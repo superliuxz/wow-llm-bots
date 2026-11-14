@@ -5,3 +5,4 @@
 /reference/
 /compile_commands.json
 .cache/
+/models/

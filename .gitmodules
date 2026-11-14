@@ -24,3 +24,6 @@
 [submodule "private"]
 	path = private
 	url = https://github.com/superliuxz/wow-llm-bots-private.git
+[submodule "third_party/llama.cpp"]
+	path = third_party/llama.cpp
+	url = https://github.com/ggml-org/llama.cpp.git
