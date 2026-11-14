@@ -21,6 +21,8 @@ p=sys.argv[1]; k=os.environ["KEY"]; v=os.environ["VAL"]
 s=open(p).read()
 s=re.sub(r"^"+re.escape(k)+r"[ \t]*=.*$", lambda m: k+" = "+v, s, count=1, flags=re.M)
 open(p,"w").write(s)' "$out"
+      else
+        printf '%s = %s\n' "$key" "$val" >> "$out"   # key not in the template: append it
       fi
     done < "$ov"
   done

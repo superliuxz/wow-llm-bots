@@ -21,3 +21,10 @@ if ! running worldserver; then
   (cd "$S/bin" && exec ./worldserver -c ../etc/worldserver.conf) < "$RUN/worldserver.stdin" > "$LOG/worldserver.out" 2>&1 &
   echo $! > "$RUN/worldserver.pid"; echo "worldserver started (log: $LOG/worldserver.out)"
 fi
+
+# Human baseline for evals: sample the user's character state while online (untracked, server/logs/human/).
+if ! pgrep -f 'bot-sampler.sh .*/human/' >/dev/null; then
+  mkdir -p "$LOG/human"
+  (exec "$ROOT/tools/bot-sampler.sh" "$LOG/human/state-$(date +%Y%m%d).jsonl" 60 'WILL') > /dev/null 2>&1 &
+  echo $! > "$RUN/human-sampler.pid"; echo "human-play sampler started"
+fi

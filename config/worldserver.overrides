@@ -2,3 +2,16 @@ DataDir = "/mnt/storage/wow-llm-bots/server/data"
 # PvE realm (decided). Horde only: disable Alliance character creation.
 GameType = 0
 CharacterCreating.Disabled = 1
+# Save characters every 60 s (state sampling for evals: bots and the user's human baseline).
+PlayerSaveInterval = 60000
+# Chat log for evals (bot chat + the user's human baseline). Flags 5 = timestamp + filter type.
+Appender.Chat = 2,4,5,Chat.log,a
+Logger.chat.say = 4,Chat
+Logger.chat.emote = 4,Chat
+Logger.chat.yell = 4,Chat
+Logger.chat.whisper = 4,Chat
+Logger.chat.party = 4,Chat
+Logger.chat.raid = 4,Chat
+Logger.chat.guild = 4,Chat
+Logger.chat.guild.officer = 4,Chat
+Logger.chat.channel = 4,Chat

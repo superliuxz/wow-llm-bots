@@ -14,6 +14,8 @@ stop() {  # stop <name> <timeout_s>
   fi
   rm -f "$f"
 }
+stop human-sampler 1
+
 # Graceful world shutdown via console (saves characters), then wait for the process to exit.
 if pgrep -x worldserver >/dev/null && [ -p "$RUN/worldserver.stdin" ]; then
   echo "server shutdown 1" > "$RUN/worldserver.stdin"
