@@ -22,3 +22,7 @@ Playerbots.MinRandomBotTeleportInterval = 31536000
 Playerbots.MaxRandomBotTeleportInterval = 31536000
 Playerbots.MinRandomBotRandomizeTime = 31536000
 Playerbots.MaxRandomBotRandomizeTime = 31536000
+# Our bots are "real players": always active, no sleeping/rotation when no human is nearby.
+# (Default 10% active-alone + smart scaling made the test bot sleep ~90% of the time.)
+Playerbots.BotActiveAlone = 100
+Playerbots.botActiveAloneSmartScale = 0
