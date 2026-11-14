@@ -188,6 +188,15 @@ Existing base: mod-playerbots "New RPG" strategy (src/Ai/World/Rpg/) already que
 - Code style (decided): all our C++ (harness and server module) follows Google/Chromium C++ style; root `.clang-format` uses `BasedOnStyle: Chromium`. Upstream code in third_party/ keeps its own style. The server module stays thin.
 - Performance note: LLM inference (200-400 ms) dominates; harness overhead ~1-2 ms per decision. Hot paths (reflexes, problem detection, chat skim filter, perception building) live in the C++ server module.
 
+## Evals (proposed 2026-11-14)
+Four layers, fast/cheap to slow/realistic:
+1. **Brain evals (offline, seconds):** cases in `evals/cases/` (tracked): perception snapshot + bot identity/known mechanics + recent chat, plus expectations. Checks: hard (parses, client-legal command, latency), expected/forbidden actions (move out of Defile; new player must not use unlearned mechanics; no loot it didn't win), judge-scored soft qualities (sounds like a 2008-2026 WoW player, in character, 3.3.5a-correct: no transmog/modern terms). Categories: chat style, call-following, stuck reasoning, quest choice, knowledge gating, era correctness, behavior rules, output format. Run on every prompt/model/RULES.md change; pass rate per category + diff vs last run.
+2. **Scenario evals (in-game, minutes):** GM-scripted setups (stuck in cave, fall, call mid-pull) via config/tests + tools/bot-sampler.sh; measure success, time, deaths.
+3. **Soak metrics (hours):** sampler JSONL -> XP/h, quests/h, stuck time, deaths, gold, chat frequency; compared with the stock baseline (phase 1a) and human pace.
+4. **"Bot or human?" review (user):** flags on chat/behavior traces; every flag becomes a layer-1 case.
+Rules: evals call the same harness entry point as live play (`decide(snapshot)`), not a copy of prompts; cases are promoted from real logged play.
+**Judge cost control (decided):** deterministic checks first (free); daily iteration uses a local judge (Qwen3.8 27B dense; swapped in when the bot model is unloaded; same-family bias measured by calibration); judgments cached by hash(case + output) so only changed outputs are re-judged; smoke set (~30 cases) for quick loops, affected categories for targeted changes, full set at milestones; cloud judge via OpenRouter (pinned model, strong open model preferred) only for calibration against the user's labels (30-50 cases) and phase sign-off; OpenRouter key has a hard credit limit and lives in private/ or env, never in the main repo. Open: eval runner language (C++/GoogleTest vs Python).
+
 ## Legal note
 Private server for self/friends is generally tolerated; public or monetized servers get shut down.
  
