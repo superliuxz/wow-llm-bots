@@ -1,0 +1,2 @@
+# Save characters every 60 s so tools/bot-sampler.sh sees fresh data.
+PlayerSaveInterval = 60000

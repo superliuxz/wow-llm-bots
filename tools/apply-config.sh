@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build server/etc/*.conf from the .dist templates plus our overrides in config/.
 # The DB password comes from server/etc/.acore-db-password (untracked).
+# Usage: tools/apply-config.sh [test-name]   (adds config/tests/<test-name>.*.overrides)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 ETC=$ROOT/server/etc
@@ -25,8 +26,10 @@ open(p,"w").write(s)' "$out"
   done
 }
 C=$ROOT/config
-apply "$ETC/worldserver.conf.dist" "$ETC/worldserver.conf" "$C/common.overrides" "$C/worldserver.overrides"
+T=${1:-}
+extra() { [ -n "$T" ] && [ -f "$C/tests/$T.$1.overrides" ] && echo "$C/tests/$T.$1.overrides" || true; }
+apply "$ETC/worldserver.conf.dist" "$ETC/worldserver.conf" "$C/common.overrides" "$C/worldserver.overrides" $(extra worldserver)
 apply "$ETC/authserver.conf.dist"  "$ETC/authserver.conf"  "$C/common.overrides"
 apply "$ETC/dbimport.conf.dist"    "$ETC/dbimport.conf"    "$C/common.overrides"
-apply "$ETC/modules/playerbots.conf.dist" "$ETC/modules/playerbots.conf" "$C/playerbots.overrides"
-echo "config applied"
+apply "$ETC/modules/playerbots.conf.dist" "$ETC/modules/playerbots.conf" "$C/playerbots.overrides" $(extra playerbots)
+echo "config applied${T:+ (test: $T)}"

@@ -14,3 +14,11 @@ Playerbots.RandomBotAllianceRatio = 0
 Playerbots.RandomBotHordeRatio = 100
 Playerbots.MinRandomBots = 0
 Playerbots.MaxRandomBots = 0
+# No hidden cheats from the random-bot manager: no auto-revive (bots must corpse-run),
+# no periodic random teleports, no level/gear re-randomizing.
+Playerbots.MinRandomBotReviveTime = 31536000
+Playerbots.MaxRandomBotReviveTime = 31536000
+Playerbots.MinRandomBotTeleportInterval = 31536000
+Playerbots.MaxRandomBotTeleportInterval = 31536000
+Playerbots.MinRandomBotRandomizeTime = 31536000
+Playerbots.MaxRandomBotRandomizeTime = 31536000
