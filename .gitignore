@@ -1,0 +1,7 @@
+# Generated / runtime, not source
+/out/
+/server/
+/var/
+/reference/
+/compile_commands.json
+.cache/

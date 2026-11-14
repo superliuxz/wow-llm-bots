@@ -1,0 +1,17 @@
+{
+  // Use clangd for C++; turn off Microsoft's IntelliSense so they don't conflict.
+  "C_Cpp.intelliSenseEngine": "disabled",
+
+  // clangd uses the root compile_commands.json symlink (made by tools/setup.sh).
+  "clangd.arguments": [
+    "--background-index",
+    "-j=8",
+    "--header-insertion=never",
+    "--clang-tidy=false"
+  ],
+  "cmake.sourceDirectory": "/mnt/storage/wow-llm-bots/third_party/azerothcore-wotlk",
+  // Reuse the existing clang + Ninja build instead of creating a second one.
+  "cmake.buildDirectory": "/mnt/storage/wow-llm-bots/out/server",
+  "cmake.generator": "Ninja",
+  "cmake.configureOnOpen": false
+}

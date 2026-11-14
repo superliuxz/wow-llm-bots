@@ -1,0 +1,26 @@
+[submodule "third_party/azerothcore-wotlk"]
+	path = third_party/azerothcore-wotlk
+	url = https://github.com/mod-playerbots/azerothcore-wotlk.git
+	branch = Playerbot
+[submodule "third_party/mod-playerbots"]
+	path = third_party/mod-playerbots
+	url = https://github.com/mod-playerbots/mod-playerbots.git
+	branch = master
+[submodule "third_party/abseil-cpp"]
+	path = third_party/abseil-cpp
+	url = https://github.com/abseil/abseil-cpp.git
+[submodule "third_party/googletest"]
+	path = third_party/googletest
+	url = https://github.com/google/googletest.git
+[submodule "third_party/libevent"]
+	path = third_party/libevent
+	url = https://github.com/libevent/libevent.git
+[submodule "third_party/cpp-httplib"]
+	path = third_party/cpp-httplib
+	url = https://github.com/yhirose/cpp-httplib.git
+[submodule "third_party/json"]
+	path = third_party/json
+	url = https://github.com/nlohmann/json.git
+[submodule "private"]
+	path = private
+	url = https://github.com/superliuxz/wow-llm-bots-private.git

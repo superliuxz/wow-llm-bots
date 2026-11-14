@@ -1,0 +1,16 @@
+[mysqld]
+datadir=/mnt/storage/wow-llm-bots/server/mysql-data
+socket=/mnt/storage/wow-llm-bots/server/run/mysql.sock
+pid-file=/mnt/storage/wow-llm-bots/server/run/mysqld.pid
+log-error=/mnt/storage/wow-llm-bots/server/logs/mysql.log
+bind-address=127.0.0.1
+port=3306
+mysqlx=OFF
+secure-file-priv=/mnt/storage/wow-llm-bots/server/mysql-files
+character-set-server=utf8mb4
+collation-server=utf8mb4_unicode_ci
+max_connections=300
+innodb_buffer_pool_size=2G
+
+[client]
+socket=/mnt/storage/wow-llm-bots/server/run/mysql.sock

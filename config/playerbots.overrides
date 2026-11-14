@@ -1,0 +1,16 @@
+PlayerbotsDatabaseInfo = "127.0.0.1;3306;acore;@DB_PASSWORD@;acore_playerbots"
+# No cheats or shortcuts: bots play like humans (docs/design.md).
+Playerbots.BotCheats = ""
+Playerbots.AutoLearnTrainerSpells = 0
+Playerbots.AutoLearnQuestSpells = 0
+Playerbots.AutoPickTalents = 0
+Playerbots.AutoUpgradeEquip = 0
+Playerbots.AutoEquipUpgradeLoot = 0
+Playerbots.AutoTeleportForLevel = 0
+Playerbots.AutoGearCommand = 0
+Playerbots.ReviveBotWhenSummoned = 0
+# All Horde. No random bots until the phase 1 tests.
+Playerbots.RandomBotAllianceRatio = 0
+Playerbots.RandomBotHordeRatio = 100
+Playerbots.MinRandomBots = 0
+Playerbots.MaxRandomBots = 0
