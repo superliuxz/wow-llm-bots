@@ -42,6 +42,15 @@ CLASSES = ["warrior", "paladin", "hunter", "rogue", "priest",
            "death knight", "shaman", "mage", "warlock", "druid"]
 
 
+OPTIONS = ("Options (computed by the game client):\n"
+           "1. Move 12 yards south to open space (spread)\n"
+           "2. Stay and keep attacking the Lich King\n"
+           "3. Move to the tank Grumbar (20 yards north)\n"
+           "4. Cast a heal on yourself\n"
+           "5. Ask in raid chat what Defile is\n"
+           "Reply with only the option number.")
+
+
 def make_request(i):
     identity = (
         f"You are bot #{i}, a level 80 {CLASSES[i % len(CLASSES)]} named Bot{i}. "
@@ -54,6 +63,15 @@ def make_request(i):
         "The tank Grumbar is 20 yards north. You are standing in the middle of the raid. "
         "What do you do right now? Answer with one command as JSON: {\"action\": move|cast|target|wait|say, \"detail\": ..., \"say\": ... or null}."
     )
+    if os.environ.get("OPTIONS"):
+        return {
+            "messages": [
+                {"role": "system", "content": RULES + "\n\n" + identity},
+                {"role": "user", "content": situation.split(" What do you do")[0] + "\n\n" + OPTIONS},
+            ],
+            "max_tokens": 3, "temperature": 0.7,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
     return {
         "messages": [
             {"role": "system", "content": RULES + "\n\n" + identity},
@@ -76,11 +94,14 @@ def call(i, results):
         dt = time.perf_counter() - t0
         text = out["choices"][0]["message"]["content"]
         usage = out.get("usage", {})
-        try:
-            cmd = json.loads(text)
-            ok = cmd.get("action") in SCHEMA["properties"]["action"]["enum"]
-        except json.JSONDecodeError:
-            cmd, ok = text, False
+        if os.environ.get("OPTIONS"):
+            cmd, ok = text.strip(), text.strip()[:1] in "12345"
+        else:
+            try:
+                cmd = json.loads(text)
+                ok = cmd.get("action") in SCHEMA["properties"]["action"]["enum"]
+            except json.JSONDecodeError:
+                cmd, ok = text, False
         results[i] = {"latency": dt, "ok": ok, "cmd": cmd,
                       "prompt_tokens": usage.get("prompt_tokens"),
                       "cached": (usage.get("prompt_tokens_details") or {}).get("cached_tokens"),
