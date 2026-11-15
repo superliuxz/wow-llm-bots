@@ -1,0 +1,128 @@
+{
+ "bot": "Morgrath",
+ "seq": 52010,
+ "time_ms": "1794762000000",
+ "base": {
+  "self": {
+   "unit": {
+    "name": "Morgrath",
+    "kind": "PLAYER",
+    "level": 80,
+    "health_pct": 100,
+    "player": {
+     "class": "Death Knight"
+    }
+   },
+   "health": 29600,
+   "health_max": 29600,
+   "power_type": "RUNIC_POWER",
+   "power_max": 130,
+   "state": "ALIVE",
+   "money": 3300000,
+   "indicators": {
+    "in_queue": true,
+    "bag_free_slots": 20
+   }
+  },
+  "where": {
+   "map": "Kalimdor",
+   "zone": "Orgrimmar",
+   "subzone": "Hall of Legends",
+   "indoors": true,
+   "pvp_status": "sanctuary"
+  },
+  "doing": {
+   "activity": "pvp",
+   "since_s": 200.0,
+   "detail": "farm honor for the weapon"
+  },
+  "nearby": {
+   "units": [
+    {
+     "name": "Grizzle Halfmane",
+     "subtitle": "<Battlemaster>",
+     "kind": "NPC",
+     "level": 80,
+     "reaction": "FRIENDLY",
+     "rel": {
+      "dist_yd": 4.0,
+      "dir": "N",
+      "in_los": true
+     }
+    }
+   ]
+  },
+  "ui": {
+   "open_panels": [
+    "PVP"
+   ]
+  }
+ },
+ "ext": {
+  "world": {
+   "queues": [
+    {
+     "name": "Arathi Basin",
+     "status": "ready",
+     "waited_s": 480.0
+    },
+    {
+     "name": "Warsong Gulch",
+     "status": "queued",
+     "waited_s": 480.0,
+     "estimated_s": 120.0
+    }
+   ]
+  },
+  "interaction": {
+   "with": "Grizzle Halfmane",
+   "battlemaster": {
+    "battlegrounds": [
+     "Warsong Gulch",
+     "Arathi Basin",
+     "Alterac Valley",
+     "Eye of the Storm",
+     "Strand of the Ancients",
+     "Isle of Conquest",
+     "Random Battleground"
+    ]
+   }
+  },
+  "pvp": {
+   "honor": 61230,
+   "arena_points": 1440,
+   "honorable_kills_today": 37,
+   "honorable_kills_total": 12044,
+   "arena_teams": [
+    {
+     "name": "Cleave or Leave",
+     "size": 2,
+     "rating": 1620
+    }
+   ]
+  }
+ },
+ "events": [
+  {
+   "prompt": {
+    "kind": "BATTLEGROUND_READY",
+    "text": "Arathi Basin is ready to enter.",
+    "timeout_s": 78.0
+   }
+  }
+ ],
+ "options": [
+  {
+   "text": "Enter Arathi Basin"
+  },
+  {
+   "text": "Leave the Arathi Basin queue"
+  },
+  {
+   "text": "Queue for Alterac Valley too"
+  },
+  {
+   "text": "Keep doing what I'm doing"
+  }
+ ]
+}

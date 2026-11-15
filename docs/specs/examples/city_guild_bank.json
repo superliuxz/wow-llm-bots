@@ -1,0 +1,415 @@
+{
+ "bot": "Grokta",
+ "seq": 88120,
+ "time_ms": "1794751200000",
+ "base": {
+  "self": {
+   "unit": {
+    "guid": "0x0000000000001A2B",
+    "name": "Grokta",
+    "kind": "PLAYER",
+    "level": 80,
+    "health_pct": 100,
+    "power_pct": 100,
+    "player": {
+     "class": "Warrior",
+     "title": "the Explorer"
+    }
+   },
+   "gender": "FEMALE",
+   "health": 28400,
+   "health_max": 28400,
+   "power_type": "RAGE",
+   "power": 0,
+   "power_max": 100,
+   "state": "ALIVE",
+   "resting": true,
+   "money": 41235077,
+   "form": "Battle Stance",
+   "indicators": {
+    "new_mail": true,
+    "bag_free_slots": 4,
+    "in_queue": true,
+    "achievement_toast": true
+   }
+  },
+  "where": {
+   "map": "Kalimdor",
+   "zone": "Orgrimmar",
+   "subzone": "The Drag",
+   "position": {
+    "x": 1630.0,
+    "y": -4370.0,
+    "z": 18.0
+   },
+   "facing": 0.4,
+   "indoors": true,
+   "pvp_status": "sanctuary"
+  },
+  "doing": {
+   "activity": "use_guild_bank",
+   "since_s": 12.0,
+   "detail": "deposit Frozen Orbs"
+  },
+  "nearby": {
+   "units": [
+    {
+     "guid": "0xF13000A1B2000001",
+     "name": "Kurtok",
+     "subtitle": "<Guild Banker>",
+     "kind": "NPC",
+     "level": 80,
+     "reaction": "FRIENDLY",
+     "rel": {
+      "dist_yd": 4.0,
+      "dir": "N",
+      "height": "LEVEL",
+      "in_los": true
+     }
+    },
+    {
+     "guid": "0x0000000000002C3D",
+     "name": "Zul'jinx",
+     "kind": "PLAYER",
+     "level": 78,
+     "reaction": "FRIENDLY",
+     "rel": {
+      "dist_yd": 9.0,
+      "dir": "E",
+      "height": "LEVEL",
+      "in_los": true
+     },
+     "activity": {
+      "state": "IDLE"
+     },
+     "player": {
+      "class": "Shaman",
+      "afk": true
+     }
+    }
+   ],
+   "objects": [
+    {
+     "guid": "0xF1100002E1000001",
+     "name": "Guild Vault",
+     "kind": "GUILD_VAULT",
+     "usable": true,
+     "rel": {
+      "dist_yd": 3.0,
+      "dir": "N",
+      "height": "LEVEL",
+      "in_los": true
+     }
+    },
+    {
+     "guid": "0xF1100002E1000002",
+     "name": "Mailbox",
+     "kind": "MAILBOX",
+     "usable": true,
+     "rel": {
+      "dist_yd": 14.0,
+      "dir": "W",
+      "height": "LEVEL",
+      "in_los": true
+     }
+    }
+   ]
+  },
+  "ui": {
+   "open_panels": [
+    "BAGS"
+   ]
+  }
+ },
+ "ext": {
+  "minimap": {
+   "zone": "Orgrimmar",
+   "subzone": "The Drag",
+   "clock": "20:14",
+   "tracking": "Find Minerals"
+  },
+  "action_bars": {
+   "buttons": [
+    {
+     "id": 47450,
+     "name": "Heroic Strike",
+     "rank": 13,
+     "ability": {
+      "slot": "1",
+      "known": true
+     }
+    }
+   ],
+   "stance_bar": [
+    {
+     "id": 2457,
+     "name": "Battle Stance",
+     "ability": {
+      "slot": "stance:1",
+      "usable": true,
+      "known": true
+     }
+    },
+    {
+     "id": 71,
+     "name": "Defensive Stance",
+     "ability": {
+      "slot": "stance:2",
+      "usable": true,
+      "known": true
+     }
+    },
+    {
+     "id": 2458,
+     "name": "Berserker Stance",
+     "ability": {
+      "slot": "stance:3",
+      "usable": true,
+      "known": true
+     }
+    }
+   ]
+  },
+  "world": {
+   "session_minutes": 47,
+   "daily_reset_in_s": 30240,
+   "queues": [
+    {
+     "name": "Warsong Gulch",
+     "status": "queued",
+     "waited_s": 312.0,
+     "estimated_s": 240.0
+    }
+   ],
+   "world_states": [
+    {
+     "label": "Wintergrasp: next battle in",
+     "value": "1:12:40",
+     "timer_s": 4360.0
+    }
+   ]
+  },
+  "interaction": {
+   "with": "Guild Vault",
+   "guild_bank": {
+    "tabs": [
+     {
+      "name": "Mats",
+      "withdrawals_left": 5,
+      "items": [
+       {
+        "id": 43102,
+        "name": "Frozen Orb",
+        "quality": "UNCOMMON",
+        "count": 7,
+        "kind": "TRADE_GOOD",
+        "bag_slot": "gbank:1:1"
+       },
+       {
+        "id": 36913,
+        "name": "Saronite Bar",
+        "quality": "COMMON",
+        "count": 200,
+        "kind": "TRADE_GOOD",
+        "bag_slot": "gbank:1:2"
+       }
+      ],
+      "can_view": true,
+      "can_deposit": true
+     },
+     {
+      "name": "Raid Consumables",
+      "withdrawals_left": 0,
+      "can_view": true,
+      "can_deposit": false
+     }
+    ],
+    "money": 152330000,
+    "withdraw_money_left": 1000000,
+    "log": [
+     "Zul'jinx deposited Saronite Bar x20 (2 hours ago)",
+     "Grokta withdrew Flask of Endless Rage (1 day ago)"
+    ]
+   }
+  },
+  "bags": {
+   "items": [
+    {
+     "id": 43102,
+     "name": "Frozen Orb",
+     "quality": "UNCOMMON",
+     "count": 3,
+     "kind": "TRADE_GOOD",
+     "bag_slot": "bag0:1"
+    },
+    {
+     "id": 40211,
+     "name": "Potion of Speed",
+     "quality": "COMMON",
+     "count": 12,
+     "kind": "CONSUMABLE",
+     "bag_slot": "bag0:2",
+     "usable": true
+    },
+    {
+     "id": 40102,
+     "name": "Glyph of Revenge",
+     "quality": "UNCOMMON",
+     "count": 1,
+     "kind": "GLYPH",
+     "bag_slot": "bag1:3",
+     "usable": true
+    },
+    {
+     "id": 6948,
+     "name": "Hearthstone",
+     "quality": "COMMON",
+     "count": 1,
+     "kind": "OTHER",
+     "bag_slot": "bag0:16",
+     "usable": true
+    }
+   ],
+   "free_slots": 4,
+   "total_slots": 80,
+   "hearthstone": {
+    "ready": true,
+    "bind": "Orgrimmar"
+   }
+  }
+ },
+ "events": [
+  {
+   "chat": {
+    "channel": "TRADE",
+    "channel_name": "2. Trade - City",
+    "from": "Hexxa",
+    "text": "WTS [Titansteel Bar] x4 120g ea, also LF JC for [Bold Cardinal Ruby]",
+    "from_dist_yd": 0.0,
+    "links": [
+     {
+      "text": "[Titansteel Bar]",
+      "item": {
+       "id": 37663,
+       "name": "Titansteel Bar",
+       "quality": "UNCOMMON",
+       "kind": "TRADE_GOOD"
+      }
+     },
+     {
+      "text": "[Bold Cardinal Ruby]",
+      "item": {
+       "id": 40111,
+       "name": "Bold Cardinal Ruby",
+       "quality": "EPIC",
+       "kind": "GEM"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "chat": {
+    "channel": "GUILD",
+    "from": "Zul'jinx",
+    "text": "grats on [Loremaster]!",
+    "links": [
+     {
+      "text": "[Loremaster]",
+      "achievement": {
+       "id": 1681,
+       "name": "Loremaster",
+       "points": 10,
+       "earned": true
+      }
+     }
+    ]
+   }
+  },
+  {
+   "achievement_earned": {
+    "achievement": {
+     "id": 1681,
+     "name": "Loremaster",
+     "description": "Complete the Loremaster achievements for Eastern Kingdoms, Kalimdor, Outland and Northrend.",
+     "points": 10,
+     "category": "Quests",
+     "earned": true,
+     "earned_on": "2026-11-15",
+     "reward": "Title Reward: Loremaster"
+    }
+   }
+  },
+  {
+   "title_earned": {
+    "title": "Loremaster"
+   }
+  },
+  {
+   "mail_received": {
+    "from": "Horde Auction House"
+   }
+  }
+ ],
+ "options": [
+  {
+   "text": "Deposit Frozen Orb x3 into Mats"
+  },
+  {
+   "text": "Withdraw Saronite Bar x20"
+  },
+  {
+   "text": "Withdraw ___ Saronite Bar",
+   "blanks": [
+    {
+     "kind": "COUNT",
+     "label": "Stack size",
+     "min": 1,
+     "max": 200
+    }
+   ]
+  },
+  {
+   "text": "Deposit ___ into the guild bank",
+   "blanks": [
+    {
+     "kind": "MONEY",
+     "label": "Amount",
+     "max": 41235077
+    }
+   ]
+  },
+  {
+   "text": "Go to the mailbox and mail ___ to ___ (subject ___)",
+   "blanks": [
+    {
+     "kind": "MONEY",
+     "label": "Money",
+     "max": 41235077
+    },
+    {
+     "kind": "PLAYER",
+     "label": "To",
+     "max_length": 12
+    },
+    {
+     "kind": "TEXT",
+     "label": "Subject",
+     "max_length": 64
+    }
+   ]
+  },
+  {
+   "text": "Close the guild bank"
+  },
+  {
+   "text": "Reply in guild chat"
+  },
+  {
+   "text": "Set title: Loremaster"
+  },
+  {
+   "text": "Keep doing what I'm doing"
+  }
+ ]
+}

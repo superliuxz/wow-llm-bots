@@ -1,0 +1,196 @@
+{
+ "bot": "Selaya",
+ "seq": 15100,
+ "time_ms": "1794810000000",
+ "base": {
+  "self": {
+   "unit": {
+    "name": "Selaya",
+    "kind": "PLAYER",
+    "level": 80,
+    "health_pct": 100,
+    "player": {
+     "class": "Priest"
+    }
+   },
+   "health": 17800,
+   "health_max": 17800,
+   "power_type": "MANA",
+   "power": 24100,
+   "power_max": 24100,
+   "state": "ALIVE",
+   "money": 5512000
+  },
+  "where": {
+   "map": "Icecrown Citadel",
+   "zone": "Icecrown Citadel",
+   "subzone": "Rampart of Skulls",
+   "in_instance": true
+  },
+  "doing": {
+   "activity": "raid",
+   "since_s": 600.0,
+   "detail": "waiting for Saurfang pull"
+  },
+  "nearby": {
+   "units": [
+    {
+     "name": "Deathbringer Saurfang",
+     "kind": "NPC",
+     "level": 83,
+     "reaction": "HOSTILE",
+     "rel": {
+      "dist_yd": 40.0,
+      "dir": "N",
+      "in_los": true
+     },
+     "classification": "WORLD_BOSS",
+     "raid_marker": "SKULL",
+     "activity": {
+      "state": "IDLE"
+     }
+    }
+   ]
+  },
+  "ui": {}
+ },
+ "ext": {
+  "raid": {
+   "main_tanks": [
+    "Thrallson",
+    "Brakk"
+   ],
+   "members": [
+    {
+     "name": "Thrallson",
+     "health_pct": 100,
+     "player": {
+      "class": "Paladin"
+     },
+     "group": {
+      "online": true,
+      "in_range": true,
+      "subgroup": 1,
+      "main_tank": true,
+      "ready": "ready"
+     }
+    },
+    {
+     "name": "Brakk",
+     "health_pct": 100,
+     "player": {
+      "class": "Warrior"
+     },
+     "group": {
+      "online": true,
+      "in_range": true,
+      "subgroup": 1,
+      "main_tank": true,
+      "ready": "ready"
+     }
+    },
+    {
+     "name": "Vexx",
+     "health_pct": 100,
+     "player": {
+      "class": "Mage"
+     },
+     "group": {
+      "online": true,
+      "in_range": true,
+      "subgroup": 2,
+      "ready": "not_ready"
+     }
+    },
+    {
+     "name": "Kragh",
+     "health_pct": 100,
+     "player": {
+      "class": "Hunter"
+     },
+     "group": {
+      "online": false,
+      "in_range": true,
+      "subgroup": 2,
+      "ready": "waiting"
+     }
+    },
+    {
+     "name": "Velaris",
+     "health_pct": 100,
+     "player": {
+      "class": "Druid"
+     },
+     "group": {
+      "online": true,
+      "in_range": true,
+      "subgroup": 1,
+      "leader": true,
+      "ready": "ready"
+     }
+    }
+   ]
+  },
+  "encounter": {
+   "dbm": [
+    {
+     "name": "Pull in",
+     "remaining_s": 10.0
+    }
+   ]
+  },
+  "instance": {
+   "name": "Icecrown Citadel",
+   "difficulty": "normal",
+   "size": 10,
+   "bosses": [
+    {
+     "name": "Lord Marrowgar",
+     "killed": true
+    },
+    {
+     "name": "Lady Deathwhisper",
+     "killed": true
+    },
+    {
+     "name": "Gunship Battle",
+     "killed": true
+    },
+    {
+     "name": "Deathbringer Saurfang"
+    }
+   ]
+  }
+ },
+ "events": [
+  {
+   "prompt": {
+    "kind": "READY_CHECK",
+    "from": "Velaris",
+    "text": "Velaris is checking if everyone is ready.",
+    "timeout_s": 30.0
+   }
+  },
+  {
+   "chat": {
+    "channel": "RAID_WARNING",
+    "from": "Velaris",
+    "text": "BLOOD BEASTS: kill on spawn, healers on MT, mark stays"
+   }
+  }
+ ],
+ "options": [
+  {
+   "text": "Ready"
+  },
+  {
+   "text": "Not ready"
+  },
+  {
+   "text": "Say in raid: need 1 min, drinking"
+  },
+  {
+   "text": "Keep doing what I'm doing"
+  }
+ ]
+}

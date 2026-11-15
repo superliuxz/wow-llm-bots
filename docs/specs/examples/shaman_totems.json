@@ -1,0 +1,128 @@
+{
+ "bot": "Zul'jinx",
+ "seq": 9300,
+ "time_ms": "1794810000000",
+ "base": {
+  "self": {
+   "unit": {
+    "name": "Zul'jinx",
+    "kind": "PLAYER",
+    "level": 80,
+    "health_pct": 100,
+    "player": {
+     "class": "Shaman"
+    }
+   },
+   "health": 19400,
+   "health_max": 19400,
+   "power_type": "MANA",
+   "power": 19000,
+   "power_max": 21000,
+   "state": "ALIVE",
+   "money": 900000,
+   "in_combat": true
+  },
+  "where": {
+   "map": "The Violet Hold",
+   "zone": "The Violet Hold",
+   "in_instance": true,
+   "indoors": true
+  },
+  "doing": {
+   "activity": "heal_dungeon",
+   "since_s": 120.0
+  },
+  "ui": {}
+ },
+ "ext": {
+  "pet": {
+   "totems": [
+    {
+     "name": "Mana Spring Totem VIII",
+     "element": "water",
+     "remaining_s": 220.0
+    },
+    {
+     "name": "Strength of Earth Totem VIII",
+     "element": "earth",
+     "remaining_s": 220.0
+    },
+    {
+     "name": "Flametongue Totem VIII",
+     "element": "fire",
+     "remaining_s": 220.0
+    },
+    {
+     "name": "Wrath of Air Totem",
+     "element": "air",
+     "remaining_s": 220.0
+    }
+   ]
+  },
+  "action_bars": {
+   "totem_bar": [
+    {
+     "id": 66842,
+     "name": "Call of the Elements",
+     "ability": {
+      "slot": "totem:1",
+      "usable": true,
+      "known": true
+     }
+    },
+    {
+     "id": 36936,
+     "name": "Totemic Recall",
+     "ability": {
+      "slot": "totem:4",
+      "usable": true,
+      "known": true
+     }
+    }
+   ]
+  },
+  "party": {
+   "leader": "Grokta",
+   "members": [
+    {
+     "name": "Grokta",
+     "health_pct": 62,
+     "player": {
+      "class": "Warrior"
+     },
+     "group": {
+      "online": true,
+      "in_range": true,
+      "aggro": true
+     }
+    },
+    {
+     "name": "Vexx",
+     "health_pct": 100,
+     "player": {
+      "class": "Mage"
+     },
+     "group": {
+      "online": true,
+      "in_range": true
+     }
+    }
+   ],
+   "missing_buffs_i_can_give": []
+  }
+ },
+ "options": [
+  {
+   "text": "Chain Heal Grokta"
+  },
+  {
+   "text": "Riptide Grokta"
+  },
+  {
+   "text": "Recall totems after the fight"
+  },
+  {
+   "text": "Keep doing what I'm doing"
+  }
+ ]
+}

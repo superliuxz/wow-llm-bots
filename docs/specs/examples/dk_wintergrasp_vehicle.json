@@ -1,0 +1,313 @@
+{
+ "bot": "Morgrath",
+ "seq": 51007,
+ "time_ms": "1794760000000",
+ "base": {
+  "self": {
+   "unit": {
+    "name": "Morgrath",
+    "kind": "PLAYER",
+    "level": 80,
+    "health_pct": 88,
+    "power_pct": 30,
+    "pvp_flagged": true,
+    "player": {
+     "class": "Death Knight"
+    },
+    "auras": [
+     {
+      "id": 48266,
+      "name": "Blood Presence"
+     },
+     {
+      "id": 57940,
+      "name": "Essence of Wintergrasp",
+      "remaining_s": 0.0
+     },
+     {
+      "id": 44521,
+      "name": "Recruit",
+      "stacks": 4
+     }
+    ]
+   },
+   "gender": "MALE",
+   "health": 26100,
+   "health_max": 29600,
+   "power_type": "RUNIC_POWER",
+   "power": 30,
+   "power_max": 130,
+   "state": "ALIVE",
+   "in_combat": true,
+   "pvp_flagged": true,
+   "money": 3300000,
+   "form": "Blood Presence",
+   "runes": [
+    {
+     "type": "blood"
+    },
+    {
+     "type": "blood",
+     "ready_in_s": 4.0
+    },
+    {
+     "type": "frost"
+    },
+    {
+     "type": "frost"
+    },
+    {
+     "type": "unholy",
+     "ready_in_s": 7.5
+    },
+    {
+     "type": "death"
+    }
+   ],
+   "indicators": {
+    "bag_free_slots": 20
+   }
+  },
+  "where": {
+   "map": "Northrend",
+   "zone": "Wintergrasp",
+   "subzone": "Westspark Workshop",
+   "position": {
+    "x": 4358.0,
+    "y": 2340.0,
+    "z": 374.0
+   },
+   "pvp_status": "contested"
+  },
+  "doing": {
+   "activity": "siege",
+   "since_s": 95.0,
+   "detail": "drive engine to the west wall"
+  },
+  "nearby": {
+   "units": [
+    {
+     "name": "Aldoran",
+     "kind": "PLAYER",
+     "level": 80,
+     "reaction": "HOSTILE",
+     "health_pct": 100,
+     "pvp_flagged": true,
+     "targeting_me": true,
+     "rel": {
+      "dist_yd": 22.0,
+      "dir": "NE",
+      "height": "ABOVE",
+      "in_los": true
+     },
+     "player": {
+      "class": "Paladin"
+     },
+     "activity": {
+      "state": "CASTING",
+      "cast": {
+       "spell": {
+        "id": 48782,
+        "name": "Holy Light"
+       },
+       "remaining_ms": 900,
+       "interruptible": true
+      }
+     }
+    },
+    {
+     "name": "Wintergrasp Siege Engine",
+     "kind": "VEHICLE",
+     "level": 80,
+     "reaction": "FRIENDLY",
+     "health_pct": 64,
+     "rel": {
+      "dist_yd": 8.0,
+      "dir": "E",
+      "in_los": true
+     },
+     "vehicle": {
+      "seats": [
+       {
+        "index": 0,
+        "occupant": "Zaktar"
+       },
+       {
+        "index": 1,
+        "can_use": true
+       }
+      ]
+     }
+    }
+   ],
+   "objects": [
+    {
+     "name": "Westspark Workshop",
+     "kind": "CAPTURE_POINT",
+     "owner": "Horde",
+     "capture_progress_pct": 100.0,
+     "rel": {
+      "dist_yd": 15.0,
+      "dir": "S",
+      "in_los": true
+     }
+    },
+    {
+     "name": "Fortress West Wall",
+     "kind": "DESTRUCTIBLE",
+     "state": "damaged",
+     "health_pct": 41.0,
+     "rel": {
+      "dist_yd": 90.0,
+      "dir": "N",
+      "height": "ABOVE",
+      "in_los": true
+     }
+    }
+   ]
+  },
+  "ui": {}
+ },
+ "ext": {
+  "vehicle": {
+   "name": "Wintergrasp Demolisher",
+   "kind": "VEHICLE",
+   "health_pct": 77,
+   "vehicle": {
+    "seats": [
+     {
+      "index": 0,
+      "occupant": "Morgrath"
+     },
+     {
+      "index": 1,
+      "occupant": "Skuzz"
+     }
+    ],
+    "abilities": [
+     {
+      "id": 57606,
+      "name": "Hurl Boulder",
+      "ability": {
+       "slot": "vehicle:1",
+       "usable": true,
+       "known": true,
+       "ground_targeted": true
+      }
+     },
+     {
+      "id": 56092,
+      "name": "Ram",
+      "ability": {
+       "slot": "vehicle:2",
+       "cooldown_remaining_s": 3.0,
+       "known": true
+      }
+     }
+    ],
+    "aim": {
+     "pitch_deg": 32.0,
+     "min_pitch_deg": 10.0,
+     "max_pitch_deg": 60.0,
+     "impact": {
+      "dist_yd": 84.0,
+      "dir": "N",
+      "height": "ABOVE",
+      "in_los": true
+     }
+    }
+   }
+  },
+  "world": {
+   "world_states": [
+    {
+     "label": "Wintergrasp: battle ends in",
+     "value": "18:22",
+     "timer_s": 1102.0
+    },
+    {
+     "label": "Horde vehicles",
+     "value": "6/8"
+    },
+    {
+     "label": "Alliance vehicles",
+     "value": "4/8"
+    },
+    {
+     "label": "Defender",
+     "value": "Alliance"
+    }
+   ]
+  },
+  "battleground": {
+   "name": "Wintergrasp",
+   "remaining_s": 1102.0,
+   "objectives": [
+    {
+     "name": "Westspark Workshop",
+     "owner": "Horde"
+    },
+    {
+     "name": "Eastspark Workshop",
+     "owner": "Alliance"
+    },
+    {
+     "name": "Fortress Gate",
+     "owner": "Alliance"
+    }
+   ]
+  },
+  "combat": {
+   "attackers": [
+    {
+     "name": "Aldoran",
+     "level": 80,
+     "reaction": "HOSTILE",
+     "player": {
+      "class": "Paladin"
+     }
+    }
+   ],
+   "summary": "Aldoran hit Demolisher for 3100 (Hammer of Wrath on you missed)"
+  }
+ },
+ "events": [
+  {
+   "chat": {
+    "channel": "BOSS_EMOTE",
+    "from": "",
+    "text": "The Alliance has damaged the Westspark Workshop!"
+   }
+  },
+  {
+   "chat": {
+    "channel": "RAID_WARNING",
+    "from": "Skuzz",
+    "text": "ALL ENGINES WEST WALL NOW"
+   }
+  },
+  {
+   "battleground": {
+    "what": "building_damaged",
+    "text": "The Fortress West Wall is under attack!"
+   }
+  }
+ ],
+ "options": [
+  {
+   "text": "Hurl Boulder at the west wall"
+  },
+  {
+   "text": "Ram the wall"
+  },
+  {
+   "text": "Get out and fight Aldoran"
+  },
+  {
+   "text": "Drive back to Westspark for repairs"
+  },
+  {
+   "text": "Keep doing what I'm doing"
+  }
+ ]
+}

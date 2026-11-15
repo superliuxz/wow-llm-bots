@@ -1,0 +1,142 @@
+{
+ "bot": "Selaya",
+ "seq": 14466,
+ "time_ms": "1794800420000",
+ "base": {
+  "self": {
+   "unit": {
+    "name": "Selaya",
+    "kind": "PLAYER",
+    "level": 80,
+    "health_pct": 100,
+    "power_pct": 91,
+    "player": {
+     "class": "Priest",
+     "in_my_group": true
+    }
+   },
+   "health": 17800,
+   "health_max": 17800,
+   "power_type": "MANA",
+   "power": 21900,
+   "power_max": 24100,
+   "state": "ALIVE",
+   "money": 5512000
+  },
+  "where": {
+   "map": "The Violet Hold",
+   "zone": "The Violet Hold",
+   "in_instance": true,
+   "indoors": true
+  },
+  "doing": {
+   "activity": "heal_dungeon",
+   "since_s": 380.0
+  },
+  "ui": {}
+ },
+ "ext": {
+  "party": {
+   "leader": "Thrallson",
+   "lfg": true,
+   "difficulty": "heroic",
+   "loot_method": "need before greed",
+   "members": [
+    {
+     "name": "Thrallson",
+     "health_pct": 100,
+     "player": {
+      "class": "Paladin"
+     },
+     "group": {
+      "role": "TANK",
+      "online": true,
+      "in_range": true,
+      "leader": true
+     }
+    },
+    {
+     "name": "Vexx",
+     "health_pct": 80,
+     "player": {
+      "class": "Mage"
+     },
+     "group": {
+      "role": "DPS",
+      "online": true,
+      "in_range": true
+     }
+    },
+    {
+     "name": "Kragh",
+     "health_pct": 100,
+     "player": {
+      "class": "Hunter"
+     },
+     "group": {
+      "role": "DPS",
+      "online": false
+     }
+    }
+   ]
+  },
+  "instance": {
+   "name": "The Violet Hold",
+   "difficulty": "heroic",
+   "size": 5,
+   "bosses": [
+    {
+     "name": "Moragg",
+     "killed": true
+    },
+    {
+     "name": "Cyanigosa"
+    }
+   ]
+  },
+  "world": {
+   "world_states": [
+    {
+     "label": "Portals Opened",
+     "value": "12/18"
+    },
+    {
+     "label": "Prison Seal Integrity",
+     "value": "85%"
+    }
+   ]
+  }
+ },
+ "events": [
+  {
+   "chat": {
+    "channel": "PARTY",
+    "from": "Vexx",
+    "text": "hunter afk since portal 6, kick?"
+   }
+  },
+  {
+   "prompt": {
+    "kind": "LFG_BOOT_VOTE",
+    "text": "Vote to kick Kragh: AFK. 2 more votes needed.",
+    "timeout_s": 60.0,
+    "target": "Kragh",
+    "reason": "AFK"
+   }
+  }
+ ],
+ "options": [
+  {
+   "text": "Vote yes (kick Kragh)"
+  },
+  {
+   "text": "Vote no"
+  },
+  {
+   "text": "Say in party: give him a sec"
+  },
+  {
+   "text": "Keep doing what I'm doing"
+  }
+ ]
+}

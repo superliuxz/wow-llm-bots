@@ -1,0 +1,93 @@
+{
+ "bot": "Dezlu",
+ "seq": 1800,
+ "time_ms": "1794810000000",
+ "base": {
+  "self": {
+   "unit": {
+    "name": "Dezlu",
+    "kind": "PLAYER",
+    "level": 32,
+    "health_pct": 100,
+    "player": {
+     "class": "Priest"
+    }
+   },
+   "health": 1750,
+   "health_max": 1750,
+   "power_type": "MANA",
+   "power": 2400,
+   "power_max": 2400,
+   "state": "ALIVE",
+   "money": 104000
+  },
+  "where": {
+   "map": "Kalimdor",
+   "zone": "Durotar",
+   "subzone": "Zeppelin tower"
+  },
+  "doing": {
+   "activity": "travel",
+   "since_s": 30.0,
+   "detail": "to Grom'gol for STV"
+  },
+  "nearby": {
+   "units": [
+    {
+     "name": "Snurk Bucksquick",
+     "kind": "NPC",
+     "level": 45,
+     "reaction": "FRIENDLY",
+     "rel": {
+      "dist_yd": 5.0,
+      "dir": "N",
+      "in_los": true
+     },
+     "subtitle": "<Zeppelin Master>"
+    }
+   ]
+  },
+  "ui": {}
+ },
+ "ext": {
+  "travel": {
+   "transports": [
+    {
+     "to": "Grom'gol Base Camp",
+     "from": {
+      "name": "Durotar zeppelin tower (south)",
+      "kind": "ZEPPELIN_TOWER",
+      "rel": {
+       "dist_yd": 4.0,
+       "dir": "S"
+      }
+     },
+     "departs_in_s": 75.0
+    },
+    {
+     "to": "Undercity",
+     "from": {
+      "name": "Durotar zeppelin tower (north)",
+      "kind": "ZEPPELIN_TOWER",
+      "rel": {
+       "dist_yd": 30.0,
+       "dir": "N"
+      }
+     },
+     "departs_in_s": 190.0
+    }
+   ]
+  }
+ },
+ "options": [
+  {
+   "text": "Wait on the south platform for the Grom'gol zeppelin"
+  },
+  {
+   "text": "Sit down while waiting"
+  },
+  {
+   "text": "Keep doing what I'm doing"
+  }
+ ]
+}

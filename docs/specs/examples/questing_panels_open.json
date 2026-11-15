@@ -1,44 +1,37 @@
 {
- "type": "snapshot",
  "bot": "Dezlu",
  "seq": 413,
- "t": 5023000,
+ "time_ms": "5023000",
  "base": {
   "self": {
-   "name": "Dezlu",
-   "kind": "player",
-   "race": "Troll",
-   "class": "Priest",
-   "gender": "male",
-   "level": 5,
+   "unit": {
+    "name": "Dezlu",
+    "kind": "PLAYER",
+    "level": 5,
+    "auras": [
+     {
+      "name": "Power Word: Fortitude",
+      "remaining_s": 1640.0,
+      "dispel_type": "MAGIC",
+      "caster": "me"
+     }
+    ],
+    "player": {
+     "class": "Priest"
+    }
+   },
+   "gender": "MALE",
    "xp": 1039,
    "xp_next": 1400,
-   "rested_xp": 0,
    "health": 96,
    "health_max": 118,
-   "power_type": "mana",
+   "power_type": "MANA",
    "power": 140,
    "power_max": 210,
-   "state": "alive",
-   "in_combat": false,
-   "resting": false,
+   "state": "ALIVE",
    "control": {},
    "money": 71,
-   "new_mail": false,
-   "auras": [
-    {
-     "name": "Power Word: Fortitude",
-     "harmful": false,
-     "remaining_s": 1640,
-     "dispel_type": "magic",
-     "caster": "me"
-    }
-   ],
    "indicators": {
-    "talent_points_unspent": false,
-    "durability_warning": [],
-    "calendar_invite_pending": false,
-    "new_mail": false,
     "bag_free_slots": 9
    }
   },
@@ -47,100 +40,92 @@
    "zone": "Durotar",
    "subzone": "Valley of Trials",
    "position": {
-    "x": -362,
-    "y": -4214,
-    "z": 56
+    "x": -362.0,
+    "y": -4214.0,
+    "z": 56.0
    },
-   "facing": 1.2,
-   "indoors": false,
-   "in_instance": false
+   "facing": 1.2
   },
   "doing": {
    "activity": "do_quest",
-   "since_s": 95,
+   "since_s": 95.0,
    "detail": "Sting of the Scorpid"
   },
   "nearby": {
    "units": [
     {
      "name": "Scorpid Worker",
-     "kind": "npc",
-     "level": 3,
-     "level_color": "green",
-     "reaction": "hostile",
-     "classification": "normal",
-     "health_pct": 100,
-     "dist_yd": 28,
-     "dir": "S",
-     "height": "level",
-     "in_los": true,
-     "tapped_by_other": false,
-     "targeting_me": false,
-     "threat_status": "none",
-     "activity": {
-      "state": "moving"
+     "rel": {
+      "dist_yd": 28.0,
+      "dir": "S",
+      "height": "LEVEL",
+      "in_los": true
      },
-     "relative_position": {
-      "behind_it": false,
-      "facing_me": false
+     "kind": "NPC",
+     "level": 3,
+     "level_color": "GREEN",
+     "reaction": "HOSTILE",
+     "classification": "NORMAL",
+     "health_pct": 100.0,
+     "threat_status": "THREAT_NONE",
+     "activity": {
+      "state": "MOVING"
      }
     },
     {
      "name": "Gornek",
-     "kind": "npc",
+     "rel": {
+      "dist_yd": 64.0,
+      "dir": "NE",
+      "in_los": true
+     },
+     "kind": "NPC",
      "level": 10,
-     "reaction": "friendly",
-     "dist_yd": 64,
-     "dir": "NE",
-     "in_los": true,
-     "quest_marker": "?",
-     "services": [
-      "quest_giver"
-     ],
+     "reaction": "FRIENDLY",
+     "quest_marker": "QUEST_TURN_IN",
      "activity": {
-      "state": "idle"
+      "state": "IDLE"
      }
     },
     {
      "name": "Gatda",
-     "kind": "player",
-     "class": "Rogue",
-     "race": "Orc",
+     "rel": {
+      "dist_yd": 40.0,
+      "dir": "W",
+      "in_los": true
+     },
+     "kind": "PLAYER",
      "level": 4,
-     "reaction": "friendly",
-     "dist_yd": 40,
-     "dir": "W",
-     "in_los": true,
+     "reaction": "FRIENDLY",
      "activity": {
-      "state": "fighting",
+      "state": "FIGHTING",
       "with": "Mottled Boar"
+     },
+     "player": {
+      "class": "Rogue"
      }
     }
    ],
    "objects": [
     {
      "name": "Cactus Apple",
-     "kind": "quest_object",
-     "dist_yd": 15,
-     "dir": "E",
+     "rel": {
+      "dist_yd": 15.0,
+      "dir": "E"
+     },
+     "kind": "QUEST_OBJECT",
      "usable": true
     }
-   ],
-   "areas": []
+   ]
   },
   "ui": {
    "open_panels": [
-    "bags",
-    "map"
-   ],
-   "hovering": []
-  },
-  "tooltips": []
+    "BAGS",
+    "MAP"
+   ]
+  }
  },
  "ext": {
-  "world": {
-   "session_minutes": 47
-  },
   "minimap": {
    "zone": "Durotar",
    "subzone": "Valley of Trials",
@@ -148,102 +133,105 @@
    "places": [
     {
      "name": "Valley of Trials",
-     "kind": "camp",
-     "dist_yd": 60,
-     "dir": "NE"
+     "rel": {
+      "dist_yd": 60.0,
+      "dir": "NE"
+     },
+     "kind": "CAMP"
     }
    ],
    "objective_areas": [
     {
      "name": "Sting of the Scorpid",
-     "kind": "landmark",
-     "dist_yd": 40,
-     "dir": "S"
+     "rel": {
+      "dist_yd": 40.0,
+      "dir": "S"
+     },
+     "kind": "LANDMARK"
     }
-   ],
-   "tracked": []
+   ]
   },
   "quest_tracker": [
    {
-    "source": "quest",
-    "quest": "Sting of the Scorpid",
     "title": "Scorpid Worker Tail",
-    "text": "Scorpid Worker Tail",
     "progress": {
      "have": 4,
      "need": 10
     },
-    "done": false,
-    "complete": false,
     "where": {
      "name": "south of the valley",
-     "kind": "landmark",
-     "dist_yd": 40,
-     "dir": "S"
+     "rel": {
+      "dist_yd": 40.0,
+      "dir": "S"
+     },
+     "kind": "LANDMARK"
+    },
+    "quest": {
+     "quest": "Sting of the Scorpid",
+     "text": "Scorpid Worker Tail"
     }
    },
    {
-    "source": "goal",
-    "id": "g1",
-    "goal_kind": "train",
     "title": "Learn level 6 spells",
-    "done": false,
     "where": {
      "name": "Ken'jai",
-     "kind": "trainer",
-     "dist_yd": 70,
-     "dir": "NE"
+     "rel": {
+      "dist_yd": 70.0,
+      "dir": "NE"
+     },
+     "kind": "TRAINER"
+    },
+    "goal": {
+     "id": "g1",
+     "goal_kind": "TRAIN"
     }
    }
   ],
-  "action_bars": [
-   {
-    "name": "Smite",
-    "cooldown_remaining_s": 0,
-    "usable": true,
-    "in_range": false
-   },
-   {
-    "name": "Lesser Heal",
-    "cooldown_remaining_s": 0,
-    "usable": true
-   },
-   {
-    "name": "Power Word: Shield",
-    "cooldown_remaining_s": 0,
-    "usable": true
-   }
-  ],
+  "action_bars": {
+   "buttons": [
+    {
+     "name": "Smite",
+     "ability": {
+      "usable": true
+     }
+    },
+    {
+     "name": "Lesser Heal",
+     "ability": {
+      "usable": true
+     }
+    },
+    {
+     "name": "Power Word: Shield",
+     "ability": {
+      "usable": true
+     }
+    }
+   ]
+  },
+  "world": {
+   "session_minutes": 47
+  },
   "bags": {
    "items": [
     {
      "name": "Scorpid Worker Tail",
-     "kind": "quest",
+     "quality": "COMMON",
      "count": 4,
-     "quality": "common",
-     "tooltip": [
-      "Quest Item"
-     ]
+     "kind": "QUEST"
     },
     {
      "name": "Tough Jerky",
-     "kind": "consumable",
+     "quality": "COMMON",
      "count": 3,
-     "quality": "common",
-     "usable": true,
-     "cooldown_s": 0,
-     "vendor_value": 6,
-     "tooltip": [
-      "Requires Level 5",
-      "Use: Restores 61 health over 18 sec. Must remain seated while eating."
-     ]
+     "kind": "CONSUMABLE",
+     "usable": true
     },
     {
      "name": "Broken Tooth",
-     "kind": "junk",
+     "quality": "POOR",
      "count": 2,
-     "quality": "poor",
-     "vendor_value": 12
+     "kind": "JUNK"
     }
    ],
    "free_slots": 9,
@@ -255,63 +243,73 @@
   },
   "map": {
    "zone": {
-    "name": "Durotar",
-    "level_range": {
-     "min": 1,
-     "max": 10
-    }
+    "name": "Durotar"
    },
    "places": [
     {
      "name": "Valley of Trials",
-     "kind": "camp",
-     "dist_yd": 60,
-     "dir": "NE"
+     "rel": {
+      "dist_yd": 60.0,
+      "dir": "NE"
+     },
+     "kind": "CAMP"
     },
     {
      "name": "Razor Hill",
-     "kind": "town",
-     "dist_yd": 900,
-     "dir": "E"
+     "rel": {
+      "dist_yd": 900.0,
+      "dir": "E"
+     },
+     "kind": "TOWN"
     }
    ],
    "bordering_zones": [
     {
      "name": "The Barrens",
-     "kind": "zone_exit",
-     "dist_yd": 2100,
-     "dir": "W",
-     "level_range": {
-      "min": 10,
-      "max": 25
-     }
+     "rel": {
+      "dist_yd": 2100.0,
+      "dir": "W"
+     },
+     "kind": "ZONE_EXIT"
     }
    ],
    "objective_locations": [
     {
      "name": "Scorpid area",
-     "kind": "landmark",
-     "dist_yd": 40,
-     "dir": "S"
+     "rel": {
+      "dist_yd": 40.0,
+      "dir": "S"
+     },
+     "kind": "LANDMARK"
     }
    ]
   }
  },
  "events": [
   {
-   "kind": "chat",
-   "channel": "say",
-   "from": "Gatda",
-   "text": "lol these boars",
-   "at_me": false,
-   "from_dist_yd": 40
+   "chat": {
+    "channel": "SAY",
+    "from": "Gatda",
+    "text": "lol these boars",
+    "from_dist_yd": 40.0
+   }
   }
  ],
  "options": [
-  "Keep doing what I'm doing",
-  "Kill Scorpid Workers (S, 40 yd)",
-  "Pick up Cactus Apple (E, 15 yd)",
-  "Turn in at Gornek (NE, 64 yd)",
-  "Rest"
+  {
+   "text": "Keep doing what I'm doing"
+  },
+  {
+   "text": "Kill Scorpid Workers (S, 40 yd)"
+  },
+  {
+   "text": "Pick up Cactus Apple (E, 15 yd)"
+  },
+  {
+   "text": "Turn in at Gornek (NE, 64 yd)"
+  },
+  {
+   "text": "Rest"
+  }
  ]
 }

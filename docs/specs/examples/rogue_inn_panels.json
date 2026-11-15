@@ -1,0 +1,293 @@
+{
+ "bot": "Sseth",
+ "seq": 7702,
+ "time_ms": "1794770000000",
+ "base": {
+  "self": {
+   "unit": {
+    "name": "Sseth",
+    "kind": "PLAYER",
+    "level": 80,
+    "health_pct": 100,
+    "power_pct": 100,
+    "player": {
+     "class": "Rogue"
+    },
+    "auras": [
+     {
+      "id": 25804,
+      "name": "Rumsey Rum Black Label",
+      "remaining_s": 840.0
+     }
+    ],
+    "activity": {
+     "state": "SITTING"
+    },
+    "visual_state": [
+     "DRUNK_SWAY"
+    ]
+   },
+   "gender": "MALE",
+   "health": 21000,
+   "health_max": 21000,
+   "power_type": "ENERGY",
+   "power": 100,
+   "power_max": 100,
+   "state": "ALIVE",
+   "resting": true,
+   "money": 12900500,
+   "drunk": "TIPSY",
+   "weapon_enchants": [
+    {
+     "slot": "main_hand",
+     "name": "Instant Poison IX",
+     "remaining_s": 2900.0,
+     "charges": 0
+    },
+    {
+     "slot": "off_hand",
+     "name": "Deadly Poison IX",
+     "remaining_s": 140.0
+    }
+   ],
+   "indicators": {
+    "bag_free_slots": 9
+   }
+  },
+  "where": {
+   "map": "Northrend",
+   "zone": "Dalaran",
+   "subzone": "The Filthy Animal",
+   "indoors": true,
+   "pvp_status": "sanctuary"
+  },
+  "doing": {
+   "activity": "idle",
+   "since_s": 300.0,
+   "detail": "raid fell apart"
+  },
+  "nearby": {
+   "units": [
+    {
+     "name": "Uda the Beast",
+     "subtitle": "<Innkeeper>",
+     "kind": "NPC",
+     "level": 80,
+     "reaction": "FRIENDLY",
+     "rel": {
+      "dist_yd": 5.0,
+      "dir": "W",
+      "in_los": true
+     }
+    }
+   ]
+  },
+  "ui": {
+   "open_panels": [
+    "TALENTS",
+    "CHARACTER"
+   ]
+  }
+ },
+ "ext": {
+  "talents": {
+   "unspent": 0,
+   "trees": [
+    "Assassination",
+    "Combat",
+    "Subtlety"
+   ],
+   "points_per_tree": [
+    51,
+    18,
+    2
+   ],
+   "talents": [
+    {
+     "name": "Mutilate",
+     "rank": 1,
+     "max_rank": 1,
+     "tree": "Assassination",
+     "available": true
+    },
+    {
+     "name": "Hunger For Blood",
+     "rank": 1,
+     "max_rank": 1,
+     "tree": "Assassination",
+     "available": true
+    }
+   ],
+   "glyphs": [
+    {
+     "type": "major",
+     "name": "Glyph of Mutilate"
+    },
+    {
+     "type": "major",
+     "name": "Glyph of Hunger for Blood"
+    },
+    {
+     "type": "major"
+    },
+    {
+     "type": "minor",
+     "name": "Glyph of Vanish"
+    },
+    {
+     "type": "minor",
+     "name": ""
+    },
+    {
+     "type": "minor",
+     "name": "Glyph of Blurred Speed"
+    }
+   ],
+   "specs": [
+    {
+     "points_per_tree": [
+      51,
+      18,
+      2
+     ],
+     "active": true
+    },
+    {
+     "points_per_tree": [
+      7,
+      51,
+      13
+     ]
+    }
+   ]
+  },
+  "character": {
+   "equipped": [
+    {
+     "id": 40499,
+     "name": "Ice-Etched Hood",
+     "quality": "EPIC",
+     "kind": "EQUIPMENT",
+     "equipment": {
+      "slot": "HEAD",
+      "durability_pct": 62
+     }
+    },
+    {
+     "id": 40383,
+     "name": "Calamity's Grasp",
+     "quality": "EPIC",
+     "kind": "EQUIPMENT",
+     "equipment": {
+      "slot": "MAIN_HAND",
+      "durability_pct": 80
+     }
+    }
+   ],
+   "stats": [
+    {
+     "stat": "AGILITY",
+     "value": 1420
+    },
+    {
+     "stat": "ATTACK_POWER",
+     "value": 4310
+    },
+    {
+     "stat": "HIT_RATING",
+     "value": 263
+    },
+    {
+     "stat": "EXPERTISE",
+     "value": 18
+    },
+    {
+     "stat": "ARMOR_PENETRATION_RATING",
+     "value": 120
+    }
+   ],
+   "titles": [
+    "Private",
+    "the Explorer"
+   ],
+   "active_title": "Private",
+   "equipment_sets": [
+    {
+     "name": "Mutilate",
+     "complete": true
+    },
+    {
+     "name": "Combat Swords",
+     "complete": false
+    }
+   ],
+   "currency": [
+    {
+     "name": "Emblem of Heroism",
+     "count": 47
+    },
+    {
+     "name": "Emblem of Valor",
+     "count": 12
+    },
+    {
+     "name": "Honor Points",
+     "count": 8120
+    },
+    {
+     "name": "Stone Keeper's Shard",
+     "count": 90
+    }
+   ]
+  }
+ },
+ "events": [
+  {
+   "kicked": {
+    "from": "raid",
+    "by": "Velaris",
+    "reason": "removed from the raid group"
+   }
+  },
+  {
+   "info": {
+    "text": "You feel tipsy. Whee!"
+   }
+  },
+  {
+   "prompt": {
+    "kind": "BIND_HEARTHSTONE",
+    "from": "Uda the Beast",
+    "text": "Do you want to make The Filthy Animal your new home?"
+   }
+  },
+  {
+   "chat": {
+    "channel": "WHISPER",
+    "from": "Velaris",
+    "text": "sorry m8 needed a 2nd healer, next week?",
+    "at_me": true
+   }
+  }
+ ],
+ "options": [
+  {
+   "text": "Make The Filthy Animal my home"
+  },
+  {
+   "text": "Decline"
+  },
+  {
+   "text": "Switch to Combat spec"
+  },
+  {
+   "text": "Whisper Velaris back"
+  },
+  {
+   "text": "Equip set Combat Swords"
+  },
+  {
+   "text": "Keep doing what I'm doing"
+  }
+ ]
+}

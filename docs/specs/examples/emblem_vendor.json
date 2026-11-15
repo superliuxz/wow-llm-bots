@@ -1,0 +1,156 @@
+{
+ "bot": "Grokta",
+ "seq": 88302,
+ "time_ms": "1794751800000",
+ "base": {
+  "self": {
+   "unit": {
+    "name": "Grokta",
+    "kind": "PLAYER",
+    "level": 80,
+    "health_pct": 100,
+    "player": {
+     "class": "Warrior"
+    }
+   },
+   "health": 28400,
+   "health_max": 28400,
+   "power_type": "RAGE",
+   "power_max": 100,
+   "state": "ALIVE",
+   "resting": true,
+   "money": 41235077,
+   "indicators": {
+    "bag_free_slots": 4
+   }
+  },
+  "where": {
+   "map": "Northrend",
+   "zone": "Dalaran",
+   "subzone": "Krasus' Landing",
+   "pvp_status": "sanctuary"
+  },
+  "doing": {
+   "activity": "shop",
+   "since_s": 40.0,
+   "detail": "spend emblems"
+  },
+  "nearby": {
+   "units": [
+    {
+     "name": "Ninsianna",
+     "subtitle": "<Emblem of Heroism Quartermaster>",
+     "kind": "NPC",
+     "level": 80,
+     "reaction": "FRIENDLY",
+     "rel": {
+      "dist_yd": 3.0,
+      "dir": "W",
+      "in_los": true
+     }
+    }
+   ]
+  },
+  "ui": {
+   "open_panels": [
+    "BAGS"
+   ]
+  }
+ },
+ "ext": {
+  "interaction": {
+   "with": "Ninsianna",
+   "merchant": {
+    "can_repair": false,
+    "items": [
+     {
+      "id": 40678,
+      "name": "Pendant of the Outcast Hero",
+      "quality": "EPIC",
+      "kind": "EQUIPMENT",
+      "currency_price": [
+       {
+        "name": "Emblem of Heroism",
+        "count": 25
+       }
+      ],
+      "equipment": {
+       "slot": "NECK"
+      }
+     },
+     {
+      "id": 40733,
+      "name": "Wapach's Spaulders of Solidarity",
+      "quality": "EPIC",
+      "kind": "EQUIPMENT",
+      "currency_price": [
+       {
+        "name": "Emblem of Heroism",
+        "count": 45
+       }
+      ],
+      "equipment": {
+       "slot": "SHOULDER"
+      }
+     },
+     {
+      "id": 44228,
+      "name": "Swift Mammoth reins (example)",
+      "quality": "EPIC",
+      "kind": "OTHER",
+      "price": 100000000,
+      "currency_price": [
+       {
+        "name": "Stone Keeper's Shard",
+        "count": 200
+       }
+      ]
+     }
+    ],
+    "my_currency": [
+     {
+      "name": "Emblem of Heroism",
+      "count": 47
+     },
+     {
+      "name": "Stone Keeper's Shard",
+      "count": 90
+     }
+    ]
+   }
+  },
+  "bags": {
+   "items": [
+    {
+     "id": 40111,
+     "name": "Bold Cardinal Ruby",
+     "quality": "EPIC",
+     "count": 2,
+     "kind": "GEM",
+     "bag_slot": "bag0:5"
+    },
+    {
+     "id": 41285,
+     "name": "Relentless Earthsiege Diamond",
+     "quality": "RARE_QUALITY",
+     "count": 1,
+     "kind": "GEM",
+     "bag_slot": "bag0:6"
+    }
+   ],
+   "free_slots": 4,
+   "total_slots": 80
+  }
+ },
+ "options": [
+  {
+   "text": "Buy Pendant of the Outcast Hero (25 Emblems of Heroism; I have 47)"
+  },
+  {
+   "text": "Close the vendor"
+  },
+  {
+   "text": "Keep doing what I'm doing"
+  }
+ ]
+}

@@ -1,0 +1,116 @@
+{
+ "bot": "Grimz",
+ "seq": 4700,
+ "time_ms": "1794810000000",
+ "base": {
+  "self": {
+   "unit": {
+    "name": "Grimz",
+    "kind": "PLAYER",
+    "level": 46,
+    "health_pct": 100,
+    "player": {
+     "class": "Rogue"
+    }
+   },
+   "health": 3200,
+   "health_max": 3200,
+   "power_type": "ENERGY",
+   "power": 100,
+   "power_max": 100,
+   "state": "ALIVE",
+   "money": 655000,
+   "indicators": {
+    "bag_free_slots": 0,
+    "durability_warning": [
+     {
+      "slot": "chest",
+      "level": "BROKEN"
+     },
+     {
+      "slot": "legs",
+      "level": "DAMAGED"
+     }
+    ]
+   }
+  },
+  "where": {
+   "map": "Kalimdor",
+   "zone": "Tanaris",
+   "subzone": "Zul'Farrak (outside)"
+  },
+  "doing": {
+   "activity": "grind",
+   "since_s": 900.0
+  },
+  "nearby": {
+   "units": [
+    {
+     "name": "Sandfury Shadowcaster",
+     "kind": "NPC",
+     "level": 45,
+     "reaction": "HOSTILE",
+     "rel": {
+      "dist_yd": 2.0,
+      "dir": "N",
+      "in_los": true
+     },
+     "dead": true,
+     "lootable": true
+    }
+   ]
+  },
+  "ui": {}
+ },
+ "ext": {
+  "trade_loot": {
+   "loot": [
+    {
+     "id": 8150,
+     "name": "Deeprock Salt",
+     "quality": "COMMON",
+     "kind": "TRADE_GOOD"
+    },
+    {
+     "id": 4338,
+     "name": "Mageweave Cloth",
+     "quality": "COMMON",
+     "kind": "TRADE_GOOD",
+     "count": 2
+    }
+   ],
+   "loot_money": 4310
+  },
+  "world": {
+   "server_messages": [
+    "Server shutdown in 5:00 (restart for maintenance)"
+   ]
+  }
+ },
+ "events": [
+  {
+   "error": {
+    "text": "Inventory is full."
+   }
+  },
+  {
+   "info": {
+    "text": "Your Chest is broken!"
+   }
+  }
+ ],
+ "options": [
+  {
+   "text": "Destroy the gray item in my bags and loot the cloth"
+  },
+  {
+   "text": "Take only the coin"
+  },
+  {
+   "text": "Hearth to Gadgetzan and repair before the restart"
+  },
+  {
+   "text": "Keep doing what I'm doing"
+  }
+ ]
+}

@@ -1,0 +1,69 @@
+{
+ "bot": "Dezlu",
+ "seq": 1600,
+ "time_ms": "1794810000000",
+ "base": {
+  "self": {
+   "unit": {
+    "name": "Dezlu",
+    "kind": "PLAYER",
+    "level": 31,
+    "health_pct": 100,
+    "player": {
+     "class": "Priest"
+    }
+   },
+   "health": 1700,
+   "health_max": 1700,
+   "power_type": "MANA",
+   "power": 2300,
+   "power_max": 2300,
+   "state": "ALIVE",
+   "money": 99000,
+   "swimming": true
+  },
+  "where": {
+   "map": "Kalimdor",
+   "zone": "Thousand Needles",
+   "subzone": "Darkcloud Pinnacle (lake bed)"
+  },
+  "doing": {
+   "activity": "quest",
+   "since_s": 50.0,
+   "detail": "loot the sunken chest"
+  },
+  "nearby": {
+   "objects": [
+    {
+     "name": "Sunken Chest",
+     "kind": "CHEST",
+     "usable": true,
+     "highlighted": true,
+     "rel": {
+      "dist_yd": 11.0,
+      "dir": "N",
+      "height": "BELOW",
+      "in_los": true
+     }
+    }
+   ]
+  },
+  "ui": {}
+ },
+ "ext": {
+  "environment": {
+   "breath_s": 14.0
+  }
+ },
+ "options": [
+  {
+   "text": "Swim to the chest and loot it (11 yd)"
+  },
+  {
+   "text": "Surface for air now"
+  },
+  {
+   "text": "Keep doing what I'm doing"
+  }
+ ]
+}

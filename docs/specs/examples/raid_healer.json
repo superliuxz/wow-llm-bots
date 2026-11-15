@@ -1,33 +1,34 @@
 {
- "type": "snapshot",
  "bot": "Morwyn",
  "seq": 90211,
- "t": 88001000,
+ "time_ms": "88001000",
  "base": {
   "self": {
-   "name": "Morwyn",
-   "kind": "player",
-   "race": "Tauren",
-   "class": "Druid",
-   "level": 80,
+   "unit": {
+    "name": "Morwyn",
+    "kind": "PLAYER",
+    "level": 80,
+    "player": {
+     "class": "Druid"
+    }
+   },
    "health": 21000,
    "health_max": 23500,
-   "power_type": "mana",
+   "power_type": "MANA",
    "power": 15200,
    "power_max": 28000,
-   "state": "alive",
+   "state": "ALIVE",
    "in_combat": true,
    "control": {},
-   "money": 12345678,
    "casting": {
     "spell": {
-     "name": "Nourish",
-     "cast_time_ms": 1500
+     "name": "Nourish"
     },
     "remaining_ms": 600,
     "interruptible": true,
     "target": "Grumbar"
-   }
+   },
+   "money": 12345678
   },
   "where": {
    "map": "Icecrown Citadel",
@@ -39,90 +40,106 @@
    "units": [
     {
      "name": "The Lich King",
-     "kind": "npc",
+     "rel": {
+      "dist_yd": 32.0,
+      "dir": "N",
+      "in_los": true
+     },
+     "kind": "NPC",
      "level": 83,
-     "level_color": "skull",
-     "reaction": "hostile",
-     "classification": "boss",
-     "health_pct": 61,
-     "dist_yd": 32,
-     "dir": "N",
-     "in_los": true,
+     "level_color": "SKULL_LEVEL",
+     "reaction": "HOSTILE",
+     "classification": "WORLD_BOSS",
+     "health_pct": 61.0,
      "target": "Grumbar",
      "activity": {
-      "state": "casting",
+      "state": "CASTING",
       "cast": {
        "spell": {
         "name": "Defile"
        },
        "remaining_ms": 1800,
-       "interruptible": false,
        "target": "Lacrimae"
       }
      }
     }
    ],
-   "objects": [],
    "areas": [
     {
      "name": "Defile",
-     "spell": {
-      "name": "Defile",
-      "school": "shadow"
+     "rel": {
+      "dist_yd": 9.0,
+      "dir": "E"
      },
-     "radius_yd": 6,
-     "dist_yd": 9,
-     "dir": "E",
-     "inside_me": false,
+     "spell": {
+      "name": "Defile"
+     },
+     "radius_yd": 6.0,
      "hostile": true
     }
    ]
   },
-  "ui": {
-   "open_panels": [],
-   "hovering": []
-  }
+  "ui": {}
  },
  "ext": {
+  "action_bars": {
+   "buttons": [
+    {
+     "name": "Wild Growth",
+     "cooldown_s": 6.0,
+     "ability": {
+      "cooldown_remaining_s": 2.1,
+      "usable": true,
+      "in_range": true
+     }
+    }
+   ]
+  },
+  "combat": {},
   "raid": {
    "members": [
     {
      "name": "Grumbar",
-     "kind": "player",
-     "class": "Warrior",
-     "role": "tank",
-     "health_pct": 48,
-     "health_deficit": 19000,
-     "in_range": true,
-     "aggro": true,
-     "subgroup": 1,
+     "kind": "PLAYER",
+     "health_pct": 48.0,
      "auras": [
       {
        "name": "Necrotic Plague",
        "harmful": true,
-       "remaining_s": 5,
-       "dispel_type": "disease",
-       "dispellable_by_me": false
+       "remaining_s": 5.0,
+       "dispel_type": "DISEASE"
       }
-     ]
+     ],
+     "player": {
+      "class": "Warrior"
+     },
+     "group": {
+      "health_deficit": 19000,
+      "in_range": true,
+      "aggro": true,
+      "subgroup": 1
+     }
     },
     {
      "name": "Lacrimae",
-     "kind": "player",
-     "class": "Mage",
-     "role": "dps",
-     "health_pct": 100,
-     "in_range": true,
-     "subgroup": 2,
+     "kind": "PLAYER",
+     "health_pct": 100.0,
      "auras": [
       {
        "name": "Curse of Doom",
        "harmful": true,
-       "remaining_s": 40,
-       "dispel_type": "curse",
+       "remaining_s": 40.0,
+       "dispel_type": "CURSE",
        "dispellable_by_me": true
       }
-     ]
+     ],
+     "player": {
+      "class": "Mage"
+     },
+     "group": {
+      "in_range": true,
+      "subgroup": 2
+     }
     }
    ],
    "main_tanks": [
@@ -132,19 +149,21 @@
   "encounter": {
    "boss": {
     "name": "The Lich King",
-    "kind": "npc",
-    "classification": "boss",
-    "health_pct": 61,
-    "phase": 2
+    "kind": "NPC",
+    "classification": "WORLD_BOSS",
+    "health_pct": 61.0,
+    "boss": {
+     "phase": 2
+    }
    },
    "dbm": [
     {
      "name": "Defile",
-     "remaining_s": 30
+     "remaining_s": 30.0
     },
     {
      "name": "Summon Val'kyr",
-     "remaining_s": 12
+     "remaining_s": 12.0
     }
    ]
   },
@@ -154,34 +173,32 @@
    "size": 25,
    "bosses": [
     {
-     "name": "The Lich King",
-     "killed": false
+     "name": "The Lich King"
     }
    ]
-  },
-  "combat": {},
-  "action_bars": [
-   {
-    "name": "Wild Growth",
-    "cooldown_s": 6,
-    "cooldown_remaining_s": 2.1,
-    "usable": true,
-    "in_range": true
-   }
-  ]
+  }
  },
  "events": [
   {
-   "kind": "chat",
-   "channel": "raid_warning",
-   "from": "Gorvak",
-   "text": "Defile soon, spread out!"
+   "chat": {
+    "channel": "RAID_WARNING",
+    "from": "Gorvak",
+    "text": "Defile soon, spread out!"
+   }
   }
  ],
  "options": [
-  "Keep doing what I'm doing",
-  "Move away from Defile (W)",
-  "Heal Grumbar (Wild Growth)",
-  "Remove Curse on Lacrimae"
+  {
+   "text": "Keep doing what I'm doing"
+  },
+  {
+   "text": "Move away from Defile (W)"
+  },
+  {
+   "text": "Heal Grumbar (Wild Growth)"
+  },
+  {
+   "text": "Remove Curse on Lacrimae"
+  }
  ]
 }

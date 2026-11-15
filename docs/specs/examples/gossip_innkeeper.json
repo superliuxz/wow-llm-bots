@@ -1,0 +1,94 @@
+{
+ "bot": "Sseth",
+ "seq": 7900,
+ "time_ms": "1794810000000",
+ "base": {
+  "self": {
+   "unit": {
+    "name": "Sseth",
+    "kind": "PLAYER",
+    "level": 80,
+    "health_pct": 100,
+    "player": {
+     "class": "Rogue"
+    }
+   },
+   "health": 21000,
+   "health_max": 21000,
+   "power_type": "ENERGY",
+   "power": 100,
+   "power_max": 100,
+   "state": "ALIVE",
+   "money": 12900500
+  },
+  "where": {
+   "map": "Northrend",
+   "zone": "Borean Tundra",
+   "subzone": "Warsong Hold",
+   "indoors": true
+  },
+  "doing": {
+   "activity": "rest",
+   "since_s": 10.0
+  },
+  "nearby": {
+   "units": [
+    {
+     "name": "Innkeeper Pahl",
+     "kind": "NPC",
+     "level": 75,
+     "reaction": "FRIENDLY",
+     "rel": {
+      "dist_yd": 3.0,
+      "dir": "N",
+      "in_los": true
+     },
+     "subtitle": "<Innkeeper>"
+    }
+   ]
+  },
+  "ui": {}
+ },
+ "ext": {
+  "interaction": {
+   "with": "Innkeeper Pahl",
+   "gossip": {
+    "text": "Welcome to Warsong Hold, friend.",
+    "options": [
+     {
+      "text": "Make this inn your home.",
+      "icon": "binder"
+     },
+     {
+      "text": "Let me browse your goods.",
+      "icon": "vendor"
+     },
+     {
+      "text": "What can I do at an inn?",
+      "icon": "chat"
+     }
+    ],
+    "quests": [
+     "The Defense of Warsong Hold"
+    ]
+   }
+  }
+ },
+ "options": [
+  {
+   "text": "Make this inn my home"
+  },
+  {
+   "text": "Browse the innkeeper's goods"
+  },
+  {
+   "text": "Accept The Defense of Warsong Hold"
+  },
+  {
+   "text": "Say goodbye"
+  },
+  {
+   "text": "Keep doing what I'm doing"
+  }
+ ]
+}

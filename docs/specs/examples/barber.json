@@ -1,0 +1,89 @@
+{
+ "bot": "Sseth",
+ "seq": 7790,
+ "time_ms": "1794771000000",
+ "base": {
+  "self": {
+   "unit": {
+    "name": "Sseth",
+    "kind": "PLAYER",
+    "level": 80,
+    "health_pct": 100,
+    "player": {
+     "class": "Rogue"
+    },
+    "activity": {
+     "state": "SITTING"
+    }
+   },
+   "health": 21000,
+   "health_max": 21000,
+   "power_type": "ENERGY",
+   "power": 100,
+   "power_max": 100,
+   "state": "ALIVE",
+   "resting": true,
+   "money": 12900500
+  },
+  "where": {
+   "map": "Northrend",
+   "zone": "Dalaran",
+   "subzone": "Cut-Throat Alley",
+   "indoors": true,
+   "pvp_status": "sanctuary"
+  },
+  "doing": {
+   "activity": "barber",
+   "since_s": 30.0,
+   "detail": "new hair for the guild photo"
+  },
+  "nearby": {
+   "objects": [
+    {
+     "name": "Barber Chair",
+     "kind": "BARBER_CHAIR",
+     "usable": true,
+     "rel": {
+      "dist_yd": 0.0,
+      "dir": "HERE",
+      "in_los": true
+     }
+    }
+   ]
+  },
+  "ui": {}
+ },
+ "ext": {
+  "interaction": {
+   "with": "Barber Chair",
+   "barber": {
+    "cost": 344000,
+    "options": [
+     "Hair Style: 4 of 10",
+     "Hair Color: 2 of 9",
+     "Tusks: 3 of 6"
+    ]
+   }
+  }
+ },
+ "options": [
+  {
+   "text": "Accept (34g 40s)"
+  },
+  {
+   "text": "Next hair style"
+  },
+  {
+   "text": "Next hair colour"
+  },
+  {
+   "text": "Next tusks"
+  },
+  {
+   "text": "Cancel"
+  },
+  {
+   "text": "Keep doing what I'm doing"
+  }
+ ]
+}

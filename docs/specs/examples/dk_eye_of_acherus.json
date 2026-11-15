@@ -1,0 +1,150 @@
+{
+ "bot": "Morgrath",
+ "seq": 12,
+ "time_ms": "1794810000000",
+ "base": {
+  "self": {
+   "unit": {
+    "name": "Morgrath",
+    "kind": "PLAYER",
+    "level": 55,
+    "health_pct": 100,
+    "player": {
+     "class": "Death Knight"
+    }
+   },
+   "health": 7000,
+   "health_max": 7000,
+   "power_type": "RUNIC_POWER",
+   "power": 0,
+   "power_max": 100,
+   "state": "ALIVE",
+   "money": 0
+  },
+  "where": {
+   "map": "Ebon Hold",
+   "zone": "Plaguelands: The Scarlet Enclave",
+   "subzone": "New Avalon"
+  },
+  "doing": {
+   "activity": "quest",
+   "since_s": 30.0,
+   "detail": "Death Comes From On High: siphon the forge, town hall, tower, chapel"
+  },
+  "nearby": {
+   "units": [
+    {
+     "name": "Scarlet Crusader",
+     "kind": "NPC",
+     "level": 56,
+     "reaction": "HOSTILE",
+     "rel": {
+      "dist_yd": 40.0,
+      "dir": "S",
+      "in_los": true
+     }
+    },
+    {
+     "name": "Scarlet Peasant",
+     "kind": "NPC",
+     "level": 55,
+     "reaction": "HOSTILE",
+     "rel": {
+      "dist_yd": 35.0,
+      "dir": "SW",
+      "in_los": true
+     },
+     "activity": {
+      "state": "FLEEING"
+     }
+    }
+   ],
+   "objects": [
+    {
+     "name": "New Avalon Forge",
+     "kind": "QUEST_OBJECT",
+     "highlighted": true,
+     "rel": {
+      "dist_yd": 60.0,
+      "dir": "S",
+      "height": "BELOW",
+      "in_los": true
+     }
+    }
+   ]
+  },
+  "ui": {}
+ },
+ "ext": {
+  "possessed": {
+   "name": "Eye of Acherus",
+   "kind": "VEHICLE",
+   "health_pct": 100,
+   "vehicle": {
+    "abilities": [
+     {
+      "id": 51859,
+      "name": "Siphon of Acherus",
+      "ability": {
+       "slot": "possess:1",
+       "usable": false,
+       "in_range": false,
+       "known": true
+      }
+     },
+     {
+      "id": 52694,
+      "name": "Recall Eye of Acherus",
+      "ability": {
+       "slot": "possess:2",
+       "usable": true,
+       "known": true
+      }
+     }
+    ]
+   }
+  },
+  "quest_tracker": [
+   {
+    "title": "Death Comes From On High",
+    "progress": {
+     "have": 0,
+     "need": 4
+    },
+    "where": {
+     "name": "New Avalon Forge",
+     "kind": "OBJECTIVE_AREA",
+     "rel": {
+      "dist_yd": 60.0,
+      "dir": "S"
+     }
+    },
+    "quest": {
+     "quest": "Death Comes From On High",
+     "text": "Siphon New Avalon Forge analyzed 0/1"
+    }
+   }
+  ]
+ },
+ "events": [
+  {
+   "info": {
+    "text": "The Eye of Acherus launches towards its destination."
+   }
+  }
+ ],
+ "options": [
+  {
+   "text": "Fly the Eye to New Avalon Forge (60 yd S)"
+  },
+  {
+   "text": "Siphon the forge when in range"
+  },
+  {
+   "text": "Recall the Eye"
+  },
+  {
+   "text": "Keep doing what I'm doing"
+  }
+ ]
+}

@@ -1,0 +1,108 @@
+{
+ "bot": "Morgrath",
+ "seq": 54000,
+ "time_ms": "1794810000000",
+ "base": {
+  "self": {
+   "unit": {
+    "name": "Morgrath",
+    "kind": "PLAYER",
+    "level": 80,
+    "health_pct": 100,
+    "player": {
+     "class": "Death Knight"
+    },
+    "pvp_flagged": true
+   },
+   "health": 29600,
+   "health_max": 29600,
+   "power_type": "RUNIC_POWER",
+   "power": 40,
+   "power_max": 130,
+   "state": "ALIVE",
+   "money": 3300000,
+   "pvp_flagged": true,
+   "mounted": true
+  },
+  "where": {
+   "map": "Alterac Valley",
+   "zone": "Alterac Valley",
+   "subzone": "Iceblood Garrison",
+   "in_instance": true
+  },
+  "doing": {
+   "activity": "defend",
+   "since_s": 120.0
+  },
+  "nearby": {
+   "objects": [
+    {
+     "name": "Iceblood Tower",
+     "kind": "CAPTURE_POINT",
+     "owner": "Horde",
+     "state": "assaulted by Alliance",
+     "rel": {
+      "dist_yd": 30.0,
+      "dir": "W",
+      "in_los": true
+     }
+    }
+   ]
+  },
+  "ui": {}
+ },
+ "ext": {
+  "battleground": {
+   "name": "Alterac Valley",
+   "score": {
+    "Horde reinforcements": 312,
+    "Alliance reinforcements": 280
+   },
+   "objectives": [
+    {
+     "name": "Iceblood Tower",
+     "owner": "Alliance (assaulting)"
+    },
+    {
+     "name": "Stonehearth Graveyard",
+     "owner": "Horde"
+    },
+    {
+     "name": "Galvangar",
+     "owner": "Horde"
+    }
+   ]
+  },
+  "world": {
+   "world_states": [
+    {
+     "label": "Iceblood Tower falls in",
+     "value": "3:12",
+     "timer_s": 192.0
+    }
+   ]
+  }
+ },
+ "events": [
+  {
+   "chat": {
+    "channel": "BOSS_EMOTE",
+    "text": "Iceblood Tower is under attack! If left unchecked, the Alliance will destroy it!"
+   }
+  }
+ ],
+ "options": [
+  {
+   "text": "Ride to Iceblood Tower and defend the flag"
+  },
+  {
+   "text": "Keep going south to Stonehearth"
+  },
+  {
+   "text": "Say in BG: IBT under attack"
+  },
+  {
+   "text": "Keep doing what I'm doing"
+  }
+ ]
+}

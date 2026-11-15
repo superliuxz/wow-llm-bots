@@ -1,0 +1,152 @@
+{
+ "bot": "Hexxa",
+ "seq": 560,
+ "time_ms": "1794810000000",
+ "base": {
+  "self": {
+   "unit": {
+    "name": "Hexxa",
+    "kind": "PLAYER",
+    "level": 80,
+    "health_pct": 100,
+    "player": {
+     "class": "Mage"
+    }
+   },
+   "health": 10000,
+   "health_max": 10000,
+   "power_type": "MANA",
+   "power": 100,
+   "power_max": 100,
+   "state": "ALIVE",
+   "money": 88120000
+  },
+  "where": {
+   "map": "Northrend",
+   "zone": "Dalaran",
+   "subzone": "Cartier & Co. Fine Jewelry",
+   "indoors": true,
+   "pvp_status": "sanctuary"
+  },
+  "doing": {
+   "activity": "craft",
+   "since_s": 90.0,
+   "detail": "daily Icy Prism, cut rubies"
+  },
+  "ui": {
+   "open_panels": [
+    "SKILLS"
+   ]
+  }
+ },
+ "ext": {
+  "interaction": {
+   "with": "Jewelcrafting",
+   "tradeskill": {
+    "profession": "Jewelcrafting",
+    "skill": 437,
+    "max": 450,
+    "recipes": [
+     {
+      "name": "Icy Prism",
+      "skillup_color": "yellow",
+      "can_craft": 0,
+      "reagents": [
+       {
+        "item": {
+         "id": 36860,
+         "name": "Eternal Fire",
+         "quality": "COMMON",
+         "kind": "OTHER"
+        },
+        "have": 0,
+        "need": 1
+       }
+      ],
+      "cooldown_s": 40000.0
+     },
+     {
+      "name": "Bold Cardinal Ruby",
+      "skillup_color": "orange",
+      "can_craft": 2,
+      "reagents": [
+       {
+        "item": {
+         "id": 36919,
+         "name": "Cardinal Ruby",
+         "quality": "EPIC",
+         "kind": "GEM"
+        },
+        "have": 2,
+        "need": 1
+       }
+      ]
+     },
+     {
+      "name": "Runed Scarlet Ruby",
+      "skillup_color": "gray",
+      "can_craft": 5,
+      "reagents": [
+       {
+        "item": {
+         "id": 39998,
+         "name": "Scarlet Ruby",
+         "quality": "RARE_QUALITY",
+         "kind": "GEM"
+        },
+        "have": 5,
+        "need": 1
+       }
+      ]
+     }
+    ]
+   }
+  },
+  "skills": {
+   "skills": [
+    {
+     "name": "Jewelcrafting",
+     "skill": 437,
+     "max": 450,
+     "category": "profession"
+    },
+    {
+     "name": "Mining",
+     "skill": 450,
+     "max": 450,
+     "category": "profession"
+    }
+   ]
+  }
+ },
+ "events": [
+  {
+   "skill_up": {
+    "skill": "Jewelcrafting",
+    "value": 437
+   }
+  }
+ ],
+ "options": [
+  {
+   "text": "Cut Bold Cardinal Ruby"
+  },
+  {
+   "text": "Cut ___ Runed Scarlet Ruby",
+   "blanks": [
+    {
+     "kind": "COUNT",
+     "label": "Count",
+     "min": 1,
+     "max": 5
+    }
+   ]
+  },
+  {
+   "text": "Close jewelcrafting"
+  },
+  {
+   "text": "Keep doing what I'm doing"
+  }
+ ]
+}

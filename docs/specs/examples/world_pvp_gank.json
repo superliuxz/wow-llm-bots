@@ -1,0 +1,138 @@
+{
+ "bot": "Taruk",
+ "seq": 2900,
+ "time_ms": "1794810000000",
+ "base": {
+  "self": {
+   "unit": {
+    "name": "Taruk",
+    "kind": "PLAYER",
+    "level": 38,
+    "health_pct": 31,
+    "player": {
+     "class": "Hunter"
+    },
+    "pvp_flagged": true,
+    "auras": [
+     {
+      "id": 12826,
+      "name": "Polymorph",
+      "harmful": true,
+      "remaining_s": 6.0,
+      "dispel_type": "MAGIC",
+      "caster": "Aldaria"
+     }
+    ],
+    "visual_state": [
+     "POLYMORPHED"
+    ]
+   },
+   "health": 800,
+   "health_max": 2600,
+   "power_type": "MANA",
+   "power": 2100,
+   "power_max": 2100,
+   "state": "ALIVE",
+   "money": 310000,
+   "in_combat": true,
+   "pvp_flagged": true,
+   "control": {
+    "pacified": true,
+    "silenced": true
+   }
+  },
+  "where": {
+   "map": "Eastern Kingdoms",
+   "zone": "Stranglethorn Vale",
+   "subzone": "Nesingwary's Expedition",
+   "pvp_status": "contested"
+  },
+  "doing": {
+   "activity": "quest",
+   "since_s": 300.0,
+   "detail": "Panther Mastery"
+  },
+  "nearby": {
+   "units": [
+    {
+     "name": "Aldaria",
+     "kind": "PLAYER",
+     "level_color": "SKULL_LEVEL",
+     "reaction": "HOSTILE",
+     "pvp_flagged": true,
+     "targeting_me": true,
+     "rel": {
+      "dist_yd": 18.0,
+      "dir": "W",
+      "in_los": true
+     },
+     "player": {
+      "class": "Mage"
+     },
+     "activity": {
+      "state": "CASTING",
+      "cast": {
+       "spell": {
+        "id": 42842,
+        "name": "Frostbolt"
+       },
+       "remaining_ms": 1800,
+       "interruptible": true
+      }
+     }
+    },
+    {
+     "reaction": "HOSTILE",
+     "visual_state": [
+      "STEALTH_SHIMMER"
+     ],
+     "rel": {
+      "dist_yd": 7.0,
+      "dir": "S",
+      "in_los": true
+     }
+    }
+   ]
+  },
+  "ui": {}
+ },
+ "ext": {
+  "combat": {
+   "attackers": [
+    {
+     "name": "Aldaria",
+     "level_color": "SKULL_LEVEL",
+     "reaction": "HOSTILE",
+     "player": {
+      "class": "Mage"
+     }
+    }
+   ],
+   "summary": "Aldaria: Frostbolt 2104 (you), Ice Lance 980 (you); you are polymorphed"
+  }
+ },
+ "events": [
+  {
+   "chat": {
+    "channel": "YELL",
+    "from": "Aldaria",
+    "text": "lol",
+    "from_dist_yd": 18.0
+   }
+  }
+ ],
+ "options": [
+  {
+   "text": "Use the PvP trinket to break Polymorph"
+  },
+  {
+   "text": "Wait out Polymorph (6 s)"
+  },
+  {
+   "text": "Whisper my guild for help"
+  },
+  {
+   "text": "Keep doing what I'm doing"
+  }
+ ]
+}

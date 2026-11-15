@@ -1,0 +1,63 @@
+{
+ "bot": "Ashlan",
+ "seq": 1,
+ "time_ms": "1794810000000",
+ "base": {
+  "self": {
+   "unit": {
+    "name": "Ashlan",
+    "kind": "PLAYER",
+    "level": 1,
+    "health_pct": 100,
+    "player": {
+     "class": "Warlock"
+    }
+   },
+   "health": 50,
+   "health_max": 50,
+   "power_type": "MANA",
+   "power": 80,
+   "power_max": 80,
+   "state": "ALIVE",
+   "money": 0,
+   "in_cinematic": true
+  },
+  "where": {
+   "map": "Eastern Kingdoms",
+   "zone": "Tirisfal Glades",
+   "subzone": "Deathknell",
+   "indoors": true
+  },
+  "doing": {
+   "activity": "watch",
+   "since_s": 20.0
+  },
+  "ui": {}
+ },
+ "ext": {
+  "world": {
+   "session_minutes": 1,
+   "server_messages": [
+    "Welcome to the realm."
+   ]
+  }
+ },
+ "events": [
+  {
+   "cinematic": {
+    "started": true
+   }
+  }
+ ],
+ "options": [
+  {
+   "text": "Watch the intro"
+  },
+  {
+   "text": "Skip the intro (Esc)"
+  },
+  {
+   "text": "Keep doing what I'm doing"
+  }
+ ]
+}

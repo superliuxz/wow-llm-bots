@@ -1,0 +1,114 @@
+{
+ "bot": "Grokta",
+ "seq": 88600,
+ "time_ms": "1794810000000",
+ "base": {
+  "self": {
+   "unit": {
+    "name": "Grokta",
+    "kind": "PLAYER",
+    "level": 80,
+    "health_pct": 100,
+    "player": {
+     "class": "Warrior"
+    }
+   },
+   "health": 10000,
+   "health_max": 10000,
+   "power_type": "RAGE",
+   "power": 0,
+   "power_max": 100,
+   "state": "ALIVE",
+   "money": 41235077
+  },
+  "where": {
+   "map": "Kalimdor",
+   "zone": "Orgrimmar",
+   "subzone": "The Drag",
+   "pvp_status": "sanctuary"
+  },
+  "doing": {
+   "activity": "trade",
+   "since_s": 20.0,
+   "detail": "buy titansteel from Hexxa"
+  },
+  "nearby": {
+   "units": [
+    {
+     "name": "Hexxa",
+     "kind": "PLAYER",
+     "level": 80,
+     "reaction": "FRIENDLY",
+     "rel": {
+      "dist_yd": 2.0,
+      "dir": "E",
+      "in_los": true
+     },
+     "player": {
+      "class": "Mage"
+     }
+    }
+   ]
+  },
+  "ui": {
+   "open_panels": [
+    "BAGS"
+   ]
+  }
+ },
+ "ext": {
+  "trade_loot": {
+   "trade": {
+    "with": "Hexxa",
+    "theirs": [
+     {
+      "id": 37663,
+      "name": "Titansteel Bar",
+      "quality": "UNCOMMON",
+      "kind": "TRADE_GOOD",
+      "count": 4
+     }
+    ],
+    "my_money": 4800000,
+    "they_accepted": true,
+    "i_accepted": false
+   }
+  },
+  "bags": {
+   "items": [],
+   "free_slots": 4,
+   "total_slots": 80
+  }
+ },
+ "events": [
+  {
+   "chat": {
+    "channel": "WHISPER",
+    "from": "Hexxa",
+    "text": "4 bars, 480g as said. hit trade",
+    "at_me": true
+   }
+  }
+ ],
+ "options": [
+  {
+   "text": "Accept the trade"
+  },
+  {
+   "text": "Change my gold to ___",
+   "blanks": [
+    {
+     "kind": "MONEY",
+     "label": "Money",
+     "max": 41235077
+    }
+   ]
+  },
+  {
+   "text": "Cancel the trade"
+  },
+  {
+   "text": "Keep doing what I'm doing"
+  }
+ ]
+}

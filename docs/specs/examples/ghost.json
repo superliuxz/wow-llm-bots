@@ -1,15 +1,15 @@
 {
- "type": "snapshot",
  "bot": "Dezlu",
  "seq": 980,
- "t": 6021000,
+ "time_ms": "6021000",
  "base": {
   "self": {
-   "name": "Dezlu",
-   "kind": "player",
-   "level": 6,
-   "state": "ghost",
-   "in_combat": false,
+   "unit": {
+    "name": "Dezlu",
+    "kind": "PLAYER",
+    "level": 6
+   },
+   "state": "GHOST",
    "control": {},
    "money": 340
   },
@@ -22,31 +22,37 @@
    "units": [
     {
      "name": "Spirit Healer",
-     "kind": "npc",
-     "reaction": "friendly",
-     "services": [
-      "spirit_healer"
-     ],
-     "dist_yd": 8,
-     "dir": "S"
+     "rel": {
+      "dist_yd": 8.0,
+      "dir": "S"
+     },
+     "kind": "NPC",
+     "reaction": "FRIENDLY"
     }
-   ],
-   "objects": [],
-   "areas": []
+   ]
   }
  },
  "ext": {
+  "minimap": {
+   "zone": "Durotar",
+   "subzone": "Razor Hill",
+   "corpse": {
+    "dist_yd": 220.0,
+    "dir": "NE"
+   }
+  },
   "death": {
    "corpse": {
-    "dist_yd": 220,
+    "dist_yd": 220.0,
     "dir": "NE"
    },
-   "can_resurrect_in_s": 0,
    "spirit_healer": {
     "name": "Spirit Healer",
-    "kind": "graveyard",
-    "dist_yd": 8,
-    "dir": "S"
+    "rel": {
+     "dist_yd": 8.0,
+     "dir": "S"
+    },
+    "kind": "GRAVEYARD"
    }
   },
   "surroundings": {
@@ -57,41 +63,44 @@
    ],
    "obstacles": [
     {
-     "kind": "wall",
-     "dist_yd": 4,
-     "dir": "W",
-     "height_yd": 6
+     "kind": "WALL",
+     "rel": {
+      "dist_yd": 4.0,
+      "dir": "W"
+     },
+     "height_yd": 6.0
     }
    ],
    "goal": {
-    "dist_yd": 220,
+    "dist_yd": 220.0,
     "dir": "NE"
    },
    "description": "Open slope to the NE towards the corpse; fence to the W."
-  },
-  "minimap": {
-   "zone": "Durotar",
-   "subzone": "Razor Hill",
-   "corpse": {
-    "dist_yd": 220,
-    "dir": "NE"
-   }
   }
  },
  "events": [
   {
-   "kind": "path_failed",
-   "to": {
-    "name": "corpse",
-    "kind": "landmark",
-    "dist_yd": 220,
-    "dir": "NE"
+   "path_failed": {
+    "to": {
+     "name": "corpse",
+     "rel": {
+      "dist_yd": 220.0,
+      "dir": "NE"
+     },
+     "kind": "LANDMARK"
+    }
    }
   }
  ],
  "options": [
-  "Run to corpse (NE, 220 yd)",
-  "Resurrect at Spirit Healer",
-  "Use \"Stuck\""
+  {
+   "text": "Run to corpse (NE, 220 yd)"
+  },
+  {
+   "text": "Resurrect at Spirit Healer"
+  },
+  {
+   "text": "Use \"Stuck\""
+  }
  ]
 }

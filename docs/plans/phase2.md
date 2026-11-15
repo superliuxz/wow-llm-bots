@@ -38,7 +38,7 @@ socket and two lock-protected queues. Nothing in the module ever waits on the ha
 ### A. Server module `server_module/mod-llm-brain` (AzerothCore module, Google/Chromium style)
 1. Module skeleton (CMake, script loader), linked into worldserver via `tools/setup.sh` symlink.
    Config file `mod-llm-brain.conf`: enabled, socket path, bot names to attach to, tick interval.
-2. IO thread + Unix socket server (Boost.Asio, already a server dependency); outbound/inbound
+2. IO thread + Unix socket server (epoll IO thread on `common/net`, done in A2); outbound/inbound
    queues; drop-oldest when the harness is gone (no unbounded growth).
 3. Snapshot v0 (world thread, per attached bot, streamed every 1 s; LLM is not called per snapshot):
    identity (name, race, class, level, gold), HP/mana, zone/subzone, position, current RPG
@@ -61,7 +61,8 @@ socket and two lock-protected queues. Nothing in the module ever waits on the ha
    per-bot slot pinning (keep each bot's prompt prefix cached), timeouts.
 5. `brain/`: `decide(snapshot) -> Decision` (the single entry point used live and by evals):
    prompt builder (content/RULES.md -> bot identity -> snapshot -> options), reply parser
-   (option number; strict validation; one retry, else no-op so the stock AI continues),
+   (option number, plus one fill-in per blank when an option has blanks, none in phase 2;
+   strict validation; one retry, else no-op so the stock AI continues),
    chat reply generation (separate call after the decision).
 6. `triggers/` + `sched/`: change detection on each snapshot (decides whether to think), 10 s fallback timer; priority queue v0 (chat reply > activity choice), bounded concurrency, stale
    request replacement per bot.
@@ -111,7 +112,11 @@ UnixSocketServer, UnixSocketClient. No third-party runtime deps (libevent droppe
 not in `out/common-server` (linked into AzerothCore).
 
 ## Decisions (review 2026-11-14)
-1. **Wire format** module <-> harness: newline-delimited JSON over a Unix socket. The LLM never
+1. **Wire format** module <-> harness (revised 2026-11-15): binary protobuf messages from
+   `docs/specs/snapshot.proto` (lite runtime, as Chromium), in length-prefixed frames over the
+   Unix socket (a `LengthPrefixFramer` in `common/net` replaces the newline framer for the
+   bridge). JSON (canonical protobuf mapping) only in harness tooling: recordings, decision
+   logs, eval cases. The LLM never
    sees this JSON: the harness renders snapshots into compact plain-text prompts (fewer tokens,
    natural to read). Prompt format is an eval question later.
 2. **Bot manager:** phase 2 borrows one random bot (cheats disabled). Phase 3: our module owns
