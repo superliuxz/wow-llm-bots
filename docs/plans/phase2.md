@@ -53,10 +53,10 @@ socket and two lock-protected queues. Nothing in the module ever waits on the ha
    disabled). Our own bot manager replaces RandomPlayerbotMgr in phase 3.
 
 ### B. Harness `harness/` (separate process, Google/Chromium style, deps from third_party/)
-1. CMake project into `out/harness`; links Abseil, libevent, cpp-httplib, nlohmann/json, GoogleTest.
-2. `base/`: SequencedTaskRunner, ThreadPool, PostTask / PostTaskAndReplyWithResult,
-   OnceCallback / RepeatingCallback (absl::AnyInvocable), WeakPtrFactory. Unit-tested.
-3. `net/`: libevent IO thread, Unix socket client with reconnect + newline-JSON framing.
+1. CMake project into `out/harness`; links `common/` (wlb_base, wlb_net), Abseil, cpp-httplib, nlohmann/json, GoogleTest.
+2. `base/` and `net/` now live in the shared `common/` library (done, see below), used by both
+   the server module and the harness.
+3. (in `common/net/`) Unix socket client with reconnect + newline framing.
 4. `llm/`: llama-server client (cpp-httplib on the thread pool, results posted back),
    per-bot slot pinning (keep each bot's prompt prefix cached), timeouts.
 5. `brain/`: `decide(snapshot) -> Decision` (the single entry point used live and by evals):
@@ -82,6 +82,22 @@ socket and two lock-protected queues. Nothing in the module ever waits on the ha
 ## Rough size
 A: ~1-1.5k lines C++. B: ~2-3k lines C++ plus tests. C/D: small. Build A first, against a
 tiny fake harness (netcat-level), then B.
+
+## Shared C++ library `common/` (built 2026-11-14)
+Both ends of the socket use the same Chromium-style code (user decision: no std::thread /
+std::shared_ptr / Boost.Asio threading in our code; follow what Chromium does):
+- `base/`: PlatformThread (pthreads); Thread with Options{MessagePumpType::DEFAULT | IO};
+  MessagePumpDefault (condvar) and MessagePumpEpoll (= MessagePumpForIO: epoll + eventfd,
+  epoll_pwait2 timeouts) with WatchFileDescriptor / FdWatchController / FdWatcher via
+  CurrentIOThread::Get(); TaskQueue (SequencedTaskRunner, bound as current default for a
+  Thread's whole run); ThreadPool; PostTaskAndReplyWithResult; OnceCallback / RepeatingCallback /
+  BindOnce / BindRepeating (WeakPtr receivers); WeakPtr / WeakPtrFactory; RefCountedThreadSafe /
+  scoped_refptr / MakeRefCounted; TimeDelta / TimeTicks. Plain C++20 (AzerothCore modules are C++20).
+- `net/`: LineFramer, LineConnection (non-blocking fd, buffered writes, backpressure),
+  UnixSocketServer (one client, replace on reconnect), UnixSocketClient (auto-reconnect).
+- No third-party runtime deps (libevent dropped; modern Chromium uses epoll on Linux).
+- Tests: 24 GoogleTest cases; clean under ASan+UBSan and TSan (`tools/build-common.sh --asan|--tsan`).
+  MSan reports false positives from uninstrumented libstdc++; needs an MSan-built libc++ (later).
 
 ## Decisions (review 2026-11-14)
 1. **Wire format** module <-> harness: newline-delimited JSON over a Unix socket. The LLM never

@@ -1,0 +1,120 @@
+// Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
+
+#include "base/task_queue.h"
+
+#include <cstddef>
+#include <deque>
+#include <functional>
+#include <mutex>
+#include <optional>
+#include <queue>
+#include <utility>
+#include <vector>
+#include "base/callback.h"
+#include "base/ref_counted.h"
+#include "base/time.h"
+
+namespace base {
+namespace {
+thread_local const TaskQueue* g_running_queue = nullptr;
+}  // namespace
+
+// static
+scoped_refptr<TaskQueue> TaskQueue::Create() {
+  return scoped_refptr<TaskQueue>(new TaskQueue());
+}
+
+TaskQueue::ScopedBindToCurrentThread::ScopedBindToCurrentThread(
+    TaskQueue* queue)
+    : previous_queue_(g_running_queue), current_default_(queue) {
+  g_running_queue = queue;
+}
+
+TaskQueue::ScopedBindToCurrentThread::~ScopedBindToCurrentThread() {
+  g_running_queue = previous_queue_;
+}
+
+TaskQueue::TaskQueue() = default;
+TaskQueue::~TaskQueue() = default;
+
+bool TaskQueue::PostDelayedTask(OnceClosure task, TimeDelta delay) {
+  RepeatingClosure wakeup;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (shut_down_) {
+      return false;
+    }
+    if (!delay.is_positive()) {
+      immediate_.push_back(std::move(task));
+    } else {
+      delayed_.push(DelayedTask{TimeTicks::Now() + delay, next_sequence_++,
+                                std::move(task)});
+    }
+    wakeup = wakeup_;
+  }
+  if (wakeup) {
+    wakeup.Run();
+  }
+  return true;
+}
+
+bool TaskQueue::RunsTasksInCurrentSequence() const {
+  return g_running_queue == this;
+}
+
+std::vector<OnceClosure> TaskQueue::TakeReadyTasks() {
+  std::vector<OnceClosure> ready;
+  const TimeTicks now = TimeTicks::Now();
+  std::lock_guard<std::mutex> lock(mutex_);
+  while (!delayed_.empty() && delayed_.top().run_time <= now) {
+    ready.push_back(std::move(delayed_.top().task));
+    delayed_.pop();
+  }
+  for (OnceClosure& task : immediate_) {
+    ready.push_back(std::move(task));
+  }
+  immediate_.clear();
+  return ready;
+}
+
+size_t TaskQueue::RunPendingTasks() {
+  std::vector<OnceClosure> ready = TakeReadyTasks();
+  ScopedBindToCurrentThread bind(this);
+  for (OnceClosure& task : ready) {
+    std::move(task).Run();
+  }
+  return ready.size();
+}
+
+void TaskQueue::Shutdown() {
+  std::deque<OnceClosure> immediate;
+  std::priority_queue<DelayedTask, std::vector<DelayedTask>, std::greater<>>
+      delayed;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    shut_down_ = true;
+    immediate.swap(immediate_);
+    delayed.swap(delayed_);
+  }
+  // Pending tasks are destroyed here, outside the lock.
+}
+
+void TaskQueue::SetWakeupCallback(RepeatingClosure wakeup) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  wakeup_ = std::move(wakeup);
+}
+
+std::optional<TimeTicks> TaskQueue::NextDelayedRunTime() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (delayed_.empty()) {
+    return std::nullopt;
+  }
+  return delayed_.top().run_time;
+}
+
+size_t TaskQueue::PendingTaskCount() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return immediate_.size() + delayed_.size();
+}
+
+}  // namespace base
