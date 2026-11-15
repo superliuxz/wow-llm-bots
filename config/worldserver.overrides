@@ -15,3 +15,7 @@ Logger.chat.raid = 4,Chat
 Logger.chat.guild = 4,Chat
 Logger.chat.guild.officer = 4,Chat
 Logger.chat.channel = 4,Chat
+# No automated Dungeon Finder (decided, inspired by WoW Forever): groups form socially
+# via chat ("LF2M Deadmines"). Keep the Raid Browser (manual listing board) and
+# seasonal bosses. Mask: 1 dungeon finder, 2 raid browser, 4 seasonal bosses.
+DungeonFinder.OptionsMask = 6

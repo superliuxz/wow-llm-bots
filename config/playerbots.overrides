@@ -26,3 +26,5 @@ Playerbots.MaxRandomBotRandomizeTime = 31536000
 # (Default 10% active-alone + smart scaling made the test bot sleep ~90% of the time.)
 Playerbots.BotActiveAlone = 100
 Playerbots.botActiveAloneSmartScale = 0
+# Dungeon Finder is disabled server-wide; bots must form groups socially.
+Playerbots.RandomBotJoinLfg = 0
