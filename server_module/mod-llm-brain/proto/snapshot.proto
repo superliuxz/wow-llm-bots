@@ -389,6 +389,22 @@ message Unit {
     ROOTED = 13;
     DRUNK_SWAY = 14;
   }
+  enum Size {
+    SIZE_UNSPECIFIED = 0;
+    SMALL = 1;
+    MEDIUM = 2;
+    LARGE = 3;
+    HUGE = 4;
+  }
+  enum Detail {
+    // Nameplate-level (also: target, focus, party frames, tooltips).
+    DETAIL_UNSPECIFIED = 0;
+    NAMEPLATE = 1;
+    // Beyond name / nameplate range: only what the model shows (rel, kind, looks_like,
+    // size, activity, dead, visual_state, pack, raid_marker). Name, level, health and
+    // hostility only when hovered or targeted.
+    MODEL = 2;
+  }
   // Mobs standing together: pull one, get the pack.
   message Pack {
     uint32 id = 1;
@@ -427,6 +443,12 @@ message Unit {
   repeated Service services = 26 [(visibility) = HOVER];
   // Short NPC subtitle under the name, e.g. "<Weapon Merchant>".
   string subtitle = 27;
+  // What a player sees of the model without a nameplate: "boar", "troll in plate",
+  // "large dragon".
+  string looks_like = 28;
+  Size size = 29;
+  // How much of this unit the client shows (base.nearby only).
+  Detail detail = 35;
 
   // Exactly one of these may be set, by kind.
   PlayerPart player = 30;
@@ -936,12 +958,12 @@ message Doing {
   string detail = 3;
 }
 
+// Everything in the client's visibility set: no caps (the harness decides what the bot
+// notices). Units beyond name / nameplate range carry model-level fields only
+// (Unit.detail); beyond that range, units out of line of sight are left out.
 message Nearby {
-  // Up to 50, by salience.
   repeated Unit units = 1;
-  // Up to 20.
   repeated GameObject objects = 2;
-  // Up to 20.
   repeated Area areas = 3;
 }
 

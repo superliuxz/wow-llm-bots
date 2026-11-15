@@ -75,8 +75,10 @@ Messages (`snapshot.proto`): the module sends `ModuleMessage` (a `Snapshot`, or 
 - Proto3 JSON omits default values (false, 0, empty), so absence means false / zero.
 - Each snapshot is **complete** (not a diff). `ext` holds only the active extensions.
   `events` repeats every event since the previous snapshot (they were also sent live).
-- Size budget ~2-4 KB typical, hard cap 16 KB. Tooltips are sent in full only where a
-  decision needs them (§7); under pressure lists are truncated by salience.
+- No caps on content: the module sends everything the client could show (§4 `nearby`, §7).
+  Typical sizes: a few KB in the open world, up to ~50 KB in a busy city. The only hard limit
+  is the bridge's 1 MiB frame (the module drops the least salient `nearby` entries if a
+  snapshot would ever exceed it). Choosing what the bot notices is the harness's job.
 
 ## 3. Types
 
@@ -125,7 +127,7 @@ Event: one of chat | error | info | prompt | level_up | xp_gained | ... (§8)
 | `self` | **Self** (incl. `gcd_remaining_ms` from the GCD sweep, `auto_attack` melee/ranged, `in_cinematic`), incl. `indicators`: talent button flashing (unspent points), the damaged-armor figure (damaged/broken slots), calendar icon flashing, mail icon, free bag slots on the backpack | unit frame, buff bar, cast bar, main-screen cues |
 | `where` | `map`, `zone`, `subzone`, `position`, `facing`, `indoors`, `in_instance` | zone text |
 | `doing` | `{activity, since_s, detail}` | the player's own intent |
-| `nearby` | **units** (Unit/Player, up to 50), **objects** (GameObject, up to 20), **areas** (Area, up to 20) in the client's visibility set, by salience. Nameplate-level fields only (name, level, health, hostility, elite marker, quest marker, activity incl. patrolling, threat indicator, raid marker), plus what a player sees of the model: **`pack`** (mobs standing together: pull one, get the pack), **`visual_state`** (sheep, stun stars, ice block, sleeping, banished...), Questie **`quest_relevant`** icon; guild/race/services etc. on hover. Objects show `highlighted` (quest sparkle); items `starts_quest` | nameplates, highlighted objects, ground effects |
+| `nearby` | **units** (Unit/Player), **objects** (GameObject), **areas** (Area): everything in the client's visibility set (~100 yd, more in instances), **no caps** (the harness decides what the bot notices, §7). Detail follows the client (`detail`): **within name/nameplate range** (a per-bot UI setting, §6) the nameplate-level fields (name, level, health, hostility, elite marker, quest marker, activity incl. patrolling, threat indicator, raid marker, through walls with `in_los: false`); **beyond it** only what the model shows: `looks_like` ("boar", "troll in plate"), `size`, `activity`, `dead`, `visual_state`, `pack`, raid marker, position; name/level/health only when targeted or hovered. Beyond that range a unit **not in line of sight is left out** (a player can't see it). Plus what a player sees of the model: **`pack`** (mobs standing together: pull one, get the pack), **`visual_state`** (sheep, stun stars, ice block, sleeping, banished...), Questie **`quest_relevant`** icon; guild/race/services etc. on hover. Objects show `highlighted` (quest sparkle); items `starts_quest` | nameplates, unit models, highlighted objects, ground effects |
 | `ui` | `open_panels`, `hovering` | what the player has open / points at |
 | `tooltips` | one **Tooltipped** per hovered thing: tooltip lines + the full typed object (Item with stats and GearScore, Spell, Aura, Player with guild, Place with level range) + Questie line | tooltips |
 
@@ -194,9 +196,14 @@ Same extensions, different focus, like a player's UI layout:
 - **DPS:** `target` and `combat` cooldowns first; marker priority (skull, cross).
 - Class extras in `combat`/`pet`: combo points, runes, pet happiness, ammo, soul shards, totems.
 
-## 6. Addon loadout (per bot)
+## 6. Addon loadout and UI settings (per bot)
 
-Each bot has an addon list in its memory (`var/bots/<name>/addons.md`), chosen by its
+Each bot has UI settings, like a player's Interface options: **nameplates** on/off and their
+distance (20 yd default, up to 41), and **floating names** (players / NPCs). They decide how far
+`nearby` shows names and nameplate fields (§4). A new player often has the defaults; a
+veteran turns enemy nameplates on.
+
+Each bot also has an addon list in its memory (`var/bots/<name>/addons.md`), chosen by its
 personality and experience: a veteran raider runs DBM, Omen, Grid and GearScore; a new player
 has the default UI plus maybe Questie. Addon-backed content (Questie pins, Omen threat,
 Grid/VuhDo, Decursive highlights, DBM timers, GearScore values, Skada meters) is only
@@ -204,14 +211,20 @@ produced for bots that have the addon. Bots can install addons later ("someone t
 get DBM"). The default UI parts (quest log + native quest POI, party frames, target frame,
 tooltips...) are always available.
 
-## 7. Salience and budget
+## 7. Salience and attention (harness)
 
-Visibility already keeps snapshots small: open panels and tooltips only appear when the bot
-looks. If a snapshot still exceeds the cap, trim (lowest first): `world` < open panels
-(longest first) < `travel` < `minimap` places < `instance` < `battleground` < `interaction` <
-`trade_loot` < `vehicle` < `surroundings` < `quest_tracker` < `party`/`raid` < `target` <
-`action_bars` < `death` < `combat` < `encounter` < base. Within lists: hostile-and-targeting-me
-> casting-at-me > quest-related > interactable > other; nearest first.
+The module reports everything the client could show; it does not choose. Choosing what this
+bot **notices** is the harness's attention step, part of the variance layers (design.md):
+a distracted new player notices less than a veteran. When rendering a prompt the harness
+ranks `nearby` by salience: hostile-and-targeting-me > casting-at-me > quest-related >
+interactable > other; nearest first; and fits the prompt budget in this order (dropped
+first): `world` < open panels (longest first) < `travel` < `minimap` places < `instance` <
+`battleground` < `interaction` < `trade_loot` < `vehicle` < `surroundings` < `quest_tracker`
+< `party`/`raid` < `target` < `action_bars` < `death` < `combat` < `encounter` < base.
+
+**Line of sight** costs a ray cast against the map geometry, so the module checks it on a
+budget: a fixed number of casts per bot per tick, nearest units first, each result cached for
+a few seconds. Far units' `in_los` can be a few seconds old.
 
 ## 8. Events (from packets to the bot's session)
 
@@ -370,3 +383,8 @@ real player knows their junk and bag space from habit), but only sends what's vi
    windows, PvP panel and queues, world states, chat links, `/who` and ignore, all
    confirmation popups, roll / kicked / drunk / hearthstone events, stance and totem bars,
    runes, druid mana, weapon enchants, merchant buyback, inspect details.
+15. **No caps in the module** (rev 7): `nearby` carries everything in the client's
+   visibility set, with detail by distance as the client shows it (nameplate fields within
+   name/nameplate range, model-level fields beyond, nothing for far units out of line of
+   sight). Selection (attention, salience) is the harness's job, so evals and recordings see
+   what was really there.

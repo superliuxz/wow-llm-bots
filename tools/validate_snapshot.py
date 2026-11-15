@@ -4,7 +4,9 @@ Each file must parse as a wlb.snapshot.Snapshot in the canonical protobuf JSON m
 (unknown fields are errors), and must respect visibility:
   - fields marked [(visibility) = HOVER] are only set inside base.tooltips;
   - an open panel (ext field marked OPEN) is only present while base.ui.open_panels
-    lists it.
+    lists it;
+  - a nearby unit beyond name / nameplate range (detail MODEL) shows only model-level
+    fields.
 
 Usage: out/tools-venv/bin/python -I tools/validate_snapshot.py <proto_py_dir> <file.json>...
        (tools/validate-snapshots.sh compiles the proto and checks the examples)
@@ -36,9 +38,19 @@ def walk(msg, path, in_tooltip, errors):
             walk(item, f"{here}[{i}]" if fd.is_repeated else here, inside, errors)
 
 
+# What a player sees of a unit beyond name / nameplate range: the model only.
+MODEL_FIELDS = {"guid", "rel", "kind", "looks_like", "size", "detail", "activity", "dead",
+                "visual_state", "pack", "raid_marker", "lootable"}
+
+
 def check(snapshot):
     errors = []
     walk(snapshot, "$", False, errors)
+    for i, unit in enumerate(snapshot.base.nearby.units):
+        if unit.detail == pb.Unit.MODEL:
+            extra = sorted(fd.name for fd, _ in unit.ListFields() if fd.name not in MODEL_FIELDS)
+            if extra:
+                errors.append(f"$.base.nearby.units[{i}]: MODEL detail but shows {', '.join(extra)}")
     open_panels = {pb.Panel.Name(p) for p in snapshot.base.ui.open_panels}
     for fd, _ in snapshot.ext.ListFields():
         if field_visibility(fd) == opts.OPEN and fd.name.upper() not in open_panels:
