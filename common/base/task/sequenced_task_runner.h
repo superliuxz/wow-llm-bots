@@ -5,6 +5,7 @@
 
 #include <utility>
 #include "base/functional/callback.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 
@@ -12,7 +13,8 @@ namespace base {
 
 // Runs posted tasks one at a time, in posting order (delayed tasks in due-time
 // order). Held in scoped_refptr, like Chromium's.
-class SequencedTaskRunner : public RefCountedThreadSafe<SequencedTaskRunner> {
+class SequencedTaskRunner : public RefCountedThreadSafe<SequencedTaskRunner>,
+                            public RawPtrTarget {
  public:
   // Thread-safe. Returns false if the task runner no longer accepts tasks (the
   // task is then destroyed without running).
@@ -41,7 +43,7 @@ class SequencedTaskRunner : public RefCountedThreadSafe<SequencedTaskRunner> {
     ~ScopedCurrentDefault();
 
    private:
-    SequencedTaskRunner* previous_;
+    const raw_ptr<SequencedTaskRunner> previous_;
   };
 };
 

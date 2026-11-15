@@ -5,6 +5,7 @@
 
 #include <pthread.h>  // IWYU pragma: keep (pthread_mutex_t)
 
+#include "base/memory/raw_ptr.h"
 #include "base/thread_annotations.h"
 
 namespace base {
@@ -13,7 +14,7 @@ class ConditionVariable;
 
 // A non-recursive mutex, like Chromium's base::Lock. Annotated so that
 // -Wthread-safety checks GUARDED_BY data is only used with the lock held.
-class LOCKABLE Lock {
+class LOCKABLE Lock : public RawPtrTarget {
  public:
   Lock();
   Lock(const Lock&) = delete;

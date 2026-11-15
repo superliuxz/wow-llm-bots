@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_pump.h"
 #include "base/message_loop/message_pump_epoll.h"
@@ -67,7 +68,7 @@ class CurrentIOThread {
  private:
   friend class Thread;
   explicit CurrentIOThread(MessagePumpForIO* pump) : pump_(pump) {}
-  MessagePumpForIO* const pump_;
+  const raw_ptr<MessagePumpForIO> pump_;
 };
 
 }  // namespace base

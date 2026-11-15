@@ -5,6 +5,7 @@
 
 #include <pthread.h>  // IWYU pragma: keep (pthread_cond_t)
 
+#include "base/memory/raw_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
 
@@ -28,7 +29,7 @@ class ConditionVariable {
 
  private:
   pthread_cond_t cond_;
-  Lock* const user_lock_;
+  const raw_ptr<Lock> user_lock_;
 };
 
 }  // namespace base

@@ -32,6 +32,7 @@ Strict (safety reasons), use `common/base`:
 | `std::promise`, `std::future` | post a reply task (`PostTaskAndReplyWithResult`); block only in startup handshakes and tests, with `base::WaitableEvent` |
 | Boost.Asio, libevent, custom event loops | `base::Thread` with `MessagePumpType::IO` + `CurrentIOThread::Get()->WatchFileDescriptor(...)`; sockets in `common/net` |
 | shared state across threads | post tasks to the owning sequence (`SequencedTaskRunner::PostTask`) |
+| raw `T*` pointer **fields** (non-owning) | `base::raw_ptr<T>` (`base/memory/raw_ptr.h`); make the pointee a `base::RawPtrTarget` so destroying it while a `raw_ptr` still points to it crashes immediately ("dangling raw_ptr"); `base::MayBeDangling<T>` only for fields that dangle by design (with a comment); delete through one with `ClearAndDelete()`. Locals and parameters stay plain `T*`; owning pointers are `std::unique_ptr` / `scoped_refptr`. |
 
 Loosened (the reason doesn't apply to us):
 

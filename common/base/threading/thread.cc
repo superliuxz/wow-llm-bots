@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include "base/memory/raw_ptr.h"
 #include "base/message_loop/message_pump.h"
 #include "base/message_loop/message_pump_epoll.h"
 #include "base/task/task_queue.h"
@@ -28,7 +29,7 @@ class Thread::Delegate : public MessagePump::Delegate {
   }
 
  private:
-  TaskQueue* const queue_;
+  const raw_ptr<TaskQueue> queue_;
 };
 
 Thread::Thread(std::string name)

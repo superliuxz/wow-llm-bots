@@ -52,6 +52,7 @@ set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
 add_subdirectory("${WLB_ROOT}/third_party/googletest" googletest EXCLUDE_FROM_ALL)
 add_executable(wlb_common_unittests
   base/functional/callback_unittest.cc
+  base/memory/raw_ptr_unittest.cc
   base/task/task_queue_unittest.cc
   base/threading/thread_unittest.cc
   base/synchronization/waitable_event_unittest.cc

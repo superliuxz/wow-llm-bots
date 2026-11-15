@@ -2,9 +2,9 @@
 
 #include "base/message_loop/message_pump_epoll.h"
 
+#include <stdio.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
-#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -148,14 +148,14 @@ void MessagePumpEpoll::Dispatch(int fd, uint32_t events) {
     if (it == controllers_.end()) {
       return;  // Stopped by an earlier callback.
     }
-    FdWatchController* controller = it->second;
+    FdWatchController* controller = it->second.get();
     const bool ready =
         (controller->mode_ & mode) &&
         (error || (events & (mode == WATCH_READ ? EPOLLIN : EPOLLOUT)));
     if (!ready) {
       continue;
     }
-    FdWatcher* watcher = controller->watcher_;
+    FdWatcher* watcher = controller->watcher_.get();
     if (!controller->persistent_) {
       StopWatching(controller);
     }

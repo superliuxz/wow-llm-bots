@@ -5,6 +5,7 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 
 namespace base {
@@ -17,7 +18,7 @@ enum class MessagePumpType {
 // The loop a base::Thread runs, like Chromium's base::MessagePump. Run() calls
 // back into the delegate to do work and sleeps until ScheduleWork() or the
 // next delayed run time.
-class MessagePump {
+class MessagePump : public RawPtrTarget {
  public:
   class Delegate {
    public:

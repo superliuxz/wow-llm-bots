@@ -9,6 +9,7 @@
 #define COMMON_BASE_MEMORY_WEAK_PTR_H_
 
 #include <utility>
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 
 namespace base {
@@ -43,7 +44,8 @@ class WeakPtr {
   WeakPtr(T* ptr, scoped_refptr<internal::WeakFlag> flag)
       : ptr_(ptr), flag_(std::move(flag)) {}
 
-  T* ptr_ = nullptr;
+  // May dangle by design: only dereferenced while `flag_` says it's valid.
+  MayBeDangling<T> ptr_ = nullptr;
   scoped_refptr<internal::WeakFlag> flag_;
 };
 
@@ -73,7 +75,8 @@ class WeakPtrFactory {
   bool HasWeakPtrs() const { return flag_ && !flag_->HasOneRef(); }
 
  private:
-  T* const ptr_;
+  // MayBeDangling: the factory is a member of *ptr_ and dies with it.
+  const MayBeDangling<T> ptr_;
   scoped_refptr<internal::WeakFlag> flag_;
 };
 

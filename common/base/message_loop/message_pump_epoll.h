@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <unordered_map>
 
+#include "base/memory/raw_ptr.h"
 #include "base/message_loop/message_pump.h"
 
 namespace base {
@@ -23,7 +24,7 @@ class MessagePumpEpoll : public MessagePump {
   };
 
   // Receives readiness notifications. Runs on the pump's thread.
-  class FdWatcher {
+  class FdWatcher : public RawPtrTarget {
    public:
     virtual void OnFileCanReadWithoutBlocking(int fd) = 0;
     virtual void OnFileCanWriteWithoutBlocking(int fd) = 0;
@@ -33,7 +34,7 @@ class MessagePumpEpoll : public MessagePump {
   };
 
   // Owns one watch. Destroying it (or StopWatchingFileDescriptor) stops it.
-  class FdWatchController {
+  class FdWatchController : public RawPtrTarget {
    public:
     FdWatchController() = default;
     FdWatchController(const FdWatchController&) = delete;
@@ -45,8 +46,8 @@ class MessagePumpEpoll : public MessagePump {
 
    private:
     friend class MessagePumpEpoll;
-    MessagePumpEpoll* pump_ = nullptr;
-    FdWatcher* watcher_ = nullptr;
+    raw_ptr<MessagePumpEpoll> pump_ = nullptr;
+    raw_ptr<FdWatcher> watcher_ = nullptr;
     int fd_ = -1;
     int mode_ = 0;
     bool persistent_ = false;
@@ -80,7 +81,7 @@ class MessagePumpEpoll : public MessagePump {
   bool quit_ = false;
   // Watched fd -> its controller. Looked up at dispatch time, so a controller
   // destroyed by an earlier callback in the same epoll batch is never touched.
-  std::unordered_map<int, FdWatchController*> controllers_;
+  std::unordered_map<int, raw_ptr<FdWatchController>> controllers_;
 };
 
 using MessagePumpForIO = MessagePumpEpoll;
