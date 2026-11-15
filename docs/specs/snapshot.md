@@ -1,6 +1,6 @@
 # Bot perception: the snapshot spec
 
-Status: **agreed, revision 4** (2026-11-15). The exact field-level contract is the JSON Schema
+Status: **agreed, revision 5** (2026-11-15). The exact field-level contract is the JSON Schema
 [`snapshot.schema.json`](snapshot.schema.json) (types inherit with `allOf`); examples in
 [`examples/`](examples/), checked by `tools/validate-snapshots.sh`. This document explains it. Everything a bot's brain decides is based on this.
 
@@ -12,11 +12,18 @@ Status: **agreed, revision 4** (2026-11-15). The exact field-level contract is t
    of this bot's addons) where a human could see this?* If yes, it belongs here, in the
    extension for that UI place; if no, it doesn't, however useful it would be. The one
    deliberate stand-in is `surroundings`, which approximates the 3D view itself.
-2. **A base view plus extensions**, like the real UI: a base screen everyone has, and panels
-   or addons that appear in certain situations. **Always-on** extensions (`map`,
-   `objectives`, `inventory`, `character`, `world`) model what a player keeps glancing at;
-   **conditional** ones (party frames, raid grid, boss timers, an open vendor window...)
-   attach while their situation applies.
+2. **Three visibility levels**, like a real player's screen. Every field is tagged
+   (`x-visibility` in the schema):
+   - **glance**: on screen without doing anything (unit frames, nameplates, minimap, quest
+     tracker, action bars, buff icons, chat, red error text, flashing UI cues, and the frames
+     that appear in a situation: target, party, raid grid, boss timers, an open vendor...);
+   - **open**: inside a panel the bot must open (bags, world map, quest log, character,
+     spellbook, talents, reputation, skills, social, calendar);
+   - **hover**: inside a tooltip of something the bot points at (item stats, spell and buff
+     descriptions, a player's guild, a zone's level range).
+   Glance content is always sent; open panels only while open; tooltips only while hovered
+   (§9 `open` / `close` / `hover`). So a bot has to *notice* full bags or *hover* a drop to
+   see whether it's an upgrade, like a person; and prompts stay small.
 3. **Built from the client's own information**, not server internals:
    - **Events** come from the packets the server sends the bot's session (AzerothCore's
      `ServerScript::OnPacketSent`, which fires for client-less sessions).
@@ -34,7 +41,10 @@ Status: **agreed, revision 4** (2026-11-15). The exact field-level contract is t
 
 - The module streams one snapshot per attached bot every `LlmBrain.SnapshotIntervalMs`
   (1 s), plus **events immediately**. Nothing is stored server-side.
-- The harness keeps only the **latest snapshot per bot** in memory.
+- The harness keeps the **latest snapshot per bot** in memory, plus **remembered views**: the
+  last-seen contents of panels the bot has since closed, tooltips it hovered, and a rolling
+  chat history, each with its age ("bags, seen 40 s ago"). These are rendered into prompts as
+  memory, not as live state; the snapshot itself is only what's on screen now.
 - On disk: the snapshot behind each **decision** (with prompt, reply, choice, latency) in
   `var/bots/<name>/events/<date>.jsonl`; optional full recording to `out/recordings/`
   (debug only; ~8-9 GB/day at 50 bots).
@@ -42,7 +52,7 @@ Status: **agreed, revision 4** (2026-11-15). The exact field-level contract is t
 ```json
 {"type":"snapshot","bot":"Dezlu","seq":1234,"t":123456789,
  "base":{...},
- "ext":{"map":{...},"objectives":{...},"inventory":{...},"character":{...},"world":{...},"party":{...}},
+ "ext":{"minimap":{...},"quest_tracker":[...],"action_bars":[...],"world":{...},"party":{...},"bags":{...}},
  "events":[...],
  "options":[...]}
 {"type":"event","bot":"Dezlu","seq":1235,"t":123456790,"event":{...}}
@@ -94,54 +104,65 @@ Cast {spell (Spell), remaining_ms, interruptible, target, channeled}
 Event {kind, ...}   (§8)
 ```
 
-## 4. Base view (always present)
-
-What's on screen with nothing open.
+## 4. Base view (glance, always present)
 
 | Block | Fields | Client equivalent |
 |---|---|---|
-| `self` | **Self** | unit frame, buff bar, cast bar, minimap mail icon |
-| `where` | `map`, `zone`, `subzone`, `position`, `facing`, `indoors`, `in_instance` | minimap, zone text |
-| `doing` | `{activity, since_s, detail}` (do_quest + title, grind + area, rest, travel...) | the player's own intent |
-| `nearby` | **units** (Unit/Player, up to 50), **objects** (GameObject, up to 20), **areas** (Area, up to 20), all in the client's visibility set, sorted by salience. `threat_status` is the default UI's threat indicator (Omen adds numbers). Gathering nodes appear as the client shows them (and on the minimap only with tracking, see `map.tracked`) | nameplates, tooltips, highlighted objects, spell effects on the ground |
-
-Everything else is an extension.
+| `self` | **Self**, incl. `indicators`: talent button flashing (unspent points), the damaged-armor figure (damaged/broken slots), calendar icon flashing, mail icon, free bag slots on the backpack | unit frame, buff bar, cast bar, main-screen cues |
+| `where` | `map`, `zone`, `subzone`, `position`, `facing`, `indoors`, `in_instance` | zone text |
+| `doing` | `{activity, since_s, detail}` | the player's own intent |
+| `nearby` | **units** (Unit/Player, up to 50), **objects** (GameObject, up to 20), **areas** (Area, up to 20) in the client's visibility set, by salience. Nameplate-level fields only (name, level, health, hostility, elite marker, quest marker, activity, threat indicator); guild/race/services etc. on hover | nameplates, highlighted objects, ground effects |
+| `ui` | `open_panels`, `hovering` | what the player has open / points at |
+| `tooltips` | one **Tooltipped** per hovered thing: tooltip lines + the full typed object (Item with stats and GearScore, Spell, Aura, Player with guild, Place with level range) + Questie line | tooltips |
 
 ## 5. Extensions
 
 An extension that mirrors an addon (or the addon-provided part of one) is only present if
 the bot has that addon in its **loadout** (§6).
 
-### Always-on
+### Glance: always on screen
 
 | Extension | Content | Mirrors |
 |---|---|---|
-| `map` | The overview from glancing at the map: current `zone {name, level_range}` and position; **objective locations** from `objectives`; nearby **places** (Place: towns, camps, flight masters, innkeeper, graveyard, dungeon entrances, campfires); zones bordering this one with their `level_range`; party members and corpse marker; **`tracked`**: minimap blips from active tracking (Find Herbs, Find Minerals, Track Beasts...). With **Questie**: quest givers with available quests, and mob/item spawn areas for objectives | world map, minimap (+ **Questie** pins) |
-| `objectives` | Everything the bot is working towards: `{kind, title, progress, done, where {place, dir, dist_yd}, source}`. **Quests** (`source: quest`): from the quest log, objectives `{text, have, need}`, `complete`, `failed`, `daily`, `timer_s` (timed quests), `escort` (the escorted unit), `where` from quest POI. **Self-set goals** (`source: goal`, set by the brain with `set_goal`, §9): `sell` (items, AH or vendor), `buy`, `train`, `repair`, `learn_profession`, `reach_level`, `travel_to`, `meet`, `farm` (item x count)...; the module fills in progress (bags, level, gold, skill) and `where` (nearest auctioneer / trainer / vendor / place) | quest tracker + the player's to-do list |
-| `inventory` | **Full bag contents** (Item list with slots); `free_slots/total`; **equipped gear** (Item per slot, with durability and GearScore); total GearScore (with GearScore); ammo; hearthstone (Item, ready/bind location) | bags, character pane, **GearScore** |
-| `character` | **unspent talent points**, talent spec summary (points per tree, key talents); **skills**: professions and secondary skills `{name, skill, max}`, riding, weapon skills; reputations with relevant factions `{faction, standing, value}`; known flight paths count; rested state | talent pane, skills/reputation tabs |
-| `world` | `game_time` (day/night), `session_minutes`, `daily_reset_in_s`, zone PvP status, server messages pending (shutdown countdown) | clock, session |
+| `minimap` | zone, subzone, **clock**; places within minimap range; quest **objective areas** (native since 3.3); **tracked** blips (Find Herbs, Track Beasts...); party dots; corpse arrow | minimap |
+| `quest_tracker` | watched quests, up to the client's tracking limit (QuestObjective: progress, `where`, `daily`, `timer_s`, `escort`) **plus the bot's own goals** (Goal, set with `set_goal`: sell / buy / train / repair / learn_profession / reach_level / travel_to / meet / farm; progress and `where` filled in by the module). Goals are the bot's own to-do list, always in mind | quest tracker + the player's to-do list |
+| `action_bars` | Ability per button: `cooldown_remaining_s`, `usable`, `in_range` (vs target), charges; tooltips on hover | action bars |
+| `world` | `session_minutes`, `daily_reset_in_s`, zone PvP status, pending server messages | session, server notices |
 
-### Conditional
+### Glance: situational frames (on screen while the situation lasts)
 
 | Extension | Active when | Content | Mirrors |
 |---|---|---|---|
-| `target` | has a target (and `focus` if set) | Unit (with all its auras and its `activity`), raid marker | target / focus frames |
-| `combat` | in combat | attackers (Unit, `targeting_me`), duel opponent, my **threat** on each (**Omen**), **abilities** (Spell list of what's on my bars: cooldowns, usable, in range), resources (combo points, runes), recent combat summary (hits taken/dealt by whom, incoming casts) | action bars, **Omen**, scrolling combat text |
-| `party` | in a party (not raid) | leader; members (Unit with `role`, `power_pct`, `target`, `auras` incl. `dispellable_by_me`, offline); buffs missing that I can give; loot method; raid markers | party frames (+ **Decursive** dispel highlights) |
-| `raid` ("grid") | in a raid | compact grid by subgroup: members `{name, class, role, health_deficit, dead, in_range, in_los, aggro, dispellable_by_me, target}`; main tanks; raid markers | **Grid / VuhDo** |
-| `encounter` | engaged with a boss | boss Unit (`health_pct`, `activity`), `phase`, **DBM** timers and warnings `{name, remaining_s}` | **DBM** |
-| `instance` | inside a dungeon or raid | `name, difficulty, size`, bosses `{name, killed}`, lockout, entrance location (for corpse runs from inside) | instance info, raid info |
-| `death` | dead or ghost | `corpse {dir, dist_yd}`, `can_resurrect_in_s`, `spirit_healer {dir, dist_yd}`, pending resurrect offers | death UI, corpse arrow |
-| `vehicle` | controlling or riding a vehicle | vehicle Unit, its health/power, its abilities (Spell list), seats | vehicle UI |
-| `interaction` | a window is open | **merchant** (Item list with prices, buyback), **trainer** (Spell list with cost, learnable), **quest giver** (quest text, objectives, rewards as Items, choices), **flight map** (destinations with cost), **bank**, **mail** (letters, attached Items/money, COD), **auction house** (my auctions, search results / prices for items I'm selling or buying), **tradeskill** (recipes `{name, reagents [{Item, have, need}], skillup_color, can_craft}`), **gossip** (dialog options), **inspect** (another player's equipped Equipment and GearScore), **item_text** (books, letters, notes), **raid_browser** (listings) | the open window |
-| `trade_loot` | trade window, loot window or loot roll open | trade contents both sides (Items, money); lootable Items; roll `{Item, roll_id, time_left_s}` | trade / loot / roll frames |
-| `travel` | travelling, or no quest target nearby | known flight paths, nearest flight master, hearthstone, mount, transports (zeppelin/boat: where they go, when they leave) | world map, flight map, schedules |
-| `pet` | has a pet / totems / minion | pet Unit (`happiness` for hunters, abilities on autocast); shaman totems active + timers | pet frame, totem bar |
-| `social` | idle in a city/town, or a social event | friends online; `guild {name, rank, motd, online}`; **`calendar`** (events and my sign-up status: guild raid nights); LFG listings ("LF2M Deadmines") | friends list, guild panel, calendar, chat channels |
-| `environment` | breath, fatigue or falling active | `breath_s`, `fatigue_s`, `falling {height_yd}` | mirror timers |
-| `battleground` | in a battleground | score, objectives (Place + owner), flag carriers, time remaining | battleground UI |
-| `surroundings` | stuck, `path_failed`, or in tight terrain | what a human sees in 3D, computed from the navmesh/vmaps: `walkable` directions, `obstacles` (wall, slope, drop, water, ledge, opening, door... with dir/dist/height), the `goal` direction, a short `description`, and optionally a synthetic top-down `image` (rendered from map data, no game client) for a vision model | the 3D view |
+| `target` | has a target (and `focus`) | Unit with auras (debuff borders show dispel type) and `activity`, raid marker | target / focus frames |
+| `combat` | in combat | attackers, duel opponent, my **threat** per enemy (**Omen**), resources (combo points, runes), recent combat summary | **Omen**, combat text |
+| `party` | in a party | leader; GroupMembers (health/power, `target`, debuffs incl. `dispellable_by_me`); missing buffs I can give; loot method; markers | party frames (+ **Decursive**) |
+| `raid` ("grid") | in a raid | compact grid: health deficits, aggro, range/LoS, `dispellable_by_me`, targets; main tanks; markers | **Grid / VuhDo** |
+| `encounter` | engaged with a boss | Boss (`health_pct`, `phase`, `activity`), **DBM** timers and warnings | **DBM** |
+| `instance` | in a dungeon/raid | name, difficulty, size, bosses killed, lockout, entrance | instance info |
+| `death` | dead or ghost | corpse, resurrect timer, spirit healer, resurrect offers | death UI |
+| `vehicle` | in a vehicle | Vehicle with its abilities and seats | vehicle UI |
+| `interaction` | a window is open | merchant, trainer, quest dialog, gossip, flight map, bank, mail, auction house, tradeskill, inspect, item text, raid browser (Items/Spells inside carry hover-level details only when hovered) | the open window |
+| `trade_loot` | trade / loot / roll open | trade both sides, loot, roll | trade / loot / roll frames |
+| `travel` | travelling | known flight paths, nearest flight master, mount, transports | flight map, schedules |
+| `pet` | has a pet / totems | Pet (happiness, autocast), totems | pet frame, totem bar |
+| `environment` | breath / fatigue / falling | timers, fall height | mirror timers |
+| `battleground` | in a battleground | score, objectives, flag carriers, time | battleground UI |
+| `surroundings` | stuck, `path_failed`, tight terrain | walkable directions, obstacles, goal direction, description, optional synthetic top-down image | the 3D view |
+
+### Open panels (only while the bot has them open)
+
+| Panel | Content | Auto-opens with |
+|---|---|---|
+| `bags` | every Item (bag slot, count, quality, kind, usable, cooldown); free/total slots; hearthstone | merchant, bank, mail, trade, auction house |
+| `map` | world map: Places (towns, flight masters, graveyards, dungeons, zone exits), bordering zones, objective areas, **Questie** pins; zone level ranges on hover | - |
+| `character` | equipped Equipment (durability, stats), total GearScore, character stats | - |
+| `quest_log` | all quests with description, objectives, rewards | quest giver dialog |
+| `spellbook` | all known Abilities | trainer |
+| `talents` | unspent points, points per tree, talents | - |
+| `skills` | professions, secondary skills, riding, weapon skills | tradeskill window |
+| `reputation` | factions and standing | - |
+| `social` | friends online, guild (name, rank, MOTD, online), LFG listings | - |
+| `calendar` | events and my sign-up status (guild raid nights) | - |
 
 ### Role and class flavors
 Same extensions, different focus, like a player's UI layout:
@@ -164,14 +185,12 @@ tooltips...) are always available.
 
 ## 7. Salience and budget
 
-Priority when the snapshot must shrink (lowest trimmed first):
-`world` < `social` < `travel` < `map` (nearest places first) < `character` <
-`inventory` (notable items first: quest, consumables, upgrades, junk total) < `pet` <
-`instance` < `battleground` < `objectives` < `interaction` < `trade_loot` < `vehicle` <
-`surroundings` < `party`/`raid` <
-`target` < `death` < `combat` < `encounter` < base.
-Within lists: hostile-and-targeting-me > casting-at-me > quest-related > interactable >
-other; nearest first. Tooltips are dropped before entries are.
+Visibility already keeps snapshots small: open panels and tooltips only appear when the bot
+looks. If a snapshot still exceeds the cap, trim (lowest first): `world` < open panels
+(longest first) < `travel` < `minimap` places < `instance` < `battleground` < `interaction` <
+`trade_loot` < `vehicle` < `surroundings` < `quest_tracker` < `party`/`raid` < `target` <
+`action_bars` < `death` < `combat` < `encounter` < base. Within lists: hostile-and-targeting-me
+> casting-at-me > quest-related > interactable > other; nearest first.
 
 ## 8. Events (from packets to the bot's session)
 
@@ -192,35 +211,50 @@ other; nearest first. Tooltips are dropped before entries are.
 ## 9. Options and commands
 
 **Options:** numbered actions computed in C++ from base + extensions, phrased as player
-intents; each extension contributes its own (`objectives`: accept / turn in / go to an
+intents; each extension contributes its own (`quest_tracker`: accept / turn in / go to an
 objective or goal; `interaction`: buy / sell junk / repair / learn spells / craft / post an
 auction; `death`: release / run to corpse / spirit healer / "Stuck"; `trade_loot`: need /
-greed / pass; `character`: spend talent points; prompts: accept / decline; `vehicle`: its
+greed / pass; `indicators.talent_points_unspent` / `talents`: spend talent points; prompts: accept / decline; `vehicle`: its
 abilities). Always includes `Keep doing what I'm doing`. The brain answers with a number.
 
-**Commands** (not options): `set_goal {kind, params}` / `clear_goal {id}` (the bot's own
-to-do list in `objectives`); `say {channel, text, to}` (chat replies are generated
-separately from decisions).
+**Commands** (not options):
+- `open {panel}` / `close {panel}`: open or close a panel (§5). Panels also auto-open with
+  their windows, and close on their own when the window closes, as in the client.
+- `hover {kind, id/name}`: point at an item, spell, aura, unit, place or quest; its tooltip
+  is in `tooltips` for the next few snapshots.
+- `ah_search {query}`: search the auction house (results appear in `interaction`).
+
+**Habits:** routine looking is not a brain decision. Each bot has habits (from its
+personality, in `var/bots/<name>/habits.md`) that the harness runs automatically, without an
+LLM call, e.g. hover new loot, glance at the map on entering a zone, open bags at a vendor,
+close bags when combat starts, check the calendar on login. The brain can still open and
+hover deliberately.
+- `set_goal {goal_kind, params}` / `clear_goal {id}`: the bot's own to-do list in
+  `quest_tracker`.
+- `say {channel, text, to}`: chat (generated separately from decisions).
+
+The module still uses all game data internally to compute options and goal progress (a
+real player knows their junk and bag space from habit), but only sends what's visible.
 
 ## 10. Scene checklist (each becomes an e2e/eval check)
 
 | Scene | Must be present |
 |---|---|
-| Kill quest | `objectives` quest with counts and `where`; mobs with `tapped_by_other`, `activity` |
-| Use-item quest | quest item in `inventory` with its "Use:" tooltip line and `cooldown_s` |
-| Timed / escort quest | `objectives.timer_s`; escorted unit (`activity: following/moving`, health) |
-| Combat | `combat` (attackers, abilities with cooldowns, threat if Omen); `target` with its cast in `activity` |
+| Kill quest | `quest_tracker` quest with counts and `where`; mobs with `tapped_by_other`, `activity` |
+| Use-item quest | quest item (open `bags`) and, when hovered, its "Use:" tooltip line; `action_bars`/item `cooldown_s` |
+| Timed / escort quest | `quest_tracker` `timer_s`; escorted unit (`activity: following/moving`, health) |
+| Combat | `combat` (attackers, threat if Omen), `action_bars` cooldowns; `target` with its cast in `activity` |
 | Caster pack | every caster's `activity.casting` in `nearby` with `interruptible` |
 | Ground effect | `nearby.areas` entry with `inside_me` |
 | Stunned / feared | `self.control` |
-| Low health after a fight | `self.health`, food/water Items in `inventory`, option `Rest` |
+| Low health after a fight | `self.health`, food/water in `action_bars` or open `bags`, option `Rest` |
 | Death (world and in instance) | `death` (corpse, spirit healer, timer); in instance: `instance.entrance` |
-| Town | NPC `services`; `inventory` (free slots, junk, durability); vendor / repair options |
-| Trainer | `interaction.trainer` Spells with cost; `character.unspent talent points` after level 10 |
-| Profession | `character.skills`; `interaction.tradeskill` recipes with reagents have/need; nodes only with skill |
-| Auction house | `interaction.auction_house` prices; later `auction_sold` event and `self.new_mail` |
-| Gear upgrade | looted Item with `gearscore_delta` and `upgrade` (GearScore loadout) |
-| Self-set goal | `set_goal sell` at AH -> `objectives` goal with progress and `where` = auctioneer, also on `map` |
+| Town | NPC services (hover or the open window); `indicators.bag_free_slots`, `durability_warning`; vendor / repair options; merchant auto-opens `bags` |
+| Trainer | `interaction.trainer` Spells with cost; `indicators.talent_points_unspent` after level 10 |
+| Profession | `skills` (open); `interaction.tradeskill` recipes with reagents have/need; nodes only with skill |
+| Auction house | `interaction.auction_house` prices; later `auction_sold` event and `indicators.new_mail` |
+| Gear upgrade | hovering the looted Item gives its tooltip with stats, `gearscore_delta`, `upgrade` (GearScore loadout) |
+| Self-set goal | `set_goal sell` at AH -> `quest_tracker` goal with progress and `where` = auctioneer |
 | Social prompts | `prompt` events + accept/decline options |
 | Chat | `chat` events incl. `at_me`, `from_dist_yd`, channels, system, raid_warning |
 | Red error text | `error` events |
@@ -229,21 +263,24 @@ separately from decisions).
 | Loot roll | `trade_loot` roll + need/greed/pass options |
 | Vehicle quest | `vehicle` with its abilities |
 | Travel | `travel` (flight paths, transports, hearthstone); `self.in_flight` / `on_transport` |
-| Orientation (any time) | `map` with position, zone `level_range`, objective locations, nearest town/graveyard |
-| Wrong zone level | `map.zone.level_range` and bordering zones' ranges |
+| Orientation (any time) | `minimap` (nearby places, objective areas, clock); open `map` for distant places |
+| Wrong zone level | open `map`, hover the zone: `level_range`; bordering zones |
 | Underwater | `environment.breath_s` |
 | Stuck | `path_failed` event; `doing.since_s` without progress; `surroundings` (walkable directions, obstacles, goal) |
 | Backstab / frontal cone | `relative_position.behind_it` / `facing_me` on the target |
 | Pulling without Omen | `threat_status` on units (default UI indicator) |
 | Fishing | the bobber GameObject with `state: splashing` |
-| Herbalism | `map.tracked` blips with Find Herbs on |
-| LFG "GS 5.5k?" | `gearscore` on players (GearScore); `interaction.inspect` |
-| Guild raid night | `social.calendar` with my sign-up status; `social.guild.motd` |
+| Herbalism | `minimap.tracked` blips with Find Herbs on |
+| LFG "GS 5.5k?" | hover a player: `gearscore` (GearScore); `interaction.inspect` |
+| Guild raid night | `indicators.calendar_invite_pending`; open `calendar` for sign-up; guild MOTD in `social` |
 | Daily quest | quest `daily: true`; `world.daily_reset_in_s` |
 | Battleground | `battleground` score, objectives, flag carriers |
 | Duel | `duel_started` / `duel_ended`; `combat.duel_opponent` |
 | Reading a book | `interaction.item_text` |
 | Events | `level_up`, `talent_point_gained`, `quest_complete`, `item_received`, `skill_up` |
+| Bags fill up | `error` "Inventory is full" and `indicators.bag_free_slots` 0, without opening bags |
+| Damaged gear | `indicators.durability_warning` (armor figure); exact values in open `character` |
+| Out-of-combat cooldowns | `action_bars` (always on screen) |
 
 ## 11. Decisions
 
@@ -263,3 +300,11 @@ separately from decisions).
 9. **Structured data, not screenshots:** bots have no client to render, images cost many more
    tokens, break prompt caching and get numbers wrong, and are hard to test. Exception: an
    optional synthetic top-down render in `surroundings` for spatial problems.
+
+10. **Visibility levels (glance / open / hover):** the bot sees what's on screen; panels and
+   tooltips need an action, like a person. Every field carries `x-visibility` in the schema.
+11. **Sounds** (aggro yells, spell sounds) mostly arrive as events already; a dedicated
+   sound channel is deferred.
+12. **Habits and remembered views:** routine looking (hover loot, check the map) is done by
+   per-bot habits in the harness without LLM calls; the harness remembers closed panels,
+   tooltips and chat with their age and renders them as memory.

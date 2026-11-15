@@ -1,0 +1,278 @@
+{
+ "type": "snapshot",
+ "bot": "Dezlu",
+ "seq": 530,
+ "t": 5023000,
+ "base": {
+  "self": {
+   "name": "Dezlu",
+   "kind": "player",
+   "race": "Troll",
+   "class": "Priest",
+   "gender": "male",
+   "level": 5,
+   "xp": 1039,
+   "xp_next": 1400,
+   "rested_xp": 0,
+   "health": 96,
+   "health_max": 118,
+   "power_type": "mana",
+   "power": 140,
+   "power_max": 210,
+   "state": "alive",
+   "in_combat": false,
+   "resting": false,
+   "control": {},
+   "money": 71,
+   "new_mail": false,
+   "auras": [
+    {
+     "name": "Power Word: Fortitude",
+     "harmful": false,
+     "remaining_s": 1640,
+     "dispel_type": "magic",
+     "caster": "me"
+    }
+   ],
+   "indicators": {
+    "talent_points_unspent": false,
+    "durability_warning": [],
+    "calendar_invite_pending": false,
+    "new_mail": false,
+    "bag_free_slots": 9
+   }
+  },
+  "where": {
+   "map": "Kalimdor",
+   "zone": "Durotar",
+   "subzone": "Valley of Trials",
+   "position": {
+    "x": -362,
+    "y": -4214,
+    "z": 56
+   },
+   "facing": 1.2,
+   "indoors": false,
+   "in_instance": false
+  },
+  "doing": {
+   "activity": "do_quest",
+   "since_s": 95,
+   "detail": "Sting of the Scorpid"
+  },
+  "nearby": {
+   "units": [
+    {
+     "name": "Scorpid Worker",
+     "kind": "npc",
+     "level": 3,
+     "level_color": "green",
+     "reaction": "hostile",
+     "classification": "normal",
+     "health_pct": 100,
+     "dist_yd": 28,
+     "dir": "S",
+     "height": "level",
+     "in_los": true,
+     "tapped_by_other": false,
+     "targeting_me": false,
+     "threat_status": "none",
+     "activity": {
+      "state": "moving"
+     },
+     "relative_position": {
+      "behind_it": false,
+      "facing_me": false
+     }
+    },
+    {
+     "name": "Gornek",
+     "kind": "npc",
+     "level": 10,
+     "reaction": "friendly",
+     "dist_yd": 64,
+     "dir": "NE",
+     "in_los": true,
+     "quest_marker": "?",
+     "services": [
+      "quest_giver"
+     ],
+     "activity": {
+      "state": "idle"
+     }
+    },
+    {
+     "name": "Gatda",
+     "kind": "player",
+     "class": "Rogue",
+     "race": "Orc",
+     "level": 4,
+     "reaction": "friendly",
+     "dist_yd": 40,
+     "dir": "W",
+     "in_los": true,
+     "activity": {
+      "state": "fighting",
+      "with": "Mottled Boar"
+     }
+    }
+   ],
+   "objects": [
+    {
+     "name": "Cactus Apple",
+     "kind": "quest_object",
+     "dist_yd": 15,
+     "dir": "E",
+     "usable": true
+    }
+   ],
+   "areas": []
+  },
+  "ui": {
+   "open_panels": [],
+   "hovering": [
+    {
+     "kind": "item",
+     "id": 2654,
+     "name": "Flimsy Chain Cloak"
+    }
+   ]
+  },
+  "tooltips": [
+   {
+    "ref": {
+     "kind": "item",
+     "id": 2654,
+     "name": "Flimsy Chain Cloak"
+    },
+    "tooltip": [
+     "Flimsy Chain Cloak",
+     "Binds when equipped",
+     "Back",
+     "5 Armor",
+     "Durability 16 / 16",
+     "Requires Level 3",
+     "GearScore: 14"
+    ],
+    "item": {
+     "name": "Flimsy Chain Cloak",
+     "id": 2654,
+     "kind": "equipment",
+     "slot": "back",
+     "quality": "poor",
+     "gearscore": 14,
+     "gearscore_delta": 14,
+     "upgrade": true,
+     "stats": {
+      "armor": 5
+     }
+    }
+   }
+  ]
+ },
+ "ext": {
+  "world": {
+   "session_minutes": 47
+  },
+  "minimap": {
+   "zone": "Durotar",
+   "subzone": "Valley of Trials",
+   "clock": "14:20",
+   "places": [
+    {
+     "name": "Valley of Trials",
+     "kind": "camp",
+     "dist_yd": 60,
+     "dir": "NE"
+    }
+   ],
+   "objective_areas": [
+    {
+     "name": "Sting of the Scorpid",
+     "kind": "landmark",
+     "dist_yd": 40,
+     "dir": "S"
+    }
+   ],
+   "tracked": []
+  },
+  "quest_tracker": [
+   {
+    "source": "quest",
+    "quest": "Sting of the Scorpid",
+    "title": "Scorpid Worker Tail",
+    "text": "Scorpid Worker Tail",
+    "progress": {
+     "have": 4,
+     "need": 10
+    },
+    "done": false,
+    "complete": false,
+    "where": {
+     "name": "south of the valley",
+     "kind": "landmark",
+     "dist_yd": 40,
+     "dir": "S"
+    }
+   },
+   {
+    "source": "goal",
+    "id": "g1",
+    "goal_kind": "train",
+    "title": "Learn level 6 spells",
+    "done": false,
+    "where": {
+     "name": "Ken'jai",
+     "kind": "trainer",
+     "dist_yd": 70,
+     "dir": "NE"
+    }
+   }
+  ],
+  "action_bars": [
+   {
+    "name": "Smite",
+    "cooldown_remaining_s": 0,
+    "usable": true,
+    "in_range": false
+   },
+   {
+    "name": "Lesser Heal",
+    "cooldown_remaining_s": 0,
+    "usable": true
+   },
+   {
+    "name": "Power Word: Shield",
+    "cooldown_remaining_s": 0,
+    "usable": true
+   }
+  ],
+  "trade_loot": {
+   "loot": [
+    {
+     "name": "Flimsy Chain Cloak",
+     "kind": "equipment",
+     "slot": "back",
+     "quality": "poor"
+    }
+   ]
+  }
+ },
+ "events": [
+  {
+   "kind": "chat",
+   "channel": "say",
+   "from": "Gatda",
+   "text": "lol these boars",
+   "at_me": false,
+   "from_dist_yd": 40
+  }
+ ],
+ "options": [
+  "Keep doing what I'm doing",
+  "Kill Scorpid Workers (S, 40 yd)",
+  "Pick up Cactus Apple (E, 15 yd)",
+  "Turn in at Gornek (NE, 64 yd)",
+  "Rest"
+ ]
+}
