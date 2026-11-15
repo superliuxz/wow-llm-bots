@@ -83,12 +83,14 @@ socket and two lock-protected queues. Nothing in the module ever waits on the ha
 A: ~1-1.5k lines C++. B: ~2-3k lines C++ plus tests. C/D: small. Build A first, against a
 tiny fake harness (netcat-level), then B.
 
-## Open questions for review
-1. **Protocol:** newline-delimited JSON over a Unix socket (simple, debuggable with `socat`).
-   Protobuf later only if it ever matters. OK?
-2. **Phase-2 bot:** keep one random-playerbot (cheats disabled) as the test bot, and build our
-   own bot manager in phase 3. OK?
-3. **Brain trigger cadence v0:** on events (whisper, activity finished) plus an idle timer
-   (every 60 s). OK, or should idle be slower?
-4. **Who writes the C++:** I can write it all, or split it (e.g. you take `base/`, since you
-   know the //base model best, and review the rest).
+## Decisions (review 2026-11-14)
+1. **Wire format** module <-> harness: newline-delimited JSON over a Unix socket. The LLM never
+   sees this JSON: the harness renders snapshots into compact plain-text prompts (fewer tokens,
+   natural to read). Prompt format is an eval question later.
+2. **Bot manager:** phase 2 borrows one random bot (cheats disabled). Phase 3: our module owns
+   bot lifecycle (character creation by each bot's brain, human-like login schedules, no cheats)
+   and RandomPlayerbotMgr is no longer used for our bots.
+3. **Triggers:** events (whisper, activity finished) + 60 s idle safety net. For testing: console
+   command `brain think <bot>` to force a decision, and a verbose decision log in the harness.
+4. **Authorship:** Claude writes the code in small reviewable commits (each builds and is tested);
+   the user reviews.
