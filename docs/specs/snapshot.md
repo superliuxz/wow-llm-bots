@@ -9,7 +9,7 @@ Status: **agreed** (2026-11-14). Everything a bot's brain decides is based on th
 2. **A base view plus extensions**, like the real UI: a base screen everyone has, and panels
    or addons that appear only in certain situations (quest log, party frames, raid grid,
    threat meter, boss timers...). **Conditional** extensions attach when their situation
-   applies and disappear when it ends; **always-on** extensions (`map`, `world`) model
+   applies and disappear when it ends; **always-on** extensions (`map`, `objectives`, `inventory`, `world`) model
    things a player keeps glancing at. A snapshot only carries what matters right now.
 3. **Built from the client's own information**, not server internals:
    - **Events** come from the packets the server sends the bot's session (AzerothCore's
@@ -34,7 +34,7 @@ Status: **agreed** (2026-11-14). Everything a bot's brain decides is based on th
 ```json
 {"type":"snapshot","bot":"Dezlu","seq":1234,"t":123456789,
  "base":{...},
- "ext":{"quests":{...},"party":{...}},
+ "ext":{"map":{...},"objectives":{...},"inventory":{...},"world":{...},"party":{...}},
  "events":[...],
  "options":[...]}
 {"type":"event","bot":"Dezlu","seq":1235,"t":123456790,"event":{...}}
@@ -54,7 +54,7 @@ What's on screen with nothing open.
 | `self` | name, race, class, gender, level; `xp`, `xp_next`, `rested_xp`; `health`/`health_max`; `power_type`, `power`/`power_max`; `state` (alive / dead at corpse / ghost); `in_combat`, `resting`, `mounted`, `swimming`; `casting {spell, remaining_ms}`; `auras` on self `{name, remaining_s, stacks, harmful}`; `money` (copper) | player unit frame, XP bar, buff bar, cast bar |
 | `where` | `map`, `zone`, `subzone`, `x,y,z`, `facing`, `indoors`, `in_instance` | minimap, zone text |
 | `doing` | `{activity, since_s, detail}` (do_quest + title, grind + area, rest, travel...) | the player's own intent |
-| `nearby` | units and objects in the client's visibility set, sorted by salience, capped (~20 units, ~10 objects). Units: `name, kind (npc/player/pet), level, level_color, reaction, classification (normal/elite/rare/boss), health_pct, dist_yd, dir (8-way + above/below), in_los, targeting_me, tapped_by_other, quest_marker (!, ?, gray !), services (vendor, class trainer, repair, innkeeper, flight master, banker, auctioneer, spirit healer...), dead, lootable`. Players add `class, in_my_group`. Objects: `name, kind (quest object, herb, ore, chest, mailbox, door...), dist_yd, dir, usable` | nameplates, tooltips, highlighted objects |
+| `nearby` | units and objects in the client's visibility set, sorted by salience, capped at **50 units and 20 objects**. Units: `name, kind (npc/player/pet), level, level_color, reaction, classification (normal/elite/rare/boss), health_pct, dist_yd, dir (8-way + above/below), in_los, targeting_me, tapped_by_other, quest_marker (!, ?, gray !), services (vendor, class trainer, repair, innkeeper, flight master, banker, auctioneer, spirit healer...), dead, lootable`. Players add `class, in_my_group`. Objects: `name, kind (quest object, herb, ore, chest, mailbox, door...), dist_yd, dir, usable` | nameplates, tooltips, highlighted objects |
 
 Everything else is an extension.
 
@@ -68,22 +68,22 @@ part of one) is only present if the bot has that addon in its **loadout** (§5).
 
 | Extension | Content | Mirrors |
 |---|---|---|
-| `map` | The spatial overview a player gets from glancing at the map: current zone and the bot's position in it; **quest objective areas** for tracked quests (`{quest, area_name, dir, dist_yd}`; native quest POI blobs since patch 3.3); nearby **places**: towns/camps, flight masters (known or not), innkeeper, graveyard, dungeon entrances, with dir/dist; party members and corpse markers on the map; zones bordering this one and their level ranges (from the client's map data). With **Questie**: quest givers with available quests and mob/item spawn areas for objectives | world map + minimap (+ **Questie** map pins) |
+| `map` | The spatial overview a player gets from glancing at the map: current zone and the bot's position in it; **objective locations** from `objectives` (quest objective areas: native quest POI blobs since patch 3.3; self-set goals: e.g. the auction house for "sell at AH"); nearby **places**: towns/camps, flight masters (known or not), innkeeper, graveyard, dungeon entrances, with dir/dist; party members and corpse markers on the map; zones bordering this one and their level ranges (from the client's map data). With **Questie**: quest givers with available quests and mob/item spawn areas for objectives | world map + minimap (+ **Questie** map pins) |
+| `objectives` | Everything the bot is working towards, each `{kind, title, progress, done, where {place, dir, dist_yd}, source}`. **Quest objectives** (`source: quest`): from the quest log, `{quest, text, have, need}`, `complete`, `failed`, where from quest POI. **Self-set goals** (`source: goal`): set by the brain with `set_goal` (§8) and tracked by the module, e.g. `sell` (items, at AH or vendor), `buy`, `train` (spells at the class trainer), `repair`, `learn_profession`, `reach_level`, `travel_to`, `meet` (a player), `farm` (item x count); the module fills in progress (from bags, level, gold...) and `where` (nearest auctioneer / trainer / vendor / place) | quest tracker + the player's own to-do list |
+| `inventory` | **Full bag contents**: per item `{name, count, quality, slot, kind (equipment/consumable/quest/trade_good/junk/container/other), bound (soulbound/BoE/none), vendor_value, usable, gearscore_delta (with GearScore)}`; `free_slots/total`; equipped gear per slot with `durability_pct` (+ worst item); hearthstone ready + bind location; money is in `self` | bags, character pane, **GearScore** |
 | `world` | `game_time` (day/night), `session_minutes`, zone PvP status | clock, session |
 
 ### Conditional
 
 | Extension | Active when | Content | Mirrors |
 |---|---|---|---|
-| `quests` ("missions") | quest log not empty | each quest: `title, level, objectives [{text, have, need, done}], complete, failed`; `nearest_objective {dir, dist_yd, area}` (where it is on the map: see `map`) | quest log + tracker |
 | `target` | has a target (and `focus` if set) | `name, level, reaction, classification, health_pct, casting {spell, remaining_ms, interruptible}, auras (mine on it), its target, raid marker` | target / focus frames |
 | `combat` | in combat | attackers (who, `targeting_me`), my threat on each (**Omen**), my usable abilities + cooldowns + range, resources (combo points, runes...), recent combat summary (hits taken/dealt, incoming casts) | action bars, cast bars, **Omen**, scrolling combat text |
 | `party` | in a party (not raid) | leader; members `name, class, level, role, health_pct, power_pct, dist_yd, in_los, dead, offline`; per member `auras` incl. **dispellable_by_me** debuffs, missing buffs I can give; loot method; raid markers | party frames (+ **Decursive**-like dispel highlights) |
 | `raid` ("grid") | in a raid | compact grid by subgroup: `name, class, role, health_deficit, dead, in_range/in_los, aggro, dispellable_by_me`; raid markers; main tanks; raid warnings | **Grid / VuhDo** raid frames |
 | `encounter` | engaged with a boss | boss `health_pct`, `phase`, **DBM** timers and warnings (`{name, remaining_s}`); boss emotes/yells | **DBM** |
 | `death` | dead or ghost | `corpse {dir, dist_yd}`, `can_resurrect_in_s`, `spirit_healer {dir, dist_yd}`, pending resurrect offers | death UI, corpse arrow |
-| `interaction` | a window is open (talking to an NPC/object) | merchant (items, prices, buyback), trainer (spells I can learn, cost), quest giver dialog (quest text, rewards), flight map (known destinations, cost), bank, mail, auction house | the open window |
-| `inventory` | bags nearly full, just looted, low durability, or in town | `free_slots/total`, junk items + value, consumables (food/water/potions), quest items, `durability_pct` + worst item, upgrades found (**GearScore** delta), hearthstone ready + bind location | bags, character pane, **GearScore** |
+| `interaction` | a window is open (talking to an NPC/object) | merchant (items, prices, buyback), trainer (spells I can learn, cost), quest giver dialog and quest log details (quest text, rewards), flight map (known destinations, cost), bank, mail, auction house | the open window |
 | `trade_loot` | trade window, loot window or loot roll open | trade contents both sides; lootable items; roll `{item, roll_id, time_left}` | trade / loot / roll frames |
 | `travel` | travelling or about to (no quest target nearby) | known flight paths, nearest flight master, hearthstone, mount available | world map, flight map |
 | `pet` | has a pet / totems / minion | pet `name, health_pct, happiness (hunter), abilities on autocast`; shaman totems active + timers | pet frame, totem bar |
@@ -113,8 +113,9 @@ the default UI and always available.
 ## 6. Salience and budget
 
 Priority when the snapshot must shrink (lowest dropped first):
-`world` < `social` < `travel` < `map` (trimmed to the nearest places first) < `inventory` <
-`pet` < `quests` < `interaction` <
+`world` < `social` < `travel` < `map` (trimmed to the nearest places first) <
+`inventory` (trimmed to notable items: quest, consumables, upgrades, junk total) < `pet` <
+`objectives` < `interaction` <
 `trade_loot` < `party`/`raid` < `target` < `death` < `combat` < `encounter` < base.
 Within lists: hostile-and-targeting-me > quest-related > interactable > other; nearest first.
 
@@ -134,21 +135,27 @@ Within lists: hostile-and-targeting-me > quest-related > interactable > other; n
 ## 8. Options
 
 Numbered actions computed in C++ from base + extensions, phrased as player intents; each
-extension contributes its own (`quests`: accept / turn in / go to objective; `interaction`:
+extension contributes its own (`objectives`: accept / turn in / go to an objective or goal; `interaction`:
 buy / sell junk / repair / learn spells; `death`: release / run to corpse / spirit healer /
 "Stuck"; `trade_loot`: need / greed / pass; prompts: accept / decline). Always includes
 `Keep doing what I'm doing`. The brain answers with a number; chat replies are generated
 separately.
 
+### Commands that aren't options
+Besides choosing an option, the brain can send `set_goal {kind, params}` / `clear_goal {id}`
+to keep its own to-do list in `objectives` (the module tracks progress and location), and
+`say {channel, text, to}` to talk.
+
 ## 9. Scene checklist (each becomes an e2e/eval check)
 
 | Scene | Must be present |
 |---|---|
-| Kill quest | `quests` with counts and `nearest_objective`; mobs with `tapped_by_other` |
+| Kill quest | `objectives` quest entry with counts and `where`; mobs with `tapped_by_other` |
 | Combat | `combat` (attackers, cooldowns, threat if Omen), `target` incl. its cast |
-| Low health after a fight | `self.health`, `inventory.consumables`, option `Rest` |
+| Low health after a fight | `self.health`, food/water in `inventory`, option `Rest` |
 | Death | `death` (corpse dir/dist, spirit healer, timer) + death options |
 | Town | NPC `services` in `nearby`; `inventory` (free slots, junk, durability); vendor/repair options |
+| Self-set goal | after `set_goal sell` at the AH: `objectives` goal with progress and `where` = nearest auctioneer (dir/dist), also on `map` |
 | Talking to a trainer | `interaction.trainer` with learnable spells and costs |
 | Social prompts | `prompt` events + accept/decline options |
 | Channels | `chat` events for general/trade/lfg/guild |
@@ -157,7 +164,7 @@ separately.
 | Raid | `raid` grid, `encounter` with DBM timers only if DBM is in the loadout |
 | Loot roll | `trade_loot` roll + need/greed/pass options |
 | Travel | `travel` (flight paths, hearthstone); `map` places with flight masters and bordering zones |
-| Orientation (any time) | `map` with the bot's position, objective areas for tracked quests, nearest town and graveyard |
+| Orientation (any time) | `map` with the bot's position, objective locations, nearest town and graveyard |
 | Underwater | `environment.breath_s` |
 | Events | `level_up`, `quest_complete`, `item_received` |
 
