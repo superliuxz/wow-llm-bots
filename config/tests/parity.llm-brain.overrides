@@ -1,4 +1,6 @@
-# Bot-manager parity test: phase 1a again (stock AI, no LLM), but with our bot manager in
-# charge instead of playerbots' random-bot manager. Same start as the phase 1 baseline: a
-# never-played level-1 Troll Priest in the Valley of Trials.
-LlmBrain.Bots = "Wozkaruy"
+# Bot-manager parity test: phase 1a again (stock AI, no LLM) with our bot manager in charge.
+# Testpriest is recreated from the fixture on every server start: a fresh level-1 Troll
+# Priest at the Valley of Trials start, the same start as the phase 1 baseline.
+LlmBrain.Bots = "Testpriest"
+LlmBrain.TestFixtures = "Testpriest=priest-l1-valley.pdump"
+LlmBrain.FixtureDir = "@ROOT@/tests/fixtures/characters"

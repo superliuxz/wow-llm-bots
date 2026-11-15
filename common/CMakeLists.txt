@@ -104,6 +104,8 @@ set(WLB_MODULE_SRC "${WLB_ROOT}/server_module/mod-llm-brain/src")
 add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/brain_bridge.cc"
   "${WLB_MODULE_SRC}/brain_bridge_unittest.cc"
+  "${WLB_MODULE_SRC}/config_parsing.cc"
+  "${WLB_MODULE_SRC}/config_parsing_unittest.cc"
   "${WLB_PROTO_ROOT}/proto/snapshot_unittest.cc")
 target_include_directories(llm_brain_unittests PRIVATE "${WLB_MODULE_SRC}")
 target_link_libraries(llm_brain_unittests PRIVATE wlb_net wlb_proto

@@ -30,7 +30,18 @@ for f in common/**/*.cc; do check "$f" -p out/common; done
 # its headers only include std and common/ headers.
 for f in server_module/**/*.h; do check "$f" -- "${FLAGS[@]}"; done
 for f in server_module/**/*.cc; do
-  case "$f" in *_unittest.cc) check "$f" -p out/common ;; *) check "$f" -p out/server ;; esac
+  case "$f" in
+    *_unittest.cc) check "$f" -p out/common ;;
+    */src/test/*)
+      # Test-only module code is only in out/server's compile commands for a
+      # test build (tools/build-server.sh --test).
+      if grep -q "${f#server_module/}" out/server/compile_commands.json; then
+        check "$f" -p out/server
+      else
+        echo "note: $f not checked (out/server is a production build)" >&2
+      fi ;;
+    *) check "$f" -p out/server ;;
+  esac
 done
 [ "$MODE" = --edit ] && clang-format -i common/**/*.h common/**/*.cc server_module/**/*.h server_module/**/*.cc
 [ $status = 0 ] && [ "$MODE" = --print=changes ] && echo "includes OK"

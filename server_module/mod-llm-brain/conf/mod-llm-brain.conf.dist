@@ -53,3 +53,25 @@ LlmBrain.SnapshotIntervalMs = 1000
 LlmBrain.CombatStrategies = "+boost,+dps assist,-threat"
 LlmBrain.NonCombatStrategies = "-follow,+grind,+new rpg"
 LlmBrain.DeadStrategies = "-follow"
+
+#
+#    LlmBrain.TestFixtures
+#        Description: TEST ONLY. Characters to reset at startup from player dumps, as
+#                     "Name=file.pdump,Name2=other.pdump" (files relative to
+#                     LlmBrain.FixtureDir). Each is erased and recreated before the bot
+#                     manager logs it in, so every test run starts from the same state.
+#                     Only characters on LlmBrain.TestAccount are ever erased; the account
+#                     is created if missing. Leave empty outside tests.
+#        Default:     ""
+#
+#    LlmBrain.FixtureDir
+#        Description: Directory of the fixture files (tests/fixtures/characters).
+#        Default:     ""
+#
+#    LlmBrain.TestAccount
+#        Description: Account that holds the test characters.
+#        Default:     "WLBTEST"
+
+LlmBrain.TestFixtures = ""
+LlmBrain.FixtureDir = ""
+LlmBrain.TestAccount = "WLBTEST"

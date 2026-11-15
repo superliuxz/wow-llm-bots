@@ -18,6 +18,13 @@
 #include "proto/snapshot.pb.h"
 #include "snapshot_builder.h"
 
+#if defined(LLM_BRAIN_TEST_HOOKS)
+#include <utility>
+#include <vector>
+
+#include "test/fixture_loader.h"
+#endif
+
 namespace llm_brain {
 namespace {
 
@@ -46,6 +53,22 @@ class LlmBrainWorldScript : public WorldScript {
     if (!config_.enabled) {
       return;
     }
+#if defined(LLM_BRAIN_TEST_HOOKS)
+    if (!config_.test_fixtures.empty()) {
+      std::vector<FixtureLoader::Fixture> fixtures;
+      for (const auto& [character, file] : config_.test_fixtures) {
+        fixtures.push_back({character, file});
+      }
+      fixture_loader_ = std::make_unique<FixtureLoader>(config_.test_account,
+                                                        std::move(fixtures));
+    }
+#else
+    if (!config_.test_fixtures.empty()) {
+      LOG_ERROR("module",
+                "mod-llm-brain: LlmBrain.TestFixtures ignored: production "
+                "build (test builds: tools/build-server.sh --test)");
+    }
+#endif
     bot_manager_ = std::make_unique<BotManager>(
         config_.bots, BotManager::Strategies{config_.combat_strategies,
                                              config_.non_combat_strategies,
@@ -72,7 +95,16 @@ class LlmBrainWorldScript : public WorldScript {
   }
 
   void OnUpdate(uint32 diff) override {
-    if (bot_manager_) {
+#if defined(LLM_BRAIN_TEST_HOOKS)
+    // Test fixtures are reset before the bot manager logs anyone in.
+    if (fixture_loader_ && fixture_loader_->Update()) {
+      fixture_loader_.reset();
+    }
+    const bool fixtures_pending = fixture_loader_ != nullptr;
+#else
+    const bool fixtures_pending = false;
+#endif
+    if (bot_manager_ && !fixtures_pending) {
       bot_manager_->Update(diff);
     }
     if (!bridge_) {
@@ -119,6 +151,9 @@ class LlmBrainWorldScript : public WorldScript {
   }
 
   Config config_;
+#if defined(LLM_BRAIN_TEST_HOOKS)
+  std::unique_ptr<FixtureLoader> fixture_loader_;
+#endif
   std::unique_ptr<BotManager> bot_manager_;
   std::unique_ptr<BrainBridge> bridge_;
   uint32 since_snapshot_ms_ = 0;

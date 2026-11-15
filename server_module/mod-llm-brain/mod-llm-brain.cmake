@@ -30,7 +30,7 @@ target_link_libraries(modules PRIVATE
 # program, and these objects link into AzerothCore binaries built without it
 # (mixing let lld pull our objects into dbimport for hardened std::string
 # instantiations). Hardening applies to common/ tests and the harness.
-file(GLOB WLB_MODULE_SOURCES "${CMAKE_CURRENT_LIST_DIR}/src/*.cc")
+file(GLOB_RECURSE WLB_MODULE_SOURCES "${CMAKE_CURRENT_LIST_DIR}/src/*.cc")
 list(FILTER WLB_MODULE_SOURCES EXCLUDE REGEX "_unittest\\.cc$")
 set_source_files_properties(${WLB_MODULE_SOURCES} PROPERTIES
   COMPILE_OPTIONS "-Wthread-safety;-Werror=thread-safety")
@@ -40,4 +40,14 @@ set_source_files_properties(${WLB_MODULE_SOURCES} PROPERTIES
 # from the `modules` target. common/CMakeLists.txt builds them as tests.
 get_target_property(WLB_MODULES_SOURCES modules SOURCES)
 list(FILTER WLB_MODULES_SOURCES EXCLUDE REGEX "/mod-llm-brain/.*_unittest\\.cc$")
+
+# Test-only code (src/test/, e.g. the fixture reset) is only compiled into test
+# builds of the server (tools/build-server.sh --test); production binaries
+# don't contain it.
+option(LLM_BRAIN_TEST_HOOKS "Compile mod-llm-brain's test-only code" OFF)
+if(LLM_BRAIN_TEST_HOOKS)
+  target_compile_definitions(modules PRIVATE LLM_BRAIN_TEST_HOOKS)
+else()
+  list(FILTER WLB_MODULES_SOURCES EXCLUDE REGEX "/mod-llm-brain/src/test/")
+endif()
 set_property(TARGET modules PROPERTY SOURCES ${WLB_MODULES_SOURCES})

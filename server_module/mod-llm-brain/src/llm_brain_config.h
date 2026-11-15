@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace llm_brain {
@@ -20,6 +21,10 @@ struct Config {
   std::string combat_strategies;
   std::string non_combat_strategies;
   std::string dead_strategies;
+  // Test only: characters reset from fixture files at startup, as
+  // (character, fixture file path) pairs, on `test_account`.
+  std::string test_account = "WLBTEST";
+  std::vector<std::pair<std::string, std::string>> test_fixtures;
 };
 
 // Reads LlmBrain.* options from the loaded worldserver config.
