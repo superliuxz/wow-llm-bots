@@ -1,18 +1,18 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
-#include "base/task_queue.h"
+#include "base/task/task_queue.h"
 
 #include <cstddef>
 #include <deque>
 #include <functional>
-#include <mutex>
 #include <optional>
 #include <queue>
 #include <utility>
 #include <vector>
-#include "base/callback.h"
-#include "base/ref_counted.h"
-#include "base/time.h"
+#include "base/functional/callback.h"
+#include "base/memory/ref_counted.h"
+#include "base/synchronization/lock.h"
+#include "base/time/time.h"
 
 namespace base {
 namespace {
@@ -40,7 +40,7 @@ TaskQueue::~TaskQueue() = default;
 bool TaskQueue::PostDelayedTask(OnceClosure task, TimeDelta delay) {
   RepeatingClosure wakeup;
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    AutoLock lock(lock_);
     if (shut_down_) {
       return false;
     }
@@ -65,7 +65,7 @@ bool TaskQueue::RunsTasksInCurrentSequence() const {
 std::vector<OnceClosure> TaskQueue::TakeReadyTasks() {
   std::vector<OnceClosure> ready;
   const TimeTicks now = TimeTicks::Now();
-  std::lock_guard<std::mutex> lock(mutex_);
+  AutoLock lock(lock_);
   while (!delayed_.empty() && delayed_.top().run_time <= now) {
     ready.push_back(std::move(delayed_.top().task));
     delayed_.pop();
@@ -91,7 +91,7 @@ void TaskQueue::Shutdown() {
   std::priority_queue<DelayedTask, std::vector<DelayedTask>, std::greater<>>
       delayed;
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    AutoLock lock(lock_);
     shut_down_ = true;
     immediate.swap(immediate_);
     delayed.swap(delayed_);
@@ -100,12 +100,12 @@ void TaskQueue::Shutdown() {
 }
 
 void TaskQueue::SetWakeupCallback(RepeatingClosure wakeup) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  AutoLock lock(lock_);
   wakeup_ = std::move(wakeup);
 }
 
 std::optional<TimeTicks> TaskQueue::NextDelayedRunTime() const {
-  std::lock_guard<std::mutex> lock(mutex_);
+  AutoLock lock(lock_);
   if (delayed_.empty()) {
     return std::nullopt;
   }
@@ -113,7 +113,7 @@ std::optional<TimeTicks> TaskQueue::NextDelayedRunTime() const {
 }
 
 size_t TaskQueue::PendingTaskCount() const {
-  std::lock_guard<std::mutex> lock(mutex_);
+  AutoLock lock(lock_);
   return immediate_.size() + delayed_.size();
 }
 

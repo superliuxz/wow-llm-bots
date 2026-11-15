@@ -1,6 +1,6 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
-#include "base/message_pump_epoll.h"
+#include "base/message_loop/message_pump_epoll.h"
 
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
@@ -8,11 +8,10 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <cstddef>
 #include <cstdint>
 
-#include "base/sanitizers.h"
-#include "base/time.h"
+#include "base/compiler_specific.h"
+#include "base/time/time.h"
 
 namespace base {
 namespace {
@@ -78,7 +77,7 @@ void MessagePumpEpoll::Run(Delegate* delegate) {
     const int n = epoll_pwait2(epoll_fd_, events, 64, timeout_ptr, nullptr);
     if (n > 0) {
       // MSan has no epoll_pwait2 interceptor; the kernel filled `events`.
-      MsanUnpoison(events, sizeof(events[0]) * static_cast<size_t>(n));
+      MSAN_UNPOISON(events, sizeof(events[0]) * static_cast<size_t>(n));
     }
     for (int i = 0; i < n; ++i) {
       if (events[i].data.fd == wake_fd_) {

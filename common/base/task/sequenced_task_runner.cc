@@ -1,7 +1,7 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
-#include "base/sequenced_task_runner.h"
-#include "base/ref_counted.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/memory/ref_counted.h"
 
 namespace base {
 namespace {

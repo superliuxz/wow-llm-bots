@@ -1,17 +1,17 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
-#ifndef COMMON_BASE_THREAD_H_
-#define COMMON_BASE_THREAD_H_
+#ifndef COMMON_BASE_THREADING_THREAD_H_
+#define COMMON_BASE_THREADING_THREAD_H_
 
 #include <memory>
 #include <string>
 
-#include "base/message_pump.h"
-#include "base/message_pump_epoll.h"
-#include "base/platform_thread.h"
-#include "base/ref_counted.h"
-#include "base/sequenced_task_runner.h"
-#include "base/task_queue.h"
+#include "base/memory/ref_counted.h"
+#include "base/message_loop/message_pump.h"
+#include "base/message_loop/message_pump_epoll.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/task_queue.h"
+#include "base/threading/platform_thread.h"
 
 namespace base {
 
@@ -72,4 +72,4 @@ class CurrentIOThread {
 
 }  // namespace base
 
-#endif  // COMMON_BASE_THREAD_H_
+#endif  // COMMON_BASE_THREADING_THREAD_H_

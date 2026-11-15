@@ -1,12 +1,12 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 
 #include <memory>
 #include <string>
 #include <utility>
 
-#include "base/weak_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "gtest/gtest.h"
 
 namespace base {

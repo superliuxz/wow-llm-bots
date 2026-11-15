@@ -1,17 +1,18 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
-#ifndef COMMON_BASE_THREAD_POOL_H_
-#define COMMON_BASE_THREAD_POOL_H_
+#ifndef COMMON_BASE_TASK_THREAD_POOL_H_
+#define COMMON_BASE_TASK_THREAD_POOL_H_
 
-#include <condition_variable>
 #include <cstddef>
 #include <deque>
-#include <mutex>
 #include <string>
 #include <vector>
 
-#include "base/callback.h"
-#include "base/platform_thread.h"
+#include "base/functional/callback.h"
+#include "base/synchronization/condition_variable.h"
+#include "base/synchronization/lock.h"
+#include "base/thread_annotations.h"
+#include "base/threading/platform_thread.h"
 
 namespace base {
 
@@ -31,13 +32,13 @@ class ThreadPool {
  private:
   void WorkerLoop();
 
-  std::mutex mutex_;
-  std::condition_variable cv_;
-  std::deque<OnceClosure> tasks_;
-  bool shutting_down_ = false;
+  Lock lock_;
+  ConditionVariable cv_{&lock_};
+  std::deque<OnceClosure> tasks_ GUARDED_BY(lock_);
+  bool shutting_down_ GUARDED_BY(lock_) = false;
   std::vector<PlatformThreadHandle> workers_;
 };
 
 }  // namespace base
 
-#endif  // COMMON_BASE_THREAD_POOL_H_
+#endif  // COMMON_BASE_TASK_THREAD_POOL_H_

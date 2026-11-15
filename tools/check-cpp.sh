@@ -5,10 +5,11 @@
 #   3. build + unit tests: default, ASan+UBSan, TSan, MSan
 # Usage: tools/check-cpp.sh
 set -euo pipefail
+shopt -s globstar nullglob
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 echo "== clang-format"
-clang-format --dry-run --Werror common/*/*.h common/*/*.cc
+clang-format --dry-run --Werror common/**/*.h common/**/*.cc server_module/*/src/*.h server_module/*/src/*.cc
 echo "ok"
 echo "== includes"
 tools/check-includes.sh

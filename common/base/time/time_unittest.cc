@@ -1,6 +1,6 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
-#include "base/time.h"
+#include "base/time/time.h"
 
 #include "gtest/gtest.h"
 

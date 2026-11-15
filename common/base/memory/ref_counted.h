@@ -3,8 +3,8 @@
 // Intrusive reference counting in the spirit of Chromium's
 // //base/memory/ref_counted.h and scoped_refptr.h.
 
-#ifndef COMMON_BASE_REF_COUNTED_H_
-#define COMMON_BASE_REF_COUNTED_H_
+#ifndef COMMON_BASE_MEMORY_REF_COUNTED_H_
+#define COMMON_BASE_MEMORY_REF_COUNTED_H_
 
 #include <atomic>
 #include <cstddef>
@@ -87,4 +87,4 @@ scoped_refptr<T> MakeRefCounted(Args&&... args) {
 
 }  // namespace base
 
-#endif  // COMMON_BASE_REF_COUNTED_H_
+#endif  // COMMON_BASE_MEMORY_REF_COUNTED_H_

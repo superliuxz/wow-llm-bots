@@ -7,12 +7,12 @@
 #include <memory>
 #include <string>
 
-#include "base/callback.h"
-#include "base/message_pump_epoll.h"
-#include "base/ref_counted.h"
-#include "base/sequenced_task_runner.h"
-#include "base/time.h"
-#include "base/weak_ptr.h"
+#include "base/functional/callback.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
+#include "base/message_loop/message_pump_epoll.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/time/time.h"
 #include "net/line_connection.h"
 
 namespace net {

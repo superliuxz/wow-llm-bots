@@ -1,14 +1,14 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
-#ifndef COMMON_BASE_PLATFORM_THREAD_H_
-#define COMMON_BASE_PLATFORM_THREAD_H_
+#ifndef COMMON_BASE_THREADING_PLATFORM_THREAD_H_
+#define COMMON_BASE_THREADING_PLATFORM_THREAD_H_
 
 #include <pthread.h>  // IWYU pragma: keep (pthread_t; not <bits/...>)
 
 #include <string>
 
-#include "base/callback.h"
-#include "base/time.h"
+#include "base/functional/callback.h"
+#include "base/time/time.h"
 
 namespace base {
 
@@ -40,4 +40,4 @@ class PlatformThread {
 
 }  // namespace base
 
-#endif  // COMMON_BASE_PLATFORM_THREAD_H_
+#endif  // COMMON_BASE_THREADING_PLATFORM_THREAD_H_

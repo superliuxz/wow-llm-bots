@@ -1,13 +1,13 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
-#include "base/thread_pool.h"
+#include "base/task/thread_pool.h"
 
 #include <cstddef>
-#include <mutex>
 #include <string>
 #include <utility>
-#include "base/callback.h"
-#include "base/platform_thread.h"
+#include "base/functional/callback.h"
+#include "base/synchronization/lock.h"
+#include "base/threading/platform_thread.h"
 
 namespace base {
 
@@ -20,10 +20,10 @@ ThreadPool::ThreadPool(std::string name, size_t num_threads) {
 
 ThreadPool::~ThreadPool() {
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    AutoLock lock(lock_);
     shutting_down_ = true;
+    cv_.Broadcast();
   }
-  cv_.notify_all();
   for (PlatformThreadHandle& worker : workers_) {
     PlatformThread::Join(worker);
   }
@@ -31,13 +31,13 @@ ThreadPool::~ThreadPool() {
 
 bool ThreadPool::PostTask(OnceClosure task) {
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    AutoLock lock(lock_);
     if (shutting_down_) {
       return false;
     }
     tasks_.push_back(std::move(task));
+    cv_.Signal();
   }
-  cv_.notify_one();
   return true;
 }
 
@@ -45,8 +45,10 @@ void ThreadPool::WorkerLoop() {
   while (true) {
     OnceClosure task;
     {
-      std::unique_lock<std::mutex> lock(mutex_);
-      cv_.wait(lock, [this] { return shutting_down_ || !tasks_.empty(); });
+      AutoLock lock(lock_);
+      while (!shutting_down_ && tasks_.empty()) {
+        cv_.Wait();
+      }
       if (tasks_.empty()) {
         return;  // Shutting down and drained.
       }

@@ -12,11 +12,11 @@
 #include <string>
 #include <utility>
 
-#include "base/callback.h"
-#include "base/message_pump_epoll.h"
-#include "base/sequenced_task_runner.h"
-#include "base/thread.h"
-#include "base/time.h"
+#include "base/functional/callback.h"
+#include "base/message_loop/message_pump_epoll.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/threading/thread.h"
+#include "base/time/time.h"
 #include "net/line_connection.h"
 
 namespace net {

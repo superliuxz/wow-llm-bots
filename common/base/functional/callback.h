@@ -4,8 +4,8 @@
 // spirit of Chromium's //base/functional. Plain C++20 so it can be included
 // from AzerothCore modules.
 
-#ifndef COMMON_BASE_CALLBACK_H_
-#define COMMON_BASE_CALLBACK_H_
+#ifndef COMMON_BASE_FUNCTIONAL_CALLBACK_H_
+#define COMMON_BASE_FUNCTIONAL_CALLBACK_H_
 
 #include <functional>
 #include <memory>
@@ -13,8 +13,8 @@
 #include <type_traits>
 #include <utility>
 
-#include "base/ref_counted.h"
-#include "base/weak_ptr.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 
 namespace base {
 
@@ -182,4 +182,4 @@ auto BindRepeating(F&& fn, BoundArgs&&... bound) {
 
 }  // namespace base
 
-#endif  // COMMON_BASE_CALLBACK_H_
+#endif  // COMMON_BASE_FUNCTIONAL_CALLBACK_H_

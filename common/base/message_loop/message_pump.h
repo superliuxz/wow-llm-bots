@@ -1,11 +1,11 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
-#ifndef COMMON_BASE_MESSAGE_PUMP_H_
-#define COMMON_BASE_MESSAGE_PUMP_H_
+#ifndef COMMON_BASE_MESSAGE_LOOP_MESSAGE_PUMP_H_
+#define COMMON_BASE_MESSAGE_LOOP_MESSAGE_PUMP_H_
 
 #include <memory>
 
-#include "base/time.h"
+#include "base/time/time.h"
 
 namespace base {
 
@@ -39,4 +39,4 @@ class MessagePump {
 
 }  // namespace base
 
-#endif  // COMMON_BASE_MESSAGE_PUMP_H_
+#endif  // COMMON_BASE_MESSAGE_LOOP_MESSAGE_PUMP_H_

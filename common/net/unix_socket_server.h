@@ -8,9 +8,9 @@
 #include <memory>
 #include <string>
 
-#include "base/callback.h"
-#include "base/message_pump_epoll.h"
-#include "base/weak_ptr.h"
+#include "base/functional/callback.h"
+#include "base/memory/weak_ptr.h"
+#include "base/message_loop/message_pump_epoll.h"
 #include "net/line_connection.h"
 
 namespace net {

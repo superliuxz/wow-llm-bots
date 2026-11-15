@@ -6,8 +6,8 @@
 #include <cstddef>
 #include <string>
 
-#include "base/callback.h"
-#include "base/message_pump_epoll.h"
+#include "base/functional/callback.h"
+#include "base/message_loop/message_pump_epoll.h"
 #include "net/line_framer.h"
 
 namespace net {

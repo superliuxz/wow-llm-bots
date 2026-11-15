@@ -1,21 +1,22 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
-#ifndef COMMON_BASE_TASK_QUEUE_H_
-#define COMMON_BASE_TASK_QUEUE_H_
+#ifndef COMMON_BASE_TASK_TASK_QUEUE_H_
+#define COMMON_BASE_TASK_TASK_QUEUE_H_
 
 #include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <functional>
-#include <mutex>
 #include <optional>
 #include <queue>
 #include <vector>
 
-#include "base/callback.h"
-#include "base/ref_counted.h"
-#include "base/sequenced_task_runner.h"
-#include "base/time.h"
+#include "base/functional/callback.h"
+#include "base/memory/ref_counted.h"
+#include "base/synchronization/lock.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/thread_annotations.h"
+#include "base/time/time.h"
 
 namespace base {
 
@@ -73,17 +74,17 @@ class TaskQueue : public SequencedTaskRunner {
 
   TaskQueue();
   ~TaskQueue() override;
-  std::vector<OnceClosure> TakeReadyTasks();
+  std::vector<OnceClosure> TakeReadyTasks() LOCKS_EXCLUDED(lock_);
 
-  mutable std::mutex mutex_;
-  std::deque<OnceClosure> immediate_;
+  mutable Lock lock_;
+  std::deque<OnceClosure> immediate_ GUARDED_BY(lock_);
   std::priority_queue<DelayedTask, std::vector<DelayedTask>, std::greater<>>
-      delayed_;
-  uint64_t next_sequence_ = 0;
-  bool shut_down_ = false;
-  RepeatingClosure wakeup_;
+      delayed_ GUARDED_BY(lock_);
+  uint64_t next_sequence_ GUARDED_BY(lock_) = 0;
+  bool shut_down_ GUARDED_BY(lock_) = false;
+  RepeatingClosure wakeup_ GUARDED_BY(lock_);
 };
 
 }  // namespace base
 
-#endif  // COMMON_BASE_TASK_QUEUE_H_
+#endif  // COMMON_BASE_TASK_TASK_QUEUE_H_

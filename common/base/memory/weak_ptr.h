@@ -5,11 +5,11 @@
 // on the owning object's sequence only. They may be *copied and passed* across
 // threads (e.g. bound into a task posted back to the owner's sequence).
 
-#ifndef COMMON_BASE_WEAK_PTR_H_
-#define COMMON_BASE_WEAK_PTR_H_
+#ifndef COMMON_BASE_MEMORY_WEAK_PTR_H_
+#define COMMON_BASE_MEMORY_WEAK_PTR_H_
 
 #include <utility>
-#include "base/ref_counted.h"
+#include "base/memory/ref_counted.h"
 
 namespace base {
 
@@ -79,4 +79,4 @@ class WeakPtrFactory {
 
 }  // namespace base
 
-#endif  // COMMON_BASE_WEAK_PTR_H_
+#endif  // COMMON_BASE_MEMORY_WEAK_PTR_H_

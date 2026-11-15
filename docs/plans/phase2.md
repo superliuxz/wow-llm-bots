@@ -84,20 +84,19 @@ A: ~1-1.5k lines C++. B: ~2-3k lines C++ plus tests. C/D: small. Build A first, 
 tiny fake harness (netcat-level), then B.
 
 ## Shared C++ library `common/` (built 2026-11-14)
-Both ends of the socket use the same Chromium-style code (user decision: no std::thread /
-std::shared_ptr / Boost.Asio threading in our code; follow what Chromium does):
-- `base/`: PlatformThread (pthreads); Thread with Options{MessagePumpType::DEFAULT | IO};
-  MessagePumpDefault (condvar) and MessagePumpEpoll (= MessagePumpForIO: epoll + eventfd,
-  epoll_pwait2 timeouts) with WatchFileDescriptor / FdWatchController / FdWatcher via
-  CurrentIOThread::Get(); TaskQueue (SequencedTaskRunner, bound as current default for a
-  Thread's whole run); ThreadPool; PostTaskAndReplyWithResult; OnceCallback / RepeatingCallback /
-  BindOnce / BindRepeating (WeakPtr receivers); WeakPtr / WeakPtrFactory; RefCountedThreadSafe /
-  scoped_refptr / MakeRefCounted; TimeDelta / TimeTicks. Plain C++20 (AzerothCore modules are C++20).
-- `net/`: LineFramer, LineConnection (non-blocking fd, buffered writes, backpressure),
-  UnixSocketServer (one client, replace on reconnect), UnixSocketClient (auto-reconnect).
-- No third-party runtime deps (libevent dropped; modern Chromium uses epoll on Linux).
-- Tests: 24 GoogleTest cases; clean under ASan+UBSan and TSan (`tools/build-common.sh --asan|--tsan`).
-  MSan reports false positives from uninstrumented libstdc++; needs an MSan-built libc++ (later).
+Both ends of the socket use the same Chromium-style code (rules and reasoning: CLAUDE.md). Layout
+mirrors Chromium: `base/functional/` (Once/RepeatingCallback, BindOnce/BindRepeating with WeakPtr
+receivers), `base/memory/` (WeakPtr, RefCountedThreadSafe/scoped_refptr), `base/task/`
+(SequencedTaskRunner, TaskQueue, ThreadPool, PostTaskAndReplyWithResult), `base/threading/`
+(PlatformThread, Thread with Options{MessagePumpType}, CurrentIOThread), `base/message_loop/`
+(MessagePumpDefault, MessagePumpEpoll = MessagePumpForIO with WatchFileDescriptor),
+`base/synchronization/` (Lock/AutoLock with thread-safety annotations, ConditionVariable,
+WaitableEvent), `base/time/` (TimeDelta, TimeTicks on CLOCK_MONOTONIC), `base/compiler_specific.h`
+(MSAN_UNPOISON), `base/thread_annotations.h`. `net/`: LineFramer, LineConnection,
+UnixSocketServer, UnixSocketClient. No third-party runtime deps (libevent dropped). Plain C++20.
+28 tests; `tools/check-cpp.sh` = format + include-what-you-use + default/ASan+UBSan/TSan/MSan
+(MSan against instrumented libc++); `-Werror=thread-safety`; hardened std lib in `out/common`,
+not in `out/common-server` (linked into AzerothCore).
 
 ## Decisions (review 2026-11-14)
 1. **Wire format** module <-> harness: newline-delimited JSON over a Unix socket. The LLM never

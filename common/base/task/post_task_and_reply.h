@@ -1,12 +1,12 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
-#ifndef COMMON_BASE_POST_TASK_AND_REPLY_H_
-#define COMMON_BASE_POST_TASK_AND_REPLY_H_
+#ifndef COMMON_BASE_TASK_POST_TASK_AND_REPLY_H_
+#define COMMON_BASE_TASK_POST_TASK_AND_REPLY_H_
 
 #include <utility>
 
-#include "base/ref_counted.h"
-#include "base/sequenced_task_runner.h"
+#include "base/memory/ref_counted.h"
+#include "base/task/sequenced_task_runner.h"
 
 namespace base {
 
@@ -33,4 +33,4 @@ bool PostTaskAndReplyWithResult(Target& target, Task task, Reply reply) {
 
 }  // namespace base
 
-#endif  // COMMON_BASE_POST_TASK_AND_REPLY_H_
+#endif  // COMMON_BASE_TASK_POST_TASK_AND_REPLY_H_

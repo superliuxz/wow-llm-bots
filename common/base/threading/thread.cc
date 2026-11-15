@@ -1,16 +1,16 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
-#include "base/thread.h"
+#include "base/threading/thread.h"
 
 #include <memory>
 #include <optional>
 #include <string>
 #include <utility>
-#include "base/message_pump.h"
-#include "base/message_pump_epoll.h"
-#include "base/platform_thread.h"
-#include "base/task_queue.h"
-#include "base/time.h"
+#include "base/message_loop/message_pump.h"
+#include "base/message_loop/message_pump_epoll.h"
+#include "base/task/task_queue.h"
+#include "base/threading/platform_thread.h"
+#include "base/time/time.h"
 
 namespace base {
 namespace {

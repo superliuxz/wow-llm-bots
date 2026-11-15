@@ -1,12 +1,12 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
-#ifndef COMMON_BASE_MESSAGE_PUMP_EPOLL_H_
-#define COMMON_BASE_MESSAGE_PUMP_EPOLL_H_
+#ifndef COMMON_BASE_MESSAGE_LOOP_MESSAGE_PUMP_EPOLL_H_
+#define COMMON_BASE_MESSAGE_LOOP_MESSAGE_PUMP_EPOLL_H_
 
 #include <cstdint>
 #include <unordered_map>
 
-#include "base/message_pump.h"
+#include "base/message_loop/message_pump.h"
 
 namespace base {
 
@@ -87,4 +87,4 @@ using MessagePumpForIO = MessagePumpEpoll;
 
 }  // namespace base
 
-#endif  // COMMON_BASE_MESSAGE_PUMP_EPOLL_H_
+#endif  // COMMON_BASE_MESSAGE_LOOP_MESSAGE_PUMP_EPOLL_H_

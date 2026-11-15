@@ -1,6 +1,6 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
-#include "base/platform_thread.h"
+#include "base/threading/platform_thread.h"
 
 #include <pthread.h>
 #include <sys/syscall.h>
@@ -11,8 +11,8 @@
 #include <memory>
 #include <string>
 #include <utility>
-#include "base/callback.h"
-#include "base/time.h"
+#include "base/functional/callback.h"
+#include "base/time/time.h"
 
 namespace base {
 namespace {

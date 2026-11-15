@@ -3,8 +3,8 @@
 // TimeDelta and TimeTicks in the spirit of Chromium's //base/time. Durations
 // and monotonic time points with microsecond resolution.
 
-#ifndef COMMON_BASE_TIME_H_
-#define COMMON_BASE_TIME_H_
+#ifndef COMMON_BASE_TIME_TIME_H_
+#define COMMON_BASE_TIME_TIME_H_
 
 #include <compare>  // IWYU pragma: keep (defaulted operator<=>)
 #include <cstdint>
@@ -83,4 +83,4 @@ class TimeTicks {
 
 }  // namespace base
 
-#endif  // COMMON_BASE_TIME_H_
+#endif  // COMMON_BASE_TIME_TIME_H_

@@ -12,8 +12,8 @@
 #include <string_view>
 #include <utility>
 
-#include "base/message_pump_epoll.h"
-#include "base/thread.h"
+#include "base/message_loop/message_pump_epoll.h"
+#include "base/threading/thread.h"
 
 namespace net {
 

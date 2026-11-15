@@ -23,9 +23,13 @@ check() {  # check <file> [clang-include-cleaner args...]
     echo "== $f"; echo "$out"; status=1
   fi
 }
-shopt -s nullglob
-for f in common/*/*.h; do check "$f" -- "${FLAGS[@]}"; done
-for f in common/*/*.cc; do check "$f" -p out/common; done
-[ "$MODE" = --edit ] && clang-format -i common/*/*.h common/*/*.cc
+shopt -s globstar nullglob
+for f in common/**/*.h; do check "$f" -- "${FLAGS[@]}"; done
+for f in common/**/*.cc; do check "$f" -p out/common; done
+# Our AzerothCore module: sources use the server build's compile commands;
+# its headers only include std and common/ headers.
+for f in server_module/*/src/*.h; do check "$f" -- "${FLAGS[@]}"; done
+for f in server_module/*/src/*.cc; do check "$f" -p out/server; done
+[ "$MODE" = --edit ] && clang-format -i common/**/*.h common/**/*.cc server_module/*/src/*.h server_module/*/src/*.cc
 [ $status = 0 ] && [ "$MODE" = --print=changes ] && echo "includes OK"
 exit $status
