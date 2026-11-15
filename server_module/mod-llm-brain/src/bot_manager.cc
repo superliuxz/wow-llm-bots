@@ -17,6 +17,7 @@
 #include "Playerbots.h"
 #include "RandomPlayerbotMgr.h"
 #include "SharedDefines.h"
+#include "config_parsing.h"
 
 namespace llm_brain {
 namespace {
@@ -47,7 +48,8 @@ std::string SoloHealerCombatExtras(Player* player) {
 }  // namespace
 
 BotManager::BotManager(std::vector<std::string> names, Strategies strategies)
-    : strategies_(std::move(strategies)) {
+    : strategies_(std::move(strategies)),
+      reset_check_(ResetCheckFor(strategies_.non_combat)) {
   for (std::string& name : names) {
     bots_.push_back(Bot{std::move(name)});
   }
@@ -99,9 +101,10 @@ void BotManager::EnsureStrategies(Player* player) {
   if (!ai || player->InBattleground()) {
     return;  // Not set up yet, or playerbots' battleground strategies apply.
   }
-  // Our non-combat set adds "grind"; playerbots' defaults for our bots don't.
-  // Missing means playerbots reset the strategies since we last applied them.
-  if (ai->HasStrategy("grind", BOT_STATE_NON_COMBAT)) {
+  // Still as we left it: playerbots hasn't reset the strategies since.
+  if (!reset_check_ ||
+      ai->HasStrategy(reset_check_->name, BOT_STATE_NON_COMBAT) ==
+          reset_check_->present) {
     return;
   }
   std::string combat = strategies_.combat;

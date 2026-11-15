@@ -3,6 +3,7 @@
 #include "config_parsing.h"
 
 #include <cstddef>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -40,6 +41,22 @@ std::vector<std::pair<std::string, std::string>> ParseFixtures(
     fixtures.emplace_back(entry.substr(0, eq), std::move(file));
   }
   return fixtures;
+}
+
+std::optional<StrategyCheck> ResetCheckFor(const std::string& changes) {
+  std::optional<StrategyCheck> removed;
+  for (const std::string& change : SplitList(changes)) {
+    if (change.size() < 2) {
+      continue;
+    }
+    if (change.front() == '+') {
+      return StrategyCheck{change.substr(1), /*present=*/true};
+    }
+    if (change.front() == '-' && !removed) {
+      removed = StrategyCheck{change.substr(1), /*present=*/false};
+    }
+  }
+  return removed;
 }
 
 }  // namespace llm_brain

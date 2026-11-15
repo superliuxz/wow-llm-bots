@@ -106,6 +106,12 @@ add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/brain_bridge_unittest.cc"
   "${WLB_MODULE_SRC}/config_parsing.cc"
   "${WLB_MODULE_SRC}/config_parsing_unittest.cc"
+  "${WLB_MODULE_SRC}/perception.cc"
+  "${WLB_MODULE_SRC}/perception_unittest.cc"
+  "${WLB_MODULE_SRC}/snapshot_stats.cc"
+  "${WLB_MODULE_SRC}/snapshot_stats_unittest.cc"
+  "${WLB_MODULE_SRC}/test/test_accounts.cc"
+  "${WLB_MODULE_SRC}/test/test_accounts_unittest.cc"
   "${WLB_PROTO_ROOT}/proto/snapshot_unittest.cc")
 target_include_directories(llm_brain_unittests PRIVATE "${WLB_MODULE_SRC}")
 target_link_libraries(llm_brain_unittests PRIVATE wlb_net wlb_proto

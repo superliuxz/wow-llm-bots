@@ -38,6 +38,21 @@ LlmBrain.Bots = ""
 LlmBrain.SnapshotIntervalMs = 1000
 
 #
+#    LlmBrain.NameplateRangeYd
+#        Description: How far names and nameplate fields show in a snapshot's `nearby`
+#                     (the client's nameplate distance: 20 default, up to 41). Beyond it,
+#                     units carry only what their model shows. Later a per-bot UI setting.
+#        Default:     20
+#
+#    LlmBrain.LosRaycastsPerSnapshot
+#        Description: Line-of-sight ray casts per bot per snapshot (nearest first, results
+#                     cached 1 s near / 5 s far). Bounds the world-thread cost of `nearby`.
+#        Default:     32
+
+LlmBrain.NameplateRangeYd = 20
+LlmBrain.LosRaycastsPerSnapshot = 32
+
+#
 #    LlmBrain.CombatStrategies
 #    LlmBrain.NonCombatStrategies
 #    LlmBrain.DeadStrategies

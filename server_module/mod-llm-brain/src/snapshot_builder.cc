@@ -14,40 +14,14 @@
 #include "StringFormat.h"
 #include "UpdateFields.h"
 #include "World.h"
+#include "nearby_builder.h"
+#include "perception.h"
 #include "proto/snapshot.pb.h"
 
 namespace llm_brain {
 namespace {
 
 namespace pb = wlb::snapshot;
-
-// The class names the client shows (ChrClasses.dbc's name column isn't loaded).
-const char* ClassName(uint8_t class_id) {
-  switch (class_id) {
-    case CLASS_WARRIOR:
-      return "Warrior";
-    case CLASS_PALADIN:
-      return "Paladin";
-    case CLASS_HUNTER:
-      return "Hunter";
-    case CLASS_ROGUE:
-      return "Rogue";
-    case CLASS_PRIEST:
-      return "Priest";
-    case CLASS_DEATH_KNIGHT:
-      return "Death Knight";
-    case CLASS_SHAMAN:
-      return "Shaman";
-    case CLASS_MAGE:
-      return "Mage";
-    case CLASS_WARLOCK:
-      return "Warlock";
-    case CLASS_DRUID:
-      return "Druid";
-    default:
-      return "";
-  }
-}
 
 pb::Self::PowerType ToPowerType(Powers power) {
   switch (power) {
@@ -143,10 +117,17 @@ void FillWhere(Player* bot, pb::Where* where) {
 
 }  // namespace
 
-void BuildSnapshot(Player* bot, pb::Snapshot* snapshot) {
+SnapshotBuilder::SnapshotBuilder(NearbyBuilder::Options nearby_options)
+    : nearby_(nearby_options) {}
+
+SnapshotBuilder::~SnapshotBuilder() = default;
+
+NearbyBuilder::Stats SnapshotBuilder::Build(Player* bot,
+                                            pb::Snapshot* snapshot) {
   pb::Base* base = snapshot->mutable_base();
   FillSelf(bot, base->mutable_self());
   FillWhere(bot, base->mutable_where());
+  return nearby_.Build(bot, base->mutable_nearby());
 }
 
 }  // namespace llm_brain

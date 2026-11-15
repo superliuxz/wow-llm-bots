@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "Define.h"
 #include "Log.h"
@@ -15,11 +16,12 @@
 #include "bot_manager.h"
 #include "brain_bridge.h"
 #include "llm_brain_config.h"
+#include "nearby_builder.h"
 #include "proto/snapshot.pb.h"
 #include "snapshot_builder.h"
+#include "snapshot_stats.h"
 
 #if defined(LLM_BRAIN_TEST_HOOKS)
-#include <utility>
 #include <vector>
 
 #include "test/fixture_loader.h"
@@ -29,6 +31,8 @@ namespace llm_brain {
 namespace {
 
 constexpr size_t kMaxPendingMessages = 1000;
+// How often the snapshot cost summary is logged.
+constexpr uint32_t kStatsIntervalMs = 60000;
 
 // World-thread entry points for the brain bridge: every snapshot interval,
 // send each attached bot's snapshot to the harness.
@@ -112,6 +116,15 @@ class LlmBrainWorldScript : public WorldScript {
     }
     bridge_->RunWorldTasks();
     since_snapshot_ms_ += diff;
+    since_stats_ms_ += diff;
+    if (since_stats_ms_ >= kStatsIntervalMs) {
+      since_stats_ms_ = 0;
+      if (stats_.count()) {
+        LOG_INFO("module", "mod-llm-brain: snapshots in the last minute: {}",
+                 stats_.Summary());
+        stats_.Reset();
+      }
+    }
     if (since_snapshot_ms_ < config_.snapshot_interval_ms) {
       return;
     }
@@ -141,13 +154,22 @@ class LlmBrainWorldScript : public WorldScript {
     if (!bot) {
       return;  // Offline (or not in the world yet).
     }
+    BotState& state = bots_[name];
+    if (!state.builder) {
+      state.builder = std::make_unique<SnapshotBuilder>(NearbyBuilder::Options{
+          config_.nameplate_range_yd, config_.los_raycasts_per_snapshot});
+    }
     wlb::snapshot::ModuleMessage message;
     wlb::snapshot::Snapshot* snapshot = message.mutable_snapshot();
     snapshot->set_bot(name);
-    snapshot->set_seq(++seq_[name]);
+    snapshot->set_seq(++state.seq);
     snapshot->set_time_ms(base::Time::Now().InMillisecondsSinceUnixEpoch());
-    BuildSnapshot(bot, snapshot);
-    bridge_->Send(message.SerializeAsString());
+    const base::TimeTicks start = base::TimeTicks::Now();
+    const NearbyBuilder::Stats nearby = state.builder->Build(bot, snapshot);
+    std::string bytes = message.SerializeAsString();
+    stats_.Add({base::TimeTicks::Now() - start, bytes.size(), nearby.units,
+                nearby.objects, nearby.hidden, nearby.raycasts});
+    bridge_->Send(std::move(bytes));
   }
 
   Config config_;
@@ -157,8 +179,14 @@ class LlmBrainWorldScript : public WorldScript {
   std::unique_ptr<BotManager> bot_manager_;
   std::unique_ptr<BrainBridge> bridge_;
   uint32 since_snapshot_ms_ = 0;
-  // Per-bot snapshot counter (gaps tell the harness something was dropped).
-  std::map<std::string, uint32_t> seq_;
+  uint32 since_stats_ms_ = 0;
+  SnapshotStats stats_;
+  struct BotState {
+    // Snapshot counter (gaps tell the harness something was dropped).
+    uint32_t seq = 0;
+    std::unique_ptr<SnapshotBuilder> builder;
+  };
+  std::map<std::string, BotState> bots_;
 };
 
 }  // namespace

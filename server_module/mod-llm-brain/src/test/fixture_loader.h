@@ -8,18 +8,23 @@
 #include <string>
 #include <vector>
 
+#include "base/time/time.h"
+
 namespace llm_brain {
 
 // Test only. Resets test characters to a known state at server startup: each
 // is erased and recreated from a player dump (AzerothCore's `pdump` format,
 // tests/fixtures/characters/*.pdump), so every test run starts the same.
 //
-// Only characters on the test account are ever erased; the account is created
-// if missing. AzerothCore queues character deletes, dump loads and account
-// creation as async writes, so each step is confirmed with a direct query on a
-// later tick before the next one starts. Those blocking queries run on the
-// world thread, which is acceptable only because this runs in tests, during
-// the first seconds after startup.
+// Test characters live on a pool of test accounts (`account`, `account`2, ...;
+// test_accounts.h), created when missing; a load that finds an account full
+// moves on to the next. Only characters on pool accounts are ever erased.
+//
+// AzerothCore queues character deletes, dump loads and account creation as
+// async writes, so each step is confirmed with a direct query on later ticks
+// before the next one starts. Those blocking queries run on the world thread,
+// which is acceptable only because this runs in tests, during the first
+// seconds after startup.
 //
 // World thread only.
 class FixtureLoader {
@@ -49,16 +54,19 @@ class FixtureLoader {
     kDone,
   };
 
+  void StartWait(Step step);
+  bool TimedOut() const;
   void NextFixture();
   void Fail(const std::string& why);
 
   const std::string account_;
   const std::vector<Fixture> fixtures_;
   Step step_ = Step::kCreateAccount;
-  uint32_t account_id_ = 0;
   size_t index_ = 0;
-  // Polls left before the current wait step gives up.
-  uint32_t polls_left_ = 0;
+  // The pool account fixtures currently go on, and its id once known.
+  size_t pool_index_ = 0;
+  uint32_t account_id_ = 0;
+  base::TimeTicks deadline_;
 };
 
 }  // namespace llm_brain

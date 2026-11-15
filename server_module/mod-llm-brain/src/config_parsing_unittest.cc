@@ -2,6 +2,7 @@
 
 #include "config_parsing.h"
 
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -34,6 +35,16 @@ TEST(ConfigParsingTest, ParseFixturesJoinsRelativeFilesToDir) {
 TEST(ConfigParsingTest, ParseFixturesSkipsMalformedEntries) {
   EXPECT_EQ(ParseFixtures("NoFile, =x.pdump, Name=, Ok=ok.pdump", ""),
             (Fixtures{{"Ok", "ok.pdump"}}));
+}
+
+TEST(ConfigParsingTest, ResetCheckPrefersAnAddedStrategy) {
+  EXPECT_EQ(ResetCheckFor("-follow,+grind,+new rpg"),
+            (StrategyCheck{"grind", /*present=*/true}));
+  EXPECT_EQ(ResetCheckFor("-grind, -new rpg, -follow"),
+            (StrategyCheck{"grind", /*present=*/false}));
+  EXPECT_EQ(ResetCheckFor("+stay"), (StrategyCheck{"stay", true}));
+  EXPECT_EQ(ResetCheckFor(""), std::nullopt);
+  EXPECT_EQ(ResetCheckFor("grind, +"), std::nullopt);
 }
 
 }  // namespace

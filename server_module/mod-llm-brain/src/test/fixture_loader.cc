@@ -15,15 +15,19 @@
 #include "DatabaseEnvFwd.h"
 #include "Log.h"
 #include "ObjectGuid.h"
+#include "ObjectMgr.h"
 #include "Player.h"
 #include "PlayerDump.h"
 #include "Random.h"
+#include "SharedDefines.h"
+#include "base/time/time.h"
+#include "test/test_accounts.h"
 
 namespace llm_brain {
 namespace {
 
-// Async writes normally land within a few ticks; give up after this many polls.
-constexpr uint32_t kMaxPolls = 500;
+// Async writes normally land within a few seconds, even with dozens queued.
+constexpr base::TimeDelta kWaitTimeout = base::Seconds(30);
 
 bool CharacterExists(const std::string& name) {
   CharacterDatabasePreparedStatement* stmt =
@@ -32,7 +36,7 @@ bool CharacterExists(const std::string& name) {
   return CharacterDatabase.Query(stmt) != nullptr;
 }
 
-// The test account is never logged into; its password only has to exist.
+// Test accounts are never logged into; the password only has to exist.
 std::string RandomPassword() {
   static constexpr char kChars[] =
       "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -54,34 +58,53 @@ FixtureLoader::FixtureLoader(std::string account, std::vector<Fixture> fixtures)
 
 FixtureLoader::~FixtureLoader() = default;
 
+void FixtureLoader::StartWait(Step step) {
+  step_ = step;
+  deadline_ = base::TimeTicks::Now() + kWaitTimeout;
+}
+
+bool FixtureLoader::TimedOut() const {
+  return base::TimeTicks::Now() > deadline_;
+}
+
 bool FixtureLoader::Update() {
+  const std::string account = TestAccountName(account_, pool_index_);
   switch (step_) {
     case Step::kCreateAccount:
-      account_id_ = AccountMgr::GetId(account_);
+      account_id_ = AccountMgr::GetId(account);
       if (account_id_) {
         step_ = Step::kDeleteCharacter;
         break;
       }
-      if (sAccountMgr->CreateAccount(account_, RandomPassword()) != AOR_OK) {
-        Fail("cannot create test account " + account_);
+      if (sAccountMgr->CreateAccount(account, RandomPassword()) != AOR_OK) {
+        Fail("cannot create test account " + account);
         break;
       }
-      LOG_INFO("module", "mod-llm-brain: created test account {}", account_);
-      step_ = Step::kWaitForAccount;
-      polls_left_ = kMaxPolls;
+      LOG_INFO("module", "mod-llm-brain: created test account {}", account);
+      StartWait(Step::kWaitForAccount);
       break;
 
     case Step::kWaitForAccount:
-      account_id_ = AccountMgr::GetId(account_);
+      account_id_ = AccountMgr::GetId(account);
       if (account_id_) {
         step_ = Step::kDeleteCharacter;
-      } else if (--polls_left_ == 0) {
-        Fail("test account " + account_ + " never appeared");
+      } else if (TimedOut()) {
+        Fail("test account " + account + " never appeared");
       }
       break;
 
     case Step::kDeleteCharacter: {
       const Fixture& fixture = fixtures_[index_];
+      // An invalid name would make LoadDump quietly fall back to a temporary
+      // name (with a rename at login), so reject it here.
+      if (ObjectMgr::CheckPlayerName(fixture.character, /*create=*/true) !=
+          CHAR_NAME_SUCCESS) {
+        LOG_ERROR("module",
+                  "mod-llm-brain: {} is not a valid character name; skipped",
+                  fixture.character);
+        NextFixture();
+        break;
+      }
       const ObjectGuid guid =
           sCharacterCache->GetCharacterGuidByName(fixture.character);
       if (guid.IsEmpty()) {
@@ -89,25 +112,27 @@ bool FixtureLoader::Update() {
         break;
       }
       // Never erase a character that isn't ours to reset.
-      if (sCharacterCache->GetCharacterAccountIdByGuid(guid) != account_id_) {
+      const uint32_t owner = sCharacterCache->GetCharacterAccountIdByGuid(guid);
+      std::string owner_name;
+      if (!AccountMgr::GetName(owner, owner_name) ||
+          !IsTestAccountName(owner_name, account_)) {
         LOG_ERROR("module",
-                  "mod-llm-brain: {} exists on another account; not resetting "
-                  "it (test characters must be on {})",
-                  fixture.character, account_);
+                  "mod-llm-brain: {} exists on account {}; not resetting it "
+                  "(test characters must be on {}, {}2, ...)",
+                  fixture.character, owner_name, account_, account_);
         NextFixture();
         break;
       }
-      Player::DeleteFromDB(guid.GetCounter(), account_id_,
+      Player::DeleteFromDB(guid.GetCounter(), owner,
                            /*updateRealmChars=*/true, /*deleteFinally=*/true);
-      step_ = Step::kWaitForDelete;
-      polls_left_ = kMaxPolls;
+      StartWait(Step::kWaitForDelete);
       break;
     }
 
     case Step::kWaitForDelete:
       if (!CharacterExists(fixtures_[index_].character)) {
         step_ = Step::kLoadDump;
-      } else if (--polls_left_ == 0) {
+      } else if (TimedOut()) {
         Fail(fixtures_[index_].character + " was never deleted");
       }
       break;
@@ -116,23 +141,28 @@ bool FixtureLoader::Update() {
       const Fixture& fixture = fixtures_[index_];
       const DumpReturn result = PlayerDumpReader().LoadDumpFromFile(
           fixture.file, account_id_, fixture.character, /*guid=*/0);
+      if (result == DUMP_TOO_MANY_CHARS) {
+        // This account is full: same fixture, next account in the pool.
+        ++pool_index_;
+        step_ = Step::kCreateAccount;
+        break;
+      }
       if (result != DUMP_SUCCESS) {
         LOG_ERROR("module", "mod-llm-brain: cannot load {} from {} (code {})",
                   fixture.character, fixture.file, static_cast<int>(result));
         NextFixture();
         break;
       }
-      step_ = Step::kWaitForLoad;
-      polls_left_ = kMaxPolls;
+      StartWait(Step::kWaitForLoad);
       break;
     }
 
     case Step::kWaitForLoad:
       if (CharacterExists(fixtures_[index_].character)) {
-        LOG_INFO("module", "mod-llm-brain: reset {} from {}",
-                 fixtures_[index_].character, fixtures_[index_].file);
+        LOG_INFO("module", "mod-llm-brain: reset {} on {} from {}",
+                 fixtures_[index_].character, account, fixtures_[index_].file);
         NextFixture();
-      } else if (--polls_left_ == 0) {
+      } else if (TimedOut()) {
         Fail(fixtures_[index_].character + " never appeared after loading");
       }
       break;

@@ -20,6 +20,10 @@ Config LoadConfig() {
       SplitList(sConfigMgr->GetOption<std::string>("LlmBrain.Bots", ""));
   config.snapshot_interval_ms =
       sConfigMgr->GetOption<uint32_t>("LlmBrain.SnapshotIntervalMs", 1000);
+  config.nameplate_range_yd =
+      sConfigMgr->GetOption<float>("LlmBrain.NameplateRangeYd", 20);
+  config.los_raycasts_per_snapshot =
+      sConfigMgr->GetOption<uint32_t>("LlmBrain.LosRaycastsPerSnapshot", 32);
   config.combat_strategies = sConfigMgr->GetOption<std::string>(
       "LlmBrain.CombatStrategies", "+boost,+dps assist,-threat");
   config.non_combat_strategies = sConfigMgr->GetOption<std::string>(
