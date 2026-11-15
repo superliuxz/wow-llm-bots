@@ -23,6 +23,8 @@ for arg in "$@"; do
   esac
 done
 B="$ROOT/$OUT"
+# Generated proto code needs protoc (same pinned protobuf as the runtime).
+[ -x "$ROOT/out/protoc/protobuf/protoc" ] || "$ROOT/tools/build-protoc.sh"
 if [ ! -f "$B/build.ninja" ]; then
   FLAGS=""; LDFLAGS="-fuse-ld=lld"
   if [ -n "$SAN" ]; then
@@ -42,9 +44,9 @@ if [ ! -f "$B/build.ninja" ]; then
     -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS" > /dev/null
 fi
 if [ "$TESTS" = 0 ]; then
-  ninja -C "$B" wlb_base wlb_net
+  ninja -C "$B" wlb_base wlb_net wlb_proto
 else
-  ninja -C "$B" wlb_base wlb_net wlb_common_unittests llm_brain_unittests
+  ninja -C "$B" wlb_base wlb_net wlb_proto wlb_common_unittests llm_brain_unittests
   "$B/wlb_common_unittests" --gtest_brief=1
   "$B/llm_brain_unittests" --gtest_brief=1
 fi

@@ -28,11 +28,10 @@ for f in common/**/*.h; do check "$f" -- "${FLAGS[@]}"; done
 for f in common/**/*.cc; do check "$f" -p out/common; done
 # Our AzerothCore module: sources use the server build's compile commands;
 # its headers only include std and common/ headers.
-for f in server_module/*/src/*.h; do check "$f" -- "${FLAGS[@]}"; done
-for f in server_module/*/src/*.cc; do
+for f in server_module/**/*.h; do check "$f" -- "${FLAGS[@]}"; done
+for f in server_module/**/*.cc; do
   case "$f" in *_unittest.cc) check "$f" -p out/common ;; *) check "$f" -p out/server ;; esac
 done
-for f in; do check "$f" -p out/common; done
-[ "$MODE" = --edit ] && clang-format -i common/**/*.h common/**/*.cc server_module/*/src/*.h server_module/*/src/*.cc
+[ "$MODE" = --edit ] && clang-format -i common/**/*.h common/**/*.cc server_module/**/*.h server_module/**/*.cc
 [ $status = 0 ] && [ "$MODE" = --print=changes ] && echo "includes OK"
 exit $status

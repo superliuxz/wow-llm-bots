@@ -2,7 +2,8 @@
 #   wlb_base: threads (default and epoll IO message pumps),
 #             task runners, callbacks, WeakPtr, TimeDelta/TimeTicks.
 #   wlb_net:  length-prefixed framing, Unix socket server/client (on IO threads).
-# No third-party runtime dependencies (GoogleTest for tests only).
+#   wlb_proto: C++ generated from server_module/mod-llm-brain/proto/*.proto
+#             (protobuf lite runtime; protobuf and abseil from third_party/).
 # Plain C++20 (AzerothCore modules compile as C++20 and include these headers).
 cmake_minimum_required(VERSION 3.20)
 project(wlb_common C CXX)
@@ -46,6 +47,41 @@ add_library(wlb_net STATIC
 target_link_libraries(wlb_net PUBLIC wlb_base)
 target_compile_options(wlb_net PRIVATE ${WLB_SAFETY_FLAGS})
 
+# Protobuf (lite runtime) and its abseil dependency, from the pinned submodules,
+# built with this build's flags (sanitizers need every byte instrumented).
+set(ABSL_PROPAGATE_CXX_STD ON)
+set(ABSL_BUILD_TESTING OFF)
+add_subdirectory("${WLB_ROOT}/third_party/abseil-cpp" abseil EXCLUDE_FROM_ALL)
+set(protobuf_BUILD_TESTS OFF)
+set(protobuf_BUILD_CONFORMANCE OFF)
+set(protobuf_BUILD_EXAMPLES OFF)
+set(protobuf_BUILD_PROTOC_BINARIES OFF)
+set(protobuf_BUILD_LIBUPB OFF)
+set(protobuf_INSTALL OFF)
+set(protobuf_LOCAL_DEPENDENCIES_ONLY ON)
+set(protobuf_WITH_ZLIB OFF)
+add_subdirectory("${WLB_ROOT}/third_party/protobuf" protobuf EXCLUDE_FROM_ALL)
+
+# Generated code comes from protoc built separately (tools/build-protoc.sh) from
+# the same pinned protobuf, so generator and runtime versions always match.
+set(WLB_PROTOC "${WLB_ROOT}/out/protoc/protobuf/protoc" CACHE FILEPATH "protoc")
+set(WLB_PROTO_ROOT "${WLB_ROOT}/server_module/mod-llm-brain")
+set(WLB_PROTO_OUT "${CMAKE_CURRENT_BINARY_DIR}/gen")
+add_custom_command(
+  OUTPUT "${WLB_PROTO_OUT}/proto/snapshot.pb.cc"
+         "${WLB_PROTO_OUT}/proto/snapshot.pb.h"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${WLB_PROTO_OUT}"
+  COMMAND "${WLB_PROTOC}" "-I${WLB_PROTO_ROOT}"
+          "-I${WLB_ROOT}/third_party/protobuf/src"
+          "--cpp_out=${WLB_PROTO_OUT}" proto/snapshot.proto
+  WORKING_DIRECTORY "${WLB_PROTO_ROOT}"
+  DEPENDS "${WLB_PROTO_ROOT}/proto/snapshot.proto"
+          "${WLB_PROTO_ROOT}/proto/snapshot_options.proto" "${WLB_PROTOC}"
+  COMMENT "protoc proto/snapshot.proto")
+add_library(wlb_proto STATIC "${WLB_PROTO_OUT}/proto/snapshot.pb.cc")
+target_include_directories(wlb_proto PUBLIC "${WLB_PROTO_OUT}")
+target_link_libraries(wlb_proto PUBLIC protobuf::libprotobuf-lite)
+
 # Unit tests.
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
@@ -67,7 +103,9 @@ target_compile_options(wlb_common_unittests PRIVATE ${WLB_SAFETY_FLAGS})
 set(WLB_MODULE_SRC "${WLB_ROOT}/server_module/mod-llm-brain/src")
 add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/brain_bridge.cc"
-  "${WLB_MODULE_SRC}/brain_bridge_unittest.cc")
+  "${WLB_MODULE_SRC}/brain_bridge_unittest.cc"
+  "${WLB_PROTO_ROOT}/proto/snapshot_unittest.cc")
 target_include_directories(llm_brain_unittests PRIVATE "${WLB_MODULE_SRC}")
-target_link_libraries(llm_brain_unittests PRIVATE wlb_net GTest::gtest_main)
+target_link_libraries(llm_brain_unittests PRIVATE wlb_net wlb_proto
+                      GTest::gtest_main)
 target_compile_options(llm_brain_unittests PRIVATE ${WLB_SAFETY_FLAGS})

@@ -9,7 +9,7 @@ shopt -s globstar nullglob
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 echo "== clang-format"
-clang-format --dry-run --Werror common/**/*.h common/**/*.cc server_module/*/src/*.h server_module/*/src/*.cc
+clang-format --dry-run --Werror common/**/*.h common/**/*.cc server_module/**/*.h server_module/**/*.cc
 echo "ok"
 echo "== includes"
 tools/check-includes.sh
