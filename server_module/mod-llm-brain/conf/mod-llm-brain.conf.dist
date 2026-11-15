@@ -1,0 +1,35 @@
+[worldserver]
+
+########################################
+# mod-llm-brain configuration
+########################################
+#
+#    LlmBrain.Enable
+#        Description: Enable the LLM brain bridge (snapshots out, commands in).
+#        Default:     0 - (Disabled)
+#                     1 - (Enabled)
+
+LlmBrain.Enable = 0
+
+#
+#    LlmBrain.SocketPath
+#        Description: Unix socket the harness connects to.
+#        Default:     "brain.sock" (relative to the worldserver working directory)
+
+LlmBrain.SocketPath = "brain.sock"
+
+#
+#    LlmBrain.Bots
+#        Description: Comma-separated character names the brain controls (phase 2: one bot).
+#        Default:     ""
+
+LlmBrain.Bots = ""
+
+#
+#    LlmBrain.SnapshotIntervalMs
+#        Description: How often each attached bot's snapshot is streamed to the harness.
+#                     The harness decides when to call the LLM (only when there is something
+#                     to act on, plus its own fallback timer); snapshots alone cost no LLM time.
+#        Default:     1000
+
+LlmBrain.SnapshotIntervalMs = 1000

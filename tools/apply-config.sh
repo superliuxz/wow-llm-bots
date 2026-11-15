@@ -34,4 +34,7 @@ apply "$ETC/worldserver.conf.dist" "$ETC/worldserver.conf" "$C/common.overrides"
 apply "$ETC/authserver.conf.dist"  "$ETC/authserver.conf"  "$C/common.overrides"
 apply "$ETC/dbimport.conf.dist"    "$ETC/dbimport.conf"    "$C/common.overrides"
 apply "$ETC/modules/playerbots.conf.dist" "$ETC/modules/playerbots.conf" "$C/playerbots.overrides" $(extra playerbots)
+if [ -f "$ETC/modules/mod-llm-brain.conf.dist" ]; then
+  apply "$ETC/modules/mod-llm-brain.conf.dist" "$ETC/modules/mod-llm-brain.conf" "$C/llm-brain.overrides" $(extra llm-brain)
+fi
 echo "config applied${T:+ (test: $T)}"

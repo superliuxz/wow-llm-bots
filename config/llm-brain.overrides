@@ -1,0 +1,5 @@
+# mod-llm-brain (our module). Phase 2: one bot, harness socket in server/run.
+LlmBrain.Enable = 1
+LlmBrain.SocketPath = "/mnt/storage/wow-llm-bots/server/run/brain.sock"
+LlmBrain.Bots = "Dezlu"
+LlmBrain.SnapshotIntervalMs = 1000

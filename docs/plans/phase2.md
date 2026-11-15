@@ -40,12 +40,12 @@ socket and two lock-protected queues. Nothing in the module ever waits on the ha
    Config file `mod-llm-brain.conf`: enabled, socket path, bot names to attach to, tick interval.
 2. IO thread + Unix socket server (Boost.Asio, already a server dependency); outbound/inbound
    queues; drop-oldest when the harness is gone (no unbounded growth).
-3. Snapshot v0 (world thread, per attached bot, every few seconds and on events):
+3. Snapshot v0 (world thread, per attached bot, streamed every 1 s; LLM is not called per snapshot):
    identity (name, race, class, level, gold), HP/mana, zone/subzone, position, current RPG
    activity, quest log summary, nearby units (name, level, hostile/friendly, quest giver),
    recent chat addressed to the bot. Plus a numbered **options** list computed in C++
    (e.g. "1. do quest X", "2. grind near Y", "3. wander", "4. rest").
-4. Events v0: whisper/say to the bot, activity finished (RPG status changed to idle).
+4. Events v0 (sent immediately, also visible in the next snapshot): whisper/say to the bot, activity finished (RPG status changed to idle).
 5. Commands v0 (applied on the world thread): `choose_option {n}` -> map to playerbots RPG
    switches (`ChangeToDoQuest`, `ChangeToGoGrind`, `ChangeToWanderRandom`, `ChangeToRest`);
    `say {channel, text, to}` -> bot speaks (whisper reply / say / party).
@@ -63,7 +63,7 @@ socket and two lock-protected queues. Nothing in the module ever waits on the ha
    prompt builder (content/RULES.md -> bot identity -> snapshot -> options), reply parser
    (option number; strict validation; one retry, else no-op so the stock AI continues),
    chat reply generation (separate call after the decision).
-6. `sched/`: priority queue v0 (chat reply > activity choice), bounded concurrency, stale
+6. `triggers/` + `sched/`: change detection on each snapshot (decides whether to think), 10 s fallback timer; priority queue v0 (chat reply > activity choice), bounded concurrency, stale
    request replacement per bot.
 7. Logging: `var/bots/<name>/events/<date>.jsonl` (snapshot, prompt hash, reply, choice,
    latency), atomic writes.
@@ -90,7 +90,6 @@ tiny fake harness (netcat-level), then B.
 2. **Bot manager:** phase 2 borrows one random bot (cheats disabled). Phase 3: our module owns
    bot lifecycle (character creation by each bot's brain, human-like login schedules, no cheats)
    and RandomPlayerbotMgr is no longer used for our bots.
-3. **Triggers:** events (whisper, activity finished) + 60 s idle safety net. For testing: console
-   command `brain think <bot>` to force a decision, and a verbose decision log in the harness.
+3. **Snapshots vs thinking:** the module streams every attached bot's snapshot to the harness every **1 s** (no LLM). The harness keeps the latest per bot and runs cheap change detection on each one (whisper/chat to the bot, activity finished, bags full, low health, friend nearby, ...). The LLM is called **only when a snapshot has something to act on**, plus a **10 s fallback** check-in if nothing triggered (50 bots ~ 5 calls/s). Trigger rules live in the harness (no server rebuild to tune). For testing: console command `brain think <bot>` and a verbose decision log.
 4. **Authorship:** Claude writes the code in small reviewable commits (each builds and is tested);
    the user reviews.
