@@ -1,0 +1,413 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/superliuxz/wow-llm-bots/docs/specs/snapshot.schema.json",
+  "title": "Bot perception snapshot",
+  "description": "What one bot perceives, as a real 3.3.5a client (plus that bot's addons) would. Explained in snapshot.md. Types inherit with allOf.",
+  "oneOf": [{"$ref": "#/$defs/SnapshotMessage"}, {"$ref": "#/$defs/EventMessage"}],
+
+  "$defs": {
+
+    "Vec3": {"type": "object", "required": ["x", "y", "z"],
+      "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "z": {"type": "number"}}},
+
+    "Direction": {"enum": ["N", "NE", "E", "SE", "S", "SW", "W", "NW", "here"]},
+
+    "Relative": {"description": "Where something is relative to the bot.", "type": "object",
+      "properties": {
+        "dist_yd": {"type": "number", "minimum": 0},
+        "dir": {"$ref": "#/$defs/Direction"},
+        "height": {"enum": ["above", "level", "below"]},
+        "in_los": {"type": "boolean"},
+        "position": {"$ref": "#/$defs/Vec3"},
+        "relative_position": {"type": "object", "properties": {
+          "behind_it": {"type": "boolean", "description": "bot is behind it (Backstab, frontal cones)"},
+          "facing_me": {"type": "boolean"}}}}},
+
+    "Entity": {"type": "object", "required": ["name"],
+      "properties": {"guid": {"type": "string"}, "name": {"type": "string"}}},
+
+    "Located": {"allOf": [{"$ref": "#/$defs/Entity"}, {"$ref": "#/$defs/Relative"}]},
+
+    "Tooltip": {"description": "The client's tooltip lines, in order.", "type": "array", "items": {"type": "string"}},
+
+    "Money": {"description": "Copper.", "type": "integer", "minimum": 0},
+
+    "LevelRange": {"type": "object", "properties": {"min": {"type": "integer"}, "max": {"type": "integer"}}},
+
+    "Spell": {"allOf": [{"$ref": "#/$defs/Entity"}, {"type": "object", "properties": {
+      "id": {"type": "integer"},
+      "rank": {"type": "integer"},
+      "school": {"enum": ["physical", "holy", "fire", "nature", "frost", "shadow", "arcane"]},
+      "cost": {"type": "object", "properties": {
+        "type": {"enum": ["mana", "rage", "energy", "runic_power", "focus", "health", "runes", "none"]},
+        "amount": {"type": "integer"}}},
+      "cast_time_ms": {"type": "integer"},
+      "range_yd": {"type": "number"},
+      "cooldown_s": {"type": "number"},
+      "tooltip": {"$ref": "#/$defs/Tooltip"}}}]},
+
+    "Ability": {"description": "A spell/item on the bot's action bars.", "allOf": [{"$ref": "#/$defs/Spell"}, {"type": "object", "properties": {
+      "cooldown_remaining_s": {"type": "number"},
+      "usable": {"type": "boolean"},
+      "in_range": {"type": "boolean"},
+      "known": {"type": "boolean"}}}]},
+
+    "TrainerSpell": {"allOf": [{"$ref": "#/$defs/Spell"}, {"type": "object", "properties": {
+      "price": {"$ref": "#/$defs/Money"},
+      "required_level": {"type": "integer"},
+      "learnable": {"type": "boolean"}}}]},
+
+    "Cast": {"type": "object", "required": ["spell"], "properties": {
+      "spell": {"$ref": "#/$defs/Spell"},
+      "remaining_ms": {"type": "integer"},
+      "interruptible": {"type": "boolean"},
+      "target": {"type": "string"},
+      "channeled": {"type": "boolean"}}},
+
+    "Aura": {"allOf": [{"$ref": "#/$defs/Entity"}, {"type": "object", "properties": {
+      "id": {"type": "integer"},
+      "harmful": {"type": "boolean"},
+      "remaining_s": {"type": "number"},
+      "stacks": {"type": "integer"},
+      "dispel_type": {"enum": ["magic", "curse", "poison", "disease", "none"]},
+      "dispellable_by_me": {"type": "boolean"},
+      "caster": {"type": "string", "description": "\"me\" or a name"},
+      "tooltip": {"$ref": "#/$defs/Tooltip"}}}]},
+
+    "Activity": {"description": "What a unit is doing (NPCs, allies, bosses, enemies alike).", "type": "object", "required": ["state"], "properties": {
+      "state": {"enum": ["idle", "moving", "approaching_me", "fleeing", "fighting", "casting", "channeling",
+                         "talking", "emoting", "looting", "gathering", "sitting", "following", "fishing", "dead"]},
+      "cast": {"$ref": "#/$defs/Cast"},
+      "with": {"type": "string", "description": "whom it fights, follows or talks to"},
+      "text": {"type": "string", "description": "speech or emote text"}}},
+
+    "Unit": {"allOf": [{"$ref": "#/$defs/Located"}, {"type": "object", "properties": {
+      "kind": {"enum": ["npc", "player", "pet", "vehicle", "totem"]},
+      "level": {"type": "integer"},
+      "level_color": {"enum": ["gray", "green", "yellow", "orange", "red", "skull"]},
+      "reaction": {"enum": ["hostile", "neutral", "friendly"]},
+      "classification": {"enum": ["normal", "elite", "rare", "rare_elite", "boss"]},
+      "health_pct": {"type": "number"},
+      "power_pct": {"type": "number"},
+      "dead": {"type": "boolean"},
+      "lootable": {"type": "boolean"},
+      "skinnable": {"type": "boolean"},
+      "tapped_by_other": {"type": "boolean"},
+      "targeting_me": {"type": "boolean"},
+      "target": {"type": "string"},
+      "threat_status": {"enum": ["none", "high", "aggro"], "description": "default UI threat indicator vs me"},
+      "quest_marker": {"enum": ["!", "?", "gray!"]},
+      "services": {"type": "array", "items": {"enum": ["vendor", "class_trainer", "profession_trainer", "repair",
+        "innkeeper", "flight_master", "banker", "auctioneer", "stable_master", "spirit_healer",
+        "battlemaster", "guild_master", "tabard_vendor", "quest_giver"]}},
+      "pvp_flagged": {"type": "boolean"},
+      "activity": {"$ref": "#/$defs/Activity"},
+      "auras": {"type": "array", "items": {"$ref": "#/$defs/Aura"}},
+      "raid_marker": {"enum": ["star", "circle", "diamond", "triangle", "moon", "square", "cross", "skull"]}}}]},
+
+    "Player": {"allOf": [{"$ref": "#/$defs/Unit"}, {"type": "object", "properties": {
+      "class": {"type": "string"},
+      "race": {"type": "string"},
+      "guild": {"type": "string"},
+      "in_my_group": {"type": "boolean"},
+      "is_friend": {"type": "boolean"},
+      "gearscore": {"type": "integer", "description": "only with the GearScore addon"}}}]},
+
+    "GroupMember": {"allOf": [{"$ref": "#/$defs/Player"}, {"type": "object", "properties": {
+      "role": {"enum": ["tank", "healer", "dps"]},
+      "online": {"type": "boolean"},
+      "health_deficit": {"type": "integer"},
+      "in_range": {"type": "boolean"},
+      "aggro": {"type": "boolean"},
+      "subgroup": {"type": "integer"}}}]},
+
+    "Boss": {"allOf": [{"$ref": "#/$defs/Unit"}, {"type": "object", "properties": {"phase": {"type": "integer"}}}]},
+
+    "Pet": {"allOf": [{"$ref": "#/$defs/Unit"}, {"type": "object", "properties": {
+      "happiness": {"enum": ["unhappy", "content", "happy"]},
+      "autocast": {"type": "array", "items": {"$ref": "#/$defs/Spell"}}}}]},
+
+    "Vehicle": {"allOf": [{"$ref": "#/$defs/Unit"}, {"type": "object", "properties": {
+      "seats": {"type": "array", "items": {"type": "object", "properties": {
+        "occupant": {"type": "string"}, "controls": {"type": "boolean"}}}},
+      "abilities": {"type": "array", "items": {"$ref": "#/$defs/Ability"}}}}]},
+
+    "Self": {"description": "The bot itself: a Player plus what only its own UI shows.", "allOf": [{"$ref": "#/$defs/Player"}, {"type": "object", "properties": {
+      "gender": {"enum": ["male", "female"]},
+      "xp": {"type": "integer"}, "xp_next": {"type": "integer"}, "rested_xp": {"type": "integer"},
+      "health": {"type": "integer"}, "health_max": {"type": "integer"},
+      "power_type": {"enum": ["mana", "rage", "energy", "runic_power", "focus"]},
+      "power": {"type": "integer"}, "power_max": {"type": "integer"},
+      "state": {"enum": ["alive", "dead", "ghost"]},
+      "in_combat": {"type": "boolean"}, "resting": {"type": "boolean"}, "camping": {"type": "boolean"},
+      "mounted": {"type": "boolean"}, "swimming": {"type": "boolean"},
+      "in_flight": {"type": "boolean"}, "on_transport": {"type": "boolean"},
+      "control": {"type": "object", "properties": {
+        "stunned": {"type": "boolean"}, "feared": {"type": "boolean"}, "charmed": {"type": "boolean"},
+        "silenced": {"type": "boolean"}, "rooted": {"type": "boolean"}, "pacified": {"type": "boolean"},
+        "disarmed": {"type": "boolean"}}},
+      "casting": {"$ref": "#/$defs/Cast"},
+      "money": {"$ref": "#/$defs/Money"},
+      "new_mail": {"type": "boolean"}}}]},
+
+    "GameObject": {"allOf": [{"$ref": "#/$defs/Located"}, {"type": "object", "properties": {
+      "kind": {"enum": ["quest_object", "herb", "ore", "chest", "mailbox", "door", "campfire", "bobber",
+                        "meeting_stone", "summoning_portal", "transport", "other"]},
+      "usable": {"type": "boolean"},
+      "state": {"type": "string", "description": "e.g. bobber \"splashing\", door \"open\""}}}]},
+
+    "Area": {"description": "A ground effect (dynamic object).", "allOf": [{"$ref": "#/$defs/Located"}, {"type": "object", "properties": {
+      "spell": {"$ref": "#/$defs/Spell"},
+      "radius_yd": {"type": "number"},
+      "inside_me": {"type": "boolean"},
+      "hostile": {"type": "boolean"},
+      "remaining_s": {"type": "number"}}}]},
+
+    "Item": {"allOf": [{"$ref": "#/$defs/Entity"}, {"type": "object", "properties": {
+      "id": {"type": "integer"},
+      "quality": {"enum": ["poor", "common", "uncommon", "rare", "epic", "legendary", "artifact", "heirloom"]},
+      "count": {"type": "integer"},
+      "kind": {"enum": ["equipment", "consumable", "quest", "trade_good", "recipe", "container", "reagent", "projectile", "junk", "key", "other"]},
+      "bag_slot": {"type": "string", "description": "e.g. \"bag1:4\""},
+      "item_level": {"type": "integer"},
+      "required_level": {"type": "integer"},
+      "bound": {"enum": ["soulbound", "bind_on_equip", "bind_on_use", "none"]},
+      "unique": {"type": "boolean"},
+      "vendor_value": {"$ref": "#/$defs/Money"},
+      "usable": {"type": "boolean"},
+      "cooldown_s": {"type": "number"},
+      "charges": {"type": "integer"},
+      "tooltip": {"$ref": "#/$defs/Tooltip"}}}]},
+
+    "Equipment": {"allOf": [{"$ref": "#/$defs/Item"}, {"type": "object", "properties": {
+      "slot": {"enum": ["head", "neck", "shoulder", "back", "chest", "shirt", "tabard", "wrist", "hands", "waist",
+                        "legs", "feet", "finger1", "finger2", "trinket1", "trinket2", "main_hand", "off_hand", "ranged"]},
+      "durability_pct": {"type": "number"},
+      "stats": {"type": "object", "additionalProperties": {"type": "number"}},
+      "gearscore": {"type": "integer"},
+      "gearscore_delta": {"type": "integer", "description": "vs equipped in that slot"},
+      "upgrade": {"type": "boolean"}}}]},
+
+    "PricedItem": {"allOf": [{"$ref": "#/$defs/Item"}, {"type": "object", "properties": {
+      "price": {"$ref": "#/$defs/Money"}}}]},
+
+    "AnyItem": {"anyOf": [{"$ref": "#/$defs/Equipment"}, {"$ref": "#/$defs/Item"}]},
+
+    "Place": {"allOf": [{"$ref": "#/$defs/Located"}, {"type": "object", "properties": {
+      "kind": {"enum": ["town", "camp", "flight_master", "innkeeper", "graveyard", "dungeon", "raid", "zone_exit",
+                        "landmark", "campfire", "auction_house", "bank", "trainer", "vendor", "dock", "zeppelin_tower"]},
+      "known": {"type": "boolean", "description": "flight paths"},
+      "level_range": {"$ref": "#/$defs/LevelRange"}}}]},
+
+    "Objective": {"type": "object", "required": ["title"], "properties": {
+      "title": {"type": "string"},
+      "progress": {"type": "object", "properties": {"have": {"type": "integer"}, "need": {"type": "integer"}}},
+      "done": {"type": "boolean"},
+      "where": {"$ref": "#/$defs/Place"}}},
+
+    "QuestObjective": {"allOf": [{"$ref": "#/$defs/Objective"}, {"type": "object", "properties": {
+      "source": {"const": "quest"},
+      "quest": {"type": "string"},
+      "text": {"type": "string"},
+      "complete": {"type": "boolean"},
+      "failed": {"type": "boolean"},
+      "daily": {"type": "boolean"},
+      "timer_s": {"type": "number"},
+      "escort": {"type": "string"}}}]},
+
+    "Goal": {"allOf": [{"$ref": "#/$defs/Objective"}, {"type": "object", "required": ["id", "goal_kind"], "properties": {
+      "source": {"const": "goal"},
+      "id": {"type": "string"},
+      "goal_kind": {"enum": ["sell", "buy", "train", "repair", "learn_profession", "reach_level", "travel_to", "meet", "farm", "other"]},
+      "params": {"type": "object"}}}]},
+
+    "ChatChannel": {"enum": ["say", "yell", "whisper", "party", "raid", "raid_warning", "guild", "officer", "general",
+                             "trade", "lfg", "emote", "monster_say", "monster_yell", "monster_emote", "system", "channel"]},
+
+    "Event": {"type": "object", "required": ["kind"], "properties": {
+      "kind": {"enum": ["chat", "error", "prompt", "level_up", "talent_point_gained", "quest_complete", "quest_failed",
+                        "xp_gained", "money_changed", "item_received", "skill_up", "died", "resurrected", "loot_roll",
+                        "loot_won", "mail_received", "auction_sold", "auction_expired", "zone_changed", "discovered_area",
+                        "path_failed", "duel_started", "duel_ended", "dbm_warning"]},
+      "channel": {"$ref": "#/$defs/ChatChannel"},
+      "from": {"type": "string"},
+      "text": {"type": "string"},
+      "at_me": {"type": "boolean"},
+      "from_dist_yd": {"type": "number"},
+      "prompt": {"enum": ["group_invite", "trade", "duel", "guild_invite", "ready_check", "resurrect_offer", "summon", "battleground"]},
+      "item": {"$ref": "#/$defs/AnyItem"},
+      "money": {"$ref": "#/$defs/Money"},
+      "roll_id": {"type": "integer"},
+      "killer": {"type": "string"},
+      "to": {"$ref": "#/$defs/Place"}}},
+
+    "Base": {"type": "object", "required": ["self", "where", "nearby"], "properties": {
+      "self": {"$ref": "#/$defs/Self"},
+      "where": {"type": "object", "properties": {
+        "map": {"type": "string"}, "zone": {"type": "string"}, "subzone": {"type": "string"},
+        "position": {"$ref": "#/$defs/Vec3"}, "facing": {"type": "number"},
+        "indoors": {"type": "boolean"}, "in_instance": {"type": "boolean"}}},
+      "doing": {"type": "object", "properties": {
+        "activity": {"type": "string"}, "since_s": {"type": "number"}, "detail": {"type": "string"}}},
+      "nearby": {"type": "object", "properties": {
+        "units": {"type": "array", "maxItems": 50, "items": {"anyOf": [{"$ref": "#/$defs/Player"}, {"$ref": "#/$defs/Unit"}]}},
+        "objects": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/GameObject"}},
+        "areas": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/Area"}}}}}},
+
+    "Extensions": {"description": "Only active extensions are present.", "type": "object", "additionalProperties": false, "properties": {
+      "map": {"type": "object", "properties": {
+        "zone": {"type": "object", "properties": {"name": {"type": "string"}, "level_range": {"$ref": "#/$defs/LevelRange"}}},
+        "places": {"type": "array", "items": {"$ref": "#/$defs/Place"}},
+        "bordering_zones": {"type": "array", "items": {"$ref": "#/$defs/Place"}},
+        "objective_locations": {"type": "array", "items": {"$ref": "#/$defs/Place"}},
+        "tracked": {"type": "array", "description": "minimap blips from active tracking (Find Herbs, Track Beasts...)", "items": {"$ref": "#/$defs/Located"}},
+        "questie": {"type": "object", "description": "only with Questie", "properties": {
+          "quest_givers": {"type": "array", "items": {"$ref": "#/$defs/Place"}},
+          "spawn_areas": {"type": "array", "items": {"$ref": "#/$defs/Place"}}}}}},
+      "objectives": {"type": "array", "items": {"anyOf": [{"$ref": "#/$defs/QuestObjective"}, {"$ref": "#/$defs/Goal"}]}},
+      "inventory": {"type": "object", "properties": {
+        "bags": {"type": "array", "items": {"$ref": "#/$defs/AnyItem"}},
+        "free_slots": {"type": "integer"}, "total_slots": {"type": "integer"},
+        "equipped": {"type": "array", "items": {"$ref": "#/$defs/Equipment"}},
+        "gearscore": {"type": "integer"},
+        "hearthstone": {"type": "object", "properties": {"ready": {"type": "boolean"}, "bind": {"type": "string"}}}}},
+      "character": {"type": "object", "properties": {
+        "unspent_talent_points": {"type": "integer"},
+        "talents": {"type": "object", "additionalProperties": {"type": "integer"}, "description": "points per tree"},
+        "skills": {"type": "array", "items": {"type": "object", "properties": {
+          "name": {"type": "string"}, "skill": {"type": "integer"}, "max": {"type": "integer"}}}},
+        "reputations": {"type": "array", "items": {"type": "object", "properties": {
+          "faction": {"type": "string"}, "standing": {"type": "string"}, "value": {"type": "integer"}}}}}},
+      "world": {"type": "object", "properties": {
+        "game_time": {"type": "string"}, "session_minutes": {"type": "integer"},
+        "daily_reset_in_s": {"type": "integer"}, "server_message": {"type": "string"}}},
+      "target": {"type": "object", "properties": {
+        "target": {"anyOf": [{"$ref": "#/$defs/Player"}, {"$ref": "#/$defs/Boss"}, {"$ref": "#/$defs/Unit"}]},
+        "focus": {"$ref": "#/$defs/Unit"}}},
+      "combat": {"type": "object", "properties": {
+        "attackers": {"type": "array", "items": {"$ref": "#/$defs/Unit"}},
+        "threat": {"type": "array", "description": "only with Omen", "items": {"type": "object", "properties": {
+          "unit": {"type": "string"}, "my_threat_pct": {"type": "number"}, "top": {"type": "string"}}}},
+        "abilities": {"type": "array", "items": {"$ref": "#/$defs/Ability"}},
+        "resources": {"type": "object", "properties": {"combo_points": {"type": "integer"}, "runes": {"type": "array", "items": {"type": "string"}}}},
+        "summary": {"type": "string"},
+        "duel_opponent": {"type": "string"}}},
+      "party": {"type": "object", "properties": {
+        "leader": {"type": "string"},
+        "members": {"type": "array", "items": {"$ref": "#/$defs/GroupMember"}},
+        "missing_buffs_i_can_give": {"type": "array", "items": {"type": "string"}},
+        "loot_method": {"type": "string"}}},
+      "raid": {"type": "object", "properties": {
+        "members": {"type": "array", "items": {"$ref": "#/$defs/GroupMember"}},
+        "main_tanks": {"type": "array", "items": {"type": "string"}}}},
+      "encounter": {"type": "object", "properties": {
+        "boss": {"$ref": "#/$defs/Boss"},
+        "dbm": {"type": "array", "description": "only with DBM", "items": {"type": "object", "properties": {
+          "name": {"type": "string"}, "remaining_s": {"type": "number"}}}}}},
+      "instance": {"type": "object", "properties": {
+        "name": {"type": "string"}, "difficulty": {"type": "string"}, "size": {"type": "integer"},
+        "bosses": {"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}, "killed": {"type": "boolean"}}}},
+        "locked_until": {"type": "string"},
+        "entrance": {"$ref": "#/$defs/Place"}}},
+      "death": {"type": "object", "properties": {
+        "corpse": {"$ref": "#/$defs/Relative"},
+        "can_resurrect_in_s": {"type": "number"},
+        "spirit_healer": {"$ref": "#/$defs/Place"},
+        "resurrect_offer_from": {"type": "string"}}},
+      "vehicle": {"$ref": "#/$defs/Vehicle"},
+      "interaction": {"type": "object", "properties": {
+        "window": {"enum": ["merchant", "trainer", "quest", "gossip", "flight_map", "bank", "mail", "auction_house",
+                            "tradeskill", "inspect", "item_text", "raid_browser"]},
+        "with": {"type": "string"},
+        "merchant": {"type": "object", "properties": {
+          "items": {"type": "array", "items": {"$ref": "#/$defs/PricedItem"}},
+          "buyback": {"type": "array", "items": {"$ref": "#/$defs/PricedItem"}},
+          "can_repair": {"type": "boolean"}, "repair_cost": {"$ref": "#/$defs/Money"}}},
+        "trainer": {"type": "array", "items": {"$ref": "#/$defs/TrainerSpell"}},
+        "quest": {"type": "object", "properties": {
+          "title": {"type": "string"}, "text": {"type": "string"}, "objectives": {"type": "string"},
+          "rewards": {"type": "array", "items": {"$ref": "#/$defs/AnyItem"}},
+          "choices": {"type": "array", "items": {"$ref": "#/$defs/AnyItem"}},
+          "money": {"$ref": "#/$defs/Money"}}},
+        "gossip": {"type": "array", "items": {"type": "string"}},
+        "flight_map": {"type": "array", "items": {"allOf": [{"$ref": "#/$defs/Place"}, {"type": "object", "properties": {"price": {"$ref": "#/$defs/Money"}}}]}},
+        "bank": {"type": "array", "items": {"$ref": "#/$defs/AnyItem"}},
+        "mail": {"type": "array", "items": {"type": "object", "properties": {
+          "from": {"type": "string"}, "subject": {"type": "string"}, "money": {"$ref": "#/$defs/Money"},
+          "cod": {"$ref": "#/$defs/Money"}, "items": {"type": "array", "items": {"$ref": "#/$defs/AnyItem"}}}}},
+        "auction_house": {"type": "object", "properties": {
+          "my_auctions": {"type": "array", "items": {"$ref": "#/$defs/PricedItem"}},
+          "results": {"type": "array", "items": {"$ref": "#/$defs/PricedItem"}}}},
+        "tradeskill": {"type": "array", "items": {"type": "object", "properties": {
+          "name": {"type": "string"},
+          "reagents": {"type": "array", "items": {"type": "object", "properties": {
+            "item": {"$ref": "#/$defs/Item"}, "have": {"type": "integer"}, "need": {"type": "integer"}}}},
+          "skillup_color": {"enum": ["orange", "yellow", "green", "gray"]},
+          "can_craft": {"type": "boolean"}}}},
+        "inspect": {"type": "object", "properties": {
+          "player": {"$ref": "#/$defs/Player"},
+          "equipped": {"type": "array", "items": {"$ref": "#/$defs/Equipment"}}}},
+        "item_text": {"type": "string"},
+        "raid_browser": {"type": "array", "items": {"type": "object", "properties": {
+          "leader": {"type": "string"}, "raid": {"type": "string"}, "comment": {"type": "string"}, "members": {"type": "integer"}}}}}},
+      "trade_loot": {"type": "object", "properties": {
+        "trade": {"type": "object", "properties": {
+          "with": {"type": "string"},
+          "mine": {"type": "array", "items": {"$ref": "#/$defs/AnyItem"}},
+          "theirs": {"type": "array", "items": {"$ref": "#/$defs/AnyItem"}},
+          "my_money": {"$ref": "#/$defs/Money"}, "their_money": {"$ref": "#/$defs/Money"}}},
+        "loot": {"type": "array", "items": {"$ref": "#/$defs/AnyItem"}},
+        "roll": {"type": "object", "properties": {
+          "item": {"$ref": "#/$defs/AnyItem"}, "roll_id": {"type": "integer"}, "time_left_s": {"type": "number"}}}}},
+      "travel": {"type": "object", "properties": {
+        "known_flight_paths": {"type": "array", "items": {"$ref": "#/$defs/Place"}},
+        "nearest_flight_master": {"$ref": "#/$defs/Place"},
+        "mount": {"$ref": "#/$defs/Item"},
+        "transports": {"type": "array", "items": {"type": "object", "properties": {
+          "to": {"type": "string"}, "from": {"$ref": "#/$defs/Place"}, "departs_in_s": {"type": "number"}}}}}},
+      "pet": {"type": "object", "properties": {
+        "pet": {"$ref": "#/$defs/Pet"},
+        "totems": {"type": "array", "items": {"allOf": [{"$ref": "#/$defs/Entity"}, {"type": "object", "properties": {"remaining_s": {"type": "number"}}}]}}}},
+      "social": {"type": "object", "properties": {
+        "friends_online": {"type": "array", "items": {"type": "string"}},
+        "guild": {"type": "object", "properties": {
+          "name": {"type": "string"}, "rank": {"type": "string"}, "motd": {"type": "string"}, "online": {"type": "integer"}}},
+        "calendar": {"type": "array", "items": {"type": "object", "properties": {
+          "title": {"type": "string"}, "when": {"type": "string"}, "my_status": {"enum": ["invited", "accepted", "declined", "tentative"]}}}},
+        "lfg_listings": {"type": "array", "items": {"type": "string"}}}},
+      "environment": {"type": "object", "properties": {
+        "breath_s": {"type": "number"}, "fatigue_s": {"type": "number"},
+        "falling": {"type": "object", "properties": {"height_yd": {"type": "number"}}}}},
+      "battleground": {"type": "object", "properties": {
+        "name": {"type": "string"},
+        "score": {"type": "object", "additionalProperties": {"type": "integer"}},
+        "objectives": {"type": "array", "items": {"allOf": [{"$ref": "#/$defs/Place"}, {"type": "object", "properties": {"owner": {"type": "string"}}}]}},
+        "flag_carriers": {"type": "array", "items": {"type": "string"}},
+        "remaining_s": {"type": "number"}}},
+      "surroundings": {"description": "When stuck, a path failed, or in tight terrain: what a human would see in 3D, from navmesh/vmaps.", "type": "object", "properties": {
+        "walkable": {"type": "array", "items": {"$ref": "#/$defs/Direction"}},
+        "obstacles": {"type": "array", "items": {"allOf": [{"$ref": "#/$defs/Relative"}, {"type": "object", "properties": {
+          "kind": {"enum": ["wall", "slope", "drop", "water", "ledge", "opening", "door", "tree", "rock"]},
+          "height_yd": {"type": "number"}}}]}},
+        "goal": {"$ref": "#/$defs/Relative"},
+        "image": {"type": "string", "description": "optional synthetic top-down render (base64 PNG) for a vision model"},
+        "description": {"type": "string"}}}}},
+
+    "SnapshotMessage": {"type": "object", "required": ["type", "bot", "seq", "t", "base"], "properties": {
+      "type": {"const": "snapshot"},
+      "bot": {"type": "string"},
+      "seq": {"type": "integer"},
+      "t": {"type": "integer", "description": "game time, ms"},
+      "base": {"$ref": "#/$defs/Base"},
+      "ext": {"$ref": "#/$defs/Extensions"},
+      "events": {"type": "array", "items": {"$ref": "#/$defs/Event"}},
+      "options": {"type": "array", "items": {"type": "string"}}}},
+
+    "EventMessage": {"type": "object", "required": ["type", "bot", "seq", "t", "event"], "properties": {
+      "type": {"const": "event"},
+      "bot": {"type": "string"},
+      "seq": {"type": "integer"},
+      "t": {"type": "integer"},
+      "event": {"$ref": "#/$defs/Event"}}}
+  }
+}

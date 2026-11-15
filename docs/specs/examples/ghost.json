@@ -1,0 +1,8 @@
+{"type":"snapshot","bot":"Dezlu","seq":980,"t":6021000,
+ "base":{"self":{"name":"Dezlu","kind":"player","level":6,"state":"ghost","in_combat":false,"control":{},"money":340},
+  "where":{"map":"Kalimdor","zone":"Durotar","subzone":"Razor Hill"},
+  "nearby":{"units":[{"name":"Spirit Healer","kind":"npc","reaction":"friendly","services":["spirit_healer"],"dist_yd":8,"dir":"S"}],"objects":[],"areas":[]}},
+ "ext":{"death":{"corpse":{"dist_yd":220,"dir":"NE"},"can_resurrect_in_s":0,"spirit_healer":{"name":"Spirit Healer","kind":"graveyard","dist_yd":8,"dir":"S"}},
+  "surroundings":{"walkable":["N","NE","E"],"obstacles":[{"kind":"wall","dist_yd":4,"dir":"W","height_yd":6}],"goal":{"dist_yd":220,"dir":"NE"},"description":"Open slope to the NE towards the corpse; fence to the W."}},
+ "events":[{"kind":"path_failed","to":{"name":"corpse","kind":"landmark","dist_yd":220,"dir":"NE"}}],
+ "options":["Run to corpse (NE, 220 yd)","Resurrect at Spirit Healer","Use \"Stuck\""]}

@@ -1,0 +1,25 @@
+{"type":"snapshot","bot":"Morwyn","seq":90211,"t":88001000,
+ "base":{
+  "self":{"name":"Morwyn","kind":"player","race":"Tauren","class":"Druid","level":80,"health":21000,"health_max":23500,
+   "power_type":"mana","power":15200,"power_max":28000,"state":"alive","in_combat":true,"control":{},"money":12345678,
+   "casting":{"spell":{"name":"Nourish","cast_time_ms":1500},"remaining_ms":600,"interruptible":true,"target":"Grumbar"}},
+  "where":{"map":"Icecrown Citadel","zone":"Icecrown Citadel","subzone":"The Frozen Throne","in_instance":true},
+  "nearby":{
+   "units":[{"name":"The Lich King","kind":"npc","level":83,"level_color":"skull","reaction":"hostile","classification":"boss",
+     "health_pct":61,"dist_yd":32,"dir":"N","in_los":true,"target":"Grumbar",
+     "activity":{"state":"casting","cast":{"spell":{"name":"Defile"},"remaining_ms":1800,"interruptible":false,"target":"Lacrimae"}}}],
+   "objects":[],
+   "areas":[{"name":"Defile","spell":{"name":"Defile","school":"shadow"},"radius_yd":6,"dist_yd":9,"dir":"E","inside_me":false,"hostile":true}]}},
+ "ext":{
+  "raid":{"members":[
+   {"name":"Grumbar","kind":"player","class":"Warrior","role":"tank","health_pct":48,"health_deficit":19000,"in_range":true,"aggro":true,"subgroup":1,
+    "auras":[{"name":"Necrotic Plague","harmful":true,"remaining_s":5,"dispel_type":"disease","dispellable_by_me":false}]},
+   {"name":"Lacrimae","kind":"player","class":"Mage","role":"dps","health_pct":100,"in_range":true,"subgroup":2,
+    "auras":[{"name":"Curse of Doom","harmful":true,"remaining_s":40,"dispel_type":"curse","dispellable_by_me":true}]}],
+   "main_tanks":["Grumbar"]},
+  "encounter":{"boss":{"name":"The Lich King","kind":"npc","classification":"boss","health_pct":61,"phase":2},
+   "dbm":[{"name":"Defile","remaining_s":30},{"name":"Summon Val'kyr","remaining_s":12}]},
+  "instance":{"name":"Icecrown Citadel","difficulty":"25 normal","size":25,"bosses":[{"name":"The Lich King","killed":false}]},
+  "combat":{"abilities":[{"name":"Wild Growth","cooldown_s":6,"cooldown_remaining_s":2.1,"usable":true,"in_range":true}]}},
+ "events":[{"kind":"chat","channel":"raid_warning","from":"Gorvak","text":"Defile soon, spread out!"}],
+ "options":["Keep doing what I'm doing","Move away from Defile (W)","Heal Grumbar (Wild Growth)","Remove Curse on Lacrimae"]}

@@ -1,11 +1,17 @@
 # Bot perception: the snapshot spec
 
-Status: **agreed, revision 3** (2026-11-14). Everything a bot's brain decides is based on this.
+Status: **agreed, revision 4** (2026-11-15). The exact field-level contract is the JSON Schema
+[`snapshot.schema.json`](snapshot.schema.json) (types inherit with `allOf`); examples in
+[`examples/`](examples/), checked by `tools/validate-snapshots.sh`. This document explains it. Everything a bot's brain decides is based on this.
 
 ## 1. Principles
 
-1. **Parity with a real client.** A bot perceives what a human player would get through the
-   3.3.5a client plus the addons that bot "has installed". Nothing hidden, nothing extra.
+1. **Definition: everything a user could possibly see in the WoW client, nothing more.**
+   A bot perceives what a human player could get through the 3.3.5a client plus the addons
+   that bot "has installed". The test for any field: *is there a place in the client (or one
+   of this bot's addons) where a human could see this?* If yes, it belongs here, in the
+   extension for that UI place; if no, it doesn't, however useful it would be. The one
+   deliberate stand-in is `surroundings`, which approximates the 3D view itself.
 2. **A base view plus extensions**, like the real UI: a base screen everyone has, and panels
    or addons that appear in certain situations. **Always-on** extensions (`map`,
    `objectives`, `inventory`, `character`, `world`) model what a player keeps glancing at;
@@ -47,44 +53,46 @@ Status: **agreed, revision 3** (2026-11-14). Everything a bot's brain decides is
 - Size budget ~2-4 KB typical, hard cap 16 KB. Tooltips are sent in full only where a
   decision needs them (§7); under pressure lists are truncated by salience.
 
-## 3. Shared types
+## 3. Types
 
-### Item (bags, equipment, vendor, bank, mail, loot, trade, rolls, rewards, AH)
-`{name, id, quality (poor..legendary), count, kind (equipment/consumable/quest/trade_good/
-recipe/container/junk/other), slot (for equipment), item_level, required_level, bound
-(soulbound/BoE/BoU/none), unique, vendor_value, usable, cooldown_s, charges,
-tooltip (the client's tooltip lines: stats, "Use:", "Equip:", "Chance on hit:", set bonus,
-durability, requirements), gearscore (equipment, with GearScore), gearscore_delta (vs what's
-equipped in that slot), upgrade (bool, with GearScore)}`
+Every concept is one type, reused everywhere it appears (object-oriented: children inherit
+their parent's fields). Full definitions in the schema's `$defs`.
 
-### Spell / ability (action bars, spellbook, trainer, casts by anyone)
-`{name, id, rank, school, cost {type, amount}, cast_time_ms, range_yd, cooldown_s (total),
-cooldown_remaining_s, usable, in_range, known, tooltip}`
-For a cast in progress: `{spell, remaining_ms, interruptible, target}`.
+```
+Entity {guid, name}
+├─ Located = Entity + Relative {dist_yd, dir, height, in_los, position, relative_position {behind_it, facing_me}}
+│  ├─ Unit {kind, level, level_color, reaction, classification, health_pct, power_pct, dead, lootable,
+│  │        skinnable, tapped_by_other, targeting_me, target, threat_status, quest_marker, services,
+│  │        pvp_flagged, activity (Activity), auras [Aura], raid_marker}
+│  │  ├─ Player {class, race, guild, in_my_group, is_friend, gearscore (GearScore addon)}
+│  │  │  ├─ Self: the bot (xp, health/power, state, combat/resting/camping/mounted/flight/transport,
+│  │  │  │        control {stunned, feared, ...}, casting (Cast), money, new_mail)
+│  │  │  └─ GroupMember {role, online, health_deficit, in_range, aggro, subgroup}
+│  │  ├─ Boss {phase}
+│  │  ├─ Pet {happiness, autocast [Spell]}
+│  │  └─ Vehicle {seats, abilities [Ability]}
+│  ├─ GameObject {kind (quest object, herb, ore, chest, mailbox, door, campfire, bobber...), usable,
+│  │              state ("splashing", "open"...)}
+│  ├─ Area: a ground effect {spell, radius_yd, inside_me, hostile, remaining_s}
+│  └─ Place {kind (town, camp, flight master, graveyard, dungeon, zone exit, AH...), known, level_range}
+├─ Item {id, quality, count, kind, item_level, required_level, bound, unique, vendor_value, usable,
+│        cooldown_s, charges, tooltip}
+│  ├─ Equipment {slot, durability_pct, stats, gearscore, gearscore_delta, upgrade}
+│  └─ PricedItem {price}  (merchant, buyback, auction house)
+├─ Spell {id, rank, school, cost, cast_time_ms, range_yd, cooldown_s, tooltip}
+│  ├─ Ability {cooldown_remaining_s, usable, in_range, known}  (action bars)
+│  └─ TrainerSpell {price, required_level, learnable}
+└─ Aura {id, harmful, remaining_s, stacks, dispel_type, dispellable_by_me, caster, tooltip}
 
-### Aura (buffs/debuffs on anyone)
-`{name, id, harmful, remaining_s, stacks, dispel_type (magic/curse/poison/disease/none),
-dispellable_by_me, caster (me / name), tooltip}`
+Objective {title, progress {have, need}, done, where (Place)}
+├─ QuestObjective {quest, text, complete, failed, daily, timer_s, escort}
+└─ Goal {id, goal_kind (sell, buy, train, repair, learn_profession, reach_level, travel_to, meet, farm), params}
 
-### Unit (nearby, target, party, raid, pet, boss)
-`{name, guid, kind (npc/player/pet/vehicle), level, level_color, reaction (hostile/
-neutral/friendly), role (for group members), classification (normal/elite/rare/
-rare_elite/boss), health_pct, power_pct, dist_yd, dir (8-way + above/below), in_los,
-targeting_me, target (name), tapped_by_other, quest_marker (!, ?, gray !), services
-(vendor, class trainer, profession trainer, repair, innkeeper, flight master, banker,
-auctioneer, mailbox, stable master, spirit healer, battlemaster...), dead, lootable,
-skinnable, pvp_flagged, activity, auras (visible on its frame)}`.
-Players add `class, guild, in_my_group, is_friend`.
-
-**`activity`** (what the unit is doing, the same for NPCs, allies, bosses, enemies):
-`{state: idle/moving/approaching_me/fleeing/fighting/casting/channeling/talking/
-emoting/looting/gathering/sitting/following/dead, detail}` where `detail` is e.g. the
-cast `{spell, remaining_ms, interruptible, target}`, whom it's fighting or following,
-or the emote/speech text.
-
-### Place (map)
-`{name, kind (town/camp/flight_master/innkeeper/graveyard/dungeon/raid/zone_exit/
-landmark/campfire), dir, dist_yd, known (flight paths), level_range (zones)}`
+Activity {state (idle, moving, approaching_me, fleeing, fighting, casting, channeling, talking,
+          emoting, looting, gathering, sitting, following, fishing, dead), cast (Cast), with, text}
+Cast {spell (Spell), remaining_ms, interruptible, target, channeled}
+Event {kind, ...}   (§8)
+```
 
 ## 4. Base view (always present)
 
@@ -92,10 +100,10 @@ What's on screen with nothing open.
 
 | Block | Fields | Client equivalent |
 |---|---|---|
-| `self` | name, race, class, gender, level; `xp`, `xp_next`, `rested_xp`; `health`/`health_max`; `power_type`, `power`/`power_max`; `state` (alive / dead at corpse / ghost); `in_combat`, `resting`, `camping` (our campfire feature), `mounted`, `swimming`, `in_flight`, `on_transport`; `control` `{stunned, feared, charmed, silenced, rooted, pacified, disarmed}`; `casting` (cast type); `auras` (Aura list); `money` (copper); `new_mail` | unit frame, buff bar, cast bar, minimap mail icon |
-| `where` | `map`, `zone`, `subzone`, `x,y,z`, `facing`, `indoors`, `in_instance` | minimap, zone text |
+| `self` | **Self** | unit frame, buff bar, cast bar, minimap mail icon |
+| `where` | `map`, `zone`, `subzone`, `position`, `facing`, `indoors`, `in_instance` | minimap, zone text |
 | `doing` | `{activity, since_s, detail}` (do_quest + title, grind + area, rest, travel...) | the player's own intent |
-| `nearby` | **units** (Unit, up to 50), **objects** (up to 20: `{name, kind (quest object, herb, ore, chest, mailbox, door, campfire...), dist_yd, dir, usable}`; gathering nodes only with the skill) and **areas** (ground effects, up to 20: `{name, spell, radius_yd, dir, dist_yd, inside_me, hostile, remaining_s}`), all in the client's visibility set, sorted by salience | nameplates, tooltips, highlighted objects, spell effects on the ground |
+| `nearby` | **units** (Unit/Player, up to 50), **objects** (GameObject, up to 20), **areas** (Area, up to 20), all in the client's visibility set, sorted by salience. `threat_status` is the default UI's threat indicator (Omen adds numbers). Gathering nodes appear as the client shows them (and on the minimap only with tracking, see `map.tracked`) | nameplates, tooltips, highlighted objects, spell effects on the ground |
 
 Everything else is an extension.
 
@@ -108,30 +116,32 @@ the bot has that addon in its **loadout** (§6).
 
 | Extension | Content | Mirrors |
 |---|---|---|
-| `map` | The overview from glancing at the map: current `zone {name, level_range}` and position; **objective locations** from `objectives`; nearby **places** (Place: towns, camps, flight masters, innkeeper, graveyard, dungeon entrances, campfires); zones bordering this one with their `level_range`; party members and corpse marker. With **Questie**: quest givers with available quests, and mob/item spawn areas for objectives | world map, minimap (+ **Questie** pins) |
-| `objectives` | Everything the bot is working towards: `{kind, title, progress, done, where {place, dir, dist_yd}, source}`. **Quests** (`source: quest`): from the quest log, objectives `{text, have, need}`, `complete`, `failed`, `timer_s` (timed quests), `escort` (the escorted unit), `where` from quest POI. **Self-set goals** (`source: goal`, set by the brain with `set_goal`, §9): `sell` (items, AH or vendor), `buy`, `train`, `repair`, `learn_profession`, `reach_level`, `travel_to`, `meet`, `farm` (item x count)...; the module fills in progress (bags, level, gold, skill) and `where` (nearest auctioneer / trainer / vendor / place) | quest tracker + the player's to-do list |
+| `map` | The overview from glancing at the map: current `zone {name, level_range}` and position; **objective locations** from `objectives`; nearby **places** (Place: towns, camps, flight masters, innkeeper, graveyard, dungeon entrances, campfires); zones bordering this one with their `level_range`; party members and corpse marker; **`tracked`**: minimap blips from active tracking (Find Herbs, Find Minerals, Track Beasts...). With **Questie**: quest givers with available quests, and mob/item spawn areas for objectives | world map, minimap (+ **Questie** pins) |
+| `objectives` | Everything the bot is working towards: `{kind, title, progress, done, where {place, dir, dist_yd}, source}`. **Quests** (`source: quest`): from the quest log, objectives `{text, have, need}`, `complete`, `failed`, `daily`, `timer_s` (timed quests), `escort` (the escorted unit), `where` from quest POI. **Self-set goals** (`source: goal`, set by the brain with `set_goal`, §9): `sell` (items, AH or vendor), `buy`, `train`, `repair`, `learn_profession`, `reach_level`, `travel_to`, `meet`, `farm` (item x count)...; the module fills in progress (bags, level, gold, skill) and `where` (nearest auctioneer / trainer / vendor / place) | quest tracker + the player's to-do list |
 | `inventory` | **Full bag contents** (Item list with slots); `free_slots/total`; **equipped gear** (Item per slot, with durability and GearScore); total GearScore (with GearScore); ammo; hearthstone (Item, ready/bind location) | bags, character pane, **GearScore** |
 | `character` | **unspent talent points**, talent spec summary (points per tree, key talents); **skills**: professions and secondary skills `{name, skill, max}`, riding, weapon skills; reputations with relevant factions `{faction, standing, value}`; known flight paths count; rested state | talent pane, skills/reputation tabs |
-| `world` | `game_time` (day/night), `session_minutes`, zone PvP status, server messages pending (shutdown countdown) | clock, session |
+| `world` | `game_time` (day/night), `session_minutes`, `daily_reset_in_s`, zone PvP status, server messages pending (shutdown countdown) | clock, session |
 
 ### Conditional
 
 | Extension | Active when | Content | Mirrors |
 |---|---|---|---|
 | `target` | has a target (and `focus` if set) | Unit (with all its auras and its `activity`), raid marker | target / focus frames |
-| `combat` | in combat | attackers (Unit refs, `targeting_me`), my **threat** on each (**Omen**), **abilities** (Spell list of what's on my bars: cooldowns, usable, in range), resources (combo points, runes), recent combat summary (hits taken/dealt by whom, incoming casts) | action bars, **Omen**, scrolling combat text |
+| `combat` | in combat | attackers (Unit, `targeting_me`), duel opponent, my **threat** on each (**Omen**), **abilities** (Spell list of what's on my bars: cooldowns, usable, in range), resources (combo points, runes), recent combat summary (hits taken/dealt by whom, incoming casts) | action bars, **Omen**, scrolling combat text |
 | `party` | in a party (not raid) | leader; members (Unit with `role`, `power_pct`, `target`, `auras` incl. `dispellable_by_me`, offline); buffs missing that I can give; loot method; raid markers | party frames (+ **Decursive** dispel highlights) |
 | `raid` ("grid") | in a raid | compact grid by subgroup: members `{name, class, role, health_deficit, dead, in_range, in_los, aggro, dispellable_by_me, target}`; main tanks; raid markers | **Grid / VuhDo** |
 | `encounter` | engaged with a boss | boss Unit (`health_pct`, `activity`), `phase`, **DBM** timers and warnings `{name, remaining_s}` | **DBM** |
 | `instance` | inside a dungeon or raid | `name, difficulty, size`, bosses `{name, killed}`, lockout, entrance location (for corpse runs from inside) | instance info, raid info |
 | `death` | dead or ghost | `corpse {dir, dist_yd}`, `can_resurrect_in_s`, `spirit_healer {dir, dist_yd}`, pending resurrect offers | death UI, corpse arrow |
 | `vehicle` | controlling or riding a vehicle | vehicle Unit, its health/power, its abilities (Spell list), seats | vehicle UI |
-| `interaction` | a window is open | **merchant** (Item list with prices, buyback), **trainer** (Spell list with cost, learnable), **quest giver** (quest text, objectives, rewards as Items, choices), **flight map** (destinations with cost), **bank**, **mail** (letters, attached Items/money, COD), **auction house** (my auctions, search results / prices for items I'm selling or buying), **tradeskill** (recipes `{name, reagents [{Item, have, need}], skillup_color, can_craft}`), **gossip** (dialog options) | the open window |
+| `interaction` | a window is open | **merchant** (Item list with prices, buyback), **trainer** (Spell list with cost, learnable), **quest giver** (quest text, objectives, rewards as Items, choices), **flight map** (destinations with cost), **bank**, **mail** (letters, attached Items/money, COD), **auction house** (my auctions, search results / prices for items I'm selling or buying), **tradeskill** (recipes `{name, reagents [{Item, have, need}], skillup_color, can_craft}`), **gossip** (dialog options), **inspect** (another player's equipped Equipment and GearScore), **item_text** (books, letters, notes), **raid_browser** (listings) | the open window |
 | `trade_loot` | trade window, loot window or loot roll open | trade contents both sides (Items, money); lootable Items; roll `{Item, roll_id, time_left_s}` | trade / loot / roll frames |
 | `travel` | travelling, or no quest target nearby | known flight paths, nearest flight master, hearthstone, mount, transports (zeppelin/boat: where they go, when they leave) | world map, flight map, schedules |
 | `pet` | has a pet / totems / minion | pet Unit (`happiness` for hunters, abilities on autocast); shaman totems active + timers | pet frame, totem bar |
-| `social` | idle in a city/town, or a social event | friends online, guild online count + recent guild chat, LFG listings ("LF2M Deadmines") | friends list, guild panel, chat channels |
+| `social` | idle in a city/town, or a social event | friends online; `guild {name, rank, motd, online}`; **`calendar`** (events and my sign-up status: guild raid nights); LFG listings ("LF2M Deadmines") | friends list, guild panel, calendar, chat channels |
 | `environment` | breath, fatigue or falling active | `breath_s`, `fatigue_s`, `falling {height_yd}` | mirror timers |
+| `battleground` | in a battleground | score, objectives (Place + owner), flag carriers, time remaining | battleground UI |
+| `surroundings` | stuck, `path_failed`, or in tight terrain | what a human sees in 3D, computed from the navmesh/vmaps: `walkable` directions, `obstacles` (wall, slope, drop, water, ledge, opening, door... with dir/dist/height), the `goal` direction, a short `description`, and optionally a synthetic top-down `image` (rendered from map data, no game client) for a vision model | the 3D view |
 
 ### Role and class flavors
 Same extensions, different focus, like a player's UI layout:
@@ -157,7 +167,8 @@ tooltips...) are always available.
 Priority when the snapshot must shrink (lowest trimmed first):
 `world` < `social` < `travel` < `map` (nearest places first) < `character` <
 `inventory` (notable items first: quest, consumables, upgrades, junk total) < `pet` <
-`instance` < `objectives` < `interaction` < `trade_loot` < `vehicle` < `party`/`raid` <
+`instance` < `battleground` < `objectives` < `interaction` < `trade_loot` < `vehicle` <
+`surroundings` < `party`/`raid` <
 `target` < `death` < `combat` < `encounter` < base.
 Within lists: hostile-and-targeting-me > casting-at-me > quest-related > interactable >
 other; nearest first. Tooltips are dropped before entries are.
@@ -175,6 +186,7 @@ other; nearest first. Tooltips are dropped before entries are.
 | `mail_received`, `auction_sold {Item, money}`, `auction_expired` | SMSG_RECEIVED_MAIL, SMSG_AUCTION_OWNER_NOTIFICATION |
 | `zone_changed`, `discovered_area` | SMSG_EXPLORATION_EXPERIENCE, zone updates |
 | `path_failed {to}` (movement can't reach a destination) | playerbots movement result (feeds stuck detection) |
+| `duel_started {from}`, `duel_ended {winner}` | SMSG_DUEL_* |
 | `dbm_warning {text}` | our DBM-parity emulation (only with DBM in the loadout) |
 
 ## 9. Options and commands
@@ -220,7 +232,17 @@ separately from decisions).
 | Orientation (any time) | `map` with position, zone `level_range`, objective locations, nearest town/graveyard |
 | Wrong zone level | `map.zone.level_range` and bordering zones' ranges |
 | Underwater | `environment.breath_s` |
-| Stuck | `path_failed` event; `doing.since_s` without progress |
+| Stuck | `path_failed` event; `doing.since_s` without progress; `surroundings` (walkable directions, obstacles, goal) |
+| Backstab / frontal cone | `relative_position.behind_it` / `facing_me` on the target |
+| Pulling without Omen | `threat_status` on units (default UI indicator) |
+| Fishing | the bobber GameObject with `state: splashing` |
+| Herbalism | `map.tracked` blips with Find Herbs on |
+| LFG "GS 5.5k?" | `gearscore` on players (GearScore); `interaction.inspect` |
+| Guild raid night | `social.calendar` with my sign-up status; `social.guild.motd` |
+| Daily quest | quest `daily: true`; `world.daily_reset_in_s` |
+| Battleground | `battleground` score, objectives, flag carriers |
+| Duel | `duel_started` / `duel_ended`; `combat.duel_opponent` |
+| Reading a book | `interaction.item_text` |
 | Events | `level_up`, `talent_point_gained`, `quest_complete`, `item_received`, `skill_up` |
 
 ## 11. Decisions
@@ -237,4 +259,7 @@ separately from decisions).
    which extensions to build first.
 7. **Unit activity, not just casting:** every unit carries `activity` (what it's doing).
 8. **Shared types** for Item / Spell / Aura / Unit / Place, with tooltips, cooldowns and
-   GearScore everywhere they appear.
+   GearScore everywhere they appear; defined once in the schema, inherited with `allOf`.
+9. **Structured data, not screenshots:** bots have no client to render, images cost many more
+   tokens, break prompt caching and get numbers wrong, and are hard to test. Exception: an
+   optional synthetic top-down render in `surroundings` for spatial problems.
