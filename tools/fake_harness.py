@@ -6,11 +6,13 @@ optionally sends lines, then disconnects.
 Usage: python3 -I tools/fake_harness.py [seconds=5] [line-to-send ...]
 """
 
+import pathlib
 import socket
 import sys
 import time
 
-SOCK = "/mnt/storage/wow-llm-bots/server/run/brain.sock"
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+SOCK = str(ROOT / "server" / "run" / "brain.sock")
 
 
 def main():

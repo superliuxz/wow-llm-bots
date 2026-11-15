@@ -1,4 +1,4 @@
-DataDir = "/mnt/storage/wow-llm-bots/server/data"
+DataDir = "@ROOT@/server/data"
 # PvE realm (decided). Horde only: disable Alliance character creation.
 GameType = 0
 CharacterCreating.Disabled = 1

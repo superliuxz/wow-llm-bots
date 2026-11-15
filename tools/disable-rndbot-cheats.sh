@@ -9,7 +9,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 if pgrep -x worldserver >/dev/null; then echo "stop worldserver first"; exit 1; fi
 "$ROOT/tools/db-start.sh" >/dev/null
-mysql --defaults-file="$ROOT/config/mysql.cnf" -uroot <<'SQL'
+mysql --defaults-file="$ROOT/server/etc/mysql.cnf" -uroot <<'SQL'
 DELETE FROM acore_playerbots.playerbots_random_bots WHERE event IN ('teleport','randomize');
 INSERT INTO acore_playerbots.playerbots_random_bots (owner, bot, time, validIn, event, value)
 SELECT 0, c.guid, UNIX_TIMESTAMP(), 315360000, e.event, 1

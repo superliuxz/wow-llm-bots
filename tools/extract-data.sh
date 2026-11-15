@@ -2,9 +2,11 @@
 # Extract DBC, maps, vmaps and mmaps from the 3.3.5a client into server/data.
 set -euo pipefail
 
-CLIENT=/mnt/storage/WoW-3.3.5a
-BIN=/mnt/storage/wow-llm-bots/server/bin
-OUT=/mnt/storage/wow-llm-bots/server/data
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# The 3.3.5a client folder; defaults to WoW-3.3.5a next to the repo.
+CLIENT=${WOW_CLIENT:-$(dirname "$ROOT")/WoW-3.3.5a}
+BIN=$ROOT/server/bin
+OUT=$ROOT/server/data
 
 mkdir -p "$OUT"
 cd "$OUT"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build server/etc/*.conf from the .dist templates plus our overrides in config/.
-# The DB password comes from server/etc/.acore-db-password (untracked).
+# @ROOT@ in overrides becomes the repo root. The DB password comes from server/etc/.acore-db-password (untracked).
 # Usage: tools/apply-config.sh [test-name]   (adds config/tests/<test-name>.*.overrides)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -13,7 +13,7 @@ apply() {  # apply <dist> <out> <overrides...>
     while IFS= read -r line; do
       [[ -z "$line" || "$line" == \#* ]] && continue
       key=${line%%=*}; key=${key%"${key##*[![:space:]]}"}
-      val=${line#*=}; val=${val#"${val%%[![:space:]]*}"}; val=${val//@DB_PASSWORD@/$PW}
+      val=${line#*=}; val=${val#"${val%%[![:space:]]*}"}; val=${val//@DB_PASSWORD@/$PW}; val=${val//@ROOT@/$ROOT}
       if grep -qE "^${key//./\\.}[[:space:]]*=" "$out"; then
         KEY="$key" VAL="$val" python3 -I -c '
 import os,re,sys

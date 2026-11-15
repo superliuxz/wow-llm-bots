@@ -1,0 +1,17 @@
+# Template: tools/db-start.sh renders it to server/etc/mysql.cnf, with the repo root filled in.
+[mysqld]
+datadir=@ROOT@/server/mysql-data
+socket=@ROOT@/server/run/mysql.sock
+pid-file=@ROOT@/server/run/mysqld.pid
+log-error=@ROOT@/server/logs/mysql.log
+bind-address=127.0.0.1
+port=3306
+mysqlx=OFF
+secure-file-priv=@ROOT@/server/mysql-files
+character-set-server=utf8mb4
+collation-server=utf8mb4_unicode_ci
+max_connections=300
+innodb_buffer_pool_size=2G
+
+[client]
+socket=@ROOT@/server/run/mysql.sock

@@ -9,9 +9,9 @@
     "--header-insertion=never",
     "--clang-tidy=false"
   ],
-  "cmake.sourceDirectory": "/mnt/storage/wow-llm-bots/third_party/azerothcore-wotlk",
+  "cmake.sourceDirectory": "${workspaceFolder}/third_party/azerothcore-wotlk",
   // Reuse the existing clang + Ninja build instead of creating a second one.
-  "cmake.buildDirectory": "/mnt/storage/wow-llm-bots/out/server",
+  "cmake.buildDirectory": "${workspaceFolder}/out/server",
   "cmake.generator": "Ninja",
   "cmake.configureOnOpen": false
 }

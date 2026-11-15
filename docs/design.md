@@ -7,7 +7,7 @@ Private WoW 3.3.5a (12340) server where bots can clear 25-man ICC, with local LL
  
 ## Scope (updated 2026-11-14)
 ALL 3.3.5a content, not just ICC: every 5-man dungeon (Classic, TBC, WotLK; normal and heroic) and every raid up to 25-man heroic ICC. ICC is the hardest endpoint, not the only target.
-- Paths: project at /mnt/storage/wow-llm-bots, client at /mnt/storage/WoW-3.3.5a, compiler is clang (not gcc).
+- Paths: nothing tracked hardcodes an absolute path. Scripts find the repo root from their own location; config templates use `@ROOT@` (rendered by `tools/apply-config.sh` / `tools/db-start.sh`); the 3.3.5a client is `$WOW_CLIENT` (default: `WoW-3.3.5a` next to the repo). Compiler is clang (not gcc).
 - mod-playerbots already ships boss-specific code in src/Ai/Raid/* (ICC ~20k lines, Ulduar, Naxx, SSC, BT, TK, Hyjal, Kara, ZA, Gruul, Mag, MC, BWL, Ony, AQ20, ZG, VoA, OS, EoE, RS) and src/Ai/Dungeon/* (most WotLK 5-mans plus a few TBC). Likely gaps: Trial of the Crusader, Halls of Reflection, most Classic/TBC dungeons, AQ40. Verify by testing.
 - Strategy: test each instance from simplest to hardest, find where bots fail, then fix or add triggers. Unscripted content falls back on generic combat AI.
 
