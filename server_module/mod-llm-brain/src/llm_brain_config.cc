@@ -2,7 +2,11 @@
 
 #include "llm_brain_config.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <sstream>
+#include <string>
+#include <vector>
 
 #include "Config.h"
 
