@@ -32,7 +32,9 @@ class Thread {
 
   bool Start() { return StartWithOptions(Options()); }
   bool StartWithOptions(const Options& options);
-  // Runs tasks already posted, then joins. Later posts are dropped.
+  // Runs tasks already posted, then joins. Later posts to the old
+  // task_runner() are dropped. The thread can be started again; it then gets
+  // a fresh task runner (call task_runner() again).
   void Stop();
 
   scoped_refptr<SequencedTaskRunner> task_runner() const { return queue_; }
@@ -44,6 +46,7 @@ class Thread {
 
   const std::string name_;
   scoped_refptr<TaskQueue> queue_;
+  bool queue_shut_down_ = false;  // Set by Stop(); Start() makes a new queue.
   std::unique_ptr<MessagePump> pump_;
   std::unique_ptr<Delegate> delegate_;
   PlatformThreadHandle handle_;

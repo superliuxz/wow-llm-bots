@@ -43,6 +43,10 @@ bool Thread::StartWithOptions(const Options& options) {
   if (IsRunning()) {
     return true;
   }
+  if (queue_shut_down_) {
+    queue_ = TaskQueue::Create();
+    queue_shut_down_ = false;
+  }
   pump_ = MessagePump::Create(options.message_pump_type);
   delegate_ = std::make_unique<Delegate>(queue_.get());
   MessagePump* pump = pump_.get();
@@ -70,6 +74,7 @@ void Thread::Stop() {
   PlatformThread::Join(handle_);
   queue_->Shutdown();
   queue_->SetWakeupCallback({});
+  queue_shut_down_ = true;
   delegate_.reset();
   pump_.reset();
 }

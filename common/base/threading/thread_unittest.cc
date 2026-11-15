@@ -40,6 +40,17 @@ TEST(ThreadTest, StopRunsAlreadyPostedTasks) {
   EXPECT_FALSE(thread.task_runner()->PostTask([] {}));
 }
 
+TEST(ThreadTest, CanRestartAfterStop) {
+  Thread thread("test");
+  for (int round = 0; round < 3; ++round) {
+    ASSERT_TRUE(thread.Start());
+    WaitableEvent done;
+    EXPECT_TRUE(thread.task_runner()->PostTask([&] { done.Signal(); }));
+    EXPECT_TRUE(done.TimedWait(Seconds(2)));
+    thread.Stop();
+  }
+}
+
 TEST(ThreadTest, DelayedTaskRuns) {
   Thread thread("test");
   thread.Start();

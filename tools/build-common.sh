@@ -44,6 +44,7 @@ fi
 if [ "$TESTS" = 0 ]; then
   ninja -C "$B" wlb_base wlb_net
 else
-  ninja -C "$B" wlb_base wlb_net wlb_common_unittests
+  ninja -C "$B" wlb_base wlb_net wlb_common_unittests llm_brain_unittests
   "$B/wlb_common_unittests" --gtest_brief=1
+  "$B/llm_brain_unittests" --gtest_brief=1
 fi

@@ -16,6 +16,8 @@ tools/check-includes.sh
 for mode in "" --asan --tsan --msan; do
   echo "== build + tests ${mode:-default}"
   tools/build-common.sh $mode 2>&1 | grep -E 'error|warning:|PASSED|FAILED|Sanitizer|runtime error' || true
-  "out/common${mode:+-${mode#--}}/wlb_common_unittests" --gtest_brief=1 > /dev/null
+  for t in wlb_common_unittests llm_brain_unittests; do
+    "out/common${mode:+-${mode#--}}/$t" --gtest_brief=1 > /dev/null
+  done
 done
 echo "ALL CHECKS PASSED"

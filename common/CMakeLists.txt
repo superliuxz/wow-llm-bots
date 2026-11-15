@@ -61,3 +61,13 @@ add_executable(wlb_common_unittests
   net/unix_socket_unittest.cc)
 target_link_libraries(wlb_common_unittests PRIVATE wlb_net GTest::gtest_main)
 target_compile_options(wlb_common_unittests PRIVATE ${WLB_SAFETY_FLAGS})
+
+# Unit tests for our AzerothCore module's AzerothCore-independent parts. They
+# sit next to the code; mod-llm-brain.cmake keeps them out of the server.
+set(WLB_MODULE_SRC "${WLB_ROOT}/server_module/mod-llm-brain/src")
+add_executable(llm_brain_unittests
+  "${WLB_MODULE_SRC}/brain_bridge.cc"
+  "${WLB_MODULE_SRC}/brain_bridge_unittest.cc")
+target_include_directories(llm_brain_unittests PRIVATE "${WLB_MODULE_SRC}")
+target_link_libraries(llm_brain_unittests PRIVATE wlb_net GTest::gtest_main)
+target_compile_options(llm_brain_unittests PRIVATE ${WLB_SAFETY_FLAGS})
