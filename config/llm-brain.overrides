@@ -1,5 +1,7 @@
 # mod-llm-brain (our module). Phase 2: one bot, harness socket in server/run.
 LlmBrain.Enable = 1
 LlmBrain.SocketPath = "@ROOT@/server/run/brain.sock"
-LlmBrain.Bots = "Dezlu"
+# Phase 2 bot: Testpriest (test account WLBTEST). Persistent here, like a real bot whose
+# memory carries over; test configs (config/tests/) reset it from a fixture instead.
+LlmBrain.Bots = "Testpriest"
 LlmBrain.SnapshotIntervalMs = 1000
