@@ -319,6 +319,7 @@
           "enum": [
             "idle",
             "moving",
+            "patrolling",
             "approaching_me",
             "fleeing",
             "fighting",
@@ -458,7 +459,8 @@
               "type": "boolean"
             },
             "activity": {
-              "$ref": "#/$defs/Activity"
+              "$ref": "#/$defs/Activity",
+              "description": "what it's doing; includes patrolling"
             },
             "auras": {
               "type": "array",
@@ -477,6 +479,46 @@
                 "cross",
                 "skull"
               ]
+            },
+            "pack": {
+              "type": "object",
+              "x-visibility": "glance",
+              "description": "Mobs standing together (pulling one likely pulls the pack), as a player sees them grouped",
+              "properties": {
+                "id": {
+                  "type": "integer"
+                },
+                "size": {
+                  "type": "integer"
+                }
+              }
+            },
+            "visual_state": {
+              "type": "array",
+              "x-visibility": "glance",
+              "description": "What its model visibly shows without targeting it (sheep, stun stars, ice block, sleeping, banished, fleeing in fear...)",
+              "items": {
+                "enum": [
+                  "polymorphed",
+                  "stunned",
+                  "feared",
+                  "sapped",
+                  "asleep",
+                  "banished",
+                  "frozen",
+                  "ice_block",
+                  "bubbled",
+                  "mind_controlled",
+                  "stealthed_shimmer",
+                  "shackled",
+                  "rooted"
+                ]
+              }
+            },
+            "quest_relevant": {
+              "type": "string",
+              "x-visibility": "glance",
+              "description": "Questie nameplate/quest icon: the quest it counts for (with Questie)"
             }
           }
         }
@@ -767,6 +809,29 @@
                   "description": "free bag space shown on the backpack"
                 }
               }
+            },
+            "gcd_remaining_ms": {
+              "type": "integer",
+              "x-visibility": "glance",
+              "description": "global cooldown sweep on the action bars"
+            },
+            "auto_attack": {
+              "type": "object",
+              "x-visibility": "glance",
+              "description": "auto attack / auto shot / wand (button flashing)",
+              "properties": {
+                "melee": {
+                  "type": "boolean"
+                },
+                "ranged": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "in_cinematic": {
+              "type": "boolean",
+              "x-visibility": "glance",
+              "description": "watching a cutscene or scripted sequence (can't act)"
             }
           }
         }
@@ -802,6 +867,11 @@
             "state": {
               "type": "string",
               "description": "e.g. bobber \"splashing\", door \"open\""
+            },
+            "highlighted": {
+              "type": "boolean",
+              "x-visibility": "glance",
+              "description": "quest object sparkle / highlight"
             }
           }
         }
@@ -917,6 +987,11 @@
             "tooltip": {
               "$ref": "#/$defs/Tooltip",
               "x-visibility": "hover"
+            },
+            "starts_quest": {
+              "type": "boolean",
+              "x-visibility": "glance",
+              "description": "'This Item Begins a Quest' (loot window/bag icon)"
             }
           }
         }
@@ -1104,6 +1179,11 @@
             },
             "escort": {
               "type": "string"
+            },
+            "item_button": {
+              "$ref": "#/$defs/Ability",
+              "x-visibility": "glance",
+              "description": "usable quest item button in the tracker (native since 3.3)"
             }
           }
         }
@@ -1200,7 +1280,11 @@
             "path_failed",
             "duel_started",
             "duel_ended",
-            "dbm_warning"
+            "dbm_warning",
+            "cinematic_started",
+            "cinematic_ended",
+            "instance_entered",
+            "instance_reset"
           ]
         },
         "channel": {
@@ -1227,7 +1311,8 @@
             "ready_check",
             "resurrect_offer",
             "summon",
-            "battleground"
+            "battleground",
+            "quest_share"
           ]
         },
         "item": {
@@ -1398,6 +1483,10 @@
             },
             "focus": {
               "$ref": "#/$defs/Unit"
+            },
+            "target_of_target": {
+              "type": "string",
+              "description": "target-of-target frame"
             }
           },
           "x-visibility": "glance"
@@ -2149,6 +2238,21 @@
                   }
                 },
                 "spawn_areas": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Place"
+                  }
+                }
+              }
+            },
+            "instance_map": {
+              "type": "object",
+              "description": "inside an instance: the dungeon map (floors, areas, bosses)",
+              "properties": {
+                "floor": {
+                  "type": "string"
+                },
+                "areas": {
                   "type": "array",
                   "items": {
                     "$ref": "#/$defs/Place"

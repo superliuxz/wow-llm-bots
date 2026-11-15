@@ -1,0 +1,33 @@
+{"type":"snapshot","bot":"Grumbar","seq":5021,"t":40123000,
+ "base":{
+  "self":{"name":"Grumbar","kind":"player","class":"Warrior","race":"Orc","level":18,"health":1650,"health_max":1900,
+   "power_type":"rage","power":35,"power_max":100,"state":"alive","in_combat":true,"control":{},"money":4512,
+   "gcd_remaining_ms":400,"auto_attack":{"melee":true,"ranged":false},"in_cinematic":false,
+   "indicators":{"talent_points_unspent":false,"durability_warning":[{"slot":"chest","level":"damaged"}],"bag_free_slots":3}},
+  "where":{"map":"Ragefire Chasm","zone":"Ragefire Chasm","in_instance":true},
+  "nearby":{
+   "units":[
+    {"name":"Ragefire Trogg","kind":"npc","level":15,"reaction":"hostile","classification":"elite","health_pct":70,"dist_yd":3,"dir":"N",
+     "targeting_me":true,"threat_status":"aggro","pack":{"id":1,"size":3},"activity":{"state":"fighting","with":"Grumbar"},"raid_marker":"skull",
+     "relative_position":{"behind_it":false,"facing_me":true}},
+    {"name":"Ragefire Shaman","kind":"npc","level":16,"reaction":"hostile","classification":"elite","health_pct":100,"dist_yd":12,"dir":"NE",
+     "targeting_me":false,"target":"Morwyn","threat_status":"high","pack":{"id":1,"size":3},
+     "activity":{"state":"casting","cast":{"spell":{"name":"Healing Wave"},"remaining_ms":1500,"interruptible":true,"target":"Ragefire Trogg"}}},
+    {"name":"Ragefire Trogg","kind":"npc","level":15,"reaction":"hostile","classification":"elite","dist_yd":14,"dir":"E",
+     "pack":{"id":1,"size":3},"visual_state":["polymorphed"],"activity":{"state":"idle"},"raid_marker":"moon"},
+    {"name":"Searing Blade Cultist","kind":"npc","level":16,"reaction":"hostile","classification":"elite","dist_yd":38,"dir":"SE",
+     "activity":{"state":"patrolling"}}],
+   "objects":[],"areas":[]},
+  "ui":{"open_panels":[],"hovering":[]}},
+ "ext":{
+  "target":{"target":{"name":"Ragefire Trogg","kind":"npc","level":15,"health_pct":70,"raid_marker":"skull"},"target_of_target":"Grumbar"},
+  "combat":{"threat":[{"unit":"Ragefire Shaman","my_threat_pct":72,"top":"Morwyn"}],"summary":"Trogg hits you for ~80; Shaman healing Trogg"},
+  "party":{"leader":"Will","members":[
+   {"name":"Morwyn","kind":"player","class":"Druid","role":"healer","health_pct":88,"power_pct":64,"in_range":true,"target":"Grumbar"},
+   {"name":"Will","kind":"player","class":"Mage","role":"dps","health_pct":100,"in_range":true,"target":"Ragefire Trogg"}]},
+  "instance":{"name":"Ragefire Chasm","difficulty":"normal","size":5,"bosses":[{"name":"Taragaman the Hungerer","killed":false}]},
+  "action_bars":[{"name":"Shield Bash","cooldown_s":12,"cooldown_remaining_s":0,"usable":true,"in_range":false},
+                 {"name":"Sunder Armor","cooldown_remaining_s":0,"usable":true,"in_range":true}],
+  "quest_tracker":[{"source":"quest","quest":"Searching for the Lost Satchel","title":"Maur Grimtotem's Satchel","done":false,"complete":false}]},
+ "events":[{"kind":"chat","channel":"party","from":"Morwyn","text":"shaman on me!"}],
+ "options":["Keep doing what I'm doing","Taunt the Shaman off Morwyn","Charge/intercept the Shaman (interrupt Healing Wave)","Shield Bash the Shaman (need to be in range)"]}

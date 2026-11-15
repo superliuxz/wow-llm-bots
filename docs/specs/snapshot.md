@@ -1,6 +1,6 @@
 # Bot perception: the snapshot spec
 
-Status: **agreed, revision 5** (2026-11-15). The exact field-level contract is the JSON Schema
+Status: **agreed, revision 6** (2026-11-15). The exact field-level contract is the JSON Schema
 [`snapshot.schema.json`](snapshot.schema.json) (types inherit with `allOf`); examples in
 [`examples/`](examples/), checked by `tools/validate-snapshots.sh`. This document explains it. Everything a bot's brain decides is based on this.
 
@@ -108,10 +108,10 @@ Event {kind, ...}   (§8)
 
 | Block | Fields | Client equivalent |
 |---|---|---|
-| `self` | **Self**, incl. `indicators`: talent button flashing (unspent points), the damaged-armor figure (damaged/broken slots), calendar icon flashing, mail icon, free bag slots on the backpack | unit frame, buff bar, cast bar, main-screen cues |
+| `self` | **Self** (incl. `gcd_remaining_ms` from the GCD sweep, `auto_attack` melee/ranged, `in_cinematic`), incl. `indicators`: talent button flashing (unspent points), the damaged-armor figure (damaged/broken slots), calendar icon flashing, mail icon, free bag slots on the backpack | unit frame, buff bar, cast bar, main-screen cues |
 | `where` | `map`, `zone`, `subzone`, `position`, `facing`, `indoors`, `in_instance` | zone text |
 | `doing` | `{activity, since_s, detail}` | the player's own intent |
-| `nearby` | **units** (Unit/Player, up to 50), **objects** (GameObject, up to 20), **areas** (Area, up to 20) in the client's visibility set, by salience. Nameplate-level fields only (name, level, health, hostility, elite marker, quest marker, activity, threat indicator); guild/race/services etc. on hover | nameplates, highlighted objects, ground effects |
+| `nearby` | **units** (Unit/Player, up to 50), **objects** (GameObject, up to 20), **areas** (Area, up to 20) in the client's visibility set, by salience. Nameplate-level fields only (name, level, health, hostility, elite marker, quest marker, activity incl. patrolling, threat indicator, raid marker), plus what a player sees of the model: **`pack`** (mobs standing together: pull one, get the pack), **`visual_state`** (sheep, stun stars, ice block, sleeping, banished...), Questie **`quest_relevant`** icon; guild/race/services etc. on hover. Objects show `highlighted` (quest sparkle); items `starts_quest` | nameplates, highlighted objects, ground effects |
 | `ui` | `open_panels`, `hovering` | what the player has open / points at |
 | `tooltips` | one **Tooltipped** per hovered thing: tooltip lines + the full typed object (Item with stats and GearScore, Spell, Aura, Player with guild, Place with level range) + Questie line | tooltips |
 
@@ -125,7 +125,7 @@ the bot has that addon in its **loadout** (§6).
 | Extension | Content | Mirrors |
 |---|---|---|
 | `minimap` | zone, subzone, **clock**; places within minimap range; quest **objective areas** (native since 3.3); **tracked** blips (Find Herbs, Track Beasts...); party dots; corpse arrow | minimap |
-| `quest_tracker` | watched quests, up to the client's tracking limit (QuestObjective: progress, `where`, `daily`, `timer_s`, `escort`) **plus the bot's own goals** (Goal, set with `set_goal`: sell / buy / train / repair / learn_profession / reach_level / travel_to / meet / farm; progress and `where` filled in by the module). Goals are the bot's own to-do list, always in mind | quest tracker + the player's to-do list |
+| `quest_tracker` | watched quests, up to the client's tracking limit (QuestObjective, with the **quest item button** when the quest has a usable item: progress, `where`, `daily`, `timer_s`, `escort`) **plus the bot's own goals** (Goal, set with `set_goal`: sell / buy / train / repair / learn_profession / reach_level / travel_to / meet / farm; progress and `where` filled in by the module). Goals are the bot's own to-do list, always in mind | quest tracker + the player's to-do list |
 | `action_bars` | Ability per button: `cooldown_remaining_s`, `usable`, `in_range` (vs target), charges; tooltips on hover | action bars |
 | `world` | `session_minutes`, `daily_reset_in_s`, zone PvP status, pending server messages | session, server notices |
 
@@ -133,7 +133,7 @@ the bot has that addon in its **loadout** (§6).
 
 | Extension | Active when | Content | Mirrors |
 |---|---|---|---|
-| `target` | has a target (and `focus`) | Unit with auras (debuff borders show dispel type) and `activity`, raid marker | target / focus frames |
+| `target` | has a target (and `focus`) | Unit with auras (debuff borders show dispel type) and `activity`, raid marker, **target-of-target** | target / focus / ToT frames |
 | `combat` | in combat | attackers, duel opponent, my **threat** per enemy (**Omen**), resources (combo points, runes), recent combat summary | **Omen**, combat text |
 | `party` | in a party | leader; GroupMembers (health/power, `target`, debuffs incl. `dispellable_by_me`); missing buffs I can give; loot method; markers | party frames (+ **Decursive**) |
 | `raid` ("grid") | in a raid | compact grid: health deficits, aggro, range/LoS, `dispellable_by_me`, targets; main tanks; markers | **Grid / VuhDo** |
@@ -154,7 +154,7 @@ the bot has that addon in its **loadout** (§6).
 | Panel | Content | Auto-opens with |
 |---|---|---|
 | `bags` | every Item (bag slot, count, quality, kind, usable, cooldown); free/total slots; hearthstone | merchant, bank, mail, trade, auction house |
-| `map` | world map: Places (towns, flight masters, graveyards, dungeons, zone exits), bordering zones, objective areas, **Questie** pins; zone level ranges on hover | - |
+| `map` | world map: Places (towns, flight masters, graveyards, dungeons, zone exits), bordering zones, objective areas, **Questie** pins; zone level ranges on hover; **inside an instance: the dungeon map** (floors, areas) | - |
 | `character` | equipped Equipment (durability, stats), total GearScore, character stats | - |
 | `quest_log` | all quests with description, objectives, rewards | quest giver dialog |
 | `spellbook` | all known Abilities | trainer |
@@ -198,12 +198,13 @@ looks. If a snapshot still exceeds the cap, trim (lowest first): `world` < open 
 |---|---|
 | `chat {channel, from, text, at_me, from_dist_yd}` (say / yell / whisper / party / raid / raid_warning / guild / officer / general / trade / lfg / emote / monster say-yell-emote / system) | SMSG_MESSAGECHAT (+ GM variant), SMSG_TEXT_EMOTE, SMSG_NOTIFICATION, server messages |
 | `error {text}` (red UI text) | SMSG_CAST_FAILED, SMSG_INVENTORY_CHANGE_FAILURE, SMSG_NOTIFICATION, other error packets |
-| `prompt {kind, from}` (group invite, trade, duel, guild invite, ready check, role check, resurrect offer, summon, LFG/BG proposal) | SMSG_GROUP_INVITE, SMSG_TRADE_STATUS, SMSG_DUEL_REQUESTED, SMSG_GUILD_INVITE, MSG_RAID_READY_CHECK, SMSG_RESURRECT_REQUEST, SMSG_SUMMON_REQUEST, ... |
+| `prompt {kind, from}` (group invite, trade, duel, guild invite, ready check, role check, resurrect offer, summon, quest share, LFG/BG proposal) | SMSG_GROUP_INVITE, SMSG_TRADE_STATUS, SMSG_DUEL_REQUESTED, SMSG_GUILD_INVITE, MSG_RAID_READY_CHECK, SMSG_RESURRECT_REQUEST, SMSG_SUMMON_REQUEST, ... |
 | `level_up`, `talent_point_gained`, `quest_complete`, `quest_failed`, `xp_gained`, `money_changed`, `item_received`, `skill_up` | SMSG_LEVELUP_INFO, SMSG_QUESTGIVER_QUEST_COMPLETE, SMSG_QUESTUPDATE_*, SMSG_LOG_XPGAIN, SMSG_ITEM_PUSH_RESULT, skill updates |
 | `died {killer}`, `resurrected` | death / resurrect packets |
 | `loot_roll {Item, roll_id}`, `loot_won {Item, by}` | SMSG_LOOT_START_ROLL, SMSG_LOOT_ROLL_WON |
 | `mail_received`, `auction_sold {Item, money}`, `auction_expired` | SMSG_RECEIVED_MAIL, SMSG_AUCTION_OWNER_NOTIFICATION |
-| `zone_changed`, `discovered_area` | SMSG_EXPLORATION_EXPERIENCE, zone updates |
+| `zone_changed`, `discovered_area`, `instance_entered`, `instance_reset` | SMSG_EXPLORATION_EXPERIENCE, zone updates, instance messages |
+| `cinematic_started`, `cinematic_ended` | SMSG_TRIGGER_CINEMATIC / movie packets |
 | `path_failed {to}` (movement can't reach a destination) | playerbots movement result (feeds stuck detection) |
 | `duel_started {from}`, `duel_ended {winner}` | SMSG_DUEL_* |
 | `dbm_warning {text}` | our DBM-parity emulation (only with DBM in the loadout) |
@@ -277,6 +278,20 @@ real player knows their junk and bag space from habit), but only sends what's vi
 | Battleground | `battleground` score, objectives, flag carriers |
 | Duel | `duel_started` / `duel_ended`; `combat.duel_opponent` |
 | Reading a book | `interaction.item_text` |
+| **Combat:** pulling | `pack` on mobs (pull one, get the pack), `activity: patrolling` on patrols, level color, elite marker |
+| **Combat:** crowd control | `visual_state` on CC'd mobs (sheep, sap, shackle) without targeting them; don't break it |
+| **Combat:** rotation pacing | `gcd_remaining_ms`, `auto_attack`, `action_bars` cooldowns, combo points/rage |
+| **Combat:** interrupt | caster's `activity.cast.interruptible` + my interrupt's cooldown and `in_range` |
+| **Questing:** find quest mobs | Questie `quest_relevant` icon on mobs; objective areas on the minimap |
+| **Questing:** collect objects | `highlighted` GameObjects (sparkle) |
+| **Questing:** use quest item | `quest_tracker` item button with cooldown/range |
+| **Questing:** drop starts a quest | `starts_quest` Item in loot / bags |
+| **Questing:** party shares a quest | `prompt quest_share` + accept/decline |
+| **Questing:** cutscene | `in_cinematic` (can't act), `cinematic_*` events |
+| **Dungeon:** tanking | threat per mob (Omen) or `threat_status`; mob `target` (who it's hitting); party member targets; target-of-target |
+| **Dungeon:** healing | party health/power, debuffs with `dispellable_by_me`, `in_range`, mobs targeting the healer |
+| **Dungeon:** navigating | open `map`: dungeon map with floors and areas; `instance` bosses killed |
+| **Dungeon:** wipe | `death` + `instance.entrance`; `instance_reset` system message |
 | Events | `level_up`, `talent_point_gained`, `quest_complete`, `item_received`, `skill_up` |
 | Bags fill up | `error` "Inventory is full" and `indicators.bag_free_slots` 0, without opening bags |
 | Damaged gear | `indicators.durability_warning` (armor figure); exact values in open `character` |
