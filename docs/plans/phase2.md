@@ -79,6 +79,18 @@ socket and two lock-protected queues. Nothing in the module ever waits on the ha
    and llama-server.
 2. Save real snapshots from play as the first eval fixtures (`evals/cases/` seed).
 
+### E. End-to-end tests (planned)
+Three layers, all on an **isolated test stack** (own ports, socket path and config; databases
+restored from a "golden" copy of the freshly imported DBs for every run, so tests never touch
+the user's play server and always start from the same state). One runner: `tools/e2e.sh`.
+1. **Module e2e** (from A3-A5): real worldserver + fake harness; snapshot fields correct,
+   `choose_option` / `say` change the bot in game.
+2. **Brain e2e** (with B): real server + harness + **fake LLM** (canned HTTP replies):
+   deterministic decision loop, no GPU.
+3. **Full stack** (milestones): + llama-server + an AzerothGhost headless player
+   (`third_party/azerothcore-wotlk/e2e`, Go) that logs in and whispers the bot; checks the
+   phase 2 "done when" items. AzerothGhost needs `Warden.Enabled = 0` (known login bug).
+
 ## Rough size
 A: ~1-1.5k lines C++. B: ~2-3k lines C++ plus tests. C/D: small. Build A first, against a
 tiny fake harness (netcat-level), then B.
