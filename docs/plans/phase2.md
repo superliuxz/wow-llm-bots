@@ -25,7 +25,7 @@ worldserver process                                harness process (ours)       
 |  IO thread: Unix socket server, two queues   |<->| thread pool: HTTP calls    |   +-----------+
 +----------------------------------------------+   | logs: var/bots/<name>/     |
             Unix socket server/run/brain.sock      +----------------------------+
-            newline-delimited JSON
+            length-prefixed protobuf frames
 ```
 
 **Threading rule (server):** snapshots are built and commands applied only on the world thread
@@ -56,7 +56,7 @@ socket and two lock-protected queues. Nothing in the module ever waits on the ha
 1. CMake project into `out/harness`; links `common/` (wlb_base, wlb_net), Abseil, cpp-httplib, nlohmann/json, GoogleTest.
 2. `base/` and `net/` now live in the shared `common/` library (done, see below), used by both
    the server module and the harness.
-3. (in `common/net/`) Unix socket client with reconnect + newline framing.
+3. (in `common/net/`) Unix socket client with reconnect + length-prefixed framing (done in A3).
 4. `llm/`: llama-server client (cpp-httplib on the thread pool, results posted back),
    per-bot slot pinning (keep each bot's prompt prefix cached), timeouts.
 5. `brain/`: `decide(snapshot) -> Decision` (the single entry point used live and by evals):
@@ -113,9 +113,9 @@ not in `out/common-server` (linked into AzerothCore).
 
 ## Decisions (review 2026-11-14)
 1. **Wire format** module <-> harness (revised 2026-11-15): binary protobuf messages from
-   `server_module/mod-llm-brain/proto/snapshot.proto` (lite runtime, as Chromium), in length-prefixed frames over the
-   Unix socket (a `LengthPrefixFramer` in `common/net` replaces the newline framer for the
-   bridge). JSON (canonical protobuf mapping) only in harness tooling: recordings, decision
+   `server_module/mod-llm-brain/proto/snapshot.proto` (lite runtime, as Chromium), one per
+   length-prefixed frame (`common/net/frame_codec.h`: 4-byte big-endian length + payload)
+   over the Unix socket. JSON (canonical protobuf mapping) only in harness tooling: recordings, decision
    logs, eval cases. The LLM never
    sees this JSON: the harness renders snapshots into compact plain-text prompts (fewer tokens,
    natural to read). Prompt format is an eval question later.

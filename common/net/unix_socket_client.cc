@@ -10,6 +10,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "base/functional/callback.h"
@@ -17,7 +18,7 @@
 #include "base/task/sequenced_task_runner.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
-#include "net/line_connection.h"
+#include "net/framed_connection.h"
 
 namespace net {
 
@@ -54,8 +55,8 @@ void UnixSocketClient::Stop() {
   connection_.reset();
 }
 
-bool UnixSocketClient::SendLine(const std::string& line) {
-  return connection_ && connection_->SendLine(line);
+bool UnixSocketClient::SendFrame(std::string_view payload) {
+  return connection_ && connection_->SendFrame(payload);
 }
 
 void UnixSocketClient::Connect() {
@@ -104,10 +105,10 @@ void UnixSocketClient::OnFileCanWriteWithoutBlocking(int fd) {
 }
 
 void UnixSocketClient::OnConnected(int fd) {
-  connection_ = std::make_unique<LineConnection>(
+  connection_ = std::make_unique<FramedConnection>(
       fd,
-      LineConnection::Callbacks{
-          callbacks_.on_line,
+      FramedConnection::Callbacks{
+          callbacks_.on_frame,
           base::BindRepeating(&UnixSocketClient::OnConnectionClosed,
                               weak_factory_.GetWeakPtr())},
       max_output_bytes_);

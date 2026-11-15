@@ -15,8 +15,8 @@
 
 namespace llm_brain {
 
-// Moves newline-delimited messages between AzerothCore's world thread and the
-// harness over a Unix socket.
+// Moves messages (serialized protos, any bytes) between AzerothCore's world
+// thread and the harness over a Unix socket, one length-prefixed frame each.
 //
 // Threads: the socket lives on a private IO thread (base::Thread, epoll pump).
 // Messages for the world thread are posted to `world_queue_`, which the world
@@ -50,7 +50,7 @@ class BrainBridge {
   // World thread. Closes the socket and joins the IO thread.
   void Stop();
 
-  // World thread. Queues `message` (no '\n') for the harness.
+  // World thread. Queues `message` for the harness.
   void Send(std::string message);
   // World thread. Runs pending tasks posted from the IO thread (incoming
   // messages, connection changes). Call every world update.

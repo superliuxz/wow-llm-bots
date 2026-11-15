@@ -1,18 +1,30 @@
 """Minimal stand-in for the harness, for testing mod-llm-brain's socket.
 
 Connects to the brain socket, prints what the server sends for a few seconds,
-optionally sends lines, then disconnects.
+optionally sends messages, then disconnects. Messages are length-prefixed frames
+(4-byte big-endian length, then the payload), as in common/net/frame_codec.h.
+Payloads are printed as text when they decode as UTF-8, otherwise as a byte
+count and hex preview (serialized protos).
 
-Usage: python3 -I tools/fake_harness.py [seconds=5] [line-to-send ...]
+Usage: python3 -I tools/fake_harness.py [seconds=5] [message-to-send ...]
 """
 
 import pathlib
 import socket
+import struct
 import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOCK = str(ROOT / "server" / "run" / "brain.sock")
+HEADER = struct.Struct(">I")
+
+
+def describe(payload):
+    try:
+        return payload.decode("utf-8")[:200]
+    except UnicodeDecodeError:
+        return f"[{len(payload)} bytes] {payload[:32].hex()}"
 
 
 def main():
@@ -21,9 +33,10 @@ def main():
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.connect(SOCK)
     s.settimeout(0.2)
-    for line in to_send:
-        s.sendall(line.encode() + b"\n")
-        print(f">> {line}")
+    for message in to_send:
+        payload = message.encode()
+        s.sendall(HEADER.pack(len(payload)) + payload)
+        print(f">> {message}")
     buf = b""
     received = 0
     end = time.time() + seconds
@@ -36,10 +49,14 @@ def main():
             print("server closed the connection")
             break
         buf += chunk
-        while b"\n" in buf:
-            line, buf = buf.split(b"\n", 1)
+        while len(buf) >= HEADER.size:
+            (size,) = HEADER.unpack_from(buf)
+            if len(buf) < HEADER.size + size:
+                break
+            payload = buf[HEADER.size:HEADER.size + size]
+            buf = buf[HEADER.size + size:]
             received += 1
-            print(f"<< {line.decode()[:200]}")
+            print(f"<< {describe(payload)}")
     s.close()
     print(f"received {received} messages in {seconds:.0f}s")
 

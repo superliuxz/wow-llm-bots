@@ -1,6 +1,6 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
-// Next to brain_bridge.cc, Chromium-style. mod-llm-brain.cmake keeps
+// Next to brain_bridge.cc. mod-llm-brain.cmake keeps
 // *_unittest.cc out of the server build; common/CMakeLists.txt builds it as a
 // test.
 
@@ -56,9 +56,10 @@ class FakeHarness {
       client_ = std::make_unique<net::UnixSocketClient>(
           path,
           net::UnixSocketClient::Callbacks{[this] { connected_.Signal(); },
-                                           [this](std::string line) {
+                                           [this](std::string frame) {
                                              base::AutoLock lock(lock_);
-                                             lines_.push_back(std::move(line));
+                                             frames_.push_back(
+                                                 std::move(frame));
                                            },
                                            [this] { disconnected_.Signal(); }},
           base::Milliseconds(20));
@@ -71,12 +72,12 @@ class FakeHarness {
 
   bool WaitConnected() { return connected_.TimedWait(kTimeout); }
   bool WaitDisconnected() { return disconnected_.TimedWait(kTimeout); }
-  void Send(const std::string& line) {
-    RunOnIo([this, line] { EXPECT_TRUE(client_->SendLine(line)); });
+  void Send(const std::string& message) {
+    RunOnIo([this, message] { EXPECT_TRUE(client_->SendFrame(message)); });
   }
-  std::vector<std::string> lines() {
+  std::vector<std::string> frames() {
     base::AutoLock lock(lock_);
-    return lines_;
+    return frames_;
   }
 
  private:
@@ -95,7 +96,7 @@ class FakeHarness {
   base::WaitableEvent connected_;
   base::WaitableEvent disconnected_;
   base::Lock lock_;
-  std::vector<std::string> lines_ GUARDED_BY(lock_);
+  std::vector<std::string> frames_ GUARDED_BY(lock_);
 };
 
 // Records world-thread callbacks (they all run on the test thread).
@@ -132,10 +133,10 @@ TEST(BrainBridgeTest, MessagesFlowBothWays) {
   bridge.Send("{\"type\":\"snapshot\"}");
   harness.Send("{\"type\":\"command\"}");
   ASSERT_TRUE(RunWorldUntil(bridge, [&] {
-    return !world.messages.empty() && !harness.lines().empty();
+    return !world.messages.empty() && !harness.frames().empty();
   }));
   EXPECT_EQ(world.messages, std::vector<std::string>{"{\"type\":\"command\"}"});
-  EXPECT_EQ(harness.lines(),
+  EXPECT_EQ(harness.frames(),
             std::vector<std::string>{"{\"type\":\"snapshot\"}"});
 }
 
@@ -159,8 +160,8 @@ TEST(BrainBridgeTest, NewHarnessReplacesOldOne) {
   EXPECT_TRUE(first.WaitDisconnected());
 
   bridge.Send("to the new harness");
-  ASSERT_TRUE(RunWorldUntil(bridge, [&] { return !second.lines().empty(); }));
-  EXPECT_TRUE(first.lines().empty());
+  ASSERT_TRUE(RunWorldUntil(bridge, [&] { return !second.frames().empty(); }));
+  EXPECT_TRUE(first.frames().empty());
 }
 
 TEST(BrainBridgeTest, DropsInboundWhenWorldFallsBehind) {

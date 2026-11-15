@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "base/functional/callback.h"
 #include "base/memory/ref_counted.h"
@@ -13,18 +14,18 @@
 #include "base/message_loop/message_pump_epoll.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
-#include "net/line_connection.h"
+#include "net/framed_connection.h"
 
 namespace net {
 
-// Line-oriented Unix socket client that keeps reconnecting (every
-// `retry_delay`) until Stop() or destruction. Create, use and destroy on one
-// IO thread (a base::Thread with MessagePumpType::IO).
+// Unix socket client for length-prefixed frames (net/frame_codec.h) that keeps
+// reconnecting (every `retry_delay`) until Stop() or destruction. Create, use
+// and destroy on one IO thread (a base::Thread with MessagePumpType::IO).
 class UnixSocketClient : public base::MessagePumpForIO::FdWatcher {
  public:
   struct Callbacks {
     base::RepeatingClosure on_connected;
-    base::RepeatingCallback<void(std::string)> on_line;
+    base::RepeatingCallback<void(std::string)> on_frame;
     base::RepeatingClosure on_disconnected;
   };
 
@@ -38,8 +39,9 @@ class UnixSocketClient : public base::MessagePumpForIO::FdWatcher {
 
   void Start();
   void Stop();
-  // Returns false (line dropped) when not connected or backed up.
-  bool SendLine(const std::string& line);
+  // Sends `payload` as one frame. Returns false (dropped) when not connected
+  // or backed up.
+  bool SendFrame(std::string_view payload);
   bool connected() const { return connection_ != nullptr; }
 
  private:
@@ -60,7 +62,7 @@ class UnixSocketClient : public base::MessagePumpForIO::FdWatcher {
   bool running_ = false;
   int connecting_fd_ = -1;
   base::MessagePumpForIO::FdWatchController connect_controller_;
-  std::unique_ptr<LineConnection> connection_;
+  std::unique_ptr<FramedConnection> connection_;
   base::WeakPtrFactory<UnixSocketClient> weak_factory_{this};
 };
 

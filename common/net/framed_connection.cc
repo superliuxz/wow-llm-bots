@@ -1,6 +1,6 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
-#include "net/line_connection.h"
+#include "net/framed_connection.h"
 
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -14,12 +14,13 @@
 
 #include "base/message_loop/message_pump_epoll.h"
 #include "base/threading/thread.h"
+#include "net/frame_codec.h"
 
 namespace net {
 
-LineConnection::LineConnection(int fd,
-                               Callbacks callbacks,
-                               size_t max_output_bytes)
+FramedConnection::FramedConnection(int fd,
+                                   Callbacks callbacks,
+                                   size_t max_output_bytes)
     : fd_(fd),
       callbacks_(std::move(callbacks)),
       max_output_bytes_(max_output_bytes) {
@@ -28,38 +29,43 @@ LineConnection::LineConnection(int fd,
       &controller_, this);
 }
 
-LineConnection::~LineConnection() {
+FramedConnection::~FramedConnection() {
   controller_.StopWatchingFileDescriptor();
   if (fd_ >= 0) {
     close(fd_);
   }
 }
 
-bool LineConnection::SendLine(const std::string& line) {
+bool FramedConnection::SendFrame(std::string_view payload) {
   if (fd_ < 0 || output_.size() - output_offset_ > max_output_bytes_) {
     return false;
   }
-  output_.append(line);
-  output_.push_back('\n');
+  if (!AppendFrame(payload, &output_)) {
+    return false;
+  }
   if (!watching_write_) {
     Flush();
   }
   return true;
 }
 
-void LineConnection::OnFileCanReadWithoutBlocking(int /*fd*/) {
+void FramedConnection::OnFileCanReadWithoutBlocking(int /*fd*/) {
   char buf[16384];
   while (fd_ >= 0) {
     const ssize_t n = recv(fd_, buf, sizeof(buf), 0);
     if (n > 0) {
-      for (std::string& line :
-           framer_.Append(std::string_view(buf, static_cast<size_t>(n)))) {
-        if (callbacks_.on_line) {
-          callbacks_.on_line.Run(std::move(line));
+      for (std::string& frame :
+           decoder_.Append(std::string_view(buf, static_cast<size_t>(n)))) {
+        if (callbacks_.on_frame) {
+          callbacks_.on_frame.Run(std::move(frame));
         }
         if (fd_ < 0) {
-          return;  // Closed from inside on_line.
+          return;  // Closed from inside on_frame.
         }
+      }
+      if (decoder_.failed()) {
+        Close();  // Corrupt length: the stream can't be resynchronized.
+        return;
       }
       continue;
     }
@@ -74,11 +80,11 @@ void LineConnection::OnFileCanReadWithoutBlocking(int /*fd*/) {
   }
 }
 
-void LineConnection::OnFileCanWriteWithoutBlocking(int /*fd*/) {
+void FramedConnection::OnFileCanWriteWithoutBlocking(int /*fd*/) {
   Flush();
 }
 
-void LineConnection::Flush() {
+void FramedConnection::Flush() {
   while (fd_ >= 0 && output_offset_ < output_.size()) {
     const ssize_t n = send(fd_, output_.data() + output_offset_,
                            output_.size() - output_offset_, MSG_NOSIGNAL);
@@ -112,7 +118,7 @@ void LineConnection::Flush() {
   }
 }
 
-void LineConnection::Close() {
+void FramedConnection::Close() {
   if (fd_ < 0) {
     return;
   }

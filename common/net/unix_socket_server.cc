@@ -10,13 +10,14 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "base/functional/callback.h"
 #include "base/message_loop/message_pump_epoll.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/threading/thread.h"
-#include "net/line_connection.h"
+#include "net/framed_connection.h"
 
 namespace net {
 
@@ -60,12 +61,12 @@ bool UnixSocketServer::Listen() {
   return true;
 }
 
-void UnixSocketServer::SendLine(const std::string& line) {
-  if (!client_ || !client_->SendLine(line)) {
-    ++stats_.lines_dropped;
+void UnixSocketServer::SendFrame(std::string_view payload) {
+  if (!client_ || !client_->SendFrame(payload)) {
+    ++stats_.frames_dropped;
     return;
   }
-  ++stats_.lines_sent;
+  ++stats_.frames_sent;
 }
 
 void UnixSocketServer::OnFileCanReadWithoutBlocking(int /*fd*/) {
@@ -83,10 +84,10 @@ void UnixSocketServer::OnFileCanReadWithoutBlocking(int /*fd*/) {
     if (had_client && callbacks_.on_disconnected) {
       callbacks_.on_disconnected.Run();
     }
-    client_ = std::make_unique<LineConnection>(
+    client_ = std::make_unique<FramedConnection>(
         fd,
-        LineConnection::Callbacks{
-            base::BindRepeating(&UnixSocketServer::OnClientLine,
+        FramedConnection::Callbacks{
+            base::BindRepeating(&UnixSocketServer::OnClientFrame,
                                 weak_factory_.GetWeakPtr()),
             base::BindRepeating(&UnixSocketServer::OnClientClosed,
                                 weak_factory_.GetWeakPtr())},
@@ -98,10 +99,10 @@ void UnixSocketServer::OnFileCanReadWithoutBlocking(int /*fd*/) {
   }
 }
 
-void UnixSocketServer::OnClientLine(std::string line) {
-  ++stats_.lines_received;
-  if (callbacks_.on_line) {
-    callbacks_.on_line.Run(std::move(line));
+void UnixSocketServer::OnClientFrame(std::string frame) {
+  ++stats_.frames_received;
+  if (callbacks_.on_frame) {
+    callbacks_.on_frame.Run(std::move(frame));
   }
 }
 

@@ -33,14 +33,14 @@ class BrainBridge::IoCore : public base::RawPtrTarget {
         server_(std::move(path),
                 net::UnixSocketServer::Callbacks{
                     [this] { PostConnectionChanged(true); },
-                    [this](std::string line) { OnLine(std::move(line)); },
+                    [this](std::string frame) { OnFrame(std::move(frame)); },
                     [this] { PostConnectionChanged(false); }}) {}
 
   bool Listen() { return server_.Listen(); }
-  void Send(const std::string& message) { server_.SendLine(message); }
+  void Send(const std::string& message) { server_.SendFrame(message); }
 
  private:
-  void OnLine(std::string line) {
+  void OnFrame(std::string frame) {
     if (world_queue_->PendingTaskCount() >= max_pending_messages_) {
       ++dropped_inbound_;
       return;
@@ -50,7 +50,7 @@ class BrainBridge::IoCore : public base::RawPtrTarget {
         [](MessageHandler handler, std::string message) {
           handler.Run(std::move(message));
         },
-        on_message_, std::move(line)));
+        on_message_, std::move(frame)));
   }
 
   void PostConnectionChanged(bool connected) {

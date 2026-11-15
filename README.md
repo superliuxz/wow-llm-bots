@@ -13,7 +13,7 @@ Design and every decision so far: [docs/design.md](docs/design.md).
 | `docs/` | design doc |
 | `private/` | private submodule (accounts, personal data); not accessible to others |
 | `third_party/` | upstream code as pinned git submodules: AzerothCore (mod-playerbots fork, `Playerbot` branch), mod-playerbots (`master`), harness deps: Abseil `20260817.0`, GoogleTest `v1.18.0`, cpp-httplib `v0.66.0`, nlohmann/json `v3.12.0`, and llama.cpp `v1.0.0` |
-| `common/` | shared C++ used by the server module and the harness: `base/` (Chromium-style threads, epoll IO message pump, task runners, callbacks, WeakPtr, scoped_refptr, TimeDelta) and `net/` (Unix socket server/client, line framing) |
+| `common/` | shared C++ used by the server module and the harness: `base/` (Chromium-style threads, epoll IO message pump, task runners, callbacks, WeakPtr, scoped_refptr, TimeDelta) and `net/` (Unix socket server/client, length-prefixed framing) |
 | `server_module/` | our AzerothCore module(s) |
 | `harness/` | the bot brain harness (C++) |
 | `content/` | shared bot knowledge: `RULES.md`, `concepts/`, prompts |

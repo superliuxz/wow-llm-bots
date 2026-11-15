@@ -1,7 +1,11 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/un.h>
 #include <unistd.h>
 
+#include <cstring>
 #include <memory>
 #include <string>
 #include <utility>
@@ -23,26 +27,26 @@ namespace {
 
 constexpr base::TimeDelta kTimeout = base::Seconds(2);
 
-// Collects lines from callbacks running on IO threads.
+// Collects frames from callbacks running on IO threads.
 class Recorder {
  public:
-  void OnLine(std::string line) {
+  void OnFrame(std::string frame) {
     {
       base::AutoLock lock(lock_);
-      lines_.push_back(std::move(line));
+      frames_.push_back(std::move(frame));
     }
-    got_line_.Signal();
+    got_frame_.Signal();
   }
-  bool WaitForLine() { return got_line_.TimedWait(kTimeout); }
-  std::vector<std::string> lines() {
+  bool WaitForFrame() { return got_frame_.TimedWait(kTimeout); }
+  std::vector<std::string> frames() {
     base::AutoLock lock(lock_);
-    return lines_;
+    return frames_;
   }
 
  private:
   base::Lock lock_;
-  std::vector<std::string> lines_ GUARDED_BY(lock_);
-  base::WaitableEvent got_line_;
+  std::vector<std::string> frames_ GUARDED_BY(lock_);
+  base::WaitableEvent got_frame_;
 };
 
 std::string TestSocketPath() {
@@ -64,7 +68,7 @@ void RunOn(base::Thread& io, Fn fn) {
   done.Wait();
 }
 
-TEST(UnixSocketTest, ClientAndServerExchangeLines) {
+TEST(UnixSocketTest, ClientAndServerExchangeFrames) {
   const std::string path = TestSocketPath();
   base::Thread server_io("server"), client_io("client");
   ASSERT_TRUE(server_io.StartWithOptions(IoOptions()));
@@ -78,7 +82,7 @@ TEST(UnixSocketTest, ClientAndServerExchangeLines) {
     server = std::make_unique<UnixSocketServer>(
         path,
         UnixSocketServer::Callbacks{
-            {}, [&](std::string l) { at_server.OnLine(std::move(l)); }, {}});
+            {}, [&](std::string f) { at_server.OnFrame(std::move(f)); }, {}});
     ASSERT_TRUE(server->Listen());
   });
   RunOn(client_io, [&] {
@@ -86,19 +90,21 @@ TEST(UnixSocketTest, ClientAndServerExchangeLines) {
         path,
         UnixSocketClient::Callbacks{
             [&] { client_connected.Signal(); },
-            [&](std::string l) { at_client.OnLine(std::move(l)); },
+            [&](std::string f) { at_client.OnFrame(std::move(f)); },
             {}},
         base::Milliseconds(50));
     client->Start();
   });
   ASSERT_TRUE(client_connected.TimedWait(kTimeout));
 
-  RunOn(client_io, [&] { EXPECT_TRUE(client->SendLine("hello server")); });
-  ASSERT_TRUE(at_server.WaitForLine());
-  RunOn(server_io, [&] { server->SendLine("hello client"); });
-  ASSERT_TRUE(at_client.WaitForLine());
-  EXPECT_EQ(at_server.lines(), std::vector<std::string>{"hello server"});
-  EXPECT_EQ(at_client.lines(), std::vector<std::string>{"hello client"});
+  // Binary payloads (serialized protos) contain newlines and zero bytes.
+  const std::string binary("snap\nshot\0\xff", 11);
+  RunOn(client_io, [&] { EXPECT_TRUE(client->SendFrame("hello server")); });
+  ASSERT_TRUE(at_server.WaitForFrame());
+  RunOn(server_io, [&] { server->SendFrame(binary); });
+  ASSERT_TRUE(at_client.WaitForFrame());
+  EXPECT_EQ(at_server.frames(), std::vector<std::string>{"hello server"});
+  EXPECT_EQ(at_client.frames(), std::vector<std::string>{binary});
 
   RunOn(client_io, [&] { client.reset(); });
   RunOn(server_io, [&] { server.reset(); });
@@ -131,16 +137,49 @@ TEST(UnixSocketTest, ClientReconnectsWhenServerStartsLater) {
   RunOn(server_io, [&] { server.reset(); });
 }
 
-TEST(UnixSocketTest, ServerDropsLinesWithoutClient) {
+TEST(UnixSocketTest, ServerDropsFramesWithoutClient) {
   const std::string path = TestSocketPath();
   base::Thread io("server");
   ASSERT_TRUE(io.StartWithOptions(IoOptions()));
   RunOn(io, [&] {
     UnixSocketServer server(path, UnixSocketServer::Callbacks{});
     ASSERT_TRUE(server.Listen());
-    server.SendLine("nobody listening");
-    EXPECT_EQ(server.stats().lines_dropped, 1u);
+    server.SendFrame("nobody listening");
+    EXPECT_EQ(server.stats().frames_dropped, 1u);
   });
+}
+
+TEST(UnixSocketTest, ServerClosesClientOnCorruptFrame) {
+  const std::string path = TestSocketPath();
+  base::Thread io("server");
+  ASSERT_TRUE(io.StartWithOptions(IoOptions()));
+  std::unique_ptr<UnixSocketServer> server;
+  base::WaitableEvent connected, disconnected;
+  RunOn(io, [&] {
+    server = std::make_unique<UnixSocketServer>(
+        path,
+        UnixSocketServer::Callbacks{
+            [&] { connected.Signal(); }, {}, [&] { disconnected.Signal(); }});
+    ASSERT_TRUE(server->Listen());
+  });
+
+  // A raw client that sends a length far over the limit.
+  const int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  ASSERT_GE(fd, 0);
+  sockaddr_un addr = {};
+  addr.sun_family = AF_UNIX;
+  std::strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
+  ASSERT_EQ(connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)),
+            0);
+  ASSERT_TRUE(connected.TimedWait(kTimeout));
+  const char garbage[] = {'\xff', '\xff', '\xff', '\xff', 'x'};
+  ASSERT_EQ(send(fd, garbage, sizeof(garbage), MSG_NOSIGNAL),
+            static_cast<ssize_t>(sizeof(garbage)));
+  EXPECT_TRUE(disconnected.TimedWait(kTimeout));
+  RunOn(io, [&] { EXPECT_FALSE(server->connected()); });
+
+  close(fd);
+  RunOn(io, [&] { server.reset(); });
 }
 
 }  // namespace

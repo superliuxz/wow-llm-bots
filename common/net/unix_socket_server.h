@@ -7,28 +7,29 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_pump_epoll.h"
-#include "net/line_connection.h"
+#include "net/framed_connection.h"
 
 namespace net {
 
-// Line-oriented Unix socket server with at most one client: a new connection
-// replaces the old one. Create, use and destroy on one IO thread (a
-// base::Thread with MessagePumpType::IO).
+// Unix socket server for length-prefixed frames (net/frame_codec.h), with at
+// most one client: a new connection replaces the old one. Create, use and
+// destroy on one IO thread (a base::Thread with MessagePumpType::IO).
 class UnixSocketServer : public base::MessagePumpForIO::FdWatcher {
  public:
   struct Callbacks {
     base::RepeatingClosure on_connected;
-    base::RepeatingCallback<void(std::string)> on_line;
+    base::RepeatingCallback<void(std::string)> on_frame;
     base::RepeatingClosure on_disconnected;
   };
   struct Stats {
-    uint64_t lines_sent = 0;
-    uint64_t lines_received = 0;
-    uint64_t lines_dropped = 0;  // Not connected, or output backed up.
+    uint64_t frames_sent = 0;
+    uint64_t frames_received = 0;
+    uint64_t frames_dropped = 0;  // Not connected, or output backed up.
     uint64_t connections = 0;
   };
 
@@ -41,8 +42,8 @@ class UnixSocketServer : public base::MessagePumpForIO::FdWatcher {
 
   // Removes a stale socket file, binds and listens. Returns false on failure.
   bool Listen();
-  // Queues `line` for the client; dropped if none or backed up.
-  void SendLine(const std::string& line);
+  // Queues `payload` as one frame for the client; dropped if none or backed up.
+  void SendFrame(std::string_view payload);
   bool connected() const { return client_ != nullptr; }
   const Stats& stats() const { return stats_; }
 
@@ -51,7 +52,7 @@ class UnixSocketServer : public base::MessagePumpForIO::FdWatcher {
   void OnFileCanReadWithoutBlocking(int fd) override;
   void OnFileCanWriteWithoutBlocking(int /*fd*/) override {}
 
-  void OnClientLine(std::string line);
+  void OnClientFrame(std::string frame);
   void OnClientClosed();
 
   const std::string path_;
@@ -59,7 +60,7 @@ class UnixSocketServer : public base::MessagePumpForIO::FdWatcher {
   const size_t max_output_bytes_;
   int listen_fd_ = -1;
   base::MessagePumpForIO::FdWatchController listen_controller_;
-  std::unique_ptr<LineConnection> client_;
+  std::unique_ptr<FramedConnection> client_;
   Stats stats_;
   base::WeakPtrFactory<UnixSocketServer> weak_factory_{this};
 };
