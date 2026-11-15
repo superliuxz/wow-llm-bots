@@ -24,5 +24,21 @@ TEST(TimeTicksTest, IsMonotonicAndSupportsArithmetic) {
   EXPECT_FALSE(a.is_null());
 }
 
+TEST(TimeTest, NowIsWallClockTime) {
+  // 2026-01-01T00:00:00Z: any real "now" is later.
+  const Time earliest = Time::FromMillisecondsSinceUnixEpoch(1767225600000);
+  const Time now = Time::Now();
+  EXPECT_FALSE(now.is_null());
+  EXPECT_GT(now, earliest);
+}
+
+TEST(TimeTest, MillisecondsSinceUnixEpochRoundTrip) {
+  const Time t = Time::FromMillisecondsSinceUnixEpoch(1794729600123);
+  EXPECT_EQ(t.InMillisecondsSinceUnixEpoch(), 1794729600123);
+  EXPECT_EQ((t + Seconds(2)).InMillisecondsSinceUnixEpoch(), 1794729602123);
+  EXPECT_EQ((t + Milliseconds(5)) - t, Milliseconds(5));
+  EXPECT_TRUE(Time().is_null());
+}
+
 }  // namespace
 }  // namespace base

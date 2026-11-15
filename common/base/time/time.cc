@@ -16,4 +16,11 @@ TimeTicks TimeTicks::Now() {
                    ts.tv_nsec / 1000);
 }
 
+// static
+Time Time::Now() {
+  timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  return Time(static_cast<int64_t>(ts.tv_sec) * 1000000 + ts.tv_nsec / 1000);
+}
+
 }  // namespace base

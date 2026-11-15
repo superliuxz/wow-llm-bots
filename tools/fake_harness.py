@@ -3,10 +3,12 @@
 Connects to the brain socket, prints what the server sends for a few seconds,
 optionally sends messages, then disconnects. Messages are length-prefixed frames
 (4-byte big-endian length, then the payload), as in common/net/frame_codec.h.
-Payloads are printed as text when they decode as UTF-8, otherwise as a byte
-count and hex preview (serialized protos).
+Module messages (wlb.snapshot.ModuleMessage) are printed as JSON when the
+generated Python code is available, otherwise as a byte count and hex preview.
 
-Usage: python3 -I tools/fake_harness.py [seconds=5] [message-to-send ...]
+Dev tool only (production is C++). For JSON, generate the code once with
+tools/validate-snapshots.sh and run with the tools venv:
+  out/tools-venv/bin/python -I tools/fake_harness.py [seconds=5] [message ...]
 """
 
 import pathlib
@@ -19,12 +21,23 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOCK = str(ROOT / "server" / "run" / "brain.sock")
 HEADER = struct.Struct(">I")
 
+try:
+    sys.path.insert(0, str(ROOT / "out" / "proto"))
+    from google.protobuf import json_format
+    from proto import snapshot_pb2
+except ImportError:
+    snapshot_pb2 = None
+
 
 def describe(payload):
-    try:
-        return payload.decode("utf-8")[:200]
-    except UnicodeDecodeError:
-        return f"[{len(payload)} bytes] {payload[:32].hex()}"
+    if snapshot_pb2 is not None:
+        message = snapshot_pb2.ModuleMessage()
+        try:
+            message.ParseFromString(payload)
+            return json_format.MessageToJson(message, indent=1, preserving_proto_field_name=True)
+        except Exception:  # Not a ModuleMessage: fall through to hex.
+            pass
+    return f"[{len(payload)} bytes] {payload[:32].hex()}"
 
 
 def main():

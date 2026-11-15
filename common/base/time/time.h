@@ -1,7 +1,7 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
-// TimeDelta and TimeTicks: durations and monotonic time points with microsecond
-// resolution.
+// TimeDelta, TimeTicks and Time: durations, monotonic time points and
+// wall-clock time points, with microsecond resolution.
 
 #ifndef COMMON_BASE_TIME_TIME_H_
 #define COMMON_BASE_TIME_TIME_H_
@@ -78,6 +78,38 @@ class TimeTicks {
 
  private:
   explicit constexpr TimeTicks(int64_t us) : us_(us) {}
+  int64_t us_ = 0;
+};
+
+// A point on the wall clock (UTC). It can jump when the system clock is set:
+// use it for timestamps that people and logs read, and TimeTicks to measure
+// durations or schedule work.
+class Time {
+ public:
+  constexpr Time() = default;
+
+  static Time Now();
+  static constexpr Time FromMillisecondsSinceUnixEpoch(int64_t ms) {
+    return Time(ms * 1000);
+  }
+
+  constexpr int64_t InMillisecondsSinceUnixEpoch() const { return us_ / 1000; }
+  constexpr bool is_null() const { return us_ == 0; }
+
+  constexpr Time operator+(TimeDelta delta) const {
+    return Time(us_ + delta.InMicroseconds());
+  }
+  constexpr Time operator-(TimeDelta delta) const {
+    return Time(us_ - delta.InMicroseconds());
+  }
+  constexpr TimeDelta operator-(Time other) const {
+    return Microseconds(us_ - other.us_);
+  }
+  constexpr auto operator<=>(const Time&) const = default;
+
+ private:
+  // Microseconds since the Unix epoch.
+  explicit constexpr Time(int64_t us) : us_(us) {}
   int64_t us_ = 0;
 };
 
