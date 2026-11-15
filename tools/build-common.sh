@@ -7,8 +7,8 @@
 #   --asan  -> out/common-asan (AddressSanitizer + UndefinedBehaviorSanitizer)
 #   --tsan  -> out/common-tsan (ThreadSanitizer)
 #   --msan  -> out/common-msan (MemorySanitizer, linked against an
-#              MSan-instrumented libc++ from tools/build-msan-libcxx.sh, like
-#              Chromium's MSan builds; the system libstdc++ isn't instrumented)
+#              MSan-instrumented libc++ from tools/build-msan-libcxx.sh; the
+#              system libstdc++ isn't instrumented)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 TESTS=1; OUT=out/common; SAN=""; TYPE=RelWithDebInfo; HARDENED=ON

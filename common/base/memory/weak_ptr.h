@@ -1,9 +1,9 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
-// WeakPtr / WeakPtrFactory in the spirit of Chromium's //base/memory/weak_ptr.
-// Like Chromium's, they are not thread-safe: create, dereference and invalidate
-// on the owning object's sequence only. They may be *copied and passed* across
-// threads (e.g. bound into a task posted back to the owner's sequence).
+// WeakPtr / WeakPtrFactory. They are not thread-safe: create, dereference and
+// invalidate on the owning object's sequence only. They may be *copied and
+// passed* across threads (e.g. bound into a task posted back to the owner's
+// sequence).
 
 #ifndef COMMON_BASE_MEMORY_WEAK_PTR_H_
 #define COMMON_BASE_MEMORY_WEAK_PTR_H_
@@ -18,7 +18,7 @@ template <typename T>
 class WeakPtrFactory;
 
 namespace internal {
-// Shared validity flag, like Chromium's WeakReference::Flag.
+// Shared validity flag.
 class WeakFlag : public RefCountedThreadSafe<WeakFlag> {
  public:
   bool valid = true;

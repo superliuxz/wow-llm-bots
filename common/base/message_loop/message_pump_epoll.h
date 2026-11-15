@@ -11,10 +11,9 @@
 
 namespace base {
 
-// IO message pump on epoll, like Chromium's MessagePumpEpoll (Linux
-// MessagePumpForIO). Tasks wake it through an eventfd; delayed tasks set the
-// epoll_pwait2 timeout. File descriptors are watched with
-// WatchFileDescriptor(), usually via CurrentIOThread::Get().
+// IO message pump on epoll (MessagePumpForIO). Tasks wake it through an
+// eventfd; delayed tasks set the epoll_pwait2 timeout. File descriptors are
+// watched with WatchFileDescriptor(), usually via CurrentIOThread::Get().
 class MessagePumpEpoll : public MessagePump {
  public:
   enum Mode {

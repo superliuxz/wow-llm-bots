@@ -1,7 +1,7 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
-// TimeDelta and TimeTicks in the spirit of Chromium's //base/time. Durations
-// and monotonic time points with microsecond resolution.
+// TimeDelta and TimeTicks: durations and monotonic time points with microsecond
+// resolution.
 
 #ifndef COMMON_BASE_TIME_TIME_H_
 #define COMMON_BASE_TIME_TIME_H_

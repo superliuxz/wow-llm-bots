@@ -18,7 +18,7 @@ list(FILTER WLB_MODULE_SOURCES EXCLUDE REGEX "_unittest\\.cc$")
 set_source_files_properties(${WLB_MODULE_SOURCES} PROPERTIES
   COMPILE_OPTIONS "-Wthread-safety;-Werror=thread-safety")
 
-# Unit tests sit next to the code (Chromium-style) but must not be compiled into
+# Unit tests sit next to the code but must not be compiled into
 # the server: AzerothCore globs every .cc in a module directory, so drop them
 # from the `modules` target. common/CMakeLists.txt builds them as tests.
 get_target_property(WLB_MODULES_SOURCES modules SOURCES)

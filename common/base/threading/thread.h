@@ -16,9 +16,9 @@
 
 namespace base {
 
-// A thread running a sequenced task loop on a message pump, like Chromium's
-// base::Thread. Use Options{MessagePumpType::IO} for a thread that can watch
-// sockets (see CurrentIOThread).
+// A thread running a sequenced task loop on a message pump. Use
+// Options{MessagePumpType::IO} for a thread that can watch sockets (see
+// CurrentIOThread).
 class Thread {
  public:
   struct Options {
@@ -52,8 +52,7 @@ class Thread {
   PlatformThreadHandle handle_;
 };
 
-// Access to the IO message pump of the current thread, like Chromium's
-// base::CurrentIOThread:
+// Access to the IO message pump of the current thread:
 //   CurrentIOThread::Get()->WatchFileDescriptor(fd, true, WATCH_READ, ...);
 class CurrentIOThread {
  public:

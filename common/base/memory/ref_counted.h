@@ -1,7 +1,6 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
-// Intrusive reference counting in the spirit of Chromium's
-// //base/memory/ref_counted.h and scoped_refptr.h.
+// Intrusive reference counting: RefCountedThreadSafe and scoped_refptr.
 
 #ifndef COMMON_BASE_MEMORY_REF_COUNTED_H_
 #define COMMON_BASE_MEMORY_REF_COUNTED_H_

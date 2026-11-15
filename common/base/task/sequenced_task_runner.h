@@ -12,7 +12,7 @@
 namespace base {
 
 // Runs posted tasks one at a time, in posting order (delayed tasks in due-time
-// order). Held in scoped_refptr, like Chromium's.
+// order). Held in scoped_refptr.
 class SequencedTaskRunner : public RefCountedThreadSafe<SequencedTaskRunner>,
                             public RawPtrTarget {
  public:

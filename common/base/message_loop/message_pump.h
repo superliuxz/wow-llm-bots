@@ -15,7 +15,7 @@ enum class MessagePumpType {
   IO,       // epoll loop; file descriptors can be watched on this thread.
 };
 
-// The loop a base::Thread runs, like Chromium's base::MessagePump. Run() calls
+// The loop a base::Thread runs. Run() calls
 // back into the delegate to do work and sleeps until ScheduleWork() or the
 // next delayed run time.
 class MessagePump : public RawPtrTarget {

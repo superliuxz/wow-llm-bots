@@ -23,8 +23,9 @@ edition = "2024";
 
 package wlb.snapshot;
 
-// As in Chromium: generated C++ uses the lite runtime. The wire is binary; JSON exists only
-// in tooling (harness recordings, evals), converted via a descriptor-based TypeResolver.
+// Generated C++ uses the lite runtime. The wire is binary; JSON exists only in
+// tooling (harness recordings, evals), converted via a descriptor-based
+// TypeResolver.
 option optimize_for = LITE_RUNTIME;
 // proto3 semantics: scalars have no presence; absent means default (false, 0, "").
 option features.field_presence = IMPLICIT;

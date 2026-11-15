@@ -140,7 +140,7 @@ bool MessagePumpEpoll::StopWatching(FdWatchController* controller) {
 }
 
 void MessagePumpEpoll::Dispatch(int fd, uint32_t events) {
-  // Errors and hangups are reported as readable/writable, like Chromium:
+  // Errors and hangups are reported as readable/writable:
   // the next read/write returns the error or EOF.
   const bool error = events & (EPOLLERR | EPOLLHUP);
   for (int mode : {WATCH_WRITE, WATCH_READ}) {

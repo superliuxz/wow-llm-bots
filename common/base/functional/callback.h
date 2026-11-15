@@ -1,8 +1,7 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
-// Minimal OnceCallback / RepeatingCallback / BindOnce / BindRepeating in the
-// spirit of Chromium's //base/functional. Plain C++20 so it can be included
-// from AzerothCore modules.
+// Minimal OnceCallback / RepeatingCallback / BindOnce / BindRepeating. Plain
+// C++20 so it can be included from AzerothCore modules.
 
 #ifndef COMMON_BASE_FUNCTIONAL_CALLBACK_H_
 #define COMMON_BASE_FUNCTIONAL_CALLBACK_H_
@@ -119,7 +118,7 @@ constexpr bool kFirstIsWeakPtr<First, Rest...> =
 
 // Binds leading arguments; the result converts to OnceCallback<...>. When the
 // first bound argument is a WeakPtr (method on an object), the call is skipped
-// once the WeakPtr is invalidated, like Chromium's base::BindOnce.
+// once the WeakPtr is invalidated.
 template <typename F, typename... BoundArgs>
 auto BindOnce(F&& fn, BoundArgs&&... bound) {
   if constexpr (internal::kFirstIsWeakPtr<BoundArgs...>) {

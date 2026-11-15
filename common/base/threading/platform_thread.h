@@ -12,7 +12,7 @@
 
 namespace base {
 
-// Thin pthread wrapper, like Chromium's base::PlatformThread. Prefer
+// Thin pthread wrapper. Prefer
 // base::Thread or base::ThreadPool; use this only to build those.
 class PlatformThreadHandle {
  public:

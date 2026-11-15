@@ -1,6 +1,6 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
-// Compiler/sanitizer helpers, like Chromium's base/compiler_specific.h.
+// Compiler/sanitizer helpers.
 
 #ifndef COMMON_BASE_COMPILER_SPECIFIC_H_
 #define COMMON_BASE_COMPILER_SPECIFIC_H_

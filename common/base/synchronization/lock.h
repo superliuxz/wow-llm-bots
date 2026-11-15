@@ -12,7 +12,7 @@ namespace base {
 
 class ConditionVariable;
 
-// A non-recursive mutex, like Chromium's base::Lock. Annotated so that
+// A non-recursive mutex. Annotated so that
 // -Wthread-safety checks GUARDED_BY data is only used with the lock held.
 class LOCKABLE Lock : public RawPtrTarget {
  public:
@@ -30,7 +30,7 @@ class LOCKABLE Lock : public RawPtrTarget {
   pthread_mutex_t mutex_;
 };
 
-// Holds a Lock for its scope, like Chromium's base::AutoLock.
+// Holds a Lock for its scope.
 class SCOPED_LOCKABLE AutoLock {
  public:
   explicit AutoLock(Lock& lock) EXCLUSIVE_LOCK_FUNCTION(lock) : lock_(lock) {

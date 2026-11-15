@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Everything our C++ must pass before review/commit:
-#   1. clang-format (Chromium style)
+#   1. clang-format (.clang-format)
 #   2. include-what-you-use (tools/check-includes.sh)
 #   3. build + unit tests: default, ASan+UBSan, TSan, MSan
 # Usage: tools/check-cpp.sh

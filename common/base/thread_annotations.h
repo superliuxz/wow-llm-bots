@@ -1,6 +1,6 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
-// Clang thread-safety annotations, as in Chromium's base/thread_annotations.h.
+// Clang thread-safety annotations.
 // With -Wthread-safety the compiler checks that guarded data is only touched
 // with its lock held. See https://clang.llvm.org/docs/ThreadSafetyAnalysis.html
 

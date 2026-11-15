@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build libc++/libc++abi instrumented with MemorySanitizer into out/llvm/msan,
 # matching the installed clang version (MSan needs every byte of C++ code
-# instrumented, including the standard library; Chromium does the same).
+# instrumented, including the standard library).
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 VER=$(clang --version | sed -n 's/.*clang version \([0-9.]*\).*/\1/p' | head -1)

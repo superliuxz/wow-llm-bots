@@ -10,7 +10,7 @@
 
 namespace base {
 
-// A one-bit signal threads can wait on, like Chromium's base::WaitableEvent.
+// A one-bit signal threads can wait on.
 // Blocking is rare in our code (startup handshakes, tests): prefer posting a
 // reply task.
 class WaitableEvent {

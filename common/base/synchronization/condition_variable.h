@@ -11,10 +11,9 @@
 
 namespace base {
 
-// Condition variable bound to one Lock, like Chromium's
-// base::ConditionVariable. Wait()/TimedWait() must be called with the lock held
-// and may wake spuriously: always re-check the condition in a loop. Uses the
-// monotonic clock, so wall-clock changes don't affect timeouts.
+// Condition variable bound to one Lock. Wait()/TimedWait() must be called with
+// the lock held and may wake spuriously: always re-check the condition in a
+// loop. Uses the monotonic clock, so wall-clock changes don't affect timeouts.
 class ConditionVariable {
  public:
   explicit ConditionVariable(Lock* user_lock);

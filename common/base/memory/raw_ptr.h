@@ -1,12 +1,10 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
-// raw_ptr<T>: a non-owning pointer for class fields, in the spirit of
-// Chromium's MiraclePtr (base/memory/raw_ptr.h) and its dangling pointer
-// detector. Chromium does this in its allocator (PartitionAlloc); we do it by
-// opt-in: if T derives from base::RawPtrTarget, every raw_ptr<T> holds a count
-// on the object, and destroying the object while any raw_ptr<T> still points
-// to it crashes immediately ("dangling raw_ptr") instead of becoming a
-// use-after-free later. For other T, raw_ptr<T> is a plain pointer.
+// raw_ptr<T>: a non-owning pointer for class fields with a dangling pointer
+// detector, by opt-in: if T derives from base::RawPtrTarget, every raw_ptr<T>
+// holds a count on the object, and destroying the object while any raw_ptr<T>
+// still points to it crashes immediately ("dangling raw_ptr") instead of
+// becoming a use-after-free later. For other T, raw_ptr<T> is a plain pointer.
 //
 // Use raw_ptr<T> for pointer fields (not locals or parameters). Fields that may
 // legitimately dangle (e.g. WeakPtr's target) use MayBeDangling<T>.
@@ -98,8 +96,7 @@ class raw_ptr {
   operator T*() const { return ptr_; }  // NOLINT: implicit like T*
   explicit operator bool() const { return ptr_ != nullptr; }
 
-  // Deletes the pointee after dropping this reference, like Chromium's
-  // raw_ptr::ClearAndDelete().
+  // Deletes the pointee after dropping this reference.
   void ClearAndDelete() {
     T* p = ptr_;
     ReleaseRef();
