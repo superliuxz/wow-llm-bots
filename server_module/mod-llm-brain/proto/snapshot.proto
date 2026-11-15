@@ -1,10 +1,11 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
 // The snapshot: everything a player could possibly see in the WoW 3.3.5a client, and
-// nothing more. Single source of truth for the module <-> harness protocol; the
-// prose and rationale are in snapshot.md, coverage in coverage-ui.md and
-// coverage-opcodes.md. Recordings and eval examples use the canonical protobuf JSON
-// mapping (examples/*.json); the wire between module and harness is binary.
+// nothing more. Single source of truth for the module <-> harness protocol; the prose
+// and rationale are in docs/specs/snapshot.md, coverage in docs/specs/coverage-ui.md
+// and docs/specs/coverage-opcodes.md. Recordings and eval examples use the canonical
+// protobuf JSON mapping (docs/specs/examples/*.json); the wire between module and
+// harness is binary.
 //
 // Conventions:
 // - Composition instead of inheritance: a Unit carries optional `player`, `group`,
@@ -30,7 +31,7 @@ option features.field_presence = IMPLICIT;
 
 // Option-only import (Edition 2024): the annotations are readable through descriptors, but
 // the generated (lite) code does not depend on snapshot_options.proto or descriptor.proto.
-import option "snapshot_options.proto";
+import option "proto/snapshot_options.proto";
 
 // ---------------------------------------------------------------------------------
 // Shared value types.

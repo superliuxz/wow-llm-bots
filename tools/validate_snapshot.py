@@ -1,4 +1,4 @@
-"""Validate snapshot JSON files against docs/specs/snapshot.proto.
+"""Validate snapshot JSON files against server_module/mod-llm-brain/proto/snapshot.proto.
 
 Each file must parse as a wlb.snapshot.Snapshot in the canonical protobuf JSON mapping
 (unknown fields are errors), and must respect visibility:
@@ -14,8 +14,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, sys.argv[1])
-import snapshot_options_pb2 as opts  # noqa: E402  (registers the option extensions)
-import snapshot_pb2 as pb  # noqa: E402
+from proto import snapshot_options_pb2 as opts  # noqa: E402  (registers the option extensions)
+from proto import snapshot_pb2 as pb  # noqa: E402
 from google.protobuf import json_format  # noqa: E402
 
 

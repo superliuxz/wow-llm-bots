@@ -1,9 +1,9 @@
 # Bot perception: the snapshot spec
 
 Status: **agreed, revision 7** (2026-11-15). The exact field-level contract is
-[`snapshot.proto`](snapshot.proto) (protobuf Edition 2024, lite runtime; the single source of
+[`server_module/mod-llm-brain/proto/snapshot.proto`](../../server_module/mod-llm-brain/proto/snapshot.proto) (protobuf Edition 2024, lite runtime; the single source of
 truth for the module <-> harness protocol; field annotations in
-[`snapshot_options.proto`](snapshot_options.proto)); examples in [`examples/`](examples/) use the canonical protobuf JSON
+[`snapshot_options.proto`](../../server_module/mod-llm-brain/proto/snapshot_options.proto)); examples in [`examples/`](examples/) use the canonical protobuf JSON
 mapping and are checked by `tools/validate-snapshots.sh` (strict parse + visibility rules).
 Coverage against the client: [`coverage-ui.md`](coverage-ui.md) (every UI frame) and
 [`coverage-opcodes.md`](coverage-opcodes.md) (every server opcode). This document explains it. Everything a bot's brain decides is based on this.

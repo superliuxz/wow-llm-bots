@@ -113,7 +113,7 @@ not in `out/common-server` (linked into AzerothCore).
 
 ## Decisions (review 2026-11-14)
 1. **Wire format** module <-> harness (revised 2026-11-15): binary protobuf messages from
-   `docs/specs/snapshot.proto` (lite runtime, as Chromium), in length-prefixed frames over the
+   `server_module/mod-llm-brain/proto/snapshot.proto` (lite runtime, as Chromium), in length-prefixed frames over the
    Unix socket (a `LengthPrefixFramer` in `common/net` replaces the newline framer for the
    bridge). JSON (canonical protobuf mapping) only in harness tooling: recordings, decision
    logs, eval cases. The LLM never
