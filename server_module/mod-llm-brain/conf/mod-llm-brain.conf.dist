@@ -20,7 +20,10 @@ LlmBrain.SocketPath = "brain.sock"
 
 #
 #    LlmBrain.Bots
-#        Description: Comma-separated character names the brain controls (phase 2: one bot).
+#        Description: Comma-separated character names our bot manager keeps logged in and
+#                     the brain controls (phase 2: one bot). Requires
+#                     Playerbots.RandomBotAutologin = 0 (our manager replaces playerbots'
+#                     random-bot manager).
 #        Default:     ""
 
 LlmBrain.Bots = ""
@@ -33,3 +36,20 @@ LlmBrain.Bots = ""
 #        Default:     1000
 
 LlmBrain.SnapshotIntervalMs = 1000
+
+#
+#    LlmBrain.CombatStrategies
+#    LlmBrain.NonCombatStrategies
+#    LlmBrain.DeadStrategies
+#        Description: Playerbots strategy changes the bot manager applies to our bots and
+#                     re-applies whenever playerbots resets them. The defaults give our bots
+#                     what playerbots gives a solo random bot: they quest and grind on their
+#                     own (docs/playerbots-random-bot-audit.md). Healers also get the solo
+#                     damage strategies for their spec.
+#        Default:     "+boost,+dps assist,-threat"
+#                     "-follow,+grind,+new rpg"
+#                     "-follow"
+
+LlmBrain.CombatStrategies = "+boost,+dps assist,-threat"
+LlmBrain.NonCombatStrategies = "-follow,+grind,+new rpg"
+LlmBrain.DeadStrategies = "-follow"

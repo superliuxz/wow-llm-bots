@@ -12,6 +12,7 @@
 #include "Player.h"
 #include "WorldScript.h"
 #include "base/time/time.h"
+#include "bot_manager.h"
 #include "brain_bridge.h"
 #include "llm_brain_config.h"
 #include "proto/snapshot.pb.h"
@@ -45,6 +46,10 @@ class LlmBrainWorldScript : public WorldScript {
     if (!config_.enabled) {
       return;
     }
+    bot_manager_ = std::make_unique<BotManager>(
+        config_.bots, BotManager::Strategies{config_.combat_strategies,
+                                             config_.non_combat_strategies,
+                                             config_.dead_strategies});
     bridge_ = std::make_unique<BrainBridge>(
         config_.socket_path, kMaxPendingMessages,
         BrainBridge::Callbacks{
@@ -67,6 +72,9 @@ class LlmBrainWorldScript : public WorldScript {
   }
 
   void OnUpdate(uint32 diff) override {
+    if (bot_manager_) {
+      bot_manager_->Update(diff);
+    }
     if (!bridge_) {
       return;
     }
@@ -85,6 +93,10 @@ class LlmBrainWorldScript : public WorldScript {
   }
 
   void OnShutdown() override {
+    if (bot_manager_) {
+      bot_manager_->Stop();
+      bot_manager_.reset();
+    }
     if (bridge_) {
       bridge_->Stop();
       bridge_.reset();
@@ -107,6 +119,7 @@ class LlmBrainWorldScript : public WorldScript {
   }
 
   Config config_;
+  std::unique_ptr<BotManager> bot_manager_;
   std::unique_ptr<BrainBridge> bridge_;
   uint32 since_snapshot_ms_ = 0;
   // Per-bot snapshot counter (gaps tell the harness something was dropped).

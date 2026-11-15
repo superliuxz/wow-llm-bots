@@ -1,9 +1,20 @@
 # Audit: what mod-playerbots gives "random bots" that our bots won't have
 
 Context: we replace playerbots' random-bot manager with our own bot manager (route A,
-decided 2026-11-15). Our bots log in through a `PlayerbotHolder` subclass in mod-llm-brain,
-with no master, and are **not** random bots (`RandomPlayerbotMgr::IsRandomBot()` is false:
-the manager's private `currentBots` set is empty). This audit lists every place playerbots
+decided 2026-11-15). Our manager (`server_module/mod-llm-brain/src/bot_manager.cc`) decides
+who is online and logs them in with playerbots' public `AddPlayerBot(guid, 0)` (no master).
+Playerbots then runs them through its own plumbing: a login without a master always ends in
+`RandomPlayerbotMgr`'s holder (sessions drained and AI ticked by playerbots' world / player
+scripts, independent of `RandomBotAutologin`). With `RandomBotAutologin = 0` the manager
+itself does nothing else: no picking, rotation, refresh, revive or teleports. Our bots are
+**not** random bots (`IsRandomBot()` is false: the manager's private `currentBots` set is
+empty).
+
+The manager's **login hook** (`RandomPlayerbotMgr::OnBotLoginInternal`) still runs for our
+bots: it would put them in automatic bot guilds (`RandomBotGuildCount`) and, from level 70,
+bot arena teams (`RandomBotArenaTeam*Count`). Both are set to 0 in our config. It also adds
+non-random bots to its list of "real players" (only used by the activity throttle, which is
+off: `BotActiveAlone = 100`). This audit lists every place playerbots
 checks `IsRandomBot` (89 call sites in 71 functions, pinned submodule as of 2026-11-15) and
 what that means for our bots. No edits to `third_party/`.
 

@@ -1,5 +1,0 @@
-# Phase 1a: one stock random bot from level 1, solo.
-Playerbots.MinRandomBots = 1
-Playerbots.MaxRandomBots = 1
-Playerbots.DisableRandomLevels = 1
-Playerbots.RandombotStartingLevel = 1

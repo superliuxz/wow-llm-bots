@@ -9,19 +9,18 @@ Playerbots.AutoEquipUpgradeLoot = 0
 Playerbots.AutoTeleportForLevel = 0
 Playerbots.AutoGearCommand = 0
 Playerbots.ReviveBotWhenSummoned = 0
-# All Horde. No random bots until the phase 1 tests.
-Playerbots.RandomBotAllianceRatio = 0
-Playerbots.RandomBotHordeRatio = 100
+# The random-bot manager is off: our module's bot manager decides who is online
+# (mod-llm-brain LlmBrain.Bots; docs/playerbots-random-bot-audit.md). Off means no random
+# picking, rotation, refresh / revive, teleports or re-randomizing.
+Playerbots.RandomBotAutologin = 0
 Playerbots.MinRandomBots = 0
 Playerbots.MaxRandomBots = 0
-# No hidden cheats from the random-bot manager: no auto-revive (bots must corpse-run),
-# no periodic random teleports, no level/gear re-randomizing.
-Playerbots.MinRandomBotReviveTime = 31536000
-Playerbots.MaxRandomBotReviveTime = 31536000
-Playerbots.MinRandomBotTeleportInterval = 31536000
-Playerbots.MaxRandomBotTeleportInterval = 31536000
-Playerbots.MinRandomBotRandomizeTime = 31536000
-Playerbots.MaxRandomBotRandomizeTime = 31536000
+# Its login hook still runs for bots without a master: no automatic bot guilds or arena
+# teams (bots form guilds themselves).
+Playerbots.RandomBotGuildCount = 0
+Playerbots.RandomBotArenaTeam2v2Count = 0
+Playerbots.RandomBotArenaTeam3v3Count = 0
+Playerbots.RandomBotArenaTeam5v5Count = 0
 # Our bots are "real players": always active, no sleeping/rotation when no human is nearby.
 # (Default 10% active-alone + smart scaling made the test bot sleep ~90% of the time.)
 Playerbots.BotActiveAlone = 100

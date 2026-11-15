@@ -12,8 +12,14 @@ namespace llm_brain {
 struct Config {
   bool enabled = false;
   std::string socket_path = "brain.sock";
+  // Characters our bot manager keeps online and the brain controls.
   std::vector<std::string> bots;
   uint32_t snapshot_interval_ms = 1000;
+  // Playerbots strategy changes the bot manager keeps applied (see
+  // docs/playerbots-random-bot-audit.md).
+  std::string combat_strategies;
+  std::string non_combat_strategies;
+  std::string dead_strategies;
 };
 
 // Reads LlmBrain.* options from the loaded worldserver config.

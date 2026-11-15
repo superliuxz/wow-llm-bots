@@ -38,6 +38,12 @@ Config LoadConfig() {
       SplitNames(sConfigMgr->GetOption<std::string>("LlmBrain.Bots", ""));
   config.snapshot_interval_ms =
       sConfigMgr->GetOption<uint32_t>("LlmBrain.SnapshotIntervalMs", 1000);
+  config.combat_strategies = sConfigMgr->GetOption<std::string>(
+      "LlmBrain.CombatStrategies", "+boost,+dps assist,-threat");
+  config.non_combat_strategies = sConfigMgr->GetOption<std::string>(
+      "LlmBrain.NonCombatStrategies", "-follow,+grind,+new rpg");
+  config.dead_strategies =
+      sConfigMgr->GetOption<std::string>("LlmBrain.DeadStrategies", "-follow");
   return config;
 }
 
