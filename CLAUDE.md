@@ -2,6 +2,13 @@
 
 Design and decisions: `docs/design.md`. Current phase plan: `docs/plans/`.
 
+## The brain decides; C++ is a pure harness
+
+Our C++ perceives, measures, estimates, executes, and does math an LLM is bad at (geometry,
+routing, timing). Judgments (what's worth doing, risk, priorities, when to act) belong to the
+LLM brain: expose them as parameters the brain sets, with neutral defaults. No hard-coded
+"if this then that" game logic in C++: it defeats the purpose (docs/design.md).
+
 ## C++ (our code: `common/`, `harness/`, `server_module/`)
 
 **When in doubt, do what Chromium does.** Follow the
