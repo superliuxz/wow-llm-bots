@@ -1,0 +1,216 @@
+// Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
+
+#include "llm_client.h"
+
+#include <chrono>
+#include <nlohmann/json_fwd.hpp>
+#include <string>
+#include <thread>
+
+#include "base/functional/callback.h"
+#include "base/synchronization/lock.h"
+#include "base/synchronization/waitable_event.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/thread_annotations.h"
+#include "base/threading/thread.h"
+#include "gtest/gtest.h"
+#include "httplib.h"
+#include "nlohmann/json.hpp"
+
+namespace harness {
+namespace {
+
+using Json = nlohmann::json;
+
+constexpr char kReplyBody[] = R"({
+  "choices": [{"message": {"role": "assistant", "content": "do: 1\nlook: 30"}}],
+  "usage": {"prompt_tokens": 812, "completion_tokens": 9},
+  "timings": {"prompt_n": 240, "prompt_ms": 31.5, "predicted_ms": 64.25}
+})";
+
+LlmRequest SampleRequest() {
+  LlmRequest request;
+  request.system = "You are a player.";
+  request.user = "Your screen:\nme: Tess";
+  request.grammar = "root ::= \"x\"";
+  request.slot = 3;
+  request.max_tokens = 80;
+  request.temperature = 0.5f;
+  return request;
+}
+
+TEST(LlmClientTest, TheBodyCarriesEverythingTheServerNeeds) {
+  const Json body = Json::parse(BuildChatBody(SampleRequest()));
+  EXPECT_EQ(body["messages"][0]["role"], "system");
+  EXPECT_EQ(body["messages"][0]["content"], "You are a player.");
+  EXPECT_EQ(body["messages"][1]["role"], "user");
+  EXPECT_EQ(body["messages"][1]["content"], "Your screen:\nme: Tess");
+  EXPECT_EQ(body["grammar"], "root ::= \"x\"");
+  EXPECT_EQ(body["id_slot"], 3);
+  EXPECT_EQ(body["max_tokens"], 80);
+  EXPECT_FLOAT_EQ(body["temperature"].get<float>(), 0.5f);
+  EXPECT_EQ(body["cache_prompt"], true);
+  EXPECT_EQ(body["chat_template_kwargs"]["enable_thinking"], false);
+}
+
+TEST(LlmClientTest, SlotAndGrammarAreLeftOutWhenNotGiven) {
+  LlmRequest request = SampleRequest();
+  request.slot = -1;
+  request.grammar.clear();
+  const Json body = Json::parse(BuildChatBody(request));
+  EXPECT_FALSE(body.contains("id_slot"));
+  EXPECT_FALSE(body.contains("grammar"));
+}
+
+TEST(LlmClientTest, InvalidUtf8InTheTextDoesNotThrow) {
+  LlmRequest request = SampleRequest();
+  request.user = "name: caf\xE9";  // Latin-1, not UTF-8.
+  const Json body = Json::parse(BuildChatBody(request));
+  EXPECT_NE(body["messages"][1]["content"].get<std::string>().find("caf"),
+            std::string::npos);
+}
+
+TEST(LlmClientTest, ParsesTheReplyTextTokensAndTimings) {
+  const LlmResult result = ParseChatReply(kReplyBody);
+  ASSERT_TRUE(result.reply) << result.error;
+  EXPECT_EQ(result.reply->text, "do: 1\nlook: 30");
+  EXPECT_EQ(result.reply->prompt_tokens, 812);
+  EXPECT_EQ(result.reply->completion_tokens, 9);
+  EXPECT_EQ(result.reply->prompt_computed, 240);
+  EXPECT_DOUBLE_EQ(result.reply->prompt_ms, 31.5);
+  EXPECT_DOUBLE_EQ(result.reply->predicted_ms, 64.25);
+}
+
+TEST(LlmClientTest, ATextOnlyReplyIsEnough) {
+  const LlmResult result =
+      ParseChatReply(R"({"choices": [{"message": {"content": "hi"}}]})");
+  ASSERT_TRUE(result.reply) << result.error;
+  EXPECT_EQ(result.reply->text, "hi");
+  EXPECT_EQ(result.reply->prompt_tokens, 0);
+}
+
+TEST(LlmClientTest, ReportsWhatIsWrongWithAReply) {
+  EXPECT_FALSE(ParseChatReply("not json").reply);
+  EXPECT_FALSE(ParseChatReply("[1, 2]").reply);
+  EXPECT_FALSE(ParseChatReply("{}").reply);
+  EXPECT_FALSE(ParseChatReply(R"({"choices": []})").reply);
+  EXPECT_FALSE(ParseChatReply(R"({"choices": [{"message": {}}]})").reply);
+  EXPECT_FALSE(
+      ParseChatReply(R"({"choices": [{"message": {"content": 5}}]})").reply);
+  EXPECT_NE(ParseChatReply("not json").error.find("not JSON"),
+            std::string::npos);
+}
+
+// A stand-in for llama-server on a free port of this machine.
+class FakeLlamaServer {
+ public:
+  FakeLlamaServer() : thread_("fake-llama") {
+    server_.Post("/v1/chat/completions", [this](const httplib::Request& request,
+                                                httplib::Response& response) {
+      {
+        base::AutoLock lock(lock_);
+        last_body_ = request.body;
+        ++calls_;
+      }
+      if (delay_ms_ > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms_));
+      }
+      response.status = status_;
+      response.set_content(status_ == 200 ? kReplyBody : "oops",
+                           "application/json");
+    });
+    port_ = server_.bind_to_any_port("127.0.0.1");
+    thread_.Start();
+    thread_.task_runner()->PostTask([this] { server_.listen_after_bind(); });
+    while (!server_.is_running()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+  ~FakeLlamaServer() {
+    server_.stop();
+    thread_.Stop();
+  }
+
+  LlmEndpoint endpoint() const {
+    LlmEndpoint endpoint;
+    endpoint.port = port_;
+    endpoint.reply_timeout_s = 5;
+    return endpoint;
+  }
+  std::string last_body() {
+    base::AutoLock lock(lock_);
+    return last_body_;
+  }
+  int calls() {
+    base::AutoLock lock(lock_);
+    return calls_;
+  }
+  void set_status(int status) { status_ = status; }
+
+ private:
+  httplib::Server server_;
+  base::Thread thread_;
+  int port_ = 0;
+  base::Lock lock_;
+  std::string last_body_ GUARDED_BY(lock_);
+  int calls_ GUARDED_BY(lock_) = 0;
+  int status_ = 200;
+  int delay_ms_ = 0;
+};
+
+TEST(LlmClientTest, CallsTheServerAndReturnsItsReply) {
+  FakeLlamaServer server;
+  const LlmResult result = CallLlama(server.endpoint(), SampleRequest());
+  ASSERT_TRUE(result.reply) << result.error;
+  EXPECT_EQ(result.reply->text, "do: 1\nlook: 30");
+  EXPECT_GT(result.round_trip_ms, 0);
+  EXPECT_EQ(Json::parse(server.last_body())["id_slot"], 3);
+  EXPECT_EQ(server.calls(), 1);
+}
+
+TEST(LlmClientTest, AServerErrorIsAFailureWithItsStatus) {
+  FakeLlamaServer server;
+  server.set_status(500);
+  const LlmResult result = CallLlama(server.endpoint(), SampleRequest());
+  EXPECT_FALSE(result.reply);
+  EXPECT_NE(result.error.find("500"), std::string::npos) << result.error;
+}
+
+TEST(LlmClientTest, NobodyListeningIsAFailureNotACrash) {
+  LlmEndpoint endpoint;
+  {
+    // Take a free port, then close it.
+    FakeLlamaServer server;
+    endpoint = server.endpoint();
+  }
+  endpoint.connect_timeout_s = 1;
+  const LlmResult result = CallLlama(endpoint, SampleRequest());
+  EXPECT_FALSE(result.reply);
+  EXPECT_NE(result.error.find("could not reach llama-server"),
+            std::string::npos)
+      << result.error;
+}
+
+TEST(LlmClientTest, AskRepliesOnTheCallersSequence) {
+  FakeLlamaServer server;
+  LlmClient client(server.endpoint(), 2);
+  base::Thread origin("origin");
+  origin.Start();
+  base::WaitableEvent done;
+  bool on_origin = false;
+  std::string text;
+  origin.task_runner()->PostTask([&] {
+    auto runner = base::SequencedTaskRunner::GetCurrentDefault();
+    client.Ask(SampleRequest(), [&, runner](LlmResult result) {
+      on_origin = runner->RunsTasksInCurrentSequence();
+      text = result.reply ? result.reply->text : result.error;
+      done.Signal();
+    });
+  });
+  done.Wait();
+  EXPECT_TRUE(on_origin);
+  EXPECT_EQ(text, "do: 1\nlook: 30");
+}
+
+}  // namespace
+}  // namespace harness

@@ -121,13 +121,20 @@ target_compile_options(llm_brain_unittests PRIVATE ${WLB_SAFETY_FLAGS})
 # The harness (harness/): the brain's process. Its parts that don't need the
 # game are built and tested here, with the same flags and sanitizers as the rest.
 set(WLB_HARNESS_SRC "${WLB_ROOT}/harness/src")
-add_library(wlb_harness STATIC "${WLB_HARNESS_SRC}/plan.cc"
+find_package(Threads REQUIRED)
+add_library(wlb_harness STATIC "${WLB_HARNESS_SRC}/llm_client.cc"
+            "${WLB_HARNESS_SRC}/plan.cc"
             "${WLB_HARNESS_SRC}/screen_renderer.cc")
 target_include_directories(wlb_harness PUBLIC "${WLB_HARNESS_SRC}")
-target_link_libraries(wlb_harness PUBLIC wlb_proto absl::strings
-                      absl::str_format)
+# cpp-httplib and nlohmann/json are header-only third-party code (their own style,
+# so their warnings are not ours).
+target_include_directories(wlb_harness SYSTEM PUBLIC
+  "${WLB_ROOT}/third_party/cpp-httplib" "${WLB_ROOT}/third_party/json/include")
+target_link_libraries(wlb_harness PUBLIC wlb_base wlb_proto absl::strings
+                      absl::str_format Threads::Threads)
 target_compile_options(wlb_harness PRIVATE ${WLB_SAFETY_FLAGS})
 add_executable(harness_unittests
+  "${WLB_HARNESS_SRC}/llm_client_unittest.cc"
   "${WLB_HARNESS_SRC}/plan_unittest.cc"
   "${WLB_HARNESS_SRC}/screen_renderer_unittest.cc")
 target_link_libraries(harness_unittests PRIVATE wlb_harness GTest::gtest_main)
