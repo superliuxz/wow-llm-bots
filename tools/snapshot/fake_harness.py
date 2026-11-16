@@ -1,25 +1,33 @@
 """Minimal stand-in for the harness, for testing mod-llm-brain's socket.
 
-Connects to the brain socket, prints what the server sends for a few seconds,
-optionally sends messages, then disconnects. Messages are length-prefixed frames
-(4-byte big-endian length, then the payload), as in common/net/frame_codec.h.
-Module messages (wlb.snapshot.ModuleMessage) are printed as JSON when the
-generated Python code is available, otherwise as a byte count and hex preview.
+Connects to the brain socket and, for a few seconds, either prints what the server sends or
+measures how it arrives. Messages are length-prefixed frames (4-byte big-endian length, then
+the payload), as in common/net/frame_codec.h. Module messages (wlb.snapshot.ModuleMessage) are
+printed as JSON when the generated Python code is available.
 
 Dev tool only (production is C++). For JSON, generate the code once with
 tools/validate-snapshots.sh and run with the tools venv:
   out/tools-venv/bin/python -I tools/snapshot/fake_harness.py [seconds=5] [message ...]
+  out/tools-venv/bin/python -I tools/snapshot/fake_harness.py --stats [seconds=10]
+
+--stats prints nothing per frame. It reports, from the snapshots' own timestamps (the module's
+wall clock is this machine's): frames per second; the age of a snapshot when it arrives (built to
+received: world thread, socket, this process); how evenly each bot's snapshots are spaced; and
+how bunched the arrivals are (the most frames arriving within 10 ms), which shows whether the
+module builds all bots on the same tick.
 """
 
+import collections
 import pathlib
 import socket
-import struct
 import sys
 import time
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from frame_reader import FrameReader  # noqa: E402
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 SOCK = str(ROOT / "out" / "server" / "run" / "brain.sock")
-HEADER = struct.Struct(">I")
 
 try:
     sys.path.insert(0, str(ROOT / "out" / "proto"))
@@ -40,38 +48,97 @@ def describe(payload):
     return f"[{len(payload)} bytes] {payload[:32].hex()}"
 
 
-def main():
-    seconds = float(sys.argv[1]) if len(sys.argv) > 1 else 5.0
-    to_send = sys.argv[2:]
+def percentile(sorted_values, q):
+    return sorted_values[min(len(sorted_values) - 1, int(q * len(sorted_values)))] if sorted_values else 0
+
+
+def connect():
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.connect(SOCK)
     s.settimeout(0.2)
-    for message in to_send:
-        payload = message.encode()
-        s.sendall(HEADER.pack(len(payload)) + payload)
-        print(f">> {message}")
-    buf = b""
-    received = 0
+    return s
+
+
+def run_stats(seconds):
+    s = connect()
+    reader = FrameReader()
+    ages, arrivals = [], []  # age in ms; arrival time in s.
+    per_bot = collections.defaultdict(list)  # bot -> built-at times (ms).
     end = time.time() + seconds
     while time.time() < end:
         try:
-            chunk = s.recv(65536)
+            chunk = s.recv(1 << 20)
         except socket.timeout:
             continue
         if not chunk:
             print("server closed the connection")
             break
-        buf += chunk
-        while len(buf) >= HEADER.size:
-            (size,) = HEADER.unpack_from(buf)
-            if len(buf) < HEADER.size + size:
-                break
-            payload = buf[HEADER.size:HEADER.size + size]
-            buf = buf[HEADER.size + size:]
+        received_ms = time.time() * 1000
+        for payload in reader.feed(chunk):
+            message = snapshot_pb2.ModuleMessage()
+            message.ParseFromString(payload)
+            if not message.HasField("snapshot"):
+                continue
+            snap = message.snapshot
+            ages.append(received_ms - snap.time_ms)
+            arrivals.append(received_ms / 1000)
+            per_bot[snap.bot].append(snap.time_ms)
+    s.close()
+    if not ages:
+        print("no snapshots received")
+        return
+    ages.sort()
+    gaps = sorted(b - a for times in per_bot.values() for a, b in zip(times, times[1:]))
+    # The most frames within any 10 ms window.
+    window, most = collections.deque(), 0
+    for t in arrivals:
+        window.append(t)
+        while t - window[0] > 0.010:
+            window.popleft()
+        most = max(most, len(window))
+    print(f"{len(ages)} snapshots from {len(per_bot)} bots in {seconds:.0f}s "
+          f"({len(ages) / seconds:.1f}/s)")
+    print(f"age on arrival (built -> received): p50 {percentile(ages, .5):.1f} ms, "
+          f"p95 {percentile(ages, .95):.1f} ms, max {ages[-1]:.1f} ms")
+    if gaps:
+        print(f"spacing of one bot's snapshots: p5 {percentile(gaps, .05):.0f} ms, "
+              f"p50 {percentile(gaps, .5):.0f} ms, p95 {percentile(gaps, .95):.0f} ms")
+    print(f"bunching: up to {most} snapshots arrived within 10 ms")
+
+
+def run_print(seconds, to_send):
+    s = connect()
+    for message in to_send:
+        payload = message.encode()
+        s.sendall(len(payload).to_bytes(4, "big") + payload)
+        print(f">> {message}")
+    reader = FrameReader()
+    received = 0
+    end = time.time() + seconds
+    while time.time() < end:
+        try:
+            chunk = s.recv(1 << 20)
+        except socket.timeout:
+            continue
+        if not chunk:
+            print("server closed the connection")
+            break
+        for payload in reader.feed(chunk):
             received += 1
             print(f"<< {describe(payload)}")
     s.close()
     print(f"received {received} messages in {seconds:.0f}s")
+
+
+def main():
+    args = sys.argv[1:]
+    stats = "--stats" in args
+    args = [a for a in args if a != "--stats"]
+    seconds = float(args[0]) if args else (10.0 if stats else 5.0)
+    if stats:
+        run_stats(seconds)
+    else:
+        run_print(seconds, args[1:])
 
 
 if __name__ == "__main__":
