@@ -283,6 +283,41 @@ idles part of each step while llama-server does its per-stream CPU work (grammar
 | 50 bots, plans ~30 s (1.9 wakes per bot per minute) | 0.5 s / 0.9 s / 1.2 s | 35% |
 | 50 bots, plans ~15 s (3.9 per bot per minute) | 0.8 s / 1.6 s / 2.8 s | 68% |
 
+### Response time by number of bots and plan length (2026-11-16)
+
+Wake to plan, median (95th percentile), in seconds. **Every cell is a measured run.**
+
+| Bots | 30 s plans | 15 s plans | 10 s plans | 5 s plans |
+|---|---|---|---|---|
+| 50 | **0.5** (1.0) | **0.9** (1.7) | **1.6** (2.7) | *queue* 14 (29) |
+| 100 | **0.6** (1.5) | **2.0** (3.3) | *queue* 12 (25) | *queue* 88 (163) |
+| 200 | **2.0** (3.3) | *queue* 47 (82) | *queue* 83 (159) | *queue* 230 (436) |
+
+**How it was measured** (`tools/bench/brain_load.py`, 120 s per cell, one run each):
+- **What is timed:** from a bot's wake-up being due to its plan being read back from
+  llama-server. **It is not end to end.** It leaves out the module building the snapshot and the
+  socket to the harness (~1 ms, measured separately), the C++ harness (scheduler, renderer,
+  parser) and the plan being applied in the game (the `choose` command doesn't exist yet).
+- **Wake-ups:** replayed in real time from `trigger_sim.py` on 5 minutes of captured
+  snapshots of 50 questing bots (`PLAN_S` = 30, 15, 10, 5: a plan lasts a random time with that mean).
+  For 100 and 200 bots each extra copy replays a captured bot's timeline shifted by a random
+  offset. This is a simulation of when bots wake, not live bots.
+- **Prompts:** the compact numbered screen from the Python prototype `prompt_render.py`
+  (`MODE=menu RENDER=tight MERGED=1 COUNTS=1`, ~780 tokens per wake-up), answered under the plan
+  grammar (all plans valid). Not the C++ renderer.
+- **Server:** llama-server, Qwen3.6-35B-A3B Q4, 16 slots, `-ub 2048 -b 4096`, RTX 5090, with the
+  game server running alongside. Calls in flight at once: 16. Urgent wake-ups go first.
+- **Capacity:** about 7 wake-ups per second, where the GPU reaches 100% busy. Below that, a cell
+  stays at 0.5-2 s (the last one that held: 100 bots, 15 s plans, ~6.5 per second). Above it a
+  call still takes ~2 s, and the rest is waiting for a slot.
+- ***queue* cells are worst-case:** the bench never drops a stale wake-up, so the queue grows for
+  the whole 2 minutes and the number is the wait at that point, not a steady state. The harness
+  scheduler replaces a waiting wake-up with a newer one, so a real bot would wait less but think
+  less often than its plan length. These cells say "over capacity", not what a player would see.
+- Real bots wake less often than the plan length alone suggests (the brain's own `look`), and
+  more often when fights interrupt; with the "safety net" prompt it was ~1.3 wake-ups per bot per
+  minute (next section).
+
 ### Counts and how long plans last (2026-11-16)
 
 `do` may repeat an option (`3x4`: option 3, four times; `COUNTS=1`). How long a plan lasts is
