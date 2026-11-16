@@ -1,0 +1,30 @@
+me: Loada, level 1 male priest; health 72/72; mana 91/91; xp 40/400 (rested 10)
+where: The Den, Durotar (Kalimdor); indoors
+around me:
+  - Loadc: level 1 troll priest, yellow, player, friendly, moving; 8 yd W
+  - Loadan: level 1 troll priest, yellow, player, friendly; 4 yd SW, you're behind it
+  1. Den Grunt: level 65 humanoid, skull level, npc, friendly, small; 3 yd W, facing you
+  2. Gornek: level 5 humanoid, orange, npc, friendly, quest marker quest incomplete; 9 yd W, facing you
+  3. Den Grunt: level 65 humanoid, skull level, npc, friendly; 4 yd SW
+  - Loadas: level 1 troll priest, yellow, player, friendly, moving; 7 yd E, facing you
+  4. Ken'jai: level 10 humanoid, red, npc, friendly, subtitle Priest Trainer; 14 yd S
+  - Loadam: level 1 troll priest, yellow, player, friendly; 9 yd SW, you're behind it
+  - Loadap: level 1 troll priest, yellow, player, friendly; 9 yd W, you're behind it
+  - Loadah: level 1 troll priest, yellow, player, friendly, moving; 12 yd W
+  - Loadae: level 1 troll priest, yellow, player, friendly; 16 yd NE
+  - Loadad: level 1 troll priest, yellow, player, friendly, moving; 6 yd SW, you're behind it
+  - Loadz: level 1 troll priest, yellow, player, friendly, moving; 7 yd W, facing you
+  - Loadw: level 1 troll priest, yellow, player, friendly; NE, you're behind it
+  - Loadt: level 1 troll priest, yellow, player, friendly, moving; 0 yd E, facing you
+  - Loadq: level 1 troll priest, yellow, player, friendly; 8 yd W, you're behind it
+far away: 3x humanoid, npc, small (20-73 yd S/SE); 6x humanoid, npc (24-77 yd E/NE/SE); 1x humanoid, npc, small, patrolling (66 yd E); 9x troll, player, moving (56-97 yd SE); 5x troll, player (25-88 yd E/NE/W); 1x humanoid, npc, sitting (26 yd S); 1x humanoid, npc, patrolling (33 yd E)
+objects:
+  5. 3x Crude Brazier: other; 8-43 yd SW/W
+  6. Bubbling Cauldron: other; 47 yd NE
+  7. Fire: other; 50 yd E, below
+  8. Cooking Table: other; 41 yd NE
+also:
+  9. Keep doing what I'm doing
+  10. Explore somewhere new
+  11. Rest (eat and drink)
+  12. Go to the nearest town

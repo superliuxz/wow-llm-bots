@@ -1,0 +1,32 @@
+me: Loada, level 1 male priest; health 72/72; mana 91/91; xp 40/400 (rested 10)
+where: The Den, Durotar (Kalimdor)
+around me:
+  1. Mai'ah: level 10 humanoid, red, npc, friendly, subtitle Mage Trainer; 20 yd SE
+  2. Shikrik: level 10 humanoid, red, npc, friendly, small, subtitle Shaman Trainer; 16 yd S
+  3. Den Grunt: level 65 humanoid, skull level, npc, friendly, small, patrolling; 18 yd E
+  - Loadc: level 1 troll priest, yellow, player, friendly; 1 yd SW, out of sight, facing you
+  - Loadan: level 1 troll priest, yellow, player, friendly; here, facing you
+  4. Den Grunt: level 65 humanoid, skull level, npc, friendly, small; 6 yd NW, facing you
+  5. Gornek: level 5 humanoid, orange, npc, friendly, quest marker quest incomplete; 11 yd W
+  6. Den Grunt: level 65 humanoid, skull level, npc, friendly; 2 yd W, facing you
+  - Loadas: level 1 troll priest, yellow, player, friendly; 9 yd NW, you're behind it
+  7. Ken'jai: level 10 humanoid, red, npc, friendly, subtitle Priest Trainer; 10 yd S, you're behind it
+  - Loadam: level 1 troll priest, yellow, player, friendly; 13 yd NW
+  - Loadaf: level 1 troll priest, yellow, player, friendly; 17 yd W
+  - Loadar: level 1 troll priest, yellow, player, friendly, moving; 14 yd W
+  - Loadah: level 1 troll priest, yellow, player, friendly; 1 yd NE, you're behind it
+  - Loadz: level 1 troll priest, yellow, player, friendly, moving; 17 yd W
+  - Loadw: level 1 troll priest, yellow, player, friendly, moving; 1 yd N, facing you
+  - Loadt: level 1 troll priest, yellow, player, friendly, moving; 5 yd NW, facing you
+  - Loadq: level 1 troll priest, yellow, player, friendly, moving; 15 yd W
+far away: 4x humanoid, npc (21-78 yd E/N/NE/SE); 2x humanoid, npc, small (40-71 yd N/SE); 2x troll, player (35-51 yd E/SE); 1x humanoid, npc, sitting (22 yd S); 1x humanoid, npc, patrolling (80 yd E); 2x troll, player, moving (28-30 yd W)
+objects:
+  8. Bubbling Cauldron: other; 50 yd NE
+  9. Crude Brazier: other; 6 yd W
+  10. Fire: other; 50 yd E, below
+  11. Cooking Table: other; 44 yd NE
+also:
+  12. Keep doing what I'm doing
+  13. Explore somewhere new
+  14. Rest (eat and drink)
+  15. Go to the nearest town

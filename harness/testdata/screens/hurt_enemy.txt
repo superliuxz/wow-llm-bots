@@ -1,0 +1,18 @@
+me: Loadaa, level 1 male priest; health 72/72; mana 91/91; xp 40/400 (rested 10)
+where: Valley of Trials, Durotar (Kalimdor)
+around me:
+  1. Mottled Boar: level 1 boar, yellow, npc, neutral, health 33%, fighting Loadv, tapped by other yes, target Loadv; 19 yd SW
+  - Mottled Boar: level 2 boar, yellow, npc, neutral, dead, tapped by other yes; 7 yd NW, you're behind it
+  - Loadf: level 1 troll priest, yellow, player, friendly; 13 yd W
+  - Loadv: level 1 troll priest, yellow, player, friendly, power 87%, fighting Mottled Boar, target Mottled Boar; 8 yd W
+far away: 1x humanoid, npc, small, visual state [rooted] (85 yd SE); 3x boar, npc (35-79 yd E/NE/SW); 2x scorpid, npc, moving (66-96 yd E/SE); 1x critter, critter, small (49 yd S); 2x humanoid, npc, small (42-75 yd NW); 2x humanoid, npc (71-77 yd N/NW); 1x humanoid, npc, small, patrolling (60 yd NW); 4x troll, player, moving (27-37 yd NW/W); 4x boar, npc, moving (50-98 yd E/S/SE/W); 6x troll, player (28-77 yd NW/W); 1x humanoid, npc, sitting (93 yd NW); 1x boar, npc, dead (54 yd W)
+objects:
+  2. 2x LumberPile: other; 78-81 yd NE/SE
+  3. 3x Cactus Apple: herb; 18-73 yd E/NE/S
+  4. Fire: other; 86 yd N
+  5. Razor Hill: other; 92 yd N
+also:
+  6. Keep doing what I'm doing
+  7. Explore somewhere new
+  8. Rest (eat and drink)
+  9. Go to the nearest town

@@ -1,0 +1,76 @@
+me: Loada, level 2 male priest; health 77/77; mana 95/95; xp 15/900 (rested 7); resting
+where: Orgrimmar (Kalimdor)
+around me:
+  - Loadaa: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadab: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadac: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  1. Koma: level 45 humanoid, skull level, npc, friendly, subtitle Banker; 18 yd E, below, out of sight
+  - Loadax: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadau: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadag: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loads: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadn: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadal: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadav: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loade: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadah: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadak: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadu: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadx: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadaf: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadi: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadq: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadae: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  2. Soran: level 45 humanoid, skull level, npc, friendly, subtitle Banker; 18 yd SW, below, out of sight
+  - Loadaw: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadg: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadj: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadz: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  3. Karus: level 45 humanoid, skull level, npc, friendly, subtitle Banker; 17 yd SE, below, out of sight
+  - Loadk: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadm: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadl: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadp: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadr: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadt: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadv: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadw: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loady: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loado: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadaq: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadap: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadb: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadc: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadd: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadf: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadh: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadad: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadai: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadaj: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadam: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadan: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadao: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadar: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadas: level 2 troll priest, yellow, player, friendly; here, you're behind it
+  - Loadat: level 2 troll priest, yellow, player, friendly; here, you're behind it
+far away: 1x humanoid, npc, moving, pack (id 208236, size 2) (100 yd W); 2x humanoid, npc, small, patrolling (69-89 yd NE/W); 5x humanoid, npc (31-70 yd N/NE/NW/S/SE); 4x humanoid, npc, small (60-92 yd E/S/W)
+objects:
+  4. Horde Bell: other; 43 yd NW, above
+  5. Soran's Leather and Steel Armory: other; 89 yd SE, below
+  6. 6x Mighty Blaze: other; 54-121 yd NW/S/SE
+  7. Orgrimmar Auction House: other; 67 yd NE, below
+  8. 5x Bonfire: other; 36-97 yd E/N/NW/S/W
+  9. Horde Embassy: other; 85 yd SW, below
+  10. 2x PVP HOLIDAY HORDE ARATHI: other; 29-53 yd NE/NW
+  11. The Skytower: other; 32 yd NW, below
+  12. Boomstick Imports: other; 59 yd NE, below
+  13. Valley of Wisdom: other; 92 yd N
+  14. The Drag: other; 92 yd N
+  15. Mailbox: mailbox; 65 yd NE, below
+  16. Valley of Spirits: other; 40 yd NE, below
+  17. Orgrimmar General Store: other; 102 yd S, below
+also:
+  18. Keep doing what I'm doing
+  19. Explore somewhere new
+  20. Rest (eat and drink)
+  21. Go to the nearest town
