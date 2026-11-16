@@ -130,7 +130,7 @@ order   ::= when " -> " act (", then " act){0,2}
 when    ::= "always" | cond (" & " cond){0,2}
 cond    ::= "not "? test
 test    ::= mech " on " who | mech " stacks" cmp cnt " on " who
-          | mech " cast" | mech " appears" | mech " count>" cnt
+          | mech " cast" | mech " cast on " who | mech " appears" | mech " count>" cnt
           | thing (" within " | " beyond ") num | thing " targets " who
           | thing " hp" cmp pct | "mana" cmp pct | thing " is " state
           | "me " mystate | "phase " digit | "after " num "s" | "every " num "s"
@@ -152,7 +152,9 @@ skull`; `not Fire Bomb cast & boss hp>20 -> target boss`; `Sindragosa is flying 
   can't be: `docs/specs/trigger-conditions.tsv`, one row each (how it was made:
   `trigger-conditions-brief.md`; six readers in parallel, then 12 random rows re-read against
   the source). `tools/check-trigger-conditions.py` parses every `when` cell against the grammar
-  (all pass), so the table is the grammar's regression set. Leaving out 25 `plumbing` rows (base
+  (all pass), so the table is the grammar's regression set. The script is a second copy of the
+  grammar: once orders are parsed in `harness/src/plan.cc`, a unit test runs the real parser over
+  the table and the Python copy is retired. Leaving out 25 `plumbing` rows (base
   classes, shared timer keepers), 18 `bugnet` rows (resetting state, stuck bots) and 5 `cheat`
   rows (the `*Cheat*` triggers, which only fire with playerbots' raid cheat on), the 547
   mechanics are:

@@ -25,6 +25,7 @@ MYSTATE = r"(?:in vehicle|mounted|swimming|nearest to it)"
 TESTS = [
     rf"{NAME} on {WHO}",
     rf"{NAME} stacks{CMP}{NUM} on {WHO}",
+    rf"{NAME} cast on {WHO}",
     rf"{NAME} cast",
     rf"{NAME} appears",
     rf"{NAME} count>{NUM}",
