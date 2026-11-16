@@ -15,8 +15,8 @@ Design and every decision so far: [docs/design.md](docs/design.md).
 | `third_party/` | upstream code as pinned git submodules: AzerothCore (mod-playerbots fork, `Playerbot` branch), mod-playerbots (`master`), harness deps: Abseil `20260817.0`, GoogleTest `v1.18.0`, cpp-httplib `v0.66.0`, nlohmann/json `v3.12.0`, and llama.cpp `v1.0.0` |
 | `common/` | shared C++ used by the server module and the harness: `base/` (Chromium-style threads, epoll IO message pump, task runners, callbacks, WeakPtr, scoped_refptr, TimeDelta) and `net/` (Unix socket server/client, length-prefixed framing) |
 | `server_module/` | our AzerothCore module: sees the game, builds each bot's snapshot, carries out commands |
-| `harness/` | the brain's process (C++), separate from the game server: screens, plans, and soon the llama client and scheduler (`docs/plans/harness.md`) |
-| `content/` | *planned, not created yet:* shared bot knowledge (`RULES.md`, `concepts/`, prompts) |
+| `harness/` | the brain's process (C++), separate from the game server: screens, plans, the llama client, prompts, the decision log, the scheduler, and `harness decide` to run one decision offline (`docs/plans/harness.md`); built as `out/common/harness` |
+| `content/` | shared bot knowledge: `RULES.md` (the rules every bot starts from); `concepts/` and prompts are planned |
 | `config/` | our config files (MySQL, server overrides) |
 | `tools/` | scripts: see [Tools](#tools) |
 | `out/` | everything generated, as `out/<name>` for what builds it (not tracked). **Safe to delete: every part comes back from a command.** `out/server` is the installed game server (binaries, configs, the extracted map data, sockets); rebuild it with `tools/build-server.sh`, `tools/apply-config.sh` and `tools/setup/extract-data.sh` |

@@ -34,9 +34,13 @@ and `docs/phase2-results.md` (what that costs). This plan is the build order.
 
 1. **H1 `screen_renderer`** (done): a C++ port of `tools/bench/prompt_render.py`, tested against
    its output on 10 real snapshots (`harness/testdata/screens`) and on hand-built cases.
-2. **H2 `plan`:** grammar, parser, validator, with the vocabulary from `triggers.md`.
-3. **H3** `llm_client`, `bot_state`, `scheduler`, `decision_log`, `harness decide`: the offline
-   loop on recorded snapshots (this is also the eval entry point).
+2. **H2 `plan`** (done): the plan's grammar (built per call from the bot's options), parser,
+   validator and formatter, with the vocabulary from `triggers.md`.
+3. **H3** (done): `llm_client` (llama-server over HTTP, bounded in flight), the prompt builder and
+   `content/RULES.md`, `decision_log` (`<root>/<bot>/events/<date>.jsonl`), `scheduler` (urgent first,
+   one question per bot, a newer wake-up replaces a waiting one) and `harness decide <snapshot.pb>`:
+   one decision offline on a saved snapshot (also the entry point for the quality check). Tried live
+   with the 35B: valid plans in 210-310 ms. Not built yet: `bot_state`, which H4 needs.
 4. **H4** `module_connection` and `triggers`: live, against the running server.
 5. **M (module side)**, in step with H4: the options list, the `choose` and `say` commands, chat
    events, then quest log, bags, gear, target, combat and party in the snapshot.
