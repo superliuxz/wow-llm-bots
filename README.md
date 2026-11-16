@@ -20,7 +20,7 @@ Design and every decision so far: [docs/design.md](docs/design.md).
 | `config/` | our config files (MySQL, server overrides) |
 | `tools/` | scripts: see [Tools](#tools) |
 | `out/` | everything generated, as `out/<name>` for what builds it (not tracked). **Safe to delete: every part comes back from a command.** `out/server` is the installed game server (binaries, configs, the extracted map data, sockets); rebuild it with `tools/build-server.sh`, `tools/apply-config.sh` and `tools/setup/extract-data.sh` |
-| `var/` | **state worth keeping, not tracked: back it up.** `mysql-data/` (the database: accounts, characters, bot progress), `logs/` (server logs and the samples of your own play), and, once the harness exists, `bots/` (live bot memory: `<name>/identity.md`, goals, `events/*.jsonl`; its own git repo) |
+| `var/` | **state worth keeping, not tracked.** `backups/` (database dumps, one per server stop), `mysql-data/` (the database: accounts, characters, bot progress), `logs/` (server logs and the samples of your own play), and, once the harness exists, `bots/` (live bot memory: `<name>/identity.md`, goals, `events/*.jsonl`; its own git repo) |
 | `models/` | the GGUF model files llama-server loads (not tracked) |
 | `reference/` | downloaded addon sources (not tracked) |
 
@@ -51,6 +51,7 @@ Run from the repo root. Every script finds the repo from its own location.
 | `tools/apply-config.sh [test]` | render `out/server/etc/*.conf` from the templates plus `config/*.overrides` (and `config/tests/<test>.*`) |
 | `tools/server-start.sh` / `server-stop.sh` | MySQL, authserver and worldserver together |
 | `tools/db-start.sh` / `db-stop.sh` | the project-local MySQL alone |
+| `tools/db-backup.sh` | back up accounts, characters and playerbots' tables to `var/backups/` (compressed, newest 14 kept; restore command in the script's header). `server-stop.sh` runs it every time |
 | `tools/wsc <command>` | send a command to the worldserver console |
 | `tools/llm-server.sh` | llama-server with the settings measured fastest (`docs/phase2-results.md`) |
 | `tools/validate-snapshots.sh` | compile the snapshot proto, validate the example snapshots, check the client-event table |

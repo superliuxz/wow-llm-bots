@@ -27,4 +27,6 @@ stop worldserver-pipe 1
 rm -f "$RUN/worldserver.stdin"
 pkill -TERM -x authserver && echo "authserver stopped"; rm -f "$RUN/authserver.pid"
 for _ in $(seq 1 10); do pgrep -x authserver >/dev/null || break; sleep 1; done
+# The databases are quiet now: back them up before MySQL stops (tools/db-backup.sh).
+"$ROOT/tools/db-backup.sh" || echo "backup FAILED (the server is stopping anyway)"
 "$ROOT/tools/db-stop.sh"
