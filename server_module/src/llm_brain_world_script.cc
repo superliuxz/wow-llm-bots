@@ -7,25 +7,28 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "Define.h"
 #include "Log.h"
 #include "ObjectAccessor.h"
 #include "Player.h"
 #include "WorldScript.h"
+#include "base/functional/callback.h"
+#include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "bot_manager.h"
 #include "brain_bridge.h"
 #include "llm_brain_config.h"
 #include "nearby_builder.h"
+#include "option_executor.h"
+#include "options.h"
 #include "proto/snapshot.pb.h"
 #include "snapshot_builder.h"
 #include "snapshot_schedule.h"
 #include "snapshot_stats.h"
 
 #if defined(LLM_BRAIN_TEST_HOOKS)
-#include <vector>
-
 #include "test/fixture_loader.h"
 #endif
 
@@ -35,6 +38,10 @@ namespace {
 constexpr size_t kMaxPendingMessages = 1000;
 // How often the snapshot cost summary is logged.
 constexpr uint32_t kStatsIntervalMs = 60000;
+// How many recent snapshots' options a bot remembers, so a choice made on a
+// snapshot that is no longer the newest can still be resolved (16 s at one
+// snapshot a second, 4 s in combat).
+constexpr size_t kOptionHistory = 16;
 
 // World-thread entry points for the brain bridge: every snapshot interval,
 // send each attached bot's snapshot to the harness.
@@ -88,11 +95,8 @@ class LlmBrainWorldScript : public WorldScript {
     bridge_ = std::make_unique<BrainBridge>(
         config_.socket_path, kMaxPendingMessages,
         BrainBridge::Callbacks{
-            [](std::string message) {
-              // Commands are parsed and applied in a later step.
-              LOG_INFO("module", "mod-llm-brain: from harness: {} bytes",
-                       message.size());
-            },
+            base::BindRepeating(&LlmBrainWorldScript::OnHarnessMessage,
+                                weak_factory_.GetWeakPtr()),
             [](bool connected) {
               LOG_INFO("module", "mod-llm-brain: harness {}",
                        connected ? "connected" : "disconnected");
@@ -182,6 +186,16 @@ class LlmBrainWorldScript : public WorldScript {
     }
     max_update_snapshots_ = 0;
     max_update_time_ = base::TimeDelta();
+    if (!apply_ages_.empty()) {
+      std::sort(apply_ages_.begin(), apply_ages_.end());
+      LOG_INFO("module",
+               "mod-llm-brain: choices applied n={} (age_at_apply p50={} ms "
+               "max={} ms)",
+               apply_ages_.size(),
+               apply_ages_[apply_ages_.size() / 2].InMilliseconds(),
+               apply_ages_.back().InMilliseconds());
+      apply_ages_.clear();
+    }
     BrainBridge::SendStats sent = bridge_->TakeSendStats();
     if (!sent.delays.empty() || sent.replaced > 0) {
       std::sort(sent.delays.begin(), sent.delays.end());
@@ -202,6 +216,61 @@ class LlmBrainWorldScript : public WorldScript {
     }
   }
 
+  // A command from the harness (docs/specs/snapshot.md §9). So far: Choose.
+  void OnHarnessMessage(std::string bytes) {
+    wlb::snapshot::Command command;
+    if (!command.ParseFromString(bytes)) {
+      LOG_ERROR("module", "mod-llm-brain: unreadable command ({} bytes)",
+                bytes.size());
+      return;
+    }
+    const std::string name(command.bot());
+    if (!command.has_choose()) {
+      LOG_INFO("module", "mod-llm-brain: {}: command not supported yet", name);
+      return;
+    }
+    const auto state = bots_.find(name);
+    Player* bot = ObjectAccessor::FindPlayerByName(name);
+    if (state == bots_.end() || !bot) {
+      LOG_INFO("module", "mod-llm-brain: choose for {}: no such bot online",
+               name);
+      return;
+    }
+    const wlb::snapshot::Command::Choose& choose = command.choose();
+    const OptionHistory::Lookup found =
+        state->second.history.Find(choose.seq(), choose.option());
+    std::string error = found.error;
+    if (found.target) {
+      error = ExecuteOption(bot, *found.target);
+    }
+    // How old the picture was when the bot acted on it: the number that
+    // matters (docs/plans/harness.md, "Age").
+    const int64_t age_ms =
+        found.target ? base::Time::Now().InMillisecondsSinceUnixEpoch() -
+                           found.snapshot_time_ms
+                     : -1;
+    if (found.target) {
+      apply_ages_.push_back(base::Milliseconds(age_ms));
+    }
+    LOG_INFO("module",
+             "mod-llm-brain: {} chose {} of snapshot {} ({} {}): {}, "
+             "age_at_apply={} ms",
+             name, choose.option(), choose.seq(),
+             found.target ? OptionKindName(found.target->kind) : "-",
+             found.target ? found.target->name : "",
+             error.empty() ? "ok" : error, age_ms);
+    if (!error.empty()) {
+      // The bot sees it like the client's red error line.
+      wlb::snapshot::ModuleMessage message;
+      wlb::snapshot::ImmediateEvent* event = message.mutable_event();
+      event->set_bot(name);
+      event->set_seq(state->second.seq);
+      event->set_time_ms(base::Time::Now().InMillisecondsSinceUnixEpoch());
+      event->mutable_event()->mutable_error()->set_text(error);
+      bridge_->Send(message.SerializeAsString());
+    }
+  }
+
   void SendSnapshot(const std::string& name, Player* bot) {
     BotState& state = bots_[name];
     if (!state.builder) {
@@ -215,6 +284,8 @@ class LlmBrainWorldScript : public WorldScript {
     snapshot->set_time_ms(base::Time::Now().InMillisecondsSinceUnixEpoch());
     const base::TimeTicks start = base::TimeTicks::Now();
     const NearbyBuilder::Stats nearby = state.builder->Build(bot, snapshot);
+    state.history.Add(snapshot->seq(), snapshot->time_ms(),
+                      AddOptions(snapshot));
     std::string bytes = message.SerializeAsString();
     stats_.Add({base::TimeTicks::Now() - start, bytes.size(), nearby.units,
                 nearby.objects, nearby.hidden, nearby.raycasts});
@@ -237,8 +308,12 @@ class LlmBrainWorldScript : public WorldScript {
     // Snapshot counter (gaps tell the harness something was dropped).
     uint32_t seq = 0;
     std::unique_ptr<SnapshotBuilder> builder;
+    OptionHistory history{kOptionHistory};
   };
   std::map<std::string, BotState> bots_;
+  // How old each applied choice's snapshot was, since the last summary.
+  std::vector<base::TimeDelta> apply_ages_;
+  base::WeakPtrFactory<LlmBrainWorldScript> weak_factory_{this};
 };
 
 }  // namespace

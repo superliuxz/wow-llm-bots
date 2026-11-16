@@ -44,6 +44,16 @@ and `docs/phase2-results.md` (what that costs). This plan is the build order.
 4. **H4** `module_connection` and `triggers`: live, against the running server.
 5. **M (module side)**, in step with H4: the options list, the `choose` and `say` commands, chat
    events, then quest log, bags, gear, target, combat and party in the snapshot.
+   **M1 (done 2026-11-16):** every snapshot carries `options` (`server_module/src/options.cc`):
+   one "Attack <name>" per hostile or neutral NPC name (the nearest of that name), one
+   "Loot <name>" per lootable corpse name, and "Keep doing what I'm doing" last; facts only, nothing
+   ranked. `Command.Choose` (option, seq) is resolved against the bot's last 16 snapshots and
+   carried out with playerbots' own attack action and loot strategy; a failure comes back as an
+   `error` event, and each choice logs `age_at_apply`. Tried live (`config/tests/choose`: one
+   level-1 priest next to a boar, its body's own grinding off, `fake_harness.py --choose Attack
+   Loot`): it attacked, killed and looted the boar (age_at_apply 1-2 ms). Not yet: talk (playerbots
+   opens a gossip window only for a bot's master), gather, use, and the harness reading
+   `snapshot.options` instead of numbering the screen itself (H4).
 6. **Integration:** Testpriest decides and acts, end to end. Done when the phase 2 list in
    `docs/plans/phase2.md` holds.
 
@@ -68,7 +78,7 @@ machine's clock everywhere):
 | received to the question asked | the harness (`age_at_ask`) | H4 |
 | asked to the plan read | the decision log (`round_trip_ms`) | done |
 | built to the plan ready | the harness: `age_at_plan`, in the decision log next to the screen | H4 |
-| built to the command applied | the module, from the `seq` a command names: `age_at_apply` | with the `choose` command |
+| built to the command applied | the module, from the `seq` a command names: `age_at_apply` (per choice and per minute in the server log) | done (module) |
 
 The last one is the number that matters: how old the picture was when the bot acted on it.
 

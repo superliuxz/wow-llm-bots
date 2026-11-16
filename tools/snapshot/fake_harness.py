@@ -9,12 +9,19 @@ Dev tool only (production is C++). For JSON, generate the code once with
 tools/validate-snapshots.sh and run with the tools venv:
   out/tools-venv/bin/python -I tools/snapshot/fake_harness.py [seconds=5] [message ...]
   out/tools-venv/bin/python -I tools/snapshot/fake_harness.py --stats [seconds=10]
+  out/tools-venv/bin/python -I tools/snapshot/fake_harness.py --choose [seconds=30] Attack Loot
 
 --stats prints nothing per frame. It reports, from the snapshots' own timestamps (the module's
 wall clock is this machine's): frames per second; the age of a snapshot when it arrives (built to
 received: world thread, socket, this process); how evenly each bot's snapshots are spaced; and
 how bunched the arrivals are (the most frames arriving within 10 ms), which shows whether the
 module builds all bots on the same tick.
+
+--choose plays a scripted brain: for each word given, in turn, it waits for a snapshot with an
+option starting with that word (case-insensitive), sends a Command.Choose for it (that option of
+that snapshot), and then waits at least 2 s before looking for the next word. It prints one line
+per snapshot (seq, health, in combat, the options) and every immediate event (a failed choice
+comes back as an error event). The module's log has the matching "chose ... age_at_apply" line.
 """
 
 import collections
@@ -146,13 +153,64 @@ def run_print(seconds, to_send):
     print(f"received {received} messages in {seconds:.0f}s")
 
 
+def send_frame(s, payload):
+    s.sendall(len(payload).to_bytes(4, "big") + payload)
+
+
+def run_choose(seconds, words):
+    s = connect()
+    reader = FrameReader()
+    words = list(words)
+    next_at = 0.0
+    end = time.time() + seconds
+    while time.time() < end:
+        try:
+            chunk = s.recv(1 << 20)
+        except socket.timeout:
+            continue
+        if not chunk:
+            print("server closed the connection")
+            break
+        for payload in reader.feed(chunk):
+            message = snapshot_pb2.ModuleMessage()
+            message.ParseFromString(payload)
+            if message.HasField("event"):
+                print(f"<< event for {message.event.bot}: "
+                      f"{json_format.MessageToDict(message.event.event)}")
+                continue
+            snap = message.snapshot
+            me = snap.base.self
+            options = [o.text for o in snap.options]
+            print(f"<< {snap.bot} #{snap.seq}: health {me.health}/{me.health_max}"
+                  f"{', in combat' if me.in_combat else ''}; options: "
+                  + "; ".join(f"{i}. {t}" for i, t in enumerate(options, 1)))
+            if not words or time.time() < next_at:
+                continue
+            for i, text in enumerate(options, 1):
+                if text.lower().startswith(words[0].lower()):
+                    command = snapshot_pb2.Command(bot=snap.bot)
+                    command.choose.option = i
+                    command.choose.seq = snap.seq
+                    send_frame(s, command.SerializeToString())
+                    print(f">> {snap.bot} chooses {i} ({text}) of snapshot {snap.seq}")
+                    words.pop(0)
+                    next_at = time.time() + 2
+                    break
+    s.close()
+    if words:
+        print(f"never offered: {', '.join(words)}")
+
+
 def main():
     args = sys.argv[1:]
     stats = "--stats" in args
-    args = [a for a in args if a != "--stats"]
+    choose = "--choose" in args
+    args = [a for a in args if a not in ("--stats", "--choose")]
     seconds = float(args[0]) if args else (10.0 if stats else 5.0)
     if stats:
         run_stats(seconds)
+    elif choose:
+        run_choose(seconds, args[1:])
     else:
         run_print(seconds, args[1:])
 
