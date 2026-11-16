@@ -3,7 +3,7 @@
 # Usage: tools/wsc account create will mypassword
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-OUT=$ROOT/out/server/logs/worldserver.out
+OUT=$ROOT/var/logs/worldserver.out
 n=$(wc -l < "$OUT")
 echo "$*" > "$ROOT/out/server/run/worldserver.stdin"
 sleep 1

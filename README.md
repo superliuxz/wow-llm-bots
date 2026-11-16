@@ -19,8 +19,8 @@ Design and every decision so far: [docs/design.md](docs/design.md).
 | `content/` | *planned, not created yet:* shared bot knowledge (`RULES.md`, `concepts/`, prompts) |
 | `config/` | our config files (MySQL, server overrides) |
 | `tools/` | scripts: see [Tools](#tools) |
-| `out/` | everything generated, laid out as `out/<name>` for what builds it (not tracked). **`out/server` is the installed game server and holds its state:** binaries, configs, the 7 GB of extracted map data and the MySQL database (accounts, characters). Don't `rm -rf out`; clean specific build directories |
-| `var/bots/` | *planned, not created yet:* live bot memory (`<name>/identity.md`, goals, `events/*.jsonl`), its own git repo, written by the harness (not tracked here) |
+| `out/` | everything generated, as `out/<name>` for what builds it (not tracked). **Safe to delete: every part comes back from a command.** `out/server` is the installed game server (binaries, configs, the extracted map data, sockets); rebuild it with `tools/build-server.sh`, `tools/apply-config.sh` and `tools/setup/extract-data.sh` |
+| `var/` | **state worth keeping, not tracked: back it up.** `mysql-data/` (the database: accounts, characters, bot progress), `logs/` (server logs and the samples of your own play), and, once the harness exists, `bots/` (live bot memory: `<name>/identity.md`, goals, `events/*.jsonl`; its own git repo) |
 | `models/` | the GGUF model files llama-server loads (not tracked) |
 | `reference/` | downloaded addon sources (not tracked) |
 

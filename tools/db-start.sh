@@ -13,4 +13,4 @@ for i in $(seq 1 30); do
   mysqladmin --defaults-file="$CNF" -uroot ping >/dev/null 2>&1 && { echo "mysql up"; exit 0; }
   sleep 1
 done
-echo "mysql failed to start; see $S/logs/mysql.log"; exit 1
+echo "mysql failed to start; see $ROOT/var/logs/mysql.log"; exit 1

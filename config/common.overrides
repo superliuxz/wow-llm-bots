@@ -2,6 +2,6 @@
 LoginDatabaseInfo = "127.0.0.1;3306;acore;@DB_PASSWORD@;acore_auth"
 WorldDatabaseInfo = "127.0.0.1;3306;acore;@DB_PASSWORD@;acore_world"
 CharacterDatabaseInfo = "127.0.0.1;3306;acore;@DB_PASSWORD@;acore_characters"
-LogsDir = "@ROOT@/out/server/logs"
+LogsDir = "@ROOT@/var/logs"
 SourceDirectory = "@ROOT@/third_party/azerothcore-wotlk"
 MySQLExecutable = "/usr/bin/mysql"

@@ -4,7 +4,7 @@
 
 Stock mod-playerbots AI (New RPG strategy), no LLM. One random bot, level 1, no human nearby.
 Data: `out/tests/solo-leveling-*` (samples every 60 s via `tools/bot-sampler.sh`) and
-`out/server/logs/Playerbots.log`.
+`var/logs/Playerbots.log`.
 
 ### Final clean run (Dezlu, Troll Priest, Valley of Trials, 59 min)
 
