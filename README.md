@@ -55,6 +55,7 @@ Run from the repo root. Every script finds the repo from its own location.
 | `tools/wsc <command>` | send a command to the worldserver console |
 | `tools/llm-server.sh` | llama-server with the settings measured fastest (`docs/phase2-results.md`) |
 | `tools/validate-snapshots.sh` | compile the snapshot proto, validate the example snapshots, check the client-event table |
+| `tools/check-trigger-conditions.py` | parse every condition in `docs/specs/trigger-conditions.tsv` against the standing-order grammar |
 | `tools/bot-sampler.sh` | sample bot state from the DB to JSONL (started by `server-start.sh`) |
 
 **Once** (`tools/setup/`, plus `tools/setup.sh` and `tools/build-protoc.sh`)

@@ -68,8 +68,9 @@ client event (a player just sees them), which is why `appears` exists.
 ## Standing orders (proposed 2026-11-16, not built)
 
 **The test for any behaviour is how fast it has to happen.** Under about a second it can't be a
-brain call: an urgent wake costs 0.8 s with spare capacity and 2-3 s with a busy GPU, never
-less (`docs/phase2-results.md`, "Urgent wakes"). So it is a **reflex** (the playerbots engine:
+brain call: one bot alone gets a plan in 0.21 s, but an urgent wake cost 0.8 s at the lightest
+load measured (2 surprises per bot per minute, 50 bots, 79% GPU) and 2-3 s with a busy GPU
+(`docs/phase2-results.md`, "Urgent wakes"; the cost at low load isn't measured). So it is a **reflex** (the playerbots engine:
 rotation, interrupts, fighting back, human-paced) or a **standing order**. Anything slower is a
 brain decision.
 
@@ -150,27 +151,32 @@ skull`; `not Fire Bomb cast & boss hp>20 -> target boss`; `Sindragosa is flying 
   dungeon) was read, following helpers, and written in the revised grammar or marked why it
   can't be: `docs/specs/trigger-conditions.tsv`, one row each (how it was made:
   `trigger-conditions-brief.md`; six readers in parallel, then 12 random rows re-read against
-  the source). Leaving out 25 `plumbing` rows (base classes, shared timer keepers) and 19 `bugnet`
-  rows (resetting state, stuck bots), the 551 mechanics are:
+  the source). `tools/check-trigger-conditions.py` parses every `when` cell against the grammar
+  (all pass), so the table is the grammar's regression set. Leaving out 25 `plumbing` rows (base
+  classes, shared timer keepers), 18 `bugnet` rows (resetting state, stuck bots) and 5 `cheat`
+  rows (the `*Cheat*` triggers, which only fire with playerbots' raid cheat on), the 547
+  mechanics are:
 
   | Verdict | Triggers |
   |---|---|
-  | `fits` (a `when` clause in the revised grammar) | 342 (62%) |
+  | `fits` (a `when` clause in the revised grammar) | 339 (62%) |
   | `always` (no condition beyond the fight and the bot's role) | 124 (23%) |
-  | `unsayable` | 85 (15%) |
+  | `unsayable` | 84 (15%) |
 
-  So **85% can be said**, close to the 86% estimated from the first pass. 83 of the `fits` rows
-  needed a stretch (noted in `missing`), and 45 use `phase N`, whose numbers assume DBM's
+  So **85% can be said if every stretch is allowed, 69% without any** (256 clean `fits` plus 124
+  `always`). 83 `fits` rows needed a stretch (noted in `missing`); 28 of those assume the bot
+  knows its assignment. Separately, 44 `fits` rows use `phase N`, whose numbers assume DBM's
   numbering (playerbots computes its own phases, e.g. Illidan, Kael'thas; not checked against
-  DBM). Why the 85 can't be said (a row can have several): `other` 43, `assignment` 21,
-  `fixed_location` 17, `timer` 13, `nonaura_state` 10, `vehicle_gear` 8, `distance_other` 5,
-  `count` 4, `health_range` 3, `marker` 2.
-- **Grammar gaps the re-run found** (each cheap): `me` is not a `thing`, so "my health < 40%"
+  DBM). Why the 84 can't be said (a row can have several): `other` 43, `assignment` 21,
+  `fixed_location` 17, `timer` 13, `nonaura_state` 10, `vehicle_gear` 8, `count` 4,
+  `distance_other` 4, `health_range` 3, `marker` 2.
+- **Grammar gaps the re-run found** (each cheap; they cover most of the 43 `other` rows): `me` is not a `thing`, so "my health < 40%"
   can't be said though the snapshot has it; no "master" or assist-tank `who`; no line-of-sight,
   "behind it" or "my current target" test (the snapshot has `in_los` and `behind_it`); no game
   objects as `mech` (traps, Crystal Spike); a named unit among several bosses (council fights)
   can't be told apart by `boss`; some triggers need 4 conditions (cap 3) or 5-7 orders (cap 4),
-  e.g. one interrupt order per spell.
+  e.g. one interrupt order per spell; no aura's time left (`Aura.remaining_s` exists), no
+  "anyone within N" for spread checks, no absolute mana amount.
 - **Snapshot gaps it found:** a flying/grounded, untargetable and submerged state on `Unit`
   (the most common gap: Razorscale, Sapphiron, Onyxia, Sindragosa, Nightbane, Thaddius, Kael's
   advisors, Lurker); an assist-tank and assist-healer index in `GroupPart`; where a cast will land
@@ -252,7 +258,9 @@ module for each action.
   does a bot without the note write none.
 - This keeps "no per-case scripts": C++ knows the verbs, never the bosses.
 
-Still open: the grammar and snapshot gaps above (then re-run the table, the grammar's
+Still open: a bench of a raid-wide burst (`SURPRISES` wakes bots at independent random times;
+an ICC mechanic wakes 25 bots in the same instant: a knob for "N bots at once every M seconds");
+the grammar and snapshot gaps above (then re-run the table, the grammar's
 regression set); the six snapshot gaps above; how orders are tested live. **Testing, in five steps:** (1) coverage on paper (done:
 `trigger-conditions.tsv`, 595 rows, the grammar's regression set); (2) unit tests in the harness for `not`, `&`, `always`
 and order priority, on recorded snapshot sequences; (3) offline with the model: boss notes in,
