@@ -7,6 +7,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -403,6 +404,30 @@ std::string WhereLine(const pb::Where& w) {
 }
 
 }  // namespace
+
+std::string_view OptionKindName(OptionKind kind) {
+  switch (kind) {
+    case OptionKind::kAttack:
+      return "attack";
+    case OptionKind::kTalk:
+      return "talk";
+    case OptionKind::kLoot:
+      return "loot";
+    case OptionKind::kGather:
+      return "gather";
+    case OptionKind::kUse:
+      return "use";
+    case OptionKind::kKeep:
+      return "keep doing what I'm doing";
+    case OptionKind::kExplore:
+      return "explore";
+    case OptionKind::kRest:
+      return "rest";
+    case OptionKind::kTown:
+      return "go to town";
+  }
+  return "?";
+}
 
 Screen RenderScreen(const pb::Snapshot& snapshot) {
   Screen screen;

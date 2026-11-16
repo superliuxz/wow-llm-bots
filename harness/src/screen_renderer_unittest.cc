@@ -249,6 +249,12 @@ TEST(ScreenRendererTest, ObjectsAreGatheredOrUsedAndDefaultsAreLeftOut) {
   EXPECT_EQ(screen.options[0], OptionKind::kGather);
 }
 
+TEST(ScreenRendererTest, EveryOptionKindHasAName) {
+  EXPECT_EQ(OptionKindName(OptionKind::kAttack), "attack");
+  EXPECT_EQ(OptionKindName(OptionKind::kTown), "go to town");
+  EXPECT_EQ(OptionKindName(OptionKind::kKeep), "keep doing what I'm doing");
+}
+
 TEST(ScreenRendererTest, WhenNotAliveTheLifeStateComesBeforeTheFlags) {
   pb::Snapshot snapshot = NewSnapshot();
   snapshot.mutable_base()->mutable_self()->set_state(pb::Self::GHOST);

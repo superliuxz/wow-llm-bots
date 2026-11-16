@@ -23,6 +23,7 @@
 #define HARNESS_SCREEN_RENDERER_H_
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "proto/snapshot.pb.h"
@@ -41,6 +42,9 @@ enum class OptionKind {
   kRest,
   kTown,  // Go to the nearest town.
 };
+
+// "attack", "talk", "loot", ...
+std::string_view OptionKindName(OptionKind kind);
 
 struct Screen {
   std::string text;
