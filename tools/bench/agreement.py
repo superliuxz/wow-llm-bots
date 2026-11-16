@@ -41,7 +41,7 @@ def collect(snap_dir, wakes_file, out_file, limit):
                 if not todo:
                     return
                 i, w = todo.pop(0)
-            wake = {**w, "source": w["bot"], "copy": slot}
+            wake = {**w, "source": w["bot"], "copy": slot, "worker": slot}
             plan, usage, _ = b.call(wake, snap_dir, 16)
             _, kinds = render_tight(b.snapshot(snap_dir, w["bot"], w["seq"]), numbered=True)
             with lock:

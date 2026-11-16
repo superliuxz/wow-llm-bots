@@ -32,7 +32,9 @@ class NearbyBuilder {
     size_t objects = 0;
     size_t areas = 0;
     size_t raycasts = 0;
-    size_t hidden = 0;  // Far and out of line of sight: left out.
+    // Left out because a player can't see it: far and out of line of sight,
+    // or a trigger or invisible model.
+    size_t hidden = 0;
   };
 
   explicit NearbyBuilder(Options options);

@@ -34,7 +34,7 @@ def main():
         rng = random.Random(w)
         while time.perf_counter() - t0 < seconds + warm:
             wake = rng.choice(wakes)
-            wake = {**wake, "source": wake["bot"], "copy": w}
+            wake = {**wake, "source": wake["bot"], "copy": w, "worker": w}
             start = time.perf_counter()
             try:
                 plan = b.call(wake, snap_dir, workers)[0]

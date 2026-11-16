@@ -39,6 +39,15 @@ const char* ClassName(uint8_t class_id);
 // Rough model size from the unit's bounding radius (players ~0.3-0.4).
 wlb::snapshot::Unit::Size SizeFromBoundingRadius(float radius);
 
+// True if the client draws nothing for a creature with this display id (an
+// "invisible stalker" model: generators, spawners, trigger markers).
+bool IsInvisibleModel(uint32_t display_id);
+
+// A creature a player can't see even though the server lists it as visible:
+// a trigger (a mechanic marker, never shown to players) or one with an
+// invisible model. These must not appear in the snapshot.
+bool HiddenFromPlayers(bool is_trigger, uint32_t display_id);
+
 // Line-of-sight results per object, refreshed on a budget: a ray cast against
 // the map geometry is too expensive to do for every visible object every
 // snapshot. Near objects are refreshed more often than far ones.

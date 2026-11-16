@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "base/time/time.h"
+#include "invisible_displays.h"
 #include "proto/snapshot.pb.h"
 
 namespace llm_brain {
@@ -101,6 +102,15 @@ pb::Unit::Size SizeFromBoundingRadius(float radius) {
     return pb::Unit::LARGE;
   }
   return pb::Unit::HUGE;
+}
+
+bool IsInvisibleModel(uint32_t display_id) {
+  return std::binary_search(std::begin(kInvisibleDisplays),
+                            std::end(kInvisibleDisplays), display_id);
+}
+
+bool HiddenFromPlayers(bool is_trigger, uint32_t display_id) {
+  return is_trigger || IsInvisibleModel(display_id);
 }
 
 LosCache::LosCache(float near_yd,

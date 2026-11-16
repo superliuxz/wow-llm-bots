@@ -426,6 +426,14 @@ pb::GameObject::Kind ObjectKind(GameObject* object) {
   }
 }
 
+// Triggers and invisible-model creatures are on the visible list (the client
+// is sent them) but draw nothing: a player sees nobody there.
+bool HiddenFromPlayer(WorldObject* object) {
+  Creature* creature = object->ToCreature();
+  return creature &&
+         HiddenFromPlayers(creature->IsTrigger(), creature->GetDisplayId());
+}
+
 }  // namespace
 
 NearbyBuilder::NearbyBuilder(Options options)
@@ -446,6 +454,9 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
   std::vector<LosCache::Candidate> candidates;
   candidates.reserve(visible->size());
   for (const auto& [guid, object] : *visible) {
+    if (HiddenFromPlayer(object)) {
+      continue;  // Not worth a ray cast.
+    }
     candidates.push_back({guid.GetRawValue(), bot->GetDistance(object)});
   }
   for (uint64_t raw : los_.PickChecks(std::move(candidates), now,
@@ -474,6 +485,10 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
 
   for (const auto& [guid, object] : *visible) {
     if (object == bot) {
+      continue;
+    }
+    if (HiddenFromPlayer(object)) {
+      ++stats.hidden;
       continue;
     }
     const float dist = bot->GetDistance(object);

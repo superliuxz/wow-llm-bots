@@ -72,7 +72,7 @@ Run from the repo root. Every script finds the repo from its own location.
 | Path | What |
 |---|---|
 | `tools/snapshot/` | `validate_snapshot.py` (used by `validate-snapshots.sh`), `fake_harness.py` (a stand-in harness that prints what the module sends) |
-| `tools/audit/` | the client-event audit: `extract-client-ui.sh` and the scripts it feeds (`docs/specs/coverage-client-events.md`) |
+| `tools/audit/` | the client-event audit: `extract-client-ui.sh` and the scripts it feeds (`docs/specs/coverage-client-events.md`); `gen_invisible_displays.py` regenerates the table of invisible creature models (`src/invisible_displays.h`) |
 | `tools/bench/` | brain load benches: `capture_snapshots.py` (live snapshots to files), `trigger_sim.py` (how often bots wake), `brain_load.py` (wake-ups replayed against llama-server), `throughput.py` (capacity), `prompt_render.py` (the compact prompt) |
 
 

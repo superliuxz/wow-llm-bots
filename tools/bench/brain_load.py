@@ -16,6 +16,13 @@ Env: SLOTS (default 25), MAX_TOKENS (default 150), OUT=<file> (per-call JSON),
      watch vocabulary, enforced by a grammar built per call (free text only in a
      short goal and an optional say line).
      RENDER=tight: prompt_render.render_tight (base view in a few plain lines).
+     IDENTITY=<chars>: each bot gets its own identity and memory text of about that many
+     characters (4 chars is about one token) after the shared rules, unique per bot, as
+     var/bots/<name>/identity.md and its memories will be (1200 tokens is about 5000).
+     PIN=1: a bot always uses its own slot (id_slot = bot number modulo SLOTS; SLOTS is the
+     server's -np), so its identity and memory stay cached between its wake-ups. Without it
+     slots are shared round-robin by the worker. WORKERS (default SLOTS) is how many calls
+     run at once.
      TEMP=<t>: sampling temperature (default 0.7).
      GOAL_ONCE=1: the bot's current goal is in the prompt, and the brain writes a
      goal line only when it changes.
@@ -181,6 +188,34 @@ def snapshot(snap_dir, bot, seq):
     return json.loads((pathlib.Path(snap_dir) / bot / f"{seq}.json").read_text())
 
 
+TRAITS = ["curious", "cautious", "reckless", "chatty", "quiet", "greedy", "generous", "stubborn",
+          "patient", "impatient", "loyal", "sarcastic", "earnest", "lazy", "ambitious"]
+PLACES = ["Orgrimmar", "Razor Hill", "the Barrens", "Sen'jin Village", "Thunder Bluff",
+          "Undercity", "Ratchet", "Crossroads", "the Valley of Trials", "Durotar"]
+THINGS = ["a boar that would not die", "a stranger who shared water", "a guild that fell apart",
+          "a rare drop that never came", "a group that wiped twice", "a trainer who was rude",
+          "a lost wallet", "a long walk at night", "a nice view from a hill"]
+
+
+def identity_text(copy, chars):
+    """Stand-in for var/bots/<name>/identity.md plus memories: unique per bot, about `chars`."""
+    import random as _random
+    rng = _random.Random(copy * 7919)
+    traits = rng.sample(TRAITS, 3)
+    lines = [f"Your identity (bot {copy}):",
+             f"You are {', '.join(traits)}. You grew up near {rng.choice(PLACES)} and still "
+             f"think of it as home. You play in the evenings and like "
+             f"{rng.choice(['quests', 'herbs', 'chatting', 'exploring', 'grouping'])}.",
+             "Your voice: short lines, a little slang from 2008, never formal.", "",
+             "What you remember:"]
+    while sum(len(x) + 1 for x in lines) < chars:
+        lines.append(f"- {rng.choice(['Earlier today', 'Last night', 'Two days ago', 'A while ago'])}"
+                     f" you thought about {rng.choice(THINGS)} near {rng.choice(PLACES)}; you felt "
+                     f"{rng.choice(TRAITS)} about it and decided to "
+                     f"{rng.choice(['keep going', 'wait and see', 'ask someone', 'let it go'])}.")
+    return "\n".join(lines)
+
+
 GOALS = {}  # copy -> the bot's current goal (GOAL_ONCE).
 GOALS_LOCK = threading.Lock()
 
@@ -199,6 +234,7 @@ def call(wake, snap_dir, slots):
         if menu:
             screen += "\noptions:\n" + "\n".join(f"  {i}. {o}" for i, o in enumerate(options, 1))
     rules = RULES_MENU if menu else RULES
+    identity = int(os.environ.get("IDENTITY", 0))
     counts = menu and bool(os.environ.get("COUNTS"))
     if counts:
         rules = rules.replace(
@@ -226,12 +262,14 @@ def call(wake, snap_dir, slots):
         head = (f"Your goal: {goal}." if goal else "You have no goal yet.") + " " + head
     body = {
         "messages": [
-            {"role": "system", "content": rules + f"\nYou are {wake['source']}."},
+            {"role": "system", "content": rules + f"\nYou are {wake['source']}."
+                                          + (("\n\n" + identity_text(wake["copy"], identity))
+                                             if identity else "")},
             {"role": "user", "content": f"{head}\n\nYour screen now:\n{screen}"},
         ],
         "max_tokens": int(os.environ.get("MAX_TOKENS", 150)),
         "temperature": float(os.environ.get("TEMP", 0.7)),
-        "id_slot": wake["copy"] % slots,
+        "id_slot": wake["copy"] % slots if os.environ.get("PIN") else wake["worker"] % slots,
         "cache_prompt": True,
         "chat_template_kwargs": {"enable_thinking": False},
     }
@@ -329,13 +367,14 @@ def main():
     n_bots = int(sys.argv[3]) if len(sys.argv) > 3 else 50
     seconds = float(sys.argv[4]) if len(sys.argv) > 4 else 120
     slots = int(os.environ.get("SLOTS", 25))
+    workers = int(os.environ.get("WORKERS", slots))
     wakes = load(snap_dir, wakes_file, n_bots, seconds, random.Random(2))
     queue, lock, cv = [], threading.Lock(), threading.Condition(threading.Lock())
     results, busy = [], [0]
     busy_since, busy_total = [None], [0.0]
     t0 = time.perf_counter()
 
-    def worker():
+    def worker(number):
         while True:
             with cv:
                 while not queue:
@@ -349,7 +388,7 @@ def main():
                 busy[0] += 1
             start = time.perf_counter()
             try:
-                plan, usage, timings = call(wake, snap_dir, slots)
+                plan, usage, timings = call({**wake, "worker": number}, snap_dir, slots)
                 ok = plan.get("_valid", "do" in plan)
             except Exception as e:  # Report, don't stop the replay.
                 plan, usage, timings, ok = str(e), {}, {}, False
@@ -361,9 +400,10 @@ def main():
                 results.append({**wake, "wait": start - t0 - wake["t"], "think": done - start,
                                 "latency": done - t0 - wake["t"], "ok": ok, "plan": plan,
                                 "prompt_tokens": usage.get("prompt_tokens"),
+                                "read_tokens": timings.get("prompt_n"),
                                 "reply_tokens": usage.get("completion_tokens")})
 
-    threads = [threading.Thread(target=worker) for _ in range(slots)]
+    threads = [threading.Thread(target=worker, args=(n,)) for n in range(workers)]
     for t in threads:
         t.start()
     batch_s = float(os.environ.get("BATCH_S", 0))
@@ -397,7 +437,7 @@ def main():
     stop_flusher.set()
     flush()
     with cv:
-        for n in range(slots):
+        for n in range(workers):
             heapq.heappush(queue, (2, len(wakes) + n, None))
         cv.notify_all()
     for t in threads:
@@ -416,7 +456,8 @@ def main():
           f"wake->plan p50 {pct(lat, 0.5):.1f}s p95 {pct(lat, 0.95):.1f}s max {lat[-1] if lat else 0:.1f}s | "
           f"think p50 {statistics.median(r['think'] for r in results):.1f}s | "
           f"GPU busy {busy_total[0] / wall:.0%} | prompt "
-          f"{statistics.mean(r['prompt_tokens'] or 0 for r in results):.0f} tok, plan "
+          f"{statistics.mean(r['prompt_tokens'] or 0 for r in results):.0f} tok "
+          f"(read again {statistics.mean(r['read_tokens'] or 0 for r in results):.0f}), plan "
           f"{statistics.mean(r['reply_tokens'] or 0 for r in results):.0f} tok | valid "
           f"{sum(r['ok'] for r in results)}/{len(results)} | brain's look_again_s median "
           f"{statistics.median(look) if look else '-'}")

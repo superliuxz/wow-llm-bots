@@ -327,4 +327,7 @@ routine picks, judged by the real quality check.
 
 - `nearby` listed **"World Invisible Trigger"** (level 80, hostile, 5 yd away) in 160 of the
   sampled snapshots, 23 of 50 bots: invisible server objects a player could not see. The brain
-  even chose to attack one. To fix in `nearby_builder.cc` (filter what the client would not show).
+  even chose to attack one. **Fixed (2026-11-16):** `nearby` leaves out triggers and creatures with
+  an invisible model (146 display ids from the client's DBCs, `tools/audit/gen_invisible_displays.py`).
+  Live check, 50 bots in the valley: 329 listings in 25 bots before, 0 after; snapshot build still
+  50 µs median, 130 µs p99.

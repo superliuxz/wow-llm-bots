@@ -59,6 +59,25 @@ TEST(PerceptionTest, ClassNames) {
   EXPECT_STREQ(ClassName(200), "");
 }
 
+TEST(PerceptionTest, InvisibleModelsAreHidden) {
+  // 11686 is the Invisible Stalker. 169 is the Infernal: visible, though
+  // many trigger creatures list it as their other (GM-only) model.
+  EXPECT_TRUE(IsInvisibleModel(11686));
+  EXPECT_TRUE(IsInvisibleModel(6908));   // First in the table.
+  EXPECT_TRUE(IsInvisibleModel(23258));  // Last in the table.
+  EXPECT_FALSE(IsInvisibleModel(169));
+  EXPECT_FALSE(IsInvisibleModel(0));
+  EXPECT_FALSE(IsInvisibleModel(11685));  // Just before an invisible one.
+  EXPECT_FALSE(IsInvisibleModel(4000000));
+}
+
+TEST(PerceptionTest, TriggersAndInvisibleModelsAreHiddenFromPlayers) {
+  EXPECT_TRUE(HiddenFromPlayers(/*is_trigger=*/true, /*display_id=*/169));
+  EXPECT_TRUE(HiddenFromPlayers(false, 11686));
+  EXPECT_TRUE(HiddenFromPlayers(true, 11686));
+  EXPECT_FALSE(HiddenFromPlayers(false, 169));
+}
+
 TEST(PerceptionTest, SizeBuckets) {
   EXPECT_EQ(SizeFromBoundingRadius(0.1f), pb::Unit::SMALL);
   EXPECT_EQ(SizeFromBoundingRadius(0.35f), pb::Unit::MEDIUM);
