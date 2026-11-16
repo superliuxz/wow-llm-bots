@@ -3,12 +3,13 @@
 #include "screen_renderer.h"
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <optional>
 #include <set>
 #include <string>
 #include <string_view>
-#include <utility>
+#include <tuple>
 #include <vector>
 
 #include "absl/strings/ascii.h"
@@ -64,10 +65,20 @@ void AddEnum(std::vector<std::string>* bits,
 }
 
 // "health 24%" for a unit below full health (0 means not shown).
-void AddPercent(std::vector<std::string>* bits, float pct, const char* key) {
-  if (pct != 0 && pct < 100) {
+// Only when shown at all (a far unit's health isn't), and not full.
+void AddPercent(std::vector<std::string>* bits,
+                bool shown,
+                float pct,
+                const char* key) {
+  if (shown && pct < 100) {
     bits->push_back(absl::StrFormat("%s %.0f%%", key, pct));
   }
+}
+
+// A distance safe to sort and print: a missing or broken one (NaN, inf)
+// counts as 0 (here), never as undefined behavior in std::sort.
+float Finite(float yd) {
+  return std::isfinite(yd) ? yd : 0.0f;
 }
 
 // Where something is: "28 yd SW, below, out of sight, you're behind it".
@@ -77,7 +88,10 @@ std::string Where(const pb::Relative& rel) {
   if (dir == "HERE" || (rel.dist_yd() == 0 && dir.empty())) {
     parts.push_back("here");
   } else if (rel.dist_yd() != 0) {
-    parts.push_back(absl::StrFormat("%.0f yd %s", rel.dist_yd(), dir));
+    parts.push_back(
+        dir.empty()
+            ? absl::StrFormat("%.0f yd", Finite(rel.dist_yd()))
+            : absl::StrFormat("%.0f yd %s", Finite(rel.dist_yd()), dir));
   } else {
     parts.push_back(dir);
   }
@@ -85,7 +99,7 @@ std::string Where(const pb::Relative& rel) {
       rel.height() == pb::Relative::BELOW) {
     parts.push_back(Word(pb::Relative_Height_Name(rel.height())));
   }
-  if (!rel.in_los()) {
+  if (rel.has_in_los() && !rel.in_los()) {  // Unset: not checked yet.
     parts.push_back("out of sight");
   }
   if (rel.behind_it()) {
@@ -130,9 +144,9 @@ std::string UnitLook(const pb::Unit& u) {
   if (!u.player().class_().empty()) {
     who.push_back(absl::AsciiStrToLower(u.player().class_()));
   }
-  if (u.level() != 0 || !who.empty()) {
+  if (u.has_level() || !who.empty()) {
     std::vector<std::string> parts;
-    if (u.level() != 0) {
+    if (u.has_level()) {
       parts.push_back(absl::StrCat("level ", u.level()));
     }
     parts.insert(parts.end(), who.begin(), who.end());
@@ -148,8 +162,8 @@ std::string UnitLook(const pb::Unit& u) {
       bits.push_back(Word(name));
     }
   }
-  AddPercent(&bits, u.health_pct(), "health");
-  AddPercent(&bits, u.power_pct(), "power");
+  AddPercent(&bits, u.has_health_pct(), u.health_pct(), "health");
+  AddPercent(&bits, u.has_power_pct(), u.power_pct(), "power");
   const std::string state =
       NameOf(u.activity().state(), pb::Activity_State_Name);
   if (!state.empty() && !IsDefaultName(state)) {
@@ -200,7 +214,7 @@ std::string ObjectLook(const pb::GameObject& go) {
   if (!kind.empty() && !IsDefaultName(kind)) {
     bits.push_back(Word(kind));
   }
-  AddPercent(&bits, go.health_pct(), "health");
+  AddPercent(&bits, go.has_health_pct(), go.health_pct(), "health");
   // A usable object in the ready state is the normal case; written only when
   // it is the first thing said (the Python prototype's string replace left
   // those in).
@@ -261,11 +275,13 @@ std::optional<OptionKind> ObjectOption(const pb::GameObject& go) {
 // on get the next option number.
 std::vector<std::string> ThingLines(const std::vector<Thing>& things,
                                     std::vector<OptionKind>* options) {
-  std::vector<std::pair<std::string, std::string>> order;
-  std::map<std::pair<std::string, std::string>, std::vector<const Thing*>>
-      groups;
+  // Things only share a line if they also share what the bot can do with them
+  // (a usable and an unusable chest look alike).
+  using Key = std::tuple<std::string, std::string, std::optional<OptionKind>>;
+  std::vector<Key> order;
+  std::map<Key, std::vector<const Thing*>> groups;
   for (const Thing& t : things) {
-    const auto key = std::make_pair(t.name.empty() ? "?" : t.name, t.look);
+    const Key key{t.name.empty() ? "?" : t.name, t.look, t.option};
     if (groups.find(key) == groups.end()) {
       order.push_back(key);
     }
@@ -279,21 +295,27 @@ std::vector<std::string> ThingLines(const std::vector<Thing>& things,
       options->push_back(*group[0]->option);
       mark = absl::StrCat(options->size(), ".");
     }
+    const std::string& name = std::get<0>(key);
+    const std::string& look = std::get<1>(key);
     if (group.size() == 1) {
-      lines.push_back(absl::StrCat(mark, " ", key.first, ": ", key.second, "; ",
+      lines.push_back(absl::StrCat(mark, " ", name, ": ", look, "; ",
                                    TightWhere(group[0]->rel)));
       continue;
     }
     std::vector<float> dists;
     std::set<std::string> dirs;
     for (const Thing* t : group) {
-      dists.push_back(t->rel.dist_yd());
-      dirs.insert(NameOf(t->rel.dir(), pb::Direction_Name));
+      dists.push_back(Finite(t->rel.dist_yd()));
+      const std::string dir = NameOf(t->rel.dir(), pb::Direction_Name);
+      if (!dir.empty()) {
+        dirs.insert(dir);
+      }
     }
     std::sort(dists.begin(), dists.end());
-    lines.push_back(absl::StrFormat(
-        "%s %dx %s: %s; %.0f-%.0f yd %s", mark, group.size(), key.first,
-        key.second, dists.front(), dists.back(), absl::StrJoin(dirs, "/")));
+    lines.push_back(
+        absl::StrFormat("%s %dx %s: %s; %.0f-%.0f yd%s", mark, group.size(),
+                        name, look, dists.front(), dists.back(),
+                        dirs.empty() ? "" : " " + absl::StrJoin(dirs, "/")));
   }
   return lines;
 }
@@ -315,7 +337,7 @@ std::string FarSummary(const std::vector<const pb::Unit*>& units) {
     std::vector<float> dists;
     std::set<std::string> dirs;
     for (const pb::Relative* rel : groups[look]) {
-      dists.push_back(rel->dist_yd());
+      dists.push_back(Finite(rel->dist_yd()));
       const std::string dir = NameOf(rel->dir(), pb::Direction_Name);
       if (!dir.empty()) {
         dirs.insert(dir);
@@ -482,6 +504,15 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
     screen.options.push_back(option.kind);
     lines.push_back(
         absl::StrCat("  ", screen.options.size(), ". ", option.text));
+  }
+  // Every line is one line: a name or subtitle from the game with a line
+  // break in it must not write a fake line (an option the bot doesn't have).
+  for (std::string& line : lines) {
+    for (char& c : line) {
+      if (c == '\n' || c == '\r') {
+        c = ' ';
+      }
+    }
   }
   screen.text = absl::StrJoin(lines, "\n");
   return screen;

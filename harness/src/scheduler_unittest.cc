@@ -3,6 +3,7 @@
 #include "scheduler.h"
 
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -135,6 +136,24 @@ TEST(SchedulerTest, AnAnswerThatArrivesAfterTheSchedulerIsGoneIsHarmless) {
   }
   r.Finish("a");  // Must not touch the destroyed scheduler.
   SUCCEED();
+}
+
+TEST(SchedulerTest, WorkThatDestroysTheSchedulerIsSafe) {
+  // The owner may drop the scheduler from a done callback run inside Submit.
+  auto scheduler = std::make_unique<Scheduler>(2);
+  Scheduler::Work destroy = [&](base::OnceClosure done) {
+    scheduler.reset();
+    std::move(done).Run();
+  };
+  scheduler->Submit("a", Urgency::kNormal, std::move(destroy));
+  EXPECT_EQ(scheduler, nullptr);  // And no use-after-free (ASan).
+}
+
+TEST(SchedulerTest, ALimitOfZeroStillRunsOneAtATime) {
+  Scheduler scheduler(0);
+  Recorder r;
+  scheduler.Submit("a", Urgency::kNormal, r.Work("a"));
+  EXPECT_EQ(r.started(), (Names{"a"}));
 }
 
 }  // namespace

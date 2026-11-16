@@ -62,9 +62,15 @@ Messages (`snapshot.proto`): the module sends `ModuleMessage` (a `Snapshot`, or 
  "ext":{"minimap":{...},"quest_tracker":[...],"action_bars":{...},"world":{...},"party":{...},"bags":{...}},
  "events":[{"chat":{...}}, {"xp_gained":{...}}],
  "options":[...]}}
-{"event": {"bot":"Dezlu","seq":1235,"time_ms":"1794729600350","event":{"prompt":{...}}}}
+{"event": {"bot":"Dezlu","seq":1234,"time_ms":"1794729600350","event":{"prompt":{...}}}}
 ```
-- `seq`: per-bot counter (gaps reveal drops); `time_ms`: server time.
+- `seq`: per-bot snapshot counter. A gap means a snapshot was built but never delivered: a
+  newer one replaced it while the harness was behind (latest wins), which is by design, not a
+  loss of anything the harness needed. An event carries the seq of the bot's newest snapshot when
+  it happened. `time_ms`: server wall-clock time, for people and logs; ages are measured with
+  `monotonic_us` (this machine's monotonic clock).
+- A command may carry a `command_id`; an error it causes comes back with the same id, so the
+  harness can tell "my choice failed" from an ordinary error line ("Not ready yet").
 - Wire format: **binary protobuf, length-prefixed frames** over the Unix socket. Both sides
   use C++ generated from `snapshot.proto` with `optimize_for = LITE_RUNTIME`, as Chromium
   does; the module contains no JSON code.

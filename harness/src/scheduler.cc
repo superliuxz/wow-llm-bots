@@ -2,15 +2,19 @@
 
 #include "scheduler.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <utility>
 
 #include "base/functional/callback.h"
+#include "base/memory/weak_ptr.h"
 
 namespace harness {
 
-Scheduler::Scheduler(size_t max_in_flight) : max_in_flight_(max_in_flight) {}
+Scheduler::Scheduler(size_t max_in_flight)
+    // Zero would never start anything.
+    : max_in_flight_(std::max<size_t>(max_in_flight, 1)) {}
 
 Scheduler::~Scheduler() = default;
 
@@ -56,8 +60,14 @@ void Scheduler::StartWaiting() {
     Waiting next = std::move(queue_[best]);
     queue_.erase(queue_.begin() + static_cast<std::ptrdiff_t>(best));
     in_flight_.insert(next.bot);
-    std::move(next.work).Run(base::BindOnce(
-        &Scheduler::OnDone, weak_factory_.GetWeakPtr(), next.bot));
+    // The work may finish at once and its done callback may destroy this
+    // scheduler: never touch a member after Run() unless it is still alive.
+    base::WeakPtr<Scheduler> self = weak_factory_.GetWeakPtr();
+    std::move(next.work).Run(
+        base::BindOnce(&Scheduler::OnDone, self, next.bot));
+    if (!self) {
+      return;
+    }
   }
   starting_ = false;
 }

@@ -57,10 +57,11 @@ def main():
     col = {name: i for i, name in enumerate(header)}
     failures = []
     for n, row in enumerate(rows, 2):
-        verdict, when = row[col["verdict"]], row[col["when"]]
         if len(row) != len(header):
             failures.append(f"{n}: {len(row)} columns, want {len(header)}")
-        elif verdict not in VERDICTS:
+            continue
+        verdict, when = row[col["verdict"]], row[col["when"]]
+        if verdict not in VERDICTS:
             failures.append(f"{n}: unknown verdict {verdict!r}")
         elif verdict == "fits" and not parses(when):
             failures.append(f"{n}: {row[col['class']]}: doesn't parse: {when!r}")

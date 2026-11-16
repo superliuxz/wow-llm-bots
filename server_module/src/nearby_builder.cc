@@ -34,6 +34,7 @@
 #include "StringFormat.h"
 #include "Unit.h"
 #include "UnitDefines.h"
+#include "UpdateFields.h"
 #include "World.h"
 #include "base/time/time.h"
 #include "perception.h"
@@ -47,6 +48,8 @@ namespace pb = wlb::snapshot;
 constexpr float kLosNearYd = 40;
 constexpr base::TimeDelta kLosNearTtl = base::Seconds(1);
 constexpr base::TimeDelta kLosFarTtl = base::Seconds(5);
+// Line-of-sight results are re-checked once the bot has moved this far.
+constexpr float kLosMovedYd = 3;
 constexpr base::TimeDelta kLosForgetAfter = base::Seconds(30);
 // Where a player looks at a game object: a little above its base.
 constexpr float kObjectSightHeightYd = 1.0f;
@@ -227,14 +230,31 @@ pb::Unit::QuestMarker QuestMarker(Player* bot, Creature* creature) {
   }
 }
 
-void FillCast(Spell* spell, pb::Cast* cast) {
+// Line of sight only when it was checked: unset means "not known yet" (the
+// field has explicit presence), never a guess.
+void SetInLos(std::optional<bool> in_los, pb::Relative* rel) {
+  if (in_los) {
+    rel->set_in_los(*in_los);
+  }
+}
+
+// Whether the caster can't be interrupted right now: the client shows the
+// shield on its cast bar.
+bool ImmuneToInterrupt(Unit* unit) {
+  return unit->m_spellImmune[IMMUNITY_MECHANIC].count(MECHANIC_INTERRUPT) > 0 ||
+         unit->HasAuraTypeWithMiscvalue(SPELL_AURA_MECHANIC_IMMUNITY,
+                                        MECHANIC_INTERRUPT);
+}
+
+void FillCast(Unit* unit, Spell* spell, pb::Cast* cast) {
   const SpellInfo* info = spell->GetSpellInfo();
   cast->mutable_spell()->set_id(info->Id);
   cast->mutable_spell()->set_name(Localized(info->SpellName));
   cast->set_remaining_ms(
       static_cast<uint32_t>(std::max(0, spell->GetCastTimeRemaining())));
-  cast->set_interruptible(info->InterruptFlags &
-                          SPELL_INTERRUPT_FLAG_INTERRUPT);
+  cast->set_interruptible(
+      (info->InterruptFlags & SPELL_INTERRUPT_FLAG_INTERRUPT) &&
+      !ImmuneToInterrupt(unit));
   cast->set_channeled(info->IsChanneled());
 }
 
@@ -243,14 +263,20 @@ void FillActivity(Unit* unit, Player* bot, pb::Activity* activity) {
     activity->set_state(pb::Activity::DEAD);
     return;
   }
-  if (Spell* channel = unit->GetCurrentSpell(CURRENT_CHANNELED_SPELL)) {
+  // What shows a cast bar, as in Unit::IsNonMeleeSpellCast: a spell stays in
+  // its slot after it finished, while its projectile flies (delayed) and for
+  // an instant cast, none of which a player sees as casting.
+  Spell* channel = unit->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
+  if (channel && channel->getState() != SPELL_STATE_FINISHED) {
     activity->set_state(pb::Activity::CHANNELING);
-    FillCast(channel, activity->mutable_cast());
+    FillCast(unit, channel, activity->mutable_cast());
     return;
   }
-  if (Spell* cast = unit->GetCurrentSpell(CURRENT_GENERIC_SPELL)) {
+  Spell* cast = unit->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+  if (cast && cast->getState() == SPELL_STATE_PREPARING &&
+      cast->GetCastTime() > 0) {
     activity->set_state(pb::Activity::CASTING);
-    FillCast(cast, activity->mutable_cast());
+    FillCast(unit, cast, activity->mutable_cast());
     return;
   }
   Unit* victim = unit->GetVictim();
@@ -449,6 +475,8 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
     return stats;
   }
   const base::TimeTicks now = base::TimeTicks::Now();
+  los_.SetViewer(bot->GetMapId(), bot->GetPositionX(), bot->GetPositionY(),
+                 bot->GetPositionZ(), kLosMovedYd);
 
   // Line of sight first, on the budget, nearest unknown or stale first.
   std::vector<LosCache::Candidate> candidates;
@@ -503,7 +531,7 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
       pb::Unit* out = nearby->add_units();
       FillModel(unit, bot, out);
       FillRelative(bot, unit, out->mutable_rel());
-      out->mutable_rel()->set_in_los(in_los.value_or(true));
+      SetInLos(in_los, out->mutable_rel());
       out->mutable_rel()->set_behind_it(unit->isInBack(bot));
       out->mutable_rel()->set_facing_me(unit->isInFront(bot, M_PI / 2));
       if (near) {
@@ -522,9 +550,13 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
       out->set_state(go->GetGoState() == GO_STATE_ACTIVE ? "active" : "ready");
       out->set_highlighted(go->ActivateToQuest(bot));
       FillRelative(bot, go, out->mutable_rel());
-      out->mutable_rel()->set_in_los(in_los.value_or(true));
+      SetInLos(in_los, out->mutable_rel());
       ++stats.objects;
     } else if (DynamicObject* area = object->ToDynObject()) {
+      if (area->GetByteValue(DYNAMICOBJECT_BYTES, 0) !=
+          DYNAMIC_OBJECT_AREA_SPELL) {
+        continue;  // A far-sight viewpoint: nothing a player sees.
+      }
       pb::Area* out = nearby->add_areas();
       out->set_guid(GuidString(guid));
       out->set_name(SpellName(area->GetSpellId()));
@@ -534,9 +566,11 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
       out->set_inside_me(bot->GetExactDist2d(area) <= area->GetRadius());
       Unit* caster = area->GetCaster();
       out->set_hostile(caster && caster->IsHostileTo(bot));
-      out->set_remaining_s(area->GetDuration() / 1000.0f);
+      if (area->GetDuration() > 0) {  // -1: lasts until removed.
+        out->set_remaining_s(static_cast<float>(area->GetDuration()) / 1000.0f);
+      }
       FillRelative(bot, area, out->mutable_rel());
-      out->mutable_rel()->set_in_los(in_los.value_or(true));
+      SetInLos(in_los, out->mutable_rel());
       ++stats.areas;
     }
   }

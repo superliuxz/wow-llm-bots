@@ -39,7 +39,12 @@ set_source_files_properties(${WLB_MODULE_SOURCES} PROPERTIES
 # the server: AzerothCore globs every .cc in a module directory, so drop them
 # from the `modules` target. common/CMakeLists.txt builds them as tests.
 get_target_property(WLB_MODULES_SOURCES modules SOURCES)
-list(FILTER WLB_MODULES_SOURCES EXCLUDE REGEX "/mod-llm-brain/.*_unittest\\.cc$")
+# Anchored on this directory, whatever name AzerothCore's modules/ link has.
+# AzerothCore may list our sources through the link or the real path: drop both.
+string(REGEX REPLACE "([][+.*()^$?|\\\\])" "\\\\\\1" WLB_DIR_RE_LINK "${CMAKE_CURRENT_LIST_DIR}")
+string(REGEX REPLACE "([][+.*()^$?|\\\\])" "\\\\\\1" WLB_DIR_RE_REAL "${WLB_MODULE_DIR}")
+set(WLB_OURS_RE "^(${WLB_DIR_RE_LINK}|${WLB_DIR_RE_REAL})/")
+list(FILTER WLB_MODULES_SOURCES EXCLUDE REGEX "${WLB_OURS_RE}.*_unittest\\.cc$")
 
 # Test-only code (src/test/, e.g. the fixture reset) is only compiled into test
 # builds of the server (tools/build-server.sh --test); production binaries
@@ -48,6 +53,6 @@ option(LLM_BRAIN_TEST_HOOKS "Compile mod-llm-brain's test-only code" OFF)
 if(LLM_BRAIN_TEST_HOOKS)
   target_compile_definitions(modules PRIVATE LLM_BRAIN_TEST_HOOKS)
 else()
-  list(FILTER WLB_MODULES_SOURCES EXCLUDE REGEX "/mod-llm-brain/src/test/")
+  list(FILTER WLB_MODULES_SOURCES EXCLUDE REGEX "${WLB_OURS_RE}src/test/")
 endif()
 set_property(TARGET modules PROPERTY SOURCES ${WLB_MODULES_SOURCES})

@@ -11,8 +11,8 @@ tools/validate-snapshots.sh and run with the tools venv:
   out/tools-venv/bin/python -I tools/snapshot/fake_harness.py --stats [seconds=10]
   out/tools-venv/bin/python -I tools/snapshot/fake_harness.py --choose [seconds=30] Attack Loot
 
---stats prints nothing per frame. It reports, from the snapshots' own timestamps (the module's
-wall clock is this machine's): frames per second; the age of a snapshot when it arrives (built to
+--stats prints nothing per frame. It reports, from the snapshots' own timestamps (monotonic_us:
+this machine's monotonic clock, the same in every process): frames per second; the age of a snapshot when it arrives (built to
 received: world thread, socket, this process); how evenly each bot's snapshots are spaced; and
 how bunched the arrivals are (the most frames arriving within 10 ms), which shows whether the
 module builds all bots on the same tick.
@@ -80,16 +80,19 @@ def run_stats(seconds, warmup=2.0):
         if not chunk:
             print("server closed the connection")
             break
-        received_ms = time.time() * 1000
+        # The snapshot's monotonic_us is CLOCK_MONOTONIC, which time.monotonic_ns() reads
+        # on Linux: a clock that the wall clock being set can't move.
+        received_ms = time.monotonic_ns() / 1e6
         for payload in reader.feed(chunk):
             message = snapshot_pb2.ModuleMessage()
             message.ParseFromString(payload)
             if not message.HasField("snapshot"):
                 continue
             snap = message.snapshot
-            ages.append(received_ms - snap.time_ms)
+            built_ms = snap.monotonic_us / 1000
+            ages.append(received_ms - built_ms)
             arrivals.append(received_ms / 1000)
-            per_bot[snap.bot].append(snap.time_ms)
+            per_bot[snap.bot].append(built_ms)
     s.close()
     if not ages:
         print("no snapshots received")
@@ -162,6 +165,7 @@ def run_choose(seconds, words):
     reader = FrameReader()
     words = list(words)
     next_at = 0.0
+    sent = 0  # Also each command's id, so a failure names the command it belongs to.
     end = time.time() + seconds
     while time.time() < end:
         try:
@@ -188,7 +192,8 @@ def run_choose(seconds, words):
                 continue
             for i, text in enumerate(options, 1):
                 if text.lower().startswith(words[0].lower()):
-                    command = snapshot_pb2.Command(bot=snap.bot)
+                    sent += 1
+                    command = snapshot_pb2.Command(bot=snap.bot, command_id=sent)
                     command.choose.option = i
                     command.choose.seq = snap.seq
                     send_frame(s, command.SerializeToString())

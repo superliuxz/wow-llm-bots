@@ -1,16 +1,23 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
-// WeakPtr / WeakPtrFactory. They are not thread-safe: create, dereference and
+// WeakPtr / WeakPtrFactory. They are not thread-safe: dereference and
 // invalidate on the owning object's sequence only. They may be *copied and
 // passed* across threads (e.g. bound into a task posted back to the owner's
-// sequence).
+// sequence). As in Chromium, a flag binds to the thread that first
+// dereferences or invalidates it, and doing either on another thread aborts:
+// the race shows up at once instead of as a rare use-after-free.
 
 #ifndef COMMON_BASE_MEMORY_WEAK_PTR_H_
 #define COMMON_BASE_MEMORY_WEAK_PTR_H_
 
+#include <atomic>
+#include <cstdio>
+#include <cstdlib>
 #include <utility>
+
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
+#include "base/threading/current_thread_id.h"
 
 namespace base {
 
@@ -21,9 +28,32 @@ namespace internal {
 // Shared validity flag.
 class WeakFlag : public RefCountedThreadSafe<WeakFlag> {
  public:
-  bool valid = true;
+  bool IsValid() {
+    CheckThread();
+    return valid_.load(std::memory_order_acquire);
+  }
+  void Invalidate() {
+    CheckThread();
+    valid_.store(false, std::memory_order_release);
+  }
 
  private:
+  void CheckThread() {
+    const int current = CurrentThreadId();
+    int bound = 0;
+    if (!bound_thread_.compare_exchange_strong(bound, current) &&
+        bound != current) {
+      std::fprintf(stderr,
+                   "WeakPtr used on thread %d but bound to thread %d: "
+                   "dereference and invalidate on the owner's sequence only\n",
+                   current, bound);
+      std::abort();
+    }
+  }
+
+  std::atomic<bool> valid_{true};
+  std::atomic<int> bound_thread_{0};
+
   friend class RefCountedThreadSafe<WeakFlag>;
   ~WeakFlag() = default;
 };
@@ -34,7 +64,7 @@ class WeakPtr {
  public:
   WeakPtr() = default;
 
-  T* get() const { return (flag_ && flag_->valid) ? ptr_ : nullptr; }
+  T* get() const { return (flag_ && flag_->IsValid()) ? ptr_ : nullptr; }
   T* operator->() const { return get(); }
   T& operator*() const { return *get(); }
   explicit operator bool() const { return get() != nullptr; }
@@ -67,7 +97,7 @@ class WeakPtrFactory {
 
   void InvalidateWeakPtrs() {
     if (flag_) {
-      flag_->valid = false;
+      flag_->Invalidate();
       flag_.reset();
     }
   }

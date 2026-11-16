@@ -14,15 +14,20 @@ SnapshotSchedule::SnapshotSchedule(size_t bot_count,
                                    base::TimeDelta interval,
                                    base::TimeDelta combat_interval,
                                    base::TimeTicks start)
-    : interval_(interval),
+    : interval_(std::max(interval, kMinInterval)),
       combat_interval_(combat_interval.is_positive() &&
-                               combat_interval < interval
-                           ? combat_interval
-                           : interval),
+                               combat_interval < interval_
+                           ? std::max(combat_interval, kMinInterval)
+                           : interval_),
       slots_(bot_count) {
-  for (size_t i = 0; i < bot_count; ++i) {
-    slots_[i].next_due = start + interval * static_cast<int64_t>(i) /
-                                     static_cast<int64_t>(bot_count);
+  Restart(start);
+}
+
+void SnapshotSchedule::Restart(base::TimeTicks now) {
+  const int64_t count = static_cast<int64_t>(slots_.size());
+  for (size_t i = 0; i < slots_.size(); ++i) {
+    slots_[i] = Slot{};
+    slots_[i].next_due = now + interval_ * static_cast<int64_t>(i) / count;
   }
 }
 

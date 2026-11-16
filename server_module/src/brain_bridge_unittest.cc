@@ -15,7 +15,6 @@
 
 #include <cstdint>
 #include <cstring>
-#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -44,7 +43,8 @@ std::string TestSocketPath() {
 
 // Pumps the bridge's world-thread tasks (this test thread plays AzerothCore's
 // world thread) until `done()` or timeout.
-bool RunWorldUntil(BrainBridge& bridge, const std::function<bool()>& done) {
+template <typename Done>
+bool RunWorldUntil(BrainBridge& bridge, const Done& done) {
   const base::TimeTicks deadline = base::TimeTicks::Now() + kTimeout;
   while (!done()) {
     if (base::TimeTicks::Now() > deadline) {

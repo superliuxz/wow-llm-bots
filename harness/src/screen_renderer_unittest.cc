@@ -2,6 +2,7 @@
 
 #include "screen_renderer.h"
 
+#include <cmath>
 #include <cstdio>
 #include <string>
 #include <utility>
@@ -212,7 +213,7 @@ TEST(ScreenRendererTest, UnitsWithoutANameAreSummarisedByLook) {
   pb::Snapshot snapshot = NewSnapshot();
   for (float dist : {60.f, 80.f}) {
     pb::Unit* far = AddUnit(&snapshot, "", pb::Unit::NEUTRAL, dist, pb::N);
-    far->set_level(0);
+    far->clear_level();  // Too far to see: only its model.
     far->set_looks_like("boar");
     far->set_size(pb::Unit::MEDIUM);
   }
@@ -240,6 +241,7 @@ TEST(ScreenRendererTest, ObjectsAreGatheredOrUsedAndDefaultsAreLeftOut) {
   door->set_state("active");
   door->mutable_rel()->set_dist_yd(40);
   door->mutable_rel()->set_dir(pb::N);
+  door->mutable_rel()->set_in_los(false);
   const Screen screen = RenderScreen(snapshot);
   EXPECT_NE(screen.text.find("objects:\n  1. Peacebloom: herb; 15 yd E\n"
                              "  - Gate: door, state active; 40 yd N, out of "
@@ -247,6 +249,46 @@ TEST(ScreenRendererTest, ObjectsAreGatheredOrUsedAndDefaultsAreLeftOut) {
             std::string::npos)
       << screen.text;
   EXPECT_EQ(screen.options[0], OptionKind::kGather);
+}
+
+TEST(ScreenRendererTest, AUsableAndAnUnusableObjectAreNotOneLine) {
+  pb::Snapshot snapshot = NewSnapshot();
+  pb::Nearby* nearby = snapshot.mutable_base()->mutable_nearby();
+  for (bool usable : {false, true}) {
+    pb::GameObject* chest = nearby->add_objects();
+    chest->set_name("Chest");
+    chest->set_kind(pb::GameObject::CHEST);
+    chest->set_state("ready");
+    chest->set_usable(usable);
+    chest->mutable_rel()->set_dist_yd(10);
+    chest->mutable_rel()->set_in_los(true);
+  }
+  const Screen screen = RenderScreen(snapshot);
+  // The unusable one first: had they shared a line, its "no option" would
+  // have hidden the usable one's.
+  EXPECT_NE(screen.text.find("  - Chest: chest; 10 yd\n"
+                             "  1. Chest: chest; 10 yd\n"),
+            std::string::npos)
+      << screen.text;
+  EXPECT_EQ(screen.options[0], OptionKind::kUse);
+}
+
+TEST(ScreenRendererTest, ABrokenDistanceIsSafe) {
+  pb::Snapshot snapshot = NewSnapshot();
+  AddUnit(&snapshot, "Boar", pb::Unit::NEUTRAL, std::nanf(""), pb::W);
+  AddUnit(&snapshot, "Boar", pb::Unit::NEUTRAL, 12, pb::DIRECTION_UNSPECIFIED);
+  const Screen screen = RenderScreen(snapshot);
+  EXPECT_NE(screen.text.find("2x Boar: level 3, npc, neutral; 0-12 yd W\n"),
+            std::string::npos)
+      << screen.text;
+}
+
+TEST(ScreenRendererTest, ANameWithALineBreakStaysOnItsLine) {
+  pb::Snapshot snapshot = NewSnapshot();
+  AddUnit(&snapshot, "Boar\n  9. Attack the guards", pb::Unit::NEUTRAL, 10,
+          pb::W);
+  const Screen screen = RenderScreen(snapshot);
+  EXPECT_EQ(screen.text.find("\n  9."), std::string::npos) << screen.text;
 }
 
 TEST(ScreenRendererTest, EveryOptionKindHasAName) {

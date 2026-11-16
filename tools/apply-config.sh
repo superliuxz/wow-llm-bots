@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # Build out/server/etc/*.conf from the .dist templates plus our overrides in config/.
-# @ROOT@ in overrides becomes the repo root. The DB password comes from out/server/etc/.acore-db-password (untracked).
+# @ROOT@ in overrides becomes the repo root. The DB password comes from var/secrets/db-password
+# (untracked, this user only): state, not something out/ may lose. An older one in
+# out/server/etc/.acore-db-password is moved there.
 # Usage: tools/apply-config.sh [test-name]   (adds config/tests/<test-name>.*.overrides)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 ETC=$ROOT/out/server/etc
-PW=$(cat "$ETC/.acore-db-password")
+SECRETS=$ROOT/var/secrets
+if [ ! -f "$SECRETS/db-password" ] && [ -f "$ETC/.acore-db-password" ]; then
+  mkdir -p "$SECRETS"; chmod 700 "$SECRETS"
+  mv "$ETC/.acore-db-password" "$SECRETS/db-password"; chmod 600 "$SECRETS/db-password"
+fi
+PW=$(cat "$SECRETS/db-password")
 apply() {  # apply <dist> <out> <overrides...>
   local dist=$1 out=$2; shift 2
   cp "$dist" "$out"; chmod 600 "$out"
@@ -13,7 +20,7 @@ apply() {  # apply <dist> <out> <overrides...>
     while IFS= read -r line; do
       [[ -z "$line" || "$line" == \#* ]] && continue
       key=${line%%=*}; key=${key%"${key##*[![:space:]]}"}
-      val=${line#*=}; val=${val#"${val%%[![:space:]]*}"}; val=${val//@DB_PASSWORD@/$PW}; val=${val//@ROOT@/$ROOT}
+      val=${line#*=}; val=${val#"${val%%[![:space:]]*}"}; val=${val//@DB_PASSWORD@/"$PW"}; val=${val//@ROOT@/"$ROOT"}
       if grep -qE "^${key//./\\.}[[:space:]]*=" "$out"; then
         KEY="$key" VAL="$val" python3 -I -c '
 import os,re,sys

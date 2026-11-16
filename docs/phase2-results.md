@@ -307,6 +307,9 @@ Wake to plan, median (95th percentile), in seconds. **Every cell is a measured r
   grammar (all plans valid). Not the C++ renderer.
 - **Server:** llama-server, Qwen3.6-35B-A3B Q4, 16 slots, `-ub 2048 -b 4096`, RTX 5090, with the
   game server running alongside. Calls in flight at once: 16. Urgent wake-ups go first.
+- **"GPU busy"** in this file's tables is the share of the run with at least one call in flight
+  (`brain_load.py`; since 2026-11-16 it prints "busy (a call in flight)"), not the GPU's own
+  utilisation: a stand-in that saturates at 100% when calls overlap.
 - **Capacity:** about 7 wake-ups per second, where the GPU reaches 100% busy. Below that, a cell
   stays at 0.5-2 s (the last one that held: 100 bots, 15 s plans, ~6.5 per second). Above it a
   call still takes ~2 s, and the rest is waiting for a slot.

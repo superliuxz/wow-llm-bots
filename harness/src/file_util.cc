@@ -53,8 +53,19 @@ bool AppendToFile(const std::string& path, std::string_view text) {
   if (fd < 0) {
     return false;
   }
-  const ssize_t written = ::write(fd, text.data(), text.size());
-  const bool ok = written == static_cast<ssize_t>(text.size());
+  // write() may take part of the text, or be interrupted: keep going.
+  bool ok = true;
+  while (!text.empty()) {
+    const ssize_t written = ::write(fd, text.data(), text.size());
+    if (written < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      ok = false;
+      break;
+    }
+    text.remove_prefix(static_cast<size_t>(written));
+  }
   ::close(fd);
   return ok;
 }

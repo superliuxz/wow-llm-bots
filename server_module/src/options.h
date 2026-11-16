@@ -3,13 +3,13 @@
 #ifndef MOD_LLM_BRAIN_OPTIONS_H_
 #define MOD_LLM_BRAIN_OPTIONS_H_
 
-#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "base/time/time.h"
 #include "proto/snapshot.pb.h"
 
 namespace llm_brain {
@@ -38,22 +38,26 @@ std::string_view OptionKindName(OptionTarget::Kind kind);
 std::vector<OptionTarget> AddOptions(wlb::snapshot::Snapshot* snapshot);
 
 // The options of a bot's recent snapshots, so a Choose naming (seq, option)
-// can be resolved after the bot has moved on to newer snapshots. Keeps the last
-// `capacity` snapshots. One per bot; world thread only.
+// can be resolved after the bot has moved on to newer snapshots. Keeps the
+// snapshots built within `window` of the newest one: by time, not by count, so
+// a slow answer in combat (snapshots every 250 ms) is still resolved. One per
+// bot; world thread only.
 class OptionHistory {
  public:
-  explicit OptionHistory(size_t capacity);
+  explicit OptionHistory(base::TimeDelta window);
   OptionHistory(const OptionHistory&) = delete;
   OptionHistory& operator=(const OptionHistory&) = delete;
   ~OptionHistory();
 
-  void Add(uint32_t seq, int64_t time_ms, std::vector<OptionTarget> options);
+  void Add(uint32_t seq,
+           base::TimeTicks built,
+           std::vector<OptionTarget> options);
 
   struct Lookup {
     // Set when found.
     const OptionTarget* target = nullptr;
-    // When the snapshot that offered it was built (ms since the Unix epoch).
-    int64_t snapshot_time_ms = 0;
+    // When the snapshot that offered it was built.
+    base::TimeTicks snapshot_built;
     // Why not, when not found.
     std::string error;
   };
@@ -63,10 +67,10 @@ class OptionHistory {
  private:
   struct Entry {
     uint32_t seq = 0;
-    int64_t time_ms = 0;
+    base::TimeTicks built;
     std::vector<OptionTarget> options;
   };
-  const size_t capacity_;
+  const base::TimeDelta window_;
   std::deque<Entry> entries_;  // Oldest first.
 };
 

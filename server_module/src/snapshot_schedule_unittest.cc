@@ -157,5 +157,31 @@ TEST(SnapshotScheduleTest, NoBotsIsFine) {
   (void)schedule;
 }
 
+TEST(SnapshotScheduleTest, AZeroIntervalIsRaisedToTheMinimum) {
+  SnapshotSchedule schedule = Schedule(1, /*interval_ms=*/0, /*combat_ms=*/0);
+  schedule.Sent(0, At(0), Flags());
+  // Not due on the very next world tick, as a zero interval would be.
+  EXPECT_FALSE(schedule.IsDue(0, At(50), Flags()));
+  EXPECT_TRUE(schedule.IsDue(0, At(100), Flags()));
+}
+
+TEST(SnapshotScheduleTest, RestartSpreadsOverdueBotsAgain) {
+  SnapshotSchedule schedule = Schedule(4);
+  // The harness connects 10 s after startup: every bot is overdue.
+  const base::TimeTicks connected = At(10000);
+  int overdue = 0;
+  for (size_t bot = 0; bot < 4; ++bot) {
+    overdue += schedule.IsDue(bot, connected, Flags());
+  }
+  EXPECT_EQ(overdue, 4);
+  schedule.Restart(connected);
+  int due = 0;
+  for (size_t bot = 0; bot < 4; ++bot) {
+    due += schedule.IsDue(bot, connected, Flags());
+  }
+  EXPECT_EQ(due, 1);  // One at a time again, not a burst of four.
+  EXPECT_TRUE(schedule.IsDue(3, At(10750), Flags()));
+}
+
 }  // namespace
 }  // namespace llm_brain

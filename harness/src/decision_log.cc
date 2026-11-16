@@ -33,10 +33,14 @@ uint64_t Fnv1a(std::string_view text) {
 }
 
 std::string DateUtc(base::Time time) {
+  // Floor, not truncation, so a time before 1970 doesn't land on the next day.
+  const int64_t ms = time.InMillisecondsSinceUnixEpoch();
   const time_t seconds =
-      static_cast<time_t>(time.InMillisecondsSinceUnixEpoch() / 1000);
+      static_cast<time_t>(ms >= 0 ? ms / 1000 : (ms - 999) / 1000);
   struct tm parts;
-  ::gmtime_r(&seconds, &parts);
+  if (::gmtime_r(&seconds, &parts) == nullptr) {
+    return "unknown-date";
+  }
   return absl::StrFormat("%04d-%02d-%02d", parts.tm_year + 1900,
                          parts.tm_mon + 1, parts.tm_mday);
 }

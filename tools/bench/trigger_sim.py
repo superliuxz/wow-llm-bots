@@ -25,6 +25,9 @@ import pathlib
 import random
 import sys
 
+# "combat" (entering combat when the plan expected no fight) never fires here yet: without the
+# bot's own target in the snapshot (ext.target) a fight it starts can't be told from one that
+# starts on it, so every fight is counted as expected. It is listed for the harness's urgency.
 COMBAT_REASONS = {"died", "combat", "new_attacker", "control", "hostile_player"}
 
 
@@ -75,8 +78,10 @@ def simulate(bot, frames, plan_s, watch_players, rng):
         if not in_combat:
             expected = set()
         if why is None and watch_players:
-            new_players = hostile_players(snap) - seen_players
-            seen_players |= new_players
+            near = hostile_players(snap)
+            new_players = near - seen_players
+            # One who left is forgotten, so coming back is noticed again.
+            seen_players = near
             if new_players:
                 why = "hostile_player"
         if why is None and t >= plan_ends:
@@ -90,9 +95,10 @@ def simulate(bot, frames, plan_s, watch_players, rng):
 
 
 def main():
-    root = pathlib.Path(sys.argv[1])
-    plan_s = float(sys.argv[2]) if len(sys.argv) > 2 else 60
     watch_players = "--watch-players" in sys.argv
+    args = [a for a in sys.argv[1:] if a != "--watch-players"]
+    root = pathlib.Path(args[0])
+    plan_s = float(args[1]) if len(args) > 1 else 60
     rng = random.Random(1)
     all_wakes, duration = [], 0
     for bot_dir in sorted(p for p in root.iterdir() if p.is_dir()):

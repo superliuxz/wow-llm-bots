@@ -168,6 +168,22 @@ std::vector<uint64_t> LosCache::PickChecks(std::vector<Candidate> candidates,
   return picked;
 }
 
+void LosCache::SetViewer(uint32_t map_id,
+                         float x,
+                         float y,
+                         float z,
+                         float moved_yd) {
+  if (viewer_) {
+    const float dx = x - viewer_->x, dy = y - viewer_->y, dz = z - viewer_->z;
+    if (viewer_->map_id == map_id &&
+        dx * dx + dy * dy + dz * dz <= moved_yd * moved_yd) {
+      return;  // Still about where the results were taken.
+    }
+    entries_.clear();
+  }
+  viewer_ = Viewer{map_id, x, y, z};
+}
+
 void LosCache::Prune(base::TimeTicks now, base::TimeDelta max_age) {
   std::erase_if(entries_, [&](const auto& entry) {
     return now - entry.second.checked > max_age;

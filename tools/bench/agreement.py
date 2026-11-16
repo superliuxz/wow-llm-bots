@@ -24,6 +24,11 @@ from prompt_render import render_tight  # noqa: E402
 
 
 def collect(snap_dir, wakes_file, out_file, limit):
+    # Greedy, as the docstring says (brain_load reads TEMP for every call).
+    os.environ["TEMP"] = "0"
+    # The option kinds below come from the numbered screen: only valid with it.
+    if os.environ.get("MODE") != "menu" or not os.environ.get("MERGED"):
+        sys.exit("agreement.py collect needs MODE=menu MERGED=1 (the numbered screen)")
     wakes, seen = [], set()
     for line in open(wakes_file):
         w = json.loads(line)

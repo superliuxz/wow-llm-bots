@@ -11,6 +11,12 @@ and applies defaults taken from the game client (what the client itself alerts a
 
 ## The plan (the brain's answer)
 
+**Built today vs. designed.** The harness's plan (`harness/src/plan.cc`, `content/RULES.md`)
+has `goal`, `do` (option numbers, with counts), `expect`, `watch` (only `hp<N`, `mana<N`, both
+percent of maximum, `enemy_player<YARDS`, `attacked`, `whisper`), `look` and `say`. The fields
+`until`, `ignore` and `react` and the path-based watches below are the full design, not built
+yet; standing orders (below) are proposed.
+
 | Field | What it is |
 |---|---|
 | `goal` | what the bot is working towards, in its own words ("10 scorpid tails, then turn in") |
@@ -56,8 +62,8 @@ snapshot and the checker validates them.
 | Watch | Fires when | Example |
 |---|---|---|
 | `event {kind, filter}` | an event of that kind arrives (matching the filter) | a whisper; chat that mentions my name; a raid warning |
-| `changed {path}` | the field changes | `self.in_combat`; `self.control`; `party.members` |
-| `crossed {path, below/above, value}` | a number crosses the line | `self.health` below 40%; `target.health_pct` below 20%; power below 30% |
+| `changed {path}` | the field changes | `base.self.in_combat`; `base.self.control`; `ext.party.members` |
+| `crossed {path, below/above, value}` | a number crosses the line | `base.self.unit.health_pct` below 40; `ext.target.target.health_pct` below 20; `base.self.unit.power_pct` below 30 |
 | `appears {list, filter}` / `gone {list, filter}` | an entry matching the filter enters or leaves a list | a hostile player in `nearby.units` within 40 yd; a new entry in `combat.attackers`; an aura on me (`self.unit.auras`); a friend online |
 | `elapsed {s}` | time passes | |
 
@@ -283,9 +289,9 @@ attention**. The list is derived from the client's own UI code (`client_alert` i
 |---|---|
 | every **prompt** | a popup waits for an answer (and often has a timer) |
 | events the client alerts on: whisper (sound), raid warning (raid notice + sound), Dungeon Finder proposal (sound), achievement (alert frame), died (popup), resurrect offer (popup + sound), ... | the event's `client_alert` has a sound, popup, flash, raid notice, alert frame or error line |
-| **entered combat** (`self.in_combat` changed to true) when the plan `expect`s no fight | the red screen-edge flash (`PLAYER_REGEN_DISABLED`) |
+| **entered combat** (`base.self.in_combat` changed to true) when the plan `expect`s no fight | the red screen-edge flash (`PLAYER_REGEN_DISABLED`) |
 | a new entry in `combat.attackers` that the plan doesn't `expect` | combat feedback on my portrait (`UNIT_COMBAT`): how a player notices being hit; the 3.3.5a UI plays no aggro sound |
-| **lost control** (`self.control` changed: stunned, feared, charmed, possessed) | the action bars stop responding and the camera or character moves on its own |
+| **lost control** (`base.self.control` changed: stunned, feared, charmed, possessed) | the action bars stop responding and the camera or character moves on its own |
 | **displaced** (knocked back, pulled, teleported) | the screen jumps (no client event: from the movement opcodes) |
 | plan **done** or **failed** | the player would stop and decide what's next |
 
@@ -318,7 +324,7 @@ Gornek (`expect`: Scorpid Workers).
 3. The brain sees the rogue, its level, its health, the bot's health and what's nearby, and
    answers with a new plan: fight, flee to the guards, or ignore it and die. The new plan
    `expect`s the rogue, so its hits don't wake the brain again; it might watch
-   `crossed {self.health, below, 30%}` to reconsider.
+   `crossed {base.self.unit.health_pct, below, 30}` to reconsider.
 
 ## Tests
 

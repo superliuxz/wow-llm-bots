@@ -39,7 +39,8 @@ socket and two lock-protected queues. Nothing in the module ever waits on the ha
 1. Module skeleton (CMake, script loader), linked into worldserver via `tools/setup.sh` symlink.
    Config file `mod-llm-brain.conf`: enabled, socket path, bot names to attach to, tick interval.
 2. IO thread + Unix socket server (epoll IO thread on `common/net`, done in A2); outbound/inbound
-   queues; drop-oldest when the harness is gone (no unbounded growth).
+   queues; outbound messages are dropped while no harness is connected, and a bot's snapshots
+   are latest-wins while it is behind (no unbounded growth; was "drop-oldest" in this plan).
 3. Snapshot v0 (world thread, per attached bot, streamed every 1 s; LLM is not called per snapshot):
    identity (name, race, class, level, gold), HP/mana, zone/subzone, position, current RPG
    activity, quest log summary, nearby units (name, level, hostile/friendly, quest giver),
@@ -71,7 +72,8 @@ socket and two lock-protected queues. Nothing in the module ever waits on the ha
    request replacement per bot.
 7. Logging: `var/bots/<name>/events/<date>.jsonl` (snapshot, prompt hash, reply, choice,
    latency), atomic writes.
-8. CLI: `harness run` (live) and `harness decide <snapshot.json>` (offline, for evals).
+8. CLI: `harness run` (live) and `harness decide <snapshot.pb>` (offline, for evals; a binary
+   snapshot, as on the wire).
 
 ### C. Content and memory
 1. `content/RULES.md` v0 (framing, action space, behavior rules, chat style, output format).
@@ -108,8 +110,9 @@ receivers), `base/memory/` (WeakPtr, RefCountedThreadSafe/scoped_refptr), `base/
 (MessagePumpDefault, MessagePumpEpoll = MessagePumpForIO with WatchFileDescriptor),
 `base/synchronization/` (Lock/AutoLock with thread-safety annotations, ConditionVariable,
 WaitableEvent), `base/time/` (TimeDelta, TimeTicks on CLOCK_MONOTONIC), `base/compiler_specific.h`
-(MSAN_UNPOISON), `base/thread_annotations.h`. `net/`: LineFramer, LineConnection,
-UnixSocketServer, UnixSocketClient. No third-party runtime deps (libevent dropped). Plain C++20.
+(MSAN_UNPOISON), `base/thread_annotations.h`. `net/`: FrameCodec (length-prefixed
+frames), FramedConnection, UnixSocketServer, UnixSocketClient (the line-based LineFramer and
+LineConnection were replaced by frames for protobuf). No third-party runtime deps (libevent dropped). Plain C++20.
 28 tests; `tools/check-cpp.sh` = format + include-what-you-use + default/ASan+UBSan/TSan/MSan
 (MSan against instrumented libc++); `-Werror=thread-safety`; hardened std lib in `out/common`,
 not in `out/common-server` (linked into AzerothCore).

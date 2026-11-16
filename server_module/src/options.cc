@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/time/time.h"
 #include "proto/snapshot.pb.h"
 
 namespace llm_brain {
@@ -86,20 +87,22 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot) {
   }
   targets.push_back({OptionTarget::Kind::kKeep, "", ""});
   for (const OptionTarget& target : targets) {
-    snapshot->add_options()->set_text(OptionText(target));
+    pb::Option* option = snapshot->add_options();
+    option->set_text(OptionText(target));
+    option->set_guid(target.guid);
   }
   return targets;
 }
 
-OptionHistory::OptionHistory(size_t capacity) : capacity_(capacity) {}
+OptionHistory::OptionHistory(base::TimeDelta window) : window_(window) {}
 
 OptionHistory::~OptionHistory() = default;
 
 void OptionHistory::Add(uint32_t seq,
-                        int64_t time_ms,
+                        base::TimeTicks built,
                         std::vector<OptionTarget> options) {
-  entries_.push_back({seq, time_ms, std::move(options)});
-  while (entries_.size() > capacity_) {
+  entries_.push_back({seq, built, std::move(options)});
+  while (entries_.front().built < built - window_) {
     entries_.pop_front();
   }
 }
@@ -116,7 +119,7 @@ OptionHistory::Lookup OptionHistory::Find(uint32_t seq, uint32_t option) const {
       return result;
     }
     result.target = &entry.options[option - 1];
-    result.snapshot_time_ms = entry.time_ms;
+    result.snapshot_built = entry.built;
     return result;
   }
   result.error = "snapshot " + std::to_string(seq) + " is too old or unknown";

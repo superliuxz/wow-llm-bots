@@ -48,5 +48,17 @@ TEST(LatestWinsTest, TakingEmptiesIt) {
   EXPECT_FALSE(queue.Put("a", "2", kT0));
 }
 
+TEST(LatestWinsTest, TakeOldestTakesOneAndLeavesTheRestReplaceable) {
+  LatestWins queue;
+  queue.Put("a", "a1", kT0);
+  queue.Put("b", "b1", kT0);
+  EXPECT_EQ(queue.TakeOldest().message, "a1");
+  EXPECT_EQ(queue.size(), 1u);
+  // "b" is still waiting, so a newer one still replaces it.
+  EXPECT_TRUE(queue.Put("b", "b2", kT0));
+  EXPECT_EQ(queue.TakeOldest().message, "b2");
+  EXPECT_TRUE(queue.empty());
+}
+
 }  // namespace
 }  // namespace llm_brain

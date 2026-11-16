@@ -81,6 +81,12 @@ class LosCache {
   // Forgets results older than `max_age` (objects that left view).
   void Prune(base::TimeTicks now, base::TimeDelta max_age);
 
+  // Where the bot (the viewer) is now. A result is only valid from where it
+  // was taken: once the bot has moved more than `moved_yd` since the results
+  // were taken (walked round a pillar) or changed map (a teleport), they are
+  // all forgotten and re-checked.
+  void SetViewer(uint32_t map_id, float x, float y, float z, float moved_yd);
+
   size_t size() const { return entries_.size(); }
 
  private:
@@ -91,6 +97,12 @@ class LosCache {
   };
 
   bool IsFresh(const Entry& entry, base::TimeTicks now) const;
+
+  struct Viewer {
+    uint32_t map_id = 0;
+    float x = 0, y = 0, z = 0;
+  };
+  std::optional<Viewer> viewer_;
 
   const float near_yd_;
   const base::TimeDelta near_ttl_;

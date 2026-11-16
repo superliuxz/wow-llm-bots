@@ -10,15 +10,24 @@
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
+for db in out/common/compile_commands.json out/server/compile_commands.json; do
+  [ -f "$db" ] || { echo "missing $db: build first (tools/build-common.sh, tools/build-server.sh)"; exit 1; }
+done
 MODE=--print=changes
 [ "${1:-}" = "--fix" ] && MODE=--edit
 IGNORE='bits/.*,asm-generic/.*,asm/.*,linux/.*'
-FLAGS=(-xc++-header -std=c++20 -Icommon -Ithird_party/googletest/googletest/include)
+FLAGS=(-xc++-header -std=c++20 -Icommon -Ithird_party/googletest/googletest/include
+       -Ithird_party/protobuf/src -Ithird_party/abseil-cpp)
 status=0
 check() {  # check <file> [clang-include-cleaner args...]
   local f=$1; shift
   local out
-  out=$(clang-include-cleaner "$MODE" --ignore-headers="$IGNORE" "$f" "$@" 2>/dev/null)
+  local err; err=$(mktemp)
+  # A file the tool can't parse is a failure, not a pass: keep its exit code and errors.
+  if ! out=$(clang-include-cleaner "$MODE" --ignore-headers="$IGNORE" "$f" "$@" 2>"$err"); then
+    echo "== $f: clang-include-cleaner failed"; grep -E "error" "$err" | head -5; status=1
+  fi
+  rm -f "$err"
   if [ -n "$out" ] && [ "$MODE" = --print=changes ]; then
     echo "== $f"; echo "$out"; status=1
   fi
@@ -30,8 +39,10 @@ for f in common/**/*.cc; do check "$f" -p out/common; done
 for f in harness/**/*.h; do check "$f" -- "${FLAGS[@]}" -Iharness/src -Iout/common/gen; done
 for f in harness/**/*.cc; do check "$f" -p out/common; done
 # Our AzerothCore module: sources use the server build's compile commands;
-# its headers only include std and common/ headers.
-for f in server_module/**/*.h; do check "$f" -- "${FLAGS[@]}"; done
+# its headers include std, common/, each other and the generated proto.
+for f in server_module/**/*.h; do
+  check "$f" -- "${FLAGS[@]}" -Iserver_module/src -Iout/common/gen
+done
 for f in server_module/**/*.cc; do
   case "$f" in
     *_unittest.cc) check "$f" -p out/common ;;

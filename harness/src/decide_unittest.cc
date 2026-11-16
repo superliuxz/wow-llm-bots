@@ -111,8 +111,9 @@ TEST(DecideTest, ShowsTheScreenTheReplyAndWhatThePlanMeans) {
   EXPECT_NE(seen.system.find("Test rules"), std::string::npos);
   EXPECT_NE(seen.system.find("You are Tess."), std::string::npos);
   EXPECT_NE(seen.user.find("Woken: plan done."), std::string::npos);
-  EXPECT_NE(seen.grammar.find("\"9\""), std::string::npos);
-  EXPECT_EQ(seen.grammar.find("\"10\""), std::string::npos);
+  EXPECT_NE(seen.grammar.find("opt ::= \"1\" | \"2\" | \"3\" | \"4\" | "
+                              "\"5\" | \"6\" | \"7\" | \"8\" | \"9\"\n"),
+            std::string::npos);
 }
 
 TEST(DecideTest, TheBotNameDefaultsToTheSnapshots) {

@@ -2,7 +2,6 @@
 
 #include "config_parsing.h"
 
-#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -37,14 +36,16 @@ TEST(ConfigParsingTest, ParseFixturesSkipsMalformedEntries) {
             (Fixtures{{"Ok", "ok.pdump"}}));
 }
 
-TEST(ConfigParsingTest, ResetCheckPrefersAnAddedStrategy) {
-  EXPECT_EQ(ResetCheckFor("-follow,+grind,+new rpg"),
-            (StrategyCheck{"grind", /*present=*/true}));
-  EXPECT_EQ(ResetCheckFor("-grind, -new rpg, -follow"),
-            (StrategyCheck{"grind", /*present=*/false}));
-  EXPECT_EQ(ResetCheckFor("+stay"), (StrategyCheck{"stay", true}));
-  EXPECT_EQ(ResetCheckFor(""), std::nullopt);
-  EXPECT_EQ(ResetCheckFor("grind, +"), std::nullopt);
+TEST(ConfigParsingTest, StrategyChecksCoverEveryChange) {
+  using Checks = std::vector<StrategyCheck>;
+  EXPECT_EQ(StrategyChecks("-follow,+grind,+new rpg"),
+            (Checks{{"follow", false}, {"grind", true}, {"new rpg", true}}));
+  // Turning grinding off: "grind absent" is checked too, not only "follow".
+  EXPECT_EQ(StrategyChecks("-grind, -new rpg, -follow"),
+            (Checks{{"grind", false}, {"new rpg", false}, {"follow", false}}));
+  EXPECT_EQ(StrategyChecks("+stay,-stay"), (Checks{{"stay", false}}));
+  EXPECT_EQ(StrategyChecks(""), Checks{});
+  EXPECT_EQ(StrategyChecks("grind, +"), Checks{});
 }
 
 }  // namespace

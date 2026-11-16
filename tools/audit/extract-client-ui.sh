@@ -10,7 +10,7 @@ CLIENT=${WOW_CLIENT:-$(dirname "$ROOT")/WoW-3.3.5a}
 OUT=$ROOT/out/client-ui
 LIBMPQ=$ROOT/third_party/azerothcore-wotlk/deps/libmpq
 mkdir -p "$OUT"
-clang -O1 -w -I"$LIBMPQ/libmpq" -I"$LIBMPQ" -I"$ROOT/out/server/deps/libmpq" \
+clang -O1 -Wall -Wno-pointer-sign -I"$LIBMPQ/libmpq" -I"$LIBMPQ" -I"$ROOT/out/server/deps/libmpq" \
   "$ROOT/tools/audit/mpq_extract.c" "$ROOT/out/server/deps/libmpq/libmpq.a" -lz -lbz2 \
   -o "$OUT/mpq_extract"
 rm -rf "$OUT/Interface"

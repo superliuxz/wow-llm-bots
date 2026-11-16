@@ -35,7 +35,9 @@ class SnapshotSchedule {
 
   // `bot_count` bots, numbered 0..bot_count-1 (their order in the config). A
   // `combat_interval` that is zero or not shorter than `interval` means no
-  // faster cadence in combat.
+  // faster cadence in combat. Intervals shorter than kMinInterval are raised
+  // to it (zero would build a snapshot every world tick).
+  static constexpr base::TimeDelta kMinInterval = base::Milliseconds(100);
   SnapshotSchedule(size_t bot_count,
                    base::TimeDelta interval,
                    base::TimeDelta combat_interval,
@@ -47,6 +49,11 @@ class SnapshotSchedule {
 
   // A snapshot of `bot` was sent. Plans the next one.
   void Sent(size_t bot, base::TimeTicks now, Flags flags);
+
+  // Spreads the bots over the interval again from `now`. For a harness that
+  // connects after startup: every bot is overdue by then, and without this
+  // they would all be built on its first tick.
+  void Restart(base::TimeTicks now);
 
   // When `bot`'s next regular snapshot is due.
   base::TimeTicks next_due(size_t bot) const { return slots_[bot].next_due; }

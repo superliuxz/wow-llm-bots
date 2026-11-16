@@ -24,6 +24,18 @@ TEST(TimeTicksTest, IsMonotonicAndSupportsArithmetic) {
   EXPECT_FALSE(a.is_null());
 }
 
+TEST(TimeTicksTest, ArithmeticSaturatesInsteadOfOverflowing) {
+  const TimeTicks now = TimeTicks::Now();
+  // "Wait forever" is Now() + Max(): the far future, not a wrapped past.
+  EXPECT_GT(now + TimeDelta::Max(), now);
+  EXPECT_EQ(
+      (now + TimeDelta::Max()) - now,
+      TimeDelta::Max() - Microseconds((now - TimeTicks()).InMicroseconds()));
+  EXPECT_EQ(TimeDelta::Max() + Seconds(1), TimeDelta::Max());
+  EXPECT_EQ(TimeDelta::Max() * 2, TimeDelta::Max());
+  EXPECT_TRUE((TimeDelta() - TimeDelta::Max() - Seconds(5)).is_negative());
+}
+
 TEST(TimeTest, NowIsWallClockTime) {
   // 2026-01-01T00:00:00Z: any real "now" is later.
   const Time earliest = Time::FromMillisecondsSinceUnixEpoch(1767225600000);

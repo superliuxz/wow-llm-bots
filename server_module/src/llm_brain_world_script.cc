@@ -38,10 +38,10 @@ namespace {
 constexpr size_t kMaxPendingMessages = 1000;
 // How often the snapshot cost summary is logged.
 constexpr uint32_t kStatsIntervalMs = 60000;
-// How many recent snapshots' options a bot remembers, so a choice made on a
-// snapshot that is no longer the newest can still be resolved (16 s at one
-// snapshot a second, 4 s in combat).
-constexpr size_t kOptionHistory = 16;
+// How long a bot remembers its snapshots' options, so a choice made on a
+// snapshot that is no longer the newest can still be resolved: well above an
+// urgent wake-up on a busy GPU (p95 3.8 s, docs/phase2-results.md).
+constexpr base::TimeDelta kOptionHistory = base::Seconds(30);
 
 // World-thread entry points for the brain bridge: every snapshot interval,
 // send each attached bot's snapshot to the harness.
@@ -52,7 +52,17 @@ class LlmBrainWorldScript : public WorldScript {
                     {WORLDHOOK_ON_AFTER_CONFIG_LOAD, WORLDHOOK_ON_STARTUP,
                      WORLDHOOK_ON_UPDATE, WORLDHOOK_ON_SHUTDOWN}) {}
 
-  void OnAfterConfigLoad(bool /*reload*/) override { config_ = LoadConfig(); }
+  void OnAfterConfigLoad(bool reload) override {
+    if (reload) {
+      // The bot list sizes the schedule and the bot manager at startup, and
+      // the socket is already open: a running server keeps its settings.
+      LOG_WARN("module",
+               "mod-llm-brain: settings are read at startup only; restart "
+               "the server to apply changes");
+      return;
+    }
+    config_ = LoadConfig();
+  }
 
   void OnStartup() override {
     std::string bots;
@@ -97,10 +107,8 @@ class LlmBrainWorldScript : public WorldScript {
         BrainBridge::Callbacks{
             base::BindRepeating(&LlmBrainWorldScript::OnHarnessMessage,
                                 weak_factory_.GetWeakPtr()),
-            [](bool connected) {
-              LOG_INFO("module", "mod-llm-brain: harness {}",
-                       connected ? "connected" : "disconnected");
-            }});
+            base::BindRepeating(&LlmBrainWorldScript::OnHarnessConnection,
+                                weak_factory_.GetWeakPtr())});
     if (!bridge_->Start()) {
       LOG_ERROR("module", "mod-llm-brain: cannot listen on {}",
                 config_.socket_path);
@@ -216,6 +224,16 @@ class LlmBrainWorldScript : public WorldScript {
     }
   }
 
+  void OnHarnessConnection(bool connected) {
+    LOG_INFO("module", "mod-llm-brain: harness {}",
+             connected ? "connected" : "disconnected");
+    if (connected) {
+      // Every bot is overdue by now: spread them again instead of building
+      // them all on the next tick.
+      schedule_->Restart(base::TimeTicks::Now());
+    }
+  }
+
   // A command from the harness (docs/specs/snapshot.md §9). So far: Choose.
   void OnHarnessMessage(std::string bytes) {
     wlb::snapshot::Command command;
@@ -246,9 +264,9 @@ class LlmBrainWorldScript : public WorldScript {
     // How old the picture was when the bot acted on it: the number that
     // matters (docs/plans/harness.md, "Age").
     const int64_t age_ms =
-        found.target ? base::Time::Now().InMillisecondsSinceUnixEpoch() -
-                           found.snapshot_time_ms
-                     : -1;
+        found.target
+            ? (base::TimeTicks::Now() - found.snapshot_built).InMilliseconds()
+            : -1;
     if (found.target) {
       apply_ages_.push_back(base::Milliseconds(age_ms));
     }
@@ -266,7 +284,12 @@ class LlmBrainWorldScript : public WorldScript {
       event->set_bot(name);
       event->set_seq(state->second.seq);
       event->set_time_ms(base::Time::Now().InMillisecondsSinceUnixEpoch());
-      event->mutable_event()->mutable_error()->set_text(error);
+      event->set_monotonic_us(
+          (base::TimeTicks::Now() - base::TimeTicks()).InMicroseconds());
+      wlb::snapshot::ErrorEvent* failed =
+          event->mutable_event()->mutable_error();
+      failed->set_text(error);
+      failed->set_command_id(command.command_id());
       bridge_->Send(message.SerializeAsString());
     }
   }
@@ -283,9 +306,9 @@ class LlmBrainWorldScript : public WorldScript {
     snapshot->set_seq(++state.seq);
     snapshot->set_time_ms(base::Time::Now().InMillisecondsSinceUnixEpoch());
     const base::TimeTicks start = base::TimeTicks::Now();
+    snapshot->set_monotonic_us((start - base::TimeTicks()).InMicroseconds());
     const NearbyBuilder::Stats nearby = state.builder->Build(bot, snapshot);
-    state.history.Add(snapshot->seq(), snapshot->time_ms(),
-                      AddOptions(snapshot));
+    state.history.Add(snapshot->seq(), start, AddOptions(snapshot));
     std::string bytes = message.SerializeAsString();
     stats_.Add({base::TimeTicks::Now() - start, bytes.size(), nearby.units,
                 nearby.objects, nearby.hidden, nearby.raycasts});

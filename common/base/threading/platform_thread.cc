@@ -3,15 +3,14 @@
 #include "base/threading/platform_thread.h"
 
 #include <pthread.h>
-#include <sys/syscall.h>
 #include <time.h>
-#include <unistd.h>
 
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
 #include "base/functional/callback.h"
+#include "base/threading/current_thread_id.h"
 #include "base/time/time.h"
 
 namespace base {
@@ -68,7 +67,7 @@ void PlatformThread::Sleep(TimeDelta duration) {
 
 // static
 int PlatformThread::CurrentId() {
-  return static_cast<int>(syscall(SYS_gettid));
+  return CurrentThreadId();
 }
 
 }  // namespace base

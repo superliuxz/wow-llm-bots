@@ -2,6 +2,7 @@
 
 #include "plan.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -125,16 +126,35 @@ std::optional<std::vector<T>> ParseList(std::string_view text,
   return items;
 }
 
-std::string Cut(std::string_view text, size_t max_chars) {
-  return std::string(Trim(text).substr(0, max_chars));
+// At most `max_bytes` of `text`, never splitting a UTF-8 character.
+std::string Cut(std::string_view text, size_t max_bytes) {
+  text = Trim(text);
+  if (text.size() <= max_bytes) {
+    return std::string(text);
+  }
+  size_t end = max_bytes;
+  // Back up over continuation bytes (10xxxxxx) to a character's first byte.
+  while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xC0) == 0x80) {
+    --end;
+  }
+  return std::string(Trim(text.substr(0, end)));
 }
 
 }  // namespace
 
 std::string PlanGrammar(int option_count) {
+  // A screen always has at least "Keep doing what I'm doing"; an empty
+  // alternative would be an invalid grammar (llama-server rejects it).
+  option_count = std::max(option_count, 1);
   std::vector<std::string> options;
   for (int i = 1; i <= option_count; ++i) {
     options.push_back(absl::StrCat("\"", i, "\""));
+  }
+  // Every count 2..kMaxRepeat spelled out, so the grammar follows kMaxRepeat
+  // whatever its value.
+  std::vector<std::string> counts;
+  for (int n = 2; n <= kMaxRepeat; ++n) {
+    counts.push_back(absl::StrCat("\"", n, "\""));
   }
   return absl::StrCat(
       "root ::= \"goal: \" goal \"\\ndo: \" steps \"\\nexpect: \" "
@@ -149,9 +169,9 @@ std::string PlanGrammar(int option_count) {
       kMaxSteps - 1,
       "}\n"
       "step ::= opt (\"x\" cnt)?\n"
-      "cnt ::= [2-9] | [1-",
-      kMaxRepeat / 10,
-      "] [0-9]\n"
+      "cnt ::= ",
+      absl::StrJoin(counts, " | "),
+      "\n"
       "opt ::= ",
       absl::StrJoin(options, " | "),
       "\n"
@@ -176,11 +196,14 @@ std::optional<Plan> ParsePlan(std::string_view text, int option_count) {
       continue;
     }
     const std::string key = absl::AsciiStrToLower(Trim(line.substr(0, colon)));
-    const std::string value = StripBrackets(Trim(line.substr(colon + 1)));
+    // Free text is kept as written; brackets are only stripped from the
+    // numbers a model sometimes wraps in them.
+    const std::string_view raw = Trim(line.substr(colon + 1));
+    const std::string value = StripBrackets(raw);
     if (key == "goal") {
-      plan.goal = Cut(value, kMaxGoalChars);
+      plan.goal = Cut(raw, kMaxGoalChars);
     } else if (key == "say") {
-      plan.say = Cut(value, kMaxSayChars);
+      plan.say = Cut(raw, kMaxSayChars);
     } else if (key == "do") {
       auto steps = ParseList<PlanStep>(
           value, kMaxSteps,
@@ -214,17 +237,29 @@ std::optional<Plan> ParsePlan(std::string_view text, int option_count) {
       }
       plan.watches = std::move(*watches);
     } else if (key == "look") {
-      // "60", or "60 seconds".
+      // "60", "60s", "60 seconds", or "2m" / "2 min" / "2 minutes".
       size_t digits = 0;
       while (digits < value.size() && absl::ascii_isdigit(value[digits])) {
         ++digits;
       }
-      const std::optional<int> look = ParseInt(
+      const std::string unit =
+          absl::AsciiStrToLower(Trim(std::string_view(value).substr(digits)));
+      int scale = 0;
+      if (unit.empty() || unit == "s" || unit == "sec" || unit == "secs" ||
+          unit == "second" || unit == "seconds") {
+        scale = 1;
+      } else if (unit == "m" || unit == "min" || unit == "mins" ||
+                 unit == "minute" || unit == "minutes") {
+        scale = 60;
+      } else {
+        return std::nullopt;  // Something else: not a time we understand.
+      }
+      const std::optional<int> count = ParseInt(
           std::string_view(value).substr(0, digits), 1, kMaxLookSeconds);
-      if (!look) {
+      if (!count || *count * scale > kMaxLookSeconds) {
         return std::nullopt;
       }
-      plan.look_s = *look;
+      plan.look_s = *count * scale;
       have_look = true;
     }
   }

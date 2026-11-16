@@ -62,7 +62,15 @@ bool Thread::StartWithOptions(const Options& options) {
         pump->Run(delegate);
         g_current_io_thread = nullptr;
       });
-  return IsRunning();
+  if (!IsRunning()) {
+    // No thread: unhook the pump from the queue before destroying it, so a
+    // later PostTask can't wake a pump that is gone.
+    queue_->SetWakeupCallback({});
+    delegate_.reset();
+    pump_.reset();
+    return false;
+  }
+  return true;
 }
 
 void Thread::Stop() {

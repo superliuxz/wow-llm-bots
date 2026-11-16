@@ -3,7 +3,6 @@
 #ifndef MOD_LLM_BRAIN_CONFIG_PARSING_H_
 #define MOD_LLM_BRAIN_CONFIG_PARSING_H_
 
-#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -20,16 +19,16 @@ std::vector<std::pair<std::string, std::string>> ParseFixtures(
     const std::string& csv,
     const std::string& dir);
 
-// How to tell whether playerbots has reset a bot's strategies since we applied
-// `changes` ("-follow,+grind,+new rpg"): the first strategy we add must be
-// present, or else the first one we remove must be absent. nullopt if
-// `changes` names no strategy.
+// What must hold while the strategy changes `changes` ("-follow,+grind,+new
+// rpg") are in effect: every strategy added present, every one removed absent
+// (the last change to a name wins). If any no longer holds, playerbots has
+// reset the strategies since we applied them.
 struct StrategyCheck {
   std::string name;
   bool present = true;
   bool operator==(const StrategyCheck&) const = default;
 };
-std::optional<StrategyCheck> ResetCheckFor(const std::string& changes);
+std::vector<StrategyCheck> StrategyChecks(const std::string& changes);
 
 }  // namespace llm_brain
 

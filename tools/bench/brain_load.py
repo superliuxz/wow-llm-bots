@@ -172,15 +172,18 @@ def load(snap_dir, wakes_file, n_bots, seconds, rng):
     bots = sorted(p.name for p in pathlib.Path(snap_dir).iterdir() if p.is_dir())
     duration = max((w["t"] for w in wakes), default=1) or 1
     out = []
+    # A run longer than the capture replays it again (the same timeline, one capture later).
+    passes = int(seconds // duration) + 1
     for copy in range(n_bots):
         source = bots[copy % len(bots)]
         offset = 0 if copy < len(bots) else rng.uniform(0, duration)
         for w in wakes:
             if w["bot"] != source:
                 continue
-            t = (w["t"] + offset) % duration
-            if t < seconds:
-                out.append({**w, "t": t, "copy": copy, "source": source})
+            for k in range(passes):
+                t = (w["t"] + offset) % duration + k * duration
+                if t < seconds:
+                    out.append({**w, "t": t, "copy": copy, "source": source})
     rate = float(os.environ.get("SURPRISES", 0)) / 60
     if rate:
         for copy in range(n_bots):
@@ -408,7 +411,7 @@ def main():
                 plan, usage, timings = call({**wake, "worker": number}, snap_dir, slots)
                 ok = plan.get("_valid", "do" in plan)
             except Exception as e:  # Report, don't stop the replay.
-                plan, usage, timings, ok = str(e), {}, {}, False
+                plan, usage, timings, ok = str(e), None, {}, False
             done = time.perf_counter()
             with lock:
                 busy[0] -= 1
@@ -416,9 +419,12 @@ def main():
                     busy_total[0] += done - busy_since[0]
                 results.append({**wake, "wait": start - t0 - wake["t"], "think": done - start,
                                 "latency": done - t0 - wake["t"], "ok": ok, "plan": plan,
-                                "prompt_tokens": usage.get("prompt_tokens"),
+                                # A call that failed (HTTP error, timeout) has no answer:
+                                # it is left out of the latency and token figures.
+                                "failed": usage is None,
+                                "prompt_tokens": (usage or {}).get("prompt_tokens"),
                                 "read_tokens": timings.get("prompt_n"),
-                                "reply_tokens": usage.get("completion_tokens")})
+                                "reply_tokens": (usage or {}).get("completion_tokens")})
 
     threads = [threading.Thread(target=worker, args=(n,)) for n in range(workers)]
     for t in threads:
@@ -460,7 +466,9 @@ def main():
     for t in threads:
         t.join()
     wall = time.perf_counter() - t0
-    lat = sorted(r["latency"] for r in results)
+    failed = [r for r in results if r["failed"]]
+    results = [r for r in results if not r["failed"]] or results
+    lat = sorted(r["latency"] for r in results if not r["failed"])
     look = [r["plan"].get("look_again_s") for r in results
             if r["ok"] and isinstance(r["plan"].get("look_again_s"), (int, float))]
     est = [r["plan"]["_est_s"] for r in results
@@ -472,12 +480,15 @@ def main():
           f"({len(results) / n_bots / seconds * 60:.2f} per bot per min): "
           f"wake->plan p50 {pct(lat, 0.5):.1f}s p95 {pct(lat, 0.95):.1f}s max {lat[-1] if lat else 0:.1f}s | "
           f"think p50 {statistics.median(r['think'] for r in results):.1f}s | "
-          f"GPU busy {busy_total[0] / wall:.0%} | prompt "
+          # The share of the run with at least one call in flight: a stand-in for GPU load
+          # (it doesn't see how many calls run at once or what the GPU itself does).
+          f"busy (a call in flight) {busy_total[0] / wall:.0%} | prompt "
           f"{statistics.mean(r['prompt_tokens'] or 0 for r in results):.0f} tok "
           f"(read again {statistics.mean(r['read_tokens'] or 0 for r in results):.0f}), plan "
           f"{statistics.mean(r['reply_tokens'] or 0 for r in results):.0f} tok | valid "
           f"{sum(r['ok'] for r in results)}/{len(results)} | brain's look_again_s median "
-          f"{statistics.median(look) if look else '-'}")
+          f"{statistics.median(look) if look else '-'}"
+          + (f" | {len(failed)} calls FAILED (left out)" if failed else ""))
     urgent = sorted(r["latency"] for r in results if r["why"] in URGENT)
     if os.environ.get("SURPRISES") and urgent:
         print(f"  urgent wakes ({len(urgent)}, {len(urgent) / n_bots / seconds * 60:.1f} per bot per min): "

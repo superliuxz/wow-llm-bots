@@ -18,7 +18,7 @@ import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 DBC = ROOT / "out" / "server" / "data" / "dbc"
-OUT = ROOT / "server_module" / "mod-llm-brain" / "src" / "invisible_displays.h"
+OUT = ROOT / "server_module" / "src" / "invisible_displays.h"
 INVISIBLE_MODELS = ("invisiblestalker", "invisibleman")
 
 

@@ -48,8 +48,7 @@ std::string SoloHealerCombatExtras(Player* player) {
 }  // namespace
 
 BotManager::BotManager(std::vector<std::string> names, Strategies strategies)
-    : strategies_(std::move(strategies)),
-      reset_check_(ResetCheckFor(strategies_.non_combat)) {
+    : strategies_(std::move(strategies)) {
   for (std::string& name : names) {
     bots_.push_back(Bot{std::move(name)});
   }
@@ -82,8 +81,12 @@ void BotManager::Tick() {
     }
     const ObjectGuid guid(bot.guid);
     Player* player = ObjectAccessor::FindConnectedPlayer(guid);
-    if (player && player->IsInWorld()) {
-      EnsureStrategies(player);
+    if (player) {
+      // Connected. Between maps (a teleport, an instance) it is briefly out
+      // of the world: wait, never log it in a second time.
+      if (player->IsInWorld()) {
+        EnsureStrategies(player);
+      }
       continue;
     }
     if (now_ms_ >= bot.next_login_ms) {
@@ -101,15 +104,24 @@ void BotManager::EnsureStrategies(Player* player) {
   if (!ai || player->InBattleground()) {
     return;  // Not set up yet, or playerbots' battleground strategies apply.
   }
-  // Still as we left it: playerbots hasn't reset the strategies since.
-  if (!reset_check_ ||
-      ai->HasStrategy(reset_check_->name, BOT_STATE_NON_COMBAT) ==
-          reset_check_->present) {
-    return;
-  }
   std::string combat = strategies_.combat;
   if (!player->GetGroup()) {
     combat += SoloHealerCombatExtras(player);
+  }
+  // Still as we left it in every state: playerbots hasn't reset any of them
+  // since (it resets combat alone too, e.g. SelectiveResetStrategies).
+  const auto holds = [&](const std::string& changes, BotState state) {
+    for (const StrategyCheck& check : StrategyChecks(changes)) {
+      if (ai->HasStrategy(check.name, state) != check.present) {
+        return false;
+      }
+    }
+    return true;
+  };
+  if (holds(combat, BOT_STATE_COMBAT) &&
+      holds(strategies_.non_combat, BOT_STATE_NON_COMBAT) &&
+      holds(strategies_.dead, BOT_STATE_DEAD)) {
+    return;
   }
   ai->ChangeStrategy(combat, BOT_STATE_COMBAT);
   ai->ChangeStrategy(strategies_.non_combat, BOT_STATE_NON_COMBAT);

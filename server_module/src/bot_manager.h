@@ -4,11 +4,8 @@
 #define MOD_LLM_BRAIN_BOT_MANAGER_H_
 
 #include <cstdint>
-#include <optional>
 #include <string>
 #include <vector>
-
-#include "config_parsing.h"
 
 class Player;
 
@@ -49,17 +46,15 @@ class BotManager {
   struct Bot {
     std::string name;
     uint64_t guid = 0;  // 0: unknown character name.
-    uint32_t next_login_ms = 0;
+    uint64_t next_login_ms = 0;
   };
 
   void Tick();
   void EnsureStrategies(Player* player);
 
   const Strategies strategies_;
-  // Tells whether playerbots reset the strategies since we applied them.
-  const std::optional<StrategyCheck> reset_check_;
   std::vector<Bot> bots_;
-  uint32_t now_ms_ = 0;
+  uint64_t now_ms_ = 0;
   uint32_t since_tick_ms_ = 0;
 };
 

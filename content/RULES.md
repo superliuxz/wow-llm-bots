@@ -12,6 +12,6 @@ Reply in exactly this form:
 goal: <what you're working towards, a few words>
 do: <option numbers, in order; add xN to repeat one N times, e.g. 3x4 does option 3 four times, one after another>
 expect: <option numbers of the mobs this plan fights, or none>
-watch: <none, or up to 4 of: hp<N, mana<N, enemy_player<YARDS, attacked, whisper>
+watch: <none, or up to 4 of: hp<N, mana<N (N is a percent of your maximum), enemy_player<YARDS, attacked, whisper>
 look: <a safety net only: you are woken at once if anything unexpected happens, so make it longer than your plan takes, usually 60 to 300 seconds>
 say: <optional: only if you want to say something in chat>

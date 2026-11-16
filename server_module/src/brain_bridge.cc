@@ -105,9 +105,13 @@ class BrainBridge::IoCore : public base::RawPtrTarget {
         on_message_, std::move(frame)));
   }
 
-  // The socket caught up: send what waited, the newest of each key.
+  // The socket caught up: send what waited, the newest of each key, one at a
+  // time while the socket takes it. Whatever it can't take yet stays here,
+  // where a newer snapshot can still replace it (once handed to the socket, it
+  // can't be).
   void OnDrained() {
-    for (LatestWins::Item& item : waiting_.TakeAll()) {
+    while (!waiting_.empty() && server_.pending_output_bytes() == 0) {
+      LatestWins::Item item = waiting_.TakeOldest();
       Send(item.message, item.queued);
     }
   }

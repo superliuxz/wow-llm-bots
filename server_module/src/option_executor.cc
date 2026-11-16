@@ -51,25 +51,42 @@ std::string ExecuteOption(Player* bot, const OptionTarget& target) {
     return target.name + " is gone";
   }
   AiObjectContext* context = ai->GetAiObjectContext();
+  // Playerbots returns null for a value name it doesn't know (a renamed one
+  // after an update): fail the choice, never dereference it.
+  auto* current_target = context->GetValue<Unit*>("current target");
+  auto* available_loot = context->GetValue<LootObjectStack*>("available loot");
+  auto* loot_target = context->GetValue<LootObject>("loot target");
+  if (!current_target || !available_loot || !available_loot->Get() ||
+      !loot_target) {
+    return "the body can't do that (playerbots values missing)";
+  }
   switch (target.kind) {
     case OptionTarget::Kind::kAttack:
       // Playerbots' attack action attacks the "current target" and runs its
       // own checks; the combat strategies take over from there.
-      context->GetValue<Unit*>("current target")->Set(unit);
-      if (!ai->DoSpecificAction("attack", Event(), /*silent=*/true)) {
-        return "can't attack " + target.name + " now";
+      {
+        Unit* old_target = current_target->Get();
+        current_target->Set(unit);
+        if (!ai->DoSpecificAction("attack", Event(), /*silent=*/true)) {
+          // Refused: leave the body's target as it was, so nothing acts on
+          // the refused one later.
+          current_target->Set(old_target);
+          return "can't attack " + target.name + " now";
+        }
       }
       return "";
     case OptionTarget::Kind::kLoot:
       if (!unit->isDead()) {
         return target.name + " isn't dead";
       }
+      // The snapshot that offered it may be seconds old: someone else may
+      // have looted it since.
+      if (!LootObject(bot, unit->GetGUID()).IsLootPossible(bot)) {
+        return "nothing to loot on " + target.name;
+      }
       // The loot strategy walks to the "loot target" and opens it.
-      context->GetValue<LootObjectStack*>("available loot")
-          ->Get()
-          ->Add(unit->GetGUID());
-      context->GetValue<LootObject>("loot target")
-          ->Set(LootObject(bot, unit->GetGUID()));
+      available_loot->Get()->Add(unit->GetGUID());
+      loot_target->Set(LootObject(bot, unit->GetGUID()));
       return "";
     case OptionTarget::Kind::kKeep:
       break;

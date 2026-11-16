@@ -51,9 +51,25 @@ and `docs/phase2-results.md` (what that costs). This plan is the build order.
    carried out with playerbots' own attack action and loot strategy; a failure comes back as an
    `error` event, and each choice logs `age_at_apply`. Tried live (`config/tests/choose`: one
    level-1 priest next to a boar, its body's own grinding off, `fake_harness.py --choose Attack
-   Loot`): it attacked, killed and looted the boar (age_at_apply 1-2 ms). Not yet: talk (playerbots
-   opens a gossip window only for a bot's master), gather, use, and the harness reading
-   `snapshot.options` instead of numbering the screen itself (H4).
+   Loot`): it attacked, killed and looted the boar (age_at_apply 1-2 ms: the fake harness answers at
+   once, so that is the plumbing only; the real number comes with H4). Each option carries the
+   `guid` of the thing it acts on; history is kept by time (30 s), not by count; a refused attack
+   leaves the body's target as it was; loot is re-checked when applied. Not yet: talk (playerbots
+   opens a gossip window only for a bot's master), gather, use, and "go to" (options exist only for
+   units with a name, within nameplate range, 20 yd: with grinding off, a bot can't choose anything
+   farther away until it can walk there).
+
+   **For H4, decided by this step:**
+   - **The harness numbers nothing itself.** The screen puts each `snapshot.options` number on
+     the line of the thing with that `guid` (the rest under "also:"), and until it does, the
+     harness sends no `Choose`: two numberings that disagree would hit the wrong target silently.
+   - **"ok" means accepted, not done.** A choice is done when the snapshots show it (the target
+     dead, the loot gone, out of combat), not when the module says ok. Proposed: the harness
+     infers it from later snapshots, with a timeout per kind; a module "step done / failed" event
+     only if inferring proves unreliable. (Open, decide before `plan_runner`.)
+   - **Repeats re-resolve.** A plan's `3x4` (attack four boars) is "the same kind and name": for
+     each repeat the runner finds that option again in the newest snapshot, never re-sends the
+     old (seq, option), whose unit is dead by then.
 6. **Integration:** Testpriest decides and acts, end to end. Done when the phase 2 list in
    `docs/plans/phase2.md` holds.
 

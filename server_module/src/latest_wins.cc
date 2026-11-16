@@ -24,6 +24,12 @@ bool LatestWins::Put(std::string key,
   return false;
 }
 
+LatestWins::Item LatestWins::TakeOldest() {
+  Item oldest = std::move(items_.front());
+  items_.erase(items_.begin());
+  return oldest;
+}
+
 std::vector<LatestWins::Item> LatestWins::TakeAll() {
   return std::exchange(items_, {});
 }

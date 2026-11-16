@@ -1,9 +1,9 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
 #include "config_parsing.h"
+#include <algorithm>
 
 #include <cstddef>
-#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -43,20 +43,23 @@ std::vector<std::pair<std::string, std::string>> ParseFixtures(
   return fixtures;
 }
 
-std::optional<StrategyCheck> ResetCheckFor(const std::string& changes) {
-  std::optional<StrategyCheck> removed;
+std::vector<StrategyCheck> StrategyChecks(const std::string& changes) {
+  std::vector<StrategyCheck> checks;
   for (const std::string& change : SplitList(changes)) {
-    if (change.size() < 2) {
+    if (change.size() < 2 || (change.front() != '+' && change.front() != '-')) {
       continue;
     }
-    if (change.front() == '+') {
-      return StrategyCheck{change.substr(1), /*present=*/true};
-    }
-    if (change.front() == '-' && !removed) {
-      removed = StrategyCheck{change.substr(1), /*present=*/false};
+    StrategyCheck check{change.substr(1), change.front() == '+'};
+    const auto same = std::find_if(
+        checks.begin(), checks.end(),
+        [&](const StrategyCheck& c) { return c.name == check.name; });
+    if (same != checks.end()) {
+      *same = std::move(check);  // The last change to a name wins.
+    } else {
+      checks.push_back(std::move(check));
     }
   }
-  return removed;
+  return checks;
 }
 
 }  // namespace llm_brain

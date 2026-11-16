@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "base/time/time.h"
 #include "gtest/gtest.h"
 #include "proto/snapshot.pb.h"
 
@@ -61,6 +62,9 @@ TEST(OptionsTest, OneAttackPerNameTargetingTheNearest) {
   EXPECT_EQ(targets[0].guid, "0x3");
   EXPECT_EQ(targets[0].name, "Scorpid Worker");
   EXPECT_EQ(targets[1].guid, "0x2");
+  // The screen puts each number on that unit's own line.
+  EXPECT_EQ(snapshot.options(0).guid(), "0x3");
+  EXPECT_EQ(snapshot.options(2).guid(), "");
 }
 
 TEST(OptionsTest, NeutralCanBeAttackedFriendlyCannot) {
@@ -99,37 +103,45 @@ TEST(OptionsTest, NothingForPlayersOrUnitsTooFarToName) {
             std::vector<std::string>{"Keep doing what I'm doing"});
 }
 
+base::TimeTicks AtMs(int64_t ms) {
+  return base::TimeTicks() + base::Milliseconds(ms);
+}
+
 TEST(OptionHistoryTest, FindsAnOptionOfARecentSnapshot) {
-  OptionHistory history(4);
-  history.Add(7, 1000,
+  OptionHistory history(base::Seconds(30));
+  history.Add(7, AtMs(1000),
               {{OptionTarget::Kind::kAttack, "0x1", "Boar"},
                {OptionTarget::Kind::kKeep, "", ""}});
-  history.Add(8, 2000, {{OptionTarget::Kind::kKeep, "", ""}});
+  history.Add(8, AtMs(2000), {{OptionTarget::Kind::kKeep, "", ""}});
   const OptionHistory::Lookup found = history.Find(7, 1);
   ASSERT_NE(found.target, nullptr);
   EXPECT_EQ(found.target->guid, "0x1");
-  EXPECT_EQ(found.snapshot_time_ms, 1000);
+  EXPECT_EQ(found.snapshot_built, AtMs(1000));
   EXPECT_TRUE(found.error.empty());
   EXPECT_EQ(history.Find(8, 1).target->kind, OptionTarget::Kind::kKeep);
 }
 
 TEST(OptionHistoryTest, OptionNumbersAreOneBased) {
-  OptionHistory history(4);
-  history.Add(1, 0, {{OptionTarget::Kind::kKeep, "", ""}});
+  OptionHistory history(base::Seconds(30));
+  history.Add(1, AtMs(0), {{OptionTarget::Kind::kKeep, "", ""}});
   EXPECT_EQ(history.Find(1, 0).target, nullptr);
   EXPECT_EQ(history.Find(1, 0).error, "no option 0 in snapshot 1");
   EXPECT_EQ(history.Find(1, 2).error, "no option 2 in snapshot 1");
 }
 
-TEST(OptionHistoryTest, ForgetsTheOldest) {
-  OptionHistory history(2);
-  for (uint32_t seq = 1; seq <= 3; ++seq) {
-    history.Add(seq, seq, {{OptionTarget::Kind::kKeep, "", ""}});
+TEST(OptionHistoryTest, KeepsAWindowOfTimeNotACount) {
+  OptionHistory history(base::Seconds(30));
+  // Combat: a snapshot every 250 ms for 40 s. The window holds every one of
+  // the last 30 s, however many that is.
+  for (uint32_t seq = 1; seq <= 161; ++seq) {
+    history.Add(seq, AtMs((seq - 1) * 250),
+                {{OptionTarget::Kind::kKeep, "", ""}});
   }
-  EXPECT_EQ(history.Find(1, 1).target, nullptr);
-  EXPECT_EQ(history.Find(1, 1).error, "snapshot 1 is too old or unknown");
-  EXPECT_NE(history.Find(2, 1).target, nullptr);
-  EXPECT_NE(history.Find(3, 1).target, nullptr);
+  // The newest is at 40 s: 10 s and later are kept, earlier ones forgotten.
+  EXPECT_EQ(history.Find(40, 1).target, nullptr);  // At 9.75 s.
+  EXPECT_EQ(history.Find(40, 1).error, "snapshot 40 is too old or unknown");
+  EXPECT_NE(history.Find(41, 1).target, nullptr);  // At 10 s.
+  EXPECT_NE(history.Find(161, 1).target, nullptr);
 }
 
 }  // namespace

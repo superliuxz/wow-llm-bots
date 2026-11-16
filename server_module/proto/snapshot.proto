@@ -7,6 +7,12 @@
 // protobuf JSON mapping (docs/specs/examples/*.json); the wire between module and
 // harness is binary.
 //
+// This schema is the full design, ahead of the code: most of it is not filled yet. Filled
+// today: Snapshot (bot, seq, time_ms, monotonic_us, options), base.self, base.where and
+// base.nearby (units, objects, areas), and ImmediateEvent's error; every Extension and most
+// Events are still empty, and some enum values (e.g. Panel.CURRENCY, HoverRef ZONE and
+// QUEST) have no part to show yet. The harness must treat anything else as "not known".
+//
 // Conventions:
 // - Composition instead of inheritance: a Unit carries optional `player`, `group`,
 //   `boss`, `pet`, `vehicle` parts; an Item an optional `equipment` part; a Spell
@@ -29,6 +35,9 @@ package wlb.snapshot;
 option optimize_for = LITE_RUNTIME;
 // proto3 semantics: scalars have no presence; absent means default (false, 0, "").
 option features.field_presence = IMPLICIT;
+// A few fields are EXPLICIT, where 0 / false is a real value that must not read the same as
+// "not known or not shown": a far unit's level and health (only its model is visible), a
+// line-of-sight result not taken yet, an aura or area without a timer, breath at 0 (drowning).
 
 // Option-only import (Edition 2024): the annotations are readable through descriptors, but
 // the generated (lite) code does not depend on snapshot_options.proto or descriptor.proto.
@@ -68,7 +77,7 @@ message Relative {
   float dist_yd = 1;
   Direction dir = 2;
   Height height = 3;
-  bool in_los = 4;
+  bool in_los = 4 [features.field_presence = EXPLICIT];
   Vec3 position = 5;
   // The bot is behind it (backstab, shred).
   bool behind_it = 6;
@@ -253,7 +262,7 @@ message Aura {
   uint32 id = 1;
   string name = 2;
   bool harmful = 3;
-  float remaining_s = 4;
+  float remaining_s = 4 [features.field_presence = EXPLICIT];
   uint32 stacks = 5;
   // The debuff border colour.
   DispelType dispel_type = 6;
@@ -415,12 +424,12 @@ message Unit {
   string name = 2;
   Relative rel = 3;
   Kind kind = 4;
-  uint32 level = 5;
+  uint32 level = 5 [features.field_presence = EXPLICIT];
   LevelColor level_color = 6;
   Reaction reaction = 7;
   Classification classification = 8;
-  float health_pct = 9;
-  float power_pct = 10;
+  float health_pct = 9 [features.field_presence = EXPLICIT];
+  float power_pct = 10 [features.field_presence = EXPLICIT];
   bool dead = 11;
   // Sparkles on the corpse.
   bool lootable = 12;
@@ -686,7 +695,7 @@ message GameObject {
   // Herb / ore / lock skill needed, red if too high.
   uint32 required_skill = 8;
   // DESTRUCTIBLE: damage state is in `state` ("intact", "damaged", "destroyed").
-  float health_pct = 9;
+  float health_pct = 9 [features.field_presence = EXPLICIT];
   // CAPTURE_POINT: controlling faction and the capture bar (0 = Alliance, 100 = Horde).
   string owner = 10;
   float capture_progress_pct = 11;
@@ -701,7 +710,7 @@ message Area {
   float radius_yd = 5;
   bool inside_me = 6;
   bool hostile = 7;
-  float remaining_s = 8;
+  float remaining_s = 8 [features.field_presence = EXPLICIT];
 }
 
 message Place {
@@ -1423,7 +1432,7 @@ message Environment {
   message Falling {
     float height_yd = 1;
   }
-  float breath_s = 1;
+  float breath_s = 1 [features.field_presence = EXPLICIT];
   float fatigue_s = 2;
   Falling falling = 3;
   // Feign Death / Fake Death mirror timers are not here; they are auras.
@@ -1836,6 +1845,9 @@ message ChatEvent {
 
 message ErrorEvent {
   string text = 1;
+  // The Command.command_id of the command that caused it; 0 when it wasn't one (an
+  // ordinary error line of the game, e.g. "Not ready yet").
+  uint32 command_id = 2;
 }
 
 // Yellow info text ("Quest accepted: ...", "You feel tipsy").
@@ -2152,8 +2164,12 @@ message TalentPointEvent {
 message Snapshot {
   string bot = 1;
   uint32 seq = 2;
-  // Server time, ms since the Unix epoch (a string in JSON).
+  // Server time, ms since the Unix epoch (a string in JSON). For people and logs: it can
+  // jump when the system clock is set, so ages are measured with monotonic_us.
   int64 time_ms = 3;
+  // When it was built on this machine's monotonic clock (CLOCK_MONOTONIC, µs): the same
+  // clock in every process here, so the harness measures a snapshot's age with it.
+  int64 monotonic_us = 8;
   Base base = 4;
   Extensions ext = 5;
   // Events since the previous snapshot.
@@ -2168,6 +2184,10 @@ message Option {
   // "Buy a guild charter named ___".
   string text = 1;
   repeated Blank blanks = 2;
+  // The unit or object on screen this option acts on (its `guid` in base.nearby), so the
+  // screen can put the option's number on that thing's own line; empty for options that
+  // aren't a thing on screen ("Keep doing what I'm doing").
+  string guid = 3;
 }
 
 // Something the player would type into the client (a name, a price, an amount). The
@@ -2208,9 +2228,13 @@ message ModuleMessage {
 
 message ImmediateEvent {
   string bot = 1;
+  // The seq of the bot's newest snapshot when the event happened (events have no counter
+  // of their own; snapshot seqs can skip, see Snapshot).
   uint32 seq = 2;
   int64 time_ms = 3;
   Event event = 4;
+  // As Snapshot.monotonic_us.
+  int64 monotonic_us = 5;
 }
 
 // Harness -> module.
@@ -2252,6 +2276,9 @@ message Command {
   }
 
   string bot = 1;
+  // Chosen by the harness (non-zero, e.g. a counter) to match errors to the command that
+  // caused them (ErrorEvent.command_id).
+  uint32 command_id = 2;
   oneof command {
     Choose choose = 10;
     SetGoal set_goal = 11;

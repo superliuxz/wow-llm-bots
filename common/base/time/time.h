@@ -10,6 +10,34 @@
 #include <cstdint>
 
 namespace base {
+namespace internal {
+
+// As in Chromium, time arithmetic saturates instead of overflowing:
+// TimeTicks::Now() + TimeDelta::Max() is the far future, not undefined
+// behavior.
+constexpr int64_t SaturatedAdd(int64_t a, int64_t b) {
+  int64_t sum = 0;
+  if (__builtin_add_overflow(a, b, &sum)) {
+    return b > 0 ? INT64_MAX : INT64_MIN;
+  }
+  return sum;
+}
+constexpr int64_t SaturatedSub(int64_t a, int64_t b) {
+  int64_t difference = 0;
+  if (__builtin_sub_overflow(a, b, &difference)) {
+    return b < 0 ? INT64_MAX : INT64_MIN;
+  }
+  return difference;
+}
+constexpr int64_t SaturatedMul(int64_t a, int64_t b) {
+  int64_t product = 0;
+  if (__builtin_mul_overflow(a, b, &product)) {
+    return (a < 0) != (b < 0) ? INT64_MIN : INT64_MAX;
+  }
+  return product;
+}
+
+}  // namespace internal
 
 class TimeDelta {
  public:
@@ -29,12 +57,14 @@ class TimeDelta {
   constexpr bool is_negative() const { return us_ < 0; }
 
   constexpr TimeDelta operator+(TimeDelta other) const {
-    return TimeDelta(us_ + other.us_);
+    return TimeDelta(internal::SaturatedAdd(us_, other.us_));
   }
   constexpr TimeDelta operator-(TimeDelta other) const {
-    return TimeDelta(us_ - other.us_);
+    return TimeDelta(internal::SaturatedSub(us_, other.us_));
   }
-  constexpr TimeDelta operator*(int64_t n) const { return TimeDelta(us_ * n); }
+  constexpr TimeDelta operator*(int64_t n) const {
+    return TimeDelta(internal::SaturatedMul(us_, n));
+  }
   constexpr TimeDelta operator/(int64_t n) const { return TimeDelta(us_ / n); }
   constexpr auto operator<=>(const TimeDelta&) const = default;
 
@@ -47,10 +77,10 @@ constexpr TimeDelta Microseconds(int64_t n) {
   return TimeDelta::FromMicroseconds(n);
 }
 constexpr TimeDelta Milliseconds(int64_t n) {
-  return TimeDelta::FromMicroseconds(n * 1000);
+  return TimeDelta::FromMicroseconds(internal::SaturatedMul(n, 1000));
 }
 constexpr TimeDelta Seconds(int64_t n) {
-  return TimeDelta::FromMicroseconds(n * 1000000);
+  return TimeDelta::FromMicroseconds(internal::SaturatedMul(n, 1000000));
 }
 constexpr TimeDelta Minutes(int64_t n) {
   return Seconds(n * 60);
@@ -66,13 +96,13 @@ class TimeTicks {
   constexpr bool is_null() const { return us_ == 0; }
 
   constexpr TimeTicks operator+(TimeDelta delta) const {
-    return TimeTicks(us_ + delta.InMicroseconds());
+    return TimeTicks(internal::SaturatedAdd(us_, delta.InMicroseconds()));
   }
   constexpr TimeTicks operator-(TimeDelta delta) const {
-    return TimeTicks(us_ - delta.InMicroseconds());
+    return TimeTicks(internal::SaturatedSub(us_, delta.InMicroseconds()));
   }
   constexpr TimeDelta operator-(TimeTicks other) const {
-    return Microseconds(us_ - other.us_);
+    return Microseconds(internal::SaturatedSub(us_, other.us_));
   }
   constexpr auto operator<=>(const TimeTicks&) const = default;
 
@@ -97,13 +127,13 @@ class Time {
   constexpr bool is_null() const { return us_ == 0; }
 
   constexpr Time operator+(TimeDelta delta) const {
-    return Time(us_ + delta.InMicroseconds());
+    return Time(internal::SaturatedAdd(us_, delta.InMicroseconds()));
   }
   constexpr Time operator-(TimeDelta delta) const {
-    return Time(us_ - delta.InMicroseconds());
+    return Time(internal::SaturatedSub(us_, delta.InMicroseconds()));
   }
   constexpr TimeDelta operator-(Time other) const {
-    return Microseconds(us_ - other.us_);
+    return Microseconds(internal::SaturatedSub(us_, other.us_));
   }
   constexpr auto operator<=>(const Time&) const = default;
 
