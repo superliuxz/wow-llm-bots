@@ -90,6 +90,8 @@ void UnixSocketServer::OnFileCanReadWithoutBlocking(int /*fd*/) {
             base::BindRepeating(&UnixSocketServer::OnClientFrame,
                                 weak_factory_.GetWeakPtr()),
             base::BindRepeating(&UnixSocketServer::OnClientClosed,
+                                weak_factory_.GetWeakPtr()),
+            base::BindRepeating(&UnixSocketServer::OnClientDrained,
                                 weak_factory_.GetWeakPtr())},
         max_output_bytes_);
     ++stats_.connections;
@@ -103,6 +105,12 @@ void UnixSocketServer::OnClientFrame(std::string frame) {
   ++stats_.frames_received;
   if (callbacks_.on_frame) {
     callbacks_.on_frame.Run(std::move(frame));
+  }
+}
+
+void UnixSocketServer::OnClientDrained() {
+  if (callbacks_.on_drained) {
+    callbacks_.on_drained.Run();
   }
 }
 

@@ -17,6 +17,13 @@
 #include "net/frame_codec.h"
 
 namespace net {
+namespace {
+
+// The sent part of the output buffer is released once it is at least this big
+// (and at least half the buffer).
+constexpr size_t kCompactBytes = 64 * 1024;
+
+}  // namespace
 
 FramedConnection::FramedConnection(int fd,
                                    Callbacks callbacks,
@@ -39,6 +46,14 @@ FramedConnection::~FramedConnection() {
 bool FramedConnection::SendFrame(std::string_view payload) {
   if (fd_ < 0 || output_.size() - output_offset_ > max_output_bytes_) {
     return false;
+  }
+  // Release what was already sent. The buffer is only reset when it empties
+  // completely, so a peer that is always a little behind would otherwise make
+  // it keep every byte ever sent. Done when at least half of it is sent, so the
+  // copy of the rest is paid for by the bytes released.
+  if (output_offset_ >= kCompactBytes && output_offset_ >= output_.size() / 2) {
+    output_.erase(0, output_offset_);
+    output_offset_ = 0;
   }
   if (!AppendFrame(payload, &output_)) {
     return false;
@@ -115,6 +130,10 @@ void FramedConnection::Flush() {
         fd_, /*persistent=*/true, base::MessagePumpForIO::WATCH_READ,
         &controller_, this);
     watching_write_ = false;
+    // The peer has caught up. The callback may send more.
+    if (callbacks_.on_drained) {
+      callbacks_.on_drained.Run();
+    }
   }
 }
 

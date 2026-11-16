@@ -110,7 +110,8 @@ void UnixSocketClient::OnConnected(int fd) {
       FramedConnection::Callbacks{
           callbacks_.on_frame,
           base::BindRepeating(&UnixSocketClient::OnConnectionClosed,
-                              weak_factory_.GetWeakPtr())},
+                              weak_factory_.GetWeakPtr()),
+          /*on_drained=*/{}},
       max_output_bytes_);
   if (callbacks_.on_connected) {
     callbacks_.on_connected.Run();

@@ -80,9 +80,11 @@ TEST(UnixSocketTest, ClientAndServerExchangeFrames) {
 
   RunOn(server_io, [&] {
     server = std::make_unique<UnixSocketServer>(
-        path,
-        UnixSocketServer::Callbacks{
-            {}, [&](std::string f) { at_server.OnFrame(std::move(f)); }, {}});
+        path, UnixSocketServer::Callbacks{
+                  {},
+                  [&](std::string f) { at_server.OnFrame(std::move(f)); },
+                  {},
+                  /*on_drained=*/{}});
     ASSERT_TRUE(server->Listen());
   });
   RunOn(client_io, [&] {
@@ -157,9 +159,10 @@ TEST(UnixSocketTest, ServerClosesClientOnCorruptFrame) {
   base::WaitableEvent connected, disconnected;
   RunOn(io, [&] {
     server = std::make_unique<UnixSocketServer>(
-        path,
-        UnixSocketServer::Callbacks{
-            [&] { connected.Signal(); }, {}, [&] { disconnected.Signal(); }});
+        path, UnixSocketServer::Callbacks{[&] { connected.Signal(); },
+                                          {},
+                                          [&] { disconnected.Signal(); },
+                                          /*on_drained=*/{}});
     ASSERT_TRUE(server->Listen());
   });
 

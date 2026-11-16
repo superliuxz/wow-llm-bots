@@ -25,6 +25,9 @@ class UnixSocketServer : public base::MessagePumpForIO::FdWatcher {
     base::RepeatingClosure on_connected;
     base::RepeatingCallback<void(std::string)> on_frame;
     base::RepeatingClosure on_disconnected;
+    // The client was backed up and has caught up (see
+    // FramedConnection::Callbacks::on_drained). SendFrame() may be called here.
+    base::RepeatingClosure on_drained;
   };
   struct Stats {
     uint64_t frames_sent = 0;
@@ -45,6 +48,11 @@ class UnixSocketServer : public base::MessagePumpForIO::FdWatcher {
   // Queues `payload` as one frame for the client; dropped if none or backed up.
   void SendFrame(std::string_view payload);
   bool connected() const { return client_ != nullptr; }
+  // Bytes queued for the client that its socket has not accepted yet; zero
+  // when there is no client. Zero means the next frame goes out at once.
+  size_t pending_output_bytes() const {
+    return client_ ? client_->pending_output_bytes() : 0;
+  }
   const Stats& stats() const { return stats_; }
 
  private:
@@ -54,6 +62,7 @@ class UnixSocketServer : public base::MessagePumpForIO::FdWatcher {
 
   void OnClientFrame(std::string frame);
   void OnClientClosed();
+  void OnClientDrained();
 
   const std::string path_;
   Callbacks callbacks_;

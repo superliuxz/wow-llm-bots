@@ -94,6 +94,7 @@ add_executable(wlb_common_unittests
   base/synchronization/waitable_event_unittest.cc
   base/time/time_unittest.cc
   net/frame_codec_unittest.cc
+  net/framed_connection_unittest.cc
   net/unix_socket_unittest.cc)
 target_link_libraries(wlb_common_unittests PRIVATE wlb_net GTest::gtest_main)
 target_compile_options(wlb_common_unittests PRIVATE ${WLB_SAFETY_FLAGS})

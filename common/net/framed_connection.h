@@ -23,6 +23,10 @@ class FramedConnection : public base::MessagePumpForIO::FdWatcher {
     base::RepeatingCallback<void(std::string)> on_frame;
     // Peer closed, error or corrupt frame; fd closed.
     base::RepeatingClosure on_closed;
+    // The output buffer was backed up (the socket was full) and has just
+    // emptied: the peer has caught up. Not called when everything went out at
+    // once. SendFrame() may be called from here.
+    base::RepeatingClosure on_drained;
   };
 
   // Takes ownership of `fd` (must be non-blocking) and starts reading.
@@ -36,6 +40,16 @@ class FramedConnection : public base::MessagePumpForIO::FdWatcher {
   // the connection is closed.
   bool SendFrame(std::string_view payload);
   bool is_open() const { return fd_ >= 0; }
+
+  // Bytes queued and not yet accepted by the socket. Zero: the next frame goes
+  // out at once.
+  size_t pending_output_bytes() const {
+    return output_.size() - output_offset_;
+  }
+  // Bytes the output buffer holds, including a sent part not yet released (it
+  // is released once it is as big as the rest, so never more than twice the
+  // pending bytes, however much has been sent).
+  size_t buffered_output_bytes() const { return output_.size(); }
 
  private:
   // base::MessagePumpForIO::FdWatcher:
