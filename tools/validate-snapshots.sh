@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Compile server_module/mod-llm-brain/proto/snapshot.proto, validate the example snapshots (or
+# Compile server_module/proto/snapshot.proto, validate the example snapshots (or
 # given files), and check the client-event table (docs/specs/client-events.tsv) against the proto.
 # Needs out/protoc (tools/build-protoc.sh).
 set -euo pipefail
@@ -14,8 +14,8 @@ PY_PROTOBUF=7.$("$PROTOC" --version | awk '{print $2}')
 "$VENV/bin/python" -I -c "import google.protobuf as p, sys; sys.exit(p.__version__ != '$PY_PROTOBUF')" 2>/dev/null \
   || "$VENV/bin/pip" install -q "protobuf==$PY_PROTOBUF"
 mkdir -p "$GEN"
-"$PROTOC" -I"$ROOT/server_module/mod-llm-brain" -I"$ROOT/third_party/protobuf/src" --python_out="$GEN" \
-  "$ROOT/server_module/mod-llm-brain/proto/snapshot.proto" "$ROOT/server_module/mod-llm-brain/proto/snapshot_options.proto"
+"$PROTOC" -I"$ROOT/server_module" -I"$ROOT/third_party/protobuf/src" --python_out="$GEN" \
+  "$ROOT/server_module/proto/snapshot.proto" "$ROOT/server_module/proto/snapshot_options.proto"
 if [ $# -eq 0 ]; then set -- "$ROOT"/docs/specs/examples/*.json; fi
 "$VENV/bin/python" -I "$ROOT/tools/snapshot/validate_snapshot.py" "$GEN" "$@"
 "$VENV/bin/python" -I -B "$ROOT/tools/audit/check_client_events.py" "$GEN"

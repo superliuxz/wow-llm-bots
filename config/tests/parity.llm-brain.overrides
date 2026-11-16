@@ -3,4 +3,4 @@
 # Priest at the Valley of Trials start, the same start as the phase 1 baseline.
 LlmBrain.Bots = "Testpriest"
 LlmBrain.TestFixtures = "Testpriest=priest-l1-valley.pdump"
-LlmBrain.FixtureDir = "@ROOT@/tests/fixtures/characters"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"

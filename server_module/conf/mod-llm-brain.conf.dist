@@ -80,7 +80,7 @@ LlmBrain.DeadStrategies = "-follow"
 #        Default:     ""
 #
 #    LlmBrain.FixtureDir
-#        Description: Directory of the fixture files (tests/fixtures/characters).
+#        Description: Directory of the fixture files (server_module/testdata/characters).
 #        Default:     ""
 #
 #    LlmBrain.TestAccount

@@ -1,4 +1,4 @@
-"""Validate snapshot JSON files against server_module/mod-llm-brain/proto/snapshot.proto.
+"""Validate snapshot JSON files against server_module/proto/snapshot.proto.
 
 Each file must parse as a wlb.snapshot.Snapshot in the canonical protobuf JSON mapping
 (unknown fields are errors), and must respect visibility:

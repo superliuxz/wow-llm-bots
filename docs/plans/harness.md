@@ -4,7 +4,7 @@ The harness (`harness/`) is the brain's process, separate from the game server. 
 module (`server_module/`, inside worldserver) sees the game and carries out commands; the harness
 reads what the module sends, decides when a bot's brain should think, asks llama-server, and
 sends commands back. They share `common/` (threads, sockets, framing) and the protobuf in
-`server_module/mod-llm-brain/proto/snapshot.proto`.
+`server_module/proto/snapshot.proto`.
 
 ```
 worldserver (mod-llm-brain)  <-- Unix socket, protobuf frames -->  harness  <-- HTTP -->  llama-server

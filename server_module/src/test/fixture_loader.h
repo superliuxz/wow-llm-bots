@@ -14,7 +14,8 @@ namespace llm_brain {
 
 // Test only. Resets test characters to a known state at server startup: each
 // is erased and recreated from a player dump (AzerothCore's `pdump` format,
-// tests/fixtures/characters/*.pdump), so every test run starts the same.
+// server_module/testdata/characters/*.pdump), so every test run starts the
+// same.
 //
 // Test characters live on a pool of test accounts (`account`, `account`2, ...;
 // test_accounts.h), created when missing; a load that finds an account full

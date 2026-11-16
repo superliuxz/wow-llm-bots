@@ -35,7 +35,7 @@ socket and two lock-protected queues. Nothing in the module ever waits on the ha
 
 ## Work items, in order
 
-### A. Server module `server_module/mod-llm-brain` (AzerothCore module, Google/Chromium style)
+### A. Server module `server_module` (AzerothCore module, Google/Chromium style)
 1. Module skeleton (CMake, script loader), linked into worldserver via `tools/setup.sh` symlink.
    Config file `mod-llm-brain.conf`: enabled, socket path, bot names to attach to, tick interval.
 2. IO thread + Unix socket server (epoll IO thread on `common/net`, done in A2); outbound/inbound
@@ -116,7 +116,7 @@ not in `out/common-server` (linked into AzerothCore).
 
 ## Decisions (review 2026-11-14)
 1. **Wire format** module <-> harness (revised 2026-11-15): binary protobuf messages from
-   `server_module/mod-llm-brain/proto/snapshot.proto` (lite runtime, as Chromium), one per
+   `server_module/proto/snapshot.proto` (lite runtime, as Chromium), one per
    length-prefixed frame (`common/net/frame_codec.h`: 4-byte big-endian length + payload)
    over the Unix socket. JSON (canonical protobuf mapping) only in harness tooling: recordings, decision
    logs, eval cases. The LLM never

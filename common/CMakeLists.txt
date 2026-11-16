@@ -2,7 +2,7 @@
 #   wlb_base: threads (default and epoll IO message pumps),
 #             task runners, callbacks, WeakPtr, TimeDelta/TimeTicks.
 #   wlb_net:  length-prefixed framing, Unix socket server/client (on IO threads).
-#   wlb_proto: C++ generated from server_module/mod-llm-brain/proto/*.proto
+#   wlb_proto: C++ generated from server_module/proto/*.proto
 #             (protobuf lite runtime; protobuf and abseil from third_party/).
 # Plain C++20 (AzerothCore modules compile as C++20 and include these headers).
 cmake_minimum_required(VERSION 3.20)
@@ -65,7 +65,7 @@ add_subdirectory("${WLB_ROOT}/third_party/protobuf" protobuf EXCLUDE_FROM_ALL)
 # Generated code comes from protoc built separately (tools/build-protoc.sh) from
 # the same pinned protobuf, so generator and runtime versions always match.
 set(WLB_PROTOC "${WLB_ROOT}/out/protoc/protobuf/protoc" CACHE FILEPATH "protoc")
-set(WLB_PROTO_ROOT "${WLB_ROOT}/server_module/mod-llm-brain")
+set(WLB_PROTO_ROOT "${WLB_ROOT}/server_module")
 set(WLB_PROTO_OUT "${CMAKE_CURRENT_BINARY_DIR}/gen")
 add_custom_command(
   OUTPUT "${WLB_PROTO_OUT}/proto/snapshot.pb.cc"
@@ -100,7 +100,7 @@ target_compile_options(wlb_common_unittests PRIVATE ${WLB_SAFETY_FLAGS})
 
 # Unit tests for our AzerothCore module's AzerothCore-independent parts. They
 # sit next to the code; mod-llm-brain.cmake keeps them out of the server.
-set(WLB_MODULE_SRC "${WLB_ROOT}/server_module/mod-llm-brain/src")
+set(WLB_MODULE_SRC "${WLB_ROOT}/server_module/src")
 add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/brain_bridge.cc"
   "${WLB_MODULE_SRC}/brain_bridge_unittest.cc"

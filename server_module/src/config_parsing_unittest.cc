@@ -23,11 +23,11 @@ TEST(ConfigParsingTest, SplitListTrimsAndDropsEmpty) {
 }
 
 TEST(ConfigParsingTest, ParseFixturesJoinsRelativeFilesToDir) {
-  EXPECT_EQ(
-      ParseFixtures("Testpriest=priest.pdump, Testwar=/abs/war.pdump",
-                    "/repo/tests/fixtures/characters"),
-      (Fixtures{{"Testpriest", "/repo/tests/fixtures/characters/priest.pdump"},
-                {"Testwar", "/abs/war.pdump"}}));
+  EXPECT_EQ(ParseFixtures("Testpriest=priest.pdump, Testwar=/abs/war.pdump",
+                          "/repo/server_module/testdata/characters"),
+            (Fixtures{{"Testpriest",
+                       "/repo/server_module/testdata/characters/priest.pdump"},
+                      {"Testwar", "/abs/war.pdump"}}));
   EXPECT_EQ(ParseFixtures("Testpriest=priest.pdump", ""),
             (Fixtures{{"Testpriest", "priest.pdump"}}));
 }

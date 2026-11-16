@@ -1,4 +1,4 @@
-"""Generates server_module/mod-llm-brain/src/invisible_displays.h from the client's DBC files.
+"""Generates server_module/src/invisible_displays.h from the client's DBC files.
 
 A creature whose model is an "invisible stalker" is on the server's visible list (the client
 is sent it) but draws nothing: a player sees nobody there. The server doesn't load model file

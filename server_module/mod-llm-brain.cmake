@@ -3,7 +3,7 @@
 # protobuf lite runtime with the abseil libraries it uses, all built beforehand
 # into out/common-server (not hardened) by tools/build-server.sh.
 get_filename_component(WLB_MODULE_DIR "${CMAKE_CURRENT_LIST_DIR}" REALPATH)
-get_filename_component(WLB_ROOT "${WLB_MODULE_DIR}/../.." REALPATH)
+get_filename_component(WLB_ROOT "${WLB_MODULE_DIR}/.." REALPATH)
 set(WLB_SERVER_OUT "${WLB_ROOT}/out/common-server")
 target_include_directories(modules PRIVATE
   "${WLB_ROOT}/common"
