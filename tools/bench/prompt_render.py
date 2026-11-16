@@ -193,24 +193,49 @@ def far_summary(units):
     return "; ".join(parts)
 
 
-def tight_things(items):
+def actionable(item):
+    """A stand-in for the module's options: can the bot act on this entry?"""
+    if "usable" in item or item.get("kind") in ("HERB", "ORE", "CHEST", "QUEST_OBJECT"):
+        return bool(item.get("usable"))
+    if item.get("kind") not in ("NPC", "CRITTER"):
+        return False
+    if item.get("dead"):
+        return bool(item.get("lootable"))
+    return item.get("reaction") in ("HOSTILE", "NEUTRAL", "FRIENDLY")
+
+
+def tight_things(items, counter=None):
+    """One line per thing; with `counter`, entries the bot can act on get the next number."""
     groups = collections.OrderedDict()
     for item in items:
-        groups.setdefault((item.get("name", "?"), tight_look(item)), []).append(item.get("rel"))
+        groups.setdefault((item.get("name", "?"), tight_look(item)), []).append(item)
     lines = []
-    for (name, look), rels in groups.items():
+    for (name, look), group in groups.items():
+        rels = [g.get("rel") for g in group]
+        mark = "-"
+        if counter is not None and actionable(group[0]):
+            counter[0] += 1
+            mark = f"{counter[0]}."
         if len(rels) == 1:
-            lines.append(f"- {name}: {look}; {tight_where(rels[0])}")
+            lines.append(f"{mark} {name}: {look}; {tight_where(rels[0])}")
         else:
             d = sorted(quant((r or {}).get("dist_yd", 0)) for r in rels)
             dirs = "/".join(sorted({(r or {}).get("dir", "") for r in rels if r}))
-            lines.append(f"- {len(rels)}x {name}: {look}; {d[0]:.0f}-{d[-1]:.0f} yd {dirs}")
+            lines.append(f"{mark} {len(rels)}x {name}: {look}; {d[0]:.0f}-{d[-1]:.0f} yd {dirs}")
     return lines
 
 
-def render_tight(snapshot, coarse=False):
+# Options that aren't a thing on screen (a stand-in for the module's).
+ALWAYS = ["Keep doing what I'm doing", "Explore somewhere new", "Rest (eat and drink)",
+          "Go to the nearest town"]
+
+
+def render_tight(snapshot, coarse=False, numbered=False):
+    """The screen in a few plain lines. With `numbered`, the entries the bot can act on carry
+    their option number (no separate options list), and the result is (text, option count)."""
     global COARSE
     COARSE = coarse
+    counter = [0] if numbered else None
     base = snapshot.get("base", {})
     lines = []
     if base.get("self"):
@@ -226,12 +251,12 @@ def render_tight(snapshot, coarse=False):
         named.sort(key=lambda u: (u["name"], (u.get("rel") or {}).get("dir", "")))
     if named:
         lines.append("around me:")
-        lines += ["  " + line for line in tight_things(named)]
+        lines += ["  " + line for line in tight_things(named, counter)]
     if nameless:
         lines.append("far away: " + far_summary(nameless))
     if nearby.get("objects"):
         lines.append("objects:")
-        lines += ["  " + line for line in tight_things(nearby["objects"])]
+        lines += ["  " + line for line in tight_things(nearby["objects"], counter)]
     rest = {k: v for k, v in base.items() if k not in ("self", "where", "doing", "nearby")}
     rest = {"base": rest} if rest else {}
     for key in ("ext", "events", "options"):
@@ -239,4 +264,10 @@ def render_tight(snapshot, coarse=False):
             rest[key] = snapshot[key]
     if rest:
         lines += render(rest)
+    if numbered:
+        lines.append("also:")
+        for option in ALWAYS:
+            counter[0] += 1
+            lines.append(f"  {counter[0]}. {option}")
+        return "\n".join(lines), counter[0]
     return "\n".join(lines)

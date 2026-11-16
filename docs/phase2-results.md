@@ -256,3 +256,21 @@ with it off (200 bots 6.5 s to 4.4 s) also changed the slot context from 12k to 
 now the default. The stall in the burst test (`decode_bench.py`, since removed: 25 streams took 9.4 s instead
 of 3.8 s with the cache on) only appears when every slot has just finished a warm-up request;
 it doesn't show in steady state or in the replay.
+
+### Numbered screen instead of a separate options list
+
+`render_tight(numbered=True)` (`MERGED=1` in `brain_load.py`): the screen's own entries carry
+the option numbers, so nothing is written twice. Same server settings, closed loop, two rounds:
+
+| | Wake-ups/s | One call p50 | Prompt |
+|---|---|---|---|
+| Separate options list | 8.3 / 8.3 | 1.83 s / 1.84 s | 773 tok |
+| **Numbered screen** | **8.7 / 8.6** | 1.80 s / 1.78 s | 726 tok |
+
+Only +5%, not the ~25% the list's size suggested: reading is a smaller share of a wake-up than
+assumed, and the list was mostly cheap to read. Replay, 200 bots, 30 s plans: 3.1 s / 6.7 s
+(vs 3.2 s / 7.6 s). All plans valid. Kept: it removes duplicate text and is simpler to build.
+
+**Is the Python bench the bottleneck? No.** During a run the client used 1% of one core;
+llama-server's busiest threads 40-53%; the GPU 59-83% busy at ~370 W (of ~575 W). The GPU
+idles part of each step while llama-server does its per-stream CPU work (grammar, sampling).

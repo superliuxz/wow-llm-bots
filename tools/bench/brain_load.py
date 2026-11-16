@@ -18,6 +18,8 @@ Env: SLOTS (default 25), MAX_TOKENS (default 150), OUT=<file> (per-call JSON),
      RENDER=tight: prompt_render.render_tight (base view in a few plain lines).
      GOAL_ONCE=1: the bot's current goal is in the prompt, and the brain writes a
      goal line only when it changes.
+     MERGED=1: no separate options list; the screen's own entries carry the option numbers
+     (prompt_render.render_tight(numbered=True)).
      NO_GRAMMAR=1: no grammar; the harness validates the reply afterwards (plan["_valid"]):
      option numbers that exist, watches from the vocabulary, a numeric look.
      CODES_ONLY=1: no goal or chat lines at all (a floor: the cost of the free text).
@@ -173,11 +175,21 @@ def call(wake, snap_dir, slots):
     menu = os.environ.get("MODE") == "menu"
     goal_once = menu and bool(os.environ.get("GOAL_ONCE"))
     snap = snapshot(snap_dir, wake["source"], wake["seq"])
-    screen = (render_tight if os.environ.get("RENDER") == "tight" else render_snapshot)(snap)
-    options = menu_options(snap) if menu else []
-    if menu:
-        screen += "\noptions:\n" + "\n".join(f"  {i}. {o}" for i, o in enumerate(options, 1))
+    merged = menu and bool(os.environ.get("MERGED"))
+    if merged:
+        screen, count = render_tight(snap, numbered=True)
+        options = [None] * count
+    else:
+        screen = (render_tight if os.environ.get("RENDER") == "tight" else render_snapshot)(snap)
+        options = menu_options(snap) if menu else []
+        if menu:
+            screen += "\noptions:\n" + "\n".join(f"  {i}. {o}" for i, o in enumerate(options, 1))
     rules = RULES_MENU if menu else RULES
+    if merged:
+        rules = rules.replace(
+            "your screen and the numbered options you can take now.",
+            "your screen. Numbered entries are your options: picking a number attacks an enemy, "
+            "talks to a friendly NPC, loots a corpse, or uses an object.")
     head = f"Woken: {wake['why'].replace('_', ' ')}."
     if goal_once:
         rules = rules.replace("goal: <what you're working towards, a few words>",
