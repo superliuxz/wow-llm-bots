@@ -231,8 +231,8 @@ a few seconds. Far units' `in_los` can be a few seconds old.
 | Event | Source packet(s) |
 |---|---|
 | `chat {channel, from, text, at_me, from_dist_yd}` (say / yell / whisper / party / raid / raid_warning / guild / officer / general / trade / lfg / emote / monster say-yell-emote / system) | SMSG_MESSAGECHAT (+ GM variant), SMSG_TEXT_EMOTE, SMSG_NOTIFICATION, server messages |
-| `error {text}` (red UI text) | SMSG_CAST_FAILED, SMSG_INVENTORY_CHANGE_FAILURE, SMSG_NOTIFICATION, other error packets |
-| `prompt {kind, from}` (group invite, trade, duel, guild invite, ready check, role check, resurrect offer, summon, quest share, battleground ready, Dungeon Finder proposal / boot vote / "find another player?", bind hearthstone, every confirmation popup) | SMSG_GROUP_INVITE, SMSG_TRADE_STATUS, SMSG_DUEL_REQUESTED, SMSG_GUILD_INVITE, MSG_RAID_READY_CHECK, SMSG_RESURRECT_REQUEST, SMSG_SUMMON_REQUEST, ... |
+| `error {text}` (red UI text) | SMSG_CAST_FAILED, SMSG_INVENTORY_CHANGE_FAILURE, SMSG_NOTIFICATION, SMSG_TRANSFER_ABORTED / SMSG_LFG_TELEPORT_DENIED (a teleport failed), other error packets |
+| `prompt {kind, from}` (group invite, trade, duel, guild invite, ready check, role check, resurrect offer, summon, quest share, battleground ready, Dungeon Finder proposal / boot vote / "find another player?", bind hearthstone, battleground spirit healer wave, reclaim corpse, chat channel invite / password, name your pet, every confirmation popup) | SMSG_GROUP_INVITE, SMSG_TRADE_STATUS, SMSG_DUEL_REQUESTED, SMSG_GUILD_INVITE, MSG_RAID_READY_CHECK, SMSG_RESURRECT_REQUEST, SMSG_SUMMON_REQUEST, ... |
 | `level_up`, `talent_point_gained`, `quest_complete`, `quest_failed`, `xp_gained`, `money_changed`, `item_received`, `skill_up` | SMSG_LEVELUP_INFO, SMSG_QUESTGIVER_QUEST_COMPLETE, SMSG_QUESTUPDATE_*, SMSG_LOG_XPGAIN, SMSG_ITEM_PUSH_RESULT, skill updates |
 | `died {killer}`, `resurrected` | death / resurrect packets |
 | `loot_roll {Item, roll_id}`, `loot_won {Item, by}` | SMSG_LOOT_START_ROLL, SMSG_LOOT_ROLL_WON |
@@ -242,6 +242,12 @@ a few seconds. Far units' `in_los` can be a few seconds old.
 | `path_failed {to}` (movement can't reach a destination) | playerbots movement result (feeds stuck detection) |
 | `duel_started {from}`, `duel_ended {winner}` | SMSG_DUEL_* |
 | `dbm_warning {text}` | our DBM-parity emulation (only with DBM in the loadout) |
+| `minimap_ping {from, where}` | MSG_MINIMAP_PING |
+| `calendar_alarm {title, starts_in_s}` | calendar event reminders |
+| `displaced {how, by, spell, distance_yd}` (knocked back, pulled, teleported on the same map) | MSG_MOVE_KNOCK_BACK, MSG_MOVE_TELEPORT, forced movement (no client event: the screen jumps) |
+
+Every client event is accounted for in `client-events.tsv` (`coverage-client-events.md`), and
+what wakes the brain is in `triggers.md`.
 
 ## 9. Options and commands
 

@@ -1881,6 +1881,18 @@ message PromptEvent {
     LFG_OFFER_CONTINUE = 29;
     // "Are you sure you want to purchase ... for 1000g?" (dual spec, bank slot, ...).
     CONFIRM_PURCHASE = 30;
+    // Battleground spirit healer: resurrected with the next wave, in `timeout_s`
+    // (accept to wait for it, or leave the area).
+    SPIRIT_HEALER_WAVE = 31;
+    // At your corpse as a ghost: "Resurrect now?".
+    RECLAIM_CORPSE = 32;
+    // Invited to a chat channel (`from`; the channel in `text`).
+    CHANNEL_INVITE = 33;
+    // A chat channel needs a password (the channel in `text`; the answer is a
+    // TEXT blank).
+    CHANNEL_PASSWORD = 34;
+    // A hunter's new pet can be named (the answer is a NEW_NAME blank).
+    PET_NAME = 35;
   }
   Kind kind = 1;
   string from = 2;
@@ -1996,6 +2008,35 @@ message InstanceEvent {
   string what = 3;
 }
 
+// Someone in the group clicked the minimap: a ping shows there for everyone.
+message MinimapPingEvent {
+  string from = 1;
+  Relative where = 2;
+}
+
+// A calendar event the bot signed up for (or a raid lockout reset) starts soon.
+message CalendarAlarmEvent {
+  string title = 1;
+  float starts_in_s = 2;
+}
+
+// The bot was moved by force: knocked back, pulled, or teleported on the same map
+// (a boss ability, a trap, a Death Grip). The client has no event for this; a
+// player sees the screen jump.
+message DisplacedEvent {
+  enum How {
+    HOW_UNSPECIFIED = 0;
+    KNOCKED_BACK = 1;
+    PULLED = 2;
+    TELEPORTED = 3;
+  }
+  How how = 1;
+  // Who did it, when known (the spell's caster).
+  string by = 2;
+  string spell = 3;
+  float distance_yd = 4;
+}
+
 message PathFailedEvent {
   Place to = 1;
 }
@@ -2095,6 +2136,9 @@ message Event {
     TalentPointEvent talent_point_gained = 32;
     LootRollChoiceEvent loot_roll_choice = 33;
     LfgEvent lfg = 34;
+    MinimapPingEvent minimap_ping = 35;
+    CalendarAlarmEvent calendar_alarm = 36;
+    DisplacedEvent displaced = 37;
   }
 }
 

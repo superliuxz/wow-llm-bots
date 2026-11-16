@@ -1,0 +1,714 @@
+event	kind	maps_to	client_alert	note
+ACCOUNT_MESSAGES_AVAILABLE	out			login screens, billing, account
+ACCOUNT_MESSAGES_BODY_LOADED	out			login screens, billing, account
+ACCOUNT_MESSAGES_HEADERS_LOADED	out			login screens, billing, account
+ACHIEVEMENT_EARNED	event	event.achievement_earned	alert_frame,error_line,shows_frame,sound	
+ACTIONBAR_HIDEGRID	internal			client plumbing
+ACTIONBAR_PAGE_CHANGED	value	ext.action_bars	shows_frame	cooldowns, usable, range
+ACTIONBAR_SHOWGRID	internal			client plumbing
+ACTIONBAR_SLOT_CHANGED	value	ext.action_bars		cooldowns, usable, range
+ACTIONBAR_UPDATE_COOLDOWN	value	ext.action_bars		cooldowns, usable, range
+ACTIONBAR_UPDATE_STATE	value	ext.action_bars		cooldowns, usable, range
+ACTIONBAR_UPDATE_USABLE	value	ext.action_bars		cooldowns, usable, range
+ACTIVE_TALENT_GROUP_CHANGED	change	ext.talents	shows_frame	
+ADDON_ACTION_BLOCKED	internal			client plumbing
+ADDON_ACTION_FORBIDDEN	internal		popup,sound	client plumbing
+ADDON_LIST_UPDATE	internal		shows_frame	client plumbing
+ADDON_LOADED	internal		shows_frame,sound	client plumbing
+AREA_SPIRIT_HEALER_IN_RANGE	prompt	prompt.SPIRIT_HEALER_WAVE	popup,sound	
+AREA_SPIRIT_HEALER_OUT_OF_RANGE	change	ext.death		
+ARENA_OPPONENT_UPDATE	change	ext.arena	shows_frame	
+ARENA_SEASON_WORLD_STATE	change	ext.arena	shows_frame	
+ARENA_TEAM_INVITE_CANCEL	not_event			a combat-text type, chat type or UI-internal name, not a client event
+ARENA_TEAM_INVITE_REQUEST	prompt	prompt.ARENA_TEAM_INVITE	popup,sound	
+ARENA_TEAM_ROSTER_UPDATE	change	ext.pvp	shows_frame	
+ARENA_TEAM_UPDATE	change	ext.pvp	shows_frame	
+AUCTION_BIDDER_LIST_UPDATE	panel	ext.interaction	shows_frame	auction house
+AUCTION_HOUSE_CLOSED	panel	ext.interaction		auction house
+AUCTION_HOUSE_DISABLED	event	event.error	popup,sound	red error or error popup
+AUCTION_HOUSE_SHOW	panel	ext.interaction	shows_frame	auction house
+AUCTION_ITEM_LIST_UPDATE	panel	ext.interaction	shows_frame	auction house
+AUCTION_MULTISELL_FAILURE	event	event.auction		
+AUCTION_MULTISELL_START	event	event.auction	shows_frame	
+AUCTION_MULTISELL_UPDATE	event	event.auction		
+AUCTION_OWNED_LIST_UPDATE	panel	ext.interaction	shows_frame	auction house
+AUTOEQUIP_BIND_CONFIRM	prompt	prompt.CONFIRM_BIND_ON_PICKUP	popup,sound	
+AUTOFOLLOW_BEGIN	change	base.self.auto_attack		
+AUTOFOLLOW_END	change	base.self.auto_attack		
+BAG_CLOSED	change	ext.bags		
+BAG_OPEN	change	ext.bags		
+BAG_UPDATE	change	ext.bags	shows_frame	
+BAG_UPDATE_COOLDOWN	change	ext.bags		
+BANKFRAME_CLOSED	panel	ext.interaction		bank
+BANKFRAME_OPENED	panel	ext.interaction	shows_frame	bank
+BARBER_SHOP_APPEARANCE_APPLIED	panel	ext.interaction		barber
+BARBER_SHOP_CLOSE	panel	ext.interaction		barber
+BARBER_SHOP_OPEN	panel	ext.interaction	shows_frame	barber
+BARBER_SHOP_SUCCESS	panel	ext.interaction	sound	barber
+BATTLEFIELDS_CLOSED	panel	ext.interaction		battlemaster
+BATTLEFIELDS_SHOW	panel	ext.interaction	shows_frame	battlemaster
+BATTLEFIELD_MGR_EJECTED	event	event.battleground	popup,shows_frame,sound	
+BATTLEFIELD_MGR_EJECT_PENDING	event	event.battleground	popup,shows_frame,sound	
+BATTLEFIELD_MGR_ENTERED	event	event.battleground	popup,shows_frame,sound	
+BATTLEFIELD_MGR_ENTRY_INVITE	prompt	prompt.WINTERGRASP_INVITE	popup,shows_frame,sound	
+BATTLEFIELD_MGR_QUEUE_INVITE	prompt	prompt.WINTERGRASP_INVITE	popup,shows_frame,sound	
+BATTLEFIELD_MGR_QUEUE_REQUEST_RESPONSE	event	event.battleground	popup,shows_frame,sound	
+BATTLEFIELD_MGR_STATE_CHANGE	event	event.battleground		
+BILLING_NAG_DIALOG	out		popup,sound	login screens, billing, account
+BIND_ENCHANT	prompt	prompt.CONFIRM_REPLACE_ENCHANT	popup,sound	
+BLOCK	not_event			a combat-text type, chat type or UI-internal name, not a client event
+BN_BLOCK_LIST_UPDATED	out		shows_frame	Battle.net (not in 3.3.5a servers)
+BN_CHAT_CHANNEL_CLOSED	out			Battle.net (not in 3.3.5a servers)
+BN_CHAT_CHANNEL_CREATE_FAILED	out			Battle.net (not in 3.3.5a servers)
+BN_CHAT_CHANNEL_CREATE_SUCCEEDED	out		flash,shows_frame	Battle.net (not in 3.3.5a servers)
+BN_CHAT_CHANNEL_INVITE_FAILED	out			Battle.net (not in 3.3.5a servers)
+BN_CHAT_CHANNEL_INVITE_SUCCEEDED	out			Battle.net (not in 3.3.5a servers)
+BN_CHAT_CHANNEL_JOINED	out			Battle.net (not in 3.3.5a servers)
+BN_CHAT_CHANNEL_LEFT	out			Battle.net (not in 3.3.5a servers)
+BN_CHAT_CHANNEL_MEMBER_JOINED	out			Battle.net (not in 3.3.5a servers)
+BN_CHAT_CHANNEL_MEMBER_LEFT	out			Battle.net (not in 3.3.5a servers)
+BN_CHAT_CHANNEL_MEMBER_UPDATED	out			Battle.net (not in 3.3.5a servers)
+BN_CHAT_CHANNEL_MESSAGE_BLOCKED	out			Battle.net (not in 3.3.5a servers)
+BN_CHAT_CHANNEL_MESSAGE_UNDELIVERABLE	out			Battle.net (not in 3.3.5a servers)
+BN_CHAT_WHISPER_UNDELIVERABLE	out			Battle.net (not in 3.3.5a servers)
+BN_CONNECTED	out			Battle.net (not in 3.3.5a servers)
+BN_CUSTOM_MESSAGE_CHANGED	out			Battle.net (not in 3.3.5a servers)
+BN_CUSTOM_MESSAGE_LOADED	out			Battle.net (not in 3.3.5a servers)
+BN_DISCONNECTED	out			Battle.net (not in 3.3.5a servers)
+BN_FRIEND_ACCOUNT_OFFLINE	out		shows_frame	Battle.net (not in 3.3.5a servers)
+BN_FRIEND_ACCOUNT_ONLINE	out		shows_frame	Battle.net (not in 3.3.5a servers)
+BN_FRIEND_INFO_CHANGED	out			Battle.net (not in 3.3.5a servers)
+BN_FRIEND_INVITE_ADDED	out		shows_frame	Battle.net (not in 3.3.5a servers)
+BN_FRIEND_INVITE_LIST_INITIALIZED	out		shows_frame	Battle.net (not in 3.3.5a servers)
+BN_FRIEND_INVITE_REMOVED	out		shows_frame	Battle.net (not in 3.3.5a servers)
+BN_FRIEND_INVITE_SEND_RESULT	out			Battle.net (not in 3.3.5a servers)
+BN_FRIEND_LIST_SIZE_CHANGED	out			Battle.net (not in 3.3.5a servers)
+BN_FRIEND_TOON_OFFLINE	out			Battle.net (not in 3.3.5a servers)
+BN_FRIEND_TOON_ONLINE	out			Battle.net (not in 3.3.5a servers)
+BN_MATURE_LANGUAGE_FILTER	out			Battle.net (not in 3.3.5a servers)
+BN_NEW_PRESENCE	out			Battle.net (not in 3.3.5a servers)
+BN_REQUEST_FOF_FAILED	out			Battle.net (not in 3.3.5a servers)
+BN_REQUEST_FOF_SUCCEEDED	out		shows_frame	Battle.net (not in 3.3.5a servers)
+BN_SELF_OFFLINE	out			Battle.net (not in 3.3.5a servers)
+BN_SELF_ONLINE	out		shows_frame	Battle.net (not in 3.3.5a servers)
+BN_SYSTEM_MESSAGE	out			Battle.net (not in 3.3.5a servers)
+BN_TOON_NAME_UPDATED	out			Battle.net (not in 3.3.5a servers)
+BOTH	not_event			a combat-text type, chat type or UI-internal name, not a client event
+CALENDAR_ACTION_PENDING	change	ext.calendar		
+CALENDAR_CLOSE_EVENT	change	ext.calendar	shows_frame	
+CALENDAR_EVENT_ALARM	event	event.calendar_alarm	flash	
+CALENDAR_NEW_EVENT	change	ext.calendar	shows_frame	
+CALENDAR_OPEN_EVENT	change	ext.calendar	shows_frame	
+CALENDAR_UPDATE_ERROR	event	event.error	popup,sound	red error or error popup
+CALENDAR_UPDATE_EVENT	change	ext.calendar	shows_frame	
+CALENDAR_UPDATE_EVENT_LIST	change	ext.calendar	shows_frame	
+CALENDAR_UPDATE_INVITE_LIST	change	ext.calendar	shows_frame	
+CALENDAR_UPDATE_PENDING_INVITES	change	ext.calendar		
+CANCEL_LOOT_ROLL	change	ext.trade_loot	shows_frame	a roll ended
+CANCEL_SUMMON	change	ext.social		friends online, guild, channels
+CHANNEL_COUNT_UPDATE	change	ext.social	shows_frame	friends online, guild, channels
+CHANNEL_FLAGS_UPDATED	change	ext.social	shows_frame	friends online, guild, channels
+CHANNEL_INVITE_REQUEST	prompt	prompt.CHANNEL_INVITE	popup,sound	
+CHANNEL_PASSWORD_REQUEST	prompt	prompt.CHANNEL_PASSWORD	popup,sound	
+CHANNEL_ROSTER_UPDATE	change	ext.social	shows_frame	friends online, guild, channels
+CHANNEL_UI_UPDATE	change	ext.social		friends online, guild, channels
+CHANNEL_VOICE_UPDATE	out			voice chat
+CHARACTER_LIST_UPDATE	out		shows_frame,sound	login screens, billing, account
+CHARACTER_POINTS_CHANGED	event	event.talent_point_gained		
+CHAT_MSG_ACHIEVEMENT	event	event.chat		
+CHAT_MSG_ADDON	internal			client plumbing
+CHAT_MSG_AFK	event	event.chat		
+CHAT_MSG_BATTLEGROUND	event	event.chat		
+CHAT_MSG_BATTLEGROUND_LEADER	event	event.chat		
+CHAT_MSG_BG_SYSTEM_ALLIANCE	event	event.info		system text
+CHAT_MSG_BG_SYSTEM_HORDE	event	event.info		system text
+CHAT_MSG_BG_SYSTEM_NEUTRAL	event	event.info		system text
+CHAT_MSG_BN_CONVERSATION	out			Battle.net (not in 3.3.5a servers)
+CHAT_MSG_BN_CONVERSATION_LIST	out			Battle.net (not in 3.3.5a servers)
+CHAT_MSG_BN_CONVERSATION_NOTICE	out		flash,shows_frame	Battle.net (not in 3.3.5a servers)
+CHAT_MSG_BN_INLINE_TOAST_ALERT	out			Battle.net (not in 3.3.5a servers)
+CHAT_MSG_BN_INLINE_TOAST_BROADCAST	out			Battle.net (not in 3.3.5a servers)
+CHAT_MSG_BN_INLINE_TOAST_BROADCAST_INFORM	out			Battle.net (not in 3.3.5a servers)
+CHAT_MSG_BN_INLINE_TOAST_CONVERSATION	out			Battle.net (not in 3.3.5a servers)
+CHAT_MSG_BN_WHISPER	out			Battle.net (not in 3.3.5a servers)
+CHAT_MSG_BN_WHISPER_INFORM	out			Battle.net (not in 3.3.5a servers)
+CHAT_MSG_CHANNEL	event	event.chat		
+CHAT_MSG_CHANNEL_JOIN	event	event.chat		
+CHAT_MSG_CHANNEL_LEAVE	event	event.chat		
+CHAT_MSG_CHANNEL_LIST	event	event.chat		
+CHAT_MSG_CHANNEL_NOTICE	event	event.chat		
+CHAT_MSG_CHANNEL_NOTICE_USER	event	event.chat		
+CHAT_MSG_COMBAT_FACTION_CHANGE	event	event.info		reputation change line
+CHAT_MSG_COMBAT_HONOR_GAIN	event	event.battleground		honor gained
+CHAT_MSG_COMBAT_MISC_INFO	event	event.info		system text
+CHAT_MSG_COMBAT_XP_GAIN	event	event.xp_gained		
+CHAT_MSG_DND	event	event.chat		
+CHAT_MSG_EMOTE	event	event.chat		
+CHAT_MSG_FILTERED	internal			client plumbing
+CHAT_MSG_GUILD	event	event.chat		
+CHAT_MSG_GUILD_ACHIEVEMENT	event	event.chat		
+CHAT_MSG_IGNORED	event	event.chat		
+CHAT_MSG_LOOT	event	event.item_received		loot lines (mine and others')
+CHAT_MSG_MONEY	event	event.money_changed		
+CHAT_MSG_MONSTER_EMOTE	event	event.chat		
+CHAT_MSG_MONSTER_PARTY	event	event.chat		
+CHAT_MSG_MONSTER_SAY	event	event.chat		
+CHAT_MSG_MONSTER_WHISPER	event	event.chat		
+CHAT_MSG_MONSTER_YELL	event	event.chat		
+CHAT_MSG_OFFICER	event	event.chat		
+CHAT_MSG_OPENING	event	event.info		system text
+CHAT_MSG_PARTY	event	event.chat		
+CHAT_MSG_PARTY_LEADER	event	event.chat		
+CHAT_MSG_PET_INFO	event	event.info		system text
+CHAT_MSG_RAID	event	event.chat		
+CHAT_MSG_RAID_BOSS_EMOTE	event	event.chat		
+CHAT_MSG_RAID_BOSS_WHISPER	event	event.chat		
+CHAT_MSG_RAID_LEADER	event	event.chat		
+CHAT_MSG_RAID_WARNING	event	event.chat	raid_notice,shows_frame,sound	
+CHAT_MSG_RESTRICTED	internal			client plumbing
+CHAT_MSG_SAY	event	event.chat		
+CHAT_MSG_SKILL	event	event.skill_up		
+CHAT_MSG_SYSTEM	event	event.info		system text
+CHAT_MSG_TARGETICONS	event	event.chat		
+CHAT_MSG_TEXT_EMOTE	event	event.chat		
+CHAT_MSG_TRADESKILLS	event	event.info		crafting lines
+CHAT_MSG_WHISPER	event	event.chat	shows_frame,sound	
+CHAT_MSG_WHISPER_INFORM	event	event.chat		
+CHAT_MSG_YELL	event	event.chat		
+CINEMATIC_START	event	event.cinematic	shows_frame	
+CINEMATIC_STOP	event	event.cinematic		
+CLIENT_ACCOUNT_MISMATCH	out		shows_frame	login screens, billing, account
+CLIENT_TRIAL	out		shows_frame	login screens, billing, account
+CLOSE_INBOX_ITEM	panel	ext.interaction		mailbox
+CLOSE_STATUS_DIALOG	out			login screens, billing, account
+CLOSE_TABARD_FRAME	panel	ext.interaction		charters, tabards
+CLOSE_WORLD_MAP	panel	ext.map		
+COMBAT_LOG_EVENT	internal			client plumbing
+COMBAT_LOG_EVENT_UNFILTERED	combat_log	ext.combat	flash,shows_frame,sound	the combat log: every hit, heal, aura and cast around the player
+COMBAT_RATING_UPDATE	change	ext.character	shows_frame	stats on the character sheet
+COMBAT_TEXT_UPDATE	internal			client plumbing
+COMMENTATOR_ENTER_WORLD	out			arena commentator mode
+COMMENTATOR_MAP_UPDATE	out			arena commentator mode
+COMMENTATOR_PLAYER_UPDATE	out			arena commentator mode
+COMMENTATOR_SKIRMISH_MODE_REQUEST	out			arena commentator mode
+COMMENTATOR_SKIRMISH_QUEUE_REQUEST	out			arena commentator mode
+COMPANION_LEARNED	change	ext.companions	shows_frame,sound	
+COMPANION_UNLEARNED	change	ext.companions	shows_frame,sound	
+COMPANION_UPDATE	change	ext.companions		
+CONFIRM_BINDER	prompt	prompt.BIND_HEARTHSTONE	popup,sound	
+CONFIRM_DISENCHANT_ROLL	prompt	prompt.CONFIRM_LOOT_ROLL	popup,sound	
+CONFIRM_LOOT_ROLL	prompt	prompt.CONFIRM_LOOT_ROLL	popup,sound	
+CONFIRM_SUMMON	prompt	prompt.SUMMON	popup,sound	
+CONFIRM_TALENT_WIPE	prompt	prompt.CONFIRM_TALENT_WIPE	popup,shows_frame,sound	
+CONFIRM_XP_LOSS	prompt	prompt.CONFIRM_SPIRIT_HEALER	popup,sound	
+CORPSE_IN_INSTANCE	event	event.info	popup,sound	'your corpse is in the instance'
+CORPSE_IN_RANGE	prompt	prompt.RECLAIM_CORPSE	popup,sound	
+CORPSE_OUT_OF_RANGE	change	ext.death		
+CRITERIA_UPDATE	change	ext.achievements	shows_frame	
+CURRENCY_DISPLAY_UPDATE	change	ext.character	shows_frame	titles, currencies
+CURRENT_SPELL_CAST_CHANGED	change	base.self.casting		casts (mine and units')
+CURSOR_UPDATE	internal			client plumbing
+CVAR_UPDATE	internal		shows_frame	client plumbing
+DAMAGE_AURA_BROKEN	combat_log	ext.combat		combat log sub-event
+DAMAGE_SHIELD	combat_log	ext.combat		combat log sub-event
+DAMAGE_SHIELD_MISSED	combat_log	ext.combat		combat log sub-event
+DAMAGE_SPLIT	combat_log	ext.combat		combat log sub-event
+DELETE_ITEM_CONFIRM	prompt	prompt.CONFIRM_DELETE_ITEM	popup,sound	
+DISABLE_LOW_LEVEL_RAID	change	ext.character		
+DISABLE_TAXI_BENCHMARK	out		shows_frame	client recording and benchmarks
+DISABLE_XP_GAIN	change	ext.character		
+DISCONNECTED_FROM_SERVER	internal		shows_frame	client plumbing
+DISPLAY_SIZE_CHANGED	internal		popup,shows_frame,sound	client plumbing
+DUEL_FINISHED	event	event.duel		
+DUEL_INBOUNDS	event	event.duel		
+DUEL_OUTOFBOUNDS	event	event.duel	popup,sound	
+DUEL_REQUESTED	prompt	prompt.DUEL	popup,sound	
+ENABLE_LOW_LEVEL_RAID	change	ext.character		
+ENABLE_TAXI_BENCHMARK	out		shows_frame	client recording and benchmarks
+ENABLE_XP_GAIN	change	ext.character		
+ENCHANT_APPLIED	change	ext.character		gear, durability
+ENCHANT_REMOVED	change	ext.character		gear, durability
+END_BOUND_TRADEABLE	prompt	prompt.CONFIRM_PURCHASE	popup,sound	confirm making a refundable/tradeable item permanent
+END_REFUND	prompt	prompt.CONFIRM_PURCHASE	popup,sound	confirm making a refundable/tradeable item permanent
+ENERGIZE	not_event			a combat-text type, chat type or UI-internal name, not a client event
+ENVIRONMENTAL_DAMAGE	combat_log	ext.combat		combat log sub-event
+EQUIPMENT_SETS_CHANGED	change	ext.character	shows_frame	gear, durability
+EQUIPMENT_SWAP_FINISHED	change	ext.character	shows_frame	gear, durability
+EQUIPMENT_SWAP_PENDING	change	ext.character		gear, durability
+EQUIP_BIND_CONFIRM	prompt	prompt.CONFIRM_BIND_ON_PICKUP	popup,sound	
+EVERYTHING	not_event		shows_frame	a combat-text type, chat type or UI-internal name, not a client event
+EXECUTE_CHAT_LINE	internal			client plumbing
+FORCE_DECLINE_CHARACTER	out			login screens, billing, account
+FORCE_RENAME_CHARACTER	out		shows_frame	login screens, billing, account
+FRAMES_LOADED	internal			client plumbing
+FRIENDLIST_SHOW	not_event		shows_frame	a combat-text type, chat type or UI-internal name, not a client event
+FRIENDLIST_UPDATE	change	ext.social		friends online, guild, channels
+GAME_ACCOUNTS_UPDATED	out			login screens, billing, account
+GET_PREFERRED_REALM_INFO	out		shows_frame	login screens, billing, account
+GLUE_SCREENSHOT_FAILED	out			login screens, billing, account
+GLUE_SCREENSHOT_SUCCEEDED	out			login screens, billing, account
+GLYPH_ADDED	change	ext.talents		
+GLYPH_DISABLED	change	ext.talents		
+GLYPH_ENABLED	change	ext.talents		
+GLYPH_REMOVED	change	ext.talents	sound	
+GLYPH_UPDATED	change	ext.talents	sound	
+GMRESPONSE_RECEIVED	out		shows_frame	GM tools and tickets
+GMSURVEY_DISPLAY	out		flash,shows_frame	GM tools and tickets
+GM_PLAYER_INFO	out			GM tools and tickets
+GOSSIP_CLOSED	panel	ext.interaction		NPC dialog
+GOSSIP_CONFIRM	panel	ext.interaction	popup,sound	NPC dialog
+GOSSIP_CONFIRM_CANCEL	panel	ext.interaction		NPC dialog
+GOSSIP_ENTER_CODE	panel	ext.interaction	popup,sound	NPC dialog
+GOSSIP_SHOW	panel	ext.interaction	shows_frame	NPC dialog
+GUILDBANKBAGSLOTS_CHANGED	panel	ext.interaction		guild bank
+GUILDBANKFRAME_CLOSED	panel	ext.interaction		guild bank
+GUILDBANKFRAME_OPENED	panel	ext.interaction	shows_frame	guild bank
+GUILDBANKLOG_UPDATE	panel	ext.interaction	shows_frame	guild bank
+GUILDBANK_ITEM_LOCK_CHANGED	panel	ext.interaction	shows_frame	guild bank
+GUILDBANK_TEXT_CHANGED	panel	ext.interaction		guild bank
+GUILDBANK_UPDATE_MONEY	panel	ext.interaction		guild bank
+GUILDBANK_UPDATE_TABS	panel	ext.interaction		guild bank
+GUILDBANK_UPDATE_TEXT	panel	ext.interaction		guild bank
+GUILDBANK_UPDATE_WITHDRAWMONEY	panel	ext.interaction	shows_frame	guild bank
+GUILDTABARD_UPDATE	panel	ext.interaction		charters, tabards
+GUILD_EVENT_LOG_UPDATE	change	ext.social		friends online, guild, channels
+GUILD_INVITE_CANCEL	change	ext.social		friends online, guild, channels
+GUILD_INVITE_REQUEST	prompt	prompt.GUILD_INVITE	popup,sound	
+GUILD_MOTD	change	ext.social		friends online, guild, channels
+GUILD_REGISTRAR_CLOSED	panel	ext.interaction		charters, tabards
+GUILD_REGISTRAR_SHOW	panel	ext.interaction	shows_frame	charters, tabards
+GUILD_ROSTER_UPDATE	change	ext.social	shows_frame	friends online, guild, channels
+HEAL	not_event			a combat-text type, chat type or UI-internal name, not a client event
+HONOR_CURRENCY_UPDATE	change	ext.pvp		
+IGNORELIST_UPDATE	change	ext.social	flash,shows_frame	friends online, guild, channels
+IGR_BILLING_NAG_DIALOG	out		popup,sound	login screens, billing, account
+IMMUNE	not_event			a combat-text type, chat type or UI-internal name, not a client event
+INCOMING	not_event			a combat-text type, chat type or UI-internal name, not a client event
+INSPECT_ACHIEVEMENT_READY	change	ext.achievements		
+INSPECT_HONOR_UPDATE	change	ext.pvp	shows_frame	
+INSPECT_TALENT_READY	panel	ext.interaction		inspect
+INSTANCE_BOOT_START	event	event.instance	popup,sound	
+INSTANCE_BOOT_STOP	event	event.instance		
+INSTANCE_ENCOUNTER_ENGAGE_UNIT	change	ext.encounter		boss frames
+INSTANCE_LOCK_START	prompt	prompt.CONFIRM_INSTANCE_LOCK	popup,sound	
+INSTANCE_LOCK_STOP	event	event.instance		
+ITEM_LOCKED	internal			client plumbing
+ITEM_LOCK_CHANGED	internal			client plumbing
+ITEM_PUSH	event	event.item_received	shows_frame	
+ITEM_TEXT_BEGIN	panel	ext.interaction		books and letters
+ITEM_TEXT_CLOSED	panel	ext.interaction		books and letters
+ITEM_TEXT_READY	panel	ext.interaction	shows_frame	books and letters
+ITEM_TEXT_TRANSLATION	panel	ext.interaction	shows_frame	books and letters
+ITEM_UNLOCKED	internal			client plumbing
+KNOWLEDGE_BASE_ARTICLE_LOAD_FAILURE	out		shows_frame	GM tools and tickets
+KNOWLEDGE_BASE_ARTICLE_LOAD_SUCCESS	out		shows_frame	GM tools and tickets
+KNOWLEDGE_BASE_QUERY_LOAD_FAILURE	out		shows_frame	GM tools and tickets
+KNOWLEDGE_BASE_QUERY_LOAD_SUCCESS	out		shows_frame	GM tools and tickets
+KNOWLEDGE_BASE_SERVER_MESSAGE	out		shows_frame	GM tools and tickets
+KNOWLEDGE_BASE_SETUP_LOAD_FAILURE	out		shows_frame	GM tools and tickets
+KNOWLEDGE_BASE_SETUP_LOAD_SUCCESS	out		shows_frame	GM tools and tickets
+KNOWLEDGE_BASE_SYSTEM_MOTD_UPDATE	not_event		shows_frame	a combat-text type, chat type or UI-internal name, not a client event
+KNOWLEDGE_BASE_SYSTEM_MOTD_UPDATED	out			GM tools and tickets
+KNOWN_CURRENCY_TYPES_UPDATE	change	ext.character		titles, currencies
+KNOWN_TITLES_UPDATE	change	ext.character		titles, currencies
+LANGUAGE_LIST_CHANGED	internal			client plumbing
+LEARNED_SPELL_IN_TAB	change	ext.spellbook	shows_frame	
+LEVEL_GRANT_PROPOSED	out		popup,sound	recruit-a-friend level grant
+LFG_BOOT_PROPOSAL_UPDATE	prompt	prompt.LFG_BOOT_VOTE	popup,sound	
+LFG_COMPLETION_REWARD	event	event.lfg	alert_frame,shows_frame,sound	
+LFG_LOCK_INFO_RECEIVED	change	ext.dungeon_finder	shows_frame	
+LFG_OFFER_CONTINUE	prompt	prompt.LFG_OFFER_CONTINUE	popup,sound	
+LFG_OPEN_FROM_GOSSIP	change	ext.dungeon_finder	shows_frame	
+LFG_PROPOSAL_FAILED	event	event.lfg	sound	
+LFG_PROPOSAL_SHOW	prompt	prompt.LFG_PROPOSAL	sound	
+LFG_PROPOSAL_SUCCEEDED	event	event.lfg		
+LFG_PROPOSAL_UPDATE	event	event.lfg	shows_frame,sound	
+LFG_QUEUE_STATUS_UPDATE	event	event.lfg		
+LFG_ROLE_CHECK_HIDE	event	event.lfg	shows_frame	
+LFG_ROLE_CHECK_ROLE_CHOSEN	event	event.lfg	shows_frame	
+LFG_ROLE_CHECK_SHOW	prompt	prompt.ROLE_CHECK	shows_frame	
+LFG_ROLE_CHECK_UPDATE	event	event.lfg		
+LFG_ROLE_UPDATE	change	ext.party		
+LFG_UPDATE	event	event.lfg	shows_frame	
+LFG_UPDATE_RANDOM_INFO	change	ext.dungeon_finder	shows_frame,sound	
+LOCALPLAYER_PET_RENAMED	change	ext.pet		
+LOGOUT_CANCEL	change	base.self.camping		
+LOOT_BIND_CONFIRM	prompt	prompt.CONFIRM_BIND_ON_PICKUP	popup,sound	
+LOOT_CLOSED	panel	ext.trade_loot		loot window
+LOOT_OPENED	panel	ext.trade_loot	shows_frame	loot window
+LOOT_SLOT_CHANGED	panel	ext.trade_loot		loot window
+LOOT_SLOT_CLEARED	panel	ext.trade_loot	shows_frame	loot window
+MACRO_ACTION_BLOCKED	internal			client plumbing
+MACRO_ACTION_FORBIDDEN	internal		popup,sound	client plumbing
+MAIL_CLOSED	panel	ext.interaction		mailbox
+MAIL_FAILED	event	event.info		mail result
+MAIL_INBOX_UPDATE	panel	ext.interaction	popup,shows_frame,sound	mailbox
+MAIL_LOCK_SEND_ITEMS	panel	ext.interaction	popup,shows_frame,sound	mailbox
+MAIL_SEND_INFO_UPDATE	panel	ext.interaction	sound	mailbox
+MAIL_SEND_SUCCESS	event	event.info	shows_frame,sound	mail result
+MAIL_SHOW	panel	ext.interaction	shows_frame,sound	mailbox
+MAIL_SUCCESS	event	event.info		mail result
+MAIL_UNLOCK_SEND_ITEMS	panel	ext.interaction		mailbox
+MERCHANT_CLOSED	panel	ext.interaction		vendor
+MERCHANT_SHOW	panel	ext.interaction	shows_frame	vendor
+MERCHANT_UPDATE	panel	ext.interaction	shows_frame	vendor
+MINIGAME_UPDATE	out			unused in 3.3.5a
+MINIMAP_PING	event	event.minimap_ping	sound	
+MINIMAP_UPDATE_TRACKING	change	ext.minimap		
+MINIMAP_UPDATE_ZOOM	internal			client plumbing
+MIRROR_TIMER_PAUSE	change	ext.environment		breath, fatigue, feign death bars
+MIRROR_TIMER_START	change	ext.environment		breath, fatigue, feign death bars
+MIRROR_TIMER_STOP	change	ext.environment		breath, fatigue, feign death bars
+MODIFIER_STATE_CHANGED	internal		shows_frame	client plumbing
+MOVIE_COMPRESSING_PROGRESS	out		shows_frame	client recording and benchmarks
+MOVIE_RECORDING_PROGRESS	out			client recording and benchmarks
+MOVIE_UNCOMPRESSED_MOVIE	out		shows_frame,sound	client recording and benchmarks
+MUTELIST_UPDATE	change	ext.social		friends online, guild, channels
+NEW_AUCTION_UPDATE	event	event.auction	popup,sound	
+NEW_TITLE_EARNED	not_event			a combat-text type, chat type or UI-internal name, not a client event
+NPC_PVPQUEUE_ANYWHERE	change	ext.pvp	shows_frame	
+OLD_TITLE_LOST	not_event			a combat-text type, chat type or UI-internal name, not a client event
+OPEN_MASTER_LOOT_LIST	panel	ext.trade_loot	shows_frame	loot window
+OPEN_REALM_LIST	out		shows_frame	login screens, billing, account
+OPEN_STATUS_DIALOG	out		shows_frame	login screens, billing, account
+OPEN_TABARD_FRAME	panel	ext.interaction	shows_frame	charters, tabards
+OUTGOING	not_event			a combat-text type, chat type or UI-internal name, not a client event
+OUTGOING_ME	not_event		shows_frame	a combat-text type, chat type or UI-internal name, not a client event
+PARTY_CONVERTED_TO_RAID	change	ext.party		
+PARTY_INVITE_CANCEL	change	ext.social		friends online, guild, channels
+PARTY_INVITE_REQUEST	prompt	prompt.GROUP_INVITE	popup,sound	
+PARTY_KILL	combat_log	ext.combat		combat log sub-event
+PARTY_LEADER_CHANGED	change	ext.party	shows_frame	
+PARTY_LFG_RESTRICTED	event	event.lfg	shows_frame	
+PARTY_LOOT_METHOD_CHANGED	change	ext.party		
+PARTY_MEMBERS_CHANGED	change	ext.party	flash,shows_frame	
+PARTY_MEMBER_DISABLE	change	ext.party	shows_frame	
+PARTY_MEMBER_ENABLE	change	ext.party		
+PATCH_DOWNLOADED	out			login screens, billing, account
+PATCH_UPDATE_PROGRESS	out			login screens, billing, account
+PETITION_CLOSED	panel	ext.interaction		charters, tabards
+PETITION_SHOW	panel	ext.interaction	shows_frame	charters, tabards
+PETITION_VENDOR_CLOSED	panel	ext.interaction		charters, tabards
+PETITION_VENDOR_SHOW	panel	ext.interaction	shows_frame	charters, tabards
+PETITION_VENDOR_UPDATE	panel	ext.interaction	shows_frame	charters, tabards
+PET_ATTACK_START	change	ext.pet		
+PET_ATTACK_STOP	change	ext.pet		
+PET_BAR_HIDE	change	ext.pet		
+PET_BAR_HIDEGRID	internal			client plumbing
+PET_BAR_SHOWGRID	internal		shows_frame	client plumbing
+PET_BAR_UPDATE	change	ext.pet		
+PET_BAR_UPDATE_COOLDOWN	change	ext.pet		
+PET_BAR_UPDATE_USABLE	change	ext.pet		
+PET_DISMISS_START	change	ext.pet		
+PET_FORCE_NAME_DECLENSION	internal			client plumbing
+PET_RENAMEABLE	prompt	prompt.PET_NAME	popup,sound	
+PET_SPELL_POWER_UPDATE	change	ext.pet	shows_frame	
+PET_STABLE_CLOSED	change	ext.pet		
+PET_STABLE_SHOW	change	ext.pet	shows_frame	
+PET_STABLE_UPDATE	change	ext.pet		
+PET_STABLE_UPDATE_PAPERDOLL	change	ext.pet		
+PET_TALENT_UPDATE	change	ext.pet	shows_frame	
+PET_UI_CLOSE	change	ext.pet		
+PET_UI_UPDATE	change	ext.pet	shows_frame	
+PLAYERBANKBAGSLOTS_CHANGED	panel	ext.interaction	shows_frame	bank
+PLAYERBANKSLOTS_CHANGED	panel	ext.interaction	shows_frame	bank
+PLAYER_ALIVE	event	event.resurrected		
+PLAYER_AURAS_CHANGED	change	base.self.unit		auras (buffs, debuffs, crowd control)
+PLAYER_CAMPING	change	base.self.camping	popup,sound	
+PLAYER_CONTROL_GAINED	change	base.self.control		feared, charmed, stunned, on a taxi
+PLAYER_CONTROL_LOST	change	base.self.control		feared, charmed, stunned, on a taxi
+PLAYER_DAMAGE_DONE_MODS	internal			client plumbing
+PLAYER_DEAD	event	event.died	popup,sound	
+PLAYER_DIFFICULTY_CHANGED	event	event.instance		
+PLAYER_ENTERING_BATTLEGROUND	event	event.battleground	flash	
+PLAYER_ENTERING_WORLD	event	event.zone_changed	flash,popup,shows_frame,sound	after a loading screen: login, teleport, instance portal
+PLAYER_ENTER_COMBAT	change	base.self.in_combat		entering / leaving combat; auto-attack on/off
+PLAYER_ENTER_MATRIX	out		shows_frame	login screens, billing, account
+PLAYER_ENTER_PIN	out		alert_frame,shows_frame,sound	login screens, billing, account
+PLAYER_ENTER_TOKEN	out			login screens, billing, account
+PLAYER_EQUIPMENT_CHANGED	change	ext.character		gear, durability
+PLAYER_FARSIGHT_FOCUS_CHANGED	change	base.self.control		the camera moved to another unit (Eye of Kilrogg, Far Sight)
+PLAYER_FLAGS_CHANGED	change	base.self.pvp_flagged		PvP flag, AFK/DND
+PLAYER_FOCUS_CHANGED	change	ext.target	shows_frame,sound	focus
+PLAYER_GAINS_VEHICLE_DATA	change	ext.vehicle	shows_frame	
+PLAYER_GUILD_UPDATE	change	ext.social	shows_frame	friends online, guild, channels
+PLAYER_LEAVE_COMBAT	change	base.self.in_combat		entering / leaving combat; auto-attack on/off
+PLAYER_LEAVING_WORLD	internal			client plumbing
+PLAYER_LEVEL_UP	event	event.level_up	shows_frame,sound	
+PLAYER_LOGIN	internal		shows_frame	client plumbing
+PLAYER_LOGOUT	internal			client plumbing
+PLAYER_LOSES_VEHICLE_DATA	change	ext.vehicle	shows_frame	
+PLAYER_MONEY	change	base.self.money	flash,shows_frame	
+PLAYER_PVP_KILLS_CHANGED	change	ext.pvp		
+PLAYER_PVP_RANK_CHANGED	change	ext.pvp	shows_frame	
+PLAYER_QUITING	change	base.self.camping	popup,sound	
+PLAYER_REGEN_DISABLED	change	base.self.in_combat	flash,shows_frame	entering / leaving combat; auto-attack on/off
+PLAYER_REGEN_ENABLED	change	base.self.in_combat		entering / leaving combat; auto-attack on/off
+PLAYER_ROLES_ASSIGNED	change	ext.party		
+PLAYER_SKINNED	event	event.info	error_line,popup,sound	your corpse was looted for insignia (PvP)
+PLAYER_TALENT_UPDATE	change	ext.talents		
+PLAYER_TARGET_CHANGED	change	ext.target	shows_frame,sound	
+PLAYER_TOTEM_UPDATE	change	ext.pet	shows_frame	totems
+PLAYER_TRADE_MONEY	change	base.self.money	shows_frame,sound	
+PLAYER_UNGHOST	event	event.resurrected		
+PLAYER_UPDATE_RESTING	change	base.self.resting		
+PLAYER_XP_UPDATE	change	base.self.xp		
+PLAYTIME_CHANGED	out			login screens, billing, account
+PLAY_MOVIE	event	event.cinematic		
+PREVIEW_PET_TALENT_POINTS_CHANGED	change	ext.pet	shows_frame	
+PREVIEW_TALENT_POINTS_CHANGED	change	ext.talents	shows_frame	
+PVPQUEUE_ANYWHERE_SHOW	change	ext.pvp		
+PVPQUEUE_ANYWHERE_UPDATE_AVAILABLE	change	ext.pvp		
+QUEST_ACCEPTED	event	event.quest_accepted	shows_frame	
+QUEST_ACCEPT_CONFIRM	prompt	prompt.QUEST_SHARE	popup,sound	
+QUEST_COMPLETE	panel	ext.interaction	shows_frame	NPC dialog
+QUEST_DETAIL	panel	ext.interaction	shows_frame	NPC dialog
+QUEST_FINISHED	panel	ext.interaction		NPC dialog
+QUEST_GREETING	panel	ext.interaction	shows_frame	NPC dialog
+QUEST_ITEM_UPDATE	change	ext.quest_log	shows_frame	quest progress
+QUEST_LOG_UPDATE	change	ext.quest_log	flash,shows_frame	quest progress
+QUEST_POI_UPDATE	change	ext.quest_log	shows_frame	quest progress
+QUEST_PROGRESS	panel	ext.interaction	shows_frame	NPC dialog
+QUEST_QUERY_COMPLETE	internal			client plumbing
+QUEST_WATCH_UPDATE	change	ext.quest_log	shows_frame	quest progress
+RAID_INSTANCE_WELCOME	event	event.instance		
+RAID_ROSTER_UPDATE	change	ext.raid	flash,shows_frame	roster, raid markers, ready check answers
+RAID_TARGET_UPDATE	change	ext.raid		roster, raid markers, ready check answers
+RAISED_AS_GHOUL	change	ext.death		
+RANGE_DAMAGE	combat_log	ext.combat		combat log sub-event
+RANGE_MISSED	combat_log	ext.combat		combat log sub-event
+READY_CHECK	prompt	prompt.READY_CHECK	shows_frame	
+READY_CHECK_CONFIRM	change	ext.raid	flash,shows_frame	roster, raid markers, ready check answers
+READY_CHECK_FINISHED	change	ext.raid		roster, raid markers, ready check answers
+RECEIVED_ACHIEVEMENT_LIST	change	ext.achievements		
+REPLACE_ENCHANT	prompt	prompt.CONFIRM_REPLACE_ENCHANT	popup,sound	
+RESET	not_event			a combat-text type, chat type or UI-internal name, not a client event
+RESURRECT_REQUEST	prompt	prompt.RESURRECT_OFFER	popup,sound	
+REVERT	not_event			a combat-text type, chat type or UI-internal name, not a client event
+RUNE_POWER_UPDATE	value	base.self.runes		
+RUNE_TYPE_UPDATE	value	base.self.runes		
+SAVE	not_event		popup,sound	a combat-text type, chat type or UI-internal name, not a client event
+SCANDLL_DOWNLOADING	out			login screens, billing, account
+SCANDLL_ERROR	out			login screens, billing, account
+SCANDLL_FINISHED	out		shows_frame,sound	login screens, billing, account
+SCREENSHOT_FAILED	out			client recording and benchmarks
+SCREENSHOT_SUCCEEDED	out			client recording and benchmarks
+SELECT_FIRST_CHARACTER	out		shows_frame,sound	login screens, billing, account
+SELECT_LAST_CHARACTER	out			login screens, billing, account
+SEND_MAIL_COD_CHANGED	panel	ext.interaction		mailbox
+SEND_MAIL_MONEY_CHANGED	panel	ext.interaction		mailbox
+SERVER_SPLIT_NOTICE	out			login screens, billing, account
+SET_GLUE_SCREEN	out		shows_frame	login screens, billing, account
+SHOW_COMPARE_TOOLTIP	not_event			a combat-text type, chat type or UI-internal name, not a client event
+SHOW_SERVER_ALERT	event	event.info	alert_frame,shows_frame	server announcement
+SHOW_SURVEY_NOTIFICATION	out		shows_frame	GM tools and tickets
+SKILL_LINES_CHANGED	change	ext.skills	shows_frame,sound	
+SOCKET_INFO_CLOSE	panel	ext.interaction		gem sockets
+SOCKET_INFO_UPDATE	panel	ext.interaction	popup,shows_frame,sound	gem sockets
+SOUND_DEVICE_UPDATE	internal			client plumbing
+SPELLS_CHANGED	change	ext.spellbook	sound	
+SPELL_AURA_APPLIED	combat_log	ext.combat		combat log sub-event
+SPELL_AURA_APPLIED_DOSE	combat_log	ext.combat		combat log sub-event
+SPELL_AURA_BROKEN	combat_log	ext.combat		combat log sub-event
+SPELL_AURA_BROKEN_SPELL	combat_log	ext.combat		combat log sub-event
+SPELL_AURA_REFRESH	combat_log	ext.combat		combat log sub-event
+SPELL_AURA_REMOVED	combat_log	ext.combat		combat log sub-event
+SPELL_AURA_REMOVED_DOSE	combat_log	ext.combat		combat log sub-event
+SPELL_BUILDING_DAMAGE	combat_log	ext.combat		combat log sub-event
+SPELL_BUILDING_HEAL	combat_log	ext.combat		combat log sub-event
+SPELL_CAST_FAILED	combat_log	ext.combat		combat log sub-event
+SPELL_CAST_START	combat_log	ext.combat		combat log sub-event
+SPELL_CAST_SUCCESS	combat_log	ext.combat		combat log sub-event
+SPELL_CREATE	combat_log	ext.combat		combat log sub-event
+SPELL_DAMAGE	combat_log	ext.combat		combat log sub-event
+SPELL_DISPEL	combat_log	ext.combat		combat log sub-event
+SPELL_DISPEL_FAILED	combat_log	ext.combat		combat log sub-event
+SPELL_DRAIN	combat_log	ext.combat		combat log sub-event
+SPELL_DURABILITY_DAMAGE	combat_log	ext.combat		combat log sub-event
+SPELL_DURABILITY_DAMAGE_ALL	combat_log	ext.combat		combat log sub-event
+SPELL_ENERGIZE	combat_log	ext.combat		combat log sub-event
+SPELL_EXTRA_ATTACKS	combat_log	ext.combat		combat log sub-event
+SPELL_HEAL	combat_log	ext.combat		combat log sub-event
+SPELL_INSTAKILL	combat_log	ext.combat		combat log sub-event
+SPELL_INTERRUPT	combat_log	ext.combat		combat log sub-event
+SPELL_LEECH	combat_log	ext.combat		combat log sub-event
+SPELL_MISSED	combat_log	ext.combat		combat log sub-event
+SPELL_PERIODIC_DAMAGE	combat_log	ext.combat		combat log sub-event
+SPELL_PERIODIC_DRAIN	combat_log	ext.combat		combat log sub-event
+SPELL_PERIODIC_ENERGIZE	combat_log	ext.combat		combat log sub-event
+SPELL_PERIODIC_HEAL	combat_log	ext.combat		combat log sub-event
+SPELL_PERIODIC_LEECH	combat_log	ext.combat		combat log sub-event
+SPELL_PERIODIC_MISSED	combat_log	ext.combat		combat log sub-event
+SPELL_RESURRECT	combat_log	ext.combat		combat log sub-event
+SPELL_STOLEN	combat_log	ext.combat		combat log sub-event
+SPELL_SUMMON	combat_log	ext.combat		combat log sub-event
+SPELL_UPDATE_COOLDOWN	value	ext.action_bars		cooldowns, usable, range
+SPELL_UPDATE_USABLE	value	ext.action_bars		cooldowns, usable, range
+START_AUTOREPEAT_SPELL	change	base.self.casting		casts (mine and units')
+START_GLUE_MUSIC	out			login screens, billing, account
+START_LOOT_ROLL	event	event.loot_roll		
+START_MINIGAME	out		shows_frame	unused in 3.3.5a
+STOP_AUTOREPEAT_SPELL	change	base.self.casting		casts (mine and units')
+SUGGEST_REALM	out		shows_frame	login screens, billing, account
+SUGGEST_REALM_WRONG_CATEGORY	out			login screens, billing, account
+SUGGEST_REALM_WRONG_PVP	out			login screens, billing, account
+SWING_DAMAGE	combat_log	ext.combat		combat log sub-event
+SWING_MISSED	combat_log	ext.combat		combat log sub-event
+SYNCHRONIZE_SETTINGS	internal			client plumbing
+SYSMSG	not_event			a combat-text type, chat type or UI-internal name, not a client event
+TABARD_CANSAVE_CHANGED	panel	ext.interaction		charters, tabards
+TABARD_SAVE_PENDING	panel	ext.interaction		charters, tabards
+TALENTS_INVOLUNTARILY_RESET	event	event.info	popup,sound	
+TAXIMAP_CLOSED	panel	ext.interaction		flight master
+TAXIMAP_OPENED	panel	ext.interaction	shows_frame	flight master
+TIMER_ALERT	internal			client plumbing
+TIME_PLAYED_MSG	internal			client plumbing
+TRACKED_ACHIEVEMENT_UPDATE	change	ext.achievements	flash,shows_frame	
+TRADE_ACCEPT_UPDATE	panel	ext.trade_loot		trade window
+TRADE_CLOSED	panel	ext.trade_loot		trade window
+TRADE_MONEY_CHANGED	panel	ext.trade_loot		trade window
+TRADE_PLAYER_ITEM_CHANGED	panel	ext.trade_loot		trade window
+TRADE_POTENTIAL_BIND_ENCHANT	prompt	prompt.CONFIRM_REPLACE_ENCHANT	popup,sound	
+TRADE_REPLACE_ENCHANT	prompt	prompt.CONFIRM_REPLACE_ENCHANT	popup,sound	
+TRADE_REQUEST	prompt	prompt.TRADE	popup,sound	
+TRADE_REQUEST_CANCEL	change	ext.social		friends online, guild, channels
+TRADE_SHOW	prompt	prompt.TRADE		
+TRADE_SKILL_CLOSE	panel	ext.interaction		profession window
+TRADE_SKILL_FILTER_UPDATE	panel	ext.interaction	shows_frame	profession window
+TRADE_SKILL_SHOW	panel	ext.interaction	shows_frame	profession window
+TRADE_SKILL_UPDATE	panel	ext.interaction		profession window
+TRADE_TARGET_ITEM_CHANGED	panel	ext.trade_loot		trade window
+TRADE_UPDATE	panel	ext.trade_loot	shows_frame	trade window
+TRAINER_CLOSED	panel	ext.interaction		trainer
+TRAINER_DESCRIPTION_UPDATE	panel	ext.interaction	shows_frame	trainer
+TRAINER_SHOW	panel	ext.interaction	shows_frame	trainer
+TRAINER_UPDATE	panel	ext.interaction	shows_frame	trainer
+TUTORIAL_TRIGGER	internal		shows_frame	client plumbing
+UI_ERROR_MESSAGE	event	event.error		red error text
+UI_INFO_MESSAGE	event	event.info		yellow info text
+UNIT_ATTACK	change	base.self.auto_attack		
+UNIT_ATTACK_POWER	change	ext.character		stats on the character sheet
+UNIT_ATTACK_SPEED	change	ext.character		stats on the character sheet
+UNIT_AURA	change	base.self.unit		auras (buffs, debuffs, crowd control)
+UNIT_CLASSIFICATION_CHANGED	change	base.nearby.units		a unit's reaction, flags, level
+UNIT_COMBAT	change	ext.combat	combat_feedback	damage/heal shown on a portrait (combat feedback)
+UNIT_COMBO_POINTS	value	base.self	shows_frame	health and power (mine and units')
+UNIT_DAMAGE	change	ext.character		stats on the character sheet
+UNIT_DEFENSE	change	ext.character		stats on the character sheet
+UNIT_DESTROYED	combat_log	ext.combat		combat log sub-event
+UNIT_DIED	combat_log	ext.combat		combat log sub-event
+UNIT_DISPLAYPOWER	change	base.nearby.units		a unit's reaction, flags, level
+UNIT_DISSIPATES	combat_log	ext.combat		combat log sub-event
+UNIT_ENERGY	value	base.self		health and power (mine and units')
+UNIT_ENTERED_VEHICLE	change	ext.vehicle	flash,shows_frame,sound	
+UNIT_ENTERING_VEHICLE	change	ext.vehicle	shows_frame	
+UNIT_EXITED_VEHICLE	change	ext.vehicle	flash,shows_frame,sound	
+UNIT_EXITING_VEHICLE	change	ext.vehicle	shows_frame	
+UNIT_FACTION	change	base.nearby.units	sound	a unit's reaction, flags, level
+UNIT_FLAGS	change	base.nearby.units		a unit's reaction, flags, level
+UNIT_FOCUS	value	base.self		health and power (mine and units')
+UNIT_HAPPINESS	change	ext.pet	shows_frame	
+UNIT_HEALTH	value	base.self		health and power (mine and units')
+UNIT_INVENTORY_CHANGED	change	ext.character		gear, durability
+UNIT_LEVEL	change	base.nearby.units		a unit's reaction, flags, level
+UNIT_MANA	value	base.self		health and power (mine and units')
+UNIT_MAXENERGY	value	base.self		health and power (mine and units')
+UNIT_MAXFOCUS	value	base.self		health and power (mine and units')
+UNIT_MAXHAPPINESS	change	ext.pet		
+UNIT_MAXHEALTH	value	base.self		health and power (mine and units')
+UNIT_MAXMANA	value	base.self		health and power (mine and units')
+UNIT_MAXRAGE	value	base.self		health and power (mine and units')
+UNIT_MAXRUNIC_POWER	value	base.self		health and power (mine and units')
+UNIT_MODEL_CHANGED	internal			client plumbing
+UNIT_NAME_UPDATE	internal		shows_frame,sound	client plumbing
+UNIT_PET	change	ext.pet	flash,shows_frame	
+UNIT_PET_EXPERIENCE	change	ext.pet		
+UNIT_PORTRAIT_UPDATE	internal			client plumbing
+UNIT_QUEST_LOG_CHANGED	change	ext.quest_log	shows_frame	quest progress
+UNIT_RAGE	value	base.self		health and power (mine and units')
+UNIT_RANGEDDAMAGE	change	ext.character		stats on the character sheet
+UNIT_RANGED_ATTACK_POWER	change	ext.character	shows_frame	stats on the character sheet
+UNIT_RESISTANCES	change	ext.character	shows_frame	stats on the character sheet
+UNIT_RUNIC_POWER	value	base.self	shows_frame	health and power (mine and units')
+UNIT_SPELLCAST_CHANNEL_START	change	base.self.casting		casts (mine and units')
+UNIT_SPELLCAST_CHANNEL_STOP	change	base.self.casting		casts (mine and units')
+UNIT_SPELLCAST_CHANNEL_UPDATE	change	base.self.casting		casts (mine and units')
+UNIT_SPELLCAST_DELAYED	change	base.self.casting		casts (mine and units')
+UNIT_SPELLCAST_FAILED	change	base.self.casting		casts (mine and units')
+UNIT_SPELLCAST_FAILED_QUIET	change	base.self.casting		casts (mine and units')
+UNIT_SPELLCAST_INTERRUPTED	change	base.self.casting		casts (mine and units')
+UNIT_SPELLCAST_INTERRUPTIBLE	change	base.self.casting		casts (mine and units')
+UNIT_SPELLCAST_NOT_INTERRUPTIBLE	change	base.self.casting		casts (mine and units')
+UNIT_SPELLCAST_SENT	change	base.self.casting		casts (mine and units')
+UNIT_SPELLCAST_START	change	base.self.casting		casts (mine and units')
+UNIT_SPELLCAST_STOP	change	base.self.casting		casts (mine and units')
+UNIT_SPELLCAST_SUCCEEDED	change	base.self.casting		casts (mine and units')
+UNIT_STATS	change	ext.character		stats on the character sheet
+UNIT_TARGET	change	base.nearby.units		who a unit is targeting
+UNIT_THREAT_LIST_UPDATE	change	base.nearby.units		threat (aggro) on units
+UNIT_THREAT_SITUATION_UPDATE	change	base.nearby.units		threat (aggro) on units
+UPDATE_BATTLEFIELD_SCORE	change	ext.battleground		world states, scores
+UPDATE_BATTLEFIELD_STATUS	event	event.battleground	shows_frame	
+UPDATE_BINDINGS	internal			client plumbing
+UPDATE_BONUS_ACTIONBAR	change	ext.vehicle	shows_frame	
+UPDATE_CHAT_COLOR	internal		flash	client plumbing
+UPDATE_CHAT_COLOR_NAME_BY_CLASS	internal			client plumbing
+UPDATE_CHAT_WINDOWS	internal			client plumbing
+UPDATE_EXHAUSTION	change	base.self.resting		
+UPDATE_FACTION	change	ext.reputation	shows_frame	
+UPDATE_FLOATING_CHAT_WINDOWS	internal		flash,shows_frame	client plumbing
+UPDATE_GM_STATUS	out		popup,sound	GM tools and tickets
+UPDATE_INSTANCE_INFO	event	event.instance		
+UPDATE_INVENTORY_ALERTS	change	ext.character		gear, durability
+UPDATE_INVENTORY_DURABILITY	change	ext.character		gear, durability
+UPDATE_LFG_LIST	change	ext.dungeon_finder	shows_frame	
+UPDATE_LFG_LIST_INCREMENTAL	change	ext.dungeon_finder		
+UPDATE_LFG_TYPES	change	ext.dungeon_finder		
+UPDATE_MACROS	internal			client plumbing
+UPDATE_MASTER_LOOT_LIST	panel	ext.trade_loot		loot window
+UPDATE_MOUSEOVER_UNIT	internal			client plumbing
+UPDATE_MULTI_CAST_ACTIONBAR	value	ext.action_bars	shows_frame	cooldowns, usable, range
+UPDATE_PENDING_MAIL	event	event.mail_received		
+UPDATE_SELECTED_CHARACTER	out			login screens, billing, account
+UPDATE_SELECTED_RACE	out			login screens, billing, account
+UPDATE_SHAPESHIFT_COOLDOWN	change	base.self.form		
+UPDATE_SHAPESHIFT_FORM	change	base.self.form		
+UPDATE_SHAPESHIFT_FORMS	change	base.self.form	shows_frame	
+UPDATE_SHAPESHIFT_USABLE	change	base.self.form		
+UPDATE_STATUS_DIALOG	out			login screens, billing, account
+UPDATE_STEALTH	change	base.self.unit		auras (buffs, debuffs, crowd control)
+UPDATE_TICKET	out		shows_frame	GM tools and tickets
+UPDATE_TRADESKILL_RECAST	value	ext.action_bars		cooldowns, usable, range
+UPDATE_WORLD_STATES	change	ext.battleground	shows_frame	world states, scores
+USE_BIND_CONFIRM	prompt	prompt.CONFIRM_BIND_ON_PICKUP	popup,sound	
+USE_GLYPH	change	ext.talents	shows_frame,sound	
+VARIABLES_LOADED	internal		flash,shows_frame,sound	client plumbing
+VEHICLE_ANGLE_SHOW	change	ext.vehicle		
+VEHICLE_ANGLE_UPDATE	change	ext.vehicle		
+VEHICLE_PASSENGERS_CHANGED	change	ext.vehicle		
+VEHICLE_POWER_SHOW	change	ext.vehicle		
+VEHICLE_UPDATE	change	ext.vehicle		
+VOICE_CHANNEL_STATUS_UPDATE	out			voice chat
+VOICE_CHAT_ENABLED_UPDATE	out		shows_frame,sound	voice chat
+VOICE_LEFT_SESSION	out			voice chat
+VOICE_PLATE_START	out		flash	voice chat
+VOICE_PLATE_STOP	out			voice chat
+VOICE_PUSH_TO_TALK_START	out		sound	voice chat
+VOICE_PUSH_TO_TALK_STOP	out		sound	voice chat
+VOICE_SELF_MUTE	out			voice chat
+VOICE_SESSIONS_UPDATE	out			voice chat
+VOICE_START	out		flash	voice chat
+VOICE_STATUS_UPDATE	out		flash	voice chat
+VOICE_STOP	out		flash	voice chat
+VOTE_KICK_REASON_NEEDED	panel	ext.dungeon_finder	popup,sound	asks for a reason after the bot starts a vote kick
+WEAR_EQUIPMENT_SET	event	event.error	error_line	red error or error popup
+WHO_LIST_UPDATE	change	ext.social	shows_frame	friends online, guild, channels
+WORLD_MAP_NAME_UPDATE	panel	ext.map		
+WORLD_MAP_UPDATE	panel	ext.map	shows_frame	
+WORLD_STATE_UI_TIMER_UPDATE	change	ext.battleground		world states, scores
+WOUND	not_event			a combat-text type, chat type or UI-internal name, not a client event
+WOW_MOUSE_NOT_FOUND	internal		popup,sound	client plumbing
+ZONE_CHANGED	event	event.zone_changed	popup,shows_frame,sound	
+ZONE_CHANGED_INDOORS	event	event.zone_changed		
+ZONE_CHANGED_NEW_AREA	event	event.zone_changed	shows_frame,zone_text	
+ZONE_UNDER_ATTACK	not_event			a combat-text type, chat type or UI-internal name, not a client event
