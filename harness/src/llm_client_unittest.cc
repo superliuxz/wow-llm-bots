@@ -3,11 +3,15 @@
 #include "llm_client.h"
 
 #include <chrono>
+#include <cstddef>
 #include <nlohmann/json_fwd.hpp>
+#include <optional>
+#include <set>
 #include <string>
 #include <thread>
 
 #include "base/functional/callback.h"
+#include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/sequenced_task_runner.h"
@@ -110,6 +114,7 @@ class FakeLlamaServer {
       {
         base::AutoLock lock(lock_);
         last_body_ = request.body;
+        client_ports_.insert(request.remote_port);
         ++calls_;
       }
       if (delay_ms_ > 0) {
@@ -146,6 +151,14 @@ class FakeLlamaServer {
     return calls_;
   }
   void set_status(int status) { status_ = status; }
+  void set_keep_alive_timeout_s(int seconds) {
+    server_.set_keep_alive_timeout(seconds);
+  }
+  // The client ports the server has seen: one port is one TCP connection.
+  size_t distinct_client_ports() {
+    base::AutoLock lock(lock_);
+    return client_ports_.size();
+  }
 
  private:
   httplib::Server server_;
@@ -154,6 +167,7 @@ class FakeLlamaServer {
   base::Lock lock_;
   std::string last_body_ GUARDED_BY(lock_);
   int calls_ GUARDED_BY(lock_) = 0;
+  std::set<int> client_ports_ GUARDED_BY(lock_);
   int status_ = 200;
   int delay_ms_ = 0;
 };
@@ -189,6 +203,55 @@ TEST(LlmClientTest, NobodyListeningIsAFailureNotACrash) {
   EXPECT_NE(result.error.find("could not reach llama-server"),
             std::string::npos)
       << result.error;
+}
+
+// Asks and waits for the reply, from a sequence of our own.
+std::optional<LlmReply> AskAndWait(LlmClient& client, base::Thread& origin) {
+  base::WaitableEvent done;
+  std::optional<LlmReply> reply;
+  origin.task_runner()->PostTask([&] {
+    client.Ask(SampleRequest(), [&](LlmResult result) {
+      reply = result.reply;
+      done.Signal();
+    });
+  });
+  done.Wait();
+  return reply;
+}
+
+TEST(LlmClientTest, ConnectionsAreKeptOpenBetweenCalls) {
+  FakeLlamaServer server;
+  LlmClient client(server.endpoint(), 2);
+  base::Thread origin("origin");
+  origin.Start();
+  for (int i = 0; i < 6; ++i) {
+    ASSERT_TRUE(AskAndWait(client, origin));
+  }
+  EXPECT_EQ(server.calls(), 6);
+  EXPECT_EQ(server.distinct_client_ports(), 1u);  // One connection for all.
+}
+
+TEST(LlmClientTest, ACallThatFailedDoesNotSpoilTheNext) {
+  FakeLlamaServer server;
+  auto pool = base::MakeRefCounted<ConnectionPool>(server.endpoint());
+  ASSERT_TRUE(pool->Call(SampleRequest()).reply);
+  EXPECT_EQ(pool->idle(), 1u);
+  server.set_status(500);
+  EXPECT_FALSE(pool->Call(SampleRequest()).reply);
+  EXPECT_EQ(pool->idle(), 0u);  // The failed connection was closed.
+  server.set_status(200);
+  EXPECT_TRUE(pool->Call(SampleRequest()).reply);
+  EXPECT_EQ(pool->idle(), 1u);
+}
+
+TEST(LlmClientTest, AnIdleConnectionTheServerClosedIsOpenedAgain) {
+  FakeLlamaServer server;
+  server.set_keep_alive_timeout_s(1);  // The server hangs up on idle clients.
+  auto pool = base::MakeRefCounted<ConnectionPool>(server.endpoint());
+  ASSERT_TRUE(pool->Call(SampleRequest()).reply);
+  std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+  const LlmResult result = pool->Call(SampleRequest());
+  EXPECT_TRUE(result.reply) << result.error;
 }
 
 TEST(LlmClientTest, AskRepliesOnTheCallersSequence) {

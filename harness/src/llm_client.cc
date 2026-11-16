@@ -3,6 +3,7 @@
 #include "llm_client.h"
 
 #include <cstddef>
+#include <memory>
 #include <nlohmann/json_fwd.hpp>
 #include <string>
 #include <string_view>
@@ -10,6 +11,8 @@
 
 #include "absl/strings/str_cat.h"
 #include "base/functional/callback.h"
+#include "base/memory/ref_counted.h"
+#include "base/synchronization/lock.h"
 #include "base/task/post_task_and_reply.h"
 #include "base/time/time.h"
 #include "httplib.h"
@@ -92,14 +95,29 @@ LlmResult ParseChatReply(std::string_view body) {
   return result;
 }
 
-LlmResult CallLlama(const LlmEndpoint& endpoint, const LlmRequest& request) {
+// httplib's client reports failures as values here; it is third-party code.
+struct LlamaConnection::Impl {
+  explicit Impl(const LlmEndpoint& endpoint)
+      : endpoint(endpoint), client(endpoint.host, endpoint.port) {
+    client.set_connection_timeout(endpoint.connect_timeout_s, 0);
+    client.set_read_timeout(endpoint.reply_timeout_s, 0);
+    client.set_write_timeout(endpoint.reply_timeout_s, 0);
+    client.set_keep_alive(true);
+  }
+
+  const LlmEndpoint endpoint;
+  httplib::Client client;
+};
+
+LlamaConnection::LlamaConnection(const LlmEndpoint& endpoint)
+    : impl_(std::make_unique<Impl>(endpoint)) {}
+
+LlamaConnection::~LlamaConnection() = default;
+
+LlmResult LlamaConnection::Call(const LlmRequest& request) {
   const base::TimeTicks start = base::TimeTicks::Now();
-  // httplib's client reports failures as values here; it is third-party code.
-  httplib::Client client(endpoint.host, endpoint.port);
-  client.set_connection_timeout(endpoint.connect_timeout_s, 0);
-  client.set_read_timeout(endpoint.reply_timeout_s, 0);
-  client.set_write_timeout(endpoint.reply_timeout_s, 0);
-  const httplib::Result response = client.Post(
+  const LlmEndpoint& endpoint = impl_->endpoint;
+  const httplib::Result response = impl_->client.Post(
       "/v1/chat/completions", BuildChatBody(request), "application/json");
   LlmResult result;
   if (!response) {
@@ -117,8 +135,43 @@ LlmResult CallLlama(const LlmEndpoint& endpoint, const LlmRequest& request) {
   return result;
 }
 
+LlmResult CallLlama(const LlmEndpoint& endpoint, const LlmRequest& request) {
+  return LlamaConnection(endpoint).Call(request);
+}
+
+ConnectionPool::ConnectionPool(LlmEndpoint endpoint)
+    : endpoint_(std::move(endpoint)) {}
+
+ConnectionPool::~ConnectionPool() = default;
+
+LlmResult ConnectionPool::Call(const LlmRequest& request) {
+  std::unique_ptr<LlamaConnection> connection;
+  {
+    base::AutoLock lock(lock_);
+    if (!idle_.empty()) {
+      connection = std::move(idle_.back());
+      idle_.pop_back();
+    }
+  }
+  if (!connection) {
+    connection = std::make_unique<LlamaConnection>(endpoint_);
+  }
+  LlmResult result = connection->Call(request);
+  if (result.reply) {
+    base::AutoLock lock(lock_);
+    idle_.push_back(std::move(connection));
+  }
+  return result;
+}
+
+size_t ConnectionPool::idle() const {
+  base::AutoLock lock(lock_);
+  return idle_.size();
+}
+
 LlmClient::LlmClient(LlmEndpoint endpoint, size_t max_in_flight)
-    : endpoint_(std::move(endpoint)), pool_("llm-client", max_in_flight) {}
+    : connections_(base::MakeRefCounted<ConnectionPool>(std::move(endpoint))),
+      pool_("llm-client", max_in_flight) {}
 
 LlmClient::~LlmClient() = default;
 
@@ -126,8 +179,8 @@ void LlmClient::Ask(LlmRequest request,
                     base::OnceCallback<void(LlmResult)> reply) {
   base::PostTaskAndReplyWithResult(
       pool_,
-      [endpoint = endpoint_, request = std::move(request)]() {
-        return CallLlama(endpoint, request);
+      [connections = connections_, request = std::move(request)]() {
+        return connections->Call(request);
       },
       [reply = std::move(reply)](LlmResult result) mutable {
         std::move(reply).Run(std::move(result));
