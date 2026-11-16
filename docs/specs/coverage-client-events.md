@@ -7,7 +7,7 @@ can be told about, and nothing else is.
 
 ## Sources
 
-`tools/extract-client-ui.sh` (needs the client and a server build) extracts, into the
+`tools/audit/extract-client-ui.sh` (needs the client and a server build) extracts, into the
 untracked `out/client-ui/`:
 
 - **The default UI code** (FrameXML, GlueXML, the Blizzard_* addons: 463 files) from the
@@ -96,7 +96,7 @@ comes into view with a watch set; the bot dies; a Dungeon Finder proposal.
 ## Re-running
 
 ```
-tools/extract-client-ui.sh                       # client data -> out/client-ui
+tools/audit/extract-client-ui.sh                       # client data -> out/client-ui
 python3 -I tools/audit/client_alerts.py          # alerts per event
 python3 -I tools/audit/classify_client_events.py # adds new events to the table, as `review`
 tools/validate-snapshots.sh                      # checks the table

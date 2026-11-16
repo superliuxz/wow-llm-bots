@@ -70,7 +70,7 @@ included: use the public header and mark it `// IWYU pragma: keep`.
 
 **Before showing C++ for review or committing it, `tools/check-cpp.sh` must pass:**
 clang-format, include check, and build + unit tests in default, ASan+UBSan, TSan and MSan
-(MSan links an instrumented libc++ built by `tools/build-msan-libcxx.sh`). New code comes
+(MSan links an instrumented libc++ built by `tools/setup/build-msan-libcxx.sh`). New code comes
 with unit tests. A syscall MSan has no interceptor for gets
 `MSAN_UNPOISON` (`base/compiler_specific.h`), never a suppression.
 

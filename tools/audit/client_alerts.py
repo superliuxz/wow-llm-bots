@@ -1,6 +1,6 @@
 """Which client events make the 3.3.5a default UI alert the player.
 
-Reads the extracted UI code (tools/extract-client-ui.sh) and, for every event
+Reads the extracted UI code (tools/audit/extract-client-ui.sh) and, for every event
 handler branch (`event == "X"` up to the next branch or the end of the
 function), records the alert actions in it: sounds, popups, flashes (including
 the low-health screen flash), raid notices, error lines, alert frames, zone

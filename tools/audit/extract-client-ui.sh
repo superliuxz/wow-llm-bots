@@ -5,7 +5,7 @@
 #   out/client-ui/events_exe.txt    event names in Wow.exe's event tables
 # Needs a server build (for libmpq). Client: $WOW_CLIENT (default: WoW-3.3.5a next to the repo).
 set -euo pipefail
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 CLIENT=${WOW_CLIENT:-$(dirname "$ROOT")/WoW-3.3.5a}
 OUT=$ROOT/out/client-ui
 LIBMPQ=$ROOT/third_party/azerothcore-wotlk/deps/libmpq

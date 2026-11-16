@@ -49,7 +49,7 @@ show, with `in_los: false`, as nameplates do).
 
 The simple design: each think cycle, every bot's latest full snapshot goes to the LLM and the
 LLM answers with what to do next (goal, next step, chat, when to look again). No rules in
-C++ in between. All bots are sent at once (`tools/bench/think_cycle.py`; snapshots from
+C++ in between. All bots are sent at once (`tools/bench/think_cycle.py`, since removed: see git history before the tools cleanup; snapshots from
 `tools/bench/capture_snapshots.py`). Qwen3.6-35B-A3B Q4 on the RTX 5090, llama-server with
 25 slots x 12k context (50 slots didn't fit: this hybrid model also needs ~63 MB of recurrent
 state per slot), thinking off, ~40-token JSON replies, all valid.
@@ -253,6 +253,6 @@ prompt cache (`--cache-ram`, default 8 GB) on vs off. 100 bots: 0.5 s / 1.2 s vs
 (wake to plan, median / p95). 200 bots (GPU saturated): 3.2 s / 7.6 s vs 6.2 s / 11.9 s, one run
 each. No gain from turning it off, so it stays at the default. An earlier improvement seen
 with it off (200 bots 6.5 s to 4.4 s) also changed the slot context from 12k to 4k; the 4k is
-now the default. The stall in the burst test (`decode_bench.py`: 25 streams took 9.4 s instead
+now the default. The stall in the burst test (`decode_bench.py`, since removed: 25 streams took 9.4 s instead
 of 3.8 s with the cache on) only appears when every slot has just finished a warm-up request;
 it doesn't show in steady state or in the replay.

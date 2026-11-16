@@ -1,7 +1,7 @@
 // Extracts the 3.3.5a client's default UI code (Interface\FrameXML, GlueXML and the
 // Blizzard_* addons: .lua, .xml, .toc) from its MPQs, using AzerothCore's libmpq. Archives
 // are given highest priority first; the first copy of a file wins.
-// Usage: mpq_extract <out_dir> <mpq>...  (built and run by tools/extract-client-ui.sh)
+// Usage: mpq_extract <out_dir> <mpq>...  (built and run by tools/audit/extract-client-ui.sh)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

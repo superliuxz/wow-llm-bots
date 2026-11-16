@@ -7,7 +7,7 @@
 #   --asan  -> out/common-asan (AddressSanitizer + UndefinedBehaviorSanitizer)
 #   --tsan  -> out/common-tsan (ThreadSanitizer)
 #   --msan  -> out/common-msan (MemorySanitizer, linked against an
-#              MSan-instrumented libc++ from tools/build-msan-libcxx.sh; the
+#              MSan-instrumented libc++ from tools/setup/build-msan-libcxx.sh; the
 #              system libstdc++ isn't instrumented)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -32,7 +32,7 @@ if [ ! -f "$B/build.ninja" ]; then
     LDFLAGS="$LDFLAGS -fsanitize=$SAN"
     if [ "$SAN" = memory ]; then
       LIBCXX="$ROOT/out/llvm/msan"
-      [ -f "$LIBCXX/lib/libc++.so" ] || "$ROOT/tools/build-msan-libcxx.sh"
+      [ -f "$LIBCXX/lib/libc++.so" ] || "$ROOT/tools/setup/build-msan-libcxx.sh"
       FLAGS="$FLAGS -fsanitize-memory-track-origins -nostdinc++ -isystem $LIBCXX/include/c++/v1"
       LDFLAGS="$LDFLAGS -stdlib=libc++ -L$LIBCXX/lib -Wl,-rpath,$LIBCXX/lib -lc++abi"
     fi

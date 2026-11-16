@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Configure the AzerothCore build in out/server (clang + lld + Ninja, Percona client).
 set -euo pipefail
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cmake -S "$ROOT/third_party/azerothcore-wotlk" -B "$ROOT/out/server" -G Ninja \
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
   -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld \

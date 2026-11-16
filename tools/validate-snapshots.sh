@@ -17,5 +17,5 @@ mkdir -p "$GEN"
 "$PROTOC" -I"$ROOT/server_module/mod-llm-brain" -I"$ROOT/third_party/protobuf/src" --python_out="$GEN" \
   "$ROOT/server_module/mod-llm-brain/proto/snapshot.proto" "$ROOT/server_module/mod-llm-brain/proto/snapshot_options.proto"
 if [ $# -eq 0 ]; then set -- "$ROOT"/docs/specs/examples/*.json; fi
-"$VENV/bin/python" -I "$ROOT/tools/validate_snapshot.py" "$GEN" "$@"
+"$VENV/bin/python" -I "$ROOT/tools/snapshot/validate_snapshot.py" "$GEN" "$@"
 "$VENV/bin/python" -I -B "$ROOT/tools/audit/check_client_events.py" "$GEN"

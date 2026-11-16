@@ -8,7 +8,7 @@ generated Python code is available, otherwise as a byte count and hex preview.
 
 Dev tool only (production is C++). For JSON, generate the code once with
 tools/validate-snapshots.sh and run with the tools venv:
-  out/tools-venv/bin/python -I tools/fake_harness.py [seconds=5] [message ...]
+  out/tools-venv/bin/python -I tools/snapshot/fake_harness.py [seconds=5] [message ...]
 """
 
 import pathlib
@@ -17,7 +17,7 @@ import struct
 import sys
 import time
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 SOCK = str(ROOT / "server" / "run" / "brain.sock")
 HEADER = struct.Struct(">I")
 

@@ -3,7 +3,7 @@
 # matching the installed clang version (MSan needs every byte of C++ code
 # instrumented, including the standard library).
 set -euo pipefail
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 VER=$(clang --version | sed -n 's/.*clang version \([0-9.]*\).*/\1/p' | head -1)
 SRC="$ROOT/out/llvm/src"
 if [ ! -d "$SRC/libcxx" ]; then

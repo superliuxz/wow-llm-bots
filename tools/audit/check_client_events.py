@@ -8,7 +8,7 @@ audit, docs/specs/coverage-client-events.md). This keeps it honest:
 3. every Event kind and PromptEvent kind in the proto is produced by some
    client event, or is listed below as not coming from one (with the reason),
    so a new event or prompt can't be added without deciding where it comes from;
-4. when the extracted client data is present (tools/extract-client-ui.sh), the
+4. when the extracted client data is present (tools/audit/extract-client-ui.sh), the
    table lists exactly the client's events.
 
 Usage: python3 -I tools/audit/check_client_events.py <generated_proto_dir>

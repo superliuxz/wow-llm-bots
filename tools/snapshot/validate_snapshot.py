@@ -8,7 +8,7 @@ Each file must parse as a wlb.snapshot.Snapshot in the canonical protobuf JSON m
   - a nearby unit beyond name / nameplate range (detail MODEL) shows only model-level
     fields.
 
-Usage: out/tools-venv/bin/python -I tools/validate_snapshot.py <proto_py_dir> <file.json>...
+Usage: out/tools-venv/bin/python -I tools/snapshot/validate_snapshot.py <proto_py_dir> <file.json>...
        (tools/validate-snapshots.sh compiles the proto and checks the examples)
 """
 
