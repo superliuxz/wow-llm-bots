@@ -111,6 +111,25 @@ Strategies to apply for parity with random bots (from `AiFactory`, solo, not in 
 | `SuggestWhatToDoAction::isUseful` | random "LFG / let's do X" suggestions in chat |
 | `TrainerAction::Execute` | learn everything at a trainer; ours learn only with an explicit `learn` (the brain's `train` goal) |
 
+## The second check: random-bot accounts (found 2026-11-15, to audit)
+
+Besides `IsRandomBot` (by character), playerbots also tells random bots apart by **account**:
+`PlayerbotAIConfig::IsInRandomAccountList`, at ~17 live sites. Our bots are on our own
+accounts, so every one of these treats them as real players' characters. This audit didn't
+cover them, and one already broke the server:
+
+- **Chat storm (fixed):** `PlayerbotAI::HandleBotOutgoingPacket` rate-limits replies only to
+  bots on random accounts ("isFromFreeBot"). 50 of our bots in General - Durotar answered each
+  other without a cooldown, in a loop inside one world update, until the world thread hung at
+  ~20 GB. Fix: `Playerbots.RandomBotTalk = 0` (`config/playerbots.overrides`); what a bot says
+  is its brain's call anyway.
+- **To review:** `PlayerbotSecurity.cpp:50` (who may command the bot), `TrainerAction.cpp:323,
+  579`, `TradeStatusAction.cpp:219`, `SendMailAction.cpp:18`, `CheckMailAction.cpp:32`,
+  `BattleGroundJoinAction.cpp:105`, `ChangeStrategyAction.cpp:51`, `PlayerbotGuildMgr.cpp:217,
+  253`, `PlayerbotMgr.cpp:551, 632`, `RandomPlayerbotMgr.cpp:2491`,
+  `RandomPlayerbotFactory.cpp:858, 921`. Re-run with `grep -rn IsInRandomAccountList` when
+  bumping the submodule.
+
 ## Risks to watch in the parity test
 
 - A non-random bot **without a master** is less-travelled in playerbots: random bots have no
