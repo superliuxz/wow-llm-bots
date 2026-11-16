@@ -54,3 +54,30 @@ use, `tools/check-cpp.sh` (format, includes, all sanitizers) before commit, unit
 code. Sources in `harness/src` next to their `_unittest.cc`; test data in `harness/testdata`;
 build targets are in `common/CMakeLists.txt` (`wlb_harness`, `harness_unittests`) so they get the
 same flags and sanitizers as everything else. The `harness` executable comes with H3.
+
+## Age: how old is what the brain acts on
+
+A bot acts on a snapshot that was true when the module built it. Every step after that makes it
+older, and each step is measured (`time_ms` in the snapshot is the module's wall clock, the same
+machine's clock everywhere):
+
+| Point | Measured by | Today |
+|---|---|---|
+| built to handed to the socket | the module, per minute in the server log (`sent n=... built to socket p50 p99 max`, and how many snapshots a newer one replaced) | done |
+| built to received | `tools/snapshot/fake_harness.py --stats` (the harness's own `module_connection` will log the same) | done (tool), H4 (harness) |
+| received to the question asked | the harness (`age_at_ask`) | H4 |
+| asked to the plan read | the decision log (`round_trip_ms`) | done |
+| built to the plan ready | the harness: `age_at_plan`, in the decision log next to the screen | H4 |
+| built to the command applied | the module, from the `seq` a command names: `age_at_apply` | with the `choose` command |
+
+The last one is the number that matters: how old the picture was when the bot acted on it.
+
+## How snapshots reach the harness
+
+- One snapshot per bot per interval (1 s), **spread over the interval**: bot i of N is first due i/N
+  of an interval in, so a world tick builds one or two snapshots, never all 50.
+- A bot in combat is sent snapshots every 250 ms, and a bot whose combat or life state changed since its
+  last snapshot is sent one at once: the brain doesn't learn about a fight up to a second late.
+- If the harness is behind and the socket is full, a newer snapshot **replaces** the waiting one
+  (latest wins); events are never dropped or reordered.
+- llama-server connections stay open between questions (keep-alive).

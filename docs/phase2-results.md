@@ -358,3 +358,41 @@ tokens the server had to process again:
   reallocations (zero in both). Cause unknown; not worth chasing while shared slots work.
 - So "one brain per bot" means a separate identity, memory and decision per wake-up, not a slot
   per bot. Shared slots also scale to more bots than slots.
+
+## Delivering snapshots: spread, latest-wins, measured (2026-11-16)
+
+Findings from a review of the path from the module to the harness, and what was done. Measured
+with `tools/snapshot/fake_harness.py --stats` and the module's own per-minute log, 50 test bots
+standing in the Valley of Strength (`config/tests/pressure`), 1 s interval.
+
+| | Before | After |
+|---|---|---|
+| Snapshots built in the worst world tick | 50 (2.8 ms back to back) | **1** (0.29 ms) |
+| Snapshots arriving within 10 ms (steady state) | 50 | **2** |
+| One bot's snapshot spacing | 1000 ms | 1000 ms |
+| Age when it arrives (built to received) | 0.6 ms median, 1.2 ms worst | 0.6 ms median, 1.2 ms worst |
+| Built to handed to the socket (module) | not measured | 16 µs median, 38 µs worst |
+
+- **Spread over the interval.** Bot i of N is first due i/N of an interval in, so a tick builds
+  one snapshot, not all 50. (A harness that connects still gets every bot's first snapshot at
+  once: a one-time burst of ~3-4 ms, which is what a connecting harness wants.)
+- **Up to 1 s before a trigger was seen.** A bot in combat is now sent a snapshot every 250 ms
+  (`LlmBrain.SnapshotIntervalCombatMs`), and one whose combat or life state changed since its last
+  snapshot is sent one at once, so a fight or a death no longer waits for the next regular tick.
+  Rates keyed on facts: what to do about a fight is still the brain's.
+- **Latest wins.** The outbound path was a FIFO that, when full, dropped the *newest* frames and kept
+  the stale ones. Snapshots now go through `SendLatest(bot, ...)`: while the socket is full a newer
+  snapshot of a bot replaces the waiting one. Events are never replaced or reordered. Tested with a
+  client that stops reading: 20 events (2 MB) arrive intact and in order, then only the newest
+  snapshot of each of two bots (1,998 replaced).
+- **Buffer growth.** `FramedConnection` only released its output buffer when it emptied completely,
+  so a peer that was always a little behind made it keep every byte ever sent. It now releases the
+  sent part once it is as big as the rest (at most twice the pending bytes, whatever was sent).
+  The new test fails (buffer 1.7 MB against a 0.5 MB bound) with the fix removed.
+- **Age.** Measured now: built to socket (module, logged each minute with the count of replaced
+  snapshots) and built to received (the probe). The rest is in `docs/plans/harness.md` ("Age").
+- **Python tools.** `capture_snapshots.py` and `fake_harness.py` cut the buffer per frame and built
+  JSON per frame while receiving; they now read at an offset and convert afterwards.
+- **A new connection per question.** The llama client keeps connections open between questions
+  (keep-alive, a pool shared by the worker threads; a failed connection is closed, not reused; one
+  the server closed while idle is opened again).

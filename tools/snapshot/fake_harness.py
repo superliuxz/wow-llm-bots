@@ -59,7 +59,7 @@ def connect():
     return s
 
 
-def run_stats(seconds):
+def run_stats(seconds, warmup=2.0):
     s = connect()
     reader = FrameReader()
     ages, arrivals = [], []  # age in ms; arrival time in s.
@@ -87,23 +87,39 @@ def run_stats(seconds):
     if not ages:
         print("no snapshots received")
         return
-    ages.sort()
-    gaps = sorted(b - a for times in per_bot.values() for a, b in zip(times, times[1:]))
-    # The most frames within any 10 ms window.
-    window, most = collections.deque(), 0
-    for t in arrivals:
-        window.append(t)
-        while t - window[0] > 0.010:
-            window.popleft()
-        most = max(most, len(window))
+    def bunching(times):
+        """The most frames arriving within any 10 ms window."""
+        window, most = collections.deque(), 0
+        for t in times:
+            window.append(t)
+            while t - window[0] > 0.010:
+                window.popleft()
+            most = max(most, len(window))
+        return most
+
+    first = arrivals[0]
+    # The first round is every bot's first snapshot, all overdue when the harness connects (a
+    # burst by design): reported on its own, and left out of the steady-state numbers.
+    steady = [i for i, t in enumerate(arrivals) if t - first >= warmup]
     print(f"{len(ages)} snapshots from {len(per_bot)} bots in {seconds:.0f}s "
           f"({len(ages) / seconds:.1f}/s)")
-    print(f"age on arrival (built -> received): p50 {percentile(ages, .5):.1f} ms, "
-          f"p95 {percentile(ages, .95):.1f} ms, max {ages[-1]:.1f} ms")
+    print(f"first {warmup:.0f} s (every bot's first snapshot): up to "
+          f"{bunching([t for t in arrivals if t - first < warmup])} within 10 ms")
+    if not steady:
+        print("(no steady state: run longer)")
+        return
+    steady_ages = sorted(ages[i] for i in steady)
+    steady_from_ms = arrivals[steady[0]] * 1000
+    gaps = sorted(b - a for times in per_bot.values()
+                  for a, b in zip(times, times[1:]) if a >= steady_from_ms - 1500)
+    print(f"steady state ({len(steady)} snapshots):")
+    print(f"  age on arrival (built -> received): p50 {percentile(steady_ages, .5):.1f} ms, "
+          f"p95 {percentile(steady_ages, .95):.1f} ms, max {steady_ages[-1]:.1f} ms")
     if gaps:
-        print(f"spacing of one bot's snapshots: p5 {percentile(gaps, .05):.0f} ms, "
+        print(f"  spacing of one bot's snapshots: p5 {percentile(gaps, .05):.0f} ms, "
               f"p50 {percentile(gaps, .5):.0f} ms, p95 {percentile(gaps, .95):.0f} ms")
-    print(f"bunching: up to {most} snapshots arrived within 10 ms")
+    print(f"  bunching: up to {bunching([arrivals[i] for i in steady])} snapshots "
+          f"arrived within 10 ms")
 
 
 def run_print(seconds, to_send):
