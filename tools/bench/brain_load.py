@@ -16,10 +16,15 @@ Env: SLOTS (default 25), MAX_TOKENS (default 150), OUT=<file> (per-call JSON),
      watch vocabulary, enforced by a grammar built per call (free text only in a
      short goal and an optional say line).
      RENDER=tight: prompt_render.render_tight (base view in a few plain lines).
+     TEMP=<t>: sampling temperature (default 0.7).
      GOAL_ONCE=1: the bot's current goal is in the prompt, and the brain writes a
      goal line only when it changes.
      MERGED=1: no separate options list; the screen's own entries carry the option numbers
      (prompt_render.render_tight(numbered=True)).
+     LOOK_SAFETY=1 (with COUNTS): the prompt says `look` is only a safety net, usually 60-300 s.
+     COUNTS=1: `do` may repeat an option: `3x10` is option 3, ten times (2-29). With MERGED=1
+     the run also estimates how long each plan would really last (DURATION_S) and prints the
+     time to the next wake-up it implies.
      NO_GRAMMAR=1: no grammar; the harness validates the reply afterwards (plan["_valid"]):
      option numbers that exist, watches from the vocabulary, a numeric look.
      CODES_ONLY=1: no goal or chat lines at all (a floor: the cost of the free text).
@@ -121,17 +126,26 @@ def menu_options(snap):
                       "Rest (eat and drink)", "Go to the nearest town"]
 
 
-def menu_grammar(n, goal_optional=False, codes_only=False, loose=False):
+# How long one action takes, in seconds: stand-ins to estimate how long a plan lasts (a real
+# measure needs the bot to play it). `keep` runs until the plan's own `look`.
+DURATION_S = {"attack": 20, "talk": 8, "loot": 3, "gather": 10, "use": 8, "explore": 45,
+              "rest": 30, "town": 60}
+
+
+def menu_grammar(n, goal_optional=False, codes_only=False, loose=False, counts=False):
     """GBNF: only these option numbers, only the watch vocabulary."""
     opt = " | ".join(f'"{i}"' for i in range(1, n + 1))
     goal = r'("goal: " goal "\n")?' if goal_optional else r'"goal: " goal "\n"'
     if codes_only:
         goal = ""
     return "\n".join([
-        f'root ::= {goal} "do: " opts "\\nexpect: " ("none" | opts) "\\nwatch: " watches '
+        f'root ::= {goal} "do: " opts "\\nexpect: " ("none" | ids) "\\nwatch: " watches '
         r'"\nlook: " num' + ("" if codes_only else " say?"),
         "goal ::= [^\\n]+" if loose else "goal ::= [^\\n]{1,60}",
-        'opts ::= opt (", " opt){0,4}',
+        'ids ::= opt (", " opt){0,4}',
+        'opts ::= step (", " step){0,4}' if counts else 'opts ::= ids',
+        'step ::= opt ("x" cnt)?',
+        "cnt ::= [2-9] | [1-2] [0-9]",
         f"opt ::= {opt}",
         'watches ::= "none" | watch (", " watch){0,3}',
         f"watch ::= {WATCH}",
@@ -177,14 +191,27 @@ def call(wake, snap_dir, slots):
     snap = snapshot(snap_dir, wake["source"], wake["seq"])
     merged = menu and bool(os.environ.get("MERGED"))
     if merged:
-        screen, count = render_tight(snap, numbered=True)
-        options = [None] * count
+        screen, kinds = render_tight(snap, numbered=True)
+        options = [None] * len(kinds)
     else:
         screen = (render_tight if os.environ.get("RENDER") == "tight" else render_snapshot)(snap)
         options = menu_options(snap) if menu else []
         if menu:
             screen += "\noptions:\n" + "\n".join(f"  {i}. {o}" for i, o in enumerate(options, 1))
     rules = RULES_MENU if menu else RULES
+    counts = menu and bool(os.environ.get("COUNTS"))
+    if counts:
+        rules = rules.replace(
+            "do: <option numbers, in order>",
+            "do: <option numbers, in order; add xN to repeat one N times, e.g. 3x4 does option 3 "
+            "four times, one after another>").replace(
+            "look: <seconds until you look again anyway>",
+            "look: <seconds until you look again anyway: at least as long as your plan takes>")
+    if counts and os.environ.get("LOOK_SAFETY"):
+        rules = rules.replace(
+            "look: <seconds until you look again anyway: at least as long as your plan takes>",
+            "look: <a safety net only: you are woken at once if anything unexpected happens, so "
+            "make it longer than your plan takes, usually 60 to 300 seconds>")
     if merged:
         rules = rules.replace(
             "your screen and the numbered options you can take now.",
@@ -203,14 +230,15 @@ def call(wake, snap_dir, slots):
             {"role": "user", "content": f"{head}\n\nYour screen now:\n{screen}"},
         ],
         "max_tokens": int(os.environ.get("MAX_TOKENS", 150)),
-        "temperature": 0.7,
+        "temperature": float(os.environ.get("TEMP", 0.7)),
         "id_slot": wake["copy"] % slots,
         "cache_prompt": True,
         "chat_template_kwargs": {"enable_thinking": False},
     }
     if menu and not os.environ.get("NO_GRAMMAR"):
         body["grammar"] = menu_grammar(len(options), goal_optional=goal_once,
-                                       codes_only=bool(os.environ.get("CODES_ONLY")))
+                                       codes_only=bool(os.environ.get("CODES_ONLY")),
+                                       counts=counts)
     req = urllib.request.Request(URL, data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=600) as r:
@@ -218,7 +246,9 @@ def call(wake, snap_dir, slots):
     plan = parse_plan(out["choices"][0]["message"]["content"])
     if menu:
         plan["_valid"] = validate(normalize(plan) if os.environ.get("NO_GRAMMAR") else plan,
-                                  len(options))
+                                  len(options), counts)
+        if merged and plan["_valid"]:
+            plan["_est_s"] = estimate_seconds(plan, kinds)
     if goal_once and plan.get("goal"):
         with GOALS_LOCK:
             GOALS[wake["copy"]] = plan["goal"]
@@ -228,11 +258,22 @@ def call(wake, snap_dir, slots):
 WATCH_RE = re.compile(r"^(hp<[1-9]\d?|mana<[1-9]\d?|enemy_player<[1-9]\d{0,2}|attacked|whisper)$")
 
 
+def estimate_seconds(plan, kinds):
+    """How long until the bot wakes by itself: when its steps are done, or its `look`."""
+    look = float(plan.get("look", "30") or 30)
+    total = 0.0
+    for part in plan["do"].split(","):
+        number, _, times = part.strip().partition("x")
+        kind = kinds[int(number) - 1]
+        total += (look if kind == "keep" else DURATION_S[kind]) * (int(times) if times else 1)
+    return min(total, look)
+
+
 def normalize(plan):
     """Forgiving reading of a plan the model wrote freely: `[5]` is 5, `hp20` is `hp<20`."""
     for key in ("do", "expect"):
         if key in plan:
-            plan[key] = re.sub(r"[\[\]()]", "", plan[key]).strip()
+            plan[key] = re.sub(r"\s*[x\u00d7]\s*", "x", re.sub(r"[\[\]()]", "", plan[key])).strip()
     if "watch" in plan:
         plan["watch"] = ", ".join(
             re.sub(r"^(hp|mana|enemy_player)\s*<?\s*(\d+)\s*(%|yd)?$", r"\1<\2", x.strip())
@@ -243,13 +284,22 @@ def normalize(plan):
     return plan
 
 
-def validate(plan, n_options):
+STEP_RE = re.compile(r"^(\d+)(?:x(\d+))?$")
+
+
+def validate(plan, n_options, counts=False):
     """What the grammar guarantees, checked after the fact (invalid parts would be ignored)."""
-    def numbers(text):
+    def numbers(text, with_counts=False):
         parts = [x.strip() for x in text.split(",")]
-        return all(x.isdigit() and 1 <= int(x) <= n_options for x in parts) and 0 < len(parts) <= 5
+        for x in parts:
+            m = STEP_RE.match(x)
+            if not m or not 1 <= int(m.group(1)) <= n_options:
+                return False
+            if m.group(2) and not (with_counts and 2 <= int(m.group(2)) <= 29):
+                return False
+        return 0 < len(parts) <= 5
     try:
-        return (numbers(plan["do"])
+        return (numbers(plan["do"], counts)
                 and (plan.get("expect", "none") == "none" or numbers(plan["expect"]))
                 and (plan.get("watch", "none") == "none"
                      or all(WATCH_RE.match(x.strip()) for x in plan["watch"].split(",")))
@@ -356,6 +406,10 @@ def main():
     lat = sorted(r["latency"] for r in results)
     look = [r["plan"].get("look_again_s") for r in results
             if r["ok"] and isinstance(r["plan"].get("look_again_s"), (int, float))]
+    est = [r["plan"]["_est_s"] for r in results
+           if r["ok"] and isinstance(r["plan"], dict) and "_est_s" in r["plan"]]
+    counted = sum(1 for r in results if r["ok"] and isinstance(r["plan"], dict)
+                  and re.search(r"x\d", r["plan"].get("do", "")))
     pct = lambda xs, q: xs[min(len(xs) - 1, int(q * len(xs)))] if xs else 0
     print(f"{n_bots} bots, {len(results)} wakes in {seconds:.0f} s "
           f"({len(results) / n_bots / seconds * 60:.2f} per bot per min): "
@@ -366,6 +420,11 @@ def main():
           f"{statistics.mean(r['reply_tokens'] or 0 for r in results):.0f} tok | valid "
           f"{sum(r['ok'] for r in results)}/{len(results)} | brain's look_again_s median "
           f"{statistics.median(look) if look else '-'}")
+    if est:
+        print(f"  plans with a count: {counted / len(results):.0%} | estimated time to the next "
+              f"wake-up (steps done or look, whichever first): median {statistics.median(est):.0f}s, "
+              f"mean {statistics.mean(est):.0f}s -> {60 / statistics.mean(est):.1f} wake-ups per bot "
+              f"per minute")
     if os.environ.get("OUT"):
         pathlib.Path(os.environ["OUT"]).write_text(json.dumps(results, indent=1))
 

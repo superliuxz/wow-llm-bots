@@ -193,19 +193,24 @@ def far_summary(units):
     return "; ".join(parts)
 
 
-def actionable(item):
-    """A stand-in for the module's options: can the bot act on this entry?"""
+def option_kind(item):
+    """A stand-in for the module's options: what the bot can do with this entry, or None."""
     if "usable" in item or item.get("kind") in ("HERB", "ORE", "CHEST", "QUEST_OBJECT"):
-        return bool(item.get("usable"))
+        if not item.get("usable"):
+            return None
+        return "gather" if item.get("kind") in ("HERB", "ORE") else "use"
     if item.get("kind") not in ("NPC", "CRITTER"):
-        return False
+        return None
     if item.get("dead"):
-        return bool(item.get("lootable"))
-    return item.get("reaction") in ("HOSTILE", "NEUTRAL", "FRIENDLY")
+        return "loot" if item.get("lootable") else None
+    if item.get("reaction") in ("HOSTILE", "NEUTRAL"):
+        return "attack"
+    return "talk" if item.get("reaction") == "FRIENDLY" else None
 
 
-def tight_things(items, counter=None):
-    """One line per thing; with `counter`, entries the bot can act on get the next number."""
+def tight_things(items, kinds=None):
+    """One line per thing; with `kinds` (a list), entries the bot can act on get the next number
+    and their kind is appended."""
     groups = collections.OrderedDict()
     for item in items:
         groups.setdefault((item.get("name", "?"), tight_look(item)), []).append(item)
@@ -213,9 +218,10 @@ def tight_things(items, counter=None):
     for (name, look), group in groups.items():
         rels = [g.get("rel") for g in group]
         mark = "-"
-        if counter is not None and actionable(group[0]):
-            counter[0] += 1
-            mark = f"{counter[0]}."
+        kind = option_kind(group[0]) if kinds is not None else None
+        if kind:
+            kinds.append(kind)
+            mark = f"{len(kinds)}."
         if len(rels) == 1:
             lines.append(f"{mark} {name}: {look}; {tight_where(rels[0])}")
         else:
@@ -226,16 +232,17 @@ def tight_things(items, counter=None):
 
 
 # Options that aren't a thing on screen (a stand-in for the module's).
-ALWAYS = ["Keep doing what I'm doing", "Explore somewhere new", "Rest (eat and drink)",
-          "Go to the nearest town"]
+ALWAYS = [("keep", "Keep doing what I'm doing"), ("explore", "Explore somewhere new"),
+          ("rest", "Rest (eat and drink)"), ("town", "Go to the nearest town")]
 
 
 def render_tight(snapshot, coarse=False, numbered=False):
     """The screen in a few plain lines. With `numbered`, the entries the bot can act on carry
-    their option number (no separate options list), and the result is (text, option count)."""
+    their option number (no separate options list), and the result is (text, kinds): the kind of
+    each option, in order ("attack", "talk", "loot", "gather", "use", "keep", ...)."""
     global COARSE
     COARSE = coarse
-    counter = [0] if numbered else None
+    kinds = [] if numbered else None
     base = snapshot.get("base", {})
     lines = []
     if base.get("self"):
@@ -251,12 +258,12 @@ def render_tight(snapshot, coarse=False, numbered=False):
         named.sort(key=lambda u: (u["name"], (u.get("rel") or {}).get("dir", "")))
     if named:
         lines.append("around me:")
-        lines += ["  " + line for line in tight_things(named, counter)]
+        lines += ["  " + line for line in tight_things(named, kinds)]
     if nameless:
         lines.append("far away: " + far_summary(nameless))
     if nearby.get("objects"):
         lines.append("objects:")
-        lines += ["  " + line for line in tight_things(nearby["objects"], counter)]
+        lines += ["  " + line for line in tight_things(nearby["objects"], kinds)]
     rest = {k: v for k, v in base.items() if k not in ("self", "where", "doing", "nearby")}
     rest = {"base": rest} if rest else {}
     for key in ("ext", "events", "options"):
@@ -266,8 +273,8 @@ def render_tight(snapshot, coarse=False, numbered=False):
         lines += render(rest)
     if numbered:
         lines.append("also:")
-        for option in ALWAYS:
-            counter[0] += 1
-            lines.append(f"  {counter[0]}. {option}")
-        return "\n".join(lines), counter[0]
+        for kind, text in ALWAYS:
+            kinds.append(kind)
+            lines.append(f"  {len(kinds)}. {text}")
+        return "\n".join(lines), kinds
     return "\n".join(lines)

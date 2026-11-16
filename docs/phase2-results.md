@@ -274,3 +274,57 @@ assumed, and the list was mostly cheap to read. Replay, 200 bots, 30 s plans: 3.
 **Is the Python bench the bottleneck? No.** During a run the client used 1% of one core;
 llama-server's busiest threads 40-53%; the GPU 59-83% busy at ~370 W (of ~575 W). The GPU
 idles part of each step while llama-server does its per-stream CPU work (grammar, sampling).
+
+### Response time for 50 bots (current setup: numbered screen, 16 slots, bigger batches)
+
+| | Wake to plan, median / p95 / worst | GPU busy |
+|---|---|---|
+| One bot, nothing else running | 0.21 s / 0.26 s | - |
+| 50 bots, plans ~30 s (1.9 wakes per bot per minute) | 0.5 s / 0.9 s / 1.2 s | 35% |
+| 50 bots, plans ~15 s (3.9 per bot per minute) | 0.8 s / 1.6 s / 2.8 s | 68% |
+
+### Counts and how long plans last (2026-11-16)
+
+`do` may repeat an option (`3x4`: option 3, four times; `COUNTS=1`). How long a plan lasts is
+estimated from the brain's own choices with stand-in action times (attack 20 s, talk 8 s, loot
+3 s, gather 10 s, use 8 s, explore 45 s, rest 30 s, town 60 s; `keep` runs to `look`): the bot
+wakes when its steps are done or its `look` runs out, whichever is first. 50 bots, 193 wake-ups:
+
+| Prompt | Plans with a count | `look` median | Estimated wake-ups per bot per minute |
+|---|---|---|---|
+| No counts | 0% | 10 s | 3.3 |
+| Counts (example `3x10`) | 39% | 15 s | 2.5 (73 of the counts were `x10`: copied from the example) |
+| Counts (example `3x4`) | 36% | 10 s | 3.1 |
+| **Counts + `look` is "a safety net only: you are woken at once if anything unexpected happens, usually 60-300 s"** | 34% | **60 s** | **1.3** |
+
+- The brain asked to look again after ~10 s however long its plan was, so counts alone barely
+  helped; what moved it was telling it that surprises wake it anyway, so `look` is only a
+  safety net. That is a prompt about the brain's own patience, not a C++ rule.
+- Plans cost ~43 tokens (up from 37) and stay all valid. These are estimates; real durations
+  need the bot to play the plans.
+
+### A smaller model: Qwen3-4B-Instruct (2026-11-16)
+
+Same prompts, greedy, 200 identical wake-ups, the 35B's plans as the reference
+(`tools/bench/agreement.py`; a stand-in for a quality check, since there is no right answer):
+
+| | 4B vs 35B |
+|---|---|
+| Same first option / same kind of action | 52% / 62% |
+| `look` within 2x | 33% |
+| Adds a chat line to a plan | 100% (35B: 46%) |
+| Plan tokens | 72 (35B: 42) |
+| Capacity, closed loop, 16 workers | **11.0 wake-ups/s** (35B: 8.7), one call 1.4 s (1.8 s) |
+
+Only 26% faster, not the several-fold gain expected: the 35B-A3B activates only ~3B parameters
+per token, about what a 4B dense model uses, so there is little to save per token; the 4B also
+wrote longer plans (a chat line every time). Agreement is low and the 4B is chatty, so **not
+worth switching**. Caveat: the 35B's agreement with itself at normal temperature (the noise
+ceiling) is not measured. A smaller model would pay off only with a genuinely small one for
+routine picks, judged by the real quality check.
+
+### Found by these benches
+
+- `nearby` listed **"World Invisible Trigger"** (level 80, hostile, 5 yd away) in 160 of the
+  sampled snapshots, 23 of 50 bots: invisible server objects a player could not see. The brain
+  even chose to attack one. To fix in `nearby_builder.cc` (filter what the client would not show).
