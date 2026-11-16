@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -12,32 +13,83 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_pump.h"
+#include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/task_queue.h"
+#include "base/thread_annotations.h"
+#include "base/time/time.h"
+#include "latest_wins.h"
 #include "net/unix_socket_server.h"
 
 namespace llm_brain {
 
 // The socket side of the bridge. Created, used and destroyed on the IO thread.
+// What sending cost, written on the IO thread and read on the world thread.
+class BrainBridge::SendStatsCollector : public base::RawPtrTarget {
+ public:
+  void AddDelay(base::TimeDelta delay) {
+    base::AutoLock lock(lock_);
+    stats_.delays.push_back(delay);
+  }
+  void AddReplaced() {
+    base::AutoLock lock(lock_);
+    ++stats_.replaced;
+  }
+  SendStats Take() {
+    base::AutoLock lock(lock_);
+    return std::exchange(stats_, {});
+  }
+
+ private:
+  base::Lock lock_;
+  SendStats stats_ GUARDED_BY(lock_);
+};
+
 class BrainBridge::IoCore : public base::RawPtrTarget {
  public:
   IoCore(std::string path,
          base::scoped_refptr<base::TaskQueue> world_queue,
          size_t max_pending_messages,
          base::WeakPtr<BrainBridge> bridge,
-         MessageHandler on_message)
+         MessageHandler on_message,
+         SendStatsCollector* stats)
       : world_queue_(std::move(world_queue)),
         max_pending_messages_(max_pending_messages),
         bridge_(std::move(bridge)),
         on_message_(std::move(on_message)),
+        stats_(stats),
         server_(std::move(path),
                 net::UnixSocketServer::Callbacks{
                     [this] { PostConnectionChanged(true); },
                     [this](std::string frame) { OnFrame(std::move(frame)); },
-                    [this] { PostConnectionChanged(false); }}) {}
+                    [this] {
+                      // What waited for the old harness is stale for the next.
+                      waiting_.TakeAll();
+                      PostConnectionChanged(false);
+                    },
+                    [this] { OnDrained(); }}) {}
 
   bool Listen() { return server_.Listen(); }
-  void Send(const std::string& message) { server_.SendFrame(message); }
+
+  // In order with everything sent before it.
+  void Send(const std::string& message, base::TimeTicks queued) {
+    stats_->AddDelay(base::TimeTicks::Now() - queued);
+    server_.SendFrame(message);
+  }
+
+  // Goes out at once unless the socket is full, then waits for room, and a
+  // newer message for the key replaces it.
+  void SendLatest(std::string key,
+                  std::string message,
+                  base::TimeTicks queued) {
+    if (waiting_.empty() && server_.pending_output_bytes() == 0) {
+      Send(message, queued);
+      return;
+    }
+    if (waiting_.Put(std::move(key), std::move(message), queued)) {
+      stats_->AddReplaced();
+    }
+  }
 
  private:
   void OnFrame(std::string frame) {
@@ -53,6 +105,13 @@ class BrainBridge::IoCore : public base::RawPtrTarget {
         on_message_, std::move(frame)));
   }
 
+  // The socket caught up: send what waited, the newest of each key.
+  void OnDrained() {
+    for (LatestWins::Item& item : waiting_.TakeAll()) {
+      Send(item.message, item.queued);
+    }
+  }
+
   void PostConnectionChanged(bool connected) {
     world_queue_->PostTask(
         base::BindOnce(&BrainBridge::OnConnectionChanged, bridge_, connected));
@@ -63,6 +122,8 @@ class BrainBridge::IoCore : public base::RawPtrTarget {
   // Bound to the world thread: only dereferenced by tasks run there.
   base::WeakPtr<BrainBridge> bridge_;
   MessageHandler on_message_;
+  const base::raw_ptr<SendStatsCollector> stats_;
+  LatestWins waiting_;
   net::UnixSocketServer server_;
   uint64_t dropped_inbound_ = 0;
 };
@@ -74,6 +135,7 @@ BrainBridge::BrainBridge(std::string socket_path,
       max_pending_messages_(max_pending_messages),
       callbacks_(std::move(callbacks)),
       world_queue_(base::TaskQueue::Create()),
+      send_stats_(std::make_unique<SendStatsCollector>()),
       io_thread_("llm-brain-io") {}
 
 BrainBridge::~BrainBridge() {
@@ -94,7 +156,7 @@ bool BrainBridge::Start() {
   const bool posted = io_thread_.task_runner()->PostTask(
       [&, bridge = weak_factory_.GetWeakPtr()] {
         core = new IoCore(socket_path_, world_queue_, max_pending_messages_,
-                          bridge, callbacks_.on_message);
+                          bridge, callbacks_.on_message, send_stats_.get());
         if (!core->Listen()) {
           delete core;
           core = nullptr;
@@ -131,7 +193,23 @@ void BrainBridge::Send(std::string message) {
     return;  // Nobody listening: drop here instead of hopping threads.
   }
   io_thread_.task_runner()->PostTask(
-      [core = io_core_, message = std::move(message)] { core->Send(message); });
+      [core = io_core_, message = std::move(message),
+       queued = base::TimeTicks::Now()] { core->Send(message, queued); });
+}
+
+void BrainBridge::SendLatest(std::string key, std::string message) {
+  if (!io_core_ || !connected_) {
+    return;
+  }
+  io_thread_.task_runner()->PostTask(
+      [core = io_core_, key = std::move(key), message = std::move(message),
+       queued = base::TimeTicks::Now()]() mutable {
+        core->SendLatest(std::move(key), std::move(message), queued);
+      });
+}
+
+BrainBridge::SendStats BrainBridge::TakeSendStats() {
+  return send_stats_->Take();
 }
 
 void BrainBridge::RunWorldTasks() {

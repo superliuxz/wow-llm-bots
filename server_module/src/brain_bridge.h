@@ -4,7 +4,10 @@
 #define MOD_LLM_BRAIN_BRAIN_BRIDGE_H_
 
 #include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <string>
+#include <vector>
 
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
@@ -12,6 +15,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/task/task_queue.h"
 #include "base/threading/thread.h"
+#include "base/time/time.h"
 
 namespace llm_brain {
 
@@ -26,6 +30,12 @@ namespace llm_brain {
 // One harness at a time (a new connection replaces the old one). Outbound
 // messages are dropped while no harness is connected; inbound messages are
 // dropped when the world thread falls more than `max_pending_messages` behind.
+//
+// Two ways to send. Send() is for events: every one must arrive, in order.
+// SendLatest() is for state that goes stale (a bot's snapshot): if the harness
+// is behind and the socket is full, a newer message for the same key replaces
+// the waiting one, so the harness catches up on the newest state, not on old
+// state it would only discard.
 class BrainBridge {
  public:
   using MessageHandler = base::RepeatingCallback<void(std::string)>;
@@ -50,8 +60,23 @@ class BrainBridge {
   // World thread. Closes the socket and joins the IO thread.
   void Stop();
 
-  // World thread. Queues `message` for the harness.
+  // World thread. Queues `message` for the harness, after everything sent
+  // before it.
   void Send(std::string message);
+
+  // World thread. Sends `message` now, unless the socket is full: then it
+  // waits, and a newer message with the same `key` replaces it.
+  void SendLatest(std::string key, std::string message);
+
+  // What sending cost since the last call. World thread.
+  struct SendStats {
+    // From Send() / SendLatest() to the frame being handed to the socket: the
+    // hop to the IO thread and, for SendLatest(), any wait for a full socket.
+    std::vector<base::TimeDelta> delays;
+    // Messages replaced by a newer one before they could be sent.
+    uint64_t replaced = 0;
+  };
+  SendStats TakeSendStats();
   // World thread. Runs pending tasks posted from the IO thread (incoming
   // messages, connection changes). Call every world update.
   void RunWorldTasks();
@@ -60,7 +85,8 @@ class BrainBridge {
   bool connected() const { return connected_; }
 
  private:
-  class IoCore;  // Lives on the IO thread.
+  class IoCore;              // Lives on the IO thread.
+  class SendStatsCollector;  // Written on the IO thread, read on the world's.
 
   // World thread, via world_queue_.
   void OnConnectionChanged(bool connected);
@@ -69,6 +95,8 @@ class BrainBridge {
   const size_t max_pending_messages_;
   Callbacks callbacks_;
   base::scoped_refptr<base::TaskQueue> world_queue_;
+  // Outlives the IO thread's use of it: Stop() joins the thread first.
+  std::unique_ptr<SendStatsCollector> send_stats_;
   base::Thread io_thread_;
   // Owned here but created, used and destroyed only on io_thread_. Tasks that
   // use it are posted before the task that deletes it, so it outlives them;

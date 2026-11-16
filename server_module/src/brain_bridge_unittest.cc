@@ -6,11 +6,19 @@
 
 #include "brain_bridge.h"
 
+#include <poll.h>
+#include <sys/poll.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/un.h>
 #include <unistd.h>
 
+#include <cstdint>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -22,6 +30,7 @@
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "gtest/gtest.h"
+#include "net/frame_codec.h"
 #include "net/unix_socket_client.h"
 
 namespace llm_brain {
@@ -212,6 +221,117 @@ TEST(BrainBridgeTest, DestroyWithPendingWorkIsSafe) {
   }
   bridge.reset();  // raw_ptr would abort here if IoCore were still referenced.
   EXPECT_TRUE(harness.WaitDisconnected());
+}
+
+// A harness that connects and reads only when told: a slow or stalled one. Its
+// receive buffer is tiny, so what the bridge sends piles up on the bridge's
+// side.
+class RawClient {
+ public:
+  explicit RawClient(const std::string& path) {
+    fd_ = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    int small = 4096;
+    ::setsockopt(fd_, SOL_SOCKET, SO_RCVBUF, &small, sizeof(small));
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    std::strncpy(address.sun_path, path.c_str(), sizeof(address.sun_path) - 1);
+    EXPECT_EQ(
+        ::connect(fd_, reinterpret_cast<sockaddr*>(&address), sizeof(address)),
+        0);
+  }
+  ~RawClient() { ::close(fd_); }
+
+  // Reads until `count` frames have arrived or `timeout` passes.
+  std::vector<std::string> ReadFrames(size_t count, base::TimeDelta timeout) {
+    std::vector<std::string> frames;
+    const base::TimeTicks deadline = base::TimeTicks::Now() + timeout;
+    char buffer[65536];
+    while (frames.size() < count && base::TimeTicks::Now() < deadline) {
+      pollfd poll_fd{fd_, POLLIN, 0};
+      if (::poll(&poll_fd, 1, 50) <= 0) {
+        continue;
+      }
+      const ssize_t n = ::recv(fd_, buffer, sizeof(buffer), 0);
+      if (n <= 0) {
+        break;
+      }
+      for (std::string& frame :
+           decoder_.Append(std::string_view(buffer, static_cast<size_t>(n)))) {
+        frames.push_back(std::move(frame));
+      }
+    }
+    return frames;
+  }
+
+ private:
+  int fd_ = -1;
+  net::FrameDecoder decoder_;
+};
+
+TEST(BrainBridgeTest, LatestMessagesGoOutAtOnceAndInOrderWhenThereIsRoom) {
+  WorldRecorder world;
+  BrainBridge bridge(TestSocketPath(), 100, world.Callbacks());
+  ASSERT_TRUE(bridge.Start());
+  FakeHarness harness(TestSocketPath());
+  ASSERT_TRUE(harness.WaitConnected());
+  ASSERT_TRUE(RunWorldUntil(bridge, [&] { return bridge.connected(); }));
+  bridge.Send("event 1");
+  bridge.SendLatest("tess", "snapshot 1");
+  bridge.Send("event 2");
+  bridge.SendLatest("tess", "snapshot 2");
+  ASSERT_TRUE(
+      RunWorldUntil(bridge, [&] { return harness.frames().size() >= 4; }));
+  EXPECT_EQ(harness.frames(),
+            (std::vector<std::string>{"event 1", "snapshot 1", "event 2",
+                                      "snapshot 2"}));
+  EXPECT_EQ(bridge.TakeSendStats().replaced, 0u);
+}
+
+TEST(BrainBridgeTest, ASlowHarnessGetsTheNewestSnapshotOfEachBotAndEveryEvent) {
+  WorldRecorder world;
+  BrainBridge bridge(TestSocketPath(), 100, world.Callbacks());
+  ASSERT_TRUE(bridge.Start());
+  RawClient harness(TestSocketPath());
+  ASSERT_TRUE(RunWorldUntil(bridge, [&] { return bridge.connected(); }));
+
+  // Events fill the socket (it holds a few hundred KB), so it is backed up.
+  std::vector<std::string> events;
+  for (int i = 0; i < 20; ++i) {
+    events.push_back(std::to_string(i) + std::string(100000, 'e'));
+    bridge.Send(events.back());
+  }
+  // The harness is not reading. A thousand snapshots each for two bots.
+  for (int i = 0; i < 1000; ++i) {
+    bridge.SendLatest("tess", "tess-" + std::to_string(i));
+    bridge.SendLatest("gorn", "gorn-" + std::to_string(i));
+  }
+  uint64_t replaced = 0;
+  std::vector<base::TimeDelta> delays;
+  ASSERT_TRUE(RunWorldUntil(bridge, [&] {
+    BrainBridge::SendStats stats = bridge.TakeSendStats();
+    replaced += stats.replaced;
+    delays.insert(delays.end(), stats.delays.begin(), stats.delays.end());
+    return replaced >= 1998;
+  }));
+  EXPECT_EQ(replaced, 1998u);  // All but the newest of each bot.
+
+  // The harness catches up: every event, then only the newest snapshots.
+  const std::vector<std::string> frames =
+      harness.ReadFrames(events.size() + 2, base::Seconds(5));
+  ASSERT_EQ(frames.size(), events.size() + 2);
+  EXPECT_EQ(std::vector<std::string>(frames.begin(), frames.begin() + 20),
+            events);
+  EXPECT_EQ(frames[20], "tess-999");
+  EXPECT_EQ(frames[21], "gorn-999");
+  // Nothing else follows.
+  EXPECT_TRUE(harness.ReadFrames(1, base::Milliseconds(200)).empty());
+  // Every frame that was sent was timed (the replaced ones were never sent).
+  ASSERT_TRUE(RunWorldUntil(bridge, [&] {
+    BrainBridge::SendStats stats = bridge.TakeSendStats();
+    delays.insert(delays.end(), stats.delays.begin(), stats.delays.end());
+    return delays.size() >= 22;
+  }));
+  EXPECT_EQ(delays.size(), 22u);
 }
 
 }  // namespace

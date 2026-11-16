@@ -107,6 +107,8 @@ add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/brain_bridge_unittest.cc"
   "${WLB_MODULE_SRC}/config_parsing.cc"
   "${WLB_MODULE_SRC}/config_parsing_unittest.cc"
+  "${WLB_MODULE_SRC}/latest_wins.cc"
+  "${WLB_MODULE_SRC}/latest_wins_unittest.cc"
   "${WLB_MODULE_SRC}/perception.cc"
   "${WLB_MODULE_SRC}/perception_unittest.cc"
   "${WLB_MODULE_SRC}/snapshot_stats.cc"
