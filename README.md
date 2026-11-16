@@ -19,8 +19,7 @@ Design and every decision so far: [docs/design.md](docs/design.md).
 | `content/` | shared bot knowledge: `RULES.md`, `concepts/`, prompts |
 | `config/` | our config files (MySQL, server overrides) |
 | `tools/` | scripts: see [Tools](#tools) |
-| `out/` | build outputs (not tracked) |
-| `server/` | installed server, extracted map data, MySQL data, logs (not tracked) |
+| `out/` | everything generated, laid out as `out/<name>` for what builds it (not tracked). **`out/server` is the installed game server and holds its state:** binaries, configs, the 7 GB of extracted map data and the MySQL database (accounts, characters). Don't `rm -rf out`; clean specific build directories |
 | `var/bots/` | live bot memory, its own git repo (not tracked here) |
 | `reference/` | downloaded addon sources (not tracked) |
 
@@ -48,7 +47,7 @@ Run from the repo root. Every script finds the repo from its own location.
 | `tools/check-includes.sh` | include-what-you-use check (`--fix` to apply) |
 | `tools/build-common.sh` | build `common/` and run its tests (`--asan` / `--tsan` / `--msan`, `--server` for the copy linked into AzerothCore) |
 | `tools/build-server.sh` | build and install AzerothCore with our module (`--test` adds the test-only fixtures) |
-| `tools/apply-config.sh [test]` | render `server/etc/*.conf` from the templates plus `config/*.overrides` (and `config/tests/<test>.*`) |
+| `tools/apply-config.sh [test]` | render `out/server/etc/*.conf` from the templates plus `config/*.overrides` (and `config/tests/<test>.*`) |
 | `tools/server-start.sh` / `server-stop.sh` | MySQL, authserver and worldserver together |
 | `tools/db-start.sh` / `db-stop.sh` | the project-local MySQL alone |
 | `tools/wsc <command>` | send a command to the worldserver console |

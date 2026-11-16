@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Build server/etc/*.conf from the .dist templates plus our overrides in config/.
-# @ROOT@ in overrides becomes the repo root. The DB password comes from server/etc/.acore-db-password (untracked).
+# Build out/server/etc/*.conf from the .dist templates plus our overrides in config/.
+# @ROOT@ in overrides becomes the repo root. The DB password comes from out/server/etc/.acore-db-password (untracked).
 # Usage: tools/apply-config.sh [test-name]   (adds config/tests/<test-name>.*.overrides)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-ETC=$ROOT/server/etc
+ETC=$ROOT/out/server/etc
 PW=$(cat "$ETC/.acore-db-password")
 apply() {  # apply <dist> <out> <overrides...>
   local dist=$1 out=$2; shift 2

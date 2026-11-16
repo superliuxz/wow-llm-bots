@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Start the project-local MySQL (Percona) instance in the background.
-# Renders config/mysql.cnf.in to server/etc/mysql.cnf first.
+# Renders config/mysql.cnf.in to out/server/etc/mysql.cnf first.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-S=$ROOT/server
+S=$ROOT/out/server
 CNF=$S/etc/mysql.cnf
 mkdir -p "$S/etc"
 sed "s|@ROOT@|$ROOT|g" "$ROOT/config/mysql.cnf.in" > "$CNF"

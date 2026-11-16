@@ -1,4 +1,4 @@
-DataDir = "@ROOT@/server/data"
+DataDir = "@ROOT@/out/server/data"
 # PvE realm (decided). Horde only: disable Alliance character creation.
 GameType = 0
 CharacterCreating.Disabled = 1

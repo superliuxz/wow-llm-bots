@@ -15,6 +15,6 @@ Q="SELECT JSON_OBJECT('t', UNIX_TIMESTAMP(), 'name', c.name, 'race', c.race, 'cl
 FROM acore_characters.characters c JOIN acore_auth.account a ON a.id=c.account
 WHERE a.username LIKE '$ACC' AND c.online = 1"
 while true; do
-  mysql --defaults-file="$ROOT/server/etc/mysql.cnf" -uroot -N -B -e "$Q" >> "$OUT" || true
+  mysql --defaults-file="$ROOT/out/server/etc/mysql.cnf" -uroot -N -B -e "$Q" >> "$OUT" || true
   sleep "$INT"
 done

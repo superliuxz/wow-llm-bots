@@ -3,7 +3,7 @@
 # worldserver's console reads from a named pipe: send commands with tools/wsc.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-S=$ROOT/server; RUN=$S/run; LOG=$S/logs
+S=$ROOT/out/server; RUN=$S/run; LOG=$S/logs
 mkdir -p "$RUN" "$LOG"
 "$ROOT/tools/db-start.sh"
 running() { pgrep -x "$1" >/dev/null; }  # by process name, so a stale/missing pid file can't fool us
@@ -22,7 +22,7 @@ if ! running worldserver; then
   echo $! > "$RUN/worldserver.pid"; echo "worldserver started (log: $LOG/worldserver.out)"
 fi
 
-# Human baseline for evals: sample the user's character state while online (untracked, server/logs/human/).
+# Human baseline for evals: sample the user's character state while online (untracked, out/server/logs/human/).
 if ! pgrep -f 'bot-sampler.sh .*/human/' >/dev/null; then
   mkdir -p "$LOG/human"
   (exec "$ROOT/tools/bot-sampler.sh" "$LOG/human/state-$(date +%Y%m%d).jsonl" 60 'WILL') > /dev/null 2>&1 &

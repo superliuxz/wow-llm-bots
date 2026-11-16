@@ -82,5 +82,7 @@ their names. It must never block the world thread.
 - Public-ready private repo: no secrets or personal details in tracked files; those go in the
   `private/` submodule. Commits use the noreply email set in the repo config.
 - Upstream code only in `third_party/` (pinned submodules); never edit it.
-- Build outputs in `out/`, runtime data in `server/` and `var/` (untracked).
+- Everything generated is in `out/<name>` (untracked). `out/server` is the installed game server and
+  also holds its state (extracted map data, the MySQL database): never `rm -rf out`, clean specific
+  build directories. Live bot memory is in `var/` (untracked).
 - Settings live in `config/*.overrides`, rendered by `tools/apply-config.sh`.

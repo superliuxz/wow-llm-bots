@@ -2,7 +2,7 @@
 # Stop worldserver (graceful), authserver, then MySQL.
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-RUN=$ROOT/server/run
+RUN=$ROOT/out/server/run
 stop() {  # stop <name> <timeout_s>
   local f=$RUN/$1.pid; [ -f "$f" ] || return 0
   local pid; pid=$(cat "$f")

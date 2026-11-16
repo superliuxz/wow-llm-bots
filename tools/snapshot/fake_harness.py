@@ -18,7 +18,7 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
-SOCK = str(ROOT / "server" / "run" / "brain.sock")
+SOCK = str(ROOT / "out" / "server" / "run" / "brain.sock")
 HEADER = struct.Struct(">I")
 
 try:

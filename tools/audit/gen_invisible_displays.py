@@ -3,7 +3,7 @@
 A creature whose model is an "invisible stalker" is on the server's visible list (the client
 is sent it) but draws nothing: a player sees nobody there. The server doesn't load model file
 names, so this reads CreatureDisplayInfo.dbc and CreatureModelData.dbc (extracted by
-tools/setup/extract-data.sh into server/data/dbc) and lists every display id whose model is an
+tools/setup/extract-data.sh into out/server/data/dbc) and lists every display id whose model is an
 InvisibleStalker or InvisibleMan model.
 
 Re-run when the client data changes (3.3.5a is frozen, so: practically never), then commit.
@@ -17,7 +17,7 @@ import struct
 import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
-DBC = ROOT / "server" / "data" / "dbc"
+DBC = ROOT / "out" / "server" / "data" / "dbc"
 OUT = ROOT / "server_module" / "mod-llm-brain" / "src" / "invisible_displays.h"
 INVISIBLE_MODELS = ("invisiblestalker", "invisibleman")
 

@@ -16,6 +16,6 @@ account) are ever erased.
 
 1. Get a character into the state you want (play it, or let a bot play it).
 2. With the character offline: `tools/wsc pdump write <file>.pdump <Name>` (written to
-   `server/bin/`).
+   `out/server/bin/`).
 3. Read the file, move it here, add a row above. The character's original name, account and
    GUID are replaced when it's loaded.

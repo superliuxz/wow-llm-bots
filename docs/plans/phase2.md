@@ -24,7 +24,7 @@ worldserver process                                harness process (ours)       
 |  world thread: build snapshots, apply cmds   |   |   parser, scheduler        |   | localhost |
 |  IO thread: Unix socket server, two queues   |<->| thread pool: HTTP calls    |   +-----------+
 +----------------------------------------------+   | logs: var/bots/<name>/     |
-            Unix socket server/run/brain.sock      +----------------------------+
+            Unix socket out/server/run/brain.sock      +----------------------------+
             length-prefixed protobuf frames
 ```
 
