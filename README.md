@@ -10,17 +10,18 @@ Design and every decision so far: [docs/design.md](docs/design.md).
 
 | Path | What |
 |---|---|
-| `docs/` | design doc |
+| `docs/` | the design (`design.md`), plans, specs and measured results |
 | `private/` | private submodule (accounts, personal data); not accessible to others |
 | `third_party/` | upstream code as pinned git submodules: AzerothCore (mod-playerbots fork, `Playerbot` branch), mod-playerbots (`master`), harness deps: Abseil `20260817.0`, GoogleTest `v1.18.0`, cpp-httplib `v0.66.0`, nlohmann/json `v3.12.0`, and llama.cpp `v1.0.0` |
 | `common/` | shared C++ used by the server module and the harness: `base/` (Chromium-style threads, epoll IO message pump, task runners, callbacks, WeakPtr, scoped_refptr, TimeDelta) and `net/` (Unix socket server/client, length-prefixed framing) |
-| `server_module/` | our AzerothCore module(s) |
-| `harness/` | the bot brain harness (C++) |
-| `content/` | shared bot knowledge: `RULES.md`, `concepts/`, prompts |
+| `server_module/` | our AzerothCore module: sees the game, builds each bot's snapshot, carries out commands |
+| `harness/` | the brain's process (C++), separate from the game server: screens, plans, and soon the llama client and scheduler (`docs/plans/harness.md`) |
+| `content/` | *planned, not created yet:* shared bot knowledge (`RULES.md`, `concepts/`, prompts) |
 | `config/` | our config files (MySQL, server overrides) |
 | `tools/` | scripts: see [Tools](#tools) |
 | `out/` | everything generated, laid out as `out/<name>` for what builds it (not tracked). **`out/server` is the installed game server and holds its state:** binaries, configs, the 7 GB of extracted map data and the MySQL database (accounts, characters). Don't `rm -rf out`; clean specific build directories |
-| `var/bots/` | live bot memory, its own git repo (not tracked here) |
+| `var/bots/` | *planned, not created yet:* live bot memory (`<name>/identity.md`, goals, `events/*.jsonl`), its own git repo, written by the harness (not tracked here) |
+| `models/` | the GGUF model files llama-server loads (not tracked) |
 | `reference/` | downloaded addon sources (not tracked) |
 
 ## Setup
