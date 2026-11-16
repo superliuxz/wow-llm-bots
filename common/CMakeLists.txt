@@ -121,12 +121,14 @@ target_compile_options(llm_brain_unittests PRIVATE ${WLB_SAFETY_FLAGS})
 # The harness (harness/): the brain's process. Its parts that don't need the
 # game are built and tested here, with the same flags and sanitizers as the rest.
 set(WLB_HARNESS_SRC "${WLB_ROOT}/harness/src")
-add_library(wlb_harness STATIC "${WLB_HARNESS_SRC}/screen_renderer.cc")
+add_library(wlb_harness STATIC "${WLB_HARNESS_SRC}/plan.cc"
+            "${WLB_HARNESS_SRC}/screen_renderer.cc")
 target_include_directories(wlb_harness PUBLIC "${WLB_HARNESS_SRC}")
 target_link_libraries(wlb_harness PUBLIC wlb_proto absl::strings
                       absl::str_format)
 target_compile_options(wlb_harness PRIVATE ${WLB_SAFETY_FLAGS})
 add_executable(harness_unittests
+  "${WLB_HARNESS_SRC}/plan_unittest.cc"
   "${WLB_HARNESS_SRC}/screen_renderer_unittest.cc")
 target_link_libraries(harness_unittests PRIVATE wlb_harness GTest::gtest_main)
 target_compile_definitions(harness_unittests PRIVATE
