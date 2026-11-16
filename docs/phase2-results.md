@@ -331,3 +331,30 @@ routine picks, judged by the real quality check.
   an invisible model (146 display ids from the client's DBCs, `tools/audit/gen_invisible_displays.py`).
   Live check, 50 bots in the valley: 329 listings in 25 bots before, 0 after; snapshot build still
   50 µs median, 130 µs p99.
+
+### One brain per bot: its own identity and memory, shared or pinned slots (2026-11-16)
+
+Each bot gets its own ~1,200-token identity and memory text (`IDENTITY=5000` in `brain_load.py`,
+unique per bot) after the shared rules. The model is shared (a second copy of a 22 GB model
+doesn't fit); the question is whether a bot should keep its own server slot, so its identity
+stays cached between wake-ups. Replay, current setup; "read again" is how many of the prompt's
+tokens the server had to process again:
+
+| Slots | Identity | Bots, plan | Wake to plan p50 / p95 | Prompt (read again) | GPU busy |
+|---|---|---|---|---|---|
+| 16 shared | small | 100, 30 s | 0.8 s / 1.7 s | 796 (604) | 77% |
+| **16 shared** | **big** | 100, 30 s | **1.1 s / 2.5 s** | 1,964 (1,533) | 82% |
+| **16 shared** | **big** | 50, 15 s | **1.4 s / 2.6 s** | 1,985 (1,301) | 81% |
+| 64 pinned (2 bots per slot) | big | 100, 30 s | 8.5 s / 23 s | 1,964 (1,141) | 97% |
+| 64 pinned (1 bot per slot) | big | 50, 15 s | 3.7 s / 7.3 s (once 39.8 s / 62 s) | 1,985 (693) | 97% |
+| 64-slot server, shared slots 0-15 (control) | small | 50, 15 s | 0.9 s / 1.9 s | 820 (677) | 76% |
+
+- **Shared slots win.** A 1,200-token identity costs only about +0.3 s (100 bots, 30 s plans) to
+  +0.6 s (50 bots, 15 s plans) at the median, because reading is fast.
+- **Pinned slots cache the identity (re-read tokens fall by half) yet are 2-3x slower** at the same
+  load, and sometimes far worse (a 40 s run right after a 100-bot pinned run on the same
+  server). Not caused by: the host prompt cache (`--cache-ram 0`: 5.5 s), context checkpoints
+  (`--ctx-checkpoints 1`: 3.8 s), the 64-slot server itself (control above), or graph
+  reallocations (zero in both). Cause unknown; not worth chasing while shared slots work.
+- So "one brain per bot" means a separate identity, memory and decision per wake-up, not a slot
+  per bot. Shared slots also scale to more bots than slots.
