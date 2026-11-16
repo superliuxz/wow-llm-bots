@@ -318,6 +318,35 @@ Wake to plan, median (95th percentile), in seconds. **Every cell is a measured r
   more often when fights interrupt; with the "safety net" prompt it was ~1.3 wake-ups per bot per
   minute (next section).
 
+### Urgent wakes: surprises on top of the plans (2026-11-16)
+
+The table above has no surprises: every fight in the replay was one mob the bot pulled itself.
+`SURPRISES=<n>` in `brain_load.py` adds n urgent "combat" wake-ups per bot per minute (random
+times, exponential gaps so some come in bursts) on top of the 30 s plan replay. Wake to plan,
+median / p95, 120 s per cell, one run each, same prompts and server as above:
+
+| Bots | Surprises per bot per min | Urgent wakes | All wakes, p95 | GPU busy |
+|---|---|---|---|---|
+| 50 | 0 | - | 1.0 s | 40% |
+| 50 | 2 | 0.8 s / 1.8 s | 1.8 s | 79% |
+| 50 | 4 | 1.6 s / 2.5 s | 2.6 s | 96% |
+| 50 | 6 | 2.0 s / 3.0 s | 3.4 s | 98% |
+| 50 | 10 | 5.5 s / 7.2 s | 92 s | 100% |
+| 100 | 1 | 1.5 s / 2.5 s | 2.5 s | 95% |
+| 100 | 2 | 2.2 s / 3.0 s | 6.1 s | 100% |
+| 100 | 4 | 2.6 s / 3.8 s | 77 s | 100% |
+
+- **Not a real fight:** the captured screens have no combat, so this loads the brain with urgent
+  wake-ups but not with a combat screen (which may be longer or shorter). A live run is not done.
+- **"All wakes, p95"** is over every wake-up in the run, urgent ones included (they are most of
+  the load in the last rows), so it is the slow normal wakes that push it up; the bench never
+  drops a stale wake-up.
+- **Urgent wakes go first, and still take 2-3 s once the GPU is busy:** a call is ~2 s, and an
+  urgent wake still waits for one of the 16 slots to free up. At 10 surprises per bot per minute
+  (50 bots) the normal wakes starve behind them (p95 92 s).
+- So anything needing an answer in under about a second can't be a brain call: it is a reflex
+  or a standing order (`docs/specs/triggers.md`).
+
 ### Counts and how long plans last (2026-11-16)
 
 `do` may repeat an option (`3x4`: option 3, four times; `COUNTS=1`). How long a plan lasts is

@@ -37,6 +37,11 @@ Env: SLOTS (default 25), MAX_TOKENS (default 150), OUT=<file> (per-call JSON),
      CODES_ONLY=1: no goal or chat lines at all (a floor: the cost of the free text).
      BATCH_S=<s>: non-urgent wakes wait for the next multiple of <s> seconds and
      go to the GPU together (urgent ones go at once).
+     SURPRISES=<n>: on top of the replayed wakes, every bot gets n urgent "combat" wakes per
+     minute at random times (exponential gaps, so some come in bursts), each on the screen of
+     a random wake of the same bot. The captured screens have no real fights, so this loads
+     the brain with urgent wakes but not with a combat screen. The summary then also reports
+     the urgent wakes' wait on their own (see docs/phase2-results.md).
 """
 
 import heapq
@@ -176,6 +181,18 @@ def load(snap_dir, wakes_file, n_bots, seconds, rng):
             t = (w["t"] + offset) % duration
             if t < seconds:
                 out.append({**w, "t": t, "copy": copy, "source": source})
+    rate = float(os.environ.get("SURPRISES", 0)) / 60
+    if rate:
+        for copy in range(n_bots):
+            source = bots[copy % len(bots)]
+            mine = [w for w in out if w["copy"] == copy]
+            if not mine:
+                continue
+            t = rng.expovariate(rate)
+            while t < seconds:
+                pick = rng.choice(mine)
+                out.append({**pick, "t": t, "why": "combat", "surprise": True})
+                t += rng.expovariate(rate)
     return sorted(out, key=lambda w: w["t"])
 
 
@@ -461,6 +478,10 @@ def main():
           f"{statistics.mean(r['reply_tokens'] or 0 for r in results):.0f} tok | valid "
           f"{sum(r['ok'] for r in results)}/{len(results)} | brain's look_again_s median "
           f"{statistics.median(look) if look else '-'}")
+    urgent = sorted(r["latency"] for r in results if r["why"] in URGENT)
+    if os.environ.get("SURPRISES") and urgent:
+        print(f"  urgent wakes ({len(urgent)}, {len(urgent) / n_bots / seconds * 60:.1f} per bot per min): "
+              f"wake->plan p50 {pct(urgent, 0.5):.1f}s p95 {pct(urgent, 0.95):.1f}s max {urgent[-1]:.1f}s")
     if est:
         print(f"  plans with a count: {counted / len(results):.0%} | estimated time to the next "
               f"wake-up (steps done or look, whichever first): median {statistics.median(est):.0f}s, "
