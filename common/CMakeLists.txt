@@ -111,6 +111,8 @@ add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/latest_wins_unittest.cc"
   "${WLB_MODULE_SRC}/perception.cc"
   "${WLB_MODULE_SRC}/perception_unittest.cc"
+  "${WLB_MODULE_SRC}/snapshot_schedule.cc"
+  "${WLB_MODULE_SRC}/snapshot_schedule_unittest.cc"
   "${WLB_MODULE_SRC}/snapshot_stats.cc"
   "${WLB_MODULE_SRC}/snapshot_stats_unittest.cc"
   "${WLB_MODULE_SRC}/test/test_accounts.cc"

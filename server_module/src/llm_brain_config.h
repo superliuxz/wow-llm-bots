@@ -16,6 +16,7 @@ struct Config {
   // Characters our bot manager keeps online and the brain controls.
   std::vector<std::string> bots;
   uint32_t snapshot_interval_ms = 1000;
+  uint32_t snapshot_interval_combat_ms = 250;
   // How far names / nameplate fields show in `nearby` (later per bot, from its
   // UI settings), and the line-of-sight ray-cast budget per snapshot.
   float nameplate_range_yd = 20;

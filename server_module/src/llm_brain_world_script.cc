@@ -1,5 +1,6 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -19,6 +20,7 @@
 #include "nearby_builder.h"
 #include "proto/snapshot.pb.h"
 #include "snapshot_builder.h"
+#include "snapshot_schedule.h"
 #include "snapshot_stats.h"
 
 #if defined(LLM_BRAIN_TEST_HOOKS)
@@ -51,9 +53,15 @@ class LlmBrainWorldScript : public WorldScript {
       bots += bots.empty() ? name : ", " + name;
     }
     LOG_INFO("module",
-             "mod-llm-brain: {} (socket {}, bots [{}], snapshot every {} ms)",
+             "mod-llm-brain: {} (socket {}, bots [{}], snapshot every {} ms, "
+             "{} ms in combat)",
              config_.enabled ? "enabled" : "disabled", config_.socket_path,
-             bots, config_.snapshot_interval_ms);
+             bots, config_.snapshot_interval_ms,
+             config_.snapshot_interval_combat_ms);
+    schedule_ = std::make_unique<SnapshotSchedule>(
+        config_.bots.size(), base::Milliseconds(config_.snapshot_interval_ms),
+        base::Milliseconds(config_.snapshot_interval_combat_ms),
+        base::TimeTicks::Now());
     if (!config_.enabled) {
       return;
     }
@@ -115,25 +123,35 @@ class LlmBrainWorldScript : public WorldScript {
       return;
     }
     bridge_->RunWorldTasks();
-    since_snapshot_ms_ += diff;
     since_stats_ms_ += diff;
     if (since_stats_ms_ >= kStatsIntervalMs) {
       since_stats_ms_ = 0;
-      if (stats_.count()) {
-        LOG_INFO("module", "mod-llm-brain: snapshots in the last minute: {}",
-                 stats_.Summary());
-        stats_.Reset();
-      }
+      LogStats();
     }
-    if (since_snapshot_ms_ < config_.snapshot_interval_ms) {
-      return;
-    }
-    since_snapshot_ms_ = 0;
     if (!bridge_->connected()) {
       return;  // Nobody to send to: don't spend world-thread time building.
     }
-    for (const std::string& name : config_.bots) {
-      SendSnapshot(name);
+    // Each bot has its own moment in the interval (bots are spread over it, so
+    // a tick builds one or two snapshots, not all of them), and a bot whose
+    // combat or life state changed is due at once.
+    const base::TimeTicks now = base::TimeTicks::Now();
+    size_t built = 0;
+    for (size_t i = 0; i < config_.bots.size(); ++i) {
+      Player* bot = ObjectAccessor::FindPlayerByName(config_.bots[i]);
+      if (!bot) {
+        continue;  // Offline (or not in the world yet).
+      }
+      const SnapshotSchedule::Flags flags{bot->IsInCombat(), bot->IsAlive()};
+      if (schedule_->IsDue(i, now, flags)) {
+        SendSnapshot(config_.bots[i], bot);
+        schedule_->Sent(i, now, flags);
+        ++built;
+      }
+    }
+    if (built > 0) {
+      max_update_snapshots_ = std::max(max_update_snapshots_, built);
+      max_update_time_ =
+          std::max(max_update_time_, base::TimeTicks::Now() - now);
     }
   }
 
@@ -149,11 +167,42 @@ class LlmBrainWorldScript : public WorldScript {
   }
 
  private:
-  void SendSnapshot(const std::string& name) {
-    Player* bot = ObjectAccessor::FindPlayerByName(name);
-    if (!bot) {
-      return;  // Offline (or not in the world yet).
+  // The minute's summary: what snapshots cost to build, how many one tick
+  // built at most (the spread of the bots), and how long they took to reach the
+  // socket.
+  void LogStats() {
+    if (stats_.count()) {
+      LOG_INFO("module", "mod-llm-brain: snapshots in the last minute: {}",
+               stats_.Summary());
+      LOG_INFO("module",
+               "mod-llm-brain: one tick built at most {} snapshots, in at most "
+               "{} us",
+               max_update_snapshots_, max_update_time_.InMicroseconds());
+      stats_.Reset();
     }
+    max_update_snapshots_ = 0;
+    max_update_time_ = base::TimeDelta();
+    BrainBridge::SendStats sent = bridge_->TakeSendStats();
+    if (!sent.delays.empty() || sent.replaced > 0) {
+      std::sort(sent.delays.begin(), sent.delays.end());
+      const auto at = [&](double q) {
+        return sent.delays.empty()
+                   ? int64_t{0}
+                   : sent
+                         .delays[std::min(
+                             sent.delays.size() - 1,
+                             static_cast<size_t>(
+                                 q * static_cast<double>(sent.delays.size())))]
+                         .InMicroseconds();
+      };
+      LOG_INFO("module",
+               "mod-llm-brain: sent n={} (built to socket p50={}us p99={}us "
+               "max={}us), {} replaced by a newer snapshot",
+               sent.delays.size(), at(0.5), at(0.99), at(1.0), sent.replaced);
+    }
+  }
+
+  void SendSnapshot(const std::string& name, Player* bot) {
     BotState& state = bots_[name];
     if (!state.builder) {
       state.builder = std::make_unique<SnapshotBuilder>(NearbyBuilder::Options{
@@ -169,7 +218,8 @@ class LlmBrainWorldScript : public WorldScript {
     std::string bytes = message.SerializeAsString();
     stats_.Add({base::TimeTicks::Now() - start, bytes.size(), nearby.units,
                 nearby.objects, nearby.hidden, nearby.raycasts});
-    bridge_->Send(std::move(bytes));
+    // The newest snapshot of a bot wins if the harness is behind.
+    bridge_->SendLatest(name, std::move(bytes));
   }
 
   Config config_;
@@ -178,8 +228,10 @@ class LlmBrainWorldScript : public WorldScript {
 #endif
   std::unique_ptr<BotManager> bot_manager_;
   std::unique_ptr<BrainBridge> bridge_;
-  uint32 since_snapshot_ms_ = 0;
+  std::unique_ptr<SnapshotSchedule> schedule_;
   uint32 since_stats_ms_ = 0;
+  size_t max_update_snapshots_ = 0;
+  base::TimeDelta max_update_time_;
   SnapshotStats stats_;
   struct BotState {
     // Snapshot counter (gaps tell the harness something was dropped).

@@ -31,11 +31,21 @@ LlmBrain.Bots = ""
 #
 #    LlmBrain.SnapshotIntervalMs
 #        Description: How often each attached bot's snapshot is streamed to the harness.
+#                     The bots are spread over the interval (bot i of N is first due i/N of an
+#                     interval after the start), so the work is never one burst per interval.
 #                     The harness decides when to call the LLM (only when there is something
 #                     to act on, plus its own fallback timer); snapshots alone cost no LLM time.
 #        Default:     1000
+#
+#    LlmBrain.SnapshotIntervalCombatMs
+#        Description: The same, for a bot in combat: a fight changes in a fraction of a second.
+#                     A bot whose combat or life state changed is sent a snapshot at once,
+#                     whatever its interval. 0, or not shorter than SnapshotIntervalMs: no
+#                     faster cadence.
+#        Default:     250
 
 LlmBrain.SnapshotIntervalMs = 1000
+LlmBrain.SnapshotIntervalCombatMs = 250
 
 #
 #    LlmBrain.NameplateRangeYd
