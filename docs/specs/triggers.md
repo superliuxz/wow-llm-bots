@@ -18,6 +18,7 @@ and applies defaults taken from the game client (what the client itself alerts a
 | `expect` | what the plan intends to deal with, as filters ("Scorpid Worker" mobs): these don't count as surprises |
 | `watch` | extra conditions to wake on (below) |
 | `ignore` | default triggers not to wake on for this plan ("whispers", "combat feedback from expected mobs") |
+| `orders` | proposed: standing orders, `<watch> -> <action>`, run by C++ without waking the brain (below) |
 | `react` | the first reaction to a surprise while the brain thinks ("run to the Razor Hill guards"); default: the body's stock reaction (playerbots: fight back if attacked, otherwise keep going) |
 | `look_again_s` | wake anyway after this long |
 
@@ -63,6 +64,204 @@ snapshot and the checker validates them.
 Filters compare an entry's fields: `{kind: PLAYER, reaction: HOSTILE, level >= 70,
 rel.dist_yd < 40}`, `{name: "Hogger"}`, `{dispel_type: MAGIC}`. Units coming into view have no
 client event (a player just sees them), which is why `appears` exists.
+
+## Standing orders (proposed 2026-11-16, not built)
+
+**The test for any behaviour is how fast it has to happen.** Under about a second it can't be a
+brain call: an urgent wake costs 0.8 s with spare capacity and 2-3 s with a busy GPU, never
+less (`docs/phase2-results.md`, "Urgent wakes"). So it is a **reflex** (the playerbots engine:
+rotation, interrupts, fighting back, human-paced) or a **standing order**. Anything slower is a
+brain decision.
+
+| Layer | Who | Speed | Examples |
+|---|---|---|---|
+| Reflex | C++ (playerbots engine, our module) | within a tick, plus a human-like delay | rotation, interrupts, fighting back |
+| Standing order | the brain writes it, C++ carries it out | written ahead of time, runs within a tick | "hp<30: use option 7", "Defile on me: run to the edge" |
+| Decision | the brain | 0.5-2 s | what to do next, who to group with, chat, what to do after a wipe |
+
+An **order** is a small plan started by a watch instead of by the brain:
+`<when> -> <act>, then <act>` (grammar below): the verbs act on things the plan's `steps` already
+name, and a step may end `until` a condition or a timeout, as in a plan; it generalises today's
+single `react` line to a list.
+
+**About ten verbs, and the number must not grow per boss; what grows is what they point at**
+(provisional: see "What a pass over playerbots' boss triggers found" below):
+`to`, `away`, `target`, `use`, `stop`, `face`, `jump`, `cancel`, `avoid`, `wake`.
+
+| Verb | Covers |
+|---|---|
+| `to` | stack, run to the tank, hide behind an ice tomb, enter a portal |
+| `away` | Defile, spread out, get out of a cloud |
+| `target` | switch to adds, a Bone Spike, a Val'kyr |
+| `use` | a cooldown, potion, dispel, taunt, interrupt |
+| `stop` | stop casting or attacking (Unchained Magic) |
+| `avoid` | don't melee this, don't dispel that |
+| `face`, `jump`, `cancel` | turn to a unit; jump; cancel an aura or a cast |
+| `wake` | no rule fits: ask the brain (what every watch does today) |
+
+Targets and places reuse the filter vocabulary the watches already have (`{name: ...}`, an
+aura, a raid marker on a unit, a distance).
+
+**What a first pass over playerbots' boss triggers found** (2026-11-16, against the first
+grammar; its table was not kept, and the re-run with the revised grammar below replaces its numbers). Six readers wrote each of the 594 boss-trigger bodies in the
+pinned playerbots commit as a `when` clause of the first grammar here, or marked why it couldn't be
+said:
+
+| Result | Triggers |
+|---|---|
+| Fits the first grammar | 188 (32%) |
+| No condition at all: "this role does this for the whole fight" | 120 (20%) |
+| Can't be said | 286 (48%) |
+
+The verbs were not the weak part; the `when` side was. Why the 286 failed (a trigger can have
+several reasons; counts are from a keyword sort of the notes): "not" (an aura is absent, the boss
+isn't casting) 145; assignments computed in code and shared between bots 49; a state that isn't
+an aura (flying, submerged, untargetable, a phase flag) 48; a fixed location, height or room 45;
+a distance other than "within N of me" 28; health above a line or a range 24; vehicle, mount, pet
+or gear state 23; "or" of two conditions about 20; a raid marker 15; a repeating or stored timer
+15; a count of units 14. Of the 120 whole-fight triggers about 52 are positions and about 24 are
+kill priorities: standing orders with no trigger, so the grammar needs `always`.
+
+**The `when` side, revised** (proposed; the verb side is as above):
+
+```
+order   ::= when " -> " act (", then " act){0,2}
+when    ::= "always" | cond (" & " cond){0,2}
+cond    ::= "not "? test
+test    ::= mech " on " who | mech " stacks" cmp cnt " on " who
+          | mech " cast" | mech " appears" | mech " count>" cnt
+          | thing (" within " | " beyond ") num | thing " targets " who
+          | thing " hp" cmp pct | "mana" cmp pct | thing " is " state
+          | "me " mystate | "phase " digit | "after " num "s" | "every " num "s"
+cmp     ::= "<" | ">"
+who     ::= "me" | "tank" | "healer" | "anyone" | "boss"
+thing   ::= "it" | "boss" | "tank" | mech | "marker " mark
+state   ::= "flying" | "grounded" | "untargetable" | "submerged"
+mystate ::= "in vehicle" | "mounted" | "swimming" | "nearest to it"
+```
+
+Examples the first grammar couldn't say: `always -> to behind boss`; `always -> target marker
+skull`; `not Fire Bomb cast & boss hp>20 -> target boss`; `Sindragosa is flying -> to Ice Tomb`;
+`Tainted Core appears & me nearest to it -> use 4 on it`.
+
+- **"Or" needs no syntax:** write two orders with the same action.
+- **Coverage, measured (2026-11-16):** every one of the 595 `IsActive` bodies in
+  `src/Ai/Raid` and `src/Ai/Dungeon` of the pinned playerbots commit (`ecc4a53`; 482 raid, 113
+  dungeon) was read, following helpers, and written in the revised grammar or marked why it
+  can't be: `docs/specs/trigger-conditions.tsv`, one row each (how it was made:
+  `trigger-conditions-brief.md`; six readers in parallel, then 12 random rows re-read against
+  the source). Leaving out 25 `plumbing` rows (base classes, shared timer keepers) and 19 `bugnet`
+  rows (resetting state, stuck bots), the 551 mechanics are:
+
+  | Verdict | Triggers |
+  |---|---|
+  | `fits` (a `when` clause in the revised grammar) | 342 (62%) |
+  | `always` (no condition beyond the fight and the bot's role) | 124 (23%) |
+  | `unsayable` | 85 (15%) |
+
+  So **85% can be said**, close to the 86% estimated from the first pass. 83 of the `fits` rows
+  needed a stretch (noted in `missing`), and 45 use `phase N`, whose numbers assume DBM's
+  numbering (playerbots computes its own phases, e.g. Illidan, Kael'thas; not checked against
+  DBM). Why the 85 can't be said (a row can have several): `other` 43, `assignment` 21,
+  `fixed_location` 17, `timer` 13, `nonaura_state` 10, `vehicle_gear` 8, `distance_other` 5,
+  `count` 4, `health_range` 3, `marker` 2.
+- **Grammar gaps the re-run found** (each cheap): `me` is not a `thing`, so "my health < 40%"
+  can't be said though the snapshot has it; no "master" or assist-tank `who`; no line-of-sight,
+  "behind it" or "my current target" test (the snapshot has `in_los` and `behind_it`); no game
+  objects as `mech` (traps, Crystal Spike); a named unit among several bosses (council fights)
+  can't be told apart by `boss`; some triggers need 4 conditions (cap 3) or 5-7 orders (cap 4),
+  e.g. one interrupt order per spell.
+- **Snapshot gaps it found:** a flying/grounded, untargetable and submerged state on `Unit`
+  (the most common gap: Razorscale, Sapphiron, Onyxia, Sindragosa, Nightbane, Thaddius, Kael's
+  advisors, Lurker); an assist-tank and assist-healer index in `GroupPart`; where a cast will land
+  (Arcane Orb, Flame Strike, Malleable Goo); the liquid under the bot (lava).
+- **Found in playerbots:** `TooFarFromPlayerWithAuraTrigger::TooFarFromPlayerWithAura`
+  (`src/Ai/Base/Trigger/RangeTriggers.cpp:275`) returns before its distance loop, so the range is
+  never checked (Yogg-Saron Brain Link); `NotBehindIngvarTrigger` returns true when the bot *is*
+  behind its target. Several ICC triggers also change auras as a side effect (strip
+  "Experienced", give heroic cheat buffs), and 5 are `*Cheat*` triggers: not comparable with a
+  player.
+- **`phase N` comes from DBM (decided 2026-11-16).** The snapshot already has it, gated on the
+  DBM addon like a player's own: `BossPart.phase`, the encounter's DBM timers and the
+  `dbm_warning` event.
+- **`marker` as a place** only works on a unit carrying the icon: 3.3.5a has no markers on the ground.
+- **Outside the grammar** (first pass: about 84 triggers; re-run: 85, mainly assignments and
+  fixed locations). Most of the answer is already in the snapshot; six gaps are
+  left (checked against `snapshot.proto`: `main_tank`, `assistant`, `subgroup`, raid markers,
+  `LANDMARK`, `swimming` and `visual_state` exist; `lands_in_s` does not):
+  1. **Named places in a boss room** (the hard one): playerbots says `(x, y, z)`, a player says "on
+     the dais". Cheapest first: a player or unit ("ranged stack on Loada" is `to Loada`, covers
+     most cases, nothing new); relative spots (behind the boss, max range, the door you came in
+     by, N yards apart: computed from what is sent); room landmarks (no server data known, would
+     be per-room scripting, so left until a fight needs it).
+  2. **Unit states that aren't auras** (flying, submerged, untargetable): add to `Unit.visual_state`.
+  3. **Impact spots before they land** (a cast aimed at a point, with the time left): a flag and
+     `lands_in_s` on `Area`.
+  4. **Liquid type under the bot** (lava, slime): next to `swimming`.
+  5. **Main assist:** the proto has `main_tank` and `assistant`, but no main assist.
+  6. **DBM data per boss** (phases, timers, warnings): the fields exist; filling them is where
+     per-boss knowledge legitimately lives. DBM's own boss mods are the obvious source to
+     convert from (not looked at yet).
+  Also: assignments that are settled in raid chat before the pull can only be used if they are in
+  the bot's prompt when it writes its orders: the raid chat where it was given, or a line in its
+  memory ("I take the left cube"). Playerbots' "the closest free bot does it" (5) is computable in
+  the harness from the positions already sent. About 9 triggers are bug nets (fell through the
+  floor): not the brain's job, a C++ safety net or the "Stuck" option.
+
+**A sequence is allowed if it stays short and has no branches:** two or three steps, each with
+an `until` or a timeout, ending in "resume the plan" or `wake`. Anything of the form "if that
+fails, then..." is a brain decision, so a failed step wakes the brain. One order runs at a
+time; the brain lists them in priority order and a higher one interrupts a lower one.
+Example: `Defile on me -> away, then resume`.
+
+Rules that keep the split clean:
+
+1. **C++ never chooses for the bot.** It carries out an order the brain wrote, or what the
+   playerbots reflexes do anyway. If no order covers an event, it wakes the brain (the defaults
+   above) and does not guess.
+2. **The brain never sits in a timing loop.** If something needs an answer in under about a
+   second, it must be an order given in advance.
+3. **Knowing unlocks the reaction.** An order for a boss mechanic only exists for a bot that has
+   learned that mechanic (`design.md`, known-mechanics gate): a bot that hasn't learned Defile
+   has no order for it and reacts late, like a player.
+4. **An order covers its event.** A matching order replaces the default wake, and the event goes
+   into the next look's "since your last look". An order can also say `wake` to do both: do the
+   thing, then ask the brain.
+5. **Priority is the order the brain wrote them in** (see above); a new plan replaces all of the
+   old plan's orders. At most 4 orders per plan, like today's 4 watches.
+
+Why: it cuts urgent wakes. Every expected surprise ("an add: target it", "health under 30%:
+potion") is handled without a brain call, and the measured limit is about 7 wake-ups a second,
+shared by every bot. The cost: a longer reply (about 6 tokens per order) and an executor in the
+module for each action.
+
+**How the brain learns orders for a mechanic** (two separate things: the verbs, and what a boss does):
+
+- **The verbs:** a short section in `content/RULES.md` with one or two examples; the per-call
+  grammar enforces them, as it does for options.
+- **What the boss does:** per-bot notes, from the four sources `design.md` names (dying to it,
+  being told in chat, looking it up in the local database tool, watching others), for example
+  "Lich King, Defile: black pool under whoever is targeted, grows when people stand in it".
+- **Gating:** the `when` part of the grammar is built from the bot's own notes, so a bot can only
+  write an order about Defile if Defile is in its notes. That enforces "knowing unlocks the
+  reaction" in code.
+- **The loop:** before a pull, one wake with that boss's notes and the verbs, and the answer is
+  the order list; the harness checks that each order names a real spell or aura and a legal
+  verb; after a wipe, one wake with what killed the bot, and it updates its notes and orders.
+- **Testing:** offline evals: given these notes, does the brain write a sensible order, and
+  does a bot without the note write none.
+- This keeps "no per-case scripts": C++ knows the verbs, never the bosses.
+
+Still open: the grammar and snapshot gaps above (then re-run the table, the grammar's
+regression set); the six snapshot gaps above; how orders are tested live. **Testing, in five steps:** (1) coverage on paper (done:
+`trigger-conditions.tsv`, 595 rows, the grammar's regression set); (2) unit tests in the harness for `not`, `&`, `always`
+and order priority, on recorded snapshot sequences; (3) offline with the model: boss notes in,
+orders out, scored with `harness decide`, and a bot without the note writes none; (4) live
+without the model: hand-written orders on a fixture bot, cause the mechanic from the console,
+measure event to first action, one scenario per verb and one per `test` form (about 25); (5)
+live with the model, boss by boss: orders fired, reaction time, deaths per mechanic, wakes during
+the fight, wake to plan for bots outside, against playerbots' stock strategy on the same boss.
+Steps 4 and 5 need the `choose` command and level-80 fixtures.
 
 ## Defaults (from the client)
 
