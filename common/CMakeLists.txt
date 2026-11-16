@@ -122,8 +122,12 @@ target_compile_options(llm_brain_unittests PRIVATE ${WLB_SAFETY_FLAGS})
 # game are built and tested here, with the same flags and sanitizers as the rest.
 set(WLB_HARNESS_SRC "${WLB_ROOT}/harness/src")
 find_package(Threads REQUIRED)
-add_library(wlb_harness STATIC "${WLB_HARNESS_SRC}/llm_client.cc"
+add_library(wlb_harness STATIC "${WLB_HARNESS_SRC}/decision_log.cc"
+            "${WLB_HARNESS_SRC}/file_util.cc"
+            "${WLB_HARNESS_SRC}/llm_client.cc"
             "${WLB_HARNESS_SRC}/plan.cc"
+            "${WLB_HARNESS_SRC}/prompt.cc"
+            "${WLB_HARNESS_SRC}/scheduler.cc"
             "${WLB_HARNESS_SRC}/screen_renderer.cc")
 target_include_directories(wlb_harness PUBLIC "${WLB_HARNESS_SRC}")
 # cpp-httplib and nlohmann/json are header-only third-party code (their own style,
@@ -134,8 +138,12 @@ target_link_libraries(wlb_harness PUBLIC wlb_base wlb_proto absl::strings
                       absl::str_format Threads::Threads)
 target_compile_options(wlb_harness PRIVATE ${WLB_SAFETY_FLAGS})
 add_executable(harness_unittests
+  "${WLB_HARNESS_SRC}/decision_log_unittest.cc"
+  "${WLB_HARNESS_SRC}/file_util_unittest.cc"
   "${WLB_HARNESS_SRC}/llm_client_unittest.cc"
   "${WLB_HARNESS_SRC}/plan_unittest.cc"
+  "${WLB_HARNESS_SRC}/prompt_unittest.cc"
+  "${WLB_HARNESS_SRC}/scheduler_unittest.cc"
   "${WLB_HARNESS_SRC}/screen_renderer_unittest.cc")
 target_link_libraries(harness_unittests PRIVATE wlb_harness GTest::gtest_main)
 target_compile_definitions(harness_unittests PRIVATE
