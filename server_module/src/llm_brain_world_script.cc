@@ -1,19 +1,18 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
 #include <algorithm>
-#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <utility>
 #include <vector>
 
 #include "Creature.h"
 #include "Define.h"
+#include "GameObject.h"
 #include "Log.h"
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
@@ -51,19 +50,6 @@ constexpr uint32_t kStatsIntervalMs = 60000;
 // urgent wake-up on a busy GPU (p95 3.8 s, docs/phase2-results.md).
 constexpr base::TimeDelta kOptionHistory = base::Seconds(30);
 
-ObjectGuid ParseGuidString(std::string_view text) {
-  if (text.starts_with("0x")) {
-    text.remove_prefix(2);
-  }
-  uint64_t raw = 0;
-  const auto [end, error] =
-      std::from_chars(text.data(), text.data() + text.size(), raw, 16);
-  if (error != std::errc() || end != text.data() + text.size()) {
-    return ObjectGuid::Empty;
-  }
-  return ObjectGuid(raw);
-}
-
 uint8_t ControlMask(const Player* bot) {
   uint8_t mask = 0;
   if (bot->HasUnitState(UNIT_STATE_STUNNED) ||
@@ -93,17 +79,30 @@ uint8_t ControlMask(const Player* bot) {
   return mask;
 }
 
-bool IsOptionTargetPending(Player* bot, const OptionTarget& target) {
+// Whether the body is still carrying out `target` (`used`: a non-loot object
+// was already clicked on arrival).
+bool IsOptionTargetPending(Player* bot, const OptionTarget& target, bool used) {
   switch (target.kind) {
     case OptionTarget::Kind::kAttack: {
-      Unit* unit = ObjectAccessor::GetUnit(*bot, ParseGuidString(target.guid));
+      Unit* unit =
+          ObjectAccessor::GetUnit(*bot, ParseSnapshotGuid(target.guid));
       return unit != nullptr && unit->IsInWorld() && !unit->isDead();
     }
     case OptionTarget::Kind::kLoot: {
       Creature* creature =
-          ObjectAccessor::GetCreature(*bot, ParseGuidString(target.guid));
+          ObjectAccessor::GetCreature(*bot, ParseSnapshotGuid(target.guid));
       return creature != nullptr && creature->IsInWorld() &&
              creature->HasDynamicFlag(UNIT_DYNFLAG_LOOTABLE);
+    }
+    case OptionTarget::Kind::kGather:
+    case OptionTarget::Kind::kUse: {
+      GameObject* go =
+          ObjectAccessor::GetGameObject(*bot, ParseSnapshotGuid(target.guid));
+      if (go == nullptr || !go->IsInWorld() || !go->isSpawned()) {
+        return false;
+      }
+      // A chest, herb or vein is done once opened; anything else once clicked.
+      return IsLootableObject(go) ? go->getLootState() == GO_READY : !used;
     }
     case OptionTarget::Kind::kKeep:
       return false;
@@ -222,6 +221,7 @@ class LlmBrainWorldScript : public WorldScript {
       if (!bot || !bot->IsInWorld()) {
         continue;  // Offline (or not in the world yet).
       }
+      UseOnArrival(bot, i, config_.bots[i]);
       const SnapshotSchedule::Flags flags = CurrentFlags(bot, i);
       if (schedule_->IsDue(i, now, flags)) {
         SendSnapshot(i, config_.bots[i], bot);
@@ -366,7 +366,9 @@ class LlmBrainWorldScript : public WorldScript {
       failed.command_id = command.command_id;
       EmitAlertingEvent(bot_index, name, bot, std::move(payload));
     } else if (found.target) {
-      const bool pending = IsOptionTargetPending(bot, *found.target);
+      bots_[bot_index].object_used = false;
+      bots_[bot_index].active_command_id = command.command_id;
+      const bool pending = IsOptionTargetPending(bot, *found.target, false);
       if (pending) {
         bots_[bot_index].active_option = *found.target;
       } else {
@@ -376,11 +378,40 @@ class LlmBrainWorldScript : public WorldScript {
     }
   }
 
+  // A Use step whose object playerbots can't walk to itself: the executor
+  // started the walk; click it once in reach, as a player would on arrival.
+  void UseOnArrival(Player* bot, size_t index, const std::string& name) {
+    BotState& state = bots_[index];
+    if (!state.active_option || state.object_used ||
+        state.active_option->kind != OptionTarget::Kind::kUse) {
+      return;
+    }
+    GameObject* go = ObjectAccessor::GetGameObject(
+        *bot, ParseSnapshotGuid(state.active_option->guid));
+    if (go == nullptr || IsLootableObject(go) ||
+        !go->IsAtInteractDistance(bot)) {
+      return;
+    }
+    state.object_used = true;
+    if (!UseObjectNow(bot, go)) {
+      const std::string text =
+          "can't use " + state.active_option->name + " now";
+      state.active_option.reset();
+      schedule_->SetActiveTargetPending(index, false);
+      wlb::snapshot::Event payload;
+      wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
+      failed.text = text;
+      failed.command_id = state.active_command_id;
+      EmitAlertingEvent(index, name, bot, std::move(payload));
+    }
+  }
+
   SnapshotSchedule::Flags CurrentFlags(Player* bot, size_t index) {
     BotState* state = &bots_[index];
     bool pending = false;
     if (state->active_option) {
-      pending = IsOptionTargetPending(bot, *state->active_option);
+      pending =
+          IsOptionTargetPending(bot, *state->active_option, state->object_used);
       if (!pending) {
         state->active_option.reset();
       }
@@ -454,6 +485,9 @@ class LlmBrainWorldScript : public WorldScript {
     std::unique_ptr<SnapshotBuilder> builder;
     OptionHistory history{kOptionHistory};
     std::optional<OptionTarget> active_option;
+    uint32_t active_command_id = 0;
+    // A Use step's object was clicked on arrival (UseOnArrival).
+    bool object_used = false;
   };
   std::vector<BotState> bots_;
   // How old each applied choice's snapshot was, since the last summary.

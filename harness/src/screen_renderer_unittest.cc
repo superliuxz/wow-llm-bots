@@ -359,5 +359,121 @@ TEST(ScreenRendererTest, ModuleOptionsNumberScreenLinesByGuidWithoutMismatch) {
   EXPECT_EQ(screen.text.find("Explore somewhere new"), std::string::npos);
 }
 
+// A snapshot with one named boar around me.
+pb::Snapshot BoarAround(const std::string& guid) {
+  pb::Snapshot snap;
+  snap.bot = "Testpriest";
+  snap.base.self.state = pb::Self::ALIVE;
+  pb::Unit& boar = snap.base.nearby.units.emplace_back();
+  boar.guid = guid;
+  boar.name = "Mottled Boar";
+  boar.reaction = pb::Unit::HOSTILE;
+  boar.rel.dist_yd = 8.0f;
+  return snap;
+}
+
+TEST(ScreenRendererTest, TargetAroundMeAddsOnlyHealthTargetOfTargetAndThreat) {
+  pb::Snapshot snap = BoarAround("0x1");
+  pb::Target& frames = snap.ext.target.emplace();
+  pb::Unit& target = frames.target.emplace(snap.base.nearby.units[0]);
+  target.health_pct = 45.0f;
+  frames.target_of_target = "Testpriest";
+  frames.my_threat_pct = 100.0f;
+  const Screen screen = RenderScreen(snap);
+  EXPECT_NE(
+      screen.text.find(
+          "target: Mottled Boar: health 45%; targets you; my threat 100%"),
+      std::string::npos)
+      << screen.text;
+}
+
+TEST(ScreenRendererTest, TargetAndFocusNotAroundMeAreWrittenInFull) {
+  pb::Snapshot snap = BoarAround("0x1");
+  pb::Target& frames = snap.ext.target.emplace();
+  pb::Unit& focus = frames.focus.emplace();
+  focus.guid = "0x9";
+  focus.name = "Hogger";
+  focus.level = 11;
+  focus.rel.dist_yd = 60.0f;
+  const Screen screen = RenderScreen(snap);
+  EXPECT_NE(screen.text.find("focus: Hogger: level 11"), std::string::npos)
+      << screen.text;
+  EXPECT_EQ(screen.text.find("target:"), std::string::npos) << screen.text;
+}
+
+TEST(ScreenRendererTest, CombatCountsAttackersAndSkipsThreatOnTheTargetLine) {
+  pb::Snapshot snap = BoarAround("0x1");
+  pb::Target& frames = snap.ext.target.emplace();
+  frames.target.emplace(snap.base.nearby.units[0]);
+  frames.my_threat_pct = 80.0f;
+  pb::Combat& combat = snap.ext.combat.emplace();
+  combat.attackers.emplace_back().name = "Kobold Vermin";
+  combat.attackers.emplace_back().name = "Kobold Vermin";
+  combat.attackers.emplace_back().name = "Mottled Boar";
+  pb::Combat::Threat& on_boar = combat.threat.emplace_back();
+  on_boar.unit = "Mottled Boar";
+  on_boar.my_threat_pct = 80.0f;
+  pb::Combat::Threat& on_kobold = combat.threat.emplace_back();
+  on_kobold.unit = "Kobold Vermin";
+  on_kobold.my_threat_pct = 40.0f;
+  on_kobold.top = "Gatda";
+  const Screen screen = RenderScreen(snap);
+  EXPECT_NE(screen.text.find("combat: attacked by 2x Kobold Vermin, Mottled "
+                             "Boar; my threat Kobold Vermin 40% (top Gatda)"),
+            std::string::npos)
+      << screen.text;
+}
+
+TEST(ScreenRendererTest, PartyListsMembersAndQuestTrackerGroupsObjectives) {
+  pb::Snapshot snap = BoarAround("0x1");
+  pb::Party& party = snap.ext.party.emplace();
+  party.leader = "Testpriest";
+  party.loot_method = "GROUP_LOOT";
+  pb::Unit& tank = party.members.emplace_back();
+  tank.name = "Gatda";
+  tank.health_pct = 70.0f;
+  tank.group.emplace().role = pb::TANK;
+  tank.group->online = true;
+  tank.group->in_range = true;
+
+  for (const char* title : {"Kobold Vermin slain", "Kobold Worker slain"}) {
+    pb::Objective& o = snap.ext.quest_tracker.emplace_back();
+    o.title = title;
+    o.progress.emplace().have = 3;
+    o.progress->need = 8;
+    pb::QuestPart& q = o.quest.emplace();
+    q.quest_id = 7;
+    q.quest = "Kobold Camp Cleanup";
+    q.level = 2;
+  }
+  snap.ext.quest_tracker.emplace_back().title = "sell junk";
+
+  const Screen screen = RenderScreen(snap);
+  EXPECT_NE(screen.text.find("party: leader you; loot group loot\n"
+                             "  - Gatda: tank, health 70%"),
+            std::string::npos)
+      << screen.text;
+  EXPECT_NE(screen.text.find("quests:\n"
+                             "  Kobold Camp Cleanup (level 2)\n"
+                             "    - Kobold Vermin slain 3/8\n"
+                             "    - Kobold Worker slain 3/8\n"
+                             "goals:\n"
+                             "  - sell junk"),
+            std::string::npos)
+      << screen.text;
+}
+
+TEST(ScreenRendererTest, BagSpaceShowsOnlyWhenLowOrFull) {
+  pb::Snapshot snap = BoarAround("0x1");
+  snap.base.self.indicators.bag_free_slots = 12;
+  EXPECT_EQ(RenderScreen(snap).text.find("bags"), std::string::npos);
+  snap.base.self.indicators.bag_free_slots = 3;
+  EXPECT_NE(RenderScreen(snap).text.find("bags 3 free"), std::string::npos);
+  snap.base.self.indicators.bag_free_slots = 0;
+  EXPECT_NE(RenderScreen(snap).text.find("bags full"), std::string::npos);
+  snap.base.self.indicators.bag_free_slots.reset();  // Unknown: nothing.
+  EXPECT_EQ(RenderScreen(snap).text.find("bags"), std::string::npos);
+}
+
 }  // namespace
 }  // namespace harness

@@ -11,20 +11,22 @@
 #include "AiObjectContext.h"
 #include "Creature.h"
 #include "Event.h"
+#include "GameObject.h"
 #include "LootObjectStack.h"
+#include "MotionMaster.h"
 #include "ObjectAccessor.h"
+#include "ObjectDefines.h"
 #include "ObjectGuid.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
 #include "Playerbots.h"
+#include "SharedDefines.h"
 #include "Unit.h"
 #include "options/options.h"
 
 namespace llm_brain {
-namespace {
 
-// The snapshot writes guids as "0x" + 16 hex digits.
-ObjectGuid ParseGuid(std::string_view text) {
+ObjectGuid ParseSnapshotGuid(std::string_view text) {
   if (text.starts_with("0x")) {
     text.remove_prefix(2);
   }
@@ -35,6 +37,55 @@ ObjectGuid ParseGuid(std::string_view text) {
     return ObjectGuid::Empty;
   }
   return ObjectGuid(raw);
+}
+
+bool IsLootableObject(GameObject* go) {
+  return go->GetGoType() == GAMEOBJECT_TYPE_CHEST ||
+         go->GetGOInfo()->GetLootId() != 0;
+}
+
+bool UseObjectNow(Player* bot, GameObject* go) {
+  PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
+  if (!ai) {
+    return false;
+  }
+  // Playerbots' "use" action takes the object as a chat link (the form
+  // ChatHelper::FormatGameobject writes) and does what a click does: a chest,
+  // herb or vein goes through its loot strategy (walk there, open, loot), any
+  // other object gets CMSG_GAMEOBJ_USE when in reach.
+  const std::string link =
+      "|cffffff00|Hfound:" + std::to_string(go->GetGUID().GetRawValue()) + ":" +
+      std::to_string(go->GetEntry()) + ":|h[" + go->GetName() + "]|h|r";
+  if (!ai->DoSpecificAction("use", Event("llm-brain", link), /*silent=*/true)) {
+    return false;
+  }
+  ai->ResetActionDuration();
+  return true;
+}
+
+namespace {
+
+std::string ExecuteObjectOption(Player* bot, const OptionTarget& target) {
+  GameObject* go =
+      ObjectAccessor::GetGameObject(*bot, ParseSnapshotGuid(target.guid));
+  if (!go || !go->IsInWorld() || !go->isSpawned()) {
+    return target.name + " is gone";
+  }
+  if (IsLootableObject(go) || go->IsAtInteractDistance(bot)) {
+    return UseObjectNow(bot, go) ? "" : "can't use " + target.name + " now";
+  }
+  // Playerbots only uses a non-loot object within reach and has no strategy
+  // that walks to it: walk there, as a player would before clicking. The
+  // world script uses it on arrival (UseObjectNow), and the harness times
+  // the step out if the body never gets there.
+  float x = go->GetPositionX();
+  float y = go->GetPositionY();
+  float z = go->GetPositionZ();
+  // On the bot's side of the object (the angle is relative to its facing).
+  go->GetClosePoint(x, y, z, bot->GetObjectSize(), CONTACT_DISTANCE,
+                    go->GetAngle(bot) - go->GetOrientation(), bot);
+  bot->GetMotionMaster()->MovePoint(/*id=*/0, x, y, z);
+  return "";
 }
 
 }  // namespace
@@ -50,7 +101,11 @@ std::string ExecuteOption(Player* bot, const OptionTarget& target) {
   if (!bot->IsAlive()) {
     return "you are dead";  // A choice from before the bot died.
   }
-  Unit* unit = ObjectAccessor::GetUnit(*bot, ParseGuid(target.guid));
+  if (target.kind == OptionTarget::Kind::kGather ||
+      target.kind == OptionTarget::Kind::kUse) {
+    return ExecuteObjectOption(bot, target);
+  }
+  Unit* unit = ObjectAccessor::GetUnit(*bot, ParseSnapshotGuid(target.guid));
   if (!unit || !unit->IsInWorld()) {
     return target.name + " is gone";
   }
@@ -112,8 +167,10 @@ std::string ExecuteOption(Player* bot, const OptionTarget& target) {
         ai->ResetActionDuration();
       }
       return "";
+    case OptionTarget::Kind::kGather:
+    case OptionTarget::Kind::kUse:
     case OptionTarget::Kind::kKeep:
-      break;
+      break;  // Handled above.
   }
   return "";
 }

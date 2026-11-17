@@ -990,7 +990,8 @@ struct Self_Indicators {
   std::vector<Self_Indicators_Durability> durability_warning;
   bool calendar_invite_pending = false;
   bool new_mail = false;
-  uint32_t bag_free_slots = 0;
+  // Unset when not known; 0 means the bags are full.
+  std::optional<uint32_t> bag_free_slots;
   bool in_queue = false;
   bool achievement_toast = false;
 

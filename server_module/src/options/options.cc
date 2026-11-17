@@ -36,12 +36,58 @@ std::optional<OptionTarget::Kind> UnitKind(const pb::Unit& u) {
   return std::nullopt;
 }
 
+// What clicking this object does. Only kinds the executor can carry out:
+// mailboxes, banks, barber chairs and the like open windows the bot can't use
+// yet (no `interaction` extension), so they offer nothing.
+std::optional<OptionTarget::Kind> ObjectKind(const pb::GameObject& go) {
+  if (go.name.empty() || go.guid.empty() || !go.usable) {
+    return std::nullopt;
+  }
+  switch (go.kind) {
+    case pb::GameObject::HERB:
+    case pb::GameObject::ORE:
+      return OptionTarget::Kind::kGather;
+    case pb::GameObject::CHEST:
+    case pb::GameObject::QUEST_OBJECT:
+    case pb::GameObject::DOOR:
+    case pb::GameObject::PORTAL:
+      return OptionTarget::Kind::kUse;
+    default:
+      return std::nullopt;
+  }
+}
+
+// One option per (kind, name), in the order the names first appear; its
+// target is the nearest thing of that name.
+void AddTarget(OptionTarget::Kind kind,
+               const std::string& guid,
+               const std::string& name,
+               float dist_yd,
+               std::vector<OptionTarget>* targets,
+               std::vector<float>* nearest) {
+  for (size_t i = 0; i < targets->size(); ++i) {
+    if ((*targets)[i].kind == kind && (*targets)[i].name == name) {
+      if (dist_yd < (*nearest)[i]) {
+        (*targets)[i].guid = guid;
+        (*nearest)[i] = dist_yd;
+      }
+      return;
+    }
+  }
+  targets->push_back({kind, guid, name});
+  nearest->push_back(dist_yd);
+}
+
 std::string OptionText(const OptionTarget& target) {
   switch (target.kind) {
     case OptionTarget::Kind::kAttack:
       return "Attack " + target.name;
     case OptionTarget::Kind::kLoot:
       return "Loot " + target.name;
+    case OptionTarget::Kind::kGather:
+      return "Gather " + target.name;
+    case OptionTarget::Kind::kUse:
+      return "Use " + target.name;
     case OptionTarget::Kind::kKeep:
       return "Keep doing what I'm doing";
   }
@@ -56,6 +102,10 @@ std::string_view OptionKindName(OptionTarget::Kind kind) {
       return "attack";
     case OptionTarget::Kind::kLoot:
       return "loot";
+    case OptionTarget::Kind::kGather:
+      return "gather";
+    case OptionTarget::Kind::kUse:
+      return "use";
     case OptionTarget::Kind::kKeep:
       return "keep";
   }
@@ -63,28 +113,16 @@ std::string_view OptionKindName(OptionTarget::Kind kind) {
 }
 
 std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot) {
-  // One option per (kind, name), in the order the names first appear; its
-  // target is the nearest unit of that name.
   std::vector<OptionTarget> targets;
   std::vector<float> nearest;
   for (const pb::Unit& u : snapshot->base.nearby.units) {
-    const std::optional<OptionTarget::Kind> kind = UnitKind(u);
-    if (!kind) {
-      continue;
+    if (const std::optional<OptionTarget::Kind> kind = UnitKind(u)) {
+      AddTarget(*kind, u.guid, u.name, u.rel.dist_yd, &targets, &nearest);
     }
-    size_t existing = targets.size();
-    for (size_t i = 0; i < targets.size(); ++i) {
-      if (targets[i].kind == *kind && targets[i].name == u.name) {
-        existing = i;
-        break;
-      }
-    }
-    if (existing == targets.size()) {
-      targets.push_back({*kind, u.guid, u.name});
-      nearest.push_back(u.rel.dist_yd);
-    } else if (u.rel.dist_yd < nearest[existing]) {
-      targets[existing].guid = u.guid;
-      nearest[existing] = u.rel.dist_yd;
+  }
+  for (const pb::GameObject& go : snapshot->base.nearby.objects) {
+    if (const std::optional<OptionTarget::Kind> kind = ObjectKind(go)) {
+      AddTarget(*kind, go.guid, go.name, go.rel.dist_yd, &targets, &nearest);
     }
   }
   targets.push_back({OptionTarget::Kind::kKeep, "", ""});

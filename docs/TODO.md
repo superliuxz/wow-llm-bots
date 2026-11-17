@@ -28,7 +28,18 @@ Working order (2026-11-17 09:50): finish #3, #1, then #4, #2, #5.
 - **#3 E2E latency Tier 2: built (2026-11-17), live numbers pending** (`docs/plans/latency.md`,
   Tier 2). Measure combat-detection age and preemption savings in the #1 run.
 
-- **#4, #2, #5:** not started (#4 started 10:02: snapshot `ext` fill + screen rendering).
+- **#4 Module: more things a bot can do: partly done (2026-11-17).** Built, unit-tested, and the
+  module sources compiled (not yet run in game): `Gather <herb/ore>` and `Use <chest, quest object,
+  door, portal>` options (`options.cc`); the executor (`option_executor.cc`: lootable objects go
+  through playerbots' loot strategy, others are walked to with `MovePoint` and clicked on arrival
+  by `UseOnArrival` in `llm_brain_world_script.cc`); the screen now writes `ext.target` / `focus`,
+  `ext.combat`, `ext.party`, the quest tracker with goals, and low bag space / damaged armor /
+  talent points / mail (`screen_renderer.cc`; `bag_free_slots` is now optional, unset = unknown).
+  **Left:** the module does not fill `ext` yet (target, combat, party, quest tracker, indicators:
+  `snapshot_builder.cc`), so the new screen lines only show in tests; then talk and "go to"; then
+  bags, gear, quest log. Needs `tools/wlb build server` + a restart to try live (stops the play
+  server).
+- **#2, #5:** not started.
 
 ## Next, in order
 
@@ -78,6 +89,11 @@ Working order (2026-11-17 09:50): finish #3, #1, then #4, #2, #5.
 
 ## Loose ends
 
+- `Use` on a door, quest object or portal (`option_executor.cc`): the harness counts a Use step done
+  only when the object stops being usable (`plan_runner.cc` `IsTargetDone`), which a clicked door
+  never does, so such steps end on the 15 s timeout ("step timed out"). Needs a done signal from
+  the module (a wire change: decide its shape first). Also unverified live: whether playerbots'
+  own movement overrides the `MovePoint` walk to the object.
 - **Running an agent unattended:** an Antigravity chat in the VS Code Remote-SSH sidebar runs as
   `agy --hub` under VS Code's extension host. When the SSH client drops, VS Code Server keeps it for
   3 h, or for only 5 min if the laptop dark-wakes and reconnects briefly. Then it kills the session

@@ -103,6 +103,54 @@ TEST(OptionsTest, NothingForPlayersOrUnitsTooFarToName) {
             std::vector<std::string>{"Keep doing what I'm doing"});
 }
 
+pb::GameObject* AddObject(pb::Snapshot* snapshot,
+                          const std::string& name,
+                          const std::string& guid,
+                          float dist_yd,
+                          pb::GameObject::Kind kind,
+                          bool usable = true) {
+  pb::GameObject& go = snapshot->base.nearby.objects.emplace_back();
+  go.name = name;
+  go.guid = guid;
+  go.kind = kind;
+  go.usable = usable;
+  go.rel.dist_yd = dist_yd;
+  return &go;
+}
+
+TEST(OptionsTest, GatherHerbsAndOreUseChestsAndQuestObjects) {
+  pb::Snapshot snapshot;
+  AddUnit(&snapshot, "Mottled Boar", "0x1", 10);
+  AddObject(&snapshot, "Peacebloom", "0xa", 25, pb::GameObject::HERB);
+  AddObject(&snapshot, "Peacebloom", "0xb", 12, pb::GameObject::HERB);
+  AddObject(&snapshot, "Copper Vein", "0xc", 30, pb::GameObject::ORE);
+  AddObject(&snapshot, "Battered Chest", "0xd", 8, pb::GameObject::CHEST);
+  AddObject(&snapshot, "Wanted Poster", "0xe", 5, pb::GameObject::QUEST_OBJECT);
+  const std::vector<OptionTarget> targets = AddOptions(&snapshot);
+  EXPECT_EQ(Texts(snapshot),
+            (std::vector<std::string>{"Attack Mottled Boar",
+                                      "Gather Peacebloom", "Gather Copper Vein",
+                                      "Use Battered Chest", "Use Wanted Poster",
+                                      "Keep doing what I'm doing"}));
+  ASSERT_EQ(targets.size(), 6u);
+  EXPECT_EQ(targets[1].kind, OptionTarget::Kind::kGather);
+  EXPECT_EQ(targets[1].guid, "0xb");  // The nearer Peacebloom.
+  EXPECT_EQ(snapshot.options[1].guid, "0xb");
+  EXPECT_EQ(targets[3].kind, OptionTarget::Kind::kUse);
+}
+
+TEST(OptionsTest, NothingForObjectsTheBodyCantUseOrClick) {
+  pb::Snapshot snapshot;
+  AddObject(&snapshot, "Mailbox", "0x1", 5, pb::GameObject::MAILBOX);
+  AddObject(&snapshot, "Barber Chair", "0x2", 5, pb::GameObject::BARBER_CHAIR);
+  AddObject(&snapshot, "Peacebloom", "0x3", 5, pb::GameObject::HERB,
+            /*usable=*/false);
+  AddObject(&snapshot, "", "0x4", 5, pb::GameObject::HERB);
+  AddOptions(&snapshot);
+  EXPECT_EQ(Texts(snapshot),
+            std::vector<std::string>{"Keep doing what I'm doing"});
+}
+
 base::TimeTicks AtMs(int64_t ms) {
   return base::TimeTicks() + base::Milliseconds(ms);
 }

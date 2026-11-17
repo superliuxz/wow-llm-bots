@@ -5,12 +5,14 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <flat_map>
 #include <flat_set>
 #include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "base/strings/strcat.h"
@@ -26,6 +28,9 @@ namespace pb = wlb::snapshot;
 
 // Facing and "behind it" only matter within melee range.
 constexpr float kMeleeYd = 10;
+
+// Free bag slots are written from this many down (and "bags full" at 0).
+constexpr uint32_t kFewBagSlots = 4;
 
 // "THREAT_AGGRO" -> "threat aggro".
 std::string Word(std::string_view name) {
@@ -136,25 +141,28 @@ std::string PackText(const pb::Unit::Pack& pack) {
   return base::StrCat({"(", base::JoinString(parts, ", "), ")"});
 }
 
+// Who a unit is: "level 5 troll priest", or "" when nothing is known.
+std::string Who(const pb::Unit& u) {
+  std::vector<std::string> parts;
+  if (u.level) {
+    parts.push_back(base::StrCat({"level ", base::NumberToString(*u.level)}));
+  }
+  if (!u.looks_like.empty()) {
+    parts.push_back(u.looks_like);
+  }
+  if (u.player && !u.player->class_.empty()) {
+    parts.push_back(base::ToLowerASCII(u.player->class_));
+  }
+  return base::JoinString(parts, " ");
+}
+
 // Everything about a unit except its name and position, in the order of the
 // Python prototype: who it is, how it looks, how hurt, what it does, then the
 // rest of its fields by field number.
 std::string UnitLook(const pb::Unit& u) {
   std::vector<std::string> bits;
-  std::vector<std::string> who;
-  if (!u.looks_like.empty()) {
-    who.push_back(u.looks_like);
-  }
-  if (u.player && !u.player->class_.empty()) {
-    who.push_back(base::ToLowerASCII(u.player->class_));
-  }
-  if (u.level || !who.empty()) {
-    std::vector<std::string> parts;
-    if (u.level) {
-      parts.push_back(base::StrCat({"level ", base::NumberToString(*u.level)}));
-    }
-    parts.insert(parts.end(), who.begin(), who.end());
-    bits.push_back(base::JoinString(parts, " "));
+  if (std::string who = Who(u); !who.empty()) {
+    bits.push_back(std::move(who));
   }
   for (const std::string& name :
        {NameOf(u.level_color), NameOf(u.kind), NameOf(u.reaction),
@@ -434,6 +442,43 @@ std::string FarSummary(const std::vector<const pb::Unit*>& units) {
   return base::JoinString(parts, "; ");
 }
 
+// The main-screen cues (snapshot.md §4, `indicators`): free bag slots, the
+// damaged-armor figure, the talent and mail icons. Only the ones showing; bag
+// space only once it runs low (with plenty of room it is noise).
+void IndicatorBits(const pb::Self_Indicators& ind,
+                   std::vector<std::string>* bits) {
+  if (ind.bag_free_slots == 0u) {
+    bits->push_back("bags full");
+  } else if (ind.bag_free_slots && *ind.bag_free_slots <= kFewBagSlots) {
+    bits->push_back(base::StrCat(
+        {"bags ", base::NumberToString(*ind.bag_free_slots), " free"}));
+  }
+  std::vector<std::string> damaged;
+  std::vector<std::string> broken;
+  for (const pb::Self_Indicators::Durability& d : ind.durability_warning) {
+    const std::string slot = d.slot.empty() ? "?" : base::ToLowerASCII(d.slot);
+    if (d.level == pb::Self_Indicators::Durability::BROKEN) {
+      broken.push_back(slot);
+    } else if (d.level == pb::Self_Indicators::Durability::DAMAGED) {
+      damaged.push_back(slot);
+    }
+  }
+  if (!damaged.empty()) {
+    bits->push_back(
+        base::StrCat({"damaged armor ", base::JoinString(damaged, ", ")}));
+  }
+  if (!broken.empty()) {
+    bits->push_back(
+        base::StrCat({"broken armor ", base::JoinString(broken, ", ")}));
+  }
+  if (ind.talent_points_unspent) {
+    bits->push_back("unspent talent points");
+  }
+  if (ind.new_mail) {
+    bits->push_back("new mail");
+  }
+}
+
 std::string SelfLine(const pb::Self& s) {
   std::vector<std::string> who;
   who.push_back(
@@ -492,6 +537,7 @@ std::string SelfLine(const pb::Self& s) {
       bits.push_back(flag.word);
     }
   }
+  IndicatorBits(s.indicators, &bits);
   return base::JoinString(bits, "; ");
 }
 
@@ -514,6 +560,312 @@ std::string WhereLine(const pb::Where& w) {
     base::StrAppend(&out, {"; in an instance"});
   }
   return out;
+}
+
+// "name: look; where", leaving out the parts that are empty.
+std::string NamedLine(std::string_view name,
+                      const std::string& look,
+                      const std::string& where) {
+  std::string out(name.empty() ? "?" : name);
+  if (!look.empty()) {
+    base::StrAppend(&out, {": ", look});
+  }
+  if (!where.empty()) {
+    base::StrAppend(&out, {"; ", where});
+  }
+  return out;
+}
+
+// Where a unit is, or "" when the snapshot doesn't say.
+std::string UnitWhere(const pb::Unit& u) {
+  return u.rel == pb::Relative{} ? "" : TightWhere(u.rel);
+}
+
+// A unit already written under "around me" (matched by guid) is not written
+// again in full: the frames below only add what that line lacks.
+bool IsAroundMe(const pb::Unit& u, const std::flat_set<std::string>& guids) {
+  return !u.guid.empty() && guids.contains(u.guid);
+}
+
+// A unit in a frame (target, focus). When it is around me, only its health
+// and death: they tell which of several same-named units it is.
+std::string FrameLine(const pb::Unit& u, bool around_me) {
+  if (!around_me) {
+    return NamedLine(u.name, UnitLook(u), UnitWhere(u));
+  }
+  std::vector<std::string> bits;
+  AddPercent(&bits, u.health_pct, "health");
+  if (u.dead) {
+    bits.push_back("dead");
+  }
+  return NamedLine(u.name, base::JoinString(bits, ", "), "");
+}
+
+// "target: Mottled Boar: health 45%; targets you; my threat 100%".
+std::string TargetLine(const pb::Target& t,
+                       const pb::Unit& target,
+                       bool around_me,
+                       std::string_view my_name) {
+  pb::Unit u = target;
+  if (!t.target_of_target.empty()) {  // Said once, below.
+    u.target.clear();
+    u.targeting_me = false;
+  }
+  std::vector<std::string> parts = {FrameLine(u, around_me)};
+  if (!t.target_of_target.empty()) {
+    parts.push_back(t.target_of_target == my_name
+                        ? "targets you"
+                        : base::StrCat({"targets ", t.target_of_target}));
+  }
+  if (Finite(t.my_threat_pct) > 0) {
+    parts.push_back(base::StringPrintf("my threat %.0f%%", t.my_threat_pct));
+  }
+  return base::JoinString(parts, "; ");
+}
+
+// Names in first-seen order, the same name several times as "2x Kobold".
+std::string CountedNames(const std::vector<std::string>& names) {
+  std::vector<std::string> order;
+  std::flat_map<std::string, int> counts;
+  for (const std::string& name : names) {
+    if (counts[name]++ == 0) {
+      order.push_back(name);
+    }
+  }
+  std::vector<std::string> parts;
+  for (const std::string& name : order) {
+    const int count = counts[name];
+    parts.push_back(
+        count == 1 ? name
+                   : base::StrCat({base::NumberToString(count), "x ", name}));
+  }
+  return base::JoinString(parts, ", ");
+}
+
+// "attacked by 2x Kobold Vermin; my threat Kobold Vermin 40% (top Gatda);
+// combo points 3". `skip_threat_on` already has its threat on the target line.
+std::string CombatLine(const pb::Combat& c,
+                       std::string_view my_name,
+                       std::string_view skip_threat_on) {
+  std::vector<std::string> bits;
+  if (!c.attackers.empty()) {
+    std::vector<std::string> names;
+    for (const pb::Unit& u : c.attackers) {
+      names.push_back(!u.name.empty()         ? u.name
+                      : !u.looks_like.empty() ? u.looks_like
+                                              : "?");
+    }
+    bits.push_back(base::StrCat({"attacked by ", CountedNames(names)}));
+  }
+  if (!c.duel_opponent.empty()) {
+    bits.push_back(base::StrCat({"dueling ", c.duel_opponent}));
+  }
+  std::vector<std::string> threat;
+  for (const pb::Combat::Threat& t : c.threat) {
+    if (t.unit.empty() || t.unit == skip_threat_on) {
+      continue;
+    }
+    std::string entry = base::StringPrintf("%s %.0f%%", t.unit.c_str(),
+                                           Finite(t.my_threat_pct));
+    if (!t.top.empty() && t.top != my_name) {
+      base::StrAppend(&entry, {" (top ", t.top, ")"});
+    }
+    threat.push_back(std::move(entry));
+  }
+  if (!threat.empty()) {
+    bits.push_back(
+        base::StrCat({"my threat ", base::JoinString(threat, ", ")}));
+  }
+  if (c.resources) {
+    const struct {
+      uint32_t value;
+      const char* word;
+    } resources[] = {{c.resources->combo_points, "combo points"},
+                     {c.resources->soul_shards, "soul shards"},
+                     {c.resources->ammo, "ammo"}};
+    for (const auto& resource : resources) {
+      if (resource.value != 0) {
+        bits.push_back(base::StrCat(
+            {resource.word, " ", base::NumberToString(resource.value)}));
+      }
+    }
+  }
+  if (!c.summary.empty()) {
+    bits.push_back(c.summary);
+  }
+  return base::JoinString(bits, "; ");
+}
+
+// One party member: who (unless around me), role and state, where (unless
+// around me).
+std::string MemberLine(const pb::Unit& u, bool around_me, bool leader) {
+  std::vector<std::string> bits;
+  if (!around_me) {
+    if (std::string who = Who(u); !who.empty()) {
+      bits.push_back(std::move(who));
+    }
+  }
+  if (leader) {
+    bits.push_back("leader");
+  }
+  if (u.group) {
+    const std::string role = NameOf(u.group->role);
+    if (!role.empty()) {
+      bits.push_back(Word(role));
+    }
+    if (!u.group->online) {
+      bits.push_back("offline");
+    } else if (!u.group->in_range) {
+      bits.push_back("out of range");
+    }
+    if (u.group->aggro) {
+      bits.push_back("has aggro");
+    }
+  }
+  if (u.dead) {
+    bits.push_back("dead");
+  }
+  AddPercent(&bits, u.health_pct, "health");
+  AddPercent(&bits, u.power_pct, "power");
+  if (!u.target.empty()) {
+    bits.push_back(base::StrCat({"target ", u.target}));
+  }
+  return NamedLine(u.name, base::JoinString(bits, ", "),
+                   around_me ? "" : UnitWhere(u));
+}
+
+// "party: leader you; loot group loot" and a line per member.
+std::vector<std::string> PartyLines(const pb::Party& p,
+                                    const std::flat_set<std::string>& guids,
+                                    std::string_view my_name) {
+  std::vector<std::string> header;
+  bool leader_listed = false;
+  for (const pb::Unit& u : p.members) {
+    leader_listed |= !p.leader.empty() && u.name == p.leader;
+  }
+  if (!p.leader.empty() && !leader_listed) {
+    header.push_back(base::StrCat(
+        {"leader ", p.leader == my_name ? std::string("you") : p.leader}));
+  }
+  if (!p.loot_method.empty()) {
+    header.push_back(base::StrCat({"loot ", Word(p.loot_method)}));
+  }
+  if (!p.missing_buffs_i_can_give.empty()) {
+    header.push_back(
+        base::StrCat({"missing my buffs ",
+                      base::JoinString(p.missing_buffs_i_can_give, ", ")}));
+  }
+  std::vector<std::string> lines;
+  if (header.empty() && p.members.empty()) {
+    return lines;
+  }
+  lines.push_back(
+      header.empty()
+          ? "party:"
+          : base::StrCat({"party: ", base::JoinString(header, "; ")}));
+  for (const pb::Unit& u : p.members) {
+    const bool leader = (!p.leader.empty() && u.name == p.leader) ||
+                        (u.group && u.group->leader);
+    lines.push_back(
+        base::StrCat({"  - ", MemberLine(u, IsAroundMe(u, guids), leader)}));
+  }
+  return lines;
+}
+
+// " 3/8" for an objective's progress, " (done)" for a finished one without.
+std::string ProgressText(const pb::Objective& o) {
+  if (o.progress && o.progress->need != 0) {
+    return base::StrCat({" ", base::NumberToString(o.progress->have), "/",
+                         base::NumberToString(o.progress->need)});
+  }
+  return o.done ? " (done)" : "";
+}
+
+// The quest tracker: a line per quest ("Kobold Camp Cleanup (level 2,
+// complete)") with its objectives under it ("- Kobold Vermin slain 3/8");
+// the bot's own goals after them. The module sends one Objective per quest
+// objective, each with the quest's QuestPart.
+std::vector<std::string> QuestLines(const std::vector<pb::Objective>& tracker) {
+  struct Quest {
+    pb::QuestPart part;
+    std::vector<const pb::Objective*> objectives;
+  };
+  std::vector<Quest> quests;
+  std::vector<const pb::Objective*> goals;
+  for (const pb::Objective& o : tracker) {
+    if (!o.quest) {
+      goals.push_back(&o);
+      continue;
+    }
+    const pb::QuestPart& part = *o.quest;
+    Quest* quest = nullptr;
+    for (Quest& q : quests) {
+      if (part.quest_id != 0
+              ? q.part.quest_id == part.quest_id
+              : q.part.quest_id == 0 && q.part.quest == part.quest) {
+        quest = &q;
+        break;
+      }
+    }
+    if (!quest) {
+      quest = &quests.emplace_back(Quest{part, {}});
+    }
+    quest->part.complete |= part.complete;
+    quest->part.failed |= part.failed;
+    quest->part.daily |= part.daily;
+    if (quest->part.level == 0) {
+      quest->part.level = part.level;
+    }
+    if (quest->part.timer_s == 0) {
+      quest->part.timer_s = part.timer_s;
+    }
+    if (!(o.title.empty() || o.title == part.quest) || o.progress) {
+      quest->objectives.push_back(&o);
+    }
+  }
+
+  std::vector<std::string> lines;
+  if (!quests.empty()) {
+    lines.push_back("quests:");
+  }
+  for (const Quest& q : quests) {
+    std::vector<std::string> about;
+    if (q.part.level != 0) {
+      about.push_back(
+          base::StrCat({"level ", base::NumberToString(q.part.level)}));
+    }
+    if (q.part.complete) {
+      about.push_back("complete");
+    }
+    if (q.part.failed) {
+      about.push_back("failed");
+    }
+    if (q.part.daily) {
+      about.push_back("daily");
+    }
+    if (Finite(q.part.timer_s) > 0) {
+      about.push_back(base::StringPrintf("%.0f s left", q.part.timer_s));
+    }
+    std::string line =
+        base::StrCat({"  ", q.part.quest.empty() ? "?" : q.part.quest});
+    if (!about.empty()) {
+      base::StrAppend(&line, {" (", base::JoinString(about, ", "), ")"});
+    }
+    lines.push_back(std::move(line));
+    for (const pb::Objective* o : q.objectives) {
+      std::string text = base::StrCat({o->title, ProgressText(*o)});
+      lines.push_back(
+          base::StrCat({"    - ", base::TrimWhitespaceASCII(text)}));
+    }
+  }
+  if (!goals.empty()) {
+    lines.push_back("goals:");
+  }
+  for (const pb::Objective* o : goals) {
+    lines.push_back(base::StrCat(
+        {"  - ", o->title.empty() ? "?" : o->title, ProgressText(*o)}));
+  }
+  return lines;
 }
 
 }  // namespace
@@ -575,6 +927,39 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
     lines.push_back("where: " + WhereLine(base.where));
   }
   const pb::Nearby& nearby = base.nearby;
+  // Units written under "around me": the frames below don't repeat them.
+  std::flat_set<std::string> around_me;
+  for (const pb::Unit& u : nearby.units) {
+    if (!u.name.empty() && !u.guid.empty()) {
+      around_me.insert(u.guid);
+    }
+  }
+  // The frames a player watches first (snapshot.md §4): target, focus, combat.
+  const pb::Extensions& ext = snapshot.ext;
+  std::string_view threat_on_target;
+  if (ext.target) {
+    if (ext.target->target) {
+      const pb::Unit& t = *ext.target->target;
+      lines.push_back(base::StrCat(
+          {"target: ", TargetLine(*ext.target, t, IsAroundMe(t, around_me),
+                                  snapshot.bot)}));
+      if (Finite(ext.target->my_threat_pct) > 0) {
+        threat_on_target = t.name;
+      }
+    }
+    if (ext.target->focus) {
+      const pb::Unit& f = *ext.target->focus;
+      lines.push_back(
+          base::StrCat({"focus: ", FrameLine(f, IsAroundMe(f, around_me))}));
+    }
+  }
+  if (ext.combat) {
+    if (std::string combat =
+            CombatLine(*ext.combat, snapshot.bot, threat_on_target);
+        !combat.empty()) {
+      lines.push_back(base::StrCat({"combat: ", combat}));
+    }
+  }
   std::vector<Thing> named;
   std::vector<const pb::Unit*> nameless;
   for (const pb::Unit& u : nearby.units) {
@@ -615,6 +1000,14 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
                     &screen.details, &placed)) {
       lines.push_back("  " + line);
     }
+  }
+  if (ext.party) {
+    for (std::string& line : PartyLines(*ext.party, around_me, snapshot.bot)) {
+      lines.push_back(std::move(line));
+    }
+  }
+  for (std::string& line : QuestLines(ext.quest_tracker)) {
+    lines.push_back(std::move(line));
   }
   if (screen.has_module_options) {
     std::vector<std::string> extra;

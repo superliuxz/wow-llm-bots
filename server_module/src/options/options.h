@@ -19,10 +19,13 @@ struct OptionTarget {
   enum class Kind {
     kAttack,
     kLoot,
-    kKeep,  // Keep doing what I'm doing: the body carries on.
+    kGather,  // A herb or ore node: looted with the gathering skill.
+    kUse,     // Any other game object the body can click (chest, quest object).
+    kKeep,    // Keep doing what I'm doing: the body carries on.
   };
   Kind kind = Kind::kKeep;
-  // The unit's guid as the snapshot writes it ("0x..."); empty for kKeep.
+  // The unit's or game object's guid as the snapshot writes it ("0x...");
+  // empty for kKeep.
   std::string guid;
   std::string name;
 };
@@ -33,8 +36,11 @@ std::string_view OptionKindName(OptionTarget::Kind kind);
 // (docs/specs/snapshot.md §9) and returns what each one targets, in the same
 // order. Facts only, nothing ranked or left out by judgment: one "Attack
 // <name>" per hostile or neutral NPC name (the nearest of that name: the one a
-// player would click), one "Loot <name>" per lootable corpse name, and always
-// "Keep doing what I'm doing" last. Pure: reads base.nearby, needs no game.
+// player would click), one "Loot <name>" per lootable corpse name, one
+// "Gather <name>" per herb or ore name, one "Use <name>" per other clickable
+// object name the body can carry out (chests, quest objects, buttons,
+// portals), and always "Keep doing what I'm doing" last. Pure: reads
+// base.nearby, needs no game.
 std::vector<OptionTarget> AddOptions(wlb::snapshot::Snapshot* snapshot);
 
 // The options of a bot's recent snapshots, so a Choose naming (seq, option)
