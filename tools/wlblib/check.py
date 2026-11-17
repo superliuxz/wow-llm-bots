@@ -1,4 +1,4 @@
-"""`wlb check`: everything our code must pass before review or commit (CLAUDE.md).
+"""`wlb check`: everything our code must pass before review or commit (CONTRIBUTING.md).
 
   wlb check              all of it: format, includes, the builds and unit tests (default, ASan+UBSan,
                          TSan, MSan), the screen goldens, the snapshot examples and the trigger table

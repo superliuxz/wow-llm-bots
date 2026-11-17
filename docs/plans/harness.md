@@ -75,7 +75,7 @@ and `docs/phase2-results.md` (what that costs). This plan is the build order.
 
 ## Conventions
 
-Same rules as the rest of our C++ (CLAUDE.md): Chromium style and `base::` types, include what you
+Same rules as the rest of our C++ (CONTRIBUTING.md): Chromium style and `base::` types, include what you
 use, `tools/wlb check` (format, includes, all sanitizers) before commit, unit tests with the
 code. Sources in `harness/src` next to their `_unittest.cc`; test data in `harness/testdata`;
 build targets are in `common/CMakeLists.txt` (`wlb_harness`, `harness_unittests`) so they get the
