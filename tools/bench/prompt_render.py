@@ -209,6 +209,10 @@ def option_kind(item):
     return "talk" if item.get("reaction") == "FRIENDLY" else None
 
 
+VERBS = {"attack": "Attack ", "talk": "Talk to ", "loot": "Loot ",
+         "gather": "Gather ", "use": "Use "}
+
+
 def tight_things(items, kinds=None):
     """One line per thing; with `kinds` (a list), entries the bot can act on get the next number
     and their kind is appended."""
@@ -220,17 +224,18 @@ def tight_things(items, kinds=None):
     lines = []
     for (name, look, _), group in groups.items():
         rels = [g.get("rel") for g in group]
-        mark = "-"
+        mark, verb = "-", ""
         kind = option_kind(group[0]) if kinds is not None else None
         if kind:
             kinds.append(kind)
             mark = f"{len(kinds)}."
+            verb = VERBS.get(kind, "")
         if len(rels) == 1:
-            lines.append(f"{mark} {name}: {look}; {tight_where(rels[0])}")
+            lines.append(f"{mark} {verb}{name}: {look}; {tight_where(rels[0])}")
         else:
             d = sorted(quant((r or {}).get("dist_yd", 0)) for r in rels)
             dirs = "/".join(sorted({(r or {}).get("dir", "") for r in rels if r}))
-            lines.append(f"{mark} {len(rels)}x {name}: {look}; {d[0]:.0f}-{d[-1]:.0f} yd {dirs}".rstrip())
+            lines.append(f"{mark} {verb}{len(rels)}x {name}: {look}; {d[0]:.0f}-{d[-1]:.0f} yd {dirs}".rstrip())
     return lines
 
 

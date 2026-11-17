@@ -1,18 +1,18 @@
 me: Loadaa, level 1 male priest; health 72/72; mana 91/91; xp 40/400 (rested 10)
 where: Valley of Trials, Durotar (Kalimdor)
 around me:
-  1. Den Grunt: level 65 humanoid, skull level, npc, friendly, small, patrolling; 18 yd NE
-  2. Den Grunt: level 65 humanoid, skull level, npc, friendly, small; 2 yd E, you're behind it
+  1. Talk to Den Grunt: level 65 humanoid, skull level, npc, friendly, small, patrolling; 18 yd NE
+  2. Talk to Den Grunt: level 65 humanoid, skull level, npc, friendly, small; 2 yd E, you're behind it
   - Loadf: level 1 troll priest, yellow, player, friendly, moving, target Mottled Boar; here, you're behind it
   - Loadg: level 1 troll priest, yellow, player, friendly, moving, target Mottled Boar; 0 yd SE, you're behind it
   - Loadb: level 1 troll priest, yellow, player, friendly, moving, target Mottled Boar; 6 yd NW, facing you
   - Loads: level 1 troll priest, yellow, player, friendly, moving, target Mottled Boar; 18 yd W
 far away: 3x boar, npc, moving (70-97 yd E/S/SE); 1x humanoid, npc, small, visual state [rooted] (84 yd E); 1x boar, npc, dead (37 yd SE); 3x humanoid, npc, small (29-75 yd NE/NW); 5x humanoid, npc (27-87 yd N/NW/W); 13x troll, player, moving (20-78 yd N/NW/S/SE); 4x troll, player (24-91 yd N/NW); 1x boar, npc (73 yd SW); 1x humanoid, npc, patrolling (57 yd NW)
 objects:
-  3. 3x Cactus Apple: herb; 52-102 yd N/S/SE
-  4. Bubbling Cauldron: other; 93 yd NW
-  5. Fire: other; 41 yd N
-  6. Razor Hill: other; 67 yd NE
+  3. Gather 3x Cactus Apple: herb; 52-102 yd N/S/SE
+  4. Use Bubbling Cauldron: other; 93 yd NW
+  5. Use Fire: other; 41 yd N
+  6. Use Razor Hill: other; 67 yd NE
 also:
   7. Keep doing what I'm doing
   8. Explore somewhere new

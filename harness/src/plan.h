@@ -33,6 +33,7 @@ inline constexpr int kMaxWatches = 4;
 inline constexpr int kMaxRepeat = 29;  // A step can repeat 2..kMaxRepeat times.
 inline constexpr int kMaxGoalChars = 60;
 inline constexpr int kMaxSayChars = 80;
+inline constexpr int kMinLookSeconds = 10;
 inline constexpr int kMaxLookSeconds = 999;
 
 // One option, done `times` times in a row (3x4: option 3, four times).

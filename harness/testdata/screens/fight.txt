@@ -1,13 +1,13 @@
 me: Loadaa, level 1 male priest; health 72/72; mana 79/91; xp 40/400 (rested 10); in combat
 where: Valley of Trials, Durotar (Kalimdor)
 around me:
-  1. Mottled Boar: level 2 boar, yellow, npc, neutral, moving; 9 yd NE, facing you
-  2. Mottled Boar: level 1 boar, yellow, npc, neutral, health 24%, approaching me Loadaa, targeting me yes, target Loadaa, threat status threat aggro; 17 yd S, below
+  1. Attack Mottled Boar: level 2 boar, yellow, npc, neutral, moving; 9 yd NE, facing you
+  2. Attack Mottled Boar: level 1 boar, yellow, npc, neutral, health 24%, approaching me Loadaa, targeting me yes, target Loadaa, threat status threat aggro; 17 yd S, below
 far away: 1x troll, player, moving (85 yd NW); 2x humanoid, npc, small, visual state [rooted] (63-74 yd NE/S); 1x boar, npc (53 yd NE); 2x scorpid, npc, moving (39-79 yd SE); 1x critter, critter, small, moving (58 yd SW); 3x boar, npc, dead (31-79 yd W); 3x humanoid, npc, small (62-98 yd N/NW); 1x humanoid, npc (95 yd NW); 7x troll, player (32-76 yd SW/W); 2x boar, npc, moving (38-98 yd E/NE); 3x troll, player, casting (50-57 yd SW); 1x boar, npc, fighting Loadg (53 yd SW); 1x boar, npc, fighting Loadr (59 yd SW)
 objects:
-  3. 2x LumberPile: other; 67-70 yd N/S
-  4. 3x Cactus Apple: herb; 14-67 yd E/NW/SW
-  5. Razor Hill: other; 94 yd N, below
+  3. Use 2x LumberPile: other; 67-70 yd N/S
+  4. Gather 3x Cactus Apple: herb; 14-67 yd E/NW/SW
+  5. Use Razor Hill: other; 94 yd N, below
 also:
   6. Keep doing what I'm doing
   7. Explore somewhere new

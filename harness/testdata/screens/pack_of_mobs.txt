@@ -4,7 +4,7 @@ around me:
   - Loadaa: level 2 troll priest, yellow, player, friendly; here, you're behind it
   - Loadab: level 2 troll priest, yellow, player, friendly; here, you're behind it
   - Loadac: level 2 troll priest, yellow, player, friendly; here, you're behind it
-  1. Koma: level 45 humanoid, skull level, npc, friendly, subtitle Banker; 18 yd E, below, out of sight
+  1. Talk to Koma: level 45 humanoid, skull level, npc, friendly, subtitle Banker; 18 yd E, below, out of sight
   - Loadax: level 2 troll priest, yellow, player, friendly; here, you're behind it
   - Loadau: level 2 troll priest, yellow, player, friendly; here, you're behind it
   - Loadag: level 2 troll priest, yellow, player, friendly; here, you're behind it
@@ -21,12 +21,12 @@ around me:
   - Loadi: level 2 troll priest, yellow, player, friendly; here, you're behind it
   - Loadq: level 2 troll priest, yellow, player, friendly; here, you're behind it
   - Loadae: level 2 troll priest, yellow, player, friendly; here, you're behind it
-  2. Soran: level 45 humanoid, skull level, npc, friendly, subtitle Banker; 18 yd SW, below, out of sight
+  2. Talk to Soran: level 45 humanoid, skull level, npc, friendly, subtitle Banker; 18 yd SW, below, out of sight
   - Loadaw: level 2 troll priest, yellow, player, friendly; here, you're behind it
   - Loadg: level 2 troll priest, yellow, player, friendly; here, you're behind it
   - Loadj: level 2 troll priest, yellow, player, friendly; here, you're behind it
   - Loadz: level 2 troll priest, yellow, player, friendly; here, you're behind it
-  3. Karus: level 45 humanoid, skull level, npc, friendly, subtitle Banker; 17 yd SE, below, out of sight
+  3. Talk to Karus: level 45 humanoid, skull level, npc, friendly, subtitle Banker; 17 yd SE, below, out of sight
   - Loadk: level 2 troll priest, yellow, player, friendly; here, you're behind it
   - Loadm: level 2 troll priest, yellow, player, friendly; here, you're behind it
   - Loadl: level 2 troll priest, yellow, player, friendly; here, you're behind it
@@ -55,20 +55,20 @@ around me:
   - Loadat: level 2 troll priest, yellow, player, friendly; here, you're behind it
 far away: 1x humanoid, npc, moving, pack (id 208236, size 2) (100 yd W); 2x humanoid, npc, small, patrolling (69-89 yd NE/W); 5x humanoid, npc (31-70 yd N/NE/NW/S/SE); 4x humanoid, npc, small (60-92 yd E/S/W)
 objects:
-  4. Horde Bell: other; 43 yd NW, above
-  5. Soran's Leather and Steel Armory: other; 89 yd SE, below
-  6. 6x Mighty Blaze: other; 54-121 yd NW/S/SE
-  7. Orgrimmar Auction House: other; 67 yd NE, below
-  8. 5x Bonfire: other; 36-97 yd E/N/NW/S/W
-  9. Horde Embassy: other; 85 yd SW, below
-  10. 2x PVP HOLIDAY HORDE ARATHI: other; 29-53 yd NE/NW
-  11. The Skytower: other; 32 yd NW, below
-  12. Boomstick Imports: other; 59 yd NE, below
-  13. Valley of Wisdom: other; 92 yd N
-  14. The Drag: other; 92 yd N
-  15. Mailbox: mailbox; 65 yd NE, below
-  16. Valley of Spirits: other; 40 yd NE, below
-  17. Orgrimmar General Store: other; 102 yd S, below
+  4. Use Horde Bell: other; 43 yd NW, above
+  5. Use Soran's Leather and Steel Armory: other; 89 yd SE, below
+  6. Use 6x Mighty Blaze: other; 54-121 yd NW/S/SE
+  7. Use Orgrimmar Auction House: other; 67 yd NE, below
+  8. Use 5x Bonfire: other; 36-97 yd E/N/NW/S/W
+  9. Use Horde Embassy: other; 85 yd SW, below
+  10. Use 2x PVP HOLIDAY HORDE ARATHI: other; 29-53 yd NE/NW
+  11. Use The Skytower: other; 32 yd NW, below
+  12. Use Boomstick Imports: other; 59 yd NE, below
+  13. Use Valley of Wisdom: other; 92 yd N
+  14. Use The Drag: other; 92 yd N
+  15. Use Mailbox: mailbox; 65 yd NE, below
+  16. Use Valley of Spirits: other; 40 yd NE, below
+  17. Use Orgrimmar General Store: other; 102 yd S, below
 also:
   18. Keep doing what I'm doing
   19. Explore somewhere new

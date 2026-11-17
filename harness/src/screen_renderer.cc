@@ -270,9 +270,30 @@ std::optional<OptionKind> ObjectOption(const pb::GameObject& go) {
              : OptionKind::kUse;
 }
 
+std::string_view OptionVerb(OptionKind kind) {
+  switch (kind) {
+    case OptionKind::kAttack:
+      return "Attack ";
+    case OptionKind::kTalk:
+      return "Talk to ";
+    case OptionKind::kLoot:
+      return "Loot ";
+    case OptionKind::kGather:
+      return "Gather ";
+    case OptionKind::kUse:
+      return "Use ";
+    case OptionKind::kKeep:
+    case OptionKind::kExplore:
+    case OptionKind::kRest:
+    case OptionKind::kTown:
+      return "";
+  }
+  return "";
+}
+
 // One line per distinct (name, look): the same thing seen several times is
 // one line with a count and the range of distances. Entries the bot can act
-// on get the next option number.
+// on get the next option number and the action verb.
 std::vector<std::string> ThingLines(const std::vector<Thing>& things,
                                     std::vector<OptionKind>* options) {
   // Things only share a line if they also share what the bot can do with them
@@ -291,14 +312,16 @@ std::vector<std::string> ThingLines(const std::vector<Thing>& things,
   for (const auto& key : order) {
     const std::vector<const Thing*>& group = groups[key];
     std::string mark = "-";
+    std::string_view verb;
     if (group[0]->option) {
       options->push_back(*group[0]->option);
       mark = absl::StrCat(options->size(), ".");
+      verb = OptionVerb(*group[0]->option);
     }
     const std::string& name = std::get<0>(key);
     const std::string& look = std::get<1>(key);
     if (group.size() == 1) {
-      lines.push_back(absl::StrCat(mark, " ", name, ": ", look, "; ",
+      lines.push_back(absl::StrCat(mark, " ", verb, name, ": ", look, "; ",
                                    TightWhere(group[0]->rel)));
       continue;
     }
@@ -313,8 +336,8 @@ std::vector<std::string> ThingLines(const std::vector<Thing>& things,
     }
     std::sort(dists.begin(), dists.end());
     lines.push_back(
-        absl::StrFormat("%s %dx %s: %s; %.0f-%.0f yd%s", mark, group.size(),
-                        name, look, dists.front(), dists.back(),
+        absl::StrFormat("%s %s%dx %s: %s; %.0f-%.0f yd%s", mark, verb,
+                        group.size(), name, look, dists.front(), dists.back(),
                         dirs.empty() ? "" : " " + absl::StrJoin(dirs, "/")));
   }
   return lines;

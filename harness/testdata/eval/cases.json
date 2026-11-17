@@ -57,8 +57,9 @@
     "source": "live capture (Loada/272)",
     "reason": "plan done",
     "summary": "6x Cactus Apple quest herbs starting at 14 yd (1), no mobs or corpses",
-    "rule": "first step is Gather Cactus Apple (1)",
-    "first_options": [1]
+    "rule": "starts with Gather (1), Explore (5), or Go to town (7) until quest log is shown",
+    "first_options": [1, 5, 7],
+    "forbid_kinds": ["rest", "keep doing what I'm doing"]
   },
   {
     "name": "quest_available",

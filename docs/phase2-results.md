@@ -486,6 +486,22 @@ captures for low health, out of mana, and a patrolling skull-level elite), each 
 - **`gpt-oss-20b` dropped and removed:** its Harmony `<\|channel\|>` PEG parser rejects user GBNF
   without Harmony headers, and its raw completions wrote `1x12, 1x13...` chains and garbled `say:`.
 
-Why both remaining models miss 6-9 cases today:
-- Numbered screen entries in `around me:` / `objects:` carry no action verb (`1. Hare: level 1 critter...` rather than `Attack`), and `content/RULES.md` states no WoW basics yet (tapped mobs give no credit, critters give no XP, finish an existing attacker before pulling another).
-- `herb_to_gather` asks for gathering Cactus Apples before `screen_renderer` shows the quest log, so a bot without Herbalism has no way to know they are quest items.
+### Fixing the screen verbs, `look` floor, and `RULES.md` (2026-11-16)
+
+Three changes without touching game logic in C++:
+1. Numbered screen lines print the action verb (`1. Attack Hare: ...`, `2. Loot Mottled Boar: ...`,
+   `7. Talk to Ken'jai: ...`) instead of bare names (`screen_renderer.cc`, `prompt_render.py`).
+2. `PlanGrammar` and `ParsePlan` require `look >= 10` s (`kMinLookSeconds = 10`), preventing
+   1-second polling loops.
+3. `content/RULES.md` states basic client facts (check `me:` health/mana and active attackers
+   first; `-` lines are not clickable; critters, `gray`, and `tapped by other` mobs give no XP or
+   loot) plus a literal 5-line example matching `PlanGrammar`.
+
+| Model | Before (score, median) | After (score, median) | Remaining misses |
+|---|---|---|---|
+| **`gemma-4-26B-A4B-it`** | 9 / 15 (60%), 280 ms | **13 / 15 (87%), 239 ms** | `skip_tapped_mob`, `ignore_critter` (writes `goal: loot...` before `do:`, then picks `1`) |
+| `Qwen3.6-35B-A3B` | 6 / 15 (40%), 252 ms | **11 / 15 (73%), 206 ms** | `low_hp_hostile`, `oom_caster`, `loot_with_boar_nearby`, `quiet_empty_field` |
+
+Median call latency also dropped **~40–46 ms** on both models because the literal example keeps
+sampling on `llama.cpp`'s `O(1)` single-token grammar path instead of triggering 248k-vocab
+rescans, and every `look` value is now 60–120 s (zero 1 s loops).

@@ -1,24 +1,24 @@
 me: Loada, level 1 male priest; health 72/72; mana 91/91; xp 40/400 (rested 10)
 where: Valley of Trials, Durotar (Kalimdor)
 around me:
-  1. Zureetha Fargaze: level 12 humanoid, skull level, npc, friendly, small; 12 yd SE
-  2. Mai'ah: level 10 humanoid, red, npc, friendly, subtitle Mage Trainer; 11 yd SW
-  3. Shikrik: level 10 humanoid, red, npc, friendly, small, subtitle Shaman Trainer; 16 yd SW
-  4. Den Grunt: level 65 humanoid, skull level, npc, friendly, small, patrolling; 18 yd N
-  5. Jen'shan: level 8 humanoid, red, npc, friendly, subtitle Hunter Trainer; 17 yd S
+  1. Talk to Zureetha Fargaze: level 12 humanoid, skull level, npc, friendly, small; 12 yd SE
+  2. Talk to Mai'ah: level 10 humanoid, red, npc, friendly, subtitle Mage Trainer; 11 yd SW
+  3. Talk to Shikrik: level 10 humanoid, red, npc, friendly, small, subtitle Shaman Trainer; 16 yd SW
+  4. Talk to Den Grunt: level 65 humanoid, skull level, npc, friendly, small, patrolling; 18 yd N
+  5. Talk to Jen'shan: level 8 humanoid, red, npc, friendly, subtitle Hunter Trainer; 17 yd S
   - Loadi: level 1 troll priest, yellow, player, friendly, moving; 9 yd N, you're behind it
-  6. Canaga Earthcaller: level 8 humanoid, red, npc, friendly, sitting; 19 yd SW
-  7. Ruzan: level 10 humanoid, red, npc, friendly; 7 yd SW, facing you
-  8. Ken'jai: level 10 humanoid, red, npc, friendly, subtitle Priest Trainer; 16 yd W
+  6. Talk to Canaga Earthcaller: level 8 humanoid, red, npc, friendly, sitting; 19 yd SW
+  7. Talk to Ruzan: level 10 humanoid, red, npc, friendly; 7 yd SW, facing you
+  8. Talk to Ken'jai: level 10 humanoid, red, npc, friendly, subtitle Priest Trainer; 16 yd W
   - Loadao: level 1 troll priest, yellow, player, friendly; 15 yd S
   - Loadah: level 1 troll priest, yellow, player, friendly; 19 yd NW
   - Loadab: level 1 troll priest, yellow, player, friendly, moving; 18 yd NW
 far away: 3x humanoid, npc, small (30-98 yd E/NW/SE); 2x boar, npc, dead (82-92 yd SE); 4x humanoid, npc (22-67 yd E/NE/NW/S); 4x troll, player, moving (28-89 yd NW/SE/W); 2x humanoid, npc, patrolling (54-58 yd E/W); 2x troll, player (29-34 yd NW)
 objects:
-  9. 2x Cactus Apple: herb; 88-97 yd NE/SE
-  10. Razor Hill: other; 81 yd E
-  11. Crude Brazier: other; 66 yd W, above
-  12. Fire: other; 30 yd NE
+  9. Gather 2x Cactus Apple: herb; 88-97 yd NE/SE
+  10. Use Razor Hill: other; 81 yd E
+  11. Use Crude Brazier: other; 66 yd W, above
+  12. Use Fire: other; 30 yd NE
 also:
   13. Keep doing what I'm doing
   14. Explore somewhere new

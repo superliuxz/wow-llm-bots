@@ -1,17 +1,17 @@
 me: Loada, level 1 male priest; health 72/72; mana 91/91; xp 40/400 (rested 10)
 where: The Den, Durotar (Kalimdor)
 around me:
-  1. Shikrik: level 10 humanoid, red, npc, friendly, small, subtitle Shaman Trainer; 18 yd S, out of sight
+  1. Talk to Shikrik: level 10 humanoid, red, npc, friendly, small, subtitle Shaman Trainer; 18 yd S, out of sight
   - Loadd: level 1 troll priest, yellow, player, friendly, moving; 16 yd N
   - Loadc: level 1 troll priest, yellow, player, friendly; here, you're behind it
   - Loadb: level 1 troll priest, yellow, player, friendly, moving, target Mottled Boar; 13 yd S
   - Loadan: level 1 troll priest, yellow, player, friendly, moving; 5 yd W, out of sight, you're behind it
-  2. Den Grunt: level 65 humanoid, skull level, npc, friendly, small; 8 yd W, facing you
-  3. Gornek: level 5 humanoid, orange, npc, friendly, quest marker quest incomplete; 14 yd W
-  4. Den Grunt: level 65 humanoid, skull level, npc, friendly; 7 yd SW, facing you
-  5. Ken'jai: level 10 humanoid, red, npc, friendly, subtitle Priest Trainer; 12 yd S, out of sight
+  2. Talk to Den Grunt: level 65 humanoid, skull level, npc, friendly, small; 8 yd W, facing you
+  3. Talk to Gornek: level 5 humanoid, orange, npc, friendly, quest marker quest incomplete; 14 yd W
+  4. Talk to Den Grunt: level 65 humanoid, skull level, npc, friendly; 7 yd SW, facing you
+  5. Talk to Ken'jai: level 10 humanoid, red, npc, friendly, subtitle Priest Trainer; 12 yd S, out of sight
   - Loadam: level 1 troll priest, yellow, player, friendly; 4 yd NW, out of sight, you're behind it
-  6. Den Grunt: level 65 humanoid, skull level, npc, friendly, patrolling; 18 yd E
+  6. Talk to Den Grunt: level 65 humanoid, skull level, npc, friendly, patrolling; 18 yd E
   - Loadah: level 1 troll priest, yellow, player, friendly, health 85%; 11 yd SW
   - Loadae: level 1 troll priest, yellow, player, friendly, moving; W, facing you
   - Loadz: level 1 troll priest, yellow, player, friendly, moving; 19 yd W
@@ -19,11 +19,11 @@ around me:
   - Loads: level 1 troll priest, yellow, player, friendly, moving; 13 yd S
 far away: 3x humanoid, npc, small (34-69 yd N/SE); 5x humanoid, npc (21-73 yd E/N/NE/S/SE); 1x humanoid, npc, small, patrolling (72 yd E); 13x troll, player, moving (20-89 yd E/N/NE/SE/W); 16x troll, player (21-90 yd E/NE/SE/W); 2x troll, player, fighting Mottled Boar (83-84 yd SE); 2x troll, player, casting (83-83 yd SE)
 objects:
-  7. 3x Crude Brazier: other; 11-48 yd SW/W
-  8. Bubbling Cauldron: other; 46 yd N
-  9. Fire: other; 46 yd E
-  10. Razor Hill: other; 96 yd E
-  11. Cooking Table: other; 40 yd N
+  7. Use 3x Crude Brazier: other; 11-48 yd SW/W
+  8. Use Bubbling Cauldron: other; 46 yd N
+  9. Use Fire: other; 46 yd E
+  10. Use Razor Hill: other; 96 yd E
+  11. Use Cooking Table: other; 40 yd N
 also:
   12. Keep doing what I'm doing
   13. Explore somewhere new

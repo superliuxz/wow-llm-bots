@@ -13,12 +13,9 @@ Last updated 2026-11-16.
 
 ## Next, in order
 
-1. **Model choice & plan quality fixes** (`docs/phase2-results.md`, "Plan quality"): decide whether
-   to switch `tools/wlblib/llm.py` default from Qwen3.6-35B-A3B to Gemma 4 26B-A4B (9/15 vs 6/15
-   eval, 8.6 vs 7.8 wakes/s, 4.8 GiB smaller; both kept in `models/` for now); add action verbs to
-   numbered screen lines in `screen_renderer.cc`, WoW basics (tapped mobs, critters, active
-   attacker) + a `look` example/floor in `content/RULES.md` / `plan.cc`, and revisit
-   `herb_to_gather` once quest log is rendered.
+1. **Model choice:** decide whether to switch `tools/wlblib/llm.py` default from Qwen3.6-35B-A3B to
+   Gemma 4 26B-A4B (13/15 vs 11/15 eval, 8.6 vs 7.8 wakes/s, 4.8 GiB smaller; both kept in
+   `models/` for now), and revisit `herb_to_gather` once quest log is rendered.
 2. **E2E latency quick wins** (identified 2026-11-16, not built yet): reset `PlayerbotAI` check
    delay (`ResetActionDuration()`) in `option_executor.cc` so non-immediate choices (`Loot`, future
    state changes) don't wait out 1-20 s playerbots timers; put `do:` on line 1 + stream SSE for
@@ -85,6 +82,9 @@ Last updated 2026-11-16.
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-16: plan quality fixes: action verbs on numbered screen lines, `look >= 10` s floor, and
+  `RULES.md` facts + example (`Gemma 4 26B` 9/15 → 13/15 at 239 ms, `Qwen3.6-35B` 6/15 → 11/15 at
+  206 ms; `docs/phase2-results.md`).
 - 2026-11-16: `tools/wlb test eval` with 15 live-capture cases (`harness/testdata/eval/`); model
   shootout + `perf brain` on Gemma 4 26B-A4B (9/15, 8.6/s) vs Qwen3.6-35B-A3B (6/15, 7.8/s);
   `gpt-oss-20b` dropped (`docs/phase2-results.md`).

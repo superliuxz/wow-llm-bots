@@ -166,16 +166,18 @@ TEST(ScreenRendererTest, FriendlyHostileAndNeutralUnitsGetOptionsInOrder) {
   EXPECT_EQ(screen.options[0], OptionKind::kTalk);
   EXPECT_EQ(screen.options[1], OptionKind::kAttack);
   EXPECT_EQ(screen.options[2], OptionKind::kAttack);
-  EXPECT_NE(screen.text.find("  1. Gornek: level 3, npc, friendly; 20 yd NE"),
-            std::string::npos)
+  EXPECT_NE(
+      screen.text.find("  1. Talk to Gornek: level 3, npc, friendly; 20 yd NE"),
+      std::string::npos)
       << screen.text;
   // Within melee range the facing matters; beyond it, it is left out.
-  EXPECT_NE(screen.text.find("  2. Scorpid: level 3, npc, hostile; 8 yd S, "
-                             "facing you"),
+  EXPECT_NE(screen.text.find("  2. Attack Scorpid: level 3, npc, hostile; "
+                             "8 yd S, facing you"),
             std::string::npos)
       << screen.text;
-  EXPECT_NE(screen.text.find("  3. Boar: level 3, npc, neutral; 30 yd W"),
-            std::string::npos)
+  EXPECT_NE(
+      screen.text.find("  3. Attack Boar: level 3, npc, neutral; 30 yd W"),
+      std::string::npos)
       << screen.text;
 }
 
@@ -202,9 +204,10 @@ TEST(ScreenRendererTest, TheSameThingSeveralTimesIsOneLineWithARange) {
   AddUnit(&snapshot, "Boar", pb::Unit::NEUTRAL, 12, pb::NW);
   AddUnit(&snapshot, "Boar", pb::Unit::NEUTRAL, 21, pb::W);
   const Screen screen = RenderScreen(snapshot);
-  EXPECT_NE(screen.text.find("  1. 3x Boar: level 3, npc, neutral; 12-30 yd "
-                             "NW/W"),
-            std::string::npos)
+  EXPECT_NE(
+      screen.text.find("  1. Attack 3x Boar: level 3, npc, neutral; 12-30 yd "
+                       "NW/W"),
+      std::string::npos)
       << screen.text;
   EXPECT_EQ(screen.options.size(), 5u);  // One option for the three boars.
 }
@@ -243,7 +246,7 @@ TEST(ScreenRendererTest, ObjectsAreGatheredOrUsedAndDefaultsAreLeftOut) {
   door->mutable_rel()->set_dir(pb::N);
   door->mutable_rel()->set_in_los(false);
   const Screen screen = RenderScreen(snapshot);
-  EXPECT_NE(screen.text.find("objects:\n  1. Peacebloom: herb; 15 yd E\n"
+  EXPECT_NE(screen.text.find("objects:\n  1. Gather Peacebloom: herb; 15 yd E\n"
                              "  - Gate: door, state active; 40 yd N, out of "
                              "sight\n"),
             std::string::npos)
@@ -267,7 +270,7 @@ TEST(ScreenRendererTest, AUsableAndAnUnusableObjectAreNotOneLine) {
   // The unusable one first: had they shared a line, its "no option" would
   // have hidden the usable one's.
   EXPECT_NE(screen.text.find("  - Chest: chest; 10 yd\n"
-                             "  1. Chest: chest; 10 yd\n"),
+                             "  1. Use Chest: chest; 10 yd\n"),
             std::string::npos)
       << screen.text;
   EXPECT_EQ(screen.options[0], OptionKind::kUse);
@@ -278,8 +281,9 @@ TEST(ScreenRendererTest, ABrokenDistanceIsSafe) {
   AddUnit(&snapshot, "Boar", pb::Unit::NEUTRAL, std::nanf(""), pb::W);
   AddUnit(&snapshot, "Boar", pb::Unit::NEUTRAL, 12, pb::DIRECTION_UNSPECIFIED);
   const Screen screen = RenderScreen(snapshot);
-  EXPECT_NE(screen.text.find("2x Boar: level 3, npc, neutral; 0-12 yd W\n"),
-            std::string::npos)
+  EXPECT_NE(
+      screen.text.find("Attack 2x Boar: level 3, npc, neutral; 0-12 yd W\n"),
+      std::string::npos)
       << screen.text;
 }
 

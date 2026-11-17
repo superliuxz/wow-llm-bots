@@ -158,7 +158,7 @@ std::string PlanGrammar(int option_count) {
   }
   return absl::StrCat(
       "root ::= \"goal: \" goal \"\\ndo: \" steps \"\\nexpect: \" "
-      "(\"none\" | ids) \"\\nwatch: \" watches \"\\nlook: \" num say?\n"
+      "(\"none\" | ids) \"\\nwatch: \" watches \"\\nlook: \" looknum say?\n"
       "goal ::= [^\\n]{1,",
       kMaxGoalChars,
       "}\n"
@@ -182,6 +182,7 @@ std::string PlanGrammar(int option_count) {
       "\"attacked\" | \"whisper\"\n"
       "pct ::= [1-9] [0-9]?\n"
       "num ::= [1-9] [0-9]{0,2}\n"
+      "looknum ::= [1-9] [0-9] [0-9]?\n"
       "say ::= \"\\nsay: \" [^\\n]{1,",
       kMaxSayChars, "}\n");
 }
@@ -259,7 +260,8 @@ std::optional<Plan> ParsePlan(std::string_view text, int option_count) {
       }
       const std::optional<int> count = ParseInt(
           std::string_view(value).substr(0, digits), 1, kMaxLookSeconds);
-      if (!count || *count * scale > kMaxLookSeconds) {
+      if (!count || *count * scale < kMinLookSeconds ||
+          *count * scale > kMaxLookSeconds) {
         return std::nullopt;
       }
       plan.look_s = *count * scale;
