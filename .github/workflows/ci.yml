@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/TODO.md'
+      - 'docs/*.md'
+      - 'docs/plans/**'
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-and-sanitizers:
+    name: wlb check + sanitizers (ASan/UBSan, TSan, MSan)
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+      # ASan's LeakSanitizer needs SYS_PTRACE; TSan on Linux 6.8+ needs personality()
+      # (blocked by default Docker seccomp) when re-execing under high mmap_rnd_bits.
+      options: --security-opt seccomp=unconfined --cap-add SYS_PTRACE
+    env:
+      CCACHE_DIR: /github/workspace/.ccache
+      CCACHE_MAXSIZE: 2G
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+    steps:
+      - name: Install toolchain
+        run: |
+          pacman -Syu --noconfirm --needed \
+            clang lld compiler-rt gcc cmake ninja python git ccache
+          git config --global --add safe.directory '*'
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Checkout C++ test/header submodules
+        run: |
+          git submodule update --init --depth 1 \
+            third_party/googletest \
+            third_party/cpp-httplib \
+            third_party/json \
+            third_party/glaze
+
+      - name: Detect Clang version
+        id: clang-ver
+        run: |
+          ver=$(clang --version | sed -n 's/.*clang version \([0-9.]*\).*/\1/p' | head -n1)
+          echo "ver=${ver}" >> "$GITHUB_OUTPUT"
+          echo "Detected Clang ${ver}"
+
+      - name: Cache MSan instrumented libc++
+        uses: actions/cache@v4
+        with:
+          path: out/llvm/msan
+          key: msan-libcxx-arch-clang-${{ steps.clang-ver.outputs.ver }}
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-arch-${{ steps.clang-ver.outputs.ver }}-${{ github.sha }}
+          restore-keys: |
+            ccache-arch-${{ steps.clang-ver.outputs.ver }}-
+
+      - name: Run wlb check --sanitizers
+        run: |
+          tools/wlb check --sanitizers
+          ccache -s

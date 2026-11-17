@@ -5,7 +5,7 @@ what exists, what comes next and in which order. **Keep it current** (CONTRIBUTI
 docs/TODO.md current"): anything unfinished, deferred or decided-but-not-built goes here, not only
 in a conversation.
 
-Last updated 2026-11-16.
+Last updated 2026-11-17.
 
 ## In progress
 
@@ -30,7 +30,7 @@ Last updated 2026-11-16.
    Attack, Loot, Keep. Missing: talk (playerbots opens gossip only for a bot's master), gather,
    use, "go to" (options exist only for named units within 20 yd). Then the rest of the snapshot:
    quest log (plans invent quests without it), bags, gear, target (`ext.target`), combat, party
-   (`docs/specs/snapshot.md`; most of `snapshot.proto` is not filled yet).
+   (`docs/specs/snapshot.md`; most of `common/proto/snapshot.h` is not filled yet).
 5. **Standing orders** (`docs/specs/triggers.md`, "Standing orders", proposed). Settle the order
    syntax, build it in `harness/src/plan.cc`, the executors in the module, then evals. Cheap
    grammar gaps to add first: `me` as a thing (my health), master and assist tank as `who`,
@@ -69,8 +69,8 @@ Last updated 2026-11-16.
   a force-push: their decision.
 - Unit tests for the AzerothCore-dependent module code (`bot_manager`, `option_executor`,
   `nearby_builder`, ...) can't run without the game server: only the e2e case covers it
-  (`ResetActionDuration()` in `option_executor.cc` passed `wlb check includes` against `out/server`
-  but `wlb test e2e choose` has not been re-run yet so the play server stays up).
+  (rebuild/restart `out/server` with `tools/wlb build server` before connecting the new BEVE
+  `harness`, since the running play server predates the Glaze wire switch).
 - `BrainBridge`: a connection generation drops stale frames, but a stalled old connection's
   commands still arrive in order before its disconnect is seen. Judged not worth more yet.
 - Bugs found in playerbots (not ours, `third_party/`): `RangeTriggers.cpp:275` returns before its
@@ -81,6 +81,11 @@ Last updated 2026-11-16.
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-17: replaced `protobuf` + `abseil-cpp` with `stephenberry/glaze` v9.1.0
+  (`common/proto/snapshot.h` plain C++20 structs + `snapshot_wire.cc` BEVE wire/JSON +
+  `snapshot_check` + `wire_py.py`), removed `third_party/abseil-cpp`, `third_party/protobuf`,
+  `protoc`, and `.pb` fixtures, and added GitHub Actions CI (`.github/workflows/ci.yml`) running
+  `wlb check --sanitizers`.
 - 2026-11-16: Chromium `common/base/strings/` (`strcat`, `string_util`, `string_split`,
   `string_number_conversions`, `stringprintf`), migrated `harness/` off `absl::*`, replaced `<pthread.h>`
   in `harness/src/main.cc` and all `<set>`/`<map>` across `harness/` + `server_module/` (`std::flat_map`,
