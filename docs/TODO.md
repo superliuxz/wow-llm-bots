@@ -31,15 +31,18 @@ Last updated 2026-11-17.
    use, "go to" (options exist only for named units within 20 yd). Then the rest of the snapshot:
    quest log (plans invent quests without it), bags, gear, target (`ext.target`), combat, party
    (`docs/specs/snapshot.md`; most of `common/proto/snapshot.h` is not filled yet).
-5. **Standing orders** (`docs/specs/triggers.md`, "Standing orders", proposed). Settle the order
-   syntax, build it in `harness/src/plan.cc`, the executors in the module, then evals. Cheap
-   grammar gaps to add first: `me` as a thing (my health), master and assist tank as `who`,
-   line of sight, "behind it", my current target, game objects, aura time left, "anyone within N",
-   absolute mana. Snapshot gaps: a flying / untargetable / submerged state on `Unit`, assist-tank
-   index, where a cast will land (`lands_in_s`), liquid under the bot, named places in a room
-   (the hard one). Phase numbers come from DBM (decided). Re-run the trigger table with the
-   revised grammar (`docs/specs/trigger-conditions.tsv`, `tools/wlb check triggers`) for a real
-   coverage number (85% estimated, 69% without stretches).
+5. **Standing orders** (`docs/specs/triggers.md`, "The grammar (final, 2026-11-17)"). The `when`
+   and `<act>` grammar is final and both audit tables parse against it
+   (`tools/wlb check triggers`; `docs/specs/trigger-conditions.tsv` and `trigger-actions.tsv`).
+   Left: (a) re-judge the unsayable and stretched rows with the final grammar for a measured
+   coverage number (judged against the earlier grammar: conditions 85%, actions 46%; upper bounds
+   with the new constructs about 89% and 55%); (b) build it in `harness/src/plan.cc` and retire the
+   Python copy of the grammar (`tools/check-trigger-grammar.py`), then the executors in the module
+   (the new verbs `kite`, `mark`, `board`, `equip`, `pet`, `interact` need engine support);
+   (c) the snapshot gaps: named places in a room (**133 of the 254 unsayable actions are "go to
+   hardcoded coordinates"**: the biggest one), a flying / untargetable / submerged state on `Unit`,
+   assist-tank index, where a cast will land (`lands_in_s`), liquid under the bot; (d) evals.
+   `trigger-actions.tsv` and its brief are not committed yet.
 
 ## Later
 

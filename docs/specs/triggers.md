@@ -71,7 +71,7 @@ Filters compare an entry's fields: `{kind: PLAYER, reaction: HOSTILE, level >= 7
 rel.dist_yd < 40}`, `{name: "Hogger"}`, `{dispel_type: MAGIC}`. Units coming into view have no
 client event (a player just sees them), which is why `appears` exists.
 
-## Standing orders (proposed 2026-11-16, not built)
+## Standing orders (grammar final 2026-11-17; not built)
 
 **The test for any behaviour is how fast it has to happen.** Under about a second it can't be a
 brain call: one bot alone gets a plan in 0.21 s, but an urgent wake cost 0.8 s at the lightest
@@ -87,30 +87,110 @@ brain decision.
 | Decision | the brain | 0.5-2 s | what to do next, who to group with, chat, what to do after a wipe |
 
 An **order** is a small plan started by a watch instead of by the brain:
-`<when> -> <act>, then <act>` (grammar below): the verbs act on things the plan's `steps` already
-name, and a step may end `until` a condition or a timeout, as in a plan; it generalises today's
-single `react` line to a list.
+`<when> -> <act>, then <act>` (grammar below); it generalises today's single `react` line to a
+list.
 
-**About ten verbs, and the number must not grow per boss; what grows is what they point at**
-(provisional: see "What a pass over playerbots' boss triggers found" below):
-`to`, `away`, `target`, `use`, `stop`, `face`, `jump`, `cancel`, `avoid`, `wake`.
+### The grammar (final, 2026-11-17)
+
+An order is a condition and one to three steps. `tools/check-trigger-grammar.py` parses every
+`fits` row of both audit tables against exactly this (all 595 conditions and 579 actions pass).
+
+```
+order   ::= when " -> " act (", then " act){0,2}              ; up to 3 steps; up to 7 orders per plan
+when    ::= "always" | cond (" & " cond){0,3}                  ; up to 4 conditions
+cond    ::= "not "? test
+test    ::= mech " on " who                                    ; an aura or debuff on someone
+          | mech " stacks" cmp cnt " on " who
+          | mech " ends<" num "s on " who                      ; its time left (Aura.remaining_s)
+          | mech " cast" | mech " cast on " who                ; being cast now / aimed at someone
+          | mech " cast in last " num "s"                      ; started within the last N seconds
+          | mech " appears" | mech " appears in last " num "s"
+          | mech " count" cmp cnt                              ; how many of it are around
+          | thing (" within " | " beyond ") num (" of " thing)?   ; yards, from me or from a thing
+          | thing " targets " thing
+          | thing " hp" cmp num                                ; percent of maximum
+          | "mana" cmp num | "mana_points" cmp cnt             ; mine: percent / an absolute amount
+          | thing " is " state | thing " is marked " icon
+          | thing " in sight" | thing " out of sight"          ; line of sight
+          | "me behind " thing | "my target is " thing
+          | "me " mystate | "me has " name                     ; an item, pet or totem I have
+          | "phase " digit | "after " num "s" | "every " num "s"
+cmp     ::= "<" | ">"
+who     ::= "me" | "tank" | "offtank" | "healer" | "leader" | "anyone" | "boss" | "it"
+thing   ::= who | "my target" | "marker " icon | "nearest " kind | "ally with " mech
+          | "group" | "allies" | "focus" | name
+kind    ::= "ally" | "player" | "enemy" | name
+state   ::= "flying" | "grounded" | "untargetable" | "submerged"
+mystate ::= "in vehicle" | "mounted" | "swimming" | "nearest to it"
+icon    ::= "skull" | "cross" | "square" | "moon" | "triangle" | "diamond" | "circle" | "star"
+
+act     ::= "to " place | "away" (" " thing)? (" " num)? | "avoid " thing
+          | "target " thing | "use " name (" on " thing)?
+          | "stop" (" casting" | " attacking" | " moving")? | "face " thing | "face away " thing
+          | "jump" | "cancel " name | "mark " thing " " icon | "interact " thing
+          | "board " thing | "leave vehicle" | "equip " name | "pet " petcmd | "kite " thing
+          | "wake"
+place   ::= thing | "behind " thing | "in front of " thing | "max range of " thing
+          | num " yd from " thing
+petcmd  ::= "attack " thing | "stay" | "follow" | "passive" | "defensive"
+```
+
+- **`name`** is a spell, aura, unit, object, item or landmark as a player sees it. The harness
+  builds each call's grammar from the names in the bot's own notes and screen, so a bot can only
+  write an order about what it knows (rule 3 below). `use` takes a name from the bot's spellbook
+  or bags.
+- **`it`** is what the first condition matched on: the unit with the aura, the caster, the object
+  that appeared. An `always` order has no `it`.
+- **No coordinates, ever.** A place is a thing the snapshot names (a unit, an object, a landmark,
+  a subzone) or a spot relative to one (`behind boss`, `15 yd from Loada`, `max range of boss`).
+  A fixed spot in a room needs the snapshot to name it (a landmark): a snapshot gap, not a grammar one.
+- **`tank`** is the group's main tank, `offtank` the assist tank, `leader` the party or raid
+  leader. Our bots have no master; where playerbots compares with "my master" the order names the
+  leader or a unit.
+- **"Or"** needs no syntax: two orders with the same act. **Priority** is the order the brain
+  wrote them in; the first match wins.
+- **Each step ends** when it is done or after a step timeout (a harness parameter, 5 s by
+  default); a failed step wakes the brain. No branches: "if that fails, then..." is a decision.
+- **Assignments** ("you take the left cube") are not grammar: the brain, or the leader's call in
+  raid chat, gives each bot its own concrete orders, so the order already names the thing.
+
+**Why these verbs** (the ten the first audit used, plus six; the number must not grow per boss,
+and these are player actions, not boss ones). Counted over the 254 actions the audit could not say:
+`kite` 28 (the engine owns the continuous steering; the brain says when and from what), `mark` 23,
+`board`/`leave vehicle` 11, `equip` 9, `pet` 6, `interact` 6. Relative places (`behind`, `max
+range of`, `N yd from`) cover most of the 85 `relative_spot` rows.
 
 | Verb | Covers |
 |---|---|
-| `to` | stack, run to the tank, hide behind an ice tomb, enter a portal |
-| `away` | Defile, spread out, get out of a cloud |
-| `target` | switch to adds, a Bone Spike, a Val'kyr |
-| `use` | a cooldown, potion, dispel, taunt, interrupt |
-| `stop` | stop casting or attacking (Unchained Magic) |
-| `avoid` | don't melee this, don't dispel that |
-| `face`, `jump`, `cancel` | turn to a unit; jump; cancel an aura or a cast |
+| `to` | stack, run to the tank, hide behind an ice tomb, enter a portal, a relative spot |
+| `away` | Defile, spread out, get out of a cloud (`away group`, `away nearest ally 10`) |
+| `target`, `use`, `stop` | switch to an add; a cooldown, potion, dispel, taunt, interrupt, Misdirection; stop casting |
+| `avoid`, `face`, `jump`, `cancel` | don't melee or dispel this; turn to or from a unit; jump; cancel an aura |
+| `mark` | set a raid icon on a unit |
+| `interact` | click an object or talk to a unit (a trap, a crystal, a lance rack) |
+| `board`, `leave vehicle` | a vehicle, a cannon, a drake |
+| `equip` | swap an item (a lance, a weapon) |
+| `pet` | attack, stay, follow, passive, defensive |
+| `kite` | run a kiting circle around or away from a unit |
 | `wake` | no rule fits: ask the brain (what every watch does today) |
 
-Targets and places reuse the filter vocabulary the watches already have (`{name: ...}`, an
-aura, a raid marker on a unit, a distance).
+**What the two audits say the grammar can say** (the rows were judged against the earlier grammar
+with the 10 verbs; the second line of each is an upper bound with the constructs added above, not
+a re-judgment):
+
+| | Judged | With the final grammar (at most) |
+|---|---|---|
+| Conditions: `fits` + `always` of 547 | 463 (85%) | about 486 (89%) |
+| Actions: `fits` of 469 (`fits` + `unsayable`) | 215 (46%) | about 260 (55%) |
+
+What stays out of the grammar, by the actions' count of blockers (a row can have several): **hardcoded
+locations 133** (a snapshot gap: landmarks), **assignments 89** (the brain writes each bot's own
+orders), **multi-step or branching procedures 72** (a skill the engine owns, or a brain decision).
+The next measurement is to re-judge the 84 unsayable and 83 stretched conditions and the 254
+unsayable actions with this grammar.
 
 **What a first pass over playerbots' boss triggers found** (2026-11-16, against the first
-grammar; its table was not kept, and the re-run with the revised grammar below replaces its numbers). Six readers wrote each of the 594 boss-trigger bodies in the
+grammar; its table was not kept, and the re-run below replaces its numbers). Six readers wrote each of the 594 boss-trigger bodies in the
 pinned playerbots commit as a `when` clause of the first grammar here, or marked why it couldn't be
 said:
 
@@ -129,27 +209,12 @@ or gear state 23; "or" of two conditions about 20; a raid marker 15; a repeating
 15; a count of units 14. Of the 120 whole-fight triggers about 52 are positions and about 24 are
 kill priorities: standing orders with no trigger, so the grammar needs `always`.
 
-**The `when` side, revised** (proposed; the verb side is as above):
-
-```
-order   ::= when " -> " act (", then " act){0,2}
-when    ::= "always" | cond (" & " cond){0,2}
-cond    ::= "not "? test
-test    ::= mech " on " who | mech " stacks" cmp cnt " on " who
-          | mech " cast" | mech " cast on " who | mech " appears" | mech " count>" cnt
-          | thing (" within " | " beyond ") num | thing " targets " who
-          | thing " hp" cmp pct | "mana" cmp pct | thing " is " state
-          | "me " mystate | "phase " digit | "after " num "s" | "every " num "s"
-cmp     ::= "<" | ">"
-who     ::= "me" | "tank" | "healer" | "anyone" | "boss"
-thing   ::= "it" | "boss" | "tank" | mech | "marker " mark
-state   ::= "flying" | "grounded" | "untargetable" | "submerged"
-mystate ::= "in vehicle" | "mounted" | "swimming" | "nearest to it"
-```
-
-Examples the first grammar couldn't say: `always -> to behind boss`; `always -> target marker
-skull`; `not Fire Bomb cast & boss hp>20 -> target boss`; `Sindragosa is flying -> to Ice Tomb`;
-`Tainted Core appears & me nearest to it -> use 4 on it`.
+**The `when` side** is defined in "The grammar (final)" above. What the first audit added to the
+first grammar: `not`, up to three conditions joined by `&`, `always`, states and counts. What the
+re-run found missing, now in: `me` as a thing, `leader` and `offtank` (not "master"), line of sight,
+"behind it", "my target", an aura's time left, "anyone within N", an absolute mana amount, distance
+between two things, a time window (`cast in last N s`), `me has`, marked units, and the caps raised
+from 3 conditions and 4 orders to 4 and 7.
 
 - **"Or" needs no syntax:** write two orders with the same action.
 - **Coverage, measured (2026-11-16):** every one of the 595 `IsActive` bodies in
@@ -157,7 +222,7 @@ skull`; `not Fire Bomb cast & boss hp>20 -> target boss`; `Sindragosa is flying 
   dungeon) was read, following helpers, and written in the revised grammar or marked why it
   can't be: `docs/specs/trigger-conditions.tsv`, one row each (how it was made:
   `trigger-conditions-brief.md`; six readers in parallel, then 12 random rows re-read against
-  the source). `tools/check-trigger-conditions.py` parses every `when` cell against the grammar
+  the source). `tools/check-trigger-grammar.py` parses every `when` cell against the grammar
   (all pass), so the table is the grammar's regression set. The script is a second copy of the
   grammar: once orders are parsed in `harness/src/plan.cc`, a unit test runs the real parser over
   the table and the Python copy is retired. Leaving out 25 `plumbing` rows (base
@@ -222,11 +287,9 @@ skull`; `not Fire Bomb cast & boss hp>20 -> target boss`; `Sindragosa is flying 
   the harness from the positions already sent. About 9 triggers are bug nets (fell through the
   floor): not the brain's job, a C++ safety net or the "Stuck" option.
 
-**A sequence is allowed if it stays short and has no branches:** two or three steps, each with
-an `until` or a timeout, ending in "resume the plan" or `wake`. Anything of the form "if that
-fails, then..." is a brain decision, so a failed step wakes the brain. One order runs at a
-time; the brain lists them in priority order and a higher one interrupts a lower one.
-Example: `Defile on me -> away, then resume`.
+**A sequence is allowed if it stays short and has no branches:** up to three steps. One order runs
+at a time; the brain lists them in priority order and a higher one interrupts a lower one.
+Example: `Defile on me -> away, then to behind boss`.
 
 Rules that keep the split clean:
 
@@ -242,7 +305,7 @@ Rules that keep the split clean:
    into the next look's "since your last look". An order can also say `wake` to do both: do the
    thing, then ask the brain.
 5. **Priority is the order the brain wrote them in** (see above); a new plan replaces all of the
-   old plan's orders. At most 4 orders per plan, like today's 4 watches.
+   old plan's orders. At most 7 orders per plan (the first grammar's cap was 4).
 
 Why: it cuts urgent wakes. Every expected surprise ("an add: target it", "health under 30%:
 potion") is handled without a brain call, and the measured limit is about 7 wake-ups a second,

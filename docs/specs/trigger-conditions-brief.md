@@ -4,7 +4,7 @@ How `trigger-conditions.tsv` was made (2026-11-16): the 595 `bool <class>::IsAct
 `src/Ai/Raid/*/*Triggers.cpp` and `src/Ai/Dungeon/*/*Triggers.cpp` were listed with grep, split
 into six groups, and each group given to a reader (an LLM agent) with this brief. Afterwards
 the five `*Cheat*` triggers (they only fire with playerbots' raid cheat on) got their own
-verdict, `cheat`, and the `when` cells were normalised until `tools/check-trigger-conditions.py`
+verdict, `cheat`, and the `when` cells were normalised until `tools/check-trigger-grammar.py`
 passed.
 
 Playerbots source (read only, never edit):

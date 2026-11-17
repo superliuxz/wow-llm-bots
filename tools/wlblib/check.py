@@ -145,7 +145,7 @@ def snapshots(files=()):
 
 
 def triggers():
-    run(["python3", "-I", ROOT / "tools/check-trigger-conditions.py"])
+    run(["python3", "-I", ROOT / "tools/check-trigger-grammar.py"])
 
 
 def goldens():
