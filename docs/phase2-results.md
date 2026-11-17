@@ -530,3 +530,31 @@ Four changes (`docs/plans/latency.md`):
 | Saturated 16-slot full call p50 | `1.96 s` → **`1.42 s`** | `1.85 s` → **`1.74 s`** |
 | 50 bots, 30 s plans (wake→plan p50 / p95) | `0.5 s / 0.9 s` → **`0.3 s / 0.6 s`** | `0.6 s / 1.0 s` → **`0.5 s / 0.8 s`** |
 | 100 bots, 15 s plans (wake→plan p50 / p95) | `2.1 s / 3.2 s` → **`0.8 s / 1.5 s`** | `1.9 s / 2.6 s` → **`1.5 s / 2.1 s`** |
+
+## Gemma 4 perf baselines & live end-to-end verification (2026-11-17)
+
+1. **`perf` re-baselined (`tools/wlb test perf --update-baselines --verify`, `PROMPT=harness` on
+   `gemma-4-26B-A4B-it` Q4, 16 slots, with `ext` + `indicators` populated):**
+   - `perf brain`: `8.9 wakes/s` capacity (`100%` valid, saturated single-call p50 `1.78 s`),
+     50 bots / 30 s wake→plan p50 **`0.4 s`** / p95 **`0.8 s`** (`100%` valid), 100 bots / 15 s
+     wake→plan p50 **`1.3 s`** / p95 **`1.9 s`** (`100%` valid).
+   - `perf snapshots` (50 bots in Orgrimmar): build p50 **`83 µs`**, p99 **`175 µs`**, max
+     **`264 µs`** (`264 ms/min` total world-thread time), `50.0` frames/s, `0` dropped,
+     `built -> received` p50 `0.12 ms` / p95 `0.19 ms`, average snapshot `23,206` bytes.
+2. **Live run (`Testpriest` + `Gatda`, `gemma-4-26B-A4B-it`, `n = 86` decisions):**
+   - Snapshot build p50 **`29–45 µs`** (p99 `70–123 µs`, max `165 µs`), `built -> received` p50
+     **`0.06–0.08 ms`** (p95 `0.10–0.13 ms`), `0` replaced / `0` dropped.
+   - Decision latency: `do:` p50 **`109.6 ms`** (p95 `190.2 ms`), full reply p50 **`246.5 ms`**
+     (p95 `346.4 ms`); `age_at_ask_ms` p50 `0.2 ms`, `age_at_first_line_ms` p50 `112.1 ms`,
+     `age_at_plan_ms` p50 `253.5 ms`, `age_at_apply` p50 **`94–115 ms`**.
+   - Urgent state flips (`entered combat`, `attacked`, `died`, `alive again`, `n = 18`):
+     `age_at_ask_ms` p50 **`0.18 ms`**, p95/max **`234.9 ms`**.
+   - `Testpriest`: `42` decisions in `374.4 s` (`6.7 wakes/min`, non-whisper `3.8/min`); `Gatda`:
+     `44` decisions in `333.3 s` (`7.9 wakes/min`, non-whisper `5.0/min`).
+   - Whispers & death verified live: `Gatda` whispered `Testpriest` `"who"` (`!pb ` command prefix
+     prevented running playerbots' `who`) and `"hey, any good spots to level around here?"`;
+     `Testpriest` replied in character mid-fight (`"finishing this bird first, then maybe around
+     Camp Taurajo?"`) and `Gatda` answered (`"sounds good, let me know when you're ready"`).
+     `Testpriest` also died (`age_at_ask_ms = 0.151 ms`, only `Keep` offered) and resurrected
+     (`alive again`, `age_at_ask_ms = 0.181 ms`).
+

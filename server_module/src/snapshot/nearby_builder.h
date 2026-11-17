@@ -9,6 +9,8 @@
 #include "snapshot/perception.h"
 
 class Player;
+class Unit;
+class WorldObject;
 
 namespace llm_brain {
 
@@ -43,6 +45,16 @@ class NearbyBuilder {
   ~NearbyBuilder();
 
   Stats Build(Player* bot, wlb::snapshot::Nearby* nearby);
+
+  // Fills `out` with model, relative position, cached LoS, and nameplate
+  // fields (for unit frames: target, attackers).
+  void FillUnit(Player* bot, Unit* unit, wlb::snapshot::Unit* out);
+
+  // Fills `rel` with distance, compass direction, height, coordinates, and
+  // cached LoS from `bot` to `object`.
+  void FillUnitRelative(Player* bot,
+                        WorldObject* object,
+                        wlb::snapshot::Relative* rel);
 
  private:
   const Options options_;

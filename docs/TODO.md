@@ -9,71 +9,24 @@ Last updated 2026-11-17.
 
 ## In progress
 
-Working order (2026-11-17 09:50): finish #3, #1, then #4, #2, #5.
+Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `indicators`) is done, remaining #4 option kinds and open panels are in `## Next, in order` ahead of #5.
 
-- **Review of c80e791 + 4ce9490** (`docs/reviews/2026-11-17-c80e791.md`, 18 findings + 6
-  follow-ups): all fixed and unit-tested (2026-11-17). **Not yet run live**: rebuild and install
-  the server (`tools/wlb build server`), `tools/wlb config`, restart, and watch a bot loot, gather,
-  use a door, die and come back, and get whispered "who".
-
-- **#1 Play Testpriest live: partly done (2026-11-17 01:34-01:38 and from 10:00, Qwen3.6-35B, 16
-  slots).** Measured at 01:34: snapshot build p50 33-45 us, p99 58-122 us; built->received p50
-  0.09 ms, p95 0.15 ms, max 1.5 ms; world update diff 1 ms; warm `do:` 60-92 ms, full reply
-  124-185 ms (first look 231/344 ms, cold prefix); `age_at_apply` p50 91-137 ms, max 295 ms.
-  Checked by hand: harness killed -> module logs "harness disconnected", the body keeps playing; a
-  client that stops reading for 15 s gets 15 frames, then live ones (0 dropped). **Not yet
-  checked:** whisper -> in-character reply (phase 2 "done when" item 1: needs the human player in
-  game), death and respawn, combat detection latency as a number, wakes per bot per minute over a
-  longer run.
-  - Fixed (2026-11-17): the wake loop on a refused Attack (`step failed: can't attack X now`, six
-    wakes in ~1 s). `option_executor.cc` now counts a refusal as done when the body already has
-    that target (`current target` or `GetVictim()`).
-  - Whisper path built (2026-11-17): the module hears whispers to its bots
-    (`chat/chat_scripts.cc`, a `PlayerScript` hook into a locked `ChatInbox`, sent as chat
-    events), carries out `Say` commands (say, yell, whisper: `chat/speak.cc`), and has a console
-    command `.llmbrain whisper <from> <to> <text>`; plans have a `tell <Name>: text` line, chosen
-    by the model (`plan.cc`, `content/RULES.md`). `e2e whisper` (two bots, scripted brain): the
-    passes (each whisper heard within a few ms). **Live (2026-11-17, Qwen3.6):** Gatda (a
-    random-bot orc rogue, now in `LlmBrain.Bots` as the second brain-run bot) whispered
-    Testpriest via the console command; Testpriest heard it and whispered back "yes" (wake to
-    full reply ~220 ms). A second, open question ("any good spots to level?") got no `tell`.
-    So the path works, but Qwen answers whispers unreliably and tersely (eval: 3/5 whisper
-    cases; Gemma 4: 5/5). Phase 2 "done when" #1 is not met on Qwen yet.
-  - Loot steps timed out twice (corpse at 0-9 yd, still `lootable yes` after 15 s): playerbots
-    leaves items, the corpse stays lootable (review finding 3). Fixed by `done_command_id`; not
-    yet seen live.
-- **#3 E2E latency Tier 2: built (2026-11-17), live numbers pending** (`docs/plans/latency.md`,
-  Tier 2). Measure combat-detection age and preemption savings in the #1 run.
-
-- **#4 Module: more things a bot can do: partly done (2026-11-17).** Built, unit-tested, and the
-  module sources compiled (not yet run in game): `Gather <herb/ore>` and `Use <chest, quest object,
-  door, portal>` options (`options.cc`); the executor (`option_executor.cc`: lootable objects go
-  through playerbots' loot strategy, others are walked to with `MovePoint` and clicked on arrival
-  by `UseOnArrival` in `llm_brain_world_script.cc`); the screen now writes `ext.target` / `focus`,
-  `ext.combat`, `ext.party`, the quest tracker with goals, and low bag space / damaged armor /
-  talent points / mail (`screen_renderer.cc`; `bag_free_slots` is now optional, unset = unknown).
-  **Left:** the module does not fill `ext` yet (target, combat, party, quest tracker, indicators:
-  `snapshot_builder.cc`), so the new screen lines only show in tests; then talk and "go to"; then
-  bags, gear, quest log. Needs `tools/wlb build server` + a restart to try live (stops the play
-  server).
-- **#2, #5:** not started.
+- **#4 Module: more things a bot can do: partly done (2026-11-17).** Built, unit-tested, and
+  verified live: `Gather <herb/ore>` and `Use <chest, quest object, door, portal>` options
+  (`options.cc`, `option_executor.cc`, `UseOnArrival` in `llm_brain_world_script.cc`);
+  `snapshot_builder.cc` + `nearby_builder.{h,cc}` now fill `ext.target`, `ext.combat`,
+  `ext.party`, `ext.quest_tracker`, and `base.self.indicators` (`bag_free_slots`,
+  `talent_points_unspent`, `new_mail`, `durability_warning`); `screen_renderer.cc` renders all
+  of them. **Left:** `Talk`, `Rest`, `Explore`, `Go to` options (resolves the 13 `planned` eval
+  cases), then open panels (`bags`, `character`, `quest_log` — `docs/specs/snapshot.md`).
 
 ## Next, in order
 
-1. **Play Testpriest live with the real model**, end to end (`tools/wlb llm` + `tools/wlb harness`),
-   and read the real numbers: wakes per bot per minute, how long plans last, `age_at_ask` /
-   `age_at_first_line` / `age_at_plan` / `age_at_apply`, combat and death detection latency,
-   latest-wins under a stalled harness. Done when the list in `docs/plans/phase2.md` holds.
-2. **Re-baseline perf on Gemma 4** (`tools/wlb test perf --update-baselines`):
-   `tools/wlblib/cases/perf_baselines.json` was measured on Qwen3.6 with the Python prototype's
-   prompt; now Gemma 4 is the default and `perf brain` sends the harness's own prompt; revisit `herb_to_gather` once the quest log is rendered.
-3. **E2E latency Tier 2** (`docs/plans/latency.md`): built; measure live (In progress).
-4. **Module: more things a bot can do** (`docs/plans/harness.md`, M1 "Not yet"). Options today:
-   Attack, Loot, Keep. Missing: talk (playerbots opens gossip only for a bot's master), gather,
-   use, "go to" (options exist only for named units within 20 yd). Then the rest of the snapshot:
-   quest log (plans invent quests without it), bags, gear, target (`ext.target`), combat, party
-   (`docs/specs/snapshot.md`; most of `common/proto/snapshot.h` is not filled yet).
-5. **Standing orders** (`docs/specs/triggers.md`, "The grammar (final, 2026-11-17)"). The `when`
+1. **Module: remaining options and open panels** (`#4`, `docs/plans/harness.md` M1,
+   `docs/specs/snapshot.md`): add `Talk` (gossip without master), `Rest`, `Explore`, and `Go to`
+   options so the 13 `planned` eval cases run on live options, then open panels (`bags`,
+   `character`, `quest_log`).
+2. **Standing orders** (`#5`, `docs/specs/triggers.md`, "The grammar (final, 2026-11-17)"). The `when`
    and `<act>` grammar is final and both audit tables parse against it
    (`tools/wlb check triggers`; `docs/specs/trigger-conditions.tsv` and `trigger-actions.tsv`).
    Left: (a) re-judge the unsayable and stretched rows with the final grammar for a measured
@@ -119,13 +72,21 @@ Working order (2026-11-17 09:50): finish #3, #1, then #4, #2, #5.
 
 ## Loose ends
 
+- Bots without Herbalism or Mining are still offered `Gather <herb/ore>` and walk there before
+  failing with `you lack the skill, tool or key for ...` (seen live on Copper Vein, Kingsblood,
+  Peacebloom); gate or annotate by `required_skill` / learned skills.
+- When two brain-run bots whisper `"who"` back and forth (`Gatda` -> `Testpriest`), they echoed
+  `"who"` several times before switching to a real question (and stopped naturally after
+  `"sounds good, let me know when you're ready"`).
 - A bot once wrote `tell <its own name>:` (Gatda, Gemma 4, live 2026-11-17); the module refuses
   it. Likely cause, the RULES.md example `tell Gatda:`, is fixed (review finding 8); watch whether
   it recurs.
-- **Eval on live options (2026-11-17, Gemma 4):** 35/37 live cases, 10/13 planned. With only
-  Attack and Keep on screen, it attacks a critter (`ignore_critter`) and a red level-6 mob
-  (`red_mob_nearby`): no way to walk away exists yet (Explore / Go to town are `planned`). The
-  Qwen3.6 shootout was not re-run on the new set; the model choice was made on the old one.
+- **Eval on live options (2026-11-17, Gemma 4):** 34/37 live cases (`herb_to_gather` now
+  passes with `ext.quest_tracker`: 1/1), 7/7 whispers, 10/13 planned. With only Attack/Gather/Use/Keep
+  on screen, it attacks a critter (`ignore_critter`), a red level-6 mob (`red_mob_nearby`), and a
+  tapped mob (`skip_tapped_mob`): no way to walk away exists yet (Explore / Go to town are
+  `planned`). The Qwen3.6 shootout was not re-run on the new set; the model choice was made on the
+  old one.
 - Dead bots: only Keep is offered while dead, refused steps back off (2-30 s), and coming back
   to life wakes the brain ("alive again"). Release spirit / run to corpse are not options yet
   (the body's playerbots dead strategy handles it).
@@ -159,6 +120,15 @@ Working order (2026-11-17 09:50): finish #3, #1, then #4, #2, #5.
   fails with "never offered". Passed every run so far.
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-17: completed `#1`–`#3` and `#4` snapshot fill (`docs/phase2-results.md`,
+  `docs/plans/latency.md`): `snapshot_builder.cc` + `nearby_builder.{h,cc}` fill `ext.target`,
+  `ext.combat`, `ext.party`, `ext.quest_tracker`, and `base.self.indicators`; `herb_to_gather`
+  updated and passing (`1/1`); `wlb test perf --update-baselines --verify` passed (`2/2`) on Gemma
+  4 26B-A4B (`8.9/s` capacity, `50 bots / 30 s` p50 `0.4 s` / p95 `0.8 s`, snapshot build p50
+  `83 µs`); live run with rebuilt server verified whisper replies without running `who` as a
+  playerbots command, `ext` lines on screen, death -> `Keep` only -> `alive again`, urgent
+  state-flip `age_at_ask_ms` p50 `0.18 ms`, and `do:` p50 `109.6 ms` (`86` decisions).
 
 - 2026-11-17: follow-up review fixes on 4ce9490 (`bot_loop.cc`, `option_executor.cc`,
   `nearby_builder.cc`, `llm_brain_world_script.cc`): preserve `say`/`tell` and refusal backoff

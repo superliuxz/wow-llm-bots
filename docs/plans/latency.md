@@ -59,16 +59,23 @@ access for personality-weighted option sampling (Tier 3, #8).
      wake-ups/s` (+45%)** and 100-bot 15 s wake-to-plan dropped **`2.1 / 3.2 s -> 0.8 / 1.5 s`**
      (Gemma 4 26B: `8.6 -> 9.1 /s`, 100-bot 15 s `1.9 / 2.6 s -> 1.5 / 2.1 s`).
 
-## Tier 2: perception & scheduling (built 2026-11-17; live numbers pending)
+## Tier 2: perception & scheduling (built and measured 2026-11-17)
 
 Built: (5) `SnapshotSchedule::Flags` carries `control_mask`, `attacker_count` and
 `active_target_pending` (`snapshot_schedule_unittest`); the module sends a fresh snapshot before an
-error `ImmediateEvent` (`EmitAlertingEvent`; only the `Choose` error path exists today). (6)
+error `ImmediateEvent` (`EmitAlertingEvent`; chat `OnSay` errors omit the extra snapshot). (6)
 `Urgency` is P0-P4; a P0 wake cancels the same bot's lower-tier call in flight through
 `LlmCancelHandle` (`httplib::Client::stop()`), `BotLoop` treats a cancelled reply as neither a
 decision nor a brain error (no 10 s retry), and a module disconnect cancels every call in flight
-(`scheduler_unittest`, `llm_client_unittest`, `bot_loop_unittest`). Still to measure live: combat
-detection age and preemption savings (docs/TODO.md).
+(`scheduler_unittest`, `llm_client_unittest`, `bot_loop_unittest`).
+
+Measured live (`Testpriest` + `Gatda`, Gemma 4 26B-A4B, `n = 86` decisions):
+- Urgent state-flip wakes (`entered combat`, `attacked`, `died`, `alive again`, `n = 18`):
+  `age_at_ask_ms` p50 **`0.18 ms`**, p95/max **`234.9 ms`** (down from `0–1,000 ms`).
+- All `86` decisions: `do:` p50 **`109.6 ms`** (p95 `190.2 ms`), full reply p50 **`246.5 ms`**
+  (p95 `346.4 ms`); `age_at_ask_ms` p50 `0.2 ms` (p95 `509.1 ms`), `age_at_first_line_ms` p50
+  `112.1 ms` (p95 `627.6 ms`), `age_at_plan_ms` p50 `253.5 ms` (p95 `829.6 ms`); `age_at_apply`
+  p50 **`94–115 ms`**.
 
 5. **Event-driven snapshot fast-paths + snapshot on alerting `ImmediateEvent`s (`-125 to -1,000 ms`)**
    - *Where:* `server_module/src/snapshot/snapshot_schedule.{h,cc}`,

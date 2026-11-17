@@ -502,6 +502,22 @@ NearbyBuilder::NearbyBuilder(Options options)
 
 NearbyBuilder::~NearbyBuilder() = default;
 
+void NearbyBuilder::FillUnit(Player* bot, Unit* unit, pb::Unit* out) {
+  out->detail = pb::Unit::NAMEPLATE;
+  FillModel(unit, bot, out);
+  FillUnitRelative(bot, unit, &out->rel);
+  out->rel.behind_it = unit->isInBack(bot);
+  out->rel.facing_me = unit->isInFront(bot, M_PI / 2);
+  FillNameplate(unit, bot, out);
+}
+
+void NearbyBuilder::FillUnitRelative(Player* bot,
+                                     WorldObject* object,
+                                     pb::Relative* rel) {
+  FillRelative(bot, object, rel);
+  SetInLos(los_.Get(object->GetGUID().GetRawValue()), rel);
+}
+
 NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
   Stats stats;
   const VisibleWorldObjectsMap* visible =

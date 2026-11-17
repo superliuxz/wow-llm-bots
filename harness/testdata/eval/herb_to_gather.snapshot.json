@@ -918,6 +918,22 @@
       ]
     }
   },
+  "ext": {
+    "quest_tracker": [
+      {
+        "title": "Cactus Apple",
+        "progress": {
+          "have": 2,
+          "need": 10
+        },
+        "quest": {
+          "quest_id": 4402,
+          "quest": "Galgar's Cactus Apple Surprise",
+          "level": 3
+        }
+      }
+    ]
+  },
   "options": [
     {
       "text": "Gather Cactus Apple",
