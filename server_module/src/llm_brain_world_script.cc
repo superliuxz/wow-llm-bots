@@ -205,7 +205,7 @@ class LlmBrainWorldScript : public WorldScript {
       apply_ages_.clear();
     }
     BrainBridge::SendStats sent = bridge_->TakeSendStats();
-    if (!sent.delays.empty() || sent.replaced > 0) {
+    if (!sent.delays.empty() || sent.replaced > 0 || sent.dropped > 0) {
       std::sort(sent.delays.begin(), sent.delays.end());
       const auto at = [&](double q) {
         return sent.delays.empty()
@@ -219,8 +219,10 @@ class LlmBrainWorldScript : public WorldScript {
       };
       LOG_INFO("module",
                "mod-llm-brain: sent n={} (built to socket p50={}us p99={}us "
-               "max={}us), {} replaced by a newer snapshot",
-               sent.delays.size(), at(0.5), at(0.99), at(1.0), sent.replaced);
+               "max={}us), {} replaced by a newer snapshot, {} dropped "
+               "(socket refused)",
+               sent.delays.size(), at(0.5), at(0.99), at(1.0), sent.replaced,
+               sent.dropped);
     }
   }
 

@@ -35,7 +35,10 @@ bool SnapshotSchedule::IsDue(size_t bot,
                              base::TimeTicks now,
                              Flags flags) const {
   const Slot& slot = slots_[bot];
-  return now >= slot.next_due || (slot.sent_once && flags != slot.last_flags);
+  // A bot already fighting when the schedule (re)starts goes first: its place
+  // in the interval can wait, the fight can't.
+  return now >= slot.next_due || (slot.sent_once && flags != slot.last_flags) ||
+         (!slot.sent_once && flags.in_combat);
 }
 
 void SnapshotSchedule::Sent(size_t bot, base::TimeTicks now, Flags flags) {

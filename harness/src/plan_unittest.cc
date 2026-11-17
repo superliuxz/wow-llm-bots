@@ -48,7 +48,7 @@ TEST(PlanTest, ExpectWatchAndTheGoalAreOptional) {
   EXPECT_TRUE(plan->watches.empty());
   EXPECT_EQ(plan->say, "");
   EXPECT_EQ(FormatPlan(*plan),
-            "goal: \ndo: 1\nexpect: none\nwatch: none\nlook: 30");
+            "goal: none\ndo: 1\nexpect: none\nwatch: none\nlook: 30");
   const std::optional<Plan> none =
       ParsePlan("do: 2\nexpect: none\nwatch: none\nlook: 5", 4);
   ASSERT_TRUE(none);
@@ -140,6 +140,22 @@ TEST(PlanTest, LongGoalsAndChatAreCut) {
   ASSERT_TRUE(plan);
   EXPECT_EQ(plan->goal.size(), static_cast<size_t>(kMaxGoalChars));
   EXPECT_EQ(plan->say.size(), static_cast<size_t>(kMaxSayChars));
+}
+
+TEST(PlanTest, APlanWithoutAGoalFormatsAsGrammarValidText) {
+  // A model without the grammar may leave the goal out, or write one that
+  // cutting empties (a lone continuation byte).
+  const std::string cut_to_nothing =
+      "goal: " + std::string(kMaxGoalChars + 1, '\x80') + "\ndo: 1\nlook: 5";
+  for (const std::string& reply :
+       {std::string("do: 1\nlook: 5"), cut_to_nothing}) {
+    const std::optional<Plan> plan = ParsePlan(reply, 4);
+    ASSERT_TRUE(plan) << reply;
+    EXPECT_EQ(plan->goal, "");
+    const std::string text = FormatPlan(*plan);
+    EXPECT_EQ(text.rfind("goal: none\n", 0), 0u) << text;
+    EXPECT_EQ(ParsePlan(text, 4)->goal, "");
+  }
 }
 
 TEST(PlanTest, LookTakesMinutesToo) {

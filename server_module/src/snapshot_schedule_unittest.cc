@@ -145,11 +145,12 @@ TEST(SnapshotScheduleTest, LeavingCombatIsAlsoAChange) {
   EXPECT_TRUE(schedule.IsDue(0, At(50), Flags()));
 }
 
-TEST(SnapshotScheduleTest, ABotNeverSentIsDueOnceItsTurnComes) {
+TEST(SnapshotScheduleTest, ABotNeverSentWaitsForItsTurnUnlessFighting) {
   const SnapshotSchedule schedule = Schedule(2);
-  EXPECT_TRUE(schedule.IsDue(0, At(0), Flags{.in_combat = true}));
-  EXPECT_FALSE(schedule.IsDue(1, At(499), Flags{.in_combat = true}));
+  EXPECT_FALSE(schedule.IsDue(1, At(499), Flags()));
   EXPECT_TRUE(schedule.IsDue(1, At(500), Flags()));
+  // Already in a fight when the schedule starts: at once.
+  EXPECT_TRUE(schedule.IsDue(1, At(0), Flags{.in_combat = true}));
 }
 
 TEST(SnapshotScheduleTest, NoBotsIsFine) {
@@ -181,6 +182,8 @@ TEST(SnapshotScheduleTest, RestartSpreadsOverdueBotsAgain) {
   }
   EXPECT_EQ(due, 1);  // One at a time again, not a burst of four.
   EXPECT_TRUE(schedule.IsDue(3, At(10750), Flags()));
+  // But a bot already fighting doesn't wait for its place.
+  EXPECT_TRUE(schedule.IsDue(3, connected, Flags{/*in_combat=*/true, true}));
 }
 
 }  // namespace

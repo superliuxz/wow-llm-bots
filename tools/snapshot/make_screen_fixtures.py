@@ -12,6 +12,9 @@ screens read, change the C++ and the prototype's expected text together, then re
 (or edit the .txt by hand, deliberately).
 
 Usage: out/tools-venv/bin/python -I tools/snapshot/make_screen_fixtures.py <capture_dir>...
+       out/tools-venv/bin/python -I tools/snapshot/make_screen_fixtures.py --check
+--check renders the committed NAME.pb with the prototype and compares it with NAME.txt and
+NAME.options: run it after changing either renderer, so the two can't drift apart.
 """
 
 import glob
@@ -54,7 +57,26 @@ FEATURES = {
 }
 
 
+def check():
+    """The prototype, run on the committed snapshots, must still write the goldens."""
+    bad = 0
+    for pb in sorted(OUT.glob("*.pb")):
+        message = snapshot_pb2.Snapshot()
+        message.ParseFromString(pb.read_bytes())
+        d = json_format.MessageToDict(message, preserving_proto_field_name=True)
+        text, kinds = render_tight(d, numbered=True)
+        for suffix, got in ((".txt", text + "\n"), (".options", "\n".join(kinds) + "\n")):
+            want = pb.with_suffix(suffix).read_text()
+            if got != want:
+                bad += 1
+                print(f"DIFFERS: {pb.stem}{suffix}")
+    print(f"{len(list(OUT.glob('*.pb')))} snapshots, {bad} differ")
+    sys.exit(1 if bad else 0)
+
+
 def main():
+    if sys.argv[1:] == ["--check"]:
+        check()
     OUT.mkdir(parents=True, exist_ok=True)
     files = sorted(f for root in sys.argv[1:] for f in glob.glob(f"{root}/*/*.json"))
     wanted = dict(FEATURES)

@@ -28,6 +28,9 @@ for mode in "" --asan --tsan --msan; do
     # The include check reads the default build's compile commands, so it runs after that build.
     echo "== includes"
     tools/check-includes.sh
+    # The screen renderer's goldens come from the Python prototype: it must still write them.
+    echo "== screen goldens vs the prototype"
+    out/tools-venv/bin/python -I tools/snapshot/make_screen_fixtures.py --check
   fi
 done
 echo "ALL CHECKS PASSED"

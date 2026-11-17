@@ -83,7 +83,7 @@ constexpr TimeDelta Seconds(int64_t n) {
   return TimeDelta::FromMicroseconds(internal::SaturatedMul(n, 1000000));
 }
 constexpr TimeDelta Minutes(int64_t n) {
-  return Seconds(n * 60);
+  return Seconds(internal::SaturatedMul(n, 60));
 }
 
 // A point on a monotonic clock (never jumps; unrelated to wall-clock time).
@@ -120,7 +120,7 @@ class Time {
 
   static Time Now();
   static constexpr Time FromMillisecondsSinceUnixEpoch(int64_t ms) {
-    return Time(ms * 1000);
+    return Time(internal::SaturatedMul(ms, 1000));
   }
 
   constexpr int64_t InMillisecondsSinceUnixEpoch() const { return us_ / 1000; }

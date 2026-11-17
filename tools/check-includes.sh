@@ -10,9 +10,11 @@
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
-for db in out/common/compile_commands.json out/server/compile_commands.json; do
-  [ -f "$db" ] || { echo "missing $db: build first (tools/build-common.sh, tools/build-server.sh)"; exit 1; }
-done
+[ -f out/common/compile_commands.json ] || {
+  echo "missing out/common/compile_commands.json: build first (tools/build-common.sh)"; exit 1; }
+# The module's sources need the server build's compile commands (AzerothCore's headers): without
+# a server build they are skipped, with a note, so common/ and harness/ can be checked alone.
+HAVE_SERVER=0; [ -f out/server/compile_commands.json ] && HAVE_SERVER=1
 MODE=--print=changes
 [ "${1:-}" = "--fix" ] && MODE=--edit
 IGNORE='bits/.*,asm-generic/.*,asm/.*,linux/.*'
@@ -44,6 +46,9 @@ for f in server_module/**/*.h; do
   check "$f" -- "${FLAGS[@]}" -Iserver_module/src -Iout/common/gen
 done
 for f in server_module/**/*.cc; do
+  if [ "$HAVE_SERVER" = 0 ] && [[ "$f" != *_unittest.cc ]]; then
+    echo "note: $f not checked (no server build: tools/build-server.sh)" >&2; continue
+  fi
   case "$f" in
     *_unittest.cc) check "$f" -p out/common ;;
     */src/test/*)

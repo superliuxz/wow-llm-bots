@@ -46,7 +46,8 @@ class UnixSocketServer : public base::MessagePumpForIO::FdWatcher {
   // Removes a stale socket file, binds and listens. Returns false on failure.
   bool Listen();
   // Queues `payload` as one frame for the client; dropped if none or backed up.
-  void SendFrame(std::string_view payload);
+  // False if it was dropped (no client, or its buffer is full).
+  bool SendFrame(std::string_view payload);
   bool connected() const { return client_ != nullptr; }
   // Bytes queued for the client that its socket has not accepted yet; zero
   // when there is no client. Zero means the next frame goes out at once.

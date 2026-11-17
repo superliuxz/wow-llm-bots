@@ -202,6 +202,9 @@ std::optional<Plan> ParsePlan(std::string_view text, int option_count) {
     const std::string value = StripBrackets(raw);
     if (key == "goal") {
       plan.goal = Cut(raw, kMaxGoalChars);
+      if (absl::AsciiStrToLower(plan.goal) == "none") {
+        plan.goal.clear();  // What FormatPlan writes for no goal.
+      }
     } else if (key == "say") {
       plan.say = Cut(raw, kMaxSayChars);
     } else if (key == "do") {
@@ -299,8 +302,10 @@ std::string FormatPlan(const Plan& plan) {
     }
     watches = absl::StrJoin(items, ", ");
   }
+  // The grammar's goal is never empty: a plan without one is written "none".
   std::string out = absl::StrCat(
-      "goal: ", plan.goal, "\ndo: ", absl::StrJoin(steps, ", "), "\nexpect: ",
+      "goal: ", plan.goal.empty() ? "none" : plan.goal,
+      "\ndo: ", absl::StrJoin(steps, ", "), "\nexpect: ",
       plan.expect.empty() ? "none" : absl::StrJoin(plan.expect, ", "),
       "\nwatch: ", watches, "\nlook: ", plan.look_s);
   if (!plan.say.empty()) {

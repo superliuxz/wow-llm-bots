@@ -75,6 +75,8 @@ class BrainBridge {
     std::vector<base::TimeDelta> delays;
     // Messages replaced by a newer one before they could be sent.
     uint64_t replaced = 0;
+    // Messages the socket refused (no harness, or its buffer full).
+    uint64_t dropped = 0;
   };
   SendStats TakeSendStats();
   // World thread. Runs pending tasks posted from the IO thread (incoming
@@ -87,6 +89,7 @@ class BrainBridge {
  private:
   class IoCore;              // Lives on the IO thread.
   class SendStatsCollector;  // Written on the IO thread, read on the world's.
+  class Generation;          // Bumped on the IO thread, read on the world's.
 
   // World thread, via world_queue_.
   void OnConnectionChanged(bool connected);
@@ -97,6 +100,10 @@ class BrainBridge {
   base::scoped_refptr<base::TaskQueue> world_queue_;
   // Outlives the IO thread's use of it: Stop() joins the thread first.
   std::unique_ptr<SendStatsCollector> send_stats_;
+  // Which harness connection is current. An inbound message from an earlier
+  // one (it disconnected while its frames waited for the world thread) is
+  // dropped, never applied for the next harness.
+  std::unique_ptr<Generation> generation_;
   base::Thread io_thread_;
   // Owned here but created, used and destroyed only on io_thread_. Tasks that
   // use it are posted before the task that deletes it, so it outlives them;

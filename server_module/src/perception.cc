@@ -122,7 +122,7 @@ LosCache::~LosCache() = default;
 
 bool LosCache::IsFresh(const Entry& entry, base::TimeTicks now) const {
   const base::TimeDelta ttl = entry.dist_yd < near_yd_ ? near_ttl_ : far_ttl_;
-  return now - entry.checked < ttl;
+  return !entry.stale && now - entry.checked < ttl;
 }
 
 std::optional<bool> LosCache::Get(uint64_t guid) const {
@@ -179,7 +179,16 @@ void LosCache::SetViewer(uint32_t map_id,
         dx * dx + dy * dy + dz * dz <= moved_yd * moved_yd) {
       return;  // Still about where the results were taken.
     }
-    entries_.clear();
+    if (viewer_->map_id != map_id) {
+      entries_.clear();  // Another map: nothing carries over.
+    } else {
+      // Moved: every result is due again, but kept until re-checked, so a
+      // running bot (7 yd/s) doesn't lose sight of everything past the ray
+      // budget on every snapshot.
+      for (auto& [guid, entry] : entries_) {
+        entry.stale = true;
+      }
+    }
   }
   viewer_ = Viewer{map_id, x, y, z};
 }

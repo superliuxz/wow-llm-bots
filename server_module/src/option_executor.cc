@@ -9,6 +9,7 @@
 #include <system_error>
 
 #include "AiObjectContext.h"
+#include "Creature.h"
 #include "Event.h"
 #include "LootObjectStack.h"
 #include "ObjectAccessor.h"
@@ -46,6 +47,9 @@ std::string ExecuteOption(Player* bot, const OptionTarget& target) {
   if (!ai) {
     return "not a bot";
   }
+  if (!bot->IsAlive()) {
+    return "you are dead";  // A choice from before the bot died.
+  }
   Unit* unit = ObjectAccessor::GetUnit(*bot, ParseGuid(target.guid));
   if (!unit || !unit->IsInWorld()) {
     return target.name + " is gone";
@@ -79,14 +83,21 @@ std::string ExecuteOption(Player* bot, const OptionTarget& target) {
       if (!unit->isDead()) {
         return target.name + " isn't dead";
       }
-      // The snapshot that offered it may be seconds old: someone else may
-      // have looted it since.
-      if (!LootObject(bot, unit->GetGUID()).IsLootPossible(bot)) {
-        return "nothing to loot on " + target.name;
+      {
+        // The snapshot that offered it may be seconds old: someone else may
+        // have looted it since. Only loot rights are checked here, not
+        // IsLootPossible(), which also wants the corpse within 3 yd of the
+        // bot's height: true once it has walked there, not up a slope or
+        // stairs before it sets off.
+        Creature* creature = unit->ToCreature();
+        LootObject loot(bot, unit->GetGUID());
+        if (!creature || loot.IsEmpty() || !bot->isAllowedToLoot(creature)) {
+          return "nothing to loot on " + target.name;
+        }
+        // The loot strategy walks to the "loot target" and opens it.
+        available_loot->Get()->Add(unit->GetGUID());
+        loot_target->Set(loot);
       }
-      // The loot strategy walks to the "loot target" and opens it.
-      available_loot->Get()->Add(unit->GetGUID());
-      loot_target->Set(LootObject(bot, unit->GetGUID()));
       return "";
     case OptionTarget::Kind::kKeep:
       break;

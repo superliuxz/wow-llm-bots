@@ -2,6 +2,7 @@
 
 #include "bot_manager.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -104,10 +105,17 @@ void BotManager::EnsureStrategies(Player* player) {
   if (!ai || player->InBattleground()) {
     return;  // Not set up yet, or playerbots' battleground strategies apply.
   }
-  std::string combat = strategies_.combat;
-  if (!player->GetGroup()) {
-    combat += SoloHealerCombatExtras(player);
+  // Solo, a healer also deals damage; in a group it heals, so the same extras
+  // are removed (",+holy dps" becomes ",-holy dps"): joining a group must undo
+  // what being solo added.
+  std::string extras = SoloHealerCombatExtras(player);
+  if (player->GetGroup()) {
+    for (size_t at = extras.find(",+"); at != std::string::npos;
+         at = extras.find(",+", at)) {
+      extras[at + 1] = '-';
+    }
   }
+  const std::string combat = strategies_.combat + extras;
   // Still as we left it in every state: playerbots hasn't reset any of them
   // since (it resets combat alone too, e.g. SelectiveResetStrategies).
   const auto holds = [&](const std::string& changes, BotState state) {

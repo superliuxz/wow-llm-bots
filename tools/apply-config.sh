@@ -12,13 +12,20 @@ if [ ! -f "$SECRETS/db-password" ] && [ -f "$ETC/.acore-db-password" ]; then
   mkdir -p "$SECRETS"; chmod 700 "$SECRETS"
   mv "$ETC/.acore-db-password" "$SECRETS/db-password"; chmod 600 "$SECRETS/db-password"
 fi
-PW=$(cat "$SECRETS/db-password")
+if [ ! -s "$SECRETS/db-password" ]; then
+  echo "no DB password in $SECRETS/db-password: create it (one line, mode 600) first" >&2
+  exit 1
+fi
+PW=$(head -n1 "$SECRETS/db-password")
 apply() {  # apply <dist> <out> <overrides...>
   local dist=$1 out=$2; shift 2
   cp "$dist" "$out"; chmod 600 "$out"
   for ov in "$@"; do
-    while IFS= read -r line; do
-      [[ -z "$line" || "$line" == \#* ]] && continue
+    # "|| [ -n ...]": also the last line when the file doesn't end in a newline.
+    while IFS= read -r line || [ -n "$line" ]; do
+      line=${line%$'\r'}
+      [[ -z "${line//[[:space:]]/}" || "$line" =~ ^[[:space:]]*\# ]] && continue
+      [[ "$line" == *=* ]] || { echo "ignored (no '='): $line" >&2; continue; }
       key=${line%%=*}; key=${key%"${key##*[![:space:]]}"}
       val=${line#*=}; val=${val#"${val%%[![:space:]]*}"}; val=${val//@DB_PASSWORD@/"$PW"}; val=${val//@ROOT@/"$ROOT"}
       if grep -qE "^${key//./\\.}[[:space:]]*=" "$out"; then

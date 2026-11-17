@@ -2,6 +2,7 @@
 
 #include "brain_bridge.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -35,6 +36,10 @@ class BrainBridge::SendStatsCollector : public base::RawPtrTarget {
     base::AutoLock lock(lock_);
     ++stats_.replaced;
   }
+  void AddDropped() {
+    base::AutoLock lock(lock_);
+    ++stats_.dropped;
+  }
   SendStats Take() {
     base::AutoLock lock(lock_);
     return std::exchange(stats_, {});
@@ -45,6 +50,15 @@ class BrainBridge::SendStatsCollector : public base::RawPtrTarget {
   SendStats stats_ GUARDED_BY(lock_);
 };
 
+class BrainBridge::Generation : public base::RawPtrTarget {
+ public:
+  uint64_t Get() const { return value_.load(std::memory_order_acquire); }
+  void Bump() { value_.fetch_add(1, std::memory_order_acq_rel); }
+
+ private:
+  std::atomic<uint64_t> value_{0};
+};
+
 class BrainBridge::IoCore : public base::RawPtrTarget {
  public:
   IoCore(std::string path,
@@ -52,19 +66,25 @@ class BrainBridge::IoCore : public base::RawPtrTarget {
          size_t max_pending_messages,
          base::WeakPtr<BrainBridge> bridge,
          MessageHandler on_message,
-         SendStatsCollector* stats)
+         SendStatsCollector* stats,
+         Generation* generation)
       : world_queue_(std::move(world_queue)),
         max_pending_messages_(max_pending_messages),
         bridge_(std::move(bridge)),
         on_message_(std::move(on_message)),
         stats_(stats),
+        generation_(generation),
         server_(std::move(path),
                 net::UnixSocketServer::Callbacks{
-                    [this] { PostConnectionChanged(true); },
+                    [this] {
+                      generation_->Bump();
+                      PostConnectionChanged(true);
+                    },
                     [this](std::string frame) { OnFrame(std::move(frame)); },
                     [this] {
                       // What waited for the old harness is stale for the next.
                       waiting_.TakeAll();
+                      generation_->Bump();
                       PostConnectionChanged(false);
                     },
                     [this] { OnDrained(); }}) {}
@@ -73,8 +93,11 @@ class BrainBridge::IoCore : public base::RawPtrTarget {
 
   // In order with everything sent before it.
   void Send(const std::string& message, base::TimeTicks queued) {
-    stats_->AddDelay(base::TimeTicks::Now() - queued);
-    server_.SendFrame(message);
+    if (server_.SendFrame(message)) {
+      stats_->AddDelay(base::TimeTicks::Now() - queued);
+    } else {
+      stats_->AddDropped();
+    }
   }
 
   // Goes out at once unless the socket is full, then waits for room, and a
@@ -97,12 +120,17 @@ class BrainBridge::IoCore : public base::RawPtrTarget {
       ++dropped_inbound_;
       return;
     }
-    // on_message_ runs on the world thread (it's posted there).
+    // on_message_ runs on the world thread (it's posted there), unless the
+    // connection the frame came on is gone by then. The generation outlives
+    // these tasks: the bridge owns it, and only the bridge runs them.
     world_queue_->PostTask(base::BindOnce(
-        [](MessageHandler handler, std::string message) {
-          handler.Run(std::move(message));
+        [](MessageHandler handler, std::string message,
+           const Generation* generation, uint64_t received_in) {
+          if (generation->Get() == received_in) {
+            handler.Run(std::move(message));
+          }
         },
-        on_message_, std::move(frame)));
+        on_message_, std::move(frame), generation_.get(), generation_->Get()));
   }
 
   // The socket caught up: send what waited, the newest of each key, one at a
@@ -127,6 +155,7 @@ class BrainBridge::IoCore : public base::RawPtrTarget {
   base::WeakPtr<BrainBridge> bridge_;
   MessageHandler on_message_;
   const base::raw_ptr<SendStatsCollector> stats_;
+  const base::raw_ptr<Generation> generation_;
   LatestWins waiting_;
   net::UnixSocketServer server_;
   uint64_t dropped_inbound_ = 0;
@@ -140,6 +169,7 @@ BrainBridge::BrainBridge(std::string socket_path,
       callbacks_(std::move(callbacks)),
       world_queue_(base::TaskQueue::Create()),
       send_stats_(std::make_unique<SendStatsCollector>()),
+      generation_(std::make_unique<Generation>()),
       io_thread_("llm-brain-io") {}
 
 BrainBridge::~BrainBridge() {
@@ -160,7 +190,8 @@ bool BrainBridge::Start() {
   const bool posted = io_thread_.task_runner()->PostTask(
       [&, bridge = weak_factory_.GetWeakPtr()] {
         core = new IoCore(socket_path_, world_queue_, max_pending_messages_,
-                          bridge, callbacks_.on_message, send_stats_.get());
+                          bridge, callbacks_.on_message, send_stats_.get(),
+                          generation_.get());
         if (!core->Listen()) {
           delete core;
           core = nullptr;
@@ -190,6 +221,9 @@ void BrainBridge::Stop() {
       [core = std::move(io_core_)]() mutable { core.ClearAndDelete(); });
   io_thread_.Stop();
   connected_ = false;
+  // Whatever the IO thread posted and the world thread hasn't run is for a
+  // connection that is gone: a fresh queue drops it.
+  world_queue_ = base::TaskQueue::Create();
 }
 
 void BrainBridge::Send(std::string message) {

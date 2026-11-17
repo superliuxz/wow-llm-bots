@@ -173,6 +173,27 @@ TEST(BrainBridgeTest, NewHarnessReplacesOldOne) {
   EXPECT_TRUE(first.frames().empty());
 }
 
+TEST(BrainBridgeTest, FramesFromAHarnessThatLeftAreNotApplied) {
+  WorldRecorder world;
+  BrainBridge bridge(TestSocketPath(), 100, world.Callbacks());
+  ASSERT_TRUE(bridge.Start());
+  auto first = std::make_unique<FakeHarness>(TestSocketPath());
+  ASSERT_TRUE(RunWorldUntil(bridge, [&] { return bridge.connected(); }));
+  // The old harness's commands wait for the world thread...
+  first->Send("old 1");
+  first->Send("old 2");
+  base::PlatformThread::Sleep(base::Milliseconds(100));
+  // ...while it goes and a new one connects, before the next world tick.
+  FakeHarness second(TestSocketPath());
+  ASSERT_TRUE(second.WaitConnected());
+  ASSERT_TRUE(first->WaitDisconnected());
+  second.Send("new");
+  ASSERT_TRUE(RunWorldUntil(bridge, [&] {
+    return !world.messages.empty() && world.messages.back() == "new";
+  }));
+  EXPECT_EQ(world.messages, std::vector<std::string>{"new"});
+}
+
 TEST(BrainBridgeTest, DropsInboundWhenWorldFallsBehind) {
   WorldRecorder world;
   BrainBridge bridge(TestSocketPath(), /*max_pending_messages=*/5,

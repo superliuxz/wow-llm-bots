@@ -2,6 +2,7 @@
 // Blizzard_* addons: .lua, .xml, .toc) from its MPQs, using AzerothCore's libmpq. Archives
 // are given highest priority first; the first copy of a file wins.
 // Usage: mpq_extract <out_dir> <mpq>...  (built and run by tools/audit/extract-client-ui.sh)
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,7 +12,9 @@ static uint8_t* read_file(mpq_archive_s* a, const char* name, libmpq__off_t* siz
   uint32_t n;
   if (libmpq__file_number(a, name, &n)) return NULL;
   if (libmpq__file_unpacked_size(a, n, size)) return NULL;
-  uint8_t* buf = malloc(*size + 1);
+  // The size comes from the archive: signed, and untrusted.
+  if (*size < 0 || (uintmax_t)*size >= SIZE_MAX) return NULL;
+  uint8_t* buf = malloc((size_t)*size + 1);
   if (!buf) return NULL;
   libmpq__off_t got;
   if (libmpq__file_read(a, n, buf, *size, &got)) { free(buf); return NULL; }

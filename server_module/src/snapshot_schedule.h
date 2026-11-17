@@ -43,8 +43,9 @@ class SnapshotSchedule {
                    base::TimeDelta combat_interval,
                    base::TimeTicks start);
 
-  // Is a snapshot of `bot` due at `now`: its time has come, or its flags are
-  // not what they were at its last snapshot.
+  // Is a snapshot of `bot` due at `now`: its time has come, its flags are not
+  // what they were at its last snapshot, or it is in combat and hasn't been
+  // sent one since the schedule (re)started.
   bool IsDue(size_t bot, base::TimeTicks now, Flags flags) const;
 
   // A snapshot of `bot` was sent. Plans the next one.

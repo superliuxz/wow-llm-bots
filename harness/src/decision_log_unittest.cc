@@ -59,7 +59,8 @@ TEST(DecisionLogTest, TheJsonHasWhatWasAskedAndAnswered) {
   EXPECT_EQ(json["prompt_computed"], 120);
   EXPECT_EQ(json["completion_tokens"], 8);
   EXPECT_DOUBLE_EQ(json["round_trip_ms"].get<double>(), 55.5);
-  EXPECT_EQ(json["plan"], "goal: \ndo: 1\nexpect: none\nwatch: none\nlook: 60");
+  EXPECT_EQ(json["plan"],
+            "goal: none\ndo: 1\nexpect: none\nwatch: none\nlook: 60");
   EXPECT_FALSE(json.contains("error"));
 }
 

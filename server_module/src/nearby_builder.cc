@@ -242,8 +242,26 @@ void SetInLos(std::optional<bool> in_los, pb::Relative* rel) {
 // shield on its cast bar.
 bool ImmuneToInterrupt(Unit* unit) {
   return unit->m_spellImmune[IMMUNITY_MECHANIC].count(MECHANIC_INTERRUPT) > 0 ||
+         unit->m_spellImmune[IMMUNITY_EFFECT].count(
+             SPELL_EFFECT_INTERRUPT_CAST) > 0 ||
          unit->HasAuraTypeWithMiscvalue(SPELL_AURA_MECHANIC_IMMUNITY,
-                                        MECHANIC_INTERRUPT);
+                                        MECHANIC_INTERRUPT) ||
+         unit->HasAuraTypeWithMiscvalue(SPELL_AURA_EFFECT_IMMUNITY,
+                                        SPELL_EFFECT_INTERRUPT_CAST);
+}
+
+// The rule of AzerothCore's own interrupt (Spell::EffectInterruptCast): only a
+// spell silence can stop, by its cast or its channel interrupt flag.
+bool Interruptible(Unit* unit, const SpellInfo* info) {
+  if (info->PreventionType != SPELL_PREVENTION_TYPE_SILENCE) {
+    return false;
+  }
+  const bool flagged =
+      info->IsChanneled()
+          ? (info->ChannelInterruptFlags & CHANNEL_INTERRUPT_FLAG_INTERRUPT) !=
+                0
+          : (info->InterruptFlags & SPELL_INTERRUPT_FLAG_INTERRUPT) != 0;
+  return flagged && !ImmuneToInterrupt(unit);
 }
 
 void FillCast(Unit* unit, Spell* spell, pb::Cast* cast) {
@@ -252,9 +270,7 @@ void FillCast(Unit* unit, Spell* spell, pb::Cast* cast) {
   cast->mutable_spell()->set_name(Localized(info->SpellName));
   cast->set_remaining_ms(
       static_cast<uint32_t>(std::max(0, spell->GetCastTimeRemaining())));
-  cast->set_interruptible(
-      (info->InterruptFlags & SPELL_INTERRUPT_FLAG_INTERRUPT) &&
-      !ImmuneToInterrupt(unit));
+  cast->set_interruptible(Interruptible(unit, info));
   cast->set_channeled(info->IsChanneled());
 }
 

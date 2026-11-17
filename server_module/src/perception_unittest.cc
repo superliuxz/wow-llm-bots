@@ -151,18 +151,26 @@ TEST_F(LosCacheTest, PruneForgetsOldResults) {
   EXPECT_EQ(cache_.size(), 1u);
 }
 
-TEST_F(LosCacheTest, ForgetsEverythingWhenTheBotMovesOrChangesMap) {
+TEST_F(LosCacheTest, MovingMakesResultsDueButKeepsThem) {
   cache_.SetViewer(/*map_id=*/1, 0, 0, 0, /*moved_yd=*/3);
   cache_.Put(/*guid=*/1, /*in_los=*/false, /*dist_yd=*/80, t0_);
-  // A step or two: the results still hold.
+  // A step or two: the result holds, nothing to re-check.
   cache_.SetViewer(1, 2, 0, 0, 3);
   EXPECT_EQ(cache_.Get(1), false);
-  // Round the pillar: what was hidden may be in view now.
+  EXPECT_TRUE(cache_.PickChecks({{1, 80}}, t0_, 32).empty());
+  // Round the pillar: due for a re-check, but still known until then.
   cache_.SetViewer(1, 6, 0, 0, 3);
-  EXPECT_EQ(cache_.Get(1), std::nullopt);
-  // A teleport to another map at the same coordinates.
-  cache_.Put(1, true, 10, t0_);
-  cache_.SetViewer(/*map_id=*/2, 6, 0, 0, 3);
+  EXPECT_EQ(cache_.Get(1), false);
+  EXPECT_EQ(cache_.PickChecks({{1, 80}}, t0_, 32), std::vector<uint64_t>{1});
+  // Re-checked from here: fresh again.
+  cache_.Put(1, true, 80, t0_);
+  EXPECT_TRUE(cache_.PickChecks({{1, 80}}, t0_, 32).empty());
+}
+
+TEST_F(LosCacheTest, AnotherMapForgetsEverything) {
+  cache_.SetViewer(/*map_id=*/1, 0, 0, 0, /*moved_yd=*/3);
+  cache_.Put(/*guid=*/1, /*in_los=*/true, /*dist_yd=*/10, t0_);
+  cache_.SetViewer(/*map_id=*/2, 0, 0, 0, 3);
   EXPECT_EQ(cache_.Get(1), std::nullopt);
 }
 

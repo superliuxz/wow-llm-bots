@@ -61,12 +61,13 @@ bool UnixSocketServer::Listen() {
   return true;
 }
 
-void UnixSocketServer::SendFrame(std::string_view payload) {
+bool UnixSocketServer::SendFrame(std::string_view payload) {
   if (!client_ || !client_->SendFrame(payload)) {
     ++stats_.frames_dropped;
-    return;
+    return false;
   }
   ++stats_.frames_sent;
+  return true;
 }
 
 void UnixSocketServer::OnFileCanReadWithoutBlocking(int /*fd*/) {

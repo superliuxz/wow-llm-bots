@@ -2,6 +2,8 @@
 
 #include "base/time/time.h"
 
+#include <cstdint>
+
 #include "gtest/gtest.h"
 
 namespace base {
@@ -34,6 +36,8 @@ TEST(TimeTicksTest, ArithmeticSaturatesInsteadOfOverflowing) {
   EXPECT_EQ(TimeDelta::Max() + Seconds(1), TimeDelta::Max());
   EXPECT_EQ(TimeDelta::Max() * 2, TimeDelta::Max());
   EXPECT_TRUE((TimeDelta() - TimeDelta::Max() - Seconds(5)).is_negative());
+  EXPECT_EQ(Minutes(INT64_MAX), TimeDelta::Max());
+  EXPECT_GT(Time::FromMillisecondsSinceUnixEpoch(INT64_MAX), Time::Now());
 }
 
 TEST(TimeTest, NowIsWallClockTime) {

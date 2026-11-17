@@ -82,9 +82,9 @@ class LosCache {
   void Prune(base::TimeTicks now, base::TimeDelta max_age);
 
   // Where the bot (the viewer) is now. A result is only valid from where it
-  // was taken: once the bot has moved more than `moved_yd` since the results
-  // were taken (walked round a pillar) or changed map (a teleport), they are
-  // all forgotten and re-checked.
+  // was taken: once the bot has moved more than `moved_yd` (walked round a
+  // pillar), every result is due for a re-check, but still returned by Get()
+  // until then; on another map (a teleport) they are all forgotten.
   void SetViewer(uint32_t map_id, float x, float y, float z, float moved_yd);
 
   size_t size() const { return entries_.size(); }
@@ -94,6 +94,8 @@ class LosCache {
     bool in_los = false;
     float dist_yd = 0;
     base::TimeTicks checked;
+    // Taken from where the bot no longer is: re-check it.
+    bool stale = false;
   };
 
   bool IsFresh(const Entry& entry, base::TimeTicks now) const;

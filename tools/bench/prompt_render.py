@@ -13,7 +13,7 @@ The real renderer belongs in the C++ harness; this measures what it would save.
 
 import collections
 
-SKIP_KEYS = {"guid", "position", "detail", "seq", "time_ms", "bot"}
+SKIP_KEYS = {"guid", "position", "detail", "seq", "time_ms", "monotonic_us", "bot"}
 DEFAULT_VALUES = {"IDLE", "LEVEL", "MEDIUM", "THREAT_NONE", "NORMAL", "NAMEPLATE"}
 
 
@@ -27,10 +27,11 @@ def where(rel):
     dist = rel.get("dist_yd")
     direction = rel.get("dir", "")
     parts = ["here" if direction == "HERE" or dist is None and not direction
-             else f"{dist:.0f} yd {direction}" if dist is not None else direction]
+             else f"{dist:.0f} yd {direction}".rstrip() if dist is not None else direction]
     if rel.get("height") in ("ABOVE", "BELOW"):
         parts.append(word(rel["height"]))
-    if not rel.get("in_los"):
+    # in_los has explicit presence: missing means "not checked yet", not "out of sight".
+    if rel.get("in_los") is False:
         parts.append("out of sight")
     if rel.get("behind_it"):
         parts.append("you're behind it")
@@ -213,9 +214,11 @@ def tight_things(items, kinds=None):
     and their kind is appended."""
     groups = collections.OrderedDict()
     for item in items:
-        groups.setdefault((item.get("name", "?"), tight_look(item)), []).append(item)
+        # Things share a line only if they also share what the bot can do with them.
+        key = (item.get("name", "?"), tight_look(item), option_kind(item) if kinds is not None else None)
+        groups.setdefault(key, []).append(item)
     lines = []
-    for (name, look), group in groups.items():
+    for (name, look, _), group in groups.items():
         rels = [g.get("rel") for g in group]
         mark = "-"
         kind = option_kind(group[0]) if kinds is not None else None
@@ -227,7 +230,7 @@ def tight_things(items, kinds=None):
         else:
             d = sorted(quant((r or {}).get("dist_yd", 0)) for r in rels)
             dirs = "/".join(sorted({(r or {}).get("dir", "") for r in rels if r}))
-            lines.append(f"{mark} {len(rels)}x {name}: {look}; {d[0]:.0f}-{d[-1]:.0f} yd {dirs}")
+            lines.append(f"{mark} {len(rels)}x {name}: {look}; {d[0]:.0f}-{d[-1]:.0f} yd {dirs}".rstrip())
     return lines
 
 

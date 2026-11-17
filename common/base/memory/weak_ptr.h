@@ -1,11 +1,13 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
-// WeakPtr / WeakPtrFactory. They are not thread-safe: dereference and
-// invalidate on the owning object's sequence only. They may be *copied and
+// WeakPtr / WeakPtrFactory. They are not thread-safe: hand out, dereference and
+// invalidate on the owning object's thread only. They may be *copied and
 // passed* across threads (e.g. bound into a task posted back to the owner's
-// sequence). As in Chromium, a flag binds to the thread that first
-// dereferences or invalidates it, and doing either on another thread aborts:
-// the race shows up at once instead of as a rare use-after-free.
+// thread). A flag binds to the thread that hands out its first WeakPtr (the
+// owner's), and dereferencing or invalidating on any other thread aborts: the
+// race shows up at once instead of as a rare use-after-free. Unlike Chromium
+// this checks the OS thread, not the sequence: an object whose sequence hops
+// between pool threads can't use WeakPtrs (none does here).
 
 #ifndef COMMON_BASE_MEMORY_WEAK_PTR_H_
 #define COMMON_BASE_MEMORY_WEAK_PTR_H_
@@ -28,6 +30,8 @@ namespace internal {
 // Shared validity flag.
 class WeakFlag : public RefCountedThreadSafe<WeakFlag> {
  public:
+  // The owner's thread; called when the first WeakPtr is handed out.
+  void Bind() { CheckThread(); }
   bool IsValid() {
     CheckThread();
     return valid_.load(std::memory_order_acquire);
@@ -92,6 +96,7 @@ class WeakPtrFactory {
     if (!flag_) {
       flag_ = MakeRefCounted<internal::WeakFlag>();
     }
+    flag_->Bind();
     return WeakPtr<T>(ptr_, flag_);
   }
 
