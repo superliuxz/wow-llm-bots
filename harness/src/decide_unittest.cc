@@ -19,7 +19,7 @@ namespace {
 // Nine options: 1-2 attack, 3 use, 4 gather, 5 use, then keep, explore, rest,
 // town.
 constexpr char kGoodPlan[] =
-    "goal: kill the boars\ndo: 1x3, 7\nexpect: 1\nwatch: hp<40\nlook: 90";
+    "do: 1x3, 7\nexpect: 1\nwatch: hp<40\nlook: 90\ngoal: kill the boars";
 
 DecideOptions Options() {
   DecideOptions options;
@@ -62,12 +62,13 @@ TEST(DecideArgsTest, TheSnapshotIsTheOnlyRequiredThing) {
 TEST(DecideArgsTest, EveryFlag) {
   std::string error;
   const auto options = ParseDecideArgs(
-      {"--name=Tess", "--reason=attacked", "--rules=r.md", "--identity=i.md",
-       "snap.pb", "--log-dir=var/bots", "--host=10.0.0.2", "--port=9000",
-       "--slot=5", "--temperature=0", "--dry-run"},
+      {"--name=Tess", "--goal=boars", "--reason=attacked", "--rules=r.md",
+       "--identity=i.md", "snap.pb", "--log-dir=var/bots", "--host=10.0.0.2",
+       "--port=9000", "--slot=5", "--temperature=0", "--dry-run"},
       &error);
   ASSERT_TRUE(options) << error;
   EXPECT_EQ(options->bot_name, "Tess");
+  EXPECT_EQ(options->current_goal, "boars");
   EXPECT_EQ(options->wake_reason, "attacked");
   EXPECT_EQ(options->rules_path, "r.md");
   EXPECT_EQ(options->identity_path, "i.md");
@@ -111,9 +112,10 @@ TEST(DecideTest, ShowsTheScreenTheReplyAndWhatThePlanMeans) {
   EXPECT_NE(report.find("== plan: 1x3 attack, 7 explore; look again in 90 s"),
             std::string::npos)
       << report;
-  // The model was asked with the rules and the screen's options.
+  // The model was asked with shared rules in system and bot context in user.
   EXPECT_NE(seen.system.find("Test rules"), std::string::npos);
-  EXPECT_NE(seen.system.find("You are Tess."), std::string::npos);
+  EXPECT_EQ(seen.system.find("Tess"), std::string::npos);
+  EXPECT_NE(seen.user.find("You are Tess."), std::string::npos);
   EXPECT_NE(seen.user.find("Woken: plan done."), std::string::npos);
   EXPECT_NE(seen.grammar.find("opt ::= \"1\" | \"2\" | \"3\" | \"4\" | "
                               "\"5\" | \"6\" | \"7\" | \"8\" | \"9\"\n"),
@@ -194,17 +196,20 @@ TEST(DecideTest, MissingFilesAreNamed) {
   EXPECT_NE(report.find("is not a snapshot"), std::string::npos);
 }
 
-TEST(DecideTest, TheIdentityJoinsTheSystemPrompt) {
+TEST(DecideTest, TheIdentityAndGoalJoinTheUserPromptLeavingSystemShared) {
   std::string dir = testing::TempDir() + "harness-decide-XXXXXX";
   ASSERT_NE(::mkdtemp(dir.data()), nullptr);
   ASSERT_TRUE(
       AppendToFile(dir + "/identity.md", "You grew up near Razor Hill."));
   DecideOptions options = Options();
   options.identity_path = dir + "/identity.md";
+  options.current_goal = "collect Cactus Apples";
   LlmRequest seen;
   std::string report;
   EXPECT_EQ(RunDecide(options, Replying(kGoodPlan, &seen), &report), 0);
-  EXPECT_NE(seen.system.find("You grew up near Razor Hill."),
+  EXPECT_EQ(seen.system.find("Razor Hill"), std::string::npos);
+  EXPECT_NE(seen.user.find("You grew up near Razor Hill."), std::string::npos);
+  EXPECT_NE(seen.user.find("Current goal: collect Cactus Apples."),
             std::string::npos);
   ::unlink((dir + "/identity.md").c_str());
   ::rmdir(dir.c_str());

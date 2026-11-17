@@ -39,12 +39,13 @@ struct LlmEndpoint {
 };
 
 struct LlmRequest {
-  std::string system;   // The rules and the bot's identity.
-  std::string user;     // Why it was woken, and its screen.
+  std::string system;   // The shared rules (identical across bots).
+  std::string user;     // Identity, goal, why it was woken, and its screen.
   std::string grammar;  // llama.cpp GBNF; empty: unconstrained.
   int slot = -1;        // llama-server slot; -1: any.
   int max_tokens = 150;
   float temperature = 0.7f;
+  bool stream = true;  // Stream SSE so line 1 (`do: ...`) arrives early.
 };
 
 struct LlmReply {
@@ -59,13 +60,19 @@ struct LlmReply {
 struct LlmResult {
   std::optional<LlmReply> reply;  // Empty on failure.
   std::string error;              // Why, when it failed.
-  double round_trip_ms = 0;       // As the caller saw it.
+  double first_line_ms = 0;       // When line 1 (`do: ...`) arrived.
+  double round_trip_ms = 0;       // As the caller saw the whole call.
 };
+
+// Invoked once with line 1 (without the trailing '\n') as soon as the first
+// newline of a streamed reply arrives.
+using FirstLineCallback = base::OnceCallback<void(std::string_view)>;
 
 // The JSON body of a chat request.
 std::string BuildChatBody(const LlmRequest& request);
 
-// Reads a chat reply body. On failure, `reply` is empty and `error` says why.
+// Reads a non-streamed chat reply body. On failure, `reply` is empty and
+// `error` says why.
 LlmResult ParseChatReply(std::string_view body);
 
 // A connection to llama-server that stays open between calls (keep-alive). If
@@ -78,7 +85,8 @@ class LlamaConnection {
   LlamaConnection& operator=(const LlamaConnection&) = delete;
   ~LlamaConnection();
 
-  LlmResult Call(const LlmRequest& request);
+  LlmResult Call(const LlmRequest& request,
+                 FirstLineCallback on_first_line = {});
 
  private:
   struct Impl;
@@ -86,7 +94,9 @@ class LlamaConnection {
 };
 
 // One blocking call, on a connection of its own.
-LlmResult CallLlama(const LlmEndpoint& endpoint, const LlmRequest& request);
+LlmResult CallLlama(const LlmEndpoint& endpoint,
+                    const LlmRequest& request,
+                    FirstLineCallback on_first_line = {});
 
 // Idle connections, shared by the worker threads.
 class ConnectionPool : public base::RefCountedThreadSafe<ConnectionPool> {
@@ -95,7 +105,8 @@ class ConnectionPool : public base::RefCountedThreadSafe<ConnectionPool> {
 
   // One blocking call on an idle connection (or a new one). A connection that
   // failed is closed, not reused: after a timeout it may hold half an answer.
-  LlmResult Call(const LlmRequest& request);
+  LlmResult Call(const LlmRequest& request,
+                 FirstLineCallback on_first_line = {});
 
   // How many connections are open and idle.
   size_t idle() const;
@@ -117,9 +128,12 @@ class LlmClient {
   LlmClient& operator=(const LlmClient&) = delete;
   ~LlmClient();  // Finishes the calls in progress.
 
-  // Must be called from a task running on a sequence: `reply` runs there. The
-  // call waits for a free worker if all are busy.
-  void Ask(LlmRequest request, base::OnceCallback<void(LlmResult)> reply);
+  // Must be called from a task running on a sequence: `on_first_line` (if
+  // given) and `reply` both run there, in order. The call waits for a free
+  // worker if all are busy.
+  void Ask(LlmRequest request,
+           base::OnceCallback<void(LlmResult)> reply,
+           FirstLineCallback on_first_line = {});
 
  private:
   // Declared before the thread pool, which is destroyed (and joined) first.

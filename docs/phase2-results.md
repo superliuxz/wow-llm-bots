@@ -505,3 +505,28 @@ Three changes without touching game logic in C++:
 Median call latency also dropped **~40–46 ms** on both models because the literal example keeps
 sampling on `llama.cpp`'s `O(1)` single-token grammar path instead of triggering 248k-vocab
 rescans, and every `look` value is now 60–120 s (zero 1 s loops).
+
+### Tier 1 end-to-end latency optimizations (2026-11-16)
+
+Four changes (`docs/plans/latency.md`):
+1. `ExecuteOption` calls `ai->ResetActionDuration()` on `kAttack` and `kLoot` (`option_executor.cc`),
+   eliminating 1–20 s `PlayerbotAI` check-delay stalls on loot/state choices.
+2. Reordered plan lines to `do -> expect -> watch -> look -> goal? -> say?`, added SSE streaming
+   with `FirstLineCallback` firing on the first `\n`, and enabled `TCP_NODELAY` on `LlamaConnection`
+   (fixing a 40 ms Nagle stall on reused keep-alive sockets).
+3. Made `goal:` optional (`Current goal:` passed in `user` when active).
+4. Kept `system` 100% identical across all bots (`RULES.md` only, moving `You are <bot>.` and
+   `identity` to the head of `user`) so `llama-server`'s start-of-`user` checkpoint caches
+   **522–523 tokens** across bot switches on hybrid recurrent models instead of resetting
+   `n_past = 0`, paired with soft idle-slot affinity in `Scheduler`.
+
+| Metric | `Qwen3.6-35B-A3B` (before → after) | `gemma-4-26B-A4B-it` (before → after) |
+|---|---|---|
+| Solo `eval` time to `do:` (median) | `206 ms` → **`79 ms`** (`-62%`) | `239 ms` → **`91 ms`** (`-62%`) |
+| Solo `eval` full reply (median, score) | `206 ms` → **`152 ms`** (10/15) | `239 ms` → **`224 ms`** (**13/15**) |
+| Warm tokens cached across bot switches | `0 tok` → **`522 tok`** | `~523 tok` → **`523 tok`** |
+| 16-slot throughput (`perf brain`, wakes/sec, higher is faster) | `7.8 wakes/s` → **`11.3 wakes/s`** (`+45%`) | `8.6 wakes/s` → **`9.1 wakes/s`** (`+6%`) |
+| Saturated 16-slot time to `do:` (p50 / p95) | `1.96 s` → **`0.40 s / 0.60 s`** | `1.85 s` → **`0.42 s / 0.63 s`** |
+| Saturated 16-slot full call p50 | `1.96 s` → **`1.42 s`** | `1.85 s` → **`1.74 s`** |
+| 50 bots, 30 s plans (wake→plan p50 / p95) | `0.5 s / 0.9 s` → **`0.3 s / 0.6 s`** | `0.6 s / 1.0 s` → **`0.5 s / 0.8 s`** |
+| 100 bots, 15 s plans (wake→plan p50 / p95) | `2.1 s / 3.2 s` → **`0.8 s / 1.5 s`** | `1.9 s / 2.6 s` → **`1.5 s / 2.1 s`** |

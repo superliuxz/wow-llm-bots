@@ -20,7 +20,8 @@ namespace harness {
 
 struct DecideOptions {
   std::string snapshot_path;
-  std::string bot_name;  // Default: the snapshot's bot.
+  std::string bot_name;      // Default: the snapshot's bot.
+  std::string current_goal;  // Optional active goal before this wake.
   std::string wake_reason = "plan done";
   std::string rules_path = "content/RULES.md";
   std::string identity_path;  // Optional.

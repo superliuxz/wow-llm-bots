@@ -14,14 +14,14 @@ Last updated 2026-11-16.
 ## Next, in order
 
 1. **Model choice:** decide whether to switch `tools/wlblib/llm.py` default from Qwen3.6-35B-A3B to
-   Gemma 4 26B-A4B (13/15 vs 11/15 eval, 8.6 vs 7.8 wakes/s, 4.8 GiB smaller; both kept in
-   `models/` for now), and revisit `herb_to_gather` once quest log is rendered.
-2. **E2E latency quick wins** (identified 2026-11-16, not built yet): reset `PlayerbotAI` check
-   delay (`ResetActionDuration()`) in `option_executor.cc` so non-immediate choices (`Loot`, future
-   state changes) don't wait out 1-20 s playerbots timers; put `do:` on line 1 + stream SSE for
-   early dispatch; make `goal:` optional; align `RULES.md` with `PlanGrammar` to avoid 248k-vocab
-   CPU rescans; split shared `RULES.md` (`system`) from per-bot `identity` (`user`) + soft slot
-   affinity.
+   Gemma 4 26B-A4B (`eval` 13/15 vs 10/15; after Tier 1 Qwen3.6 hits `11.3/s` capacity and `79 ms`
+   solo `do:` vs Gemma 4's `9.1/s` and `91 ms`; Gemma 4 is 4.8 GiB smaller; both kept in `models/`
+   for now), and revisit `herb_to_gather` once quest log is rendered.
+2. **E2E latency Tier 2 (with H4)** (`docs/plans/latency.md`): (e) expand `SnapshotSchedule::Flags`
+   (loss of control, attacker count, option target completion) + attach fresh snapshot to alerting
+   `ImmediateEvent`s (`-125 to -1,000 ms`); (f) preempt obsolete lower-priority in-flight calls on
+   urgent combat wakes + P0-P4 priority tiers in `scheduler.cc` / `llm_client.cc` (`-0.8 to
+   -1.8 s`).
 3. **H4: the harness loop** (`docs/plans/harness.md`, step 4). `module_connection` (the socket to
    the module, reconnect), `bot_state`, default triggers and the `look` timer, `plan_runner`, and
    `harness run`; tested against a canned-reply fake LLM so no GPU is needed. Decided already
@@ -50,6 +50,10 @@ Last updated 2026-11-16.
 
 ## Later
 
+- **GPU `--backend-sampling` or thin `libllama` runner** (`docs/plans/latency.md`, Tier 3 #8):
+  unconstrained + `ParsePlan` with 1 grammar retry (`+16%` capacity), or a `wlb_net` Unix-socket
+  `libllama` daemon combining ~15-token ID masks on structured fields with GPU sampling on free text
+  (`-200 to -330 ms` under load).
 - **Isolated e2e stack** (`docs/plans/phase2.md`, E): own ports and socket, database restored from a
   golden copy, so tests never stop the play server. Today `wlb test e2e|perf` stops it for ~15
   minutes (the module flavor switch recompiles the whole `modules` target both ways).
@@ -71,7 +75,9 @@ Last updated 2026-11-16.
   `tools/server-start.sh`); it is out of the current files. Removing it means rewriting history and
   a force-push: their decision.
 - Unit tests for the AzerothCore-dependent module code (`bot_manager`, `option_executor`,
-  `nearby_builder`, ...) can't run without the game server: only the e2e case covers it.
+  `nearby_builder`, ...) can't run without the game server: only the e2e case covers it
+  (`ResetActionDuration()` in `option_executor.cc` passed `wlb check includes` against `out/server`
+  but `wlb test e2e choose` has not been re-run yet so the play server stays up).
 - `BrainBridge`: a connection generation drops stale frames, but a stalled old connection's
   commands still arrive in order before its disconnect is seen. Judged not worth more yet.
 - Bugs found in playerbots (not ours, `third_party/`): `RangeTriggers.cpp:275` returns before its
@@ -82,6 +88,11 @@ Last updated 2026-11-16.
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-16: E2E latency Tier 1 (`option_executor.cc` `ResetActionDuration()`, `do:`-first + SSE
+  streaming early dispatch + `TCP_NODELAY`, optional `goal?`, shared-`system` checkpoint split +
+  soft slot affinity): solo `do:` `206 → 79 ms` (Qwen3.6) / `239 → 91 ms` (Gemma 4); Qwen3.6
+  capacity `7.8 → 11.3/s` (+45%) and 100-bot 15 s `2.1/3.2 s → 0.8/1.5 s` (`docs/plans/latency.md`,
+  `docs/phase2-results.md`).
 - 2026-11-16: plan quality fixes: action verbs on numbered screen lines, `look >= 10` s floor, and
   `RULES.md` facts + example (`Gemma 4 26B` 9/15 → 13/15 at 239 ms, `Qwen3.6-35B` 6/15 → 11/15 at
   206 ms; `docs/phase2-results.md`).

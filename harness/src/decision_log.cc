@@ -76,6 +76,7 @@ std::string DecisionJson(const Decision& decision) {
   } else {
     json["error"] = decision.result.error;
   }
+  json["first_line_ms"] = decision.result.first_line_ms;
   json["round_trip_ms"] = decision.result.round_trip_ms;
   json["plan"] = decision.plan ? Json(FormatPlan(*decision.plan)) : Json();
   return json.dump(-1, ' ', false, Json::error_handler_t::replace);

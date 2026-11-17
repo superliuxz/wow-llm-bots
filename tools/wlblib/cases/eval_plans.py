@@ -25,7 +25,11 @@ SHOOTOUT_MODELS = (
     "gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf",
 )
 
-REPLY_RE = re.compile(r"^== reply \(([\d.]+) ms;", re.M)
+REPLY_RE = re.compile(
+    r"^== reply \(([\d.]+) ms(?:, first line ([\d.]+) ms)?; "
+    r"prompt (\d+) tokens, (\d+) read again;",
+    re.M,
+)
 PLAN_RE = re.compile(r"^== plan: (.+); look again in (\d+) s$", re.M)
 STEP_RE = re.compile(r"^(\d+)(?:x(\d+))? (.+)$")
 GOAL_RE = re.compile(r"^goal:\s*(.*)$", re.M | re.I)
@@ -47,25 +51,29 @@ def case_names():
 
 
 def ensure_harness():
-    if not HARNESS_BIN.exists():
-        build.common("default", tests=False)
+    build.common("default", tests=False)
 
 
-def decide_one(case, temperature=0.0):
+def decide_one(case, temperature=0.0, slot=0):
     pb_path = EVAL_DIR / f"{case['name']}.pb"
     cmd = [
         str(HARNESS_BIN), "decide", str(pb_path),
         f"--reason={case['reason']}",
         f"--rules={RULES_FILE}",
+        f"--slot={slot}",
         f"--temperature={temperature}",
     ]
     res = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
     out = res.stdout
     reply_m = REPLY_RE.search(out)
     ms = float(reply_m.group(1)) if reply_m else 0.0
+    first_ms = float(reply_m.group(2) or ms) if reply_m else 0.0
+    prompt_tok = int(reply_m.group(3)) if reply_m else 0
+    prompt_comp = int(reply_m.group(4)) if reply_m else 0
     plan_m = PLAN_RE.search(out)
     if res.returncode != 0 or not plan_m:
-        return {"valid": False, "ms": ms, "steps": [], "look_s": 0, "goal": "", "raw": out[-300:]}
+        return {"valid": False, "ms": ms, "first_ms": first_ms, "steps": [],
+                "look_s": 0, "goal": "", "raw": out[-300:]}
     steps = []
     for part in plan_m.group(1).split(", "):
         sm = STEP_RE.match(part.strip())
@@ -79,6 +87,9 @@ def decide_one(case, temperature=0.0):
     return {
         "valid": True,
         "ms": ms,
+        "first_ms": first_ms,
+        "prompt_tokens": prompt_tok,
+        "prompt_computed": prompt_comp,
         "steps": steps,
         "plan_desc": plan_m.group(1),
         "look_s": int(plan_m.group(2)),
@@ -124,7 +135,9 @@ def run_suite(cases, label=None):
         got = decide_one(case)
         problems = check_case(case, got)
         ok = not problems
-        desc = f"{got.get('plan_desc', 'INVALID')}; look {got['look_s']}s ({got['ms']:.0f} ms)"
+        desc = (f"{got.get('plan_desc', 'INVALID')}; look {got['look_s']}s "
+                f"(do: {got['first_ms']:.0f} ms / total {got['ms']:.0f} ms, "
+                f"read {got.get('prompt_computed', 0)}/{got.get('prompt_tokens', 0)} tok)")
         if got.get("goal"):
             desc += f" | goal: {got['goal']}"
         verdict = "PASS" if ok else f"FAIL ({'; '.join(problems)})"
@@ -132,8 +145,12 @@ def run_suite(cases, label=None):
         rows.append({"case": case["name"], "ok": ok, "got": got, "problems": problems})
     passed = sum(r["ok"] for r in rows)
     med_ms = statistics.median(r["got"]["ms"] for r in rows) if rows else 0.0
+    med_first_ms = statistics.median(r["got"]["first_ms"] for r in rows) if rows else 0.0
+    warm_comp = [r["got"].get("prompt_computed", 0) for r in rows[1:] if r["got"]["valid"]]
+    med_comp = statistics.median(warm_comp) if warm_comp else 0
     pct = 100.0 * passed / len(rows) if rows else 0.0
     say(f"score{f' [{label}]' if label else ''}: {passed}/{len(rows)} ({pct:.0f}%), "
-        f"median {med_ms:.0f} ms")
+        f"first line {med_first_ms:.0f} ms, total {med_ms:.0f} ms, "
+        f"warm prompt_computed {med_comp:.0f} tok")
     return {"label": label or "default", "passed": passed, "total": len(rows),
-            "median_ms": med_ms, "rows": rows}
+            "median_first_ms": med_first_ms, "median_ms": med_ms, "rows": rows}

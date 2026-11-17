@@ -156,5 +156,52 @@ TEST(SchedulerTest, ALimitOfZeroStillRunsOneAtATime) {
   EXPECT_EQ(r.started(), (Names{"a"}));
 }
 
+TEST(SchedulerTest, SpreadsBotsAcrossSlotsAndReusesIdlePreferredSlot) {
+  Scheduler scheduler(3);
+  std::vector<int> slots;
+  auto instant_slot = [&](int slot, base::OnceClosure done) {
+    slots.push_back(slot);
+    std::move(done).Run();
+  };
+  scheduler.Submit("a", Urgency::kNormal, instant_slot);
+  scheduler.Submit("b", Urgency::kNormal, instant_slot);
+  scheduler.Submit("c", Urgency::kNormal, instant_slot);
+  // New bots spread across 0, 1, 2 even when arriving one at a time, then each
+  // reuses its own slot when idle.
+  scheduler.Submit("b", Urgency::kNormal, instant_slot);
+  scheduler.Submit("a", Urgency::kNormal, instant_slot);
+  EXPECT_EQ(slots, (std::vector<int>{0, 1, 2, 1, 0}));
+}
+
+TEST(SchedulerTest, NeverWaitsForABusyPreferredSlot) {
+  Scheduler scheduler(2);
+  std::map<std::string, base::OnceClosure> dones;
+  std::map<std::string, int> assigned;
+  auto capture = [&](const std::string& bot) -> Scheduler::SlotWork {
+    return [&, bot](int slot, base::OnceClosure done) {
+      assigned[bot] = slot;
+      dones[bot] = std::move(done);
+    };
+  };
+  // "a" takes slot 0 and finishes.
+  scheduler.Submit("a", Urgency::kNormal, capture("a"));
+  EXPECT_EQ(assigned["a"], 0);
+  std::move(dones["a"]).Run();
+
+  // "b" takes slot 1, "c" takes slot 0 (occupying "a"'s preferred slot).
+  scheduler.Submit("b", Urgency::kNormal, capture("b"));
+  scheduler.Submit("c", Urgency::kNormal, capture("c"));
+  EXPECT_EQ(assigned["b"], 1);
+  EXPECT_EQ(assigned["c"], 0);
+
+  // "b" finishes freeing slot 1 while slot 0 is still busy with "c": "a" takes
+  // slot 1 immediately instead of waiting for slot 0.
+  std::move(dones["b"]).Run();
+  scheduler.Submit("a", Urgency::kNormal, capture("a2"));
+  EXPECT_EQ(assigned["a2"], 1);
+  EXPECT_EQ(scheduler.in_flight(), 2u);
+  EXPECT_EQ(scheduler.queued(), 0u);
+}
+
 }  // namespace
 }  // namespace harness

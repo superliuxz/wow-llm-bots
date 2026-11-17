@@ -13,11 +13,11 @@ namespace harness {
 namespace {
 
 constexpr char kFullPlan[] =
-    "goal: kill boars for the quest\n"
     "do: 3x4, 5\n"
     "expect: 3\n"
     "watch: hp<40, enemy_player<40\n"
     "look: 60\n"
+    "goal: kill boars for the quest\n"
     "say: anyone want to group?";
 
 TEST(PlanTest, ParsesEveryField) {
@@ -47,8 +47,7 @@ TEST(PlanTest, ExpectWatchAndTheGoalAreOptional) {
   EXPECT_TRUE(plan->expect.empty());
   EXPECT_TRUE(plan->watches.empty());
   EXPECT_EQ(plan->say, "");
-  EXPECT_EQ(FormatPlan(*plan),
-            "goal: none\ndo: 1\nexpect: none\nwatch: none\nlook: 30");
+  EXPECT_EQ(FormatPlan(*plan), "do: 1\nexpect: none\nwatch: none\nlook: 30");
   const std::optional<Plan> none =
       ParsePlan("do: 2\nexpect: none\nwatch: none\nlook: 15", 4);
   ASSERT_TRUE(none);
@@ -143,20 +142,32 @@ TEST(PlanTest, LongGoalsAndChatAreCut) {
   EXPECT_EQ(plan->say.size(), static_cast<size_t>(kMaxSayChars));
 }
 
-TEST(PlanTest, APlanWithoutAGoalFormatsAsGrammarValidText) {
-  // A model without the grammar may leave the goal out, or write one that
+TEST(PlanTest, APlanWithoutAGoalOmitsGoalInFormatPlan) {
+  // A model may leave the goal out, write "goal: none", or write one that
   // cutting empties (a lone continuation byte).
   const std::string cut_to_nothing =
-      "goal: " + std::string(kMaxGoalChars + 1, '\x80') + "\ndo: 1\nlook: 15";
+      "do: 1\nlook: 15\ngoal: " + std::string(kMaxGoalChars + 1, '\x80');
   for (const std::string& reply :
-       {std::string("do: 1\nlook: 15"), cut_to_nothing}) {
+       {std::string("do: 1\nlook: 15"),
+        std::string("do: 1\nlook: 15\ngoal: none"), cut_to_nothing}) {
     const std::optional<Plan> plan = ParsePlan(reply, 4);
     ASSERT_TRUE(plan) << reply;
     EXPECT_EQ(plan->goal, "");
     const std::string text = FormatPlan(*plan);
-    EXPECT_EQ(text.rfind("goal: none\n", 0), 0u) << text;
+    EXPECT_EQ(text.find("goal:"), std::string::npos) << text;
     EXPECT_EQ(ParsePlan(text, 4)->goal, "");
   }
+}
+
+TEST(PlanTest, ParsePlanStepsLineReadsFirstStreamedLine) {
+  EXPECT_EQ(ParsePlanStepsLine("do: 3x4, 5", 6),
+            (std::optional<std::vector<PlanStep>>{{{3, 4}, {5, 1}}}));
+  EXPECT_EQ(ParsePlanStepsLine("  DO: [1] \r", 4),
+            (std::optional<std::vector<PlanStep>>{{{1, 1}}}));
+  EXPECT_FALSE(ParsePlanStepsLine("do: 7", 4));
+  EXPECT_FALSE(ParsePlanStepsLine("goal: boars", 4));
+  EXPECT_FALSE(ParsePlanStepsLine("do: 1\nlook: 30", 4));
+  EXPECT_FALSE(ParsePlanStepsLine("", 4));
 }
 
 TEST(PlanTest, LookTakesMinutesToo) {
@@ -190,10 +201,8 @@ TEST(PlanTest, CuttingNeverSplitsACharacter) {
 
 TEST(PlanTest, TheGrammarOnlyAllowsTheBotsOwnOptions) {
   EXPECT_EQ(PlanGrammar(3),
-            "root ::= \"goal: \" goal \"\\ndo: \" steps \"\\nexpect: \" "
-            "(\"none\" | ids) \"\\nwatch: \" watches \"\\nlook: \" looknum "
-            "say?\n"
-            "goal ::= [^\\n]{1,60}\n"
+            "root ::= \"do: \" steps \"\\nexpect: \" (\"none\" | ids) "
+            "\"\\nwatch: \" watches \"\\nlook: \" looknum goal? say?\n"
             "ids ::= opt (\", \" opt){0,4}\n"
             "steps ::= step (\", \" step){0,4}\n"
             "step ::= opt (\"x\" cnt)?\n"
@@ -208,6 +217,7 @@ TEST(PlanTest, TheGrammarOnlyAllowsTheBotsOwnOptions) {
             "pct ::= [1-9] [0-9]?\n"
             "num ::= [1-9] [0-9]{0,2}\n"
             "looknum ::= [1-9] [0-9] [0-9]?\n"
+            "goal ::= \"\\ngoal: \" [^\\n]{1,60}\n"
             "say ::= \"\\nsay: \" [^\\n]{1,80}\n");
   EXPECT_NE(PlanGrammar(12).find("opt ::= \"1\" | \"2\" | \"3\" | \"4\" | "
                                  "\"5\" | \"6\" | \"7\" | \"8\" | \"9\" | "

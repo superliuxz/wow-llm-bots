@@ -75,7 +75,8 @@ def run(perf):
         for bots, plan_s, seconds in CELLS:
             say(f"perf brain: replay ({bots} bots, {plan_s} s plans, {seconds} s)")
             load_out = bench("brain_load.py", SNAPSHOTS, wakes_file(plan_s), bots, seconds)
-            say("  " + load_out.strip().splitlines()[-1])
+            for line in load_out.strip().splitlines():
+                say("  " + line)
             m = LOAD.search(load_out)
             expect(m, f"brain_load.py printed nothing readable ({bots} bots, {plan_s} s plans)")
             cell = f"{bots}bots_{plan_s}s"

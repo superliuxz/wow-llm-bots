@@ -45,6 +45,7 @@ Env: SLOTS (default 25), MAX_TOKENS (default 150), OUT=<file> (per-call JSON),
 """
 
 import heapq
+import http.client
 import re
 import json
 import os
@@ -54,13 +55,13 @@ import statistics
 import sys
 import threading
 import time
-import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from prompt_render import render_snapshot, render_tight  # noqa: E402
 
-URL = "http://127.0.0.1:8090/v1/chat/completions"
+HOST, PORT, PATH = "127.0.0.1", 8090, "/v1/chat/completions"
 URGENT = {"died", "combat", "new_attacker", "control", "hostile_player"}
+RULES_MD = (pathlib.Path(__file__).resolve().parents[2] / "content" / "RULES.md").read_text()
 
 RULES = """\
 You are a human player on a World of Warcraft 3.3.5a (Wrath of the Lich King) private server.
@@ -83,23 +84,7 @@ look: <seconds until you look again anyway>
 """
 
 
-RULES_MENU = """\
-You are a human player on a World of Warcraft 3.3.5a (Wrath of the Lich King) private server.
-You play through the game client like everyone else, and only know what your screen, your
-addons and your memory tell you. Never mention being an AI.
-
-You are woken when something happens that your plan didn't cover, or when it ends. You see
-your screen and the numbered options you can take now. Make a plan for the next while: your
-hands carry it out, and you're woken again if something unexpected happens.
-
-Reply in exactly this form:
-goal: <what you're working towards, a few words>
-do: <option numbers, in order>
-expect: <option numbers of the mobs this plan fights, or none>
-watch: <none, or up to 4 of: hp<N, mana<N, enemy_player<YARDS, attacked, whisper>
-look: <seconds until you look again anyway>
-say: <optional: only if you want to say something in chat>
-"""
+RULES_MENU = RULES_MD
 
 WATCH = r'"hp<" pct | "mana<" pct | "enemy_player<" num | "attacked" | "whisper"'
 
@@ -144,25 +129,26 @@ DURATION_S = {"attack": 20, "talk": 8, "loot": 3, "gather": 10, "use": 8, "explo
               "rest": 30, "town": 60}
 
 
-def menu_grammar(n, goal_optional=False, codes_only=False, loose=False, counts=False):
-    """GBNF: only these option numbers, only the watch vocabulary."""
-    opt = " | ".join(f'"{i}"' for i in range(1, n + 1))
-    goal = r'("goal: " goal "\n")?' if goal_optional else r'"goal: " goal "\n"'
-    if codes_only:
-        goal = ""
+def menu_grammar(n, goal_optional=True, codes_only=False, loose=False, counts=False):
+    """GBNF matching harness/src/plan.cc PlanGrammar()."""
+    opt = " | ".join(f'"{i}"' for i in range(1, max(n, 1) + 1))
+    cnt = " | ".join(f'"{i}"' for i in range(2, 30))
+    tail = "" if codes_only else (" goal? say?" if goal_optional else ' "\ngoal: " goal say?')
     return "\n".join([
-        f'root ::= {goal} "do: " opts "\\nexpect: " ("none" | ids) "\\nwatch: " watches '
-        r'"\nlook: " num' + ("" if codes_only else " say?"),
-        "goal ::= [^\\n]+" if loose else "goal ::= [^\\n]{1,60}",
+        f'root ::= "do: " opts "\\nexpect: " ("none" | ids) "\\nwatch: " watches '
+        r'"\nlook: " looknum' + tail,
         'ids ::= opt (", " opt){0,4}',
         'opts ::= step (", " step){0,4}' if counts else 'opts ::= ids',
         'step ::= opt ("x" cnt)?',
-        "cnt ::= [2-9] | [1-2] [0-9]",
+        f"cnt ::= {cnt}",
         f"opt ::= {opt}",
         'watches ::= "none" | watch (", " watch){0,3}',
         f"watch ::= {WATCH}",
         "pct ::= [1-9] [0-9]?",
         "num ::= [1-9] [0-9]{0,2}",
+        "looknum ::= [1-9] [0-9] [0-9]?",
+        (r'goal ::= "\ngoal: " [^\n]+' if loose else r'goal ::= "\ngoal: " [^\n]{1,60}')
+        if goal_optional else ("goal ::= [^\\n]+" if loose else "goal ::= [^\\n]{1,60}"),
         r'say ::= "\nsay: " [^\n]+' if loose else r'say ::= "\nsay: " [^\n]{1,80}',
     ])
 
@@ -236,13 +222,97 @@ def identity_text(copy, chars):
     return "\n".join(lines)
 
 
-GOALS = {}  # copy -> the bot's current goal (GOAL_ONCE).
+GOALS = {}  # copy -> the bot's current goal.
 GOALS_LOCK = threading.Lock()
+SLOT_LOCK = threading.Lock()
+SLOT_BUSY = set()
+LAST_SLOT = {}
+NEXT_SLOT = [0]
+TLS = threading.local()
+
+
+def acquire_slot(copy, slots):
+    if os.environ.get("PIN"):
+        return copy % slots, False
+    with SLOT_LOCK:
+        pref = LAST_SLOT.get(copy)
+        if pref is not None and pref < slots and pref not in SLOT_BUSY:
+            SLOT_BUSY.add(pref)
+            return pref, True
+        for i in range(slots):
+            s = (NEXT_SLOT[0] + i) % slots
+            if s not in SLOT_BUSY:
+                NEXT_SLOT[0] = (s + 1) % slots
+                SLOT_BUSY.add(s)
+                LAST_SLOT[copy] = s
+                return s, True
+        return copy % slots, False
+
+
+def release_slot(slot, tracked):
+    if tracked:
+        with SLOT_LOCK:
+            SLOT_BUSY.discard(slot)
+
+
+def post_stream(body):
+    """Streams /v1/chat/completions over a keep-alive HTTP connection; returns
+    (text, usage, timings, first_line_elapsed_s)."""
+    payload = json.dumps(body).encode()
+    for attempt in range(2):
+        conn = getattr(TLS, "conn", None)
+        if conn is None:
+            conn = http.client.HTTPConnection(HOST, PORT, timeout=600)
+            TLS.conn = conn
+        try:
+            t0 = time.perf_counter()
+            conn.request("POST", PATH, body=payload,
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            if resp.status != 200:
+                err = resp.read().decode("utf-8", "replace")
+                raise RuntimeError(f"HTTP {resp.status}: {err[:200]}")
+            text_parts = []
+            usage, timings = {}, {}
+            first_line_s = None
+            while True:
+                raw = resp.readline()
+                if not raw:
+                    break
+                line = raw.decode("utf-8", "replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].lstrip()
+                if data == "[DONE]":
+                    resp.read()  # Drain trailing CRLF so keep-alive stays clean.
+                    break
+                chunk = json.loads(data)
+                choices = chunk.get("choices") or []
+                if choices:
+                    piece = (choices[0].get("delta") or {}).get("content")
+                    if piece:
+                        text_parts.append(piece)
+                        if first_line_s is None and "\n" in piece:
+                            first_line_s = time.perf_counter() - t0
+                if chunk.get("usage"):
+                    usage = chunk["usage"]
+                if chunk.get("timings"):
+                    timings = chunk["timings"]
+            full_s = time.perf_counter() - t0
+            return "".join(text_parts), usage, timings, (first_line_s or full_s)
+        except (http.client.HTTPException, OSError):
+            try:
+                conn.close()
+            except Exception:
+                pass
+            TLS.conn = None
+            if attempt == 1:
+                raise
 
 
 def call(wake, snap_dir, slots):
     menu = os.environ.get("MODE") == "menu"
-    goal_once = menu and bool(os.environ.get("GOAL_ONCE"))
+    goal_optional = menu and os.environ.get("GOAL_ONCE", "1") != "0"
     snap = snapshot(snap_dir, wake["source"], wake["seq"])
     merged = menu and bool(os.environ.get("MERGED"))
     if merged:
@@ -256,61 +326,52 @@ def call(wake, snap_dir, slots):
     rules = RULES_MENU if menu else RULES
     identity = int(os.environ.get("IDENTITY", 0))
     counts = menu and bool(os.environ.get("COUNTS"))
-    if counts:
-        rules = rules.replace(
-            "do: <option numbers, in order>",
-            "do: <option numbers, in order; add xN to repeat one N times, e.g. 3x4 does option 3 "
-            "four times, one after another>").replace(
-            "look: <seconds until you look again anyway>",
-            "look: <seconds until you look again anyway: at least as long as your plan takes>")
-    if counts and os.environ.get("LOOK_SAFETY"):
-        rules = rules.replace(
-            "look: <seconds until you look again anyway: at least as long as your plan takes>",
-            "look: <a safety net only: you are woken at once if anything unexpected happens, so "
-            "make it longer than your plan takes, usually 60 to 300 seconds>")
-    if merged:
-        rules = rules.replace(
-            "your screen and the numbered options you can take now.",
-            "your screen. Numbered entries are your options: picking a number attacks an enemy, "
-            "talks to a friendly NPC, loots a corpse, or uses an object.")
-    head = f"Woken: {wake['why'].replace('_', ' ')}."
-    if goal_once:
-        rules = rules.replace("goal: <what you're working towards, a few words>",
-                              "goal: <only if your goal changed (or you have none yet): a few words>")
+    user_parts = [f"You are {wake['source']}."]
+    if identity:
+        user_parts.append(identity_text(wake["copy"], identity))
+    wake_block = []
+    if goal_optional:
         with GOALS_LOCK:
             goal = GOALS.get(wake["copy"])
-        head = (f"Your goal: {goal}." if goal else "You have no goal yet.") + " " + head
-    body = {
-        "messages": [
-            {"role": "system", "content": rules + f"\nYou are {wake['source']}."
-                                          + (("\n\n" + identity_text(wake["copy"], identity))
-                                             if identity else "")},
-            {"role": "user", "content": f"{head}\n\nYour screen now:\n{screen}"},
-        ],
-        "max_tokens": int(os.environ.get("MAX_TOKENS", 150)),
-        "temperature": float(os.environ.get("TEMP", 0.7)),
-        "id_slot": wake["copy"] % slots if os.environ.get("PIN") else wake["worker"] % slots,
-        "cache_prompt": True,
-        "chat_template_kwargs": {"enable_thinking": False},
-    }
-    if menu and not os.environ.get("NO_GRAMMAR"):
-        body["grammar"] = menu_grammar(len(options), goal_optional=goal_once,
-                                       codes_only=bool(os.environ.get("CODES_ONLY")),
-                                       counts=counts)
-    req = urllib.request.Request(URL, data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=600) as r:
-        out = json.load(r)
-    plan = parse_plan(out["choices"][0]["message"]["content"])
+        if goal:
+            wake_block.append(f"Current goal: {goal}.")
+    wake_block.append(f"Woken: {wake['why'].replace('_', ' ')}.")
+    user_parts.append("\n".join(wake_block))
+    user_parts.append(f"Your screen now:\n{screen}")
+
+    slot, tracked = acquire_slot(wake["copy"], slots)
+    try:
+        body = {
+            "messages": [
+                {"role": "system", "content": rules},
+                {"role": "user", "content": "\n\n".join(user_parts)},
+            ],
+            "max_tokens": int(os.environ.get("MAX_TOKENS", 150)),
+            "temperature": float(os.environ.get("TEMP", 0.7)),
+            "id_slot": slot,
+            "cache_prompt": True,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+        if menu and not os.environ.get("NO_GRAMMAR"):
+            body["grammar"] = menu_grammar(len(options), goal_optional=goal_optional,
+                                           codes_only=bool(os.environ.get("CODES_ONLY")),
+                                           counts=counts)
+        content, usage, timings, first_line_s = post_stream(body)
+    finally:
+        release_slot(slot, tracked)
+    plan = parse_plan(content)
+    plan["_first_line_s"] = first_line_s
     if menu:
         plan["_valid"] = validate(normalize(plan) if os.environ.get("NO_GRAMMAR") else plan,
                                   len(options), counts)
         if merged and plan["_valid"]:
             plan["_est_s"] = estimate_seconds(plan, kinds)
-    if goal_once and plan.get("goal"):
+    if goal_optional and plan.get("goal"):
         with GOALS_LOCK:
             GOALS[wake["copy"]] = plan["goal"]
-    return plan, out["usage"], out.get("timings", {})
+    return plan, usage, timings
 
 
 WATCH_RE = re.compile(r"^(hp<[1-9]\d?|mana<[1-9]\d?|enemy_player<[1-9]\d{0,2}|attacked|whisper)$")
@@ -417,11 +478,14 @@ def main():
                 busy[0] -= 1
                 if busy[0] == 0:
                     busy_total[0] += done - busy_since[0]
-                results.append({**wake, "wait": start - t0 - wake["t"], "think": done - start,
+                wait_s = start - t0 - wake["t"]
+                first_s = plan.get("_first_line_s", done - start) if isinstance(plan, dict) else (done - start)
+                results.append({**wake, "wait": wait_s, "think": done - start,
+                                "first_latency": wait_s + first_s,
                                 "latency": done - t0 - wake["t"], "ok": ok, "plan": plan,
                                 # A call that failed (HTTP error, timeout) has no answer:
                                 # it is left out of the latency and token figures.
-                                "failed": usage is None,
+                                "failed": not usage,
                                 "prompt_tokens": (usage or {}).get("prompt_tokens"),
                                 "read_tokens": timings.get("prompt_n"),
                                 "reply_tokens": (usage or {}).get("completion_tokens")})
@@ -469,6 +533,7 @@ def main():
     failed = [r for r in results if r["failed"]]
     results = [r for r in results if not r["failed"]] or results
     lat = sorted(r["latency"] for r in results if not r["failed"])
+    do_lat = sorted(r["first_latency"] for r in results if not r["failed"])
     look = [r["plan"].get("look_again_s") for r in results
             if r["ok"] and isinstance(r["plan"].get("look_again_s"), (int, float))]
     est = [r["plan"]["_est_s"] for r in results
@@ -478,6 +543,7 @@ def main():
     pct = lambda xs, q: xs[min(len(xs) - 1, int(q * len(xs)))] if xs else 0
     print(f"{n_bots} bots, {len(results)} wakes in {seconds:.0f} s "
           f"({len(results) / n_bots / seconds * 60:.2f} per bot per min): "
+          f"wake->do p50 {pct(do_lat, 0.5):.2f}s p95 {pct(do_lat, 0.95):.2f}s | "
           f"wake->plan p50 {pct(lat, 0.5):.1f}s p95 {pct(lat, 0.95):.1f}s max {lat[-1] if lat else 0:.1f}s | "
           f"think p50 {statistics.median(r['think'] for r in results):.1f}s | "
           # The share of the run with at least one call in flight: a stand-in for GPU load

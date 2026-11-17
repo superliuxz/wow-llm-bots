@@ -40,6 +40,7 @@ Decision SampleDecision() {
   reply.prompt_ms = 12.5;
   reply.predicted_ms = 30;
   decision.result.reply = reply;
+  decision.result.first_line_ms = 18.25;
   decision.result.round_trip_ms = 55.5;
   decision.plan = ParsePlan(reply.text, 4);
   decision.time = base::Time::FromMillisecondsSinceUnixEpoch(kSomeTimeMs);
@@ -58,9 +59,9 @@ TEST(DecisionLogTest, TheJsonHasWhatWasAskedAndAnswered) {
   EXPECT_EQ(json["prompt_tokens"], 700);
   EXPECT_EQ(json["prompt_computed"], 120);
   EXPECT_EQ(json["completion_tokens"], 8);
+  EXPECT_DOUBLE_EQ(json["first_line_ms"].get<double>(), 18.25);
   EXPECT_DOUBLE_EQ(json["round_trip_ms"].get<double>(), 55.5);
-  EXPECT_EQ(json["plan"],
-            "goal: none\ndo: 1\nexpect: none\nwatch: none\nlook: 60");
+  EXPECT_EQ(json["plan"], "do: 1\nexpect: none\nwatch: none\nlook: 60");
   EXPECT_FALSE(json.contains("error"));
 }
 

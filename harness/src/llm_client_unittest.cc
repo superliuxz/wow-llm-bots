@@ -8,7 +8,10 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "base/functional/callback.h"
 #include "base/memory/ref_counted.h"
@@ -54,7 +57,13 @@ TEST(LlmClientTest, TheBodyCarriesEverythingTheServerNeeds) {
   EXPECT_EQ(body["max_tokens"], 80);
   EXPECT_FLOAT_EQ(body["temperature"].get<float>(), 0.5f);
   EXPECT_EQ(body["cache_prompt"], true);
+  EXPECT_EQ(body["stream"], true);
+  EXPECT_EQ(body["stream_options"]["include_usage"], true);
   EXPECT_EQ(body["chat_template_kwargs"]["enable_thinking"], false);
+
+  LlmRequest unstreamed = SampleRequest();
+  unstreamed.stream = false;
+  EXPECT_FALSE(Json::parse(BuildChatBody(unstreamed)).contains("stream"));
 }
 
 TEST(LlmClientTest, SlotAndGrammarAreLeftOutWhenNotGiven) {
@@ -109,20 +118,45 @@ TEST(LlmClientTest, ReportsWhatIsWrongWithAReply) {
 class FakeLlamaServer {
  public:
   FakeLlamaServer() : thread_("fake-llama") {
+    server_.set_tcp_nodelay(true);
     server_.Post("/v1/chat/completions", [this](const httplib::Request& request,
                                                 httplib::Response& response) {
+      std::vector<std::string> chunks;
+      int tail_delay_ms = 0;
       {
         base::AutoLock lock(lock_);
         last_body_ = request.body;
         client_ports_.insert(request.remote_port);
         ++calls_;
+        chunks = stream_chunks_;
+        tail_delay_ms = stream_tail_delay_ms_;
       }
       if (delay_ms_ > 0) {
         std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms_));
       }
       response.status = status_;
-      response.set_content(status_ == 200 ? kReplyBody : "oops",
-                           "application/json");
+      if (status_ != 200) {
+        response.set_content("oops", "application/json");
+        return;
+      }
+      if (!chunks.empty()) {
+        response.set_chunked_content_provider(
+            "text/event-stream",
+            [chunks, tail_delay_ms](size_t /*offset*/,
+                                    httplib::DataSink& sink) {
+              for (size_t i = 0; i < chunks.size(); ++i) {
+                if (i == 1 && tail_delay_ms > 0) {
+                  std::this_thread::sleep_for(
+                      std::chrono::milliseconds(tail_delay_ms));
+                }
+                sink.write(chunks[i].data(), chunks[i].size());
+              }
+              sink.done();
+              return true;
+            });
+        return;
+      }
+      response.set_content(kReplyBody, "application/json");
     });
     port_ = server_.bind_to_any_port("127.0.0.1");
     thread_.Start();
@@ -151,6 +185,12 @@ class FakeLlamaServer {
     return calls_;
   }
   void set_status(int status) { status_ = status; }
+  void set_stream_chunks(std::vector<std::string> chunks,
+                         int tail_delay_ms = 0) {
+    base::AutoLock lock(lock_);
+    stream_chunks_ = std::move(chunks);
+    stream_tail_delay_ms_ = tail_delay_ms;
+  }
   void set_keep_alive_timeout_s(int seconds) {
     server_.set_keep_alive_timeout(seconds);
   }
@@ -168,6 +208,8 @@ class FakeLlamaServer {
   std::string last_body_ GUARDED_BY(lock_);
   int calls_ GUARDED_BY(lock_) = 0;
   std::set<int> client_ports_ GUARDED_BY(lock_);
+  std::vector<std::string> stream_chunks_ GUARDED_BY(lock_);
+  int stream_tail_delay_ms_ GUARDED_BY(lock_) = 0;
   int status_ = 200;
   int delay_ms_ = 0;
 };
@@ -273,6 +315,75 @@ TEST(LlmClientTest, AskRepliesOnTheCallersSequence) {
   done.Wait();
   EXPECT_TRUE(on_origin);
   EXPECT_EQ(text, "do: 1\nlook: 30");
+}
+
+TEST(LlmClientTest, StreamsSseAndFiresFirstLineBeforeTailFinishes) {
+  FakeLlamaServer server;
+  // Chunk 0 completes line 1; chunks 1..3 sleep 80 ms, split an SSE line
+  // mid-JSON across two writes, and finish with usage/timings + [DONE].
+  server.set_stream_chunks(
+      {
+          "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n"
+          "data: {\"choices\":[{\"delta\":{\"content\":\"do: 1x3\\n\"}}]}\n\n",
+          "data: {\"choices\":[{\"delta\":{\"content\":\"expect: none\\n",
+          "watch: none\\nlook: 60\"}}]}\n\n"
+          "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":812,"
+          "\"completion_tokens\":14},\"timings\":{\"prompt_n\":48,"
+          "\"prompt_ms\":12.5,\"predicted_ms\":55.0}}\n\n",
+          "data: [DONE]\n\n",
+      },
+      /*tail_delay_ms=*/80);
+
+  LlmClient client(server.endpoint(), 2);
+  base::Thread origin("origin");
+  origin.Start();
+
+  for (int i = 0; i < 3; ++i) {
+    base::WaitableEvent done;
+    std::vector<std::string> events;
+    LlmResult got;
+    bool first_line_on_origin = false;
+    origin.task_runner()->PostTask([&] {
+      auto runner = base::SequencedTaskRunner::GetCurrentDefault();
+      client.Ask(
+          SampleRequest(),
+          [&](LlmResult result) {
+            events.push_back("reply");
+            got = std::move(result);
+            done.Signal();
+          },
+          [&, runner](std::string_view line) {
+            first_line_on_origin = runner->RunsTasksInCurrentSequence();
+            events.push_back("first:" + std::string(line));
+          });
+    });
+    done.Wait();
+    ASSERT_TRUE(got.reply) << got.error;
+    EXPECT_TRUE(first_line_on_origin);
+    EXPECT_EQ(events, (std::vector<std::string>{"first:do: 1x3", "reply"}));
+    EXPECT_EQ(got.reply->text, "do: 1x3\nexpect: none\nwatch: none\nlook: 60");
+    EXPECT_EQ(got.reply->prompt_tokens, 812);
+    EXPECT_EQ(got.reply->completion_tokens, 14);
+    EXPECT_EQ(got.reply->prompt_computed, 48);
+    EXPECT_DOUBLE_EQ(got.reply->prompt_ms, 12.5);
+    EXPECT_DOUBLE_EQ(got.reply->predicted_ms, 55.0);
+    EXPECT_GT(got.first_line_ms, 0);
+    EXPECT_LT(got.first_line_ms + 40.0, got.round_trip_ms);
+  }
+  // Keep-alive still reuses one TCP connection across streamed SSE calls.
+  EXPECT_EQ(server.distinct_client_ports(), 1u);
+}
+
+TEST(LlmClientTest, ATruncatedSseStreamWithoutDoneFailsAndDropsConnection) {
+  FakeLlamaServer server;
+  server.set_stream_chunks({
+      "data: {\"choices\":[{\"delta\":{\"content\":\"do: 1\\n\"}}]}\n\n",
+  });
+  auto pool = base::MakeRefCounted<ConnectionPool>(server.endpoint());
+  const LlmResult bad = pool->Call(SampleRequest());
+  EXPECT_FALSE(bad.reply);
+  EXPECT_NE(bad.error.find("[DONE]"), std::string::npos) << bad.error;
+  EXPECT_EQ(pool->idle(), 0u);
 }
 
 }  // namespace

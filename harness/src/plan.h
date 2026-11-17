@@ -6,11 +6,11 @@
 // to be woken for. Free text is limited to a short goal and an optional chat
 // line.
 //
-//   goal: kill boars for the quest
 //   do: 3x4, 5
 //   expect: 3
 //   watch: hp<40, enemy_player<40
 //   look: 60
+//   goal: kill boars for the quest
 //   say: anyone want to group?
 //
 // PlanGrammar() builds the grammar that makes llama-server write only valid
@@ -73,6 +73,12 @@ struct Plan {
 
 // The grammar (llama.cpp GBNF) for a bot that has `option_count` options.
 std::string PlanGrammar(int option_count);
+
+// Reads only the `do: ...` line, as soon as the first newline of a streamed
+// reply arrives, so the body can start moving while the rest of the plan is
+// still being written.
+std::optional<std::vector<PlanStep>> ParsePlanStepsLine(std::string_view line,
+                                                        int option_count);
 
 // Reads and validates a plan. nullopt if it isn't one: no valid steps, an
 // option that doesn't exist, a count out of range, no `look`, an unknown

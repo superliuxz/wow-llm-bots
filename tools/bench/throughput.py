@@ -25,7 +25,7 @@ def main():
     workers = int(sys.argv[3]) if len(sys.argv) > 3 else 25
     seconds = float(sys.argv[4]) if len(sys.argv) > 4 else 30
     wakes = [json.loads(line) for line in open(wakes_file)]
-    done, lat, valid = [], [], []
+    done, lat, first_lat, valid = [], [], [], []
     lock = threading.Lock()
     t0 = time.perf_counter()
     warm = 5.0
@@ -45,6 +45,7 @@ def main():
                 with lock:
                     done.append(end)
                     lat.append(end - start)
+                    first_lat.append(plan.get("_first_line_s", end - start))
                     valid.append(bool(plan.get("_valid", True)))
 
     threads = [threading.Thread(target=worker, args=(w,)) for w in range(workers)]
@@ -54,7 +55,9 @@ def main():
         t.join()
     print(f"{workers} workers: {len(done) / seconds:.1f} wake-ups/s | one call p50 "
           f"{statistics.median(lat):.2f}s p95 {sorted(lat)[int(0.95 * len(lat))]:.2f}s | "
-          f"valid {sum(valid)}/{len(valid)}")
+          f"valid {sum(valid)}/{len(valid)} | first-line p50 "
+          f"{statistics.median(first_lat):.2f}s p95 "
+          f"{sorted(first_lat)[int(0.95 * len(first_lat))]:.2f}s")
 
 
 if __name__ == "__main__":

@@ -73,6 +73,8 @@ std::optional<DecideOptions> ParseDecideArgs(
     const bool is_real = absl::SimpleAtof(value, &real) && std::isfinite(real);
     if (name == "name") {
       options.bot_name = value;
+    } else if (name == "goal") {
+      options.current_goal = value;
     } else if (name == "reason") {
       options.wake_reason = value;
     } else if (name == "rules") {
@@ -138,6 +140,7 @@ int RunDecide(const DecideOptions& options,
     }
     input.identity = *identity;
   }
+  input.current_goal = options.current_goal;
   input.wake_reason = options.wake_reason;
   input.slot = options.slot;
   input.temperature = options.temperature;
@@ -164,11 +167,21 @@ int RunDecide(const DecideOptions& options,
                           decision.result.round_trip_ms, decision.result.error);
   } else {
     const LlmReply& reply = *decision.result.reply;
-    absl::StrAppendFormat(
-        report,
-        "== reply (%.0f ms; prompt %d tokens, %d read again; wrote %d)\n%s\n",
-        decision.result.round_trip_ms, reply.prompt_tokens,
-        reply.prompt_computed, reply.completion_tokens, reply.text);
+    if (decision.result.first_line_ms > 0) {
+      absl::StrAppendFormat(
+          report,
+          "== reply (%.0f ms, first line %.0f ms; prompt %d tokens, %d read "
+          "again; wrote %d)\n%s\n",
+          decision.result.round_trip_ms, decision.result.first_line_ms,
+          reply.prompt_tokens, reply.prompt_computed, reply.completion_tokens,
+          reply.text);
+    } else {
+      absl::StrAppendFormat(
+          report,
+          "== reply (%.0f ms; prompt %d tokens, %d read again; wrote %d)\n%s\n",
+          decision.result.round_trip_ms, reply.prompt_tokens,
+          reply.prompt_computed, reply.completion_tokens, reply.text);
+    }
     decision.plan =
         ParsePlan(reply.text, static_cast<int>(screen.options.size()));
     if (decision.plan) {

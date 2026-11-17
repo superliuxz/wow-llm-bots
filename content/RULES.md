@@ -17,16 +17,16 @@ choosing — don't pick option 1 out of habit:
 - When your plan is done and nothing useful is nearby, explore or head to town rather than
   standing still.
 
-Reply in exactly this form (plain numbers only, omit `say:` unless talking to someone):
-goal: <what you're working towards, a few words>
+Reply in exactly this form (plain numbers only; omit `goal:` unless setting or changing your
+goal, and omit `say:` unless talking to someone):
 do: <option numbers in order; add xN to repeat 2-29 times, e.g. 3x4>
 expect: <option numbers of the mobs this plan fights, or none>
 watch: <none, or up to 4 of: hp<N, mana<N, enemy_player<YARDS, attacked, whisper>
 look: <integer 60 to 300: a safety net only, since surprises wake you at once>
+goal: <optional: what you're working towards, a few words>
 say: <optional chat line>
 
 Example:
-goal: find quests down the road
 do: 5
 expect: none
 watch: hp<35

@@ -17,7 +17,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <set>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -33,15 +33,20 @@ enum class Urgency {
 
 class Scheduler {
  public:
-  // Starts the work for one bot (asks the model). It must call `done` once,
-  // on the scheduler's sequence, when it has finished with the answer.
+  // Starts the work for one bot (asks the model). `SlotWork` also receives the
+  // assigned llama-server slot `0 .. max_in_flight - 1` (reusing the bot's
+  // previous slot when idle so its prompt prefix stays cached, else any free
+  // slot without waiting). Work must call `done` once on the scheduler's
+  // sequence when finished.
   using Work = base::OnceCallback<void(base::OnceClosure done)>;
+  using SlotWork = base::OnceCallback<void(int slot, base::OnceClosure done)>;
 
   explicit Scheduler(size_t max_in_flight);
   Scheduler(const Scheduler&) = delete;
   Scheduler& operator=(const Scheduler&) = delete;
   ~Scheduler();
 
+  void Submit(const std::string& bot, Urgency urgency, SlotWork work);
   void Submit(const std::string& bot, Urgency urgency, Work work);
 
   size_t in_flight() const { return in_flight_.size(); }
@@ -52,16 +57,20 @@ class Scheduler {
     std::string bot;
     Urgency urgency = Urgency::kNormal;
     uint64_t order = 0;  // Lower waited longer.
-    Work work;
+    SlotWork work;
   };
 
+  int PickSlot(const std::string& bot);
   void StartWaiting();
   void OnDone(const std::string& bot);
 
   const size_t max_in_flight_;
   uint64_t next_order_ = 0;
+  size_t next_slot_ = 0;
   std::vector<Waiting> queue_;
-  std::set<std::string> in_flight_;
+  std::vector<bool> slot_busy_;
+  std::map<std::string, int> in_flight_;
+  std::map<std::string, int> last_slot_;
   bool starting_ = false;  // StartWaiting is running (work may finish inside).
   base::WeakPtrFactory<Scheduler> weak_factory_{this};
 };

@@ -157,11 +157,8 @@ std::string PlanGrammar(int option_count) {
     counts.push_back(absl::StrCat("\"", n, "\""));
   }
   return absl::StrCat(
-      "root ::= \"goal: \" goal \"\\ndo: \" steps \"\\nexpect: \" "
-      "(\"none\" | ids) \"\\nwatch: \" watches \"\\nlook: \" looknum say?\n"
-      "goal ::= [^\\n]{1,",
-      kMaxGoalChars,
-      "}\n"
+      "root ::= \"do: \" steps \"\\nexpect: \" (\"none\" | ids) \"\\nwatch: \" "
+      "watches \"\\nlook: \" looknum goal? say?\n"
       "ids ::= opt (\", \" opt){0,",
       kMaxExpected - 1,
       "}\n"
@@ -183,8 +180,28 @@ std::string PlanGrammar(int option_count) {
       "pct ::= [1-9] [0-9]?\n"
       "num ::= [1-9] [0-9]{0,2}\n"
       "looknum ::= [1-9] [0-9] [0-9]?\n"
+      "goal ::= \"\\ngoal: \" [^\\n]{1,",
+      kMaxGoalChars,
+      "}\n"
       "say ::= \"\\nsay: \" [^\\n]{1,",
       kMaxSayChars, "}\n");
+}
+
+std::optional<std::vector<PlanStep>> ParsePlanStepsLine(std::string_view line,
+                                                        int option_count) {
+  line = Trim(line);
+  if (line.find('\n') != line.npos) {
+    return std::nullopt;
+  }
+  const size_t colon = line.find(':');
+  if (colon == line.npos ||
+      absl::AsciiStrToLower(Trim(line.substr(0, colon))) != "do") {
+    return std::nullopt;
+  }
+  const std::string value = StripBrackets(Trim(line.substr(colon + 1)));
+  return ParseList<PlanStep>(value, kMaxSteps, [&](std::string_view t) {
+    return ParseStep(t, option_count);
+  });
 }
 
 std::optional<Plan> ParsePlan(std::string_view text, int option_count) {
@@ -304,12 +321,13 @@ std::string FormatPlan(const Plan& plan) {
     }
     watches = absl::StrJoin(items, ", ");
   }
-  // The grammar's goal is never empty: a plan without one is written "none".
   std::string out = absl::StrCat(
-      "goal: ", plan.goal.empty() ? "none" : plan.goal,
-      "\ndo: ", absl::StrJoin(steps, ", "), "\nexpect: ",
+      "do: ", absl::StrJoin(steps, ", "), "\nexpect: ",
       plan.expect.empty() ? "none" : absl::StrJoin(plan.expect, ", "),
       "\nwatch: ", watches, "\nlook: ", plan.look_s);
+  if (!plan.goal.empty()) {
+    absl::StrAppend(&out, "\ngoal: ", plan.goal);
+  }
   if (!plan.say.empty()) {
     absl::StrAppend(&out, "\nsay: ", plan.say);
   }

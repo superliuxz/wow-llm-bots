@@ -17,9 +17,10 @@ namespace {
 
 int Usage() {
   std::fputs(
-      "usage: harness decide <snapshot.pb> [--name=BOT] [--reason=TEXT]\n"
-      "         [--rules=FILE] [--identity=FILE] [--log-dir=DIR] [--host=H]\n"
-      "         [--port=N] [--slot=N] [--temperature=T] [--dry-run]\n",
+      "usage: harness decide <snapshot.pb> [--name=BOT] [--goal=TEXT]\n"
+      "         [--reason=TEXT] [--rules=FILE] [--identity=FILE]\n"
+      "         [--log-dir=DIR] [--host=H] [--port=N] [--slot=N]\n"
+      "         [--temperature=T] [--dry-run]\n",
       stderr);
   return 2;
 }

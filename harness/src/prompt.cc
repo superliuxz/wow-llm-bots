@@ -30,13 +30,18 @@ std::string OneLine(std::string_view text) {
 
 LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
   LlmRequest request;
-  request.system =
-      absl::StrCat(input.rules, "\nYou are ", OneLine(input.bot_name), ".");
+  request.system = input.rules;
+  request.user = absl::StrCat("You are ", OneLine(input.bot_name), ".");
   if (!input.identity.empty()) {
-    absl::StrAppend(&request.system, "\n\n", input.identity);
+    absl::StrAppend(&request.user, "\n\n", input.identity);
   }
-  request.user = absl::StrCat("Woken: ", OneLine(input.wake_reason),
-                              ".\n\nYour screen now:\n", screen.text);
+  absl::StrAppend(&request.user, "\n\n");
+  if (!input.current_goal.empty()) {
+    absl::StrAppend(&request.user,
+                    "Current goal: ", OneLine(input.current_goal), ".\n");
+  }
+  absl::StrAppend(&request.user, "Woken: ", OneLine(input.wake_reason),
+                  ".\n\nYour screen now:\n", screen.text);
   request.grammar = PlanGrammar(static_cast<int>(screen.options.size()));
   request.slot = input.slot;
   request.temperature = input.temperature;
