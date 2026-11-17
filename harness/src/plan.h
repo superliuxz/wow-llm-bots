@@ -3,8 +3,8 @@
 // The brain's answer: a plan (docs/specs/triggers.md). The brain can only do
 // what a player can do, so a plan is mostly numbers: the options on the bot's
 // screen, in order, each optionally repeated, plus what it expects and what
-// to be woken for. Free text is limited to a short goal and an optional chat
-// line.
+// to be woken for. Free text is limited to a short goal and optional chat:
+// a line said out loud and a whisper to one player.
 //
 //   do: 3x4, 5
 //   expect: 3
@@ -12,6 +12,7 @@
 //   look: 60
 //   goal: kill boars for the quest
 //   say: anyone want to group?
+//   tell Gatda: sure, inviting you now
 //
 // PlanGrammar() builds the grammar that makes llama-server write only valid
 // plans for a bot's current options; ParsePlan() reads the text back (and
@@ -33,6 +34,9 @@ inline constexpr int kMaxWatches = 4;
 inline constexpr int kMaxRepeat = 29;  // A step can repeat 2..kMaxRepeat times.
 inline constexpr int kMaxGoalChars = 60;
 inline constexpr int kMaxSayChars = 80;
+// A character name in 3.3.5a: 2 to 12 letters.
+inline constexpr int kMinNameChars = 2;
+inline constexpr int kMaxNameChars = 12;
 inline constexpr int kMinLookSeconds = 10;
 inline constexpr int kMaxLookSeconds = 999;
 
@@ -66,7 +70,10 @@ struct Plan {
       expect;  // Options this plan deals with (don't wake for them).
   std::vector<Watch> watches;
   int look_s = 0;   // Wake anyway after this many seconds.
-  std::string say;  // Empty: nothing to say.
+  std::string say;  // Out loud. Empty: nothing to say.
+  // A whisper: to `tell_to` (a character name), `tell`. Empty: none.
+  std::string tell_to;
+  std::string tell;
 
   bool operator==(const Plan&) const = default;
 };

@@ -5,7 +5,9 @@
     "reason": "plan done",
     "summary": "2x lootable Mottled Boar corpses 10 yd away, out of combat, full HP",
     "rule": "first step is Loot (option 1)",
-    "first_kinds": ["loot"]
+    "first_kinds": [
+      "loot"
+    ]
   },
   {
     "name": "loot_with_boar_nearby",
@@ -13,7 +15,9 @@
     "reason": "plan done",
     "summary": "live boar (1, 5 yd) and lootable boar corpse (2, 11 yd), out of combat",
     "rule": "plan includes Loot (option 2)",
-    "must_include_kinds": ["loot"]
+    "must_include_kinds": [
+      "loot"
+    ]
   },
   {
     "name": "finish_fight",
@@ -21,8 +25,16 @@
     "reason": "attacked",
     "summary": "in combat with a 45%-HP Mottled Boar attacking me (1)",
     "rule": "first step is Attack (1) or Keep (3); never Rest/Explore/Town/Use",
-    "first_options": [1, 3],
-    "forbid_kinds": ["rest", "explore", "go to town", "use"]
+    "first_options": [
+      1,
+      3
+    ],
+    "forbid_kinds": [
+      "rest",
+      "explore",
+      "go to town",
+      "use"
+    ]
   },
   {
     "name": "fight_aggro_not_fresh",
@@ -30,9 +42,16 @@
     "reason": "attacked",
     "summary": "in combat: unaggroed full-HP boar (1) vs 24%-HP boar attacking me (2)",
     "rule": "first step finishes attacker (2) or Keep (6); does not pull fresh boar (1)",
-    "first_options": [2, 6],
-    "forbid_options": [1],
-    "forbid_kinds": ["rest"]
+    "first_options": [
+      2,
+      6
+    ],
+    "forbid_options": [
+      1
+    ],
+    "forbid_kinds": [
+      "rest"
+    ]
   },
   {
     "name": "healthy_boar_pull",
@@ -40,8 +59,13 @@
     "reason": "plan done",
     "summary": "full HP/mana L1 priest 7 yd behind untapped L2 Mottled Boar (1), Cactus Apples (4)",
     "rule": "starts with Attack (1) or Gather (4); does not Rest at full HP/mana",
-    "first_options": [1, 4],
-    "forbid_kinds": ["rest"]
+    "first_options": [
+      1,
+      4
+    ],
+    "forbid_kinds": [
+      "rest"
+    ]
   },
   {
     "name": "skip_tapped_mob",
@@ -49,8 +73,13 @@
     "reason": "plan done",
     "summary": "only live mob (1) is tapped by another player; Cactus Apples at (4)",
     "rule": "does not Attack tapped mob (1) or Rest at full HP/mana",
-    "forbid_options": [1],
-    "forbid_kinds": ["attack", "rest"]
+    "forbid_options": [
+      1
+    ],
+    "forbid_kinds": [
+      "attack",
+      "rest"
+    ]
   },
   {
     "name": "herb_to_gather",
@@ -58,8 +87,15 @@
     "reason": "plan done",
     "summary": "6x Cactus Apple quest herbs starting at 14 yd (1), no mobs or corpses",
     "rule": "starts with Gather (1), Explore (5), or Go to town (7) until quest log is shown",
-    "first_options": [1, 5, 7],
-    "forbid_kinds": ["rest", "keep doing what I'm doing"]
+    "first_options": [
+      1,
+      5,
+      7
+    ],
+    "forbid_kinds": [
+      "rest",
+      "keep doing what I'm doing"
+    ]
   },
   {
     "name": "quest_available",
@@ -67,7 +103,9 @@
     "reason": "logged in",
     "summary": "fresh L1 (0/400 xp) 6 yd in front of Kaltunk with quest available (1)",
     "rule": "first step is Talk to Kaltunk (1)",
-    "first_options": [1]
+    "first_options": [
+      1
+    ]
   },
   {
     "name": "priest_picks_own_trainer",
@@ -75,7 +113,9 @@
     "reason": "leveled up",
     "summary": "L2 priest near Mage Trainer (1), Shaman Trainer (2), Grunts, Priest Trainer Ken'jai (7)",
     "rule": "first step is Talk to Priest Trainer Ken'jai (7), not wrong-class trainers",
-    "first_options": [7]
+    "first_options": [
+      7
+    ]
   },
   {
     "name": "ignore_critter",
@@ -83,8 +123,13 @@
     "reason": "plan done",
     "summary": "quiet field where the only live unit is a level-1 Hare critter (1)",
     "rule": "does not Attack the critter (1) or Rest at full HP/mana",
-    "forbid_options": [1],
-    "forbid_kinds": ["attack", "rest"]
+    "forbid_options": [
+      1
+    ],
+    "forbid_kinds": [
+      "attack",
+      "rest"
+    ]
   },
   {
     "name": "quiet_empty_field",
@@ -92,8 +137,14 @@
     "reason": "plan done",
     "summary": "empty stretch of Valley of Trials, no units or objects, full HP/mana",
     "rule": "moves on (Explore 2 or Go to town 4), not Rest (3) or Keep nothing (1)",
-    "first_kinds": ["explore", "go to town"],
-    "forbid_kinds": ["rest", "keep doing what I'm doing"]
+    "first_kinds": [
+      "explore",
+      "go to town"
+    ],
+    "forbid_kinds": [
+      "rest",
+      "keep doing what I'm doing"
+    ]
   },
   {
     "name": "city_crowd_patience",
@@ -101,7 +152,9 @@
     "reason": "plan done",
     "summary": "in Orgrimmar already resting at full HP/mana near Bankers, AH, Mailbox",
     "rule": "does not Rest again (20), and look >= 20 s",
-    "forbid_kinds": ["rest"],
+    "forbid_kinds": [
+      "rest"
+    ],
     "min_look_s": 20
   },
   {
@@ -110,8 +163,13 @@
     "reason": "plan done",
     "summary": "10/72 HP (14%) out of combat with hostile Scorpid Worker 7 yd away (1)",
     "rule": "does not Attack (1); picks Rest (8) or Go to town (9)",
-    "first_kinds": ["rest", "go to town"],
-    "forbid_kinds": ["attack"]
+    "first_kinds": [
+      "rest",
+      "go to town"
+    ],
+    "forbid_kinds": [
+      "attack"
+    ]
   },
   {
     "name": "oom_caster",
@@ -119,8 +177,13 @@
     "reason": "plan done",
     "summary": "priest at 4/91 mana (4%) out of combat next to Mottled Boar (1)",
     "rule": "does not Attack (1) while OOM; picks Rest (8) or Go to town (9)",
-    "first_kinds": ["rest", "go to town"],
-    "forbid_kinds": ["attack"]
+    "first_kinds": [
+      "rest",
+      "go to town"
+    ],
+    "forbid_kinds": [
+      "attack"
+    ]
   },
   {
     "name": "skull_elite_nearby",
@@ -128,7 +191,453 @@
     "reason": "plan done",
     "summary": "L1 priest 16 yd from patrolling L25 skull-level elite Son of Arugal (1)",
     "rule": "does not Attack skull elite (1) or Rest in its path; leaves (Explore 3 or Town 5)",
-    "first_kinds": ["explore", "go to town"],
-    "forbid_kinds": ["attack", "rest"]
+    "first_kinds": [
+      "explore",
+      "go to town"
+    ],
+    "forbid_kinds": [
+      "attack",
+      "rest"
+    ]
+  },
+  {
+    "name": "whisper_group_invite",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "whisper from Gatda: hey, want to group up for the boar quest?",
+    "summary": "quiet field; Gatda whispers asking to group",
+    "rule": "whispers back to Gatda",
+    "must_tell_to": "Gatda",
+    "forbid_kinds": [
+      "rest"
+    ]
+  },
+  {
+    "name": "whisper_question",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "whisper from Gatda: do you know where the cactus apples are?",
+    "summary": "quiet field; Gatda asks where the cactus apples are",
+    "rule": "whispers back to Gatda",
+    "must_tell_to": "Gatda"
+  },
+  {
+    "name": "whisper_asks_for_water",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "whisper from Gatda: can you spare some water?",
+    "summary": "full HP/mana; Gatda asks for water",
+    "rule": "whispers back to Gatda",
+    "must_tell_to": "Gatda",
+    "forbid_kinds": [
+      "rest"
+    ]
+  },
+  {
+    "name": "whisper_in_city",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "whisper from Gatda: meet me at the bank?",
+    "summary": "in Orgrimmar; Gatda asks to meet at the bank",
+    "rule": "whispers back to Gatda",
+    "must_tell_to": "Gatda"
+  },
+  {
+    "name": "whisper_while_low_hp",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "whisper from Gatda: can you help me kill this scorpid?",
+    "summary": "20% HP out of combat, scorpid near; Gatda asks for help with it",
+    "rule": "doesn't attack at 20% HP; whispers back to Gatda",
+    "must_tell_to": "Gatda",
+    "forbid_kinds": [
+      "attack"
+    ]
+  },
+  {
+    "name": "whisper_during_fight",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "whisper from Gatda: how's it going?",
+    "summary": "in combat with a 40% boar attacking me; Gatda asks how it's going",
+    "rule": "keeps fighting the boar (Attack it or Keep)",
+    "first_texts": [
+      "Attack Mottled Boar",
+      "Keep doing"
+    ],
+    "forbid_kinds": [
+      "rest",
+      "explore",
+      "go to town"
+    ]
+  },
+  {
+    "name": "gold_spam_whisper",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "whisper from Xqzvbnk: CHEAP GOLD www.g0ld4u.com 1000g = $5 fast delivery",
+    "summary": "a gold seller whispers an advert",
+    "rule": "doesn't answer the spammer",
+    "forbid_tell_to": "Xqzvbnk"
+  },
+  {
+    "name": "no_whisper_unprompted",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "quiet field, nobody talking",
+    "rule": "doesn't whisper anyone",
+    "forbid_tell": true
+  },
+  {
+    "name": "attacked_next_to_corpse",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "attacked by Scorpid Worker",
+    "summary": "scorpid attacking me at 60% HP, a lootable boar corpse 6 yd",
+    "rule": "fights first (Attack the scorpid or Keep), loots later",
+    "first_texts": [
+      "Attack Scorpid Worker",
+      "Keep doing"
+    ],
+    "forbid_kinds": [
+      "rest",
+      "explore",
+      "go to town"
+    ]
+  },
+  {
+    "name": "two_attackers",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "attacked by Vile Familiar",
+    "summary": "two Vile Familiars attacking me (30% and 100%), me at 60%",
+    "rule": "fights one of them or Keep; never rest/explore/town in combat",
+    "first_kinds": [
+      "attack",
+      "keep doing what I'm doing"
+    ],
+    "forbid_kinds": [
+      "rest",
+      "explore",
+      "go to town"
+    ]
+  },
+  {
+    "name": "low_mana_in_combat",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "mana<20",
+    "summary": "8% mana, boar at 25% attacking me",
+    "rule": "finishes the boar (Attack or Keep); can't rest in combat",
+    "first_texts": [
+      "Attack Mottled Boar",
+      "Keep doing"
+    ],
+    "forbid_kinds": [
+      "rest",
+      "explore",
+      "go to town"
+    ]
+  },
+  {
+    "name": "low_hp_weak_attacker",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "hp<35",
+    "summary": "me at 30% HP in combat, scorpid at 10% attacking me",
+    "rule": "finishes the scorpid (Attack or Keep)",
+    "first_texts": [
+      "Attack Scorpid Worker",
+      "Keep doing"
+    ],
+    "forbid_kinds": [
+      "rest",
+      "explore",
+      "go to town"
+    ]
+  },
+  {
+    "name": "caster_at_range",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "attacked by Vile Familiar",
+    "summary": "a Vile Familiar casting at me from 25 yd",
+    "rule": "fights it (Attack or Keep)",
+    "first_texts": [
+      "Attack Vile Familiar",
+      "Keep doing"
+    ],
+    "forbid_kinds": [
+      "rest",
+      "explore",
+      "go to town"
+    ]
+  },
+  {
+    "name": "fresh_mob_mid_fight",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "entered combat",
+    "summary": "fighting a 50% boar; an untouched scorpid 8 yd away",
+    "rule": "keeps on the boar, doesn't pull the scorpid",
+    "first_texts": [
+      "Attack Mottled Boar",
+      "Keep doing"
+    ],
+    "forbid_texts": [
+      "Attack Scorpid"
+    ],
+    "forbid_kinds": [
+      "rest",
+      "explore",
+      "go to town"
+    ]
+  },
+  {
+    "name": "finish_nearly_dead",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "attacked by Mottled Boar",
+    "summary": "boar at 5% attacking me, me at 50%",
+    "rule": "finishes it",
+    "first_texts": [
+      "Attack Mottled Boar",
+      "Keep doing"
+    ],
+    "forbid_kinds": [
+      "rest",
+      "explore",
+      "go to town"
+    ]
+  },
+  {
+    "name": "critter_and_boar",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "a Hare 6 yd and a Mottled Boar 15 yd, full HP/mana",
+    "rule": "never attacks the Hare; doesn't rest",
+    "forbid_texts": [
+      "Attack Hare"
+    ],
+    "forbid_kinds": [
+      "rest"
+    ]
+  },
+  {
+    "name": "only_critters",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "only an Adder and a Hare around, full HP/mana",
+    "rule": "attacks neither; doesn't rest",
+    "forbid_kinds": [
+      "attack",
+      "rest"
+    ]
+  },
+  {
+    "name": "gray_mob_only",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "level 10 priest; only a gray level-2 boar nearby",
+    "rule": "doesn't attack a gray mob; doesn't rest",
+    "forbid_kinds": [
+      "attack",
+      "rest"
+    ]
+  },
+  {
+    "name": "tapped_and_free",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "a scorpid tapped by another player and a free boar",
+    "rule": "never attacks the tapped scorpid",
+    "forbid_texts": [
+      "Attack Scorpid Worker"
+    ],
+    "forbid_kinds": [
+      "rest"
+    ]
+  },
+  {
+    "name": "all_tapped",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "the only two mobs are both tapped by other players",
+    "rule": "attacks neither; doesn't rest",
+    "forbid_kinds": [
+      "attack",
+      "rest"
+    ]
+  },
+  {
+    "name": "elite_nearby",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "L1 priest 14 yd from an orange elite Burning Blade Thug",
+    "rule": "doesn't attack the elite",
+    "forbid_texts": [
+      "Attack Burning Blade Thug"
+    ],
+    "forbid_kinds": [
+      "rest"
+    ]
+  },
+  {
+    "name": "red_mob_nearby",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "L1 priest 18 yd from a red level-6 Razormane Quilboar",
+    "rule": "doesn't attack a mob five levels up",
+    "forbid_texts": [
+      "Attack Razormane Quilboar"
+    ],
+    "forbid_kinds": [
+      "rest"
+    ]
+  },
+  {
+    "name": "skull_patrol_far",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "a skull-level elite patrolling 35 yd away",
+    "rule": "doesn't attack it",
+    "forbid_kinds": [
+      "attack",
+      "rest"
+    ]
+  },
+  {
+    "name": "two_corpses_and_live",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "two lootable corpses (boar, scorpid) and a live boar 20 yd",
+    "rule": "loots first",
+    "first_kinds": [
+      "loot"
+    ]
+  },
+  {
+    "name": "loot_scorpid",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "one lootable Scorpid Worker corpse 6 yd away",
+    "rule": "loots it",
+    "first_kinds": [
+      "loot"
+    ]
+  },
+  {
+    "name": "hp_30_boar_near",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "30% HP out of combat, a boar 8 yd away",
+    "rule": "rests or heads to town first; doesn't attack",
+    "first_kinds": [
+      "rest",
+      "go to town"
+    ],
+    "forbid_kinds": [
+      "attack"
+    ]
+  },
+  {
+    "name": "mana_20_boar_near",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "20% mana out of combat, a boar 8 yd away",
+    "rule": "rests or heads to town first; doesn't attack",
+    "first_kinds": [
+      "rest",
+      "go to town"
+    ],
+    "forbid_kinds": [
+      "attack"
+    ]
+  },
+  {
+    "name": "hp_15_empty_field",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "15% HP, nothing around",
+    "rule": "rests or heads to town first",
+    "first_kinds": [
+      "rest",
+      "go to town"
+    ]
+  },
+  {
+    "name": "mana_10_empty_field",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "10% mana, nothing around",
+    "rule": "rests or heads to town first",
+    "first_kinds": [
+      "rest",
+      "go to town"
+    ]
+  },
+  {
+    "name": "hp_60_fine",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "60% HP, full mana, a boar 10 yd away",
+    "rule": "doesn't rest above a third of health",
+    "forbid_kinds": [
+      "rest"
+    ]
+  },
+  {
+    "name": "quest_giver_and_boar",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "logged in",
+    "summary": "fresh L1; quest giver Kaltunk 25 yd, a boar 8 yd",
+    "rule": "talks to Kaltunk first",
+    "first_texts": [
+      "Talk to Kaltunk"
+    ]
+  },
+  {
+    "name": "bags_full",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "bags full, a boar 9 yd away",
+    "rule": "heads to town instead of killing for loot",
+    "first_kinds": [
+      "go to town"
+    ]
+  },
+  {
+    "name": "leveled_up_empty_field",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "reached level 2",
+    "summary": "just reached level 2, nothing around",
+    "rule": "moves on (explore or town); doesn't rest or idle",
+    "first_kinds": [
+      "explore",
+      "go to town"
+    ],
+    "forbid_kinds": [
+      "rest",
+      "keep doing what I'm doing"
+    ]
   }
 ]

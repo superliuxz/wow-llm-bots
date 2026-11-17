@@ -202,7 +202,7 @@ TEST(PlanTest, CuttingNeverSplitsACharacter) {
 TEST(PlanTest, TheGrammarOnlyAllowsTheBotsOwnOptions) {
   EXPECT_EQ(PlanGrammar(3),
             "root ::= \"do: \" steps \"\\nexpect: \" (\"none\" | ids) "
-            "\"\\nwatch: \" watches \"\\nlook: \" looknum goal? say?\n"
+            "\"\\nwatch: \" watches \"\\nlook: \" looknum goal? say? tell?\n"
             "ids ::= opt (\", \" opt){0,4}\n"
             "steps ::= step (\", \" step){0,4}\n"
             "step ::= opt (\"x\" cnt)?\n"
@@ -218,13 +218,39 @@ TEST(PlanTest, TheGrammarOnlyAllowsTheBotsOwnOptions) {
             "num ::= [1-9] [0-9]{0,2}\n"
             "looknum ::= [1-9] [0-9] [0-9]?\n"
             "goal ::= \"\\ngoal: \" [^\\n]{1,60}\n"
-            "say ::= \"\\nsay: \" [^\\n]{1,80}\n");
+            "say ::= \"\\nsay: \" [^\\n]{1,80}\n"
+            "tell ::= \"\\ntell \" [A-Z] [a-z]{1,11} \": \" [^\\n]{1,80}\n");
   EXPECT_NE(PlanGrammar(12).find("opt ::= \"1\" | \"2\" | \"3\" | \"4\" | "
                                  "\"5\" | \"6\" | \"7\" | \"8\" | \"9\" | "
                                  "\"10\" | \"11\" | \"12\"\n"),
             std::string::npos);
   // No options at all would be an invalid grammar: there is always one.
   EXPECT_NE(PlanGrammar(0).find("opt ::= \"1\"\n"), std::string::npos);
+}
+
+TEST(PlanTest, ATellLineIsAWhisperToOnePlayer) {
+  const std::optional<Plan> plan = ParsePlan(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+      "say: hello all\ntell Gatda: sure, inviting you now",
+      2);
+  ASSERT_TRUE(plan);
+  EXPECT_EQ(plan->say, "hello all");
+  EXPECT_EQ(plan->tell_to, "Gatda");
+  EXPECT_EQ(plan->tell, "sure, inviting you now");
+  EXPECT_EQ(ParsePlan(FormatPlan(*plan), 2), plan);
+}
+
+TEST(PlanTest, ATellNameIsCapitalizedAndABadOneIsDropped) {
+  std::optional<Plan> plan = ParsePlan("do: 1\nlook: 60\ntell gATDA: hi", 1);
+  ASSERT_TRUE(plan);
+  EXPECT_EQ(plan->tell_to, "Gatda");
+  for (const char* bad : {"tell G: hi", "tell Gat da: hi", "tell Gatda1: hi",
+                          "tell Abcdefghijklm: hi", "tell Gatda:   "}) {
+    plan = ParsePlan(std::string("do: 1\nlook: 60\n") + bad, 1);
+    ASSERT_TRUE(plan) << bad;  // The plan stands; only the whisper is lost.
+    EXPECT_TRUE(plan->tell.empty()) << bad;
+    EXPECT_TRUE(plan->tell_to.empty()) << bad;
+  }
 }
 
 }  // namespace

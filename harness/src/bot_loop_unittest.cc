@@ -445,5 +445,49 @@ TEST(BotLoopTest, StaleCommandErrorDoesNotCancelCurrentPlan) {
             std::string::npos);
 }
 
+TEST(BotLoopTest, AWhisperWakesTheBotAndItsTellWhispersBack) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Testpriest", 1, t0);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300");
+  ASSERT_EQ(brain.size(), 0u);
+
+  pb::ImmediateEvent whisper;
+  whisper.bot = "Testpriest";
+  pb::ChatEvent& chat = whisper.event.chat.emplace();
+  chat.channel = pb::WHISPER;
+  chat.from = "Gatda";
+  chat.text = "want to group?";
+  chat.at_me = true;
+  loop.OnEvent(whisper, t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("whisper from Gatda"),
+            std::string::npos);
+  EXPECT_NE(brain.front_request().user.find("want to group?"),
+            std::string::npos);
+
+  commands.clear();
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 300\n"
+      "tell gatda: sure, send an invite");
+  std::vector<pb::Command::Say> said;
+  for (const pb::Command& cmd : commands) {
+    if (cmd.say) {
+      said.push_back(*cmd.say);
+    }
+  }
+  ASSERT_EQ(said.size(), 1u);
+  EXPECT_EQ(said[0].channel, pb::WHISPER);
+  EXPECT_EQ(said[0].to, "Gatda");
+  EXPECT_EQ(said[0].text, "sure, send an invite");
+}
+
 }  // namespace
 }  // namespace harness

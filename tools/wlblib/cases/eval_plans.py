@@ -33,6 +33,10 @@ REPLY_RE = re.compile(
 PLAN_RE = re.compile(r"^== plan: (.+); look again in (\d+) s$", re.M)
 STEP_RE = re.compile(r"^(\d+)(?:x(\d+))? (.+)$")
 GOAL_RE = re.compile(r"^goal:\s*(.*)$", re.M | re.I)
+TELL_RE = re.compile(r"^tell ([A-Za-z]+):\s*(.*)$", re.M | re.I)
+# A numbered line of the screen: "  3. Attack Mottled Boar: level 2 boar, ..." -> 3, the text
+# before the details.
+OPTION_RE = re.compile(r"^\s+(\d+)\. ([^:\n]+)", re.M)
 
 
 def load_cases(names=()):
@@ -84,6 +88,12 @@ def decide_one(case, temperature=0.0, slot=0):
                 "kind": sm.group(3),
             })
     goal_m = GOAL_RE.search(out)
+    screen = out.split("== reply", 1)[0]
+    option_texts = {int(n): text.strip() for n, text in OPTION_RE.findall(screen)}
+    reply = out.split("== reply", 1)[1] if "== reply" in out else ""
+    tell_m = TELL_RE.search(reply)
+    for step in steps:
+        step["text"] = option_texts.get(step["option"], "")
     return {
         "valid": True,
         "ms": ms,
@@ -94,6 +104,8 @@ def decide_one(case, temperature=0.0, slot=0):
         "plan_desc": plan_m.group(1),
         "look_s": int(plan_m.group(2)),
         "goal": goal_m.group(1).strip() if goal_m else "",
+        "tell_to": tell_m.group(1).capitalize() if tell_m else "",
+        "tell": tell_m.group(2).strip() if tell_m else "",
     }
 
 
@@ -121,6 +133,23 @@ def check_case(case, got):
     for bad_kind in case.get("forbid_kinds", ()):
         if bad_kind in all_kinds:
             problems.append(f"plan chose forbidden kind '{bad_kind}'")
+    # Option texts as the screen wrote them; a check matches a text by its start
+    # ("Attack Hare", "Keep doing").
+    def matches(text, prefixes):
+        return any(text.startswith(p) for p in prefixes)
+
+    if "first_texts" in case and not matches(first["text"], case["first_texts"]):
+        problems.append(f"first step '{first['text']}' not one of {case['first_texts']}")
+    for step in got["steps"]:
+        if matches(step["text"], case.get("forbid_texts", ())):
+            problems.append(f"plan chose forbidden '{step['text']}'")
+    if "must_tell_to" in case and got["tell_to"] != case["must_tell_to"]:
+        problems.append(f"no whisper back to {case['must_tell_to']}"
+                        + (f" (told {got['tell_to']})" if got["tell_to"] else ""))
+    if case.get("forbid_tell_to") and got["tell_to"] == case["forbid_tell_to"]:
+        problems.append(f"whispered {got['tell_to']}: {got['tell']}")
+    if case.get("forbid_tell") and got["tell_to"]:
+        problems.append(f"whispered {got['tell_to']} unprompted: {got['tell']}")
     if "min_look_s" in case and got["look_s"] < case["min_look_s"]:
         problems.append(f"look {got['look_s']}s < {case['min_look_s']}s")
     return problems
@@ -140,6 +169,8 @@ def run_suite(cases, label=None):
                 f"read {got.get('prompt_computed', 0)}/{got.get('prompt_tokens', 0)} tok)")
         if got.get("goal"):
             desc += f" | goal: {got['goal']}"
+        if got.get("tell_to"):
+            desc += f" | tell {got['tell_to']}: {got['tell']}"
         verdict = "PASS" if ok else f"FAIL ({'; '.join(problems)})"
         say(f"  {verdict:4s} {case['name']:25s} -> {desc}")
         rows.append({"case": case["name"], "ok": ok, "got": got, "problems": problems})

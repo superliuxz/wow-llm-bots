@@ -457,7 +457,10 @@ void BotLoop::OnReply(const std::string& bot,
             CollectExpectedNames(plan->steps, plan->expect, ask_screen));
         state.look_deadline = now + base::Seconds(plan->look_s);
         if (!plan->say.empty()) {
-          SendSay(bot, plan->say);
+          SendSay(bot, pb::SAY, "", plan->say);
+        }
+        if (!plan->tell.empty()) {
+          SendSay(bot, pb::WHISPER, plan->tell_to, plan->tell);
         }
         if (!state.early_steps_dispatched) {
           const RunnerAction action =
@@ -497,12 +500,16 @@ uint32_t BotLoop::SendChoose(const std::string& bot,
   return id;
 }
 
-void BotLoop::SendSay(const std::string& bot, const std::string& text) {
+void BotLoop::SendSay(const std::string& bot,
+                      pb::ChatChannel channel,
+                      const std::string& to,
+                      const std::string& text) {
   pb::Command cmd;
   cmd.bot = bot;
   cmd.command_id = ++next_command_id_;
   pb::Command::Say& say = cmd.say.emplace();
-  say.channel = pb::SAY;
+  say.channel = channel;
+  say.to = to;
   say.text = text;
   ++commands_sent_;
   if (send_command_) {

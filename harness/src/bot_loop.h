@@ -135,7 +135,11 @@ class BotLoop {
                             const RunnerAction& action);
   uint32_t SendChoose(const std::string& bot,
                       const wlb::snapshot::Command::Choose& choose);
-  void SendSay(const std::string& bot, const std::string& text);
+  // `to`: the player whispered (channel WHISPER only).
+  void SendSay(const std::string& bot,
+               wlb::snapshot::ChatChannel channel,
+               const std::string& to,
+               const std::string& text);
   void Log(const std::string& line);
 
   const BotLoopConfig config_;

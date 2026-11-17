@@ -8,6 +8,7 @@ Dev tool only (production is C++). Needs `tools/wlb build common --no-tests` onc
   python3 -I tools/snapshot/fake_harness.py [seconds=5] [message ...]
   python3 -I tools/snapshot/fake_harness.py --stats [--json] [seconds=10]
   python3 -I tools/snapshot/fake_harness.py --choose [--json] [--tail=S] [seconds=30] Attack Loot
+  python3 -I tools/snapshot/fake_harness.py --whisper [--json] [seconds=30] FROM TO TEXT REPLY
 """
 
 import collections
@@ -220,17 +221,85 @@ def play_script(seconds, words, echo=print, tail_s=None):
     return out
 
 
+def whisper_script(seconds, sender, receiver, text, reply, echo=print):
+    """Makes `sender` whisper `text` to `receiver` once both are online (a Say command), and
+    `receiver` whisper `reply` back once it has heard it. Returns what each bot heard, the
+    commands sent and any error events."""
+    s = connect()
+    reader = FrameReader()
+    out = {"heard": [], "commands": [], "errors": [], "closed": False}
+    seen = set()
+    sent = 0
+    replied = False
+    start = time.time()
+    stop_at = start + seconds
+
+    def say(bot, to, words):
+        nonlocal sent
+        sent += 1
+        cmd = {"bot": bot, "command_id": sent,
+               "say": {"channel": "WHISPER", "to": to, "text": words}}
+        send_frame(s, wire_py.encode_command(cmd))
+        out["commands"].append({"t": round(time.time() - start, 3), **cmd})
+        echo(f">> {bot} whispers to {to}: {words}")
+
+    while time.time() < stop_at:
+        try:
+            chunk = s.recv(1 << 20)
+        except socket.timeout:
+            continue
+        if not chunk:
+            out["closed"] = True
+            break
+        for payload in reader.feed(chunk):
+            message = wire_py.decode_module_message(payload)
+            if not message:
+                continue
+            t = round(time.time() - start, 3)
+            if "snapshot" in message:
+                bot = message["snapshot"].get("bot", "")
+                if bot not in seen:
+                    seen.add(bot)
+                    echo(f"<< first snapshot of {bot}")
+                    if {sender, receiver} <= seen and sent == 0:
+                        say(sender, receiver, text)
+                continue
+            imm = message.get("event", {})
+            event = imm.get("event", {})
+            if "error" in event:
+                out["errors"].append({"t": t, "bot": imm.get("bot", ""), **event["error"]})
+                echo(f"<< error for {imm.get('bot', '')}: {event['error']}")
+            chat = event.get("chat")
+            if not chat:
+                continue
+            out["heard"].append({"t": t, "bot": imm.get("bot", ""), **chat})
+            echo(f"<< {imm.get('bot', '')} heard {chat}")
+            if imm.get("bot") == receiver and chat.get("from") == sender and not replied:
+                replied = True
+                say(receiver, sender, reply)
+            elif imm.get("bot") == sender and chat.get("from") == receiver:
+                stop_at = min(stop_at, time.time() + 1)
+    s.close()
+    return out
+
+
 def main():
     args = sys.argv[1:]
     stats = "--stats" in args
     choose = "--choose" in args
+    whisper = "--whisper" in args
     as_json = "--json" in args
     tail = next((float(a.split("=", 1)[1]) for a in args if a.startswith("--tail=")), None)
-    args = [a for a in args if a not in ("--stats", "--choose", "--json")
+    args = [a for a in args if a not in ("--stats", "--choose", "--whisper", "--json")
             and not a.startswith("--tail=")]
     seconds = float(args[0]) if args else (10.0 if stats else 5.0)
     if stats:
         run_stats(seconds, as_json)
+    elif whisper:
+        echo = (lambda line: print(line, file=sys.stderr)) if as_json else print
+        transcript = whisper_script(seconds, *args[1:5], echo=echo)
+        if as_json:
+            print(json.dumps(transcript))
     elif choose:
         if as_json:
             transcript = play_script(

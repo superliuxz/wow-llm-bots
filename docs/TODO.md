@@ -23,6 +23,16 @@ Working order (2026-11-17 09:50): finish #3, #1, then #4, #2, #5.
   - Fixed (2026-11-17): the wake loop on a refused Attack (`step failed: can't attack X now`, six
     wakes in ~1 s). `option_executor.cc` now counts a refusal as done when the body already has
     that target (`current target` or `GetVictim()`).
+  - Whisper path built (2026-11-17): the module hears whispers to its bots
+    (`chat/chat_scripts.cc`, a `PlayerScript` hook into a locked `ChatInbox`, sent as chat
+    events), carries out `Say` commands (say, yell, whisper: `chat/speak.cc`), and has a console
+    command `.llmbrain whisper <from> <to> <text>`; plans have a `tell <Name>: text` line, chosen
+    by the model (`plan.cc`, `content/RULES.md`). `e2e whisper` (two bots, scripted brain): the
+    server log showed Loada's whisper sent and heard by Telda, but the run failed because the
+    live harness reconnected and took the socket (`wlb test e2e` now refuses to start while a
+    live harness runs). **Left:** stop the live harness, re-run `tools/wlb test e2e whisper`;
+    restart `tools/wlb harness` on the new build and whisper Testpriest with
+    `tools/wlb console llmbrain whisper <someone online> Testpriest hi` for the in-character reply.
   - Open: loot steps timed out twice (corpse at 0-9 yd, still `lootable yes` after 15 s). The
     cause isn't known yet.
 - **#3 E2E latency Tier 2: built (2026-11-17), live numbers pending** (`docs/plans/latency.md`,
@@ -47,10 +57,14 @@ Working order (2026-11-17 09:50): finish #3, #1, then #4, #2, #5.
    and read the real numbers: wakes per bot per minute, how long plans last, `age_at_ask` /
    `age_at_first_line` / `age_at_plan` / `age_at_apply`, combat and death detection latency,
    latest-wins under a stalled harness. Done when the list in `docs/plans/phase2.md` holds.
-2. **Model choice:** decide whether to switch `tools/wlblib/llm.py` default from Qwen3.6-35B-A3B to
-   Gemma 4 26B-A4B (`eval` 13/15 vs 10/15; after Tier 1 Qwen3.6 hits `11.3/s` capacity and `79 ms`
-   solo `do:` vs Gemma 4's `9.1/s` and `91 ms`; Gemma 4 is 4.8 GiB smaller; both kept in `models/`
-   for now), and revisit `herb_to_gather` once quest log is rendered.
+2. **Model choice** (decided 2026-11-17: Qwen3.6-35B-A3B stays the default for now; both models
+   stay in `models/`; the default is the more accurate one as long as it stays within the speed
+   limit; they can't be loaded together: 17 + 22 GB > 32 GB). The eval grew from 15 to 48 cases
+   (33 made by `tools/snapshot/make_eval_cases.py`: whispers, combat, targets, loot, HP/mana,
+   quests). **Qwen3.6 on 48: 35/48 (73%), `do:` 59 ms, full 134 ms** (old 15: 10/15); its misses
+   are mostly resting at low HP/mana (5) and idling in an empty field (4). **Left:** the same
+   48 on Gemma 4 (`tools/wlb test eval --shootout`; needs the running llama-server stopped),
+   then apply the rule; revisit `herb_to_gather` once the quest log is rendered.
 3. **E2E latency Tier 2** (`docs/plans/latency.md`): built; measure live (In progress).
 4. **Module: more things a bot can do** (`docs/plans/harness.md`, M1 "Not yet"). Options today:
    Attack, Loot, Keep. Missing: talk (playerbots opens gossip only for a bot's master), gather,
@@ -69,6 +83,19 @@ Working order (2026-11-17 09:50): finish #3, #1, then #4, #2, #5.
    hardcoded coordinates"**: the biggest one), a flying / untargetable / submerged state on `Unit`,
    assist-tank index, where a cast will land (`lands_in_s`), liquid under the bot; (d) evals.
    `trigger-actions.tsv` and its brief are not committed yet.
+   **Design decisions to settle with the user before building (2026-11-17):**
+   1. **Where orders run.** In the module (reacts within a world tick, the spec's promise, but
+      more logic in the server and orders must be sent down the socket) or in the harness (module
+      stays thin, but reacts only on snapshots/events: 250 ms-1 s). The spec says "runs within a
+      tick" without saying where. The big one.
+   2. **Named places in a boss room** (133 of the 254 unsayable actions). Spec's order: places
+      relative to a unit or player (works today), then spots computed from positions (behind the
+      boss, max range, N yd apart), then per-room landmarks (deferred until a fight needs one).
+      Open: build the computed spots now?
+   3. **How each new verb runs** (`kite`, `mark`, `board`, `equip`, `pet`, `interact`): a
+      playerbots action or our own movement, per verb; check playerbots verb by verb.
+   4. Then the small snapshot additions (unit states, impact spots, liquid, main assist):
+      mechanical once 1-3 are settled.
 
 ## Later
 
@@ -113,9 +140,9 @@ Working order (2026-11-17 09:50): finish #3, #1, then #4, #2, #5.
   overwrites something that works). Test them in a scratch directory, or on the next fresh checkout.
 - `CLAUDE.md` imports `CONTRIBUTING.md` with `@CONTRIBUTING.md`: **not yet confirmed** that a fresh
   Claude Code session loads the rules through it.
-- The human player's account name is in the public git history (older commits of
-  `tools/server-start.sh`); it is out of the current files. Removing it means rewriting history and
-  a force-push: their decision.
+- The human player's account name is in the git history (commit `c8ae0f4`,
+  `tools/server-start.sh`; and `test_accounts_unittest.cc` until 2026-11-17); it is out of the
+  current files. Removing it means rewriting history and a force-push: their decision.
 - Unit tests for the AzerothCore-dependent module code (`bot_manager`, `option_executor`,
   `nearby_builder`, ...) can't run without the game server: only the e2e case covers it
   (rebuild/restart `out/server` with `tools/wlb build server` before connecting the new BEVE

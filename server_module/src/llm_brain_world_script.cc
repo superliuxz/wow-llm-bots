@@ -22,10 +22,14 @@
 #include "UnitDefines.h"
 #include "WorldScript.h"
 #include "base/functional/callback.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "bot_manager/bot_manager.h"
 #include "bridge/brain_bridge.h"
+#include "chat/chat_inbox.h"
+#include "chat/chat_scripts.h"
+#include "chat/speak.h"
 #include "config/llm_brain_config.h"
 #include "options/option_executor.h"
 #include "options/options.h"
@@ -114,10 +118,11 @@ bool IsOptionTargetPending(Player* bot, const OptionTarget& target, bool used) {
 // send each attached bot's snapshot to the harness.
 class LlmBrainWorldScript : public WorldScript {
  public:
-  LlmBrainWorldScript()
+  explicit LlmBrainWorldScript(ChatInbox* inbox)
       : WorldScript("LlmBrainWorldScript",
                     {WORLDHOOK_ON_AFTER_CONFIG_LOAD, WORLDHOOK_ON_STARTUP,
-                     WORLDHOOK_ON_UPDATE, WORLDHOOK_ON_SHUTDOWN}) {}
+                     WORLDHOOK_ON_UPDATE, WORLDHOOK_ON_SHUTDOWN}),
+        inbox_(inbox) {}
 
   void OnAfterConfigLoad(bool reload) override {
     if (reload) {
@@ -150,6 +155,7 @@ class LlmBrainWorldScript : public WorldScript {
     if (!config_.enabled) {
       return;
     }
+    inbox_->SetBots(config_.bots);
 #if defined(LLM_BRAIN_TEST_HOOKS)
     if (!config_.test_fixtures.empty()) {
       std::vector<FixtureLoader::Fixture> fixtures;
@@ -203,6 +209,7 @@ class LlmBrainWorldScript : public WorldScript {
       return;
     }
     bridge_->RunWorldTasks();
+    DeliverChat();
     since_stats_ms_ += diff;
     if (since_stats_ms_ >= kStatsIntervalMs) {
       since_stats_ms_ = 0;
@@ -305,7 +312,39 @@ class LlmBrainWorldScript : public WorldScript {
     }
   }
 
-  // A command from the harness (docs/specs/snapshot.md §9). So far: Choose.
+  // The index of `name` in LlmBrain.Bots, or config_.bots.size().
+  size_t BotIndex(const std::string& name) const {
+    for (size_t i = 0; i < config_.bots.size(); ++i) {
+      if (config_.bots[i] == name) {
+        return i;
+      }
+    }
+    return config_.bots.size();
+  }
+
+  // Whispers the bots heard since the last update, each sent to the harness
+  // as an event (with a fresh snapshot first, like any alerting event).
+  void DeliverChat() {
+    if (const size_t dropped = inbox_->TakeDropped()) {
+      LOG_WARN("module", "mod-llm-brain: {} chat lines dropped (inbox full)",
+               dropped);
+    }
+    for (ChatInbox::Line& line : inbox_->TakeAll()) {
+      const size_t index = BotIndex(line.to);
+      Player* bot = ObjectAccessor::FindPlayerByName(line.to);
+      if (index == config_.bots.size() || !bot || !bot->IsInWorld() ||
+          !bridge_->connected()) {
+        continue;  // Nobody to tell: like a whisper while away.
+      }
+      LOG_INFO("module", "mod-llm-brain: {} heard a whisper from {}: {}",
+               line.to, line.chat.from, line.chat.text);
+      wlb::snapshot::Event payload;
+      payload.chat = std::move(line.chat);
+      EmitAlertingEvent(index, line.to, bot, std::move(payload));
+    }
+  }
+
+  // A command from the harness (docs/specs/snapshot.md §9): Choose and Say.
   void OnHarnessMessage(std::string bytes) {
     wlb::snapshot::Command command;
     if (!wlb::snapshot::ReadBeve(bytes, &command)) {
@@ -314,21 +353,19 @@ class LlmBrainWorldScript : public WorldScript {
       return;
     }
     const std::string& name = command.bot;
-    if (!command.choose) {
+    if (!command.choose && !command.say) {
       LOG_INFO("module", "mod-llm-brain: {}: command not supported yet", name);
       return;
     }
-    size_t bot_index = config_.bots.size();
-    for (size_t i = 0; i < config_.bots.size(); ++i) {
-      if (config_.bots[i] == name) {
-        bot_index = i;
-        break;
-      }
-    }
+    const size_t bot_index = BotIndex(name);
     Player* bot = ObjectAccessor::FindPlayerByName(name);
     if (bot_index == config_.bots.size() || !bot || bots_[bot_index].seq == 0) {
-      LOG_INFO("module", "mod-llm-brain: choose for {}: no such bot online",
+      LOG_INFO("module", "mod-llm-brain: command for {}: no such bot online",
                name);
+      return;
+    }
+    if (command.say) {
+      OnSay(bot_index, name, bot, command.command_id, *command.say);
       return;
     }
     const wlb::snapshot::Command::Choose& choose = *command.choose;
@@ -375,6 +412,24 @@ class LlmBrainWorldScript : public WorldScript {
         bots_[bot_index].active_option.reset();
       }
       schedule_->SetActiveTargetPending(bot_index, pending);
+    }
+  }
+
+  void OnSay(size_t bot_index,
+             const std::string& name,
+             Player* bot,
+             uint32_t command_id,
+             const wlb::snapshot::Command::Say& say) {
+    const std::string error = Speak(bot, say);
+    LOG_INFO("module", "mod-llm-brain: {} says ({}{}{}): {}: {}", name,
+             wlb::snapshot::EnumName(say.channel), say.to.empty() ? "" : " to ",
+             say.to, say.text, error.empty() ? "ok" : error);
+    if (!error.empty()) {
+      wlb::snapshot::Event payload;
+      wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
+      failed.text = error;
+      failed.command_id = command_id;
+      EmitAlertingEvent(bot_index, name, bot, std::move(payload));
     }
   }
 
@@ -469,6 +524,7 @@ class LlmBrainWorldScript : public WorldScript {
   }
 
   Config config_;
+  const base::raw_ptr<ChatInbox> inbox_;
 #if defined(LLM_BRAIN_TEST_HOOKS)
   std::unique_ptr<FixtureLoader> fixture_loader_;
 #endif
@@ -499,5 +555,9 @@ class LlmBrainWorldScript : public WorldScript {
 }  // namespace llm_brain
 
 void AddLlmBrainScripts() {
-  new llm_brain::LlmBrainWorldScript();
+  // Shared by the scripts, which AzerothCore deletes at shutdown in no set
+  // order: never freed, so it outlives them all.
+  auto* inbox = new llm_brain::ChatInbox();
+  new llm_brain::LlmBrainWorldScript(inbox);
+  llm_brain::AddLlmBrainChatScripts(inbox);
 }

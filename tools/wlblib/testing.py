@@ -16,6 +16,7 @@ for). The runner prints one PASS or FAIL line per case and exits 1 if any failed
 import datetime
 import importlib
 import json
+import os
 import pathlib
 import pkgutil
 import shutil
@@ -59,6 +60,23 @@ def unit(variant="default", gtest_filter=None):
     say(f"PASS unit ({variant}{', filter ' + gtest_filter if gtest_filter else ''})")
 
 
+def _live_harness_pids():
+    """Pids of this checkout's harness binary (out/common/harness) that are running."""
+    binary = (OUT / "common" / "harness").resolve()
+    pids = []
+    for proc in pathlib.Path("/proc").iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            # A binary rebuilt since it started reads "<path> (deleted)".
+            exe = os.readlink(proc / "exe").removesuffix(" (deleted)")
+            if pathlib.Path(exe) == binary:
+                pids.append(int(proc.name))
+        except OSError:
+            continue
+    return pids
+
+
 # ---- e2e ----------------------------------------------------------------------------------------
 
 class Stack:
@@ -77,6 +95,12 @@ class Stack:
         self.log_start = 0
 
     def __enter__(self):
+        # A live harness reconnects within a second and takes the socket from the scripted
+        # brain (the module keeps the newest client), so a test can't share it.
+        harness = _live_harness_pids()
+        if harness:
+            raise Failed(f"a live harness is running (pid {', '.join(map(str, harness))}): "
+                         "stop it first (it would take the test's socket)")
         self.was_running = running_pid("worldserver") is not None
         self.flavor_before = build.built_flavor()
         try:
@@ -135,6 +159,18 @@ class Stack:
         result = subprocess.run(
             ["python3", "-I", ROOT / "tools/snapshot/fake_harness.py", "--choose", "--json",
              f"--tail={tail_s}", str(seconds), *words], capture_output=True, text=True)
+        if result.returncode != 0:
+            raise Failed(f"the scripted brain failed:\n{result.stderr.strip()[-600:]}")
+        return json.loads(result.stdout)
+
+    def whisper(self, sender, receiver, text, reply, seconds=60):
+        """Runs tools/snapshot/fake_harness.py --whisper: `sender` whispers `text` to `receiver`,
+        which whispers `reply` back. Returns its transcript (what each bot heard)."""
+        if not (OUT / "common" / "libwlb_wire_py.so").exists():
+            build.common("default", tests=False)
+        result = subprocess.run(
+            ["python3", "-I", ROOT / "tools/snapshot/fake_harness.py", "--whisper", "--json",
+             str(seconds), sender, receiver, text, reply], capture_output=True, text=True)
         if result.returncode != 0:
             raise Failed(f"the scripted brain failed:\n{result.stderr.strip()[-600:]}")
         return json.loads(result.stdout)

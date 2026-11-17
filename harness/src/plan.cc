@@ -130,6 +130,25 @@ std::optional<std::vector<T>> ParseList(std::string_view text,
 }
 
 // At most `max_bytes` of `text`, never splitting a UTF-8 character.
+// A character name, capitalized as the game writes it ("gatda" -> "Gatda"),
+// or nullopt if it isn't one (letters only, kMinNameChars..kMaxNameChars).
+std::optional<std::string> ParseName(std::string_view text) {
+  text = Trim(text);
+  if (text.size() < static_cast<size_t>(kMinNameChars) ||
+      text.size() > static_cast<size_t>(kMaxNameChars)) {
+    return std::nullopt;
+  }
+  std::string name;
+  for (char c : text) {
+    if (!base::IsAsciiAlpha(c)) {
+      return std::nullopt;
+    }
+    name.push_back(name.empty() ? base::ToUpperASCII(c)
+                                : base::ToLowerASCII(c));
+  }
+  return name;
+}
+
 std::string Cut(std::string_view text, size_t max_bytes) {
   text = Trim(text);
   if (text.size() <= max_bytes) {
@@ -161,7 +180,7 @@ std::string PlanGrammar(int option_count) {
   }
   return base::StrCat({
       "root ::= \"do: \" steps \"\\nexpect: \" (\"none\" | ids) \"\\nwatch: \" "
-      "watches \"\\nlook: \" looknum goal? say?\n"
+      "watches \"\\nlook: \" looknum goal? say? tell?\n"
       "ids ::= opt (\", \" opt){0,",
       base::NumberToString(kMaxExpected - 1),
       "}\n"
@@ -187,6 +206,13 @@ std::string PlanGrammar(int option_count) {
       base::NumberToString(kMaxGoalChars),
       "}\n"
       "say ::= \"\\nsay: \" [^\\n]{1,",
+      base::NumberToString(kMaxSayChars),
+      "}\n"
+      "tell ::= \"\\ntell \" [A-Z] [a-z]{",
+      base::NumberToString(kMinNameChars - 1),
+      ",",
+      base::NumberToString(kMaxNameChars - 1),
+      "} \": \" [^\\n]{1,",
       base::NumberToString(kMaxSayChars),
       "}\n",
   });
@@ -231,6 +257,14 @@ std::optional<Plan> ParsePlan(std::string_view text, int option_count) {
       }
     } else if (key == "say") {
       plan.say = Cut(raw, kMaxSayChars);
+    } else if (key.starts_with("tell ")) {
+      // "tell Gatda: text". A name that isn't one is dropped with its line.
+      if (std::optional<std::string> name = ParseName(key.substr(5))) {
+        if (std::string text = Cut(raw, kMaxSayChars); !text.empty()) {
+          plan.tell_to = std::move(*name);
+          plan.tell = std::move(text);
+        }
+      }
     } else if (key == "do") {
       auto steps = ParseList<PlanStep>(
           value, kMaxSteps,
@@ -351,6 +385,9 @@ std::string FormatPlan(const Plan& plan) {
   }
   if (!plan.say.empty()) {
     base::StrAppend(&out, {"\nsay: ", plan.say});
+  }
+  if (!plan.tell.empty()) {
+    base::StrAppend(&out, {"\ntell ", plan.tell_to, ": ", plan.tell});
   }
   return out;
 }

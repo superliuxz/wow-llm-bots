@@ -98,6 +98,8 @@ add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/bridge/brain_bridge_unittest.cc"
   "${WLB_MODULE_SRC}/bridge/latest_wins.cc"
   "${WLB_MODULE_SRC}/bridge/latest_wins_unittest.cc"
+  "${WLB_MODULE_SRC}/chat/chat_inbox.cc"
+  "${WLB_MODULE_SRC}/chat/chat_inbox_unittest.cc"
   "${WLB_MODULE_SRC}/config/config_parsing.cc"
   "${WLB_MODULE_SRC}/config/config_parsing_unittest.cc"
   "${WLB_MODULE_SRC}/options/options.cc"

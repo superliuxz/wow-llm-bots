@@ -1,0 +1,66 @@
+{
+  "bot": "Loadn",
+  "seq": 291,
+  "time_ms": 1794793389571,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x00000000000003A3",
+        "name": "Loadn",
+        "kind": "PLAYER",
+        "level": 1,
+        "health_pct": 100.0,
+        "power_pct": 100.0,
+        "player": {
+          "class": "Priest"
+        }
+      },
+      "gender": "MALE",
+      "xp": 99,
+      "xp_next": 400,
+      "health": 72,
+      "health_max": 72,
+      "power_type": "MANA",
+      "power": 91,
+      "power_max": 91,
+      "state": "ALIVE"
+    },
+    "where": {
+      "map": "Kalimdor",
+      "zone": "Durotar",
+      "subzone": "Valley of Trials",
+      "position": {
+        "x": -548.3376,
+        "y": -4248.51,
+        "z": 71.351906
+      },
+      "facing": -0.4644824
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0x00000000000003A0",
+          "rel": {
+            "dist_yd": 45.530083,
+            "dir": "E",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -539.53345,
+              "y": -4283.025,
+              "z": 38.39191
+            },
+            "facing_me": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        }
+      ]
+    }
+  }
+}

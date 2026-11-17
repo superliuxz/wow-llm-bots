@@ -262,7 +262,10 @@ def _hold_console_open():
     FIFO never blocks on Linux) and handed to the child."""
     fd = os.open(CONSOLE, os.O_RDWR | os.O_NONBLOCK)
     try:
-        holder = subprocess.Popen(["sleep", "infinity"], stdout=fd, start_new_session=True)
+        # Nothing of the caller's: an inherited stdin/stderr pipe would keep whoever reads
+        # `wlb server start` output (a `| tail`) waiting for as long as the server runs.
+        holder = subprocess.Popen(["sleep", "infinity"], stdin=subprocess.DEVNULL, stdout=fd,
+                                  stderr=subprocess.DEVNULL, start_new_session=True)
     finally:
         os.close(fd)
     return holder.pid

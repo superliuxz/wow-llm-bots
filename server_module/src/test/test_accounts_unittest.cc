@@ -21,7 +21,7 @@ TEST(TestAccountsTest, RecognizesOnlyThePool) {
   EXPECT_FALSE(IsTestAccountName("WLBTEST02", "WLBTEST"));
   EXPECT_FALSE(IsTestAccountName("WLBTESTX", "WLBTEST"));
   EXPECT_FALSE(IsTestAccountName("RNDBOT12", "WLBTEST"));
-  EXPECT_FALSE(IsTestAccountName("WILL", "WLBTEST"));
+  EXPECT_FALSE(IsTestAccountName("PLAYER", "WLBTEST"));
   EXPECT_FALSE(IsTestAccountName("WLBTEST", ""));
 }
 
