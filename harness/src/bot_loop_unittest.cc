@@ -301,5 +301,73 @@ TEST(BotLoopTest, SupersededInFlightCallDoesNotDispatchStaleSteps) {
   EXPECT_NE(brain.front_request().user.find("Woken: died."), std::string::npos);
 }
 
+TEST(BotLoopTest, ReconnectAfterDisconnectWithInFlightCallWakesBotAgain) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Tess", 1, t0);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+
+  // Module disconnects while call #1 is still in flight; then call #1 finishes
+  // before any new snapshot arrives.
+  loop.OnConnectionChanged(false);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+
+  // Reconnecting and receiving a new snapshot must trigger a fresh first look.
+  loop.OnConnectionChanged(true);
+  pb::Snapshot s2 = MakeLiveSnap("Tess", 2, t0 + base::Seconds(5));
+  AddKeep(&s2);
+  loop.OnSnapshot(s2, t0 + base::Seconds(5));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("Woken: first look."),
+            std::string::npos);
+}
+
+TEST(BotLoopTest, StaleCommandErrorDoesNotCancelCurrentPlan) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Tess", 1, t0);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.StreamFirstLine("do: 1");
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  ASSERT_EQ(commands.size(), 1u);
+  const uint32_t current_id = commands[0].command_id;
+
+  // An error from an older command (different command_id) is ignored.
+  pb::ImmediateEvent stale_err;
+  stale_err.bot = "Tess";
+  pb::ErrorEvent& se = stale_err.event.error.emplace();
+  se.command_id = current_id + 99;
+  se.text = "too late";
+  loop.OnEvent(stale_err, t0 + base::Seconds(1));
+  EXPECT_EQ(brain.size(), 0u);
+
+  // An error matching the current plan's command_id cancels it and wakes.
+  pb::ImmediateEvent cur_err;
+  cur_err.bot = "Tess";
+  pb::ErrorEvent& ce = cur_err.event.error.emplace();
+  ce.command_id = current_id;
+  ce.text = "target lost";
+  loop.OnEvent(cur_err, t0 + base::Seconds(2));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("Woken: step failed: target lost."),
+            std::string::npos);
+}
+
 }  // namespace
 }  // namespace harness

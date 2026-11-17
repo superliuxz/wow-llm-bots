@@ -137,7 +137,7 @@ class LiveSession : public base::RawPtrTarget {
       log_fn_.Run(base::StringPrintf(
           "harness: last min snapshots=%" PRIu64 " events=%" PRIu64
           " (built->received p50=%.2f ms p95=%.2f ms max=%.2f ms) "
-          "decisions=%" PRIu64 " commands=%" PRIu64,
+          "total_decisions=%" PRIu64 " total_commands=%" PRIu64,
           s.snapshots, s.events, pct_ms(0.5), pct_ms(0.95), pct_ms(1.0),
           loop_->decisions_completed(), loop_->commands_sent()));
     }

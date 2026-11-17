@@ -101,6 +101,12 @@ void BotLoop::OnConnectionChanged(bool connected) {
     for (auto&& [name, state] : bots_) {
       state.runner.Stop();
       state.latest_snapshot.reset();
+      state.look_deadline = base::TimeTicks();
+      state.has_ever_woken = false;
+      state.has_queued_wake = false;
+      state.call_in_flight = false;
+      state.pending_reasons.clear();
+      ++state.call_epoch;
     }
   }
 }
@@ -170,6 +176,10 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks /*received_at*/) {
   BotState& state = bots_[bot];
   NoteEvent(&state, imm.event);
   if (imm.event.error && imm.event.error->command_id != 0) {
+    if (!state.runner.active() ||
+        imm.event.error->command_id != state.runner.last_command_id()) {
+      return;
+    }
     state.runner.Stop();
   }
   const std::optional<WakeTrigger> trig =
