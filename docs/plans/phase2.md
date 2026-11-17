@@ -18,7 +18,7 @@ Not yet: goals system, full perception, upkeep, learning, many bots (phase 3+).
 ```
 worldserver process                                harness process (ours)          llama-server
 +----------------------------------------------+   +----------------------------+   +-----------+
-| mod-playerbots (stock body: combat, quests)  |   | IO thread: socket client   |   | Qwen3.6   |
+| mod-playerbots (stock body: combat, quests)  |   | IO thread: socket client   |   | Gemma 4   |
 |        ^ steer (RPG state, chat)             |   | main sequence: per-bot     |   | 35B-A3B   |
 | mod-llm-brain (ours, thin):                  |   |   brain, prompt builder,   |<->| HTTP      |
 |  world thread: build snapshots, apply cmds   |   |   parser, scheduler        |   | localhost |

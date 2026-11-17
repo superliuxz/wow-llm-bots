@@ -8,7 +8,9 @@ import os
 
 from wlblib.common import OUT, ROOT, need
 
-DEFAULT_MODEL = "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"
+# The more accurate model within the speed limit (docs/TODO.md, "Model choice"): Gemma 4 scored
+# 44/48 on the eval against Qwen3.6's 35/48, 16 ms slower to the first line. `MODEL=` picks another.
+DEFAULT_MODEL = "gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf"
 
 
 def serve(slots=16, ctx_per_slot=4096, model=None, extra=()):

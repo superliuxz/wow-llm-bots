@@ -58,15 +58,9 @@ Working order (2026-11-17 09:50): finish #3, #1, then #4, #2, #5.
    and read the real numbers: wakes per bot per minute, how long plans last, `age_at_ask` /
    `age_at_first_line` / `age_at_plan` / `age_at_apply`, combat and death detection latency,
    latest-wins under a stalled harness. Done when the list in `docs/plans/phase2.md` holds.
-2. **Model choice** (decided 2026-11-17: Qwen3.6-35B-A3B stays the default for now; both models
-   stay in `models/`; the default is the more accurate one as long as it stays within the speed
-   limit; they can't be loaded together: 17 + 22 GB > 32 GB). The eval grew from 15 to 48 cases
-   (33 made by `tools/snapshot/make_eval_cases.py`: whispers, combat, targets, loot, HP/mana,
-   quests). Shootout on 48 (4 slots, idle GPU, 2026-11-17): **Qwen3.6 35/48 (73%), `do:`
-   118 ms, full 218 ms; Gemma 4 44/48 (92%), `do:` 134 ms, full 306 ms.** Qwen misses resting
-   at low HP/mana (5), idling in an empty field (4) and whispers (2); both attack a red mob.
-   **Left:** apply the rule (Gemma is more accurate and 16 ms slower to `do:`); revisit
-   `herb_to_gather` once the quest log is rendered.
+2. **Re-baseline perf on Gemma 4** (`tools/wlb test perf --update-baselines`):
+   `tools/wlblib/cases/perf_baselines.json` was measured on Qwen3.6, now that Gemma 4 is the
+   default; revisit `herb_to_gather` once the quest log is rendered.
 3. **E2E latency Tier 2** (`docs/plans/latency.md`): built; measure live (In progress).
 4. **Module: more things a bot can do** (`docs/plans/harness.md`, M1 "Not yet"). Options today:
    Attack, Loot, Keep. Missing: talk (playerbots opens gossip only for a bot's master), gather,
@@ -118,6 +112,9 @@ Working order (2026-11-17 09:50): finish #3, #1, then #4, #2, #5.
 
 ## Loose ends
 
+- A bot once wrote `tell <its own name>:` (Gatda, Gemma 4, live 2026-11-17); the module refuses
+  it ("you can't whisper yourself"), so nothing breaks, but the whisper is lost. Watch whether it
+  recurs; the prompt may need to say who "you" are next to the whisper.
 - **Dead bots wake in a loop** (seen live 2026-11-17 on Testpriest and Gatda): while dead,
   the screen still offers Attack/Loot options, the module refuses each with "you are dead", and
   every refusal wakes the brain again (several wakes a minute). The options while dead should be
@@ -163,6 +160,9 @@ Working order (2026-11-17 09:50): finish #3, #1, then #4, #2, #5.
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-17: default model switched to Gemma 4 26B-A4B (`tools/wlblib/llm.py`) by the rule
+  "the more accurate within the speed limit": 48-case eval Gemma 4 44/48 (`do:` 134 ms, full
+  306 ms) vs Qwen3.6 35/48 (118 / 218 ms); Qwen3.6 kept in `models/` (`MODEL=`).
 - 2026-11-17: replaced `protobuf` + `abseil-cpp` with `stephenberry/glaze` v9.1.0
   (`common/proto/snapshot.h` plain C++20 structs + `snapshot_wire.cc` BEVE wire/JSON +
   `snapshot_check` + `wire_py.py`), removed `third_party/abseil-cpp`, `third_party/protobuf`,
