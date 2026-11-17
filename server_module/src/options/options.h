@@ -45,6 +45,8 @@ std::vector<OptionTarget> AddOptions(wlb::snapshot::Snapshot* snapshot);
 class OptionHistory {
  public:
   explicit OptionHistory(base::TimeDelta window);
+  OptionHistory(OptionHistory&&) noexcept;
+  OptionHistory& operator=(OptionHistory&&) noexcept;
   OptionHistory(const OptionHistory&) = delete;
   OptionHistory& operator=(const OptionHistory&) = delete;
   ~OptionHistory();
@@ -70,7 +72,7 @@ class OptionHistory {
     base::TimeTicks built;
     std::vector<OptionTarget> options;
   };
-  const base::TimeDelta window_;
+  base::TimeDelta window_;
   std::deque<Entry> entries_;  // Oldest first.
 };
 

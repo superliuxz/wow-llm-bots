@@ -17,7 +17,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <map>
+#include <flat_map>
 #include <string>
 #include <vector>
 
@@ -69,8 +69,8 @@ class Scheduler {
   size_t next_slot_ = 0;
   std::vector<Waiting> queue_;
   std::vector<bool> slot_busy_;
-  std::map<std::string, int> in_flight_;
-  std::map<std::string, int> last_slot_;
+  std::flat_map<std::string, int> in_flight_;
+  std::flat_map<std::string, int> last_slot_;
   bool starting_ = false;  // StartWaiting is running (work may finish inside).
   base::WeakPtrFactory<Scheduler> weak_factory_{this};
 };

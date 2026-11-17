@@ -16,6 +16,11 @@ set(WLB_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 add_library(wlb_base STATIC
   base/message_loop/message_pump_default.cc
+  base/strings/strcat.cc
+  base/strings/string_number_conversions.cc
+  base/strings/string_split.cc
+  base/strings/string_util.cc
+  base/strings/stringprintf.cc
   base/synchronization/condition_variable.cc
   base/synchronization/lock.cc
   base/synchronization/waitable_event.cc
@@ -89,6 +94,7 @@ add_subdirectory("${WLB_ROOT}/third_party/googletest" googletest EXCLUDE_FROM_AL
 add_executable(wlb_common_unittests
   base/functional/callback_unittest.cc
   base/memory/raw_ptr_unittest.cc
+  base/strings/strings_unittest.cc
   base/task/task_queue_unittest.cc
   base/threading/thread_unittest.cc
   base/synchronization/waitable_event_unittest.cc
@@ -147,8 +153,8 @@ target_include_directories(wlb_harness PUBLIC "${WLB_HARNESS_SRC}")
 # so their warnings are not ours).
 target_include_directories(wlb_harness SYSTEM PUBLIC
   "${WLB_ROOT}/third_party/cpp-httplib" "${WLB_ROOT}/third_party/json/include")
-target_link_libraries(wlb_harness PUBLIC wlb_net wlb_proto absl::strings
-                      absl::str_format Threads::Threads)
+target_link_libraries(wlb_harness PUBLIC wlb_net wlb_proto)
+target_compile_features(wlb_harness PUBLIC cxx_std_26)
 target_compile_options(wlb_harness PRIVATE ${WLB_SAFETY_FLAGS})
 add_executable(harness_unittests
   "${WLB_HARNESS_SRC}/bot_loop_unittest.cc"

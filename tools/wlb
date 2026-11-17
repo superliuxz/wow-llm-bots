@@ -6,7 +6,7 @@
   tools/wlb config [TEST]                render out/server/etc/*.conf (TEST: config/tests/TEST.*)
   tools/wlb server start | stop
   tools/wlb console COMMAND...           send a command to worldserver's console
-  tools/wlb check [format|includes|snapshots|triggers|goldens] [--fix] [FILES...]
+  tools/wlb check [format|includes|snapshots|triggers|goldens|sanitizers] [--san] [--fix] [FILES...]
   tools/wlb test unit [--filter PATTERN] [--variant asan|tsan|msan]
   tools/wlb test e2e|perf|eval [NAME...]  [--keep-server]   (e2e: a live server, stack restored after)
   tools/wlb test perf [--update-baselines [--verify]] | --capture   (perf: record the numbers, and
@@ -60,7 +60,10 @@ def parse(argv):
 
     p = sub.add_parser("check", help="what code must pass before review or commit")
     p.add_argument("what", nargs="?", default="all",
-                   choices=["all", "format", "includes", "snapshots", "triggers", "goldens"])
+                   choices=["all", "format", "includes", "snapshots", "triggers", "goldens",
+                            "sanitizers"])
+    p.add_argument("--sanitizers", "--san", "--full", dest="sanitizers", action="store_true",
+                   help="for all: also build and run ASan+UBSan, TSan, and MSan")
     p.add_argument("--fix", action="store_true", help="for format and includes: rewrite files")
     p.add_argument("files", nargs="*", help="for snapshots: files to validate")
 
@@ -123,7 +126,9 @@ def main():
         server.console(" ".join(a.words))
     elif a.command == "check":
         if a.what == "all":
-            check.all_()
+            check.all_(with_sanitizers=a.sanitizers)
+        elif a.what == "sanitizers":
+            check.sanitizers()
         elif a.what == "format":
             check.format_(fix=a.fix)
         elif a.what == "includes":

@@ -10,24 +10,22 @@
 #include <utility>
 #include <vector>
 
-#include "absl/strings/ascii.h"
-#include "absl/strings/numbers.h"
-#include "absl/strings/str_cat.h"
-#include "absl/strings/str_join.h"
-#include "absl/strings/str_split.h"
-#include "absl/strings/strip.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 
 namespace harness {
 namespace {
 
 std::string_view Trim(std::string_view text) {
-  return absl::StripAsciiWhitespace(text);
+  return base::TrimWhitespaceASCII(text);
 }
 
 // An integer in [low, high], digits only.
 std::optional<int> ParseInt(std::string_view text, int low, int high) {
   int value = 0;
-  if (text.empty() || !absl::SimpleAtoi(text, &value) || value < low ||
+  if (text.empty() || !base::StringToInt(text, &value) || value < low ||
       value > high || text.find_first_not_of("0123456789") != text.npos) {
     return std::nullopt;
   }
@@ -75,7 +73,7 @@ std::optional<PlanStep> ParseStep(std::string_view token, int option_count) {
 
 // "hp<40", "hp40", "hp<40%", "enemy_player<40yd", "attacked", "whisper".
 std::optional<Watch> ParseWatch(std::string_view token) {
-  const std::string text = absl::AsciiStrToLower(Trim(token));
+  const std::string text = base::ToLowerASCII(Trim(token));
   if (text == "attacked") {
     return Watch{Watch::Kind::kAttacked, 0};
   }
@@ -87,15 +85,19 @@ std::optional<Watch> ParseWatch(std::string_view token) {
       {"mana", Watch::Kind::kManaBelow},
       {"enemy_player", Watch::Kind::kEnemyPlayerWithin}};
   for (const auto& [prefix, kind] : kinds) {
-    std::string_view rest = text;
-    if (!absl::ConsumePrefix(&rest, prefix)) {
+    const std::optional<std::string_view> after_prefix =
+        base::RemovePrefix(text, prefix);
+    if (!after_prefix) {
       continue;
     }
-    rest = Trim(rest);
-    absl::ConsumePrefix(&rest, "<");
-    rest = Trim(rest);
-    if (!absl::ConsumeSuffix(&rest, "%")) {
-      absl::ConsumeSuffix(&rest, "yd");
+    std::string_view rest = Trim(*after_prefix);
+    if (const auto after_lt = base::RemovePrefix(rest, "<")) {
+      rest = Trim(*after_lt);
+    }
+    if (const auto no_pct = base::RemoveSuffix(rest, "%")) {
+      rest = *no_pct;
+    } else if (const auto no_yd = base::RemoveSuffix(rest, "yd")) {
+      rest = *no_yd;
     }
     const int max = kind == Watch::Kind::kEnemyPlayerWithin ? 999 : 99;
     if (const std::optional<int> value = ParseInt(Trim(rest), 1, max)) {
@@ -113,7 +115,8 @@ std::optional<std::vector<T>> ParseList(std::string_view text,
                                         size_t max,
                                         Parse parse) {
   std::vector<T> items;
-  for (std::string_view token : absl::StrSplit(text, ',')) {
+  for (std::string_view token : base::SplitStringPiece(
+           text, ",", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
     std::optional<T> item = parse(token);
     if (!item || items.size() >= max) {
       return std::nullopt;
@@ -148,32 +151,32 @@ std::string PlanGrammar(int option_count) {
   option_count = std::max(option_count, 1);
   std::vector<std::string> options;
   for (int i = 1; i <= option_count; ++i) {
-    options.push_back(absl::StrCat("\"", i, "\""));
+    options.push_back(base::StrCat({"\"", base::NumberToString(i), "\""}));
   }
   // Every count 2..kMaxRepeat spelled out, so the grammar follows kMaxRepeat
   // whatever its value.
   std::vector<std::string> counts;
   for (int n = 2; n <= kMaxRepeat; ++n) {
-    counts.push_back(absl::StrCat("\"", n, "\""));
+    counts.push_back(base::StrCat({"\"", base::NumberToString(n), "\""}));
   }
-  return absl::StrCat(
+  return base::StrCat({
       "root ::= \"do: \" steps \"\\nexpect: \" (\"none\" | ids) \"\\nwatch: \" "
       "watches \"\\nlook: \" looknum goal? say?\n"
       "ids ::= opt (\", \" opt){0,",
-      kMaxExpected - 1,
+      base::NumberToString(kMaxExpected - 1),
       "}\n"
       "steps ::= step (\", \" step){0,",
-      kMaxSteps - 1,
+      base::NumberToString(kMaxSteps - 1),
       "}\n"
       "step ::= opt (\"x\" cnt)?\n"
       "cnt ::= ",
-      absl::StrJoin(counts, " | "),
+      base::JoinString(counts, " | "),
       "\n"
       "opt ::= ",
-      absl::StrJoin(options, " | "),
+      base::JoinString(options, " | "),
       "\n"
       "watches ::= \"none\" | watch (\", \" watch){0,",
-      kMaxWatches - 1,
+      base::NumberToString(kMaxWatches - 1),
       "}\n"
       "watch ::= \"hp<\" pct | \"mana<\" pct | \"enemy_player<\" num | "
       "\"attacked\" | \"whisper\"\n"
@@ -181,10 +184,12 @@ std::string PlanGrammar(int option_count) {
       "num ::= [1-9] [0-9]{0,2}\n"
       "looknum ::= [1-9] [0-9] [0-9]?\n"
       "goal ::= \"\\ngoal: \" [^\\n]{1,",
-      kMaxGoalChars,
+      base::NumberToString(kMaxGoalChars),
       "}\n"
       "say ::= \"\\nsay: \" [^\\n]{1,",
-      kMaxSayChars, "}\n");
+      base::NumberToString(kMaxSayChars),
+      "}\n",
+  });
 }
 
 std::optional<std::vector<PlanStep>> ParsePlanStepsLine(std::string_view line,
@@ -195,7 +200,7 @@ std::optional<std::vector<PlanStep>> ParsePlanStepsLine(std::string_view line,
   }
   const size_t colon = line.find(':');
   if (colon == line.npos ||
-      absl::AsciiStrToLower(Trim(line.substr(0, colon))) != "do") {
+      base::ToLowerASCII(Trim(line.substr(0, colon))) != "do") {
     return std::nullopt;
   }
   const std::string value = StripBrackets(Trim(line.substr(colon + 1)));
@@ -208,19 +213,20 @@ std::optional<Plan> ParsePlan(std::string_view text, int option_count) {
   Plan plan;
   bool have_steps = false;
   bool have_look = false;
-  for (std::string_view line : absl::StrSplit(text, '\n')) {
+  for (std::string_view line : base::SplitStringPiece(
+           text, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
     const size_t colon = line.find(':');
     if (colon == line.npos) {
       continue;
     }
-    const std::string key = absl::AsciiStrToLower(Trim(line.substr(0, colon)));
+    const std::string key = base::ToLowerASCII(Trim(line.substr(0, colon)));
     // Free text is kept as written; brackets are only stripped from the
     // numbers a model sometimes wraps in them.
     const std::string_view raw = Trim(line.substr(colon + 1));
     const std::string value = StripBrackets(raw);
     if (key == "goal") {
       plan.goal = Cut(raw, kMaxGoalChars);
-      if (absl::AsciiStrToLower(plan.goal) == "none") {
+      if (base::ToLowerASCII(plan.goal) == "none") {
         plan.goal.clear();  // What FormatPlan writes for no goal.
       }
     } else if (key == "say") {
@@ -235,7 +241,7 @@ std::optional<Plan> ParsePlan(std::string_view text, int option_count) {
       plan.steps = std::move(*steps);
       have_steps = true;
     } else if (key == "expect") {
-      if (absl::AsciiStrToLower(Trim(value)) == "none") {
+      if (base::ToLowerASCII(Trim(value)) == "none") {
         continue;
       }
       auto expect = ParseList<int>(
@@ -249,7 +255,7 @@ std::optional<Plan> ParsePlan(std::string_view text, int option_count) {
       }
       plan.expect = std::move(*expect);
     } else if (key == "watch") {
-      if (absl::AsciiStrToLower(Trim(value)) == "none") {
+      if (base::ToLowerASCII(Trim(value)) == "none") {
         continue;
       }
       auto watches = ParseList<Watch>(value, kMaxWatches, ParseWatch);
@@ -260,11 +266,11 @@ std::optional<Plan> ParsePlan(std::string_view text, int option_count) {
     } else if (key == "look") {
       // "60", "60s", "60 seconds", or "2m" / "2 min" / "2 minutes".
       size_t digits = 0;
-      while (digits < value.size() && absl::ascii_isdigit(value[digits])) {
+      while (digits < value.size() && base::IsAsciiDigit(value[digits])) {
         ++digits;
       }
       const std::string unit =
-          absl::AsciiStrToLower(Trim(std::string_view(value).substr(digits)));
+          base::ToLowerASCII(Trim(std::string_view(value).substr(digits)));
       int scale = 0;
       if (unit.empty() || unit == "s" || unit == "sec" || unit == "secs" ||
           unit == "second" || unit == "seconds") {
@@ -294,8 +300,10 @@ std::optional<Plan> ParsePlan(std::string_view text, int option_count) {
 std::string FormatPlan(const Plan& plan) {
   std::vector<std::string> steps;
   for (const PlanStep& step : plan.steps) {
-    steps.push_back(step.times > 1 ? absl::StrCat(step.option, "x", step.times)
-                                   : absl::StrCat(step.option));
+    steps.push_back(step.times > 1
+                        ? base::StrCat({base::NumberToString(step.option), "x",
+                                        base::NumberToString(step.times)})
+                        : base::NumberToString(step.option));
   }
   std::string watches = "none";
   if (!plan.watches.empty()) {
@@ -303,13 +311,16 @@ std::string FormatPlan(const Plan& plan) {
     for (const Watch& watch : plan.watches) {
       switch (watch.kind) {
         case Watch::Kind::kHealthBelow:
-          items.push_back(absl::StrCat("hp<", watch.value));
+          items.push_back(
+              base::StrCat({"hp<", base::NumberToString(watch.value)}));
           break;
         case Watch::Kind::kManaBelow:
-          items.push_back(absl::StrCat("mana<", watch.value));
+          items.push_back(
+              base::StrCat({"mana<", base::NumberToString(watch.value)}));
           break;
         case Watch::Kind::kEnemyPlayerWithin:
-          items.push_back(absl::StrCat("enemy_player<", watch.value));
+          items.push_back(base::StrCat(
+              {"enemy_player<", base::NumberToString(watch.value)}));
           break;
         case Watch::Kind::kAttacked:
           items.push_back("attacked");
@@ -319,17 +330,27 @@ std::string FormatPlan(const Plan& plan) {
           break;
       }
     }
-    watches = absl::StrJoin(items, ", ");
+    watches = base::JoinString(items, ", ");
   }
-  std::string out = absl::StrCat(
-      "do: ", absl::StrJoin(steps, ", "), "\nexpect: ",
-      plan.expect.empty() ? "none" : absl::StrJoin(plan.expect, ", "),
-      "\nwatch: ", watches, "\nlook: ", plan.look_s);
+  std::vector<std::string> expect_strs;
+  for (int opt : plan.expect) {
+    expect_strs.push_back(base::NumberToString(opt));
+  }
+  std::string out = base::StrCat({
+      "do: ",
+      base::JoinString(steps, ", "),
+      "\nexpect: ",
+      plan.expect.empty() ? "none" : base::JoinString(expect_strs, ", "),
+      "\nwatch: ",
+      watches,
+      "\nlook: ",
+      base::NumberToString(plan.look_s),
+  });
   if (!plan.goal.empty()) {
-    absl::StrAppend(&out, "\ngoal: ", plan.goal);
+    base::StrAppend(&out, {"\ngoal: ", plan.goal});
   }
   if (!plan.say.empty()) {
-    absl::StrAppend(&out, "\nsay: ", plan.say);
+    base::StrAppend(&out, {"\nsay: ", plan.say});
   }
   return out;
 }

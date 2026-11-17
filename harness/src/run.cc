@@ -2,6 +2,8 @@
 
 #include "run.h"
 
+#include <inttypes.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -14,13 +16,13 @@
 #include <utility>
 #include <vector>
 
-#include "absl/strings/numbers.h"
-#include "absl/strings/str_cat.h"
-#include "absl/strings/str_format.h"
-#include "absl/strings/strip.h"
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/threading/thread.h"
@@ -35,13 +37,13 @@ namespace harness {
 namespace {
 
 bool SplitFlag(const std::string& arg, std::string* name, std::string* value) {
-  std::string_view rest = arg;
-  if (!absl::ConsumePrefix(&rest, "--")) {
+  const std::optional<std::string_view> rest = base::RemovePrefix(arg, "--");
+  if (!rest) {
     return false;
   }
-  const size_t eq = rest.find('=');
-  *name = std::string(rest.substr(0, eq));
-  *value = eq == rest.npos ? "" : std::string(rest.substr(eq + 1));
+  const size_t eq = rest->find('=');
+  *name = std::string(rest->substr(0, eq));
+  *value = eq == rest->npos ? "" : std::string(rest->substr(eq + 1));
   return true;
 }
 
@@ -132,9 +134,10 @@ class LiveSession : public base::RawPtrTarget {
       return s.receive_ages[idx].InMicroseconds() / 1000.0;
     };
     if (log_fn_) {
-      log_fn_.Run(absl::StrFormat(
-          "harness: last min snapshots=%d events=%d (built->received "
-          "p50=%.2f ms p95=%.2f ms max=%.2f ms) decisions=%d commands=%d",
+      log_fn_.Run(base::StringPrintf(
+          "harness: last min snapshots=%" PRIu64 " events=%" PRIu64
+          " (built->received p50=%.2f ms p95=%.2f ms max=%.2f ms) "
+          "decisions=%" PRIu64 " commands=%" PRIu64,
           s.snapshots, s.events, pct_ms(0.5), pct_ms(0.95), pct_ms(1.0),
           loop_->decisions_completed(), loop_->commands_sent()));
     }
@@ -157,13 +160,14 @@ std::optional<RunOptions> ParseRunArgs(const std::vector<std::string>& args,
     std::string name;
     std::string value;
     if (!SplitFlag(arg, &name, &value)) {
-      *error = absl::StrCat("unexpected positional argument: ", arg);
+      *error = base::StrCat({"unexpected positional argument: ", arg});
       return std::nullopt;
     }
     int number = 0;
-    const bool is_number = absl::SimpleAtoi(value, &number);
+    const bool is_number = base::StringToInt(value, &number);
     double real = 0;
-    const bool is_real = absl::SimpleAtod(value, &real) && std::isfinite(real);
+    const bool is_real =
+        base::StringToDouble(value, &real) && std::isfinite(real);
     if (name == "socket" && !value.empty()) {
       options.socket_path = value;
     } else if (name == "rules" && !value.empty()) {
@@ -181,7 +185,7 @@ std::optional<RunOptions> ParseRunArgs(const std::vector<std::string>& args,
     } else if (name == "seconds" && is_real && real >= 0.0) {
       options.seconds = real;
     } else {
-      *error = absl::StrCat("unknown or invalid option: ", arg);
+      *error = base::StrCat({"unknown or invalid option: ", arg});
       return std::nullopt;
     }
   }
@@ -196,7 +200,7 @@ int RunHarness(const RunOptions& options,
   }
   const std::optional<std::string> rules = ReadFile(options.rules_path);
   if (!rules) {
-    log_fn.Run(absl::StrCat("can't read the rules ", options.rules_path));
+    log_fn.Run(base::StrCat({"can't read the rules ", options.rules_path}));
     return 1;
   }
 
@@ -229,9 +233,10 @@ int RunHarness(const RunOptions& options,
     return 1;
   }
 
-  log_fn.Run(absl::StrFormat("harness: watching %s -> llama %s:%d (%d slots)",
-                             options.socket_path, options.endpoint.host,
-                             options.endpoint.port, options.slots));
+  log_fn.Run(base::StringPrintf(
+      "harness: watching %s -> llama %s:%d (%zu slots)",
+      options.socket_path.c_str(), options.endpoint.host.c_str(),
+      options.endpoint.port, options.slots));
 
   base::WaitableEvent local_stop;
   base::WaitableEvent* waiter = stop_event ? stop_event : &local_stop;

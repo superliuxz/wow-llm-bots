@@ -53,10 +53,12 @@ Strict (safety reasons), use `common/base`:
 | `std::function`, `std::bind`, lambdas capturing `this` posted across threads | `base::OnceCallback` / `RepeatingCallback`, `base::BindOnce` / `BindRepeating` with a `base::WeakPtr` receiver |
 | `std::shared_ptr`, `std::make_shared`, `enable_shared_from_this` | single ownership (`std::unique_ptr`), or `base::RefCountedThreadSafe<T>` + `base::scoped_refptr<T>` (`base::MakeRefCounted`) |
 | `std::mutex`, `lock_guard`, `unique_lock`, `std::condition_variable` | `base::Lock` + `base::AutoLock` + `base::ConditionVariable` (`base/synchronization/`), with `GUARDED_BY(lock_)` on guarded members (`base/thread_annotations.h`); `-Werror=thread-safety` checks it at compile time |
-| `std::thread`, `std::this_thread` | `base::Thread`, `base::ThreadPool`, `base::PlatformThread` (`Sleep`, `CurrentId`) |
+| `std::thread`, `std::this_thread`, `<pthread.h>` (outside `common/base/`) | `base::Thread`, `base::ThreadPool`, `base::PlatformThread` (`Sleep`, `CurrentId`); `<pthread.h>` is encapsulated inside `common/base/` only |
 | `std::promise`, `std::future` | post a reply task (`PostTaskAndReplyWithResult`); block only in startup handshakes and tests, with `base::WaitableEvent` |
 | Boost.Asio, libevent, custom event loops | `base::Thread` with `MessagePumpType::IO` + `CurrentIOThread::Get()->WatchFileDescriptor(...)`; sockets in `common/net` |
 | shared state across threads | post tasks to the owning sequence (`SequencedTaskRunner::PostTask`) |
+| `absl::*` / `#include "absl/..."` | `common/base/` (`base/strings/` for `StrCat`, `StringPrintf`, `JoinString`, `SplitString`, `TrimWhitespaceASCII`, `StringToInt`, `NumberToString`, ...). `third_party/abseil-cpp` exists solely as `protobuf`'s internal build dependency and is never included or linked directly by our code (`common/`, `harness/`, `server_module/`). |
+| `std::set`, `std::map`, `std::multiset`, `std::multimap` (`<set>`, `<map>`) | `std::vector` (in C++20 `common/` and `server_module/`) or C++23 `std::flat_map` / `std::flat_set` (`<flat_map>`, `<flat_set>` in C++26 `harness/`) — contiguous storage instead of per-node red-black tree allocations |
 | raw `T*` pointer **fields** (non-owning) | `base::raw_ptr<T>` (`base/memory/raw_ptr.h`); make the pointee a `base::RawPtrTarget` so destroying it while a `raw_ptr` still points to it crashes immediately ("dangling raw_ptr"); `base::MayBeDangling<T>` only for fields that dangle by design (with a comment); delete through one with `ClearAndDelete()`. Locals and parameters stay plain `T*`; owning pointers are `std::unique_ptr` / `scoped_refptr`. |
 
 Loosened (the reason doesn't apply to us):
@@ -69,8 +71,9 @@ Loosened (the reason doesn't apply to us):
 Allowed as in Chromium: `std::unique_ptr`/`make_unique`, `std::optional`, `std::string_view`,
 `std::atomic`, `std::invoke`/`apply`, standard containers, `<compare>`.
 
-Layout mirrors Chromium: `base/functional/`, `base/memory/`, `base/task/`, `base/threading/`,
-`base/synchronization/`, `base/message_loop/`, `base/time/`, `base/compiler_specific.h`.
+Layout mirrors Chromium: `base/functional/`, `base/memory/`, `base/strings/`, `base/task/`,
+`base/threading/`, `base/synchronization/`, `base/message_loop/`, `base/time/`,
+`base/compiler_specific.h`.
 
 **Safety build settings:** our code builds with `-Wthread-safety -Werror=thread-safety`.
 Hardened standard library (`_GLIBCXX_ASSERTIONS`, libc++ extensive hardening) is on for
@@ -87,13 +90,15 @@ unused includes, no relying on transitive includes. Check with `tools/wlb check 
 included: use the public header and mark it `// IWYU pragma: keep`.
 
 **Before showing C++ for review or committing it, `tools/wlb check` must pass:**
-clang-format, include check, and build + unit tests in default, ASan+UBSan, TSan and MSan
-(MSan links an instrumented libc++ built by `tools/wlb setup msan`). New code comes
-with unit tests. A syscall MSan has no interceptor for gets
+clang-format, snapshot/trigger validation, default build + unit tests, include check, and screen
+goldens (~5 s). Run `tools/wlb check sanitizers` (or `tools/wlb check --sanitizers`) to also build
+and test under ASan+UBSan, TSan and MSan (MSan links an instrumented libc++ built by
+`tools/wlb setup msan`) before committing C++ changes that touch memory, lifetimes, threading or
+syscalls. New code comes with unit tests. A syscall MSan has no interceptor for gets
 `MSAN_UNPOISON` (`base/compiler_specific.h`), never a suppression.
 
 **Four test targets**, each its own `tools/wlb test <target>`: `unit` (gtest suites, no game or
-GPU; the `unit_tests` CMake target; `tools/wlb check` runs it under every sanitizer), `e2e` (live
+GPU; the `unit_tests` CMake target; `tools/wlb check sanitizers` runs it under every sanitizer), `e2e` (live
 scenarios against a real worldserver, pass or fail), `perf` (what things cost, each against a
 stored baseline and a hard limit: `tools/wlblib/cases/perf_baselines.json`) and `eval` (how well the brain decides, scored). Cases are modules in
 `tools/wlblib/cases/<target>_<name>.py`. A change to what the bot sees or does gets a unit test, and

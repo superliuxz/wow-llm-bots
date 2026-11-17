@@ -9,11 +9,10 @@
 #include <string_view>
 #include <vector>
 
-#include "absl/strings/numbers.h"
-#include "absl/strings/str_cat.h"
-#include "absl/strings/str_format.h"
-#include "absl/strings/str_join.h"
-#include "absl/strings/strip.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "decision_log.h"
 #include "file_util.h"
@@ -28,13 +27,13 @@ namespace {
 
 // "--name=value" or "--flag": the part after "--", split at '='.
 bool SplitFlag(const std::string& arg, std::string* name, std::string* value) {
-  std::string_view rest = arg;
-  if (!absl::ConsumePrefix(&rest, "--")) {
+  const std::optional<std::string_view> rest = base::RemovePrefix(arg, "--");
+  if (!rest) {
     return false;
   }
-  const size_t eq = rest.find('=');
-  *name = std::string(rest.substr(0, eq));
-  *value = eq == rest.npos ? "" : std::string(rest.substr(eq + 1));
+  const size_t eq = rest->find('=');
+  *name = std::string(rest->substr(0, eq));
+  *value = eq == rest->npos ? "" : std::string(rest->substr(eq + 1));
   return true;
 }
 
@@ -42,12 +41,15 @@ bool SplitFlag(const std::string& arg, std::string* name, std::string* value) {
 std::string DescribeSteps(const Plan& plan, const Screen& screen) {
   std::vector<std::string> parts;
   for (const PlanStep& step : plan.steps) {
-    const std::string kind(OptionKindName(screen.options[step.option - 1]));
-    parts.push_back(step.times > 1
-                        ? absl::StrCat(step.option, "x", step.times, " ", kind)
-                        : absl::StrCat(step.option, " ", kind));
+    const std::string_view kind =
+        OptionKindName(screen.options[step.option - 1]);
+    parts.push_back(
+        step.times > 1
+            ? base::StrCat({base::NumberToString(step.option), "x",
+                            base::NumberToString(step.times), " ", kind})
+            : base::StrCat({base::NumberToString(step.option), " ", kind}));
   }
-  return absl::StrJoin(parts, ", ");
+  return base::JoinString(parts, ", ");
 }
 
 }  // namespace
@@ -61,16 +63,17 @@ std::optional<DecideOptions> ParseDecideArgs(
     std::string value;
     if (!SplitFlag(arg, &name, &value)) {
       if (!options.snapshot_path.empty()) {
-        *error = absl::StrCat("one snapshot only; got a second: ", arg);
+        *error = base::StrCat({"one snapshot only; got a second: ", arg});
         return std::nullopt;
       }
       options.snapshot_path = arg;
       continue;
     }
     int number = 0;
-    const bool is_number = absl::SimpleAtoi(value, &number);
-    float real = 0;
-    const bool is_real = absl::SimpleAtof(value, &real) && std::isfinite(real);
+    const bool is_number = base::StringToInt(value, &number);
+    double real = 0;
+    const bool is_real =
+        base::StringToDouble(value, &real) && std::isfinite(real);
     if (name == "name") {
       options.bot_name = value;
     } else if (name == "goal") {
@@ -89,13 +92,12 @@ std::optional<DecideOptions> ParseDecideArgs(
       options.endpoint.port = number;
     } else if (name == "slot" && is_number && number >= -1) {
       options.slot = number;
-    } else if (name == "temperature" && is_real && real >= 0.0f &&
-               real <= 2.0f) {
-      options.temperature = real;
+    } else if (name == "temperature" && is_real && real >= 0.0 && real <= 2.0) {
+      options.temperature = static_cast<float>(real);
     } else if (name == "dry-run" && value.empty()) {
       options.dry_run = true;
     } else {
-      *error = absl::StrCat("unknown or invalid option: ", arg);
+      *error = base::StrCat({"unknown or invalid option: ", arg});
       return std::nullopt;
     }
   }
@@ -112,18 +114,19 @@ int RunDecide(const DecideOptions& options,
   const std::optional<std::string> snapshot_bytes =
       ReadFile(options.snapshot_path);
   if (!snapshot_bytes) {
-    absl::StrAppend(report, "can't read the snapshot ", options.snapshot_path,
-                    "\n");
+    base::StrAppend(report,
+                    {"can't read the snapshot ", options.snapshot_path, "\n"});
     return 1;
   }
   wlb::snapshot::Snapshot snapshot;
   if (!snapshot.ParseFromString(*snapshot_bytes)) {
-    absl::StrAppend(report, options.snapshot_path, " is not a snapshot\n");
+    base::StrAppend(report, {options.snapshot_path, " is not a snapshot\n"});
     return 1;
   }
   const std::optional<std::string> rules = ReadFile(options.rules_path);
   if (!rules) {
-    absl::StrAppend(report, "can't read the rules ", options.rules_path, "\n");
+    base::StrAppend(report,
+                    {"can't read the rules ", options.rules_path, "\n"});
     return 1;
   }
   PromptInput input;
@@ -134,8 +137,8 @@ int RunDecide(const DecideOptions& options,
   if (!options.identity_path.empty()) {
     const std::optional<std::string> identity = ReadFile(options.identity_path);
     if (!identity) {
-      absl::StrAppend(report, "can't read the identity ", options.identity_path,
-                      "\n");
+      base::StrAppend(
+          report, {"can't read the identity ", options.identity_path, "\n"});
       return 1;
     }
     input.identity = *identity;
@@ -147,11 +150,12 @@ int RunDecide(const DecideOptions& options,
 
   const Screen screen = RenderScreen(snapshot);
   const LlmRequest request = BuildPlanRequest(input, screen);
-  absl::StrAppendFormat(report, "== screen of %s (%d options)\n%s\n",
-                        input.bot_name, screen.options.size(), screen.text);
+  base::StringAppendF(report, "== screen of %s (%zu options)\n%s\n",
+                      input.bot_name.c_str(), screen.options.size(),
+                      screen.text.c_str());
   if (options.dry_run) {
-    absl::StrAppendFormat(
-        report, "== dry run: not asked. The prompt is %d characters.\n",
+    base::StringAppendF(
+        report, "== dry run: not asked. The prompt is %zu characters.\n",
         request.system.size() + request.user.size());
     return 0;
   }
@@ -163,42 +167,43 @@ int RunDecide(const DecideOptions& options,
   decision.time = base::Time::Now();
   decision.result = ask.Run(request);
   if (!decision.result.reply) {
-    absl::StrAppendFormat(report, "== no reply (%.0f ms): %s\n",
-                          decision.result.round_trip_ms, decision.result.error);
+    base::StringAppendF(report, "== no reply (%.0f ms): %s\n",
+                        decision.result.round_trip_ms,
+                        decision.result.error.c_str());
   } else {
     const LlmReply& reply = *decision.result.reply;
     if (decision.result.first_line_ms > 0) {
-      absl::StrAppendFormat(
+      base::StringAppendF(
           report,
           "== reply (%.0f ms, first line %.0f ms; prompt %d tokens, %d read "
           "again; wrote %d)\n%s\n",
           decision.result.round_trip_ms, decision.result.first_line_ms,
           reply.prompt_tokens, reply.prompt_computed, reply.completion_tokens,
-          reply.text);
+          reply.text.c_str());
     } else {
-      absl::StrAppendFormat(
+      base::StringAppendF(
           report,
           "== reply (%.0f ms; prompt %d tokens, %d read again; wrote %d)\n%s\n",
           decision.result.round_trip_ms, reply.prompt_tokens,
-          reply.prompt_computed, reply.completion_tokens, reply.text);
+          reply.prompt_computed, reply.completion_tokens, reply.text.c_str());
     }
     decision.plan =
         ParsePlan(reply.text, static_cast<int>(screen.options.size()));
     if (decision.plan) {
-      absl::StrAppendFormat(report, "== plan: %s; look again in %d s\n",
-                            DescribeSteps(*decision.plan, screen),
-                            decision.plan->look_s);
+      const std::string desc = DescribeSteps(*decision.plan, screen);
+      base::StringAppendF(report, "== plan: %s; look again in %d s\n",
+                          desc.c_str(), decision.plan->look_s);
     } else {
-      absl::StrAppend(report, "== not a valid plan for these options\n");
+      base::StrAppend(report, {"== not a valid plan for these options\n"});
     }
   }
   if (!options.log_dir.empty()) {
     const DecisionLog log(options.log_dir);
     if (log.Record(decision)) {
-      absl::StrAppendFormat(report, "== logged in %s\n",
-                            log.PathFor(decision.bot, decision.time));
+      const std::string path = log.PathFor(decision.bot, decision.time);
+      base::StringAppendF(report, "== logged in %s\n", path.c_str());
     } else {
-      absl::StrAppend(report, "== could not write the decision log\n");
+      base::StrAppend(report, {"== could not write the decision log\n"});
     }
   }
   return decision.plan ? 0 : 1;

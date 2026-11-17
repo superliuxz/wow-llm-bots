@@ -2,7 +2,7 @@
 
 #include "scheduler.h"
 
-#include <map>
+#include <flat_map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -36,7 +36,7 @@ class Recorder {
 
  private:
   std::vector<std::string> started_;
-  std::map<std::string, base::OnceClosure> dones_;
+  std::flat_map<std::string, base::OnceClosure> dones_;
 };
 
 using Names = std::vector<std::string>;
@@ -175,8 +175,8 @@ TEST(SchedulerTest, SpreadsBotsAcrossSlotsAndReusesIdlePreferredSlot) {
 
 TEST(SchedulerTest, NeverWaitsForABusyPreferredSlot) {
   Scheduler scheduler(2);
-  std::map<std::string, base::OnceClosure> dones;
-  std::map<std::string, int> assigned;
+  std::flat_map<std::string, base::OnceClosure> dones;
+  std::flat_map<std::string, int> assigned;
   auto capture = [&](const std::string& bot) -> Scheduler::SlotWork {
     return [&, bot](int slot, base::OnceClosure done) {
       assigned[bot] = slot;

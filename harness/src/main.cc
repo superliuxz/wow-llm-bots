@@ -7,10 +7,9 @@
 //                   --identity= --log-dir= --host= --port= --slot=
 //                   --temperature= --dry-run]
 
-#include <pthread.h>  // IWYU pragma: keep
-#include <signal.h>
-#include <time.h>
+#include <unistd.h>
 
+#include <csignal>
 #include <cstdio>
 #include <optional>
 #include <string>
@@ -23,6 +22,16 @@
 #include "run.h"
 
 namespace {
+
+int g_signal_write_fd = -1;
+
+void OnShutdownSignal(int /*sig*/) {
+  if (g_signal_write_fd >= 0) {
+    const char byte = 1;
+    const ssize_t unused = ::write(g_signal_write_fd, &byte, 1);
+    (void)unused;
+  }
+}
 
 int Usage() {
   std::fputs(
@@ -47,29 +56,36 @@ int RunCommand(const std::vector<std::string>& args) {
     return Usage();
   }
 
-  sigset_t mask{};
-  sigemptyset(&mask);
-  sigaddset(&mask, SIGINT);
-  sigaddset(&mask, SIGTERM);
-  pthread_sigmask(SIG_BLOCK, &mask, nullptr);
+  int pipe_fds[2] = {-1, -1};
+  if (::pipe(pipe_fds) != 0) {
+    return 1;
+  }
+  g_signal_write_fd = pipe_fds[1];
+  std::signal(SIGINT, &OnShutdownSignal);
+  std::signal(SIGTERM, &OnShutdownSignal);
 
   base::WaitableEvent stop_event;
-  base::WaitableEvent finished;
-  base::Thread sig_thread("sig-watch");
-  sig_thread.Start();
-  sig_thread.task_runner()->PostTask([&] {
-    while (!finished.IsSignaled()) {
-      timespec ts{0, 100 * 1000 * 1000};  // 100 ms
-      if (sigtimedwait(&mask, nullptr, &ts) > 0) {
-        stop_event.Signal();
-        break;
-      }
+  base::Thread signal_reader("signal-reader");
+  signal_reader.Start();
+  const int read_fd = pipe_fds[0];
+  signal_reader.task_runner()->PostTask([read_fd, &stop_event] {
+    char byte = 0;
+    if (::read(read_fd, &byte, 1) > 0 && byte == 1) {
+      stop_event.Signal();
     }
   });
 
   const int code = harness::RunHarness(*options, &stop_event);
-  finished.Signal();
-  sig_thread.Stop();
+
+  std::signal(SIGINT, SIG_DFL);
+  std::signal(SIGTERM, SIG_DFL);
+  g_signal_write_fd = -1;
+  const char wake = 0;
+  const ssize_t unused = ::write(pipe_fds[1], &wake, 1);
+  (void)unused;
+  signal_reader.Stop();
+  ::close(pipe_fds[0]);
+  ::close(pipe_fds[1]);
   return code;
 }
 

@@ -5,15 +5,16 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <flat_set>
 #include <optional>
-#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
-#include "absl/strings/ascii.h"
-#include "absl/strings/str_cat.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "plan.h"
 #include "proto/snapshot.pb.h"
 #include "scheduler.h"
@@ -26,7 +27,7 @@ namespace pb = wlb::snapshot;
 std::string LowerWords(std::string_view enum_name) {
   std::string out(enum_name);
   for (char& c : out) {
-    c = c == '_' ? ' ' : absl::ascii_tolower(c);
+    c = c == '_' ? ' ' : base::ToLowerASCII(c);
   }
   return out;
 }
@@ -73,7 +74,7 @@ void Consider(std::optional<WakeTrigger>* best, WakeTrigger candidate) {
   }
   if (!candidate.reason.empty() &&
       (*best)->reason.find(candidate.reason) == std::string::npos) {
-    absl::StrAppend(&(*best)->reason, "; ", candidate.reason);
+    base::StrAppend(&(*best)->reason, {"; ", candidate.reason});
   }
 }
 
@@ -85,57 +86,59 @@ std::string DescribeEvent(const pb::Event& event) {
       const pb::ChatEvent& chat = event.chat();
       const std::string ch = LowerWords(pb::ChatChannel_Name(chat.channel()));
       if (chat.from().empty()) {
-        return absl::StrCat("[", ch, "] ", chat.text());
+        return base::StrCat({"[", ch, "] ", chat.text()});
       }
-      return absl::StrCat(ch, " from ", chat.from(), ": ", chat.text());
+      return base::StrCat({ch, " from ", chat.from(), ": ", chat.text()});
     }
     case pb::Event::kError:
-      return absl::StrCat("error: ", event.error().text());
+      return base::StrCat({"error: ", event.error().text()});
     case pb::Event::kInfo:
       return std::string(event.info().text());
     case pb::Event::kPrompt: {
       const pb::PromptEvent& prompt = event.prompt();
-      std::string out = absl::StrCat(
-          "prompt: ", LowerWords(pb::PromptEvent_Kind_Name(prompt.kind())));
+      std::string out = base::StrCat(
+          {"prompt: ", LowerWords(pb::PromptEvent_Kind_Name(prompt.kind()))});
       if (!prompt.from().empty()) {
-        absl::StrAppend(&out, " from ", prompt.from());
+        base::StrAppend(&out, {" from ", prompt.from()});
       }
       if (!prompt.text().empty()) {
-        absl::StrAppend(&out, " (", prompt.text(), ")");
+        base::StrAppend(&out, {" (", prompt.text(), ")"});
       }
       return out;
     }
     case pb::Event::kDied:
       return event.died().killer().empty()
                  ? "died"
-                 : absl::StrCat("killed by ", event.died().killer());
+                 : base::StrCat({"killed by ", event.died().killer()});
     case pb::Event::kResurrected:
       return event.resurrected().by().empty()
                  ? "resurrected"
-                 : absl::StrCat("resurrected by ", event.resurrected().by());
+                 : base::StrCat({"resurrected by ", event.resurrected().by()});
     case pb::Event::kLevelUp:
-      return absl::StrCat("reached level ", event.level_up().level());
+      return base::StrCat(
+          {"reached level ", base::NumberToString(event.level_up().level())});
     case pb::Event::kXpGained:
-      return absl::StrCat("gained ", event.xp_gained().amount(), " xp");
+      return base::StrCat(
+          {"gained ", base::NumberToString(event.xp_gained().amount()), " xp"});
     case pb::Event::kMoneyChanged:
-      return absl::StrCat("money ",
-                          event.money_changed().delta() >= 0 ? "+" : "",
-                          event.money_changed().delta(), "c");
+      return base::StrCat(
+          {"money ", event.money_changed().delta() >= 0 ? "+" : "",
+           base::NumberToString(event.money_changed().delta()), "c"});
     case pb::Event::kItemReceived: {
       const uint32_t count = event.item_received().item().count() > 0
                                  ? event.item_received().item().count()
                                  : 1;
-      return absl::StrCat("received ", count, "x ",
-                          event.item_received().item().name());
+      return base::StrCat({"received ", base::NumberToString(count), "x ",
+                           event.item_received().item().name()});
     }
     case pb::Event::kQuestComplete:
-      return absl::StrCat("quest complete: ", event.quest_complete().quest());
+      return base::StrCat({"quest complete: ", event.quest_complete().quest()});
     case pb::Event::kQuestFailed:
-      return absl::StrCat("quest failed: ", event.quest_failed().quest());
+      return base::StrCat({"quest failed: ", event.quest_failed().quest()});
     case pb::Event::kQuestAccepted:
-      return absl::StrCat("quest accepted: ", event.quest_accepted().quest());
+      return base::StrCat({"quest accepted: ", event.quest_accepted().quest()});
     case pb::Event::kLootRoll:
-      return absl::StrCat("loot roll: ", event.loot_roll().item().name());
+      return base::StrCat({"loot roll: ", event.loot_roll().item().name()});
     case pb::Event::kPathFailed:
       return "path failed";
     case pb::Event::kDisplaced: {
@@ -144,14 +147,14 @@ std::string DescribeEvent(const pb::Event& event) {
       return how.empty() || how == "how unspecified" ? "displaced" : how;
     }
     case pb::Event::kDbmWarning:
-      return absl::StrCat("dbm warning: ", event.dbm_warning().text());
+      return base::StrCat({"dbm warning: ", event.dbm_warning().text()});
     case pb::Event::kKicked:
-      return absl::StrCat("kicked from ", event.kicked().from());
+      return base::StrCat({"kicked from ", event.kicked().from()});
     case pb::Event::kDuel:
-      return absl::StrCat("duel ", event.duel().what(), " with ",
-                          event.duel().with());
+      return base::StrCat(
+          {"duel ", event.duel().what(), " with ", event.duel().with()});
     case pb::Event::kLfg:
-      return absl::StrCat("lfg: ", event.lfg().what());
+      return base::StrCat({"lfg: ", event.lfg().what()});
     default:
       return "";
   }
@@ -181,8 +184,9 @@ std::optional<WakeTrigger> EvaluateEventTrigger(
       return WakeTrigger{Urgency::kNormal, DescribeEvent(event)};
     case pb::Event::kError:
       if (event.error().command_id() != 0) {
-        return WakeTrigger{Urgency::kNormal,
-                           absl::StrCat("step failed: ", event.error().text())};
+        return WakeTrigger{
+            Urgency::kNormal,
+            base::StrCat({"step failed: ", event.error().text()})};
       }
       return std::nullopt;
     case pb::Event::kChat: {
@@ -190,7 +194,7 @@ std::optional<WakeTrigger> EvaluateEventTrigger(
       if (chat.channel() == pb::WHISPER ||
           chat.channel() == pb::MONSTER_WHISPER) {
         return WakeTrigger{Urgency::kNormal,
-                           absl::StrCat("whisper from ", chat.from())};
+                           base::StrCat({"whisper from ", chat.from()})};
       }
       if (chat.channel() == pb::RAID_WARNING ||
           chat.channel() == pb::BOSS_EMOTE) {
@@ -218,8 +222,9 @@ std::optional<WakeTrigger> EvaluateEventTrigger(
   }
 }
 
-void TriggerEvaluator::SetPlanContext(std::vector<Watch> watches,
-                                      std::set<std::string> expected_names) {
+void TriggerEvaluator::SetPlanContext(
+    std::vector<Watch> watches,
+    std::flat_set<std::string> expected_names) {
   watches_ = std::move(watches);
   watch_fired_.assign(watches_.size(), false);
   watch_seen_players_.assign(watches_.size(), {});
@@ -245,7 +250,7 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
   }
 
   // Collect current attackers (units targeting me in nearby or ext.combat).
-  std::set<std::string> attackers;
+  std::flat_set<std::string> attackers;
   std::vector<std::pair<std::string, std::string>> attacker_entries;
   for (const pb::Unit& u : snapshot.base().nearby().units()) {
     if (!u.dead() && u.targeting_me()) {
@@ -284,7 +289,7 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
     for (const auto& item : controls) {
       if (!item.was && item.now) {
         Consider(&chosen, {Urgency::kUrgent,
-                           absl::StrCat("lost control (", item.label, ")")});
+                           base::StrCat({"lost control (", item.label, ")"})});
       }
     }
 
@@ -296,10 +301,10 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
       }
       if (prev_attackers_.count(key) == 0) {
         if (watch_attacked || expected_names_.count(name) == 0) {
-          Consider(
-              &chosen,
-              {Urgency::kUrgent,
-               name.empty() ? "attacked" : absl::StrCat("attacked by ", name)});
+          Consider(&chosen,
+                   {Urgency::kUrgent,
+                    name.empty() ? "attacked"
+                                 : base::StrCat({"attacked by ", name})});
         }
       }
     }
@@ -326,8 +331,10 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
             if (*hp_pct < static_cast<double>(watch.value)) {
               if (!watch_fired_[i]) {
                 watch_fired_[i] = true;
-                Consider(&chosen,
-                         {Urgency::kUrgent, absl::StrCat("hp<", watch.value)});
+                Consider(
+                    &chosen,
+                    {Urgency::kUrgent,
+                     base::StrCat({"hp<", base::NumberToString(watch.value)})});
               }
             } else {
               watch_fired_[i] = false;
@@ -341,7 +348,8 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
                 watch_fired_[i] = true;
                 Consider(&chosen,
                          {in_combat ? Urgency::kUrgent : Urgency::kNormal,
-                          absl::StrCat("mana<", watch.value)});
+                          base::StrCat(
+                              {"mana<", base::NumberToString(watch.value)})});
               }
             } else {
               watch_fired_[i] = false;
@@ -349,7 +357,7 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
           }
           break;
         case Watch::Kind::kEnemyPlayerWithin: {
-          std::set<std::string> current_within;
+          std::flat_set<std::string> current_within;
           for (const pb::Unit& u : snapshot.base().nearby().units()) {
             const float dist = u.rel().dist_yd();
             if (!u.dead() && u.kind() == pb::Unit::PLAYER &&
@@ -358,10 +366,11 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
               const std::string key = AttackerKey(u);
               current_within.insert(key);
               if (watch_seen_players_[i].count(key) == 0) {
-                Consider(&chosen,
-                         {Urgency::kUrgent,
-                          absl::StrCat("enemy player ", u.name(), " within ",
-                                       watch.value, " yd")});
+                Consider(
+                    &chosen,
+                    {Urgency::kUrgent,
+                     base::StrCat({"enemy player ", u.name(), " within ",
+                                   base::NumberToString(watch.value), " yd"})});
               }
             }
           }

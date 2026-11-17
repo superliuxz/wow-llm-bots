@@ -1,7 +1,9 @@
-"""`wlb check`: everything our code must pass before review or commit (CONTRIBUTING.md).
+"""`wlb check`: fast static/default checks, plus optional sanitizer passes (CONTRIBUTING.md).
 
-  wlb check              all of it: format, includes, the builds and unit tests (default, ASan+UBSan,
-                         TSan, MSan), the screen goldens, the snapshot examples and the trigger table
+  wlb check              fast loop: format, snapshots, triggers, default build + unit tests,
+                         includes, and screen goldens
+  wlb check --sanitizers everything above plus ASan+UBSan, TSan, and MSan (--san / --full)
+  wlb check sanitizers   build + unit tests under ASan+UBSan, TSan, and MSan only
   wlb check format       clang-format (--fix rewrites)
   wlb check includes     include what you use (--fix rewrites)
   wlb check snapshots    compile the proto, validate example snapshots, check the client-event table
@@ -21,9 +23,12 @@ from wlblib.common import OUT, PROTOC, ROOT, SERVER, VENV_PYTHON, Failed, output
 # glibc's internal headers carry no IWYU mappings: include the public header (<pthread.h>) and
 # mark it `// IWYU pragma: keep`.
 IGNORED_HEADERS = "bits/.*,asm-generic/.*,asm/.*,linux/.*"
-HEADER_FLAGS = ["-xc++-header", "-std=c++20", "-Icommon",
-                "-Ithird_party/googletest/googletest/include",
-                "-Ithird_party/protobuf/src", "-Ithird_party/abseil-cpp"]
+HEADER_FLAGS_20 = ["-xc++-header", "-std=c++20", "-Icommon",
+                   "-Ithird_party/googletest/googletest/include",
+                   "-Ithird_party/protobuf/src", "-Ithird_party/abseil-cpp"]
+HEADER_FLAGS_26 = ["-xc++-header", "-std=c++26", "-Icommon",
+                   "-Ithird_party/googletest/googletest/include",
+                   "-Ithird_party/protobuf/src", "-Ithird_party/abseil-cpp"]
 
 
 def _sources(*suffixes):
@@ -57,11 +62,11 @@ def _include_jobs():
         raise Failed("missing out/common/compile_commands.json: tools/wlb build common")
     have_server = (server_db / "compile_commands.json").exists()
     for f in (ROOT / "common").rglob("*.h"):
-        jobs.append((f, ["--", *HEADER_FLAGS]))
+        jobs.append((f, ["--", *HEADER_FLAGS_20]))
     for f in (ROOT / "harness").rglob("*.h"):
-        jobs.append((f, ["--", *HEADER_FLAGS, "-Iharness/src", "-Iout/common/gen"]))
+        jobs.append((f, ["--", *HEADER_FLAGS_26, "-Iharness/src", "-Iout/common/gen"]))
     for f in (ROOT / "server_module").rglob("*.h"):
-        jobs.append((f, ["--", *HEADER_FLAGS, "-Iserver_module/src", "-Iout/common/gen"]))
+        jobs.append((f, ["--", *HEADER_FLAGS_20, "-Iserver_module/src", "-Iout/common/gen"]))
     for f in [*(ROOT / "common").rglob("*.cc"), *(ROOT / "harness").rglob("*.cc")]:
         jobs.append((f, ["-p", common_db]))
     for f in (ROOT / "server_module").rglob("*.cc"):
@@ -78,8 +83,26 @@ def _include_jobs():
 
 
 def includes(fix=False):
-    """Every file includes exactly what it uses (clang-include-cleaner). A file the tool can't
-    parse is a failure, not a pass."""
+    """Every file includes exactly what it uses (clang-include-cleaner), and none includes absl
+    or <pthread.h> outside common/base/ (CONTRIBUTING.md). A file the tool can't parse is a
+    failure, not a pass."""
+    banned = []
+    for f in _sources(".h", ".cc"):
+        rel = str(f.relative_to(ROOT))
+        in_base = rel.startswith("common/base/")
+        for lineno, line in enumerate(f.read_text().splitlines(), 1):
+            stripped = line.lstrip()
+            if not stripped.startswith("#include"):
+                continue
+            if "\"absl/" in stripped or "<absl/" in stripped:
+                banned.append(f"{rel}:{lineno}: {stripped} (use common/base/strings/)")
+            elif not in_base and ("<pthread.h>" in stripped or "\"pthread.h\"" in stripped):
+                banned.append(f"{rel}:{lineno}: {stripped} (use base::Thread / base::Lock)")
+            elif "<set>" in stripped or "<map>" in stripped:
+                banned.append(f"{rel}:{lineno}: {stripped} (use std::vector or std::flat_map/flat_set)")
+    if banned:
+        say("\n".join(banned))
+        raise Failed("includes: banned header included directly (see CONTRIBUTING.md)")
     jobs, notes = _include_jobs()
     mode = "--edit" if fix else "--print=changes"
 
@@ -145,21 +168,29 @@ def goldens():
     run([VENV_PYTHON, "-I", ROOT / "tools/snapshot/make_screen_fixtures.py", "--check"])
 
 
-def all_():
-    """Everything, in the order that fails fastest."""
+def sanitizers():
+    """Build and run unit tests under ASan+UBSan, TSan, and MSan."""
+    for variant in ("asan", "tsan", "msan"):
+        say(f"== build + unit tests ({variant})")
+        build.common(variant)
+    say("SANITIZERS PASSED")
+
+
+def all_(with_sanitizers=False):
+    """Fast checks in the order that fails fastest; optionally followed by *SAN."""
     say("== format")
     format_()
     say("== snapshots")
     snapshots()  # Also regenerates out/proto, which the goldens check reads.
     say("== trigger table")
     triggers()
-    for variant in ("default", "asan", "tsan", "msan"):
-        say(f"== build + unit tests ({variant})")
-        build.common(variant)
-        if variant == "default":
-            # The include check reads the default build's compile commands.
-            say("== includes")
-            includes()
-            say("== screen goldens vs the prototype")
-            goldens()
+    say("== build + unit tests (default)")
+    build.common("default")
+    # The include check reads the default build's compile commands.
+    say("== includes")
+    includes()
+    say("== screen goldens vs the prototype")
+    goldens()
+    if with_sanitizers:
+        sanitizers()
     say("ALL CHECKS PASSED")

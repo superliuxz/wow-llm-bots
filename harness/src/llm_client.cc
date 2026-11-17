@@ -7,14 +7,16 @@
 #include <cstdint>
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 
-#include "absl/strings/str_cat.h"
-#include "absl/strings/strip.h"
 #include "base/functional/callback.h"
 #include "base/memory/ref_counted.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/synchronization/lock.h"
 #include "base/task/post_task_and_reply.h"
 #include "base/task/sequenced_task_runner.h"
@@ -148,10 +150,16 @@ LlmResult LlamaConnection::Call(const LlmRequest& request,
     if (!line.empty() && line.back() == '\r') {
       line.remove_suffix(1);
     }
-    if (!absl::ConsumePrefix(&line, "data:")) {
+    const std::optional<std::string_view> after_data =
+        base::RemovePrefix(line, "data:");
+    if (!after_data) {
       return;
     }
-    absl::ConsumePrefix(&line, " ");
+    line = *after_data;
+    if (const std::optional<std::string_view> trimmed =
+            base::RemovePrefix(line, " ")) {
+      line = *trimmed;
+    }
     if (line == "[DONE]") {
       saw_done = true;
       return;
@@ -245,11 +253,13 @@ LlmResult LlamaConnection::Call(const LlmRequest& request,
   LlmResult result;
   if (!response) {
     result.error =
-        absl::StrCat("could not reach llama-server at ", endpoint.host, ":",
-                     endpoint.port, ": ", httplib::to_string(response.error()));
+        base::StrCat({"could not reach llama-server at ", endpoint.host, ":",
+                      base::NumberToString(endpoint.port), ": ",
+                      httplib::to_string(response.error())});
   } else if (response->status != 200) {
-    result.error = absl::StrCat("llama-server answered ", response->status,
-                                ": ", raw_body);
+    result.error =
+        base::StrCat({"llama-server answered ",
+                      base::NumberToString(response->status), ": ", raw_body});
   } else if (is_event_stream) {
     if (!sse_pending.empty()) {
       handle_sse_line(sse_pending);

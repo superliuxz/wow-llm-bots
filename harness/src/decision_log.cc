@@ -2,6 +2,7 @@
 
 #include "decision_log.h"
 
+#include <inttypes.h>
 #include <time.h>
 
 #include <cstdint>
@@ -9,9 +10,9 @@
 #include <string>
 #include <string_view>
 
-#include "absl/strings/ascii.h"
-#include "absl/strings/str_cat.h"
-#include "absl/strings/str_format.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "file_util.h"
 #include "llm_client.h"
@@ -23,7 +24,7 @@ namespace {
 
 using Json = nlohmann::json;
 
-// 64-bit FNV-1a: stable across runs (absl::Hash is seeded per process).
+// 64-bit FNV-1a: stable across runs and processes.
 uint64_t Fnv1a(std::string_view text) {
   uint64_t hash = 14695981039346656037ull;
   for (unsigned char c : text) {
@@ -41,14 +42,14 @@ std::string DateUtc(base::Time time) {
   if (::gmtime_r(&seconds, &parts) == nullptr) {
     return "unknown-date";
   }
-  return absl::StrFormat("%04d-%02d-%02d", parts.tm_year + 1900,
-                         parts.tm_mon + 1, parts.tm_mday);
+  return base::StringPrintf("%04d-%02d-%02d", parts.tm_year + 1900,
+                            parts.tm_mon + 1, parts.tm_mday);
 }
 
 std::string SafeName(const std::string& name) {
   std::string out;
   for (char c : name) {
-    out.push_back(absl::ascii_isalnum(c) ? c : '_');
+    out.push_back(base::IsAsciiAlphaNumeric(c) ? c : '_');
   }
   return out.empty() ? "_" : out;
 }
@@ -63,7 +64,7 @@ std::string DecisionJson(const Decision& decision) {
   json["slot"] = decision.request.slot;
   json["system_chars"] = decision.request.system.size();
   json["system_hash"] =
-      absl::StrFormat("%016x", Fnv1a(decision.request.system));
+      base::StringPrintf("%016" PRIx64, Fnv1a(decision.request.system));
   json["screen"] = decision.request.user;
   if (decision.result.reply) {
     const LlmReply& reply = *decision.result.reply;
@@ -93,8 +94,8 @@ std::string DecisionJson(const Decision& decision) {
 
 std::string DecisionLog::PathFor(const std::string& bot,
                                  base::Time time) const {
-  return absl::StrCat(root_, "/", SafeName(bot), "/events/", DateUtc(time),
-                      ".jsonl");
+  return base::StrCat(
+      {root_, "/", SafeName(bot), "/events/", DateUtc(time), ".jsonl"});
 }
 
 bool DecisionLog::Record(const Decision& decision) const {
@@ -102,7 +103,7 @@ bool DecisionLog::Record(const Decision& decision) const {
   if (!MakeDirectories(path.substr(0, path.rfind('/')))) {
     return false;
   }
-  return AppendToFile(path, absl::StrCat(DecisionJson(decision), "\n"));
+  return AppendToFile(path, base::StrCat({DecisionJson(decision), "\n"}));
 }
 
 }  // namespace harness

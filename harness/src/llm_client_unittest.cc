@@ -4,9 +4,9 @@
 
 #include <chrono>
 #include <cstddef>
+#include <flat_set>
 #include <nlohmann/json_fwd.hpp>
 #include <optional>
-#include <set>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -207,7 +207,7 @@ class FakeLlamaServer {
   base::Lock lock_;
   std::string last_body_ GUARDED_BY(lock_);
   int calls_ GUARDED_BY(lock_) = 0;
-  std::set<int> client_ports_ GUARDED_BY(lock_);
+  std::flat_set<int> client_ports_ GUARDED_BY(lock_);
   std::vector<std::string> stream_chunks_ GUARDED_BY(lock_);
   int stream_tail_delay_ms_ GUARDED_BY(lock_) = 0;
   int status_ = 200;

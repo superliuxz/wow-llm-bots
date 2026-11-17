@@ -9,8 +9,8 @@
 #ifndef HARNESS_TRIGGERS_H_
 #define HARNESS_TRIGGERS_H_
 
+#include <flat_set>
 #include <optional>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -47,10 +47,10 @@ class TriggerEvaluator {
   // Installs the active plan's watches and expected mob names, resetting
   // watch crossing latches.
   void SetPlanContext(std::vector<Watch> watches,
-                      std::set<std::string> expected_names);
+                      std::flat_set<std::string> expected_names);
 
   const std::vector<Watch>& watches() const { return watches_; }
-  const std::set<std::string>& expected_names() const {
+  const std::flat_set<std::string>& expected_names() const {
     return expected_names_;
   }
 
@@ -74,12 +74,12 @@ class TriggerEvaluator {
   bool was_alive_ = true;
   bool was_in_combat_ = false;
   ControlFlags prev_control_;
-  std::set<std::string> prev_attackers_;
+  std::flat_set<std::string> prev_attackers_;
 
   std::vector<Watch> watches_;
   std::vector<bool> watch_fired_;
-  std::vector<std::set<std::string>> watch_seen_players_;
-  std::set<std::string> expected_names_;
+  std::vector<std::flat_set<std::string>> watch_seen_players_;
+  std::flat_set<std::string> expected_names_;
 };
 
 }  // namespace harness

@@ -5,20 +5,18 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <map>
+#include <flat_map>
+#include <flat_set>
+#include <functional>
 #include <optional>
-#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "absl/strings/ascii.h"
-#include "absl/strings/match.h"
-#include "absl/strings/str_cat.h"
-#include "absl/strings/str_format.h"
-#include "absl/strings/str_join.h"
-#include "absl/strings/string_view.h"
-#include "absl/strings/strip.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "proto/snapshot.pb.h"
 
 namespace harness {
@@ -30,22 +28,22 @@ namespace pb = wlb::snapshot;
 constexpr float kMeleeYd = 10;
 
 // "THREAT_AGGRO" -> "threat aggro".
-std::string Word(absl::string_view name) {
+std::string Word(std::string_view name) {
   std::string out(name);
   for (char& c : out) {
-    c = c == '_' ? ' ' : absl::ascii_tolower(c);
+    c = c == '_' ? ' ' : base::ToLowerASCII(c);
   }
   return out;
 }
 
 // The enum value's name, or "" when it is unset (zero).
 template <typename Enum>
-std::string NameOf(Enum value, absl::string_view (*name_fn)(Enum)) {
+std::string NameOf(Enum value, std::string_view (*name_fn)(Enum)) {
   return value == static_cast<Enum>(0) ? "" : std::string(name_fn(value));
 }
 
 // Values that are the normal case and so left out of the text.
-bool IsDefaultName(absl::string_view name) {
+bool IsDefaultName(std::string_view name) {
   return name == "IDLE" || name == "LEVEL" || name == "MEDIUM" ||
          name == "THREAT_NONE" || name == "NORMAL" || name == "NAMEPLATE";
 }
@@ -53,7 +51,7 @@ bool IsDefaultName(absl::string_view name) {
 // "key yes" for a set flag.
 void AddFlag(std::vector<std::string>* bits, bool value, const char* key) {
   if (value) {
-    bits->push_back(absl::StrCat(key, " yes"));
+    bits->push_back(base::StrCat({key, " yes"}));
   }
 }
 
@@ -62,7 +60,7 @@ void AddEnum(std::vector<std::string>* bits,
              const std::string& name,
              const char* key) {
   if (!name.empty() && !IsDefaultName(name)) {
-    bits->push_back(absl::StrCat(key, " ", Word(name)));
+    bits->push_back(base::StrCat({key, " ", Word(name)}));
   }
 }
 
@@ -73,7 +71,7 @@ void AddPercent(std::vector<std::string>* bits,
                 float pct,
                 const char* key) {
   if (shown && pct < 100) {
-    bits->push_back(absl::StrFormat("%s %.0f%%", key, pct));
+    bits->push_back(base::StringPrintf("%s %.0f%%", key, pct));
   }
 }
 
@@ -81,6 +79,12 @@ void AddPercent(std::vector<std::string>* bits,
 // counts as 0 (here), never as undefined behavior in std::sort.
 float Finite(float yd) {
   return std::isfinite(yd) ? yd : 0.0f;
+}
+
+std::string JoinSet(const std::flat_set<std::string>& items,
+                    std::string_view separator) {
+  return base::JoinString(std::vector<std::string>(items.begin(), items.end()),
+                          separator);
 }
 
 // Where something is: "28 yd SW, below, out of sight, you're behind it".
@@ -91,9 +95,9 @@ std::string Where(const pb::Relative& rel) {
     parts.push_back("here");
   } else if (rel.dist_yd() != 0) {
     parts.push_back(
-        dir.empty()
-            ? absl::StrFormat("%.0f yd", Finite(rel.dist_yd()))
-            : absl::StrFormat("%.0f yd %s", Finite(rel.dist_yd()), dir));
+        dir.empty() ? base::StringPrintf("%.0f yd", Finite(rel.dist_yd()))
+                    : base::StringPrintf("%.0f yd %s", Finite(rel.dist_yd()),
+                                         dir.c_str()));
   } else {
     parts.push_back(dir);
   }
@@ -110,7 +114,7 @@ std::string Where(const pb::Relative& rel) {
   if (rel.facing_me()) {
     parts.push_back("facing you");
   }
-  return absl::StrJoin(parts, ", ");
+  return base::JoinString(parts, ", ");
 }
 
 std::string TightWhere(const pb::Relative& rel_in) {
@@ -126,12 +130,12 @@ std::string TightWhere(const pb::Relative& rel_in) {
 std::string PackText(const pb::Unit::Pack& pack) {
   std::vector<std::string> parts;
   if (pack.id() != 0) {
-    parts.push_back(absl::StrCat("id ", pack.id()));
+    parts.push_back(base::StrCat({"id ", base::NumberToString(pack.id())}));
   }
   if (pack.size() != 0) {
-    parts.push_back(absl::StrCat("size ", pack.size()));
+    parts.push_back(base::StrCat({"size ", base::NumberToString(pack.size())}));
   }
-  return absl::StrCat("(", absl::StrJoin(parts, ", "), ")");
+  return base::StrCat({"(", base::JoinString(parts, ", "), ")"});
 }
 
 // Everything about a unit except its name and position, in the order of the
@@ -144,15 +148,16 @@ std::string UnitLook(const pb::Unit& u) {
     who.push_back(std::string(u.looks_like()));
   }
   if (!u.player().class_().empty()) {
-    who.push_back(absl::AsciiStrToLower(u.player().class_()));
+    who.push_back(base::ToLowerASCII(u.player().class_()));
   }
   if (u.has_level() || !who.empty()) {
     std::vector<std::string> parts;
     if (u.has_level()) {
-      parts.push_back(absl::StrCat("level ", u.level()));
+      parts.push_back(
+          base::StrCat({"level ", base::NumberToString(u.level())}));
     }
     parts.insert(parts.end(), who.begin(), who.end());
-    bits.push_back(absl::StrJoin(parts, " "));
+    bits.push_back(base::JoinString(parts, " "));
   }
   for (const std::string& name :
        {NameOf(u.level_color(), pb::Unit_LevelColor_Name),
@@ -172,7 +177,7 @@ std::string UnitLook(const pb::Unit& u) {
     bits.push_back(Word(state) +
                    (u.activity().with().empty()
                         ? ""
-                        : absl::StrCat(" ", u.activity().with())));
+                        : base::StrCat({" ", u.activity().with()})));
   }
   // `dead` is already in the activity.
   AddFlag(&bits, u.lootable(), "lootable");
@@ -180,7 +185,7 @@ std::string UnitLook(const pb::Unit& u) {
   AddFlag(&bits, u.tapped_by_other(), "tapped by other");
   AddFlag(&bits, u.targeting_me(), "targeting me");
   if (!u.target().empty()) {
-    bits.push_back(absl::StrCat("target ", u.target()));
+    bits.push_back(base::StrCat({"target ", u.target()}));
   }
   AddEnum(&bits, NameOf(u.threat_status(), pb::Unit_ThreatStatus_Name),
           "threat status");
@@ -189,7 +194,7 @@ std::string UnitLook(const pb::Unit& u) {
   AddFlag(&bits, u.pvp_flagged(), "pvp flagged");
   AddEnum(&bits, NameOf(u.raid_marker(), pb::RaidMarker_Name), "raid marker");
   if (u.has_pack() && (u.pack().id() != 0 || u.pack().size() != 0)) {
-    bits.push_back(absl::StrCat("pack ", PackText(u.pack())));
+    bits.push_back(base::StrCat({"pack ", PackText(u.pack())}));
   }
   if (u.visual_state_size() > 0) {
     std::vector<std::string> states;
@@ -197,15 +202,15 @@ std::string UnitLook(const pb::Unit& u) {
       states.push_back(Word(pb::Unit_VisualState_Name(u.visual_state(i))));
     }
     bits.push_back(
-        absl::StrCat("visual state [", absl::StrJoin(states, "; "), "]"));
+        base::StrCat({"visual state [", base::JoinString(states, "; "), "]"}));
   }
   if (!u.quest_relevant().empty()) {
-    bits.push_back(absl::StrCat("quest relevant ", u.quest_relevant()));
+    bits.push_back(base::StrCat({"quest relevant ", u.quest_relevant()}));
   }
   if (!u.subtitle().empty()) {
-    bits.push_back(absl::StrCat("subtitle ", u.subtitle()));
+    bits.push_back(base::StrCat({"subtitle ", u.subtitle()}));
   }
-  return absl::StrJoin(bits, ", ");
+  return base::JoinString(bits, ", ");
 }
 
 // "herb, state active": the usual state of an object (usable, ready) is left
@@ -224,17 +229,17 @@ std::string ObjectLook(const pb::GameObject& go) {
     bits.push_back("usable yes");
   }
   if (!go.state().empty() && !(go.state() == "ready" && !bits.empty())) {
-    bits.push_back(absl::StrCat("state ", go.state()));
+    bits.push_back(base::StrCat({"state ", go.state()}));
   }
   AddFlag(&bits, go.highlighted(), "highlighted");
   if (!go.owner().empty()) {
-    bits.push_back(absl::StrCat("owner ", go.owner()));
+    bits.push_back(base::StrCat({"owner ", go.owner()}));
   }
   if (go.capture_progress_pct() != 0) {
-    bits.push_back(
-        absl::StrFormat("capture progress pct %g", go.capture_progress_pct()));
+    bits.push_back(base::StringPrintf("capture progress pct %g",
+                                      go.capture_progress_pct()));
   }
-  return absl::StrJoin(bits, ", ");
+  return base::JoinString(bits, ", ");
 }
 
 // What the bot can do with a unit or object.
@@ -296,7 +301,7 @@ std::string_view OptionVerb(OptionKind kind) {
 }
 
 ScreenOption ParseModuleOption(const pb::Option& option) {
-  std::string_view text = absl::StripAsciiWhitespace(option.text());
+  const std::string_view text = base::TrimWhitespaceASCII(option.text());
   const struct {
     std::string_view prefix;
     OptionKind kind;
@@ -306,18 +311,18 @@ ScreenOption ParseModuleOption(const pb::Option& option) {
       {"Use ", OptionKind::kUse},
   };
   for (const auto& entry : targeted) {
-    if (absl::ConsumePrefix(&text, entry.prefix)) {
+    if (const auto rest = base::RemovePrefix(text, entry.prefix)) {
       return {entry.kind, std::string(option.guid()),
-              std::string(absl::StripAsciiWhitespace(text))};
+              std::string(base::TrimWhitespaceASCII(*rest))};
     }
   }
-  if (absl::StartsWithIgnoreCase(text, "Explore")) {
+  if (base::StartsWith(text, "Explore", base::CompareCase::INSENSITIVE_ASCII)) {
     return {OptionKind::kExplore, std::string(option.guid()), ""};
   }
-  if (absl::StartsWithIgnoreCase(text, "Rest")) {
+  if (base::StartsWith(text, "Rest", base::CompareCase::INSENSITIVE_ASCII)) {
     return {OptionKind::kRest, std::string(option.guid()), ""};
   }
-  if (absl::StartsWithIgnoreCase(text, "Go to")) {
+  if (base::StartsWith(text, "Go to", base::CompareCase::INSENSITIVE_ASCII)) {
     return {OptionKind::kTown, std::string(option.guid()), ""};
   }
   return {OptionKind::kKeep, std::string(option.guid()), ""};
@@ -363,28 +368,28 @@ std::vector<std::string> ThingLines(const std::vector<Thing>& things,
   std::vector<std::string> lines;
   for (const Group& group : groups) {
     std::string mark = "-";
-    std::string_view verb;
+    std::string verb;
     if (has_module_options) {
       if (group.module_option > 0) {
         const size_t idx = static_cast<size_t>(group.module_option - 1);
-        mark = absl::StrCat(group.module_option, ".");
-        verb = OptionVerb((*options)[idx]);
+        mark = base::StrCat({base::NumberToString(group.module_option), "."});
+        verb = std::string(OptionVerb((*options)[idx]));
         (*placed)[idx] = true;
       }
     } else if (group.option) {
       options->push_back(*group.option);
       details->push_back({*group.option, group.items[0]->guid, group.name});
-      mark = absl::StrCat(options->size(), ".");
-      verb = OptionVerb(*group.option);
+      mark = base::StrCat({base::NumberToString(options->size()), "."});
+      verb = std::string(OptionVerb(*group.option));
     }
     if (group.items.size() == 1) {
-      lines.push_back(absl::StrCat(mark, " ", verb, group.name, ": ",
-                                   group.look, "; ",
-                                   TightWhere(group.items[0]->rel)));
+      lines.push_back(
+          base::StrCat({mark, " ", verb, group.name, ": ", group.look, "; ",
+                        TightWhere(group.items[0]->rel)}));
       continue;
     }
     std::vector<float> dists;
-    std::set<std::string> dirs;
+    std::flat_set<std::string> dirs;
     for (const Thing* t : group.items) {
       dists.push_back(Finite(t->rel.dist_yd()));
       const std::string dir = NameOf(t->rel.dir(), pb::Direction_Name);
@@ -393,10 +398,12 @@ std::vector<std::string> ThingLines(const std::vector<Thing>& things,
       }
     }
     std::sort(dists.begin(), dists.end());
-    lines.push_back(absl::StrFormat(
-        "%s %s%dx %s: %s; %.0f-%.0f yd%s", mark, verb, group.items.size(),
-        group.name, group.look, dists.front(), dists.back(),
-        dirs.empty() ? "" : " " + absl::StrJoin(dirs, "/")));
+    const std::string dir_suffix =
+        dirs.empty() ? "" : base::StrCat({" ", JoinSet(dirs, "/")});
+    lines.push_back(base::StringPrintf(
+        "%s %s%zux %s: %s; %.0f-%.0f yd%s", mark.c_str(), verb.c_str(),
+        group.items.size(), group.name.c_str(), group.look.c_str(),
+        dists.front(), dists.back(), dir_suffix.c_str()));
   }
   return lines;
 }
@@ -405,7 +412,7 @@ std::vector<std::string> ThingLines(const std::vector<Thing>& things,
 // range of distances and the directions.
 std::string FarSummary(const std::vector<const pb::Unit*>& units) {
   std::vector<std::string> order;
-  std::map<std::string, std::vector<const pb::Relative*>> groups;
+  std::flat_map<std::string, std::vector<const pb::Relative*>> groups;
   for (const pb::Unit* u : units) {
     const std::string look = UnitLook(*u);
     if (groups.find(look) == groups.end()) {
@@ -416,7 +423,7 @@ std::string FarSummary(const std::vector<const pb::Unit*>& units) {
   std::vector<std::string> parts;
   for (const std::string& look : order) {
     std::vector<float> dists;
-    std::set<std::string> dirs;
+    std::flat_set<std::string> dirs;
     for (const pb::Relative* rel : groups[look]) {
       dists.push_back(Finite(rel->dist_yd()));
       const std::string dir = NameOf(rel->dir(), pb::Direction_Name);
@@ -427,43 +434,54 @@ std::string FarSummary(const std::vector<const pb::Unit*>& units) {
     std::sort(dists.begin(), dists.end());
     const std::string span =
         dists.front() == dists.back()
-            ? absl::StrFormat("%.0f", dists.front())
-            : absl::StrFormat("%.0f-%.0f", dists.front(), dists.back());
-    parts.push_back(absl::StrFormat("%dx %s (%s yd %s)", groups[look].size(),
-                                    look, span, absl::StrJoin(dirs, "/")));
+            ? base::StringPrintf("%.0f", dists.front())
+            : base::StringPrintf("%.0f-%.0f", dists.front(), dists.back());
+    const std::string joined_dirs = JoinSet(dirs, "/");
+    parts.push_back(base::StringPrintf("%zux %s (%s yd %s)",
+                                       groups[look].size(), look.c_str(),
+                                       span.c_str(), joined_dirs.c_str()));
   }
-  return absl::StrJoin(parts, "; ");
+  return base::JoinString(parts, "; ");
 }
 
 std::string SelfLine(const pb::Self& s) {
   std::vector<std::string> who;
-  who.push_back(s.unit().level() != 0 ? absl::StrCat("level ", s.unit().level())
-                                      : "level ?");
+  who.push_back(
+      s.unit().level() != 0
+          ? base::StrCat({"level ", base::NumberToString(s.unit().level())})
+          : "level ?");
   const std::string gender = NameOf(s.gender(), pb::Self_Gender_Name);
   if (!gender.empty()) {
     who.push_back(Word(gender));
   }
   if (!s.unit().player().class_().empty()) {
-    who.push_back(absl::AsciiStrToLower(s.unit().player().class_()));
+    who.push_back(base::ToLowerASCII(s.unit().player().class_()));
   }
   std::vector<std::string> bits;
-  bits.push_back(absl::StrCat(s.unit().name().empty() ? "?" : s.unit().name(),
-                              ", ", absl::StrJoin(who, " ")));
-  bits.push_back(absl::StrCat("health ", s.health(), "/", s.health_max()));
+  bits.push_back(base::StrCat({s.unit().name().empty() ? "?" : s.unit().name(),
+                               ", ", base::JoinString(who, " ")}));
+  bits.push_back(base::StrCat({"health ", base::NumberToString(s.health()), "/",
+                               base::NumberToString(s.health_max())}));
   if (s.power_max() != 0) {
     const std::string power_type =
         NameOf(s.power_type(), pb::Self_PowerType_Name);
-    bits.push_back(absl::StrCat(power_type.empty() ? "power" : Word(power_type),
-                                " ", s.power(), "/", s.power_max()));
+    bits.push_back(
+        base::StrCat({power_type.empty() ? "power" : Word(power_type), " ",
+                      base::NumberToString(s.power()), "/",
+                      base::NumberToString(s.power_max())}));
   }
   if (s.xp_next() != 0) {
-    bits.push_back(absl::StrCat(
-        "xp ", s.xp(), "/", s.xp_next(),
-        s.rested_xp() != 0 ? absl::StrCat(" (rested ", s.rested_xp(), ")")
-                           : ""));
+    bits.push_back(base::StrCat(
+        {"xp ", base::NumberToString(s.xp()), "/",
+         base::NumberToString(s.xp_next()),
+         s.rested_xp() != 0
+             ? base::StrCat(
+                   {" (rested ", base::NumberToString(s.rested_xp()), ")"})
+             : ""}));
   }
   if (s.money() != 0) {
-    bits.push_back(absl::StrCat("money ", s.money(), "c"));
+    bits.push_back(
+        base::StrCat({"money ", base::NumberToString(s.money()), "c"}));
   }
   // The life state first when not alive, then the flags.
   const std::string life = NameOf(s.state(), pb::Self_LifeState_Name);
@@ -482,7 +500,7 @@ std::string SelfLine(const pb::Self& s) {
       bits.push_back(flag.word);
     }
   }
-  return absl::StrJoin(bits, "; ");
+  return base::JoinString(bits, "; ");
 }
 
 std::string WhereLine(const pb::Where& w) {
@@ -493,15 +511,15 @@ std::string WhereLine(const pb::Where& w) {
   if (!w.zone().empty()) {
     places.push_back(std::string(w.zone()));
   }
-  std::string out = absl::StrJoin(places, ", ");
+  std::string out = base::JoinString(places, ", ");
   if (!w.map().empty()) {
-    absl::StrAppend(&out, " (", w.map(), ")");
+    base::StrAppend(&out, {" (", w.map(), ")"});
   }
   if (w.indoors()) {
-    absl::StrAppend(&out, "; indoors");
+    base::StrAppend(&out, {"; indoors"});
   }
   if (w.in_instance()) {
-    absl::StrAppend(&out, "; in an instance");
+    base::StrAppend(&out, {"; in an instance"});
   }
   return out;
 }
@@ -535,7 +553,7 @@ std::string_view OptionKindName(OptionKind kind) {
 Screen RenderScreen(const pb::Snapshot& snapshot) {
   Screen screen;
   screen.has_module_options = snapshot.options_size() > 0;
-  std::map<std::string, int> guid_to_option;
+  std::flat_map<std::string, int, std::less<>> guid_to_option;
   std::vector<bool> placed;
   if (screen.has_module_options) {
     placed.assign(static_cast<size_t>(snapshot.options_size()), false);
@@ -552,7 +570,7 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
     if (guid.empty()) {
       return 0;
     }
-    const auto it = guid_to_option.find(std::string(guid));
+    const auto it = guid_to_option.find(guid);
     return it == guid_to_option.end() ? 0 : it->second;
   };
 
@@ -611,8 +629,8 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
     std::vector<std::string> extra;
     for (int i = 0; i < snapshot.options_size(); ++i) {
       if (!placed[static_cast<size_t>(i)]) {
-        extra.push_back(
-            absl::StrCat("  ", i + 1, ". ", snapshot.options(i).text()));
+        extra.push_back(base::StrCat({"  ", base::NumberToString(i + 1), ". ",
+                                      snapshot.options(i).text()}));
       }
     }
     if (!extra.empty()) {
@@ -632,7 +650,8 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
       screen.options.push_back(option.kind);
       screen.details.push_back({option.kind, "", ""});
       lines.push_back(
-          absl::StrCat("  ", screen.options.size(), ". ", option.text));
+          base::StrCat({"  ", base::NumberToString(screen.options.size()), ". ",
+                        option.text}));
     }
   }
   // Every line is one line: a name or subtitle from the game with a line
@@ -644,7 +663,7 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
       }
     }
   }
-  screen.text = absl::StrJoin(lines, "\n");
+  screen.text = base::JoinString(lines, "\n");
   return screen;
 }
 

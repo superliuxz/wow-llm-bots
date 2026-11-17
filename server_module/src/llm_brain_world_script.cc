@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -79,6 +78,7 @@ class LlmBrainWorldScript : public WorldScript {
         config_.bots.size(), base::Milliseconds(config_.snapshot_interval_ms),
         base::Milliseconds(config_.snapshot_interval_combat_ms),
         base::TimeTicks::Now());
+    bots_.resize(config_.bots.size());
     if (!config_.enabled) {
       return;
     }
@@ -155,7 +155,7 @@ class LlmBrainWorldScript : public WorldScript {
       }
       const SnapshotSchedule::Flags flags{bot->IsInCombat(), bot->IsAlive()};
       if (schedule_->IsDue(i, now, flags)) {
-        SendSnapshot(config_.bots[i], bot);
+        SendSnapshot(i, config_.bots[i], bot);
         schedule_->Sent(i, now, flags);
         ++built;
       }
@@ -249,16 +249,22 @@ class LlmBrainWorldScript : public WorldScript {
       LOG_INFO("module", "mod-llm-brain: {}: command not supported yet", name);
       return;
     }
-    const auto state = bots_.find(name);
+    size_t bot_index = config_.bots.size();
+    for (size_t i = 0; i < config_.bots.size(); ++i) {
+      if (config_.bots[i] == name) {
+        bot_index = i;
+        break;
+      }
+    }
     Player* bot = ObjectAccessor::FindPlayerByName(name);
-    if (state == bots_.end() || !bot) {
+    if (bot_index == config_.bots.size() || !bot || bots_[bot_index].seq == 0) {
       LOG_INFO("module", "mod-llm-brain: choose for {}: no such bot online",
                name);
       return;
     }
     const wlb::snapshot::Command::Choose& choose = command.choose();
     const OptionHistory::Lookup found =
-        state->second.history.Find(choose.seq(), choose.option());
+        bots_[bot_index].history.Find(choose.seq(), choose.option());
     std::string error = found.error;
     if (found.target) {
       error = ExecuteOption(bot, *found.target);
@@ -284,7 +290,7 @@ class LlmBrainWorldScript : public WorldScript {
       wlb::snapshot::ModuleMessage message;
       wlb::snapshot::ImmediateEvent* event = message.mutable_event();
       event->set_bot(name);
-      event->set_seq(state->second.seq);
+      event->set_seq(bots_[bot_index].seq);
       event->set_time_ms(base::Time::Now().InMillisecondsSinceUnixEpoch());
       event->set_monotonic_us(
           (base::TimeTicks::Now() - base::TimeTicks()).InMicroseconds());
@@ -296,8 +302,8 @@ class LlmBrainWorldScript : public WorldScript {
     }
   }
 
-  void SendSnapshot(const std::string& name, Player* bot) {
-    BotState& state = bots_[name];
+  void SendSnapshot(size_t index, const std::string& name, Player* bot) {
+    BotState& state = bots_[index];
     if (!state.builder) {
       state.builder = std::make_unique<SnapshotBuilder>(NearbyBuilder::Options{
           config_.nameplate_range_yd, config_.los_raycasts_per_snapshot});
@@ -335,7 +341,7 @@ class LlmBrainWorldScript : public WorldScript {
     std::unique_ptr<SnapshotBuilder> builder;
     OptionHistory history{kOptionHistory};
   };
-  std::map<std::string, BotState> bots_;
+  std::vector<BotState> bots_;
   // How old each applied choice's snapshot was, since the last summary.
   std::vector<base::TimeDelta> apply_ages_;
   base::WeakPtrFactory<LlmBrainWorldScript> weak_factory_{this};

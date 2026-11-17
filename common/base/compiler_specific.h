@@ -18,4 +18,11 @@
 #define MSAN_UNPOISON(p, size)
 #endif
 
+#if defined(__GNUC__) || defined(__clang__)
+#define PRINTF_FORMAT(format_param, dots_param) \
+  __attribute__((format(printf, format_param, dots_param)))
+#else
+#define PRINTF_FORMAT(format_param, dots_param)
+#endif
+
 #endif  // COMMON_BASE_COMPILER_SPECIFIC_H_

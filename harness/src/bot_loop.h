@@ -14,7 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
-#include <map>
+#include <flat_map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -136,7 +136,7 @@ class BotLoop {
   LogMessageFn log_message_;
   std::unique_ptr<DecisionLog> decision_log_;
   Scheduler scheduler_;
-  std::map<std::string, BotState> bots_;
+  std::flat_map<std::string, BotState> bots_;
   uint32_t next_command_id_ = 0;
   uint64_t decisions_completed_ = 0;
   uint64_t commands_sent_ = 0;

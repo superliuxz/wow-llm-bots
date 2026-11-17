@@ -81,6 +81,11 @@ Last updated 2026-11-16.
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-16: Chromium `common/base/strings/` (`strcat`, `string_util`, `string_split`,
+  `string_number_conversions`, `stringprintf`), migrated `harness/` off `absl::*`, replaced `<pthread.h>`
+  in `harness/src/main.cc` and all `<set>`/`<map>` across `harness/` + `server_module/` (`std::flat_map`,
+  `std::flat_set`, `std::vector`), enforced the bans in `CONTRIBUTING.md` + `wlb check includes`, and
+  split `*SAN` out of fast `wlb check` into `wlb check sanitizers` / `--sanitizers`.
 - 2026-11-16: H4 live harness loop (`screen_renderer` aligned with `snapshot.options`,
   `module_connection`, `triggers`, `plan_runner`, `bot_loop`, `harness run` + `tools/wlb harness`;
   113 harness unit tests passing across default, ASan+UBSan, TSan, MSan).

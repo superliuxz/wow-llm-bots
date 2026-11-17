@@ -4,7 +4,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -68,21 +67,25 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot) {
   // One option per (kind, name), in the order the names first appear; its
   // target is the nearest unit of that name.
   std::vector<OptionTarget> targets;
-  std::map<std::pair<OptionTarget::Kind, std::string>, size_t> index;
   std::vector<float> nearest;
   for (const pb::Unit& u : snapshot->base().nearby().units()) {
     const std::optional<OptionTarget::Kind> kind = UnitKind(u);
     if (!kind) {
       continue;
     }
-    const std::string name(u.name());
-    const auto [it, added] = index.try_emplace({*kind, name}, targets.size());
-    if (added) {
-      targets.push_back({*kind, std::string(u.guid()), name});
+    size_t existing = targets.size();
+    for (size_t i = 0; i < targets.size(); ++i) {
+      if (targets[i].kind == *kind && targets[i].name == u.name()) {
+        existing = i;
+        break;
+      }
+    }
+    if (existing == targets.size()) {
+      targets.push_back({*kind, std::string(u.guid()), std::string(u.name())});
       nearest.push_back(u.rel().dist_yd());
-    } else if (u.rel().dist_yd() < nearest[it->second]) {
-      targets[it->second].guid = std::string(u.guid());
-      nearest[it->second] = u.rel().dist_yd();
+    } else if (u.rel().dist_yd() < nearest[existing]) {
+      targets[existing].guid = std::string(u.guid());
+      nearest[existing] = u.rel().dist_yd();
     }
   }
   targets.push_back({OptionTarget::Kind::kKeep, "", ""});
@@ -95,6 +98,10 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot) {
 }
 
 OptionHistory::OptionHistory(base::TimeDelta window) : window_(window) {}
+
+OptionHistory::OptionHistory(OptionHistory&&) noexcept = default;
+
+OptionHistory& OptionHistory::operator=(OptionHistory&&) noexcept = default;
 
 OptionHistory::~OptionHistory() = default;
 

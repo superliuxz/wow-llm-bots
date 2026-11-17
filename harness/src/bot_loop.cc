@@ -5,19 +5,19 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <flat_set>
 #include <memory>
 #include <optional>
-#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
-#include "absl/strings/str_cat.h"
-#include "absl/strings/str_format.h"
-#include "absl/strings/str_join.h"
 #include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "decision_log.h"
 #include "file_util.h"
@@ -45,10 +45,11 @@ std::optional<double> AgeMsSince(int64_t snapshot_monotonic_us,
   return (at - built).InMicroseconds() / 1000.0;
 }
 
-std::set<std::string> CollectExpectedNames(const std::vector<PlanStep>& steps,
-                                           const std::vector<int>& expect,
-                                           const Screen& screen) {
-  std::set<std::string> names;
+std::flat_set<std::string> CollectExpectedNames(
+    const std::vector<PlanStep>& steps,
+    const std::vector<int>& expect,
+    const Screen& screen) {
+  std::flat_set<std::string> names;
   for (int opt : expect) {
     if (opt >= 1 && static_cast<size_t>(opt) <= screen.details.size()) {
       const std::string& name =
@@ -97,7 +98,7 @@ void BotLoop::OnConnectionChanged(bool connected) {
   Log(connected ? "harness: connected to mod-llm-brain"
                 : "harness: disconnected from mod-llm-brain");
   if (!connected) {
-    for (auto& [name, state] : bots_) {
+    for (auto&& [name, state] : bots_) {
       state.runner.Stop();
       state.latest_snapshot.reset();
     }
@@ -188,7 +189,7 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks /*received_at*/) {
 }
 
 void BotLoop::OnTick(base::TimeTicks now) {
-  for (auto& [bot, state] : bots_) {
+  for (auto&& [bot, state] : bots_) {
     if (!state.latest_snapshot || state.call_in_flight ||
         state.has_queued_wake) {
       continue;
@@ -245,7 +246,7 @@ void BotLoop::StartBotCall(const std::string& bot,
     state.identity_loaded = true;
     if (!config_.bots_dir.empty()) {
       if (const std::optional<std::string> id = ReadFile(
-              absl::StrCat(config_.bots_dir, "/", bot, "/identity.md"))) {
+              base::StrCat({config_.bots_dir, "/", bot, "/identity.md"}))) {
         state.identity = *id;
       }
     }
@@ -259,7 +260,7 @@ void BotLoop::StartBotCall(const std::string& bot,
   const std::string wake_reason =
       state.pending_reasons.empty()
           ? "plan done"
-          : absl::StrJoin(state.pending_reasons, "; ");
+          : base::JoinString(state.pending_reasons, "; ");
   state.pending_reasons.clear();
 
   PromptInput input;
@@ -396,22 +397,23 @@ void BotLoop::OnReply(const std::string& bot,
     BotState& state = it->second;
     state.call_in_flight = false;
     if (!decision.result.reply) {
-      Log(absl::StrFormat("harness: %s brain error (%.0f ms): %s", bot,
-                          decision.result.round_trip_ms,
-                          decision.result.error));
+      Log(base::StringPrintf("harness: %s brain error (%.0f ms): %s",
+                             bot.c_str(), decision.result.round_trip_ms,
+                             decision.result.error.c_str()));
       state.look_deadline = now + base::Seconds(10);
     } else if (!plan) {
-      Log(absl::StrFormat("harness: %s invalid plan (%.0f ms)", bot,
-                          decision.result.round_trip_ms));
+      Log(base::StringPrintf("harness: %s invalid plan (%.0f ms)", bot.c_str(),
+                             decision.result.round_trip_ms));
       state.look_deadline = now + base::Seconds(10);
     } else {
       if (!plan->goal.empty()) {
         state.current_goal = plan->goal;
       }
-      Log(absl::StrFormat(
+      const std::string formatted = FormatPlan(*plan);
+      const std::string do_line = formatted.substr(0, formatted.find('\n'));
+      Log(base::StringPrintf(
           "harness: %s woke (%s) -> %s (do %.0f ms, total %.0f ms, look %d s)",
-          bot, decision.reason,
-          FormatPlan(*plan).substr(0, FormatPlan(*plan).find('\n')),
+          bot.c_str(), decision.reason.c_str(), do_line.c_str(),
           decision.result.first_line_ms, decision.result.round_trip_ms,
           plan->look_s));
       // Only install watches/steps if no newer surprise already superseded this
