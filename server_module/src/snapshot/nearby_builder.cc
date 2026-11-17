@@ -469,6 +469,24 @@ pb::GameObject::Kind ObjectKind(GameObject* object) {
   }
 }
 
+// Whether the client gives `go` a click cursor for `bot`: selectable, any
+// quest condition met (e.g. Cactus Apple requires its quest), and not an
+// already-opened chest/herb/vein.
+bool IsObjectUsable(Player* bot, GameObject* go) {
+  if (go->HasGameObjectFlag(GO_FLAG_NOT_SELECTABLE)) {
+    return false;
+  }
+  if (go->HasGameObjectFlag(GO_FLAG_INTERACT_COND) &&
+      !go->ActivateToQuest(bot)) {
+    return false;
+  }
+  if (go->GetGoType() == GAMEOBJECT_TYPE_CHEST ||
+      go->GetGOInfo()->GetLootId() != 0) {
+    return go->getLootState() == GO_READY;
+  }
+  return true;
+}
+
 // Triggers and invisible-model creatures are on the visible list (the client
 // is sent them) but draw nothing: a player sees nobody there.
 bool HiddenFromPlayer(WorldObject* object) {
@@ -563,7 +581,7 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
       out.guid = GuidString(guid);
       out.name = go->GetName();
       out.kind = ObjectKind(go);
-      out.usable = !go->HasGameObjectFlag(GO_FLAG_NOT_SELECTABLE);
+      out.usable = IsObjectUsable(bot, go);
       out.state = go->GetGoState() == GO_STATE_ACTIVE ? "active" : "ready";
       out.highlighted = go->ActivateToQuest(bot);
       FillRelative(bot, go, &out.rel);

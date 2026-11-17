@@ -106,7 +106,12 @@ void BotLoop::OnConnectionChanged(bool connected) {
       state.has_ever_woken = false;
       state.has_queued_wake = false;
       state.call_in_flight = false;
+      state.early_steps_dispatched = false;
+      state.early_step_failed = false;
+      state.step_refusals = 0;
       state.pending_reasons.clear();
+      state.recent_events.clear();
+      state.whisperers.clear();
       ++state.call_epoch;
     }
     // Answers to screens of the old connection are useless: free the slots.
@@ -212,7 +217,11 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
       !state.look_deadline.is_null() && received_at >= state.look_deadline) {
     state.look_deadline = base::TimeTicks();
     state.runner.Stop();
-    WakeBot(bot, Urgency::kNormal, "look timer");
+    const bool backoff_wake = !state.pending_reasons.empty();
+    if (!backoff_wake) {
+      state.step_refusals = 0;
+    }
+    WakeBot(bot, Urgency::kNormal, backoff_wake ? "" : "look timer");
   }
 }
 
@@ -239,6 +248,9 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
       return;
     }
     state.runner.Stop();
+    if (state.call_in_flight) {
+      state.early_step_failed = true;
+    }
     const base::TimeDelta backoff = StepRefusalBackoff(++state.step_refusals);
     if (backoff.is_positive()) {
       if (const std::optional<WakeTrigger> trig =
@@ -284,7 +296,14 @@ void BotLoop::OnTick(base::TimeTicks now) {
       state.latest_snapshot.reset();
       state.look_deadline = base::TimeTicks();
       state.has_ever_woken = false;
-      // A call in flight still answers, but installs nothing: no snapshot.
+      state.has_queued_wake = false;
+      state.call_in_flight = false;
+      state.early_steps_dispatched = false;
+      state.early_step_failed = false;
+      state.step_refusals = 0;
+      state.pending_reasons.clear();
+      state.recent_events.clear();
+      ++state.call_epoch;
       continue;
     }
     if (!state.latest_snapshot || state.call_in_flight ||
@@ -300,7 +319,11 @@ void BotLoop::OnTick(base::TimeTicks now) {
     if (!state.look_deadline.is_null() && now >= state.look_deadline) {
       state.look_deadline = base::TimeTicks();
       state.runner.Stop();
-      WakeBot(bot, Urgency::kNormal, "look timer");
+      const bool backoff_wake = !state.pending_reasons.empty();
+      if (!backoff_wake) {
+        state.step_refusals = 0;
+      }
+      WakeBot(bot, Urgency::kNormal, backoff_wake ? "" : "look timer");
     }
   }
 }
@@ -352,6 +375,7 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
   state.has_queued_wake = false;
   state.call_in_flight = true;
   state.early_steps_dispatched = false;
+  state.early_step_failed = false;
   const uint64_t epoch = ++state.call_epoch;
 
   const std::string wake_reason =
@@ -549,12 +573,20 @@ void BotLoop::OnReply(const std::string& bot,
           decision.result.first_line_ms, decision.result.round_trip_ms,
           plan->look_s));
       // Only install watches/steps if no newer surprise already superseded this
-      // call while it was in flight.
-      if (!state.has_queued_wake && state.latest_snapshot) {
+      // call while it was in flight. When an early-dispatched step of this
+      // same call failed before the reply finished, still deliver say/tell and
+      // watches, and keep the refusal wake or backoff timer instead of
+      // requeueing the already-answered wake reasons.
+      if ((!state.has_queued_wake || state.early_step_failed) &&
+          state.latest_snapshot) {
         state.triggers.SetPlanContext(
             plan->watches,
-            CollectExpectedNames(plan->steps, plan->expect, ask_screen));
-        state.look_deadline = now + base::Seconds(plan->look_s);
+            state.early_step_failed
+                ? std::flat_set<std::string>{}
+                : CollectExpectedNames(plan->steps, plan->expect, ask_screen));
+        if (!state.early_step_failed) {
+          state.look_deadline = now + base::Seconds(plan->look_s);
+        }
         if (!plan->say.empty()) {
           SendSay(bot, pb::SAY, "", plan->say);
         }

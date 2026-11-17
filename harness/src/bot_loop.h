@@ -116,6 +116,7 @@ class BotLoop {
     bool has_queued_wake = false;
     bool call_in_flight = false;
     bool early_steps_dispatched = false;
+    bool early_step_failed = false;
     // Refused steps in a row since the last completed one; from the second,
     // the wake is delayed (StepRefusalBackoff()) so a body that can't act
     // (dead, out of range) doesn't ask the brain again many times a second.

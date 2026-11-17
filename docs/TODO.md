@@ -11,10 +11,10 @@ Last updated 2026-11-17.
 
 Working order (2026-11-17 09:50): finish #3, #1, then #4, #2, #5.
 
-- **Review of c80e791** (`docs/reviews/2026-11-17-c80e791.md`, 18 findings): all fixed and
-  unit-tested (2026-11-17). **Not yet run live**: rebuild the server (`tools/wlb build server`),
-  `tools/wlb config`, restart, and watch a bot loot, gather, use a door, die and come back, and
-  get whispered "who".
+- **Review of c80e791 + 4ce9490** (`docs/reviews/2026-11-17-c80e791.md`, 18 findings + 6
+  follow-ups): all fixed and unit-tested (2026-11-17). **Not yet run live**: rebuild and install
+  the server (`tools/wlb build server`), `tools/wlb config`, restart, and watch a bot loot, gather,
+  use a door, die and come back, and get whispered "who".
 
 - **#1 Play Testpriest live: partly done (2026-11-17 01:34-01:38 and from 10:00, Qwen3.6-35B, 16
   slots).** Measured at 01:34: snapshot build p50 33-45 us, p99 58-122 us; built->received p50
@@ -159,6 +159,14 @@ Working order (2026-11-17 09:50): finish #3, #1, then #4, #2, #5.
   fails with "never offered". Passed every run so far.
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-17: follow-up review fixes on 4ce9490 (`bot_loop.cc`, `option_executor.cc`,
+  `nearby_builder.cc`, `llm_brain_world_script.cc`): preserve `say`/`tell` and refusal backoff
+  when an early-dispatched step fails during streaming; clear `last movement` before
+  `UseObjectNow`; check `GO_FLAG_INTERACT_COND`/`ActivateToQuest` and `GO_READY` for
+  `GameObject::usable`; clear stale/disconnected bot call state; send `OnSay` errors as
+  non-step events (`command_id = 0`) without an alerting snapshot; reset `step_refusals` on
+  normal `look timer`.
 
 - 2026-11-17: the rest of review c80e791 (`docs/reviews/2026-11-17-c80e791.md`): the done
   signal (`Snapshot::done_command_id`), Gather/Use walk-then-use with the refusal reason,

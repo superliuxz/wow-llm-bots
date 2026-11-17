@@ -157,6 +157,13 @@ std::string UseObjectNow(Player* bot, GameObject* go) {
   if (std::string why = WhyCantUse(bot, go); !why.empty()) {
     return why;
   }
+  // If WalkNextTo brought the bot into LootDistance, clear its movement timer
+  // so UseGameObject's "move to loot" step is not refused by
+  // IsWaitingForLastMove.
+  if (auto* last =
+          ai->GetAiObjectContext()->GetValue<LastMovement&>("last movement")) {
+    last->Get().clear();
+  }
   // Playerbots' "use" action takes the object as a chat link (the form
   // ChatHelper::FormatGameobject writes) and does what a click does: a chest,
   // herb or vein goes through its loot strategy (walk there, open, loot), any

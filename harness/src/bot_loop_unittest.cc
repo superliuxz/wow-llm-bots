@@ -656,5 +656,162 @@ TEST(BotLoopTest, ABotWhoseSnapshotsStoppedIsNotAskedAboutItsLastScreen) {
   EXPECT_NE(brain.front_request().user.find("first look"), std::string::npos);
 }
 
+// An early-dispatched step refused while the same LLM call is still streaming
+// its tail must still deliver say/tell from that reply, must not requeue the
+// already-answered wake reasons on refusal #1, and must keep the backoff
+// deadline instead of overwriting it with `look:` on refusal #2.
+TEST(BotLoopTest, EarlyStepRefusedDuringStreamingKeepsTellAndBackoff) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Tess", 1, t0);
+  AddUnitAndOption(&s1, "0x1", "Mottled Boar", false, false);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 2\nexpect: none\nwatch: none\nlook: 300");
+
+  auto refuse_last = [&](base::TimeTicks at) {
+    ASSERT_FALSE(commands.empty());
+    pb::ImmediateEvent err;
+    err.bot = "Tess";
+    pb::ErrorEvent& e = err.event.error.emplace();
+    e.command_id = commands.back().command_id;
+    e.text = "you are dead";
+    loop.OnEvent(err, at);
+  };
+
+  // Call woken by a whisper: `do: 1` streams early, and the module refuses it
+  // before the rest of the reply arrives.
+  loop.OnEvent(WhisperFrom("Tess", "Brakka", "coming?"), t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.StreamFirstLine("do: 1");
+  refuse_last(t0 + base::Seconds(1) + base::Milliseconds(10));
+
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\ntell Brakka: omw");
+  bool sent_tell = false;
+  for (const pb::Command& cmd : commands) {
+    if (cmd.say && cmd.say->channel == pb::WHISPER && cmd.say->to == "Brakka" &&
+        cmd.say->text == "omw") {
+      sent_tell = true;
+    }
+  }
+  EXPECT_TRUE(sent_tell);
+
+  // Refusal #1 wakes at once, without requeueing the answered whisper reason.
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(
+      brain.front_request().user.find("Woken: step failed: you are dead."),
+      std::string::npos)
+      << brain.front_request().user;
+  EXPECT_EQ(brain.front_request().user.find("Woken: whisper from Brakka"),
+            std::string::npos)
+      << brain.front_request().user;
+
+  // Refusal #2 during streaming: FinishReply must not overwrite the 2 s
+  // backoff deadline with `look: 60`, and the timer wake keeps the reason.
+  brain.StreamFirstLine("do: 1");
+  const base::TimeTicks r2_at = t0 + base::Seconds(2);
+  refuse_last(r2_at);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  EXPECT_EQ(brain.size(), 0u);
+
+  loop.OnTick(r2_at + base::Seconds(1));
+  EXPECT_EQ(brain.size(), 0u);
+  loop.OnTick(r2_at + base::Seconds(2));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(
+      brain.front_request().user.find("Woken: step failed: you are dead."),
+      std::string::npos)
+      << brain.front_request().user;
+  EXPECT_EQ(brain.front_request().user.find("look timer"), std::string::npos)
+      << brain.front_request().user;
+}
+
+TEST(BotLoopTest, LookTimerAfterKeepResetsStepRefusals) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Tess", 1, t0);
+  AddUnitAndOption(&s1, "0x1", "Mottled Boar", false, false);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+
+  auto refuse_last = [&](base::TimeTicks at) {
+    ASSERT_FALSE(commands.empty());
+    pb::ImmediateEvent err;
+    err.bot = "Tess";
+    pb::ErrorEvent& e = err.event.error.emplace();
+    e.command_id = commands.back().command_id;
+    e.text = "target lost";
+    loop.OnEvent(err, at);
+  };
+
+  // Refusal 1 wakes immediately; the brain then picks Keep for 10 s.
+  brain.StreamFirstLine("do: 1");
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  refuse_last(t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.StreamFirstLine("do: 2");
+  brain.FinishReply("do: 2\nexpect: none\nwatch: none\nlook: 10");
+  EXPECT_EQ(brain.size(), 0u);
+
+  // Completing the Keep look timer resets the consecutive-refusal counter.
+  loop.OnTick(t0 + base::Seconds(20));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.StreamFirstLine("do: 1");
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  refuse_last(t0 + base::Seconds(21));
+  EXPECT_EQ(brain.size(), 1u);
+}
+
+TEST(BotLoopTest, StaleSnapshotWhileCallInFlightDoesNotRequeueOldReasons) {
+  CannedBrain brain;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  BotLoop loop(cfg, brain.Fn(), [](const pb::Command&) {});
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Tess", 1, t0);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+
+  loop.OnEvent(WhisperFrom("Tess", "Brakka", "old question"),
+               t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+
+  // Snapshots stop while call #2 is still in flight -> forgotten, and the late
+  // reply must not requeue the old whisper onto the next login.
+  loop.OnTick(t0 + base::Seconds(6));
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+
+  pb::Snapshot back = MakeLiveSnap("Tess", 2, t0 + base::Seconds(10));
+  AddKeep(&back);
+  loop.OnSnapshot(back, t0 + base::Seconds(10));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("Woken: first look."),
+            std::string::npos)
+      << brain.front_request().user;
+  EXPECT_EQ(brain.front_request().user.find("whisper from Brakka"),
+            std::string::npos)
+      << brain.front_request().user;
+  EXPECT_EQ(brain.front_request().user.find("old question"), std::string::npos)
+      << brain.front_request().user;
+}
+
 }  // namespace
 }  // namespace harness

@@ -453,18 +453,19 @@ class LlmBrainWorldScript : public WorldScript {
   void OnSay(size_t bot_index,
              const std::string& name,
              Player* bot,
-             uint32_t command_id,
+             uint32_t /*command_id*/,
              const wlb::snapshot::Command::Say& say) {
     const std::string error = Speak(bot, say);
     LOG_INFO("module", "mod-llm-brain: {} says ({}{}{}): {}: {}", name,
              wlb::snapshot::EnumName(say.channel), say.to.empty() ? "" : " to ",
              say.to, say.text, error.empty() ? "ok" : error);
     if (!error.empty()) {
+      // Chat error (command_id = 0): recorded in recent_events without
+      // cancelling the active step or building an extra snapshot.
       wlb::snapshot::Event payload;
       wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
       failed.text = error;
-      failed.command_id = command_id;
-      EmitAlertingEvent(bot_index, name, bot, std::move(payload));
+      SendImmediateEvent(bot_index, name, std::move(payload));
     }
   }
 
@@ -516,16 +517,9 @@ class LlmBrainWorldScript : public WorldScript {
     };
   }
 
-  void EmitAlertingEvent(size_t index,
-                         const std::string& name,
-                         Player* bot,
-                         wlb::snapshot::Event payload) {
-    if (bot && bot->IsInWorld()) {
-      const base::TimeTicks now = base::TimeTicks::Now();
-      const SnapshotSchedule::Flags flags = CurrentFlags(bot, index);
-      SendSnapshot(index, name, bot);
-      schedule_->Sent(index, now, flags);
-    }
+  void SendImmediateEvent(size_t index,
+                          const std::string& name,
+                          wlb::snapshot::Event payload) {
     wlb::snapshot::ModuleMessage message;
     message.version = wlb::snapshot::kWireVersion;
     wlb::snapshot::ImmediateEvent& event = message.event.emplace();
@@ -536,6 +530,19 @@ class LlmBrainWorldScript : public WorldScript {
         (base::TimeTicks::Now() - base::TimeTicks()).InMicroseconds();
     event.event = std::move(payload);
     bridge_->Send(wlb::snapshot::WriteBeve(message));
+  }
+
+  void EmitAlertingEvent(size_t index,
+                         const std::string& name,
+                         Player* bot,
+                         wlb::snapshot::Event payload) {
+    if (bot && bot->IsInWorld()) {
+      const base::TimeTicks now = base::TimeTicks::Now();
+      const SnapshotSchedule::Flags flags = CurrentFlags(bot, index);
+      SendSnapshot(index, name, bot);
+      schedule_->Sent(index, now, flags);
+    }
+    SendImmediateEvent(index, name, std::move(payload));
   }
 
   void SendSnapshot(size_t index, const std::string& name, Player* bot) {
