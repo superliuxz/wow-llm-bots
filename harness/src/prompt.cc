@@ -40,8 +40,14 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
     absl::StrAppend(&request.user,
                     "Current goal: ", OneLine(input.current_goal), ".\n");
   }
-  absl::StrAppend(&request.user, "Woken: ", OneLine(input.wake_reason),
-                  ".\n\nYour screen now:\n", screen.text);
+  absl::StrAppend(&request.user, "Woken: ", OneLine(input.wake_reason), ".");
+  if (!input.recent_events.empty()) {
+    absl::StrAppend(&request.user, "\n\nSince your last look:");
+    for (const std::string& event : input.recent_events) {
+      absl::StrAppend(&request.user, "\n- ", OneLine(event));
+    }
+  }
+  absl::StrAppend(&request.user, "\n\nYour screen now:\n", screen.text);
   request.grammar = PlanGrammar(static_cast<int>(screen.options.size()));
   request.slot = input.slot;
   request.temperature = input.temperature;

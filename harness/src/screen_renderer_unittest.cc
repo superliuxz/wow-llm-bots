@@ -309,5 +309,54 @@ TEST(ScreenRendererTest, WhenNotAliveTheLifeStateComesBeforeTheFlags) {
             std::string::npos);
 }
 
+TEST(ScreenRendererTest, ModuleOptionsNumberScreenLinesByGuidWithoutMismatch) {
+  pb::Snapshot snapshot = NewSnapshot();
+  // Friendly Gornek has no module option in M1; two Boars share a name/look
+  // (the second is closer and holds the module's option guid); a lootable Wolf
+  // corpse has option 1 (even though it appears last in nearby.units).
+  AddUnit(&snapshot, "Gornek", pb::Unit::FRIENDLY, 18, pb::N)->set_guid("0x10");
+  AddUnit(&snapshot, "Boar", pb::Unit::NEUTRAL, 14, pb::E)->set_guid("0x20");
+  AddUnit(&snapshot, "Boar", pb::Unit::NEUTRAL, 6, pb::E)->set_guid("0x21");
+  pb::Unit* wolf = AddUnit(&snapshot, "Wolf", pb::Unit::HOSTILE, 4, pb::W);
+  wolf->set_guid("0x30");
+  wolf->set_dead(true);
+  wolf->set_lootable(true);
+
+  pb::Option* o1 = snapshot.add_options();
+  o1->set_text("Loot Wolf");
+  o1->set_guid("0x30");
+  pb::Option* o2 = snapshot.add_options();
+  o2->set_text("Attack Boar");
+  o2->set_guid("0x21");
+  pb::Option* o3 = snapshot.add_options();
+  o3->set_text("Keep doing what I'm doing");
+
+  const Screen screen = RenderScreen(snapshot);
+  EXPECT_TRUE(screen.has_module_options);
+  EXPECT_EQ(screen.options,
+            (std::vector<OptionKind>{OptionKind::kLoot, OptionKind::kAttack,
+                                     OptionKind::kKeep}));
+  EXPECT_EQ(screen.details, (std::vector<ScreenOption>{
+                                {OptionKind::kLoot, "0x30", "Wolf"},
+                                {OptionKind::kAttack, "0x21", "Boar"},
+                                {OptionKind::kKeep, "", ""},
+                            }));
+  // Gornek is unnumbered ('-'), the two Boars carry option 2, Wolf carries
+  // option 1, and "also:" lists only option 3 (Keep).
+  EXPECT_NE(screen.text.find("  - Gornek: level 3, npc, friendly; 18 yd N\n"),
+            std::string::npos)
+      << screen.text;
+  EXPECT_NE(screen.text.find(
+                "  2. Attack 2x Boar: level 3, npc, neutral; 6-14 yd E\n"),
+            std::string::npos)
+      << screen.text;
+  EXPECT_NE(screen.text.find("  1. Loot Wolf: "), std::string::npos)
+      << screen.text;
+  EXPECT_NE(screen.text.find("also:\n  3. Keep doing what I'm doing"),
+            std::string::npos)
+      << screen.text;
+  EXPECT_EQ(screen.text.find("Explore somewhere new"), std::string::npos);
+}
+
 }  // namespace
 }  // namespace harness

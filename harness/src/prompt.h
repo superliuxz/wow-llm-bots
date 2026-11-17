@@ -13,6 +13,7 @@
 #define HARNESS_PROMPT_H_
 
 #include <string>
+#include <vector>
 
 #include "llm_client.h"
 #include "screen_renderer.h"
@@ -25,7 +26,9 @@ struct PromptInput {
   std::string identity;      // var/bots/<name>/identity.md; may be empty
   std::string current_goal;  // Empty when the bot has no goal yet.
   std::string wake_reason;   // "plan done", "attacked", ...
-  int slot = -1;             // llama-server slot, or -1
+  // Events noted since the bot's last look (chat, loot, errors).
+  std::vector<std::string> recent_events;
+  int slot = -1;  // llama-server slot, or -1
   float temperature = 0.7f;
 };
 

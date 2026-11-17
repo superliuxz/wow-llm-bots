@@ -46,10 +46,24 @@ enum class OptionKind {
 // "attack", "talk", "loot", ...
 std::string_view OptionKindName(OptionKind kind);
 
+// What one numbered option on the screen targets.
+struct ScreenOption {
+  OptionKind kind = OptionKind::kKeep;
+  std::string guid;  // Empty for non-target options ("Keep ...").
+  std::string name;  // Target name ("Mottled Boar"), for re-resolving repeats.
+
+  bool operator==(const ScreenOption&) const = default;
+};
+
 struct Screen {
   std::string text;
   // options[i] is what option number i + 1 does.
   std::vector<OptionKind> options;
+  // Same length as `options`: target guid and name for each 1-based option.
+  std::vector<ScreenOption> details;
+  // True when option numbers came from `snapshot.options` (safe to send
+  // Command.Choose); false when derived locally from an offline snapshot.
+  bool has_module_options = false;
 };
 
 Screen RenderScreen(const wlb::snapshot::Snapshot& snapshot);

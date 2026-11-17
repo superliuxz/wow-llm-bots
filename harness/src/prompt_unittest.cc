@@ -41,10 +41,15 @@ TEST(PromptTest, TheUserMessageCarriesNameIdentityGoalAndScreenInOrder) {
   PromptInput rich = SampleInput();
   rich.identity = "You grew up near Razor Hill.";
   rich.current_goal = "kill boars for the quest";
+  rich.recent_events = {"received 2x Tough Jerky", "whisper from Gorn: hi"};
   EXPECT_EQ(BuildPlanRequest(rich, SampleScreen()).user,
             "You are Tess.\n\nYou grew up near Razor Hill.\n\n"
             "Current goal: kill boars for the quest.\n"
-            "Woken: plan done.\n\nYour screen now:\n"
+            "Woken: plan done.\n\n"
+            "Since your last look:\n"
+            "- received 2x Tough Jerky\n"
+            "- whisper from Gorn: hi\n\n"
+            "Your screen now:\n"
             "me: Tess\nalso:\n  1. Keep doing what I'm doing");
 }
 

@@ -4,19 +4,21 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <map>
 #include <optional>
 #include <set>
 #include <string>
 #include <string_view>
-#include <tuple>
 #include <vector>
 
 #include "absl/strings/ascii.h"
+#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
+#include "absl/strings/strip.h"
 #include "proto/snapshot.pb.h"
 
 namespace harness {
@@ -237,10 +239,12 @@ std::string ObjectLook(const pb::GameObject& go) {
 
 // What the bot can do with a unit or object.
 struct Thing {
+  std::string guid;
   std::string name;
   std::string look;
   pb::Relative rel;
   std::optional<OptionKind> option;
+  int module_option = 0;  // 1-based index into snapshot.options, or 0.
 };
 
 std::optional<OptionKind> UnitOption(const pb::Unit& u) {
@@ -291,43 +295,97 @@ std::string_view OptionVerb(OptionKind kind) {
   return "";
 }
 
-// One line per distinct (name, look): the same thing seen several times is
-// one line with a count and the range of distances. Entries the bot can act
-// on get the next option number and the action verb.
-std::vector<std::string> ThingLines(const std::vector<Thing>& things,
-                                    std::vector<OptionKind>* options) {
-  // Things only share a line if they also share what the bot can do with them
-  // (a usable and an unusable chest look alike).
-  using Key = std::tuple<std::string, std::string, std::optional<OptionKind>>;
-  std::vector<Key> order;
-  std::map<Key, std::vector<const Thing*>> groups;
-  for (const Thing& t : things) {
-    const Key key{t.name.empty() ? "?" : t.name, t.look, t.option};
-    if (groups.find(key) == groups.end()) {
-      order.push_back(key);
+ScreenOption ParseModuleOption(const pb::Option& option) {
+  std::string_view text = absl::StripAsciiWhitespace(option.text());
+  const struct {
+    std::string_view prefix;
+    OptionKind kind;
+  } targeted[] = {
+      {"Attack ", OptionKind::kAttack}, {"Talk to ", OptionKind::kTalk},
+      {"Loot ", OptionKind::kLoot},     {"Gather ", OptionKind::kGather},
+      {"Use ", OptionKind::kUse},
+  };
+  for (const auto& entry : targeted) {
+    if (absl::ConsumePrefix(&text, entry.prefix)) {
+      return {entry.kind, std::string(option.guid()),
+              std::string(absl::StripAsciiWhitespace(text))};
     }
-    groups[key].push_back(&t);
   }
+  if (absl::StartsWithIgnoreCase(text, "Explore")) {
+    return {OptionKind::kExplore, std::string(option.guid()), ""};
+  }
+  if (absl::StartsWithIgnoreCase(text, "Rest")) {
+    return {OptionKind::kRest, std::string(option.guid()), ""};
+  }
+  if (absl::StartsWithIgnoreCase(text, "Go to")) {
+    return {OptionKind::kTown, std::string(option.guid()), ""};
+  }
+  return {OptionKind::kKeep, std::string(option.guid()), ""};
+}
+
+// One line per distinct (name, look): the same thing seen several times is
+// one line with a count and the range of distances. When `has_module_options`
+// is false, entries the bot can act on get the next option number; when true,
+// only groups carrying a `module_option` from `snapshot.options` get that
+// exact number.
+std::vector<std::string> ThingLines(const std::vector<Thing>& things,
+                                    bool has_module_options,
+                                    std::vector<OptionKind>* options,
+                                    std::vector<ScreenOption>* details,
+                                    std::vector<bool>* placed) {
+  struct Group {
+    std::string name;
+    std::string look;
+    std::optional<OptionKind> option;
+    int module_option = 0;
+    std::vector<const Thing*> items;
+  };
+  std::vector<Group> groups;
+  for (const Thing& t : things) {
+    const std::string name = t.name.empty() ? "?" : t.name;
+    bool merged = false;
+    for (Group& g : groups) {
+      if (g.name == name && g.look == t.look && g.option == t.option &&
+          (g.module_option == 0 || t.module_option == 0)) {
+        if (g.module_option == 0 && t.module_option > 0) {
+          g.module_option = t.module_option;
+        }
+        g.items.push_back(&t);
+        merged = true;
+        break;
+      }
+    }
+    if (!merged) {
+      groups.push_back({name, t.look, t.option, t.module_option, {&t}});
+    }
+  }
+
   std::vector<std::string> lines;
-  for (const auto& key : order) {
-    const std::vector<const Thing*>& group = groups[key];
+  for (const Group& group : groups) {
     std::string mark = "-";
     std::string_view verb;
-    if (group[0]->option) {
-      options->push_back(*group[0]->option);
+    if (has_module_options) {
+      if (group.module_option > 0) {
+        const size_t idx = static_cast<size_t>(group.module_option - 1);
+        mark = absl::StrCat(group.module_option, ".");
+        verb = OptionVerb((*options)[idx]);
+        (*placed)[idx] = true;
+      }
+    } else if (group.option) {
+      options->push_back(*group.option);
+      details->push_back({*group.option, group.items[0]->guid, group.name});
       mark = absl::StrCat(options->size(), ".");
-      verb = OptionVerb(*group[0]->option);
+      verb = OptionVerb(*group.option);
     }
-    const std::string& name = std::get<0>(key);
-    const std::string& look = std::get<1>(key);
-    if (group.size() == 1) {
-      lines.push_back(absl::StrCat(mark, " ", verb, name, ": ", look, "; ",
-                                   TightWhere(group[0]->rel)));
+    if (group.items.size() == 1) {
+      lines.push_back(absl::StrCat(mark, " ", verb, group.name, ": ",
+                                   group.look, "; ",
+                                   TightWhere(group.items[0]->rel)));
       continue;
     }
     std::vector<float> dists;
     std::set<std::string> dirs;
-    for (const Thing* t : group) {
+    for (const Thing* t : group.items) {
       dists.push_back(Finite(t->rel.dist_yd()));
       const std::string dir = NameOf(t->rel.dir(), pb::Direction_Name);
       if (!dir.empty()) {
@@ -335,10 +393,10 @@ std::vector<std::string> ThingLines(const std::vector<Thing>& things,
       }
     }
     std::sort(dists.begin(), dists.end());
-    lines.push_back(
-        absl::StrFormat("%s %s%dx %s: %s; %.0f-%.0f yd%s", mark, verb,
-                        group.size(), name, look, dists.front(), dists.back(),
-                        dirs.empty() ? "" : " " + absl::StrJoin(dirs, "/")));
+    lines.push_back(absl::StrFormat(
+        "%s %s%dx %s: %s; %.0f-%.0f yd%s", mark, verb, group.items.size(),
+        group.name, group.look, dists.front(), dists.back(),
+        dirs.empty() ? "" : " " + absl::StrJoin(dirs, "/")));
   }
   return lines;
 }
@@ -476,6 +534,28 @@ std::string_view OptionKindName(OptionKind kind) {
 
 Screen RenderScreen(const pb::Snapshot& snapshot) {
   Screen screen;
+  screen.has_module_options = snapshot.options_size() > 0;
+  std::map<std::string, int> guid_to_option;
+  std::vector<bool> placed;
+  if (screen.has_module_options) {
+    placed.assign(static_cast<size_t>(snapshot.options_size()), false);
+    for (int i = 0; i < snapshot.options_size(); ++i) {
+      ScreenOption parsed = ParseModuleOption(snapshot.options(i));
+      screen.options.push_back(parsed.kind);
+      screen.details.push_back(parsed);
+      if (!parsed.guid.empty()) {
+        guid_to_option.try_emplace(parsed.guid, i + 1);
+      }
+    }
+  }
+  const auto lookup_module_option = [&](std::string_view guid) {
+    if (guid.empty()) {
+      return 0;
+    }
+    const auto it = guid_to_option.find(std::string(guid));
+    return it == guid_to_option.end() ? 0 : it->second;
+  };
+
   const pb::Base& base = snapshot.base();
   std::vector<std::string> lines;
   if (base.has_self()) {
@@ -491,13 +571,19 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
     if (u.name().empty()) {
       nameless.push_back(&u);
     } else {
-      named.push_back(
-          {std::string(u.name()), UnitLook(u), u.rel(), UnitOption(u)});
+      const int mod_opt = lookup_module_option(u.guid());
+      const std::optional<OptionKind> opt =
+          mod_opt > 0 ? std::optional(screen.options[mod_opt - 1])
+                      : UnitOption(u);
+      named.push_back({std::string(u.guid()), std::string(u.name()),
+                       UnitLook(u), u.rel(), opt, mod_opt});
     }
   }
   if (!named.empty()) {
     lines.push_back("around me:");
-    for (const std::string& line : ThingLines(named, &screen.options)) {
+    for (const std::string& line :
+         ThingLines(named, screen.has_module_options, &screen.options,
+                    &screen.details, &placed)) {
       lines.push_back("  " + line);
     }
   }
@@ -507,26 +593,47 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
   if (nearby.objects_size() > 0) {
     std::vector<Thing> objects;
     for (const pb::GameObject& go : nearby.objects()) {
-      objects.push_back(
-          {std::string(go.name()), ObjectLook(go), go.rel(), ObjectOption(go)});
+      const int mod_opt = lookup_module_option(go.guid());
+      const std::optional<OptionKind> opt =
+          mod_opt > 0 ? std::optional(screen.options[mod_opt - 1])
+                      : ObjectOption(go);
+      objects.push_back({std::string(go.guid()), std::string(go.name()),
+                         ObjectLook(go), go.rel(), opt, mod_opt});
     }
     lines.push_back("objects:");
-    for (const std::string& line : ThingLines(objects, &screen.options)) {
+    for (const std::string& line :
+         ThingLines(objects, screen.has_module_options, &screen.options,
+                    &screen.details, &placed)) {
       lines.push_back("  " + line);
     }
   }
-  lines.push_back("also:");
-  const struct {
-    OptionKind kind;
-    const char* text;
-  } always[] = {{OptionKind::kKeep, "Keep doing what I'm doing"},
-                {OptionKind::kExplore, "Explore somewhere new"},
-                {OptionKind::kRest, "Rest (eat and drink)"},
-                {OptionKind::kTown, "Go to the nearest town"}};
-  for (const auto& option : always) {
-    screen.options.push_back(option.kind);
-    lines.push_back(
-        absl::StrCat("  ", screen.options.size(), ". ", option.text));
+  if (screen.has_module_options) {
+    std::vector<std::string> extra;
+    for (int i = 0; i < snapshot.options_size(); ++i) {
+      if (!placed[static_cast<size_t>(i)]) {
+        extra.push_back(
+            absl::StrCat("  ", i + 1, ". ", snapshot.options(i).text()));
+      }
+    }
+    if (!extra.empty()) {
+      lines.push_back("also:");
+      lines.insert(lines.end(), extra.begin(), extra.end());
+    }
+  } else {
+    lines.push_back("also:");
+    const struct {
+      OptionKind kind;
+      const char* text;
+    } always[] = {{OptionKind::kKeep, "Keep doing what I'm doing"},
+                  {OptionKind::kExplore, "Explore somewhere new"},
+                  {OptionKind::kRest, "Rest (eat and drink)"},
+                  {OptionKind::kTown, "Go to the nearest town"}};
+    for (const auto& option : always) {
+      screen.options.push_back(option.kind);
+      screen.details.push_back({option.kind, "", ""});
+      lines.push_back(
+          absl::StrCat("  ", screen.options.size(), ". ", option.text));
+    }
   }
   // Every line is one line: a name or subtitle from the game with a line
   // break in it must not write a fake line (an option the bot doesn't have).
