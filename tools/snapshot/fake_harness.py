@@ -8,10 +8,10 @@ printed as JSON when the generated Python code is available.
 Dev tool only (production is C++). For JSON, generate the code once with
 tools/wlb check snapshots and run with the tools venv:
   out/tools-venv/bin/python -I tools/snapshot/fake_harness.py [seconds=5] [message ...]
-  out/tools-venv/bin/python -I tools/snapshot/fake_harness.py --stats [seconds=10]
+  out/tools-venv/bin/python -I tools/snapshot/fake_harness.py --stats [--json] [seconds=10]
   out/tools-venv/bin/python -I tools/snapshot/fake_harness.py --choose [--json] [--tail=S] [seconds=30] Attack Loot
 
---stats prints nothing per frame. It reports, from the snapshots' own timestamps (monotonic_us:
+--stats prints nothing per frame (with --json: one JSON object, see measure_delivery). It reports, from the snapshots' own timestamps (monotonic_us:
 this machine's monotonic clock, the same in every process): frames per second; the age of a snapshot when it arrives (built to
 received: world thread, socket, this process); how evenly each bot's snapshots are spaced; and
 how bunched the arrivals are (the most frames arriving within 10 ms), which shows whether the
@@ -69,7 +69,14 @@ def connect():
     return s
 
 
-def run_stats(seconds, warmup=2.0):
+def measure_delivery(seconds, warmup=2.0):
+    """Receives snapshots for `seconds` and measures how they arrive (from the snapshots' own
+    timestamps, monotonic_us: this machine's monotonic clock, the same in every process).
+    Returns {"snapshots", "bots", "per_s", "first_bunching"} plus, if there was a steady state
+    (after the first `warmup` s: every bot's first snapshot is overdue when a harness connects,
+    a burst by design), {"steady": {"n", "age_p50_ms", "age_p95_ms", "age_max_ms",
+    "spacing_p5_ms", "spacing_p50_ms", "spacing_p95_ms", "bunching"}}. "bunching" is the most
+    frames arriving within 10 ms. Returns {"error": text} if nothing arrived."""
     s = connect()
     reader = FrameReader()
     ages, arrivals = [], []  # age in ms; arrival time in s.
@@ -81,7 +88,6 @@ def run_stats(seconds, warmup=2.0):
         except socket.timeout:
             continue
         if not chunk:
-            print("server closed the connection")
             break
         # The snapshot's monotonic_us is CLOCK_MONOTONIC, which time.monotonic_ns() reads
         # on Linux: a clock that the wall clock being set can't move.
@@ -98,8 +104,8 @@ def run_stats(seconds, warmup=2.0):
             per_bot[snap.bot].append(built_ms)
     s.close()
     if not ages:
-        print("no snapshots received")
-        return
+        return {"error": "no snapshots received"}
+
     def bunching(times):
         """The most frames arriving within any 10 ms window."""
         window, most = collections.deque(), 0
@@ -111,28 +117,49 @@ def run_stats(seconds, warmup=2.0):
         return most
 
     first = arrivals[0]
-    # The first round is every bot's first snapshot, all overdue when the harness connects (a
-    # burst by design): reported on its own, and left out of the steady-state numbers.
+    out = {"snapshots": len(ages), "bots": len(per_bot), "per_s": len(ages) / seconds,
+           "warmup_s": warmup,
+           "first_bunching": bunching([t for t in arrivals if t - first < warmup])}
     steady = [i for i, t in enumerate(arrivals) if t - first >= warmup]
-    print(f"{len(ages)} snapshots from {len(per_bot)} bots in {seconds:.0f}s "
-          f"({len(ages) / seconds:.1f}/s)")
+    if steady:
+        steady_ages = sorted(ages[i] for i in steady)
+        steady_from_ms = arrivals[steady[0]] * 1000
+        gaps = sorted(b - a for times in per_bot.values()
+                      for a, b in zip(times, times[1:]) if a >= steady_from_ms - 1500)
+        out["steady"] = {
+            "n": len(steady),
+            "age_p50_ms": percentile(steady_ages, .5),
+            "age_p95_ms": percentile(steady_ages, .95),
+            "age_max_ms": steady_ages[-1],
+            "spacing_p5_ms": percentile(gaps, .05), "spacing_p50_ms": percentile(gaps, .5),
+            "spacing_p95_ms": percentile(gaps, .95),
+            "bunching": bunching([arrivals[i] for i in steady]),
+        }
+    return out
+
+
+def run_stats(seconds, as_json=False, warmup=2.0):
+    r = measure_delivery(seconds, warmup)
+    if as_json:
+        print(json.dumps(r))
+        return
+    if "error" in r:
+        print(r["error"])
+        return
+    print(f"{r['snapshots']} snapshots from {r['bots']} bots in {seconds:.0f}s "
+          f"({r['per_s']:.1f}/s)")
     print(f"first {warmup:.0f} s (every bot's first snapshot): up to "
-          f"{bunching([t for t in arrivals if t - first < warmup])} within 10 ms")
-    if not steady:
+          f"{r['first_bunching']} within 10 ms")
+    st = r.get("steady")
+    if not st:
         print("(no steady state: run longer)")
         return
-    steady_ages = sorted(ages[i] for i in steady)
-    steady_from_ms = arrivals[steady[0]] * 1000
-    gaps = sorted(b - a for times in per_bot.values()
-                  for a, b in zip(times, times[1:]) if a >= steady_from_ms - 1500)
-    print(f"steady state ({len(steady)} snapshots):")
-    print(f"  age on arrival (built -> received): p50 {percentile(steady_ages, .5):.1f} ms, "
-          f"p95 {percentile(steady_ages, .95):.1f} ms, max {steady_ages[-1]:.1f} ms")
-    if gaps:
-        print(f"  spacing of one bot's snapshots: p5 {percentile(gaps, .05):.0f} ms, "
-              f"p50 {percentile(gaps, .5):.0f} ms, p95 {percentile(gaps, .95):.0f} ms")
-    print(f"  bunching: up to {bunching([arrivals[i] for i in steady])} snapshots "
-          f"arrived within 10 ms")
+    print(f"steady state ({st['n']} snapshots):")
+    print(f"  age on arrival (built -> received): p50 {st['age_p50_ms']:.1f} ms, "
+          f"p95 {st['age_p95_ms']:.1f} ms, max {st['age_max_ms']:.1f} ms")
+    print(f"  spacing of one bot's snapshots: p5 {st['spacing_p5_ms']:.0f} ms, "
+          f"p50 {st['spacing_p50_ms']:.0f} ms, p95 {st['spacing_p95_ms']:.0f} ms")
+    print(f"  bunching: up to {st['bunching']} snapshots arrived within 10 ms")
 
 
 def run_print(seconds, to_send):
@@ -243,7 +270,7 @@ def main():
             and not a.startswith("--tail=")]
     seconds = float(args[0]) if args else (10.0 if stats else 5.0)
     if stats:
-        run_stats(seconds)
+        run_stats(seconds, as_json)
     elif choose:
         if as_json:
             transcript = play_script(

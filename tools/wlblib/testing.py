@@ -13,14 +13,18 @@ and, for e2e, TEST_CONFIG (config/tests/<TEST_CONFIG>.*.overrides) and BOT (the 
 for). The runner prints one PASS or FAIL line per case and exits 1 if any failed.
 """
 
+import datetime
 import importlib
 import json
+import pathlib
 import pkgutil
+import shutil
 import subprocess
 import time
+import urllib.request
 
 from wlblib import build, cases, server
-from wlblib.common import LOGS, ROOT, Failed, running_pid, say, venv_python
+from wlblib.common import LOGS, OUT, ROOT, Failed, output, run, running_pid, say, venv_python
 
 TARGETS = ("unit", "e2e", "perf", "eval")
 
@@ -64,8 +68,8 @@ class Stack:
     play server first and puts it back afterwards: same build, normal config, started again if it
     was running. Test characters are recreated from fixtures on every start; yours isn't touched."""
 
-    def __init__(self, test_config, bot, keep=False):
-        self.test_config, self.bot, self.keep = test_config, bot, keep
+    def __init__(self, test_config, bot, keep=False, online=1):
+        self.test_config, self.bot, self.keep, self.online = test_config, bot, keep, online
         self.was_running = False
         self.flavor_before = None
         self.log_start = 0
@@ -83,6 +87,8 @@ class Stack:
             server.config(self.test_config)
             server.server_start()
             server.wait_online(self.bot)
+            if self.online > 1:
+                server.wait_online_count(self.online)
             try:
                 self.log_start = (LOGS / "Server.log").stat().st_size
             except OSError:
@@ -131,30 +137,7 @@ class Stack:
         return json.loads(result.stdout)
 
 
-def e2e(names=(), keep_server=False):
-    found = discover("e2e")
-    unknown = [n for n in names if n not in found]
-    if unknown:
-        raise Failed(f"no e2e case {', '.join(unknown)} (have: {', '.join(found) or 'none'})")
-    selected = [found[n] for n in names] if names else list(found.values())
-    if not selected:
-        raise Failed("no e2e cases")
-    # Cases that share a test config share one server start.
-    by_config = {}
-    for module in selected:
-        by_config.setdefault((module.TEST_CONFIG, module.BOT), []).append(module)
-    results = []
-    for (config, bot), modules in by_config.items():
-        with Stack(config, bot, keep=keep_server) as stack:
-            for module in modules:
-                results.append(_run_case("e2e", module, stack))
-    _summary(results)
-
-
-# ---- perf and eval ------------------------------------------------------------------------------
-
-def run_plain(target, names=()):
-    """perf and eval cases manage what they need themselves (they get no stack)."""
+def _select(target, names):
     found = discover(target)
     unknown = [n for n in names if n not in found]
     if unknown:
@@ -162,7 +145,215 @@ def run_plain(target, names=()):
     selected = [found[n] for n in names] if names else list(found.values())
     if not selected:
         raise Failed(f"no {target} cases yet")
-    _summary([_run_case(target, module, None) for module in selected])
+    return selected
+
+
+def _run_selected(selected, keep_server, call):
+    """Runs `call(module, stack)` for every case. Cases with a TEST_CONFIG share one stack per
+    (TEST_CONFIG, BOT, ONLINE); cases without one run with stack None, first (the play server
+    stays up for them)."""
+    groups, plain, results = {}, [], []
+    for module in selected:
+        config = getattr(module, "TEST_CONFIG", None)
+        if config:
+            key = (config, module.BOT, getattr(module, "ONLINE", 1))
+            groups.setdefault(key, []).append(module)
+        else:
+            plain.append(module)
+    for module in plain:
+        results.append(call(module, None))
+    for (config, bot, online), modules in groups.items():
+        with Stack(config, bot, keep=keep_server, online=online) as stack:
+            for module in modules:
+                results.append(call(module, stack))
+    _summary(results)
+
+
+def e2e(names=(), keep_server=False):
+    selected = _select("e2e", names)
+    missing = [m.NAME for m in selected if not getattr(m, "TEST_CONFIG", None)]
+    if missing:
+        raise Failed(f"e2e cases need a TEST_CONFIG: {', '.join(missing)}")
+    _run_selected(selected, keep_server, lambda module, stack: _run_case("e2e", module, stack))
+
+
+# ---- perf ---------------------------------------------------------------------------------------
+
+BASELINES = pathlib.Path(__file__).resolve().parent / "cases" / "perf_baselines.json"
+
+
+class Baselines:
+    """What each perf measurement was when it was last accepted (`--update-baselines`):
+    {"_meta": {...}, "<case>": {"<metric>": value}}. Machine-specific, tracked in git so a
+    regression shows against the numbers of the same box."""
+
+    def __init__(self):
+        try:
+            self.data = json.loads(BASELINES.read_text())
+        except (OSError, ValueError):
+            self.data = {}
+
+    def get(self, case, key):
+        return self.data.get(case, {}).get(key)
+
+    def record(self, case, measured):
+        self.data[case] = dict(sorted(measured.items()))
+
+    def save(self):
+        self.data["_meta"] = {"recorded": datetime.date.today().isoformat(), **_machine()}
+        BASELINES.write_text(json.dumps(self.data, indent=2, sort_keys=True) + "\n")
+
+
+def _machine():
+    def first_line(cmd):
+        try:
+            return output(cmd).splitlines()[0].strip()
+        except (Failed, IndexError, OSError):
+            return "unknown"
+    cpu = next((l.split(":", 1)[1].strip() for l in open("/proc/cpuinfo")
+                if l.startswith("model name")), "unknown")
+    return {"cpu": cpu, "gpu": first_line(
+        ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"])}
+
+
+class Perf:
+    """What a perf case gets: `stack` (the running test stack, or None) and `measure()`."""
+
+    def __init__(self, case, stack, baselines):
+        self.case, self.stack, self.baselines = case, stack, baselines
+        self.measured, self.shown, self.failures = {}, [], []
+
+    def measure(self, key, value, unit="", *, lower_is_better=True, factor=1.5, slack=0.0,
+                limit=None):
+        """Records `value` and checks it. Against the baseline: worse than the baseline by more
+        than `factor` fails, with `slack` (in the metric's own unit) allowed besides, so a tiny
+        baseline doesn't fail on noise. Against `limit` (a hard bound, e.g. a documented
+        criterion): beyond it fails whatever the baseline says. No baseline yet: it passes, and
+        says so (record one with `wlb test perf --update-baselines`)."""
+        self.measured[key] = value
+        base = self.baselines.get(self.case, key)
+        text = f"{key}={value:.4g}{unit}"
+        if base is None:
+            text += " (no baseline)"
+        else:
+            text += f" (baseline {base:.4g})"
+            if lower_is_better:
+                allowed = max(base * factor, base + slack)
+                if value > allowed:
+                    self.failures.append(f"{key} {value:.4g}{unit} is worse than the baseline "
+                                         f"{base:.4g} (allowed {allowed:.4g})")
+            else:
+                allowed = min(base / factor, base - slack)
+                if value < allowed:
+                    self.failures.append(f"{key} {value:.4g}{unit} is worse than the baseline "
+                                         f"{base:.4g} (allowed {allowed:.4g})")
+        if limit is not None and (value > limit if lower_is_better else value < limit):
+            self.failures.append(f"{key} {value:.4g}{unit} is beyond the limit {limit:.4g}")
+        self.shown.append(text)
+
+    def summary(self):
+        return ", ".join(self.shown)
+
+
+def perf(names=(), keep_server=False, update_baselines=False, verify=False):
+    """Runs the perf cases against their baselines. With `update_baselines`, each case's numbers
+    are recorded as its baseline; with `verify` as well, the case then runs a second time in the
+    same session (the same stack, the same llama-server) and is checked against what was just
+    recorded: a measurement that can't reproduce itself has a baseline that can't be trusted."""
+    selected = _select("perf", names)
+    baselines = Baselines()
+
+    def call(module, stack):
+        ok = _run_perf(module, stack, baselines, update_baselines)
+        if update_baselines and verify:
+            say(f"verifying {module.NAME} against the baseline just recorded")
+            return _run_perf(module, stack, baselines, False)
+        return ok
+
+    _run_selected(selected, keep_server, call)
+
+
+def _run_perf(module, stack, baselines, update):
+    start = time.time()
+    p = Perf(module.NAME, stack, baselines)
+    crashed = False
+    try:
+        module.run(p)
+        if p.failures:
+            raise Failed("; ".join(p.failures))
+        ok, detail = True, p.summary()
+    except Failed as e:
+        ok, detail = False, f"{e} [{p.summary()}]"
+    except Exception as e:
+        ok, detail, crashed = False, f"{type(e).__name__}: {e}", True
+    if update and p.measured and not crashed:
+        baselines.record(module.NAME, p.measured)
+        baselines.save()
+        detail += " [baseline recorded]"
+    say(f"{'PASS' if ok else 'FAIL'} perf {module.NAME} ({time.time() - start:.1f} s): {detail}")
+    return ok
+
+
+class LlamaServer:
+    """llama-server with the brain's model (`wlb llm`), for the length of a `with`. One that is
+    already running is used as it is and left running."""
+
+    URL = "http://127.0.0.1:8090/health"
+
+    def __init__(self, slots=16, timeout_s=240):
+        self.slots, self.timeout_s, self.proc = slots, timeout_s, None
+
+    def healthy(self):
+        try:
+            with urllib.request.urlopen(self.URL, timeout=2) as r:
+                return r.status == 200
+        except OSError:
+            return False
+
+    def __enter__(self):
+        if self.healthy():
+            say("using the llama-server that is already running")
+            return self
+        say("starting llama-server (the 35B model)")
+        log = open(OUT / "logs" / "llama-perf.log", "wb")
+        self.proc = subprocess.Popen([ROOT / "tools" / "wlb", "llm", "--slots", str(self.slots)],
+                                     stdout=log, stderr=subprocess.STDOUT)
+        deadline = time.time() + self.timeout_s
+        while time.time() < deadline:
+            if self.proc.poll() is not None:
+                raise Failed("llama-server exited (see out/logs/llama-perf.log)")
+            if self.healthy():
+                return self
+            time.sleep(2)
+        self.__exit__()
+        raise Failed(f"llama-server not healthy after {self.timeout_s} s")
+
+    def __exit__(self, *exc):
+        if self.proc and self.proc.poll() is None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(30)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+        return False
+
+
+def capture_snapshots(seconds=300):
+    """Records live snapshots of 50 questing bots (the `questing` test stack) into
+    out/bench/snapshots/quest, the input of the brain load replay (tools/bench/brain_load.py).
+    Replaces what is there."""
+    target = OUT / "bench" / "snapshots" / "quest"
+    with Stack("questing", "Loada", online=50) as stack:
+        shutil.rmtree(target, ignore_errors=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        say(f"capturing {seconds} s of snapshots into {target.relative_to(ROOT)}")
+        run([venv_python(), "-I", ROOT / "tools/bench/capture_snapshots.py", target, str(seconds)])
+    say(f"captured {sum(1 for _ in target.rglob('*.json'))} snapshots")
+
+
+def eval_(names=(), keep_server=False):
+    _run_selected(_select("eval", names), keep_server,
+                  lambda module, stack: _run_case("eval", module, stack))
 
 
 # ---- shared -------------------------------------------------------------------------------------

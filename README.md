@@ -10,6 +10,7 @@ Design and every decision so far: [docs/design.md](docs/design.md).
 
 | Path | What |
 |---|---|
+| `CONTRIBUTING.md` | the rules for working in this repo (C++ style and checks, layout); `CLAUDE.md` only imports it, for Claude Code |
 | `docs/` | the design (`design.md`), plans, specs and measured results |
 | `private/` | private submodule (accounts, personal data); not accessible to others |
 | `third_party/` | upstream code as pinned git submodules: AzerothCore (mod-playerbots fork, `Playerbot` branch), mod-playerbots (`master`), harness deps: Abseil `20260817.0`, GoogleTest `v1.18.0`, cpp-httplib `v0.66.0`, nlohmann/json `v3.12.0`, and llama.cpp `v1.0.0` |
@@ -50,7 +51,7 @@ more. It acts on this checkout's processes only (by their pid files), never by n
 | `tools/wlb check format\|includes\|snapshots\|triggers\|goldens` | one of those (`--fix` for format and includes) |
 | `tools/wlb build common [asan\|tsan\|msan\|server]` | build `common/` (and the harness) and run the unit tests; `server` is the copy linked into AzerothCore |
 | `tools/wlb build server [--test]` | build and install AzerothCore with our module (`--test` adds the test-only fixtures) |
-| `tools/wlb test unit\|e2e\|perf\|eval [NAME...]` | the four test targets: `unit` (gtest, `--filter`, `--variant`), `e2e` (live scenarios on a test build of the server; stops the play server and restores it), `perf`, `eval`; `--list` shows the cases |
+| `tools/wlb test unit\|e2e\|perf\|eval [NAME...]` | the four test targets: `unit` (gtest, `--filter`, `--variant`), `e2e` (live scenarios on a test build of the server; stops the play server and restores it), `perf` (measurements checked against `tools/wlblib/cases/perf_baselines.json` and hard limits; `--update-baselines` records a run, `--capture` records the brain replay's input), `eval`; `--list` shows the cases |
 | `tools/wlb config [test]` | render `out/server/etc/*.conf` from the templates plus `config/*.overrides` (and `config/tests/<test>.*`) |
 | `tools/wlb server start\|stop` | MySQL, authserver and worldserver together (stop backs the databases up first) |
 | `tools/wlb db start\|stop\|backup` | the project-local MySQL alone; `backup` dumps accounts, characters and playerbots' tables to `var/backups/` (compressed, newest 14 kept; the restore command is in `tools/wlblib/server.py`) |

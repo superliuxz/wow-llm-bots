@@ -9,6 +9,8 @@
   tools/wlb check [format|includes|snapshots|triggers|goldens] [--fix] [FILES...]
   tools/wlb test unit [--filter PATTERN] [--variant asan|tsan|msan]
   tools/wlb test e2e|perf|eval [NAME...]  [--keep-server]   (e2e: a live server, stack restored after)
+  tools/wlb test perf [--update-baselines [--verify]] | --capture   (perf: record the numbers, and
+                                                                     check they reproduce / the replay input)
   tools/wlb test --list
   tools/wlb setup links|configure|data|llama|msan|client-ui
   tools/wlb llm [--slots N] [--ctx N] [--model FILE] [-- llama-server args...]
@@ -68,7 +70,13 @@ def parse(argv):
     p.add_argument("--variant", default="default", choices=list(build.VARIANTS),
                    help="unit: the build (default, asan, tsan, msan)")
     p.add_argument("--keep-server", action="store_true",
-                   help="e2e: leave the test stack running instead of restoring the play server")
+                   help="leave the test stack running instead of restoring the play server")
+    p.add_argument("--update-baselines", action="store_true",
+                   help="perf: record this run's numbers as the new baselines")
+    p.add_argument("--verify", action="store_true",
+                   help="perf, with --update-baselines: run again right after and check against it")
+    p.add_argument("--capture", action="store_true",
+                   help="perf: record 5 minutes of live snapshots (the brain replay's input)")
 
     p = sub.add_parser("setup", help="one-time setup steps")
     p.add_argument("step", choices=["links", "configure", "data", "llama", "msan", "client-ui"])
@@ -124,8 +132,12 @@ def main():
             testing.unit(a.variant, a.filter)
         elif a.target == "e2e":
             testing.e2e(a.names, a.keep_server)
+        elif a.target == "perf" and a.capture:
+            testing.capture_snapshots()
+        elif a.target == "perf":
+            testing.perf(a.names, a.keep_server, a.update_baselines, a.verify)
         else:
-            testing.run_plain(a.target, a.names)
+            testing.eval_(a.names, a.keep_server)
     elif a.command == "setup":
         getattr(setup, a.step.replace("-", "_"))()
     elif a.command == "llm":

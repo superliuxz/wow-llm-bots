@@ -1,0 +1,34 @@
+{
+  "_meta": {
+    "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "recorded": "2026-11-16"
+  },
+  "brain": {
+    "call_p50_s": 1.96,
+    "capacity_valid": 1.0,
+    "capacity_wakes_per_s": 7.8,
+    "p50_s[100bots_15s]": 2.1,
+    "p50_s[50bots_30s]": 0.5,
+    "p95_s[100bots_15s]": 3.2,
+    "p95_s[50bots_30s]": 0.9,
+    "valid[100bots_15s]": 1.0,
+    "valid[50bots_30s]": 1.0
+  },
+  "snapshots": {
+    "age_max_ms": 0.4094479978084564,
+    "age_p50_ms": 0.11825299263000488,
+    "age_p95_ms": 0.19131100177764893,
+    "build_max_us": 264,
+    "build_p50_us": 86,
+    "build_p99_us": 177,
+    "build_total_ms_per_min": 271,
+    "built_to_socket_p99_us": 29,
+    "bunching_10ms": 3,
+    "dropped": 0,
+    "frames_per_s": 50.007407407407406,
+    "snapshot_bytes_avg": 8352,
+    "tick_max_snapshots": 1,
+    "tick_max_us": 286
+  }
+}

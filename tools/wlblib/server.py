@@ -173,6 +173,21 @@ def online_characters():
     return set(rows.split())
 
 
+def wait_online_count(count, timeout_s=300):
+    """Waits until at least `count` characters are online, or fails after `timeout_s`."""
+    deadline = time.time() + timeout_s
+    seen = 0
+    while time.time() < deadline:
+        try:
+            seen = len(online_characters())
+            if seen >= count:
+                return
+        except Failed:
+            pass  # MySQL still starting.
+        time.sleep(3)
+    raise Failed(f"only {seen} of {count} characters came online in {timeout_s} s")
+
+
 def wait_online(name, timeout_s=180):
     """Waits until the character `name` is online, or fails after `timeout_s`."""
     deadline = time.time() + timeout_s

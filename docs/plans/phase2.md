@@ -87,7 +87,10 @@ socket and two lock-protected queues. Nothing in the module ever waits on the ha
 
 ### E. End-to-end tests (started 2026-11-16)
 `tools/wlb test unit|e2e|perf|eval` (cases: `tools/wlblib/cases/`). **Built:** `e2e choose` (a bot
-told to Attack a boar fights it, told to Loot it loots the corpse; the first case). Today the
+told to Attack a boar fights it, told to Loot it loots the corpse; the first case), and `perf`:
+`snapshots` (build cost and delivery, 50 bots in a crowd, against the pressure-test criteria) and
+`brain` (capacity and wake-to-plan latency of the 35B on recorded wake-ups), both checked against
+`tools/wlblib/cases/perf_baselines.json` (this machine's numbers, tracked in git). Today the
 stack is the play server's machine and database: the runner stops the play server, runs the test
 build with a test config (test characters are recreated from fixtures on every start), and puts the
 play server back. **Planned:** three layers, all on an **isolated test stack** (own ports, socket
@@ -106,7 +109,7 @@ A: ~1-1.5k lines C++. B: ~2-3k lines C++ plus tests. C/D: small. Build A first, 
 tiny fake harness (netcat-level), then B.
 
 ## Shared C++ library `common/` (built 2026-11-14)
-Both ends of the socket use the same Chromium-style code (rules and reasoning: CLAUDE.md). Layout
+Both ends of the socket use the same Chromium-style code (rules and reasoning: CONTRIBUTING.md). Layout
 mirrors Chromium: `base/functional/` (Once/RepeatingCallback, BindOnce/BindRepeating with WeakPtr
 receivers), `base/memory/` (WeakPtr, RefCountedThreadSafe/scoped_refptr), `base/task/`
 (SequencedTaskRunner, TaskQueue, ThreadPool, PostTaskAndReplyWithResult), `base/threading/`
