@@ -463,3 +463,29 @@ standing in the Valley of Strength (`config/tests/pressure`), 1 s interval.
 - **A new connection per question.** The llama client keeps connections open between questions
   (keep-alive, a pool shared by the worker threads; a failed connection is closed, not reused; one
   the server closed while idle is opened again).
+
+## Plan quality: first eval and model shootout (2026-11-16)
+
+15 saved snapshots in `harness/testdata/eval/` (12 live questing/city captures plus 3 hand-edited
+captures for low health, out of mana, and a patrolling skull-level elite), each run through
+`out/common/harness decide --temperature=0` (`tools/wlb test eval --shootout`):
+
+| Model | Size | Eval score | Capacity (16 slots) | 50 bots, 30 s (p50 / p95) | 100 bots, 15 s (p50 / p95) |
+|---|---|---|---|---|---|
+| **`gemma-4-26B-A4B-it`** (`UD-Q4_K_XL`) | **16.0 GiB** | **9 / 15 (60%)** | **8.6 /s** (call p50 1.85 s) | 0.6 s / 1.0 s | **1.9 s / 2.6 s** |
+| `Qwen3.6-35B-A3B` (`UD-Q4_K_XL`) | 20.8 GiB | 6 / 15 (40%) | 7.8 /s (call p50 1.96 s) | **0.5 s / 0.9 s** | 2.1 s / 3.2 s |
+| `gpt-oss-20b` (`UD-Q4_K_XL`, deleted) | 12.0 GiB | 0 / 15 (0%) | - | - | - |
+
+- **Gemma 4 26B-A4B wins on quality, capacity, loaded tail latency, and VRAM (-4.8 GiB)**, with 100%
+  valid plans across the whole `perf brain` run. Rested at 14% HP, fled the skull elite, looted
+  corpses, and explored empty fields. Caveat: in `eval` it wrote `look: 1` s on 4 of 15 cases and
+  used repeat counts (`xN`) less often (8% in `perf brain`), which would raise real wake rates
+  unless `RULES.md` or the grammar sets a floor on `look`.
+- **Qwen3.6-35B-A3B** showed strong option-1 bias (11 of 15): attacked at 14% HP, at 4% mana, and a
+  Hare critter (`1x13`), and idled near the skull elite; picked the right class trainer (`Ken'jai`).
+- **`gpt-oss-20b` dropped and removed:** its Harmony `<\|channel\|>` PEG parser rejects user GBNF
+  without Harmony headers, and its raw completions wrote `1x12, 1x13...` chains and garbled `say:`.
+
+Why both remaining models miss 6-9 cases today:
+- Numbered screen entries in `around me:` / `objects:` carry no action verb (`1. Hare: level 1 critter...` rather than `Attack`), and `content/RULES.md` states no WoW basics yet (tapped mobs give no credit, critters give no XP, finish an existing attacker before pulling another).
+- `herb_to_gather` asks for gathering Cactus Apples before `screen_renderer` shows the quest log, so a bot without Herbalism has no way to know they are quest items.

@@ -46,9 +46,11 @@ def discover(target):
 
 
 def list_cases():
-    for target in TARGETS[1:]:
+    for target in ("e2e", "perf"):
         found = discover(target)
         say(f"{target}: " + (", ".join(found) if found else "(no cases yet)"))
+    from wlblib.cases import eval_plans
+    say("eval: " + ", ".join(eval_plans.case_names()))
     say("unit: every gtest suite (wlb test unit [--filter PATTERN] [--variant asan|tsan|msan])")
 
 
@@ -296,12 +298,13 @@ def _run_perf(module, stack, baselines, update):
 
 class LlamaServer:
     """llama-server with the brain's model (`wlb llm`), for the length of a `with`. One that is
-    already running is used as it is and left running."""
+    already running is used as it is and left running (unless a different `model` was asked for)."""
 
     URL = "http://127.0.0.1:8090/health"
+    MODELS_URL = "http://127.0.0.1:8090/v1/models"
 
-    def __init__(self, slots=16, timeout_s=240):
-        self.slots, self.timeout_s, self.proc = slots, timeout_s, None
+    def __init__(self, slots=16, timeout_s=240, model=None):
+        self.slots, self.timeout_s, self.model, self.proc = slots, timeout_s, model, None
 
     def healthy(self):
         try:
@@ -310,14 +313,31 @@ class LlamaServer:
         except OSError:
             return False
 
+    def loaded_model_matches(self):
+        if not self.model:
+            return True
+        try:
+            with urllib.request.urlopen(self.MODELS_URL, timeout=2) as r:
+                body = r.read().decode(errors="replace")
+                return self.model in body
+        except OSError:
+            return False
+
     def __enter__(self):
         if self.healthy():
+            if not self.loaded_model_matches():
+                raise Failed(f"another llama-server is already running on :8090 "
+                             f"(stop it first to load {self.model})")
             say("using the llama-server that is already running")
             return self
-        say("starting llama-server (the 35B model)")
+        label = self.model or "the 35B model"
+        say(f"starting llama-server ({label})")
+        (OUT / "logs").mkdir(parents=True, exist_ok=True)
         log = open(OUT / "logs" / "llama-perf.log", "wb")
-        self.proc = subprocess.Popen([ROOT / "tools" / "wlb", "llm", "--slots", str(self.slots)],
-                                     stdout=log, stderr=subprocess.STDOUT)
+        cmd = [ROOT / "tools" / "wlb", "llm", "--slots", str(self.slots)]
+        if self.model:
+            cmd += ["--model", self.model]
+        self.proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)
         deadline = time.time() + self.timeout_s
         while time.time() < deadline:
             if self.proc.poll() is not None:
@@ -351,9 +371,37 @@ def capture_snapshots(seconds=300):
     say(f"captured {sum(1 for _ in target.rglob('*.json'))} snapshots")
 
 
-def eval_(names=(), keep_server=False):
-    _run_selected(_select("eval", names), keep_server,
-                  lambda module, stack: _run_case("eval", module, stack))
+def eval_(names=(), model=None, shootout=False):
+    from wlblib.cases import eval_plans
+
+    cases = eval_plans.load_cases(names)
+    if shootout:
+        models = [m for m in eval_plans.SHOOTOUT_MODELS if (ROOT / "models" / m).exists()]
+        if not models:
+            raise Failed("no shootout models found in models/")
+        runs = []
+        for m in models:
+            with LlamaServer(slots=4, model=m):
+                runs.append(eval_plans.run_suite(cases, label=m))
+        say("== shootout summary ==")
+        header = f"  {'case':25s} | " + " | ".join(f"{r['label'][:18]:18s}" for r in runs)
+        say(header)
+        for i, case in enumerate(cases):
+            cells = []
+            for r in runs:
+                row = r["rows"][i]
+                step = row["got"].get("plan_desc", "ERR")[:13]
+                cells.append(f"{'PASS' if row['ok'] else 'FAIL'} ({step:11s})"[:18].ljust(18))
+            say(f"  {case['name']:25s} | " + " | ".join(cells))
+        totals = " | ".join(
+            f"{r['passed']:2d}/{r['total']:<2d} ({r['median_ms']:4.0f} ms)   "[:18] for r in runs)
+        say(f"  {'SCORE':25s} | {totals}")
+        return
+
+    with LlamaServer(slots=4, model=model):
+        res = eval_plans.run_suite(cases, label=model)
+    if res["passed"] != res["total"]:
+        raise Failed(f"{res['total'] - res['passed']} of {res['total']} eval cases failed")
 
 
 # ---- shared -------------------------------------------------------------------------------------

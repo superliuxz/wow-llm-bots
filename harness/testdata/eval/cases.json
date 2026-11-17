@@ -1,0 +1,133 @@
+[
+  {
+    "name": "loot_corpse",
+    "source": "live capture (Loadaa/1)",
+    "reason": "plan done",
+    "summary": "2x lootable Mottled Boar corpses 10 yd away, out of combat, full HP",
+    "rule": "first step is Loot (option 1)",
+    "first_kinds": ["loot"]
+  },
+  {
+    "name": "loot_with_boar_nearby",
+    "source": "live capture (corpse_to_loot)",
+    "reason": "plan done",
+    "summary": "live boar (1, 5 yd) and lootable boar corpse (2, 11 yd), out of combat",
+    "rule": "plan includes Loot (option 2)",
+    "must_include_kinds": ["loot"]
+  },
+  {
+    "name": "finish_fight",
+    "source": "live capture (Loadaa/107)",
+    "reason": "attacked",
+    "summary": "in combat with a 45%-HP Mottled Boar attacking me (1)",
+    "rule": "first step is Attack (1) or Keep (3); never Rest/Explore/Town/Use",
+    "first_options": [1, 3],
+    "forbid_kinds": ["rest", "explore", "go to town", "use"]
+  },
+  {
+    "name": "fight_aggro_not_fresh",
+    "source": "live capture (fight)",
+    "reason": "attacked",
+    "summary": "in combat: unaggroed full-HP boar (1) vs 24%-HP boar attacking me (2)",
+    "rule": "first step finishes attacker (2) or Keep (6); does not pull fresh boar (1)",
+    "first_options": [2, 6],
+    "forbid_options": [1],
+    "forbid_kinds": ["rest"]
+  },
+  {
+    "name": "healthy_boar_pull",
+    "source": "live capture (Loadaa/19)",
+    "reason": "plan done",
+    "summary": "full HP/mana L1 priest 7 yd behind untapped L2 Mottled Boar (1), Cactus Apples (4)",
+    "rule": "starts with Attack (1) or Gather (4); does not Rest at full HP/mana",
+    "first_options": [1, 4],
+    "forbid_kinds": ["rest"]
+  },
+  {
+    "name": "skip_tapped_mob",
+    "source": "live capture (Loadab/41)",
+    "reason": "plan done",
+    "summary": "only live mob (1) is tapped by another player; Cactus Apples at (4)",
+    "rule": "does not Attack tapped mob (1) or Rest at full HP/mana",
+    "forbid_options": [1],
+    "forbid_kinds": ["attack", "rest"]
+  },
+  {
+    "name": "herb_to_gather",
+    "source": "live capture (Loada/272)",
+    "reason": "plan done",
+    "summary": "6x Cactus Apple quest herbs starting at 14 yd (1), no mobs or corpses",
+    "rule": "first step is Gather Cactus Apple (1)",
+    "first_options": [1]
+  },
+  {
+    "name": "quest_available",
+    "source": "live capture (Loadah/1)",
+    "reason": "logged in",
+    "summary": "fresh L1 (0/400 xp) 6 yd in front of Kaltunk with quest available (1)",
+    "rule": "first step is Talk to Kaltunk (1)",
+    "first_options": [1]
+  },
+  {
+    "name": "priest_picks_own_trainer",
+    "source": "live capture + L2 edit (town_trainers)",
+    "reason": "leveled up",
+    "summary": "L2 priest near Mage Trainer (1), Shaman Trainer (2), Grunts, Priest Trainer Ken'jai (7)",
+    "rule": "first step is Talk to Priest Trainer Ken'jai (7), not wrong-class trainers",
+    "first_options": [7]
+  },
+  {
+    "name": "ignore_critter",
+    "source": "live capture (Loadaa/125)",
+    "reason": "plan done",
+    "summary": "quiet field where the only live unit is a level-1 Hare critter (1)",
+    "rule": "does not Attack the critter (1) or Rest at full HP/mana",
+    "forbid_options": [1],
+    "forbid_kinds": ["attack", "rest"]
+  },
+  {
+    "name": "quiet_empty_field",
+    "source": "live capture (Loadn/291)",
+    "reason": "plan done",
+    "summary": "empty stretch of Valley of Trials, no units or objects, full HP/mana",
+    "rule": "moves on (Explore 2 or Go to town 4), not Rest (3) or Keep nothing (1)",
+    "first_kinds": ["explore", "go to town"],
+    "forbid_kinds": ["rest", "keep doing what I'm doing"]
+  },
+  {
+    "name": "city_crowd_patience",
+    "source": "live capture (Orgrimmar)",
+    "reason": "plan done",
+    "summary": "in Orgrimmar already resting at full HP/mana near Bankers, AH, Mailbox",
+    "rule": "does not Rest again (20), and look >= 20 s",
+    "forbid_kinds": ["rest"],
+    "min_look_s": 20
+  },
+  {
+    "name": "low_hp_hostile",
+    "source": "hand-edited capture (14% HP)",
+    "reason": "plan done",
+    "summary": "10/72 HP (14%) out of combat with hostile Scorpid Worker 7 yd away (1)",
+    "rule": "does not Attack (1); picks Rest (8) or Go to town (9)",
+    "first_kinds": ["rest", "go to town"],
+    "forbid_kinds": ["attack"]
+  },
+  {
+    "name": "oom_caster",
+    "source": "hand-edited capture (4% mana)",
+    "reason": "plan done",
+    "summary": "priest at 4/91 mana (4%) out of combat next to Mottled Boar (1)",
+    "rule": "does not Attack (1) while OOM; picks Rest (8) or Go to town (9)",
+    "first_kinds": ["rest", "go to town"],
+    "forbid_kinds": ["attack"]
+  },
+  {
+    "name": "skull_elite_nearby",
+    "source": "hand-edited capture (skull elite)",
+    "reason": "plan done",
+    "summary": "L1 priest 16 yd from patrolling L25 skull-level elite Son of Arugal (1)",
+    "rule": "does not Attack skull elite (1) or Rest in its path; leaves (Explore 3 or Town 5)",
+    "first_kinds": ["explore", "go to town"],
+    "forbid_kinds": ["attack", "rest"]
+  }
+]

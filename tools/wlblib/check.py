@@ -128,7 +128,10 @@ def snapshots(files=()):
     proto = ROOT / "server_module" / "proto"
     run([PROTOC, f"-I{ROOT / 'server_module'}", f"-I{ROOT / 'third_party/protobuf/src'}",
          f"--python_out={gen}", proto / "snapshot.proto", proto / "snapshot_options.proto"])
-    files = list(files) or sorted((ROOT / "docs/specs/examples").glob("*.json"))
+    files = list(files) or [
+        *sorted((ROOT / "docs/specs/examples").glob("*.json")),
+        *sorted((ROOT / "harness/testdata/eval").glob("*.snapshot.json")),
+    ]
     run([VENV_PYTHON, "-I", ROOT / "tools/snapshot/validate_snapshot.py", gen, *files])
     run([VENV_PYTHON, "-I", "-B", ROOT / "tools/audit/check_client_events.py", gen])
 

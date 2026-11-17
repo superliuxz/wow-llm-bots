@@ -1,0 +1,343 @@
+{
+  "bot": "Loadaa",
+  "seq": 107,
+  "time_ms": "1794793205563",
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x00000000000003B0",
+        "name": "Loadaa",
+        "kind": "PLAYER",
+        "level": 1,
+        "health_pct": 100.0,
+        "power_pct": 86.81319,
+        "player": {
+          "class": "Priest"
+        }
+      },
+      "gender": "MALE",
+      "xp": 305,
+      "xp_next": 400,
+      "health": 72,
+      "health_max": 72,
+      "power_type": "MANA",
+      "power": 79,
+      "power_max": 91,
+      "state": "ALIVE",
+      "in_combat": true
+    },
+    "where": {
+      "map": "Kalimdor",
+      "zone": "Durotar",
+      "subzone": "Valley of Trials",
+      "position": {
+        "x": -741.11,
+        "y": -4196.519,
+        "z": 30.094975
+      },
+      "facing": 0.84152305
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0xF130000C340002D2",
+          "rel": {
+            "dist_yd": 94.41481,
+            "dir": "E",
+            "height": "ABOVE",
+            "in_los": true,
+            "position": {
+              "x": -760.3424,
+              "y": -4290.598,
+              "z": 40.84786
+            }
+          },
+          "kind": "NPC",
+          "dead": true,
+          "activity": {
+            "state": "DEAD"
+          },
+          "looks_like": "scorpid",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003C3",
+          "rel": {
+            "dist_yd": 93.44463,
+            "dir": "E",
+            "height": "ABOVE",
+            "in_los": true,
+            "position": {
+              "x": -758.21075,
+              "y": -4290.873,
+              "z": 40.41259
+            }
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C3400027A",
+          "rel": {
+            "dist_yd": 75.34532,
+            "dir": "NW",
+            "height": "ABOVE",
+            "in_los": true,
+            "position": {
+              "x": -680.309,
+              "y": -4148.819,
+              "z": 36.63624
+            }
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "scorpid",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF13000293C00025F",
+          "rel": {
+            "dist_yd": 55.24916,
+            "dir": "W",
+            "height": "ABOVE",
+            "in_los": true,
+            "position": {
+              "x": -752.944,
+              "y": -4140.56,
+              "z": 39.40381
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "SMALL",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C1A000275",
+          "rel": {
+            "dist_yd": 47.438164,
+            "dir": "NW",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -719.2277,
+              "y": -4152.038,
+              "z": 30.067896
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C1A000260",
+          "name": "Mottled Boar",
+          "rel": {
+            "dist_yd": 0.49928784,
+            "dir": "SW",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -742.97736,
+              "y": -4194.665,
+              "z": 29.998722
+            },
+            "facing_me": true
+          },
+          "kind": "NPC",
+          "level": 2,
+          "level_color": "YELLOW",
+          "reaction": "NEUTRAL",
+          "classification": "NORMAL",
+          "dead": true,
+          "skinnable": true,
+          "activity": {
+            "state": "DEAD"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0xF13000173F000281",
+          "rel": {
+            "dist_yd": 31.912209,
+            "dir": "NW",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -722.34045,
+              "y": -4167.975,
+              "z": 30.029856
+            },
+            "facing_me": true
+          },
+          "kind": "CRITTER",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "critter",
+          "size": "SMALL",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF13000293C00026C",
+          "rel": {
+            "dist_yd": 29.651283,
+            "dir": "S",
+            "height": "ABOVE",
+            "in_los": true,
+            "position": {
+              "x": -769.523,
+              "y": -4203.34,
+              "z": 43.979576
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "visual_state": [
+            "STUNNED"
+          ],
+          "looks_like": "humanoid",
+          "size": "SMALL",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C1A000278",
+          "name": "Mottled Boar",
+          "rel": {
+            "dist_yd": 7.1753483,
+            "dir": "NW",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -734.5646,
+              "y": -4189.8994,
+              "z": 30.108177
+            },
+            "facing_me": true
+          },
+          "kind": "NPC",
+          "level": 2,
+          "level_color": "YELLOW",
+          "reaction": "NEUTRAL",
+          "classification": "NORMAL",
+          "health_pct": 45.454544,
+          "targeting_me": true,
+          "target": "Loadaa",
+          "threat_status": "THREAT_AGGRO",
+          "activity": {
+            "state": "APPROACHING_ME",
+            "with": "Loadaa"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0xF130000C3400027C",
+          "rel": {
+            "dist_yd": 71.71841,
+            "dir": "SE",
+            "height": "ABOVE",
+            "in_los": true,
+            "position": {
+              "x": -787.391,
+              "y": -4249.475,
+              "z": 52.880013
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "scorpid",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF13000173F0002BA",
+          "rel": {
+            "dist_yd": 69.70675,
+            "dir": "E",
+            "height": "ABOVE",
+            "in_los": true,
+            "position": {
+              "x": -729.4844,
+              "y": -4266.531,
+              "z": 41.968407
+            },
+            "facing_me": true
+          },
+          "kind": "CRITTER",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "critter",
+          "size": "SMALL",
+          "detail": "MODEL"
+        }
+      ],
+      "objects": [
+        {
+          "guid": "0xF11002AEA80000AD",
+          "name": "LumberPile",
+          "rel": {
+            "dist_yd": 51.018017,
+            "dir": "W",
+            "height": "ABOVE",
+            "in_los": true,
+            "position": {
+              "x": -756.341,
+              "y": -4146.32,
+              "z": 38.3306
+            }
+          },
+          "kind": "OTHER",
+          "usable": true,
+          "state": "ready"
+        },
+        {
+          "guid": "0xF11002AEA80000AC",
+          "name": "LumberPile",
+          "rel": {
+            "dist_yd": 31.371864,
+            "dir": "S",
+            "height": "ABOVE",
+            "in_los": true,
+            "position": {
+              "x": -770.455,
+              "y": -4203.73,
+              "z": 44.4523
+            }
+          },
+          "kind": "OTHER",
+          "usable": true,
+          "state": "ready"
+        }
+      ]
+    }
+  }
+}

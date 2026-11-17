@@ -13,7 +13,7 @@ import os
 import re
 import subprocess
 
-from wlblib.common import OUT, ROOT, Failed
+from wlblib.common import OUT, ROOT, Failed, say
 from wlblib.testing import LlamaServer, expect
 
 NAME = "brain"
@@ -57,9 +57,13 @@ def run(perf):
     with LlamaServer():
         # A run straight after the model loads reads low (cold caches: 6.5 against 7.8 wake-ups/s
         # on the same input a few minutes later): one short run first, discarded.
+        say(f"perf brain: warm-up ({WARMUP_S} s)")
         bench("throughput.py", SNAPSHOTS, wakes_file(30), 16, WARMUP_S)
         # Capacity: closed loop, 16 calls always in flight.
-        m = THROUGHPUT.search(bench("throughput.py", SNAPSHOTS, wakes_file(30), 16, CAPACITY_S))
+        say(f"perf brain: capacity ({CAPACITY_S} s, 16 in flight)")
+        cap_out = bench("throughput.py", SNAPSHOTS, wakes_file(30), 16, CAPACITY_S)
+        say("  " + cap_out.strip())
+        m = THROUGHPUT.search(cap_out)
         expect(m, "throughput.py printed nothing readable")
         perf.measure("capacity_wakes_per_s", float(m.group(2)), "/s", lower_is_better=False,
                      factor=1.2)
@@ -69,7 +73,10 @@ def run(perf):
 
         # Latency under a replayed load.
         for bots, plan_s, seconds in CELLS:
-            m = LOAD.search(bench("brain_load.py", SNAPSHOTS, wakes_file(plan_s), bots, seconds))
+            say(f"perf brain: replay ({bots} bots, {plan_s} s plans, {seconds} s)")
+            load_out = bench("brain_load.py", SNAPSHOTS, wakes_file(plan_s), bots, seconds)
+            say("  " + load_out.strip().splitlines()[-1])
+            m = LOAD.search(load_out)
             expect(m, f"brain_load.py printed nothing readable ({bots} bots, {plan_s} s plans)")
             cell = f"{bots}bots_{plan_s}s"
             perf.measure(f"p50_s[{cell}]", float(m.group(1)), " s", factor=1.5, slack=0.3)
