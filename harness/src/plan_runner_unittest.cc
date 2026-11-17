@@ -1,0 +1,155 @@
+// Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
+
+#include "plan_runner.h"
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+#include "base/time/time.h"
+#include "gtest/gtest.h"
+#include "proto/snapshot.pb.h"
+#include "screen_renderer.h"
+
+namespace harness {
+namespace {
+
+namespace pb = wlb::snapshot;
+
+pb::Snapshot MakeSnap(uint32_t seq, bool in_combat = false) {
+  pb::Snapshot snap;
+  snap.set_seq(seq);
+  snap.mutable_base()->mutable_self()->set_state(pb::Self::ALIVE);
+  snap.mutable_base()->mutable_self()->set_in_combat(in_combat);
+  snap.mutable_base()->mutable_self()->set_health(60);
+  snap.mutable_base()->mutable_self()->set_health_max(60);
+  return snap;
+}
+
+void AddBoar(pb::Snapshot* snap,
+             const std::string& guid,
+             bool dead = false,
+             bool lootable = false) {
+  pb::Unit* u = snap->mutable_base()->mutable_nearby()->add_units();
+  u->set_guid(guid);
+  u->set_name("Mottled Boar");
+  u->set_kind(pb::Unit::NPC);
+  u->set_reaction(pb::Unit::NEUTRAL);
+  u->set_dead(dead);
+  u->set_lootable(lootable);
+  u->mutable_rel()->set_dist_yd(6.0f);
+}
+
+void AddModuleOption(pb::Snapshot* snap,
+                     const std::string& text,
+                     const std::string& guid = "") {
+  pb::Option* opt = snap->add_options();
+  opt->set_text(text);
+  opt->set_guid(guid);
+}
+
+TEST(PlanRunnerTest, RepeatsReResolveAgainstFreshSnapshotsAndThenLoot) {
+  const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
+
+  // Snapshot 10: two live boars (0x1 nearest, 0x2 second).
+  pb::Snapshot s10 = MakeSnap(10);
+  AddBoar(&s10, "0x1");
+  AddBoar(&s10, "0x2");
+  AddModuleOption(&s10, "Attack Mottled Boar", "0x1");
+  AddModuleOption(&s10, "Keep doing what I'm doing");
+  const Screen sc10 = RenderScreen(s10);
+
+  PlanRunner runner;
+  // Plan: attack 2x Mottled Boar (`1x2`).
+  const RunnerAction a1 = runner.Start({{1, 2}}, 10, sc10, t0);
+  ASSERT_TRUE(a1.choose);
+  EXPECT_EQ(a1.choose->seq(), 10u);
+  EXPECT_EQ(a1.choose->option(), 1u);
+  EXPECT_TRUE(a1.finished_reason.empty());
+
+  // Snapshot 11: fighting 0x1 (still alive) -> nothing new sent yet.
+  pb::Snapshot s11 = MakeSnap(11, /*in_combat=*/true);
+  AddBoar(&s11, "0x1");
+  AddBoar(&s11, "0x2");
+  AddModuleOption(&s11, "Attack Mottled Boar", "0x1");
+  AddModuleOption(&s11, "Keep doing what I'm doing");
+  const RunnerAction a2 =
+      runner.OnSnapshot(s11, RenderScreen(s11), t0 + base::Seconds(2));
+  EXPECT_FALSE(a2.choose);
+  EXPECT_TRUE(a2.finished_reason.empty());
+
+  // Snapshot 12: 0x1 died (now option 1 = Loot 0x1, option 2 = Attack 0x2!).
+  pb::Snapshot s12 = MakeSnap(12, /*in_combat=*/false);
+  AddBoar(&s12, "0x1", /*dead=*/true, /*lootable=*/true);
+  AddBoar(&s12, "0x2");
+  AddModuleOption(&s12, "Loot Mottled Boar", "0x1");
+  AddModuleOption(&s12, "Attack Mottled Boar", "0x2");
+  AddModuleOption(&s12, "Keep doing what I'm doing");
+  const RunnerAction a3 =
+      runner.OnSnapshot(s12, RenderScreen(s12), t0 + base::Seconds(5));
+  // Repeat #2 re-resolves "Attack Mottled Boar" to option 2 of snapshot 12!
+  ASSERT_TRUE(a3.choose);
+  EXPECT_EQ(a3.choose->seq(), 12u);
+  EXPECT_EQ(a3.choose->option(), 2u);
+
+  // Snapshot 13: 0x2 also died -> 2x2 finished, wakes brain with "plan done".
+  pb::Snapshot s13 = MakeSnap(13, /*in_combat=*/false);
+  AddBoar(&s13, "0x1", /*dead=*/true, /*lootable=*/true);
+  AddBoar(&s13, "0x2", /*dead=*/true, /*lootable=*/true);
+  AddModuleOption(&s13, "Loot Mottled Boar", "0x1");
+  AddModuleOption(&s13, "Keep doing what I'm doing");
+  const RunnerAction a4 =
+      runner.OnSnapshot(s13, RenderScreen(s13), t0 + base::Seconds(9));
+  EXPECT_FALSE(a4.choose);
+  EXPECT_EQ(a4.finished_reason, "plan done");
+  EXPECT_FALSE(runner.active());
+}
+
+TEST(PlanRunnerTest, KeepStaysActiveUntilLookTimerWithoutFinishingEarly) {
+  const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
+  pb::Snapshot s1 = MakeSnap(1);
+  AddModuleOption(&s1, "Keep doing what I'm doing");
+  const Screen sc1 = RenderScreen(s1);
+
+  PlanRunner runner;
+  const RunnerAction a1 = runner.Start({{1, 1}}, 1, sc1, t0);
+  ASSERT_TRUE(a1.choose);
+  EXPECT_EQ(a1.choose->option(), 1u);
+
+  // Even 120 s later, `Keep` does not self-finish or time out on its own.
+  const RunnerAction a2 = runner.OnSnapshot(s1, sc1, t0 + base::Seconds(120));
+  EXPECT_FALSE(a2.choose);
+  EXPECT_TRUE(a2.finished_reason.empty());
+  EXPECT_TRUE(runner.active());
+}
+
+TEST(PlanRunnerTest, NeverSendsChooseWhenScreenLacksModuleOptions) {
+  const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
+  pb::Snapshot offline = MakeSnap(1);
+  AddBoar(&offline, "0x1");
+  const Screen sc = RenderScreen(offline);
+  ASSERT_FALSE(sc.has_module_options);
+
+  PlanRunner runner;
+  const RunnerAction a = runner.Start({{1, 1}}, 1, sc, t0);
+  EXPECT_FALSE(a.choose);
+  EXPECT_TRUE(runner.active());
+}
+
+TEST(PlanRunnerTest, StalledAttackTimesOutAfterSafetyLimit) {
+  const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
+  pb::Snapshot s1 = MakeSnap(1, /*in_combat=*/true);
+  AddBoar(&s1, "0x1");
+  AddModuleOption(&s1, "Attack Mottled Boar", "0x1");
+  AddModuleOption(&s1, "Keep doing what I'm doing");
+  const Screen sc1 = RenderScreen(s1);
+
+  PlanRunner runner;
+  ASSERT_TRUE(runner.Start({{1, 1}}, 1, sc1, t0).choose);
+  EXPECT_FALSE(runner.CheckTimeout(t0 + base::Seconds(44)));
+  EXPECT_EQ(runner.CheckTimeout(t0 + base::Seconds(45)), "step timed out");
+  EXPECT_FALSE(runner.active());
+}
+
+}  // namespace
+}  // namespace harness

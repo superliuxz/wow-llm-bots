@@ -61,8 +61,18 @@ TEST(DecisionLogTest, TheJsonHasWhatWasAskedAndAnswered) {
   EXPECT_EQ(json["completion_tokens"], 8);
   EXPECT_DOUBLE_EQ(json["first_line_ms"].get<double>(), 18.25);
   EXPECT_DOUBLE_EQ(json["round_trip_ms"].get<double>(), 55.5);
+  EXPECT_FALSE(json.contains("age_at_ask_ms"));
   EXPECT_EQ(json["plan"], "do: 1\nexpect: none\nwatch: none\nlook: 60");
   EXPECT_FALSE(json.contains("error"));
+
+  Decision live = SampleDecision();
+  live.age_at_ask_ms = 1.5;
+  live.age_at_first_line_ms = 19.75;
+  live.age_at_plan_ms = 57.0;
+  const Json live_json = Json::parse(DecisionJson(live));
+  EXPECT_DOUBLE_EQ(live_json["age_at_ask_ms"].get<double>(), 1.5);
+  EXPECT_DOUBLE_EQ(live_json["age_at_first_line_ms"].get<double>(), 19.75);
+  EXPECT_DOUBLE_EQ(live_json["age_at_plan_ms"].get<double>(), 57.0);
 }
 
 TEST(DecisionLogTest, TheSystemPromptIsHashedNotStoredAndTheHashIsStable) {

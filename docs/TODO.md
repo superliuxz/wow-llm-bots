@@ -13,32 +13,25 @@ Last updated 2026-11-16.
 
 ## Next, in order
 
-1. **Model choice:** decide whether to switch `tools/wlblib/llm.py` default from Qwen3.6-35B-A3B to
+1. **Play Testpriest live with the real model**, end to end (`tools/wlb llm` + `tools/wlb harness`),
+   and read the real numbers: wakes per bot per minute, how long plans last, `age_at_ask` /
+   `age_at_first_line` / `age_at_plan` / `age_at_apply`, combat and death detection latency,
+   latest-wins under a stalled harness. Done when the list in `docs/plans/phase2.md` holds.
+2. **Model choice:** decide whether to switch `tools/wlblib/llm.py` default from Qwen3.6-35B-A3B to
    Gemma 4 26B-A4B (`eval` 13/15 vs 10/15; after Tier 1 Qwen3.6 hits `11.3/s` capacity and `79 ms`
    solo `do:` vs Gemma 4's `9.1/s` and `91 ms`; Gemma 4 is 4.8 GiB smaller; both kept in `models/`
    for now), and revisit `herb_to_gather` once quest log is rendered.
-2. **E2E latency Tier 2 (with H4)** (`docs/plans/latency.md`): (e) expand `SnapshotSchedule::Flags`
-   (loss of control, attacker count, option target completion) + attach fresh snapshot to alerting
+3. **E2E latency Tier 2** (`docs/plans/latency.md`): (e) expand `SnapshotSchedule::Flags` (loss of
+   control, attacker count, option target completion) + attach fresh snapshot to alerting
    `ImmediateEvent`s (`-125 to -1,000 ms`); (f) preempt obsolete lower-priority in-flight calls on
    urgent combat wakes + P0-P4 priority tiers in `scheduler.cc` / `llm_client.cc` (`-0.8 to
    -1.8 s`).
-3. **H4: the harness loop** (`docs/plans/harness.md`, step 4). `module_connection` (the socket to
-   the module, reconnect), `bot_state`, default triggers and the `look` timer, `plan_runner`, and
-   `harness run`; tested against a canned-reply fake LLM so no GPU is needed. Decided already
-   (harness.md, "For H4"): the screen takes option numbers from `snapshot.options` (each option has
-   the target's `guid`) and sends no `Choose` until it does; a step is done when later snapshots show
-   it (inferred, with a timeout per kind); repeats (`3x4`) find "same kind and name" in the newest
-   snapshot each time.
-4. **Play Testpriest live with the real model**, end to end, and read the real numbers: wakes per
-   bot per minute, how long plans last, `age_at_apply`, combat and death detection latency (only
-   unit-tested so far), latest-wins under a really stalled harness. Done when the list in
-   `docs/plans/phase2.md` holds.
-5. **Module: more things a bot can do** (`docs/plans/harness.md`, M1 "Not yet"). Options today:
+4. **Module: more things a bot can do** (`docs/plans/harness.md`, M1 "Not yet"). Options today:
    Attack, Loot, Keep. Missing: talk (playerbots opens gossip only for a bot's master), gather,
    use, "go to" (options exist only for named units within 20 yd). Then the rest of the snapshot:
    quest log (plans invent quests without it), bags, gear, target (`ext.target`), combat, party
    (`docs/specs/snapshot.md`; most of `snapshot.proto` is not filled yet).
-6. **Standing orders** (`docs/specs/triggers.md`, "Standing orders", proposed). Settle the order
+5. **Standing orders** (`docs/specs/triggers.md`, "Standing orders", proposed). Settle the order
    syntax, build it in `harness/src/plan.cc`, the executors in the module, then evals. Cheap
    grammar gaps to add first: `me` as a thing (my health), master and assist tank as `who`,
    line of sight, "behind it", my current target, game objects, aura time left, "anyone within N",
@@ -88,6 +81,9 @@ Last updated 2026-11-16.
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-16: H4 live harness loop (`screen_renderer` aligned with `snapshot.options`,
+  `module_connection`, `triggers`, `plan_runner`, `bot_loop`, `harness run` + `tools/wlb harness`;
+  113 harness unit tests passing across default, ASan+UBSan, TSan, MSan).
 - 2026-11-16: E2E latency Tier 1 (`option_executor.cc` `ResetActionDuration()`, `do:`-first + SSE
   streaming early dispatch + `TCP_NODELAY`, optional `goal?`, shared-`system` checkpoint split +
   soft slot affinity): solo `do:` `206 → 79 ms` (Qwen3.6) / `239 → 91 ms` (Gemma 4); Qwen3.6

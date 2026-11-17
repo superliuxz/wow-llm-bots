@@ -78,6 +78,15 @@ std::string DecisionJson(const Decision& decision) {
   }
   json["first_line_ms"] = decision.result.first_line_ms;
   json["round_trip_ms"] = decision.result.round_trip_ms;
+  if (decision.age_at_ask_ms) {
+    json["age_at_ask_ms"] = *decision.age_at_ask_ms;
+  }
+  if (decision.age_at_first_line_ms) {
+    json["age_at_first_line_ms"] = *decision.age_at_first_line_ms;
+  }
+  if (decision.age_at_plan_ms) {
+    json["age_at_plan_ms"] = *decision.age_at_plan_ms;
+  }
   json["plan"] = decision.plan ? Json(FormatPlan(*decision.plan)) : Json();
   return json.dump(-1, ' ', false, Json::error_handler_t::replace);
 }

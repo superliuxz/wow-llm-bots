@@ -41,7 +41,13 @@ and `docs/phase2-results.md` (what that costs). This plan is the build order.
    one question per bot, a newer wake-up replaces a waiting one) and `harness decide <snapshot.pb>`:
    one decision offline on a saved snapshot (also the entry point for the quality check). Tried live
    with the 35B: valid plans in 210-310 ms. Not built yet: `bot_state`, which H4 needs.
-4. **H4** `module_connection` and `triggers`: live, against the running server.
+4. **H4** (done 2026-11-16): `screen_renderer` numbers lines directly from `snapshot.options` by
+   `guid` (`has_module_options`), `module_connection` (Unix socket client + reconnect + delivery
+   ages), `triggers` (client defaults + edge-latched watches + `expect` suppression), `plan_runner`
+   (infers step completion from snapshots with per-kind safety timeouts and re-resolves `xN` repeats
+   by `(kind, name)`), `bot_loop` (early SSE `do:` dispatch, `Since your last look:`, `look` timer,
+   and `age_at_ask` / `age_at_first_line` / `age_at_plan` logging), and `harness run` (`tools/wlb
+   harness`). Tested end-to-end against a fake Unix-socket module and fake SSE `llama-server`.
 5. **M (module side)**, in step with H4: the options list, the `choose` and `say` commands, chat
    events, then quest log, bags, gear, target, combat and party in the snapshot.
    **M1 (done 2026-11-16):** every snapshot carries `options` (`server_module/src/options/options.cc`):
@@ -90,10 +96,10 @@ machine's clock everywhere):
 | Point | Measured by | Today |
 |---|---|---|
 | built to handed to the socket | the module, per minute in the server log (`sent n=... built to socket p50 p99 max`, and how many snapshots a newer one replaced) | done |
-| built to received | `tools/snapshot/fake_harness.py --stats` (the harness's own `module_connection` will log the same) | done (tool), H4 (harness) |
-| received to the question asked | the harness (`age_at_ask`) | H4 |
-| asked to the plan read | the decision log (`round_trip_ms`) | done |
-| built to the plan ready | the harness: `age_at_plan`, in the decision log next to the screen | H4 |
+| built to received | `ModuleConnection::TakeDeliveryStats()` (per minute in `harness run`) and `tools/snapshot/fake_harness.py --stats` | done |
+| built to the question asked | `age_at_ask_ms` in the decision log (`bot_loop.cc`) | done |
+| asked to the plan read | `first_line_ms` and `round_trip_ms` in the decision log | done |
+| built to the plan ready | `age_at_first_line_ms` and `age_at_plan_ms` in the decision log | done |
 | built to the command applied | the module, from the `seq` a command names: `age_at_apply` (per choice and per minute in the server log) | done (module) |
 
 The last one is the number that matters: how old the picture was when the bot acted on it.

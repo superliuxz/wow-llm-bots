@@ -14,11 +14,13 @@
   tools/wlb test --list
   tools/wlb setup links|configure|data|llama|msan|client-ui
   tools/wlb llm [--slots N] [--ctx N] [--model FILE] [-- llama-server args...]
+  tools/wlb harness [run|decide ...]     build and run the C++ brain harness (default: run)
 
 `tools/wlb <command> --help` says more. Python standard library only.
 """
 
 import argparse
+import os
 import pathlib
 import sys
 
@@ -26,7 +28,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from wlblib import build, check, llm, server, setup, testing  # noqa: E402
-from wlblib.common import main_guard  # noqa: E402
+from wlblib.common import OUT, main_guard  # noqa: E402
 
 
 def parse(argv):
@@ -89,6 +91,10 @@ def parse(argv):
     p.add_argument("--ctx", type=int, default=4096, help="context per slot")
     p.add_argument("--model", help="a file in models/ (default: $MODEL or the 35B)")
     p.add_argument("extra", nargs=argparse.REMAINDER, help="after --: llama-server arguments")
+
+    p = sub.add_parser("harness", help="build and run the C++ brain harness")
+    p.add_argument("args", nargs=argparse.REMAINDER,
+                   help="subcommand and flags (default: run)")
     return parser.parse_args(argv)
 
 
@@ -146,6 +152,13 @@ def main():
     elif a.command == "llm":
         extra = a.extra[1:] if a.extra[:1] == ["--"] else a.extra
         llm.serve(a.slots, a.ctx, a.model, extra)
+    elif a.command == "harness":
+        build.common("default", tests=False)
+        hargs = a.args[1:] if a.args[:1] == ["--"] else a.args
+        if not hargs or hargs[0].startswith("--"):
+            hargs = ["run", *hargs]
+        bin_path = str(OUT / "common" / "harness")
+        os.execv(bin_path, [bin_path, *hargs])
 
 
 if __name__ == "__main__":

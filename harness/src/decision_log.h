@@ -25,6 +25,11 @@ struct Decision {
   LlmResult result;          // What came back, or why not.
   std::optional<Plan> plan;  // What was understood of it; empty: not a plan.
   base::Time time;
+  // Snapshot age (`CLOCK_MONOTONIC`, from `Snapshot.monotonic_us`) in live
+  // runs; empty in offline `harness decide` runs without monotonic timestamps.
+  std::optional<double> age_at_ask_ms;
+  std::optional<double> age_at_first_line_ms;
+  std::optional<double> age_at_plan_ms;
 };
 
 // The decision as one line of JSON (no newline). The prompt is kept as the
