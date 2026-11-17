@@ -77,6 +77,7 @@ std::string ExecuteOption(Player* bot, const OptionTarget& target) {
           current_target->Set(old_target);
           return "can't attack " + target.name + " now";
         }
+        ai->ResetActionDuration();
       }
       return "";
     case OptionTarget::Kind::kLoot:
@@ -94,9 +95,12 @@ std::string ExecuteOption(Player* bot, const OptionTarget& target) {
         if (!creature || loot.IsEmpty() || !bot->isAllowedToLoot(creature)) {
           return "nothing to loot on " + target.name;
         }
-        // The loot strategy walks to the "loot target" and opens it.
+        // The loot strategy walks to the "loot target" and opens it; clear any
+        // leftover check delay (SitDelay, RpgDelay, LootDelay) so UpdateAI acts
+        // on the next world tick instead of sleeping it out.
         available_loot->Get()->Add(unit->GetGUID());
         loot_target->Set(loot);
+        ai->ResetActionDuration();
       }
       return "";
     case OptionTarget::Kind::kKeep:
