@@ -13,8 +13,8 @@ Design and every decision so far: [docs/design.md](docs/design.md).
 | `CONTRIBUTING.md` | the rules for working in this repo (C++ style and checks, layout); `CLAUDE.md` only imports it, for Claude Code |
 | `docs/` | the design (`design.md`), plans, specs and measured results; **`TODO.md` is the list of open work** |
 | `private/` | private submodule (accounts, personal data); not accessible to others |
-| `third_party/` | upstream code as pinned git submodules: AzerothCore (mod-playerbots fork, `Playerbot` branch), mod-playerbots (`master`), harness deps: Abseil `20260817.0`, GoogleTest `v1.18.0`, cpp-httplib `v0.66.0`, nlohmann/json `v3.12.0`, and llama.cpp `v1.0.0` |
-| `common/` | shared C++ used by the server module and the harness: `base/` (Chromium-style threads, epoll IO message pump, task runners, callbacks, WeakPtr, scoped_refptr, TimeDelta) and `net/` (Unix socket server/client, length-prefixed framing) |
+| `third_party/` | upstream code as pinned git submodules: AzerothCore (mod-playerbots fork, `Playerbot` branch), mod-playerbots (`master`), harness/common deps: Glaze `v9.1.0`, GoogleTest `v1.18.0`, cpp-httplib `v0.66.0`, nlohmann/json `v3.12.0`, and llama.cpp `v1.0.0` |
+| `common/` | shared C++ used by the server module and the harness: `base/` (Chromium-style threads, epoll IO message pump, task runners, callbacks, WeakPtr, scoped_refptr, TimeDelta, strings), `net/` (Unix socket server/client, length-prefixed framing), and `proto/` (plain C++20 snapshot/command structs + Glaze BEVE/JSON wire codecs) |
 | `server_module/` | our AzerothCore module: sees the game, builds each bot's snapshot, carries out commands |
 | `harness/` | the brain's process (C++), separate from the game server: screens, plans, the llama client, prompts, the decision log, the scheduler, and `harness decide` to run one decision offline (`docs/plans/harness.md`); built as `out/common/harness` |
 | `content/` | shared bot knowledge: `RULES.md` (the rules every bot starts from); `concepts/` and prompts are planned |
@@ -47,8 +47,9 @@ more. It acts on this checkout's processes only (by their pid files), never by n
 
 | Command | What |
 |---|---|
-| `tools/wlb check` | everything our code must pass before review or commit: format, the snapshot examples, the trigger table, build and unit tests in default, ASan+UBSan, TSan and MSan, includes, the screen goldens |
-| `tools/wlb check format\|includes\|snapshots\|triggers\|goldens` | one of those (`--fix` for format and includes) |
+| `tools/wlb check` | fast everyday checks before review or commit: format, trigger table, default build + unit tests, snapshot examples, includes, screen goldens |
+| `tools/wlb check sanitizers` | build and run unit tests under ASan+UBSan, TSan, and MSan (`--sanitizers` / `--san` on `wlb check` runs everything) |
+| `tools/wlb check format\|includes\|snapshots\|triggers\|goldens\|sanitizers` | one of those (`--fix` for format and includes) |
 | `tools/wlb build common [asan\|tsan\|msan\|server]` | build `common/` (and the harness) and run the unit tests; `server` is the copy linked into AzerothCore |
 | `tools/wlb build server [--test]` | build and install AzerothCore with our module (`--test` adds the test-only fixtures) |
 | `tools/wlb test unit\|e2e\|perf\|eval [NAME...]` | the four test targets: `unit` (gtest, `--filter`, `--variant`), `e2e` (live scenarios on a test build of the server; stops the play server and restores it), `perf` (measurements checked against `tools/wlblib/cases/perf_baselines.json` and hard limits; `--update-baselines` records a run, `--capture` records the brain replay's input), `eval`; `--list` shows the cases |
@@ -68,13 +69,12 @@ more. It acts on this checkout's processes only (by their pid files), never by n
 | `tools/wlb setup llama` | llama.cpp with CUDA |
 | `tools/wlb setup msan` | MSan-instrumented libc++ (built by `tools/wlb build common msan` when missing) |
 | `tools/wlb setup client-ui` | the client's UI code and event names, for the client-event audit |
-| `tools/wlb build protoc` | protoc, built from `third_party/` |
 
 **Snapshot and brain research** (Python, dev only; production is C++)
 
 | Path | What |
 |---|---|
-| `tools/snapshot/` | `validate_snapshot.py` (used by `tools/wlb check snapshots`), `fake_harness.py` (a stand-in harness that prints what the module sends) |
+| `tools/snapshot/` | `wire_py.py` (`ctypes` wrapper for `libwlb_wire_py.so`), `fake_harness.py` (a stand-in harness that prints what the module sends) |
 | `tools/audit/` | the client-event audit: the scripts `tools/wlb setup client-ui` feeds (`docs/specs/coverage-client-events.md`); `gen_invisible_displays.py` regenerates the table of invisible creature models (`server_module/src/snapshot/invisible_displays.h`) |
 | `tools/bench/` | brain load benches: `capture_snapshots.py` (live snapshots to files), `trigger_sim.py` (how often bots wake), `brain_load.py` (wake-ups replayed against llama-server), `throughput.py` (capacity), `prompt_render.py` (the compact prompt) |
 
@@ -83,4 +83,5 @@ Code style: Google/Chromium C++ style (`.clang-format`).
 
 License: GPL-2.0 (same as AzerothCore and mod-playerbots), see [LICENSE](LICENSE).
 
-Server deps stay system packages (Arch/CachyOS): `clang lld cmake ninja boost percona-server percona-server-clients`.
+System toolchain (`common/` + `harness/`): `clang lld cmake ninja python ccache`.
+Upstream AzerothCore server deps (`worldserver` only): `boost percona-server percona-server-clients`.
