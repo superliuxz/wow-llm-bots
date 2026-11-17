@@ -2,7 +2,8 @@
 //
 // The brain's process. So far one command:
 //   harness decide <snapshot.pb> [--name= --reason= --rules= --identity=
-//                    --log-dir= --host= --port= --slot= --dry-run]
+//                    --log-dir= --host= --port= --slot= --temperature=
+//                    --dry-run]
 
 #include <cstdio>
 #include <optional>
@@ -18,7 +19,7 @@ int Usage() {
   std::fputs(
       "usage: harness decide <snapshot.pb> [--name=BOT] [--reason=TEXT]\n"
       "         [--rules=FILE] [--identity=FILE] [--log-dir=DIR] [--host=H]\n"
-      "         [--port=N] [--slot=N] [--dry-run]\n",
+      "         [--port=N] [--slot=N] [--temperature=T] [--dry-run]\n",
       stderr);
   return 2;
 }

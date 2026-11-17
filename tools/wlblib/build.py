@@ -64,7 +64,8 @@ def common(variant="default", tests=True, gtest_filter=None):
              f"-DCMAKE_C_FLAGS={' '.join(flags)}", f"-DCMAKE_CXX_FLAGS={' '.join(flags)}",
              f"-DWLB_HARDENED={'ON' if hardened else 'OFF'}",
              f"-DCMAKE_EXE_LINKER_FLAGS={' '.join(ldflags)}"], quiet=True)
-    targets = ["wlb_base", "wlb_net", "wlb_proto"]
+    targets = ["wlb_base", "wlb_net", "wlb_proto",
+               *([] if variant == "server" else ["harness"])]
     if tests and variant != "server":
         run(["ninja", "-C", build, *targets, "unit_tests"])
         for test in UNIT_TESTS:

@@ -22,6 +22,7 @@ struct PromptInput {
   std::string identity;     // var/bots/<name>/identity.md; may be empty
   std::string wake_reason;  // "plan done", "attacked", ...
   int slot = -1;            // llama-server slot, or -1
+  float temperature = 0.7f;
 };
 
 // The request that asks for a plan for this screen. The plan grammar allows

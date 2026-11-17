@@ -26,6 +26,7 @@ struct DecideOptions {
   std::string identity_path;  // Optional.
   std::string log_dir;        // Optional: var/bots.
   int slot = -1;
+  float temperature = 0.7f;
   bool dry_run = false;  // Print the prompt; don't ask the model.
   LlmEndpoint endpoint;
 };

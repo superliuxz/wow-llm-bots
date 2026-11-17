@@ -39,6 +39,7 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
                               ".\n\nYour screen now:\n", screen.text);
   request.grammar = PlanGrammar(static_cast<int>(screen.options.size()));
   request.slot = input.slot;
+  request.temperature = input.temperature;
   return request;
 }
 

@@ -64,7 +64,7 @@ TEST(DecideArgsTest, EveryFlag) {
   const auto options = ParseDecideArgs(
       {"--name=Tess", "--reason=attacked", "--rules=r.md", "--identity=i.md",
        "snap.pb", "--log-dir=var/bots", "--host=10.0.0.2", "--port=9000",
-       "--slot=5", "--dry-run"},
+       "--slot=5", "--temperature=0", "--dry-run"},
       &error);
   ASSERT_TRUE(options) << error;
   EXPECT_EQ(options->bot_name, "Tess");
@@ -75,6 +75,7 @@ TEST(DecideArgsTest, EveryFlag) {
   EXPECT_EQ(options->endpoint.host, "10.0.0.2");
   EXPECT_EQ(options->endpoint.port, 9000);
   EXPECT_EQ(options->slot, 5);
+  EXPECT_FLOAT_EQ(options->temperature, 0.0f);
   EXPECT_TRUE(options->dry_run);
 }
 
@@ -90,6 +91,9 @@ TEST(DecideArgsTest, SaysWhatIsWrong) {
   EXPECT_FALSE(ParseDecideArgs({"a.pb", "--port=70000"}, &error));
   EXPECT_FALSE(ParseDecideArgs({"a.pb", "--port=abc"}, &error));
   EXPECT_FALSE(ParseDecideArgs({"a.pb", "--slot=-2"}, &error));
+  EXPECT_FALSE(ParseDecideArgs({"a.pb", "--temperature=-0.1"}, &error));
+  EXPECT_FALSE(ParseDecideArgs({"a.pb", "--temperature=2.5"}, &error));
+  EXPECT_FALSE(ParseDecideArgs({"a.pb", "--temperature=nan"}, &error));
 }
 
 TEST(DecideTest, ShowsTheScreenTheReplyAndWhatThePlanMeans) {

@@ -61,11 +61,16 @@ TEST(PromptTest, TheGrammarAllowsOnlyTheScreensOptions) {
   EXPECT_NE(request.grammar.find("opt ::= \"1\" | \"2\"\n"), std::string::npos);
 }
 
-TEST(PromptTest, TheSlotIsPassedOn) {
+TEST(PromptTest, TheSlotAndTemperatureArePassedOn) {
   PromptInput input = SampleInput();
   input.slot = 7;
-  EXPECT_EQ(BuildPlanRequest(input, SampleScreen()).slot, 7);
+  input.temperature = 0.0f;
+  const LlmRequest request = BuildPlanRequest(input, SampleScreen());
+  EXPECT_EQ(request.slot, 7);
+  EXPECT_FLOAT_EQ(request.temperature, 0.0f);
   EXPECT_EQ(BuildPlanRequest(SampleInput(), SampleScreen()).slot, -1);
+  EXPECT_FLOAT_EQ(BuildPlanRequest(SampleInput(), SampleScreen()).temperature,
+                  0.7f);
 }
 
 TEST(PromptTest, TheRulesAreTheSameStartForEveryBot) {

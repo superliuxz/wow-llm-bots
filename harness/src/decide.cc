@@ -2,6 +2,7 @@
 
 #include "decide.h"
 
+#include <cmath>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -68,6 +69,8 @@ std::optional<DecideOptions> ParseDecideArgs(
     }
     int number = 0;
     const bool is_number = absl::SimpleAtoi(value, &number);
+    float real = 0;
+    const bool is_real = absl::SimpleAtof(value, &real) && std::isfinite(real);
     if (name == "name") {
       options.bot_name = value;
     } else if (name == "reason") {
@@ -84,6 +87,9 @@ std::optional<DecideOptions> ParseDecideArgs(
       options.endpoint.port = number;
     } else if (name == "slot" && is_number && number >= -1) {
       options.slot = number;
+    } else if (name == "temperature" && is_real && real >= 0.0f &&
+               real <= 2.0f) {
+      options.temperature = real;
     } else if (name == "dry-run" && value.empty()) {
       options.dry_run = true;
     } else {
@@ -134,6 +140,7 @@ int RunDecide(const DecideOptions& options,
   }
   input.wake_reason = options.wake_reason;
   input.slot = options.slot;
+  input.temperature = options.temperature;
 
   const Screen screen = RenderScreen(snapshot);
   const LlmRequest request = BuildPlanRequest(input, screen);
