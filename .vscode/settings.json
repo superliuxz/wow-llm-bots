@@ -2,7 +2,7 @@
   // Use clangd for C++; turn off Microsoft's IntelliSense so they don't conflict.
   "C_Cpp.intelliSenseEngine": "disabled",
 
-  // clangd uses the root compile_commands.json symlink (made by tools/setup.sh).
+  // clangd uses the root compile_commands.json symlink (made by tools/wlb setup links).
   "clangd.arguments": [
     "--background-index",
     "-j=8",

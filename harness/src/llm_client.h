@@ -1,7 +1,7 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
 // Asks llama-server a question: one chat request, one reply. llama-server is
-// the local model server (tools/llm-server.sh); this speaks its
+// the local model server (tools/wlb llm); this speaks its
 // OpenAI-compatible HTTP API. The request carries the plan grammar
 // (plan.h), so the model can only write valid plans, and the slot to use, so
 // a bot's prompt prefix can stay cached.

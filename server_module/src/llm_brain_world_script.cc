@@ -95,7 +95,7 @@ class LlmBrainWorldScript : public WorldScript {
     if (!config_.test_fixtures.empty()) {
       LOG_ERROR("module",
                 "mod-llm-brain: LlmBrain.TestFixtures ignored: production "
-                "build (test builds: tools/build-server.sh --test)");
+                "build (test builds: tools/wlb build server --test)");
     }
 #endif
     bot_manager_ = std::make_unique<BotManager>(

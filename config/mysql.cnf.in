@@ -1,4 +1,4 @@
-# Template: tools/db-start.sh renders it to out/server/etc/mysql.cnf, with the repo root filled in.
+# Template: tools/wlb db start renders it to out/server/etc/mysql.cnf, with the repo root filled in.
 [mysqld]
 datadir=@ROOT@/var/mysql-data
 socket=@ROOT@/out/server/run/mysql.sock

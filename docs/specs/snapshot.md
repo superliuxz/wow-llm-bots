@@ -4,7 +4,7 @@ Status: **agreed, revision 7** (2026-11-15). The exact field-level contract is
 [`server_module/proto/snapshot.proto`](../../server_module/proto/snapshot.proto) (protobuf Edition 2024, lite runtime; the single source of
 truth for the module <-> harness protocol; field annotations in
 [`snapshot_options.proto`](../../server_module/proto/snapshot_options.proto)); examples in [`examples/`](examples/) use the canonical protobuf JSON
-mapping and are checked by `tools/validate-snapshots.sh` (strict parse + visibility rules).
+mapping and are checked by `tools/wlb check snapshots` (strict parse + visibility rules).
 Coverage against the client: [`coverage-ui.md`](coverage-ui.md) (every UI frame) and
 [`coverage-opcodes.md`](coverage-opcodes.md) (every server opcode). This document explains it. Everything a bot's brain decides is based on this.
 
@@ -386,7 +386,7 @@ real player knows their junk and bag space from habit), but only sends what's vi
    drift), it has `oneof` for variants and typed enums, and its canonical JSON mapping serves
    recordings and evals (tooling only; the wire is binary, lite runtime). protobuf and its
    abseil dependency are pinned in `third_party/`,
-   built by `tools/build-protoc.sh`.
+   built by `tools/wlb build protoc`.
 14. **Coverage audited against the client** (rev 7): every UI frame and every server opcode
    is mapped to a snapshot field or marked out of scope with a reason
    ([`coverage-ui.md`](coverage-ui.md), [`coverage-opcodes.md`](coverage-opcodes.md)). New in

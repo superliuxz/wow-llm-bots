@@ -3,7 +3,7 @@
 ## 1a. Stock bot, solo leveling, cheats off (2026-11-14)
 
 Stock mod-playerbots AI (New RPG strategy), no LLM. One random bot, level 1, no human nearby.
-Data: `out/tests/solo-leveling-*` (samples every 60 s via `tools/bot-sampler.sh`) and
+Data: `out/tests/solo-leveling-*` (samples every 60 s via `tools/wlb server sample`) and
 `var/logs/Playerbots.log`.
 
 ### Final clean run (Dezlu, Troll Priest, Valley of Trials, 59 min)

@@ -6,7 +6,7 @@ the payload), as in common/net/frame_codec.h. Module messages (wlb.snapshot.Modu
 printed as JSON when the generated Python code is available.
 
 Dev tool only (production is C++). For JSON, generate the code once with
-tools/validate-snapshots.sh and run with the tools venv:
+tools/wlb check snapshots and run with the tools venv:
   out/tools-venv/bin/python -I tools/snapshot/fake_harness.py [seconds=5] [message ...]
   out/tools-venv/bin/python -I tools/snapshot/fake_harness.py --stats [seconds=10]
   out/tools-venv/bin/python -I tools/snapshot/fake_harness.py --choose [seconds=30] Attack Loot

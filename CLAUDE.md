@@ -64,13 +64,13 @@ must cover a whole program and AzerothCore isn't built hardened.
 C++20 and includes our headers). The harness, a separate build, may use C++26.
 
 **Include what you use.** Every file includes exactly the headers whose symbols it uses: no
-unused includes, no relying on transitive includes. Check with `tools/check-includes.sh`
+unused includes, no relying on transitive includes. Check with `tools/wlb check includes`
 (`--fix` to apply). glibc's internal headers (`<bits/...>`, `<asm-generic/...>`) are never
 included: use the public header and mark it `// IWYU pragma: keep`.
 
-**Before showing C++ for review or committing it, `tools/check-cpp.sh` must pass:**
+**Before showing C++ for review or committing it, `tools/wlb check` must pass:**
 clang-format, include check, and build + unit tests in default, ASan+UBSan, TSan and MSan
-(MSan links an instrumented libc++ built by `tools/setup/build-msan-libcxx.sh`). New code comes
+(MSan links an instrumented libc++ built by `tools/wlb setup msan`). New code comes
 with unit tests. A syscall MSan has no interceptor for gets
 `MSAN_UNPOISON` (`base/compiler_specific.h`), never a suppression.
 
@@ -83,6 +83,6 @@ their names. It must never block the world thread.
   `private/` submodule. Commits use the noreply email set in the repo config.
 - Upstream code only in `third_party/` (pinned submodules); never edit it.
 - Everything generated is in `out/<name>` (untracked) and may be deleted at any time (`out/server` is the
-  installed game server, rebuilt by `tools/build-server.sh` and friends). Anything that must survive is
+  installed game server, rebuilt by `tools/wlb build server` and friends). Anything that must survive is
   in `var/` (untracked): the MySQL database, logs, bot memory. Never put state worth keeping in `out/`.
-- Settings live in `config/*.overrides`, rendered by `tools/apply-config.sh`.
+- Settings live in `config/*.overrides`, rendered by `tools/wlb config`.

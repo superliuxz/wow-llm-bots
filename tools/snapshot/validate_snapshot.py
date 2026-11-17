@@ -9,7 +9,7 @@ Each file must parse as a wlb.snapshot.Snapshot in the canonical protobuf JSON m
     fields.
 
 Usage: out/tools-venv/bin/python -I tools/snapshot/validate_snapshot.py <proto_py_dir> <file.json>...
-       (tools/validate-snapshots.sh compiles the proto and checks the examples)
+       (tools/wlb check snapshots compiles the proto and checks the examples)
 """
 
 import sys

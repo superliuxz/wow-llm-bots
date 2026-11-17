@@ -36,7 +36,7 @@ socket and two lock-protected queues. Nothing in the module ever waits on the ha
 ## Work items, in order
 
 ### A. Server module `server_module` (AzerothCore module, Google/Chromium style)
-1. Module skeleton (CMake, script loader), linked into worldserver via `tools/setup.sh` symlink.
+1. Module skeleton (CMake, script loader), linked into worldserver via `tools/wlb setup links` symlink.
    Config file `mod-llm-brain.conf`: enabled, socket path, bot names to attach to, tick interval.
 2. IO thread + Unix socket server (epoll IO thread on `common/net`, done in A2); outbound/inbound
    queues; outbound messages are dropped while no harness is connected, and a bot's snapshots
@@ -81,14 +81,15 @@ socket and two lock-protected queues. Nothing in the module ever waits on the ha
    generated personalities come later). `var/bots/` gets its own git repo.
 
 ### D. Tooling
-1. `tools/build-harness.sh`, `tools/harness.sh` (run), and start/stop alongside the server
-   and llama-server.
+1. `tools/wlb` subcommands for the harness: build (`wlb build common` already builds it), run, and
+   start/stop alongside the server and llama-server.
 2. Save real snapshots from play as the first eval fixtures (`evals/cases/` seed).
 
 ### E. End-to-end tests (planned)
 Three layers, all on an **isolated test stack** (own ports, socket path and config; databases
 restored from a "golden" copy of the freshly imported DBs for every run, so tests never touch
-the user's play server and always start from the same state). One runner: `tools/e2e.sh`.
+the user's play server and always start from the same state). One runner: `tools/wlb test e2e` (planned, with `unit`, `perf`
+and `eval` beside it).
 1. **Module e2e** (from A3-A5): real worldserver + fake harness; snapshot fields correct,
    `choose_option` / `say` change the bot in game.
 2. **Brain e2e** (with B): real server + harness + **fake LLM** (canned HTTP replies):
@@ -113,7 +114,7 @@ WaitableEvent), `base/time/` (TimeDelta, TimeTicks on CLOCK_MONOTONIC), `base/co
 (MSAN_UNPOISON), `base/thread_annotations.h`. `net/`: FrameCodec (length-prefixed
 frames), FramedConnection, UnixSocketServer, UnixSocketClient (the line-based LineFramer and
 LineConnection were replaced by frames for protobuf). No third-party runtime deps (libevent dropped). Plain C++20.
-28 tests; `tools/check-cpp.sh` = format + include-what-you-use + default/ASan+UBSan/TSan/MSan
+28 tests; `tools/wlb check` = format + include-what-you-use + default/ASan+UBSan/TSan/MSan
 (MSan against instrumented libc++); `-Werror=thread-safety`; hardened std lib in `out/common`,
 not in `out/common-server` (linked into AzerothCore).
 

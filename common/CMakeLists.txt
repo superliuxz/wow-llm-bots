@@ -31,7 +31,7 @@ target_include_directories(wlb_base PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 # library (bounds-checked containers etc.) in every build.
 set(WLB_SAFETY_FLAGS -Wall -Wextra -Wthread-safety -Werror=thread-safety)
 # Hardening must cover a whole program; the copy linked into AzerothCore (not
-# hardened) is built with WLB_HARDENED=OFF (tools/build-server.sh).
+# hardened) is built with WLB_HARDENED=OFF (tools/wlb build server).
 option(WLB_HARDENED "Hardened standard library (whole-program builds)" ON)
 if(WLB_HARDENED)
   add_compile_definitions(_GLIBCXX_ASSERTIONS
@@ -62,7 +62,7 @@ set(protobuf_LOCAL_DEPENDENCIES_ONLY ON)
 set(protobuf_WITH_ZLIB OFF)
 add_subdirectory("${WLB_ROOT}/third_party/protobuf" protobuf EXCLUDE_FROM_ALL)
 
-# Generated code comes from protoc built separately (tools/build-protoc.sh) from
+# Generated code comes from protoc built separately (tools/wlb build protoc) from
 # the same pinned protobuf, so generator and runtime versions always match.
 set(WLB_PROTOC "${WLB_ROOT}/out/protoc/protobuf/protoc" CACHE FILEPATH "protoc")
 set(WLB_PROTO_ROOT "${WLB_ROOT}/server_module")

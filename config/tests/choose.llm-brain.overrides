@@ -1,8 +1,8 @@
 # Choose test: the brain's choices move the bot. One fresh level-1 Troll Priest in the Valley of
 # Trials next to a Mottled Boar spawn (reset from the fixture on every server start) whose body
 # doesn't pick fights or wander on its own (no grind, no new rpg), so an attack or a loot comes
-# from a Choose sent by tools/snapshot/fake_harness.py --choose. Needs a test build (tools/build-
-# server.sh --test).
+# from a Choose sent by tools/snapshot/fake_harness.py --choose. Needs a test build (tools/wlb build server
+# --test).
 LlmBrain.Bots = "Loada"
 LlmBrain.TestFixtures = "Loada=priest-l1-boars.pdump"
 LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"

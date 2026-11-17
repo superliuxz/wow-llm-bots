@@ -1,7 +1,7 @@
 # Included by AzerothCore's modules/CMakeLists.txt after the `modules` target
 # exists. Links our shared C++ (common/: wlb_base, wlb_net, wlb_proto) and the
 # protobuf lite runtime with the abseil libraries it uses, all built beforehand
-# into out/common-server (not hardened) by tools/build-server.sh.
+# into out/common-server (not hardened) by tools/wlb build server.
 get_filename_component(WLB_MODULE_DIR "${CMAKE_CURRENT_LIST_DIR}" REALPATH)
 get_filename_component(WLB_ROOT "${WLB_MODULE_DIR}/.." REALPATH)
 set(WLB_SERVER_OUT "${WLB_ROOT}/out/common-server")
@@ -17,7 +17,7 @@ file(GLOB_RECURSE WLB_DEP_ARCHIVES
   "${WLB_SERVER_OUT}/protobuf/*.a" "${WLB_SERVER_OUT}/abseil/*.a")
 if(NOT WLB_DEP_ARCHIVES)
   message(FATAL_ERROR "mod-llm-brain: build out/common-server first "
-                      "(tools/build-common.sh --server)")
+                      "(tools/wlb build common server)")
 endif()
 target_link_libraries(modules PRIVATE
   "${WLB_SERVER_OUT}/libwlb_proto.a"
@@ -47,7 +47,7 @@ set(WLB_OURS_RE "^(${WLB_DIR_RE_LINK}|${WLB_DIR_RE_REAL})/")
 list(FILTER WLB_MODULES_SOURCES EXCLUDE REGEX "${WLB_OURS_RE}.*_unittest\\.cc$")
 
 # Test-only code (src/test/, e.g. the fixture reset) is only compiled into test
-# builds of the server (tools/build-server.sh --test); production binaries
+# builds of the server (tools/wlb build server --test); production binaries
 # don't contain it.
 option(LLM_BRAIN_TEST_HOOKS "Compile mod-llm-brain's test-only code" OFF)
 if(LLM_BRAIN_TEST_HOOKS)

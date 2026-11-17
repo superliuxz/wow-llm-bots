@@ -1,0 +1,115 @@
+#!/usr/bin/env -S python3 -I
+"""wlb: the project's one command-line tool (build, run, check, set up).
+
+  tools/wlb build protoc | common [VARIANT] [--no-tests] | server [--test]
+  tools/wlb db start | stop | backup [--keep N]
+  tools/wlb config [TEST]                render out/server/etc/*.conf (TEST: config/tests/TEST.*)
+  tools/wlb server start | stop
+  tools/wlb console COMMAND...           send a command to worldserver's console
+  tools/wlb check [format|includes|snapshots|triggers|goldens] [--fix] [FILES...]
+  tools/wlb setup links|configure|data|llama|msan|client-ui
+  tools/wlb llm [--slots N] [--ctx N] [--model FILE] [-- llama-server args...]
+
+`tools/wlb <command> --help` says more. Python standard library only.
+"""
+
+import argparse
+import pathlib
+import sys
+
+# -I (isolated) leaves the script's own directory off the path: add the tools directory.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+from wlblib import build, check, llm, server, setup  # noqa: E402
+from wlblib.common import main_guard  # noqa: E402
+
+
+def parse(argv):
+    parser = argparse.ArgumentParser(prog="tools/wlb", description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("build", help="build protoc, common/ or the server")
+    p.add_argument("what", choices=["protoc", "common", "server"])
+    p.add_argument("variant", nargs="?", default="default", choices=list(build.VARIANTS),
+                   help="for common: default, asan, tsan, msan or server")
+    p.add_argument("--no-tests", action="store_true", help="for common: don't run unit tests")
+    p.add_argument("--test", action="store_true",
+                   help="for server: a test build (the module's test-only code compiled in)")
+
+    p = sub.add_parser("db", help="the project-local MySQL")
+    p.add_argument("action", choices=["start", "stop", "backup"])
+    p.add_argument("--keep", type=int, default=14, help="for backup: how many to keep")
+
+    p = sub.add_parser("config", help="render the server's config from config/*.overrides")
+    p.add_argument("test", nargs="?", help="a test config: config/tests/TEST.*.overrides")
+
+    p = sub.add_parser("server", help="start or stop MySQL, authserver and worldserver")
+    p.add_argument("action", choices=["start", "stop", "sample"])
+    p.add_argument("args", nargs="*", help=argparse.SUPPRESS)  # sample OUT INTERVAL ACCOUNT
+
+    p = sub.add_parser("console", help="send a command to the worldserver console")
+    p.add_argument("words", nargs="+")
+
+    p = sub.add_parser("check", help="what code must pass before review or commit")
+    p.add_argument("what", nargs="?", default="all",
+                   choices=["all", "format", "includes", "snapshots", "triggers", "goldens"])
+    p.add_argument("--fix", action="store_true", help="for format and includes: rewrite files")
+    p.add_argument("files", nargs="*", help="for snapshots: files to validate")
+
+    p = sub.add_parser("setup", help="one-time setup steps")
+    p.add_argument("step", choices=["links", "configure", "data", "llama", "msan", "client-ui"])
+
+    p = sub.add_parser("llm", help="run llama-server with the brain's model")
+    p.add_argument("--slots", type=int, default=16)
+    p.add_argument("--ctx", type=int, default=4096, help="context per slot")
+    p.add_argument("--model", help="a file in models/ (default: $MODEL or the 35B)")
+    p.add_argument("extra", nargs=argparse.REMAINDER, help="after --: llama-server arguments")
+    return parser.parse_args(argv)
+
+
+def main():
+    a = parse(sys.argv[1:])
+    if a.command == "build":
+        if a.what == "protoc":
+            build.protoc()
+        elif a.what == "common":
+            build.common(a.variant, tests=not a.no_tests)
+        else:
+            build.server(test=a.test)
+    elif a.command == "db":
+        {"start": server.db_start, "stop": server.db_stop,
+         "backup": lambda: server.db_backup(a.keep)}[a.action]()
+    elif a.command == "config":
+        server.config(a.test)
+    elif a.command == "server":
+        if a.action == "start":
+            server.server_start()
+        elif a.action == "stop":
+            server.server_stop()
+        else:
+            server.sample(*a.args)
+    elif a.command == "console":
+        server.console(" ".join(a.words))
+    elif a.command == "check":
+        if a.what == "all":
+            check.all_()
+        elif a.what == "format":
+            check.format_(fix=a.fix)
+        elif a.what == "includes":
+            check.includes(fix=a.fix)
+        elif a.what == "snapshots":
+            check.snapshots(a.files)
+        elif a.what == "triggers":
+            check.triggers()
+        else:
+            check.goldens()
+    elif a.command == "setup":
+        getattr(setup, a.step.replace("-", "_"))()
+    elif a.command == "llm":
+        extra = a.extra[1:] if a.extra[:1] == ["--"] else a.extra
+        llm.serve(a.slots, a.ctx, a.model, extra)
+
+
+if __name__ == "__main__":
+    main_guard(main)

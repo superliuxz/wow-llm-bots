@@ -7,7 +7,7 @@ can be told about, and nothing else is.
 
 ## Sources
 
-`tools/audit/extract-client-ui.sh` (needs the client and a server build) extracts, into the
+`tools/wlb setup client-ui` (needs the client and a server build) extracts, into the
 untracked `out/client-ui/`:
 
 - **The default UI code** (FrameXML, GlueXML, the Blizzard_* addons: 463 files) from the
@@ -80,7 +80,7 @@ watch; gravity, turn rates: internal).
 
 ## Enforced
 
-`tools/validate-snapshots.sh` runs `tools/audit/check_client_events.py`, which fails when:
+`tools/wlb check snapshots` runs `tools/audit/check_client_events.py`, which fails when:
 a row isn't classified; a `maps_to` names something the proto doesn't have; an Event or
 PromptEvent kind in the proto is produced by no client event and isn't listed as coming from
 elsewhere (with the reason: our own path failures, DBM warnings, lines split out of chat text);
@@ -96,8 +96,8 @@ comes into view with a watch set; the bot dies; a Dungeon Finder proposal.
 ## Re-running
 
 ```
-tools/audit/extract-client-ui.sh                       # client data -> out/client-ui
+tools/wlb setup client-ui                       # client data -> out/client-ui
 python3 -I tools/audit/client_alerts.py          # alerts per event
 python3 -I tools/audit/classify_client_events.py # adds new events to the table, as `review`
-tools/validate-snapshots.sh                      # checks the table
+tools/wlb check snapshots                      # checks the table
 ```

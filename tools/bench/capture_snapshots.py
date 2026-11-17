@@ -5,7 +5,7 @@ with their arrival time, so the receive loop never falls behind the module. When
 they are written as JSON (proto field names, defaults left out), one file per frame:
   <out_dir>/<bot>/<seq>.json
 
-Dev tool only. Needs the generated Python code (tools/validate-snapshots.sh once):
+Dev tool only. Needs the generated Python code (tools/wlb check snapshots once):
   out/tools-venv/bin/python -I tools/bench/capture_snapshots.py <out_dir> [seconds=15]
 """
 
