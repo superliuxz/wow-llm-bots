@@ -3,5 +3,5 @@ LlmBrain.Enable = 1
 LlmBrain.SocketPath = "@ROOT@/out/server/run/brain.sock"
 # Phase 2 bot: Testpriest (test account WLBTEST). Persistent here, like a real bot whose
 # memory carries over; test configs (config/tests/) reset it from a fixture instead.
-LlmBrain.Bots = "Testpriest"
+LlmBrain.Bots = "Testpriest,Gatda"
 LlmBrain.SnapshotIntervalMs = 1000

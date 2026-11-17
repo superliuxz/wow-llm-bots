@@ -28,11 +28,12 @@ Working order (2026-11-17 09:50): finish #3, #1, then #4, #2, #5.
     events), carries out `Say` commands (say, yell, whisper: `chat/speak.cc`), and has a console
     command `.llmbrain whisper <from> <to> <text>`; plans have a `tell <Name>: text` line, chosen
     by the model (`plan.cc`, `content/RULES.md`). `e2e whisper` (two bots, scripted brain): the
-    server log showed Loada's whisper sent and heard by Telda, but the run failed because the
-    live harness reconnected and took the socket (`wlb test e2e` now refuses to start while a
-    live harness runs). **Left:** stop the live harness, re-run `tools/wlb test e2e whisper`;
-    restart `tools/wlb harness` on the new build and whisper Testpriest with
-    `tools/wlb console llmbrain whisper <someone online> Testpriest hi` for the in-character reply.
+    passes (each whisper heard within a few ms). **Live (2026-11-17, Qwen3.6):** Gatda (a
+    random-bot orc rogue, now in `LlmBrain.Bots` as the second brain-run bot) whispered
+    Testpriest via the console command; Testpriest heard it and whispered back "yes" (wake to
+    full reply ~220 ms). A second, open question ("any good spots to level?") got no `tell`.
+    So the path works, but Qwen answers whispers unreliably and tersely (eval: 3/5 whisper
+    cases; Gemma 4: 5/5). Phase 2 "done when" #1 is not met on Qwen yet.
   - Open: loot steps timed out twice (corpse at 0-9 yd, still `lootable yes` after 15 s). The
     cause isn't known yet.
 - **#3 E2E latency Tier 2: built (2026-11-17), live numbers pending** (`docs/plans/latency.md`,
@@ -61,10 +62,11 @@ Working order (2026-11-17 09:50): finish #3, #1, then #4, #2, #5.
    stay in `models/`; the default is the more accurate one as long as it stays within the speed
    limit; they can't be loaded together: 17 + 22 GB > 32 GB). The eval grew from 15 to 48 cases
    (33 made by `tools/snapshot/make_eval_cases.py`: whispers, combat, targets, loot, HP/mana,
-   quests). **Qwen3.6 on 48: 35/48 (73%), `do:` 59 ms, full 134 ms** (old 15: 10/15); its misses
-   are mostly resting at low HP/mana (5) and idling in an empty field (4). **Left:** the same
-   48 on Gemma 4 (`tools/wlb test eval --shootout`; needs the running llama-server stopped),
-   then apply the rule; revisit `herb_to_gather` once the quest log is rendered.
+   quests). Shootout on 48 (4 slots, idle GPU, 2026-11-17): **Qwen3.6 35/48 (73%), `do:`
+   118 ms, full 218 ms; Gemma 4 44/48 (92%), `do:` 134 ms, full 306 ms.** Qwen misses resting
+   at low HP/mana (5), idling in an empty field (4) and whispers (2); both attack a red mob.
+   **Left:** apply the rule (Gemma is more accurate and 16 ms slower to `do:`); revisit
+   `herb_to_gather` once the quest log is rendered.
 3. **E2E latency Tier 2** (`docs/plans/latency.md`): built; measure live (In progress).
 4. **Module: more things a bot can do** (`docs/plans/harness.md`, M1 "Not yet"). Options today:
    Attack, Loot, Keep. Missing: talk (playerbots opens gossip only for a bot's master), gather,
@@ -116,6 +118,10 @@ Working order (2026-11-17 09:50): finish #3, #1, then #4, #2, #5.
 
 ## Loose ends
 
+- **Dead bots wake in a loop** (seen live 2026-11-17 on Testpriest and Gatda): while dead,
+  the screen still offers Attack/Loot options, the module refuses each with "you are dead", and
+  every refusal wakes the brain again (several wakes a minute). The options while dead should be
+  what a dead player can click (release spirit / keep), `options.cc` `AddOptions`.
 - `Gather` refused live (2026-11-17 10:57, new build): Testpriest (Herbalism 7) chose "Gather
   Peacebloom" -> "can't use Peacebloom now". Playerbots' `UseItemAction::UseGameObject` refused it
   silently; suspects: `LootObject::IsLootPossible` (3 yd height check) or no `loot` / `gather`
