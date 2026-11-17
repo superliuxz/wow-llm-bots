@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "base/functional/callback.h"
 #include "base/memory/ref_counted.h"
@@ -110,6 +111,38 @@ LlmResult ParseChatReply(std::string_view body) {
   return result;
 }
 
+LlmCancelHandle::LlmCancelHandle() = default;
+
+LlmCancelHandle::~LlmCancelHandle() = default;
+
+void LlmCancelHandle::Cancel() {
+  base::AutoLock lock(lock_);
+  cancelled_ = true;
+  if (active_) {
+    active_->Stop();
+  }
+}
+
+bool LlmCancelHandle::cancelled() const {
+  base::AutoLock lock(lock_);
+  return cancelled_;
+}
+
+bool LlmCancelHandle::Attach(LlamaConnection* connection) {
+  base::AutoLock lock(lock_);
+  if (cancelled_) {
+    return false;
+  }
+  active_ = connection;
+  return true;
+}
+
+bool LlmCancelHandle::Detach() {
+  base::AutoLock lock(lock_);
+  active_ = nullptr;
+  return cancelled_;
+}
+
 // httplib's client reports failures as values here; it is third-party code.
 struct LlamaConnection::Impl {
   explicit Impl(const LlmEndpoint& endpoint)
@@ -130,9 +163,20 @@ LlamaConnection::LlamaConnection(const LlmEndpoint& endpoint)
 
 LlamaConnection::~LlamaConnection() = default;
 
+void LlamaConnection::Stop() {
+  impl_->client.stop();
+}
+
 LlmResult LlamaConnection::Call(const LlmRequest& request,
-                                FirstLineCallback on_first_line) {
+                                FirstLineCallback on_first_line,
+                                base::scoped_refptr<LlmCancelHandle> cancel) {
   const base::TimeTicks start = base::TimeTicks::Now();
+  if (cancel && !cancel->Attach(this)) {
+    LlmResult aborted;
+    aborted.cancelled = true;
+    aborted.error = "cancelled";
+    return aborted;
+  }
   const LlmEndpoint& endpoint = impl_->endpoint;
 
   int status = 0;
@@ -212,6 +256,9 @@ LlmResult LlamaConnection::Call(const LlmRequest& request,
   http_req.body = BuildChatBody(request);
   http_req.set_header("Content-Type", "application/json");
   http_req.response_handler = [&](const httplib::Response& res) {
+    if (cancel && cancel->cancelled()) {
+      return false;
+    }
     status = res.status;
     is_event_stream =
         res.get_header_value("Content-Type").find("text/event-stream") !=
@@ -220,6 +267,9 @@ LlmResult LlamaConnection::Call(const LlmRequest& request,
   };
   http_req.content_receiver = [&](const char* data, size_t len,
                                   uint64_t /*offset*/, uint64_t /*total*/) {
+    if (cancel && cancel->cancelled()) {
+      return false;
+    }
     if (status != 200) {
       if (raw_body.size() < 200) {
         raw_body.append(data, std::min<size_t>(len, 200 - raw_body.size()));
@@ -247,10 +297,18 @@ LlmResult LlamaConnection::Call(const LlmRequest& request,
   };
 
   const httplib::Result response = impl_->client.send(http_req);
+  const bool was_cancelled = cancel ? cancel->Detach() : false;
   const double end_ms =
       (base::TimeTicks::Now() - start).InMicroseconds() / 1000.0;
 
   LlmResult result;
+  if (was_cancelled) {
+    result.cancelled = true;
+    result.error = "cancelled";
+    result.first_line_ms = first_line_ms;
+    result.round_trip_ms = end_ms;
+    return result;
+  }
   if (!response) {
     result.error =
         base::StrCat({"could not reach llama-server at ", endpoint.host, ":",
@@ -295,8 +353,10 @@ LlmResult LlamaConnection::Call(const LlmRequest& request,
 
 LlmResult CallLlama(const LlmEndpoint& endpoint,
                     const LlmRequest& request,
-                    FirstLineCallback on_first_line) {
-  return LlamaConnection(endpoint).Call(request, std::move(on_first_line));
+                    FirstLineCallback on_first_line,
+                    base::scoped_refptr<LlmCancelHandle> cancel) {
+  return LlamaConnection(endpoint).Call(request, std::move(on_first_line),
+                                        std::move(cancel));
 }
 
 ConnectionPool::ConnectionPool(LlmEndpoint endpoint)
@@ -305,10 +365,21 @@ ConnectionPool::ConnectionPool(LlmEndpoint endpoint)
 ConnectionPool::~ConnectionPool() = default;
 
 LlmResult ConnectionPool::Call(const LlmRequest& request,
-                               FirstLineCallback on_first_line) {
+                               FirstLineCallback on_first_line,
+                               base::scoped_refptr<LlmCancelHandle> cancel) {
+  if (!cancel) {
+    cancel = base::MakeRefCounted<LlmCancelHandle>();
+  }
   std::unique_ptr<LlamaConnection> connection;
   {
     base::AutoLock lock(lock_);
+    if (closed_) {
+      LlmResult aborted;
+      aborted.cancelled = true;
+      aborted.error = "cancelled";
+      return aborted;
+    }
+    active_.push_back(cancel);
     if (!idle_.empty()) {
       connection = std::move(idle_.back());
       idle_.pop_back();
@@ -317,12 +388,31 @@ LlmResult ConnectionPool::Call(const LlmRequest& request,
   if (!connection) {
     connection = std::make_unique<LlamaConnection>(endpoint_);
   }
-  LlmResult result = connection->Call(request, std::move(on_first_line));
-  if (result.reply) {
+  LlmResult result =
+      connection->Call(request, std::move(on_first_line), cancel);
+  {
     base::AutoLock lock(lock_);
-    idle_.push_back(std::move(connection));
+    const auto it = std::find(active_.begin(), active_.end(), cancel);
+    if (it != active_.end()) {
+      active_.erase(it);
+    }
+    if (result.reply && !result.cancelled) {
+      idle_.push_back(std::move(connection));
+    }
   }
   return result;
+}
+
+void ConnectionPool::CancelAll() {
+  std::vector<base::scoped_refptr<LlmCancelHandle>> snapshot;
+  {
+    base::AutoLock lock(lock_);
+    closed_ = true;
+    snapshot = active_;
+  }
+  for (const auto& handle : snapshot) {
+    handle->Cancel();
+  }
 }
 
 size_t ConnectionPool::idle() const {
@@ -334,11 +424,15 @@ LlmClient::LlmClient(LlmEndpoint endpoint, size_t max_in_flight)
     : connections_(base::MakeRefCounted<ConnectionPool>(std::move(endpoint))),
       pool_("llm-client", max_in_flight) {}
 
-LlmClient::~LlmClient() = default;
+LlmClient::~LlmClient() {
+  connections_->CancelAll();
+}
 
-void LlmClient::Ask(LlmRequest request,
-                    base::OnceCallback<void(LlmResult)> reply,
-                    FirstLineCallback on_first_line) {
+base::scoped_refptr<LlmCancelHandle> LlmClient::Ask(
+    LlmRequest request,
+    base::OnceCallback<void(LlmResult)> reply,
+    FirstLineCallback on_first_line) {
+  auto cancel = base::MakeRefCounted<LlmCancelHandle>();
   FirstLineCallback posted_first_line;
   if (on_first_line) {
     if (auto origin = base::SequencedTaskRunner::GetCurrentDefault()) {
@@ -355,12 +449,14 @@ void LlmClient::Ask(LlmRequest request,
   base::PostTaskAndReplyWithResult(
       pool_,
       [connections = connections_, request = std::move(request),
-       posted_first_line = std::move(posted_first_line)]() mutable {
-        return connections->Call(request, std::move(posted_first_line));
+       posted_first_line = std::move(posted_first_line), cancel]() mutable {
+        return connections->Call(request, std::move(posted_first_line),
+                                 std::move(cancel));
       },
       [reply = std::move(reply)](LlmResult result) mutable {
         std::move(reply).Run(std::move(result));
       });
+  return cancel;
 }
 
 }  // namespace harness

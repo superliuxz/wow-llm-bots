@@ -12,6 +12,7 @@
 #include "Player.h"
 #include "SharedDefines.h"
 #include "StringFormat.h"
+#include "UnitDefines.h"
 #include "UpdateFields.h"
 #include "World.h"
 #include "proto/snapshot.h"
@@ -95,6 +96,20 @@ void FillSelf(Player* bot, pb::Self* self) {
   self->in_flight = bot->IsInFlight();
   self->on_transport = bot->GetTransport() != nullptr;
   self->money = bot->GetMoney();
+
+  pb::Self::Control& control = self->control;
+  control.stunned = bot->HasUnitState(UNIT_STATE_STUNNED) ||
+                    bot->HasUnitFlag(UNIT_FLAG_STUNNED);
+  control.feared =
+      bot->HasUnitState(UNIT_STATE_FLEEING | UNIT_STATE_CONFUSED) ||
+      bot->HasUnitFlag(UNIT_FLAG_FLEEING | UNIT_FLAG_CONFUSED);
+  control.charmed =
+      bot->HasUnitState(UNIT_STATE_CHARMED | UNIT_STATE_POSSESSED) ||
+      !bot->GetCharmerGUID().IsEmpty();
+  control.silenced = bot->HasUnitFlag(UNIT_FLAG_SILENCED);
+  control.rooted = bot->HasUnitState(UNIT_STATE_ROOT);
+  control.pacified = bot->HasUnitFlag(UNIT_FLAG_PACIFIED);
+  control.disarmed = bot->HasUnitFlag(UNIT_FLAG_DISARMED);
 }
 
 void FillWhere(Player* bot, pb::Where* where) {

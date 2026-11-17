@@ -72,6 +72,15 @@ std::string ExecuteOption(Player* bot, const OptionTarget& target) {
         Unit* old_target = current_target->Get();
         current_target->Set(unit);
         if (!ai->DoSpecificAction("attack", Event(), /*silent=*/true)) {
+          // Playerbots' AttackAction also refuses when the body already has
+          // this target in attack mode (e.g. still closing in on it). That is
+          // the choice already being carried out, not a failure: reporting
+          // it woke the brain, which chose the same again, in a loop
+          // (6 wakes in ~1 s, 2026-11-17).
+          if (old_target == unit || bot->GetVictim() == unit) {
+            ai->ResetActionDuration();
+            return "";
+          }
           // Refused: leave the body's target as it was, so nothing acts on
           // the refused one later.
           current_target->Set(old_target);

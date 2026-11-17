@@ -120,7 +120,7 @@ TEST(TriggersTest, EnemyPlayerWatchFiresWhenHostilePlayerEntersRange) {
                 32.0f);
   EXPECT_EQ(eval.EvaluateSnapshot(close),
             (std::optional<WakeTrigger>{
-                {Urgency::kUrgent, "enemy player Ganker within 40 yd"}}));
+                {Urgency::kP1Danger, "enemy player Ganker within 40 yd"}}));
   // Staying in range does not spam wakes.
   EXPECT_FALSE(eval.EvaluateSnapshot(close));
 }
@@ -149,7 +149,7 @@ TEST(TriggersTest, EventsAlertOnlyOnClientAttentionEvents) {
   wchat.text = "want to group?";
   EXPECT_EQ(
       EvaluateEventTrigger(whisper),
-      (std::optional<WakeTrigger>{{Urgency::kNormal, "whisper from Tess"}}));
+      (std::optional<WakeTrigger>{{Urgency::kP3Chat, "whisper from Tess"}}));
 
   pb::Event invite;
   pb::PromptEvent& prompt = invite.prompt.emplace();
@@ -157,7 +157,7 @@ TEST(TriggersTest, EventsAlertOnlyOnClientAttentionEvents) {
   prompt.from = "Tess";
   EXPECT_EQ(EvaluateEventTrigger(invite),
             (std::optional<WakeTrigger>{
-                {Urgency::kUrgent, "prompt: group invite from Tess"}}));
+                {Urgency::kP1Danger, "prompt: group invite from Tess"}}));
 
   pb::Event cmd_err;
   pb::ErrorEvent& err = cmd_err.error.emplace();

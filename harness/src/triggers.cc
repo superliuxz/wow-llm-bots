@@ -2,6 +2,7 @@
 
 #include "triggers.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -68,9 +69,7 @@ void Consider(std::optional<WakeTrigger>* best, WakeTrigger candidate) {
     *best = std::move(candidate);
     return;
   }
-  if (candidate.urgency == Urgency::kUrgent) {
-    (*best)->urgency = Urgency::kUrgent;
-  }
+  (*best)->urgency = std::min((*best)->urgency, candidate.urgency);
   if (!candidate.reason.empty() &&
       (*best)->reason.find(candidate.reason) == std::string::npos) {
     base::StrAppend(&(*best)->reason, {"; ", candidate.reason});
@@ -179,35 +178,35 @@ std::optional<WakeTrigger> EvaluateEventTrigger(
     const pb::Event& event,
     const std::vector<Watch>& /*watches*/) {
   if (event.prompt) {
-    return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
+    return WakeTrigger{Urgency::kP1Danger, DescribeEvent(event)};
   }
   if (event.died) {
-    return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
+    return WakeTrigger{Urgency::kP0Combat, DescribeEvent(event)};
   }
   if (event.resurrected) {
-    return WakeTrigger{Urgency::kNormal, DescribeEvent(event)};
+    return WakeTrigger{Urgency::kP2Routine, DescribeEvent(event)};
   }
   if (event.displaced) {
-    return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
+    return WakeTrigger{Urgency::kP0Combat, DescribeEvent(event)};
   }
   if (event.dbm_warning) {
-    return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
+    return WakeTrigger{Urgency::kP0Combat, DescribeEvent(event)};
   }
   if (event.loot_roll) {
-    return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
+    return WakeTrigger{Urgency::kP1Danger, DescribeEvent(event)};
   }
   if (event.path_failed) {
-    return WakeTrigger{Urgency::kNormal, "path failed"};
+    return WakeTrigger{Urgency::kP2Routine, "path failed"};
   }
   if (event.quest_failed) {
-    return WakeTrigger{Urgency::kNormal, DescribeEvent(event)};
+    return WakeTrigger{Urgency::kP2Routine, DescribeEvent(event)};
   }
   if (event.kicked) {
-    return WakeTrigger{Urgency::kNormal, DescribeEvent(event)};
+    return WakeTrigger{Urgency::kP2Routine, DescribeEvent(event)};
   }
   if (event.error) {
     if (event.error->command_id != 0) {
-      return WakeTrigger{Urgency::kNormal,
+      return WakeTrigger{Urgency::kP2Routine,
                          base::StrCat({"step failed: ", event.error->text})};
     }
     return std::nullopt;
@@ -215,27 +214,27 @@ std::optional<WakeTrigger> EvaluateEventTrigger(
   if (event.chat) {
     const pb::ChatEvent& chat = *event.chat;
     if (chat.channel == pb::WHISPER || chat.channel == pb::MONSTER_WHISPER) {
-      return WakeTrigger{Urgency::kNormal,
+      return WakeTrigger{Urgency::kP3Chat,
                          base::StrCat({"whisper from ", chat.from})};
     }
     if (chat.channel == pb::RAID_WARNING || chat.channel == pb::BOSS_EMOTE) {
-      return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
+      return WakeTrigger{Urgency::kP0Combat, DescribeEvent(event)};
     }
     if (chat.at_me && chat.channel != pb::WHISPER_SENT) {
-      return WakeTrigger{Urgency::kNormal, DescribeEvent(event)};
+      return WakeTrigger{Urgency::kP3Chat, DescribeEvent(event)};
     }
     return std::nullopt;
   }
   if (event.duel) {
     if (event.duel->what == "started") {
-      return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
+      return WakeTrigger{Urgency::kP0Combat, DescribeEvent(event)};
     }
     return std::nullopt;
   }
   if (event.lfg) {
     if (event.lfg->what == "teleported_in" ||
         event.lfg->what == "dungeon_completed" || event.lfg->what == "kicked") {
-      return WakeTrigger{Urgency::kNormal, DescribeEvent(event)};
+      return WakeTrigger{Urgency::kP2Routine, DescribeEvent(event)};
     }
     return std::nullopt;
   }
@@ -389,7 +388,7 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
               if (watch_seen_players_[i].count(key) == 0) {
                 Consider(
                     &chosen,
-                    {Urgency::kUrgent,
+                    {Urgency::kP1Danger,
                      base::StrCat({"enemy player ", u.name, " within ",
                                    base::NumberToString(watch.value), " yd"})});
               }

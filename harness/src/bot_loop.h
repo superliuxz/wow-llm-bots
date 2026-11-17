@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "base/functional/callback.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "decision_log.h"
@@ -42,10 +43,13 @@ struct BotLoopConfig {
   size_t max_recent_events = 12;
 };
 
-using AsyncAskFn =
-    base::RepeatingCallback<void(LlmRequest request,
-                                 base::OnceCallback<void(LlmResult)> reply,
-                                 FirstLineCallback on_first_line)>;
+// Starts one brain call. Returns a handle whose Cancel() aborts it early (the
+// reply then still arrives, with `LlmResult::cancelled` set); may return null
+// when the call can't be cancelled.
+using AsyncAskFn = base::RepeatingCallback<base::scoped_refptr<LlmCancelHandle>(
+    LlmRequest request,
+    base::OnceCallback<void(LlmResult)> reply,
+    FirstLineCallback on_first_line)>;
 
 using SendCommandFn =
     base::RepeatingCallback<void(const wlb::snapshot::Command&)>;
@@ -73,6 +77,7 @@ class BotLoop {
   size_t in_flight() const { return scheduler_.in_flight(); }
   size_t queued() const { return scheduler_.queued(); }
   uint64_t decisions_completed() const { return decisions_completed_; }
+  uint64_t calls_cancelled() const { return calls_cancelled_; }
   uint64_t commands_sent() const { return commands_sent_; }
   std::string CurrentGoal(const std::string& bot) const;
 
@@ -103,7 +108,10 @@ class BotLoop {
   void WakeBot(const std::string& bot,
                Urgency urgency,
                const std::string& reason);
-  void StartBotCall(const std::string& bot, int slot, base::OnceClosure done);
+  // Returns a closure that cancels the started call (empty if none started).
+  base::OnceClosure StartBotCall(const std::string& bot,
+                                 int slot,
+                                 base::OnceClosure done);
   void OnFirstLine(const std::string& bot,
                    uint64_t epoch,
                    uint32_t ask_seq,
@@ -139,6 +147,7 @@ class BotLoop {
   std::flat_map<std::string, BotState> bots_;
   uint32_t next_command_id_ = 0;
   uint64_t decisions_completed_ = 0;
+  uint64_t calls_cancelled_ = 0;
   uint64_t commands_sent_ = 0;
   base::WeakPtrFactory<BotLoop> weak_factory_{this};
 };

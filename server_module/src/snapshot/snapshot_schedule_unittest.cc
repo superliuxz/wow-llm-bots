@@ -186,5 +186,45 @@ TEST(SnapshotScheduleTest, RestartSpreadsOverdueBotsAgain) {
   EXPECT_TRUE(schedule.IsDue(3, connected, Flags{/*in_combat=*/true, true}));
 }
 
+TEST(SnapshotScheduleTest, LossOfControlMakesTheNextSnapshotDueAtOnce) {
+  SnapshotSchedule schedule = Schedule(1);
+  schedule.Sent(0, At(0), Flags{.in_combat = true});
+  EXPECT_FALSE(schedule.IsDue(0, At(20), Flags{.in_combat = true}));
+  const Flags stunned{.in_combat = true, .control_mask = 0x01};
+  EXPECT_TRUE(schedule.IsDue(0, At(20), stunned));
+  schedule.Sent(0, At(20), stunned);
+  EXPECT_FALSE(schedule.IsDue(0, At(40), stunned));
+  // Regaining control also notifies the harness immediately.
+  EXPECT_TRUE(schedule.IsDue(0, At(40), Flags{.in_combat = true}));
+}
+
+TEST(SnapshotScheduleTest, AttackerCountChangeMakesTheNextSnapshotDueAtOnce) {
+  SnapshotSchedule schedule = Schedule(1);
+  const Flags one_mob{.in_combat = true, .attacker_count = 1};
+  schedule.Sent(0, At(0), one_mob);
+  EXPECT_FALSE(schedule.IsDue(0, At(30), one_mob));
+  const Flags add_joined{.in_combat = true, .attacker_count = 2};
+  EXPECT_TRUE(schedule.IsDue(0, At(30), add_joined));
+  schedule.Sent(0, At(30), add_joined);
+  EXPECT_FALSE(schedule.IsDue(0, At(60), add_joined));
+  // One of the two attackers dying mid-fight is also immediate.
+  EXPECT_TRUE(schedule.IsDue(0, At(60), one_mob));
+}
+
+TEST(SnapshotScheduleTest, ActiveTargetCompletionMakesSnapshotDueAtOnce) {
+  SnapshotSchedule schedule = Schedule(1);
+  schedule.Sent(0, At(0), Flags{.in_combat = true});
+  // Starting an option arms `active_target_pending` without forcing an extra
+  // snapshot while the target is still alive / unlooted.
+  schedule.SetActiveTargetPending(0, true);
+  const Flags pending{.in_combat = true, .active_target_pending = true};
+  EXPECT_FALSE(schedule.IsDue(0, At(50), pending));
+  // As soon as the target dies or is looted (`active_target_pending` -> false),
+  // a snapshot is due immediately without waiting out the 250 ms combat tick.
+  EXPECT_TRUE(schedule.IsDue(0, At(55), Flags{.in_combat = true}));
+  schedule.Sent(0, At(55), Flags{.in_combat = true});
+  EXPECT_FALSE(schedule.IsDue(0, At(100), Flags{.in_combat = true}));
+}
+
 }  // namespace
 }  // namespace llm_brain

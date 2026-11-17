@@ -386,5 +386,50 @@ TEST(LlmClientTest, ATruncatedSseStreamWithoutDoneFailsAndDropsConnection) {
   EXPECT_EQ(pool->idle(), 0u);
 }
 
+TEST(LlmClientTest, ACallCancelledBeforeItStartsNeverReachesTheServer) {
+  FakeLlamaServer server;
+  auto pool = base::MakeRefCounted<ConnectionPool>(server.endpoint());
+  auto cancel = base::MakeRefCounted<LlmCancelHandle>();
+  cancel->Cancel();
+  const LlmResult result = pool->Call(SampleRequest(), {}, cancel);
+  EXPECT_TRUE(result.cancelled);
+  EXPECT_FALSE(result.reply);
+  EXPECT_EQ(server.calls(), 0);
+}
+
+TEST(LlmClientTest, CancelAbortsAStreamingCallAndDropsItsConnection) {
+  FakeLlamaServer server;
+  // Line 1 arrives at once; the rest only after 1.5 s.
+  server.set_stream_chunks(
+      {
+          "data: {\"choices\":[{\"delta\":{\"content\":\"do: 1\\n\"}}]}\n\n",
+          "data: {\"choices\":[{\"delta\":{\"content\":\"look: 60\"}}]}\n\n",
+          "data: [DONE]\n\n",
+      },
+      /*tail_delay_ms=*/1500);
+  LlmClient client(server.endpoint(), 2);
+  base::Thread origin("origin");
+  origin.Start();
+
+  base::WaitableEvent done;
+  LlmResult got;
+  // Set and read only on `origin`: line 1 is posted there, after this task.
+  base::scoped_refptr<LlmCancelHandle> handle;
+  origin.task_runner()->PostTask([&] {
+    handle = client.Ask(
+        SampleRequest(),
+        [&](LlmResult result) {
+          got = std::move(result);
+          done.Signal();
+        },
+        // Cancel as soon as line 1 is in: the call is mid-stream then.
+        [&](std::string_view /*line*/) { handle->Cancel(); });
+  });
+  done.Wait();
+  EXPECT_TRUE(got.cancelled);
+  EXPECT_FALSE(got.reply);
+  EXPECT_LT(got.round_trip_ms, 1000.0);  // Did not wait for the tail.
+}
+
 }  // namespace
 }  // namespace harness

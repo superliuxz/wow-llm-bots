@@ -1,17 +1,26 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
 #include <algorithm>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
+#include "Creature.h"
 #include "Define.h"
 #include "Log.h"
 #include "ObjectAccessor.h"
+#include "ObjectGuid.h"
 #include "Player.h"
+#include "SharedDefines.h"
+#include "Unit.h"
+#include "UnitDefines.h"
 #include "WorldScript.h"
 #include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
@@ -41,6 +50,66 @@ constexpr uint32_t kStatsIntervalMs = 60000;
 // snapshot that is no longer the newest can still be resolved: well above an
 // urgent wake-up on a busy GPU (p95 3.8 s, docs/phase2-results.md).
 constexpr base::TimeDelta kOptionHistory = base::Seconds(30);
+
+ObjectGuid ParseGuidString(std::string_view text) {
+  if (text.starts_with("0x")) {
+    text.remove_prefix(2);
+  }
+  uint64_t raw = 0;
+  const auto [end, error] =
+      std::from_chars(text.data(), text.data() + text.size(), raw, 16);
+  if (error != std::errc() || end != text.data() + text.size()) {
+    return ObjectGuid::Empty;
+  }
+  return ObjectGuid(raw);
+}
+
+uint8_t ControlMask(const Player* bot) {
+  uint8_t mask = 0;
+  if (bot->HasUnitState(UNIT_STATE_STUNNED) ||
+      bot->HasUnitFlag(UNIT_FLAG_STUNNED)) {
+    mask |= 1u << 0;
+  }
+  if (bot->HasUnitState(UNIT_STATE_FLEEING | UNIT_STATE_CONFUSED) ||
+      bot->HasUnitFlag(UNIT_FLAG_FLEEING | UNIT_FLAG_CONFUSED)) {
+    mask |= 1u << 1;
+  }
+  if (bot->HasUnitState(UNIT_STATE_CHARMED | UNIT_STATE_POSSESSED) ||
+      !bot->GetCharmerGUID().IsEmpty()) {
+    mask |= 1u << 2;
+  }
+  if (bot->HasUnitFlag(UNIT_FLAG_SILENCED)) {
+    mask |= 1u << 3;
+  }
+  if (bot->HasUnitState(UNIT_STATE_ROOT)) {
+    mask |= 1u << 4;
+  }
+  if (bot->HasUnitFlag(UNIT_FLAG_PACIFIED)) {
+    mask |= 1u << 5;
+  }
+  if (bot->HasUnitFlag(UNIT_FLAG_DISARMED)) {
+    mask |= 1u << 6;
+  }
+  return mask;
+}
+
+bool IsOptionTargetPending(Player* bot, const OptionTarget& target) {
+  switch (target.kind) {
+    case OptionTarget::Kind::kAttack: {
+      Unit* unit = ObjectAccessor::GetUnit(*bot, ParseGuidString(target.guid));
+      return unit != nullptr && unit->IsInWorld() && !unit->isDead();
+    }
+    case OptionTarget::Kind::kLoot: {
+      Creature* creature =
+          ObjectAccessor::GetCreature(*bot, ParseGuidString(target.guid));
+      return creature != nullptr && creature->IsInWorld() &&
+             creature->HasDynamicFlag(UNIT_DYNFLAG_LOOTABLE);
+    }
+    case OptionTarget::Kind::kKeep:
+      return false;
+  }
+  return false;
+}
 
 // World-thread entry points for the brain bridge: every snapshot interval,
 // send each attached bot's snapshot to the harness.
@@ -150,10 +219,10 @@ class LlmBrainWorldScript : public WorldScript {
     size_t built = 0;
     for (size_t i = 0; i < config_.bots.size(); ++i) {
       Player* bot = ObjectAccessor::FindPlayerByName(config_.bots[i]);
-      if (!bot) {
+      if (!bot || !bot->IsInWorld()) {
         continue;  // Offline (or not in the world yet).
       }
-      const SnapshotSchedule::Flags flags{bot->IsInCombat(), bot->IsAlive()};
+      const SnapshotSchedule::Flags flags = CurrentFlags(bot, i);
       if (schedule_->IsDue(i, now, flags)) {
         SendSnapshot(i, config_.bots[i], bot);
         schedule_->Sent(i, now, flags);
@@ -286,19 +355,64 @@ class LlmBrainWorldScript : public WorldScript {
              found.target ? found.target->name : "",
              error.empty() ? "ok" : error, age_ms);
     if (!error.empty()) {
-      // The bot sees it like the client's red error line.
-      wlb::snapshot::ModuleMessage message;
-      wlb::snapshot::ImmediateEvent& event = message.event.emplace();
-      event.bot = name;
-      event.seq = bots_[bot_index].seq;
-      event.time_ms = base::Time::Now().InMillisecondsSinceUnixEpoch();
-      event.monotonic_us =
-          (base::TimeTicks::Now() - base::TimeTicks()).InMicroseconds();
-      wlb::snapshot::ErrorEvent& failed = event.event.error.emplace();
+      bots_[bot_index].active_option.reset();
+      schedule_->SetActiveTargetPending(bot_index, false);
+      // The bot sees it like the client's red error line; attach a fresh
+      // snapshot first so the harness acts on current world state rather than a
+      // snapshot up to 999 ms stale.
+      wlb::snapshot::Event payload;
+      wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
       failed.text = error;
       failed.command_id = command.command_id;
-      bridge_->Send(wlb::snapshot::WriteBeve(message));
+      EmitAlertingEvent(bot_index, name, bot, std::move(payload));
+    } else if (found.target) {
+      const bool pending = IsOptionTargetPending(bot, *found.target);
+      if (pending) {
+        bots_[bot_index].active_option = *found.target;
+      } else {
+        bots_[bot_index].active_option.reset();
+      }
+      schedule_->SetActiveTargetPending(bot_index, pending);
     }
+  }
+
+  SnapshotSchedule::Flags CurrentFlags(Player* bot, size_t index) {
+    BotState* state = &bots_[index];
+    bool pending = false;
+    if (state->active_option) {
+      pending = IsOptionTargetPending(bot, *state->active_option);
+      if (!pending) {
+        state->active_option.reset();
+      }
+    }
+    return SnapshotSchedule::Flags{
+        .in_combat = bot->IsInCombat(),
+        .alive = bot->IsAlive(),
+        .control_mask = ControlMask(bot),
+        .attacker_count = static_cast<uint32_t>(bot->getAttackers().size()),
+        .active_target_pending = pending,
+    };
+  }
+
+  void EmitAlertingEvent(size_t index,
+                         const std::string& name,
+                         Player* bot,
+                         wlb::snapshot::Event payload) {
+    if (bot && bot->IsInWorld()) {
+      const base::TimeTicks now = base::TimeTicks::Now();
+      const SnapshotSchedule::Flags flags = CurrentFlags(bot, index);
+      SendSnapshot(index, name, bot);
+      schedule_->Sent(index, now, flags);
+    }
+    wlb::snapshot::ModuleMessage message;
+    wlb::snapshot::ImmediateEvent& event = message.event.emplace();
+    event.bot = name;
+    event.seq = bots_[index].seq;
+    event.time_ms = base::Time::Now().InMillisecondsSinceUnixEpoch();
+    event.monotonic_us =
+        (base::TimeTicks::Now() - base::TimeTicks()).InMicroseconds();
+    event.event = std::move(payload);
+    bridge_->Send(wlb::snapshot::WriteBeve(message));
   }
 
   void SendSnapshot(size_t index, const std::string& name, Player* bot) {
@@ -339,6 +453,7 @@ class LlmBrainWorldScript : public WorldScript {
     uint32_t seq = 0;
     std::unique_ptr<SnapshotBuilder> builder;
     OptionHistory history{kOptionHistory};
+    std::optional<OptionTarget> active_option;
   };
   std::vector<BotState> bots_;
   // How old each applied choice's snapshot was, since the last summary.

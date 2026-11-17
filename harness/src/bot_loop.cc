@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "base/functional/callback.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
@@ -108,6 +109,8 @@ void BotLoop::OnConnectionChanged(bool connected) {
       state.pending_reasons.clear();
       ++state.call_epoch;
     }
+    // Answers to screens of the old connection are useless: free the slots.
+    scheduler_.CancelAllInFlight();
   }
 }
 
@@ -229,19 +232,19 @@ void BotLoop::WakeBot(const std::string& bot,
   }
   state.has_queued_wake = true;
   base::WeakPtr<BotLoop> self = weak_factory_.GetWeakPtr();
-  scheduler_.Submit(bot, urgency,
-                    [self, bot](int slot, base::OnceClosure done) {
-                      if (!self) {
-                        std::move(done).Run();
-                        return;
-                      }
-                      self->StartBotCall(bot, slot, std::move(done));
-                    });
+  scheduler_.SubmitCancelable(
+      bot, urgency, [self, bot](int slot, base::OnceClosure done) {
+        if (!self) {
+          std::move(done).Run();
+          return base::OnceClosure{};
+        }
+        return self->StartBotCall(bot, slot, std::move(done));
+      });
 }
 
-void BotLoop::StartBotCall(const std::string& bot,
-                           int slot,
-                           base::OnceClosure done) {
+base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
+                                        int slot,
+                                        base::OnceClosure done) {
   auto it = bots_.find(bot);
   if (it == bots_.end() || !it->second.latest_snapshot) {
     if (it != bots_.end()) {
@@ -249,7 +252,7 @@ void BotLoop::StartBotCall(const std::string& bot,
       it->second.pending_reasons.clear();
     }
     std::move(done).Run();
-    return;
+    return base::OnceClosure{};
   }
   BotState& state = it->second;
   if (!state.identity_loaded) {
@@ -309,7 +312,7 @@ void BotLoop::StartBotCall(const std::string& bot,
         }
       };
 
-  ask_.Run(
+  base::scoped_refptr<LlmCancelHandle> handle = ask_.Run(
       std::move(request),
       [self, bot, epoch, ask_seq, ask_screen, wake_reason,
        request_copy = std::move(request_copy), snap_mono_us, age_at_ask_ms,
@@ -325,6 +328,12 @@ void BotLoop::StartBotCall(const std::string& bot,
                       std::move(result));
       },
       std::move(on_first_line));
+  if (!handle) {
+    return base::OnceClosure{};
+  }
+  // Cancel() is thread-safe and never runs the reply inline: the reply (with
+  // `cancelled` set) arrives later on this sequence and releases the slot.
+  return [handle = std::move(handle)]() { handle->Cancel(); };
 }
 
 void BotLoop::OnFirstLine(const std::string& bot,
@@ -374,6 +383,20 @@ void BotLoop::OnReply(const std::string& bot,
                       base::OnceClosure done,
                       LlmResult result) {
   const base::TimeTicks now = base::TimeTicks::Now();
+  if (result.cancelled) {
+    // Preempted by a more urgent wake, or the module disconnected: not a
+    // decision and not a brain error, so no retry timer. A newer wake (if any)
+    // is already queued and starts once `done` frees the slot.
+    if (auto it = bots_.find(bot);
+        it != bots_.end() && it->second.call_epoch == epoch) {
+      it->second.call_in_flight = false;
+    }
+    ++calls_cancelled_;
+    Log(base::StringPrintf("harness: %s call cancelled after %.0f ms",
+                           bot.c_str(), result.round_trip_ms));
+    std::move(done).Run();
+    return;
+  }
   const std::optional<double> age_at_plan_ms =
       AgeMsSince(snapshot_monotonic_us, now);
 

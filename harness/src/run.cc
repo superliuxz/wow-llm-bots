@@ -83,7 +83,8 @@ class LiveSession : public base::RawPtrTarget {
         std::move(cfg),
         [this](LlmRequest req, base::OnceCallback<void(LlmResult)> reply,
                FirstLineCallback on_first_line) {
-          llm_.Ask(std::move(req), std::move(reply), std::move(on_first_line));
+          return llm_.Ask(std::move(req), std::move(reply),
+                          std::move(on_first_line));
         },
         [this](const wlb::snapshot::Command& cmd) { module_.SendCommand(cmd); },
         log_fn_);

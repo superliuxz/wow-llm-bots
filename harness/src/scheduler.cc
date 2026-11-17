@@ -4,8 +4,10 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
@@ -19,21 +21,48 @@ Scheduler::Scheduler(size_t max_in_flight)
 
 Scheduler::~Scheduler() = default;
 
-void Scheduler::Submit(const std::string& bot, Urgency urgency, SlotWork work) {
+void Scheduler::SubmitCancelable(const std::string& bot,
+                                 Urgency urgency,
+                                 CancelableSlotWork work) {
+  bool replaced = false;
   for (Waiting& waiting : queue_) {
     if (waiting.bot == bot) {
-      // The newer wake-up replaces the stale one but keeps its place in line
-      // and the stronger urgency.
+      // The newer wake-up replaces the stale one, keeping its place in line and
+      // the stronger (numerically lower) urgency tier.
       waiting.work = std::move(work);
-      if (urgency == Urgency::kUrgent) {
-        waiting.urgency = Urgency::kUrgent;
-      }
-      StartWaiting();
-      return;
+      waiting.urgency = std::min(waiting.urgency, urgency);
+      replaced = true;
+      break;
     }
   }
-  queue_.push_back({bot, urgency, next_order_++, std::move(work)});
+  if (!replaced) {
+    queue_.push_back({bot, urgency, next_order_++, std::move(work)});
+  }
+
+  // Preempt an obsolete lower-priority in-flight call for the same bot when a
+  // P0 combat wake arrives (docs/plans/latency.md §6).
+  if (urgency == Urgency::kP0Combat) {
+    if (const auto it = in_flight_.find(bot);
+        it != in_flight_.end() && it->second.urgency > Urgency::kP0Combat &&
+        it->second.cancel) {
+      base::OnceClosure cancel = std::move(it->second.cancel);
+      base::WeakPtr<Scheduler> self = weak_factory_.GetWeakPtr();
+      std::move(cancel).Run();
+      if (!self) {
+        return;
+      }
+    }
+  }
   StartWaiting();
+}
+
+void Scheduler::Submit(const std::string& bot, Urgency urgency, SlotWork work) {
+  SubmitCancelable(
+      bot, urgency,
+      [work = std::move(work)](int slot, base::OnceClosure done) mutable {
+        std::move(work).Run(slot, std::move(done));
+        return base::OnceClosure{};
+      });
 }
 
 void Scheduler::Submit(const std::string& bot, Urgency urgency, Work work) {
@@ -42,6 +71,23 @@ void Scheduler::Submit(const std::string& bot, Urgency urgency, Work work) {
       [work = std::move(work)](int /*slot*/, base::OnceClosure done) mutable {
         std::move(work).Run(std::move(done));
       });
+}
+
+void Scheduler::CancelAllInFlight() {
+  std::vector<base::OnceClosure> cancels;
+  cancels.reserve(in_flight_.size());
+  for (auto&& [bot, state] : in_flight_) {
+    if (state.cancel) {
+      cancels.push_back(std::move(state.cancel));
+    }
+  }
+  base::WeakPtr<Scheduler> self = weak_factory_.GetWeakPtr();
+  for (base::OnceClosure& cancel : cancels) {
+    std::move(cancel).Run();
+    if (!self) {
+      return;
+    }
+  }
 }
 
 int Scheduler::PickSlot(const std::string& bot) {
@@ -84,24 +130,33 @@ void Scheduler::StartWaiting() {
     Waiting next = std::move(queue_[best]);
     queue_.erase(queue_.begin() + static_cast<std::ptrdiff_t>(best));
     const int slot = PickSlot(next.bot);
+    const uint64_t run_id = ++next_run_id_;
     slot_busy_[static_cast<size_t>(slot)] = true;
-    in_flight_[next.bot] = slot;
+    in_flight_[next.bot] = InFlight{run_id, slot, next.urgency, {}};
     last_slot_[next.bot] = slot;
     // The work may finish at once and its done callback may destroy this
     // scheduler: never touch a member after Run() unless it is still alive.
     base::WeakPtr<Scheduler> self = weak_factory_.GetWeakPtr();
-    std::move(next.work).Run(
-        slot, base::BindOnce(&Scheduler::OnDone, self, next.bot));
+    const std::string started_bot = next.bot;
+    base::OnceClosure cancel = std::move(next.work).Run(
+        slot, base::BindOnce(&Scheduler::OnDone, self, started_bot, run_id));
     if (!self) {
       return;
+    }
+    if (cancel) {
+      if (const auto it = in_flight_.find(started_bot);
+          it != in_flight_.end() && it->second.run_id == run_id) {
+        it->second.cancel = std::move(cancel);
+      }
     }
   }
   starting_ = false;
 }
 
-void Scheduler::OnDone(const std::string& bot) {
-  if (const auto it = in_flight_.find(bot); it != in_flight_.end()) {
-    slot_busy_[static_cast<size_t>(it->second)] = false;
+void Scheduler::OnDone(const std::string& bot, uint64_t run_id) {
+  if (const auto it = in_flight_.find(bot);
+      it != in_flight_.end() && it->second.run_id == run_id) {
+    slot_busy_[static_cast<size_t>(it->second.slot)] = false;
     in_flight_.erase(it);
   }
   StartWaiting();

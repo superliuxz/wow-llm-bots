@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "base/functional/callback.h"
+#include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "decision_log.h"
 #include "file_util.h"
@@ -33,18 +34,22 @@ class CannedBrain {
     LlmRequest request;
     base::OnceCallback<void(LlmResult)> reply;
     FirstLineCallback on_first_line;
+    base::scoped_refptr<LlmCancelHandle> cancel;
   };
 
   AsyncAskFn Fn() {
     return [this](LlmRequest request, base::OnceCallback<void(LlmResult)> reply,
                   FirstLineCallback on_first_line) {
-      calls_.push_back(
-          {std::move(request), std::move(reply), std::move(on_first_line)});
+      auto cancel = base::MakeRefCounted<LlmCancelHandle>();
+      calls_.push_back({std::move(request), std::move(reply),
+                        std::move(on_first_line), cancel});
+      return cancel;
     };
   }
 
   size_t size() const { return calls_.size(); }
   const LlmRequest& front_request() const { return calls_.front().request; }
+  bool front_cancelled() const { return calls_.front().cancel->cancelled(); }
 
   void StreamFirstLine(const std::string& line) {
     ASSERT_FALSE(calls_.empty());
@@ -53,10 +58,25 @@ class CannedBrain {
     }
   }
 
+  // Like LlmClient: a cancelled call still replies, with `cancelled` set.
+  void FinishCancelled() {
+    ASSERT_FALSE(calls_.empty());
+    PendingCall call = std::move(calls_.front());
+    calls_.pop_front();
+    LlmResult res;
+    res.cancelled = true;
+    res.error = "cancelled";
+    std::move(call.reply).Run(std::move(res));
+  }
+
   void FinishReply(const std::string& full_text,
                    double first_ms = 60.0,
                    double total_ms = 150.0) {
     ASSERT_FALSE(calls_.empty());
+    if (calls_.front().cancel->cancelled()) {
+      FinishCancelled();
+      return;
+    }
     PendingCall call = std::move(calls_.front());
     calls_.pop_front();
     LlmResult res;
@@ -284,21 +304,74 @@ TEST(BotLoopTest, SupersededInFlightCallDoesNotDispatchStaleSteps) {
   loop.OnSnapshot(s1, t0);
   ASSERT_EQ(brain.size(), 1u);
 
-  // While call #1 is thinking, Tess dies -> queues urgent "died" wake behind
-  // it.
+  // While call #1 is thinking, Tess dies -> an urgent (P0) "died" wake cancels
+  // the obsolete routine call and queues behind it.
   pb::Snapshot dead = MakeLiveSnap("Tess", 2, t0 + base::Milliseconds(50));
   dead.base.self.state = pb::Self::DEAD_BODY;
   AddKeep(&dead);
   loop.OnSnapshot(dead, t0 + base::Milliseconds(50));
+  EXPECT_TRUE(brain.front_cancelled());
 
-  // Call #1 now streams "do: 1" (Attack Boar) and finishes -> suppressed
-  // because Tess already has a newer wake queued, and call #2 starts
-  // immediately!
+  // Call #1 still streams "do: 1" (Attack Boar) before the abort lands ->
+  // suppressed because Tess already has a newer wake queued; its cancelled
+  // reply frees the slot and call #2 starts immediately!
   brain.StreamFirstLine("do: 1");
   brain.FinishReply("do: 1\nexpect: 1\nwatch: none\nlook: 60");
   EXPECT_TRUE(commands.empty());
+  EXPECT_EQ(loop.calls_cancelled(), 1u);
+  EXPECT_EQ(loop.decisions_completed(), 0u);
   ASSERT_EQ(brain.size(), 1u);
   EXPECT_NE(brain.front_request().user.find("Woken: died."), std::string::npos);
+  EXPECT_FALSE(brain.front_cancelled());
+}
+
+TEST(BotLoopTest, ARoutineWakeDoesNotCancelTheCallInFlight) {
+  CannedBrain brain;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  BotLoop loop(cfg, brain.Fn(), [](const pb::Command&) {});
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Tess", 1, t0);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+
+  // A whisper (P3) while the first look is in flight waits; it doesn't abort.
+  pb::ImmediateEvent whisper;
+  whisper.bot = "Tess";
+  pb::ChatEvent& chat = whisper.event.chat.emplace();
+  chat.channel = pb::WHISPER;
+  chat.from = "Will";
+  chat.text = "hi";
+  loop.OnEvent(whisper, t0 + base::Milliseconds(10));
+  EXPECT_FALSE(brain.front_cancelled());
+  EXPECT_EQ(loop.queued(), 1u);
+}
+
+TEST(BotLoopTest, ACancelledCallIsNotABrainErrorAndSetsNoRetryTimer) {
+  CannedBrain brain;
+  std::vector<std::string> logs;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  BotLoop loop(
+      cfg, brain.Fn(), [](const pb::Command&) {},
+      [&](const std::string& line) { logs.push_back(line); });
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Tess", 1, t0);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishCancelled();
+  EXPECT_EQ(loop.in_flight(), 0u);
+  EXPECT_EQ(loop.calls_cancelled(), 1u);
+  for (const std::string& line : logs) {
+    EXPECT_EQ(line.find("brain error"), std::string::npos) << line;
+  }
+  // No 10 s "look timer" retry: nothing wakes until the world says so.
+  loop.OnTick(base::TimeTicks::Now() + base::Seconds(11));
+  EXPECT_EQ(brain.size(), 0u);
 }
 
 TEST(BotLoopTest, ReconnectAfterDisconnectWithInFlightCallWakesBotAgain) {
@@ -315,10 +388,13 @@ TEST(BotLoopTest, ReconnectAfterDisconnectWithInFlightCallWakesBotAgain) {
   loop.OnSnapshot(s1, t0);
   ASSERT_EQ(brain.size(), 1u);
 
-  // Module disconnects while call #1 is still in flight; then call #1 finishes
-  // before any new snapshot arrives.
+  // Module disconnects while call #1 is still in flight: the call is aborted
+  // (its answer would be for the old connection's screen) and replies
+  // cancelled before any new snapshot arrives.
   loop.OnConnectionChanged(false);
+  EXPECT_TRUE(brain.front_cancelled());
   brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  EXPECT_EQ(loop.in_flight(), 0u);
 
   // Reconnecting and receiving a new snapshot must trigger a fresh first look.
   loop.OnConnectionChanged(true);

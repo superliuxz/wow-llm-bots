@@ -17,6 +17,7 @@
 #define MOD_LLM_BRAIN_SNAPSHOT_SNAPSHOT_SCHEDULE_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include "base/time/time.h"
@@ -29,6 +30,15 @@ class SnapshotSchedule {
   struct Flags {
     bool in_combat = false;
     bool alive = true;
+    // Bitmask of active loss-of-control states (stun, fear, charm, silence,
+    // root, pacify, disarm).
+    uint8_t control_mask = 0;
+    // Number of attackers currently engaging the bot.
+    uint32_t attacker_count = 0;
+    // True while the bot's active target option (Attack / Loot) has not yet
+    // completed; flipping to false triggers an immediate snapshot so step
+    // completion is seen without waiting out the regular interval.
+    bool active_target_pending = false;
 
     bool operator==(const Flags&) const = default;
   };
@@ -50,6 +60,11 @@ class SnapshotSchedule {
 
   // A snapshot of `bot` was sent. Plans the next one.
   void Sent(size_t bot, base::TimeTicks now, Flags flags);
+
+  // Arms or clears `active_target_pending` on `bot`'s last recorded flags when
+  // a target option starts, so starting the option does not emit a redundant
+  // snapshot while completing it (flipping true -> false) triggers one at once.
+  void SetActiveTargetPending(size_t bot, bool pending);
 
   // Spreads the bots over the interval again from `now`. For a harness that
   // connects after startup: every bot is overdue by then, and without this

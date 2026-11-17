@@ -203,5 +203,100 @@ TEST(SchedulerTest, NeverWaitsForABusyPreferredSlot) {
   EXPECT_EQ(scheduler.queued(), 0u);
 }
 
+// A cancelable work that keeps its `done` and counts how often it is cancelled.
+Scheduler::CancelableSlotWork CountingWork(
+    std::flat_map<std::string, base::OnceClosure>* dones,
+    std::flat_map<std::string, int>* cancels,
+    const std::string& key) {
+  return [dones, cancels, key](int /*slot*/, base::OnceClosure done) {
+    (*dones)[key] = std::move(done);
+    return base::OnceClosure([cancels, key] { ++(*cancels)[key]; });
+  };
+}
+
+TEST(SchedulerTest, ACombatWakePreemptsALowerPriorityCallForTheSameBot) {
+  Scheduler scheduler(2);
+  std::flat_map<std::string, base::OnceClosure> dones;
+  std::flat_map<std::string, int> cancels;
+  scheduler.SubmitCancelable("a", Urgency::kP2Routine,
+                             CountingWork(&dones, &cancels, "a1"));
+  scheduler.SubmitCancelable("b", Urgency::kP2Routine,
+                             CountingWork(&dones, &cancels, "b1"));
+
+  // A P1 wake waits behind the call in flight, without cancelling it.
+  scheduler.SubmitCancelable("a", Urgency::kP1Danger,
+                             CountingWork(&dones, &cancels, "a2"));
+  EXPECT_EQ(cancels["a1"], 0);
+  EXPECT_EQ(scheduler.queued(), 1u);
+
+  // A P0 wake cancels the obsolete call once; the other bot is untouched.
+  scheduler.SubmitCancelable("a", Urgency::kP0Combat,
+                             CountingWork(&dones, &cancels, "a3"));
+  EXPECT_EQ(cancels["a1"], 1);
+  EXPECT_EQ(cancels["b1"], 0);
+  EXPECT_EQ(scheduler.queued(), 1u);  // a2 was replaced by a3.
+
+  // A second P0 wake does not cancel the same call again.
+  scheduler.SubmitCancelable("a", Urgency::kP0Combat,
+                             CountingWork(&dones, &cancels, "a4"));
+  EXPECT_EQ(cancels["a1"], 1);
+
+  // The cancelled call reports done; the newest wake starts in its place.
+  std::move(dones["a1"]).Run();
+  EXPECT_TRUE(dones.contains("a4"));
+  EXPECT_FALSE(dones.contains("a3"));
+  EXPECT_EQ(scheduler.in_flight(), 2u);
+  EXPECT_EQ(scheduler.queued(), 0u);
+}
+
+TEST(SchedulerTest, ACombatWakeNeverPreemptsACombatCall) {
+  Scheduler scheduler(1);
+  std::flat_map<std::string, base::OnceClosure> dones;
+  std::flat_map<std::string, int> cancels;
+  scheduler.SubmitCancelable("a", Urgency::kP0Combat,
+                             CountingWork(&dones, &cancels, "a1"));
+  scheduler.SubmitCancelable("a", Urgency::kP0Combat,
+                             CountingWork(&dones, &cancels, "a2"));
+  EXPECT_EQ(cancels["a1"], 0);
+  EXPECT_EQ(scheduler.queued(), 1u);
+}
+
+TEST(SchedulerTest, CancelAllInFlightCancelsRunningCallsOnly) {
+  Scheduler scheduler(2);
+  std::flat_map<std::string, base::OnceClosure> dones;
+  std::flat_map<std::string, int> cancels;
+  scheduler.SubmitCancelable("a", Urgency::kP2Routine,
+                             CountingWork(&dones, &cancels, "a"));
+  scheduler.SubmitCancelable("b", Urgency::kP3Chat,
+                             CountingWork(&dones, &cancels, "b"));
+  scheduler.SubmitCancelable("c", Urgency::kP2Routine,
+                             CountingWork(&dones, &cancels, "c"));
+  scheduler.CancelAllInFlight();
+  EXPECT_EQ(cancels["a"], 1);
+  EXPECT_EQ(cancels["b"], 1);
+  EXPECT_EQ(cancels["c"], 0);     // Still waiting: never started.
+  scheduler.CancelAllInFlight();  // Each cancel runs at most once.
+  EXPECT_EQ(cancels["a"], 1);
+}
+
+TEST(SchedulerTest, TheCancelOfAFinishedRunIsNeverKeptForTheNextRun) {
+  Scheduler scheduler(1);
+  int stale_cancels = 0;
+  // Finishes inside Run(), then hands back a cancel for a call that is over.
+  scheduler.SubmitCancelable(
+      "a", Urgency::kP2Routine, [&](int /*slot*/, base::OnceClosure done) {
+        std::move(done).Run();
+        return base::OnceClosure([&] { ++stale_cancels; });
+      });
+  EXPECT_EQ(scheduler.in_flight(), 0u);
+
+  // The next run of the same bot has no cancel of its own; a P0 wake must not
+  // run the stale one.
+  Recorder r;
+  scheduler.Submit("a", Urgency::kP2Routine, r.Work("a"));
+  scheduler.Submit("a", Urgency::kP0Combat, r.Work("a"));
+  EXPECT_EQ(stale_cancels, 0);
+}
+
 }  // namespace
 }  // namespace harness

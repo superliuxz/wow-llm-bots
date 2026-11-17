@@ -58,4 +58,10 @@ void SnapshotSchedule::Sent(size_t bot, base::TimeTicks now, Flags flags) {
   slot.sent_once = true;
 }
 
+void SnapshotSchedule::SetActiveTargetPending(size_t bot, bool pending) {
+  if (bot < slots_.size()) {
+    slots_[bot].last_flags.active_target_pending = pending;
+  }
+}
+
 }  // namespace llm_brain

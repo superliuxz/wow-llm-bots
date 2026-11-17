@@ -9,7 +9,26 @@ Last updated 2026-11-17.
 
 ## In progress
 
-(none)
+Working order (2026-11-17 09:50): finish #3, #1, then #4, #2, #5.
+
+- **#1 Play Testpriest live: partly done (2026-11-17 01:34-01:38 and from 10:00, Qwen3.6-35B, 16
+  slots).** Measured at 01:34: snapshot build p50 33-45 us, p99 58-122 us; built->received p50
+  0.09 ms, p95 0.15 ms, max 1.5 ms; world update diff 1 ms; warm `do:` 60-92 ms, full reply
+  124-185 ms (first look 231/344 ms, cold prefix); `age_at_apply` p50 91-137 ms, max 295 ms.
+  Checked by hand: harness killed -> module logs "harness disconnected", the body keeps playing; a
+  client that stops reading for 15 s gets 15 frames, then live ones (0 dropped). **Not yet
+  checked:** whisper -> in-character reply (phase 2 "done when" item 1: needs the human player in
+  game), death and respawn, combat detection latency as a number, wakes per bot per minute over a
+  longer run.
+  - Fixed (2026-11-17): the wake loop on a refused Attack (`step failed: can't attack X now`, six
+    wakes in ~1 s). `option_executor.cc` now counts a refusal as done when the body already has
+    that target (`current target` or `GetVictim()`).
+  - Open: loot steps timed out twice (corpse at 0-9 yd, still `lootable yes` after 15 s). The
+    cause isn't known yet.
+- **#3 E2E latency Tier 2: built (2026-11-17), live numbers pending** (`docs/plans/latency.md`,
+  Tier 2). Measure combat-detection age and preemption savings in the #1 run.
+
+- **#4, #2, #5:** not started (#4 started 10:02: snapshot `ext` fill + screen rendering).
 
 ## Next, in order
 
@@ -21,11 +40,7 @@ Last updated 2026-11-17.
    Gemma 4 26B-A4B (`eval` 13/15 vs 10/15; after Tier 1 Qwen3.6 hits `11.3/s` capacity and `79 ms`
    solo `do:` vs Gemma 4's `9.1/s` and `91 ms`; Gemma 4 is 4.8 GiB smaller; both kept in `models/`
    for now), and revisit `herb_to_gather` once quest log is rendered.
-3. **E2E latency Tier 2** (`docs/plans/latency.md`): (e) expand `SnapshotSchedule::Flags` (loss of
-   control, attacker count, option target completion) + attach fresh snapshot to alerting
-   `ImmediateEvent`s (`-125 to -1,000 ms`); (f) preempt obsolete lower-priority in-flight calls on
-   urgent combat wakes + P0-P4 priority tiers in `scheduler.cc` / `llm_client.cc` (`-0.8 to
-   -1.8 s`).
+3. **E2E latency Tier 2** (`docs/plans/latency.md`): built; measure live (In progress).
 4. **Module: more things a bot can do** (`docs/plans/harness.md`, M1 "Not yet"). Options today:
    Attack, Loot, Keep. Missing: talk (playerbots opens gossip only for a bot's master), gather,
    use, "go to" (options exist only for named units within 20 yd). Then the rest of the snapshot:
@@ -63,6 +78,16 @@ Last updated 2026-11-17.
 
 ## Loose ends
 
+- **Running an agent unattended:** an Antigravity chat in the VS Code Remote-SSH sidebar runs as
+  `agy --hub` under VS Code's extension host. When the SSH client drops, VS Code Server keeps it for
+  3 h, or for only 5 min if the laptop dark-wakes and reconnects briefly. Then it kills the session
+  (this happened 2026-11-17: disconnect 01:59:57, reconnect 02:00:21, killed 02:05:23;
+  `~/.vscode-server/data/logs/20261116T091853/remoteagent.log`). Processes started detached
+  (`worldserver`, `mysqld`, `llama-server`) survive. For overnight work, run the agent outside VS
+  Code. `agy remote-control` daemon: set up and active since 2026-11-17 09:42 (systemd user unit
+  `antigravity-cli-daemon.service`, `Linger=yes`, instance `cachyos`). Not yet tested: whether a
+  conversation started through it survives the laptop closing. Alternative: `agy` in `tmux` on
+  CachyOS.
 - `tools/wlb setup data`, `llama` and `msan` were ported from shell and **not run** (each
   overwrites something that works). Test them in a scratch directory, or on the next fresh checkout.
 - `CLAUDE.md` imports `CONTRIBUTING.md` with `@CONTRIBUTING.md`: **not yet confirmed** that a fresh

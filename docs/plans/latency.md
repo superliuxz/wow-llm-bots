@@ -59,7 +59,16 @@ access for personality-weighted option sampling (Tier 3, #8).
      wake-ups/s` (+45%)** and 100-bot 15 s wake-to-plan dropped **`2.1 / 3.2 s -> 0.8 / 1.5 s`**
      (Gemma 4 26B: `8.6 -> 9.1 /s`, 100-bot 15 s `1.9 / 2.6 s -> 1.5 / 2.1 s`).
 
-## Tier 2: perception & scheduling (build with H4)
+## Tier 2: perception & scheduling (built 2026-11-17; live numbers pending)
+
+Built: (5) `SnapshotSchedule::Flags` carries `control_mask`, `attacker_count` and
+`active_target_pending` (`snapshot_schedule_unittest`); the module sends a fresh snapshot before an
+error `ImmediateEvent` (`EmitAlertingEvent`; only the `Choose` error path exists today). (6)
+`Urgency` is P0-P4; a P0 wake cancels the same bot's lower-tier call in flight through
+`LlmCancelHandle` (`httplib::Client::stop()`), `BotLoop` treats a cancelled reply as neither a
+decision nor a brain error (no 10 s retry), and a module disconnect cancels every call in flight
+(`scheduler_unittest`, `llm_client_unittest`, `bot_loop_unittest`). Still to measure live: combat
+detection age and preemption savings (docs/TODO.md).
 
 5. **Event-driven snapshot fast-paths + snapshot on alerting `ImmediateEvent`s (`-125 to -1,000 ms`)**
    - *Where:* `server_module/src/snapshot/snapshot_schedule.{h,cc}`,
