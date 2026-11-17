@@ -74,6 +74,13 @@ clang-format, include check, and build + unit tests in default, ASan+UBSan, TSan
 with unit tests. A syscall MSan has no interceptor for gets
 `MSAN_UNPOISON` (`base/compiler_specific.h`), never a suppression.
 
+**Four test targets**, each its own `tools/wlb test <target>`: `unit` (gtest suites, no game or
+GPU; the `unit_tests` CMake target; `tools/wlb check` runs it under every sanitizer), `e2e` (live
+scenarios against a real worldserver, pass or fail), `perf` (what things cost, each against a
+bound) and `eval` (how well the brain decides, scored). Cases are modules in
+`tools/wlblib/cases/<target>_<name>.py`. A change to what the bot sees or does gets a unit test, and
+an e2e case when it only shows in the game.
+
 Our AzerothCore module (`server_module/`) follows the same rules; AzerothCore's own APIs keep
 their names. It must never block the world thread.
 

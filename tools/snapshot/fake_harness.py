@@ -9,7 +9,7 @@ Dev tool only (production is C++). For JSON, generate the code once with
 tools/wlb check snapshots and run with the tools venv:
   out/tools-venv/bin/python -I tools/snapshot/fake_harness.py [seconds=5] [message ...]
   out/tools-venv/bin/python -I tools/snapshot/fake_harness.py --stats [seconds=10]
-  out/tools-venv/bin/python -I tools/snapshot/fake_harness.py --choose [seconds=30] Attack Loot
+  out/tools-venv/bin/python -I tools/snapshot/fake_harness.py --choose [--json] [--tail=S] [seconds=30] Attack Loot
 
 --stats prints nothing per frame. It reports, from the snapshots' own timestamps (monotonic_us:
 this machine's monotonic clock, the same in every process): frames per second; the age of a snapshot when it arrives (built to
@@ -17,14 +17,17 @@ received: world thread, socket, this process); how evenly each bot's snapshots a
 how bunched the arrivals are (the most frames arriving within 10 ms), which shows whether the
 module builds all bots on the same tick.
 
---choose plays a scripted brain: for each word given, in turn, it waits for a snapshot with an
-option starting with that word (case-insensitive), sends a Command.Choose for it (that option of
-that snapshot), and then waits at least 2 s before looking for the next word. It prints one line
-per snapshot (seq, health, in combat, the options) and every immediate event (a failed choice
-comes back as an error event). The module's log has the matching "chose ... age_at_apply" line.
+--choose plays a scripted brain (play_script): for each word given, in turn, it waits for a
+snapshot with an option starting with that word (case-insensitive), sends a Command.Choose for
+it (that option of that snapshot), and then waits at least 2 s before looking for the next
+word. It prints one line per snapshot (seq, health, in combat, the options) and every immediate
+event (a failed choice comes back as an error event). The module's log has the matching
+"chose ... age_at_apply" line. With --json it prints nothing else: the whole transcript as one
+JSON object (what `tools/wlb test e2e` reads).
 """
 
 import collections
+import json
 import pathlib
 import socket
 import sys
@@ -160,34 +163,52 @@ def send_frame(s, payload):
     s.sendall(len(payload).to_bytes(4, "big") + payload)
 
 
-def run_choose(seconds, words):
+def play_script(seconds, words, echo=print, tail_s=None):
+    """A scripted brain: for each word in `words`, in turn, waits for a snapshot with an option
+    starting with it (case-insensitive) and sends a Command.Choose for that option of that
+    snapshot, then waits at least 2 s before the next word. Returns what happened:
+      {"snapshots": [{"t", "seq", "health", "in_combat", "options": [text...]}...],
+       "events": [{"t", "event": {...}}...],          # immediate events (errors, ...)
+       "commands": [{"t", "command_id", "option", "seq", "text"}...],
+       "never_offered": [word...],                    # words never found in time
+       "closed": bool}                                # the server closed the connection
+    `t` is seconds since the start. `echo` gets one line per snapshot, event and command. With
+    `tail_s`, it stops that long after the last word was sent (instead of at `seconds`)."""
     s = connect()
     reader = FrameReader()
     words = list(words)
+    out = {"snapshots": [], "events": [], "commands": [], "never_offered": [], "closed": False}
+    start = time.time()
     next_at = 0.0
     sent = 0  # Also each command's id, so a failure names the command it belongs to.
-    end = time.time() + seconds
-    while time.time() < end:
+    stop_at = start + seconds
+    while time.time() < stop_at:
         try:
             chunk = s.recv(1 << 20)
         except socket.timeout:
             continue
         if not chunk:
-            print("server closed the connection")
+            out["closed"] = True
+            echo("server closed the connection")
             break
         for payload in reader.feed(chunk):
             message = snapshot_pb2.ModuleMessage()
             message.ParseFromString(payload)
+            t = round(time.time() - start, 3)
             if message.HasField("event"):
-                print(f"<< event for {message.event.bot}: "
-                      f"{json_format.MessageToDict(message.event.event)}")
+                event = json_format.MessageToDict(message.event.event,
+                                                  preserving_proto_field_name=True)
+                out["events"].append({"t": t, "event": event})
+                echo(f"<< event for {message.event.bot}: {event}")
                 continue
             snap = message.snapshot
             me = snap.base.self
             options = [o.text for o in snap.options]
-            print(f"<< {snap.bot} #{snap.seq}: health {me.health}/{me.health_max}"
-                  f"{', in combat' if me.in_combat else ''}; options: "
-                  + "; ".join(f"{i}. {t}" for i, t in enumerate(options, 1)))
+            out["snapshots"].append({"t": t, "seq": snap.seq, "health": me.health,
+                                     "in_combat": me.in_combat, "options": options})
+            echo(f"<< {snap.bot} #{snap.seq}: health {me.health}/{me.health_max}"
+                 f"{', in combat' if me.in_combat else ''}; options: "
+                 + "; ".join(f"{i}. {t_}" for i, t_ in enumerate(options, 1)))
             if not words or time.time() < next_at:
                 continue
             for i, text in enumerate(options, 1):
@@ -197,25 +218,39 @@ def run_choose(seconds, words):
                     command.choose.option = i
                     command.choose.seq = snap.seq
                     send_frame(s, command.SerializeToString())
-                    print(f">> {snap.bot} chooses {i} ({text}) of snapshot {snap.seq}")
+                    out["commands"].append({"t": t, "command_id": sent, "option": i,
+                                            "seq": snap.seq, "text": text})
+                    echo(f">> {snap.bot} chooses {i} ({text}) of snapshot {snap.seq}")
                     words.pop(0)
                     next_at = time.time() + 2
+                    if not words and tail_s is not None:
+                        stop_at = min(stop_at, time.time() + tail_s)
                     break
     s.close()
+    out["never_offered"] = words
     if words:
-        print(f"never offered: {', '.join(words)}")
+        echo(f"never offered: {', '.join(words)}")
+    return out
 
 
 def main():
     args = sys.argv[1:]
     stats = "--stats" in args
     choose = "--choose" in args
-    args = [a for a in args if a not in ("--stats", "--choose")]
+    as_json = "--json" in args
+    tail = next((float(a.split("=", 1)[1]) for a in args if a.startswith("--tail=")), None)
+    args = [a for a in args if a not in ("--stats", "--choose", "--json")
+            and not a.startswith("--tail=")]
     seconds = float(args[0]) if args else (10.0 if stats else 5.0)
     if stats:
         run_stats(seconds)
     elif choose:
-        run_choose(seconds, args[1:])
+        if as_json:
+            transcript = play_script(
+                seconds, args[1:], echo=lambda line: print(line, file=sys.stderr), tail_s=tail)
+            print(json.dumps(transcript))
+        else:
+            play_script(seconds, args[1:], tail_s=tail)
     else:
         run_print(seconds, args[1:])
 

@@ -85,11 +85,14 @@ socket and two lock-protected queues. Nothing in the module ever waits on the ha
    start/stop alongside the server and llama-server.
 2. Save real snapshots from play as the first eval fixtures (`evals/cases/` seed).
 
-### E. End-to-end tests (planned)
-Three layers, all on an **isolated test stack** (own ports, socket path and config; databases
-restored from a "golden" copy of the freshly imported DBs for every run, so tests never touch
-the user's play server and always start from the same state). One runner: `tools/wlb test e2e` (planned, with `unit`, `perf`
-and `eval` beside it).
+### E. End-to-end tests (started 2026-11-16)
+`tools/wlb test unit|e2e|perf|eval` (cases: `tools/wlblib/cases/`). **Built:** `e2e choose` (a bot
+told to Attack a boar fights it, told to Loot it loots the corpse; the first case). Today the
+stack is the play server's machine and database: the runner stops the play server, runs the test
+build with a test config (test characters are recreated from fixtures on every start), and puts the
+play server back. **Planned:** three layers, all on an **isolated test stack** (own ports, socket
+path and config; databases restored from a "golden" copy of the freshly imported DBs for every
+run, so tests never touch the user's play server and always start from the same state).
 1. **Module e2e** (from A3-A5): real worldserver + fake harness; snapshot fields correct,
    `choose_option` / `say` change the bot in game.
 2. **Brain e2e** (with B): real server + harness + **fake LLM** (canned HTTP replies):

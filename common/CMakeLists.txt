@@ -158,6 +158,11 @@ target_link_libraries(harness_unittests PRIVATE wlb_harness GTest::gtest_main)
 target_compile_definitions(harness_unittests PRIVATE
   WLB_HARNESS_TESTDATA="${WLB_ROOT}/harness/testdata")
 target_compile_options(harness_unittests PRIVATE ${WLB_SAFETY_FLAGS})
+
+# One name for every unit test suite: `ninja unit_tests`, run by `tools/wlb test unit`.
+add_custom_target(unit_tests
+  DEPENDS wlb_common_unittests llm_brain_unittests harness_unittests)
+
 # The program: `harness decide <snapshot.pb>` (out/common/harness).
 add_executable(harness "${WLB_HARNESS_SRC}/main.cc")
 target_link_libraries(harness PRIVATE wlb_harness)

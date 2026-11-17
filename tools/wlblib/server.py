@@ -166,6 +166,27 @@ def config(test=None):
 
 # ---- Server -------------------------------------------------------------------------------------
 
+def online_characters():
+    """The names of the characters online now (from the characters database)."""
+    rows = output(["mysql", f"--defaults-file={MYSQL_CNF}", "-uroot", "-N", "-e",
+                   "SELECT name FROM acore_characters.characters WHERE online=1"])
+    return set(rows.split())
+
+
+def wait_online(name, timeout_s=180):
+    """Waits until the character `name` is online, or fails after `timeout_s`."""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            if name in online_characters():
+                return
+        except Failed:
+            pass  # MySQL still starting.
+        time.sleep(2)
+    raise Failed(f"{name} didn't come online in {timeout_s} s (log: "
+                 f"{(LOGS / 'worldserver.out').relative_to(ROOT)})")
+
+
 def _start_detached(name, cmd, cwd, log, stdin=subprocess.DEVNULL):
     with open(log, "ab") as out:
         process = subprocess.Popen(cmd, cwd=cwd, stdin=stdin, stdout=out,

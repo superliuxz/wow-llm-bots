@@ -7,6 +7,9 @@
   tools/wlb server start | stop
   tools/wlb console COMMAND...           send a command to worldserver's console
   tools/wlb check [format|includes|snapshots|triggers|goldens] [--fix] [FILES...]
+  tools/wlb test unit [--filter PATTERN] [--variant asan|tsan|msan]
+  tools/wlb test e2e|perf|eval [NAME...]  [--keep-server]   (e2e: a live server, stack restored after)
+  tools/wlb test --list
   tools/wlb setup links|configure|data|llama|msan|client-ui
   tools/wlb llm [--slots N] [--ctx N] [--model FILE] [-- llama-server args...]
 
@@ -20,7 +23,7 @@ import sys
 # -I (isolated) leaves the script's own directory off the path: add the tools directory.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from wlblib import build, check, llm, server, setup  # noqa: E402
+from wlblib import build, check, llm, server, setup, testing  # noqa: E402
 from wlblib.common import main_guard  # noqa: E402
 
 
@@ -56,6 +59,16 @@ def parse(argv):
                    choices=["all", "format", "includes", "snapshots", "triggers", "goldens"])
     p.add_argument("--fix", action="store_true", help="for format and includes: rewrite files")
     p.add_argument("files", nargs="*", help="for snapshots: files to validate")
+
+    p = sub.add_parser("test", help="unit, e2e, perf and eval tests")
+    p.add_argument("target", nargs="?", choices=list(testing.TARGETS))
+    p.add_argument("names", nargs="*", help="e2e, perf, eval: the cases to run (default: all)")
+    p.add_argument("--list", action="store_true", help="list the cases")
+    p.add_argument("--filter", help="unit: a gtest filter, e.g. 'PlanTest.*'")
+    p.add_argument("--variant", default="default", choices=list(build.VARIANTS),
+                   help="unit: the build (default, asan, tsan, msan)")
+    p.add_argument("--keep-server", action="store_true",
+                   help="e2e: leave the test stack running instead of restoring the play server")
 
     p = sub.add_parser("setup", help="one-time setup steps")
     p.add_argument("step", choices=["links", "configure", "data", "llama", "msan", "client-ui"])
@@ -104,6 +117,15 @@ def main():
             check.triggers()
         else:
             check.goldens()
+    elif a.command == "test":
+        if a.list or not a.target:
+            testing.list_cases()
+        elif a.target == "unit":
+            testing.unit(a.variant, a.filter)
+        elif a.target == "e2e":
+            testing.e2e(a.names, a.keep_server)
+        else:
+            testing.run_plain(a.target, a.names)
     elif a.command == "setup":
         getattr(setup, a.step.replace("-", "_"))()
     elif a.command == "llm":

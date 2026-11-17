@@ -4,6 +4,7 @@ import re
 
 from wlblib.common import OUT, PROTOC, ROOT, SERVER, run, say
 
+# The unit test suites; `ninja unit_tests` (common/CMakeLists.txt) builds them all.
 UNIT_TESTS = ("wlb_common_unittests", "llm_brain_unittests", "harness_unittests")
 
 # out/<dir>, sanitizer, build type, hardened std lib.
@@ -33,9 +34,10 @@ def common_dir(variant):
     return OUT / VARIANTS[variant][0]
 
 
-def common(variant="default", tests=True):
+def common(variant="default", tests=True, gtest_filter=None):
     """Builds common/ (and the harness and the module's tests) in out/common[-variant]; with
-    `tests`, builds and runs the unit tests too. Returns the build directory."""
+    `tests`, builds and runs the unit tests too (only those matching `gtest_filter`, if given).
+    Returns the build directory."""
     from wlblib import setup  # The MSan libc++ is built on demand.
 
     out_dir, sanitizer, build_type, hardened = VARIANTS[variant]
@@ -64,9 +66,10 @@ def common(variant="default", tests=True):
              f"-DCMAKE_EXE_LINKER_FLAGS={' '.join(ldflags)}"], quiet=True)
     targets = ["wlb_base", "wlb_net", "wlb_proto"]
     if tests and variant != "server":
-        run(["ninja", "-C", build, *targets, *UNIT_TESTS])
+        run(["ninja", "-C", build, *targets, "unit_tests"])
         for test in UNIT_TESTS:
-            run([build / test, "--gtest_brief=1"])
+            run([build / test, "--gtest_brief=1",
+                 *([f"--gtest_filter={gtest_filter}"] if gtest_filter else [])])
     else:
         run(["ninja", "-C", build, *targets])
     return build
