@@ -44,7 +44,7 @@ and `docs/phase2-results.md` (what that costs). This plan is the build order.
 4. **H4** `module_connection` and `triggers`: live, against the running server.
 5. **M (module side)**, in step with H4: the options list, the `choose` and `say` commands, chat
    events, then quest log, bags, gear, target, combat and party in the snapshot.
-   **M1 (done 2026-11-16):** every snapshot carries `options` (`server_module/src/options.cc`):
+   **M1 (done 2026-11-16):** every snapshot carries `options` (`server_module/src/options/options.cc`):
    one "Attack <name>" per hostile or neutral NPC name (the nearest of that name), one
    "Loot <name>" per lootable corpse name, and "Keep doing what I'm doing" last; facts only, nothing
    ranked. `Command.Choose` (option, seq) is resolved against the bot's last 16 snapshots and

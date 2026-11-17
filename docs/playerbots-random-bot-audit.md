@@ -1,7 +1,7 @@
 # Audit: what mod-playerbots gives "random bots" that our bots won't have
 
 Context: we replace playerbots' random-bot manager with our own bot manager (route A,
-decided 2026-11-15). Our manager (`server_module/src/bot_manager.cc`) decides
+decided 2026-11-15). Our manager (`server_module/src/bot_manager/bot_manager.cc`) decides
 who is online and logs them in with playerbots' public `AddPlayerBot(guid, 0)` (no master).
 Playerbots then runs them through its own plumbing: a login without a master always ends in
 `RandomPlayerbotMgr`'s holder (sessions drained and AI ticked by playerbots' world / player

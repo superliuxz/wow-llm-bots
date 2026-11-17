@@ -1,4 +1,4 @@
-"""Generates server_module/src/invisible_displays.h from the client's DBC files.
+"""Generates server_module/src/snapshot/invisible_displays.h from the client's DBC files.
 
 A creature whose model is an "invisible stalker" is on the server's visible list (the client
 is sent it) but draws nothing: a player sees nobody there. The server doesn't load model file
@@ -18,7 +18,7 @@ import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 DBC = ROOT / "out" / "server" / "data" / "dbc"
-OUT = ROOT / "server_module" / "src" / "invisible_displays.h"
+OUT = ROOT / "server_module" / "src" / "snapshot" / "invisible_displays.h"
 INVISIBLE_MODELS = ("invisiblestalker", "invisibleman")
 
 
@@ -28,8 +28,8 @@ TEMPLATE = """// Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0
 // The @COUNT@ creature display ids whose model is an InvisibleStalker or InvisibleMan:
 // the client draws nothing for them.
 
-#ifndef MOD_LLM_BRAIN_INVISIBLE_DISPLAYS_H_
-#define MOD_LLM_BRAIN_INVISIBLE_DISPLAYS_H_
+#ifndef MOD_LLM_BRAIN_SNAPSHOT_INVISIBLE_DISPLAYS_H_
+#define MOD_LLM_BRAIN_SNAPSHOT_INVISIBLE_DISPLAYS_H_
 
 #include <cstdint>
 
@@ -40,7 +40,7 @@ inline constexpr uint32_t kInvisibleDisplays[] = {@IDS@};
 
 }  // namespace llm_brain
 
-#endif  // MOD_LLM_BRAIN_INVISIBLE_DISPLAYS_H_
+#endif  // MOD_LLM_BRAIN_SNAPSHOT_INVISIBLE_DISPLAYS_H_
 """
 
 
