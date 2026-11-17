@@ -89,6 +89,11 @@ Working order (2026-11-17 09:50): finish #3, #1, then #4, #2, #5.
 
 ## Loose ends
 
+- `Gather` refused live (2026-11-17 10:57, new build): Testpriest (Herbalism 7) chose "Gather
+  Peacebloom" -> "can't use Peacebloom now". Playerbots' `UseItemAction::UseGameObject` refused it
+  silently; suspects: `LootObject::IsLootPossible` (3 yd height check) or no `loot` / `gather`
+  non-combat strategy on the bot (`LlmBrain.NonCombatStrategies`). Log the refusal reason to find
+  out.
 - `Use` on a door, quest object or portal (`option_executor.cc`): the harness counts a Use step done
   only when the object stops being usable (`plan_runner.cc` `IsTargetDone`), which a clicked door
   never does, so such steps end on the 15 s timeout ("step timed out"). Needs a done signal from
