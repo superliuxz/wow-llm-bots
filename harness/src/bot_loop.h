@@ -41,6 +41,11 @@ struct BotLoopConfig {
   size_t max_in_flight = 16;  // llama-server slots / concurrent calls.
   float temperature = 0.7f;
   size_t max_recent_events = 12;
+  // A bot with no snapshot for this long has left the world (logged out,
+  // loading screen, server trouble): its last screen is no longer true, so it
+  // isn't asked about it; it gets a first look when snapshots come back.
+  // Snapshots come every 1 s (LlmBrain.SnapshotIntervalMs).
+  base::TimeDelta stale_snapshot_after = base::Seconds(5);
 };
 
 // Starts one brain call. Returns a handle whose Cancel() aborts it early (the
@@ -55,6 +60,10 @@ using SendCommandFn =
     base::RepeatingCallback<void(const wlb::snapshot::Command&)>;
 
 using LogMessageFn = base::RepeatingCallback<void(const std::string&)>;
+
+// How long the wake after the `refusals`-th refused step in a row waits: none
+// for the first, then 2, 4, 8, 16, 30, 30... seconds.
+base::TimeDelta StepRefusalBackoff(int refusals);
 
 class BotLoop {
  public:
@@ -92,6 +101,13 @@ class BotLoop {
     std::string current_goal;
     std::deque<std::string> recent_events;
     std::vector<std::string> pending_reasons;
+    // Who whispered the bot lately, newest first: the names its `tell` line
+    // may answer (kWhispererMemory, kMaxWhisperers in bot_loop.cc).
+    struct Whisperer {
+      std::string name;
+      base::TimeTicks at;
+    };
+    std::deque<Whisperer> whisperers;
 
     TriggerEvaluator triggers;
     PlanRunner runner;
@@ -100,11 +116,25 @@ class BotLoop {
     bool has_queued_wake = false;
     bool call_in_flight = false;
     bool early_steps_dispatched = false;
+    // Refused steps in a row since the last completed one; from the second,
+    // the wake is delayed (StepRefusalBackoff()) so a body that can't act
+    // (dead, out of range) doesn't ask the brain again many times a second.
+    int step_refusals = 0;
     uint64_t call_epoch = 0;
     base::TimeTicks look_deadline;
   };
 
   void NoteEvent(BotState* state, const wlb::snapshot::Event& event);
+  // Remembers who whispered (for the `tell` grammar).
+  static void NoteWhisperer(BotState* state,
+                            const wlb::snapshot::Event& event,
+                            base::TimeTicks now);
+  // Puts a call's wake reasons and recent events back in front of any newer
+  // ones, for a call that ended without installing a plan, so the next call
+  // still sees them (a whisper is not lost to a cancelled or failed call).
+  void Requeue(BotState* state,
+               std::vector<std::string> reasons,
+               std::vector<std::string> events);
   void WakeBot(const std::string& bot,
                Urgency urgency,
                const std::string& reason);
@@ -124,6 +154,8 @@ class BotLoop {
                uint32_t ask_seq,
                Screen ask_screen,
                std::string wake_reason,
+               std::vector<std::string> asked_reasons,
+               std::vector<std::string> asked_events,
                LlmRequest request,
                int64_t snapshot_monotonic_us,
                std::optional<double> age_at_ask_ms,

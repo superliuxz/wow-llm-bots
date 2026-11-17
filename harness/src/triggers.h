@@ -44,10 +44,16 @@ class TriggerEvaluator {
  public:
   TriggerEvaluator() = default;
 
-  // Installs the active plan's watches and expected mob names, resetting
-  // watch crossing latches.
+  // Installs the active plan's watches and expected mob names. Each watch's
+  // latch starts from the last snapshot seen: a condition already true when
+  // the plan is installed (the brain saw it on the screen) does not fire until
+  // it clears and crosses again.
   void SetPlanContext(std::vector<Watch> watches,
                       std::flat_set<std::string> expected_names);
+
+  // Replaces only the expected mob names, keeping the watches and latches
+  // (the first streamed line of a plan, before its `expect:` arrives).
+  void SetExpectedNames(std::flat_set<std::string> expected_names);
 
   const std::vector<Watch>& watches() const { return watches_; }
   const std::flat_set<std::string>& expected_names() const {
@@ -75,6 +81,14 @@ class TriggerEvaluator {
   bool was_in_combat_ = false;
   ControlFlags prev_control_;
   std::flat_set<std::string> prev_attackers_;
+  // Last snapshot's watch inputs, to seed latches in SetPlanContext().
+  std::optional<double> last_hp_pct_;
+  std::optional<double> last_mana_pct_;
+  struct EnemyPlayer {
+    std::string key;
+    float dist_yd = 0;
+  };
+  std::vector<EnemyPlayer> last_enemy_players_;
 
   std::vector<Watch> watches_;
   std::vector<bool> watch_fired_;

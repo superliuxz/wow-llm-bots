@@ -83,8 +83,8 @@ uint8_t ControlMask(const Player* bot) {
   return mask;
 }
 
-// Whether the body is still carrying out `target` (`used`: a non-loot object
-// was already clicked on arrival).
+// Whether the body is still carrying out `target` (`used`: the object was
+// already clicked, at once or on arrival).
 bool IsOptionTargetPending(Player* bot, const OptionTarget& target, bool used) {
   switch (target.kind) {
     case OptionTarget::Kind::kAttack: {
@@ -93,10 +93,14 @@ bool IsOptionTargetPending(Player* bot, const OptionTarget& target, bool used) {
       return unit != nullptr && unit->IsInWorld() && !unit->isDead();
     }
     case OptionTarget::Kind::kLoot: {
-      Creature* creature =
-          ObjectAccessor::GetCreature(*bot, ParseSnapshotGuid(target.guid));
+      // Done when the loot strategy is done with it, not when the corpse is
+      // empty: playerbots leaves items it has no use for (and vendor junk
+      // with full bags), and that corpse stays lootable.
+      const ObjectGuid guid = ParseSnapshotGuid(target.guid);
+      Creature* creature = ObjectAccessor::GetCreature(*bot, guid);
       return creature != nullptr && creature->IsInWorld() &&
-             creature->HasDynamicFlag(UNIT_DYNFLAG_LOOTABLE);
+             creature->HasDynamicFlag(UNIT_DYNFLAG_LOOTABLE) &&
+             IsLootInProgress(bot, guid);
     }
     case OptionTarget::Kind::kGather:
     case OptionTarget::Kind::kUse: {
@@ -105,7 +109,8 @@ bool IsOptionTargetPending(Player* bot, const OptionTarget& target, bool used) {
       if (go == nullptr || !go->IsInWorld() || !go->isSpawned()) {
         return false;
       }
-      // A chest, herb or vein is done once opened; anything else once clicked.
+      // A chest, herb or vein is done once opened (walking there until then);
+      // anything else once clicked.
       return IsLootableObject(go) ? go->getLootState() == GO_READY : !used;
     }
     case OptionTarget::Kind::kKeep:
@@ -305,10 +310,18 @@ class LlmBrainWorldScript : public WorldScript {
   void OnHarnessConnection(bool connected) {
     LOG_INFO("module", "mod-llm-brain: harness {}",
              connected ? "connected" : "disconnected");
+    wrong_version_logged_ = false;
     if (connected) {
       // Every bot is overdue by now: spread them again instead of building
       // them all on the next tick.
       schedule_->Restart(base::TimeTicks::Now());
+      // A new harness numbers its commands afresh: forget the old one's.
+      for (size_t i = 0; i < bots_.size(); ++i) {
+        bots_[i].active_option.reset();
+        bots_[i].active_command_id = 0;
+        bots_[i].done_command_id = 0;
+        schedule_->SetActiveTargetPending(i, false);
+      }
     }
   }
 
@@ -352,6 +365,18 @@ class LlmBrainWorldScript : public WorldScript {
                 bytes.size());
       return;
     }
+    if (command.version != wlb::snapshot::kWireVersion) {
+      // Once per connection: every command of that harness would say the same.
+      if (!wrong_version_logged_) {
+        wrong_version_logged_ = true;
+        LOG_ERROR("module",
+                  "mod-llm-brain: dropping commands from a harness of wire "
+                  "version {} (this module: {}): rebuild and restart the one "
+                  "that is out of date",
+                  command.version, wlb::snapshot::kWireVersion);
+      }
+      return;
+    }
     const std::string& name = command.bot;
     if (!command.choose && !command.say) {
       LOG_INFO("module", "mod-llm-brain: {}: command not supported yet", name);
@@ -372,8 +397,11 @@ class LlmBrainWorldScript : public WorldScript {
     const OptionHistory::Lookup found =
         bots_[bot_index].history.Find(choose.seq, choose.option);
     std::string error = found.error;
+    bool used = false;
     if (found.target) {
-      error = ExecuteOption(bot, *found.target);
+      ExecuteResult result = ExecuteOption(bot, *found.target);
+      error = std::move(result.error);
+      used = result.used;
     }
     // How old the picture was when the bot acted on it: the number that
     // matters (docs/plans/harness.md, "Age").
@@ -391,8 +419,9 @@ class LlmBrainWorldScript : public WorldScript {
              found.target ? OptionKindName(found.target->kind) : "-",
              found.target ? found.target->name : "",
              error.empty() ? "ok" : error, age_ms);
+    BotState& state = bots_[bot_index];
     if (!error.empty()) {
-      bots_[bot_index].active_option.reset();
+      state.active_option.reset();
       schedule_->SetActiveTargetPending(bot_index, false);
       // The bot sees it like the client's red error line; attach a fresh
       // snapshot first so the harness acts on current world state rather than a
@@ -402,14 +431,20 @@ class LlmBrainWorldScript : public WorldScript {
       failed.text = error;
       failed.command_id = command.command_id;
       EmitAlertingEvent(bot_index, name, bot, std::move(payload));
+    } else if (found.target &&
+               found.target->kind == OptionTarget::Kind::kKeep) {
+      // Keep: the body carries on, including a walk to an object it hasn't
+      // clicked yet.
+      state.done_command_id = command.command_id;
     } else if (found.target) {
-      bots_[bot_index].object_used = false;
-      bots_[bot_index].active_command_id = command.command_id;
-      const bool pending = IsOptionTargetPending(bot, *found.target, false);
+      state.object_used = used;
+      state.active_command_id = command.command_id;
+      const bool pending = IsOptionTargetPending(bot, *found.target, used);
       if (pending) {
-        bots_[bot_index].active_option = *found.target;
+        state.active_option = *found.target;
       } else {
-        bots_[bot_index].active_option.reset();
+        state.active_option.reset();
+        state.done_command_id = command.command_id;
       }
       schedule_->SetActiveTargetPending(bot_index, pending);
     }
@@ -433,24 +468,24 @@ class LlmBrainWorldScript : public WorldScript {
     }
   }
 
-  // A Use step whose object playerbots can't walk to itself: the executor
-  // started the walk; click it once in reach, as a player would on arrival.
+  // A Gather or Use step out of reach when chosen: the executor started the
+  // walk; click the object once in range, as a player would on arrival.
   void UseOnArrival(Player* bot, size_t index, const std::string& name) {
     BotState& state = bots_[index];
     if (!state.active_option || state.object_used ||
-        state.active_option->kind != OptionTarget::Kind::kUse) {
+        (state.active_option->kind != OptionTarget::Kind::kUse &&
+         state.active_option->kind != OptionTarget::Kind::kGather)) {
       return;
     }
     GameObject* go = ObjectAccessor::GetGameObject(
         *bot, ParseSnapshotGuid(state.active_option->guid));
-    if (go == nullptr || IsLootableObject(go) ||
-        !go->IsAtInteractDistance(bot)) {
+    if (go == nullptr || !IsInUseRange(bot, go)) {
       return;
     }
     state.object_used = true;
-    if (!UseObjectNow(bot, go)) {
-      const std::string text =
-          "can't use " + state.active_option->name + " now";
+    if (std::string text = UseObjectNow(bot, go); !text.empty()) {
+      LOG_INFO("module", "mod-llm-brain: {} can't use {} on arrival: {}", name,
+               state.active_option->name, text);
       state.active_option.reset();
       schedule_->SetActiveTargetPending(index, false);
       wlb::snapshot::Event payload;
@@ -469,6 +504,7 @@ class LlmBrainWorldScript : public WorldScript {
           IsOptionTargetPending(bot, *state->active_option, state->object_used);
       if (!pending) {
         state->active_option.reset();
+        state->done_command_id = state->active_command_id;
       }
     }
     return SnapshotSchedule::Flags{
@@ -491,6 +527,7 @@ class LlmBrainWorldScript : public WorldScript {
       schedule_->Sent(index, now, flags);
     }
     wlb::snapshot::ModuleMessage message;
+    message.version = wlb::snapshot::kWireVersion;
     wlb::snapshot::ImmediateEvent& event = message.event.emplace();
     event.bot = name;
     event.seq = bots_[index].seq;
@@ -508,12 +545,14 @@ class LlmBrainWorldScript : public WorldScript {
           config_.nameplate_range_yd, config_.los_raycasts_per_snapshot});
     }
     wlb::snapshot::ModuleMessage message;
+    message.version = wlb::snapshot::kWireVersion;
     wlb::snapshot::Snapshot& snapshot = message.snapshot.emplace();
     snapshot.bot = name;
     snapshot.seq = ++state.seq;
     snapshot.time_ms = base::Time::Now().InMillisecondsSinceUnixEpoch();
     const base::TimeTicks start = base::TimeTicks::Now();
     snapshot.monotonic_us = (start - base::TimeTicks()).InMicroseconds();
+    snapshot.done_command_id = state.done_command_id;
     const NearbyBuilder::Stats nearby = state.builder->Build(bot, &snapshot);
     state.history.Add(snapshot.seq, start, AddOptions(&snapshot));
     std::string bytes = wlb::snapshot::WriteBeve(message);
@@ -542,10 +581,14 @@ class LlmBrainWorldScript : public WorldScript {
     OptionHistory history{kOptionHistory};
     std::optional<OptionTarget> active_option;
     uint32_t active_command_id = 0;
-    // A Use step's object was clicked on arrival (UseOnArrival).
+    // The last command the body finished (Snapshot::done_command_id).
+    uint32_t done_command_id = 0;
+    // A Gather / Use step's object was clicked (at once or on arrival).
     bool object_used = false;
   };
   std::vector<BotState> bots_;
+  // A wrong-version command was logged on this connection.
+  bool wrong_version_logged_ = false;
   // How old each applied choice's snapshot was, since the last summary.
   std::vector<base::TimeDelta> apply_ages_;
   base::WeakPtrFactory<LlmBrainWorldScript> weak_factory_{this};

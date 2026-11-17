@@ -115,6 +115,7 @@ def main():
         server.config(a.test)
     elif a.command == "server":
         if a.action == "start":
+            testing.restore_interrupted()  # A test run that died left its stack installed.
             server.server_start()
         elif a.action == "stop":
             server.server_stop()

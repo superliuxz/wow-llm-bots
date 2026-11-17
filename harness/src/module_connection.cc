@@ -41,6 +41,11 @@ class ModuleConnection::StatsCollector : public base::RawPtrTarget {
     base::AutoLock lock(lock_);
     ++stats_.events;
   }
+  void RecordWrongVersion() {
+    base::AutoLock lock(lock_);
+    ++stats_.wrong_version;
+  }
+
   void RecordUnparseable() {
     base::AutoLock lock(lock_);
     ++stats_.unparseable;
@@ -97,6 +102,10 @@ class ModuleConnection::IoCore : public base::RawPtrTarget {
     pb::ModuleMessage msg;
     if (!pb::ReadBeve(frame, &msg)) {
       stats_->RecordUnparseable();
+      return;
+    }
+    if (msg.version != pb::kWireVersion) {
+      stats_->RecordWrongVersion();
       return;
     }
     if (msg.snapshot) {
@@ -175,7 +184,9 @@ void ModuleConnection::SendCommand(const pb::Command& command) {
   if (!io_core_) {
     return;
   }
-  std::string bytes = pb::WriteBeve(command);
+  pb::Command versioned = command;
+  versioned.version = pb::kWireVersion;
+  std::string bytes = pb::WriteBeve(versioned);
   io_thread_.task_runner()->PostTask(
       [core = io_core_, bytes = std::move(bytes)] { core->Send(bytes); });
 }

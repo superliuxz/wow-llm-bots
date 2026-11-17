@@ -62,12 +62,25 @@ def running_pid(name):
 
 
 def alive(pid):
+    """Whether `pid` is a running process. A zombie (exited, not yet reaped: a child this
+    process started and hasn't waited for) is not: os.kill(pid, 0) still succeeds on one."""
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
         return True
+    try:
+        stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return False
+    # "pid (comm) S ...": the state follows the last ")" (comm may contain one).
+    if stat[stat.rfind(")") + 2:][:1] in ("Z", "X"):
+        try:
+            os.waitpid(pid, os.WNOHANG)  # Reap it if it is ours.
+        except ChildProcessError:
+            pass
+        return False
     return True
 
 

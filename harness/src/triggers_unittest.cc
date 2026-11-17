@@ -125,6 +125,74 @@ TEST(TriggersTest, EnemyPlayerWatchFiresWhenHostilePlayerEntersRange) {
   EXPECT_FALSE(eval.EvaluateSnapshot(close));
 }
 
+// A watch already true when its plan is installed was on the screen the brain
+// just read: it must not fire again on every re-install (a wake loop).
+TEST(TriggersTest, WatchAlreadyTrueAtInstallDoesNotFireUntilItCrossesAgain) {
+  TriggerEvaluator eval;
+  EXPECT_FALSE(eval.EvaluateSnapshot(BaseSnap(33, 100)));
+
+  for (int plan = 0; plan < 3; ++plan) {
+    eval.SetPlanContext({{Watch::Kind::kHealthBelow, 40}}, {});
+    EXPECT_FALSE(eval.EvaluateSnapshot(BaseSnap(33, 100))) << plan;
+  }
+
+  EXPECT_FALSE(eval.EvaluateSnapshot(BaseSnap(60, 100)));
+  EXPECT_EQ(eval.EvaluateSnapshot(BaseSnap(35, 100)),
+            (std::optional<WakeTrigger>{{Urgency::kUrgent, "hp<40"}}));
+}
+
+TEST(TriggersTest, EnemyPlayerAlreadyInRangeAtInstallDoesNotFire) {
+  TriggerEvaluator eval;
+  pb::Snapshot close = BaseSnap();
+  AddNearbyUnit(&close, "0x99", "Ganker", pb::Unit::PLAYER, pb::Unit::HOSTILE,
+                20.0f);
+  EXPECT_FALSE(eval.EvaluateSnapshot(close));
+
+  eval.SetPlanContext({{Watch::Kind::kEnemyPlayerWithin, 40}}, {});
+  EXPECT_FALSE(eval.EvaluateSnapshot(close));
+
+  // A second player entering range still fires.
+  pb::Snapshot two = close;
+  AddNearbyUnit(&two, "0x98", "Other", pb::Unit::PLAYER, pb::Unit::HOSTILE,
+                30.0f);
+  EXPECT_EQ(eval.EvaluateSnapshot(two),
+            (std::optional<WakeTrigger>{
+                {Urgency::kP1Danger, "enemy player Other within 40 yd"}}));
+}
+
+TEST(TriggersTest, SetExpectedNamesKeepsWatchLatches) {
+  TriggerEvaluator eval;
+  eval.SetPlanContext({{Watch::Kind::kHealthBelow, 40}}, {});
+  EXPECT_FALSE(eval.EvaluateSnapshot(BaseSnap(80, 100)));
+  EXPECT_TRUE(eval.EvaluateSnapshot(BaseSnap(30, 100)));
+
+  eval.SetExpectedNames({"Mottled Boar"});
+  EXPECT_EQ(eval.watches().size(), 1u);
+  EXPECT_FALSE(eval.EvaluateSnapshot(BaseSnap(30, 100)));
+  EXPECT_EQ(eval.expected_names().count("Mottled Boar"), 1u);
+}
+
+TEST(TriggersTest, FriendlyUnitTargetingMeIsNotAnAttacker) {
+  TriggerEvaluator eval;
+  EXPECT_FALSE(eval.EvaluateSnapshot(BaseSnap()));
+
+  pb::Snapshot targeted = BaseSnap();
+  AddNearbyUnit(&targeted, "0x7", "Gatda", pb::Unit::PLAYER, pb::Unit::FRIENDLY,
+                3.0f, /*targeting_me=*/true);
+  EXPECT_FALSE(eval.EvaluateSnapshot(targeted));
+}
+
+TEST(TriggersTest, ComingBackToLifeWakes) {
+  TriggerEvaluator eval;
+  pb::Snapshot dead = BaseSnap();
+  dead.base.self.state = pb::Self::DEAD_BODY;
+  EXPECT_FALSE(eval.EvaluateSnapshot(dead));
+  EXPECT_FALSE(eval.EvaluateSnapshot(dead));
+  EXPECT_EQ(eval.EvaluateSnapshot(BaseSnap()),
+            (std::optional<WakeTrigger>{{Urgency::kNormal, "alive again"}}));
+  EXPECT_FALSE(eval.EvaluateSnapshot(BaseSnap()));
+}
+
 TEST(TriggersTest, LossOfControlAndDeathWakeUrgently) {
   TriggerEvaluator eval;
   EXPECT_FALSE(eval.EvaluateSnapshot(BaseSnap()));

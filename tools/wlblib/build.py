@@ -55,7 +55,7 @@ def common(variant="default", tests=True, gtest_filter=None):
              f"-DCMAKE_EXE_LINKER_FLAGS={' '.join(ldflags)}"], quiet=True)
     targets = ["wlb_base", "wlb_net", "wlb_proto",
                *([] if variant == "server"
-                 else ["harness", "snapshot_check",
+                 else ["harness", "snapshot_check", "fixture_options",
                        *(["wlb_wire_py"] if variant == "default" else [])])]
     if tests and variant != "server":
         run(["ninja", "-C", build, *targets, "unit_tests"])
@@ -67,20 +67,37 @@ def common(variant="default", tests=True, gtest_filter=None):
     return build
 
 
-def server(test=False):
+INSTALLED_FLAVOR = SERVER / "installed-flavor"
+
+
+def server(test=False, install=True):
     """Builds common/ for the server, then builds and installs AzerothCore (with our module)
     into out/server. `test` compiles in the module's test-only code (src/test/: the fixture
-    reset); a production build contains none of it. Switching only rebuilds the module."""
+    reset); a production build contains none of it. Switching only rebuilds the module.
+    `install=False` only compiles, so a running server keeps running meanwhile; installing
+    afterwards is quick."""
     common("server", tests=False)
     hooks = "ON" if test else "OFF"
     # Re-run cmake: it also picks up sources added or moved in the module since last time.
     run(["cmake", SERVER, f"-DLLM_BRAIN_TEST_HOOKS={hooks}"], quiet=True)
+    if not install:
+        run(["ninja", "-C", SERVER])
+        return
+    INSTALLED_FLAVOR.unlink(missing_ok=True)  # Unknown while the install is half done.
     run(["ninja", "-C", SERVER, "install"])
-    say(f"installed a {'test' if test else 'production'} build")
+    flavor = "test" if test else "production"
+    INSTALLED_FLAVOR.write_text(flavor + "\n")
+    say(f"installed a {flavor} build")
 
 
 def built_flavor():
-    """'test' or 'production': what out/server was last configured as, or None."""
+    """'test' or 'production': what out/server has installed (written after an install
+    succeeds), or None when unknown. Installs from before that file existed: what the build was
+    last configured as."""
+    try:
+        return INSTALLED_FLAVOR.read_text().strip() or None
+    except OSError:
+        pass
     try:
         cache = (SERVER / "CMakeCache.txt").read_text()
     except OSError:

@@ -48,7 +48,8 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
     }
   }
   base::StrAppend(&request.user, {"\n\nYour screen now:\n", screen.text});
-  request.grammar = PlanGrammar(static_cast<int>(screen.options.size()));
+  request.grammar =
+      PlanGrammar(static_cast<int>(screen.options.size()), input.whisperers);
   request.slot = input.slot;
   request.temperature = input.temperature;
   return request;

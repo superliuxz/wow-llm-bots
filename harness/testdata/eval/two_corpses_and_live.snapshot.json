@@ -130,5 +130,22 @@
         }
       ]
     }
-  }
+  },
+  "options": [
+    {
+      "text": "Loot Mottled Boar",
+      "guid": "0xF130000C0000901C"
+    },
+    {
+      "text": "Loot Scorpid Worker",
+      "guid": "0xF130000C0000901D"
+    },
+    {
+      "text": "Attack Mottled Boar",
+      "guid": "0xF130000C0000901E"
+    },
+    {
+      "text": "Keep doing what I'm doing"
+    }
+  ]
 }

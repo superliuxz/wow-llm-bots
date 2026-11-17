@@ -215,7 +215,12 @@ RunnerAction PlanRunner::OnSnapshot(const pb::Snapshot& snapshot,
     }
     return {};
   }
-  if (!IsTargetDone(active_kind_, active_guid_, snapshot)) {
+  // The body says it finished this step's command, or the target shows it
+  // (some steps, like using a door, only end by the first).
+  const bool body_done = active_kind_ != OptionKind::kKeep &&
+                         last_command_id_ != 0 &&
+                         snapshot.done_command_id == last_command_id_;
+  if (!body_done && !IsTargetDone(active_kind_, active_guid_, snapshot)) {
     if (const auto timed_out = CheckTimeout(now)) {
       return {std::nullopt, *timed_out};
     }
@@ -229,11 +234,14 @@ RunnerAction PlanRunner::OnSnapshot(const pb::Snapshot& snapshot,
     match_guid_first = true;
     if (step_index_ >= steps_.size()) {
       Stop();
-      return {std::nullopt, "plan done"};
+      return {std::nullopt, "plan done", /*step_done=*/true};
     }
     repeats_left_ = steps_[step_index_].times;
   }
-  return LaunchCurrentFromScreen(snapshot.seq, screen, match_guid_first, now);
+  RunnerAction action =
+      LaunchCurrentFromScreen(snapshot.seq, screen, match_guid_first, now);
+  action.step_done = true;
+  return action;
 }
 
 std::optional<std::string> PlanRunner::CheckTimeout(base::TimeTicks now) {

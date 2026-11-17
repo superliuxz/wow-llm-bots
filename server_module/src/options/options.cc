@@ -57,25 +57,39 @@ std::optional<OptionTarget::Kind> ObjectKind(const pb::GameObject& go) {
   }
 }
 
+// How a target is picked among things of the same name: one attacking the
+// bot first (the one a player would hit back), then the nearest.
+struct Rank {
+  bool targeting_me = false;
+  float dist_yd = 0;
+
+  bool BetterThan(const Rank& other) const {
+    if (targeting_me != other.targeting_me) {
+      return targeting_me;
+    }
+    return dist_yd < other.dist_yd;
+  }
+};
+
 // One option per (kind, name), in the order the names first appear; its
-// target is the nearest thing of that name.
+// target is the best-ranked thing of that name.
 void AddTarget(OptionTarget::Kind kind,
                const std::string& guid,
                const std::string& name,
-               float dist_yd,
+               Rank rank,
                std::vector<OptionTarget>* targets,
-               std::vector<float>* nearest) {
+               std::vector<Rank>* ranks) {
   for (size_t i = 0; i < targets->size(); ++i) {
     if ((*targets)[i].kind == kind && (*targets)[i].name == name) {
-      if (dist_yd < (*nearest)[i]) {
+      if (rank.BetterThan((*ranks)[i])) {
         (*targets)[i].guid = guid;
-        (*nearest)[i] = dist_yd;
+        (*ranks)[i] = rank;
       }
       return;
     }
   }
   targets->push_back({kind, guid, name});
-  nearest->push_back(dist_yd);
+  ranks->push_back(rank);
 }
 
 std::string OptionText(const OptionTarget& target) {
@@ -114,15 +128,22 @@ std::string_view OptionKindName(OptionTarget::Kind kind) {
 
 std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot) {
   std::vector<OptionTarget> targets;
-  std::vector<float> nearest;
+  std::vector<Rank> ranks;
+  // A dead player (body or ghost) can't attack, loot or click anything nearby.
+  const bool alive = snapshot->base.self.state != pb::Self::DEAD_BODY &&
+                     snapshot->base.self.state != pb::Self::GHOST;
   for (const pb::Unit& u : snapshot->base.nearby.units) {
-    if (const std::optional<OptionTarget::Kind> kind = UnitKind(u)) {
-      AddTarget(*kind, u.guid, u.name, u.rel.dist_yd, &targets, &nearest);
+    if (const std::optional<OptionTarget::Kind> kind = UnitKind(u);
+        kind && alive) {
+      AddTarget(*kind, u.guid, u.name, {u.targeting_me, u.rel.dist_yd},
+                &targets, &ranks);
     }
   }
   for (const pb::GameObject& go : snapshot->base.nearby.objects) {
-    if (const std::optional<OptionTarget::Kind> kind = ObjectKind(go)) {
-      AddTarget(*kind, go.guid, go.name, go.rel.dist_yd, &targets, &nearest);
+    if (const std::optional<OptionTarget::Kind> kind = ObjectKind(go);
+        kind && alive) {
+      AddTarget(*kind, go.guid, go.name, {false, go.rel.dist_yd}, &targets,
+                &ranks);
     }
   }
   targets.push_back({OptionTarget::Kind::kKeep, "", ""});

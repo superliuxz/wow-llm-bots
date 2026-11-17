@@ -25,7 +25,12 @@ import time
 import urllib.request
 
 from wlblib import build, cases, server
-from wlblib.common import LOGS, OUT, ROOT, Failed, output, run, running_pid, say
+from wlblib.common import LOGS, OUT, ROOT, VAR, Failed, output, run, running_pid, say
+
+# Written while a test stack replaces the play server, removed once the play server is back: a
+# run that was interrupted (killed, crashed, power cut) leaves it, and the next test run or
+# `wlb server start` puts the play server back first (review 2026-11-17, finding 16).
+STACK_STATE = VAR / "test-stack.json"
 
 TARGETS = ("unit", "e2e", "perf", "eval")
 
@@ -101,29 +106,61 @@ class Stack:
         if harness:
             raise Failed(f"a live harness is running (pid {', '.join(map(str, harness))}): "
                          "stop it first (it would take the test's socket)")
-        self.was_running = running_pid("worldserver") is not None
-        self.flavor_before = build.built_flavor()
+        interrupted = _interrupted_state()
+        if interrupted:
+            # The play server is already down from that run: this run restores it at the end,
+            # instead of rebuilding it now only to stop it again.
+            say("an interrupted test run left the test stack in place: this run puts the play "
+                "server back when it ends")
+            self.was_running = interrupted.get("was_running", False)
+            self.flavor_before = interrupted.get("flavor_before")
+        else:
+            self.was_running = running_pid("worldserver") is not None
+            self.flavor_before = build.built_flavor()
+        switch = build.built_flavor() != "test"
+        if switch:
+            # Compile while the play server still runs: a failed build then leaves it alone.
+            say("building the test flavor of the server (the module only)")
+            build.server(test=True, install=False)
+        STACK_STATE.parent.mkdir(parents=True, exist_ok=True)
+        STACK_STATE.write_text(json.dumps({"was_running": self.was_running,
+                                           "flavor_before": self.flavor_before}) + "\n")
         try:
-            if self.was_running:
+            if running_pid("worldserver"):
                 say("stopping the play server")
-                server.server_stop()
-            if build.built_flavor() != "test":
-                say("building the test flavor of the server (the module only)")
-                build.server(test=True)
-            server.config(self.test_config)
-            server.server_start()
-            server.wait_online(self.bot)
-            if self.online > 1:
-                server.wait_online_count(self.online)
-            try:
-                self.log_start = (LOGS / "Server.log").stat().st_size
-            except OSError:
-                self.log_start = 0
-            # The first snapshots are sent as soon as a harness connects.
+                server.server_stop(backup=False)  # Tests don't touch your characters.
+            if switch:
+                build.server(test=True)  # Compiled above: installs only.
+            self._bring_up()
         except BaseException:
             self.restore()
             raise
         return self
+
+    def _bring_up(self):
+        server.config(self.test_config)
+        server.server_start()
+        server.wait_online(self.bot)
+        if self.online > 1:
+            server.wait_online_count(self.online)
+        try:
+            self.log_start = (LOGS / "Server.log").stat().st_size
+        except OSError:
+            self.log_start = 0
+        # The first snapshots are sent as soon as a harness connects.
+
+    def switch(self, test_config, bot, online=1):
+        """Another test config on the same test build: only a config and a restart, no build
+        and no restore in between (one test install per run)."""
+        self.test_config, self.bot, self.online = test_config, bot, online
+        say(f"switching the test stack to {test_config}")
+        try:
+            server.server_stop(backup=False)
+            self._bring_up()
+        except BaseException:
+            if not self.keep:
+                self.restore()
+            raise
 
     def __exit__(self, *exc):
         if not self.keep:
@@ -133,13 +170,7 @@ class Stack:
         return False
 
     def restore(self):
-        say("restoring the play server")
-        server.server_stop()
-        if self.flavor_before and build.built_flavor() != self.flavor_before:
-            build.server(test=self.flavor_before == "test")
-        server.config()
-        if self.was_running:
-            server.server_start()
+        _restore(self.was_running, self.flavor_before)
 
     def server_log(self):
         """The module's log lines since the stack came up."""
@@ -176,6 +207,52 @@ class Stack:
         return json.loads(result.stdout)
 
 
+def _restore(was_running, flavor_before):
+    """Puts the play server back: its build, its config, running if it was. Every step is
+    tried even if one before it failed (a failed build still gets the normal config and a
+    start), and the failures are reported together at the end."""
+    say("restoring the play server")
+    failures = []
+
+    def step(what, fn, *args, **kwargs):
+        try:
+            fn(*args, **kwargs)
+        except Exception as e:  # noqa: BLE001 - keep going, report below.
+            failures.append(f"{what}: {e}")
+            say(f"restore: {what} FAILED: {e}")
+
+    back = flavor_before is None or flavor_before == build.built_flavor()
+    if not back:
+        # Compile with the test server still up (finding 6): then it is down only to install.
+        step("build", build.server, test=flavor_before == "test", install=False)
+    step("stop", server.server_stop, backup=False)
+    if not back and not failures:
+        step("install", build.server, test=flavor_before == "test")
+    step("config", server.config)
+    if was_running:
+        step("start", server.server_start)
+    if failures:
+        raise Failed("the play server was not fully restored (" + "; ".join(failures) +
+                     f"); fix it, then run `tools/wlb server start` (state in {STACK_STATE})")
+    STACK_STATE.unlink(missing_ok=True)
+
+
+def _interrupted_state():
+    try:
+        return json.loads(STACK_STATE.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def restore_interrupted():
+    """If a test run was interrupted with the test stack installed, puts the play server back."""
+    state = _interrupted_state()
+    if not state:
+        return
+    say("an interrupted test run left the test stack in place: restoring the play server first")
+    _restore(state.get("was_running", False), state.get("flavor_before"))
+
+
 def _select(target, names):
     found = discover(target)
     unknown = [n for n in names if n not in found]
@@ -201,10 +278,17 @@ def _run_selected(selected, keep_server, call):
             plain.append(module)
     for module in plain:
         results.append(call(module, None))
-    for (config, bot, online), modules in groups.items():
+    # One test stack for the whole run: the test build is installed once and the play server
+    # restored once; between configs only the config changes (a restart).
+    if groups:
+        keys = list(groups)
+        config, bot, online = keys[0]
         with Stack(config, bot, keep=keep_server, online=online) as stack:
-            for module in modules:
-                results.append(call(module, stack))
+            for i, key in enumerate(keys):
+                if i:
+                    stack.switch(*key)
+                for module in groups[key]:
+                    results.append(call(module, stack))
     _summary(results)
 
 

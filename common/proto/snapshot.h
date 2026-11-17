@@ -1769,6 +1769,12 @@ struct LfgEvent {
   bool operator==(const LfgEvent&) const = default;
 };
 
+// The socket protocol's version: every ModuleMessage and Command carries it,
+// and each side drops frames of another version (a module and a harness from
+// different checkouts). Adding a field doesn't change it (an older reader
+// skips unknown keys); changing or removing what a field means does.
+inline constexpr uint32_t kWireVersion = 1;
+
 struct Command {
   using Choose = Command_Choose;
   using SetGoal = Command_SetGoal;
@@ -1780,6 +1786,8 @@ struct Command {
   using AhSearch = Command_AhSearch;
   using Who = Command_Who;
 
+  // kWireVersion of the sender (set by the harness when it sends).
+  uint32_t version = 0;
   std::string bot;
   uint32_t command_id = 0;
   std::optional<Command_Choose> choose;
@@ -2630,6 +2638,11 @@ struct Snapshot {
   uint32_t seq = 0;
   int64_t time_ms = 0;
   int64_t monotonic_us = 0;
+  // The `command_id` of the last Choose the body finished carrying out (the
+  // target died, the loot window closed, the object was clicked); 0 before
+  // any. Repeated on every snapshot until the next one finishes, so a newer
+  // snapshot can't lose it (docs/specs/snapshot.md, "Commands").
+  uint32_t done_command_id = 0;
   Base base;
   Extensions ext;
   std::vector<Event> events;
@@ -2639,6 +2652,8 @@ struct Snapshot {
 };
 
 struct ModuleMessage {
+  // kWireVersion of the sender (set by the module when it sends).
+  uint32_t version = 0;
   std::optional<Snapshot> snapshot;
   std::optional<ImmediateEvent> event;
 
@@ -2722,7 +2737,8 @@ bool ReadBeve(std::string_view bytes, Command* out);
 std::string WriteBeve(const Snapshot& snap);
 bool ReadBeve(std::string_view bytes, Snapshot* out);
 
-// JSON codec (spec examples, eval/screen fixtures, debug tools).
+// JSON codec (spec examples, eval/screen fixtures, debug tools). WriteJson
+// returns "" when the value can't be written (an enum value with no name).
 std::string WriteJson(const Snapshot& snap, bool pretty = false);
 bool ReadJson(std::string_view json,
               Snapshot* out,

@@ -110,5 +110,18 @@
         }
       ]
     }
-  }
+  },
+  "options": [
+    {
+      "text": "Attack Mottled Boar",
+      "guid": "0xF130000C0000900D"
+    },
+    {
+      "text": "Attack Scorpid Worker",
+      "guid": "0xF130000C0000900E"
+    },
+    {
+      "text": "Keep doing what I'm doing"
+    }
+  ]
 }

@@ -106,5 +106,18 @@
         }
       ]
     }
-  }
+  },
+  "options": [
+    {
+      "text": "Attack Adder",
+      "guid": "0xF130000C00009012"
+    },
+    {
+      "text": "Attack Hare",
+      "guid": "0xF130000C00009013"
+    },
+    {
+      "text": "Keep doing what I'm doing"
+    }
+  ]
 }

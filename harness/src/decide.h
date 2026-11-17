@@ -29,6 +29,13 @@ struct DecideOptions {
   int slot = -1;
   float temperature = 0.7f;
   bool dry_run = false;  // Print the prompt; don't ask the model.
+  // Print only the request body the harness would send, as JSON
+  // ({"kinds": [option kinds], "body": {...}}), for tools/bench; don't ask
+  // the model.
+  bool print_request = false;
+  // Who recently whispered the bot (who a `tell` may answer), besides the
+  // whispers in the snapshot's own events.
+  std::vector<std::string> whisperers;
   LlmEndpoint endpoint;
 };
 

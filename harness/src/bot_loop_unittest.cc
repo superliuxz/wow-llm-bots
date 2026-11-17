@@ -258,6 +258,8 @@ TEST(BotLoopTest, WatchCrossingAndLookTimerWakeTheBot) {
   std::vector<pb::Command> commands;
   BotLoopConfig cfg;
   cfg.rules = "RULES";
+  // Ticks run past the last snapshot, which live snapshots never let happen.
+  cfg.stale_snapshot_after = base::Seconds(3600);
   BotLoop loop(cfg, brain.Fn(),
                [&](const pb::Command& cmd) { commands.push_back(cmd); });
 
@@ -321,7 +323,8 @@ TEST(BotLoopTest, SupersededInFlightCallDoesNotDispatchStaleSteps) {
   EXPECT_EQ(loop.calls_cancelled(), 1u);
   EXPECT_EQ(loop.decisions_completed(), 0u);
   ASSERT_EQ(brain.size(), 1u);
-  EXPECT_NE(brain.front_request().user.find("Woken: died."), std::string::npos);
+  EXPECT_NE(brain.front_request().user.find("Woken: first look; died."),
+            std::string::npos);
   EXPECT_FALSE(brain.front_cancelled());
 }
 
@@ -472,6 +475,9 @@ TEST(BotLoopTest, AWhisperWakesTheBotAndItsTellWhispersBack) {
             std::string::npos);
   EXPECT_NE(brain.front_request().user.find("want to group?"),
             std::string::npos);
+  // The grammar lets it answer Gatda, and only Gatda.
+  EXPECT_NE(brain.front_request().grammar.find("(\"Gatda\")"),
+            std::string::npos);
 
   commands.clear();
   brain.FinishReply(
@@ -487,6 +493,167 @@ TEST(BotLoopTest, AWhisperWakesTheBotAndItsTellWhispersBack) {
   EXPECT_EQ(said[0].channel, pb::WHISPER);
   EXPECT_EQ(said[0].to, "Gatda");
   EXPECT_EQ(said[0].text, "sure, send an invite");
+}
+
+pb::ImmediateEvent WhisperFrom(const std::string& bot,
+                               const std::string& from,
+                               const std::string& text) {
+  pb::ImmediateEvent whisper;
+  whisper.bot = bot;
+  pb::ChatEvent& chat = whisper.event.chat.emplace();
+  chat.channel = pb::WHISPER;
+  chat.from = from;
+  chat.text = text;
+  chat.at_me = true;
+  return whisper;
+}
+
+// A whisper's call is cancelled by a more urgent wake: the next call still
+// carries the whisper (reason and text), so it can be answered.
+TEST(BotLoopTest, AWhisperSurvivesItsCallBeingCancelled) {
+  CannedBrain brain;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  BotLoop loop(cfg, brain.Fn(), [](const pb::Command&) {});
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Tess", 1, t0);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300");
+
+  loop.OnEvent(WhisperFrom("Tess", "Gatda", "want to group?"),
+               t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+
+  pb::Snapshot dead = MakeLiveSnap("Tess", 2, t0 + base::Seconds(2));
+  dead.base.self.state = pb::Self::DEAD_BODY;
+  AddKeep(&dead);
+  loop.OnSnapshot(dead, t0 + base::Seconds(2));
+  ASSERT_TRUE(brain.front_cancelled());
+  brain.FinishCancelled();
+
+  ASSERT_EQ(brain.size(), 1u);
+  const std::string& user = brain.front_request().user;
+  EXPECT_NE(user.find("died"), std::string::npos) << user;
+  EXPECT_NE(user.find("whisper from Gatda"), std::string::npos) << user;
+  EXPECT_NE(user.find("want to group?"), std::string::npos) << user;
+}
+
+// An invalid plan in answer to a whisper: the retry still carries it.
+TEST(BotLoopTest, AWhisperSurvivesAnInvalidPlan) {
+  CannedBrain brain;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  // Ticks run past the last snapshot, which live snapshots never let happen.
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(), [](const pb::Command&) {});
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Tess", 1, t0);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300");
+
+  loop.OnEvent(WhisperFrom("Tess", "Gatda", "want to group?"),
+               t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("this is not a plan");
+  ASSERT_EQ(brain.size(), 0u);
+
+  loop.OnTick(t0 + base::Seconds(30));
+  ASSERT_EQ(brain.size(), 1u);
+  const std::string& user = brain.front_request().user;
+  EXPECT_NE(user.find("whisper from Gatda"), std::string::npos) << user;
+  EXPECT_NE(user.find("want to group?"), std::string::npos) << user;
+}
+
+TEST(BotLoopTest, StepRefusalBackoffDoublesFromTheSecondAndCapsAt30s) {
+  EXPECT_EQ(StepRefusalBackoff(1), base::TimeDelta());
+  EXPECT_EQ(StepRefusalBackoff(2), base::Seconds(2));
+  EXPECT_EQ(StepRefusalBackoff(3), base::Seconds(4));
+  EXPECT_EQ(StepRefusalBackoff(5), base::Seconds(16));
+  EXPECT_EQ(StepRefusalBackoff(6), base::Seconds(30));
+  EXPECT_EQ(StepRefusalBackoff(50), base::Seconds(30));
+}
+
+// A body that refuses every step (dead, out of range) wakes the brain at once
+// the first time, then only after a growing delay.
+TEST(BotLoopTest, RepeatedStepRefusalsBackOff) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  // Ticks run past the last snapshot, which live snapshots never let happen.
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Tess", 1, t0);
+  AddUnitAndOption(&s1, "0x1", "Mottled Boar", false, false);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+
+  auto refuse = [&](base::TimeTicks at) {
+    ASSERT_FALSE(commands.empty());
+    pb::ImmediateEvent err;
+    err.bot = "Tess";
+    pb::ErrorEvent& e = err.event.error.emplace();
+    e.command_id = commands.back().command_id;
+    e.text = "you are dead";
+    loop.OnEvent(err, at);
+  };
+
+  // Refusal 1: an immediate wake.
+  ASSERT_EQ(brain.size(), 1u);
+  brain.StreamFirstLine("do: 1");
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  refuse(t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+
+  // Refusal 2: no call until 2 s later, and the reason is kept.
+  brain.StreamFirstLine("do: 1");
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  refuse(t0 + base::Seconds(2));
+  EXPECT_EQ(brain.size(), 0u);
+  loop.OnTick(t0 + base::Seconds(3));
+  EXPECT_EQ(brain.size(), 0u);
+  loop.OnTick(t0 + base::Seconds(4));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("step failed: you are dead"),
+            std::string::npos);
+
+  // Refusal 3: 4 s.
+  brain.StreamFirstLine("do: 1");
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  refuse(t0 + base::Seconds(5));
+  loop.OnTick(t0 + base::Seconds(8));
+  EXPECT_EQ(brain.size(), 0u);
+  loop.OnTick(t0 + base::Seconds(9));
+  EXPECT_EQ(brain.size(), 1u);
+}
+
+// A bot whose snapshots stopped (logged out) isn't asked about its last
+// screen; when they come back it gets a first look.
+TEST(BotLoopTest, ABotWhoseSnapshotsStoppedIsNotAskedAboutItsLastScreen) {
+  CannedBrain brain;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  BotLoop loop(cfg, brain.Fn(), [](const pb::Command&) {});
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Tess", 1, t0);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  ASSERT_EQ(brain.size(), 0u);
+
+  loop.OnTick(t0 + base::Seconds(6));    // Stale: forgotten.
+  loop.OnTick(t0 + base::Seconds(120));  // Past the look timer: no call.
+  EXPECT_EQ(brain.size(), 0u);
+
+  pb::Snapshot back = MakeLiveSnap("Tess", 2, t0 + base::Seconds(130));
+  AddKeep(&back);
+  loop.OnSnapshot(back, t0 + base::Seconds(130));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("first look"), std::string::npos);
 }
 
 }  // namespace

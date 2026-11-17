@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 
+from wlblib import build
 from wlblib.common import OUT, ROOT, Failed, say
 from wlblib.testing import LlamaServer, expect
 
@@ -20,9 +21,10 @@ NAME = "brain"
 DESCRIPTION = "35B brain: capacity and wake-to-plan latency from recorded wake-ups"
 
 SNAPSHOTS = OUT / "bench" / "snapshots" / "quest"
-# The prompt the brain really gets (docs/phase2-results.md): numbered screen, grammar, counts.
-ENV = {"MODE": "menu", "RENDER": "tight", "MERGED": "1", "COUNTS": "1", "SLOTS": "16",
-       "PYTHONDONTWRITEBYTECODE": "1"}
+# The prompt the brain really gets: the harness builds each request itself (`harness decide
+# --print-request`: its screen, content/RULES.md, its grammar), not tools/bench's Python
+# prototype (review 2026-11-17, finding 17).
+ENV = {"PROMPT": "harness", "SLOTS": "16", "PYTHONDONTWRITEBYTECODE": "1"}
 CAPACITY_S = 30
 WARMUP_S = 20
 # (bots, mean plan length in s, seconds replayed)
@@ -30,6 +32,7 @@ CELLS = ((50, 30, 90), (100, 15, 90))
 
 THROUGHPUT = re.compile(r"(\d+) workers: ([\d.]+) wake-ups/s \| one call p50 ([\d.]+)s "
                         r"p95 ([\d.]+)s \| valid (\d+)/(\d+)")
+FAILED = re.compile(r"(\d+) calls FAILED")
 LOAD = re.compile(r"wake->plan p50 ([\d.]+)s p95 ([\d.]+)s max ([\d.]+)s .*? valid (\d+)/(\d+)")
 
 
@@ -39,6 +42,10 @@ def bench(script, *args):
                             capture_output=True, text=True, env={**os.environ, **ENV})
     if result.returncode != 0:
         raise Failed(f"{script} failed:\n{(result.stderr or result.stdout).strip()[-600:]}")
+    # Failed calls are left out of the numbers, which then look fine: fail the case instead
+    # (review 2026-11-17, finding 17).
+    if m := FAILED.search(result.stdout):
+        raise Failed(f"{script}: {m.group(1)} brain calls failed:\n{result.stdout.strip()[-600:]}")
     return result.stdout
 
 
@@ -52,6 +59,7 @@ def wakes_file(plan_s):
 
 
 def run(perf):
+    build.common("default", tests=False)  # The harness that builds the prompts.
     expect(SNAPSHOTS.is_dir(), "no replay input: record it with `tools/wlb test perf --capture`")
     expect(sum(1 for _ in SNAPSHOTS.iterdir()) >= 50, "fewer than 50 bots in the replay input")
     with LlamaServer():

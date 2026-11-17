@@ -151,5 +151,37 @@ TEST(PlanRunnerTest, StalledAttackTimesOutAfterSafetyLimit) {
   EXPECT_FALSE(runner.active());
 }
 
+// Playerbots leaves items it has no use for, so the corpse stays lootable: the
+// step ends when the module says the body finished its command.
+TEST(PlanRunnerTest, LootEndsOnTheBodysDoneSignalWhileTheCorpseIsLootable) {
+  const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
+  pb::Snapshot s1 = MakeSnap(1);
+  AddBoar(&s1, "0x1", /*dead=*/true, /*lootable=*/true);
+  AddModuleOption(&s1, "Loot Mottled Boar", "0x1");
+  AddModuleOption(&s1, "Keep doing what I'm doing");
+
+  PlanRunner runner;
+  const RunnerAction a1 = runner.Start({{1, 1}}, 1, RenderScreen(s1), t0);
+  ASSERT_TRUE(a1.choose);
+  runner.set_last_command_id(7);
+
+  // Still lootable, and the body hasn't finished: carry on.
+  pb::Snapshot s2 = s1;
+  s2.seq = 2;
+  s2.done_command_id = 6;
+  EXPECT_TRUE(runner.OnSnapshot(s2, RenderScreen(s2), t0 + base::Seconds(1))
+                  .finished_reason.empty());
+  EXPECT_TRUE(runner.active());
+
+  // Finished (items left on it): the plan is done.
+  pb::Snapshot s3 = s1;
+  s3.seq = 3;
+  s3.done_command_id = 7;
+  const RunnerAction a3 =
+      runner.OnSnapshot(s3, RenderScreen(s3), t0 + base::Seconds(2));
+  EXPECT_TRUE(a3.step_done);
+  EXPECT_EQ(a3.finished_reason, "plan done");
+}
+
 }  // namespace
 }  // namespace harness

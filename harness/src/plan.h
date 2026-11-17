@@ -79,7 +79,12 @@ struct Plan {
 };
 
 // The grammar (llama.cpp GBNF) for a bot that has `option_count` options.
-std::string PlanGrammar(int option_count);
+// `tell_names`: who a `tell` line may whisper, the players who recently
+// whispered the bot (a name the bot invents, or its own, can't be written);
+// none means no `tell` line at all. Names that aren't a plain character name
+// (2-12 ASCII letters) are left out.
+std::string PlanGrammar(int option_count,
+                        const std::vector<std::string>& tell_names = {});
 
 // Reads only the `do: ...` line, as soon as the first newline of a streamed
 // reply arrives, so the body can start moving while the rest of the plan is

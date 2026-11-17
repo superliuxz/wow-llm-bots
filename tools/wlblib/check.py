@@ -68,7 +68,8 @@ def _include_jobs():
     for f in [*(ROOT / "common").rglob("*.cc"), *(ROOT / "harness").rglob("*.cc")]:
         jobs.append((f, ["-p", common_db]))
     for f in (ROOT / "server_module").rglob("*.cc"):
-        if f.name.endswith("_unittest.cc"):
+        if f.name.endswith("_unittest.cc") or f.parent.name == "tools":
+            # Unit tests and tools (server_module/tools/) are built by common/.
             jobs.append((f, ["-p", common_db]))
         elif not have_server:
             notes.append(f"{f.relative_to(ROOT)} not checked (no server build)")
@@ -142,6 +143,8 @@ def snapshots(files=()):
     ]
     run([checker, *files])
     run(["python3", "-I", "-B", ROOT / "tools/audit/check_client_events.py", checker])
+    # Eval snapshots show the options the module offers (review 2026-11-17, finding 5).
+    run(["python3", "-I", "-B", ROOT / "tools/snapshot/add_fixture_options.py", "--check"])
 
 
 def triggers():

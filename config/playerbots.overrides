@@ -34,3 +34,7 @@ Playerbots.RandomBotJoinLfg = 0
 # other without a cooldown; 50 bots in General - Durotar replied in a loop inside one world update
 # until the server hung at ~20 GB (2026-11-15).
 Playerbots.RandomBotTalk = 0
+# Whispers to our bots are conversation for the brain, not playerbots commands: with no prefix,
+# every whisper ("who", "leave", "invite me") also ran as a command beside the brain's reply.
+# Commands still work with the prefix ("!pb stats").
+Playerbots.CommandPrefix = "!pb "

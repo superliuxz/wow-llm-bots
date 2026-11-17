@@ -693,5 +693,18 @@
         }
       ]
     }
-  }
+  },
+  "options": [
+    {
+      "text": "Attack Mottled Boar",
+      "guid": "0xF130000C1A0002D7"
+    },
+    {
+      "text": "Gather Cactus Apple",
+      "guid": "0xF110029FA20000C8"
+    },
+    {
+      "text": "Keep doing what I'm doing"
+    }
+  ]
 }

@@ -30,6 +30,9 @@ struct RunnerAction {
   std::optional<wlb::snapshot::Command::Choose> choose;
   // Non-empty when the plan finished or timed out and the brain should wake.
   std::string finished_reason;
+  // True when the current target was done on this snapshot (a step or one of
+  // its repeats completed).
+  bool step_done = false;
 };
 
 class PlanRunner {

@@ -39,7 +39,7 @@
     "nearby": {
       "units": [
         {
-          "guid": "0xF130000C00009023",
+          "guid": "0xF130000C00009025",
           "name": "Mottled Boar",
           "rel": {
             "dist_yd": 8.0,
@@ -61,7 +61,7 @@
           }
         },
         {
-          "guid": "0xF130000C00009024",
+          "guid": "0xF130000C00009026",
           "name": "Kaltunk",
           "rel": {
             "dist_yd": 25.0,

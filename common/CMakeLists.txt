@@ -100,6 +100,8 @@ add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/bridge/latest_wins_unittest.cc"
   "${WLB_MODULE_SRC}/chat/chat_inbox.cc"
   "${WLB_MODULE_SRC}/chat/chat_inbox_unittest.cc"
+  "${WLB_MODULE_SRC}/chat/chat_text.cc"
+  "${WLB_MODULE_SRC}/chat/chat_text_unittest.cc"
   "${WLB_MODULE_SRC}/config/config_parsing.cc"
   "${WLB_MODULE_SRC}/config/config_parsing_unittest.cc"
   "${WLB_MODULE_SRC}/options/options.cc"
@@ -117,6 +119,13 @@ target_include_directories(llm_brain_unittests PRIVATE "${WLB_MODULE_SRC}")
 target_link_libraries(llm_brain_unittests PRIVATE wlb_net wlb_proto
                       GTest::gtest_main)
 target_compile_options(llm_brain_unittests PRIVATE ${WLB_SAFETY_FLAGS})
+
+# Writes the module's options into saved snapshots (eval and screen fixtures).
+add_executable(fixture_options "${WLB_ROOT}/server_module/tools/fixture_options.cc"
+               "${WLB_MODULE_SRC}/options/options.cc")
+target_include_directories(fixture_options PRIVATE "${WLB_MODULE_SRC}")
+target_link_libraries(fixture_options PRIVATE wlb_base wlb_proto)
+target_compile_options(fixture_options PRIVATE ${WLB_SAFETY_FLAGS})
 
 # The harness (harness/): the brain's process. Its parts that don't need the
 # game are built and tested here, with the same flags and sanitizers as the rest.

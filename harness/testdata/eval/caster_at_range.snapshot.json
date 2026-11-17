@@ -88,5 +88,14 @@
         }
       ]
     }
-  }
+  },
+  "options": [
+    {
+      "text": "Attack Vile Familiar",
+      "guid": "0xF130000C0000900C"
+    },
+    {
+      "text": "Keep doing what I'm doing"
+    }
+  ]
 }

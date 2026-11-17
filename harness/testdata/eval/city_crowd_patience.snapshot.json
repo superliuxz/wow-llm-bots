@@ -2296,5 +2296,10 @@
         }
       ]
     }
-  }
+  },
+  "options": [
+    {
+      "text": "Keep doing what I'm doing"
+    }
+  ]
 }

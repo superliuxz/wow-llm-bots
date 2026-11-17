@@ -121,6 +121,13 @@ class LiveSession : public base::RawPtrTarget {
 
   void LogStatsSummary() {
     ModuleConnection::DeliveryStats s = module_.TakeDeliveryStats();
+    if (s.wrong_version > 0 && log_fn_) {
+      log_fn_.Run(base::StringPrintf(
+          "harness: dropped %" PRIu64
+          " messages from a module of another wire version (this harness: "
+          "%u): rebuild and restart the one that is out of date",
+          s.wrong_version, wlb::snapshot::kWireVersion));
+    }
     if (s.snapshots == 0 && s.events == 0) {
       return;
     }

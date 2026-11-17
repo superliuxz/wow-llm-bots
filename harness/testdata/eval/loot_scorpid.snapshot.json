@@ -85,5 +85,14 @@
         }
       ]
     }
-  }
+  },
+  "options": [
+    {
+      "text": "Loot Scorpid Worker",
+      "guid": "0xF130000C0000901F"
+    },
+    {
+      "text": "Keep doing what I'm doing"
+    }
+  ]
 }

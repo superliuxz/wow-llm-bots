@@ -42,7 +42,8 @@ int Usage() {
       "  harness decide <snapshot.pb> [--name=BOT] [--goal=TEXT]\n"
       "                 [--reason=TEXT] [--rules=FILE] [--identity=FILE]\n"
       "                 [--log-dir=DIR] [--host=H] [--port=N] [--slot=N]\n"
-      "                 [--temperature=T] [--dry-run]\n",
+      "                 [--temperature=T] [--dry-run] [--print-request]\n"
+      "                 [--whisperers=NAME,NAME]\n",
       stderr);
   return 2;
 }

@@ -84,5 +84,14 @@
         }
       ]
     }
-  }
+  },
+  "options": [
+    {
+      "text": "Attack Son of Arugal",
+      "guid": "0xF130000C0000901B"
+    },
+    {
+      "text": "Keep doing what I'm doing"
+    }
+  ]
 }

@@ -199,10 +199,23 @@ TEST(PlanTest, CuttingNeverSplitsACharacter) {
   EXPECT_EQ(plan->goal.back(), '\xA9');
 }
 
+// `tell` may answer only who whispered: no invented names, not the bot itself.
+TEST(PlanTest, TellNamesAreTheWhisperers) {
+  const std::string grammar =
+      PlanGrammar(2, {"Brakka", "Gatda", "Bad Name", "X"});
+  EXPECT_NE(grammar.find("goal? say? tell?\n"), std::string::npos);
+  EXPECT_NE(
+      grammar.find("tell ::= \"\\ntell \" (\"Brakka\" | \"Gatda\") \": \" "
+                   "[^\\n|]{1,80}\n"),
+      std::string::npos)
+      << grammar;
+  EXPECT_EQ(PlanGrammar(2).find("tell"), std::string::npos);
+}
+
 TEST(PlanTest, TheGrammarOnlyAllowsTheBotsOwnOptions) {
   EXPECT_EQ(PlanGrammar(3),
             "root ::= \"do: \" steps \"\\nexpect: \" (\"none\" | ids) "
-            "\"\\nwatch: \" watches \"\\nlook: \" looknum goal? say? tell?\n"
+            "\"\\nwatch: \" watches \"\\nlook: \" looknum goal? say?\n"
             "ids ::= opt (\", \" opt){0,4}\n"
             "steps ::= step (\", \" step){0,4}\n"
             "step ::= opt (\"x\" cnt)?\n"
@@ -218,8 +231,7 @@ TEST(PlanTest, TheGrammarOnlyAllowsTheBotsOwnOptions) {
             "num ::= [1-9] [0-9]{0,2}\n"
             "looknum ::= [1-9] [0-9] [0-9]?\n"
             "goal ::= \"\\ngoal: \" [^\\n]{1,60}\n"
-            "say ::= \"\\nsay: \" [^\\n]{1,80}\n"
-            "tell ::= \"\\ntell \" [A-Z] [a-z]{1,11} \": \" [^\\n]{1,80}\n");
+            "say ::= \"\\nsay: \" [^\\n|]{1,80}\n");
   EXPECT_NE(PlanGrammar(12).find("opt ::= \"1\" | \"2\" | \"3\" | \"4\" | "
                                  "\"5\" | \"6\" | \"7\" | \"8\" | \"9\" | "
                                  "\"10\" | \"11\" | \"12\"\n"),

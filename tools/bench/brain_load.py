@@ -52,6 +52,7 @@ import os
 import pathlib
 import random
 import statistics
+import subprocess
 import sys
 import threading
 import time
@@ -310,7 +311,96 @@ def post_stream(body):
                 raise
 
 
+HARNESS = pathlib.Path(__file__).resolve().parents[2] / "out" / "common" / "harness"
+RULES_FILE = pathlib.Path(__file__).resolve().parents[2] / "content" / "RULES.md"
+HARNESS_REQUESTS = {}
+HARNESS_LOCK = threading.Lock()
+
+
+INT64_KEYS = ("time_ms", "monotonic_us")
+
+
+def harness_snapshot(snap_dir, bot, seq):
+    """The snapshot file as the harness reads it. Captures from before the Glaze wire format
+    (2026-11-17) wrote 64-bit numbers as strings, protobuf's JSON style: such a file gets a
+    converted copy beside the captures (`<snap_dir>.harness/`)."""
+    path = pathlib.Path(snap_dir) / bot / f"{seq}.json"
+    text = path.read_text()
+    if not any(f'"{k}": "' in text or f'"{k}":"' in text for k in INT64_KEYS):
+        return path
+
+    def fix(node):
+        if isinstance(node, dict):
+            return {k: int(v) if k in INT64_KEYS and isinstance(v, str) else fix(v)
+                    for k, v in node.items()}
+        if isinstance(node, list):
+            return [fix(v) for v in node]
+        return node
+
+    out = pathlib.Path(f"{snap_dir}.harness") / bot / f"{seq}.json"
+    if not out.exists():
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(fix(json.loads(text))))
+    return out
+
+
+def harness_request(snap_dir, wake):
+    """PROMPT=harness: the request the harness itself would send for this wake-up (`harness
+    decide --print-request`: its screen, RULES.md, grammar), so the numbers are the real
+    brain's, not this prototype's. Cached per (bot, snapshot, reason); returns (body, kinds)."""
+    key = (wake["source"], wake["seq"], wake["why"])
+    with HARNESS_LOCK:
+        if key in HARNESS_REQUESTS:
+            return HARNESS_REQUESTS[key]
+    path = harness_snapshot(snap_dir, wake["source"], wake["seq"])
+    out = subprocess.run([str(HARNESS), "decide", str(path), "--print-request",
+                          f"--rules={RULES_FILE}", f"--name={wake['source']}",
+                          f"--reason={wake['why'].replace('_', ' ')}"],
+                         capture_output=True, text=True, check=True).stdout
+    got = json.loads(out)
+    with HARNESS_LOCK:
+        HARNESS_REQUESTS[key] = (got["body"], got["kinds"])
+    return got["body"], got["kinds"]
+
+
+def prepare_harness_requests(snap_dir, wakes):
+    """Builds every wake-up's request before the clock starts (a process each)."""
+    for wake in wakes:
+        harness_request(snap_dir, {**wake, "source": wake["bot"]})
+
+
+def call_harness_prompt(wake, snap_dir, slots):
+    body, kinds = harness_request(snap_dir, wake)
+    body = json.loads(json.dumps(body))  # Our copy: the goal and slot differ per call.
+    with GOALS_LOCK:
+        goal = GOALS.get(wake["copy"])
+    if goal:
+        # Where the harness writes it (prompt.cc): just before "Woken:".
+        user = body["messages"][1]
+        user["content"] = user["content"].replace("Woken: ", f"Current goal: {goal}.\nWoken: ", 1)
+    body["temperature"] = float(os.environ.get("TEMP", 0.7))
+    body["stream"] = True
+    body["stream_options"] = {"include_usage": True}
+    slot, tracked = acquire_slot(wake["copy"], slots)
+    try:
+        body["id_slot"] = slot
+        content, usage, timings, first_line_s = post_stream(body)
+    finally:
+        release_slot(slot, tracked)
+    plan = parse_plan(content)
+    plan["_first_line_s"] = first_line_s
+    plan["_valid"] = validate(plan, len(kinds), counts=True)
+    if plan["_valid"]:
+        plan["_est_s"] = estimate_seconds(plan, kinds)
+    if plan.get("goal"):
+        with GOALS_LOCK:
+            GOALS[wake["copy"]] = plan["goal"]
+    return plan, usage, timings
+
+
 def call(wake, snap_dir, slots):
+    if os.environ.get("PROMPT") == "harness":
+        return call_harness_prompt(wake, snap_dir, slots)
     menu = os.environ.get("MODE") == "menu"
     goal_optional = menu and os.environ.get("GOAL_ONCE", "1") != "0"
     snap = snapshot(snap_dir, wake["source"], wake["seq"])
@@ -384,6 +474,8 @@ def estimate_seconds(plan, kinds):
     for part in plan["do"].split(","):
         number, _, times = part.strip().partition("x")
         kind = kinds[int(number) - 1]
+        # The harness's names (OptionKindName) differ from this prototype's for two kinds.
+        kind = {"keep doing what I'm doing": "keep", "go to town": "town"}.get(kind, kind)
         total += (look if kind == "keep" else DURATION_S[kind]) * (int(times) if times else 1)
     return min(total, look)
 
@@ -450,6 +542,8 @@ def main():
     slots = int(os.environ.get("SLOTS", 25))
     workers = int(os.environ.get("WORKERS", slots))
     wakes = load(snap_dir, wakes_file, n_bots, seconds, random.Random(2))
+    if os.environ.get("PROMPT") == "harness":
+        prepare_harness_requests(snap_dir, wakes)
     queue, lock, cv = [], threading.Lock(), threading.Condition(threading.Lock())
     results, busy = [], [0]
     busy_since, busy_total = [None], [0.0]

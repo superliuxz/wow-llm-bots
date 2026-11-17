@@ -106,5 +106,18 @@
         }
       ]
     }
-  }
+  },
+  "options": [
+    {
+      "text": "Attack Hare",
+      "guid": "0xF130000C00009010"
+    },
+    {
+      "text": "Attack Mottled Boar",
+      "guid": "0xF130000C00009011"
+    },
+    {
+      "text": "Keep doing what I'm doing"
+    }
+  ]
 }

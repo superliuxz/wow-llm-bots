@@ -84,5 +84,14 @@
         }
       ]
     }
-  }
+  },
+  "options": [
+    {
+      "text": "Attack Razormane Quilboar",
+      "guid": "0xF130000C0000901A"
+    },
+    {
+      "text": "Keep doing what I'm doing"
+    }
+  ]
 }

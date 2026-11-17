@@ -24,10 +24,10 @@
     "source": "live capture (Loadaa/107)",
     "reason": "attacked",
     "summary": "in combat with a 45%-HP Mottled Boar attacking me (1)",
-    "rule": "first step is Attack (1) or Keep (3); never Rest/Explore/Town/Use",
+    "rule": "first step is Attack (1) or Keep (2); never Rest/Explore/Town/Use",
     "first_options": [
       1,
-      3
+      2
     ],
     "forbid_kinds": [
       "rest",
@@ -41,13 +41,10 @@
     "source": "live capture (fight)",
     "reason": "attacked",
     "summary": "in combat: unaggroed full-HP boar (1) vs 24%-HP boar attacking me (2)",
-    "rule": "first step finishes attacker (2) or Keep (6); does not pull fresh boar (1)",
+    "rule": "first step is Attack (1: the module aims it at the boar attacking me) or Keep (3)",
     "first_options": [
-      2,
-      6
-    ],
-    "forbid_options": [
-      1
+      1,
+      3
     ],
     "forbid_kinds": [
       "rest"
@@ -58,10 +55,10 @@
     "source": "live capture (Loadaa/19)",
     "reason": "plan done",
     "summary": "full HP/mana L1 priest 7 yd behind untapped L2 Mottled Boar (1), Cactus Apples (4)",
-    "rule": "starts with Attack (1) or Gather (4); does not Rest at full HP/mana",
+    "rule": "starts with Attack (1) or Gather (2); does not Rest at full HP/mana",
     "first_options": [
       1,
-      4
+      2
     ],
     "forbid_kinds": [
       "rest"
@@ -86,11 +83,9 @@
     "source": "live capture (Loada/272)",
     "reason": "plan done",
     "summary": "6x Cactus Apple quest herbs starting at 14 yd (1), no mobs or corpses",
-    "rule": "starts with Gather (1), Explore (5), or Go to town (7) until quest log is shown",
+    "rule": "starts with Gather (1)",
     "first_options": [
-      1,
-      5,
-      7
+      1
     ],
     "forbid_kinds": [
       "rest",
@@ -105,7 +100,8 @@
     "rule": "first step is Talk to Kaltunk (1)",
     "first_options": [
       1
-    ]
+    ],
+    "planned": true
   },
   {
     "name": "priest_picks_own_trainer",
@@ -115,7 +111,8 @@
     "rule": "first step is Talk to Priest Trainer Ken'jai (7), not wrong-class trainers",
     "first_options": [
       7
-    ]
+    ],
+    "planned": true
   },
   {
     "name": "ignore_critter",
@@ -144,7 +141,8 @@
     "forbid_kinds": [
       "rest",
       "keep doing what I'm doing"
-    ]
+    ],
+    "planned": true
   },
   {
     "name": "city_crowd_patience",
@@ -169,7 +167,8 @@
     ],
     "forbid_kinds": [
       "attack"
-    ]
+    ],
+    "planned": true
   },
   {
     "name": "oom_caster",
@@ -183,7 +182,8 @@
     ],
     "forbid_kinds": [
       "attack"
-    ]
+    ],
+    "planned": true
   },
   {
     "name": "skull_elite_nearby",
@@ -198,16 +198,17 @@
     "forbid_kinds": [
       "attack",
       "rest"
-    ]
+    ],
+    "planned": true
   },
   {
     "name": "whisper_group_invite",
     "source": "generated (tools/snapshot/make_eval_cases.py)",
     "generated": true,
-    "reason": "whisper from Gatda: hey, want to group up for the boar quest?",
-    "summary": "quiet field; Gatda whispers asking to group",
-    "rule": "whispers back to Gatda",
-    "must_tell_to": "Gatda",
+    "reason": "whisper from Brakka: hey, want to group up for the boar quest?",
+    "summary": "quiet field; Brakka whispers asking to group",
+    "rule": "whispers back to Brakka",
+    "must_tell_to": "Brakka",
     "forbid_kinds": [
       "rest"
     ]
@@ -216,19 +217,19 @@
     "name": "whisper_question",
     "source": "generated (tools/snapshot/make_eval_cases.py)",
     "generated": true,
-    "reason": "whisper from Gatda: do you know where the cactus apples are?",
-    "summary": "quiet field; Gatda asks where the cactus apples are",
-    "rule": "whispers back to Gatda",
-    "must_tell_to": "Gatda"
+    "reason": "whisper from Lunessa: do you know where the cactus apples are?",
+    "summary": "quiet field; Lunessa asks where the cactus apples are",
+    "rule": "whispers back to Lunessa",
+    "must_tell_to": "Lunessa"
   },
   {
     "name": "whisper_asks_for_water",
     "source": "generated (tools/snapshot/make_eval_cases.py)",
     "generated": true,
-    "reason": "whisper from Gatda: can you spare some water?",
-    "summary": "full HP/mana; Gatda asks for water",
-    "rule": "whispers back to Gatda",
-    "must_tell_to": "Gatda",
+    "reason": "whisper from Torvin: can you spare some water?",
+    "summary": "full HP/mana; Torvin asks for water",
+    "rule": "whispers back to Torvin",
+    "must_tell_to": "Torvin",
     "forbid_kinds": [
       "rest"
     ]
@@ -246,10 +247,10 @@
     "name": "whisper_while_low_hp",
     "source": "generated (tools/snapshot/make_eval_cases.py)",
     "generated": true,
-    "reason": "whisper from Gatda: can you help me kill this scorpid?",
-    "summary": "20% HP out of combat, scorpid near; Gatda asks for help with it",
-    "rule": "doesn't attack at 20% HP; whispers back to Gatda",
-    "must_tell_to": "Gatda",
+    "reason": "whisper from Ozrik: can you help me kill this scorpid?",
+    "summary": "20% HP out of combat, scorpid near; Ozrik asks for help with it",
+    "rule": "doesn't attack at 20% HP; whispers back to Ozrik",
+    "must_tell_to": "Ozrik",
     "forbid_kinds": [
       "attack"
     ]
@@ -258,8 +259,8 @@
     "name": "whisper_during_fight",
     "source": "generated (tools/snapshot/make_eval_cases.py)",
     "generated": true,
-    "reason": "whisper from Gatda: how's it going?",
-    "summary": "in combat with a 40% boar attacking me; Gatda asks how it's going",
+    "reason": "whisper from Mirela: how's it going?",
+    "summary": "in combat with a 40% boar attacking me; Mirela asks how it's going",
     "rule": "keeps fighting the boar (Attack it or Keep)",
     "first_texts": [
       "Attack Mottled Boar",
@@ -550,6 +551,18 @@
     ],
     "forbid_kinds": [
       "attack"
+    ],
+    "planned": true
+  },
+  {
+    "name": "hp_30_boar_near_live",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "30% HP out of combat, a boar 8 yd away (live options)",
+    "rule": "doesn't attack",
+    "forbid_kinds": [
+      "attack"
     ]
   },
   {
@@ -565,6 +578,18 @@
     ],
     "forbid_kinds": [
       "attack"
+    ],
+    "planned": true
+  },
+  {
+    "name": "mana_20_boar_near_live",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "20% mana out of combat, a boar 8 yd away (live options)",
+    "rule": "doesn't attack",
+    "forbid_kinds": [
+      "attack"
     ]
   },
   {
@@ -577,7 +602,8 @@
     "first_kinds": [
       "rest",
       "go to town"
-    ]
+    ],
+    "planned": true
   },
   {
     "name": "mana_10_empty_field",
@@ -589,7 +615,8 @@
     "first_kinds": [
       "rest",
       "go to town"
-    ]
+    ],
+    "planned": true
   },
   {
     "name": "hp_60_fine",
@@ -611,7 +638,8 @@
     "rule": "talks to Kaltunk first",
     "first_texts": [
       "Talk to Kaltunk"
-    ]
+    ],
+    "planned": true
   },
   {
     "name": "bags_full",
@@ -622,7 +650,8 @@
     "rule": "heads to town instead of killing for loot",
     "first_kinds": [
       "go to town"
-    ]
+    ],
+    "planned": true
   },
   {
     "name": "leveled_up_empty_field",
@@ -638,6 +667,7 @@
     "forbid_kinds": [
       "rest",
       "keep doing what I'm doing"
-    ]
+    ],
+    "planned": true
   }
 ]

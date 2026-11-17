@@ -40,7 +40,13 @@ list(FILTER WLB_MODULES_SOURCES EXCLUDE REGEX "${WLB_OURS_RE}.*_unittest\\.cc$")
 # don't contain it.
 option(LLM_BRAIN_TEST_HOOKS "Compile mod-llm-brain's test-only code" OFF)
 if(LLM_BRAIN_TEST_HOOKS)
-  target_compile_definitions(modules PRIVATE LLM_BRAIN_TEST_HOOKS)
+  # On our files only: a define on the whole `modules` target changes the
+  # flags of every playerbots file, and switching between test and production
+  # builds recompiled all ~700 of them (~10 min each way). Only ours use it.
+  set(WLB_OURS_IN_TARGET ${WLB_MODULES_SOURCES})
+  list(FILTER WLB_OURS_IN_TARGET INCLUDE REGEX "${WLB_OURS_RE}")
+  set_property(SOURCE ${WLB_OURS_IN_TARGET} APPEND PROPERTY
+               COMPILE_DEFINITIONS LLM_BRAIN_TEST_HOOKS)
 else()
   list(FILTER WLB_MODULES_SOURCES EXCLUDE REGEX "${WLB_OURS_RE}src/test/")
 endif()

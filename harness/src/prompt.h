@@ -28,6 +28,9 @@ struct PromptInput {
   std::string wake_reason;   // "plan done", "attacked", ...
   // Events noted since the bot's last look (chat, loot, errors).
   std::vector<std::string> recent_events;
+  // Players who recently whispered the bot, newest first: who a `tell` line
+  // may answer (PlanGrammar()).
+  std::vector<std::string> whisperers;
   int slot = -1;  // llama-server slot, or -1
   float temperature = 0.7f;
 };

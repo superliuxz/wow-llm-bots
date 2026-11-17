@@ -336,5 +336,14 @@
         }
       ]
     }
-  }
+  },
+  "options": [
+    {
+      "text": "Attack Hare",
+      "guid": "0xF13000173F000281"
+    },
+    {
+      "text": "Keep doing what I'm doing"
+    }
+  ]
 }

@@ -113,5 +113,18 @@
         }
       ]
     }
-  }
+  },
+  "options": [
+    {
+      "text": "Attack Vile Familiar",
+      "guid": "0xF130000C00009008"
+    },
+    {
+      "text": "Attack Burning Blade Imp",
+      "guid": "0xF130000C00009009"
+    },
+    {
+      "text": "Keep doing what I'm doing"
+    }
+  ]
 }

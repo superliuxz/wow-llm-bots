@@ -9,6 +9,7 @@ Usage: python3 -I tools/bench/throughput.py <snapshot_dir> <wakes.jsonl> [worker
 """
 
 import json
+import os
 import pathlib
 import random
 import statistics
@@ -25,7 +26,9 @@ def main():
     workers = int(sys.argv[3]) if len(sys.argv) > 3 else 25
     seconds = float(sys.argv[4]) if len(sys.argv) > 4 else 30
     wakes = [json.loads(line) for line in open(wakes_file)]
-    done, lat, first_lat, valid = [], [], [], []
+    if os.environ.get("PROMPT") == "harness":
+        b.prepare_harness_requests(snap_dir, wakes)
+    done, lat, first_lat, valid, failed = [], [], [], [], []
     lock = threading.Lock()
     t0 = time.perf_counter()
     warm = 5.0
@@ -38,7 +41,9 @@ def main():
             start = time.perf_counter()
             try:
                 plan = b.call(wake, snap_dir, workers)[0]
-            except Exception:  # Count only completed calls.
+            except Exception:  # Left out of the numbers, but counted: a failure isn't a pass.
+                with lock:
+                    failed.append(time.perf_counter())
                 continue
             end = time.perf_counter()
             if start - t0 >= warm:
@@ -57,7 +62,8 @@ def main():
           f"{statistics.median(lat):.2f}s p95 {sorted(lat)[int(0.95 * len(lat))]:.2f}s | "
           f"valid {sum(valid)}/{len(valid)} | first-line p50 "
           f"{statistics.median(first_lat):.2f}s p95 "
-          f"{sorted(first_lat)[int(0.95 * len(first_lat))]:.2f}s")
+          f"{sorted(first_lat)[int(0.95 * len(first_lat))]:.2f}s"
+          + (f" | {len(failed)} calls FAILED (left out)" if failed else ""))
 
 
 if __name__ == "__main__":

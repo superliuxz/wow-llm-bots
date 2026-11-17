@@ -84,5 +84,14 @@
         }
       ]
     }
-  }
+  },
+  "options": [
+    {
+      "text": "Attack Burning Blade Thug",
+      "guid": "0xF130000C00009019"
+    },
+    {
+      "text": "Keep doing what I'm doing"
+    }
+  ]
 }

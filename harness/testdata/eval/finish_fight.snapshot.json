@@ -339,5 +339,14 @@
         }
       ]
     }
-  }
+  },
+  "options": [
+    {
+      "text": "Attack Mottled Boar",
+      "guid": "0xF130000C1A000278"
+    },
+    {
+      "text": "Keep doing what I'm doing"
+    }
+  ]
 }

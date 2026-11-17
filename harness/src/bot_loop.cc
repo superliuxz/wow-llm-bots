@@ -129,6 +129,47 @@ void BotLoop::NoteEvent(BotState* state, const pb::Event& event) {
   }
 }
 
+// How long and how many whisperers a bot can answer with `tell`: a player
+// answers the last few people who talked to them, not everyone from an hour
+// ago.
+constexpr base::TimeDelta kWhispererMemory = base::Seconds(600);
+constexpr size_t kMaxWhisperers = 4;
+
+// static
+void BotLoop::NoteWhisperer(BotState* state,
+                            const pb::Event& event,
+                            base::TimeTicks now) {
+  if (!event.chat || event.chat->channel != pb::WHISPER ||
+      event.chat->from.empty()) {
+    return;
+  }
+  const std::string& from = event.chat->from;
+  std::erase_if(state->whisperers,
+                [&](const BotState::Whisperer& w) { return w.name == from; });
+  state->whisperers.push_front({from, now});
+  if (state->whisperers.size() > kMaxWhisperers) {
+    state->whisperers.pop_back();
+  }
+}
+
+void BotLoop::Requeue(BotState* state,
+                      std::vector<std::string> reasons,
+                      std::vector<std::string> events) {
+  for (std::string& r : state->pending_reasons) {
+    if (std::find(reasons.begin(), reasons.end(), r) == reasons.end()) {
+      reasons.push_back(std::move(r));
+    }
+  }
+  state->pending_reasons = std::move(reasons);
+  for (auto it = events.rbegin(); it != events.rend(); ++it) {
+    state->recent_events.push_front(std::move(*it));
+  }
+  while (state->recent_events.size() >
+         std::max<size_t>(config_.max_recent_events, 1)) {
+    state->recent_events.pop_front();
+  }
+}
+
 void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   const std::string bot = snapshot.bot;
   if (bot.empty()) {
@@ -137,6 +178,7 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   BotState& state = bots_[bot];
   for (const pb::Event& ev : snapshot.events) {
     NoteEvent(&state, ev);
+    NoteWhisperer(&state, ev, received_at);
   }
   Screen screen = RenderScreen(snapshot);
   const std::optional<WakeTrigger> trig =
@@ -162,6 +204,9 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   }
   const RunnerAction action = state.runner.OnSnapshot(
       *state.latest_snapshot, state.latest_screen, received_at);
+  if (action.step_done) {
+    state.step_refusals = 0;
+  }
   DispatchRunnerAction(bot, &state, action);
   if (!state.has_queued_wake && !state.call_in_flight &&
       !state.look_deadline.is_null() && received_at >= state.look_deadline) {
@@ -171,19 +216,45 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   }
 }
 
-void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks /*received_at*/) {
+base::TimeDelta StepRefusalBackoff(int refusals) {
+  if (refusals <= 1) {
+    return base::TimeDelta();
+  }
+  constexpr int kMaxSeconds = 30;
+  const int shift = std::min(refusals - 1, 5);
+  return base::Seconds(std::min(1 << shift, kMaxSeconds));
+}
+
+void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
   const std::string& bot = imm.bot;
   if (bot.empty()) {
     return;
   }
   BotState& state = bots_[bot];
   NoteEvent(&state, imm.event);
+  NoteWhisperer(&state, imm.event, received_at);
   if (imm.event.error && imm.event.error->command_id != 0) {
     if (!state.runner.active() ||
         imm.event.error->command_id != state.runner.last_command_id()) {
       return;
     }
     state.runner.Stop();
+    const base::TimeDelta backoff = StepRefusalBackoff(++state.step_refusals);
+    if (backoff.is_positive()) {
+      if (const std::optional<WakeTrigger> trig =
+              EvaluateEventTrigger(imm.event, state.triggers.watches());
+          trig &&
+          std::find(state.pending_reasons.begin(), state.pending_reasons.end(),
+                    trig->reason) == state.pending_reasons.end()) {
+        state.pending_reasons.push_back(trig->reason);
+      }
+      state.look_deadline = received_at + backoff;
+      Log(base::StringPrintf(
+          "harness: %s step refused %d times in a row; "
+          "next look in %.0f s",
+          bot.c_str(), state.step_refusals, backoff.InSecondsF()));
+      return;
+    }
   }
   const std::optional<WakeTrigger> trig =
       EvaluateEventTrigger(imm.event, state.triggers.watches());
@@ -203,6 +274,19 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks /*received_at*/) {
 
 void BotLoop::OnTick(base::TimeTicks now) {
   for (auto&& [bot, state] : bots_) {
+    if (state.latest_snapshot &&
+        now - state.latest_received_at > config_.stale_snapshot_after) {
+      Log(base::StringPrintf(
+          "harness: %s: no snapshot for %.0f s; waiting "
+          "for it to come back",
+          bot.c_str(), (now - state.latest_received_at).InSecondsF()));
+      state.runner.Stop();
+      state.latest_snapshot.reset();
+      state.look_deadline = base::TimeTicks();
+      state.has_ever_woken = false;
+      // A call in flight still answers, but installs nothing: no snapshot.
+      continue;
+    }
     if (!state.latest_snapshot || state.call_in_flight ||
         state.has_queued_wake) {
       continue;
@@ -274,8 +358,10 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
       state.pending_reasons.empty()
           ? "plan done"
           : base::JoinString(state.pending_reasons, "; ");
+  std::vector<std::string> asked_reasons = std::move(state.pending_reasons);
   state.pending_reasons.clear();
 
+  const base::TimeTicks asked_at_for_whisperers = base::TimeTicks::Now();
   PromptInput input;
   input.rules = config_.rules;
   input.bot_name = bot;
@@ -285,6 +371,12 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
   input.recent_events.assign(state.recent_events.begin(),
                              state.recent_events.end());
   state.recent_events.clear();
+  std::vector<std::string> asked_events = input.recent_events;
+  for (const BotState::Whisperer& w : state.whisperers) {
+    if (asked_at_for_whisperers - w.at <= kWhispererMemory) {
+      input.whisperers.push_back(w.name);
+    }
+  }
   input.slot = slot;
   input.temperature = config_.temperature;
 
@@ -315,6 +407,8 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
   base::scoped_refptr<LlmCancelHandle> handle = ask_.Run(
       std::move(request),
       [self, bot, epoch, ask_seq, ask_screen, wake_reason,
+       asked_reasons = std::move(asked_reasons),
+       asked_events = std::move(asked_events),
        request_copy = std::move(request_copy), snap_mono_us, age_at_ask_ms,
        holder = std::move(first_line_age_holder),
        done = std::move(done)](LlmResult result) mutable {
@@ -323,7 +417,8 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
           return;
         }
         self->OnReply(bot, epoch, ask_seq, std::move(ask_screen),
-                      std::move(wake_reason), std::move(request_copy),
+                      std::move(wake_reason), std::move(asked_reasons),
+                      std::move(asked_events), std::move(request_copy),
                       snap_mono_us, age_at_ask_ms, *holder, std::move(done),
                       std::move(result));
       },
@@ -364,8 +459,7 @@ void BotLoop::OnFirstLine(const std::string& bot,
   state.early_steps_dispatched = true;
   // Provisionally mark attacked targets as expected while the rest of the plan
   // streams, so entering combat before `expect:` arrives does not re-wake.
-  state.triggers.SetPlanContext(state.triggers.watches(),
-                                CollectExpectedNames(*steps, {}, ask_screen));
+  state.triggers.SetExpectedNames(CollectExpectedNames(*steps, {}, ask_screen));
   const RunnerAction action =
       state.runner.Start(*steps, ask_seq, ask_screen, base::TimeTicks::Now());
   DispatchRunnerAction(bot, &state, action);
@@ -376,6 +470,8 @@ void BotLoop::OnReply(const std::string& bot,
                       uint32_t ask_seq,
                       Screen ask_screen,
                       std::string wake_reason,
+                      std::vector<std::string> asked_reasons,
+                      std::vector<std::string> asked_events,
                       LlmRequest request,
                       int64_t snapshot_monotonic_us,
                       std::optional<double> age_at_ask_ms,
@@ -390,6 +486,7 @@ void BotLoop::OnReply(const std::string& bot,
     if (auto it = bots_.find(bot);
         it != bots_.end() && it->second.call_epoch == epoch) {
       it->second.call_in_flight = false;
+      Requeue(&it->second, std::move(asked_reasons), std::move(asked_events));
     }
     ++calls_cancelled_;
     Log(base::StringPrintf("harness: %s call cancelled after %.0f ms",
@@ -434,10 +531,12 @@ void BotLoop::OnReply(const std::string& bot,
                              bot.c_str(), decision.result.round_trip_ms,
                              decision.result.error.c_str()));
       state.look_deadline = now + base::Seconds(10);
+      Requeue(&state, std::move(asked_reasons), std::move(asked_events));
     } else if (!plan) {
       Log(base::StringPrintf("harness: %s invalid plan (%.0f ms)", bot.c_str(),
                              decision.result.round_trip_ms));
       state.look_deadline = now + base::Seconds(10);
+      Requeue(&state, std::move(asked_reasons), std::move(asked_events));
     } else {
       if (!plan->goal.empty()) {
         state.current_goal = plan->goal;
@@ -467,6 +566,9 @@ void BotLoop::OnReply(const std::string& bot,
               state.runner.Start(plan->steps, ask_seq, ask_screen, now);
           DispatchRunnerAction(bot, &state, action);
         }
+      } else {
+        // Superseded by a newer wake while in flight: that call answers.
+        Requeue(&state, std::move(asked_reasons), std::move(asked_events));
       }
     }
   }

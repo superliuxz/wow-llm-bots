@@ -42,7 +42,12 @@ char* wlb_module_message_beve_to_json(const char* bytes,
     *out_len = 0;
     return nullptr;
   }
-  return DupBytes(wlb::snapshot::WriteJson(msg, pretty != 0), out_len);
+  const std::string json = wlb::snapshot::WriteJson(msg, pretty != 0);
+  if (json.empty()) {
+    *out_len = 0;
+    return nullptr;
+  }
+  return DupBytes(json, out_len);
 }
 
 // Encodes a JSON Command into BEVE wire bytes. Returns malloc'd buffer (free
@@ -53,6 +58,8 @@ char* wlb_command_json_to_beve(const char* json, size_t len, size_t* out_len) {
     *out_len = 0;
     return nullptr;
   }
+  // Tools speak for this checkout's harness: its version.
+  cmd.version = wlb::snapshot::kWireVersion;
   return DupBytes(wlb::snapshot::WriteBeve(cmd), out_len);
 }
 

@@ -247,6 +247,34 @@ void TriggerEvaluator::SetPlanContext(
   watches_ = std::move(watches);
   watch_fired_.assign(watches_.size(), false);
   watch_seen_players_.assign(watches_.size(), {});
+  for (size_t i = 0; i < watches_.size(); ++i) {
+    const Watch& watch = watches_[i];
+    const auto value = static_cast<double>(watch.value);
+    switch (watch.kind) {
+      case Watch::Kind::kHealthBelow:
+        watch_fired_[i] = was_alive_ && last_hp_pct_ && *last_hp_pct_ < value;
+        break;
+      case Watch::Kind::kManaBelow:
+        watch_fired_[i] =
+            was_alive_ && last_mana_pct_ && *last_mana_pct_ < value;
+        break;
+      case Watch::Kind::kEnemyPlayerWithin:
+        for (const EnemyPlayer& p : last_enemy_players_) {
+          if (p.dist_yd <= static_cast<float>(watch.value)) {
+            watch_seen_players_[i].insert(p.key);
+          }
+        }
+        break;
+      case Watch::Kind::kAttacked:
+      case Watch::Kind::kWhisper:
+        break;
+    }
+  }
+  expected_names_ = std::move(expected_names);
+}
+
+void TriggerEvaluator::SetExpectedNames(
+    std::flat_set<std::string> expected_names) {
   expected_names_ = std::move(expected_names);
 }
 
@@ -267,11 +295,13 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
     }
   }
 
-  // Collect current attackers (units targeting me in nearby or ext.combat).
+  // Collect current attackers (non-friendly units targeting me in nearby, and
+  // ext.combat). A friendly unit targeting me (a healer, a party member) is not
+  // an attacker.
   std::flat_set<std::string> attackers;
   std::vector<std::pair<std::string, std::string>> attacker_entries;
   for (const pb::Unit& u : snapshot.base.nearby.units) {
-    if (!u.dead && u.targeting_me) {
+    if (!u.dead && u.targeting_me && u.reaction != pb::Unit::FRIENDLY) {
       const std::string key = AttackerKey(u);
       if (attackers.insert(key).second) {
         attacker_entries.push_back({key, u.name});
@@ -292,6 +322,11 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
   if (seen_snapshot_) {
     if (was_alive_ && !alive) {
       Consider(&chosen, {Urgency::kUrgent, "died"});
+    }
+    // Back from the dead (resurrected, or the spirit reached the body): while
+    // dead only Keep was offered, so there is a choice to make again.
+    if (!was_alive_ && alive) {
+      Consider(&chosen, {Urgency::kNormal, "alive again"});
     }
     const struct {
       bool was;
@@ -340,9 +375,9 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
   }
 
   // Evaluate watches (edge-latched per crossing).
+  const std::optional<double> hp_pct = HealthPercent(self);
+  const std::optional<double> mana_pct = ManaPercent(self);
   if (alive) {
-    const std::optional<double> hp_pct = HealthPercent(self);
-    const std::optional<double> mana_pct = ManaPercent(self);
     for (size_t i = 0; i < watches_.size(); ++i) {
       const Watch& watch = watches_[i];
       switch (watch.kind) {
@@ -407,6 +442,16 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
   for (const pb::Event& ev : snapshot.events) {
     if (std::optional<WakeTrigger> trig = EvaluateEventTrigger(ev, watches_)) {
       Consider(&chosen, std::move(*trig));
+    }
+  }
+
+  last_hp_pct_ = hp_pct;
+  last_mana_pct_ = mana_pct;
+  last_enemy_players_.clear();
+  for (const pb::Unit& u : snapshot.base.nearby.units) {
+    if (!u.dead && u.kind == pb::Unit::PLAYER &&
+        u.reaction == pb::Unit::HOSTILE && std::isfinite(u.rel.dist_yd)) {
+      last_enemy_players_.push_back({AttackerKey(u), u.rel.dist_yd});
     }
   }
 

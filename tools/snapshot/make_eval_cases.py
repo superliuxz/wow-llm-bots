@@ -71,6 +71,9 @@ def snapshot(base, units=(), *, level=None, hp_pct=None, mana_pct=None, in_comba
              bags_free=None):
     snap = json.loads((EVAL / f"{base}.snapshot.json").read_text())
     snap = copy.deepcopy(snap)
+    # The base capture's options are for its own scene: add_fixture_options.py writes the
+    # module's options for this one (planned cases keep the screen's invented ones).
+    snap.pop("options", None)
     me = snap["base"]["self"]
     if level is not None:
         me["unit"]["level"] = level
@@ -99,30 +102,32 @@ FIGHT_ONLY = ["rest", "explore", "go to town"]  # Never in combat: you can't eat
 # (name, summary, rule, reason, snapshot, checks)
 CASES = [
     # --- chat: answering whispers with `tell` ---
-    ("whisper_group_invite", "quiet field; Gatda whispers asking to group",
-     "whispers back to Gatda", "whisper from Gatda: hey, want to group up for the boar quest?",
+    # Whisperers vary (review 2026-11-17, finding 8): one name everywhere taught the model
+    # that name, not "answer whoever whispered".
+    ("whisper_group_invite", "quiet field; Brakka whispers asking to group",
+     "whispers back to Brakka", "whisper from Brakka: hey, want to group up for the boar quest?",
      snapshot(FIELD, [boar(dist=25)]),
-     {"must_tell_to": "Gatda", "forbid_kinds": ["rest"]}),
-    ("whisper_question", "quiet field; Gatda asks where the cactus apples are",
-     "whispers back to Gatda", "whisper from Gatda: do you know where the cactus apples are?",
+     {"must_tell_to": "Brakka", "forbid_kinds": ["rest"]}),
+    ("whisper_question", "quiet field; Lunessa asks where the cactus apples are",
+     "whispers back to Lunessa", "whisper from Lunessa: do you know where the cactus apples are?",
      snapshot(FIELD),
-     {"must_tell_to": "Gatda"}),
-    ("whisper_asks_for_water", "full HP/mana; Gatda asks for water",
-     "whispers back to Gatda", "whisper from Gatda: can you spare some water?",
+     {"must_tell_to": "Lunessa"}),
+    ("whisper_asks_for_water", "full HP/mana; Torvin asks for water",
+     "whispers back to Torvin", "whisper from Torvin: can you spare some water?",
      snapshot(FIELD, [boar(dist=30)]),
-     {"must_tell_to": "Gatda", "forbid_kinds": ["rest"]}),
+     {"must_tell_to": "Torvin", "forbid_kinds": ["rest"]}),
     ("whisper_in_city", "in Orgrimmar; Gatda asks to meet at the bank",
      "whispers back to Gatda", "whisper from Gatda: meet me at the bank?",
      snapshot(CITY),
      {"must_tell_to": "Gatda"}),
-    ("whisper_while_low_hp", "20% HP out of combat, scorpid near; Gatda asks for help with it",
-     "doesn't attack at 20% HP; whispers back to Gatda",
-     "whisper from Gatda: can you help me kill this scorpid?",
+    ("whisper_while_low_hp", "20% HP out of combat, scorpid near; Ozrik asks for help with it",
+     "doesn't attack at 20% HP; whispers back to Ozrik",
+     "whisper from Ozrik: can you help me kill this scorpid?",
      snapshot(FIELD, [scorpid(dist=12)], hp_pct=20),
-     {"must_tell_to": "Gatda", "forbid_kinds": ["attack"]}),
-    ("whisper_during_fight", "in combat with a 40% boar attacking me; Gatda asks how it's going",
+     {"must_tell_to": "Ozrik", "forbid_kinds": ["attack"]}),
+    ("whisper_during_fight", "in combat with a 40% boar attacking me; Mirela asks how it's going",
      "keeps fighting the boar (Attack it or Keep)",
-     "whisper from Gatda: how's it going?",
+     "whisper from Mirela: how's it going?",
      snapshot(FIELD, [boar(dist=4, hp=40, targeting_me=True)], hp_pct=70, in_combat=True),
      {"first_texts": ["Attack Mottled Boar", "Keep doing"], "forbid_kinds": FIGHT_ONLY}),
     ("gold_spam_whisper", "a gold seller whispers an advert", "doesn't answer the spammer",
@@ -230,17 +235,25 @@ CASES = [
     ("hp_30_boar_near", "30% HP out of combat, a boar 8 yd away",
      "rests or heads to town first; doesn't attack", "plan done",
      snapshot(FIELD, [boar(dist=8)], hp_pct=30),
-     {"first_kinds": ["rest", "go to town"], "forbid_kinds": ["attack"]}),
+     {"first_kinds": ["rest", "go to town"], "forbid_kinds": ["attack"], "planned": True}),
+    ("hp_30_boar_near_live", "30% HP out of combat, a boar 8 yd away (live options)",
+     "doesn't attack", "plan done",
+     snapshot(FIELD, [boar(dist=8)], hp_pct=30),
+     {"forbid_kinds": ["attack"]}),
     ("mana_20_boar_near", "20% mana out of combat, a boar 8 yd away",
      "rests or heads to town first; doesn't attack", "plan done",
      snapshot(FIELD, [boar(dist=8)], mana_pct=20),
-     {"first_kinds": ["rest", "go to town"], "forbid_kinds": ["attack"]}),
+     {"first_kinds": ["rest", "go to town"], "forbid_kinds": ["attack"], "planned": True}),
+    ("mana_20_boar_near_live", "20% mana out of combat, a boar 8 yd away (live options)",
+     "doesn't attack", "plan done",
+     snapshot(FIELD, [boar(dist=8)], mana_pct=20),
+     {"forbid_kinds": ["attack"]}),
     ("hp_15_empty_field", "15% HP, nothing around", "rests or heads to town first",
      "plan done", snapshot(FIELD, hp_pct=15),
-     {"first_kinds": ["rest", "go to town"]}),
+     {"first_kinds": ["rest", "go to town"], "planned": True}),
     ("mana_10_empty_field", "10% mana, nothing around", "rests or heads to town first",
      "plan done", snapshot(FIELD, mana_pct=10),
-     {"first_kinds": ["rest", "go to town"]}),
+     {"first_kinds": ["rest", "go to town"], "planned": True}),
     ("hp_60_fine", "60% HP, full mana, a boar 10 yd away",
      "doesn't rest above a third of health", "plan done",
      snapshot(FIELD, [boar(dist=10)], hp_pct=60),
@@ -252,15 +265,15 @@ CASES = [
      snapshot(FIELD, [boar(dist=8),
                       unit("Kaltunk", 20, dist=25, reaction="FRIENDLY", color="SKULL_LEVEL",
                            looks_like="humanoid", quest_marker="QUEST_AVAILABLE")]),
-     {"first_texts": ["Talk to Kaltunk"]}),
+     {"first_texts": ["Talk to Kaltunk"], "planned": True}),
     ("bags_full", "bags full, a boar 9 yd away", "heads to town instead of killing for loot",
      "plan done", snapshot(FIELD, [boar(dist=9)], bags_free=0),
-     {"first_kinds": ["go to town"]}),
+     {"first_kinds": ["go to town"], "planned": True}),
     ("leveled_up_empty_field", "just reached level 2, nothing around",
      "moves on (explore or town); doesn't rest or idle", "reached level 2",
      snapshot(FIELD, level=2),
      {"first_kinds": ["explore", "go to town"],
-      "forbid_kinds": ["rest", "keep doing what I'm doing"]}),
+      "forbid_kinds": ["rest", "keep doing what I'm doing"], "planned": True}),
 ]
 
 
@@ -274,7 +287,8 @@ def main():
                     "generated": True, "reason": reason, "summary": summary, "rule": rule,
                     **checks})
     (EVAL / "cases.json").write_text(json.dumps(out, indent=2) + "\n")
-    print(f"{len(kept)} captured + {len(CASES)} generated = {len(out)} cases")
+    print(f"{len(kept)} captured + {len(CASES)} generated = {len(out)} cases; now run "
+          "tools/snapshot/add_fixture_options.py")
 
 
 if __name__ == "__main__":

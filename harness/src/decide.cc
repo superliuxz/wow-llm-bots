@@ -2,6 +2,7 @@
 
 #include "decide.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <optional>
@@ -11,6 +12,7 @@
 
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
@@ -96,6 +98,11 @@ std::optional<DecideOptions> ParseDecideArgs(
       options.temperature = static_cast<float>(real);
     } else if (name == "dry-run" && value.empty()) {
       options.dry_run = true;
+    } else if (name == "print-request" && value.empty()) {
+      options.print_request = true;
+    } else if (name == "whisperers") {
+      options.whisperers = base::SplitString(value, ",", base::TRIM_WHITESPACE,
+                                             base::SPLIT_WANT_NONEMPTY);
     } else {
       *error = base::StrCat({"unknown or invalid option: ", arg});
       return std::nullopt;
@@ -148,9 +155,28 @@ int RunDecide(const DecideOptions& options,
   input.wake_reason = options.wake_reason;
   input.slot = options.slot;
   input.temperature = options.temperature;
+  input.whisperers = options.whisperers;
+  for (const wlb::snapshot::Event& event : snapshot.events) {
+    if (event.chat && event.chat->channel == wlb::snapshot::WHISPER &&
+        !event.chat->from.empty() &&
+        std::find(input.whisperers.begin(), input.whisperers.end(),
+                  event.chat->from) == input.whisperers.end()) {
+      input.whisperers.push_back(event.chat->from);
+    }
+  }
 
   const Screen screen = RenderScreen(snapshot);
   const LlmRequest request = BuildPlanRequest(input, screen);
+  if (options.print_request) {
+    // Kind names are plain words (OptionKindName): no JSON escaping needed.
+    std::vector<std::string> kinds;
+    for (const OptionKind kind : screen.options) {
+      kinds.push_back(base::StrCat({"\"", OptionKindName(kind), "\""}));
+    }
+    base::StrAppend(report, {"{\"kinds\":[", base::JoinString(kinds, ","),
+                             "],\"body\":", BuildChatBody(request), "}\n"});
+    return 0;
+  }
   base::StringAppendF(report, "== screen of %s (%zu options)\n%s\n",
                       input.bot_name.c_str(), screen.options.size(),
                       screen.text.c_str());

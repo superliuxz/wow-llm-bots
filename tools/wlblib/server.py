@@ -5,6 +5,7 @@ processes only, found by their pid files, never by name across the machine."""
 import datetime
 import errno
 import os
+import pathlib
 import re
 import signal
 import subprocess
@@ -320,18 +321,28 @@ def _stop_pid(name, timeout_s):
     pid_file(name).unlink(missing_ok=True)
 
 
-def _kill_pid_file(name):
+def _kill_pid_file(name, *cmdline_words):
+    """SIGKILLs the process in `name`'s pid file, only if its command line still has all of
+    `cmdline_words`: after a reboot or a long time the pid may belong to something else."""
     try:
-        os.kill(int(pid_file(name).read_text()), signal.SIGKILL)
+        pid = int(pid_file(name).read_text())
+        args = pathlib.Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
     except (OSError, ValueError):
-        pass
+        pid, args = None, []
+    words = [a.decode(errors="replace") for a in args]
+    if pid and all(any(w in a for a in words) for w in cmdline_words):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
     pid_file(name).unlink(missing_ok=True)
 
 
-def server_stop():
-    """Stops worldserver (gracefully: it saves characters), authserver, backs the databases up,
-    then stops MySQL."""
-    _kill_pid_file("human-sampler")
+def server_stop(backup=True):
+    """Stops worldserver (gracefully: it saves characters), authserver, backs the databases up
+    (unless `backup` is False: test runs stop and start often, and would rotate the real backups
+    out), then stops MySQL."""
+    _kill_pid_file("human-sampler", "server", "sample")
     pid = running_pid("worldserver")
     if pid:
         try:
@@ -350,12 +361,13 @@ def server_stop():
         else:
             say("worldserver stopped")
     pid_file("worldserver").unlink(missing_ok=True)
-    _kill_pid_file("worldserver-pipe")
+    _kill_pid_file("worldserver-pipe", "sleep", "infinity")
     CONSOLE.unlink(missing_ok=True)
     _stop_pid("authserver", 10)
     if _mysql_up():
         try:
-            db_backup()  # The databases are quiet now.
+            if backup:
+                db_backup()  # The databases are quiet now.
         except Failed as e:
             say(f"backup FAILED (the server is stopping anyway): {e}")
         db_stop()

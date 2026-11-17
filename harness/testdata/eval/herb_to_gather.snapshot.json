@@ -917,5 +917,14 @@
         }
       ]
     }
-  }
+  },
+  "options": [
+    {
+      "text": "Gather Cactus Apple",
+      "guid": "0xF110029FA2000091"
+    },
+    {
+      "text": "Keep doing what I'm doing"
+    }
+  ]
 }

@@ -164,7 +164,8 @@ std::string Cut(std::string_view text, size_t max_bytes) {
 
 }  // namespace
 
-std::string PlanGrammar(int option_count) {
+std::string PlanGrammar(int option_count,
+                        const std::vector<std::string>& tell_names) {
   // A screen always has at least "Keep doing what I'm doing"; an empty
   // alternative would be an invalid grammar (llama-server rejects it).
   option_count = std::max(option_count, 1);
@@ -178,9 +179,28 @@ std::string PlanGrammar(int option_count) {
   for (int n = 2; n <= kMaxRepeat; ++n) {
     counts.push_back(base::StrCat({"\"", base::NumberToString(n), "\""}));
   }
+  std::vector<std::string> names;
+  for (const std::string& name : tell_names) {
+    const bool plain = name.size() >= static_cast<size_t>(kMinNameChars) &&
+                       name.size() <= static_cast<size_t>(kMaxNameChars) &&
+                       std::all_of(name.begin(), name.end(), [](char c) {
+                         return base::IsAsciiAlpha(c);
+                       });
+    if (plain) {
+      names.push_back(base::StrCat({"\"", name, "\""}));
+    }
+  }
+  std::string tell_rule;
+  if (!names.empty()) {
+    tell_rule = base::StrCat(
+        {"tell ::= \"\\ntell \" (", base::JoinString(names, " | "),
+         ") \": \" [^\\n|]{1,", base::NumberToString(kMaxSayChars), "}\n"});
+  }
   return base::StrCat({
       "root ::= \"do: \" steps \"\\nexpect: \" (\"none\" | ids) \"\\nwatch: \" "
-      "watches \"\\nlook: \" looknum goal? say? tell?\n"
+      "watches \"\\nlook: \" looknum goal? say?",
+      names.empty() ? "" : " tell?",
+      "\n"
       "ids ::= opt (\", \" opt){0,",
       base::NumberToString(kMaxExpected - 1),
       "}\n"
@@ -205,16 +225,12 @@ std::string PlanGrammar(int option_count) {
       "goal ::= \"\\ngoal: \" [^\\n]{1,",
       base::NumberToString(kMaxGoalChars),
       "}\n"
-      "say ::= \"\\nsay: \" [^\\n]{1,",
-      base::NumberToString(kMaxSayChars),
-      "}\n"
-      "tell ::= \"\\ntell \" [A-Z] [a-z]{",
-      base::NumberToString(kMinNameChars - 1),
-      ",",
-      base::NumberToString(kMaxNameChars - 1),
-      "} \": \" [^\\n]{1,",
+      // Chat lines: no '|' (the client's link and color escape; the module
+      // drops it too, chat/chat_text.h).
+      "say ::= \"\\nsay: \" [^\\n|]{1,",
       base::NumberToString(kMaxSayChars),
       "}\n",
+      tell_rule,
   });
 }
 

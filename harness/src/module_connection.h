@@ -44,6 +44,8 @@ class ModuleConnection {
     uint64_t snapshots = 0;
     uint64_t events = 0;
     uint64_t unparseable = 0;
+    // Readable, but from a module of another wire version (dropped).
+    uint64_t wrong_version = 0;
     uint64_t dropped_outbound = 0;
   };
 

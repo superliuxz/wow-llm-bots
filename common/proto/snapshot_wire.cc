@@ -2232,16 +2232,27 @@ struct glz::meta<wlb::snapshot::ModuleMessage> {
 namespace wlb::snapshot {
 namespace {
 
+// Read limits: a frame is at most 1 MiB (net/frame_codec.h), but a corrupt one
+// can claim a huge length for a string or array; refuse it before allocating.
+// Far above anything real: a snapshot's longest strings are chat lines and
+// tooltips, its longest arrays the nearby units of a crowded city (~200).
+inline constexpr size_t kMaxWireStringBytes = 64 * 1024;
+inline constexpr size_t kMaxWireArraySize = 16 * 1024;
+
 struct WireBeveOpts : glz::opts {
   uint32_t format = glz::BEVE;
   bool skip_null_members = true;
   bool skip_default_members = true;
   bool error_on_unknown_keys = false;
+  size_t max_string_length = kMaxWireStringBytes;
+  size_t max_array_size = kMaxWireArraySize;
 };
 
 struct StrictJsonReadOpts : glz::opts {
   uint32_t format = glz::JSON;
   bool error_on_unknown_keys = true;
+  size_t max_string_length = kMaxWireStringBytes;
+  size_t max_array_size = kMaxWireArraySize;
 };
 
 struct CompactJsonWriteOpts : glz::opts {
@@ -6702,10 +6713,12 @@ bool ReadBeve(std::string_view bytes, Snapshot* out) {
 
 std::string WriteJson(const Snapshot& snap, bool pretty) {
   std::string out;
-  if (pretty) {
-    (void)glz::write<PrettyJsonWriteOpts{}>(snap, out);
-  } else {
-    (void)glz::write<CompactJsonWriteOpts{}>(snap, out);
+  // An enum value with no name (a newer peer's, or memory gone bad) makes the
+  // writer fail half way, leaving invalid JSON: return nothing instead.
+  const auto ec = pretty ? glz::write<PrettyJsonWriteOpts{}>(snap, out)
+                         : glz::write<CompactJsonWriteOpts{}>(snap, out);
+  if (ec) {
+    return "";
   }
   return out;
 }
@@ -6724,10 +6737,12 @@ bool ReadJson(std::string_view json, Snapshot* out, std::string* error) {
 
 std::string WriteJson(const ModuleMessage& msg, bool pretty) {
   std::string out;
-  if (pretty) {
-    (void)glz::write<PrettyJsonWriteOpts{}>(msg, out);
-  } else {
-    (void)glz::write<CompactJsonWriteOpts{}>(msg, out);
+  // An enum value with no name (a newer peer's, or memory gone bad) makes the
+  // writer fail half way, leaving invalid JSON: return nothing instead.
+  const auto ec = pretty ? glz::write<PrettyJsonWriteOpts{}>(msg, out)
+                         : glz::write<CompactJsonWriteOpts{}>(msg, out);
+  if (ec) {
+    return "";
   }
   return out;
 }
@@ -6746,10 +6761,12 @@ bool ReadJson(std::string_view json, ModuleMessage* out, std::string* error) {
 
 std::string WriteJson(const Command& cmd, bool pretty) {
   std::string out;
-  if (pretty) {
-    (void)glz::write<PrettyJsonWriteOpts{}>(cmd, out);
-  } else {
-    (void)glz::write<CompactJsonWriteOpts{}>(cmd, out);
+  // An enum value with no name (a newer peer's, or memory gone bad) makes the
+  // writer fail half way, leaving invalid JSON: return nothing instead.
+  const auto ec = pretty ? glz::write<PrettyJsonWriteOpts{}>(cmd, out)
+                         : glz::write<CompactJsonWriteOpts{}>(cmd, out);
+  if (ec) {
+    return "";
   }
   return out;
 }

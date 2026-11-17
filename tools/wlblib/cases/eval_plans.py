@@ -40,10 +40,15 @@ OPTION_RE = re.compile(r"^\s+(\d+)\. ([^:\n]+)", re.M)
 
 
 def load_cases(names=()):
+    """The cases to score: by default those whose options live bots have; `planned` for the
+    ones that need options the module doesn't offer yet (Talk, Rest, Explore, Go to town:
+    review 2026-11-17, finding 5), or cases by name."""
     cases = json.loads(CASES_FILE.read_text())
     by_name = {c["name"]: c for c in cases}
     if not names or list(names) == [NAME]:
-        return cases
+        return [c for c in cases if not c.get("planned")]
+    if list(names) == ["planned"]:
+        return [c for c in cases if c.get("planned")]
     unknown = [n for n in names if n not in by_name]
     if unknown:
         raise Failed(f"no eval case {', '.join(unknown)} (have: {', '.join(by_name)})")
@@ -58,6 +63,9 @@ def ensure_harness():
     build.common("default", tests=False)
 
 
+WHISPER_FROM_RE = re.compile(r"whisper from ([A-Za-z]+)")
+
+
 def decide_one(case, temperature=0.0, slot=0):
     snap_path = EVAL_DIR / f"{case['name']}.snapshot.json"
     cmd = [
@@ -67,6 +75,10 @@ def decide_one(case, temperature=0.0, slot=0):
         f"--slot={slot}",
         f"--temperature={temperature}",
     ]
+    # Who whispered (as the live harness remembers it): who a `tell` line may answer.
+    whisperers = WHISPER_FROM_RE.findall(case["reason"])
+    if whisperers:
+        cmd.append(f"--whisperers={','.join(whisperers)}")
     res = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
     out = res.stdout
     reply_m = REPLY_RE.search(out)

@@ -71,6 +71,15 @@ Messages (`snapshot.proto`): the module sends `ModuleMessage` (a `Snapshot`, or 
   `monotonic_us` (this machine's monotonic clock).
 - A command may carry a `command_id`; an error it causes comes back with the same id, so the
   harness can tell "my choice failed" from an ordinary error line ("Not ready yet").
+- `version` (on every module message and command): `kWireVersion` (`common/proto/snapshot.h`).
+  Each side drops frames of another version and says so in its log (a module and a harness
+  from different checkouts). Adding a field keeps the version; changing a field's meaning
+  bumps it.
+- `done_command_id` (on the snapshot): the `command_id` of the last choice the body finished
+  carrying out (target dead, loot window closed, object clicked; for Keep, at once); 0 before
+  any, and again after the harness reconnects. A field, not an event, so a newer snapshot
+  replacing an older one can't lose it. The harness counts the step done when it matches the
+  step's command (some steps, like using a door, have no other visible end).
 - Wire format: **binary protobuf, length-prefixed frames** over the Unix socket. Both sides
   use C++ generated from `snapshot.proto` with `optimize_for = LITE_RUNTIME`, as Chromium
   does; the module contains no JSON code.

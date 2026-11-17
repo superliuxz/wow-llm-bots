@@ -3,6 +3,7 @@
 // The snapshot BEVE and JSON codecs round-trip through the bridge's frame
 // codec: what the module serializes is what the harness parses.
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -91,6 +92,69 @@ TEST(SnapshotProtoTest, CommandCarriesBlankFills) {
   EXPECT_EQ(parsed.choose->option, 4u);
   ASSERT_EQ(parsed.choose->fills.size(), 1u);
   EXPECT_EQ(parsed.choose->fills[0], "Totem Pole");
+}
+
+// A set optional holding 0 or false is not the same as an unset one (bags with
+// 0 free slots are full; unset is unknown): both codecs must keep it.
+TEST(SnapshotProtoTest, ZeroAndFalseOptionalsSurvive) {
+  pb::Snapshot snap;
+  snap.base.self.indicators.bag_free_slots = 0;
+  snap.base.nearby.units.emplace_back().rel.in_los = false;
+  snap.done_command_id = 7;
+
+  pb::Snapshot from_beve;
+  ASSERT_TRUE(pb::ReadBeve(pb::WriteBeve(snap), &from_beve));
+  EXPECT_EQ(from_beve, snap);
+  ASSERT_TRUE(from_beve.base.self.indicators.bag_free_slots.has_value());
+  ASSERT_TRUE(from_beve.base.nearby.units[0].rel.in_los.has_value());
+
+  pb::Snapshot from_json;
+  ASSERT_TRUE(pb::ReadJson(pb::WriteJson(snap), &from_json));
+  EXPECT_EQ(from_json, snap);
+}
+
+// Whatever arrives on the socket, reading it fails cleanly or succeeds: never a
+// crash (the sanitizer builds run this too).
+TEST(SnapshotProtoTest, CorruptFramesNeverCrash) {
+  const std::string good = pb::WriteBeve(MakeSnapshotMessage());
+  uint32_t state = 12345;
+  const auto next = [&state] {
+    state = state * 1664525u + 1013904223u;
+    return state >> 8;
+  };
+  for (int i = 0; i < 4000; ++i) {
+    std::string bad = good;
+    const int flips = 1 + static_cast<int>(next() % 4);
+    for (int f = 0; f < flips; ++f) {
+      bad[next() % bad.size()] = static_cast<char>(next());
+    }
+    if (i % 3 == 0) {
+      bad.resize(next() % bad.size());
+    }
+    pb::ModuleMessage msg;
+    (void)pb::ReadBeve(bad, &msg);
+  }
+}
+
+// A corrupt frame claiming a huge array is refused, not allocated.
+TEST(SnapshotProtoTest, OversizedArraysAreRefused) {
+  pb::Snapshot big;
+  big.options.resize(20000);
+  for (pb::Option& o : big.options) {
+    o.text = "x";
+  }
+  pb::Snapshot parsed;
+  EXPECT_FALSE(pb::ReadBeve(pb::WriteBeve(big), &parsed));
+}
+
+// An enum value with no name can't be written as JSON: nothing, not half a
+// document.
+TEST(SnapshotProtoTest, WriteJsonOfAnUnnamedEnumValueIsEmpty) {
+  pb::Snapshot snap;
+  pb::ChatEvent& chat = snap.events.emplace_back().chat.emplace();
+  chat.channel = static_cast<pb::ChatChannel>(250);
+  chat.text = "hi";
+  EXPECT_EQ(pb::WriteJson(snap), "");
 }
 
 }  // namespace

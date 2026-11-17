@@ -5,8 +5,10 @@
 #include <cstdint>
 #include <string>
 
+#include "Bag.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
+#include "ItemTemplate.h"
 #include "Map.h"
 #include "ObjectGuid.h"
 #include "Player.h"
@@ -60,6 +62,26 @@ std::string AreaName(uint32_t area_id) {
   return name ? name : "";
 }
 
+// Free slots in the backpack and general-purpose bags, the number the client's
+// bag bar shows (special bags, like a herb bag or a quiver, don't count).
+uint32_t FreeBagSlots(Player* bot) {
+  uint32_t free = 0;
+  for (uint8_t slot = INVENTORY_SLOT_ITEM_START; slot < INVENTORY_SLOT_ITEM_END;
+       ++slot) {
+    if (!bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot)) {
+      ++free;
+    }
+  }
+  for (uint8_t i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i) {
+    const Bag* bag = bot->GetBagByPos(i);
+    if (bag && bag->GetTemplate()->Class == ITEM_CLASS_CONTAINER &&
+        bag->GetTemplate()->SubClass == ITEM_SUBCLASS_CONTAINER) {
+      free += bag->GetFreeSlots();
+    }
+  }
+  return free;
+}
+
 void FillSelf(Player* bot, pb::Self* self) {
   const Powers power = bot->getPowerType();
   pb::Unit& unit = self->unit;
@@ -96,6 +118,7 @@ void FillSelf(Player* bot, pb::Self* self) {
   self->in_flight = bot->IsInFlight();
   self->on_transport = bot->GetTransport() != nullptr;
   self->money = bot->GetMoney();
+  self->indicators.bag_free_slots = FreeBagSlots(bot);
 
   pb::Self::Control& control = self->control;
   control.stunned = bot->HasUnitState(UNIT_STATE_STUNNED) ||

@@ -67,6 +67,32 @@ TEST(OptionsTest, OneAttackPerNameTargetingTheNearest) {
   EXPECT_EQ(snapshot.options[2].guid, "");
 }
 
+// The mob hitting the bot is the one a player hits back, even if another of
+// the same name is nearer.
+TEST(OptionsTest, AttackPrefersTheUnitAttackingTheBot) {
+  pb::Snapshot snapshot;
+  AddUnit(&snapshot, "Scorpid Worker", "0x1", 5);
+  AddUnit(&snapshot, "Scorpid Worker", "0x2", 9)->targeting_me = true;
+  const std::vector<OptionTarget> targets = AddOptions(&snapshot);
+  ASSERT_EQ(targets.size(), 2u);
+  EXPECT_EQ(targets[0].guid, "0x2");
+}
+
+TEST(OptionsTest, OnlyKeepWhileDead) {
+  for (pb::Self::LifeState state : {pb::Self::DEAD_BODY, pb::Self::GHOST}) {
+    pb::Snapshot snapshot;
+    snapshot.base.self.state = state;
+    AddUnit(&snapshot, "Scorpid Worker", "0x1", 5);
+    pb::Unit* corpse = AddUnit(&snapshot, "Vile Familiar", "0x2", 3);
+    corpse->dead = true;
+    corpse->lootable = true;
+    EXPECT_EQ(Texts(snapshot).size(), 0u);
+    AddOptions(&snapshot);
+    EXPECT_EQ(Texts(snapshot),
+              std::vector<std::string>{"Keep doing what I'm doing"});
+  }
+}
+
 TEST(OptionsTest, NeutralCanBeAttackedFriendlyCannot) {
   pb::Snapshot snapshot;
   AddUnit(&snapshot, "Mottled Boar", "0x1", 10, pb::Unit::NEUTRAL);

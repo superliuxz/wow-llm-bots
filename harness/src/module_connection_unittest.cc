@@ -72,8 +72,14 @@ class FakeModuleServer {
   void WaitForClient() { client_connected_.Wait(); }
   void WaitForCommand() { got_command_.Wait(); }
 
-  void Send(const pb::ModuleMessage& msg) {
-    std::string bytes = pb::WriteBeve(msg);
+  // Sent as this checkout's module would: with kWireVersion, unless the test
+  // sets another.
+  void Send(const pb::ModuleMessage& msg, bool keep_version = false) {
+    pb::ModuleMessage versioned = msg;
+    if (!keep_version) {
+      versioned.version = pb::kWireVersion;
+    }
+    std::string bytes = pb::WriteBeve(versioned);
     io_.task_runner()->PostTask(
         [s = server_, bytes = std::move(bytes)] { s->SendFrame(bytes); });
   }
@@ -167,6 +173,7 @@ TEST(ModuleConnectionTest, ReceivesSnapshotsEventsSendsCommandsAndReconnects) {
     const auto cmds = s1.commands();
     ASSERT_EQ(cmds.size(), 1u);
     EXPECT_EQ(cmds[0].command_id, 42u);
+    EXPECT_EQ(cmds[0].version, pb::kWireVersion);
     ASSERT_TRUE(cmds[0].choose.has_value());
     EXPECT_EQ(cmds[0].choose->option, 2u);
   }  // s1 stops and unlinks sock.
@@ -176,6 +183,12 @@ TEST(ModuleConnectionTest, ReceivesSnapshotsEventsSendsCommandsAndReconnects) {
     FakeModuleServer s2(sock);
     ASSERT_TRUE(s2.Start());
     s2.WaitForClient();
+
+    // A module of another wire version: dropped, and counted.
+    pb::ModuleMessage old;
+    old.version = pb::kWireVersion + 1;
+    old.snapshot.emplace().seq = 99;
+    s2.Send(old, /*keep_version=*/true);
 
     pb::ModuleMessage m2;
     pb::Snapshot& s2_snap = m2.snapshot.emplace();
@@ -200,6 +213,7 @@ TEST(ModuleConnectionTest, ReceivesSnapshotsEventsSendsCommandsAndReconnects) {
   EXPECT_EQ(stats.snapshots, 2u);
   EXPECT_EQ(stats.events, 1u);
   EXPECT_EQ(stats.receive_ages.size(), 1u);
+  EXPECT_EQ(stats.wrong_version, 1u);
 
   ::rmdir(dir.c_str());
 }

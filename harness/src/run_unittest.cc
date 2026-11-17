@@ -137,6 +137,7 @@ TEST(RunHarnessTest, EndToEndSocketToStreamingLlmToChooseCommand) {
   harness_connected.Wait();
 
   pb::ModuleMessage msg;
+  msg.version = pb::kWireVersion;
   pb::Snapshot& snap = msg.snapshot.emplace();
   snap.bot = "Testpriest";
   snap.seq = 7;
