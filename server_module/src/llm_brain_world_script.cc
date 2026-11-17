@@ -21,7 +21,7 @@
 #include "config/llm_brain_config.h"
 #include "options/option_executor.h"
 #include "options/options.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 #include "snapshot/nearby_builder.h"
 #include "snapshot/snapshot_builder.h"
 #include "snapshot/snapshot_schedule.h"
@@ -239,13 +239,13 @@ class LlmBrainWorldScript : public WorldScript {
   // A command from the harness (docs/specs/snapshot.md §9). So far: Choose.
   void OnHarnessMessage(std::string bytes) {
     wlb::snapshot::Command command;
-    if (!command.ParseFromString(bytes)) {
+    if (!wlb::snapshot::ReadBeve(bytes, &command)) {
       LOG_ERROR("module", "mod-llm-brain: unreadable command ({} bytes)",
                 bytes.size());
       return;
     }
-    const std::string name(command.bot());
-    if (!command.has_choose()) {
+    const std::string& name = command.bot;
+    if (!command.choose) {
       LOG_INFO("module", "mod-llm-brain: {}: command not supported yet", name);
       return;
     }
@@ -262,9 +262,9 @@ class LlmBrainWorldScript : public WorldScript {
                name);
       return;
     }
-    const wlb::snapshot::Command::Choose& choose = command.choose();
+    const wlb::snapshot::Command::Choose& choose = *command.choose;
     const OptionHistory::Lookup found =
-        bots_[bot_index].history.Find(choose.seq(), choose.option());
+        bots_[bot_index].history.Find(choose.seq, choose.option);
     std::string error = found.error;
     if (found.target) {
       error = ExecuteOption(bot, *found.target);
@@ -281,24 +281,23 @@ class LlmBrainWorldScript : public WorldScript {
     LOG_INFO("module",
              "mod-llm-brain: {} chose {} of snapshot {} ({} {}): {}, "
              "age_at_apply={} ms",
-             name, choose.option(), choose.seq(),
+             name, choose.option, choose.seq,
              found.target ? OptionKindName(found.target->kind) : "-",
              found.target ? found.target->name : "",
              error.empty() ? "ok" : error, age_ms);
     if (!error.empty()) {
       // The bot sees it like the client's red error line.
       wlb::snapshot::ModuleMessage message;
-      wlb::snapshot::ImmediateEvent* event = message.mutable_event();
-      event->set_bot(name);
-      event->set_seq(bots_[bot_index].seq);
-      event->set_time_ms(base::Time::Now().InMillisecondsSinceUnixEpoch());
-      event->set_monotonic_us(
-          (base::TimeTicks::Now() - base::TimeTicks()).InMicroseconds());
-      wlb::snapshot::ErrorEvent* failed =
-          event->mutable_event()->mutable_error();
-      failed->set_text(error);
-      failed->set_command_id(command.command_id());
-      bridge_->Send(message.SerializeAsString());
+      wlb::snapshot::ImmediateEvent& event = message.event.emplace();
+      event.bot = name;
+      event.seq = bots_[bot_index].seq;
+      event.time_ms = base::Time::Now().InMillisecondsSinceUnixEpoch();
+      event.monotonic_us =
+          (base::TimeTicks::Now() - base::TimeTicks()).InMicroseconds();
+      wlb::snapshot::ErrorEvent& failed = event.event.error.emplace();
+      failed.text = error;
+      failed.command_id = command.command_id;
+      bridge_->Send(wlb::snapshot::WriteBeve(message));
     }
   }
 
@@ -309,15 +308,15 @@ class LlmBrainWorldScript : public WorldScript {
           config_.nameplate_range_yd, config_.los_raycasts_per_snapshot});
     }
     wlb::snapshot::ModuleMessage message;
-    wlb::snapshot::Snapshot* snapshot = message.mutable_snapshot();
-    snapshot->set_bot(name);
-    snapshot->set_seq(++state.seq);
-    snapshot->set_time_ms(base::Time::Now().InMillisecondsSinceUnixEpoch());
+    wlb::snapshot::Snapshot& snapshot = message.snapshot.emplace();
+    snapshot.bot = name;
+    snapshot.seq = ++state.seq;
+    snapshot.time_ms = base::Time::Now().InMillisecondsSinceUnixEpoch();
     const base::TimeTicks start = base::TimeTicks::Now();
-    snapshot->set_monotonic_us((start - base::TimeTicks()).InMicroseconds());
-    const NearbyBuilder::Stats nearby = state.builder->Build(bot, snapshot);
-    state.history.Add(snapshot->seq(), start, AddOptions(snapshot));
-    std::string bytes = message.SerializeAsString();
+    snapshot.monotonic_us = (start - base::TimeTicks()).InMicroseconds();
+    const NearbyBuilder::Stats nearby = state.builder->Build(bot, &snapshot);
+    state.history.Add(snapshot.seq, start, AddOptions(&snapshot));
+    std::string bytes = wlb::snapshot::WriteBeve(message);
     stats_.Add({base::TimeTicks::Now() - start, bytes.size(), nearby.units,
                 nearby.objects, nearby.hidden, nearby.raycasts});
     // The newest snapshot of a bot wins if the harness is behind.

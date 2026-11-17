@@ -37,7 +37,7 @@
 #include "UpdateFields.h"
 #include "World.h"
 #include "base/time/time.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 #include "snapshot/perception.h"
 
 namespace llm_brain {
@@ -73,13 +73,12 @@ std::string SpellName(uint32_t spell_id) {
 void FillRelative(Player* bot, WorldObject* object, pb::Relative* rel) {
   const float dx = object->GetPositionX() - bot->GetPositionX();
   const float dy = object->GetPositionY() - bot->GetPositionY();
-  rel->set_dist_yd(bot->GetDistance(object));
-  rel->set_dir(CompassDirection(dx, dy));
-  rel->set_height(HeightOf(object->GetPositionZ() - bot->GetPositionZ()));
-  pb::Vec3* position = rel->mutable_position();
-  position->set_x(object->GetPositionX());
-  position->set_y(object->GetPositionY());
-  position->set_z(object->GetPositionZ());
+  rel->dist_yd = bot->GetDistance(object);
+  rel->dir = CompassDirection(dx, dy);
+  rel->height = HeightOf(object->GetPositionZ() - bot->GetPositionZ());
+  rel->position.x = object->GetPositionX();
+  rel->position.y = object->GetPositionY();
+  rel->position.z = object->GetPositionZ();
 }
 
 pb::Unit::Kind UnitKind(Unit* unit) {
@@ -234,7 +233,7 @@ pb::Unit::QuestMarker QuestMarker(Player* bot, Creature* creature) {
 // field has explicit presence), never a guess.
 void SetInLos(std::optional<bool> in_los, pb::Relative* rel) {
   if (in_los) {
-    rel->set_in_los(*in_los);
+    rel->in_los = *in_los;
   }
 }
 
@@ -266,17 +265,18 @@ bool Interruptible(Unit* unit, const SpellInfo* info) {
 
 void FillCast(Unit* unit, Spell* spell, pb::Cast* cast) {
   const SpellInfo* info = spell->GetSpellInfo();
-  cast->mutable_spell()->set_id(info->Id);
-  cast->mutable_spell()->set_name(Localized(info->SpellName));
-  cast->set_remaining_ms(
-      static_cast<uint32_t>(std::max(0, spell->GetCastTimeRemaining())));
-  cast->set_interruptible(Interruptible(unit, info));
-  cast->set_channeled(info->IsChanneled());
+  pb::Spell& sp = cast->spell.emplace();
+  sp.id = info->Id;
+  sp.name = Localized(info->SpellName);
+  cast->remaining_ms =
+      static_cast<uint32_t>(std::max(0, spell->GetCastTimeRemaining()));
+  cast->interruptible = Interruptible(unit, info);
+  cast->channeled = info->IsChanneled();
 }
 
 void FillActivity(Unit* unit, Player* bot, pb::Activity* activity) {
   if (!unit->IsAlive()) {
-    activity->set_state(pb::Activity::DEAD);
+    activity->state = pb::Activity::DEAD;
     return;
   }
   // What shows a cast bar, as in Unit::IsNonMeleeSpellCast: a spell stays in
@@ -284,75 +284,75 @@ void FillActivity(Unit* unit, Player* bot, pb::Activity* activity) {
   // an instant cast, none of which a player sees as casting.
   Spell* channel = unit->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
   if (channel && channel->getState() != SPELL_STATE_FINISHED) {
-    activity->set_state(pb::Activity::CHANNELING);
-    FillCast(unit, channel, activity->mutable_cast());
+    activity->state = pb::Activity::CHANNELING;
+    FillCast(unit, channel, &activity->cast.emplace());
     return;
   }
   Spell* cast = unit->GetCurrentSpell(CURRENT_GENERIC_SPELL);
   if (cast && cast->getState() == SPELL_STATE_PREPARING &&
       cast->GetCastTime() > 0) {
-    activity->set_state(pb::Activity::CASTING);
-    FillCast(unit, cast, activity->mutable_cast());
+    activity->state = pb::Activity::CASTING;
+    FillCast(unit, cast, &activity->cast.emplace());
     return;
   }
   Unit* victim = unit->GetVictim();
   if (victim && unit->IsInCombat()) {
-    activity->set_state(victim == bot && unit->isMoving()
-                            ? pb::Activity::APPROACHING_ME
-                            : pb::Activity::FIGHTING);
-    activity->set_with(victim->GetName());
+    activity->state = victim == bot && unit->isMoving()
+                          ? pb::Activity::APPROACHING_ME
+                          : pb::Activity::FIGHTING;
+    activity->with = victim->GetName();
     return;
   }
   switch (unit->GetMotionMaster()->GetCurrentMovementGeneratorType()) {
     case FLEEING_MOTION_TYPE:
     case TIMED_FLEEING_MOTION_TYPE:
-      activity->set_state(pb::Activity::FLEEING);
+      activity->state = pb::Activity::FLEEING;
       return;
     case WAYPOINT_MOTION_TYPE:
-      activity->set_state(pb::Activity::PATROLLING);
+      activity->state = pb::Activity::PATROLLING;
       return;
     case FOLLOW_MOTION_TYPE:
-      activity->set_state(pb::Activity::FOLLOWING);
+      activity->state = pb::Activity::FOLLOWING;
       return;
     default:
       break;
   }
   if (unit->isMoving()) {
-    activity->set_state(pb::Activity::MOVING);
+    activity->state = pb::Activity::MOVING;
   } else if (unit->getStandState() == UNIT_STAND_STATE_SIT) {
-    activity->set_state(pb::Activity::SITTING);
+    activity->state = pb::Activity::SITTING;
   } else {
-    activity->set_state(pb::Activity::IDLE);
+    activity->state = pb::Activity::IDLE;
   }
 }
 
 void FillVisualState(Unit* unit, pb::Unit* out) {
   if (unit->HasUnitState(UNIT_STATE_STUNNED)) {
-    out->add_visual_state(pb::Unit::STUNNED);
+    out->visual_state.push_back(pb::Unit::STUNNED);
   }
   if (unit->HasAuraType(SPELL_AURA_MOD_FEAR)) {
-    out->add_visual_state(pb::Unit::FEARED);
+    out->visual_state.push_back(pb::Unit::FEARED);
   }
   if (unit->HasAuraWithMechanic(1 << MECHANIC_POLYMORPH)) {
-    out->add_visual_state(pb::Unit::POLYMORPHED);
+    out->visual_state.push_back(pb::Unit::POLYMORPHED);
   }
   if (unit->HasAuraWithMechanic(1 << MECHANIC_SLEEP)) {
-    out->add_visual_state(pb::Unit::ASLEEP);
+    out->visual_state.push_back(pb::Unit::ASLEEP);
   }
   if (unit->HasAuraWithMechanic(1 << MECHANIC_BANISH)) {
-    out->add_visual_state(pb::Unit::BANISHED);
+    out->visual_state.push_back(pb::Unit::BANISHED);
   }
   if (unit->HasAuraWithMechanic(1 << MECHANIC_SHACKLE)) {
-    out->add_visual_state(pb::Unit::SHACKLED);
+    out->visual_state.push_back(pb::Unit::SHACKLED);
   }
   if (unit->HasUnitState(UNIT_STATE_ROOT)) {
-    out->add_visual_state(pb::Unit::ROOTED);
+    out->visual_state.push_back(pb::Unit::ROOTED);
   }
   if (unit->IsCharmed()) {
-    out->add_visual_state(pb::Unit::MIND_CONTROLLED);
+    out->visual_state.push_back(pb::Unit::MIND_CONTROLLED);
   }
   if (unit->HasStealthAura()) {
-    out->add_visual_state(pb::Unit::STEALTH_SHIMMER);
+    out->visual_state.push_back(pb::Unit::STEALTH_SHIMMER);
   }
 }
 
@@ -361,53 +361,54 @@ void FillPack(Creature* creature, pb::Unit* out) {
   if (!group || !group->GetLeader() || group->GetMembers().size() < 2) {
     return;
   }
-  out->mutable_pack()->set_id(group->GetLeader()->GetSpawnId());
-  out->mutable_pack()->set_size(group->GetMembers().size());
+  pb::Unit::Pack& pack = out->pack.emplace();
+  pack.id = group->GetLeader()->GetSpawnId();
+  pack.size = static_cast<uint32_t>(group->GetMembers().size());
 }
 
 // Model-level fields: what anyone can see of the unit at any distance.
 void FillModel(Unit* unit, Player* bot, pb::Unit* out) {
-  out->set_guid(GuidString(unit->GetGUID()));
-  out->set_kind(UnitKind(unit));
-  out->set_looks_like(LooksLike(unit));
-  out->set_size(SizeFromBoundingRadius(unit->GetBoundaryRadius()));
-  out->set_dead(!unit->IsAlive());
-  FillActivity(unit, bot, out->mutable_activity());
+  out->guid = GuidString(unit->GetGUID());
+  out->kind = UnitKind(unit);
+  out->looks_like = LooksLike(unit);
+  out->size = SizeFromBoundingRadius(unit->GetBoundaryRadius());
+  out->dead = !unit->IsAlive();
+  FillActivity(unit, bot, &out->activity);
   FillVisualState(unit, out);
   if (Creature* creature = unit->ToCreature()) {
     FillPack(creature, out);
-    out->set_lootable(!unit->IsAlive() && bot->isAllowedToLoot(creature));
+    out->lootable = !unit->IsAlive() && bot->isAllowedToLoot(creature);
   }
 }
 
 // Nameplate-level fields (within name / nameplate range).
 void FillNameplate(Unit* unit, Player* bot, pb::Unit* out) {
-  out->set_name(unit->GetName());
-  out->set_level(unit->GetLevel());
-  out->set_level_color(LevelColor(bot->GetLevel(), unit->GetLevel()));
-  out->set_reaction(Reaction(unit, bot));
-  out->set_health_pct(unit->GetHealthPct());
+  out->name = unit->GetName();
+  out->level = unit->GetLevel();
+  out->level_color = LevelColor(bot->GetLevel(), unit->GetLevel());
+  out->reaction = Reaction(unit, bot);
+  out->health_pct = unit->GetHealthPct();
   if (unit->GetMaxPower(unit->getPowerType()) > 0) {
-    out->set_power_pct(unit->GetPowerPct(unit->getPowerType()));
+    out->power_pct = unit->GetPowerPct(unit->getPowerType());
   }
-  out->set_targeting_me(unit->GetTarget() == bot->GetGUID());
+  out->targeting_me = unit->GetTarget() == bot->GetGUID();
   if (Unit* victim = unit->GetVictim()) {
-    out->set_target(victim->GetName());
+    out->target = victim->GetName();
     if (victim == bot) {
-      out->set_threat_status(pb::Unit::THREAT_AGGRO);
+      out->threat_status = pb::Unit::THREAT_AGGRO;
     }
   }
-  out->set_skinnable(unit->HasUnitFlag(UNIT_FLAG_SKINNABLE));
+  out->skinnable = unit->HasUnitFlag(UNIT_FLAG_SKINNABLE);
   if (Player* player = unit->ToPlayer()) {
-    out->set_pvp_flagged(player->IsPvP());
-    out->mutable_player()->set_class_(ClassName(player->getClass()));
+    out->pvp_flagged = player->IsPvP();
+    out->player.emplace().class_ = ClassName(player->getClass());
   }
   if (Creature* creature = unit->ToCreature()) {
-    out->set_classification(Classification(creature));
-    out->set_subtitle(creature->GetCreatureTemplate()->SubName);
-    out->set_tapped_by_other(creature->hasLootRecipient() &&
-                             !creature->isTappedBy(bot));
-    out->set_quest_marker(QuestMarker(bot, creature));
+    out->classification = Classification(creature);
+    out->subtitle = creature->GetCreatureTemplate()->SubName;
+    out->tapped_by_other =
+        creature->hasLootRecipient() && !creature->isTappedBy(bot);
+    out->quest_marker = QuestMarker(bot, creature);
   }
 }
 
@@ -544,49 +545,51 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
       continue;
     }
     if (Unit* unit = object->ToUnit()) {
-      pb::Unit* out = nearby->add_units();
-      FillModel(unit, bot, out);
-      FillRelative(bot, unit, out->mutable_rel());
-      SetInLos(in_los, out->mutable_rel());
-      out->mutable_rel()->set_behind_it(unit->isInBack(bot));
-      out->mutable_rel()->set_facing_me(unit->isInFront(bot, M_PI / 2));
+      pb::Unit& out = nearby->units.emplace_back();
+      FillModel(unit, bot, &out);
+      FillRelative(bot, unit, &out.rel);
+      SetInLos(in_los, &out.rel);
+      out.rel.behind_it = unit->isInBack(bot);
+      out.rel.facing_me = unit->isInFront(bot, M_PI / 2);
       if (near) {
-        out->set_detail(pb::Unit::NAMEPLATE);
-        FillNameplate(unit, bot, out);
+        out.detail = pb::Unit::NAMEPLATE;
+        FillNameplate(unit, bot, &out);
       } else {
-        out->set_detail(pb::Unit::MODEL);
+        out.detail = pb::Unit::MODEL;
       }
       ++stats.units;
     } else if (GameObject* go = object->ToGameObject()) {
-      pb::GameObject* out = nearby->add_objects();
-      out->set_guid(GuidString(guid));
-      out->set_name(go->GetName());
-      out->set_kind(ObjectKind(go));
-      out->set_usable(!go->HasGameObjectFlag(GO_FLAG_NOT_SELECTABLE));
-      out->set_state(go->GetGoState() == GO_STATE_ACTIVE ? "active" : "ready");
-      out->set_highlighted(go->ActivateToQuest(bot));
-      FillRelative(bot, go, out->mutable_rel());
-      SetInLos(in_los, out->mutable_rel());
+      pb::GameObject& out = nearby->objects.emplace_back();
+      out.guid = GuidString(guid);
+      out.name = go->GetName();
+      out.kind = ObjectKind(go);
+      out.usable = !go->HasGameObjectFlag(GO_FLAG_NOT_SELECTABLE);
+      out.state = go->GetGoState() == GO_STATE_ACTIVE ? "active" : "ready";
+      out.highlighted = go->ActivateToQuest(bot);
+      FillRelative(bot, go, &out.rel);
+      SetInLos(in_los, &out.rel);
       ++stats.objects;
     } else if (DynamicObject* area = object->ToDynObject()) {
       if (area->GetByteValue(DYNAMICOBJECT_BYTES, 0) !=
           DYNAMIC_OBJECT_AREA_SPELL) {
         continue;  // A far-sight viewpoint: nothing a player sees.
       }
-      pb::Area* out = nearby->add_areas();
-      out->set_guid(GuidString(guid));
-      out->set_name(SpellName(area->GetSpellId()));
-      out->mutable_spell()->set_id(area->GetSpellId());
-      out->mutable_spell()->set_name(out->name());
-      out->set_radius_yd(area->GetRadius());
-      out->set_inside_me(bot->GetExactDist2d(area) <= area->GetRadius());
+      pb::Area& out = nearby->areas.emplace_back();
+      out.guid = GuidString(guid);
+      out.name = SpellName(area->GetSpellId());
+      pb::Spell& sp = out.spell.emplace();
+      sp.id = area->GetSpellId();
+      sp.name = out.name;
+      out.radius_yd = area->GetRadius();
+      out.inside_me = bot->GetExactDist2d(area) <= area->GetRadius();
       Unit* caster = area->GetCaster();
-      out->set_hostile(caster && caster->IsHostileTo(bot));
+      out.hostile = caster && caster->IsHostileTo(bot);
       if (area->GetDuration() > 0) {  // -1: lasts until removed.
-        out->set_remaining_s(static_cast<float>(area->GetDuration()) / 1000.0f);
+        out.remaining_s = static_cast<float>(area->GetDuration()) / 1000.0f;
       }
-      FillRelative(bot, area, out->mutable_rel());
-      SetInLos(in_los, out->mutable_rel());
+      pb::Relative& rel = out.rel.emplace();
+      FillRelative(bot, area, &rel);
+      SetInLos(in_los, &rel);
       ++stats.areas;
     }
   }

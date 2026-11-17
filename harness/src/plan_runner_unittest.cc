@@ -8,7 +8,7 @@
 
 #include "base/time/time.h"
 #include "gtest/gtest.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 #include "screen_renderer.h"
 
 namespace harness {
@@ -18,11 +18,11 @@ namespace pb = wlb::snapshot;
 
 pb::Snapshot MakeSnap(uint32_t seq, bool in_combat = false) {
   pb::Snapshot snap;
-  snap.set_seq(seq);
-  snap.mutable_base()->mutable_self()->set_state(pb::Self::ALIVE);
-  snap.mutable_base()->mutable_self()->set_in_combat(in_combat);
-  snap.mutable_base()->mutable_self()->set_health(60);
-  snap.mutable_base()->mutable_self()->set_health_max(60);
+  snap.seq = seq;
+  snap.base.self.state = pb::Self::ALIVE;
+  snap.base.self.in_combat = in_combat;
+  snap.base.self.health = 60;
+  snap.base.self.health_max = 60;
   return snap;
 }
 
@@ -30,22 +30,22 @@ void AddBoar(pb::Snapshot* snap,
              const std::string& guid,
              bool dead = false,
              bool lootable = false) {
-  pb::Unit* u = snap->mutable_base()->mutable_nearby()->add_units();
-  u->set_guid(guid);
-  u->set_name("Mottled Boar");
-  u->set_kind(pb::Unit::NPC);
-  u->set_reaction(pb::Unit::NEUTRAL);
-  u->set_dead(dead);
-  u->set_lootable(lootable);
-  u->mutable_rel()->set_dist_yd(6.0f);
+  pb::Unit& u = snap->base.nearby.units.emplace_back();
+  u.guid = guid;
+  u.name = "Mottled Boar";
+  u.kind = pb::Unit::NPC;
+  u.reaction = pb::Unit::NEUTRAL;
+  u.dead = dead;
+  u.lootable = lootable;
+  u.rel.dist_yd = 6.0f;
 }
 
 void AddModuleOption(pb::Snapshot* snap,
                      const std::string& text,
                      const std::string& guid = "") {
-  pb::Option* opt = snap->add_options();
-  opt->set_text(text);
-  opt->set_guid(guid);
+  pb::Option& opt = snap->options.emplace_back();
+  opt.text = text;
+  opt.guid = guid;
 }
 
 TEST(PlanRunnerTest, RepeatsReResolveAgainstFreshSnapshotsAndThenLoot) {
@@ -63,8 +63,8 @@ TEST(PlanRunnerTest, RepeatsReResolveAgainstFreshSnapshotsAndThenLoot) {
   // Plan: attack 2x Mottled Boar (`1x2`).
   const RunnerAction a1 = runner.Start({{1, 2}}, 10, sc10, t0);
   ASSERT_TRUE(a1.choose);
-  EXPECT_EQ(a1.choose->seq(), 10u);
-  EXPECT_EQ(a1.choose->option(), 1u);
+  EXPECT_EQ(a1.choose->seq, 10u);
+  EXPECT_EQ(a1.choose->option, 1u);
   EXPECT_TRUE(a1.finished_reason.empty());
 
   // Snapshot 11: fighting 0x1 (still alive) -> nothing new sent yet.
@@ -89,8 +89,8 @@ TEST(PlanRunnerTest, RepeatsReResolveAgainstFreshSnapshotsAndThenLoot) {
       runner.OnSnapshot(s12, RenderScreen(s12), t0 + base::Seconds(5));
   // Repeat #2 re-resolves "Attack Mottled Boar" to option 2 of snapshot 12!
   ASSERT_TRUE(a3.choose);
-  EXPECT_EQ(a3.choose->seq(), 12u);
-  EXPECT_EQ(a3.choose->option(), 2u);
+  EXPECT_EQ(a3.choose->seq, 12u);
+  EXPECT_EQ(a3.choose->option, 2u);
 
   // Snapshot 13: 0x2 also died -> 2x2 finished, wakes brain with "plan done".
   pb::Snapshot s13 = MakeSnap(13, /*in_combat=*/false);
@@ -114,7 +114,7 @@ TEST(PlanRunnerTest, KeepStaysActiveUntilLookTimerWithoutFinishingEarly) {
   PlanRunner runner;
   const RunnerAction a1 = runner.Start({{1, 1}}, 1, sc1, t0);
   ASSERT_TRUE(a1.choose);
-  EXPECT_EQ(a1.choose->option(), 1u);
+  EXPECT_EQ(a1.choose->option, 1u);
 
   // Even 120 s later, `Keep` does not self-finish or time out on its own.
   const RunnerAction a2 = runner.OnSnapshot(s1, sc1, t0 + base::Seconds(120));

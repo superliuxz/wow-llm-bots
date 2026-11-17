@@ -1,7 +1,7 @@
 {
  "bot": "Grokta",
  "seq": 89000,
- "time_ms": "1794810000000",
+ "time_ms": 1794810000000,
  "base": {
   "self": {
    "unit": {

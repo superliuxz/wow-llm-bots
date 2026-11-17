@@ -20,7 +20,7 @@
 #include "base/time/time.h"
 #include "gtest/gtest.h"
 #include "net/unix_socket_server.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 
 namespace harness {
 namespace {
@@ -45,7 +45,7 @@ class FakeModuleServer {
                      [this] { client_connected_.Signal(); },
                      [this](std::string frame) {
                        pb::Command cmd;
-                       if (cmd.ParseFromString(frame)) {
+                       if (pb::ReadBeve(frame, &cmd)) {
                          base::AutoLock lock(lock_);
                          commands_.push_back(std::move(cmd));
                          got_command_.Signal();
@@ -73,7 +73,7 @@ class FakeModuleServer {
   void WaitForCommand() { got_command_.Wait(); }
 
   void Send(const pb::ModuleMessage& msg) {
-    std::string bytes = msg.SerializeAsString();
+    std::string bytes = pb::WriteBeve(msg);
     io_.task_runner()->PostTask(
         [s = server_, bytes = std::move(bytes)] { s->SendFrame(bytes); });
   }
@@ -115,7 +115,7 @@ TEST(ModuleConnectionTest, ReceivesSnapshotsEventsSendsCommandsAndReconnects) {
         ModuleConnection::Callbacks{
             {},
             [&](pb::Snapshot snap, base::TimeTicks /*at*/) {
-              seqs.push_back(snap.seq());
+              seqs.push_back(snap.seq);
               if (seqs.size() == 1) {
                 got_snap_1.Signal();
               } else if (seqs.size() == 2) {
@@ -123,7 +123,9 @@ TEST(ModuleConnectionTest, ReceivesSnapshotsEventsSendsCommandsAndReconnects) {
               }
             },
             [&](pb::ImmediateEvent ev, base::TimeTicks /*at*/) {
-              event_text = ev.event().error().text();
+              if (ev.event.error) {
+                event_text = ev.event.error->text;
+              }
               got_event.Signal();
             }},
         /*retry_delay=*/base::Milliseconds(20));
@@ -139,30 +141,34 @@ TEST(ModuleConnectionTest, ReceivesSnapshotsEventsSendsCommandsAndReconnects) {
     s1.WaitForClient();
 
     pb::ModuleMessage m1;
-    m1.mutable_snapshot()->set_bot("Testpriest");
-    m1.mutable_snapshot()->set_seq(1);
-    m1.mutable_snapshot()->set_monotonic_us(
-        (base::TimeTicks::Now() - base::TimeTicks()).InMicroseconds());
+    pb::Snapshot& s1_snap = m1.snapshot.emplace();
+    s1_snap.bot = "Testpriest";
+    s1_snap.seq = 1;
+    s1_snap.monotonic_us =
+        (base::TimeTicks::Now() - base::TimeTicks()).InMicroseconds();
     s1.Send(m1);
     got_snap_1.Wait();
 
     pb::ModuleMessage me;
-    me.mutable_event()->set_bot("Testpriest");
-    me.mutable_event()->mutable_event()->mutable_error()->set_text("oom");
+    pb::ImmediateEvent& imm = me.event.emplace();
+    imm.bot = "Testpriest";
+    imm.event.error.emplace().text = "oom";
     s1.Send(me);
     got_event.Wait();
 
     pb::Command cmd;
-    cmd.set_bot("Testpriest");
-    cmd.set_command_id(42);
-    cmd.mutable_choose()->set_seq(1);
-    cmd.mutable_choose()->set_option(2);
+    cmd.bot = "Testpriest";
+    cmd.command_id = 42;
+    pb::Command::Choose& choose = cmd.choose.emplace();
+    choose.seq = 1;
+    choose.option = 2;
     harness_seq.task_runner()->PostTask([&] { conn->SendCommand(cmd); });
     s1.WaitForCommand();
     const auto cmds = s1.commands();
     ASSERT_EQ(cmds.size(), 1u);
-    EXPECT_EQ(cmds[0].command_id(), 42u);
-    EXPECT_EQ(cmds[0].choose().option(), 2u);
+    EXPECT_EQ(cmds[0].command_id, 42u);
+    ASSERT_TRUE(cmds[0].choose.has_value());
+    EXPECT_EQ(cmds[0].choose->option, 2u);
   }  // s1 stops and unlinks sock.
 
   // Start server #2 on the same socket -> client reconnects automatically!
@@ -172,8 +178,9 @@ TEST(ModuleConnectionTest, ReceivesSnapshotsEventsSendsCommandsAndReconnects) {
     s2.WaitForClient();
 
     pb::ModuleMessage m2;
-    m2.mutable_snapshot()->set_bot("Testpriest");
-    m2.mutable_snapshot()->set_seq(2);
+    pb::Snapshot& s2_snap = m2.snapshot.emplace();
+    s2_snap.bot = "Testpriest";
+    s2_snap.seq = 2;
     s2.Send(m2);
     got_snap_2.Wait();
   }

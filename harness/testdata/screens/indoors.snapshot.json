@@ -1,0 +1,1204 @@
+{
+  "bot": "Loada",
+  "seq": 11,
+  "time_ms": 1794806047917,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x00000000000003C8",
+        "name": "Loada",
+        "kind": "PLAYER",
+        "level": 1,
+        "health_pct": 100.0,
+        "power_pct": 100.0,
+        "player": {
+          "class": "Priest"
+        }
+      },
+      "gender": "MALE",
+      "xp": 40,
+      "xp_next": 400,
+      "rested_xp": 10,
+      "health": 72,
+      "health_max": 72,
+      "power_type": "MANA",
+      "power": 91,
+      "power_max": 91,
+      "state": "ALIVE"
+    },
+    "where": {
+      "map": "Kalimdor",
+      "zone": "Durotar",
+      "subzone": "The Den",
+      "position": {
+        "x": -601.61206,
+        "y": -4198.191,
+        "z": 41.099106
+      },
+      "facing": 1.3102685,
+      "indoors": true
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0xF130000C4900021E",
+          "rel": {
+            "dist_yd": 37.66114,
+            "dir": "SE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -629.052,
+              "y": -4228.06,
+              "z": 38.2334
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "SMALL",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF1300016FC000222",
+          "rel": {
+            "dist_yd": 23.688583,
+            "dir": "SE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -625.296,
+              "y": -4210.17,
+              "z": 38.2966
+            },
+            "facing_me": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF1300027C000021C",
+          "rel": {
+            "dist_yd": 53.010178,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -610.073,
+              "y": -4253.52,
+              "z": 39.0393
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C5500022E",
+          "rel": {
+            "dist_yd": 20.194609,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -623.939,
+              "y": -4203.88,
+              "z": 38.4285
+            }
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "SMALL",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130001740000230",
+          "rel": {
+            "dist_yd": 65.83472,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -626.68976,
+              "y": -4262.229,
+              "z": 38.192127
+            }
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "PATROLLING"
+          },
+          "looks_like": "humanoid",
+          "size": "SMALL",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C52000239",
+          "rel": {
+            "dist_yd": 41.871544,
+            "dir": "SE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -635.462,
+              "y": -4227.52,
+              "z": 38.371
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF13000174000023A",
+          "rel": {
+            "dist_yd": 73.332436,
+            "dir": "SE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -645.423,
+              "y": -4260.63,
+              "z": 38.163
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "SMALL",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003CE",
+          "rel": {
+            "dist_yd": 78.03907,
+            "dir": "SE",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -654.20166,
+              "y": -4259.742,
+              "z": 37.478798
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003CD",
+          "rel": {
+            "dist_yd": 77.244576,
+            "dir": "SE",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -651.7967,
+              "y": -4260.7,
+              "z": 37.454212
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003CC",
+          "rel": {
+            "dist_yd": 88.072624,
+            "dir": "NE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -552.5412,
+              "y": -4274.904,
+              "z": 39.913864
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003CA",
+          "name": "Loadc",
+          "rel": {
+            "dist_yd": 8.159147,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -603.4727,
+              "y": -4187.188,
+              "z": 41.091694
+            }
+          },
+          "kind": "PLAYER",
+          "level": 1,
+          "level_color": "YELLOW",
+          "reaction": "FRIENDLY",
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "player": {
+            "class": "Priest"
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000003CF",
+          "rel": {
+            "dist_yd": 94.785126,
+            "dir": "SE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -682.2308,
+              "y": -4253.468,
+              "z": 38.449116
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003D0",
+          "rel": {
+            "dist_yd": 53.138084,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -618.518,
+              "y": -4251.67,
+              "z": 38.718
+            }
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003D6",
+          "rel": {
+            "dist_yd": 95.73768,
+            "dir": "SE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -684.16284,
+              "y": -4252.286,
+              "z": 38.234512
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003D7",
+          "rel": {
+            "dist_yd": 50.783707,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -610.47345,
+              "y": -4251.1963,
+              "z": 38.955803
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000F2A00023C",
+          "rel": {
+            "dist_yd": 42.638348,
+            "dir": "NE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -560.125,
+              "y": -4217.2,
+              "z": 41.6737
+            },
+            "facing_me": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF1300016FF00021B",
+          "rel": {
+            "dist_yd": 26.253246,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -630.02,
+              "y": -4204.55,
+              "z": 38.2173
+            }
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "SITTING"
+          },
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003F5",
+          "rel": {
+            "dist_yd": 25.225863,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -601.0994,
+              "y": -4169.9736,
+              "z": 41.569553
+            }
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003C9",
+          "rel": {
+            "dist_yd": 66.49657,
+            "dir": "SE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -643.8175,
+              "y": -4253.352,
+              "z": 38.706764
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003EF",
+          "name": "Loadan",
+          "rel": {
+            "dist_yd": 3.5056357,
+            "dir": "SW",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -607.4556,
+              "y": -4195.3315,
+              "z": 41.099026
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "level": 1,
+          "level_color": "YELLOW",
+          "reaction": "FRIENDLY",
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "player": {
+            "class": "Priest"
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0xF130001740000238",
+          "name": "Den Grunt",
+          "rel": {
+            "dist_yd": 3.4229636,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -599.939,
+              "y": -4191.99,
+              "z": 41.1824
+            },
+            "facing_me": true
+          },
+          "kind": "NPC",
+          "level": 65,
+          "level_color": "SKULL_LEVEL",
+          "reaction": "FRIENDLY",
+          "classification": "NORMAL",
+          "health_pct": 100.0,
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "SMALL",
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0xF130000C4700021D",
+          "name": "Gornek",
+          "rel": {
+            "dist_yd": 9.093052,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -600.132,
+              "y": -4186.19,
+              "z": 41.2663
+            },
+            "facing_me": true
+          },
+          "kind": "NPC",
+          "level": 5,
+          "level_color": "ORANGE",
+          "reaction": "FRIENDLY",
+          "classification": "NORMAL",
+          "health_pct": 100.0,
+          "quest_marker": "QUEST_INCOMPLETE",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0xF130001740000233",
+          "name": "Den Grunt",
+          "rel": {
+            "dist_yd": 3.749802,
+            "dir": "SW",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -606.797,
+              "y": -4193.87,
+              "z": 41.1824
+            }
+          },
+          "kind": "NPC",
+          "level": 65,
+          "level_color": "SKULL_LEVEL",
+          "reaction": "FRIENDLY",
+          "classification": "NORMAL",
+          "health_pct": 100.0,
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0xF13000168500021F",
+          "rel": {
+            "dist_yd": 24.814798,
+            "dir": "SE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -624.024,
+              "y": -4214.41,
+              "z": 38.2173
+            }
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF13000174000027F",
+          "rel": {
+            "dist_yd": 76.65824,
+            "dir": "NE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -565.985,
+              "y": -4269.39,
+              "z": 38.488
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003F4",
+          "name": "Loadas",
+          "rel": {
+            "dist_yd": 7.10308,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -602.1059,
+              "y": -4207.9404,
+              "z": 38.49615
+            },
+            "facing_me": true
+          },
+          "kind": "PLAYER",
+          "level": 1,
+          "level_color": "YELLOW",
+          "reaction": "FRIENDLY",
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "player": {
+            "class": "Priest"
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0xF130000E7B000225",
+          "name": "Ken'jai",
+          "rel": {
+            "dist_yd": 13.573214,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -617.395,
+              "y": -4202.4,
+              "z": 38.2966
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "level": 10,
+          "level_color": "RED",
+          "reaction": "FRIENDLY",
+          "classification": "NORMAL",
+          "health_pct": 100.0,
+          "activity": {
+            "state": "IDLE"
+          },
+          "subtitle": "Priest Trainer",
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000003EE",
+          "name": "Loadam",
+          "rel": {
+            "dist_yd": 9.171368,
+            "dir": "SW",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -607.7326,
+              "y": -4187.6704,
+              "z": 41.09309
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "level": 1,
+          "level_color": "YELLOW",
+          "reaction": "FRIENDLY",
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "player": {
+            "class": "Priest"
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0xF13000174000022D",
+          "rel": {
+            "dist_yd": 32.65578,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -589.0241,
+              "y": -4231.441,
+              "z": 38.394333
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "PATROLLING"
+          },
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003F3",
+          "rel": {
+            "dist_yd": 24.837322,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -600.83344,
+              "y": -4170.367,
+              "z": 41.486744
+            }
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003F1",
+          "name": "Loadap",
+          "rel": {
+            "dist_yd": 8.895433,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -600.00323,
+              "y": -4186.405,
+              "z": 41.08937
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "level": 1,
+          "level_color": "YELLOW",
+          "reaction": "FRIENDLY",
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "player": {
+            "class": "Priest"
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000003E9",
+          "name": "Loadah",
+          "rel": {
+            "dist_yd": 11.9412,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -599.48535,
+              "y": -4183.402,
+              "z": 41.084995
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "level": 1,
+          "level_color": "YELLOW",
+          "reaction": "FRIENDLY",
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "player": {
+            "class": "Priest"
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000003E6",
+          "name": "Loadae",
+          "rel": {
+            "dist_yd": 15.943283,
+            "dir": "NE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -586.79083,
+              "y": -4209.881,
+              "z": 39.510254
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "level": 1,
+          "level_color": "YELLOW",
+          "reaction": "FRIENDLY",
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "player": {
+            "class": "Priest"
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000003E5",
+          "name": "Loadad",
+          "rel": {
+            "dist_yd": 5.5815954,
+            "dir": "SW",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -607.7527,
+              "y": -4192.213,
+              "z": 41.545963
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "level": 1,
+          "level_color": "YELLOW",
+          "reaction": "FRIENDLY",
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "player": {
+            "class": "Priest"
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000003E2",
+          "rel": {
+            "dist_yd": 75.915276,
+            "dir": "SE",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -650.602,
+              "y": -4259.9595,
+              "z": 37.598633
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003E1",
+          "name": "Loadz",
+          "rel": {
+            "dist_yd": 6.7749863,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -604.01666,
+              "y": -4188.7163,
+              "z": 41.094692
+            },
+            "facing_me": true
+          },
+          "kind": "PLAYER",
+          "level": 1,
+          "level_color": "YELLOW",
+          "reaction": "FRIENDLY",
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "player": {
+            "class": "Priest"
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000003DE",
+          "name": "Loadw",
+          "rel": {
+            "dir": "NE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -599.704,
+              "y": -4199.677,
+              "z": 40.213036
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "level": 1,
+          "level_color": "YELLOW",
+          "reaction": "FRIENDLY",
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "player": {
+            "class": "Priest"
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000003DD",
+          "rel": {
+            "dist_yd": 97.2426,
+            "dir": "SE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -669.5465,
+              "y": -4271.864,
+              "z": 38.690777
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003DB",
+          "name": "Loadt",
+          "rel": {
+            "dist_yd": 0.48447657,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -600.6698,
+              "y": -4201.3794,
+              "z": 40.05635
+            },
+            "facing_me": true
+          },
+          "kind": "PLAYER",
+          "level": 1,
+          "level_color": "YELLOW",
+          "reaction": "FRIENDLY",
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "player": {
+            "class": "Priest"
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000003DA",
+          "rel": {
+            "dist_yd": 56.00493,
+            "dir": "SE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -641.35315,
+              "y": -4241.7046,
+              "z": 38.134705
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003D9",
+          "rel": {
+            "dist_yd": 92.199486,
+            "dir": "SE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -676.4721,
+              "y": -4256.965,
+              "z": 38.968136
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003D8",
+          "name": "Loadq",
+          "rel": {
+            "dist_yd": 8.107049,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -600.2283,
+              "y": -4187.1704,
+              "z": 41.09103
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "level": 1,
+          "level_color": "YELLOW",
+          "reaction": "FRIENDLY",
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "player": {
+            "class": "Priest"
+          },
+          "detail": "NAMEPLATE"
+        }
+      ],
+      "objects": [
+        {
+          "guid": "0xF1100287760000A0",
+          "name": "Crude Brazier",
+          "rel": {
+            "dist_yd": 25.241894,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -608.464,
+              "y": -4171.94,
+              "z": 41.2497
+            }
+          },
+          "kind": "OTHER",
+          "usable": true,
+          "state": "ready"
+        },
+        {
+          "guid": "0xF1100046A3000097",
+          "name": "Bubbling Cauldron",
+          "rel": {
+            "dist_yd": 46.815765,
+            "dir": "NE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -557.679,
+              "y": -4219.21,
+              "z": 41.5904
+            }
+          },
+          "kind": "OTHER",
+          "usable": true,
+          "state": "ready"
+        },
+        {
+          "guid": "0xF11002876C00009A",
+          "name": "Crude Brazier",
+          "rel": {
+            "dist_yd": 7.5928774,
+            "dir": "SW",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -607.802,
+              "y": -4191.01,
+              "z": 40.9519
+            }
+          },
+          "kind": "OTHER",
+          "usable": true,
+          "state": "ready"
+        },
+        {
+          "guid": "0xF11002877200009E",
+          "name": "Crude Brazier",
+          "rel": {
+            "dist_yd": 43.188297,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -609.532,
+              "y": -4153.88,
+              "z": 43.5011
+            }
+          },
+          "kind": "OTHER",
+          "usable": true,
+          "state": "ready"
+        },
+        {
+          "guid": "0xF110000C0C000095",
+          "name": "Fire",
+          "rel": {
+            "dist_yd": 50.358288,
+            "dir": "E",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -602.425,
+              "y": -4250.57,
+              "z": 37.5115
+            }
+          },
+          "kind": "OTHER",
+          "usable": true,
+          "state": "ready"
+        },
+        {
+          "guid": "0xF110003179000096",
+          "name": "Cooking Table",
+          "rel": {
+            "dist_yd": 41.274822,
+            "dir": "NE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -563.016,
+              "y": -4217.51,
+              "z": 41.5901
+            }
+          },
+          "kind": "OTHER",
+          "usable": true,
+          "state": "ready"
+        }
+      ]
+    }
+  }
+}

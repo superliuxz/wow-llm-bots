@@ -25,7 +25,7 @@
 #include "plan.h"
 #include "plan_runner.h"
 #include "prompt.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 #include "scheduler.h"
 #include "screen_renderer.h"
 #include "triggers.h"
@@ -121,12 +121,12 @@ void BotLoop::NoteEvent(BotState* state, const pb::Event& event) {
 }
 
 void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
-  const std::string bot(snapshot.bot());
+  const std::string bot = snapshot.bot;
   if (bot.empty()) {
     return;
   }
   BotState& state = bots_[bot];
-  for (const pb::Event& ev : snapshot.events()) {
+  for (const pb::Event& ev : snapshot.events) {
     NoteEvent(&state, ev);
   }
   Screen screen = RenderScreen(snapshot);
@@ -163,17 +163,17 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
 }
 
 void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks /*received_at*/) {
-  const std::string bot(imm.bot());
+  const std::string& bot = imm.bot;
   if (bot.empty()) {
     return;
   }
   BotState& state = bots_[bot];
-  NoteEvent(&state, imm.event());
-  if (imm.event().has_error() && imm.event().error().command_id() != 0) {
+  NoteEvent(&state, imm.event);
+  if (imm.event.error && imm.event.error->command_id != 0) {
     state.runner.Stop();
   }
   const std::optional<WakeTrigger> trig =
-      EvaluateEventTrigger(imm.event(), state.triggers.watches());
+      EvaluateEventTrigger(imm.event, state.triggers.watches());
   if (!trig) {
     return;
   }
@@ -275,8 +275,8 @@ void BotLoop::StartBotCall(const std::string& bot,
   input.slot = slot;
   input.temperature = config_.temperature;
 
-  const uint32_t ask_seq = state.latest_snapshot->seq();
-  const int64_t snap_mono_us = state.latest_snapshot->monotonic_us();
+  const uint32_t ask_seq = state.latest_snapshot->seq;
+  const int64_t snap_mono_us = state.latest_snapshot->monotonic_us;
   const Screen ask_screen = state.latest_screen;
   const base::TimeTicks asked_at = base::TimeTicks::Now();
   const std::optional<double> age_at_ask_ms =
@@ -453,10 +453,10 @@ void BotLoop::DispatchRunnerAction(const std::string& bot,
 uint32_t BotLoop::SendChoose(const std::string& bot,
                              const pb::Command::Choose& choose) {
   pb::Command cmd;
-  cmd.set_bot(bot);
+  cmd.bot = bot;
   const uint32_t id = ++next_command_id_;
-  cmd.set_command_id(id);
-  *cmd.mutable_choose() = choose;
+  cmd.command_id = id;
+  cmd.choose = choose;
   ++commands_sent_;
   if (send_command_) {
     send_command_.Run(cmd);
@@ -466,10 +466,11 @@ uint32_t BotLoop::SendChoose(const std::string& bot,
 
 void BotLoop::SendSay(const std::string& bot, const std::string& text) {
   pb::Command cmd;
-  cmd.set_bot(bot);
-  cmd.set_command_id(++next_command_id_);
-  cmd.mutable_say()->set_channel(pb::SAY);
-  cmd.mutable_say()->set_text(text);
+  cmd.bot = bot;
+  cmd.command_id = ++next_command_id_;
+  pb::Command::Say& say = cmd.say.emplace();
+  say.channel = pb::SAY;
+  say.text = text;
   ++commands_sent_;
   if (send_command_) {
     send_command_.Run(cmd);

@@ -1,7 +1,7 @@
 {
  "bot": "Testpriest",
  "seq": 900,
- "time_ms": "1794800000000",
+ "time_ms": 1794800000000,
  "base": {
   "self": {"unit": {"name": "Testpriest", "kind": "PLAYER", "level": 4, "health_pct": 100, "power_pct": 80, "player": {"class": "Priest"}},
            "health": 110, "health_max": 110, "power_type": "MANA", "power": 140, "power_max": 175, "state": "ALIVE", "money": 41},

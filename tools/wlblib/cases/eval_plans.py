@@ -55,9 +55,9 @@ def ensure_harness():
 
 
 def decide_one(case, temperature=0.0, slot=0):
-    pb_path = EVAL_DIR / f"{case['name']}.pb"
+    snap_path = EVAL_DIR / f"{case['name']}.snapshot.json"
     cmd = [
-        str(HARNESS_BIN), "decide", str(pb_path),
+        str(HARNESS_BIN), "decide", str(snap_path),
         f"--reason={case['reason']}",
         f"--rules={RULES_FILE}",
         f"--slot={slot}",

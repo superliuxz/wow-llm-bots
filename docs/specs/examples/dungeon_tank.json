@@ -1,7 +1,7 @@
 {
  "bot": "Grumbar",
  "seq": 5021,
- "time_ms": "40123000",
+ "time_ms": 40123000,
  "base": {
   "self": {
    "unit": {

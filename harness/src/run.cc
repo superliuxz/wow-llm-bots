@@ -31,7 +31,7 @@
 #include "file_util.h"
 #include "llm_client.h"
 #include "module_connection.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 
 namespace harness {
 namespace {

@@ -11,7 +11,7 @@
 
 #include "base/time/time.h"
 #include "plan.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 #include "screen_renderer.h"
 
 namespace harness {
@@ -44,8 +44,8 @@ const pb::Unit* FindUnitByGuid(const pb::Snapshot& snapshot,
   if (guid.empty()) {
     return nullptr;
   }
-  for (const pb::Unit& u : snapshot.base().nearby().units()) {
-    if (u.guid() == guid) {
+  for (const pb::Unit& u : snapshot.base.nearby.units) {
+    if (u.guid == guid) {
       return &u;
     }
   }
@@ -57,8 +57,8 @@ const pb::GameObject* FindObjectByGuid(const pb::Snapshot& snapshot,
   if (guid.empty()) {
     return nullptr;
   }
-  for (const pb::GameObject& go : snapshot.base().nearby().objects()) {
-    if (go.guid() == guid) {
+  for (const pb::GameObject& go : snapshot.base.nearby.objects) {
+    if (go.guid == guid) {
       return &go;
     }
   }
@@ -72,29 +72,29 @@ bool IsTargetDone(OptionKind kind,
     case OptionKind::kAttack: {
       const pb::Unit* unit = FindUnitByGuid(snapshot, guid);
       if (unit != nullptr) {
-        return unit->dead();
+        return unit->dead;
       }
-      return !snapshot.base().self().in_combat();
+      return !snapshot.base.self.in_combat;
     }
     case OptionKind::kLoot: {
       const pb::Unit* unit = FindUnitByGuid(snapshot, guid);
-      return unit == nullptr || !unit->lootable();
+      return unit == nullptr || !unit->lootable;
     }
     case OptionKind::kGather:
     case OptionKind::kUse: {
       const pb::GameObject* obj = FindObjectByGuid(snapshot, guid);
-      return obj == nullptr || !obj->usable();
+      return obj == nullptr || !obj->usable;
     }
     case OptionKind::kTalk:
-      return snapshot.ext().has_interaction();
+      return snapshot.ext.interaction.has_value();
     case OptionKind::kRest: {
-      const pb::Self& self = snapshot.base().self();
+      const pb::Self& self = snapshot.base.self;
       const bool full_hp =
-          self.health_max() > 0 && self.health() >= self.health_max();
-      const bool full_mana = self.power_type() != pb::Self::MANA ||
-                             self.power_max() == 0 ||
-                             self.power() >= self.power_max();
-      return full_hp && full_mana && !self.resting();
+          self.health_max > 0 && self.health >= self.health_max;
+      const bool full_mana = self.power_type != pb::Self::MANA ||
+                             self.power_max == 0 ||
+                             self.power >= self.power_max;
+      return full_hp && full_mana && !self.resting;
     }
     case OptionKind::kKeep:
     case OptionKind::kExplore:
@@ -186,8 +186,8 @@ RunnerAction PlanRunner::LaunchCurrentFromScreen(uint32_t snapshot_seq,
       active_guid_ = screen.details[*idx].guid;
       step_started_at_ = now;
       pb::Command::Choose choose;
-      choose.set_seq(snapshot_seq);
-      choose.set_option(static_cast<uint32_t>(*idx + 1));
+      choose.seq = snapshot_seq;
+      choose.option = static_cast<uint32_t>(*idx + 1);
       return {choose, ""};
     }
     // No matching target left on screen (e.g. fewer boars than 1x4): move on to
@@ -233,7 +233,7 @@ RunnerAction PlanRunner::OnSnapshot(const pb::Snapshot& snapshot,
     }
     repeats_left_ = steps_[step_index_].times;
   }
-  return LaunchCurrentFromScreen(snapshot.seq(), screen, match_guid_first, now);
+  return LaunchCurrentFromScreen(snapshot.seq, screen, match_guid_first, now);
 }
 
 std::optional<std::string> PlanRunner::CheckTimeout(base::TimeTicks now) {

@@ -1,0 +1,808 @@
+{
+  "bot": "Loadaa",
+  "seq": 30,
+  "time_ms": 1794806066917,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x00000000000003E2",
+        "name": "Loadaa",
+        "kind": "PLAYER",
+        "level": 1,
+        "health_pct": 100.0,
+        "power_pct": 80.21978,
+        "player": {
+          "class": "Priest"
+        }
+      },
+      "gender": "MALE",
+      "xp": 100,
+      "xp_next": 400,
+      "health": 72,
+      "health_max": 72,
+      "power_type": "MANA",
+      "power": 73,
+      "power_max": 91,
+      "state": "ALIVE"
+    },
+    "where": {
+      "map": "Kalimdor",
+      "zone": "Durotar",
+      "subzone": "Valley of Trials",
+      "position": {
+        "x": -686.76215,
+        "y": -4310.402,
+        "z": 45.043373
+      },
+      "facing": 3.6077654
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0x00000000000003E6",
+          "rel": {
+            "dist_yd": 73.29959,
+            "dir": "NW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -641.4483,
+              "y": -4249.401,
+              "z": 38.175774
+            },
+            "facing_me": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF13000293C000285",
+          "rel": {
+            "dist_yd": 74.34195,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -762.903,
+              "y": -4322.07,
+              "z": 46.4172
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "visual_state": [
+            "ROOTED"
+          ],
+          "looks_like": "humanoid",
+          "size": "SMALL",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C1A0002AB",
+          "rel": {
+            "dist_yd": 53.022522,
+            "dir": "NE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -652.0597,
+              "y": -4353.27,
+              "z": 45.58297
+            },
+            "facing_me": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C340002A6",
+          "rel": {
+            "dist_yd": 36.55999,
+            "dir": "SE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -705.9006,
+              "y": -4344.0337,
+              "z": 47.44035
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "scorpid",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF13000293C000292",
+          "rel": {
+            "dist_yd": 63.065166,
+            "dir": "NE",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -628.48,
+              "y": -4340.7,
+              "z": 41.8407
+            },
+            "facing_me": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "visual_state": [
+            "ROOTED"
+          ],
+          "looks_like": "humanoid",
+          "size": "SMALL",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C1A0002A0",
+          "name": "Mottled Boar",
+          "rel": {
+            "dist_yd": 4.5962095,
+            "dir": "NE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -682.40497,
+              "y": -4315.0806,
+              "z": 47.14552
+            },
+            "facing_me": true
+          },
+          "kind": "NPC",
+          "level": 2,
+          "level_color": "YELLOW",
+          "reaction": "NEUTRAL",
+          "classification": "NORMAL",
+          "health_pct": 100.0,
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0xF13000173F000283",
+          "rel": {
+            "dist_yd": 61.70975,
+            "dir": "SW",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -734.2965,
+              "y": -4267.648,
+              "z": 43.18927
+            },
+            "behind_it": true
+          },
+          "kind": "CRITTER",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "critter",
+          "size": "SMALL",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C1A0002A3",
+          "rel": {
+            "dist_yd": 35.14753,
+            "dir": "W",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -694.0591,
+              "y": -4274.499,
+              "z": 38.140736
+            }
+          },
+          "kind": "NPC",
+          "dead": true,
+          "activity": {
+            "state": "DEAD"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C1A00027D",
+          "rel": {
+            "dist_yd": 31.496473,
+            "dir": "W",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -677.1013,
+              "y": -4278.682,
+              "z": 39.42828
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "dead": true,
+          "activity": {
+            "state": "DEAD"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C4900021E",
+          "rel": {
+            "dist_yd": 97.78198,
+            "dir": "NW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -629.052,
+              "y": -4228.06,
+              "z": 38.2334
+            }
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "SMALL",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C3400028F",
+          "rel": {
+            "dist_yd": 77.568214,
+            "dir": "SE",
+            "height": "ABOVE",
+            "in_los": true,
+            "position": {
+              "x": -755.1891,
+              "y": -4350.931,
+              "z": 51.345764
+            }
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "scorpid",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C52000239",
+          "rel": {
+            "dist_yd": 94.70172,
+            "dir": "NW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -635.462,
+              "y": -4227.52,
+              "z": 38.371
+            }
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF13000174000023A",
+          "rel": {
+            "dist_yd": 62.065475,
+            "dir": "NW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -645.423,
+              "y": -4260.63,
+              "z": 38.163
+            }
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "SMALL",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003CF",
+          "rel": {
+            "dist_yd": 43.426094,
+            "dir": "SW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -712.29785,
+              "y": -4272.0347,
+              "z": 39.451523
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003CD",
+          "rel": {
+            "dist_yd": 61.934372,
+            "dir": "SW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -719.9549,
+              "y": -4254.72,
+              "z": 41.26585
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003CE",
+          "rel": {
+            "dist_yd": 49.708923,
+            "dir": "SW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -719.9738,
+              "y": -4269.636,
+              "z": 41.385582
+            }
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C1A0002AC",
+          "name": "Mottled Boar",
+          "rel": {
+            "dist_yd": 11.211649,
+            "dir": "S",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -699.2329,
+              "y": -4314.0024,
+              "z": 41.941853
+            },
+            "facing_me": true
+          },
+          "kind": "NPC",
+          "level": 1,
+          "level_color": "YELLOW",
+          "reaction": "NEUTRAL",
+          "classification": "NORMAL",
+          "dead": true,
+          "lootable": true,
+          "activity": {
+            "state": "DEAD"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0xF130000C1A0002AD",
+          "rel": {
+            "dist_yd": 52.233295,
+            "dir": "SW",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -729.7463,
+              "y": -4277.2207,
+              "z": 42.366142
+            }
+          },
+          "kind": "NPC",
+          "dead": true,
+          "activity": {
+            "state": "DEAD"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003C9",
+          "rel": {
+            "dist_yd": 52.59202,
+            "dir": "SW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -719.4903,
+              "y": -4265.599,
+              "z": 41.57126
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003DC",
+          "rel": {
+            "dist_yd": 76.45792,
+            "dir": "W",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -700.63934,
+              "y": -4232.2583,
+              "z": 41.226543
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C1A00027B",
+          "rel": {
+            "dist_yd": 42.65331,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -675.722,
+              "y": -4353.8037,
+              "z": 44.506767
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C1A000236",
+          "rel": {
+            "dist_yd": 59.159046,
+            "dir": "SW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -716.0229,
+              "y": -4256.6445,
+              "z": 41.75941
+            }
+          },
+          "kind": "NPC",
+          "dead": true,
+          "activity": {
+            "state": "DEAD"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003D1",
+          "rel": {
+            "dist_yd": 43.164272,
+            "dir": "SW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -704.84174,
+              "y": -4268.4683,
+              "z": 38.272705
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003D6",
+          "rel": {
+            "dist_yd": 27.124668,
+            "dir": "SW",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -707.3138,
+              "y": -4288.472,
+              "z": 42.990376
+            },
+            "facing_me": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C1A00023D",
+          "rel": {
+            "dist_yd": 78.53512,
+            "dir": "W",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -702.28503,
+              "y": -4231.3267,
+              "z": 41.349678
+            },
+            "facing_me": true
+          },
+          "kind": "NPC",
+          "dead": true,
+          "activity": {
+            "state": "DEAD"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003D9",
+          "rel": {
+            "dist_yd": 56.98759,
+            "dir": "SW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -713.403,
+              "y": -4256.7524,
+              "z": 41.800583
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130002C72000275",
+          "rel": {
+            "dist_yd": 73.537766,
+            "dir": "N",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -611.587,
+              "y": -4322.08,
+              "z": 40.0927
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "SMALL",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003DA",
+          "rel": {
+            "dist_yd": 54.52716,
+            "dir": "SW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -722.341,
+              "y": -4265.3345,
+              "z": 41.514923
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003DD",
+          "rel": {
+            "dist_yd": 34.067337,
+            "dir": "W",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -692.97516,
+              "y": -4274.499,
+              "z": 38.233635
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        }
+      ],
+      "objects": [
+        {
+          "guid": "0xF11002AEA80000C7",
+          "name": "LumberPile",
+          "rel": {
+            "dist_yd": 66.58626,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -754.337,
+              "y": -4322.51,
+              "z": 43.4382
+            }
+          },
+          "kind": "OTHER",
+          "usable": true,
+          "state": "ready"
+        },
+        {
+          "guid": "0xF110029FA20000BF",
+          "name": "Cactus Apple",
+          "rel": {
+            "dist_yd": 45.525826,
+            "dir": "E",
+            "height": "ABOVE",
+            "in_los": true,
+            "position": {
+              "x": -696.942,
+              "y": -4355.8,
+              "z": 54.1846
+            }
+          },
+          "kind": "HERB",
+          "usable": true,
+          "state": "ready"
+        },
+        {
+          "guid": "0xF110029FA20000C8",
+          "name": "Cactus Apple",
+          "rel": {
+            "dist_yd": 66.71988,
+            "dir": "SW",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -746.487,
+              "y": -4276.66,
+              "z": 43.7713
+            }
+          },
+          "kind": "HERB",
+          "usable": true,
+          "state": "ready"
+        },
+        {
+          "guid": "0xF11002AEA80000C6",
+          "name": "LumberPile",
+          "rel": {
+            "dist_yd": 69.76694,
+            "dir": "N",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -619.816,
+              "y": -4336.18,
+              "z": 41.0216
+            }
+          },
+          "kind": "OTHER",
+          "usable": true,
+          "state": "ready"
+        },
+        {
+          "guid": "0xF110029FA20000C5",
+          "name": "Cactus Apple",
+          "rel": {
+            "dist_yd": 14.19125,
+            "dir": "NW",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -674.292,
+              "y": -4300.25,
+              "z": 44.9458
+            }
+          },
+          "kind": "HERB",
+          "usable": true,
+          "state": "ready"
+        },
+        {
+          "guid": "0xF110000C9F0000BA",
+          "name": "Razor Hill",
+          "rel": {
+            "dist_yd": 93.58885,
+            "dir": "N",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -591.935,
+              "y": -4300.3,
+              "z": 40.3764
+            }
+          },
+          "kind": "OTHER",
+          "usable": true,
+          "state": "ready"
+        }
+      ]
+    }
+  }
+}

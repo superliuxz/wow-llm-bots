@@ -8,7 +8,7 @@
 
 #include "base/time/time.h"
 #include "gtest/gtest.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 
 namespace llm_brain {
 namespace {
@@ -20,19 +20,19 @@ pb::Unit* AddUnit(pb::Snapshot* snapshot,
                   const std::string& guid,
                   float dist_yd,
                   pb::Unit::Reaction reaction = pb::Unit::HOSTILE) {
-  pb::Unit* u = snapshot->mutable_base()->mutable_nearby()->add_units();
-  u->set_name(name);
-  u->set_guid(guid);
-  u->set_kind(pb::Unit::NPC);
-  u->set_reaction(reaction);
-  u->mutable_rel()->set_dist_yd(dist_yd);
-  return u;
+  pb::Unit& u = snapshot->base.nearby.units.emplace_back();
+  u.name = name;
+  u.guid = guid;
+  u.kind = pb::Unit::NPC;
+  u.reaction = reaction;
+  u.rel.dist_yd = dist_yd;
+  return &u;
 }
 
 std::vector<std::string> Texts(const pb::Snapshot& snapshot) {
   std::vector<std::string> texts;
-  for (const pb::Option& option : snapshot.options()) {
-    texts.push_back(std::string(option.text()));
+  for (const pb::Option& option : snapshot.options) {
+    texts.push_back(option.text);
   }
   return texts;
 }
@@ -63,8 +63,8 @@ TEST(OptionsTest, OneAttackPerNameTargetingTheNearest) {
   EXPECT_EQ(targets[0].name, "Scorpid Worker");
   EXPECT_EQ(targets[1].guid, "0x2");
   // The screen puts each number on that unit's own line.
-  EXPECT_EQ(snapshot.options(0).guid(), "0x3");
-  EXPECT_EQ(snapshot.options(2).guid(), "");
+  EXPECT_EQ(snapshot.options[0].guid, "0x3");
+  EXPECT_EQ(snapshot.options[2].guid, "");
 }
 
 TEST(OptionsTest, NeutralCanBeAttackedFriendlyCannot) {
@@ -79,10 +79,10 @@ TEST(OptionsTest, NeutralCanBeAttackedFriendlyCannot) {
 
 TEST(OptionsTest, LootOnlyLootableCorpses) {
   pb::Snapshot snapshot;
-  AddUnit(&snapshot, "Scorpid Worker", "0x1", 4)->set_dead(true);
+  AddUnit(&snapshot, "Scorpid Worker", "0x1", 4)->dead = true;
   pb::Unit* lootable = AddUnit(&snapshot, "Scorpid Worker", "0x2", 6);
-  lootable->set_dead(true);
-  lootable->set_lootable(true);
+  lootable->dead = true;
+  lootable->lootable = true;
   AddUnit(&snapshot, "Scorpid Worker", "0x3", 15);  // Alive: attack.
   const std::vector<OptionTarget> targets = AddOptions(&snapshot);
   EXPECT_EQ(Texts(snapshot), (std::vector<std::string>{
@@ -95,7 +95,7 @@ TEST(OptionsTest, LootOnlyLootableCorpses) {
 
 TEST(OptionsTest, NothingForPlayersOrUnitsTooFarToName) {
   pb::Snapshot snapshot;
-  AddUnit(&snapshot, "Someone", "0x1", 10)->set_kind(pb::Unit::PLAYER);
+  AddUnit(&snapshot, "Someone", "0x1", 10)->kind = pb::Unit::PLAYER;
   AddUnit(&snapshot, "", "0x2", 60);  // Model only: no name to click.
   AddUnit(&snapshot, "No Guid", "", 10);
   AddOptions(&snapshot);

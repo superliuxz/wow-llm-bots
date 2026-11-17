@@ -1,29 +1,13 @@
 """Minimal stand-in for the harness, for testing mod-llm-brain's socket.
 
 Connects to the brain socket and, for a few seconds, either prints what the server sends or
-measures how it arrives. Messages are length-prefixed frames (4-byte big-endian length, then
-the payload), as in common/net/frame_codec.h. Module messages (wlb.snapshot.ModuleMessage) are
-printed as JSON when the generated Python code is available.
+measures how it arrives. Messages are length-prefixed BEVE frames (4-byte big-endian length, then
+the payload), as in common/net/frame_codec.h.
 
-Dev tool only (production is C++). For JSON, generate the code once with
-tools/wlb check snapshots and run with the tools venv:
-  out/tools-venv/bin/python -I tools/snapshot/fake_harness.py [seconds=5] [message ...]
-  out/tools-venv/bin/python -I tools/snapshot/fake_harness.py --stats [--json] [seconds=10]
-  out/tools-venv/bin/python -I tools/snapshot/fake_harness.py --choose [--json] [--tail=S] [seconds=30] Attack Loot
-
---stats prints nothing per frame (with --json: one JSON object, see measure_delivery). It reports, from the snapshots' own timestamps (monotonic_us:
-this machine's monotonic clock, the same in every process): frames per second; the age of a snapshot when it arrives (built to
-received: world thread, socket, this process); how evenly each bot's snapshots are spaced; and
-how bunched the arrivals are (the most frames arriving within 10 ms), which shows whether the
-module builds all bots on the same tick.
-
---choose plays a scripted brain (play_script): for each word given, in turn, it waits for a
-snapshot with an option starting with that word (case-insensitive), sends a Command.Choose for
-it (that option of that snapshot), and then waits at least 2 s before looking for the next
-word. It prints one line per snapshot (seq, health, in combat, the options) and every immediate
-event (a failed choice comes back as an error event). The module's log has the matching
-"chose ... age_at_apply" line. With --json it prints nothing else: the whole transcript as one
-JSON object (what `tools/wlb test e2e` reads).
+Dev tool only (production is C++). Needs `tools/wlb build common --no-tests` once for wire_py:
+  python3 -I tools/snapshot/fake_harness.py [seconds=5] [message ...]
+  python3 -I tools/snapshot/fake_harness.py --stats [--json] [seconds=10]
+  python3 -I tools/snapshot/fake_harness.py --choose [--json] [--tail=S] [seconds=30] Attack Loot
 """
 
 import collections
@@ -35,26 +19,16 @@ import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from frame_reader import FrameReader  # noqa: E402
+import wire_py  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 SOCK = str(ROOT / "out" / "server" / "run" / "brain.sock")
 
-try:
-    sys.path.insert(0, str(ROOT / "out" / "proto"))
-    from google.protobuf import json_format
-    from proto import snapshot_pb2
-except ImportError:
-    snapshot_pb2 = None
-
 
 def describe(payload):
-    if snapshot_pb2 is not None:
-        message = snapshot_pb2.ModuleMessage()
-        try:
-            message.ParseFromString(payload)
-            return json_format.MessageToJson(message, indent=1, preserving_proto_field_name=True)
-        except Exception:  # Not a ModuleMessage: fall through to hex.
-            pass
+    pretty = wire_py.module_message_to_json(payload, pretty=True)
+    if pretty is not None:
+        return pretty
     return f"[{len(payload)} bytes] {payload[:32].hex()}"
 
 
@@ -71,16 +45,11 @@ def connect():
 
 def measure_delivery(seconds, warmup=2.0):
     """Receives snapshots for `seconds` and measures how they arrive (from the snapshots' own
-    timestamps, monotonic_us: this machine's monotonic clock, the same in every process).
-    Returns {"snapshots", "bots", "per_s", "first_bunching"} plus, if there was a steady state
-    (after the first `warmup` s: every bot's first snapshot is overdue when a harness connects,
-    a burst by design), {"steady": {"n", "age_p50_ms", "age_p95_ms", "age_max_ms",
-    "spacing_p5_ms", "spacing_p50_ms", "spacing_p95_ms", "bunching"}}. "bunching" is the most
-    frames arriving within 10 ms. Returns {"error": text} if nothing arrived."""
+    timestamps, monotonic_us: this machine's monotonic clock, the same in every process)."""
     s = connect()
     reader = FrameReader()
-    ages, arrivals = [], []  # age in ms; arrival time in s.
-    per_bot = collections.defaultdict(list)  # bot -> built-at times (ms).
+    ages, arrivals = [], []
+    per_bot = collections.defaultdict(list)
     end = time.time() + seconds
     while time.time() < end:
         try:
@@ -89,25 +58,21 @@ def measure_delivery(seconds, warmup=2.0):
             continue
         if not chunk:
             break
-        # The snapshot's monotonic_us is CLOCK_MONOTONIC, which time.monotonic_ns() reads
-        # on Linux: a clock that the wall clock being set can't move.
         received_ms = time.monotonic_ns() / 1e6
         for payload in reader.feed(chunk):
-            message = snapshot_pb2.ModuleMessage()
-            message.ParseFromString(payload)
-            if not message.HasField("snapshot"):
+            message = wire_py.decode_module_message(payload)
+            if not message or "snapshot" not in message:
                 continue
-            snap = message.snapshot
-            built_ms = snap.monotonic_us / 1000
+            snap = message["snapshot"]
+            built_ms = snap.get("monotonic_us", 0) / 1000
             ages.append(received_ms - built_ms)
             arrivals.append(received_ms / 1000)
-            per_bot[snap.bot].append(built_ms)
+            per_bot[snap.get("bot", "")].append(built_ms)
     s.close()
     if not ages:
         return {"error": "no snapshots received"}
 
     def bunching(times):
-        """The most frames arriving within any 10 ms window."""
         window, most = collections.deque(), 0
         for t in times:
             window.append(t)
@@ -191,23 +156,13 @@ def send_frame(s, payload):
 
 
 def play_script(seconds, words, echo=print, tail_s=None):
-    """A scripted brain: for each word in `words`, in turn, waits for a snapshot with an option
-    starting with it (case-insensitive) and sends a Command.Choose for that option of that
-    snapshot, then waits at least 2 s before the next word. Returns what happened:
-      {"snapshots": [{"t", "seq", "health", "in_combat", "options": [text...]}...],
-       "events": [{"t", "event": {...}}...],          # immediate events (errors, ...)
-       "commands": [{"t", "command_id", "option", "seq", "text"}...],
-       "never_offered": [word...],                    # words never found in time
-       "closed": bool}                                # the server closed the connection
-    `t` is seconds since the start. `echo` gets one line per snapshot, event and command. With
-    `tail_s`, it stops that long after the last word was sent (instead of at `seconds`)."""
     s = connect()
     reader = FrameReader()
     words = list(words)
     out = {"snapshots": [], "events": [], "commands": [], "never_offered": [], "closed": False}
     start = time.time()
     next_at = 0.0
-    sent = 0  # Also each command's id, so a failure names the command it belongs to.
+    sent = 0
     stop_at = start + seconds
     while time.time() < stop_at:
         try:
@@ -219,35 +174,40 @@ def play_script(seconds, words, echo=print, tail_s=None):
             echo("server closed the connection")
             break
         for payload in reader.feed(chunk):
-            message = snapshot_pb2.ModuleMessage()
-            message.ParseFromString(payload)
-            t = round(time.time() - start, 3)
-            if message.HasField("event"):
-                event = json_format.MessageToDict(message.event.event,
-                                                  preserving_proto_field_name=True)
-                out["events"].append({"t": t, "event": event})
-                echo(f"<< event for {message.event.bot}: {event}")
+            message = wire_py.decode_module_message(payload)
+            if not message:
                 continue
-            snap = message.snapshot
-            me = snap.base.self
-            options = [o.text for o in snap.options]
-            out["snapshots"].append({"t": t, "seq": snap.seq, "health": me.health,
-                                     "in_combat": me.in_combat, "options": options})
-            echo(f"<< {snap.bot} #{snap.seq}: health {me.health}/{me.health_max}"
-                 f"{', in combat' if me.in_combat else ''}; options: "
+            t = round(time.time() - start, 3)
+            if "event" in message:
+                imm = message["event"]
+                event = imm.get("event", {})
+                out["events"].append({"t": t, "event": event})
+                echo(f"<< event for {imm.get('bot', '')}: {event}")
+                continue
+            snap = message.get("snapshot", {})
+            me = snap.get("base", {}).get("self", {})
+            options = [o.get("text", "") for o in snap.get("options", [])]
+            seq = snap.get("seq", 0)
+            bot = snap.get("bot", "")
+            hp = me.get("health", 0)
+            hp_max = me.get("health_max", 0)
+            in_combat = bool(me.get("in_combat", False))
+            out["snapshots"].append({"t": t, "seq": seq, "health": hp,
+                                     "in_combat": in_combat, "options": options})
+            echo(f"<< {bot} #{seq}: health {hp}/{hp_max}"
+                 f"{', in combat' if in_combat else ''}; options: "
                  + "; ".join(f"{i}. {t_}" for i, t_ in enumerate(options, 1)))
             if not words or time.time() < next_at:
                 continue
             for i, text in enumerate(options, 1):
                 if text.lower().startswith(words[0].lower()):
                     sent += 1
-                    command = snapshot_pb2.Command(bot=snap.bot, command_id=sent)
-                    command.choose.option = i
-                    command.choose.seq = snap.seq
-                    send_frame(s, command.SerializeToString())
+                    cmd = {"bot": bot, "command_id": sent,
+                           "choose": {"option": i, "seq": seq}}
+                    send_frame(s, wire_py.encode_command(cmd))
                     out["commands"].append({"t": t, "command_id": sent, "option": i,
-                                            "seq": snap.seq, "text": text})
-                    echo(f">> {snap.bot} chooses {i} ({text}) of snapshot {snap.seq}")
+                                            "seq": seq, "text": text})
+                    echo(f">> {bot} chooses {i} ({text}) of snapshot {seq}")
                     words.pop(0)
                     next_at = time.time() + 2
                     if not words and tail_s is not None:

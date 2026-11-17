@@ -17,7 +17,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 
 namespace harness {
 namespace {
@@ -38,8 +38,8 @@ std::string Word(std::string_view name) {
 
 // The enum value's name, or "" when it is unset (zero).
 template <typename Enum>
-std::string NameOf(Enum value, std::string_view (*name_fn)(Enum)) {
-  return value == static_cast<Enum>(0) ? "" : std::string(name_fn(value));
+std::string NameOf(Enum value) {
+  return value == static_cast<Enum>(0) ? "" : std::string(pb::EnumName(value));
 }
 
 // Values that are the normal case and so left out of the text.
@@ -67,11 +67,10 @@ void AddEnum(std::vector<std::string>* bits,
 // "health 24%" for a unit below full health (0 means not shown).
 // Only when shown at all (a far unit's health isn't), and not full.
 void AddPercent(std::vector<std::string>* bits,
-                bool shown,
-                float pct,
+                std::optional<float> pct,
                 const char* key) {
-  if (shown && pct < 100) {
-    bits->push_back(base::StringPrintf("%s %.0f%%", key, pct));
+  if (pct && *pct < 100) {
+    bits->push_back(base::StringPrintf("%s %.0f%%", key, *pct));
   }
 }
 
@@ -89,29 +88,28 @@ std::string JoinSet(const std::flat_set<std::string>& items,
 
 // Where something is: "28 yd SW, below, out of sight, you're behind it".
 std::string Where(const pb::Relative& rel) {
-  const std::string dir = NameOf(rel.dir(), pb::Direction_Name);
+  const std::string dir = NameOf(rel.dir);
   std::vector<std::string> parts;
-  if (dir == "HERE" || (rel.dist_yd() == 0 && dir.empty())) {
+  if (dir == "HERE" || (rel.dist_yd == 0 && dir.empty())) {
     parts.push_back("here");
-  } else if (rel.dist_yd() != 0) {
-    parts.push_back(
-        dir.empty() ? base::StringPrintf("%.0f yd", Finite(rel.dist_yd()))
-                    : base::StringPrintf("%.0f yd %s", Finite(rel.dist_yd()),
-                                         dir.c_str()));
+  } else if (rel.dist_yd != 0) {
+    parts.push_back(dir.empty()
+                        ? base::StringPrintf("%.0f yd", Finite(rel.dist_yd))
+                        : base::StringPrintf("%.0f yd %s", Finite(rel.dist_yd),
+                                             dir.c_str()));
   } else {
     parts.push_back(dir);
   }
-  if (rel.height() == pb::Relative::ABOVE ||
-      rel.height() == pb::Relative::BELOW) {
-    parts.push_back(Word(pb::Relative_Height_Name(rel.height())));
+  if (rel.height == pb::Relative::ABOVE || rel.height == pb::Relative::BELOW) {
+    parts.push_back(Word(pb::EnumName(rel.height)));
   }
-  if (rel.has_in_los() && !rel.in_los()) {  // Unset: not checked yet.
+  if (rel.in_los && !*rel.in_los) {  // Unset: not checked yet.
     parts.push_back("out of sight");
   }
-  if (rel.behind_it()) {
+  if (rel.behind_it) {
     parts.push_back("you're behind it");
   }
-  if (rel.facing_me()) {
+  if (rel.facing_me) {
     parts.push_back("facing you");
   }
   return base::JoinString(parts, ", ");
@@ -119,9 +117,9 @@ std::string Where(const pb::Relative& rel) {
 
 std::string TightWhere(const pb::Relative& rel_in) {
   pb::Relative rel = rel_in;
-  if (rel.dist_yd() > kMeleeYd) {
-    rel.clear_behind_it();
-    rel.clear_facing_me();
+  if (rel.dist_yd > kMeleeYd) {
+    rel.behind_it = false;
+    rel.facing_me = false;
   }
   return Where(rel);
 }
@@ -129,11 +127,11 @@ std::string TightWhere(const pb::Relative& rel_in) {
 // A unit's pack: "(id 1234, size 3)".
 std::string PackText(const pb::Unit::Pack& pack) {
   std::vector<std::string> parts;
-  if (pack.id() != 0) {
-    parts.push_back(base::StrCat({"id ", base::NumberToString(pack.id())}));
+  if (pack.id != 0) {
+    parts.push_back(base::StrCat({"id ", base::NumberToString(pack.id)}));
   }
-  if (pack.size() != 0) {
-    parts.push_back(base::StrCat({"size ", base::NumberToString(pack.size())}));
+  if (pack.size != 0) {
+    parts.push_back(base::StrCat({"size ", base::NumberToString(pack.size)}));
   }
   return base::StrCat({"(", base::JoinString(parts, ", "), ")"});
 }
@@ -144,71 +142,63 @@ std::string PackText(const pb::Unit::Pack& pack) {
 std::string UnitLook(const pb::Unit& u) {
   std::vector<std::string> bits;
   std::vector<std::string> who;
-  if (!u.looks_like().empty()) {
-    who.push_back(std::string(u.looks_like()));
+  if (!u.looks_like.empty()) {
+    who.push_back(u.looks_like);
   }
-  if (!u.player().class_().empty()) {
-    who.push_back(base::ToLowerASCII(u.player().class_()));
+  if (u.player && !u.player->class_.empty()) {
+    who.push_back(base::ToLowerASCII(u.player->class_));
   }
-  if (u.has_level() || !who.empty()) {
+  if (u.level || !who.empty()) {
     std::vector<std::string> parts;
-    if (u.has_level()) {
-      parts.push_back(
-          base::StrCat({"level ", base::NumberToString(u.level())}));
+    if (u.level) {
+      parts.push_back(base::StrCat({"level ", base::NumberToString(*u.level)}));
     }
     parts.insert(parts.end(), who.begin(), who.end());
     bits.push_back(base::JoinString(parts, " "));
   }
   for (const std::string& name :
-       {NameOf(u.level_color(), pb::Unit_LevelColor_Name),
-        NameOf(u.kind(), pb::Unit_Kind_Name),
-        NameOf(u.reaction(), pb::Unit_Reaction_Name),
-        NameOf(u.classification(), pb::Unit_Classification_Name),
-        NameOf(u.size(), pb::Unit_Size_Name)}) {
+       {NameOf(u.level_color), NameOf(u.kind), NameOf(u.reaction),
+        NameOf(u.classification), NameOf(u.size)}) {
     if (!name.empty() && !IsDefaultName(name)) {
       bits.push_back(Word(name));
     }
   }
-  AddPercent(&bits, u.has_health_pct(), u.health_pct(), "health");
-  AddPercent(&bits, u.has_power_pct(), u.power_pct(), "power");
-  const std::string state =
-      NameOf(u.activity().state(), pb::Activity_State_Name);
+  AddPercent(&bits, u.health_pct, "health");
+  AddPercent(&bits, u.power_pct, "power");
+  const std::string state = NameOf(u.activity.state);
   if (!state.empty() && !IsDefaultName(state)) {
-    bits.push_back(Word(state) +
-                   (u.activity().with().empty()
-                        ? ""
-                        : base::StrCat({" ", u.activity().with()})));
+    bits.push_back(Word(state) + (u.activity.with.empty()
+                                      ? ""
+                                      : base::StrCat({" ", u.activity.with})));
   }
   // `dead` is already in the activity.
-  AddFlag(&bits, u.lootable(), "lootable");
-  AddFlag(&bits, u.skinnable(), "skinnable");
-  AddFlag(&bits, u.tapped_by_other(), "tapped by other");
-  AddFlag(&bits, u.targeting_me(), "targeting me");
-  if (!u.target().empty()) {
-    bits.push_back(base::StrCat({"target ", u.target()}));
+  AddFlag(&bits, u.lootable, "lootable");
+  AddFlag(&bits, u.skinnable, "skinnable");
+  AddFlag(&bits, u.tapped_by_other, "tapped by other");
+  AddFlag(&bits, u.targeting_me, "targeting me");
+  if (!u.target.empty()) {
+    bits.push_back(base::StrCat({"target ", u.target}));
   }
-  AddEnum(&bits, NameOf(u.threat_status(), pb::Unit_ThreatStatus_Name),
-          "threat status");
-  AddEnum(&bits, NameOf(u.quest_marker(), pb::Unit_QuestMarker_Name),
-          "quest marker");
-  AddFlag(&bits, u.pvp_flagged(), "pvp flagged");
-  AddEnum(&bits, NameOf(u.raid_marker(), pb::RaidMarker_Name), "raid marker");
-  if (u.has_pack() && (u.pack().id() != 0 || u.pack().size() != 0)) {
-    bits.push_back(base::StrCat({"pack ", PackText(u.pack())}));
+  AddEnum(&bits, NameOf(u.threat_status), "threat status");
+  AddEnum(&bits, NameOf(u.quest_marker), "quest marker");
+  AddFlag(&bits, u.pvp_flagged, "pvp flagged");
+  AddEnum(&bits, NameOf(u.raid_marker), "raid marker");
+  if (u.pack && (u.pack->id != 0 || u.pack->size != 0)) {
+    bits.push_back(base::StrCat({"pack ", PackText(*u.pack)}));
   }
-  if (u.visual_state_size() > 0) {
+  if (!u.visual_state.empty()) {
     std::vector<std::string> states;
-    for (int i = 0; i < u.visual_state_size(); ++i) {
-      states.push_back(Word(pb::Unit_VisualState_Name(u.visual_state(i))));
+    for (pb::Unit::VisualState vs : u.visual_state) {
+      states.push_back(Word(pb::EnumName(vs)));
     }
     bits.push_back(
         base::StrCat({"visual state [", base::JoinString(states, "; "), "]"}));
   }
-  if (!u.quest_relevant().empty()) {
-    bits.push_back(base::StrCat({"quest relevant ", u.quest_relevant()}));
+  if (!u.quest_relevant.empty()) {
+    bits.push_back(base::StrCat({"quest relevant ", u.quest_relevant}));
   }
-  if (!u.subtitle().empty()) {
-    bits.push_back(base::StrCat({"subtitle ", u.subtitle()}));
+  if (!u.subtitle.empty()) {
+    bits.push_back(base::StrCat({"subtitle ", u.subtitle}));
   }
   return base::JoinString(bits, ", ");
 }
@@ -217,27 +207,27 @@ std::string UnitLook(const pb::Unit& u) {
 // out.
 std::string ObjectLook(const pb::GameObject& go) {
   std::vector<std::string> bits;
-  const std::string kind = NameOf(go.kind(), pb::GameObject_Kind_Name);
+  const std::string kind = NameOf(go.kind);
   if (!kind.empty() && !IsDefaultName(kind)) {
     bits.push_back(Word(kind));
   }
-  AddPercent(&bits, go.has_health_pct(), go.health_pct(), "health");
+  AddPercent(&bits, go.health_pct, "health");
   // A usable object in the ready state is the normal case; written only when
   // it is the first thing said (the Python prototype's string replace left
   // those in).
-  if (go.usable() && bits.empty()) {
+  if (go.usable && bits.empty()) {
     bits.push_back("usable yes");
   }
-  if (!go.state().empty() && !(go.state() == "ready" && !bits.empty())) {
-    bits.push_back(base::StrCat({"state ", go.state()}));
+  if (!go.state.empty() && !(go.state == "ready" && !bits.empty())) {
+    bits.push_back(base::StrCat({"state ", go.state}));
   }
-  AddFlag(&bits, go.highlighted(), "highlighted");
-  if (!go.owner().empty()) {
-    bits.push_back(base::StrCat({"owner ", go.owner()}));
+  AddFlag(&bits, go.highlighted, "highlighted");
+  if (!go.owner.empty()) {
+    bits.push_back(base::StrCat({"owner ", go.owner}));
   }
-  if (go.capture_progress_pct() != 0) {
-    bits.push_back(base::StringPrintf("capture progress pct %g",
-                                      go.capture_progress_pct()));
+  if (go.capture_progress_pct != 0) {
+    bits.push_back(
+        base::StringPrintf("capture progress pct %g", go.capture_progress_pct));
   }
   return base::JoinString(bits, ", ");
 }
@@ -253,13 +243,13 @@ struct Thing {
 };
 
 std::optional<OptionKind> UnitOption(const pb::Unit& u) {
-  if (u.kind() != pb::Unit::NPC && u.kind() != pb::Unit::CRITTER) {
+  if (u.kind != pb::Unit::NPC && u.kind != pb::Unit::CRITTER) {
     return std::nullopt;
   }
-  if (u.dead()) {
-    return u.lootable() ? std::optional(OptionKind::kLoot) : std::nullopt;
+  if (u.dead) {
+    return u.lootable ? std::optional(OptionKind::kLoot) : std::nullopt;
   }
-  switch (u.reaction()) {
+  switch (u.reaction) {
     case pb::Unit::HOSTILE:
     case pb::Unit::NEUTRAL:
       return OptionKind::kAttack;
@@ -271,10 +261,10 @@ std::optional<OptionKind> UnitOption(const pb::Unit& u) {
 }
 
 std::optional<OptionKind> ObjectOption(const pb::GameObject& go) {
-  if (!go.usable()) {
+  if (!go.usable) {
     return std::nullopt;
   }
-  return go.kind() == pb::GameObject::HERB || go.kind() == pb::GameObject::ORE
+  return go.kind == pb::GameObject::HERB || go.kind == pb::GameObject::ORE
              ? OptionKind::kGather
              : OptionKind::kUse;
 }
@@ -301,7 +291,7 @@ std::string_view OptionVerb(OptionKind kind) {
 }
 
 ScreenOption ParseModuleOption(const pb::Option& option) {
-  const std::string_view text = base::TrimWhitespaceASCII(option.text());
+  const std::string_view text = base::TrimWhitespaceASCII(option.text);
   const struct {
     std::string_view prefix;
     OptionKind kind;
@@ -312,20 +302,20 @@ ScreenOption ParseModuleOption(const pb::Option& option) {
   };
   for (const auto& entry : targeted) {
     if (const auto rest = base::RemovePrefix(text, entry.prefix)) {
-      return {entry.kind, std::string(option.guid()),
+      return {entry.kind, option.guid,
               std::string(base::TrimWhitespaceASCII(*rest))};
     }
   }
   if (base::StartsWith(text, "Explore", base::CompareCase::INSENSITIVE_ASCII)) {
-    return {OptionKind::kExplore, std::string(option.guid()), ""};
+    return {OptionKind::kExplore, option.guid, ""};
   }
   if (base::StartsWith(text, "Rest", base::CompareCase::INSENSITIVE_ASCII)) {
-    return {OptionKind::kRest, std::string(option.guid()), ""};
+    return {OptionKind::kRest, option.guid, ""};
   }
   if (base::StartsWith(text, "Go to", base::CompareCase::INSENSITIVE_ASCII)) {
-    return {OptionKind::kTown, std::string(option.guid()), ""};
+    return {OptionKind::kTown, option.guid, ""};
   }
-  return {OptionKind::kKeep, std::string(option.guid()), ""};
+  return {OptionKind::kKeep, option.guid, ""};
 }
 
 // One line per distinct (name, look): the same thing seen several times is
@@ -391,8 +381,8 @@ std::vector<std::string> ThingLines(const std::vector<Thing>& things,
     std::vector<float> dists;
     std::flat_set<std::string> dirs;
     for (const Thing* t : group.items) {
-      dists.push_back(Finite(t->rel.dist_yd()));
-      const std::string dir = NameOf(t->rel.dir(), pb::Direction_Name);
+      dists.push_back(Finite(t->rel.dist_yd));
+      const std::string dir = NameOf(t->rel.dir);
       if (!dir.empty()) {
         dirs.insert(dir);
       }
@@ -418,15 +408,15 @@ std::string FarSummary(const std::vector<const pb::Unit*>& units) {
     if (groups.find(look) == groups.end()) {
       order.push_back(look);
     }
-    groups[look].push_back(&u->rel());
+    groups[look].push_back(&u->rel);
   }
   std::vector<std::string> parts;
   for (const std::string& look : order) {
     std::vector<float> dists;
     std::flat_set<std::string> dirs;
     for (const pb::Relative* rel : groups[look]) {
-      dists.push_back(Finite(rel->dist_yd()));
-      const std::string dir = NameOf(rel->dir(), pb::Direction_Name);
+      dists.push_back(Finite(rel->dist_yd));
+      const std::string dir = NameOf(rel->dir);
       if (!dir.empty()) {
         dirs.insert(dir);
       }
@@ -447,54 +437,56 @@ std::string FarSummary(const std::vector<const pb::Unit*>& units) {
 std::string SelfLine(const pb::Self& s) {
   std::vector<std::string> who;
   who.push_back(
-      s.unit().level() != 0
-          ? base::StrCat({"level ", base::NumberToString(s.unit().level())})
+      s.unit.level.value_or(0) != 0
+          ? base::StrCat({"level ", base::NumberToString(*s.unit.level)})
           : "level ?");
-  const std::string gender = NameOf(s.gender(), pb::Self_Gender_Name);
+  const std::string gender = NameOf(s.gender);
   if (!gender.empty()) {
     who.push_back(Word(gender));
   }
-  if (!s.unit().player().class_().empty()) {
-    who.push_back(base::ToLowerASCII(s.unit().player().class_()));
+  if (s.unit.player && !s.unit.player->class_.empty()) {
+    who.push_back(base::ToLowerASCII(s.unit.player->class_));
   }
   std::vector<std::string> bits;
-  bits.push_back(base::StrCat({s.unit().name().empty() ? "?" : s.unit().name(),
-                               ", ", base::JoinString(who, " ")}));
-  bits.push_back(base::StrCat({"health ", base::NumberToString(s.health()), "/",
-                               base::NumberToString(s.health_max())}));
-  if (s.power_max() != 0) {
-    const std::string power_type =
-        NameOf(s.power_type(), pb::Self_PowerType_Name);
+  bits.push_back(base::StrCat({s.unit.name.empty() ? "?" : s.unit.name, ", ",
+                               base::JoinString(who, " ")}));
+  bits.push_back(base::StrCat({"health ", base::NumberToString(s.health), "/",
+                               base::NumberToString(s.health_max)}));
+  if (s.power_max != 0) {
+    const std::string power_type = NameOf(s.power_type);
     bits.push_back(
         base::StrCat({power_type.empty() ? "power" : Word(power_type), " ",
-                      base::NumberToString(s.power()), "/",
-                      base::NumberToString(s.power_max())}));
+                      base::NumberToString(s.power), "/",
+                      base::NumberToString(s.power_max)}));
   }
-  if (s.xp_next() != 0) {
+  if (s.xp_next != 0) {
     bits.push_back(base::StrCat(
-        {"xp ", base::NumberToString(s.xp()), "/",
-         base::NumberToString(s.xp_next()),
-         s.rested_xp() != 0
+        {"xp ", base::NumberToString(s.xp), "/",
+         base::NumberToString(s.xp_next),
+         s.rested_xp != 0
              ? base::StrCat(
-                   {" (rested ", base::NumberToString(s.rested_xp()), ")"})
+                   {" (rested ", base::NumberToString(s.rested_xp), ")"})
              : ""}));
   }
-  if (s.money() != 0) {
+  if (s.money != 0) {
     bits.push_back(
-        base::StrCat({"money ", base::NumberToString(s.money()), "c"}));
+        base::StrCat({"money ", base::NumberToString(s.money), "c"}));
   }
   // The life state first when not alive, then the flags.
-  const std::string life = NameOf(s.state(), pb::Self_LifeState_Name);
+  const std::string life = NameOf(s.state);
   if (!life.empty() && life != "ALIVE") {
     bits.push_back(Word(life));
   }
   const struct {
     bool value;
     const char* word;
-  } flags[] = {{s.in_combat(), "in combat"}, {s.resting(), "resting"},
-               {s.mounted(), "mounted"},     {s.swimming(), "swimming"},
-               {s.in_flight(), "in flight"}, {s.camping(), "camping"},
-               {s.drunk() != 0, "drunk"}};
+  } flags[] = {{s.in_combat, "in combat"},
+               {s.resting, "resting"},
+               {s.mounted, "mounted"},
+               {s.swimming, "swimming"},
+               {s.in_flight, "in flight"},
+               {s.camping, "camping"},
+               {s.drunk != pb::Self::DRUNK_UNSPECIFIED, "drunk"}};
   for (const auto& flag : flags) {
     if (flag.value) {
       bits.push_back(flag.word);
@@ -505,20 +497,20 @@ std::string SelfLine(const pb::Self& s) {
 
 std::string WhereLine(const pb::Where& w) {
   std::vector<std::string> places;
-  if (!w.subzone().empty()) {
-    places.push_back(std::string(w.subzone()));
+  if (!w.subzone.empty()) {
+    places.push_back(w.subzone);
   }
-  if (!w.zone().empty()) {
-    places.push_back(std::string(w.zone()));
+  if (!w.zone.empty()) {
+    places.push_back(w.zone);
   }
   std::string out = base::JoinString(places, ", ");
-  if (!w.map().empty()) {
-    base::StrAppend(&out, {" (", w.map(), ")"});
+  if (!w.map.empty()) {
+    base::StrAppend(&out, {" (", w.map, ")"});
   }
-  if (w.indoors()) {
+  if (w.indoors) {
     base::StrAppend(&out, {"; indoors"});
   }
-  if (w.in_instance()) {
+  if (w.in_instance) {
     base::StrAppend(&out, {"; in an instance"});
   }
   return out;
@@ -552,17 +544,17 @@ std::string_view OptionKindName(OptionKind kind) {
 
 Screen RenderScreen(const pb::Snapshot& snapshot) {
   Screen screen;
-  screen.has_module_options = snapshot.options_size() > 0;
+  screen.has_module_options = !snapshot.options.empty();
   std::flat_map<std::string, int, std::less<>> guid_to_option;
   std::vector<bool> placed;
   if (screen.has_module_options) {
-    placed.assign(static_cast<size_t>(snapshot.options_size()), false);
-    for (int i = 0; i < snapshot.options_size(); ++i) {
-      ScreenOption parsed = ParseModuleOption(snapshot.options(i));
+    placed.assign(snapshot.options.size(), false);
+    for (size_t i = 0; i < snapshot.options.size(); ++i) {
+      ScreenOption parsed = ParseModuleOption(snapshot.options[i]);
       screen.options.push_back(parsed.kind);
       screen.details.push_back(parsed);
       if (!parsed.guid.empty()) {
-        guid_to_option.try_emplace(parsed.guid, i + 1);
+        guid_to_option.try_emplace(parsed.guid, static_cast<int>(i + 1));
       }
     }
   }
@@ -574,27 +566,26 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
     return it == guid_to_option.end() ? 0 : it->second;
   };
 
-  const pb::Base& base = snapshot.base();
+  const pb::Base& base = snapshot.base;
   std::vector<std::string> lines;
-  if (base.has_self()) {
-    lines.push_back("me: " + SelfLine(base.self()));
+  if (base.self != pb::Self{}) {
+    lines.push_back("me: " + SelfLine(base.self));
   }
-  if (base.has_where()) {
-    lines.push_back("where: " + WhereLine(base.where()));
+  if (base.where != pb::Where{}) {
+    lines.push_back("where: " + WhereLine(base.where));
   }
-  const pb::Nearby& nearby = base.nearby();
+  const pb::Nearby& nearby = base.nearby;
   std::vector<Thing> named;
   std::vector<const pb::Unit*> nameless;
-  for (const pb::Unit& u : nearby.units()) {
-    if (u.name().empty()) {
+  for (const pb::Unit& u : nearby.units) {
+    if (u.name.empty()) {
       nameless.push_back(&u);
     } else {
-      const int mod_opt = lookup_module_option(u.guid());
+      const int mod_opt = lookup_module_option(u.guid);
       const std::optional<OptionKind> opt =
           mod_opt > 0 ? std::optional(screen.options[mod_opt - 1])
                       : UnitOption(u);
-      named.push_back({std::string(u.guid()), std::string(u.name()),
-                       UnitLook(u), u.rel(), opt, mod_opt});
+      named.push_back({u.guid, u.name, UnitLook(u), u.rel, opt, mod_opt});
     }
   }
   if (!named.empty()) {
@@ -608,15 +599,15 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
   if (!nameless.empty()) {
     lines.push_back("far away: " + FarSummary(nameless));
   }
-  if (nearby.objects_size() > 0) {
+  if (!nearby.objects.empty()) {
     std::vector<Thing> objects;
-    for (const pb::GameObject& go : nearby.objects()) {
-      const int mod_opt = lookup_module_option(go.guid());
+    for (const pb::GameObject& go : nearby.objects) {
+      const int mod_opt = lookup_module_option(go.guid);
       const std::optional<OptionKind> opt =
           mod_opt > 0 ? std::optional(screen.options[mod_opt - 1])
                       : ObjectOption(go);
-      objects.push_back({std::string(go.guid()), std::string(go.name()),
-                         ObjectLook(go), go.rel(), opt, mod_opt});
+      objects.push_back(
+          {go.guid, go.name, ObjectLook(go), go.rel, opt, mod_opt});
     }
     lines.push_back("objects:");
     for (const std::string& line :
@@ -627,10 +618,10 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
   }
   if (screen.has_module_options) {
     std::vector<std::string> extra;
-    for (int i = 0; i < snapshot.options_size(); ++i) {
-      if (!placed[static_cast<size_t>(i)]) {
+    for (size_t i = 0; i < snapshot.options.size(); ++i) {
+      if (!placed[i]) {
         extra.push_back(base::StrCat({"  ", base::NumberToString(i + 1), ". ",
-                                      snapshot.options(i).text()}));
+                                      snapshot.options[i].text}));
       }
     }
     if (!extra.empty()) {

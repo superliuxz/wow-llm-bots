@@ -14,8 +14,6 @@ RUN = SERVER / "run"  # Sockets, pid files and the console pipe of a running ser
 ETC = SERVER / "etc"
 LOGS = VAR / "logs"
 MYSQL_CNF = ETC / "mysql.cnf"
-PROTOC = OUT / "protoc" / "protobuf" / "protoc"
-VENV_PYTHON = OUT / "tools-venv" / "bin" / "python"
 
 
 class Failed(Exception):
@@ -77,12 +75,6 @@ def need(path, how):
     """Fails with `how` (what builds it) if `path` doesn't exist."""
     if not pathlib.Path(path).exists():
         raise Failed(f"missing {pathlib.Path(path).relative_to(ROOT)}: {how}")
-
-
-def venv_python():
-    """The tools venv's Python (protobuf matching protoc), created by `wlb check snapshots`."""
-    need(VENV_PYTHON, "run `tools/wlb check snapshots` once")
-    return VENV_PYTHON
 
 
 def main_guard(fn):

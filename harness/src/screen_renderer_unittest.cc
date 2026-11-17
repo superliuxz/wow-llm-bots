@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "gtest/gtest.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 
 namespace harness {
 namespace {
@@ -72,7 +72,10 @@ TEST_P(GoldenScreenTest, MatchesThePrototype) {
   const std::string dir = std::string(WLB_HARNESS_TESTDATA) + "/screens/";
   const std::string name = GetParam();
   pb::Snapshot snapshot;
-  ASSERT_TRUE(snapshot.ParseFromString(ReadFile(dir + name + ".pb")));
+  std::string err;
+  ASSERT_TRUE(
+      pb::ReadJson(ReadFile(dir + name + ".snapshot.json"), &snapshot, &err))
+      << err;
   const Screen screen = RenderScreen(snapshot);
   // The expected file ends with a newline the screen text does not have.
   EXPECT_EQ(screen.text + "\n", ReadFile(dir + name + ".txt"));
@@ -94,15 +97,14 @@ INSTANTIATE_TEST_SUITE_P(RealSnapshots,
 
 pb::Snapshot NewSnapshot() {
   pb::Snapshot snapshot;
-  pb::Self* self = snapshot.mutable_base()->mutable_self();
-  self->mutable_unit()->set_name("Tess");
-  self->mutable_unit()->set_level(7);
-  self->mutable_unit()->mutable_player()->set_class_("Rogue");
-  self->set_gender(pb::Self::FEMALE);
-  self->set_health(80);
-  self->set_health_max(100);
-  pb::Where* where = snapshot.mutable_base()->mutable_where();
-  where->set_zone("Durotar");
+  pb::Self& self = snapshot.base.self;
+  self.unit.name = "Tess";
+  self.unit.level = 7;
+  self.unit.player.emplace().class_ = "Rogue";
+  self.gender = pb::Self::FEMALE;
+  self.health = 80;
+  self.health_max = 100;
+  snapshot.base.where.zone = "Durotar";
   return snapshot;
 }
 
@@ -111,15 +113,15 @@ pb::Unit* AddUnit(pb::Snapshot* snapshot,
                   pb::Unit::Reaction reaction,
                   float dist_yd,
                   pb::Direction dir) {
-  pb::Unit* unit = snapshot->mutable_base()->mutable_nearby()->add_units();
-  unit->set_name(name);
-  unit->set_kind(pb::Unit::NPC);
-  unit->set_level(3);
-  unit->set_reaction(reaction);
-  unit->mutable_rel()->set_dist_yd(dist_yd);
-  unit->mutable_rel()->set_dir(dir);
-  unit->mutable_rel()->set_in_los(true);
-  return unit;
+  pb::Unit& unit = snapshot->base.nearby.units.emplace_back();
+  unit.name = name;
+  unit.kind = pb::Unit::NPC;
+  unit.level = 3;
+  unit.reaction = reaction;
+  unit.rel.dist_yd = dist_yd;
+  unit.rel.dir = dir;
+  unit.rel.in_los = true;
+  return &unit;
 }
 
 TEST(ScreenRendererTest, AQuietScreenHasOnlyMeWhereAndTheFixedOptions) {
@@ -139,16 +141,16 @@ TEST(ScreenRendererTest, AQuietScreenHasOnlyMeWhereAndTheFixedOptions) {
 
 TEST(ScreenRendererTest, SelfLineShowsResourcesMoneyAndState) {
   pb::Snapshot snapshot = NewSnapshot();
-  pb::Self* self = snapshot.mutable_base()->mutable_self();
-  self->set_power_type(pb::Self::MANA);
-  self->set_power(30);
-  self->set_power_max(60);
-  self->set_xp(100);
-  self->set_xp_next(400);
-  self->set_rested_xp(25);
-  self->set_money(1234);
-  self->set_in_combat(true);
-  self->set_mounted(true);
+  pb::Self& self = snapshot.base.self;
+  self.power_type = pb::Self::MANA;
+  self.power = 30;
+  self.power_max = 60;
+  self.xp = 100;
+  self.xp_next = 400;
+  self.rested_xp = 25;
+  self.money = 1234;
+  self.in_combat = true;
+  self.mounted = true;
   const std::string text = RenderScreen(snapshot).text;
   EXPECT_EQ(text.substr(0, text.find('\n')),
             "me: Tess, level 7 female rogue; health 80/100; mana 30/60; "
@@ -158,9 +160,8 @@ TEST(ScreenRendererTest, SelfLineShowsResourcesMoneyAndState) {
 TEST(ScreenRendererTest, FriendlyHostileAndNeutralUnitsGetOptionsInOrder) {
   pb::Snapshot snapshot = NewSnapshot();
   AddUnit(&snapshot, "Gornek", pb::Unit::FRIENDLY, 20, pb::NE);
-  AddUnit(&snapshot, "Scorpid", pb::Unit::HOSTILE, 8, pb::S)
-      ->mutable_rel()
-      ->set_facing_me(true);
+  AddUnit(&snapshot, "Scorpid", pb::Unit::HOSTILE, 8, pb::S)->rel.facing_me =
+      true;
   AddUnit(&snapshot, "Boar", pb::Unit::NEUTRAL, 30, pb::W);
   const Screen screen = RenderScreen(snapshot);
   EXPECT_EQ(screen.options[0], OptionKind::kTalk);
@@ -184,12 +185,12 @@ TEST(ScreenRendererTest, FriendlyHostileAndNeutralUnitsGetOptionsInOrder) {
 TEST(ScreenRendererTest, PlayersAndDeadUnitsAreNotOptionsButCorpsesToLootAre) {
   pb::Snapshot snapshot = NewSnapshot();
   pb::Unit* player = AddUnit(&snapshot, "Gatda", pb::Unit::FRIENDLY, 40, pb::W);
-  player->set_kind(pb::Unit::PLAYER);
+  player->kind = pb::Unit::PLAYER;
   pb::Unit* corpse = AddUnit(&snapshot, "Wolf", pb::Unit::HOSTILE, 5, pb::E);
-  corpse->set_dead(true);
+  corpse->dead = true;
   pb::Unit* lootable = AddUnit(&snapshot, "Boar", pb::Unit::NEUTRAL, 6, pb::E);
-  lootable->set_dead(true);
-  lootable->set_lootable(true);
+  lootable->dead = true;
+  lootable->lootable = true;
   const Screen screen = RenderScreen(snapshot);
   EXPECT_EQ(screen.options.size(), 5u);  // The boar corpse, then 4 fixed.
   EXPECT_EQ(screen.options[0], OptionKind::kLoot);
@@ -216,9 +217,9 @@ TEST(ScreenRendererTest, UnitsWithoutANameAreSummarisedByLook) {
   pb::Snapshot snapshot = NewSnapshot();
   for (float dist : {60.f, 80.f}) {
     pb::Unit* far = AddUnit(&snapshot, "", pb::Unit::NEUTRAL, dist, pb::N);
-    far->clear_level();  // Too far to see: only its model.
-    far->set_looks_like("boar");
-    far->set_size(pb::Unit::MEDIUM);
+    far->level.reset();  // Too far to see: only its model.
+    far->looks_like = "boar";
+    far->size = pb::Unit::MEDIUM;
   }
   const Screen screen = RenderScreen(snapshot);
   EXPECT_NE(screen.text.find("far away: 2x boar, npc, neutral (60-80 yd N)"),
@@ -229,22 +230,22 @@ TEST(ScreenRendererTest, UnitsWithoutANameAreSummarisedByLook) {
 
 TEST(ScreenRendererTest, ObjectsAreGatheredOrUsedAndDefaultsAreLeftOut) {
   pb::Snapshot snapshot = NewSnapshot();
-  pb::Nearby* nearby = snapshot.mutable_base()->mutable_nearby();
-  pb::GameObject* herb = nearby->add_objects();
-  herb->set_name("Peacebloom");
-  herb->set_kind(pb::GameObject::HERB);
-  herb->set_usable(true);
-  herb->set_state("ready");
-  herb->mutable_rel()->set_dist_yd(15);
-  herb->mutable_rel()->set_dir(pb::E);
-  herb->mutable_rel()->set_in_los(true);
-  pb::GameObject* door = nearby->add_objects();
-  door->set_name("Gate");
-  door->set_kind(pb::GameObject::DOOR);
-  door->set_state("active");
-  door->mutable_rel()->set_dist_yd(40);
-  door->mutable_rel()->set_dir(pb::N);
-  door->mutable_rel()->set_in_los(false);
+  pb::Nearby& nearby = snapshot.base.nearby;
+  pb::GameObject& herb = nearby.objects.emplace_back();
+  herb.name = "Peacebloom";
+  herb.kind = pb::GameObject::HERB;
+  herb.usable = true;
+  herb.state = "ready";
+  herb.rel.dist_yd = 15;
+  herb.rel.dir = pb::E;
+  herb.rel.in_los = true;
+  pb::GameObject& door = nearby.objects.emplace_back();
+  door.name = "Gate";
+  door.kind = pb::GameObject::DOOR;
+  door.state = "active";
+  door.rel.dist_yd = 40;
+  door.rel.dir = pb::N;
+  door.rel.in_los = false;
   const Screen screen = RenderScreen(snapshot);
   EXPECT_NE(screen.text.find("objects:\n  1. Gather Peacebloom: herb; 15 yd E\n"
                              "  - Gate: door, state active; 40 yd N, out of "
@@ -256,15 +257,15 @@ TEST(ScreenRendererTest, ObjectsAreGatheredOrUsedAndDefaultsAreLeftOut) {
 
 TEST(ScreenRendererTest, AUsableAndAnUnusableObjectAreNotOneLine) {
   pb::Snapshot snapshot = NewSnapshot();
-  pb::Nearby* nearby = snapshot.mutable_base()->mutable_nearby();
+  pb::Nearby& nearby = snapshot.base.nearby;
   for (bool usable : {false, true}) {
-    pb::GameObject* chest = nearby->add_objects();
-    chest->set_name("Chest");
-    chest->set_kind(pb::GameObject::CHEST);
-    chest->set_state("ready");
-    chest->set_usable(usable);
-    chest->mutable_rel()->set_dist_yd(10);
-    chest->mutable_rel()->set_in_los(true);
+    pb::GameObject& chest = nearby.objects.emplace_back();
+    chest.name = "Chest";
+    chest.kind = pb::GameObject::CHEST;
+    chest.state = "ready";
+    chest.usable = usable;
+    chest.rel.dist_yd = 10;
+    chest.rel.in_los = true;
   }
   const Screen screen = RenderScreen(snapshot);
   // The unusable one first: had they shared a line, its "no option" would
@@ -303,8 +304,8 @@ TEST(ScreenRendererTest, EveryOptionKindHasAName) {
 
 TEST(ScreenRendererTest, WhenNotAliveTheLifeStateComesBeforeTheFlags) {
   pb::Snapshot snapshot = NewSnapshot();
-  snapshot.mutable_base()->mutable_self()->set_state(pb::Self::GHOST);
-  snapshot.mutable_base()->mutable_self()->set_resting(true);
+  snapshot.base.self.state = pb::Self::GHOST;
+  snapshot.base.self.resting = true;
   EXPECT_NE(RenderScreen(snapshot).text.find("health 80/100; ghost; resting"),
             std::string::npos);
 }
@@ -314,22 +315,22 @@ TEST(ScreenRendererTest, ModuleOptionsNumberScreenLinesByGuidWithoutMismatch) {
   // Friendly Gornek has no module option in M1; two Boars share a name/look
   // (the second is closer and holds the module's option guid); a lootable Wolf
   // corpse has option 1 (even though it appears last in nearby.units).
-  AddUnit(&snapshot, "Gornek", pb::Unit::FRIENDLY, 18, pb::N)->set_guid("0x10");
-  AddUnit(&snapshot, "Boar", pb::Unit::NEUTRAL, 14, pb::E)->set_guid("0x20");
-  AddUnit(&snapshot, "Boar", pb::Unit::NEUTRAL, 6, pb::E)->set_guid("0x21");
+  AddUnit(&snapshot, "Gornek", pb::Unit::FRIENDLY, 18, pb::N)->guid = "0x10";
+  AddUnit(&snapshot, "Boar", pb::Unit::NEUTRAL, 14, pb::E)->guid = "0x20";
+  AddUnit(&snapshot, "Boar", pb::Unit::NEUTRAL, 6, pb::E)->guid = "0x21";
   pb::Unit* wolf = AddUnit(&snapshot, "Wolf", pb::Unit::HOSTILE, 4, pb::W);
-  wolf->set_guid("0x30");
-  wolf->set_dead(true);
-  wolf->set_lootable(true);
+  wolf->guid = "0x30";
+  wolf->dead = true;
+  wolf->lootable = true;
 
-  pb::Option* o1 = snapshot.add_options();
-  o1->set_text("Loot Wolf");
-  o1->set_guid("0x30");
-  pb::Option* o2 = snapshot.add_options();
-  o2->set_text("Attack Boar");
-  o2->set_guid("0x21");
-  pb::Option* o3 = snapshot.add_options();
-  o3->set_text("Keep doing what I'm doing");
+  pb::Option& o1 = snapshot.options.emplace_back();
+  o1.text = "Loot Wolf";
+  o1.guid = "0x30";
+  pb::Option& o2 = snapshot.options.emplace_back();
+  o2.text = "Attack Boar";
+  o2.guid = "0x21";
+  pb::Option& o3 = snapshot.options.emplace_back();
+  o3.text = "Keep doing what I'm doing";
 
   const Screen screen = RenderScreen(snapshot);
   EXPECT_TRUE(screen.has_module_options);

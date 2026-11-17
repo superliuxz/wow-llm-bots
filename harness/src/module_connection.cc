@@ -18,7 +18,7 @@
 #include "base/thread_annotations.h"
 #include "base/time/time.h"
 #include "net/unix_socket_client.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 
 namespace harness {
 
@@ -95,23 +95,22 @@ class ModuleConnection::IoCore : public base::RawPtrTarget {
   void OnFrame(std::string frame) {
     const base::TimeTicks received_at = base::TimeTicks::Now();
     pb::ModuleMessage msg;
-    if (!msg.ParseFromString(frame)) {
+    if (!pb::ReadBeve(frame, &msg)) {
       stats_->RecordUnparseable();
       return;
     }
-    if (msg.has_snapshot()) {
-      stats_->RecordSnapshot(msg.snapshot().monotonic_us(), received_at);
+    if (msg.snapshot) {
+      stats_->RecordSnapshot(msg.snapshot->monotonic_us, received_at);
       if (origin_) {
         origin_->PostTask(base::BindOnce(&ModuleConnection::OnSnapshot, owner_,
-                                         std::move(*msg.mutable_snapshot()),
+                                         std::move(*msg.snapshot),
                                          received_at));
       }
-    } else if (msg.has_event()) {
+    } else if (msg.event) {
       stats_->RecordEvent();
       if (origin_) {
         origin_->PostTask(base::BindOnce(&ModuleConnection::OnEvent, owner_,
-                                         std::move(*msg.mutable_event()),
-                                         received_at));
+                                         std::move(*msg.event), received_at));
       }
     }
   }
@@ -176,7 +175,7 @@ void ModuleConnection::SendCommand(const pb::Command& command) {
   if (!io_core_) {
     return;
   }
-  std::string bytes = command.SerializeAsString();
+  std::string bytes = pb::WriteBeve(command);
   io_thread_.task_runner()->PostTask(
       [core = io_core_, bytes = std::move(bytes)] { core->Send(bytes); });
 }

@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "base/time/time.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 
 namespace llm_brain {
 

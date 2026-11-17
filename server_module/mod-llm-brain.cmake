@@ -1,29 +1,18 @@
 # Included by AzerothCore's modules/CMakeLists.txt after the `modules` target
-# exists. Links our shared C++ (common/: wlb_base, wlb_net, wlb_proto) and the
-# protobuf lite runtime with the abseil libraries it uses, all built beforehand
-# into out/common-server (not hardened) by tools/wlb build server.
+# exists. Links our shared C++ (common/: wlb_base, wlb_net, wlb_proto), built
+# beforehand into out/common-server (not hardened) by tools/wlb build server.
 get_filename_component(WLB_MODULE_DIR "${CMAKE_CURRENT_LIST_DIR}" REALPATH)
 get_filename_component(WLB_ROOT "${WLB_MODULE_DIR}/.." REALPATH)
 set(WLB_SERVER_OUT "${WLB_ROOT}/out/common-server")
-target_include_directories(modules PRIVATE
-  "${WLB_ROOT}/common"
-  "${WLB_SERVER_OUT}/gen"
-  "${WLB_ROOT}/third_party/protobuf/src"
-  "${WLB_ROOT}/third_party/abseil-cpp")
-# Only the protobuf / abseil libraries wlb_proto needs are built there
-# (EXCLUDE_FROM_ALL), so take every archive under those directories. abseil's
-# archives depend on each other in no fixed order: link them as one group.
-file(GLOB_RECURSE WLB_DEP_ARCHIVES
-  "${WLB_SERVER_OUT}/protobuf/*.a" "${WLB_SERVER_OUT}/abseil/*.a")
-if(NOT WLB_DEP_ARCHIVES)
+target_include_directories(modules PRIVATE "${WLB_ROOT}/common")
+if(NOT EXISTS "${WLB_SERVER_OUT}/libwlb_proto.a")
   message(FATAL_ERROR "mod-llm-brain: build out/common-server first "
                       "(tools/wlb build common server)")
 endif()
 target_link_libraries(modules PRIVATE
   "${WLB_SERVER_OUT}/libwlb_proto.a"
   "${WLB_SERVER_OUT}/libwlb_net.a"
-  "${WLB_SERVER_OUT}/libwlb_base.a"
-  -Wl,--start-group ${WLB_DEP_ARCHIVES} -Wl,--end-group)
+  "${WLB_SERVER_OUT}/libwlb_base.a")
 
 # Our sources (not AzerothCore's or playerbots'): thread-safety analysis as
 # errors. No _GLIBCXX_ASSERTIONS here: hardening only works for a whole

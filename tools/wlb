@@ -1,7 +1,7 @@
 #!/usr/bin/env -S python3 -I
 """wlb: the project's one command-line tool (build, run, check, set up).
 
-  tools/wlb build protoc | common [VARIANT] [--no-tests] | server [--test]
+  tools/wlb build common [VARIANT] [--no-tests] | server [--test]
   tools/wlb db start | stop | backup [--keep N]
   tools/wlb config [TEST]                render out/server/etc/*.conf (TEST: config/tests/TEST.*)
   tools/wlb server start | stop
@@ -36,8 +36,8 @@ def parse(argv):
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("build", help="build protoc, common/ or the server")
-    p.add_argument("what", choices=["protoc", "common", "server"])
+    p = sub.add_parser("build", help="build common/ or the server")
+    p.add_argument("what", choices=["common", "server"])
     p.add_argument("variant", nargs="?", default="default", choices=list(build.VARIANTS),
                    help="for common: default, asan, tsan, msan or server")
     p.add_argument("--no-tests", action="store_true", help="for common: don't run unit tests")
@@ -104,9 +104,7 @@ def parse(argv):
 def main():
     a = parse(sys.argv[1:])
     if a.command == "build":
-        if a.what == "protoc":
-            build.protoc()
-        elif a.what == "common":
+        if a.what == "common":
             build.common(a.variant, tests=not a.no_tests)
         else:
             build.server(test=a.test)

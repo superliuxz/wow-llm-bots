@@ -12,7 +12,8 @@ import json
 import re
 import subprocess
 
-from wlblib.common import ROOT, Failed, venv_python
+from wlblib import build
+from wlblib.common import OUT, ROOT, Failed
 from wlblib.testing import expect
 
 NAME = "snapshots"
@@ -45,8 +46,10 @@ def last_full_minute(log):
 
 
 def run(perf):
+    if not (OUT / "common" / "libwlb_wire_py.so").exists():
+        build.common("default", tests=False)
     result = subprocess.run(
-        [venv_python(), "-I", ROOT / "tools/snapshot/fake_harness.py", "--stats", "--json",
+        ["python3", "-I", ROOT / "tools/snapshot/fake_harness.py", "--stats", "--json",
          str(RECEIVE_S)], capture_output=True, text=True)
     if result.returncode != 0:
         raise Failed(f"the harness stand-in failed:\n{result.stderr.strip()[-600:]}")

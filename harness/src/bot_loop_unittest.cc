@@ -18,7 +18,7 @@
 #include "file_util.h"
 #include "gtest/gtest.h"
 #include "llm_client.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 
 namespace harness {
 namespace {
@@ -81,17 +81,17 @@ pb::Snapshot MakeLiveSnap(const std::string& bot,
                           bool in_combat = false,
                           uint32_t hp = 60) {
   pb::Snapshot snap;
-  snap.set_bot(bot);
-  snap.set_seq(seq);
-  snap.set_monotonic_us((built_at - base::TimeTicks()).InMicroseconds());
-  pb::Self* self = snap.mutable_base()->mutable_self();
-  self->set_state(pb::Self::ALIVE);
-  self->set_in_combat(in_combat);
-  self->set_health(hp);
-  self->set_health_max(60);
-  self->set_power_type(pb::Self::MANA);
-  self->set_power(100);
-  self->set_power_max(100);
+  snap.bot = bot;
+  snap.seq = seq;
+  snap.monotonic_us = (built_at - base::TimeTicks()).InMicroseconds();
+  pb::Self& self = snap.base.self;
+  self.state = pb::Self::ALIVE;
+  self.in_combat = in_combat;
+  self.health = hp;
+  self.health_max = 60;
+  self.power_type = pb::Self::MANA;
+  self.power = 100;
+  self.power_max = 100;
   return snap;
 }
 
@@ -101,28 +101,28 @@ void AddUnitAndOption(pb::Snapshot* snap,
                       bool dead,
                       bool lootable,
                       bool targeting_me = false) {
-  pb::Unit* u = snap->mutable_base()->mutable_nearby()->add_units();
-  u->set_guid(guid);
-  u->set_name(name);
-  u->set_kind(pb::Unit::NPC);
-  u->set_reaction(pb::Unit::NEUTRAL);
-  u->set_dead(dead);
-  u->set_lootable(lootable);
-  u->set_targeting_me(targeting_me);
-  u->mutable_rel()->set_dist_yd(5.0f);
+  pb::Unit& u = snap->base.nearby.units.emplace_back();
+  u.guid = guid;
+  u.name = name;
+  u.kind = pb::Unit::NPC;
+  u.reaction = pb::Unit::NEUTRAL;
+  u.dead = dead;
+  u.lootable = lootable;
+  u.targeting_me = targeting_me;
+  u.rel.dist_yd = 5.0f;
   if (dead && lootable) {
-    pb::Option* opt = snap->add_options();
-    opt->set_text("Loot " + name);
-    opt->set_guid(guid);
+    pb::Option& opt = snap->options.emplace_back();
+    opt.text = "Loot " + name;
+    opt.guid = guid;
   } else if (!dead) {
-    pb::Option* opt = snap->add_options();
-    opt->set_text("Attack " + name);
-    opt->set_guid(guid);
+    pb::Option& opt = snap->options.emplace_back();
+    opt.text = "Attack " + name;
+    opt.guid = guid;
   }
 }
 
 void AddKeep(pb::Snapshot* snap) {
-  snap->add_options()->set_text("Keep doing what I'm doing");
+  snap->options.emplace_back().text = "Keep doing what I'm doing";
 }
 
 TEST(BotLoopTest, EarlyDispatchesDoLineCarriesGoalAndExecutesAttackThenLoot) {
@@ -161,9 +161,10 @@ TEST(BotLoopTest, EarlyDispatchesDoLineCarriesGoalAndExecutesAttackThenLoot) {
   // out immediately!
   brain.StreamFirstLine("do: 1");
   ASSERT_EQ(commands.size(), 1u);
-  EXPECT_EQ(commands[0].bot(), "Testpriest");
-  EXPECT_EQ(commands[0].choose().seq(), 1u);
-  EXPECT_EQ(commands[0].choose().option(), 1u);
+  EXPECT_EQ(commands[0].bot, "Testpriest");
+  ASSERT_TRUE(commands[0].choose.has_value());
+  EXPECT_EQ(commands[0].choose->seq, 1u);
+  EXPECT_EQ(commands[0].choose->option, 1u);
 
   // Bot enters combat with Mottled Boar BEFORE full reply arrives ->
   // provisional expectation prevents a spurious "entered combat" wake!
@@ -181,7 +182,8 @@ TEST(BotLoopTest, EarlyDispatchesDoLineCarriesGoalAndExecutesAttackThenLoot) {
       "do: 1\nexpect: 1\nwatch: hp<35\nlook: 60\n"
       "goal: hunt boars\nsay: pulling boar");
   ASSERT_EQ(commands.size(), 2u);
-  EXPECT_EQ(commands[1].say().text(), "pulling boar");
+  ASSERT_TRUE(commands[1].say.has_value());
+  EXPECT_EQ(commands[1].say->text, "pulling boar");
   EXPECT_EQ(loop.CurrentGoal("Testpriest"), "hunt boars");
   EXPECT_EQ(loop.decisions_completed(), 1u);
 
@@ -189,9 +191,8 @@ TEST(BotLoopTest, EarlyDispatchesDoLineCarriesGoalAndExecutesAttackThenLoot) {
   // waking the brain with `Current goal: hunt boars.` and `Since your last
   // look:`.
   pb::ImmediateEvent item_ev;
-  item_ev.set_bot("Testpriest");
-  item_ev.mutable_event()->mutable_item_received()->mutable_item()->set_name(
-      "Tough Jerky");
+  item_ev.bot = "Testpriest";
+  item_ev.event.item_received.emplace().item.emplace().name = "Tough Jerky";
   loop.OnEvent(item_ev, t0 + base::Seconds(5));
   EXPECT_EQ(brain.size(), 0u);  // Loot line does not wake by itself.
 
@@ -213,8 +214,9 @@ TEST(BotLoopTest, EarlyDispatchesDoLineCarriesGoalAndExecutesAttackThenLoot) {
   brain.StreamFirstLine("do: 1");
   brain.FinishReply("do: 1\nexpect: none\nwatch: hp<35\nlook: 60");
   ASSERT_EQ(commands.size(), 3u);
-  EXPECT_EQ(commands[2].choose().seq(), 3u);
-  EXPECT_EQ(commands[2].choose().option(), 1u);
+  ASSERT_TRUE(commands[2].choose.has_value());
+  EXPECT_EQ(commands[2].choose->seq, 3u);
+  EXPECT_EQ(commands[2].choose->option, 1u);
   EXPECT_EQ(loop.CurrentGoal("Testpriest"), "hunt boars");
 
   // Clean up temp decision logs.
@@ -285,7 +287,7 @@ TEST(BotLoopTest, SupersededInFlightCallDoesNotDispatchStaleSteps) {
   // While call #1 is thinking, Tess dies -> queues urgent "died" wake behind
   // it.
   pb::Snapshot dead = MakeLiveSnap("Tess", 2, t0 + base::Milliseconds(50));
-  dead.mutable_base()->mutable_self()->set_state(pb::Self::DEAD_BODY);
+  dead.base.self.state = pb::Self::DEAD_BODY;
   AddKeep(&dead);
   loop.OnSnapshot(dead, t0 + base::Milliseconds(50));
 

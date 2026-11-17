@@ -16,7 +16,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "plan.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 #include "scheduler.h"
 
 namespace harness {
@@ -33,35 +33,34 @@ std::string LowerWords(std::string_view enum_name) {
 }
 
 bool IsAlive(const pb::Self& self) {
-  return self.state() != pb::Self::DEAD_BODY && self.state() != pb::Self::GHOST;
+  return self.state != pb::Self::DEAD_BODY && self.state != pb::Self::GHOST;
 }
 
 std::optional<double> HealthPercent(const pb::Self& self) {
-  if (self.health_max() > 0) {
-    return 100.0 * static_cast<double>(self.health()) /
-           static_cast<double>(self.health_max());
+  if (self.health_max > 0) {
+    return 100.0 * static_cast<double>(self.health) /
+           static_cast<double>(self.health_max);
   }
-  if (self.unit().has_health_pct()) {
-    return self.unit().health_pct();
+  if (self.unit.health_pct) {
+    return *self.unit.health_pct;
   }
   return std::nullopt;
 }
 
 std::optional<double> ManaPercent(const pb::Self& self) {
-  if (self.power_type() == pb::Self::MANA && self.power_max() > 0) {
-    return 100.0 * static_cast<double>(self.power()) /
-           static_cast<double>(self.power_max());
+  if (self.power_type == pb::Self::MANA && self.power_max > 0) {
+    return 100.0 * static_cast<double>(self.power) /
+           static_cast<double>(self.power_max);
   }
-  if (self.alt_mana_max() > 0) {
-    return 100.0 * static_cast<double>(self.alt_mana()) /
-           static_cast<double>(self.alt_mana_max());
+  if (self.alt_mana_max > 0) {
+    return 100.0 * static_cast<double>(self.alt_mana) /
+           static_cast<double>(self.alt_mana_max);
   }
   return std::nullopt;
 }
 
 std::string AttackerKey(const pb::Unit& unit) {
-  return !unit.guid().empty() ? std::string(unit.guid())
-                              : std::string(unit.name());
+  return !unit.guid.empty() ? unit.guid : unit.name;
 }
 
 void Consider(std::optional<WakeTrigger>* best, WakeTrigger candidate) {
@@ -81,145 +80,166 @@ void Consider(std::optional<WakeTrigger>* best, WakeTrigger candidate) {
 }  // namespace
 
 std::string DescribeEvent(const pb::Event& event) {
-  switch (event.kind_case()) {
-    case pb::Event::kChat: {
-      const pb::ChatEvent& chat = event.chat();
-      const std::string ch = LowerWords(pb::ChatChannel_Name(chat.channel()));
-      if (chat.from().empty()) {
-        return base::StrCat({"[", ch, "] ", chat.text()});
-      }
-      return base::StrCat({ch, " from ", chat.from(), ": ", chat.text()});
+  if (event.chat) {
+    const pb::ChatEvent& chat = *event.chat;
+    const std::string ch = LowerWords(pb::EnumName(chat.channel));
+    if (chat.from.empty()) {
+      return base::StrCat({"[", ch, "] ", chat.text});
     }
-    case pb::Event::kError:
-      return base::StrCat({"error: ", event.error().text()});
-    case pb::Event::kInfo:
-      return std::string(event.info().text());
-    case pb::Event::kPrompt: {
-      const pb::PromptEvent& prompt = event.prompt();
-      std::string out = base::StrCat(
-          {"prompt: ", LowerWords(pb::PromptEvent_Kind_Name(prompt.kind()))});
-      if (!prompt.from().empty()) {
-        base::StrAppend(&out, {" from ", prompt.from()});
-      }
-      if (!prompt.text().empty()) {
-        base::StrAppend(&out, {" (", prompt.text(), ")"});
-      }
-      return out;
-    }
-    case pb::Event::kDied:
-      return event.died().killer().empty()
-                 ? "died"
-                 : base::StrCat({"killed by ", event.died().killer()});
-    case pb::Event::kResurrected:
-      return event.resurrected().by().empty()
-                 ? "resurrected"
-                 : base::StrCat({"resurrected by ", event.resurrected().by()});
-    case pb::Event::kLevelUp:
-      return base::StrCat(
-          {"reached level ", base::NumberToString(event.level_up().level())});
-    case pb::Event::kXpGained:
-      return base::StrCat(
-          {"gained ", base::NumberToString(event.xp_gained().amount()), " xp"});
-    case pb::Event::kMoneyChanged:
-      return base::StrCat(
-          {"money ", event.money_changed().delta() >= 0 ? "+" : "",
-           base::NumberToString(event.money_changed().delta()), "c"});
-    case pb::Event::kItemReceived: {
-      const uint32_t count = event.item_received().item().count() > 0
-                                 ? event.item_received().item().count()
-                                 : 1;
-      return base::StrCat({"received ", base::NumberToString(count), "x ",
-                           event.item_received().item().name()});
-    }
-    case pb::Event::kQuestComplete:
-      return base::StrCat({"quest complete: ", event.quest_complete().quest()});
-    case pb::Event::kQuestFailed:
-      return base::StrCat({"quest failed: ", event.quest_failed().quest()});
-    case pb::Event::kQuestAccepted:
-      return base::StrCat({"quest accepted: ", event.quest_accepted().quest()});
-    case pb::Event::kLootRoll:
-      return base::StrCat({"loot roll: ", event.loot_roll().item().name()});
-    case pb::Event::kPathFailed:
-      return "path failed";
-    case pb::Event::kDisplaced: {
-      const std::string how =
-          LowerWords(pb::DisplacedEvent_How_Name(event.displaced().how()));
-      return how.empty() || how == "how unspecified" ? "displaced" : how;
-    }
-    case pb::Event::kDbmWarning:
-      return base::StrCat({"dbm warning: ", event.dbm_warning().text()});
-    case pb::Event::kKicked:
-      return base::StrCat({"kicked from ", event.kicked().from()});
-    case pb::Event::kDuel:
-      return base::StrCat(
-          {"duel ", event.duel().what(), " with ", event.duel().with()});
-    case pb::Event::kLfg:
-      return base::StrCat({"lfg: ", event.lfg().what()});
-    default:
-      return "";
+    return base::StrCat({ch, " from ", chat.from, ": ", chat.text});
   }
+  if (event.error) {
+    return base::StrCat({"error: ", event.error->text});
+  }
+  if (event.info) {
+    return event.info->text;
+  }
+  if (event.prompt) {
+    const pb::PromptEvent& prompt = *event.prompt;
+    std::string out =
+        base::StrCat({"prompt: ", LowerWords(pb::EnumName(prompt.kind))});
+    if (!prompt.from.empty()) {
+      base::StrAppend(&out, {" from ", prompt.from});
+    }
+    if (!prompt.text.empty()) {
+      base::StrAppend(&out, {" (", prompt.text, ")"});
+    }
+    return out;
+  }
+  if (event.died) {
+    return event.died->killer.empty()
+               ? "died"
+               : base::StrCat({"killed by ", event.died->killer});
+  }
+  if (event.resurrected) {
+    return event.resurrected->by.empty()
+               ? "resurrected"
+               : base::StrCat({"resurrected by ", event.resurrected->by});
+  }
+  if (event.level_up) {
+    return base::StrCat(
+        {"reached level ", base::NumberToString(event.level_up->level)});
+  }
+  if (event.xp_gained) {
+    return base::StrCat(
+        {"gained ", base::NumberToString(event.xp_gained->amount), " xp"});
+  }
+  if (event.money_changed) {
+    return base::StrCat({"money ", event.money_changed->delta >= 0 ? "+" : "",
+                         base::NumberToString(event.money_changed->delta),
+                         "c"});
+  }
+  if (event.item_received) {
+    const pb::Item empty_item;
+    const pb::Item& item =
+        event.item_received->item ? *event.item_received->item : empty_item;
+    const uint32_t count = item.count > 0 ? item.count : 1;
+    return base::StrCat(
+        {"received ", base::NumberToString(count), "x ", item.name});
+  }
+  if (event.quest_complete) {
+    return base::StrCat({"quest complete: ", event.quest_complete->quest});
+  }
+  if (event.quest_failed) {
+    return base::StrCat({"quest failed: ", event.quest_failed->quest});
+  }
+  if (event.quest_accepted) {
+    return base::StrCat({"quest accepted: ", event.quest_accepted->quest});
+  }
+  if (event.loot_roll) {
+    const std::string_view name =
+        event.loot_roll->item ? std::string_view(event.loot_roll->item->name)
+                              : std::string_view{};
+    return base::StrCat({"loot roll: ", name});
+  }
+  if (event.path_failed) {
+    return "path failed";
+  }
+  if (event.displaced) {
+    const std::string how = LowerWords(pb::EnumName(event.displaced->how));
+    return how.empty() || how == "how unspecified" ? "displaced" : how;
+  }
+  if (event.dbm_warning) {
+    return base::StrCat({"dbm warning: ", event.dbm_warning->text});
+  }
+  if (event.kicked) {
+    return base::StrCat({"kicked from ", event.kicked->from});
+  }
+  if (event.duel) {
+    return base::StrCat(
+        {"duel ", event.duel->what, " with ", event.duel->with});
+  }
+  if (event.lfg) {
+    return base::StrCat({"lfg: ", event.lfg->what});
+  }
+  return "";
 }
 
 std::optional<WakeTrigger> EvaluateEventTrigger(
     const pb::Event& event,
     const std::vector<Watch>& /*watches*/) {
-  switch (event.kind_case()) {
-    case pb::Event::kPrompt:
-      return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
-    case pb::Event::kDied:
-      return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
-    case pb::Event::kResurrected:
-      return WakeTrigger{Urgency::kNormal, DescribeEvent(event)};
-    case pb::Event::kDisplaced:
-      return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
-    case pb::Event::kDbmWarning:
-      return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
-    case pb::Event::kLootRoll:
-      return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
-    case pb::Event::kPathFailed:
-      return WakeTrigger{Urgency::kNormal, "path failed"};
-    case pb::Event::kQuestFailed:
-      return WakeTrigger{Urgency::kNormal, DescribeEvent(event)};
-    case pb::Event::kKicked:
-      return WakeTrigger{Urgency::kNormal, DescribeEvent(event)};
-    case pb::Event::kError:
-      if (event.error().command_id() != 0) {
-        return WakeTrigger{
-            Urgency::kNormal,
-            base::StrCat({"step failed: ", event.error().text()})};
-      }
-      return std::nullopt;
-    case pb::Event::kChat: {
-      const pb::ChatEvent& chat = event.chat();
-      if (chat.channel() == pb::WHISPER ||
-          chat.channel() == pb::MONSTER_WHISPER) {
-        return WakeTrigger{Urgency::kNormal,
-                           base::StrCat({"whisper from ", chat.from()})};
-      }
-      if (chat.channel() == pb::RAID_WARNING ||
-          chat.channel() == pb::BOSS_EMOTE) {
-        return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
-      }
-      if (chat.at_me() && chat.channel() != pb::WHISPER_SENT) {
-        return WakeTrigger{Urgency::kNormal, DescribeEvent(event)};
-      }
-      return std::nullopt;
-    }
-    case pb::Event::kDuel:
-      if (event.duel().what() == "started") {
-        return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
-      }
-      return std::nullopt;
-    case pb::Event::kLfg:
-      if (event.lfg().what() == "teleported_in" ||
-          event.lfg().what() == "dungeon_completed" ||
-          event.lfg().what() == "kicked") {
-        return WakeTrigger{Urgency::kNormal, DescribeEvent(event)};
-      }
-      return std::nullopt;
-    default:
-      return std::nullopt;
+  if (event.prompt) {
+    return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
   }
+  if (event.died) {
+    return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
+  }
+  if (event.resurrected) {
+    return WakeTrigger{Urgency::kNormal, DescribeEvent(event)};
+  }
+  if (event.displaced) {
+    return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
+  }
+  if (event.dbm_warning) {
+    return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
+  }
+  if (event.loot_roll) {
+    return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
+  }
+  if (event.path_failed) {
+    return WakeTrigger{Urgency::kNormal, "path failed"};
+  }
+  if (event.quest_failed) {
+    return WakeTrigger{Urgency::kNormal, DescribeEvent(event)};
+  }
+  if (event.kicked) {
+    return WakeTrigger{Urgency::kNormal, DescribeEvent(event)};
+  }
+  if (event.error) {
+    if (event.error->command_id != 0) {
+      return WakeTrigger{Urgency::kNormal,
+                         base::StrCat({"step failed: ", event.error->text})};
+    }
+    return std::nullopt;
+  }
+  if (event.chat) {
+    const pb::ChatEvent& chat = *event.chat;
+    if (chat.channel == pb::WHISPER || chat.channel == pb::MONSTER_WHISPER) {
+      return WakeTrigger{Urgency::kNormal,
+                         base::StrCat({"whisper from ", chat.from})};
+    }
+    if (chat.channel == pb::RAID_WARNING || chat.channel == pb::BOSS_EMOTE) {
+      return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
+    }
+    if (chat.at_me && chat.channel != pb::WHISPER_SENT) {
+      return WakeTrigger{Urgency::kNormal, DescribeEvent(event)};
+    }
+    return std::nullopt;
+  }
+  if (event.duel) {
+    if (event.duel->what == "started") {
+      return WakeTrigger{Urgency::kUrgent, DescribeEvent(event)};
+    }
+    return std::nullopt;
+  }
+  if (event.lfg) {
+    if (event.lfg->what == "teleported_in" ||
+        event.lfg->what == "dungeon_completed" || event.lfg->what == "kicked") {
+      return WakeTrigger{Urgency::kNormal, DescribeEvent(event)};
+    }
+    return std::nullopt;
+  }
+  return std::nullopt;
 }
 
 void TriggerEvaluator::SetPlanContext(
@@ -234,13 +254,12 @@ void TriggerEvaluator::SetPlanContext(
 std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
     const pb::Snapshot& snapshot) {
   std::optional<WakeTrigger> chosen;
-  const pb::Self& self = snapshot.base().self();
+  const pb::Self& self = snapshot.base.self;
   const bool alive = IsAlive(self);
-  const bool in_combat = self.in_combat();
-  const pb::Self::Control& c = self.control();
-  const ControlFlags control{c.stunned(),  c.feared(), c.charmed(),
-                             c.silenced(), c.rooted(), c.pacified(),
-                             c.disarmed()};
+  const bool in_combat = self.in_combat;
+  const pb::Self::Control& c = self.control;
+  const ControlFlags control{c.stunned, c.feared,   c.charmed, c.silenced,
+                             c.rooted,  c.pacified, c.disarmed};
 
   bool watch_attacked = false;
   for (const Watch& w : watches_) {
@@ -252,19 +271,21 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
   // Collect current attackers (units targeting me in nearby or ext.combat).
   std::flat_set<std::string> attackers;
   std::vector<std::pair<std::string, std::string>> attacker_entries;
-  for (const pb::Unit& u : snapshot.base().nearby().units()) {
-    if (!u.dead() && u.targeting_me()) {
+  for (const pb::Unit& u : snapshot.base.nearby.units) {
+    if (!u.dead && u.targeting_me) {
       const std::string key = AttackerKey(u);
       if (attackers.insert(key).second) {
-        attacker_entries.push_back({key, std::string(u.name())});
+        attacker_entries.push_back({key, u.name});
       }
     }
   }
-  for (const pb::Unit& u : snapshot.ext().combat().attackers()) {
-    if (!u.dead()) {
-      const std::string key = AttackerKey(u);
-      if (attackers.insert(key).second) {
-        attacker_entries.push_back({key, std::string(u.name())});
+  if (snapshot.ext.combat) {
+    for (const pb::Unit& u : snapshot.ext.combat->attackers) {
+      if (!u.dead) {
+        const std::string key = AttackerKey(u);
+        if (attackers.insert(key).second) {
+          attacker_entries.push_back({key, u.name});
+        }
       }
     }
   }
@@ -358,10 +379,10 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
           break;
         case Watch::Kind::kEnemyPlayerWithin: {
           std::flat_set<std::string> current_within;
-          for (const pb::Unit& u : snapshot.base().nearby().units()) {
-            const float dist = u.rel().dist_yd();
-            if (!u.dead() && u.kind() == pb::Unit::PLAYER &&
-                u.reaction() == pb::Unit::HOSTILE && std::isfinite(dist) &&
+          for (const pb::Unit& u : snapshot.base.nearby.units) {
+            const float dist = u.rel.dist_yd;
+            if (!u.dead && u.kind == pb::Unit::PLAYER &&
+                u.reaction == pb::Unit::HOSTILE && std::isfinite(dist) &&
                 dist <= static_cast<float>(watch.value)) {
               const std::string key = AttackerKey(u);
               current_within.insert(key);
@@ -369,7 +390,7 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
                 Consider(
                     &chosen,
                     {Urgency::kUrgent,
-                     base::StrCat({"enemy player ", u.name(), " within ",
+                     base::StrCat({"enemy player ", u.name, " within ",
                                    base::NumberToString(watch.value), " yd"})});
               }
             }
@@ -384,7 +405,7 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
     }
   }
 
-  for (const pb::Event& ev : snapshot.events()) {
+  for (const pb::Event& ev : snapshot.events) {
     if (std::optional<WakeTrigger> trig = EvaluateEventTrigger(ev, watches_)) {
       Consider(&chosen, std::move(*trig));
     }

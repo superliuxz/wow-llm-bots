@@ -1,8 +1,8 @@
-"""`wlb build`: protoc, our shared C++ (common/, the harness, the module's tests) and the server."""
+"""`wlb build`: our shared C++ (common/, the harness, the module's tests) and the server."""
 
 import re
 
-from wlblib.common import OUT, PROTOC, ROOT, SERVER, run, say
+from wlblib.common import OUT, ROOT, SERVER, run, say
 
 # The unit test suites; `ninja unit_tests` (common/CMakeLists.txt) builds them all.
 UNIT_TESTS = ("wlb_common_unittests", "llm_brain_unittests", "harness_unittests")
@@ -21,15 +21,6 @@ VARIANTS = {
 }
 
 
-def protoc():
-    """protoc from the pinned third_party/protobuf and abseil, with clang, into out/protoc."""
-    run(["cmake", "-S", ROOT / "tools" / "protobuf", "-B", OUT / "protoc", "-G", "Ninja",
-         "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_C_COMPILER=clang",
-         "-DCMAKE_CXX_COMPILER=clang++", "-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld"])
-    run(["ninja", "-C", OUT / "protoc", "protoc"])
-    run([PROTOC, "--version"])
-
-
 def common_dir(variant):
     return OUT / VARIANTS[variant][0]
 
@@ -42,8 +33,6 @@ def common(variant="default", tests=True, gtest_filter=None):
 
     out_dir, sanitizer, build_type, hardened = VARIANTS[variant]
     build = OUT / out_dir
-    if not PROTOC.exists():  # Generated proto code needs the pinned protoc.
-        protoc()
     if not (build / "build.ninja").exists():
         flags, ldflags = [], ["-fuse-ld=lld"]
         if sanitizer:
@@ -65,7 +54,9 @@ def common(variant="default", tests=True, gtest_filter=None):
              f"-DWLB_HARDENED={'ON' if hardened else 'OFF'}",
              f"-DCMAKE_EXE_LINKER_FLAGS={' '.join(ldflags)}"], quiet=True)
     targets = ["wlb_base", "wlb_net", "wlb_proto",
-               *([] if variant == "server" else ["harness"])]
+               *([] if variant == "server"
+                 else ["harness", "snapshot_check",
+                       *(["wlb_wire_py"] if variant == "default" else [])])]
     if tests and variant != "server":
         run(["ninja", "-C", build, *targets, "unit_tests"])
         for test in UNIT_TESTS:

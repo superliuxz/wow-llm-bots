@@ -1,12 +1,12 @@
 """Saves live snapshots from mod-llm-brain's socket, for offline brain benchmarks.
 
-Connects like the harness would, and for `seconds` only receives: frames are kept as raw bytes
+Connects like the harness would, and for `seconds` only receives: frames are kept as raw BEVE bytes
 with their arrival time, so the receive loop never falls behind the module. When the time is up
-they are written as JSON (proto field names, defaults left out), one file per frame:
+they are written as JSON (defaults left out), one file per frame:
   <out_dir>/<bot>/<seq>.json
 
-Dev tool only. Needs the generated Python code (tools/wlb check snapshots once):
-  out/tools-venv/bin/python -I tools/bench/capture_snapshots.py <out_dir> [seconds=15]
+Dev tool only. Needs `tools/wlb build common --no-tests` once for wire_py:
+  python3 -I tools/bench/capture_snapshots.py <out_dir> [seconds=15]
 """
 
 import json
@@ -19,10 +19,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 SOCK = str(ROOT / "out" / "server" / "run" / "brain.sock")
 
 sys.path.insert(0, str(ROOT / "tools" / "snapshot"))
-sys.path.insert(0, str(ROOT / "out" / "proto"))
 from frame_reader import FrameReader  # noqa: E402
-from google.protobuf import json_format  # noqa: E402
-from proto import snapshot_pb2  # noqa: E402
+import wire_py  # noqa: E402
 
 
 def main():
@@ -44,20 +42,20 @@ def main():
             break
         frames += reader.feed(chunk)
     s.close()
-    saved = bots = 0
+    saved = 0
     seen = set()
     for payload in frames:
-        message = snapshot_pb2.ModuleMessage()
-        message.ParseFromString(payload)
-        if not message.HasField("snapshot"):
+        message = wire_py.decode_module_message(payload)
+        if not message or "snapshot" not in message:
             continue
-        snap = message.snapshot
-        path = out_dir / snap.bot / f"{snap.seq}.json"
+        snap = message["snapshot"]
+        bot = snap.get("bot", "unknown")
+        seq = snap.get("seq", 0)
+        path = out_dir / bot / f"{seq}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(json_format.MessageToDict(
-            snap, preserving_proto_field_name=True)))
+        path.write_text(json.dumps(snap))
         saved += 1
-        seen.add(snap.bot)
+        seen.add(bot)
     print(f"saved {saved} snapshots from {len(seen)} bots in {out_dir}")
 
 

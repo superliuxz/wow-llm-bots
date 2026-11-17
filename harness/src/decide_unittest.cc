@@ -24,7 +24,7 @@ constexpr char kGoodPlan[] =
 DecideOptions Options() {
   DecideOptions options;
   options.snapshot_path =
-      std::string(WLB_HARNESS_TESTDATA) + "/screens/fight.pb";
+      std::string(WLB_HARNESS_TESTDATA) + "/screens/fight.snapshot.json";
   options.rules_path = std::string(WLB_HARNESS_TESTDATA) + "/rules.txt";
   options.bot_name = "Tess";
   return options;

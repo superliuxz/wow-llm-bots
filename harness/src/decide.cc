@@ -19,7 +19,7 @@
 #include "llm_client.h"
 #include "plan.h"
 #include "prompt.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 #include "screen_renderer.h"
 
 namespace harness {
@@ -102,7 +102,7 @@ std::optional<DecideOptions> ParseDecideArgs(
     }
   }
   if (options.snapshot_path.empty()) {
-    *error = "which snapshot? harness decide <snapshot.pb> [options]";
+    *error = "which snapshot? harness decide <snapshot.json> [options]";
     return std::nullopt;
   }
   return options;
@@ -119,7 +119,8 @@ int RunDecide(const DecideOptions& options,
     return 1;
   }
   wlb::snapshot::Snapshot snapshot;
-  if (!snapshot.ParseFromString(*snapshot_bytes)) {
+  if (!wlb::snapshot::ReadJson(*snapshot_bytes, &snapshot) &&
+      !wlb::snapshot::ReadBeve(*snapshot_bytes, &snapshot)) {
     base::StrAppend(report, {options.snapshot_path, " is not a snapshot\n"});
     return 1;
   }
@@ -132,7 +133,7 @@ int RunDecide(const DecideOptions& options,
   PromptInput input;
   input.rules = *rules;
   input.bot_name = !options.bot_name.empty() ? options.bot_name
-                   : !snapshot.bot().empty() ? std::string(snapshot.bot())
+                   : !snapshot.bot.empty()   ? snapshot.bot
                                              : "bot";
   if (!options.identity_path.empty()) {
     const std::optional<std::string> identity = ReadFile(options.identity_path);

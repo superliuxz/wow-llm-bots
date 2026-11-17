@@ -5,9 +5,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#include <chrono>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -15,12 +13,13 @@
 #include "base/message_loop/message_pump.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "gtest/gtest.h"
 #include "httplib.h"
 #include "net/unix_socket_server.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 
 namespace harness {
 namespace {
@@ -86,7 +85,7 @@ TEST(RunHarnessTest, EndToEndSocketToStreamingLlmToChooseCommand) {
   http_thread.Start();
   http_thread.task_runner()->PostTask([&] { http_srv.listen_after_bind(); });
   while (!http_srv.is_running()) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    base::PlatformThread::Sleep(base::Milliseconds(1));
   }
 
   // 2. Fake Unix-socket game server sending a snapshot and awaiting Choose.
@@ -105,7 +104,7 @@ TEST(RunHarnessTest, EndToEndSocketToStreamingLlmToChooseCommand) {
                   [&] { harness_connected.Signal(); },
                   [&](std::string frame) {
                     pb::Command cmd;
-                    if (cmd.ParseFromString(frame) && cmd.has_choose()) {
+                    if (pb::ReadBeve(frame, &cmd) && cmd.choose) {
                       base::AutoLock lock(cmd_lock);
                       received_cmd = std::move(cmd);
                       got_choose.Signal();
@@ -138,26 +137,26 @@ TEST(RunHarnessTest, EndToEndSocketToStreamingLlmToChooseCommand) {
   harness_connected.Wait();
 
   pb::ModuleMessage msg;
-  pb::Snapshot* snap = msg.mutable_snapshot();
-  snap->set_bot("Testpriest");
-  snap->set_seq(7);
-  snap->set_monotonic_us(
-      (base::TimeTicks::Now() - base::TimeTicks()).InMicroseconds());
-  snap->mutable_base()->mutable_self()->set_state(pb::Self::ALIVE);
-  snap->mutable_base()->mutable_self()->set_health(60);
-  snap->mutable_base()->mutable_self()->set_health_max(60);
-  pb::Unit* boar = snap->mutable_base()->mutable_nearby()->add_units();
-  boar->set_guid("0xABCD");
-  boar->set_name("Mottled Boar");
-  boar->set_kind(pb::Unit::NPC);
-  boar->set_reaction(pb::Unit::NEUTRAL);
-  boar->mutable_rel()->set_dist_yd(6.0f);
-  pb::Option* o1 = snap->add_options();
-  o1->set_text("Attack Mottled Boar");
-  o1->set_guid("0xABCD");
-  snap->add_options()->set_text("Keep doing what I'm doing");
+  pb::Snapshot& snap = msg.snapshot.emplace();
+  snap.bot = "Testpriest";
+  snap.seq = 7;
+  snap.monotonic_us =
+      (base::TimeTicks::Now() - base::TimeTicks()).InMicroseconds();
+  snap.base.self.state = pb::Self::ALIVE;
+  snap.base.self.health = 60;
+  snap.base.self.health_max = 60;
+  pb::Unit& boar = snap.base.nearby.units.emplace_back();
+  boar.guid = "0xABCD";
+  boar.name = "Mottled Boar";
+  boar.kind = pb::Unit::NPC;
+  boar.reaction = pb::Unit::NEUTRAL;
+  boar.rel.dist_yd = 6.0f;
+  pb::Option& o1 = snap.options.emplace_back();
+  o1.text = "Attack Mottled Boar";
+  o1.guid = "0xABCD";
+  snap.options.emplace_back().text = "Keep doing what I'm doing";
 
-  std::string payload = msg.SerializeAsString();
+  std::string payload = pb::WriteBeve(msg);
   mod_io.task_runner()->PostTask(
       [s = mod_srv, payload = std::move(payload)] { s->SendFrame(payload); });
 
@@ -167,9 +166,10 @@ TEST(RunHarnessTest, EndToEndSocketToStreamingLlmToChooseCommand) {
 
   {
     base::AutoLock lock(cmd_lock);
-    EXPECT_EQ(received_cmd.bot(), "Testpriest");
-    EXPECT_EQ(received_cmd.choose().seq(), 7u);
-    EXPECT_EQ(received_cmd.choose().option(), 1u);
+    EXPECT_EQ(received_cmd.bot, "Testpriest");
+    ASSERT_TRUE(received_cmd.choose.has_value());
+    EXPECT_EQ(received_cmd.choose->seq, 7u);
+    EXPECT_EQ(received_cmd.choose->option, 1u);
   }
   EXPECT_EQ(exit_code, 0);
 

@@ -24,7 +24,7 @@ import time
 import urllib.request
 
 from wlblib import build, cases, server
-from wlblib.common import LOGS, OUT, ROOT, Failed, output, run, running_pid, say, venv_python
+from wlblib.common import LOGS, OUT, ROOT, Failed, output, run, running_pid, say
 
 TARGETS = ("unit", "e2e", "perf", "eval")
 
@@ -130,9 +130,10 @@ class Stack:
         """Runs the scripted brain (tools/snapshot/fake_harness.py --choose) against the module
         and returns its transcript: snapshots, events, commands sent, words never offered. It
         stops `tail_s` after the last word was sent, or after `seconds`."""
-        python = venv_python()
+        if not (OUT / "common" / "libwlb_wire_py.so").exists():
+            build.common("default", tests=False)
         result = subprocess.run(
-            [python, "-I", ROOT / "tools/snapshot/fake_harness.py", "--choose", "--json",
+            ["python3", "-I", ROOT / "tools/snapshot/fake_harness.py", "--choose", "--json",
              f"--tail={tail_s}", str(seconds), *words], capture_output=True, text=True)
         if result.returncode != 0:
             raise Failed(f"the scripted brain failed:\n{result.stderr.strip()[-600:]}")
@@ -363,11 +364,13 @@ def capture_snapshots(seconds=300):
     out/bench/snapshots/quest, the input of the brain load replay (tools/bench/brain_load.py).
     Replaces what is there."""
     target = OUT / "bench" / "snapshots" / "quest"
+    if not (OUT / "common" / "libwlb_wire_py.so").exists():
+        build.common("default", tests=False)
     with Stack("questing", "Loada", online=50) as stack:
         shutil.rmtree(target, ignore_errors=True)
         target.parent.mkdir(parents=True, exist_ok=True)
         say(f"capturing {seconds} s of snapshots into {target.relative_to(ROOT)}")
-        run([venv_python(), "-I", ROOT / "tools/bench/capture_snapshots.py", target, str(seconds)])
+        run(["python3", "-I", ROOT / "tools/bench/capture_snapshots.py", target, str(seconds)])
     say(f"captured {sum(1 for _ in target.rglob('*.json'))} snapshots")
 
 

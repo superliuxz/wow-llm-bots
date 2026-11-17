@@ -27,7 +27,7 @@
 #include "decision_log.h"
 #include "llm_client.h"
 #include "plan_runner.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 #include "scheduler.h"
 #include "screen_renderer.h"
 #include "triggers.h"

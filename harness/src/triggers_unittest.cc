@@ -9,7 +9,7 @@
 
 #include "gtest/gtest.h"
 #include "plan.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 #include "scheduler.h"
 
 namespace harness {
@@ -19,13 +19,13 @@ namespace pb = wlb::snapshot;
 
 pb::Snapshot BaseSnap(uint32_t hp = 100, uint32_t max_hp = 100) {
   pb::Snapshot snap;
-  pb::Self* self = snap.mutable_base()->mutable_self();
-  self->set_state(pb::Self::ALIVE);
-  self->set_health(hp);
-  self->set_health_max(max_hp);
-  self->set_power_type(pb::Self::MANA);
-  self->set_power(100);
-  self->set_power_max(100);
+  pb::Self& self = snap.base.self;
+  self.state = pb::Self::ALIVE;
+  self.health = hp;
+  self.health_max = max_hp;
+  self.power_type = pb::Self::MANA;
+  self.power = 100;
+  self.power_max = 100;
   return snap;
 }
 
@@ -36,14 +36,14 @@ pb::Unit* AddNearbyUnit(pb::Snapshot* snap,
                         pb::Unit::Reaction reaction,
                         float dist_yd,
                         bool targeting_me = false) {
-  pb::Unit* u = snap->mutable_base()->mutable_nearby()->add_units();
-  u->set_guid(guid);
-  u->set_name(name);
-  u->set_kind(kind);
-  u->set_reaction(reaction);
-  u->mutable_rel()->set_dist_yd(dist_yd);
-  u->set_targeting_me(targeting_me);
-  return u;
+  pb::Unit& u = snap->base.nearby.units.emplace_back();
+  u.guid = guid;
+  u.name = name;
+  u.kind = kind;
+  u.reaction = reaction;
+  u.rel.dist_yd = dist_yd;
+  u.targeting_me = targeting_me;
+  return &u;
 }
 
 TEST(TriggersTest, ExpectedFightDoesNotWakeButUnexpectedAddDoes) {
@@ -53,7 +53,7 @@ TEST(TriggersTest, ExpectedFightDoesNotWakeButUnexpectedAddDoes) {
 
   // Entering combat with an expected Mottled Boar does not wake the brain.
   pb::Snapshot fighting_boar = BaseSnap(90, 100);
-  fighting_boar.mutable_base()->mutable_self()->set_in_combat(true);
+  fighting_boar.base.self.in_combat = true;
   AddNearbyUnit(&fighting_boar, "0x1", "Mottled Boar", pb::Unit::NPC,
                 pb::Unit::HOSTILE, 4.0f, /*targeting_me=*/true);
   EXPECT_FALSE(eval.EvaluateSnapshot(fighting_boar));
@@ -76,7 +76,7 @@ TEST(TriggersTest, EnteringCombatWithoutExpectationsWakesUrgently) {
   EXPECT_FALSE(eval.EvaluateSnapshot(BaseSnap()));
 
   pb::Snapshot combat = BaseSnap();
-  combat.mutable_base()->mutable_self()->set_in_combat(true);
+  combat.base.self.in_combat = true;
   const auto wake = eval.EvaluateSnapshot(combat);
   ASSERT_TRUE(wake);
   EXPECT_EQ(wake->urgency, Urgency::kUrgent);
@@ -101,7 +101,7 @@ TEST(TriggersTest, HealthAndManaWatchesFireOncePerCrossingAndRearm) {
 
   // Mana watch out of combat uses kNormal urgency.
   pb::Snapshot low_mana = BaseSnap(80, 100);
-  low_mana.mutable_base()->mutable_self()->set_power(20);
+  low_mana.base.self.power = 20;
   EXPECT_EQ(eval.EvaluateSnapshot(low_mana),
             (std::optional<WakeTrigger>{{Urgency::kNormal, "mana<25"}}));
 }
@@ -130,36 +130,39 @@ TEST(TriggersTest, LossOfControlAndDeathWakeUrgently) {
   EXPECT_FALSE(eval.EvaluateSnapshot(BaseSnap()));
 
   pb::Snapshot stunned = BaseSnap();
-  stunned.mutable_base()->mutable_self()->mutable_control()->set_stunned(true);
+  stunned.base.self.control.stunned = true;
   EXPECT_EQ(eval.EvaluateSnapshot(stunned),
             (std::optional<WakeTrigger>{
                 {Urgency::kUrgent, "lost control (stunned)"}}));
 
   pb::Snapshot dead = BaseSnap(0, 100);
-  dead.mutable_base()->mutable_self()->set_state(pb::Self::DEAD_BODY);
+  dead.base.self.state = pb::Self::DEAD_BODY;
   EXPECT_EQ(eval.EvaluateSnapshot(dead),
             (std::optional<WakeTrigger>{{Urgency::kUrgent, "died"}}));
 }
 
 TEST(TriggersTest, EventsAlertOnlyOnClientAttentionEvents) {
   pb::Event whisper;
-  whisper.mutable_chat()->set_channel(pb::WHISPER);
-  whisper.mutable_chat()->set_from("Tess");
-  whisper.mutable_chat()->set_text("want to group?");
+  pb::ChatEvent& wchat = whisper.chat.emplace();
+  wchat.channel = pb::WHISPER;
+  wchat.from = "Tess";
+  wchat.text = "want to group?";
   EXPECT_EQ(
       EvaluateEventTrigger(whisper),
       (std::optional<WakeTrigger>{{Urgency::kNormal, "whisper from Tess"}}));
 
   pb::Event invite;
-  invite.mutable_prompt()->set_kind(pb::PromptEvent::GROUP_INVITE);
-  invite.mutable_prompt()->set_from("Tess");
+  pb::PromptEvent& prompt = invite.prompt.emplace();
+  prompt.kind = pb::PromptEvent::GROUP_INVITE;
+  prompt.from = "Tess";
   EXPECT_EQ(EvaluateEventTrigger(invite),
             (std::optional<WakeTrigger>{
                 {Urgency::kUrgent, "prompt: group invite from Tess"}}));
 
   pb::Event cmd_err;
-  cmd_err.mutable_error()->set_command_id(7);
-  cmd_err.mutable_error()->set_text("nothing to loot on Mottled Boar");
+  pb::ErrorEvent& err = cmd_err.error.emplace();
+  err.command_id = 7;
+  err.text = "nothing to loot on Mottled Boar";
   EXPECT_EQ(
       EvaluateEventTrigger(cmd_err),
       (std::optional<WakeTrigger>{
@@ -167,15 +170,17 @@ TEST(TriggersTest, EventsAlertOnlyOnClientAttentionEvents) {
 
   // Routine loot and party chat are noted, not woken on.
   pb::Event loot;
-  loot.mutable_item_received()->mutable_item()->set_name("Tough Jerky");
-  loot.mutable_item_received()->mutable_item()->set_count(2);
+  pb::Item& item = loot.item_received.emplace().item.emplace();
+  item.name = "Tough Jerky";
+  item.count = 2;
   EXPECT_FALSE(EvaluateEventTrigger(loot));
   EXPECT_EQ(DescribeEvent(loot), "received 2x Tough Jerky");
 
   pb::Event party_chat;
-  party_chat.mutable_chat()->set_channel(pb::PARTY);
-  party_chat.mutable_chat()->set_from("Gorn");
-  party_chat.mutable_chat()->set_text("pulling");
+  pb::ChatEvent& pchat = party_chat.chat.emplace();
+  pchat.channel = pb::PARTY;
+  pchat.from = "Gorn";
+  pchat.text = "pulling";
   EXPECT_FALSE(EvaluateEventTrigger(party_chat));
 }
 

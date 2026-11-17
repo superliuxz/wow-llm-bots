@@ -5,7 +5,7 @@
 
 #include <cstddef>
 
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 #include "snapshot/perception.h"
 
 class Player;

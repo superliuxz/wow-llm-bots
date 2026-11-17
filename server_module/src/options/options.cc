@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "base/time/time.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 
 namespace llm_brain {
 namespace {
@@ -21,17 +21,16 @@ namespace pb = wlb::snapshot;
 // The same rule as the screen the brain reads (harness/src/screen_renderer.cc):
 // what a player can do with this unit by clicking it.
 std::optional<OptionTarget::Kind> UnitKind(const pb::Unit& u) {
-  if (u.name().empty() || u.guid().empty()) {
+  if (u.name.empty() || u.guid.empty()) {
     return std::nullopt;  // Too far to see who it is: nothing to click.
   }
-  if (u.kind() != pb::Unit::NPC && u.kind() != pb::Unit::CRITTER) {
+  if (u.kind != pb::Unit::NPC && u.kind != pb::Unit::CRITTER) {
     return std::nullopt;
   }
-  if (u.dead()) {
-    return u.lootable() ? std::optional(OptionTarget::Kind::kLoot)
-                        : std::nullopt;
+  if (u.dead) {
+    return u.lootable ? std::optional(OptionTarget::Kind::kLoot) : std::nullopt;
   }
-  if (u.reaction() == pb::Unit::HOSTILE || u.reaction() == pb::Unit::NEUTRAL) {
+  if (u.reaction == pb::Unit::HOSTILE || u.reaction == pb::Unit::NEUTRAL) {
     return OptionTarget::Kind::kAttack;
   }
   return std::nullopt;
@@ -68,31 +67,31 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot) {
   // target is the nearest unit of that name.
   std::vector<OptionTarget> targets;
   std::vector<float> nearest;
-  for (const pb::Unit& u : snapshot->base().nearby().units()) {
+  for (const pb::Unit& u : snapshot->base.nearby.units) {
     const std::optional<OptionTarget::Kind> kind = UnitKind(u);
     if (!kind) {
       continue;
     }
     size_t existing = targets.size();
     for (size_t i = 0; i < targets.size(); ++i) {
-      if (targets[i].kind == *kind && targets[i].name == u.name()) {
+      if (targets[i].kind == *kind && targets[i].name == u.name) {
         existing = i;
         break;
       }
     }
     if (existing == targets.size()) {
-      targets.push_back({*kind, std::string(u.guid()), std::string(u.name())});
-      nearest.push_back(u.rel().dist_yd());
-    } else if (u.rel().dist_yd() < nearest[existing]) {
-      targets[existing].guid = std::string(u.guid());
-      nearest[existing] = u.rel().dist_yd();
+      targets.push_back({*kind, u.guid, u.name});
+      nearest.push_back(u.rel.dist_yd);
+    } else if (u.rel.dist_yd < nearest[existing]) {
+      targets[existing].guid = u.guid;
+      nearest[existing] = u.rel.dist_yd;
     }
   }
   targets.push_back({OptionTarget::Kind::kKeep, "", ""});
   for (const OptionTarget& target : targets) {
-    pb::Option* option = snapshot->add_options();
-    option->set_text(OptionText(target));
-    option->set_guid(target.guid);
+    pb::Option& option = snapshot->options.emplace_back();
+    option.text = OptionText(target);
+    option.guid = target.guid;
   }
   return targets;
 }

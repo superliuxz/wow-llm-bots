@@ -3,7 +3,7 @@
 #ifndef MOD_LLM_BRAIN_SNAPSHOT_SNAPSHOT_BUILDER_H_
 #define MOD_LLM_BRAIN_SNAPSHOT_SNAPSHOT_BUILDER_H_
 
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 #include "snapshot/nearby_builder.h"
 
 class Player;

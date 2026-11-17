@@ -2,8 +2,8 @@
 #   wlb_base: threads (default and epoll IO message pumps),
 #             task runners, callbacks, WeakPtr, TimeDelta/TimeTicks.
 #   wlb_net:  length-prefixed framing, Unix socket server/client (on IO threads).
-#   wlb_proto: C++ generated from server_module/proto/*.proto
-#             (protobuf lite runtime; protobuf and abseil from third_party/).
+#   wlb_proto: module <-> harness snapshot/command structs (proto/snapshot.h)
+#             and Glaze BEVE/JSON codecs (proto/snapshot_wire.cc).
 # Plain C++20 (AzerothCore modules compile as C++20 and include these headers).
 cmake_minimum_required(VERSION 3.20)
 project(wlb_common C CXX)
@@ -52,40 +52,24 @@ add_library(wlb_net STATIC
 target_link_libraries(wlb_net PUBLIC wlb_base)
 target_compile_options(wlb_net PRIVATE ${WLB_SAFETY_FLAGS})
 
-# Protobuf (lite runtime) and its abseil dependency, from the pinned submodules,
-# built with this build's flags (sanitizers need every byte instrumented).
-set(ABSL_PROPAGATE_CXX_STD ON)
-set(ABSL_BUILD_TESTING OFF)
-add_subdirectory("${WLB_ROOT}/third_party/abseil-cpp" abseil EXCLUDE_FROM_ALL)
-set(protobuf_BUILD_TESTS OFF)
-set(protobuf_BUILD_CONFORMANCE OFF)
-set(protobuf_BUILD_EXAMPLES OFF)
-set(protobuf_BUILD_PROTOC_BINARIES OFF)
-set(protobuf_BUILD_LIBUPB OFF)
-set(protobuf_INSTALL OFF)
-set(protobuf_LOCAL_DEPENDENCIES_ONLY ON)
-set(protobuf_WITH_ZLIB OFF)
-add_subdirectory("${WLB_ROOT}/third_party/protobuf" protobuf EXCLUDE_FROM_ALL)
+# Protocol library: plain C++20 structs in proto/snapshot.h, serialized to BEVE
+# (wire) and JSON (fixtures/tools) via Glaze (C++23, confined to snapshot_wire.cc
+# so C++20 server_module never includes Glaze templates).
+add_library(wlb_proto STATIC proto/snapshot_wire.cc)
+target_include_directories(wlb_proto PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(wlb_proto SYSTEM PRIVATE
+  "${WLB_ROOT}/third_party/glaze/include")
+target_link_libraries(wlb_proto PUBLIC wlb_base)
+target_compile_features(wlb_proto PRIVATE cxx_std_23)
+target_compile_options(wlb_proto PRIVATE ${WLB_SAFETY_FLAGS} -Wno-missing-braces)
 
-# Generated code comes from protoc built separately (tools/wlb build protoc) from
-# the same pinned protobuf, so generator and runtime versions always match.
-set(WLB_PROTOC "${WLB_ROOT}/out/protoc/protobuf/protoc" CACHE FILEPATH "protoc")
-set(WLB_PROTO_ROOT "${WLB_ROOT}/server_module")
-set(WLB_PROTO_OUT "${CMAKE_CURRENT_BINARY_DIR}/gen")
-add_custom_command(
-  OUTPUT "${WLB_PROTO_OUT}/proto/snapshot.pb.cc"
-         "${WLB_PROTO_OUT}/proto/snapshot.pb.h"
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "${WLB_PROTO_OUT}"
-  COMMAND "${WLB_PROTOC}" "-I${WLB_PROTO_ROOT}"
-          "-I${WLB_ROOT}/third_party/protobuf/src"
-          "--cpp_out=${WLB_PROTO_OUT}" proto/snapshot.proto
-  WORKING_DIRECTORY "${WLB_PROTO_ROOT}"
-  DEPENDS "${WLB_PROTO_ROOT}/proto/snapshot.proto"
-          "${WLB_PROTO_ROOT}/proto/snapshot_options.proto" "${WLB_PROTOC}"
-  COMMENT "protoc proto/snapshot.proto")
-add_library(wlb_proto STATIC "${WLB_PROTO_OUT}/proto/snapshot.pb.cc")
-target_include_directories(wlb_proto PUBLIC "${WLB_PROTO_OUT}")
-target_link_libraries(wlb_proto PUBLIC protobuf::libprotobuf-lite)
+add_executable(snapshot_check proto/snapshot_check.cc)
+target_link_libraries(snapshot_check PRIVATE wlb_proto)
+target_compile_options(snapshot_check PRIVATE ${WLB_SAFETY_FLAGS})
+
+add_library(wlb_wire_py SHARED proto/snapshot_wire_c.cc)
+target_link_libraries(wlb_wire_py PRIVATE wlb_proto)
+target_compile_options(wlb_wire_py PRIVATE ${WLB_SAFETY_FLAGS})
 
 # Unit tests.
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
@@ -108,6 +92,7 @@ target_compile_options(wlb_common_unittests PRIVATE ${WLB_SAFETY_FLAGS})
 # Unit tests for our AzerothCore module's AzerothCore-independent parts. They
 # sit next to the code; mod-llm-brain.cmake keeps them out of the server.
 set(WLB_MODULE_SRC "${WLB_ROOT}/server_module/src")
+set(WLB_PROTO_ROOT "${WLB_ROOT}/server_module")
 add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/bridge/brain_bridge.cc"
   "${WLB_MODULE_SRC}/bridge/brain_bridge_unittest.cc"
@@ -134,7 +119,6 @@ target_compile_options(llm_brain_unittests PRIVATE ${WLB_SAFETY_FLAGS})
 # The harness (harness/): the brain's process. Its parts that don't need the
 # game are built and tested here, with the same flags and sanitizers as the rest.
 set(WLB_HARNESS_SRC "${WLB_ROOT}/harness/src")
-find_package(Threads REQUIRED)
 add_library(wlb_harness STATIC "${WLB_HARNESS_SRC}/bot_loop.cc"
             "${WLB_HARNESS_SRC}/decide.cc"
             "${WLB_HARNESS_SRC}/decision_log.cc"

@@ -21,7 +21,7 @@
 
 #include "base/time/time.h"
 #include "plan.h"
-#include "proto/snapshot.pb.h"
+#include "proto/snapshot.h"
 #include "screen_renderer.h"
 
 namespace harness {

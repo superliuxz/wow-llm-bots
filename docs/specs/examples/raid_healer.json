@@ -1,7 +1,7 @@
 {
  "bot": "Morwyn",
  "seq": 90211,
- "time_ms": "88001000",
+ "time_ms": 88001000,
  "base": {
   "self": {
    "unit": {

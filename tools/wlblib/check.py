@@ -18,17 +18,15 @@ import subprocess
 import tempfile
 
 from wlblib import build
-from wlblib.common import OUT, PROTOC, ROOT, SERVER, VENV_PYTHON, Failed, output, run, say
+from wlblib.common import OUT, ROOT, SERVER, Failed, run, say
 
-# glibc's internal headers carry no IWYU mappings: include the public header (<pthread.h>) and
-# mark it `// IWYU pragma: keep`.
-IGNORED_HEADERS = "bits/.*,asm-generic/.*,asm/.*,linux/.*"
+# glibc's internal headers and Glaze's umbrella internals carry no IWYU mappings: include the
+# public header and mark it `// IWYU pragma: keep`.
+IGNORED_HEADERS = "bits/.*,asm-generic/.*,asm/.*,linux/.*,glaze/.*"
 HEADER_FLAGS_20 = ["-xc++-header", "-std=c++20", "-Icommon",
-                   "-Ithird_party/googletest/googletest/include",
-                   "-Ithird_party/protobuf/src", "-Ithird_party/abseil-cpp"]
+                   "-Ithird_party/googletest/googletest/include"]
 HEADER_FLAGS_26 = ["-xc++-header", "-std=c++26", "-Icommon",
-                   "-Ithird_party/googletest/googletest/include",
-                   "-Ithird_party/protobuf/src", "-Ithird_party/abseil-cpp"]
+                   "-Ithird_party/googletest/googletest/include"]
 
 
 def _sources(*suffixes):
@@ -64,9 +62,9 @@ def _include_jobs():
     for f in (ROOT / "common").rglob("*.h"):
         jobs.append((f, ["--", *HEADER_FLAGS_20]))
     for f in (ROOT / "harness").rglob("*.h"):
-        jobs.append((f, ["--", *HEADER_FLAGS_26, "-Iharness/src", "-Iout/common/gen"]))
+        jobs.append((f, ["--", *HEADER_FLAGS_26, "-Iharness/src"]))
     for f in (ROOT / "server_module").rglob("*.h"):
-        jobs.append((f, ["--", *HEADER_FLAGS_20, "-Iserver_module/src", "-Iout/common/gen"]))
+        jobs.append((f, ["--", *HEADER_FLAGS_20, "-Iserver_module/src"]))
     for f in [*(ROOT / "common").rglob("*.cc"), *(ROOT / "harness").rglob("*.cc")]:
         jobs.append((f, ["-p", common_db]))
     for f in (ROOT / "server_module").rglob("*.cc"):
@@ -132,31 +130,18 @@ def includes(fix=False):
 
 
 def snapshots(files=()):
-    """Compiles the snapshot proto for Python (out/proto), validates the example snapshots (or
-    `files`), and checks the client-event table against the proto. Creates the tools venv with
-    the protobuf runtime matching protoc."""
-    if not PROTOC.exists():
-        build.protoc()
-    # The Python runtime must match protoc's version (protoc 36.2 <-> protobuf 7.36.2).
-    want = "7." + output([PROTOC, "--version"]).split()[1]
-    if not VENV_PYTHON.exists():
-        run(["python3", "-m", "venv", VENV_PYTHON.parent.parent])
-    have = subprocess.run([VENV_PYTHON, "-I", "-c",
-                           "import google.protobuf as p; print(p.__version__)"],
-                          capture_output=True, text=True).stdout.strip()
-    if have != want:
-        run([VENV_PYTHON.parent / "pip", "install", "-q", f"protobuf=={want}"])
-    gen = OUT / "proto"
-    gen.mkdir(parents=True, exist_ok=True)
-    proto = ROOT / "server_module" / "proto"
-    run([PROTOC, f"-I{ROOT / 'server_module'}", f"-I{ROOT / 'third_party/protobuf/src'}",
-         f"--python_out={gen}", proto / "snapshot.proto", proto / "snapshot_options.proto"])
+    """Validates snapshot JSON files against wlb::snapshot::Snapshot (strict JSON keys +
+    visibility rules) and checks docs/specs/client-events.tsv against the reflected C++ schema."""
+    checker = OUT / "common" / "snapshot_check"
+    if not checker.exists():
+        build.common("default", tests=False)
     files = list(files) or [
         *sorted((ROOT / "docs/specs/examples").glob("*.json")),
         *sorted((ROOT / "harness/testdata/eval").glob("*.snapshot.json")),
+        *sorted((ROOT / "harness/testdata/screens").glob("*.snapshot.json")),
     ]
-    run([VENV_PYTHON, "-I", ROOT / "tools/snapshot/validate_snapshot.py", gen, *files])
-    run([VENV_PYTHON, "-I", "-B", ROOT / "tools/audit/check_client_events.py", gen])
+    run([checker, *files])
+    run(["python3", "-I", "-B", ROOT / "tools/audit/check_client_events.py", checker])
 
 
 def triggers():
@@ -165,7 +150,7 @@ def triggers():
 
 def goldens():
     """The screen renderer's goldens come from the Python prototype: it must still write them."""
-    run([VENV_PYTHON, "-I", ROOT / "tools/snapshot/make_screen_fixtures.py", "--check"])
+    run(["python3", "-I", ROOT / "tools/snapshot/make_screen_fixtures.py", "--check"])
 
 
 def sanitizers():
@@ -180,13 +165,13 @@ def all_(with_sanitizers=False):
     """Fast checks in the order that fails fastest; optionally followed by *SAN."""
     say("== format")
     format_()
-    say("== snapshots")
-    snapshots()  # Also regenerates out/proto, which the goldens check reads.
     say("== trigger table")
     triggers()
     say("== build + unit tests (default)")
     build.common("default")
-    # The include check reads the default build's compile commands.
+    # snapshot_check and compile_commands.json are now up to date from the default build.
+    say("== snapshots")
+    snapshots()
     say("== includes")
     includes()
     say("== screen goldens vs the prototype")

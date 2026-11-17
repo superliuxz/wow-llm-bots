@@ -1,21 +1,12 @@
-"""Checks docs/specs/client-events.tsv against the snapshot proto.
+"""Checks docs/specs/client-events.tsv against the reflected C++ snapshot schema.
 
-The table classifies every event the 3.3.5a client knows (the client-event
-audit, docs/specs/coverage-client-events.md). This keeps it honest:
-1. every row is classified (no `review`), with a known kind;
-2. every `maps_to` names something that exists in the proto: an Event kind,
-   a PromptEvent kind, or a snapshot field path;
-3. every Event kind and PromptEvent kind in the proto is produced by some
-   client event, or is listed below as not coming from one (with the reason),
-   so a new event or prompt can't be added without deciding where it comes from;
-4. when the extracted client data is present (tools/wlb setup client-ui), the
-   table lists exactly the client's events.
-
-Usage: python3 -I tools/audit/check_client_events.py <generated_proto_dir>
+Usage: python3 -I tools/audit/check_client_events.py <snapshot_check_bin>
 """
 
 import csv
+import json
 import pathlib
+import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
@@ -50,27 +41,12 @@ NOT_FROM_CLIENT = {
 }
 
 
-def field_paths(descriptor, prefix, depth=4):
-    paths = set()
-    for f in descriptor.fields:
-        path = prefix + f.name
-        paths.add(path)
-        sub = f.message_type
-        if sub is not None and depth > 0 and not sub.GetOptions().map_entry:
-            paths |= field_paths(sub, path + ".", depth - 1)
-    return paths
-
-
 def main():
-    sys.path.insert(0, sys.argv[1])
-    from proto import snapshot_pb2 as pb  # noqa: E402
-
-    # `prompt` wraps the PromptEvent kinds, which are checked one by one.
-    events = {"event." + f.name for f in pb.Event.DESCRIPTOR.fields if f.name != "prompt"}
-    prompts = {"prompt." + v.name
-               for v in pb.PromptEvent.DESCRIPTOR.enum_types_by_name["Kind"].values
-               if v.number != 0}
-    fields = field_paths(pb.Snapshot.DESCRIPTOR, "")
+    raw = subprocess.check_output([sys.argv[1], "--schema-json"], text=True)
+    schema = json.loads(raw)
+    events = set(schema["events"])
+    prompts = set(schema["prompts"])
+    fields = set(schema["fields"])
     errors = []
     with open(TSV) as f:
         rows = list(csv.DictReader(f, delimiter="\t"))
