@@ -33,12 +33,14 @@
 #include "Unit.h"
 #include "UpdateFields.h"
 #include "World.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "snapshot/perception.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/spell_text.h"
+#include "snapshot/world_util.h"
 
 namespace llm_brain {
 namespace {
@@ -47,15 +49,6 @@ namespace pb = wlb::snapshot;
 
 constexpr uint32_t kHearthstoneItem = 6948;
 constexpr uint32_t kHearthstoneSpell = 8690;
-
-std::string AreaName(uint32_t area_id) {
-  const AreaTableEntry* area = sAreaTableStore.LookupEntry(area_id);
-  if (!area) {
-    return "";
-  }
-  const char* name = area->area_name[sWorld->GetDefaultDbcLocale()];
-  return name ? name : "";
-}
 
 // "1g 2s 3c", as the client's money text.
 std::string MoneyText(uint32_t copper) {
@@ -74,113 +67,98 @@ std::string MoneyText(uint32_t copper) {
 }
 
 pb::Item::Quality ToQuality(uint32_t quality) {
-  switch (quality) {
-    case ITEM_QUALITY_POOR:
-      return pb::Item::POOR;
-    case ITEM_QUALITY_NORMAL:
-      return pb::Item::COMMON;
-    case ITEM_QUALITY_UNCOMMON:
-      return pb::Item::UNCOMMON;
-    case ITEM_QUALITY_RARE:
-      return pb::Item::RARE_QUALITY;
-    case ITEM_QUALITY_EPIC:
-      return pb::Item::EPIC;
-    case ITEM_QUALITY_LEGENDARY:
-      return pb::Item::LEGENDARY;
-    case ITEM_QUALITY_ARTIFACT:
-      return pb::Item::ARTIFACT;
-    case ITEM_QUALITY_HEIRLOOM:
-      return pb::Item::HEIRLOOM;
-    default:
-      return pb::Item::QUALITY_UNSPECIFIED;
-  }
+  static constexpr pb::Item::Quality kQualities[] = {
+      pb::Item::POOR,         pb::Item::COMMON,  pb::Item::UNCOMMON,
+      pb::Item::RARE_QUALITY, pb::Item::EPIC,    pb::Item::LEGENDARY,
+      pb::Item::ARTIFACT,     pb::Item::HEIRLOOM};
+  return quality < std::size(kQualities) ? kQualities[quality]
+                                         : pb::Item::QUALITY_UNSPECIFIED;
 }
 
 pb::Item::Kind ToKind(const ItemTemplate* p) {
   if (p->Quality == ITEM_QUALITY_POOR) {
     return pb::Item::JUNK;
   }
-  switch (p->Class) {
-    case ITEM_CLASS_WEAPON:
-    case ITEM_CLASS_ARMOR:
-      return pb::Item::EQUIPMENT;
-    case ITEM_CLASS_CONSUMABLE:
-      return pb::Item::CONSUMABLE;
-    case ITEM_CLASS_CONTAINER:
-    case ITEM_CLASS_QUIVER:
-      return pb::Item::CONTAINER;
-    case ITEM_CLASS_GEM:
-      return pb::Item::GEM;
-    case ITEM_CLASS_REAGENT:
-      return pb::Item::REAGENT;
-    case ITEM_CLASS_PROJECTILE:
-      return pb::Item::PROJECTILE;
-    case ITEM_CLASS_TRADE_GOODS:
-      return pb::Item::TRADE_GOOD;
-    case ITEM_CLASS_RECIPE:
-      return pb::Item::RECIPE;
-    case ITEM_CLASS_QUEST:
-      return pb::Item::QUEST;
-    case ITEM_CLASS_KEY:
-      return pb::Item::KEY;
-    case ITEM_CLASS_GLYPH:
-      return pb::Item::GLYPH;
-    default:
-      return pb::Item::OTHER;
+  struct Entry {
+    uint32_t item_class;
+    pb::Item::Kind kind;
+  };
+  static constexpr Entry kKinds[] = {
+      {ITEM_CLASS_WEAPON, pb::Item::EQUIPMENT},
+      {ITEM_CLASS_ARMOR, pb::Item::EQUIPMENT},
+      {ITEM_CLASS_CONSUMABLE, pb::Item::CONSUMABLE},
+      {ITEM_CLASS_CONTAINER, pb::Item::CONTAINER},
+      {ITEM_CLASS_QUIVER, pb::Item::CONTAINER},
+      {ITEM_CLASS_GEM, pb::Item::GEM},
+      {ITEM_CLASS_REAGENT, pb::Item::REAGENT},
+      {ITEM_CLASS_PROJECTILE, pb::Item::PROJECTILE},
+      {ITEM_CLASS_TRADE_GOODS, pb::Item::TRADE_GOOD},
+      {ITEM_CLASS_RECIPE, pb::Item::RECIPE},
+      {ITEM_CLASS_QUEST, pb::Item::QUEST},
+      {ITEM_CLASS_KEY, pb::Item::KEY},
+      {ITEM_CLASS_GLYPH, pb::Item::GLYPH},
+  };
+  for (const Entry& e : kKinds) {
+    if (e.item_class == p->Class) {
+      return e.kind;
+    }
   }
+  return pb::Item::OTHER;
 }
 
-// The equipment slot an item of `inventory_type` goes in.
-pb::EquipmentPart::Slot SlotOfType(uint32_t inventory_type) {
-  switch (inventory_type) {
-    case INVTYPE_HEAD:
-      return pb::EquipmentPart::HEAD;
-    case INVTYPE_NECK:
-      return pb::EquipmentPart::NECK;
-    case INVTYPE_SHOULDERS:
-      return pb::EquipmentPart::SHOULDER;
-    case INVTYPE_BODY:
-      return pb::EquipmentPart::SHIRT;
-    case INVTYPE_CHEST:
-    case INVTYPE_ROBE:
-      return pb::EquipmentPart::CHEST;
-    case INVTYPE_WAIST:
-      return pb::EquipmentPart::WAIST;
-    case INVTYPE_LEGS:
-      return pb::EquipmentPart::LEGS;
-    case INVTYPE_FEET:
-      return pb::EquipmentPart::FEET;
-    case INVTYPE_WRISTS:
-      return pb::EquipmentPart::WRIST;
-    case INVTYPE_HANDS:
-      return pb::EquipmentPart::HANDS;
-    case INVTYPE_FINGER:
-      return pb::EquipmentPart::FINGER1;
-    case INVTYPE_TRINKET:
-      return pb::EquipmentPart::TRINKET1;
-    case INVTYPE_CLOAK:
-      return pb::EquipmentPart::BACK;
-    case INVTYPE_WEAPON:
-    case INVTYPE_2HWEAPON:
-    case INVTYPE_WEAPONMAINHAND:
-      return pb::EquipmentPart::MAIN_HAND;
-    case INVTYPE_SHIELD:
-    case INVTYPE_WEAPONOFFHAND:
-    case INVTYPE_HOLDABLE:
-      return pb::EquipmentPart::OFF_HAND;
-    case INVTYPE_RANGED:
-    case INVTYPE_THROWN:
-    case INVTYPE_RANGEDRIGHT:
-    case INVTYPE_RELIC:
-      return pb::EquipmentPart::RANGED;
-    case INVTYPE_TABARD:
-      return pb::EquipmentPart::TABARD;
-    case INVTYPE_BAG:
-    case INVTYPE_QUIVER:
-      return pb::EquipmentPart::BAG;
-    default:
-      return pb::EquipmentPart::SLOT_UNSPECIFIED;
+struct InvTypeInfo {
+  uint32_t inv_type;
+  pb::EquipmentPart::Slot slot;
+  const char* word;
+};
+
+constexpr InvTypeInfo kInvTypes[] = {
+    {INVTYPE_HEAD, pb::EquipmentPart::HEAD, "Head"},
+    {INVTYPE_NECK, pb::EquipmentPart::NECK, "Neck"},
+    {INVTYPE_SHOULDERS, pb::EquipmentPart::SHOULDER, "Shoulder"},
+    {INVTYPE_BODY, pb::EquipmentPart::SHIRT, "Shirt"},
+    {INVTYPE_CHEST, pb::EquipmentPart::CHEST, "Chest"},
+    {INVTYPE_ROBE, pb::EquipmentPart::CHEST, "Chest"},
+    {INVTYPE_WAIST, pb::EquipmentPart::WAIST, "Waist"},
+    {INVTYPE_LEGS, pb::EquipmentPart::LEGS, "Legs"},
+    {INVTYPE_FEET, pb::EquipmentPart::FEET, "Feet"},
+    {INVTYPE_WRISTS, pb::EquipmentPart::WRIST, "Wrist"},
+    {INVTYPE_HANDS, pb::EquipmentPart::HANDS, "Hands"},
+    {INVTYPE_FINGER, pb::EquipmentPart::FINGER1, "Finger"},
+    {INVTYPE_TRINKET, pb::EquipmentPart::TRINKET1, "Trinket"},
+    {INVTYPE_CLOAK, pb::EquipmentPart::BACK, "Back"},
+    {INVTYPE_WEAPON, pb::EquipmentPart::MAIN_HAND, "One-Hand"},
+    {INVTYPE_2HWEAPON, pb::EquipmentPart::MAIN_HAND, "Two-Hand"},
+    {INVTYPE_WEAPONMAINHAND, pb::EquipmentPart::MAIN_HAND, "Main Hand"},
+    {INVTYPE_WEAPONOFFHAND, pb::EquipmentPart::OFF_HAND, "Off Hand"},
+    {INVTYPE_SHIELD, pb::EquipmentPart::OFF_HAND, "Off Hand"},
+    {INVTYPE_HOLDABLE, pb::EquipmentPart::OFF_HAND, "Held In Off-hand"},
+    {INVTYPE_RANGED, pb::EquipmentPart::RANGED, "Ranged"},
+    {INVTYPE_RANGEDRIGHT, pb::EquipmentPart::RANGED, "Ranged"},
+    {INVTYPE_THROWN, pb::EquipmentPart::RANGED, "Thrown"},
+    {INVTYPE_RELIC, pb::EquipmentPart::RANGED, "Relic"},
+    {INVTYPE_TABARD, pb::EquipmentPart::TABARD, "Tabard"},
+    {INVTYPE_BAG, pb::EquipmentPart::BAG, "Bag"},
+    {INVTYPE_QUIVER, pb::EquipmentPart::BAG, ""},
+};
+
+const InvTypeInfo* FindInvType(uint32_t inventory_type) {
+  for (const InvTypeInfo& info : kInvTypes) {
+    if (info.inv_type == inventory_type) {
+      return &info;
+    }
   }
+  return nullptr;
+}
+
+pb::EquipmentPart::Slot SlotOfType(uint32_t inventory_type) {
+  const InvTypeInfo* info = FindInvType(inventory_type);
+  return info ? info->slot : pb::EquipmentPart::SLOT_UNSPECIFIED;
+}
+
+const char* SlotWord(uint32_t inventory_type) {
+  const InvTypeInfo* info = FindInvType(inventory_type);
+  return info ? info->word : "";
 }
 
 pb::EquipmentPart::Slot SlotOfEquipmentPos(uint8_t slot) {
@@ -197,64 +175,6 @@ pb::EquipmentPart::Slot SlotOfEquipmentPos(uint8_t slot) {
       pb::EquipmentPart::TABARD};
   return slot < std::size(kSlots) ? kSlots[slot]
                                   : pb::EquipmentPart::SLOT_UNSPECIFIED;
-}
-
-// The client's slot word ("Chest") for an inventory type.
-const char* SlotWord(uint32_t inventory_type) {
-  switch (inventory_type) {
-    case INVTYPE_HEAD:
-      return "Head";
-    case INVTYPE_NECK:
-      return "Neck";
-    case INVTYPE_SHOULDERS:
-      return "Shoulder";
-    case INVTYPE_BODY:
-      return "Shirt";
-    case INVTYPE_CHEST:
-    case INVTYPE_ROBE:
-      return "Chest";
-    case INVTYPE_WAIST:
-      return "Waist";
-    case INVTYPE_LEGS:
-      return "Legs";
-    case INVTYPE_FEET:
-      return "Feet";
-    case INVTYPE_WRISTS:
-      return "Wrist";
-    case INVTYPE_HANDS:
-      return "Hands";
-    case INVTYPE_FINGER:
-      return "Finger";
-    case INVTYPE_TRINKET:
-      return "Trinket";
-    case INVTYPE_CLOAK:
-      return "Back";
-    case INVTYPE_WEAPON:
-      return "One-Hand";
-    case INVTYPE_2HWEAPON:
-      return "Two-Hand";
-    case INVTYPE_WEAPONMAINHAND:
-      return "Main Hand";
-    case INVTYPE_WEAPONOFFHAND:
-      return "Off Hand";
-    case INVTYPE_SHIELD:
-      return "Off Hand";
-    case INVTYPE_HOLDABLE:
-      return "Held In Off-hand";
-    case INVTYPE_RANGED:
-    case INVTYPE_RANGEDRIGHT:
-      return "Ranged";
-    case INVTYPE_THROWN:
-      return "Thrown";
-    case INVTYPE_RELIC:
-      return "Relic";
-    case INVTYPE_TABARD:
-      return "Tabard";
-    case INVTYPE_BAG:
-      return "Bag";
-    default:
-      return "";
-  }
 }
 
 // "Cloth", "Mace", ...: the item's subclass as the tooltip names it.
@@ -276,129 +196,99 @@ std::string TypeWord(const ItemTemplate* p) {
   return "";
 }
 
-std::optional<pb::Stat> ToStat(uint32_t mod) {
-  switch (mod) {
-    case ITEM_MOD_MANA:
-      return pb::Stat::MANA;
-    case ITEM_MOD_HEALTH:
-      return pb::Stat::HEALTH;
-    case ITEM_MOD_AGILITY:
-      return pb::Stat::AGILITY;
-    case ITEM_MOD_STRENGTH:
-      return pb::Stat::STRENGTH;
-    case ITEM_MOD_INTELLECT:
-      return pb::Stat::INTELLECT;
-    case ITEM_MOD_SPIRIT:
-      return pb::Stat::SPIRIT;
-    case ITEM_MOD_STAMINA:
-      return pb::Stat::STAMINA;
-    case ITEM_MOD_DEFENSE_SKILL_RATING:
-      return pb::Stat::DEFENSE_RATING;
-    case ITEM_MOD_DODGE_RATING:
-      return pb::Stat::DODGE_RATING;
-    case ITEM_MOD_PARRY_RATING:
-      return pb::Stat::PARRY_RATING;
-    case ITEM_MOD_BLOCK_RATING:
-      return pb::Stat::BLOCK_RATING;
-    case ITEM_MOD_HIT_RATING:
-      return pb::Stat::HIT_RATING;
-    case ITEM_MOD_CRIT_RATING:
-      return pb::Stat::CRIT_RATING;
-    case ITEM_MOD_RESILIENCE_RATING:
-      return pb::Stat::RESILIENCE_RATING;
-    case ITEM_MOD_HASTE_RATING:
-      return pb::Stat::HASTE_RATING;
-    case ITEM_MOD_EXPERTISE_RATING:
-      return pb::Stat::EXPERTISE_RATING;
-    case ITEM_MOD_ATTACK_POWER:
-      return pb::Stat::ATTACK_POWER;
-    case ITEM_MOD_RANGED_ATTACK_POWER:
-      return pb::Stat::RANGED_ATTACK_POWER;
-    case ITEM_MOD_MANA_REGENERATION:
-      return pb::Stat::MP5;
-    case ITEM_MOD_ARMOR_PENETRATION_RATING:
-      return pb::Stat::ARMOR_PENETRATION_RATING;
-    case ITEM_MOD_SPELL_POWER:
-      return pb::Stat::SPELL_POWER;
-    case ITEM_MOD_SPELL_PENETRATION:
-      return pb::Stat::SPELL_PENETRATION;
-    case ITEM_MOD_BLOCK_VALUE:
-      return pb::Stat::BLOCK_VALUE;
-    default:
-      return std::nullopt;
+struct StatInfo {
+  uint32_t mod;
+  pb::Stat stat;
+  const char* prefix;  // Empty: signed primary stat ("%+d <suffix>").
+  const char* suffix;
+};
+
+constexpr StatInfo kStats[] = {
+    {ITEM_MOD_STRENGTH, pb::Stat::STRENGTH, "", " Strength"},
+    {ITEM_MOD_AGILITY, pb::Stat::AGILITY, "", " Agility"},
+    {ITEM_MOD_STAMINA, pb::Stat::STAMINA, "", " Stamina"},
+    {ITEM_MOD_INTELLECT, pb::Stat::INTELLECT, "", " Intellect"},
+    {ITEM_MOD_SPIRIT, pb::Stat::SPIRIT, "", " Spirit"},
+    {ITEM_MOD_HEALTH, pb::Stat::HEALTH, "", " Health"},
+    {ITEM_MOD_MANA, pb::Stat::MANA, "", " Mana"},
+    {ITEM_MOD_ATTACK_POWER, pb::Stat::ATTACK_POWER,
+     "Equip: Increases attack power by ", "."},
+    {ITEM_MOD_RANGED_ATTACK_POWER, pb::Stat::RANGED_ATTACK_POWER,
+     "Equip: Increases ranged attack power by ", "."},
+    {ITEM_MOD_SPELL_POWER, pb::Stat::SPELL_POWER,
+     "Equip: Increases spell power by ", "."},
+    {ITEM_MOD_MANA_REGENERATION, pb::Stat::MP5, "Equip: Restores ",
+     " mana per 5 sec."},
+    {ITEM_MOD_HIT_RATING, pb::Stat::HIT_RATING,
+     "Equip: Improves hit rating by ", "."},
+    {ITEM_MOD_CRIT_RATING, pb::Stat::CRIT_RATING,
+     "Equip: Improves critical strike rating by ", "."},
+    {ITEM_MOD_HASTE_RATING, pb::Stat::HASTE_RATING,
+     "Equip: Improves haste rating by ", "."},
+    {ITEM_MOD_DEFENSE_SKILL_RATING, pb::Stat::DEFENSE_RATING, nullptr, nullptr},
+    {ITEM_MOD_DODGE_RATING, pb::Stat::DODGE_RATING, nullptr, nullptr},
+    {ITEM_MOD_PARRY_RATING, pb::Stat::PARRY_RATING, nullptr, nullptr},
+    {ITEM_MOD_BLOCK_RATING, pb::Stat::BLOCK_RATING, nullptr, nullptr},
+    {ITEM_MOD_RESILIENCE_RATING, pb::Stat::RESILIENCE_RATING, nullptr, nullptr},
+    {ITEM_MOD_EXPERTISE_RATING, pb::Stat::EXPERTISE_RATING, nullptr, nullptr},
+    {ITEM_MOD_ARMOR_PENETRATION_RATING, pb::Stat::ARMOR_PENETRATION_RATING,
+     nullptr, nullptr},
+    {ITEM_MOD_SPELL_PENETRATION, pb::Stat::SPELL_PENETRATION, nullptr, nullptr},
+    {ITEM_MOD_BLOCK_VALUE, pb::Stat::BLOCK_VALUE, nullptr, nullptr},
+};
+
+const StatInfo* FindStat(uint32_t mod) {
+  for (const StatInfo& info : kStats) {
+    if (info.mod == mod) {
+      return &info;
+    }
   }
+  return nullptr;
 }
 
-// "+2 Stamina", "Improves hit rating by 10.", as the tooltip writes them.
-std::string StatLine(pb::Stat stat, int32_t value) {
-  switch (stat) {
-    case pb::Stat::STRENGTH:
-      return base::StringPrintf("%+d Strength", value);
-    case pb::Stat::AGILITY:
-      return base::StringPrintf("%+d Agility", value);
-    case pb::Stat::STAMINA:
-      return base::StringPrintf("%+d Stamina", value);
-    case pb::Stat::INTELLECT:
-      return base::StringPrintf("%+d Intellect", value);
-    case pb::Stat::SPIRIT:
-      return base::StringPrintf("%+d Spirit", value);
-    case pb::Stat::HEALTH:
-      return base::StringPrintf("%+d Health", value);
-    case pb::Stat::MANA:
-      return base::StringPrintf("%+d Mana", value);
-    case pb::Stat::ATTACK_POWER:
-      return base::StringPrintf("Equip: Increases attack power by %d.", value);
-    case pb::Stat::RANGED_ATTACK_POWER:
-      return base::StringPrintf("Equip: Increases ranged attack power by %d.",
-                                value);
-    case pb::Stat::SPELL_POWER:
-      return base::StringPrintf("Equip: Increases spell power by %d.", value);
-    case pb::Stat::MP5:
-      return base::StringPrintf("Equip: Restores %d mana per 5 sec.", value);
-    case pb::Stat::HIT_RATING:
-      return base::StringPrintf("Equip: Improves hit rating by %d.", value);
-    case pb::Stat::CRIT_RATING:
-      return base::StringPrintf("Equip: Improves critical strike rating by %d.",
-                                value);
-    case pb::Stat::HASTE_RATING:
-      return base::StringPrintf("Equip: Improves haste rating by %d.", value);
-    default:
-      return base::StringPrintf("Equip: +%d %s", value,
-                                std::string(pb::EnumName(stat)).c_str());
+// "+2 Stamina", "Equip: Improves hit rating by 10.", as the tooltip writes.
+std::string StatLine(const StatInfo& info, int32_t value) {
+  if (!info.prefix) {
+    return base::StrCat({"Equip: +", base::NumberToString(value), " ",
+                         pb::EnumName(info.stat)});
   }
+  if (!*info.prefix) {
+    return base::StringPrintf("%+d%s", value, info.suffix);
+  }
+  return base::StrCat({info.prefix, base::NumberToString(value), info.suffix});
 }
+
+struct BindingInfo {
+  uint32_t bonding;
+  pb::Item::Binding binding;
+  const char* line;
+};
+
+constexpr BindingInfo kBindings[] = {
+    {NO_BIND, pb::Item::NOT_BOUND, ""},
+    {BIND_WHEN_PICKED_UP, pb::Item::BIND_ON_PICKUP, "Binds when picked up"},
+    {BIND_WHEN_EQUIPPED, pb::Item::BIND_ON_EQUIP, "Binds when equipped"},
+    {BIND_WHEN_USE, pb::Item::BIND_ON_USE, "Binds when used"},
+    {BIND_QUEST_ITEM, pb::Item::BIND_ON_PICKUP, "Quest Item"},
+    {BIND_QUEST_ITEM1, pb::Item::BIND_ON_PICKUP, "Quest Item"},
+};
 
 const char* BindingLine(uint32_t bonding) {
-  switch (bonding) {
-    case BIND_WHEN_PICKED_UP:
-      return "Binds when picked up";
-    case BIND_WHEN_EQUIPPED:
-      return "Binds when equipped";
-    case BIND_WHEN_USE:
-      return "Binds when used";
-    case BIND_QUEST_ITEM:
-    case BIND_QUEST_ITEM1:
-      return "Quest Item";
-    default:
-      return "";
+  for (const BindingInfo& info : kBindings) {
+    if (info.bonding == bonding) {
+      return info.line;
+    }
   }
+  return "";
 }
 
 pb::Item::Binding ToBinding(uint32_t bonding) {
-  switch (bonding) {
-    case NO_BIND:
-      return pb::Item::NOT_BOUND;
-    case BIND_WHEN_PICKED_UP:
-    case BIND_QUEST_ITEM:
-    case BIND_QUEST_ITEM1:
-      return pb::Item::BIND_ON_PICKUP;
-    case BIND_WHEN_EQUIPPED:
-      return pb::Item::BIND_ON_EQUIP;
-    case BIND_WHEN_USE:
-      return pb::Item::BIND_ON_USE;
-    default:
-      return pb::Item::BINDING_UNSPECIFIED;
+  for (const BindingInfo& info : kBindings) {
+    if (info.bonding == bonding) {
+      return info.binding;
+    }
   }
+  return pb::Item::BINDING_UNSPECIFIED;
 }
 
 // What a glance at a bag slot shows: the icon, its count, its border color.
@@ -440,12 +330,6 @@ pb::Item BagItem(Player* bot, Item* item, uint8_t bag, uint8_t slot) {
     }
   }
   return out;
-}
-
-bool IsGeneralBag(const Bag* bag) {
-  const ItemTemplate* p = bag->GetTemplate();
-  return p && p->Class == ITEM_CLASS_CONTAINER &&
-         p->SubClass == ITEM_SUBCLASS_CONTAINER;
 }
 
 // The spell values a description's tokens name (spell_text.h).
@@ -623,12 +507,11 @@ void AddItemTooltip(Player* bot,
   }
   std::vector<pb::StatValue> stats;
   for (uint32_t i = 0; i < p->StatsCount && i < MAX_ITEM_PROTO_STATS; ++i) {
-    if (const std::optional<pb::Stat> stat =
-            ToStat(p->ItemStat[i].ItemStatType);
-        stat && p->ItemStat[i].ItemStatValue != 0) {
+    if (const StatInfo* info = FindStat(p->ItemStat[i].ItemStatType);
+        info && p->ItemStat[i].ItemStatValue != 0) {
       stats.push_back(
-          {*stat, static_cast<float>(p->ItemStat[i].ItemStatValue)});
-      lines.push_back(StatLine(*stat, p->ItemStat[i].ItemStatValue));
+          {info->stat, static_cast<float>(p->ItemStat[i].ItemStatValue)});
+      lines.push_back(StatLine(*info, p->ItemStat[i].ItemStatValue));
     }
   }
   if (p->MaxDurability > 0) {
@@ -838,31 +721,16 @@ const std::string* ItemSpellTexts::Find(uint32_t spell_id) const {
 
 void FillBags(Player* bot, pb::Bags* bags) {
   uint32_t total = INVENTORY_SLOT_ITEM_END - INVENTORY_SLOT_ITEM_START;
-  uint32_t used = 0;
-  for (uint8_t slot = INVENTORY_SLOT_ITEM_START; slot < INVENTORY_SLOT_ITEM_END;
-       ++slot) {
-    if (Item* item = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot)) {
-      ++used;
-      bags->items.push_back(BagItem(bot, item, INVENTORY_SLOT_BAG_0, slot));
-    }
-  }
   for (uint8_t bag_pos = INVENTORY_SLOT_BAG_START;
        bag_pos < INVENTORY_SLOT_BAG_END; ++bag_pos) {
-    Bag* bag = bot->GetBagByPos(bag_pos);
-    if (!bag) {
-      continue;
-    }
-    const bool general = IsGeneralBag(bag);
-    if (general) {
+    if (const Bag* bag = bot->GetBagByPos(bag_pos); IsGeneralBag(bag)) {
       total += bag->GetBagSize();
     }
-    for (uint32_t slot = 0; slot < bag->GetBagSize(); ++slot) {
-      if (Item* item = bot->GetItemByPos(bag_pos, static_cast<uint8_t>(slot))) {
-        used += general ? 1 : 0;
-        bags->items.push_back(
-            BagItem(bot, item, bag_pos, static_cast<uint8_t>(slot)));
-      }
-    }
+  }
+  uint32_t used = 0;
+  for (const BagSlotItem& entry : BagItems(bot)) {
+    used += entry.general_bag ? 1 : 0;
+    bags->items.push_back(BagItem(bot, entry.item, entry.bag, entry.slot));
   }
   bags->total_slots = total;
   bags->free_slots = total - std::min(used, total);

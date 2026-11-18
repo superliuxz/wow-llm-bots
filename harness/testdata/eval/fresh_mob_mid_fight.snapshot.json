@@ -114,14 +114,19 @@
   "options": [
     {
       "text": "Attack Mottled Boar",
-      "guid": "0xF13000000000900D"
+      "guid": "0xF13000000000900D",
+      "kind": "ATTACK",
+      "name": "Mottled Boar"
     },
     {
       "text": "Attack Scorpid Worker",
-      "guid": "0xF13000000000900E"
+      "guid": "0xF13000000000900E",
+      "kind": "ATTACK",
+      "name": "Scorpid Worker"
     },
     {
-      "text": "Keep doing what I'm doing"
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
     }
   ]
 }

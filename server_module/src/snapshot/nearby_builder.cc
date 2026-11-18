@@ -31,7 +31,6 @@
 #include "SpellDefines.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
-#include "StringFormat.h"
 #include "Unit.h"
 #include "UnitDefines.h"
 #include "UpdateFields.h"
@@ -39,6 +38,7 @@
 #include "base/time/time.h"
 #include "snapshot/perception.h"
 #include "snapshot/snapshot.h"
+#include "snapshot/world_util.h"
 
 namespace llm_brain {
 namespace {
@@ -53,10 +53,6 @@ constexpr float kLosMovedYd = 3;
 constexpr base::TimeDelta kLosForgetAfter = base::Seconds(30);
 // Where a player looks at a game object: a little above its base.
 constexpr float kObjectSightHeightYd = 1.0f;
-
-std::string GuidString(ObjectGuid guid) {
-  return Acore::StringFormat("0x{:016X}", guid.GetRawValue());
-}
 
 // A DBC string column in the server's locale (std::array or C array of 16).
 template <typename Names>
@@ -103,61 +99,18 @@ pb::Unit::Kind UnitKind(Unit* unit) {
 }
 
 const char* RaceName(uint8_t race) {
-  switch (race) {
-    case RACE_HUMAN:
-      return "human";
-    case RACE_ORC:
-      return "orc";
-    case RACE_DWARF:
-      return "dwarf";
-    case RACE_NIGHTELF:
-      return "night elf";
-    case RACE_UNDEAD_PLAYER:
-      return "undead";
-    case RACE_TAUREN:
-      return "tauren";
-    case RACE_GNOME:
-      return "gnome";
-    case RACE_TROLL:
-      return "troll";
-    case RACE_BLOODELF:
-      return "blood elf";
-    case RACE_DRAENEI:
-      return "draenei";
-    default:
-      return "person";
-  }
+  static constexpr const char* kRaces[] = {
+      "",       "human", "orc",   "dwarf", "night elf", "undead",
+      "tauren", "gnome", "troll", "",      "blood elf", "draenei"};
+  return race < std::size(kRaces) && *kRaces[race] ? kRaces[race] : "person";
 }
 
 const char* CreatureTypeName(uint32_t type) {
-  switch (type) {
-    case CREATURE_TYPE_BEAST:
-      return "beast";
-    case CREATURE_TYPE_DRAGONKIN:
-      return "dragonkin";
-    case CREATURE_TYPE_DEMON:
-      return "demon";
-    case CREATURE_TYPE_ELEMENTAL:
-      return "elemental";
-    case CREATURE_TYPE_GIANT:
-      return "giant";
-    case CREATURE_TYPE_UNDEAD:
-      return "undead";
-    case CREATURE_TYPE_HUMANOID:
-      return "humanoid";
-    case CREATURE_TYPE_CRITTER:
-      return "critter";
-    case CREATURE_TYPE_MECHANICAL:
-      return "mechanical";
-    case CREATURE_TYPE_TOTEM:
-      return "totem";
-    case CREATURE_TYPE_NON_COMBAT_PET:
-      return "small pet";
-    case CREATURE_TYPE_GAS_CLOUD:
-      return "gas cloud";
-    default:
-      return "creature";
-  }
+  static constexpr const char* kTypes[] = {
+      "",      "beast",  "dragonkin", "demon",    "elemental",
+      "giant", "undead", "humanoid",  "critter",  "mechanical",
+      "",      "totem",  "small pet", "gas cloud"};
+  return type < std::size(kTypes) && *kTypes[type] ? kTypes[type] : "creature";
 }
 
 // What a player recognizes from the model alone: "boar", "troll", "undead".
@@ -368,7 +321,7 @@ void FillPack(Creature* creature, pb::Unit* out) {
 
 // Model-level fields: what anyone can see of the unit at any distance.
 void FillModel(Unit* unit, Player* bot, pb::Unit* out) {
-  out->guid = GuidString(unit->GetGUID());
+  out->guid = GuidString(unit->GetGUID().GetRawValue());
   out->kind = UnitKind(unit);
   out->looks_like = LooksLike(unit);
   out->size = SizeFromBoundingRadius(unit->GetBoundaryRadius());
@@ -604,7 +557,7 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
       ++stats.units;
     } else if (GameObject* go = object->ToGameObject()) {
       pb::GameObject& out = nearby->objects.emplace_back();
-      out.guid = GuidString(guid);
+      out.guid = GuidString(guid.GetRawValue());
       out.name = go->GetName();
       out.kind = ObjectKind(go, &out.required_skill);
       out.usable = IsObjectUsable(bot, go);
@@ -619,7 +572,7 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
         continue;  // A far-sight viewpoint: nothing a player sees.
       }
       pb::Area& out = nearby->areas.emplace_back();
-      out.guid = GuidString(guid);
+      out.guid = GuidString(guid.GetRawValue());
       out.name = SpellName(area->GetSpellId());
       pb::Spell& sp = out.spell.emplace();
       sp.id = area->GetSpellId();

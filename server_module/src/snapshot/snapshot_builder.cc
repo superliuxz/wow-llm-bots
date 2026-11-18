@@ -15,8 +15,6 @@
 #include "Bag.h"
 #include "Creature.h"
 #include "CreatureData.h"
-#include "DBCStores.h"
-#include "DBCStructure.h"
 #include "GameObject.h"
 #include "GameObjectData.h"
 #include "GridTerrainData.h"
@@ -39,12 +37,10 @@
 #include "SpellAuraDefines.h"
 #include "SpellAuras.h"
 #include "SpellInfo.h"
-#include "StringFormat.h"
 #include "ThreatManager.h"
 #include "Trainer.h"
 #include "TravelMgr.h"
 #include "Unit.h"
-#include "UnitDefines.h"
 #include "UpdateFields.h"
 #include "World.h"
 #include "base/time/time.h"
@@ -57,6 +53,7 @@
 #include "snapshot/perception.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/ui_state.h"
+#include "snapshot/world_util.h"
 
 namespace llm_brain {
 namespace {
@@ -85,23 +82,8 @@ pb::Self::PowerType ToPowerType(Powers power) {
   }
 }
 
-// "0x00000000000001FC": the raw GUID, as the client's combat log prints it.
-std::string GuidString(ObjectGuid guid) {
-  return Acore::StringFormat("0x{:016X}", guid.GetRawValue());
-}
-
 float Percent(uint32_t value, uint32_t max) {
   return max == 0 ? 0.0f : 100.0f * static_cast<float>(value) / max;
-}
-
-// The area's name in the server's DBC locale (what the zone text shows).
-std::string AreaName(uint32_t area_id) {
-  const AreaTableEntry* area = sAreaTableStore.LookupEntry(area_id);
-  if (!area) {
-    return "";
-  }
-  const char* name = area->area_name[sWorld->GetDefaultDbcLocale()];
-  return name ? name : "";
 }
 
 void FillPointRelative(Player* bot,
@@ -129,9 +111,7 @@ uint32_t FreeBagSlots(Player* bot) {
     }
   }
   for (uint8_t i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i) {
-    const Bag* bag = bot->GetBagByPos(i);
-    if (bag && bag->GetTemplate()->Class == ITEM_CLASS_CONTAINER &&
-        bag->GetTemplate()->SubClass == ITEM_SUBCLASS_CONTAINER) {
+    if (const Bag* bag = bot->GetBagByPos(i); IsGeneralBag(bag)) {
       free += bag->GetFreeSlots();
     }
   }
@@ -139,48 +119,12 @@ uint32_t FreeBagSlots(Player* bot) {
 }
 
 const char* EquipmentSlotName(uint8_t slot) {
-  switch (slot) {
-    case EQUIPMENT_SLOT_HEAD:
-      return "head";
-    case EQUIPMENT_SLOT_NECK:
-      return "neck";
-    case EQUIPMENT_SLOT_SHOULDERS:
-      return "shoulders";
-    case EQUIPMENT_SLOT_BODY:
-      return "shirt";
-    case EQUIPMENT_SLOT_CHEST:
-      return "chest";
-    case EQUIPMENT_SLOT_WAIST:
-      return "waist";
-    case EQUIPMENT_SLOT_LEGS:
-      return "legs";
-    case EQUIPMENT_SLOT_FEET:
-      return "feet";
-    case EQUIPMENT_SLOT_WRISTS:
-      return "wrists";
-    case EQUIPMENT_SLOT_HANDS:
-      return "hands";
-    case EQUIPMENT_SLOT_FINGER1:
-      return "finger1";
-    case EQUIPMENT_SLOT_FINGER2:
-      return "finger2";
-    case EQUIPMENT_SLOT_TRINKET1:
-      return "trinket1";
-    case EQUIPMENT_SLOT_TRINKET2:
-      return "trinket2";
-    case EQUIPMENT_SLOT_BACK:
-      return "back";
-    case EQUIPMENT_SLOT_MAINHAND:
-      return "mainhand";
-    case EQUIPMENT_SLOT_OFFHAND:
-      return "offhand";
-    case EQUIPMENT_SLOT_RANGED:
-      return "ranged";
-    case EQUIPMENT_SLOT_TABARD:
-      return "tabard";
-    default:
-      return "slot";
-  }
+  static constexpr const char* kSlotNames[] = {
+      "head",     "neck",    "shoulders", "shirt",    "chest",
+      "waist",    "legs",    "feet",      "wrists",   "hands",
+      "finger1",  "finger2", "trinket1",  "trinket2", "back",
+      "mainhand", "offhand", "ranged",    "tabard"};
+  return slot < std::size(kSlotNames) ? kSlotNames[slot] : "slot";
 }
 
 void FillIndicators(Player* bot, pb::Self_Indicators* indicators) {
@@ -258,7 +202,7 @@ pb::Role PartyRole(uint8_t roles) {
 void FillSelf(Player* bot, pb::Self* self) {
   const Powers power = bot->getPowerType();
   pb::Unit& unit = self->unit;
-  unit.guid = GuidString(bot->GetGUID());
+  unit.guid = GuidString(bot->GetGUID().GetRawValue());
   unit.name = bot->GetName();
   unit.kind = pb::Unit::PLAYER;
   unit.level = bot->GetLevel();
@@ -311,20 +255,7 @@ void FillSelf(Player* bot, pb::Self* self) {
   self->on_transport = bot->GetTransport() != nullptr;
   self->money = bot->GetMoney();
   FillIndicators(bot, &self->indicators);
-
-  pb::Self::Control& control = self->control;
-  control.stunned = bot->HasUnitState(UNIT_STATE_STUNNED) ||
-                    bot->HasUnitFlag(UNIT_FLAG_STUNNED);
-  control.feared =
-      bot->HasUnitState(UNIT_STATE_FLEEING | UNIT_STATE_CONFUSED) ||
-      bot->HasUnitFlag(UNIT_FLAG_FLEEING | UNIT_FLAG_CONFUSED);
-  control.charmed =
-      bot->HasUnitState(UNIT_STATE_CHARMED | UNIT_STATE_POSSESSED) ||
-      !bot->GetCharmerGUID().IsEmpty();
-  control.silenced = bot->HasUnitFlag(UNIT_FLAG_SILENCED);
-  control.rooted = bot->HasUnitState(UNIT_STATE_ROOT);
-  control.pacified = bot->HasUnitFlag(UNIT_FLAG_PACIFIED);
-  control.disarmed = bot->HasUnitFlag(UNIT_FLAG_DISARMED);
+  self->control = ReadControlState(bot);
 }
 
 void FillWhere(Player* bot, pb::Where* where) {
@@ -414,7 +345,7 @@ void FillParty(Player* bot, NearbyBuilder* nearby, pb::Extensions* ext) {
       continue;
     }
     pb::Unit& m = party.members.emplace_back();
-    m.guid = GuidString(slot.guid);
+    m.guid = GuidString(slot.guid.GetRawValue());
     m.name = slot.name;
     m.kind = pb::Unit::PLAYER;
     m.detail = pb::Unit::NAMEPLATE;

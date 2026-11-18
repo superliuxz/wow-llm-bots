@@ -41,11 +41,15 @@ void AddBoar(pb::Snapshot* snap,
 }
 
 void AddModuleOption(pb::Snapshot* snap,
+                     pb::Option::Kind kind,
                      const std::string& text,
-                     const std::string& guid = "") {
+                     const std::string& guid = "",
+                     const std::string& name = "") {
   pb::Option& opt = snap->options.emplace_back();
   opt.text = text;
   opt.guid = guid;
+  opt.kind = kind;
+  opt.name = name;
 }
 
 TEST(PlanRunnerTest, RepeatsReResolveAgainstFreshSnapshotsAndThenLoot) {
@@ -55,8 +59,9 @@ TEST(PlanRunnerTest, RepeatsReResolveAgainstFreshSnapshotsAndThenLoot) {
   pb::Snapshot s10 = MakeSnap(10);
   AddBoar(&s10, "0x1");
   AddBoar(&s10, "0x2");
-  AddModuleOption(&s10, "Attack Mottled Boar", "0x1");
-  AddModuleOption(&s10, "Keep doing what I'm doing");
+  AddModuleOption(&s10, pb::Option::ATTACK, "Attack Mottled Boar", "0x1",
+                  "Mottled Boar");
+  AddModuleOption(&s10, pb::Option::KEEP, "Keep doing what I'm doing");
   const Screen sc10 = RenderScreen(s10);
 
   PlanRunner runner;
@@ -71,8 +76,9 @@ TEST(PlanRunnerTest, RepeatsReResolveAgainstFreshSnapshotsAndThenLoot) {
   pb::Snapshot s11 = MakeSnap(11, /*in_combat=*/true);
   AddBoar(&s11, "0x1");
   AddBoar(&s11, "0x2");
-  AddModuleOption(&s11, "Attack Mottled Boar", "0x1");
-  AddModuleOption(&s11, "Keep doing what I'm doing");
+  AddModuleOption(&s11, pb::Option::ATTACK, "Attack Mottled Boar", "0x1",
+                  "Mottled Boar");
+  AddModuleOption(&s11, pb::Option::KEEP, "Keep doing what I'm doing");
   const RunnerAction a2 =
       runner.OnSnapshot(s11, RenderScreen(s11), t0 + base::Seconds(2));
   EXPECT_FALSE(a2.choose);
@@ -82,9 +88,11 @@ TEST(PlanRunnerTest, RepeatsReResolveAgainstFreshSnapshotsAndThenLoot) {
   pb::Snapshot s12 = MakeSnap(12, /*in_combat=*/false);
   AddBoar(&s12, "0x1", /*dead=*/true, /*lootable=*/true);
   AddBoar(&s12, "0x2");
-  AddModuleOption(&s12, "Loot Mottled Boar", "0x1");
-  AddModuleOption(&s12, "Attack Mottled Boar", "0x2");
-  AddModuleOption(&s12, "Keep doing what I'm doing");
+  AddModuleOption(&s12, pb::Option::LOOT, "Loot Mottled Boar", "0x1",
+                  "Mottled Boar");
+  AddModuleOption(&s12, pb::Option::ATTACK, "Attack Mottled Boar", "0x2",
+                  "Mottled Boar");
+  AddModuleOption(&s12, pb::Option::KEEP, "Keep doing what I'm doing");
   const RunnerAction a3 =
       runner.OnSnapshot(s12, RenderScreen(s12), t0 + base::Seconds(5));
   // Repeat #2 re-resolves "Attack Mottled Boar" to option 2 of snapshot 12!
@@ -96,8 +104,9 @@ TEST(PlanRunnerTest, RepeatsReResolveAgainstFreshSnapshotsAndThenLoot) {
   pb::Snapshot s13 = MakeSnap(13, /*in_combat=*/false);
   AddBoar(&s13, "0x1", /*dead=*/true, /*lootable=*/true);
   AddBoar(&s13, "0x2", /*dead=*/true, /*lootable=*/true);
-  AddModuleOption(&s13, "Loot Mottled Boar", "0x1");
-  AddModuleOption(&s13, "Keep doing what I'm doing");
+  AddModuleOption(&s13, pb::Option::LOOT, "Loot Mottled Boar", "0x1",
+                  "Mottled Boar");
+  AddModuleOption(&s13, pb::Option::KEEP, "Keep doing what I'm doing");
   const RunnerAction a4 =
       runner.OnSnapshot(s13, RenderScreen(s13), t0 + base::Seconds(9));
   EXPECT_FALSE(a4.choose);
@@ -108,7 +117,7 @@ TEST(PlanRunnerTest, RepeatsReResolveAgainstFreshSnapshotsAndThenLoot) {
 TEST(PlanRunnerTest, KeepStaysActiveUntilLookTimerWithoutFinishingEarly) {
   const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
   pb::Snapshot s1 = MakeSnap(1);
-  AddModuleOption(&s1, "Keep doing what I'm doing");
+  AddModuleOption(&s1, pb::Option::KEEP, "Keep doing what I'm doing");
   const Screen sc1 = RenderScreen(s1);
 
   PlanRunner runner;
@@ -140,8 +149,9 @@ TEST(PlanRunnerTest, StalledAttackTimesOutAfterSafetyLimit) {
   const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
   pb::Snapshot s1 = MakeSnap(1, /*in_combat=*/true);
   AddBoar(&s1, "0x1");
-  AddModuleOption(&s1, "Attack Mottled Boar", "0x1");
-  AddModuleOption(&s1, "Keep doing what I'm doing");
+  AddModuleOption(&s1, pb::Option::ATTACK, "Attack Mottled Boar", "0x1",
+                  "Mottled Boar");
+  AddModuleOption(&s1, pb::Option::KEEP, "Keep doing what I'm doing");
   const Screen sc1 = RenderScreen(s1);
 
   PlanRunner runner;
@@ -157,8 +167,9 @@ TEST(PlanRunnerTest, LootEndsOnTheBodysDoneSignalWhileTheCorpseIsLootable) {
   const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
   pb::Snapshot s1 = MakeSnap(1);
   AddBoar(&s1, "0x1", /*dead=*/true, /*lootable=*/true);
-  AddModuleOption(&s1, "Loot Mottled Boar", "0x1");
-  AddModuleOption(&s1, "Keep doing what I'm doing");
+  AddModuleOption(&s1, pb::Option::LOOT, "Loot Mottled Boar", "0x1",
+                  "Mottled Boar");
+  AddModuleOption(&s1, pb::Option::KEEP, "Keep doing what I'm doing");
 
   PlanRunner runner;
   const RunnerAction a1 = runner.Start({{1, 1}}, 1, RenderScreen(s1), t0);
@@ -186,15 +197,19 @@ TEST(PlanRunnerTest, LootEndsOnTheBodysDoneSignalWhileTheCorpseIsLootable) {
 TEST(PlanRunnerTest, MultipleExploreAndGoToOptionsDoNotCollideAcrossSnapshots) {
   const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
   pb::Snapshot s1 = MakeSnap(1);
-  AddModuleOption(&s1, "Rest (eat and drink)");
-  AddModuleOption(&s1, "Explore NE, 300 yd (boars, level 1-2)",
-                  "spot:1:-500:-4100");
-  AddModuleOption(&s1, "Explore S, 220 yd (scorpids, level 3-5)",
-                  "spot:1:-700:-4300");
-  AddModuleOption(&s1, "Go to The Den (innkeeper), 150 yd W", "place:the_den");
-  AddModuleOption(&s1, "Go to Razor Hill (vendor, repair), 900 yd N",
-                  "place:razor_hill");
-  AddModuleOption(&s1, "Keep doing what I'm doing");
+  AddModuleOption(&s1, pb::Option::REST, "Rest (eat and drink)");
+  AddModuleOption(&s1, pb::Option::EXPLORE,
+                  "Explore NE, 300 yd (boars, level 1-2)", "spot:1:-500:-4100",
+                  "boars, level 1-2");
+  AddModuleOption(&s1, pb::Option::EXPLORE,
+                  "Explore S, 220 yd (scorpids, level 3-5)",
+                  "spot:1:-700:-4300", "scorpids, level 3-5");
+  AddModuleOption(&s1, pb::Option::GO_TO, "Go to The Den (innkeeper), 150 yd W",
+                  "place:the_den", "The Den");
+  AddModuleOption(&s1, pb::Option::GO_TO,
+                  "Go to Razor Hill (vendor, repair), 900 yd N",
+                  "place:razor_hill", "Razor Hill");
+  AddModuleOption(&s1, pb::Option::KEEP, "Keep doing what I'm doing");
 
   PlanRunner runner;
   // Plan: Rest (1), then Explore S (3), then Go to Razor Hill (5).
@@ -207,14 +222,18 @@ TEST(PlanRunnerTest, MultipleExploreAndGoToOptionsDoNotCollideAcrossSnapshots) {
   // Rest finishes on s2; distances and directions shifted while resting.
   pb::Snapshot s2 = MakeSnap(2);
   s2.done_command_id = 10;
-  AddModuleOption(&s2, "Explore N, 290 yd (boars, level 1-2)",
-                  "spot:1:-500:-4100");
-  AddModuleOption(&s2, "Explore SE, 210 yd (scorpids, level 3-5)",
-                  "spot:1:-700:-4300");
-  AddModuleOption(&s2, "Go to The Den (innkeeper), 140 yd W", "place:the_den");
-  AddModuleOption(&s2, "Go to Razor Hill (vendor, repair), 890 yd N",
-                  "place:razor_hill");
-  AddModuleOption(&s2, "Keep doing what I'm doing");
+  AddModuleOption(&s2, pb::Option::EXPLORE,
+                  "Explore N, 290 yd (boars, level 1-2)", "spot:1:-500:-4100",
+                  "boars, level 1-2");
+  AddModuleOption(&s2, pb::Option::EXPLORE,
+                  "Explore SE, 210 yd (scorpids, level 3-5)",
+                  "spot:1:-700:-4300", "scorpids, level 3-5");
+  AddModuleOption(&s2, pb::Option::GO_TO, "Go to The Den (innkeeper), 140 yd W",
+                  "place:the_den", "The Den");
+  AddModuleOption(&s2, pb::Option::GO_TO,
+                  "Go to Razor Hill (vendor, repair), 890 yd N",
+                  "place:razor_hill", "Razor Hill");
+  AddModuleOption(&s2, pb::Option::KEEP, "Keep doing what I'm doing");
   const RunnerAction a2 =
       runner.OnSnapshot(s2, RenderScreen(s2), t0 + base::Seconds(15));
   ASSERT_TRUE(a2.choose);

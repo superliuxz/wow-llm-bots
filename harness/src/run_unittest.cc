@@ -155,7 +155,11 @@ TEST(RunHarnessTest, EndToEndSocketToStreamingLlmToChooseCommand) {
   pb::Option& o1 = snap.options.emplace_back();
   o1.text = "Attack Mottled Boar";
   o1.guid = "0xABCD";
-  snap.options.emplace_back().text = "Keep doing what I'm doing";
+  o1.kind = pb::Option::ATTACK;
+  o1.name = "Mottled Boar";
+  pb::Option& o2 = snap.options.emplace_back();
+  o2.text = "Keep doing what I'm doing";
+  o2.kind = pb::Option::KEEP;
 
   std::string payload = pb::WriteBeve(msg);
   mod_io.task_runner()->PostTask(

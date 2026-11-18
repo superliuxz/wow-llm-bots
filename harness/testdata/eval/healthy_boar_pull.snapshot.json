@@ -697,34 +697,49 @@
   "options": [
     {
       "text": "Attack Mottled Boar",
-      "guid": "0xF130000C1A0002D7"
+      "guid": "0xF130000C1A0002D7",
+      "kind": "ATTACK",
+      "name": "Mottled Boar"
     },
     {
       "text": "Gather Cactus Apple",
-      "guid": "0xF110029FA20000C8"
+      "guid": "0xF110029FA20000C8",
+      "kind": "GATHER",
+      "name": "Cactus Apple"
     },
     {
       "text": "Explore SW, 53 yd (boars, level 1-2)",
-      "guid": "spot:1:-715:-4286"
+      "guid": "spot:1:-715:-4286",
+      "kind": "EXPLORE",
+      "name": "boars, level 1-2"
     },
     {
       "text": "Explore NE, 112 yd (boars, level 1-2)",
-      "guid": "spot:1:-616:-4418"
+      "guid": "spot:1:-616:-4418",
+      "kind": "EXPLORE",
+      "name": "boars, level 1-2"
     },
     {
       "text": "Explore N, 162 yd (boars, level 1-2)",
-      "guid": "spot:1:-517:-4287"
+      "guid": "spot:1:-517:-4287",
+      "kind": "EXPLORE",
+      "name": "boars, level 1-2"
     },
     {
       "text": "Go to Ratchet (innkeeper, vendor, repair, flight master), 757 yd SW",
-      "guid": "place:1:-1050:-3665"
+      "guid": "place:1:-1050:-3665",
+      "kind": "GO_TO",
+      "name": "Ratchet"
     },
     {
       "text": "Go to Valley of Trials (vendor, repair, priest trainer, graveyard), 104 yd NW",
-      "guid": "place:1:-627:-4230"
+      "guid": "place:1:-627:-4230",
+      "kind": "GO_TO",
+      "name": "Valley of Trials"
     },
     {
-      "text": "Keep doing what I'm doing"
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
     }
   ]
 }

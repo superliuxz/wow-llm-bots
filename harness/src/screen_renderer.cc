@@ -316,50 +316,39 @@ std::string_view OptionVerb(OptionKind kind) {
   return "";
 }
 
-ScreenOption ParseModuleOption(const pb::Option& option) {
-  const std::string_view text = base::TrimWhitespaceASCII(option.text);
-  const struct {
-    std::string_view prefix;
-    OptionKind kind;
-  } targeted[] = {
-      {"Attack ", OptionKind::kAttack}, {"Talk to ", OptionKind::kTalk},
-      {"Loot ", OptionKind::kLoot},     {"Gather ", OptionKind::kGather},
-      {"Use ", OptionKind::kUse},
-  };
-  for (const auto& entry : targeted) {
-    if (const auto rest = base::RemovePrefix(text, entry.prefix)) {
-      return {entry.kind, option.guid,
-              std::string(base::TrimWhitespaceASCII(*rest))};
-    }
+ScreenOption FromModuleOption(const pb::Option& option) {
+  OptionKind kind = OptionKind::kKeep;
+  switch (option.kind) {
+    case pb::Option::ATTACK:
+      kind = OptionKind::kAttack;
+      break;
+    case pb::Option::TALK:
+      kind = OptionKind::kTalk;
+      break;
+    case pb::Option::LOOT:
+      kind = OptionKind::kLoot;
+      break;
+    case pb::Option::GATHER:
+      kind = OptionKind::kGather;
+      break;
+    case pb::Option::USE:
+      kind = OptionKind::kUse;
+      break;
+    case pb::Option::REST:
+      kind = OptionKind::kRest;
+      break;
+    case pb::Option::EXPLORE:
+      kind = OptionKind::kExplore;
+      break;
+    case pb::Option::GO_TO:
+      kind = OptionKind::kTown;
+      break;
+    case pb::Option::KEEP:
+    case pb::Option::KIND_UNSPECIFIED:
+      kind = OptionKind::kKeep;
+      break;
   }
-  if (base::StartsWith(text, "Explore", base::CompareCase::INSENSITIVE_ASCII)) {
-    std::string name;
-    if (const size_t open = text.find('(');
-        open != std::string_view::npos && text.ends_with(')')) {
-      name = std::string(base::TrimWhitespaceASCII(
-          text.substr(open + 1, text.size() - open - 2)));
-    } else if (const auto rest = base::RemovePrefix(text, "Explore ");
-               rest && *rest != "somewhere new") {
-      const size_t end = rest->find_first_of(", ");
-      name = std::string(rest->substr(0, end));
-    }
-    return {OptionKind::kExplore, option.guid, std::move(name)};
-  }
-  if (base::StartsWith(text, "Rest", base::CompareCase::INSENSITIVE_ASCII)) {
-    return {OptionKind::kRest, option.guid, ""};
-  }
-  if (base::StartsWith(text, "Go to", base::CompareCase::INSENSITIVE_ASCII)) {
-    std::string name;
-    if (const auto rest = base::RemovePrefix(text, "Go to ");
-        rest && *rest != "the nearest town") {
-      const size_t paren = rest->find(" (");
-      const size_t comma = rest->find(", ");
-      const size_t end = std::min(paren, comma);
-      name = std::string(base::TrimWhitespaceASCII(rest->substr(0, end)));
-    }
-    return {OptionKind::kTown, option.guid, std::move(name)};
-  }
-  return {OptionKind::kKeep, option.guid, ""};
+  return {kind, option.guid, option.name};
 }
 
 // One line per distinct (name, look): the same thing seen several times is
@@ -1214,7 +1203,7 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
   if (screen.has_module_options) {
     placed.assign(snapshot.options.size(), false);
     for (size_t i = 0; i < snapshot.options.size(); ++i) {
-      ScreenOption parsed = ParseModuleOption(snapshot.options[i]);
+      ScreenOption parsed = FromModuleOption(snapshot.options[i]);
       screen.options.push_back(parsed.kind);
       screen.details.push_back(parsed);
       if (!parsed.guid.empty()) {

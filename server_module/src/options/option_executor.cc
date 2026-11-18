@@ -14,7 +14,6 @@
 #include <vector>
 
 #include "AiObjectContext.h"
-#include "Bag.h"
 #include "ByteBuffer.h"
 #include "Creature.h"
 #include "DBCStores.h"
@@ -69,6 +68,7 @@
 #include "base/time/time.h"
 #include "options/options.h"
 #include "snapshot/snapshot.h"
+#include "snapshot/world_util.h"
 
 namespace llm_brain {
 
@@ -313,32 +313,18 @@ uint32_t BestQuestRewardIndex(Player* bot,
 
 uint32_t SellGreyItemsTo(Player* bot, ObjectGuid vendor_guid) {
   uint32_t sold = 0;
-  const auto sell_if_grey = [&](Item* item) {
-    if (!item) {
-      return;
-    }
-    const ItemTemplate* proto = item->GetTemplate();
+  for (const BagSlotItem& entry : BagItems(bot)) {
+    const ItemTemplate* proto = entry.item->GetTemplate();
     if (!proto || proto->Quality != ITEM_QUALITY_POOR ||
         proto->SellPrice == 0) {
-      return;
+      continue;
     }
     WorldPacket p(CMSG_SELL_ITEM);
-    p << vendor_guid << item->GetGUID() << item->GetCount();
+    p << vendor_guid << entry.item->GetGUID() << entry.item->GetCount();
     WorldPackets::Item::SellItem packet(std::move(p));
     packet.Read();
     bot->GetSession()->HandleSellItemOpcode(packet);
     ++sold;
-  };
-  for (uint8_t slot = INVENTORY_SLOT_ITEM_START; slot < INVENTORY_SLOT_ITEM_END;
-       ++slot) {
-    sell_if_grey(bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot));
-  }
-  for (uint8_t i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i) {
-    if (const Bag* bag = bot->GetBagByPos(i)) {
-      for (uint32_t slot = 0; slot < bag->GetBagSize(); ++slot) {
-        sell_if_grey(bot->GetItemByPos(i, static_cast<uint8_t>(slot)));
-      }
-    }
   }
   return sold;
 }
@@ -565,35 +551,19 @@ bool HasCategoryAura(Player* bot, uint32_t category) {
 void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink) {
   *has_food = false;
   *has_drink = false;
-  const auto check_item = [&](Item* item) {
-    if (!item) {
-      return;
-    }
-    const ItemTemplate* proto = item->GetTemplate();
+  for (const BagSlotItem& entry : BagItems(bot)) {
+    const ItemTemplate* proto = entry.item->GetTemplate();
     if (!proto || proto->Class != ITEM_CLASS_CONSUMABLE ||
         (proto->SubClass != ITEM_SUBCLASS_FOOD &&
-         proto->SubClass != ITEM_SUBCLASS_CONSUMABLE)) {
-      return;
-    }
-    if (bot->CanUseItem(proto) != EQUIP_ERR_OK) {
-      return;
+         proto->SubClass != ITEM_SUBCLASS_CONSUMABLE) ||
+        bot->CanUseItem(proto) != EQUIP_ERR_OK) {
+      continue;
     }
     const uint32_t cat = proto->Spells[0].SpellCategory;
     if (cat == kSpellCategoryFood) {
       *has_food = true;
     } else if (cat == kSpellCategoryDrink) {
       *has_drink = true;
-    }
-  };
-  for (uint8_t slot = INVENTORY_SLOT_ITEM_START; slot < INVENTORY_SLOT_ITEM_END;
-       ++slot) {
-    check_item(bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot));
-  }
-  for (uint8_t i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i) {
-    if (const Bag* bag = bot->GetBagByPos(i)) {
-      for (uint32_t slot = 0; slot < bag->GetBagSize(); ++slot) {
-        check_item(bot->GetItemByPos(i, static_cast<uint8_t>(slot)));
-      }
     }
   }
 }
@@ -604,27 +574,39 @@ bool HasFoodOrDrinkAura(Player* bot) {
          HasCategoryAura(bot, kSpellCategoryDrink);
 }
 
+namespace {
+
+// Eats and/or drinks only what the bags actually hold: with no drink,
+// playerbots' "drink" falls back to food, and the food aura doesn't stop the
+// drink check, so the bot ate again every second or two (review of f40b0b6,
+// finding 2). Used on both the first tick (ExecuteRestOption) and later ticks
+// (ContinueRest). Returns true if a consumable action fired.
+bool TryEatAndDrink(Player* bot, PlayerbotAI* ai) {
+  bool has_food = false;
+  bool has_drink = false;
+  CheckBagFoodAndDrink(bot, &has_food, &has_drink);
+  bool used = false;
+  if (has_food && !bot->IsFullHealth() &&
+      !HasCategoryAura(bot, kSpellCategoryFood) &&
+      !bot->HasAura(kSpellGraccusFruitcake)) {
+    used |= ai->DoSpecificAction("eat", Event(), /*silent=*/true);
+  }
+  if (has_drink && bot->GetMaxPower(POWER_MANA) > 0 &&
+      bot->GetPower(POWER_MANA) < bot->GetMaxPower(POWER_MANA) &&
+      !HasCategoryAura(bot, kSpellCategoryDrink)) {
+    used |= ai->DoSpecificAction("drink", Event(), /*silent=*/true);
+  }
+  return used;
+}
+
+}  // namespace
+
 void ContinueRest(Player* bot) {
   PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
   if (!ai || bot->IsNonMeleeSpellCast(false) || bot->IsInCombat()) {
     return;
   }
-  // Only what the bags hold: with no drink, playerbots' "drink" falls back to
-  // food, and the food aura doesn't stop the drink check, so the bot ate again
-  // every second or two (review of f40b0b6, finding 2).
-  bool has_food = false;
-  bool has_drink = false;
-  CheckBagFoodAndDrink(bot, &has_food, &has_drink);
-  if (has_food && !bot->IsFullHealth() &&
-      !HasCategoryAura(bot, kSpellCategoryFood) &&
-      !bot->HasAura(kSpellGraccusFruitcake)) {
-    ai->DoSpecificAction("eat", Event(), /*silent=*/true);
-  }
-  if (has_drink && bot->GetMaxPower(POWER_MANA) > 0 &&
-      bot->GetPower(POWER_MANA) < bot->GetMaxPower(POWER_MANA) &&
-      !HasCategoryAura(bot, kSpellCategoryDrink)) {
-    ai->DoSpecificAction("drink", Event(), /*silent=*/true);
-  }
+  TryEatAndDrink(bot, ai);
   // Sitting with nothing to eat: keep the body from standing up (it does when
   // its next check is due), a little longer than the caller's 1 s period. Its
   // AI waits meanwhile, as a player sitting down reacts a moment late.
@@ -1017,14 +999,7 @@ ExecuteResult ExecuteRestOption(Player* bot, PlayerbotAI* ai) {
   if (bot->isMoving()) {
     bot->StopMoving();
   }
-  bool used_consumable = false;
-  if (!bot->IsFullHealth()) {
-    used_consumable |= ai->DoSpecificAction("eat", Event(), /*silent=*/true);
-  }
-  if (bot->GetMaxPower(POWER_MANA) > 0 &&
-      bot->GetPower(POWER_MANA) < bot->GetMaxPower(POWER_MANA)) {
-    used_consumable |= ai->DoSpecificAction("drink", Event(), /*silent=*/true);
-  }
+  const bool used_consumable = TryEatAndDrink(bot, ai);
   // No ResetActionDuration here: eat / drink set the body's action duration
   // to the meal, and playerbots stands a sitting bot up as soon as its next
   // check is due (PlayerbotAI::UpdateAIInternal), which would end the meal.

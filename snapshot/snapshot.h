@@ -1252,9 +1252,25 @@ struct Pvp {
 };
 
 struct Option {
+  enum class Kind : uint8_t {
+    KIND_UNSPECIFIED = 0,
+    ATTACK = 1,
+    TALK = 2,
+    LOOT = 3,
+    GATHER = 4,
+    USE = 5,
+    REST = 6,
+    EXPLORE = 7,
+    GO_TO = 8,
+    KEEP = 9,
+  };
+  using enum Kind;
+
   std::string text;
   std::vector<Blank> blanks;
   std::string guid;
+  Option::Kind kind = Option::Kind::KIND_UNSPECIFIED;
+  std::string name;
 
   bool operator==(const Option&) const = default;
 };
@@ -2747,6 +2763,7 @@ std::string_view EnumName(HoverRef::Kind value);
 std::string_view EnumName(Calendar_Entry::Status value);
 std::string_view EnumName(DisplacedEvent::How value);
 std::string_view EnumName(Blank::Kind value);
+std::string_view EnumName(Option::Kind value);
 std::string_view EnumName(Relative::Height value);
 std::string_view EnumName(Spell::School value);
 std::string_view EnumName(Item::Quality value);

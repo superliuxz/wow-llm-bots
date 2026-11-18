@@ -326,11 +326,16 @@ TEST(ScreenRendererTest, ModuleOptionsNumberScreenLinesByGuidWithoutMismatch) {
   pb::Option& o1 = snapshot.options.emplace_back();
   o1.text = "Loot Wolf";
   o1.guid = "0x30";
+  o1.kind = pb::Option::LOOT;
+  o1.name = "Wolf";
   pb::Option& o2 = snapshot.options.emplace_back();
   o2.text = "Attack Boar";
   o2.guid = "0x21";
+  o2.kind = pb::Option::ATTACK;
+  o2.name = "Boar";
   pb::Option& o3 = snapshot.options.emplace_back();
   o3.text = "Keep doing what I'm doing";
+  o3.kind = pb::Option::KEEP;
 
   const Screen screen = RenderScreen(snapshot);
   EXPECT_TRUE(screen.has_module_options);
@@ -475,20 +480,28 @@ TEST(ScreenRendererTest, BagSpaceShowsOnlyWhenLowOrFull) {
   EXPECT_EQ(RenderScreen(snap).text.find("bags"), std::string::npos);
 }
 
-TEST(ScreenRendererTest, ExploreAndGoToModuleOptionsExtractInvariantNames) {
+TEST(ScreenRendererTest, ExploreAndGoToModuleOptionsCarryStructuredFields) {
   pb::Snapshot snap = NewSnapshot();
   pb::Option& e1 = snap.options.emplace_back();
   e1.text = "Explore NE, 300 yd (boars, scorpids, level 3-5)";
   e1.guid = "spot:1:-500:-4100";
+  e1.kind = pb::Option::EXPLORE;
+  e1.name = "boars, scorpids, level 3-5";
   pb::Option& e2 = snap.options.emplace_back();
   e2.text = "Explore S, 80 yd";
   e2.guid = "spot:1:-700:-4200";
+  e2.kind = pb::Option::EXPLORE;
+  e2.name = "S";
   pb::Option& g1 = snap.options.emplace_back();
   g1.text = "Go to Razor Hill (innkeeper, vendor, repair), 900 yd N";
   g1.guid = "place:razor_hill";
+  g1.kind = pb::Option::GO_TO;
+  g1.name = "Razor Hill";
   pb::Option& g2 = snap.options.emplace_back();
   g2.text = "Go to Sen'jin Village Graveyard, 250 yd S";
   g2.guid = "place:grave_1";
+  g2.kind = pb::Option::GO_TO;
+  g2.name = "Sen'jin Village Graveyard";
 
   const Screen screen = RenderScreen(snap);
   ASSERT_EQ(screen.details.size(), 4u);

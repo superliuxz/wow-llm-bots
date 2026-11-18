@@ -110,34 +110,49 @@
   "options": [
     {
       "text": "Attack Hare",
-      "guid": "0xF130000000009010"
+      "guid": "0xF130000000009010",
+      "kind": "ATTACK",
+      "name": "Hare"
     },
     {
       "text": "Attack Mottled Boar",
-      "guid": "0xF130000000009011"
+      "guid": "0xF130000000009011",
+      "kind": "ATTACK",
+      "name": "Mottled Boar"
     },
     {
       "text": "Explore NE, 59 yd (boars, level 1-2)",
-      "guid": "spot:1:-517:-4287"
+      "guid": "spot:1:-517:-4287",
+      "kind": "EXPLORE",
+      "name": "boars, level 1-2"
     },
     {
       "text": "Explore NW, 73 yd (boars, level 1-2)",
-      "guid": "spot:1:-487:-4214"
+      "guid": "spot:1:-487:-4214",
+      "kind": "EXPLORE",
+      "name": "boars, level 1-2"
     },
     {
       "text": "Explore N, 101 yd (boars, level 1-2)",
-      "guid": "spot:1:-454:-4223"
+      "guid": "spot:1:-454:-4223",
+      "kind": "EXPLORE",
+      "name": "boars, level 1-2"
     },
     {
       "text": "Go to Ratchet (innkeeper, vendor, repair, flight master), 771 yd SW",
-      "guid": "place:1:-1050:-3665"
+      "guid": "place:1:-1050:-3665",
+      "kind": "GO_TO",
+      "name": "Ratchet"
     },
     {
       "text": "Go to Valley of Trials (vendor, priest trainer, graveyard), 45 yd W",
-      "guid": "place:1:-560:-4217"
+      "guid": "place:1:-560:-4217",
+      "kind": "GO_TO",
+      "name": "Valley of Trials"
     },
     {
-      "text": "Keep doing what I'm doing"
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
     }
   ]
 }

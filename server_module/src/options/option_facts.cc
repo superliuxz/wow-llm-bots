@@ -40,6 +40,7 @@
 #include "options/position_facts.h"
 #include "snapshot/perception.h"
 #include "snapshot/snapshot.h"
+#include "snapshot/world_util.h"
 
 namespace llm_brain {
 namespace {
@@ -52,15 +53,6 @@ constexpr size_t kMaxSpots = 3;
 // Hubs this much beyond minimap range are kept, so a bot that moves before the
 // next recompute (SnapshotBuilder: 20 yd) still sees them come into range.
 constexpr float kMinimapMarginYd = 50.0f;
-
-std::string AreaName(uint32_t area_id) {
-  const AreaTableEntry* area = sAreaTableStore.LookupEntry(area_id);
-  if (!area) {
-    return "";
-  }
-  const char* name = area->area_name[sWorld->GetDefaultDbcLocale()];
-  return name ? name : "";
-}
 
 std::string PlaceId(uint32_t map_id, float x, float y) {
   return Acore::StringFormat("place:{}:{}:{}", map_id,

@@ -224,6 +224,8 @@ TEST(OptionsTest, ExploreAndGoToUseOptionFactsAndCarryDestinationPos) {
   ASSERT_TRUE(targets[0].pos.has_value());
   EXPECT_FLOAT_EQ(targets[0].pos->x, -500.0f);
   EXPECT_EQ(snapshot.options[0].guid, "spot:1:-500:-4100");
+  EXPECT_EQ(snapshot.options[0].kind, pb::Option::EXPLORE);
+  EXPECT_EQ(snapshot.options[0].name, "boars, scorpids, level 3-5");
 
   EXPECT_EQ(targets[2].kind, OptionTarget::Kind::kGoTo);
   EXPECT_EQ(targets[2].guid, "place:razor_hill");
@@ -231,6 +233,10 @@ TEST(OptionsTest, ExploreAndGoToUseOptionFactsAndCarryDestinationPos) {
   ASSERT_TRUE(targets[2].pos.has_value());
   EXPECT_FLOAT_EQ(targets[2].pos->x, 315.0f);
   EXPECT_EQ(snapshot.options[2].guid, "place:razor_hill");
+  EXPECT_EQ(snapshot.options[2].kind, pb::Option::GO_TO);
+  EXPECT_EQ(snapshot.options[2].name, "Razor Hill");
+  EXPECT_EQ(snapshot.options[3].kind, pb::Option::KEEP);
+  EXPECT_EQ(snapshot.options[3].name, "");
 }
 
 TEST(OptionsTest, LootOnlyLootableCorpses) {
@@ -247,6 +253,10 @@ TEST(OptionsTest, LootOnlyLootableCorpses) {
   EXPECT_EQ(targets[0].kind, OptionTarget::Kind::kLoot);
   EXPECT_EQ(targets[0].guid, "0x2");
   EXPECT_EQ(targets[1].guid, "0x3");
+  EXPECT_EQ(snapshot.options[0].kind, pb::Option::LOOT);
+  EXPECT_EQ(snapshot.options[0].name, "Scorpid Worker");
+  EXPECT_EQ(snapshot.options[1].kind, pb::Option::ATTACK);
+  EXPECT_EQ(snapshot.options[1].name, "Scorpid Worker");
 }
 
 TEST(OptionsTest, NothingForPlayersOrUnitsTooFarToName) {

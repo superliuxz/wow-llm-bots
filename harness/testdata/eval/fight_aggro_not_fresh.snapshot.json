@@ -858,14 +858,19 @@
   "options": [
     {
       "text": "Attack Mottled Boar",
-      "guid": "0xF130000C1A0002AC"
+      "guid": "0xF130000C1A0002AC",
+      "kind": "ATTACK",
+      "name": "Mottled Boar"
     },
     {
       "text": "Gather Cactus Apple",
-      "guid": "0xF110029FA20000C5"
+      "guid": "0xF110029FA20000C5",
+      "kind": "GATHER",
+      "name": "Cactus Apple"
     },
     {
-      "text": "Keep doing what I'm doing"
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
     }
   ]
 }

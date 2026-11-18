@@ -721,30 +721,43 @@
   "options": [
     {
       "text": "Talk to Kaltunk",
-      "guid": "0xF1300027C0000253"
+      "guid": "0xF1300027C0000253",
+      "kind": "TALK",
+      "name": "Kaltunk"
     },
     {
       "text": "Explore S, 102 yd (boars, level 1-2)",
-      "guid": "spot:1:-715:-4286"
+      "guid": "spot:1:-715:-4286",
+      "kind": "EXPLORE",
+      "name": "boars, level 1-2"
     },
     {
       "text": "Explore N, 108 yd (boars, level 1-2)",
-      "guid": "spot:1:-517:-4287"
+      "guid": "spot:1:-517:-4287",
+      "kind": "EXPLORE",
+      "name": "boars, level 1-2"
     },
     {
       "text": "Explore NE, 140 yd (boars, level 1-2)",
-      "guid": "spot:1:-514:-4345"
+      "guid": "spot:1:-514:-4345",
+      "kind": "EXPLORE",
+      "name": "boars, level 1-2"
     },
     {
       "text": "Go to Ratchet (innkeeper, vendor, repair, flight master), 729 yd SW",
-      "guid": "place:1:-1050:-3665"
+      "guid": "place:1:-1050:-3665",
+      "kind": "GO_TO",
+      "name": "Ratchet"
     },
     {
       "text": "Go to Valley of Trials (vendor, priest trainer, graveyard), 68 yd NW",
-      "guid": "place:1:-560:-4217"
+      "guid": "place:1:-560:-4217",
+      "kind": "GO_TO",
+      "name": "Valley of Trials"
     },
     {
-      "text": "Keep doing what I'm doing"
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
     }
   ]
 }

@@ -92,10 +92,13 @@
   "options": [
     {
       "text": "Attack Vile Familiar",
-      "guid": "0xF13000000000900C"
+      "guid": "0xF13000000000900C",
+      "kind": "ATTACK",
+      "name": "Vile Familiar"
     },
     {
-      "text": "Keep doing what I'm doing"
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
     }
   ]
 }

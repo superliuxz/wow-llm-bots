@@ -92,10 +92,13 @@
   "options": [
     {
       "text": "Attack Scorpid Worker",
-      "guid": "0xF13000000000900B"
+      "guid": "0xF13000000000900B",
+      "kind": "ATTACK",
+      "name": "Scorpid Worker"
     },
     {
-      "text": "Keep doing what I'm doing"
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
     }
   ]
 }

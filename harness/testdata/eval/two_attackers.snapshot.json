@@ -117,14 +117,19 @@
   "options": [
     {
       "text": "Attack Vile Familiar",
-      "guid": "0xF130000000009008"
+      "guid": "0xF130000000009008",
+      "kind": "ATTACK",
+      "name": "Vile Familiar"
     },
     {
       "text": "Attack Burning Blade Imp",
-      "guid": "0xF130000000009009"
+      "guid": "0xF130000000009009",
+      "kind": "ATTACK",
+      "name": "Burning Blade Imp"
     },
     {
-      "text": "Keep doing what I'm doing"
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
     }
   ]
 }

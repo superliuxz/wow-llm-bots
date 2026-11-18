@@ -15,11 +15,9 @@
 #include "GameObject.h"
 #include "Log.h"
 #include "ObjectAccessor.h"
-#include "ObjectGuid.h"
 #include "Player.h"
 #include "SharedDefines.h"
 #include "Unit.h"
-#include "UnitDefines.h"
 #include "WorldScript.h"
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
@@ -41,6 +39,7 @@
 #include "snapshot/snapshot_schedule.h"
 #include "snapshot/snapshot_stats.h"
 #include "snapshot/ui_state.h"
+#include "snapshot/world_util.h"
 
 #if defined(LLM_BRAIN_TEST_HOOKS)
 #include "test/facts_dump.h"
@@ -57,35 +56,6 @@ constexpr uint32_t kStatsIntervalMs = 60000;
 // snapshot that is no longer the newest can still be resolved: well above an
 // urgent wake-up on a busy GPU (p95 3.8 s, docs/results.md).
 constexpr base::TimeDelta kOptionHistory = base::Seconds(30);
-
-uint8_t ControlMask(const Player* bot) {
-  uint8_t mask = 0;
-  if (bot->HasUnitState(UNIT_STATE_STUNNED) ||
-      bot->HasUnitFlag(UNIT_FLAG_STUNNED)) {
-    mask |= 1u << 0;
-  }
-  if (bot->HasUnitState(UNIT_STATE_FLEEING | UNIT_STATE_CONFUSED) ||
-      bot->HasUnitFlag(UNIT_FLAG_FLEEING | UNIT_FLAG_CONFUSED)) {
-    mask |= 1u << 1;
-  }
-  if (bot->HasUnitState(UNIT_STATE_CHARMED | UNIT_STATE_POSSESSED) ||
-      !bot->GetCharmerGUID().IsEmpty()) {
-    mask |= 1u << 2;
-  }
-  if (bot->HasUnitFlag(UNIT_FLAG_SILENCED)) {
-    mask |= 1u << 3;
-  }
-  if (bot->HasUnitState(UNIT_STATE_ROOT)) {
-    mask |= 1u << 4;
-  }
-  if (bot->HasUnitFlag(UNIT_FLAG_PACIFIED)) {
-    mask |= 1u << 5;
-  }
-  if (bot->HasUnitFlag(UNIT_FLAG_DISARMED)) {
-    mask |= 1u << 6;
-  }
-  return mask;
-}
 
 // How the body is doing with `target` (`used`: the object/NPC was already
 // clicked or the destination reached, at once or on arrival): still at it,

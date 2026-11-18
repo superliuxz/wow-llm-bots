@@ -343,10 +343,13 @@
   "options": [
     {
       "text": "Attack Mottled Boar",
-      "guid": "0xF130000C1A000278"
+      "guid": "0xF130000C1A000278",
+      "kind": "ATTACK",
+      "name": "Mottled Boar"
     },
     {
-      "text": "Keep doing what I'm doing"
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
     }
   ]
 }

@@ -91,11 +91,10 @@ included: use the public header and mark it `// IWYU pragma: keep`.
 
 **Before showing C++ for review or committing it, `tools/wlb check` must pass:**
 clang-format, snapshot/trigger validation, default build + unit tests, include check, and screen
-goldens (~5 s). Run `tools/wlb check sanitizers` (or `tools/wlb check --sanitizers`) to also build
-and test under ASan+UBSan, TSan and MSan (MSan links an instrumented libc++ built by
-`tools/wlb setup msan`) before committing C++ changes that touch memory, lifetimes, threading or
-syscalls. New code comes with unit tests. A syscall MSan has no interceptor for gets
-`MSAN_UNPOISON` (`base/compiler_specific.h`), never a suppression.
+goldens (~5 s). **Do not run sanitizers locally** (`tools/wlb check sanitizers` / `--sanitizers`:
+ASan+UBSan, TSan, MSan)—leave those to CI unless explicitly asked. New code comes with unit
+tests. A syscall MSan has no interceptor for gets `MSAN_UNPOISON` (`base/compiler_specific.h`),
+never a suppression.
 
 **Four test targets**, each its own `tools/wlb test <target>`: `unit` (gtest suites, no game or
 GPU; the `unit_tests` CMake target; `tools/wlb check sanitizers` runs it under every sanitizer), `e2e` (live

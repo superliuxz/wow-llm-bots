@@ -135,15 +135,21 @@ void AddUnitAndOption(pb::Snapshot* snap,
     pb::Option& opt = snap->options.emplace_back();
     opt.text = "Loot " + name;
     opt.guid = guid;
+    opt.kind = pb::Option::LOOT;
+    opt.name = name;
   } else if (!dead) {
     pb::Option& opt = snap->options.emplace_back();
     opt.text = "Attack " + name;
     opt.guid = guid;
+    opt.kind = pb::Option::ATTACK;
+    opt.name = name;
   }
 }
 
 void AddKeep(pb::Snapshot* snap) {
-  snap->options.emplace_back().text = "Keep doing what I'm doing";
+  pb::Option& opt = snap->options.emplace_back();
+  opt.text = "Keep doing what I'm doing";
+  opt.kind = pb::Option::KEEP;
 }
 
 TEST(BotLoopTest, EarlyDispatchesDoLineCarriesGoalAndExecutesAttackThenLoot) {

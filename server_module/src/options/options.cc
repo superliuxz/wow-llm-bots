@@ -203,6 +203,30 @@ std::string TargetedOptionText(const OptionTarget& target) {
   return "?";
 }
 
+pb::Option::Kind ToProtoKind(OptionTarget::Kind kind) {
+  switch (kind) {
+    case OptionTarget::Kind::kAttack:
+      return pb::Option::ATTACK;
+    case OptionTarget::Kind::kLoot:
+      return pb::Option::LOOT;
+    case OptionTarget::Kind::kGather:
+      return pb::Option::GATHER;
+    case OptionTarget::Kind::kUse:
+      return pb::Option::USE;
+    case OptionTarget::Kind::kTalk:
+      return pb::Option::TALK;
+    case OptionTarget::Kind::kRest:
+      return pb::Option::REST;
+    case OptionTarget::Kind::kExplore:
+      return pb::Option::EXPLORE;
+    case OptionTarget::Kind::kGoTo:
+      return pb::Option::GO_TO;
+    case OptionTarget::Kind::kKeep:
+      return pb::Option::KEEP;
+  }
+  return pb::Option::KIND_UNSPECIFIED;
+}
+
 }  // namespace
 
 std::string_view OptionKindName(OptionTarget::Kind kind) {
@@ -257,6 +281,8 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
     pb::Option& option = snapshot->options.emplace_back();
     option.text = TargetedOptionText(target);
     option.guid = target.guid;
+    option.kind = ToProtoKind(target.kind);
+    option.name = target.name;
   }
 
   if (alive && !self.in_combat) {
@@ -268,6 +294,7 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       targets.push_back({OptionTarget::Kind::kRest, "", text});
       pb::Option& option = snapshot->options.emplace_back();
       option.text = text;
+      option.kind = pb::Option::REST;
     }
 
     size_t explore_count = 0;
@@ -288,6 +315,9 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       pb::Option& option = snapshot->options.emplace_back();
       option.text = text;
       option.guid = spot.id;
+      option.kind = pb::Option::EXPLORE;
+      option.name =
+          !spot.label.empty() ? spot.label : std::string(DirText(spot.dir));
     }
 
     for (const OptionFacts::Place& place : facts.places) {
@@ -300,12 +330,15 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       pb::Option& option = snapshot->options.emplace_back();
       option.text = text;
       option.guid = place.id;
+      option.kind = pb::Option::GO_TO;
+      option.name = place.name;
     }
   }
 
   targets.push_back({OptionTarget::Kind::kKeep, "", ""});
   pb::Option& keep = snapshot->options.emplace_back();
   keep.text = "Keep doing what I'm doing";
+  keep.kind = pb::Option::KEEP;
   return targets;
 }
 

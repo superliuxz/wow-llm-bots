@@ -220,6 +220,21 @@ struct glz::meta<wlb::snapshot::Blank::Kind> {
 };
 
 template <>
+struct glz::meta<wlb::snapshot::Option::Kind> {
+  using enum wlb::snapshot::Option::Kind;
+  static constexpr auto value = glz::enumerate(KIND_UNSPECIFIED,
+                                               ATTACK,
+                                               TALK,
+                                               LOOT,
+                                               GATHER,
+                                               USE,
+                                               REST,
+                                               EXPLORE,
+                                               GO_TO,
+                                               KEEP);
+};
+
+template <>
 struct glz::meta<wlb::snapshot::Relative::Height> {
   using enum wlb::snapshot::Relative::Height;
   static constexpr auto value =
@@ -1279,6 +1294,10 @@ std::string_view EnumName(Self::LifeState value) {
 }
 
 std::string_view EnumName(Self::Drunk value) {
+  return glz::get_enum_name(value);
+}
+
+std::string_view EnumName(Option::Kind value) {
   return glz::get_enum_name(value);
 }
 
