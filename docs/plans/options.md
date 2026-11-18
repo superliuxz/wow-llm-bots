@@ -1,4 +1,4 @@
-# Plan: Talk, Rest, Explore, Go to (2026-11-17, built and verified)
+# Plan: Talk, Rest, Explore, Go to (2026-11-17, built)
 
 The four options the 13 `planned` eval cases need (TODO "Next" #1). For each: what it targets,
 when it is offered, and what carries it out. Like the existing options, the module offers facts
@@ -26,6 +26,9 @@ when it is offered, and what carries it out. Like the existing options, the modu
   Done by `done_command_id` when the module has finished the talk on arrival, with an `info`
   summary line (or the natural `quest_accepted` / `quest_complete` / `money_changed` events) so
   the brain sees what happened and does not immediately re-pick `Talk to <name>`.
+- **Not in Talk:** binding the hearthstone at an innkeeper changes where home is, a judgment:
+  a later option of its own (through the bind spell, not `SetHomebind`). Training goes through
+  the server's `Trainer::TeachSpell`.
 - **Later:** open the window (`ext.interaction`) and let the brain pick each quest, reward,
   spell and item. "Accept all, learn everything affordable, sell greys" is the neutral default
   until that panel exists; note that learning everything can spend all the bot's money.
@@ -80,14 +83,19 @@ when it is offered, and what carries it out. Like the existing options, the modu
   ~70 yd along the `mmap` path on world ticks whenever the bot gets within ~10 yd of the current
   step, refreshing playerbots' `last movement` so its own movement doesn't override ours. We
   **don't** use `MoveFarTo` itself: when stuck for 90 s it teleports the bot (a cheat). If path
-  generation fails or progress stalls (less than 5 yd closer in 10 s), we abort the walk and send `"stuck"` as a refused-step
-  `error` event (carrying the step's `command_id`), and the brain decides what to do. Entering
-  combat or dying cancels the pending walk. Arrival within 10 yd sets `done_command_id`.
+  generation fails or progress stalls (the bot moved less than 5 yd in 10 s: a detour that leads
+  away from the goal for a while still counts as moving), we abort the walk and send `"stuck"` as
+  a refused-step `error` event (carrying the step's `command_id`), and the brain decides what to
+  do. Combat, death or another map end the walk with `walk interrupted: ...`, so the harness
+  doesn't wait for its backstop. The path is asked for again at most once a second. Arrival
+  within 10 yd sets `done_command_id`.
   Steps are needed anyway: AzerothCore's `PathGenerator` cuts a path at
   `MAX_POINT_PATH_LENGTH` (74 points), so one `MovePoint` can't cover 900 yd.
 - **World-thread cost:** one path per ~70 yd step per walking bot runs on the world thread,
-  which our module must never block. Likely cheap; add a `perf` case (N bots walking at once,
-  path time per tick) with a baseline before relying on it.
+  which our module must never block: `perf walk` (50 bots walking at once). The facts: the
+  world's spots and hubs are indexed once at startup (`WorldPlaces::Build`, 76 ms); a bot's spots
+  and places are recomputed after 20 yd or 10 s and only re-measured in between
+  (`SnapshotBuilder`); quest map points are cached per quest (`perf snapshots`).
 - **Distinct `ScreenOption::name` for multiple `Explore` / `Go to` lines:** in
   `harness/src/screen_renderer.cc`, `ParseModuleOption` currently sets `ScreenOption::name = ""`
   for `kExplore` and `kTown`. Because `PlanRunner::MatchOptionInScreen` matches queued steps by
@@ -117,12 +125,17 @@ Options must be computed by the same code in the live module and in `fixture_opt
 eval tests something live bots never see (review 2026-11-17, finding 5). So `AddOptions` reads
 only the snapshot plus an `OptionFacts` struct: the game data a player knows but the snapshot
 doesn't show (NPC flags by guid, food and drink in the bags, nearby places with their services,
-learned gathering skills). Each `Explore` spot and `Go to` place in `OptionFacts` carries its
+learned gathering skills). Spot and place ids come from their position (`spot:<map>:<x>:<y>`,
+`place:<map>:<x>:<y>`), never from a name two places can share. Each `Explore` spot and `Go to` place in `OptionFacts` carries its
 destination `pb::Vec3 pos`, which `AddOptions` copies onto `OptionTarget::pos` so
 `OptionExecutor` walks straight to that coordinate without re-querying `sTravelMgr`. The live
-module builds `OptionFacts` from the game; capturing a fixture saves it next to the snapshot
-(`<case>.facts.json`), and `fixture_options` reads it from there. No guessing from subtitles or
-power type; the old hand-made fixtures are re-captured (Decided 4).
+module builds `OptionFacts` from the game. For the eval fixtures the test server runs the same
+code on each saved snapshot (`LlmBrain.TestFactsQueries`, `test/facts_dump.cc`;
+`tools/snapshot/add_fixture_options.py --capture`) and writes `<case>.facts.json`, which
+`fixture_options` reads. What a hand-built scene's snapshot doesn't show (team, food and drink,
+gathering skills) is stated in the case's `scene` (defaults: Horde, the starting kit's bread and
+water, no gathering skill); NPC flags come from the creature entry in each unit's guid. The
+walkable-ray Explore fallback needs a live bot, so the dump skips it.
 
 ## Decided (2026-11-17)
 

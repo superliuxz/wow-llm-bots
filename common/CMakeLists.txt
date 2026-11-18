@@ -106,6 +106,8 @@ add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/config/config_parsing_unittest.cc"
   "${WLB_MODULE_SRC}/options/options.cc"
   "${WLB_MODULE_SRC}/options/options_unittest.cc"
+  "${WLB_MODULE_SRC}/options/position_facts.cc"
+  "${WLB_MODULE_SRC}/options/position_facts_unittest.cc"
   "${WLB_MODULE_SRC}/snapshot/perception.cc"
   "${WLB_MODULE_SRC}/snapshot/perception_unittest.cc"
   "${WLB_MODULE_SRC}/snapshot/snapshot_schedule.cc"

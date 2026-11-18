@@ -93,6 +93,12 @@ LlmBrain.DeadStrategies = "-follow"
 #        Description: Directory of the fixture files (server_module/testdata/characters).
 #        Default:     ""
 #
+#    LlmBrain.TestFactsQueries
+#        Description: TEST ONLY. A file of eval-fixture queries; at startup the module
+#                     writes each fixture's OptionFacts with its own code
+#                     (tools/snapshot/add_fixture_options.py --capture). Test builds only.
+#        Default:     ""
+#
 #    LlmBrain.TestAccount
 #        Description: Account that holds the test characters.
 #        Default:     "WLBTEST"
@@ -100,3 +106,4 @@ LlmBrain.DeadStrategies = "-follow"
 LlmBrain.TestFixtures = ""
 LlmBrain.FixtureDir = ""
 LlmBrain.TestAccount = "WLBTEST"
+LlmBrain.TestFactsQueries = ""

@@ -27,15 +27,19 @@ struct PendingWalk {
   wlb::snapshot::Vec3 dest;
   wlb::snapshot::Vec3 step_dest;
   bool has_step = false;
-  float best_dist_yd = 0.0f;
+  // Where the bot was when it last made progress (moved 5 yd), and when.
+  wlb::snapshot::Vec3 progress_pos;
   base::TimeTicks last_progress_at;
+  // When the path was last worked out: at most once a second.
+  base::TimeTicks last_path_at;
 };
 
 struct WalkStepResult {
   bool arrived = false;
-  bool cancelled = false;
-  // Non-empty ("stuck") when pathing fails or progress stalls (< 5 yd closer in
-  // 10 s).
+  // Non-empty when the walk ends without arriving: "stuck" (no path, or the
+  // bot moved less than 5 yd in 10 s; a detour that leads away for a while
+  // still counts as moving), or "walk interrupted: ..." (combat, death, another
+  // map), so the harness hears of it instead of waiting for its timeout.
   std::string error;
   base::TimeDelta path_time;
 };

@@ -40,7 +40,7 @@
     "nearby": {
       "units": [
         {
-          "guid": "0xF130000C0000900D",
+          "guid": "0xF13000000000900D",
           "name": "Mottled Boar",
           "rel": {
             "dist_yd": 3.0,
@@ -65,7 +65,7 @@
           "target": "Loadn"
         },
         {
-          "guid": "0xF130000C0000900E",
+          "guid": "0xF13000000000900E",
           "name": "Scorpid Worker",
           "rel": {
             "dist_yd": 8.0,
@@ -114,11 +114,11 @@
   "options": [
     {
       "text": "Attack Mottled Boar",
-      "guid": "0xF130000C0000900D"
+      "guid": "0xF13000000000900D"
     },
     {
       "text": "Attack Scorpid Worker",
-      "guid": "0xF130000C0000900E"
+      "guid": "0xF13000000000900E"
     },
     {
       "text": "Keep doing what I'm doing"

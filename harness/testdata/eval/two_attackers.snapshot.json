@@ -40,7 +40,7 @@
     "nearby": {
       "units": [
         {
-          "guid": "0xF130000C00009008",
+          "guid": "0xF130000000009008",
           "name": "Vile Familiar",
           "rel": {
             "dist_yd": 3.0,
@@ -65,7 +65,7 @@
           "target": "Loadn"
         },
         {
-          "guid": "0xF130000C00009009",
+          "guid": "0xF130000000009009",
           "name": "Burning Blade Imp",
           "rel": {
             "dist_yd": 5.0,
@@ -117,11 +117,11 @@
   "options": [
     {
       "text": "Attack Vile Familiar",
-      "guid": "0xF130000C00009008"
+      "guid": "0xF130000000009008"
     },
     {
       "text": "Attack Burning Blade Imp",
-      "guid": "0xF130000C00009009"
+      "guid": "0xF130000000009009"
     },
     {
       "text": "Keep doing what I'm doing"

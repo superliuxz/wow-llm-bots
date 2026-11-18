@@ -1,41 +1,54 @@
 {
   "has_food": true,
   "has_drink": true,
+  "spots": [
+    {
+      "id": "spot:1:-252:-4227",
+      "dir": "S",
+      "dist_yd": 1887.8632,
+      "label": "scorpids, level 3",
+      "pos": {
+        "x": -252.066,
+        "y": -4227.22,
+        "z": 62.8692
+      }
+    }
+  ],
   "places": [
     {
-      "id": "place:valley_of_strength",
-      "name": "Valley of Strength",
-      "services": "innkeeper, vendor, repair",
+      "id": "place:1:1634:-4439",
+      "name": "Orgrimmar",
+      "services": "innkeeper, vendor, repair, flight master",
       "dir": "E",
-      "dist_yd": 67.8,
+      "dist_yd": 67.728386,
       "pos": {
-        "x": 1633.9,
-        "y": -4439.4,
-        "z": 15.5
+        "x": 1633.99,
+        "y": -4439.37,
+        "z": 15.7597
       }
     },
     {
-      "id": "place:valley_of_spirits",
-      "name": "Valley of Spirits",
-      "services": "priest trainer",
+      "id": "place:1:1467:-4230",
+      "name": "Orgrimmar",
+      "services": "vendor, repair, priest trainer",
       "dir": "SW",
-      "dist_yd": 262.8,
+      "dist_yd": 217.60577,
       "pos": {
-        "x": 1453.8,
-        "y": -4178.9,
-        "z": 44.1
+        "x": 1466.88,
+        "y": -4229.92,
+        "z": 43.286
       }
     },
     {
-      "id": "place:The_drag",
-      "name": "The Drag",
-      "services": "vendor, repair, flight master",
-      "dir": "NW",
-      "dist_yd": 80.3,
+      "id": "place:1:1178:-4464",
+      "name": "Durotar Graveyard",
+      "services": "graveyard",
+      "dir": "S",
+      "dist_yd": 461.17212,
       "pos": {
-        "x": 1676.2,
-        "y": -4315.3,
-        "z": 61.6
+        "x": 1177.78,
+        "y": -4464.24,
+        "z": 21.3539
       }
     }
   ]

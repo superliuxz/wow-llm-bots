@@ -30,6 +30,10 @@ struct Config {
   // (character, fixture file path) pairs, on `test_account`.
   std::string test_account = "WLBTEST";
   std::vector<std::pair<std::string, std::string>> test_fixtures;
+  // Test only: a query file for test/facts_dump.cc; the eval fixtures'
+  // OptionFacts are written at startup (tools/snapshot/add_fixture_options.py
+  // --capture).
+  std::string test_facts_queries;
 };
 
 // Reads LlmBrain.* options from the loaded worldserver config.

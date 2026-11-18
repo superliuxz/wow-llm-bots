@@ -27,10 +27,12 @@ ME = "@me"
 
 def unit(name, level=2, dist=10.0, *, reaction="HOSTILE", color="YELLOW", kind="NPC",
          classification="NORMAL", hp=100.0, looks_like="beast", targeting_me=False, dead=False,
-         lootable=False, tapped_by=None, state="IDLE", quest_marker=None):
-    """One named unit near the bot (on its nameplate)."""
+         lootable=False, tapped_by=None, state="IDLE", quest_marker=None, entry=0):
+    """One named unit near the bot (on its nameplate). `entry` is the creature template the
+    guid names (0: none), so the module's facts dump (add_fixture_options.py --capture) finds the
+    real NPC's flags."""
     u = {
-        "guid": f"0xF130000C{next(_guids):08X}",
+        "guid": f"0xF130{entry:06X}{next(_guids):06X}",
         "name": name,
         "rel": {"dist_yd": float(dist), "dir": DIRS[int(dist) % 8], "height": "LEVEL",
                 "in_los": True},
@@ -264,7 +266,8 @@ CASES = [
      "talks to Kaltunk first", "logged in",
      snapshot(FIELD, [boar(dist=8),
                       unit("Kaltunk", 20, dist=25, reaction="FRIENDLY", color="SKULL_LEVEL",
-                           looks_like="humanoid", quest_marker="QUEST_AVAILABLE")]),
+                           looks_like="humanoid", quest_marker="QUEST_AVAILABLE",
+                           entry=10176)]),
      {"first_texts": ["Talk to Kaltunk"]}),
     ("bags_full", "bags full, a boar 9 yd away", "heads to town instead of killing for loot",
      "plan done", snapshot(FIELD, [boar(dist=9)], bags_free=0),

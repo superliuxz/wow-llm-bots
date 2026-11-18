@@ -3,62 +3,62 @@
   "has_drink": true,
   "spots": [
     {
-      "id": "spot:1:-698:-4302",
-      "dir": "SE",
-      "dist_yd": 34.0,
+      "id": "spot:1:-715:-4286",
+      "dir": "S",
+      "dist_yd": 37.59,
       "label": "boars, level 1-2",
       "pos": {
-        "x": -698.0,
-        "y": -4302.3,
-        "z": 43.5
+        "x": -714.713,
+        "y": -4286.47,
+        "z": 43.2732
       }
     },
     {
-      "id": "spot:1:-692:-4348",
-      "dir": "E",
-      "dist_yd": 75.7,
-      "label": "boars, scorpids, level 1-3",
-      "pos": {
-        "x": -691.7,
-        "y": -4348.4,
-        "z": 46.3
-      }
-    },
-    {
-      "id": "spot:1:-743:-4196",
+      "id": "spot:1:-747:-4181",
       "dir": "SW",
-      "dist_yd": 100.4,
+      "dist_yd": 115.1516,
       "label": "boars, level 1-2",
       "pos": {
-        "x": -742.9,
-        "y": -4196.4,
-        "z": 34.5
+        "x": -747.256,
+        "y": -4181.42,
+        "z": 30.2402
+      }
+    },
+    {
+      "id": "spot:1:-616:-4418",
+      "dir": "NE",
+      "dist_yd": 157.03929,
+      "label": "boars, level 1-2",
+      "pos": {
+        "x": -616.183,
+        "y": -4417.66,
+        "z": 45.7873
       }
     }
   ],
   "places": [
     {
-      "id": "place:the_den",
-      "name": "The Den",
-      "services": "vendor, repair, priest trainer, graveyard",
-      "dir": "NW",
-      "dist_yd": 94.8,
+      "id": "place:1:-1050:-3665",
+      "name": "Ratchet",
+      "services": "innkeeper, vendor, repair, flight master",
+      "dir": "SW",
+      "dist_yd": 713.2965,
       "pos": {
-        "x": -617.4,
-        "y": -4202.4,
-        "z": 38.3
+        "x": -1050.04,
+        "y": -3664.8,
+        "z": 23.9684
       }
     },
     {
-      "id": "place:razor_hill",
-      "name": "Razor Hill",
-      "services": "innkeeper, vendor, repair, priest trainer",
-      "dir": "N",
-      "dist_yd": 1100.3,
+      "id": "place:1:-627:-4230",
+      "name": "Valley of Trials",
+      "services": "vendor, repair, priest trainer, graveyard",
+      "dir": "NW",
+      "dist_yd": 68.58937,
       "pos": {
-        "x": 340.4,
-        "y": -4686.3,
-        "z": 16.5
+        "x": -627.102,
+        "y": -4229.93,
+        "z": 42.0365
       }
     }
   ]

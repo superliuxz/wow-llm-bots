@@ -11,6 +11,17 @@ Last updated 2026-11-17.
 
 Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `indicators`) and all option kinds (`Gather`, `Use`, `Talk`, `Rest`, `Explore`, `Go to`) are done; remaining #4 open panels are in `## Next, in order` ahead of #5.
 
+- **#4 Module: more things a bot can do: mostly done (2026-11-17).** Options `Gather` (hidden
+  without the skill), `Use`, `Talk to <name>` (quests in and out, training through
+  `Trainer::TeachSpell`, sell greys, repair; an `info` summary), `Rest (...)`,
+  `Explore <dir>, <dist> yd (<mobs, levels>)` and `Go to <place> (<services>)` (stepped mmap
+  walk), from `OptionFacts` built by the same code live and for eval fixtures
+  (`docs/plans/options.md`). Live: `e2e walk` (Explore arrives, done signal); Talk and Rest have
+  no live case yet (Loose ends). **Left:** open panels (`bags`, `character`, `quest_log`,
+  `docs/specs/snapshot.md`).
+
+## Next, in order` ahead of #5.
+
 - **#4 Module: more things a bot can do: mostly done (2026-11-17).** Built, unit-tested, and
   verified live: `Gather <herb/ore>` (gated by `required_skill` vs. learned skill),
   `Use <chest, quest object, door, portal>`, `Talk to <name>` (turns in completed quests via
@@ -59,6 +70,8 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
 
 ## Later
 
+- **Bind hearthstone** at an innkeeper as an option of its own (the brain's choice, through the
+  bind spell), not part of Talk (`docs/plans/options.md`).
 - **GPU `--backend-sampling` or thin `libllama` runner** (`docs/plans/latency.md`, Tier 3 #8):
   unconstrained + `ParsePlan` with 1 grammar retry (`+16%` capacity), or a `wlb_net` Unix-socket
   `libllama` daemon combining ~15-token ID masks on structured fields with GPU sampling on free text
@@ -83,13 +96,17 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
 - A bot once wrote `tell <its own name>:` (Gatda, Gemma 4, live 2026-11-17); the module refuses
   it. Likely cause, the RULES.md example `tell Gatda:`, is fixed (review finding 8); watch whether
   it recurs.
-- **Eval on live options (2026-11-17, Gemma 4):** **48/50 (96%)** across all 50 cases on live
-  `fixture_options` (`<case>.facts.json`), including **13/13** on the formerly-`planned` cases
-  (`Talk`, `Rest`, `Explore`, `Go to`), **7/7** on whispers, and `red_mob_nearby` now walking
-  away via `Explore`. The remaining 2 misses (`ignore_critter`, `skip_tapped_mob`) have a dead
-  unlootable boar line (`- Mottled Boar: ... dead`) next to option `1. Attack ...` that the
-  model tries to loot. The Qwen3.6 shootout was not re-run on the new set; the model choice was
-  made on the old one.
+- **Eval on live options (2026-11-17, Gemma 4):** 46/50 with facts captured by the module
+  (`add_fixture_options.py --capture`) and RULES.md stating facts, not the eval's answers. (The
+  48/50 before was on Python-made facts with "always Talk first" / "bags full: go to a vendor"
+  written into RULES.md.) Misses: `quest_giver_and_boar` and `bags_full` explore instead of
+  talking or selling (a judgment the prompt no longer dictates); `ignore_critter` and
+  `skip_tapped_mob` attack (a dead boar line next to `1. Attack`). The Qwen3.6 shootout was not
+  re-run on this set.
+- **Talk and Rest have no e2e case**: only unit tests of the options and `e2e walk`. Needs a test
+  scene with an NPC within 20 yd and a hurt bot (a fixture character, `config/tests/`).
+- `perf snapshots` passes but its baselines predate `OptionFacts` (build p50 94 us vs 83 us,
+  tick max 340 us vs 280): re-baseline with `wlb test perf --update-baselines --verify`.
 - Dead bots: only Keep is offered while dead, refused steps back off (2-30 s), and coming back
   to life wakes the brain ("alive again"). Release spirit / run to corpse are not options yet
   (the body's playerbots dead strategy handles it).
@@ -123,6 +140,14 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
   fails with "never offered". Passed every run so far.
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-17: review of 528f479 (the options), all 11 points: eval facts written by the module
+  (`test/facts_dump.cc`, `LlmBrain.TestFactsQueries`, `add_fixture_options.py --capture`);
+  `WorldPlaces` indexed at startup (76 ms), a bot's spots/places recomputed after 20 yd or 10 s,
+  quest map points cached; training through `Trainer::TeachSpell`; no hearthstone binding in
+  Talk; repair no-ops removed; place ids from position; the stall rule counts movement and paths
+  are asked for at most once a second; interrupted walks report an error; RULES.md states facts;
+  `e2e walk`; `position_facts` unit tests.
 
 - 2026-11-17: completed `#1`–`#3` and `#4` snapshot fill (`docs/phase2-results.md`,
   `docs/plans/latency.md`): `snapshot_builder.cc` + `nearby_builder.{h,cc}` fill `ext.target`,

@@ -343,24 +343,24 @@
       "guid": "0xF13000173F000281"
     },
     {
-      "text": "Explore NW, 51 yd (boars, scorpids, level 1-3)",
-      "guid": "spot:1:-699:-4148"
+      "text": "Explore E, 104 yd (boars, level 1-2)",
+      "guid": "spot:1:-715:-4286"
     },
     {
-      "text": "Explore E, 123 yd (boars, level 1-2)",
-      "guid": "spot:1:-698:-4302"
+      "text": "Explore NE, 240 yd (boars, level 1-2)",
+      "guid": "spot:1:-517:-4287"
     },
     {
-      "text": "Explore N, 235 yd (boars, scorpids, level 1-3)",
-      "guid": "spot:1:-504:-4158"
+      "text": "Explore N, 249 yd (boars, level 1-2)",
+      "guid": "spot:1:-487:-4214"
     },
     {
-      "text": "Go to The Den (vendor, repair, priest trainer, graveyard), 118 yd N",
-      "guid": "place:the_den"
+      "text": "Go to Ratchet (innkeeper, vendor, repair, flight master), 609 yd SW",
+      "guid": "place:1:-1050:-3665"
     },
     {
-      "text": "Go to Razor Hill (innkeeper, vendor, repair, priest trainer), 1185 yd NE",
-      "guid": "place:razor_hill"
+      "text": "Go to Valley of Trials (vendor, repair, priest trainer, graveyard), 116 yd NE",
+      "guid": "place:1:-627:-4230"
     },
     {
       "text": "Keep doing what I'm doing"

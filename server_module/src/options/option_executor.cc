@@ -80,6 +80,7 @@ constexpr float kWalkStepAdvanceYd = 10.0f;
 constexpr float kWalkArrivalYd = 10.0f;
 constexpr float kWalkStallProgressYd = 5.0f;
 constexpr base::TimeDelta kWalkStallTimeout = base::Seconds(10);
+constexpr base::TimeDelta kWalkRepathEvery = base::Seconds(1);
 
 }  // namespace
 
@@ -401,10 +402,11 @@ TalkResult TalkToNpcNow(Player* bot, Creature* npc) {
     }
   }
 
-  // 2. Trainer: learn affordable spells.
+  // 2. Trainer: learn what the bot can afford, through the server's own
+  // trainer code (Trainer::TeachSpell: the checks, the cost, the packets),
+  // as a click on "Train" would.
   if (npc->HasNpcFlag(UNIT_NPC_FLAG_TRAINER | UNIT_NPC_FLAG_TRAINER_CLASS)) {
-    if (const Trainer::Trainer* trainer =
-            sObjectMgr->GetTrainer(npc->GetEntry())) {
+    if (Trainer::Trainer* trainer = sObjectMgr->GetTrainer(npc->GetEntry())) {
       if (!trainer->IsTrainerValidForPlayer(bot)) {
         if (done.empty()) {
           return {npc->GetName() + " cannot train your class", ""};
@@ -414,32 +416,26 @@ TalkResult TalkToNpcNow(Player* bot, Creature* npc) {
         std::vector<std::string> learned;
         bool too_expensive = false;
         for (const Trainer::Spell& sp : trainer->GetSpells()) {
-          const Trainer::Spell* tsp = trainer->GetSpell(sp.SpellId);
-          if (!tsp ||
-              !PlayerbotFactory::IsTrainerSpellAllowedForBot(bot, trainer,
-                                                             tsp) ||
-              !trainer->CanTeachSpell(bot, tsp)) {
+          if (!PlayerbotFactory::IsTrainerSpellAllowedForBot(bot, trainer,
+                                                             &sp) ||
+              !trainer->CanTeachSpell(bot, &sp)) {
             continue;
           }
-          const SpellInfo* info = sSpellMgr->GetSpellInfo(tsp->SpellId);
-          if (!info) {
-            continue;
-          }
-          const uint32_t cost =
-              static_cast<uint32_t>(std::floor(tsp->MoneyCost * discount));
-          if (bot->GetMoney() < cost) {
+          const int32_t cost = static_cast<int32_t>(sp.MoneyCost * discount);
+          if (!bot->HasEnoughMoney(cost)) {
             too_expensive = true;
             continue;
           }
-          bot->ModifyMoney(-static_cast<int32_t>(cost));
-          if (info->HasEffect(SPELL_EFFECT_LEARN_SPELL)) {
-            bot->CastSpell(bot, info->Id, true);
-          } else {
-            bot->learnSpell(info->Id, false);
+          const uint32_t money_before = bot->GetMoney();
+          trainer->TeachSpell(npc, bot, sp.SpellId);
+          if (bot->GetMoney() == money_before && cost > 0) {
+            continue;  // Refused.
           }
-          const char* sname = info->SpellName[sWorld->GetDefaultDbcLocale()];
-          if (sname && *sname) {
-            learned.push_back(sname);
+          if (const SpellInfo* info = sSpellMgr->GetSpellInfo(sp.SpellId)) {
+            const char* name = info->SpellName[sWorld->GetDefaultDbcLocale()];
+            if (name && *name) {
+              learned.push_back(name);
+            }
           }
         }
         if (!learned.empty()) {
@@ -453,7 +449,9 @@ TalkResult TalkToNpcNow(Player* bot, Creature* npc) {
     }
   }
 
-  // 3. Vendor / repair: sell grey items, repair equipment.
+  // 3. Vendor / repair: sell grey items, repair equipment. Binding the
+  // hearthstone at an innkeeper is the brain's choice, not part of Talk
+  // (docs/plans/options.md, "Later").
   if (npc->HasNpcFlag(UNIT_NPC_FLAG_VENDOR)) {
     const uint32_t sold = SellGreyItemsTo(bot, npc->GetGUID());
     if (sold > 0) {
@@ -462,23 +460,12 @@ TalkResult TalkToNpcNow(Player* bot, Creature* npc) {
     }
   }
   if (npc->HasNpcFlag(UNIT_NPC_FLAG_REPAIR)) {
-    const float discount = bot->GetReputationPriceDiscount(npc);
-    uint32_t cost =
-        bot->DurabilityRepair(EQUIPMENT_SLOT_MAINHAND, true, discount, false);
-    cost += bot->DurabilityRepair(EQUIPMENT_SLOT_RANGED, true, discount, false);
-    cost +=
-        bot->DurabilityRepair(EQUIPMENT_SLOT_OFFHAND, true, discount, false);
-    cost += bot->DurabilityRepairAll(true, discount, false);
-    if (cost > 0) {
+    // Equipped items and bags; items the bot can't afford stay broken (and
+    // cost nothing).
+    if (bot->DurabilityRepairAll(true, bot->GetReputationPriceDiscount(npc),
+                                 false) > 0) {
       done.push_back("repaired gear");
     }
-  }
-  if (npc->HasNpcFlag(UNIT_NPC_FLAG_INNKEEPER) &&
-      bot->m_homebindAreaId != bot->GetAreaId()) {
-    WorldLocation loc(bot->GetMapId(), bot->GetPositionX(), bot->GetPositionY(),
-                      bot->GetPositionZ(), bot->GetOrientation());
-    bot->SetHomebind(loc, bot->GetAreaId());
-    done.push_back("bound hearthstone");
   }
 
   ai->ResetActionDuration();
@@ -545,9 +532,17 @@ bool IsRestInProgress(Player* bot, bool* had_food_drink_aura) {
 WalkStepResult TickLongWalk(Player* bot,
                             base::TimeTicks now,
                             PendingWalk* walk) {
-  if (!walk || !bot->IsAlive() || bot->IsInCombat() ||
-      bot->GetMapId() != walk->map_id) {
-    return {.cancelled = true};
+  if (!walk) {
+    return {.error = "walk interrupted"};
+  }
+  if (!bot->IsAlive()) {
+    return {.error = "walk interrupted: you died"};
+  }
+  if (bot->IsInCombat()) {
+    return {.error = "walk interrupted: you are in combat"};
+  }
+  if (bot->GetMapId() != walk->map_id) {
+    return {.error = "walk interrupted: you changed map"};
   }
   const float dist_to_dest =
       bot->GetExactDist(walk->dest.x, walk->dest.y, walk->dest.z);
@@ -559,8 +554,10 @@ WalkStepResult TickLongWalk(Player* bot,
     return {.arrived = true};
   }
 
-  if (dist_to_dest + kWalkStallProgressYd <= walk->best_dist_yd) {
-    walk->best_dist_yd = dist_to_dest;
+  if (bot->GetExactDist(walk->progress_pos.x, walk->progress_pos.y,
+                        walk->progress_pos.z) >= kWalkStallProgressYd) {
+    walk->progress_pos = {bot->GetPositionX(), bot->GetPositionY(),
+                          bot->GetPositionZ()};
     walk->last_progress_at = now;
   } else if (now - walk->last_progress_at >= kWalkStallTimeout) {
     ClearLastMovement(bot);
@@ -577,6 +574,11 @@ WalkStepResult TickLongWalk(Player* bot,
       return {};
     }
   }
+  // Not moving yet (or pushed off the path): ask again, but not every tick.
+  if (walk->has_step && now - walk->last_path_at < kWalkRepathEvery) {
+    return {};
+  }
+  walk->last_path_at = now;
 
   const base::TimeTicks path_start = base::TimeTicks::Now();
   constexpr uint32_t kTypeOk =
@@ -739,9 +741,10 @@ ExecuteResult ExecuteWalkOption(Player* bot,
       .dest = *target.pos,
       .step_dest = {},
       .has_step = false,
-      .best_dist_yd =
-          bot->GetExactDist(target.pos->x, target.pos->y, target.pos->z),
+      .progress_pos = {bot->GetPositionX(), bot->GetPositionY(),
+                       bot->GetPositionZ()},
       .last_progress_at = now,
+      .last_path_at = {},
   };
   const WalkStepResult step = TickLongWalk(bot, now, walk);
   if (!step.error.empty()) {

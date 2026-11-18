@@ -3,62 +3,62 @@
   "has_drink": true,
   "spots": [
     {
-      "id": "spot:1:-500:-4299",
-      "dir": "E",
-      "dist_yd": 29.7,
-      "label": "boars, level 1-2",
-      "pos": {
-        "x": -500.4,
-        "y": -4299.3,
-        "z": 41.7
-      }
-    },
-    {
-      "id": "spot:1:-483:-4198",
+      "id": "spot:1:-487:-4214",
       "dir": "W",
-      "dist_yd": 74.4,
+      "dist_yd": 58.06805,
       "label": "boars, level 1-2",
       "pos": {
-        "x": -482.6,
-        "y": -4198.1,
-        "z": 50.6
+        "x": -487.311,
+        "y": -4213.77,
+        "z": 50.2931
       }
     },
     {
-      "id": "spot:1:-618:-4400",
-      "dir": "SE",
-      "dist_yd": 174.6,
+      "id": "spot:1:-454:-4223",
+      "dir": "NW",
+      "dist_yd": 67.4118,
       "label": "boars, level 1-2",
       "pos": {
-        "x": -617.7,
-        "y": -4400.2,
-        "z": 44.5
+        "x": -453.709,
+        "y": -4222.64,
+        "z": 49.1813
+      }
+    },
+    {
+      "id": "spot:1:-450:-4314",
+      "dir": "NE",
+      "dist_yd": 68.19117,
+      "label": "boars, level 1-2",
+      "pos": {
+        "x": -449.98,
+        "y": -4314.05,
+        "z": 45.9259
       }
     }
   ],
   "places": [
     {
-      "id": "place:the_den",
-      "name": "The Den",
-      "services": "vendor, repair, priest trainer, graveyard",
+      "id": "place:1:-1050:-3665",
+      "name": "Ratchet",
+      "services": "innkeeper, vendor, repair, flight master",
       "dir": "SW",
-      "dist_yd": 133.9,
+      "dist_yd": 816.65735,
       "pos": {
-        "x": -617.4,
-        "y": -4202.4,
-        "z": 38.3
+        "x": -1050.04,
+        "y": -3664.8,
+        "z": 23.9684
       }
     },
     {
-      "id": "place:razor_hill",
-      "name": "Razor Hill",
-      "services": "innkeeper, vendor, repair, priest trainer",
-      "dir": "NE",
-      "dist_yd": 940.0,
+      "id": "place:1:-560:-4217",
+      "name": "Valley of Trials",
+      "services": "vendor, priest trainer, graveyard",
+      "dir": "SW",
+      "dist_yd": 78.54968,
       "pos": {
-        "x": 340.4,
-        "y": -4686.3,
-        "z": 16.5
+        "x": -560.125,
+        "y": -4217.2,
+        "z": 41.6737
       }
     }
   ]

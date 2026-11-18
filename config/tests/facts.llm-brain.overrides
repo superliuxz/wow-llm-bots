@@ -1,0 +1,9 @@
+# Facts capture for the eval fixtures (tools/snapshot/add_fixture_options.py --capture): at
+# startup the module writes each eval snapshot's OptionFacts with its own code
+# (test/facts_dump.cc). One test bot so the stack comes up as usual; it does nothing. Needs a test
+# build (tools/wlb build server --test).
+LlmBrain.Bots = "Loada"
+LlmBrain.TestFixtures = "Loada=priest-l1-boars.pdump"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.NonCombatStrategies = "-follow,-grind,-new rpg"
+LlmBrain.TestFactsQueries = "@ROOT@/var/test-facts/queries.tsv"

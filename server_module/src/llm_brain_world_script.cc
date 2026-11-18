@@ -32,6 +32,7 @@
 #include "chat/speak.h"
 #include "config/llm_brain_config.h"
 #include "options/option_executor.h"
+#include "options/option_facts.h"
 #include "options/options.h"
 #include "proto/snapshot.h"
 #include "snapshot/nearby_builder.h"
@@ -40,6 +41,7 @@
 #include "snapshot/snapshot_stats.h"
 
 #if defined(LLM_BRAIN_TEST_HOOKS)
+#include "test/facts_dump.h"
 #include "test/fixture_loader.h"
 #endif
 
@@ -177,6 +179,15 @@ class LlmBrainWorldScript : public WorldScript {
       return;
     }
     inbox_->SetBots(config_.bots);
+    // Before any bot logs in: a zone lookup per creature spawn takes seconds,
+    // which must never happen on a snapshot.
+    const base::TimeTicks places_start = base::TimeTicks::Now();
+    world_places_ = WorldPlaces::Build();
+    LOG_INFO(
+        "module",
+        "mod-llm-brain: indexed {} grind spots and {} service hubs in {} ms",
+        world_places_->buckets().size(), world_places_->hubs().size(),
+        (base::TimeTicks::Now() - places_start).InMilliseconds());
 #if defined(LLM_BRAIN_TEST_HOOKS)
     if (!config_.test_fixtures.empty()) {
       std::vector<FixtureLoader::Fixture> fixtures;
@@ -187,10 +198,11 @@ class LlmBrainWorldScript : public WorldScript {
                                                         std::move(fixtures));
     }
 #else
-    if (!config_.test_fixtures.empty()) {
+    if (!config_.test_fixtures.empty() || !config_.test_facts_queries.empty()) {
       LOG_ERROR("module",
-                "mod-llm-brain: LlmBrain.TestFixtures ignored: production "
-                "build (test builds: tools/wlb build server --test)");
+                "mod-llm-brain: LlmBrain.TestFixtures / TestFactsQueries "
+                "ignored: production build (test builds: tools/wlb build "
+                "server --test)");
     }
 #endif
     bot_manager_ = std::make_unique<BotManager>(
@@ -220,6 +232,18 @@ class LlmBrainWorldScript : public WorldScript {
       fixture_loader_.reset();
     }
     const bool fixtures_pending = fixture_loader_ != nullptr;
+    // After startup (playerbots' travel caches are built by then).
+    if (world_places_ && !config_.test_facts_queries.empty()) {
+      std::string error;
+      const int written =
+          DumpFixtureFacts(*world_places_, config_.test_facts_queries, &error);
+      if (written < 0) {
+        LOG_ERROR("module", "mod-llm-brain: facts dump failed: {}", error);
+      } else {
+        LOG_INFO("module", "mod-llm-brain: facts dumped n={}", written);
+      }
+      config_.test_facts_queries.clear();
+    }
 #else
     const bool fixtures_pending = false;
 #endif
@@ -567,11 +591,6 @@ class LlmBrainWorldScript : public WorldScript {
       if (!step.path_time.is_zero()) {
         path_times_.push_back(step.path_time);
       }
-      if (step.cancelled) {
-        state.active_option.reset();
-        schedule_->SetActiveTargetPending(index, false);
-        return;
-      }
       if (!step.error.empty()) {
         LOG_INFO("module", "mod-llm-brain: {} walk to {} failed: {}", name,
                  state.active_option->name, step.error);
@@ -664,8 +683,8 @@ class LlmBrainWorldScript : public WorldScript {
     snapshot.monotonic_us = (start - base::TimeTicks()).InMicroseconds();
     snapshot.done_command_id = state.done_command_id;
     OptionFacts facts;
-    const NearbyBuilder::Stats nearby =
-        state.builder->Build(bot, &snapshot, &facts);
+    const NearbyBuilder::Stats nearby = state.builder->Build(
+        bot, &snapshot, &facts, world_places_.get(), start);
     state.history.Add(snapshot.seq, start, AddOptions(&snapshot, facts));
     std::string bytes = wlb::snapshot::WriteBeve(message);
     stats_.Add({base::TimeTicks::Now() - start, bytes.size(), nearby.units,
@@ -679,6 +698,8 @@ class LlmBrainWorldScript : public WorldScript {
 #if defined(LLM_BRAIN_TEST_HOOKS)
   std::unique_ptr<FixtureLoader> fixture_loader_;
 #endif
+  // Grind spots and service hubs, indexed at startup (Explore / Go to).
+  std::unique_ptr<WorldPlaces> world_places_;
   std::unique_ptr<BotManager> bot_manager_;
   std::unique_ptr<BrainBridge> bridge_;
   std::unique_ptr<SnapshotSchedule> schedule_;

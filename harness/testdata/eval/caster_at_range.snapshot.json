@@ -40,7 +40,7 @@
     "nearby": {
       "units": [
         {
-          "guid": "0xF130000C0000900C",
+          "guid": "0xF13000000000900C",
           "name": "Vile Familiar",
           "rel": {
             "dist_yd": 25.0,
@@ -92,7 +92,7 @@
   "options": [
     {
       "text": "Attack Vile Familiar",
-      "guid": "0xF130000C0000900C"
+      "guid": "0xF13000000000900C"
     },
     {
       "text": "Keep doing what I'm doing"

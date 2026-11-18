@@ -929,20 +929,24 @@
       "guid": "0xF130000E7B000225"
     },
     {
-      "text": "Explore SW, 107 yd (boars, scorpids, level 1-3)",
-      "guid": "spot:1:-699:-4148"
+      "text": "Explore SW, 92 yd (scorpids, boars, level 1-3)",
+      "guid": "spot:1:-680:-4146"
     },
     {
-      "text": "Explore W, 107 yd (scorpids, level 3)",
-      "guid": "spot:1:-595:-4098"
+      "text": "Explore N, 104 yd (scorpids, level 3)",
+      "guid": "spot:1:-511:-4174"
     },
     {
-      "text": "Explore N, 113 yd (boars, scorpids, level 1-3)",
-      "guid": "spot:1:-504:-4158"
+      "text": "Explore W, 121 yd (scorpids, level 3)",
+      "guid": "spot:1:-611:-4084"
     },
     {
-      "text": "Go to Razor Hill (innkeeper, vendor, repair, priest trainer), 1064 yd NE",
-      "guid": "place:razor_hill"
+      "text": "Go to Ratchet (innkeeper, vendor, repair, flight master), 695 yd SW",
+      "guid": "place:1:-1050:-3665"
+    },
+    {
+      "text": "Go to Valley of Trials (vendor, repair, priest trainer, graveyard), 38 yd SE",
+      "guid": "place:1:-627:-4230"
     },
     {
       "text": "Keep doing what I'm doing"

@@ -2299,16 +2299,20 @@
   },
   "options": [
     {
-      "text": "Go to Valley of Strength (innkeeper, vendor, repair), 68 yd E",
-      "guid": "place:valley_of_strength"
+      "text": "Explore S, 1888 yd (scorpids, level 3)",
+      "guid": "spot:1:-252:-4227"
     },
     {
-      "text": "Go to Valley of Spirits (priest trainer), 263 yd SW",
-      "guid": "place:valley_of_spirits"
+      "text": "Go to Orgrimmar (innkeeper, vendor, repair, flight master), 68 yd E",
+      "guid": "place:1:1634:-4439"
     },
     {
-      "text": "Go to The Drag (vendor, repair, flight master), 80 yd NW",
-      "guid": "place:The_drag"
+      "text": "Go to Orgrimmar (vendor, repair, priest trainer), 218 yd SW",
+      "guid": "place:1:1467:-4230"
+    },
+    {
+      "text": "Go to Durotar Graveyard (graveyard), 461 yd S",
+      "guid": "place:1:1178:-4464"
     },
     {
       "text": "Keep doing what I'm doing"

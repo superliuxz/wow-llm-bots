@@ -40,7 +40,7 @@
     "nearby": {
       "units": [
         {
-          "guid": "0xF130000C0000900B",
+          "guid": "0xF13000000000900B",
           "name": "Scorpid Worker",
           "rel": {
             "dist_yd": 3.0,
@@ -92,7 +92,7 @@
   "options": [
     {
       "text": "Attack Scorpid Worker",
-      "guid": "0xF130000C0000900B"
+      "guid": "0xF13000000000900B"
     },
     {
       "text": "Keep doing what I'm doing"

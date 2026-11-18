@@ -39,7 +39,7 @@
     "nearby": {
       "units": [
         {
-          "guid": "0xF130000C00009014",
+          "guid": "0xF130000000009014",
           "name": "Mottled Boar",
           "rel": {
             "dist_yd": 9.0,
@@ -88,27 +88,27 @@
   "options": [
     {
       "text": "Attack Mottled Boar",
-      "guid": "0xF130000C00009014"
+      "guid": "0xF130000000009014"
     },
     {
-      "text": "Explore NE, 76 yd (boars, level 1-2)",
-      "guid": "spot:1:-500:-4299"
+      "text": "Explore NW, 414 yd (crocolisks, level 9-11)",
+      "guid": "spot:1:-345:-3892"
     },
     {
-      "text": "Explore NW, 85 yd (boars, level 1-2)",
-      "guid": "spot:1:-483:-4198"
+      "text": "Explore E, 429 yd (boars, scorpids, level 5-7)",
+      "guid": "spot:1:-681:-4655"
     },
     {
-      "text": "Explore E, 157 yd (boars, level 1-2)",
-      "guid": "spot:1:-552:-4403"
+      "text": "Explore SE, 462 yd (kolkar drudge, kolkar outrunner, level 6-8)",
+      "guid": "spot:1:-945:-4481"
     },
     {
-      "text": "Go to The Den (vendor, repair, priest trainer, graveyard), 89 yd SW",
-      "guid": "place:the_den"
+      "text": "Go to Ratchet (innkeeper, vendor, repair, flight master), 771 yd SW",
+      "guid": "place:1:-1050:-3665"
     },
     {
-      "text": "Go to Razor Hill (innkeeper, vendor, repair, priest trainer), 992 yd NE",
-      "guid": "place:razor_hill"
+      "text": "Go to Valley of Trials (vendor, priest trainer, graveyard), 45 yd W",
+      "guid": "place:1:-560:-4217"
     },
     {
       "text": "Keep doing what I'm doing"

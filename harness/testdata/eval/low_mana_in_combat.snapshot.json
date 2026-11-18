@@ -40,7 +40,7 @@
     "nearby": {
       "units": [
         {
-          "guid": "0xF130000C0000900A",
+          "guid": "0xF13000000000900A",
           "name": "Mottled Boar",
           "rel": {
             "dist_yd": 4.0,
@@ -92,7 +92,7 @@
   "options": [
     {
       "text": "Attack Mottled Boar",
-      "guid": "0xF130000C0000900A"
+      "guid": "0xF13000000000900A"
     },
     {
       "text": "Keep doing what I'm doing"

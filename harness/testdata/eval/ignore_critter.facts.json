@@ -3,62 +3,62 @@
   "has_drink": true,
   "spots": [
     {
-      "id": "spot:1:-699:-4148",
-      "dir": "NW",
-      "dist_yd": 51.0,
-      "label": "boars, scorpids, level 1-3",
-      "pos": {
-        "x": -698.7,
-        "y": -4148.2,
-        "z": 33.2
-      }
-    },
-    {
-      "id": "spot:1:-698:-4302",
+      "id": "spot:1:-715:-4286",
       "dir": "E",
-      "dist_yd": 122.8,
+      "dist_yd": 103.58881,
       "label": "boars, level 1-2",
       "pos": {
-        "x": -698.0,
-        "y": -4302.3,
-        "z": 43.5
+        "x": -714.713,
+        "y": -4286.47,
+        "z": 43.2732
       }
     },
     {
-      "id": "spot:1:-504:-4158",
-      "dir": "N",
-      "dist_yd": 234.7,
-      "label": "boars, scorpids, level 1-3",
+      "id": "spot:1:-517:-4287",
+      "dir": "NE",
+      "dist_yd": 239.54836,
+      "label": "boars, level 1-2",
       "pos": {
-        "x": -503.6,
-        "y": -4158.5,
-        "z": 69.9
+        "x": -516.59,
+        "y": -4286.81,
+        "z": 40.0634
+      }
+    },
+    {
+      "id": "spot:1:-487:-4214",
+      "dir": "N",
+      "dist_yd": 248.52052,
+      "label": "boars, level 1-2",
+      "pos": {
+        "x": -487.311,
+        "y": -4213.77,
+        "z": 50.2931
       }
     }
   ],
   "places": [
     {
-      "id": "place:the_den",
-      "name": "The Den",
-      "services": "vendor, repair, priest trainer, graveyard",
-      "dir": "N",
-      "dist_yd": 117.5,
+      "id": "place:1:-1050:-3665",
+      "name": "Ratchet",
+      "services": "innkeeper, vendor, repair, flight master",
+      "dir": "SW",
+      "dist_yd": 609.37177,
       "pos": {
-        "x": -617.4,
-        "y": -4202.4,
-        "z": 38.3
+        "x": -1050.04,
+        "y": -3664.8,
+        "z": 23.9684
       }
     },
     {
-      "id": "place:razor_hill",
-      "name": "Razor Hill",
-      "services": "innkeeper, vendor, repair, priest trainer",
+      "id": "place:1:-627:-4230",
+      "name": "Valley of Trials",
+      "services": "vendor, repair, priest trainer, graveyard",
       "dir": "NE",
-      "dist_yd": 1185.0,
+      "dist_yd": 115.83834,
       "pos": {
-        "x": 340.4,
-        "y": -4686.3,
-        "z": 16.5
+        "x": -627.102,
+        "y": -4229.93,
+        "z": 42.0365
       }
     }
   ]

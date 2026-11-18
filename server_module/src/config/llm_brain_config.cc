@@ -37,6 +37,8 @@ Config LoadConfig() {
   config.test_fixtures = ParseFixtures(
       sConfigMgr->GetOption<std::string>("LlmBrain.TestFixtures", ""),
       sConfigMgr->GetOption<std::string>("LlmBrain.FixtureDir", ""));
+  config.test_facts_queries =
+      sConfigMgr->GetOption<std::string>("LlmBrain.TestFactsQueries", "");
   return config;
 }
 

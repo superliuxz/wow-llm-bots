@@ -193,8 +193,11 @@ def play_script(seconds, words, echo=print, tail_s=None):
             hp = me.get("health", 0)
             hp_max = me.get("health_max", 0)
             in_combat = bool(me.get("in_combat", False))
+            pos = snap.get("base", {}).get("where", {}).get("position", {})
             out["snapshots"].append({"t": t, "seq": seq, "health": hp,
-                                     "in_combat": in_combat, "options": options})
+                                     "in_combat": in_combat, "options": options,
+                                     "done_command_id": snap.get("done_command_id", 0),
+                                     "pos": [pos.get("x", 0.0), pos.get("y", 0.0)]})
             echo(f"<< {bot} #{seq}: health {hp}/{hp_max}"
                  f"{', in combat' if in_combat else ''}; options: "
                  + "; ".join(f"{i}. {t_}" for i, t_ in enumerate(options, 1)))
