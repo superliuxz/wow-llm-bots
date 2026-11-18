@@ -16,8 +16,8 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
   `Trainer::TeachSpell`, sell greys, repair; an `info` summary), `Rest (...)`,
   `Explore <dir>, <dist> yd (<mobs, levels>)` and `Go to <place> (<services>)` (stepped mmap
   walk), from `OptionFacts` built by the same code live and for eval fixtures
-  (`docs/plans/options.md`). Live: `e2e walk` (Explore arrives, done signal); Talk and Rest have
-  no live case yet (Loose ends). **Left:** open panels (`bags`, `character`, `quest_log`,
+  (`docs/plans/options.md`). Live: `e2e talk` (accepts Kaltunk's quest), `e2e rest` (sits to
+  full after a fight), `e2e walk` (Explore arrives, done signal). **Left:** open panels (`bags`, `character`, `quest_log`,
   `docs/specs/snapshot.md`).
 
 ## Next, in order
@@ -86,10 +86,6 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
   talking or selling (a judgment the prompt no longer dictates); `ignore_critter` and
   `skip_tapped_mob` attack (a dead boar line next to `1. Attack`). The Qwen3.6 shootout was not
   re-run on this set.
-- **Talk and Rest have no e2e case**: only unit tests of the options and `e2e walk`. Needs a test
-  scene with an NPC within 20 yd and a hurt bot (a fixture character, `config/tests/`).
-- `perf snapshots` passes but its baselines predate `OptionFacts` (build p50 94 us vs 83 us,
-  tick max 340 us vs 280): re-baseline with `wlb test perf --update-baselines --verify`.
 - Dead bots: only Keep is offered while dead, refused steps back off (2-30 s), and coming back
   to life wakes the brain ("alive again"). Release spirit / run to corpse are not options yet
   (the body's playerbots dead strategy handles it).
@@ -123,6 +119,13 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
   fails with "never offered". Passed every run so far.
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-17: `e2e talk` and `e2e rest` (`config/tests/talk`); Rest fixes they found: the body
+  stood a sitting bot up at once (playerbots' next AI check: `SetNextCheckDelay` while sitting
+  without food, no `ResetActionDuration` after eat / drink), and a second item used in the same
+  tick was refused, so a bot ate and never drank (`ContinueRest`, once a second). `perf
+  snapshots` and `perf walk` re-baselined with OptionFacts (build p50 94 us, walk path p50
+  ~250 us).
 
 - 2026-11-17: review of 528f479 (the options), all 11 points: eval facts written by the module
   (`test/facts_dump.cc`, `LlmBrain.TestFactsQueries`, `add_fixture_options.py --capture`);

@@ -42,7 +42,10 @@ when it is offered, and what carries it out. Like the existing options, the modu
   has in its bags: `Rest (eat and drink)`, `Rest (eat)`, `Rest (drink)`, or `Rest (sit, no food)`
   (food and drink in bags come from `OptionFacts`, not guessed from the power type).
 - **Carried out:** playerbots' `EatAction` / `DrinkAction` (best food and water in the bags), or
-  sitting when there is none. `Playerbots.BotCheats` stays empty (no free food). Tracked in
+  sitting when there is none. While the step runs, the module starts the other of eat / drink
+  once the first is going (`ContinueRest`, once a second: a second item used in the same tick is
+  refused), and holds the body's AI while it sits without food (playerbots stands a sitting bot
+  up at its next check). `Playerbots.BotCheats` stays empty (no free food). Tracked in
   `OptionExecutor` as a pending action and marked `done_command_id` when health and mana reach
   full (or the food/drink aura expires, or combat starts).
 

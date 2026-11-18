@@ -550,6 +550,13 @@ class LlmBrainWorldScript : public WorldScript {
       return;
     }
     const OptionTarget::Kind kind = state.active_option->kind;
+    if (kind == OptionTarget::Kind::kRest) {
+      if (now >= state.next_rest_try) {
+        state.next_rest_try = now + base::Seconds(1);
+        ContinueRest(bot);
+      }
+      return;
+    }
     if (kind == OptionTarget::Kind::kUse ||
         kind == OptionTarget::Kind::kGather) {
       GameObject* go = ObjectAccessor::GetGameObject(
@@ -720,6 +727,8 @@ class LlmBrainWorldScript : public WorldScript {
     bool object_used = false;
     // Rest: whether a food or drink aura was observed while resting.
     bool had_food_drink_aura = false;
+    // Rest: when ContinueRest may next try the other of eat / drink.
+    base::TimeTicks next_rest_try;
     // Explore / GoTo: active stepped mmap walk state.
     PendingWalk walk;
   };

@@ -16,23 +16,23 @@
     "valid[50bots_30s]": 1.0
   },
   "snapshots": {
-    "age_max_ms": 0.4433690309524536,
-    "age_p50_ms": 0.1226080060005188,
-    "age_p95_ms": 0.18612396717071533,
-    "build_max_us": 264,
-    "build_p50_us": 83,
-    "build_p99_us": 175,
-    "build_total_ms_per_min": 264,
-    "built_to_socket_p99_us": 31,
+    "age_max_ms": 0.4289470314979553,
+    "age_p50_ms": 0.13474798202514648,
+    "age_p95_ms": 0.20292997360229492,
+    "build_max_us": 346,
+    "build_p50_us": 94,
+    "build_p99_us": 200,
+    "build_total_ms_per_min": 297,
+    "built_to_socket_p99_us": 30,
     "bunching_10ms": 2,
     "dropped": 0,
     "frames_per_s": 50.007407407407406,
-    "snapshot_bytes_avg": 23206,
+    "snapshot_bytes_avg": 24067,
     "tick_max_snapshots": 1,
-    "tick_max_us": 280
+    "tick_max_us": 367
   },
   "walk": {
-    "path_max_us": 705,
-    "path_p50_us": 5
+    "path_max_us": 629,
+    "path_p50_us": 269
   }
 }

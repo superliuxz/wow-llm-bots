@@ -99,6 +99,11 @@ TalkResult TalkToNpcNow(Player* bot, Creature* npc);
 // Whether the bot currently has a food or drink regeneration aura.
 bool HasFoodOrDrinkAura(Player* bot);
 
+// While a Rest step runs: starts eating or drinking when that one isn't going
+// yet (a second item used in the same tick as the first is refused, so a bot
+// would eat and never drink). Call at most about once a second.
+void ContinueRest(Player* bot);
+
 // Whether a Rest option is still in progress: alive, out of combat, below full
 // HP or mana, and either holding a food/drink aura or sitting.
 bool IsRestInProgress(Player* bot, bool* had_food_drink_aura);

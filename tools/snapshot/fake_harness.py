@@ -194,7 +194,9 @@ def play_script(seconds, words, echo=print, tail_s=None):
             hp_max = me.get("health_max", 0)
             in_combat = bool(me.get("in_combat", False))
             pos = snap.get("base", {}).get("where", {}).get("position", {})
-            out["snapshots"].append({"t": t, "seq": seq, "health": hp,
+            out["snapshots"].append({"t": t, "seq": seq, "health": hp, "health_max": hp_max,
+                                     "power": me.get("power", 0),
+                                     "power_max": me.get("power_max", 0),
                                      "in_combat": in_combat, "options": options,
                                      "done_command_id": snap.get("done_command_id", 0),
                                      "pos": [pos.get("x", 0.0), pos.get("y", 0.0)]})

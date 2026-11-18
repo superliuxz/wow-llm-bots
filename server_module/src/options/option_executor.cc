@@ -74,6 +74,8 @@ namespace {
 constexpr uint32_t kSpellCategoryFood = 11;
 constexpr uint32_t kSpellCategoryDrink = 59;
 constexpr uint32_t kSpellGraccusFruitcake = 25990;
+// How long a Rest without food holds the body's AI, renewed every second.
+constexpr uint32_t kSitHoldMs = 1500;
 
 constexpr float kWalkStepYd = 70.0f;
 constexpr float kWalkStepAdvanceYd = 10.0f;
@@ -475,25 +477,53 @@ TalkResult TalkToNpcNow(Player* bot, Creature* npc) {
   return {"", summary};
 }
 
-bool HasFoodOrDrinkAura(Player* bot) {
-  if (bot->HasAura(kSpellGraccusFruitcake)) {
-    return true;
-  }
+namespace {
+
+// Whether the bot has an eating (kSpellCategoryFood) or drinking
+// (kSpellCategoryDrink) aura.
+bool HasCategoryAura(Player* bot, uint32_t category) {
   for (const auto& [spell_id, app] : bot->GetAppliedAuras()) {
     (void)spell_id;
     if (!app || !app->GetBase()) {
       continue;
     }
-    const SpellInfo* info = app->GetBase()->GetSpellInfo();
-    if (!info) {
-      continue;
-    }
-    const uint32_t cat = info->GetCategory();
-    if (cat == kSpellCategoryFood || cat == kSpellCategoryDrink) {
+    if (const SpellInfo* info = app->GetBase()->GetSpellInfo();
+        info && info->GetCategory() == category) {
       return true;
     }
   }
   return false;
+}
+
+}  // namespace
+
+bool HasFoodOrDrinkAura(Player* bot) {
+  return bot->HasAura(kSpellGraccusFruitcake) ||
+         HasCategoryAura(bot, kSpellCategoryFood) ||
+         HasCategoryAura(bot, kSpellCategoryDrink);
+}
+
+void ContinueRest(Player* bot) {
+  PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
+  if (!ai || bot->IsNonMeleeSpellCast(false) || bot->IsInCombat()) {
+    return;
+  }
+  if (!bot->IsFullHealth() && !HasCategoryAura(bot, kSpellCategoryFood) &&
+      !bot->HasAura(kSpellGraccusFruitcake)) {
+    ai->DoSpecificAction("eat", Event(), /*silent=*/true);
+  }
+  if (bot->GetMaxPower(POWER_MANA) > 0 &&
+      bot->GetPower(POWER_MANA) < bot->GetMaxPower(POWER_MANA) &&
+      !HasCategoryAura(bot, kSpellCategoryDrink)) {
+    ai->DoSpecificAction("drink", Event(), /*silent=*/true);
+  }
+  // Sitting with nothing to eat: keep the body from standing up (it does when
+  // its next check is due), a little longer than the caller's 1 s period. Its
+  // AI waits meanwhile, as a player sitting down reacts a moment late.
+  if (bot->getStandState() == UNIT_STAND_STATE_SIT &&
+      !HasFoodOrDrinkAura(bot)) {
+    ai->SetNextCheckDelay(kSitHoldMs);
+  }
 }
 
 bool IsRestInProgress(Player* bot, bool* had_food_drink_aura) {
@@ -725,10 +755,13 @@ ExecuteResult ExecuteRestOption(Player* bot, PlayerbotAI* ai) {
       bot->GetPower(POWER_MANA) < bot->GetMaxPower(POWER_MANA)) {
     used_consumable |= ai->DoSpecificAction("drink", Event(), /*silent=*/true);
   }
+  // No ResetActionDuration here: eat / drink set the body's action duration
+  // to the meal, and playerbots stands a sitting bot up as soon as its next
+  // check is due (PlayerbotAI::UpdateAIInternal), which would end the meal.
   if (!used_consumable) {
     bot->SetStandState(UNIT_STAND_STATE_SIT);
+    ai->SetNextCheckDelay(kSitHoldMs);
   }
-  ai->ResetActionDuration();
   return {};
 }
 
