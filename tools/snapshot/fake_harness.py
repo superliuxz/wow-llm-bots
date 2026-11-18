@@ -283,18 +283,69 @@ def whisper_script(seconds, sender, receiver, text, reply, echo=print):
     return out
 
 
+def run_walk(seconds, as_json=False):
+    """Sends Go to / Explore choices to every bot that connects, cycling destinations every 15 s
+    so all bots walk in ~70 yd mmap steps concurrently across the measurement window."""
+    s = connect()
+    reader = FrameReader()
+    sent = 0
+    snapshots = 0
+    last_sent = {}
+    choice_idx = collections.defaultdict(int)
+    end = time.time() + seconds
+    while time.time() < end:
+        try:
+            chunk = s.recv(1 << 20)
+        except socket.timeout:
+            continue
+        if not chunk:
+            break
+        now = time.time()
+        for payload in reader.feed(chunk):
+            message = wire_py.decode_module_message(payload)
+            if not message or "snapshot" not in message:
+                continue
+            snapshots += 1
+            snap = message["snapshot"]
+            bot = snap.get("bot", "")
+            seq = snap.get("seq", 0)
+            if now - last_sent.get(bot, 0.0) < 15.0:
+                continue
+            options = snap.get("options", [])
+            walk_opts = [i for i, o in enumerate(options, 1)
+                         if o.get("text", "").startswith(("Go to ", "Explore "))]
+            if not walk_opts:
+                continue
+            pick = walk_opts[choice_idx[bot] % len(walk_opts)]
+            choice_idx[bot] += 1
+            sent += 1
+            last_sent[bot] = now
+            cmd = {"bot": bot, "command_id": sent,
+                   "choose": {"option": pick, "seq": seq}}
+            send_frame(s, wire_py.encode_command(cmd))
+    s.close()
+    out = {"bots_walked": len(last_sent), "commands_sent": sent, "snapshots": snapshots}
+    if as_json:
+        print(json.dumps(out))
+    else:
+        print(f"walked {out['bots_walked']} bots ({sent} walk commands, {snapshots} snapshots)")
+
+
 def main():
     args = sys.argv[1:]
     stats = "--stats" in args
+    walk = "--walk" in args
     choose = "--choose" in args
     whisper = "--whisper" in args
     as_json = "--json" in args
     tail = next((float(a.split("=", 1)[1]) for a in args if a.startswith("--tail=")), None)
-    args = [a for a in args if a not in ("--stats", "--choose", "--whisper", "--json")
+    args = [a for a in args if a not in ("--stats", "--walk", "--choose", "--whisper", "--json")
             and not a.startswith("--tail=")]
     seconds = float(args[0]) if args else (10.0 if stats else 5.0)
     if stats:
         run_stats(seconds, as_json)
+    elif walk:
+        run_walk(seconds, as_json)
     elif whisper:
         echo = (lambda line: print(line, file=sys.stderr)) if as_json else print
         transcript = whisper_script(seconds, *args[1:5], echo=echo)

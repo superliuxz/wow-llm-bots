@@ -2660,6 +2660,53 @@ struct ModuleMessage {
   bool operator==(const ModuleMessage&) const = default;
 };
 
+struct OptionFacts_Npc {
+  std::string guid;
+  uint32_t npc_flags = 0;
+
+  bool operator==(const OptionFacts_Npc&) const = default;
+};
+
+struct OptionFacts_Spot {
+  std::string id;
+  Direction dir = Direction::DIRECTION_UNSPECIFIED;
+  float dist_yd = 0.0f;
+  std::string label;
+  Vec3 pos;
+
+  bool operator==(const OptionFacts_Spot&) const = default;
+};
+
+struct OptionFacts_Place {
+  std::string id;
+  std::string name;
+  std::string services;
+  Direction dir = Direction::DIRECTION_UNSPECIFIED;
+  float dist_yd = 0.0f;
+  Vec3 pos;
+
+  bool operator==(const OptionFacts_Place&) const = default;
+};
+
+// Game data a player knows (or sees on hover) that the glance snapshot does
+// not carry, read by llm_brain::AddOptions both live and in fixture_options
+// (<case>.facts.json).
+struct OptionFacts {
+  using Npc = OptionFacts_Npc;
+  using Spot = OptionFacts_Spot;
+  using Place = OptionFacts_Place;
+
+  std::vector<OptionFacts_Npc> npcs;
+  bool has_food = false;
+  bool has_drink = false;
+  uint32_t herbalism_skill = 0;
+  uint32_t mining_skill = 0;
+  std::vector<OptionFacts_Spot> spots;
+  std::vector<OptionFacts_Place> places;
+
+  bool operator==(const OptionFacts&) const = default;
+};
+
 template <typename T>
 Box<T>::~Box() = default;
 
@@ -2752,6 +2799,11 @@ bool ReadJson(std::string_view json,
 std::string WriteJson(const Command& cmd, bool pretty = false);
 bool ReadJson(std::string_view json,
               Command* out,
+              std::string* error = nullptr);
+
+std::string WriteJson(const OptionFacts& facts, bool pretty = false);
+bool ReadJson(std::string_view json,
+              OptionFacts* out,
               std::string* error = nullptr);
 
 // Checks visibility rules (HOVER fields only inside base.tooltips, OPEN panels

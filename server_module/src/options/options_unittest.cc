@@ -82,18 +82,29 @@ TEST(OptionsTest, OnlyKeepWhileDead) {
   for (pb::Self::LifeState state : {pb::Self::DEAD_BODY, pb::Self::GHOST}) {
     pb::Snapshot snapshot;
     snapshot.base.self.state = state;
+    snapshot.base.self.health = 0;
+    snapshot.base.self.health_max = 100;
     AddUnit(&snapshot, "Scorpid Worker", "0x1", 5);
     pb::Unit* corpse = AddUnit(&snapshot, "Vile Familiar", "0x2", 3);
     corpse->dead = true;
     corpse->lootable = true;
+    OptionFacts facts;
+    facts.spots.push_back(
+        {"spot:1:0:0", pb::N, 200.0f, "boars, level 1-2", {0, 0, 0}});
+    facts.places.push_back({"place:razor_hill",
+                            "Razor Hill",
+                            "innkeeper",
+                            pb::N,
+                            900.0f,
+                            {0, 0, 0}});
     EXPECT_EQ(Texts(snapshot).size(), 0u);
-    AddOptions(&snapshot);
+    AddOptions(&snapshot, facts);
     EXPECT_EQ(Texts(snapshot),
               std::vector<std::string>{"Keep doing what I'm doing"});
   }
 }
 
-TEST(OptionsTest, NeutralCanBeAttackedFriendlyCannot) {
+TEST(OptionsTest, NeutralCanBeAttackedFriendlyWithoutServiceOrQuestCannot) {
   pb::Snapshot snapshot;
   AddUnit(&snapshot, "Mottled Boar", "0x1", 10, pb::Unit::NEUTRAL);
   AddUnit(&snapshot, "Gornek", "0x2", 5, pb::Unit::FRIENDLY);
@@ -101,6 +112,125 @@ TEST(OptionsTest, NeutralCanBeAttackedFriendlyCannot) {
   EXPECT_EQ(Texts(snapshot),
             (std::vector<std::string>{"Attack Mottled Boar",
                                       "Keep doing what I'm doing"}));
+}
+
+TEST(OptionsTest, TalkOfferedForQuestGiversAndServiceNpcsOutOfCombat) {
+  pb::Snapshot snapshot;
+  AddUnit(&snapshot, "Kaltunk", "0x1", 6, pb::Unit::FRIENDLY)->quest_marker =
+      pb::Unit::QUEST_AVAILABLE;
+  AddUnit(&snapshot, "Gornek", "0x2", 8, pb::Unit::FRIENDLY)->quest_marker =
+      pb::Unit::QUEST_INCOMPLETE;
+  AddUnit(&snapshot, "Ken'jai", "0x3", 12, pb::Unit::FRIENDLY);
+  AddUnit(&snapshot, "Grunt", "0x4", 10, pb::Unit::FRIENDLY);
+
+  OptionFacts facts;
+  facts.npcs.push_back({"0x3", kNpcFlagTrainer | kNpcFlagTrainerClass});
+  facts.npcs.push_back({"0x4", kNpcFlagGossip});  // Plain gossip: not offered.
+
+  const std::vector<OptionTarget> targets = AddOptions(&snapshot, facts);
+  EXPECT_EQ(Texts(snapshot),
+            (std::vector<std::string>{"Talk to Kaltunk", "Talk to Ken'jai",
+                                      "Keep doing what I'm doing"}));
+  ASSERT_EQ(targets.size(), 3u);
+  EXPECT_EQ(targets[0].kind, OptionTarget::Kind::kTalk);
+  EXPECT_EQ(targets[0].guid, "0x1");
+  EXPECT_EQ(targets[1].kind, OptionTarget::Kind::kTalk);
+  EXPECT_EQ(targets[1].guid, "0x3");
+
+  // In combat: Talk is not offered.
+  snapshot.options.clear();
+  snapshot.base.self.in_combat = true;
+  AddOptions(&snapshot, facts);
+  EXPECT_EQ(Texts(snapshot),
+            std::vector<std::string>{"Keep doing what I'm doing"});
+}
+
+TEST(OptionsTest, RestReflectsFoodAndDrinkInBagsWhenBelowFullOutOfCombat) {
+  pb::Snapshot snapshot;
+  snapshot.base.self.health = 50;
+  snapshot.base.self.health_max = 100;
+  snapshot.base.self.power_type = pb::Self::MANA;
+  snapshot.base.self.power = 100;
+  snapshot.base.self.power_max = 100;
+
+  OptionFacts facts;
+  AddOptions(&snapshot, facts);
+  EXPECT_EQ(Texts(snapshot),
+            (std::vector<std::string>{"Rest (sit, no food)",
+                                      "Keep doing what I'm doing"}));
+
+  snapshot.options.clear();
+  facts.has_food = true;
+  AddOptions(&snapshot, facts);
+  EXPECT_EQ(Texts(snapshot), (std::vector<std::string>{
+                                 "Rest (eat)", "Keep doing what I'm doing"}));
+
+  snapshot.options.clear();
+  facts.has_drink = true;
+  AddOptions(&snapshot, facts);
+  EXPECT_EQ(Texts(snapshot),
+            (std::vector<std::string>{"Rest (eat and drink)",
+                                      "Keep doing what I'm doing"}));
+
+  // Mounted or in combat: Rest is not offered.
+  snapshot.options.clear();
+  snapshot.base.self.mounted = true;
+  AddOptions(&snapshot, facts);
+  EXPECT_EQ(Texts(snapshot),
+            std::vector<std::string>{"Keep doing what I'm doing"});
+}
+
+TEST(OptionsTest, ExploreAndGoToUseOptionFactsAndCarryDestinationPos) {
+  pb::Snapshot snapshot;
+  OptionFacts facts;
+  facts.spots = {
+      {"spot:1:-500:-4100",
+       pb::NE,
+       300.0f,
+       "boars, scorpids, level 3-5",
+       {-500, -4100, 40}},
+      // Same direction (NE): skipped so each option has a distinct direction.
+      {"spot:1:-450:-4050",
+       pb::NE,
+       380.0f,
+       "boars, level 4",
+       {-450, -4050, 40}},
+      {"spot:1:-700:-4300",
+       pb::S,
+       220.0f,
+       "imps, level 3-4",
+       {-700, -4300, 50}},
+  };
+  facts.places = {
+      {"place:razor_hill",
+       "Razor Hill",
+       "innkeeper, vendor, repair",
+       pb::N,
+       900.0f,
+       {315, -4700, 10}},
+  };
+
+  const std::vector<OptionTarget> targets = AddOptions(&snapshot, facts);
+  EXPECT_EQ(Texts(snapshot),
+            (std::vector<std::string>{
+                "Explore NE, 300 yd (boars, scorpids, level 3-5)",
+                "Explore S, 220 yd (imps, level 3-4)",
+                "Go to Razor Hill (innkeeper, vendor, repair), 900 yd N",
+                "Keep doing what I'm doing"}));
+  ASSERT_EQ(targets.size(), 4u);
+  EXPECT_EQ(targets[0].kind, OptionTarget::Kind::kExplore);
+  EXPECT_EQ(targets[0].guid, "spot:1:-500:-4100");
+  EXPECT_EQ(targets[0].name, "boars, scorpids, level 3-5");
+  ASSERT_TRUE(targets[0].pos.has_value());
+  EXPECT_FLOAT_EQ(targets[0].pos->x, -500.0f);
+  EXPECT_EQ(snapshot.options[0].guid, "spot:1:-500:-4100");
+
+  EXPECT_EQ(targets[2].kind, OptionTarget::Kind::kGoTo);
+  EXPECT_EQ(targets[2].guid, "place:razor_hill");
+  EXPECT_EQ(targets[2].name, "Razor Hill");
+  ASSERT_TRUE(targets[2].pos.has_value());
+  EXPECT_FLOAT_EQ(targets[2].pos->x, 315.0f);
+  EXPECT_EQ(snapshot.options[2].guid, "place:razor_hill");
 }
 
 TEST(OptionsTest, LootOnlyLootableCorpses) {
@@ -163,6 +293,58 @@ TEST(OptionsTest, GatherHerbsAndOreUseChestsAndQuestObjects) {
   EXPECT_EQ(targets[1].guid, "0xb");  // The nearer Peacebloom.
   EXPECT_EQ(snapshot.options[1].guid, "0xb");
   EXPECT_EQ(targets[3].kind, OptionTarget::Kind::kUse);
+}
+
+TEST(OptionsTest, GatherGatedByRequiredSkillAgainstLearnedSkill) {
+  pb::Snapshot snapshot;
+  AddObject(&snapshot, "Cactus Apple", "0x1", 8, pb::GameObject::HERB)
+      ->required_skill = 0;
+  AddObject(&snapshot, "Peacebloom", "0x2", 10, pb::GameObject::HERB)
+      ->required_skill = 1;
+  AddObject(&snapshot, "Kingsblood", "0x3", 12, pb::GameObject::HERB)
+      ->required_skill = 125;
+  AddObject(&snapshot, "Copper Vein", "0x4", 15, pb::GameObject::ORE)
+      ->required_skill = 1;
+
+  OptionFacts no_skills;
+  AddOptions(&snapshot, no_skills);
+  // Only Cactus Apple (required_skill = 0) is offered without Herbalism/Mining.
+  EXPECT_EQ(Texts(snapshot),
+            (std::vector<std::string>{"Gather Cactus Apple",
+                                      "Keep doing what I'm doing"}));
+
+  snapshot.options.clear();
+  OptionFacts apprentice_herbalist;
+  apprentice_herbalist.herbalism_skill = 50;
+  AddOptions(&snapshot, apprentice_herbalist);
+  EXPECT_EQ(Texts(snapshot), (std::vector<std::string>{
+                                 "Gather Cactus Apple", "Gather Peacebloom",
+                                 "Keep doing what I'm doing"}));
+}
+
+TEST(OptionsTest, OptionFactsJsonRoundTrip) {
+  OptionFacts facts;
+  facts.npcs.push_back({"0x123", kNpcFlagTrainer});
+  facts.has_food = true;
+  facts.herbalism_skill = 75;
+  facts.spots.push_back({"spot:1:-600:-4200",
+                         pb::NE,
+                         300.0f,
+                         "boars, level 1-2",
+                         {-600, -4200, 40}});
+  facts.places.push_back({"place:razor_hill",
+                          "Razor Hill",
+                          "innkeeper, vendor",
+                          pb::N,
+                          900.0f,
+                          {300, -4700, 10}});
+
+  const std::string json = pb::WriteJson(facts, /*pretty=*/true);
+  ASSERT_FALSE(json.empty());
+  OptionFacts parsed;
+  std::string err;
+  ASSERT_TRUE(pb::ReadJson(json, &parsed, &err)) << err;
+  EXPECT_EQ(parsed, facts);
 }
 
 TEST(OptionsTest, NothingForObjectsTheBodyCantUseOrClick) {

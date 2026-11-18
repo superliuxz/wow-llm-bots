@@ -475,5 +475,34 @@ TEST(ScreenRendererTest, BagSpaceShowsOnlyWhenLowOrFull) {
   EXPECT_EQ(RenderScreen(snap).text.find("bags"), std::string::npos);
 }
 
+TEST(ScreenRendererTest, ExploreAndGoToModuleOptionsExtractInvariantNames) {
+  pb::Snapshot snap = NewSnapshot();
+  pb::Option& e1 = snap.options.emplace_back();
+  e1.text = "Explore NE, 300 yd (boars, scorpids, level 3-5)";
+  e1.guid = "spot:1:-500:-4100";
+  pb::Option& e2 = snap.options.emplace_back();
+  e2.text = "Explore S, 80 yd";
+  e2.guid = "spot:1:-700:-4200";
+  pb::Option& g1 = snap.options.emplace_back();
+  g1.text = "Go to Razor Hill (innkeeper, vendor, repair), 900 yd N";
+  g1.guid = "place:razor_hill";
+  pb::Option& g2 = snap.options.emplace_back();
+  g2.text = "Go to Sen'jin Village Graveyard, 250 yd S";
+  g2.guid = "place:grave_1";
+
+  const Screen screen = RenderScreen(snap);
+  ASSERT_EQ(screen.details.size(), 4u);
+  EXPECT_EQ(screen.details[0],
+            (ScreenOption{OptionKind::kExplore, "spot:1:-500:-4100",
+                          "boars, scorpids, level 3-5"}));
+  EXPECT_EQ(screen.details[1],
+            (ScreenOption{OptionKind::kExplore, "spot:1:-700:-4200", "S"}));
+  EXPECT_EQ(
+      screen.details[2],
+      (ScreenOption{OptionKind::kTown, "place:razor_hill", "Razor Hill"}));
+  EXPECT_EQ(screen.details[3], (ScreenOption{OptionKind::kTown, "place:grave_1",
+                                             "Sen'jin Village Graveyard"}));
+}
+
 }  // namespace
 }  // namespace harness

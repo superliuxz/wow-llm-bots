@@ -914,5 +914,38 @@
         }
       ]
     }
-  }
+  },
+  "options": [
+    {
+      "text": "Talk to Mai'ah",
+      "guid": "0xF1300016FC000222"
+    },
+    {
+      "text": "Talk to Shikrik",
+      "guid": "0xF130000C5500022E"
+    },
+    {
+      "text": "Talk to Ken'jai",
+      "guid": "0xF130000E7B000225"
+    },
+    {
+      "text": "Explore SW, 107 yd (boars, scorpids, level 1-3)",
+      "guid": "spot:1:-699:-4148"
+    },
+    {
+      "text": "Explore W, 107 yd (scorpids, level 3)",
+      "guid": "spot:1:-595:-4098"
+    },
+    {
+      "text": "Explore N, 113 yd (boars, scorpids, level 1-3)",
+      "guid": "spot:1:-504:-4158"
+    },
+    {
+      "text": "Go to Razor Hill (innkeeper, vendor, repair, priest trainer), 1064 yd NE",
+      "guid": "place:razor_hill"
+    },
+    {
+      "text": "Keep doing what I'm doing"
+    }
+  ]
 }

@@ -6783,6 +6783,28 @@ bool ReadJson(std::string_view json, Command* out, std::string* error) {
   return true;
 }
 
+std::string WriteJson(const OptionFacts& facts, bool pretty) {
+  std::string out;
+  const auto ec = pretty ? glz::write<PrettyJsonWriteOpts{}>(facts, out)
+                         : glz::write<CompactJsonWriteOpts{}>(facts, out);
+  if (ec) {
+    return "";
+  }
+  return out;
+}
+
+bool ReadJson(std::string_view json, OptionFacts* out, std::string* error) {
+  *out = OptionFacts{};
+  const auto ec = glz::read<StrictJsonReadOpts{}>(*out, json);
+  if (ec) {
+    if (error != nullptr) {
+      *error = glz::format_error(ec, json);
+    }
+    return false;
+  }
+  return true;
+}
+
 std::string_view EnumName(Direction value) {
   switch (value) {
     case Direction::DIRECTION_UNSPECIFIED:

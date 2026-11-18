@@ -717,5 +717,34 @@
         }
       ]
     }
-  }
+  },
+  "options": [
+    {
+      "text": "Talk to Kaltunk",
+      "guid": "0xF1300027C0000253"
+    },
+    {
+      "text": "Explore SE, 94 yd (boars, level 1-2)",
+      "guid": "spot:1:-698:-4302"
+    },
+    {
+      "text": "Explore N, 127 yd (boars, level 1-2)",
+      "guid": "spot:1:-500:-4299"
+    },
+    {
+      "text": "Explore SW, 131 yd (boars, scorpids, level 1-3)",
+      "guid": "spot:1:-699:-4148"
+    },
+    {
+      "text": "Go to The Den (vendor, repair, priest trainer, graveyard), 49 yd W",
+      "guid": "place:the_den"
+    },
+    {
+      "text": "Go to Razor Hill (innkeeper, vendor, repair, priest trainer), 1053 yd NE",
+      "guid": "place:razor_hill"
+    },
+    {
+      "text": "Keep doing what I'm doing"
+    }
+  ]
 }

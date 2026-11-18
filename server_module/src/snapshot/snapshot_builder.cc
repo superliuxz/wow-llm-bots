@@ -1,36 +1,60 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
 #include "snapshot/snapshot_builder.h"
+#include <math.h>
 
+#include <algorithm>
+#include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <tuple>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "Bag.h"
+#include "Creature.h"
 #include "CreatureData.h"
+#include "DBCEnums.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
+#include "GameGraveyard.h"
 #include "GameObject.h"
 #include "GameObjectData.h"
+#include "GridTerrainData.h"
 #include "Group.h"
+#include "IVMapMgr.h"
 #include "Item.h"
 #include "ItemTemplate.h"
 #include "LFG.h"
 #include "LootMgr.h"
 #include "Map.h"
+#include "MapMgr.h"
+#include "Object.h"
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
 #include "ObjectMgr.h"
+#include "PathGenerator.h"
 #include "Player.h"
+#include "Position.h"
 #include "QuestDef.h"
 #include "SharedDefines.h"
 #include "StringFormat.h"
 #include "ThreatManager.h"
+#include "Trainer.h"
+#include "TravelMgr.h"
 #include "Unit.h"
 #include "UnitDefines.h"
 #include "UpdateFields.h"
 #include "World.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_util.h"
+#include "options/option_executor.h"
+#include "options/options.h"
 #include "proto/snapshot.h"
 #include "snapshot/nearby_builder.h"
 #include "snapshot/perception.h"
@@ -39,6 +63,13 @@ namespace llm_brain {
 namespace {
 
 namespace pb = wlb::snapshot;
+
+constexpr uint32_t kSpellCategoryFood = 11;
+constexpr uint32_t kSpellCategoryDrink = 59;
+constexpr float kMinimapRangeYd = 150.0f;
+constexpr float kMinTravelDistYd = 25.0f;
+constexpr float kMaxTravelDistYd = 2500.0f;
+constexpr float kHubMergeRadiusYd = 250.0f;
 
 pb::Self::PowerType ToPowerType(Powers power) {
   switch (power) {
@@ -76,6 +107,266 @@ std::string AreaName(uint32_t area_id) {
   return name ? name : "";
 }
 
+void FillPointRelative(Player* bot,
+                       float x,
+                       float y,
+                       float z,
+                       pb::Relative* rel) {
+  const float dx = x - bot->GetPositionX();
+  const float dy = y - bot->GetPositionY();
+  const float dz = z - bot->GetPositionZ();
+  rel->dist_yd = bot->GetExactDist(x, y, z);
+  rel->dir = CompassDirection(dx, dy);
+  rel->height = HeightOf(dz);
+  rel->position = {x, y, z};
+}
+
+std::string PluralizeNoun(std::string word) {
+  if (word.empty()) {
+    return word;
+  }
+  if (word == "wolf") {
+    return "wolves";
+  }
+  if (word.ends_with("s") || word.ends_with("sh") || word.ends_with("ch") ||
+      word.ends_with("x")) {
+    return word;
+  }
+  return word + "s";
+}
+
+std::string MobNoun(const CreatureTemplate* tmpl) {
+  if (tmpl->family != 0) {
+    if (const CreatureFamilyEntry* fam =
+            sCreatureFamilyStore.LookupEntry(tmpl->family)) {
+      const char* raw = fam->Name[sWorld->GetDefaultDbcLocale()];
+      if (raw && *raw) {
+        return PluralizeNoun(base::ToLowerASCII(raw));
+      }
+    }
+  }
+  return base::ToLowerASCII(tmpl->Name);
+}
+
+std::string SlugId(std::string_view prefix, std::string_view text) {
+  std::string out(prefix);
+  bool prev_underscore = false;
+  for (unsigned char c : text) {
+    if (std::isalnum(c)) {
+      out.push_back(static_cast<char>(std::tolower(c)));
+      prev_underscore = false;
+    } else if (!prev_underscore && !out.ends_with(':')) {
+      out.push_back('_');
+      prev_underscore = true;
+    }
+  }
+  while (out.ends_with('_')) {
+    out.pop_back();
+  }
+  return out;
+}
+
+// One-time index of grind spot labels (matching sTravelMgr.GetLocsPerLevelCache
+// 50-yd buckets) and friendly service hubs by subzone, built once on the world
+// thread from sObjectMgr->GetAllCreatureData().
+struct WorldPlacesCache {
+  struct SpotBucket {
+    uint32_t map_id = 0;
+    uint32_t zone_id = 0;
+    uint32_t min_level = 0;
+    uint32_t max_level = 0;
+    std::vector<std::string> mobs;
+    pb::Vec3 centroid;
+    uint32_t count = 0;
+
+    std::string FormatLabel() const {
+      std::string out = base::JoinString(mobs, ", ");
+      if (min_level > 0) {
+        if (!out.empty()) {
+          out += ", ";
+        }
+        out += min_level == max_level
+                   ? Acore::StringFormat("level {}", min_level)
+                   : Acore::StringFormat("level {}-{}", min_level, max_level);
+      }
+      return out;
+    }
+  };
+
+  struct Hub {
+    std::string id;
+    uint32_t map_id = 0;
+    uint32_t zone_id = 0;
+    uint32_t area_id = 0;
+    std::string name;
+    bool for_alliance = false;
+    bool for_horde = false;
+    bool has_innkeeper = false;
+    bool has_vendor = false;
+    bool has_repair = false;
+    bool has_flight_master = false;
+    uint32_t class_trainer_mask = 0;
+    pb::Vec3 pos;
+    bool pos_from_innkeeper = false;
+  };
+
+  static uint64_t BucketKey(uint32_t map_id, float x, float y, float z) {
+    const uint64_t rx =
+        static_cast<uint16_t>(static_cast<int16_t>(std::lround(x / 50.0f)));
+    const uint64_t ry =
+        static_cast<uint16_t>(static_cast<int16_t>(std::lround(y / 50.0f)));
+    const uint64_t rz =
+        static_cast<uint16_t>(static_cast<int16_t>(std::lround(z / 50.0f)));
+    return (static_cast<uint64_t>(map_id & 0xFFFFu) << 48) | (rx << 32) |
+           (ry << 16) | rz;
+  }
+
+  std::unordered_map<uint64_t, SpotBucket> spot_buckets;
+  std::vector<Hub> hubs;
+};
+
+const WorldPlacesCache& GetWorldPlacesCache() {
+  static const WorldPlacesCache* cache = []() {
+    auto* c = new WorldPlacesCache();
+    for (const auto& [guid, data] : sObjectMgr->GetAllCreatureData()) {
+      const CreatureTemplate* tmpl = sObjectMgr->GetCreatureTemplate(data.id);
+      if (!tmpl || tmpl->Name.starts_with("[DND]")) {
+        continue;
+      }
+      const uint32_t display_id =
+          tmpl->Models.empty() ? 0 : tmpl->Models[0].CreatureDisplayID;
+      if (HiddenFromPlayers(
+              (tmpl->flags_extra & CREATURE_FLAG_EXTRA_TRIGGER) != 0,
+              display_id)) {
+        continue;
+      }
+      const uint32_t map_id = data.mapid;
+      if (map_id != 0 && map_id != 1 && map_id != 530 && map_id != 571) {
+        continue;
+      }
+      uint32_t zone_id = 0;
+      uint32_t area_id = 0;
+      sMapMgr->GetZoneAndAreaId(PHASEMASK_NORMAL, zone_id, area_id, map_id,
+                                data.posX, data.posY, data.posZ);
+      if (zone_id == 0) {
+        continue;
+      }
+
+      // Grindable mob bucket (same filter as
+      // TravelMgr::PrepareDestinationCache).
+      if (tmpl->npcflag == 0 && tmpl->lootid != 0 &&
+          tmpl->maxlevel - tmpl->minlevel < 3 && data.spawntimesecs < 1000 &&
+          tmpl->rank == 0 && (tmpl->unit_flags & (256 | 4096)) == 0) {
+        const uint64_t key = WorldPlacesCache::BucketKey(map_id, data.posX,
+                                                         data.posY, data.posZ);
+        WorldPlacesCache::SpotBucket& b = c->spot_buckets[key];
+        b.map_id = map_id;
+        b.zone_id = zone_id;
+        const float n = static_cast<float>(b.count);
+        b.centroid.x = (b.centroid.x * n + data.posX) / (n + 1.0f);
+        b.centroid.y = (b.centroid.y * n + data.posY) / (n + 1.0f);
+        b.centroid.z = (b.centroid.z * n + data.posZ) / (n + 1.0f);
+        ++b.count;
+        if (b.min_level == 0 || tmpl->minlevel < b.min_level) {
+          b.min_level = tmpl->minlevel;
+        }
+        if (tmpl->maxlevel > b.max_level) {
+          b.max_level = tmpl->maxlevel;
+        }
+        if (b.mobs.size() < 3) {
+          const std::string noun = MobNoun(tmpl);
+          if (!noun.empty() &&
+              std::find(b.mobs.begin(), b.mobs.end(), noun) == b.mobs.end()) {
+            b.mobs.push_back(noun);
+          }
+        }
+        continue;
+      }
+
+      // Service NPCs for Go to <place>.
+      constexpr uint32_t kHubFlags =
+          UNIT_NPC_FLAG_INNKEEPER | UNIT_NPC_FLAG_VENDOR |
+          UNIT_NPC_FLAG_REPAIR | UNIT_NPC_FLAG_FLIGHTMASTER |
+          UNIT_NPC_FLAG_TRAINER | UNIT_NPC_FLAG_TRAINER_CLASS;
+      if ((tmpl->npcflag & kHubFlags) == 0) {
+        continue;
+      }
+      const FactionTemplateEntry* faction =
+          sFactionTemplateStore.LookupEntry(tmpl->faction);
+      if (!faction) {
+        continue;
+      }
+      const bool for_alliance = (faction->hostileMask & 2) == 0;
+      const bool for_horde = (faction->hostileMask & 4) == 0;
+      if (!for_alliance && !for_horde) {
+        continue;
+      }
+
+      uint32_t class_mask = 0;
+      if ((tmpl->npcflag &
+           (UNIT_NPC_FLAG_TRAINER | UNIT_NPC_FLAG_TRAINER_CLASS)) != 0) {
+        if (const Trainer::Trainer* trainer =
+                sObjectMgr->GetTrainer(tmpl->Entry);
+            trainer && trainer->GetTrainerType() == Trainer::Type::Class &&
+            trainer->GetTrainerRequirement() < 32) {
+          class_mask = 1u << trainer->GetTrainerRequirement();
+        }
+      }
+      const bool has_inn = (tmpl->npcflag & UNIT_NPC_FLAG_INNKEEPER) != 0;
+      const bool has_vendor = (tmpl->npcflag & UNIT_NPC_FLAG_VENDOR) != 0;
+      const bool has_repair = (tmpl->npcflag & UNIT_NPC_FLAG_REPAIR) != 0;
+      const bool has_fm = (tmpl->npcflag & UNIT_NPC_FLAG_FLIGHTMASTER) != 0;
+      if (!has_inn && !has_vendor && !has_repair && !has_fm &&
+          class_mask == 0) {
+        continue;
+      }
+
+      const uint32_t eff_area = area_id != 0 ? area_id : zone_id;
+      std::string place_name = eff_area == 363 ? "The Den" : AreaName(eff_area);
+      if (place_name.empty()) {
+        place_name = AreaName(zone_id);
+      }
+      if (place_name.empty()) {
+        place_name = tmpl->Name;
+      }
+
+      WorldPlacesCache::Hub* hub = nullptr;
+      for (WorldPlacesCache::Hub& existing : c->hubs) {
+        if (existing.map_id == map_id && existing.area_id == eff_area &&
+            existing.for_alliance == for_alliance &&
+            existing.for_horde == for_horde &&
+            std::hypot(existing.pos.x - data.posX,
+                       existing.pos.y - data.posY) <= kHubMergeRadiusYd) {
+          hub = &existing;
+          break;
+        }
+      }
+      if (!hub) {
+        hub = &c->hubs.emplace_back();
+        hub->map_id = map_id;
+        hub->zone_id = zone_id;
+        hub->area_id = eff_area;
+        hub->name = place_name;
+        hub->id = SlugId("place:", place_name);
+        hub->for_alliance = for_alliance;
+        hub->for_horde = for_horde;
+        hub->pos = {data.posX, data.posY, data.posZ};
+      }
+      hub->has_innkeeper |= has_inn;
+      hub->has_vendor |= has_vendor;
+      hub->has_repair |= has_repair;
+      hub->has_flight_master |= has_fm;
+      hub->class_trainer_mask |= class_mask;
+      if (has_inn && !hub->pos_from_innkeeper) {
+        hub->pos = {data.posX, data.posY, data.posZ};
+        hub->pos_from_innkeeper = true;
+      }
+    }
+    return c;
+  }();
+  return *cache;
+}
+
 // Free slots in the backpack and general-purpose bags, the number the client's
 // bag bar shows (special bags, like a herb bag or a quiver, don't count).
 uint32_t FreeBagSlots(Player* bot) {
@@ -94,6 +385,42 @@ uint32_t FreeBagSlots(Player* bot) {
     }
   }
   return free;
+}
+
+void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink) {
+  *has_food = false;
+  *has_drink = false;
+  const auto check_item = [&](Item* item) {
+    if (!item) {
+      return;
+    }
+    const ItemTemplate* proto = item->GetTemplate();
+    if (!proto || proto->Class != ITEM_CLASS_CONSUMABLE ||
+        (proto->SubClass != ITEM_SUBCLASS_FOOD &&
+         proto->SubClass != ITEM_SUBCLASS_CONSUMABLE)) {
+      return;
+    }
+    if (bot->CanUseItem(proto) != EQUIP_ERR_OK) {
+      return;
+    }
+    const uint32_t cat = proto->Spells[0].SpellCategory;
+    if (cat == kSpellCategoryFood) {
+      *has_food = true;
+    } else if (cat == kSpellCategoryDrink) {
+      *has_drink = true;
+    }
+  };
+  for (uint8_t slot = INVENTORY_SLOT_ITEM_START; slot < INVENTORY_SLOT_ITEM_END;
+       ++slot) {
+    check_item(bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot));
+  }
+  for (uint8_t i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i) {
+    if (const Bag* bag = bot->GetBagByPos(i)) {
+      for (uint32_t slot = 0; slot < bag->GetBagSize(); ++slot) {
+        check_item(bot->GetItemByPos(i, static_cast<uint8_t>(slot)));
+      }
+    }
+  }
 }
 
 const char* EquipmentSlotName(uint8_t slot) {
@@ -387,6 +714,57 @@ void FillParty(Player* bot, NearbyBuilder* nearby, pb::Extensions* ext) {
   }
 }
 
+std::optional<pb::Place> FindQuestPoiPlace(Player* bot,
+                                           const Quest* q,
+                                           int32_t objective_index) {
+  const QuestPOIVector* pois = sObjectMgr->GetQuestPOIVector(q->GetQuestId());
+  if (!pois) {
+    return std::nullopt;
+  }
+  Map* map = bot->GetMap();
+  if (!map) {
+    return std::nullopt;
+  }
+  for (const QuestPOI& poi : *pois) {
+    if (poi.MapId != bot->GetMapId() || poi.ObjectiveIndex != objective_index ||
+        poi.points.empty()) {
+      continue;
+    }
+    float cx = 0.0f;
+    float cy = 0.0f;
+    for (const QuestPOIPoint& pt : poi.points) {
+      cx += static_cast<float>(pt.x);
+      cy += static_cast<float>(pt.y);
+    }
+    cx /= static_cast<float>(poi.points.size());
+    cy /= static_cast<float>(poi.points.size());
+    if (bot->GetExactDist2d(cx, cy) > kMaxTravelDistYd) {
+      continue;
+    }
+    const float cz = std::max(map->GetHeight(cx, cy, MAX_HEIGHT),
+                              map->GetWaterLevel(cx, cy));
+    if (cz == INVALID_HEIGHT || cz == VMAP_INVALID_HEIGHT_VALUE) {
+      continue;
+    }
+    uint32_t zone_id = 0;
+    uint32_t area_id = 0;
+    sMapMgr->GetZoneAndAreaId(bot->GetPhaseMask(), zone_id, area_id,
+                              bot->GetMapId(), cx, cy, cz);
+    std::string area_name = AreaName(area_id != 0 ? area_id : zone_id);
+    if (area_name.empty()) {
+      area_name = q->GetTitle();
+    }
+    pb::Place place;
+    place.name = std::move(area_name);
+    FillPointRelative(bot, cx, cy, cz, &place.rel);
+    place.kind = pb::Place::OBJECTIVE_AREA;
+    place.known = true;
+    place.quest = q->GetTitle();
+    return place;
+  }
+  return std::nullopt;
+}
+
 void FillQuestTracker(Player* bot, pb::Extensions* ext) {
   // 3.3.5a auto-watches accepted quests; show the whole quest log here.
   const auto& status_map = bot->getQuestStatusMap();
@@ -413,6 +791,8 @@ void FillQuestTracker(Player* bot, pb::Extensions* ext) {
     if (status_it != status_map.end() && status_it->second.Timer > 0) {
       part.timer_s = static_cast<float>(status_it->second.Timer) / 1000.0f;
     }
+    const std::optional<pb::Place> turnin_where =
+        part.complete ? FindQuestPoiPlace(bot, q, -1) : std::nullopt;
 
     bool added_objective = false;
     for (size_t i = 0; i < QUEST_OBJECTIVES_COUNT; ++i) {
@@ -442,6 +822,8 @@ void FillQuestTracker(Player* bot, pb::Extensions* ext) {
       obj.progress = pb::Objective::Progress{have, need};
       obj.done = have >= need;
       obj.quest = part;
+      obj.where = obj.done ? turnin_where
+                           : FindQuestPoiPlace(bot, q, static_cast<int32_t>(i));
       added_objective = true;
     }
     for (size_t i = 0; i < QUEST_ITEM_OBJECTIVES_COUNT; ++i) {
@@ -459,6 +841,11 @@ void FillQuestTracker(Player* bot, pb::Extensions* ext) {
       obj.progress = pb::Objective::Progress{have, need};
       obj.done = have >= need;
       obj.quest = part;
+      obj.where =
+          obj.done
+              ? turnin_where
+              : FindQuestPoiPlace(
+                    bot, q, static_cast<int32_t>(QUEST_OBJECTIVES_COUNT + i));
       added_objective = true;
     }
     if (!added_objective) {
@@ -466,7 +853,332 @@ void FillQuestTracker(Player* bot, pb::Extensions* ext) {
       obj.title = q->GetTitle();
       obj.done = part.complete;
       obj.quest = part;
+      obj.where = turnin_where;
     }
+  }
+}
+
+void FillExploreSpots(Player* bot,
+                      const WorldPlacesCache& cache,
+                      std::vector<OptionFacts::Spot>* out) {
+  const uint32_t map_id = bot->GetMapId();
+  const uint32_t zone_id = bot->GetZoneId();
+  bool in_city = false;
+  if (const AreaTableEntry* zone = sAreaTableStore.LookupEntry(zone_id)) {
+    in_city = (zone->flags & AREA_FLAG_CAPITAL) != 0;
+  }
+
+  std::vector<OptionFacts::Spot> candidates;
+  const auto add_candidate = [&](float x, float y, float z,
+                                 const std::string& label) {
+    const float dist = bot->GetExactDist(x, y, z);
+    if (dist < kMinTravelDistYd || dist > kMaxTravelDistYd) {
+      return;
+    }
+    const pb::Direction dir =
+        CompassDirection(x - bot->GetPositionX(), y - bot->GetPositionY());
+    if (dir == pb::DIRECTION_UNSPECIFIED || dir == pb::HERE) {
+      return;
+    }
+    const std::string id = Acore::StringFormat(
+        "spot:{}:{}:{}", map_id, static_cast<int>(std::lround(x)),
+        static_cast<int>(std::lround(y)));
+    candidates.push_back({id, dir, dist, label, {x, y, z}});
+  };
+
+  // Primary source: playerbots' per-level spot cache, annotated with the
+  // 50-yd bucket's mob names and level range from WorldPlacesCache.
+  const std::vector<WorldLocation>& level_locs =
+      sTravelMgr.GetLocsPerLevelCache(bot->GetLevel());
+  Map* map = bot->GetMap();
+  for (const WorldLocation& loc : level_locs) {
+    if (loc.GetMapId() != map_id) {
+      continue;
+    }
+    if (!in_city && map &&
+        map->GetZoneId(bot->GetPhaseMask(), loc.GetPositionX(),
+                       loc.GetPositionY(), loc.GetPositionZ()) != zone_id) {
+      continue;
+    }
+    const uint64_t key = WorldPlacesCache::BucketKey(
+        map_id, loc.GetPositionX(), loc.GetPositionY(), loc.GetPositionZ());
+    std::string label;
+    if (const auto it = cache.spot_buckets.find(key);
+        it != cache.spot_buckets.end()) {
+      label = it->second.FormatLabel();
+    }
+    add_candidate(loc.GetPositionX(), loc.GetPositionY(), loc.GetPositionZ(),
+                  label);
+  }
+
+  // If GetLocsPerLevelCache had no spots in this zone (e.g. a zone whose mobs
+  // are outside the level bracket), fall back to the zone's buckets in
+  // WorldPlacesCache within +-6 levels of the bot.
+  if (candidates.empty()) {
+    const uint32_t bot_level = bot->GetLevel();
+    for (const auto& [key, b] : cache.spot_buckets) {
+      if (b.map_id != map_id || (!in_city && b.zone_id != zone_id) ||
+          b.count < 2) {
+        continue;
+      }
+      if (b.min_level > bot_level + 6 ||
+          (bot_level > 6 && b.max_level + 6 < bot_level)) {
+        continue;
+      }
+      add_candidate(b.centroid.x, b.centroid.y, b.centroid.z, b.FormatLabel());
+    }
+  }
+
+  std::sort(candidates.begin(), candidates.end(),
+            [](const OptionFacts::Spot& a, const OptionFacts::Spot& b) {
+              return a.dist_yd < b.dist_yd;
+            });
+
+  uint32_t seen_dirs = 0;
+  for (OptionFacts::Spot& spot : candidates) {
+    if (out->size() >= 3) {
+      break;
+    }
+    const uint32_t bit = 1u << static_cast<uint8_t>(spot.dir);
+    if ((seen_dirs & bit) != 0) {
+      continue;
+    }
+    seen_dirs |= bit;
+    out->push_back(std::move(spot));
+  }
+
+  // Fallback when a zone/instance has no cached grind spots: up to 3 walkable
+  // mmap rays ~80 yd out.
+  if (out->empty() && map) {
+    static constexpr float kAngles[] = {0.0f, static_cast<float>(M_PI_2),
+                                        static_cast<float>(M_PI),
+                                        static_cast<float>(-M_PI_2)};
+    for (float angle : kAngles) {
+      if (out->size() >= 3) {
+        break;
+      }
+      const float tx = bot->GetPositionX() + 80.0f * std::cos(angle);
+      const float ty = bot->GetPositionY() + 80.0f * std::sin(angle);
+      const float tz = map->GetHeight(bot->GetPhaseMask(), tx, ty,
+                                      bot->GetPositionZ() + 5.0f);
+      if (tz == INVALID_HEIGHT || tz == VMAP_INVALID_HEIGHT_VALUE) {
+        continue;
+      }
+      PathGenerator path(bot);
+      path.CalculatePath(tx, ty, tz);
+      const uint32_t ok_mask =
+          PATHFIND_NORMAL | PATHFIND_INCOMPLETE | PATHFIND_FARFROMPOLY;
+      if ((path.GetPathType() & ~ok_mask) != 0) {
+        continue;
+      }
+      const G3D::Vector3& end = path.GetActualEndPosition();
+      const float dist = bot->GetExactDist(end.x, end.y, end.z);
+      if (dist < kMinTravelDistYd) {
+        continue;
+      }
+      const pb::Direction dir = CompassDirection(end.x - bot->GetPositionX(),
+                                                 end.y - bot->GetPositionY());
+      const uint32_t bit = 1u << static_cast<uint8_t>(dir);
+      if ((seen_dirs & bit) != 0) {
+        continue;
+      }
+      seen_dirs |= bit;
+      out->push_back({Acore::StringFormat("spot:{}:{}:{}", map_id,
+                                          static_cast<int>(std::lround(end.x)),
+                                          static_cast<int>(std::lround(end.y))),
+                      dir,
+                      dist,
+                      "",
+                      {end.x, end.y, end.z}});
+    }
+  }
+}
+
+void FillGoToPlacesAndMinimap(Player* bot,
+                              const WorldPlacesCache& cache,
+                              pb::Snapshot* snapshot,
+                              std::vector<OptionFacts::Place>* out_places) {
+  const uint32_t map_id = bot->GetMapId();
+  const bool is_alliance = bot->GetTeamId() == TEAM_ALLIANCE;
+  const uint32_t class_bit = 1u << bot->getClass();
+  const std::string trainer_label = base::StrCat(
+      {base::ToLowerASCII(ClassName(bot->getClass())), " trainer"});
+
+  // Also populates ext.minimap for places within minimap range (glance).
+  pb::Minimap& minimap = snapshot->ext.minimap.emplace();
+  minimap.zone = snapshot->base.where.zone;
+  minimap.subzone = snapshot->base.where.subzone;
+
+  struct RankedHub {
+    const WorldPlacesCache::Hub* hub = nullptr;
+    float dist_yd = 0.0f;
+  };
+  std::vector<RankedHub> valid_hubs;
+  for (const WorldPlacesCache::Hub& hub : cache.hubs) {
+    if (hub.map_id != map_id) {
+      continue;
+    }
+    if (is_alliance ? !hub.for_alliance : !hub.for_horde) {
+      continue;
+    }
+    const float dist = bot->GetExactDist(hub.pos.x, hub.pos.y, hub.pos.z);
+    if (dist <= kMinimapRangeYd) {
+      pb::Place& mp = minimap.places.emplace_back();
+      mp.name = hub.name;
+      FillPointRelative(bot, hub.pos.x, hub.pos.y, hub.pos.z, &mp.rel);
+      mp.kind = hub.has_innkeeper ? pb::Place::TOWN : pb::Place::CAMP;
+      mp.known = true;
+    }
+    if (dist >= kMinTravelDistYd && dist <= kMaxTravelDistYd) {
+      valid_hubs.push_back({&hub, dist});
+    }
+  }
+  std::sort(valid_hubs.begin(), valid_hubs.end(),
+            [](const RankedHub& a, const RankedHub& b) {
+              return a.dist_yd < b.dist_yd;
+            });
+
+  // Pick the nearest hub for each service kind the bot could need:
+  // innkeeper, vendor/repair, class trainer, flight master.
+  std::vector<const WorldPlacesCache::Hub*> chosen;
+  const auto pick_first = [&](auto pred) {
+    for (const RankedHub& rh : valid_hubs) {
+      if (pred(*rh.hub)) {
+        if (std::find(chosen.begin(), chosen.end(), rh.hub) == chosen.end()) {
+          chosen.push_back(rh.hub);
+        }
+        return;
+      }
+    }
+  };
+  pick_first([](const WorldPlacesCache::Hub& h) { return h.has_innkeeper; });
+  pick_first([](const WorldPlacesCache::Hub& h) {
+    return h.has_vendor || h.has_repair;
+  });
+  pick_first([&](const WorldPlacesCache::Hub& h) {
+    return (h.class_trainer_mask & class_bit) != 0;
+  });
+  pick_first(
+      [](const WorldPlacesCache::Hub& h) { return h.has_flight_master; });
+
+  const GraveyardStruct* grave =
+      sGraveyard->GetClosestGraveyard(bot, bot->GetTeamId());
+  bool grave_merged = false;
+
+  for (const WorldPlacesCache::Hub* hub : chosen) {
+    std::vector<std::string> services;
+    if (hub->has_innkeeper) {
+      services.push_back("innkeeper");
+    }
+    if (hub->has_vendor) {
+      services.push_back("vendor");
+    }
+    if (hub->has_repair) {
+      services.push_back("repair");
+    }
+    if ((hub->class_trainer_mask & class_bit) != 0) {
+      services.push_back(trainer_label);
+    }
+    if (hub->has_flight_master) {
+      services.push_back("flight master");
+    }
+    if (grave && grave->Map == map_id &&
+        std::hypot(grave->x - hub->pos.x, grave->y - hub->pos.y) <= 120.0f) {
+      services.push_back("graveyard");
+      grave_merged = true;
+    }
+    const float dist = bot->GetExactDist(hub->pos.x, hub->pos.y, hub->pos.z);
+    const pb::Direction dir = CompassDirection(
+        hub->pos.x - bot->GetPositionX(), hub->pos.y - bot->GetPositionY());
+    out_places->push_back({hub->id, hub->name, base::JoinString(services, ", "),
+                           dir, dist, hub->pos});
+  }
+
+  if (grave && !grave_merged && grave->Map == map_id) {
+    const float dist = bot->GetExactDist(grave->x, grave->y, grave->z);
+    if (dist >= kMinTravelDistYd && dist <= kMaxTravelDistYd) {
+      uint32_t gz = 0;
+      uint32_t ga = 0;
+      sMapMgr->GetZoneAndAreaId(bot->GetPhaseMask(), gz, ga, map_id, grave->x,
+                                grave->y, grave->z);
+      std::string gname = AreaName(ga != 0 ? ga : gz);
+      gname = gname.empty() ? "Graveyard" : gname + " Graveyard";
+      const pb::Direction dir = CompassDirection(
+          grave->x - bot->GetPositionX(), grave->y - bot->GetPositionY());
+      out_places->push_back({SlugId("place:", gname),
+                             gname,
+                             "graveyard",
+                             dir,
+                             dist,
+                             {grave->x, grave->y, grave->z}});
+    }
+  }
+
+  // Nearest completed quest turn-in and nearest incomplete quest objective
+  // from quest_tracker ("the nearest place of each kind").
+  const pb::Objective* best_turnin = nullptr;
+  const pb::Objective* best_objective = nullptr;
+  for (const pb::Objective& obj : snapshot->ext.quest_tracker) {
+    if (!obj.where || !obj.quest || obj.where->rel.dist_yd < kMinTravelDistYd) {
+      continue;
+    }
+    if (obj.where->rel.dist_yd <= kMinimapRangeYd) {
+      minimap.objective_areas.push_back(*obj.where);
+    }
+    if (obj.quest->complete) {
+      if (!best_turnin ||
+          obj.where->rel.dist_yd < best_turnin->where->rel.dist_yd) {
+        best_turnin = &obj;
+      }
+    } else if (!obj.done &&
+               (!best_objective ||
+                obj.where->rel.dist_yd < best_objective->where->rel.dist_yd)) {
+      best_objective = &obj;
+    }
+  }
+  for (const pb::Objective* obj : {best_turnin, best_objective}) {
+    if (!obj) {
+      continue;
+    }
+    const std::string service =
+        (obj->quest->complete ? "turn in: " : "quest: ") + obj->quest->quest;
+    const std::string id =
+        Acore::StringFormat("place:quest_{}_{}", obj->quest->quest_id,
+                            SlugId("", obj->where->name));
+    out_places->push_back({id, obj->where->name, service, obj->where->rel.dir,
+                           obj->where->rel.dist_yd, obj->where->rel.position});
+  }
+}
+
+void FillOptionFactsAndPlaces(Player* bot,
+                              pb::Snapshot* snapshot,
+                              OptionFacts* facts) {
+  const WorldPlacesCache& cache = GetWorldPlacesCache();
+  OptionFacts local_facts;
+  OptionFacts* out = facts ? facts : &local_facts;
+  *out = OptionFacts{};
+
+  for (const pb::Unit& u : snapshot->base.nearby.units) {
+    if (u.kind != pb::Unit::NPC || u.dead || u.reaction != pb::Unit::FRIENDLY ||
+        u.guid.empty()) {
+      continue;
+    }
+    if (Creature* creature =
+            ObjectAccessor::GetCreature(*bot, ParseSnapshotGuid(u.guid))) {
+      const uint32_t flags = creature->GetUInt32Value(UNIT_NPC_FLAGS);
+      if ((flags & kTalkNpcFlags) != 0) {
+        out->npcs.push_back({u.guid, flags});
+      }
+    }
+  }
+
+  CheckBagFoodAndDrink(bot, &out->has_food, &out->has_drink);
+  out->herbalism_skill = bot->GetSkillValue(SKILL_HERBALISM);
+  out->mining_skill = bot->GetSkillValue(SKILL_MINING);
+
+  if (bot->IsAlive() && !bot->IsInCombat()) {
+    FillExploreSpots(bot, cache, &out->spots);
+    FillGoToPlacesAndMinimap(bot, cache, snapshot, &out->places);
   }
 }
 
@@ -478,7 +1190,8 @@ SnapshotBuilder::SnapshotBuilder(NearbyBuilder::Options nearby_options)
 SnapshotBuilder::~SnapshotBuilder() = default;
 
 NearbyBuilder::Stats SnapshotBuilder::Build(Player* bot,
-                                            pb::Snapshot* snapshot) {
+                                            pb::Snapshot* snapshot,
+                                            OptionFacts* facts) {
   pb::Base& base = snapshot->base;
   FillSelf(bot, &base.self);
   FillWhere(bot, &base.where);
@@ -487,6 +1200,7 @@ NearbyBuilder::Stats SnapshotBuilder::Build(Player* bot,
   FillCombat(bot, &nearby_, &snapshot->ext);
   FillParty(bot, &nearby_, &snapshot->ext);
   FillQuestTracker(bot, &snapshot->ext);
+  FillOptionFactsAndPlaces(bot, snapshot, facts);
   return stats;
 }
 

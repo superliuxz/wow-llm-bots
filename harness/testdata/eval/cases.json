@@ -100,8 +100,7 @@
     "rule": "first step is Talk to Kaltunk (1)",
     "first_options": [
       1
-    ],
-    "planned": true
+    ]
   },
   {
     "name": "priest_picks_own_trainer",
@@ -110,9 +109,8 @@
     "summary": "L2 priest near Mage Trainer (1), Shaman Trainer (2), Grunts, Priest Trainer Ken'jai (7)",
     "rule": "first step is Talk to Priest Trainer Ken'jai (7), not wrong-class trainers",
     "first_options": [
-      7
-    ],
-    "planned": true
+      3
+    ]
   },
   {
     "name": "ignore_critter",
@@ -141,8 +139,7 @@
     "forbid_kinds": [
       "rest",
       "keep doing what I'm doing"
-    ],
-    "planned": true
+    ]
   },
   {
     "name": "city_crowd_patience",
@@ -167,8 +164,7 @@
     ],
     "forbid_kinds": [
       "attack"
-    ],
-    "planned": true
+    ]
   },
   {
     "name": "oom_caster",
@@ -182,8 +178,7 @@
     ],
     "forbid_kinds": [
       "attack"
-    ],
-    "planned": true
+    ]
   },
   {
     "name": "skull_elite_nearby",
@@ -198,8 +193,7 @@
     "forbid_kinds": [
       "attack",
       "rest"
-    ],
-    "planned": true
+    ]
   },
   {
     "name": "whisper_group_invite",
@@ -551,8 +545,7 @@
     ],
     "forbid_kinds": [
       "attack"
-    ],
-    "planned": true
+    ]
   },
   {
     "name": "hp_30_boar_near_live",
@@ -578,8 +571,7 @@
     ],
     "forbid_kinds": [
       "attack"
-    ],
-    "planned": true
+    ]
   },
   {
     "name": "mana_20_boar_near_live",
@@ -602,8 +594,7 @@
     "first_kinds": [
       "rest",
       "go to town"
-    ],
-    "planned": true
+    ]
   },
   {
     "name": "mana_10_empty_field",
@@ -615,8 +606,7 @@
     "first_kinds": [
       "rest",
       "go to town"
-    ],
-    "planned": true
+    ]
   },
   {
     "name": "hp_60_fine",
@@ -638,8 +628,7 @@
     "rule": "talks to Kaltunk first",
     "first_texts": [
       "Talk to Kaltunk"
-    ],
-    "planned": true
+    ]
   },
   {
     "name": "bags_full",
@@ -650,8 +639,7 @@
     "rule": "heads to town instead of killing for loot",
     "first_kinds": [
       "go to town"
-    ],
-    "planned": true
+    ]
   },
   {
     "name": "leveled_up_empty_field",
@@ -667,7 +655,6 @@
     "forbid_kinds": [
       "rest",
       "keep doing what I'm doing"
-    ],
-    "planned": true
+    ]
   }
 ]

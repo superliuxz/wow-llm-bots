@@ -413,7 +413,8 @@ void FillNameplate(Unit* unit, Player* bot, pb::Unit* out) {
 }
 
 // Herbs and ore veins are chests whose lock needs a gathering skill.
-pb::GameObject::Kind ChestKind(GameObject* object) {
+std::pair<pb::GameObject::Kind, uint32_t> ChestKindAndSkill(
+    GameObject* object) {
   if (const LockEntry* lock =
           sLockStore.LookupEntry(object->GetGOInfo()->GetLockId())) {
     for (size_t i = 0; i < MAX_LOCK_CASE; ++i) {
@@ -421,17 +422,21 @@ pb::GameObject::Kind ChestKind(GameObject* object) {
         continue;
       }
       if (lock->Index[i] == LOCKTYPE_HERBALISM) {
-        return pb::GameObject::HERB;
+        return {pb::GameObject::HERB, lock->Skill[i]};
       }
       if (lock->Index[i] == LOCKTYPE_MINING) {
-        return pb::GameObject::ORE;
+        return {pb::GameObject::ORE, lock->Skill[i]};
       }
     }
   }
-  return pb::GameObject::CHEST;
+  return {pb::GameObject::CHEST, 0};
 }
 
-pb::GameObject::Kind ObjectKind(GameObject* object) {
+pb::GameObject::Kind ObjectKind(GameObject* object,
+                                uint32_t* required_skill = nullptr) {
+  if (required_skill) {
+    *required_skill = 0;
+  }
   switch (object->GetGoType()) {
     case GAMEOBJECT_TYPE_DOOR:
     case GAMEOBJECT_TYPE_BUTTON:
@@ -459,8 +464,13 @@ pb::GameObject::Kind ObjectKind(GameObject* object) {
       return pb::GameObject::DESTRUCTIBLE;
     case GAMEOBJECT_TYPE_CAPTURE_POINT:
       return pb::GameObject::CAPTURE_POINT;
-    case GAMEOBJECT_TYPE_CHEST:
-      return ChestKind(object);
+    case GAMEOBJECT_TYPE_CHEST: {
+      const auto [kind, skill] = ChestKindAndSkill(object);
+      if (required_skill) {
+        *required_skill = skill;
+      }
+      return kind;
+    }
     case GAMEOBJECT_TYPE_GOOBER:
     case GAMEOBJECT_TYPE_QUESTGIVER:
       return pb::GameObject::QUEST_OBJECT;
@@ -596,7 +606,7 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
       pb::GameObject& out = nearby->objects.emplace_back();
       out.guid = GuidString(guid);
       out.name = go->GetName();
-      out.kind = ObjectKind(go);
+      out.kind = ObjectKind(go, &out.required_skill);
       out.usable = IsObjectUsable(bot, go);
       out.state = go->GetGoState() == GO_STATE_ACTIVE ? "active" : "ready";
       out.highlighted = go->ActivateToQuest(bot);

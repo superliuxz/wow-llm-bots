@@ -4,11 +4,13 @@
 // (llm_brain::AddOptions, the code the server runs), so saved snapshots
 // (eval cases, screen fixtures) show the screen a live bot sees:
 //   fixture_options <snapshot.json>
+// Reads <case>.facts.json next to <case>.snapshot.json when present.
 // tools/snapshot/add_fixture_options.py writes them into the fixtures.
 
 #include <cstdio>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "options/options.h"
@@ -35,6 +37,20 @@ std::optional<std::string> ReadFileBytes(const char* path) {
   return out;
 }
 
+std::string FactsPathFor(std::string_view snapshot_path) {
+  constexpr std::string_view kSnapSuffix = ".snapshot.json";
+  constexpr std::string_view kJsonSuffix = ".json";
+  if (snapshot_path.ends_with(kSnapSuffix)) {
+    snapshot_path.remove_suffix(kSnapSuffix.size());
+    return std::string(snapshot_path) + ".facts.json";
+  }
+  if (snapshot_path.ends_with(kJsonSuffix)) {
+    snapshot_path.remove_suffix(kJsonSuffix.size());
+    return std::string(snapshot_path) + ".facts.json";
+  }
+  return std::string(snapshot_path) + ".facts.json";
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -53,8 +69,17 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "%s: %s\n", argv[1], error.c_str());
     return 1;
   }
+  wlb::snapshot::OptionFacts facts;
+  const std::string facts_path = FactsPathFor(argv[1]);
+  if (const std::optional<std::string> facts_text =
+          ReadFileBytes(facts_path.c_str())) {
+    if (!wlb::snapshot::ReadJson(*facts_text, &facts, &error)) {
+      std::fprintf(stderr, "%s: %s\n", facts_path.c_str(), error.c_str());
+      return 1;
+    }
+  }
   snap.options.clear();
-  llm_brain::AddOptions(&snap);
+  llm_brain::AddOptions(&snap, facts);
   // Only the options: the caller keeps the rest of the file as it is.
   wlb::snapshot::Snapshot only;
   only.options = std::move(snap.options);

@@ -940,6 +940,26 @@
       "guid": "0xF110029FA2000091"
     },
     {
+      "text": "Explore E, 30 yd (boars, level 1-2)",
+      "guid": "spot:1:-500:-4299"
+    },
+    {
+      "text": "Explore W, 74 yd (boars, level 1-2)",
+      "guid": "spot:1:-483:-4198"
+    },
+    {
+      "text": "Explore SE, 175 yd (boars, level 1-2)",
+      "guid": "spot:1:-618:-4400"
+    },
+    {
+      "text": "Go to The Den (vendor, repair, priest trainer, graveyard), 134 yd SW",
+      "guid": "place:the_den"
+    },
+    {
+      "text": "Go to Razor Hill (innkeeper, vendor, repair, priest trainer), 940 yd NE",
+      "guid": "place:razor_hill"
+    },
+    {
       "text": "Keep doing what I'm doing"
     }
   ]

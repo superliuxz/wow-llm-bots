@@ -83,9 +83,12 @@ uint8_t ControlMask(const Player* bot) {
   return mask;
 }
 
-// Whether the body is still carrying out `target` (`used`: the object was
-// already clicked, at once or on arrival).
-bool IsOptionTargetPending(Player* bot, const OptionTarget& target, bool used) {
+// Whether the body is still carrying out `target` (`used`: the object/NPC was
+// already clicked or the destination reached, at once or on arrival).
+bool IsOptionTargetPending(Player* bot,
+                           const OptionTarget& target,
+                           bool used,
+                           bool* had_food_drink_aura) {
   switch (target.kind) {
     case OptionTarget::Kind::kAttack: {
       Unit* unit =
@@ -113,6 +116,19 @@ bool IsOptionTargetPending(Player* bot, const OptionTarget& target, bool used) {
       // anything else once clicked.
       return IsLootableObject(go) ? go->getLootState() == GO_READY : !used;
     }
+    case OptionTarget::Kind::kTalk: {
+      if (used || bot->IsInCombat() || !bot->IsAlive()) {
+        return false;
+      }
+      Creature* npc =
+          ObjectAccessor::GetCreature(*bot, ParseSnapshotGuid(target.guid));
+      return npc != nullptr && npc->IsInWorld() && npc->IsAlive();
+    }
+    case OptionTarget::Kind::kRest:
+      return IsRestInProgress(bot, had_food_drink_aura);
+    case OptionTarget::Kind::kExplore:
+    case OptionTarget::Kind::kGoTo:
+      return !used && bot->IsAlive() && !bot->IsInCombat();
     case OptionTarget::Kind::kKeep:
       return false;
   }
@@ -233,7 +249,7 @@ class LlmBrainWorldScript : public WorldScript {
       if (!bot || !bot->IsInWorld()) {
         continue;  // Offline (or not in the world yet).
       }
-      UseOnArrival(bot, i, config_.bots[i]);
+      StepActiveOption(bot, i, config_.bots[i], now);
       const SnapshotSchedule::Flags flags = CurrentFlags(bot, i);
       if (schedule_->IsDue(i, now, flags)) {
         SendSnapshot(i, config_.bots[i], bot);
@@ -285,6 +301,15 @@ class LlmBrainWorldScript : public WorldScript {
                apply_ages_.back().InMilliseconds());
       apply_ages_.clear();
     }
+    if (!path_times_.empty()) {
+      std::sort(path_times_.begin(), path_times_.end());
+      LOG_INFO("module",
+               "mod-llm-brain: walk paths n={} (path_us p50={} max={})",
+               path_times_.size(),
+               path_times_[path_times_.size() / 2].InMicroseconds(),
+               path_times_.back().InMicroseconds());
+      path_times_.clear();
+    }
     BrainBridge::SendStats sent = bridge_->TakeSendStats();
     if (!sent.delays.empty() || sent.replaced > 0 || sent.dropped > 0) {
       std::sort(sent.delays.begin(), sent.delays.end());
@@ -320,6 +345,9 @@ class LlmBrainWorldScript : public WorldScript {
         bots_[i].active_option.reset();
         bots_[i].active_command_id = 0;
         bots_[i].done_command_id = 0;
+        bots_[i].object_used = false;
+        bots_[i].had_food_drink_aura = false;
+        bots_[i].walk = PendingWalk{};
         schedule_->SetActiveTargetPending(i, false);
       }
     }
@@ -393,15 +421,26 @@ class LlmBrainWorldScript : public WorldScript {
       OnSay(bot_index, name, bot, command.command_id, *command.say);
       return;
     }
+    BotState& state = bots_[bot_index];
     const wlb::snapshot::Command::Choose& choose = *command.choose;
     const OptionHistory::Lookup found =
-        bots_[bot_index].history.Find(choose.seq, choose.option);
+        state.history.Find(choose.seq, choose.option);
     std::string error = found.error;
     bool used = false;
+    std::string info;
+    state.had_food_drink_aura = false;
+    state.walk = PendingWalk{};
     if (found.target) {
-      ExecuteResult result = ExecuteOption(bot, *found.target);
+      ExecuteResult result = ExecuteOption(bot, *found.target, &state.walk);
       error = std::move(result.error);
       used = result.used;
+      info = std::move(result.info);
+      if (!result.path_time.is_zero()) {
+        path_times_.push_back(result.path_time);
+      }
+      if (found.target->kind == OptionTarget::Kind::kRest) {
+        state.had_food_drink_aura = HasFoodOrDrinkAura(bot);
+      }
     }
     // How old the picture was when the bot acted on it: the number that
     // matters (docs/plans/harness.md, "Age").
@@ -419,7 +458,6 @@ class LlmBrainWorldScript : public WorldScript {
              found.target ? OptionKindName(found.target->kind) : "-",
              found.target ? found.target->name : "",
              error.empty() ? "ok" : error, age_ms);
-    BotState& state = bots_[bot_index];
     if (!error.empty()) {
       state.active_option.reset();
       schedule_->SetActiveTargetPending(bot_index, false);
@@ -437,9 +475,15 @@ class LlmBrainWorldScript : public WorldScript {
       // clicked yet.
       state.done_command_id = command.command_id;
     } else if (found.target) {
+      if (!info.empty()) {
+        wlb::snapshot::Event payload;
+        payload.info.emplace().text = std::move(info);
+        SendImmediateEvent(bot_index, name, std::move(payload));
+      }
       state.object_used = used;
       state.active_command_id = command.command_id;
-      const bool pending = IsOptionTargetPending(bot, *found.target, used);
+      const bool pending = IsOptionTargetPending(bot, *found.target, used,
+                                                 &state.had_food_drink_aura);
       if (pending) {
         state.active_option = *found.target;
       } else {
@@ -469,32 +513,90 @@ class LlmBrainWorldScript : public WorldScript {
     }
   }
 
-  // A Gather or Use step out of reach when chosen: the executor started the
-  // walk; click the object once in range, as a player would on arrival.
-  void UseOnArrival(Player* bot, size_t index, const std::string& name) {
+  // Advances an active multi-tick option:
+  // - Gather / Use: clicks the object once in range;
+  // - Talk: talks to the NPC once in range;
+  // - Explore / GoTo: steps along the mmap path ~70 yd at a time.
+  void StepActiveOption(Player* bot,
+                        size_t index,
+                        const std::string& name,
+                        base::TimeTicks now) {
     BotState& state = bots_[index];
-    if (!state.active_option || state.object_used ||
-        (state.active_option->kind != OptionTarget::Kind::kUse &&
-         state.active_option->kind != OptionTarget::Kind::kGather)) {
+    if (!state.active_option || state.object_used) {
       return;
     }
-    GameObject* go = ObjectAccessor::GetGameObject(
-        *bot, ParseSnapshotGuid(state.active_option->guid));
-    if (go == nullptr || !IsInUseRange(bot, go)) {
+    const OptionTarget::Kind kind = state.active_option->kind;
+    if (kind == OptionTarget::Kind::kUse ||
+        kind == OptionTarget::Kind::kGather) {
+      GameObject* go = ObjectAccessor::GetGameObject(
+          *bot, ParseSnapshotGuid(state.active_option->guid));
+      if (go == nullptr || !IsInUseRange(bot, go)) {
+        return;
+      }
+      state.object_used = true;
+      if (std::string text = UseObjectNow(bot, go); !text.empty()) {
+        LOG_INFO("module", "mod-llm-brain: {} can't use {} on arrival: {}",
+                 name, state.active_option->name, text);
+        FailActiveOption(index, name, bot, std::move(text));
+      }
       return;
     }
-    state.object_used = true;
-    if (std::string text = UseObjectNow(bot, go); !text.empty()) {
-      LOG_INFO("module", "mod-llm-brain: {} can't use {} on arrival: {}", name,
-               state.active_option->name, text);
-      state.active_option.reset();
-      schedule_->SetActiveTargetPending(index, false);
-      wlb::snapshot::Event payload;
-      wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
-      failed.text = text;
-      failed.command_id = state.active_command_id;
-      EmitAlertingEvent(index, name, bot, std::move(payload));
+    if (kind == OptionTarget::Kind::kTalk) {
+      Creature* npc = ObjectAccessor::GetCreature(
+          *bot, ParseSnapshotGuid(state.active_option->guid));
+      if (npc == nullptr || !IsInTalkRange(bot, npc)) {
+        return;
+      }
+      state.object_used = true;
+      TalkResult res = TalkToNpcNow(bot, npc);
+      if (!res.error.empty()) {
+        LOG_INFO("module", "mod-llm-brain: {} can't talk to {} on arrival: {}",
+                 name, state.active_option->name, res.error);
+        FailActiveOption(index, name, bot, std::move(res.error));
+      } else if (!res.info.empty()) {
+        LOG_INFO("module", "mod-llm-brain: {}: {}", name, res.info);
+        wlb::snapshot::Event payload;
+        payload.info.emplace().text = std::move(res.info);
+        SendImmediateEvent(index, name, std::move(payload));
+      }
+      return;
     }
+    if (kind == OptionTarget::Kind::kExplore ||
+        kind == OptionTarget::Kind::kGoTo) {
+      const WalkStepResult step = TickLongWalk(bot, now, &state.walk);
+      if (!step.path_time.is_zero()) {
+        path_times_.push_back(step.path_time);
+      }
+      if (step.cancelled) {
+        state.active_option.reset();
+        schedule_->SetActiveTargetPending(index, false);
+        return;
+      }
+      if (!step.error.empty()) {
+        LOG_INFO("module", "mod-llm-brain: {} walk to {} failed: {}", name,
+                 state.active_option->name, step.error);
+        FailActiveOption(index, name, bot, std::move(step.error));
+        return;
+      }
+      if (step.arrived) {
+        state.object_used = true;
+      }
+    }
+  }
+
+  void FailActiveOption(size_t index,
+                        const std::string& name,
+                        Player* bot,
+                        std::string error) {
+    BotState& state = bots_[index];
+    const uint32_t command_id = state.active_command_id;
+    state.active_option.reset();
+    schedule_->SetActiveTargetPending(index, false);
+    wlb::snapshot::Event payload;
+    wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
+    failed.text = std::move(error);
+    failed.command_id = command_id;
+    EmitAlertingEvent(index, name, bot, std::move(payload));
   }
 
   SnapshotSchedule::Flags CurrentFlags(Player* bot, size_t index) {
@@ -502,7 +604,8 @@ class LlmBrainWorldScript : public WorldScript {
     bool pending = false;
     if (state->active_option) {
       pending =
-          IsOptionTargetPending(bot, *state->active_option, state->object_used);
+          IsOptionTargetPending(bot, *state->active_option, state->object_used,
+                                &state->had_food_drink_aura);
       if (!pending) {
         state->active_option.reset();
         state->done_command_id = state->active_command_id;
@@ -560,8 +663,10 @@ class LlmBrainWorldScript : public WorldScript {
     const base::TimeTicks start = base::TimeTicks::Now();
     snapshot.monotonic_us = (start - base::TimeTicks()).InMicroseconds();
     snapshot.done_command_id = state.done_command_id;
-    const NearbyBuilder::Stats nearby = state.builder->Build(bot, &snapshot);
-    state.history.Add(snapshot.seq, start, AddOptions(&snapshot));
+    OptionFacts facts;
+    const NearbyBuilder::Stats nearby =
+        state.builder->Build(bot, &snapshot, &facts);
+    state.history.Add(snapshot.seq, start, AddOptions(&snapshot, facts));
     std::string bytes = wlb::snapshot::WriteBeve(message);
     stats_.Add({base::TimeTicks::Now() - start, bytes.size(), nearby.units,
                 nearby.objects, nearby.hidden, nearby.raycasts});
@@ -590,14 +695,20 @@ class LlmBrainWorldScript : public WorldScript {
     uint32_t active_command_id = 0;
     // The last command the body finished (Snapshot::done_command_id).
     uint32_t done_command_id = 0;
-    // A Gather / Use step's object was clicked (at once or on arrival).
+    // Gather / Use / Talk / Explore / GoTo: finished at once or on arrival.
     bool object_used = false;
+    // Rest: whether a food or drink aura was observed while resting.
+    bool had_food_drink_aura = false;
+    // Explore / GoTo: active stepped mmap walk state.
+    PendingWalk walk;
   };
   std::vector<BotState> bots_;
   // A wrong-version command was logged on this connection.
   bool wrong_version_logged_ = false;
   // How old each applied choice's snapshot was, since the last summary.
   std::vector<base::TimeDelta> apply_ages_;
+  // Time spent in PathGenerator per ~70 yd walk step, since the last summary.
+  std::vector<base::TimeDelta> path_times_;
   base::WeakPtrFactory<LlmBrainWorldScript> weak_factory_{this};
 };
 

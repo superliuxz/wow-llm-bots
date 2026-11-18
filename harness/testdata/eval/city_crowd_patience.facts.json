@@ -1,0 +1,42 @@
+{
+  "has_food": true,
+  "has_drink": true,
+  "places": [
+    {
+      "id": "place:valley_of_strength",
+      "name": "Valley of Strength",
+      "services": "innkeeper, vendor, repair",
+      "dir": "E",
+      "dist_yd": 67.8,
+      "pos": {
+        "x": 1633.9,
+        "y": -4439.4,
+        "z": 15.5
+      }
+    },
+    {
+      "id": "place:valley_of_spirits",
+      "name": "Valley of Spirits",
+      "services": "priest trainer",
+      "dir": "SW",
+      "dist_yd": 262.8,
+      "pos": {
+        "x": 1453.8,
+        "y": -4178.9,
+        "z": 44.1
+      }
+    },
+    {
+      "id": "place:The_drag",
+      "name": "The Drag",
+      "services": "vendor, repair, flight master",
+      "dir": "NW",
+      "dist_yd": 80.3,
+      "pos": {
+        "x": 1676.2,
+        "y": -4315.3,
+        "z": 61.6
+      }
+    }
+  ]
+}

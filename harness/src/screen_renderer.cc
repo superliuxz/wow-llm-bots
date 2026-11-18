@@ -315,13 +315,31 @@ ScreenOption ParseModuleOption(const pb::Option& option) {
     }
   }
   if (base::StartsWith(text, "Explore", base::CompareCase::INSENSITIVE_ASCII)) {
-    return {OptionKind::kExplore, option.guid, ""};
+    std::string name;
+    if (const size_t open = text.find('(');
+        open != std::string_view::npos && text.ends_with(')')) {
+      name = std::string(base::TrimWhitespaceASCII(
+          text.substr(open + 1, text.size() - open - 2)));
+    } else if (const auto rest = base::RemovePrefix(text, "Explore ");
+               rest && *rest != "somewhere new") {
+      const size_t end = rest->find_first_of(", ");
+      name = std::string(rest->substr(0, end));
+    }
+    return {OptionKind::kExplore, option.guid, std::move(name)};
   }
   if (base::StartsWith(text, "Rest", base::CompareCase::INSENSITIVE_ASCII)) {
     return {OptionKind::kRest, option.guid, ""};
   }
   if (base::StartsWith(text, "Go to", base::CompareCase::INSENSITIVE_ASCII)) {
-    return {OptionKind::kTown, option.guid, ""};
+    std::string name;
+    if (const auto rest = base::RemovePrefix(text, "Go to ");
+        rest && *rest != "the nearest town") {
+      const size_t paren = rest->find(" (");
+      const size_t comma = rest->find(", ");
+      const size_t end = std::min(paren, comma);
+      name = std::string(base::TrimWhitespaceASCII(rest->substr(0, end)));
+    }
+    return {OptionKind::kTown, option.guid, std::move(name)};
   }
   return {OptionKind::kKeep, option.guid, ""};
 }

@@ -30,5 +30,9 @@
     "snapshot_bytes_avg": 23206,
     "tick_max_snapshots": 1,
     "tick_max_us": 280
+  },
+  "walk": {
+    "path_max_us": 705,
+    "path_p50_us": 5
   }
 }

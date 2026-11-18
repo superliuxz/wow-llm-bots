@@ -5,35 +5,83 @@
 #include <algorithm>
 #include <charconv>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include "AiObjectContext.h"
+#include "Bag.h"
 #include "Creature.h"
 #include "Define.h"
 #include "Event.h"
+#include "G3D/Vector3.h"
 #include "GameObject.h"
+#include "GossipDef.h"
+#include "GridTerrainData.h"
+#include "IVMapMgr.h"
+#include "Item.h"
+#include "ItemPackets.h"
+#include "ItemTemplate.h"
+#include "ItemUsageValue.h"
 #include "LastMovementValue.h"
 #include "LootObjectStack.h"
+#include "Map.h"
 #include "MotionMaster.h"
+#include "MoveSplineInitArgs.h"
 #include "ObjectAccessor.h"
 #include "ObjectDefines.h"
 #include "ObjectGuid.h"
+#include "ObjectMgr.h"
+#include "Opcodes.h"
+#include "PathGenerator.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
 #include "PlayerbotAIConfig.h"
+#include "PlayerbotFactory.h"
 #include "Playerbots.h"
+#include "Position.h"
+#include "QuestDef.h"
 #include "SharedDefines.h"
+#include "SpellAuras.h"
+#include "SpellDefines.h"
+#include "SpellInfo.h"
+#include "SpellMgr.h"
+#include "StatsWeightCalculator.h"
+#include "Trainer.h"
 #include "Unit.h"
 #include "UnitDefines.h"
 #include "UpdateFields.h"
+#include "World.h"
+#include "WorldPacket.h"
+#include "WorldSession.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/time/time.h"
 #include "options/options.h"
+#include "proto/snapshot.h"
 
 namespace llm_brain {
+
+namespace pb = wlb::snapshot;
+
+namespace {
+
+constexpr uint32_t kSpellCategoryFood = 11;
+constexpr uint32_t kSpellCategoryDrink = 59;
+constexpr uint32_t kSpellGraccusFruitcake = 25990;
+
+constexpr float kWalkStepYd = 70.0f;
+constexpr float kWalkStepAdvanceYd = 10.0f;
+constexpr float kWalkArrivalYd = 10.0f;
+constexpr float kWalkStallProgressYd = 5.0f;
+constexpr base::TimeDelta kWalkStallTimeout = base::Seconds(10);
+
+}  // namespace
 
 ObjectGuid ParseSnapshotGuid(std::string_view text) {
   if (text.starts_with("0x")) {
@@ -61,6 +109,10 @@ bool IsInUseRange(Player* bot, GameObject* go) {
   // (UseItemAction::UseGameObject); 1 yd of margin for the walk's last step.
   const float limit = sPlayerbotAIConfig.LootDistance;
   return limit <= 0 || bot->GetDistance(go) <= std::max(limit - 1.0f, 1.0f);
+}
+
+bool IsInTalkRange(Player* bot, Creature* npc) {
+  return npc->IsWithinDistInMap(bot, INTERACTION_DISTANCE);
 }
 
 namespace {
@@ -147,6 +199,112 @@ void WalkNextTo(Player* bot, WorldObject* target) {
   WalkTo(bot, x, y, z);
 }
 
+void ClearLastMovement(Player* bot) {
+  if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot)) {
+    if (auto* last = ai->GetAiObjectContext()->GetValue<LastMovement&>(
+            "last movement")) {
+      last->Get().clear();
+    }
+  }
+}
+
+// Picks the quest reward index using playerbots' item usage + stat weight
+// calculator (NewRpgBaseAction::BestRewardIndex).
+uint32_t BestQuestRewardIndex(Player* bot,
+                              PlayerbotAI* ai,
+                              const Quest* quest) {
+  if (!ai || quest->GetRewChoiceItemsCount() <= 1) {
+    return 0;
+  }
+  AiObjectContext* ctx = ai->GetAiObjectContext();
+  ItemUsage best_usage = ITEM_USAGE_NONE;
+  for (uint8_t i = 0; i < quest->GetRewChoiceItemsCount(); ++i) {
+    auto* val =
+        ctx->GetValue<ItemUsage>("item usage", quest->RewardChoiceItemId[i]);
+    const ItemUsage usage = val ? val->Get() : ITEM_USAGE_NONE;
+    if (usage == ITEM_USAGE_EQUIP || usage == ITEM_USAGE_REPLACE) {
+      best_usage = ITEM_USAGE_EQUIP;
+    } else if (usage == ITEM_USAGE_BAD_EQUIP &&
+               best_usage != ITEM_USAGE_EQUIP) {
+      best_usage = usage;
+    } else if (usage != ITEM_USAGE_NONE && best_usage == ITEM_USAGE_NONE) {
+      best_usage = usage;
+    }
+  }
+  StatsWeightCalculator calc(bot);
+  uint32_t best = 0;
+  float best_score = 0.0f;
+  for (uint8_t i = 0; i < quest->GetRewChoiceItemsCount(); ++i) {
+    auto* val =
+        ctx->GetValue<ItemUsage>("item usage", quest->RewardChoiceItemId[i]);
+    const ItemUsage usage = val ? val->Get() : ITEM_USAGE_NONE;
+    if (usage == best_usage || usage == ITEM_USAGE_REPLACE) {
+      const uint32_t item_id = quest->RewardChoiceItemId[i];
+      const ItemTemplate* proto = sObjectMgr->GetItemTemplate(item_id);
+      const uint8_t slot =
+          proto ? ai->FindEquipSlot(proto, NULL_SLOT, true) : NULL_SLOT;
+      const float score = calc.CalculateItem(item_id, 0, slot);
+      if (score > best_score) {
+        best_score = score;
+        best = i;
+      }
+    }
+  }
+  return best;
+}
+
+uint32_t SellGreyItemsTo(Player* bot, ObjectGuid vendor_guid) {
+  uint32_t sold = 0;
+  const auto sell_if_grey = [&](Item* item) {
+    if (!item) {
+      return;
+    }
+    const ItemTemplate* proto = item->GetTemplate();
+    if (!proto || proto->Quality != ITEM_QUALITY_POOR ||
+        proto->SellPrice == 0) {
+      return;
+    }
+    WorldPacket p(CMSG_SELL_ITEM);
+    p << vendor_guid << item->GetGUID() << item->GetCount();
+    WorldPackets::Item::SellItem packet(std::move(p));
+    packet.Read();
+    bot->GetSession()->HandleSellItemOpcode(packet);
+    ++sold;
+  };
+  for (uint8_t slot = INVENTORY_SLOT_ITEM_START; slot < INVENTORY_SLOT_ITEM_END;
+       ++slot) {
+    sell_if_grey(bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot));
+  }
+  for (uint8_t i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i) {
+    if (const Bag* bag = bot->GetBagByPos(i)) {
+      for (uint32_t slot = 0; slot < bag->GetBagSize(); ++slot) {
+        sell_if_grey(bot->GetItemByPos(i, static_cast<uint8_t>(slot)));
+      }
+    }
+  }
+  return sold;
+}
+
+// Picks the point ~70 yd along `points` from the start (or the end of `points`
+// if the path is shorter).
+G3D::Vector3 PointAlongPath(const Movement::PointsArray& points,
+                            float step_yd) {
+  if (points.empty()) {
+    return G3D::Vector3();
+  }
+  float acc = 0.0f;
+  for (size_t i = 1; i < points.size(); ++i) {
+    const G3D::Vector3 seg = points[i] - points[i - 1];
+    const float len = seg.length();
+    if (acc + len >= step_yd && len > 0.0f) {
+      const float t = (step_yd - acc) / len;
+      return points[i - 1] + seg * t;
+    }
+    acc += len;
+  }
+  return points.back();
+}
+
 }  // namespace
 
 std::string UseObjectNow(Player* bot, GameObject* go) {
@@ -160,10 +318,7 @@ std::string UseObjectNow(Player* bot, GameObject* go) {
   // If WalkNextTo brought the bot into LootDistance, clear its movement timer
   // so UseGameObject's "move to loot" step is not refused by
   // IsWaitingForLastMove.
-  if (auto* last =
-          ai->GetAiObjectContext()->GetValue<LastMovement&>("last movement")) {
-    last->Get().clear();
-  }
+  ClearLastMovement(bot);
   // Playerbots' "use" action takes the object as a chat link (the form
   // ChatHelper::FormatGameobject writes) and does what a click does: a chest,
   // herb or vein goes through its loot strategy (walk there, open, loot), any
@@ -176,6 +331,317 @@ std::string UseObjectNow(Player* bot, GameObject* go) {
   }
   ai->ResetActionDuration();
   return "";
+}
+
+TalkResult TalkToNpcNow(Player* bot, Creature* npc) {
+  PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
+  if (!ai) {
+    return {"not a bot", ""};
+  }
+  if (!npc || !npc->IsInWorld() || !npc->IsAlive()) {
+    return {"that NPC is gone", ""};
+  }
+  if (!IsInTalkRange(bot, npc)) {
+    return {base::StringPrintf("%s is %.0f yd away", npc->GetName().c_str(),
+                               bot->GetDistance(npc)),
+            ""};
+  }
+  ClearLastMovement(bot);
+  if (bot->isMoving()) {
+    bot->StopMoving();
+  }
+  bot->SetFacingToObject(npc);
+  bot->SetSelection(npc->GetGUID());
+
+  std::vector<std::string> done;
+
+  // 1. Quest giver: turn in completed quests first, then accept available ones
+  // (two passes so a follow-up quest unlocked by a turn-in is also accepted).
+  if (npc->HasNpcFlag(UNIT_NPC_FLAG_QUESTGIVER) &&
+      bot->CanInteractWithQuestGiver(npc)) {
+    for (int pass = 0; pass < 2; ++pass) {
+      bot->PrepareQuestMenu(npc->GetGUID());
+      const QuestMenu& menu = bot->PlayerTalkClass->GetQuestMenu();
+      bool turned_in_any = false;
+      for (uint8_t idx = 0; idx < menu.GetMenuItemCount(); ++idx) {
+        const QuestMenuItem& item = menu.GetItem(idx);
+        const Quest* quest = sObjectMgr->GetQuestTemplate(item.QuestId);
+        if (!quest) {
+          continue;
+        }
+        const QuestStatus status = bot->GetQuestStatus(item.QuestId);
+        if (status == QUEST_STATUS_COMPLETE &&
+            !bot->GetQuestRewardStatus(item.QuestId) &&
+            bot->CanRewardQuest(quest, false)) {
+          const uint32_t reward_idx = BestQuestRewardIndex(bot, ai, quest);
+          if (bot->CanRewardQuest(quest, reward_idx, false)) {
+            WorldPacket p(CMSG_QUESTGIVER_CHOOSE_REWARD);
+            p << npc->GetGUID() << quest->GetQuestId() << reward_idx;
+            p.rpos(0);
+            bot->GetSession()->HandleQuestgiverChooseRewardOpcode(p);
+            ai->RecordQuestRewarded(quest->GetQuestId());
+            done.push_back("turned in " + quest->GetTitle());
+            turned_in_any = true;
+          }
+        } else if (status == QUEST_STATUS_NONE &&
+                   bot->CanTakeQuest(quest, false) &&
+                   bot->CanAddQuest(quest, false)) {
+          WorldPacket p(CMSG_QUESTGIVER_ACCEPT_QUEST);
+          uint32_t unk1 = 0;
+          p << npc->GetGUID() << quest->GetQuestId() << unk1;
+          p.rpos(0);
+          bot->GetSession()->HandleQuestgiverAcceptQuestOpcode(p);
+          ai->RecordQuestAccepted(quest->GetQuestId());
+          done.push_back("accepted " + quest->GetTitle());
+        }
+      }
+      if (!turned_in_any) {
+        break;
+      }
+    }
+  }
+
+  // 2. Trainer: learn affordable spells.
+  if (npc->HasNpcFlag(UNIT_NPC_FLAG_TRAINER | UNIT_NPC_FLAG_TRAINER_CLASS)) {
+    if (const Trainer::Trainer* trainer =
+            sObjectMgr->GetTrainer(npc->GetEntry())) {
+      if (!trainer->IsTrainerValidForPlayer(bot)) {
+        if (done.empty()) {
+          return {npc->GetName() + " cannot train your class", ""};
+        }
+      } else {
+        const float discount = bot->GetReputationPriceDiscount(npc);
+        std::vector<std::string> learned;
+        bool too_expensive = false;
+        for (const Trainer::Spell& sp : trainer->GetSpells()) {
+          const Trainer::Spell* tsp = trainer->GetSpell(sp.SpellId);
+          if (!tsp ||
+              !PlayerbotFactory::IsTrainerSpellAllowedForBot(bot, trainer,
+                                                             tsp) ||
+              !trainer->CanTeachSpell(bot, tsp)) {
+            continue;
+          }
+          const SpellInfo* info = sSpellMgr->GetSpellInfo(tsp->SpellId);
+          if (!info) {
+            continue;
+          }
+          const uint32_t cost =
+              static_cast<uint32_t>(std::floor(tsp->MoneyCost * discount));
+          if (bot->GetMoney() < cost) {
+            too_expensive = true;
+            continue;
+          }
+          bot->ModifyMoney(-static_cast<int32_t>(cost));
+          if (info->HasEffect(SPELL_EFFECT_LEARN_SPELL)) {
+            bot->CastSpell(bot, info->Id, true);
+          } else {
+            bot->learnSpell(info->Id, false);
+          }
+          const char* sname = info->SpellName[sWorld->GetDefaultDbcLocale()];
+          if (sname && *sname) {
+            learned.push_back(sname);
+          }
+        }
+        if (!learned.empty()) {
+          done.push_back("learned " + base::JoinString(learned, ", "));
+        } else if (too_expensive) {
+          done.push_back("not enough money for new spells");
+        } else {
+          done.push_back("no new spells to learn");
+        }
+      }
+    }
+  }
+
+  // 3. Vendor / repair: sell grey items, repair equipment.
+  if (npc->HasNpcFlag(UNIT_NPC_FLAG_VENDOR)) {
+    const uint32_t sold = SellGreyItemsTo(bot, npc->GetGUID());
+    if (sold > 0) {
+      done.push_back(base::StringPrintf("sold %u grey item%s", sold,
+                                        sold == 1 ? "" : "s"));
+    }
+  }
+  if (npc->HasNpcFlag(UNIT_NPC_FLAG_REPAIR)) {
+    const float discount = bot->GetReputationPriceDiscount(npc);
+    uint32_t cost =
+        bot->DurabilityRepair(EQUIPMENT_SLOT_MAINHAND, true, discount, false);
+    cost += bot->DurabilityRepair(EQUIPMENT_SLOT_RANGED, true, discount, false);
+    cost +=
+        bot->DurabilityRepair(EQUIPMENT_SLOT_OFFHAND, true, discount, false);
+    cost += bot->DurabilityRepairAll(true, discount, false);
+    if (cost > 0) {
+      done.push_back("repaired gear");
+    }
+  }
+  if (npc->HasNpcFlag(UNIT_NPC_FLAG_INNKEEPER) &&
+      bot->m_homebindAreaId != bot->GetAreaId()) {
+    WorldLocation loc(bot->GetMapId(), bot->GetPositionX(), bot->GetPositionY(),
+                      bot->GetPositionZ(), bot->GetOrientation());
+    bot->SetHomebind(loc, bot->GetAreaId());
+    done.push_back("bound hearthstone");
+  }
+
+  ai->ResetActionDuration();
+  const std::string summary = base::StrCat(
+      {"talked to ", npc->GetName(), ": ",
+       done.empty() ? "nothing new" : base::JoinString(done, "; ")});
+  return {"", summary};
+}
+
+bool HasFoodOrDrinkAura(Player* bot) {
+  if (bot->HasAura(kSpellGraccusFruitcake)) {
+    return true;
+  }
+  for (const auto& [spell_id, app] : bot->GetAppliedAuras()) {
+    (void)spell_id;
+    if (!app || !app->GetBase()) {
+      continue;
+    }
+    const SpellInfo* info = app->GetBase()->GetSpellInfo();
+    if (!info) {
+      continue;
+    }
+    const uint32_t cat = info->GetCategory();
+    if (cat == kSpellCategoryFood || cat == kSpellCategoryDrink) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool IsRestInProgress(Player* bot, bool* had_food_drink_aura) {
+  if (!bot->IsAlive() || bot->IsInCombat() || bot->IsMounted() ||
+      bot->IsInWater()) {
+    return false;
+  }
+  const bool full_hp = bot->IsFullHealth();
+  const bool full_mana =
+      bot->GetMaxPower(POWER_MANA) == 0 ||
+      bot->GetPower(POWER_MANA) >= bot->GetMaxPower(POWER_MANA);
+  if (full_hp && full_mana) {
+    if (bot->getStandState() == UNIT_STAND_STATE_SIT) {
+      bot->SetStandState(UNIT_STAND_STATE_STAND);
+    }
+    return false;
+  }
+  const bool has_aura = HasFoodOrDrinkAura(bot);
+  if (has_aura) {
+    if (had_food_drink_aura) {
+      *had_food_drink_aura = true;
+    }
+    return true;
+  }
+  if (had_food_drink_aura && *had_food_drink_aura) {
+    // Food/drink aura expired before reaching 100%: finish the step so the
+    // brain can decide whether to eat again or move on.
+    if (bot->getStandState() == UNIT_STAND_STATE_SIT) {
+      bot->SetStandState(UNIT_STAND_STATE_STAND);
+    }
+    return false;
+  }
+  return bot->getStandState() == UNIT_STAND_STATE_SIT;
+}
+
+WalkStepResult TickLongWalk(Player* bot,
+                            base::TimeTicks now,
+                            PendingWalk* walk) {
+  if (!walk || !bot->IsAlive() || bot->IsInCombat() ||
+      bot->GetMapId() != walk->map_id) {
+    return {.cancelled = true};
+  }
+  const float dist_to_dest =
+      bot->GetExactDist(walk->dest.x, walk->dest.y, walk->dest.z);
+  if (dist_to_dest <= kWalkArrivalYd) {
+    ClearLastMovement(bot);
+    if (bot->isMoving()) {
+      bot->StopMoving();
+    }
+    return {.arrived = true};
+  }
+
+  if (dist_to_dest + kWalkStallProgressYd <= walk->best_dist_yd) {
+    walk->best_dist_yd = dist_to_dest;
+    walk->last_progress_at = now;
+  } else if (now - walk->last_progress_at >= kWalkStallTimeout) {
+    ClearLastMovement(bot);
+    if (bot->isMoving()) {
+      bot->StopMoving();
+    }
+    return {.error = "stuck"};
+  }
+
+  if (walk->has_step && bot->isMoving()) {
+    const float dist_to_step = bot->GetExactDist(
+        walk->step_dest.x, walk->step_dest.y, walk->step_dest.z);
+    if (dist_to_step > kWalkStepAdvanceYd) {
+      return {};
+    }
+  }
+
+  const base::TimeTicks path_start = base::TimeTicks::Now();
+  constexpr uint32_t kTypeOk =
+      PATHFIND_NORMAL | PATHFIND_INCOMPLETE | PATHFIND_FARFROMPOLY;
+  G3D::Vector3 next_pt;
+  bool found = false;
+
+  {
+    PathGenerator path(bot);
+    path.CalculatePath(walk->dest.x, walk->dest.y, walk->dest.z);
+    if ((path.GetPathType() & ~kTypeOk) == 0 && path.GetPath().size() >= 2) {
+      const G3D::Vector3 cand = PointAlongPath(path.GetPath(), kWalkStepYd);
+      const float cand_dist_to_dest =
+          std::hypot(cand.x - walk->dest.x, cand.y - walk->dest.y);
+      if (bot->GetExactDist(cand.x, cand.y, cand.z) >= 2.0f &&
+          cand_dist_to_dest + 2.0f < dist_to_dest) {
+        next_pt = cand;
+        found = true;
+      }
+    }
+  }
+
+  if (!found) {
+    Map* map = bot->GetMap();
+    const float base_angle = bot->GetAngle(walk->dest.x, walk->dest.y);
+    const float step_len = std::min(kWalkStepYd, dist_to_dest);
+    static constexpr float kOffsets[] = {0.0f, 0.7f, -0.7f};
+    for (float offset : kOffsets) {
+      const float angle = base_angle + offset;
+      const float tx = bot->GetPositionX() + std::cos(angle) * step_len;
+      const float ty = bot->GetPositionY() + std::sin(angle) * step_len;
+      float tz = walk->dest.z;
+      if (map) {
+        const float h = map->GetHeight(bot->GetPhaseMask(), tx, ty,
+                                       bot->GetPositionZ() + 10.0f);
+        if (h != INVALID_HEIGHT && h != VMAP_INVALID_HEIGHT_VALUE) {
+          tz = h;
+        }
+      }
+      PathGenerator path(bot);
+      path.CalculatePath(tx, ty, tz);
+      if ((path.GetPathType() & ~kTypeOk) == 0 && path.GetPath().size() >= 2) {
+        const G3D::Vector3 cand = PointAlongPath(path.GetPath(), kWalkStepYd);
+        if (bot->GetExactDist(cand.x, cand.y, cand.z) >= 3.0f) {
+          next_pt = cand;
+          found = true;
+          break;
+        }
+      }
+    }
+  }
+
+  const base::TimeDelta path_time = base::TimeTicks::Now() - path_start;
+  if (!found) {
+    ClearLastMovement(bot);
+    if (bot->isMoving()) {
+      bot->StopMoving();
+    }
+    return {.error = "stuck", .path_time = path_time};
+  }
+
+  walk->step_dest = {next_pt.x, next_pt.y, next_pt.z};
+  walk->has_step = true;
+  WalkTo(bot, next_pt.x, next_pt.y, next_pt.z);
+  return {.path_time = path_time};
 }
 
 bool IsLootInProgress(Player* bot, ObjectGuid guid) {
@@ -211,9 +677,84 @@ ExecuteResult ExecuteObjectOption(Player* bot, const OptionTarget& target) {
   return {};
 }
 
+ExecuteResult ExecuteTalkOption(Player* bot, const OptionTarget& target) {
+  if (bot->IsInCombat()) {
+    return {"you are in combat"};
+  }
+  Creature* npc =
+      ObjectAccessor::GetCreature(*bot, ParseSnapshotGuid(target.guid));
+  if (!npc || !npc->IsInWorld() || !npc->IsAlive()) {
+    return {target.name + " is gone"};
+  }
+  if (IsInTalkRange(bot, npc)) {
+    TalkResult res = TalkToNpcNow(bot, npc);
+    const bool used = res.error.empty();
+    return {std::move(res.error), used, std::move(res.info)};
+  }
+  WalkNextTo(bot, npc);
+  return {};
+}
+
+ExecuteResult ExecuteRestOption(Player* bot, PlayerbotAI* ai) {
+  if (bot->IsInCombat()) {
+    return {"you are in combat"};
+  }
+  if (bot->IsMounted()) {
+    return {"you are mounted"};
+  }
+  if (bot->IsInWater()) {
+    return {"you are swimming"};
+  }
+  ClearLastMovement(bot);
+  if (bot->isMoving()) {
+    bot->StopMoving();
+  }
+  bool used_consumable = false;
+  if (!bot->IsFullHealth()) {
+    used_consumable |= ai->DoSpecificAction("eat", Event(), /*silent=*/true);
+  }
+  if (bot->GetMaxPower(POWER_MANA) > 0 &&
+      bot->GetPower(POWER_MANA) < bot->GetMaxPower(POWER_MANA)) {
+    used_consumable |= ai->DoSpecificAction("drink", Event(), /*silent=*/true);
+  }
+  if (!used_consumable) {
+    bot->SetStandState(UNIT_STAND_STATE_SIT);
+  }
+  ai->ResetActionDuration();
+  return {};
+}
+
+ExecuteResult ExecuteWalkOption(Player* bot,
+                                const OptionTarget& target,
+                                PendingWalk* walk) {
+  if (bot->IsInCombat()) {
+    return {"you are in combat"};
+  }
+  if (!target.pos || !walk) {
+    return {"no destination for " + target.name};
+  }
+  const base::TimeTicks now = base::TimeTicks::Now();
+  *walk = PendingWalk{
+      .map_id = bot->GetMapId(),
+      .dest = *target.pos,
+      .step_dest = {},
+      .has_step = false,
+      .best_dist_yd =
+          bot->GetExactDist(target.pos->x, target.pos->y, target.pos->z),
+      .last_progress_at = now,
+  };
+  const WalkStepResult step = TickLongWalk(bot, now, walk);
+  if (!step.error.empty()) {
+    return {step.error, /*used=*/false, "", step.path_time};
+  }
+  return {"", /*used=*/step.arrived, "", step.path_time};
+}
+
 }  // namespace
 
-ExecuteResult ExecuteOption(Player* bot, const OptionTarget& target) {
+ExecuteResult ExecuteOption(Player* bot,
+                            const OptionTarget& target,
+                            PendingWalk* walk) {
   if (target.kind == OptionTarget::Kind::kKeep) {
     return {};  // The body carries on with what it was doing.
   }
@@ -228,6 +769,17 @@ ExecuteResult ExecuteOption(Player* bot, const OptionTarget& target) {
       target.kind == OptionTarget::Kind::kUse) {
     return ExecuteObjectOption(bot, target);
   }
+  if (target.kind == OptionTarget::Kind::kTalk) {
+    return ExecuteTalkOption(bot, target);
+  }
+  if (target.kind == OptionTarget::Kind::kRest) {
+    return ExecuteRestOption(bot, ai);
+  }
+  if (target.kind == OptionTarget::Kind::kExplore ||
+      target.kind == OptionTarget::Kind::kGoTo) {
+    return ExecuteWalkOption(bot, target, walk);
+  }
+
   Unit* unit = ObjectAccessor::GetUnit(*bot, ParseSnapshotGuid(target.guid));
   if (!unit || !unit->IsInWorld()) {
     return {target.name + " is gone"};
@@ -299,6 +851,10 @@ ExecuteResult ExecuteOption(Player* bot, const OptionTarget& target) {
       return {};
     case OptionTarget::Kind::kGather:
     case OptionTarget::Kind::kUse:
+    case OptionTarget::Kind::kTalk:
+    case OptionTarget::Kind::kRest:
+    case OptionTarget::Kind::kExplore:
+    case OptionTarget::Kind::kGoTo:
     case OptionTarget::Kind::kKeep:
       break;  // Handled above.
   }

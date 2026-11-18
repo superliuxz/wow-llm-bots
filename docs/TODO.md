@@ -9,23 +9,28 @@ Last updated 2026-11-17.
 
 ## In progress
 
-Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `indicators`) is done, remaining #4 option kinds and open panels are in `## Next, in order` ahead of #5.
+Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `indicators`) and all option kinds (`Gather`, `Use`, `Talk`, `Rest`, `Explore`, `Go to`) are done; remaining #4 open panels are in `## Next, in order` ahead of #5.
 
-- **#4 Module: more things a bot can do: partly done (2026-11-17).** Built, unit-tested, and
-  verified live: `Gather <herb/ore>` and `Use <chest, quest object, door, portal>` options
-  (`options.cc`, `option_executor.cc`, `UseOnArrival` in `llm_brain_world_script.cc`);
-  `snapshot_builder.cc` + `nearby_builder.{h,cc}` now fill `ext.target`, `ext.combat`,
-  `ext.party`, `ext.quest_tracker`, and `base.self.indicators` (`bag_free_slots`,
-  `talent_points_unspent`, `new_mail`, `durability_warning`); `screen_renderer.cc` renders all
-  of them. **Left:** `Talk`, `Rest`, `Explore`, `Go to` options (resolves the 13 `planned` eval
-  cases), then open panels (`bags`, `character`, `quest_log` — `docs/specs/snapshot.md`).
+- **#4 Module: more things a bot can do: mostly done (2026-11-17).** Built, unit-tested, and
+  verified live: `Gather <herb/ore>` (gated by `required_skill` vs. learned skill),
+  `Use <chest, quest object, door, portal>`, `Talk to <name>` (turns in completed quests via
+  `BestRewardIndex`, accepts available quests, learns affordable trainer spells, sells greys,
+  repairs, binds hearthstone, and emits an `info` summary), `Rest (...)` (eats/drinks/sits until
+  full HP and mana or aura expiry), `Explore <dir>, <dist> yd (<mobs, level range>)`, and
+  `Go to <place> (<services>), <dist> yd <dir>` (stepped ~70 yd `mmap` walk with 10 s stall
+  refusal; 50-bot world-thread path perf case in `perf_walk.py`); `snapshot_builder.cc` +
+  `nearby_builder.{h,cc}` fill `ext.target`, `ext.combat`, `ext.party`, `ext.quest_tracker`
+  (incl. `Objective::where`), `ext.minimap.places`, `base.self.indicators`,
+  `GameObject::required_skill`, and `OptionFacts` (`<case>.facts.json` for `fixture_options`);
+  all 13 formerly-`planned` eval cases now run on live options (**13/13 pass**, **48/50** across
+  the full eval suite). **Left:** open panels (`bags`, `character`, `quest_log` —
+  `docs/specs/snapshot.md`).
 
 ## Next, in order
 
-1. **Module: remaining options and open panels** (`#4`, `docs/plans/harness.md` M1,
-   `docs/specs/snapshot.md`): add `Talk` (gossip without master), `Rest`, `Explore`, and `Go to`
-   options so the 13 `planned` eval cases run on live options, then open panels (`bags`,
-   `character`, `quest_log`).
+1. **Module: open panels** (`#4`, `docs/plans/harness.md` M1, `docs/specs/snapshot.md`): fill
+   `ext.bags`, `ext.character`, and `ext.quest_log` when listed in `base.ui.open_panels`, and
+   support `open` / `close` commands.
 2. **Standing orders** (`#5`, `docs/specs/triggers.md`, "The grammar (final, 2026-11-17)"). The `when`
    and `<act>` grammar is final and both audit tables parse against it
    (`tools/wlb check triggers`; `docs/specs/trigger-conditions.tsv` and `trigger-actions.tsv`).
@@ -72,21 +77,19 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
 
 ## Loose ends
 
-- Bots without Herbalism or Mining are still offered `Gather <herb/ore>` and walk there before
-  failing with `you lack the skill, tool or key for ...` (seen live on Copper Vein, Kingsblood,
-  Peacebloom); gate or annotate by `required_skill` / learned skills.
 - When two brain-run bots whisper `"who"` back and forth (`Gatda` -> `Testpriest`), they echoed
   `"who"` several times before switching to a real question (and stopped naturally after
   `"sounds good, let me know when you're ready"`).
 - A bot once wrote `tell <its own name>:` (Gatda, Gemma 4, live 2026-11-17); the module refuses
   it. Likely cause, the RULES.md example `tell Gatda:`, is fixed (review finding 8); watch whether
   it recurs.
-- **Eval on live options (2026-11-17, Gemma 4):** 34/37 live cases (`herb_to_gather` now
-  passes with `ext.quest_tracker`: 1/1), 7/7 whispers, 10/13 planned. With only Attack/Gather/Use/Keep
-  on screen, it attacks a critter (`ignore_critter`), a red level-6 mob (`red_mob_nearby`), and a
-  tapped mob (`skip_tapped_mob`): no way to walk away exists yet (Explore / Go to town are
-  `planned`). The Qwen3.6 shootout was not re-run on the new set; the model choice was made on the
-  old one.
+- **Eval on live options (2026-11-17, Gemma 4):** **48/50 (96%)** across all 50 cases on live
+  `fixture_options` (`<case>.facts.json`), including **13/13** on the formerly-`planned` cases
+  (`Talk`, `Rest`, `Explore`, `Go to`), **7/7** on whispers, and `red_mob_nearby` now walking
+  away via `Explore`. The remaining 2 misses (`ignore_critter`, `skip_tapped_mob`) have a dead
+  unlootable boar line (`- Mottled Boar: ... dead`) next to option `1. Attack ...` that the
+  model tries to loot. The Qwen3.6 shootout was not re-run on the new set; the model choice was
+  made on the old one.
 - Dead bots: only Keep is offered while dead, refused steps back off (2-30 s), and coming back
   to life wakes the brain ("alive again"). Release spirit / run to corpse are not options yet
   (the body's playerbots dead strategy handles it).

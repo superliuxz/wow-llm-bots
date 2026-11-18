@@ -24,14 +24,17 @@ std::optional<base::TimeDelta> TimeoutForKind(OptionKind kind) {
     case OptionKind::kAttack:
       return base::Seconds(45);
     case OptionKind::kLoot:
-    case OptionKind::kTalk:
     case OptionKind::kGather:
     case OptionKind::kUse:
       return base::Seconds(15);
-    case OptionKind::kExplore:
+    case OptionKind::kTalk:
+      return base::Seconds(30);
     case OptionKind::kRest:
-    case OptionKind::kTown:
       return base::Seconds(60);
+    case OptionKind::kExplore:
+    case OptionKind::kTown:
+      // The module's 10 s stall check is the real guard; this is a backstop.
+      return base::Minutes(10);
     case OptionKind::kKeep:
       // `Keep` runs until the plan's own `look` timer or a surprise trigger.
       return std::nullopt;

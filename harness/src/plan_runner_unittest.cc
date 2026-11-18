@@ -183,5 +183,54 @@ TEST(PlanRunnerTest, LootEndsOnTheBodysDoneSignalWhileTheCorpseIsLootable) {
   EXPECT_EQ(a3.finished_reason, "plan done");
 }
 
+TEST(PlanRunnerTest, MultipleExploreAndGoToOptionsDoNotCollideAcrossSnapshots) {
+  const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
+  pb::Snapshot s1 = MakeSnap(1);
+  AddModuleOption(&s1, "Rest (eat and drink)");
+  AddModuleOption(&s1, "Explore NE, 300 yd (boars, level 1-2)",
+                  "spot:1:-500:-4100");
+  AddModuleOption(&s1, "Explore S, 220 yd (scorpids, level 3-5)",
+                  "spot:1:-700:-4300");
+  AddModuleOption(&s1, "Go to The Den (innkeeper), 150 yd W", "place:the_den");
+  AddModuleOption(&s1, "Go to Razor Hill (vendor, repair), 900 yd N",
+                  "place:razor_hill");
+  AddModuleOption(&s1, "Keep doing what I'm doing");
+
+  PlanRunner runner;
+  // Plan: Rest (1), then Explore S (3), then Go to Razor Hill (5).
+  const RunnerAction a1 =
+      runner.Start({{1, 1}, {3, 1}, {5, 1}}, 1, RenderScreen(s1), t0);
+  ASSERT_TRUE(a1.choose);
+  EXPECT_EQ(a1.choose->option, 1u);
+  runner.set_last_command_id(10);
+
+  // Rest finishes on s2; distances and directions shifted while resting.
+  pb::Snapshot s2 = MakeSnap(2);
+  s2.done_command_id = 10;
+  AddModuleOption(&s2, "Explore N, 290 yd (boars, level 1-2)",
+                  "spot:1:-500:-4100");
+  AddModuleOption(&s2, "Explore SE, 210 yd (scorpids, level 3-5)",
+                  "spot:1:-700:-4300");
+  AddModuleOption(&s2, "Go to The Den (innkeeper), 140 yd W", "place:the_den");
+  AddModuleOption(&s2, "Go to Razor Hill (vendor, repair), 890 yd N",
+                  "place:razor_hill");
+  AddModuleOption(&s2, "Keep doing what I'm doing");
+  const RunnerAction a2 =
+      runner.OnSnapshot(s2, RenderScreen(s2), t0 + base::Seconds(15));
+  ASSERT_TRUE(a2.choose);
+  // Picks the second Explore option (scorpids), not the first (boars)!
+  EXPECT_EQ(a2.choose->option, 2u);
+  runner.set_last_command_id(11);
+
+  // Explore finishes on s3; advances to Go to Razor Hill (option 4 on s3).
+  pb::Snapshot s3 = s2;
+  s3.seq = 3;
+  s3.done_command_id = 11;
+  const RunnerAction a3 =
+      runner.OnSnapshot(s3, RenderScreen(s3), t0 + base::Seconds(60));
+  ASSERT_TRUE(a3.choose);
+  EXPECT_EQ(a3.choose->option, 4u);
+}
+
 }  // namespace
 }  // namespace harness

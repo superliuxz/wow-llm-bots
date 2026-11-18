@@ -1,0 +1,65 @@
+{
+  "has_food": true,
+  "has_drink": true,
+  "spots": [
+    {
+      "id": "spot:1:-500:-4299",
+      "dir": "NE",
+      "dist_yd": 75.9,
+      "label": "boars, level 1-2",
+      "pos": {
+        "x": -500.4,
+        "y": -4299.3,
+        "z": 41.7
+      }
+    },
+    {
+      "id": "spot:1:-483:-4198",
+      "dir": "NW",
+      "dist_yd": 85.4,
+      "label": "boars, level 1-2",
+      "pos": {
+        "x": -482.6,
+        "y": -4198.1,
+        "z": 50.6
+      }
+    },
+    {
+      "id": "spot:1:-552:-4403",
+      "dir": "E",
+      "dist_yd": 156.9,
+      "label": "boars, level 1-2",
+      "pos": {
+        "x": -552.3,
+        "y": -4402.9,
+        "z": 43.8
+      }
+    }
+  ],
+  "places": [
+    {
+      "id": "place:the_den",
+      "name": "The Den",
+      "services": "vendor, repair, priest trainer, graveyard",
+      "dir": "SW",
+      "dist_yd": 89.4,
+      "pos": {
+        "x": -617.4,
+        "y": -4202.4,
+        "z": 38.3
+      }
+    },
+    {
+      "id": "place:razor_hill",
+      "name": "Razor Hill",
+      "services": "innkeeper, vendor, repair, priest trainer",
+      "dir": "NE",
+      "dist_yd": 992.2,
+      "pos": {
+        "x": 340.4,
+        "y": -4686.3,
+        "z": 16.5
+      }
+    }
+  ]
+}
