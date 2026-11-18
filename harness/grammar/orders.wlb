@@ -1,0 +1,108 @@
+// Standing orders (docs/specs/triggers.md, "The grammar (final, 2026-11-17)").
+// The one source of the order language: tools/grammar/wlb_gen.py generates
+// its C++ types, parser, printer and GBNF (docs/plans/grammar-idl.md).
+// A choice's arms are tried in the order written: put the longer forms first
+// ("X cast on me" before "X on me").
+
+env OrderEnv {
+  order_names: names;  // units, objects, auras, spells and items; none: no orders
+}
+
+words Who     { me, tank, offtank, healer, leader, anyone, boss, it }
+words Icon    { skull, cross, square, moon, triangle, diamond, circle, star }
+words State   { flying, grounded, untargetable, submerged }
+words MyState { "in vehicle", mounted, swimming, "nearest to it" }
+words Cmp     { "<", ">" }
+words Stop    { casting, attacking, moving }
+words PetCmd  { stay, follow, passive, defensive }
+num   Num   0..999 1dp
+int   Count 0..999
+int   Digit 0..9
+name  Name  from order_names
+
+choice NearestKind {
+  Ally   = "ally";
+  Player = "player";
+  Enemy  = "enemy";
+  Named  = name:Name;
+}
+
+choice Thing {
+  Who      = who:Who;
+  MyTarget = "my target";
+  Marker   = "marker " icon:Icon;
+  Nearest  = "nearest " kind:NearestKind;
+  AllyWith = "ally with " mech:Name;
+  Group    = "group";
+  Allies   = "allies";
+  Focus    = "focus";
+  Named    = name:Name;
+}
+
+choice Check {
+  Stacks     = mech:Name " stacks" cmp:Cmp n:Count " on " who:Who;
+  Ends       = mech:Name " ends<" s:Num "s on " who:Who;
+  CastOn     = mech:Name " cast on " who:Who;
+  CastInLast = mech:Name " cast in last " s:Num "s";
+  Cast       = mech:Name " cast";
+  AppearsIn  = mech:Name " appears in last " s:Num "s";
+  Appears    = mech:Name " appears";
+  Count      = mech:Name " count" cmp:Cmp n:Count;
+  On         = mech:Name " on " who:Who;
+  Within     = a:Thing " within " yd:Num (" of " b:Thing)?;
+  Beyond     = a:Thing " beyond " yd:Num (" of " b:Thing)?;
+  Targets    = a:Thing " targets " b:Thing;
+  Hp         = a:Thing " hp" cmp:Cmp pct:Num;
+  ManaPoints = "mana_points" cmp:Cmp n:Count;
+  Mana       = "mana" cmp:Cmp pct:Num;
+  IsMarked   = a:Thing " is marked " icon:Icon;
+  Is         = a:Thing " is " state:State;
+  InSight    = a:Thing " in sight";
+  OutOfSight = a:Thing " out of sight";
+  MeBehind   = "me behind " a:Thing;
+  MyTargetIs = "my target is " a:Thing;
+  MeHas      = "me has " name:Name;
+  Me         = "me " state:MyState;
+  Phase      = "phase " n:Digit;
+  After      = "after " s:Num "s";
+  Every      = "every " s:Num "s";
+}
+
+struct Condition = (negated:"not ")? check:Check;
+
+choice When {
+  Always = "always";
+  All    = conds:list<Condition, " & ", 1..4>;
+}
+
+choice Place {
+  Behind   = "behind " t:Thing;
+  InFront  = "in front of " t:Thing;
+  MaxRange = "max range of " t:Thing;
+  YdFrom   = yd:Num " yd from " t:Thing;
+  At       = t:Thing;
+}
+
+choice Act {
+  To        = "to " place:Place;
+  Away      = "away" (" " t:Thing)? (" " yd:Num)?;
+  Avoid     = "avoid " t:Thing;
+  Target    = "target " t:Thing;
+  Use       = "use " name:Name (" on " t:Thing)?;
+  Stop      = "stop" (" " what:Stop)?;
+  FaceAway  = "face away " t:Thing;
+  Face      = "face " t:Thing;
+  Jump      = "jump";
+  Cancel    = "cancel " name:Name;
+  Mark      = "mark " t:Thing " " icon:Icon;
+  Interact  = "interact " t:Thing;
+  Board     = "board " t:Thing;
+  Leave     = "leave vehicle";
+  Equip     = "equip " name:Name;
+  PetAttack = "pet attack " t:Thing;
+  Pet       = "pet " cmd:PetCmd;
+  Kite      = "kite " t:Thing;
+  Wake      = "wake";
+}
+
+struct Order = when:When " -> " steps:list<Act, ", then ", 1..3>;

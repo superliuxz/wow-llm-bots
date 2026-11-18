@@ -302,7 +302,7 @@ TEST(PlanTest, OrderLinesOnlyWithNamesToUse) {
   EXPECT_EQ(PlanGrammar(1).find("oline"), std::string::npos);
   const std::string grammar = PlanGrammar(1, {}, {}, {"Defile"});
   EXPECT_NE(grammar.find(" oline{0,7}\n"), std::string::npos) << grammar;
-  EXPECT_NE(grammar.find("oname ::= \"Defile\"\n"), std::string::npos);
+  EXPECT_NE(grammar.find("orders-Name ::= \"Defile\"\n"), std::string::npos);
 }
 
 TEST(PlanTest, TheGrammarOffersHoverOnlyForNamesOnScreen) {

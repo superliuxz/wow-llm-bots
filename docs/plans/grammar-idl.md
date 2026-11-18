@@ -275,8 +275,10 @@ memoizing.
 Each type becomes one GBNF rule (prefixed by its file: `orders_Thing`, so the two files never
 clash); `words` and `from <env>` types become alternatives of literals, ranges become the same
 digit patterns as today. An `env` list that is empty makes its rule unusable, and the generator
-drops every alternative and optional that needs it (no `hover:` line without hover names, no
-`order:` lines without order names), the cases that are hand-coded ternaries today.
+drops every alternative and optional that needs it (no `hover:` line without hover names), the
+cases that are hand-coded ternaries today. Orders that name nothing (`always -> jump`) stay
+usable without names, so "no order names, no `order:` lines" (how orders stay off until step
+(b) of `docs/specs/triggers.md`) is an explicit gate in `OrderGrammar`, not pruning.
 
 ## Tests
 
@@ -325,6 +327,27 @@ C++, against the ~1,450 lines they replace; every later grammar change is one ed
 
 The standing-order evaluator (step (a) of `docs/specs/triggers.md`) waits for step 1, so it is
 written against the generated types.
+
+## Progress
+
+- **Step 1 (2026-11-18), done except two tests:**
+  - `tools/grammar/wlb_gen.py` (Python stdlib) generates `grammar/orders.wlb.{h,cc}` at build
+    time (`common/CMakeLists.txt`); the runtime is `harness/grammar/wlb_runtime.{h,cc}`
+    (namespace `harness::grammar::rt`: the matcher, GBNF emission with pruning, number and name
+    helpers). Choice arms are namespace-scope structs aliased in the choice (`Thing::Who` is
+    `ThingWho`), because a nested struct's default member initializers can't be used while the
+    outer struct is incomplete. Generated besides the plan: `CollectNames(value, &names)`, the
+    names a value uses (what its GBNF needs).
+  - The matcher only tries a field's ends where the literal that follows it occurs (or the
+    whole span when nothing follows); trying every end made a rejected order cost ~50 ms and the
+    junk test never finish. Now 32 forms round-trip in 4 ms, the junk test takes 1 ms.
+  - `harness/src/orders.{h,cc}` is the thin API (`using` the generated `ParseOrder`,
+    `ParseWhen`, `FormatOrder`; `ParseActs`; `OrderGrammar` with the explicit "no names, no
+    orders" gate). The hand-written order parser, printer and GBNF are gone.
+  - Tests: `OrdersTest` (incl. "Fire on the ground on me", "away boss 10"), every audit row
+    parses, round-trips and is accepted by the generated GBNF (llama.cpp's code), the junk test.
+  - **Left in step 1:** random round-trip values (the audit rows cover every form for now) and
+    the generator's golden test (a small `.wlb` with each construct).
 
 ## Decided (2026-11-18)
 

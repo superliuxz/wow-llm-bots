@@ -7,10 +7,15 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
+#include "base/strings/strcat.h"
 #include "base/strings/string_split.h"
+#include "base/time/time.h"
 #include "file_util.h"
+#include "gbnf_check.h"
+#include "grammar/orders.wlb.h"
 #include "gtest/gtest.h"
 
 namespace harness {
@@ -20,17 +25,59 @@ TEST(OrdersTest, ParsesTheSpecsExample) {
   const std::optional<Order> order =
       ParseOrder("Defile on me -> away, then to behind boss");
   ASSERT_TRUE(order);
-  ASSERT_EQ(order->when.conditions.size(), 1u);
-  const Check& test = order->when.conditions[0].test;
-  EXPECT_EQ(test.kind, Check::Kind::kOn);
-  EXPECT_EQ(test.mech, "Defile");
-  EXPECT_EQ(test.who, Who::kMe);
+  const auto* all = std::get_if<When::All>(&order->when.value);
+  ASSERT_TRUE(all);
+  ASSERT_EQ(all->conds.size(), 1u);
+  EXPECT_FALSE(all->conds[0].negated);
+  const auto* on = std::get_if<Check::On>(&all->conds[0].check.value);
+  ASSERT_TRUE(on);
+  EXPECT_EQ(on->mech, "Defile");
+  EXPECT_EQ(on->who, Who::kMe);
   ASSERT_EQ(order->steps.size(), 2u);
-  EXPECT_EQ(order->steps[0].verb, Act::Verb::kAway);
-  EXPECT_FALSE(order->steps[0].thing);
-  EXPECT_EQ(order->steps[1].verb, Act::Verb::kTo);
-  EXPECT_EQ(order->steps[1].place.kind, Place::Kind::kBehind);
-  EXPECT_EQ(order->steps[1].place.thing.who, Who::kBoss);
+  const auto* away = std::get_if<Act::Away>(&order->steps[0].value);
+  ASSERT_TRUE(away);
+  EXPECT_FALSE(away->t);
+  EXPECT_FALSE(away->yd);
+  const auto* to = std::get_if<Act::To>(&order->steps[1].value);
+  ASSERT_TRUE(to);
+  const auto* behind = std::get_if<Place::Behind>(&to->place.value);
+  ASSERT_TRUE(behind);
+  const auto* boss = std::get_if<Thing::Who>(&behind->t.value);
+  ASSERT_TRUE(boss);
+  EXPECT_EQ(boss->who, Who::kBoss);
+}
+
+// A name that holds a separator splits where both sides parse ("Fire on the
+// ground" is the aura, not "Fire").
+TEST(OrdersTest, ANameMayHoldTheSeparator) {
+  const std::optional<Order> order =
+      ParseOrder("Fire on the ground on me -> away");
+  ASSERT_TRUE(order);
+  const auto& all = std::get<When::All>(order->when.value);
+  EXPECT_EQ(std::get<Check::On>(all.conds[0].check.value).mech,
+            "Fire on the ground");
+  // "away boss 10": the boss and 10 yards, not a unit named "boss 10" (a name
+  // needs a letter, and the shorter thing is tried first).
+  const std::optional<std::vector<Act>> acts = ParseActs("away boss 10");
+  ASSERT_TRUE(acts);
+  const auto& away = std::get<Act::Away>((*acts)[0].value);
+  ASSERT_TRUE(away.t && away.yd);
+  EXPECT_EQ(std::get<Thing::Who>(away.t->value).who, Who::kBoss);
+  EXPECT_EQ(*away.yd, 10);
+}
+
+// What the printer writes, the GBNF the brain is held to accepts (with the
+// names the order uses).
+void ExpectGrammarAccepts(const Order& order) {
+  std::vector<std::string> names;
+  grammar::CollectNames(order, &names);
+  const std::string rules =
+      OrderGrammar(names.empty() ? std::vector<std::string>{"X"} : names);
+  const std::string text = FormatOrder(order);
+  const GbnfResult result =
+      GbnfAccepts(rules, grammar::OrdersRuleName("Order"), text);
+  EXPECT_TRUE(result.grammar_ok) << rules;
+  EXPECT_TRUE(result.accepted) << text << "\n" << rules;
 }
 
 // Each line parses, and prints back exactly as written.
@@ -75,6 +122,7 @@ TEST(OrdersTest, EveryFormRoundTrips) {
     const std::optional<Order> order = ParseOrder(text);
     ASSERT_TRUE(order) << text;
     EXPECT_EQ(FormatOrder(*order), text);
+    ExpectGrammarAccepts(*order);
   }
 }
 
@@ -152,7 +200,11 @@ TEST(OrdersTest, EveryFittingConditionOfTheAuditParses) {
                 {"fits", "always", "unsayable", "bugnet", "plumbing", "cheat"});
   EXPECT_GT(whens.size(), 300u);
   for (const std::string& when : whens) {
-    EXPECT_TRUE(ParseWhen(when)) << when;
+    const std::optional<Order> order =
+        ParseOrder(base::StrCat({when, " -> wake"}));
+    ASSERT_TRUE(order) << when;
+    EXPECT_EQ(ParseOrder(FormatOrder(*order)), order) << when;
+    ExpectGrammarAccepts(*order);
   }
 }
 
@@ -162,7 +214,11 @@ TEST(OrdersTest, EveryFittingActionOfTheAuditParses) {
                 {"fits", "reflex", "unsayable", "bugnet", "plumbing", "cheat"});
   EXPECT_GT(acts.size(), 200u);
   for (const std::string& act : acts) {
-    EXPECT_TRUE(ParseActs(act)) << act;
+    const std::optional<Order> order =
+        ParseOrder(base::StrCat({"always -> ", act}));
+    ASSERT_TRUE(order) << act;
+    EXPECT_EQ(ParseOrder(FormatOrder(*order)), order) << act;
+    ExpectGrammarAccepts(*order);
   }
 }
 
@@ -170,10 +226,27 @@ TEST(OrdersTest, TheGrammarNamesOnlyWhatTheBotKnows) {
   EXPECT_EQ(OrderGrammar({}), "");
   const std::string grammar =
       OrderGrammar({"Defile", "Lord Marrowgar", "bad|name", ""});
-  EXPECT_NE(grammar.find("oname ::= \"Defile\" | \"Lord Marrowgar\"\n"),
+  EXPECT_NE(grammar.find("orders-Name ::= \"Defile\" | \"Lord Marrowgar\"\n"),
             std::string::npos)
       << grammar;
-  EXPECT_NE(grammar.find("oline ::= \"\\norder: \" owhen"), std::string::npos);
+  EXPECT_NE(grammar.find("oline ::= \"\\norder: \" orders-Order\n"),
+            std::string::npos);
+}
+
+// An unconstrained model can send junk; trying every split point must not blow
+// up (docs/plans/grammar-idl.md, "Tests").
+TEST(OrdersTest, JunkFailsFast) {
+  std::string junk;
+  while (junk.size() < 240) {
+    junk += "a on a & ";
+  }
+  for (const std::string& text :
+       {junk, junk + "-> wake", "always -> " + junk,
+        std::string(240, 'a') + " within 5 of " + std::string(10, 'b')}) {
+    const base::TimeTicks start = base::TimeTicks::Now();
+    ParseOrder(text);
+    EXPECT_LT(base::TimeTicks::Now() - start, base::Milliseconds(200)) << text;
+  }
 }
 
 }  // namespace

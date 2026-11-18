@@ -136,6 +136,23 @@ target_compile_options(fixture_options PRIVATE ${WLB_SAFETY_FLAGS})
 # The harness (harness/): the brain's process. Its parts that don't need the
 # game are built and tested here, with the same flags and sanitizers as the rest.
 set(WLB_HARNESS_SRC "${WLB_ROOT}/harness/src")
+
+# The reply grammars, generated from harness/grammar/*.wlb by
+# tools/grammar/wlb_gen.py (docs/plans/grammar-idl.md) into
+# <build>/gen/grammar/; the generator's runtime is harness/grammar/wlb_runtime.
+set(WLB_GRAMMAR_GEN "${CMAKE_CURRENT_BINARY_DIR}/gen")
+set(WLB_GRAMMAR_SOURCES)
+foreach(grammar orders)
+  set(wlb "${WLB_ROOT}/harness/grammar/${grammar}.wlb")
+  set(out "${WLB_GRAMMAR_GEN}/grammar/${grammar}.wlb")
+  add_custom_command(
+    OUTPUT "${out}.h" "${out}.cc"
+    COMMAND python3 -I -B "${WLB_ROOT}/tools/grammar/wlb_gen.py" "${wlb}"
+            "${WLB_GRAMMAR_GEN}/grammar"
+    DEPENDS "${WLB_ROOT}/tools/grammar/wlb_gen.py" "${wlb}"
+    COMMENT "Generating ${grammar}.wlb.{h,cc}")
+  list(APPEND WLB_GRAMMAR_SOURCES "${out}.cc")
+endforeach()
 add_library(wlb_harness STATIC "${WLB_HARNESS_SRC}/bot_loop.cc"
             "${WLB_HARNESS_SRC}/decide.cc"
             "${WLB_HARNESS_SRC}/decision_log.cc"
@@ -143,6 +160,8 @@ add_library(wlb_harness STATIC "${WLB_HARNESS_SRC}/bot_loop.cc"
             "${WLB_HARNESS_SRC}/llm_client.cc"
             "${WLB_HARNESS_SRC}/module_connection.cc"
             "${WLB_HARNESS_SRC}/orders.cc"
+            "${WLB_ROOT}/harness/grammar/wlb_runtime.cc"
+            ${WLB_GRAMMAR_SOURCES}
             "${WLB_HARNESS_SRC}/plan.cc"
             "${WLB_HARNESS_SRC}/plan_runner.cc"
             "${WLB_HARNESS_SRC}/prompt.cc"
@@ -150,7 +169,8 @@ add_library(wlb_harness STATIC "${WLB_HARNESS_SRC}/bot_loop.cc"
             "${WLB_HARNESS_SRC}/scheduler.cc"
             "${WLB_HARNESS_SRC}/screen_renderer.cc"
             "${WLB_HARNESS_SRC}/triggers.cc")
-target_include_directories(wlb_harness PUBLIC "${WLB_HARNESS_SRC}")
+target_include_directories(wlb_harness PUBLIC "${WLB_HARNESS_SRC}"
+                           "${WLB_ROOT}/harness" "${WLB_GRAMMAR_GEN}")
 # cpp-httplib and nlohmann/json are header-only third-party code (their own style,
 # so their warnings are not ours).
 target_include_directories(wlb_harness SYSTEM PUBLIC

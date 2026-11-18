@@ -14,10 +14,14 @@ design decisions below.
 
 ## Next, in order
 
-0. **Grammar IDL** (`docs/plans/grammar-idl.md`, agreed 2026-11-18; step 1 started: the llama.cpp grammar check links into the unit tests, `harness/src/gbnf_check.{h,cc}` with five stubs, and today's `PlanGrammar` accepts what `FormatPlan` writes; next the generator and `orders.wlb`): each reply grammar
-   (plan, standing orders) written once in a `.wlb` file; types, parser, printer, GBNF and
-   RULES.md's reply form generated from it. Parity only, no language change. Comes before the
-   standing-order evaluator, so that is written against the generated types.
+0. **Grammar IDL** (`docs/plans/grammar-idl.md`, "Progress"): **step 1 done** except random
+   round-trip values and the generator's golden test: `harness/grammar/orders.wlb` generates the
+   order types, parser, printer and GBNF (`tools/grammar/wlb_gen.py`, runtime
+   `harness/grammar/wlb_runtime`), the hand-written order code is gone, every audit row
+   round-trips and is accepted by llama.cpp's grammar code (`harness/src/gbnf_check`). **Next:**
+   step 2, `plan.wlb` (the `lines` construct, `~` parse-only spellings, `env` counts, the three
+   hooks, the first-line parser); then 3 (RULES.md generated) and 4. The standing-order
+   evaluator waits for it and is written against the generated types.
 1. **Standing orders** (`#5`; spec and decisions: `docs/specs/triggers.md`, "The grammar (final,
    2026-11-17)" and "Decided (2026-11-18)": `when` evaluated in the harness, acts carried out in
    the module; relative places now, room landmarks later; acts through the client's own

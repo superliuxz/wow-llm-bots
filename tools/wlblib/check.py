@@ -62,7 +62,10 @@ def _include_jobs():
     for f in (ROOT / "common").rglob("*.h"):
         jobs.append((f, ["--", *HEADER_FLAGS_20]))
     for f in (ROOT / "harness").rglob("*.h"):
-        jobs.append((f, ["--", *HEADER_FLAGS_26, "-Iharness/src"]))
+        # harness/ for grammar/wlb_runtime.h; the generated grammar headers
+        # (grammar/<name>.wlb.h, docs/plans/grammar-idl.md) are in out/common/gen.
+        jobs.append((f, ["--", *HEADER_FLAGS_26, "-Iharness/src", "-Iharness",
+                         f"-I{OUT / 'common' / 'gen'}"]))
     for f in (ROOT / "server_module").rglob("*.h"):
         jobs.append((f, ["--", *HEADER_FLAGS_20, "-Iserver_module/src"]))
     for f in [*(ROOT / "common").rglob("*.cc"), *(ROOT / "harness").rglob("*.cc")]:
