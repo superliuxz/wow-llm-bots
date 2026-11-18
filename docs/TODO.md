@@ -71,6 +71,14 @@ design decisions below.
 
 ## Loose ends
 
+- **Options go over the wire as text and are parsed back** (simplification review 2026-11-18,
+  item 4): the module writes "Attack X" / "Go to Y (...)", `ParseModuleOption`
+  (`harness/src/screen_renderer.cc`) takes it apart by prefix, and text it doesn't recognize
+  silently becomes Keep. Add `kind` and `name` fields to `snapshot::Option`, fill them in the
+  module, delete the parser (fixture options regenerate with `add_fixture_options.py`).
+- **The eval re-parses replies with regexes** (same review, item 7): `eval_plans.py`'s
+  `STEP_RE`, `TELL_RE`, `OPEN_RE`, `HOVER_RE` duplicate the generated plan parser; read
+  `harness parse-plans` JSON instead, as `perf brain` already does.
 - **The brain's screen doesn't show the bot's own auras**: the module fills `self.unit.auras` now
   (the buff bar; e2e `rest` checks Food / Drink there) but `screen_renderer.cc` doesn't render
   them, so the brain doesn't see "eating", a debuff or a buff running out.

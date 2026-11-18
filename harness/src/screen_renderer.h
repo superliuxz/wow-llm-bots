@@ -87,7 +87,7 @@ struct Screen {
 std::vector<std::string> PanelLines(const wlb::snapshot::Snapshot& snapshot,
                                     wlb::snapshot::Panel panel);
 
-// The name a reply uses for `panel` ("bags", "quest log"; plan.h kPanelNames),
+// The name a reply uses for `panel` ("bags", "quest log"; plan.wlb's `Panel`),
 // and back; PANEL_UNSPECIFIED for an unknown name.
 std::string_view PanelName(wlb::snapshot::Panel panel);
 wlb::snapshot::Panel PanelFromName(std::string_view name);

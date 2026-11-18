@@ -16,20 +16,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "glaze/glaze.hpp"  // IWYU pragma: keep
 
-// Glaze string-enum and C++ keyword field mappings.
-
-namespace wlb::snapshot::wire_detail {
-template <typename V>
-bool IsDefaultValue(const V& v) {
-  if constexpr (requires { v.has_value(); }) {
-    return !v.has_value();
-  } else if constexpr (requires { v.empty(); }) {
-    return v.empty();
-  } else {
-    return v == V{};
-  }
-}
-}  // namespace wlb::snapshot::wire_detail
+// Enum names: the wire format of every enum in snapshot.h.
 
 template <>
 struct glz::meta<wlb::snapshot::Direction> {
@@ -617,1616 +604,54 @@ struct glz::meta<wlb::snapshot::Self::Drunk> {
       glz::enumerate(DRUNK_UNSPECIFIED, SOBER, TIPSY, DRUNK, SMASHED);
 };
 
-template <>
-struct glz::meta<wlb::snapshot::TrainerSpell> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-  using T = wlb::snapshot::TrainerSpell;
-  static constexpr auto value = glz::object("price",
-                                            &T::price,
-                                            "required_level",
-                                            &T::required_level,
-                                            "learnable",
-                                            &T::learnable,
-                                            "learned",
-                                            &T::learned,
-                                            "requires",
-                                            &T::requires_);
-};
-
-template <>
-struct glz::meta<wlb::snapshot::PlayerPart> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-  using T = wlb::snapshot::PlayerPart;
-  static constexpr auto value = glz::object("class",
-                                            &T::class_,
-                                            "race",
-                                            &T::race,
-                                            "guild",
-                                            &T::guild,
-                                            "title",
-                                            &T::title,
-                                            "in_my_group",
-                                            &T::in_my_group,
-                                            "is_friend",
-                                            &T::is_friend,
-                                            "is_ignored",
-                                            &T::is_ignored,
-                                            "afk",
-                                            &T::afk,
-                                            "dnd",
-                                            &T::dnd,
-                                            "gearscore",
-                                            &T::gearscore);
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Scoreboard_Row> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-  using T = wlb::snapshot::Scoreboard_Row;
-  static constexpr auto value = glz::object("name",
-                                            &T::name,
-                                            "class",
-                                            &T::class_,
-                                            "team",
-                                            &T::team,
-                                            "killing_blows",
-                                            &T::killing_blows,
-                                            "honorable_kills",
-                                            &T::honorable_kills,
-                                            "deaths",
-                                            &T::deaths,
-                                            "bonus_honor",
-                                            &T::bonus_honor,
-                                            "damage_done",
-                                            &T::damage_done,
-                                            "healing_done",
-                                            &T::healing_done,
-                                            "objectives",
-                                            &T::objectives,
-                                            "rating_change",
-                                            &T::rating_change);
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Social_Friend> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-  using T = wlb::snapshot::Social_Friend;
-  static constexpr auto value = glz::object("name",
-                                            &T::name,
-                                            "online",
-                                            &T::online,
-                                            "level",
-                                            &T::level,
-                                            "class",
-                                            &T::class_,
-                                            "zone",
-                                            &T::zone,
-                                            "note",
-                                            &T::note);
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Vec3> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::LevelRange> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Tooltip> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::CurrencyAmount> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::StatValue> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Spell_Cost> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::AbilityState> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Unit_Pack> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::GroupPart> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::BossPart> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::VehiclePart_Seat> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Self_Control> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Self_Indicators_Durability> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Self_AutoAttack> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Self_WeaponEnchant> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Self_Rune> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Objective_Progress> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::GoalPart> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::AchievementPart> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Achievement_Criterion> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Doing> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::HoverRef> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::WorldState> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::World_Queue> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Combat_Threat> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Combat_Resources> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Encounter_Timer> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Instance_Boss> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_Gossip_Option> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_RaidBrowserEntry> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_Barber> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_Petition> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_Registrar> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_ItemText> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_Tabard> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_Battlemaster> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::PetFrame_Totem> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Environment_Falling> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Battleground_Objective> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Bags_Hearthstone> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Character_EquipmentSet> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Talents_Talent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Talents_Glyph> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Talents_Spec> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Skills_Skill> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Reputation_Faction> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Calendar_Entry> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::DungeonFinder_Queue> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Pvp_ArenaTeam> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::ErrorEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::InfoEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::LevelUpEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::XpGainedEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::MoneyChangedEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::SkillUpEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::QuestEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::DiedEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::ResurrectedEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::RollEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::MailEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::ZoneEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::InstanceEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::CalendarAlarmEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::DisplacedEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::DuelEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::TitleEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::KickedEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::HearthstoneBoundEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::DbmWarningEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::CinematicEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::TalentPointEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Blank> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Command_Choose> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Command_ClearGoal> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Command_Say> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Command_Open> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Command_Close> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Command_AhSearch> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Command_Who> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Relative> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Spell> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Aura> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Self_Indicators> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Item> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Achievement> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Where> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Ui> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::World> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_Gossip> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_RaidBrowser> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Environment> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Battleground> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Scoreboard> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Map_Zone> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Talents> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Skills> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Reputation> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Social_Guild> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Social_WhoResult> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Calendar> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::DungeonFinder_Dungeon> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Pvp> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Option> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Command_SetGoal> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Command_Hover> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Cast> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::PetPart> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::VehiclePart_Aim> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::GameObject> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Area> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Place> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::EquipmentPart_Socket> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::QuestPart> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::ActionBars> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_Merchant> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_QuestDialog> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_Mail> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_AuctionHouse> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_Recipe_Reagent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_Bank> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_GuildBank_Tab> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_Trainer> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::TradeLoot_Trade> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::TradeLoot_Roll> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Surroundings_Obstacle> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Bags> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Character> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Companions> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Spellbook> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Social> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Achievements> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::DungeonFinder> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::PromptEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::ItemReceivedEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::LootRollEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::LootWonEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::LootRollChoiceEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::AuctionEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::MinimapPingEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::AchievementEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::BattlegroundEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::LfgEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Command> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Activity> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::VehiclePart> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::EquipmentPart> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Objective> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Instance> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Death> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_FlightMap_Destination> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_Recipe> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_GuildBank> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_Socketing> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::MailInbox> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::TradeLoot> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Travel_Transport> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Surroundings> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Map_Questie> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Map_InstanceMap> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::ChatLink> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::PathFailedEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Unit> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_FlightMap> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_Tradeskill> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Travel> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Map> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::QuestLog_Entry> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::ChatEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Self> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Nearby> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Tooltipped> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Minimap> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Target> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Combat> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Party> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Raid> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Encounter> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_Inspect> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction_Stable> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::PetFrame> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Arena> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::QuestLog> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Event> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Base> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Interaction> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::ImmediateEvent> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Extensions> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Snapshot> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
-};
-
-template <>
-struct glz::meta<wlb::snapshot::ModuleMessage> {
-  static constexpr auto skip_if =
-      [](const auto& v, std::string_view, glz::meta_context) {
-        return wlb::snapshot::wire_detail::IsDefaultValue(v);
-      };
+// How every struct of snapshot.h goes on the wire and into JSON. Enums are
+// listed above (their names are the wire format); structs need no list:
+// Glaze reflects their fields, and the one specialization below gives them
+// all the same two rules.
+namespace wlb::snapshot::wire_detail {
+
+// True for a field left at its default: an unset optional or Box, an empty
+// string or list, or a value equal to its default (0, false, an UNSPECIFIED
+// enum, a struct with nothing set). Such fields are not written.
+template <typename V>
+bool IsDefaultValue(const V& v) {
+  if constexpr (requires { v.has_value(); }) {
+    return !v.has_value();
+  } else if constexpr (requires { v.empty(); }) {
+    return v.empty();
+  } else {
+    return v == V{};
+  }
+}
+
+// The structs declared directly in namespace wlb::snapshot: not templates
+// (Box), not std types holding ours, not this file's helpers in nested
+// namespaces.
+template <typename T>
+consteval bool IsSnapshotStruct() {
+  constexpr std::string_view kNamespace = "wlb::snapshot::";
+  constexpr std::string_view name = glz::type_name<T>;
+  return name.starts_with(kNamespace) &&
+         name.find_first_of(":<", kNamespace.size()) == std::string_view::npos;
+}
+
+template <typename T>
+concept SnapshotStruct = std::is_aggregate_v<T> && IsSnapshotStruct<T>();
+
+}  // namespace wlb::snapshot::wire_detail
+
+// Fields at their default are left out, and a field named after a C++
+// keyword (`class_`, `requires_`) is written without its underscore.
+template <typename T>
+  requires wlb::snapshot::wire_detail::SnapshotStruct<T>
+struct glz::meta<T> {
+  static constexpr auto skip_if =
+      [](const auto& v, std::string_view, glz::meta_context) {
+        return wlb::snapshot::wire_detail::IsDefaultValue(v);
+      };
+  static constexpr auto rename_key = [](std::string_view key) {
+    return key.ends_with('_') ? key.substr(0, key.size() - 1) : key;
+  };
 };
 
 namespace wlb::snapshot {
@@ -2270,14 +695,48 @@ struct PrettyJsonWriteOpts : glz::opts {
 };
 
 template <typename T>
-bool IsFieldPresent(const T& v) {
-  if constexpr (requires { v.has_value(); }) {
-    return v.has_value();
-  } else if constexpr (requires { v.empty(); }) {
-    return !v.empty();
-  } else {
-    return !(v == T{});
+std::string WriteBeveOf(const T& value) {
+  std::string out;
+  (void)glz::write<WireBeveOpts{}>(value, out);
+  return out;
+}
+
+template <typename T>
+bool ReadBeveOf(std::string_view bytes, T* out) {
+  *out = T{};
+  return !glz::read<WireBeveOpts{}>(*out, bytes);
+}
+
+template <typename T>
+std::string WriteJsonOf(const T& value, bool pretty) {
+  std::string out;
+  // An enum value with no name (a newer peer's, or memory gone bad) makes the
+  // writer fail half way, leaving invalid JSON: return nothing instead.
+  const auto ec = pretty ? glz::write<PrettyJsonWriteOpts{}>(value, out)
+                         : glz::write<CompactJsonWriteOpts{}>(value, out);
+  if (ec) {
+    return "";
   }
+  return out;
+}
+
+template <typename T>
+bool ReadJsonOf(std::string_view json, T* out, std::string* error) {
+  *out = T{};
+  const auto ec = glz::read<StrictJsonReadOpts{}>(*out, json);
+  if (ec) {
+    if (error != nullptr) {
+      *error = glz::format_error(ec, json);
+    }
+    return false;
+  }
+  return true;
+}
+
+// Whether a field would be written (wire_detail::IsDefaultValue).
+template <typename T>
+bool IsFieldPresent(const T& v) {
+  return !wire_detail::IsDefaultValue(v);
 }
 
 // The hover-only fields (`visibility: HOVER` in snapshot.h), as
@@ -2624,1212 +1083,203 @@ std::string ReflectedSchemaJson() {
 }
 
 std::string WriteBeve(const ModuleMessage& msg) {
-  std::string out;
-  (void)glz::write<WireBeveOpts{}>(msg, out);
-  return out;
+  return WriteBeveOf(msg);
 }
-
 bool ReadBeve(std::string_view bytes, ModuleMessage* out) {
-  *out = ModuleMessage{};
-  return !glz::read<WireBeveOpts{}>(*out, bytes);
+  return ReadBeveOf(bytes, out);
 }
-
 std::string WriteBeve(const Command& cmd) {
-  std::string out;
-  (void)glz::write<WireBeveOpts{}>(cmd, out);
-  return out;
+  return WriteBeveOf(cmd);
 }
-
 bool ReadBeve(std::string_view bytes, Command* out) {
-  *out = Command{};
-  return !glz::read<WireBeveOpts{}>(*out, bytes);
+  return ReadBeveOf(bytes, out);
 }
-
 std::string WriteBeve(const Snapshot& snap) {
-  std::string out;
-  (void)glz::write<WireBeveOpts{}>(snap, out);
-  return out;
+  return WriteBeveOf(snap);
 }
-
 bool ReadBeve(std::string_view bytes, Snapshot* out) {
-  *out = Snapshot{};
-  return !glz::read<WireBeveOpts{}>(*out, bytes);
+  return ReadBeveOf(bytes, out);
 }
 
 std::string WriteJson(const Snapshot& snap, bool pretty) {
-  std::string out;
-  // An enum value with no name (a newer peer's, or memory gone bad) makes the
-  // writer fail half way, leaving invalid JSON: return nothing instead.
-  const auto ec = pretty ? glz::write<PrettyJsonWriteOpts{}>(snap, out)
-                         : glz::write<CompactJsonWriteOpts{}>(snap, out);
-  if (ec) {
-    return "";
-  }
-  return out;
+  return WriteJsonOf(snap, pretty);
 }
-
 bool ReadJson(std::string_view json, Snapshot* out, std::string* error) {
-  *out = Snapshot{};
-  const auto ec = glz::read<StrictJsonReadOpts{}>(*out, json);
-  if (ec) {
-    if (error != nullptr) {
-      *error = glz::format_error(ec, json);
-    }
-    return false;
-  }
-  return true;
+  return ReadJsonOf(json, out, error);
 }
-
 std::string WriteJson(const ModuleMessage& msg, bool pretty) {
-  std::string out;
-  // An enum value with no name (a newer peer's, or memory gone bad) makes the
-  // writer fail half way, leaving invalid JSON: return nothing instead.
-  const auto ec = pretty ? glz::write<PrettyJsonWriteOpts{}>(msg, out)
-                         : glz::write<CompactJsonWriteOpts{}>(msg, out);
-  if (ec) {
-    return "";
-  }
-  return out;
+  return WriteJsonOf(msg, pretty);
 }
-
 bool ReadJson(std::string_view json, ModuleMessage* out, std::string* error) {
-  *out = ModuleMessage{};
-  const auto ec = glz::read<StrictJsonReadOpts{}>(*out, json);
-  if (ec) {
-    if (error != nullptr) {
-      *error = glz::format_error(ec, json);
-    }
-    return false;
-  }
-  return true;
+  return ReadJsonOf(json, out, error);
 }
-
 std::string WriteJson(const Command& cmd, bool pretty) {
-  std::string out;
-  // An enum value with no name (a newer peer's, or memory gone bad) makes the
-  // writer fail half way, leaving invalid JSON: return nothing instead.
-  const auto ec = pretty ? glz::write<PrettyJsonWriteOpts{}>(cmd, out)
-                         : glz::write<CompactJsonWriteOpts{}>(cmd, out);
-  if (ec) {
-    return "";
-  }
-  return out;
+  return WriteJsonOf(cmd, pretty);
 }
-
 bool ReadJson(std::string_view json, Command* out, std::string* error) {
-  *out = Command{};
-  const auto ec = glz::read<StrictJsonReadOpts{}>(*out, json);
-  if (ec) {
-    if (error != nullptr) {
-      *error = glz::format_error(ec, json);
-    }
-    return false;
-  }
-  return true;
+  return ReadJsonOf(json, out, error);
 }
-
 std::string WriteJson(const OptionFacts& facts, bool pretty) {
-  std::string out;
-  const auto ec = pretty ? glz::write<PrettyJsonWriteOpts{}>(facts, out)
-                         : glz::write<CompactJsonWriteOpts{}>(facts, out);
-  if (ec) {
-    return "";
-  }
-  return out;
+  return WriteJsonOf(facts, pretty);
 }
-
 bool ReadJson(std::string_view json, OptionFacts* out, std::string* error) {
-  *out = OptionFacts{};
-  const auto ec = glz::read<StrictJsonReadOpts{}>(*out, json);
-  if (ec) {
-    if (error != nullptr) {
-      *error = glz::format_error(ec, json);
-    }
-    return false;
-  }
-  return true;
+  return ReadJsonOf(json, out, error);
 }
 
 std::string_view EnumName(Direction value) {
-  switch (value) {
-    case Direction::DIRECTION_UNSPECIFIED:
-      return "DIRECTION_UNSPECIFIED";
-    case Direction::HERE:
-      return "HERE";
-    case Direction::N:
-      return "N";
-    case Direction::NE:
-      return "NE";
-    case Direction::E:
-      return "E";
-    case Direction::SE:
-      return "SE";
-    case Direction::S:
-      return "S";
-    case Direction::SW:
-      return "SW";
-    case Direction::W:
-      return "W";
-    case Direction::NW:
-      return "NW";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(DispelType value) {
-  switch (value) {
-    case DispelType::DISPEL_TYPE_UNSPECIFIED:
-      return "DISPEL_TYPE_UNSPECIFIED";
-    case DispelType::DISPEL_NONE:
-      return "DISPEL_NONE";
-    case DispelType::MAGIC:
-      return "MAGIC";
-    case DispelType::CURSE:
-      return "CURSE";
-    case DispelType::POISON:
-      return "POISON";
-    case DispelType::DISEASE:
-      return "DISEASE";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(RaidMarker value) {
-  switch (value) {
-    case RaidMarker::RAID_MARKER_UNSPECIFIED:
-      return "RAID_MARKER_UNSPECIFIED";
-    case RaidMarker::STAR:
-      return "STAR";
-    case RaidMarker::CIRCLE:
-      return "CIRCLE";
-    case RaidMarker::DIAMOND:
-      return "DIAMOND";
-    case RaidMarker::TRIANGLE:
-      return "TRIANGLE";
-    case RaidMarker::MOON:
-      return "MOON";
-    case RaidMarker::SQUARE:
-      return "SQUARE";
-    case RaidMarker::CROSS:
-      return "CROSS";
-    case RaidMarker::SKULL:
-      return "SKULL";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Role value) {
-  switch (value) {
-    case Role::ROLE_UNSPECIFIED:
-      return "ROLE_UNSPECIFIED";
-    case Role::TANK:
-      return "TANK";
-    case Role::HEALER:
-      return "HEALER";
-    case Role::DPS:
-      return "DPS";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Stat value) {
-  switch (value) {
-    case Stat::STAT_UNSPECIFIED:
-      return "STAT_UNSPECIFIED";
-    case Stat::STRENGTH:
-      return "STRENGTH";
-    case Stat::AGILITY:
-      return "AGILITY";
-    case Stat::STAMINA:
-      return "STAMINA";
-    case Stat::INTELLECT:
-      return "INTELLECT";
-    case Stat::SPIRIT:
-      return "SPIRIT";
-    case Stat::ARMOR:
-      return "ARMOR";
-    case Stat::HEALTH:
-      return "HEALTH";
-    case Stat::MANA:
-      return "MANA";
-    case Stat::ATTACK_POWER:
-      return "ATTACK_POWER";
-    case Stat::RANGED_ATTACK_POWER:
-      return "RANGED_ATTACK_POWER";
-    case Stat::SPELL_POWER:
-      return "SPELL_POWER";
-    case Stat::MP5:
-      return "MP5";
-    case Stat::HIT_RATING:
-      return "HIT_RATING";
-    case Stat::CRIT_RATING:
-      return "CRIT_RATING";
-    case Stat::HASTE_RATING:
-      return "HASTE_RATING";
-    case Stat::EXPERTISE_RATING:
-      return "EXPERTISE_RATING";
-    case Stat::ARMOR_PENETRATION_RATING:
-      return "ARMOR_PENETRATION_RATING";
-    case Stat::SPELL_PENETRATION:
-      return "SPELL_PENETRATION";
-    case Stat::DEFENSE_RATING:
-      return "DEFENSE_RATING";
-    case Stat::DODGE_RATING:
-      return "DODGE_RATING";
-    case Stat::PARRY_RATING:
-      return "PARRY_RATING";
-    case Stat::BLOCK_RATING:
-      return "BLOCK_RATING";
-    case Stat::BLOCK_VALUE:
-      return "BLOCK_VALUE";
-    case Stat::RESILIENCE_RATING:
-      return "RESILIENCE_RATING";
-    case Stat::FIRE_RESISTANCE:
-      return "FIRE_RESISTANCE";
-    case Stat::FROST_RESISTANCE:
-      return "FROST_RESISTANCE";
-    case Stat::NATURE_RESISTANCE:
-      return "NATURE_RESISTANCE";
-    case Stat::SHADOW_RESISTANCE:
-      return "SHADOW_RESISTANCE";
-    case Stat::ARCANE_RESISTANCE:
-      return "ARCANE_RESISTANCE";
-    case Stat::WEAPON_DPS:
-      return "WEAPON_DPS";
-    case Stat::WEAPON_MIN_DAMAGE:
-      return "WEAPON_MIN_DAMAGE";
-    case Stat::WEAPON_MAX_DAMAGE:
-      return "WEAPON_MAX_DAMAGE";
-    case Stat::WEAPON_SPEED:
-      return "WEAPON_SPEED";
-    case Stat::MELEE_CRIT_PCT:
-      return "MELEE_CRIT_PCT";
-    case Stat::RANGED_CRIT_PCT:
-      return "RANGED_CRIT_PCT";
-    case Stat::SPELL_CRIT_PCT:
-      return "SPELL_CRIT_PCT";
-    case Stat::MELEE_HIT_PCT:
-      return "MELEE_HIT_PCT";
-    case Stat::SPELL_HIT_PCT:
-      return "SPELL_HIT_PCT";
-    case Stat::HASTE_PCT:
-      return "HASTE_PCT";
-    case Stat::EXPERTISE:
-      return "EXPERTISE";
-    case Stat::DEFENSE:
-      return "DEFENSE";
-    case Stat::DODGE_PCT:
-      return "DODGE_PCT";
-    case Stat::PARRY_PCT:
-      return "PARRY_PCT";
-    case Stat::BLOCK_PCT:
-      return "BLOCK_PCT";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Panel value) {
-  switch (value) {
-    case Panel::PANEL_UNSPECIFIED:
-      return "PANEL_UNSPECIFIED";
-    case Panel::MAP:
-      return "MAP";
-    case Panel::BAGS:
-      return "BAGS";
-    case Panel::CHARACTER:
-      return "CHARACTER";
-    case Panel::QUEST_LOG:
-      return "QUEST_LOG";
-    case Panel::SPELLBOOK:
-      return "SPELLBOOK";
-    case Panel::TALENTS:
-      return "TALENTS";
-    case Panel::SKILLS:
-      return "SKILLS";
-    case Panel::REPUTATION:
-      return "REPUTATION";
-    case Panel::SOCIAL:
-      return "SOCIAL";
-    case Panel::CALENDAR:
-      return "CALENDAR";
-    case Panel::ACHIEVEMENTS:
-      return "ACHIEVEMENTS";
-    case Panel::CURRENCY:
-      return "CURRENCY";
-    case Panel::PVP:
-      return "PVP";
-    case Panel::COMPANIONS:
-      return "COMPANIONS";
-    case Panel::DUNGEON_FINDER:
-      return "DUNGEON_FINDER";
-    case Panel::SCOREBOARD:
-      return "SCOREBOARD";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(ChatChannel value) {
-  switch (value) {
-    case ChatChannel::CHAT_CHANNEL_UNSPECIFIED:
-      return "CHAT_CHANNEL_UNSPECIFIED";
-    case ChatChannel::SAY:
-      return "SAY";
-    case ChatChannel::YELL:
-      return "YELL";
-    case ChatChannel::WHISPER:
-      return "WHISPER";
-    case ChatChannel::WHISPER_SENT:
-      return "WHISPER_SENT";
-    case ChatChannel::PARTY:
-      return "PARTY";
-    case ChatChannel::RAID:
-      return "RAID";
-    case ChatChannel::RAID_WARNING:
-      return "RAID_WARNING";
-    case ChatChannel::GUILD:
-      return "GUILD";
-    case ChatChannel::OFFICER:
-      return "OFFICER";
-    case ChatChannel::GENERAL:
-      return "GENERAL";
-    case ChatChannel::TRADE:
-      return "TRADE";
-    case ChatChannel::LFG:
-      return "LFG";
-    case ChatChannel::EMOTE:
-      return "EMOTE";
-    case ChatChannel::MONSTER_SAY:
-      return "MONSTER_SAY";
-    case ChatChannel::MONSTER_YELL:
-      return "MONSTER_YELL";
-    case ChatChannel::MONSTER_EMOTE:
-      return "MONSTER_EMOTE";
-    case ChatChannel::MONSTER_WHISPER:
-      return "MONSTER_WHISPER";
-    case ChatChannel::BOSS_EMOTE:
-      return "BOSS_EMOTE";
-    case ChatChannel::SYSTEM:
-      return "SYSTEM";
-    case ChatChannel::CUSTOM_CHANNEL:
-      return "CUSTOM_CHANNEL";
-    case ChatChannel::BATTLEGROUND:
-      return "BATTLEGROUND";
-    case ChatChannel::ACHIEVEMENT:
-      return "ACHIEVEMENT";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Self_Indicators_Durability::Level value) {
-  switch (value) {
-    case Self_Indicators_Durability::Level::LEVEL_UNSPECIFIED:
-      return "LEVEL_UNSPECIFIED";
-    case Self_Indicators_Durability::Level::DAMAGED:
-      return "DAMAGED";
-    case Self_Indicators_Durability::Level::BROKEN:
-      return "BROKEN";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(GoalPart::Kind value) {
-  switch (value) {
-    case GoalPart::Kind::KIND_UNSPECIFIED:
-      return "KIND_UNSPECIFIED";
-    case GoalPart::Kind::SELL:
-      return "SELL";
-    case GoalPart::Kind::BUY:
-      return "BUY";
-    case GoalPart::Kind::TRAIN:
-      return "TRAIN";
-    case GoalPart::Kind::REPAIR:
-      return "REPAIR";
-    case GoalPart::Kind::LEARN_PROFESSION:
-      return "LEARN_PROFESSION";
-    case GoalPart::Kind::REACH_LEVEL:
-      return "REACH_LEVEL";
-    case GoalPart::Kind::TRAVEL_TO:
-      return "TRAVEL_TO";
-    case GoalPart::Kind::MEET:
-      return "MEET";
-    case GoalPart::Kind::FARM:
-      return "FARM";
-    case GoalPart::Kind::OTHER:
-      return "OTHER";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(HoverRef::Kind value) {
-  switch (value) {
-    case HoverRef::Kind::KIND_UNSPECIFIED:
-      return "KIND_UNSPECIFIED";
-    case HoverRef::Kind::ITEM:
-      return "ITEM";
-    case HoverRef::Kind::SPELL:
-      return "SPELL";
-    case HoverRef::Kind::AURA:
-      return "AURA";
-    case HoverRef::Kind::UNIT:
-      return "UNIT";
-    case HoverRef::Kind::ZONE:
-      return "ZONE";
-    case HoverRef::Kind::PLACE:
-      return "PLACE";
-    case HoverRef::Kind::QUEST:
-      return "QUEST";
-    case HoverRef::Kind::ACHIEVEMENT:
-      return "ACHIEVEMENT";
-    case HoverRef::Kind::OBJECT:
-      return "OBJECT";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Calendar_Entry::Status value) {
-  switch (value) {
-    case Calendar_Entry::Status::STATUS_UNSPECIFIED:
-      return "STATUS_UNSPECIFIED";
-    case Calendar_Entry::Status::INVITED:
-      return "INVITED";
-    case Calendar_Entry::Status::ACCEPTED:
-      return "ACCEPTED";
-    case Calendar_Entry::Status::DECLINED:
-      return "DECLINED";
-    case Calendar_Entry::Status::TENTATIVE:
-      return "TENTATIVE";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(DisplacedEvent::How value) {
-  switch (value) {
-    case DisplacedEvent::How::HOW_UNSPECIFIED:
-      return "HOW_UNSPECIFIED";
-    case DisplacedEvent::How::KNOCKED_BACK:
-      return "KNOCKED_BACK";
-    case DisplacedEvent::How::PULLED:
-      return "PULLED";
-    case DisplacedEvent::How::TELEPORTED:
-      return "TELEPORTED";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Blank::Kind value) {
-  switch (value) {
-    case Blank::Kind::KIND_UNSPECIFIED:
-      return "KIND_UNSPECIFIED";
-    case Blank::Kind::TEXT:
-      return "TEXT";
-    case Blank::Kind::NEW_NAME:
-      return "NEW_NAME";
-    case Blank::Kind::PLAYER:
-      return "PLAYER";
-    case Blank::Kind::MONEY:
-      return "MONEY";
-    case Blank::Kind::COUNT:
-      return "COUNT";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Relative::Height value) {
-  switch (value) {
-    case Relative::Height::HEIGHT_UNSPECIFIED:
-      return "HEIGHT_UNSPECIFIED";
-    case Relative::Height::LEVEL:
-      return "LEVEL";
-    case Relative::Height::ABOVE:
-      return "ABOVE";
-    case Relative::Height::BELOW:
-      return "BELOW";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Spell::School value) {
-  switch (value) {
-    case Spell::School::SCHOOL_UNSPECIFIED:
-      return "SCHOOL_UNSPECIFIED";
-    case Spell::School::PHYSICAL:
-      return "PHYSICAL";
-    case Spell::School::HOLY:
-      return "HOLY";
-    case Spell::School::FIRE:
-      return "FIRE";
-    case Spell::School::NATURE:
-      return "NATURE";
-    case Spell::School::FROST:
-      return "FROST";
-    case Spell::School::SHADOW:
-      return "SHADOW";
-    case Spell::School::ARCANE:
-      return "ARCANE";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Item::Quality value) {
-  switch (value) {
-    case Item::Quality::QUALITY_UNSPECIFIED:
-      return "QUALITY_UNSPECIFIED";
-    case Item::Quality::POOR:
-      return "POOR";
-    case Item::Quality::COMMON:
-      return "COMMON";
-    case Item::Quality::UNCOMMON:
-      return "UNCOMMON";
-    case Item::Quality::RARE_QUALITY:
-      return "RARE_QUALITY";
-    case Item::Quality::EPIC:
-      return "EPIC";
-    case Item::Quality::LEGENDARY:
-      return "LEGENDARY";
-    case Item::Quality::ARTIFACT:
-      return "ARTIFACT";
-    case Item::Quality::HEIRLOOM:
-      return "HEIRLOOM";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Item::Kind value) {
-  switch (value) {
-    case Item::Kind::KIND_UNSPECIFIED:
-      return "KIND_UNSPECIFIED";
-    case Item::Kind::EQUIPMENT:
-      return "EQUIPMENT";
-    case Item::Kind::CONSUMABLE:
-      return "CONSUMABLE";
-    case Item::Kind::QUEST:
-      return "QUEST";
-    case Item::Kind::TRADE_GOOD:
-      return "TRADE_GOOD";
-    case Item::Kind::RECIPE:
-      return "RECIPE";
-    case Item::Kind::CONTAINER:
-      return "CONTAINER";
-    case Item::Kind::REAGENT:
-      return "REAGENT";
-    case Item::Kind::PROJECTILE:
-      return "PROJECTILE";
-    case Item::Kind::JUNK:
-      return "JUNK";
-    case Item::Kind::KEY:
-      return "KEY";
-    case Item::Kind::GEM:
-      return "GEM";
-    case Item::Kind::GLYPH:
-      return "GLYPH";
-    case Item::Kind::CURRENCY_TOKEN:
-      return "CURRENCY_TOKEN";
-    case Item::Kind::OTHER:
-      return "OTHER";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Item::Binding value) {
-  switch (value) {
-    case Item::Binding::BINDING_UNSPECIFIED:
-      return "BINDING_UNSPECIFIED";
-    case Item::Binding::NOT_BOUND:
-      return "NOT_BOUND";
-    case Item::Binding::SOULBOUND:
-      return "SOULBOUND";
-    case Item::Binding::BIND_ON_PICKUP:
-      return "BIND_ON_PICKUP";
-    case Item::Binding::BIND_ON_EQUIP:
-      return "BIND_ON_EQUIP";
-    case Item::Binding::BIND_ON_USE:
-      return "BIND_ON_USE";
-    case Item::Binding::BIND_TO_ACCOUNT:
-      return "BIND_TO_ACCOUNT";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(PetPart::Happiness value) {
-  switch (value) {
-    case PetPart::Happiness::HAPPINESS_UNSPECIFIED:
-      return "HAPPINESS_UNSPECIFIED";
-    case PetPart::Happiness::UNHAPPY:
-      return "UNHAPPY";
-    case PetPart::Happiness::CONTENT:
-      return "CONTENT";
-    case PetPart::Happiness::HAPPY:
-      return "HAPPY";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(GameObject::Kind value) {
-  switch (value) {
-    case GameObject::Kind::KIND_UNSPECIFIED:
-      return "KIND_UNSPECIFIED";
-    case GameObject::Kind::QUEST_OBJECT:
-      return "QUEST_OBJECT";
-    case GameObject::Kind::HERB:
-      return "HERB";
-    case GameObject::Kind::ORE:
-      return "ORE";
-    case GameObject::Kind::CHEST:
-      return "CHEST";
-    case GameObject::Kind::MAILBOX:
-      return "MAILBOX";
-    case GameObject::Kind::DOOR:
-      return "DOOR";
-    case GameObject::Kind::CAMPFIRE:
-      return "CAMPFIRE";
-    case GameObject::Kind::BOBBER:
-      return "BOBBER";
-    case GameObject::Kind::MEETING_STONE:
-      return "MEETING_STONE";
-    case GameObject::Kind::SUMMONING_PORTAL:
-      return "SUMMONING_PORTAL";
-    case GameObject::Kind::TRANSPORT:
-      return "TRANSPORT";
-    case GameObject::Kind::FISHING_POOL:
-      return "FISHING_POOL";
-    case GameObject::Kind::BARBER_CHAIR:
-      return "BARBER_CHAIR";
-    case GameObject::Kind::GUILD_VAULT:
-      return "GUILD_VAULT";
-    case GameObject::Kind::PORTAL:
-      return "PORTAL";
-    case GameObject::Kind::RITUAL:
-      return "RITUAL";
-    case GameObject::Kind::OTHER:
-      return "OTHER";
-    case GameObject::Kind::CAPTURE_POINT:
-      return "CAPTURE_POINT";
-    case GameObject::Kind::DESTRUCTIBLE:
-      return "DESTRUCTIBLE";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Place::Kind value) {
-  switch (value) {
-    case Place::Kind::KIND_UNSPECIFIED:
-      return "KIND_UNSPECIFIED";
-    case Place::Kind::TOWN:
-      return "TOWN";
-    case Place::Kind::CAMP:
-      return "CAMP";
-    case Place::Kind::FLIGHT_MASTER:
-      return "FLIGHT_MASTER";
-    case Place::Kind::INNKEEPER:
-      return "INNKEEPER";
-    case Place::Kind::GRAVEYARD:
-      return "GRAVEYARD";
-    case Place::Kind::DUNGEON:
-      return "DUNGEON";
-    case Place::Kind::RAID:
-      return "RAID";
-    case Place::Kind::ZONE_EXIT:
-      return "ZONE_EXIT";
-    case Place::Kind::LANDMARK:
-      return "LANDMARK";
-    case Place::Kind::CAMPFIRE:
-      return "CAMPFIRE";
-    case Place::Kind::AUCTION_HOUSE:
-      return "AUCTION_HOUSE";
-    case Place::Kind::BANK:
-      return "BANK";
-    case Place::Kind::TRAINER:
-      return "TRAINER";
-    case Place::Kind::VENDOR:
-      return "VENDOR";
-    case Place::Kind::DOCK:
-      return "DOCK";
-    case Place::Kind::ZEPPELIN_TOWER:
-      return "ZEPPELIN_TOWER";
-    case Place::Kind::ZONE:
-      return "ZONE";
-    case Place::Kind::OBJECTIVE_AREA:
-      return "OBJECTIVE_AREA";
-    case Place::Kind::BATTLEMASTER:
-      return "BATTLEMASTER";
-    case Place::Kind::GUILD_BANK:
-      return "GUILD_BANK";
-    case Place::Kind::BARBER_SHOP:
-      return "BARBER_SHOP";
-    case Place::Kind::STABLE:
-      return "STABLE";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Surroundings_Obstacle::Kind value) {
-  switch (value) {
-    case Surroundings_Obstacle::Kind::KIND_UNSPECIFIED:
-      return "KIND_UNSPECIFIED";
-    case Surroundings_Obstacle::Kind::WALL:
-      return "WALL";
-    case Surroundings_Obstacle::Kind::SLOPE:
-      return "SLOPE";
-    case Surroundings_Obstacle::Kind::DROP:
-      return "DROP";
-    case Surroundings_Obstacle::Kind::WATER:
-      return "WATER";
-    case Surroundings_Obstacle::Kind::LEDGE:
-      return "LEDGE";
-    case Surroundings_Obstacle::Kind::OPENING:
-      return "OPENING";
-    case Surroundings_Obstacle::Kind::DOOR:
-      return "DOOR";
-    case Surroundings_Obstacle::Kind::TREE:
-      return "TREE";
-    case Surroundings_Obstacle::Kind::ROCK:
-      return "ROCK";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(PromptEvent::Kind value) {
-  switch (value) {
-    case PromptEvent::Kind::KIND_UNSPECIFIED:
-      return "KIND_UNSPECIFIED";
-    case PromptEvent::Kind::GROUP_INVITE:
-      return "GROUP_INVITE";
-    case PromptEvent::Kind::TRADE:
-      return "TRADE";
-    case PromptEvent::Kind::DUEL:
-      return "DUEL";
-    case PromptEvent::Kind::GUILD_INVITE:
-      return "GUILD_INVITE";
-    case PromptEvent::Kind::READY_CHECK:
-      return "READY_CHECK";
-    case PromptEvent::Kind::ROLE_CHECK:
-      return "ROLE_CHECK";
-    case PromptEvent::Kind::RESURRECT_OFFER:
-      return "RESURRECT_OFFER";
-    case PromptEvent::Kind::SUMMON:
-      return "SUMMON";
-    case PromptEvent::Kind::QUEST_SHARE:
-      return "QUEST_SHARE";
-    case PromptEvent::Kind::BATTLEGROUND_READY:
-      return "BATTLEGROUND_READY";
-    case PromptEvent::Kind::ARENA_TEAM_INVITE:
-      return "ARENA_TEAM_INVITE";
-    case PromptEvent::Kind::WINTERGRASP_INVITE:
-      return "WINTERGRASP_INVITE";
-    case PromptEvent::Kind::BIND_HEARTHSTONE:
-      return "BIND_HEARTHSTONE";
-    case PromptEvent::Kind::CONFIRM_BIND_ON_PICKUP:
-      return "CONFIRM_BIND_ON_PICKUP";
-    case PromptEvent::Kind::CONFIRM_DELETE_ITEM:
-      return "CONFIRM_DELETE_ITEM";
-    case PromptEvent::Kind::CONFIRM_ABANDON_QUEST:
-      return "CONFIRM_ABANDON_QUEST";
-    case PromptEvent::Kind::CONFIRM_REPLACE_ENCHANT:
-      return "CONFIRM_REPLACE_ENCHANT";
-    case PromptEvent::Kind::CONFIRM_TALENT_WIPE:
-      return "CONFIRM_TALENT_WIPE";
-    case PromptEvent::Kind::CONFIRM_RELEASE_SPIRIT:
-      return "CONFIRM_RELEASE_SPIRIT";
-    case PromptEvent::Kind::CONFIRM_LOOT_ROLL:
-      return "CONFIRM_LOOT_ROLL";
-    case PromptEvent::Kind::CONFIRM_PETITION_SIGN:
-      return "CONFIRM_PETITION_SIGN";
-    case PromptEvent::Kind::CONFIRM_LEAVE_BATTLEGROUND:
-      return "CONFIRM_LEAVE_BATTLEGROUND";
-    case PromptEvent::Kind::CONFIRM_INSTANCE_LOCK:
-      return "CONFIRM_INSTANCE_LOCK";
-    case PromptEvent::Kind::CONFIRM_SPIRIT_HEALER:
-      return "CONFIRM_SPIRIT_HEALER";
-    case PromptEvent::Kind::CONFIRM_GUILD_LEADER:
-      return "CONFIRM_GUILD_LEADER";
-    case PromptEvent::Kind::CONFIRM_REPLACE_GEM:
-      return "CONFIRM_REPLACE_GEM";
-    case PromptEvent::Kind::LFG_PROPOSAL:
-      return "LFG_PROPOSAL";
-    case PromptEvent::Kind::LFG_BOOT_VOTE:
-      return "LFG_BOOT_VOTE";
-    case PromptEvent::Kind::LFG_OFFER_CONTINUE:
-      return "LFG_OFFER_CONTINUE";
-    case PromptEvent::Kind::CONFIRM_PURCHASE:
-      return "CONFIRM_PURCHASE";
-    case PromptEvent::Kind::SPIRIT_HEALER_WAVE:
-      return "SPIRIT_HEALER_WAVE";
-    case PromptEvent::Kind::RECLAIM_CORPSE:
-      return "RECLAIM_CORPSE";
-    case PromptEvent::Kind::CHANNEL_INVITE:
-      return "CHANNEL_INVITE";
-    case PromptEvent::Kind::CHANNEL_PASSWORD:
-      return "CHANNEL_PASSWORD";
-    case PromptEvent::Kind::PET_NAME:
-      return "PET_NAME";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Activity::State value) {
-  switch (value) {
-    case Activity::State::STATE_UNSPECIFIED:
-      return "STATE_UNSPECIFIED";
-    case Activity::State::IDLE:
-      return "IDLE";
-    case Activity::State::MOVING:
-      return "MOVING";
-    case Activity::State::PATROLLING:
-      return "PATROLLING";
-    case Activity::State::APPROACHING_ME:
-      return "APPROACHING_ME";
-    case Activity::State::FLEEING:
-      return "FLEEING";
-    case Activity::State::FIGHTING:
-      return "FIGHTING";
-    case Activity::State::CASTING:
-      return "CASTING";
-    case Activity::State::CHANNELING:
-      return "CHANNELING";
-    case Activity::State::TALKING:
-      return "TALKING";
-    case Activity::State::EMOTING:
-      return "EMOTING";
-    case Activity::State::LOOTING:
-      return "LOOTING";
-    case Activity::State::GATHERING:
-      return "GATHERING";
-    case Activity::State::SITTING:
-      return "SITTING";
-    case Activity::State::FOLLOWING:
-      return "FOLLOWING";
-    case Activity::State::FISHING:
-      return "FISHING";
-    case Activity::State::DEAD:
-      return "DEAD";
-    case Activity::State::DRINKING:
-      return "DRINKING";
-    case Activity::State::STEALTHED:
-      return "STEALTHED";
-    case Activity::State::AFK:
-      return "AFK";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(EquipmentPart::Slot value) {
-  switch (value) {
-    case EquipmentPart::Slot::SLOT_UNSPECIFIED:
-      return "SLOT_UNSPECIFIED";
-    case EquipmentPart::Slot::HEAD:
-      return "HEAD";
-    case EquipmentPart::Slot::NECK:
-      return "NECK";
-    case EquipmentPart::Slot::SHOULDER:
-      return "SHOULDER";
-    case EquipmentPart::Slot::BACK:
-      return "BACK";
-    case EquipmentPart::Slot::CHEST:
-      return "CHEST";
-    case EquipmentPart::Slot::SHIRT:
-      return "SHIRT";
-    case EquipmentPart::Slot::TABARD:
-      return "TABARD";
-    case EquipmentPart::Slot::WRIST:
-      return "WRIST";
-    case EquipmentPart::Slot::HANDS:
-      return "HANDS";
-    case EquipmentPart::Slot::WAIST:
-      return "WAIST";
-    case EquipmentPart::Slot::LEGS:
-      return "LEGS";
-    case EquipmentPart::Slot::FEET:
-      return "FEET";
-    case EquipmentPart::Slot::FINGER1:
-      return "FINGER1";
-    case EquipmentPart::Slot::FINGER2:
-      return "FINGER2";
-    case EquipmentPart::Slot::TRINKET1:
-      return "TRINKET1";
-    case EquipmentPart::Slot::TRINKET2:
-      return "TRINKET2";
-    case EquipmentPart::Slot::MAIN_HAND:
-      return "MAIN_HAND";
-    case EquipmentPart::Slot::OFF_HAND:
-      return "OFF_HAND";
-    case EquipmentPart::Slot::RANGED:
-      return "RANGED";
-    case EquipmentPart::Slot::BAG:
-      return "BAG";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Unit::Kind value) {
-  switch (value) {
-    case Unit::Kind::KIND_UNSPECIFIED:
-      return "KIND_UNSPECIFIED";
-    case Unit::Kind::NPC:
-      return "NPC";
-    case Unit::Kind::PLAYER:
-      return "PLAYER";
-    case Unit::Kind::PET:
-      return "PET";
-    case Unit::Kind::VEHICLE:
-      return "VEHICLE";
-    case Unit::Kind::TOTEM:
-      return "TOTEM";
-    case Unit::Kind::CRITTER:
-      return "CRITTER";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Unit::LevelColor value) {
-  switch (value) {
-    case Unit::LevelColor::LEVEL_COLOR_UNSPECIFIED:
-      return "LEVEL_COLOR_UNSPECIFIED";
-    case Unit::LevelColor::GRAY:
-      return "GRAY";
-    case Unit::LevelColor::GREEN:
-      return "GREEN";
-    case Unit::LevelColor::YELLOW:
-      return "YELLOW";
-    case Unit::LevelColor::ORANGE:
-      return "ORANGE";
-    case Unit::LevelColor::RED:
-      return "RED";
-    case Unit::LevelColor::SKULL_LEVEL:
-      return "SKULL_LEVEL";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Unit::Reaction value) {
-  switch (value) {
-    case Unit::Reaction::REACTION_UNSPECIFIED:
-      return "REACTION_UNSPECIFIED";
-    case Unit::Reaction::HOSTILE:
-      return "HOSTILE";
-    case Unit::Reaction::NEUTRAL:
-      return "NEUTRAL";
-    case Unit::Reaction::FRIENDLY:
-      return "FRIENDLY";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Unit::Classification value) {
-  switch (value) {
-    case Unit::Classification::CLASSIFICATION_UNSPECIFIED:
-      return "CLASSIFICATION_UNSPECIFIED";
-    case Unit::Classification::NORMAL:
-      return "NORMAL";
-    case Unit::Classification::ELITE:
-      return "ELITE";
-    case Unit::Classification::RARE:
-      return "RARE";
-    case Unit::Classification::RARE_ELITE:
-      return "RARE_ELITE";
-    case Unit::Classification::WORLD_BOSS:
-      return "WORLD_BOSS";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Unit::ThreatStatus value) {
-  switch (value) {
-    case Unit::ThreatStatus::THREAT_STATUS_UNSPECIFIED:
-      return "THREAT_STATUS_UNSPECIFIED";
-    case Unit::ThreatStatus::THREAT_NONE:
-      return "THREAT_NONE";
-    case Unit::ThreatStatus::THREAT_HIGH:
-      return "THREAT_HIGH";
-    case Unit::ThreatStatus::THREAT_AGGRO:
-      return "THREAT_AGGRO";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Unit::QuestMarker value) {
-  switch (value) {
-    case Unit::QuestMarker::QUEST_MARKER_UNSPECIFIED:
-      return "QUEST_MARKER_UNSPECIFIED";
-    case Unit::QuestMarker::QUEST_AVAILABLE:
-      return "QUEST_AVAILABLE";
-    case Unit::QuestMarker::QUEST_AVAILABLE_LOW:
-      return "QUEST_AVAILABLE_LOW";
-    case Unit::QuestMarker::QUEST_TURN_IN:
-      return "QUEST_TURN_IN";
-    case Unit::QuestMarker::QUEST_INCOMPLETE:
-      return "QUEST_INCOMPLETE";
-    case Unit::QuestMarker::QUEST_DAILY:
-      return "QUEST_DAILY";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Unit::Service value) {
-  switch (value) {
-    case Unit::Service::SERVICE_UNSPECIFIED:
-      return "SERVICE_UNSPECIFIED";
-    case Unit::Service::VENDOR:
-      return "VENDOR";
-    case Unit::Service::CLASS_TRAINER:
-      return "CLASS_TRAINER";
-    case Unit::Service::PROFESSION_TRAINER:
-      return "PROFESSION_TRAINER";
-    case Unit::Service::REPAIR:
-      return "REPAIR";
-    case Unit::Service::INNKEEPER:
-      return "INNKEEPER";
-    case Unit::Service::FLIGHT_MASTER:
-      return "FLIGHT_MASTER";
-    case Unit::Service::BANKER:
-      return "BANKER";
-    case Unit::Service::AUCTIONEER:
-      return "AUCTIONEER";
-    case Unit::Service::STABLE_MASTER:
-      return "STABLE_MASTER";
-    case Unit::Service::SPIRIT_HEALER:
-      return "SPIRIT_HEALER";
-    case Unit::Service::BATTLEMASTER:
-      return "BATTLEMASTER";
-    case Unit::Service::GUILD_MASTER:
-      return "GUILD_MASTER";
-    case Unit::Service::TABARD_VENDOR:
-      return "TABARD_VENDOR";
-    case Unit::Service::QUEST_GIVER:
-      return "QUEST_GIVER";
-    case Unit::Service::GUILD_BANKER:
-      return "GUILD_BANKER";
-    case Unit::Service::BARBER:
-      return "BARBER";
-    case Unit::Service::ARENA_ORGANIZER:
-      return "ARENA_ORGANIZER";
-    case Unit::Service::WEAPON_MASTER:
-      return "WEAPON_MASTER";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Unit::VisualState value) {
-  switch (value) {
-    case Unit::VisualState::VISUAL_STATE_UNSPECIFIED:
-      return "VISUAL_STATE_UNSPECIFIED";
-    case Unit::VisualState::POLYMORPHED:
-      return "POLYMORPHED";
-    case Unit::VisualState::STUNNED:
-      return "STUNNED";
-    case Unit::VisualState::FEARED:
-      return "FEARED";
-    case Unit::VisualState::SAPPED:
-      return "SAPPED";
-    case Unit::VisualState::ASLEEP:
-      return "ASLEEP";
-    case Unit::VisualState::BANISHED:
-      return "BANISHED";
-    case Unit::VisualState::FROZEN:
-      return "FROZEN";
-    case Unit::VisualState::ICE_BLOCK:
-      return "ICE_BLOCK";
-    case Unit::VisualState::BUBBLED:
-      return "BUBBLED";
-    case Unit::VisualState::MIND_CONTROLLED:
-      return "MIND_CONTROLLED";
-    case Unit::VisualState::STEALTH_SHIMMER:
-      return "STEALTH_SHIMMER";
-    case Unit::VisualState::SHACKLED:
-      return "SHACKLED";
-    case Unit::VisualState::ROOTED:
-      return "ROOTED";
-    case Unit::VisualState::DRUNK_SWAY:
-      return "DRUNK_SWAY";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Unit::Size value) {
-  switch (value) {
-    case Unit::Size::SIZE_UNSPECIFIED:
-      return "SIZE_UNSPECIFIED";
-    case Unit::Size::SMALL:
-      return "SMALL";
-    case Unit::Size::MEDIUM:
-      return "MEDIUM";
-    case Unit::Size::LARGE:
-      return "LARGE";
-    case Unit::Size::HUGE:
-      return "HUGE";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Unit::Detail value) {
-  switch (value) {
-    case Unit::Detail::DETAIL_UNSPECIFIED:
-      return "DETAIL_UNSPECIFIED";
-    case Unit::Detail::NAMEPLATE:
-      return "NAMEPLATE";
-    case Unit::Detail::MODEL:
-      return "MODEL";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Self::Gender value) {
-  switch (value) {
-    case Self::Gender::GENDER_UNSPECIFIED:
-      return "GENDER_UNSPECIFIED";
-    case Self::Gender::MALE:
-      return "MALE";
-    case Self::Gender::FEMALE:
-      return "FEMALE";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Self::PowerType value) {
-  switch (value) {
-    case Self::PowerType::POWER_TYPE_UNSPECIFIED:
-      return "POWER_TYPE_UNSPECIFIED";
-    case Self::PowerType::MANA:
-      return "MANA";
-    case Self::PowerType::RAGE:
-      return "RAGE";
-    case Self::PowerType::ENERGY:
-      return "ENERGY";
-    case Self::PowerType::RUNIC_POWER:
-      return "RUNIC_POWER";
-    case Self::PowerType::FOCUS:
-      return "FOCUS";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Self::LifeState value) {
-  switch (value) {
-    case Self::LifeState::LIFE_STATE_UNSPECIFIED:
-      return "LIFE_STATE_UNSPECIFIED";
-    case Self::LifeState::ALIVE:
-      return "ALIVE";
-    case Self::LifeState::DEAD_BODY:
-      return "DEAD_BODY";
-    case Self::LifeState::GHOST:
-      return "GHOST";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 std::string_view EnumName(Self::Drunk value) {
-  switch (value) {
-    case Self::Drunk::DRUNK_UNSPECIFIED:
-      return "DRUNK_UNSPECIFIED";
-    case Self::Drunk::SOBER:
-      return "SOBER";
-    case Self::Drunk::TIPSY:
-      return "TIPSY";
-    case Self::Drunk::DRUNK:
-      return "DRUNK";
-    case Self::Drunk::SMASHED:
-      return "SMASHED";
-  }
-  return "";
+  return glz::get_enum_name(value);
 }
 
 }  // namespace wlb::snapshot

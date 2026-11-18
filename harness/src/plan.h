@@ -42,8 +42,6 @@ inline constexpr int kMaxNameChars = 12;
 inline constexpr int kMinLookSeconds = 10;
 inline constexpr int kMaxLookSeconds = 999;
 inline constexpr int kMaxHoverChars = 60;
-// The panels a reply's `open:` / `close:` lines may name.
-inline constexpr const char* kPanelNames[] = {"bags", "character", "quest log"};
 
 // One option, done `times` times in a row (3x4: option 3, four times).
 struct PlanStep {
@@ -79,9 +77,9 @@ struct Plan {
   // A whisper: to `tell_to` (a character name), `tell`. Empty: none.
   std::string tell_to;
   std::string tell;
-  // Panels to open / close (kPanelNames), and the name of a thing on screen
-  // to point at for its tooltip (docs/plans/options-and-panels.md). Empty:
-  // none.
+  // Panels to open / close (plan.wlb's `Panel` words), and the name of a
+  // thing on screen to point at for its tooltip
+  // (docs/plans/options-and-panels.md). Empty: none.
   std::vector<std::string> open;
   std::vector<std::string> close;
   std::string hover;
