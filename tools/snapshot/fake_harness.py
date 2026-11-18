@@ -45,6 +45,15 @@ def connect():
     return s
 
 
+def note_visibility(payload, out):
+    """Every frame the module sends must pass the visibility rules (snapshot.md, "Three
+    visibility levels"): an e2e run fails on the first few it records (review of f40b0b6,
+    finding 17: the check never ran on module output)."""
+    errors = wire_py.visibility_errors(payload) or []
+    if errors and len(out["visibility_errors"]) < 20:
+        out["visibility_errors"].extend(errors[:5])
+
+
 def measure_delivery(seconds, warmup=2.0):
     """Receives snapshots for `seconds` and measures how they arrive (from the snapshots' own
     timestamps, monotonic_us: this machine's monotonic clock, the same in every process)."""
@@ -161,7 +170,8 @@ def play_script(seconds, words, echo=print, tail_s=None):
     s = connect()
     reader = FrameReader()
     words = list(words)
-    out = {"snapshots": [], "events": [], "commands": [], "never_offered": [], "closed": False}
+    out = {"snapshots": [], "events": [], "commands": [], "never_offered": [], "closed": False,
+           "visibility_errors": []}
     start = time.time()
     next_at = 0.0
     sent = 0
@@ -176,6 +186,7 @@ def play_script(seconds, words, echo=print, tail_s=None):
             echo("server closed the connection")
             break
         for payload in reader.feed(chunk):
+            note_visibility(payload, out)
             message = wire_py.decode_module_message(payload)
             if not message:
                 continue
@@ -208,6 +219,8 @@ def play_script(seconds, words, echo=print, tail_s=None):
                                      "tooltips": [t_.get("tooltip", {}).get("lines", [])
                                                   for t_ in snap.get("base", {})
                                                   .get("tooltips", [])],
+                                     "auras": [a.get("name", "") for a in
+                                               me.get("unit", {}).get("auras", [])],
                                      "pos": [pos.get("x", 0.0), pos.get("y", 0.0)]})
             echo(f"<< {bot} #{seq}: health {hp}/{hp_max}"
                  f"{', in combat' if in_combat else ''}; options: "
@@ -265,7 +278,7 @@ def whisper_script(seconds, sender, receiver, text, reply, echo=print):
     commands sent and any error events."""
     s = connect()
     reader = FrameReader()
-    out = {"heard": [], "commands": [], "errors": [], "closed": False}
+    out = {"heard": [], "commands": [], "errors": [], "closed": False, "visibility_errors": []}
     seen = set()
     sent = 0
     replied = False
@@ -290,6 +303,7 @@ def whisper_script(seconds, sender, receiver, text, reply, echo=print):
             out["closed"] = True
             break
         for payload in reader.feed(chunk):
+            note_visibility(payload, out)
             message = wire_py.decode_module_message(payload)
             if not message:
                 continue

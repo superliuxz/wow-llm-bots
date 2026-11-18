@@ -25,6 +25,10 @@ def _load():
         ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t)
     ]
     lib.wlb_command_json_to_beve.restype = ctypes.c_void_p
+    lib.wlb_module_message_visibility_errors.argtypes = [
+        ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t)
+    ]
+    lib.wlb_module_message_visibility_errors.restype = ctypes.c_void_p
     lib.wlb_wire_free.argtypes = [ctypes.c_void_p]
     lib.wlb_wire_free.restype = None
     _lib = lib
@@ -64,3 +68,21 @@ def encode_command(command_dict: dict) -> bytes:
         return ctypes.string_at(ptr, out_len.value)
     finally:
         lib.wlb_wire_free(ptr)
+
+
+def visibility_errors(payload: bytes):
+    """The snapshot's visibility errors (ValidateSnapshotVisibility), or None if the frame
+    isn't a ModuleMessage."""
+    lib = _load()
+    if lib is None:
+        return None
+    out_len = ctypes.c_size_t(0)
+    ptr = lib.wlb_module_message_visibility_errors(payload, len(payload),
+                                                   ctypes.byref(out_len))
+    if not ptr:
+        return None
+    try:
+        text = ctypes.string_at(ptr, out_len.value).decode("utf-8")
+    finally:
+        lib.wlb_wire_free(ptr)
+    return [line for line in text.split("\n") if line]

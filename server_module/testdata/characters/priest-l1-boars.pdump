@@ -31,6 +31,9 @@ INSERT INTO `character_inventory` (`guid`, `bag`, `slot`, `item`) VALUES ('195',
 INSERT INTO `character_inventory` (`guid`, `bag`, `slot`, `item`) VALUES ('195', '0', '6', '2636');
 INSERT INTO `character_inventory` (`guid`, `bag`, `slot`, `item`) VALUES ('195', '0', '15', '2630');
 INSERT INTO `character_inventory` (`guid`, `bag`, `slot`, `item`) VALUES ('195', '0', '23', '2638');
+INSERT INTO `character_inventory` (`guid`, `bag`, `slot`, `item`) VALUES ('195', '0', '24', '2640');
+INSERT INTO `character_inventory` (`guid`, `bag`, `slot`, `item`) VALUES ('195', '0', '25', '2642');
+INSERT INTO `character_inventory` (`guid`, `bag`, `slot`, `item`) VALUES ('195', '0', '26', '2644');
 INSERT INTO `character_skills` (`guid`, `skill`, `value`, `max`) VALUES ('195', '54', '1', '5');
 INSERT INTO `character_skills` (`guid`, `skill`, `value`, `max`) VALUES ('195', '56', '5', '5');
 INSERT INTO `character_skills` (`guid`, `skill`, `value`, `max`) VALUES ('195', '78', '5', '5');
@@ -51,3 +54,6 @@ INSERT INTO `item_instance` (`guid`, `itemEntry`, `owner_guid`, `creatorGuid`, `
 INSERT INTO `item_instance` (`guid`, `itemEntry`, `owner_guid`, `creatorGuid`, `giftCreatorGuid`, `count`, `duration`, `charges`, `flags`, `enchantments`, `randomPropertyId`, `durability`, `playedTime`, `text`) VALUES ('2634', '53', '195', '0', '0', '1', '0', '0 0 0 0 0 ', '0', '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ', '0', '0', '0', 'NULL');
 INSERT INTO `item_instance` (`guid`, `itemEntry`, `owner_guid`, `creatorGuid`, `giftCreatorGuid`, `count`, `duration`, `charges`, `flags`, `enchantments`, `randomPropertyId`, `durability`, `playedTime`, `text`) VALUES ('2636', '52', '195', '0', '0', '1', '0', '0 0 0 0 0 ', '0', '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ', '0', '25', '0', 'NULL');
 INSERT INTO `item_instance` (`guid`, `itemEntry`, `owner_guid`, `creatorGuid`, `giftCreatorGuid`, `count`, `duration`, `charges`, `flags`, `enchantments`, `randomPropertyId`, `durability`, `playedTime`, `text`) VALUES ('2638', '6948', '195', '0', '0', '1', '0', '0 0 0 0 0 ', '1', '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ', '0', '0', '0', 'NULL');
+INSERT INTO `item_instance` (`guid`, `itemEntry`, `owner_guid`, `creatorGuid`, `giftCreatorGuid`, `count`, `duration`, `charges`, `flags`, `enchantments`, `randomPropertyId`, `durability`, `playedTime`, `text`) VALUES ('2640', '4540', '195', '0', '0', '4', '0', '-1 0 0 0 0 ', '0', '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ', '0', '0', '0', 'NULL');
+INSERT INTO `item_instance` (`guid`, `itemEntry`, `owner_guid`, `creatorGuid`, `giftCreatorGuid`, `count`, `duration`, `charges`, `flags`, `enchantments`, `randomPropertyId`, `durability`, `playedTime`, `text`) VALUES ('2642', '159', '195', '0', '0', '4', '0', '-1 0 0 0 0 ', '0', '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ', '0', '0', '0', 'NULL');
+INSERT INTO `item_instance` (`guid`, `itemEntry`, `owner_guid`, `creatorGuid`, `giftCreatorGuid`, `count`, `duration`, `charges`, `flags`, `enchantments`, `randomPropertyId`, `durability`, `playedTime`, `text`) VALUES ('2644', '118', '195', '0', '0', '1', '0', '-1 0 0 0 0 ', '0', '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ', '0', '0', '0', 'NULL');

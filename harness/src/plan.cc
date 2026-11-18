@@ -8,6 +8,7 @@
 #include "plan.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -16,6 +17,7 @@
 #include <vector>
 
 #include "base/strings/strcat.h"
+#include "base/strings/string_number_conversions.h"
 #include "grammar/plan.wlb.h"
 #include "grammar/wlb_runtime.h"
 #include "orders.h"
@@ -163,6 +165,26 @@ std::optional<Plan> ParsePlan(std::string_view text,
   plan.hover = parsed->hover;
   plan.orders = parsed->orders;
   return plan;
+}
+
+std::string CheckPlanRecords(std::string_view records) {
+  std::string out;
+  size_t start = 0;
+  while (start < records.size()) {
+    size_t end = records.find('\0', start);
+    if (end == std::string_view::npos) {
+      end = records.size();
+    }
+    const std::string_view record = records.substr(start, end - start);
+    const size_t tab = record.find('\t');
+    int options = 0;
+    const bool ok = tab != std::string_view::npos &&
+                    base::StringToInt(record.substr(0, tab), &options) &&
+                    ParsePlan(record.substr(tab + 1), options).has_value();
+    base::StrAppend(&out, {ok ? "1" : "0", "\n"});
+    start = end + 1;
+  }
+  return out;
 }
 
 std::string FormatPlan(const Plan& plan) {

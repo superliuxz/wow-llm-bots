@@ -13,8 +13,8 @@ moves the case's option numbers (`first_options`, `forbid_options`) to the new n
 option's text.
 
 Usage: python3 -I tools/snapshot/add_fixture_options.py [--capture | --check]
-  --capture: re-capture every case's facts with the test server first (stops the play server
-             for about a minute and puts it back, like `wlb test e2e`).
+  --capture: re-capture every case's facts with the isolated test server first (about a minute;
+             the play server keeps running, as with `wlb test e2e`).
   --check:   exit 1 if any eval snapshot's options differ from what the module would offer.
 """
 
@@ -64,7 +64,7 @@ def capture(cases):
             if "facts dump failed" in stack.server_log() or time.time() > end:
                 missing = [p.name for p in want if not p.exists()]
                 raise SystemExit(f"the module wrote no facts for {', '.join(missing[:5])}...: "
-                                 "see var/logs/Server.log ('facts dump')")
+                                 "see var/logs/test/Server.log ('facts dump')")
             time.sleep(0.5)
     for case, src in zip(cases, want):
         shutil.copyfile(src, EVAL / f"{case['name']}.facts.json")

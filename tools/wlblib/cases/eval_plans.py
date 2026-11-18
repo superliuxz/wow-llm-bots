@@ -181,10 +181,59 @@ def check_case(case, got):
     return problems
 
 
+def _option_kind(text):
+    """The step kind `harness decide` names an option by (OptionKindName)."""
+    for prefix, kind in (("Attack ", "attack"), ("Talk to ", "talk"), ("Loot ", "loot"),
+                         ("Gather ", "gather"), ("Use ", "use")):
+        if text.startswith(prefix):
+            return kind
+    lower = text.lower()
+    for prefix, kind in (("explore", "explore"), ("rest", "rest"), ("go to", "go to town"),
+                         ("keep", "keep doing what I'm doing")):
+        if lower.startswith(prefix):
+            return kind
+    return "?"
+
+
+def _probe_plans(case):
+    """Every one-step plan the case's screen allows, plain and with a whisper and a look: what a
+    model could answer, for the checks to be tried on."""
+    snap = json.loads((EVAL_DIR / f"{case['name']}.snapshot.json").read_text())
+    texts = [o.get("text", "").split(":")[0].strip() for o in snap.get("options", [])]
+    plans = []
+    for i, text in enumerate(texts, 1):
+        step = {"option": i, "times": 1, "kind": _option_kind(text), "text": text}
+        plain = {"valid": True, "steps": [step], "look_s": 60, "goal": "", "tell_to": "",
+                 "tell": "", "open": [], "hover": ""}
+        plans.append(plain)
+        whisperers = WHISPER_FROM_RE.findall(case["reason"]) or ["Someone"]
+        plans.append({**plain, "tell_to": whisperers[0], "tell": "hi", "open": ["bags"],
+                      "hover": "x", "look_s": 10})
+    return plans
+
+
+def can_fail(case):
+    """Whether some answer fails the case's checks. One no answer fails tells nothing about the
+    brain (review of f40b0b6, finding 14: 8 in-combat cases offered only right options)."""
+    return any(check_case(case, plan) for plan in _probe_plans(case))
+
+
+def random_pass_rate(case):
+    """The share of the screen's options that pass as a plain one-step plan: what picking an
+    option at random scores on this case."""
+    plain = [p for p in _probe_plans(case) if not p["tell_to"]]
+    return sum(not check_case(case, p) for p in plain) / len(plain) if plain else 0.0
+
+
 def run_suite(cases, label=None):
     ensure_harness()
     if label:
         say(f"== eval ({label}) ==")
+    unfailable = [c["name"] for c in cases if not can_fail(c)]
+    if unfailable:
+        say(f"  not scored (no answer fails them): {', '.join(unfailable)}")
+    cases = [c for c in cases if c["name"] not in unfailable]
+    random_score = sum(random_pass_rate(c) for c in cases)
     rows = []
     for case in cases:
         got = decide_one(case)
@@ -210,7 +259,8 @@ def run_suite(cases, label=None):
     warm_comp = [r["got"].get("prompt_computed", 0) for r in rows[1:] if r["got"]["valid"]]
     med_comp = statistics.median(warm_comp) if warm_comp else 0
     pct = 100.0 * passed / len(rows) if rows else 0.0
-    say(f"score{f' [{label}]' if label else ''}: {passed}/{len(rows)} ({pct:.0f}%), "
+    say(f"score{f' [{label}]' if label else ''}: {passed}/{len(rows)} ({pct:.0f}%; a random "
+        f"option scores {random_score:.1f}), "
         f"first line {med_first_ms:.0f} ms, total {med_ms:.0f} ms, "
         f"warm prompt_computed {med_comp:.0f} tok")
     return {"label": label or "default", "passed": passed, "total": len(rows),

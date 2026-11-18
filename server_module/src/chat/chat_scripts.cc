@@ -11,11 +11,16 @@
 #include "CommandScript.h"
 #include "Common.h"
 #include "Define.h"
+#include "Language.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "Player.h"
 #include "PlayerScript.h"
+#include "PlayerbotAIConfig.h"
 #include "SharedDefines.h"
+#include "World.h"
+#include "WorldConfig.h"
+#include "WorldPacket.h"
 #include "base/memory/raw_ptr.h"
 #include "chat/chat_inbox.h"
 #include "chat/speak.h"
@@ -52,8 +57,55 @@ class LlmBrainChatScript : public PlayerScript {
     chat.from = player->GetName();
     chat.text = msg;
     chat.at_me = true;
-    inbox_->Add(receiver->GetName(), std::move(chat));
-    return true;  // Only listening: the whisper goes through.
+    if (!inbox_->Add(receiver->GetName(), std::move(chat))) {
+      return true;  // Not one of ours: only listening.
+    }
+    // One of the brain's bots: a whisper is for its brain, not a playerbots
+    // command. Playerbots' handler (it runs after this one: modules register
+    // in name order) checks its security before the command prefix, so a
+    // plain whisper could draw a canned reply ("I'm kind of busy now"):
+    // deliver it here and stop the hooks, unless it is a "!pb " command
+    // (review of c80e791, finding 1, the part left after 4ce9490).
+    const std::string& prefix = sPlayerbotAIConfig.CommandPrefix;
+    if (prefix.empty() || msg.starts_with(prefix)) {
+      return true;
+    }
+    DeliverWhisper(player, receiver, static_cast<Language>(language), msg);
+    return false;
+  }
+
+  // What Player::Whisper does after its script hook: the line to the
+  // receiver, "To ..." to the sender, the chat filter, AFK / DND replies.
+  static void DeliverWhisper(Player* sender,
+                             Player* receiver,
+                             Language language,
+                             const std::string& text) {
+    const bool filtered = sWorld->getBoolConfig(CONFIG_CHAT_FILTER_WHISPER) &&
+                          Player::IsChatFiltered(text);
+    WorldPacket data;
+    if (!filtered) {
+      ChatHandler::BuildChatPacket(data, CHAT_MSG_WHISPER, language, sender,
+                                   sender, text);
+      receiver->SendDirectMessage(&data);
+    }
+    ChatHandler::BuildChatPacket(
+        data, filtered ? CHAT_MSG_FILTERED : CHAT_MSG_WHISPER_INFORM, language,
+        receiver, receiver, text);
+    sender->SendDirectMessage(&data);
+    if (!sender->isAcceptWhispers() && !sender->IsGameMaster() &&
+        !receiver->IsGameMaster()) {
+      sender->SetAcceptWhispers(true);
+      ChatHandler(sender->GetSession()).SendSysMessage(LANG_COMMAND_WHISPERON);
+    }
+    if (receiver->isAFK()) {
+      ChatHandler(sender->GetSession())
+          .PSendSysMessage(LANG_PLAYER_AFK, receiver->GetName(),
+                           receiver->autoReplyMsg);
+    } else if (receiver->isDND()) {
+      ChatHandler(sender->GetSession())
+          .PSendSysMessage(LANG_PLAYER_DND, receiver->GetName(),
+                           receiver->autoReplyMsg);
+    }
   }
 
  private:

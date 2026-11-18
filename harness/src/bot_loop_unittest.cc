@@ -788,6 +788,49 @@ TEST(BotLoopTest, LookTimerAfterKeepResetsStepRefusals) {
   EXPECT_EQ(brain.size(), 1u);
 }
 
+// Any wake that isn't for a refusal starts the count over: a refusal after it
+// wakes the brain at once (review of f40b0b6, finding 6: one late refusal
+// held a bot in combat back for up to 30 s).
+TEST(BotLoopTest, AnotherWakeResetsStepRefusals) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Tess", 1, t0);
+  AddUnitAndOption(&s1, "0x1", "Mottled Boar", false, false);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  auto refuse_last = [&](base::TimeTicks at) {
+    ASSERT_FALSE(commands.empty());
+    pb::ImmediateEvent err;
+    err.bot = "Tess";
+    pb::ErrorEvent& e = err.event.error.emplace();
+    e.command_id = commands.back().command_id;
+    e.text = "target lost";
+    loop.OnEvent(err, at);
+  };
+  // Two refusals in a row: the second backs off.
+  brain.StreamFirstLine("do: 1");
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  refuse_last(t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.StreamFirstLine("do: 1");
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  refuse_last(t0 + base::Seconds(2));
+  EXPECT_EQ(brain.size(), 0u);  // Backing off.
+  // A whisper wakes the bot meanwhile; its plan's step is refused: at once.
+  loop.OnEvent(WhisperFrom("Tess", "Brakka", "hi"), t0 + base::Seconds(3));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.StreamFirstLine("do: 1");
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  refuse_last(t0 + base::Seconds(4));
+  EXPECT_EQ(brain.size(), 1u);
+}
+
 TEST(BotLoopTest, StaleSnapshotWhileCallInFlightDoesNotRequeueOldReasons) {
   CannedBrain brain;
   BotLoopConfig cfg;
@@ -890,6 +933,40 @@ TEST(BotLoopTest, OpenWakesTheBrainOnceShownAndClosedPanelsAreRemembered) {
             std::string::npos)
       << user;
   EXPECT_NE(user.find("Tough Hunk of Bread x4"), std::string::npos);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+
+  // After remember_panels_for (5 min), they are forgotten.
+  pb::Snapshot s4 = MakeLiveSnap("Testpriest", 4, t0 + base::Seconds(399));
+  AddKeep(&s4);
+  loop.OnSnapshot(s4, t0 + base::Seconds(399));
+  loop.OnTick(t0 + base::Seconds(400));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_EQ(brain.front_request().user.find("You remember"), std::string::npos)
+      << brain.front_request().user;
+}
+
+// `open:` of a panel already on the brain's screen shows nothing new: no wake
+// for it (review of f40b0b6, finding 5: it woke on every snapshot).
+TEST(BotLoopTest, OpenOfAPanelAlreadyOpenDoesNotWake) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Testpriest", 1, t0);
+  AddKeep(&s1);
+  OpenBags(&s1);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60\nopen: bags");
+  for (int i = 2; i < 12; ++i) {
+    pb::Snapshot s = MakeLiveSnap("Testpriest", i, t0 + base::Seconds(i));
+    AddKeep(&s);
+    OpenBags(&s);
+    loop.OnSnapshot(s, t0 + base::Seconds(i));
+  }
+  EXPECT_EQ(brain.size(), 0u);
 }
 
 TEST(BotLoopTest, HoverSendsTheThingsRefAndAnUnknownNameNothing) {
@@ -974,17 +1051,67 @@ TEST(BotLoopTest, HabitsCloseInCombatAndGlanceAtTheQuestLog) {
   EXPECT_EQ(panel[1].close->panel, pb::QUEST_LOG);
   EXPECT_EQ(brain.size(), 0u);  // Habits ask the brain nothing.
 
-  // Combat starts with bags open: they are closed.
+  // Combat starts with bags open that no habit opened (the brain or the
+  // player did): they stay open (review of f40b0b6, finding 8).
   pb::Snapshot s4 = MakeLiveSnap("Testpriest", 4, t0 + base::Seconds(3),
                                  /*in_combat=*/true);
   AddKeep(&s4);
   quest(&s4, true);
   OpenBags(&s4);
   loop.OnSnapshot(s4, t0 + base::Seconds(3));
+  EXPECT_EQ(PanelCommands(commands).size(), 2u);
+}
+
+// The rest of finding 8 (review of f40b0b6): the first quest taken glances
+// too, a glance never shown is given up (the habit works again), a glance
+// cut by combat is closed, and each act is a line in the next prompt.
+TEST(BotLoopTest, HabitsGlanceAtTheFirstQuestRetryAndTellTheBrain) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  const auto snap = [&](int seq, int quest_id, bool in_combat = false) {
+    pb::Snapshot s =
+        MakeLiveSnap("Testpriest", seq, t0 + base::Seconds(seq), in_combat);
+    AddKeep(&s);
+    if (quest_id != 0) {
+      pb::Objective& o = s.ext.quest_tracker.emplace_back();
+      o.quest.emplace().quest_id = quest_id;
+      o.quest->quest = "Boar Hunt";
+    }
+    return s;
+  };
+  loop.OnSnapshot(snap(1, 0), t0 + base::Seconds(1));
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  // The first quest: a glance.
+  loop.OnSnapshot(snap(2, 7), t0 + base::Seconds(2));
+  ASSERT_EQ(PanelCommands(commands).size(), 1u);
+  // Never shown: given up after look_wait (3 s); the next change glances again.
+  loop.OnSnapshot(snap(6, 7), t0 + base::Seconds(6));
+  loop.OnSnapshot(snap(7, 8), t0 + base::Seconds(7));
+  std::vector<pb::Command> panel = PanelCommands(commands);
+  ASSERT_EQ(panel.size(), 2u);
+  ASSERT_TRUE(panel[1].open);
+  // Combat starts while that glance is open: it is closed.
+  pb::Snapshot fight = snap(8, 8, /*in_combat=*/true);
+  fight.base.ui.open_panels.push_back(pb::QUEST_LOG);
+  loop.OnSnapshot(fight, t0 + base::Seconds(8));
   panel = PanelCommands(commands);
   ASSERT_EQ(panel.size(), 3u);
   ASSERT_TRUE(panel[2].close);
-  EXPECT_EQ(panel[2].close->panel, pb::BAGS);
+  EXPECT_EQ(panel[2].close->panel, pb::QUEST_LOG);
+  // The brain hears what its body did.
+  loop.OnTick(t0 + base::Seconds(70));
+  ASSERT_EQ(brain.size(), 1u);
+  const std::string& user = brain.front_request().user;
+  EXPECT_NE(user.find("you glanced at your quest log (your quests changed)"),
+            std::string::npos)
+      << user;
+  EXPECT_NE(user.find("you closed your quest log (combat started)"),
+            std::string::npos)
+      << user;
 }
 
 }  // namespace

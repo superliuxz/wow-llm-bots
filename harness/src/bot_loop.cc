@@ -113,6 +113,7 @@ void BotLoop::OnConnectionChanged(bool connected) {
       state.pending_reasons.clear();
       state.recent_events.clear();
       state.whisperers.clear();
+      ResetLooking(&state);
       ++state.call_epoch;
     }
     // Answers to screens of the old connection are useless: free the slots.
@@ -121,14 +122,26 @@ void BotLoop::OnConnectionChanged(bool connected) {
 }
 
 void BotLoop::NoteEvent(BotState* state, const pb::Event& event) {
-  const std::string text = DescribeEvent(event);
+  NoteText(state, DescribeEvent(event));
+}
+
+// static
+void BotLoop::ResetLooking(BotState* state) {
+  state->pending_look.reset();
+  state->glancing.clear();
+  state->was_in_combat = false;
+  state->last_bag_free_slots = 1;
+  state->last_quest_state.reset();
+}
+
+void BotLoop::NoteText(BotState* state, std::string text) {
   if (text.empty()) {
     return;
   }
   if (!state->recent_events.empty() && state->recent_events.back() == text) {
     return;
   }
-  state->recent_events.push_back(text);
+  state->recent_events.push_back(std::move(text));
   while (state->recent_events.size() >
          std::max<size_t>(config_.max_recent_events, 1)) {
     state->recent_events.pop_front();
@@ -220,10 +233,8 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
     state.look_deadline = base::TimeTicks();
     state.runner.Stop();
     const bool backoff_wake = !state.pending_reasons.empty();
-    if (!backoff_wake) {
-      state.step_refusals = 0;
-    }
-    WakeBot(bot, Urgency::kNormal, backoff_wake ? "" : "look timer");
+    WakeBot(bot, Urgency::kNormal, backoff_wake ? "" : "look timer",
+            /*refusal=*/backoff_wake);
   }
 }
 
@@ -270,6 +281,7 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
       return;
     }
   }
+  const bool refusal = imm.event.error && imm.event.error->command_id != 0;
   const std::optional<WakeTrigger> trig =
       EvaluateEventTrigger(imm.event, state.triggers.watches());
   if (!trig) {
@@ -278,7 +290,7 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
   state.runner.Stop();
   state.look_deadline = base::TimeTicks();
   if (state.latest_snapshot) {
-    WakeBot(bot, trig->urgency, trig->reason);
+    WakeBot(bot, trig->urgency, trig->reason, refusal);
   } else if (std::find(state.pending_reasons.begin(),
                        state.pending_reasons.end(),
                        trig->reason) == state.pending_reasons.end()) {
@@ -305,6 +317,7 @@ void BotLoop::OnTick(base::TimeTicks now) {
       state.step_refusals = 0;
       state.pending_reasons.clear();
       state.recent_events.clear();
+      ResetLooking(&state);
       ++state.call_epoch;
       continue;
     }
@@ -322,18 +335,20 @@ void BotLoop::OnTick(base::TimeTicks now) {
       state.look_deadline = base::TimeTicks();
       state.runner.Stop();
       const bool backoff_wake = !state.pending_reasons.empty();
-      if (!backoff_wake) {
-        state.step_refusals = 0;
-      }
-      WakeBot(bot, Urgency::kNormal, backoff_wake ? "" : "look timer");
+      WakeBot(bot, Urgency::kNormal, backoff_wake ? "" : "look timer",
+              /*refusal=*/backoff_wake);
     }
   }
 }
 
 void BotLoop::WakeBot(const std::string& bot,
                       Urgency urgency,
-                      const std::string& reason) {
+                      const std::string& reason,
+                      bool refusal) {
   BotState& state = bots_[bot];
+  if (!refusal) {
+    state.step_refusals = 0;
+  }
   if (!reason.empty() &&
       std::find(state.pending_reasons.begin(), state.pending_reasons.end(),
                 reason) == state.pending_reasons.end()) {
@@ -403,11 +418,14 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
       input.whisperers.push_back(w.name);
     }
   }
-  input.remembered = RememberedPanels(state, asked_at_for_whisperers);
+  // Ages on the snapshots' clock (seen_at is a snapshot's received time).
+  input.remembered = RememberedPanels(state, state.latest_received_at,
+                                      config_.remember_panels_for);
   input.slot = slot;
   input.temperature = config_.temperature;
 
   const uint32_t ask_seq = state.latest_snapshot->seq;
+  state.ask_watch_inputs = TriggerEvaluator::InputsOf(*state.latest_snapshot);
   const int64_t snap_mono_us = state.latest_snapshot->monotonic_us;
   const Screen ask_screen = state.latest_screen;
   const base::TimeTicks asked_at = base::TimeTicks::Now();
@@ -571,10 +589,11 @@ void BotLoop::OnReply(const std::string& bot,
       const std::string formatted = FormatPlan(*plan);
       const std::string do_line = formatted.substr(0, formatted.find('\n'));
       Log(base::StringPrintf(
-          "harness: %s woke (%s) -> %s (do %.0f ms, total %.0f ms, look %d s)",
+          "harness: %s woke (%s) -> %s (do %.0f ms, total %.0f ms, look %d s, "
+          "prompt %d tok)",
           bot.c_str(), decision.reason.c_str(), do_line.c_str(),
           decision.result.first_line_ms, decision.result.round_trip_ms,
-          plan->look_s));
+          plan->look_s, decision.result.reply->prompt_tokens));
       // Only install watches/steps if no newer surprise already superseded this
       // call while it was in flight. When an early-dispatched step of this
       // same call failed before the reply finished, still deliver say/tell and
@@ -586,7 +605,8 @@ void BotLoop::OnReply(const std::string& bot,
             plan->watches,
             state.early_step_failed
                 ? std::flat_set<std::string>{}
-                : CollectExpectedNames(plan->steps, plan->expect, ask_screen));
+                : CollectExpectedNames(plan->steps, plan->expect, ask_screen),
+            &state.ask_watch_inputs);
         if (!state.early_step_failed) {
           state.look_deadline = now + base::Seconds(plan->look_s);
         }
@@ -599,18 +619,32 @@ void BotLoop::OnReply(const std::string& bot,
         for (const std::string& name : plan->close) {
           SendPanel(bot, PanelFromName(name), /*open=*/false);
         }
+        // A look at what the brain already had on its screen shows nothing
+        // new: no wake for it (it woke the bot on every snapshot: review of
+        // f40b0b6, finding 5).
         BotState::PendingLook look;
         for (const std::string& name : plan->open) {
           const pb::Panel panel = PanelFromName(name);
           SendPanel(bot, panel, /*open=*/true);
-          look.panels.push_back(panel);
-          std::erase(state.glancing, panel);  // The brain keeps it open.
+          if (std::find(ask_screen.open_panels.begin(),
+                        ask_screen.open_panels.end(),
+                        panel) == ask_screen.open_panels.end()) {
+            look.panels.push_back(panel);
+          }
+          // The brain keeps it open.
+          std::erase_if(state.glancing, [&](const BotState::Glance& g) {
+            return g.panel == panel;
+          });
         }
         if (!plan->hover.empty()) {
           for (const Hoverable& h : ask_screen.hoverables) {
             if (h.name == plan->hover) {
               SendHover(bot, h.ref);
-              look.hover = h.name;
+              if (std::find(ask_screen.shown_tooltips.begin(),
+                            ask_screen.shown_tooltips.end(),
+                            h.name) == ask_screen.shown_tooltips.end()) {
+                look.hover = h.name;
+              }
               break;
             }
           }
@@ -676,37 +710,56 @@ bool BotLoop::OnLookSnapshot(const std::string& bot,
     }
   }
 
-  // Habits: no brain call.
+  // Habits: no brain call. They act on panels a habit opened only, never on
+  // one the brain opened, and each act is a line in the next prompt, so the
+  // brain knows what its body did (review of f40b0b6, finding 8).
   const BotLoopConfig::Habits& habits = config_.habits;
   const bool in_combat = snap.base.self.in_combat;
+  const auto asked = [&](pb::Panel panel) {
+    return state->pending_look &&
+           std::find(state->pending_look->panels.begin(),
+                     state->pending_look->panels.end(),
+                     panel) != state->pending_look->panels.end();
+  };
   if (habits.close_panels_in_combat && in_combat && !state->was_in_combat) {
-    for (const pb::Panel panel : ui.open_panels) {
-      SendPanel(bot, panel, /*open=*/false);
+    for (const BotState::Glance& g : state->glancing) {
+      if (is_open(g.panel)) {
+        SendPanel(bot, g.panel, /*open=*/false);
+        NoteText(state, base::StrCat({"you closed your ", PanelName(g.panel),
+                                      " (combat started)"}));
+      }
     }
     state->glancing.clear();
   }
   state->was_in_combat = in_combat;
-  std::erase_if(state->glancing, [&](pb::Panel panel) {
-    if (!is_open(panel)) {
-      return false;
+  std::erase_if(state->glancing, [&](const BotState::Glance& g) {
+    if (asked(g.panel)) {
+      return true;  // The brain asked for it meanwhile: it stays open.
     }
-    SendPanel(bot, panel, /*open=*/false);  // Seen (and remembered).
+    if (!is_open(g.panel)) {
+      return received_at >= g.until;  // Never shown: given up.
+    }
+    SendPanel(bot, g.panel, /*open=*/false);  // Seen (and remembered).
     return true;
   });
-  const auto glance = [&](pb::Panel panel) {
-    if (!in_combat && !is_open(panel) &&
-        std::find(state->glancing.begin(), state->glancing.end(), panel) ==
-            state->glancing.end()) {
-      SendPanel(bot, panel, /*open=*/true);
-      state->glancing.push_back(panel);
+  const auto glance = [&](pb::Panel panel, std::string_view why) {
+    if (in_combat || is_open(panel) || asked(panel) ||
+        std::any_of(
+            state->glancing.begin(), state->glancing.end(),
+            [&](const BotState::Glance& g) { return g.panel == panel; })) {
+      return;
     }
+    SendPanel(bot, panel, /*open=*/true);
+    state->glancing.push_back({panel, received_at + config_.look_wait});
+    NoteText(state, base::StrCat({"you glanced at your ", PanelName(panel),
+                                  " (", why, ")"}));
   };
   if (const std::optional<uint32_t> bag_free =
           snap.base.self.indicators.bag_free_slots) {
     const uint32_t free = *bag_free;
     if (habits.open_bags_when_full && free == 0 &&
         state->last_bag_free_slots != 0) {
-      glance(pb::BAGS);
+      glance(pb::BAGS, "they were full");
     }
     state->last_bag_free_slots = free;
   }
@@ -717,9 +770,9 @@ bool BotLoop::OnLookSnapshot(const std::string& bot,
                                      o.quest->complete ? "c" : "", ";"});
     }
   }
-  if (habits.glance_at_quest_log && quest_state != state->last_quest_state &&
-      !state->last_quest_state.empty()) {
-    glance(pb::QUEST_LOG);
+  if (habits.glance_at_quest_log && state->last_quest_state &&
+      quest_state != *state->last_quest_state) {
+    glance(pb::QUEST_LOG, "your quests changed");
   }
   state->last_quest_state = std::move(quest_state);
 
@@ -760,15 +813,17 @@ bool BotLoop::OnLookSnapshot(const std::string& bot,
 }
 
 // static
-std::vector<std::string> BotLoop::RememberedPanels(const BotState& state,
-                                                   base::TimeTicks now) {
+std::vector<std::string> BotLoop::RememberedPanels(
+    const BotState& state,
+    base::TimeTicks now,
+    base::TimeDelta remember_for) {
   std::vector<std::string> out;
   const pb::Ui& ui = state.latest_snapshot->base.ui;
   for (const auto& [panel, seen] : state.seen_panels) {
     if (std::find(ui.open_panels.begin(), ui.open_panels.end(), panel) !=
             ui.open_panels.end() ||
-        seen.lines.empty()) {
-      continue;  // On screen now.
+        seen.lines.empty() || now - seen.seen_at > remember_for) {
+      continue;  // On screen now, or forgotten.
     }
     std::vector<std::string> lines = seen.lines;
     lines.front() = base::StringPrintf(

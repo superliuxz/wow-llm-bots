@@ -1,8 +1,10 @@
 """A bot hurt by a fight, told to Rest, eats or drinks until full and the step is done.
 
 docs/plans/options-and-panels.md, "Rest": offered out of combat below full health or mana; the body uses
-the food and water of its starting kit (playerbots' eat / drink actions, no free food) or sits.
-The fight comes first: the same scene as `e2e choose`.
+the food and water in its bags (the fixture carries bread and water; playerbots' eat / drink
+actions, no free food) or sits. The fight comes first: the same scene as `e2e choose`. It must
+really eat or drink: a Food or Drink aura shows while resting (review of f40b0b6, finding 15:
+it passed by sitting).
 """
 
 from wlblib.testing import expect
@@ -37,5 +39,10 @@ def run(stack):
     expect(done["health"] == done["health_max"] and done["power"] == done["power_max"],
            f"done at {done['health']}/{done['health_max']} health, "
            f"{done['power']}/{done['power_max']} mana")
+    resting = [s for s in t["snapshots"] if rest["t"] <= s["t"] <= done["t"]]
+    ate = any("Food" in s["auras"] for s in resting)
+    drank = any("Drink" in s["auras"] for s in resting)
+    expect(ate or drank, "rested without eating or drinking (no Food or Drink aura)")
     return (f"{start['health']}/{start['health_max']} hp, {start['power']}/{start['power_max']} "
-            f"mana -> full, done {done['t'] - rest['t']:.1f} s after Rest")
+            f"mana -> full ({'ate' if ate else ''}{' and ' if ate and drank else ''}"
+            f"{'drank' if drank else ''}), done {done['t'] - rest['t']:.1f} s after Rest")

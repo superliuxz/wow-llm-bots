@@ -354,5 +354,12 @@ TEST(PlanTest, RandomPlansRoundTripAndTheGrammarAcceptsThem) {
   }
 }
 
+TEST(PlanTest, CheckPlanRecordsUsesTheRealParser) {
+  const std::string records =
+      std::string("2\tdo: 2\nexpect: none\nwatch: none\nlook: 60") + '\0' +
+      "2\tdo: 3\nexpect: none\nwatch: none\nlook: 60" + '\0' + "junk";
+  EXPECT_EQ(CheckPlanRecords(records), "1\n0\n0\n");
+}
+
 }  // namespace
 }  // namespace harness

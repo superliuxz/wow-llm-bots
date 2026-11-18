@@ -120,6 +120,13 @@ std::optional<Plan> ParsePlan(std::string_view text,
                               int option_count,
                               const std::vector<std::string>& order_names = {});
 
+// For tools (`harness parse-plans`): `records` are replies, each
+// "<option count>\t<reply text>", separated by '\0'; one "1" (a plan
+// ParsePlan reads) or "0" per record, one per line. So a benchmark counts
+// valid plans with the harness's own parser, not a copy (review of c80e791,
+// finding 17, the part left).
+std::string CheckPlanRecords(std::string_view records);
+
 // The plan in the form above (what the grammar produces).
 std::string FormatPlan(const Plan& plan);
 

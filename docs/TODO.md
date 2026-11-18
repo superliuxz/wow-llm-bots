@@ -71,6 +71,14 @@ design decisions below.
 
 ## Loose ends
 
+- **The brain's screen doesn't show the bot's own auras**: the module fills `self.unit.auras` now
+  (the buff bar; e2e `rest` checks Food / Drink there) but `screen_renderer.cc` doesn't render
+  them, so the brain doesn't see "eating", a debuff or a buff running out.
+- **Screen goldens have no module options** (review of c80e791, finding 5; still open after the
+  review of f40b0b6): the 10 goldens test rendering against the Python prototype, which invents
+  its own options. Real options need each golden's facts captured on the test server
+  (`add_fixture_options.py --capture` does it for the eval) and the prototype taught the
+  module's numbering. Module options are covered by `ScreenRendererTest` unit tests meanwhile.
 - Stale docs: `docs/specs/snapshot.md`, `docs/specs/trigger-audit.md`, `docs/plans/harness.md`
   and `docs/plans/phase2.md` still point at `server_module/proto/snapshot.proto` (protobuf, gone
   since 76e38a5); the structs are `snapshot/snapshot.h` now.
@@ -128,6 +136,9 @@ design decisions below.
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-18: review of f40b0b6, all 18 findings (`docs/reviews/2026-11-18-f40b0b6.md`, "Status"),
+  plus the parts of review c80e791 left open (canned replies, say/yell checks, perf's parser copy);
+  all 7 e2e cases pass on the test server. Not yet re-measured: eval (now out of 44 scored cases).
 - 2026-11-18: isolated test stack (`docs/plans/phase2.md`, E): e2e and perf run on their own
   test server (`out/server-test`, port 8086, `acore_test_*` databases reset from golden copies)
   while the play server keeps running; perf beside a busy play server warns instead of failing.

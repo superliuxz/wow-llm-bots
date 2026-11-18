@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -258,6 +259,53 @@ TEST(OrdersTest, AUseNameHoldingOnIsReadAsTheNameTheCallOffered) {
   EXPECT_EQ(use->name, "Fire on the ground");
   ASSERT_TRUE(use->t);
   EXPECT_EQ(std::get<Thing::Named>(use->t->value).name, "Defile");
+}
+
+// A name that ends like a number: read as the offered name, not as a shorter
+// name and a distance (review of f40b0b6, finding 18).
+TEST(OrdersTest, AnOfferedNameEndingInANumberIsReadWhole) {
+  const grammar::rt::Env offered{.names = {{"order_names", {"Area 52"}}},
+                                 .counts = {}};
+  const std::optional<std::vector<Act>> acts =
+      ParseActs("away Area 52", {"Area 52"});
+  ASSERT_TRUE(acts);
+  const auto* away = std::get_if<Act::Away>(&(*acts)[0].value);
+  ASSERT_TRUE(away);
+  ASSERT_TRUE(away->t);
+  EXPECT_EQ(std::get<Thing::Named>(away->t->value).name, "Area 52");
+  EXPECT_FALSE(away->yd);
+  const std::optional<Order> order =
+      ParseOrder("always -> away Area 52", offered);
+  ASSERT_TRUE(order);
+  EXPECT_EQ(FormatOrder(*order), "always -> away Area 52");
+}
+
+// What the GBNF lets the model write, sampled with llama.cpp's own grammar
+// code (not only what our printer writes), parses with the call's names, and
+// reads back the same once printed (review of f40b0b6, finding 18).
+TEST(OrdersTest, EverythingTheGrammarAllowsParses) {
+  const std::vector<std::string> pool = {
+      "Defile",         "Area 52",    "Fire on the ground",
+      "Lord Marrowgar", "SI:7 Agent", "Mark of the Fallen Champion",
+      "Kel'Thuzad"};
+  const grammar::rt::Env offered{.names = {{"order_names", pool}},
+                                 .counts = {}};
+  const std::string rules = OrderGrammar(pool);
+  const std::string root = grammar::OrdersRuleName("Order");
+  int sampled = 0;
+  for (uint64_t seed = 1; seed <= 400; ++seed) {
+    const std::optional<std::string> text =
+        GbnfSample(rules, root, seed, /*max_len=*/300, /*stop_chance=*/0.2);
+    if (!text) {
+      continue;
+    }
+    ++sampled;
+    const std::optional<Order> order = ParseOrder(*text, offered);
+    ASSERT_TRUE(order) << *text;
+    const std::string printed = FormatOrder(*order);
+    EXPECT_EQ(ParseOrder(printed, offered), order) << *text << "\n" << printed;
+  }
+  EXPECT_GT(sampled, 300);
 }
 
 // For random orders: parse(format(x)) == x, and the GBNF accepts the text.

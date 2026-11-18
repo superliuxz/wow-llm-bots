@@ -15,13 +15,17 @@
 
 #include "AiObjectContext.h"
 #include "Bag.h"
+#include "ByteBuffer.h"
 #include "Creature.h"
+#include "DBCStores.h"
+#include "DBCStructure.h"
 #include "Define.h"
 #include "Event.h"
 #include "G3D/Vector3.h"
 #include "GameObject.h"
 #include "GossipDef.h"
 #include "GridTerrainData.h"
+#include "Group.h"
 #include "IVMapMgr.h"
 #include "Item.h"
 #include "ItemPackets.h"
@@ -125,6 +129,34 @@ bool IsInLootRange(Player* bot, Creature* creature) {
 
 namespace {
 
+// How far a path may end from where the bot was sent and still count as
+// getting there (a path ends on the navmesh, a little off an object's spot).
+constexpr float kPathEndSlackYd = 3.0f;
+
+// Whether `go`'s lock needs a gathering skill (herbalism, mining, skinning,
+// engineering), as playerbots' 80% bag rule reads it.
+bool NeedsGatheringSkill(GameObject* go) {
+  const LockEntry* lock = sLockStore.LookupEntry(go->GetGOInfo()->GetLockId());
+  if (!lock) {
+    return false;
+  }
+  for (size_t i = 0; i < MAX_LOCK_CASE; ++i) {
+    if (lock->Type[i] != LOCK_KEY_SKILL) {
+      continue;
+    }
+    switch (SkillByLockType(static_cast<LockType>(lock->Index[i]))) {
+      case SKILL_HERBALISM:
+      case SKILL_MINING:
+      case SKILL_SKINNING:
+      case SKILL_ENGINEERING:
+        return true;
+      default:
+        break;
+    }
+  }
+  return false;
+}
+
 // Why playerbots' "use" refuses `go`, checked in the order its
 // UseItemAction::UseGameObject checks (it only tells a master, so we ask the
 // same questions). Empty when none of them applies.
@@ -157,18 +189,19 @@ std::string WhyCantUse(Player* bot, GameObject* go) {
       return base::StringPrintf("%s is %.0f yd %s you", name.c_str(),
                                 std::abs(dz), dz > 0 ? "above" : "below");
     }
-    if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot)) {
-      // Playerbots won't gather with bags more than 80% full
-      // (LootObject::IsLootPossible).
-      if (auto* bag_space =
-              ai->GetAiObjectContext()->GetValue<uint8>("bag space");
-          bag_space && bag_space->Get() > 80) {
+    LootObject loot(bot, go->GetGUID());
+    if (!loot.IsLootPossible(bot)) {
+      // Playerbots won't gather (herb, ore, skin, engineering) with bags more
+      // than 80% full: that reason only for a gathering lock, and only once
+      // the object was refused (a chest or quest object never: review of
+      // f40b0b6, finding 12).
+      PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
+      auto* bag_space =
+          ai ? ai->GetAiObjectContext()->GetValue<uint8>("bag space") : nullptr;
+      if (bag_space && bag_space->Get() > 80 && NeedsGatheringSkill(go)) {
         return base::StringPrintf("your bags are %d%% full",
                                   static_cast<int>(bag_space->Get()));
       }
-    }
-    LootObject loot(bot, go->GetGUID());
-    if (!loot.IsLootPossible(bot)) {
       return "you lack the skill, tool or key for " + name;
     }
   }
@@ -177,34 +210,51 @@ std::string WhyCantUse(Player* bot, GameObject* go) {
 
 // Walks to (x, y, z) and tells playerbots it is the bot's current movement,
 // so its own idle movement (wander, travel) doesn't replace the walk before it
-// arrives; combat movement still does.
-void WalkTo(Player* bot, float x, float y, float z) {
-  bot->GetMotionMaster()->MovePoint(/*id=*/0, x, y, z);
+// arrives; combat movement still does. Only along a path, as a player walks:
+// false (and no move) when none gets there; never a straight line through
+// walls, which MovePoint's forced destination drew (review of f40b0b6,
+// finding 11).
+bool WalkTo(Player* bot, float x, float y, float z) {
+  PathGenerator path(bot);
+  path.CalculatePath(x, y, z);
+  const uint32_t type = path.GetPathType();
+  const G3D::Vector3& end = path.GetActualEndPosition();
+  if ((type & PATHFIND_NOT_USING_PATH) == 0 &&
+      ((type & PATHFIND_NOPATH) != 0 ||
+       std::hypot(end.x - x, end.y - y) > kPathEndSlackYd)) {
+    return false;
+  }
+  bot->GetMotionMaster()->MovePoint(/*id=*/0, x, y, z, FORCED_MOVEMENT_NONE,
+                                    /*speed=*/0.0f, /*orientation=*/0.0f,
+                                    /*generatePath=*/true,
+                                    /*forceDestination=*/false);
   PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
   if (!ai) {
-    return;
+    return true;
   }
   auto* last =
       ai->GetAiObjectContext()->GetValue<LastMovement&>("last movement");
   if (!last) {
-    return;
+    return true;
   }
   const float speed = bot->GetSpeed(MOVE_RUN);
   const float ms =
       speed > 0 ? bot->GetExactDist(x, y, z) / speed * 1000.0f : 1000.0f;
   last->Get().Set(bot->GetMapId(), x, y, z, bot->GetOrientation(), ms + 500.0f,
                   MovementPriority::MOVEMENT_NORMAL);
+  return true;
 }
 
-// Walks to the bot's side of `target`, within contact distance.
-void WalkNextTo(Player* bot, WorldObject* target) {
+// Walks to the bot's side of `target`, within contact distance; false when
+// no path gets there.
+bool WalkNextTo(Player* bot, WorldObject* target) {
   float x = target->GetPositionX();
   float y = target->GetPositionY();
   float z = target->GetPositionZ();
   // The angle is relative to the target's facing.
   target->GetClosePoint(x, y, z, bot->GetObjectSize(), CONTACT_DISTANCE,
                         target->GetAngle(bot) - target->GetOrientation(), bot);
-  WalkTo(bot, x, y, z);
+  return WalkTo(bot, x, y, z);
 }
 
 void ClearLastMovement(Player* bot) {
@@ -413,7 +463,17 @@ TalkResult TalkToNpcNow(Player* bot, Creature* npc) {
   // trainer code (Trainer::TeachSpell: the checks, the cost, the packets),
   // as a click on "Train" would.
   if (npc->HasNpcFlag(UNIT_NPC_FLAG_TRAINER | UNIT_NPC_FLAG_TRAINER_CLASS)) {
-    if (Trainer::Trainer* trainer = sObjectMgr->GetTrainer(npc->GetEntry())) {
+    if (Trainer::Trainer* trainer = sObjectMgr->GetTrainer(npc->GetEntry());
+        trainer && trainer->GetTrainerType() != Trainer::Type::Class) {
+      // A profession, riding or pet trainer: what to learn there (a new
+      // profession is a big choice) is the brain's, and there is no option
+      // for it yet: Talk learns nothing (review of f40b0b6, finding 13).
+      if (done.empty()) {
+        return {
+            npc->GetName() + " trains a profession or skill, not your class",
+            ""};
+      }
+    } else if (trainer) {
       if (!trainer->IsTrainerValidForPlayer(bot)) {
         if (done.empty()) {
           return {npc->GetName() + " cannot train your class", ""};
@@ -502,6 +562,42 @@ bool HasCategoryAura(Player* bot, uint32_t category) {
 
 }  // namespace
 
+void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink) {
+  *has_food = false;
+  *has_drink = false;
+  const auto check_item = [&](Item* item) {
+    if (!item) {
+      return;
+    }
+    const ItemTemplate* proto = item->GetTemplate();
+    if (!proto || proto->Class != ITEM_CLASS_CONSUMABLE ||
+        (proto->SubClass != ITEM_SUBCLASS_FOOD &&
+         proto->SubClass != ITEM_SUBCLASS_CONSUMABLE)) {
+      return;
+    }
+    if (bot->CanUseItem(proto) != EQUIP_ERR_OK) {
+      return;
+    }
+    const uint32_t cat = proto->Spells[0].SpellCategory;
+    if (cat == kSpellCategoryFood) {
+      *has_food = true;
+    } else if (cat == kSpellCategoryDrink) {
+      *has_drink = true;
+    }
+  };
+  for (uint8_t slot = INVENTORY_SLOT_ITEM_START; slot < INVENTORY_SLOT_ITEM_END;
+       ++slot) {
+    check_item(bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot));
+  }
+  for (uint8_t i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i) {
+    if (const Bag* bag = bot->GetBagByPos(i)) {
+      for (uint32_t slot = 0; slot < bag->GetBagSize(); ++slot) {
+        check_item(bot->GetItemByPos(i, static_cast<uint8_t>(slot)));
+      }
+    }
+  }
+}
+
 bool HasFoodOrDrinkAura(Player* bot) {
   return bot->HasAura(kSpellGraccusFruitcake) ||
          HasCategoryAura(bot, kSpellCategoryFood) ||
@@ -513,11 +609,18 @@ void ContinueRest(Player* bot) {
   if (!ai || bot->IsNonMeleeSpellCast(false) || bot->IsInCombat()) {
     return;
   }
-  if (!bot->IsFullHealth() && !HasCategoryAura(bot, kSpellCategoryFood) &&
+  // Only what the bags hold: with no drink, playerbots' "drink" falls back to
+  // food, and the food aura doesn't stop the drink check, so the bot ate again
+  // every second or two (review of f40b0b6, finding 2).
+  bool has_food = false;
+  bool has_drink = false;
+  CheckBagFoodAndDrink(bot, &has_food, &has_drink);
+  if (has_food && !bot->IsFullHealth() &&
+      !HasCategoryAura(bot, kSpellCategoryFood) &&
       !bot->HasAura(kSpellGraccusFruitcake)) {
     ai->DoSpecificAction("eat", Event(), /*silent=*/true);
   }
-  if (bot->GetMaxPower(POWER_MANA) > 0 &&
+  if (has_drink && bot->GetMaxPower(POWER_MANA) > 0 &&
       bot->GetPower(POWER_MANA) < bot->GetMaxPower(POWER_MANA) &&
       !HasCategoryAura(bot, kSpellCategoryDrink)) {
     ai->DoSpecificAction("drink", Event(), /*silent=*/true);
@@ -683,9 +786,61 @@ WalkStepResult TickLongWalk(Player* bot,
 
   walk->step_dest = {next_pt.x, next_pt.y, next_pt.z};
   walk->has_step = true;
-  WalkTo(bot, next_pt.x, next_pt.y, next_pt.z);
+  if (!WalkTo(bot, next_pt.x, next_pt.y, next_pt.z)) {
+    return {.error = "stuck", .path_time = path_time};
+  }
   return {.path_time = path_time};
 }
+
+namespace {
+
+// The loot slots of `creature` that `bot` may take now, as its loot window
+// shows them: built from the same LootView the client gets (round robin,
+// roll winners, master loot, quest and free-for-all items), with the
+// permission Player::SendLoot gives for a corpse. Both of LootCorpseNow's
+// loops use it, so the bot never takes an item on another's turn nor reports
+// one it may not take (review of f40b0b6, finding 9).
+std::vector<uint8_t> TakeableLootSlots(Player* bot, Creature* creature) {
+  PermissionTypes permission = NONE_PERMISSION;
+  if (Group* group = creature->GetLootRecipientGroup()) {
+    if (bot->GetGroup() == group) {
+      switch (group->GetLootMethod()) {
+        case MASTER_LOOT:
+          permission = group->GetMasterLooterGuid() == bot->GetGUID()
+                           ? MASTER_PERMISSION
+                           : RESTRICTED_PERMISSION;
+          break;
+        case FREE_FOR_ALL:
+          permission = ALL_PERMISSION;
+          break;
+        case ROUND_ROBIN:
+          permission = ROUND_ROBIN_PERMISSION;
+          break;
+        default:
+          permission = GROUP_PERMISSION;
+          break;
+      }
+    }
+  } else if (creature->GetLootRecipient() == bot) {
+    permission = OWNER_PERMISSION;
+  }
+  ByteBuffer view;
+  view << LootView(creature->loot, bot, permission);
+  std::vector<uint8_t> slots;
+  view.read_skip<uint32_t>();  // Gold.
+  const uint8_t count = view.read<uint8_t>();
+  for (uint8_t i = 0; i < count; ++i) {
+    const auto slot = view.read<uint8_t>();
+    view.read_skip(5 * sizeof(uint32_t));  // Item id, count, display, random.
+    const auto type = view.read<uint8_t>();
+    if (type == LOOT_SLOT_TYPE_ALLOW_LOOT || type == LOOT_SLOT_TYPE_OWNER) {
+      slots.push_back(slot);
+    }
+  }
+  return slots;
+}
+
+}  // namespace
 
 std::string LootCorpseNow(Player* bot, Creature* creature) {
   PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
@@ -732,26 +887,22 @@ std::string LootCorpseNow(Player* bot, Creature* creature) {
     WorldPacket money_pkt(CMSG_LOOT_MONEY, 0);
     bot->GetSession()->HandleLootMoneyOpcode(money_pkt);
   }
-  const uint32_t max_slot =
-      std::min<uint32_t>(255u, creature->loot.GetMaxSlotInLootFor(bot));
-  for (uint32_t slot = 0; slot < max_slot; ++slot) {
-    if (!creature->loot.LootItemInSlot(slot, bot)) {
-      continue;
-    }
+  for (const uint8_t slot : TakeableLootSlots(bot, creature)) {
     WorldPacket item_pkt(CMSG_AUTOSTORE_LOOT_ITEM, 1);
     item_pkt << static_cast<uint8_t>(slot);
     item_pkt.rpos(0);
     bot->GetSession()->HandleAutostoreLootItemOpcode(item_pkt);
   }
-  // What is still there, and why: a player sees "Inventory is full" only when
-  // that is the reason. Items being rolled for or held for the master looter
-  // (`is_blocked`) are not the bot's to take now: the roll is its own thing
-  // (`loot_roll` events), so the step is done.
+  // What is still there that the bot may take, and why: a player sees
+  // "Inventory is full" only when that is the reason. Items being rolled for,
+  // held for the master looter or on another's round-robin turn are not the
+  // bot's to take now (the roll is its own thing: `loot_roll` events), so the
+  // step is done.
   std::string no_room;
   std::string refused;
-  for (uint32_t slot = 0; slot < max_slot; ++slot) {
+  for (const uint8_t slot : TakeableLootSlots(bot, creature)) {
     const LootItem* left = creature->loot.LootItemInSlot(slot, bot);
-    if (left == nullptr || left->is_blocked) {
+    if (left == nullptr) {
       continue;
     }
     const ItemTemplate* proto = sObjectMgr->GetItemTemplate(left->itemid);
@@ -806,7 +957,9 @@ ExecuteResult ExecuteLootOption(Player* bot, const OptionTarget& target) {
     const bool used = error.empty();
     return {std::move(error), used};
   }
-  WalkNextTo(bot, creature);
+  if (!WalkNextTo(bot, creature)) {
+    return {"no path to " + target.name};
+  }
   return {};
 }
 
@@ -824,7 +977,9 @@ ExecuteResult ExecuteObjectOption(Player* bot, const OptionTarget& target) {
   // Out of reach: walk there first, as a player would before clicking. The
   // world script uses it on arrival, and the harness times the step out if
   // the body never gets there.
-  WalkNextTo(bot, go);
+  if (!WalkNextTo(bot, go)) {
+    return {"no path to " + target.name};
+  }
   return {};
 }
 
@@ -842,7 +997,9 @@ ExecuteResult ExecuteTalkOption(Player* bot, const OptionTarget& target) {
     const bool used = res.error.empty();
     return {std::move(res.error), used, std::move(res.info)};
   }
-  WalkNextTo(bot, npc);
+  if (!WalkNextTo(bot, npc)) {
+    return {"no path to " + target.name};
+  }
   return {};
 }
 

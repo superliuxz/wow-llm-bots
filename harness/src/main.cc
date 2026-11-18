@@ -6,6 +6,7 @@
 //   harness decide <snapshot.pb> [--name= --goal= --reason= --rules=
 //                   --identity= --log-dir= --host= --port= --slot=
 //                   --temperature= --dry-run]
+//   harness parse-plans  < records (CheckPlanRecords, plan.h)
 
 #include <unistd.h>
 
@@ -19,6 +20,7 @@
 #include "base/threading/thread.h"
 #include "decide.h"
 #include "llm_client.h"
+#include "plan.h"
 #include "run.h"
 
 namespace {
@@ -43,7 +45,9 @@ int Usage() {
       "                 [--reason=TEXT] [--rules=FILE] [--identity=FILE]\n"
       "                 [--log-dir=DIR] [--host=H] [--port=N] [--slot=N]\n"
       "                 [--temperature=T] [--dry-run] [--print-request]\n"
-      "                 [--whisperers=NAME,NAME]\n",
+      "                 [--whisperers=NAME,NAME]\n"
+      "  harness parse-plans < records   (\"<options>\\t<reply>\" each, NUL-"
+      "separated)\n",
       stderr);
   return 2;
 }
@@ -123,6 +127,16 @@ int main(int argc, char** argv) {
   }
   if (sub == "decide") {
     return DecideCommand(args);
+  }
+  if (sub == "parse-plans") {
+    std::string input;
+    char buffer[4096];
+    size_t n = 0;
+    while ((n = std::fread(buffer, 1, sizeof(buffer), stdin)) > 0) {
+      input.append(buffer, n);
+    }
+    std::fputs(harness::CheckPlanRecords(input).c_str(), stdout);
+    return 0;
   }
   return Usage();
 }

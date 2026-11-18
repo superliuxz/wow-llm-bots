@@ -141,6 +141,21 @@ TEST(TriggersTest, WatchAlreadyTrueAtInstallDoesNotFireUntilItCrossesAgain) {
             (std::optional<WakeTrigger>{{Urgency::kUrgent, "hp<40"}}));
 }
 
+// The brain was asked at 60% hp; hp fell below its watch while the call was in
+// flight: the crossing fires once the plan is installed (review of f40b0b6,
+// finding 4: latches seeded from the newest snapshot swallowed it).
+TEST(TriggersTest, WatchCrossedDuringTheCallFires) {
+  TriggerEvaluator eval;
+  const pb::Snapshot asked = BaseSnap(60, 100);
+  EXPECT_FALSE(eval.EvaluateSnapshot(asked));
+  const TriggerEvaluator::WatchInputs seen = TriggerEvaluator::InputsOf(asked);
+  EXPECT_FALSE(eval.EvaluateSnapshot(BaseSnap(35, 100)));  // During the call.
+  eval.SetPlanContext({{Watch::Kind::kHealthBelow, 40}}, {}, &seen);
+  EXPECT_EQ(eval.EvaluateSnapshot(BaseSnap(34, 100)),
+            (std::optional<WakeTrigger>{{Urgency::kUrgent, "hp<40"}}));
+  EXPECT_FALSE(eval.EvaluateSnapshot(BaseSnap(33, 100)));  // Once.
+}
+
 TEST(TriggersTest, EnemyPlayerAlreadyInRangeAtInstallDoesNotFire) {
   TriggerEvaluator eval;
   pb::Snapshot close = BaseSnap();

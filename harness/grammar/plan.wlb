@@ -49,10 +49,10 @@ lines Plan {
   tell? <tell_to:Player "Name">: tell:Chat
       "<optional: a whisper to one player by name; answer a whisper this way>";
   open?: open:list<Panel, ", ", 1..3> default "none" lenient
-      "<optional: bags, character and/or quest log, to look at them; you are woken again once they show>";
+      "<optional: bags, character and/or quest log not already open, to look at them; you are woken again once they show>";
   close?: close:list<Panel, ", ", 1..3> default "none" lenient
       "<optional: panels to close>";
   hover?: hover:Hover default "none"
-      "<optional: the name of an item or quest on your screen, to read its tooltip; you are woken again>";
+      "<optional: the name of an item or quest on your screen whose tooltip isn't shown yet, to read it; you are woken again>";
   order*7: orders:Order @needs(order_names);
 }

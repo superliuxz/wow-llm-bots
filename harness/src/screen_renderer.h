@@ -75,6 +75,10 @@ struct Screen {
   bool has_module_options = false;
   // What can be pointed at, one per name (first one wins).
   std::vector<Hoverable> hoverables;
+  // What is already on the screen: the open panels and the names of the
+  // tooltips shown (an `open:` / `hover:` of these shows nothing new).
+  std::vector<wlb::snapshot::Panel> open_panels;
+  std::vector<std::string> shown_tooltips;
 };
 
 // The lines of one open panel (bags, character, quest log), as on the screen

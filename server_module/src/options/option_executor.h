@@ -99,6 +99,9 @@ TalkResult TalkToNpcNow(Player* bot, Creature* npc);
 // Whether the bot currently has a food or drink regeneration aura.
 bool HasFoodOrDrinkAura(Player* bot);
 
+// Whether the bags hold food / drink the bot can use now.
+void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink);
+
 // While a Rest step runs: starts eating or drinking when that one isn't going
 // yet (a second item used in the same tick as the first is refused, so a bot
 // would eat and never drink). Call at most about once a second.

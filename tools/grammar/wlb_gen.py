@@ -1044,6 +1044,7 @@ class Gen:
                 c += [f"bool Parse{name}(std::string_view s, std::string* out, const rt::Env* env) {{", "  (void)env;",
                       "  std::string value;",
                       f"  if (!hooks::{t['hook']}(s, &value)) return false;",
+                      f"  if (!rt::IsOffered(env, \"{t['env']}\", value)) return false;",
                       "  if (out) *out = std::move(value);", "  return true;", "}", "",
                       f"void Append{name}(const std::string& v, std::string* out) {{",
                       "  out->append(v);", "}", ""]
@@ -1062,6 +1063,7 @@ class Gen:
             elif k == "name":
                 c += [f"bool Parse{name}(std::string_view s, std::string* out, const rt::Env* env) {{", "  (void)env;",
                       "  if (!rt::IsName(s)) return false;",
+                      f"  if (!rt::IsOffered(env, \"{t['env']}\", s)) return false;",
                       "  if (out) *out = std::string(s);", "  return true;", "}", "",
                       f"void Append{name}(const std::string& v, std::string* out) {{",
                       "  out->append(v);", "}", ""]

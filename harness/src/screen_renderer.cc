@@ -9,6 +9,7 @@
 #include <flat_map>
 #include <flat_set>
 #include <functional>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -23,6 +24,23 @@
 
 namespace harness {
 namespace {
+
+// Quest text is long (a quest log of 25 quests ran to thousands of
+// characters): each piece is cut to this many bytes, at a character boundary,
+// with "..." (review of f40b0b6, finding 7).
+constexpr size_t kMaxQuestText = 240;
+constexpr size_t kMaxTooltip = 400;
+
+std::string Capped(std::string_view text, size_t max) {
+  if (text.size() <= max) {
+    return std::string(text);
+  }
+  size_t end = max;
+  while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xC0) == 0x80) {
+    --end;  // Not inside a UTF-8 character.
+  }
+  return base::StrCat({text.substr(0, end), "..."});
+}
 
 namespace pb = wlb::snapshot;
 
@@ -1023,10 +1041,10 @@ std::vector<std::string> QuestLogLines(const pb::QuestLog& log) {
     }
     std::vector<std::string> parts;
     if (!e.description.empty()) {
-      parts.push_back(e.description);
+      parts.push_back(Capped(e.description, kMaxQuestText));
     }
     if (!q.text.empty()) {
-      parts.push_back(q.text);
+      parts.push_back(Capped(q.text, kMaxQuestText));
     }
     if (!e.rewards.empty()) {
       parts.push_back(base::StrCat({"rewards ", ItemNames(e.rewards)}));
@@ -1066,8 +1084,8 @@ std::string TooltipLine(const pb::Tooltipped& t) {
   } else if (t.item && t.item->equipment && t.item->equipment->upgrade) {
     lines.push_back("an upgrade (that slot is empty)");
   }
-  return base::StrCat(
-      {"pointing at ", name, ": ", base::JoinString(lines, "; ")});
+  return base::StrCat({"pointing at ", name, ": ",
+                       Capped(base::JoinString(lines, "; "), kMaxTooltip)});
 }
 
 void AddHoverable(std::vector<Hoverable>* out,
@@ -1304,16 +1322,24 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
     lines.push_back(std::move(line));
   }
   // Open panels and the tooltip of what the bot points at
-  // (docs/plans/options-and-panels.md).
+  // (docs/plans/options-and-panels.md): last, after every option ("also:"), so
+  // long panels never push an option out of the model's sight.
+  std::vector<std::string> looked_at;
   for (const pb::Panel panel : base.ui.open_panels) {
     for (std::string& line : PanelLines(snapshot, panel)) {
-      lines.push_back(std::move(line));
+      looked_at.push_back(std::move(line));
     }
   }
   for (const pb::Tooltipped& t : base.tooltips) {
-    lines.push_back(TooltipLine(t));
+    looked_at.push_back(TooltipLine(t));
   }
   screen.hoverables = Hoverables(snapshot);
+  screen.open_panels = snapshot.base.ui.open_panels;
+  for (const pb::Tooltipped& t : snapshot.base.tooltips) {
+    if (t.ref) {
+      screen.shown_tooltips.push_back(t.ref->name);
+    }
+  }
   if (screen.has_module_options) {
     std::vector<std::string> extra;
     for (size_t i = 0; i < snapshot.options.size(); ++i) {
@@ -1343,6 +1369,8 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
                         option.text}));
     }
   }
+  lines.insert(lines.end(), std::make_move_iterator(looked_at.begin()),
+               std::make_move_iterator(looked_at.end()));
   // Every line is one line: a name or subtitle from the game with a line
   // break in it must not write a fake line (an option the bot doesn't have).
   for (std::string& line : lines) {

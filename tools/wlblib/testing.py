@@ -136,7 +136,11 @@ class Stack:
              *map(str, args)], capture_output=True, text=True)
         if result.returncode != 0:
             raise Failed(f"the scripted brain failed:\n{result.stderr.strip()[-600:]}")
-        return json.loads(result.stdout)
+        transcript = json.loads(result.stdout)
+        if transcript.get("visibility_errors"):
+            raise Failed("the module sent what the bot can't see:\n  " +
+                         "\n  ".join(transcript["visibility_errors"]))
+        return transcript
 
     def play(self, words, seconds=90, tail_s=15):
         """Runs the scripted brain (tools/snapshot/fake_harness.py --choose) against the module

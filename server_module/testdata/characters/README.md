@@ -9,7 +9,7 @@ account) are ever erased.
 
 | File | State |
 |---|---|
-| `priest-l1-valley.pdump` | Troll Priest, level 1, freshly created (never logged in), at the Valley of Trials start with starting gear and hearthstone |
+| `priest-l1-valley.pdump` | Troll Priest, level 1, freshly created (never logged in), at the Valley of Trials start with starting gear, hearthstone, 4 Tough Hunk of Bread, 4 Refreshing Spring Water and a Minor Healing Potion (added by hand, for the Rest and tooltip cases) |
 | `priest-l1-boars.pdump` | The same fresh priest moved about 12 yd from a Mottled Boar spawn in the Valley of Trials (-669, -4282); used by the choose test |
 | `city-orgrimmar.pdump` | The same Troll Priest after its first login, standing in Orgrimmar's Valley of Strength (bank and auction house); used by the snapshot pressure test |
 

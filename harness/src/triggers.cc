@@ -241,9 +241,25 @@ std::optional<WakeTrigger> EvaluateEventTrigger(
   return std::nullopt;
 }
 
-void TriggerEvaluator::SetPlanContext(
-    std::vector<Watch> watches,
-    std::flat_set<std::string> expected_names) {
+TriggerEvaluator::WatchInputs TriggerEvaluator::InputsOf(
+    const pb::Snapshot& snapshot) {
+  WatchInputs in;
+  in.alive = IsAlive(snapshot.base.self);
+  in.hp_pct = HealthPercent(snapshot.base.self);
+  in.mana_pct = ManaPercent(snapshot.base.self);
+  for (const pb::Unit& u : snapshot.base.nearby.units) {
+    if (!u.dead && u.kind == pb::Unit::PLAYER &&
+        u.reaction == pb::Unit::HOSTILE && std::isfinite(u.rel.dist_yd)) {
+      in.enemy_players.push_back({AttackerKey(u), u.rel.dist_yd});
+    }
+  }
+  return in;
+}
+
+void TriggerEvaluator::SetPlanContext(std::vector<Watch> watches,
+                                      std::flat_set<std::string> expected_names,
+                                      const WatchInputs* seen) {
+  const WatchInputs& in = seen != nullptr ? *seen : last_;
   watches_ = std::move(watches);
   watch_fired_.assign(watches_.size(), false);
   watch_seen_players_.assign(watches_.size(), {});
@@ -252,14 +268,13 @@ void TriggerEvaluator::SetPlanContext(
     const auto value = static_cast<double>(watch.value);
     switch (watch.kind) {
       case Watch::Kind::kHealthBelow:
-        watch_fired_[i] = was_alive_ && last_hp_pct_ && *last_hp_pct_ < value;
+        watch_fired_[i] = in.alive && in.hp_pct && *in.hp_pct < value;
         break;
       case Watch::Kind::kManaBelow:
-        watch_fired_[i] =
-            was_alive_ && last_mana_pct_ && *last_mana_pct_ < value;
+        watch_fired_[i] = in.alive && in.mana_pct && *in.mana_pct < value;
         break;
       case Watch::Kind::kEnemyPlayerWithin:
-        for (const EnemyPlayer& p : last_enemy_players_) {
+        for (const WatchInputs::EnemyPlayer& p : in.enemy_players) {
           if (p.dist_yd <= static_cast<float>(watch.value)) {
             watch_seen_players_[i].insert(p.key);
           }
@@ -445,15 +460,7 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
     }
   }
 
-  last_hp_pct_ = hp_pct;
-  last_mana_pct_ = mana_pct;
-  last_enemy_players_.clear();
-  for (const pb::Unit& u : snapshot.base.nearby.units) {
-    if (!u.dead && u.kind == pb::Unit::PLAYER &&
-        u.reaction == pb::Unit::HOSTILE && std::isfinite(u.rel.dist_yd)) {
-      last_enemy_players_.push_back({AttackerKey(u), u.rel.dist_yd});
-    }
-  }
+  last_ = InputsOf(snapshot);
 
   seen_snapshot_ = true;
   was_alive_ = alive;

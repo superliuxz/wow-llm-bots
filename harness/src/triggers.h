@@ -42,14 +42,29 @@ std::optional<WakeTrigger> EvaluateEventTrigger(
 // or new attacker once rather than on every tick while the condition holds.
 class TriggerEvaluator {
  public:
+  // What a snapshot says about the watches' conditions.
+  struct WatchInputs {
+    struct EnemyPlayer {
+      std::string key;
+      float dist_yd = 0;
+    };
+    bool alive = true;
+    std::optional<double> hp_pct;
+    std::optional<double> mana_pct;
+    std::vector<EnemyPlayer> enemy_players;
+  };
+  static WatchInputs InputsOf(const wlb::snapshot::Snapshot& snapshot);
+
   TriggerEvaluator() = default;
 
   // Installs the active plan's watches and expected mob names. Each watch's
-  // latch starts from the last snapshot seen: a condition already true when
-  // the plan is installed (the brain saw it on the screen) does not fire until
-  // it clears and crosses again.
+  // latch starts from `seen`, the snapshot the brain was asked about: a
+  // condition already true there does not fire until it clears and crosses
+  // again, but one that crossed while the call was in flight fires. Without
+  // `seen`, the last snapshot evaluated.
   void SetPlanContext(std::vector<Watch> watches,
-                      std::flat_set<std::string> expected_names);
+                      std::flat_set<std::string> expected_names,
+                      const WatchInputs* seen = nullptr);
 
   // Replaces only the expected mob names, keeping the watches and latches
   // (the first streamed line of a plan, before its `expect:` arrives).
@@ -82,13 +97,7 @@ class TriggerEvaluator {
   ControlFlags prev_control_;
   std::flat_set<std::string> prev_attackers_;
   // Last snapshot's watch inputs, to seed latches in SetPlanContext().
-  std::optional<double> last_hp_pct_;
-  std::optional<double> last_mana_pct_;
-  struct EnemyPlayer {
-    std::string key;
-    float dist_yd = 0;
-  };
-  std::vector<EnemyPlayer> last_enemy_players_;
+  WatchInputs last_;
 
   std::vector<Watch> watches_;
   std::vector<bool> watch_fired_;

@@ -422,6 +422,13 @@ std::string EmitGbnf(const std::vector<const Rule*>& rules,
   return Emitter(rules, env).Emit(root);
 }
 
+bool IsOffered(const Env* env, std::string_view list, std::string_view value) {
+  const std::vector<std::string>* names =
+      env != nullptr ? FindEnv(*env, list) : nullptr;
+  return names == nullptr || names->empty() ||
+         std::find(names->begin(), names->end(), value) != names->end();
+}
+
 int CountOf(const Env& env, std::string_view name) {
   for (const auto& [key, count] : env.counts) {
     if (key == name) {

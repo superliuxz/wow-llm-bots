@@ -157,5 +157,35 @@ TEST(SnapshotProtoTest, WriteJsonOfAnUnnamedEnumValueIsEmpty) {
   EXPECT_EQ(pb::WriteJson(snap), "");
 }
 
+// The visibility walker reaches every field by reflection (review of
+// f40b0b6, finding 17): a hover-only field deep in the nearby units is caught
+// outside a tooltip and allowed in one; a tooltip is for something hovered.
+TEST(SnapshotVisibilityTest,
+     HoverOnlyFieldsAnywhereAndTooltipsForWhatIsHovered) {
+  pb::Snapshot snap;
+  pb::Unit& unit = snap.base.nearby.units.emplace_back();
+  unit.name = "Gatda";
+  unit.player.emplace().race = "Orc";
+  std::vector<std::string> errors = ValidateSnapshotVisibility(snap);
+  ASSERT_EQ(errors.size(), 1u);
+  EXPECT_EQ(errors[0],
+            "$.base.nearby.units[0].player.race: hover-only field outside "
+            "base.tooltips");
+
+  snap.base.nearby.units[0].player->race.clear();
+  pb::Tooltipped& tip = snap.base.tooltips.emplace_back();
+  tip.ref.emplace().kind = pb::HoverRef::ITEM;
+  tip.ref->id = "4540";
+  pb::Item& item = tip.item.emplace();
+  item.name = "Tough Hunk of Bread";
+  item.vendor_value = 1;  // Hover-only, inside the tooltip: fine.
+  errors = ValidateSnapshotVisibility(snap);
+  ASSERT_EQ(errors.size(), 1u);
+  EXPECT_EQ(errors[0],
+            "$.base.tooltips[0]: not for anything in base.ui.hovering");
+  snap.base.ui.hovering.push_back(*tip.ref);
+  EXPECT_TRUE(ValidateSnapshotVisibility(snap).empty());
+}
+
 }  // namespace
 }  // namespace wlb::snapshot

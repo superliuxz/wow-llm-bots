@@ -559,5 +559,25 @@ TEST(ScreenRendererTest, OpenPanelsTooltipsAndWhatCanBePointedAt) {
   EXPECT_EQ(screen.hoverables[2].ref.kind, pb::HoverRef::QUEST);
 }
 
+// Panels come after every option, and quest text is cut (review of f40b0b6,
+// finding 7: a full quest log pushed "also:" out of a 4,096-token slot).
+TEST(ScreenRendererTest, OptionsComeBeforePanelsAndQuestTextIsCut) {
+  pb::Snapshot snap;
+  snap.base.self.state = pb::Self::ALIVE;
+  snap.base.ui.open_panels = {pb::QUEST_LOG};
+  pb::QuestLog::Entry& q = snap.ext.quest_log.emplace().quests.emplace_back();
+  q.objective.emplace().quest.emplace().quest_id = 1;
+  q.objective->quest->quest = "Long";
+  q.description = std::string(500, 'a') + "\xC3\xA9";
+  const Screen screen = RenderScreen(snap);
+  const size_t also = screen.text.find("also:");
+  const size_t log = screen.text.find("quest log:");
+  ASSERT_NE(also, std::string::npos) << screen.text;
+  ASSERT_NE(log, std::string::npos) << screen.text;
+  EXPECT_LT(also, log);
+  EXPECT_NE(screen.text.find(std::string(240, 'a') + "..."), std::string::npos);
+  EXPECT_EQ(screen.text.find(std::string(241, 'a')), std::string::npos);
+}
+
 }  // namespace
 }  // namespace harness

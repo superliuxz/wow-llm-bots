@@ -87,56 +87,94 @@ uint8_t ControlMask(const Player* bot) {
   return mask;
 }
 
-// Whether the body is still carrying out `target` (`used`: the object/NPC was
-// already clicked or the destination reached, at once or on arrival).
-bool IsOptionTargetPending(Player* bot,
-                           const OptionTarget& target,
-                           bool used,
-                           bool* had_food_drink_aura) {
+// How the body is doing with `target` (`used`: the object/NPC was already
+// clicked or the destination reached, at once or on arrival): still at it,
+// done, or cut short (`interrupted` says why; it is reported as the step's
+// error, never as done: review of f40b0b6, finding 10).
+struct TargetProgress {
+  bool pending = false;
+  std::string interrupted;
+};
+
+TargetProgress OptionTargetProgress(Player* bot,
+                                    const OptionTarget& target,
+                                    bool used,
+                                    bool* had_food_drink_aura) {
+  const auto pending = [] { return TargetProgress{.pending = true}; };
+  const auto done = [] { return TargetProgress{}; };
+  const auto cut = [](std::string why) {
+    return TargetProgress{.interrupted = std::move(why)};
+  };
+  if (target.kind != OptionTarget::Kind::kKeep && !bot->IsAlive()) {
+    return cut("you died");
+  }
   switch (target.kind) {
     case OptionTarget::Kind::kAttack: {
       Unit* unit =
           ObjectAccessor::GetUnit(*bot, ParseSnapshotGuid(target.guid));
-      return unit != nullptr && unit->IsInWorld() && !unit->isDead();
+      if (unit == nullptr || !unit->IsInWorld()) {
+        return cut(target.name + " is gone");
+      }
+      return unit->isDead() ? done() : pending();
     }
     case OptionTarget::Kind::kLoot: {
-      if (used || !bot->IsAlive()) {
-        return false;
+      if (used) {
+        return done();
       }
       Creature* creature =
           ObjectAccessor::GetCreature(*bot, ParseSnapshotGuid(target.guid));
-      return creature != nullptr && creature->IsInWorld() &&
-             creature->isDead() &&
-             creature->HasDynamicFlag(UNIT_DYNFLAG_LOOTABLE);
+      if (creature == nullptr || !creature->IsInWorld() ||
+          !creature->isDead() ||
+          !creature->HasDynamicFlag(UNIT_DYNFLAG_LOOTABLE)) {
+        return cut("nothing left to loot on " + target.name);
+      }
+      return pending();
     }
     case OptionTarget::Kind::kGather:
     case OptionTarget::Kind::kUse: {
       GameObject* go =
           ObjectAccessor::GetGameObject(*bot, ParseSnapshotGuid(target.guid));
       if (go == nullptr || !go->IsInWorld() || !go->isSpawned()) {
-        return false;
+        return used ? done() : cut(target.name + " is gone");
       }
       // A chest, herb or vein is done once opened (walking there until then);
       // anything else once clicked.
-      return IsLootableObject(go) ? go->getLootState() == GO_READY : !used;
+      const bool still =
+          IsLootableObject(go) ? go->getLootState() == GO_READY : !used;
+      if (still && !used && bot->IsInCombat()) {
+        return cut("you are in combat");
+      }
+      return still ? pending() : done();
     }
     case OptionTarget::Kind::kTalk: {
-      if (used || bot->IsInCombat() || !bot->IsAlive()) {
-        return false;
+      if (used) {
+        return done();
+      }
+      if (bot->IsInCombat()) {
+        return cut("you are in combat");
       }
       Creature* npc =
           ObjectAccessor::GetCreature(*bot, ParseSnapshotGuid(target.guid));
-      return npc != nullptr && npc->IsInWorld() && npc->IsAlive();
+      if (npc == nullptr || !npc->IsInWorld() || !npc->IsAlive()) {
+        return cut(target.name + " is gone");
+      }
+      return pending();
     }
     case OptionTarget::Kind::kRest:
-      return IsRestInProgress(bot, had_food_drink_aura);
+      if (IsRestInProgress(bot, had_food_drink_aura)) {
+        return pending();
+      }
+      return bot->IsInCombat() ? cut("you are in combat") : done();
     case OptionTarget::Kind::kExplore:
     case OptionTarget::Kind::kGoTo:
-      return !used && bot->IsAlive() && !bot->IsInCombat();
+      if (used) {
+        return done();
+      }
+      return bot->IsInCombat() ? cut("you are in combat") : pending();
     case OptionTarget::Kind::kKeep:
-      return false;
+      return done();
   }
-  return false;
+  return done();
 }
 
 // World-thread entry points for the brain bridge: every snapshot interval,
@@ -464,8 +502,14 @@ class LlmBrainWorldScript : public WorldScript {
     std::string error = found.error;
     bool used = false;
     std::string info;
-    state.had_food_drink_aura = false;
-    state.walk = PendingWalk{};
+    // Keep carries on with what the body is doing: its walk and its rest stay
+    // as they are (a reset walk would send the bot towards (0, 0, 0)).
+    const bool keep =
+        found.target && found.target->kind == OptionTarget::Kind::kKeep;
+    if (!keep) {
+      state.had_food_drink_aura = false;
+      state.walk = PendingWalk{};
+    }
     if (found.target) {
       ExecuteResult result = ExecuteOption(bot, *found.target, &state.walk);
       error = std::move(result.error);
@@ -505,8 +549,7 @@ class LlmBrainWorldScript : public WorldScript {
       failed.text = error;
       failed.command_id = command.command_id;
       EmitAlertingEvent(bot_index, name, bot, std::move(payload));
-    } else if (found.target &&
-               found.target->kind == OptionTarget::Kind::kKeep) {
+    } else if (keep) {
       // Keep: the body carries on, including a walk to an object it hasn't
       // clicked yet.
       state.done_command_id = command.command_id;
@@ -518,15 +561,19 @@ class LlmBrainWorldScript : public WorldScript {
       }
       state.object_used = used;
       state.active_command_id = command.command_id;
-      const bool pending = IsOptionTargetPending(bot, *found.target, used,
-                                                 &state.had_food_drink_aura);
-      if (pending) {
+      const TargetProgress progress = OptionTargetProgress(
+          bot, *found.target, used, &state.had_food_drink_aura);
+      if (progress.pending) {
         state.active_option = *found.target;
+        schedule_->SetActiveTargetPending(bot_index, true);
+      } else if (!progress.interrupted.empty()) {
+        state.active_option = *found.target;
+        FailActiveOption(bot_index, name, bot, progress.interrupted);
       } else {
         state.active_option.reset();
         state.done_command_id = command.command_id;
+        schedule_->SetActiveTargetPending(bot_index, false);
       }
-      schedule_->SetActiveTargetPending(bot_index, pending);
     }
   }
 
@@ -680,10 +727,16 @@ class LlmBrainWorldScript : public WorldScript {
     BotState* state = &bots_[index];
     bool pending = false;
     if (state->active_option) {
-      pending =
-          IsOptionTargetPending(bot, *state->active_option, state->object_used,
-                                &state->had_food_drink_aura);
-      if (!pending) {
+      const TargetProgress progress =
+          OptionTargetProgress(bot, *state->active_option, state->object_used,
+                               &state->had_food_drink_aura);
+      pending = progress.pending;
+      if (!progress.interrupted.empty()) {
+        LOG_INFO("module", "mod-llm-brain: {}: {} interrupted: {}",
+                 bot->GetName(), state->active_option->name,
+                 progress.interrupted);
+        FailActiveOption(index, bot->GetName(), bot, progress.interrupted);
+      } else if (!pending) {
         state->active_option.reset();
         state->done_command_id = state->active_command_id;
       }

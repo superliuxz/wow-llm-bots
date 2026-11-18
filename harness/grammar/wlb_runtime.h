@@ -144,6 +144,13 @@ struct Env {
 // An env count by name (0 if absent).
 int CountOf(const Env& env, std::string_view name);
 
+// Whether `value` may be read as a name of env list `list`: with the call's
+// env (`env` not null) holding names in that list, only one of them (the
+// GBNF allowed only those, and a name the call never offered is a misreading:
+// "away Area 52" is not "Area" 52 yd when "Area 52" was offered); otherwise
+// any name.
+bool IsOffered(const Env* env, std::string_view list, std::string_view value);
+
 // The GBNF for `root` and every rule it uses. A rule whose env list is empty
 // (or whose every alternative needs one) is unusable: alternatives and
 // optionals that need it are dropped, and if `root` itself is unusable the

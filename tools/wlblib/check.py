@@ -147,6 +147,7 @@ def snapshots(files=()):
         *sorted((ROOT / "harness/testdata/screens").glob("*.snapshot.json")),
     ]
     run([checker, *files])
+    run(["python3", "-I", "-B", ROOT / "tools/snapshot/check_hover_fields.py"])
     run(["python3", "-I", "-B", ROOT / "tools/audit/check_client_events.py", checker])
     # Eval snapshots show the options the module offers (review 2026-11-17, finding 5).
     run(["python3", "-I", "-B", ROOT / "tools/snapshot/add_fixture_options.py", "--check"])

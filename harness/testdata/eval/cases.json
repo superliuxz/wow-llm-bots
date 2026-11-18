@@ -549,17 +549,6 @@
     ]
   },
   {
-    "name": "hp_30_boar_near_live",
-    "source": "generated (tools/snapshot/make_eval_cases.py)",
-    "generated": true,
-    "reason": "plan done",
-    "summary": "30% HP out of combat, a boar 8 yd away (live options)",
-    "rule": "doesn't attack",
-    "forbid_kinds": [
-      "attack"
-    ]
-  },
-  {
     "name": "mana_20_boar_near",
     "source": "generated (tools/snapshot/make_eval_cases.py)",
     "generated": true,
@@ -570,17 +559,6 @@
       "rest",
       "go to town"
     ],
-    "forbid_kinds": [
-      "attack"
-    ]
-  },
-  {
-    "name": "mana_20_boar_near_live",
-    "source": "generated (tools/snapshot/make_eval_cases.py)",
-    "generated": true,
-    "reason": "plan done",
-    "summary": "20% mana out of combat, a boar 8 yd away (live options)",
-    "rule": "doesn't attack",
     "forbid_kinds": [
       "attack"
     ]

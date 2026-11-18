@@ -63,6 +63,30 @@ char* wlb_command_json_to_beve(const char* json, size_t len, size_t* out_len) {
   return DupBytes(wlb::snapshot::WriteBeve(cmd), out_len);
 }
 
+// The visibility errors (ValidateSnapshotVisibility) of a BEVE ModuleMessage
+// frame's snapshot, one per line; "" when it has none or carries no snapshot.
+// Returns a malloc'd buffer (free with wlb_wire_free), or nullptr if `bytes`
+// is not a valid ModuleMessage. The e2e runs check every frame the module
+// sends with it.
+char* wlb_module_message_visibility_errors(const char* bytes,
+                                           size_t len,
+                                           size_t* out_len) {
+  wlb::snapshot::ModuleMessage msg;
+  if (!wlb::snapshot::ReadBeve(std::string_view(bytes, len), &msg)) {
+    *out_len = 0;
+    return nullptr;
+  }
+  std::string errors;
+  if (msg.snapshot) {
+    for (const std::string& e :
+         wlb::snapshot::ValidateSnapshotVisibility(*msg.snapshot)) {
+      errors += e;
+      errors += '\n';
+    }
+  }
+  return DupBytes(errors, out_len);
+}
+
 void wlb_wire_free(void* ptr) {
   std::free(ptr);
 }

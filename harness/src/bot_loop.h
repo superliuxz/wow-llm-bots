@@ -57,6 +57,10 @@ struct BotLoopConfig {
   // How long a reply's `open:` / `hover:` waits for the snapshot that shows
   // it before the brain is woken to read it; then the look is given up.
   base::TimeDelta look_wait = base::Seconds(3);
+  // How long a closed panel stays in the prompt's memory ("You remember");
+  // then it is forgotten (the prompt has to fit the slot: review of f40b0b6,
+  // finding 7).
+  base::TimeDelta remember_panels_for = base::Minutes(5);
 };
 
 // Starts one brain call. Returns a handle whose Cancel() aborts it early (the
@@ -121,6 +125,9 @@ class BotLoop {
     std::deque<Whisperer> whisperers;
 
     TriggerEvaluator triggers;
+    // The watch inputs of the snapshot the call in flight asked about: its
+    // plan's watches are latched from them (a crossing during the call fires).
+    TriggerEvaluator::WatchInputs ask_watch_inputs;
     PlanRunner runner;
 
     bool has_ever_woken = false;
@@ -148,14 +155,25 @@ class BotLoop {
       base::TimeTicks until;
     };
     std::optional<PendingLook> pending_look;
-    // Panels a habit opened only for a glance: closed once seen.
-    std::vector<wlb::snapshot::Panel> glancing;
+    // Panels a habit opened only for a glance: closed once seen; given up at
+    // `until` if never shown (else the habit would never glance again).
+    struct Glance {
+      wlb::snapshot::Panel panel;
+      base::TimeTicks until;
+    };
+    std::vector<Glance> glancing;
     bool was_in_combat = false;
     uint32_t last_bag_free_slots = 1;
-    std::string last_quest_state;
+    // The quest tracker's state; nullopt before the first snapshot (no
+    // glance for what was there already).
+    std::optional<std::string> last_quest_state;
   };
 
   void NoteEvent(BotState* state, const wlb::snapshot::Event& event);
+  // A line for the next prompt's "Since your last look".
+  void NoteText(BotState* state, std::string text);
+  // What a habit or a disconnect leaves behind: forgotten.
+  static void ResetLooking(BotState* state);
   // Remembers who whispered (for the `tell` grammar).
   static void NoteWhisperer(BotState* state,
                             const wlb::snapshot::Event& event,
@@ -166,9 +184,13 @@ class BotLoop {
   void Requeue(BotState* state,
                std::vector<std::string> reasons,
                std::vector<std::string> events);
+  // `refusal`: woken because a step was refused (the refusal count stays;
+  // any other wake starts it over, so one late refusal after, say, entering
+  // combat doesn't hold the bot back up to 30 s: review of f40b0b6, finding 6).
   void WakeBot(const std::string& bot,
                Urgency urgency,
-               const std::string& reason);
+               const std::string& reason,
+               bool refusal = false);
   // Returns a closure that cancels the started call (empty if none started).
   base::OnceClosure StartBotCall(const std::string& bot,
                                  int slot,
@@ -207,8 +229,10 @@ class BotLoop {
                       BotState* state,
                       base::TimeTicks received_at);
   // The prompt's memory of panels not open now.
-  static std::vector<std::string> RememberedPanels(const BotState& state,
-                                                   base::TimeTicks now);
+  static std::vector<std::string> RememberedPanels(
+      const BotState& state,
+      base::TimeTicks now,
+      base::TimeDelta remember_for);
   void SendSay(const std::string& bot,
                wlb::snapshot::ChatChannel channel,
                const std::string& to,

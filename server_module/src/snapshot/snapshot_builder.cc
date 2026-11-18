@@ -36,6 +36,9 @@
 #include "Player.h"
 #include "QuestDef.h"
 #include "SharedDefines.h"
+#include "SpellAuraDefines.h"
+#include "SpellAuras.h"
+#include "SpellInfo.h"
 #include "StringFormat.h"
 #include "ThreatManager.h"
 #include "Trainer.h"
@@ -60,8 +63,6 @@ namespace {
 
 namespace pb = wlb::snapshot;
 
-constexpr uint32_t kSpellCategoryFood = 11;
-constexpr uint32_t kSpellCategoryDrink = 59;
 // When a bot's Explore spots and Go to places are worked out again
 // (docs/plans/options-and-panels.md, "World-thread cost").
 constexpr float kFactsRecomputeYd = 20.0f;
@@ -135,42 +136,6 @@ uint32_t FreeBagSlots(Player* bot) {
     }
   }
   return free;
-}
-
-void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink) {
-  *has_food = false;
-  *has_drink = false;
-  const auto check_item = [&](Item* item) {
-    if (!item) {
-      return;
-    }
-    const ItemTemplate* proto = item->GetTemplate();
-    if (!proto || proto->Class != ITEM_CLASS_CONSUMABLE ||
-        (proto->SubClass != ITEM_SUBCLASS_FOOD &&
-         proto->SubClass != ITEM_SUBCLASS_CONSUMABLE)) {
-      return;
-    }
-    if (bot->CanUseItem(proto) != EQUIP_ERR_OK) {
-      return;
-    }
-    const uint32_t cat = proto->Spells[0].SpellCategory;
-    if (cat == kSpellCategoryFood) {
-      *has_food = true;
-    } else if (cat == kSpellCategoryDrink) {
-      *has_drink = true;
-    }
-  };
-  for (uint8_t slot = INVENTORY_SLOT_ITEM_START; slot < INVENTORY_SLOT_ITEM_END;
-       ++slot) {
-    check_item(bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot));
-  }
-  for (uint8_t i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i) {
-    if (const Bag* bag = bot->GetBagByPos(i)) {
-      for (uint32_t slot = 0; slot < bag->GetBagSize(); ++slot) {
-        check_item(bot->GetItemByPos(i, static_cast<uint8_t>(slot)));
-      }
-    }
-  }
 }
 
 const char* EquipmentSlotName(uint8_t slot) {
@@ -301,6 +266,25 @@ void FillSelf(Player* bot, pb::Self* self) {
   unit.power_pct = Percent(bot->GetPower(power), bot->GetMaxPower(power));
   unit.dead = bot->isDead();
   unit.player.emplace().class_ = ClassName(bot->getClass());
+  // The bot's buff bar: the auras the client shows (those with a visible
+  // slot), as a player sees their own ("Food" while eating).
+  for (const auto& [spell_id, app] : bot->GetAppliedAuras()) {
+    const Aura* base = app ? app->GetBase() : nullptr;
+    if (!base || app->GetSlot() >= MAX_AURAS) {
+      continue;
+    }
+    pb::Aura& aura = unit.auras.emplace_back();
+    aura.id = spell_id;
+    if (const char* name =
+            base->GetSpellInfo()->SpellName[sWorld->GetDefaultDbcLocale()]) {
+      aura.name = name;
+    }
+    aura.harmful = !app->IsPositive();
+    if (base->GetDuration() > 0) {
+      aura.remaining_s = static_cast<float>(base->GetDuration()) / 1000.0f;
+    }
+    aura.stacks = base->GetStackAmount() > 1 ? base->GetStackAmount() : 0;
+  }
 
   self->gender =
       bot->getGender() == GENDER_FEMALE ? pb::Self::FEMALE : pb::Self::MALE;

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 
+#include "Common.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "Player.h"
@@ -56,6 +57,40 @@ std::string WhyCantWhisper(Player* bot, Player* to, const std::string& name) {
   return "";
 }
 
+// The server's checks before any say, yell or whisper a player's client sends
+// (HandleMessagechatOpcode): the first-login mute (most chat types), and for
+// out loud, a spectator or a dead body (dropped silently by the server) and
+// the level required to talk (review of c80e791, finding 14, the part left).
+std::string WhyCantTalk(Player* bot, bool out_loud) {
+  WorldSession* session = bot->GetSession();
+  if (sWorld->getBoolConfig(CONFIG_CHAT_MUTE_FIRST_LOGIN) &&
+      !(session &&
+        session->HasPermission(rbac::RBAC_PERM_SKIP_CHECK_CHAT_CHANNEL_REQ))) {
+    const uint32_t minutes =
+        sWorld->getIntConfig(CONFIG_CHAT_TIME_MUTE_FIRST_LOGIN);
+    if (bot->GetTotalPlayedTime() < minutes * MINUTE) {
+      return "you can't talk until you have played " + std::to_string(minutes) +
+             " minutes";
+    }
+  }
+  if (!out_loud) {
+    return "";
+  }
+  if (bot->IsSpectator()) {
+    return "spectators can't talk";
+  }
+  if (!bot->IsAlive()) {
+    return "you are dead";
+  }
+  const auto level_req =
+      static_cast<uint32_t>(sWorld->getIntConfig(CONFIG_CHAT_SAY_LEVEL_REQ));
+  if (bot->GetLevel() < level_req) {
+    return "you must be level " + std::to_string(level_req) +
+           " to talk out loud";
+  }
+  return "";
+}
+
 }  // namespace
 
 std::string Speak(Player* bot, const pb::Command::Say& say) {
@@ -65,6 +100,10 @@ std::string Speak(Player* bot, const pb::Command::Say& say) {
   }
   if (!bot->CanSpeak()) {
     return "you can't speak yet (muted)";
+  }
+  if (std::string why = WhyCantTalk(bot, say.channel != pb::WHISPER);
+      !why.empty()) {
+    return why;
   }
   // Out loud a player speaks their race's language; whispers are always
   // readable (Player::Whisper makes them so).

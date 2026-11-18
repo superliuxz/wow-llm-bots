@@ -28,7 +28,7 @@ def main():
     wakes = [json.loads(line) for line in open(wakes_file)]
     if os.environ.get("PROMPT") == "harness":
         b.prepare_harness_requests(snap_dir, wakes)
-    done, lat, first_lat, valid, failed = [], [], [], [], []
+    done, lat, first_lat, plans, failed = [], [], [], [], []
     lock = threading.Lock()
     t0 = time.perf_counter()
     warm = 5.0
@@ -51,13 +51,15 @@ def main():
                     done.append(end)
                     lat.append(end - start)
                     first_lat.append(plan.get("_first_line_s", end - start))
-                    valid.append(bool(plan.get("_valid", True)))
+                    plans.append(plan)
 
     threads = [threading.Thread(target=worker, args=(w,)) for w in range(workers)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
+    b.revalidate(plans)
+    valid = [bool(p.get("_valid", True)) for p in plans]
     print(f"{workers} workers: {len(done) / seconds:.1f} wake-ups/s | one call p50 "
           f"{statistics.median(lat):.2f}s p95 {sorted(lat)[int(0.95 * len(lat))]:.2f}s | "
           f"valid {sum(valid)}/{len(valid)} | first-line p50 "

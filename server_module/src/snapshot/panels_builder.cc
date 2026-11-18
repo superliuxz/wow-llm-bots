@@ -468,16 +468,28 @@ class SpellValues : public SpellValueSource {
     }
     const int effect = index > 0 ? index - 1 : 0;
     const SpellEffectInfo& e = info->Effects[effect];
+    const auto [lo, hi] = Range(*info, e);
     switch (code) {
       case 's':
+        return lo == hi ? base::NumberToString(lo)
+                        : base::StringPrintf("%d to %d", lo, hi);
       case 'm':
-        return base::NumberToString(std::abs(e.CalcValue(bot_)));
+        return base::NumberToString(lo);
       case 'o': {
-        if (e.Amplitude <= 0 || info->GetDuration() <= 0) {
+        // Over the whole duration, at one value per period; a regen aura
+        // (food, drink: no period of its own) counts per 5 s, as the client
+        // does. Floating point, then cut: 17 per 5 s for 18 s is 61, not 51
+        // (review of f40b0b6, finding 16).
+        const int32_t ms = info->GetDuration();
+        const double period = e.Amplitude > 0 ? e.Amplitude : 5000.0;
+        if (ms <= 0) {
           return std::nullopt;
         }
-        const int32_t ticks = info->GetDuration() / e.Amplitude;
-        return base::NumberToString(std::abs(e.CalcValue(bot_)) * ticks);
+        const auto total = [&](int v) {
+          return static_cast<int>(v * (ms / period));
+        };
+        return lo == hi ? base::NumberToString(total(lo))
+                        : base::StringPrintf("%d to %d", total(lo), total(hi));
       }
       case 't':
         if (e.Amplitude <= 0) {
@@ -514,6 +526,31 @@ class SpellValues : public SpellValueSource {
   }
 
  private:
+  // The effect's value range as the tooltip shows it, never a roll: the
+  // base points with the level bonus SpellEffectInfo::CalcValue adds, plus
+  // 1..die sides (a potion's "70 to 90"). Talent modifiers are left out, as
+  // the client's own tooltip leaves them out.
+  std::pair<int, int> Range(const SpellInfo& info,
+                            const SpellEffectInfo& e) const {
+    int base = e.BasePoints;
+    if (e.RealPointsPerLevel != 0.0f) {
+      int level = static_cast<int>(bot_->GetLevel());
+      if (info.MaxLevel > 0 && level > static_cast<int>(info.MaxLevel)) {
+        level = static_cast<int>(info.MaxLevel);
+      } else if (level < static_cast<int>(info.BaseLevel)) {
+        level = static_cast<int>(info.BaseLevel);
+      }
+      level -= static_cast<int>(std::max(info.BaseLevel, info.SpellLevel));
+      base += static_cast<int>(level * e.RealPointsPerLevel);
+    }
+    const int dice = e.DieSides;
+    int lo = base + (dice == 0 ? 0 : std::min(dice, 1));
+    int hi = base + (dice == 0 ? 0 : std::max(dice, 1));
+    lo = std::abs(lo);
+    hi = std::abs(hi);
+    return {std::min(lo, hi), std::max(lo, hi)};
+  }
+
   Player* bot_;
   uint32_t spell_id_;
 };
@@ -644,6 +681,12 @@ void AddItemTooltip(Player* bot,
 
 std::string ProgressLine(Player* bot, const Quest* q) {
   std::vector<std::string> parts;
+  // Read without Player::GetReqKillOrCastCurrentCount: its m_QuestStatus[id]
+  // inserts an empty entry for a quest that has none (a rewarded one), which
+  // then reads as NONE: offered again and never completable (review of
+  // f40b0b6, finding 3).
+  const QuestStatusMap& statuses = bot->getQuestStatusMap();
+  const auto status = statuses.find(q->GetQuestId());
   for (uint32_t i = 0; i < QUEST_OBJECTIVES_COUNT; ++i) {
     const int32_t entry = q->RequiredNpcOrGo[i];
     const uint32_t need = q->RequiredNpcOrGoCount[i];
@@ -662,7 +705,8 @@ std::string ProgressLine(Player* bot, const Quest* q) {
     parts.push_back(base::StringPrintf(
         "%s: %u/%u", name.c_str(),
         std::min<uint32_t>(
-            bot->GetReqKillOrCastCurrentCount(q->GetQuestId(), entry), need),
+            status != statuses.end() ? status->second.CreatureOrGOCount[i] : 0,
+            need),
         need));
   }
   for (uint32_t i = 0; i < QUEST_ITEM_OBJECTIVES_COUNT; ++i) {
@@ -917,7 +961,9 @@ std::optional<pb::Tooltipped> BuildTooltip(Player* bot,
   }
   if (ref.kind == pb::HoverRef::QUEST) {
     const Quest* q = sObjectMgr->GetQuestTemplate(id);
-    if (!q || bot->GetQuestStatus(id) == QUEST_STATUS_NONE) {
+    // In the quest log only: a rewarded quest isn't NONE, but it has no slot
+    // (and no counters) any more.
+    if (!q || bot->FindQuestSlot(id) >= MAX_QUEST_LOG_SIZE) {
       return std::nullopt;  // Not in the bot's quest log: nothing to point at.
     }
     AddQuestTooltip(bot, q, &out);

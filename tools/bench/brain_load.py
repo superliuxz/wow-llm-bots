@@ -389,7 +389,10 @@ def call_harness_prompt(wake, snap_dir, slots):
         release_slot(slot, tracked)
     plan = parse_plan(content)
     plan["_first_line_s"] = first_line_s
+    # Provisional (for the estimate below); revalidate() replaces it with the harness's own
+    # parser after the timed run.
     plan["_valid"] = validate(plan, len(kinds), counts=True)
+    plan["_text"], plan["_options"] = content, len(kinds)
     if plan["_valid"]:
         plan["_est_s"] = estimate_seconds(plan, kinds)
     if plan.get("goal"):
@@ -496,6 +499,20 @@ def normalize(plan):
 
 
 STEP_RE = re.compile(r"^(\d+)(?:x(\d+))?$")
+
+
+def revalidate(plans):
+    """Sets each PROMPT=harness plan's `_valid` from the harness's own parser (`harness
+    parse-plans`, ParsePlan), in one process after the timed run: the count of valid plans is
+    the real one, not this file's copy of the rules (review of c80e791, finding 17)."""
+    todo = [p for p in plans if isinstance(p, dict) and "_text" in p]
+    if not todo:
+        return
+    records = "\0".join(f"{p['_options']}\t{p['_text']}" for p in todo)
+    out = subprocess.run([str(HARNESS), "parse-plans"], input=records, capture_output=True,
+                         text=True, check=True).stdout.split()
+    for plan, verdict in zip(todo, out):
+        plan["_valid"] = verdict == "1"
 
 
 def validate(plan, n_options, counts=False):
@@ -623,6 +640,10 @@ def main():
         cv.notify_all()
     for t in threads:
         t.join()
+    revalidate([r["plan"] for r in results])
+    for r in results:
+        if isinstance(r["plan"], dict) and "_text" in r["plan"]:
+            r["ok"] = r["plan"]["_valid"]
     wall = time.perf_counter() - t0
     failed = [r for r in results if r["failed"]]
     results = [r for r in results if not r["failed"]] or results

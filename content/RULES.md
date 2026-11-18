@@ -38,9 +38,9 @@ look: <integer 60 to 300: a safety net only, since surprises wake you at once>
 goal: <optional: what you're working towards, a few words>
 say: <optional: a line said out loud to the players near you>
 tell <Name>: <optional: a whisper to one player by name; answer a whisper this way>
-open: <optional: bags, character and/or quest log, to look at them; you are woken again once they show>
+open: <optional: bags, character and/or quest log not already open, to look at them; you are woken again once they show>
 close: <optional: panels to close>
-hover: <optional: the name of an item or quest on your screen, to read its tooltip; you are woken again>
+hover: <optional: the name of an item or quest on your screen whose tooltip isn't shown yet, to read it; you are woken again>
 
 Example:
 do: 5
