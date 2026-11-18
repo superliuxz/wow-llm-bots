@@ -60,6 +60,26 @@ TEST(PositionFactsTest, RefreshMeasuresFromTheNewPositionAndKeepsIds) {
   EXPECT_FLOAT_EQ(facts.places[0].dist_yd, 990);
 }
 
+TEST(PositionFactsTest, RefreshSortsByDistanceAndDeduplicatesCompassDirection) {
+  PositionFacts facts;
+  // From (0, 0): spot:far is N (100, 0), spot:near is NE (40, -40).
+  facts.spots = {Spot("spot:far", 100, 0), Spot("spot:near", 40, -40)};
+  RefreshFrom({0, 0, 0}, &facts);
+  ASSERT_EQ(facts.spots.size(), 2u);
+  EXPECT_EQ(facts.spots[0].id, "spot:near");
+  EXPECT_EQ(facts.spots[0].dir, pb::NE);
+  EXPECT_EQ(facts.spots[1].id, "spot:far");
+  EXPECT_EQ(facts.spots[1].dir, pb::N);
+
+  // From (0, -40): both (100, 0) and (40, -40) are N, so only the nearer is
+  // kept.
+  PositionFacts moved = facts;
+  RefreshFrom({0, -40, 0}, &moved);
+  ASSERT_EQ(moved.spots.size(), 1u);
+  EXPECT_EQ(moved.spots[0].id, "spot:near");
+  EXPECT_EQ(moved.spots[0].dir, pb::N);
+}
+
 TEST(PositionFactsTest, DropsWhatIsOutOfTravelRange) {
   PositionFacts facts;
   facts.places = {PlaceAt("place:near", 10, 0), PlaceAt("place:far", 3000, 0),

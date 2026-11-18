@@ -2,6 +2,7 @@
 
 #include "test/facts_dump.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <optional>
@@ -22,6 +23,7 @@
 #include "options/option_executor.h"
 #include "options/option_facts.h"
 #include "options/options.h"
+#include "options/position_facts.h"
 #include "proto/snapshot.h"
 #include "snapshot/perception.h"
 

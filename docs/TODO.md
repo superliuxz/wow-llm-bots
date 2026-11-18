@@ -20,23 +20,6 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
   no live case yet (Loose ends). **Left:** open panels (`bags`, `character`, `quest_log`,
   `docs/specs/snapshot.md`).
 
-## Next, in order` ahead of #5.
-
-- **#4 Module: more things a bot can do: mostly done (2026-11-17).** Built, unit-tested, and
-  verified live: `Gather <herb/ore>` (gated by `required_skill` vs. learned skill),
-  `Use <chest, quest object, door, portal>`, `Talk to <name>` (turns in completed quests via
-  `BestRewardIndex`, accepts available quests, learns affordable trainer spells, sells greys,
-  repairs, binds hearthstone, and emits an `info` summary), `Rest (...)` (eats/drinks/sits until
-  full HP and mana or aura expiry), `Explore <dir>, <dist> yd (<mobs, level range>)`, and
-  `Go to <place> (<services>), <dist> yd <dir>` (stepped ~70 yd `mmap` walk with 10 s stall
-  refusal; 50-bot world-thread path perf case in `perf_walk.py`); `snapshot_builder.cc` +
-  `nearby_builder.{h,cc}` fill `ext.target`, `ext.combat`, `ext.party`, `ext.quest_tracker`
-  (incl. `Objective::where`), `ext.minimap.places`, `base.self.indicators`,
-  `GameObject::required_skill`, and `OptionFacts` (`<case>.facts.json` for `fixture_options`);
-  all 13 formerly-`planned` eval cases now run on live options (**13/13 pass**, **48/50** across
-  the full eval suite). **Left:** open panels (`bags`, `character`, `quest_log` —
-  `docs/specs/snapshot.md`).
-
 ## Next, in order
 
 1. **Module: open panels** (`#4`, `docs/plans/harness.md` M1, `docs/specs/snapshot.md`): fill

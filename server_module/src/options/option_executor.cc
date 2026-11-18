@@ -532,25 +532,31 @@ bool IsRestInProgress(Player* bot, bool* had_food_drink_aura) {
 WalkStepResult TickLongWalk(Player* bot,
                             base::TimeTicks now,
                             PendingWalk* walk) {
+  const auto stop_walk = [&]() {
+    ClearLastMovement(bot);
+    if (bot->isMoving()) {
+      bot->StopMoving();
+    }
+  };
   if (!walk) {
     return {.error = "walk interrupted"};
   }
   if (!bot->IsAlive()) {
+    stop_walk();
     return {.error = "walk interrupted: you died"};
   }
   if (bot->IsInCombat()) {
+    stop_walk();
     return {.error = "walk interrupted: you are in combat"};
   }
   if (bot->GetMapId() != walk->map_id) {
+    stop_walk();
     return {.error = "walk interrupted: you changed map"};
   }
   const float dist_to_dest =
       bot->GetExactDist(walk->dest.x, walk->dest.y, walk->dest.z);
   if (dist_to_dest <= kWalkArrivalYd) {
-    ClearLastMovement(bot);
-    if (bot->isMoving()) {
-      bot->StopMoving();
-    }
+    stop_walk();
     return {.arrived = true};
   }
 
@@ -560,10 +566,7 @@ WalkStepResult TickLongWalk(Player* bot,
                           bot->GetPositionZ()};
     walk->last_progress_at = now;
   } else if (now - walk->last_progress_at >= kWalkStallTimeout) {
-    ClearLastMovement(bot);
-    if (bot->isMoving()) {
-      bot->StopMoving();
-    }
+    stop_walk();
     return {.error = "stuck"};
   }
 
@@ -589,12 +592,15 @@ WalkStepResult TickLongWalk(Player* bot,
   {
     PathGenerator path(bot);
     path.CalculatePath(walk->dest.x, walk->dest.y, walk->dest.z);
-    if ((path.GetPathType() & ~kTypeOk) == 0 && path.GetPath().size() >= 2) {
+    const uint32_t path_type = path.GetPathType();
+    if ((path_type & ~kTypeOk) == 0 && path.GetPath().size() >= 2) {
       const G3D::Vector3 cand = PointAlongPath(path.GetPath(), kWalkStepYd);
-      const float cand_dist_to_dest =
-          std::hypot(cand.x - walk->dest.x, cand.y - walk->dest.y);
+      const G3D::Vector3& end = path.GetActualEndPosition();
+      const float end_dist_to_dest =
+          std::hypot(end.x - walk->dest.x, end.y - walk->dest.y);
       if (bot->GetExactDist(cand.x, cand.y, cand.z) >= 2.0f &&
-          cand_dist_to_dest + 2.0f < dist_to_dest) {
+          ((path_type & PATHFIND_NORMAL) != 0 ||
+           end_dist_to_dest + 2.0f < dist_to_dest)) {
         next_pt = cand;
         found = true;
       }

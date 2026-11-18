@@ -2,7 +2,9 @@
 
 #include "options/position_facts.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 #include "base/strings/stringprintf.h"
@@ -29,7 +31,21 @@ void RefreshFrom(const pb::Vec3& pos, PositionFacts* facts) {
   std::erase_if(facts->spots, [&](pb::OptionFacts::Spot& spot) {
     spot.dist_yd = Dist(pos, spot.pos.x, spot.pos.y, spot.pos.z);
     spot.dir = DirFrom(pos, spot.pos.x, spot.pos.y);
-    return out_of_range(spot.dist_yd);
+    return out_of_range(spot.dist_yd) ||
+           spot.dir == pb::DIRECTION_UNSPECIFIED || spot.dir == pb::HERE;
+  });
+  std::sort(facts->spots.begin(), facts->spots.end(),
+            [](const pb::OptionFacts::Spot& a, const pb::OptionFacts::Spot& b) {
+              return a.dist_yd < b.dist_yd;
+            });
+  uint32_t seen_dirs = 0;
+  std::erase_if(facts->spots, [&](const pb::OptionFacts::Spot& spot) {
+    const uint32_t bit = 1u << static_cast<uint8_t>(spot.dir);
+    if ((seen_dirs & bit) != 0) {
+      return true;
+    }
+    seen_dirs |= bit;
+    return false;
   });
   std::erase_if(facts->places, [&](pb::OptionFacts::Place& place) {
     place.dist_yd = Dist(pos, place.pos.x, place.pos.y, place.pos.z);

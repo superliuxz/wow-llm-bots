@@ -696,23 +696,33 @@ void SnapshotBuilder::FillOptionFacts(Player* bot,
     return;  // Explore and Go to are offered only alive and out of combat.
   }
   // The spots and places change only as the bot moves: recompute them after
-  // 20 yd or 10 s, or on a new map, zone or level, and re-measure in between.
+  // 20 yd or 10 s, on a new map, zone or level, or when a cached spot/place
+  // drops out of travel range; re-measure a copy in between so transient steps
+  // across the 25 yd boundary never permanently erase cached entries.
   const Viewpoint view = ViewpointOf(bot);
-  const bool stale =
+  bool stale =
       !position_facts_ || position_view_.map_id != view.map_id ||
       position_view_.zone_id != view.zone_id ||
       position_view_.level != view.level ||
       std::hypot(position_view_.pos.x - view.pos.x,
                  position_view_.pos.y - view.pos.y) > kFactsRecomputeYd ||
       now - position_time_ > kFactsRecomputeAfter;
+  PositionFacts current;
+  if (!stale) {
+    current = *position_facts_;
+    RefreshFrom(view.pos, &current);
+    if (current.spots.size() < position_facts_->spots.size() ||
+        current.places.size() < position_facts_->places.size()) {
+      stale = true;
+    }
+  }
   if (stale) {
     position_facts_ = ComputePositionFacts(*world, view, bot);
     position_view_ = view;
     position_time_ = now;
-  } else {
-    RefreshFrom(view.pos, &*position_facts_);
+    current = *position_facts_;
   }
-  AddPositionFacts(*position_facts_, view.pos, snapshot->ext.quest_tracker, out,
+  AddPositionFacts(current, view.pos, snapshot->ext.quest_tracker, out,
                    &minimap);
 }
 
