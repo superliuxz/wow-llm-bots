@@ -67,11 +67,16 @@ design decisions below.
 - A bot once wrote `tell <its own name>:` (Gatda, Gemma 4, live 2026-11-17); the module refuses
   it. Likely cause, the RULES.md example `tell Gatda:`, is fixed (review finding 8); watch whether
   it recurs.
-- **Eval (2026-11-18, Gemma 4):** **49/53 (92%)** with the looking cases (`food_in_open_bags`,
-  `bags_full_open`, `new_loot_hover`, and `healthy_boar_pull` `forbid_look` all passing; `do:` p50
-  `71 ms`, total `190 ms`). Remaining 4 misses: `bags_full` (with closed bags it picks `Keep`; in
-  live play the habit opens bags when full, which passes in `bags_full_open`), `hp_60_fine`,
-  `ignore_critter`, `skip_tapped_mob`. The Qwen3.6 shootout was not re-run on this set.
+- **Eval (2026-11-18, Gemma 4):** 47/53 after taking the case-shaped wording back out of
+  RULES.md ("even if `skull level`", "`red`", and a worked example that was the
+  `new_loot_hover` scene; the example now hovers a quest). 49/53 with them. Misses:
+  `red_mob_nearby` (attacks a red mob), `new_loot_hover` (never hovers new loot), `hp_60_fine`,
+  `ignore_critter`, `skip_tapped_mob`, `bags_full` (with closed bags it explores; in live play
+  the habit opens full bags, and `bags_full_open` passes). The Qwen3.6 shootout was not re-run.
+- **llama-server is slower than earlier today** (2026-11-18): `do:` p50 ~190 ms in the eval
+  against 71-84 ms in the morning, the same with the old and new RULES.md (checked on one case
+  each). Same process since the morning, GPU otherwise idle. Restart it (`tools/wlb llm`) and
+  re-run `tools/wlb test perf brain` before trusting new latency numbers.
 - **Panels, things not built yet** (`docs/plans/options-and-panels.md`): no `Use <item>` option
   for bag items (and thus no spec §10 use-item quest eval case yet: needs item target selection for
   unit/object/self quest items); the module sends no `quest_accepted` / `quest_complete` /
@@ -109,6 +114,11 @@ design decisions below.
   fails with "never offered". Passed every run so far.
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-18: review of 3a28d9d / fa50c95: `LootCorpseNow` says "Inventory is full" only when
+  there is no room ("You can't carry <item>" for the server's other refusals; items being rolled
+  for or held for the master looter stay and the step is done); RULES.md without the eval-shaped
+  wording; the loot trade-off documented (`docs/plans/options-and-panels.md`, "Loot").
 
 - 2026-11-18: live `harness` run (`Testpriest`, `Gatda`) verified `open:`, `close:`, `hover:`
   (`hover: Kolkar Leaders` -> quest tooltip wake), remembered panels, and the habits in live play;

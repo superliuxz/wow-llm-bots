@@ -113,8 +113,11 @@ bool IsInLootRange(Player* bot, Creature* creature);
 
 // Opens `creature`'s corpse, takes its money and auto-loots all items for `bot`
 // through the server's loot opcodes (including grey items playerbots' own
-// >80%-bag-space filter would leave behind). Returns why it failed ("Inventory
-// is full", ...), or empty when looted.
+// >80%-bag-space filter would leave behind). Items being rolled for or held for
+// the master looter stay, and the loot still counts as done. Returns why an
+// item stayed: "Inventory is full" only when there is no room, "You can't carry
+// <item>" for the server's other refusals (unique, quest item limit); empty
+// when looted.
 std::string LootCorpseNow(Player* bot, Creature* creature);
 
 }  // namespace llm_brain

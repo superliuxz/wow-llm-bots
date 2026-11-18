@@ -743,11 +743,32 @@ std::string LootCorpseNow(Player* bot, Creature* creature) {
     item_pkt.rpos(0);
     bot->GetSession()->HandleAutostoreLootItemOpcode(item_pkt);
   }
-  bool left_behind = false;
+  // What is still there, and why: a player sees "Inventory is full" only when
+  // that is the reason. Items being rolled for or held for the master looter
+  // (`is_blocked`) are not the bot's to take now: the roll is its own thing
+  // (`loot_roll` events), so the step is done.
+  std::string no_room;
+  std::string refused;
   for (uint32_t slot = 0; slot < max_slot; ++slot) {
-    if (creature->loot.LootItemInSlot(slot, bot) != nullptr) {
-      left_behind = true;
-      break;
+    const LootItem* left = creature->loot.LootItemInSlot(slot, bot);
+    if (left == nullptr || left->is_blocked) {
+      continue;
+    }
+    const ItemTemplate* proto = sObjectMgr->GetItemTemplate(left->itemid);
+    const std::string item_name = proto ? proto->Name1 : "an item";
+    ItemPosCountVec dest;
+    switch (bot->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, left->itemid,
+                                 left->count)) {
+      case EQUIP_ERR_OK:
+        refused = item_name;  // Room, yet not taken: some other rule.
+        break;
+      case EQUIP_ERR_BAG_FULL:
+      case EQUIP_ERR_INVENTORY_FULL:
+        no_room = item_name;
+        break;
+      default:
+        refused = item_name;  // Unique, quest item limit, ...
+        break;
     }
   }
   WorldPacket release_pkt(CMSG_LOOT_RELEASE, 8);
@@ -755,8 +776,11 @@ std::string LootCorpseNow(Player* bot, Creature* creature) {
   release_pkt.rpos(0);
   bot->GetSession()->HandleLootReleaseOpcode(release_pkt);
   ai->ResetActionDuration();
-  if (left_behind) {
+  if (!no_room.empty()) {
     return "Inventory is full";
+  }
+  if (!refused.empty()) {
+    return "You can't carry " + refused;
   }
   return "";
 }

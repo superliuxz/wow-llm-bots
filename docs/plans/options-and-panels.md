@@ -84,6 +84,17 @@ when it is offered, and what carries it out. Like the existing options, the modu
   its corpse, and a `Go to graveyard` would fight it for the movement. Death options (release
   spirit, run to corpse, spirit healer) are their own later item.
 
+### Loot (changed 2026-11-18)
+
+- **Carried out:** the bot walks next to the corpse and loots it through the server's own loot
+  opcodes (`LootCorpseNow`): money and every item it may take, grey ones included.
+  **Trade-off:** playerbots' loot strategy no longer decides what to take (it skipped junk with
+  bags over 80% full, which left the corpse lootable and `Loot` on screen forever); the body now
+  takes everything it is allowed to, as a player's "loot all" does. Items being rolled for or
+  held for the master looter stay and the step still counts as done (the roll is its own
+  thing); the step fails with "Inventory is full" only when there is no room, and with "You
+  can't carry <item>" for the server's other refusals.
+
 ### The long walk (Explore and Go to) & harness wiring
 
 - **Stepped `mmap` walk:** our `WalkTo` today is a single `MovePoint`: fine for 20 yd, not for

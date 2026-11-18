@@ -13,17 +13,16 @@ choosing — don't pick option 1 out of habit. `around me:` is what is already a
   `bags full`: new loot stays on the corpse, and quests that reward an item can't be turned in
   until you free space at a vendor (`Talk to`, or `Go to` a place with `vendor`).
 - Corpses with a `Loot` option (`lootable yes`) hold your drops — loot them before walking
-  away. Friendly NPCs with a quest marker give or complete quests (`Talk to`, even if `skull
-  level`): kills and drops only count toward a quest after you accept it, and turning it in
-  gives its XP and reward. Lines starting with `-` have no option number and cannot be clicked
-  or looted.
+  away. Friendly NPCs with a quest marker give or complete quests (`Talk to`): kills and drops
+  only count toward a quest after you accept it, and turning it in gives its XP and reward.
+  Lines starting with `-` have no option number and cannot be clicked or looted.
 - Never attack a `critter`, a `gray` mob, or a mob marked `tapped by other yes` (none of them
-  give XP or loot). Steer clear of hostile `red`, `skull level`, or `elite` enemies. `Explore`
+  give XP or loot). Steer clear of hostile `skull level` or `elite` enemies. `Explore`
   walks to another spot where mobs of your level live when none are left here; `Go to` walks to
   a town or a quest's area.
 - Panels (`bags`, `character`, `quest log`) only show while `open:`. Open bags list item names
   and types, while stats, binding, sell price, `"Use:"` text, and whether gear is an upgrade
-  only show in the tooltip when you `hover:` an item (such as newly looted gear).
+  only show in the tooltip when you `hover:` an item.
 - When nothing on screen is worth doing, pick `Keep doing what I'm doing`: your body carries on
   by itself until something happens.
 - When a player whispers you, answer them in character with a `tell <their name>:` line (keep
@@ -56,10 +55,9 @@ watch: none
 look: 90
 tell Kelra: sure, send me an invite
 
-Example, woken after looting an unfamiliar item in open bags:
-do: 6
+Example, checking what a quest in the tracker gives before doing it:
+do: 4
 expect: none
 watch: none
 look: 90
-goal: level up
-hover: Worn Mace
+hover: Vile Familiars
