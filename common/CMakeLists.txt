@@ -158,11 +158,35 @@ target_include_directories(wlb_harness SYSTEM PUBLIC
 target_link_libraries(wlb_harness PUBLIC wlb_net wlb_proto)
 target_compile_features(wlb_harness PUBLIC cxx_std_26)
 target_compile_options(wlb_harness PRIVATE ${WLB_SAFETY_FLAGS})
+# TEST ONLY: llama.cpp's own grammar code, to check in unit tests that a GBNF
+# accepts what our printers write (harness/src/gbnf_check.h;
+# docs/plans/grammar-idl.md, "Tests"). No model, vocabulary or GGML runtime:
+# llama_grammar_stubs.cc stands in for the five functions only used with one.
+# llama.cpp's files keep their own style (no warnings of theirs are ours).
+set(WLB_LLAMA "${WLB_ROOT}/third_party/llama.cpp")
+add_library(wlb_gbnf_check STATIC
+  "${WLB_LLAMA}/src/llama-grammar.cpp"
+  "${WLB_LLAMA}/src/unicode.cpp"
+  "${WLB_LLAMA}/src/unicode-data.cpp"
+  "${WLB_HARNESS_SRC}/llama_grammar_stubs.cc"
+  "${WLB_HARNESS_SRC}/gbnf_check.cc")
+target_include_directories(wlb_gbnf_check SYSTEM PRIVATE
+  "${WLB_LLAMA}/include" "${WLB_LLAMA}/ggml/include" "${WLB_LLAMA}/src")
+target_include_directories(wlb_gbnf_check PUBLIC "${WLB_HARNESS_SRC}")
+target_compile_features(wlb_gbnf_check PRIVATE cxx_std_17)
+set_source_files_properties("${WLB_LLAMA}/src/llama-grammar.cpp"
+  "${WLB_LLAMA}/src/unicode.cpp" "${WLB_LLAMA}/src/unicode-data.cpp"
+  PROPERTIES COMPILE_OPTIONS "-w")
+set_source_files_properties("${WLB_HARNESS_SRC}/llama_grammar_stubs.cc"
+  "${WLB_HARNESS_SRC}/gbnf_check.cc"
+  PROPERTIES COMPILE_OPTIONS "${WLB_SAFETY_FLAGS}")
+
 add_executable(harness_unittests
   "${WLB_HARNESS_SRC}/bot_loop_unittest.cc"
   "${WLB_HARNESS_SRC}/decide_unittest.cc"
   "${WLB_HARNESS_SRC}/decision_log_unittest.cc"
   "${WLB_HARNESS_SRC}/file_util_unittest.cc"
+  "${WLB_HARNESS_SRC}/gbnf_check_unittest.cc"
   "${WLB_HARNESS_SRC}/llm_client_unittest.cc"
   "${WLB_HARNESS_SRC}/module_connection_unittest.cc"
   "${WLB_HARNESS_SRC}/orders_unittest.cc"
@@ -173,7 +197,8 @@ add_executable(harness_unittests
   "${WLB_HARNESS_SRC}/scheduler_unittest.cc"
   "${WLB_HARNESS_SRC}/screen_renderer_unittest.cc"
   "${WLB_HARNESS_SRC}/triggers_unittest.cc")
-target_link_libraries(harness_unittests PRIVATE wlb_harness GTest::gtest_main)
+target_link_libraries(harness_unittests PRIVATE wlb_harness wlb_gbnf_check
+                      GTest::gtest_main)
 target_compile_definitions(harness_unittests PRIVATE
   WLB_HARNESS_TESTDATA="${WLB_ROOT}/harness/testdata"
   WLB_SPECS_DIR="${WLB_ROOT}/docs/specs")

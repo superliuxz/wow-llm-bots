@@ -14,6 +14,10 @@ design decisions below.
 
 ## Next, in order
 
+0. **Grammar IDL** (`docs/plans/grammar-idl.md`, agreed 2026-11-18; step 1 started: the llama.cpp grammar check links into the unit tests, `harness/src/gbnf_check.{h,cc}` with five stubs, and today's `PlanGrammar` accepts what `FormatPlan` writes; next the generator and `orders.wlb`): each reply grammar
+   (plan, standing orders) written once in a `.wlb` file; types, parser, printer, GBNF and
+   RULES.md's reply form generated from it. Parity only, no language change. Comes before the
+   standing-order evaluator, so that is written against the generated types.
 1. **Standing orders** (`#5`; spec and decisions: `docs/specs/triggers.md`, "The grammar (final,
    2026-11-17)" and "Decided (2026-11-18)": `when` evaluated in the harness, acts carried out in
    the module; relative places now, room landmarks later; acts through the client's own
