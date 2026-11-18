@@ -5,7 +5,7 @@ what exists, what comes next and in which order. **Keep it current** (CONTRIBUTI
 docs/TODO.md current"): anything unfinished, deferred or decided-but-not-built goes here, not only
 in a conversation.
 
-Last updated 2026-11-17.
+Last updated 2026-11-18.
 
 ## In progress
 
@@ -16,12 +16,12 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
   `Trainer::TeachSpell`, sell greys, repair; an `info` summary), `Rest (...)`,
   `Explore <dir>, <dist> yd (<mobs, levels>)` and `Go to <place> (<services>)` (stepped mmap
   walk), from `OptionFacts` built by the same code live and for eval fixtures
-  (`docs/plans/options.md`). Live: `e2e talk` (accepts Kaltunk's quest), `e2e rest` (sits to
+  (`docs/plans/options-and-panels.md`). Live: `e2e talk` (accepts Kaltunk's quest), `e2e rest` (sits to
   full after a fight), `e2e walk` (Explore arrives, done signal). Open panels and hover built (2026-11-18).
 
 ## Next, in order
 
-1. **Live check of panels and hover with the real brain** (`docs/plans/panels.md`): whether
+1. **Live check of panels and hover with the real brain** (`docs/plans/options-and-panels.md`): whether
    Gemma uses `open:` / `hover:` sensibly (eval cases for the use-item quest and "food in open
    bags", spec §10), and what the extra wakes cost (`perf brain`).
 2. **Standing orders** (`#5`, `docs/specs/triggers.md`, "The grammar (final, 2026-11-17)"). The `when`
@@ -53,7 +53,7 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
 ## Later
 
 - **Bind hearthstone** at an innkeeper as an option of its own (the brain's choice, through the
-  bind spell), not part of Talk (`docs/plans/options.md`).
+  bind spell), not part of Talk (`docs/plans/options-and-panels.md`).
 - **GPU `--backend-sampling` or thin `libllama` runner** (`docs/plans/latency.md`, Tier 3 #8):
   unconstrained + `ParsePlan` with 1 grammar retry (`+16%` capacity), or a `wlb_net` Unix-socket
   `libllama` daemon combining ~15-token ID masks on structured fields with GPU sampling on free text
@@ -119,7 +119,7 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
 ## Done (newest first, keep about ten)
 
 - 2026-11-18: open panels (bags, character, quest log) and hover for items and quests
-  (`docs/plans/panels.md`): module fill and tooltips (item "Use:" text from Spell.dbc), `open:` /
+  (`docs/plans/options-and-panels.md`): module fill and tooltips (item "Use:" text from Spell.dbc), `open:` /
   `close:` / `hover:` reply lines with a wake once shown, remembered panels, three habits; RULES.md
   reply form; `e2e panels`; unit tests (`ui_state`, `spell_text`, plan, screen, bot loop).
 
@@ -138,7 +138,7 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
   are asked for at most once a second; interrupted walks report an error; RULES.md states facts;
   `e2e walk`; `position_facts` unit tests.
 
-- 2026-11-17: completed `#1`–`#3` and `#4` snapshot fill (`docs/phase2-results.md`,
+- 2026-11-17: completed `#1`–`#3` and `#4` snapshot fill (`docs/results.md`,
   `docs/plans/latency.md`): `snapshot_builder.cc` + `nearby_builder.{h,cc}` fill `ext.target`,
   `ext.combat`, `ext.party`, `ext.quest_tracker`, and `base.self.indicators`; `herb_to_gather`
   updated and passing (`1/1`); `wlb test perf --update-baselines --verify` passed (`2/2`) on Gemma
@@ -155,7 +155,7 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
   non-step events (`command_id = 0`) without an alerting snapshot; reset `step_refusals` on
   normal `look timer`.
 
-- 2026-11-17: the rest of review c80e791 (`docs/reviews/2026-11-17-c80e791.md`): the done
+- 2026-11-17: the rest of review c80e791 (fixed in 4ce9490): the done
   signal (`Snapshot::done_command_id`), Gather/Use walk-then-use with the refusal reason,
   `bag_free_slots`, loot up/down slopes, Attack aimed at the attacker, only Keep while dead, chat
   checks (`CleanChatText`, whisper checks), stale-snapshot reset, eval fixtures with live
@@ -163,7 +163,7 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
   (state file, compile before stop, installed flavor, no test backups), zombie-safe `alive()`,
   `perf brain` fails on failed calls, Glaze read limits and wire tests.
 
-- 2026-11-17: review fixes 1, 2, 7, 9, 10 (`docs/reviews/2026-11-17-c80e791.md`): whispers no
+- 2026-11-17: review fixes 1, 2, 7, 9, 10 (fixed in 4ce9490): whispers no
   longer run as playerbots commands; watch latches start from the last snapshot; friendly units
   aren't attackers; a cancelled/failed/superseded call's wake reasons and events are put back;
   repeated step refusals back off (2-30 s).
@@ -188,13 +188,13 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
   streaming early dispatch + `TCP_NODELAY`, optional `goal?`, shared-`system` checkpoint split +
   soft slot affinity): solo `do:` `206 → 79 ms` (Qwen3.6) / `239 → 91 ms` (Gemma 4); Qwen3.6
   capacity `7.8 → 11.3/s` (+45%) and 100-bot 15 s `2.1/3.2 s → 0.8/1.5 s` (`docs/plans/latency.md`,
-  `docs/phase2-results.md`).
+  `docs/results.md`).
 - 2026-11-16: plan quality fixes: action verbs on numbered screen lines, `look >= 10` s floor, and
   `RULES.md` facts + example (`Gemma 4 26B` 9/15 → 13/15 at 239 ms, `Qwen3.6-35B` 6/15 → 11/15 at
-  206 ms; `docs/phase2-results.md`).
+  206 ms; `docs/results.md`).
 - 2026-11-16: `tools/wlb test eval` with 15 live-capture cases (`harness/testdata/eval/`); model
   shootout + `perf brain` on Gemma 4 26B-A4B (9/15, 8.6/s) vs Qwen3.6-35B-A3B (6/15, 7.8/s);
-  `gpt-oss-20b` dropped (`docs/phase2-results.md`).
+  `gpt-oss-20b` dropped (`docs/results.md`).
 - 2026-11-16: `tools/wlb test perf` with baselines (snapshots, brain); `wlb test e2e` with the first
   case (`choose`); `wlb test unit`.
 - 2026-11-16: `tools/wlb`, one Python CLI, replaces the 21 shell scripts.

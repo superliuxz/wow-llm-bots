@@ -55,7 +55,7 @@ constexpr size_t kMaxPendingMessages = 1000;
 constexpr uint32_t kStatsIntervalMs = 60000;
 // How long a bot remembers its snapshots' options, so a choice made on a
 // snapshot that is no longer the newest can still be resolved: well above an
-// urgent wake-up on a busy GPU (p95 3.8 s, docs/phase2-results.md).
+// urgent wake-up on a busy GPU (p95 3.8 s, docs/results.md).
 constexpr base::TimeDelta kOptionHistory = base::Seconds(30);
 
 uint8_t ControlMask(const Player* bot) {
@@ -549,8 +549,8 @@ class LlmBrainWorldScript : public WorldScript {
     }
   }
 
-  // open / close / hover (docs/plans/panels.md): the next snapshot shows the
-  // panel or tooltip. A refusal comes back as a non-step error event.
+  // open / close / hover (docs/plans/options-and-panels.md): the next snapshot
+  // shows the panel or tooltip. A refusal comes back as a non-step error event.
   void OnUiCommand(size_t bot_index,
                    const std::string& name,
                    const wlb::snapshot::Command& command) {

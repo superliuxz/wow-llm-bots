@@ -1,6 +1,6 @@
 """A bot told to Talk to a quest giver accepts the quest it offers.
 
-docs/plans/options.md, "Talk to <name>": the bot walks up (here it is already in reach), and the
+docs/plans/options-and-panels.md, "Talk to <name>": the bot walks up (here it is already in reach), and the
 module does what the NPC is there for with the server's own quest code, then reports it in an
 `info` event and sets `done_command_id`.
 """

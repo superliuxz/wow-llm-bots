@@ -1,6 +1,6 @@
 """Drafts docs/specs/client-events.tsv: every 3.3.5a client event, classified.
 
-One-off drafting aid for the client-event audit (docs/specs/coverage-client-events.md):
+One-off drafting aid for the client-event audit (docs/specs/coverage.md):
 rules by name give each event its kind and where it lands in our snapshot; the
 TSV is then reviewed and kept by hand (this script won't overwrite reviewed
 rows: it only adds events missing from the TSV, marked `review`).

@@ -41,7 +41,7 @@ Env: SLOTS (default 25), MAX_TOKENS (default 150), OUT=<file> (per-call JSON),
      minute at random times (exponential gaps, so some come in bursts), each on the screen of
      a random wake of the same bot. The captured screens have no real fights, so this loads
      the brain with urgent wakes but not with a combat screen. The summary then also reports
-     the urgent wakes' wait on their own (see docs/phase2-results.md).
+     the urgent wakes' wait on their own (see docs/results.md).
 """
 
 import heapq

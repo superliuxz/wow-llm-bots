@@ -57,9 +57,10 @@ struct OptionTarget {
 std::string_view OptionKindName(OptionTarget::Kind kind);
 
 // Adds to `snapshot` the options a player would have on this screen
-// (docs/specs/snapshot.md §9, docs/plans/options.md) and returns what each one
-// targets, in the same order. Pure: reads `snapshot` and `facts`, needs no
-// game server, so the live module and `fixture_options` run the same code.
+// (docs/specs/snapshot.md §9, docs/plans/options-and-panels.md) and returns
+// what each one targets, in the same order. Pure: reads `snapshot` and `facts`,
+// needs no game server, so the live module and `fixture_options` run the same
+// code.
 std::vector<OptionTarget> AddOptions(wlb::snapshot::Snapshot* snapshot,
                                      const OptionFacts& facts = {});
 

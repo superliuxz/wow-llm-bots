@@ -78,7 +78,8 @@ struct Plan {
   std::string tell_to;
   std::string tell;
   // Panels to open / close (kPanelNames), and the name of a thing on screen
-  // to point at for its tooltip (docs/plans/panels.md). Empty: none.
+  // to point at for its tooltip (docs/plans/options-and-panels.md). Empty:
+  // none.
   std::vector<std::string> open;
   std::vector<std::string> close;
   std::string hover;

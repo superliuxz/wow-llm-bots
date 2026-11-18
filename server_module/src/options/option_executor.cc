@@ -453,7 +453,7 @@ TalkResult TalkToNpcNow(Player* bot, Creature* npc) {
 
   // 3. Vendor / repair: sell grey items, repair equipment. Binding the
   // hearthstone at an innkeeper is the brain's choice, not part of Talk
-  // (docs/plans/options.md, "Later").
+  // (docs/plans/options-and-panels.md, "Later").
   if (npc->HasNpcFlag(UNIT_NPC_FLAG_VENDOR)) {
     const uint32_t sold = SellGreyItemsTo(bot, npc->GetGUID());
     if (sold > 0) {

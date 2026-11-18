@@ -1,6 +1,82 @@
-# Phase 2 results
+# Results
 
-## Snapshot pressure test (2026-11-15)
+What has been measured, phase by phase, newest sections last within each phase. Each phase was
+its own file until 2026-11-18.
+
+## Phase 1
+### 1a. Stock bot, solo leveling, cheats off (2026-11-14)
+
+Stock mod-playerbots AI (New RPG strategy), no LLM. One random bot, level 1, no human nearby.
+Data: `out/tests/solo-leveling-*` (samples every 60 s via `tools/wlb server sample`) and
+`var/logs/Playerbots.log`.
+
+#### Final clean run (Dezlu, Troll Priest, Valley of Trials, 59 min)
+
+| Metric | Result |
+|---|---|
+| Levels | 1 -> 5 (level 2 at 3 min, 3 at 12, 4 at 22, 5 at 47) |
+| Quests | 8 accepted, 6 turned in |
+| Deaths | 0 |
+| Manager rescues (refresh / teleport) | 0 |
+| Time standing still | 2 min |
+| Distance travelled | ~3,400 yd, still in Durotar |
+| Spells trained | **0** (still only level-1 spells at level 5) |
+| Gold | **71 copper** (loot never sold; 87 items in bags) |
+| Chat lines | **0** |
+
+#### What earlier runs revealed (each fixed before the clean run)
+
+1. **Active-alone throttling:** `BotActiveAlone = 10` + smart scaling let a bot with no human
+   nearby sleep ~90% of the time: it looked stuck and slow. Fixed: always active.
+2. **Random-bot manager cheats:** on first idle it does `Refresh` (free revive + full heal) and a
+   random level-appropriate teleport; it also hands out starting gold (24-43 g) and picks random
+   spawn spots (a level-1 bot placed outside its starting valley died repeatedly).
+   Fixed: `tools/disable-rndbot-cheats.sh` pre-seeds its teleport/randomize events.
+3. **Stranding:** when a bot ended up somewhere with no grind spot / inn in range ("0 available"),
+   it idled forever; the manager's teleport normally hides this.
+4. Test tooling: PC idle-sleep paused a run (now `systemd-inhibit --what=idle`); server scripts
+   tracked wrapper PIDs (fixed).
+
+#### Conclusions
+
+- **Works out of the box:** combat, looting, the quest loop in a starting area (accept, objectives
+  via quest POIs, turn in), corpse runs, human-ish early leveling pace.
+- **Missing without cheats** (upkeep the stock AI leaves to shortcuts): training new spells,
+  selling loot, and recovering when no destination is in range. These become goals for the brain
+  (design: "Character upkeep without cheats", "Problem solving").
+- **Bot tells already visible:** total chat silence, never visiting town services.
+- **Management:** RandomPlayerbotMgr is built around cheats (refresh, teleports, randomize, gold,
+  placement). Our module should manage our bots itself.
+- **Still open for 1a:** behavior after outgrowing the starting area (finding the next hub without
+  teleports) needs a longer run.
+
+### 1a again: our bot manager in charge (2026-11-15)
+
+Same test (stock AI, no LLM, level-1 Troll Priest, Valley of Trials, 60 min), but with
+mod-llm-brain's bot manager instead of playerbots' random-bot manager (switched off): our
+manager logs the bot in through playerbots' public login and keeps the strategy set a solo
+random bot gets (docs/playerbots-random-bot-audit.md). Bot: Wozkaruy (never played).
+Data: `out/tests/parity-20261115-1058/`.
+
+| Metric | Baseline (Dezlu, random-bot manager) | Our manager (Wozkaruy) |
+|---|---|---|
+| Level 2 / 3 / 4 / 5 at | 3 / 12 / 22 / 47 min | 4 / 26 / 37 / 57 min |
+| Quests turned in | 6 | 6 |
+| Deaths | 0 | 0 |
+| Manager rescues | 0 | 0 (manager off) |
+| Time standing still | 2 min | 5 min |
+| Distance travelled | ~3,430 yd | ~3,630 yd |
+| Strategy re-applies needed | - | 0 (no playerbots reset during the run) |
+| Bot drops / re-logins | - | 0 |
+
+**Parity holds.** Same quest loop, no deaths, similar distance. The slower 2 -> 3 stretch is
+the stock AI's own randomness: after taking three quests it cycled between randomly picked
+grind spots and inns (picked from 333-499 candidates) and marked one quest abandoned before
+completing all three. Nothing in the log points at the manager. One run each, so a 10-minute
+difference isn't significant.
+
+## Phase 2
+### Snapshot pressure test (2026-11-15)
 
 What it costs the world thread to build `nearby` with no caps (docs/specs/snapshot.md §4,
 §7) in a busy place. 50 test bots stand in Orgrimmar's Valley of Strength
@@ -28,7 +104,7 @@ About 67 of the ~150 visible objects are left out per snapshot: far and out of l
 mostly NPCs inside the bank, auction house and other buildings (near ones behind walls still
 show, with `in_los: false`, as nameplates do).
 
-### Bugs the test found (fixed before the numbers above)
+#### Bugs the test found (fixed before the numbers above)
 
 1. **Line-of-sight starvation.** Checks went to the nearest objects first; the 49 bots
    standing next to each other went stale every second and used the whole budget, so far
@@ -45,7 +121,7 @@ show, with `in_los: false`, as nameplates do).
    invalid, which made AzerothCore's dump loader silently save the character under a
    temporary name (the loader now checks names first).
 
-## Brain load: the batched think cycle (2026-11-15)
+### Brain load: the batched think cycle (2026-11-15)
 
 The simple design: each think cycle, every bot's latest full snapshot goes to the LLM and the
 LLM answers with what to do next (goal, next step, chat, when to look again). No rules in
@@ -68,7 +144,7 @@ state per slot), thinking off, ~40-token JSON replies, all valid.
 - Between two looks 5-10 s apart, ~25% of a crowded snapshot changed (bots standing still);
   1 s apart, ~2%.
 
-### Compact prompt
+#### Compact prompt
 
 The same test with the snapshot written for the LLM in compact text
 (`tools/bench/prompt_render.py`, a prototype of the harness's prompt renderer): one short
@@ -89,7 +165,7 @@ the others look less often.
 The captured city snapshots have no `options` yet (snapshot steps 4-5), and some bots
 answered with an option number anyway: the brain needs the options list to act.
 
-## Brain load: plans and triggers (2026-11-15)
+### Brain load: plans and triggers (2026-11-15)
 
 The design in `docs/specs/triggers.md`: the brain answers with a plan and is woken only by a
 trigger. Benched in two steps.
@@ -140,7 +216,7 @@ plan.
 ~20 GB: playerbots' canned chat replies looped (`docs/playerbots-random-bot-audit.md`). Fixed
 with `Playerbots.RandomBotTalk = 0`.
 
-### Limiting what the brain can say
+#### Limiting what the brain can say
 
 The same replay, with the brain allowed only what a player can actually do: pick from the bot's
 numbered options (`snapshot.md` §9; a stand-in built from what's on screen, since `options`
@@ -164,7 +240,7 @@ call enforces it (`MODE=menu` in `tools/bench/brain_load.py`); free text only in
   over half the time, adds a chat line to ~60% of plans, and still asks to look again in
   10-30 s.
 
-### Prompt cache and a tighter screen
+#### Prompt cache and a tighter screen
 
 - **Prompt cache: already working.** Two calls to one slot with the same rules and a different
   screen recompute only the screen: the fixed rules (~230 tokens) are reused, with llama-server's
@@ -185,7 +261,7 @@ Capacity rose from ~4 to **~5 wakes per second**: 150 bots on 30 s plans get a p
 2 s. Less than the prompt cut suggests: with short prompts, the decoding steps (36 tokens per
 plan, 25 streams at a time) are a large share again.
 
-### Goal only when it changes, batching, and the cost of free text
+#### Goal only when it changes, batching, and the cost of free text
 
 Same replay (limited + tight), 30 s plans, at the edge of capacity:
 
@@ -206,7 +282,7 @@ Same replay (limited + tight), 30 s plans, at the edge of capacity:
   behavior, not the harness: goals that last (a session's goal, not the next step) and chat
   only when there's something to say. That needs the prompt tuned against a quality check.
 
-### Speed: what limits the brain, and what helped (2026-11-15)
+#### Speed: what limits the brain, and what helped (2026-11-15)
 
 Capacity is measured closed-loop (`tools/bench/throughput.py`): workers fire real wake-ups
 back to back, tight prompt (~800 tokens), grammar-limited ~36-token plans.
@@ -257,7 +333,7 @@ now the default. The stall in the burst test (`decode_bench.py`, since removed: 
 of 3.8 s with the cache on) only appears when every slot has just finished a warm-up request;
 it doesn't show in steady state or in the replay.
 
-### Numbered screen instead of a separate options list
+#### Numbered screen instead of a separate options list
 
 `render_tight(numbered=True)` (`MERGED=1` in `brain_load.py`): the screen's own entries carry
 the option numbers, so nothing is written twice. Same server settings, closed loop, two rounds:
@@ -275,7 +351,7 @@ assumed, and the list was mostly cheap to read. Replay, 200 bots, 30 s plans: 3.
 llama-server's busiest threads 40-53%; the GPU 59-83% busy at ~370 W (of ~575 W). The GPU
 idles part of each step while llama-server does its per-stream CPU work (grammar, sampling).
 
-### Response time for 50 bots (current setup: numbered screen, 16 slots, bigger batches)
+#### Response time for 50 bots (current setup: numbered screen, 16 slots, bigger batches)
 
 | | Wake to plan, median / p95 / worst | GPU busy |
 |---|---|---|
@@ -283,7 +359,7 @@ idles part of each step while llama-server does its per-stream CPU work (grammar
 | 50 bots, plans ~30 s (1.9 wakes per bot per minute) | 0.5 s / 0.9 s / 1.2 s | 35% |
 | 50 bots, plans ~15 s (3.9 per bot per minute) | 0.8 s / 1.6 s / 2.8 s | 68% |
 
-### Response time by number of bots and plan length (2026-11-16)
+#### Response time by number of bots and plan length (2026-11-16)
 
 Wake to plan, median (95th percentile), in seconds. **Every cell is a measured run.**
 
@@ -321,7 +397,7 @@ Wake to plan, median (95th percentile), in seconds. **Every cell is a measured r
   more often when fights interrupt; with the "safety net" prompt it was ~1.3 wake-ups per bot per
   minute (next section).
 
-### Urgent wakes: surprises on top of the plans (2026-11-16)
+#### Urgent wakes: surprises on top of the plans (2026-11-16)
 
 The table above has no surprises: every fight in the replay was one mob the bot pulled itself.
 `SURPRISES=<n>` in `brain_load.py` adds n urgent "combat" wake-ups per bot per minute (random
@@ -350,7 +426,7 @@ median / p95, 120 s per cell, one run each, same prompts and server as above:
 - So anything needing an answer in under about a second can't be a brain call: it is a reflex
   or a standing order (`docs/specs/triggers.md`).
 
-### Counts and how long plans last (2026-11-16)
+#### Counts and how long plans last (2026-11-16)
 
 `do` may repeat an option (`3x4`: option 3, four times; `COUNTS=1`). How long a plan lasts is
 estimated from the brain's own choices with stand-in action times (attack 20 s, talk 8 s, loot
@@ -370,7 +446,7 @@ wakes when its steps are done or its `look` runs out, whichever is first. 50 bot
 - Plans cost ~43 tokens (up from 37) and stay all valid. These are estimates; real durations
   need the bot to play the plans.
 
-### A smaller model: Qwen3-4B-Instruct (2026-11-16)
+#### A smaller model: Qwen3-4B-Instruct (2026-11-16)
 
 Same prompts, greedy, 200 identical wake-ups, the 35B's plans as the reference
 (`tools/bench/agreement.py`; a stand-in for a quality check, since there is no right answer):
@@ -390,7 +466,7 @@ worth switching**. Caveat: the 35B's agreement with itself at normal temperature
 ceiling) is not measured. A smaller model would pay off only with a genuinely small one for
 routine picks, judged by the real quality check.
 
-### Found by these benches
+#### Found by these benches
 
 - `nearby` listed **"World Invisible Trigger"** (level 80, hostile, 5 yd away) in 160 of the
   sampled snapshots, 23 of 50 bots: invisible server objects a player could not see. The brain
@@ -399,7 +475,7 @@ routine picks, judged by the real quality check.
   Live check, 50 bots in the valley: 329 listings in 25 bots before, 0 after; snapshot build still
   50 µs median, 130 µs p99.
 
-### One brain per bot: its own identity and memory, shared or pinned slots (2026-11-16)
+#### One brain per bot: its own identity and memory, shared or pinned slots (2026-11-16)
 
 Each bot gets its own ~1,200-token identity and memory text (`IDENTITY=5000` in `brain_load.py`,
 unique per bot) after the shared rules. The model is shared (a second copy of a 22 GB model
@@ -426,7 +502,7 @@ tokens the server had to process again:
 - So "one brain per bot" means a separate identity, memory and decision per wake-up, not a slot
   per bot. Shared slots also scale to more bots than slots.
 
-## Delivering snapshots: spread, latest-wins, measured (2026-11-16)
+### Delivering snapshots: spread, latest-wins, measured (2026-11-16)
 
 Findings from a review of the path from the module to the harness, and what was done. Measured
 with `tools/snapshot/fake_harness.py --stats` and the module's own per-minute log, 50 test bots
@@ -464,7 +540,7 @@ standing in the Valley of Strength (`config/tests/pressure`), 1 s interval.
   (keep-alive, a pool shared by the worker threads; a failed connection is closed, not reused; one
   the server closed while idle is opened again).
 
-## Plan quality: first eval and model shootout (2026-11-16)
+### Plan quality: first eval and model shootout (2026-11-16)
 
 15 saved snapshots in `harness/testdata/eval/` (12 live questing/city captures plus 3 hand-edited
 captures for low health, out of mana, and a patrolling skull-level elite), each run through
@@ -486,7 +562,7 @@ captures for low health, out of mana, and a patrolling skull-level elite), each 
 - **`gpt-oss-20b` dropped and removed:** its Harmony `<\|channel\|>` PEG parser rejects user GBNF
   without Harmony headers, and its raw completions wrote `1x12, 1x13...` chains and garbled `say:`.
 
-### Fixing the screen verbs, `look` floor, and `RULES.md` (2026-11-16)
+#### Fixing the screen verbs, `look` floor, and `RULES.md` (2026-11-16)
 
 Three changes without touching game logic in C++:
 1. Numbered screen lines print the action verb (`1. Attack Hare: ...`, `2. Loot Mottled Boar: ...`,
@@ -506,7 +582,7 @@ Median call latency also dropped **~40–46 ms** on both models because the lite
 sampling on `llama.cpp`'s `O(1)` single-token grammar path instead of triggering 248k-vocab
 rescans, and every `look` value is now 60–120 s (zero 1 s loops).
 
-### Tier 1 end-to-end latency optimizations (2026-11-16)
+#### Tier 1 end-to-end latency optimizations (2026-11-16)
 
 Four changes (`docs/plans/latency.md`):
 1. `ExecuteOption` calls `ai->ResetActionDuration()` on `kAttack` and `kLoot` (`option_executor.cc`),
@@ -531,7 +607,7 @@ Four changes (`docs/plans/latency.md`):
 | 50 bots, 30 s plans (wake→plan p50 / p95) | `0.5 s / 0.9 s` → **`0.3 s / 0.6 s`** | `0.6 s / 1.0 s` → **`0.5 s / 0.8 s`** |
 | 100 bots, 15 s plans (wake→plan p50 / p95) | `2.1 s / 3.2 s` → **`0.8 s / 1.5 s`** | `1.9 s / 2.6 s` → **`1.5 s / 2.1 s`** |
 
-## Gemma 4 perf baselines & live end-to-end verification (2026-11-17)
+### Gemma 4 perf baselines & live end-to-end verification (2026-11-17)
 
 1. **`perf` re-baselined (`tools/wlb test perf --update-baselines --verify`, `PROMPT=harness` on
    `gemma-4-26B-A4B-it` Q4, 16 slots, with `ext` + `indicators` populated):**
@@ -557,4 +633,3 @@ Four changes (`docs/plans/latency.md`):
      Camp Taurajo?"`) and `Gatda` answered (`"sounds good, let me know when you're ready"`).
      `Testpriest` also died (`age_at_ask_ms = 0.151 ms`, only `Keep` offered) and resurrected
      (`alive again`, `age_at_ask_ms = 0.181 ms`).
-

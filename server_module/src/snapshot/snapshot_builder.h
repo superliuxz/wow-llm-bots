@@ -27,9 +27,9 @@ namespace llm_brain {
 
 // Builds what one bot could see in its client right now
 // (docs/specs/snapshot.md), plus the non-screen OptionFacts needed by
-// AddOptions (docs/plans/options.md). Keeps per-bot state between snapshots
-// (the line-of-sight cache, the Explore / Go to facts, quest map points), so
-// use one per bot. World thread only.
+// AddOptions (docs/plans/options-and-panels.md). Keeps per-bot state between
+// snapshots (the line-of-sight cache, the Explore / Go to facts, quest map
+// points), so use one per bot. World thread only.
 class SnapshotBuilder {
  public:
   explicit SnapshotBuilder(NearbyBuilder::Options nearby_options);
@@ -48,7 +48,8 @@ class SnapshotBuilder {
   // Fills `snapshot` and (when non-null) `facts`; the caller sets bot, seq and
   // time_ms. Without `world` (the module disabled) there are no Explore spots
   // or Go to places. `ui` (what the bot has open and points at,
-  // docs/plans/panels.md) is aged by one snapshot; `texts` may be null.
+  // docs/plans/options-and-panels.md) is aged by one snapshot; `texts` may be
+  // null.
   NearbyBuilder::Stats Build(Player* bot,
                              wlb::snapshot::Snapshot* snapshot,
                              OptionFacts* facts,

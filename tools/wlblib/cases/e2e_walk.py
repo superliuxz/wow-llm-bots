@@ -1,6 +1,6 @@
 """A bot told to Explore walks to the spot and the module reports the step done.
 
-The stepped mmap walk of docs/plans/options.md: Explore is offered from the module's facts, a
+The stepped mmap walk of docs/plans/options-and-panels.md: Explore is offered from the module's facts, a
 Choose starts the walk, the module steps it ~70 yd at a time and sets `done_command_id` on
 arrival. Talk and Rest have no live case yet (docs/TODO.md, "Loose ends").
 """

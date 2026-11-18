@@ -3,7 +3,7 @@
 The brain doesn't look at every snapshot. It answers with a **plan**, C++ carries the plan out at
 game speed, and the brain is woken by a **trigger**: something the plan didn't account for, or
 something the brain asked to be told about. Measured: one bot's think takes 0.4-1 s, a 50-bot
-batch 8-10 s (`docs/phase2-results.md`), so the brain can't be in every step, and doesn't need
+batch 8-10 s (`docs/results.md`), so the brain can't be in every step, and doesn't need
 to be: neither is a human.
 
 C++ never judges here. It carries out the brain's plan, checks the conditions the brain set,
@@ -35,12 +35,12 @@ own `options` (`snapshot.md` §9), `watch` uses only the vocabulary below, and `
 is a number; free text only in a short `goal` and an optional chat line. The harness enforces
 this with a grammar built for each call from the bot's current options, so a plan is always
 valid and short (~36 tokens). Benched: it tripled the brain's capacity and made every plan
-valid (`docs/phase2-results.md`).
+valid (`docs/results.md`).
 
 ## Where triggers come from (complete)
 
 Every event the 3.3.5a client can fire is classified in `client-events.tsv`
-(`coverage-client-events.md`): each one is either an Event in the snapshot, or a change in a
+(`coverage.md`, "Client events"): each one is either an Event in the snapshot, or a change in a
 snapshot field, or out of scope. So two sources cover everything a player can be told:
 
 1. **Events:** every Event kind in `events` (chat, prompts, errors, died, displaced, ...). The
@@ -76,7 +76,7 @@ client event (a player just sees them), which is why `appears` exists.
 **The test for any behaviour is how fast it has to happen.** Under about a second it can't be a
 brain call: one bot alone gets a plan in 0.21 s, but an urgent wake cost 0.8 s at the lightest
 load measured (2 surprises per bot per minute, 50 bots, 79% GPU) and 2-3 s with a busy GPU
-(`docs/phase2-results.md`, "Urgent wakes"; the cost at low load isn't measured). So it is a **reflex** (the playerbots engine:
+(`docs/results.md`, "Urgent wakes"; the cost at low load isn't measured). So it is a **reflex** (the playerbots engine:
 rotation, interrupts, fighting back, human-paced) or a **standing order**. Anything slower is a
 brain decision.
 
@@ -221,7 +221,7 @@ from 3 conditions and 4 orders to 4 and 7.
   `src/Ai/Raid` and `src/Ai/Dungeon` of the pinned playerbots commit (`ecc4a53`; 482 raid, 113
   dungeon) was read, following helpers, and written in the revised grammar or marked why it
   can't be: `docs/specs/trigger-conditions.tsv`, one row each (how it was made:
-  `trigger-conditions-brief.md`; six readers in parallel, then 12 random rows re-read against
+  `trigger-audit.md`; six readers in parallel, then 12 random rows re-read against
   the source). `tools/check-trigger-grammar.py` parses every `when` cell against the grammar
   (all pass), so the table is the grammar's regression set. The script is a second copy of the
   grammar: once orders are parsed in `harness/src/plan.cc`, a unit test runs the real parser over

@@ -1,6 +1,6 @@
 # End-to-end latency plan (2026-11-16)
 
-`wake -> plan` in `docs/phase2-results.md` (`~210-240 ms` solo, `0.5-1.0 s` for 50 bots on 30 s
+`wake -> plan` in `docs/results.md` (`~210-240 ms` solo, `0.5-1.0 s` for 50 bots on 30 s
 plans, `1.9-2.6 s` for 100 bots on 15 s plans) is only the middle slice. True end-to-end latency is
 from **something happening in the game world** to **the bot's body acting on it in the world**:
 

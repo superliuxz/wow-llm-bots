@@ -57,7 +57,7 @@ more. It acts on this checkout's processes only (by their pid files), never by n
 | `tools/wlb server start\|stop` | MySQL, authserver and worldserver together (stop backs the databases up first) |
 | `tools/wlb db start\|stop\|backup` | the project-local MySQL alone; `backup` dumps accounts, characters and playerbots' tables to `var/backups/` (compressed, newest 14 kept; the restore command is in `tools/wlblib/server.py`) |
 | `tools/wlb console <command>` | send a command to the worldserver console |
-| `tools/wlb llm` | llama-server with the settings measured fastest (`docs/phase2-results.md`) |
+| `tools/wlb llm` | llama-server with the settings measured fastest (`docs/results.md`) |
 
 **Once**
 
@@ -75,7 +75,7 @@ more. It acts on this checkout's processes only (by their pid files), never by n
 | Path | What |
 |---|---|
 | `tools/snapshot/` | `wire_py.py` (`ctypes` wrapper for `libwlb_wire_py.so`), `fake_harness.py` (a stand-in harness that prints what the module sends) |
-| `tools/audit/` | the client-event audit: the scripts `tools/wlb setup client-ui` feeds (`docs/specs/coverage-client-events.md`); `gen_invisible_displays.py` regenerates the table of invisible creature models (`server_module/src/snapshot/invisible_displays.h`) |
+| `tools/audit/` | the client-event audit: the scripts `tools/wlb setup client-ui` feeds (`docs/specs/coverage.md`); `gen_invisible_displays.py` regenerates the table of invisible creature models (`server_module/src/snapshot/invisible_displays.h`) |
 | `tools/bench/` | brain load benches: `capture_snapshots.py` (live snapshots to files), `trigger_sim.py` (how often bots wake), `brain_load.py` (wake-ups replayed against llama-server), `throughput.py` (capacity), `prompt_render.py` (the compact prompt) |
 
 

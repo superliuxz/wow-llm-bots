@@ -1,7 +1,7 @@
 """What the brain costs: llama-server with the 35B model, driven by recorded wake-ups.
 
 Needs the replay input, 50 bots' live snapshots (`wlb test perf --capture`, into
-out/bench/snapshots/quest), and the model. Measures, as docs/phase2-results.md describes:
+out/bench/snapshots/quest), and the model. Measures, as docs/results.md describes:
   capacity   wake-ups per second with 16 calls in flight, back to back (tools/bench/throughput.py)
   latency    from a wake-up being due to its plan read back, for 50 bots on 30 s plans (a normal
              load) and 100 bots on 15 s plans (about the capacity limit), replayed in real time

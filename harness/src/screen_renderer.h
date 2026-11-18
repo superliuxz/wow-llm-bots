@@ -56,7 +56,7 @@ struct ScreenOption {
 };
 
 // Something on screen a `hover:` line may name: an item in an open panel or a
-// quest in the tracker or log (docs/plans/panels.md).
+// quest in the tracker or log (docs/plans/options-and-panels.md).
 struct Hoverable {
   std::string name;
   wlb::snapshot::HoverRef ref;

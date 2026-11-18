@@ -38,8 +38,8 @@ class ItemSpellTexts {
   std::unordered_map<uint32_t, std::string> texts_;
 };
 
-// The open panels of docs/plans/panels.md, as the client shows them. World
-// thread only.
+// The open panels of docs/plans/options-and-panels.md, as the client shows
+// them. World thread only.
 void FillBags(Player* bot, wlb::snapshot::Bags* bags);
 void FillCharacter(Player* bot, wlb::snapshot::Character* character);
 void FillQuestLog(Player* bot, wlb::snapshot::QuestLog* log);

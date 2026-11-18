@@ -11,10 +11,11 @@
 
 namespace llm_brain {
 
-// What one bot has open and points at in its client (docs/plans/panels.md):
-// the panels the `open` / `close` commands opened, and the thing the last
-// `hover` names, whose tooltip shows for a few snapshots. Nothing of it goes
-// to the game: the client opens bags and the quest log without a packet.
+// What one bot has open and points at in its client
+// (docs/plans/options-and-panels.md): the panels the `open` / `close` commands
+// opened, and the thing the last `hover` names, whose tooltip shows for a few
+// snapshots. Nothing of it goes to the game: the client opens bags and the
+// quest log without a packet.
 class UiState {
  public:
   // Snapshots a tooltip stays after a hover (about 5 s out of combat).

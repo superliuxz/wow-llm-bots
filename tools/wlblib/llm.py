@@ -1,6 +1,6 @@
 """`wlb llm`: llama-server with the brain's model on 127.0.0.1:8090, in the foreground.
 
-The defaults are the fastest settings measured for 50-200 bots (docs/phase2-results.md): 16 slots,
+The defaults are the fastest settings measured for 50-200 bots (docs/results.md): 16 slots,
 4k context each, bigger batches (-ub 2048 -b 4096).
 """
 

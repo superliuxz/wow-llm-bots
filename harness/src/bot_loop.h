@@ -47,8 +47,8 @@ struct BotLoopConfig {
   // Snapshots come every 1 s (LlmBrain.SnapshotIntervalMs).
   base::TimeDelta stale_snapshot_after = base::Seconds(5);
   // Routine looking the harness does with no brain call (spec decision 12,
-  // docs/plans/panels.md); defaults a player has, parameters a brain can
-  // change later.
+  // docs/plans/options-and-panels.md); defaults a player has, parameters a
+  // brain can change later.
   struct Habits {
     bool open_bags_when_full = true;     // bag_free_slots reaches 0.
     bool glance_at_quest_log = true;     // The quest tracker changed.

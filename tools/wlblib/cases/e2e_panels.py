@@ -1,6 +1,6 @@
 """Open bags, point at an item, close bags: the panel and tooltip show and go.
 
-docs/plans/panels.md: `open` / `close` / `hover` commands; the module fills `ext.bags` only while
+docs/plans/options-and-panels.md: `open` / `close` / `hover` commands; the module fills `ext.bags` only while
 open and the tooltip for a few snapshots; item "Use:" text comes from Spell.dbc (the hearthstone:
 "Returns you to $z" with the home filled in).
 """

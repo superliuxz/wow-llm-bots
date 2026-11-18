@@ -1304,7 +1304,7 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
     lines.push_back(std::move(line));
   }
   // Open panels and the tooltip of what the bot points at
-  // (docs/plans/panels.md).
+  // (docs/plans/options-and-panels.md).
   for (const pb::Panel panel : base.ui.open_panels) {
     for (std::string& line : PanelLines(snapshot, panel)) {
       lines.push_back(std::move(line));

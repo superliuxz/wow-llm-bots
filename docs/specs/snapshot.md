@@ -5,8 +5,7 @@ Status: **agreed, revision 7** (2026-11-15). The exact field-level contract is
 truth for the module <-> harness protocol; field annotations in
 [`snapshot_options.proto`](../../server_module/proto/snapshot_options.proto)); examples in [`examples/`](examples/) use the canonical protobuf JSON
 mapping and are checked by `tools/wlb check snapshots` (strict parse + visibility rules).
-Coverage against the client: [`coverage-ui.md`](coverage-ui.md) (every UI frame) and
-[`coverage-opcodes.md`](coverage-opcodes.md) (every server opcode). This document explains it. Everything a bot's brain decides is based on this.
+Coverage against the client: [`coverage.md`](coverage.md) (every UI frame, server opcode and client event). This document explains it. Everything a bot's brain decides is based on this.
 
 ## 1. Principles
 
@@ -261,7 +260,7 @@ a few seconds. Far units' `in_los` can be a few seconds old.
 | `calendar_alarm {title, starts_in_s}` | calendar event reminders |
 | `displaced {how, by, spell, distance_yd}` (knocked back, pulled, teleported on the same map) | MSG_MOVE_KNOCK_BACK, MSG_MOVE_TELEPORT, forced movement (no client event: the screen jumps) |
 
-Every client event is accounted for in `client-events.tsv` (`coverage-client-events.md`), and
+Every client event is accounted for in `client-events.tsv` (`coverage.md`, "Client events"), and
 what wakes the brain is in `triggers.md`.
 
 ## 9. Options and commands
@@ -398,7 +397,7 @@ real player knows their junk and bag space from habit), but only sends what's vi
    built by `tools/wlb build protoc`.
 14. **Coverage audited against the client** (rev 7): every UI frame and every server opcode
    is mapped to a snapshot field or marked out of scope with a reason
-   ([`coverage-ui.md`](coverage-ui.md), [`coverage-opcodes.md`](coverage-opcodes.md)). New in
+   ([`coverage.md`](coverage.md)). New in
    rev 7 from the audit: achievements, titles, currencies, glyphs and dual spec, equipment
    sets, mounts/companions, barber / guild bank / socketing / stable / charter / tabard
    windows, PvP panel and queues, world states, chat links, `/who` and ignore, all

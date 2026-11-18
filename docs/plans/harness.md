@@ -13,7 +13,7 @@ worldserver (mod-llm-brain)  <-- Unix socket, protobuf frames -->  harness  <-- 
 ```
 
 What it does is specified in `docs/specs/triggers.md` (when the brain thinks, what a plan is)
-and `docs/phase2-results.md` (what that costs). This plan is the build order.
+and `docs/results.md` (what that costs). This plan is the build order.
 
 ## Parts
 

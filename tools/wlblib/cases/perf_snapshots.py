@@ -4,7 +4,7 @@ view), one harness connected for a few minutes.
 Two parts, from one run: how the snapshots arrive (age when received, how evenly, bunching:
 tools/snapshot/fake_harness.py --stats) and what the module spent building and sending them (its
 own once-a-minute lines in the server log). The limits are the criteria set before the first
-pressure test (docs/phase2-results.md): under 5 ms added per world update on average, no single
+pressure test (docs/results.md): under 5 ms added per world update on average, no single
 build over 2 ms, no dropped frames.
 """
 
