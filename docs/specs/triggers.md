@@ -83,7 +83,7 @@ brain decision.
 | Layer | Who | Speed | Examples |
 |---|---|---|---|
 | Reflex | C++ (playerbots engine, our module) | within a tick, plus a human-like delay | rotation, interrupts, fighting back |
-| Standing order | the brain writes it, C++ carries it out | written ahead of time, runs within a tick | "hp<30: use option 7", "Defile on me: run to the edge" |
+| Standing order | the brain writes it, the harness watches for it, the module carries it out | written ahead of time; acts within one snapshot plus a world tick (at most ~250 ms in combat, ~10 ms after an event-driven snapshot) | "hp<30: use option 7", "Defile on me: run to the edge" |
 | Decision | the brain | 0.5-2 s | what to do next, who to group with, chat, what to do after a wipe |
 
 An **order** is a small plan started by a watch instead of by the brain:
@@ -92,8 +92,9 @@ list.
 
 ### The grammar (final, 2026-11-17)
 
-An order is a condition and one to three steps. `tools/check-trigger-grammar.py` parses every
-`fits` row of both audit tables against exactly this (all 595 conditions and 579 actions pass).
+An order is a condition and one to three steps. The parser (`harness/src/orders.cc`) is checked
+against every `fits` row of both audit tables (`OrdersTest.*Audit*`, also
+`tools/wlb check triggers`).
 
 ```
 order   ::= when " -> " act (", then " act){0,2}              ; up to 3 steps; up to 7 orders per plan
@@ -153,6 +154,42 @@ petcmd  ::= "attack " thing | "stay" | "follow" | "passive" | "defensive"
   default); a failed step wakes the brain. No branches: "if that fails, then..." is a decision.
 - **Assignments** ("you take the left cube") are not grammar: the brain, or the leader's call in
   raid chat, gives each bot its own concrete orders, so the order already names the thing.
+
+### Decided (2026-11-18): where orders run and how acts are carried out
+
+1. **`when` is evaluated in the harness; `<act>` runs in the module.** The harness checks every
+   order on each snapshot and event (unit-tested on recorded sequences, under the sanitizers,
+   without a server; an order can only read what the snapshot shows). When one fires, the
+   harness sends the act as a command; the module carries it out on the world thread and reports
+   it done through `done_command_id`, as `Choose` does. The act resolves its target when it runs
+   ("behind boss" is where the boss stands now), not from the snapshot that fired it.
+   **Latency:** one snapshot plus a world tick: combat snapshots every 250 ms, and an immediate
+   snapshot when a cast starts or an aura appears on the bot, its target or focus, or an attacker
+   (a new `SnapshotSchedule::Flags` bit; only those units are watched each tick, to stay cheap,
+   with a minimum gap of about 50 ms between such snapshots).
+2. **Relative places are built now; room landmarks later.** `behind`, `in front of`,
+   `max range of`, `<N> yd from` and `away <thing> <N>` are geometry in the module from unit
+   positions and facing, checked for ground, line of sight and a path (`PathGenerator`: "8 yd
+   from X" must not land in a wall), and recomputed while the step runs (the boss turns). Named
+   room landmarks wait for a boss that needs them (per-room data).
+3. **Acts go through the client's own handlers, not playerbots' action wrappers** (which carry
+   random-bot habits, as Talk and Loot showed). Where a client opcode exists, its session handler
+   is used rather than a raw object method: `board` by spell click (`CMSG_SPELLCLICK`, its
+   conditions), `pet` through the pet action handler, `mark` after the leader / assistant check
+   the client makes, `equip` through the server's equip checks. `interact` reuses
+   `UseObjectNow` / `TalkToNpcNow`; `to`, `away` and `kite` use our own walk. **Open before
+   `kite`:** in combat, playerbots' combat movement (chasing the target, ranged positioning)
+   will fight our steering; a step probably has to pause its movement strategies while it runs
+   and restore them after. Check that first.
+4. **The small snapshot additions** (`flying` / `untargetable` / `submerged` on `Unit`,
+   `lands_in_s`, the liquid under the bot, main assist) come right after 1-3, each with a unit
+   test of the condition that reads it.
+
+**Build order:** (a) the order grammar, parser and evaluator in the harness, pure and
+unit-tested, including a test that runs the parser over every `fits` row of both audit tables
+(done 2026-11-18: `harness/src/orders.cc`; the Python checker is retired); (b) the wire command for an act and the
+module's executor, a few verbs first (`to`, `away`, `target`, `use`, `stop`, `wake`); (c) the
+event-driven snapshot bit; (d) the other verbs; (e) the snapshot additions; (f) evals.
 
 **Why these verbs** (the ten the first audit used, plus six; the number must not grow per boss,
 and these are player actions, not boss ones). Counted over the 254 actions the audit could not say:
@@ -222,10 +259,8 @@ from 3 conditions and 4 orders to 4 and 7.
   dungeon) was read, following helpers, and written in the revised grammar or marked why it
   can't be: `docs/specs/trigger-conditions.tsv`, one row each (how it was made:
   `trigger-audit.md`; six readers in parallel, then 12 random rows re-read against
-  the source). `tools/check-trigger-grammar.py` parses every `when` cell against the grammar
-  (all pass), so the table is the grammar's regression set. The script is a second copy of the
-  grammar: once orders are parsed in `harness/src/plan.cc`, a unit test runs the real parser over
-  the table and the Python copy is retired. Leaving out 25 `plumbing` rows (base
+  the source). The harness's parser (`harness/src/orders.cc`) parses every `when` cell
+  (all pass; `OrdersTest.*Audit*`), so the table is the grammar's regression set. Leaving out 25 `plumbing` rows (base
   classes, shared timer keepers), 18 `bugnet` rows (resetting state, stuck bots) and 5 `cheat`
   rows (the `*Cheat*` triggers, which only fire with playerbots' raid cheat on), the 547
   mechanics are:

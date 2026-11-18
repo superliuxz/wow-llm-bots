@@ -26,6 +26,8 @@
 #include <string_view>
 #include <vector>
 
+#include "orders.h"
+
 namespace harness {
 
 inline constexpr int kMaxSteps = 5;
@@ -83,6 +85,9 @@ struct Plan {
   std::vector<std::string> open;
   std::vector<std::string> close;
   std::string hover;
+  // Standing orders, in priority order (orders.h; docs/specs/triggers.md):
+  // up to kMaxOrders `order:` lines. A new plan replaces all of them.
+  std::vector<Order> orders;
 
   bool operator==(const Plan&) const = default;
 };
@@ -93,10 +98,12 @@ struct Plan {
 // none means no `tell` line at all. Names that aren't a plain character name
 // (2-12 ASCII letters) are left out.
 // `hover_names`: what a `hover:` line may name (items and quests on screen);
-// none, no `hover:` line.
+// none, no `hover:` line. `order_names`: the names `order:` lines may use
+// (OrderGrammar); none, no `order:` lines.
 std::string PlanGrammar(int option_count,
                         const std::vector<std::string>& tell_names = {},
-                        const std::vector<std::string>& hover_names = {});
+                        const std::vector<std::string>& hover_names = {},
+                        const std::vector<std::string>& order_names = {});
 
 // Reads only the `do: ...` line, as soon as the first newline of a streamed
 // reply arrives, so the body can start moving while the rest of the plan is

@@ -14,30 +14,42 @@ design decisions below.
 
 ## Next, in order
 
-1. **Standing orders** (`#5`, `docs/specs/triggers.md`, "The grammar (final, 2026-11-17)"). The `when`
-   and `<act>` grammar is final and both audit tables parse against it
-   (`tools/wlb check triggers`; `docs/specs/trigger-conditions.tsv` and `trigger-actions.tsv`).
-   Left: (a) re-judge the unsayable and stretched rows with the final grammar for a measured
-   coverage number (judged against the earlier grammar: conditions 85%, actions 46%; upper bounds
-   with the new constructs about 89% and 55%); (b) build it in `harness/src/plan.cc` and retire the
-   Python copy of the grammar (`tools/check-trigger-grammar.py`), then the executors in the module
-   (the new verbs `kite`, `mark`, `board`, `equip`, `pet`, `interact` need engine support);
-   (c) the snapshot gaps: named places in a room (**133 of the 254 unsayable actions are "go to
-   hardcoded coordinates"**: the biggest one), a flying / untargetable / submerged state on `Unit`,
-   assist-tank index, where a cast will land (`lands_in_s`), liquid under the bot; (d) evals.
-   **Design decisions to settle with the user before building (2026-11-17):**
-   1. **Where orders run.** In the module (reacts within a world tick, the spec's promise, but
-      more logic in the server and orders must be sent down the socket) or in the harness (module
-      stays thin, but reacts only on snapshots/events: 250 ms-1 s). The spec says "runs within a
-      tick" without saying where. The big one.
-   2. **Named places in a boss room** (133 of the 254 unsayable actions). Spec's order: places
-      relative to a unit or player (works today), then spots computed from positions (behind the
-      boss, max range, N yd apart), then per-room landmarks (deferred until a fight needs one).
-      Open: build the computed spots now?
-   3. **How each new verb runs** (`kite`, `mark`, `board`, `equip`, `pet`, `interact`): a
-      playerbots action or our own movement, per verb; check playerbots verb by verb.
-   4. Then the small snapshot additions (unit states, impact spots, liquid, main assist):
-      mechanical once 1-3 are settled.
+1. **Standing orders** (`#5`; spec and decisions: `docs/specs/triggers.md`, "The grammar (final,
+   2026-11-17)" and "Decided (2026-11-18)": `when` evaluated in the harness, acts carried out in
+   the module; relative places now, room landmarks later; acts through the client's own
+   handlers). **About a sixth done; nothing acts on an order in game yet.** Build order:
+   - **(a) Order language and evaluator in the harness: half done.**
+     - Done (2026-11-18): `harness/src/orders.{h,cc}`: types, parser (26 condition forms, 18
+       verbs; hand-written, `<regex>` is banned), printer, per-call grammar (`OrderGrammar`,
+       names limited to what the bot knows); `order:` plan lines, up to 7, in priority order
+       (`plan.{h,cc}`; a bad order is dropped, the plan stands); tests: round trips, rejects,
+       and every `fits` row of both audit tables (`OrdersTest.*Audit*`, also
+       `tools/wlb check triggers`; the Python checker is retired); `base::
+       SplitStringPieceUsingSubstr` in `common/base`. **`order:` lines are off in live prompts**
+       (no names are passed to the grammar) until (b) can carry acts out.
+     - Not done: the **evaluator**: which order fires on a snapshot or event (priority, the
+       first match wins), `it` binding, time windows (`cast in last Ns`, `appears in last Ns`,
+       `after Ns`, `every Ns`), `then` chains, the step timeout (5 s default), a higher order
+       interrupting a lower one, an order covering its event (no default wake); conditions
+       on fields the snapshot lacks yet (flying, submerged, ...) are false until (e). Unit tests
+       on recorded snapshot sequences. Then the bot loop runs it and RULES.md gets the verbs.
+   - **(b) Not started:** a wire command for an act (`Command`, `kWireVersion`) and the module's
+     executor for the first verbs (`to`, `away`, `target`, `use`, `stop`, `wake`), done through
+     `done_command_id`; relative places (`behind`, `in front of`, `max range of`, `N yd from`)
+     with ground, line-of-sight and path checks, recomputed while the step runs.
+   - **(c) Not started:** an immediate snapshot when a cast starts or an aura appears on the
+     bot, its target or focus, or an attacker (`SnapshotSchedule::Flags`; ~50 ms minimum gap).
+   - **(d) Not started:** the other verbs: `kite` (first check pausing playerbots' combat
+     movement while a step steers), `mark`, `board` / `leave vehicle`, `equip`, `pet`,
+     `interact`, `face`, `jump`, `cancel`, `avoid`.
+   - **(e) Not started:** snapshot additions: flying / untargetable / submerged on `Unit`,
+     `lands_in_s`, the liquid under the bot, the main assist.
+   - **(f) Not started:** evals (boss notes in, orders out; a bot without the note writes none)
+     and live tests (hand-written orders on a fixture bot, one scenario per verb).
+   - Also open from the audit: re-judge the unsayable rows with the final grammar for a measured
+     coverage number (against the earlier grammar: conditions 85%, actions 46%; upper bounds with
+     the new constructs about 89% and 55%); named room landmarks (most of the 133 "go to
+     hardcoded coordinates" actions) wait for a boss that needs them.
 
 ## Later
 

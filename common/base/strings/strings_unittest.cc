@@ -74,6 +74,23 @@ TEST(StringsTest, CasePrefixesTrimAndJoin) {
   EXPECT_EQ(JoinString(std::vector<std::string>{}, ", "), "");
 }
 
+TEST(StringsTest, SplitStringPieceUsingSubstr) {
+  EXPECT_EQ(
+      SplitStringPieceUsingSubstr("away, then to boss, then wake", ", then ",
+                                  KEEP_WHITESPACE, SPLIT_WANT_ALL),
+      (std::vector<std::string_view>{"away", "to boss", "wake"}));
+  // A comma alone is not the delimiter.
+  EXPECT_EQ(SplitStringPieceUsingSubstr("a, b", ", then ", KEEP_WHITESPACE,
+                                        SPLIT_WANT_ALL),
+            (std::vector<std::string_view>{"a, b"}));
+  EXPECT_EQ(SplitStringPieceUsingSubstr(" x &&  & y ", "&", TRIM_WHITESPACE,
+                                        SPLIT_WANT_NONEMPTY),
+            (std::vector<std::string_view>{"x", "y"}));
+  EXPECT_EQ(
+      SplitStringPieceUsingSubstr("", "&", KEEP_WHITESPACE, SPLIT_WANT_ALL),
+      (std::vector<std::string_view>{""}));
+}
+
 TEST(StringsTest, SplitStringAndSplitStringPiece) {
   EXPECT_EQ(
       SplitStringPiece(" 1, 2 , , 3 ", ",", TRIM_WHITESPACE, SPLIT_WANT_ALL),

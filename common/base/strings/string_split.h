@@ -31,6 +31,14 @@ enum SplitResult {
     WhitespaceHandling whitespace,
     SplitResult result_type);
 
+// Like SplitStringPiece, but `delimiter` is one whole substring (", then "),
+// not a set of characters (as in Chromium's //base/strings/string_split.h).
+[[nodiscard]] std::vector<std::string_view> SplitStringPieceUsingSubstr(
+    std::string_view input,
+    std::string_view delimiter,
+    WhitespaceHandling whitespace,
+    SplitResult result_type);
+
 }  // namespace base
 
 #endif  // COMMON_BASE_STRINGS_STRING_SPLIT_H_

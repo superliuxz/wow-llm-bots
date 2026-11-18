@@ -41,6 +41,36 @@ std::vector<std::string_view> SplitStringPiece(std::string_view input,
   return result;
 }
 
+std::vector<std::string_view> SplitStringPieceUsingSubstr(
+    std::string_view input,
+    std::string_view delimiter,
+    WhitespaceHandling whitespace,
+    SplitResult result_type) {
+  std::vector<std::string_view> result;
+  if (delimiter.empty()) {
+    result.push_back(input);
+    return result;
+  }
+  size_t start = 0;
+  while (true) {
+    const size_t end = input.find(delimiter, start);
+    std::string_view piece = end == std::string_view::npos
+                                 ? input.substr(start)
+                                 : input.substr(start, end - start);
+    if (whitespace == TRIM_WHITESPACE) {
+      piece = TrimWhitespaceASCII(piece, TRIM_ALL);
+    }
+    if (result_type == SPLIT_WANT_ALL || !piece.empty()) {
+      result.push_back(piece);
+    }
+    if (end == std::string_view::npos) {
+      break;
+    }
+    start = end + delimiter.size();
+  }
+  return result;
+}
+
 std::vector<std::string> SplitString(std::string_view input,
                                      std::string_view separators,
                                      WhitespaceHandling whitespace,

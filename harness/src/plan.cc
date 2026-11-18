@@ -14,6 +14,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "orders.h"
 
 namespace harness {
 namespace {
@@ -191,7 +192,8 @@ std::string Cut(std::string_view text, size_t max_bytes) {
 
 std::string PlanGrammar(int option_count,
                         const std::vector<std::string>& tell_names,
-                        const std::vector<std::string>& hover_names) {
+                        const std::vector<std::string>& hover_names,
+                        const std::vector<std::string>& order_names) {
   // A screen always has at least "Keep doing what I'm doing"; an empty
   // alternative would be an invalid grammar (llama-server rejects it).
   option_count = std::max(option_count, 1);
@@ -232,6 +234,7 @@ std::string PlanGrammar(int option_count,
     hover_rule = base::StrCat(
         {"hover ::= \"\\nhover: \" (", base::JoinString(hovers, " | "), ")\n"});
   }
+  const std::string order_rules = OrderGrammar(order_names);
   std::string tell_rule;
   if (!names.empty()) {
     tell_rule = base::StrCat(
@@ -244,6 +247,9 @@ std::string PlanGrammar(int option_count,
       names.empty() ? "" : " tell?",
       " open? close?",
       hovers.empty() ? "" : " hover?",
+      order_rules.empty()
+          ? ""
+          : base::StrCat({" oline{0,", base::NumberToString(kMaxOrders), "}"}),
       "\n"
       "panel ::= ",
       base::JoinString(panels, " | "),
@@ -281,6 +287,7 @@ std::string PlanGrammar(int option_count,
       "}\n",
       tell_rule,
       hover_rule,
+      order_rules,
   });
 }
 
@@ -344,6 +351,13 @@ std::optional<Plan> ParsePlan(std::string_view text, int option_count) {
             std::find(panels.begin(), panels.end(), *panel) == panels.end()) {
           panels.push_back(std::move(*panel));
         }
+      }
+    } else if (key == "order") {
+      // An order that isn't the grammar is dropped; the rest of the plan
+      // stands.
+      if (std::optional<Order> order = ParseOrder(Trim(raw));
+          order && plan.orders.size() < static_cast<size_t>(kMaxOrders)) {
+        plan.orders.push_back(std::move(*order));
       }
     } else if (key == "hover") {
       if (base::ToLowerASCII(Trim(raw)) != "none") {
@@ -481,6 +495,9 @@ std::string FormatPlan(const Plan& plan) {
   }
   if (!plan.hover.empty()) {
     base::StrAppend(&out, {"\nhover: ", plan.hover});
+  }
+  for (const Order& order : plan.orders) {
+    base::StrAppend(&out, {"\norder: ", FormatOrder(order)});
   }
   return out;
 }

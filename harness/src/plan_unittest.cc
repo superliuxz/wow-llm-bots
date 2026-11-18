@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "gtest/gtest.h"
+#include "orders.h"
 
 namespace harness {
 namespace {
@@ -280,6 +281,28 @@ TEST(PlanTest, OpenCloseAndHoverLines) {
   EXPECT_EQ(plan->close, (std::vector<std::string>{"character"}));
   EXPECT_EQ(plan->hover, "Tough Hunk of Bread");
   EXPECT_EQ(ParsePlan(FormatPlan(*plan), 1), plan);
+}
+
+TEST(PlanTest, OrderLinesAreStandingOrdersInPriorityOrder) {
+  const std::optional<Plan> plan = ParsePlan(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+      "order: Defile on me -> away, then to behind boss\n"
+      "order: this is not an order\n"
+      "order: boss hp<20 -> use Execute",
+      1);
+  ASSERT_TRUE(plan);  // The bad order is dropped; the plan stands.
+  ASSERT_EQ(plan->orders.size(), 2u);
+  EXPECT_EQ(FormatOrder(plan->orders[0]),
+            "Defile on me -> away, then to behind boss");
+  EXPECT_EQ(FormatOrder(plan->orders[1]), "boss hp<20 -> use Execute");
+  EXPECT_EQ(ParsePlan(FormatPlan(*plan), 1), plan);
+}
+
+TEST(PlanTest, OrderLinesOnlyWithNamesToUse) {
+  EXPECT_EQ(PlanGrammar(1).find("oline"), std::string::npos);
+  const std::string grammar = PlanGrammar(1, {}, {}, {"Defile"});
+  EXPECT_NE(grammar.find(" oline{0,7}\n"), std::string::npos) << grammar;
+  EXPECT_NE(grammar.find("oname ::= \"Defile\"\n"), std::string::npos);
 }
 
 TEST(PlanTest, TheGrammarOffersHoverOnlyForNamesOnScreen) {

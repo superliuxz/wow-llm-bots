@@ -142,6 +142,7 @@ add_library(wlb_harness STATIC "${WLB_HARNESS_SRC}/bot_loop.cc"
             "${WLB_HARNESS_SRC}/file_util.cc"
             "${WLB_HARNESS_SRC}/llm_client.cc"
             "${WLB_HARNESS_SRC}/module_connection.cc"
+            "${WLB_HARNESS_SRC}/orders.cc"
             "${WLB_HARNESS_SRC}/plan.cc"
             "${WLB_HARNESS_SRC}/plan_runner.cc"
             "${WLB_HARNESS_SRC}/prompt.cc"
@@ -164,6 +165,7 @@ add_executable(harness_unittests
   "${WLB_HARNESS_SRC}/file_util_unittest.cc"
   "${WLB_HARNESS_SRC}/llm_client_unittest.cc"
   "${WLB_HARNESS_SRC}/module_connection_unittest.cc"
+  "${WLB_HARNESS_SRC}/orders_unittest.cc"
   "${WLB_HARNESS_SRC}/plan_runner_unittest.cc"
   "${WLB_HARNESS_SRC}/plan_unittest.cc"
   "${WLB_HARNESS_SRC}/prompt_unittest.cc"
@@ -173,7 +175,8 @@ add_executable(harness_unittests
   "${WLB_HARNESS_SRC}/triggers_unittest.cc")
 target_link_libraries(harness_unittests PRIVATE wlb_harness GTest::gtest_main)
 target_compile_definitions(harness_unittests PRIVATE
-  WLB_HARNESS_TESTDATA="${WLB_ROOT}/harness/testdata")
+  WLB_HARNESS_TESTDATA="${WLB_ROOT}/harness/testdata"
+  WLB_SPECS_DIR="${WLB_ROOT}/docs/specs")
 target_compile_options(harness_unittests PRIVATE ${WLB_SAFETY_FLAGS})
 
 # One name for every unit test suite: `ninja unit_tests`, run by `tools/wlb test unit`.

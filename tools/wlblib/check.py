@@ -148,7 +148,10 @@ def snapshots(files=()):
 
 
 def triggers():
-    run(["python3", "-I", ROOT / "tools/check-trigger-grammar.py"])
+    """The standing-order audit tables against the real parser (harness/src/orders.cc): every
+    `fits` row parses, every row has a known verdict. Also part of the unit tests."""
+    build.common("default", tests=False)
+    run([OUT / "common" / "harness_unittests", "--gtest_filter=OrdersTest.*Audit*"])
 
 
 def goldens():
@@ -168,8 +171,6 @@ def all_(with_sanitizers=False):
     """Fast checks in the order that fails fastest; optionally followed by *SAN."""
     say("== format")
     format_()
-    say("== trigger table")
-    triggers()
     say("== build + unit tests (default)")
     build.common("default")
     # snapshot_check and compile_commands.json are now up to date from the default build.
