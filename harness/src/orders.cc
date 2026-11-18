@@ -15,10 +15,13 @@
 
 namespace harness {
 
-std::optional<std::vector<Act>> ParseActs(std::string_view text) {
+std::optional<std::vector<Act>> ParseActs(
+    std::string_view text,
+    const std::vector<std::string>& names) {
   // The steps of an order are only a type inside `Order`: parse them as one.
-  std::optional<Order> order =
-      grammar::ParseOrder(base::StrCat({"always -> ", text}));
+  std::optional<Order> order = grammar::ParseOrder(
+      base::StrCat({"always -> ", text}),
+      grammar::rt::Env{.names = {{"order_names", names}}, .counts = {}});
   if (!order) {
     return std::nullopt;
   }
@@ -35,14 +38,9 @@ std::string OrderGrammar(const std::vector<std::string>& names) {
       })) {
     return "";
   }
-  const std::string rules = grammar::OrdersGrammar(
+  return grammar::OrdersGrammar(
       "Order",
       grammar::rt::Env{.names = {{"order_names", names}}, .counts = {}});
-  if (rules.empty()) {
-    return "";
-  }
-  return base::StrCat({"oline ::= \"\\norder: \" ",
-                       grammar::OrdersRuleName("Order"), "\n", rules});
 }
 
 }  // namespace harness

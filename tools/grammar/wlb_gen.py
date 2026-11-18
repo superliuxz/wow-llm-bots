@@ -9,6 +9,12 @@ emission are in the hand-written runtime, harness/grammar/wlb_runtime.{h,cc}; th
 code is tables of sequences and the code that fills and prints the types.
 
 Usage: python3 -I -B tools/grammar/wlb_gen.py <file.wlb> <out_dir>
+       python3 -I -B tools/grammar/wlb_gen.py --rules <file.wlb> <RULES.md> [--fix]
+
+With --rules it checks (or with --fix rewrites) the reply form in RULES.md: the lines between
+the paragraph starting "Reply in exactly this form" (up to its ":\n") and "\n\nExample:" are
+one per documented line of the file's `lines` type, in its order. It fails when the anchors
+are missing and when an optional line's key is not named (in backquotes) in that paragraph.
 """
 
 import pathlib
@@ -131,7 +137,7 @@ def read_hook(r):
 
 def read_line(r, path):
     """One line of a `lines` block:
-    key[?|*N] [<field:Type>]: field:Type|field:list<...> [default "x"] [lenient]
+    key[?|*N] [<field:Type ["Label"]>]: field:Type|field:list<...> [default "x"] [lenient]
     [@normalize(Fn)] [@needs(list)] ["description"];"""
     line = {"key": r.take("ident"), "mode": "required", "max": 1, "key_field": None,
             "default": None, "lenient": False, "normalize": None, "needs": None,
@@ -147,7 +153,9 @@ def read_line(r, path):
         r.take()
         name = r.take("ident")
         r.take("punct", ":")
-        line["key_field"] = {"name": name, "type": r.take("ident")}
+        line["key_field"] = {"name": name, "type": r.take("ident"), "label": None}
+        if r.at("string"):
+            line["key_field"]["label"] = r.take("string")  # What RULES.md shows: <Label>.
         r.take("punct", ">")
     r.take("punct", ":")
     value = read_seq_one(r)
@@ -541,6 +549,10 @@ class Gen:
                 continue
             if self.types[name]["kind"] in ("words", "struct", "choice"):
                 h += [f"std::optional<{name}> Parse{name}(std::string_view text);",
+                      "// The same, preferring the names `env` offered where a name could",
+                      "// end in more than one place.",
+                      f"std::optional<{name}> Parse{name}(std::string_view text, "
+                      "const rt::Env& env);",
                       f"std::string Format{name}(const {name}& value);"]
             if self.types[name]["kind"] in ("words", "struct", "choice"):
                 h.append(f"// For tests: a random valid value (round trips, GBNF checks).")
@@ -572,8 +584,10 @@ class Gen:
         if k == "flag":
             return f"rt::Flag({cpp_string(e['text'])}, {ids[e['name']]})"
         if k == "field":
+            t = self.types[e["type"]]
+            names = (f", \"{t['env']}\"" if t["kind"] == "name" and t.get("env") else "")
             return (f"rt::Field(&Is{e['type']}, \"{self.rule(e['type'])}\", "
-                    f"{ids[e['name']]})")
+                    f"{ids[e['name']]}{names})")
         if k == "list":
             return (f"rt::List(&Is{e['type']}, \"{self.rule(e['type'])}\", "
                     f"{cpp_string(e['sep'])}, {ids[e['name']]}, {e['min']}, {e['max']})")
@@ -596,11 +610,11 @@ class Gen:
                 body = f"{out}->{m} = true;"
             elif e["kind"] == "list":
                 body = (f"{out}->{m}.emplace_back(); "
-                        f"Parse{e['type']}(c.span, &{out}->{m}.back());")
+                        f"Parse{e['type']}(c.span, &{out}->{m}.back(), env);")
             elif opt:
-                body = f"{out}->{m}.emplace(); Parse{e['type']}(c.span, &*{out}->{m});"
+                body = f"{out}->{m}.emplace(); Parse{e['type']}(c.span, &*{out}->{m}, env);"
             else:
-                body = f"Parse{e['type']}(c.span, &{out}->{m});"
+                body = f"Parse{e['type']}(c.span, &{out}->{m}, env);"
             lines.append(f"      case {i}: {body} break;")
         lines += ["      default: break;", "    }", "  }"]
         return lines
@@ -701,8 +715,8 @@ class Gen:
     def parse_into(self, type_name, src, dst):
         """A C++ condition: `src` parses as `type_name` into `dst`."""
         if self.own(type_name):
-            return f"Parse{type_name}({src}, &{dst})"
-        return f"rt::Assign(Parse{type_name}({src}), &{dst})"
+            return f"Parse{type_name}({src}, &{dst}, &env)"
+        return f"rt::Assign(Parse{type_name}({src}, env), &{dst})"
 
     def append_value(self, type_name, v):
         if self.own(type_name):
@@ -983,15 +997,16 @@ class Gen:
                 continue
             cpp = self.scalar(name) if self.types[name]["kind"] in (
                 "int", "num", "name", "text") else name
-            c += [f"bool Parse{name}(std::string_view s, {cpp}* out);",
-                  f"[[maybe_unused]] bool Is{name}(std::string_view s) {{ return Parse{name}(s, nullptr); }}",
+            c += [f"bool Parse{name}(std::string_view s, {cpp}* out, const rt::Env* env);",
+                  f"[[maybe_unused]] bool Is{name}(std::string_view s, const rt::Env* env) "
+                  f"{{ return Parse{name}(s, nullptr, env); }}",
                   f"void Append{name}(const {cpp}& v, std::string* out);"]
         c.append("")
         for name in order:
             t = self.types[name]
             k = t["kind"]
             if k == "words":
-                c.append(f"bool Parse{name}(std::string_view s, {name}* out) {{")
+                c += [f"bool Parse{name}(std::string_view s, {name}* out, const rt::Env* env) {{", "  (void)env;"]
                 for w in t["words"]:
                     spellings = [w["spelling"]] + w["aliases"]
                     test = " || ".join(f"rt::EqualsIgnoreCase(s, {cpp_string(x)})"
@@ -1007,7 +1022,7 @@ class Gen:
                              f"out->append({cpp_string(w['spelling'])}); return;")
                 c += ["  }", "}", ""]
             elif k == "int" and t.get("hook"):
-                c += [f"bool Parse{name}(std::string_view s, int* out) {{",
+                c += [f"bool Parse{name}(std::string_view s, int* out, const rt::Env* env) {{", "  (void)env;",
                       "  int value = 0;",
                       f"  if (!hooks::{t['hook']}(s, &value) || value < {t['lo']} || "
                       f"value > {t['hi']}) return false;",
@@ -1015,18 +1030,18 @@ class Gen:
                       f"void Append{name}(const int& v, std::string* out) {{",
                       "  out->append(base::NumberToString(v));", "}", ""]
             elif k == "int":
-                c += [f"bool Parse{name}(std::string_view s, int* out) {{",
+                c += [f"bool Parse{name}(std::string_view s, int* out, const rt::Env* env) {{", "  (void)env;",
                       f"  return rt::ParseIntIn(s, {t['lo']}, {t['hi']}, out);", "}", "",
                       f"void Append{name}(const int& v, std::string* out) {{",
                       "  out->append(base::NumberToString(v));", "}", ""]
             elif k == "num":
-                c += [f"bool Parse{name}(std::string_view s, double* out) {{",
+                c += [f"bool Parse{name}(std::string_view s, double* out, const rt::Env* env) {{", "  (void)env;",
                       f"  return rt::ParseNumIn(s, {t['lo']}, {t['hi']}, {t['decimals']}, "
                       "out);", "}", "",
                       f"void Append{name}(const double& v, std::string* out) {{",
                       "  out->append(rt::FormatNum(v));", "}", ""]
             elif k == "name" and t.get("hook"):
-                c += [f"bool Parse{name}(std::string_view s, std::string* out) {{",
+                c += [f"bool Parse{name}(std::string_view s, std::string* out, const rt::Env* env) {{", "  (void)env;",
                       "  std::string value;",
                       f"  if (!hooks::{t['hook']}(s, &value)) return false;",
                       "  if (out) *out = std::move(value);", "  return true;", "}", "",
@@ -1038,14 +1053,14 @@ class Gen:
                 cut = ("  if (s.size() > {m}) return false;\n  std::string value(s);"
                        if t["env"] else
                        "  std::string value = rt::Cut(s, {m});").format(m=t["max"])
-                c += [f"bool Parse{name}(std::string_view s, std::string* out) {{",
+                c += [f"bool Parse{name}(std::string_view s, std::string* out, const rt::Env* env) {{", "  (void)env;",
                       "  s = rt::Trim(s);"] + cut.split("\n") + [
                       "  if (value.empty()) return false;",
                       "  if (out) *out = std::move(value);", "  return true;", "}", "",
                       f"void Append{name}(const std::string& v, std::string* out) {{",
                       "  out->append(v);", "}", ""]
             elif k == "name":
-                c += [f"bool Parse{name}(std::string_view s, std::string* out) {{",
+                c += [f"bool Parse{name}(std::string_view s, std::string* out, const rt::Env* env) {{", "  (void)env;",
                       "  if (!rt::IsName(s)) return false;",
                       "  if (out) *out = std::string(s);", "  return true;", "}", "",
                       f"void Append{name}(const std::string& v, std::string* out) {{",
@@ -1053,9 +1068,9 @@ class Gen:
             elif k == "struct":
                 ids = self.ids(t["seq"])
                 c += self.seq_table(f"Seq{name}", t["seq"], ids)
-                c += [f"bool Parse{name}(std::string_view s, {name}* out) {{",
+                c += [f"bool Parse{name}(std::string_view s, {name}* out, const rt::Env* env) {{", "  (void)env;",
                       "  std::vector<rt::Capture> caps;",
-                      f"  if (!rt::MatchSeq(Seq{name}(), s, &caps)) return false;",
+                      f"  if (!rt::MatchSeq(Seq{name}(), s, &caps, env)) return false;",
                       "  if (!out) return true;", f"  *out = {name}();"]
                 c += self.fill("out", t["seq"], ids)
                 c += ["  return true;", "}", "",
@@ -1066,11 +1081,11 @@ class Gen:
                 for arm in t["arms"]:
                     c += self.seq_table(f"Seq{name}{arm['name']}", arm["seq"],
                                         self.ids(arm["seq"]))
-                c += [f"bool Parse{name}(std::string_view s, {name}* out) {{",
+                c += [f"bool Parse{name}(std::string_view s, {name}* out, const rt::Env* env) {{", "  (void)env;",
                       "  std::vector<rt::Capture> caps;"]
                 for arm in t["arms"]:
                     a = f"{name}::{arm['name']}"
-                    c += [f"  if (rt::MatchSeq(Seq{name}{arm['name']}(), s, &caps)) {{",
+                    c += [f"  if (rt::MatchSeq(Seq{name}{arm['name']}(), s, &caps, env)) {{",
                           "    if (!out) return true;", f"    {a} arm;"]
                     c += ["  " + line for line in self.fill("(&arm)", arm["seq"],
                                                             self.ids(arm["seq"]))]
@@ -1178,7 +1193,12 @@ class Gen:
             if self.types[name]["kind"] in ("words", "struct", "choice"):
                 c += [f"std::optional<{name}> Parse{name}(std::string_view text) {{",
                       f"  {name} value;",
-                      f"  if (!Parse{name}(text, &value)) return std::nullopt;",
+                      f"  if (!Parse{name}(text, &value, nullptr)) return std::nullopt;",
+                      "  return value;", "}", "",
+                      f"std::optional<{name}> Parse{name}(std::string_view text, "
+                      "const rt::Env& env) {",
+                      f"  {name} value;",
+                      f"  if (!Parse{name}(text, &value, &env)) return std::nullopt;",
                       "  return value;", "}", "",
                       f"std::string Format{name}(const {name}& value) {{",
                       "  std::string out;", f"  Append{name}(value, &out);", "  return out;",
@@ -1239,7 +1259,72 @@ class Gen:
         return "\n".join(c)
 
 
+INTRO = "Reply in exactly this form"
+END = "\n\nExample:"
+
+
+def reply_form(types):
+    """RULES.md's reply form: `key: <description>` per documented line of the `lines` type."""
+    roots = [t for t in types.values() if t["kind"] == "lines" and not t.get("imported")]
+    if len(roots) != 1:
+        raise WlbError(f"--rules needs exactly one `lines` type, found {len(roots)}")
+    out, optional = [], []
+    for line in roots[0]["lines"]:
+        if line["doc"] is None:
+            continue  # Not taught yet (`order:` until the module acts on orders).
+        key = line["key"]
+        if line["key_field"]:
+            kf = line["key_field"]
+            key += f" <{kf['label'] or kf['type']}>"
+        out.append(f"{key}: {line['doc']}")
+        if line["mode"] == "optional":
+            optional.append(line["key"])
+    return out, optional
+
+
+def check_rules(wlb_path, rules_path, fix):
+    types, _, _ = read_wlb(wlb_path)
+    form, optional = reply_form(types)
+    text = rules_path.read_text()
+    start = text.find(INTRO)
+    if start < 0:
+        raise WlbError(f"{rules_path}: no paragraph starting {INTRO!r} (reworded?)")
+    body = text.find(":\n", start)
+    end = text.find(END, body if body >= 0 else start)
+    if body < 0 or end < 0:
+        raise WlbError(f"{rules_path}: the reply form after {INTRO!r} has no ':\\n' "
+                       f"or no {END.strip()!r} after it (reworded?)")
+    intro = text[start:body]
+    missing = [k for k in optional if f"`{k}" not in intro]
+    if missing:
+        raise WlbError(f"{rules_path}: the reply form's intro doesn't say when to write "
+                       f"{', '.join(missing)} (name each optional key in backquotes)")
+    want = "\n".join(form)
+    have = text[body + 2:end]
+    if have == want:
+        return 0
+    if fix:
+        rules_path.write_text(text[:body + 2] + want + text[end:])
+        print(f"wlb_gen: rewrote the reply form in {rules_path}")
+        return 0
+    print(f"wlb_gen: {rules_path}'s reply form differs from {wlb_path} "
+          f"(tools/wlb check rules --fix). Expected:\n{want}\nFound:\n{have}", file=sys.stderr)
+    return 1
+
+
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "--rules":
+        args = sys.argv[2:]
+        fix = "--fix" in args
+        args = [a for a in args if a != "--fix"]
+        if len(args) != 2:
+            print(__doc__)
+            return 2
+        try:
+            return check_rules(pathlib.Path(args[0]), pathlib.Path(args[1]), fix)
+        except (WlbError, OSError) as e:
+            print(f"wlb_gen: {e}", file=sys.stderr)
+            return 1
     if len(sys.argv) != 3:
         print(__doc__)
         return 2

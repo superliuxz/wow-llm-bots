@@ -8,6 +8,7 @@
   wlb check includes     include what you use (--fix rewrites)
   wlb check snapshots    compile the proto, validate example snapshots, check the client-event table
   wlb check triggers     the standing-order grammar over docs/specs/trigger-conditions.tsv
+  wlb check rules        RULES.md's reply form matches harness/grammar/plan.wlb (--fix rewrites)
 """
 
 import concurrent.futures
@@ -157,6 +158,16 @@ def triggers():
     run([OUT / "common" / "harness_unittests", "--gtest_filter=OrdersTest.*Audit*"])
 
 
+def rules(fix=False):
+    """RULES.md's reply form is generated from plan.wlb's line descriptions
+    (docs/plans/grammar-idl.md): stale, or anchors not found, fails."""
+    run(["python3", "-I", "-B", ROOT / "tools/grammar/wlb_gen_test.py", "-q"])
+    command = ["python3", "-I", "-B", ROOT / "tools/grammar/wlb_gen.py", "--rules",
+               ROOT / "harness/grammar/plan.wlb", ROOT / "content/RULES.md"]
+    run(command + (["--fix"] if fix else []))
+    say("rules ok" if not fix else "rules up to date")
+
+
 def goldens():
     """The screen renderer's goldens come from the Python prototype: it must still write them."""
     run(["python3", "-I", ROOT / "tools/snapshot/make_screen_fixtures.py", "--check"])
@@ -174,6 +185,8 @@ def all_(with_sanitizers=False):
     """Fast checks in the order that fails fastest; optionally followed by *SAN."""
     say("== format")
     format_()
+    say("== RULES.md reply form")
+    rules()
     say("== build + unit tests (default)")
     build.common("default")
     # snapshot_check and compile_commands.json are now up to date from the default build.

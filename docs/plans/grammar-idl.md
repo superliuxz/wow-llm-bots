@@ -356,7 +356,7 @@ written against the generated types.
     name lists), and is compiled into the unit tests (`ConstructsTest`): parsing, printing,
     what the GBNF offers and prunes, random round trips. It found two bugs at once: `~` ate a
     space the next literal needed, and an unused-parameter warning.
-  - **Known ambiguity (pinned by `OrdersTest.AUseNameHoldingOnSplitsAtTheFirstOn`):** in
+  - **Known ambiguity (fixed in step 3, see below):** in
     `use <name> on <thing>`, a name holding " on " ("Fire on the ground") splits at the first
     " on " (the hand-written parser read it the same way). Fix: the parser prefers names the
     call offered (they are known: the GBNF allowed only them), so the parser takes the call's
@@ -378,8 +378,25 @@ written against the generated types.
     against the GBNF. A lenient list drops repeats when read, so its random values have none.
   - One deliberate change: a `hover:` over 60 characters is rejected, no longer cut.
   - **Not done, moved to step 3:** the parser taking the call's names (the `use <name> on` fix
-    above). `ParsePlan` still takes only the option count; passing the names means a `plan.h`
-    API change and a matcher that prefers offered names.
+    above).
+- **Step 3 (2026-11-18), done:**
+  - RULES.md's reply form is generated: `tools/wlb check rules` (also part of `tools/wlb
+    check`) runs `wlb_gen.py --rules`, which fails when the block differs from `plan.wlb`'s
+    line descriptions, when either anchor is missing, or when an optional key isn't named in
+    backquotes in the intro; `--fix` rewrites the block. A key field may carry the label
+    RULES.md shows (`tell? <tell_to:Player "Name">:`). Its own tests:
+    `tools/grammar/wlb_gen_test.py` (stdlib `unittest`, run by `check rules`).
+  - The parser takes the call's names: every generated parse function takes the call's
+    `rt::Env` (null when there is none), and a `name ... from <list>` field tries the ends that
+    make it one of the offered names first, then the rest shortest first. Public
+    `Parse<T>(text, env)` overloads; `ParseActs(text, names)`, `ParsePlan(text, options,
+    order_names)`. "use Fire on the ground" is "Fire on the ground" when that was offered
+    (`OrdersTest.AUseNameHoldingOnIsReadAsTheNameTheCallOffered`); the random orders now draw
+    it from their pool too.
+- **Step 4 (2026-11-18), done:** the hand-written order and plan code went in steps 1 and 2;
+  what was left was `OrderGrammar`'s `oline` wrapper, which nothing used after `PlanGrammar`
+  became generated: it now returns the generated `orders-Order` rules, still with the "no
+  names, no orders" gate. The plan is finished.
 
 ## Decided (2026-11-18)
 

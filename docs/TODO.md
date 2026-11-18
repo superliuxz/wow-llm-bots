@@ -14,22 +14,13 @@ design decisions below.
 
 ## Next, in order
 
-0. **Grammar IDL** (`docs/plans/grammar-idl.md`, "Progress"): **steps 1 and 2 done**:
-   `harness/grammar/orders.wlb` and `plan.wlb` generate the order and plan types, parsers,
-   printers and GBNF (`tools/grammar/wlb_gen.py`, runtime `harness/grammar/wlb_runtime`, plan
-   hooks `harness/grammar/plan_hooks`); the hand-written order and plan code is gone; audit rows
-   and random values round-trip and are accepted by llama.cpp's grammar code
-   (`harness/src/gbnf_check`). **Next:** step 3 (RULES.md's reply form generated from
-   `plan.wlb`'s descriptions; the parser taking the call's names, which fixes the known
-   `use <name> on` ambiguity), then 4. The standing-order evaluator waits for it and is written
-   against the generated types.
 1. **Standing orders** (`#5`; spec and decisions: `docs/specs/triggers.md`, "The grammar (final,
    2026-11-17)" and "Decided (2026-11-18)": `when` evaluated in the harness, acts carried out in
    the module; relative places now, room landmarks later; acts through the client's own
    handlers). **About a sixth done; nothing acts on an order in game yet.** Build order:
    - **(a) Order language and evaluator in the harness: half done.**
      - Done (2026-11-18): `harness/src/orders.{h,cc}`: types, parser (26 condition forms, 18
-       verbs; hand-written, `<regex>` is banned), printer, per-call grammar (`OrderGrammar`,
+       verbs; generated from `harness/grammar/orders.wlb`), printer, per-call grammar (`OrderGrammar`,
        names limited to what the bot knows); `order:` plan lines, up to 7, in priority order
        (`plan.{h,cc}`; a bad order is dropped, the plan stands); tests: round trips, rejects,
        and every `fits` row of both audit tables (`OrdersTest.*Audit*`, also
@@ -45,7 +36,9 @@ design decisions below.
    - **(b) Not started:** a wire command for an act (`Command`, `kWireVersion`) and the module's
      executor for the first verbs (`to`, `away`, `target`, `use`, `stop`, `wake`), done through
      `done_command_id`; relative places (`behind`, `in front of`, `max range of`, `N yd from`)
-     with ground, line-of-sight and path checks, recomputed while the step runs.
+     with ground, line-of-sight and path checks, recomputed while the step runs. When it
+     passes order names to `PlanGrammar`, pass the same to `ParsePlan` (bot_loop.cc,
+     decide.cc), so names holding " on " are read right.
    - **(c) Not started:** an immediate snapshot when a cast starts or an aura appears on the
      bot, its target or focus, or an attacker (`SnapshotSchedule::Flags`; ~50 ms minimum gap).
    - **(d) Not started:** the other verbs: `kite` (first check pausing playerbots' combat
@@ -136,6 +129,9 @@ design decisions below.
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-18: grammar IDL steps 3 and 4, the plan finished (`docs/plans/grammar-idl.md`,
+  "Progress"): RULES.md's reply form generated and checked (`tools/wlb check rules`); the parser
+  prefers the names the call offered (fixes `use <name> on`); `OrderGrammar` without `oline`.
 - 2026-11-18: grammar IDL step 2: `plan.wlb` generates the plan code (`docs/plans/grammar-idl.md`,
   "Progress"). Parity: eval 47/53 (same as before), `perf brain` PASS with every call valid
   (capacity 8.5/s vs baseline 8.9; replay p95 1.3 s vs 0.8 s, on the llama-server already noted as slow).

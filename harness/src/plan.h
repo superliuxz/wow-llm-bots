@@ -113,8 +113,12 @@ std::optional<std::vector<PlanStep>> ParsePlanStepsLine(std::string_view line,
 
 // Reads and validates a plan. nullopt if it isn't one: no valid steps, an
 // option that doesn't exist, a count out of range, no `look`, an unknown
-// watch. Over-long goals and chat lines are cut.
-std::optional<Plan> ParsePlan(std::string_view text, int option_count);
+// watch. Over-long goals and chat lines are cut. `order_names`: those the
+// call's grammar offered (PlanGrammar), so an order's name that could end in
+// more than one place is read as one of them.
+std::optional<Plan> ParsePlan(std::string_view text,
+                              int option_count,
+                              const std::vector<std::string>& order_names = {});
 
 // The plan in the form above (what the grammar produces).
 std::string FormatPlan(const Plan& plan);

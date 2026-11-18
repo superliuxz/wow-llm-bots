@@ -19,9 +19,11 @@
 
 namespace harness::grammar::rt {
 
+struct Env;
+
 // Whether a whole span is a value of a type (the generated Parse<T> with no
-// output).
-using ValidFn = bool (*)(std::string_view);
+// output). `env`, when not null, is the call's: the names it offered.
+using ValidFn = bool (*)(std::string_view, const Env* env);
 
 // One element of a sequence.
 struct Node {
@@ -41,6 +43,10 @@ struct Node {
   std::vector<Node> body;   // kOpt.
   int min = 1;              // kList.
   int max = 1;              // kList.
+  // kField: the env list of names this field prefers. Where a span could end
+  // at more than one place, ends that make it one of the call's names are
+  // tried first ("use Fire on the ground on me").
+  std::string_view names;
 };
 using Seq = std::vector<Node>;
 
@@ -64,12 +70,16 @@ inline Node Flag(std::string_view text, int id) {
   n.id = id;
   return n;
 }
-inline Node Field(ValidFn valid, std::string_view rule, int id) {
+inline Node Field(ValidFn valid,
+                  std::string_view rule,
+                  int id,
+                  std::string_view names = {}) {
   Node n;
   n.kind = Node::Kind::kField;
   n.valid = valid;
   n.rule = rule;
   n.id = id;
+  n.names = names;
   return n;
 }
 inline Node List(ValidFn valid,
@@ -102,12 +112,13 @@ struct Capture {
 };
 
 // Matches all of `s` against `seq`: each field tries its shortest span first
-// whose rest also matches (so "Fire on the ground on me" splits on the last
-// " on " that works), an optional tries "present" before "absent". On success,
+// whose rest also matches, an optional tries "present" before "absent"; with
+// `env`, a field with `names` tries the call's names first. On success,
 // `captures` holds the matched path in order.
 bool MatchSeq(const Seq& seq,
               std::string_view s,
-              std::vector<Capture>* captures);
+              std::vector<Capture>* captures,
+              const Env* env = nullptr);
 
 // GBNF ----------------------------------------------------------------------
 

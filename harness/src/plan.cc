@@ -141,9 +141,11 @@ std::optional<std::vector<PlanStep>> ParsePlanStepsLine(std::string_view line,
   return Map<PlanStep>(*steps, ToStep);
 }
 
-std::optional<Plan> ParsePlan(std::string_view text, int option_count) {
+std::optional<Plan> ParsePlan(std::string_view text,
+                              int option_count,
+                              const std::vector<std::string>& order_names) {
   const std::optional<g::Plan> parsed =
-      g::ParsePlan(text, PlanEnv(option_count));
+      g::ParsePlan(text, PlanEnv(option_count, {}, {}, order_names));
   if (!parsed) {
     return std::nullopt;
   }

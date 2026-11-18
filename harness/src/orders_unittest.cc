@@ -230,37 +230,58 @@ TEST(OrdersTest, TheGrammarNamesOnlyWhatTheBotKnows) {
   EXPECT_NE(grammar.find("orders-Name ::= \"Defile\" | \"Lord Marrowgar\"\n"),
             std::string::npos)
       << grammar;
-  EXPECT_NE(grammar.find("oline ::= \"\\norder: \" orders-Order\n"),
-            std::string::npos);
 }
 
-// A known ambiguity of the language: in `use <name> on <thing>`, a name that
-// holds " on " can split two ways, and the parser takes the shorter name. The
-// fix is to prefer names the call offered (docs/plans/grammar-idl.md,
-// "Progress"); this pins today's reading until then.
-TEST(OrdersTest, AUseNameHoldingOnSplitsAtTheFirstOn) {
-  const std::optional<std::vector<Act>> acts =
-      ParseActs("use Fire on the ground");
+// In `use <name> on <thing>`, a name that holds " on " can split two ways: the
+// parser prefers the names the call offered, else takes the shorter name.
+TEST(OrdersTest, AUseNameHoldingOnIsReadAsTheNameTheCallOffered) {
+  // Without the call's names, the first " on " splits it.
+  std::optional<std::vector<Act>> acts = ParseActs("use Fire on the ground");
   ASSERT_TRUE(acts);
-  const auto& use = std::get<Act::Use>((*acts)[0].value);
-  EXPECT_EQ(use.name, "Fire");
-  ASSERT_TRUE(use.t);
-  EXPECT_EQ(std::get<Thing::Named>(use.t->value).name, "the ground");
+  const auto* use = std::get_if<Act::Use>(&(*acts)[0].value);
+  ASSERT_TRUE(use);
+  EXPECT_EQ(use->name, "Fire");
+  ASSERT_TRUE(use->t);
+  EXPECT_EQ(std::get<Thing::Named>(use->t->value).name, "the ground");
+  // With them, it is the name offered.
+  acts = ParseActs("use Fire on the ground", {"Fire on the ground"});
+  ASSERT_TRUE(acts);
+  use = std::get_if<Act::Use>(&(*acts)[0].value);
+  ASSERT_TRUE(use);
+  EXPECT_EQ(use->name, "Fire on the ground");
+  EXPECT_FALSE(use->t);
+  acts = ParseActs("use Fire on the ground on Defile",
+                   {"Fire on the ground", "Defile"});
+  ASSERT_TRUE(acts);
+  use = std::get_if<Act::Use>(&(*acts)[0].value);
+  ASSERT_TRUE(use);
+  EXPECT_EQ(use->name, "Fire on the ground");
+  ASSERT_TRUE(use->t);
+  EXPECT_EQ(std::get<Thing::Named>(use->t->value).name, "Defile");
 }
 
 // For random orders: parse(format(x)) == x, and the GBNF accepts the text.
-// The names are realistic ones holding " of ", hyphens and colons; none is
-// also a keyword of the grammar ("tank", "boss"), ends like a form ("... cast")
-// or holds " on " (the ambiguity above), which the language can't tell apart.
+// The names are realistic ones holding " of ", " on ", hyphens and colons, read
+// back with the names offered (as a call does); none is also a keyword of the
+// grammar ("tank", "boss") or ends like a form ("... cast"), which the
+// language can't tell apart.
 TEST(OrdersTest, RandomOrdersRoundTripAndTheGrammarAcceptsThem) {
-  grammar::rt::RandomSource source(
-      20261118, {"Defile", "Ring of Frost", "Blood-Queen Lana'thel",
-                 "SI:7 Agent", "Lord Marrowgar", "Kel'Thuzad",
-                 "Invocation of Blood", "Mark of the Fallen Champion"});
+  const std::vector<std::string> pool = {"Defile",
+                                         "Ring of Frost",
+                                         "Blood-Queen Lana'thel",
+                                         "SI:7 Agent",
+                                         "Lord Marrowgar",
+                                         "Kel'Thuzad",
+                                         "Invocation of Blood",
+                                         "Mark of the Fallen Champion",
+                                         "Fire on the ground"};
+  const grammar::rt::Env offered{.names = {{"order_names", pool}},
+                                 .counts = {}};
+  grammar::rt::RandomSource source(20261118, pool);
   for (int i = 0; i < 2000; ++i) {
     const Order order = grammar::RandomOrder(&source);
     const std::string text = FormatOrder(order);
-    EXPECT_EQ(ParseOrder(text), order) << text;
+    EXPECT_EQ(ParseOrder(text, offered), order) << text;
     if (i % 10 == 0) {  // llama.cpp's grammar check is the slow part.
       ExpectGrammarAccepts(order);
     }

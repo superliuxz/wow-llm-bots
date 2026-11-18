@@ -25,7 +25,10 @@ struct Frame {
   const Seq* seq;
   size_t i;
   const Frame* next;
+  const Env* env;  // The call's, or null.
 };
+
+const std::vector<std::string>* FindEnv(const Env& env, std::string_view name);
 
 bool Run(const Frame* f, std::string_view s, std::vector<Capture>* caps);
 
@@ -137,17 +140,31 @@ bool RunNode(const Node& node,
       }
       return Run(&rest, s, caps) || fail();
     case Node::Kind::kOpt: {
-      const Frame body{&node.body, 0, &rest};
+      const Frame body{&node.body, 0, &rest, rest.env};
       if (Run(&body, s, caps)) {
         return true;
       }
       caps->resize(mark);
       return Run(&rest, s, caps) || fail();
     }
-    case Node::Kind::kField:
-      for (const size_t end : CandidateEnds(s, NextHint(&rest))) {
+    case Node::Kind::kField: {
+      std::vector<size_t> ends = CandidateEnds(s, NextHint(&rest));
+      const std::vector<std::string>* offered =
+          node.names.empty() || rest.env == nullptr
+              ? nullptr
+              : FindEnv(*rest.env, node.names);
+      if (offered != nullptr && ends.size() > 1) {
+        // The call's names first, then the rest shortest first.
+        std::stable_partition(ends.begin(), ends.end(), [&](size_t end) {
+          const std::string_view span = s.substr(0, end);
+          return std::any_of(
+              offered->begin(), offered->end(),
+              [&](const std::string& name) { return name == span; });
+        });
+      }
+      for (const size_t end : ends) {
         const std::string_view span = s.substr(0, end);
-        if (!node.valid(span)) {
+        if (!node.valid(span, rest.env)) {
           continue;
         }
         caps->push_back({node.id, span});
@@ -157,6 +174,7 @@ bool RunNode(const Node& node,
         caps->resize(mark);
       }
       return false;
+    }
     case Node::Kind::kList: {
       // Item, then (separator, item) up to max - 1 times, then the rest.
       const Hint after_list = NextHint(&rest);
@@ -164,7 +182,7 @@ bool RunNode(const Node& node,
                              int count) -> bool {
         for (const size_t end : CandidateEnds(t, after_list, node.text)) {
           const std::string_view span = t.substr(0, end);
-          if (!node.valid(span)) {
+          if (!node.valid(span, rest.env)) {
             continue;
           }
           const size_t item_mark = caps->size();
@@ -198,7 +216,7 @@ bool Run(const Frame* f, std::string_view s, std::vector<Capture>* caps) {
   if (f == nullptr) {
     return s.empty();
   }
-  const Frame rest{f->seq, f->i + 1, f->next};
+  const Frame rest{f->seq, f->i + 1, f->next, f->env};
   return RunNode((*f->seq)[f->i], rest, s, caps);
 }
 
@@ -230,7 +248,8 @@ std::vector<std::string> UsableNames(const std::vector<std::string>* names,
     return out;
   }
   for (const std::string& name : *names) {
-    if (valid != nullptr ? valid(name) : IsName(name) && name.size() <= 60) {
+    if (valid != nullptr ? valid(name, nullptr)
+                         : IsName(name) && name.size() <= 60) {
       out.push_back(name);
     }
   }
@@ -390,9 +409,10 @@ class Emitter {
 
 bool MatchSeq(const Seq& seq,
               std::string_view s,
-              std::vector<Capture>* captures) {
+              std::vector<Capture>* captures,
+              const Env* env) {
   captures->clear();
-  const Frame f{&seq, 0, nullptr};
+  const Frame f{&seq, 0, nullptr, env};
   return Run(&f, s, captures);
 }
 

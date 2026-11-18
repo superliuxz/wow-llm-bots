@@ -46,7 +46,7 @@ lines Plan {
       "<optional: what you're working towards, a few words>";
   say?: say:Chat
       "<optional: a line said out loud to the players near you>";
-  tell? <tell_to:Player>: tell:Chat
+  tell? <tell_to:Player "Name">: tell:Chat
       "<optional: a whisper to one player by name; answer a whisper this way>";
   open?: open:list<Panel, ", ", 1..3> default "none" lenient
       "<optional: bags, character and/or quest log, to look at them; you are woken again once they show>";

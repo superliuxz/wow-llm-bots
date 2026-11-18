@@ -36,10 +36,15 @@ using grammar::Who;
 using grammar::FormatOrder;
 using grammar::ParseOrder;
 using grammar::ParseWhen;
-std::optional<std::vector<Act>> ParseActs(std::string_view text);
+// With `names` (those the call offered), a name that could end in more than
+// one place is read as one of them: "use Fire on the ground" uses "Fire on the
+// ground" when that was offered, else "Fire" on "the ground".
+std::optional<std::vector<Act>> ParseActs(
+    std::string_view text,
+    const std::vector<std::string>& names = {});
 
-// The GBNF rules for a plan's `order` lines: `oline` (`\norder: ` + an order)
-// and what it uses, with names limited to `names` (what the bot can see or
+// The GBNF rules for an order (root `orders-Order`, OrdersRuleName) and what it
+// uses, with names limited to `names` (what the bot can see or
 // knows: units, objects, auras, its spells and items); "" when `names` has no
 // usable name, so the plan grammar leaves `order:` lines out.
 std::string OrderGrammar(const std::vector<std::string>& names);
