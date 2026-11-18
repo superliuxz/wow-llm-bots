@@ -10,7 +10,7 @@
 #include <string>
 #include <unordered_map>
 
-#include "proto/snapshot.h"
+#include "snapshot/snapshot.h"
 
 class Player;
 

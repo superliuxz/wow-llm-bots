@@ -16,7 +16,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/thread_annotations.h"
-#include "proto/snapshot.h"
+#include "snapshot/snapshot.h"
 
 namespace llm_brain {
 

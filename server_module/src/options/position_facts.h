@@ -5,7 +5,7 @@
 
 #include <vector>
 
-#include "proto/snapshot.h"
+#include "snapshot/snapshot.h"
 
 // The parts of the Explore / Go to facts that need no game server
 // (option_facts.h computes them from the world): unit-tested.

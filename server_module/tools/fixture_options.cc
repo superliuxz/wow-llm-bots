@@ -14,7 +14,7 @@
 #include <utility>
 
 #include "options/options.h"
-#include "proto/snapshot.h"
+#include "snapshot/snapshot.h"
 
 namespace {
 

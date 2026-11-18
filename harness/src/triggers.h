@@ -15,8 +15,8 @@
 #include <vector>
 
 #include "plan.h"
-#include "proto/snapshot.h"
 #include "scheduler.h"
+#include "snapshot/snapshot.h"
 
 namespace harness {
 

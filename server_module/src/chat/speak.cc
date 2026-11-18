@@ -14,7 +14,7 @@
 #include "WorldConfig.h"
 #include "WorldSession.h"
 #include "chat/chat_text.h"
-#include "proto/snapshot.h"
+#include "snapshot/snapshot.h"
 
 namespace llm_brain {
 namespace {

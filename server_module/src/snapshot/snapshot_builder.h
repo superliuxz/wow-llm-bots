@@ -13,8 +13,8 @@
 #include "options/option_facts.h"
 #include "options/options.h"
 #include "options/position_facts.h"
-#include "proto/snapshot.h"
 #include "snapshot/nearby_builder.h"
+#include "snapshot/snapshot.h"
 #include "snapshot/ui_state.h"
 
 class Player;

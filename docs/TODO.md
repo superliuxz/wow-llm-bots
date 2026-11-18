@@ -75,6 +75,9 @@ design decisions below.
 
 ## Loose ends
 
+- Stale docs: `docs/specs/snapshot.md`, `docs/specs/trigger-audit.md`, `docs/plans/harness.md`
+  and `docs/plans/phase2.md` still point at `server_module/proto/snapshot.proto` (protobuf, gone
+  since 76e38a5); the structs are `snapshot/snapshot.h` now.
 - When two brain-run bots whisper `"who"` back and forth (`Gatda` -> `Testpriest`), they echoed
   `"who"` several times before switching to a real question (and stopped naturally after
   `"sounds good, let me know when you're ready"`).

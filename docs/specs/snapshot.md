@@ -70,7 +70,7 @@ Messages (`snapshot.proto`): the module sends `ModuleMessage` (a `Snapshot`, or 
   `monotonic_us` (this machine's monotonic clock).
 - A command may carry a `command_id`; an error it causes comes back with the same id, so the
   harness can tell "my choice failed" from an ordinary error line ("Not ready yet").
-- `version` (on every module message and command): `kWireVersion` (`common/proto/snapshot.h`).
+- `version` (on every module message and command): `kWireVersion` (`snapshot/snapshot.h`).
   Each side drops frames of another version and says so in its log (a module and a harness
   from different checkouts). Adding a field keeps the version; changing a field's meaning
   bumps it.

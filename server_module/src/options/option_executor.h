@@ -9,7 +9,7 @@
 
 #include "base/time/time.h"
 #include "options/options.h"
-#include "proto/snapshot.h"
+#include "snapshot/snapshot.h"
 
 class Creature;
 class GameObject;

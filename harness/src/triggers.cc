@@ -17,8 +17,8 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "plan.h"
-#include "proto/snapshot.h"
 #include "scheduler.h"
+#include "snapshot/snapshot.h"
 
 namespace harness {
 namespace {

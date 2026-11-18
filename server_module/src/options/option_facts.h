@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "options/position_facts.h"
-#include "proto/snapshot.h"
+#include "snapshot/snapshot.h"
 
 class Player;
 class WorldObject;

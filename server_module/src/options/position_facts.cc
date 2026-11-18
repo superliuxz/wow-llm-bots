@@ -8,8 +8,8 @@
 #include <vector>
 
 #include "base/strings/stringprintf.h"
-#include "proto/snapshot.h"
 #include "snapshot/perception.h"
+#include "snapshot/snapshot.h"
 
 namespace llm_brain {
 

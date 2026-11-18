@@ -38,8 +38,8 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "options/position_facts.h"
-#include "proto/snapshot.h"
 #include "snapshot/perception.h"
+#include "snapshot/snapshot.h"
 
 namespace llm_brain {
 namespace {

@@ -24,8 +24,8 @@
 #include "options/option_facts.h"
 #include "options/options.h"
 #include "options/position_facts.h"
-#include "proto/snapshot.h"
 #include "snapshot/perception.h"
+#include "snapshot/snapshot.h"
 
 namespace llm_brain {
 namespace {

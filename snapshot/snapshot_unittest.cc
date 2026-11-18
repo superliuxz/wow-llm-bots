@@ -9,9 +9,9 @@
 
 #include "gtest/gtest.h"
 #include "net/frame_codec.h"
-#include "proto/snapshot.h"
+#include "snapshot/snapshot.h"
 
-namespace llm_brain {
+namespace wlb::snapshot {
 namespace {
 
 namespace pb = wlb::snapshot;
@@ -158,4 +158,4 @@ TEST(SnapshotProtoTest, WriteJsonOfAnUnnamedEnumValueIsEmpty) {
 }
 
 }  // namespace
-}  // namespace llm_brain
+}  // namespace wlb::snapshot

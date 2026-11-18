@@ -13,7 +13,7 @@
 
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
-#include "proto/snapshot.h"
+#include "snapshot/snapshot.h"
 
 namespace llm_brain {
 namespace {

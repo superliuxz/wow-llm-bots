@@ -20,7 +20,7 @@
 #include "base/time/time.h"
 #include "gtest/gtest.h"
 #include "net/unix_socket_server.h"
-#include "proto/snapshot.h"
+#include "snapshot/snapshot.h"
 
 namespace harness {
 namespace {

@@ -19,7 +19,7 @@
 #include "base/memory/raw_ptr.h"
 #include "chat/chat_inbox.h"
 #include "chat/speak.h"
-#include "proto/snapshot.h"
+#include "snapshot/snapshot.h"
 
 namespace llm_brain {
 namespace {

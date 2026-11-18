@@ -36,8 +36,8 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "proto/snapshot.h"
 #include "snapshot/perception.h"
+#include "snapshot/snapshot.h"
 #include "snapshot/spell_text.h"
 
 namespace llm_brain {

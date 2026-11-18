@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/synchronization/lock.h"
-#include "proto/snapshot.h"
+#include "snapshot/snapshot.h"
 
 namespace llm_brain {
 

@@ -19,7 +19,7 @@
 #include "gtest/gtest.h"
 #include "httplib.h"
 #include "net/unix_socket_server.h"
-#include "proto/snapshot.h"
+#include "snapshot/snapshot.h"
 
 namespace harness {
 namespace {

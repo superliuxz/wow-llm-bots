@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "gtest/gtest.h"
-#include "proto/snapshot.h"
+#include "snapshot/snapshot.h"
 
 namespace llm_brain {
 namespace {

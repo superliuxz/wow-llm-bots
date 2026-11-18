@@ -9,7 +9,7 @@
 #include <string>
 #include <string_view>
 
-#include "proto/snapshot.h"
+#include "snapshot/snapshot.h"
 
 namespace {
 

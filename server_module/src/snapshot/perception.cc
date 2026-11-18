@@ -13,8 +13,8 @@
 #include <vector>
 
 #include "base/time/time.h"
-#include "proto/snapshot.h"
 #include "snapshot/invisible_displays.h"
+#include "snapshot/snapshot.h"
 
 namespace llm_brain {
 namespace {

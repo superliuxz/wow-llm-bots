@@ -18,7 +18,7 @@
 #include "base/thread_annotations.h"
 #include "base/time/time.h"
 #include "net/unix_socket_client.h"
-#include "proto/snapshot.h"
+#include "snapshot/snapshot.h"
 
 namespace harness {
 

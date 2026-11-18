@@ -5,8 +5,8 @@
 
 #include <cstddef>
 
-#include "proto/snapshot.h"
 #include "snapshot/perception.h"
+#include "snapshot/snapshot.h"
 
 class Player;
 class Unit;

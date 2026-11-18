@@ -20,7 +20,7 @@
 #include "gbnf_check.h"
 #include "gtest/gtest.h"
 #include "llm_client.h"
-#include "proto/snapshot.h"
+#include "snapshot/snapshot.h"
 
 namespace harness {
 namespace {

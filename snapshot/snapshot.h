@@ -4,8 +4,8 @@
 // Wire serialization (BEVE) and JSON mapping live in snapshot_wire.cc (Glaze).
 // Keep this header pure C++20: AzerothCore compiles server_module as C++20.
 
-#ifndef WLB_COMMON_PROTO_SNAPSHOT_H_
-#define WLB_COMMON_PROTO_SNAPSHOT_H_
+#ifndef WLB_SNAPSHOT_SNAPSHOT_H_
+#define WLB_SNAPSHOT_SNAPSHOT_H_
 
 #include <cstdint>
 #include <memory>
@@ -2817,4 +2817,4 @@ std::string ReflectedSchemaJson();
 
 }  // namespace wlb::snapshot
 
-#endif  // WLB_COMMON_PROTO_SNAPSHOT_H_
+#endif  // WLB_SNAPSHOT_SNAPSHOT_H_

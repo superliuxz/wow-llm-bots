@@ -24,15 +24,15 @@ from wlblib.common import OUT, ROOT, SERVER, Failed, run, say
 # glibc's internal headers and Glaze's umbrella internals carry no IWYU mappings: include the
 # public header and mark it `// IWYU pragma: keep`.
 IGNORED_HEADERS = "bits/.*,asm-generic/.*,asm/.*,linux/.*,glaze/.*"
-HEADER_FLAGS_20 = ["-xc++-header", "-std=c++20", "-Icommon",
+HEADER_FLAGS_20 = ["-xc++-header", "-std=c++20", "-Icommon", "-I.",
                    "-Ithird_party/googletest/googletest/include"]
-HEADER_FLAGS_26 = ["-xc++-header", "-std=c++26", "-Icommon",
+HEADER_FLAGS_26 = ["-xc++-header", "-std=c++26", "-Icommon", "-I.",
                    "-Ithird_party/googletest/googletest/include"]
 
 
 def _sources(*suffixes):
     files = []
-    for top in ("common", "harness", "server_module"):
+    for top in ("common", "snapshot", "harness", "server_module"):
         for suffix in suffixes:
             files += sorted((ROOT / top).rglob(f"*{suffix}"))
     return files
@@ -60,7 +60,7 @@ def _include_jobs():
     if not (common_db / "compile_commands.json").exists():
         raise Failed("missing out/common/compile_commands.json: tools/wlb build common")
     have_server = (server_db / "compile_commands.json").exists()
-    for f in (ROOT / "common").rglob("*.h"):
+    for f in [*(ROOT / "common").rglob("*.h"), *(ROOT / "snapshot").rglob("*.h")]:
         jobs.append((f, ["--", *HEADER_FLAGS_20]))
     for f in (ROOT / "harness").rglob("*.h"):
         # harness/ for grammar/wlb_runtime.h; the generated grammar headers
@@ -69,7 +69,8 @@ def _include_jobs():
                          f"-I{OUT / 'common' / 'gen'}"]))
     for f in (ROOT / "server_module").rglob("*.h"):
         jobs.append((f, ["--", *HEADER_FLAGS_20, "-Iserver_module/src"]))
-    for f in [*(ROOT / "common").rglob("*.cc"), *(ROOT / "harness").rglob("*.cc")]:
+    for f in [*(ROOT / "common").rglob("*.cc"), *(ROOT / "snapshot").rglob("*.cc"),
+              *(ROOT / "harness").rglob("*.cc")]:
         jobs.append((f, ["-p", common_db]))
     for f in (ROOT / "server_module").rglob("*.cc"):
         if f.name.endswith("_unittest.cc") or f.parent.name == "tools":

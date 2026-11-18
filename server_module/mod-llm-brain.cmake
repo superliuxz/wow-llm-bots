@@ -1,16 +1,18 @@
 # Included by AzerothCore's modules/CMakeLists.txt after the `modules` target
-# exists. Links our shared C++ (common/: wlb_base, wlb_net, wlb_proto), built
+# exists. Links our shared C++ (common/: wlb_base, wlb_net; snapshot/:
+# wlb_snapshot), built
 # beforehand into out/common-server (not hardened) by tools/wlb build server.
 get_filename_component(WLB_MODULE_DIR "${CMAKE_CURRENT_LIST_DIR}" REALPATH)
 get_filename_component(WLB_ROOT "${WLB_MODULE_DIR}/.." REALPATH)
 set(WLB_SERVER_OUT "${WLB_ROOT}/out/common-server")
-target_include_directories(modules PRIVATE "${WLB_ROOT}/common")
-if(NOT EXISTS "${WLB_SERVER_OUT}/libwlb_proto.a")
+# common/ for base/ and net/; the repo root for snapshot/snapshot.h.
+target_include_directories(modules PRIVATE "${WLB_ROOT}/common" "${WLB_ROOT}")
+if(NOT EXISTS "${WLB_SERVER_OUT}/libwlb_snapshot.a")
   message(FATAL_ERROR "mod-llm-brain: build out/common-server first "
                       "(tools/wlb build common server)")
 endif()
 target_link_libraries(modules PRIVATE
-  "${WLB_SERVER_OUT}/libwlb_proto.a"
+  "${WLB_SERVER_OUT}/libwlb_snapshot.a"
   "${WLB_SERVER_OUT}/libwlb_net.a"
   "${WLB_SERVER_OUT}/libwlb_base.a")
 

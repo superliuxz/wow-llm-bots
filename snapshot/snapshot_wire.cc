@@ -1,6 +1,6 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
-#include "proto/snapshot.h"
+#include "snapshot/snapshot.h"
 
 #include <algorithm>
 #include <cstddef>

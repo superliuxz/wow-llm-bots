@@ -26,7 +26,7 @@
 #include <string_view>
 #include <vector>
 
-#include "proto/snapshot.h"
+#include "snapshot/snapshot.h"
 
 namespace harness {
 

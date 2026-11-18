@@ -21,8 +21,8 @@
 #include "llm_client.h"
 #include "plan.h"
 #include "prompt.h"
-#include "proto/snapshot.h"
 #include "screen_renderer.h"
+#include "snapshot/snapshot.h"
 
 namespace harness {
 namespace {

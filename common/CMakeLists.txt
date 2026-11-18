@@ -2,8 +2,9 @@
 #   wlb_base: threads (default and epoll IO message pumps),
 #             task runners, callbacks, WeakPtr, TimeDelta/TimeTicks.
 #   wlb_net:  length-prefixed framing, Unix socket server/client (on IO threads).
-#   wlb_proto: module <-> harness snapshot/command structs (proto/snapshot.h)
-#             and Glaze BEVE/JSON codecs (proto/snapshot_wire.cc).
+#   wlb_snapshot: module <-> harness snapshot/command structs
+#             (snapshot/snapshot.h, at the repo root) and Glaze BEVE/JSON codecs
+#             (snapshot/snapshot_wire.cc).
 # Plain C++20 (AzerothCore modules compile as C++20 and include these headers).
 cmake_minimum_required(VERSION 3.20)
 project(wlb_common C CXX)
@@ -52,23 +53,25 @@ add_library(wlb_net STATIC
 target_link_libraries(wlb_net PUBLIC wlb_base)
 target_compile_options(wlb_net PRIVATE ${WLB_SAFETY_FLAGS})
 
-# Protocol library: plain C++20 structs in proto/snapshot.h, serialized to BEVE
+# Protocol library: plain C++20 structs in snapshot/snapshot.h, serialized to BEVE
 # (wire) and JSON (fixtures/tools) via Glaze (C++23, confined to snapshot_wire.cc
 # so C++20 server_module never includes Glaze templates).
-add_library(wlb_proto STATIC proto/snapshot_wire.cc)
-target_include_directories(wlb_proto PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_include_directories(wlb_proto SYSTEM PRIVATE
+set(WLB_SNAPSHOT "${WLB_ROOT}/snapshot")
+add_library(wlb_snapshot STATIC "${WLB_SNAPSHOT}/snapshot_wire.cc")
+# The repo root: "snapshot/snapshot.h".
+target_include_directories(wlb_snapshot PUBLIC "${WLB_ROOT}")
+target_include_directories(wlb_snapshot SYSTEM PRIVATE
   "${WLB_ROOT}/third_party/glaze/include")
-target_link_libraries(wlb_proto PUBLIC wlb_base)
-target_compile_features(wlb_proto PRIVATE cxx_std_23)
-target_compile_options(wlb_proto PRIVATE ${WLB_SAFETY_FLAGS} -Wno-missing-braces)
+target_link_libraries(wlb_snapshot PUBLIC wlb_base)
+target_compile_features(wlb_snapshot PRIVATE cxx_std_23)
+target_compile_options(wlb_snapshot PRIVATE ${WLB_SAFETY_FLAGS} -Wno-missing-braces)
 
-add_executable(snapshot_check proto/snapshot_check.cc)
-target_link_libraries(snapshot_check PRIVATE wlb_proto)
+add_executable(snapshot_check "${WLB_SNAPSHOT}/snapshot_check.cc")
+target_link_libraries(snapshot_check PRIVATE wlb_snapshot)
 target_compile_options(snapshot_check PRIVATE ${WLB_SAFETY_FLAGS})
 
-add_library(wlb_wire_py SHARED proto/snapshot_wire_c.cc)
-target_link_libraries(wlb_wire_py PRIVATE wlb_proto)
+add_library(wlb_wire_py SHARED "${WLB_SNAPSHOT}/snapshot_wire_c.cc")
+target_link_libraries(wlb_wire_py PRIVATE wlb_snapshot)
 target_compile_options(wlb_wire_py PRIVATE ${WLB_SAFETY_FLAGS})
 
 # Unit tests.
@@ -85,14 +88,15 @@ add_executable(wlb_common_unittests
   base/time/time_unittest.cc
   net/frame_codec_unittest.cc
   net/framed_connection_unittest.cc
-  net/unix_socket_unittest.cc)
-target_link_libraries(wlb_common_unittests PRIVATE wlb_net GTest::gtest_main)
+  net/unix_socket_unittest.cc
+  "${WLB_SNAPSHOT}/snapshot_unittest.cc")
+target_link_libraries(wlb_common_unittests PRIVATE wlb_net wlb_snapshot
+                      GTest::gtest_main)
 target_compile_options(wlb_common_unittests PRIVATE ${WLB_SAFETY_FLAGS})
 
 # Unit tests for our AzerothCore module's AzerothCore-independent parts. They
 # sit next to the code; mod-llm-brain.cmake keeps them out of the server.
 set(WLB_MODULE_SRC "${WLB_ROOT}/server_module/src")
-set(WLB_PROTO_ROOT "${WLB_ROOT}/server_module")
 add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/bridge/brain_bridge.cc"
   "${WLB_MODULE_SRC}/bridge/brain_bridge_unittest.cc"
@@ -119,10 +123,9 @@ add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/snapshot/ui_state.cc"
   "${WLB_MODULE_SRC}/snapshot/ui_state_unittest.cc"
   "${WLB_MODULE_SRC}/test/test_accounts.cc"
-  "${WLB_MODULE_SRC}/test/test_accounts_unittest.cc"
-  "${WLB_PROTO_ROOT}/proto/snapshot_unittest.cc")
+  "${WLB_MODULE_SRC}/test/test_accounts_unittest.cc")
 target_include_directories(llm_brain_unittests PRIVATE "${WLB_MODULE_SRC}")
-target_link_libraries(llm_brain_unittests PRIVATE wlb_net wlb_proto
+target_link_libraries(llm_brain_unittests PRIVATE wlb_net wlb_snapshot
                       GTest::gtest_main)
 target_compile_options(llm_brain_unittests PRIVATE ${WLB_SAFETY_FLAGS})
 
@@ -130,7 +133,7 @@ target_compile_options(llm_brain_unittests PRIVATE ${WLB_SAFETY_FLAGS})
 add_executable(fixture_options "${WLB_ROOT}/server_module/tools/fixture_options.cc"
                "${WLB_MODULE_SRC}/options/options.cc")
 target_include_directories(fixture_options PRIVATE "${WLB_MODULE_SRC}")
-target_link_libraries(fixture_options PRIVATE wlb_base wlb_proto)
+target_link_libraries(fixture_options PRIVATE wlb_base wlb_snapshot)
 target_compile_options(fixture_options PRIVATE ${WLB_SAFETY_FLAGS})
 
 # The harness (harness/): the brain's process. Its parts that don't need the
@@ -183,7 +186,7 @@ target_include_directories(wlb_harness PUBLIC "${WLB_HARNESS_SRC}"
 # so their warnings are not ours).
 target_include_directories(wlb_harness SYSTEM PUBLIC
   "${WLB_ROOT}/third_party/cpp-httplib" "${WLB_ROOT}/third_party/json/include")
-target_link_libraries(wlb_harness PUBLIC wlb_net wlb_proto)
+target_link_libraries(wlb_harness PUBLIC wlb_net wlb_snapshot)
 target_compile_features(wlb_harness PUBLIC cxx_std_26)
 target_compile_options(wlb_harness PRIVATE ${WLB_SAFETY_FLAGS})
 # TEST ONLY: llama.cpp's own grammar code, to check in unit tests that a GBNF
