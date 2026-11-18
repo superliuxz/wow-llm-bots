@@ -9,6 +9,7 @@
 #ifndef HARNESS_GRAMMAR_WLB_RUNTIME_H_
 #define HARNESS_GRAMMAR_WLB_RUNTIME_H_
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -151,6 +152,29 @@ std::string FormatNum(double value);
 
 // Case-insensitive equality (words match in any case when parsing).
 bool EqualsIgnoreCase(std::string_view a, std::string_view b);
+
+// Tests ---------------------------------------------------------------------
+
+// Where the generated Random<T> functions draw from: a small seeded generator
+// (the same values on every run) and the names a `name` field may take.
+class RandomSource {
+ public:
+  RandomSource(uint64_t seed, std::vector<std::string> names);
+  RandomSource(const RandomSource&) = delete;
+  RandomSource& operator=(const RandomSource&) = delete;
+  ~RandomSource();
+
+  // In [0, n); n > 0.
+  int Below(int n);
+  bool Coin() { return Below(2) == 1; }
+  const std::string& Name();
+  // A number in [lo, hi] with at most `decimals` places (0 or 1 for now).
+  double Num(double lo, double hi, int decimals);
+
+ private:
+  uint64_t state_;
+  std::vector<std::string> names_;
+};
 
 }  // namespace harness::grammar::rt
 

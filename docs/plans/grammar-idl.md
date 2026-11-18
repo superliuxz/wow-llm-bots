@@ -330,7 +330,7 @@ written against the generated types.
 
 ## Progress
 
-- **Step 1 (2026-11-18), done except two tests:**
+- **Step 1 (2026-11-18), done:**
   - `tools/grammar/wlb_gen.py` (Python stdlib) generates `grammar/orders.wlb.{h,cc}` at build
     time (`common/CMakeLists.txt`); the runtime is `harness/grammar/wlb_runtime.{h,cc}`
     (namespace `harness::grammar::rt`: the matcher, GBNF emission with pruning, number and name
@@ -346,8 +346,21 @@ written against the generated types.
     orders" gate). The hand-written order parser, printer and GBNF are gone.
   - Tests: `OrdersTest` (incl. "Fire on the ground on me", "away boss 10"), every audit row
     parses, round-trips and is accepted by the generated GBNF (llama.cpp's code), the junk test.
-  - **Left in step 1:** random round-trip values (the audit rows cover every form for now) and
-    the generator's golden test (a small `.wlb` with each construct).
+  - Random round trips: the generator also emits `Random<T>(source)` (a seeded
+    `rt::RandomSource`, names from a pool the test passes); 2,000 random orders round-trip and
+    every tenth is checked against the GBNF.
+  - The generator's test: instead of a byte-for-byte golden of the generated C++ (it would break
+    with every clang-format version, and CI's differs from ours),
+    `harness/grammar/testdata/constructs.wlb` holds one of each construct, including the step-2
+    ones (`~` spellings, word aliases, a list that may be empty, flags, nested optionals, two
+    name lists), and is compiled into the unit tests (`ConstructsTest`): parsing, printing,
+    what the GBNF offers and prunes, random round trips. It found two bugs at once: `~` ate a
+    space the next literal needed, and an unused-parameter warning.
+  - **Known ambiguity (pinned by `OrdersTest.AUseNameHoldingOnSplitsAtTheFirstOn`):** in
+    `use <name> on <thing>`, a name holding " on " ("Fire on the ground") splits at the first
+    " on " (the hand-written parser read it the same way). Fix: the parser prefers names the
+    call offered (they are known: the GBNF allowed only them), so the parser takes the call's
+    names after all; to do with step 2's `env`.
 
 ## Decided (2026-11-18)
 

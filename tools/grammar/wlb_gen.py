@@ -343,6 +343,9 @@ class Gen:
             if self.types[name]["kind"] in ("words", "struct", "choice"):
                 h += [f"std::optional<{name}> Parse{name}(std::string_view text);",
                       f"std::string Format{name}(const {name}& value);"]
+            if self.types[name]["kind"] in ("words", "struct", "choice"):
+                h.append(f"// For tests: a random valid value (round trips, GBNF checks).")
+                h.append(f"{name} Random{name}(rt::RandomSource* source);")
             if self.types[name]["kind"] in ("struct", "choice"):
                 h.append(f"// Every `name` value in `value`, in order (what its GBNF needs).")
                 h.append(f"void CollectNames(const {name}& value, "
@@ -432,6 +435,29 @@ class Gen:
             elif k == "opt":
                 lines.append(f"{indent}if ({self.present(v, e['body'])}) {{")
                 lines += self.append_seq(v, e["body"], indent + "  ", True)
+                lines.append(f"{indent}}}")
+        return lines
+
+    def random_seq(self, v, seq, indent, opt=False):
+        """Code giving `v`'s fields of `seq` random values; an optional group is
+        present or absent as a whole."""
+        lines = []
+        for e in seq:
+            k = e["kind"]
+            if k == "flag":
+                lines.append(f"{indent}{v}.{member(e['name'])} = source->Coin();")
+            elif k == "field":
+                value = f"Random{e['type']}(source)"
+                lines.append(f"{indent}{v}.{member(e['name'])} = {value};")
+            elif k == "list":
+                m = f"{v}.{member(e['name'])}"
+                lines.append(
+                    f"{indent}for (int i = 0, n = {e['min']} + source->Below("
+                    f"{e['max'] - e['min'] + 1}); i < n; ++i) {{ {m}.push_back("
+                    f"Random{e['type']}(source)); }}")
+            elif k == "opt":
+                lines.append(f"{indent}if (source->Coin()) {{")
+                lines += self.random_seq(v, e["body"], indent + "  ", True)
                 lines.append(f"{indent}}}")
         return lines
 
@@ -543,6 +569,19 @@ class Gen:
                     c += self.append_seq("(*arm)", arm["seq"], "    ")
                     c += ["    return;", "  }"]
                 c += ["}", ""]
+        # Random values of the scalar types (tests).
+        for name in order:
+            t = self.types[name]
+            if t["kind"] == "int":
+                c += [f"int Random{name}(rt::RandomSource* source) {{",
+                      f"  return {t['lo']} + source->Below({t['hi'] - t['lo'] + 1});", "}", ""]
+            elif t["kind"] == "num":
+                c += [f"double Random{name}(rt::RandomSource* source) {{",
+                      f"  return source->Num({t['lo']}, {t['hi']}, {t['decimals']});", "}",
+                      ""]
+            elif t["kind"] == "name":
+                c += [f"std::string Random{name}(rt::RandomSource* source) {{",
+                      "  return source->Name();", "}", ""]
         # GBNF rules.
         rules = []
         for name in order:
@@ -602,7 +641,26 @@ class Gen:
                         c.append("  }")
             else:
                 c += self.collect("value", t["seq"])
-            c += ["  (void)out;", "}", ""]
+            c += ["  (void)value;", "  (void)out;", "}", ""]
+        for name in order:
+            t = self.types[name]
+            if t["kind"] == "words":
+                c += [f"{name} Random{name}(rt::RandomSource* source) {{",
+                      f"  return static_cast<{name}>(source->Below({len(t['words'])}));",
+                      "}", ""]
+            elif t["kind"] == "struct":
+                c += [f"{name} Random{name}(rt::RandomSource* source) {{", f"  {name} v;"]
+                c += self.random_seq("v", t["seq"], "  ")
+                c += ["  return v;", "}", ""]
+            elif t["kind"] == "choice":
+                c += [f"{name} Random{name}(rt::RandomSource* source) {{", f"  {name} v;",
+                      f"  switch (source->Below({len(t['arms'])})) {{"]
+                for i, arm in enumerate(t["arms"]):
+                    a = f"{name}::{arm['name']}"
+                    c += [f"    case {i}: {{", f"      {a} arm;"]
+                    c += self.random_seq("arm", arm["seq"], "      ")
+                    c += ["      v.value = std::move(arm);", "      break;", "    }"]
+                c += ["    default: break;", "  }", "  return v;", "}", ""]
         rule_list = ", ".join(f"&{r}()" for r in rules)
         c += [f"std::string {self.title}RuleName(std::string_view type) {{",
               f"  return std::string(\"{self.stem}-\") + std::string(type);", "}", "",

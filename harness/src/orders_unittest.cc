@@ -16,6 +16,7 @@
 #include "file_util.h"
 #include "gbnf_check.h"
 #include "grammar/orders.wlb.h"
+#include "grammar/wlb_runtime.h"
 #include "gtest/gtest.h"
 
 namespace harness {
@@ -231,6 +232,39 @@ TEST(OrdersTest, TheGrammarNamesOnlyWhatTheBotKnows) {
       << grammar;
   EXPECT_NE(grammar.find("oline ::= \"\\norder: \" orders-Order\n"),
             std::string::npos);
+}
+
+// A known ambiguity of the language: in `use <name> on <thing>`, a name that
+// holds " on " can split two ways, and the parser takes the shorter name. The
+// fix is to prefer names the call offered (docs/plans/grammar-idl.md,
+// "Progress"); this pins today's reading until then.
+TEST(OrdersTest, AUseNameHoldingOnSplitsAtTheFirstOn) {
+  const std::optional<std::vector<Act>> acts =
+      ParseActs("use Fire on the ground");
+  ASSERT_TRUE(acts);
+  const auto& use = std::get<Act::Use>((*acts)[0].value);
+  EXPECT_EQ(use.name, "Fire");
+  ASSERT_TRUE(use.t);
+  EXPECT_EQ(std::get<Thing::Named>(use.t->value).name, "the ground");
+}
+
+// For random orders: parse(format(x)) == x, and the GBNF accepts the text.
+// The names are realistic ones holding " of ", hyphens and colons; none is
+// also a keyword of the grammar ("tank", "boss"), ends like a form ("... cast")
+// or holds " on " (the ambiguity above), which the language can't tell apart.
+TEST(OrdersTest, RandomOrdersRoundTripAndTheGrammarAcceptsThem) {
+  grammar::rt::RandomSource source(
+      20261118, {"Defile", "Ring of Frost", "Blood-Queen Lana'thel",
+                 "SI:7 Agent", "Lord Marrowgar", "Kel'Thuzad",
+                 "Invocation of Blood", "Mark of the Fallen Champion"});
+  for (int i = 0; i < 2000; ++i) {
+    const Order order = grammar::RandomOrder(&source);
+    const std::string text = FormatOrder(order);
+    EXPECT_EQ(ParseOrder(text), order) << text;
+    if (i % 10 == 0) {  // llama.cpp's grammar check is the slow part.
+      ExpectGrammarAccepts(order);
+    }
+  }
 }
 
 // An unconstrained model can send junk; trying every split point must not blow

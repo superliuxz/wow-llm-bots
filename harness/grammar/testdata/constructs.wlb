@@ -1,0 +1,24 @@
+// TEST ONLY: one of each `.wlb` construct, compiled into the unit tests
+// (harness/grammar/constructs_unittest.cc) to test the generator itself.
+
+env TestEnv {
+  labels: names;
+  others: names;
+}
+
+words Color { red, "dark blue" ~"navy" ~"darkblue", green }
+int   Small 1..5
+num   Ratio 0..9 1dp
+name  Label from labels
+name  Other from others
+
+struct Pair = left:Small "/" right:Small;
+
+choice Shape {
+  Dot    = "dot";
+  Circle = "circle " r:Ratio (" in " color:Color)?;
+  Tagged = "tag " label:Label (" and " other:Other)?;
+  Pairs  = "pairs:" items:list<Pair, ",", 0..3> ".";
+}
+
+struct Line = (bold:"bold ")? "hp" ~"<" n:Small ~"%" " " shape:Shape;

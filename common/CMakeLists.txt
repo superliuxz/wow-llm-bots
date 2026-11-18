@@ -141,18 +141,23 @@ set(WLB_HARNESS_SRC "${WLB_ROOT}/harness/src")
 # tools/grammar/wlb_gen.py (docs/plans/grammar-idl.md) into
 # <build>/gen/grammar/; the generator's runtime is harness/grammar/wlb_runtime.
 set(WLB_GRAMMAR_GEN "${CMAKE_CURRENT_BINARY_DIR}/gen")
-set(WLB_GRAMMAR_SOURCES)
-foreach(grammar orders)
-  set(wlb "${WLB_ROOT}/harness/grammar/${grammar}.wlb")
-  set(out "${WLB_GRAMMAR_GEN}/grammar/${grammar}.wlb")
+function(wlb_grammar wlb sources_var)
+  get_filename_component(name "${wlb}" NAME_WE)
+  set(out "${WLB_GRAMMAR_GEN}/grammar/${name}.wlb")
   add_custom_command(
     OUTPUT "${out}.h" "${out}.cc"
     COMMAND python3 -I -B "${WLB_ROOT}/tools/grammar/wlb_gen.py" "${wlb}"
             "${WLB_GRAMMAR_GEN}/grammar"
     DEPENDS "${WLB_ROOT}/tools/grammar/wlb_gen.py" "${wlb}"
-    COMMENT "Generating ${grammar}.wlb.{h,cc}")
-  list(APPEND WLB_GRAMMAR_SOURCES "${out}.cc")
-endforeach()
+    COMMENT "Generating ${name}.wlb.{h,cc}")
+  set(${sources_var} ${${sources_var}} "${out}.cc" PARENT_SCOPE)
+endfunction()
+set(WLB_GRAMMAR_SOURCES)
+wlb_grammar("${WLB_ROOT}/harness/grammar/orders.wlb" WLB_GRAMMAR_SOURCES)
+# TEST ONLY: one of each construct, to test the generator itself.
+set(WLB_GRAMMAR_TEST_SOURCES)
+wlb_grammar("${WLB_ROOT}/harness/grammar/testdata/constructs.wlb"
+            WLB_GRAMMAR_TEST_SOURCES)
 add_library(wlb_harness STATIC "${WLB_HARNESS_SRC}/bot_loop.cc"
             "${WLB_HARNESS_SRC}/decide.cc"
             "${WLB_HARNESS_SRC}/decision_log.cc"
@@ -207,6 +212,8 @@ add_executable(harness_unittests
   "${WLB_HARNESS_SRC}/decision_log_unittest.cc"
   "${WLB_HARNESS_SRC}/file_util_unittest.cc"
   "${WLB_HARNESS_SRC}/gbnf_check_unittest.cc"
+  "${WLB_ROOT}/harness/grammar/constructs_unittest.cc"
+  ${WLB_GRAMMAR_TEST_SOURCES}
   "${WLB_HARNESS_SRC}/llm_client_unittest.cc"
   "${WLB_HARNESS_SRC}/module_connection_unittest.cc"
   "${WLB_HARNESS_SRC}/orders_unittest.cc"

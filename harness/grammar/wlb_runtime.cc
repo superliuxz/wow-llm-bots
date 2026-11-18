@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -98,15 +99,30 @@ bool RunNode(const Node& node,
       return s.starts_with(node.text) &&
              Run(&rest, s.substr(node.text.size()), caps);
     case Node::Kind::kParseOnly: {
-      // Optional spaces around it, as an unconstrained model writes them.
-      std::string_view t = base::TrimWhitespaceASCII(s, base::TRIM_LEADING);
-      if (t.starts_with(node.text)) {
-        std::string_view after = base::TrimWhitespaceASCII(
-            t.substr(node.text.size()), base::TRIM_LEADING);
+      // Optional spaces on either side, as an unconstrained model writes them
+      // ("hp < 30%"), but never a space what follows needs: each side is tried
+      // with and without its spaces.
+      const std::string_view trimmed =
+          base::TrimWhitespaceASCII(s, base::TRIM_LEADING);
+      for (const std::string_view from : {s, trimmed}) {
+        if (!from.starts_with(node.text)) {
+          continue;
+        }
+        const std::string_view after = from.substr(node.text.size());
+        const std::string_view after_trimmed =
+            base::TrimWhitespaceASCII(after, base::TRIM_LEADING);
         if (Run(&rest, after, caps)) {
           return true;
         }
         caps->resize(mark);
+        if (after_trimmed.size() != after.size() &&
+            Run(&rest, after_trimmed, caps)) {
+          return true;
+        }
+        caps->resize(mark);
+        if (trimmed.size() == s.size()) {
+          break;  // No leading spaces: `trimmed` is `s` again.
+        }
       }
       return Run(&rest, s, caps) || fail();
     }
@@ -459,6 +475,33 @@ bool EqualsIgnoreCase(std::string_view a, std::string_view b) {
     }
   }
   return true;
+}
+
+RandomSource::RandomSource(uint64_t seed, std::vector<std::string> names)
+    : state_(seed == 0 ? 0x9E3779B97F4A7C15ull : seed),
+      names_(std::move(names)) {}
+
+RandomSource::~RandomSource() = default;
+
+int RandomSource::Below(int n) {
+  // xorshift64*: enough for tests, and the same on every machine.
+  state_ ^= state_ >> 12;
+  state_ ^= state_ << 25;
+  state_ ^= state_ >> 27;
+  const uint64_t r = state_ * 0x2545F4914F6CDD1Dull;
+  return static_cast<int>((r >> 33) % static_cast<uint64_t>(n));
+}
+
+const std::string& RandomSource::Name() {
+  return names_[static_cast<size_t>(Below(static_cast<int>(names_.size())))];
+}
+
+double RandomSource::Num(double lo, double hi, int decimals) {
+  const int scale = decimals > 0 ? 10 : 1;
+  const int low = static_cast<int>(lo * scale);
+  const int high = static_cast<int>(hi * scale);
+  // An exact quotient of integers: the same double the parser reads back.
+  return static_cast<double>(low + Below(high - low + 1)) / scale;
 }
 
 }  // namespace harness::grammar::rt
