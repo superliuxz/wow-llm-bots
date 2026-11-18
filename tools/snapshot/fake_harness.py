@@ -199,11 +199,43 @@ def play_script(seconds, words, echo=print, tail_s=None):
                                      "power_max": me.get("power_max", 0),
                                      "in_combat": in_combat, "options": options,
                                      "done_command_id": snap.get("done_command_id", 0),
+                                     "open_panels": snap.get("base", {}).get("ui", {})
+                                     .get("open_panels", []),
+                                     "bag_items": [i.get("name", "") for i in
+                                                   snap.get("ext", {}).get("bags", {})
+                                                   .get("items", [])],
+                                     "tooltips": [t_.get("tooltip", {}).get("lines", [])
+                                                  for t_ in snap.get("base", {})
+                                                  .get("tooltips", [])],
                                      "pos": [pos.get("x", 0.0), pos.get("y", 0.0)]})
             echo(f"<< {bot} #{seq}: health {hp}/{hp_max}"
                  f"{', in combat' if in_combat else ''}; options: "
                  + "; ".join(f"{i}. {t_}" for i, t_ in enumerate(options, 1)))
             if not words or time.time() < next_at:
+                continue
+            # "open:bags", "close:bags", "hover:<item in open bags>": the panel
+            # commands of docs/plans/panels.md, sent as soon as they can be.
+            verb, _, arg = words[0].partition(":")
+            if verb in ("open", "close", "hover"):
+                cmd = {"bot": bot, "command_id": sent + 1}
+                if verb == "hover":
+                    bag = snap.get("ext", {}).get("bags", {}).get("items", [])
+                    item = next((i for i in bag if i.get("name") == arg), None)
+                    if not item:
+                        continue
+                    cmd["hover"] = {"ref": {"kind": "ITEM", "id": str(item["id"]),
+                                            "name": arg}}
+                else:
+                    cmd[verb] = {"panel": arg.upper().replace(" ", "_")}
+                sent += 1
+                send_frame(s, wire_py.encode_command(cmd))
+                out["commands"].append({"t": t, "command_id": sent, "seq": seq,
+                                        "text": words[0]})
+                echo(f">> {bot} {words[0]}")
+                words.pop(0)
+                next_at = time.time() + 2
+                if not words and tail_s is not None:
+                    stop_at = min(stop_at, time.time() + tail_s)
                 continue
             for i, text in enumerate(options, 1):
                 if text.lower().startswith(words[0].lower()):

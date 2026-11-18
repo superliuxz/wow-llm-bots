@@ -46,6 +46,17 @@ struct BotLoopConfig {
   // isn't asked about it; it gets a first look when snapshots come back.
   // Snapshots come every 1 s (LlmBrain.SnapshotIntervalMs).
   base::TimeDelta stale_snapshot_after = base::Seconds(5);
+  // Routine looking the harness does with no brain call (spec decision 12,
+  // docs/plans/panels.md); defaults a player has, parameters a brain can
+  // change later.
+  struct Habits {
+    bool open_bags_when_full = true;     // bag_free_slots reaches 0.
+    bool glance_at_quest_log = true;     // The quest tracker changed.
+    bool close_panels_in_combat = true;  // Combat starts.
+  } habits;
+  // How long a reply's `open:` / `hover:` waits for the snapshot that shows
+  // it before the brain is woken to read it; then the look is given up.
+  base::TimeDelta look_wait = base::Seconds(3);
 };
 
 // Starts one brain call. Returns a handle whose Cancel() aborts it early (the
@@ -123,6 +134,25 @@ class BotLoop {
     int step_refusals = 0;
     uint64_t call_epoch = 0;
     base::TimeTicks look_deadline;
+    // Panels as the bot last saw them, for the prompt once they are closed.
+    struct SeenPanel {
+      std::vector<std::string> lines;
+      base::TimeTicks seen_at;
+    };
+    std::flat_map<wlb::snapshot::Panel, SeenPanel> seen_panels;
+    // A look the brain asked for (`open:` / `hover:`): it is woken again once
+    // a snapshot shows it, or the look is dropped at `until`.
+    struct PendingLook {
+      std::vector<wlb::snapshot::Panel> panels;
+      std::string hover;
+      base::TimeTicks until;
+    };
+    std::optional<PendingLook> pending_look;
+    // Panels a habit opened only for a glance: closed once seen.
+    std::vector<wlb::snapshot::Panel> glancing;
+    bool was_in_combat = false;
+    uint32_t last_bag_free_slots = 1;
+    std::string last_quest_state;
   };
 
   void NoteEvent(BotState* state, const wlb::snapshot::Event& event);
@@ -169,6 +199,16 @@ class BotLoop {
   uint32_t SendChoose(const std::string& bot,
                       const wlb::snapshot::Command::Choose& choose);
   // `to`: the player whispered (channel WHISPER only).
+  void SendPanel(const std::string& bot, wlb::snapshot::Panel panel, bool open);
+  void SendHover(const std::string& bot, const wlb::snapshot::HoverRef& ref);
+  // Remembers open panels, runs the habits and wakes the brain when the look
+  // it asked for shows; true when it woke the brain.
+  bool OnLookSnapshot(const std::string& bot,
+                      BotState* state,
+                      base::TimeTicks received_at);
+  // The prompt's memory of panels not open now.
+  static std::vector<std::string> RememberedPanels(const BotState& state,
+                                                   base::TimeTicks now);
   void SendSay(const std::string& bot,
                wlb::snapshot::ChatChannel channel,
                const std::string& to,

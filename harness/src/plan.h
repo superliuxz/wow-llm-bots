@@ -39,6 +39,9 @@ inline constexpr int kMinNameChars = 2;
 inline constexpr int kMaxNameChars = 12;
 inline constexpr int kMinLookSeconds = 10;
 inline constexpr int kMaxLookSeconds = 999;
+inline constexpr int kMaxHoverChars = 60;
+// The panels a reply's `open:` / `close:` lines may name.
+inline constexpr const char* kPanelNames[] = {"bags", "character", "quest log"};
 
 // One option, done `times` times in a row (3x4: option 3, four times).
 struct PlanStep {
@@ -74,6 +77,11 @@ struct Plan {
   // A whisper: to `tell_to` (a character name), `tell`. Empty: none.
   std::string tell_to;
   std::string tell;
+  // Panels to open / close (kPanelNames), and the name of a thing on screen
+  // to point at for its tooltip (docs/plans/panels.md). Empty: none.
+  std::vector<std::string> open;
+  std::vector<std::string> close;
+  std::string hover;
 
   bool operator==(const Plan&) const = default;
 };
@@ -83,8 +91,11 @@ struct Plan {
 // whispered the bot (a name the bot invents, or its own, can't be written);
 // none means no `tell` line at all. Names that aren't a plain character name
 // (2-12 ASCII letters) are left out.
+// `hover_names`: what a `hover:` line may name (items and quests on screen);
+// none, no `hover:` line.
 std::string PlanGrammar(int option_count,
-                        const std::vector<std::string>& tell_names = {});
+                        const std::vector<std::string>& tell_names = {},
+                        const std::vector<std::string>& hover_names = {});
 
 // Reads only the `do: ...` line, as soon as the first newline of a streamed
 // reply arrives, so the body can start moving while the rest of the plan is

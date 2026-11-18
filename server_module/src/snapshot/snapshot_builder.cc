@@ -51,7 +51,9 @@
 #include "options/position_facts.h"
 #include "proto/snapshot.h"
 #include "snapshot/nearby_builder.h"
+#include "snapshot/panels_builder.h"
 #include "snapshot/perception.h"
+#include "snapshot/ui_state.h"
 
 namespace llm_brain {
 namespace {
@@ -663,6 +665,8 @@ NearbyBuilder::Stats SnapshotBuilder::Build(Player* bot,
                                             pb::Snapshot* snapshot,
                                             OptionFacts* facts,
                                             const WorldPlaces* world,
+                                            UiState* ui,
+                                            const ItemSpellTexts* texts,
                                             base::TimeTicks now) {
   pb::Base& base = snapshot->base;
   FillSelf(bot, &base.self);
@@ -673,6 +677,24 @@ NearbyBuilder::Stats SnapshotBuilder::Build(Player* bot,
   FillParty(bot, &nearby_, &snapshot->ext);
   FillQuestTracker(bot, &snapshot->ext, &quest_pois_);
   FillOptionFacts(bot, snapshot, facts, world, now);
+  // Open panels and the tooltip of what the bot points at (visibility OPEN and
+  // HOVER, docs/specs/snapshot.md §3).
+  const std::optional<pb::HoverRef> hover = ui->hover();
+  ui->FillAndAge(&base.ui);
+  if (ui->IsOpen(pb::BAGS)) {
+    FillBags(bot, &snapshot->ext.bags.emplace());
+  }
+  if (ui->IsOpen(pb::CHARACTER)) {
+    FillCharacter(bot, &snapshot->ext.character.emplace());
+  }
+  if (ui->IsOpen(pb::QUEST_LOG)) {
+    FillQuestLog(bot, &snapshot->ext.quest_log.emplace());
+  }
+  if (hover) {
+    if (std::optional<pb::Tooltipped> tip = BuildTooltip(bot, *hover, texts)) {
+      base.tooltips.push_back(std::move(*tip));
+    }
+  }
   return stats;
 }
 

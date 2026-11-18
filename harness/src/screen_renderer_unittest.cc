@@ -504,5 +504,60 @@ TEST(ScreenRendererTest, ExploreAndGoToModuleOptionsExtractInvariantNames) {
                                              "Sen'jin Village Graveyard"}));
 }
 
+TEST(ScreenRendererTest, OpenPanelsTooltipsAndWhatCanBePointedAt) {
+  pb::Snapshot snap;
+  snap.base.self.state = pb::Self::ALIVE;
+  snap.base.ui.open_panels = {pb::BAGS, pb::QUEST_LOG};
+  pb::Bags& bags = snap.ext.bags.emplace();
+  bags.free_slots = 13;
+  bags.total_slots = 16;
+  bags.hearthstone.emplace().ready = true;
+  bags.hearthstone->bind = "Razor Hill";
+  pb::Item& bread = bags.items.emplace_back();
+  bread.id = 4540;
+  bread.name = "Tough Hunk of Bread";
+  bread.count = 4;
+  bread.kind = pb::Item::CONSUMABLE;
+  bread.usable = true;
+  pb::Item& meat = bags.items.emplace_back();
+  meat.id = 769;
+  meat.name = "Chunk of Boar Meat";
+  meat.quality = pb::Item::POOR;
+  // The character sheet isn't open: not shown even if sent.
+  snap.ext.character.emplace().equipped.emplace_back().name = "Robe";
+  pb::QuestLog::Entry& q = snap.ext.quest_log.emplace().quests.emplace_back();
+  q.objective.emplace().quest.emplace().quest_id = 4641;
+  q.objective->quest->quest = "Your Place In The World";
+  q.objective->quest->level = 1;
+  q.description = "Speak with Gornek.";
+  q.money = 120;
+  pb::Tooltipped& tip = snap.base.tooltips.emplace_back();
+  tip.ref.emplace().name = "Tough Hunk of Bread";
+  tip.tooltip.emplace().lines = {"Tough Hunk of Bread",
+                                 "Use: Restores 61 health over 18 sec.",
+                                 "Sell Price: 1c"};
+  const Screen screen = RenderScreen(snap);
+  EXPECT_NE(screen.text.find("bags (13 of 16 free; hearthstone ready, home "
+                             "Razor Hill):\n  Tough Hunk of Bread x4 "
+                             "(consumable, usable), Chunk of Boar Meat (gray)"),
+            std::string::npos)
+      << screen.text;
+  EXPECT_NE(screen.text.find("quest log:\n  Your Place In The World (level "
+                             "1): Speak with Gornek.; money 1s 20c"),
+            std::string::npos)
+      << screen.text;
+  EXPECT_EQ(screen.text.find("Robe"), std::string::npos);
+  EXPECT_NE(screen.text.find("pointing at Tough Hunk of Bread: Use: Restores "
+                             "61 health over 18 sec.; Sell Price: 1c"),
+            std::string::npos)
+      << screen.text;
+  ASSERT_EQ(screen.hoverables.size(), 3u);
+  EXPECT_EQ(screen.hoverables[0].name, "Tough Hunk of Bread");
+  EXPECT_EQ(screen.hoverables[0].ref.kind, pb::HoverRef::ITEM);
+  EXPECT_EQ(screen.hoverables[0].ref.id, "4540");
+  EXPECT_EQ(screen.hoverables[2].name, "Your Place In The World");
+  EXPECT_EQ(screen.hoverables[2].ref.kind, pb::HoverRef::QUEST);
+}
+
 }  // namespace
 }  // namespace harness

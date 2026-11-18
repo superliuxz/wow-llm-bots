@@ -17,14 +17,13 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
   `Explore <dir>, <dist> yd (<mobs, levels>)` and `Go to <place> (<services>)` (stepped mmap
   walk), from `OptionFacts` built by the same code live and for eval fixtures
   (`docs/plans/options.md`). Live: `e2e talk` (accepts Kaltunk's quest), `e2e rest` (sits to
-  full after a fight), `e2e walk` (Explore arrives, done signal). **Left:** open panels (`bags`, `character`, `quest_log`,
-  `docs/specs/snapshot.md`).
+  full after a fight), `e2e walk` (Explore arrives, done signal). Open panels and hover built (2026-11-18).
 
 ## Next, in order
 
-1. **Module: open panels** (`#4`, `docs/plans/harness.md` M1, `docs/specs/snapshot.md`): fill
-   `ext.bags`, `ext.character`, and `ext.quest_log` when listed in `base.ui.open_panels`, and
-   support `open` / `close` commands.
+1. **Live check of panels and hover with the real brain** (`docs/plans/panels.md`): whether
+   Gemma uses `open:` / `hover:` sensibly (eval cases for the use-item quest and "food in open
+   bags", spec §10), and what the extra wakes cost (`perf brain`).
 2. **Standing orders** (`#5`, `docs/specs/triggers.md`, "The grammar (final, 2026-11-17)"). The `when`
    and `<act>` grammar is final and both audit tables parse against it
    (`tools/wlb check triggers`; `docs/specs/trigger-conditions.tsv` and `trigger-actions.tsv`).
@@ -79,13 +78,12 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
 - A bot once wrote `tell <its own name>:` (Gatda, Gemma 4, live 2026-11-17); the module refuses
   it. Likely cause, the RULES.md example `tell Gatda:`, is fixed (review finding 8); watch whether
   it recurs.
-- **Eval on live options (2026-11-17, Gemma 4):** 46/50 with facts captured by the module
-  (`add_fixture_options.py --capture`) and RULES.md stating facts, not the eval's answers. (The
-  48/50 before was on Python-made facts with "always Talk first" / "bags full: go to a vendor"
-  written into RULES.md.) Misses: `quest_giver_and_boar` and `bags_full` explore instead of
-  talking or selling (a judgment the prompt no longer dictates); `ignore_critter` and
-  `skip_tapped_mob` attack (a dead boar line next to `1. Attack`). The Qwen3.6 shootout was not
-  re-run on this set.
+- **Eval on live options (2026-11-18, Gemma 4):** 46/50, the same on three runs. RULES.md states
+  three more facts (`around me:` vs `also:`; quest kills count only after accepting; full bags
+  leave loot on the corpse and block item-reward turn-ins): `quest_giver_and_boar`,
+  `ignore_critter` and `skip_tapped_mob` now pass; `whisper_while_low_hp` (rests, no reply),
+  `red_mob_nearby` (attacks a red level-6), `hp_60_fine` (rests at 60%) now fail; `bags_full`
+  still explores. The Qwen3.6 shootout was not re-run on this set.
 - Dead bots: only Keep is offered while dead, refused steps back off (2-30 s), and coming back
   to life wakes the brain ("alive again"). Release spirit / run to corpse are not options yet
   (the body's playerbots dead strategy handles it).
@@ -119,6 +117,11 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
   fails with "never offered". Passed every run so far.
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-18: open panels (bags, character, quest log) and hover for items and quests
+  (`docs/plans/panels.md`): module fill and tooltips (item "Use:" text from Spell.dbc), `open:` /
+  `close:` / `hover:` reply lines with a wake once shown, remembered panels, three habits; RULES.md
+  reply form; `e2e panels`; unit tests (`ui_state`, `spell_text`, plan, screen, bot loop).
 
 - 2026-11-17: `e2e talk` and `e2e rest` (`config/tests/talk`); Rest fixes they found: the body
   stood a sitting bot up at once (playerbots' next AI check: `SetNextCheckDelay` while sitting

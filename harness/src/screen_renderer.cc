@@ -886,7 +886,283 @@ std::vector<std::string> QuestLines(const std::vector<pb::Objective>& tracker) {
   return lines;
 }
 
+std::string ItemWords(const pb::Item& item) {
+  std::string out = item.name;
+  if (item.count > 1) {
+    base::StrAppend(&out, {" x", base::NumberToString(item.count)});
+  }
+  std::vector<std::string> bits;
+  if (item.quality == pb::Item::POOR) {
+    bits.push_back("gray");
+  } else if (item.quality == pb::Item::RARE_QUALITY) {
+    bits.push_back("rare");
+  } else if (item.quality >= pb::Item::UNCOMMON) {
+    bits.push_back(Word(pb::EnumName(item.quality)));
+  }
+  if (item.kind != pb::Item::KIND_UNSPECIFIED && item.kind != pb::Item::OTHER &&
+      item.kind != pb::Item::JUNK) {
+    bits.push_back(Word(pb::EnumName(item.kind)));
+  }
+  if (item.usable) {
+    bits.push_back("usable");
+  }
+  if (Finite(item.cooldown_s) > 0) {
+    bits.push_back(base::StringPrintf("cooldown %.0f s", item.cooldown_s));
+  }
+  if (item.charges > 0) {
+    bits.push_back(
+        base::StrCat({base::NumberToString(item.charges), " charges"}));
+  }
+  if (item.starts_quest) {
+    bits.push_back("starts a quest");
+  }
+  if (!bits.empty()) {
+    base::StrAppend(&out, {" (", base::JoinString(bits, ", "), ")"});
+  }
+  return out;
+}
+
+std::string ItemNames(const std::vector<pb::Item>& items) {
+  std::vector<std::string> names;
+  for (const pb::Item& item : items) {
+    names.push_back(
+        item.count > 1
+            ? base::StrCat({item.name, " x", base::NumberToString(item.count)})
+            : item.name);
+  }
+  return base::JoinString(names, ", ");
+}
+
+std::string Money(uint32_t copper) {
+  std::vector<std::string> parts;
+  if (copper >= 10000) {
+    parts.push_back(base::StrCat({base::NumberToString(copper / 10000), "g"}));
+  }
+  if (copper % 10000 >= 100) {
+    parts.push_back(
+        base::StrCat({base::NumberToString(copper % 10000 / 100), "s"}));
+  }
+  if (copper % 100 != 0 || parts.empty()) {
+    parts.push_back(base::StrCat({base::NumberToString(copper % 100), "c"}));
+  }
+  return base::JoinString(parts, " ");
+}
+
+std::vector<std::string> BagsLines(const pb::Bags& bags) {
+  std::vector<std::string> head = {
+      base::StringPrintf("%u of %u free", bags.free_slots, bags.total_slots)};
+  if (bags.hearthstone) {
+    head.push_back(base::StrCat(
+        {"hearthstone ", bags.hearthstone->ready ? "ready" : "cooling down",
+         bags.hearthstone->bind.empty()
+             ? ""
+             : base::StrCat({", home ", bags.hearthstone->bind})}));
+  }
+  std::vector<std::string> items;
+  for (const pb::Item& item : bags.items) {
+    items.push_back(ItemWords(item));
+  }
+  std::vector<std::string> lines = {
+      base::StrCat({"bags (", base::JoinString(head, "; "), "):"})};
+  if (!items.empty()) {
+    lines.push_back(base::StrCat({"  ", base::JoinString(items, ", ")}));
+  }
+  return lines;
+}
+
+std::vector<std::string> CharacterLines(const pb::Character& c) {
+  std::vector<std::string> worn;
+  for (const pb::Item& item : c.equipped) {
+    std::string text = item.name;
+    if (item.equipment) {
+      text = base::StrCat(
+          {Word(pb::EnumName(item.equipment->slot)), " ", item.name});
+      if (item.equipment->durability_pct > 0 &&
+          item.equipment->durability_pct < 100) {
+        base::StrAppend(&text,
+                        {base::StringPrintf(" (durability %.0f%%)",
+                                            item.equipment->durability_pct)});
+      }
+    }
+    worn.push_back(std::move(text));
+  }
+  std::vector<std::string> stats;
+  for (const pb::StatValue& s : c.stats) {
+    const bool pct = std::string_view(pb::EnumName(s.stat)).ends_with("_PCT");
+    stats.push_back(base::StrCat({Word(pb::EnumName(s.stat)), " ",
+                                  pct ? base::StringPrintf("%.1f%%", s.value)
+                                      : base::StringPrintf("%.0f", s.value)}));
+  }
+  std::vector<std::string> lines = {"character:"};
+  if (!worn.empty()) {
+    lines.push_back(
+        base::StrCat({"  wearing: ", base::JoinString(worn, ", ")}));
+  }
+  if (!stats.empty()) {
+    lines.push_back(base::StrCat({"  stats: ", base::JoinString(stats, ", ")}));
+  }
+  return lines;
+}
+
+std::vector<std::string> QuestLogLines(const pb::QuestLog& log) {
+  std::vector<std::string> lines = {"quest log:"};
+  for (const pb::QuestLog::Entry& e : log.quests) {
+    if (!e.objective || !e.objective->quest) {
+      continue;
+    }
+    const pb::QuestPart& q = *e.objective->quest;
+    std::vector<std::string> about;
+    if (q.level) {
+      about.push_back(base::StrCat({"level ", base::NumberToString(q.level)}));
+    }
+    if (q.complete) {
+      about.push_back("complete");
+    }
+    if (q.failed) {
+      about.push_back("failed");
+    }
+    std::vector<std::string> parts;
+    if (!e.description.empty()) {
+      parts.push_back(e.description);
+    }
+    if (!q.text.empty()) {
+      parts.push_back(q.text);
+    }
+    if (!e.rewards.empty()) {
+      parts.push_back(base::StrCat({"rewards ", ItemNames(e.rewards)}));
+    }
+    if (!e.choices.empty()) {
+      parts.push_back(base::StrCat({"choose one of ", ItemNames(e.choices)}));
+    }
+    if (e.money > 0) {
+      parts.push_back(base::StrCat({"money ", Money(e.money)}));
+    }
+    std::string line = base::StrCat({"  ", q.quest});
+    if (!about.empty()) {
+      base::StrAppend(&line, {" (", base::JoinString(about, ", "), ")"});
+    }
+    if (!parts.empty()) {
+      base::StrAppend(&line, {": ", base::JoinString(parts, "; ")});
+    }
+    lines.push_back(std::move(line));
+  }
+  return lines;
+}
+
+std::string TooltipLine(const pb::Tooltipped& t) {
+  std::string name = t.ref ? t.ref->name : "";
+  std::vector<std::string> lines;
+  if (t.tooltip) {
+    lines = t.tooltip->lines;
+  }
+  if (!lines.empty() && (name.empty() || lines.front() == name)) {
+    name = lines.front();
+    lines.erase(lines.begin());
+  }
+  if (t.item && t.item->equipment && !t.compare.empty()) {
+    lines.push_back(base::StrCat(
+        {t.item->equipment->upgrade ? "an upgrade over " : "not better than ",
+         t.compare.front().name, " (worn)"}));
+  } else if (t.item && t.item->equipment && t.item->equipment->upgrade) {
+    lines.push_back("an upgrade (that slot is empty)");
+  }
+  return base::StrCat(
+      {"pointing at ", name, ": ", base::JoinString(lines, "; ")});
+}
+
+void AddHoverable(std::vector<Hoverable>* out,
+                  const std::string& name,
+                  pb::HoverRef::Kind kind,
+                  const std::string& id) {
+  if (name.empty() || id.empty() || id == "0") {
+    return;
+  }
+  for (const Hoverable& h : *out) {
+    if (h.name == name) {
+      return;
+    }
+  }
+  pb::HoverRef ref;
+  ref.kind = kind;
+  ref.id = id;
+  ref.name = name;
+  out->push_back({name, std::move(ref)});
+}
+
+std::vector<Hoverable> Hoverables(const pb::Snapshot& snapshot) {
+  std::vector<Hoverable> out;
+  const pb::Extensions& ext = snapshot.ext;
+  for (const pb::Objective& o : ext.quest_tracker) {
+    if (o.quest) {
+      AddHoverable(&out, o.quest->quest, pb::HoverRef::QUEST,
+                   base::NumberToString(o.quest->quest_id));
+    }
+  }
+  const auto items = [&out](const std::vector<pb::Item>& list) {
+    for (const pb::Item& item : list) {
+      AddHoverable(&out, item.name, pb::HoverRef::ITEM,
+                   base::NumberToString(item.id));
+    }
+  };
+  if (ext.bags) {
+    items(ext.bags->items);
+  }
+  if (ext.character) {
+    items(ext.character->equipped);
+  }
+  if (ext.quest_log) {
+    for (const pb::QuestLog::Entry& e : ext.quest_log->quests) {
+      if (e.objective && e.objective->quest) {
+        AddHoverable(&out, e.objective->quest->quest, pb::HoverRef::QUEST,
+                     base::NumberToString(e.objective->quest->quest_id));
+      }
+      items(e.rewards);
+      items(e.choices);
+    }
+  }
+  return out;
+}
+
 }  // namespace
+
+std::string_view PanelName(pb::Panel panel) {
+  switch (panel) {
+    case pb::BAGS:
+      return "bags";
+    case pb::CHARACTER:
+      return "character";
+    case pb::QUEST_LOG:
+      return "quest log";
+    default:
+      return "";
+  }
+}
+
+pb::Panel PanelFromName(std::string_view name) {
+  for (const pb::Panel panel : {pb::BAGS, pb::CHARACTER, pb::QUEST_LOG}) {
+    if (PanelName(panel) == name) {
+      return panel;
+    }
+  }
+  return pb::PANEL_UNSPECIFIED;
+}
+
+std::vector<std::string> PanelLines(const pb::Snapshot& snapshot,
+                                    pb::Panel panel) {
+  const pb::Extensions& ext = snapshot.ext;
+  switch (panel) {
+    case pb::BAGS:
+      return ext.bags ? BagsLines(*ext.bags) : std::vector<std::string>{};
+    case pb::CHARACTER:
+      return ext.character ? CharacterLines(*ext.character)
+                           : std::vector<std::string>{};
+    case pb::QUEST_LOG:
+      return ext.quest_log ? QuestLogLines(*ext.quest_log)
+                           : std::vector<std::string>{};
+    default:
+      return {};
+  }
+}
 
 std::string_view OptionKindName(OptionKind kind) {
   switch (kind) {
@@ -1027,6 +1303,17 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
   for (std::string& line : QuestLines(ext.quest_tracker)) {
     lines.push_back(std::move(line));
   }
+  // Open panels and the tooltip of what the bot points at
+  // (docs/plans/panels.md).
+  for (const pb::Panel panel : base.ui.open_panels) {
+    for (std::string& line : PanelLines(snapshot, panel)) {
+      lines.push_back(std::move(line));
+    }
+  }
+  for (const pb::Tooltipped& t : base.tooltips) {
+    lines.push_back(TooltipLine(t));
+  }
+  screen.hoverables = Hoverables(snapshot);
   if (screen.has_module_options) {
     std::vector<std::string> extra;
     for (size_t i = 0; i < snapshot.options.size(); ++i) {

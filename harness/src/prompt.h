@@ -31,6 +31,9 @@ struct PromptInput {
   // Players who recently whispered the bot, newest first: who a `tell` line
   // may answer (PlanGrammar()).
   std::vector<std::string> whisperers;
+  // Panels the bot has since closed, as it last saw them, each led by its age
+  // ("bags, seen 40 s ago:"): memory, not the screen (docs/plans/panels.md).
+  std::vector<std::string> remembered;
   int slot = -1;  // llama-server slot, or -1
   float temperature = 0.7f;
 };

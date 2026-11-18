@@ -4,6 +4,7 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "base/strings/strcat.h"
 #include "llm_client.h"
@@ -47,9 +48,19 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
       base::StrAppend(&request.user, {"\n- ", OneLine(event)});
     }
   }
+  if (!input.remembered.empty()) {
+    base::StrAppend(&request.user, {"\n\nYou remember (not on screen now):"});
+    for (const std::string& line : input.remembered) {
+      base::StrAppend(&request.user, {"\n", line});
+    }
+  }
   base::StrAppend(&request.user, {"\n\nYour screen now:\n", screen.text});
-  request.grammar =
-      PlanGrammar(static_cast<int>(screen.options.size()), input.whisperers);
+  std::vector<std::string> hover_names;
+  for (const Hoverable& h : screen.hoverables) {
+    hover_names.push_back(h.name);
+  }
+  request.grammar = PlanGrammar(static_cast<int>(screen.options.size()),
+                                input.whisperers, hover_names);
   request.slot = input.slot;
   request.temperature = input.temperature;
   return request;

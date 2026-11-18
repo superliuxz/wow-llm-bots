@@ -813,5 +813,169 @@ TEST(BotLoopTest, StaleSnapshotWhileCallInFlightDoesNotRequeueOldReasons) {
       << brain.front_request().user;
 }
 
+std::vector<pb::Command> PanelCommands(const std::vector<pb::Command>& all) {
+  std::vector<pb::Command> out;
+  for (const pb::Command& c : all) {
+    if (c.open || c.close || c.hover) {
+      out.push_back(c);
+    }
+  }
+  return out;
+}
+
+void OpenBags(pb::Snapshot* snap) {
+  snap->base.ui.open_panels.push_back(pb::BAGS);
+  pb::Bags& bags = snap->ext.bags.emplace();
+  bags.free_slots = 10;
+  bags.total_slots = 16;
+  pb::Item& bread = bags.items.emplace_back();
+  bread.id = 4540;
+  bread.name = "Tough Hunk of Bread";
+  bread.count = 4;
+  bread.kind = pb::Item::CONSUMABLE;
+}
+
+TEST(BotLoopTest, OpenWakesTheBrainOnceShownAndClosedPanelsAreRemembered) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);  // A long tick below.
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Testpriest", 1, t0);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60\nopen: bags");
+  std::vector<pb::Command> panel = PanelCommands(commands);
+  ASSERT_EQ(panel.size(), 1u);
+  ASSERT_TRUE(panel[0].open);
+  EXPECT_EQ(panel[0].open->panel, pb::BAGS);
+
+  // The next snapshot shows the bags: the brain is woken to read them.
+  pb::Snapshot s2 = MakeLiveSnap("Testpriest", 2, t0 + base::Seconds(1));
+  AddKeep(&s2);
+  OpenBags(&s2);
+  loop.OnSnapshot(s2, t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("Woken: looked at bags."),
+            std::string::npos);
+  EXPECT_NE(brain.front_request().user.find("Tough Hunk of Bread x4"),
+            std::string::npos);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60\nclose: bags");
+  panel = PanelCommands(commands);
+  ASSERT_EQ(panel.size(), 2u);
+  ASSERT_TRUE(panel[1].close);
+
+  // Closed: the next look remembers them, with their age.
+  pb::Snapshot s3 = MakeLiveSnap("Testpriest", 3, t0 + base::Seconds(2));
+  AddKeep(&s3);
+  loop.OnSnapshot(s3, t0 + base::Seconds(2));
+  loop.OnTick(t0 + base::Seconds(70));
+  ASSERT_EQ(brain.size(), 1u);
+  const std::string& user = brain.front_request().user;
+  EXPECT_NE(user.find("You remember (not on screen now):\nbags, seen "),
+            std::string::npos)
+      << user;
+  EXPECT_NE(user.find("Tough Hunk of Bread x4"), std::string::npos);
+}
+
+TEST(BotLoopTest, HoverSendsTheThingsRefAndAnUnknownNameNothing) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Testpriest", 1, t0);
+  AddKeep(&s1);
+  OpenBags(&s1);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().grammar.find("\"Tough Hunk of Bread\""),
+            std::string::npos);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\nhover: Tough Hunk of Bread");
+  std::vector<pb::Command> panel = PanelCommands(commands);
+  ASSERT_EQ(panel.size(), 1u);
+  ASSERT_TRUE(panel[0].hover && panel[0].hover->ref);
+  EXPECT_EQ(panel[0].hover->ref->kind, pb::HoverRef::ITEM);
+  EXPECT_EQ(panel[0].hover->ref->id, "4540");
+
+  // The tooltip shows: the brain is woken to read it.
+  pb::Snapshot s2 = MakeLiveSnap("Testpriest", 2, t0 + base::Seconds(1));
+  AddKeep(&s2);
+  OpenBags(&s2);
+  pb::Tooltipped& tip = s2.base.tooltips.emplace_back();
+  tip.ref = panel[0].hover->ref;
+  tip.tooltip.emplace().lines = {"Tough Hunk of Bread",
+                                 "Use: Restores 61 health over 18 sec."};
+  loop.OnSnapshot(s2, t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find(
+                "pointing at Tough Hunk of Bread: Use: Restores 61 health"),
+            std::string::npos);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\nhover: Peacebloom");
+  EXPECT_EQ(PanelCommands(commands).size(), 1u);  // Not on screen: nothing.
+}
+
+TEST(BotLoopTest, HabitsCloseInCombatAndGlanceAtTheQuestLog) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  const auto quest = [](pb::Snapshot* snap, bool complete) {
+    pb::Objective& o = snap->ext.quest_tracker.emplace_back();
+    o.title = "Kill boars";
+    pb::QuestPart& q = o.quest.emplace();
+    q.quest_id = 7;
+    q.quest = "Boar Hunt";
+    q.complete = complete;
+  };
+  pb::Snapshot s1 = MakeLiveSnap("Testpriest", 1, t0);
+  AddKeep(&s1);
+  quest(&s1, false);
+  loop.OnSnapshot(s1, t0);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+
+  // The quest is complete: a glance at the quest log, closed once seen.
+  pb::Snapshot s2 = MakeLiveSnap("Testpriest", 2, t0 + base::Seconds(1));
+  AddKeep(&s2);
+  quest(&s2, true);
+  loop.OnSnapshot(s2, t0 + base::Seconds(1));
+  std::vector<pb::Command> panel = PanelCommands(commands);
+  ASSERT_EQ(panel.size(), 1u);
+  ASSERT_TRUE(panel[0].open);
+  EXPECT_EQ(panel[0].open->panel, pb::QUEST_LOG);
+  pb::Snapshot s3 = MakeLiveSnap("Testpriest", 3, t0 + base::Seconds(2));
+  AddKeep(&s3);
+  quest(&s3, true);
+  s3.base.ui.open_panels.push_back(pb::QUEST_LOG);
+  s3.ext.quest_log.emplace();
+  loop.OnSnapshot(s3, t0 + base::Seconds(2));
+  panel = PanelCommands(commands);
+  ASSERT_EQ(panel.size(), 2u);
+  ASSERT_TRUE(panel[1].close);
+  EXPECT_EQ(panel[1].close->panel, pb::QUEST_LOG);
+  EXPECT_EQ(brain.size(), 0u);  // Habits ask the brain nothing.
+
+  // Combat starts with bags open: they are closed.
+  pb::Snapshot s4 = MakeLiveSnap("Testpriest", 4, t0 + base::Seconds(3),
+                                 /*in_combat=*/true);
+  AddKeep(&s4);
+  quest(&s4, true);
+  OpenBags(&s4);
+  loop.OnSnapshot(s4, t0 + base::Seconds(3));
+  panel = PanelCommands(commands);
+  ASSERT_EQ(panel.size(), 3u);
+  ASSERT_TRUE(panel[2].close);
+  EXPECT_EQ(panel[2].close->panel, pb::BAGS);
+}
+
 }  // namespace
 }  // namespace harness

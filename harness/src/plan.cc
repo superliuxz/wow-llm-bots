@@ -149,6 +149,31 @@ std::optional<std::string> ParseName(std::string_view text) {
   return name;
 }
 
+// A GBNF string literal of `text`.
+std::string GbnfLiteral(std::string_view text) {
+  std::string out = "\"";
+  for (char c : text) {
+    if (c == '"' || c == '\\') {
+      out.push_back('\\');
+    }
+    out.push_back(c);
+  }
+  out.push_back('"');
+  return out;
+}
+
+// "Bags", " quest log " -> the kPanelNames spelling, or nullopt.
+std::optional<std::string> ParsePanel(std::string_view text) {
+  const std::string name = base::ToLowerASCII(base::TrimWhitespaceASCII(text));
+  for (const char* panel : kPanelNames) {
+    if (name == panel ||
+        (name == "questlog" && std::string_view(panel) == "quest log")) {
+      return std::string(panel);
+    }
+  }
+  return std::nullopt;
+}
+
 std::string Cut(std::string_view text, size_t max_bytes) {
   text = Trim(text);
   if (text.size() <= max_bytes) {
@@ -165,7 +190,8 @@ std::string Cut(std::string_view text, size_t max_bytes) {
 }  // namespace
 
 std::string PlanGrammar(int option_count,
-                        const std::vector<std::string>& tell_names) {
+                        const std::vector<std::string>& tell_names,
+                        const std::vector<std::string>& hover_names) {
   // A screen always has at least "Keep doing what I'm doing"; an empty
   // alternative would be an invalid grammar (llama-server rejects it).
   option_count = std::max(option_count, 1);
@@ -190,6 +216,22 @@ std::string PlanGrammar(int option_count,
       names.push_back(base::StrCat({"\"", name, "\""}));
     }
   }
+  std::vector<std::string> panels;
+  for (const char* panel : kPanelNames) {
+    panels.push_back(GbnfLiteral(panel));
+  }
+  std::vector<std::string> hovers;
+  for (const std::string& name : hover_names) {
+    if (!name.empty() && name.size() <= static_cast<size_t>(kMaxHoverChars) &&
+        name.find_first_of("\n|") == name.npos) {
+      hovers.push_back(GbnfLiteral(name));
+    }
+  }
+  std::string hover_rule;
+  if (!hovers.empty()) {
+    hover_rule = base::StrCat(
+        {"hover ::= \"\\nhover: \" (", base::JoinString(hovers, " | "), ")\n"});
+  }
   std::string tell_rule;
   if (!names.empty()) {
     tell_rule = base::StrCat(
@@ -198,9 +240,16 @@ std::string PlanGrammar(int option_count,
   }
   return base::StrCat({
       "root ::= \"do: \" steps \"\\nexpect: \" (\"none\" | ids) \"\\nwatch: \" "
-      "watches \"\\nlook: \" looknum goal? say?",
+      "watches \"\\nlook: \" looknum open? close?",
+      hovers.empty() ? "" : " hover?",
+      " goal? say?",
       names.empty() ? "" : " tell?",
       "\n"
+      "panel ::= ",
+      base::JoinString(panels, " | "),
+      "\n"
+      "open ::= \"\\nopen: \" panel (\", \" panel){0,2}\n"
+      "close ::= \"\\nclose: \" panel (\", \" panel){0,2}\n"
       "ids ::= opt (\", \" opt){0,",
       base::NumberToString(kMaxExpected - 1),
       "}\n"
@@ -231,6 +280,7 @@ std::string PlanGrammar(int option_count,
       base::NumberToString(kMaxSayChars),
       "}\n",
       tell_rule,
+      hover_rule,
   });
 }
 
@@ -280,6 +330,24 @@ std::optional<Plan> ParsePlan(std::string_view text, int option_count) {
           plan.tell_to = std::move(*name);
           plan.tell = std::move(text);
         }
+      }
+    } else if (key == "open" || key == "close") {
+      std::vector<std::string>& panels = key == "open" ? plan.open : plan.close;
+      if (base::ToLowerASCII(Trim(raw)) == "none") {
+        continue;
+      }
+      for (std::string_view token : base::SplitStringPiece(
+               raw, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
+        // A name that isn't a panel is dropped; the rest of the plan stands.
+        if (std::optional<std::string> panel = ParsePanel(token);
+            panel &&
+            std::find(panels.begin(), panels.end(), *panel) == panels.end()) {
+          panels.push_back(std::move(*panel));
+        }
+      }
+    } else if (key == "hover") {
+      if (base::ToLowerASCII(Trim(raw)) != "none") {
+        plan.hover = Cut(raw, kMaxHoverChars);
       }
     } else if (key == "do") {
       auto steps = ParseList<PlanStep>(
@@ -396,6 +464,15 @@ std::string FormatPlan(const Plan& plan) {
       "\nlook: ",
       base::NumberToString(plan.look_s),
   });
+  if (!plan.open.empty()) {
+    base::StrAppend(&out, {"\nopen: ", base::JoinString(plan.open, ", ")});
+  }
+  if (!plan.close.empty()) {
+    base::StrAppend(&out, {"\nclose: ", base::JoinString(plan.close, ", ")});
+  }
+  if (!plan.hover.empty()) {
+    base::StrAppend(&out, {"\nhover: ", plan.hover});
+  }
   if (!plan.goal.empty()) {
     base::StrAppend(&out, {"\ngoal: ", plan.goal});
   }

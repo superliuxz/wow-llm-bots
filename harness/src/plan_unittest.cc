@@ -213,25 +213,29 @@ TEST(PlanTest, TellNamesAreTheWhisperers) {
 }
 
 TEST(PlanTest, TheGrammarOnlyAllowsTheBotsOwnOptions) {
-  EXPECT_EQ(PlanGrammar(3),
-            "root ::= \"do: \" steps \"\\nexpect: \" (\"none\" | ids) "
-            "\"\\nwatch: \" watches \"\\nlook: \" looknum goal? say?\n"
-            "ids ::= opt (\", \" opt){0,4}\n"
-            "steps ::= step (\", \" step){0,4}\n"
-            "step ::= opt (\"x\" cnt)?\n"
-            "cnt ::= \"2\" | \"3\" | \"4\" | \"5\" | \"6\" | \"7\" | \"8\" | "
-            "\"9\" | \"10\" | \"11\" | \"12\" | \"13\" | \"14\" | \"15\" | "
-            "\"16\" | \"17\" | \"18\" | \"19\" | \"20\" | \"21\" | \"22\" | "
-            "\"23\" | \"24\" | \"25\" | \"26\" | \"27\" | \"28\" | \"29\"\n"
-            "opt ::= \"1\" | \"2\" | \"3\"\n"
-            "watches ::= \"none\" | watch (\", \" watch){0,3}\n"
-            "watch ::= \"hp<\" pct | \"mana<\" pct | \"enemy_player<\" num | "
-            "\"attacked\" | \"whisper\"\n"
-            "pct ::= [1-9] [0-9]?\n"
-            "num ::= [1-9] [0-9]{0,2}\n"
-            "looknum ::= [1-9] [0-9] [0-9]?\n"
-            "goal ::= \"\\ngoal: \" [^\\n]{1,60}\n"
-            "say ::= \"\\nsay: \" [^\\n|]{1,80}\n");
+  EXPECT_EQ(
+      PlanGrammar(3),
+      "root ::= \"do: \" steps \"\\nexpect: \" (\"none\" | ids) "
+      "\"\\nwatch: \" watches \"\\nlook: \" looknum open? close? goal? say?\n"
+      "panel ::= \"bags\" | \"character\" | \"quest log\"\n"
+      "open ::= \"\\nopen: \" panel (\", \" panel){0,2}\n"
+      "close ::= \"\\nclose: \" panel (\", \" panel){0,2}\n"
+      "ids ::= opt (\", \" opt){0,4}\n"
+      "steps ::= step (\", \" step){0,4}\n"
+      "step ::= opt (\"x\" cnt)?\n"
+      "cnt ::= \"2\" | \"3\" | \"4\" | \"5\" | \"6\" | \"7\" | \"8\" | "
+      "\"9\" | \"10\" | \"11\" | \"12\" | \"13\" | \"14\" | \"15\" | "
+      "\"16\" | \"17\" | \"18\" | \"19\" | \"20\" | \"21\" | \"22\" | "
+      "\"23\" | \"24\" | \"25\" | \"26\" | \"27\" | \"28\" | \"29\"\n"
+      "opt ::= \"1\" | \"2\" | \"3\"\n"
+      "watches ::= \"none\" | watch (\", \" watch){0,3}\n"
+      "watch ::= \"hp<\" pct | \"mana<\" pct | \"enemy_player<\" num | "
+      "\"attacked\" | \"whisper\"\n"
+      "pct ::= [1-9] [0-9]?\n"
+      "num ::= [1-9] [0-9]{0,2}\n"
+      "looknum ::= [1-9] [0-9] [0-9]?\n"
+      "goal ::= \"\\ngoal: \" [^\\n]{1,60}\n"
+      "say ::= \"\\nsay: \" [^\\n|]{1,80}\n");
   EXPECT_NE(PlanGrammar(12).find("opt ::= \"1\" | \"2\" | \"3\" | \"4\" | "
                                  "\"5\" | \"6\" | \"7\" | \"8\" | \"9\" | "
                                  "\"10\" | \"11\" | \"12\"\n"),
@@ -263,6 +267,30 @@ TEST(PlanTest, ATellNameIsCapitalizedAndABadOneIsDropped) {
     EXPECT_TRUE(plan->tell.empty()) << bad;
     EXPECT_TRUE(plan->tell_to.empty()) << bad;
   }
+}
+
+TEST(PlanTest, OpenCloseAndHoverLines) {
+  const std::optional<Plan> plan = ParsePlan(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\nopen: Bags, quest log, "
+      "talents\nclose: character\nhover: Tough Hunk of Bread",
+      1);
+  ASSERT_TRUE(plan);
+  // A name that isn't a panel is dropped; the rest of the plan stands.
+  EXPECT_EQ(plan->open, (std::vector<std::string>{"bags", "quest log"}));
+  EXPECT_EQ(plan->close, (std::vector<std::string>{"character"}));
+  EXPECT_EQ(plan->hover, "Tough Hunk of Bread");
+  EXPECT_EQ(ParsePlan(FormatPlan(*plan), 1), plan);
+}
+
+TEST(PlanTest, TheGrammarOffersHoverOnlyForNamesOnScreen) {
+  EXPECT_EQ(PlanGrammar(1).find("hover"), std::string::npos);
+  const std::string grammar =
+      PlanGrammar(1, {}, {"Tough Hunk of Bread", "Say \"hi\"", "bad\nname"});
+  EXPECT_NE(grammar.find(" hover? goal?"), std::string::npos);
+  EXPECT_NE(grammar.find("hover ::= \"\\nhover: \" (\"Tough Hunk of Bread\" | "
+                         "\"Say \\\"hi\\\"\")\n"),
+            std::string::npos)
+      << grammar;
 }
 
 }  // namespace

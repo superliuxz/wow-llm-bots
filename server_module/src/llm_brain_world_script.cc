@@ -36,9 +36,11 @@
 #include "options/options.h"
 #include "proto/snapshot.h"
 #include "snapshot/nearby_builder.h"
+#include "snapshot/panels_builder.h"
 #include "snapshot/snapshot_builder.h"
 #include "snapshot/snapshot_schedule.h"
 #include "snapshot/snapshot_stats.h"
+#include "snapshot/ui_state.h"
 
 #if defined(LLM_BRAIN_TEST_HOOKS)
 #include "test/facts_dump.h"
@@ -181,6 +183,10 @@ class LlmBrainWorldScript : public WorldScript {
     inbox_->SetBots(config_.bots);
     // Before any bot logs in: a zone lookup per creature spawn takes seconds,
     // which must never happen on a snapshot.
+    item_spell_texts_ = ItemSpellTexts::Load();
+    LOG_INFO("module",
+             "mod-llm-brain: {} item spell descriptions from Spell.dbc",
+             item_spell_texts_ ? item_spell_texts_->size() : 0);
     const base::TimeTicks places_start = base::TimeTicks::Now();
     world_places_ = WorldPlaces::Build();
     LOG_INFO(
@@ -372,6 +378,7 @@ class LlmBrainWorldScript : public WorldScript {
         bots_[i].object_used = false;
         bots_[i].had_food_drink_aura = false;
         bots_[i].walk = PendingWalk{};
+        bots_[i].ui.Reset();
         schedule_->SetActiveTargetPending(i, false);
       }
     }
@@ -430,7 +437,8 @@ class LlmBrainWorldScript : public WorldScript {
       return;
     }
     const std::string& name = command.bot;
-    if (!command.choose && !command.say) {
+    if (!command.choose && !command.say && !command.open && !command.close &&
+        !command.hover) {
       LOG_INFO("module", "mod-llm-brain: {}: command not supported yet", name);
       return;
     }
@@ -443,6 +451,10 @@ class LlmBrainWorldScript : public WorldScript {
     }
     if (command.say) {
       OnSay(bot_index, name, bot, command.command_id, *command.say);
+      return;
+    }
+    if (command.open || command.close || command.hover) {
+      OnUiCommand(bot_index, name, command);
       return;
     }
     BotState& state = bots_[bot_index];
@@ -535,6 +547,30 @@ class LlmBrainWorldScript : public WorldScript {
       failed.text = error;
       SendImmediateEvent(bot_index, name, std::move(payload));
     }
+  }
+
+  // open / close / hover (docs/plans/panels.md): the next snapshot shows the
+  // panel or tooltip. A refusal comes back as a non-step error event.
+  void OnUiCommand(size_t bot_index,
+                   const std::string& name,
+                   const wlb::snapshot::Command& command) {
+    UiState& ui = bots_[bot_index].ui;
+    std::string error;
+    if (command.open) {
+      error = ui.Open(command.open->panel);
+    } else if (command.close) {
+      ui.Close(command.close->panel);
+    } else if (command.hover) {
+      error = command.hover->ref ? ui.Hover(*command.hover->ref)
+                                 : "nothing to point at";
+    }
+    if (error.empty()) {
+      return;
+    }
+    LOG_INFO("module", "mod-llm-brain: {}: {}", name, error);
+    wlb::snapshot::Event payload;
+    payload.error.emplace().text = std::move(error);
+    SendImmediateEvent(bot_index, name, std::move(payload));
   }
 
   // Advances an active multi-tick option:
@@ -690,8 +726,9 @@ class LlmBrainWorldScript : public WorldScript {
     snapshot.monotonic_us = (start - base::TimeTicks()).InMicroseconds();
     snapshot.done_command_id = state.done_command_id;
     OptionFacts facts;
-    const NearbyBuilder::Stats nearby = state.builder->Build(
-        bot, &snapshot, &facts, world_places_.get(), start);
+    const NearbyBuilder::Stats nearby =
+        state.builder->Build(bot, &snapshot, &facts, world_places_.get(),
+                             &state.ui, item_spell_texts_.get(), start);
     state.history.Add(snapshot.seq, start, AddOptions(&snapshot, facts));
     std::string bytes = wlb::snapshot::WriteBeve(message);
     stats_.Add({base::TimeTicks::Now() - start, bytes.size(), nearby.units,
@@ -705,6 +742,8 @@ class LlmBrainWorldScript : public WorldScript {
 #if defined(LLM_BRAIN_TEST_HOOKS)
   std::unique_ptr<FixtureLoader> fixture_loader_;
 #endif
+  // The client's text of item spells (tooltips), read from Spell.dbc.
+  std::unique_ptr<ItemSpellTexts> item_spell_texts_;
   // Grind spots and service hubs, indexed at startup (Explore / Go to).
   std::unique_ptr<WorldPlaces> world_places_;
   std::unique_ptr<BotManager> bot_manager_;
@@ -727,6 +766,8 @@ class LlmBrainWorldScript : public WorldScript {
     bool object_used = false;
     // Rest: whether a food or drink aura was observed while resting.
     bool had_food_drink_aura = false;
+    // What the bot has open and points at (open / close / hover).
+    UiState ui;
     // Rest: when ContinueRest may next try the other of eat / drink.
     base::TimeTicks next_rest_try;
     // Explore / GoTo: active stepped mmap walk state.

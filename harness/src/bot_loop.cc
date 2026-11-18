@@ -17,6 +17,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/strcat.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
@@ -192,6 +193,7 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   state.latest_screen = std::move(screen);
   state.latest_received_at = received_at;
 
+  const bool look_woke = OnLookSnapshot(bot, &state, received_at);
   if (!state.has_ever_woken) {
     state.has_ever_woken = true;
     WakeBot(bot, trig ? trig->urgency : Urgency::kNormal,
@@ -204,7 +206,7 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
     WakeBot(bot, trig->urgency, trig->reason);
     return;
   }
-  if (state.call_in_flight || state.has_queued_wake) {
+  if (look_woke || state.call_in_flight || state.has_queued_wake) {
     return;
   }
   const RunnerAction action = state.runner.OnSnapshot(
@@ -401,6 +403,7 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
       input.whisperers.push_back(w.name);
     }
   }
+  input.remembered = RememberedPanels(state, asked_at_for_whisperers);
   input.slot = slot;
   input.temperature = config_.temperature;
 
@@ -593,6 +596,29 @@ void BotLoop::OnReply(const std::string& bot,
         if (!plan->tell.empty()) {
           SendSay(bot, pb::WHISPER, plan->tell_to, plan->tell);
         }
+        for (const std::string& name : plan->close) {
+          SendPanel(bot, PanelFromName(name), /*open=*/false);
+        }
+        BotState::PendingLook look;
+        for (const std::string& name : plan->open) {
+          const pb::Panel panel = PanelFromName(name);
+          SendPanel(bot, panel, /*open=*/true);
+          look.panels.push_back(panel);
+          std::erase(state.glancing, panel);  // The brain keeps it open.
+        }
+        if (!plan->hover.empty()) {
+          for (const Hoverable& h : ask_screen.hoverables) {
+            if (h.name == plan->hover) {
+              SendHover(bot, h.ref);
+              look.hover = h.name;
+              break;
+            }
+          }
+        }
+        if (!look.panels.empty() || !look.hover.empty()) {
+          look.until = now + config_.look_wait;
+          state.pending_look = std::move(look);
+        }
         if (!state.early_steps_dispatched) {
           const RunnerAction action =
               state.runner.Start(plan->steps, ask_seq, ask_screen, now);
@@ -632,6 +658,155 @@ uint32_t BotLoop::SendChoose(const std::string& bot,
     send_command_.Run(cmd);
   }
   return id;
+}
+
+bool BotLoop::OnLookSnapshot(const std::string& bot,
+                             BotState* state,
+                             base::TimeTicks received_at) {
+  const pb::Snapshot& snap = *state->latest_snapshot;
+  const pb::Ui& ui = snap.base.ui;
+  const auto is_open = [&ui](pb::Panel panel) {
+    return std::find(ui.open_panels.begin(), ui.open_panels.end(), panel) !=
+           ui.open_panels.end();
+  };
+  for (const pb::Panel panel : ui.open_panels) {
+    if (std::vector<std::string> lines = PanelLines(snap, panel);
+        !lines.empty()) {
+      state->seen_panels[panel] = {std::move(lines), received_at};
+    }
+  }
+
+  // Habits: no brain call.
+  const BotLoopConfig::Habits& habits = config_.habits;
+  const bool in_combat = snap.base.self.in_combat;
+  if (habits.close_panels_in_combat && in_combat && !state->was_in_combat) {
+    for (const pb::Panel panel : ui.open_panels) {
+      SendPanel(bot, panel, /*open=*/false);
+    }
+    state->glancing.clear();
+  }
+  state->was_in_combat = in_combat;
+  std::erase_if(state->glancing, [&](pb::Panel panel) {
+    if (!is_open(panel)) {
+      return false;
+    }
+    SendPanel(bot, panel, /*open=*/false);  // Seen (and remembered).
+    return true;
+  });
+  const auto glance = [&](pb::Panel panel) {
+    if (!in_combat && !is_open(panel) &&
+        std::find(state->glancing.begin(), state->glancing.end(), panel) ==
+            state->glancing.end()) {
+      SendPanel(bot, panel, /*open=*/true);
+      state->glancing.push_back(panel);
+    }
+  };
+  if (const std::optional<uint32_t> bag_free =
+          snap.base.self.indicators.bag_free_slots) {
+    const uint32_t free = *bag_free;
+    if (habits.open_bags_when_full && free == 0 &&
+        state->last_bag_free_slots != 0) {
+      glance(pb::BAGS);
+    }
+    state->last_bag_free_slots = free;
+  }
+  std::string quest_state;
+  for (const pb::Objective& o : snap.ext.quest_tracker) {
+    if (o.quest) {
+      base::StrAppend(&quest_state, {base::NumberToString(o.quest->quest_id),
+                                     o.quest->complete ? "c" : "", ";"});
+    }
+  }
+  if (habits.glance_at_quest_log && quest_state != state->last_quest_state &&
+      !state->last_quest_state.empty()) {
+    glance(pb::QUEST_LOG);
+  }
+  state->last_quest_state = std::move(quest_state);
+
+  // The look the brain asked for.
+  if (!state->pending_look) {
+    return false;
+  }
+  const BotState::PendingLook& look = *state->pending_look;
+  bool shown = std::all_of(look.panels.begin(), look.panels.end(), is_open);
+  if (!look.hover.empty()) {
+    shown = shown &&
+            std::any_of(snap.base.tooltips.begin(), snap.base.tooltips.end(),
+                        [&](const pb::Tooltipped& t) {
+                          return t.ref && t.ref->name == look.hover;
+                        });
+  }
+  if (!shown) {
+    if (received_at >= look.until) {
+      state->pending_look.reset();
+    }
+    return false;
+  }
+  std::vector<std::string> what;
+  for (const pb::Panel panel : look.panels) {
+    what.emplace_back(PanelName(panel));
+  }
+  if (!look.hover.empty()) {
+    what.push_back(look.hover);
+  }
+  state->pending_look.reset();
+  if (state->call_in_flight || state->has_queued_wake) {
+    return false;  // A newer call sees it anyway.
+  }
+  state->look_deadline = base::TimeTicks();
+  WakeBot(bot, Urgency::kNormal,
+          base::StrCat({"looked at ", base::JoinString(what, ", ")}));
+  return true;
+}
+
+// static
+std::vector<std::string> BotLoop::RememberedPanels(const BotState& state,
+                                                   base::TimeTicks now) {
+  std::vector<std::string> out;
+  const pb::Ui& ui = state.latest_snapshot->base.ui;
+  for (const auto& [panel, seen] : state.seen_panels) {
+    if (std::find(ui.open_panels.begin(), ui.open_panels.end(), panel) !=
+            ui.open_panels.end() ||
+        seen.lines.empty()) {
+      continue;  // On screen now.
+    }
+    std::vector<std::string> lines = seen.lines;
+    lines.front() = base::StringPrintf(
+        "%s, seen %.0f s ago: %s", std::string(PanelName(panel)).c_str(),
+        (now - seen.seen_at).InSecondsF(),
+        std::string(base::TrimWhitespaceASCII(lines.front())).c_str());
+    out.insert(out.end(), lines.begin(), lines.end());
+  }
+  return out;
+}
+
+void BotLoop::SendPanel(const std::string& bot, pb::Panel panel, bool open) {
+  if (panel == pb::PANEL_UNSPECIFIED) {
+    return;
+  }
+  pb::Command cmd;
+  cmd.bot = bot;
+  cmd.command_id = ++next_command_id_;
+  if (open) {
+    cmd.open.emplace().panel = panel;
+  } else {
+    cmd.close.emplace().panel = panel;
+  }
+  ++commands_sent_;
+  if (send_command_) {
+    send_command_.Run(cmd);
+  }
+}
+
+void BotLoop::SendHover(const std::string& bot, const pb::HoverRef& ref) {
+  pb::Command cmd;
+  cmd.bot = bot;
+  cmd.command_id = ++next_command_id_;
+  cmd.hover.emplace().ref = ref;
+  ++commands_sent_;
+  if (send_command_) {
+    send_command_.Run(cmd);
+  }
 }
 
 void BotLoop::SendSay(const std::string& bot,

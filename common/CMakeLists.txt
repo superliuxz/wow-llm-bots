@@ -114,6 +114,10 @@ add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/snapshot/snapshot_schedule_unittest.cc"
   "${WLB_MODULE_SRC}/snapshot/snapshot_stats.cc"
   "${WLB_MODULE_SRC}/snapshot/snapshot_stats_unittest.cc"
+  "${WLB_MODULE_SRC}/snapshot/spell_text.cc"
+  "${WLB_MODULE_SRC}/snapshot/spell_text_unittest.cc"
+  "${WLB_MODULE_SRC}/snapshot/ui_state.cc"
+  "${WLB_MODULE_SRC}/snapshot/ui_state_unittest.cc"
   "${WLB_MODULE_SRC}/test/test_accounts.cc"
   "${WLB_MODULE_SRC}/test/test_accounts_unittest.cc"
   "${WLB_PROTO_ROOT}/proto/snapshot_unittest.cc")

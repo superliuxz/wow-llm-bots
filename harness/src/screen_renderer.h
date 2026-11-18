@@ -55,6 +55,15 @@ struct ScreenOption {
   bool operator==(const ScreenOption&) const = default;
 };
 
+// Something on screen a `hover:` line may name: an item in an open panel or a
+// quest in the tracker or log (docs/plans/panels.md).
+struct Hoverable {
+  std::string name;
+  wlb::snapshot::HoverRef ref;
+
+  bool operator==(const Hoverable&) const = default;
+};
+
 struct Screen {
   std::string text;
   // options[i] is what option number i + 1 does.
@@ -64,7 +73,20 @@ struct Screen {
   // True when option numbers came from `snapshot.options` (safe to send
   // Command.Choose); false when derived locally from an offline snapshot.
   bool has_module_options = false;
+  // What can be pointed at, one per name (first one wins).
+  std::vector<Hoverable> hoverables;
 };
+
+// The lines of one open panel (bags, character, quest log), as on the screen
+// ("bags (3 of 16 free): ..."); empty if the snapshot doesn't carry it. Also
+// what the harness remembers once the panel is closed.
+std::vector<std::string> PanelLines(const wlb::snapshot::Snapshot& snapshot,
+                                    wlb::snapshot::Panel panel);
+
+// The name a reply uses for `panel` ("bags", "quest log"; plan.h kPanelNames),
+// and back; PANEL_UNSPECIFIED for an unknown name.
+std::string_view PanelName(wlb::snapshot::Panel panel);
+wlb::snapshot::Panel PanelFromName(std::string_view name);
 
 Screen RenderScreen(const wlb::snapshot::Snapshot& snapshot);
 

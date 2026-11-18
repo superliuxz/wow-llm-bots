@@ -15,8 +15,13 @@
 #include "options/position_facts.h"
 #include "proto/snapshot.h"
 #include "snapshot/nearby_builder.h"
+#include "snapshot/ui_state.h"
 
 class Player;
+
+namespace llm_brain {
+class ItemSpellTexts;
+}  // namespace llm_brain
 
 namespace llm_brain {
 
@@ -42,11 +47,14 @@ class SnapshotBuilder {
 
   // Fills `snapshot` and (when non-null) `facts`; the caller sets bot, seq and
   // time_ms. Without `world` (the module disabled) there are no Explore spots
-  // or Go to places.
+  // or Go to places. `ui` (what the bot has open and points at,
+  // docs/plans/panels.md) is aged by one snapshot; `texts` may be null.
   NearbyBuilder::Stats Build(Player* bot,
                              wlb::snapshot::Snapshot* snapshot,
                              OptionFacts* facts,
                              const WorldPlaces* world,
+                             UiState* ui,
+                             const ItemSpellTexts* texts,
                              base::TimeTicks now);
 
  private:
