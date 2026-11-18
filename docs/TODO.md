@@ -138,7 +138,9 @@ design decisions below.
 
 - 2026-11-18: review of f40b0b6, all 18 findings (`docs/reviews/2026-11-18-f40b0b6.md`, "Status"),
   plus the parts of review c80e791 left open (canned replies, say/yell checks, perf's parser copy);
-  all 7 e2e cases pass on the test server. Not yet re-measured: eval (now out of 44 scored cases).
+  all 7 e2e cases pass on the test server; eval 39/44 scored cases (a random option scores 21;
+  7 unfailable cases left out), failing: ignore_critter, red_mob_nearby, hp_60_fine, bags_full,
+  new_loot_hover.
 - 2026-11-18: isolated test stack (`docs/plans/phase2.md`, E): e2e and perf run on their own
   test server (`out/server-test`, port 8086, `acore_test_*` databases reset from golden copies)
   while the play server keeps running; perf beside a busy play server warns instead of failing.
