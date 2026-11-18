@@ -17,6 +17,7 @@
 #include "base/time/time.h"
 #include "decision_log.h"
 #include "file_util.h"
+#include "gbnf_check.h"
 #include "gtest/gtest.h"
 #include "llm_client.h"
 #include "proto/snapshot.h"
@@ -476,8 +477,17 @@ TEST(BotLoopTest, AWhisperWakesTheBotAndItsTellWhispersBack) {
   EXPECT_NE(brain.front_request().user.find("want to group?"),
             std::string::npos);
   // The grammar lets it answer Gatda, and only Gatda.
-  EXPECT_NE(brain.front_request().grammar.find("(\"Gatda\")"),
-            std::string::npos);
+  const std::string& grammar = brain.front_request().grammar;
+  EXPECT_TRUE(
+      GbnfAccepts(
+          grammar, "root",
+          "do: 1\nexpect: none\nwatch: none\nlook: 60\ntell Gatda: sure")
+          .accepted);
+  EXPECT_FALSE(
+      GbnfAccepts(
+          grammar, "root",
+          "do: 1\nexpect: none\nwatch: none\nlook: 60\ntell Kelra: sure")
+          .accepted);
 
   commands.clear();
   brain.FinishReply(

@@ -12,6 +12,7 @@
 
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 
@@ -214,7 +215,7 @@ const Rule* FindRule(const std::vector<const Rule*>& rules,
 }
 
 const std::vector<std::string>* FindEnv(const Env& env, std::string_view name) {
-  for (const auto& [key, names] : env) {
+  for (const auto& [key, names] : env.names) {
     if (key == name) {
       return &names;
     }
@@ -222,13 +223,14 @@ const std::vector<std::string>* FindEnv(const Env& env, std::string_view name) {
   return nullptr;
 }
 
-std::vector<std::string> UsableNames(const std::vector<std::string>* names) {
+std::vector<std::string> UsableNames(const std::vector<std::string>* names,
+                                     ValidFn valid) {
   std::vector<std::string> out;
   if (names == nullptr) {
     return out;
   }
   for (const std::string& name : *names) {
-    if (IsName(name) && name.size() <= 60) {
+    if (valid != nullptr ? valid(name) : IsName(name) && name.size() <= 60) {
       out.push_back(name);
     }
   }
@@ -253,11 +255,17 @@ class Emitter {
       if (!rule->raw.empty()) {
         live = true;
       } else if (!rule->env.empty()) {
-        live = !UsableNames(FindEnv(env_, rule->env)).empty();
+        live = !UsableNames(FindEnv(env_, rule->env), rule->valid).empty();
+      } else if (!rule->count.empty()) {
+        live = CountOf(env_, rule->count) >= rule->count_from;
       } else {
         for (const Seq& alt : rule->alts) {
           live = live || SeqLive(alt);
         }
+      }
+      if (!rule->needs.empty() &&
+          UsableNames(FindEnv(env_, rule->needs), nullptr).empty()) {
+        live = false;
       }
     }
     for (auto& [r, l] : memo_) {
@@ -305,6 +313,12 @@ class Emitter {
             break;  // min == 0, else the sequence wasn't live.
           }
           Use(node.rule);
+          if (node.text.empty()) {  // Repeated, no separator: `x{min,max}`.
+            parts.push_back(base::StrCat(
+                {std::string(node.rule), "{", base::NumberToString(node.min),
+                 ",", base::NumberToString(node.max), "}"}));
+            break;
+          }
           std::string list =
               base::StrCat({std::string(node.rule), " (",
                             GbnfLiteral(node.text), " ", std::string(node.rule),
@@ -340,8 +354,15 @@ class Emitter {
         body = std::string(rule->raw);
       } else if (!rule->env.empty()) {
         std::vector<std::string> alts;
-        for (const std::string& name : UsableNames(FindEnv(env_, rule->env))) {
+        for (const std::string& name :
+             UsableNames(FindEnv(env_, rule->env), rule->valid)) {
           alts.push_back(GbnfLiteral(name));
+        }
+        body = base::JoinString(alts, " | ");
+      } else if (!rule->count.empty()) {
+        std::vector<std::string> alts;
+        for (int n = rule->count_from; n <= CountOf(env_, rule->count); ++n) {
+          alts.push_back(GbnfLiteral(base::NumberToString(n)));
         }
         body = base::JoinString(alts, " | ");
       } else {
@@ -379,6 +400,15 @@ std::string EmitGbnf(const std::vector<const Rule*>& rules,
                      std::string_view root,
                      const Env& env) {
   return Emitter(rules, env).Emit(root);
+}
+
+int CountOf(const Env& env, std::string_view name) {
+  for (const auto& [key, count] : env.counts) {
+    if (key == name) {
+      return count;
+    }
+  }
+  return 0;
 }
 
 std::string GbnfLiteral(std::string_view text) {
@@ -463,6 +493,58 @@ std::string FormatNum(double value) {
     return base::NumberToString(static_cast<long long>(value));
   }
   return base::StringPrintf("%g", value);
+}
+
+std::string_view Trim(std::string_view s) {
+  return base::TrimWhitespaceASCII(s, base::TRIM_ALL);
+}
+
+std::string Cut(std::string_view s, size_t max_bytes) {
+  s = Trim(s);
+  if (s.size() <= max_bytes) {
+    return std::string(s);
+  }
+  size_t end = max_bytes;
+  // Back up over continuation bytes (10xxxxxx) to a character's first byte.
+  while (end > 0 && (static_cast<unsigned char>(s[end]) & 0xC0) == 0x80) {
+    --end;
+  }
+  return std::string(Trim(s.substr(0, end)));
+}
+
+std::vector<std::string_view> SplitLines(std::string_view text) {
+  return base::SplitStringPiece(text, "\n", base::KEEP_WHITESPACE,
+                                base::SPLIT_WANT_ALL);
+}
+
+bool SplitLine(std::string_view line,
+               std::string_view* key,
+               std::string_view* value) {
+  const size_t colon = line.find(':');
+  if (colon == line.npos) {
+    return false;
+  }
+  *key = Trim(line.substr(0, colon));
+  *value = Trim(line.substr(colon + 1));
+  return true;
+}
+
+bool KeyWithField(std::string_view key,
+                  std::string_view word,
+                  std::string_view* field) {
+  if (key.size() <= word.size() + 1 ||
+      !EqualsIgnoreCase(key.substr(0, word.size()), word) ||
+      key[word.size()] != ' ') {
+    return false;
+  }
+  *field = Trim(key.substr(word.size() + 1));
+  return !field->empty();
+}
+
+std::vector<std::string_view> SplitItems(std::string_view value,
+                                         std::string_view separator) {
+  return base::SplitStringPieceUsingSubstr(
+      value, separator, base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 }
 
 bool EqualsIgnoreCase(std::string_view a, std::string_view b) {

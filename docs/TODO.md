@@ -14,14 +14,15 @@ design decisions below.
 
 ## Next, in order
 
-0. **Grammar IDL** (`docs/plans/grammar-idl.md`, "Progress"): **step 1 done** (random round
-   trips; the generator tested on a grammar with one of each construct): `harness/grammar/orders.wlb` generates the
-   order types, parser, printer and GBNF (`tools/grammar/wlb_gen.py`, runtime
-   `harness/grammar/wlb_runtime`), the hand-written order code is gone, every audit row
-   round-trips and is accepted by llama.cpp's grammar code (`harness/src/gbnf_check`). **Next:**
-   step 2, `plan.wlb` (the `lines` construct, `env` counts, the three hooks, the first-line
-   parser; the parser taking the call's names, which fixes the known `use <name> on` ambiguity); then 3 (RULES.md generated) and 4. The standing-order
-   evaluator waits for it and is written against the generated types.
+0. **Grammar IDL** (`docs/plans/grammar-idl.md`, "Progress"): **steps 1 and 2 done**:
+   `harness/grammar/orders.wlb` and `plan.wlb` generate the order and plan types, parsers,
+   printers and GBNF (`tools/grammar/wlb_gen.py`, runtime `harness/grammar/wlb_runtime`, plan
+   hooks `harness/grammar/plan_hooks`); the hand-written order and plan code is gone; audit rows
+   and random values round-trip and are accepted by llama.cpp's grammar code
+   (`harness/src/gbnf_check`). **Next:** step 3 (RULES.md's reply form generated from
+   `plan.wlb`'s descriptions; the parser taking the call's names, which fixes the known
+   `use <name> on` ambiguity), then 4. The standing-order evaluator waits for it and is written
+   against the generated types.
 1. **Standing orders** (`#5`; spec and decisions: `docs/specs/triggers.md`, "The grammar (final,
    2026-11-17)" and "Decided (2026-11-18)": `when` evaluated in the harness, acts carried out in
    the module; relative places now, room landmarks later; acts through the client's own
@@ -135,6 +136,9 @@ design decisions below.
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-18: grammar IDL step 2: `plan.wlb` generates the plan code (`docs/plans/grammar-idl.md`,
+  "Progress"). Parity: eval 47/53 (same as before), `perf brain` PASS with every call valid
+  (capacity 8.5/s vs baseline 8.9; replay p95 1.3 s vs 0.8 s, on the llama-server already noted as slow).
 - 2026-11-18: review of 3a28d9d / fa50c95: `LootCorpseNow` says "Inventory is full" only when
   there is no room ("You can't carry <item>" for the server's other refusals; items being rolled
   for or held for the master looter stay and the step is done); RULES.md without the eval-shaped

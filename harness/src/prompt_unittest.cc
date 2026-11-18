@@ -4,6 +4,7 @@
 
 #include <string>
 
+#include "gbnf_check.h"
 #include "gtest/gtest.h"
 #include "llm_client.h"
 #include "plan.h"
@@ -68,7 +69,12 @@ TEST(PromptTest, ALineBreakCannotWriteAFakeLine) {
 TEST(PromptTest, TheGrammarAllowsOnlyTheScreensOptions) {
   const LlmRequest request = BuildPlanRequest(SampleInput(), SampleScreen());
   EXPECT_EQ(request.grammar, PlanGrammar(2));
-  EXPECT_NE(request.grammar.find("opt ::= \"1\" | \"2\"\n"), std::string::npos);
+  EXPECT_TRUE(GbnfAccepts(request.grammar, "root",
+                          "do: 2\nexpect: none\nwatch: none\nlook: 60")
+                  .accepted);
+  EXPECT_FALSE(GbnfAccepts(request.grammar, "root",
+                           "do: 3\nexpect: none\nwatch: none\nlook: 60")
+                   .accepted);
 }
 
 TEST(PromptTest, TheSlotAndTemperatureArePassedOn) {

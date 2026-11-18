@@ -9,7 +9,9 @@
 #ifndef HARNESS_GRAMMAR_WLB_RUNTIME_H_
 #define HARNESS_GRAMMAR_WLB_RUNTIME_H_
 
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -114,12 +116,22 @@ bool MatchSeq(const Seq& seq,
 struct Rule {
   std::string_view name;
   std::vector<Seq> alts;
-  std::string_view raw;  // When set, the rule's whole GBNF body.
-  std::string_view env;  // When set, the rule is the names of this env list.
+  std::string_view raw;     // When set, the rule's whole GBNF body.
+  std::string_view env;     // When set, the rule is the names of this env list,
+  ValidFn valid = nullptr;  // those of them `valid` accepts (default IsName).
+  std::string_view count;   // When set, the numbers `count_from`..this count.
+  int count_from = 1;
+  std::string_view needs;  // When set, unusable while this env list is empty.
 };
 
-// The env lists one call passes in, by name.
-using Env = std::vector<std::pair<std::string_view, std::vector<std::string>>>;
+// What one call passes in: name lists and counts, by name.
+struct Env {
+  std::vector<std::pair<std::string_view, std::vector<std::string>>> names;
+  std::vector<std::pair<std::string_view, int>> counts;
+};
+
+// An env count by name (0 if absent).
+int CountOf(const Env& env, std::string_view name);
 
 // The GBNF for `root` and every rule it uses. A rule whose env list is empty
 // (or whose every alternative needs one) is unusable: alternatives and
@@ -152,6 +164,34 @@ std::string FormatNum(double value);
 
 // Case-insensitive equality (words match in any case when parsing).
 bool EqualsIgnoreCase(std::string_view a, std::string_view b);
+
+// Lines of a reply ----------------------------------------------------------
+
+std::string_view Trim(std::string_view s);
+// At most `max_bytes` of trimmed `s`, never splitting a UTF-8 character.
+std::string Cut(std::string_view s, size_t max_bytes);
+// The lines of a reply (empty ones too).
+std::vector<std::string_view> SplitLines(std::string_view text);
+// "Key: value" -> the trimmed key and value; false without a ':'.
+bool SplitLine(std::string_view line,
+               std::string_view* key,
+               std::string_view* value);
+// "tell Gatda" with `word` "tell" -> true and `field` "Gatda" (any case).
+bool KeyWithField(std::string_view key,
+                  std::string_view word,
+                  std::string_view* field);
+// A line's list, split at `separator` with the items trimmed ("3, 4" or "3,4").
+std::vector<std::string_view> SplitItems(std::string_view value,
+                                         std::string_view separator);
+// Moves a parsed value into `out`; false if there is none.
+template <typename T>
+bool Assign(std::optional<T> value, T* out) {
+  if (!value) {
+    return false;
+  }
+  *out = std::move(*value);
+  return true;
+}
 
 // Tests ---------------------------------------------------------------------
 

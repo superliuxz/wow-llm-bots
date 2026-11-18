@@ -361,6 +361,25 @@ written against the generated types.
     " on " (the hand-written parser read it the same way). Fix: the parser prefers names the
     call offered (they are known: the GBNF allowed only them), so the parser takes the call's
     names after all; to do with step 2's `env`.
+- **Step 2 (2026-11-18), done (parity gates: see the TODO entry):**
+  - `harness/grammar/plan.wlb` generates the plan's types, parser (`ParsePlan(text, env)`,
+    `ParsePlanFirstLine`), printer and GBNF; it imports `orders.wlb` for its `order:` lines. The
+    generator gained `import`, `env` (`names` and `count`: `int Option 1..options`), `text max N
+    no "chars" [from list]`, `@parse(Fn)` hooks on ints and names, and `lines` (`key?`, `key*N`,
+    `key <field:Type>:`, `default`, `lenient`, `@normalize`, `@needs`, a description per line).
+  - Hooks, hand-written with their own test (`plan_hooks.{h,cc}`, `PlanHooksTest`):
+    `NormalizeSteps`, `NormalizeWatches`, `LookSeconds`, `CapitalizedName`.
+  - `harness/src/plan.cc` is the adapter: `harness::Plan` (unchanged, its callers untouched) to
+    and from the generated `grammar::Plan`; `PlanGrammar` adds `root ::= plan-Plan` and keeps the
+    "no order names, no order lines" gate. The hand-written plan parser, printer and GBNF are gone.
+  - The tests that pinned the old GBNF text (`PlanTest`, `PromptTest`, `DecideTest`,
+    `BotLoopTest`) now ask llama.cpp's grammar code what it accepts. `RandomPlan(source)` is
+    generated too: 500 random plans round-trip through `harness::Plan`, every tenth checked
+    against the GBNF. A lenient list drops repeats when read, so its random values have none.
+  - One deliberate change: a `hover:` over 60 characters is rejected, no longer cut.
+  - **Not done, moved to step 3:** the parser taking the call's names (the `use <name> on` fix
+    above). `ParsePlan` still takes only the option count; passing the names means a `plan.h`
+    API change and a matcher that prefers offered names.
 
 ## Decided (2026-11-18)
 

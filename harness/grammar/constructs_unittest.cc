@@ -20,7 +20,9 @@ namespace {
 
 rt::Env TestEnv(std::vector<std::string> labels,
                 std::vector<std::string> others) {
-  return {{"labels", std::move(labels)}, {"others", std::move(others)}};
+  return {
+      .names = {{"labels", std::move(labels)}, {"others", std::move(others)}},
+      .counts = {}};
 }
 
 TEST(ConstructsTest, WordsMatchAnyCaseAndTheirAliasesButPrintTheirSpelling) {

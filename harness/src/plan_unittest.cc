@@ -5,13 +5,34 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "gbnf_check.h"
+#include "grammar/plan.wlb.h"
+#include "grammar/wlb_runtime.h"
 #include "gtest/gtest.h"
 #include "orders.h"
 
 namespace harness {
 namespace {
+
+// Whether `grammar` (what llama-server is held to) accepts a plan: the
+// required lines, then `tail` (optional lines, each after a newline). With
+// `whole` set, that is the whole text instead.
+bool Accepts(const std::string& grammar,
+             std::string_view tail,
+             std::string_view whole = {}) {
+  std::string text =
+      whole.empty() ? std::string("do: 1\nexpect: none\nwatch: none\nlook: 60")
+                    : std::string(whole);
+  if (whole.empty() && !tail.empty()) {
+    text += "\n" + std::string(tail);
+  }
+  const GbnfResult result = GbnfAccepts(grammar, "root", text);
+  EXPECT_TRUE(result.grammar_ok) << grammar;
+  return result.accepted;
+}
 
 constexpr char kFullPlan[] =
     "do: 3x4, 5\n"
@@ -204,45 +225,43 @@ TEST(PlanTest, CuttingNeverSplitsACharacter) {
 TEST(PlanTest, TellNamesAreTheWhisperers) {
   const std::string grammar =
       PlanGrammar(2, {"Brakka", "Gatda", "Bad Name", "X"});
-  EXPECT_NE(grammar.find("goal? say? tell? open? close?\n"), std::string::npos);
-  EXPECT_NE(
-      grammar.find("tell ::= \"\\ntell \" (\"Brakka\" | \"Gatda\") \": \" "
-                   "[^\\n|]{1,80}\n"),
-      std::string::npos)
-      << grammar;
-  EXPECT_EQ(PlanGrammar(2).find("tell"), std::string::npos);
+  EXPECT_TRUE(Accepts(grammar, "tell Brakka: sure"));
+  EXPECT_TRUE(Accepts(grammar, "tell Gatda: on my way"));
+  EXPECT_FALSE(Accepts(grammar, "tell Kelra: hi"));     // Didn't whisper.
+  EXPECT_FALSE(Accepts(grammar, "tell Bad Name: hi"));  // Not a name.
+  EXPECT_FALSE(Accepts(grammar, "tell X: hi"));
+  EXPECT_FALSE(Accepts(grammar, "tell Brakka: a|link"));  // No '|' in chat.
+  EXPECT_FALSE(Accepts(PlanGrammar(2), "tell Brakka: sure"));
 }
 
 TEST(PlanTest, TheGrammarOnlyAllowsTheBotsOwnOptions) {
-  EXPECT_EQ(
-      PlanGrammar(3),
-      "root ::= \"do: \" steps \"\\nexpect: \" (\"none\" | ids) "
-      "\"\\nwatch: \" watches \"\\nlook: \" looknum goal? say? open? close?\n"
-      "panel ::= \"bags\" | \"character\" | \"quest log\"\n"
-      "open ::= \"\\nopen: \" panel (\", \" panel){0,2}\n"
-      "close ::= \"\\nclose: \" panel (\", \" panel){0,2}\n"
-      "ids ::= opt (\", \" opt){0,4}\n"
-      "steps ::= step (\", \" step){0,4}\n"
-      "step ::= opt (\"x\" cnt)?\n"
-      "cnt ::= \"2\" | \"3\" | \"4\" | \"5\" | \"6\" | \"7\" | \"8\" | "
-      "\"9\" | \"10\" | \"11\" | \"12\" | \"13\" | \"14\" | \"15\" | "
-      "\"16\" | \"17\" | \"18\" | \"19\" | \"20\" | \"21\" | \"22\" | "
-      "\"23\" | \"24\" | \"25\" | \"26\" | \"27\" | \"28\" | \"29\"\n"
-      "opt ::= \"1\" | \"2\" | \"3\"\n"
-      "watches ::= \"none\" | watch (\", \" watch){0,3}\n"
-      "watch ::= \"hp<\" pct | \"mana<\" pct | \"enemy_player<\" num | "
-      "\"attacked\" | \"whisper\"\n"
-      "pct ::= [1-9] [0-9]?\n"
-      "num ::= [1-9] [0-9]{0,2}\n"
-      "looknum ::= [1-9] [0-9] [0-9]?\n"
-      "goal ::= \"\\ngoal: \" [^\\n]{1,60}\n"
-      "say ::= \"\\nsay: \" [^\\n|]{1,80}\n");
-  EXPECT_NE(PlanGrammar(12).find("opt ::= \"1\" | \"2\" | \"3\" | \"4\" | "
-                                 "\"5\" | \"6\" | \"7\" | \"8\" | \"9\" | "
-                                 "\"10\" | \"11\" | \"12\"\n"),
-            std::string::npos);
+  const std::string grammar = PlanGrammar(3);
+  EXPECT_TRUE(Accepts(grammar, "",
+                      "do: 3, 1x29\nexpect: 3\nwatch: hp<40, "
+                      "enemy_player<120, whisper\nlook: 999"));
+  EXPECT_FALSE(
+      Accepts(grammar, "", "do: 4\nexpect: none\nwatch: none\nlook: 60"));
+  EXPECT_FALSE(
+      Accepts(grammar, "", "do: 1x30\nexpect: none\nwatch: none\nlook: 60"));
+  EXPECT_FALSE(
+      Accepts(grammar, "", "do: 1x1\nexpect: none\nwatch: none\nlook: 60"));
+  EXPECT_FALSE(
+      Accepts(grammar, "", "do: 1\nexpect: none\nwatch: hp<100\nlook: 60"));
+  EXPECT_FALSE(
+      Accepts(grammar, "", "do: 1\nexpect: none\nwatch: none\nlook: 9"));
+  EXPECT_FALSE(Accepts(grammar, "",
+                       "do: 1, 1, 1, 1, 1, 1\nexpect: none\n"
+                       "watch: none\nlook: 60"));
+  // The lines come in RULES.md's order.
+  EXPECT_FALSE(
+      Accepts(grammar, "", "do: 1\nwatch: none\nexpect: none\nlook: 60"));
+  EXPECT_TRUE(Accepts(grammar, "goal: hunt\nsay: hi"));
+  EXPECT_FALSE(Accepts(grammar, "say: hi\ngoal: hunt"));
+  EXPECT_TRUE(Accepts(PlanGrammar(12), "",
+                      "do: 12\nexpect: none\nwatch: none\n"
+                      "look: 60"));
   // No options at all would be an invalid grammar: there is always one.
-  EXPECT_NE(PlanGrammar(0).find("opt ::= \"1\"\n"), std::string::npos);
+  EXPECT_TRUE(Accepts(PlanGrammar(0), ""));
 }
 
 TEST(PlanTest, ATellLineIsAWhisperToOnePlayer) {
@@ -299,21 +318,40 @@ TEST(PlanTest, OrderLinesAreStandingOrdersInPriorityOrder) {
 }
 
 TEST(PlanTest, OrderLinesOnlyWithNamesToUse) {
-  EXPECT_EQ(PlanGrammar(1).find("oline"), std::string::npos);
+  EXPECT_FALSE(Accepts(PlanGrammar(1), "order: always -> jump"));
   const std::string grammar = PlanGrammar(1, {}, {}, {"Defile"});
-  EXPECT_NE(grammar.find(" oline{0,7}\n"), std::string::npos) << grammar;
-  EXPECT_NE(grammar.find("orders-Name ::= \"Defile\"\n"), std::string::npos);
+  EXPECT_TRUE(Accepts(grammar, "order: Defile on me -> away"));
+  EXPECT_TRUE(Accepts(grammar, "order: always -> jump\norder: always -> wake"));
+  EXPECT_FALSE(Accepts(grammar, "order: Frost Bomb appears -> away"));
 }
 
 TEST(PlanTest, TheGrammarOffersHoverOnlyForNamesOnScreen) {
-  EXPECT_EQ(PlanGrammar(1).find("hover"), std::string::npos);
+  EXPECT_FALSE(Accepts(PlanGrammar(1), "hover: Tough Hunk of Bread"));
   const std::string grammar =
       PlanGrammar(1, {}, {"Tough Hunk of Bread", "Say \"hi\"", "bad\nname"});
-  EXPECT_NE(grammar.find("open? close? hover?\n"), std::string::npos);
-  EXPECT_NE(grammar.find("hover ::= \"\\nhover: \" (\"Tough Hunk of Bread\" | "
-                         "\"Say \\\"hi\\\"\")\n"),
-            std::string::npos)
-      << grammar;
+  EXPECT_TRUE(Accepts(grammar, "hover: Tough Hunk of Bread"));
+  EXPECT_TRUE(Accepts(grammar, "hover: Say \"hi\""));
+  EXPECT_FALSE(Accepts(grammar, "hover: bad"));
+  EXPECT_TRUE(
+      Accepts(grammar, "open: bags, quest log\nhover: Tough Hunk of Bread"));
+}
+
+TEST(PlanTest, RandomPlansRoundTripAndTheGrammarAcceptsThem) {
+  const std::vector<std::string> names = {"Gatda", "Brakka", "Kelra"};
+  const std::string grammar = PlanGrammar(9, names, names, names);
+  grammar::rt::RandomSource source(11, names);
+  for (int i = 0; i < 500; ++i) {
+    const std::string text = grammar::FormatPlan(grammar::RandomPlan(&source));
+    // Through the harness's Plan and back.
+    const std::optional<Plan> plan = ParsePlan(text, 9);
+    ASSERT_TRUE(plan) << text;
+    EXPECT_EQ(FormatPlan(*plan), text);
+    if (i % 10 == 0) {
+      const GbnfResult result = GbnfAccepts(grammar, "root", text);
+      EXPECT_TRUE(result.grammar_ok);
+      EXPECT_TRUE(result.accepted) << text;
+    }
+  }
 }
 
 }  // namespace

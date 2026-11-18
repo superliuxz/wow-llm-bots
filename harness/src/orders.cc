@@ -35,8 +35,9 @@ std::string OrderGrammar(const std::vector<std::string>& names) {
       })) {
     return "";
   }
-  const std::string rules =
-      grammar::OrdersGrammar("Order", grammar::rt::Env{{"order_names", names}});
+  const std::string rules = grammar::OrdersGrammar(
+      "Order",
+      grammar::rt::Env{.names = {{"order_names", names}}, .counts = {}});
   if (rules.empty()) {
     return "";
   }

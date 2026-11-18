@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "file_util.h"
+#include "gbnf_check.h"
 #include "gtest/gtest.h"
 #include "llm_client.h"
 
@@ -117,9 +118,13 @@ TEST(DecideTest, ShowsTheScreenTheReplyAndWhatThePlanMeans) {
   EXPECT_EQ(seen.system.find("Tess"), std::string::npos);
   EXPECT_NE(seen.user.find("You are Tess."), std::string::npos);
   EXPECT_NE(seen.user.find("Woken: plan done."), std::string::npos);
-  EXPECT_NE(seen.grammar.find("opt ::= \"1\" | \"2\" | \"3\" | \"4\" | "
-                              "\"5\" | \"6\" | \"7\" | \"8\" | \"9\"\n"),
-            std::string::npos);
+  // The grammar offers the screen's nine options and no more.
+  EXPECT_TRUE(GbnfAccepts(seen.grammar, "root",
+                          "do: 9\nexpect: none\nwatch: none\nlook: 60")
+                  .accepted);
+  EXPECT_FALSE(GbnfAccepts(seen.grammar, "root",
+                           "do: 10\nexpect: none\nwatch: none\nlook: 60")
+                   .accepted);
 }
 
 TEST(DecideTest, TheBotNameDefaultsToTheSnapshots) {

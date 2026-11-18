@@ -149,11 +149,13 @@ function(wlb_grammar wlb sources_var)
     COMMAND python3 -I -B "${WLB_ROOT}/tools/grammar/wlb_gen.py" "${wlb}"
             "${WLB_GRAMMAR_GEN}/grammar"
     DEPENDS "${WLB_ROOT}/tools/grammar/wlb_gen.py" "${wlb}"
+            "${WLB_ROOT}/harness/grammar/orders.wlb"
     COMMENT "Generating ${name}.wlb.{h,cc}")
   set(${sources_var} ${${sources_var}} "${out}.cc" PARENT_SCOPE)
 endfunction()
 set(WLB_GRAMMAR_SOURCES)
 wlb_grammar("${WLB_ROOT}/harness/grammar/orders.wlb" WLB_GRAMMAR_SOURCES)
+wlb_grammar("${WLB_ROOT}/harness/grammar/plan.wlb" WLB_GRAMMAR_SOURCES)
 # TEST ONLY: one of each construct, to test the generator itself.
 set(WLB_GRAMMAR_TEST_SOURCES)
 wlb_grammar("${WLB_ROOT}/harness/grammar/testdata/constructs.wlb"
@@ -166,6 +168,7 @@ add_library(wlb_harness STATIC "${WLB_HARNESS_SRC}/bot_loop.cc"
             "${WLB_HARNESS_SRC}/module_connection.cc"
             "${WLB_HARNESS_SRC}/orders.cc"
             "${WLB_ROOT}/harness/grammar/wlb_runtime.cc"
+            "${WLB_ROOT}/harness/grammar/plan_hooks.cc"
             ${WLB_GRAMMAR_SOURCES}
             "${WLB_HARNESS_SRC}/plan.cc"
             "${WLB_HARNESS_SRC}/plan_runner.cc"
@@ -213,6 +216,7 @@ add_executable(harness_unittests
   "${WLB_HARNESS_SRC}/file_util_unittest.cc"
   "${WLB_HARNESS_SRC}/gbnf_check_unittest.cc"
   "${WLB_ROOT}/harness/grammar/constructs_unittest.cc"
+  "${WLB_ROOT}/harness/grammar/plan_hooks_unittest.cc"
   ${WLB_GRAMMAR_TEST_SOURCES}
   "${WLB_HARNESS_SRC}/llm_client_unittest.cc"
   "${WLB_HARNESS_SRC}/module_connection_unittest.cc"
