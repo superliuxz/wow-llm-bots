@@ -9,21 +9,16 @@ Last updated 2026-11-18.
 
 ## In progress
 
-Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `indicators`) and all option kinds (`Gather`, `Use`, `Talk`, `Rest`, `Explore`, `Go to`) are done; remaining #4 open panels are in `## Next, in order` ahead of #5.
-
-- **#4 Module: more things a bot can do: mostly done (2026-11-17).** Options `Gather` (hidden
-  without the skill), `Use`, `Talk to <name>` (quests in and out, training through
-  `Trainer::TeachSpell`, sell greys, repair; an `info` summary), `Rest (...)`,
-  `Explore <dir>, <dist> yd (<mobs, levels>)` and `Go to <place> (<services>)` (stepped mmap
-  walk), from `OptionFacts` built by the same code live and for eval fixtures
-  (`docs/plans/options-and-panels.md`). Live: `e2e talk` (accepts Kaltunk's quest), `e2e rest` (sits to
-  full after a fight), `e2e walk` (Explore arrives, done signal). Open panels and hover built (2026-11-18).
+Items #1–#4 are done: #4's options, open panels with hover, and looking eval (`49/53`, `perf brain`
+`10.2/s`) are built and verified. Next: live harness run with open panels/hover and panel
+follow-ups (`Use <item>`, time-based hover), then #5.
 
 ## Next, in order
 
-1. **Live check of panels and hover with the real brain** (`docs/plans/options-and-panels.md`): whether
-   Gemma uses `open:` / `hover:` sensibly (eval cases for the use-item quest and "food in open
-   bags", spec §10), and what the extra wakes cost (`perf brain`).
+1. **Live run with the real harness + panel follow-ups** (`docs/plans/options-and-panels.md`):
+   run the live C++ `harness` against the server to verify `open:` / `hover:` and the habits in
+   live play; add time-based hover expiry and `Use <item>` for usable bag/quest items (enabling
+   the spec §10 use-item quest eval scene).
 2. **Standing orders** (`#5`, `docs/specs/triggers.md`, "The grammar (final, 2026-11-17)"). The `when`
    and `<act>` grammar is final and both audit tables parse against it
    (`tools/wlb check triggers`; `docs/specs/trigger-conditions.tsv` and `trigger-actions.tsv`).
@@ -35,7 +30,6 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
    (c) the snapshot gaps: named places in a room (**133 of the 254 unsayable actions are "go to
    hardcoded coordinates"**: the biggest one), a flying / untargetable / submerged state on `Unit`,
    assist-tank index, where a cast will land (`lands_in_s`), liquid under the bot; (d) evals.
-   `trigger-actions.tsv` and its brief are not committed yet.
    **Design decisions to settle with the user before building (2026-11-17):**
    1. **Where orders run.** In the module (reacts within a world tick, the spec's promise, but
       more logic in the server and orders must be sent down the socket) or in the harness (module
@@ -78,12 +72,17 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
 - A bot once wrote `tell <its own name>:` (Gatda, Gemma 4, live 2026-11-17); the module refuses
   it. Likely cause, the RULES.md example `tell Gatda:`, is fixed (review finding 8); watch whether
   it recurs.
-- **Eval on live options (2026-11-18, Gemma 4):** 46/50, the same on three runs. RULES.md states
-  three more facts (`around me:` vs `also:`; quest kills count only after accepting; full bags
-  leave loot on the corpse and block item-reward turn-ins): `quest_giver_and_boar`,
-  `ignore_critter` and `skip_tapped_mob` now pass; `whisper_while_low_hp` (rests, no reply),
-  `red_mob_nearby` (attacks a red level-6), `hp_60_fine` (rests at 60%) now fail; `bags_full`
-  still explores. The Qwen3.6 shootout was not re-run on this set.
+- **Eval (2026-11-18, Gemma 4):** **49/53 (92%)** with the looking cases (`food_in_open_bags`,
+  `bags_full_open`, `new_loot_hover`, and `healthy_boar_pull` `forbid_look` all passing; `do:` p50
+  `71 ms`, total `190 ms`). Remaining 4 misses: `bags_full` (with closed bags it picks `Keep`; in
+  live play the habit opens bags when full, which passes in `bags_full_open`), `hp_60_fine`,
+  `ignore_critter`, `skip_tapped_mob`. The Qwen3.6 shootout was not re-run on this set.
+- **Panels, things not built yet** (`docs/plans/options-and-panels.md`): no `Use <item>` option
+  for bag items; the module sends no `quest_accepted` / `quest_complete` / inventory-full events,
+  so the habits read the snapshot instead (`bag_free_slots`, the quest tracker); "open bags at a
+  vendor" waits for vendor windows (`interaction`); hover only for items and quests (spells,
+  auras, units, places later); hover lasts 5 snapshots, which is ~1.25 s in combat (snapshots
+  every 250 ms): by time would be steadier.
 - Dead bots: only Keep is offered while dead, refused steps back off (2-30 s), and coming back
   to life wakes the brain ("alive again"). Release spirit / run to corpse are not options yet
   (the body's playerbots dead strategy handles it).
@@ -117,6 +116,13 @@ Items #1–#3 are done (live verified 2026-11-17); #4 snapshot fill (`ext` + `in
   fails with "never offered". Passed every run so far.
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-18: looking eval cases (`food_in_open_bags`, `bags_full_open`, `new_loot_hover`,
+  `forbid_look` on `healthy_boar_pull`, `eval_plans.py` `must_open`/`must_hover`/`forbid_look`);
+  aligned `PlanGrammar` + `FormatPlan` order (`goal? say? tell? open? close? hover?`) with
+  `RULES.md` so `goal:` no longer blocks `hover:`, and added panel/tooltip visibility facts +
+  example in `RULES.md`: **49/53 (92%)** on Gemma 4 (`new_loot_hover`, `quest_giver_and_boar`, and
+  `red_mob_nearby` passing), `perf brain` **PASS** (`10.2/s` capacity, `1040/1040` valid).
 
 - 2026-11-18: open panels (bags, character, quest log) and hover for items and quests
   (`docs/plans/options-and-panels.md`): module fill and tooltips (item "Use:" text from Spell.dbc), `open:` /

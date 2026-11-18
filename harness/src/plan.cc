@@ -240,10 +240,10 @@ std::string PlanGrammar(int option_count,
   }
   return base::StrCat({
       "root ::= \"do: \" steps \"\\nexpect: \" (\"none\" | ids) \"\\nwatch: \" "
-      "watches \"\\nlook: \" looknum open? close?",
-      hovers.empty() ? "" : " hover?",
-      " goal? say?",
+      "watches \"\\nlook: \" looknum goal? say?",
       names.empty() ? "" : " tell?",
+      " open? close?",
+      hovers.empty() ? "" : " hover?",
       "\n"
       "panel ::= ",
       base::JoinString(panels, " | "),
@@ -464,15 +464,6 @@ std::string FormatPlan(const Plan& plan) {
       "\nlook: ",
       base::NumberToString(plan.look_s),
   });
-  if (!plan.open.empty()) {
-    base::StrAppend(&out, {"\nopen: ", base::JoinString(plan.open, ", ")});
-  }
-  if (!plan.close.empty()) {
-    base::StrAppend(&out, {"\nclose: ", base::JoinString(plan.close, ", ")});
-  }
-  if (!plan.hover.empty()) {
-    base::StrAppend(&out, {"\nhover: ", plan.hover});
-  }
   if (!plan.goal.empty()) {
     base::StrAppend(&out, {"\ngoal: ", plan.goal});
   }
@@ -481,6 +472,15 @@ std::string FormatPlan(const Plan& plan) {
   }
   if (!plan.tell.empty()) {
     base::StrAppend(&out, {"\ntell ", plan.tell_to, ": ", plan.tell});
+  }
+  if (!plan.open.empty()) {
+    base::StrAppend(&out, {"\nopen: ", base::JoinString(plan.open, ", ")});
+  }
+  if (!plan.close.empty()) {
+    base::StrAppend(&out, {"\nclose: ", base::JoinString(plan.close, ", ")});
+  }
+  if (!plan.hover.empty()) {
+    base::StrAppend(&out, {"\nhover: ", plan.hover});
   }
   return out;
 }

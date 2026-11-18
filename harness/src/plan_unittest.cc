@@ -203,7 +203,7 @@ TEST(PlanTest, CuttingNeverSplitsACharacter) {
 TEST(PlanTest, TellNamesAreTheWhisperers) {
   const std::string grammar =
       PlanGrammar(2, {"Brakka", "Gatda", "Bad Name", "X"});
-  EXPECT_NE(grammar.find("goal? say? tell?\n"), std::string::npos);
+  EXPECT_NE(grammar.find("goal? say? tell? open? close?\n"), std::string::npos);
   EXPECT_NE(
       grammar.find("tell ::= \"\\ntell \" (\"Brakka\" | \"Gatda\") \": \" "
                    "[^\\n|]{1,80}\n"),
@@ -216,7 +216,7 @@ TEST(PlanTest, TheGrammarOnlyAllowsTheBotsOwnOptions) {
   EXPECT_EQ(
       PlanGrammar(3),
       "root ::= \"do: \" steps \"\\nexpect: \" (\"none\" | ids) "
-      "\"\\nwatch: \" watches \"\\nlook: \" looknum open? close? goal? say?\n"
+      "\"\\nwatch: \" watches \"\\nlook: \" looknum goal? say? open? close?\n"
       "panel ::= \"bags\" | \"character\" | \"quest log\"\n"
       "open ::= \"\\nopen: \" panel (\", \" panel){0,2}\n"
       "close ::= \"\\nclose: \" panel (\", \" panel){0,2}\n"
@@ -286,7 +286,7 @@ TEST(PlanTest, TheGrammarOffersHoverOnlyForNamesOnScreen) {
   EXPECT_EQ(PlanGrammar(1).find("hover"), std::string::npos);
   const std::string grammar =
       PlanGrammar(1, {}, {"Tough Hunk of Bread", "Say \"hi\"", "bad\nname"});
-  EXPECT_NE(grammar.find(" hover? goal?"), std::string::npos);
+  EXPECT_NE(grammar.find("open? close? hover?\n"), std::string::npos);
   EXPECT_NE(grammar.find("hover ::= \"\\nhover: \" (\"Tough Hunk of Bread\" | "
                          "\"Say \\\"hi\\\"\")\n"),
             std::string::npos)

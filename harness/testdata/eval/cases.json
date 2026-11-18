@@ -62,7 +62,8 @@
     ],
     "forbid_kinds": [
       "rest"
-    ]
+    ],
+    "forbid_look": true
   },
   {
     "name": "skip_tapped_mob",
@@ -640,6 +641,40 @@
     "first_kinds": [
       "go to town"
     ]
+  },
+  {
+    "name": "food_in_open_bags",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "25% HP, bags open with bread and water, a boar 12 yd away",
+    "rule": "rests (food is right there), doesn't attack",
+    "first_kinds": [
+      "rest"
+    ],
+    "forbid_kinds": [
+      "attack"
+    ]
+  },
+  {
+    "name": "bags_full_open",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "plan done",
+    "summary": "bags open and full of gray junk, a boar 9 yd away",
+    "rule": "heads to a vendor instead of killing for loot that won't fit",
+    "first_kinds": [
+      "go to town"
+    ]
+  },
+  {
+    "name": "new_loot_hover",
+    "source": "generated (tools/snapshot/make_eval_cases.py)",
+    "generated": true,
+    "reason": "looted Rugged Leather Pants",
+    "summary": "just looted green leather pants, bags open, nothing near",
+    "rule": "points at the new pants to see what they are",
+    "must_hover": "Rugged Leather Pants"
   },
   {
     "name": "leveled_up_empty_field",

@@ -69,8 +69,16 @@ def scorpid(**kw):
     return unit("Scorpid Worker", 3, looks_like="scorpid", **kw)
 
 
+def item(name, item_id, *, count=1, kind="CONSUMABLE", quality="COMMON", usable=False):
+    """One item in the open bags (only what a glance at the bag slot shows)."""
+    out = {"id": item_id, "name": name, "quality": quality, "count": count, "kind": kind}
+    if usable:
+        out["usable"] = True
+    return out
+
+
 def snapshot(base, units=(), *, level=None, hp_pct=None, mana_pct=None, in_combat=False,
-             bags_free=None):
+             bags_free=None, bags=None):
     snap = json.loads((EVAL / f"{base}.snapshot.json").read_text())
     snap = copy.deepcopy(snap)
     # The base capture's options are for its own scene: add_fixture_options.py writes the
@@ -93,6 +101,11 @@ def snapshot(base, units=(), *, level=None, hp_pct=None, mana_pct=None, in_comba
         me.pop("in_combat", None)
     if bags_free is not None:
         me.setdefault("indicators", {})["bag_free_slots"] = bags_free
+    if bags is not None:  # The bags panel is open (docs/plans/options-and-panels.md).
+        snap["base"].setdefault("ui", {})["open_panels"] = ["BAGS"]
+        free = 16 - len(bags) if bags_free is None else bags_free
+        snap.setdefault("ext", {})["bags"] = {"items": bags, "free_slots": free,
+                                             "total_slots": 16}
     snap["base"].setdefault("nearby", {}).setdefault("units", [])
     added = json.loads(json.dumps(list(units)).replace(f'"{ME}"', json.dumps(me["unit"]["name"])))
     snap["base"]["nearby"]["units"] = added + snap["base"]["nearby"]["units"]
@@ -272,6 +285,29 @@ CASES = [
     ("bags_full", "bags full, a boar 9 yd away", "heads to town instead of killing for loot",
      "plan done", snapshot(FIELD, [boar(dist=9)], bags_free=0),
      {"first_kinds": ["go to town"]}),
+    # --- looking: open panels and hover (docs/plans/options-and-panels.md) ---
+    ("food_in_open_bags", "25% HP, bags open with bread and water, a boar 12 yd away",
+     "rests (food is right there), doesn't attack", "plan done",
+     snapshot(FIELD, [boar(dist=12)], hp_pct=25,
+              bags=[item("Tough Hunk of Bread", 4540, count=4, usable=True),
+                    item("Refreshing Spring Water", 159, count=2, usable=True),
+                    item("Hearthstone", 6948, kind="OTHER", usable=True)]),
+     {"first_kinds": ["rest"], "forbid_kinds": ["attack"]}),
+    ("bags_full_open", "bags open and full of gray junk, a boar 9 yd away",
+     "heads to a vendor instead of killing for loot that won't fit", "plan done",
+     snapshot(FIELD, [boar(dist=9)], bags_free=0,
+              bags=[item("Chunk of Boar Meat", 769, count=5, kind="JUNK", quality="POOR")] * 8
+              + [item("Scorpid Stinger", 5466, count=3, kind="JUNK", quality="POOR")] * 6
+              + [item("Tough Hunk of Bread", 4540, count=2, usable=True),
+                 item("Hearthstone", 6948, kind="OTHER", usable=True)]),
+     {"first_kinds": ["go to town"]}),
+    ("new_loot_hover", "just looted green leather pants, bags open, nothing near",
+     "points at the new pants to see what they are", "looted Rugged Leather Pants",
+     snapshot(FIELD, bags=[item("Rugged Leather Pants", 2297, kind="EQUIPMENT",
+                                quality="UNCOMMON"),
+                           item("Tough Hunk of Bread", 4540, count=4, usable=True),
+                           item("Hearthstone", 6948, kind="OTHER", usable=True)]),
+     {"must_hover": "Rugged Leather Pants"}),
     ("leveled_up_empty_field", "just reached level 2, nothing around",
      "moves on (explore or town); doesn't rest or idle", "reached level 2",
      snapshot(FIELD, level=2),

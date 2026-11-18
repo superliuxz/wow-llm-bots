@@ -34,6 +34,8 @@ PLAN_RE = re.compile(r"^== plan: (.+); look again in (\d+) s$", re.M)
 STEP_RE = re.compile(r"^(\d+)(?:x(\d+))? (.+)$")
 GOAL_RE = re.compile(r"^goal:\s*(.*)$", re.M | re.I)
 TELL_RE = re.compile(r"^tell ([A-Za-z]+):\s*(.*)$", re.M | re.I)
+OPEN_RE = re.compile(r"^open: (.+)$", re.M)
+HOVER_RE = re.compile(r"^hover: (.+)$", re.M)
 # A numbered line of the screen: "  3. Attack Mottled Boar: level 2 boar, ..." -> 3, the text
 # before the details.
 OPTION_RE = re.compile(r"^\s+(\d+)\. ([^:\n]+)", re.M)
@@ -104,6 +106,8 @@ def decide_one(case, temperature=0.0, slot=0):
     option_texts = {int(n): text.strip() for n, text in OPTION_RE.findall(screen)}
     reply = out.split("== reply", 1)[1] if "== reply" in out else ""
     tell_m = TELL_RE.search(reply)
+    open_m = OPEN_RE.search(reply)
+    hover_m = HOVER_RE.search(reply)
     for step in steps:
         step["text"] = option_texts.get(step["option"], "")
     return {
@@ -118,6 +122,8 @@ def decide_one(case, temperature=0.0, slot=0):
         "goal": goal_m.group(1).strip() if goal_m else "",
         "tell_to": tell_m.group(1).capitalize() if tell_m else "",
         "tell": tell_m.group(2).strip() if tell_m else "",
+        "open": [p.strip() for p in open_m.group(1).split(",")] if open_m else [],
+        "hover": hover_m.group(1).strip() if hover_m else "",
     }
 
 
@@ -162,6 +168,14 @@ def check_case(case, got):
         problems.append(f"whispered {got['tell_to']}: {got['tell']}")
     if case.get("forbid_tell") and got["tell_to"]:
         problems.append(f"whispered {got['tell_to']} unprompted: {got['tell']}")
+    # Looking (docs/plans/options-and-panels.md): `open:` / `hover:` cost a second wake.
+    for panel in case.get("must_open", ()):
+        if panel not in got["open"]:
+            problems.append(f"didn't open {panel} (open: {got['open'] or 'none'})")
+    if "must_hover" in case and not got["hover"].startswith(case["must_hover"]):
+        problems.append(f"didn't hover {case['must_hover']} (hover: {got['hover'] or 'none'})")
+    if case.get("forbid_look") and (got["open"] or got["hover"]):
+        problems.append(f"looked for no reason (open: {got['open']}, hover: {got['hover']!r})")
     if "min_look_s" in case and got["look_s"] < case["min_look_s"]:
         problems.append(f"look {got['look_s']}s < {case['min_look_s']}s")
     return problems
@@ -183,6 +197,10 @@ def run_suite(cases, label=None):
             desc += f" | goal: {got['goal']}"
         if got.get("tell_to"):
             desc += f" | tell {got['tell_to']}: {got['tell']}"
+        if got.get("open"):
+            desc += f" | open: {', '.join(got['open'])}"
+        if got.get("hover"):
+            desc += f" | hover: {got['hover']}"
         verdict = "PASS" if ok else f"FAIL ({'; '.join(problems)})"
         say(f"  {verdict:4s} {case['name']:25s} -> {desc}")
         rows.append({"case": case["name"], "ok": ok, "got": got, "problems": problems})
