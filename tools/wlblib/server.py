@@ -1,6 +1,11 @@
 """`wlb db`, `wlb config`, `wlb server`, `wlb console`: the local MySQL, the rendered config, the
 game server (authserver + worldserver) and its console. Everything acts on this checkout's
-processes only, found by their pid files, never by name across the machine."""
+processes only, found by their pid files, never by name across the machine.
+
+Two servers (common.Instance): the play server, and the isolated test server e2e and perf run on
+while you play (worldserver only, its own port, run directory, logs and databases, reset for
+every run from a golden copy: docs/plans/phase2.md, E). Functions take `inst`, the play server
+by default."""
 
 import datetime
 import errno
@@ -11,16 +16,27 @@ import signal
 import subprocess
 import time
 
-from wlblib.common import (ETC, LOGS, MYSQL_CNF, ROOT, RUN, SERVER, VAR, Failed, alive,
+from wlblib.common import (ETC, LOGS, MYSQL_CNF, PLAY, ROOT, TEST, VAR, Failed, alive,
                            output, pid_file, run, running_pid, say)
 
-CONSOLE = RUN / "worldserver.stdin"  # worldserver reads its console from this pipe.
 SECRETS = VAR / "secrets"
 DB_PASSWORD = SECRETS / "db-password"
 HUMAN_ACCOUNT_FILE = ROOT / "private" / "human-account"
 BACKUPS = VAR / "backups"
 # The databases that hold state; acore_world is rebuilt from AzerothCore's SQL by dbimport.
 STATE_DATABASES = ("acore_auth", "acore_characters", "acore_playerbots")
+# The same, by name without the prefix; and every database a server uses.
+STATE_NAMES = ("auth", "characters", "playerbots")
+ALL_NAMES = (*STATE_NAMES, "world")
+# The test server's state databases as they were right after it first set them up: every test
+# run starts from a copy of these (the world database isn't written by tests: it stays).
+GOLDEN_PREFIX = "acore_golden_"
+GOLDEN_KEY = TEST.root / "golden-key"  # What the golden copy was made with (submodule commits).
+
+
+def console_pipe(inst=PLAY):
+    """The pipe worldserver reads its console from."""
+    return inst.run / "worldserver.stdin"
 
 
 # ---- MySQL --------------------------------------------------------------------------------------
@@ -101,8 +117,15 @@ def _db_password():
     return password
 
 
-def _overrides(path, password):
-    """`key = value` pairs of an .overrides file; @DB_PASSWORD@ and @ROOT@ filled in."""
+def _tokens(inst, password):
+    """What the @...@ placeholders of config/*.overrides stand for, for `inst`."""
+    return {"@DB_PASSWORD@": password, "@ROOT@": str(ROOT), "@DB@": inst.db_prefix,
+            "@LOGS@": str(inst.logs), "@RUN@": str(inst.run),
+            "@WORLD_PORT@": str(inst.world_port)}
+
+
+def _overrides(path, tokens):
+    """`key = value` pairs of an .overrides file, with the placeholders filled in."""
     pairs = []
     for line in path.read_text().splitlines():
         line = line.strip()
@@ -112,16 +135,17 @@ def _overrides(path, password):
             say(f"ignored (no '='): {path.name}: {line}")
             continue
         key, value = (part.strip() for part in line.split("=", 1))
-        pairs.append((key, value.replace("@DB_PASSWORD@", password)
-                      .replace("@ROOT@", str(ROOT))))
+        for token, text in tokens.items():
+            value = value.replace(token, text)
+        pairs.append((key, value))
     return pairs
 
 
-def _apply(dist, out, override_files, password):
+def _apply(dist, out, override_files, tokens):
     """out = dist with every overridden key set (replaced where it is, else appended)."""
     text = dist.read_text()
     for path in override_files:
-        for key, value in _overrides(path, password):
+        for key, value in _overrides(path, tokens):
             line = f"{key} = {value}"
             pattern = re.compile(rf"^{re.escape(key)}[ \t]*=.*$", re.M)
             if pattern.search(text):
@@ -143,44 +167,45 @@ CONFIGS = (
 )
 
 
-def config(test=None):
-    """Renders out/server/etc/*.conf from AzerothCore's .dist templates plus config/*.overrides
+def config(test=None, inst=PLAY):
+    """Renders <inst>/etc/*.conf from AzerothCore's .dist templates plus config/*.overrides
     (and config/tests/<test>.*.overrides for a test)."""
-    password = _db_password()
+    tokens = _tokens(inst, _db_password())
     configs = ROOT / "config"
     if test and not list((configs / "tests").glob(f"{test}.*.overrides")):
         raise Failed(f"no test config {test} (config/tests/{test}.*.overrides)")
     for template, names, test_name in CONFIGS:
-        dist = ETC / template
+        dist = inst.etc / template
         if not dist.exists():
             if "mod-llm-brain" in template:
                 continue  # A server built without our module.
-            raise Failed(f"no {template} under {ETC.relative_to(ROOT)} (tools/wlb build server)")
+            raise Failed(f"no {template} under {inst.etc.relative_to(ROOT)} (tools/wlb build "
+                         f"server{' --test' if inst is TEST else ''})")
         files = [configs / f"{name}.overrides" for name in names]
         if test and test_name:
             extra = configs / "tests" / f"{test}.{test_name}.overrides"
             if extra.exists():
                 files.append(extra)
-        _apply(dist, dist.with_suffix(""), files, password)
-    say(f"config applied{f' (test: {test})' if test else ''}")
+        _apply(dist, dist.with_suffix(""), files, tokens)
+    say(f"{inst.name} config applied{f' (test: {test})' if test else ''}")
 
 
 # ---- Server -------------------------------------------------------------------------------------
 
-def online_characters():
+def online_characters(inst=PLAY):
     """The names of the characters online now (from the characters database)."""
     rows = output(["mysql", f"--defaults-file={MYSQL_CNF}", "-uroot", "-N", "-e",
-                   "SELECT name FROM acore_characters.characters WHERE online=1"])
+                   f"SELECT name FROM {inst.db('characters')}.characters WHERE online=1"])
     return set(rows.split())
 
 
-def wait_online_count(count, timeout_s=300):
+def wait_online_count(count, timeout_s=300, inst=PLAY):
     """Waits until at least `count` characters are online, or fails after `timeout_s`."""
     deadline = time.time() + timeout_s
     seen = 0
     while time.time() < deadline:
         try:
-            seen = len(online_characters())
+            seen = len(online_characters(inst))
             if seen >= count:
                 return
         except Failed:
@@ -189,25 +214,28 @@ def wait_online_count(count, timeout_s=300):
     raise Failed(f"only {seen} of {count} characters came online in {timeout_s} s")
 
 
-def wait_online(name, timeout_s=180):
+def wait_online(name, timeout_s=180, inst=PLAY):
     """Waits until the character `name` is online, or fails after `timeout_s`."""
     deadline = time.time() + timeout_s
     while time.time() < deadline:
+        if not running_pid("worldserver", inst):
+            raise Failed(f"the {inst.name} worldserver exited (log: "
+                         f"{(inst.logs / 'worldserver.out').relative_to(ROOT)})")
         try:
-            if name in online_characters():
+            if name in online_characters(inst):
                 return
         except Failed:
             pass  # MySQL still starting.
         time.sleep(2)
     raise Failed(f"{name} didn't come online in {timeout_s} s (log: "
-                 f"{(LOGS / 'worldserver.out').relative_to(ROOT)})")
+                 f"{(inst.logs / 'worldserver.out').relative_to(ROOT)})")
 
 
-def _start_detached(name, cmd, cwd, log, stdin=subprocess.DEVNULL):
+def _start_detached(name, cmd, cwd, log, stdin=subprocess.DEVNULL, inst=PLAY):
     with open(log, "ab") as out:
         process = subprocess.Popen(cmd, cwd=cwd, stdin=stdin, stdout=out,
                                    stderr=subprocess.STDOUT, start_new_session=True)
-    pid_file(name).write_text(f"{process.pid}\n")
+    pid_file(name, inst).write_text(f"{process.pid}\n")
     return process.pid
 
 
@@ -224,29 +252,37 @@ def _human_account():
     return account
 
 
-def server_start():
+def server_start(inst=PLAY):
     """Starts MySQL, authserver and worldserver, all in the background. worldserver reads its
-    console from a pipe (`wlb console ...`)."""
-    RUN.mkdir(parents=True, exist_ok=True)
+    console from a pipe (`wlb console ...`). The test server is a worldserver only (its bots are
+    server-side: nobody logs in), on the client data the play server's build extracted."""
+    play = inst is PLAY
+    if not play and not (ROOT / "out" / "server" / "data").is_dir():
+        raise Failed("no client data in out/server/data (tools/wlb setup data): the test "
+                     "server shares the play server's")
+    inst.run.mkdir(parents=True, exist_ok=True)
     # MySQL's socket (root, no password) and the brain and console pipes: this user only.
-    RUN.chmod(0o700)
-    LOGS.mkdir(parents=True, exist_ok=True)
+    inst.run.chmod(0o700)
+    inst.logs.mkdir(parents=True, exist_ok=True)
     db_start()
-    bin_dir = SERVER / "bin"
-    if not running_pid("authserver"):
+    if play and not running_pid("authserver"):
         _start_detached("authserver", ["./authserver", "-c", "../etc/authserver.conf"],
-                        bin_dir, LOGS / "authserver.out")
+                        inst.bin, LOGS / "authserver.out")
         say("authserver started")
-    if not running_pid("worldserver"):
-        CONSOLE.unlink(missing_ok=True)
-        os.mkfifo(CONSOLE, 0o600)
+    if not running_pid("worldserver", inst):
+        pipe = console_pipe(inst)
+        pipe.unlink(missing_ok=True)
+        os.mkfifo(pipe, 0o600)
         # Hold the pipe open for writing, so worldserver never sees EOF on its console.
-        holder = _hold_console_open()
-        pid_file("worldserver-pipe").write_text(f"{holder}\n")
-        with open(CONSOLE, "rb", buffering=0) as console:
+        holder = _hold_console_open(pipe)
+        pid_file("worldserver-pipe", inst).write_text(f"{holder}\n")
+        with open(pipe, "rb", buffering=0) as console:
             _start_detached("worldserver", ["./worldserver", "-c", "../etc/worldserver.conf"],
-                            bin_dir, LOGS / "worldserver.out", stdin=console)
-        say(f"worldserver started (log: {(LOGS / 'worldserver.out').relative_to(ROOT)})")
+                            inst.bin, inst.logs / "worldserver.out", stdin=console, inst=inst)
+        say(f"{inst.name} worldserver started (log: "
+            f"{(inst.logs / 'worldserver.out').relative_to(ROOT)})")
+    if not play:
+        return
     account = _human_account()
     if account and not _sampler_running():
         (LOGS / "human").mkdir(parents=True, exist_ok=True)
@@ -257,11 +293,11 @@ def server_start():
         say("human-play sampler started")
 
 
-def _hold_console_open():
+def _hold_console_open(pipe):
     """A `sleep infinity` holding the console pipe open for writing; returns its pid. Opening a
     pipe for writing blocks until a reader opens it, so it is opened non-blocking (O_RDWR on a
     FIFO never blocks on Linux) and handed to the child."""
-    fd = os.open(CONSOLE, os.O_RDWR | os.O_NONBLOCK)
+    fd = os.open(pipe, os.O_RDWR | os.O_NONBLOCK)
     try:
         # Nothing of the caller's: an inherited stdin/stderr pipe would keep whoever reads
         # `wlb server start` output (a `| tail`) waiting for as long as the server runs.
@@ -280,16 +316,17 @@ def _sampler_running():
     return alive(pid)
 
 
-def console(command, wait_s=1.0):
+def console(command, wait_s=1.0, inst=PLAY):
     """Sends one command to the running worldserver's console and prints the log lines it
     produced. Never blocks: the pipe is written non-blocking, only while this checkout's
     worldserver is alive."""
-    if not running_pid("worldserver") or not CONSOLE.exists():
-        raise Failed("worldserver isn't running (tools/wlb server start)")
-    log = LOGS / "worldserver.out"
+    pipe = console_pipe(inst)
+    if not running_pid("worldserver", inst) or not pipe.exists():
+        raise Failed(f"the {inst.name} worldserver isn't running")
+    log = inst.logs / "worldserver.out"
     start = log.stat().st_size
     try:
-        fd = os.open(CONSOLE, os.O_WRONLY | os.O_NONBLOCK)
+        fd = os.open(pipe, os.O_WRONLY | os.O_NONBLOCK)
     except OSError as e:
         if e.errno == errno.ENXIO:  # No reader: worldserver isn't reading its console.
             raise Failed("worldserver isn't reading its console") from e
@@ -304,9 +341,9 @@ def console(command, wait_s=1.0):
         print(f.read().decode(errors="replace"), end="")
 
 
-def _stop_pid(name, timeout_s):
+def _stop_pid(name, timeout_s, inst=PLAY):
     """SIGTERM this checkout's `name`, wait up to `timeout_s`, then SIGKILL."""
-    pid = running_pid(name)
+    pid = running_pid(name, inst)
     if pid:
         os.kill(pid, signal.SIGTERM)
         for _ in range(timeout_s):
@@ -318,14 +355,14 @@ def _stop_pid(name, timeout_s):
             say(f"{name} force-killed")
         else:
             say(f"{name} stopped")
-    pid_file(name).unlink(missing_ok=True)
+    pid_file(name, inst).unlink(missing_ok=True)
 
 
-def _kill_pid_file(name, *cmdline_words):
+def _kill_pid_file(name, *cmdline_words, inst=PLAY):
     """SIGKILLs the process in `name`'s pid file, only if its command line still has all of
     `cmdline_words`: after a reboot or a long time the pid may belong to something else."""
     try:
-        pid = int(pid_file(name).read_text())
+        pid = int(pid_file(name, inst).read_text())
         args = pathlib.Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
     except (OSError, ValueError):
         pid, args = None, []
@@ -335,18 +372,16 @@ def _kill_pid_file(name, *cmdline_words):
             os.kill(pid, signal.SIGKILL)
         except OSError:
             pass
-    pid_file(name).unlink(missing_ok=True)
+    pid_file(name, inst).unlink(missing_ok=True)
 
 
-def server_stop(backup=True):
-    """Stops worldserver (gracefully: it saves characters), authserver, backs the databases up
-    (unless `backup` is False: test runs stop and start often, and would rotate the real backups
-    out), then stops MySQL."""
-    _kill_pid_file("human-sampler", "server", "sample")
-    pid = running_pid("worldserver")
+def worldserver_stop(inst=PLAY):
+    """Stops `inst`'s worldserver gracefully (it saves characters), SIGKILL after 90 s."""
+    pid = running_pid("worldserver", inst)
+    pipe = console_pipe(inst)
     if pid:
         try:
-            fd = os.open(CONSOLE, os.O_WRONLY | os.O_NONBLOCK)
+            fd = os.open(pipe, os.O_WRONLY | os.O_NONBLOCK)
             os.write(fd, b"server shutdown 1\n")
             os.close(fd)
         except OSError:
@@ -357,12 +392,23 @@ def server_stop(backup=True):
             time.sleep(1)
         if alive(pid):
             os.kill(pid, signal.SIGKILL)
-            say("worldserver force-killed")
+            say(f"{inst.name} worldserver force-killed")
         else:
-            say("worldserver stopped")
-    pid_file("worldserver").unlink(missing_ok=True)
-    _kill_pid_file("worldserver-pipe", "sleep", "infinity")
-    CONSOLE.unlink(missing_ok=True)
+            say(f"{inst.name} worldserver stopped")
+    pid_file("worldserver", inst).unlink(missing_ok=True)
+    _kill_pid_file("worldserver-pipe", "sleep", "infinity", inst=inst)
+    pipe.unlink(missing_ok=True)
+
+
+def server_stop(backup=True, inst=PLAY):
+    """Stops worldserver (gracefully: it saves characters), authserver, backs the databases up
+    (unless `backup` is False), then stops MySQL. The test server is only its worldserver:
+    MySQL stays up for the play server."""
+    if inst is not PLAY:
+        worldserver_stop(inst)
+        return
+    _kill_pid_file("human-sampler", "server", "sample")
+    worldserver_stop(PLAY)
     _stop_pid("authserver", 10)
     if _mysql_up():
         try:
@@ -370,7 +416,108 @@ def server_stop(backup=True):
                 db_backup()  # The databases are quiet now.
         except Failed as e:
             say(f"backup FAILED (the server is stopping anyway): {e}")
-        db_stop()
+        if running_pid("worldserver", TEST):
+            say("the test server is running: MySQL stays up for it")
+        else:
+            db_stop()
+
+
+# ---- The test server's databases ----------------------------------------------------------------
+
+def _sql(statement):
+    return output(["mysql", f"--defaults-file={MYSQL_CNF}", "-uroot", "-N", "-B", "-e",
+                   statement])
+
+
+def _databases():
+    return set(_sql("SHOW DATABASES").split())
+
+
+def _copy_database(source, target):
+    """Replaces database `target` with a copy of `source` (tables and rows), inside MySQL."""
+    tables = _sql(f"SELECT table_name FROM information_schema.tables WHERE "
+                  f"table_schema='{source}' AND table_type='BASE TABLE'").split()
+    statements = [f"DROP DATABASE IF EXISTS `{target}`", f"CREATE DATABASE `{target}`",
+                  "SET SESSION foreign_key_checks=0"]
+    for table in tables:
+        statements += [f"CREATE TABLE `{target}`.`{table}` LIKE `{source}`.`{table}`",
+                       f"INSERT INTO `{target}`.`{table}` SELECT * FROM `{source}`.`{table}`"]
+    _sql(";\n".join(statements))
+
+
+def _golden_key():
+    """What the golden copy depends on: the commits of AzerothCore and playerbots, whose SQL
+    sets the databases up."""
+    third = ROOT / "third_party"
+    return " ".join(output(["git", "-C", third / name, "rev-parse", "HEAD"]).strip()
+                    for name in ("azerothcore-wotlk", "mod-playerbots"))
+
+
+def _grant(name):
+    for host in ("127.0.0.1", "localhost"):
+        _sql(f"GRANT ALL PRIVILEGES ON `{name}`.* TO 'acore'@'{host}'")
+
+
+def test_databases_reset():
+    """Puts the test server's databases in their golden state: auth, characters and playerbots
+    copied from the golden copy; world as the test server set it up. The first time (and when
+    AzerothCore or playerbots moved on), the test server is started once on its databases to set
+    them up (a few minutes for an empty world database), and the golden copy is made from the
+    result. The test server must be stopped."""
+    db_start()
+    have = _databases()
+    golden = all(GOLDEN_PREFIX + n in have for n in STATE_NAMES)
+    key = _golden_key()
+    try:
+        current = GOLDEN_KEY.read_text().strip()
+    except OSError:
+        current = None
+    if not golden or current != key:
+        say("making the test server's golden databases (first run, or AzerothCore or "
+            "playerbots moved on)")
+        for name in ALL_NAMES:
+            db = TEST.db(name)
+            if golden:
+                if name in STATE_NAMES:  # Start from the old golden: only updates to apply.
+                    _copy_database(GOLDEN_PREFIX + name, db)
+            elif db not in have:
+                _sql(f"CREATE DATABASE `{db}`")
+            _grant(db)
+        GOLDEN_KEY.unlink(missing_ok=True)
+        _set_up_once()
+        for name in STATE_NAMES:
+            _copy_database(TEST.db(name), GOLDEN_PREFIX + name)
+        GOLDEN_KEY.write_text(key + "\n")
+        say("golden databases made")
+    for name in STATE_NAMES:
+        _copy_database(GOLDEN_PREFIX + name, TEST.db(name))
+    say("test databases reset")
+
+
+def _set_up_once(timeout_s=1800):
+    """Starts the test server on the base config (no test characters) until it is ready, so it
+    sets its databases up (AzerothCore's and playerbots' updaters), then stops it."""
+    config(inst=TEST)
+    log = TEST.logs / "worldserver.out"
+    TEST.logs.mkdir(parents=True, exist_ok=True)
+    start = log.stat().st_size if log.exists() else 0
+    server_start(TEST)
+    deadline = time.time() + timeout_s
+    try:
+        while True:
+            with open(log, "rb") as f:
+                f.seek(start)
+                if b") ready..." in f.read():
+                    break
+            if not running_pid("worldserver", TEST):
+                raise Failed(f"the test worldserver exited while setting up its databases "
+                             f"(log: {log.relative_to(ROOT)})")
+            if time.time() > deadline:
+                raise Failed(f"the test worldserver wasn't ready in {timeout_s} s "
+                             f"(log: {log.relative_to(ROOT)})")
+            time.sleep(5)
+    finally:
+        worldserver_stop(TEST)
 
 
 def sample(out, interval_s, account_like):

@@ -9,6 +9,7 @@ Dev tool only (production is C++). Needs `tools/wlb build common --no-tests` onc
   python3 -I tools/snapshot/fake_harness.py --stats [--json] [seconds=10]
   python3 -I tools/snapshot/fake_harness.py --choose [--json] [--tail=S] [seconds=30] Attack Loot
   python3 -I tools/snapshot/fake_harness.py --whisper [--json] [seconds=30] FROM TO TEXT REPLY
+--socket=PATH: another server's brain socket (the test server's: out/server-test/run/brain.sock).
 """
 
 import collections
@@ -369,7 +370,10 @@ def run_walk(seconds, as_json=False):
 
 
 def main():
+    global SOCK
     args = sys.argv[1:]
+    SOCK = next((a.split("=", 1)[1] for a in args if a.startswith("--socket=")), SOCK)
+    args = [a for a in args if not a.startswith("--socket=")]
     stats = "--stats" in args
     walk = "--walk" in args
     choose = "--choose" in args

@@ -1,8 +1,7 @@
 """`wlb build`: our shared C++ (common/, the harness, the module's tests) and the server."""
 
-import re
 
-from wlblib.common import OUT, ROOT, SERVER, run, say
+from wlblib.common import OUT, PLAY, ROOT, TEST, run, say
 
 # The unit test suites; `ninja unit_tests` (common/CMakeLists.txt) builds them all.
 UNIT_TESTS = ("wlb_common_unittests", "llm_brain_unittests", "harness_unittests")
@@ -67,40 +66,24 @@ def common(variant="default", tests=True, gtest_filter=None):
     return build
 
 
-INSTALLED_FLAVOR = SERVER / "installed-flavor"
-
-
 def server(test=False, install=True):
-    """Builds common/ for the server, then builds and installs AzerothCore (with our module)
-    into out/server. `test` compiles in the module's test-only code (src/test/: the fixture
-    reset); a production build contains none of it. Switching only rebuilds the module.
+    """Builds common/ for the server, then builds and installs AzerothCore (with our module):
+    the play server into out/server (production: no test-only code), or with `test` the
+    isolated test server into out/server-test (the module's src/test/ compiled in). The first
+    test build configures and compiles all of AzerothCore; later ones only what changed.
     `install=False` only compiles, so a running server keeps running meanwhile; installing
     afterwards is quick."""
+    from wlblib import setup
+
+    inst = TEST if test else PLAY
     common("server", tests=False)
-    hooks = "ON" if test else "OFF"
-    # Re-run cmake: it also picks up sources added or moved in the module since last time.
-    run(["cmake", SERVER, f"-DLLM_BRAIN_TEST_HOOKS={hooks}"], quiet=True)
-    if not install:
-        run(["ninja", "-C", SERVER])
-        return
-    INSTALLED_FLAVOR.unlink(missing_ok=True)  # Unknown while the install is half done.
-    run(["ninja", "-C", SERVER, "install"])
-    flavor = "test" if test else "production"
-    INSTALLED_FLAVOR.write_text(flavor + "\n")
-    say(f"installed a {flavor} build")
-
-
-def built_flavor():
-    """'test' or 'production': what out/server has installed (written after an install
-    succeeds), or None when unknown. Installs from before that file existed: what the build was
-    last configured as."""
-    try:
-        return INSTALLED_FLAVOR.read_text().strip() or None
-    except OSError:
-        pass
-    try:
-        cache = (SERVER / "CMakeCache.txt").read_text()
-    except OSError:
-        return None
-    match = re.search(r"^LLM_BRAIN_TEST_HOOKS:BOOL=(\w+)", cache, re.M)
-    return "test" if match and match.group(1) == "ON" else "production"
+    if not (inst.root / "build.ninja").exists():
+        say(f"configuring the {inst.name} server build in {inst.root.relative_to(ROOT)}")
+        setup.configure(inst.root, inst.test_hooks)
+    else:
+        # Re-run cmake: it also picks up sources added or moved in the module since last time.
+        run(["cmake", inst.root, f"-DLLM_BRAIN_TEST_HOOKS={'ON' if inst.test_hooks else 'OFF'}"],
+            quiet=True)
+    run(["ninja", "-C", inst.root, *(["install"] if install else [])])
+    if install:
+        say(f"installed the {inst.name} server")

@@ -1,4 +1,7 @@
+# The client data the play build extracted (tools/wlb setup data); the test server shares it.
 DataDir = "@ROOT@/out/server/data"
+# 8085 for the play server, 8086 for the test server (tools/wlblib/common.py).
+WorldServerPort = @WORLD_PORT@
 # PvE realm (decided). Horde only: disable Alliance character creation.
 GameType = 0
 CharacterCreating.Disabled = 1

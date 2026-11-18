@@ -26,6 +26,7 @@ def run(perf):
         build.common("default", tests=False)
     result = subprocess.run(
         ["python3", "-I", ROOT / "tools/snapshot/fake_harness.py", "--walk", "--json",
+         f"--socket={perf.stack.socket}",
          str(WALK_S)], capture_output=True, text=True)
     if result.returncode != 0:
         raise Failed(f"the walk harness failed:\n{result.stderr.strip()[-600:]}")

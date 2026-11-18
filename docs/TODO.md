@@ -61,10 +61,6 @@ design decisions below.
   unconstrained + `ParsePlan` with 1 grammar retry (`+16%` capacity), or a `wlb_net` Unix-socket
   `libllama` daemon combining ~15-token ID masks on structured fields with GPU sampling on free text
   (`-200 to -330 ms` under load).
-- **Isolated e2e stack** (`docs/plans/phase2.md`, E): own ports and socket, database restored from a
-  golden copy, so tests never stop the play server. Today `wlb test e2e|perf` stops it for the
-  run plus a test-flag switch each way (only our module's files and a relink since 2026-11-17;
-  one test install per run, configs switch with a restart).
 - **More e2e cases:** death and respawn, harness reconnect, a failing choice reaching the brain.
 - **More perf:** a raid-wide burst (N bots woken in the same instant every M seconds; today's
   `SURPRISES` wakes bots independently), cells past capacity, and the harness-side age points
@@ -132,6 +128,9 @@ design decisions below.
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-18: isolated test stack (`docs/plans/phase2.md`, E): e2e and perf run on their own
+  test server (`out/server-test`, port 8086, `acore_test_*` databases reset from golden copies)
+  while the play server keeps running; perf beside a busy play server warns instead of failing.
 - 2026-11-18: grammar IDL steps 3 and 4, the plan finished (`docs/plans/grammar-idl.md`,
   "Progress"): RULES.md's reply form generated and checked (`tools/wlb check rules`); the parser
   prefers the names the call offered (fixes `use <name> on`); `OrderGrammar` without `oline`.

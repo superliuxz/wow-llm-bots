@@ -90,12 +90,28 @@ socket and two lock-protected queues. Nothing in the module ever waits on the ha
 told to Attack a boar fights it, told to Loot it loots the corpse; the first case), and `perf`:
 `snapshots` (build cost and delivery, 50 bots in a crowd, against the pressure-test criteria) and
 `brain` (capacity and wake-to-plan latency of the 35B on recorded wake-ups), both checked against
-`tools/wlblib/cases/perf_baselines.json` (this machine's numbers, tracked in git). Today the
-stack is the play server's machine and database: the runner stops the play server, runs the test
-build with a test config (test characters are recreated from fixtures on every start), and puts the
-play server back. **Planned:** three layers, all on an **isolated test stack** (own ports, socket
-path and config; databases restored from a "golden" copy of the freshly imported DBs for every
-run, so tests never touch the user's play server and always start from the same state).
+`tools/wlblib/cases/perf_baselines.json` (this machine's numbers, tracked in git).
+
+**Isolated test stack (built 2026-11-18; decided with the user that day).** e2e and perf run on
+their own test server while the play server keeps running (`common.TEST` in `tools/wlblib`):
+- **Its own build**, `out/server-test` (test hooks compiled in), next to the play server's
+  production `out/server`: the play binary never carries test code and is never swapped. The
+  first build compiles all of AzerothCore; later ones only what changed.
+- **Worldserver only** (its bots are server-side; nobody logs in), on port 8086, with its own
+  `run/` (brain socket, console pipe, pid files) and logs in `var/logs/test`. It shares MySQL,
+  the client data in `out/server/data` and llama-server.
+- **Its own databases**, `acore_test_{auth,characters,playerbots,world}`, reset for every run:
+  auth, characters and playerbots are copied (inside MySQL, seconds) from golden copies
+  `acore_golden_*`, made by starting the test server once on empty databases and stopping it
+  when ready; they are made again when AzerothCore's or playerbots' commit changes
+  (`out/server-test/golden-key`). Tests don't write the world database, so it stays.
+- Config placeholders `@DB@`, `@LOGS@`, `@RUN@`, `@WORLD_PORT@` in `config/*.overrides`
+  render each server's config; `tools/wlb server|console --test` act on the test server.
+- **perf beside play:** when the play server has characters online, perf says so and a
+  regression against the baseline is a warning, not a failure (a hard limit still fails);
+  baselines can't be recorded then.
+
+**Planned:** three layers on that stack.
 1. **Module e2e** (from A3-A5): real worldserver + fake harness; snapshot fields correct,
    `choose_option` / `say` change the bot in game.
 2. **Brain e2e** (with B): real server + harness + **fake LLM** (canned HTTP replies):

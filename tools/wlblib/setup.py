@@ -54,11 +54,13 @@ def links():
     say("setup done")
 
 
-def configure():
-    run(["cmake", "-S", AC, "-B", SERVER, "-G", "Ninja",
+def configure(root=SERVER, test_hooks=False):
+    """Configures an AzerothCore build (with our module) in `root`, installing there too."""
+    run(["cmake", "-S", AC, "-B", root, "-G", "Ninja",
          "-DCMAKE_C_COMPILER=clang", "-DCMAKE_CXX_COMPILER=clang++",
          "-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld", "-DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld",
-         "-DCMAKE_BUILD_TYPE=RelWithDebInfo", f"-DCMAKE_INSTALL_PREFIX={SERVER}",
+         "-DCMAKE_BUILD_TYPE=RelWithDebInfo", f"-DCMAKE_INSTALL_PREFIX={root}",
+         f"-DLLM_BRAIN_TEST_HOOKS={'ON' if test_hooks else 'OFF'}",
          "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
          "-DAPPS_BUILD=all", "-DTOOLS_BUILD=all", "-DMODULES=static", "-DSCRIPTS=static",
          "-DMYSQL_CONFIG=/usr/bin/perconaserver_config",

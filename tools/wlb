@@ -1,14 +1,14 @@
 #!/usr/bin/env -S python3 -I
 """wlb: the project's one command-line tool (build, run, check, set up).
 
-  tools/wlb build common [VARIANT] [--no-tests] | server [--test]
+  tools/wlb build common [VARIANT] [--no-tests] | server [--test]   (--test: out/server-test)
   tools/wlb db start | stop | backup [--keep N]
   tools/wlb config [TEST]                render out/server/etc/*.conf (TEST: config/tests/TEST.*)
-  tools/wlb server start | stop
-  tools/wlb console COMMAND...           send a command to worldserver's console
+  tools/wlb server start | stop [--test]   (--test: the isolated test server)
+  tools/wlb console [--test] COMMAND...   send a command to worldserver's console
   tools/wlb check [format|includes|snapshots|triggers|rules|goldens|sanitizers] [--san] [--fix] [FILES...]
   tools/wlb test unit [--filter PATTERN] [--variant asan|tsan|msan]
-  tools/wlb test e2e|perf|eval [NAME...]  [--keep-server]   (e2e: a live server, stack restored after)
+  tools/wlb test e2e|perf|eval [NAME...]  [--keep-server]   (e2e/perf: the isolated test server)
   tools/wlb test perf [--update-baselines [--verify]] | --capture   (perf: record the numbers, and
                                                                      check they reproduce / the replay input)
   tools/wlb test --list
@@ -27,7 +27,7 @@ import sys
 # -I (isolated) leaves the script's own directory off the path: add the tools directory.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from wlblib import build, check, llm, server, setup, testing  # noqa: E402
+from wlblib import build, check, common, llm, server, setup, testing  # noqa: E402
 from wlblib.common import OUT, main_guard  # noqa: E402
 
 
@@ -42,7 +42,8 @@ def parse(argv):
                    help="for common: default, asan, tsan, msan or server")
     p.add_argument("--no-tests", action="store_true", help="for common: don't run unit tests")
     p.add_argument("--test", action="store_true",
-                   help="for server: a test build (the module's test-only code compiled in)")
+                   help="for server: the isolated test server's build in out/server-test (the "
+                        "module's test-only code compiled in)")
 
     p = sub.add_parser("db", help="the project-local MySQL")
     p.add_argument("action", choices=["start", "stop", "backup"])
@@ -53,9 +54,12 @@ def parse(argv):
 
     p = sub.add_parser("server", help="start or stop MySQL, authserver and worldserver")
     p.add_argument("action", choices=["start", "stop", "sample"])
+    p.add_argument("--test", action="store_true",
+                   help="the isolated test server (out/server-test) instead of the play server")
     p.add_argument("args", nargs="*", help=argparse.SUPPRESS)  # sample OUT INTERVAL ACCOUNT
 
     p = sub.add_parser("console", help="send a command to the worldserver console")
+    p.add_argument("--test", action="store_true", help="the test server's console")
     p.add_argument("words", nargs="+")
 
     p = sub.add_parser("check", help="what code must pass before review or commit")
@@ -75,7 +79,7 @@ def parse(argv):
     p.add_argument("--variant", default="default", choices=list(build.VARIANTS),
                    help="unit: the build (default, asan, tsan, msan)")
     p.add_argument("--keep-server", action="store_true",
-                   help="leave the test stack running instead of restoring the play server")
+                   help="leave the test server running afterwards (tools/wlb server stop --test)")
     p.add_argument("--update-baselines", action="store_true",
                    help="perf: record this run's numbers as the new baselines")
     p.add_argument("--verify", action="store_true",
@@ -114,15 +118,15 @@ def main():
     elif a.command == "config":
         server.config(a.test)
     elif a.command == "server":
+        inst = common.TEST if a.test else common.PLAY
         if a.action == "start":
-            testing.restore_interrupted()  # A test run that died left its stack installed.
-            server.server_start()
+            server.server_start(inst)
         elif a.action == "stop":
-            server.server_stop()
+            server.server_stop(inst=inst)
         else:
             server.sample(*a.args)
     elif a.command == "console":
-        server.console(" ".join(a.words))
+        server.console(" ".join(a.words), inst=common.TEST if a.test else common.PLAY)
     elif a.command == "check":
         if a.what == "all":
             check.all_(with_sanitizers=a.sanitizers)

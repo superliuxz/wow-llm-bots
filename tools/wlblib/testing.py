@@ -16,7 +16,6 @@ for). The runner prints one PASS or FAIL line per case and exits 1 if any failed
 import datetime
 import importlib
 import json
-import os
 import pathlib
 import pkgutil
 import shutil
@@ -25,12 +24,7 @@ import time
 import urllib.request
 
 from wlblib import build, cases, server
-from wlblib.common import LOGS, OUT, ROOT, VAR, Failed, output, run, running_pid, say
-
-# Written while a test stack replaces the play server, removed once the play server is back: a
-# run that was interrupted (killed, crashed, power cut) leaves it, and the next test run or
-# `wlb server start` puts the play server back first (review 2026-11-17, finding 16).
-STACK_STATE = VAR / "test-stack.json"
+from wlblib.common import OUT, PLAY, ROOT, TEST, Failed, output, run, running_pid, say
 
 TARGETS = ("unit", "e2e", "perf", "eval")
 
@@ -65,192 +59,95 @@ def unit(variant="default", gtest_filter=None):
     say(f"PASS unit ({variant}{', filter ' + gtest_filter if gtest_filter else ''})")
 
 
-def _live_harness_pids():
-    """Pids of this checkout's harness binary (out/common/harness) that are running."""
-    binary = (OUT / "common" / "harness").resolve()
-    pids = []
-    for proc in pathlib.Path("/proc").iterdir():
-        if not proc.name.isdigit():
-            continue
-        try:
-            # A binary rebuilt since it started reads "<path> (deleted)".
-            exe = os.readlink(proc / "exe").removesuffix(" (deleted)")
-            if pathlib.Path(exe) == binary:
-                pids.append(int(proc.name))
-        except OSError:
-            continue
-    return pids
-
-
 # ---- e2e ----------------------------------------------------------------------------------------
 
 class Stack:
-    """A running test stack: the test build of the server with a test config, the test bot
-    online, and a record of the server log from the start of the run.
+    """The running test stack: the isolated test server (common.TEST: its own build, port, run
+    directory, logs and databases) with a test config and the test bot online, and a record of
+    its log from the start of the run. Your play server keeps running meanwhile, untouched.
 
-    It is the same machine and database as the play server (an isolated stack with its own
-    ports and a restored database is planned, docs/plans/phase2.md section E), so it stops the
-    play server first and puts it back afterwards: same build, normal config, started again if it
-    was running. Test characters are recreated from fixtures on every start; yours isn't touched."""
+    Every run starts from the same state: the test server's databases are reset from their
+    golden copy (server.test_databases_reset), and test characters are recreated from fixtures
+    on every start."""
+
+    socket = TEST.run / "brain.sock"
 
     def __init__(self, test_config, bot, keep=False, online=1):
         self.test_config, self.bot, self.keep, self.online = test_config, bot, keep, online
-        self.was_running = False
-        self.flavor_before = None
         self.log_start = 0
 
     def __enter__(self):
-        # A live harness reconnects within a second and takes the socket from the scripted
-        # brain (the module keeps the newest client), so a test can't share it.
-        harness = _live_harness_pids()
-        if harness:
-            raise Failed(f"a live harness is running (pid {', '.join(map(str, harness))}): "
-                         "stop it first (it would take the test's socket)")
-        interrupted = _interrupted_state()
-        if interrupted:
-            # The play server is already down from that run: this run restores it at the end,
-            # instead of rebuilding it now only to stop it again.
-            say("an interrupted test run left the test stack in place: this run puts the play "
-                "server back when it ends")
-            self.was_running = interrupted.get("was_running", False)
-            self.flavor_before = interrupted.get("flavor_before")
-        else:
-            self.was_running = running_pid("worldserver") is not None
-            self.flavor_before = build.built_flavor()
-        switch = build.built_flavor() != "test"
-        if switch:
-            # Compile while the play server still runs: a failed build then leaves it alone.
-            say("building the test flavor of the server (the module only)")
-            build.server(test=True, install=False)
-        STACK_STATE.parent.mkdir(parents=True, exist_ok=True)
-        STACK_STATE.write_text(json.dumps({"was_running": self.was_running,
-                                           "flavor_before": self.flavor_before}) + "\n")
+        build.server(test=True)  # Only what changed since the last run.
+        server.server_stop(inst=TEST)  # One left running by --keep-server or a crash.
         try:
-            if running_pid("worldserver"):
-                say("stopping the play server")
-                server.server_stop(backup=False)  # Tests don't touch your characters.
-            if switch:
-                build.server(test=True)  # Compiled above: installs only.
+            server.test_databases_reset()
             self._bring_up()
         except BaseException:
-            self.restore()
+            server.server_stop(inst=TEST)
             raise
         return self
 
     def _bring_up(self):
-        server.config(self.test_config)
-        server.server_start()
-        server.wait_online(self.bot)
+        server.config(self.test_config, inst=TEST)
+        server.server_start(TEST)
+        server.wait_online(self.bot, inst=TEST)
         if self.online > 1:
-            server.wait_online_count(self.online)
+            server.wait_online_count(self.online, inst=TEST)
         try:
-            self.log_start = (LOGS / "Server.log").stat().st_size
+            self.log_start = (TEST.logs / "Server.log").stat().st_size
         except OSError:
             self.log_start = 0
         # The first snapshots are sent as soon as a harness connects.
 
     def switch(self, test_config, bot, online=1):
-        """Another test config on the same test build: only a config and a restart, no build
-        and no restore in between (one test install per run)."""
+        """Another test config on the same test server: a config and a restart."""
         self.test_config, self.bot, self.online = test_config, bot, online
         say(f"switching the test stack to {test_config}")
         try:
-            server.server_stop(backup=False)
+            server.server_stop(inst=TEST)
             self._bring_up()
         except BaseException:
             if not self.keep:
-                self.restore()
+                server.server_stop(inst=TEST)
             raise
 
     def __exit__(self, *exc):
-        if not self.keep:
-            self.restore()
+        if self.keep:
+            say("leaving the test server running (--keep-server; stop it with "
+                "`tools/wlb server stop --test`)")
         else:
-            say("leaving the test stack running (--keep-server)")
+            server.server_stop(inst=TEST)
         return False
-
-    def restore(self):
-        _restore(self.was_running, self.flavor_before)
 
     def server_log(self):
         """The module's log lines since the stack came up."""
         try:
-            with open(LOGS / "Server.log", "rb") as f:
+            with open(TEST.logs / "Server.log", "rb") as f:
                 f.seek(self.log_start)
                 return f.read().decode(errors="replace")
         except OSError:
             return ""
 
+    def _fake_harness(self, *args):
+        if not (OUT / "common" / "libwlb_wire_py.so").exists():
+            build.common("default", tests=False)
+        result = subprocess.run(
+            ["python3", "-I", ROOT / "tools/snapshot/fake_harness.py", f"--socket={self.socket}",
+             *map(str, args)], capture_output=True, text=True)
+        if result.returncode != 0:
+            raise Failed(f"the scripted brain failed:\n{result.stderr.strip()[-600:]}")
+        return json.loads(result.stdout)
+
     def play(self, words, seconds=90, tail_s=15):
         """Runs the scripted brain (tools/snapshot/fake_harness.py --choose) against the module
         and returns its transcript: snapshots, events, commands sent, words never offered. It
         stops `tail_s` after the last word was sent, or after `seconds`."""
-        if not (OUT / "common" / "libwlb_wire_py.so").exists():
-            build.common("default", tests=False)
-        result = subprocess.run(
-            ["python3", "-I", ROOT / "tools/snapshot/fake_harness.py", "--choose", "--json",
-             f"--tail={tail_s}", str(seconds), *words], capture_output=True, text=True)
-        if result.returncode != 0:
-            raise Failed(f"the scripted brain failed:\n{result.stderr.strip()[-600:]}")
-        return json.loads(result.stdout)
+        return self._fake_harness("--choose", "--json", f"--tail={tail_s}", seconds, *words)
 
     def whisper(self, sender, receiver, text, reply, seconds=60):
         """Runs tools/snapshot/fake_harness.py --whisper: `sender` whispers `text` to `receiver`,
         which whispers `reply` back. Returns its transcript (what each bot heard)."""
-        if not (OUT / "common" / "libwlb_wire_py.so").exists():
-            build.common("default", tests=False)
-        result = subprocess.run(
-            ["python3", "-I", ROOT / "tools/snapshot/fake_harness.py", "--whisper", "--json",
-             str(seconds), sender, receiver, text, reply], capture_output=True, text=True)
-        if result.returncode != 0:
-            raise Failed(f"the scripted brain failed:\n{result.stderr.strip()[-600:]}")
-        return json.loads(result.stdout)
-
-
-def _restore(was_running, flavor_before):
-    """Puts the play server back: its build, its config, running if it was. Every step is
-    tried even if one before it failed (a failed build still gets the normal config and a
-    start), and the failures are reported together at the end."""
-    say("restoring the play server")
-    failures = []
-
-    def step(what, fn, *args, **kwargs):
-        try:
-            fn(*args, **kwargs)
-        except Exception as e:  # noqa: BLE001 - keep going, report below.
-            failures.append(f"{what}: {e}")
-            say(f"restore: {what} FAILED: {e}")
-
-    back = flavor_before is None or flavor_before == build.built_flavor()
-    if not back:
-        # Compile with the test server still up (finding 6): then it is down only to install.
-        step("build", build.server, test=flavor_before == "test", install=False)
-    step("stop", server.server_stop, backup=False)
-    if not back and not failures:
-        step("install", build.server, test=flavor_before == "test")
-    step("config", server.config)
-    if was_running:
-        step("start", server.server_start)
-    if failures:
-        raise Failed("the play server was not fully restored (" + "; ".join(failures) +
-                     f"); fix it, then run `tools/wlb server start` (state in {STACK_STATE})")
-    STACK_STATE.unlink(missing_ok=True)
-
-
-def _interrupted_state():
-    try:
-        return json.loads(STACK_STATE.read_text())
-    except (OSError, ValueError):
-        return None
-
-
-def restore_interrupted():
-    """If a test run was interrupted with the test stack installed, puts the play server back."""
-    state = _interrupted_state()
-    if not state:
-        return
-    say("an interrupted test run left the test stack in place: restoring the play server first")
-    _restore(state.get("was_running", False), state.get("flavor_before"))
+        return self._fake_harness("--whisper", "--json", seconds, sender, receiver, text, reply)
 
 
 def _select(target, names):
@@ -344,7 +241,8 @@ class Perf:
 
     def __init__(self, case, stack, baselines):
         self.case, self.stack, self.baselines = case, stack, baselines
-        self.measured, self.shown, self.failures = {}, [], []
+        # Worse than the baseline (a warning beside a busy play server), and beyond a limit.
+        self.measured, self.shown, self.failures, self.beyond = {}, [], [], []
 
     def measure(self, key, value, unit="", *, lower_is_better=True, factor=1.5, slack=0.0,
                 limit=None):
@@ -371,7 +269,7 @@ class Perf:
                     self.failures.append(f"{key} {value:.4g}{unit} is worse than the baseline "
                                          f"{base:.4g} (allowed {allowed:.4g})")
         if limit is not None and (value > limit if lower_is_better else value < limit):
-            self.failures.append(f"{key} {value:.4g}{unit} is beyond the limit {limit:.4g}")
+            self.beyond.append(f"{key} {value:.4g}{unit} is beyond the limit {limit:.4g}")
         self.shown.append(text)
 
     def summary(self):
@@ -385,25 +283,46 @@ def perf(names=(), keep_server=False, update_baselines=False, verify=False):
     recorded: a measurement that can't reproduce itself has a baseline that can't be trusted."""
     selected = _select("perf", names)
     baselines = Baselines()
+    busy = _play_busy()
+    if busy:
+        say(f"the play server is running with {busy} online: it competes for the CPU and GPU, "
+            "so a regression against the baseline is a warning this run, not a failure")
+        if update_baselines:
+            raise Failed("not recording baselines while the play server is busy (stop it, or "
+                         "run without --update-baselines)")
 
     def call(module, stack):
-        ok = _run_perf(module, stack, baselines, update_baselines)
+        ok = _run_perf(module, stack, baselines, update_baselines, busy)
         if update_baselines and verify:
             say(f"verifying {module.NAME} against the baseline just recorded")
-            return _run_perf(module, stack, baselines, False)
+            return _run_perf(module, stack, baselines, False, busy)
         return ok
 
     _run_selected(selected, keep_server, call)
 
 
-def _run_perf(module, stack, baselines, update):
+def _play_busy():
+    """"N characters" when the play server is running with characters online, else None."""
+    if not running_pid("worldserver", PLAY):
+        return None
+    try:
+        online = len(server.online_characters(PLAY))
+    except Failed:
+        return None
+    return f"{online} characters" if online else None
+
+
+def _run_perf(module, stack, baselines, update, busy=None):
     start = time.time()
     p = Perf(module.NAME, stack, baselines)
     crashed = False
     try:
         module.run(p)
-        if p.failures:
-            raise Failed("; ".join(p.failures))
+        if p.failures and busy:
+            # Measured beside a busy play server: reported, not failed.
+            say(f"WARN perf {module.NAME}: {'; '.join(p.failures)} (play server busy)")
+        if p.beyond or (p.failures and not busy):
+            raise Failed("; ".join(p.beyond + ([] if busy else p.failures)))
         ok, detail = True, p.summary()
     except Failed as e:
         ok, detail = False, f"{e} [{p.summary()}]"

@@ -21,7 +21,7 @@ Design and every decision so far: [docs/design.md](docs/design.md).
 | `content/` | shared bot knowledge: `RULES.md` (the rules every bot starts from); `concepts/` and prompts are planned |
 | `config/` | our config files (MySQL, server overrides) |
 | `tools/` | `tools/wlb`, the one command-line tool, and research scripts: see [Tools](#tools) |
-| `out/` | everything generated, as `out/<name>` for what builds it (not tracked). **Safe to delete: every part comes back from a command.** `out/server` is the installed game server (binaries, configs, the extracted map data, sockets); rebuild it with `tools/wlb build server`, `tools/wlb config` and `tools/wlb setup data` |
+| `out/` | everything generated, as `out/<name>` for what builds it (not tracked). **Safe to delete: every part comes back from a command.** `out/server` is the installed game server (binaries, configs, the extracted map data, sockets); rebuild it with `tools/wlb build server`, `tools/wlb config` and `tools/wlb setup data`. `out/server-test` is the isolated test server e2e and perf run on (`tools/wlb build server --test`; shares the map data) |
 | `var/` | **state worth keeping, not tracked.** `backups/` (database dumps, one per server stop), `mysql-data/` (the database: accounts, characters, bot progress), `logs/` (server logs and the samples of your own play), and, once the harness exists, `bots/` (live bot memory: `<name>/identity.md`, goals, `events/*.jsonl`; its own git repo) |
 | `models/` | the GGUF model files llama-server loads (not tracked) |
 | `reference/` | downloaded addon sources (not tracked) |
@@ -52,12 +52,12 @@ more. It acts on this checkout's processes only (by their pid files), never by n
 | `tools/wlb check sanitizers` | build and run unit tests under ASan+UBSan, TSan, and MSan (`--sanitizers` / `--san` on `wlb check` runs everything) |
 | `tools/wlb check format\|includes\|snapshots\|triggers\|goldens\|sanitizers` | one of those (`--fix` for format and includes) |
 | `tools/wlb build common [asan\|tsan\|msan\|server]` | build `common/` (and the harness) and run the unit tests; `server` is the copy linked into AzerothCore |
-| `tools/wlb build server [--test]` | build and install AzerothCore with our module (`--test` adds the test-only fixtures) |
-| `tools/wlb test unit\|e2e\|perf\|eval [NAME...]` | the four test targets: `unit` (gtest, `--filter`, `--variant`), `e2e` (live scenarios on a test build of the server; stops the play server and restores it), `perf` (measurements checked against `tools/wlblib/cases/perf_baselines.json` and hard limits; `--update-baselines` records a run, `--capture` records the brain replay's input), `eval`; `--list` shows the cases |
+| `tools/wlb build server [--test]` | build and install AzerothCore with our module into `out/server` (`--test`: the test server in `out/server-test`, with the test-only fixtures) |
+| `tools/wlb test unit\|e2e\|perf\|eval [NAME...]` | the four test targets: `unit` (gtest, `--filter`, `--variant`), `e2e` (live scenarios on the isolated test server: own build, port 8086 and databases reset for every run; the play server keeps running), `perf` (measurements checked against `tools/wlblib/cases/perf_baselines.json` and hard limits; `--update-baselines` records a run, `--capture` records the brain replay's input), `eval`; `--list` shows the cases |
 | `tools/wlb config [test]` | render `out/server/etc/*.conf` from the templates plus `config/*.overrides` (and `config/tests/<test>.*`) |
-| `tools/wlb server start\|stop` | MySQL, authserver and worldserver together (stop backs the databases up first) |
+| `tools/wlb server start\|stop [--test]` | MySQL, authserver and worldserver together (stop backs the databases up first); `--test`: the test server's worldserver |
 | `tools/wlb db start\|stop\|backup` | the project-local MySQL alone; `backup` dumps accounts, characters and playerbots' tables to `var/backups/` (compressed, newest 14 kept; the restore command is in `tools/wlblib/server.py`) |
-| `tools/wlb console <command>` | send a command to the worldserver console |
+| `tools/wlb console [--test] <command>` | send a command to the worldserver console |
 | `tools/wlb llm` | llama-server with the settings measured fastest (`docs/results.md`) |
 
 **Once**
