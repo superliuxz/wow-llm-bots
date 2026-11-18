@@ -9,17 +9,12 @@ Last updated 2026-11-18.
 
 ## In progress
 
-Items #1–#4 are done: #4's options, open panels with hover, and looking eval (`49/53`, `perf brain`
-`10.2/s`) are built and verified. Next: live harness run with open panels/hover and panel
-follow-ups (`Use <item>`, time-based hover), then #5.
+Items #1–#4 are done and verified live (2026-11-18). Next is #5 (Standing orders), pending the
+design decisions below.
 
 ## Next, in order
 
-1. **Live run with the real harness + panel follow-ups** (`docs/plans/options-and-panels.md`):
-   run the live C++ `harness` against the server to verify `open:` / `hover:` and the habits in
-   live play; add time-based hover expiry and `Use <item>` for usable bag/quest items (enabling
-   the spec §10 use-item quest eval scene).
-2. **Standing orders** (`#5`, `docs/specs/triggers.md`, "The grammar (final, 2026-11-17)"). The `when`
+1. **Standing orders** (`#5`, `docs/specs/triggers.md`, "The grammar (final, 2026-11-17)"). The `when`
    and `<act>` grammar is final and both audit tables parse against it
    (`tools/wlb check triggers`; `docs/specs/trigger-conditions.tsv` and `trigger-actions.tsv`).
    Left: (a) re-judge the unsayable and stretched rows with the final grammar for a measured
@@ -78,11 +73,11 @@ follow-ups (`Use <item>`, time-based hover), then #5.
   live play the habit opens bags when full, which passes in `bags_full_open`), `hp_60_fine`,
   `ignore_critter`, `skip_tapped_mob`. The Qwen3.6 shootout was not re-run on this set.
 - **Panels, things not built yet** (`docs/plans/options-and-panels.md`): no `Use <item>` option
-  for bag items; the module sends no `quest_accepted` / `quest_complete` / inventory-full events,
-  so the habits read the snapshot instead (`bag_free_slots`, the quest tracker); "open bags at a
-  vendor" waits for vendor windows (`interaction`); hover only for items and quests (spells,
-  auras, units, places later); hover lasts 5 snapshots, which is ~1.25 s in combat (snapshots
-  every 250 ms): by time would be steadier.
+  for bag items (and thus no spec §10 use-item quest eval case yet: needs item target selection for
+  unit/object/self quest items); the module sends no `quest_accepted` / `quest_complete` /
+  inventory-full events, so the habits read the snapshot instead (`bag_free_slots`, the quest
+  tracker); "open bags at a vendor" waits for vendor windows (`interaction`); hover only for items
+  and quests (spells, auras, units, places later).
 - Dead bots: only Keep is offered while dead, refused steps back off (2-30 s), and coming back
   to life wakes the brain ("alive again"). Release spirit / run to corpse are not options yet
   (the body's playerbots dead strategy handles it).
@@ -104,9 +99,7 @@ follow-ups (`Use <item>`, time-based hover), then #5.
   `tools/server-start.sh`; and `test_accounts_unittest.cc` until 2026-11-17); it is out of the
   current files. Removing it means rewriting history and a force-push: their decision.
 - Unit tests for the AzerothCore-dependent module code (`bot_manager`, `option_executor`,
-  `nearby_builder`, ...) can't run without the game server: only the e2e case covers it
-  (rebuild/restart `out/server` with `tools/wlb build server` before connecting the new BEVE
-  `harness`, since the running play server predates the Glaze wire switch).
+  `nearby_builder`, ...) can't run without the game server: only the e2e cases cover them.
 - `BrainBridge`: a connection generation drops stale frames, but a stalled old connection's
   commands still arrive in order before its disconnect is seen. Judged not worth more yet.
 - Bugs found in playerbots (not ours, `third_party/`): `RangeTriggers.cpp:275` returns before its
@@ -116,6 +109,14 @@ follow-ups (`Use <item>`, time-based hover), then #5.
   fails with "never offered". Passed every run so far.
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-18: live `harness` run (`Testpriest`, `Gatda`) verified `open:`, `close:`, `hover:`
+  (`hover: Kolkar Leaders` -> quest tooltip wake), remembered panels, and the habits in live play;
+  fixed two live findings + time-based hover (`UiState::kHoverDuration = 5 s` instead of 5
+  snapshots; `LootCorpseNow` through the server's loot opcodes so >80%-full bags no longer leave
+  grey items on corpses and loop `Loot`, returning `"Inventory is full"` when items cannot fit;
+  `FormatQuestText` for `$B`/`$N`/`$C`/`$R`/`$G` tokens in quest log and tooltips); `6/6` e2e
+  suites passing.
 
 - 2026-11-18: looking eval cases (`food_in_open_bags`, `bags_full_open`, `new_loot_hover`,
   `forbid_look` on `healthy_boar_pull`, `eval_plans.py` `must_open`/`must_hover`/`forbid_look`);

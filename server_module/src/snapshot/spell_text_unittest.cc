@@ -111,5 +111,15 @@ TEST(SpellTextTest, ReadsDescriptionsOfWantedSpells) {
   EXPECT_TRUE(ParseSpellDescriptions(dbc, {433}, 5).empty());
 }
 
+TEST(SpellTextTest, FormatsQuestTokensAndParagraphBreaks) {
+  EXPECT_EQ(
+      FormatQuestText(
+          "Cross the bridge.$B$BStop at the outpost, $N, young $c of the $R, "
+          "$Gbrother:sister;.",
+          "Gatda", "Rogue", "Troll", /*female=*/true),
+      "Cross the bridge. Stop at the outpost, Gatda, young Rogue of the Troll, "
+      "sister.");
+}
+
 }  // namespace
 }  // namespace llm_brain

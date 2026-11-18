@@ -37,6 +37,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "proto/snapshot.h"
+#include "snapshot/perception.h"
 #include "snapshot/spell_text.h"
 
 namespace llm_brain {
@@ -702,6 +703,18 @@ std::string ItemList(const std::vector<pb::Item>& items) {
   return base::JoinString(names, ", ");
 }
 
+std::string QuestObjectivesText(Player* bot, const Quest* q) {
+  std::string race;
+  if (const ChrRacesEntry* r = sChrRacesStore.LookupEntry(bot->getRace())) {
+    if (const char* rn = r->name[sWorld->GetDefaultDbcLocale()]) {
+      race = rn;
+    }
+  }
+  return FormatQuestText(q->GetObjectives(), bot->GetName(),
+                         ClassName(bot->getClass()), race,
+                         bot->getGender() == GENDER_FEMALE);
+}
+
 void AddQuestTooltip(Player* bot, const Quest* q, pb::Tooltipped* out) {
   std::vector<std::string>& lines = out->tooltip.emplace().lines;
   lines.push_back(q->GetTitle());
@@ -709,7 +722,7 @@ void AddQuestTooltip(Player* bot, const Quest* q, pb::Tooltipped* out) {
     lines.push_back(base::StringPrintf("Level %d", q->GetQuestLevel()));
   }
   if (!q->GetObjectives().empty()) {
-    lines.push_back(q->GetObjectives());
+    lines.push_back(QuestObjectivesText(bot, q));
   }
   if (std::string progress = ProgressLine(bot, q); !progress.empty()) {
     lines.push_back(std::move(progress));
@@ -874,7 +887,7 @@ void FillQuestLog(Player* bot, pb::QuestLog* log) {
     }
     obj.done = part.complete;
     part.text = ProgressLine(bot, q);
-    entry.description = q->GetObjectives();
+    entry.description = QuestObjectivesText(bot, q);
     entry.rewards =
         RewardItems(q->RewardItemId, q->RewardItemIdCount, QUEST_REWARDS_COUNT);
     entry.choices = RewardItems(q->RewardChoiceItemId, q->RewardChoiceItemCount,

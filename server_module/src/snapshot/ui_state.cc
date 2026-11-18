@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "base/time/time.h"
 #include "proto/snapshot.h"
 
 namespace llm_brain {
@@ -40,7 +41,7 @@ void UiState::CloseAll() {
   open_.clear();
 }
 
-std::string UiState::Hover(const pb::HoverRef& ref) {
+std::string UiState::Hover(const pb::HoverRef& ref, base::TimeTicks now) {
   if (ref.kind != pb::HoverRef::ITEM && ref.kind != pb::HoverRef::QUEST) {
     return "that can't be pointed at yet";
   }
@@ -48,30 +49,36 @@ std::string UiState::Hover(const pb::HoverRef& ref) {
     return "nothing to point at";
   }
   hover_ = ref;
-  hover_snapshots_left_ = kHoverSnapshots;
+  hover_until_ = now + kHoverDuration;
+  hover_shown_ = false;
   return "";
 }
 
 void UiState::Reset() {
   open_.clear();
   hover_.reset();
-  hover_snapshots_left_ = 0;
+  hover_until_ = base::TimeTicks();
+  hover_shown_ = false;
 }
 
 bool UiState::IsOpen(pb::Panel panel) const {
   return std::find(open_.begin(), open_.end(), panel) != open_.end();
 }
 
-void UiState::FillAndAge(pb::Ui* ui) {
+std::optional<pb::HoverRef> UiState::FillAndAge(pb::Ui* ui,
+                                                base::TimeTicks now) {
   ui->open_panels = open_;
   ui->hovering.clear();
   if (!hover_) {
-    return;
+    return std::nullopt;
   }
-  ui->hovering.push_back(*hover_);
-  if (--hover_snapshots_left_ <= 0) {
+  if (hover_shown_ && now >= hover_until_) {
     hover_.reset();
+    return std::nullopt;
   }
+  hover_shown_ = true;
+  ui->hovering.push_back(*hover_);
+  return hover_;
 }
 
 }  // namespace llm_brain

@@ -100,14 +100,14 @@ bool IsOptionTargetPending(Player* bot,
       return unit != nullptr && unit->IsInWorld() && !unit->isDead();
     }
     case OptionTarget::Kind::kLoot: {
-      // Done when the loot strategy is done with it, not when the corpse is
-      // empty: playerbots leaves items it has no use for (and vendor junk
-      // with full bags), and that corpse stays lootable.
-      const ObjectGuid guid = ParseSnapshotGuid(target.guid);
-      Creature* creature = ObjectAccessor::GetCreature(*bot, guid);
+      if (used || !bot->IsAlive()) {
+        return false;
+      }
+      Creature* creature =
+          ObjectAccessor::GetCreature(*bot, ParseSnapshotGuid(target.guid));
       return creature != nullptr && creature->IsInWorld() &&
-             creature->HasDynamicFlag(UNIT_DYNFLAG_LOOTABLE) &&
-             IsLootInProgress(bot, guid);
+             creature->isDead() &&
+             creature->HasDynamicFlag(UNIT_DYNFLAG_LOOTABLE);
     }
     case OptionTarget::Kind::kGather:
     case OptionTarget::Kind::kUse: {
@@ -561,8 +561,9 @@ class LlmBrainWorldScript : public WorldScript {
     } else if (command.close) {
       ui.Close(command.close->panel);
     } else if (command.hover) {
-      error = command.hover->ref ? ui.Hover(*command.hover->ref)
-                                 : "nothing to point at";
+      error = command.hover->ref
+                  ? ui.Hover(*command.hover->ref, base::TimeTicks::Now())
+                  : "nothing to point at";
     }
     if (error.empty()) {
       return;
@@ -590,6 +591,20 @@ class LlmBrainWorldScript : public WorldScript {
       if (now >= state.next_rest_try) {
         state.next_rest_try = now + base::Seconds(1);
         ContinueRest(bot);
+      }
+      return;
+    }
+    if (kind == OptionTarget::Kind::kLoot) {
+      Creature* creature = ObjectAccessor::GetCreature(
+          *bot, ParseSnapshotGuid(state.active_option->guid));
+      if (creature == nullptr || !IsInLootRange(bot, creature)) {
+        return;
+      }
+      state.object_used = true;
+      if (std::string text = LootCorpseNow(bot, creature); !text.empty()) {
+        LOG_INFO("module", "mod-llm-brain: {} can't loot {} on arrival: {}",
+                 name, state.active_option->name, text);
+        FailActiveOption(index, name, bot, std::move(text));
       }
       return;
     }

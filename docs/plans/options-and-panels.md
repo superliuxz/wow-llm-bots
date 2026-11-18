@@ -208,7 +208,7 @@ proposal is about what to build first and how the brain gets a panel open.
 
 ### As built (2026-11-18)
 
-- Module: `snapshot/ui_state.{h,cc}` (open panels, hover for 5 snapshots), `snapshot/panels_builder`
+- Module: `snapshot/ui_state.{h,cc}` (open panels, hover for 5 s), `snapshot/panels_builder`
   (bags, character, quest log, item and quest tooltips), `snapshot/spell_text` (token formatter and
   the Spell.dbc description reader: AzerothCore doesn't load descriptions, so the module reads
   field 170 of `DataDir/dbc/Spell.dbc` at startup for the spells items cast). Commands

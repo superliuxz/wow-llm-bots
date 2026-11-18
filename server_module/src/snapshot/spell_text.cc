@@ -166,4 +166,59 @@ std::string FormatSpellText(std::string_view text,
   return out;
 }
 
+std::string FormatQuestText(std::string_view text,
+                            std::string_view name,
+                            std::string_view class_name,
+                            std::string_view race_name,
+                            bool female) {
+  std::string out;
+  size_t i = 0;
+  while (i < text.size()) {
+    if (text[i] != '$' || i + 1 >= text.size()) {
+      out.push_back(text[i++]);
+      continue;
+    }
+    const char code = base::ToLowerASCII(text[i + 1]);
+    if (code == 'b') {
+      if (!out.empty() && out.back() != ' ' && out.back() != '\n') {
+        out.push_back(' ');
+      }
+      i += 2;
+      while (i < text.size() && text[i] == ' ') {
+        ++i;
+      }
+      continue;
+    }
+    if (code == 'n') {
+      out.append(name);
+      i += 2;
+      continue;
+    }
+    if (code == 'c') {
+      out.append(class_name);
+      i += 2;
+      continue;
+    }
+    if (code == 'r') {
+      out.append(race_name);
+      i += 2;
+      continue;
+    }
+    if (code == 'g') {
+      const size_t colon = text.find(':', i + 2);
+      const size_t semi = text.find(';', i + 2);
+      if (colon != text.npos && semi != text.npos && colon < semi) {
+        const std::string_view male_form = text.substr(i + 2, colon - i - 2);
+        const std::string_view female_form =
+            text.substr(colon + 1, semi - colon - 1);
+        out.append(female ? female_form : male_form);
+        i = semi + 1;
+        continue;
+      }
+    }
+    out.push_back(text[i++]);
+  }
+  return out;
+}
+
 }  // namespace llm_brain

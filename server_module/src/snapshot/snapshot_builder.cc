@@ -679,8 +679,7 @@ NearbyBuilder::Stats SnapshotBuilder::Build(Player* bot,
   FillOptionFacts(bot, snapshot, facts, world, now);
   // Open panels and the tooltip of what the bot points at (visibility OPEN and
   // HOVER, docs/specs/snapshot.md §3).
-  const std::optional<pb::HoverRef> hover = ui->hover();
-  ui->FillAndAge(&base.ui);
+  const std::optional<pb::HoverRef> hover = ui->FillAndAge(&base.ui, now);
   if (ui->IsOpen(pb::BAGS)) {
     FillBags(bot, &snapshot->ext.bags.emplace());
   }

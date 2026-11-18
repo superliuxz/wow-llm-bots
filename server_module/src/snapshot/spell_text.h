@@ -36,6 +36,15 @@ class SpellValueSource {
 std::string FormatSpellText(std::string_view text,
                             const SpellValueSource& values);
 
+// Fills in a quest text's client tokens: `$B`/`$b` (paragraph break -> space),
+// `$N`/`$n` (name), `$C`/`$c` (class), `$R`/`$r` (race), and `$Gmale:female;` /
+// `$gmale:female;`.
+std::string FormatQuestText(std::string_view text,
+                            std::string_view name,
+                            std::string_view class_name,
+                            std::string_view race_name,
+                            bool female);
+
 // Spell.dbc (3.3.5a WDBC) column of the description in the given locale:
 // field 170 is enUS, then one per locale (DBCStructure.h: not loaded by
 // AzerothCore, "not used" by the server).

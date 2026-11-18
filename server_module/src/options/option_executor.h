@@ -48,8 +48,8 @@ struct ExecuteResult {
   // What went wrong, phrased like the client's error line; empty when the body
   // took the choice on.
   std::string error;
-  // Gather / Use / Talk / Explore / GoTo: true when finished at once (already
-  // in reach or already at the destination).
+  // Loot / Gather / Use / Talk / Explore / GoTo: true when finished at once
+  // (already in reach or already at the destination).
   bool used = false;
   // Optional info summary emitted when Talk finishes at once.
   std::string info;
@@ -108,10 +108,14 @@ void ContinueRest(Player* bot);
 // HP or mana, and either holding a food/drink aura or sitting.
 bool IsRestInProgress(Player* bot, bool* had_food_drink_aura);
 
-// Whether the body is still looting the corpse `guid`: it is playerbots' loot
-// target or the open loot window. False once the loot strategy is done with
-// it, even if it left items it had no use for.
-bool IsLootInProgress(Player* bot, ObjectGuid guid);
+// Whether the bot is close enough to loot `creature` now.
+bool IsInLootRange(Player* bot, Creature* creature);
+
+// Opens `creature`'s corpse, takes its money and auto-loots all items for `bot`
+// through the server's loot opcodes (including grey items playerbots' own
+// >80%-bag-space filter would leave behind). Returns why it failed ("Inventory
+// is full", ...), or empty when looted.
+std::string LootCorpseNow(Player* bot, Creature* creature);
 
 }  // namespace llm_brain
 

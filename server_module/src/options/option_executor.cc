@@ -28,6 +28,7 @@
 #include "ItemTemplate.h"
 #include "ItemUsageValue.h"
 #include "LastMovementValue.h"
+#include "LootMgr.h"
 #include "LootObjectStack.h"
 #include "Map.h"
 #include "MotionMaster.h"
@@ -116,6 +117,10 @@ bool IsInUseRange(Player* bot, GameObject* go) {
 
 bool IsInTalkRange(Player* bot, Creature* npc) {
   return npc->IsWithinDistInMap(bot, INTERACTION_DISTANCE);
+}
+
+bool IsInLootRange(Player* bot, Creature* creature) {
+  return creature->IsWithinDistInMap(bot, INTERACTION_DISTANCE - 0.5f);
 }
 
 namespace {
@@ -682,20 +687,104 @@ WalkStepResult TickLongWalk(Player* bot,
   return {.path_time = path_time};
 }
 
-bool IsLootInProgress(Player* bot, ObjectGuid guid) {
-  if (bot->GetLootGUID() == guid) {
-    return true;
-  }
+std::string LootCorpseNow(Player* bot, Creature* creature) {
   PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
   if (!ai) {
-    return false;
+    return "not a bot";
   }
-  auto* loot_target =
-      ai->GetAiObjectContext()->GetValue<LootObject>("loot target");
-  return loot_target && loot_target->Get().guid == guid;
+  if (!creature || !creature->IsInWorld() || !creature->isDead()) {
+    return "nothing to loot";
+  }
+  if (!bot->isAllowedToLoot(creature) ||
+      !creature->HasDynamicFlag(UNIT_DYNFLAG_LOOTABLE)) {
+    return "nothing to loot on " + creature->GetName();
+  }
+  if (!creature->IsWithinDistInMap(bot, INTERACTION_DISTANCE)) {
+    return base::StringPrintf("%s is %.0f yd away", creature->GetName().c_str(),
+                              bot->GetDistance(creature));
+  }
+  ClearLastMovement(bot);
+  if (bot->isMoving()) {
+    bot->StopMoving();
+  }
+  if (AiObjectContext* ctx = ai->GetAiObjectContext()) {
+    if (auto* avail = ctx->GetValue<LootObjectStack*>("available loot");
+        avail && avail->Get()) {
+      avail->Get()->Remove(creature->GetGUID());
+    }
+    if (auto* lt = ctx->GetValue<LootObject>("loot target");
+        lt && lt->Get().guid == creature->GetGUID()) {
+      lt->Set(LootObject());
+    }
+  }
+  const ObjectGuid guid = creature->GetGUID();
+  if (const ObjectGuid prev = bot->GetLootGUID(); prev && prev != guid) {
+    bot->GetSession()->DoLootRelease(prev);
+  }
+  WorldPacket open_pkt(CMSG_LOOT, 8);
+  open_pkt << guid;
+  open_pkt.rpos(0);
+  bot->GetSession()->HandleLootOpcode(open_pkt);
+  if (bot->GetLootGUID() != guid) {
+    return "nothing to loot on " + creature->GetName();
+  }
+  if (creature->loot.gold > 0) {
+    WorldPacket money_pkt(CMSG_LOOT_MONEY, 0);
+    bot->GetSession()->HandleLootMoneyOpcode(money_pkt);
+  }
+  const uint32_t max_slot =
+      std::min<uint32_t>(255u, creature->loot.GetMaxSlotInLootFor(bot));
+  for (uint32_t slot = 0; slot < max_slot; ++slot) {
+    if (!creature->loot.LootItemInSlot(slot, bot)) {
+      continue;
+    }
+    WorldPacket item_pkt(CMSG_AUTOSTORE_LOOT_ITEM, 1);
+    item_pkt << static_cast<uint8_t>(slot);
+    item_pkt.rpos(0);
+    bot->GetSession()->HandleAutostoreLootItemOpcode(item_pkt);
+  }
+  bool left_behind = false;
+  for (uint32_t slot = 0; slot < max_slot; ++slot) {
+    if (creature->loot.LootItemInSlot(slot, bot) != nullptr) {
+      left_behind = true;
+      break;
+    }
+  }
+  WorldPacket release_pkt(CMSG_LOOT_RELEASE, 8);
+  release_pkt << guid;
+  release_pkt.rpos(0);
+  bot->GetSession()->HandleLootReleaseOpcode(release_pkt);
+  ai->ResetActionDuration();
+  if (left_behind) {
+    return "Inventory is full";
+  }
+  return "";
 }
 
 namespace {
+
+ExecuteResult ExecuteLootOption(Player* bot, const OptionTarget& target) {
+  Creature* creature =
+      ObjectAccessor::GetCreature(*bot, ParseSnapshotGuid(target.guid));
+  if (!creature || !creature->IsInWorld()) {
+    return {target.name + " is gone"};
+  }
+  if (!creature->isDead()) {
+    return {target.name + " isn't dead"};
+  }
+  LootObject loot(bot, creature->GetGUID());
+  if (loot.IsEmpty() || !bot->isAllowedToLoot(creature) ||
+      !creature->HasDynamicFlag(UNIT_DYNFLAG_LOOTABLE)) {
+    return {"nothing to loot on " + target.name};
+  }
+  if (IsInLootRange(bot, creature)) {
+    std::string error = LootCorpseNow(bot, creature);
+    const bool used = error.empty();
+    return {std::move(error), used};
+  }
+  WalkNextTo(bot, creature);
+  return {};
+}
 
 ExecuteResult ExecuteObjectOption(Player* bot, const OptionTarget& target) {
   GameObject* go =
@@ -807,6 +896,9 @@ ExecuteResult ExecuteOption(Player* bot,
   if (!bot->IsAlive()) {
     return {"you are dead"};  // A choice from before the bot died.
   }
+  if (target.kind == OptionTarget::Kind::kLoot) {
+    return ExecuteLootOption(bot, target);
+  }
   if (target.kind == OptionTarget::Kind::kGather ||
       target.kind == OptionTarget::Kind::kUse) {
     return ExecuteObjectOption(bot, target);
@@ -830,10 +922,7 @@ ExecuteResult ExecuteOption(Player* bot,
   // Playerbots returns null for a value name it doesn't know (a renamed one
   // after an update): fail the choice, never dereference it.
   auto* current_target = context->GetValue<Unit*>("current target");
-  auto* available_loot = context->GetValue<LootObjectStack*>("available loot");
-  auto* loot_target = context->GetValue<LootObject>("loot target");
-  if (!current_target || !available_loot || !available_loot->Get() ||
-      !loot_target) {
+  if (!current_target) {
     return {"the body can't do that (playerbots values missing)"};
   }
   switch (target.kind) {
@@ -862,35 +951,6 @@ ExecuteResult ExecuteOption(Player* bot,
       }
       return {};
     case OptionTarget::Kind::kLoot:
-      if (!unit->isDead()) {
-        return {target.name + " isn't dead"};
-      }
-      {
-        // The snapshot that offered it may be seconds old: someone else may
-        // have looted it since. Only loot rights are checked here, not
-        // IsLootPossible(), which also wants the corpse within 3 yd of the
-        // bot's height: true once it has walked there, not up a slope or
-        // stairs before it sets off.
-        Creature* creature = unit->ToCreature();
-        LootObject loot(bot, unit->GetGUID());
-        if (!creature || loot.IsEmpty() || !bot->isAllowedToLoot(creature)) {
-          return {"nothing to loot on " + target.name};
-        }
-        // Playerbots' loot strategy doesn't set off while the corpse is more
-        // than 3 yd above or below (IsLootPossible): walk there ourselves, and
-        // it takes over once level with it.
-        if (std::abs(unit->GetPositionZ() - bot->GetPositionZ()) >
-            INTERACTION_DISTANCE - 2.0f) {
-          WalkNextTo(bot, unit);
-        }
-        // The loot strategy walks to the "loot target" and opens it; clear any
-        // leftover check delay (SitDelay, RpgDelay, LootDelay) so UpdateAI acts
-        // on the next world tick instead of sleeping it out.
-        available_loot->Get()->Add(unit->GetGUID());
-        loot_target->Set(loot);
-        ai->ResetActionDuration();
-      }
-      return {};
     case OptionTarget::Kind::kGather:
     case OptionTarget::Kind::kUse:
     case OptionTarget::Kind::kTalk:
