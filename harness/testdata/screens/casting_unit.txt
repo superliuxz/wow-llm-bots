@@ -5,12 +5,12 @@ around me:
   - Loadc: level 1 troll priest, yellow, player, friendly; here, you're behind it
   - Loadb: level 1 troll priest, yellow, player, friendly, moving; 18 yd SE
   - Loadan: level 1 troll priest, yellow, player, friendly; 7 yd SW, you're behind it
-  2. Talk to Den Grunt: level 65 humanoid, skull level, npc, friendly, small; 8 yd W, facing you
-  3. Talk to Gornek: level 5 humanoid, orange, npc, friendly, quest marker quest incomplete; 14 yd W
-  4. Talk to Den Grunt: level 65 humanoid, skull level, npc, friendly; 7 yd SW, facing you
-  5. Talk to Ken'jai: level 10 humanoid, red, npc, friendly, subtitle Priest Trainer; 12 yd S, out of sight
+  - Den Grunt: level 65 humanoid, skull level, npc, friendly, small; 8 yd W, facing you
+  - Gornek: level 5 humanoid, orange, npc, friendly, quest marker quest incomplete; 14 yd W
+  - Den Grunt: level 65 humanoid, skull level, npc, friendly; 7 yd SW, facing you
+  2. Talk to Ken'jai: level 10 humanoid, red, npc, friendly, subtitle Priest Trainer; 12 yd S, out of sight
   - Loadam: level 1 troll priest, yellow, player, friendly, moving; 7 yd W, you're behind it
-  6. Talk to Den Grunt: level 65 humanoid, skull level, npc, friendly, patrolling; 17 yd E
+  - Den Grunt: level 65 humanoid, skull level, npc, friendly, patrolling; 17 yd E
   - Loadap: level 1 troll priest, yellow, player, friendly, moving; 16 yd E
   - Loadah: level 1 troll priest, yellow, player, friendly, health 85%; 11 yd SW
   - Loadae: level 1 troll priest, yellow, player, friendly; here, you're behind it
@@ -18,13 +18,15 @@ around me:
   - Loads: level 1 troll priest, yellow, player, friendly, moving, target Mottled Boar; 15 yd S, out of sight
 far away: 3x humanoid, npc, small (34-69 yd N/SE); 5x humanoid, npc (21-73 yd E/N/NE/S/SE); 1x humanoid, npc, small, patrolling (71 yd E); 16x troll, player, moving (21-96 yd E/N/NE/SE/W); 16x troll, player (27-90 yd E/NE/SE/W); 2x troll, player, casting (83-84 yd SE)
 objects:
-  7. Use 3x Crude Brazier: other; 11-48 yd SW/W
-  8. Use Bubbling Cauldron: other; 46 yd N
-  9. Use Fire: other; 46 yd E
-  10. Use Razor Hill: other; 96 yd E
-  11. Use Cooking Table: other; 40 yd N
+  - 3x Crude Brazier: other; 11-48 yd SW/W
+  - Bubbling Cauldron: other; 46 yd N
+  - Fire: other; 46 yd E
+  - Razor Hill: other; 96 yd E
+  - Cooking Table: other; 40 yd N
 also:
-  12. Keep doing what I'm doing
-  13. Explore somewhere new
-  14. Rest (eat and drink)
-  15. Go to the nearest town
+  3. Explore N, 116 yd (boars, level 1-2)
+  4. Explore NE, 120 yd (boars, level 1-2)
+  5. Explore SE, 140 yd (boars, level 1-2)
+  6. Go to Ratchet (innkeeper, vendor, repair, flight master), 700 yd SW
+  7. Go to Valley of Trials (vendor, repair, priest trainer, graveyard), 37 yd SE
+  8. Keep doing what I'm doing

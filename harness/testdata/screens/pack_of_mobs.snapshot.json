@@ -2296,5 +2296,35 @@
         }
       ]
     }
-  }
+  },
+  "options": [
+    {
+      "text": "Explore S, 1888 yd (scorpids, level 3)",
+      "guid": "spot:1:-252:-4227",
+      "kind": "EXPLORE",
+      "name": "scorpids, level 3"
+    },
+    {
+      "text": "Go to Orgrimmar (innkeeper, vendor, repair, flight master), 68 yd E",
+      "guid": "place:1:1634:-4439",
+      "kind": "GO_TO",
+      "name": "Orgrimmar"
+    },
+    {
+      "text": "Go to Orgrimmar (vendor, repair, priest trainer), 218 yd SW",
+      "guid": "place:1:1467:-4230",
+      "kind": "GO_TO",
+      "name": "Orgrimmar"
+    },
+    {
+      "text": "Go to Durotar Graveyard (graveyard), 461 yd S",
+      "guid": "place:1:1178:-4464",
+      "kind": "GO_TO",
+      "name": "Durotar Graveyard"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
 }

@@ -13,11 +13,8 @@ Items #1–#5 are done and verified live (2026-11-18).
 
 ## Next, in order
 
-- **Trigger audit re-judgment and room landmarks** (`docs/specs/triggers.md`): re-judge the
-  unsayable and stretched rows with the final grammar for a measured coverage number (against the
-  earlier grammar: conditions 85%, actions 46%; upper bounds with the new constructs about 89%
-  and 55%); named room landmarks (most of the 133 "go to hardcoded coordinates" actions) wait for
-  a boss that needs them.
+- **Named room landmarks** (`docs/specs/triggers.md`): 132 of the 218 unsayable boss actions move
+  to hardcoded room coordinates; deferred until a boss fight needs per-room landmark data.
 
 ## Later
 
@@ -33,11 +30,6 @@ Items #1–#5 are done and verified live (2026-11-18).
 
 ## Loose ends
 
-- **Screen goldens have no module options** (review of c80e791, finding 5; still open after the
-  review of f40b0b6): the 10 goldens test rendering against the Python prototype, which invents
-  its own options. Real options need each golden's facts captured on the test server
-  (`add_fixture_options.py --capture` does it for the eval) and the prototype taught the
-  module's numbering. Module options are covered by `ScreenRendererTest` unit tests meanwhile.
 - Stale docs: `docs/specs/snapshot.md`, `docs/specs/trigger-audit.md`, `docs/plans/harness.md`
   and `docs/plans/phase2.md` still point at `server_module/proto/snapshot.proto` (protobuf, gone
   since 76e38a5); the structs are `snapshot/snapshot.h` now.
@@ -95,6 +87,12 @@ Items #1–#5 are done and verified live (2026-11-18).
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-18: screen goldens populated with real module options (`harness/testdata/screens/*.facts.json`
+  captured on the isolated test server, `add_fixture_options.py` checking both `eval` and
+  `screens`, `tools/bench/prompt_render.py` taught module option numbering and self auras);
+  trigger audit tables (`trigger-conditions.tsv`, `trigger-actions.tsv`, `triggers.md`) re-judged
+  against the final grammar (`Points 0..99999` for `mana_points`): **483/547 (88%, 77% clean)**
+  conditions and **251/469 (54%, 43% clean)** actions fit (`OrdersTest.*Audit*` passing).
 - 2026-11-18: live standing-orders e2e suite (`tools/wlblib/cases/e2e_orders.py`,
   `config/tests/orders.llm-brain.overrides`, `server_module/testdata/characters/priest-l80-boars.pdump`,
   test-only `llmtest` console commands in `server_module/src/test/test_commands.{h,cc}`): runs real

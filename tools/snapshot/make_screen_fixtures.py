@@ -64,9 +64,24 @@ def check():
     sys.exit(1 if bad else 0)
 
 
+def rewrite():
+    """Re-renders .txt and .options from the committed .snapshot.json files."""
+    snaps = sorted(OUT.glob("*.snapshot.json"))
+    for jf in snaps:
+        stem = jf.name.removesuffix(".snapshot.json")
+        d = json.loads(jf.read_text())
+        text, kinds = render_tight(d, numbered=True)
+        (OUT / f"{stem}.txt").write_text(text + "\n")
+        (OUT / f"{stem}.options").write_text("\n".join(kinds) + "\n")
+    print(f"rewrote {len(snaps)} screen goldens")
+
+
 def main():
     if sys.argv[1:] == ["--check"]:
         check()
+    if sys.argv[1:] == ["--rewrite"]:
+        rewrite()
+        return
     OUT.mkdir(parents=True, exist_ok=True)
     files = sorted(f for root in sys.argv[1:] for f in glob.glob(f"{root}/*/*.json"))
     wanted = dict(FEATURES)

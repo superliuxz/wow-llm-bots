@@ -28,6 +28,7 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 EVAL = ROOT / "harness" / "testdata" / "eval"
+SCREENS = ROOT / "harness" / "testdata" / "screens"
 HARNESS = ROOT / "out" / "common" / "harness"
 TOOL = ROOT / "out" / "common" / "fixture_options"
 QUERIES_DIR = ROOT / "var" / "test-facts"
@@ -41,23 +42,41 @@ def scene_of(case):
     return {**SCENE_DEFAULTS, **case.get("scene", {})}
 
 
-def capture(cases):
+def screen_fixture_stems():
+    return [p.name.removesuffix(".snapshot.json") for p in sorted(SCREENS.glob("*.snapshot.json"))]
+
+
+def capture(cases, screens_only=False):
     """Has the module write every case's facts (test/facts_dump.cc)."""
     sys.path.insert(0, str(ROOT / "tools"))
     from wlblib import testing  # noqa: E402 (needs tools/ on the path)
 
     shutil.rmtree(QUERIES_DIR, ignore_errors=True)
     QUERIES_DIR.mkdir(parents=True)
+    targets = []
+    if not screens_only:
+        for case in cases:
+            targets.append((
+                EVAL / f"{case['name']}.snapshot.json",
+                QUERIES_DIR / f"eval_{case['name']}.facts.json",
+                EVAL / f"{case['name']}.facts.json",
+                scene_of(case),
+            ))
+    for stem in screen_fixture_stems():
+        targets.append((
+            SCREENS / f"{stem}.snapshot.json",
+            QUERIES_DIR / f"screen_{stem}.facts.json",
+            SCREENS / f"{stem}.facts.json",
+            SCENE_DEFAULTS,
+        ))
     lines = []
-    for case in cases:
-        s = scene_of(case)
+    for snap_p, out_p, _, s in targets:
         lines.append("\t".join([
-            str(EVAL / f"{case['name']}.snapshot.json"),
-            str(QUERIES_DIR / f"{case['name']}.facts.json"),
+            str(snap_p), str(out_p),
             s["team"], "1" if s["has_food"] else "0", "1" if s["has_drink"] else "0",
             str(s["herbalism"]), str(s["mining"])]))
     (QUERIES_DIR / "queries.tsv").write_text("\n".join(lines) + "\n")
-    want = [QUERIES_DIR / f"{case['name']}.facts.json" for case in cases]
+    want = [out_p for _, out_p, _, _ in targets]
     with testing.Stack("facts", bot="Loada") as stack:
         end = time.time() + CAPTURE_TIMEOUT_S
         while not all(p.exists() for p in want):
@@ -66,9 +85,9 @@ def capture(cases):
                 raise SystemExit(f"the module wrote no facts for {', '.join(missing[:5])}...: "
                                  "see var/logs/test/Server.log ('facts dump')")
             time.sleep(0.5)
-    for case, src in zip(cases, want):
-        shutil.copyfile(src, EVAL / f"{case['name']}.facts.json")
-    print(f"captured facts for {len(want)} cases")
+    for _, src, dst, _ in targets:
+        shutil.copyfile(src, dst)
+    print(f"captured facts for {len(want)} snapshots")
 
 
 def screen_options(path):
@@ -87,7 +106,9 @@ def main():
     check = "--check" in sys.argv[1:]
     cases = json.loads((EVAL / "cases.json").read_text())
     if "--capture" in sys.argv[1:]:
-        capture(cases)
+        capture(cases, screens_only=False)
+    elif "--capture-screens" in sys.argv[1:]:
+        capture(cases, screens_only=True)
     stale, rejudge = [], []
     for case in cases:
         path = EVAL / f"{case['name']}.snapshot.json"
@@ -114,6 +135,19 @@ def main():
                 print(f"{case['name']}: {key} dropped {dropped}")
             if key == "first_options" and not moved:
                 rejudge.append(case["name"])
+    for stem in screen_fixture_stems():
+        path = SCREENS / f"{stem}.snapshot.json"
+        if not (SCREENS / f"{stem}.facts.json").exists():
+            raise SystemExit(f"screens/{stem}: no facts.json (run with --capture-screens)")
+        snap = json.loads(path.read_text())
+        want = module_options(path)
+        if snap.get("options") == want:
+            continue
+        if check:
+            stale.append(f"screens/{stem}")
+            continue
+        snap["options"] = want
+        path.write_text(json.dumps(snap, indent=2, ensure_ascii=False) + "\n")
     if check:
         if stale:
             print("options out of date (run tools/snapshot/add_fixture_options.py):",

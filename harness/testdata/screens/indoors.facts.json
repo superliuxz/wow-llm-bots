@@ -1,0 +1,71 @@
+{
+  "npcs": [
+    {
+      "guid": "0xF130000E7B000225",
+      "npc_flags": 51
+    }
+  ],
+  "has_food": true,
+  "has_drink": true,
+  "spots": [
+    {
+      "id": "spot:1:-487:-4214",
+      "dir": "N",
+      "dist_yd": 115.72367,
+      "label": "boars, level 1-2",
+      "pos": {
+        "x": -487.311,
+        "y": -4213.77,
+        "z": 50.2931
+      }
+    },
+    {
+      "id": "spot:1:-517:-4287",
+      "dir": "NE",
+      "dist_yd": 122.81356,
+      "label": "boars, level 1-2",
+      "pos": {
+        "x": -516.59,
+        "y": -4286.81,
+        "z": 40.0634
+      }
+    },
+    {
+      "id": "spot:1:-715:-4286",
+      "dir": "SE",
+      "dist_yd": 143.49141,
+      "label": "boars, level 1-2",
+      "pos": {
+        "x": -714.713,
+        "y": -4286.47,
+        "z": 43.2732
+      }
+    }
+  ],
+  "places": [
+    {
+      "id": "place:1:-1050:-3665",
+      "name": "Ratchet",
+      "services": "innkeeper, vendor, repair, flight master",
+      "dir": "SW",
+      "dist_yd": 697.0559,
+      "pos": {
+        "x": -1050.04,
+        "y": -3664.8,
+        "z": 23.9684
+      }
+    },
+    {
+      "id": "place:1:-627:-4230",
+      "name": "Valley of Trials",
+      "services": "vendor, repair, priest trainer, graveyard",
+      "dir": "SE",
+      "dist_yd": 40.71849,
+      "pos": {
+        "x": -627.102,
+        "y": -4229.93,
+        "z": 42.0365
+      }
+    }
+  ]
+}

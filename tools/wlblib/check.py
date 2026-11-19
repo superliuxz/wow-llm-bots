@@ -154,9 +154,10 @@ def snapshots(files=()):
 
 
 def triggers():
-    """The standing-order audit tables against the real parser (harness/src/orders.cc): every
+    """The standing-order audit tables against the real parser (harness/src/plan/orders.cc): every
     `fits` row parses, every row has a known verdict. Also part of the unit tests."""
     build.common("default", tests=False)
+    run(["ninja", "-C", OUT / "common", "harness_unittests"])
     run([OUT / "common" / "harness_unittests", "--gtest_filter=OrdersTest.*Audit*"])
 
 

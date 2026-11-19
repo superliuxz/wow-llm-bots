@@ -110,7 +110,7 @@ test    ::= mech " on " who                                    ; an aura or debu
           | thing (" within " | " beyond ") num (" of " thing)?   ; yards, from me or from a thing
           | thing " targets " thing
           | thing " hp" cmp num                                ; percent of maximum
-          | "mana" cmp num | "mana_points" cmp cnt             ; mine: percent / an absolute amount
+          | "mana" cmp num | "mana_points" cmp pts             ; mine: percent / an absolute amount (0..99999)
           | thing " is " state | thing " is marked " icon
           | thing " in sight" | thing " out of sight"          ; line of sight
           | "me behind " thing | "my target is " thing
@@ -211,20 +211,23 @@ range of`, `N yd from`) cover most of the 85 `relative_spot` rows.
 | `kite` | run a kiting circle around or away from a unit |
 | `wake` | no rule fits: ask the brain (what every watch does today) |
 
-**What the two audits say the grammar can say** (the rows were judged against the earlier grammar
-with the 10 verbs; the second line of each is an upper bound with the constructs added above, not
-a re-judgment):
+**What the two audits say the grammar can say** (re-judged 2026-11-18 against the final 18-verb
+`orders.wlb` grammar and `#5e` snapshot additions; every `fits` row is parsed and GBNF-checked by
+`OrdersTest.*Audit*` / `tools/wlb check triggers`):
 
-| | Judged | With the final grammar (at most) |
-|---|---|---|
-| Conditions: `fits` + `always` of 547 | 463 (85%) | about 486 (89%) |
-| Actions: `fits` of 469 (`fits` + `unsayable`) | 215 (46%) | about 260 (55%) |
+| | Earlier grammar (10 verbs) | Final grammar (measured, 2026-11-18) | Clean without stretch |
+|---|---|---|---|
+| Conditions: `fits` + `always` of 547 | 463 (85%; 380 / 69% clean) | **483 (88%)** (`359 fits` + `124 always`, `64 unsayable`) | **421 (77%)** (`297 clean fits` + `124 always`; `62` stretched) |
+| Actions: `fits` of 469 (`fits` + `unsayable`) | 215 (46%; 145 / 31% clean) | **251 (54%)** (`251 fits`, `218 unsayable`) | **204 (43%)** (`47` stretched) |
 
-What stays out of the grammar, by the actions' count of blockers (a row can have several): **hardcoded
-locations 133** (a snapshot gap: landmarks), **assignments 89** (the brain writes each bot's own
-orders), **multi-step or branching procedures 72** (a skill the engine owns, or a brain decision).
-The next measurement is to re-judge the 84 unsayable and 83 stretched conditions and the 254
-unsayable actions with this grammar.
+What stays out of the grammar, by the remaining 218 unsayable actions' count of blockers (a row can
+have several): **hardcoded locations 132** (a snapshot gap: room landmarks), **assignments 89** (the
+brain writes each bot's own orders), **relative/multi-avoidance geometry 73**, **multi-step or
+branching procedures 71** (a skill the engine owns, or a brain decision), **target filters 30**,
+**verbs 23** (loot packets, item destroy, chat/emote), **vehicle/gear 14**. For the 64 unsayable
+conditions: `other` 29 (mainly auras on non-boss adds or playerbots' "my master"), `assignment` 21,
+`fixed_location` 17, `timer` 11, `nonaura_state` 10, `vehicle_gear` 5, `distance_other` 4,
+`count` 2, `health_range` 1.
 
 **What a first pass over playerbots' boss triggers found** (2026-11-16, against the first
 grammar; its table was not kept, and the re-run below replaces its numbers). Six readers wrote each of the 594 boss-trigger bodies in the

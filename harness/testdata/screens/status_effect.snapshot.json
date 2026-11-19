@@ -1037,5 +1037,47 @@
         }
       ]
     }
-  }
+  },
+  "options": [
+    {
+      "text": "Gather Cactus Apple",
+      "guid": "0xF110029FA20000C5",
+      "kind": "GATHER",
+      "name": "Cactus Apple"
+    },
+    {
+      "text": "Explore SE, 76 yd (boars, level 1-2)",
+      "guid": "spot:1:-715:-4286",
+      "kind": "EXPLORE",
+      "name": "boars, level 1-2"
+    },
+    {
+      "text": "Explore SW, 127 yd (boars, level 1-2)",
+      "guid": "spot:1:-747:-4181",
+      "kind": "EXPLORE",
+      "name": "boars, level 1-2"
+    },
+    {
+      "text": "Explore N, 132 yd (boars, level 1-2)",
+      "guid": "spot:1:-517:-4287",
+      "kind": "EXPLORE",
+      "name": "boars, level 1-2"
+    },
+    {
+      "text": "Go to Ratchet (innkeeper, vendor, repair, flight master), 717 yd SW",
+      "guid": "place:1:-1050:-3665",
+      "kind": "GO_TO",
+      "name": "Ratchet"
+    },
+    {
+      "text": "Go to Valley of Trials (vendor, repair, priest trainer, graveyard), 32 yd NW",
+      "guid": "place:1:-627:-4230",
+      "kind": "GO_TO",
+      "name": "Valley of Trials"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
 }

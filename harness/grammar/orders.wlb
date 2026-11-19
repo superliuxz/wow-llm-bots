@@ -16,8 +16,9 @@ words Cmp     { "<", ">" }
 words Stop    { casting, attacking, moving }
 words PetCmd  { stay, follow, passive, defensive }
 num   Num   0..999 1dp
-int   Count 0..999
-int   Digit 0..9
+int   Count  0..999
+int   Points 0..99999
+int   Digit  0..9
 name  Name  from order_names
 
 choice NearestKind {
@@ -53,7 +54,7 @@ choice Check {
   Beyond     = a:Thing " beyond " yd:Num (" of " b:Thing)?;
   Targets    = a:Thing " targets " b:Thing;
   Hp         = a:Thing " hp" cmp:Cmp pct:Num;
-  ManaPoints = "mana_points" cmp:Cmp n:Count;
+  ManaPoints = "mana_points" cmp:Cmp n:Points;
   Mana       = "mana" cmp:Cmp pct:Num;
   IsMarked   = a:Thing " is marked " icon:Icon;
   Is         = a:Thing " is " state:State;

@@ -145,6 +145,24 @@ def self_line(s):
                                "camping", "drunk") if s.get(k)]
     if s.get("state", "ALIVE") != "ALIVE":
         flags.insert(0, word(s["state"]))
+    auras = u.get("auras") or []
+    buffs, debuffs = [], []
+    for a in auras:
+        name = a.get("name", "")
+        if not name:
+            continue
+        txt = name
+        if a.get("stacks", 0) > 1:
+            txt += f" x{a['stacks']}"
+        rem = a.get("remaining_s")
+        if rem is not None and rem > 0:
+            sec = round(rem)
+            txt += f" ({sec // 60}m)" if sec >= 60 else f" ({sec}s)"
+        (debuffs if a.get("harmful") else buffs).append(txt)
+    if buffs:
+        flags.append("buffs: " + ", ".join(buffs))
+    if debuffs:
+        flags.append("debuffs: " + ", ".join(debuffs))
     return "; ".join(bits + flags)
 
 
@@ -212,24 +230,58 @@ def option_kind(item):
 VERBS = {"attack": "Attack ", "talk": "Talk to ", "loot": "Loot ",
          "gather": "Gather ", "use": "Use "}
 
+MODULE_OPTION_KIND = {
+    "ATTACK": "attack",
+    "TALK": "talk",
+    "LOOT": "loot",
+    "GATHER": "gather",
+    "USE": "use",
+    "REST": "rest",
+    "EXPLORE": "explore",
+    "GO_TO": "town",
+    "KEEP": "keep",
+}
 
-def tight_things(items, kinds=None):
-    """One line per thing; with `kinds` (a list), entries the bot can act on get the next number
-    and their kind is appended."""
-    groups = collections.OrderedDict()
+
+def tight_things(items, kinds=None, guid_to_opt=None, placed=None):
+    """One line per thing; when `guid_to_opt` is given (snapshot has module options), only groups
+    whose guid is in `guid_to_opt` get that exact option number; otherwise entries the bot can act
+    on get the next number and their kind is appended."""
+    has_mod = guid_to_opt is not None
+    groups = []  # [name, look, opt, mod_opt, [items]]
     for item in items:
-        # Things share a line only if they also share what the bot can do with them.
-        key = (item.get("name", "?"), tight_look(item), option_kind(item) if kinds is not None else None)
-        groups.setdefault(key, []).append(item)
+        name = item.get("name") or "?"
+        look = tight_look(item)
+        mod_opt = guid_to_opt.get(item.get("guid", ""), 0) if has_mod else 0
+        if kinds is None:
+            opt = None
+        elif mod_opt > 0:
+            opt = kinds[mod_opt - 1]
+        else:
+            opt = option_kind(item)
+        merged = False
+        for g in groups:
+            if g[0] == name and g[1] == look and g[2] == opt and (g[3] == 0 or mod_opt == 0):
+                if g[3] == 0 and mod_opt > 0:
+                    g[3] = mod_opt
+                g[4].append(item)
+                merged = True
+                break
+        if not merged:
+            groups.append([name, look, opt, mod_opt, [item]])
     lines = []
-    for (name, look, _), group in groups.items():
+    for name, look, opt, mod_opt, group in groups:
         rels = [g.get("rel") for g in group]
         mark, verb = "-", ""
-        kind = option_kind(group[0]) if kinds is not None else None
-        if kind:
-            kinds.append(kind)
+        if has_mod:
+            if mod_opt > 0:
+                mark = f"{mod_opt}."
+                verb = VERBS.get(kinds[mod_opt - 1], "")
+                placed[mod_opt - 1] = True
+        elif kinds is not None and opt:
+            kinds.append(opt)
             mark = f"{len(kinds)}."
-            verb = VERBS.get(kind, "")
+            verb = VERBS.get(opt, "")
         if len(rels) == 1:
             lines.append(f"{mark} {verb}{name}: {look}; {tight_where(rels[0])}")
         else:
@@ -250,7 +302,20 @@ def render_tight(snapshot, coarse=False, numbered=False):
     each option, in order ("attack", "talk", "loot", "gather", "use", "keep", ...)."""
     global COARSE
     COARSE = coarse
-    kinds = [] if numbered else None
+    mod_options = snapshot.get("options") or []
+    has_mod = numbered and bool(mod_options)
+    if has_mod:
+        kinds = [MODULE_OPTION_KIND.get(o.get("kind", ""), "keep") for o in mod_options]
+        placed = [False] * len(mod_options)
+        guid_to_opt = {}
+        for i, o in enumerate(mod_options, 1):
+            g = o.get("guid", "")
+            if g and g not in guid_to_opt:
+                guid_to_opt[g] = i
+    else:
+        kinds = [] if numbered else None
+        placed = None
+        guid_to_opt = None
     base = snapshot.get("base", {})
     lines = []
     if base.get("self"):
@@ -266,23 +331,30 @@ def render_tight(snapshot, coarse=False, numbered=False):
         named.sort(key=lambda u: (u["name"], (u.get("rel") or {}).get("dir", "")))
     if named:
         lines.append("around me:")
-        lines += ["  " + line for line in tight_things(named, kinds)]
+        lines += ["  " + line for line in tight_things(named, kinds, guid_to_opt, placed)]
     if nameless:
         lines.append("far away: " + far_summary(nameless))
     if nearby.get("objects"):
         lines.append("objects:")
-        lines += ["  " + line for line in tight_things(nearby["objects"], kinds)]
+        lines += ["  " + line for line in tight_things(nearby["objects"], kinds, guid_to_opt, placed)]
     rest = {k: v for k, v in base.items() if k not in ("self", "where", "doing", "nearby")}
     rest = {"base": rest} if rest else {}
-    for key in ("ext", "events", "options"):
+    for key in ("ext", "events", *(() if numbered else ("options",))):
         if snapshot.get(key):
             rest[key] = snapshot[key]
     if rest:
         lines += render(rest)
     if numbered:
-        lines.append("also:")
-        for kind, text in ALWAYS:
-            kinds.append(kind)
-            lines.append(f"  {len(kinds)}. {text}")
+        if has_mod:
+            extra = [f"  {i + 1}. {o.get('text', '')}"
+                     for i, o in enumerate(mod_options) if not placed[i]]
+            if extra:
+                lines.append("also:")
+                lines += extra
+        else:
+            lines.append("also:")
+            for kind, text in ALWAYS:
+                kinds.append(kind)
+                lines.append(f"  {len(kinds)}. {text}")
         return "\n".join(lines), kinds
     return "\n".join(lines)

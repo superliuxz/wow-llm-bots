@@ -17,10 +17,9 @@
 namespace harness {
 namespace {
 
-// Nine options: 1-2 attack, 3 use, 4 gather, 5 use, then keep, explore, rest,
-// town.
+// Three module options in combat: 1 attack, 2 gather, 3 keep.
 constexpr char kGoodPlan[] =
-    "do: 1x3, 7\nexpect: 1\nwatch: hp<40\nlook: 90\ngoal: kill the boars";
+    "do: 1x3, 2\nexpect: 1\nwatch: hp<40\nlook: 90\ngoal: kill the boars";
 
 DecideOptions Options() {
   DecideOptions options;
@@ -102,7 +101,7 @@ TEST(DecideTest, ShowsTheScreenTheReplyAndWhatThePlanMeans) {
   LlmRequest seen;
   std::string report;
   EXPECT_EQ(RunDecide(Options(), Replying(kGoodPlan, &seen), &report), 0);
-  EXPECT_NE(report.find("== screen of Tess (9 options)"), std::string::npos)
+  EXPECT_NE(report.find("== screen of Tess (3 options)"), std::string::npos)
       << report;
   EXPECT_NE(report.find("Mottled Boar"), std::string::npos);
   EXPECT_NE(
@@ -110,7 +109,7 @@ TEST(DecideTest, ShowsTheScreenTheReplyAndWhatThePlanMeans) {
           "== reply (42 ms; prompt 700 tokens, 100 read again; wrote 12)"),
       std::string::npos)
       << report;
-  EXPECT_NE(report.find("== plan: 1x3 attack, 7 explore; look again in 90 s"),
+  EXPECT_NE(report.find("== plan: 1x3 attack, 2 gather; look again in 90 s"),
             std::string::npos)
       << report;
   // The model was asked with shared rules in system and bot context in user.
@@ -118,12 +117,12 @@ TEST(DecideTest, ShowsTheScreenTheReplyAndWhatThePlanMeans) {
   EXPECT_EQ(seen.system.find("Tess"), std::string::npos);
   EXPECT_NE(seen.user.find("You are Tess."), std::string::npos);
   EXPECT_NE(seen.user.find("Woken: plan done."), std::string::npos);
-  // The grammar offers the screen's nine options and no more.
+  // The grammar offers the screen's three options and no more.
   EXPECT_TRUE(GbnfAccepts(seen.grammar, "root",
-                          "do: 9\nexpect: none\nwatch: none\nlook: 60")
+                          "do: 3\nexpect: none\nwatch: none\nlook: 60")
                   .accepted);
   EXPECT_FALSE(GbnfAccepts(seen.grammar, "root",
-                           "do: 10\nexpect: none\nwatch: none\nlook: 60")
+                           "do: 4\nexpect: none\nwatch: none\nlook: 60")
                    .accepted);
 }
 

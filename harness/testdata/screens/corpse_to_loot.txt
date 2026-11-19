@@ -5,11 +5,14 @@ around me:
   2. Loot Mottled Boar: level 1 boar, yellow, npc, neutral, dead, lootable yes; 11 yd S, below
 far away: 5x troll, player, moving (27-73 yd NW/SW); 2x humanoid, npc, small, visual state [rooted] (63-74 yd NE/S); 2x boar, npc (43-53 yd E/NE); 2x scorpid, npc, moving (37-78 yd SE); 1x critter, critter, small, moving (62 yd SW); 5x boar, npc, dead (31-79 yd SW/W); 3x humanoid, npc, small (62-98 yd N/NW); 1x humanoid, npc (95 yd NW); 6x troll, player (34-76 yd SW/W)
 objects:
-  3. Use 2x LumberPile: other; 67-70 yd N/S
-  4. Gather 3x Cactus Apple: herb; 14-67 yd E/NW/SW
-  5. Use Razor Hill: other; 94 yd N, below
+  - 2x LumberPile: other; 67-70 yd N/S
+  3. Gather 3x Cactus Apple: herb; 14-67 yd E/NW/SW
+  - Razor Hill: other; 94 yd N, below
 also:
-  6. Keep doing what I'm doing
-  7. Explore somewhere new
-  8. Rest (eat and drink)
-  9. Go to the nearest town
+  4. Rest (eat and drink)
+  5. Explore SW, 37 yd (boars, level 1-2)
+  6. Explore NE, 128 yd (boars, level 1-2)
+  7. Explore N, 172 yd (boars, level 1-2)
+  8. Go to Ratchet (innkeeper, vendor, repair, flight master), 741 yd SW
+  9. Go to Valley of Trials (vendor, repair, priest trainer, graveyard), 100 yd NW
+  10. Keep doing what I'm doing
