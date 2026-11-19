@@ -927,6 +927,19 @@ struct Command_Act {
     USE = 4,
     STOP = 5,
     WAKE = 6,
+    AVOID = 7,
+    FACE = 8,
+    FACE_AWAY = 9,
+    JUMP = 10,
+    CANCEL = 11,
+    MARK = 12,
+    INTERACT = 13,
+    BOARD = 14,
+    LEAVE = 15,
+    EQUIP = 16,
+    PET_ATTACK = 17,
+    PET = 18,
+    KITE = 19,
   };
   using enum Verb;
 
@@ -972,10 +985,20 @@ struct Command_Act {
   };
   using enum StopKind;
 
+  enum class PetCmd : uint8_t {
+    PET_CMD_UNSPECIFIED = 0,
+    STAY = 1,
+    FOLLOW = 2,
+    PASSIVE = 3,
+    DEFENSIVE = 4,
+  };
+  using enum PetCmd;
+
   Command_Act::Verb verb = Command_Act::Verb::VERB_UNSPECIFIED;
   Command_Act::ThingKind thing = Command_Act::ThingKind::THING_UNSPECIFIED;
   Command_Act::PlaceKind place = Command_Act::PlaceKind::PLACE_UNSPECIFIED;
   Command_Act::StopKind stop = Command_Act::StopKind::STOP_UNSPECIFIED;
+  Command_Act::PetCmd pet_cmd = Command_Act::PetCmd::PET_CMD_UNSPECIFIED;
   RaidMarker marker = RaidMarker::RAID_MARKER_UNSPECIFIED;
   std::string name;
   std::string target_name;
@@ -2838,6 +2861,7 @@ std::string_view EnumName(Command_Act::Verb value);
 std::string_view EnumName(Command_Act::PlaceKind value);
 std::string_view EnumName(Command_Act::ThingKind value);
 std::string_view EnumName(Command_Act::StopKind value);
+std::string_view EnumName(Command_Act::PetCmd value);
 std::string_view EnumName(Relative::Height value);
 std::string_view EnumName(Spell::School value);
 std::string_view EnumName(Item::Quality value);

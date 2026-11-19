@@ -48,9 +48,14 @@ design decisions below.
      `kMinReactiveGap = 50 ms` (`snapshot_schedule.{h,cc,_unittest.cc}`), backed by
      `CollectReactiveState` / `HasNewCastOrAura` (`world_util.{h,cc}`, wired into
      `llm_brain_world_script.cc`) watching the bot, its selected target, and its attackers.
-   - **(d) Not started:** the other verbs: `kite` (first check pausing playerbots' combat
-     movement while a step steers), `mark`, `board` / `leave vehicle`, `equip`, `pet`,
-     `interact`, `face`, `jump`, `cancel`, `avoid`.
+   - **(d) Done (2026-11-18):** all remaining verbs on the wire (`Command::Act::Verb` + `PetCmd`),
+     in `OrderActToCommand`, and in `act_executor.cc`: `kite` (tangential arc steering in
+     `act_geometry.cc` using `MovementPriority::MOVEMENT_FORCED` to pause playerbots' combat
+     movement and clearing `last movement` on end), `mark` (with raid leader/assistant check),
+     `board` (`CMSG_SPELLCLICK`) / `leave vehicle` (`CMSG_REQUEST_VEHICLE_EXIT` + dismount),
+     `equip` (`CanEquipItem` + `SwapItem`), `pet` / `pet attack` (`HandlePetActionHelper`),
+     `interact` (`UseObjectNow` / `TalkToNpcNow`), `face` / `face away`, `jump`, `cancel`
+     (checks `SPELL_ATTR0_NO_AURA_CANCEL`), `avoid`.
    - **(e) Not started:** snapshot additions: flying / untargetable / submerged on `Unit`,
      `lands_in_s`, the liquid under the bot, the main assist.
    - **(f) Not started:** evals (boss notes in, orders out; a bot without the note writes none)

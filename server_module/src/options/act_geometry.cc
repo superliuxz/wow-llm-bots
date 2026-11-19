@@ -134,6 +134,22 @@ std::vector<pb::Vec3> CandidateSpotsForAway(const pb::Vec3& bot_pos,
   return spots;
 }
 
+std::vector<pb::Vec3> CandidateSpotsForKite(const pb::Vec3& bot_pos,
+                                            const AnchorGeometry& anchor,
+                                            float kite_dist_yd) {
+  const float dist = kite_dist_yd > 0.0f ? kite_dist_yd : kDefaultKiteYd;
+  const float base =
+      BearingFromTo(anchor.pos, bot_pos, anchor.facing_rad + kPi);
+  // Prefer tangential steps around the kiting circle (+45 / -45 / +90 / -90),
+  // falling back to straight away (0) and wider arcs if blocked by walls.
+  static constexpr float kOffsets[] = {45.0f, -45.0f, 90.0f,   -90.0f,
+                                       0.0f,  135.0f, -135.0f, 180.0f};
+  std::vector<pb::Vec3> spots;
+  AppendFan(&spots, anchor.pos, base, dist, kOffsets,
+            sizeof(kOffsets) / sizeof(kOffsets[0]));
+  return spots;
+}
+
 bool AnchorMovedSignificantly(const AnchorGeometry& prev,
                               const AnchorGeometry& cur,
                               bool cares_about_facing) {

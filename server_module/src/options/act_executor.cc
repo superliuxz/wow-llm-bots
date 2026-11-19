@@ -7,13 +7,16 @@
 #include <cstdint>
 #include <limits>
 #include <list>
+#include <numbers>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "AiObjectContext.h"
 #include "Cell.h"
+#include "CharmInfo.h"
 #include "Creature.h"
 #include "DynamicObject.h"
 #include "G3D/Vector3.h"
@@ -30,13 +33,17 @@
 #include "MotionMaster.h"
 #include "Object.h"
 #include "ObjectAccessor.h"
+#include "ObjectDefines.h"
 #include "ObjectGuid.h"
+#include "Opcodes.h"
 #include "PathGenerator.h"
+#include "Pet.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
 #include "Playerbots.h"
 #include "SharedDefines.h"
 #include "Spell.h"
+#include "SpellAuraDefines.h"
 #include "SpellAuraEffects.h"
 #include "SpellAuras.h"
 #include "SpellDefines.h"
@@ -44,6 +51,8 @@
 #include "SpellMgr.h"
 #include "Unit.h"
 #include "UnitDefines.h"
+#include "WorldPacket.h"
+#include "WorldSession.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "options/act_geometry.h"
@@ -386,8 +395,19 @@ WorldObject* ResolveThing(Player* bot,
   return nullptr;
 }
 
+void ClearActMovement(Player* bot) {
+  if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot)) {
+    if (auto* last = ai->GetAiObjectContext()->GetValue<LastMovement&>(
+            "last movement")) {
+      last->Get().clear();
+    }
+  }
+}
+
 // Picks the first candidate spot with valid ground height, optional LoS to
 // `anchor`, and a valid `PathGenerator` path, then starts moving `bot` there.
+// Uses `MOVEMENT_FORCED` so playerbots' combat movement does not fight our
+// steering while the step runs; cleared on completion/failure.
 std::optional<pb::Vec3> MoveToFirstValidSpot(
     Player* bot,
     const std::vector<pb::Vec3>& candidates,
@@ -433,7 +453,7 @@ std::optional<pb::Vec3> MoveToFirstValidSpot(
                 : 1000.0f;
         last->Get().Set(bot->GetMapId(), cand.x, cand.y, ground_z,
                         bot->GetOrientation(), ms + 500.0f,
-                        MovementPriority::MOVEMENT_COMBAT);
+                        MovementPriority::MOVEMENT_FORCED);
       }
     }
     return pb::Vec3{cand.x, cand.y, ground_z};
@@ -656,6 +676,249 @@ ActStartResult StartAct(Player* bot,
       out_active->waiting_cast = false;
       return {.done = false};
     }
+
+    case pb::Command_Act::AVOID: {
+      const std::string_view thing_name =
+          !act.target_name.empty() ? act.target_name : act.name;
+      WorldObject* obj = ResolveThing(bot, act, thing_name);
+      if (obj && bot->GetTarget() == obj->GetGUID()) {
+        bot->AttackStop();
+        bot->SetSelection(ObjectGuid::Empty);
+      }
+      return {.done = true};
+    }
+
+    case pb::Command_Act::FACE:
+    case pb::Command_Act::FACE_AWAY: {
+      const std::string_view thing_name =
+          !act.target_name.empty() ? act.target_name : act.name;
+      WorldObject* obj = ResolveThing(bot, act, thing_name);
+      if (!obj) {
+        return {.error = "target to face not found"};
+      }
+      float angle = bot->GetAngle(obj);
+      if (act.verb == pb::Command_Act::FACE_AWAY) {
+        angle += std::numbers::pi_v<float>;
+      }
+      bot->SetFacingTo(Position::NormalizeOrientation(angle));
+      return {.done = true};
+    }
+
+    case pb::Command_Act::JUMP:
+      bot->GetMotionMaster()->MoveJump(bot->GetPositionX(), bot->GetPositionY(),
+                                       bot->GetPositionZ(), 1.0f, 8.0f);
+      return {.done = true};
+
+    case pb::Command_Act::CANCEL: {
+      uint32_t cancel_id = 0;
+      for (const auto& [spell_id, aura] : bot->GetAppliedAuras()) {
+        const SpellInfo* info = aura->GetBase()->GetSpellInfo();
+        if (info && NameEq(info->SpellName[0], act.name) &&
+            !info->HasAttribute(SPELL_ATTR0_NO_AURA_CANCEL)) {
+          cancel_id = spell_id;
+          break;
+        }
+      }
+      if (cancel_id == 0) {
+        return {.error = "cannot cancel aura: " + act.name};
+      }
+      bot->RemoveOwnedAura(cancel_id, ObjectGuid::Empty, 0,
+                           AURA_REMOVE_BY_CANCEL);
+      return {.done = true};
+    }
+
+    case pb::Command_Act::MARK: {
+      Group* grp = bot->GetGroup();
+      if (!grp) {
+        return {.error = "not in a group"};
+      }
+      if (grp->isRaidGroup() && !grp->IsLeader(bot->GetGUID()) &&
+          !grp->IsAssistant(bot->GetGUID())) {
+        return {.error = "must be raid leader or assistant to mark"};
+      }
+      const uint8_t icon = RaidMarkerIconIndex(act.marker);
+      if (icon >= TARGETICONCOUNT) {
+        return {.error = "invalid raid marker"};
+      }
+      const std::string_view thing_name =
+          !act.target_name.empty() ? act.target_name : act.name;
+      WorldObject* obj = ResolveThing(bot, act, thing_name);
+      Unit* unit = obj ? obj->ToUnit() : nullptr;
+      if (!unit) {
+        return {.error = "unit to mark not found"};
+      }
+      grp->SetTargetIcon(icon, bot->GetGUID(), unit->GetGUID());
+      return {.done = true};
+    }
+
+    case pb::Command_Act::INTERACT: {
+      const std::string_view thing_name =
+          !act.target_name.empty() ? act.target_name : act.name;
+      WorldObject* obj = ResolveThing(bot, act, thing_name);
+      if (!obj) {
+        return {.error = "object or npc to interact with not found"};
+      }
+      if (GameObject* go = obj->ToGameObject()) {
+        if (IsInUseRange(bot, go)) {
+          std::string err = UseObjectNow(bot, go);
+          return err.empty() ? ActStartResult{.done = true}
+                             : ActStartResult{.error = std::move(err)};
+        }
+      } else if (Creature* npc = obj->ToCreature()) {
+        if (IsInTalkRange(bot, npc)) {
+          TalkResult tr = TalkToNpcNow(bot, npc);
+          return tr.error.empty()
+                     ? ActStartResult{.done = true}
+                     : ActStartResult{.error = std::move(tr.error)};
+        }
+      } else {
+        return {.error = "cannot interact with target"};
+      }
+      const AnchorGeometry anchor = AnchorOf(obj);
+      std::optional<pb::Vec3> chosen =
+          MoveToFirstValidSpot(bot, {anchor.pos}, nullptr);
+      if (!chosen) {
+        return {.error = "no path to interact target"};
+      }
+      out_active->command_id = command_id;
+      out_active->act = act;
+      out_active->dest = *chosen;
+      out_active->last_anchor = anchor;
+      out_active->last_repath_at = now;
+      return {.done = false};
+    }
+
+    case pb::Command_Act::BOARD: {
+      const std::string_view thing_name =
+          !act.target_name.empty() ? act.target_name : act.name;
+      WorldObject* obj = ResolveThing(bot, act, thing_name);
+      Unit* unit = obj ? obj->ToUnit() : nullptr;
+      if (!unit) {
+        return {.error = "vehicle to board not found"};
+      }
+      if (bot->IsWithinDistInMap(unit, INTERACTION_DISTANCE)) {
+        WorldPacket p(CMSG_SPELLCLICK, 8);
+        p << unit->GetGUID();
+        p.rpos(0);
+        bot->GetSession()->HandleSpellClick(p);
+        return {.done = true};
+      }
+      const AnchorGeometry anchor = AnchorOf(unit);
+      std::optional<pb::Vec3> chosen =
+          MoveToFirstValidSpot(bot, {anchor.pos}, nullptr);
+      if (!chosen) {
+        return {.error = "no path to vehicle"};
+      }
+      out_active->command_id = command_id;
+      out_active->act = act;
+      out_active->dest = *chosen;
+      out_active->last_anchor = anchor;
+      out_active->last_repath_at = now;
+      return {.done = false};
+    }
+
+    case pb::Command_Act::LEAVE: {
+      if (bot->GetVehicle()) {
+        WorldPacket p(CMSG_REQUEST_VEHICLE_EXIT, 0);
+        bot->GetSession()->HandleRequestVehicleExit(p);
+        return {.done = true};
+      }
+      if (bot->IsMounted()) {
+        bot->Dismount();
+        bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
+        return {.done = true};
+      }
+      return {.error = "not in a vehicle or mounted"};
+    }
+
+    case pb::Command_Act::EQUIP: {
+      for (const BagSlotItem& entry : BagItems(bot)) {
+        const ItemTemplate* proto = entry.item->GetTemplate();
+        if (!proto || !NameEq(proto->Name1, act.name)) {
+          continue;
+        }
+        uint16_t dest = 0;
+        if (bot->CanEquipItem(NULL_SLOT, dest, entry.item, true) !=
+            EQUIP_ERR_OK) {
+          return {.error = "cannot equip " + act.name};
+        }
+        const uint16_t src = static_cast<uint16_t>(
+            (static_cast<uint16_t>(entry.bag) << 8) | entry.slot);
+        bot->SwapItem(src, dest);
+        return {.done = true};
+      }
+      return {.error = "item not in bags: " + act.name};
+    }
+
+    case pb::Command_Act::PET_ATTACK: {
+      Pet* pet = bot->GetPet();
+      if (!pet || !pet->IsAlive()) {
+        return {.error = "no active pet"};
+      }
+      const std::string_view thing_name =
+          !act.target_name.empty() ? act.target_name : act.name;
+      WorldObject* obj = ResolveThing(bot, act, thing_name);
+      Unit* unit = obj ? obj->ToUnit() : nullptr;
+      if (!unit) {
+        return {.error = "pet target not found"};
+      }
+      bot->GetSession()->HandlePetActionHelper(
+          pet, pet->GetGUID(), COMMAND_ATTACK, ACT_COMMAND, unit->GetGUID());
+      return {.done = true};
+    }
+
+    case pb::Command_Act::PET: {
+      Pet* pet = bot->GetPet();
+      if (!pet || !pet->IsAlive()) {
+        return {.error = "no active pet"};
+      }
+      uint32_t spell_id = 0;
+      uint16_t flag = 0;
+      switch (act.pet_cmd) {
+        case pb::Command_Act::STAY:
+          spell_id = COMMAND_STAY;
+          flag = ACT_COMMAND;
+          break;
+        case pb::Command_Act::FOLLOW:
+          spell_id = COMMAND_FOLLOW;
+          flag = ACT_COMMAND;
+          break;
+        case pb::Command_Act::PASSIVE:
+          spell_id = REACT_PASSIVE;
+          flag = ACT_REACTION;
+          break;
+        case pb::Command_Act::DEFENSIVE:
+          spell_id = REACT_DEFENSIVE;
+          flag = ACT_REACTION;
+          break;
+        case pb::Command_Act::PET_CMD_UNSPECIFIED:
+          return {.error = "unspecified pet command"};
+      }
+      bot->GetSession()->HandlePetActionHelper(pet, pet->GetGUID(), spell_id,
+                                               flag, ObjectGuid::Empty);
+      return {.done = true};
+    }
+
+    case pb::Command_Act::KITE: {
+      std::optional<AnchorGeometry> anchor = ResolveMoveAnchor(bot, act);
+      if (!anchor) {
+        return {.error = "kite target not found"};
+      }
+      std::vector<pb::Vec3> candidates =
+          CandidateSpotsForKite(PosOf(bot), *anchor);
+      std::optional<pb::Vec3> chosen =
+          MoveToFirstValidSpot(bot, candidates, nullptr);
+      if (!chosen) {
+        return {.error = "no path to kite"};
+      }
+      out_active->command_id = command_id;
+      out_active->act = act;
+      out_active->dest = *chosen;
+      out_active->last_anchor = *anchor;
+      out_active->last_repath_at = now;
+      out_active->waiting_cast = false;
+      return {.done = false};
+    }
   }
   return {.error = "unsupported act"};
 }
@@ -664,6 +927,7 @@ ActStepResult StepActiveAct(Player* bot,
                             base::TimeTicks now,
                             ActiveAct* active) {
   if (!bot || !bot->IsInWorld() || !bot->IsAlive()) {
+    ClearActMovement(bot);
     return {.error = "you died"};
   }
   if (active->waiting_cast) {
@@ -674,6 +938,80 @@ ActStepResult StepActiveAct(Player* bot,
   }
 
   const pb::Command_Act& act = active->act;
+  if (act.verb == pb::Command_Act::INTERACT ||
+      act.verb == pb::Command_Act::BOARD) {
+    const std::string_view thing_name =
+        !act.target_name.empty() ? act.target_name : act.name;
+    WorldObject* obj = ResolveThing(bot, act, thing_name);
+    if (!obj) {
+      ClearActMovement(bot);
+      return {.error = "target is gone"};
+    }
+    if (act.verb == pb::Command_Act::INTERACT) {
+      if (GameObject* go = obj->ToGameObject(); go && IsInUseRange(bot, go)) {
+        ClearActMovement(bot);
+        std::string err = UseObjectNow(bot, go);
+        return err.empty() ? ActStepResult{.done = true}
+                           : ActStepResult{.error = std::move(err)};
+      }
+      if (Creature* npc = obj->ToCreature(); npc && IsInTalkRange(bot, npc)) {
+        ClearActMovement(bot);
+        TalkResult tr = TalkToNpcNow(bot, npc);
+        return tr.error.empty() ? ActStepResult{.done = true}
+                                : ActStepResult{.error = std::move(tr.error)};
+      }
+    } else if (Unit* unit = obj->ToUnit();
+               unit && bot->IsWithinDistInMap(unit, INTERACTION_DISTANCE)) {
+      ClearActMovement(bot);
+      WorldPacket p(CMSG_SPELLCLICK, 8);
+      p << unit->GetGUID();
+      p.rpos(0);
+      bot->GetSession()->HandleSpellClick(p);
+      return {.done = true};
+    }
+    if (now - active->last_repath_at >= kRepathInterval && !bot->isMoving()) {
+      active->last_repath_at = now;
+      const AnchorGeometry anchor = AnchorOf(obj);
+      if (std::optional<pb::Vec3> chosen =
+              MoveToFirstValidSpot(bot, {anchor.pos}, nullptr)) {
+        active->dest = *chosen;
+        active->last_anchor = anchor;
+      } else {
+        ClearActMovement(bot);
+        return {.error = "no path to target"};
+      }
+    }
+    return {};
+  }
+
+  if (act.verb == pb::Command_Act::KITE) {
+    if (now - active->last_repath_at < kRepathInterval) {
+      return {};
+    }
+    active->last_repath_at = now;
+    std::optional<AnchorGeometry> cur_anchor = ResolveMoveAnchor(bot, act);
+    if (!cur_anchor) {
+      ClearActMovement(bot);
+      return {.done = true};
+    }
+    const pb::Vec3 bot_pos = PosOf(bot);
+    if (!bot->isMoving() ||
+        Dist2D(bot_pos, active->dest) <= kArrivalToleranceYd + 2.0f ||
+        Dist2D(bot_pos, cur_anchor->pos) < kDefaultKiteYd * 0.6f) {
+      std::vector<pb::Vec3> candidates =
+          CandidateSpotsForKite(bot_pos, *cur_anchor);
+      std::optional<pb::Vec3> chosen =
+          MoveToFirstValidSpot(bot, candidates, nullptr);
+      if (!chosen) {
+        ClearActMovement(bot);
+        return {.error = "no path to kite"};
+      }
+      active->dest = *chosen;
+      active->last_anchor = *cur_anchor;
+    }
+    return {};
+  }
+
   if (act.verb != pb::Command_Act::TO && act.verb != pb::Command_Act::AWAY) {
     return {.done = true};
   }
@@ -682,9 +1020,11 @@ ActStepResult StepActiveAct(Player* bot,
   if (act.verb == pb::Command_Act::AWAY && act.yd > 0.0f &&
       Dist2D(bot_pos, active->last_anchor.pos) >= act.yd) {
     bot->StopMoving();
+    ClearActMovement(bot);
     return {.done = true};
   }
   if (Dist2D(bot_pos, active->dest) <= kArrivalToleranceYd) {
+    ClearActMovement(bot);
     return {.done = true};
   }
 
@@ -697,6 +1037,7 @@ ActStepResult StepActiveAct(Player* bot,
 
   std::optional<AnchorGeometry> cur_anchor = ResolveMoveAnchor(bot, act);
   if (!cur_anchor) {
+    ClearActMovement(bot);
     // Anchor vanished while moving; if we were moving away, we're safe!
     if (act.verb == pb::Command_Act::AWAY) {
       return {.done = true};
@@ -713,6 +1054,7 @@ ActStepResult StepActiveAct(Player* bot,
             ? CandidateSpotsForPlace(act.place, bot_pos, *cur_anchor, act.yd)
             : CandidateSpotsForAway(bot_pos, *cur_anchor, act.yd);
     if (candidates.empty()) {
+      ClearActMovement(bot);
       return {.done = true};
     }
     const AnchorGeometry* los_anchor =
@@ -722,6 +1064,7 @@ ActStepResult StepActiveAct(Player* bot,
     std::optional<pb::Vec3> chosen =
         MoveToFirstValidSpot(bot, candidates, los_anchor);
     if (!chosen) {
+      ClearActMovement(bot);
       return {.error = "no path to destination"};
     }
     active->dest = *chosen;

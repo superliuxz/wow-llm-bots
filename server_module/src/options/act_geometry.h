@@ -16,6 +16,7 @@ namespace llm_brain {
 
 inline constexpr float kDefaultMaxRangeYd = 28.0f;
 inline constexpr float kDefaultAwayYd = 12.0f;
+inline constexpr float kDefaultKiteYd = 20.0f;
 inline constexpr float kDefaultBehindMarginYd = 2.5f;
 
 struct AnchorGeometry {
@@ -46,6 +47,14 @@ std::vector<wlb::snapshot::Vec3> CandidateSpotsForAway(
     const wlb::snapshot::Vec3& bot_pos,
     const AnchorGeometry& anchor,
     float yd);
+
+// Ordered tangential kiting waypoints around `anchor` at `kite_dist_yd`,
+// preferring a 45-degree arc around the anchor so the bot circles smoothly
+// instead of backing straight into a wall.
+std::vector<wlb::snapshot::Vec3> CandidateSpotsForKite(
+    const wlb::snapshot::Vec3& bot_pos,
+    const AnchorGeometry& anchor,
+    float kite_dist_yd = kDefaultKiteYd);
 
 // Whether an anchor moved or turned enough since the last path calculation to
 // justify recomputing a relative-place destination.

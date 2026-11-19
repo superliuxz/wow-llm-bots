@@ -1549,6 +1549,57 @@ std::optional<pb::Command::Act> OrderActToCommand(const Act& act,
           }
         } else if constexpr (std::is_same_v<A, grammar::ActWake>) {
           out.verb = pb::Command::Act::WAKE;
+        } else if constexpr (std::is_same_v<A, grammar::ActAvoid>) {
+          out.verb = pb::Command::Act::AVOID;
+          fill_thing(a.t, &out, /*target_slot=*/false);
+        } else if constexpr (std::is_same_v<A, grammar::ActFace>) {
+          out.verb = pb::Command::Act::FACE;
+          fill_thing(a.t, &out, /*target_slot=*/false);
+        } else if constexpr (std::is_same_v<A, grammar::ActFaceAway>) {
+          out.verb = pb::Command::Act::FACE_AWAY;
+          fill_thing(a.t, &out, /*target_slot=*/false);
+        } else if constexpr (std::is_same_v<A, grammar::ActJump>) {
+          out.verb = pb::Command::Act::JUMP;
+        } else if constexpr (std::is_same_v<A, grammar::ActCancel>) {
+          out.verb = pb::Command::Act::CANCEL;
+          out.name = a.name;
+        } else if constexpr (std::is_same_v<A, grammar::ActMark>) {
+          out.verb = pb::Command::Act::MARK;
+          fill_thing(a.t, &out, /*target_slot=*/false);
+          out.marker = ToRaidMarker(a.icon);
+        } else if constexpr (std::is_same_v<A, grammar::ActInteract>) {
+          out.verb = pb::Command::Act::INTERACT;
+          fill_thing(a.t, &out, /*target_slot=*/false);
+        } else if constexpr (std::is_same_v<A, grammar::ActBoard>) {
+          out.verb = pb::Command::Act::BOARD;
+          fill_thing(a.t, &out, /*target_slot=*/false);
+        } else if constexpr (std::is_same_v<A, grammar::ActLeave>) {
+          out.verb = pb::Command::Act::LEAVE;
+        } else if constexpr (std::is_same_v<A, grammar::ActEquip>) {
+          out.verb = pb::Command::Act::EQUIP;
+          out.name = a.name;
+        } else if constexpr (std::is_same_v<A, grammar::ActPetAttack>) {
+          out.verb = pb::Command::Act::PET_ATTACK;
+          fill_thing(a.t, &out, /*target_slot=*/false);
+        } else if constexpr (std::is_same_v<A, grammar::ActPet>) {
+          out.verb = pb::Command::Act::PET;
+          switch (a.cmd) {
+            case grammar::PetCmd::kStay:
+              out.pet_cmd = pb::Command::Act::STAY;
+              break;
+            case grammar::PetCmd::kFollow:
+              out.pet_cmd = pb::Command::Act::FOLLOW;
+              break;
+            case grammar::PetCmd::kPassive:
+              out.pet_cmd = pb::Command::Act::PASSIVE;
+              break;
+            case grammar::PetCmd::kDefensive:
+              out.pet_cmd = pb::Command::Act::DEFENSIVE;
+              break;
+          }
+        } else if constexpr (std::is_same_v<A, grammar::ActKite>) {
+          out.verb = pb::Command::Act::KITE;
+          fill_thing(a.t, &out, /*target_slot=*/false);
         } else {
           supported = false;
         }

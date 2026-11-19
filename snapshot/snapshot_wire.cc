@@ -21,8 +21,26 @@
 template <>
 struct glz::meta<wlb::snapshot::Command_Act::Verb> {
   using enum wlb::snapshot::Command_Act::Verb;
-  static constexpr auto value =
-      glz::enumerate(VERB_UNSPECIFIED, TO, AWAY, TARGET, USE, STOP, WAKE);
+  static constexpr auto value = glz::enumerate(VERB_UNSPECIFIED,
+                                               TO,
+                                               AWAY,
+                                               TARGET,
+                                               USE,
+                                               STOP,
+                                               WAKE,
+                                               AVOID,
+                                               FACE,
+                                               FACE_AWAY,
+                                               JUMP,
+                                               CANCEL,
+                                               MARK,
+                                               INTERACT,
+                                               BOARD,
+                                               LEAVE,
+                                               EQUIP,
+                                               PET_ATTACK,
+                                               PET,
+                                               KITE);
 };
 
 template <>
@@ -66,6 +84,13 @@ struct glz::meta<wlb::snapshot::Command_Act::StopKind> {
   using enum wlb::snapshot::Command_Act::StopKind;
   static constexpr auto value =
       glz::enumerate(STOP_UNSPECIFIED, CASTING, ATTACKING, MOVING);
+};
+
+template <>
+struct glz::meta<wlb::snapshot::Command_Act::PetCmd> {
+  using enum wlb::snapshot::Command_Act::PetCmd;
+  static constexpr auto value =
+      glz::enumerate(PET_CMD_UNSPECIFIED, STAY, FOLLOW, PASSIVE, DEFENSIVE);
 };
 
 template <>
@@ -1256,6 +1281,10 @@ std::string_view EnumName(Command_Act::ThingKind value) {
 }
 
 std::string_view EnumName(Command_Act::StopKind value) {
+  return glz::get_enum_name(value);
+}
+
+std::string_view EnumName(Command_Act::PetCmd value) {
   return glz::get_enum_name(value);
 }
 

@@ -611,9 +611,39 @@ TEST(OrderEvaluatorTest, OrderActToCommandAndWireRoundTrip) {
   ASSERT_TRUE(cmd_act.has_value());
   EXPECT_EQ(cmd_act->verb, pb::Command::Act::WAKE);
 
-  // Deferred #5d verbs return nullopt.
-  EXPECT_FALSE(to_wire("always -> kite boss").has_value());
-  EXPECT_FALSE(to_wire("always -> mark boss skull").has_value());
+  // Remaining #5d verbs all convert cleanly.
+  cmd_act = to_wire("always -> kite boss");
+  ASSERT_TRUE(cmd_act.has_value());
+  EXPECT_EQ(cmd_act->verb, pb::Command::Act::KITE);
+  EXPECT_EQ(cmd_act->thing, pb::Command::Act::BOSS);
+
+  cmd_act = to_wire("always -> mark boss skull");
+  ASSERT_TRUE(cmd_act.has_value());
+  EXPECT_EQ(cmd_act->verb, pb::Command::Act::MARK);
+  EXPECT_EQ(cmd_act->marker, pb::RaidMarker::SKULL);
+
+  cmd_act = to_wire("always -> pet passive");
+  ASSERT_TRUE(cmd_act.has_value());
+  EXPECT_EQ(cmd_act->verb, pb::Command::Act::PET);
+  EXPECT_EQ(cmd_act->pet_cmd, pb::Command::Act::PASSIVE);
+
+  cmd_act = to_wire("always -> pet attack boss");
+  ASSERT_TRUE(cmd_act.has_value());
+  EXPECT_EQ(cmd_act->verb, pb::Command::Act::PET_ATTACK);
+
+  EXPECT_EQ(to_wire("always -> avoid boss")->verb, pb::Command::Act::AVOID);
+  EXPECT_EQ(to_wire("always -> face boss")->verb, pb::Command::Act::FACE);
+  EXPECT_EQ(to_wire("always -> face away boss")->verb,
+            pb::Command::Act::FACE_AWAY);
+  EXPECT_EQ(to_wire("always -> jump")->verb, pb::Command::Act::JUMP);
+  EXPECT_EQ(to_wire("always -> cancel Ice Block")->verb,
+            pb::Command::Act::CANCEL);
+  EXPECT_EQ(to_wire("always -> interact Portal")->verb,
+            pb::Command::Act::INTERACT);
+  EXPECT_EQ(to_wire("always -> board Drake")->verb, pb::Command::Act::BOARD);
+  EXPECT_EQ(to_wire("always -> leave vehicle")->verb, pb::Command::Act::LEAVE);
+  EXPECT_EQ(to_wire("always -> equip Wyrmrest Lance")->verb,
+            pb::Command::Act::EQUIP);
 }
 
 }  // namespace

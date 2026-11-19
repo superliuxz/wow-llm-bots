@@ -88,5 +88,16 @@ TEST(ActGeometryTest, AnchorMovedSignificantly) {
   EXPECT_TRUE(AnchorMovedSignificantly(a, c, /*cares_about_facing=*/true));
 }
 
+TEST(ActGeometryTest, KiteGeneratesTangentialArcAroundAnchor) {
+  const AnchorGeometry anchor{.pos = {0.0f, 0.0f, 0.0f}, .facing_rad = 0.0f};
+  // Bot is at (10, 0, 0): first kite spot should be at 20 yd, +45 deg.
+  std::vector<pb::Vec3> spots =
+      CandidateSpotsForKite({10.0f, 0.0f, 0.0f}, anchor, 20.0f);
+  ASSERT_GE(spots.size(), 6u);
+  EXPECT_NEAR(Dist2D(spots[0], anchor.pos), 20.0f, 1e-3f);
+  EXPECT_GT(spots[0].x, 0.0f);
+  EXPECT_GT(spots[0].y, 0.0f);
+}
+
 }  // namespace
 }  // namespace llm_brain
