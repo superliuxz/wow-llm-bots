@@ -1294,5 +1294,116 @@ TEST(BotLoopTest, OrderFailureBacksOffOnRepeat) {
   EXPECT_EQ(brain.size(), 0u);
 }
 
+TEST(BotLoopTest, FlickeringOrderConditionDoesNotResetFailureBackoff) {
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& c) { sent.push_back(c); });
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s = MakeLiveSnap("Aelindra", 1, t0, /*in_combat=*/true);
+  AddKeep(&s);
+  s.base.self.unit.health_pct = 80.0f;
+  loop.OnSnapshot(s, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+      "order: me hp<50 -> use Healthstone");
+
+  // Failure #1 at t+1s wakes immediately.
+  s.seq = 2;
+  s.base.self.unit.health_pct = 40.0f;
+  loop.OnSnapshot(s, t0 + base::Seconds(1));
+  ASSERT_FALSE(sent.empty());
+  const uint32_t act1_id = sent.back().command_id;
+  pb::ImmediateEvent err1;
+  err1.bot = "Aelindra";
+  err1.event.error.emplace().command_id = act1_id;
+  err1.event.error->text = "cannot cast";
+  loop.OnEvent(std::move(err1), t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+      "order: me hp<50 -> use Healthstone");
+
+  // Brief quiet snapshot (1 s) must NOT reset order_wakes.
+  s.seq = 3;
+  s.base.self.unit.health_pct = 55.0f;
+  loop.OnSnapshot(s, t0 + base::Seconds(2));
+
+  // Condition flickers back at t+3s and fails again: must back off!
+  s.seq = 4;
+  s.base.self.unit.health_pct = 40.0f;
+  loop.OnSnapshot(s, t0 + base::Seconds(3));
+  const uint32_t act2_id = sent.back().command_id;
+  pb::ImmediateEvent err2;
+  err2.bot = "Aelindra";
+  err2.event.error.emplace().command_id = act2_id;
+  err2.event.error->text = "cannot cast";
+  loop.OnEvent(std::move(err2), t0 + base::Seconds(3));
+  EXPECT_EQ(brain.size(), 0u);
+}
+
+TEST(BotLoopTest, OrderCancelEventMidStreamDoesNotDropInFlightPlanOrTell) {
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& c) { sent.push_back(c); });
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s = MakeLiveSnap("Aelindra", 1, t0, /*in_combat=*/true);
+  AddKeep(&s);
+  s.base.self.unit.health_pct = 80.0f;
+  loop.OnSnapshot(s, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+      "order: me hp<50 -> away 15");
+
+  // Start the movement order.
+  s.seq = 2;
+  s.base.self.unit.health_pct = 40.0f;
+  loop.OnSnapshot(s, t0 + base::Seconds(1));
+  ASSERT_FALSE(sent.empty());
+  const uint32_t move_act_id = sent.back().command_id;
+
+  // Whisper wakes the brain so a call is in flight.
+  pb::ImmediateEvent wh;
+  wh.bot = "Aelindra";
+  pb::ChatEvent& chat = wh.event.chat.emplace();
+  chat.channel = pb::WHISPER;
+  chat.from = "Thrall";
+  chat.text = "hello";
+  loop.OnEvent(std::move(wh), t0 + base::Seconds(2));
+  ASSERT_EQ(brain.size(), 1u);
+
+  // Cancel event for the old movement act arrives while the call is in flight.
+  pb::ImmediateEvent cancel;
+  cancel.bot = "Aelindra";
+  cancel.event.error.emplace().command_id = move_act_id;
+  cancel.event.error->text = "cancelled by new choice";
+  loop.OnEvent(std::move(cancel), t0 + base::Seconds(2));
+
+  // The in-flight call must NOT be cancelled; answering it delivers its `tell`.
+  ASSERT_EQ(brain.size(), 1u);
+  sent.clear();
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 30\ntell Thrall: hey!");
+  bool sent_tell = false;
+  for (const pb::Command& cmd : sent) {
+    if (cmd.say && cmd.say->channel == pb::WHISPER && cmd.say->to == "Thrall" &&
+        cmd.say->text == "hey!") {
+      sent_tell = true;
+    }
+  }
+  EXPECT_TRUE(sent_tell);
+}
+
 }  // namespace
 }  // namespace harness

@@ -134,6 +134,7 @@ void PlanRunner::Stop() {
   step_index_ = 0;
   repeats_left_ = 0;
   active_guid_.clear();
+  active_target_hp_pct_.reset();
   last_command_id_ = 0;
   active_ = false;
 }
@@ -187,6 +188,7 @@ RunnerAction PlanRunner::LaunchCurrentFromScreen(uint32_t snapshot_seq,
     if (idx) {
       active_kind_ = screen.details[*idx].kind;
       active_guid_ = screen.details[*idx].guid;
+      active_target_hp_pct_.reset();
       step_started_at_ = now;
       pb::Command::Choose choose;
       choose.seq = snapshot_seq;
@@ -224,6 +226,20 @@ RunnerAction PlanRunner::OnSnapshot(const pb::Snapshot& snapshot,
                          last_command_id_ != 0 &&
                          snapshot.done_command_id == last_command_id_;
   if (!body_done && !IsTargetDone(active_kind_, active_guid_, snapshot)) {
+    // An active Attack making combat progress (target HP dropping) must not
+    // time out mid-fight on long elite/boss encounters; only stalled attacks
+    // hit the 45 s safety limit.
+    if (active_kind_ == OptionKind::kAttack) {
+      if (const pb::Unit* unit = FindUnitByGuid(snapshot, active_guid_);
+          unit && !unit->dead) {
+        if (!active_target_hp_pct_.has_value()) {
+          active_target_hp_pct_ = unit->health_pct;
+        } else if (unit->health_pct < *active_target_hp_pct_) {
+          active_target_hp_pct_ = unit->health_pct;
+          step_started_at_ = now;
+        }
+      }
+    }
     if (const auto timed_out = CheckTimeout(now)) {
       return {std::nullopt, *timed_out};
     }

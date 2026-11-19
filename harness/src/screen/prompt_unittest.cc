@@ -118,5 +118,29 @@ TEST(PromptTest, ScreenComesBeforeNotesAndNotesAreCapped) {
   EXPECT_LE(request.user.size(), 12000u);
 }
 
+TEST(PromptTest, TokenCapDropsRememberedPanelsBeforeScreenAndPreservesAlso) {
+  PromptInput input = SampleInput();
+  // Simulate a 4.8 KB RULES.md so the remaining slot budget is tight.
+  input.rules = std::string(4800, 'R');
+  for (int i = 0; i < 40; ++i) {
+    input.remembered.push_back("quest_log, seen 10 s ago: " +
+                               std::string(200, 'Q'));
+  }
+  Screen screen = SampleScreen();
+  screen.text =
+      "me: Tess\nnearby:\n  1. Attack Mottled Boar\nalso:\n"
+      "  2. Keep doing what I'm doing";
+  const LlmRequest request = BuildPlanRequest(input, screen);
+  // Total estimated tokens (system + user + reply) stays below 4,096 slot.
+  const size_t est_tokens = (request.system.size() + 2) / 3 +
+                            (request.user.size() + 2) / 3 +
+                            static_cast<size_t>(request.max_tokens);
+  EXPECT_LE(est_tokens, 4096u);
+  // Live screen and `also:` options are never dropped for remembered panels.
+  EXPECT_NE(request.user.find("Your screen now:"), std::string::npos);
+  EXPECT_NE(request.user.find("also:\n  2. Keep doing what I'm doing"),
+            std::string::npos);
+}
+
 }  // namespace
 }  // namespace harness

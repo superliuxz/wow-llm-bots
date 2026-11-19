@@ -40,6 +40,9 @@ struct OrderEvalResult {
   // Resolved `it` binding for the active/fired order (empty if unbound).
   std::string it_guid;
   std::string it_name;
+  // Resolved GUID of the act's explicit target thing (when resolved by the
+  // harness against the current snapshot so the module acts on the same unit).
+  std::string target_guid;
   // Index of the order and step that fired or is currently running (-1 if
   // idle).
   int order_index = -1;
@@ -75,7 +78,8 @@ bool OrderCoversWake(const Order& order,
 std::optional<wlb::snapshot::Command::Act> OrderActToCommand(
     const Act& act,
     std::string_view it_guid,
-    std::string_view it_name);
+    std::string_view it_name,
+    std::string_view target_guid = {});
 
 class OrderEvaluator {
  public:
@@ -136,7 +140,7 @@ class OrderEvaluator {
 
   base::TimeDelta step_timeout_;
   std::vector<Order> orders_;
-  base::TimeTicks orders_installed_at_;
+  std::vector<base::TimeTicks> order_installed_at_;
   std::vector<std::optional<base::TimeTicks>> last_every_fired_;
   // Edge-trigger latch per order: true after firing until `when` goes false.
   std::vector<bool> order_latched_;

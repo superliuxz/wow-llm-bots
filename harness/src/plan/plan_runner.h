@@ -78,6 +78,7 @@ class PlanRunner {
   int repeats_left_ = 0;
   OptionKind active_kind_ = OptionKind::kKeep;
   std::string active_guid_;
+  std::optional<float> active_target_hp_pct_;
   base::TimeTicks step_started_at_;
   uint32_t last_command_id_ = 0;
   bool active_ = false;

@@ -255,7 +255,8 @@ void ClearStaleCombatTarget(Player* bot) {
   }
   Unit* sel = bot->GetSelectedUnit();
   if (ShouldClearStaleCombatTarget(bot->IsInCombat(), bot->IsAlive(),
-                                   sel != nullptr, sel && sel->IsAlive())) {
+                                   sel != nullptr, sel && sel->IsAlive(),
+                                   sel && bot->IsFriendlyTo(sel))) {
     bot->SetSelection(ObjectGuid::Empty);
   }
   if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot)) {
@@ -263,8 +264,8 @@ void ClearStaleCombatTarget(Player* bot) {
       if (auto* cur = ctx->GetValue<Unit*>("current target")) {
         Unit* tgt = cur->Get();
         if (ShouldClearStaleCombatTarget(bot->IsInCombat(), bot->IsAlive(),
-                                         tgt != nullptr,
-                                         tgt && tgt->IsAlive())) {
+                                         tgt != nullptr, tgt && tgt->IsAlive(),
+                                         tgt && bot->IsFriendlyTo(tgt))) {
           cur->Set(nullptr);
         }
       }

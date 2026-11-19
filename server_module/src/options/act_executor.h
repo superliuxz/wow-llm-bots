@@ -26,6 +26,7 @@ struct ActiveAct {
   // path recompute timestamp.
   wlb::snapshot::Vec3 dest;
   AnchorGeometry last_anchor;
+  float away_target_edge_yd = 0.0f;
   base::TimeTicks last_repath_at;
   // For `use` with a cast time: waiting for the cast to finish.
   bool waiting_cast = false;

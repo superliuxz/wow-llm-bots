@@ -123,9 +123,7 @@ Entity MakeUnitEntity(const pb::Unit& u) {
   if (!IsZeroVec(u.rel.position)) {
     e.position = u.rel.position;
   }
-  if (u.rel.dist_yd > 0.0f || IsZeroVec(u.rel.position)) {
-    e.dist_from_me_yd = u.rel.dist_yd;
-  }
+  e.dist_from_me_yd = u.rel.dist_yd;
   return e;
 }
 
@@ -137,9 +135,7 @@ Entity MakeObjectEntity(const pb::GameObject& o) {
   if (!IsZeroVec(o.rel.position)) {
     e.position = o.rel.position;
   }
-  if (o.rel.dist_yd > 0.0f || IsZeroVec(o.rel.position)) {
-    e.dist_from_me_yd = o.rel.dist_yd;
-  }
+  e.dist_from_me_yd = o.rel.dist_yd;
   return e;
 }
 
@@ -152,9 +148,7 @@ Entity MakeAreaEntity(const pb::Area& a) {
     if (!IsZeroVec(a.rel->position)) {
       e.position = a.rel->position;
     }
-    if (a.rel->dist_yd > 0.0f || IsZeroVec(a.rel->position)) {
-      e.dist_from_me_yd = a.rel->dist_yd;
-    }
+    e.dist_from_me_yd = a.rel->dist_yd;
   } else if (a.inside_me) {
     e.dist_from_me_yd = 0.0f;
   }
@@ -179,13 +173,13 @@ std::optional<float> DistanceBetween(const Entity& a, const Entity& b) {
     return 0.0f;
   }
   if (a.is_self) {
-    if (b.dist_from_me_yd && (*b.dist_from_me_yd > 0.0f || !b.position)) {
+    if (b.dist_from_me_yd) {
       return *b.dist_from_me_yd;
     }
     if (a.position && b.position) {
       return Dist3D(*a.position, *b.position);
     }
-    return b.dist_from_me_yd;
+    return std::nullopt;
   }
   if (b.is_self) {
     return DistanceBetween(b, a);
@@ -1147,16 +1141,61 @@ WhenMatch EvalWhen(const SnapshotView& view, const When& when) {
   return {true, std::move(it)};
 }
 
+// Resolves the explicit target `Thing` of an `Act` against `view` using the
+// exact same rules as condition evaluation, returning the chosen entity's GUID
+// so the module acts on the same unit.
+std::string ResolveActThingGuid(const SnapshotView& view,
+                                const Act& act,
+                                const std::optional<Entity>& it) {
+  const Thing* thing = std::visit(
+      [](const auto& a) -> const Thing* {
+        using A = std::decay_t<decltype(a)>;
+        if constexpr (std::is_same_v<A, grammar::ActTo>) {
+          return std::visit([](const auto& p) -> const Thing* { return &p.t; },
+                            a.place.value);
+        } else if constexpr (std::is_same_v<A, grammar::ActAway> ||
+                             std::is_same_v<A, grammar::ActUse>) {
+          return a.t ? &*a.t : nullptr;
+        } else if constexpr (std::is_same_v<A, grammar::ActTarget> ||
+                             std::is_same_v<A, grammar::ActAvoid> ||
+                             std::is_same_v<A, grammar::ActFace> ||
+                             std::is_same_v<A, grammar::ActFaceAway> ||
+                             std::is_same_v<A, grammar::ActMark> ||
+                             std::is_same_v<A, grammar::ActInteract> ||
+                             std::is_same_v<A, grammar::ActBoard> ||
+                             std::is_same_v<A, grammar::ActPetAttack> ||
+                             std::is_same_v<A, grammar::ActKite>) {
+          return &a.t;
+        } else {
+          return nullptr;
+        }
+      },
+      act.value);
+  if (!thing) {
+    return {};
+  }
+  if (const auto* w = std::get_if<grammar::ThingWho>(&thing->value);
+      w && (w->who == grammar::Who::kMe || w->who == grammar::Who::kIt)) {
+    return {};
+  }
+  if (std::holds_alternative<grammar::ThingFocus>(thing->value)) {
+    return {};
+  }
+  const std::vector<Entity> resolved = ResolveThing(view, *thing, it);
+  return resolved.empty() ? std::string{} : resolved.front().guid;
+}
+
 }  // namespace
 
 OrderEvaluator::OrderEvaluator(base::TimeDelta step_timeout)
     : step_timeout_(step_timeout) {}
 
 bool OrderEvaluator::SetOrders(std::vector<Order> orders, base::TimeTicks now) {
-  // Preserve edge latches and `every Ns` timestamps for orders whose text did
-  // not change across a replan, so a held condition (`hp<30 -> wake`) does not
-  // fire again on every new plan. Also keep a currently running order step
-  // alive if the new plan restated the exact same order.
+  // Preserve edge latches, `after Ns` / `every Ns` clocks, and any currently
+  // running step whose order text did not change across a replan, so a held
+  // condition (`hp<30 -> wake`) does not fire again on every new plan and
+  // timer orders (`after Ns`, first `every Ns`) do not restart on frequent
+  // replans.
   const bool was_moving = ActiveStepMoves();
   std::string prev_active_key;
   if (was_moving && pending_command_id_ != 0 && active_order_ >= 0 &&
@@ -1164,18 +1203,22 @@ bool OrderEvaluator::SetOrders(std::vector<Order> orders, base::TimeTicks now) {
     prev_active_key = FormatOrder(orders_[static_cast<size_t>(active_order_)]);
   }
   std::flat_set<std::string> prev_latched;
+  std::flat_map<std::string, base::TimeTicks> prev_installed;
   std::flat_map<std::string, base::TimeTicks> prev_every;
   for (size_t i = 0; i < orders_.size(); ++i) {
     const std::string key = FormatOrder(orders_[i]);
     if (i < order_latched_.size() && order_latched_[i]) {
       prev_latched.insert(key);
     }
+    if (i < order_installed_at_.size()) {
+      prev_installed[key] = order_installed_at_[i];
+    }
     if (i < last_every_fired_.size() && last_every_fired_[i].has_value()) {
       prev_every[key] = *last_every_fired_[i];
     }
   }
   orders_ = std::move(orders);
-  orders_installed_at_ = now;
+  order_installed_at_.assign(orders_.size(), now);
   last_every_fired_.assign(orders_.size(), std::nullopt);
   order_latched_.assign(orders_.size(), false);
   int kept_active_idx = -1;
@@ -1183,6 +1226,9 @@ bool OrderEvaluator::SetOrders(std::vector<Order> orders, base::TimeTicks now) {
     const std::string key = FormatOrder(orders_[i]);
     if (prev_latched.contains(key)) {
       order_latched_[i] = true;
+    }
+    if (auto it = prev_installed.find(key); it != prev_installed.end()) {
+      order_installed_at_[i] = it->second;
     }
     if (auto it = prev_every.find(key); it != prev_every.end()) {
       last_every_fired_[i] = it->second;
@@ -1220,6 +1266,7 @@ bool OrderEvaluator::ActiveStepMoves() const {
 
 void OrderEvaluator::Clear() {
   orders_.clear();
+  order_installed_at_.clear();
   last_every_fired_.clear();
   order_latched_.clear();
   ResetActive();
@@ -1408,7 +1455,7 @@ OrderEvalResult OrderEvaluator::OnSnapshot(const pb::Snapshot& snapshot,
 
   // Build snapshot view and bind history entries to live entities where
   // possible.
-  SnapshotView view(snapshot, now, orders_installed_at_);
+  SnapshotView view(snapshot, now, now);
   auto fallback_entity = [](const SeenEvent& ev) {
     Entity e;
     e.guid = ev.guid;
@@ -1444,6 +1491,7 @@ OrderEvalResult OrderEvaluator::OnSnapshot(const pb::Snapshot& snapshot,
     if (order.steps.empty()) {
       continue;
     }
+    view.installed_at = order_installed_at_[static_cast<size_t>(i)];
     view.order_last_every = last_every_fired_[static_cast<size_t>(i)];
     WhenMatch match = EvalWhen(view, order.when);
     if (!match.matched) {
@@ -1472,8 +1520,12 @@ OrderEvalResult OrderEvaluator::OnSnapshot(const pb::Snapshot& snapshot,
     }
     std::string it_guid = winner_match.it ? winner_match.it->guid : "";
     std::string it_name = winner_match.it ? winner_match.it->name : "";
-    return DispatchStep(winner, 0, std::move(it_guid), std::move(it_name),
-                        preempted, now);
+    OrderEvalResult res = DispatchStep(winner, 0, std::move(it_guid),
+                                       std::move(it_name), preempted, now);
+    if (res.act) {
+      res.target_guid = ResolveActThingGuid(view, *res.act, winner_match.it);
+    }
+    return res;
   }
 
   // A `kite` runs until stopped: it ends when its order's `when` no longer
@@ -1494,8 +1546,15 @@ OrderEvalResult OrderEvaluator::OnSnapshot(const pb::Snapshot& snapshot,
   // No higher-priority order preempted. If our active order just advanced its
   // `then` chain, dispatch the next step now.
   if (active_order_ >= 0 && step_advanced) {
-    return DispatchStep(active_order_, active_step_, active_it_guid_,
-                        active_it_name_, /*preempted=*/false, now);
+    OrderEvalResult res = DispatchStep(active_order_, active_step_,
+                                       active_it_guid_, active_it_name_,
+                                       /*preempted=*/false, now);
+    if (res.act) {
+      std::optional<Entity> it_ent =
+          view.FindByGuidOrName(active_it_guid_, active_it_name_);
+      res.target_guid = ResolveActThingGuid(view, *res.act, it_ent);
+    }
+    return res;
   }
 
   // Otherwise, the active step continues running.
@@ -1642,9 +1701,11 @@ bool OrderCoversWake(const Order& order,
   return kinds != 0 && (kinds & ~covered) == 0;
 }
 
-std::optional<pb::Command::Act> OrderActToCommand(const Act& act,
-                                                  std::string_view it_guid,
-                                                  std::string_view it_name) {
+std::optional<pb::Command::Act> OrderActToCommand(
+    const Act& act,
+    std::string_view it_guid,
+    std::string_view it_name,
+    std::string_view target_guid) {
   auto fill_thing = [](const Thing& thing, pb::Command::Act* out,
                        bool target_slot) {
     std::string& dst_name = target_slot ? out->target_name : out->name;
@@ -1845,6 +1906,12 @@ std::optional<pb::Command::Act> OrderActToCommand(const Act& act,
 
   if (!supported) {
     return std::nullopt;
+  }
+  if (!target_guid.empty() &&
+      out.thing != pb::Command::Act::THING_UNSPECIFIED &&
+      out.thing != pb::Command::Act::ME && out.thing != pb::Command::Act::IT &&
+      out.thing != pb::Command::Act::FOCUS) {
+    out.it_guid = std::string(target_guid);
   }
   return out;
 }

@@ -827,5 +827,50 @@ TEST(OrderEvaluatorTest, SetOrdersPreservesLatchesForUnchangedOrders) {
   EXPECT_FALSE(eval.OnSnapshot(s, T(5)).wake_reason.empty());
 }
 
+TEST(OrderEvaluatorTest, ReplanPreservesAfterAndFirstEveryClocks) {
+  OrderEvaluator eval(base::Seconds(5));
+  const std::vector<Order> orders = {
+      MustParse("after 5s -> use Bloodlust"),
+      MustParse("every 6s -> use Shield Block"),
+  };
+  eval.SetOrders(orders, T(0));
+  pb::Snapshot s = MakeBaseSnapshot();
+
+  // Replan every 1.5 s: `after 5s` and first `every 6s` must still fire!
+  EXPECT_FALSE(eval.OnSnapshot(s, T(1)).act.has_value());
+  eval.SetOrders(orders, T(2));
+  EXPECT_FALSE(eval.OnSnapshot(s, T(3)).act.has_value());
+  eval.SetOrders(orders, T(4));
+  const OrderEvalResult r5 = eval.OnSnapshot(s, T(5));
+  ASSERT_TRUE(r5.act.has_value());
+  EXPECT_EQ(r5.order_index, 0);
+  eval.set_pending_command_id(1);
+  eval.OnStepDone(1, T(5));
+  const OrderEvalResult r6 = eval.OnSnapshot(s, T(6));
+  ASSERT_TRUE(r6.act.has_value());
+  EXPECT_EQ(r6.order_index, 1);
+}
+
+TEST(OrderEvaluatorTest, MeleeContactDistZeroMatchesWithinAndSendsTargetGuid) {
+  OrderEvaluator eval(base::Seconds(5));
+  eval.SetOrders({MustParse("boss within 2 -> away boss 25")}, T(0));
+
+  pb::Snapshot s = MakeBaseSnapshot();
+  // Boss is in melee contact: edge-to-edge dist_yd is 0.0 even though its
+  // centre position is 8 yd away.
+  pb::Unit boss = MakeUnit("Boss-42", "Loken", 0.0f, {8.0f, 0.0f, 0.0f});
+  boss.boss = pb::BossPart{.phase = 1};
+  s.ext.encounter.emplace().boss = boss;
+
+  const OrderEvalResult r = eval.OnSnapshot(s, T(1));
+  ASSERT_TRUE(r.act.has_value());
+  EXPECT_EQ(r.target_guid, "Boss-42");
+  const std::optional<pb::Command::Act> wire =
+      OrderActToCommand(*r.act, r.it_guid, r.it_name, r.target_guid);
+  ASSERT_TRUE(wire.has_value());
+  EXPECT_EQ(wire->thing, pb::Command::Act::BOSS);
+  EXPECT_EQ(wire->it_guid, "Boss-42");
+}
+
 }  // namespace
 }  // namespace harness

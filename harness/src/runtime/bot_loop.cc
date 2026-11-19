@@ -223,9 +223,19 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   if (prev_order_cmd != 0 &&
       state.latest_snapshot->done_act_command_id == prev_order_cmd) {
     state.order_wakes = 0;
+    state.order_quiet_since = base::TimeTicks();
   }
   if (!ord.covered && ord.wake_reason.empty() && !ord.act) {
-    state.order_wakes = 0;
+    if (state.order_wakes > 0) {
+      if (state.order_quiet_since.is_null()) {
+        state.order_quiet_since = received_at;
+      } else if (received_at - state.order_quiet_since >= base::Seconds(10)) {
+        state.order_wakes = 0;
+        state.order_quiet_since = base::TimeTicks();
+      }
+    }
+  } else {
+    state.order_quiet_since = base::TimeTicks();
   }
   DispatchOrderEval(bot, &state, ord, received_at);
   if (!ord.wake_reason.empty()) {
@@ -284,6 +294,19 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
     if (state.orders.active() &&
         imm.event.error->command_id == state.orders.pending_command_id()) {
       OrderEvalResult failed = state.orders.OnStepFailed(imm.event.error->text);
+      state.order_quiet_since = base::TimeTicks();
+      if (state.call_in_flight) {
+        // Don't cancel a call already being answered (e.g. a cancel event
+        // arriving mid-stream would throw away the plan and its `tell`); queue
+        // the reason instead.
+        if (!failed.wake_reason.empty() &&
+            std::find(state.pending_reasons.begin(),
+                      state.pending_reasons.end(),
+                      failed.wake_reason) == state.pending_reasons.end()) {
+          state.pending_reasons.push_back(std::move(failed.wake_reason));
+        }
+        return;
+      }
       state.runner.Stop();
       state.look_deadline = base::TimeTicks();
       if (!failed.wake_reason.empty()) {
@@ -601,8 +624,9 @@ void BotLoop::OnReply(const std::string& bot,
 
   std::optional<Plan> plan;
   if (result.reply) {
-    plan = ParsePlan(result.reply->text,
-                     static_cast<int>(ask_screen.options.size()), order_names);
+    plan = ParsePlan(
+        StripTruncatedLastLine(result.reply->text, result.reply->finish_reason),
+        static_cast<int>(ask_screen.options.size()), order_names);
   }
 
   Decision decision;
@@ -983,8 +1007,8 @@ void BotLoop::DispatchOrderEval(const std::string& bot,
   if (eval.preempted) {
     SendStopMoving(bot);
   }
-  std::optional<pb::Command::Act> wire =
-      OrderActToCommand(*eval.act, eval.it_guid, eval.it_name);
+  std::optional<pb::Command::Act> wire = OrderActToCommand(
+      *eval.act, eval.it_guid, eval.it_name, eval.target_guid);
   if (!wire) {
     OrderEvalResult failed = state->orders.OnStepFailed("unsupported act verb");
     state->runner.Stop();

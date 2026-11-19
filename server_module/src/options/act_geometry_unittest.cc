@@ -38,20 +38,21 @@ TEST(ActGeometryTest, BehindAndInFrontUseFacing) {
 TEST(ActGeometryTest, YdFromAndMaxRangeFollowBotBearing) {
   const AnchorGeometry anchor{
       .pos = {0.0f, 0.0f, 0.0f}, .facing_rad = 0.0f, .radius_yd = 1.0f};
-  // Bot is directly +Y from anchor -> 8 yd from anchor should be (0, 8, 0).
+  // Bot is directly +Y from anchor (radius 1 yd) -> 8 yd edge-to-edge is (0, 9,
+  // 0).
   const pb::Vec3 bot{0.0f, 3.0f, 0.0f};
 
   std::vector<pb::Vec3> yd_from =
       CandidateSpotsForPlace(pb::Command_Act::YD_FROM, bot, anchor, 8.0f);
   ASSERT_GE(yd_from.size(), 10u);
   EXPECT_NEAR(yd_from[0].x, 0.0f, 1e-3f);
-  EXPECT_NEAR(yd_from[0].y, 8.0f, 1e-3f);
+  EXPECT_NEAR(yd_from[0].y, 9.0f, 1e-3f);
 
   std::vector<pb::Vec3> max_range = CandidateSpotsForPlace(
       pb::Command_Act::MAX_RANGE, bot, anchor, 0.0f, 28.0f);
   ASSERT_GE(max_range.size(), 10u);
   EXPECT_NEAR(max_range[0].x, 0.0f, 1e-3f);
-  EXPECT_NEAR(max_range[0].y, 28.0f, 1e-3f);
+  EXPECT_NEAR(max_range[0].y, 29.0f, 1e-3f);
 }
 
 TEST(ActGeometryTest, AwayReturnsEmptyWhenAlreadyFarEnough) {
@@ -97,6 +98,35 @@ TEST(ActGeometryTest, KiteGeneratesTangentialArcAroundAnchor) {
   EXPECT_NEAR(Dist2D(spots[0], anchor.pos), 20.0f, 1e-3f);
   EXPECT_GT(spots[0].x, 0.0f);
   EXPECT_GT(spots[0].y, 0.0f);
+}
+
+TEST(ActGeometryTest, DistancesAreEdgeToEdgeWithCombatReaches) {
+  // Boss with 7.5 yd combat reach + bot with 1.5 yd reach = 9.0 yd sum.
+  const AnchorGeometry boss{
+      .pos = {0.0f, 0.0f, 0.0f}, .facing_rad = 0.0f, .radius_yd = 7.5f};
+  const float bot_reach = 1.5f;
+
+  // Bot at (20, 0, 0) is only 11 yd edge-to-edge from boss: `away 25` must
+  // NOT be empty, and must place the first spot at 25 + 1.5 + 9 = 35.5 yd
+  // centre-to-centre (>= 25 yd edge-to-edge).
+  std::vector<pb::Vec3> away =
+      CandidateSpotsForAway({20.0f, 0.0f, 0.0f}, boss, 25.0f, bot_reach);
+  ASSERT_FALSE(away.empty());
+  EXPECT_NEAR(EdgeDist2D(away[0], bot_reach, boss), 26.5f, 1e-3f);
+
+  // `away` with no number (yd=0) from 20 yd edge-to-edge moves +12 yd further.
+  std::vector<pb::Vec3> bare_away =
+      CandidateSpotsForAway({29.0f, 0.0f, 0.0f}, boss, 0.0f, bot_reach);
+  ASSERT_FALSE(bare_away.empty());
+  EXPECT_NEAR(EdgeDist2D(bare_away[0], bot_reach, boss), 20.0f + kDefaultAwayYd,
+              1e-3f);
+
+  // `15 yd from boss` places first spot at 15 yd edge-to-edge (24 yd centre).
+  std::vector<pb::Vec3> yd_from =
+      CandidateSpotsForPlace(pb::Command_Act::YD_FROM, {15.0f, 0.0f, 0.0f},
+                             boss, 15.0f, 28.0f, bot_reach);
+  ASSERT_FALSE(yd_from.empty());
+  EXPECT_NEAR(EdgeDist2D(yd_from[0], bot_reach, boss), 15.0f, 1e-3f);
 }
 
 }  // namespace

@@ -161,6 +161,29 @@ TEST(PlanRunnerTest, StalledAttackTimesOutAfterSafetyLimit) {
   EXPECT_FALSE(runner.active());
 }
 
+TEST(PlanRunnerTest, ActiveAttackMakingProgressDoesNotTimeOutAt45s) {
+  const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
+  pb::Snapshot s1 = MakeSnap(1, /*in_combat=*/true);
+  AddBoar(&s1, "0x1");
+  s1.base.nearby.units[0].health_pct = 100.0f;
+  AddModuleOption(&s1, pb::Option::ATTACK, "Attack Mottled Boar", "0x1",
+                  "Mottled Boar");
+  AddModuleOption(&s1, pb::Option::KEEP, "Keep doing what I'm doing");
+
+  PlanRunner runner;
+  ASSERT_TRUE(runner.Start({{1, 1}}, 1, RenderScreen(s1), t0).choose);
+  // Target HP drops every 20 s during a long boss fight: never times out.
+  for (int step = 1; step <= 4; ++step) {
+    pb::Snapshot sn = s1;
+    sn.seq = static_cast<uint32_t>(step + 1);
+    sn.base.nearby.units[0].health_pct = 100.0f - 10.0f * step;
+    const RunnerAction a =
+        runner.OnSnapshot(sn, RenderScreen(sn), t0 + base::Seconds(20 * step));
+    EXPECT_TRUE(a.finished_reason.empty());
+    EXPECT_TRUE(runner.active());
+  }
+}
+
 // Playerbots leaves items it has no use for, so the corpse stays lootable: the
 // step ends when the module says the body finished its command.
 TEST(PlanRunnerTest, LootEndsOnTheBodysDoneSignalWhileTheCorpseIsLootable) {

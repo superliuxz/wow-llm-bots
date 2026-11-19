@@ -109,6 +109,11 @@ std::string PlanGrammar(int option_count,
 std::optional<std::vector<PlanStep>> ParsePlanStepsLine(std::string_view line,
                                                         int option_count);
 
+// Drops a potentially cut last line when a reply ended with
+// `finish_reason == "length"` (max_tokens hit mid-line).
+std::string_view StripTruncatedLastLine(std::string_view text,
+                                        std::string_view finish_reason);
+
 // Reads and validates a plan. nullopt if it isn't one: no valid steps, an
 // option that doesn't exist, a count out of range, no `look`, an unknown
 // watch. Over-long goals and chat lines are cut. `order_names`: those the

@@ -361,5 +361,18 @@ TEST(PlanTest, CheckPlanRecordsUsesTheRealParser) {
   EXPECT_EQ(CheckPlanRecords(records), "1\n0\n0\n");
 }
 
+TEST(PlanTest, StripTruncatedLastLineDropsCutLineOnLengthFinishReason) {
+  const std::string_view cut =
+      "do: 1\nlook: 30\norder: boss casts Nova -> away boss 2";
+  // Normal stop keeps everything.
+  EXPECT_EQ(StripTruncatedLastLine(cut, "stop"), cut);
+  // Length truncation drops the cut last line so `away boss 2` (cut from 25)
+  // is not installed.
+  EXPECT_EQ(StripTruncatedLastLine(cut, "length"), "do: 1\nlook: 30");
+  // If the reply ended right on a newline, no line was cut mid-line.
+  EXPECT_EQ(StripTruncatedLastLine("do: 1\nlook: 30\n", "length"),
+            "do: 1\nlook: 30\n");
+}
+
 }  // namespace
 }  // namespace harness

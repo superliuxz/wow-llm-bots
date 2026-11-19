@@ -53,6 +53,7 @@ struct LlmRequest {
 
 struct LlmReply {
   std::string text;
+  std::string finish_reason;  // "stop", "length", or empty if omitted.
   int prompt_tokens = 0;      // All of the prompt.
   int prompt_computed = 0;    // The part the server had to process again.
   int completion_tokens = 0;  // What the model wrote.

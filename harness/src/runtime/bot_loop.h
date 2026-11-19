@@ -142,10 +142,10 @@ class BotLoop {
     // the wake is delayed (StepRefusalBackoff()) so a body that can't act
     // (dead, out of range) doesn't ask the brain again many times a second.
     int step_refusals = 0;
-    // Consecutive order wakes or order step failures since the last completed
-    // order step or normal look: from the second, backs off via
-    // StepRefusalBackoff() so a failing or waking order cannot spam the brain.
+    // Consecutive order step failures/timeouts since the last completed order
+    // step, normal look, or sustained quiet period.
     int order_wakes = 0;
+    base::TimeTicks order_quiet_since;
     uint64_t call_epoch = 0;
     base::TimeTicks look_deadline;
     // Panels as the bot last saw them, for the prompt once they are closed.

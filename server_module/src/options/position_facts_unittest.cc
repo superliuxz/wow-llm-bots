@@ -281,6 +281,9 @@ TEST(PositionFactsTest, ClearsStaleDeadTargetOnlyWhileAliveInCombat) {
   EXPECT_TRUE(ShouldClearStaleCombatTarget(
       /*in_combat=*/true, /*bot_alive=*/true, /*has_target=*/true,
       /*target_alive=*/false));
+  EXPECT_FALSE(ShouldClearStaleCombatTarget(
+      /*in_combat=*/true, /*bot_alive=*/true, /*has_target=*/true,
+      /*target_alive=*/false, /*target_friendly=*/true));
   EXPECT_FALSE(ShouldClearStaleCombatTarget(true, true, true, true));
   EXPECT_FALSE(ShouldClearStaleCombatTarget(true, true, false, false));
   EXPECT_FALSE(ShouldClearStaleCombatTarget(false, true, true, false));

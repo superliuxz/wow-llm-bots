@@ -228,7 +228,8 @@ int RunDecide(const DecideOptions& options,
   decision.result = ask.Run(request);
   if (decision.result.reply) {
     decision.plan =
-        ParsePlan(decision.result.reply->text,
+        ParsePlan(StripTruncatedLastLine(decision.result.reply->text,
+                                         decision.result.reply->finish_reason),
                   static_cast<int>(screen.options.size()), input.order_names);
   }
   if (options.json_output) {

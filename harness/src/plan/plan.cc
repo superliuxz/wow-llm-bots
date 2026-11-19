@@ -143,6 +143,16 @@ std::optional<std::vector<PlanStep>> ParsePlanStepsLine(std::string_view line,
   return Map<PlanStep>(*steps, ToStep);
 }
 
+std::string_view StripTruncatedLastLine(std::string_view text,
+                                        std::string_view finish_reason) {
+  if (finish_reason != "length" || text.empty() || text.back() == '\n') {
+    return text;
+  }
+  const size_t last_nl = text.rfind('\n');
+  return last_nl == std::string_view::npos ? std::string_view{}
+                                           : text.substr(0, last_nl);
+}
+
 std::optional<Plan> ParsePlan(std::string_view text,
                               int option_count,
                               const std::vector<std::string>& order_names) {

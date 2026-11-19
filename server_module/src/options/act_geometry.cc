@@ -62,11 +62,21 @@ float Dist2D(const pb::Vec3& a, const pb::Vec3& b) {
   return std::sqrt(dx * dx + dy * dy);
 }
 
+float EdgeDist2D(const pb::Vec3& bot_pos,
+                 float bot_radius_yd,
+                 const AnchorGeometry& anchor) {
+  return std::max(
+      0.0f, Dist2D(bot_pos, anchor.pos) - bot_radius_yd - anchor.radius_yd);
+}
+
 std::vector<pb::Vec3> CandidateSpotsForPlace(pb::Command_Act::PlaceKind place,
                                              const pb::Vec3& bot_pos,
                                              const AnchorGeometry& anchor,
                                              float yd,
-                                             float max_range_yd) {
+                                             float max_range_yd,
+                                             float bot_radius_yd) {
+  const float reach_sum =
+      std::max(0.0f, bot_radius_yd) + std::max(0.0f, anchor.radius_yd);
   std::vector<pb::Vec3> spots;
   switch (place) {
     case pb::Command_Act::PLACE_UNSPECIFIED:
@@ -75,8 +85,7 @@ std::vector<pb::Vec3> CandidateSpotsForPlace(pb::Command_Act::PlaceKind place,
       return spots;
 
     case pb::Command_Act::BEHIND: {
-      const float dist =
-          std::max(anchor.radius_yd + kDefaultBehindMarginYd, 3.0f);
+      const float dist = std::max(reach_sum + kDefaultBehindMarginYd, 3.0f);
       const float behind_angle = anchor.facing_rad + kPi;
       static constexpr float kOffsets[] = {0.0f,   20.0f, -20.0f, 40.0f,
                                            -40.0f, 60.0f, -60.0f};
@@ -86,8 +95,7 @@ std::vector<pb::Vec3> CandidateSpotsForPlace(pb::Command_Act::PlaceKind place,
     }
 
     case pb::Command_Act::IN_FRONT: {
-      const float dist =
-          std::max(anchor.radius_yd + kDefaultBehindMarginYd, 3.0f);
+      const float dist = std::max(reach_sum + kDefaultBehindMarginYd, 3.0f);
       static constexpr float kOffsets[] = {0.0f, 20.0f, -20.0f, 40.0f, -40.0f};
       AppendFan(&spots, anchor.pos, anchor.facing_rad, dist, kOffsets,
                 sizeof(kOffsets) / sizeof(kOffsets[0]));
@@ -96,10 +104,11 @@ std::vector<pb::Vec3> CandidateSpotsForPlace(pb::Command_Act::PlaceKind place,
 
     case pb::Command_Act::MAX_RANGE:
     case pb::Command_Act::YD_FROM: {
-      const float dist =
+      const float edge_dist =
           (place == pb::Command_Act::MAX_RANGE)
               ? (max_range_yd > 0.0f ? max_range_yd : kDefaultMaxRangeYd)
               : std::max(yd, 1.0f);
+      const float dist = edge_dist + reach_sum;
       const float base =
           BearingFromTo(anchor.pos, bot_pos, anchor.facing_rad + kPi);
       static constexpr float kOffsets[] = {0.0f,    30.0f,  -30.0f,  60.0f,
@@ -115,14 +124,17 @@ std::vector<pb::Vec3> CandidateSpotsForPlace(pb::Command_Act::PlaceKind place,
 
 std::vector<pb::Vec3> CandidateSpotsForAway(const pb::Vec3& bot_pos,
                                             const AnchorGeometry& anchor,
-                                            float yd) {
-  const float cur_dist = Dist2D(bot_pos, anchor.pos);
-  if (yd > 0.0f && cur_dist >= yd) {
+                                            float yd,
+                                            float bot_radius_yd) {
+  const float reach_sum =
+      std::max(0.0f, bot_radius_yd) + std::max(0.0f, anchor.radius_yd);
+  const float cur_edge_dist = EdgeDist2D(bot_pos, bot_radius_yd, anchor);
+  if (yd > 0.0f && cur_edge_dist >= yd) {
     return {};
   }
-  const float target_dist =
-      yd > 0.0f ? (yd + 1.5f)
-                : std::max(cur_dist + kDefaultAwayYd, kDefaultAwayYd);
+  const float target_edge_dist =
+      yd > 0.0f ? (yd + 1.5f) : (cur_edge_dist + kDefaultAwayYd);
+  const float target_dist = target_edge_dist + reach_sum;
   const float base =
       BearingFromTo(anchor.pos, bot_pos, anchor.facing_rad + kPi);
   static constexpr float kOffsets[] = {0.0f,    30.0f,  -30.0f,  60.0f,
@@ -136,8 +148,12 @@ std::vector<pb::Vec3> CandidateSpotsForAway(const pb::Vec3& bot_pos,
 
 std::vector<pb::Vec3> CandidateSpotsForKite(const pb::Vec3& bot_pos,
                                             const AnchorGeometry& anchor,
-                                            float kite_dist_yd) {
-  const float dist = kite_dist_yd > 0.0f ? kite_dist_yd : kDefaultKiteYd;
+                                            float kite_dist_yd,
+                                            float bot_radius_yd) {
+  const float reach_sum =
+      std::max(0.0f, bot_radius_yd) + std::max(0.0f, anchor.radius_yd);
+  const float dist =
+      (kite_dist_yd > 0.0f ? kite_dist_yd : kDefaultKiteYd) + reach_sum;
   const float base =
       BearingFromTo(anchor.pos, bot_pos, anchor.facing_rad + kPi);
   // Prefer tangential steps around the kiting circle (+45 / -45 / +90 / -90),

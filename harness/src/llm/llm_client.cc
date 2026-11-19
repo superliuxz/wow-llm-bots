@@ -106,6 +106,10 @@ LlmResult ParseChatReply(std::string_view body) {
   }
   LlmReply reply;
   reply.text = content->get<std::string>();
+  if (const Json* fr = Find((*choices)[0], "finish_reason");
+      fr && fr->is_string()) {
+    reply.finish_reason = fr->get<std::string>();
+  }
   ReadUsageAndTimings(json, &reply);
   result.reply = std::move(reply);
   return result;
@@ -233,6 +237,10 @@ LlmResult LlamaConnection::Call(const LlmRequest& request,
       }
       if (content && content->is_string()) {
         streamed_reply.text.append(content->get_ref<const std::string&>());
+      }
+      if (const Json* fr = Find((*choices)[0], "finish_reason");
+          fr && fr->is_string() && !fr->get_ref<const std::string&>().empty()) {
+        streamed_reply.finish_reason = fr->get<std::string>();
       }
     }
     ReadUsageAndTimings(json, &streamed_reply);
