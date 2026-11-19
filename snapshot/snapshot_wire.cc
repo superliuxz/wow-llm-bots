@@ -645,7 +645,10 @@ struct glz::meta<wlb::snapshot::Unit::VisualState> {
                                                STEALTH_SHIMMER,
                                                SHACKLED,
                                                ROOTED,
-                                               DRUNK_SWAY);
+                                               DRUNK_SWAY,
+                                               FLYING,
+                                               UNTARGETABLE,
+                                               SUBMERGED);
 };
 
 template <>

@@ -56,8 +56,13 @@ design decisions below.
      `equip` (`CanEquipItem` + `SwapItem`), `pet` / `pet attack` (`HandlePetActionHelper`),
      `interact` (`UseObjectNow` / `TalkToNpcNow`), `face` / `face away`, `jump`, `cancel`
      (checks `SPELL_ATTR0_NO_AURA_CANCEL`), `avoid`.
-   - **(e) Not started:** snapshot additions: flying / untargetable / submerged on `Unit`,
-     `lands_in_s`, the liquid under the bot, the main assist.
+   - **(e) Done (2026-11-18):** snapshot additions (`snapshot/snapshot.h`, `snapshot_wire.cc`):
+     `Unit::VisualState` (`FLYING`, `UNTARGETABLE`, `SUBMERGED`, filled in `nearby_builder.cc`
+     and evaluated in `order_evaluator.cc` + `OrderEvaluatorTest`), `Area::lands_in_s` (filled
+     for preparing ground-targeted casts in `nearby_builder.cc`), `Self::liquid` (`"water"`,
+     `"lava"`, `"slime"` via `Map::GetLiquidData` in `snapshot_builder.cc`), and
+     `GroupPart::main_assist` / `Raid::main_assists` (`MEMBER_FLAG_MAINASSIST` in
+     `snapshot_builder.cc`).
    - **(f) Not started:** evals (boss notes in, orders out; a bot without the note writes none)
      and live tests (hand-written orders on a fixture bot, one scenario per verb).
    - Also open from the audit: re-judge the unsayable rows with the final grammar for a measured

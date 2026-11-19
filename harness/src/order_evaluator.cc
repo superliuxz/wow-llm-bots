@@ -942,9 +942,34 @@ CheckResult EvalCheck(const SnapshotView& view,
           return {};
 
         } else if constexpr (std::is_same_v<C, grammar::CheckIs>) {
-          // `Unit` does not yet carry `flying`/`grounded`/`untargetable`/
-          // `submerged` (docs/TODO.md #5e). Safely return false until added.
-          (void)c;
+          auto has_visual = [](const pb::Unit& u, pb::Unit::VisualState vs) {
+            return std::ranges::find(u.visual_state, vs) !=
+                   u.visual_state.end();
+          };
+          for (const Entity& ea : ResolveThing(view, c.a, it)) {
+            if (!ea.unit) {
+              continue;
+            }
+            bool ok = false;
+            switch (c.state) {
+              case grammar::State::kFlying:
+                ok = has_visual(*ea.unit, pb::Unit::FLYING);
+                break;
+              case grammar::State::kGrounded:
+                ok = !has_visual(*ea.unit, pb::Unit::FLYING) &&
+                     !has_visual(*ea.unit, pb::Unit::SUBMERGED);
+                break;
+              case grammar::State::kUntargetable:
+                ok = has_visual(*ea.unit, pb::Unit::UNTARGETABLE);
+                break;
+              case grammar::State::kSubmerged:
+                ok = has_visual(*ea.unit, pb::Unit::SUBMERGED);
+                break;
+            }
+            if (ok) {
+              return {true, ea};
+            }
+          }
           return {};
 
         } else if constexpr (std::is_same_v<C, grammar::CheckInSight>) {

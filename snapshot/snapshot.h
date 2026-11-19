@@ -291,6 +291,7 @@ struct GroupPart {
   bool leader = false;
   bool assistant = false;
   bool main_tank = false;
+  bool main_assist = false;
   std::string ready;
 
   bool operator==(const GroupPart&) const = default;
@@ -1465,6 +1466,9 @@ struct Area {
   bool inside_me = false;
   bool hostile = false;
   std::optional<float> remaining_s;
+  // Seconds until a ground-targeted cast lands at this area's spot (unset for
+  // already-landed ground effects).
+  std::optional<float> lands_in_s;
 
   bool operator==(const Area&) const = default;
 };
@@ -2243,6 +2247,9 @@ struct Unit {
     SHACKLED = 12,
     ROOTED = 13,
     DRUNK_SWAY = 14,
+    FLYING = 15,
+    UNTARGETABLE = 16,
+    SUBMERGED = 17,
   };
   using enum VisualState;
 
@@ -2433,6 +2440,8 @@ struct Self {
   bool camping = false;
   bool mounted = false;
   bool swimming = false;
+  // Liquid type the bot is currently in ("water", "lava", "slime"), or "".
+  std::string liquid;
   bool in_flight = false;
   bool on_transport = false;
   Self_Control control;
@@ -2528,6 +2537,7 @@ struct Party {
 struct Raid {
   std::vector<Unit> members;  // addon: Grid
   std::vector<std::string> main_tanks;
+  std::vector<std::string> main_assists;
 
   bool operator==(const Raid&) const = default;
 };

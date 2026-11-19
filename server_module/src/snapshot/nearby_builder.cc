@@ -24,6 +24,7 @@
 #include "ObjectGuid.h"
 #include "ObjectVisibilityContainer.h"
 #include "Player.h"
+#include "Position.h"
 #include "QuestDef.h"
 #include "SharedDefines.h"
 #include "Spell.h"
@@ -307,6 +308,16 @@ void FillVisualState(Unit* unit, pb::Unit* out) {
   if (unit->HasStealthAura()) {
     out->visual_state.push_back(pb::Unit::STEALTH_SHIMMER);
   }
+  if (unit->IsFlying()) {
+    out->visual_state.push_back(pb::Unit::FLYING);
+  }
+  if (unit->HasUnitFlag(UNIT_FLAG_NOT_SELECTABLE)) {
+    out->visual_state.push_back(pb::Unit::UNTARGETABLE);
+  }
+  if (unit->getStandState() == UNIT_STAND_STATE_SUBMERGED ||
+      unit->IsUnderWater()) {
+    out->visual_state.push_back(pb::Unit::SUBMERGED);
+  }
 }
 
 void FillPack(Creature* creature, pb::Unit* out) {
@@ -553,6 +564,37 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
         FillNameplate(unit, bot, &out);
       } else {
         out.detail = pb::Unit::MODEL;
+      }
+      // If a visible living unit is casting a ground-targeted spell, expose
+      // its landing spot as an Area with `lands_in_s`.
+      if (unit->IsAlive()) {
+        if (Spell* cast = unit->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+            cast && cast->getState() == SPELL_STATE_PREPARING &&
+            cast->m_targets.HasDst()) {
+          if (const WorldLocation* dst = cast->m_targets.GetDstPos()) {
+            const SpellInfo* info = cast->GetSpellInfo();
+            pb::Area& impact = nearby->areas.emplace_back();
+            impact.guid = GuidString(guid.GetRawValue());
+            impact.name = Localized(info->SpellName);
+            pb::Spell& sp = impact.spell.emplace();
+            sp.id = info->Id;
+            sp.name = impact.name;
+            const float radius = info->Effects[0].CalcRadius(unit);
+            impact.radius_yd = radius > 0.0f ? radius : 5.0f;
+            const float dist_to_dst =
+                bot->GetExactDist2d(dst->GetPositionX(), dst->GetPositionY());
+            impact.inside_me = dist_to_dst <= impact.radius_yd;
+            impact.hostile = unit->IsHostileTo(bot);
+            impact.lands_in_s =
+                static_cast<float>(std::max(0, cast->GetCastTimeRemaining())) /
+                1000.0f;
+            pb::Relative& rel = impact.rel.emplace();
+            rel.dist_yd = dist_to_dst;
+            rel.position = {dst->GetPositionX(), dst->GetPositionY(),
+                            dst->GetPositionZ()};
+            ++stats.areas;
+          }
+        }
       }
       ++stats.units;
     } else if (GameObject* go = object->ToGameObject()) {

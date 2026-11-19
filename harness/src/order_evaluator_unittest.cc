@@ -492,12 +492,12 @@ TEST(OrderEvaluatorTest, ResourcesStatesSightBehindTargetHasAndTimers) {
   EXPECT_EQ(r.order_index, 0);
 }
 
-TEST(OrderEvaluatorTest, MissingSnapshotStatesSafelyReturnFalse) {
+TEST(OrderEvaluatorTest, UnitStatesFlyingGroundedUntargetableSubmerged) {
   OrderEvaluator eval;
   eval.SetOrders({MustParse("boss is flying -> stop attacking"),
-                  MustParse("boss is grounded -> target boss"),
                   MustParse("boss is untargetable -> stop attacking"),
-                  MustParse("boss is submerged -> stop attacking")},
+                  MustParse("boss is submerged -> stop attacking"),
+                  MustParse("boss is grounded -> target boss")},
                  T(0));
 
   pb::Snapshot s = MakeBaseSnapshot();
@@ -507,9 +507,31 @@ TEST(OrderEvaluatorTest, MissingSnapshotStatesSafelyReturnFalse) {
   enc.boss = boss;
   s.ext.encounter = enc;
 
+  // Grounded by default (neither FLYING nor SUBMERGED).
   OrderEvalResult r = eval.OnSnapshot(s, T(1));
-  EXPECT_FALSE(r.act.has_value());
-  EXPECT_FALSE(r.covered);
+  ASSERT_TRUE(r.act.has_value());
+  EXPECT_EQ(r.order_index, 3);
+  eval.SetOrders(eval.orders(), T(2));
+
+  // Flying -> order 0.
+  s.ext.encounter->boss->visual_state = {pb::Unit::FLYING};
+  r = eval.OnSnapshot(s, T(2));
+  ASSERT_TRUE(r.act.has_value());
+  EXPECT_EQ(r.order_index, 0);
+  eval.SetOrders(eval.orders(), T(3));
+
+  // Untargetable -> order 1.
+  s.ext.encounter->boss->visual_state = {pb::Unit::UNTARGETABLE};
+  r = eval.OnSnapshot(s, T(3));
+  ASSERT_TRUE(r.act.has_value());
+  EXPECT_EQ(r.order_index, 1);
+  eval.SetOrders(eval.orders(), T(4));
+
+  // Submerged -> order 2 (and not grounded).
+  s.ext.encounter->boss->visual_state = {pb::Unit::SUBMERGED};
+  r = eval.OnSnapshot(s, T(4));
+  ASSERT_TRUE(r.act.has_value());
+  EXPECT_EQ(r.order_index, 2);
 }
 
 TEST(OrderEvaluatorTest, MountedSwimmingInSightAndAllyWith) {

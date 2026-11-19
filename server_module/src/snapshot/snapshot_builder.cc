@@ -251,6 +251,22 @@ void FillSelf(Player* bot, pb::Self* self) {
   self->resting = bot->HasPlayerFlag(PLAYER_FLAGS_RESTING);
   self->mounted = bot->IsMounted();
   self->swimming = bot->IsInWater();
+  if (Map* map = bot->GetMap()) {
+    const LiquidData liquid = map->GetLiquidData(
+        bot->GetPhaseMask(), bot->GetPositionX(), bot->GetPositionY(),
+        bot->GetPositionZ(), bot->GetCollisionHeight(), MAP_ALL_LIQUIDS);
+    if (liquid.Status != LIQUID_MAP_NO_WATER &&
+        liquid.Status != LIQUID_MAP_ABOVE_WATER) {
+      if ((liquid.Flags & MAP_LIQUID_TYPE_MAGMA) != 0) {
+        self->liquid = "lava";
+      } else if ((liquid.Flags & MAP_LIQUID_TYPE_SLIME) != 0) {
+        self->liquid = "slime";
+      } else if ((liquid.Flags &
+                  (MAP_LIQUID_TYPE_WATER | MAP_LIQUID_TYPE_OCEAN)) != 0) {
+        self->liquid = "water";
+      }
+    }
+  }
   self->in_flight = bot->IsInFlight();
   self->on_transport = bot->GetTransport() != nullptr;
   self->money = bot->GetMoney();
@@ -354,6 +370,7 @@ void FillParty(Player* bot, NearbyBuilder* nearby, pb::Extensions* ext) {
     gp.leader = slot.guid == group->GetLeaderGUID();
     gp.assistant = (slot.flags & MEMBER_FLAG_ASSISTANT) != 0;
     gp.main_tank = (slot.flags & MEMBER_FLAG_MAINTANK) != 0;
+    gp.main_assist = (slot.flags & MEMBER_FLAG_MAINASSIST) != 0;
     gp.role = PartyRole(slot.roles);
     if (Player* member = ObjectAccessor::FindConnectedPlayer(slot.guid);
         member && member->IsInWorld()) {
