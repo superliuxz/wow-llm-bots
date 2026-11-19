@@ -42,14 +42,17 @@ LOCKED_PATTERNS = [
     "tools/bench/human_metrics.py",
     "tools/bench/hill_climb.py",
     "tools/wlblib/cases/soak.py",
+    "tools/wlblib/testing.py",
     "server_module/src/snapshot/behavior_trace.h",
     "server_module/src/snapshot/behavior_trace.cc",
+    "server_module/src/snapshot/snapshot_builder.cc",
     "server_module/src/snapshot/snapshot_schedule.h",
     "server_module/src/snapshot/snapshot_schedule.cc",
     "server_module/src/llm_brain_world_script.cc",
     "server_module/conf/mod-llm-brain.conf.dist",
     "server_module/src/config/llm_brain_config.cc",
     "config/llm-brain.overrides",
+    "config/playerbots.overrides",
     "config/tests/soak*.llm-brain.overrides",
 ]
 
@@ -470,6 +473,17 @@ def cmd_eval_candidate(args) -> int:
         if not heldout_ok:
             print(f"HELD-OUT GATE FAILED ({ho_failures}): reverting candidate", file=sys.stderr)
             improved = False
+
+    # Commit kept changes before recording the ledger entry so the next round's
+    # base_ref points to the kept commit and a later REVERT never discards
+    # earlier KEEPs.
+    if improved and _changed_files_since("HEAD"):
+        subprocess.run(["git", "add", "-A"], cwd=ROOT, check=False)
+        subprocess.run(
+            ["git", "commit", "-m", f"hill-climb round {round_num}: {args.hypothesis}"],
+            cwd=ROOT,
+            check=False,
+        )
 
     entry = {
         "round": round_num,

@@ -470,7 +470,7 @@ class LlmBrainWorldScript : public WorldScript {
         tc.direction = "in";
         tc.channel = "whisper";
         tc.peer = line.chat.from;
-        tc.text = line.chat.text;
+        tc.text_len = line.chat.text.size();
         trace_writer_->WriteChat(tc);
       }
       wlb::snapshot::Event payload;
@@ -528,19 +528,23 @@ class LlmBrainWorldScript : public WorldScript {
     const wlb::snapshot::Command::Choose& choose = *command.choose;
     const OptionHistory::Lookup found =
         state.history.Find(choose.seq, choose.option);
+    // Copy the target by value before emitting any alerting event: emitting
+    // builds a new snapshot and calls `state.history.Add(...)`, which can evict
+    // the entry that `found.target` pointed into.
+    const std::optional<OptionTarget> target =
+        found.target ? std::optional<OptionTarget>(*found.target)
+                     : std::nullopt;
     std::string error = found.error;
     bool used = false;
     std::string info;
     // Keep carries on with what the body is doing: its walk and its rest stay
     // as they are (a reset walk would send the bot towards (0, 0, 0)).
-    const bool keep =
-        found.target && found.target->kind == OptionTarget::Kind::kKeep;
-    const bool attack =
-        found.target && found.target->kind == OptionTarget::Kind::kAttack;
-    if (!keep) {
-      // Cancel an active movement act on a new non-Keep, non-Attack choice
-      // (a replan that still fights the boss keeps an in-flight `away` running;
-      // a dropped `kite` is stopped explicitly by the harness via STOP MOVING).
+    const bool keep = target && target->kind == OptionTarget::Kind::kKeep;
+    const bool attack = target && target->kind == OptionTarget::Kind::kAttack;
+    if (target && !keep) {
+      // Cancel an active movement act on a new valid non-Keep, non-Attack
+      // choice (an expired/invalid choice must not cancel a boss dodge; a
+      // replan that still fights keeps an in-flight `away` running).
       if (!attack && state.active_act) {
         const uint32_t cancelled_cmd_id = state.active_act->command_id;
         CancelActiveAct(bot, &*state.active_act);
@@ -555,34 +559,33 @@ class LlmBrainWorldScript : public WorldScript {
       state.attack_idle_since = base::TimeTicks();
       state.walk = PendingWalk{};
     }
-    if (found.target) {
-      ExecuteResult result = ExecuteOption(bot, *found.target, &state.walk);
+    if (target) {
+      ExecuteResult result = ExecuteOption(bot, *target, &state.walk);
       error = std::move(result.error);
       used = result.used;
       info = std::move(result.info);
       if (!result.path_time.is_zero()) {
         path_times_.push_back(result.path_time);
       }
-      if (found.target->kind == OptionTarget::Kind::kRest) {
+      if (target->kind == OptionTarget::Kind::kRest) {
         state.had_food_drink_aura = HasFoodOrDrinkAura(bot);
       }
     }
     // How old the picture was when the bot acted on it: the number that
     // matters (docs/plans/harness.md, "Age").
     const int64_t age_ms =
-        found.target
+        target
             ? (base::TimeTicks::Now() - found.snapshot_built).InMilliseconds()
             : -1;
-    if (found.target) {
+    if (target) {
       apply_ages_.push_back(base::Milliseconds(age_ms));
     }
     LOG_INFO("module",
              "mod-llm-brain: {} chose {} of snapshot {} ({} {}): {}, "
              "age_at_apply={} ms",
              name, choose.option, choose.seq,
-             found.target ? OptionKindName(found.target->kind) : "-",
-             found.target ? found.target->name : "",
-             error.empty() ? "ok" : error, age_ms);
+             target ? OptionKindName(target->kind) : "-",
+             target ? target->name : "", error.empty() ? "ok" : error, age_ms);
     if (!error.empty()) {
       state.active_option.reset();
       schedule_->SetActiveTargetPending(bot_index, false);
@@ -598,7 +601,7 @@ class LlmBrainWorldScript : public WorldScript {
       // Keep: the body carries on, including a walk to an object it hasn't
       // clicked yet.
       state.done_command_id = command.command_id;
-    } else if (found.target) {
+    } else if (target) {
       if (!info.empty()) {
         wlb::snapshot::Event payload;
         payload.info.emplace().text = std::move(info);
@@ -606,13 +609,13 @@ class LlmBrainWorldScript : public WorldScript {
       }
       state.object_used = used;
       state.active_command_id = command.command_id;
-      const TargetProgress progress = OptionTargetProgress(
-          bot, *found.target, used, &state.had_food_drink_aura);
+      const TargetProgress progress =
+          OptionTargetProgress(bot, *target, used, &state.had_food_drink_aura);
       if (progress.pending) {
-        state.active_option = *found.target;
+        state.active_option = *target;
         schedule_->SetActiveTargetPending(bot_index, true);
       } else if (!progress.interrupted.empty()) {
-        state.active_option = *found.target;
+        state.active_option = *target;
         FailActiveOption(bot_index, name, bot, progress.interrupted);
       } else {
         state.active_option.reset();
@@ -628,7 +631,10 @@ class LlmBrainWorldScript : public WorldScript {
              uint32_t command_id,
              const wlb::snapshot::Command::Act& act) {
     BotState& state = bots_[bot_index];
-    state.active_act.reset();
+    if (state.active_act) {
+      CancelActiveAct(bot, &*state.active_act);
+      state.active_act.reset();
+    }
     ActiveAct pending;
     ActStartResult res =
         StartAct(bot, command_id, act, base::TimeTicks::Now(), &pending);

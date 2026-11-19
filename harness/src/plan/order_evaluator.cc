@@ -1177,7 +1177,33 @@ std::string ResolveActThingGuid(const SnapshotView& view,
     return {};
   }
   const std::vector<Entity> resolved = ResolveThing(view, *thing, it);
-  return resolved.empty() ? std::string{} : resolved.front().guid;
+  if (resolved.empty()) {
+    return {};
+  }
+  // Prefer the entity the condition matched (`it`) when it belongs to the
+  // resolved set (e.g. `Mottled Boar targets me -> kite Mottled Boar`).
+  if (it) {
+    for (const Entity& e : resolved) {
+      if (!e.guid.empty() && SameEntity(e, *it)) {
+        return e.guid;
+      }
+    }
+  }
+  // Otherwise pick the nearest matching entity instead of unordered map order.
+  const Entity* best = nullptr;
+  float best_dist = std::numeric_limits<float>::infinity();
+  for (const Entity& e : resolved) {
+    if (e.guid.empty()) {
+      continue;
+    }
+    const float d = DistanceBetween(view.self, e)
+                        .value_or(std::numeric_limits<float>::infinity());
+    if (!best || d < best_dist) {
+      best = &e;
+      best_dist = d;
+    }
+  }
+  return best ? best->guid : resolved.front().guid;
 }
 
 }  // namespace

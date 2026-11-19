@@ -273,6 +273,12 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   }
 }
 
+void SetEarlierDeadline(base::TimeTicks* deadline, base::TimeTicks candidate) {
+  if (deadline->is_null() || candidate < *deadline) {
+    *deadline = candidate;
+  }
+}
+
 base::TimeDelta StepRefusalBackoff(int refusals) {
   if (refusals <= 1) {
     return base::TimeDelta();
@@ -297,18 +303,22 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
       state.order_quiet_since = base::TimeTicks();
       if (state.call_in_flight) {
         // Don't cancel a call already being answered (e.g. a cancel event
-        // arriving mid-stream would throw away the plan and its `tell`); queue
-        // the reason instead.
-        if (!failed.wake_reason.empty() &&
-            std::find(state.pending_reasons.begin(),
-                      state.pending_reasons.end(),
-                      failed.wake_reason) == state.pending_reasons.end()) {
-          state.pending_reasons.push_back(std::move(failed.wake_reason));
+        // arriving mid-stream would throw away the plan and its `tell`). An
+        // "act cancelled by new choice" event is our own early-dispatched
+        // choice replacing an old movement act and needs no extra wake; real
+        // order failures queue the reason and wake once the reply finishes.
+        if (imm.event.error->text != "act cancelled by new choice" &&
+            !failed.wake_reason.empty()) {
+          if (std::find(state.pending_reasons.begin(),
+                        state.pending_reasons.end(),
+                        failed.wake_reason) == state.pending_reasons.end()) {
+            state.pending_reasons.push_back(std::move(failed.wake_reason));
+          }
+          state.order_failure_during_call = true;
         }
         return;
       }
       state.runner.Stop();
-      state.look_deadline = base::TimeTicks();
       if (!failed.wake_reason.empty()) {
         WakeForOrder(bot, &state, failed.wake_reason, received_at,
                      /*is_failure=*/true);
@@ -332,7 +342,7 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
                     trig->reason) == state.pending_reasons.end()) {
         state.pending_reasons.push_back(trig->reason);
       }
-      state.look_deadline = received_at + backoff;
+      SetEarlierDeadline(&state.look_deadline, received_at + backoff);
       Log(base::StringPrintf(
           "harness: %s step refused %d times in a row; "
           "next look in %.0f s",
@@ -465,6 +475,7 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
   state.call_in_flight = true;
   state.early_steps_dispatched = false;
   state.early_step_failed = false;
+  state.order_failure_during_call = false;
   const uint64_t epoch = ++state.call_epoch;
 
   const std::string wake_reason =
@@ -742,6 +753,10 @@ void BotLoop::OnReply(const std::string& bot,
               state.runner.Start(plan->steps, ask_seq, ask_screen, now);
           DispatchRunnerAction(bot, &state, action);
         }
+        if (state.order_failure_during_call) {
+          state.order_failure_during_call = false;
+          WakeForOrder(bot, &state, "", now, /*is_failure=*/true);
+        }
       } else {
         // Superseded by a newer wake while in flight: that call answers.
         Requeue(&state, std::move(asked_reasons), std::move(asked_events));
@@ -962,22 +977,28 @@ void BotLoop::WakeForOrder(const std::string& bot,
                            bool is_failure) {
   if (!is_failure) {
     state->order_wakes = 0;
+    state->look_deadline = base::TimeTicks();
     WakeBot(bot, Urgency::kUrgent, std::string(reason), /*refusal=*/false);
     return;
   }
   const base::TimeDelta backoff = StepRefusalBackoff(++state->order_wakes);
   if (backoff.is_positive()) {
-    const std::string r(reason);
-    if (std::find(state->pending_reasons.begin(), state->pending_reasons.end(),
-                  r) == state->pending_reasons.end()) {
-      state->pending_reasons.push_back(r);
+    if (!reason.empty()) {
+      const std::string r(reason);
+      if (std::find(state->pending_reasons.begin(),
+                    state->pending_reasons.end(),
+                    r) == state->pending_reasons.end()) {
+        state->pending_reasons.push_back(r);
+      }
     }
-    state->look_deadline = now + backoff;
+    // Never push an earlier plan/backoff look deadline further out.
+    SetEarlierDeadline(&state->look_deadline, now + backoff);
     Log(base::StringPrintf(
         "harness: %s order failure %d in a row; next look in %.0f s",
         bot.c_str(), state->order_wakes, backoff.InSecondsF()));
     return;
   }
+  state->look_deadline = base::TimeTicks();
   WakeBot(bot, Urgency::kUrgent, std::string(reason), /*refusal=*/true);
 }
 
@@ -996,7 +1017,6 @@ void BotLoop::DispatchOrderEval(const std::string& bot,
       SendStopMoving(bot);
     }
     state->runner.Stop();
-    state->look_deadline = base::TimeTicks();
     WakeForOrder(bot, state, eval.wake_reason, now,
                  /*is_failure=*/eval.timed_out);
     return;

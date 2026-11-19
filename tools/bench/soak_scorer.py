@@ -355,8 +355,9 @@ def score_soak(
         guardrails.append({"name": name, "ok": bool(ok), "detail": detail})
 
     n_bots = max(1, int(run_stats.get("bots", progress["traced_bots"] or 1)))
-    check("has_traced_bots", progress["traced_bots"] >= 1,
-          f"traced_bots={progress['traced_bots']} (>= 1)")
+    min_traced = max(1, n_bots // 2)
+    check("has_traced_bots", progress["traced_bots"] >= min_traced,
+          f"traced_bots={progress['traced_bots']} (>= {min_traced})")
     check("has_decisions", int(run_stats.get("decisions", 0)) >= 1,
           f"decisions={run_stats.get('decisions', 0)} (>= 1)")
     check("no_llm_errors", run_stats.get("llm_errors", 0) == 0,

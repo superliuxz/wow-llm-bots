@@ -54,20 +54,86 @@ std::string CapText(std::string_view text, size_t max_bytes) {
   return base::StrCat({text.substr(0, max_bytes - kSuffix.size()), kSuffix});
 }
 
-// Truncates `user` to `max_bytes` while preserving the trailing `also:` option
-// block if present, so a huge screen can never drop the bot's live options.
+// True when `line` is a numbered option line (e.g. `"  12. Attack ..."`),
+// which must stay visible in the prompt so the grammar and screen agree.
+bool IsNumberedOptionLine(std::string_view line) {
+  size_t i = 0;
+  while (i < line.size() && line[i] == ' ') {
+    ++i;
+  }
+  if (i == 0 || i >= line.size() || line[i] < '0' || line[i] > '9') {
+    return false;
+  }
+  while (i < line.size() && line[i] >= '0' && line[i] <= '9') {
+    ++i;
+  }
+  return i + 1 < line.size() && line[i] == '.' && line[i + 1] == ' ';
+}
+
+// Truncates `user` to `max_bytes` by first dropping non-option description
+// lines inside `Your screen now:` (keeping numbered option lines and `also:`)
+// so a crowded unit list does not hide its last options from the brain while
+// they remain in the grammar.
 std::string CapUserPreservingAlso(std::string_view user, size_t max_bytes) {
   if (user.size() <= max_bytes) {
     return std::string(user);
   }
-  const size_t also_pos = user.rfind("\nalso:\n");
-  if (also_pos != std::string_view::npos) {
-    const std::string_view tail = user.substr(also_pos);
-    constexpr std::string_view kGap = "\n[truncated]";
-    if (tail.size() + kGap.size() + 32 < max_bytes) {
-      const size_t head_budget = max_bytes - tail.size() - kGap.size();
-      return base::StrCat({user.substr(0, head_budget), kGap, tail});
+  constexpr std::string_view kScreenMarker = "\n\nYour screen now:\n";
+  const size_t screen_pos = user.find(kScreenMarker);
+  if (screen_pos != std::string_view::npos) {
+    const std::string_view head =
+        user.substr(0, screen_pos + kScreenMarker.size());
+    const std::string_view body =
+        user.substr(screen_pos + kScreenMarker.size());
+    std::vector<std::string_view> lines;
+    size_t pos = 0;
+    while (pos <= body.size()) {
+      const size_t nl = body.find('\n', pos);
+      if (nl == std::string_view::npos) {
+        lines.push_back(body.substr(pos));
+        break;
+      }
+      lines.push_back(body.substr(pos, nl - pos));
+      pos = nl + 1;
     }
+    std::vector<bool> keep(lines.size(), true);
+    size_t cur_size = user.size();
+    // Drop non-option description lines inside the screen body from bottom up
+    // (preserving `also:` and all numbered option lines).
+    for (size_t i = lines.size(); i > 0 && cur_size > max_bytes; --i) {
+      const std::string_view l = lines[i - 1];
+      if (l == "also:" || IsNumberedOptionLine(l)) {
+        continue;
+      }
+      keep[i - 1] = false;
+      cur_size -= l.size() + 1;
+    }
+    std::string rebuilt(head);
+    bool first = true;
+    for (size_t i = 0; i < lines.size(); ++i) {
+      if (!keep[i]) {
+        continue;
+      }
+      if (!first) {
+        rebuilt.push_back('\n');
+      }
+      rebuilt.append(lines[i]);
+      first = false;
+    }
+    if (rebuilt.size() <= max_bytes) {
+      return rebuilt;
+    }
+    user = rebuilt;
+    const size_t also_pos = user.rfind("\nalso:\n");
+    if (also_pos != std::string_view::npos) {
+      const std::string_view tail = user.substr(also_pos);
+      constexpr std::string_view kGap = "\n[truncated]";
+      if (tail.size() + kGap.size() + 32 < max_bytes) {
+        const size_t head_budget = max_bytes - tail.size() - kGap.size();
+        return base::StrCat({user.substr(0, head_budget), kGap, tail});
+      }
+    }
+    return CapText(user, max_bytes);
   }
   return CapText(user, max_bytes);
 }

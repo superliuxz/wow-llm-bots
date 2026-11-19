@@ -872,5 +872,23 @@ TEST(OrderEvaluatorTest, MeleeContactDistZeroMatchesWithinAndSendsTargetGuid) {
   EXPECT_EQ(wire->it_guid, "Boss-42");
 }
 
+TEST(OrderEvaluatorTest, NamedActPrefersMatchedOrNearestUnit) {
+  OrderEvaluator eval(base::Seconds(5));
+  eval.SetOrders({MustParse("Mottled Boar targets me -> kite Mottled Boar")},
+                 T(0));
+
+  pb::Snapshot s = MakeBaseSnapshot();
+  s.base.self.unit.guid = "Player-1";
+  // Far idle boar listed first; charging boar at 3 yd listed second.
+  pb::Unit far_boar = MakeUnit("Boar-far", "Mottled Boar", 30.0f);
+  pb::Unit near_boar = MakeUnit("Boar-near", "Mottled Boar", 3.0f);
+  near_boar.target = "Player-1";
+  s.base.nearby.units = {far_boar, near_boar};
+
+  const OrderEvalResult r = eval.OnSnapshot(s, T(1));
+  ASSERT_TRUE(r.act.has_value());
+  EXPECT_EQ(r.target_guid, "Boar-near");
+}
+
 }  // namespace
 }  // namespace harness

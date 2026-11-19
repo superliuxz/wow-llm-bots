@@ -755,7 +755,7 @@ namespace {
 // Far above anything real: a snapshot's longest strings are chat lines and
 // tooltips, its longest arrays the nearby units of a crowded city (~200).
 inline constexpr size_t kMaxWireStringBytes = 64 * 1024;
-inline constexpr size_t kMaxWireArraySize = 1024;
+inline constexpr size_t kMaxWireArraySize = 16 * 1024;
 
 struct WireBeveOpts : glz::opts {
   uint32_t format = glz::BEVE;

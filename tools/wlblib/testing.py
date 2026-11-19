@@ -328,6 +328,8 @@ def _run_perf(module, stack, baselines, update, busy=None):
         if p.failures and busy:
             # Measured beside a busy play server: reported, not failed.
             say(f"WARN perf {module.NAME}: {'; '.join(p.failures)} (play server busy)")
+        elif p.failures and update:
+            say(f"WARN perf {module.NAME}: {'; '.join(p.failures)} (updating baseline)")
         if p.beyond or (p.failures and not busy and not update):
             raise Failed("; ".join(p.beyond + ([] if (busy or update) else p.failures)))
         ok, detail = True, p.summary()

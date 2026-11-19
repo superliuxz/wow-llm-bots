@@ -1405,5 +1405,54 @@ TEST(BotLoopTest, OrderCancelEventMidStreamDoesNotDropInFlightPlanOrTell) {
   EXPECT_TRUE(sent_tell);
 }
 
+TEST(BotLoopTest, OrderFailureDuringBrainCallWakesAfterReply) {
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& c) { sent.push_back(c); });
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s = MakeLiveSnap("Aelindra", 1, t0, /*in_combat=*/true);
+  AddKeep(&s);
+  s.base.self.unit.health_pct = 80.0f;
+  loop.OnSnapshot(s, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+      "order: me hp<50 -> use Healthstone");
+
+  // Start the potion order.
+  s.seq = 2;
+  s.base.self.unit.health_pct = 40.0f;
+  loop.OnSnapshot(s, t0 + base::Seconds(1));
+  const uint32_t act_id = sent.back().command_id;
+
+  // Whisper starts a brain call.
+  pb::ImmediateEvent wh;
+  wh.bot = "Aelindra";
+  pb::ChatEvent& chat = wh.event.chat.emplace();
+  chat.channel = pb::WHISPER;
+  chat.from = "Thrall";
+  chat.text = "hi";
+  loop.OnEvent(std::move(wh), t0 + base::Seconds(2));
+  ASSERT_EQ(brain.size(), 1u);
+
+  // Real order failure arrives while the brain call is in flight.
+  pb::ImmediateEvent fail;
+  fail.bot = "Aelindra";
+  fail.event.error.emplace().command_id = act_id;
+  fail.event.error->text = "Healthstone is on cooldown";
+  loop.OnEvent(std::move(fail), t0 + base::Seconds(2));
+
+  // Finishing the call installs its plan AND wakes immediately for the failure
+  // instead of waiting 60 s for the look timer.
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\ntell Thrall: hey!");
+  EXPECT_EQ(brain.size(), 1u);
+}
+
 }  // namespace
 }  // namespace harness
