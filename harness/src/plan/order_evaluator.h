@@ -83,8 +83,10 @@ class OrderEvaluator {
       base::TimeDelta step_timeout = kDefaultOrderStepTimeout);
 
   // Replaces all active orders (a new plan replaces the old plan's orders).
-  // Resets timers (`after`, `every`) and clears any active chain.
-  void SetOrders(std::vector<Order> orders, base::TimeTicks now);
+  // Preserves edge latches and any currently running step whose order text is
+  // still present in the new plan. Returns true if an active movement step was
+  // dropped (caller should send `stop moving`).
+  bool SetOrders(std::vector<Order> orders, base::TimeTicks now);
 
   void Clear();
 

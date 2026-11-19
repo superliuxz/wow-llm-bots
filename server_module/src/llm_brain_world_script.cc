@@ -490,8 +490,13 @@ class LlmBrainWorldScript : public WorldScript {
     // as they are (a reset walk would send the bot towards (0, 0, 0)).
     const bool keep =
         found.target && found.target->kind == OptionTarget::Kind::kKeep;
+    const bool attack =
+        found.target && found.target->kind == OptionTarget::Kind::kAttack;
     if (!keep) {
-      if (state.active_act) {
+      // Cancel an active movement act on a new non-Keep, non-Attack choice
+      // (a replan that still fights the boss keeps an in-flight `away` running;
+      // a dropped `kite` is stopped explicitly by the harness via STOP MOVING).
+      if (!attack && state.active_act) {
         CancelActiveAct(bot, &*state.active_act);
         state.active_act.reset();
       }

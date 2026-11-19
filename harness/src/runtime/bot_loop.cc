@@ -660,10 +660,9 @@ void BotLoop::OnReply(const std::string& bot,
                 ? std::flat_set<std::string>{}
                 : CollectExpectedNames(plan->steps, plan->expect, ask_screen),
             &state.ask_watch_inputs);
-        if (state.orders.ActiveStepMoves()) {
+        if (state.orders.SetOrders(plan->orders, now)) {
           SendStopMoving(bot);
         }
-        state.orders.SetOrders(plan->orders, now);
         if (!state.early_step_failed) {
           state.look_deadline = now + base::Seconds(plan->look_s);
         }

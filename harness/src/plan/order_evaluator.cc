@@ -1152,10 +1152,17 @@ WhenMatch EvalWhen(const SnapshotView& view, const When& when) {
 OrderEvaluator::OrderEvaluator(base::TimeDelta step_timeout)
     : step_timeout_(step_timeout) {}
 
-void OrderEvaluator::SetOrders(std::vector<Order> orders, base::TimeTicks now) {
+bool OrderEvaluator::SetOrders(std::vector<Order> orders, base::TimeTicks now) {
   // Preserve edge latches and `every Ns` timestamps for orders whose text did
   // not change across a replan, so a held condition (`hp<30 -> wake`) does not
-  // fire again on every new plan.
+  // fire again on every new plan. Also keep a currently running order step
+  // alive if the new plan restated the exact same order.
+  const bool was_moving = ActiveStepMoves();
+  std::string prev_active_key;
+  if (was_moving && pending_command_id_ != 0 && active_order_ >= 0 &&
+      static_cast<size_t>(active_order_) < orders_.size()) {
+    prev_active_key = FormatOrder(orders_[static_cast<size_t>(active_order_)]);
+  }
   std::flat_set<std::string> prev_latched;
   std::flat_map<std::string, base::TimeTicks> prev_every;
   for (size_t i = 0; i < orders_.size(); ++i) {
@@ -1171,6 +1178,7 @@ void OrderEvaluator::SetOrders(std::vector<Order> orders, base::TimeTicks now) {
   orders_installed_at_ = now;
   last_every_fired_.assign(orders_.size(), std::nullopt);
   order_latched_.assign(orders_.size(), false);
+  int kept_active_idx = -1;
   for (size_t i = 0; i < orders_.size(); ++i) {
     const std::string key = FormatOrder(orders_[i]);
     if (prev_latched.contains(key)) {
@@ -1179,8 +1187,17 @@ void OrderEvaluator::SetOrders(std::vector<Order> orders, base::TimeTicks now) {
     if (auto it = prev_every.find(key); it != prev_every.end()) {
       last_every_fired_[i] = it->second;
     }
+    if (!prev_active_key.empty() && kept_active_idx < 0 &&
+        key == prev_active_key) {
+      kept_active_idx = static_cast<int>(i);
+    }
+  }
+  if (kept_active_idx >= 0) {
+    active_order_ = kept_active_idx;
+    return false;
   }
   ResetActive();
+  return was_moving;
 }
 
 bool OrderEvaluator::ActiveStepMoves() const {

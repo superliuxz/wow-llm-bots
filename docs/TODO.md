@@ -85,6 +85,12 @@ Items #1–#5 are done and verified live (2026-11-18).
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-18: added `e2e boss` (`tools/wlblib/cases/e2e_boss.py`) as a repeatable live boss
+  plumbing regression test (Loken in Halls of Lightning, `-wotlk-hol`, mock brain): verifies
+  `Lightning Nova` visibility over background `Pulsing Shockwave` channel, `1 ms` `AWAY Loken 25`
+  dispatch, movement `2.7 -> 16.3 yd`, 0 deaths, 0 visibility/command errors; also fixed a real
+  replan interaction it caught (restating an in-flight movement order during a mid-fight wake no
+  longer cancels it with `stop moving`). Both `e2e boss` and `e2e orders` pass (`2/2`).
 - 2026-11-18: review of `e84d03e`, all 15 findings (Highs #1–#3, Mediums #4–#15) + strengthened
   `e2e orders`: `SetOrders` preserves latches across unchanged orders, order wake/failure backoff,
   active orders shown on prompt, `stop moving` when a new plan drops a movement act and module

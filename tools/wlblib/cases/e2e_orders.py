@@ -466,6 +466,10 @@ def run(stack):
             wait_plan(prev_replies)
             shield_snap = None
             for attempt in range(2):
+                # Strip any Power Word: Shield / Weakened Soul playerbots may
+                # have cast in combat so `not Power Word: Shield on me` holds.
+                server.console("llmtest unaura Loada 17", wait_s=0.1, inst=TEST)
+                server.console("llmtest unaura Loada 6788", wait_s=0.1, inst=TEST)
                 cmd_mark = len(proxy.commands)
                 server.console("llmtest aura Loada 139", wait_s=0.1, inst=TEST)
                 proxy.wait_until(
