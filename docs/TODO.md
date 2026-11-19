@@ -71,12 +71,6 @@ design decisions below.
 
 ## Loose ends
 
-- **The eval re-parses replies with regexes** (simplification review 2026-11-18, item 7): `eval_plans.py`'s
-  `STEP_RE`, `TELL_RE`, `OPEN_RE`, `HOVER_RE` duplicate the generated plan parser; read
-  `harness parse-plans` JSON instead, as `perf brain` already does.
-- **The brain's screen doesn't show the bot's own auras**: the module fills `self.unit.auras` now
-  (the buff bar; e2e `rest` checks Food / Drink there) but `screen_renderer.cc` doesn't render
-  them, so the brain doesn't see "eating", a debuff or a buff running out.
 - **Screen goldens have no module options** (review of c80e791, finding 5; still open after the
   review of f40b0b6): the 10 goldens test rendering against the Python prototype, which invents
   its own options. Real options need each golden's facts captured on the test server

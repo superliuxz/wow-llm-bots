@@ -25,20 +25,18 @@ SHOOTOUT_MODELS = (
     "gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf",
 )
 
-REPLY_RE = re.compile(
-    r"^== reply \(([\d.]+) ms(?:, first line ([\d.]+) ms)?; "
-    r"prompt (\d+) tokens, (\d+) read again;",
-    re.M,
-)
-PLAN_RE = re.compile(r"^== plan: (.+); look again in (\d+) s$", re.M)
-STEP_RE = re.compile(r"^(\d+)(?:x(\d+))? (.+)$")
-GOAL_RE = re.compile(r"^goal:\s*(.*)$", re.M | re.I)
-TELL_RE = re.compile(r"^tell ([A-Za-z]+):\s*(.*)$", re.M | re.I)
-OPEN_RE = re.compile(r"^open: (.+)$", re.M)
-HOVER_RE = re.compile(r"^hover: (.+)$", re.M)
-# A numbered line of the screen: "  3. Attack Mottled Boar: level 2 boar, ..." -> 3, the text
-# before the details.
-OPTION_RE = re.compile(r"^\s+(\d+)\. ([^:\n]+)", re.M)
+# Maps snapshot::Option::Kind JSON names to screen_renderer::OptionKindName.
+OPTION_KIND_NAME = {
+    "ATTACK": "attack",
+    "TALK": "talk",
+    "LOOT": "loot",
+    "GATHER": "gather",
+    "USE": "use",
+    "REST": "rest",
+    "EXPLORE": "explore",
+    "GO_TO": "go to town",
+    "KEEP": "keep doing what I'm doing",
+}
 
 
 def load_cases(names=()):
@@ -76,55 +74,18 @@ def decide_one(case, temperature=0.0, slot=0):
         f"--rules={RULES_FILE}",
         f"--slot={slot}",
         f"--temperature={temperature}",
+        "--json",
     ]
     # Who whispered (as the live harness remembers it): who a `tell` line may answer.
     whisperers = WHISPER_FROM_RE.findall(case["reason"])
     if whisperers:
         cmd.append(f"--whisperers={','.join(whisperers)}")
     res = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
-    out = res.stdout
-    reply_m = REPLY_RE.search(out)
-    ms = float(reply_m.group(1)) if reply_m else 0.0
-    first_ms = float(reply_m.group(2) or ms) if reply_m else 0.0
-    prompt_tok = int(reply_m.group(3)) if reply_m else 0
-    prompt_comp = int(reply_m.group(4)) if reply_m else 0
-    plan_m = PLAN_RE.search(out)
-    if res.returncode != 0 or not plan_m:
-        return {"valid": False, "ms": ms, "first_ms": first_ms, "steps": [],
-                "look_s": 0, "goal": "", "raw": out[-300:]}
-    steps = []
-    for part in plan_m.group(1).split(", "):
-        sm = STEP_RE.match(part.strip())
-        if sm:
-            steps.append({
-                "option": int(sm.group(1)),
-                "times": int(sm.group(2) or 1),
-                "kind": sm.group(3),
-            })
-    goal_m = GOAL_RE.search(out)
-    screen = out.split("== reply", 1)[0]
-    option_texts = {int(n): text.strip() for n, text in OPTION_RE.findall(screen)}
-    reply = out.split("== reply", 1)[1] if "== reply" in out else ""
-    tell_m = TELL_RE.search(reply)
-    open_m = OPEN_RE.search(reply)
-    hover_m = HOVER_RE.search(reply)
-    for step in steps:
-        step["text"] = option_texts.get(step["option"], "")
-    return {
-        "valid": True,
-        "ms": ms,
-        "first_ms": first_ms,
-        "prompt_tokens": prompt_tok,
-        "prompt_computed": prompt_comp,
-        "steps": steps,
-        "plan_desc": plan_m.group(1),
-        "look_s": int(plan_m.group(2)),
-        "goal": goal_m.group(1).strip() if goal_m else "",
-        "tell_to": tell_m.group(1).capitalize() if tell_m else "",
-        "tell": tell_m.group(2).strip() if tell_m else "",
-        "open": [p.strip() for p in open_m.group(1).split(",")] if open_m else [],
-        "hover": hover_m.group(1).strip() if hover_m else "",
-    }
+    try:
+        return json.loads(res.stdout)
+    except json.JSONDecodeError:
+        return {"valid": False, "ms": 0.0, "first_ms": 0.0, "steps": [],
+                "look_s": 0, "goal": "", "raw": res.stdout[-300:]}
 
 
 def check_case(case, got):
@@ -181,28 +142,15 @@ def check_case(case, got):
     return problems
 
 
-def _option_kind(text):
-    """The step kind `harness decide` names an option by (OptionKindName)."""
-    for prefix, kind in (("Attack ", "attack"), ("Talk to ", "talk"), ("Loot ", "loot"),
-                         ("Gather ", "gather"), ("Use ", "use")):
-        if text.startswith(prefix):
-            return kind
-    lower = text.lower()
-    for prefix, kind in (("explore", "explore"), ("rest", "rest"), ("go to", "go to town"),
-                         ("keep", "keep doing what I'm doing")):
-        if lower.startswith(prefix):
-            return kind
-    return "?"
-
-
 def _probe_plans(case):
     """Every one-step plan the case's screen allows, plain and with a whisper and a look: what a
     model could answer, for the checks to be tried on."""
     snap = json.loads((EVAL_DIR / f"{case['name']}.snapshot.json").read_text())
-    texts = [o.get("text", "").split(":")[0].strip() for o in snap.get("options", [])]
     plans = []
-    for i, text in enumerate(texts, 1):
-        step = {"option": i, "times": 1, "kind": _option_kind(text), "text": text}
+    for i, opt in enumerate(snap.get("options", []), 1):
+        text = opt.get("text", "").split(":")[0].strip()
+        kind = OPTION_KIND_NAME.get(opt.get("kind", ""), "?")
+        step = {"option": i, "times": 1, "kind": kind, "text": text}
         plain = {"valid": True, "steps": [step], "look_s": 60, "goal": "", "tell_to": "",
                  "tell": "", "open": [], "hover": ""}
         plans.append(plain)

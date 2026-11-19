@@ -5,9 +5,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "base/strings/strcat.h"
@@ -19,6 +21,7 @@
 #include "decision_log.h"
 #include "file_util.h"
 #include "llm_client.h"
+#include "nlohmann/json.hpp"
 #include "plan.h"
 #include "prompt.h"
 #include "screen_renderer.h"
@@ -100,6 +103,8 @@ std::optional<DecideOptions> ParseDecideArgs(
       options.dry_run = true;
     } else if (name == "print-request" && value.empty()) {
       options.print_request = true;
+    } else if (name == "json" && value.empty()) {
+      options.json_output = true;
     } else if (name == "whisperers") {
       options.whisperers = base::SplitString(value, ",", base::TRIM_WHITESPACE,
                                              base::SPLIT_WANT_NONEMPTY);
@@ -177,9 +182,11 @@ int RunDecide(const DecideOptions& options,
                              "],\"body\":", BuildChatBody(request), "}\n"});
     return 0;
   }
-  base::StringAppendF(report, "== screen of %s (%zu options)\n%s\n",
-                      input.bot_name.c_str(), screen.options.size(),
-                      screen.text.c_str());
+  if (!options.json_output) {
+    base::StringAppendF(report, "== screen of %s (%zu options)\n%s\n",
+                        input.bot_name.c_str(), screen.options.size(),
+                        screen.text.c_str());
+  }
   if (options.dry_run) {
     base::StringAppendF(
         report, "== dry run: not asked. The prompt is %zu characters.\n",
@@ -193,7 +200,58 @@ int RunDecide(const DecideOptions& options,
   decision.request = request;
   decision.time = base::Time::Now();
   decision.result = ask.Run(request);
-  if (!decision.result.reply) {
+  if (decision.result.reply) {
+    decision.plan = ParsePlan(decision.result.reply->text,
+                              static_cast<int>(screen.options.size()));
+  }
+  if (options.json_output) {
+    nlohmann::json out;
+    out["valid"] = decision.plan.has_value();
+    out["ms"] = decision.result.round_trip_ms;
+    out["first_ms"] = decision.result.first_line_ms > 0
+                          ? decision.result.first_line_ms
+                          : decision.result.round_trip_ms;
+    out["prompt_tokens"] =
+        decision.result.reply ? decision.result.reply->prompt_tokens : 0;
+    out["prompt_computed"] =
+        decision.result.reply ? decision.result.reply->prompt_computed : 0;
+    out["raw"] = decision.result.reply ? decision.result.reply->text
+                                       : decision.result.error;
+    nlohmann::json steps = nlohmann::json::array();
+    if (decision.plan) {
+      const Plan& p = *decision.plan;
+      for (const PlanStep& s : p.steps) {
+        const size_t idx = static_cast<size_t>(s.option - 1);
+        const std::string_view kind = OptionKindName(screen.options[idx]);
+        const std::string text = idx < snapshot.options.size()
+                                     ? snapshot.options[idx].text
+                                     : std::string(kind);
+        steps.push_back({{"option", s.option},
+                         {"times", s.times},
+                         {"kind", std::string(kind)},
+                         {"text", text}});
+      }
+      out["plan_desc"] = DescribeSteps(p, screen);
+      out["look_s"] = p.look_s;
+      out["goal"] = p.goal;
+      out["tell_to"] = p.tell_to;
+      out["tell"] = p.tell;
+      out["open"] = p.open;
+      out["close"] = p.close;
+      out["hover"] = p.hover;
+    } else {
+      out["plan_desc"] = "";
+      out["look_s"] = 0;
+      out["goal"] = "";
+      out["tell_to"] = "";
+      out["tell"] = "";
+      out["open"] = nlohmann::json::array();
+      out["close"] = nlohmann::json::array();
+      out["hover"] = "";
+    }
+    out["steps"] = std::move(steps);
+    base::StrAppend(report, {out.dump(), "\n"});
+  } else if (!decision.result.reply) {
     base::StringAppendF(report, "== no reply (%.0f ms): %s\n",
                         decision.result.round_trip_ms,
                         decision.result.error.c_str());
@@ -214,8 +272,6 @@ int RunDecide(const DecideOptions& options,
           decision.result.round_trip_ms, reply.prompt_tokens,
           reply.prompt_computed, reply.completion_tokens, reply.text.c_str());
     }
-    decision.plan =
-        ParsePlan(reply.text, static_cast<int>(screen.options.size()));
     if (decision.plan) {
       const std::string desc = DescribeSteps(*decision.plan, screen);
       base::StringAppendF(report, "== plan: %s; look again in %d s\n",

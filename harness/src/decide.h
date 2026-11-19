@@ -33,6 +33,9 @@ struct DecideOptions {
   // ({"kinds": [option kinds], "body": {...}}), for tools/bench; don't ask
   // the model.
   bool print_request = false;
+  // Print the decision (timings + parsed plan) as one JSON object instead of
+  // human-readable text, for tools/wlblib/cases/eval_plans.py.
+  bool json_output = false;
   // Who recently whispered the bot (who a `tell` may answer), besides the
   // whispers in the snapshot's own events.
   std::vector<std::string> whisperers;

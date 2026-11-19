@@ -563,6 +563,38 @@ std::string SelfLine(const pb::Self& s) {
     }
   }
   IndicatorBits(s.indicators, &bits);
+  if (!s.unit.auras.empty()) {
+    std::vector<std::string> buffs;
+    std::vector<std::string> debuffs;
+    for (const pb::Aura& aura : s.unit.auras) {
+      if (aura.name.empty()) {
+        continue;
+      }
+      std::string text = aura.name;
+      if (aura.stacks > 1) {
+        base::StrAppend(&text, {" x", base::NumberToString(aura.stacks)});
+      }
+      if (aura.remaining_s) {
+        const float secs = Finite(*aura.remaining_s);
+        if (secs > 0.0f) {
+          const int rounded = static_cast<int>(std::lround(secs));
+          base::StrAppend(
+              &text, {" (",
+                      rounded >= 60 ? base::NumberToString(rounded / 60) + "m"
+                                    : base::NumberToString(rounded) + "s",
+                      ")"});
+        }
+      }
+      (aura.harmful ? debuffs : buffs).push_back(std::move(text));
+    }
+    if (!buffs.empty()) {
+      bits.push_back(base::StrCat({"buffs: ", base::JoinString(buffs, ", ")}));
+    }
+    if (!debuffs.empty()) {
+      bits.push_back(
+          base::StrCat({"debuffs: ", base::JoinString(debuffs, ", ")}));
+    }
+  }
   return base::JoinString(bits, "; ");
 }
 

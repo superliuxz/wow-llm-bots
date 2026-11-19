@@ -241,5 +241,21 @@ TEST(DecideTest, TheDecisionCanBeLogged) {
   ::rmdir(dir.c_str());
 }
 
+TEST(DecideTest, JsonOutputCarriesParsedPlanWithoutRegexes) {
+  DecideOptions options = Options();
+  options.json_output = true;
+  std::string report;
+  EXPECT_EQ(RunDecide(options, Replying(kGoodPlan), &report), 0);
+  EXPECT_NE(report.find("\"valid\":true"), std::string::npos) << report;
+  EXPECT_NE(report.find("\"goal\":\"kill the boars\""), std::string::npos)
+      << report;
+  EXPECT_NE(report.find("\"look_s\":90"), std::string::npos) << report;
+  EXPECT_NE(report.find("\"steps\":[{"), std::string::npos) << report;
+
+  report.clear();
+  EXPECT_EQ(RunDecide(options, Replying("not a plan"), &report), 1);
+  EXPECT_NE(report.find("\"valid\":false"), std::string::npos) << report;
+}
+
 }  // namespace
 }  // namespace harness

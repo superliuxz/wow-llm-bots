@@ -44,7 +44,8 @@ int Usage() {
       "  harness decide <snapshot.pb> [--name=BOT] [--goal=TEXT]\n"
       "                 [--reason=TEXT] [--rules=FILE] [--identity=FILE]\n"
       "                 [--log-dir=DIR] [--host=H] [--port=N] [--slot=N]\n"
-      "                 [--temperature=T] [--dry-run] [--print-request]\n"
+      "                 [--temperature=T] [--dry-run] [--print-request] "
+      "[--json]\n"
       "                 [--whisperers=NAME,NAME]\n"
       "  harness parse-plans < records   (\"<options>\\t<reply>\" each, NUL-"
       "separated)\n",

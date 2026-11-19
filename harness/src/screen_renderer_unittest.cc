@@ -592,5 +592,28 @@ TEST(ScreenRendererTest, OptionsComeBeforePanelsAndQuestTextIsCut) {
   EXPECT_EQ(screen.text.find(std::string(241, 'a')), std::string::npos);
 }
 
+TEST(ScreenRendererTest, RendersSelfAurasAsBuffsAndDebuffs) {
+  pb::Snapshot snap;
+  snap.base.self.state = pb::Self::ALIVE;
+  pb::Aura& fort = snap.base.self.unit.auras.emplace_back();
+  fort.name = "Power Word: Fortitude";
+  fort.remaining_s = 1700.0f;
+  pb::Aura& food = snap.base.self.unit.auras.emplace_back();
+  food.name = "Food";
+  food.remaining_s = 15.2f;
+  pb::Aura& ms = snap.base.self.unit.auras.emplace_back();
+  ms.name = "Mortal Strike";
+  ms.harmful = true;
+  ms.stacks = 3;
+  ms.remaining_s = 8.0f;
+  const Screen screen = RenderScreen(snap);
+  EXPECT_NE(screen.text.find("buffs: Power Word: Fortitude (28m), Food (15s)"),
+            std::string::npos)
+      << screen.text;
+  EXPECT_NE(screen.text.find("debuffs: Mortal Strike x3 (8s)"),
+            std::string::npos)
+      << screen.text;
+}
+
 }  // namespace
 }  // namespace harness
