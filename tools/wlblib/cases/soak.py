@@ -230,7 +230,7 @@ def _run_once(
                         decs.append(d)
                         if d.get("error"):
                             llm_errors += 1
-                        elif not d.get("valid", True):
+                        elif d.get("plan") is None:
                             invalid_plans += 1
                         if d.get("first_line_ms", 0) > 0:
                             do_ms.append(float(d["first_line_ms"]))
@@ -294,14 +294,17 @@ def _aggregate_results(results: list[dict]) -> dict:
     agg["run_scores"] = [r["score"] for r in results]
     agg["scenarios"] = [r.get("scenario", "soak") for r in results]
 
-    # Average per-metric bot values and scores across all runs.
+    # Average per-metric bot values and scores across all runs (skipping None
+    # when a metric had no observations in a run, e.g. whispers).
     all_keys = sorted({k for r in results for k in r.get("per_metric", {})})
     per_metric = {}
     for k in all_keys:
         vals = [r["per_metric"][k] for r in results if k in r.get("per_metric", {})]
+        bot_vals = [v["bot"] for v in vals if v.get("bot") is not None]
+        target_vals = [v["target"] for v in vals if v.get("target") is not None]
         per_metric[k] = {
-            "bot": round(statistics.mean(v["bot"] for v in vals), 3),
-            "target": round(vals[0]["target"], 3),
+            "bot": round(statistics.mean(bot_vals), 3) if bot_vals else None,
+            "target": round(statistics.mean(target_vals), 3) if target_vals else None,
             "score": round(statistics.mean(v["score"] for v in vals), 1),
         }
     agg["per_metric"] = per_metric

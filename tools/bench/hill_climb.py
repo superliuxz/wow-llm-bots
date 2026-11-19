@@ -32,7 +32,9 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 VAR = ROOT / "var"
 LEDGER = VAR / "experiments" / "ledger.jsonl"
-DEFAULT_LOCK_FILE = VAR / "scorer.sha256"
+EXTERNAL_STATE_DIR = pathlib.Path.home() / ".local" / "share" / "wow-llm-bots"
+DEFAULT_LOCK_FILE = EXTERNAL_STATE_DIR / "scorer.sha256"
+DEFAULT_HUMAN_DIR = EXTERNAL_STATE_DIR / "human_baseline"
 
 # Every file that produces, configures, or gates the soak score is locked.
 LOCKED_PATTERNS = [
@@ -42,9 +44,12 @@ LOCKED_PATTERNS = [
     "tools/wlblib/cases/soak.py",
     "server_module/src/snapshot/behavior_trace.h",
     "server_module/src/snapshot/behavior_trace.cc",
+    "server_module/src/snapshot/snapshot_schedule.h",
+    "server_module/src/snapshot/snapshot_schedule.cc",
     "server_module/src/llm_brain_world_script.cc",
     "server_module/conf/mod-llm-brain.conf.dist",
     "server_module/src/config/llm_brain_config.cc",
+    "config/llm-brain.overrides",
     "config/tests/soak*.llm-brain.overrides",
 ]
 
@@ -142,21 +147,28 @@ def _has_human_traces(human_dir: pathlib.Path) -> bool:
     hdir = human_dir / "human"
     if not hdir.is_dir():
         return False
-    samples = 0
-    for f in hdir.rglob("*.jsonl"):
-        for line in f.read_text(errors="ignore").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if rec.get("role") == "human" and rec.get("kind") == "sample":
-                samples += 1
-                if samples >= soak_scorer.MIN_HUMAN_SAMPLES:
-                    return True
-    return False
+    traces = soak_scorer.human_metrics.load_traces(human_dir)
+    human_traces = soak_scorer._filter_role_rows(traces["human"], "human")
+    valid_samples = 0
+    total_span_ms = 0
+    for rows in human_traces.values():
+        ts = [
+            int(r["t_ms"])
+            for r in rows
+            if r.get("kind") == "sample"
+            and all(k in r for k in ("t_ms", "x", "y", "z"))
+        ]
+        valid_samples += len(ts)
+        if len(ts) >= 2:
+            total_span_ms += max(ts) - min(ts)
+    if valid_samples < soak_scorer.MIN_HUMAN_SAMPLES or total_span_ms < 60_000:
+        return False
+    per_char = {
+        n: soak_scorer.human_metrics.analyze_character(r)
+        for n, r in human_traces.items()
+    }
+    summary = soak_scorer.human_metrics.summarize_role(per_char)
+    return summary.get("path_straightness") is not None
 
 
 def _changed_files_since(base_ref: str = "HEAD") -> list[str]:
@@ -260,13 +272,13 @@ def cmd_init(args) -> int:
             return 2
         print("WARNING: running in fallback_reference mode (--allow-fallback)", file=sys.stderr)
 
-    if args.lock_file.exists() and not args.force_relock:
+    if args.lock_file.exists():
         ok, msg = _verify_all_locks(args.lock_file)
         if not ok:
             print(f"ABORT: {msg}", file=sys.stderr)
             return 2
     else:
-        ok, msg = _write_lock_manifest(args.lock_file, force=args.force_relock)
+        ok, msg = _write_lock_manifest(args.lock_file, force=False)
         if not ok:
             print(f"ABORT: {msg}", file=sys.stderr)
             return 2
@@ -356,8 +368,14 @@ def cmd_eval_candidate(args) -> int:
             return 2
         print("WARNING: running in fallback_reference mode (--allow-fallback)", file=sys.stderr)
 
+    entries = _load_ledger()
+    best = _best_kept(entries, suite=args.suite)
+    # Default base_ref to the latest kept round's commit so committed edits
+    # made during the round cannot slip past the edit-scope check.
+    base_ref = args.base_ref or (best["commit"] if best and best.get("commit") else "HEAD")
+
     if not args.allow_any_files:
-        scope_ok, disallowed = _check_edit_scope(base_ref=args.base_ref)
+        scope_ok, disallowed = _check_edit_scope(base_ref=base_ref)
         if not scope_ok:
             print(
                 "ABORT: scored round edits files outside allowed humanization scope "
@@ -373,18 +391,16 @@ def cmd_eval_candidate(args) -> int:
         if chk.returncode != 0:
             print("REJECT: `tools/wlb check` failed", file=sys.stderr)
             if args.auto_revert:
-                _revert_to(args.base_ref)
+                _revert_to(base_ref)
             return 1
 
-    entries = _load_ledger()
-    best = _best_kept(entries, suite=args.suite)
     best_score = float(best["score"]) if best else 0.0
     baseline_std, _baseline_xp = _baseline_stats(entries, args.suite)
     required_delta = max(args.min_delta, 2.0 * baseline_std)
     xp_floor = float(args.min_xp_per_hour)
     max_deaths = int(args.max_deaths_per_run) * max(1, int(args.runs))
     round_num = (entries[-1]["round"] + 1) if entries else 1
-    diff_stat = _git("diff", "--stat", args.base_ref)
+    diff_stat = _git("diff", "--stat", base_ref)
 
     res = soak_case.run_soak(
         minutes=args.minutes,
@@ -398,6 +414,9 @@ def cmd_eval_candidate(args) -> int:
     )
     xp_h, deaths = _extract_progress(res)
     guardrails_ok, g_failures = _check_fixed_guardrails(res, xp_floor, max_deaths)
+    if not args.allow_fallback and res.get("baseline_mode") != "human_baseline":
+        guardrails_ok = False
+        g_failures.append(f"scorer ran in {res.get('baseline_mode')} instead of human_baseline")
     for f in g_failures:
         print(f"GUARDRAIL FAIL: {f}", file=sys.stderr)
 
@@ -485,7 +504,7 @@ def cmd_eval_candidate(args) -> int:
             "no_confirm": args.no_confirm,
             "no_heldout": args.no_heldout,
             "skip_check": args.skip_check,
-            "base_ref": args.base_ref,
+            "base_ref": base_ref,
             "lock_file": str(args.lock_file),
         },
         "per_metric": res["per_metric"],
@@ -501,8 +520,8 @@ def cmd_eval_candidate(args) -> int:
         f"guardrails={'PASS' if guardrails_ok else 'FAIL'}) =="
     )
     if not improved and args.auto_revert:
-        _revert_to(args.base_ref)
-        print(f"auto-reverted working tree (`git reset --hard {args.base_ref} && git clean -fd`)")
+        _revert_to(base_ref)
+        print(f"auto-reverted working tree (`git reset --hard {base_ref} && git clean -fd`)")
     return 0 if improved else 1
 
 
@@ -539,10 +558,9 @@ def main() -> int:
     p_init.add_argument("--runs", type=int, default=2)
     p_init.add_argument("--baseline-runs", type=int, default=5)
     p_init.add_argument("--suite", default="varied")
-    p_init.add_argument("--human-dir", type=pathlib.Path, default=VAR / "human_baseline")
+    p_init.add_argument("--human-dir", type=pathlib.Path, default=DEFAULT_HUMAN_DIR)
     p_init.add_argument("--lock-file", type=pathlib.Path, default=DEFAULT_LOCK_FILE)
-    p_init.add_argument("--force-relock", action="store_true")
-    p_init.add_argument("--judge", action="store_true", default=True)
+    p_init.add_argument("--judge", action="store_true", default=False)
     p_init.add_argument("--no-judge", action="store_false", dest="judge")
     p_init.add_argument("--allow-fallback", action="store_true")
 
@@ -553,13 +571,13 @@ def main() -> int:
     p_eval.add_argument("--minutes", type=float, default=5.0)
     p_eval.add_argument("--runs", type=int, default=2)
     p_eval.add_argument("--suite", default="varied")
-    p_eval.add_argument("--base-ref", default="HEAD")
+    p_eval.add_argument("--base-ref", default="")
     p_eval.add_argument("--min-delta", type=float, default=0.5)
     p_eval.add_argument("--min-xp-per-hour", type=float, default=DEFAULT_MIN_XP_PER_HOUR)
     p_eval.add_argument("--max-deaths-per-run", type=int, default=DEFAULT_MAX_DEATHS_PER_RUN)
-    p_eval.add_argument("--human-dir", type=pathlib.Path, default=VAR / "human_baseline")
+    p_eval.add_argument("--human-dir", type=pathlib.Path, default=DEFAULT_HUMAN_DIR)
     p_eval.add_argument("--lock-file", type=pathlib.Path, default=DEFAULT_LOCK_FILE)
-    p_eval.add_argument("--judge", action="store_true", default=True)
+    p_eval.add_argument("--judge", action="store_true", default=False)
     p_eval.add_argument("--no-judge", action="store_false", dest="judge")
     p_eval.add_argument("--allow-fallback", action="store_true")
     p_eval.add_argument("--allow-any-files", action="store_true")

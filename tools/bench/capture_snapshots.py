@@ -26,8 +26,9 @@ import wire_py  # noqa: E402
 def main():
     out_dir = pathlib.Path(sys.argv[1])
     seconds = float(sys.argv[2]) if len(sys.argv) > 2 else 15.0
+    sock_path = sys.argv[3] if len(sys.argv) > 3 else SOCK
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.connect(SOCK)
+    s.connect(sock_path)
     s.settimeout(0.2)
     reader = FrameReader()
     frames = []
@@ -57,6 +58,8 @@ def main():
         saved += 1
         seen.add(bot)
     print(f"saved {saved} snapshots from {len(seen)} bots in {out_dir}")
+    if saved == 0:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

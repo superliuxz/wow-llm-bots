@@ -222,7 +222,9 @@ class Baselines:
         return self.data.get(case, {}).get(key)
 
     def record(self, case, measured):
-        self.data[case] = dict(sorted(measured.items()))
+        merged = dict(self.data.get(case, {}))
+        merged.update(measured)
+        self.data[case] = dict(sorted(merged.items()))
 
     def save(self):
         self.data["_meta"] = {"recorded": datetime.date.today().isoformat(), **_machine()}
@@ -326,14 +328,14 @@ def _run_perf(module, stack, baselines, update, busy=None):
         if p.failures and busy:
             # Measured beside a busy play server: reported, not failed.
             say(f"WARN perf {module.NAME}: {'; '.join(p.failures)} (play server busy)")
-        if p.beyond or (p.failures and not busy):
-            raise Failed("; ".join(p.beyond + ([] if busy else p.failures)))
+        if p.beyond or (p.failures and not busy and not update):
+            raise Failed("; ".join(p.beyond + ([] if (busy or update) else p.failures)))
         ok, detail = True, p.summary()
     except Failed as e:
         ok, detail = False, f"{e} [{p.summary()}]"
     except Exception as e:
         ok, detail, crashed = False, f"{type(e).__name__}: {e}", True
-    if update and p.measured and not crashed:
+    if update and ok and p.measured and not crashed:
         baselines.record(module.NAME, p.measured)
         baselines.save()
         detail += " [baseline recorded]"
@@ -406,16 +408,30 @@ class LlamaServer:
 def capture_snapshots(seconds=300):
     """Records live snapshots of 50 questing bots (the `questing` test stack) into
     out/bench/snapshots/quest, the input of the brain load replay (tools/bench/brain_load.py).
-    Replaces what is there."""
+    Replaces what is there only after a good capture."""
     target = OUT / "bench" / "snapshots" / "quest"
+    tmp = target.with_name(target.name + ".tmp")
     if not (OUT / "common" / "libwlb_wire_py.so").exists():
         build.common("default", tests=False)
     with Stack("questing", "Loada", online=50) as stack:
-        shutil.rmtree(target, ignore_errors=True)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        say(f"capturing {seconds} s of snapshots into {target.relative_to(ROOT)}")
-        run(["python3", "-I", ROOT / "tools/bench/capture_snapshots.py", target, str(seconds)])
-    say(f"captured {sum(1 for _ in target.rglob('*.json'))} snapshots")
+        shutil.rmtree(tmp, ignore_errors=True)
+        tmp.mkdir(parents=True, exist_ok=True)
+        say(f"capturing {seconds} s of snapshots from {stack.socket} into {target.relative_to(ROOT)}")
+        try:
+            run([
+                "python3", "-I", ROOT / "tools/bench/capture_snapshots.py",
+                tmp, str(seconds), str(stack.socket),
+            ])
+        except Exception:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+    count = sum(1 for _ in tmp.rglob("*.json"))
+    if count == 0:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise Failed("captured 0 snapshots; keeping existing capture")
+    shutil.rmtree(target, ignore_errors=True)
+    tmp.rename(target)
+    say(f"captured {count} snapshots")
 
 
 def soak(minutes=5.0, runs=2, score=False, human_dir=None, judge=False, verify_hash=None, suite="varied"):

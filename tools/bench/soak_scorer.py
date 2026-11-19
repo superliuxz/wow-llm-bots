@@ -342,11 +342,9 @@ def score_soak(
         if use_judge
         else (None, {})
     )
-    composite = (
-        round(0.7 * dist_score + 0.3 * judge_score, 2)
-        if judge_score is not None
-        else dist_score
-    )
+    # Judge noise (~5 pts SD) is not calibrated yet: report judge_score
+    # separately without mixing it into the composite hill-climb score.
+    composite = dist_score
 
     progress = _progress_metrics(bot_traces)
     tells = human_metrics.detect_bot_tells(bot_summary, human_summary)
@@ -357,6 +355,10 @@ def score_soak(
         guardrails.append({"name": name, "ok": bool(ok), "detail": detail})
 
     n_bots = max(1, int(run_stats.get("bots", progress["traced_bots"] or 1)))
+    check("has_traced_bots", progress["traced_bots"] >= 1,
+          f"traced_bots={progress['traced_bots']} (>= 1)")
+    check("has_decisions", int(run_stats.get("decisions", 0)) >= 1,
+          f"decisions={run_stats.get('decisions', 0)} (>= 1)")
     check("no_llm_errors", run_stats.get("llm_errors", 0) == 0,
           f"llm_errors={run_stats.get('llm_errors', 0)}")
     check("no_invalid_plans", run_stats.get("invalid_plans", 0) == 0,

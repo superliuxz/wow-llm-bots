@@ -25,9 +25,12 @@ class HillClimbSafeguardsTest(unittest.TestCase):
             "tools/wlblib/cases/soak.py",
             "server_module/src/snapshot/behavior_trace.h",
             "server_module/src/snapshot/behavior_trace.cc",
+            "server_module/src/snapshot/snapshot_schedule.h",
+            "server_module/src/snapshot/snapshot_schedule.cc",
             "server_module/src/llm_brain_world_script.cc",
             "server_module/conf/mod-llm-brain.conf.dist",
             "server_module/src/config/llm_brain_config.cc",
+            "config/llm-brain.overrides",
             "config/tests/soak.llm-brain.overrides",
             "config/tests/soak_horde_rfc.llm-brain.overrides",
             "config/tests/soak_alliance_dm.llm-brain.overrides",
@@ -66,12 +69,21 @@ class HillClimbSafeguardsTest(unittest.TestCase):
             bot_line = json.dumps({"kind": "sample", "role": "bot", "t_ms": 1000})
             p.write_text((bot_line + "\n") * soak_scorer.MIN_HUMAN_SAMPLES)
             self.assertFalse(hill_climb._has_human_traces(d))
-            # Fewer than MIN_HUMAN_SAMPLES human rows must NOT count.
-            human_line = json.dumps({"kind": "sample", "role": "human", "t_ms": 1000})
-            p.write_text((human_line + "\n") * (soak_scorer.MIN_HUMAN_SAMPLES - 1))
+            # 300 junk rows with no positions/movement metrics must NOT pass.
+            junk_line = json.dumps({"kind": "sample", "role": "human", "t_ms": 1000})
+            p.write_text((junk_line + "\n") * soak_scorer.MIN_HUMAN_SAMPLES)
             self.assertFalse(hill_climb._has_human_traces(d))
-            # Reaching MIN_HUMAN_SAMPLES human rows passes.
-            p.write_text((human_line + "\n") * soak_scorer.MIN_HUMAN_SAMPLES)
+            # Reaching MIN_HUMAN_SAMPLES real movement rows passes.
+            real_rows = [
+                json.dumps({
+                    "kind": "sample", "role": "human", "name": "Alice",
+                    "t_ms": 1000 * i, "map": 1, "x": float(i * 4), "y": 0.0, "z": 0.0,
+                    "facing": 0.0, "moving": (i % 5 != 0), "jumping": False,
+                    "in_combat": False, "dead": False, "in_town": False,
+                })
+                for i in range(1, soak_scorer.MIN_HUMAN_SAMPLES + 1)
+            ]
+            p.write_text("\n".join(real_rows) + "\n")
             self.assertTrue(hill_climb._has_human_traces(d))
 
     def test_edit_scope_allows_humanization_and_rejects_game_logic(self):
