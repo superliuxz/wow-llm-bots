@@ -2,7 +2,9 @@
 
 #include "bridge/latest_wins.h"
 
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -28,6 +30,17 @@ LatestWins::Item LatestWins::TakeOldest() {
   Item oldest = std::move(items_.front());
   items_.erase(items_.begin());
   return oldest;
+}
+
+std::optional<LatestWins::Item> LatestWins::TakeKey(std::string_view key) {
+  for (auto it = items_.begin(); it != items_.end(); ++it) {
+    if (it->key == key) {
+      Item found = std::move(*it);
+      items_.erase(it);
+      return found;
+    }
+  }
+  return std::nullopt;
 }
 
 std::vector<LatestWins::Item> LatestWins::TakeAll() {

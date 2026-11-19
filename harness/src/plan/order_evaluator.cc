@@ -783,11 +783,6 @@ CheckResult EvalCheck(const SnapshotView& view,
               return {true, MakeUnitEntity(*u)};
             }
           }
-          if (view.snap.base.self.casting &&
-              view.snap.base.self.casting->spell &&
-              NameEq(view.snap.base.self.casting->spell->name, c.mech)) {
-            return {true, view.self};
-          }
           return {};
 
         } else if constexpr (std::is_same_v<C, grammar::CheckCastInLast>) {
@@ -1334,11 +1329,6 @@ void OrderEvaluator::UpdateHistory(const pb::Snapshot& snapshot,
   }
   if (snapshot.ext.target && snapshot.ext.target->target) {
     record_cast(*snapshot.ext.target->target);
-  }
-  if (snapshot.base.self.casting && snapshot.base.self.casting->spell &&
-      !snapshot.base.self.casting->spell->name.empty()) {
-    last_casts_[LowerKey(snapshot.base.self.casting->spell->name)] = {
-        now, snapshot.base.self.unit.guid, snapshot.base.self.unit.name};
   }
 
   // Track newly appearing living units, objects, and areas. On the very first

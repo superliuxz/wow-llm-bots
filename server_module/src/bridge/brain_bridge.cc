@@ -6,7 +6,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "base/functional/callback.h"
@@ -91,8 +93,18 @@ class BrainBridge::IoCore : public base::RawPtrTarget {
 
   bool Listen() { return server_.Listen(); }
 
-  // In order with everything sent before it.
-  void Send(const std::string& message, base::TimeTicks queued) {
+  // In order with everything sent before it. If `flush_key` is non-empty,
+  // flushes any pending `SendLatest` frame for that key first so an alerting
+  // event cannot overtake the snapshot queued just before it.
+  void Send(const std::string& message,
+            base::TimeTicks queued,
+            std::string_view flush_key = {}) {
+    if (!flush_key.empty()) {
+      if (std::optional<LatestWins::Item> pending =
+              waiting_.TakeKey(flush_key)) {
+        Send(pending->message, pending->queued);
+      }
+    }
     if (server_.SendFrame(message)) {
       stats_->AddDelay(base::TimeTicks::Now() - queued);
     } else {
@@ -226,13 +238,15 @@ void BrainBridge::Stop() {
   world_queue_ = base::TaskQueue::Create();
 }
 
-void BrainBridge::Send(std::string message) {
+void BrainBridge::Send(std::string message, std::string flush_key) {
   if (!io_core_ || !connected_) {
     return;  // Nobody listening: drop here instead of hopping threads.
   }
   io_thread_.task_runner()->PostTask(
       [core = io_core_, message = std::move(message),
-       queued = base::TimeTicks::Now()] { core->Send(message, queued); });
+       flush_key = std::move(flush_key), queued = base::TimeTicks::Now()] {
+        core->Send(message, queued, flush_key);
+      });
 }
 
 void BrainBridge::SendLatest(std::string key, std::string message) {

@@ -187,6 +187,7 @@ std::string FormatTraceSample(const TraceSample& s) {
 }
 
 std::string FormatTraceChat(const TraceChat& c) {
+  const size_t len = c.text_len > 0 ? c.text_len : c.text.size();
   return base::StrCat(
       {"{\"kind\":\"chat\",\"t_ms\":",
        base::StringPrintf("%lld", static_cast<long long>(c.time_ms)),
@@ -195,7 +196,8 @@ std::string FormatTraceChat(const TraceChat& c) {
        ",\"role\":", JsonEscape(c.role), ",\"name\":", JsonEscape(c.name),
        ",\"dir\":", JsonEscape(c.direction),
        ",\"channel\":", JsonEscape(c.channel), ",\"peer\":", JsonEscape(c.peer),
-       ",\"text\":", JsonEscape(c.text), "}"});
+       ",\"text\":", JsonEscape(c.text),
+       ",\"text_len\":", base::StringPrintf("%zu", len), "}"});
 }
 
 BehaviorTraceWriter::BehaviorTraceWriter(std::string root_dir,
@@ -241,6 +243,11 @@ void BehaviorTraceWriter::Flush() {
   flushed_cv_.wait(lock, [this] { return queue_.empty() && !writing_; });
 }
 
+uint64_t BehaviorTraceWriter::dropped_lines() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return dropped_lines_;
+}
+
 bool BehaviorTraceWriter::Enqueue(std::string_view role,
                                   std::string_view name,
                                   int64_t time_ms,
@@ -248,6 +255,7 @@ bool BehaviorTraceWriter::Enqueue(std::string_view role,
   {
     std::lock_guard<std::mutex> lock(mu_);
     if (stop_ || queue_.size() >= kMaxQueueLines) {
+      ++dropped_lines_;
       return false;
     }
     queue_.push_back(

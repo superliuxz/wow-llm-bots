@@ -949,7 +949,9 @@ class LlmBrainWorldScript : public WorldScript {
     event.monotonic_us =
         (base::TimeTicks::Now() - base::TimeTicks()).InMicroseconds();
     event.event = std::move(payload);
-    bridge_->Send(wlb::snapshot::WriteBeve(message));
+    // Flush any pending snapshot for `name` first so an alerting event never
+    // overtakes the snapshot sent right before it when the socket backs up.
+    bridge_->Send(wlb::snapshot::WriteBeve(message), name);
   }
 
   void EmitAlertingEvent(size_t index,

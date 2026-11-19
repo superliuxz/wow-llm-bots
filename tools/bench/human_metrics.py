@@ -173,7 +173,8 @@ def analyze_character(rows: list[dict]) -> dict:
             pending_whisper_in[peer] = c["t_ms"]
         elif c.get("dir") == "out":
             text = c.get("text", "")
-            reply_lengths.append(len(text))
+            text_len = int(c["text_len"]) if "text_len" in c else len(text)
+            reply_lengths.append(text_len)
             if text and text[0].islower():
                 lowercase_replies += 1
             if peer in pending_whisper_in:

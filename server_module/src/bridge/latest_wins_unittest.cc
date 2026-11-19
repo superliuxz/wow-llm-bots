@@ -60,5 +60,17 @@ TEST(LatestWinsTest, TakeOldestTakesOneAndLeavesTheRestReplaceable) {
   EXPECT_TRUE(queue.empty());
 }
 
+TEST(LatestWinsTest, TakeKeyExtractsMatchingKeyAndLeavesOthers) {
+  LatestWins queue;
+  queue.Put("a", "a1", kT0);
+  queue.Put("b", "b1", kT0);
+  const auto got = queue.TakeKey("b");
+  ASSERT_TRUE(got.has_value());
+  EXPECT_EQ(got->message, "b1");
+  EXPECT_FALSE(queue.TakeKey("b").has_value());
+  EXPECT_EQ(queue.size(), 1u);
+  EXPECT_EQ(queue.TakeOldest().message, "a1");
+}
+
 }  // namespace
 }  // namespace llm_brain

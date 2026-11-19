@@ -211,8 +211,11 @@ void FillSelf(Player* bot, pb::Self* self) {
   unit.power_pct = Percent(bot->GetPower(power), bot->GetMaxPower(power));
   unit.dead = bot->isDead();
   unit.player.emplace().class_ = ClassName(bot->getClass());
+  // Populate Self::casting using the same visible cast-bar rules as
+  // FillActivity (ignore flying projectiles and finished instants).
   if (Spell* sp = bot->GetCurrentSpell(CURRENT_GENERIC_SPELL);
-      sp && sp->GetSpellInfo()) {
+      sp && sp->getState() == SPELL_STATE_PREPARING && sp->GetCastTime() > 0 &&
+      sp->GetSpellInfo()) {
     pb::Cast& cast = self->casting.emplace();
     cast.spell.emplace().id = sp->GetSpellInfo()->Id;
     if (const char* sn =
@@ -223,7 +226,8 @@ void FillSelf(Player* bot, pb::Self* self) {
     cast.remaining_ms =
         static_cast<uint32_t>(std::max<int32_t>(0, sp->GetCastTimeRemaining()));
   } else if (Spell* ch = bot->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
-             ch && ch->GetSpellInfo()) {
+             ch && ch->getState() != SPELL_STATE_FINISHED &&
+             ch->GetSpellInfo()) {
     pb::Cast& cast = self->casting.emplace();
     cast.spell.emplace().id = ch->GetSpellInfo()->Id;
     if (const char* sn =

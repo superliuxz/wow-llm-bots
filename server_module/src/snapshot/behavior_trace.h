@@ -54,7 +54,8 @@ struct TraceChat {
   std::string direction;  // "in" or "out"
   std::string channel;    // "whisper", "say", "party", ...
   std::string peer;       // sender (for "in") or recipient (for "out")
-  std::string text;
+  std::string text;       // Empty when redacted (e.g. human whisper privacy).
+  size_t text_len = 0;    // Original byte length when `text` is redacted.
 };
 
 // Extracts a `TraceSample` from a built `Snapshot` (used for bots).
@@ -92,6 +93,10 @@ class BehaviorTraceWriter {
   // Blocks until all currently queued lines have been written to disk.
   void Flush();
 
+  // Number of trace lines dropped because the queue reached `kMaxQueueLines`
+  // or the writer was stopping.
+  uint64_t dropped_lines() const;
+
  private:
   struct PendingLine {
     std::string role;
@@ -109,10 +114,11 @@ class BehaviorTraceWriter {
 
   std::string root_dir_;
   uint64_t max_file_bytes_ = kDefaultMaxFileBytes;
-  std::mutex mu_;
+  mutable std::mutex mu_;
   std::condition_variable cv_;
   std::condition_variable flushed_cv_;
   std::deque<PendingLine> queue_;
+  uint64_t dropped_lines_ = 0;
   bool writing_ = false;
   bool stop_ = false;
   std::thread worker_;

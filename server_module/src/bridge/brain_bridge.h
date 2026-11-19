@@ -61,8 +61,10 @@ class BrainBridge {
   void Stop();
 
   // World thread. Queues `message` for the harness, after everything sent
-  // before it.
-  void Send(std::string message);
+  // before it. When `flush_key` is non-empty, flushes any waiting `SendLatest`
+  // frame for that key first so an alerting event never overtakes the snapshot
+  // sent right before it.
+  void Send(std::string message, std::string flush_key = {});
 
   // World thread. Sends `message` now, unless the socket is full: then it
   // waits, and a newer message with the same `key` replaces it.

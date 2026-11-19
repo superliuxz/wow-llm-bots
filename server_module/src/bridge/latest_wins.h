@@ -9,7 +9,9 @@
 #define MOD_LLM_BRAIN_BRIDGE_LATEST_WINS_H_
 
 #include <cstddef>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "base/time/time.h"
@@ -34,6 +36,9 @@ class LatestWins {
   // The oldest waiting key's message, removed from the queue. Must not be
   // empty.
   Item TakeOldest();
+
+  // Removes and returns the waiting item for `key`, if any.
+  std::optional<Item> TakeKey(std::string_view key);
 
   bool empty() const { return items_.empty(); }
   size_t size() const { return items_.size(); }

@@ -53,6 +53,18 @@ TEST(BehaviorTraceTest, FormatsSampleAndChatWithJsonEscaping) {
   EXPECT_NE(chat_line.find("\"kind\":\"chat\""), std::string::npos);
   EXPECT_NE(chat_line.find("\"role\":\"human\""), std::string::npos);
   EXPECT_NE(chat_line.find("hey \\\"friend\\\"\\nready?"), std::string::npos);
+  EXPECT_NE(chat_line.find("\"text_len\":19"), std::string::npos);
+
+  TraceChat redacted;
+  redacted.role = "human";
+  redacted.name = "Hero";
+  redacted.direction = "out";
+  redacted.channel = "whisper";
+  redacted.peer = "Friend";
+  redacted.text_len = 42;
+  const std::string red_line = FormatTraceChat(redacted);
+  EXPECT_NE(red_line.find("\"text\":\"\""), std::string::npos);
+  EXPECT_NE(red_line.find("\"text_len\":42"), std::string::npos);
 }
 
 TEST(BehaviorTraceTest, WritesUnifiedRoleDirectories) {

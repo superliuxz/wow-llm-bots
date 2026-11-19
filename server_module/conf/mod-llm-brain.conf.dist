@@ -107,3 +107,28 @@ LlmBrain.TestFixtures = ""
 LlmBrain.FixtureDir = ""
 LlmBrain.TestAccount = "WLBTEST"
 LlmBrain.TestFactsQueries = ""
+
+#    LlmBrain.TraceDir
+#        Description: Directory for unified JSONL bot behavior traces (empty
+#                     disables bot tracing).
+#        Default:     ""
+#
+#    LlmBrain.ObserveHumans
+#        Description: Sample online human (non-bot) players into
+#                     LlmBrain.ObserveHumansDir for human-baseline scoring.
+#                     Off by default. Whisper events record only timing and
+#                     byte length (never message text).
+#        Default:     0
+#
+#    LlmBrain.ObserveHumansDir
+#        Description: Directory for human behavior traces when ObserveHumans=1.
+#        Default:     "var/human_baseline"
+#
+#    LlmBrain.ObserveHumansIntervalMs
+#        Description: Sampling interval (ms) for ObserveHumans.
+#        Default:     1000
+
+LlmBrain.TraceDir = ""
+LlmBrain.ObserveHumans = 0
+LlmBrain.ObserveHumansDir = "var/human_baseline"
+LlmBrain.ObserveHumansIntervalMs = 1000
