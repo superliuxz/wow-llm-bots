@@ -85,6 +85,12 @@ Items #1–#5 are done and verified live (2026-11-18).
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-19: self-improving hill-climbing loop (`docs/plans/self-improving-loop.md`,
+  `tools/bench/soak_scorer.py`, `tools/bench/hill_climb.py`, `tools/wlb test soak --score --runs`,
+  `level`/`xp` added to `TraceSample` for real XP/h guardrails): SHA-256 tamper-checked scorer
+  (0–100 human-likeness score + optional `--judge` + hard guardrails), experiment ledger in
+  `var/experiments/ledger.jsonl`, and Round 0 baseline recorded (`SCORE 20.56/100`, all 6
+  guardrails PASS, `xp/h=1949`, `max_wakes/min/bot=3.0`, `do_p95=416 ms`, `0` deaths).
 - 2026-11-19: unified human + bot behavior tracing (`server_module/src/snapshot/behavior_trace.{h,cc}`,
   `LlmBrain.TraceDir` + `LlmBrain.ObserveHumans` in `llm_brain_world_script.cc`), distribution
   analyzer (`tools/bench/human_metrics.py`), and multi-bot live soak test (`tools/wlb test soak`,

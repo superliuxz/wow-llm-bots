@@ -25,6 +25,7 @@
 #include "SpellInfo.h"
 #include "Unit.h"
 #include "UnitDefines.h"
+#include "UpdateFields.h"
 #include "World.h"
 #include "WorldScript.h"
 #include "base/functional/callback.h"
@@ -980,6 +981,8 @@ class LlmBrainWorldScript : public WorldScript {
       s.jumping = player->HasUnitMovementFlag(MOVEMENTFLAG_FALLING);
       s.in_combat = player->IsInCombat();
       s.dead = !player->IsAlive();
+      s.level = player->GetLevel();
+      s.xp = player->GetUInt32Value(PLAYER_XP);
       if (player->GetMaxHealth() > 0) {
         s.hp_pct = 100.0f * static_cast<float>(player->GetHealth()) /
                    static_cast<float>(player->GetMaxHealth());

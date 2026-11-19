@@ -108,6 +108,8 @@ TraceSample TraceSampleFromSnapshot(const pb::Snapshot& snapshot,
   out.in_combat = snapshot.base.self.in_combat;
   out.dead = snapshot.base.self.state == pb::Self::DEAD_BODY ||
              snapshot.base.self.state == pb::Self::GHOST;
+  out.level = snapshot.base.self.unit.level.value_or(0);
+  out.xp = snapshot.base.self.xp;
   if (snapshot.base.self.health_max > 0) {
     out.hp_pct = 100.0f * static_cast<float>(snapshot.base.self.health) /
                  static_cast<float>(snapshot.base.self.health_max);
@@ -162,6 +164,10 @@ std::string FormatTraceSample(const TraceSample& s) {
        s.in_combat ? "true" : "false",
        ",\"dead\":",
        s.dead ? "true" : "false",
+       ",\"level\":",
+       base::StringPrintf("%u", s.level),
+       ",\"xp\":",
+       base::StringPrintf("%u", s.xp),
        ",\"hp_pct\":",
        base::StringPrintf("%.1f", s.hp_pct),
        ",\"mana_pct\":",

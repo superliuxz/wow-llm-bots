@@ -91,6 +91,16 @@ def parse(argv):
                    help="eval: run the same cases across every candidate model in models/")
     p.add_argument("--minutes", type=float, default=2.0,
                    help="soak: duration in minutes (default: 2.0)")
+    p.add_argument("--runs", type=int, default=1,
+                   help="soak: number of runs to average (default: 1)")
+    p.add_argument("--score", action="store_true",
+                   help="soak: print composite 0-100 human-likeness score + guardrails")
+    p.add_argument("--human-dir", type=pathlib.Path, default=None,
+                   help="soak: directory containing human/ baseline traces")
+    p.add_argument("--judge", action="store_true",
+                   help="soak: also run anonymized LLM human-vs-bot clip judge")
+    p.add_argument("--verify-hash", type=pathlib.Path, default=None,
+                   help="soak: verify scorer SHA-256 against lock file before running")
 
     p = sub.add_parser("setup", help="one-time setup steps")
     p.add_argument("step", choices=["links", "configure", "data", "llama", "msan", "client-ui"])
@@ -158,7 +168,14 @@ def main():
         elif a.target == "perf":
             testing.perf(a.names, a.keep_server, a.update_baselines, a.verify)
         elif a.target == "soak":
-            testing.soak(minutes=a.minutes)
+            testing.soak(
+                minutes=a.minutes,
+                runs=a.runs,
+                score=a.score,
+                human_dir=a.human_dir,
+                judge=a.judge,
+                verify_hash=a.verify_hash,
+            )
         else:
             testing.eval_(a.names, model=a.model, shootout=a.shootout)
     elif a.command == "setup":

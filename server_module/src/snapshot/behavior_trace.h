@@ -32,6 +32,8 @@ struct TraceSample {
   bool jumping = false;
   bool in_combat = false;
   bool dead = false;
+  uint32_t level = 0;
+  uint32_t xp = 0;
   float hp_pct = 0.0f;
   float mana_pct = 0.0f;
   std::string casting;
