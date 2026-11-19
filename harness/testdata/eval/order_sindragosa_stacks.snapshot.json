@@ -1,0 +1,85 @@
+{
+  "bot": "Aelindra",
+  "seq": 12,
+  "time_ms": 1794800002000,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x0000000000000101",
+        "name": "Aelindra",
+        "kind": "PLAYER",
+        "level": 80,
+        "health_pct": 90.0,
+        "power_pct": 85.0,
+        "player": {
+          "class": "Mage"
+        }
+      },
+      "gender": "FEMALE",
+      "health": 21600,
+      "health_max": 24000,
+      "power_type": "MANA",
+      "power": 23800,
+      "power_max": 28000,
+      "state": "ALIVE",
+      "in_combat": true
+    },
+    "where": {
+      "map": "Icecrown Citadel",
+      "zone": "Icecrown Citadel",
+      "subzone": "Sindragosa's Lair",
+      "position": {
+        "x": 4400.0,
+        "y": 2484.0,
+        "z": 203.37
+      },
+      "facing": 0.0,
+      "in_instance": true
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0xF130009003000001",
+          "name": "Sindragosa",
+          "rel": {
+            "dist_yd": 25.0,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": 4425.0,
+              "y": 2484.0,
+              "z": 203.37
+            }
+          },
+          "kind": "NPC",
+          "level": 83,
+          "level_color": "SKULL_LEVEL",
+          "reaction": "HOSTILE",
+          "classification": "WORLD_BOSS",
+          "health_pct": 32.0,
+          "activity": {
+            "state": "FIGHTING",
+            "with": "Balgor"
+          },
+          "detail": "NAMEPLATE",
+          "boss": {
+            "phase": 3
+          }
+        }
+      ]
+    }
+  },
+  "options": [
+    {
+      "text": "Attack Sindragosa",
+      "guid": "0xF130009003000001",
+      "kind": "ATTACK",
+      "name": "Sindragosa"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
+}

@@ -22,6 +22,7 @@
 #include "file_util.h"
 #include "llm_client.h"
 #include "nlohmann/json.hpp"
+#include "orders.h"
 #include "plan.h"
 #include "prompt.h"
 #include "screen_renderer.h"
@@ -108,6 +109,13 @@ std::optional<DecideOptions> ParseDecideArgs(
     } else if (name == "whisperers") {
       options.whisperers = base::SplitString(value, ",", base::TRIM_WHITESPACE,
                                              base::SPLIT_WANT_NONEMPTY);
+    } else if (name == "notes") {
+      options.notes = value;
+    } else if (name == "notes-file") {
+      options.notes_path = value;
+    } else if (name == "order-names") {
+      options.order_names = base::SplitString(value, ",", base::TRIM_WHITESPACE,
+                                              base::SPLIT_WANT_NONEMPTY);
     } else {
       *error = base::StrCat({"unknown or invalid option: ", arg});
       return std::nullopt;
@@ -158,6 +166,18 @@ int RunDecide(const DecideOptions& options,
   }
   input.current_goal = options.current_goal;
   input.wake_reason = options.wake_reason;
+  if (!options.notes.empty()) {
+    input.notes = options.notes;
+  } else if (!options.notes_path.empty()) {
+    std::optional<std::string> notes = ReadFile(options.notes_path);
+    if (!notes) {
+      base::StrAppend(report,
+                      {"cannot read notes: ", options.notes_path, "\n"});
+      return 1;
+    }
+    input.notes = std::move(*notes);
+  }
+  input.order_names = options.order_names;
   input.slot = options.slot;
   input.temperature = options.temperature;
   input.whisperers = options.whisperers;
@@ -201,8 +221,9 @@ int RunDecide(const DecideOptions& options,
   decision.time = base::Time::Now();
   decision.result = ask.Run(request);
   if (decision.result.reply) {
-    decision.plan = ParsePlan(decision.result.reply->text,
-                              static_cast<int>(screen.options.size()));
+    decision.plan =
+        ParsePlan(decision.result.reply->text,
+                  static_cast<int>(screen.options.size()), options.order_names);
   }
   if (options.json_output) {
     nlohmann::json out;
@@ -239,6 +260,11 @@ int RunDecide(const DecideOptions& options,
       out["open"] = p.open;
       out["close"] = p.close;
       out["hover"] = p.hover;
+      nlohmann::json orders = nlohmann::json::array();
+      for (const Order& o : p.orders) {
+        orders.push_back(FormatOrder(o));
+      }
+      out["orders"] = std::move(orders);
     } else {
       out["plan_desc"] = "";
       out["look_s"] = 0;
@@ -248,6 +274,7 @@ int RunDecide(const DecideOptions& options,
       out["open"] = nlohmann::json::array();
       out["close"] = nlohmann::json::array();
       out["hover"] = "";
+      out["orders"] = nlohmann::json::array();
     }
     out["steps"] = std::move(steps);
     base::StrAppend(report, {out.dump(), "\n"});

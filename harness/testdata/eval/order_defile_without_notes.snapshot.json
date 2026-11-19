@@ -1,0 +1,120 @@
+{
+  "bot": "Aelindra",
+  "seq": 10,
+  "time_ms": 1794800000000,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x0000000000000101",
+        "name": "Aelindra",
+        "kind": "PLAYER",
+        "level": 80,
+        "health_pct": 100.0,
+        "power_pct": 100.0,
+        "player": {
+          "class": "Mage"
+        }
+      },
+      "gender": "FEMALE",
+      "health": 24000,
+      "health_max": 24000,
+      "power_type": "MANA",
+      "power": 28000,
+      "power_max": 28000,
+      "state": "ALIVE",
+      "in_combat": true
+    },
+    "where": {
+      "map": "Icecrown Citadel",
+      "zone": "Icecrown Citadel",
+      "subzone": "The Frozen Throne",
+      "position": {
+        "x": 500.0,
+        "y": -2120.0,
+        "z": 840.85
+      },
+      "facing": 0.0,
+      "in_instance": true
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0xF130008EFB000001",
+          "name": "The Lich King",
+          "rel": {
+            "dist_yd": 20.0,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": 520.0,
+              "y": -2120.0,
+              "z": 840.85
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "level": 83,
+          "level_color": "SKULL_LEVEL",
+          "reaction": "HOSTILE",
+          "classification": "WORLD_BOSS",
+          "health_pct": 68.0,
+          "activity": {
+            "state": "FIGHTING",
+            "with": "Balgor"
+          },
+          "detail": "NAMEPLATE",
+          "boss": {
+            "phase": 2
+          }
+        },
+        {
+          "guid": "0x0000000000000102",
+          "name": "Balgor",
+          "rel": {
+            "dist_yd": 24.0,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": 524.0,
+              "y": -2120.0,
+              "z": 840.85
+            }
+          },
+          "kind": "PLAYER",
+          "level": 80,
+          "reaction": "FRIENDLY",
+          "health_pct": 92.0,
+          "activity": {
+            "state": "FIGHTING",
+            "with": "The Lich King"
+          },
+          "detail": "NAMEPLATE",
+          "player": {
+            "class": "Warrior",
+            "in_my_group": true
+          },
+          "group": {
+            "role": "TANK",
+            "online": true,
+            "in_range": true,
+            "main_tank": true
+          }
+        }
+      ]
+    }
+  },
+  "options": [
+    {
+      "text": "Attack The Lich King",
+      "guid": "0xF130008EFB000001",
+      "kind": "ATTACK",
+      "name": "The Lich King"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
+}

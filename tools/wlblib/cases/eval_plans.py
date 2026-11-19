@@ -80,6 +80,10 @@ def decide_one(case, temperature=0.0, slot=0):
     whisperers = WHISPER_FROM_RE.findall(case["reason"])
     if whisperers:
         cmd.append(f"--whisperers={','.join(whisperers)}")
+    if case.get("notes"):
+        cmd.append(f"--notes={case['notes']}")
+    if case.get("order_names"):
+        cmd.append(f"--order-names={','.join(case['order_names'])}")
     res = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
     try:
         return json.loads(res.stdout)
@@ -139,6 +143,14 @@ def check_case(case, got):
         problems.append(f"looked for no reason (open: {got['open']}, hover: {got['hover']!r})")
     if "min_look_s" in case and got["look_s"] < case["min_look_s"]:
         problems.append(f"look {got['look_s']}s < {case['min_look_s']}s")
+    orders = got.get("orders", ())
+    if case.get("forbid_orders") and orders:
+        problems.append(f"wrote unexpected standing orders: {orders}")
+    if "min_orders" in case and len(orders) < case["min_orders"]:
+        problems.append(f"wrote {len(orders)} standing orders, expected >= {case['min_orders']}")
+    for needle in case.get("must_order_contain", ()):
+        if not any(needle.lower() in o.lower() for o in orders):
+            problems.append(f"no standing order mentions {needle!r} (orders: {orders or 'none'})")
     return problems
 
 
@@ -152,11 +164,11 @@ def _probe_plans(case):
         kind = OPTION_KIND_NAME.get(opt.get("kind", ""), "?")
         step = {"option": i, "times": 1, "kind": kind, "text": text}
         plain = {"valid": True, "steps": [step], "look_s": 60, "goal": "", "tell_to": "",
-                 "tell": "", "open": [], "hover": ""}
+                 "tell": "", "open": [], "hover": "", "orders": []}
         plans.append(plain)
         whisperers = WHISPER_FROM_RE.findall(case["reason"]) or ["Someone"]
         plans.append({**plain, "tell_to": whisperers[0], "tell": "hi", "open": ["bags"],
-                      "hover": "x", "look_s": 10})
+                      "hover": "x", "look_s": 10, "orders": ["Defile on me -> away"]})
     return plans
 
 

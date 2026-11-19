@@ -35,6 +35,11 @@ struct PromptInput {
   // ("bags, seen 40 s ago:"): memory, not the screen
   // (docs/plans/options-and-panels.md).
   std::vector<std::string> remembered;
+  // Boss / encounter notes known to this bot (may be empty).
+  std::string notes;
+  // Known mechanic, spell, item, and unit names that `order:` lines may use
+  // (empty keeps `order:` lines out of the grammar and prompt).
+  std::vector<std::string> order_names;
   int slot = -1;  // llama-server slot, or -1
   float temperature = 0.7f;
 };

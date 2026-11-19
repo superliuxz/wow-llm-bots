@@ -257,5 +257,38 @@ TEST(DecideTest, JsonOutputCarriesParsedPlanWithoutRegexes) {
   EXPECT_NE(report.find("\"valid\":false"), std::string::npos) << report;
 }
 
+TEST(DecideTest, OrderNamesAndBossNotesGateGrammarAndEmitOrdersInJson) {
+  DecideOptions options = Options();
+  options.json_output = true;
+  options.notes = "Lich King, Defile: black pool under target, run out.";
+  options.order_names = {"Defile"};
+  const std::string reply_with_order =
+      "do: 1\n"
+      "expect: 1\n"
+      "watch: none\n"
+      "look: 90\n"
+      "order: Defile on me -> away\n";
+  LlmRequest seen;
+  std::string report;
+  EXPECT_EQ(RunDecide(options, Replying(reply_with_order, &seen), &report), 0);
+  EXPECT_NE(seen.user.find("Your boss notes:"), std::string::npos);
+  EXPECT_NE(seen.user.find("Standing orders"), std::string::npos);
+  EXPECT_NE(seen.grammar.find("Defile"), std::string::npos);
+  EXPECT_NE(report.find("\"orders\":[\"Defile on me -> away\"]"),
+            std::string::npos)
+      << report;
+
+  // Without `order_names`, the grammar has no `order:` rule and the user
+  // prompt stays lean (no standing-orders section).
+  DecideOptions without_notes = Options();
+  LlmRequest seen_plain;
+  std::string report_plain;
+  EXPECT_EQ(
+      RunDecide(without_notes, Replying(kGoodPlan, &seen_plain), &report_plain),
+      0);
+  EXPECT_EQ(seen_plain.user.find("Standing orders"), std::string::npos);
+  EXPECT_EQ(seen_plain.grammar.find("orders-Order"), std::string::npos);
+}
+
 }  // namespace
 }  // namespace harness

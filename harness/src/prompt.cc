@@ -54,13 +54,27 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
       base::StrAppend(&request.user, {"\n", line});
     }
   }
+  if (!input.notes.empty()) {
+    base::StrAppend(&request.user, {"\n\nYour boss notes:\n", input.notes});
+  }
+  if (!input.order_names.empty()) {
+    base::StrAppend(
+        &request.user,
+        {"\n\nStanding orders (optional, up to 7 `order: <when> -> <act>` "
+         "lines in priority order, using only mechanics you know; verbs: to, "
+         "away, avoid, target, use, stop, face, face away, jump, cancel, "
+         "mark, interact, board, leave vehicle, equip, pet, pet attack, "
+         "kite, wake; e.g. `order: Defile on me -> away, then to behind "
+         "boss`):"});
+  }
   base::StrAppend(&request.user, {"\n\nYour screen now:\n", screen.text});
   std::vector<std::string> hover_names;
   for (const Hoverable& h : screen.hoverables) {
     hover_names.push_back(h.name);
   }
-  request.grammar = PlanGrammar(static_cast<int>(screen.options.size()),
-                                input.whisperers, hover_names);
+  request.grammar =
+      PlanGrammar(static_cast<int>(screen.options.size()), input.whisperers,
+                  hover_names, input.order_names);
   request.slot = input.slot;
   request.temperature = input.temperature;
   return request;

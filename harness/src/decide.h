@@ -39,6 +39,11 @@ struct DecideOptions {
   // Who recently whispered the bot (who a `tell` may answer), besides the
   // whispers in the snapshot's own events.
   std::vector<std::string> whisperers;
+  // Optional boss notes text (or loaded from `notes_path`).
+  std::string notes;
+  std::string notes_path;
+  // Known mechanic/spell/item/unit names enabled for `order:` lines.
+  std::vector<std::string> order_names;
   LlmEndpoint endpoint;
 };
 

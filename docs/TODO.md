@@ -63,8 +63,15 @@ design decisions below.
      `"lava"`, `"slime"` via `Map::GetLiquidData` in `snapshot_builder.cc`), and
      `GroupPart::main_assist` / `Raid::main_assists` (`MEMBER_FLAG_MAINASSIST` in
      `snapshot_builder.cc`).
-   - **(f) Not started:** evals (boss notes in, orders out; a bot without the note writes none)
-     and live tests (hand-written orders on a fixture bot, one scenario per verb).
+   - **(f) Offline evals done (2026-11-18); live tests remaining:**
+     - Done: offline prompt/grammar/CLI plumbing (`PromptInput::notes`/`order_names` in
+       `prompt.{h,cc}`, `--notes`/`--notes-file`/`--order-names` and JSON `"orders"` in
+       `decide.{h,cc}`, unit-tested in `DecideTest.OrderNamesAndBossNotesGateGrammarAndEmitOrdersInJson`),
+       plus 4 offline standing-order eval cases in `harness/testdata/eval/` (`order_defile_with_notes`,
+       `order_defile_without_notes`, `order_valkyr_add_switch`, `order_sindragosa_stacks`) wired into
+       `tools/wlblib/cases/eval_plans.py`.
+     - Remaining: live server tests (hand-written orders on a level-80 fixture bot, one scenario
+       per verb).
    - Also open from the audit: re-judge the unsayable rows with the final grammar for a measured
      coverage number (against the earlier grammar: conditions 85%, actions 46%; upper bounds with
      the new constructs about 89% and 55%); named room landmarks (most of the 133 "go to
