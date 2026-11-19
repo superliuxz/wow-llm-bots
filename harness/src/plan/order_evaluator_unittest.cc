@@ -736,7 +736,7 @@ TEST(OrderEvaluatorTest, KiteNeverTimesOutAndMoveUsesLongTimeout) {
   pb::Snapshot s = MakeBaseSnapshot();
   pb::Unit boss = MakeUnit("Boss-1", "Gluth", 8.0f);
   boss.boss = pb::BossPart{.phase = 1};
-  s.ext.encounter = pb::Encounter{.boss = boss};
+  s.ext.encounter.emplace().boss = boss;
 
   ASSERT_TRUE(eval.OnSnapshot(s, T(1)).act.has_value());
   // Kiting is continuous: still active after 60 s.
@@ -759,7 +759,7 @@ TEST(OrderEvaluatorTest, KiteEndsWhenItsConditionClears) {
   pb::Snapshot s = MakeBaseSnapshot();
   pb::Unit boss = MakeUnit("Boss-1", "Gluth", 8.0f);
   boss.boss = pb::BossPart{.phase = 1};
-  s.ext.encounter = pb::Encounter{.boss = boss};
+  s.ext.encounter.emplace().boss = boss;
   ASSERT_TRUE(eval.OnSnapshot(s, T(1)).act.has_value());
   EXPECT_TRUE(eval.OnSnapshot(s, T(2)).covered);  // Still kiting.
   s.ext.encounter->boss->rel.dist_yd = 25.0f;
