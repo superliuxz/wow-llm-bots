@@ -702,6 +702,7 @@ class LlmBrainWorldScript : public WorldScript {
                         const std::string& name,
                         base::TimeTicks now) {
     BotState& state = bots_[index];
+    ClearStaleCombatTarget(bot);
     if (state.active_act) {
       ActStepResult res = StepActiveAct(bot, now, &*state.active_act);
       if (!res.error.empty()) {

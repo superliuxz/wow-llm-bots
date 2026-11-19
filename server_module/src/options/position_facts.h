@@ -95,6 +95,13 @@ AttackStepAction CheckAttackStep(bool in_combat,
                                  base::TimeTicks now,
                                  base::TimeTicks* idle_since);
 
+// True when a living bot in combat still holds a dead selection/target, which
+// would stall Playerbots' combat engine from acquiring a live enemy.
+bool ShouldClearStaleCombatTarget(bool in_combat,
+                                  bool bot_alive,
+                                  bool has_target,
+                                  bool target_alive);
+
 // The Explore spots and Go to places seen from one position. Distances and
 // directions are filled for the position they were computed at; RefreshFrom
 // re-measures them from a nearby one (cheap), so a bot recomputes them only

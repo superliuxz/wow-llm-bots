@@ -277,5 +277,15 @@ TEST(PositionFactsTest, AttackStepClosesRangeAndFailsAfterEightSecondsIdle) {
   EXPECT_TRUE(idle_since.is_null());
 }
 
+TEST(PositionFactsTest, ClearsStaleDeadTargetOnlyWhileAliveInCombat) {
+  EXPECT_TRUE(ShouldClearStaleCombatTarget(
+      /*in_combat=*/true, /*bot_alive=*/true, /*has_target=*/true,
+      /*target_alive=*/false));
+  EXPECT_FALSE(ShouldClearStaleCombatTarget(true, true, true, true));
+  EXPECT_FALSE(ShouldClearStaleCombatTarget(true, true, false, false));
+  EXPECT_FALSE(ShouldClearStaleCombatTarget(false, true, true, false));
+  EXPECT_FALSE(ShouldClearStaleCombatTarget(true, false, true, false));
+}
+
 }  // namespace
 }  // namespace llm_brain

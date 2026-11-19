@@ -47,6 +47,8 @@ TEST(ConfigParsingTest, StrategyChecksCoverEveryChange) {
   EXPECT_EQ(StrategyChecks("-grind, -new rpg, -follow"),
             (Checks{{"grind", false}, {"new rpg", false}, {"follow", false}}));
   EXPECT_EQ(StrategyChecks("+stay,-stay"), (Checks{{"stay", false}}));
+  EXPECT_EQ(StrategyChecks("-follow,-stay"),
+            (Checks{{"follow", false}, {"stay", false}}));
   EXPECT_EQ(StrategyChecks(""), Checks{});
   EXPECT_EQ(StrategyChecks("grind, +"), Checks{});
 }

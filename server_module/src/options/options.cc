@@ -43,6 +43,15 @@ bool HasTalkNpcFlags(const OptionFacts& facts, std::string_view guid) {
   return false;
 }
 
+bool IsMarkedNotAttackable(const OptionFacts& facts, std::string_view guid) {
+  for (const OptionFacts::Npc& npc : facts.npcs) {
+    if (npc.guid == guid) {
+      return (npc.npc_flags & kNpcFlagNotAttackable) != 0;
+    }
+  }
+  return false;
+}
+
 // What a player can do with this unit by clicking it.
 std::optional<OptionTarget::Kind> UnitKind(const pb::Unit& u,
                                            bool in_combat,
@@ -57,7 +66,9 @@ std::optional<OptionTarget::Kind> UnitKind(const pb::Unit& u,
     return u.lootable ? std::optional(OptionTarget::Kind::kLoot) : std::nullopt;
   }
   if (u.reaction == pb::Unit::HOSTILE || u.reaction == pb::Unit::NEUTRAL) {
-    return OptionTarget::Kind::kAttack;
+    return IsMarkedNotAttackable(facts, u.guid)
+               ? std::nullopt
+               : std::optional(OptionTarget::Kind::kAttack);
   }
   if (u.reaction == pb::Unit::FRIENDLY && u.kind == pb::Unit::NPC &&
       !in_combat &&

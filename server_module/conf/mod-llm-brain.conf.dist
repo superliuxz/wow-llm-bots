@@ -77,7 +77,7 @@ LlmBrain.LosRaycastsPerSnapshot = 32
 
 LlmBrain.CombatStrategies = "+boost,+dps assist,-threat"
 LlmBrain.NonCombatStrategies = "-follow,+grind,+new rpg"
-LlmBrain.DeadStrategies = "-follow"
+LlmBrain.DeadStrategies = "-follow,-stay"
 
 #
 #    LlmBrain.TestFixtures

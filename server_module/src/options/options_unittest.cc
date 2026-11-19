@@ -410,5 +410,27 @@ TEST(OptionHistoryTest, KeepsAWindowOfTimeNotACount) {
   EXPECT_NE(history.Find(161, 1).target, nullptr);
 }
 
+TEST(OptionsTest, NonAttackableNeutralAndHostileNpcsAreNotOfferedAsAttack) {
+  pb::Snapshot snapshot;
+  pb::Unit* officer =
+      AddUnit(&snapshot, "Warsong Recruitment Officer", "0x10", 8);
+  officer->reaction = pb::Unit::NEUTRAL;
+  pb::Unit* immune_boss = AddUnit(&snapshot, "Scripted Boss", "0x11", 12);
+  immune_boss->reaction = pb::Unit::HOSTILE;
+  pb::Unit* boar = AddUnit(&snapshot, "Mottled Boar", "0x12", 15);
+  boar->reaction = pb::Unit::NEUTRAL;
+
+  OptionFacts facts;
+  facts.npcs.push_back({"0x10", kNpcFlagNotAttackable});
+  facts.npcs.push_back({"0x11", kNpcFlagNotAttackable});
+
+  const std::vector<OptionTarget> targets = AddOptions(&snapshot, facts);
+  EXPECT_EQ(Texts(snapshot),
+            (std::vector<std::string>{"Attack Mottled Boar",
+                                      "Keep doing what I'm doing"}));
+  ASSERT_EQ(targets.size(), 2u);
+  EXPECT_EQ(targets[0].guid, "0x12");
+}
+
 }  // namespace
 }  // namespace llm_brain

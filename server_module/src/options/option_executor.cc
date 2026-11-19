@@ -249,6 +249,29 @@ bool WalkTowards(Player* bot, float x, float y, float z) {
   return WalkTo(bot, x, y, z);
 }
 
+void ClearStaleCombatTarget(Player* bot) {
+  if (!bot) {
+    return;
+  }
+  Unit* sel = bot->GetSelectedUnit();
+  if (ShouldClearStaleCombatTarget(bot->IsInCombat(), bot->IsAlive(),
+                                   sel != nullptr, sel && sel->IsAlive())) {
+    bot->SetSelection(ObjectGuid::Empty);
+  }
+  if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot)) {
+    if (AiObjectContext* ctx = ai->GetAiObjectContext()) {
+      if (auto* cur = ctx->GetValue<Unit*>("current target")) {
+        Unit* tgt = cur->Get();
+        if (ShouldClearStaleCombatTarget(bot->IsInCombat(), bot->IsAlive(),
+                                         tgt != nullptr,
+                                         tgt && tgt->IsAlive())) {
+          cur->Set(nullptr);
+        }
+      }
+    }
+  }
+}
+
 namespace {
 
 // Walks to the bot's side of `target`, within contact distance; false when

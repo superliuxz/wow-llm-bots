@@ -570,20 +570,30 @@ void FillQuestTracker(Player* bot,
   }
 }
 
-// Talkable NPCs on screen, with their NPC flags (what the client knows of a
-// unit it can click: the gossip and service icons).
+// Talkable NPCs and non-attackable neutral/hostile units on screen, with their
+// flags (what the client knows of a unit it can click: service icons, and
+// whether the attack cursor is unavailable).
 void FillNpcFacts(Player* bot, const pb::Snapshot& snapshot, OptionFacts* out) {
   for (const pb::Unit& u : snapshot.base.nearby.units) {
-    if (u.kind != pb::Unit::NPC || u.dead || u.reaction != pb::Unit::FRIENDLY ||
+    if ((u.kind != pb::Unit::NPC && u.kind != pb::Unit::CRITTER) || u.dead ||
         u.guid.empty()) {
       continue;
     }
-    if (Creature* creature =
-            ObjectAccessor::GetCreature(*bot, ParseSnapshotGuid(u.guid))) {
-      const uint32_t flags = creature->GetUInt32Value(UNIT_NPC_FLAGS);
-      if ((flags & kTalkNpcFlags) != 0) {
-        out->npcs.push_back({u.guid, flags});
-      }
+    Creature* creature =
+        ObjectAccessor::GetCreature(*bot, ParseSnapshotGuid(u.guid));
+    if (!creature) {
+      continue;
+    }
+    uint32_t flags = 0;
+    if (u.kind == pb::Unit::NPC && u.reaction == pb::Unit::FRIENDLY) {
+      flags |= creature->GetUInt32Value(UNIT_NPC_FLAGS) & kTalkNpcFlags;
+    } else if ((u.reaction == pb::Unit::HOSTILE ||
+                u.reaction == pb::Unit::NEUTRAL) &&
+               !bot->IsValidAttackTarget(creature)) {
+      flags |= kNpcFlagNotAttackable;
+    }
+    if (flags != 0) {
+      out->npcs.push_back({u.guid, flags});
     }
   }
 }

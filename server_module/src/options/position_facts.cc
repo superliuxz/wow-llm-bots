@@ -134,6 +134,13 @@ AttackStepAction CheckAttackStep(bool in_combat,
                                              : AttackStepAction::kRetryExecute;
 }
 
+bool ShouldClearStaleCombatTarget(bool in_combat,
+                                  bool bot_alive,
+                                  bool has_target,
+                                  bool target_alive) {
+  return in_combat && bot_alive && has_target && !target_alive;
+}
+
 void RefreshFrom(const pb::Vec3& pos, PositionFacts* facts) {
   const auto out_of_range = [](float dist) {
     return dist < kMinTravelDistYd || dist > kMaxTravelDistYd;

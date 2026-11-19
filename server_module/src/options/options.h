@@ -31,6 +31,11 @@ inline constexpr uint32_t kNpcFlagInnkeeper = 0x00010000;
 inline constexpr uint32_t kTalkNpcFlags =
     kNpcFlagTrainer | kNpcFlagTrainerClass | kNpcFlagTrainerProfession |
     kNpcFlagVendor | kNpcFlagRepair | kNpcFlagFlightMaster | kNpcFlagInnkeeper;
+// Internal OptionFacts bit (not a WoW UNIT_NPC_FLAGS bit): set for alive
+// nearby creatures that fail bot->IsValidAttackTarget (e.g. immune or
+// non-attackable neutral/event NPCs) so options.cc does not offer an
+// impossible Attack option.
+inline constexpr uint32_t kNpcFlagNotAttackable = 0x80000000u;
 
 // What one numbered option does, and to what.
 struct OptionTarget {

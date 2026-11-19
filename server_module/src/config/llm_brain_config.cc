@@ -30,8 +30,8 @@ Config LoadConfig() {
       "LlmBrain.CombatStrategies", "+boost,+dps assist,-threat");
   config.non_combat_strategies = sConfigMgr->GetOption<std::string>(
       "LlmBrain.NonCombatStrategies", "-follow,+grind,+new rpg");
-  config.dead_strategies =
-      sConfigMgr->GetOption<std::string>("LlmBrain.DeadStrategies", "-follow");
+  config.dead_strategies = sConfigMgr->GetOption<std::string>(
+      "LlmBrain.DeadStrategies", "-follow,-stay");
   config.test_account =
       sConfigMgr->GetOption<std::string>("LlmBrain.TestAccount", "WLBTEST");
   config.test_fixtures = ParseFixtures(

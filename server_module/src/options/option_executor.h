@@ -75,6 +75,10 @@ WalkStepResult TickLongWalk(Player* bot,
 // exists.
 bool WalkTowards(Player* bot, float x, float y, float z);
 
+// Clears stale dead selection / Playerbots "current target" when `bot` is
+// alive and in combat so Playerbots' combat engine isn't stalled by a corpse.
+void ClearStaleCombatTarget(Player* bot);
+
 // Whether `go` is opened through the loot strategy (chest, herb, vein).
 bool IsLootableObject(GameObject* go);
 
