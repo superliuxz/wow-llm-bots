@@ -1,0 +1,8 @@
+# Live boss test (Halls of Lightning — Loken): two level-80 Priests with playerbots'
+# hardcoded `wotlk-hol` boss strategy stripped so all boss-mechanic reactions come from
+# standing orders written by the LLM brain.
+LlmBrain.Bots = "Loada,Telda"
+LlmBrain.TestFixtures = "Loada=priest-l80-boars.pdump,Telda=priest-l80-boars.pdump"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.CombatStrategies = "+boost,+dps assist,-threat,-wotlk-hol"
+LlmBrain.NonCombatStrategies = "-follow,-grind,-new rpg,-wotlk-hol"

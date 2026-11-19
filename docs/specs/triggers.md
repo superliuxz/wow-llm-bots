@@ -305,7 +305,7 @@ from 3 conditions and 4 orders to 4 and 7.
 - **`marker` as a place** only works on a unit carrying the icon: 3.3.5a has no markers on the ground.
 - **Outside the grammar** (first pass: about 84 triggers; re-run: 85, mainly assignments and
   fixed locations). Most of the answer is already in the snapshot; six gaps are
-  left (checked against `common/proto/snapshot.h`: `main_tank`, `assistant`, `subgroup`, raid markers,
+  left (checked against `snapshot/snapshot.h`: `main_tank`, `assistant`, `subgroup`, raid markers,
   `LANDMARK`, `swimming` and `visual_state` exist; `lands_in_s` does not):
   1. **Named places in a boss room** (the hard one): playerbots says `(x, y, z)`, a player says "on
      the dais". Cheapest first: a player or unit ("ranged stack on Loada" is `to Loada`, covers

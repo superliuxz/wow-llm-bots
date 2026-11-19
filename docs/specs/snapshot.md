@@ -2,7 +2,7 @@
 
 Status: **agreed, revision 7** (2026-11-15; wire format switched from protobuf to Glaze BEVE on
 2026-11-17). The exact field-level contract is
-[`common/proto/snapshot.h`](../../common/proto/snapshot.h) (plain C++20 structs serialized with
+[`snapshot/snapshot.h`](../../snapshot/snapshot.h) (plain C++20 structs serialized with
 Glaze BEVE over the wire and Glaze JSON in tooling; the single source of truth for the
 module <-> harness protocol); examples in [`examples/`](examples/) are checked by
 `tools/wlb check snapshots` (strict parse + visibility rules).
@@ -53,7 +53,7 @@ Coverage against the client: [`coverage.md`](coverage.md) (every UI frame, serve
   `var/bots/<name>/events/<date>.jsonl`; optional full recording to `out/recordings/`
   (debug only; ~8-9 GB/day at 50 bots).
 
-Messages (`common/proto/snapshot.h`): the module sends `ModuleMessage` (a `Snapshot`, or an
+Messages (`snapshot/snapshot.h`): the module sends `ModuleMessage` (a `Snapshot`, or an
 `ImmediateEvent` between snapshots); the harness sends `Command` (choose an option,
 `set_goal`, `say`, `open`, `hover`, ...). In JSON:
 ```json
@@ -84,8 +84,8 @@ Messages (`common/proto/snapshot.h`): the module sends `ModuleMessage` (a `Snaps
   the body finished (docs/specs/triggers.md), kept apart from `done_command_id` so a plan step
   and an order's act finishing together can't hide one another. Since `kWireVersion` 2.
 - Wire format: **Glaze BEVE binary, length-prefixed frames** over the Unix socket
-  (`common/proto/snapshot_wire.cc`). Both sides share the C++20 structs in
-  `common/proto/snapshot.h`; the module contains no JSON code.
+  (`snapshot/snapshot_wire.cc`). Both sides share the C++20 structs in
+  `snapshot/snapshot.h`; the module contains no JSON code.
 - JSON exists only in tooling: the harness converts frames with `snapshot_wire.cc` when it writes
   recordings, decision logs and eval cases, and the reverse for `harness decide <snapshot.json>`.
 - JSON omits default values (false, 0, empty), so absence means false / zero.
@@ -377,7 +377,7 @@ real player knows their junk and bag space from habit), but only sends what's vi
    which extensions to build first.
 7. **Unit activity, not just casting:** every unit carries `activity` (what it's doing).
 8. **Shared types** for Item / Spell / Aura / Unit / Place, with tooltips, cooldowns and
-   GearScore everywhere they appear; defined once in `common/proto/snapshot.h`, shared by
+   GearScore everywhere they appear; defined once in `snapshot/snapshot.h`, shared by
    composition (optional parts).
 9. **Structured data, not screenshots:** bots have no client to render, images cost many more
    tokens, break prompt caching and get numbers wrong, and are hard to test. Exception: an
@@ -392,7 +392,7 @@ real player knows their junk and bag space from habit), but only sends what's vi
    per-bot habits in the harness without LLM calls; the harness remembers closed panels,
    tooltips and chat with their age and renders them as memory.
 13. **Single C++ header + Glaze, not JSON Schema** (rev 7, revised 2026-11-17):
-    `common/proto/snapshot.h` is the single source of truth shared by the module and the harness
+    `snapshot/snapshot.h` is the single source of truth shared by the module and the harness
     (originally protobuf + abseil; replaced by header-only Glaze v9.1.0 with BEVE binary wire
     frames and JSON for recordings/evals).
 14. **Coverage audited against the client** (rev 7): every UI frame and every server opcode

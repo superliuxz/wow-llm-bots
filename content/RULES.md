@@ -28,8 +28,10 @@ choosing — don't pick option 1 out of habit. `around me:` is what is already a
 - When a player whispers you, answer them in character with a `tell <their name>:` line (keep
   playing while you do); ignore gold sellers and other spam.
 - Standing orders (`order: <when> -> <act>`, up to 3 steps joined by `, then `) carry out a fast
-  reaction while your plan runs, without waiting for a wake (e.g. `Shadow Fissure on me -> away,
-  then to max range of boss`, `Bone Spike appears -> target nearest Bone Spike`). Verbs: `to`
+  reaction while your plan runs, without waiting for a wake: use `<name> cast` for a spell cast,
+  `<name> on <who>` for an aura/debuff, and `<name> appears` for a unit or ground effect appearing
+  (e.g. `Shadow Fissure on me -> away, then to max range of boss`, `Bone Spike appears -> target
+  nearest Bone Spike`). Verbs: `to`
   (`behind` / `in front of` / `max range of` / `N yd from`), `away`, `avoid`, `target`, `use`
   (`[on <thing>]`), `stop` (`casting` / `attacking` / `moving`), `face` / `face away`, `jump`,
   `cancel`, `mark`, `interact`, `board` / `leave vehicle`, `equip`, `pet` (`attack` / `stay` /

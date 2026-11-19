@@ -76,8 +76,25 @@ Items #1–#5 are done and verified live (2026-11-18).
   target. Five `*Cheat*` boss triggers fire only with playerbots' raid cheat on.
 - A flaky risk in `e2e choose`: if the boar drops nothing there is no corpse to loot, and the case
   fails with "never offered". Passed every run so far.
+- **Live boss findings (Loken, 2026-11-18):**
+  - Chaining `away 25, then to Loken` on a 4 s cast finishes `away 25` in ~3.0–3.5 s and immediately
+    runs back into the blast before the cast finishes (two separate orders or waiting for the cast
+    to end avoids returning early).
+  - Mid-fight wakes (`attacked`, `hp<N`) replace all standing orders; Gemma 4 occasionally rewrites
+    a working `Lightning Nova cast` order into `Loken cast` or `Lightning Nova appears`.
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-18: first live boss test (Halls of Lightning — Loken, map 602, 2x level-80 Priests with
+  `-wotlk-hol` vs no-notes vs stock playerbots `wotlk-hol`, real `harness run` + Gemma 4):
+  caught and fixed a real boss bug in `server_module/src/snapshot/nearby_builder.cc` (generic
+  preparing casts now take precedence over background channeled auras like Loken's `Pulsing
+  Shockwave`, which had hidden `Lightning Nova`); added `llmtest tele`/`gear` in
+  `test_commands.cc`, `config/tests/boss.llm-brain.overrides`, and `<name> cast` / `on <who>` /
+  `appears` clarity in `content/RULES.md`. Measured: LLM + notes reacted in `0 ms` harness time
+  (`0.5 -> 23.0 yd` and `5.7 -> 30.3 yd`, 0 LLM wakes for Lightning Nova, 0 deaths); LLM without
+  notes wrote 0 orders (100% known-mechanics gate, stood at `0.5–0.7 yd`, `-34%` to `-37%` HP per
+  Nova); stock playerbots `wotlk-hol` moved to `14.2–18.1 yd` (0 deaths).
 
 - 2026-11-18: screen goldens populated with real module options (`harness/testdata/screens/*.facts.json`
   captured on the isolated test server, `add_fixture_options.py` checking both `eval` and

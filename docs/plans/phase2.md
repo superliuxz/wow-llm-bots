@@ -142,7 +142,7 @@ not in `out/common-server` (linked into AzerothCore).
 
 ## Decisions (review 2026-11-14)
 1. **Wire format** module <-> harness (revised 2026-11-17): plain C++20 structs in
-   `common/proto/snapshot.h` serialized with Glaze BEVE (`common/proto/snapshot_wire.cc`), one per
+   `snapshot/snapshot.h` serialized with Glaze BEVE (`snapshot/snapshot_wire.cc`), one per
    length-prefixed frame (`common/net/frame_codec.h`: 4-byte big-endian length + payload)
    over the Unix socket (replaced protobuf + abseil on 2026-11-17). JSON only in harness tooling: recordings, decision
    logs, eval cases. The LLM never

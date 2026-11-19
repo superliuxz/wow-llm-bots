@@ -13,6 +13,7 @@
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "Player.h"
+#include "PlayerbotFactory.h"
 #include "SharedDefines.h"
 
 namespace llm_brain {
@@ -43,6 +44,8 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"aura", HandleAura, SEC_ADMINISTRATOR, Console::Yes},
         {"unaura", HandleUnaura, SEC_ADMINISTRATOR, Console::Yes},
         {"move", HandleMove, SEC_ADMINISTRATOR, Console::Yes},
+        {"tele", HandleTele, SEC_ADMINISTRATOR, Console::Yes},
+        {"gear", HandleGear, SEC_ADMINISTRATOR, Console::Yes},
     };
     static ChatCommandTable root_table = {
         {"llmtest", test_table},
@@ -140,6 +143,44 @@ class LlmBrainTestCommandScript : public CommandScript {
     player->NearTeleportTo(x, y, z, o);
     handler->PSendSysMessage("llmtest: moved {} to ({:.1f}, {:.1f}, {:.1f})",
                              player->GetName(), x, y, z);
+    return true;
+  }
+
+  static bool HandleTele(ChatHandler* handler,
+                         std::string player_name,
+                         uint32_t map_id,
+                         float x,
+                         float y,
+                         float z,
+                         float o) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player) {
+      return false;
+    }
+    if (!player->TeleportTo(map_id, x, y, z, o)) {
+      handler->SendErrorMessage("llmtest: TeleportTo map {} failed for {}",
+                                map_id, player->GetName());
+      return false;
+    }
+    handler->PSendSysMessage(
+        "llmtest: teleported {} to map {} ({:.1f}, {:.1f}, {:.1f})",
+        player->GetName(), map_id, x, y, z);
+    return true;
+  }
+
+  static bool HandleGear(ChatHandler* handler,
+                         std::string player_name,
+                         uint32_t level) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player) {
+      return false;
+    }
+    PlayerbotFactory factory(player, level, ITEM_QUALITY_EPIC);
+    factory.Randomize(false);
+    player->SetFullHealth();
+    player->SetPower(POWER_MANA, player->GetMaxPower(POWER_MANA));
+    handler->PSendSysMessage("llmtest: geared {} at level {} (hp={})",
+                             player->GetName(), level, player->GetMaxHealth());
     return true;
   }
 };

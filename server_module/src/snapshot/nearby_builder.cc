@@ -235,18 +235,21 @@ void FillActivity(Unit* unit, Player* bot, pb::Activity* activity) {
   }
   // What shows a cast bar, as in Unit::IsNonMeleeSpellCast: a spell stays in
   // its slot after it finished, while its projectile flies (delayed) and for
-  // an instant cast, none of which a player sees as casting.
-  Spell* channel = unit->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
-  if (channel && channel->getState() != SPELL_STATE_FINISHED) {
-    activity->state = pb::Activity::CHANNELING;
-    FillCast(unit, channel, &activity->cast.emplace());
-    return;
-  }
+  // an instant cast, none of which a player sees as casting. Check generic
+  // casts before channeled spells: bosses like Loken hold a background
+  // channeled aura (Pulsing Shockwave) while casting their main mechanic
+  // (Lightning Nova) in CURRENT_GENERIC_SPELL.
   Spell* cast = unit->GetCurrentSpell(CURRENT_GENERIC_SPELL);
   if (cast && cast->getState() == SPELL_STATE_PREPARING &&
       cast->GetCastTime() > 0) {
     activity->state = pb::Activity::CASTING;
     FillCast(unit, cast, &activity->cast.emplace());
+    return;
+  }
+  Spell* channel = unit->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
+  if (channel && channel->getState() != SPELL_STATE_FINISHED) {
+    activity->state = pb::Activity::CHANNELING;
+    FillCast(unit, channel, &activity->cast.emplace());
     return;
   }
   Unit* victim = unit->GetVictim();
