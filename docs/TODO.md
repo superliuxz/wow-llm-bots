@@ -18,21 +18,22 @@ design decisions below.
    2026-11-17)" and "Decided (2026-11-18)": `when` evaluated in the harness, acts carried out in
    the module; relative places now, room landmarks later; acts through the client's own
    handlers). **About a sixth done; nothing acts on an order in game yet.** Build order:
-   - **(a) Order language and evaluator in the harness: half done.**
-     - Done (2026-11-18): `harness/src/orders.{h,cc}`: types, parser (26 condition forms, 18
+   - **(a) Order language and evaluator in the harness: done (2026-11-18).**
+     - `harness/src/orders.{h,cc}`: types, parser (26 condition forms, 18
        verbs; generated from `harness/grammar/orders.wlb`), printer, per-call grammar (`OrderGrammar`,
        names limited to what the bot knows); `order:` plan lines, up to 7, in priority order
        (`plan.{h,cc}`; a bad order is dropped, the plan stands); tests: round trips, rejects,
        and every `fits` row of both audit tables (`OrdersTest.*Audit*`, also
        `tools/wlb check triggers`; the Python checker is retired); `base::
-       SplitStringPieceUsingSubstr` in `common/base`. **`order:` lines are off in live prompts**
-       (no names are passed to the grammar) until (b) can carry acts out.
-     - Not done: the **evaluator**: which order fires on a snapshot or event (priority, the
-       first match wins), `it` binding, time windows (`cast in last Ns`, `appears in last Ns`,
-       `after Ns`, `every Ns`), `then` chains, the step timeout (5 s default), a higher order
-       interrupting a lower one, an order covering its event (no default wake); conditions
-       on fields the snapshot lacks yet (flying, submerged, ...) are false until (e). Unit tests
-       on recorded snapshot sequences. Then the bot loop runs it and RULES.md gets the verbs.
+       SplitStringPieceUsingSubstr` in `common/base`.
+     - `harness/src/order_evaluator.{h,cc}` + `order_evaluator_unittest.cc`: evaluates all 26
+       `Check` forms, `WhenAlways`/`WhenAll` with negation, all 9 `Thing` and 8 `Who` forms,
+       priority matching and higher-priority preemption, `it` binding, cross-snapshot time windows
+       (`cast in last Ns`, `appears in last Ns`, `after Ns`, `every Ns`), `then` chains advancing
+       on `done_command_id` / `OnStepDone`, 5 s default step timeout and failure wakes, event
+       coverage (`covered`), and safe `false` for missing snapshot states until (e).
+     - **`order:` lines stay off in live prompts** (no names passed to the grammar, `bot_loop.cc`
+       wiring and `RULES.md` verbs deferred) until (b) can carry acts out.
    - **(b) Not started:** a wire command for an act (`Command`, `kWireVersion`) and the module's
      executor for the first verbs (`to`, `away`, `target`, `use`, `stop`, `wake`), done through
      `done_command_id`; relative places (`behind`, `in front of`, `max range of`, `N yd from`)
