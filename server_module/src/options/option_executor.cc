@@ -443,6 +443,7 @@ TalkResult TalkToNpcNow(Player* bot, Creature* npc) {
     }
   }
 
+  std::string trainer_refusal;
   // 2. Trainer: learn what the bot can afford, through the server's own
   // trainer code (Trainer::TeachSpell: the checks, the cost, the packets),
   // as a click on "Train" would.
@@ -492,9 +493,9 @@ TalkResult TalkToNpcNow(Player* bot, Creature* npc) {
         if (!learned.empty()) {
           done.push_back("learned " + base::JoinString(learned, ", "));
         } else if (too_expensive) {
-          done.push_back("not enough money for new spells");
+          trainer_refusal = "not enough money for new spells";
         } else {
-          done.push_back("no new spells to learn");
+          trainer_refusal = "no new spells to learn";
         }
       }
     }
@@ -520,12 +521,8 @@ TalkResult TalkToNpcNow(Player* bot, Creature* npc) {
   }
 
   ai->ResetActionDuration();
-  if (done.empty()) {
-    return {base::StrCat({npc->GetName(), " has nothing for you"}), ""};
-  }
-  const std::string summary = base::StrCat(
-      {"talked to ", npc->GetName(), ": ", base::JoinString(done, "; ")});
-  return {"", summary};
+  TalkOutcome out = FormatTalkOutcome(npc->GetName(), done, trainer_refusal);
+  return {std::move(out.error), std::move(out.info)};
 }
 
 namespace {

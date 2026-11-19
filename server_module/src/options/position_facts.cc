@@ -7,8 +7,12 @@
 #include <cstdint>
 #include <numbers>
 #include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
+#include "base/strings/strcat.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "snapshot/perception.h"
 #include "snapshot/snapshot.h"
@@ -68,6 +72,19 @@ WalkProgressVerdict CheckWalkProgress(const pb::Vec3& pos,
                                                 : WalkProgressVerdict::kStuck;
   }
   return WalkProgressVerdict::kContinue;
+}
+
+TalkOutcome FormatTalkOutcome(std::string_view npc_name,
+                              const std::vector<std::string>& done,
+                              std::string_view trainer_refusal) {
+  if (done.empty()) {
+    if (!trainer_refusal.empty()) {
+      return {std::string(trainer_refusal), ""};
+    }
+    return {base::StrCat({npc_name, " has nothing for you"}), ""};
+  }
+  return {"", base::StrCat({"talked to ", npc_name, ": ",
+                            base::JoinString(done, "; ")})};
 }
 
 void RefreshFrom(const pb::Vec3& pos, PositionFacts* facts) {

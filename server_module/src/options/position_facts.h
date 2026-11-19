@@ -4,6 +4,8 @@
 #define MOD_LLM_BRAIN_OPTIONS_POSITION_FACTS_H_
 
 #include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include "base/time/time.h"
@@ -44,6 +46,18 @@ WalkProgressVerdict CheckWalkProgress(const wlb::snapshot::Vec3& pos,
                                       float dist_to_dest,
                                       base::TimeTicks now,
                                       WalkProgressTracker* tracker);
+
+// Formats the outcome of TalkToNpcNow. When `done` is empty and a trainer
+// refused (e.g. "not enough money for new spells" or "no new spells to
+// learn"), returns that refusal as `error` so the harness backs off instead of
+// treating it as a successful interaction and looping.
+struct TalkOutcome {
+  std::string error;
+  std::string info;
+};
+TalkOutcome FormatTalkOutcome(std::string_view npc_name,
+                              const std::vector<std::string>& done,
+                              std::string_view trainer_refusal);
 
 // The Explore spots and Go to places seen from one position. Distances and
 // directions are filled for the position they were computed at; RefreshFrom

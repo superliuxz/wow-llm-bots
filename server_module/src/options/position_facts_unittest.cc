@@ -198,5 +198,28 @@ TEST(PositionFactsTest, WalkProgressDetectsPingPongWithoutBreakingDetours) {
       WalkProgressVerdict::kArrived);
 }
 
+TEST(PositionFactsTest, EmptyTrainerInteractionReturnsRefusalNotInfo) {
+  const TalkOutcome broke =
+      FormatTalkOutcome("Isabella", {}, "not enough money for new spells");
+  EXPECT_EQ(broke.error, "not enough money for new spells");
+  EXPECT_TRUE(broke.info.empty());
+
+  const TalkOutcome nothing_new =
+      FormatTalkOutcome("Isabella", {}, "no new spells to learn");
+  EXPECT_EQ(nothing_new.error, "no new spells to learn");
+  EXPECT_TRUE(nothing_new.info.empty());
+
+  const TalkOutcome nothing = FormatTalkOutcome("Kaltunk", {}, "");
+  EXPECT_EQ(nothing.error, "Kaltunk has nothing for you");
+  EXPECT_TRUE(nothing.info.empty());
+
+  // If another interaction succeeded (e.g. turned in a quest), it is info.
+  const TalkOutcome mixed =
+      FormatTalkOutcome("Isabella", {"turned in A New Plague"},
+                        "not enough money for new spells");
+  EXPECT_TRUE(mixed.error.empty());
+  EXPECT_EQ(mixed.info, "talked to Isabella: turned in A New Plague");
+}
+
 }  // namespace
 }  // namespace llm_brain
