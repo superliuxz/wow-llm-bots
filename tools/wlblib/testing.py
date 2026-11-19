@@ -418,7 +418,7 @@ def capture_snapshots(seconds=300):
     say(f"captured {sum(1 for _ in target.rglob('*.json'))} snapshots")
 
 
-def soak(minutes=2.0, runs=1, score=False, human_dir=None, judge=False, verify_hash=None):
+def soak(minutes=5.0, runs=2, score=False, human_dir=None, judge=False, verify_hash=None, suite="varied"):
     from wlblib.cases import soak as soak_case
 
     return soak_case.run_soak(
@@ -428,6 +428,7 @@ def soak(minutes=2.0, runs=1, score=False, human_dir=None, judge=False, verify_h
         human_dir=human_dir,
         use_judge=judge,
         verify_hash=verify_hash,
+        suite=suite,
     )
 
 

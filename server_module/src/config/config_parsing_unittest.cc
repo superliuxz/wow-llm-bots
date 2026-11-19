@@ -29,6 +29,9 @@ TEST(ConfigParsingTest, ParseFixturesJoinsRelativeFilesToDir) {
                       {"Testwar", "/abs/war.pdump"}}));
   EXPECT_EQ(ParseFixtures("Testpriest=priest.pdump", ""),
             (Fixtures{{"Testpriest", "priest.pdump"}}));
+  EXPECT_EQ(ParseFixtures("Loada=new:orc:warrior",
+                          "/repo/server_module/testdata/characters"),
+            (Fixtures{{"Loada", "new:orc:warrior"}}));
 }
 
 TEST(ConfigParsingTest, ParseFixturesSkipsMalformedEntries) {
