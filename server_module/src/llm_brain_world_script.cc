@@ -29,6 +29,7 @@
 #include "chat/chat_scripts.h"
 #include "chat/speak.h"
 #include "config/llm_brain_config.h"
+#include "options/act_executor.h"
 #include "options/option_executor.h"
 #include "options/option_facts.h"
 #include "options/options.h"
@@ -446,7 +447,7 @@ class LlmBrainWorldScript : public WorldScript {
     }
     const std::string& name = command.bot;
     if (!command.choose && !command.say && !command.open && !command.close &&
-        !command.hover) {
+        !command.hover && !command.act) {
       LOG_INFO("module", "mod-llm-brain: {}: command not supported yet", name);
       return;
     }
@@ -463,6 +464,10 @@ class LlmBrainWorldScript : public WorldScript {
     }
     if (command.open || command.close || command.hover) {
       OnUiCommand(bot_index, name, command);
+      return;
+    }
+    if (command.act) {
+      OnAct(bot_index, name, bot, command.command_id, *command.act);
       return;
     }
     BotState& state = bots_[bot_index];
@@ -547,6 +552,37 @@ class LlmBrainWorldScript : public WorldScript {
     }
   }
 
+  void OnAct(size_t bot_index,
+             const std::string& name,
+             Player* bot,
+             uint32_t command_id,
+             const wlb::snapshot::Command::Act& act) {
+    BotState& state = bots_[bot_index];
+    state.active_act.reset();
+    ActiveAct pending;
+    ActStartResult res =
+        StartAct(bot, command_id, act, base::TimeTicks::Now(), &pending);
+    LOG_INFO("module", "mod-llm-brain: {} act {} ({}): {}", name,
+             wlb::snapshot::EnumName(act.verb), act.name,
+             res.error.empty() ? (res.done ? "done" : "running") : res.error);
+    if (!res.error.empty()) {
+      schedule_->SetActiveTargetPending(bot_index,
+                                        state.active_option.has_value());
+      wlb::snapshot::Event payload;
+      wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
+      failed.text = std::move(res.error);
+      failed.command_id = command_id;
+      EmitAlertingEvent(bot_index, name, bot, std::move(payload));
+    } else if (res.done) {
+      state.done_command_id = command_id;
+      schedule_->SetActiveTargetPending(bot_index,
+                                        state.active_option.has_value());
+    } else {
+      state.active_act = std::move(pending);
+      schedule_->SetActiveTargetPending(bot_index, true);
+    }
+  }
+
   void OnSay(size_t bot_index,
              const std::string& name,
              Player* bot,
@@ -600,6 +636,23 @@ class LlmBrainWorldScript : public WorldScript {
                         const std::string& name,
                         base::TimeTicks now) {
     BotState& state = bots_[index];
+    if (state.active_act) {
+      ActStepResult res = StepActiveAct(bot, now, &*state.active_act);
+      if (!res.error.empty()) {
+        const uint32_t cmd_id = state.active_act->command_id;
+        state.active_act.reset();
+        schedule_->SetActiveTargetPending(index,
+                                          state.active_option.has_value());
+        wlb::snapshot::Event payload;
+        wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
+        failed.text = std::move(res.error);
+        failed.command_id = cmd_id;
+        EmitAlertingEvent(index, name, bot, std::move(payload));
+      } else if (res.done) {
+        state.done_command_id = state.active_act->command_id;
+        state.active_act.reset();
+      }
+    }
     if (!state.active_option || state.object_used) {
       return;
     }
@@ -716,7 +769,7 @@ class LlmBrainWorldScript : public WorldScript {
         .alive = bot->IsAlive(),
         .control_mask = ControlMask(bot),
         .attacker_count = static_cast<uint32_t>(bot->getAttackers().size()),
-        .active_target_pending = pending,
+        .active_target_pending = pending || state->active_act.has_value(),
     };
   }
 
@@ -810,6 +863,8 @@ class LlmBrainWorldScript : public WorldScript {
     base::TimeTicks next_rest_try;
     // Explore / GoTo: active stepped mmap walk state.
     PendingWalk walk;
+    // Active standing-order act (to / away / cast-time use).
+    std::optional<ActiveAct> active_act;
   };
   std::vector<BotState> bots_;
   // A wrong-version command was logged on this connection.

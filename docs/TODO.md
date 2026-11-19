@@ -34,12 +34,16 @@ design decisions below.
        coverage (`covered`), and safe `false` for missing snapshot states until (e).
      - **`order:` lines stay off in live prompts** (no names passed to the grammar, `bot_loop.cc`
        wiring and `RULES.md` verbs deferred) until (b) can carry acts out.
-   - **(b) Not started:** a wire command for an act (`Command`, `kWireVersion`) and the module's
-     executor for the first verbs (`to`, `away`, `target`, `use`, `stop`, `wake`), done through
-     `done_command_id`; relative places (`behind`, `in front of`, `max range of`, `N yd from`)
-     with ground, line-of-sight and path checks, recomputed while the step runs. When it
-     passes order names to `PlanGrammar`, pass the same to `ParsePlan` (bot_loop.cc,
-     decide.cc), so names holding " on " are read right.
+   - **(b) Done (2026-11-18):** wire command `Command::Act` (`snapshot/snapshot.h`,
+     `snapshot_wire.cc`), `OrderActToCommand` + `BotLoop` wiring (`bot_loop.{h,cc}`: installs
+     plan orders, dispatches `Command::Act`, suppresses default wakes when covered, wakes on
+     `wake`/timeout/failure), pure relative-place geometry (`act_geometry.{h,cc}` +
+     `act_geometry_unittest.cc`), and module world-thread executor (`act_executor.{h,cc}`,
+     wired into `llm_brain_world_script.cc`) for `to`, `away`, `target`, `use`, `stop`, `wake`
+     and relative places (`behind`, `in front of`, `max range of`, `N yd from`) with ground,
+     LoS and `PathGenerator` checks recomputed while running, completing via `done_command_id`.
+     **Still off in live prompts** until (f) turns on `order_names` in `PlanGrammar`/`ParsePlan`
+     and adds the verb section to `RULES.md`.
    - **(c) Not started:** an immediate snapshot when a cast starts or an aura appears on the
      bot, its target or focus, or an attacker (`SnapshotSchedule::Flags`; ~50 ms minimum gap).
    - **(d) Not started:** the other verbs: `kite` (first check pausing playerbots' combat

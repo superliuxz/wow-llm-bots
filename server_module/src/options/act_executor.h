@@ -1,0 +1,66 @@
+// Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
+//
+// Executes standing-order acts (`Command::Act`) on the world thread for the
+// first verbs (`to`, `away`, `target`, `use`, `stop`, `wake`), resolving
+// targets and relative places against live world state with ground, LoS, and
+// path checks, and recomputing relative spots while a movement step runs.
+
+#ifndef MOD_LLM_BRAIN_OPTIONS_ACT_EXECUTOR_H_
+#define MOD_LLM_BRAIN_OPTIONS_ACT_EXECUTOR_H_
+
+#include <cstdint>
+#include <string>
+
+#include "base/time/time.h"
+#include "options/act_geometry.h"
+#include "snapshot/snapshot.h"
+
+class Player;
+
+namespace llm_brain {
+
+struct ActiveAct {
+  uint32_t command_id = 0;
+  wlb::snapshot::Command_Act act;
+  // For `to` / `away`: current destination, last anchor geometry, and last
+  // path recompute timestamp.
+  wlb::snapshot::Vec3 dest;
+  AnchorGeometry last_anchor;
+  base::TimeTicks last_repath_at;
+  // For `use` with a cast time: waiting for the cast to finish.
+  bool waiting_cast = false;
+  uint32_t cast_spell_id = 0;
+};
+
+struct ActStartResult {
+  // True when the act finished immediately (no multi-tick tracking needed).
+  bool done = false;
+  // Non-empty when the act could not be started (reported as an ErrorEvent).
+  std::string error;
+};
+
+struct ActStepResult {
+  // True when the active act completed on this tick.
+  bool done = false;
+  // Non-empty when the active act failed/was interrupted (reported as an
+  // ErrorEvent).
+  std::string error;
+};
+
+// Starts carrying out `act` for `bot`. World thread only.
+// When `done` is false and `error` is empty, populates `*out_active`.
+ActStartResult StartAct(Player* bot,
+                        uint32_t command_id,
+                        const wlb::snapshot::Command_Act& act,
+                        base::TimeTicks now,
+                        ActiveAct* out_active);
+
+// Advances an active multi-tick act (`to`, `away`, cast-time `use`). World
+// thread only.
+ActStepResult StepActiveAct(Player* bot,
+                            base::TimeTicks now,
+                            ActiveAct* active);
+
+}  // namespace llm_brain
+
+#endif  // MOD_LLM_BRAIN_OPTIONS_ACT_EXECUTOR_H_

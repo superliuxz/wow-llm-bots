@@ -52,6 +52,14 @@ struct OrderEvalResult {
   std::string wake_reason;
 };
 
+// Converts a grammar `Act` into a wire `Command::Act` for the verbs supported
+// on the wire (`to`, `away`, `target`, `use`, `stop`, `wake`). Returns nullopt
+// for verbs not yet implemented on the wire (docs/TODO.md #5d).
+std::optional<wlb::snapshot::Command::Act> OrderActToCommand(
+    const Act& act,
+    std::string_view it_guid,
+    std::string_view it_name);
+
 class OrderEvaluator {
  public:
   explicit OrderEvaluator(

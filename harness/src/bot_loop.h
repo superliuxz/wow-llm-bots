@@ -27,6 +27,7 @@
 #include "base/time/time.h"
 #include "decision_log.h"
 #include "llm_client.h"
+#include "order_evaluator.h"
 #include "plan_runner.h"
 #include "scheduler.h"
 #include "screen_renderer.h"
@@ -129,6 +130,7 @@ class BotLoop {
     // plan's watches are latched from them (a crossing during the call fires).
     TriggerEvaluator::WatchInputs ask_watch_inputs;
     PlanRunner runner;
+    OrderEvaluator orders;
 
     bool has_ever_woken = false;
     bool has_queued_wake = false;
@@ -218,6 +220,10 @@ class BotLoop {
   void DispatchRunnerAction(const std::string& bot,
                             BotState* state,
                             const RunnerAction& action);
+  void DispatchOrderEval(const std::string& bot,
+                         BotState* state,
+                         const OrderEvalResult& eval);
+  uint32_t SendAct(const std::string& bot, wlb::snapshot::Command::Act act);
   uint32_t SendChoose(const std::string& bot,
                       const wlb::snapshot::Command::Choose& choose);
   // `to`: the player whispered (channel WHISPER only).

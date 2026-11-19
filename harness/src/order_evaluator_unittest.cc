@@ -547,5 +547,74 @@ TEST(OrderEvaluatorTest, MountedSwimmingInSightAndAllyWith) {
   EXPECT_EQ(r.order_index, 0);
 }
 
+TEST(OrderEvaluatorTest, OrderActToCommandAndWireRoundTrip) {
+  auto to_wire = [](std::string_view order_text, std::string_view it_guid = "",
+                    std::string_view it_name = "") {
+    Order o = MustParse(order_text);
+    return OrderActToCommand(o.steps.front(), it_guid, it_name);
+  };
+
+  // `to behind boss`
+  auto cmd_act = to_wire("always -> to behind boss");
+  ASSERT_TRUE(cmd_act.has_value());
+  EXPECT_EQ(cmd_act->verb, pb::Command::Act::TO);
+  EXPECT_EQ(cmd_act->place, pb::Command::Act::BEHIND);
+  EXPECT_EQ(cmd_act->thing, pb::Command::Act::BOSS);
+
+  // `to 8 yd from tank`
+  cmd_act = to_wire("always -> to 8 yd from tank");
+  ASSERT_TRUE(cmd_act.has_value());
+  EXPECT_EQ(cmd_act->verb, pb::Command::Act::TO);
+  EXPECT_EQ(cmd_act->place, pb::Command::Act::YD_FROM);
+  EXPECT_EQ(cmd_act->thing, pb::Command::Act::TANK);
+  EXPECT_FLOAT_EQ(cmd_act->yd, 8.0f);
+
+  // `away nearest ally 10`
+  cmd_act = to_wire("always -> away nearest ally 10");
+  ASSERT_TRUE(cmd_act.has_value());
+  EXPECT_EQ(cmd_act->verb, pb::Command::Act::AWAY);
+  EXPECT_EQ(cmd_act->thing, pb::Command::Act::NEAREST_ALLY);
+  EXPECT_FLOAT_EQ(cmd_act->yd, 10.0f);
+
+  // `target it` carries `it_guid` and `it_name` across BEVE round-trip.
+  cmd_act = to_wire("always -> target it", "Npc-99", "Val'kyr");
+  ASSERT_TRUE(cmd_act.has_value());
+  EXPECT_EQ(cmd_act->verb, pb::Command::Act::TARGET);
+  EXPECT_EQ(cmd_act->thing, pb::Command::Act::IT);
+  EXPECT_EQ(cmd_act->it_guid, "Npc-99");
+  EXPECT_EQ(cmd_act->it_name, "Val'kyr");
+
+  pb::Command wire_cmd;
+  wire_cmd.version = pb::kWireVersion;
+  wire_cmd.bot = "Aelindra";
+  wire_cmd.command_id = 42;
+  wire_cmd.act = *cmd_act;
+  const std::string bytes = pb::WriteBeve(wire_cmd);
+  pb::Command decoded;
+  ASSERT_TRUE(pb::ReadBeve(bytes, &decoded));
+  EXPECT_EQ(decoded, wire_cmd);
+
+  // `use Cleanse on tank`
+  cmd_act = to_wire("always -> use Cleanse on tank");
+  ASSERT_TRUE(cmd_act.has_value());
+  EXPECT_EQ(cmd_act->verb, pb::Command::Act::USE);
+  EXPECT_EQ(cmd_act->name, "Cleanse");
+  EXPECT_EQ(cmd_act->thing, pb::Command::Act::TANK);
+
+  // `stop casting` & `wake`
+  cmd_act = to_wire("always -> stop casting");
+  ASSERT_TRUE(cmd_act.has_value());
+  EXPECT_EQ(cmd_act->verb, pb::Command::Act::STOP);
+  EXPECT_EQ(cmd_act->stop, pb::Command::Act::CASTING);
+
+  cmd_act = to_wire("always -> wake");
+  ASSERT_TRUE(cmd_act.has_value());
+  EXPECT_EQ(cmd_act->verb, pb::Command::Act::WAKE);
+
+  // Deferred #5d verbs return nullopt.
+  EXPECT_FALSE(to_wire("always -> kite boss").has_value());
+  EXPECT_FALSE(to_wire("always -> mark boss skull").has_value());
+}
+
 }  // namespace
 }  // namespace harness

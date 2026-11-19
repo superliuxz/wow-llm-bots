@@ -1405,4 +1405,160 @@ OrderEvalResult OrderEvaluator::CheckTimeout(base::TimeTicks now) {
   return res;
 }
 
+std::optional<pb::Command::Act> OrderActToCommand(const Act& act,
+                                                  std::string_view it_guid,
+                                                  std::string_view it_name) {
+  auto fill_thing = [](const Thing& thing, pb::Command::Act* out,
+                       bool target_slot) {
+    std::string& dst_name = target_slot ? out->target_name : out->name;
+    std::visit(
+        [&](const auto& t) {
+          using T = std::decay_t<decltype(t)>;
+          if constexpr (std::is_same_v<T, grammar::ThingWho>) {
+            switch (t.who) {
+              case grammar::Who::kMe:
+                out->thing = pb::Command::Act::ME;
+                break;
+              case grammar::Who::kTank:
+                out->thing = pb::Command::Act::TANK;
+                break;
+              case grammar::Who::kOfftank:
+                out->thing = pb::Command::Act::OFFTANK;
+                break;
+              case grammar::Who::kHealer:
+                out->thing = pb::Command::Act::HEALER;
+                break;
+              case grammar::Who::kLeader:
+                out->thing = pb::Command::Act::LEADER;
+                break;
+              case grammar::Who::kAnyone:
+                out->thing = pb::Command::Act::ANYONE;
+                break;
+              case grammar::Who::kBoss:
+                out->thing = pb::Command::Act::BOSS;
+                break;
+              case grammar::Who::kIt:
+                out->thing = pb::Command::Act::IT;
+                break;
+            }
+          } else if constexpr (std::is_same_v<T, grammar::ThingMyTarget>) {
+            out->thing = pb::Command::Act::MY_TARGET;
+          } else if constexpr (std::is_same_v<T, grammar::ThingFocus>) {
+            out->thing = pb::Command::Act::FOCUS;
+          } else if constexpr (std::is_same_v<T, grammar::ThingMarker>) {
+            out->thing = pb::Command::Act::MARKER;
+            out->marker = ToRaidMarker(t.icon);
+          } else if constexpr (std::is_same_v<T, grammar::ThingNearest>) {
+            std::visit(
+                [&](const auto& k) {
+                  using K = std::decay_t<decltype(k)>;
+                  if constexpr (std::is_same_v<K, grammar::NearestKindAlly>) {
+                    out->thing = pb::Command::Act::NEAREST_ALLY;
+                  } else if constexpr (std::is_same_v<
+                                           K, grammar::NearestKindPlayer>) {
+                    out->thing = pb::Command::Act::NEAREST_PLAYER;
+                  } else if constexpr (std::is_same_v<
+                                           K, grammar::NearestKindEnemy>) {
+                    out->thing = pb::Command::Act::NEAREST_ENEMY;
+                  } else if constexpr (std::is_same_v<
+                                           K, grammar::NearestKindNamed>) {
+                    out->thing = pb::Command::Act::NEAREST_NAMED;
+                    dst_name = k.name;
+                  }
+                },
+                t.kind.value);
+          } else if constexpr (std::is_same_v<T, grammar::ThingAllyWith>) {
+            out->thing = pb::Command::Act::ALLY_WITH;
+            dst_name = t.mech;
+          } else if constexpr (std::is_same_v<T, grammar::ThingGroup>) {
+            out->thing = pb::Command::Act::GROUP;
+          } else if constexpr (std::is_same_v<T, grammar::ThingAllies>) {
+            out->thing = pb::Command::Act::ALLIES;
+          } else if constexpr (std::is_same_v<T, grammar::ThingNamed>) {
+            out->thing = pb::Command::Act::NAMED;
+            dst_name = t.name;
+          }
+        },
+        thing.value);
+  };
+
+  pb::Command::Act out;
+  out.it_guid = std::string(it_guid);
+  out.it_name = std::string(it_name);
+
+  bool supported = true;
+  std::visit(
+      [&](const auto& a) {
+        using A = std::decay_t<decltype(a)>;
+        if constexpr (std::is_same_v<A, grammar::ActTo>) {
+          out.verb = pb::Command::Act::TO;
+          std::visit(
+              [&](const auto& p) {
+                using P = std::decay_t<decltype(p)>;
+                if constexpr (std::is_same_v<P, grammar::PlaceBehind>) {
+                  out.place = pb::Command::Act::BEHIND;
+                  fill_thing(p.t, &out, /*target_slot=*/false);
+                } else if constexpr (std::is_same_v<P, grammar::PlaceInFront>) {
+                  out.place = pb::Command::Act::IN_FRONT;
+                  fill_thing(p.t, &out, /*target_slot=*/false);
+                } else if constexpr (std::is_same_v<P,
+                                                    grammar::PlaceMaxRange>) {
+                  out.place = pb::Command::Act::MAX_RANGE;
+                  fill_thing(p.t, &out, /*target_slot=*/false);
+                } else if constexpr (std::is_same_v<P, grammar::PlaceYdFrom>) {
+                  out.place = pb::Command::Act::YD_FROM;
+                  out.yd = static_cast<float>(p.yd);
+                  fill_thing(p.t, &out, /*target_slot=*/false);
+                } else if constexpr (std::is_same_v<P, grammar::PlaceAt>) {
+                  out.place = pb::Command::Act::AT;
+                  fill_thing(p.t, &out, /*target_slot=*/false);
+                }
+              },
+              a.place.value);
+        } else if constexpr (std::is_same_v<A, grammar::ActAway>) {
+          out.verb = pb::Command::Act::AWAY;
+          if (a.t) {
+            fill_thing(*a.t, &out, /*target_slot=*/false);
+          }
+          if (a.yd) {
+            out.yd = static_cast<float>(*a.yd);
+          }
+        } else if constexpr (std::is_same_v<A, grammar::ActTarget>) {
+          out.verb = pb::Command::Act::TARGET;
+          fill_thing(a.t, &out, /*target_slot=*/false);
+        } else if constexpr (std::is_same_v<A, grammar::ActUse>) {
+          out.verb = pb::Command::Act::USE;
+          out.name = a.name;
+          if (a.t) {
+            fill_thing(*a.t, &out, /*target_slot=*/true);
+          }
+        } else if constexpr (std::is_same_v<A, grammar::ActStop>) {
+          out.verb = pb::Command::Act::STOP;
+          if (a.what) {
+            switch (*a.what) {
+              case grammar::Stop::kCasting:
+                out.stop = pb::Command::Act::CASTING;
+                break;
+              case grammar::Stop::kAttacking:
+                out.stop = pb::Command::Act::ATTACKING;
+                break;
+              case grammar::Stop::kMoving:
+                out.stop = pb::Command::Act::MOVING;
+                break;
+            }
+          }
+        } else if constexpr (std::is_same_v<A, grammar::ActWake>) {
+          out.verb = pb::Command::Act::WAKE;
+        } else {
+          supported = false;
+        }
+      },
+      act.value);
+
+  if (!supported) {
+    return std::nullopt;
+  }
+  return out;
+}
+
 }  // namespace harness

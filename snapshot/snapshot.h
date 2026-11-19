@@ -918,6 +918,74 @@ struct Command_Who {
   bool operator==(const Command_Who&) const = default;
 };
 
+struct Command_Act {
+  enum class Verb : uint8_t {
+    VERB_UNSPECIFIED = 0,
+    TO = 1,
+    AWAY = 2,
+    TARGET = 3,
+    USE = 4,
+    STOP = 5,
+    WAKE = 6,
+  };
+  using enum Verb;
+
+  enum class PlaceKind : uint8_t {
+    PLACE_UNSPECIFIED = 0,
+    AT = 1,
+    BEHIND = 2,
+    IN_FRONT = 3,
+    MAX_RANGE = 4,
+    YD_FROM = 5,
+  };
+  using enum PlaceKind;
+
+  enum class ThingKind : uint8_t {
+    THING_UNSPECIFIED = 0,
+    ME = 1,
+    TANK = 2,
+    OFFTANK = 3,
+    HEALER = 4,
+    LEADER = 5,
+    ANYONE = 6,
+    BOSS = 7,
+    IT = 8,
+    MY_TARGET = 9,
+    FOCUS = 10,
+    MARKER = 11,
+    NEAREST_ALLY = 12,
+    NEAREST_PLAYER = 13,
+    NEAREST_ENEMY = 14,
+    NEAREST_NAMED = 15,
+    ALLY_WITH = 16,
+    GROUP = 17,
+    ALLIES = 18,
+    NAMED = 19,
+  };
+  using enum ThingKind;
+
+  enum class StopKind : uint8_t {
+    STOP_UNSPECIFIED = 0,
+    CASTING = 1,
+    ATTACKING = 2,
+    MOVING = 3,
+  };
+  using enum StopKind;
+
+  Command_Act::Verb verb = Command_Act::Verb::VERB_UNSPECIFIED;
+  Command_Act::ThingKind thing = Command_Act::ThingKind::THING_UNSPECIFIED;
+  Command_Act::PlaceKind place = Command_Act::PlaceKind::PLACE_UNSPECIFIED;
+  Command_Act::StopKind stop = Command_Act::StopKind::STOP_UNSPECIFIED;
+  RaidMarker marker = RaidMarker::RAID_MARKER_UNSPECIFIED;
+  std::string name;
+  std::string target_name;
+  float yd = 0.0f;
+  std::string it_guid;
+  std::string it_name;
+
+  bool operator==(const Command_Act&) const = default;
+};
+
 struct Relative {
   enum class Height : uint8_t {
     HEIGHT_UNSPECIFIED = 0,
@@ -1801,6 +1869,7 @@ struct Command {
   using Hover = Command_Hover;
   using AhSearch = Command_AhSearch;
   using Who = Command_Who;
+  using Act = Command_Act;
 
   // kWireVersion of the sender (set by the harness when it sends).
   uint32_t version = 0;
@@ -1815,6 +1884,7 @@ struct Command {
   std::optional<Command_Hover> hover;
   std::optional<Command_AhSearch> ah_search;
   std::optional<Command_Who> who;
+  std::optional<Command_Act> act;
 
   bool operator==(const Command&) const = default;
 };
@@ -2764,6 +2834,10 @@ std::string_view EnumName(Calendar_Entry::Status value);
 std::string_view EnumName(DisplacedEvent::How value);
 std::string_view EnumName(Blank::Kind value);
 std::string_view EnumName(Option::Kind value);
+std::string_view EnumName(Command_Act::Verb value);
+std::string_view EnumName(Command_Act::PlaceKind value);
+std::string_view EnumName(Command_Act::ThingKind value);
+std::string_view EnumName(Command_Act::StopKind value);
 std::string_view EnumName(Relative::Height value);
 std::string_view EnumName(Spell::School value);
 std::string_view EnumName(Item::Quality value);

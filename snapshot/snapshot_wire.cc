@@ -19,6 +19,56 @@
 // Enum names: the wire format of every enum in snapshot.h.
 
 template <>
+struct glz::meta<wlb::snapshot::Command_Act::Verb> {
+  using enum wlb::snapshot::Command_Act::Verb;
+  static constexpr auto value =
+      glz::enumerate(VERB_UNSPECIFIED, TO, AWAY, TARGET, USE, STOP, WAKE);
+};
+
+template <>
+struct glz::meta<wlb::snapshot::Command_Act::PlaceKind> {
+  using enum wlb::snapshot::Command_Act::PlaceKind;
+  static constexpr auto value = glz::enumerate(PLACE_UNSPECIFIED,
+                                               AT,
+                                               BEHIND,
+                                               IN_FRONT,
+                                               MAX_RANGE,
+                                               YD_FROM);
+};
+
+template <>
+struct glz::meta<wlb::snapshot::Command_Act::ThingKind> {
+  using enum wlb::snapshot::Command_Act::ThingKind;
+  static constexpr auto value = glz::enumerate(THING_UNSPECIFIED,
+                                               ME,
+                                               TANK,
+                                               OFFTANK,
+                                               HEALER,
+                                               LEADER,
+                                               ANYONE,
+                                               BOSS,
+                                               IT,
+                                               MY_TARGET,
+                                               FOCUS,
+                                               MARKER,
+                                               NEAREST_ALLY,
+                                               NEAREST_PLAYER,
+                                               NEAREST_ENEMY,
+                                               NEAREST_NAMED,
+                                               ALLY_WITH,
+                                               GROUP,
+                                               ALLIES,
+                                               NAMED);
+};
+
+template <>
+struct glz::meta<wlb::snapshot::Command_Act::StopKind> {
+  using enum wlb::snapshot::Command_Act::StopKind;
+  static constexpr auto value =
+      glz::enumerate(STOP_UNSPECIFIED, CASTING, ATTACKING, MOVING);
+};
+
+template <>
 struct glz::meta<wlb::snapshot::Direction> {
   using enum wlb::snapshot::Direction;
   static constexpr auto value =
@@ -1190,6 +1240,22 @@ std::string_view EnumName(DisplacedEvent::How value) {
 }
 
 std::string_view EnumName(Blank::Kind value) {
+  return glz::get_enum_name(value);
+}
+
+std::string_view EnumName(Command_Act::Verb value) {
+  return glz::get_enum_name(value);
+}
+
+std::string_view EnumName(Command_Act::PlaceKind value) {
+  return glz::get_enum_name(value);
+}
+
+std::string_view EnumName(Command_Act::ThingKind value) {
+  return glz::get_enum_name(value);
+}
+
+std::string_view EnumName(Command_Act::StopKind value) {
   return glz::get_enum_name(value);
 }
 
