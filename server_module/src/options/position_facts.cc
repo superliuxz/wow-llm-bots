@@ -87,6 +87,22 @@ TalkOutcome FormatTalkOutcome(std::string_view npc_name,
                             base::JoinString(done, "; ")})};
 }
 
+bool HasCorpseTakeableLoot(bool is_dead,
+                           bool has_lootable_flag,
+                           bool allowed_to_loot,
+                           uint32_t gold,
+                           size_t takeable_slot_count) {
+  return is_dead && has_lootable_flag && allowed_to_loot &&
+         (gold > 0 || takeable_slot_count > 0);
+}
+
+bool ShouldApproachOutOfLosTarget(bool is_alive,
+                                  bool is_friendly,
+                                  bool is_valid_attack_target,
+                                  bool in_los) {
+  return is_alive && !is_friendly && is_valid_attack_target && !in_los;
+}
+
 void RefreshFrom(const pb::Vec3& pos, PositionFacts* facts) {
   const auto out_of_range = [](float dist) {
     return dist < kMinTravelDistYd || dist > kMaxTravelDistYd;

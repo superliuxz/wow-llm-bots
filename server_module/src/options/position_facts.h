@@ -3,6 +3,8 @@
 #ifndef MOD_LLM_BRAIN_OPTIONS_POSITION_FACTS_H_
 #define MOD_LLM_BRAIN_OPTIONS_POSITION_FACTS_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <span>
 #include <string>
 #include <string_view>
@@ -58,6 +60,22 @@ struct TalkOutcome {
 TalkOutcome FormatTalkOutcome(std::string_view npc_name,
                               const std::vector<std::string>& done,
                               std::string_view trainer_refusal);
+
+// Pure predicate for HasTakeableLoot: true only when the corpse is dead,
+// flagged lootable, allowed for the bot, and actually has gold or at least one
+// slot the bot may take now (not solely items locked in a group roll).
+bool HasCorpseTakeableLoot(bool is_dead,
+                           bool has_lootable_flag,
+                           bool allowed_to_loot,
+                           uint32_t gold,
+                           size_t takeable_slot_count);
+
+// Pure predicate for out-of-LOS kAttack fallback: walk toward valid living
+// non-friendly targets when Playerbots' AttackAction refuses solely due to LOS.
+bool ShouldApproachOutOfLosTarget(bool is_alive,
+                                  bool is_friendly,
+                                  bool is_valid_attack_target,
+                                  bool in_los);
 
 // The Explore spots and Go to places seen from one position. Distances and
 // directions are filled for the position they were computed at; RefreshFrom

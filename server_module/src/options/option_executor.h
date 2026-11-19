@@ -111,6 +111,11 @@ void ContinueRest(Player* bot);
 // HP or mana, and either holding a food/drink aura or sitting.
 bool IsRestInProgress(Player* bot, bool* had_food_drink_aura);
 
+// Whether `creature` is dead, lootable by `bot`, and has gold or at least one
+// loot slot `bot` may take right now (not solely items locked in a group roll
+// or reserved for another party member).
+bool HasTakeableLoot(Player* bot, Creature* creature);
+
 // Whether the bot is close enough to loot `creature` now.
 bool IsInLootRange(Player* bot, Creature* creature);
 

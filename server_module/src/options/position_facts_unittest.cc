@@ -221,5 +221,29 @@ TEST(PositionFactsTest, EmptyTrainerInteractionReturnsRefusalNotInfo) {
   EXPECT_EQ(mixed.info, "talked to Isabella: turned in A New Plague");
 }
 
+TEST(PositionFactsTest, CorpseTakeableLootSkipsEmptyGroupRollCorpses) {
+  // Dead + lootable + allowed, but 0 gold and 0 takeable slots (e.g. item
+  // locked in a group roll) -> NOT lootable.
+  EXPECT_FALSE(HasCorpseTakeableLoot(true, true, true, /*gold=*/0,
+                                     /*takeable_slot_count=*/0));
+  EXPECT_TRUE(HasCorpseTakeableLoot(true, true, true, /*gold=*/15,
+                                    /*takeable_slot_count=*/0));
+  EXPECT_TRUE(HasCorpseTakeableLoot(true, true, true, /*gold=*/0,
+                                    /*takeable_slot_count=*/1));
+  EXPECT_FALSE(HasCorpseTakeableLoot(false, true, true, 15, 1));
+  EXPECT_FALSE(HasCorpseTakeableLoot(true, false, true, 15, 1));
+  EXPECT_FALSE(HasCorpseTakeableLoot(true, true, false, 15, 1));
+}
+
+TEST(PositionFactsTest, ApproachOutOfLosTargetOnlyWhenValidAndHidden) {
+  EXPECT_TRUE(
+      ShouldApproachOutOfLosTarget(true, false, true, /*in_los=*/false));
+  EXPECT_FALSE(
+      ShouldApproachOutOfLosTarget(true, false, true, /*in_los=*/true));
+  EXPECT_FALSE(ShouldApproachOutOfLosTarget(false, false, true, false));
+  EXPECT_FALSE(ShouldApproachOutOfLosTarget(true, true, true, false));
+  EXPECT_FALSE(ShouldApproachOutOfLosTarget(true, false, false, false));
+}
+
 }  // namespace
 }  // namespace llm_brain

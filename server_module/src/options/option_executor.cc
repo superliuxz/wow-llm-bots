@@ -824,6 +824,16 @@ std::vector<uint8_t> TakeableLootSlots(Player* bot, Creature* creature) {
 
 }  // namespace
 
+bool HasTakeableLoot(Player* bot, Creature* creature) {
+  if (!bot || !creature || !creature->IsInWorld()) {
+    return false;
+  }
+  return HasCorpseTakeableLoot(
+      creature->isDead(), creature->HasDynamicFlag(UNIT_DYNFLAG_LOOTABLE),
+      bot->isAllowedToLoot(creature), creature->loot.gold,
+      TakeableLootSlots(bot, creature).size());
+}
+
 std::string LootCorpseNow(Player* bot, Creature* creature) {
   PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
   if (!ai) {
@@ -1101,6 +1111,17 @@ ExecuteResult ExecuteOption(Player* bot,
           // it woke the brain, which chose the same again, in a loop
           // (6 wakes in ~1 s, 2026-11-17).
           if (old_target == unit || bot->GetVictim() == unit) {
+            ai->ResetActionDuration();
+            return {};
+          }
+          // Playerbots' AttackAction refuses targets that are currently out of
+          // line of sight (e.g. around a dungeon corridor bend or behind a
+          // hill). Walk toward valid targets instead of failing in a loop.
+          if (ShouldApproachOutOfLosTarget(unit->IsAlive(),
+                                           bot->IsFriendlyTo(unit),
+                                           bot->IsValidAttackTarget(unit),
+                                           bot->IsWithinLOSInMap(unit)) &&
+              WalkNextTo(bot, unit)) {
             ai->ResetActionDuration();
             return {};
           }

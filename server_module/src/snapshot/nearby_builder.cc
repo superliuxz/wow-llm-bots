@@ -37,6 +37,7 @@
 #include "UpdateFields.h"
 #include "World.h"
 #include "base/time/time.h"
+#include "options/option_executor.h"
 #include "snapshot/perception.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/world_util.h"
@@ -345,7 +346,7 @@ void FillModel(Unit* unit, Player* bot, pb::Unit* out) {
   FillVisualState(unit, out);
   if (Creature* creature = unit->ToCreature()) {
     FillPack(creature, out);
-    out->lootable = !unit->IsAlive() && bot->isAllowedToLoot(creature);
+    out->lootable = HasTakeableLoot(bot, creature);
   }
 }
 
