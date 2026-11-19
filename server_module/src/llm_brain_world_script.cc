@@ -45,6 +45,7 @@
 #if defined(LLM_BRAIN_TEST_HOOKS)
 #include "test/facts_dump.h"
 #include "test/fixture_loader.h"
+#include "test/test_commands.h"
 #endif
 
 namespace llm_brain {
@@ -900,4 +901,7 @@ void AddLlmBrainScripts() {
   auto* inbox = new llm_brain::ChatInbox();
   new llm_brain::LlmBrainWorldScript(inbox);
   llm_brain::AddLlmBrainChatScripts(inbox);
+#if defined(LLM_BRAIN_TEST_HOOKS)
+  llm_brain::AddLlmBrainTestCommandScripts();
+#endif
 }

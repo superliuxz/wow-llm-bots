@@ -337,6 +337,7 @@ void FillModel(Unit* unit, Player* bot, pb::Unit* out) {
   out->looks_like = LooksLike(unit);
   out->size = SizeFromBoundingRadius(unit->GetBoundaryRadius());
   out->dead = !unit->IsAlive();
+  out->raid_marker = RaidMarkerOf(bot, unit->GetGUID().GetRawValue());
   FillActivity(unit, bot, &out->activity);
   FillVisualState(unit, out);
   if (Creature* creature = unit->ToCreature()) {

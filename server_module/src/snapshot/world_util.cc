@@ -11,6 +11,7 @@
 #include "Bag.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
+#include "Group.h"
 #include "Item.h"
 #include "ItemTemplate.h"
 #include "Player.h"
@@ -35,6 +36,25 @@ std::string AreaName(uint32_t area_id) {
 
 std::string GuidString(uint64_t raw_guid) {
   return Acore::StringFormat("0x{:016X}", raw_guid);
+}
+
+wlb::snapshot::RaidMarker RaidMarkerOf(const Player* bot, uint64_t raw_guid) {
+  const Group* grp = bot ? bot->GetGroup() : nullptr;
+  if (!grp || raw_guid == 0) {
+    return wlb::snapshot::RaidMarker::RAID_MARKER_UNSPECIFIED;
+  }
+  static constexpr wlb::snapshot::RaidMarker kIcons[TARGETICONCOUNT] = {
+      wlb::snapshot::RaidMarker::STAR,    wlb::snapshot::RaidMarker::CIRCLE,
+      wlb::snapshot::RaidMarker::DIAMOND, wlb::snapshot::RaidMarker::TRIANGLE,
+      wlb::snapshot::RaidMarker::MOON,    wlb::snapshot::RaidMarker::SQUARE,
+      wlb::snapshot::RaidMarker::CROSS,   wlb::snapshot::RaidMarker::SKULL,
+  };
+  for (uint8_t i = 0; i < TARGETICONCOUNT; ++i) {
+    if (grp->GetTargetIcon(i).GetRawValue() == raw_guid) {
+      return kIcons[i];
+    }
+  }
+  return wlb::snapshot::RaidMarker::RAID_MARKER_UNSPECIFIED;
 }
 
 bool IsGeneralBag(const Bag* bag) {

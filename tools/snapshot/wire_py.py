@@ -21,6 +21,10 @@ def _load():
         ctypes.c_char_p, ctypes.c_size_t, ctypes.c_int, ctypes.POINTER(ctypes.c_size_t)
     ]
     lib.wlb_module_message_beve_to_json.restype = ctypes.c_void_p
+    lib.wlb_command_beve_to_json.argtypes = [
+        ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t)
+    ]
+    lib.wlb_command_beve_to_json.restype = ctypes.c_void_p
     lib.wlb_command_json_to_beve.argtypes = [
         ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t)
     ]
@@ -53,6 +57,20 @@ def module_message_to_json(payload: bytes, pretty: bool = False):
 def decode_module_message(payload: bytes):
     text = module_message_to_json(payload, pretty=False)
     return json.loads(text) if text is not None else None
+
+
+def decode_command(payload: bytes):
+    lib = _load()
+    if lib is None:
+        return None
+    out_len = ctypes.c_size_t(0)
+    ptr = lib.wlb_command_beve_to_json(payload, len(payload), ctypes.byref(out_len))
+    if not ptr:
+        return None
+    try:
+        return json.loads(ctypes.string_at(ptr, out_len.value).decode("utf-8"))
+    finally:
+        lib.wlb_wire_free(ptr)
 
 
 def encode_command(command_dict: dict) -> bytes:

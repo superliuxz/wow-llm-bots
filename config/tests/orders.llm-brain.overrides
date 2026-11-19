@@ -1,0 +1,8 @@
+# Standing-orders test: two level-80 Troll Priests (Loada and Telda) in the Valley of Trials next
+# to Mottled Boar spawns, reset from priest-l80-boars.pdump on every server start, with autonomous
+# grinding/wandering off so every movement, cast, target, raid marker and kite comes from standing
+# orders evaluated by `out/common/harness run` and carried out by `act_executor.cc`.
+LlmBrain.Bots = "Loada,Telda"
+LlmBrain.TestFixtures = "Loada=priest-l80-boars.pdump,Telda=priest-l80-boars.pdump"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.NonCombatStrategies = "-follow,-grind,-new rpg"

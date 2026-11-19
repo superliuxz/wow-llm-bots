@@ -50,6 +50,22 @@ char* wlb_module_message_beve_to_json(const char* bytes,
   return DupBytes(json, out_len);
 }
 
+// Decodes a BEVE Command frame into compact JSON. Returns malloc'd buffer
+// (free with wlb_wire_free), or nullptr if `bytes` is not a valid Command.
+char* wlb_command_beve_to_json(const char* bytes, size_t len, size_t* out_len) {
+  wlb::snapshot::Command cmd;
+  if (!wlb::snapshot::ReadBeve(std::string_view(bytes, len), &cmd)) {
+    *out_len = 0;
+    return nullptr;
+  }
+  const std::string json = wlb::snapshot::WriteJson(cmd, /*pretty=*/false);
+  if (json.empty()) {
+    *out_len = 0;
+    return nullptr;
+  }
+  return DupBytes(json, out_len);
+}
+
 // Encodes a JSON Command into BEVE wire bytes. Returns malloc'd buffer (free
 // with wlb_wire_free), or nullptr if `json` is invalid.
 char* wlb_command_json_to_beve(const char* json, size_t len, size_t* out_len) {

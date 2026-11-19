@@ -230,6 +230,7 @@ void FillSelf(Player* bot, pb::Self* self) {
     aura.stacks = base->GetStackAmount() > 1 ? base->GetStackAmount() : 0;
   }
 
+  unit.raid_marker = RaidMarkerOf(bot, bot->GetGUID().GetRawValue());
   self->gender =
       bot->getGender() == GENDER_FEMALE ? pb::Self::FEMALE : pb::Self::MALE;
   self->xp = bot->GetUInt32Value(PLAYER_XP);
@@ -365,6 +366,7 @@ void FillParty(Player* bot, NearbyBuilder* nearby, pb::Extensions* ext) {
     m.name = slot.name;
     m.kind = pb::Unit::PLAYER;
     m.detail = pb::Unit::NAMEPLATE;
+    m.raid_marker = RaidMarkerOf(bot, slot.guid.GetRawValue());
     pb::GroupPart& gp = m.group.emplace();
     gp.subgroup = static_cast<uint32_t>(slot.group) + 1;
     gp.leader = slot.guid == group->GetLeaderGUID();

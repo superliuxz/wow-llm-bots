@@ -9,71 +9,15 @@ Last updated 2026-11-18.
 
 ## In progress
 
-Items #1–#4 are done and verified live (2026-11-18). Next is #5 (Standing orders), pending the
-design decisions below.
+Items #1–#5 are done and verified live (2026-11-18).
 
 ## Next, in order
 
-1. **Standing orders** (`#5`; spec and decisions: `docs/specs/triggers.md`, "The grammar (final,
-   2026-11-17)" and "Decided (2026-11-18)": `when` evaluated in the harness, acts carried out in
-   the module; relative places now, room landmarks later; acts through the client's own
-   handlers). **Implementation, live `BotLoop` prompt/grammar wiring, and offline evals (a)–(f)
-   are done; live server e2e tests remain.** Build order:
-   - **(a) Order language and evaluator in the harness: done (2026-11-18).**
-     - `harness/src/plan/orders.{h,cc}`: types, parser (26 condition forms, 18
-       verbs; generated from `harness/grammar/orders.wlb`), printer, per-call grammar (`OrderGrammar`,
-       names limited to what the bot knows), `CollectOrderNames` (from the bot's `notes` and
-       screen); `order:` plan lines, up to 7, in priority order (`plan.{h,cc}`; a bad order is
-       dropped, the plan stands); tests: round trips, rejects, and every `fits` row of both audit
-       tables (`OrdersTest.*Audit*`, also `tools/wlb check triggers`; the Python checker is
-       retired); `base::SplitStringPieceUsingSubstr` and `base::TrimString` in `common/base`.
-     - `harness/src/plan/order_evaluator.{h,cc}` + `order_evaluator_unittest.cc`: evaluates all 26
-       `Check` forms, `WhenAlways`/`WhenAll` with negation, all 9 `Thing` and 8 `Who` forms,
-       priority matching and higher-priority preemption, `it` binding, cross-snapshot time windows
-       (`cast in last Ns`, `appears in last Ns`, `after Ns`, `every Ns`), `then` chains advancing
-       on `done_act_command_id` / `OnStepDone`, step timeouts and failure wakes, event
-       coverage (`covered`), and visual/liquid/lands_in_s states.
-   - **(b) Done (2026-11-18):** wire command `Command::Act` (`snapshot/snapshot.h`,
-     `snapshot_wire.cc`), `OrderActToCommand` + `BotLoop` wiring (`runtime/bot_loop.{h,cc}`:
-     loads `var/bots/<bot>/notes.md`, passes `CollectOrderNames` to both `PlanGrammar` and
-     `ParsePlan`, installs plan orders, dispatches `Command::Act`, suppresses default wakes when
-     covered, wakes on `wake`/timeout/failure), pure relative-place geometry (`act_geometry.{h,cc}`
-     + `act_geometry_unittest.cc`), and module world-thread executor (`act_executor.{h,cc}`,
-     wired into `llm_brain_world_script.cc`) for `to`, `away`, `target`, `use`, `stop`, `wake`
-     and relative places (`behind`, `in front of`, `max range of`, `N yd from`) with ground,
-     LoS and `PathGenerator` checks recomputed while running, completing via `done_act_command_id`.
-   - **(c) Done (2026-11-18):** `SnapshotSchedule::Flags::reactive_event` with
-     `kMinReactiveGap = 50 ms` (`snapshot_schedule.{h,cc,_unittest.cc}`), backed by
-     `CollectReactiveState` / `HasNewCastOrAura` (`world_util.{h,cc}`, wired into
-     `llm_brain_world_script.cc`) watching the bot, its selected target, and its attackers.
-   - **(d) Done (2026-11-18):** all remaining verbs on the wire (`Command::Act::Verb` + `PetCmd`),
-     in `OrderActToCommand`, and in `act_executor.cc`: `kite` (tangential arc steering in
-     `act_geometry.cc` using `MovementPriority::MOVEMENT_FORCED` to pause playerbots' combat
-     movement and clearing `last movement` on end), `mark` (with raid leader/assistant check),
-     `board` (`CMSG_SPELLCLICK`) / `leave vehicle` (`CMSG_REQUEST_VEHICLE_EXIT` + dismount),
-     `equip` (`CanEquipItem` + `SwapItem`), `pet` / `pet attack` (`HandlePetActionHelper`),
-     `interact` (`UseObjectNow` / `TalkToNpcNow`), `face` / `face away`, `jump`, `cancel`
-     (checks `SPELL_ATTR0_NO_AURA_CANCEL`), `avoid`.
-   - **(e) Done (2026-11-18):** snapshot additions (`snapshot/snapshot.h`, `snapshot_wire.cc`):
-     `Unit::VisualState` (`FLYING`, `UNTARGETABLE`, `SUBMERGED`, filled in `nearby_builder.cc`
-     and evaluated in `order_evaluator.cc` + `OrderEvaluatorTest`), `Area::lands_in_s` (filled
-     for preparing ground-targeted casts in `nearby_builder.cc`), `Self::liquid` (`"water"`,
-     `"lava"`, `"slime"` via `Map::GetLiquidData` in `snapshot_builder.cc`), and
-     `GroupPart::main_assist` / `Raid::main_assists` (`MEMBER_FLAG_MAINASSIST` in
-     `snapshot_builder.cc`).
-   - **(f) Live prompt/grammar wiring and offline evals done (2026-11-18); live server tests remaining:**
-     - Done: `order:` reply line in `harness/grammar/plan.wlb` + standing-orders verb section in
-       `content/RULES.md`, `CollectOrderNames` wired into `BotLoop` and `RunDecide` (feeding both
-       `PlanGrammar` and `ParsePlan`), and 4 offline standing-order eval cases in
-       `harness/testdata/eval/` (`order_defile_with_notes`, `order_defile_without_notes`,
-       `order_valkyr_add_switch`, `order_sindragosa_stacks`) passing **4/4** on Gemma 4 with
-       overall scored plan quality **42/48 (88%, 73 ms first line)** across the suite.
-     - Remaining: live server tests (hand-written orders on a level-80 fixture bot, one scenario
-       per verb family).
-   - Also open from the audit: re-judge the unsayable rows with the final grammar for a measured
-     coverage number (against the earlier grammar: conditions 85%, actions 46%; upper bounds with
-     the new constructs about 89% and 55%); named room landmarks (most of the 133 "go to
-     hardcoded coordinates" actions) wait for a boss that needs them.
+- **Trigger audit re-judgment and room landmarks** (`docs/specs/triggers.md`): re-judge the
+  unsayable and stretched rows with the final grammar for a measured coverage number (against the
+  earlier grammar: conditions 85%, actions 46%; upper bounds with the new constructs about 89%
+  and 55%); named room landmarks (most of the 133 "go to hardcoded coordinates" actions) wait for
+  a boss that needs them.
 
 ## Later
 
@@ -89,9 +33,6 @@ design decisions below.
 
 ## Loose ends
 
-- **No e2e case for standing orders**: the act executor (`server_module/src/options/act_executor.cc`)
-  has only geometry unit tests; an e2e case with one order per verb family (move, use, kite)
-  on the test server would catch what unit tests can't (the `group` crash was one).
 - **Screen goldens have no module options** (review of c80e791, finding 5; still open after the
   review of f40b0b6): the 10 goldens test rendering against the Python prototype, which invents
   its own options. Real options need each golden's facts captured on the test server
@@ -154,6 +95,14 @@ design decisions below.
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-18: live standing-orders e2e suite (`tools/wlblib/cases/e2e_orders.py`,
+  `config/tests/orders.llm-brain.overrides`, `server_module/testdata/characters/priest-l80-boars.pdump`,
+  test-only `llmtest` console commands in `server_module/src/test/test_commands.{h,cc}`): runs real
+  `harness run` + `act_executor.cc` on the isolated test server across moving + `then` chain +
+  `group` with nearby mobs + edge-latching (`away group 10, then to behind Telda`), `target` +
+  `mark` (`SKULL`), `use` (`Power Word: Shield`), and >5 s `kite` + `stop moving`; also filled
+  `Unit::raid_marker` (`RaidMarkerOf` in `world_util.{h,cc}`, `nearby_builder.cc`,
+  `snapshot_builder.cc`), which the `mark` e2e caught missing. Standing orders (#5) complete.
 - 2026-11-18: turned standing orders on in live `BotLoop` calls and `RULES.md` (`CollectOrderNames`
   from `notes.md` and the screen passed to both `PlanGrammar` and `ParsePlan`; `order:` reply line
   generated from `plan.wlb` and verb section added to `content/RULES.md`; `harness/src/` grouped

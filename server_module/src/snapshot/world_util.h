@@ -26,6 +26,9 @@ std::string AreaName(uint32_t area_id);
 // "0x00000000000001FC": the raw GUID, as the client's combat log prints it.
 std::string GuidString(uint64_t raw_guid);
 
+// The raid target icon set on `raw_guid` in `bot`'s group, if any.
+wlb::snapshot::RaidMarker RaidMarkerOf(const Player* bot, uint64_t raw_guid);
+
 // True for general-purpose bags (excludes profession bags, quivers, etc.).
 bool IsGeneralBag(const Bag* bag);
 
