@@ -54,5 +54,6 @@ lines Plan {
       "<optional: panels to close>";
   hover?: hover:Hover default "none"
       "<optional: the name of an item or quest on your screen whose tooltip isn't shown yet, to read it; you are woken again>";
-  order*7: orders:Order @needs(order_names);
+  order*7: orders:Order @needs(order_names)
+      "<optional, up to 7 in priority order for mechanics in Your boss notes: <when> -> <act>[, then <act>]>";
 }

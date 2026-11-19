@@ -82,6 +82,10 @@ constexpr char ToUpperASCII(char c) {
     std::string_view suffix,
     CompareCase case_sensitivity = CompareCase::SENSITIVE);
 
+[[nodiscard]] std::string_view TrimString(std::string_view input,
+                                          std::string_view trim_chars,
+                                          TrimPositions positions);
+
 [[nodiscard]] std::string_view TrimWhitespaceASCII(
     std::string_view input,
     TrimPositions positions = TRIM_ALL);

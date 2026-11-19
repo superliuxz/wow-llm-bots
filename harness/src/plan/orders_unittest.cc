@@ -18,6 +18,7 @@
 #include "grammar/wlb_runtime.h"
 #include "gtest/gtest.h"
 #include "runtime/file_util.h"
+#include "snapshot/snapshot.h"
 #include "test/gbnf_check.h"
 
 namespace harness {
@@ -350,6 +351,57 @@ TEST(OrdersTest, JunkFailsFast) {
     ParseOrder(text);
     EXPECT_LT(base::TimeTicks::Now() - start, base::Milliseconds(200)) << text;
   }
+}
+
+TEST(OrdersTest, CollectOrderNamesExtractsFromNotesAndSnapshot) {
+  wlb::snapshot::Snapshot snap;
+  snap.bot = "Aelindra";
+  snap.base.self.unit.name = "Aelindra";
+  snap.base.self.unit.auras.emplace_back().name = "Arcane Brilliance";
+
+  wlb::snapshot::Unit boss;
+  boss.name = "Sindragosa";
+  snap.base.nearby.units.push_back(boss);
+
+  wlb::snapshot::Unit corpse;
+  corpse.name = "Rimefang";
+  corpse.dead = true;
+  snap.base.nearby.units.push_back(corpse);
+
+  snap.ext.spellbook.emplace().spells.emplace_back().name =
+      "Power Word: Shield";
+  snap.ext.bags.emplace().items.emplace_back().name = "Runic Mana Potion";
+
+  const std::string notes =
+      "- The Lich King, Defile: Black pool under target; run away "
+      "immediately.\n"
+      "- Sindragosa, Mystic Buffet: when above 4 stacks, use Ice Block or "
+      "Hand of Protection.";
+
+  const std::vector<std::string> names = CollectOrderNames(snap, notes);
+  auto has = [&](std::string_view want) {
+    return std::find(names.begin(), names.end(), want) != names.end();
+  };
+  EXPECT_TRUE(has("The Lich King"));
+  EXPECT_TRUE(has("Defile"));
+  EXPECT_TRUE(has("Sindragosa"));
+  EXPECT_TRUE(has("Mystic Buffet"));
+  EXPECT_TRUE(has("Ice Block"));
+  EXPECT_TRUE(has("Hand of Protection"));
+  EXPECT_TRUE(has("Arcane Brilliance"));
+  EXPECT_TRUE(has("Power Word: Shield"));
+  EXPECT_TRUE(has("Runic Mana Potion"));
+  // Dead corpses, the bot's own unit name, and sentence stop-words stay out.
+  EXPECT_FALSE(has("Rimefang"));
+  EXPECT_FALSE(has("Aelindra"));
+  EXPECT_FALSE(has("The"));
+  EXPECT_FALSE(has("Use"));
+  EXPECT_FALSE(has("Defile: Black"));
+}
+
+TEST(OrdersTest, CollectOrderNamesIsEmptyOnBlankSnapshotAndNotes) {
+  wlb::snapshot::Snapshot empty;
+  EXPECT_TRUE(CollectOrderNames(empty).empty());
 }
 
 }  // namespace

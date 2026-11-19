@@ -111,6 +111,24 @@ std::optional<std::string_view> RemoveSuffix(std::string_view string,
   return string;
 }
 
+std::string_view TrimString(std::string_view input,
+                            std::string_view trim_chars,
+                            TrimPositions positions) {
+  if (positions & TRIM_LEADING) {
+    while (!input.empty() &&
+           trim_chars.find(input.front()) != std::string_view::npos) {
+      input.remove_prefix(1);
+    }
+  }
+  if (positions & TRIM_TRAILING) {
+    while (!input.empty() &&
+           trim_chars.find(input.back()) != std::string_view::npos) {
+      input.remove_suffix(1);
+    }
+  }
+  return input;
+}
+
 std::string_view TrimWhitespaceASCII(std::string_view input,
                                      TrimPositions positions) {
   if (positions & TRIM_LEADING) {

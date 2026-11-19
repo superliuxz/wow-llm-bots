@@ -673,13 +673,10 @@
   {
     "name": "order_defile_with_notes",
     "source": "hand-crafted boss fixture (#5f)",
-    "reason": "boss pull",
+    "reason": "entered combat",
     "summary": "L80 Mage fighting The Lich King with boss notes for Defile",
     "rule": "writes a standing order reacting to Defile by moving away",
     "notes": "The Lich King, Defile: black pool under whoever is targeted; run away immediately so it does not grow.",
-    "order_names": [
-      "Defile"
-    ],
     "min_orders": 1,
     "must_order_contain": [
       "Defile",
@@ -689,7 +686,7 @@
   {
     "name": "order_defile_without_notes",
     "source": "hand-crafted boss fixture (#5f)",
-    "reason": "boss pull",
+    "reason": "entered combat",
     "summary": "L80 Mage fighting The Lich King with no boss notes (known-mechanics gate)",
     "rule": "writes no standing orders when the bot has no boss notes / order names",
     "forbid_orders": true
@@ -697,13 +694,10 @@
   {
     "name": "order_valkyr_add_switch",
     "source": "hand-crafted boss fixture (#5f)",
-    "reason": "boss pull",
+    "reason": "entered combat",
     "summary": "L80 Mage fighting The Lich King with boss notes for Val'kyr Shadowguard",
     "rule": "writes a standing order to target Val'kyr Shadowguard when it appears",
     "notes": "The Lich King, Val'kyr Shadowguard: spawns in phase 2 and carries a raid member off the edge; immediately target it when it appears.",
-    "order_names": [
-      "Val'kyr Shadowguard"
-    ],
     "min_orders": 1,
     "must_order_contain": [
       "Val'kyr Shadowguard",
@@ -713,14 +707,10 @@
   {
     "name": "order_sindragosa_stacks",
     "source": "hand-crafted boss fixture (#5f)",
-    "reason": "boss pull",
+    "reason": "entered combat",
     "summary": "L80 Mage fighting Sindragosa with boss notes for Mystic Buffet stacks",
     "rule": "writes a standing order to use Ice Block when Mystic Buffet stacks get high",
     "notes": "Sindragosa, Mystic Buffet: stacking frost debuff on you; when you reach more than 4 stacks, use Ice Block to clear it.",
-    "order_names": [
-      "Mystic Buffet",
-      "Ice Block"
-    ],
     "min_orders": 1,
     "must_order_contain": [
       "Mystic Buffet",

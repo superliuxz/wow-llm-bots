@@ -24,6 +24,7 @@
 #include "llm/llm_client.h"
 #include "llm/scheduler.h"
 #include "plan/order_evaluator.h"
+#include "plan/orders.h"
 #include "plan/plan.h"
 #include "plan/plan_runner.h"
 #include "plan/triggers.h"
@@ -419,6 +420,11 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
       }
     }
   }
+  if (!config_.bots_dir.empty()) {
+    state.notes =
+        ReadFile(base::StrCat({config_.bots_dir, "/", bot, "/notes.md"}))
+            .value_or("");
+  }
 
   state.has_queued_wake = false;
   state.call_in_flight = true;
@@ -452,6 +458,9 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
   // Ages on the snapshots' clock (seen_at is a snapshot's received time).
   input.remembered = RememberedPanels(state, state.latest_received_at,
                                       config_.remember_panels_for);
+  input.notes = state.notes;
+  input.order_names = CollectOrderNames(*state.latest_snapshot, state.notes);
+  std::vector<std::string> order_names = input.order_names;
   input.slot = slot;
   input.temperature = config_.temperature;
 
@@ -482,7 +491,8 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
 
   base::scoped_refptr<LlmCancelHandle> handle = ask_.Run(
       std::move(request),
-      [self, bot, epoch, ask_seq, ask_screen, wake_reason,
+      [self, bot, epoch, ask_seq, ask_screen,
+       order_names = std::move(order_names), wake_reason,
        asked_reasons = std::move(asked_reasons),
        asked_events = std::move(asked_events),
        request_copy = std::move(request_copy), snap_mono_us, age_at_ask_ms,
@@ -493,10 +503,10 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
           return;
         }
         self->OnReply(bot, epoch, ask_seq, std::move(ask_screen),
-                      std::move(wake_reason), std::move(asked_reasons),
-                      std::move(asked_events), std::move(request_copy),
-                      snap_mono_us, age_at_ask_ms, *holder, std::move(done),
-                      std::move(result));
+                      std::move(order_names), std::move(wake_reason),
+                      std::move(asked_reasons), std::move(asked_events),
+                      std::move(request_copy), snap_mono_us, age_at_ask_ms,
+                      *holder, std::move(done), std::move(result));
       },
       std::move(on_first_line));
   if (!handle) {
@@ -545,6 +555,7 @@ void BotLoop::OnReply(const std::string& bot,
                       uint64_t epoch,
                       uint32_t ask_seq,
                       Screen ask_screen,
+                      std::vector<std::string> order_names,
                       std::string wake_reason,
                       std::vector<std::string> asked_reasons,
                       std::vector<std::string> asked_events,
@@ -576,7 +587,7 @@ void BotLoop::OnReply(const std::string& bot,
   std::optional<Plan> plan;
   if (result.reply) {
     plan = ParsePlan(result.reply->text,
-                     static_cast<int>(ask_screen.options.size()));
+                     static_cast<int>(ask_screen.options.size()), order_names);
   }
 
   Decision decision;

@@ -68,6 +68,9 @@ TEST(StringsTest, CasePrefixesTrimAndJoin) {
 
   EXPECT_EQ(TrimWhitespaceASCII(" \t\r\n hi \n "), "hi");
   EXPECT_EQ(TrimWhitespaceASCII("   "), "");
+  EXPECT_EQ(TrimString("..hi!?", ".!?", TRIM_ALL), "hi");
+  EXPECT_EQ(TrimString("..hi..", ".", TRIM_LEADING), "hi..");
+  EXPECT_EQ(TrimString("..hi..", ".", TRIM_TRAILING), "..hi");
 
   EXPECT_EQ(JoinString(std::vector<std::string>{"a", "b", "c"}, ", "),
             "a, b, c");

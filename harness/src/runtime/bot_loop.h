@@ -114,6 +114,7 @@ class BotLoop {
 
     bool identity_loaded = false;
     std::string identity;
+    std::string notes;
     std::string current_goal;
     std::deque<std::string> recent_events;
     std::vector<std::string> pending_reasons;
@@ -208,6 +209,7 @@ class BotLoop {
                uint64_t epoch,
                uint32_t ask_seq,
                Screen ask_screen,
+               std::vector<std::string> order_names,
                std::string wake_reason,
                std::vector<std::string> asked_reasons,
                std::vector<std::string> asked_events,

@@ -260,34 +260,39 @@ TEST(DecideTest, JsonOutputCarriesParsedPlanWithoutRegexes) {
 TEST(DecideTest, OrderNamesAndBossNotesGateGrammarAndEmitOrdersInJson) {
   DecideOptions options = Options();
   options.json_output = true;
-  options.notes = "Lich King, Defile: black pool under target, run out.";
-  options.order_names = {"Defile"};
+  options.notes =
+      "The Lich King, Defile: black pool under target, run out; use Lay on "
+      "Hands.";
   const std::string reply_with_order =
       "do: 1\n"
       "expect: 1\n"
       "watch: none\n"
       "look: 90\n"
-      "order: Defile on me -> away\n";
+      "order: Defile on me -> use Lay on Hands on Mottled Boar\n";
   LlmRequest seen;
   std::string report;
   EXPECT_EQ(RunDecide(options, Replying(reply_with_order, &seen), &report), 0);
   EXPECT_NE(seen.user.find("Your boss notes:"), std::string::npos);
-  EXPECT_NE(seen.user.find("Standing orders"), std::string::npos);
-  EXPECT_NE(seen.grammar.find("Defile"), std::string::npos);
-  EXPECT_NE(report.find("\"orders\":[\"Defile on me -> away\"]"),
-            std::string::npos)
+  EXPECT_NE(seen.grammar.find("\"Defile\""), std::string::npos);
+  EXPECT_NE(seen.grammar.find("\"Lay on Hands\""), std::string::npos);
+  EXPECT_NE(seen.grammar.find("\"Mottled Boar\""), std::string::npos);
+  EXPECT_NE(
+      report.find(
+          "\"orders\":[\"Defile on me -> use Lay on Hands on Mottled Boar\"]"),
+      std::string::npos)
       << report;
 
-  // Without `order_names`, the grammar has no `order:` rule and the user
-  // prompt stays lean (no standing-orders section).
+  // Without notes, screen names ("Mottled Boar") are offered, while unknown
+  // boss mechanics ("Defile") are absent from the grammar.
   DecideOptions without_notes = Options();
   LlmRequest seen_plain;
   std::string report_plain;
   EXPECT_EQ(
       RunDecide(without_notes, Replying(kGoodPlan, &seen_plain), &report_plain),
       0);
-  EXPECT_EQ(seen_plain.user.find("Standing orders"), std::string::npos);
-  EXPECT_EQ(seen_plain.grammar.find("orders-Order"), std::string::npos);
+  EXPECT_EQ(seen_plain.user.find("Your boss notes:"), std::string::npos);
+  EXPECT_NE(seen_plain.grammar.find("\"Mottled Boar\""), std::string::npos);
+  EXPECT_EQ(seen_plain.grammar.find("Defile"), std::string::npos);
 }
 
 }  // namespace

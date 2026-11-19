@@ -3,6 +3,7 @@
 #include "runtime/bot_loop.h"
 
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <cstdint>
@@ -1118,6 +1119,69 @@ TEST(BotLoopTest, HabitsGlanceAtTheFirstQuestRetryAndTellTheBrain) {
   EXPECT_NE(user.find("you closed your quest log (combat started)"),
             std::string::npos)
       << user;
+}
+
+TEST(BotLoopTest, NotesAndScreenNamesFeedBothPlanGrammarAndParsePlan) {
+  std::string dir = testing::TempDir() + "harness-botloop-notes-XXXXXX";
+  ASSERT_NE(::mkdtemp(dir.data()), nullptr);
+  ASSERT_EQ(::mkdir((dir + "/Testpriest").c_str(), 0700), 0);
+  ASSERT_TRUE(
+      AppendToFile(dir + "/Testpriest/notes.md",
+                   "The Lich King, Defile: use Lay on Hands when it appears."));
+
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.bots_dir = dir;
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Testpriest", 1, t0, /*in_combat=*/true);
+  AddKeep(&s1);
+  pb::Unit& boar = s1.base.nearby.units.emplace_back();
+  boar.guid = "0xF130000C1A000001";
+  boar.name = "Mottled Boar";
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  const LlmRequest& req = brain.front_request();
+  EXPECT_NE(req.user.find("Your boss notes:"), std::string::npos);
+  EXPECT_NE(req.grammar.find("\"Defile\""), std::string::npos);
+  EXPECT_NE(req.grammar.find("\"Lay on Hands\""), std::string::npos);
+  EXPECT_NE(req.grammar.find("\"Mottled Boar\""), std::string::npos);
+
+  // `ParsePlan` receives the same `order_names`: "Lay on Hands" is read
+  // as the spell name, not "Lay" on "Hands on Mottled Boar".
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+      "order: Defile on me -> use Lay on Hands on Mottled Boar");
+
+  pb::Snapshot s2 = s1;
+  s2.seq = 2;
+  pb::Aura defile;
+  defile.name = "Defile";
+  s2.base.self.unit.auras.push_back(std::move(defile));
+  loop.OnSnapshot(s2, t0 + base::Seconds(1));
+
+  const pb::Command* act_cmd = nullptr;
+  for (const pb::Command& cmd : commands) {
+    if (cmd.act) {
+      act_cmd = &cmd;
+    }
+  }
+  ASSERT_NE(act_cmd, nullptr);
+  EXPECT_EQ(act_cmd->act->verb, pb::Command::Act::USE);
+  EXPECT_EQ(act_cmd->act->name, "Lay on Hands");
+  EXPECT_EQ(act_cmd->act->target_name, "Mottled Boar");
+
+  ::unlink((dir + "/Testpriest/notes.md").c_str());
+  const std::string log_dir = dir + "/Testpriest/events";
+  if (std::optional<std::vector<std::string>> entries; true) {
+    // DecisionLog wrote one jsonl under events/; clean up best-effort.
+    DecisionLog log(dir);
+    (void)log;
+  }
 }
 
 }  // namespace

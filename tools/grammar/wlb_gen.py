@@ -1273,13 +1273,13 @@ def reply_form(types):
     out, optional = [], []
     for line in roots[0]["lines"]:
         if line["doc"] is None:
-            continue  # Not taught yet (`order:` until the module acts on orders).
+            continue
         key = line["key"]
         if line["key_field"]:
             kf = line["key_field"]
             key += f" <{kf['label'] or kf['type']}>"
         out.append(f"{key}: {line['doc']}")
-        if line["mode"] == "optional":
+        if line["mode"] in ("optional", "repeat"):
             optional.append(line["key"])
     return out, optional
 

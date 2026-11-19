@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "grammar/orders.wlb.h"
+#include "snapshot/snapshot.h"
 
 namespace harness {
 
@@ -48,6 +49,14 @@ std::optional<std::vector<Act>> ParseActs(
 // knows: units, objects, auras, its spells and items); "" when `names` has no
 // usable name, so the plan grammar leaves `order:` lines out.
 std::string OrderGrammar(const std::vector<std::string>& names);
+
+// Collects the deduplicated list of usable order names from what the bot sees
+// on `snapshot` (units, objects, areas, auras, casts, action-bar/spellbook
+// spells, bag/equipped items, options) and from its `notes` (boss/mechanic
+// headings before `:` and capitalized spell/item phrases).
+std::vector<std::string> CollectOrderNames(
+    const wlb::snapshot::Snapshot& snapshot,
+    std::string_view notes = {});
 
 }  // namespace harness
 
