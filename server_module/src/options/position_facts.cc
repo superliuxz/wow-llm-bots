@@ -38,6 +38,38 @@ std::span<const float> ExploreRayDistancesYd() {
   return kDists;
 }
 
+WalkProgressVerdict CheckWalkProgress(const pb::Vec3& pos,
+                                      float dist_to_dest,
+                                      base::TimeTicks now,
+                                      WalkProgressTracker* tracker) {
+  constexpr float kArrivalYd = 10.0f;
+  constexpr float kNearEnoughArrivalYd = 12.0f;
+  constexpr float kStallProgressYd = 5.0f;
+  constexpr float kCloserProgressYd = 3.0f;
+  constexpr base::TimeDelta kStallTimeout = base::Seconds(10);
+  constexpr base::TimeDelta kNoCloserTimeout = base::Seconds(30);
+
+  if (dist_to_dest <= kArrivalYd) {
+    return WalkProgressVerdict::kArrived;
+  }
+  if (Dist(tracker->progress_pos, pos.x, pos.y, pos.z) >= kStallProgressYd) {
+    tracker->progress_pos = pos;
+    tracker->last_progress_at = now;
+  } else if (now - tracker->last_progress_at >= kStallTimeout) {
+    return WalkProgressVerdict::kStuck;
+  }
+
+  if (tracker->last_closer_at.is_null() ||
+      dist_to_dest + kCloserProgressYd < tracker->best_dist_to_dest) {
+    tracker->best_dist_to_dest = dist_to_dest;
+    tracker->last_closer_at = now;
+  } else if (now - tracker->last_closer_at >= kNoCloserTimeout) {
+    return dist_to_dest <= kNearEnoughArrivalYd ? WalkProgressVerdict::kArrived
+                                                : WalkProgressVerdict::kStuck;
+  }
+  return WalkProgressVerdict::kContinue;
+}
+
 void RefreshFrom(const pb::Vec3& pos, PositionFacts* facts) {
   const auto out_of_range = [](float dist) {
     return dist < kMinTravelDistYd || dist > kMaxTravelDistYd;

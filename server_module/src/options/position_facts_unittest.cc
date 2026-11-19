@@ -147,5 +147,56 @@ TEST(PositionFactsTest, ExploreRayProbesCoverAllEightCompassDirections) {
   }
 }
 
+TEST(PositionFactsTest, WalkProgressDetectsPingPongWithoutBreakingDetours) {
+  const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
+  WalkProgressTracker tracker{
+      .progress_pos = {0, 0, 0},
+      .last_progress_at = t0,
+      .best_dist_to_dest = 50.0f,
+      .last_closer_at = t0,
+  };
+  // Stationary for 10 s -> stuck.
+  EXPECT_EQ(
+      CheckWalkProgress({1, 0, 0}, 50.0f, t0 + base::Seconds(10), &tracker),
+      WalkProgressVerdict::kStuck);
+
+  // Moving sideways/detouring for 20 s without getting closer -> still ok.
+  tracker = {.progress_pos = {0, 0, 0},
+             .last_progress_at = t0,
+             .best_dist_to_dest = 50.0f,
+             .last_closer_at = t0};
+  EXPECT_EQ(
+      CheckWalkProgress({0, 10, 0}, 52.0f, t0 + base::Seconds(8), &tracker),
+      WalkProgressVerdict::kContinue);
+  EXPECT_EQ(
+      CheckWalkProgress({0, 20, 0}, 55.0f, t0 + base::Seconds(16), &tracker),
+      WalkProgressVerdict::kContinue);
+  EXPECT_EQ(
+      CheckWalkProgress({0, 30, 0}, 50.0f, t0 + base::Seconds(24), &tracker),
+      WalkProgressVerdict::kContinue);
+
+  // Ping-ponging for 30 s at 20 yd (outside 12 yd slack) -> stuck (not
+  // arrived).
+  EXPECT_EQ(
+      CheckWalkProgress({0, 40, 0}, 20.0f, t0 + base::Seconds(30), &tracker),
+      WalkProgressVerdict::kContinue);  // 20 < 50 - 3 resets last_closer_at.
+  EXPECT_EQ(
+      CheckWalkProgress({0, 50, 0}, 19.0f, t0 + base::Seconds(38), &tracker),
+      WalkProgressVerdict::kContinue);
+  EXPECT_EQ(
+      CheckWalkProgress({0, 60, 0}, 20.0f, t0 + base::Seconds(60), &tracker),
+      WalkProgressVerdict::kStuck);
+
+  // Ping-ponging for 30 s within 12 yd of an unreachable hub centroid ->
+  // arrived.
+  tracker = {.progress_pos = {0, 0, 0},
+             .last_progress_at = t0,
+             .best_dist_to_dest = 11.5f,
+             .last_closer_at = t0};
+  EXPECT_EQ(
+      CheckWalkProgress({6, 0, 0}, 11.5f, t0 + base::Seconds(30), &tracker),
+      WalkProgressVerdict::kArrived);
+}
+
 }  // namespace
 }  // namespace llm_brain

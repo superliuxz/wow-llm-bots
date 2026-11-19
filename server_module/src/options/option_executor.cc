@@ -84,9 +84,7 @@ constexpr uint32_t kSitHoldMs = 1500;
 
 constexpr float kWalkStepYd = 70.0f;
 constexpr float kWalkStepAdvanceYd = 10.0f;
-constexpr float kWalkArrivalYd = 10.0f;
-constexpr float kWalkStallProgressYd = 5.0f;
-constexpr base::TimeDelta kWalkStallTimeout = base::Seconds(10);
+constexpr float kWalkNearEnoughArrivalYd = 12.0f;
 constexpr base::TimeDelta kWalkRepathEvery = base::Seconds(1);
 
 }  // namespace
@@ -677,19 +675,17 @@ WalkStepResult TickLongWalk(Player* bot,
   }
   const float dist_to_dest =
       bot->GetExactDist(walk->dest.x, walk->dest.y, walk->dest.z);
-  if (dist_to_dest <= kWalkArrivalYd) {
-    stop_walk();
-    return {.arrived = true};
-  }
-
-  if (bot->GetExactDist(walk->progress_pos.x, walk->progress_pos.y,
-                        walk->progress_pos.z) >= kWalkStallProgressYd) {
-    walk->progress_pos = {bot->GetPositionX(), bot->GetPositionY(),
-                          bot->GetPositionZ()};
-    walk->last_progress_at = now;
-  } else if (now - walk->last_progress_at >= kWalkStallTimeout) {
-    stop_walk();
-    return {.error = "stuck"};
+  const wlb::snapshot::Vec3 pos{bot->GetPositionX(), bot->GetPositionY(),
+                                bot->GetPositionZ()};
+  switch (CheckWalkProgress(pos, dist_to_dest, now, &walk->progress)) {
+    case WalkProgressVerdict::kArrived:
+      stop_walk();
+      return {.arrived = true};
+    case WalkProgressVerdict::kStuck:
+      stop_walk();
+      return {.error = "stuck"};
+    case WalkProgressVerdict::kContinue:
+      break;
   }
 
   if (walk->has_step && bot->isMoving()) {
@@ -727,6 +723,11 @@ WalkStepResult TickLongWalk(Player* bot,
         found = true;
       }
     }
+  }
+
+  if (!found && dist_to_dest <= kWalkNearEnoughArrivalYd) {
+    stop_walk();
+    return {.arrived = true, .path_time = base::TimeTicks::Now() - path_start};
   }
 
   if (!found) {
@@ -1027,9 +1028,15 @@ ExecuteResult ExecuteWalkOption(Player* bot,
       .dest = *target.pos,
       .step_dest = {},
       .has_step = false,
-      .progress_pos = {bot->GetPositionX(), bot->GetPositionY(),
-                       bot->GetPositionZ()},
-      .last_progress_at = now,
+      .progress =
+          {
+              .progress_pos = {bot->GetPositionX(), bot->GetPositionY(),
+                               bot->GetPositionZ()},
+              .last_progress_at = now,
+              .best_dist_to_dest = bot->GetExactDist(
+                  target.pos->x, target.pos->y, target.pos->z),
+              .last_closer_at = now,
+          },
       .last_path_at = {},
   };
   const WalkStepResult step = TickLongWalk(bot, now, walk);

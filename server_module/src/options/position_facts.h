@@ -6,6 +6,7 @@
 #include <span>
 #include <vector>
 
+#include "base/time/time.h"
 #include "snapshot/snapshot.h"
 
 // The parts of the Explore / Go to facts that need no game server
@@ -26,6 +27,23 @@ wlb::snapshot::Direction DirFrom(const wlb::snapshot::Vec3& from,
 // back to walkable ray probing in dungeons/cities with no grind buckets.
 std::span<const float> ExploreRayAngles();
 std::span<const float> ExploreRayDistancesYd();
+
+// Pure progress check for stepped long walks (Explore / GoTo). Detects both
+// stationary stalls (no 5 yd move in 10 s) and ping-pong loops (moving without
+// getting >= 3 yd closer to dest in 30 s). Arrives if within 10 yd, or within
+// 12 yd when a ping-pong/no-closer timeout triggers near an unreachable hub
+// centroid.
+enum class WalkProgressVerdict { kContinue, kArrived, kStuck };
+struct WalkProgressTracker {
+  wlb::snapshot::Vec3 progress_pos;
+  base::TimeTicks last_progress_at;
+  float best_dist_to_dest = 0.0f;
+  base::TimeTicks last_closer_at;
+};
+WalkProgressVerdict CheckWalkProgress(const wlb::snapshot::Vec3& pos,
+                                      float dist_to_dest,
+                                      base::TimeTicks now,
+                                      WalkProgressTracker* tracker);
 
 // The Explore spots and Go to places seen from one position. Distances and
 // directions are filled for the position they were computed at; RefreshFrom

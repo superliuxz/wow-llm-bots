@@ -9,6 +9,7 @@
 
 #include "base/time/time.h"
 #include "options/options.h"
+#include "options/position_facts.h"
 #include "snapshot/snapshot.h"
 
 class Creature;
@@ -27,9 +28,8 @@ struct PendingWalk {
   wlb::snapshot::Vec3 dest;
   wlb::snapshot::Vec3 step_dest;
   bool has_step = false;
-  // Where the bot was when it last made progress (moved 5 yd), and when.
-  wlb::snapshot::Vec3 progress_pos;
-  base::TimeTicks last_progress_at;
+  // Progress and ping-pong tracking for the active walk.
+  WalkProgressTracker progress;
   // When the path was last worked out: at most once a second.
   base::TimeTicks last_path_at;
 };
