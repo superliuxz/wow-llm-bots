@@ -3,16 +3,22 @@
 #ifndef MOD_LLM_BRAIN_CHAT_CHAT_SCRIPTS_H_
 #define MOD_LLM_BRAIN_CHAT_CHAT_SCRIPTS_H_
 
+#include <atomic>
+
 namespace llm_brain {
 
+class BehaviorTraceWriter;
 class ChatInbox;
 
 // Registers the chat scripts with AzerothCore (which owns them):
-// - a player hook that puts every whisper to a brain-run bot into `inbox`;
+// - a player hook that puts every whisper to a brain-run bot into `inbox` and
+//   logs human whispers to `*human_trace` when non-null;
 // - the console command `.llmbrain whisper <from> <to> <text>`, which makes an
 //   online character whisper another, as if typed (tests and live checks).
-// `inbox` must outlive the server.
-void AddLlmBrainChatScripts(ChatInbox* inbox);
+// `inbox` and `human_trace` must outlive the server.
+void AddLlmBrainChatScripts(
+    ChatInbox* inbox,
+    std::atomic<BehaviorTraceWriter*>* human_trace = nullptr);
 
 }  // namespace llm_brain
 

@@ -67,6 +67,7 @@ TEST(BehaviorTraceTest, WritesUnifiedRoleDirectories) {
   s.role = "human";
   s.name = "PlayerOne";
   ASSERT_TRUE(writer.WriteSample(s));
+  writer.Flush();
 
   const std::filesystem::path expected =
       root / "human" / "PlayerOne" / "2026-11-19.jsonl";
@@ -75,6 +76,30 @@ TEST(BehaviorTraceTest, WritesUnifiedRoleDirectories) {
   std::string content;
   std::getline(in, content);
   EXPECT_NE(content.find("\"name\":\"PlayerOne\""), std::string::npos);
+  std::filesystem::remove_all(root);
+}
+
+TEST(BehaviorTraceTest, RotatesFileWhenExceedingMaxBytes) {
+  const std::filesystem::path root =
+      std::filesystem::path(testing::TempDir()) / "wlb_trace_rotate_test";
+  std::filesystem::remove_all(root);
+  // Tiny cap so the second batch triggers rotation.
+  BehaviorTraceWriter writer(root.string(), /*max_file_bytes=*/50);
+  TraceSample s;
+  s.time_ms = 1795064000000LL;
+  s.role = "bot";
+  s.name = "Loada";
+  ASSERT_TRUE(writer.WriteSample(s));
+  writer.Flush();
+  ASSERT_TRUE(writer.WriteSample(s));
+  writer.Flush();
+
+  const std::filesystem::path active =
+      root / "bot" / "Loada" / "2026-11-19.jsonl";
+  const std::filesystem::path rotated =
+      root / "bot" / "Loada" / "2026-11-19.1.jsonl";
+  EXPECT_TRUE(std::filesystem::exists(active));
+  EXPECT_TRUE(std::filesystem::exists(rotated));
   std::filesystem::remove_all(root);
 }
 

@@ -2,6 +2,9 @@
 
 #include "chat/chat_scripts.h"
 
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <string>
 #include <utility>
 
@@ -17,13 +20,16 @@
 #include "Player.h"
 #include "PlayerScript.h"
 #include "PlayerbotAIConfig.h"
+#include "Playerbots.h"
 #include "SharedDefines.h"
 #include "World.h"
 #include "WorldConfig.h"
 #include "WorldPacket.h"
 #include "base/memory/raw_ptr.h"
+#include "base/time/time.h"
 #include "chat/chat_inbox.h"
 #include "chat/speak.h"
+#include "snapshot/behavior_trace.h"
 #include "snapshot/snapshot.h"
 
 namespace llm_brain {
@@ -38,10 +44,12 @@ using Acore::ChatCommands::Tail;
 // playerbots), so it only hands the line to the inbox.
 class LlmBrainChatScript : public PlayerScript {
  public:
-  explicit LlmBrainChatScript(ChatInbox* inbox)
+  LlmBrainChatScript(ChatInbox* inbox,
+                     std::atomic<BehaviorTraceWriter*>* human_trace)
       : PlayerScript("LlmBrainChatScript",
                      {PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT}),
-        inbox_(inbox) {}
+        inbox_(inbox),
+        human_trace_(human_trace) {}
 
   bool OnPlayerCanUseChat(Player* player,
                           uint32 type,
@@ -51,6 +59,25 @@ class LlmBrainChatScript : public PlayerScript {
     if (type != CHAT_MSG_WHISPER || language == LANG_ADDON || !player ||
         !receiver) {
       return true;
+    }
+    if (BehaviorTraceWriter* trace =
+            human_trace_ ? human_trace_->load(std::memory_order_acquire)
+                         : nullptr;
+        trace && trace->enabled()) {
+      const int64_t t_ms =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::system_clock::now().time_since_epoch())
+              .count();
+      const int64_t mono_us =
+          (base::TimeTicks::Now() - base::TimeTicks()).InMicroseconds();
+      if (!GET_PLAYERBOT_AI(player)) {
+        trace->WriteChat({t_ms, mono_us, "human", player->GetName(), "out",
+                          "whisper", receiver->GetName(), msg});
+      }
+      if (!GET_PLAYERBOT_AI(receiver)) {
+        trace->WriteChat({t_ms, mono_us, "human", receiver->GetName(), "in",
+                          "whisper", player->GetName(), msg});
+      }
     }
     pb::ChatEvent chat;
     chat.channel = pb::WHISPER;
@@ -110,6 +137,7 @@ class LlmBrainChatScript : public PlayerScript {
 
  private:
   const base::raw_ptr<ChatInbox> inbox_;
+  const base::raw_ptr<std::atomic<BehaviorTraceWriter*>> human_trace_;
 };
 
 class LlmBrainCommandScript : public CommandScript {
@@ -154,8 +182,9 @@ class LlmBrainCommandScript : public CommandScript {
 
 }  // namespace
 
-void AddLlmBrainChatScripts(ChatInbox* inbox) {
-  new LlmBrainChatScript(inbox);
+void AddLlmBrainChatScripts(ChatInbox* inbox,
+                            std::atomic<BehaviorTraceWriter*>* human_trace) {
+  new LlmBrainChatScript(inbox, human_trace);
   new LlmBrainCommandScript();
 }
 

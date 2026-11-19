@@ -34,6 +34,7 @@
 #include "Player.h"
 #include "QuestDef.h"
 #include "SharedDefines.h"
+#include "Spell.h"
 #include "SpellAuraDefines.h"
 #include "SpellAuras.h"
 #include "SpellInfo.h"
@@ -210,6 +211,30 @@ void FillSelf(Player* bot, pb::Self* self) {
   unit.power_pct = Percent(bot->GetPower(power), bot->GetMaxPower(power));
   unit.dead = bot->isDead();
   unit.player.emplace().class_ = ClassName(bot->getClass());
+  if (Spell* sp = bot->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+      sp && sp->GetSpellInfo()) {
+    pb::Cast& cast = self->casting.emplace();
+    cast.spell.emplace().id = sp->GetSpellInfo()->Id;
+    if (const char* sn =
+            sp->GetSpellInfo()->SpellName[sWorld->GetDefaultDbcLocale()];
+        sn && *sn) {
+      cast.spell->name = sn;
+    }
+    cast.remaining_ms =
+        static_cast<uint32_t>(std::max<int32_t>(0, sp->GetCastTimeRemaining()));
+  } else if (Spell* ch = bot->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
+             ch && ch->GetSpellInfo()) {
+    pb::Cast& cast = self->casting.emplace();
+    cast.spell.emplace().id = ch->GetSpellInfo()->Id;
+    if (const char* sn =
+            ch->GetSpellInfo()->SpellName[sWorld->GetDefaultDbcLocale()];
+        sn && *sn) {
+      cast.spell->name = sn;
+    }
+    cast.channeled = true;
+    cast.remaining_ms =
+        static_cast<uint32_t>(std::max<int32_t>(0, ch->GetCastTimeRemaining()));
+  }
   // The bot's buff bar: the auras the client shows (those with a visible
   // slot), as a player sees their own ("Food" while eating).
   for (const auto& [spell_id, app] : bot->GetAppliedAuras()) {

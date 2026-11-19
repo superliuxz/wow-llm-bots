@@ -121,23 +121,66 @@ def _progress_metrics(bot_traces: dict[str, list[dict]]) -> dict:
     }
 
 
-def _score_distributions(bot_summary: dict, human_summary: dict | None) -> tuple[float, dict, str]:
-    """Scores bot distributions (0..100) against human baseline or fallback."""
-    use_human = bool(human_summary and human_summary.get("characters", 0) > 0)
+MIN_HUMAN_SAMPLES = 300
+
+
+def _filter_role_rows(traces: dict[str, list[dict]], expected_role: str) -> dict[str, list[dict]]:
+    """Keeps only records whose embedded `role` matches `expected_role`."""
+    out: dict[str, list[dict]] = {}
+    for name, rows in traces.items():
+        filtered = [r for r in rows if r.get("role") == expected_role]
+        if filtered:
+            out[name] = filtered
+    return out
+
+
+def _score_distributions(
+    bot_summary: dict, human_summary: dict | None, human_sample_count: int = 0
+) -> tuple[float, dict, str]:
+    """Scores bot distributions (0..100) against human baseline or fallback.
+
+    - Requires at least `MIN_HUMAN_SAMPLES` verified human samples for
+      `human_baseline` mode; never silently falls back to made-up constants per
+      metric when in `human_baseline` mode.
+    - Missing metrics (None) score 0.0 instead of being dropped from the average.
+    """
+    use_human = bool(
+        human_summary
+        and human_summary.get("characters", 0) > 0
+        and human_sample_count >= MIN_HUMAN_SAMPLES
+    )
     mode = "human_baseline" if use_human else "fallback_reference"
     per_metric = {}
     weighted_sum = 0.0
     weight_total = 0.0
 
     for key, weight in METRIC_WEIGHTS.items():
+        weight_total += weight
         bval = bot_summary.get(key)
-        if bval is None:
-            continue
-        if use_human and human_summary.get(key) is not None:
-            target = float(human_summary[key])
+        if use_human:
+            hval = human_summary.get(key)
+            if hval is None:
+                per_metric[key] = {
+                    "bot": round(float(bval), 3) if bval is not None else None,
+                    "target": None,
+                    "score": 0.0,
+                    "reason": "no_human_data",
+                }
+                continue
+            target = float(hval)
             scale = max(abs(target) * 0.5, FALLBACK_TARGETS[key][1] * 0.5)
         else:
             target, scale = FALLBACK_TARGETS[key]
+
+        if bval is None:
+            per_metric[key] = {
+                "bot": None,
+                "target": round(float(target), 3),
+                "score": 0.0,
+                "reason": "missing_bot_metric",
+            }
+            continue
+
         z = (float(bval) - target) / max(scale, 1e-6)
         sim = math.exp(-(z * z))  # 1.0 at target, decays smoothly
         pts = 100.0 * sim
@@ -147,17 +190,23 @@ def _score_distributions(bot_summary: dict, human_summary: dict | None) -> tuple
             "score": round(pts, 1),
         }
         weighted_sum += weight * pts
-        weight_total += weight
 
     dist_score = (weighted_sum / weight_total) if weight_total > 0 else 0.0
     return round(dist_score, 2), per_metric, mode
 
 
-def _format_clip(rows: list[dict], max_samples: int = 20) -> str:
-    samples = [r for r in rows if r.get("kind") == "sample"][:max_samples]
-    lines = []
+def _format_clip(
+    rows: list[dict], max_samples: int = 20, rng: random.Random | None = None
+) -> str:
+    samples = [r for r in rows if r.get("kind") == "sample"]
     if not samples:
         return "(empty)"
+    if len(samples) > max_samples and rng is not None:
+        start = rng.randint(0, len(samples) - max_samples)
+        samples = samples[start : start + max_samples]
+    else:
+        samples = samples[:max_samples]
+    lines = []
     t0 = samples[0]["t_ms"]
     for s in samples:
         dt = (s["t_ms"] - t0) / 1000.0
@@ -169,57 +218,95 @@ def _format_clip(rows: list[dict], max_samples: int = 20) -> str:
     return "\n".join(lines)
 
 
+def _ask_judge_pair(a_txt: str, b_txt: str, llm_url: str) -> str | None:
+    prompt = (
+        "Two short World of Warcraft gameplay traces follow (Trace A and Trace B). "
+        "One is a human player and one is a bot. Reply with ONLY 'A' or 'B' for "
+        "which trace is the HUMAN player.\n\n"
+        f"Trace A:\n{a_txt}\n\nTrace B:\n{b_txt}\n"
+    )
+    payload = json.dumps({
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.0,
+        "max_tokens": 4,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"{llm_url.rstrip('/')}/v1/chat/completions",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        ans = data["choices"][0]["message"]["content"].strip().upper()[:1]
+        return ans if ans in ("A", "B") else None
+    except Exception:
+        return None
+
+
 def _run_llm_judge(
     bot_traces: dict[str, list[dict]],
     human_traces: dict[str, list[dict]],
     llm_url: str,
-    pairs: int = 4,
-    seed: int = 42,
-) -> float | None:
-    """Asks local LLM judge to distinguish human vs bot clips; 50% accuracy = 100 pts."""
+    pairs: int = 30,
+    control_pairs: int = 10,
+    seed: int | None = None,
+) -> tuple[float | None, dict]:
+    """Asks local LLM judge to distinguish human vs bot clips across random windows.
+
+    Includes human-vs-human control pairs to detect position bias (e.g. an
+    'always A' judge). 50% accuracy = 100 pts; 100% bot detection = 0 pts.
+    """
     if not bot_traces or not human_traces:
-        return None
-    rng = random.Random(seed)
+        return None, {}
+    rng = random.Random(seed) if seed is not None else random.SystemRandom()
     bot_list = list(bot_traces.values())
     human_list = list(human_traces.values())
     correct = 0
     total = 0
+    a_picks = 0
     for _ in range(pairs):
-        b_clip = _format_clip(rng.choice(bot_list))
-        h_clip = _format_clip(rng.choice(human_list))
+        b_clip = _format_clip(rng.choice(bot_list), rng=rng)
+        h_clip = _format_clip(rng.choice(human_list), rng=rng)
         human_is_a = rng.choice([True, False])
         a_txt, b_txt = (h_clip, b_clip) if human_is_a else (b_clip, h_clip)
-        prompt = (
-            "Two short World of Warcraft gameplay traces follow (Trace A and Trace B). "
-            "One is a human player and one is a bot. Reply with ONLY 'A' or 'B' for "
-            "which trace is the HUMAN player.\n\n"
-            f"Trace A:\n{a_txt}\n\nTrace B:\n{b_txt}\n"
-        )
-        payload = json.dumps({
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.0,
-            "max_tokens": 4,
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            f"{llm_url.rstrip('/')}/v1/chat/completions",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            ans = data["choices"][0]["message"]["content"].strip().upper()[:1]
-            if ans in ("A", "B"):
-                total += 1
-                if (ans == "A") == human_is_a:
-                    correct += 1
-        except Exception:
-            continue
+        ans = _ask_judge_pair(a_txt, b_txt, llm_url)
+        if ans is not None:
+            total += 1
+            if ans == "A":
+                a_picks += 1
+            if (ans == "A") == human_is_a:
+                correct += 1
+
+    ctrl_total = 0
+    ctrl_a = 0
+    for _ in range(control_pairs):
+        h1 = _format_clip(rng.choice(human_list), rng=rng)
+        h2 = _format_clip(rng.choice(human_list), rng=rng)
+        ans = _ask_judge_pair(h1, h2, llm_url)
+        if ans is not None:
+            ctrl_total += 1
+            if ans == "A":
+                ctrl_a += 1
+
     if total == 0:
-        return None
+        return None, {}
     acc = correct / total
-    # 50% accuracy (indistinguishable) -> 100 pts; 100% bot detection -> 0 pts.
-    return round(max(0.0, 100.0 * (1.0 - max(0.0, acc - 0.5) * 2.0)), 2)
+    ctrl_a_rate = (ctrl_a / ctrl_total) if ctrl_total > 0 else 0.5
+    details = {
+        "pairs": total,
+        "accuracy": round(acc, 3),
+        "a_pick_rate": round(a_picks / total, 3),
+        "control_pairs": ctrl_total,
+        "control_a_rate": round(ctrl_a_rate, 3),
+    }
+    # If the judge shows extreme position bias on human-vs-human controls
+    # (>80% or <20% picking A), do not trust it as a signal.
+    if ctrl_total >= 4 and (ctrl_a_rate > 0.8 or ctrl_a_rate < 0.2):
+        details["invalid_bias"] = True
+        return None, details
+    score = round(max(0.0, 100.0 * (1.0 - max(0.0, acc - 0.5) * 2.0)), 2)
+    return score, details
 
 
 def score_soak(
@@ -232,20 +319,28 @@ def score_soak(
     eval_passed: int | None = None,
 ) -> dict:
     traces = human_metrics.load_traces(trace_dir)
-    bot_traces = traces["bot"]
-    human_traces = traces["human"]
+    bot_traces = _filter_role_rows(traces["bot"], "bot")
+    human_traces = _filter_role_rows(traces["human"], "human")
     if human_dir and human_dir.exists():
         extra = human_metrics.load_traces(human_dir)
-        human_traces = {**human_traces, **extra["human"]}
+        human_traces = {**human_traces, **_filter_role_rows(extra["human"], "human")}
 
+    human_sample_count = sum(
+        sum(1 for r in rows if r.get("kind") == "sample")
+        for rows in human_traces.values()
+    )
     bot_per_char = {n: human_metrics.analyze_character(r) for n, r in bot_traces.items()}
     human_per_char = {n: human_metrics.analyze_character(r) for n, r in human_traces.items()}
     bot_summary = human_metrics.summarize_role(bot_per_char)
     human_summary = human_metrics.summarize_role(human_per_char) if human_per_char else None
 
-    dist_score, per_metric, mode = _score_distributions(bot_summary, human_summary)
-    judge_score = (
-        _run_llm_judge(bot_traces, human_traces, llm_url=llm_url) if use_judge else None
+    dist_score, per_metric, mode = _score_distributions(
+        bot_summary, human_summary, human_sample_count=human_sample_count
+    )
+    judge_score, judge_details = (
+        _run_llm_judge(bot_traces, human_traces, llm_url=llm_url)
+        if use_judge
+        else (None, {})
     )
     composite = (
         round(0.7 * dist_score + 0.3 * judge_score, 2)
@@ -289,7 +384,13 @@ def score_soak(
         "score": composite,
         "dist_score": dist_score,
         "judge_score": judge_score,
+        "judge_details": judge_details,
         "baseline_mode": mode,
+        "human_provenance": {
+            "dir": str(human_dir) if human_dir else "",
+            "characters": len(human_traces),
+            "samples": human_sample_count,
+        },
         "guardrails_ok": guardrails_ok,
         "guardrails": guardrails,
         "progress": progress,
@@ -319,8 +420,10 @@ def format_score_report(res: dict) -> str:
     lines.append("  metrics:")
     for k, m in sorted(res["per_metric"].items(), key=lambda kv: kv[1]["score"]):
         mark = " <-- WORST" if k == res["worst_metric"] else ""
+        bstr = f"{m['bot']:7.2f}" if m["bot"] is not None else "   None"
+        tstr = f"{m['target']:7.2f}" if m["target"] is not None else "   None"
         lines.append(
-            f"    {k:24s}: bot={m['bot']:7.2f}  target={m['target']:7.2f}  "
+            f"    {k:24s}: bot={bstr}  target={tstr}  "
             f"pts={m['score']:5.1f}{mark}"
         )
     lines.append("  guardrails:")

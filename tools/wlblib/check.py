@@ -176,6 +176,12 @@ def goldens():
     run(["python3", "-I", ROOT / "tools/snapshot/make_screen_fixtures.py", "--check"])
 
 
+def bench_tests():
+    """Unit tests for the soak suites, scorer, and hill-climbing safeguards."""
+    run(["python3", "-I", "-B", ROOT / "tools/bench/soak_suites_test.py", "-q"])
+    run(["python3", "-I", "-B", ROOT / "tools/bench/hill_climb_test.py", "-q"])
+
+
 def sanitizers():
     """Build and run unit tests under ASan+UBSan, TSan, and MSan."""
     for variant in ("asan", "tsan", "msan"):
@@ -199,6 +205,8 @@ def all_(with_sanitizers=False):
     includes()
     say("== screen goldens vs the prototype")
     goldens()
+    say("== bench & loop unit tests")
+    bench_tests()
     if with_sanitizers:
         sanitizers()
     say("ALL CHECKS PASSED")

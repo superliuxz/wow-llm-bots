@@ -8,9 +8,14 @@
 #ifndef MOD_LLM_BRAIN_SNAPSHOT_BEHAVIOR_TRACE_H_
 #define MOD_LLM_BRAIN_SNAPSHOT_BEHAVIOR_TRACE_H_
 
+#include <condition_variable>
+#include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 
 #include "snapshot/snapshot.h"
 
@@ -65,22 +70,52 @@ std::string FormatTraceSample(const TraceSample& sample);
 std::string FormatTraceChat(const TraceChat& chat);
 
 // Appends unified JSONL traces under `<root>/<role>/<name>/<YYYY-MM-DD>.jsonl`.
+// Enqueues formatted lines without disk I/O on the caller (world) thread and
+// flushes them on a background writer thread with size-capped file rotation.
 class BehaviorTraceWriter {
  public:
-  explicit BehaviorTraceWriter(std::string root_dir);
+  static constexpr uint64_t kDefaultMaxFileBytes = 10ULL * 1024 * 1024;
+  static constexpr size_t kMaxQueueLines = 8192;
+
+  explicit BehaviorTraceWriter(std::string root_dir,
+                               uint64_t max_file_bytes = kDefaultMaxFileBytes);
+  ~BehaviorTraceWriter();
+
+  BehaviorTraceWriter(const BehaviorTraceWriter&) = delete;
+  BehaviorTraceWriter& operator=(const BehaviorTraceWriter&) = delete;
 
   bool enabled() const { return !root_dir_.empty(); }
 
-  bool WriteSample(const TraceSample& sample) const;
-  bool WriteChat(const TraceChat& chat) const;
+  bool WriteSample(const TraceSample& sample);
+  bool WriteChat(const TraceChat& chat);
+
+  // Blocks until all currently queued lines have been written to disk.
+  void Flush();
 
  private:
-  bool AppendLine(std::string_view role,
-                  std::string_view name,
-                  int64_t time_ms,
-                  std::string_view line) const;
+  struct PendingLine {
+    std::string role;
+    std::string name;
+    int64_t time_ms = 0;
+    std::string line;
+  };
+
+  bool Enqueue(std::string_view role,
+               std::string_view name,
+               int64_t time_ms,
+               std::string line);
+  void WriterLoop();
+  void WriteBatch(const std::deque<PendingLine>& batch) const;
 
   std::string root_dir_;
+  uint64_t max_file_bytes_ = kDefaultMaxFileBytes;
+  std::mutex mu_;
+  std::condition_variable cv_;
+  std::condition_variable flushed_cv_;
+  std::deque<PendingLine> queue_;
+  bool writing_ = false;
+  bool stop_ = false;
+  std::thread worker_;
 };
 
 }  // namespace llm_brain

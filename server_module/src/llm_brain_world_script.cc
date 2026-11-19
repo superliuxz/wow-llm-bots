@@ -1,6 +1,7 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -164,11 +165,13 @@ TargetProgress OptionTargetProgress(Player* bot,
 // send each attached bot's snapshot to the harness.
 class LlmBrainWorldScript : public WorldScript {
  public:
-  explicit LlmBrainWorldScript(ChatInbox* inbox)
+  LlmBrainWorldScript(ChatInbox* inbox,
+                      std::atomic<BehaviorTraceWriter*>* human_trace)
       : WorldScript("LlmBrainWorldScript",
                     {WORLDHOOK_ON_AFTER_CONFIG_LOAD, WORLDHOOK_ON_STARTUP,
                      WORLDHOOK_ON_UPDATE, WORLDHOOK_ON_SHUTDOWN}),
-        inbox_(inbox) {}
+        inbox_(inbox),
+        human_trace_(human_trace) {}
 
   void OnAfterConfigLoad(bool reload) override {
     if (reload) {
@@ -251,6 +254,9 @@ class LlmBrainWorldScript : public WorldScript {
     }
     if (!config_.trace_dir.empty()) {
       trace_writer_ = std::make_unique<BehaviorTraceWriter>(config_.trace_dir);
+      if (human_trace_ && config_.observe_humans) {
+        human_trace_->store(trace_writer_.get(), std::memory_order_release);
+      }
       LOG_INFO("module",
                "mod-llm-brain: behavior tracing enabled (dir={}, "
                "observe_humans={})",
@@ -334,6 +340,10 @@ class LlmBrainWorldScript : public WorldScript {
       bridge_->Stop();
       bridge_.reset();
     }
+    if (human_trace_) {
+      human_trace_->store(nullptr, std::memory_order_release);
+    }
+    trace_writer_.reset();
   }
 
  private:
@@ -539,7 +549,7 @@ class LlmBrainWorldScript : public WorldScript {
         wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
         failed.text = "act cancelled by new choice";
         failed.command_id = cancelled_cmd_id;
-        EmitAlertingEvent(index, name, bot, std::move(payload));
+        EmitAlertingEvent(bot_index, name, bot, std::move(payload));
       }
       state.had_food_drink_aura = false;
       state.attack_idle_since = base::TimeTicks();
@@ -1072,6 +1082,7 @@ class LlmBrainWorldScript : public WorldScript {
 
   Config config_;
   const base::raw_ptr<ChatInbox> inbox_;
+  const base::raw_ptr<std::atomic<BehaviorTraceWriter*>> human_trace_;
 #if defined(LLM_BRAIN_TEST_HOOKS)
   std::unique_ptr<FixtureLoader> fixture_loader_;
 #endif
@@ -1135,8 +1146,9 @@ void AddLlmBrainScripts() {
   // Shared by the scripts, which AzerothCore deletes at shutdown in no set
   // order: never freed, so it outlives them all.
   auto* inbox = new llm_brain::ChatInbox();
-  new llm_brain::LlmBrainWorldScript(inbox);
-  llm_brain::AddLlmBrainChatScripts(inbox);
+  auto* human_trace = new std::atomic<llm_brain::BehaviorTraceWriter*>(nullptr);
+  new llm_brain::LlmBrainWorldScript(inbox, human_trace);
+  llm_brain::AddLlmBrainChatScripts(inbox, human_trace);
 #if defined(LLM_BRAIN_TEST_HOOKS)
   llm_brain::AddLlmBrainTestCommandScripts();
 #endif

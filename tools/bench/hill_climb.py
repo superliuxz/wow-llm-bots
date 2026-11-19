@@ -2,16 +2,18 @@
 """Self-improving hill-climbing loop controller (docs/plans/self-improving-loop.md).
 
 Commands:
-  lock-scorer      Write SHA-256 lock manifest covering scorer, trace writer,
-                   soak runner, and soak suite configs to var/scorer.sha256
-  init             Lock measurement files, run baseline 5 times to measure
-                   mean/sigma and XP/h floor, record round 0 in ledger.jsonl
-  eval-candidate   Verify all locked hashes, enforce edit scope, require real
-                   human traces (refuses fallback mode unless --allow-fallback),
-                   run `wlb check` + soak, require > max(min_delta, 2*sigma)
-                   and XP/h floor, re-run candidate once to confirm, and run
-                   --suite heldout on every KEEP (reverting on any guardrail
-                   failure)
+  lock-scorer      Write read-only (0444) SHA-256 lock manifest covering scorer,
+                   controller, trace writer, trace call sites, snapshot config,
+                   soak runner, and all soak suite configs
+  init             Verify (or create if absent) lock manifest, run baseline 5x
+                   to measure mean/sigma, record round 0 in ledger.jsonl
+  eval-candidate   Verify exact lock manifest, enforce edit scope (staged,
+                   unstaged, committed since --base-ref, and untracked), require
+                   verified human traces (refuses fallback unless
+                   --allow-fallback), run `wlb check` + soak, enforce fixed
+                   XP/h floor & max-deaths from `res["progress"]`, require
+                   > max(min_delta, 2*sigma) + confirmation re-run, and run
+                   --suite heldout with full floors on every KEEP
   status           Print experiment ledger summary + current worst metric/tell
 """
 
@@ -20,7 +22,9 @@ import datetime
 import fnmatch
 import hashlib
 import json
+import os
 import pathlib
+import stat
 import statistics
 import subprocess
 import sys
@@ -28,22 +32,21 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 VAR = ROOT / "var"
 LEDGER = VAR / "experiments" / "ledger.jsonl"
-LOCK_FILE = VAR / "scorer.sha256"
+DEFAULT_LOCK_FILE = VAR / "scorer.sha256"
 
-# Every file that produces or configures the soak score is tamper-locked,
-# including behavior_trace.* and its call sites in llm_brain_world_script.cc.
+# Every file that produces, configures, or gates the soak score is locked.
 LOCKED_PATTERNS = [
     "tools/bench/soak_scorer.py",
     "tools/bench/human_metrics.py",
+    "tools/bench/hill_climb.py",
     "tools/wlblib/cases/soak.py",
     "server_module/src/snapshot/behavior_trace.h",
     "server_module/src/snapshot/behavior_trace.cc",
     "server_module/src/llm_brain_world_script.cc",
-    "config/tests/soak_*.llm-brain.overrides",
+    "server_module/conf/mod-llm-brain.conf.dist",
+    "server_module/src/config/llm_brain_config.cc",
+    "config/tests/soak*.llm-brain.overrides",
 ]
-
-DEFAULT_MIN_XP_PER_HOUR = 3000.0
-DEFAULT_MAX_DEATHS_PER_RUN = 2
 
 # Allowed file globs for scored humanization rounds (bug fixes & C++ game
 # judgment belong in separate proposals, not mixed into scored rounds).
@@ -52,6 +55,9 @@ ALLOWED_EDIT_GLOBS = [
     "content/RULES.md",
     "content/identities/*",
 ]
+
+DEFAULT_MIN_XP_PER_HOUR = 3000.0
+DEFAULT_MAX_DEATHS_PER_RUN = 2
 
 sys.path.insert(0, str(ROOT / "tools" / "bench"))
 sys.path.insert(0, str(ROOT / "tools"))
@@ -69,30 +75,57 @@ def _sha256_file(path: pathlib.Path) -> str:
 
 
 def _locked_files() -> list[pathlib.Path]:
+    seen: set[pathlib.Path] = set()
     files: list[pathlib.Path] = []
     for pat in LOCKED_PATTERNS:
-        if "*" in pat:
-            files.extend(sorted(ROOT.glob(pat)))
-        else:
-            p = ROOT / pat
-            if p.exists():
+        matched = sorted(ROOT.glob(pat)) if "*" in pat else [ROOT / pat]
+        for p in matched:
+            if p.exists() and p not in seen:
+                seen.add(p)
                 files.append(p)
     return files
 
 
-def _verify_all_locks() -> tuple[bool, str]:
-    if not LOCK_FILE.exists():
-        return False, f"lock file missing: {LOCK_FILE.relative_to(ROOT)} (run lock-scorer)"
-    ok, msg = soak_scorer.verify_scorer_hash(LOCK_FILE)
+def _write_lock_manifest(lock_file: pathlib.Path, force: bool = False) -> tuple[bool, str]:
+    if lock_file.exists() and not force:
+        return False, (
+            f"lock file already exists: {lock_file} "
+            "(pass --force-relock explicitly to overwrite)"
+        )
+    digest = soak_scorer.scorer_sha256()
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    if lock_file.exists():
+        os.chmod(lock_file, stat.S_IRUSR | stat.S_IWUSR)
+    lines = [f"{digest}  tools/bench/soak_scorer.py"]
+    for p in _locked_files():
+        rel = p.relative_to(ROOT).as_posix()
+        lines.append(f"{_sha256_file(p)}  {rel}")
+    lock_file.write_text("\n".join(lines) + "\n")
+    os.chmod(lock_file, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)  # 0444 read-only
+    return True, f"locked {len(lines) - 1} measurement files (0444) -> {lock_file}"
+
+
+def _verify_all_locks(lock_file: pathlib.Path = DEFAULT_LOCK_FILE) -> tuple[bool, str]:
+    if not lock_file.exists():
+        return False, f"lock file missing: {lock_file} (run lock-scorer)"
+    ok, msg = soak_scorer.verify_scorer_hash(lock_file)
     if not ok:
         return False, msg
-    lines = [l.strip() for l in LOCK_FILE.read_text().splitlines() if l.strip()]
-    # Skip line 0 (combined soak_scorer.scorer_sha256() digest checked above).
+    lines = [l.strip() for l in lock_file.read_text().splitlines() if l.strip()]
+    recorded: dict[str, str] = {}
     for line in lines[1:]:
         parts = line.split(None, 1)
         if len(parts) != 2:
-            continue
+            return False, f"malformed lock entry: {line}"
         expected, rel = parts
+        recorded[rel] = expected
+
+    expected_rels = {p.relative_to(ROOT).as_posix() for p in _locked_files()}
+    missing = sorted(expected_rels - set(recorded.keys()))
+    if missing:
+        return False, f"lock manifest missing required files (line deleted or new soak config?): {missing}"
+
+    for rel, expected in sorted(recorded.items()):
         p = ROOT / rel
         if not p.exists():
             return False, f"locked file missing: {rel}"
@@ -102,22 +135,57 @@ def _verify_all_locks() -> tuple[bool, str]:
                 f"locked measurement file modified: {rel} "
                 f"(expected {expected[:12]}, got {actual[:12]})"
             )
-    return True, "all measurement locks verified"
+    return True, f"all {len(recorded)} measurement locks verified"
 
 
 def _has_human_traces(human_dir: pathlib.Path) -> bool:
     hdir = human_dir / "human"
-    return hdir.is_dir() and any(hdir.rglob("*.jsonl"))
+    if not hdir.is_dir():
+        return False
+    samples = 0
+    for f in hdir.rglob("*.jsonl"):
+        for line in f.read_text(errors="ignore").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if rec.get("role") == "human" and rec.get("kind") == "sample":
+                samples += 1
+                if samples >= soak_scorer.MIN_HUMAN_SAMPLES:
+                    return True
+    return False
 
 
-def _check_edit_scope(changed: list[str] | None = None) -> tuple[bool, list[str]]:
+def _changed_files_since(base_ref: str = "HEAD") -> list[str]:
+    """Lists all modified/staged/committed-since-base AND untracked files."""
+    tracked = [f for f in _git("diff", "--name-only", base_ref).splitlines() if f.strip()]
+    untracked = [
+        f for f in _git("ls-files", "--others", "--exclude-standard").splitlines() if f.strip()
+    ]
+    return sorted(set(tracked) | set(untracked))
+
+
+def _check_edit_scope(
+    changed: list[str] | None = None, base_ref: str = "HEAD"
+) -> tuple[bool, list[str]]:
     if changed is None:
-        changed = [f for f in _git("diff", "--name-only").splitlines() if f.strip()]
+        changed = _changed_files_since(base_ref)
     disallowed = [
         f for f in changed
         if not any(fnmatch.fnmatch(f, pat) for pat in ALLOWED_EDIT_GLOBS)
     ]
     return len(disallowed) == 0, disallowed
+
+
+def _extract_progress(res: dict) -> tuple[float, int]:
+    """Reads xp_per_hour and deaths from `res['progress']` (real run_soak shape)."""
+    prog = res.get("progress") or {}
+    xp_h = float(prog.get("xp_per_hour") or 0.0)
+    deaths = int(prog.get("deaths") or 0)
+    return xp_h, deaths
 
 
 def _check_fixed_guardrails(
@@ -127,13 +195,17 @@ def _check_fixed_guardrails(
     failures: list[str] = []
     if not res.get("guardrails_ok"):
         failures.append("scorer guardrails failed")
-    xp_h = float(res.get("xp_per_hour") or 0.0)
+    xp_h, deaths = _extract_progress(res)
     if xp_h < min_xp_per_hour:
         failures.append(f"xp/h={xp_h:.0f} < floor={min_xp_per_hour:.0f}")
-    deaths = int(res.get("deaths") or 0)
     if deaths > max_deaths:
         failures.append(f"deaths={deaths} > max={max_deaths}")
     return len(failures) == 0, failures
+
+
+def _revert_to(base_ref: str) -> None:
+    subprocess.run(["git", "reset", "--hard", base_ref], cwd=ROOT, check=False)
+    subprocess.run(["git", "clean", "-fd"], cwd=ROOT, check=False)
 
 
 def _load_ledger() -> list[dict]:
@@ -171,30 +243,35 @@ def _baseline_stats(entries: list[dict], suite: str) -> tuple[float, float]:
     return float(b.get("baseline_std") or 0.0), float(b.get("xp_per_hour") or 0.0)
 
 
-def cmd_lock_scorer(_args) -> int:
-    digest = soak_scorer.scorer_sha256()
-    LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    lines = [f"{digest}  tools/bench/soak_scorer.py"]
-    for p in _locked_files():
-        rel = p.relative_to(ROOT).as_posix()
-        lines.append(f"{_sha256_file(p)}  {rel}")
-    LOCK_FILE.write_text("\n".join(lines) + "\n")
-    print(f"locked {len(lines) - 1} measurement files -> {LOCK_FILE.relative_to(ROOT)}")
-    return 0
+def cmd_lock_scorer(args) -> int:
+    ok, msg = _write_lock_manifest(args.lock_file, force=args.force_relock)
+    print(msg, file=sys.stdout if ok else sys.stderr)
+    return 0 if ok else 2
 
 
 def cmd_init(args) -> int:
     if not _has_human_traces(args.human_dir):
         if not args.allow_fallback:
             print(
-                f"ABORT: no human traces found under {args.human_dir / 'human'}. "
-                "Record human play first (or pass --allow-fallback for smoke tests).",
+                f"ABORT: fewer than {soak_scorer.MIN_HUMAN_SAMPLES} verified human samples under "
+                f"{args.human_dir / 'human'}. Record human play first (or pass --allow-fallback).",
                 file=sys.stderr,
             )
             return 2
         print("WARNING: running in fallback_reference mode (--allow-fallback)", file=sys.stderr)
 
-    cmd_lock_scorer(args)
+    if args.lock_file.exists() and not args.force_relock:
+        ok, msg = _verify_all_locks(args.lock_file)
+        if not ok:
+            print(f"ABORT: {msg}", file=sys.stderr)
+            return 2
+    else:
+        ok, msg = _write_lock_manifest(args.lock_file, force=args.force_relock)
+        if not ok:
+            print(f"ABORT: {msg}", file=sys.stderr)
+            return 2
+        print(msg)
+
     scores: list[float] = []
     xps: list[float] = []
     last_res: dict = {}
@@ -206,12 +283,13 @@ def cmd_init(args) -> int:
             score=True,
             human_dir=args.human_dir,
             use_judge=args.judge,
-            verify_hash=LOCK_FILE,
+            verify_hash=args.lock_file,
             suite=args.suite,
             check_guardrails=False,
         )
+        xp_h, _deaths = _extract_progress(res)
         scores.append(float(res["score"]))
-        xps.append(float(res.get("xp_per_hour") or 0.0))
+        xps.append(xp_h)
         last_res = res
 
     mean_score = statistics.mean(scores)
@@ -239,10 +317,17 @@ def cmd_init(args) -> int:
         "baseline_scores": [round(s, 2) for s in scores],
         "baseline_std": round(std_score, 2),
         "xp_per_hour": round(mean_xp, 1),
-        "mode": last_res.get("mode"),
+        "mode": last_res.get("baseline_mode"),
+        "human_provenance": last_res.get("human_provenance"),
         "guardrails_ok": last_res["guardrails_ok"],
         "kept": True,
         "scorer_sha256": last_res["scorer_sha256"],
+        "safeguards": {
+            "allow_fallback": args.allow_fallback,
+            "judge": args.judge,
+            "lock_file": str(args.lock_file),
+            "baseline_runs": args.baseline_runs,
+        },
         "per_metric": last_res["per_metric"],
         "tells": last_res["tells"],
     }
@@ -256,7 +341,7 @@ def cmd_init(args) -> int:
 
 
 def cmd_eval_candidate(args) -> int:
-    ok, msg = _verify_all_locks()
+    ok, msg = _verify_all_locks(args.lock_file)
     if not ok:
         print(f"ABORT: {msg}", file=sys.stderr)
         return 2
@@ -264,15 +349,15 @@ def cmd_eval_candidate(args) -> int:
     if not _has_human_traces(args.human_dir):
         if not args.allow_fallback:
             print(
-                f"ABORT: no human traces found under {args.human_dir / 'human'}. "
-                "Refusing to score in fallback mode (pass --allow-fallback to override).",
+                f"ABORT: fewer than {soak_scorer.MIN_HUMAN_SAMPLES} verified human samples under "
+                f"{args.human_dir / 'human'}. Refusing fallback mode (pass --allow-fallback).",
                 file=sys.stderr,
             )
             return 2
         print("WARNING: running in fallback_reference mode (--allow-fallback)", file=sys.stderr)
 
     if not args.allow_any_files:
-        scope_ok, disallowed = _check_edit_scope()
+        scope_ok, disallowed = _check_edit_scope(base_ref=args.base_ref)
         if not scope_ok:
             print(
                 "ABORT: scored round edits files outside allowed humanization scope "
@@ -288,7 +373,7 @@ def cmd_eval_candidate(args) -> int:
         if chk.returncode != 0:
             print("REJECT: `tools/wlb check` failed", file=sys.stderr)
             if args.auto_revert:
-                subprocess.run(["git", "checkout", "--", "."], cwd=ROOT)
+                _revert_to(args.base_ref)
             return 1
 
     entries = _load_ledger()
@@ -299,7 +384,7 @@ def cmd_eval_candidate(args) -> int:
     xp_floor = float(args.min_xp_per_hour)
     max_deaths = int(args.max_deaths_per_run) * max(1, int(args.runs))
     round_num = (entries[-1]["round"] + 1) if entries else 1
-    diff_stat = _git("diff", "--stat")
+    diff_stat = _git("diff", "--stat", args.base_ref)
 
     res = soak_case.run_soak(
         minutes=args.minutes,
@@ -307,10 +392,11 @@ def cmd_eval_candidate(args) -> int:
         score=True,
         human_dir=args.human_dir,
         use_judge=args.judge,
-        verify_hash=LOCK_FILE,
+        verify_hash=args.lock_file,
         suite=args.suite,
         check_guardrails=False,
     )
+    xp_h, deaths = _extract_progress(res)
     guardrails_ok, g_failures = _check_fixed_guardrails(res, xp_floor, max_deaths)
     for f in g_failures:
         print(f"GUARDRAIL FAIL: {f}", file=sys.stderr)
@@ -329,7 +415,7 @@ def cmd_eval_candidate(args) -> int:
             score=True,
             human_dir=args.human_dir,
             use_judge=args.judge,
-            verify_hash=LOCK_FILE,
+            verify_hash=args.lock_file,
             suite=args.suite,
             check_guardrails=False,
         )
@@ -356,14 +442,14 @@ def cmd_eval_candidate(args) -> int:
             score=True,
             human_dir=args.human_dir,
             use_judge=args.judge,
-            verify_hash=LOCK_FILE,
+            verify_hash=args.lock_file,
             suite="heldout",
             check_guardrails=False,
         )
         heldout_score = float(ho["score"])
-        heldout_ok = bool(ho["guardrails_ok"])
+        heldout_ok, ho_failures = _check_fixed_guardrails(ho, xp_floor, max_deaths)
         if not heldout_ok:
-            print("HELD-OUT GATE FAILED: reverting candidate", file=sys.stderr)
+            print(f"HELD-OUT GATE FAILED ({ho_failures}): reverting candidate", file=sys.stderr)
             improved = False
 
     entry = {
@@ -381,14 +467,27 @@ def cmd_eval_candidate(args) -> int:
         "score": res["score"],
         "confirm_score": confirm_score,
         "required_delta": round(required_delta, 2),
-        "xp_per_hour": res.get("xp_per_hour"),
+        "xp_per_hour": round(xp_h, 1),
+        "deaths": deaths,
         "xp_floor": round(xp_floor, 1),
-        "mode": res.get("mode"),
+        "max_deaths": max_deaths,
+        "mode": res.get("baseline_mode"),
+        "human_provenance": res.get("human_provenance"),
         "guardrails_ok": guardrails_ok,
         "heldout_score": heldout_score,
         "heldout_guardrails_ok": heldout_ok,
         "kept": improved,
         "scorer_sha256": res["scorer_sha256"],
+        "safeguards": {
+            "allow_fallback": args.allow_fallback,
+            "allow_any_files": args.allow_any_files,
+            "judge": args.judge,
+            "no_confirm": args.no_confirm,
+            "no_heldout": args.no_heldout,
+            "skip_check": args.skip_check,
+            "base_ref": args.base_ref,
+            "lock_file": str(args.lock_file),
+        },
         "per_metric": res["per_metric"],
         "tells": res["tells"],
     }
@@ -402,8 +501,8 @@ def cmd_eval_candidate(args) -> int:
         f"guardrails={'PASS' if guardrails_ok else 'FAIL'}) =="
     )
     if not improved and args.auto_revert:
-        subprocess.run(["git", "checkout", "--", "."], cwd=ROOT)
-        print("auto-reverted working tree changes (`git checkout -- .`)")
+        _revert_to(args.base_ref)
+        print(f"auto-reverted working tree (`git reset --hard {args.base_ref} && git clean -fd`)")
     return 0 if improved else 1
 
 
@@ -431,14 +530,18 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Hill-climbing self-improvement controller")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("lock-scorer", help="Write SHA-256 lock manifest for all measurement files")
+    p_lock = sub.add_parser("lock-scorer", help="Write read-only SHA-256 lock manifest")
+    p_lock.add_argument("--lock-file", type=pathlib.Path, default=DEFAULT_LOCK_FILE)
+    p_lock.add_argument("--force-relock", action="store_true")
 
-    p_init = sub.add_parser("init", help="Lock measurement files and record 5x baseline")
+    p_init = sub.add_parser("init", help="Verify/create lock manifest and record 5x baseline")
     p_init.add_argument("--minutes", type=float, default=5.0)
     p_init.add_argument("--runs", type=int, default=2)
     p_init.add_argument("--baseline-runs", type=int, default=5)
     p_init.add_argument("--suite", default="varied")
     p_init.add_argument("--human-dir", type=pathlib.Path, default=VAR / "human_baseline")
+    p_init.add_argument("--lock-file", type=pathlib.Path, default=DEFAULT_LOCK_FILE)
+    p_init.add_argument("--force-relock", action="store_true")
     p_init.add_argument("--judge", action="store_true", default=True)
     p_init.add_argument("--no-judge", action="store_false", dest="judge")
     p_init.add_argument("--allow-fallback", action="store_true")
@@ -450,10 +553,12 @@ def main() -> int:
     p_eval.add_argument("--minutes", type=float, default=5.0)
     p_eval.add_argument("--runs", type=int, default=2)
     p_eval.add_argument("--suite", default="varied")
+    p_eval.add_argument("--base-ref", default="HEAD")
     p_eval.add_argument("--min-delta", type=float, default=0.5)
     p_eval.add_argument("--min-xp-per-hour", type=float, default=DEFAULT_MIN_XP_PER_HOUR)
     p_eval.add_argument("--max-deaths-per-run", type=int, default=DEFAULT_MAX_DEATHS_PER_RUN)
     p_eval.add_argument("--human-dir", type=pathlib.Path, default=VAR / "human_baseline")
+    p_eval.add_argument("--lock-file", type=pathlib.Path, default=DEFAULT_LOCK_FILE)
     p_eval.add_argument("--judge", action="store_true", default=True)
     p_eval.add_argument("--no-judge", action="store_false", dest="judge")
     p_eval.add_argument("--allow-fallback", action="store_true")

@@ -4,13 +4,18 @@
 
 #include <cstdint>
 #include <ctime>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <ios>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "base/strings/strcat.h"
 #include "base/strings/stringprintf.h"
@@ -193,43 +198,124 @@ std::string FormatTraceChat(const TraceChat& c) {
        ",\"text\":", JsonEscape(c.text), "}"});
 }
 
-BehaviorTraceWriter::BehaviorTraceWriter(std::string root_dir)
-    : root_dir_(std::move(root_dir)) {}
+BehaviorTraceWriter::BehaviorTraceWriter(std::string root_dir,
+                                         uint64_t max_file_bytes)
+    : root_dir_(std::move(root_dir)), max_file_bytes_(max_file_bytes) {
+  if (enabled()) {
+    worker_ = std::thread(&BehaviorTraceWriter::WriterLoop, this);
+  }
+}
 
-bool BehaviorTraceWriter::WriteSample(const TraceSample& sample) const {
+BehaviorTraceWriter::~BehaviorTraceWriter() {
+  if (!worker_.joinable()) {
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    stop_ = true;
+  }
+  cv_.notify_one();
+  worker_.join();
+}
+
+bool BehaviorTraceWriter::WriteSample(const TraceSample& sample) {
   if (!enabled()) {
     return false;
   }
-  return AppendLine(sample.role, sample.name, sample.time_ms,
-                    FormatTraceSample(sample));
+  return Enqueue(sample.role, sample.name, sample.time_ms,
+                 FormatTraceSample(sample));
 }
 
-bool BehaviorTraceWriter::WriteChat(const TraceChat& chat) const {
+bool BehaviorTraceWriter::WriteChat(const TraceChat& chat) {
   if (!enabled()) {
     return false;
   }
-  return AppendLine(chat.role, chat.name, chat.time_ms, FormatTraceChat(chat));
+  return Enqueue(chat.role, chat.name, chat.time_ms, FormatTraceChat(chat));
 }
 
-bool BehaviorTraceWriter::AppendLine(std::string_view role,
-                                     std::string_view name,
-                                     int64_t time_ms,
-                                     std::string_view line) const {
-  std::error_code ec;
-  const std::filesystem::path dir = std::filesystem::path(root_dir_) /
-                                    SafePathComponent(role) /
-                                    SafePathComponent(name);
-  std::filesystem::create_directories(dir, ec);
-  if (ec) {
-    return false;
+void BehaviorTraceWriter::Flush() {
+  if (!worker_.joinable()) {
+    return;
   }
-  const std::filesystem::path file = dir / (UtcDateString(time_ms) + ".jsonl");
-  std::ofstream out(file, std::ios::app);
-  if (!out) {
-    return false;
+  std::unique_lock<std::mutex> lock(mu_);
+  flushed_cv_.wait(lock, [this] { return queue_.empty() && !writing_; });
+}
+
+bool BehaviorTraceWriter::Enqueue(std::string_view role,
+                                  std::string_view name,
+                                  int64_t time_ms,
+                                  std::string line) {
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (stop_ || queue_.size() >= kMaxQueueLines) {
+      return false;
+    }
+    queue_.push_back(
+        {std::string(role), std::string(name), time_ms, std::move(line)});
   }
-  out << line << '\n';
-  return static_cast<bool>(out);
+  cv_.notify_one();
+  return true;
+}
+
+void BehaviorTraceWriter::WriterLoop() {
+  for (;;) {
+    std::deque<PendingLine> batch;
+    {
+      std::unique_lock<std::mutex> lock(mu_);
+      cv_.wait(lock, [this] { return stop_ || !queue_.empty(); });
+      if (queue_.empty() && stop_) {
+        flushed_cv_.notify_all();
+        return;
+      }
+      batch.swap(queue_);
+      writing_ = true;
+    }
+    WriteBatch(batch);
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      writing_ = false;
+      if (queue_.empty()) {
+        flushed_cv_.notify_all();
+      }
+    }
+  }
+}
+
+void BehaviorTraceWriter::WriteBatch(
+    const std::deque<PendingLine>& batch) const {
+  // Group lines by target file so each file is opened at most once per batch.
+  std::unordered_map<std::string, std::vector<const PendingLine*>> grouped;
+  for (const PendingLine& item : batch) {
+    const std::filesystem::path dir = std::filesystem::path(root_dir_) /
+                                      SafePathComponent(item.role) /
+                                      SafePathComponent(item.name);
+    const std::filesystem::path file =
+        dir / (UtcDateString(item.time_ms) + ".jsonl");
+    grouped[file.string()].push_back(&item);
+  }
+  for (const auto& [path_str, items] : grouped) {
+    const std::filesystem::path file(path_str);
+    std::error_code ec;
+    std::filesystem::create_directories(file.parent_path(), ec);
+    if (ec) {
+      continue;
+    }
+    if (max_file_bytes_ > 0 && std::filesystem::exists(file, ec)) {
+      const uint64_t sz = std::filesystem::file_size(file, ec);
+      if (!ec && sz >= max_file_bytes_) {
+        std::filesystem::path rotated = file;
+        rotated.replace_extension(".1.jsonl");
+        std::filesystem::rename(file, rotated, ec);
+      }
+    }
+    std::ofstream out(file, std::ios::app);
+    if (!out) {
+      continue;
+    }
+    for (const PendingLine* item : items) {
+      out << item->line << '\n';
+    }
+  }
 }
 
 }  // namespace llm_brain
