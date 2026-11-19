@@ -1,0 +1,7 @@
+# Varied soak scenario 3 (mid/high-level): 5 Horde questing bots (L15-L70) +
+# 5-man Horde dungeon party (Halls of Lightning L80: Tank/Healer/3DPS).
+LlmBrain.Bots = "Loada,Loadb,Loadc,Loadd,Loade,Loadf,Loadg,Loadh,Loadi,Loadj"
+LlmBrain.TestFixtures = "Loada=new:orc:shaman,Loadb=new:undead:warlock,Loadc=new:tauren:warrior,Loadd=new:troll:rogue,Loade=new:bloodelf:priest,Loadf=new:tauren:warrior,Loadg=new:bloodelf:paladin,Loadh=new:troll:mage,Loadi=new:orc:hunter,Loadj=new:undead:warlock"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.TraceDir = "@ROOT@/var/soak_traces"
+LlmBrain.ObserveHumans = 1

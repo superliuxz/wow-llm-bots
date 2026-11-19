@@ -7,7 +7,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <numbers>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -188,40 +187,52 @@ void FillSpots(const WorldPlaces& world,
     out->push_back(std::move(spot));
   }
 
-  // No grind spot at all (an instance, a city): walkable rays ~80 yd out.
-  if (!out->empty() || !map || !path_owner) {
+  // No grind spot at all (an instance, a city): walkable rays along 8 compass
+  // directions at multiple distances on the bot's actual map (including
+  // dungeon instances) so narrow/sloped corridors yield a valid Explore option.
+  if (!out->empty() || !path_owner) {
     return;
   }
-  constexpr float kPi = std::numbers::pi_v<float>;
-  for (const float angle : {0.0f, kPi / 2, kPi, -kPi / 2}) {
+  Map* probe_map = path_owner->GetMap();
+  if (!probe_map) {
+    probe_map = map;
+  }
+  if (!probe_map) {
+    return;
+  }
+  for (const float angle : ExploreRayAngles()) {
     if (out->size() >= kMaxSpots) {
       break;
     }
-    const float tx = view.pos.x + 80.0f * std::cos(angle);
-    const float ty = view.pos.y + 80.0f * std::sin(angle);
-    const float tz = map->GetHeight(view.phase_mask, tx, ty, view.pos.z + 5.0f);
-    if (tz == INVALID_HEIGHT || tz == VMAP_INVALID_HEIGHT_VALUE) {
-      continue;
+    for (const float ray_dist : ExploreRayDistancesYd()) {
+      const float tx = view.pos.x + ray_dist * std::cos(angle);
+      const float ty = view.pos.y + ray_dist * std::sin(angle);
+      const float tz =
+          probe_map->GetHeight(view.phase_mask, tx, ty, view.pos.z + 10.0f);
+      if (tz == INVALID_HEIGHT || tz == VMAP_INVALID_HEIGHT_VALUE) {
+        continue;
+      }
+      PathGenerator path(path_owner);
+      path.CalculatePath(tx, ty, tz);
+      constexpr uint32_t kOk =
+          PATHFIND_NORMAL | PATHFIND_INCOMPLETE | PATHFIND_FARFROMPOLY;
+      if ((path.GetPathType() & ~kOk) != 0) {
+        continue;
+      }
+      const G3D::Vector3& end = path.GetActualEndPosition();
+      const float dist = Dist(view.pos, end.x, end.y, end.z);
+      const pb::Direction dir = DirFrom(view.pos, end.x, end.y);
+      if (dist < kMinTravelDistYd || (seen_dirs & DirBit(dir)) != 0) {
+        continue;
+      }
+      seen_dirs |= DirBit(dir);
+      out->push_back({SpotId(view.map_id, end.x, end.y),
+                      dir,
+                      dist,
+                      "",
+                      {end.x, end.y, end.z}});
+      break;
     }
-    PathGenerator path(path_owner);
-    path.CalculatePath(tx, ty, tz);
-    constexpr uint32_t kOk =
-        PATHFIND_NORMAL | PATHFIND_INCOMPLETE | PATHFIND_FARFROMPOLY;
-    if ((path.GetPathType() & ~kOk) != 0) {
-      continue;
-    }
-    const G3D::Vector3& end = path.GetActualEndPosition();
-    const float dist = Dist(view.pos, end.x, end.y, end.z);
-    const pb::Direction dir = DirFrom(view.pos, end.x, end.y);
-    if (dist < kMinTravelDistYd || (seen_dirs & DirBit(dir)) != 0) {
-      continue;
-    }
-    seen_dirs |= DirBit(dir);
-    out->push_back({SpotId(view.map_id, end.x, end.y),
-                    dir,
-                    dist,
-                    "",
-                    {end.x, end.y, end.z}});
   }
 }
 

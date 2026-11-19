@@ -1,0 +1,7 @@
+# Varied soak scenario 2: 5 Alliance questing bots (varied classes/zones) +
+# 5-man Alliance dungeon party (Deadmines L20: Tank/Healer/3DPS).
+LlmBrain.Bots = "Loada,Loadb,Loadc,Loadd,Loade,Loadf,Loadg,Loadh,Loadi,Loadj"
+LlmBrain.TestFixtures = "Loada=new:human:paladin,Loadb=new:nightelf:hunter,Loadc=new:dwarf:warrior,Loadd=new:gnome:warlock,Loade=new:draenei:shaman,Loadf=new:dwarf:paladin,Loadg=new:nightelf:druid,Loadh=new:human:rogue,Loadi=new:gnome:mage,Loadj=new:draenei:hunter"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.TraceDir = "@ROOT@/var/soak_traces"
+LlmBrain.ObserveHumans = 1

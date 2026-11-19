@@ -35,7 +35,7 @@ std::vector<std::pair<std::string, std::string>> ParseFixtures(
       continue;
     }
     std::string file = entry.substr(eq + 1);
-    if (!dir.empty() && file.front() != '/') {
+    if (!dir.empty() && file.front() != '/' && !file.starts_with("new:")) {
       file = dir + "/" + file;
     }
     fixtures.emplace_back(entry.substr(0, eq), std::move(file));

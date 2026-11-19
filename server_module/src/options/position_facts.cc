@@ -4,10 +4,18 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <numbers>
+#include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
+#include "base/strings/strcat.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/time/time.h"
 #include "snapshot/perception.h"
 #include "snapshot/snapshot.h"
 
@@ -22,6 +30,108 @@ float Dist(const pb::Vec3& a, float x, float y, float z) {
 
 pb::Direction DirFrom(const pb::Vec3& from, float x, float y) {
   return CompassDirection(x - from.x, y - from.y);
+}
+
+std::span<const float> ExploreRayAngles() {
+  constexpr float kPi = std::numbers::pi_v<float>;
+  static constexpr float kAngles[] = {0.0f, kPi / 4,      kPi / 2,  3 * kPi / 4,
+                                      kPi,  -3 * kPi / 4, -kPi / 2, -kPi / 4};
+  return kAngles;
+}
+
+std::span<const float> ExploreRayDistancesYd() {
+  static constexpr float kDists[] = {60.0f, 35.0f, 80.0f};
+  return kDists;
+}
+
+WalkProgressVerdict CheckWalkProgress(const pb::Vec3& pos,
+                                      float dist_to_dest,
+                                      base::TimeTicks now,
+                                      WalkProgressTracker* tracker) {
+  constexpr float kArrivalYd = 10.0f;
+  constexpr float kNearEnoughArrivalYd = 12.0f;
+  constexpr float kStallProgressYd = 5.0f;
+  constexpr float kCloserProgressYd = 3.0f;
+  constexpr base::TimeDelta kStallTimeout = base::Seconds(10);
+  constexpr base::TimeDelta kNoCloserTimeout = base::Seconds(30);
+
+  if (dist_to_dest <= kArrivalYd) {
+    return WalkProgressVerdict::kArrived;
+  }
+  if (Dist(tracker->progress_pos, pos.x, pos.y, pos.z) >= kStallProgressYd) {
+    tracker->progress_pos = pos;
+    tracker->last_progress_at = now;
+  } else if (now - tracker->last_progress_at >= kStallTimeout) {
+    return WalkProgressVerdict::kStuck;
+  }
+
+  if (tracker->last_closer_at.is_null() ||
+      dist_to_dest + kCloserProgressYd < tracker->best_dist_to_dest) {
+    tracker->best_dist_to_dest = dist_to_dest;
+    tracker->last_closer_at = now;
+  } else if (now - tracker->last_closer_at >= kNoCloserTimeout) {
+    return dist_to_dest <= kNearEnoughArrivalYd ? WalkProgressVerdict::kArrived
+                                                : WalkProgressVerdict::kStuck;
+  }
+  return WalkProgressVerdict::kContinue;
+}
+
+TalkOutcome FormatTalkOutcome(std::string_view npc_name,
+                              const std::vector<std::string>& done,
+                              std::string_view trainer_refusal) {
+  if (done.empty()) {
+    if (!trainer_refusal.empty()) {
+      return {std::string(trainer_refusal), ""};
+    }
+    return {base::StrCat({npc_name, " has nothing for you"}), ""};
+  }
+  return {"", base::StrCat({"talked to ", npc_name, ": ",
+                            base::JoinString(done, "; ")})};
+}
+
+bool HasCorpseTakeableLoot(bool is_dead,
+                           bool has_lootable_flag,
+                           bool allowed_to_loot,
+                           uint32_t gold,
+                           size_t takeable_slot_count) {
+  return is_dead && has_lootable_flag && allowed_to_loot &&
+         (gold > 0 || takeable_slot_count > 0);
+}
+
+bool ShouldApproachOutOfLosTarget(bool is_alive,
+                                  bool is_friendly,
+                                  bool is_valid_attack_target,
+                                  bool in_los) {
+  return is_alive && !is_friendly && is_valid_attack_target && !in_los;
+}
+
+AttackStepAction CheckAttackStep(bool in_combat,
+                                 bool casting,
+                                 bool moving,
+                                 float dist_yd,
+                                 bool in_los,
+                                 base::TimeTicks now,
+                                 base::TimeTicks* idle_since) {
+  constexpr float kPullRangeYd = 20.0f;
+  constexpr base::TimeDelta kAttackStuckTimeout = base::Seconds(8);
+  if (in_combat || casting) {
+    *idle_since = base::TimeTicks();
+    return AttackStepAction::kActive;
+  }
+  if (moving) {
+    *idle_since = base::TimeTicks();
+    return (in_los && dist_yd <= kPullRangeYd)
+               ? AttackStepAction::kEngageWhileMoving
+               : AttackStepAction::kActive;
+  }
+  if (idle_since->is_null()) {
+    *idle_since = now;
+  }
+  if (now - *idle_since >= kAttackStuckTimeout) {
+    return AttackStepAction::kStuck;
+  }
+  return (dist_yd > kPullRangeYd || !in_los) ? AttackStepAction::kRetryWalk
+                                             : AttackStepAction::kRetryExecute;
 }
 
 void RefreshFrom(const pb::Vec3& pos, PositionFacts* facts) {

@@ -1,14 +1,26 @@
 """Live multi-bot soak test + human-likeness scorer on the isolated test server.
 
-Runs 10 questing bots (`config/tests/soak.llm-brain.overrides`) with real
+Supports both open-world questing and rotated 5-man Tank/Healer/3DPS dungeon
+runs across varied classes, factions, levels, and zones, with real
 `out/common/harness run` + real `llama-server` (Gemma 4) and unified behavior
-tracing enabled (`var/soak_traces/`). Supports multi-run averaging (`--runs N`)
-and composite human-likeness + guardrail scoring (`--score`,
-`tools/bench/soak_scorer.py`).
+tracing (`var/soak_traces/`).
+
+Suites (`--suite`):
+  - `varied` (default): 2 varied runs per evaluation —
+      1. `soak_horde_rfc`: 5 Horde questing classes across 5 zones +
+         5-man Horde Tank/Healer/3DPS in Ragefire Chasm (L15)
+      2. `soak_alliance_dm`: 5 Alliance questing classes across 5 zones +
+         5-man Alliance Tank/Healer/3DPS in Deadmines (L20)
+  - `heldout`: generalization check (never used for hill-climb tuning) —
+      1. `soak_northrend_hol`: 5 mid/high-level Horde questing bots +
+         5-man Halls of Lightning (L80)
+      2. `soak_heldout_uk`: 5 unseen Alliance questing classes +
+         5-man Utgarde Keep (L70)
+  - `quest`: legacy 10-bot level-1 Priest Valley of Trials soak (`soak`)
+  - Or any single scenario name above.
 """
 
 import json
-import math
 import pathlib
 import shutil
 import statistics
@@ -17,8 +29,8 @@ import sys
 import tempfile
 import time
 
-from wlblib import build
-from wlblib.common import OUT, ROOT, VAR, say
+from wlblib import build, server
+from wlblib.common import OUT, ROOT, TEST, VAR, say
 from wlblib.testing import LlamaServer, Stack, expect
 
 sys.path.insert(0, str(ROOT / "tools" / "bench"))
@@ -26,22 +38,138 @@ import human_metrics  # noqa: E402
 import soak_scorer  # noqa: E402
 
 NAME = "soak"
-DESCRIPTION = "10-bot live questing soak with real harness + llama-server + scorer"
+DESCRIPTION = "varied questing + 5-man Tank/Healer/3DPS dungeon soak + scorer"
 TEST_CONFIG = "soak"
 BOT = "Loada"
 ONLINE = 10
 
+DUNGEON_PARTY = ["Loadf", "Loadg", "Loadh", "Loadi", "Loadj"]
+
+# Each scenario specifies its test config override plus optional per-bot gear/tele
+# and 5-man dungeon party setup run via `llmtest` right after login.
+SCENARIOS = {
+    "soak": {
+        "config": "soak",
+        "desc": "10x L1 Priest questing (Valley of Trials)",
+        "quest_setup": [],
+        "dungeon": None,
+    },
+    "soak_horde_rfc": {
+        "config": "soak_horde_rfc",
+        "desc": "5 Horde questing (War/Dru/Mag/Pal/Hun) + 5-man RFC L15 (War/Pri/Rog/Mag/Sha)",
+        "quest_setup": [
+            # Loade: L15 Troll Hunter at The Sepulcher (Silverpine)
+            ("Loade", 15, (0, 504.534, 1539.08, 129.502)),
+        ],
+        "dungeon": {
+            "name": "Ragefire Chasm",
+            "level": 15,
+            "map": 389,
+            "pos": (3.81, -14.82, -17.84),
+        },
+    },
+    "soak_alliance_dm": {
+        "config": "soak_alliance_dm",
+        "desc": "5 Alliance questing (Pal/Hun/War/Loc/Sha) + 5-man Deadmines L20 (Pal/Dru/Rog/Mag/Hun)",
+        "quest_setup": [
+            # Loade: L15 Draenei Shaman at Sentinel Hill (Westfall)
+            ("Loade", 15, (0, -10624.5, 1096.66, 33.7641)),
+        ],
+        "dungeon": {
+            "name": "Deadmines",
+            "level": 20,
+            "map": 36,
+            "pos": (-16.4, -383.07, 61.78),
+        },
+    },
+    "soak_northrend_hol": {
+        "config": "soak_northrend_hol",
+        "desc": "5 mid/high Horde questing (L15-L70) + 5-man Halls of Lightning L80",
+        "quest_setup": [
+            ("Loada", 15, (0, 504.534, 1539.08, 129.502)),
+            ("Loadb", 35, (0, -12388.9, 172.578, 2.83358)),
+            ("Loadc", 35, (0, -12388.9, 172.578, 2.83358)),
+            ("Loadd", 70, (571, 2741.29, 6097.16, 76.9055)),
+            ("Loade", 70, (571, 2741.29, 6097.16, 76.9055)),
+        ],
+        "dungeon": {
+            "name": "Halls of Lightning",
+            "level": 80,
+            "map": 602,
+            "pos": (1331.47, 259.619, 53.398),
+        },
+    },
+    "soak_heldout_uk": {
+        "config": "soak_heldout_uk",
+        "desc": "HELD-OUT: 5 unseen Alliance questing + 5-man Utgarde Keep L70",
+        "quest_setup": [
+            ("Loadd", 15, (0, -10624.5, 1096.66, 33.7641)),
+        ],
+        "dungeon": {
+            "name": "Utgarde Keep",
+            "level": 70,
+            "map": 574,
+            "pos": (153.789, -86.548, 12.551),
+        },
+    },
+}
+
+SUITES = {
+    "varied": ["soak_horde_rfc", "soak_alliance_dm"],
+    "heldout": ["soak_northrend_hol", "soak_heldout_uk"],
+    "quest": ["soak"],
+}
+
+
+def _apply_scenario_setup(scenario: dict) -> None:
+    """Runs `llmtest gear` / `group` / `tele` for mid/high quest bots and the 5-man party."""
+    cmds = []
+    for bot_name, level, tele in scenario.get("quest_setup", []):
+        cmds.append(f"llmtest gear {bot_name} {level}")
+        if tele:
+            m, x, y, z = tele
+            cmds.append(f"llmtest tele {bot_name} {m} {x} {y} {z} 0")
+
+    dungeon = scenario.get("dungeon")
+    if dungeon:
+        leader = DUNGEON_PARTY[0]
+        for member in DUNGEON_PARTY[1:]:
+            cmds.append(f"llmtest group {leader} {member}")
+        lvl = dungeon["level"]
+        for member in DUNGEON_PARTY:
+            cmds.append(f"llmtest gear {member} {lvl}")
+
+    if not cmds:
+        return
+
+    for cmd in cmds:
+        server.console(cmd, inst=TEST)
+
+    if dungeon:
+        # Let gear/spell setup settle briefly before teleporting the 5-man party
+        # into the shared dungeon instance.
+        time.sleep(2.0)
+        m = dungeon["map"]
+        x, y, z = dungeon["pos"]
+        for member in DUNGEON_PARTY:
+            server.console(f"llmtest tele {member} {m} {x} {y} {z} 0", inst=TEST)
+        time.sleep(3.0)
+
 
 def _run_once(
+    scenario_name: str,
     minutes: float,
     human_dir: pathlib.Path | None,
     use_judge: bool,
 ) -> dict:
+    scenario = SCENARIOS[scenario_name]
     trace_dir = VAR / "soak_traces"
     shutil.rmtree(trace_dir, ignore_errors=True)
     trace_dir.mkdir(parents=True, exist_ok=True)
 
-    with Stack(TEST_CONFIG, BOT, online=ONLINE) as stack:
+    say(f"soak scenario [{scenario_name}]: {scenario['desc']}")
+    with Stack(scenario["config"], BOT, online=ONLINE) as stack:
+        _apply_scenario_setup(scenario)
         with tempfile.TemporaryDirectory(prefix="wlb-soak-") as tmp:
             tmp_dir = pathlib.Path(tmp)
             bots_dir = tmp_dir / "bots"
@@ -66,7 +194,10 @@ def _run_once(
             duration_s = max(30.0, minutes * 60.0)
             t0 = time.monotonic()
             try:
-                say(f"soak: running {ONLINE} bots for {duration_s:.0f} s with real llama-server...")
+                say(
+                    f"soak [{scenario_name}]: running {ONLINE} bots for {duration_s:.0f} s "
+                    "with real llama-server..."
+                )
                 while time.monotonic() - t0 < duration_s:
                     if proc.poll() is not None:
                         tail = "\n".join(harness_log.read_text().splitlines()[-20:])
@@ -117,6 +248,7 @@ def _run_once(
                 else 0.0
             )
             run_stats = {
+                "scenario": scenario_name,
                 "bots": ONLINE,
                 "elapsed_min": elapsed_min,
                 "decisions": total_decs,
@@ -126,58 +258,117 @@ def _run_once(
                 "llm_errors": llm_errors,
                 "invalid_plans": invalid_plans,
             }
-            return soak_scorer.score_soak(
+            res = soak_scorer.score_soak(
                 trace_dir,
                 run_stats=run_stats,
                 human_dir=human_dir,
                 use_judge=use_judge,
             )
+            res["scenario"] = scenario_name
+            return res
+
+
+def _resolve_scenarios(suite: str, runs: int) -> list[str]:
+    if suite in SUITES:
+        base = SUITES[suite]
+        if runs <= 0:
+            return list(base)
+        # Repeat/cycle through the suite so `runs` matches requested run count,
+        # or if `runs == 1` and suite has multiple scenarios, run the full suite
+        # only when runs >= len(base).
+        if suite in ("varied", "heldout") and runs == 1:
+            return list(base)
+        return [base[i % len(base)] for i in range(runs)]
+    if suite in SCENARIOS:
+        return [suite] * max(1, runs)
+    raise ValueError(f"unknown soak suite/scenario: {suite}")
+
+
+def _aggregate_results(results: list[dict]) -> dict:
+    if len(results) == 1:
+        return results[0]
+    agg = dict(results[-1])
+    agg["score"] = round(statistics.mean(r["score"] for r in results), 2)
+    agg["dist_score"] = round(statistics.mean(r["dist_score"] for r in results), 2)
+    agg["guardrails_ok"] = all(r["guardrails_ok"] for r in results)
+    agg["run_scores"] = [r["score"] for r in results]
+    agg["scenarios"] = [r.get("scenario", "soak") for r in results]
+
+    # Average per-metric bot values and scores across all runs.
+    all_keys = sorted({k for r in results for k in r.get("per_metric", {})})
+    per_metric = {}
+    for k in all_keys:
+        vals = [r["per_metric"][k] for r in results if k in r.get("per_metric", {})]
+        per_metric[k] = {
+            "bot": round(statistics.mean(v["bot"] for v in vals), 3),
+            "target": round(vals[0]["target"], 3),
+            "score": round(statistics.mean(v["score"] for v in vals), 1),
+        }
+    agg["per_metric"] = per_metric
+    if per_metric:
+        agg["worst_metric"] = min(per_metric.items(), key=lambda kv: kv[1]["score"])[0]
+
+    # Aggregate progress across runs.
+    agg["progress"] = {
+        "total_xp": sum(r["progress"]["total_xp"] for r in results),
+        "xp_per_hour": round(
+            statistics.mean(r["progress"]["xp_per_hour"] for r in results), 1
+        ),
+        "deaths": sum(r["progress"]["deaths"] for r in results),
+        "moved_bots": sum(r["progress"]["moved_bots"] for r in results),
+        "stuck_bots": sum(r["progress"]["stuck_bots"] for r in results),
+        "traced_bots": sum(r["progress"]["traced_bots"] for r in results),
+    }
+    agg["tells"] = sorted({t for r in results for t in r.get("tells", [])})
+    return agg
 
 
 def run_soak(
-    minutes: float = 2.0,
-    runs: int = 1,
+    minutes: float = 5.0,
+    runs: int = 2,
     score: bool = False,
     human_dir: pathlib.Path | None = None,
     use_judge: bool = False,
     verify_hash: pathlib.Path | None = None,
+    suite: str = "varied",
+    check_guardrails: bool = True,
 ) -> dict:
     if verify_hash:
         ok, msg = soak_scorer.verify_scorer_hash(verify_hash)
         expect(ok, f"scorer integrity check failed: {msg}")
 
+    scenarios = _resolve_scenarios(suite, runs)
     build.common("default", tests=False)
     results = []
     with LlamaServer(slots=16):
-        for r in range(max(1, runs)):
-            if runs > 1:
-                say(f"== soak run {r + 1}/{runs} ==")
-            res = _run_once(minutes=minutes, human_dir=human_dir, use_judge=use_judge)
+        for idx, sc_name in enumerate(scenarios):
+            if len(scenarios) > 1:
+                say(f"== soak run {idx + 1}/{len(scenarios)} ({sc_name}) ==")
+            res = _run_once(
+                scenario_name=sc_name,
+                minutes=minutes,
+                human_dir=human_dir,
+                use_judge=use_judge,
+            )
             results.append(res)
             st = res["run_stats"]
             p = res["progress"]
             say(
-                f"soak summary ({st['elapsed_min']:.1f} min, {ONLINE} bots): "
-                f"decisions={st['decisions']}, max_wakes/min/bot={st['max_wakes_per_min']:.1f}, "
+                f"soak summary [{sc_name}] ({st['elapsed_min']:.1f} min, {ONLINE} bots): "
+                f"score={res['score']:.2f}, decisions={st['decisions']}, "
+                f"max_wakes/min/bot={st['max_wakes_per_min']:.1f}, "
                 f"do_p50={st['do_p50_ms']:.0f}ms, do_p95={st['do_p95_ms']:.0f}ms, "
                 f"errors={st['llm_errors']}, invalid={st['invalid_plans']}, "
-                f"xp/h={p['xp_per_hour']:.0f}, moved={p['moved_bots']}/{p['traced_bots']}"
+                f"xp/h={p['xp_per_hour']:.0f}, deaths={p['deaths']}, "
+                f"moved={p['moved_bots']}/{p['traced_bots']}"
             )
 
-    # Aggregate across runs (average score; guardrails must hold on every run).
-    if len(results) == 1:
-        agg = results[0]
-    else:
-        agg = dict(results[-1])
-        agg["score"] = round(statistics.mean(r["score"] for r in results), 2)
-        agg["dist_score"] = round(statistics.mean(r["dist_score"] for r in results), 2)
-        agg["guardrails_ok"] = all(r["guardrails_ok"] for r in results)
-        agg["run_scores"] = [r["score"] for r in results]
-
+    agg = _aggregate_results(results)
     if score:
         say(soak_scorer.format_score_report(agg))
     else:
         say(human_metrics.format_report(VAR / "soak_traces"))
 
-    expect(agg["guardrails_ok"], "one or more soak guardrails failed (see above)")
+    if check_guardrails:
+        expect(agg["guardrails_ok"], "one or more soak guardrails failed (see above)")
     return agg

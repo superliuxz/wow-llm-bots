@@ -9,8 +9,20 @@ The scorer lives in `tools/bench/soak_scorer.py` + `tools/bench/human_metrics.py
 through one command:
 
 ```bash
-tools/wlb test soak --minutes 2 --runs 2 --score
+tools/wlb test soak --suite varied --minutes 5 --runs 2 --score
 ```
+
+### Varied scenario suites (anti-overfitting)
+
+To avoid overfitting to one class, starting zone, or dungeon, `soak` runs a stratified mix of
+open-world questing and 5-man Tank/Healer/3DPS dungeon parties using `new:<race>:<class>` fixtures
+in `FixtureLoader` + `llmtest group`/`gear`/`tele`:
+
+| Suite | Scenarios | Composition |
+|---|---|---|
+| `varied` (default tuning) | `soak_horde_rfc` + `soak_alliance_dm` | **Run 1:** 5 Horde questing classes (Orc War, Tauren Dru, Undead Mag, BE Pal, L15 Troll Hun) + 5-man **Ragefire Chasm** L15 (War/Pri/Rog/Mag/Sha). **Run 2:** 5 Alliance questing classes (Hum Pal, NE Hun, Dwf War, Gnm Loc, L15 Dra Sha) + 5-man **Deadmines** L20 (Pal/Dru/Rog/Mag/Hun). |
+| `heldout` (generalization check, never used for KEEP/REVERT) | `soak_northrend_hol` + `soak_heldout_uk` | **Run 1:** 5 mid/high Horde questing bots (L15–L70 Silverpine/STV/Borean Tundra) + 5-man **Halls of Lightning** L80. **Run 2:** 5 unseen Alliance classes + 5-man **Utgarde Keep** L70. |
+| `quest` (legacy) | `soak` | 10× L1 Priest questing in Valley of Trials. |
 
 It prints a single composite **0–100 human-likeness score** plus hard guardrails:
 - **Human-likeness distributions:** path straightness, stops/min, jumps/min, instant `>90°`
@@ -75,9 +87,21 @@ Run while you are not playing (the isolated test stack shares the 5090 GPU with 
 
 ## 5. Guarding against gaming the metric
 
-- **Progress guardrails:** XP/h, moved bots, and offline eval pass rate prevent "idle more to look
-  human" regressions.
-- **Held-out human traces:** never expose the held-out split to the agent or judge.
-- **Rotate the judge:** swap the judge prompt or model periodically.
-- **Weekly blind check:** review 2–5 min blind clips yourself and recalibrate if your own guesses
-  disagree with the scorer.
+- **Human traces required (no fallback scoring):** `hill_climb.py` refuses to score when
+  `var/human_baseline/human/*.jsonl` is empty (unless `--allow-fallback` is explicitly passed for a
+  smoke test). Record several hours of real human play before running a tuning loop.
+- **Full measurement lock manifest:** `lock-scorer` hashes not only `soak_scorer.py` and
+  `human_metrics.py`, but also `tools/wlblib/cases/soak.py`, `snapshot/behavior_trace.{h,cc}`,
+  `llm_brain_world_script.cc` (trace call sites), and all `config/tests/soak_*.llm-brain.overrides`
+  into `var/scorer.sha256`.
+- **Noise measurement (`2σ` + confirmation re-run):** `init` runs `--baseline-runs 5` to measure
+  `baseline_std` (`σ`). `eval-candidate` requires `score > best + max(min_delta, 2*σ)` and re-runs
+  any winning candidate once to confirm before keeping.
+- **Progress guardrails + held-out gate on every KEEP:** fixed `xp/h` floor (default `3000 xp/h`)
+  and fixed deaths cap (default `<= 2` deaths per run) must pass alongside all scorer guardrails;
+  every confirmed KEEP also runs `--suite heldout` and reverts if any held-out guardrail fails.
+- **Strict edit scope:** `eval-candidate` rejects edits outside `human_pacing*`, `content/RULES.md`,
+  and `content/identities/*` by default. Bug fixes and C++ game-judgment changes go as separate
+  reviewable PRs, never mixed into a scored round.
+- **Blind judge & human review:** `--judge` is enabled by default alongside numeric metrics; do a
+  short blind check of traces/clips yourself after each night.

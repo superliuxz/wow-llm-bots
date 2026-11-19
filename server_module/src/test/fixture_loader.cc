@@ -4,22 +4,28 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
+#include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include "AccountMgr.h"
 #include "CharacterCache.h"
 #include "CharacterDatabase.h"
+#include "Common.h"
 #include "DatabaseEnv.h"
 #include "DatabaseEnvFwd.h"
 #include "Log.h"
+#include "MotionMaster.h"
 #include "ObjectGuid.h"
 #include "ObjectMgr.h"
 #include "Player.h"
 #include "PlayerDump.h"
 #include "Random.h"
 #include "SharedDefines.h"
+#include "WorldSession.h"
 #include "base/time/time.h"
 #include "test/test_accounts.h"
 
@@ -45,6 +51,95 @@ std::string RandomPassword() {
     password += kChars[urand(0, sizeof(kChars) - 2)];
   }
   return password;
+}
+
+bool ParseNewSpec(std::string_view spec, uint8_t* race_out, uint8_t* cls_out) {
+  if (!spec.starts_with("new:")) {
+    return false;
+  }
+  spec.remove_prefix(4);
+  const size_t colon = spec.find(':');
+  if (colon == std::string_view::npos) {
+    return false;
+  }
+  const std::string_view race_str = spec.substr(0, colon);
+  const std::string_view cls_str = spec.substr(colon + 1);
+
+  uint8_t race = 0;
+  if (race_str == "human")
+    race = RACE_HUMAN;
+  else if (race_str == "orc")
+    race = RACE_ORC;
+  else if (race_str == "dwarf")
+    race = RACE_DWARF;
+  else if (race_str == "nightelf")
+    race = RACE_NIGHTELF;
+  else if (race_str == "undead")
+    race = RACE_UNDEAD_PLAYER;
+  else if (race_str == "tauren")
+    race = RACE_TAUREN;
+  else if (race_str == "gnome")
+    race = RACE_GNOME;
+  else if (race_str == "troll")
+    race = RACE_TROLL;
+  else if (race_str == "bloodelf")
+    race = RACE_BLOODELF;
+  else if (race_str == "draenei")
+    race = RACE_DRAENEI;
+  else
+    return false;
+
+  uint8_t cls = 0;
+  if (cls_str == "warrior")
+    cls = CLASS_WARRIOR;
+  else if (cls_str == "paladin")
+    cls = CLASS_PALADIN;
+  else if (cls_str == "hunter")
+    cls = CLASS_HUNTER;
+  else if (cls_str == "rogue")
+    cls = CLASS_ROGUE;
+  else if (cls_str == "priest")
+    cls = CLASS_PRIEST;
+  else if (cls_str == "shaman")
+    cls = CLASS_SHAMAN;
+  else if (cls_str == "mage")
+    cls = CLASS_MAGE;
+  else if (cls_str == "warlock")
+    cls = CLASS_WARLOCK;
+  else if (cls_str == "druid")
+    cls = CLASS_DRUID;
+  else
+    return false;
+
+  *race_out = race;
+  *cls_out = cls;
+  return true;
+}
+
+bool CreateFreshCharacter(uint32_t account_id,
+                          const std::string& name,
+                          uint8_t race,
+                          uint8_t cls) {
+  auto session = std::make_unique<WorldSession>(
+      account_id, "", 0x0, nullptr, SEC_PLAYER,
+      EXPANSION_WRATH_OF_THE_LICH_KING, time_t(0), LOCALE_enUS, 0, false, false,
+      0);
+  CharacterCreateInfo info(name, race, cls, GENDER_MALE, 0, 0, 0, 0, 0);
+  auto player = std::make_unique<Player>(session.get());
+  player->GetMotionMaster()->Initialize();
+  if (!player->Create(sObjectMgr->GetGenerator<HighGuid::Player>().Generate(),
+                      &info)) {
+    player->CleanupsBeforeDelete();
+    return false;
+  }
+  player->setCinematic(2);
+  player->SetAtLoginFlag(AT_LOGIN_NONE);
+  player->SaveToDB(true, false);
+  sCharacterCache->AddCharacterCacheEntry(
+      player->GetGUID(), account_id, player->GetName(), player->getGender(),
+      player->getRace(), player->getClass(), player->GetLevel());
+  player->CleanupsBeforeDelete();
+  return true;
 }
 
 }  // namespace
@@ -139,6 +234,26 @@ bool FixtureLoader::Update() {
 
     case Step::kLoadDump: {
       const Fixture& fixture = fixtures_[index_];
+      uint8_t race = 0;
+      uint8_t cls = 0;
+      if (ParseNewSpec(fixture.file, &race, &cls)) {
+        if (AccountMgr::GetCharactersCount(account_id_) >= 10) {
+          ++pool_index_;
+          step_ = Step::kCreateAccount;
+          break;
+        }
+        if (!CreateFreshCharacter(account_id_, fixture.character, race, cls)) {
+          LOG_ERROR(
+              "module",
+              "mod-llm-brain: cannot create {} from {} (race={} class={})",
+              fixture.character, fixture.file, static_cast<int>(race),
+              static_cast<int>(cls));
+          NextFixture();
+          break;
+        }
+        StartWait(Step::kWaitForLoad);
+        break;
+      }
       const DumpReturn result = PlayerDumpReader().LoadDumpFromFile(
           fixture.file, account_id_, fixture.character, /*guid=*/0);
       if (result == DUMP_TOO_MANY_CHARS) {

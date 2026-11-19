@@ -1,0 +1,7 @@
+# Held-out generalization scenario (never used for hill-climb tuning decisions):
+# 5 Alliance questing bots (unseen classes) + 5-man Utgarde Keep L70 party.
+LlmBrain.Bots = "Loada,Loadb,Loadc,Loadd,Loade,Loadf,Loadg,Loadh,Loadi,Loadj"
+LlmBrain.TestFixtures = "Loada=new:human:warlock,Loadb=new:nightelf:rogue,Loadc=new:dwarf:priest,Loadd=new:gnome:warrior,Loade=new:draenei:mage,Loadf=new:human:paladin,Loadg=new:draenei:shaman,Loadh=new:nightelf:hunter,Loadi=new:gnome:rogue,Loadj=new:nightelf:druid"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.TraceDir = "@ROOT@/var/soak_traces"
+LlmBrain.ObserveHumans = 1

@@ -9,6 +9,7 @@
 
 #include "base/time/time.h"
 #include "options/options.h"
+#include "options/position_facts.h"
 #include "snapshot/snapshot.h"
 
 class Creature;
@@ -27,9 +28,8 @@ struct PendingWalk {
   wlb::snapshot::Vec3 dest;
   wlb::snapshot::Vec3 step_dest;
   bool has_step = false;
-  // Where the bot was when it last made progress (moved 5 yd), and when.
-  wlb::snapshot::Vec3 progress_pos;
-  base::TimeTicks last_progress_at;
+  // Progress and ping-pong tracking for the active walk.
+  WalkProgressTracker progress;
   // When the path was last worked out: at most once a second.
   base::TimeTicks last_path_at;
 };
@@ -71,6 +71,10 @@ WalkStepResult TickLongWalk(Player* bot,
                             base::TimeTicks now,
                             PendingWalk* walk);
 
+// Walks `bot` toward (x, y, z) along the navmesh; returns false if no path
+// exists.
+bool WalkTowards(Player* bot, float x, float y, float z);
+
 // Whether `go` is opened through the loot strategy (chest, herb, vein).
 bool IsLootableObject(GameObject* go);
 
@@ -110,6 +114,11 @@ void ContinueRest(Player* bot);
 // Whether a Rest option is still in progress: alive, out of combat, below full
 // HP or mana, and either holding a food/drink aura or sitting.
 bool IsRestInProgress(Player* bot, bool* had_food_drink_aura);
+
+// Whether `creature` is dead, lootable by `bot`, and has gold or at least one
+// loot slot `bot` may take right now (not solely items locked in a group roll
+// or reserved for another party member).
+bool HasTakeableLoot(Player* bot, Creature* creature);
 
 // Whether the bot is close enough to loot `creature` now.
 bool IsInLootRange(Player* bot, Creature* creature);
