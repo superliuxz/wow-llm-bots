@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "snapshot/snapshot.h"
@@ -42,6 +43,20 @@ std::vector<BagSlotItem> BagItems(Player* bot);
 // packed bitmask for SnapshotSchedule change detection.
 wlb::snapshot::Self::Control ReadControlState(const Player* bot);
 uint8_t ControlMask(const Player* bot);
+
+// Casts and auras seen on the bot, its selected target, and its attackers at
+// the last snapshot, as sorted (unit_raw_guid, spell_id) pairs.
+struct ReactiveSnapshotState {
+  std::vector<std::pair<uint64_t, uint32_t>> casts;
+  std::vector<std::pair<uint64_t, uint32_t>> auras;
+};
+
+// Captures current casts and auras on `bot`, its target, and its attackers.
+ReactiveSnapshotState CollectReactiveState(Player* bot);
+
+// True if any cast started or any aura appeared on `bot`, its target, or an
+// attacker that was not present in `last`.
+bool HasNewCastOrAura(Player* bot, const ReactiveSnapshotState& last);
 
 }  // namespace llm_brain
 

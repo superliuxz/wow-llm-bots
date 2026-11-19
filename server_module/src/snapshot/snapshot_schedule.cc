@@ -35,9 +35,18 @@ bool SnapshotSchedule::IsDue(size_t bot,
                              base::TimeTicks now,
                              Flags flags) const {
   const Slot& slot = slots_[bot];
+  const bool core_changed =
+      slot.sent_once &&
+      (flags.in_combat != slot.last_flags.in_combat ||
+       flags.alive != slot.last_flags.alive ||
+       flags.control_mask != slot.last_flags.control_mask ||
+       flags.attacker_count != slot.last_flags.attacker_count ||
+       flags.active_target_pending != slot.last_flags.active_target_pending);
+  const bool reactive_due = slot.sent_once && flags.reactive_event &&
+                            (now - slot.last_sent >= kMinReactiveGap);
   // A bot already fighting when the schedule (re)starts goes first: its place
   // in the interval can wait, the fight can't.
-  return now >= slot.next_due || (slot.sent_once && flags != slot.last_flags) ||
+  return now >= slot.next_due || core_changed || reactive_due ||
          (!slot.sent_once && flags.in_combat);
 }
 
@@ -54,7 +63,9 @@ void SnapshotSchedule::Sent(size_t bot, base::TimeTicks now, Flags flags) {
   if (flags.in_combat && period.is_positive()) {
     slot.next_due = std::min(slot.next_due, now + period);
   }
+  flags.reactive_event = false;
   slot.last_flags = flags;
+  slot.last_sent = now;
   slot.sent_once = true;
 }
 

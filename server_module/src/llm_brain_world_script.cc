@@ -764,12 +764,15 @@ class LlmBrainWorldScript : public WorldScript {
         state->done_command_id = state->active_command_id;
       }
     }
+    const bool reactive =
+        state->seq > 0 && HasNewCastOrAura(bot, state->last_reactive);
     return SnapshotSchedule::Flags{
         .in_combat = bot->IsInCombat(),
         .alive = bot->IsAlive(),
         .control_mask = ControlMask(bot),
         .attacker_count = static_cast<uint32_t>(bot->getAttackers().size()),
         .active_target_pending = pending || state->active_act.has_value(),
+        .reactive_event = reactive,
     };
   }
 
@@ -826,6 +829,7 @@ class LlmBrainWorldScript : public WorldScript {
                 nearby.objects, nearby.hidden, nearby.raycasts});
     // The newest snapshot of a bot wins if the harness is behind.
     bridge_->SendLatest(name, std::move(bytes));
+    state.last_reactive = CollectReactiveState(bot);
   }
 
   Config config_;
@@ -865,6 +869,8 @@ class LlmBrainWorldScript : public WorldScript {
     PendingWalk walk;
     // Active standing-order act (to / away / cast-time use).
     std::optional<ActiveAct> active_act;
+    // Casts and auras on bot/target/attackers at the last sent snapshot.
+    ReactiveSnapshotState last_reactive;
   };
   std::vector<BotState> bots_;
   // A wrong-version command was logged on this connection.

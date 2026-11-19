@@ -2,8 +2,10 @@
 
 #include "snapshot/world_util.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "Bag.h"
@@ -12,7 +14,10 @@
 #include "Item.h"
 #include "ItemTemplate.h"
 #include "Player.h"
+#include "Spell.h"
+#include "SpellInfo.h"
 #include "StringFormat.h"
+#include "Unit.h"
 #include "UnitDefines.h"
 #include "World.h"
 #include "snapshot/snapshot.h"
@@ -86,6 +91,92 @@ uint8_t ControlMask(const Player* bot) {
       (c.charmed ? 1u << 2 : 0u) | (c.silenced ? 1u << 3 : 0u) |
       (c.rooted ? 1u << 4 : 0u) | (c.pacified ? 1u << 5 : 0u) |
       (c.disarmed ? 1u << 6 : 0u));
+}
+
+namespace {
+
+// Returns the small deduplicated list of units watched for reactive snapshots:
+// the bot itself, its selected target, and its attackers.
+std::vector<const Unit*> WatchedReactiveUnits(Player* bot) {
+  std::vector<const Unit*> units;
+  auto add = [&](const Unit* u) {
+    if (u && u->IsInWorld() &&
+        std::find(units.begin(), units.end(), u) == units.end()) {
+      units.push_back(u);
+    }
+  };
+  add(bot);
+  add(bot->GetSelectedUnit());
+  for (const Unit* attacker : bot->getAttackers()) {
+    add(attacker);
+  }
+  return units;
+}
+
+template <typename CastFn, typename AuraFn>
+void ForEachReactiveEntry(const Unit* u, CastFn&& on_cast, AuraFn&& on_aura) {
+  const uint64_t guid = u->GetGUID().GetRawValue();
+  for (CurrentSpellTypes type :
+       {CURRENT_GENERIC_SPELL, CURRENT_CHANNELED_SPELL}) {
+    if (const Spell* spell = u->GetCurrentSpell(type)) {
+      if (const SpellInfo* info = spell->GetSpellInfo()) {
+        on_cast(guid, info->Id);
+      }
+    }
+  }
+  for (const auto& [spell_id, aura] : u->GetAppliedAuras()) {
+    (void)aura;
+    on_aura(guid, spell_id);
+  }
+}
+
+}  // namespace
+
+ReactiveSnapshotState CollectReactiveState(Player* bot) {
+  ReactiveSnapshotState state;
+  for (const Unit* u : WatchedReactiveUnits(bot)) {
+    ForEachReactiveEntry(
+        u,
+        [&](uint64_t guid, uint32_t spell_id) {
+          state.casts.emplace_back(guid, spell_id);
+        },
+        [&](uint64_t guid, uint32_t spell_id) {
+          state.auras.emplace_back(guid, spell_id);
+        });
+  }
+  std::sort(state.casts.begin(), state.casts.end());
+  state.casts.erase(std::unique(state.casts.begin(), state.casts.end()),
+                    state.casts.end());
+  std::sort(state.auras.begin(), state.auras.end());
+  state.auras.erase(std::unique(state.auras.begin(), state.auras.end()),
+                    state.auras.end());
+  return state;
+}
+
+bool HasNewCastOrAura(Player* bot, const ReactiveSnapshotState& last) {
+  bool found = false;
+  for (const Unit* u : WatchedReactiveUnits(bot)) {
+    ForEachReactiveEntry(
+        u,
+        [&](uint64_t guid, uint32_t spell_id) {
+          if (!found &&
+              !std::binary_search(last.casts.begin(), last.casts.end(),
+                                  std::make_pair(guid, spell_id))) {
+            found = true;
+          }
+        },
+        [&](uint64_t guid, uint32_t spell_id) {
+          if (!found &&
+              !std::binary_search(last.auras.begin(), last.auras.end(),
+                                  std::make_pair(guid, spell_id))) {
+            found = true;
+          }
+        });
+    if (found) {
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace llm_brain

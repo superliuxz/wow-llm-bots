@@ -39,6 +39,10 @@ class SnapshotSchedule {
     // completed; flipping to false triggers an immediate snapshot so step
     // completion is seen without waiting out the regular interval.
     bool active_target_pending = false;
+    // True when a new cast started or a new aura appeared on the bot, its
+    // target, or an attacker since the last snapshot. Triggers an immediate
+    // snapshot subject to kMinReactiveGap (50 ms).
+    bool reactive_event = false;
 
     bool operator==(const Flags&) const = default;
   };
@@ -48,6 +52,8 @@ class SnapshotSchedule {
   // faster cadence in combat. Intervals shorter than kMinInterval are raised
   // to it (zero would build a snapshot every world tick).
   static constexpr base::TimeDelta kMinInterval = base::Milliseconds(100);
+  // Minimum gap between reactive (cast/aura) immediate snapshots per bot.
+  static constexpr base::TimeDelta kMinReactiveGap = base::Milliseconds(50);
   SnapshotSchedule(size_t bot_count,
                    base::TimeDelta interval,
                    base::TimeDelta combat_interval,
@@ -77,6 +83,7 @@ class SnapshotSchedule {
  private:
   struct Slot {
     base::TimeTicks next_due;
+    base::TimeTicks last_sent;
     Flags last_flags;
     bool sent_once = false;
   };

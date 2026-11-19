@@ -226,5 +226,25 @@ TEST(SnapshotScheduleTest, ActiveTargetCompletionMakesSnapshotDueAtOnce) {
   EXPECT_FALSE(schedule.IsDue(0, At(100), Flags{.in_combat = true}));
 }
 
+TEST(SnapshotScheduleTest, ReactiveEventFiresAfterMinGapAndDoesNotLatch) {
+  SnapshotSchedule schedule = Schedule(1);
+  const Flags fighting{.in_combat = true};
+  schedule.Sent(0, At(0), fighting);
+
+  const Flags reactive{.in_combat = true, .reactive_event = true};
+  // Within the 50 ms minimum gap: throttled.
+  EXPECT_FALSE(schedule.IsDue(0, At(49), reactive));
+  // At 50 ms: due immediately (well before the 250 ms combat interval).
+  EXPECT_TRUE(schedule.IsDue(0, At(50), reactive));
+  schedule.Sent(0, At(50), reactive);
+
+  // `reactive_event` is an edge, not a latched flag: clearing it on the next
+  // tick does not trigger a second snapshot.
+  EXPECT_FALSE(schedule.IsDue(0, At(60), fighting));
+  // Another reactive event is throttled for another 50 ms (until 100 ms).
+  EXPECT_FALSE(schedule.IsDue(0, At(99), reactive));
+  EXPECT_TRUE(schedule.IsDue(0, At(100), reactive));
+}
+
 }  // namespace
 }  // namespace llm_brain

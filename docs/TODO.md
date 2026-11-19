@@ -44,8 +44,10 @@ design decisions below.
      LoS and `PathGenerator` checks recomputed while running, completing via `done_command_id`.
      **Still off in live prompts** until (f) turns on `order_names` in `PlanGrammar`/`ParsePlan`
      and adds the verb section to `RULES.md`.
-   - **(c) Not started:** an immediate snapshot when a cast starts or an aura appears on the
-     bot, its target or focus, or an attacker (`SnapshotSchedule::Flags`; ~50 ms minimum gap).
+   - **(c) Done (2026-11-18):** `SnapshotSchedule::Flags::reactive_event` with
+     `kMinReactiveGap = 50 ms` (`snapshot_schedule.{h,cc,_unittest.cc}`), backed by
+     `CollectReactiveState` / `HasNewCastOrAura` (`world_util.{h,cc}`, wired into
+     `llm_brain_world_script.cc`) watching the bot, its selected target, and its attackers.
    - **(d) Not started:** the other verbs: `kite` (first check pausing playerbots' combat
      movement while a step steers), `mark`, `board` / `leave vehicle`, `equip`, `pet`,
      `interact`, `face`, `jump`, `cancel`, `avoid`.
