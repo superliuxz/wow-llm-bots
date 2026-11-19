@@ -10,10 +10,10 @@
 #include <variant>
 #include <vector>
 
-#include "gbnf_check.h"
 #include "grammar/constructs.wlb.h"
 #include "grammar/wlb_runtime.h"
 #include "gtest/gtest.h"
+#include "test/gbnf_check.h"
 
 namespace harness::grammar {
 namespace {

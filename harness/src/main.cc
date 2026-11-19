@@ -18,10 +18,10 @@
 
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
-#include "decide.h"
-#include "llm_client.h"
-#include "plan.h"
-#include "run.h"
+#include "llm/llm_client.h"
+#include "plan/plan.h"
+#include "runtime/decide.h"
+#include "runtime/run.h"
 
 namespace {
 

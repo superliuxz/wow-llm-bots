@@ -165,24 +165,24 @@ wlb_grammar("${WLB_ROOT}/harness/grammar/plan.wlb" WLB_GRAMMAR_SOURCES)
 set(WLB_GRAMMAR_TEST_SOURCES)
 wlb_grammar("${WLB_ROOT}/harness/grammar/testdata/constructs.wlb"
             WLB_GRAMMAR_TEST_SOURCES)
-add_library(wlb_harness STATIC "${WLB_HARNESS_SRC}/bot_loop.cc"
-            "${WLB_HARNESS_SRC}/decide.cc"
-            "${WLB_HARNESS_SRC}/decision_log.cc"
-            "${WLB_HARNESS_SRC}/file_util.cc"
-            "${WLB_HARNESS_SRC}/llm_client.cc"
-            "${WLB_HARNESS_SRC}/module_connection.cc"
-            "${WLB_HARNESS_SRC}/order_evaluator.cc"
-            "${WLB_HARNESS_SRC}/orders.cc"
+add_library(wlb_harness STATIC "${WLB_HARNESS_SRC}/llm/llm_client.cc"
+            "${WLB_HARNESS_SRC}/llm/scheduler.cc"
             "${WLB_ROOT}/harness/grammar/wlb_runtime.cc"
             "${WLB_ROOT}/harness/grammar/plan_hooks.cc"
             ${WLB_GRAMMAR_SOURCES}
-            "${WLB_HARNESS_SRC}/plan.cc"
-            "${WLB_HARNESS_SRC}/plan_runner.cc"
-            "${WLB_HARNESS_SRC}/prompt.cc"
-            "${WLB_HARNESS_SRC}/run.cc"
-            "${WLB_HARNESS_SRC}/scheduler.cc"
-            "${WLB_HARNESS_SRC}/screen_renderer.cc"
-            "${WLB_HARNESS_SRC}/triggers.cc")
+            "${WLB_HARNESS_SRC}/plan/order_evaluator.cc"
+            "${WLB_HARNESS_SRC}/plan/orders.cc"
+            "${WLB_HARNESS_SRC}/plan/plan.cc"
+            "${WLB_HARNESS_SRC}/plan/plan_runner.cc"
+            "${WLB_HARNESS_SRC}/plan/triggers.cc"
+            "${WLB_HARNESS_SRC}/runtime/bot_loop.cc"
+            "${WLB_HARNESS_SRC}/runtime/decide.cc"
+            "${WLB_HARNESS_SRC}/runtime/decision_log.cc"
+            "${WLB_HARNESS_SRC}/runtime/file_util.cc"
+            "${WLB_HARNESS_SRC}/runtime/module_connection.cc"
+            "${WLB_HARNESS_SRC}/runtime/run.cc"
+            "${WLB_HARNESS_SRC}/screen/prompt.cc"
+            "${WLB_HARNESS_SRC}/screen/screen_renderer.cc")
 target_include_directories(wlb_harness PUBLIC "${WLB_HARNESS_SRC}"
                            "${WLB_ROOT}/harness" "${WLB_GRAMMAR_GEN}")
 # cpp-httplib and nlohmann/json are header-only third-party code (their own style,
@@ -193,7 +193,7 @@ target_link_libraries(wlb_harness PUBLIC wlb_net wlb_snapshot)
 target_compile_features(wlb_harness PUBLIC cxx_std_26)
 target_compile_options(wlb_harness PRIVATE ${WLB_SAFETY_FLAGS})
 # TEST ONLY: llama.cpp's own grammar code, to check in unit tests that a GBNF
-# accepts what our printers write (harness/src/gbnf_check.h;
+# accepts what our printers write (harness/src/test/gbnf_check.h;
 # docs/plans/grammar-idl.md, "Tests"). No model, vocabulary or GGML runtime:
 # llama_grammar_stubs.cc stands in for the five functions only used with one.
 # llama.cpp's files keep their own style (no warnings of theirs are ours).
@@ -202,8 +202,8 @@ add_library(wlb_gbnf_check STATIC
   "${WLB_LLAMA}/src/llama-grammar.cpp"
   "${WLB_LLAMA}/src/unicode.cpp"
   "${WLB_LLAMA}/src/unicode-data.cpp"
-  "${WLB_HARNESS_SRC}/llama_grammar_stubs.cc"
-  "${WLB_HARNESS_SRC}/gbnf_check.cc")
+  "${WLB_HARNESS_SRC}/test/llama_grammar_stubs.cc"
+  "${WLB_HARNESS_SRC}/test/gbnf_check.cc")
 target_include_directories(wlb_gbnf_check SYSTEM PRIVATE
   "${WLB_LLAMA}/include" "${WLB_LLAMA}/ggml/include" "${WLB_LLAMA}/src")
 target_include_directories(wlb_gbnf_check PUBLIC "${WLB_HARNESS_SRC}")
@@ -211,30 +211,30 @@ target_compile_features(wlb_gbnf_check PRIVATE cxx_std_17)
 set_source_files_properties("${WLB_LLAMA}/src/llama-grammar.cpp"
   "${WLB_LLAMA}/src/unicode.cpp" "${WLB_LLAMA}/src/unicode-data.cpp"
   PROPERTIES COMPILE_OPTIONS "-w")
-set_source_files_properties("${WLB_HARNESS_SRC}/llama_grammar_stubs.cc"
-  "${WLB_HARNESS_SRC}/gbnf_check.cc"
+set_source_files_properties("${WLB_HARNESS_SRC}/test/llama_grammar_stubs.cc"
+  "${WLB_HARNESS_SRC}/test/gbnf_check.cc"
   PROPERTIES COMPILE_OPTIONS "${WLB_SAFETY_FLAGS}")
 
 add_executable(harness_unittests
-  "${WLB_HARNESS_SRC}/bot_loop_unittest.cc"
-  "${WLB_HARNESS_SRC}/decide_unittest.cc"
-  "${WLB_HARNESS_SRC}/decision_log_unittest.cc"
-  "${WLB_HARNESS_SRC}/file_util_unittest.cc"
-  "${WLB_HARNESS_SRC}/gbnf_check_unittest.cc"
   "${WLB_ROOT}/harness/grammar/constructs_unittest.cc"
   "${WLB_ROOT}/harness/grammar/plan_hooks_unittest.cc"
   ${WLB_GRAMMAR_TEST_SOURCES}
-  "${WLB_HARNESS_SRC}/llm_client_unittest.cc"
-  "${WLB_HARNESS_SRC}/module_connection_unittest.cc"
-  "${WLB_HARNESS_SRC}/order_evaluator_unittest.cc"
-  "${WLB_HARNESS_SRC}/orders_unittest.cc"
-  "${WLB_HARNESS_SRC}/plan_runner_unittest.cc"
-  "${WLB_HARNESS_SRC}/plan_unittest.cc"
-  "${WLB_HARNESS_SRC}/prompt_unittest.cc"
-  "${WLB_HARNESS_SRC}/run_unittest.cc"
-  "${WLB_HARNESS_SRC}/scheduler_unittest.cc"
-  "${WLB_HARNESS_SRC}/screen_renderer_unittest.cc"
-  "${WLB_HARNESS_SRC}/triggers_unittest.cc")
+  "${WLB_HARNESS_SRC}/llm/llm_client_unittest.cc"
+  "${WLB_HARNESS_SRC}/llm/scheduler_unittest.cc"
+  "${WLB_HARNESS_SRC}/plan/order_evaluator_unittest.cc"
+  "${WLB_HARNESS_SRC}/plan/orders_unittest.cc"
+  "${WLB_HARNESS_SRC}/plan/plan_runner_unittest.cc"
+  "${WLB_HARNESS_SRC}/plan/plan_unittest.cc"
+  "${WLB_HARNESS_SRC}/plan/triggers_unittest.cc"
+  "${WLB_HARNESS_SRC}/runtime/bot_loop_unittest.cc"
+  "${WLB_HARNESS_SRC}/runtime/decide_unittest.cc"
+  "${WLB_HARNESS_SRC}/runtime/decision_log_unittest.cc"
+  "${WLB_HARNESS_SRC}/runtime/file_util_unittest.cc"
+  "${WLB_HARNESS_SRC}/runtime/module_connection_unittest.cc"
+  "${WLB_HARNESS_SRC}/runtime/run_unittest.cc"
+  "${WLB_HARNESS_SRC}/screen/prompt_unittest.cc"
+  "${WLB_HARNESS_SRC}/screen/screen_renderer_unittest.cc"
+  "${WLB_HARNESS_SRC}/test/gbnf_check_unittest.cc")
 target_link_libraries(harness_unittests PRIVATE wlb_harness wlb_gbnf_check
                       GTest::gtest_main)
 target_compile_definitions(harness_unittests PRIVATE
