@@ -11,11 +11,12 @@ and applies defaults taken from the game client (what the client itself alerts a
 
 ## The plan (the brain's answer)
 
-**Built today vs. designed.** The harness's plan (`harness/src/plan.cc`, `content/RULES.md`)
+**Built today vs. designed.** The harness's plan (`harness/src/plan/plan.cc`, `content/RULES.md`)
 has `goal`, `do` (option numbers, with counts), `expect`, `watch` (only `hp<N`, `mana<N`, both
-percent of maximum, `enemy_player<YARDS`, `attacked`, `whisper`), `look` and `say`. The fields
+percent of maximum, `enemy_player<YARDS`, `attacked`, `whisper`), `order` (standing orders,
+built 2026-11-18), `open` / `close` / `hover`, `look`, `say`, and `tell`. The fields
 `until`, `ignore` and `react` and the path-based watches below are the full design, not built
-yet; standing orders (below) are proposed.
+yet.
 
 | Field | What it is |
 |---|---|
@@ -71,7 +72,7 @@ Filters compare an entry's fields: `{kind: PLAYER, reaction: HOSTILE, level >= 7
 rel.dist_yd < 40}`, `{name: "Hogger"}`, `{dispel_type: MAGIC}`. Units coming into view have no
 client event (a player just sees them), which is why `appears` exists.
 
-## Standing orders (grammar final 2026-11-17; not built)
+## Standing orders (built 2026-11-18)
 
 **The test for any behaviour is how fast it has to happen.** Under about a second it can't be a
 brain call: one bot alone gets a plan in 0.21 s, but an urgent wake cost 0.8 s at the lightest
@@ -92,7 +93,7 @@ list.
 
 ### The grammar (final, 2026-11-17)
 
-An order is a condition and one to three steps. The parser (`harness/src/orders.cc`) is checked
+An order is a condition and one to three steps. The parser (`harness/src/plan/orders.cc`) is checked
 against every `fits` row of both audit tables (`OrdersTest.*Audit*`, also
 `tools/wlb check triggers`).
 
@@ -304,7 +305,7 @@ from 3 conditions and 4 orders to 4 and 7.
 - **`marker` as a place** only works on a unit carrying the icon: 3.3.5a has no markers on the ground.
 - **Outside the grammar** (first pass: about 84 triggers; re-run: 85, mainly assignments and
   fixed locations). Most of the answer is already in the snapshot; six gaps are
-  left (checked against `snapshot.proto`: `main_tank`, `assistant`, `subgroup`, raid markers,
+  left (checked against `common/proto/snapshot.h`: `main_tank`, `assistant`, `subgroup`, raid markers,
   `LANDMARK`, `swimming` and `visual_state` exist; `lands_in_s` does not):
   1. **Named places in a boss room** (the hard one): playerbots says `(x, y, z)`, a player says "on
      the dais". Cheapest first: a player or unit ("ranged stack on Loada" is `to Loada`, covers

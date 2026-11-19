@@ -14,8 +14,8 @@ verdict, `cheat`, and the `when` cells were normalised until the grammar checker
 passed.
 
 Playerbots source (read only, never edit):
-third_party/mod-playerbots (pinned commit ecc4a53). Snapshot proto:
-server_module/proto/snapshot.proto. Spec for context: docs/specs/triggers.md, section
+third_party/mod-playerbots (pinned commit ecc4a53). Snapshot structs:
+common/proto/snapshot.h (originally audited against snapshot.proto). Spec for context: docs/specs/triggers.md, section
 "Standing orders".
 
 ### Your input
@@ -84,8 +84,8 @@ row, same order, columns:
   item, gear state), `timer` (a stored or repeating timer, a latched flag, "since X happened"),
   `count` (counting units/players other than `mech count>`), `marker` (a raid marker on the
   ground or as a place), `other` (explain in the note).
-- `snapshot_gap`: what the snapshot (snapshot.proto) lacks for a player to see this, or `-`.
-  Check the proto when unsure; name the field you would need.
+- `snapshot_gap`: what the snapshot (`common/proto/snapshot.h`) lacks for a player to see this, or `-`.
+  Check the schema when unsure; name the field you would need.
 - `note`: one short line: what the trigger checks, in plain words.
 
 Use TABs, no TABs or newlines inside a cell. Be literal and conservative: if you're unsure
@@ -99,8 +99,8 @@ How `trigger-actions.tsv` is made: all 585 `bool <class>::Execute` bodies in
 split into six groups, and each group is read by an agent with this brief.
 
 Playerbots source (read only, never edit):
-`third_party/mod-playerbots` (pinned commit `ecc4a53`). Snapshot proto:
-`server_module/proto/snapshot.proto`. Spec for context: `docs/specs/triggers.md`, section
+`third_party/mod-playerbots` (pinned commit `ecc4a53`). Snapshot structs:
+`common/proto/snapshot.h` (originally audited against `snapshot.proto`). Spec for context: `docs/specs/triggers.md`, section
 "Standing orders".
 
 ### Your input
@@ -154,7 +154,7 @@ Return one result per input row, in the exact same order, with fields:
   `assignment` (shared bot-to-bot slot/cube/beam/group/master), `target_filter` (lowest/highest hp,
   specific aura/role, nearest/furthest, threat/aggro), `vehicle_gear` (vehicle ability/seat, pet,
   equip/bag item), `multi_step` (>3 steps, branching if/else, continuous steering), `other` (explain in note).
-- `snapshot_gap`: what `snapshot.proto` lacks for the bot/executor to do this, or `-`.
+- `snapshot_gap`: what `common/proto/snapshot.h` lacks for the bot/executor to do this, or `-`.
 - `note`: one short line (no tabs or newlines): what the action actually does in plain words.
 
 Be literal and conservative: if you're unsure whether it fits, say `unsayable` with `other` and explain.

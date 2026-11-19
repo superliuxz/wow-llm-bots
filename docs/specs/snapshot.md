@@ -1,10 +1,11 @@
 # Bot perception: the snapshot spec
 
-Status: **agreed, revision 7** (2026-11-15). The exact field-level contract is
-[`server_module/proto/snapshot.proto`](../../server_module/proto/snapshot.proto) (protobuf Edition 2024, lite runtime; the single source of
-truth for the module <-> harness protocol; field annotations in
-[`snapshot_options.proto`](../../server_module/proto/snapshot_options.proto)); examples in [`examples/`](examples/) use the canonical protobuf JSON
-mapping and are checked by `tools/wlb check snapshots` (strict parse + visibility rules).
+Status: **agreed, revision 7** (2026-11-15; wire format switched from protobuf to Glaze BEVE on
+2026-11-17). The exact field-level contract is
+[`common/proto/snapshot.h`](../../common/proto/snapshot.h) (plain C++20 structs serialized with
+Glaze BEVE over the wire and Glaze JSON in tooling; the single source of truth for the
+module <-> harness protocol); examples in [`examples/`](examples/) are checked by
+`tools/wlb check snapshots` (strict parse + visibility rules).
 Coverage against the client: [`coverage.md`](coverage.md) (every UI frame, server opcode and client event). This document explains it. Everything a bot's brain decides is based on this.
 
 ## 1. Principles
@@ -52,7 +53,7 @@ Coverage against the client: [`coverage.md`](coverage.md) (every UI frame, serve
   `var/bots/<name>/events/<date>.jsonl`; optional full recording to `out/recordings/`
   (debug only; ~8-9 GB/day at 50 bots).
 
-Messages (`snapshot.proto`): the module sends `ModuleMessage` (a `Snapshot`, or an
+Messages (`common/proto/snapshot.h`): the module sends `ModuleMessage` (a `Snapshot`, or an
 `ImmediateEvent` between snapshots); the harness sends `Command` (choose an option,
 `set_goal`, `say`, `open`, `hover`, ...). In JSON:
 ```json
@@ -82,14 +83,12 @@ Messages (`snapshot.proto`): the module sends `ModuleMessage` (a `Snapshot`, or 
 - `done_act_command_id` (on the snapshot): the same for the last standing-order `Command.act`
   the body finished (docs/specs/triggers.md), kept apart from `done_command_id` so a plan step
   and an order's act finishing together can't hide one another. Since `kWireVersion` 2.
-- Wire format: **binary protobuf, length-prefixed frames** over the Unix socket. Both sides
-  use C++ generated from `snapshot.proto` with `optimize_for = LITE_RUNTIME`, as Chromium
-  does; the module contains no JSON code.
-- JSON (the canonical protobuf mapping, shown above) exists only in tooling: the harness
-  converts frames with `util::BinaryToJsonString` and a TypeResolver built from the compiled
-  descriptor set when it writes recordings, decision logs and eval cases, and the reverse for
-  `harness decide <snapshot.json>`.
-- Proto3 JSON omits default values (false, 0, empty), so absence means false / zero.
+- Wire format: **Glaze BEVE binary, length-prefixed frames** over the Unix socket
+  (`common/proto/snapshot_wire.cc`). Both sides share the C++20 structs in
+  `common/proto/snapshot.h`; the module contains no JSON code.
+- JSON exists only in tooling: the harness converts frames with `snapshot_wire.cc` when it writes
+  recordings, decision logs and eval cases, and the reverse for `harness decide <snapshot.json>`.
+- JSON omits default values (false, 0, empty), so absence means false / zero.
 - Each snapshot is **complete** (not a diff). `ext` holds only the active extensions.
   `events` repeats every event since the previous snapshot (they were also sent live).
 - No caps on content: the module sends everything the client could show (§4 `nearby`, §7).
@@ -378,8 +377,8 @@ real player knows their junk and bag space from habit), but only sends what's vi
    which extensions to build first.
 7. **Unit activity, not just casting:** every unit carries `activity` (what it's doing).
 8. **Shared types** for Item / Spell / Aura / Unit / Place, with tooltips, cooldowns and
-   GearScore everywhere they appear; defined once in `snapshot.proto`, shared by
-   composition (optional parts) since protobuf has no inheritance.
+   GearScore everywhere they appear; defined once in `common/proto/snapshot.h`, shared by
+   composition (optional parts).
 9. **Structured data, not screenshots:** bots have no client to render, images cost many more
    tokens, break prompt caching and get numbers wrong, and are hard to test. Exception: an
    optional synthetic top-down render in `surroundings` for spatial problems.
@@ -392,12 +391,10 @@ real player knows their junk and bag space from habit), but only sends what's vi
 12. **Habits and remembered views:** routine looking (hover loot, check the map) is done by
    per-bot habits in the harness without LLM calls; the harness remembers closed panels,
    tooltips and chat with their age and renders them as memory.
-13. **Protobuf, not JSON Schema** (rev 7): `snapshot.proto` is the single source of truth;
-   C++ code is generated from it for the module and the harness (no hand-written structs to
-   drift), it has `oneof` for variants and typed enums, and its canonical JSON mapping serves
-   recordings and evals (tooling only; the wire is binary, lite runtime). protobuf and its
-   abseil dependency are pinned in `third_party/`,
-   built by `tools/wlb build protoc`.
+13. **Single C++ header + Glaze, not JSON Schema** (rev 7, revised 2026-11-17):
+    `common/proto/snapshot.h` is the single source of truth shared by the module and the harness
+    (originally protobuf + abseil; replaced by header-only Glaze v9.1.0 with BEVE binary wire
+    frames and JSON for recordings/evals).
 14. **Coverage audited against the client** (rev 7): every UI frame and every server opcode
    is mapped to a snapshot field or marked out of scope with a reason
    ([`coverage.md`](coverage.md)). New in

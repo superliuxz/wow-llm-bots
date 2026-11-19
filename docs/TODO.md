@@ -30,25 +30,17 @@ Items #1–#5 are done and verified live (2026-11-18).
 
 ## Loose ends
 
-- Stale docs: `docs/specs/snapshot.md`, `docs/specs/trigger-audit.md`, `docs/plans/harness.md`
-  and `docs/plans/phase2.md` still point at `server_module/proto/snapshot.proto` (protobuf, gone
-  since 76e38a5); the structs are `snapshot/snapshot.h` now.
 - When two brain-run bots whisper `"who"` back and forth (`Gatda` -> `Testpriest`), they echoed
   `"who"` several times before switching to a real question (and stopped naturally after
   `"sounds good, let me know when you're ready"`).
 - A bot once wrote `tell <its own name>:` (Gatda, Gemma 4, live 2026-11-17); the module refuses
   it. Likely cause, the RULES.md example `tell Gatda:`, is fixed (review finding 8); watch whether
   it recurs.
-- **Eval (2026-11-18, Gemma 4):** 47/53 after taking the case-shaped wording back out of
-  RULES.md ("even if `skull level`", "`red`", and a worked example that was the
-  `new_loot_hover` scene; the example now hovers a quest). 49/53 with them. Misses:
-  `red_mob_nearby` (attacks a red mob), `new_loot_hover` (never hovers new loot), `hp_60_fine`,
-  `ignore_critter`, `skip_tapped_mob`, `bags_full` (with closed bags it explores; in live play
-  the habit opens full bags, and `bags_full_open` passes). The Qwen3.6 shootout was not re-run.
-- **llama-server is slower than earlier today** (2026-11-18): `do:` p50 ~190 ms in the eval
-  against 71-84 ms in the morning, the same with the old and new RULES.md (checked on one case
-  each). Same process since the morning, GPU otherwise idle. Restart it (`tools/wlb llm`) and
-  re-run `tools/wlb test perf brain` before trusting new latency numbers.
+- **Eval (2026-11-18, Gemma 4):** 42/48 scored cases (88%, random 22.0; 4/4 standing-order cases
+  pass, `do:` p50 `72 ms`, total `208 ms`; 7 unfailable cases not scored). Misses:
+  `healthy_boar_pull`, `skip_tapped_mob`, `red_mob_nearby`, `hp_60_fine`, `bags_full` (with closed
+  bags it explores; in live play the habit opens full bags, and `bags_full_open` passes),
+  `new_loot_hover`. The Qwen3.6 shootout was not re-run.
 - **Panels, things not built yet** (`docs/plans/options-and-panels.md`): no `Use <item>` option
   for bag items (and thus no spec §10 use-item quest eval case yet: needs item target selection for
   unit/object/self quest items); the module sends no `quest_accepted` / `quest_complete` /
