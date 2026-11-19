@@ -2,7 +2,10 @@
 
 #include "options/position_facts.h"
 
+#include <bit>
+#include <cmath>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -122,6 +125,26 @@ TEST(PositionFactsTest, NearestTurnInAndNearestObjectiveBecomePlaces) {
   EXPECT_EQ(out.places[1].services, "quest: Quest 4");
   // None is within minimap range to draw (the 10 yd one is skipped).
   EXPECT_TRUE(minimap.objective_areas.empty());
+}
+
+TEST(PositionFactsTest, ExploreRayProbesCoverAllEightCompassDirections) {
+  const auto angles = ExploreRayAngles();
+  ASSERT_EQ(angles.size(), 8u);
+  uint32_t seen = 0;
+  for (float a : angles) {
+    const pb::Direction dir =
+        DirFrom({0, 0, 0}, std::cos(a) * 50.0f, std::sin(a) * 50.0f);
+    ASSERT_NE(dir, pb::DIRECTION_UNSPECIFIED);
+    ASSERT_NE(dir, pb::HERE);
+    seen |= 1u << static_cast<uint8_t>(dir);
+  }
+  EXPECT_EQ(std::popcount(seen), 8);
+
+  const auto dists = ExploreRayDistancesYd();
+  ASSERT_GE(dists.size(), 3u);
+  for (float d : dists) {
+    EXPECT_GE(d, kMinTravelDistYd);
+  }
 }
 
 }  // namespace

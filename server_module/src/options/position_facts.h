@@ -3,6 +3,7 @@
 #ifndef MOD_LLM_BRAIN_OPTIONS_POSITION_FACTS_H_
 #define MOD_LLM_BRAIN_OPTIONS_POSITION_FACTS_H_
 
+#include <span>
 #include <vector>
 
 #include "snapshot/snapshot.h"
@@ -20,6 +21,11 @@ float Dist(const wlb::snapshot::Vec3& a, float x, float y, float z);
 wlb::snapshot::Direction DirFrom(const wlb::snapshot::Vec3& from,
                                  float x,
                                  float y);
+
+// Compass angles (8 directions) and probe distances (yd) used when falling
+// back to walkable ray probing in dungeons/cities with no grind buckets.
+std::span<const float> ExploreRayAngles();
+std::span<const float> ExploreRayDistancesYd();
 
 // The Explore spots and Go to places seen from one position. Distances and
 // directions are filled for the position they were computed at; RefreshFrom

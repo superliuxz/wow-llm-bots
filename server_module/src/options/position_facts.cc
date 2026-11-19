@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <numbers>
+#include <span>
 #include <vector>
 
 #include "base/strings/stringprintf.h"
@@ -22,6 +24,18 @@ float Dist(const pb::Vec3& a, float x, float y, float z) {
 
 pb::Direction DirFrom(const pb::Vec3& from, float x, float y) {
   return CompassDirection(x - from.x, y - from.y);
+}
+
+std::span<const float> ExploreRayAngles() {
+  constexpr float kPi = std::numbers::pi_v<float>;
+  static constexpr float kAngles[] = {0.0f, kPi / 4,      kPi / 2,  3 * kPi / 4,
+                                      kPi,  -3 * kPi / 4, -kPi / 2, -kPi / 4};
+  return kAngles;
+}
+
+std::span<const float> ExploreRayDistancesYd() {
+  static constexpr float kDists[] = {60.0f, 35.0f, 80.0f};
+  return kDists;
 }
 
 void RefreshFrom(const pb::Vec3& pos, PositionFacts* facts) {
