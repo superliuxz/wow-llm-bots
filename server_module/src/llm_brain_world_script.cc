@@ -7,17 +7,25 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "Creature.h"
+#include "DBCStores.h"
+#include "DBCStructure.h"
 #include "Define.h"
 #include "GameObject.h"
 #include "Log.h"
 #include "ObjectAccessor.h"
 #include "Player.h"
+#include "Playerbots.h"
 #include "SharedDefines.h"
+#include "Spell.h"
+#include "SpellInfo.h"
 #include "Unit.h"
+#include "UnitDefines.h"
+#include "World.h"
 #include "WorldScript.h"
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
@@ -33,6 +41,7 @@
 #include "options/option_executor.h"
 #include "options/option_facts.h"
 #include "options/options.h"
+#include "snapshot/behavior_trace.h"
 #include "snapshot/nearby_builder.h"
 #include "snapshot/panels_builder.h"
 #include "snapshot/snapshot.h"
@@ -238,6 +247,13 @@ class LlmBrainWorldScript : public WorldScript {
       bridge_.reset();
       return;
     }
+    if (!config_.trace_dir.empty()) {
+      trace_writer_ = std::make_unique<BehaviorTraceWriter>(config_.trace_dir);
+      LOG_INFO("module",
+               "mod-llm-brain: behavior tracing enabled (dir={}, "
+               "observe_humans={})",
+               config_.trace_dir, config_.observe_humans);
+    }
     LOG_INFO("module", "mod-llm-brain: listening on {}", config_.socket_path);
   }
 
@@ -276,13 +292,16 @@ class LlmBrainWorldScript : public WorldScript {
       since_stats_ms_ = 0;
       LogStats();
     }
+    const base::TimeTicks now = base::TimeTicks::Now();
+    if (trace_writer_ && trace_writer_->enabled() && config_.observe_humans) {
+      SampleHumans(now);
+    }
     if (!bridge_->connected()) {
       return;  // Nobody to send to: don't spend world-thread time building.
     }
     // Each bot has its own moment in the interval (bots are spread over it, so
     // a tick builds one or two snapshots, not all of them), and a bot whose
     // combat or life state changed is due at once.
-    const base::TimeTicks now = base::TimeTicks::Now();
     size_t built = 0;
     for (size_t i = 0; i < config_.bots.size(); ++i) {
       Player* bot = ObjectAccessor::FindPlayerByName(config_.bots[i]);
@@ -428,6 +447,19 @@ class LlmBrainWorldScript : public WorldScript {
       }
       LOG_INFO("module", "mod-llm-brain: {} heard a whisper from {}: {}",
                line.to, line.chat.from, line.chat.text);
+      if (trace_writer_ && trace_writer_->enabled()) {
+        const base::TimeTicks now = base::TimeTicks::Now();
+        TraceChat tc;
+        tc.time_ms = base::Time::Now().InMillisecondsSinceUnixEpoch();
+        tc.monotonic_us = (now - base::TimeTicks()).InMicroseconds();
+        tc.role = "bot";
+        tc.name = line.to;
+        tc.direction = "in";
+        tc.channel = "whisper";
+        tc.peer = line.chat.from;
+        tc.text = line.chat.text;
+        trace_writer_->WriteChat(tc);
+      }
       wlb::snapshot::Event payload;
       payload.chat = std::move(line.chat);
       EmitAlertingEvent(index, line.to, bot, std::move(payload));
@@ -610,6 +642,19 @@ class LlmBrainWorldScript : public WorldScript {
     LOG_INFO("module", "mod-llm-brain: {} says ({}{}{}): {}: {}", name,
              wlb::snapshot::EnumName(say.channel), say.to.empty() ? "" : " to ",
              say.to, say.text, error.empty() ? "ok" : error);
+    if (error.empty() && trace_writer_ && trace_writer_->enabled()) {
+      const base::TimeTicks now = base::TimeTicks::Now();
+      TraceChat tc;
+      tc.time_ms = base::Time::Now().InMillisecondsSinceUnixEpoch();
+      tc.monotonic_us = (now - base::TimeTicks()).InMicroseconds();
+      tc.role = "bot";
+      tc.name = name;
+      tc.direction = "out";
+      tc.channel = say.channel == wlb::snapshot::WHISPER ? "whisper" : "say";
+      tc.peer = say.to;
+      tc.text = say.text;
+      trace_writer_->WriteChat(tc);
+    }
     if (!error.empty()) {
       // Chat error (command_id = 0): recorded in recent_events without
       // cancelling the active step or building an extra snapshot.
@@ -878,7 +923,91 @@ class LlmBrainWorldScript : public WorldScript {
                 nearby.objects, nearby.hidden, nearby.raycasts});
     // The newest snapshot of a bot wins if the harness is behind.
     bridge_->SendLatest(name, std::move(bytes));
+    if (trace_writer_ && trace_writer_->enabled()) {
+      trace_writer_->WriteSample(TraceSampleFromSnapshot(
+          snapshot, "bot", bot->GetMapId(), bot->isMoving(),
+          bot->HasUnitMovementFlag(MOVEMENTFLAG_FALLING),
+          bot->HasPlayerFlag(PLAYER_FLAGS_RESTING)));
+    }
     state.last_reactive = CollectReactiveState(bot);
+  }
+
+  // Samples online non-bot human players on the same cadence and JSONL schema
+  // as bots (`docs/design.md`, "Evals" — unified human baseline).
+  void SampleHumans(base::TimeTicks now) {
+    const base::TimeDelta normal_gap =
+        base::Milliseconds(config_.snapshot_interval_ms);
+    const base::TimeDelta combat_gap =
+        base::Milliseconds(config_.snapshot_interval_combat_ms);
+    const int64_t time_ms = base::Time::Now().InMillisecondsSinceUnixEpoch();
+    const int64_t mono_us = (now - base::TimeTicks()).InMicroseconds();
+    for (const auto& [guid, player] : ObjectAccessor::GetPlayers()) {
+      if (!player || !player->IsInWorld() ||
+          GET_PLAYERBOT_AI(player) != nullptr ||
+          BotIndex(player->GetName()) != config_.bots.size()) {
+        continue;
+      }
+      const base::TimeDelta gap =
+          player->IsInCombat() ? combat_gap : normal_gap;
+      const uint64_t key = guid.GetRawValue();
+      auto it = human_last_sample_.find(key);
+      if (it != human_last_sample_.end() && now - it->second < gap) {
+        continue;
+      }
+      human_last_sample_[key] = now;
+      TraceSample s;
+      s.time_ms = time_ms;
+      s.monotonic_us = mono_us;
+      s.role = "human";
+      s.name = player->GetName();
+      s.map_id = player->GetMapId();
+      if (const AreaTableEntry* area =
+              sAreaTableStore.LookupEntry(player->GetZoneId())) {
+        const char* zname = area->area_name[sWorld->GetDefaultDbcLocale()];
+        if (!zname || zname[0] == '\0') {
+          zname = area->area_name[0];
+        }
+        if (zname) {
+          s.zone = zname;
+        }
+      }
+      s.in_town = player->HasPlayerFlag(PLAYER_FLAGS_RESTING);
+      s.x = player->GetPositionX();
+      s.y = player->GetPositionY();
+      s.z = player->GetPositionZ();
+      s.orientation = player->GetOrientation();
+      s.moving = player->isMoving();
+      s.jumping = player->HasUnitMovementFlag(MOVEMENTFLAG_FALLING);
+      s.in_combat = player->IsInCombat();
+      s.dead = !player->IsAlive();
+      if (player->GetMaxHealth() > 0) {
+        s.hp_pct = 100.0f * static_cast<float>(player->GetHealth()) /
+                   static_cast<float>(player->GetMaxHealth());
+      }
+      if (player->GetMaxPower(POWER_MANA) > 0) {
+        s.mana_pct = 100.0f * static_cast<float>(player->GetPower(POWER_MANA)) /
+                     static_cast<float>(player->GetMaxPower(POWER_MANA));
+      }
+      Spell* sp = player->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+      if (!sp || sp->getState() != SPELL_STATE_PREPARING) {
+        sp = player->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
+      }
+      if (sp && sp->GetSpellInfo()) {
+        const char* sn =
+            sp->GetSpellInfo()->SpellName[sWorld->GetDefaultDbcLocale()];
+        if (!sn || sn[0] == '\0') {
+          sn = sp->GetSpellInfo()->SpellName[0];
+        }
+        if (sn) {
+          s.casting = sn;
+        }
+      }
+      if (Unit* target = player->GetSelectedUnit()) {
+        s.target = target->GetName();
+      }
+      s.attackers = static_cast<int>(player->getAttackers().size());
+      trace_writer_->WriteSample(s);
+    }
   }
 
   Config config_;
@@ -893,6 +1022,8 @@ class LlmBrainWorldScript : public WorldScript {
   std::unique_ptr<BotManager> bot_manager_;
   std::unique_ptr<BrainBridge> bridge_;
   std::unique_ptr<SnapshotSchedule> schedule_;
+  std::unique_ptr<BehaviorTraceWriter> trace_writer_;
+  std::unordered_map<uint64_t, base::TimeTicks> human_last_sample_;
   uint32 since_stats_ms_ = 0;
   size_t max_update_snapshots_ = 0;
   base::TimeDelta max_update_time_;

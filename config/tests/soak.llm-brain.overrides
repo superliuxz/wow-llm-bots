@@ -1,0 +1,8 @@
+# Live multi-bot soak test: 10 level-1 priests questing in the Valley of Trials
+# with real `harness run` + `llama-server` and unified behavior tracing enabled.
+# Tests Gate 1 (no wake loops, no stuck bots, no crashes, no latency blowups).
+LlmBrain.Bots = "Loada,Loadb,Loadc,Loadd,Loade,Loadf,Loadg,Loadh,Loadi,Loadj"
+LlmBrain.TestFixtures = "Loada=priest-l1-valley.pdump,Loadb=priest-l1-valley.pdump,Loadc=priest-l1-valley.pdump,Loadd=priest-l1-valley.pdump,Loade=priest-l1-valley.pdump,Loadf=priest-l1-valley.pdump,Loadg=priest-l1-valley.pdump,Loadh=priest-l1-valley.pdump,Loadi=priest-l1-valley.pdump,Loadj=priest-l1-valley.pdump"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.TraceDir = "@ROOT@/var/soak_traces"
+LlmBrain.ObserveHumans = 1

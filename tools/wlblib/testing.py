@@ -26,7 +26,7 @@ import urllib.request
 from wlblib import build, cases, server
 from wlblib.common import OUT, PLAY, ROOT, TEST, Failed, output, run, running_pid, say
 
-TARGETS = ("unit", "e2e", "perf", "eval")
+TARGETS = ("unit", "e2e", "perf", "eval", "soak")
 
 
 def expect(condition, message):
@@ -416,6 +416,12 @@ def capture_snapshots(seconds=300):
         say(f"capturing {seconds} s of snapshots into {target.relative_to(ROOT)}")
         run(["python3", "-I", ROOT / "tools/bench/capture_snapshots.py", target, str(seconds)])
     say(f"captured {sum(1 for _ in target.rglob('*.json'))} snapshots")
+
+
+def soak(minutes=2.0):
+    from wlblib.cases import soak as soak_case
+
+    soak_case.run_soak(minutes=minutes)
 
 
 def eval_(names=(), model=None, shootout=False):

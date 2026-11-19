@@ -39,6 +39,10 @@ Config LoadConfig() {
       sConfigMgr->GetOption<std::string>("LlmBrain.FixtureDir", ""));
   config.test_facts_queries =
       sConfigMgr->GetOption<std::string>("LlmBrain.TestFactsQueries", "");
+  config.trace_dir =
+      sConfigMgr->GetOption<std::string>("LlmBrain.TraceDir", "");
+  config.observe_humans =
+      sConfigMgr->GetOption<bool>("LlmBrain.ObserveHumans", false);
   return config;
 }
 

@@ -85,6 +85,14 @@ Items #1–#5 are done and verified live (2026-11-18).
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-19: unified human + bot behavior tracing (`server_module/src/snapshot/behavior_trace.{h,cc}`,
+  `LlmBrain.TraceDir` + `LlmBrain.ObserveHumans` in `llm_brain_world_script.cc`), distribution
+  analyzer (`tools/bench/human_metrics.py`), and multi-bot live soak test (`tools/wlb test soak`,
+  `config/tests/soak.llm-brain.overrides`, `tools/wlblib/cases/soak.py`): first 1-min 10-bot soak
+  caught a 31 wakes/min `Talk` loop on empty vendors (`TalkToNpcNow` now returns `"<NPC> has
+  nothing for you"` as a refusal so `StepRefusalBackoff` engages); re-run passed with 27 decisions,
+  `max_wakes/min/bot=7.0`, `do_p50=201 ms`, `do_p95=349 ms`, `0` errors/invalid, `10/10` moved,
+  and flagged the first real movement tells (`0.0 jumps/min`, `4.1 instant >90° turns/min`).
 - 2026-11-18: added `e2e boss` (`tools/wlblib/cases/e2e_boss.py`) as a repeatable live boss
   plumbing regression test (Loken in Halls of Lightning, `-wotlk-hol`, mock brain): verifies
   `Lightning Nova` visibility over background `Pulsing Shockwave` channel, `1 ms` `AWAY Loken 25`

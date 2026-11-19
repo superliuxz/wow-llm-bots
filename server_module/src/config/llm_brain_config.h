@@ -34,6 +34,12 @@ struct Config {
   // OptionFacts are written at startup (tools/snapshot/add_fixture_options.py
   // --capture).
   std::string test_facts_queries;
+  // Unified human + bot behavior trace directory (empty disables tracing).
+  std::string trace_dir;
+  // When true (and `trace_dir` is non-empty), also logs online human players
+  // using the same trace schema so bots can be compared against a human
+  // baseline.
+  bool observe_humans = false;
 };
 
 // Reads LlmBrain.* options from the loaded worldserver config.

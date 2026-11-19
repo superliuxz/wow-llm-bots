@@ -89,6 +89,8 @@ def parse(argv):
     p.add_argument("--model", help="eval: a model file in models/ (default: $MODEL or the 35B)")
     p.add_argument("--shootout", action="store_true",
                    help="eval: run the same cases across every candidate model in models/")
+    p.add_argument("--minutes", type=float, default=2.0,
+                   help="soak: duration in minutes (default: 2.0)")
 
     p = sub.add_parser("setup", help="one-time setup steps")
     p.add_argument("step", choices=["links", "configure", "data", "llama", "msan", "client-ui"])
@@ -155,6 +157,8 @@ def main():
             testing.capture_snapshots()
         elif a.target == "perf":
             testing.perf(a.names, a.keep_server, a.update_baselines, a.verify)
+        elif a.target == "soak":
+            testing.soak(minutes=a.minutes)
         else:
             testing.eval_(a.names, model=a.model, shootout=a.shootout)
     elif a.command == "setup":

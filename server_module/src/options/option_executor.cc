@@ -522,9 +522,11 @@ TalkResult TalkToNpcNow(Player* bot, Creature* npc) {
   }
 
   ai->ResetActionDuration();
+  if (done.empty()) {
+    return {base::StrCat({npc->GetName(), " has nothing for you"}), ""};
+  }
   const std::string summary = base::StrCat(
-      {"talked to ", npc->GetName(), ": ",
-       done.empty() ? "nothing new" : base::JoinString(done, "; ")});
+      {"talked to ", npc->GetName(), ": ", base::JoinString(done, "; ")});
   return {"", summary};
 }
 
