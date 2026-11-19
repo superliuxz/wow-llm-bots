@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "base/time/time.h"
 #include "gtest/gtest.h"
 #include "snapshot/snapshot.h"
 

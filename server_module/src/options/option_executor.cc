@@ -62,11 +62,11 @@
 #include "World.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
-#include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "options/options.h"
+#include "position_facts.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/world_util.h"
 

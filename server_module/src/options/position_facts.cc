@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <numbers>
 #include <span>
@@ -14,6 +15,7 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/time/time.h"
 #include "snapshot/perception.h"
 #include "snapshot/snapshot.h"
 

@@ -42,6 +42,7 @@
 #include "options/option_executor.h"
 #include "options/option_facts.h"
 #include "options/options.h"
+#include "position_facts.h"
 #include "snapshot/behavior_trace.h"
 #include "snapshot/nearby_builder.h"
 #include "snapshot/panels_builder.h"
