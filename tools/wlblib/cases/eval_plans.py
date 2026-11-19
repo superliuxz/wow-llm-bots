@@ -77,7 +77,9 @@ def decide_one(case, temperature=0.0, slot=0):
         "--json",
     ]
     # Who whispered (as the live harness remembers it): who a `tell` line may answer.
-    whisperers = WHISPER_FROM_RE.findall(case["reason"])
+    whisperers = list(dict.fromkeys(
+        WHISPER_FROM_RE.findall(case["reason"]) + list(case.get("whisperers", []))
+    ))
     if whisperers:
         cmd.append(f"--whisperers={','.join(whisperers)}")
     if case.get("notes"):
@@ -166,7 +168,10 @@ def _probe_plans(case):
         plain = {"valid": True, "steps": [step], "look_s": 60, "goal": "", "tell_to": "",
                  "tell": "", "open": [], "hover": "", "orders": []}
         plans.append(plain)
-        whisperers = WHISPER_FROM_RE.findall(case["reason"]) or ["Someone"]
+        whisperers = (
+            WHISPER_FROM_RE.findall(case["reason"])
+            + list(case.get("whisperers", []))
+        ) or ["Someone"]
         plans.append({**plain, "tell_to": whisperers[0], "tell": "hi", "open": ["bags"],
                       "hover": "x", "look_s": 10, "orders": ["Defile on me -> away"]})
     return plans

@@ -281,7 +281,8 @@
     "source": "generated (tools/snapshot/make_eval_cases.py)",
     "generated": true,
     "reason": "plan done",
-    "summary": "quiet field, nobody talking",
+    "whisperers": ["Kelra"],
+    "summary": "quiet field, nobody talking (past whisperer in memory)",
     "rule": "doesn't whisper anyone",
     "forbid_tell": true
   },

@@ -194,6 +194,7 @@ def _run_selected(selected, keep_server, call):
 
 
 def e2e(names=(), keep_server=False):
+    build.common("default", tests=False)
     selected = _select("e2e", names)
     missing = [m.NAME for m in selected if not getattr(m, "TEST_CONFIG", None)]
     if missing:
@@ -432,13 +433,13 @@ def eval_(names=(), model=None, shootout=False):
         say("== shootout summary ==")
         header = f"  {'case':25s} | " + " | ".join(f"{r['label'][:18]:18s}" for r in runs)
         say(header)
-        for i, case in enumerate(cases):
+        for i, row0 in enumerate(runs[0]["rows"]):
             cells = []
             for r in runs:
                 row = r["rows"][i]
                 step = row["got"].get("plan_desc", "ERR")[:13]
                 cells.append(f"{'PASS' if row['ok'] else 'FAIL'} ({step:11s})"[:18].ljust(18))
-            say(f"  {case['name']:25s} | " + " | ".join(cells))
+            say(f"  {row0['case']:25s} | " + " | ".join(cells))
         totals = " | ".join(
             f"{r['passed']:2d}/{r['total']:<2d} ({r['median_ms']:4.0f} ms)   "[:18] for r in runs)
         say(f"  {'SCORE':25s} | {totals}")

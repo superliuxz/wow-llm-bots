@@ -49,7 +49,13 @@ def note_visibility(payload, out):
     """Every frame the module sends must pass the visibility rules (snapshot.md, "Three
     visibility levels"): an e2e run fails on the first few it records (review of f40b0b6,
     finding 17: the check never ran on module output)."""
-    errors = wire_py.visibility_errors(payload) or []
+    errors = wire_py.visibility_errors(payload)
+    if errors is None:
+        if len(out["visibility_errors"]) < 20:
+            out["visibility_errors"].append(
+                "failed to decode module frame (libwlb_wire_py.so missing or wire mismatch)"
+            )
+        return
     if errors and len(out["visibility_errors"]) < 20:
         out["visibility_errors"].extend(errors[:5])
 

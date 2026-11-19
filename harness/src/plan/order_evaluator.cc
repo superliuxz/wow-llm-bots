@@ -1153,11 +1153,52 @@ OrderEvaluator::OrderEvaluator(base::TimeDelta step_timeout)
     : step_timeout_(step_timeout) {}
 
 void OrderEvaluator::SetOrders(std::vector<Order> orders, base::TimeTicks now) {
+  // Preserve edge latches and `every Ns` timestamps for orders whose text did
+  // not change across a replan, so a held condition (`hp<30 -> wake`) does not
+  // fire again on every new plan.
+  std::flat_set<std::string> prev_latched;
+  std::flat_map<std::string, base::TimeTicks> prev_every;
+  for (size_t i = 0; i < orders_.size(); ++i) {
+    const std::string key = FormatOrder(orders_[i]);
+    if (i < order_latched_.size() && order_latched_[i]) {
+      prev_latched.insert(key);
+    }
+    if (i < last_every_fired_.size() && last_every_fired_[i].has_value()) {
+      prev_every[key] = *last_every_fired_[i];
+    }
+  }
   orders_ = std::move(orders);
   orders_installed_at_ = now;
   last_every_fired_.assign(orders_.size(), std::nullopt);
   order_latched_.assign(orders_.size(), false);
+  for (size_t i = 0; i < orders_.size(); ++i) {
+    const std::string key = FormatOrder(orders_[i]);
+    if (prev_latched.contains(key)) {
+      order_latched_[i] = true;
+    }
+    if (auto it = prev_every.find(key); it != prev_every.end()) {
+      last_every_fired_[i] = it->second;
+    }
+  }
   ResetActive();
+}
+
+bool OrderEvaluator::ActiveStepMoves() const {
+  if (active_order_ < 0 ||
+      static_cast<size_t>(active_order_) >= orders_.size()) {
+    return false;
+  }
+  const Order& order = orders_[static_cast<size_t>(active_order_)];
+  if (active_step_ < 0 ||
+      static_cast<size_t>(active_step_) >= order.steps.size()) {
+    return false;
+  }
+  const Act& act = order.steps[static_cast<size_t>(active_step_)];
+  return std::holds_alternative<grammar::ActTo>(act.value) ||
+         std::holds_alternative<grammar::ActAway>(act.value) ||
+         std::holds_alternative<grammar::ActKite>(act.value) ||
+         std::holds_alternative<grammar::ActInteract>(act.value) ||
+         std::holds_alternative<grammar::ActBoard>(act.value);
 }
 
 void OrderEvaluator::Clear() {
@@ -1524,9 +1565,24 @@ bool IsMe(const Thing& thing) {
   return who && who->who == grammar::Who::kMe;
 }
 
+std::optional<std::string_view> SpecificThingName(const Thing& thing) {
+  if (const auto* named = std::get_if<grammar::ThingNamed>(&thing.value)) {
+    return named->name;
+  }
+  if (const auto* nk = std::get_if<grammar::ThingNearest>(&thing.value)) {
+    if (const auto* kn =
+            std::get_if<grammar::NearestKindNamed>(&nk->kind.value)) {
+      return kn->name;
+    }
+  }
+  return std::nullopt;
+}
+
 }  // namespace
 
-bool OrderCoversWake(const Order& order, uint32_t kinds) {
+bool OrderCoversWake(const Order& order,
+                     uint32_t kinds,
+                     const std::vector<std::string>& attackers) {
   const auto* all = std::get_if<grammar::WhenAll>(&order.when.value);
   if (!all) {
     return false;  // `always` orders never suppress wake triggers.
@@ -1550,7 +1606,20 @@ bool OrderCoversWake(const Order& order, uint32_t kinds) {
     if (const auto* targets =
             std::get_if<grammar::CheckTargets>(&cond.check.value);
         targets && IsMe(targets->b)) {
-      covered |= kWakeAttacked | kWakeEnteredCombat;
+      if (const std::optional<std::string_view> specific =
+              SpecificThingName(targets->a)) {
+        // `X targets me` only covers attacks by X, never another attacker.
+        const bool all_match = !attackers.empty() &&
+                               std::all_of(attackers.begin(), attackers.end(),
+                                           [&](const std::string& a) {
+                                             return NameEq(a, *specific);
+                                           });
+        if (all_match) {
+          covered |= kWakeAttacked | kWakeEnteredCombat;
+        }
+      } else {
+        covered |= kWakeAttacked | kWakeEnteredCombat;
+      }
     }
   }
   return kinds != 0 && (kinds & ~covered) == 0;

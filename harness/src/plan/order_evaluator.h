@@ -62,9 +62,12 @@ struct OrderEvalResult {
 
 // Whether `order`'s condition covers every kind of a snapshot wake (`kinds`,
 // WakeTrigger::kinds): `me hp<N` covers my health watch, `mana<N` the mana
-// one, `X targets me` being attacked or entering combat. Death, loss of
-// control and the rest always wake; `always` orders never cover anything.
-bool OrderCoversWake(const Order& order, uint32_t kinds);
+// one, `X targets me` being attacked by X (only X, not other attackers). Death,
+// loss of control and the rest always wake; `always` orders never cover
+// anything.
+bool OrderCoversWake(const Order& order,
+                     uint32_t kinds,
+                     const std::vector<std::string>& attackers = {});
 
 // Converts a grammar `Act` into a wire `Command::Act` for the verbs supported
 // on the wire (`to`, `away`, `target`, `use`, `stop`, `wake`). Returns nullopt
@@ -87,6 +90,7 @@ class OrderEvaluator {
 
   const std::vector<Order>& orders() const { return orders_; }
   bool active() const { return active_order_ >= 0; }
+  bool ActiveStepMoves() const;
   int active_order() const { return active_order_; }
   int active_step() const { return active_order_ >= 0 ? active_step_ : -1; }
 

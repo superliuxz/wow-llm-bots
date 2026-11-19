@@ -72,6 +72,39 @@ bool IsCommonSentenceWord(std::string_view w) {
   return std::ranges::find(kStop, w) != std::end(kStop);
 }
 
+bool IsNonGameNoteHeading(std::string_view s) {
+  if (IsCommonSentenceWord(s)) {
+    return true;
+  }
+  static constexpr std::string_view kHeadings[] = {
+      "Note",      "Notes",     "Tip",          "Tips",     "Summary",
+      "Overview",  "Mechanics", "Strategy",     "Reminder", "Warning",
+      "Important", "Role",      "Roles",        "DPS",      "Melee",
+      "Ranged",    "Adds",      "Intermission",
+  };
+  for (std::string_view h : kHeadings) {
+    if (base::EqualsCaseInsensitiveASCII(s, h)) {
+      return true;
+    }
+  }
+  // Reject structural headings like "Phase 1", "Stage 2", "Step 3", "Group 1".
+  static constexpr std::string_view kNumberedPrefixes[] = {
+      "Phase ", "Stage ", "Step ", "Part ", "Group ", "Rule ",
+  };
+  for (std::string_view p : kNumberedPrefixes) {
+    if (s.size() > p.size() &&
+        base::EqualsCaseInsensitiveASCII(s.substr(0, p.size()), p)) {
+      std::string_view rest = s.substr(p.size());
+      if (std::all_of(rest.begin(), rest.end(), [](char c) {
+            return base::IsAsciiDigit(c) || c == ' ';
+          })) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 void ExtractNamesFromNotes(std::string_view notes, const auto& add_name) {
   auto clean_word = [](std::string_view w) {
     return base::TrimString(w, ".,;:!?()[]\"'*`", base::TRIM_ALL);
@@ -103,7 +136,11 @@ void ExtractNamesFromNotes(std::string_view notes, const auto& add_name) {
       for (std::string_view part : base::SplitStringPiece(
                line.substr(0, colon), ",", base::TRIM_WHITESPACE,
                base::SPLIT_WANT_NONEMPTY)) {
-        add_name(base::TrimString(part, "\"'*`", base::TRIM_ALL));
+        std::string_view cleaned =
+            base::TrimString(part, "\"'*`", base::TRIM_ALL);
+        if (!IsNonGameNoteHeading(cleaned)) {
+          add_name(cleaned);
+        }
       }
     }
     // 2. Title-Case multi-word or single capitalized names in the body
@@ -171,7 +208,8 @@ void ExtractNamesFromNotes(std::string_view notes, const auto& add_name) {
         }
         phrase.append(piece);
       }
-      if (end - i >= 2 || !IsCommonSentenceWord(phrase)) {
+      if ((end - i >= 2 || !IsCommonSentenceWord(phrase)) &&
+          !IsNonGameNoteHeading(phrase)) {
         add_name(phrase);
       }
       i = end;

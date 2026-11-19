@@ -85,6 +85,18 @@ Items #1–#5 are done and verified live (2026-11-18).
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-18: review of `e84d03e`, all 15 findings (Highs #1–#3, Mediums #4–#15) + strengthened
+  `e2e orders`: `SetOrders` preserves latches across unchanged orders, order wake/failure backoff,
+  active orders shown on prompt, `stop moving` when a new plan drops a movement act and module
+  clears `active_act` on non-`Keep` `Choose` / connect, `use` compares before/after spell/item
+  state and detects interrupted casts, ground-spell impact areas get distinct `"impact:<guid>"`
+  ids resolved to target points, `to`/`away` use `path.GetActualEndPosition()`, bare `away` uses
+  `it` and skips friendly areas, act targets use snapshot visibility filters, `cancel` uses
+  `HandleCancelAuraOpcode`, `Loot`/`Use`/`Talk` approaches re-walk if interrupted by an act,
+  `X targets me` only hides X's attacks, prompt puts screen before capped notes with a 12 KB
+  budget, `CollectOrderNames` filters structural headings (`Phase 1`), e2e rebuilds `wlb_wire_py`
+  and fails on decode errors, `--shootout` indexes scored rows, `no_whisper_unprompted` has a
+  whisperer; `wlb check` (376 unit tests) and `wlb test e2e orders` (all 6 live scenarios) pass.
 - 2026-11-18: first live boss test (Halls of Lightning — Loken, map 602, 2x level-80 Priests with
   `-wotlk-hol` vs no-notes vs stock playerbots `wotlk-hol`, real `harness run` + Gemma 4):
   caught and fixed a real boss bug in `server_module/src/snapshot/nearby_builder.cc` (generic

@@ -2,6 +2,7 @@
 
 #include "screen/prompt.h"
 
+#include <cstddef>
 #include <string>
 
 #include "gtest/gtest.h"
@@ -98,6 +99,23 @@ TEST(PromptTest, TheSystemPromptIsIdenticalAcrossEveryBot) {
   const std::string system_a = BuildPlanRequest(a, SampleScreen()).system;
   const std::string system_b = BuildPlanRequest(b, SampleScreen()).system;
   EXPECT_EQ(system_a, system_b);
+}
+
+TEST(PromptTest, ScreenComesBeforeNotesAndNotesAreCapped) {
+  PromptInput input = SampleInput();
+  input.active_orders = {"Defile on me -> away 25"};
+  input.notes = std::string(5000, 'X');
+  const LlmRequest request = BuildPlanRequest(input, SampleScreen());
+  const size_t screen_pos = request.user.find("Your screen now:");
+  const size_t notes_pos = request.user.find("Your boss notes:");
+  const size_t orders_pos = request.user.find("Active standing orders:");
+  ASSERT_NE(screen_pos, std::string::npos);
+  ASSERT_NE(notes_pos, std::string::npos);
+  ASSERT_NE(orders_pos, std::string::npos);
+  EXPECT_LT(screen_pos, notes_pos);
+  EXPECT_NE(request.user.find("Defile on me -> away 25"), std::string::npos);
+  EXPECT_NE(request.user.find("[truncated]"), std::string::npos);
+  EXPECT_LE(request.user.size(), 12000u);
 }
 
 }  // namespace

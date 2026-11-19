@@ -30,6 +30,9 @@ struct ActiveAct {
   // For `use` with a cast time: waiting for the cast to finish.
   bool waiting_cast = false;
   uint32_t cast_spell_id = 0;
+  uint32_t cast_mana_before = 0;
+  bool cast_cd_before = false;
+  base::TimeTicks cast_expected_end;
 };
 
 struct ActStartResult {
@@ -60,6 +63,10 @@ ActStartResult StartAct(Player* bot,
 ActStepResult StepActiveAct(Player* bot,
                             base::TimeTicks now,
                             ActiveAct* active);
+
+// Cancels an active act on `bot` (releasing `MOVEMENT_FORCED` and stopping
+// movement if it was a movement act). World thread only.
+void CancelActiveAct(Player* bot, ActiveAct* active);
 
 }  // namespace llm_brain
 

@@ -373,7 +373,7 @@ TEST(OrdersTest, CollectOrderNamesExtractsFromNotesAndSnapshot) {
   snap.ext.bags.emplace().items.emplace_back().name = "Runic Mana Potion";
 
   const std::string notes =
-      "- The Lich King, Defile: Black pool under target; run away "
+      "- Phase 1: The Lich King, Defile: Black pool under target; run away "
       "immediately.\n"
       "- Sindragosa, Mystic Buffet: when above 4 stacks, use Ice Block or "
       "Hand of Protection.";
@@ -391,11 +391,13 @@ TEST(OrdersTest, CollectOrderNamesExtractsFromNotesAndSnapshot) {
   EXPECT_TRUE(has("Arcane Brilliance"));
   EXPECT_TRUE(has("Power Word: Shield"));
   EXPECT_TRUE(has("Runic Mana Potion"));
-  // Dead corpses, the bot's own unit name, and sentence stop-words stay out.
+  // Dead corpses, the bot's own unit name, structural headings, and sentence
+  // stop-words stay out.
   EXPECT_FALSE(has("Rimefang"));
   EXPECT_FALSE(has("Aelindra"));
   EXPECT_FALSE(has("The"));
   EXPECT_FALSE(has("Use"));
+  EXPECT_FALSE(has("Phase 1"));
   EXPECT_FALSE(has("Defile: Black"));
 }
 

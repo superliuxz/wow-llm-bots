@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <deque>
 #include <optional>
@@ -1182,6 +1183,115 @@ TEST(BotLoopTest, NotesAndScreenNamesFeedBothPlanGrammarAndParsePlan) {
     DecisionLog log(dir);
     (void)log;
   }
+}
+
+TEST(BotLoopTest, NewPlanDuringKiteSendsStopMovingAndShowsActiveOrders) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Testpriest", 1, t0, /*in_combat=*/true);
+  AddKeep(&s1);
+  pb::Unit& boar = s1.base.nearby.units.emplace_back();
+  boar.guid = "0xF130000C1A000001";
+  boar.name = "Mottled Boar";
+  pb::Aura renew;
+  renew.name = "Renew";
+  s1.base.self.unit.auras.push_back(renew);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+      "order: Renew on me -> kite nearest Mottled Boar");
+
+  // Trigger kite.
+  pb::Snapshot s2 = s1;
+  s2.seq = 2;
+  loop.OnSnapshot(s2, t0 + base::Seconds(1));
+  ASSERT_TRUE(std::any_of(commands.begin(), commands.end(), [](const auto& c) {
+    return c.act && c.act->verb == pb::Command::Act::KITE;
+  }));
+
+  // Wake the bot via whisper while kiting; prompt must show active orders, and
+  // installing the new plan must send `stop moving`.
+  pb::ImmediateEvent imm;
+  imm.bot = "Testpriest";
+  pb::ChatEvent& chat = imm.event.chat.emplace();
+  chat.channel = pb::WHISPER;
+  chat.from = "Telda";
+  chat.text = "stop";
+  loop.OnEvent(std::move(imm), t0 + base::Seconds(2));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("Active standing orders:"),
+            std::string::npos);
+  EXPECT_NE(brain.front_request().user.find(
+                "Renew on me -> kite nearest Mottled Boar"),
+            std::string::npos);
+
+  const size_t cmds_before = commands.size();
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  bool saw_stop_moving = false;
+  for (size_t i = cmds_before; i < commands.size(); ++i) {
+    if (commands[i].act && commands[i].act->verb == pb::Command::Act::STOP &&
+        commands[i].act->stop == pb::Command::Act::MOVING) {
+      saw_stop_moving = true;
+    }
+  }
+  EXPECT_TRUE(saw_stop_moving);
+}
+
+TEST(BotLoopTest, OrderFailureBacksOffOnRepeat) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Testpriest", 1, t0, /*in_combat=*/true);
+  AddKeep(&s1);
+  pb::Aura renew;
+  renew.name = "Renew";
+  s1.base.self.unit.auras.push_back(renew);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+      "order: Renew on me -> use NonexistentSpell on me");
+
+  // First failure wakes immediately.
+  pb::Snapshot s2 = s1;
+  s2.seq = 2;
+  loop.OnSnapshot(s2, t0 + base::Seconds(1));
+  ASSERT_FALSE(commands.empty());
+  const uint32_t act1_id = commands.back().command_id;
+  pb::ImmediateEvent err1;
+  err1.bot = "Testpriest";
+  err1.event.error.emplace().command_id = act1_id;
+  err1.event.error->text = "cannot cast";
+  loop.OnEvent(std::move(err1), t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+
+  // Install a different order so it fires again and fails a second time.
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+      "order: Renew on me -> use OtherBadSpell on me");
+  pb::Snapshot s3 = s1;
+  s3.seq = 3;
+  loop.OnSnapshot(s3, t0 + base::Seconds(2));
+  const uint32_t act2_id = commands.back().command_id;
+  pb::ImmediateEvent err2;
+  err2.bot = "Testpriest";
+  err2.event.error.emplace().command_id = act2_id;
+  err2.event.error->text = "cannot cast";
+  loop.OnEvent(std::move(err2), t0 + base::Seconds(2));
+  // Second failure in a row backs off instead of waking immediately.
+  EXPECT_EQ(brain.size(), 0u);
 }
 
 }  // namespace

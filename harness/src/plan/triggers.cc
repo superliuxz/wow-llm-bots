@@ -71,6 +71,12 @@ void Consider(std::optional<WakeTrigger>* best, WakeTrigger candidate) {
   }
   (*best)->urgency = std::min((*best)->urgency, candidate.urgency);
   (*best)->kinds |= candidate.kinds;
+  for (std::string& a : candidate.attackers) {
+    if (std::find((*best)->attackers.begin(), (*best)->attackers.end(), a) ==
+        (*best)->attackers.end()) {
+      (*best)->attackers.push_back(std::move(a));
+    }
+  }
   if (!candidate.reason.empty() &&
       (*best)->reason.find(candidate.reason) == std::string::npos) {
     base::StrAppend(&(*best)->reason, {"; ", candidate.reason});
@@ -373,11 +379,14 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
       }
       if (prev_attackers_.count(key) == 0) {
         if (watch_attacked || expected_names_.count(name) == 0) {
-          Consider(
-              &chosen,
-              {Urgency::kUrgent,
-               name.empty() ? "attacked" : base::StrCat({"attacked by ", name}),
-               kWakeAttacked});
+          WakeTrigger wt{
+              Urgency::kUrgent,
+              name.empty() ? "attacked" : base::StrCat({"attacked by ", name}),
+              kWakeAttacked};
+          if (!name.empty()) {
+            wt.attackers.push_back(name);
+          }
+          Consider(&chosen, std::move(wt));
         }
       }
     }

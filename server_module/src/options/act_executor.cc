@@ -41,6 +41,7 @@
 #include "Player.h"
 #include "PlayerbotAI.h"
 #include "Playerbots.h"
+#include "Position.h"
 #include "SharedDefines.h"
 #include "Spell.h"
 #include "SpellAuraDefines.h"
@@ -58,6 +59,7 @@
 #include "base/time/time.h"
 #include "options/act_geometry.h"
 #include "options/option_executor.h"
+#include "snapshot/perception.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/world_util.h"
 
@@ -134,13 +136,34 @@ bool UnitHasAuraNamed(const Unit* unit, std::string_view name) {
   return false;
 }
 
-// Collects nearby living units around `bot`.
+// Whether `obj` is visible to `bot` under the same rules as the snapshot
+// (stealth/invisibility, triggers, and invisible display models are hidden).
+bool IsVisibleToBot(Player* bot, WorldObject* obj) {
+  if (!obj) {
+    return false;
+  }
+  if (obj == bot) {
+    return true;
+  }
+  if (!bot->CanSeeOrDetect(obj)) {
+    return false;
+  }
+  if (const Creature* c = obj->ToCreature()) {
+    if (HiddenFromPlayers(c->IsTrigger(), c->GetDisplayId())) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Collects nearby living units visible to `bot`.
 std::vector<Unit*> NearbyUnits(Player* bot, float radius = kActSearchRadiusYd) {
   std::vector<Unit*> units;
   Acore::AnyUnitInObjectRangeCheck check(bot, radius);
   Acore::UnitListSearcher<Acore::AnyUnitInObjectRangeCheck> searcher(bot, units,
                                                                      check);
   Cell::VisitObjects(bot, searcher, radius);
+  std::erase_if(units, [&](Unit* u) { return !IsVisibleToBot(bot, u); });
   return units;
 }
 
@@ -213,7 +236,8 @@ WorldObject* ResolveThing(Player* bot,
       if (!act.it_guid.empty()) {
         ObjectGuid guid = ParseSnapshotGuid(act.it_guid);
         if (!guid.IsEmpty()) {
-          if (WorldObject* obj = ObjectAccessor::GetWorldObject(*bot, guid)) {
+          if (WorldObject* obj = ObjectAccessor::GetWorldObject(*bot, guid);
+              obj && IsVisibleToBot(bot, obj)) {
             return obj;
           }
         }
@@ -454,8 +478,12 @@ std::optional<pb::Vec3> MoveToFirstValidSpot(
       continue;
     }
 
+    const bool used_path = (type & PATHFIND_NOT_USING_PATH) == 0;
+    const pb::Vec3 dest = used_path ? pb::Vec3{end.x, end.y, end.z}
+                                    : pb::Vec3{cand.x, cand.y, ground_z};
+
     bot->GetMotionMaster()->MovePoint(
-        /*id=*/0, cand.x, cand.y, ground_z, FORCED_MOVEMENT_NONE,
+        /*id=*/0, dest.x, dest.y, dest.z, FORCED_MOVEMENT_NONE,
         /*speed=*/0.0f, /*orientation=*/0.0f, /*generatePath=*/true,
         /*forceDestination=*/false);
     if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot)) {
@@ -464,14 +492,14 @@ std::optional<pb::Vec3> MoveToFirstValidSpot(
         const float speed = bot->GetSpeed(MOVE_RUN);
         const float ms =
             speed > 0.0f
-                ? bot->GetExactDist(cand.x, cand.y, ground_z) / speed * 1000.0f
+                ? bot->GetExactDist(dest.x, dest.y, dest.z) / speed * 1000.0f
                 : 1000.0f;
-        last->Get().Set(bot->GetMapId(), cand.x, cand.y, ground_z,
+        last->Get().Set(bot->GetMapId(), dest.x, dest.y, dest.z,
                         bot->GetOrientation(), ms + 500.0f,
                         MovementPriority::MOVEMENT_FORCED);
       }
     }
-    return pb::Vec3{cand.x, cand.y, ground_z};
+    return dest;
   }
   return std::nullopt;
 }
@@ -495,15 +523,81 @@ const SpellInfo* FindKnownSpell(Player* bot, std::string_view name) {
   return best;
 }
 
-// Whether a cast the client's handler was just given really started: the
-// handlers return nothing, and a refused cast (range, mana, line of sight,
-// global cooldown) leaves the bot idle. Started means casting, or the spell's
-// cooldown or the global cooldown running now. An instant spell with neither
-// would read as refused; none of the order verbs' spells is one in practice.
-bool CastStarted(Player* bot, const SpellInfo* spell) {
-  return bot->HasUnitState(UNIT_STATE_CASTING) ||
-         (spell && (bot->HasSpellCooldown(spell->Id) ||
-                    bot->GetGlobalCooldownMgr().HasGlobalCooldown(spell)));
+// Captures cast-relevant state right before a client cast/use opcode so we can
+// tell whether THIS spell/item actually started rather than seeing an existing
+// global cooldown or another cast from playerbots.
+struct CastBeforeState {
+  bool on_cd = false;
+  bool gcd = false;
+  uint32_t mana = 0;
+  bool target_had_aura = false;
+};
+
+uint32_t CurrentSpellId(Player* bot, CurrentSpellTypes slot) {
+  if (Spell* sp = bot->GetCurrentSpell(slot)) {
+    if (const SpellInfo* info = sp->GetSpellInfo()) {
+      return info->Id;
+    }
+  }
+  return 0;
+}
+
+bool IsCurrentlyCastingSpell(Player* bot, uint32_t spell_id) {
+  if (spell_id == 0) {
+    return false;
+  }
+  if (Spell* g = bot->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+      g && g->getState() == SPELL_STATE_PREPARING && g->GetSpellInfo() &&
+      g->GetSpellInfo()->Id == spell_id) {
+    return true;
+  }
+  if (Spell* c = bot->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
+      c && c->getState() != SPELL_STATE_FINISHED && c->GetSpellInfo() &&
+      c->GetSpellInfo()->Id == spell_id) {
+    return true;
+  }
+  return false;
+}
+
+CastBeforeState CaptureCastBefore(Player* bot,
+                                  const SpellInfo* spell,
+                                  Unit* target) {
+  CastBeforeState s;
+  s.mana = bot->GetPower(POWER_MANA);
+  if (spell) {
+    s.on_cd = bot->HasSpellCooldown(spell->Id);
+    s.gcd = bot->GetGlobalCooldownMgr().HasGlobalCooldown(spell);
+    s.target_had_aura = target && target->HasAura(spell->Id, bot->GetGUID());
+  }
+  return s;
+}
+
+bool CastStartedAfter(Player* bot,
+                      const SpellInfo* spell,
+                      Unit* target,
+                      const CastBeforeState& before) {
+  if (!spell) {
+    return false;
+  }
+  if (IsCurrentlyCastingSpell(bot, spell->Id) ||
+      CurrentSpellId(bot, CURRENT_GENERIC_SPELL) == spell->Id ||
+      CurrentSpellId(bot, CURRENT_CHANNELED_SPELL) == spell->Id) {
+    return true;
+  }
+  if (!before.on_cd && bot->HasSpellCooldown(spell->Id)) {
+    return true;
+  }
+  if (!before.gcd && bot->GetGlobalCooldownMgr().HasGlobalCooldown(spell)) {
+    return true;
+  }
+  if (bot->GetPower(POWER_MANA) < before.mana) {
+    return true;
+  }
+  if (target && !before.target_had_aura &&
+      target->HasAura(spell->Id, bot->GetGUID())) {
+    return true;
+  }
+  return false;
 }
 
 // Estimates the bot's effective max spell range from its known active spells,
@@ -540,11 +634,45 @@ std::optional<BagSlotItem> FindBagItemByName(Player* bot,
   return std::nullopt;
 }
 
+// Resolves a synthetic `"impact:<caster_guid>"` id (from `nearby_builder.cc`)
+// to the ground-targeted cast's landing spot.
+std::optional<AnchorGeometry> ResolveImpactAnchor(Player* bot,
+                                                  std::string_view guid_str) {
+  constexpr std::string_view kPrefix = "impact:";
+  if (!guid_str.starts_with(kPrefix)) {
+    return std::nullopt;
+  }
+  ObjectGuid caster_guid = ParseSnapshotGuid(guid_str.substr(kPrefix.size()));
+  if (caster_guid.IsEmpty()) {
+    return std::nullopt;
+  }
+  Unit* caster = ObjectAccessor::GetUnit(*bot, caster_guid);
+  if (!caster || !caster->IsAlive()) {
+    return std::nullopt;
+  }
+  if (Spell* cast = caster->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+      cast && cast->getState() == SPELL_STATE_PREPARING &&
+      cast->m_targets.HasDst()) {
+    if (const WorldLocation* dst = cast->m_targets.GetDstPos()) {
+      return AnchorGeometry{
+          {dst->GetPositionX(), dst->GetPositionY(), dst->GetPositionZ()},
+          0.0f};
+    }
+  }
+  return std::nullopt;
+}
+
 // Resolves the anchor for `to` or `away`. For bare `away` (no `thing`), uses
-// the nearest hostile dynamic area if standing near one, otherwise `bot`'s
-// current spot.
+// `it` when bound (including ground-spell impact spots), otherwise the nearest
+// hostile dynamic area if standing near one, otherwise `bot`'s current spot.
 std::optional<AnchorGeometry> ResolveMoveAnchor(Player* bot,
                                                 const pb::Command_Act& act) {
+  if (act.thing == pb::Command_Act::IT) {
+    if (std::optional<AnchorGeometry> impact =
+            ResolveImpactAnchor(bot, act.it_guid)) {
+      return impact;
+    }
+  }
   if (act.thing != pb::Command_Act::THING_UNSPECIFIED) {
     const std::string_view thing_name =
         !act.target_name.empty() ? act.target_name : act.name;
@@ -554,10 +682,27 @@ std::optional<AnchorGeometry> ResolveMoveAnchor(Player* bot,
     }
     return AnchorOf(obj);
   }
-  // Bare `away`: prefer nearest dynamic ground effect (e.g. Defile).
+  // Bare `away`: prefer `it` when the order bound a target or impact spot.
+  if (!act.it_guid.empty() || !act.it_name.empty()) {
+    if (std::optional<AnchorGeometry> impact =
+            ResolveImpactAnchor(bot, act.it_guid)) {
+      return impact;
+    }
+    pb::Command_Act it_act = act;
+    it_act.thing = pb::Command_Act::IT;
+    if (WorldObject* obj = ResolveThing(bot, it_act, act.it_name)) {
+      return AnchorOf(obj);
+    }
+  }
+  // Otherwise prefer nearest hostile dynamic ground effect (e.g. Defile),
+  // ignoring friendly areas like friendly Consecration.
   DynamicObject* nearest_area = nullptr;
   float best_dist = 15.0f;
   for (DynamicObject* dyn : NearbyAreas(bot, 20.0f)) {
+    Unit* caster = dyn->GetCaster();
+    if (!caster || !bot->IsHostileTo(caster)) {
+      continue;
+    }
     const float d = bot->GetDistance(dyn);
     if (d < best_dist) {
       nearest_area = dyn;
@@ -657,6 +802,8 @@ ActStartResult StartAct(Player* bot,
           return {.error = act.name + " is on cooldown"};
         }
         Unit* cast_target = target ? target : bot;
+        const CastBeforeState before =
+            CaptureCastBefore(bot, spell, cast_target);
         WorldPacket p(CMSG_CAST_SPELL);
         p << static_cast<uint8_t>(0) << spell->Id << static_cast<uint8_t>(0);
         SpellCastTargets targets;
@@ -664,14 +811,28 @@ ActStartResult StartAct(Player* bot,
         targets.Write(p);
         p.rpos(0);
         bot->GetSession()->HandleCastSpellOpcode(p);
-        if (!CastStarted(bot, spell)) {
+        if (!CastStartedAfter(bot, spell, cast_target, before)) {
           return {.error = "cannot cast " + act.name + " now"};
         }
-        if (bot->HasUnitState(UNIT_STATE_CASTING)) {
+        if (IsCurrentlyCastingSpell(bot, spell->Id)) {
           out_active->command_id = command_id;
           out_active->act = act;
           out_active->waiting_cast = true;
           out_active->cast_spell_id = spell->Id;
+          out_active->cast_mana_before = before.mana;
+          out_active->cast_cd_before = before.on_cd;
+          int32_t cast_ms = 0;
+          if (Spell* cur = bot->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+              cur && cur->GetSpellInfo() &&
+              cur->GetSpellInfo()->Id == spell->Id) {
+            cast_ms = cur->GetCastTime();
+          } else if (Spell* ch = bot->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
+                     ch && ch->GetSpellInfo() &&
+                     ch->GetSpellInfo()->Id == spell->Id) {
+            cast_ms = ch->GetCastTime();
+          }
+          out_active->cast_expected_end =
+              now + base::Milliseconds(std::max<int32_t>(0, cast_ms));
           return {.done = false};
         }
         return {.done = true};
@@ -694,7 +855,10 @@ ActStartResult StartAct(Player* bot,
         if (bot->HasSpellCooldown(item_spell_id)) {
           return {.error = act.name + " is on cooldown"};
         }
+        const SpellInfo* item_spell = sSpellMgr->GetSpellInfo(item_spell_id);
         const uint32_t count_before = bot->GetItemCount(proto->ItemId);
+        const CastBeforeState before =
+            CaptureCastBefore(bot, item_spell, target ? target : bot);
         WorldPacket p(CMSG_USE_ITEM);
         p << found->bag << found->slot << static_cast<uint8_t>(0)
           << item_spell_id << item->GetGUID() << static_cast<uint32_t>(0)
@@ -707,13 +871,17 @@ ActStartResult StartAct(Player* bot,
         p.rpos(0);
         bot->GetSession()->HandleUseItemOpcode(p);
         if (bot->GetItemCount(proto->ItemId) >= count_before &&
-            !CastStarted(bot, sSpellMgr->GetSpellInfo(item_spell_id))) {
+            !CastStartedAfter(bot, item_spell, target ? target : bot, before)) {
           return {.error = "cannot use " + act.name + " now"};
         }
-        if (bot->HasUnitState(UNIT_STATE_CASTING)) {
+        if (IsCurrentlyCastingSpell(bot, item_spell_id)) {
           out_active->command_id = command_id;
           out_active->act = act;
           out_active->waiting_cast = true;
+          out_active->cast_spell_id = item_spell_id;
+          out_active->cast_mana_before = before.mana;
+          out_active->cast_cd_before = before.on_cd;
+          out_active->cast_expected_end = now;
           return {.done = false};
         }
         return {.done = true};
@@ -800,8 +968,7 @@ ActStartResult StartAct(Player* bot,
       uint32_t cancel_id = 0;
       for (const auto& [spell_id, aura] : bot->GetAppliedAuras()) {
         const SpellInfo* info = aura->GetBase()->GetSpellInfo();
-        if (info && NameEq(SpellLocalizedName(info), act.name) &&
-            !info->HasAttribute(SPELL_ATTR0_NO_AURA_CANCEL)) {
+        if (info && NameEq(SpellLocalizedName(info), act.name)) {
           cancel_id = spell_id;
           break;
         }
@@ -809,8 +976,15 @@ ActStartResult StartAct(Player* bot,
       if (cancel_id == 0) {
         return {.error = "cannot cancel aura: " + act.name};
       }
-      bot->RemoveOwnedAura(cancel_id, ObjectGuid::Empty, 0,
-                           AURA_REMOVE_BY_CANCEL);
+      // Go through the client's cancel-aura handler so debuffs and
+      // uncancellable/passive auras are rejected just as in the game client.
+      WorldPacket p(CMSG_CANCEL_AURA, 4);
+      p << cancel_id;
+      p.rpos(0);
+      bot->GetSession()->HandleCancelAuraOpcode(p);
+      if (bot->HasAura(cancel_id)) {
+        return {.error = "cannot cancel aura: " + act.name};
+      }
       return {.done = true};
     }
 
@@ -1018,10 +1192,19 @@ ActStepResult StepActiveAct(Player* bot,
     return {.error = "you died"};
   }
   if (active->waiting_cast) {
-    if (!bot->HasUnitState(UNIT_STATE_CASTING)) {
+    if (IsCurrentlyCastingSpell(bot, active->cast_spell_id)) {
+      return {};
+    }
+    const bool finished_normally =
+        (!active->cast_cd_before &&
+         bot->HasSpellCooldown(active->cast_spell_id)) ||
+        bot->GetPower(POWER_MANA) < active->cast_mana_before ||
+        active->cast_expected_end.is_null() ||
+        now + base::Milliseconds(250) >= active->cast_expected_end;
+    if (finished_normally) {
       return {.done = true};
     }
-    return {};
+    return {.error = "cast interrupted"};
   }
 
   const pb::Command_Act& act = active->act;
@@ -1176,6 +1359,23 @@ ActStepResult StepActiveAct(Player* bot,
     active->last_anchor = *cur_anchor;
   }
   return {};
+}
+
+void CancelActiveAct(Player* bot, ActiveAct* active) {
+  if (!bot || !active) {
+    return;
+  }
+  const pb::Command_Act::Verb verb = active->act.verb;
+  if (verb == pb::Command_Act::TO || verb == pb::Command_Act::AWAY ||
+      verb == pb::Command_Act::KITE || verb == pb::Command_Act::INTERACT ||
+      verb == pb::Command_Act::BOARD) {
+    if (bot->IsInWorld()) {
+      bot->StopMoving();
+      bot->GetMotionMaster()->Clear();
+      ClearActMovement(bot);
+    }
+  }
+  *active = ActiveAct{};
 }
 
 }  // namespace llm_brain

@@ -13,6 +13,7 @@
 #include <flat_set>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "llm/scheduler.h"
@@ -40,8 +41,19 @@ struct WakeTrigger {
   Urgency urgency = Urgency::kNormal;
   std::string reason;
   uint32_t kinds = kWakeOther;
+  // Names of new attackers that caused `kWakeAttacked` (empty for generic
+  // combat entry). Used by `OrderCoversWake` so `X targets me` only hides
+  // attacks by X.
+  std::vector<std::string> attackers = {};
 
-  // What the brain is told; `kinds` is bookkeeping.
+  WakeTrigger() = default;
+  WakeTrigger(Urgency u,
+              std::string r,
+              uint32_t k = kWakeOther,
+              std::vector<std::string> a = {})
+      : urgency(u), reason(std::move(r)), kinds(k), attackers(std::move(a)) {}
+
+  // What the brain is told; `kinds` / `attackers` are bookkeeping.
   bool operator==(const WakeTrigger& other) const {
     return urgency == other.urgency && reason == other.reason;
   }

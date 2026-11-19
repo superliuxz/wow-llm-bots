@@ -113,10 +113,15 @@ class _ProxyRecorder:
                         break
                     client.sendall(data)
                     for payload in in_mod.feed(data):
-                        verr = wire_py.visibility_errors(payload) or []
+                        verr = wire_py.visibility_errors(payload)
                         msg = wire_py.decode_module_message(payload)
                         with self.lock:
-                            if verr and len(self.visibility_errors) < 10:
+                            if verr is None:
+                                if len(self.visibility_errors) < 10:
+                                    self.visibility_errors.append(
+                                        "failed to decode module frame for visibility check"
+                                    )
+                            elif verr and len(self.visibility_errors) < 10:
                                 self.visibility_errors.extend(verr[:5])
                             if msg and "snapshot" in msg:
                                 self.snapshots.append((now, msg["snapshot"]))
@@ -264,14 +269,27 @@ def run(stack):
             text=True,
         )
         try:
-            def wait_plan(prev_count):
+            def wait_plan(prev_count, prev_choose_count=None):
+                if prev_choose_count is None:
+                    with proxy.lock:
+                        prev_choose_count = sum(
+                            1 for _, c in proxy.commands
+                            if c.get("bot") == "Loada" and "choose" in c
+                        )
                 deadline = time.monotonic() + 10.0
                 while time.monotonic() < deadline:
                     with brain.lock:
-                        if brain.loada_replies > prev_count:
+                        replied = brain.loada_replies > prev_count
+                    with proxy.lock:
+                        cur_chooses = sum(
+                            1 for _, c in proxy.commands
+                            if c.get("bot") == "Loada" and "choose" in c
+                        )
+                    if replied and cur_chooses > prev_choose_count:
+                        with brain.lock:
                             return brain.loada_replies
                     time.sleep(0.05)
-                expect(False, "Loada never completed a brain call")
+                expect(False, "Loada never installed a new plan (reply + choose)")
 
             def act_cmds(since_idx=0):
                 return [
@@ -364,9 +382,35 @@ def run(stack):
             # Edge-latching: Renew is still on Loada; the finished
             # chain must NOT fire a third act across subsequent snapshots.
             time.sleep(1.5)
+            with proxy.lock:
+                latest_loada = next(
+                    s for _, s in reversed(proxy.snapshots) if s.get("bot") == "Loada"
+                )
+            expect("Renew" in _auras_on_self(latest_loada),
+                   "Renew expired before edge-latch check completed")
             extra_acts = act_cmds(behind_entry[0] + 1)
             expect(not extra_acts,
                    f"order re-fired while condition stayed true: {extra_acts}")
+
+            # Restating the exact same order on a new plan while Renew is still
+            # active must keep the latch and NOT re-fire (High #1).
+            prev_replies = brain.set_orders([
+                "Renew on me -> away group 10, then to behind Telda",
+            ])
+            replan_cmd_mark = len(proxy.commands)
+            server.console("llmbrain whisper Telda Loada restate", wait_s=0.1, inst=TEST)
+            wait_plan(prev_replies)
+            time.sleep(1.2)
+            with proxy.lock:
+                latest_loada = next(
+                    s for _, s in reversed(proxy.snapshots) if s.get("bot") == "Loada"
+                )
+            expect("Renew" in _auras_on_self(latest_loada),
+                   "Renew expired before restate-latch check completed")
+            restate_acts = act_cmds(replan_cmd_mark)
+            expect(not restate_acts,
+                   f"restated order re-fired while Renew held: {restate_acts}")
+
             server.console("llmtest unaura Loada 139", wait_s=0.3, inst=TEST)
             check_no_errors()
 
@@ -388,23 +432,29 @@ def run(stack):
                 timeout_s=10.0,
                 desc="MARK SKULL act command",
             )
-            mark_id = mark_entry[2]["command_id"]
+            def _targeted_boar_marked_skull(p):
+                for _, s in reversed(p.snapshots):
+                    if s.get("bot") != "Loada":
+                        continue
+                    tgt = (s.get("ext", {}).get("target", {}).get("target") or {})
+                    if tgt.get("name") != "Mottled Boar":
+                        continue
+                    tguid = tgt.get("guid", "")
+                    if tgt.get("raid_marker") == "SKULL":
+                        return s
+                    if tguid and any(
+                        u.get("guid") == tguid and u.get("raid_marker") == "SKULL"
+                        for u in s.get("base", {}).get("nearby", {}).get("units", [])
+                    ):
+                        return s
+                return None
+
             marked_snap = proxy.wait_until(
-                lambda p: next(
-                    (s for _, s in p.snapshots
-                     if s.get("bot") == "Loada"
-                     and (s.get("ext", {}).get("target", {}).get("target") or {}).get("name") == "Mottled Boar"
-                     and (
-                         (s.get("ext", {}).get("target", {}).get("target") or {}).get("raid_marker") == "SKULL"
-                         or any(u.get("raid_marker") == "SKULL"
-                                for u in s.get("base", {}).get("nearby", {}).get("units", []))
-                     )),
-                    None,
-                ),
+                _targeted_boar_marked_skull,
                 timeout_s=10.0,
-                desc="snapshot showing Mottled Boar targeted and marked SKULL",
+                desc="snapshot showing targeted Mottled Boar marked SKULL",
             )
-            expect(marked_snap is not None, "Mottled Boar was never marked SKULL")
+            expect(marked_snap is not None, "targeted Mottled Boar was never marked SKULL")
             server.console("llmtest unaura Loada 139", wait_s=0.3, inst=TEST)
             check_no_errors()
 
@@ -414,33 +464,52 @@ def run(stack):
             ])
             server.console("llmbrain whisper Telda Loada phase3", wait_s=0.1, inst=TEST)
             wait_plan(prev_replies)
-            cmd_mark = len(proxy.commands)
-            server.console("llmtest aura Loada 139", wait_s=0.1, inst=TEST)
-
-            use_entry = proxy.wait_until(
-                lambda _: next(
-                    ((i, t, c) for i, t, c in act_cmds(cmd_mark)
-                     if c["act"].get("verb") == "USE"
-                     and c["act"].get("name") == "Power Word: Shield"),
-                    None,
-                ),
-                timeout_s=8.0,
-                desc="USE Power Word: Shield act command",
-            )
-            shield_snap = proxy.wait_until(
-                lambda p: next(
-                    (s for _, s in p.snapshots
-                     if s.get("bot") == "Loada" and "Power Word: Shield" in _auras_on_self(s)),
-                    None,
-                ),
-                timeout_s=8.0,
-                desc="Power Word: Shield aura on Loada",
-            )
+            shield_snap = None
+            for attempt in range(2):
+                cmd_mark = len(proxy.commands)
+                server.console("llmtest aura Loada 139", wait_s=0.1, inst=TEST)
+                proxy.wait_until(
+                    lambda _: next(
+                        ((i, t, c) for i, t, c in act_cmds(cmd_mark)
+                         if c["act"].get("verb") == "USE"
+                         and c["act"].get("name") == "Power Word: Shield"),
+                        None,
+                    ),
+                    timeout_s=8.0,
+                    desc="USE Power Word: Shield act command",
+                )
+                try:
+                    shield_snap = proxy.wait_until(
+                        lambda p: next(
+                            (s for _, s in p.snapshots
+                             if s.get("bot") == "Loada"
+                             and "Power Word: Shield" in _auras_on_self(s)),
+                            None,
+                        ),
+                        timeout_s=4.0,
+                        desc="Power Word: Shield aura on Loada",
+                    )
+                    break
+                except AssertionError:
+                    # Playerbots may have just triggered GCD (e.g. a buff or
+                    # combat cast), causing HandleCastSpellOpcode to refuse PW:S.
+                    if attempt == 1:
+                        raise
+                    server.console("llmtest unaura Loada 139", wait_s=1.8, inst=TEST)
             expect(shield_snap is not None, "Power Word: Shield never appeared on Loada")
             server.console("llmtest unaura Loada 139", wait_s=0.3, inst=TEST)
+            server.console("llmtest unaura Loada 17", wait_s=0.2, inst=TEST)
+            # Clear any transient GCD refusal from attempt 0 before checking
+            # errors for the rest of the run.
+            with proxy.lock:
+                proxy.events = [
+                    (t, ev) for t, ev in proxy.events
+                    if "cannot cast Power Word: Shield now"
+                    not in ev.get("event", {}).get("error", {}).get("text", "")
+                ]
             check_no_errors()
 
-            # ---- 4. `kite` (> 5 s without timeout + `stop moving` on clear) ------
+            # ---- 4. `kite` (> 5 s without timeout + new plan stops kite) ---------
             prev_replies = brain.set_orders([
                 "Renew on me -> kite nearest Mottled Boar",
             ])
@@ -461,25 +530,36 @@ def run(stack):
                 timeout_s=8.0,
                 desc="KITE act command",
             )
-            # Let Loada kite for 6.0 s (> the 5 s default step timeout) to prove
-            # kite neither stalls nor triggers a step-timeout wake.
+            # Let Loada kite for 6.0 s (> the 5 s default step timeout) and check
+            # movement continued past the midpoint (not just moved once and froze).
             time.sleep(6.0)
+            mid_t = kite_entry[1] + 3.0
             with proxy.lock:
-                kite_positions = [
+                first_half = [
                     _pos2d(s) for t, s in proxy.snapshots
-                    if s.get("bot") == "Loada" and t >= kite_entry[1]
+                    if s.get("bot") == "Loada" and kite_entry[1] <= t < mid_t
                 ]
+                second_half = [
+                    _pos2d(s) for t, s in proxy.snapshots
+                    if s.get("bot") == "Loada" and t >= mid_t
+                ]
+            kite_positions = first_half + second_half
             max_kite_disp = max((math.dist(start_pos, p) for p in kite_positions), default=0.0)
             expect(max_kite_disp >= 5.0,
                    f"kite moved Loada at most {max_kite_disp:.1f} yd from {start_pos}")
+            expect(len(second_half) >= 2 and math.dist(second_half[0], second_half[-1]) >= 1.5,
+                   f"kite froze in second half: {second_half[:2]}..{second_half[-2:]}")
             with brain.lock:
                 timeout_wakes = [w for w in brain.loada_wake_reasons if "timed out" in w]
                 expect(not timeout_wakes and brain.loada_replies == replies_before_kite,
                        f"unexpected wake while kiting: {brain.loada_wake_reasons}")
 
-            # Clearing Renew ends the kite and sends `stop moving`.
+            # Sending a new plan while kiting (Renew still on) must emit `stop moving`
+            # (High #2).
             stop_mark = len(proxy.commands)
-            server.console("llmtest unaura Loada 139", wait_s=0.1, inst=TEST)
+            prev_replies = brain.set_orders([])
+            server.console("llmbrain whisper Telda Loada stopkite", wait_s=0.1, inst=TEST)
+            wait_plan(prev_replies)
             proxy.wait_until(
                 lambda _: next(
                     ((i, t, c) for i, t, c in act_cmds(stop_mark)
@@ -487,12 +567,61 @@ def run(stack):
                     None,
                 ),
                 timeout_s=8.0,
-                desc="STOP MOVING act command when kite condition clears",
+                desc="STOP MOVING act command when new plan drops kite",
             )
+            server.console("llmtest unaura Loada 139", wait_s=0.3, inst=TEST)
             check_no_errors()
 
-            return (f"away {away_dist:.1f} yd -> behind Telda ({behind_dist:.1f} yd), "
-                    f"marked boar SKULL, shielded self, kited {max_kite_disp:.1f} yd + stopped")
+            # ---- 5. Higher-priority order preempts running lower-priority one ----
+            prev_replies = brain.set_orders([
+                "Renew on me -> target Telda",
+                "Power Word: Shield on me -> kite nearest Mottled Boar",
+            ])
+            server.console("llmbrain whisper Telda Loada phase5", wait_s=0.1, inst=TEST)
+            wait_plan(prev_replies)
+            cmd_mark = len(proxy.commands)
+            server.console("llmtest aura Loada 17", wait_s=0.1, inst=TEST)
+            proxy.wait_until(
+                lambda _: next(
+                    ((i, t, c) for i, t, c in act_cmds(cmd_mark)
+                     if c["act"].get("verb") == "KITE"),
+                    None,
+                ),
+                timeout_s=8.0,
+                desc="lower-priority KITE act command",
+            )
+            preempt_mark = len(proxy.commands)
+            server.console("llmtest aura Loada 139", wait_s=0.1, inst=TEST)
+            proxy.wait_until(
+                lambda _: next(
+                    ((i, t, c) for i, t, c in act_cmds(preempt_mark)
+                     if c["act"].get("verb") == "TARGET" and c["act"].get("name") == "Telda"),
+                    None,
+                ),
+                timeout_s=8.0,
+                desc="higher-priority TARGET Telda preempting KITE",
+            )
+            server.console("llmtest unaura Loada 139", wait_s=0.2, inst=TEST)
+            server.console("llmtest unaura Loada 17", wait_s=0.2, inst=TEST)
+            check_no_errors()
+
+            # ---- 6. Refused act returns error event and wakes brain --------------
+            prev_replies = brain.set_orders([
+                "Renew on me -> use Shadow Word: Pain on focus",
+            ])
+            server.console("llmbrain whisper Telda Loada phase6", wait_s=0.1, inst=TEST)
+            replies_before_fail = wait_plan(prev_replies)
+            server.console("llmtest aura Loada 139", wait_s=0.1, inst=TEST)
+            wait_plan(replies_before_fail)
+            with brain.lock:
+                fail_wakes = [w for w in brain.loada_wake_reasons if "standing order failed" in w]
+                expect(bool(fail_wakes),
+                       f"refused act never woke brain: {brain.loada_wake_reasons}")
+            server.console("llmtest unaura Loada 139", wait_s=0.2, inst=TEST)
+
+            return (f"away {away_dist:.1f} yd -> behind Telda ({behind_dist:.1f} yd) + restate-latch, "
+                    f"marked boar SKULL, shielded self, kited {max_kite_disp:.1f} yd + replan-stop, "
+                    f"preempt, refused-act wake")
         finally:
             harness_proc.terminate()
             try:

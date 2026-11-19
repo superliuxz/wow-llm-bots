@@ -142,6 +142,10 @@ class BotLoop {
     // the wake is delayed (StepRefusalBackoff()) so a body that can't act
     // (dead, out of range) doesn't ask the brain again many times a second.
     int step_refusals = 0;
+    // Consecutive order wakes or order step failures since the last completed
+    // order step or normal look: from the second, backs off via
+    // StepRefusalBackoff() so a failing or waking order cannot spam the brain.
+    int order_wakes = 0;
     uint64_t call_epoch = 0;
     base::TimeTicks look_deadline;
     // Panels as the bot last saw them, for the prompt once they are closed.
@@ -224,7 +228,13 @@ class BotLoop {
                             const RunnerAction& action);
   void DispatchOrderEval(const std::string& bot,
                          BotState* state,
-                         const OrderEvalResult& eval);
+                         const OrderEvalResult& eval,
+                         base::TimeTicks now);
+  void WakeForOrder(const std::string& bot,
+                    BotState* state,
+                    std::string_view reason,
+                    base::TimeTicks now);
+  void SendStopMoving(const std::string& bot);
   uint32_t SendAct(const std::string& bot, wlb::snapshot::Command::Act act);
   uint32_t SendChoose(const std::string& bot,
                       const wlb::snapshot::Command::Choose& choose);

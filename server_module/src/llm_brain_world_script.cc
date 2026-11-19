@@ -376,21 +376,29 @@ class LlmBrainWorldScript : public WorldScript {
     LOG_INFO("module", "mod-llm-brain: harness {}",
              connected ? "connected" : "disconnected");
     wrong_version_logged_ = false;
-    if (connected) {
-      // Every bot is overdue by now: spread them again instead of building
-      // them all on the next tick.
-      schedule_->Restart(base::TimeTicks::Now());
-      // A new harness numbers its commands afresh: forget the old one's.
-      for (size_t i = 0; i < bots_.size(); ++i) {
+    for (size_t i = 0; i < bots_.size(); ++i) {
+      if (bots_[i].active_act) {
+        if (Player* bot = ObjectAccessor::FindPlayerByName(config_.bots[i])) {
+          CancelActiveAct(bot, &*bots_[i].active_act);
+        }
+        bots_[i].active_act.reset();
+      }
+      if (connected) {
         bots_[i].active_option.reset();
         bots_[i].active_command_id = 0;
         bots_[i].done_command_id = 0;
+        bots_[i].done_act_command_id = 0;
         bots_[i].object_used = false;
         bots_[i].had_food_drink_aura = false;
         bots_[i].walk = PendingWalk{};
         bots_[i].ui.Reset();
         schedule_->SetActiveTargetPending(i, false);
       }
+    }
+    if (connected) {
+      // Every bot is overdue by now: spread them again instead of building
+      // them all on the next tick.
+      schedule_->Restart(base::TimeTicks::Now());
     }
   }
 
@@ -483,6 +491,10 @@ class LlmBrainWorldScript : public WorldScript {
     const bool keep =
         found.target && found.target->kind == OptionTarget::Kind::kKeep;
     if (!keep) {
+      if (state.active_act) {
+        CancelActiveAct(bot, &*state.active_act);
+        state.active_act.reset();
+      }
       state.had_food_drink_aura = false;
       state.walk = PendingWalk{};
     }
@@ -673,7 +685,16 @@ class LlmBrainWorldScript : public WorldScript {
     if (kind == OptionTarget::Kind::kLoot) {
       Creature* creature = ObjectAccessor::GetCreature(
           *bot, ParseSnapshotGuid(state.active_option->guid));
-      if (creature == nullptr || !IsInLootRange(bot, creature)) {
+      if (creature == nullptr) {
+        return;
+      }
+      if (!IsInLootRange(bot, creature)) {
+        if (!bot->isMoving() && now >= state.next_rest_try) {
+          state.next_rest_try = now + base::Seconds(1);
+          bot->GetMotionMaster()->MovePoint(0, creature->GetPositionX(),
+                                            creature->GetPositionY(),
+                                            creature->GetPositionZ());
+        }
         return;
       }
       state.object_used = true;
@@ -688,7 +709,15 @@ class LlmBrainWorldScript : public WorldScript {
         kind == OptionTarget::Kind::kGather) {
       GameObject* go = ObjectAccessor::GetGameObject(
           *bot, ParseSnapshotGuid(state.active_option->guid));
-      if (go == nullptr || !IsInUseRange(bot, go)) {
+      if (go == nullptr) {
+        return;
+      }
+      if (!IsInUseRange(bot, go)) {
+        if (!bot->isMoving() && now >= state.next_rest_try) {
+          state.next_rest_try = now + base::Seconds(1);
+          bot->GetMotionMaster()->MovePoint(
+              0, go->GetPositionX(), go->GetPositionY(), go->GetPositionZ());
+        }
         return;
       }
       state.object_used = true;
@@ -702,7 +731,15 @@ class LlmBrainWorldScript : public WorldScript {
     if (kind == OptionTarget::Kind::kTalk) {
       Creature* npc = ObjectAccessor::GetCreature(
           *bot, ParseSnapshotGuid(state.active_option->guid));
-      if (npc == nullptr || !IsInTalkRange(bot, npc)) {
+      if (npc == nullptr) {
+        return;
+      }
+      if (!IsInTalkRange(bot, npc)) {
+        if (!bot->isMoving() && now >= state.next_rest_try) {
+          state.next_rest_try = now + base::Seconds(1);
+          bot->GetMotionMaster()->MovePoint(
+              0, npc->GetPositionX(), npc->GetPositionY(), npc->GetPositionZ());
+        }
         return;
       }
       state.object_used = true;

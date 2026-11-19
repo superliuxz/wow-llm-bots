@@ -578,7 +578,7 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
           if (const WorldLocation* dst = cast->m_targets.GetDstPos()) {
             const SpellInfo* info = cast->GetSpellInfo();
             pb::Area& impact = nearby->areas.emplace_back();
-            impact.guid = GuidString(guid.GetRawValue());
+            impact.guid = "impact:" + GuidString(guid.GetRawValue());
             impact.name = Localized(info->SpellName);
             pb::Spell& sp = impact.spell.emplace();
             sp.id = info->Id;

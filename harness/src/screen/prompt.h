@@ -37,6 +37,8 @@ struct PromptInput {
   std::vector<std::string> remembered;
   // Boss / encounter notes known to this bot (may be empty).
   std::string notes;
+  // Standing orders currently in force (formatted strings; may be empty).
+  std::vector<std::string> active_orders;
   // Known mechanic, spell, item, and unit names that `order:` lines may use
   // (empty keeps `order:` lines out of the grammar and prompt).
   std::vector<std::string> order_names;

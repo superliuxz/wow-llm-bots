@@ -795,6 +795,36 @@ TEST(OrderEvaluatorTest, OrderCoversWakeByConditionAndSubject) {
   Order always_order = MustParse("always -> to behind boss");
   EXPECT_FALSE(OrderCoversWake(always_order, kWakeHealth));
   EXPECT_FALSE(OrderCoversWake(always_order, kWakeEnteredCombat));
+
+  // `X targets me` hides attacks by X only, never another attacker.
+  Order boar_order = MustParse("Mottled Boar targets me -> away");
+  EXPECT_TRUE(OrderCoversWake(boar_order, kWakeAttacked, {"Mottled Boar"}));
+  EXPECT_FALSE(OrderCoversWake(boar_order, kWakeAttacked, {"Defias Pillager"}));
+  EXPECT_FALSE(OrderCoversWake(boar_order, kWakeAttacked,
+                               {"Mottled Boar", "Defias Pillager"}));
+  EXPECT_FALSE(OrderCoversWake(boar_order, kWakeAttacked, {}));
+}
+
+TEST(OrderEvaluatorTest, SetOrdersPreservesLatchesForUnchangedOrders) {
+  OrderEvaluator eval(base::Seconds(5));
+  eval.SetOrders({MustParse("me hp<30 -> wake")}, T(0));
+  pb::Snapshot s = MakeBaseSnapshot();
+  s.base.self.unit.health_pct = 20.0f;
+
+  const OrderEvalResult r1 = eval.OnSnapshot(s, T(1));
+  EXPECT_FALSE(r1.wake_reason.empty());
+
+  // Re-installing the same order while hp<30 still holds must NOT re-fire.
+  eval.SetOrders({MustParse("me hp<30 -> wake")}, T(2));
+  const OrderEvalResult r2 = eval.OnSnapshot(s, T(3));
+  EXPECT_TRUE(r2.wake_reason.empty());
+  EXPECT_FALSE(r2.act.has_value());
+
+  // Once hp recovers above 30, the latch re-arms and fires on the next drop.
+  s.base.self.unit.health_pct = 80.0f;
+  EXPECT_TRUE(eval.OnSnapshot(s, T(4)).wake_reason.empty());
+  s.base.self.unit.health_pct = 20.0f;
+  EXPECT_FALSE(eval.OnSnapshot(s, T(5)).wake_reason.empty());
 }
 
 }  // namespace
