@@ -531,6 +531,8 @@ struct CastBeforeState {
   bool gcd = false;
   uint32_t mana = 0;
   bool target_had_aura = false;
+  Spell* prev_spells[CURRENT_MAX_SPELL] = {};
+  uint32_t prev_spell_ids[CURRENT_MAX_SPELL] = {};
 };
 
 uint32_t CurrentSpellId(Player* bot, CurrentSpellTypes slot) {
@@ -564,6 +566,11 @@ CastBeforeState CaptureCastBefore(Player* bot,
                                   Unit* target) {
   CastBeforeState s;
   s.mana = bot->GetPower(POWER_MANA);
+  for (uint8_t i = 0; i < CURRENT_MAX_SPELL; ++i) {
+    const auto slot = static_cast<CurrentSpellTypes>(i);
+    s.prev_spells[i] = bot->GetCurrentSpell(slot);
+    s.prev_spell_ids[i] = CurrentSpellId(bot, slot);
+  }
   if (spell) {
     s.on_cd = bot->HasSpellCooldown(spell->Id);
     s.gcd = bot->GetGlobalCooldownMgr().HasGlobalCooldown(spell);
@@ -579,10 +586,18 @@ bool CastStartedAfter(Player* bot,
   if (!spell) {
     return false;
   }
-  if (IsCurrentlyCastingSpell(bot, spell->Id) ||
-      CurrentSpellId(bot, CURRENT_GENERIC_SPELL) == spell->Id ||
-      CurrentSpellId(bot, CURRENT_CHANNELED_SPELL) == spell->Id) {
-    return true;
+  // Check all current spell slots (including queued CURRENT_MELEE_SPELL and
+  // CURRENT_AUTOREPEAT_SPELL), and compare pointer + spell id against before
+  // so an already-running cast of the same spell does not read as newly
+  // started.
+  for (uint8_t i = 0; i < CURRENT_MAX_SPELL; ++i) {
+    const auto slot = static_cast<CurrentSpellTypes>(i);
+    Spell* cur = bot->GetCurrentSpell(slot);
+    if (cur && cur->GetSpellInfo() && cur->GetSpellInfo()->Id == spell->Id &&
+        (cur != before.prev_spells[i] ||
+         before.prev_spell_ids[i] != spell->Id)) {
+      return true;
+    }
   }
   if (!before.on_cd && bot->HasSpellCooldown(spell->Id)) {
     return true;

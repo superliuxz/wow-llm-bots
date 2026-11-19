@@ -233,7 +233,8 @@ class BotLoop {
   void WakeForOrder(const std::string& bot,
                     BotState* state,
                     std::string_view reason,
-                    base::TimeTicks now);
+                    base::TimeTicks now,
+                    bool is_failure);
   void SendStopMoving(const std::string& bot);
   uint32_t SendAct(const std::string& bot, wlb::snapshot::Command::Act act);
   uint32_t SendChoose(const std::string& bot,

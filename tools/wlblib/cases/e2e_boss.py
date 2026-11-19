@@ -334,7 +334,7 @@ def run(stack):
                 desc="AWAY Loken 25 completion",
             )
             dist_after = _loken_dist(away_done, _find_loken(away_done))
-            expect(dist_after >= dist_start + 8.0 and dist_after >= 15.0,
+            expect(dist_after >= dist_start + 8.0 and dist_after >= 20.0,
                    f"Loada only moved {dist_start:.1f} -> {dist_after:.1f} yd from Loken")
 
             with proxy.lock:

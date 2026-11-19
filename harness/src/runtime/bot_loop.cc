@@ -224,6 +224,9 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
       state.latest_snapshot->done_act_command_id == prev_order_cmd) {
     state.order_wakes = 0;
   }
+  if (!ord.covered && ord.wake_reason.empty() && !ord.act) {
+    state.order_wakes = 0;
+  }
   DispatchOrderEval(bot, &state, ord, received_at);
   if (!ord.wake_reason.empty()) {
     return;
@@ -284,7 +287,8 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
       state.runner.Stop();
       state.look_deadline = base::TimeTicks();
       if (!failed.wake_reason.empty()) {
-        WakeForOrder(bot, &state, failed.wake_reason, received_at);
+        WakeForOrder(bot, &state, failed.wake_reason, received_at,
+                     /*is_failure=*/true);
       }
       return;
     }
@@ -930,7 +934,13 @@ void BotLoop::SendStopMoving(const std::string& bot) {
 void BotLoop::WakeForOrder(const std::string& bot,
                            BotState* state,
                            std::string_view reason,
-                           base::TimeTicks now) {
+                           base::TimeTicks now,
+                           bool is_failure) {
+  if (!is_failure) {
+    state->order_wakes = 0;
+    WakeBot(bot, Urgency::kUrgent, std::string(reason), /*refusal=*/false);
+    return;
+  }
   const base::TimeDelta backoff = StepRefusalBackoff(++state->order_wakes);
   if (backoff.is_positive()) {
     const std::string r(reason);
@@ -940,7 +950,7 @@ void BotLoop::WakeForOrder(const std::string& bot,
     }
     state->look_deadline = now + backoff;
     Log(base::StringPrintf(
-        "harness: %s order wake/failure %d in a row; next look in %.0f s",
+        "harness: %s order failure %d in a row; next look in %.0f s",
         bot.c_str(), state->order_wakes, backoff.InSecondsF()));
     return;
   }
@@ -956,18 +966,22 @@ void BotLoop::DispatchOrderEval(const std::string& bot,
     return;
   }
   if (!eval.wake_reason.empty()) {
-    if (eval.timed_out) {
-      // Stop any in-progress movement and release `MOVEMENT_FORCED` on the
-      // module before waking the brain.
+    if (eval.timed_out || eval.preempted) {
+      // Stop any in-progress movement (e.g. a timed-out act or preempted kite)
+      // and release `MOVEMENT_FORCED` on the module before waking the brain.
       SendStopMoving(bot);
     }
     state->runner.Stop();
     state->look_deadline = base::TimeTicks();
-    WakeForOrder(bot, state, eval.wake_reason, now);
+    WakeForOrder(bot, state, eval.wake_reason, now,
+                 /*is_failure=*/eval.timed_out);
     return;
   }
   if (!eval.act) {
     return;
+  }
+  if (eval.preempted) {
+    SendStopMoving(bot);
   }
   std::optional<pb::Command::Act> wire =
       OrderActToCommand(*eval.act, eval.it_guid, eval.it_name);
@@ -976,7 +990,7 @@ void BotLoop::DispatchOrderEval(const std::string& bot,
     state->runner.Stop();
     state->look_deadline = base::TimeTicks();
     if (!failed.wake_reason.empty()) {
-      WakeForOrder(bot, state, failed.wake_reason, now);
+      WakeForOrder(bot, state, failed.wake_reason, now, /*is_failure=*/true);
     }
     return;
   }

@@ -532,10 +532,17 @@ class LlmBrainWorldScript : public WorldScript {
       // (a replan that still fights the boss keeps an in-flight `away` running;
       // a dropped `kite` is stopped explicitly by the harness via STOP MOVING).
       if (!attack && state.active_act) {
+        const uint32_t cancelled_cmd_id = state.active_act->command_id;
         CancelActiveAct(bot, &*state.active_act);
         state.active_act.reset();
+        wlb::snapshot::Event payload;
+        wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
+        failed.text = "act cancelled by new choice";
+        failed.command_id = cancelled_cmd_id;
+        EmitAlertingEvent(index, name, bot, std::move(payload));
       }
       state.had_food_drink_aura = false;
+      state.attack_idle_since = base::TimeTicks();
       state.walk = PendingWalk{};
     }
     if (found.target) {
@@ -783,9 +790,12 @@ class LlmBrainWorldScript : public WorldScript {
       if (!IsInLootRange(bot, creature)) {
         if (!bot->isMoving() && now >= state.next_rest_try) {
           state.next_rest_try = now + base::Seconds(1);
-          bot->GetMotionMaster()->MovePoint(0, creature->GetPositionX(),
-                                            creature->GetPositionY(),
-                                            creature->GetPositionZ());
+          if (!WalkTowards(bot, creature->GetPositionX(),
+                           creature->GetPositionY(),
+                           creature->GetPositionZ())) {
+            FailActiveOption(index, name, bot,
+                             "no path to " + state.active_option->name);
+          }
         }
         return;
       }
@@ -807,8 +817,11 @@ class LlmBrainWorldScript : public WorldScript {
       if (!IsInUseRange(bot, go)) {
         if (!bot->isMoving() && now >= state.next_rest_try) {
           state.next_rest_try = now + base::Seconds(1);
-          bot->GetMotionMaster()->MovePoint(
-              0, go->GetPositionX(), go->GetPositionY(), go->GetPositionZ());
+          if (!WalkTowards(bot, go->GetPositionX(), go->GetPositionY(),
+                           go->GetPositionZ())) {
+            FailActiveOption(index, name, bot,
+                             "no path to " + state.active_option->name);
+          }
         }
         return;
       }
@@ -829,8 +842,11 @@ class LlmBrainWorldScript : public WorldScript {
       if (!IsInTalkRange(bot, npc)) {
         if (!bot->isMoving() && now >= state.next_rest_try) {
           state.next_rest_try = now + base::Seconds(1);
-          bot->GetMotionMaster()->MovePoint(
-              0, npc->GetPositionX(), npc->GetPositionY(), npc->GetPositionZ());
+          if (!WalkTowards(bot, npc->GetPositionX(), npc->GetPositionY(),
+                           npc->GetPositionZ())) {
+            FailActiveOption(index, name, bot,
+                             "no path to " + state.active_option->name);
+          }
         }
         return;
       }
