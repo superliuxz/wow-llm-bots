@@ -17,7 +17,8 @@ design decisions below.
 1. **Standing orders** (`#5`; spec and decisions: `docs/specs/triggers.md`, "The grammar (final,
    2026-11-17)" and "Decided (2026-11-18)": `when` evaluated in the harness, acts carried out in
    the module; relative places now, room landmarks later; acts through the client's own
-   handlers). **About a sixth done; nothing acts on an order in game yet.** Build order:
+   handlers). **Implementation and offline evals (a)–(f) are done; live server tests and
+   passing `order_names` in live `BotLoop` calls remain.** Build order:
    - **(a) Order language and evaluator in the harness: done (2026-11-18).**
      - `harness/src/orders.{h,cc}`: types, parser (26 condition forms, 18
        verbs; generated from `harness/grammar/orders.wlb`), printer, per-call grammar (`OrderGrammar`,
@@ -95,6 +96,9 @@ design decisions below.
 
 ## Loose ends
 
+- **No e2e case for standing orders**: the act executor (`server_module/src/options/act_executor.cc`)
+  has only geometry unit tests; an e2e case with one order per verb family (move, use, kite)
+  on the test server would catch what unit tests can't (the `group` crash was one).
 - **Screen goldens have no module options** (review of c80e791, finding 5; still open after the
   review of f40b0b6): the 10 goldens test rendering against the Python prototype, which invents
   its own options. Real options need each golden's facts captured on the test server
@@ -157,6 +161,12 @@ design decisions below.
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-18: review of the standing-order commits (d912e3d..736b1f9): `group` crash, orders
+  latch per crossing, wakes covered by condition kind and subject (`WakeTrigger::kinds`,
+  `OrderCoversWake`), separate `done_act_command_id` (`kWireVersion` 2), act owns movement over a
+  plan walk, timeouts per act with `stop moving`, `kite` ends when its condition clears, bare
+  `away` anchored, `anyone` friendly only, `use` through the client's handlers and failing when
+  the cast doesn't start, bounded history. Not yet run live: no e2e case runs an order yet.
 - 2026-11-18: review of f40b0b6, all 18 findings (`docs/reviews/2026-11-18-f40b0b6.md`, "Status"),
   plus the parts of review c80e791 left open (canned replies, say/yell checks, perf's parser copy);
   all 7 e2e cases pass on the test server; eval 39/44 scored cases (a random option scores 21;

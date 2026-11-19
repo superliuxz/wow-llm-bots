@@ -221,7 +221,13 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   if (!ord.wake_reason.empty()) {
     return;
   }
-  if (trig && !ord.covered) {
+  const bool trig_covered =
+      trig && ord.covered && ord.order_index >= 0 &&
+      static_cast<size_t>(ord.order_index) < state.orders.orders().size() &&
+      OrderCoversWake(
+          state.orders.orders()[static_cast<size_t>(ord.order_index)],
+          trig->kinds);
+  if (trig && !trig_covered) {
     state.runner.Stop();
     state.look_deadline = base::TimeTicks();
     WakeBot(bot, trig->urgency, trig->reason);
@@ -347,8 +353,7 @@ void BotLoop::OnTick(base::TimeTicks now) {
     }
     if (const OrderEvalResult timeout = state.orders.CheckTimeout(now);
         !timeout.wake_reason.empty()) {
-      state.look_deadline = base::TimeTicks();
-      WakeBot(bot, Urgency::kUrgent, timeout.wake_reason);
+      DispatchOrderEval(bot, &state, timeout);
       continue;
     }
     if (const std::optional<std::string> timeout =
@@ -894,7 +899,22 @@ void BotLoop::SendHover(const std::string& bot, const pb::HoverRef& ref) {
 void BotLoop::DispatchOrderEval(const std::string& bot,
                                 BotState* state,
                                 const OrderEvalResult& eval) {
+  if (eval.kite_ended) {
+    pb::Command::Act stop_moving;
+    stop_moving.verb = pb::Command::Act::STOP;
+    stop_moving.stop = pb::Command::Act::MOVING;
+    SendAct(bot, std::move(stop_moving));
+    return;
+  }
   if (!eval.wake_reason.empty()) {
+    if (eval.timed_out) {
+      // Stop any in-progress movement and release `MOVEMENT_FORCED` on the
+      // module before waking the brain.
+      pb::Command::Act stop_moving;
+      stop_moving.verb = pb::Command::Act::STOP;
+      stop_moving.stop = pb::Command::Act::MOVING;
+      SendAct(bot, std::move(stop_moving));
+    }
     state->runner.Stop();
     state->look_deadline = base::TimeTicks();
     WakeBot(bot, Urgency::kUrgent, eval.wake_reason);

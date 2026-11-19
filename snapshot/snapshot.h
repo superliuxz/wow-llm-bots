@@ -1884,7 +1884,9 @@ struct LfgEvent {
 // and each side drops frames of another version (a module and a harness from
 // different checkouts). Adding a field doesn't change it (an older reader
 // skips unknown keys); changing or removing what a field means does.
-inline constexpr uint32_t kWireVersion = 1;
+// 2: standing-order acts finish through `done_act_command_id`, no longer
+// `done_command_id`.
+inline constexpr uint32_t kWireVersion = 2;
 
 struct Command {
   using Choose = Command_Choose;
@@ -2762,6 +2764,9 @@ struct Snapshot {
   // any. Repeated on every snapshot until the next one finishes, so a newer
   // snapshot can't lose it (docs/specs/snapshot.md, "Commands").
   uint32_t done_command_id = 0;
+  // Same for the last standing-order `Command::Act` finished by the body;
+  // kept separate so an option completion never overwrites an act completion.
+  uint32_t done_act_command_id = 0;
   Base base;
   Extensions ext;
   std::vector<Event> events;

@@ -22,6 +22,7 @@
 #include "grammar/orders.wlb.h"
 #include "orders.h"
 #include "snapshot/snapshot.h"
+#include "triggers.h"
 
 namespace harness {
 namespace {
@@ -508,9 +509,12 @@ std::vector<Entity> ResolveWho(const SnapshotView& view,
       }
       break;
     case grammar::Who::kAnyone:
+      // Any friendly raid/party member (never hostile enemies).
       out.push_back(view.self);
       for (const pb::Unit* u : view.units) {
-        if (!u->dead) {
+        if (!u->dead &&
+            (IsGroupMember(view.snap, *u) ||
+             (u->kind == pb::Unit::PLAYER && IsFriendlyUnit(view.snap, *u)))) {
           out.push_back(MakeUnitEntity(*u));
         }
       }
@@ -1152,12 +1156,14 @@ void OrderEvaluator::SetOrders(std::vector<Order> orders, base::TimeTicks now) {
   orders_ = std::move(orders);
   orders_installed_at_ = now;
   last_every_fired_.assign(orders_.size(), std::nullopt);
+  order_latched_.assign(orders_.size(), false);
   ResetActive();
 }
 
 void OrderEvaluator::Clear() {
   orders_.clear();
   last_every_fired_.clear();
+  order_latched_.clear();
   ResetActive();
 }
 
@@ -1170,8 +1176,35 @@ void OrderEvaluator::ResetActive() {
   pending_command_id_ = 0;
 }
 
+std::optional<base::TimeDelta> OrderEvaluator::TimeoutForAct(
+    const Act& act) const {
+  if (!step_timeout_.is_positive()) {
+    return std::nullopt;
+  }
+  if (std::holds_alternative<grammar::ActKite>(act.value)) {
+    // Kiting is continuous until preempted or the kited unit dies/vanishes.
+    return std::nullopt;
+  }
+  if (std::holds_alternative<grammar::ActTo>(act.value) ||
+      std::holds_alternative<grammar::ActAway>(act.value) ||
+      std::holds_alternative<grammar::ActInteract>(act.value) ||
+      std::holds_alternative<grammar::ActBoard>(act.value)) {
+    return std::max(step_timeout_, kLongOrderMoveTimeout);
+  }
+  return step_timeout_;
+}
+
 void OrderEvaluator::UpdateHistory(const pb::Snapshot& snapshot,
                                    base::TimeTicks now) {
+  // Prune stale history entries so maps stay bounded over long sessions.
+  auto prune = [&](std::flat_map<std::string, SeenEvent>& map) {
+    std::erase_if(map, [&](const auto& kv) {
+      return (now - kv.second.when) > kMaxOrderHistoryAge;
+    });
+  };
+  prune(last_casts_);
+  prune(last_appears_);
+
   // Record active casts from all units in the snapshot.
   auto record_cast = [&](const pb::Unit& u) {
     if (u.dead || !u.activity.cast || !u.activity.cast->spell) {
@@ -1203,7 +1236,9 @@ void OrderEvaluator::UpdateHistory(const pb::Snapshot& snapshot,
         now, snapshot.base.self.unit.guid, snapshot.base.self.unit.name};
   }
 
-  // Track newly appearing living units, objects, and areas.
+  // Track newly appearing living units, objects, and areas. On the very first
+  // snapshot, seed `prev_entity_keys_` without firing `appears in last Ns` for
+  // entities already present at login.
   std::flat_set<std::string> current_keys;
   auto record_present = [&](std::string_view guid, std::string_view name) {
     if (name.empty()) {
@@ -1212,7 +1247,7 @@ void OrderEvaluator::UpdateHistory(const pb::Snapshot& snapshot,
     std::string key =
         !guid.empty() ? std::string(guid) : ("name:" + LowerKey(name));
     current_keys.insert(key);
-    if (!prev_entity_keys_.contains(key)) {
+    if (history_seeded_ && !prev_entity_keys_.contains(key)) {
       last_appears_[LowerKey(name)] = {now, std::string(guid),
                                        std::string(name)};
     }
@@ -1235,6 +1270,7 @@ void OrderEvaluator::UpdateHistory(const pb::Snapshot& snapshot,
     record_present(a.guid, AreaName(a));
   }
   prev_entity_keys_ = std::move(current_keys);
+  history_seeded_ = true;
 }
 
 OrderEvalResult OrderEvaluator::DispatchStep(int order_idx,
@@ -1244,10 +1280,16 @@ OrderEvalResult OrderEvaluator::DispatchStep(int order_idx,
                                              bool preempted,
                                              base::TimeTicks now) {
   const Order& order = orders_[static_cast<size_t>(order_idx)];
-  if (step_idx == 0 && OrderHasEvery(order)) {
-    last_every_fired_[static_cast<size_t>(order_idx)] = now;
+  if (step_idx == 0) {
+    if (OrderHasEvery(order)) {
+      last_every_fired_[static_cast<size_t>(order_idx)] = now;
+    } else {
+      order_latched_[static_cast<size_t>(order_idx)] = true;
+    }
   }
   const Act& act = order.steps[static_cast<size_t>(step_idx)];
+  const bool is_always =
+      std::holds_alternative<grammar::WhenAlways>(order.when.value);
 
   OrderEvalResult res;
   res.act = act;
@@ -1270,7 +1312,7 @@ OrderEvalResult OrderEvaluator::DispatchStep(int order_idx,
   active_it_name_ = std::move(it_name);
   step_started_at_ = now;
   pending_command_id_ = 0;
-  res.covered = true;
+  res.covered = !is_always;
   return res;
 }
 
@@ -1282,10 +1324,11 @@ OrderEvalResult OrderEvaluator::OnSnapshot(const pb::Snapshot& snapshot,
     return {};
   }
 
-  // Check if the running step completed on this snapshot.
+  // Check if the running step completed on this snapshot (separate from
+  // `done_command_id` used by `PlanRunner`).
   bool step_advanced = false;
   if (active_order_ >= 0 && pending_command_id_ != 0 &&
-      snapshot.done_command_id == pending_command_id_) {
+      snapshot.done_act_command_id == pending_command_id_) {
     const Order& cur = orders_[static_cast<size_t>(active_order_)];
     const int next_step = active_step_ + 1;
     if (static_cast<size_t>(next_step) < cur.steps.size()) {
@@ -1330,23 +1373,63 @@ OrderEvalResult OrderEvaluator::OnSnapshot(const pb::Snapshot& snapshot,
   view.last_casts = &cast_entities;
   view.last_appears = &appear_entities;
 
-  // Evaluate in priority order: if an order is active, only strictly
-  // higher-priority orders (`i < active_order_`) can preempt it.
+  // Evaluate every order so edge latches re-arm whenever `when` goes false,
+  // and select the highest-priority eligible order (strictly higher than
+  // `active_order_` when an order is already running).
+  int winner = -1;
+  WhenMatch winner_match;
+  bool active_matched = false;
   const int limit =
       active_order_ >= 0 ? active_order_ : static_cast<int>(orders_.size());
-  for (int i = 0; i < limit; ++i) {
+  for (int i = 0; i < static_cast<int>(orders_.size()); ++i) {
     const Order& order = orders_[static_cast<size_t>(i)];
     if (order.steps.empty()) {
       continue;
     }
     view.order_last_every = last_every_fired_[static_cast<size_t>(i)];
     WhenMatch match = EvalWhen(view, order.when);
-    if (match.matched) {
-      const bool preempted = active_order_ >= 0;
-      std::string it_guid = match.it ? match.it->guid : std::string();
-      std::string it_name = match.it ? match.it->name : std::string();
-      return DispatchStep(i, 0, std::move(it_guid), std::move(it_name),
-                          preempted, now);
+    if (!match.matched) {
+      order_latched_[static_cast<size_t>(i)] = false;
+      continue;
+    }
+    if (i == active_order_) {
+      active_matched = true;
+    }
+    const bool uses_every = OrderHasEvery(order);
+    const bool latched = !uses_every && order_latched_[static_cast<size_t>(i)];
+    if (winner < 0 && i < limit && !latched) {
+      winner = i;
+      winner_match = std::move(match);
+    }
+  }
+
+  if (winner >= 0) {
+    const bool preempted = active_order_ >= 0;
+    if (preempted &&
+        std::holds_alternative<grammar::WhenAlways>(
+            orders_[static_cast<size_t>(active_order_)].when.value)) {
+      // Allow a preempted `always` fallback to resume once the urgent order
+      // finishes.
+      order_latched_[static_cast<size_t>(active_order_)] = false;
+    }
+    std::string it_guid = winner_match.it ? winner_match.it->guid : "";
+    std::string it_name = winner_match.it ? winner_match.it->name : "";
+    return DispatchStep(winner, 0, std::move(it_guid), std::move(it_name),
+                        preempted, now);
+  }
+
+  // A `kite` runs until stopped: it ends when its order's `when` no longer
+  // holds (the mob is far, the debuff is gone), not by itself.
+  if (active_order_ >= 0 && !active_matched && !step_advanced) {
+    const Order& cur = orders_[static_cast<size_t>(active_order_)];
+    if (std::holds_alternative<grammar::ActKite>(
+            cur.steps[static_cast<size_t>(active_step_)].value)) {
+      OrderEvalResult res;
+      res.order_index = active_order_;
+      res.step_index = active_step_;
+      res.kite_ended = true;
+      ResetActive();
+      return res;
     }
   }
 
@@ -1357,14 +1440,15 @@ OrderEvalResult OrderEvaluator::OnSnapshot(const pb::Snapshot& snapshot,
                         active_it_name_, /*preempted=*/false, now);
   }
 
-  // Otherwise, the active step continues running and still covers the state.
+  // Otherwise, the active step continues running.
   if (active_order_ >= 0) {
+    const Order& cur = orders_[static_cast<size_t>(active_order_)];
     OrderEvalResult res;
     res.order_index = active_order_;
     res.step_index = active_step_;
     res.it_guid = active_it_guid_;
     res.it_name = active_it_name_;
-    res.covered = true;
+    res.covered = !std::holds_alternative<grammar::WhenAlways>(cur.when.value);
     return res;
   }
 
@@ -1410,24 +1494,66 @@ OrderEvalResult OrderEvaluator::OnStepFailed(std::string_view error) {
 }
 
 OrderEvalResult OrderEvaluator::CheckTimeout(base::TimeTicks now) {
-  if (active_order_ < 0 || !step_timeout_.is_positive()) {
+  if (active_order_ < 0) {
     return {};
   }
-  if ((now - step_started_at_) < step_timeout_) {
+  const Order& order = orders_[static_cast<size_t>(active_order_)];
+  const Act& act = order.steps[static_cast<size_t>(active_step_)];
+  const std::optional<base::TimeDelta> limit = TimeoutForAct(act);
+  if (!limit || (now - step_started_at_) < *limit) {
     return {};
   }
   const int order_idx = active_order_;
   const int step_idx = active_step_;
-  const std::string order_text =
-      FormatOrder(orders_[static_cast<size_t>(order_idx)]);
+  const std::string order_text = FormatOrder(order);
   ResetActive();
 
   OrderEvalResult res;
   res.order_index = order_idx;
   res.step_index = step_idx;
   res.covered = false;
+  res.timed_out = true;
   res.wake_reason = "standing order timed out (" + order_text + ")";
   return res;
+}
+
+namespace {
+
+bool IsMe(const Thing& thing) {
+  const auto* who = std::get_if<grammar::ThingWho>(&thing.value);
+  return who && who->who == grammar::Who::kMe;
+}
+
+}  // namespace
+
+bool OrderCoversWake(const Order& order, uint32_t kinds) {
+  const auto* all = std::get_if<grammar::WhenAll>(&order.when.value);
+  if (!all) {
+    return false;  // `always` orders never suppress wake triggers.
+  }
+  // What this order's conditions are about, by the wake each one answers:
+  // my health (`me hp<N`), my mana, something targeting me. Death, coming
+  // back, loss of control, enemy players and anything else always wake.
+  uint32_t covered = 0;
+  for (const Condition& cond : all->conds) {
+    if (cond.negated) {
+      continue;
+    }
+    if (const auto* hp = std::get_if<grammar::CheckHp>(&cond.check.value);
+        hp && IsMe(hp->a)) {
+      covered |= kWakeHealth;
+    }
+    if (std::holds_alternative<grammar::CheckMana>(cond.check.value) ||
+        std::holds_alternative<grammar::CheckManaPoints>(cond.check.value)) {
+      covered |= kWakeMana;
+    }
+    if (const auto* targets =
+            std::get_if<grammar::CheckTargets>(&cond.check.value);
+        targets && IsMe(targets->b)) {
+      covered |= kWakeAttacked | kWakeEnteredCombat;
+    }
+  }
+  return kinds != 0 && (kinds & ~covered) == 0;
 }
 
 std::optional<pb::Command::Act> OrderActToCommand(const Act& act,

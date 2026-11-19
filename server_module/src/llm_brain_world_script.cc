@@ -574,7 +574,7 @@ class LlmBrainWorldScript : public WorldScript {
       failed.command_id = command_id;
       EmitAlertingEvent(bot_index, name, bot, std::move(payload));
     } else if (res.done) {
-      state.done_command_id = command_id;
+      state.done_act_command_id = command_id;
       schedule_->SetActiveTargetPending(bot_index,
                                         state.active_option.has_value());
     } else {
@@ -649,8 +649,13 @@ class LlmBrainWorldScript : public WorldScript {
         failed.command_id = cmd_id;
         EmitAlertingEvent(index, name, bot, std::move(payload));
       } else if (res.done) {
-        state.done_command_id = state.active_act->command_id;
+        state.done_act_command_id = state.active_act->command_id;
         state.active_act.reset();
+      } else {
+        // An active standing-order act owns movement/casting until it finishes
+        // or fails: pause any overlapping plan-option walk/approach so the two
+        // don't fight over MovePoint.
+        return;
       }
     }
     if (!state.active_option || state.object_used) {
@@ -819,6 +824,7 @@ class LlmBrainWorldScript : public WorldScript {
     const base::TimeTicks start = base::TimeTicks::Now();
     snapshot.monotonic_us = (start - base::TimeTicks()).InMicroseconds();
     snapshot.done_command_id = state.done_command_id;
+    snapshot.done_act_command_id = state.done_act_command_id;
     OptionFacts facts;
     const NearbyBuilder::Stats nearby =
         state.builder->Build(bot, &snapshot, &facts, world_places_.get(),
@@ -855,8 +861,11 @@ class LlmBrainWorldScript : public WorldScript {
     OptionHistory history{kOptionHistory};
     std::optional<OptionTarget> active_option;
     uint32_t active_command_id = 0;
-    // The last command the body finished (Snapshot::done_command_id).
+    // The last command the body finished (Snapshot::done_command_id /
+    // done_act_command_id), kept separate so option and act completions never
+    // overwrite each other.
     uint32_t done_command_id = 0;
+    uint32_t done_act_command_id = 0;
     // Gather / Use / Talk / Explore / GoTo: finished at once or on arrival.
     bool object_used = false;
     // Rest: whether a food or drink aura was observed while resting.

@@ -79,6 +79,9 @@ Messages (`snapshot.proto`): the module sends `ModuleMessage` (a `Snapshot`, or 
   any, and again after the harness reconnects. A field, not an event, so a newer snapshot
   replacing an older one can't lose it. The harness counts the step done when it matches the
   step's command (some steps, like using a door, have no other visible end).
+- `done_act_command_id` (on the snapshot): the same for the last standing-order `Command.act`
+  the body finished (docs/specs/triggers.md), kept apart from `done_command_id` so a plan step
+  and an order's act finishing together can't hide one another. Since `kWireVersion` 2.
 - Wire format: **binary protobuf, length-prefixed frames** over the Unix socket. Both sides
   use C++ generated from `snapshot.proto` with `optimize_for = LITE_RUNTIME`, as Chromium
   does; the module contains no JSON code.

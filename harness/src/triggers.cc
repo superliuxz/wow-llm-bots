@@ -70,6 +70,7 @@ void Consider(std::optional<WakeTrigger>* best, WakeTrigger candidate) {
     return;
   }
   (*best)->urgency = std::min((*best)->urgency, candidate.urgency);
+  (*best)->kinds |= candidate.kinds;
   if (!candidate.reason.empty() &&
       (*best)->reason.find(candidate.reason) == std::string::npos) {
     base::StrAppend(&(*best)->reason, {"; ", candidate.reason});
@@ -336,12 +337,12 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
 
   if (seen_snapshot_) {
     if (was_alive_ && !alive) {
-      Consider(&chosen, {Urgency::kUrgent, "died"});
+      Consider(&chosen, {Urgency::kUrgent, "died", kWakeDied});
     }
     // Back from the dead (resurrected, or the spirit reached the body): while
     // dead only Keep was offered, so there is a choice to make again.
     if (!was_alive_ && alive) {
-      Consider(&chosen, {Urgency::kNormal, "alive again"});
+      Consider(&chosen, {Urgency::kNormal, "alive again", kWakeAlive});
     }
     const struct {
       bool was;
@@ -359,7 +360,8 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
     for (const auto& item : controls) {
       if (!item.was && item.now) {
         Consider(&chosen, {Urgency::kUrgent,
-                           base::StrCat({"lost control (", item.label, ")"})});
+                           base::StrCat({"lost control (", item.label, ")"}),
+                           kWakeLostControl});
       }
     }
 
@@ -371,10 +373,11 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
       }
       if (prev_attackers_.count(key) == 0) {
         if (watch_attacked || expected_names_.count(name) == 0) {
-          Consider(&chosen,
-                   {Urgency::kUrgent,
-                    name.empty() ? "attacked"
-                                 : base::StrCat({"attacked by ", name})});
+          Consider(
+              &chosen,
+              {Urgency::kUrgent,
+               name.empty() ? "attacked" : base::StrCat({"attacked by ", name}),
+               kWakeAttacked});
         }
       }
     }
@@ -382,9 +385,10 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
     // Entered combat when the plan expected no fight at all.
     if (!was_in_combat_ && in_combat) {
       if (watch_attacked) {
-        Consider(&chosen, {Urgency::kUrgent, "attacked"});
+        Consider(&chosen, {Urgency::kUrgent, "attacked", kWakeAttacked});
       } else if (expected_names_.empty() && !any_expected_attacker) {
-        Consider(&chosen, {Urgency::kUrgent, "entered combat"});
+        Consider(&chosen,
+                 {Urgency::kUrgent, "entered combat", kWakeEnteredCombat});
       }
     }
   }
@@ -404,7 +408,8 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
                 Consider(
                     &chosen,
                     {Urgency::kUrgent,
-                     base::StrCat({"hp<", base::NumberToString(watch.value)})});
+                     base::StrCat({"hp<", base::NumberToString(watch.value)}),
+                     kWakeHealth});
               }
             } else {
               watch_fired_[i] = false;
@@ -416,10 +421,11 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
             if (*mana_pct < static_cast<double>(watch.value)) {
               if (!watch_fired_[i]) {
                 watch_fired_[i] = true;
-                Consider(&chosen,
-                         {in_combat ? Urgency::kUrgent : Urgency::kNormal,
-                          base::StrCat(
-                              {"mana<", base::NumberToString(watch.value)})});
+                Consider(
+                    &chosen,
+                    {in_combat ? Urgency::kUrgent : Urgency::kNormal,
+                     base::StrCat({"mana<", base::NumberToString(watch.value)}),
+                     kWakeMana});
               }
             } else {
               watch_fired_[i] = false;
@@ -440,7 +446,8 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
                     &chosen,
                     {Urgency::kP1Danger,
                      base::StrCat({"enemy player ", u.name, " within ",
-                                   base::NumberToString(watch.value), " yd"})});
+                                   base::NumberToString(watch.value), " yd"}),
+                     kWakeEnemyPlayer});
               }
             }
           }

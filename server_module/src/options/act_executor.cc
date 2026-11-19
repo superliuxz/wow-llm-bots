@@ -51,6 +51,7 @@
 #include "SpellMgr.h"
 #include "Unit.h"
 #include "UnitDefines.h"
+#include "World.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
 #include "base/strings/string_util.h"
@@ -112,13 +113,22 @@ uint8_t RaidMarkerIconIndex(pb::RaidMarker m) {
   return 255;
 }
 
+std::string_view SpellLocalizedName(const SpellInfo* info) {
+  if (!info) {
+    return {};
+  }
+  const char* name = info->SpellName[sWorld->GetDefaultDbcLocale()];
+  if (!name || name[0] == '\0') {
+    name = info->SpellName[0];
+  }
+  return name ? std::string_view(name) : std::string_view();
+}
+
 bool UnitHasAuraNamed(const Unit* unit, std::string_view name) {
   for (const auto& [spell_id, aura] : unit->GetAppliedAuras()) {
     (void)spell_id;
-    if (const SpellInfo* info = aura->GetBase()->GetSpellInfo()) {
-      if (NameEq(info->SpellName[0], name)) {
-        return true;
-      }
+    if (NameEq(SpellLocalizedName(aura->GetBase()->GetSpellInfo()), name)) {
+      return true;
     }
   }
   return false;
@@ -218,8 +228,9 @@ WorldObject* ResolveThing(Player* bot,
     case pb::Command_Act::MY_TARGET:
       return bot->GetSelectedUnit();
     case pb::Command_Act::FOCUS:
-      // AzerothCore servers do not store client focus; fall back to target.
-      return bot->GetSelectedUnit();
+      // AzerothCore does not store client focus server-side: fail explicitly
+      // rather than silently hitting the current target.
+      return nullptr;
     case pb::Command_Act::TANK: {
       std::vector<Player*> tanks = GroupTanks(bot);
       return tanks.empty() ? nullptr : tanks.front();
@@ -286,19 +297,23 @@ WorldObject* ResolveThing(Player* bot,
     case pb::Command_Act::GROUP:
     case pb::Command_Act::ALLIES:
     case pb::Command_Act::ANYONE: {
+      Group* grp = bot->GetGroup();
       Unit* best = nullptr;
       float best_dist = std::numeric_limits<float>::infinity();
       for (Unit* u : NearbyUnits(bot)) {
         if (u == bot || !u->IsAlive()) {
           continue;
         }
-        if (act.thing == pb::Command_Act::GROUP &&
-            !bot->IsInSameGroupWith(u->ToPlayer())) {
-          continue;
-        }
-        if ((act.thing == pb::Command_Act::NEAREST_ALLY ||
-             act.thing == pb::Command_Act::ALLIES) &&
-            !bot->IsFriendlyTo(u)) {
+        if (act.thing == pb::Command_Act::GROUP) {
+          Player* other = u->ToPlayer();
+          if (!other || !grp || !grp->SameSubGroup(bot, other)) {
+            continue;
+          }
+        } else if (act.thing == pb::Command_Act::ANYONE) {
+          if (!u->IsPlayer() || !bot->IsFriendlyTo(u)) {
+            continue;
+          }
+        } else if (!bot->IsFriendlyTo(u)) {
           continue;
         }
         const float d = bot->GetDistance(u);
@@ -381,7 +396,7 @@ WorldObject* ResolveThing(Player* bot,
       }
       for (DynamicObject* dyn : NearbyAreas(bot)) {
         const SpellInfo* sp = sSpellMgr->GetSpellInfo(dyn->GetSpellId());
-        if (sp && NameEq(sp->SpellName[0], thing_name)) {
+        if (NameEq(SpellLocalizedName(sp), thing_name)) {
           const float d = bot->GetDistance(dyn);
           if (d < best_dist) {
             best = dyn;
@@ -470,7 +485,7 @@ const SpellInfo* FindKnownSpell(Player* bot, std::string_view name) {
       continue;
     }
     const SpellInfo* info = sSpellMgr->GetSpellInfo(spell_id);
-    if (!info || !NameEq(info->SpellName[0], name)) {
+    if (!info || !NameEq(SpellLocalizedName(info), name)) {
       continue;
     }
     if (!best || info->GetRank() > best->GetRank()) {
@@ -480,15 +495,49 @@ const SpellInfo* FindKnownSpell(Player* bot, std::string_view name) {
   return best;
 }
 
-// Finds a usable item in `bot`'s bags matching `name`.
-Item* FindBagItemByName(Player* bot, std::string_view name) {
+// Whether a cast the client's handler was just given really started: the
+// handlers return nothing, and a refused cast (range, mana, line of sight,
+// global cooldown) leaves the bot idle. Started means casting, or the spell's
+// cooldown or the global cooldown running now. An instant spell with neither
+// would read as refused; none of the order verbs' spells is one in practice.
+bool CastStarted(Player* bot, const SpellInfo* spell) {
+  return bot->HasUnitState(UNIT_STATE_CASTING) ||
+         (spell && (bot->HasSpellCooldown(spell->Id) ||
+                    bot->GetGlobalCooldownMgr().HasGlobalCooldown(spell)));
+}
+
+// Estimates the bot's effective max spell range from its known active spells,
+// with a 2 yd margin (falls back to kDefaultMaxRangeYd when no ranged spell is
+// known).
+float BotMaxSpellRangeYd(Player* bot) {
+  float best = 0.0f;
+  for (const auto& [spell_id, player_spell] : bot->GetSpellMap()) {
+    if (!player_spell || player_spell->State == PLAYERSPELL_REMOVED ||
+        !player_spell->Active) {
+      continue;
+    }
+    const SpellInfo* info = sSpellMgr->GetSpellInfo(spell_id);
+    if (!info || info->IsPassive()) {
+      continue;
+    }
+    const float r = info->GetMaxRange(/*positive=*/false, bot);
+    if (r >= 10.0f && r <= 45.0f && r > best) {
+      best = r;
+    }
+  }
+  return best >= 10.0f ? std::max(8.0f, best - 2.0f) : kDefaultMaxRangeYd;
+}
+
+// Finds a usable item in `bot`'s bags matching `name` (with bag/slot).
+std::optional<BagSlotItem> FindBagItemByName(Player* bot,
+                                             std::string_view name) {
   for (const BagSlotItem& entry : BagItems(bot)) {
     const ItemTemplate* proto = entry.item->GetTemplate();
     if (proto && NameEq(proto->Name1, name)) {
-      return entry.item;
+      return entry;
     }
   }
-  return nullptr;
+  return std::nullopt;
 }
 
 // Resolves the anchor for `to` or `away`. For bare `away` (no `thing`), uses
@@ -564,12 +613,14 @@ ActStartResult StartAct(Player* bot,
         case pb::Command_Act::MOVING:
           bot->StopMoving();
           bot->GetMotionMaster()->Clear();
+          ClearActMovement(bot);
           break;
         case pb::Command_Act::STOP_UNSPECIFIED:
           bot->InterruptNonMeleeSpells(false);
           bot->AttackStop();
           bot->StopMoving();
           bot->GetMotionMaster()->Clear();
+          ClearActMovement(bot);
           break;
       }
       return {.done = true};
@@ -602,11 +653,19 @@ ActStartResult StartAct(Player* bot,
       }
 
       if (const SpellInfo* spell = FindKnownSpell(bot, act.name)) {
+        if (bot->HasSpellCooldown(spell->Id)) {
+          return {.error = act.name + " is on cooldown"};
+        }
         Unit* cast_target = target ? target : bot;
-        const SpellCastResult res =
-            bot->CastSpell(cast_target, spell, TRIGGERED_NONE);
-        if (res != SPELL_CAST_OK) {
-          return {.error = "cannot cast " + act.name};
+        WorldPacket p(CMSG_CAST_SPELL);
+        p << static_cast<uint8_t>(0) << spell->Id << static_cast<uint8_t>(0);
+        SpellCastTargets targets;
+        targets.SetUnitTarget(cast_target);
+        targets.Write(p);
+        p.rpos(0);
+        bot->GetSession()->HandleCastSpellOpcode(p);
+        if (!CastStarted(bot, spell)) {
+          return {.error = "cannot cast " + act.name + " now"};
         }
         if (bot->HasUnitState(UNIT_STATE_CASTING)) {
           out_active->command_id = command_id;
@@ -618,16 +677,39 @@ ActStartResult StartAct(Player* bot,
         return {.done = true};
       }
 
-      if (Item* item = FindBagItemByName(bot, act.name)) {
-        if (bot->CanUseItem(item) != EQUIP_ERR_OK) {
+      if (std::optional<BagSlotItem> found = FindBagItemByName(bot, act.name)) {
+        Item* item = found->item;
+        const ItemTemplate* proto = item->GetTemplate();
+        uint32_t item_spell_id = 0;
+        for (int i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i) {
+          if (proto->Spells[i].SpellId != 0 &&
+              proto->Spells[i].SpellTrigger == ITEM_SPELLTRIGGER_ON_USE) {
+            item_spell_id = proto->Spells[i].SpellId;
+            break;
+          }
+        }
+        if (item_spell_id == 0 || bot->CanUseItem(item) != EQUIP_ERR_OK) {
           return {.error = "cannot use " + act.name};
         }
+        if (bot->HasSpellCooldown(item_spell_id)) {
+          return {.error = act.name + " is on cooldown"};
+        }
+        const uint32_t count_before = bot->GetItemCount(proto->ItemId);
+        WorldPacket p(CMSG_USE_ITEM);
+        p << found->bag << found->slot << static_cast<uint8_t>(0)
+          << item_spell_id << item->GetGUID() << static_cast<uint32_t>(0)
+          << static_cast<uint8_t>(0);
         SpellCastTargets targets;
         if (target) {
           targets.SetUnitTarget(target);
         }
-        bot->CastItemUseSpell(item, targets, /*cast_count=*/0,
-                              /*glyphIndex=*/0);
+        targets.Write(p);
+        p.rpos(0);
+        bot->GetSession()->HandleUseItemOpcode(p);
+        if (bot->GetItemCount(proto->ItemId) >= count_before &&
+            !CastStarted(bot, sSpellMgr->GetSpellInfo(item_spell_id))) {
+          return {.error = "cannot use " + act.name + " now"};
+        }
         if (bot->HasUnitState(UNIT_STATE_CASTING)) {
           out_active->command_id = command_id;
           out_active->act = act;
@@ -647,9 +729,14 @@ ActStartResult StartAct(Player* bot,
         return {.error = "destination not found"};
       }
       const pb::Vec3 bot_pos = PosOf(bot);
+      const float max_range = (act.verb == pb::Command_Act::TO &&
+                               act.place == pb::Command_Act::MAX_RANGE)
+                                  ? BotMaxSpellRangeYd(bot)
+                                  : kDefaultMaxRangeYd;
       std::vector<pb::Vec3> candidates =
           (act.verb == pb::Command_Act::TO)
-              ? CandidateSpotsForPlace(act.place, bot_pos, *anchor, act.yd)
+              ? CandidateSpotsForPlace(act.place, bot_pos, *anchor, act.yd,
+                                       max_range)
               : CandidateSpotsForAway(bot_pos, *anchor, act.yd);
       if (candidates.empty()) {
         // Already far enough away.
@@ -713,7 +800,7 @@ ActStartResult StartAct(Player* bot,
       uint32_t cancel_id = 0;
       for (const auto& [spell_id, aura] : bot->GetAppliedAuras()) {
         const SpellInfo* info = aura->GetBase()->GetSpellInfo();
-        if (info && NameEq(info->SpellName[0], act.name) &&
+        if (info && NameEq(SpellLocalizedName(info), act.name) &&
             !info->HasAttribute(SPELL_ATTR0_NO_AURA_CANCEL)) {
           cancel_id = spell_id;
           break;
@@ -1017,12 +1104,36 @@ ActStepResult StepActiveAct(Player* bot,
   }
 
   const pb::Vec3 bot_pos = PosOf(bot);
-  if (act.verb == pb::Command_Act::AWAY && act.yd > 0.0f &&
-      Dist2D(bot_pos, active->last_anchor.pos) >= act.yd) {
-    bot->StopMoving();
-    ClearActMovement(bot);
-    return {.done = true};
+  if (act.verb == pb::Command_Act::AWAY) {
+    const float target_yd = act.yd > 0.0f ? act.yd : kDefaultAwayYd;
+    if (Dist2D(bot_pos, active->last_anchor.pos) >= target_yd ||
+        Dist2D(bot_pos, active->dest) <= kArrivalToleranceYd) {
+      bot->StopMoving();
+      ClearActMovement(bot);
+      return {.done = true};
+    }
+    // Keep the anchor fixed from StartAct so bare `away` (anchored on the
+    // starting spot) and `away <moving mob>` finish cleanly instead of
+    // chasing a shifting anchor forever.
+    if (now - active->last_repath_at >= kRepathInterval && !bot->isMoving()) {
+      active->last_repath_at = now;
+      std::vector<pb::Vec3> candidates =
+          CandidateSpotsForAway(bot_pos, active->last_anchor, act.yd);
+      if (candidates.empty()) {
+        ClearActMovement(bot);
+        return {.done = true};
+      }
+      std::optional<pb::Vec3> chosen =
+          MoveToFirstValidSpot(bot, candidates, nullptr);
+      if (!chosen) {
+        ClearActMovement(bot);
+        return {.error = "no path to destination"};
+      }
+      active->dest = *chosen;
+    }
+    return {};
   }
+
   if (Dist2D(bot_pos, active->dest) <= kArrivalToleranceYd) {
     ClearActMovement(bot);
     return {.done = true};
@@ -1038,29 +1149,23 @@ ActStepResult StepActiveAct(Player* bot,
   std::optional<AnchorGeometry> cur_anchor = ResolveMoveAnchor(bot, act);
   if (!cur_anchor) {
     ClearActMovement(bot);
-    // Anchor vanished while moving; if we were moving away, we're safe!
-    if (act.verb == pb::Command_Act::AWAY) {
-      return {.done = true};
-    }
     return {.error = "destination is gone"};
   }
 
-  const bool cares_facing =
-      act.verb == pb::Command_Act::TO && PlaceCaresAboutFacing(act.place);
+  const bool cares_facing = PlaceCaresAboutFacing(act.place);
   if (!bot->isMoving() || AnchorMovedSignificantly(active->last_anchor,
                                                    *cur_anchor, cares_facing)) {
-    std::vector<pb::Vec3> candidates =
-        (act.verb == pb::Command_Act::TO)
-            ? CandidateSpotsForPlace(act.place, bot_pos, *cur_anchor, act.yd)
-            : CandidateSpotsForAway(bot_pos, *cur_anchor, act.yd);
+    const float max_range = (act.place == pb::Command_Act::MAX_RANGE)
+                                ? BotMaxSpellRangeYd(bot)
+                                : kDefaultMaxRangeYd;
+    std::vector<pb::Vec3> candidates = CandidateSpotsForPlace(
+        act.place, bot_pos, *cur_anchor, act.yd, max_range);
     if (candidates.empty()) {
       ClearActMovement(bot);
       return {.done = true};
     }
     const AnchorGeometry* los_anchor =
-        (act.verb == pb::Command_Act::TO && PlaceNeedsLos(act.place))
-            ? &*cur_anchor
-            : nullptr;
+        PlaceNeedsLos(act.place) ? &*cur_anchor : nullptr;
     std::optional<pb::Vec3> chosen =
         MoveToFirstValidSpot(bot, candidates, los_anchor);
     if (!chosen) {

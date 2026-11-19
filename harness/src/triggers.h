@@ -9,6 +9,7 @@
 #ifndef HARNESS_TRIGGERS_H_
 #define HARNESS_TRIGGERS_H_
 
+#include <cstdint>
 #include <flat_set>
 #include <optional>
 #include <string>
@@ -20,11 +21,30 @@
 
 namespace harness {
 
+// What a snapshot wake is about, as bits (a merged trigger has several), so
+// a standing order can cover it by its condition (OrderCoversWake), not by
+// its wording.
+enum WakeKind : uint32_t {
+  kWakeOther = 1u << 0,
+  kWakeDied = 1u << 1,
+  kWakeAlive = 1u << 2,
+  kWakeLostControl = 1u << 3,
+  kWakeAttacked = 1u << 4,
+  kWakeEnteredCombat = 1u << 5,
+  kWakeHealth = 1u << 6,  // A `hp<N` watch: my own health.
+  kWakeMana = 1u << 7,    // A `mana<N` watch.
+  kWakeEnemyPlayer = 1u << 8,
+};
+
 struct WakeTrigger {
   Urgency urgency = Urgency::kNormal;
   std::string reason;
+  uint32_t kinds = kWakeOther;
 
-  bool operator==(const WakeTrigger&) const = default;
+  // What the brain is told; `kinds` is bookkeeping.
+  bool operator==(const WakeTrigger& other) const {
+    return urgency == other.urgency && reason == other.reason;
+  }
 };
 
 // One-line plain-English description of an event for `Since your last look:`

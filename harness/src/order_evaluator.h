@@ -31,6 +31,8 @@
 namespace harness {
 
 inline constexpr base::TimeDelta kDefaultOrderStepTimeout = base::Seconds(5);
+inline constexpr base::TimeDelta kLongOrderMoveTimeout = base::Seconds(15);
+inline constexpr base::TimeDelta kMaxOrderHistoryAge = base::Seconds(120);
 
 struct OrderEvalResult {
   // Next act to send to the module (nullopt if no new command this tick).
@@ -42,15 +44,27 @@ struct OrderEvalResult {
   // idle).
   int order_index = -1;
   int step_index = -1;
-  // True when a non-`wake` order fired or is actively running (suppresses
-  // default wakes for the covered event).
+  // True when a non-`wake` conditional order fired or is actively running.
+  // Use `OrderCoversWakeReason` before suppressing a specific WakeTrigger.
   bool covered = false;
   // True when a higher-priority order preempted a running lower-priority one.
   bool preempted = false;
+  // True when the active step timed out (caller should send `stop moving` to
+  // release `MOVEMENT_FORCED` on the module).
+  bool timed_out = false;
+  // True when a running `kite` ended because its order's `when` went false:
+  // the caller sends `stop moving` (no wake; the order did its job).
+  bool kite_ended = false;
   // Non-empty when the brain should wake: a `wake` act ran, a step timed out,
   // or a step failed.
   std::string wake_reason;
 };
+
+// Whether `order`'s condition covers every kind of a snapshot wake (`kinds`,
+// WakeTrigger::kinds): `me hp<N` covers my health watch, `mana<N` the mana
+// one, `X targets me` being attacked or entering combat. Death, loss of
+// control and the rest always wake; `always` orders never cover anything.
+bool OrderCoversWake(const Order& order, uint32_t kinds);
 
 // Converts a grammar `Act` into a wire `Command::Act` for the verbs supported
 // on the wire (`to`, `away`, `target`, `use`, `stop`, `wake`). Returns nullopt
@@ -103,6 +117,7 @@ class OrderEvaluator {
     std::string name;
   };
 
+  std::optional<base::TimeDelta> TimeoutForAct(const Act& act) const;
   void UpdateHistory(const wlb::snapshot::Snapshot& snapshot,
                      base::TimeTicks now);
   OrderEvalResult DispatchStep(int order_idx,
@@ -117,6 +132,8 @@ class OrderEvaluator {
   std::vector<Order> orders_;
   base::TimeTicks orders_installed_at_;
   std::vector<std::optional<base::TimeTicks>> last_every_fired_;
+  // Edge-trigger latch per order: true after firing until `when` goes false.
+  std::vector<bool> order_latched_;
 
   int active_order_ = -1;
   int active_step_ = 0;
@@ -126,6 +143,7 @@ class OrderEvaluator {
   uint32_t pending_command_id_ = 0;
 
   // Cross-snapshot history keyed by ASCII-lowercased spell/entity name.
+  bool history_seeded_ = false;
   std::flat_map<std::string, SeenEvent> last_casts_;
   std::flat_map<std::string, SeenEvent> last_appears_;
   std::flat_set<std::string> prev_entity_keys_;

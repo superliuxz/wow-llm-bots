@@ -16,6 +16,7 @@
 #include "grammar/orders.wlb.h"
 #include "orders.h"
 #include "snapshot/snapshot.h"
+#include "triggers.h"
 
 namespace harness {
 namespace {
@@ -95,7 +96,8 @@ TEST(OrderEvaluatorTest, AlwaysAndPriority) {
   ASSERT_TRUE(r.act.has_value());
   EXPECT_EQ(r.order_index, 1);
   EXPECT_EQ(r.step_index, 0);
-  EXPECT_TRUE(r.covered);
+  // `always` orders never suppress default wakes.
+  EXPECT_FALSE(r.covered);
   EXPECT_FALSE(r.preempted);
   EXPECT_TRUE(r.it_guid.empty());
   EXPECT_TRUE(std::holds_alternative<grammar::ActTo>(r.act->value));
@@ -158,7 +160,7 @@ TEST(OrderEvaluatorTest, ThenChainAdvancesOnDoneCommandId) {
   EXPECT_TRUE(r.covered);
 
   // Step 0 finishes -> step 1: to behind boss.
-  s.done_command_id = 101;
+  s.done_act_command_id = 101;
   r = eval.OnSnapshot(s, T(3));
   ASSERT_TRUE(r.act.has_value());
   EXPECT_EQ(r.order_index, 0);
@@ -168,7 +170,7 @@ TEST(OrderEvaluatorTest, ThenChainAdvancesOnDoneCommandId) {
   eval.set_pending_command_id(102);
 
   // Step 1 finishes -> step 2: wake (hands control to brain, not covered).
-  s.done_command_id = 102;
+  s.done_act_command_id = 102;
   r = eval.OnSnapshot(s, T(4));
   ASSERT_TRUE(r.act.has_value());
   EXPECT_EQ(r.order_index, 0);
@@ -177,6 +179,20 @@ TEST(OrderEvaluatorTest, ThenChainAdvancesOnDoneCommandId) {
   EXPECT_FALSE(r.covered);
   EXPECT_FALSE(r.wake_reason.empty());
   EXPECT_FALSE(eval.active());
+
+  // Latching: while Defile is STILL on me, the order does NOT fire again.
+  r = eval.OnSnapshot(s, T(5));
+  EXPECT_FALSE(r.act.has_value());
+  EXPECT_TRUE(r.wake_reason.empty());
+
+  // Defile clears -> latch re-arms; re-applying Defile fires step 0 again.
+  s.base.self.unit.auras.clear();
+  EXPECT_FALSE(eval.OnSnapshot(s, T(6)).act.has_value());
+  s.base.self.unit.auras.push_back(MakeAura("Defile"));
+  r = eval.OnSnapshot(s, T(7));
+  ASSERT_TRUE(r.act.has_value());
+  EXPECT_EQ(r.order_index, 0);
+  EXPECT_EQ(r.step_index, 0);
 }
 
 TEST(OrderEvaluatorTest, OnStepDoneAndFailureAndTimeout) {
@@ -196,14 +212,18 @@ TEST(OrderEvaluatorTest, OnStepDoneAndFailureAndTimeout) {
   EXPECT_TRUE(std::holds_alternative<grammar::ActStop>(r.act->value));
   eval.set_pending_command_id(8);
 
-  // Timeout at 2 + 5 = 7 s.
+  // Timeout at 2 + 5 = 7 s (instant/stop step uses 5 s timeout).
   EXPECT_TRUE(eval.CheckTimeout(T(6.9)).wake_reason.empty());
   r = eval.CheckTimeout(T(7.0));
   EXPECT_FALSE(r.wake_reason.empty());
+  EXPECT_TRUE(r.timed_out);
   EXPECT_FALSE(r.covered);
   EXPECT_FALSE(eval.active());
 
-  // Re-trigger and test OnStepFailed.
+  // Clear Defile to re-arm latch, re-trigger, and test OnStepFailed.
+  s.base.self.unit.auras.clear();
+  EXPECT_FALSE(eval.OnSnapshot(s, T(7.5)).act.has_value());
+  s.base.self.unit.auras.push_back(MakeAura("Defile"));
   r = eval.OnSnapshot(s, T(8));
   ASSERT_TRUE(r.act.has_value());
   r = eval.OnStepFailed("no path");
@@ -272,15 +292,15 @@ TEST(OrderEvaluatorTest, CastAndCastOnAndCastInLast) {
   EXPECT_EQ(r.it_guid, "Boss-1");
   eval.set_pending_command_id(1);
 
-  // Complete step, stop casting; at t=4 (3 s later) still within 4 s window.
-  s.done_command_id = 1;
+  // Complete step, stop casting; because the order is latched while the 4 s
+  // window still holds, it does not re-fire until the window expires and a new
+  // cast starts.
+  s.done_act_command_id = 1;
   s.ext.encounter->boss->activity = pb::Activity{};
   r = eval.OnSnapshot(s, T(4));
-  EXPECT_EQ(r.order_index, 2);
-  eval.set_pending_command_id(2);
+  EXPECT_FALSE(r.act.has_value());
 
-  // At t=6 (5 s after cast), outside 4 s window -> idle.
-  s.done_command_id = 2;
+  // At t=6 (5 s after cast), outside 4 s window -> latch re-arms.
   r = eval.OnSnapshot(s, T(6));
   EXPECT_FALSE(r.act.has_value());
   EXPECT_FALSE(r.covered);
@@ -352,7 +372,7 @@ TEST(OrderEvaluatorTest, AppearsAppearsInCountAndItNearestToIt) {
   EXPECT_EQ(r.it_guid, "Npc-30");
   eval.set_pending_command_id(5);
 
-  s.done_command_id = 5;
+  s.done_act_command_id = 5;
   r = eval.OnSnapshot(s, T(9));
   EXPECT_FALSE(r.act.has_value());
 
@@ -439,7 +459,7 @@ TEST(OrderEvaluatorTest, ResourcesStatesSightBehindTargetHasAndTimers) {
   OrderEvalResult r = eval.OnSnapshot(s, T(10));
   EXPECT_EQ(r.order_index, 6);
   eval.set_pending_command_id(10);
-  s.done_command_id = 10;
+  s.done_act_command_id = 10;
 
   // At t=15 (only 5 s since `every 10s` last fired), order 6 does not fire.
   EXPECT_FALSE(eval.OnSnapshot(s, T(15)).act.has_value());
@@ -448,7 +468,7 @@ TEST(OrderEvaluatorTest, ResourcesStatesSightBehindTargetHasAndTimers) {
   r = eval.OnSnapshot(s, T(20));
   EXPECT_EQ(r.order_index, 6);
   eval.set_pending_command_id(11);
-  s.done_command_id = 11;
+  s.done_act_command_id = 11;
 
   // `me has Wyrmrest Lance & me in vehicle` -> order 5.
   pb::Item lance;
@@ -666,6 +686,115 @@ TEST(OrderEvaluatorTest, OrderActToCommandAndWireRoundTrip) {
   EXPECT_EQ(to_wire("always -> leave vehicle")->verb, pb::Command::Act::LEAVE);
   EXPECT_EQ(to_wire("always -> equip Wyrmrest Lance")->verb,
             pb::Command::Act::EQUIP);
+}
+
+TEST(OrderEvaluatorTest, AnyoneExcludesHostileEnemies) {
+  OrderEvaluator eval;
+  eval.SetOrders({MustParse("anyone hp<30 -> use Flash Heal on it")}, T(0));
+
+  pb::Snapshot s = MakeBaseSnapshot();
+  pb::Unit boar = MakeUnit("Npc-9", "Mottled Boar", 5.0f);
+  boar.reaction = pb::Unit::HOSTILE;
+  boar.health_pct = 10.0f;
+  s.base.nearby.units.push_back(boar);
+
+  // Dying hostile boar must NOT trigger `anyone hp<30`.
+  EXPECT_FALSE(eval.OnSnapshot(s, T(1)).act.has_value());
+
+  // Low-HP group member DOES trigger it.
+  pb::Unit ally = MakeUnit("Player-2", "Balgor", 12.0f);
+  ally.kind = pb::Unit::PLAYER;
+  ally.reaction = pb::Unit::FRIENDLY;
+  ally.health_pct = 20.0f;
+  s.base.nearby.units.push_back(ally);
+  OrderEvalResult r = eval.OnSnapshot(s, T(2));
+  ASSERT_TRUE(r.act.has_value());
+  EXPECT_EQ(r.it_guid, "Player-2");
+}
+
+TEST(OrderEvaluatorTest, FirstSnapshotDoesNotFalseFireAppearsInLast) {
+  OrderEvaluator eval;
+  eval.SetOrders({MustParse("Ice Sphere appears in last 5s -> target it")},
+                 T(0));
+
+  pb::Snapshot s = MakeBaseSnapshot();
+  // Already present on the very first snapshot -> seeded, does NOT fire.
+  s.base.nearby.units.push_back(MakeUnit("Npc-1", "Ice Sphere", 15.0f));
+  EXPECT_FALSE(eval.OnSnapshot(s, T(1)).act.has_value());
+
+  // A new Ice Sphere spawning on snapshot 2 DOES fire.
+  s.base.nearby.units.push_back(MakeUnit("Npc-2", "Ice Sphere", 12.0f));
+  OrderEvalResult r = eval.OnSnapshot(s, T(2));
+  ASSERT_TRUE(r.act.has_value());
+  EXPECT_EQ(r.it_guid, "Npc-2");
+}
+
+TEST(OrderEvaluatorTest, KiteNeverTimesOutAndMoveUsesLongTimeout) {
+  OrderEvaluator eval(base::Seconds(5));
+  eval.SetOrders({MustParse("boss within 10 -> kite boss")}, T(0));
+
+  pb::Snapshot s = MakeBaseSnapshot();
+  pb::Unit boss = MakeUnit("Boss-1", "Gluth", 8.0f);
+  boss.boss = pb::BossPart{.phase = 1};
+  s.ext.encounter = pb::Encounter{.boss = boss};
+
+  ASSERT_TRUE(eval.OnSnapshot(s, T(1)).act.has_value());
+  // Kiting is continuous: still active after 60 s.
+  EXPECT_TRUE(eval.CheckTimeout(T(61)).wake_reason.empty());
+  EXPECT_TRUE(eval.active());
+
+  // `to` uses kLongOrderMoveTimeout (15 s), not 5 s.
+  eval.SetOrders({MustParse("boss within 10 -> to max range of boss")}, T(70));
+  ASSERT_TRUE(eval.OnSnapshot(s, T(71)).act.has_value());
+  EXPECT_TRUE(eval.CheckTimeout(T(80)).wake_reason.empty());
+  OrderEvalResult to = eval.CheckTimeout(T(86));
+  EXPECT_FALSE(to.wake_reason.empty());
+  EXPECT_TRUE(to.timed_out);
+}
+
+// A kite ends when its `when` stops holding, with a stop and no wake.
+TEST(OrderEvaluatorTest, KiteEndsWhenItsConditionClears) {
+  OrderEvaluator eval(base::Seconds(5));
+  eval.SetOrders({MustParse("boss within 10 -> kite boss")}, T(0));
+  pb::Snapshot s = MakeBaseSnapshot();
+  pb::Unit boss = MakeUnit("Boss-1", "Gluth", 8.0f);
+  boss.boss = pb::BossPart{.phase = 1};
+  s.ext.encounter = pb::Encounter{.boss = boss};
+  ASSERT_TRUE(eval.OnSnapshot(s, T(1)).act.has_value());
+  EXPECT_TRUE(eval.OnSnapshot(s, T(2)).covered);  // Still kiting.
+  s.ext.encounter->boss->rel.dist_yd = 25.0f;
+  const OrderEvalResult r = eval.OnSnapshot(s, T(3));
+  EXPECT_TRUE(r.kite_ended);
+  EXPECT_TRUE(r.wake_reason.empty());
+  EXPECT_FALSE(eval.active());
+}
+
+TEST(OrderEvaluatorTest, OrderCoversWakeByConditionAndSubject) {
+  Order away_boss = MustParse("boss within 10 -> away");
+  EXPECT_FALSE(OrderCoversWake(away_boss, kWakeHealth));
+  EXPECT_FALSE(OrderCoversWake(away_boss, kWakeDied));
+  EXPECT_FALSE(OrderCoversWake(away_boss, kWakeLostControl));
+  EXPECT_FALSE(OrderCoversWake(away_boss, kWakeAttacked));
+
+  Order hp_order = MustParse("me hp<30 -> use Healthstone");
+  EXPECT_TRUE(OrderCoversWake(hp_order, kWakeHealth));
+  EXPECT_FALSE(OrderCoversWake(hp_order, kWakeMana));
+  EXPECT_FALSE(OrderCoversWake(hp_order, kWakeDied));
+  // A merged wake is covered only if every part is.
+  EXPECT_FALSE(OrderCoversWake(hp_order, kWakeHealth | kWakeAttacked));
+
+  // Someone else's health doesn't cover my own `hp<N` watch.
+  EXPECT_FALSE(OrderCoversWake(
+      MustParse("tank hp<30 -> use Flash Heal on tank"), kWakeHealth));
+  // Being attacked is covered by an order about what targets me only.
+  EXPECT_TRUE(OrderCoversWake(MustParse("boss targets me -> face away boss"),
+                              kWakeAttacked | kWakeEnteredCombat));
+  EXPECT_FALSE(OrderCoversWake(
+      MustParse("Valkyr appears -> target nearest Valkyr"), kWakeAttacked));
+
+  Order always_order = MustParse("always -> to behind boss");
+  EXPECT_FALSE(OrderCoversWake(always_order, kWakeHealth));
+  EXPECT_FALSE(OrderCoversWake(always_order, kWakeEnteredCombat));
 }
 
 }  // namespace
