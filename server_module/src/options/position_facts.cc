@@ -103,6 +103,35 @@ bool ShouldApproachOutOfLosTarget(bool is_alive,
   return is_alive && !is_friendly && is_valid_attack_target && !in_los;
 }
 
+AttackStepAction CheckAttackStep(bool in_combat,
+                                 bool casting,
+                                 bool moving,
+                                 float dist_yd,
+                                 bool in_los,
+                                 base::TimeTicks now,
+                                 base::TimeTicks* idle_since) {
+  constexpr float kPullRangeYd = 20.0f;
+  constexpr base::TimeDelta kAttackStuckTimeout = base::Seconds(8);
+  if (in_combat || casting) {
+    *idle_since = base::TimeTicks();
+    return AttackStepAction::kActive;
+  }
+  if (moving) {
+    *idle_since = base::TimeTicks();
+    return (in_los && dist_yd <= kPullRangeYd)
+               ? AttackStepAction::kEngageWhileMoving
+               : AttackStepAction::kActive;
+  }
+  if (idle_since->is_null()) {
+    *idle_since = now;
+  }
+  if (now - *idle_since >= kAttackStuckTimeout) {
+    return AttackStepAction::kStuck;
+  }
+  return (dist_yd > kPullRangeYd || !in_los) ? AttackStepAction::kRetryWalk
+                                             : AttackStepAction::kRetryExecute;
+}
+
 void RefreshFrom(const pb::Vec3& pos, PositionFacts* facts) {
   const auto out_of_range = [](float dist) {
     return dist < kMinTravelDistYd || dist > kMaxTravelDistYd;

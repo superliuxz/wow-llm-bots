@@ -410,6 +410,7 @@ class LlmBrainWorldScript : public WorldScript {
         bots_[i].done_act_command_id = 0;
         bots_[i].object_used = false;
         bots_[i].had_food_drink_aura = false;
+        bots_[i].attack_idle_since = base::TimeTicks();
         bots_[i].walk = PendingWalk{};
         bots_[i].ui.Reset();
         schedule_->SetActiveTargetPending(i, false);
@@ -726,6 +727,44 @@ class LlmBrainWorldScript : public WorldScript {
       return;
     }
     const OptionTarget::Kind kind = state.active_option->kind;
+    if (kind == OptionTarget::Kind::kAttack) {
+      Unit* unit = ObjectAccessor::GetUnit(
+          *bot, ParseSnapshotGuid(state.active_option->guid));
+      if (!unit || !unit->IsInWorld() || unit->isDead()) {
+        return;
+      }
+      const AttackStepAction action = CheckAttackStep(
+          bot->IsInCombat(), bot->IsNonMeleeSpellCast(false), bot->isMoving(),
+          bot->GetDistance(unit), bot->IsWithinLOSInMap(unit), now,
+          &state.attack_idle_since);
+      switch (action) {
+        case AttackStepAction::kActive:
+          return;
+        case AttackStepAction::kEngageWhileMoving:
+          if (now >= state.next_rest_try) {
+            state.next_rest_try = now + base::Seconds(1);
+            ExecuteOption(bot, *state.active_option);
+          }
+          return;
+        case AttackStepAction::kStuck:
+          FailActiveOption(index, name, bot,
+                           "can't reach " + state.active_option->name);
+          return;
+        case AttackStepAction::kRetryWalk:
+          if (now >= state.next_rest_try) {
+            state.next_rest_try = now + base::Seconds(2);
+            WalkTowards(bot, unit->GetPositionX(), unit->GetPositionY(),
+                        unit->GetPositionZ());
+          }
+          return;
+        case AttackStepAction::kRetryExecute:
+          if (now >= state.next_rest_try) {
+            state.next_rest_try = now + base::Seconds(2);
+            ExecuteOption(bot, *state.active_option);
+          }
+          return;
+      }
+    }
     if (kind == OptionTarget::Kind::kRest) {
       if (now >= state.next_rest_try) {
         state.next_rest_try = now + base::Seconds(1);
@@ -1051,6 +1090,9 @@ class LlmBrainWorldScript : public WorldScript {
     UiState ui;
     // Rest: when ContinueRest may next try the other of eat / drink.
     base::TimeTicks next_rest_try;
+    // Attack: when the bot first stood idle (not in combat/moving/casting)
+    // while trying to engage an active kAttack target.
+    base::TimeTicks attack_idle_since;
     // Explore / GoTo: active stepped mmap walk state.
     PendingWalk walk;
     // Active standing-order act (to / away / cast-time use).

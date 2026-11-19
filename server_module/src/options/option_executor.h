@@ -71,6 +71,10 @@ WalkStepResult TickLongWalk(Player* bot,
                             base::TimeTicks now,
                             PendingWalk* walk);
 
+// Walks `bot` toward (x, y, z) along the navmesh; returns false if no path
+// exists.
+bool WalkTowards(Player* bot, float x, float y, float z);
+
 // Whether `go` is opened through the loot strategy (chest, herb, vein).
 bool IsLootableObject(GameObject* go);
 

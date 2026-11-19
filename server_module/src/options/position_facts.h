@@ -77,6 +77,24 @@ bool ShouldApproachOutOfLosTarget(bool is_alive,
                                   bool is_valid_attack_target,
                                   bool in_los);
 
+// Pure state machine for StepActiveOption(kAttack): closes range/LOS on idle
+// attack targets, engages as soon as LOS clears while approaching, and fails
+// cleanly after 8 s stuck instead of freezing until the harness timeout.
+enum class AttackStepAction {
+  kActive,
+  kEngageWhileMoving,
+  kRetryWalk,
+  kRetryExecute,
+  kStuck,
+};
+AttackStepAction CheckAttackStep(bool in_combat,
+                                 bool casting,
+                                 bool moving,
+                                 float dist_yd,
+                                 bool in_los,
+                                 base::TimeTicks now,
+                                 base::TimeTicks* idle_since);
+
 // The Explore spots and Go to places seen from one position. Distances and
 // directions are filled for the position they were computed at; RefreshFrom
 // re-measures them from a nearby one (cheap), so a bot recomputes them only

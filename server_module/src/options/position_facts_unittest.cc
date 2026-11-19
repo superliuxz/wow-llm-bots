@@ -245,5 +245,36 @@ TEST(PositionFactsTest, ApproachOutOfLosTargetOnlyWhenValidAndHidden) {
   EXPECT_FALSE(ShouldApproachOutOfLosTarget(true, false, false, false));
 }
 
+TEST(PositionFactsTest, AttackStepClosesRangeAndFailsAfterEightSecondsIdle) {
+  const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
+  base::TimeTicks idle_since;
+
+  // Approaching around a corner: engages once in LOS and within 20 yd.
+  EXPECT_EQ(CheckAttackStep(false, false, true, 25.0f, false, t0, &idle_since),
+            AttackStepAction::kActive);
+  EXPECT_EQ(CheckAttackStep(false, false, true, 18.0f, true, t0, &idle_since),
+            AttackStepAction::kEngageWhileMoving);
+  EXPECT_TRUE(idle_since.is_null());
+
+  // Idle out of range/LOS -> retry walk; within range & LOS -> retry execute.
+  EXPECT_EQ(CheckAttackStep(false, false, false, 30.0f, false, t0, &idle_since),
+            AttackStepAction::kRetryWalk);
+  EXPECT_EQ(idle_since, t0);
+  EXPECT_EQ(CheckAttackStep(false, false, false, 15.0f, true,
+                            t0 + base::Seconds(4), &idle_since),
+            AttackStepAction::kRetryExecute);
+
+  // Idle for 8 s -> stuck.
+  EXPECT_EQ(CheckAttackStep(false, false, false, 15.0f, true,
+                            t0 + base::Seconds(8), &idle_since),
+            AttackStepAction::kStuck);
+
+  // Entering combat resets idle_since.
+  EXPECT_EQ(CheckAttackStep(true, false, false, 15.0f, true,
+                            t0 + base::Seconds(9), &idle_since),
+            AttackStepAction::kActive);
+  EXPECT_TRUE(idle_since.is_null());
+}
+
 }  // namespace
 }  // namespace llm_brain

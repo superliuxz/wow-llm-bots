@@ -243,6 +243,14 @@ bool WalkTo(Player* bot, float x, float y, float z) {
   return true;
 }
 
+}  // namespace
+
+bool WalkTowards(Player* bot, float x, float y, float z) {
+  return WalkTo(bot, x, y, z);
+}
+
+namespace {
+
 // Walks to the bot's side of `target`, within contact distance; false when
 // no path gets there.
 bool WalkNextTo(Player* bot, WorldObject* target) {
