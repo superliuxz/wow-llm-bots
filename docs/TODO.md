@@ -82,10 +82,6 @@ design decisions below.
 
 - **Bind hearthstone** at an innkeeper as an option of its own (the brain's choice, through the
   bind spell), not part of Talk (`docs/plans/options-and-panels.md`).
-- **GPU `--backend-sampling` or thin `libllama` runner** (`docs/plans/latency.md`, Tier 3 #8):
-  unconstrained + `ParsePlan` with 1 grammar retry (`+16%` capacity), or a `wlb_net` Unix-socket
-  `libllama` daemon combining ~15-token ID masks on structured fields with GPU sampling on free text
-  (`-200 to -330 ms` under load).
 - **More e2e cases:** death and respawn, harness reconnect, a failing choice reaching the brain.
 - **More perf:** a raid-wide burst (N bots woken in the same instant every M seconds; today's
   `SURPRISES` wakes bots independently), cells past capacity, and the harness-side age points
