@@ -9,7 +9,61 @@ Last updated 2026-11-20.
 
 ## In progress
 
-- Run the clean 4-mode boss benchmark (`no_brain`, `llm_no_notes`, `llm`, `baseline`) with `--parallel 3` (and 6–9 runs per boss) to get statistically valid comparison data.
+### Boss benchmark & trace review (`Review Trace All Events 4`, commit `2ac5cc8`)
+
+**High**
+- [ ] **1. `llmtest resetbot` strips passive auras (`server_module/src/test/test_commands.cc`):**
+  `RemoveAllAuras()` removes passive talent, racial, and on-equip item auras (`Unit.cpp:5393-5407`),
+  crippling bots after reset. Fix: remove only non-passive auras (like `RemoveArenaAuras` skips
+  `IsPassive`), or re-apply passives afterwards, and assert a known talent passive aura is present.
+
+**Medium**
+- [ ] **2. Latency logging reads nonexistent `do_ms=` (`tools/bench/bench_bosses.py`):**
+  `harness` logs `first_line_ms` in `bots_dir/*/events/*.jsonl` (as `soak.py:218-239` reads), not
+  `do_ms=` in `harness.log`. Read `first_line_ms` from `events/*.jsonl` and fail the wave if empty.
+- [ ] **3. Console checks match any line in the log tail (`tools/bench/bench_bosses.py`):**
+  With 15 bots, a late reply from another bot can pass or fail a `role`, `checkstrat`, or `where`
+  check. Match the bot's exact name (and/or a per-command token) in the reply.
+- [ ] **4. Early pulls during 8 s in-dungeon staging (`tools/bench/bench_bosses.py`):**
+  In `llm` modes the brain is live for 8 s only ~27–30 yd from the boss before the scripted pull,
+  and scoring drops everything before `pull_start - 1 s`. Stage farther away / out of LoS, or hold
+  plans (`Keep` only) until the pull.
+- [ ] **5. Instance reuse across waves not detected (`tools/bench/bench_bosses.py`):**
+  `ResetInstances` fails silently if anyone is still on the dungeon map (`Group.cpp:2374-2385`).
+  Verify all party members are off the dungeon map before resetting and assert wave `N` instance
+  IDs differ from wave `N-1`.
+- [ ] **6. Modes aren't mixed within a wave (`tools/bench/bench_bosses.py`):**
+  Each run uses one mode, so GPU load isn't shared across modes. Give each party a different mode
+  within each wave and rotate across waves.
+- [ ] **7. Baseline `checkstrat` doesn't verify script is ON (`tools/bench/bench_bosses.py`):**
+  In `baseline` mode, assert `combat=1` or `noncombat=1` when `strip_strat` is non-empty (and note
+  Murmur has no playerbots dungeon script, so its `baseline` equals `no_brain`).
+
+**Open Lows**
+- [ ] **8. `llmtest gear` keeps random roll's glyphs & stored spec (`test_commands.cc`):**
+  `Randomize(false)` rolls a random spec/glyphs before `InitTalentsBySpecNo`; skip random talents &
+  glyphs when a spec is given (or reset glyphs and stored spec number afterwards).
+- [ ] **9. `llmtest checkstrat` leaks a `Strategy` object per call (`test_commands.cc`):**
+  `GetStrategy()` allocates a new object (`NamedObjectContext.h:301-306`) and `HandleCheckStrat`
+  never frees it. Free the returned pointer or check the engine's strategy registry without owning.
+- [ ] **10. `resetbot` incomplete resource reset (`test_commands.cc`):**
+  Also reset/revive pet health/dead pet, rage, energy, runic power, reagents, soul shards, and ammo.
+- [ ] **11. `dodge_timeline.py` hardcoded radii & target-relative distance (`tools/bench/dodge_timeline.py`):**
+  Read spell radius from server/DBC data instead of hardcoded table; measure distance to the cast's
+  impact point (not each bot's own target) and tie `act_delay_ms` to the cast-triggered act.
+- [ ] **12. `mob_kill` range check (`behavior_trace_scripts.cc`):**
+  Restrict group `mob_kill` credit to members within credit range (not across the whole continent)
+  and handle environmental deaths with no killer.
+- [ ] **13. Parity allow-list symmetry (`tools/bench/trace_parity.py`):**
+  Remove `item_unequip` and `quest_abandon` from `PARITY_ALLOWED_EVENTS` (not symmetric between bots
+  and humans).
+- [ ] **14. Bench runner polish (`bench_bosses.py`, `boss_meter.py`):**
+  Don't merge old JSON results silently into new runs; avoid re-reading the entire trace dir every
+  5 s (up to 576 MB/day/char); note `AccountInstancesPerHour` is skipped by `TELE_TO_GM_MODE`;
+  keep `boss_meter.py` dodge metric as "outside at impact" rather than max distance; review
+  `llmtest group` raid auto-convert / `TELE_TO_GM_MODE` / `questcomplete` notes.
+
+- After High 1 + Mediums 2–3 & 6 are fixed: re-run the clean multi-mode parallel boss benchmark.
 
 ## Next, in order
 
@@ -91,14 +145,13 @@ Last updated 2026-11-20.
 
 ## Done (newest first, keep about ten)
 
-- 2026-11-20: **Fast parallel 3-party boss benchmark (`tools/bench/bench_bosses.py`, `test_commands.cc`):**
-  added `llmtest resetbot` (revive, clear all auras/Sated/cooldowns, repair, full HP/mana, reset
-  instances) and `llmtest where` (`map=<id> instance=<id> alive=1`), raised
-  `AccountInstancesPerHour = 1000` on the test server, and upgraded `bench_bosses.py` to run
-  `--parallel 3` identical 5-man parties in one persistent `worldserver` with verified distinct
-  dungeon instance IDs, fresh `--bots-dir` per wave, and `p50`/`p95` decision latency logging.
-  Live-verified on Ikiss (`--runs 3 --parallel 3`): 3 distinct instances (`[1, 2, 3]`), all 15
-  bots passed role + `resetbot` + post-arrival `checkstrat tbc-seth`, finished in ~2.2 min total.
+- 2026-11-20: **Parallel 3-party boss benchmark scaffolding (`tools/bench/bench_bosses.py`, `test_commands.cc`):**
+  added `llmtest resetbot` and `llmtest where`, raised `AccountInstancesPerHour = 1000` (note:
+  skipped by `TELE_TO_GM_MODE`), and upgraded `bench_bosses.py` to run `--parallel 3` identical
+  5-man parties in one persistent `worldserver` with distinct dungeon instances (`[1, 2, 3]`
+  verified on Ikiss) and fresh `--bots-dir` per wave. *(Open bugs tracked above under "In progress":
+  `resetbot` strips passive auras, `do_ms=` latency parser is empty, console matching needs bot
+  name scoping, and modes need rotation within waves.)*
 - 2026-11-20: **Review fixes on `trace-all-events` (all 9 open items verified):**
   `server.console()` now returns captured output (`tools/wlblib/server.py`); `bench_bosses.py`
   stages bots inside the dungeon before starting `harness`, enforces unconditional role checks and
