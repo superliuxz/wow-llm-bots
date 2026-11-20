@@ -53,9 +53,12 @@ struct TraceSample {
   std::string casting;
   std::string target;
   float target_dist = -1.0f;
+  float target_x = 0.0f;
+  float target_y = 0.0f;
   float target_hp_pct = -1.0f;
   uint32_t target_level = 0;
   std::string target_casting;
+  float target_cast_radius = -1.0f;
   bool target_moving = false;
   bool target_hostile = false;
   bool target_targeting_me = false;

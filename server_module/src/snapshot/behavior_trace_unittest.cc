@@ -144,14 +144,19 @@ TEST(BehaviorTraceTest, FormatsDirectProductionTraceSampleFields) {
   s.bag_free_slots = 14;
   s.target = "Loken";
   s.target_dist = 24.5f;
+  s.target_x = 1186.5f;
+  s.target_y = 33.8f;
   s.target_hp_pct = 63.0f;
   s.target_level = 82;
   s.target_casting = "Lightning Nova";
+  s.target_cast_radius = 20.0f;
   s.target_hostile = true;
   s.target_in_combat = true;
   const std::string line = FormatTraceSample(s);
   EXPECT_NE(line.find("\"target\":\"Loken\""), std::string::npos);
   EXPECT_NE(line.find("\"target_dist\":24.5"), std::string::npos);
+  EXPECT_NE(line.find("\"target_x\":1186.5"), std::string::npos);
+  EXPECT_NE(line.find("\"target_cast_radius\":20.0"), std::string::npos);
   EXPECT_NE(line.find("\"target_casting\":\"Lightning Nova\""),
             std::string::npos);
   EXPECT_NE(line.find("\"bag_free_slots\":14"), std::string::npos);

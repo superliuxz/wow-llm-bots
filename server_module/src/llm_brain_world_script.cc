@@ -1224,6 +1224,8 @@ class LlmBrainWorldScript : public WorldScript {
       s.target_hostile = !player->IsFriendlyTo(target) && target->IsAlive();
       if (s.target_hostile) {
         s.target_dist = player->GetDistance(target);
+        s.target_x = target->GetPositionX();
+        s.target_y = target->GetPositionY();
         if (target->GetMaxHealth() > 0) {
           s.target_hp_pct = 100.0f * static_cast<float>(target->GetHealth()) /
                             static_cast<float>(target->GetMaxHealth());
@@ -1234,13 +1236,23 @@ class LlmBrainWorldScript : public WorldScript {
           tsp = target->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
         }
         if (tsp && tsp->GetSpellInfo()) {
-          const char* tsn =
-              tsp->GetSpellInfo()->SpellName[sWorld->GetDefaultDbcLocale()];
+          const SpellInfo* tinfo = tsp->GetSpellInfo();
+          const char* tsn = tinfo->SpellName[sWorld->GetDefaultDbcLocale()];
           if (!tsn || tsn[0] == '\0') {
-            tsn = tsp->GetSpellInfo()->SpellName[0];
+            tsn = tinfo->SpellName[0];
           }
           if (tsn) {
             s.target_casting = tsn;
+          }
+          float max_r = 0.0f;
+          for (uint8 eff = 0; eff < MAX_SPELL_EFFECTS; ++eff) {
+            const float r = tinfo->Effects[eff].CalcRadius(target, tsp);
+            if (r > max_r) {
+              max_r = r;
+            }
+          }
+          if (max_r > 0.0f) {
+            s.target_cast_radius = max_r;
           }
         }
         s.target_moving = target->isMoving();

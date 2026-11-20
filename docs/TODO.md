@@ -9,15 +9,6 @@ Last updated 2026-11-20.
 
 ## In progress
 
-### Remaining Open Lows (`Review Trace All Events 4`)
-- [ ] **11. `dodge_timeline.py` DBC spell radii & impact-point distance (`tools/bench/dodge_timeline.py`):**
-  Read spell radius from server/DBC data instead of hardcoded table; measure distance to the cast's
-  impact point (not each bot's own target) and tie `act_delay_ms` to the cast-triggered act.
-- [ ] **14 (remaining). Incremental trace polling & `boss_meter.py` impact-dodge metric:**
-  Avoid re-reading the entire trace dir every 5 s during long runs; replace `boss_meter.py`'s
-  max-distance dodge column with "outside at impact"; review `llmtest group` raid auto-convert /
-  `TELE_TO_GM_MODE` / `questcomplete` notes.
-
 - Next benchmark run: run `--mode mixed` + `--mode baseline` + `--mode no_brain` with `--runs 6`
   on the fixed runner (`bench_bosses.py`) for statistically powered comparison data.
 
@@ -101,6 +92,19 @@ Last updated 2026-11-20.
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-20: **Review 4 Lows 11 & 14 (DBC spell radii, cast-origin dodge distance, impact-dodge meter, incremental trace tailing):**
+  `TraceSample` (`behavior_trace.{h,cc}`, `llm_brain_world_script.cc`) now emits `target_x`,
+  `target_y`, and DBC `target_cast_radius` via `SpellInfo::Effects[eff].CalcRadius()`;
+  `tools/bench/dodge_timeline.py` drops the hardcoded radius table, measures Euclidean distance
+  from the cast origin `(target_x, target_y)` for all bots (even when not targeting the boss), and
+  ties `act_delay_ms` to dodge/movement verbs (`AWAY`/`AVOID`/`TO`/`KITE`/`STOP`);
+  `tools/bench/boss_meter.py` replaces max-distance `CastDodgeYd` with `impact_dist_yd` and
+  `outside_at_impact` (`ImpactDodge`); `tools/bench/bench_bosses.py` replaces full-dir trace
+  re-reads with incremental byte-offset `_TraceTailer` (partial-line safe) and clarifies
+  `AccountInstancesPerHour` vs `TELE_TO_GM_MODE`. Verified via unit tests (`behavior_trace_unittest.cc`,
+  `tools/bench/dodge_timeline_test.py` wired into `tools/wlb check`) and live on Ikiss
+  (`--mode mixed --runs 2 --parallel 2`, confirming DBC `radius=35.0yd` for Arcane Explosion and
+  `ImpactDodge` / `outside_at_impact` on real traces).
 - 2026-11-20: **Review 4 fixes (High 1, Mediums 2–7, Lows 8–10, 12–13, partial 14) + auto-loaded rules:**
   `llmtest resetbot` preserves passive auras (`passives=62` verified live) and resets pet health/power,
   rage/energy/runic power, ammo, and reagents (`test_commands.cc`); `llmtest gear` refreshes glyphs,

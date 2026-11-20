@@ -301,6 +301,8 @@ def _make_parties(n_parties: int, raid: bool) -> list[list[tuple[str, str, int, 
 
 
 def _set_instances_per_hour(cap: int = 1000) -> None:
+    """Raises AccountInstancesPerHour on the test server (note: TELE_TO_GM_MODE
+    bypasses this cap; kept high in case non-GM dungeon entry paths are used)."""
     ws_conf = TEST.etc / "worldserver.conf"
     if not ws_conf.exists():
         return
@@ -313,6 +315,52 @@ def _set_instances_per_hour(cap: int = 1000) -> None:
     if new_txt == txt and "AccountInstancesPerHour" not in txt:
         new_txt = txt + f"\nAccountInstancesPerHour = {cap}\n"
     ws_conf.write_text(new_txt)
+
+
+class _TraceTailer:
+    """Incrementally tails newly appended JSONL lines per bot (avoids O(N^2) re-reads)."""
+
+    def __init__(self, trace_dir: pathlib.Path, bot_names: list[str]) -> None:
+        self.trace_dir = trace_dir / "bot"
+        self.bot_names = list(bot_names)
+        self.offsets: dict[pathlib.Path, int] = {}
+        self.rows: dict[str, list[dict]] = {n: [] for n in bot_names}
+
+    def poll(self) -> dict[str, list[dict]]:
+        for name in self.bot_names:
+            bdir = self.trace_dir / name
+            if not bdir.is_dir():
+                continue
+            for f in sorted(bdir.glob("*.jsonl")):
+                off = self.offsets.get(f, 0)
+                try:
+                    sz = f.stat().st_size
+                except OSError:
+                    continue
+                if sz < off:
+                    off = 0  # File rotated/truncated.
+                if sz == off:
+                    continue
+                with f.open("r", encoding="utf-8", errors="replace") as fp:
+                    fp.seek(off)
+                    while True:
+                        pos = fp.tell()
+                        raw = fp.readline()
+                        if not raw:
+                            break
+                        if not raw.endswith("\n"):
+                            # Incomplete write in progress; retry from `pos` next poll.
+                            fp.seek(pos)
+                            break
+                        line = raw.strip()
+                        if not line:
+                            continue
+                        try:
+                            self.rows[name].append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+                    self.offsets[f] = fp.tell()
+        return self.rows
 
 
 def _slice_traces_after(
@@ -553,12 +601,13 @@ def run_boss_waves(
                         )
                 t0 = time.monotonic()
                 done_flags = [False] * len(active_parties)
+                tailer = _TraceTailer(trace_dir, [b[0] for p in active_parties for b in p])
                 try:
                     while time.monotonic() - t0 < max_s:
                         if proc is not None and proc.poll() is not None:
                             break
                         time.sleep(5.0)
-                        all_tr = boss_meter.trace_parity.load_traces(trace_dir)["bot"]
+                        all_tr = tailer.poll()
                         for p_idx, party in enumerate(active_parties):
                             if done_flags[p_idx]:
                                 continue
@@ -594,7 +643,7 @@ def run_boss_waves(
                     party_lats.append(lat)
 
             # 6. Score each party in this wave from its post-pull slice.
-            all_tr = boss_meter.trace_parity.load_traces(trace_dir)["bot"]
+            all_tr = tailer.poll()
             for p_idx, party in enumerate(active_parties):
                 pnames = [b[0] for b in party]
                 sub = _slice_traces_after(all_tr, pnames, pull_start_ms - 5000)

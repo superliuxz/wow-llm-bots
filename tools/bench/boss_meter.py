@@ -85,11 +85,46 @@ def analyze_boss_fight(
                 if boss_name and det.lower() == boss_name.lower():
                     boss_killed = True
 
-        # Track target distance during boss spell casts (e.g. Lightning Nova).
-        cast_dists: list[float] = []
+        # Track distance at the impact (end) of each boss cast and whether the
+        # character was outside the spell's DBC radius (`target_cast_radius`).
+        impact_dists: list[float] = []
+        outside_hits = 0
+        total_rated_casts = 0
+        prev_casting = ""
+        last_dist: float | None = None
+        last_rad: float | None = None
         for s in samples:
-            if s.get("target_casting") and float(s.get("target_dist", -1.0)) >= 0:
-                cast_dists.append(float(s["target_dist"]))
+            cur_cast = str(s.get("target_casting", ""))
+            d = float(s.get("target_dist", -1.0))
+            r = float(s.get("target_cast_radius", -1.0))
+            if cur_cast:
+                if prev_casting and cur_cast != prev_casting and last_dist is not None:
+                    impact_dists.append(last_dist)
+                    if last_rad is not None and last_rad > 0:
+                        total_rated_casts += 1
+                        if last_dist >= last_rad:
+                            outside_hits += 1
+                prev_casting = cur_cast
+                if d >= 0:
+                    last_dist = d
+                if r > 0:
+                    last_rad = r
+            elif prev_casting:
+                if last_dist is not None:
+                    impact_dists.append(last_dist)
+                    if last_rad is not None and last_rad > 0:
+                        total_rated_casts += 1
+                        if last_dist >= last_rad:
+                            outside_hits += 1
+                prev_casting = ""
+                last_dist = None
+                last_rad = None
+        if prev_casting and last_dist is not None:
+            impact_dists.append(last_dist)
+            if last_rad is not None and last_rad > 0:
+                total_rated_casts += 1
+                if last_dist >= last_rad:
+                    outside_hits += 1
 
         per_char[name] = {
             "damage_dealt": dmg_dealt,
@@ -98,7 +133,10 @@ def analyze_boss_fight(
             "casts": casts,
             "deaths": deaths,
             "boss_killed": boss_killed,
-            "max_dist_during_boss_cast_yd": round(max(cast_dists), 1) if cast_dists else None,
+            "impact_dist_yd": round(impact_dists[-1], 1) if impact_dists else None,
+            "outside_at_impact": (
+                f"{outside_hits}/{total_rated_casts}" if total_rated_casts > 0 else None
+            ),
         }
 
     dur_s = max(1.0, (t_end - t_start) / 1000.0) if (t_start is not None and t_end is not None and t_end > t_start) else 1.0
@@ -132,14 +170,18 @@ def format_boss_meter(res: dict[str, Any]) -> str:
         f"party DPS={res['total_dps']:.1f} | party HPS={res['total_hps']:.1f} | "
         f"deaths={res['total_deaths']} ==",
         f"  {'Character':14s} {'DPS':>8s} {'Damage':>9s} {'HPS':>8s} {'Healing':>9s} "
-        f"{'DmgTaken':>9s} {'CPM':>6s} {'Deaths':>6s} {'CastDodgeYd':>11s}",
+        f"{'DmgTaken':>9s} {'CPM':>6s} {'Deaths':>6s} {'ImpactDodge':>13s}",
     ]
     for name, c in sorted(res["characters"].items(), key=lambda kv: -kv[1]["dps"]):
-        dodge = f"{c['max_dist_during_boss_cast_yd']:.1f}yd" if c["max_dist_during_boss_cast_yd"] is not None else "-"
+        if c["impact_dist_yd"] is not None:
+            out_s = f"({c['outside_at_impact']})" if c.get("outside_at_impact") else ""
+            dodge = f"{c['impact_dist_yd']:.1f}yd{out_s}"
+        else:
+            dodge = "-"
         lines.append(
             f"  {name:14s} {c['dps']:8.1f} {c['damage_dealt']:9d} {c['hps']:8.1f} "
             f"{c['heal_done']:9d} {c['damage_taken']:9d} {c['cpm']:6.1f} "
-            f"{c['deaths']:6d} {dodge:>11s}"
+            f"{c['deaths']:6d} {dodge:>13s}"
         )
     return "\n".join(lines)
 

@@ -2,15 +2,16 @@
 """Boss cast / dodge timeline analyzer from unified behavior traces.
 
 Reads `<trace_dir>/bot/<Name>/*.jsonl` and, for every boss spell cast observed
-in `target_casting`, reports per-bot reaction chains:
-  cast start -> act_sent delay & detail -> stationary->moving transition delay
-  -> distance at impact vs spell radius -> impact damage & death -> fight-wide
-  act rate (acts/min).
+in `target_casting`, reports per-bot reaction chains using DBC-sourced spell
+radius (`target_cast_radius`) and cast origin `(target_x, target_y)`:
+  cast start -> dodge/movement act_sent delay -> stationary->moving transition
+  -> Euclidean distance to cast origin at impact vs DBC radius -> impact dmg.
 """
 
 from __future__ import annotations
 
 import argparse
+import math
 import pathlib
 import sys
 from typing import Any
@@ -19,13 +20,12 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "tools" / "bench"))
 import trace_parity  # noqa: E402
 
-KNOWN_RADII_YD: dict[str, float] = {
-    "lightning nova": 20.0,
-    "sonic boom": 34.0,
-    "poison nova": 15.0,
-    "arcane explosion": 30.0,
-    "dust field": 15.0,
-}
+DODGE_ACT_VERBS = ("AWAY", "AVOID", "TO", "KITE", "STOP")
+
+
+def _is_dodge_act(detail: str) -> bool:
+    verb = detail.strip().split(" ", 1)[0].upper() if detail else ""
+    return verb in DODGE_ACT_VERBS
 
 
 def extract_dodge_timelines(
@@ -34,15 +34,14 @@ def extract_dodge_timelines(
     radius_override: float | None = None,
 ) -> dict[str, Any]:
     """Finds boss casts seen via `target_casting` and measures each bot's reaction."""
-    raw_windows: list[tuple[int, int, str]] = []
+    # Each raw window: (t_start, t_end, spell_name, radius_yd, cast_x, cast_y)
+    raw_windows: list[list[Any]] = []
     act_counts: dict[str, int] = {}
     cbt_t0: int | None = None
     cbt_t1: int | None = None
 
     for name, rows in sorted(traces.items()):
-        cur_spell = ""
-        t_start = 0
-        t_last = 0
+        cur: list[Any] | None = None
         acts = 0
         for r in rows:
             k = r.get("kind")
@@ -56,33 +55,44 @@ def extract_dodge_timelines(
                 cbt_t1 = t if cbt_t1 is None else max(cbt_t1, t)
             sp = str(r.get("target_casting", ""))
             if sp and (not spell_filter or spell_filter.lower() in sp.lower()):
-                if sp != cur_spell or t - t_last > 1500:
-                    if cur_spell:
-                        raw_windows.append((t_start, t_last, cur_spell))
-                    cur_spell = sp
-                    t_start = t
-                t_last = t
-            elif cur_spell and t - t_last > 600:
-                raw_windows.append((t_start, t_last, cur_spell))
-                cur_spell = ""
-        if cur_spell:
-            raw_windows.append((t_start, t_last, cur_spell))
+                rad = float(r.get("target_cast_radius", -1.0))
+                tx = float(r["target_x"]) if "target_x" in r else None
+                ty = float(r["target_y"]) if "target_y" in r else None
+                if cur is None or cur[2] != sp or t - cur[1] > 1500:
+                    if cur is not None:
+                        raw_windows.append(cur)
+                    cur = [t, t, sp, rad if rad > 0 else None, tx, ty]
+                else:
+                    cur[1] = t
+                    if rad > 0:
+                        cur[3] = rad
+                    if tx is not None and ty is not None:
+                        cur[4], cur[5] = tx, ty
+            elif cur is not None and t - cur[1] > 600:
+                raw_windows.append(cur)
+                cur = None
+        if cur is not None:
+            raw_windows.append(cur)
         act_counts[name] = acts
 
     fight_min = max(1.0 / 60.0, ((cbt_t1 - cbt_t0) / 60000.0)) if (cbt_t0 and cbt_t1 and cbt_t1 > cbt_t0) else 1.0
     acts_per_min = {name: round(cnt / fight_min, 1) for name, cnt in act_counts.items()}
 
-    raw_windows.sort()
+    raw_windows.sort(key=lambda w: (w[0], w[1]))
     merged: list[list[Any]] = []
-    for s0, s1, sp in raw_windows:
-        if merged and merged[-1][2] == sp and s0 <= merged[-1][1] + 1000:
-            merged[-1][1] = max(merged[-1][1], s1)
+    for w in raw_windows:
+        if merged and merged[-1][2] == w[2] and w[0] <= merged[-1][1] + 1000:
+            merged[-1][1] = max(merged[-1][1], w[1])
+            if w[3] is not None:
+                merged[-1][3] = w[3]
+            if w[4] is not None and w[5] is not None:
+                merged[-1][4], merged[-1][5] = w[4], w[5]
         else:
-            merged.append([s0, s1, sp])
+            merged.append(list(w))
 
     windows: list[dict[str, Any]] = []
-    for s0, s1, sp in merged:
-        radius = radius_override if radius_override is not None else KNOWN_RADII_YD.get(sp.lower())
+    for s0, s1, sp, dbc_radius, cx, cy in merged:
+        radius = radius_override if radius_override is not None else dbc_radius
         per_bot: dict[str, dict[str, Any]] = {}
         for name, rows in sorted(traces.items()):
             samples = [
@@ -98,12 +108,19 @@ def extract_dodge_timelines(
                 if r.get("kind") == "event" and s1 - 500 <= int(r["t_ms"]) <= s1 + 1500
             ]
             during = [r for r in samples if s0 <= int(r["t_ms"]) <= s1 + 200]
-            dists = [float(r["target_dist"]) for r in during if float(r.get("target_dist", -1)) >= 0]
+
+            # Measure Euclidean distance to the cast origin `(cx, cy)` when available
+            # (works even if a bot wasn't targeting the boss!); fall back to target_dist.
+            dists: list[float] = []
+            for r in during:
+                if cx is not None and cy is not None and "x" in r and "y" in r:
+                    dists.append(math.hypot(float(r["x"]) - cx, float(r["y"]) - cy))
+                elif float(r.get("target_dist", -1)) >= 0:
+                    dists.append(float(r["target_dist"]))
             start_dist = dists[0] if dists else None
             end_dist = dists[-1] if dists else None
             max_dist = max(dists) if dists else None
 
-            # Distinguish stationary->moving reaction from already-moving bots.
             pre = [r for r in samples if s0 - 400 <= int(r["t_ms"]) < s0]
             was_moving = bool(pre[-1].get("moving")) if pre else False
             move_delay_ms: int | str | None = None
@@ -115,9 +132,13 @@ def extract_dodge_timelines(
                         move_delay_ms = int(r["t_ms"]) - s0
                         break
 
-            first_act = next((e for e in events_during if e.get("event") == "act_sent"), None)
-            act_delay_ms = (int(first_act["t_ms"]) - s0) if first_act else None
-            act_detail = str(first_act.get("detail", "")) if first_act else ""
+            # Tie act_delay_ms to dodge/movement acts, not unrelated TARGET/USE acts.
+            dodge_act = next(
+                (e for e in events_during if e.get("event") == "act_sent" and _is_dodge_act(str(e.get("detail", "")))),
+                None,
+            )
+            act_delay_ms = (int(dodge_act["t_ms"]) - s0) if dodge_act else None
+            act_detail = str(dodge_act.get("detail", "")) if dodge_act else ""
 
             impact_dmg = sum(
                 int(e.get("value", 0)) for e in events_impact if e.get("event") == "damage_taken"
@@ -138,7 +159,8 @@ def extract_dodge_timelines(
             }
         windows.append({
             "spell": sp,
-            "radius_yd": radius,
+            "radius_yd": round(radius, 1) if radius is not None else None,
+            "origin": [round(cx, 1), round(cy, 1)] if (cx is not None and cy is not None) else None,
             "start_ms": s0,
             "end_ms": s1,
             "dur_s": round((s1 - s0) / 1000.0, 2),
@@ -159,7 +181,7 @@ def format_timelines(res: dict[str, Any]) -> str:
     t0 = windows[0]["start_ms"]
     for w in windows:
         rel = (w["start_ms"] - t0) / 1000.0
-        rad = f", radius={w['radius_yd']:.0f}yd" if w["radius_yd"] is not None else ""
+        rad = f", radius={w['radius_yd']:.1f}yd" if w["radius_yd"] is not None else ""
         lines.append(f"\n== +{rel:5.1f}s | {w['spell']} (dur={w['dur_s']:.2f}s{rad}) ==")
         lines.append(
             f"  {'Bot':8s} {'StartYd':>7s} {'EndYd':>7s} {'Safe?':>5s} "
