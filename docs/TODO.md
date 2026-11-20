@@ -5,7 +5,7 @@ what exists, what comes next and in which order. **Keep it current** (CONTRIBUTI
 docs/TODO.md current"): anything unfinished, deferred or decided-but-not-built goes here, not only
 in a conversation.
 
-Last updated 2026-11-18.
+Last updated 2026-11-19.
 
 ## In progress
 
@@ -13,6 +13,10 @@ Items #1–#5 are done and verified live (2026-11-18).
 
 ## Next, in order
 
+- **General / Say / Party chat + quest grouping (invite/accept):** wire `/1 General`, `/s Say`, and
+  `/p Party` chat hooks into `LlmBrainChatScript` (currently whisper-only) and add group invite /
+  accept / quest-teaming options so bots can respond to LFG calls in General chat and team up with
+  players for quests.
 - **Named room landmarks** (`docs/specs/triggers.md`): 132 of the 218 unsayable boss actions move
   to hardcoded room coordinates; deferred until a boss fight needs per-room landmark data.
 
