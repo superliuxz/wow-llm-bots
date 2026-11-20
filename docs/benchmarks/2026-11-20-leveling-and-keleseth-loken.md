@@ -1,6 +1,6 @@
 # Overnight Gameplay Benchmark Report (`trace-all-events`)
 
-**Branch:** `trace-all-events` (local only, not pushed; `main` untouched at `2834756`)  
+**Branch:** `trace-all-events` (`main` untouched at `2834756`)  
 **Commits added overnight:**
 - `3a77baf` — Ignore `SIGPIPE` in [harness/src/main.cc](../../harness/src/main.cc) so closed HTTP keep-alive connections to `llama-server` don't terminate `harness` (`rc=-13`). Verified: `harness` ran **240 minutes continuously with 0 crashes** (previously died at 34 min).
 - `87668fc` — Filter [tools/bench/boss_meter.py](../../tools/bench/boss_meter.py) events and samples to the `[t_start, t_end]` combat window so pre-pull buffing/gearing and post-combat top-ups don't inflate CPM/HPS.

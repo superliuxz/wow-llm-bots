@@ -76,7 +76,7 @@ LlmBrain.LosRaycastsPerSnapshot = 32
 #                     "-follow"
 
 LlmBrain.CombatStrategies = "+boost,+dps assist,-threat"
-LlmBrain.NonCombatStrategies = "-follow,-grind,+new rpg"
+LlmBrain.NonCombatStrategies = "-follow,+grind,+new rpg"
 LlmBrain.DeadStrategies = "-follow,-stay"
 
 #
@@ -117,8 +117,14 @@ LlmBrain.TestFactsQueries = ""
 #        Description: Sample online human (non-bot) players into
 #                     LlmBrain.TraceDir (under human/<name>/) for human-baseline
 #                     scoring. Off by default; requires LlmBrain.TraceDir to be
-#                     non-empty. Whisper events record only timing and byte
-#                     length (never message text).
+#                     non-empty. Records 5 Hz kinematics/state samples (position,
+#                     facing, HP/mana/XP, hostile target state, bag free slots)
+#                     and server gameplay events (combat, casts, damage/heals,
+#                     kills, deaths, quests, loot, items, money/rep deltas,
+#                     zone/area changes, group join/leave). Does NOT record raw
+#                     keystrokes/client opcodes, other players' names in social
+#                     or PvP events, or whisper text (whispers log timing and
+#                     byte length only).
 #        Default:     0
 
 LlmBrain.TraceDir = ""

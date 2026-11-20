@@ -392,6 +392,18 @@ void BehaviorTraceWriter::WriteBatch(
     if (max_file_bytes_ > 0 && std::filesystem::exists(file, ec)) {
       const uint64_t sz = std::filesystem::file_size(file, ec);
       if (!ec && sz >= max_file_bytes_) {
+        // Shift .7.jsonl -> .8.jsonl, ..., .1.jsonl -> .2.jsonl, current ->
+        // .1.jsonl so up to kMaxRotatedFiles backups survive per day.
+        for (size_t idx = kMaxRotatedFiles; idx >= 2; --idx) {
+          std::filesystem::path src = file;
+          src.replace_extension(base::StringPrintf(".%zu.jsonl", idx - 1));
+          std::filesystem::path dst = file;
+          dst.replace_extension(base::StringPrintf(".%zu.jsonl", idx));
+          std::error_code rot_ec;
+          if (std::filesystem::exists(src, rot_ec)) {
+            std::filesystem::rename(src, dst, rot_ec);
+          }
+        }
         std::filesystem::path rotated = file;
         rotated.replace_extension(".1.jsonl");
         std::filesystem::rename(file, rotated, ec);

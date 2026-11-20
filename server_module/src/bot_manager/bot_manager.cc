@@ -115,7 +115,26 @@ void BotManager::EnsureStrategies(Player* player) {
       extras[at + 1] = '-';
     }
   }
-  const std::string combat = strategies_.combat + extras;
+  // Role-aware combat strategies: never apply "+dps assist" or "-threat" to
+  // tanks (which would strip playerbots' tank assist / threat / pull behavior).
+  std::string base_combat = strategies_.combat;
+  if (PlayerbotAI::IsTank(player)) {
+    std::vector<std::string> kept;
+    for (const StrategyCheck& check : StrategyChecks(base_combat)) {
+      if (check.name == "dps assist" || check.name == "threat") {
+        continue;
+      }
+      kept.push_back((check.present ? "+" : "-") + check.name);
+    }
+    base_combat.clear();
+    for (size_t i = 0; i < kept.size(); ++i) {
+      if (i > 0) {
+        base_combat.push_back(',');
+      }
+      base_combat += kept[i];
+    }
+  }
+  const std::string combat = base_combat + extras;
   // Still as we left it in every state: playerbots hasn't reset any of them
   // since (it resets combat alone too, e.g. SelectiveResetStrategies).
   const auto holds = [&](const std::string& changes, BotState state) {

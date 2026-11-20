@@ -24,12 +24,11 @@
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
 #include "ObjectMgr.h"
-#include "Opcodes.h"
 #include "Player.h"
 #include "PlayerScript.h"
 #include "Playerbots.h"
 #include "QuestDef.h"
-#include "ServerScript.h"
+#include "RandomPlayerbotMgr.h"
 #include "SharedDefines.h"
 #include "Spell.h"
 #include "SpellInfo.h"
@@ -37,7 +36,6 @@
 #include "Unit.h"
 #include "UnitScript.h"
 #include "World.h"
-#include "WorldPacket.h"
 #include "WorldSession.h"
 #include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
@@ -48,6 +46,9 @@ namespace {
 
 // Resolves whether `player` should be traced and returns its role ("bot" or
 // "human"), or empty if not traced.
+// Checks `IsHeadless()` and `IsRandomBot()` in addition to `GET_PLAYERBOT_AI`
+// because login/equip/zone hooks fire inside HandlePlayerLoginFromDB before
+// Playerbots attaches the AI component to random bots.
 std::string_view ResolveTracedRole(const TraceHookState& state,
                                    const Player* player) {
   if (!player) {
@@ -57,8 +58,11 @@ std::string_view ResolveTracedRole(const TraceHookState& state,
                          player->GetName())) {
     return "bot";
   }
-  if (state.observe_humans &&
-      GET_PLAYERBOT_AI(const_cast<Player*>(player)) == nullptr) {
+  Player* mutable_player = const_cast<Player*>(player);
+  const WorldSession* session = player->GetSession();
+  if (state.observe_humans && session != nullptr && !session->IsHeadless() &&
+      GET_PLAYERBOT_AI(mutable_player) == nullptr &&
+      !sRandomPlayerbotMgr.IsRandomBot(mutable_player)) {
     return "human";
   }
   return {};
@@ -158,7 +162,6 @@ class LlmBrainTracePlayerScript : public PlayerScript {
                       PLAYERHOOK_ON_MAP_CHANGED,
                       PLAYERHOOK_ON_LOGIN,
                       PLAYERHOOK_ON_LOGOUT,
-                      PLAYERHOOK_ON_GOSSIP_SELECT,
                       PLAYERHOOK_ON_STORE_NEW_ITEM,
                       PLAYERHOOK_ON_GROUP_ROLL_REWARD_ITEM,
                       PLAYERHOOK_ON_BEFORE_OPEN_ITEM,
@@ -175,14 +178,6 @@ class LlmBrainTracePlayerScript : public PlayerScript {
   void OnPlayerLogout(Player* player) override {
     EmitTraceEvent(state_, player, "logout", "",
                    player ? static_cast<int64_t>(player->GetLevel()) : 0);
-  }
-
-  void OnPlayerGossipSelect(Player* player,
-                            uint32 menu_id,
-                            uint32 /*sender*/,
-                            uint32 action) override {
-    EmitTraceEvent(state_, player, "npc_gossip", std::to_string(menu_id),
-                   static_cast<int64_t>(action));
   }
 
   void OnPlayerStoreNewItem(Player* player, Item* item, uint32 count) override {
@@ -268,16 +263,14 @@ class LlmBrainTracePlayerScript : public PlayerScript {
   }
 
   void OnPlayerPVPKill(Player* killer, Player* killed) override {
-    if (killer) {
-      EmitTraceEvent(state_, killer, "pvp_kill",
-                     killed ? killed->GetName() : "",
-                     killed ? static_cast<int64_t>(killed->GetLevel()) : 0);
+    // Ignore environmental / self-inflicted deaths (fall, lava, drowning).
+    if (!killer || !killed || killer == killed) {
+      return;
     }
-    if (killed) {
-      EmitTraceEvent(state_, killed, "died_pvp",
-                     killer ? killer->GetName() : "",
-                     killer ? static_cast<int64_t>(killer->GetLevel()) : 0);
-    }
+    EmitTraceEvent(state_, killer, "pvp_kill", "",
+                   static_cast<int64_t>(killed->GetLevel()));
+    EmitTraceEvent(state_, killed, "died_pvp", "",
+                   static_cast<int64_t>(killer->GetLevel()));
   }
 
   void OnPlayerKilledByCreature(Creature* killer, Player* killed) override {
@@ -449,10 +442,9 @@ class LlmBrainTracePlayerScript : public PlayerScript {
                    static_cast<int64_t>(text_emote));
   }
 
-  void OnPlayerDuelRequest(Player* target, Player* challenger) override {
+  void OnPlayerDuelRequest(Player* /*target*/, Player* challenger) override {
     if (challenger) {
-      EmitTraceEvent(state_, challenger, "duel_request",
-                     target ? target->GetName() : "", 0);
+      EmitTraceEvent(state_, challenger, "duel_request", "", 0);
     }
   }
 
@@ -460,12 +452,10 @@ class LlmBrainTracePlayerScript : public PlayerScript {
                        Player* loser,
                        DuelCompleteType /*type*/) override {
     if (winner) {
-      EmitTraceEvent(state_, winner, "duel_win", loser ? loser->GetName() : "",
-                     0);
+      EmitTraceEvent(state_, winner, "duel_win", "", 0);
     }
     if (loser) {
-      EmitTraceEvent(state_, loser, "duel_lose",
-                     winner ? winner->GetName() : "", 0);
+      EmitTraceEvent(state_, loser, "duel_lose", "", 0);
     }
   }
 
@@ -487,16 +477,26 @@ class LlmBrainTraceUnitScript : public UnitScript {
     }
     if (victim) {
       if (Player* vp = victim->ToPlayer()) {
-        EmitTraceEvent(state_, vp, "damage_taken",
-                       attacker ? attacker->GetName() : "",
+        // Don't leak another player's name; log NPC names or "environment".
+        std::string src;
+        if (!attacker || attacker == victim) {
+          src = "environment";
+        } else if (!attacker->IsPlayer()) {
+          src = attacker->GetName();
+        }
+        EmitTraceEvent(state_, vp, "damage_taken", std::move(src),
                        static_cast<int64_t>(damage));
       }
     }
-    if (attacker) {
-      if (Player* ap = attacker->ToPlayer()) {
-        EmitTraceEvent(state_, ap, "damage_dealt",
-                       victim ? victim->GetName() : "",
-                       static_cast<int64_t>(damage));
+    // Credit pet/totem/guardian damage to the owning player, and never count
+    // self/environmental damage (e.g. fall/lava) as damage dealt.
+    if (attacker && victim && attacker != victim) {
+      if (Player* ap = attacker->GetCharmerOrOwnerPlayerOrPlayerItself()) {
+        if (ap != victim) {
+          std::string tgt = victim->IsPlayer() ? "" : victim->GetName();
+          EmitTraceEvent(state_, ap, "damage_dealt", std::move(tgt),
+                         static_cast<int64_t>(damage));
+        }
       }
     }
   }
@@ -505,10 +505,9 @@ class LlmBrainTraceUnitScript : public UnitScript {
     if (gain == 0 || !healer) {
       return;
     }
-    if (Player* hp = healer->ToPlayer()) {
-      EmitTraceEvent(state_, hp, "heal_done",
-                     receiver ? receiver->GetName() : "",
-                     static_cast<int64_t>(gain));
+    // Credit healing totems/guardians to the owning player; omit ally names.
+    if (Player* hp = healer->GetCharmerOrOwnerPlayerOrPlayerItself()) {
+      EmitTraceEvent(state_, hp, "heal_done", "", static_cast<int64_t>(gain));
     }
   }
 
@@ -527,15 +526,14 @@ class LlmBrainTraceGroupScript : public GroupScript {
   void OnAddMember(Group* group, ObjectGuid guid) override {
     if (Player* p = ObjectAccessor::FindPlayer(guid)) {
       EmitTraceEvent(
-          state_, p, "group_join", group ? group->GetLeaderName() : "",
+          state_, p, "group_join", "",
           group ? static_cast<int64_t>(group->GetMembersCount()) : 0);
     }
   }
 
-  void OnInviteMember(Group* group, ObjectGuid guid) override {
+  void OnInviteMember(Group* /*group*/, ObjectGuid guid) override {
     if (Player* p = ObjectAccessor::FindPlayer(guid)) {
-      EmitTraceEvent(state_, p, "group_invited",
-                     group ? group->GetLeaderName() : "", 0);
+      EmitTraceEvent(state_, p, "group_invited", "", 0);
     }
   }
 
@@ -592,109 +590,6 @@ class LlmBrainTraceItemScript : public AllItemScript {
   const base::raw_ptr<TraceHookState> state_;
 };
 
-// Logs raw client input/action opcodes for observed human players (movement
-// key edges, facing, target clicks, item sells/destroys, taxi, loot clicks).
-// Stored as `event: "client_input"` and ignored by `trace_parity.py` so it
-// never leaks into parity scoring while preserving full raw human telemetry.
-class LlmBrainTraceInputScript : public ServerScript {
- public:
-  explicit LlmBrainTraceInputScript(TraceHookState* state)
-      : ServerScript("LlmBrainTraceInputScript",
-                     {SERVERHOOK_CAN_PACKET_RECEIVE}),
-        state_(state) {}
-
-  bool CanPacketReceive(WorldSession* session,
-                        WorldPacket const& packet) override {
-    if (!session) {
-      return true;
-    }
-    Player* player = session->GetPlayer();
-    if (!player) {
-      return true;
-    }
-    const char* op_name = ClassifyInputOpcode(packet.GetOpcode());
-    if (op_name != nullptr) {
-      EmitTraceEvent(state_, player, "client_input", op_name,
-                     static_cast<int64_t>(packet.GetOpcode()));
-    }
-    return true;
-  }
-
- private:
-  static const char* ClassifyInputOpcode(uint16 opcode) {
-    switch (opcode) {
-      case MSG_MOVE_START_FORWARD:
-        return "move_forward";
-      case MSG_MOVE_START_BACKWARD:
-        return "move_backward";
-      case MSG_MOVE_STOP:
-        return "move_stop";
-      case MSG_MOVE_START_STRAFE_LEFT:
-        return "strafe_left";
-      case MSG_MOVE_START_STRAFE_RIGHT:
-        return "strafe_right";
-      case MSG_MOVE_STOP_STRAFE:
-        return "strafe_stop";
-      case MSG_MOVE_JUMP:
-        return "jump";
-      case MSG_MOVE_START_TURN_LEFT:
-        return "turn_left";
-      case MSG_MOVE_START_TURN_RIGHT:
-        return "turn_right";
-      case MSG_MOVE_STOP_TURN:
-        return "turn_stop";
-      case MSG_MOVE_SET_FACING:
-        return "set_facing";
-      case MSG_MOVE_FALL_LAND:
-        return "fall_land";
-      case CMSG_SET_SELECTION:
-        return "select_target";
-      case CMSG_ATTACKSWING:
-        return "attack_swing";
-      case CMSG_ATTACKSTOP:
-        return "attack_stop";
-      case CMSG_CAST_SPELL:
-        return "cast_spell";
-      case CMSG_CANCEL_CAST:
-        return "cancel_cast";
-      case CMSG_USE_ITEM:
-        return "use_item";
-      case CMSG_OPEN_ITEM:
-        return "open_item";
-      case CMSG_LOOT:
-        return "loot_open";
-      case CMSG_AUTOSTORE_LOOT_ITEM:
-        return "loot_take_item";
-      case CMSG_LOOT_MONEY:
-        return "loot_take_money";
-      case CMSG_GAMEOBJ_USE:
-        return "go_use";
-      case CMSG_GOSSIP_HELLO:
-        return "npc_talk";
-      case CMSG_SELL_ITEM:
-        return "vendor_sell";
-      case CMSG_BUY_ITEM:
-      case CMSG_BUY_ITEM_IN_SLOT:
-        return "vendor_buy_pkt";
-      case CMSG_DESTROYITEM:
-        return "item_destroy";
-      case CMSG_AUTOEQUIP_ITEM:
-        return "item_autoequip";
-      case CMSG_SWAP_INV_ITEM:
-        return "item_swap";
-      case CMSG_ACTIVATETAXI:
-      case CMSG_ACTIVATETAXIEXPRESS:
-        return "taxi_fly";
-      case CMSG_STANDSTATECHANGE:
-        return "stand_state";
-      default:
-        return nullptr;
-    }
-  }
-
-  const base::raw_ptr<TraceHookState> state_;
-};
-
 }  // namespace
 
 void AddLlmBrainTraceScripts(TraceHookState* state) {
@@ -703,7 +598,6 @@ void AddLlmBrainTraceScripts(TraceHookState* state) {
   new LlmBrainTraceGroupScript(state);
   new LlmBrainTraceGameObjectScript(state);
   new LlmBrainTraceItemScript(state);
-  new LlmBrainTraceInputScript(state);
 }
 
 }  // namespace llm_brain

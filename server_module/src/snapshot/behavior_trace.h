@@ -108,7 +108,8 @@ std::string FormatTraceEvent(const TraceEvent& event);
 // flushes them on a background writer thread with size-capped file rotation.
 class BehaviorTraceWriter {
  public:
-  static constexpr uint64_t kDefaultMaxFileBytes = 10ULL * 1024 * 1024;
+  static constexpr uint64_t kDefaultMaxFileBytes = 64ULL * 1024 * 1024;
+  static constexpr size_t kMaxRotatedFiles = 8;
   static constexpr size_t kMaxQueueLines = 8192;
 
   explicit BehaviorTraceWriter(std::string root_dir,

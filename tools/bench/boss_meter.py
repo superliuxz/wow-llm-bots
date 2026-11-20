@@ -71,7 +71,7 @@ def analyze_boss_fight(
             val = int(e.get("value", 0))
             det = str(e.get("detail", ""))
             if ev == "damage_dealt":
-                if not boss_name or boss_name.lower() in det.lower():
+                if not boss_name or det.lower() == boss_name.lower():
                     dmg_dealt += val
             elif ev == "damage_taken":
                 dmg_taken += val
@@ -82,7 +82,7 @@ def analyze_boss_fight(
             elif ev == "died":
                 deaths += 1
             elif ev == "mob_kill":
-                if boss_name and boss_name.lower() in det.lower():
+                if boss_name and det.lower() == boss_name.lower():
                     boss_killed = True
 
         # Track target distance during boss spell casts (e.g. Lightning Nova).
