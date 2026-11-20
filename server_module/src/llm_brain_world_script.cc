@@ -1177,6 +1177,33 @@ class LlmBrainWorldScript : public WorldScript {
     }
     if (Unit* target = player->GetSelectedUnit()) {
       s.target = target->GetName();
+      s.target_hostile = !player->IsFriendlyTo(target) && target->IsAlive();
+      if (s.target_hostile) {
+        s.target_dist = player->GetDistance(target);
+        if (target->GetMaxHealth() > 0) {
+          s.target_hp_pct = 100.0f * static_cast<float>(target->GetHealth()) /
+                            static_cast<float>(target->GetMaxHealth());
+        }
+        s.target_level = target->GetLevel();
+        Spell* tsp = target->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+        if (!tsp || tsp->getState() != SPELL_STATE_PREPARING) {
+          tsp = target->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
+        }
+        if (tsp && tsp->GetSpellInfo()) {
+          const char* tsn =
+              tsp->GetSpellInfo()->SpellName[sWorld->GetDefaultDbcLocale()];
+          if (!tsn || tsn[0] == '\0') {
+            tsn = tsp->GetSpellInfo()->SpellName[0];
+          }
+          if (tsn) {
+            s.target_casting = tsn;
+          }
+        }
+        s.target_moving = target->isMoving();
+        s.target_targeting_me = target->GetTarget() == player->GetGUID() ||
+                                target->GetVictim() == player;
+        s.target_in_combat = target->IsInCombat();
+      }
     }
     s.attackers = static_cast<int>(player->getAttackers().size());
     return s;

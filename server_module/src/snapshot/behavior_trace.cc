@@ -133,7 +133,22 @@ TraceSample TraceSampleFromSnapshot(const pb::Snapshot& snapshot,
     out.casting = snapshot.base.self.casting->spell->name;
   }
   if (snapshot.ext.target && snapshot.ext.target->target) {
-    out.target = snapshot.ext.target->target->name;
+    const pb::Unit& t = *snapshot.ext.target->target;
+    out.target = t.name;
+    out.target_hostile =
+        t.reaction == pb::Unit::HOSTILE || t.reaction == pb::Unit::NEUTRAL;
+    if (out.target_hostile) {
+      out.target_dist = t.rel.dist_yd;
+      out.target_hp_pct = t.health_pct.value_or(-1.0f);
+      out.target_level = t.level.value_or(0);
+      if (t.activity.cast && t.activity.cast->spell) {
+        out.target_casting = t.activity.cast->spell->name;
+      }
+      out.target_moving = t.activity.state == pb::Activity::MOVING;
+      out.target_targeting_me = t.targeting_me;
+      out.target_in_combat =
+          t.activity.state == pb::Activity::FIGHTING || t.targeting_me;
+    }
   }
   if (snapshot.ext.combat) {
     out.attackers = static_cast<int>(snapshot.ext.combat->attackers.size());
@@ -189,6 +204,22 @@ std::string FormatTraceSample(const TraceSample& s) {
        JsonEscape(s.casting),
        ",\"target\":",
        JsonEscape(s.target),
+       ",\"target_dist\":",
+       base::StringPrintf("%.2f", s.target_dist),
+       ",\"target_hp_pct\":",
+       base::StringPrintf("%.1f", s.target_hp_pct),
+       ",\"target_level\":",
+       base::StringPrintf("%u", s.target_level),
+       ",\"target_casting\":",
+       JsonEscape(s.target_casting),
+       ",\"target_moving\":",
+       s.target_moving ? "true" : "false",
+       ",\"target_hostile\":",
+       s.target_hostile ? "true" : "false",
+       ",\"target_targeting_me\":",
+       s.target_targeting_me ? "true" : "false",
+       ",\"target_in_combat\":",
+       s.target_in_combat ? "true" : "false",
        ",\"attackers\":",
        base::StringPrintf("%d", s.attackers),
        "}"});

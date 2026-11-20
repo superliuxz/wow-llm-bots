@@ -26,7 +26,15 @@ TEST(BehaviorTraceTest, FormatsSampleAndChatWithJsonEscaping) {
   snap.base.self.power = 40;
   snap.base.self.power_max = 80;
   snap.base.self.casting.emplace().spell.emplace().name = "Smite";
-  snap.ext.target.emplace().target.emplace().name = "Mottled Boar";
+  auto& tgt = snap.ext.target.emplace().target.emplace();
+  tgt.name = "Mottled Boar";
+  tgt.rel.dist_yd = 12.5f;
+  tgt.health_pct = 80.0f;
+  tgt.level = 2;
+  tgt.activity.cast.emplace().spell.emplace().name = "Charge";
+  tgt.activity.state = wlb::snapshot::Activity::MOVING;
+  tgt.reaction = wlb::snapshot::Unit::HOSTILE;
+  tgt.targeting_me = true;
   snap.ext.combat.emplace().attackers.emplace_back().name = "Mottled Boar";
 
   const TraceSample s = TraceSampleFromSnapshot(
@@ -40,6 +48,14 @@ TEST(BehaviorTraceTest, FormatsSampleAndChatWithJsonEscaping) {
   EXPECT_NE(line.find("\"in_dungeon\":true"), std::string::npos);
   EXPECT_NE(line.find("\"casting\":\"Smite\""), std::string::npos);
   EXPECT_NE(line.find("\"target\":\"Mottled Boar\""), std::string::npos);
+  EXPECT_NE(line.find("\"target_dist\":12.50"), std::string::npos);
+  EXPECT_NE(line.find("\"target_hp_pct\":80.0"), std::string::npos);
+  EXPECT_NE(line.find("\"target_level\":2"), std::string::npos);
+  EXPECT_NE(line.find("\"target_casting\":\"Charge\""), std::string::npos);
+  EXPECT_NE(line.find("\"target_moving\":true"), std::string::npos);
+  EXPECT_NE(line.find("\"target_hostile\":true"), std::string::npos);
+  EXPECT_NE(line.find("\"target_targeting_me\":true"), std::string::npos);
+  EXPECT_NE(line.find("\"target_in_combat\":true"), std::string::npos);
   EXPECT_NE(line.find("\"attackers\":1"), std::string::npos);
 
   TraceEvent ev;

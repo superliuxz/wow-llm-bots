@@ -45,6 +45,14 @@ struct TraceSample {
   float mana_pct = 0.0f;
   std::string casting;
   std::string target;
+  float target_dist = -1.0f;
+  float target_hp_pct = -1.0f;
+  uint32_t target_level = 0;
+  std::string target_casting;
+  bool target_moving = false;
+  bool target_hostile = false;
+  bool target_targeting_me = false;
+  bool target_in_combat = false;
   int attackers = 0;
 };
 
