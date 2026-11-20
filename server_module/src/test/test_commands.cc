@@ -12,11 +12,16 @@
 #include "GroupMgr.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
+#include "Pet.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
 #include "PlayerbotFactory.h"
 #include "Playerbots.h"
 #include "SharedDefines.h"
+#include "SpellAuraEffects.h"
+#include "SpellAuras.h"
+#include "SpellInfo.h"
+#include "Strategy.h"
 
 namespace llm_brain {
 namespace {
@@ -190,7 +195,10 @@ class LlmBrainTestCommandScript : public CommandScript {
     factory.Randomize(false);
     if (spec_tab && *spec_tab >= 0 && *spec_tab <= 3) {
       PlayerbotFactory::InitTalentsBySpecNo(player, *spec_tab, true);
+      factory.InitGlyphs(false);
       factory.InitEquipment(false);
+      factory.InitAmmo();
+      factory.InitReagents();
       if (PlayerbotAI* ai = GET_PLAYERBOT_AI(player)) {
         ai->ResetStrategies();
       }
@@ -219,8 +227,9 @@ class LlmBrainTestCommandScript : public CommandScript {
                                 player->GetName());
       return false;
     }
-    const bool exists =
-        ai->GetAiObjectContext()->GetStrategy(strat_name) != nullptr;
+    const std::set<std::string> supported =
+        ai->GetAiObjectContext()->GetSupportedStrategies();
+    const bool exists = supported.count(strat_name) != 0;
     const bool in_combat = ai->HasStrategy(strat_name, BOT_STATE_COMBAT);
     const bool non_combat = ai->HasStrategy(strat_name, BOT_STATE_NON_COMBAT);
     handler->PSendSysMessage(
@@ -270,11 +279,39 @@ class LlmBrainTestCommandScript : public CommandScript {
       player->SpawnCorpseBones();
     }
     player->CombatStopWithPets(true);
-    player->RemoveAllAuras();
+    // Remove ONLY non-passive auras (clears Sated/Exhaustion, Res Sickness,
+    // buffs, debuffs) while preserving passive talent, racial, and item-equip
+    // auras (mirroring Unit::RemoveArenaAuras).
+    uint32_t passive_count = 0;
+    auto& auras = player->GetOwnedAuras();
+    for (auto itr = auras.begin(); itr != auras.end();) {
+      Aura* aura = itr->second;
+      const SpellInfo* info = aura ? aura->GetSpellInfo() : nullptr;
+      if (aura && (aura->IsPassive() || (info && info->IsPassive()))) {
+        ++passive_count;
+        ++itr;
+      } else {
+        player->RemoveOwnedAura(itr);
+      }
+    }
     player->RemoveAllSpellCooldown();
     player->DurabilityRepairAll(false, 0, false);
     player->SetFullHealth();
     player->SetPower(POWER_MANA, player->GetMaxPower(POWER_MANA));
+    player->SetPower(POWER_RAGE, 0);
+    player->SetPower(POWER_ENERGY, player->GetMaxPower(POWER_ENERGY));
+    player->SetPower(POWER_RUNIC_POWER, 0);
+    if (Pet* pet = player->GetPet()) {
+      if (!pet->IsAlive()) {
+        pet->setDeathState(DeathState::Alive);
+      }
+      pet->SetFullHealth();
+      const Powers ptype = pet->getPowerType();
+      pet->SetPower(ptype, pet->GetMaxPower(ptype));
+    }
+    PlayerbotFactory factory(player, player->GetLevel(), ITEM_QUALITY_EPIC);
+    factory.InitAmmo();
+    factory.InitReagents();
     if (Group* group = player->GetGroup()) {
       if (group->GetLeaderGUID() == player->GetGUID()) {
         group->ResetInstances(INSTANCE_RESET_ALL, false, player);
@@ -285,10 +322,11 @@ class LlmBrainTestCommandScript : public CommandScript {
       Player::ResetInstances(player->GetGUID(), INSTANCE_RESET_ALL, true);
     }
     handler->PSendSysMessage(
-        "llmtest: resetbot {} alive={} hp={}/{} mana={}/{} inst={}",
-        player->GetName(), player->IsAlive() ? 1 : 0, player->GetHealth(),
-        player->GetMaxHealth(), player->GetPower(POWER_MANA),
-        player->GetMaxPower(POWER_MANA), player->GetInstanceId());
+        "llmtest: resetbot {} alive={} passives={} hp={}/{} mana={}/{} inst={}",
+        player->GetName(), player->IsAlive() ? 1 : 0, passive_count,
+        player->GetHealth(), player->GetMaxHealth(),
+        player->GetPower(POWER_MANA), player->GetMaxPower(POWER_MANA),
+        player->GetInstanceId());
     return true;
   }
 

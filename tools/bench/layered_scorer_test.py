@@ -263,12 +263,12 @@ class LayeredScorerTest(unittest.TestCase):
         rows = known_bad_bots.generate_synthetic_human("H1", seed=7)
         t0 = next(int(r["t_ms"]) for r in rows if r.get("kind") == "sample") + 2000
         # Inject human-only events plus one symmetric event.
-        for ev in ("vendor_repair", "item_open", "emote", "mail_take_item", "client_input", "vendor_buy"):
+        for ev in ("vendor_repair", "item_open", "emote", "mail_take_item", "client_input", "vendor_buy", "item_unequip", "quest_abandon"):
             rows.append({"kind": "event", "t_ms": t0, "event": ev, "detail": "", "value": 1})
         rows.append({"kind": "event", "t_ms": t0 + 200, "event": "cast_start", "detail": "Shadow Bolt", "value": 686})
         frames = trace_parity.reconstruct_trajectory(rows)
         seen = {e["event"] for f in frames for e in f.get("events", [])}
-        for forbidden in ("vendor_repair", "item_open", "emote", "mail_take_item", "client_input", "vendor_buy"):
+        for forbidden in ("vendor_repair", "item_open", "emote", "mail_take_item", "client_input", "vendor_buy", "item_unequip", "quest_abandon"):
             self.assertNotIn(forbidden, seen)
         self.assertIn("cast_start", seen)
 

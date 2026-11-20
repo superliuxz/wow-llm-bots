@@ -9,61 +9,17 @@ Last updated 2026-11-20.
 
 ## In progress
 
-### Boss benchmark & trace review (`Review Trace All Events 4`, commit `2ac5cc8`)
-
-**High**
-- [ ] **1. `llmtest resetbot` strips passive auras (`server_module/src/test/test_commands.cc`):**
-  `RemoveAllAuras()` removes passive talent, racial, and on-equip item auras (`Unit.cpp:5393-5407`),
-  crippling bots after reset. Fix: remove only non-passive auras (like `RemoveArenaAuras` skips
-  `IsPassive`), or re-apply passives afterwards, and assert a known talent passive aura is present.
-
-**Medium**
-- [ ] **2. Latency logging reads nonexistent `do_ms=` (`tools/bench/bench_bosses.py`):**
-  `harness` logs `first_line_ms` in `bots_dir/*/events/*.jsonl` (as `soak.py:218-239` reads), not
-  `do_ms=` in `harness.log`. Read `first_line_ms` from `events/*.jsonl` and fail the wave if empty.
-- [ ] **3. Console checks match any line in the log tail (`tools/bench/bench_bosses.py`):**
-  With 15 bots, a late reply from another bot can pass or fail a `role`, `checkstrat`, or `where`
-  check. Match the bot's exact name (and/or a per-command token) in the reply.
-- [ ] **4. Early pulls during 8 s in-dungeon staging (`tools/bench/bench_bosses.py`):**
-  In `llm` modes the brain is live for 8 s only ~27–30 yd from the boss before the scripted pull,
-  and scoring drops everything before `pull_start - 1 s`. Stage farther away / out of LoS, or hold
-  plans (`Keep` only) until the pull.
-- [ ] **5. Instance reuse across waves not detected (`tools/bench/bench_bosses.py`):**
-  `ResetInstances` fails silently if anyone is still on the dungeon map (`Group.cpp:2374-2385`).
-  Verify all party members are off the dungeon map before resetting and assert wave `N` instance
-  IDs differ from wave `N-1`.
-- [ ] **6. Modes aren't mixed within a wave (`tools/bench/bench_bosses.py`):**
-  Each run uses one mode, so GPU load isn't shared across modes. Give each party a different mode
-  within each wave and rotate across waves.
-- [ ] **7. Baseline `checkstrat` doesn't verify script is ON (`tools/bench/bench_bosses.py`):**
-  In `baseline` mode, assert `combat=1` or `noncombat=1` when `strip_strat` is non-empty (and note
-  Murmur has no playerbots dungeon script, so its `baseline` equals `no_brain`).
-
-**Open Lows**
-- [ ] **8. `llmtest gear` keeps random roll's glyphs & stored spec (`test_commands.cc`):**
-  `Randomize(false)` rolls a random spec/glyphs before `InitTalentsBySpecNo`; skip random talents &
-  glyphs when a spec is given (or reset glyphs and stored spec number afterwards).
-- [ ] **9. `llmtest checkstrat` leaks a `Strategy` object per call (`test_commands.cc`):**
-  `GetStrategy()` allocates a new object (`NamedObjectContext.h:301-306`) and `HandleCheckStrat`
-  never frees it. Free the returned pointer or check the engine's strategy registry without owning.
-- [ ] **10. `resetbot` incomplete resource reset (`test_commands.cc`):**
-  Also reset/revive pet health/dead pet, rage, energy, runic power, reagents, soul shards, and ammo.
-- [ ] **11. `dodge_timeline.py` hardcoded radii & target-relative distance (`tools/bench/dodge_timeline.py`):**
+### Remaining Open Lows (`Review Trace All Events 4`)
+- [ ] **11. `dodge_timeline.py` DBC spell radii & impact-point distance (`tools/bench/dodge_timeline.py`):**
   Read spell radius from server/DBC data instead of hardcoded table; measure distance to the cast's
   impact point (not each bot's own target) and tie `act_delay_ms` to the cast-triggered act.
-- [ ] **12. `mob_kill` range check (`behavior_trace_scripts.cc`):**
-  Restrict group `mob_kill` credit to members within credit range (not across the whole continent)
-  and handle environmental deaths with no killer.
-- [ ] **13. Parity allow-list symmetry (`tools/bench/trace_parity.py`):**
-  Remove `item_unequip` and `quest_abandon` from `PARITY_ALLOWED_EVENTS` (not symmetric between bots
-  and humans).
-- [ ] **14. Bench runner polish (`bench_bosses.py`, `boss_meter.py`):**
-  Don't merge old JSON results silently into new runs; avoid re-reading the entire trace dir every
-  5 s (up to 576 MB/day/char); note `AccountInstancesPerHour` is skipped by `TELE_TO_GM_MODE`;
-  keep `boss_meter.py` dodge metric as "outside at impact" rather than max distance; review
-  `llmtest group` raid auto-convert / `TELE_TO_GM_MODE` / `questcomplete` notes.
+- [ ] **14 (remaining). Incremental trace polling & `boss_meter.py` impact-dodge metric:**
+  Avoid re-reading the entire trace dir every 5 s during long runs; replace `boss_meter.py`'s
+  max-distance dodge column with "outside at impact"; review `llmtest group` raid auto-convert /
+  `TELE_TO_GM_MODE` / `questcomplete` notes.
 
-- After High 1 + Mediums 2–3 & 6 are fixed: re-run the clean multi-mode parallel boss benchmark.
+- Next benchmark run: run `--mode mixed` + `--mode baseline` + `--mode no_brain` with `--runs 6`
+  on the fixed runner (`bench_bosses.py`) for statistically powered comparison data.
 
 ## Next, in order
 
@@ -145,6 +101,21 @@ Last updated 2026-11-20.
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-20: **Review 4 fixes (High 1, Mediums 2–7, Lows 8–10, 12–13, partial 14) + auto-loaded rules:**
+  `llmtest resetbot` preserves passive auras (`passives=62` verified live) and resets pet health/power,
+  rage/energy/runic power, ammo, and reagents (`test_commands.cc`); `llmtest gear` refreshes glyphs,
+  ammo, and reagents for the chosen spec; `llmtest checkstrat` uses non-allocating
+  `GetSupportedStrategies()` (0 leaks); `bench_bosses.py` reads `first_line_ms` from
+  `bots_dir/*/events/*.jsonl` (fails if empty), scopes all console checks to exact bot names,
+  verifies `map=0` before `resetbot` and non-reused distinct dungeon instance IDs across waves,
+  asserts baseline scripts are ON, adds `--mode mixed` (rotates `llm` and `llm_no_notes` across
+  parallel parties in the same wave under shared GPU load), and overwrites output JSON cleanly
+  unless `--append`; `behavior_trace_scripts.cc` bounds group `mob_kill` to 100 yd; `trace_parity.py`
+  drops `item_unequip` & `quest_abandon` (unit-tested, scorer re-locked); standardized the 3-step
+  review-fix procedure in `CONTRIBUTING.md` and added `.agents/rules/contributing.md` (`always_on`).
+  Live-verified on Ikiss (`--mode mixed --runs 2 --parallel 2`): inst 1 (`llm`) KILLED in `69.1 s`
+  (`Loadc`/`Loadd`/`Loade` dodged `34.0–34.1 yd`, `p50=257.4 ms`, `40` calls) vs inst 2
+  (`llm_no_notes`) wiped at `59.3 s` (`0.5–10.7 yd`, `p50=385.1 ms`, `27` calls).
 - 2026-11-20: **Parallel 3-party boss benchmark scaffolding (`tools/bench/bench_bosses.py`, `test_commands.cc`):**
   added `llmtest resetbot` and `llmtest where`, raised `AccountInstancesPerHour = 1000` (note:
   skipped by `TELE_TO_GM_MODE`), and upgraded `bench_bosses.py` to run `--parallel 3` identical

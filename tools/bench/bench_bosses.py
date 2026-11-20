@@ -253,7 +253,40 @@ BOSSES = {
 }
 
 INST_RE = re.compile(r"instance=(\d+)")
-DO_MS_RE = re.compile(r"do_ms=(\d+)")
+PASSIVES_RE = re.compile(r"passives=(\d+)")
+
+
+def _find_bot_line(output: str | None, prefix: str) -> str:
+    """Returns the line in `output` matching `prefix` (bot-scoped), or ''."""
+    for line in (output or "").splitlines():
+        if prefix in line:
+            return line
+    return ""
+
+
+def _parse_harness_latency(bots_dir: pathlib.Path, bot_names: list[str]) -> dict[str, float | int | None]:
+    """Reads `first_line_ms` from `bots_dir/<name>/events/*.jsonl` (same as soak.py)."""
+    vals: list[float] = []
+    for name in bot_names:
+        ev_dir = bots_dir / name / "events"
+        if not ev_dir.is_dir():
+            continue
+        for f in sorted(ev_dir.glob("*.jsonl")):
+            for line in f.read_text(errors="replace").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                if d.get("first_line_ms", 0) > 0:
+                    vals.append(float(d["first_line_ms"]))
+    if not vals:
+        return {"p50_ms": None, "p95_ms": None, "calls": 0}
+    vals.sort()
+    p50 = vals[len(vals) // 2]
+    p95 = vals[min(len(vals) - 1, int(len(vals) * 0.95))]
+    return {"p50_ms": round(p50, 1), "p95_ms": round(p95, 1), "calls": len(vals)}
 
 
 def _make_parties(n_parties: int, raid: bool) -> list[list[tuple[str, str, int, str]]]:
@@ -292,18 +325,6 @@ def _slice_traces_after(
         rows = all_traces.get(n, [])
         out[n] = [r for r in rows if int(r.get("t_ms", 0)) >= t_min_ms]
     return out
-
-
-def _parse_harness_latency(log_path: pathlib.Path) -> dict[str, float | None]:
-    if not log_path.exists():
-        return {"p50_ms": None, "p95_ms": None, "calls": 0}
-    vals = [int(m.group(1)) for m in DO_MS_RE.finditer(log_path.read_text(errors="replace"))]
-    if not vals:
-        return {"p50_ms": None, "p95_ms": None, "calls": 0}
-    vals.sort()
-    p50 = vals[len(vals) // 2]
-    p95 = vals[min(len(vals) - 1, int(len(vals) * 0.95))]
-    return {"p50_ms": float(p50), "p95_ms": float(p95), "calls": len(vals)}
 
 
 def run_boss_waves(
@@ -368,6 +389,10 @@ def run_boss_waves(
     invalid_runs = 0
     wave = 0
     max_waves = (target_runs // n_parties) + 3
+    seen_instances: set[int] = set()
+    # In `mixed` mode, rotate (llm, llm_no_notes) across parallel parties so
+    # both LLM modes share identical GPU load within every wave.
+    mixed_cycle = ("llm", "llm_no_notes")
 
     try:
         server.server_start(TEST)
@@ -381,7 +406,8 @@ def run_boss_waves(
                 server.console(f"llmtest group {leader} {name}", wait_s=0.3, inst=TEST)
             for idx, (name, _, spec_tab, expected_role) in enumerate(party):
                 out = server.console(f"llmtest gear {name} {level} {spec_tab}", wait_s=0.5, inst=TEST)
-                if f"role={expected_role}" not in (out or ""):
+                line = _find_bot_line(out, f"geared {name} at level {level}")
+                if f"role={expected_role}" not in line:
                     raise RuntimeError(
                         f"role mismatch for {name}: expected role={expected_role}, got: {out!r}"
                     )
@@ -393,20 +419,34 @@ def run_boss_waves(
         while len(valid_runs) < target_runs and wave < max_waves:
             wave += 1
             active_parties = parties[: min(n_parties, target_runs - len(valid_runs))]
-            say(f"boss benchmark [{era} | {tag} | {mode} | wave {wave}]: {len(active_parties)} parallel parties")
+            party_modes = [
+                mixed_cycle[(p_idx + wave - 1) % len(mixed_cycle)] if mode == "mixed" else mode
+                for p_idx in range(len(active_parties))
+            ]
+            say(f"boss benchmark [{era} | {tag} | {mode} | wave {wave}]: modes={party_modes}")
 
-            # 1. Move to holding spot outside the dungeon (map 0) and cleanly reset every bot + instance.
+            # 1. Move ALL bots off the dungeon map (to map 0) first, confirm map=0, then resetbot
+            #    (so Group::ResetInstances never silently fails due to someone still in the dungeon).
             for p_idx, party in enumerate(active_parties):
                 hx, hy, hz = -8949.95 + p_idx * 10.0, -132.49, 83.53
                 for name, _, _, _ in party:
                     server.console(f"llmtest tele {name} 0 {hx:.2f} {hy:.2f} {hz:.2f} 0", wait_s=0.25, inst=TEST)
+            time.sleep(2.0)
+            for party in active_parties:
+                for name, _, _, _ in party:
+                    wout = server.console(f"llmtest where {name}", wait_s=0.2, inst=TEST)
+                    wline = _find_bot_line(wout, f"where {name} ")
+                    if "map=0 " not in wline:
+                        raise RuntimeError(f"{name} did not leave dungeon before reset: {wout!r}")
                 for name, _, _, _ in party:
                     out = server.console(f"llmtest resetbot {name}", wait_s=0.25, inst=TEST)
-                    if "alive=1" not in (out or ""):
-                        raise RuntimeError(f"dirty start state for {name}: {out!r}")
+                    rline = _find_bot_line(out, f"resetbot {name} ")
+                    pm = PASSIVES_RE.search(rline)
+                    if "alive=1" not in rline or not pm or int(pm.group(1)) <= 0:
+                        raise RuntimeError(f"dirty start state / missing passives for {name}: {out!r}")
 
             # 2. Teleport each party to its own fresh dungeon instance at stage_xyz, wait for
-            #    cross-map worldport to complete, then assert distinct non-zero instance IDs.
+            #    cross-map worldport, then assert distinct non-zero AND never-reused instance IDs.
             sx, sy, sz = stage_xyz
             for party in active_parties:
                 for idx, (name, _, _, _) in enumerate(party):
@@ -415,18 +455,18 @@ def run_boss_waves(
                         wait_s=0.35,
                         inst=TEST,
                     )
-                    if "teleported" not in (out or ""):
+                    if not _find_bot_line(out, f"teleported {name} to map {map_id}"):
                         raise RuntimeError(f"stage teleport failed for {name}: {out!r}")
 
-            # Wait for cross-map worldport + Playerbots dungeon strategy attachment.
             time.sleep(3.5)
             party_instances: list[int] = []
             for party in active_parties:
                 inst_id = None
                 for name, _, _, _ in party:
                     wout = server.console(f"llmtest where {name}", wait_s=0.25, inst=TEST)
-                    m = INST_RE.search(wout or "")
-                    if f"map={map_id}" not in (wout or "") or not m:
+                    wline = _find_bot_line(wout, f"where {name} ")
+                    m = INST_RE.search(wline)
+                    if f"map={map_id} " not in wline or not m:
                         raise RuntimeError(f"{name} did not arrive on map {map_id}: {wout!r}")
                     cur_inst = int(m.group(1))
                     if inst_id is None:
@@ -437,42 +477,51 @@ def run_boss_waves(
                         )
                 if inst_id == 0:
                     raise RuntimeError(f"expected non-zero dungeon instance id on map {map_id}")
+                if inst_id in seen_instances:
+                    raise RuntimeError(f"dungeon instance {inst_id} was reused from an earlier wave!")
                 party_instances.append(inst_id)
 
             if len(set(party_instances)) != len(party_instances):
                 raise RuntimeError(
                     f"parallel parties collided in same dungeon instance: {party_instances}"
                 )
-            say(f"  verified distinct dungeon instances: {party_instances}")
+            seen_instances.update(party_instances)
+            say(f"  verified fresh distinct dungeon instances: {party_instances}")
 
-            # 3. Verify dungeon strategy state on every bot after arrival.
+            # 3. Verify dungeon strategy state on every bot after arrival (both OFF and baseline ON).
             if strip_strat:
                 for party in active_parties:
                     for name, _, _, _ in party:
                         chk = server.console(f"llmtest checkstrat {name} {strip_strat}", wait_s=0.25, inst=TEST)
-                        if "exists=1" not in (chk or ""):
+                        cline = _find_bot_line(chk, f"strat {strip_strat} on {name} ")
+                        if "exists=1" not in cline:
                             raise RuntimeError(f"strategy {strip_strat!r} does not exist on {name}: {chk!r}")
-                        if mode != "baseline":
-                            if "combat=0" not in chk or "noncombat=0" not in chk:
+                        if mode == "baseline":
+                            if "combat=1" not in cline and "noncombat=1" not in cline:
+                                raise RuntimeError(
+                                    f"baseline strategy {strip_strat!r} is NOT active on {name}: {chk!r}"
+                                )
+                        else:
+                            if "combat=0" not in cline or "noncombat=0" not in cline:
                                 raise RuntimeError(
                                     f"strategy {strip_strat!r} was not stripped on {name}: {chk!r}"
                                 )
 
-            # 4. Start fresh harness (if llm / llm_no_notes) with a clean --bots-dir for this wave.
-            wave_start_ms = int(time.time() * 1000)
+            # 4. Start fresh harness (if llm / llm_no_notes / mixed) with a clean --bots-dir for this wave.
+            wave_use_harness = any(pm in ("llm", "llm_no_notes") for pm in party_modes)
             with tempfile.TemporaryDirectory(prefix=f"wlb-boss-{tag}-{mode}-w{wave}-") as tmp:
                 tmp_dir = pathlib.Path(tmp)
                 bots_dir = tmp_dir / "bots"
                 bots_dir.mkdir(parents=True)
-                if notes_md and mode == "llm":
-                    for party in active_parties:
+                for p_idx, party in enumerate(active_parties):
+                    if notes_md and party_modes[p_idx] == "llm":
                         for name, _, _, _ in party:
                             bdir = bots_dir / name
                             bdir.mkdir(parents=True, exist_ok=True)
                             (bdir / "notes.md").write_text(notes_md)
                 harness_log = tmp_dir / "harness.log"
                 proc = None
-                if use_harness:
+                if wave_use_harness:
                     proc = subprocess.Popen(
                         [
                             str(OUT / "common" / "harness"),
@@ -489,7 +538,8 @@ def run_boss_waves(
                         stdout=harness_log.open("w"),
                         stderr=subprocess.STDOUT,
                     )
-                time.sleep(8.0)
+                # Brief connect window (3 s) right before pull so bots don't wander/early-pull.
+                time.sleep(3.0)
 
                 # 5. Move all active parties to spawn_xyz simultaneously to initiate the pull.
                 pull_start_ms = int(time.time() * 1000)
@@ -513,13 +563,13 @@ def run_boss_waves(
                             if done_flags[p_idx]:
                                 continue
                             pnames = [b[0] for b in party]
-                            sub = _slice_traces_after(all_tr, pnames, pull_start_ms - 1000)
+                            sub = _slice_traces_after(all_tr, pnames, pull_start_ms - 5000)
                             res = boss_meter.analyze_boss_fight(sub, boss_name=boss_name)
                             if res["killed"]:
-                                say(f"  party {p_idx + 1} (inst {party_instances[p_idx]}): {boss_name} KILLED in {res['duration_s']:.1f}s!")
+                                say(f"  party {p_idx + 1} ({party_modes[p_idx]}, inst {party_instances[p_idx]}): {boss_name} KILLED in {res['duration_s']:.1f}s!")
                                 done_flags[p_idx] = True
                             elif res["total_deaths"] >= len(party):
-                                say(f"  party {p_idx + 1} (inst {party_instances[p_idx]}): wiped ({res['total_deaths']} deaths)")
+                                say(f"  party {p_idx + 1} ({party_modes[p_idx]}, inst {party_instances[p_idx]}): wiped ({res['total_deaths']} deaths)")
                                 done_flags[p_idx] = True
                         if all(done_flags):
                             time.sleep(2.0)
@@ -531,22 +581,32 @@ def run_boss_waves(
                             proc.wait(timeout=5)
                         except subprocess.TimeoutExpired:
                             proc.kill()
-                lat = _parse_harness_latency(harness_log)
+
+                # Read per-party `first_line_ms` from `bots_dir/<name>/events/*.jsonl`.
+                party_lats = []
+                for p_idx, party in enumerate(active_parties):
+                    pnames = [b[0] for b in party]
+                    lat = _parse_harness_latency(bots_dir, pnames)
+                    if party_modes[p_idx] in ("llm", "llm_no_notes") and lat["calls"] == 0:
+                        raise RuntimeError(
+                            f"harness recorded 0 LLM decisions (first_line_ms) for party {p_idx + 1} ({pnames})"
+                        )
+                    party_lats.append(lat)
 
             # 6. Score each party in this wave from its post-pull slice.
             all_tr = boss_meter.trace_parity.load_traces(trace_dir)["bot"]
             for p_idx, party in enumerate(active_parties):
                 pnames = [b[0] for b in party]
-                sub = _slice_traces_after(all_tr, pnames, pull_start_ms - 1000)
+                sub = _slice_traces_after(all_tr, pnames, pull_start_ms - 5000)
                 res = boss_meter.analyze_boss_fight(sub, boss_name=boss_name)
                 res["era"] = era
                 res["party_size"] = len(party)
                 res["level"] = level
-                res["mode"] = mode
+                res["mode"] = party_modes[p_idx]
                 res["wave"] = wave
                 res["party_index"] = p_idx
                 res["instance_id"] = party_instances[p_idx]
-                res["harness_latency"] = lat
+                res["harness_latency"] = party_lats[p_idx]
                 res["invalid"] = (res["total_dps"] == 0.0 and res["total_deaths"] == 0 and not res["killed"])
                 print("\n" + boss_meter.format_boss_meter(res))
                 if res["invalid"]:
@@ -580,11 +640,13 @@ def main() -> int:
     ap.add_argument("--only", default="", help="Comma-separated subset of boss keys: " + ",".join(BOSSES))
     ap.add_argument("--runs", type=int, default=3, help="Valid runs per boss (default: 3)")
     ap.add_argument("--parallel", type=int, default=3, help="Parallel 5-man parties in one worldserver (default: 3)")
+    ap.add_argument("--append", action="store_true", help="Merge into existing output JSON instead of overwriting")
     ap.add_argument(
         "--mode",
-        choices=("llm", "llm_no_notes", "no_brain", "baseline"),
+        choices=("llm", "llm_no_notes", "mixed", "no_brain", "baseline"),
         default="llm",
         help="llm=harness+notes, scripts OFF; llm_no_notes=harness, no notes, scripts OFF; "
+             "mixed=rotate llm & llm_no_notes across parallel parties under shared GPU load; "
              "no_brain=no harness, scripts OFF; baseline=no harness, playerbots C++ scripts ON",
     )
     args = ap.parse_args()
@@ -593,8 +655,8 @@ def main() -> int:
     build.common("default", tests=False)
     build.server(test=True)
     out_json = VAR / f"bench_boss_10_{args.mode}.json"
-    results = json.loads(out_json.read_text()) if out_json.exists() else {}
-    ctx = LlamaServer(slots=16) if args.mode in ("llm", "llm_no_notes") else None
+    results = json.loads(out_json.read_text()) if (args.append and out_json.exists()) else {}
+    ctx = LlamaServer(slots=16) if args.mode in ("llm", "llm_no_notes", "mixed") else None
     if ctx is not None:
         ctx.__enter__()
     try:

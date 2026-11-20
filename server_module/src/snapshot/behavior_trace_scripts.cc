@@ -468,7 +468,9 @@ class LlmBrainTraceUnitScript : public UnitScript {
       for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
            itr = itr->next()) {
         Player* member = itr->GetSource();
-        if (member && member->GetMapId() == killed->GetMapId()) {
+        // Restrict credit to group members within standard 100 yd kill-credit
+        // range on the same map (not across the whole continent).
+        if (member && member->IsWithinDistInMap(killed, 100.0f)) {
           EmitTraceEvent(state_, member, "mob_kill", name, lvl);
         }
       }

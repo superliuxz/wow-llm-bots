@@ -11,6 +11,12 @@ without this conversation. You **MUST** update it **in the same commit** as the 
 
 - You start something or receive review findings (High, Medium, **and** Low): add every open item
   to `docs/TODO.md` under "In progress" before claiming work is done.
+- **Standard review-fix procedure (MUST follow in exact order):**
+  1. **Feedback → update `docs/TODO.md` with 100% honesty FIRST** — record every High, Medium, and
+     Low finding verbatim (and fix any `Done` overclaims) **without modifying any code yet**.
+  2. **Fix and verify each item one by one** (High → Medium → Low).
+  3. **Check off an item in `docs/TODO.md` ONLY after it is implemented AND verified** (tests or
+     live checks actually executed, never assumed), then commit and push.
 - You finish an item: check it off / move it to "Done" (keep about ten) **only after** it is
   implemented and verified (tests/checks actually executed, not assumed).
 - You defer, skip or only partly do something, find a bug you don't fix, or decide something you
