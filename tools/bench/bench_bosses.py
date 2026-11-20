@@ -244,11 +244,11 @@ def run_boss(
     raid: bool = False,
     notes_md: str = "",
     max_s: float = 210.0,
-    baseline: bool = False,
+    mode: str = "llm",
     run_idx: int = 1,
 ) -> dict:
     party = RAID_10 if raid else PARTY_5
-    mode_tag = f"{tag}_{'base' if baseline else 'llm'}_r{run_idx}"
+    mode_tag = f"{tag}_{mode}_r{run_idx}"
     trace_dir = VAR / f"bench_boss_{mode_tag}"
     shutil.rmtree(trace_dir, ignore_errors=True)
     trace_dir.mkdir(parents=True, exist_ok=True)
@@ -275,7 +275,7 @@ def run_boss(
     lines.append(f'LlmBrain.TraceDir = "{trace_dir}"')
     c_strats = "+boost,+dps assist,-threat"
     nc_strats = "-follow,-grind,-new rpg"
-    if strip_strat and not baseline:
+    if strip_strat and mode != "baseline":
         c_strats += f",-{strip_strat}"
         nc_strats += f",-{strip_strat}"
     lines.append(f'LlmBrain.CombatStrategies = "{c_strats}"')
@@ -302,20 +302,20 @@ def run_boss(
                 server.console(f"llmtest item {name} {role_items[idx]}", inst=TEST)
 
         # Wait for BotManager::EnsureStrategies to re-apply strategies after gear/spec reset,
-        # then verify any stripped dungeon boss script actually exists and is OFF.
+        # then verify any stripped dungeon boss script actually exists and is OFF (for llm/floor).
         time.sleep(2.5)
         if strip_strat:
             chk = server.console(f"llmtest checkstrat {leader} {strip_strat}", inst=TEST)
             if chk and "exists=1" not in chk:
                 raise RuntimeError(f"stripped strategy {strip_strat!r} does not exist: {chk!r}")
-            if not baseline and chk and ("combat=0" not in chk or "noncombat=0" not in chk):
+            if mode != "baseline" and chk and ("combat=0" not in chk or "noncombat=0" not in chk):
                 raise RuntimeError(f"strategy {strip_strat!r} was not stripped: {chk!r}")
 
         with tempfile.TemporaryDirectory(prefix=f"wlb-boss-{mode_tag}-") as tmp:
             tmp_dir = pathlib.Path(tmp)
             bots_dir = tmp_dir / "bots"
             bots_dir.mkdir(parents=True)
-            if notes_md and not baseline:
+            if notes_md and mode == "llm":
                 for name, _, _, _ in party:
                     bdir = bots_dir / name
                     bdir.mkdir(parents=True, exist_ok=True)
@@ -323,6 +323,8 @@ def run_boss(
             harness_log = tmp_dir / "harness.log"
             # Start harness BEFORE teleporting to the boss so the LLM brain is live
             # before pull and handles the opening instead of playerbots acting alone.
+            # In `baseline` / `floor` modes we still connect harness with no notes.md
+            # so bots initiate the pull cleanly, OR run without notes/orders.
             proc = subprocess.Popen(
                 [
                     str(OUT / "common" / "harness"),
@@ -378,7 +380,7 @@ def run_boss(
     res["era"] = era
     res["party_size"] = len(party)
     res["level"] = level
-    res["baseline"] = baseline
+    res["mode"] = mode
     print("\n" + boss_meter.format_boss_meter(res))
     return res
 
@@ -387,18 +389,23 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="", help="Comma-separated subset of boss keys: " + ",".join(BOSSES))
     ap.add_argument("--runs", type=int, default=3, help="Runs per boss (default: 3)")
-    ap.add_argument("--baseline", action="store_true", help="Keep playerbots' hardcoded boss scripts enabled")
+    ap.add_argument(
+        "--mode",
+        choices=("llm", "baseline", "floor"),
+        default="llm",
+        help="llm=boss scripts OFF + notes.md; baseline=playerbots C++ scripts ON; floor=boss scripts OFF, no notes.md",
+    )
     args = ap.parse_args()
     keys = [k.strip() for k in args.only.split(",") if k.strip()] if args.only else list(BOSSES.keys())
 
     build.common("default", tests=False)
     build.server(test=True)
-    out_json = VAR / ("bench_boss_10_baseline.json" if args.baseline else "bench_boss_10_results.json")
+    out_json = VAR / f"bench_boss_10_{args.mode}.json"
     results = json.loads(out_json.read_text()) if out_json.exists() else {}
     with LlamaServer(slots=16):
         for k in keys:
             runs = [
-                run_boss(**BOSSES[k], baseline=args.baseline, run_idx=i + 1)
+                run_boss(**BOSSES[k], mode=args.mode, run_idx=i + 1)
                 for i in range(max(1, args.runs))
             ]
             kills = sum(1 for r in runs if r["killed"])
@@ -407,7 +414,7 @@ def main() -> int:
                 "era": BOSSES[k]["era"],
                 "level": BOSSES[k]["level"],
                 "party_size": len(RAID_10 if BOSSES[k].get("raid") else PARTY_5),
-                "baseline": args.baseline,
+                "mode": args.mode,
                 "runs": len(runs),
                 "kills": kills,
                 "median_dps": round(statistics.median(r["total_dps"] for r in runs), 1),
