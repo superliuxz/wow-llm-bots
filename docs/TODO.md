@@ -13,13 +13,18 @@ Items #1–#5 are done and verified live (2026-11-18).
 
 ## Next, in order
 
-- **Scorer redesign (blocks any hill-climbing run):** discriminator as the deciding score (a
-  human-vs-bot clip classifier retrained every round, 50% = indistinguishable), LLM judge and blind
-  ratings as checks, separate layers (body style, decision quality, social, progress guardrail),
-  hand metrics demoted to per-situation diagnostics (`jumps/min` and `idle %` not scored). Needs
-  first: 5 Hz movement traces for humans and bots, first-hit / loot / quest / cast events,
-  situation labels, `scikit-learn` + `numpy` (approved), and more human sessions (~30% of sessions
-  held out). First human session recorded 2026-11-19 (`Hele`, 112 min, 9,180 samples).
+- **Scorer redesign (blocks any hill-climbing run, `docs/plans/self-improving-loop.md`):** retire
+  the single 0–100 movement-average score and rebuild in layers: (A) hard gates (no stuck/death/
+  refusal loops, progress floor, human timing limits), (B) pairwise blind ranking with TrueSkill /
+  Bradley–Terry ratings anchored to human clips (`blind_rate.py` + LLM judge while it agrees),
+  (C) explainable MMO adversary suite + per-situation `scikit-learn` classifier as diagnostics only
+  (never a reward), (D) calibration meta-tests against held-out humans and known-bad bots (plain
+  playerbots, random-jumper, instant-reply), (E) anti-gaming caps & frozen held-out human set,
+  (F) recording parity (observer-view broadcast packets + explicit events, identical for humans and
+  bots). Build order: (1) recording parity + events, (2) pairwise harness + `blind_rate.py`,
+  (3) known-bad bots + scorer checks, (4) diagnostic classifier + adversary suite, (5) long-horizon
+  & group tells. First human session recorded 2026-11-19 (`Hele`, 112 min, 9,180 samples; need more
+  sessions/activities & ~30% held out).
 - **General / Say / Party chat + quest grouping (invite/accept):** wire `/1 General`, `/s Say`, and
   `/p Party` chat hooks into `LlmBrainChatScript` (currently whisper-only) and add group invite /
   accept / quest-teaming options so bots can respond to LFG calls in General chat and team up with
