@@ -253,13 +253,10 @@ void ClearStaleCombatTarget(Player* bot) {
   if (!bot) {
     return;
   }
-  const bool is_healer = PlayerbotAI::IsHeal(bot);
-  const bool casting = bot->IsNonMeleeSpellCast(false);
   Unit* sel = bot->GetSelectedUnit();
   if (ShouldClearStaleCombatTarget(bot->IsInCombat(), bot->IsAlive(),
                                    sel != nullptr, sel && sel->IsAlive(),
-                                   sel && bot->IsFriendlyTo(sel), sel == bot,
-                                   is_healer, casting)) {
+                                   sel && bot->IsFriendlyTo(sel))) {
     bot->SetSelection(ObjectGuid::Empty);
   }
   if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot)) {
@@ -268,8 +265,7 @@ void ClearStaleCombatTarget(Player* bot) {
         Unit* tgt = cur->Get();
         if (ShouldClearStaleCombatTarget(bot->IsInCombat(), bot->IsAlive(),
                                          tgt != nullptr, tgt && tgt->IsAlive(),
-                                         tgt && bot->IsFriendlyTo(tgt),
-                                         tgt == bot, is_healer, casting)) {
+                                         tgt && bot->IsFriendlyTo(tgt))) {
           cur->Set(nullptr);
         }
       }

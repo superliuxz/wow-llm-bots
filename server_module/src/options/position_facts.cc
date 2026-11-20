@@ -138,17 +138,9 @@ bool ShouldClearStaleCombatTarget(bool in_combat,
                                   bool bot_alive,
                                   bool has_target,
                                   bool target_alive,
-                                  bool target_friendly,
-                                  bool target_is_self,
-                                  bool bot_is_healer,
-                                  bool bot_casting) {
-  if (!in_combat || !bot_alive || !has_target) {
-    return false;
-  }
-  if (!target_alive && !target_friendly) {
-    return true;
-  }
-  return target_alive && target_is_self && !bot_is_healer && !bot_casting;
+                                  bool target_friendly) {
+  return in_combat && bot_alive && has_target && !target_alive &&
+         !target_friendly;
 }
 
 void RefreshFrom(const pb::Vec3& pos, PositionFacts* facts) {
