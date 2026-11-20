@@ -256,9 +256,14 @@ def reconstruct_trajectory(
     for r in rows:
         kind = r.get("kind")
         if kind == "event":
+            ev_name = str(r.get("event", ""))
+            # Raw human-only client input opcodes are preserved in the JSONL
+            # archive for analysis/imitation, never passed into parity clips.
+            if ev_name == "client_input":
+                continue
             raw_events.append({
                 "t_ms": int(r.get("t_ms", 0)),
-                "event": str(r.get("event", "")),
+                "event": ev_name,
                 "value": int(r.get("value", 0)),
             })
         elif kind == "chat":
