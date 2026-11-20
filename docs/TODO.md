@@ -27,7 +27,12 @@ Items #1–#5 are done and verified live (2026-11-18).
   (4) diagnostic classifier + adversary suite, (5) long-horizon & group tells, (6) switch
   `hill_climb.py` to the B rating and delete the composite score. First human session recorded
   2026-11-19 (`Hele`, 112 min, 9,180 samples); more sessions and activities needed, ideally a few
-  players, ~30 % held out.
+  players, ~30 % held out. Also in the plan (2026-11-19): your rating time sets the loop's pace
+  (batches of ~30 pairs, LLM judge re-checked every few rounds); recording parity rebuilds human
+  and bot movement into one form so the packet type can't leak; a situation labeller from the
+  events (step 1); human clips for every situation; keep a candidate only beyond the rating's
+  uncertainty plus a confirmation run; the biggest movement tells are outside the loop's edit
+  scope, so they come from reviewed fixes the scorer measures.
 - **General / Say / Party chat + quest grouping (invite/accept):** wire `/1 General`, `/s Say`, and
   `/p Party` chat hooks into `LlmBrainChatScript` (currently whisper-only) and add group invite /
   accept / quest-teaming options so bots can respond to LFG calls in General chat and team up with

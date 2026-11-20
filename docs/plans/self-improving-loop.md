@@ -79,7 +79,15 @@ town %, aggro reaction p50, whisper reply p50.
 - **Pairwise blind comparisons** (MineRL BASALT): compare candidate vs current version, with real
   human clips mixed in as anchors.
 - **TrueSkill / Bradley–Terry ratings with uncertainty:** read as how far the gap to the human
-  anchors has closed; count a change only when outside the uncertainty / bootstrapped 95% CI.
+  anchors has closed.
+- **Keep / revert rule:** a candidate is kept only when its rating beats the current version's
+  outside the uncertainty (bootstrapped 95 % CI), the A gates pass, and a confirmation run agrees;
+  otherwise it is reverted.
+- **Your time is the bottleneck, and the pace of the loop is set by it.** A rating with useful
+  error bars needs dozens of comparisons per candidate, and the LLM judge counts only while it
+  agrees with you. So you rate in batches (e.g. ~30 pairs at a sitting, a few times a week), the
+  LLM judge's agreement with you is re-checked every few rounds rather than every round, and the
+  loop runs a handful of rounds a week, not dozens a night.
 - **Third-person watching protocol** (Togelius & Yannakakis; Even et al. 2021): clips are judged by
   watching anonymized side-by-side **plots + event timelines** (not video, and not while playing
   alongside the bots) in **matched situations** (same activity, similar level band and zone type;
@@ -87,7 +95,8 @@ town %, aggro reaction p50, whisper reply p50.
 - **Judges:**
   - **You (`tools/bench/blind_rate.py`, to build in step 2):** ground truth (a few minutes of blind ratings per round).
   - **LLM judge:** provides rating volume, and counts **only while it agrees with your blind
-    ratings** (rank correlation checked every round).
+    ratings** (rank correlation re-checked every few rounds, on a fresh batch of your ratings) and
+    still catches the known-bad bots (D).
 - **Separate layers:** body (movement/combat clips), decisions (offline eval + loop detectors),
   and social (chat judged side-by-side against real human chat in the same situation, where overly
   polished/articulate LLM prose counts as a **tell**, not a virtue — per Generative Agents
@@ -143,8 +152,13 @@ still catches the known-bad variants above.
 - **Cap candidate evaluations** per hypothesis/round.
 - **Commit on KEEP** so a later `REVERT` never discards earlier kept changes; lock all
   measurement, trace, and soak config files in a read-only manifest outside the repo.
-- **Strict edit scope:** tuning rounds edit only humanization/prompt/identity files; bug fixes and
-  C++ game-judgment changes go separately (no hard-coded gameplay-judgment numbers in C++).
+- **Strict edit scope:** tuning rounds edit only humanization/prompt/identity files
+  (`human_pacing*`, `RULES.md`, identities); bug fixes and C++ game-judgment changes go separately
+  (no hard-coded gameplay-judgment numbers in C++).
+- **So the loop can't fix the biggest tells itself.** Most movement tells live in our walk code
+  and in playerbots' movement, outside that scope, and they need review. Expect the large gains
+  to come from reviewed fixes that the scorer *measures* (before and after, with the same B
+  ranking), and the overnight loop to tune what's within its scope.
 
 ### F. Recording parity (prerequisite for everything above)
 The server learns a human player's position and facing from client movement packets (every few
@@ -154,25 +168,36 @@ behaviour.
 - **Record humans and bots the exact same way:** from what the server **broadcasts to other
   players** (`MSG_MOVE_*` / `SMSG_MONSTER_MOVE` / splines + cast, damage, loot, quest, chat
   broadcasts), with each packet's own timestamp — which is also what a real observer sees.
-- Reconstruct observer-visible trajectories on a common timeline before feature extraction or
-  rendering clips.
-- Record **several sessions and activities** (questing, town, dungeons, chatting), ideally across
-  more than one human player, holding out ~30% of sessions for testing. One player's sessions
-  mostly measure closeness to that player.
+- **Hide the packet type, not only its timing.** A human's movement reaches other players as
+  `MSG_MOVE_*` heartbeats, a bot's as splines (`SMSG_MONSTER_MOVE`). Both are rebuilt into one
+  common form (position and facing at fixed times, events on the same timeline) before any
+  feature is extracted or any clip rendered, and nothing downstream sees which packets they came
+  from; otherwise a judge learns the packet type instead of the behaviour.
+- **Situation labels from the events.** A labeller cuts every trace into situations (travel, solo
+  fight, looting, in town, chatting, in a group / dungeon) from the recorded events and state, so
+  clips can be matched and diagnostics compared per situation; without it every clip is "mixed"
+  and nothing matches.
+- **Human clips for every situation.** Matched comparisons need you (and ideally a few other
+  players) in each situation: questing, fighting, looting, town, dungeons, chat. Today there is one
+  112-minute session. Record that spread over several sessions, holding out ~30 % for testing; one
+  player's sessions mostly measure closeness to that player.
 
 ---
 
 ## 4. Build order
 
-1. **Recording parity (F):** observer-view broadcast recording (5 Hz-equivalent movement from
-   broadcast packets/splines) + explicit timestamped events (`damage_taken`, `combat_start`,
-   `loot`, `quest_accept/turnin`, `cast_start`, `chat in/out` with `text_len`), identical for
-   humans and bots. First, so every session you play from then on counts.
+1. **Recording parity (F):** observer-view broadcast recording, rebuilt into one common
+   trajectory form for humans and bots (fixed-time position and facing, no packet type), +
+   explicit timestamped events (`damage_taken`, `combat_start`, `loot`, `quest_accept/turnin`,
+   `cast_start`, `chat in/out` with `text_len`) + the situation labeller. First, so every session
+   you play from then on counts; then record yourself across every situation (and friends if
+   possible).
 2. **Pairwise rating harness + `blind_rate.py` (B):** situation-segmented, metadata-stripped
    30–60 s clips rendered as plots/timelines; TrueSkill / Bradley–Terry ranking with human anchors
-   and uncertainty; interactive blind rating CLI + LLM judge agreement tracking.
+   and uncertainty; interactive blind rating CLI that works in batches + LLM judge agreement
+   tracking; the keep / revert rule (B).
 3. **Known-bad bots & scorer calibration suite (D):** held-out human vs current bots vs plain
-   playerbots / random-jumper / instant-reply meta-tests.
+   playerbots / random-jumper / instant-reply / same-loop walker meta-tests.
 4. **Adversary suite & diagnostic classifier (C):** per-situation `scikit-learn` classifier
    (diagnostic only) + published MMO anti-bot features (waypoint repetition, inter-action timing
    regularity, cross-session self-similarity, multi-bot clustering).
