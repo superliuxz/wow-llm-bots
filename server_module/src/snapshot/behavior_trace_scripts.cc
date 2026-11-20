@@ -9,17 +9,20 @@
 #include <string_view>
 #include <utility>
 
+#include "Creature.h"
 #include "Define.h"
 #include "Item.h"
 #include "ItemTemplate.h"
 #include "LootMgr.h"
 #include "ObjectGuid.h"
+#include "ObjectMgr.h"
 #include "Player.h"
 #include "PlayerScript.h"
 #include "Playerbots.h"
 #include "QuestDef.h"
 #include "Spell.h"
 #include "SpellInfo.h"
+#include "SpellMgr.h"
 #include "Unit.h"
 #include "UnitScript.h"
 #include "World.h"
@@ -33,7 +36,7 @@ namespace {
 // Resolves whether `player` should be traced and returns its role ("bot" or
 // "human"), or empty if not traced.
 std::string_view ResolveTracedRole(const TraceHookState& state,
-                                   Player* player) {
+                                   const Player* player) {
   if (!player) {
     return {};
   }
@@ -41,14 +44,15 @@ std::string_view ResolveTracedRole(const TraceHookState& state,
                          player->GetName())) {
     return "bot";
   }
-  if (state.observe_humans && GET_PLAYERBOT_AI(player) == nullptr) {
+  if (state.observe_humans &&
+      GET_PLAYERBOT_AI(const_cast<Player*>(player)) == nullptr) {
     return "human";
   }
   return {};
 }
 
 void EmitTraceEvent(const TraceHookState* state,
-                    Player* player,
+                    const Player* player,
                     std::string_view event_name,
                     std::string detail = {},
                     int64_t value = 0) {
@@ -75,6 +79,24 @@ void EmitTraceEvent(const TraceHookState* state,
   writer->WriteEvent(ev);
 }
 
+std::string SpellDisplayName(const SpellInfo* info) {
+  if (!info) {
+    return {};
+  }
+  const char* sname = info->SpellName[sWorld->GetDefaultDbcLocale()];
+  if (!sname || sname[0] == '\0') {
+    sname = info->SpellName[0];
+  }
+  return sname ? sname : "";
+}
+
+std::string ItemDisplayName(const Item* item) {
+  if (!item || !item->GetTemplate()) {
+    return {};
+  }
+  return item->GetTemplate()->Name1;
+}
+
 class LlmBrainTracePlayerScript : public PlayerScript {
  public:
   explicit LlmBrainTracePlayerScript(TraceHookState* state)
@@ -82,7 +104,16 @@ class LlmBrainTracePlayerScript : public PlayerScript {
             "LlmBrainTracePlayerScript",
             {PLAYERHOOK_ON_SPELL_CAST, PLAYERHOOK_ON_LOOT_ITEM,
              PLAYERHOOK_ON_BEFORE_LOOT_MONEY, PLAYERHOOK_ON_PLAYER_QUEST_ACCEPT,
-             PLAYERHOOK_ON_PLAYER_COMPLETE_QUEST}),
+             PLAYERHOOK_ON_PLAYER_COMPLETE_QUEST,
+             PLAYERHOOK_ON_QUEST_REWARD_ITEM,
+             PLAYERHOOK_ON_CREATURE_KILL_CREDIT,
+             PLAYERHOOK_ON_PLAYER_KILLED_BY_CREATURE,
+             PLAYERHOOK_ON_PLAYER_RESURRECT, PLAYERHOOK_ON_LEVEL_CHANGED,
+             PLAYERHOOK_ON_LEARN_SPELL, PLAYERHOOK_ON_PLAYER_LEARN_TALENTS,
+             PLAYERHOOK_ON_EQUIP, PLAYERHOOK_ON_UNEQUIP_ITEM,
+             PLAYERHOOK_ON_AFTER_MOVE_ITEM_FROM_INVENTORY,
+             PLAYERHOOK_ON_BEFORE_BUY_ITEM_FROM_VENDOR,
+             PLAYERHOOK_ON_LEARN_TAXI_NODE}),
         state_(state) {}
 
   void OnPlayerSpellCast(Player* player,
@@ -92,11 +123,7 @@ class LlmBrainTracePlayerScript : public PlayerScript {
       return;
     }
     const SpellInfo* info = spell->GetSpellInfo();
-    const char* sname = info->SpellName[sWorld->GetDefaultDbcLocale()];
-    if (!sname || sname[0] == '\0') {
-      sname = info->SpellName[0];
-    }
-    EmitTraceEvent(state_, player, "cast_start", sname ? sname : "",
+    EmitTraceEvent(state_, player, "cast_start", SpellDisplayName(info),
                    static_cast<int64_t>(info->Id));
   }
 
@@ -104,11 +131,7 @@ class LlmBrainTracePlayerScript : public PlayerScript {
                         Item* item,
                         uint32 count,
                         ObjectGuid /*lootguid*/) override {
-    std::string name;
-    if (item && item->GetTemplate()) {
-      name = item->GetTemplate()->Name1;
-    }
-    EmitTraceEvent(state_, player, "loot", std::move(name),
+    EmitTraceEvent(state_, player, "loot", ItemDisplayName(item),
                    static_cast<int64_t>(count));
   }
 
@@ -133,6 +156,98 @@ class LlmBrainTracePlayerScript : public PlayerScript {
     }
     EmitTraceEvent(state_, player, "quest_turnin", quest->GetTitle(),
                    static_cast<int64_t>(quest->GetQuestId()));
+  }
+
+  void OnPlayerQuestRewardItem(Player* player,
+                               Item* item,
+                               uint32 count) override {
+    EmitTraceEvent(state_, player, "quest_reward", ItemDisplayName(item),
+                   static_cast<int64_t>(count));
+  }
+
+  void OnPlayerCreatureKillCredit(Player* player, Creature* killed) override {
+    if (!player || !killed) {
+      return;
+    }
+    EmitTraceEvent(state_, player, "mob_kill", killed->GetName(),
+                   static_cast<int64_t>(killed->GetLevel()));
+  }
+
+  void OnPlayerKilledByCreature(Creature* killer, Player* killed) override {
+    if (!killed) {
+      return;
+    }
+    EmitTraceEvent(state_, killed, "died", killer ? killer->GetName() : "",
+                   killer ? static_cast<int64_t>(killer->GetLevel()) : 0);
+  }
+
+  void OnPlayerResurrect(Player* player,
+                         float restore_percent,
+                         bool& /*applySickness*/) override {
+    EmitTraceEvent(state_, player, "resurrect", "",
+                   static_cast<int64_t>(restore_percent));
+  }
+
+  void OnPlayerLevelChanged(Player* player, uint8 /*oldlevel*/) override {
+    if (!player) {
+      return;
+    }
+    EmitTraceEvent(state_, player, "level_up", "",
+                   static_cast<int64_t>(player->GetLevel()));
+  }
+
+  void OnPlayerLearnSpell(Player* player, uint32 spell_id) override {
+    const SpellInfo* info = sSpellMgr->GetSpellInfo(spell_id);
+    EmitTraceEvent(state_, player, "spell_learn", SpellDisplayName(info),
+                   static_cast<int64_t>(spell_id));
+  }
+
+  void OnPlayerLearnTalents(Player* player,
+                            uint32 talent_id,
+                            uint32 talent_rank,
+                            uint32 /*spellid*/) override {
+    EmitTraceEvent(state_, player, "talent_learn", std::to_string(talent_id),
+                   static_cast<int64_t>(talent_rank));
+  }
+
+  void OnPlayerEquip(Player* player,
+                     Item* it,
+                     uint8 /*bag*/,
+                     uint8 /*slot*/,
+                     bool /*update*/) override {
+    EmitTraceEvent(state_, player, "item_equip", ItemDisplayName(it),
+                   it ? static_cast<int64_t>(it->GetEntry()) : 0);
+  }
+
+  void OnPlayerUnequip(Player* player, Item* it) override {
+    EmitTraceEvent(state_, player, "item_unequip", ItemDisplayName(it),
+                   it ? static_cast<int64_t>(it->GetEntry()) : 0);
+  }
+
+  void OnPlayerAfterMoveItemFromInventory(Player* player,
+                                          Item* it,
+                                          uint8 /*bag*/,
+                                          uint8 /*slot*/,
+                                          bool /*update*/) override {
+    EmitTraceEvent(state_, player, "item_remove", ItemDisplayName(it),
+                   it ? static_cast<int64_t>(it->GetCount()) : 0);
+  }
+
+  void OnPlayerBeforeBuyItemFromVendor(Player* player,
+                                       ObjectGuid /*vendorguid*/,
+                                       uint32 /*vendorslot*/,
+                                       uint32& item_id,
+                                       uint8 count,
+                                       uint8 /*bag*/,
+                                       uint8 /*slot*/) override {
+    const ItemTemplate* proto = sObjectMgr->GetItemTemplate(item_id);
+    EmitTraceEvent(state_, player, "vendor_buy", proto ? proto->Name1 : "",
+                   static_cast<int64_t>(count));
+  }
+
+  void OnPlayerLearnTaxiNode(Player const* player, uint32 node_id) override {
+    EmitTraceEvent(state_, player, "taxi_learn", "",
+                   static_cast<int64_t>(node_id));
   }
 
  private:
