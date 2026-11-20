@@ -99,14 +99,15 @@ AttackStepAction CheckAttackStep(bool in_combat,
 // would stall Playerbots' combat engine from acquiring a live enemy:
 //  - a dead non-friendly target (preserves dead friendly targets for combat
 //    resurrection), or
-//  - for a non-healer that isn't mid-cast, a friendly/self target left over
-//    from pre-pull buffing or conjuring (e.g. Arcane Brilliance / Mana Gem /
-//    Soulstone).
+//  - for a non-healer that isn't mid-cast, a self-target left over from
+//    pre-pull buffing or conjuring (preserves friendly ally targets such as
+//    mid-fight Soulstone on the main tank, Innervate, or Hand of Protection).
 bool ShouldClearStaleCombatTarget(bool in_combat,
                                   bool bot_alive,
                                   bool has_target,
                                   bool target_alive,
                                   bool target_friendly = false,
+                                  bool target_is_self = false,
                                   bool bot_is_healer = false,
                                   bool bot_casting = false);
 
