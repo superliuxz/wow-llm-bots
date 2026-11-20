@@ -114,9 +114,17 @@ TraceSample TraceSampleFromSnapshot(const pb::Snapshot& snapshot,
   out.orientation = snapshot.base.where.facing;
   out.moving = moving;
   out.jumping = jumping;
+  out.mounted = snapshot.base.self.mounted;
+  out.swimming = snapshot.base.self.swimming;
+  out.on_taxi = snapshot.base.self.in_flight;
   out.in_combat = snapshot.base.self.in_combat;
   out.dead = snapshot.base.self.state == pb::Self::DEAD_BODY ||
              snapshot.base.self.state == pb::Self::GHOST;
+  out.bag_free_slots = snapshot.base.self.indicators.bag_free_slots.value_or(0);
+  if (snapshot.ext.pet && snapshot.ext.pet->pet &&
+      !snapshot.ext.pet->pet->dead && snapshot.ext.pet->pet->health_pct) {
+    out.pet_hp_pct = *snapshot.ext.pet->pet->health_pct;
+  }
   out.level = snapshot.base.self.unit.level.value_or(0);
   out.xp = snapshot.base.self.xp;
   if (snapshot.base.self.health_max > 0) {
@@ -188,10 +196,24 @@ std::string FormatTraceSample(const TraceSample& s) {
        s.moving ? "true" : "false",
        ",\"jumping\":",
        s.jumping ? "true" : "false",
+       ",\"mounted\":",
+       s.mounted ? "true" : "false",
+       ",\"swimming\":",
+       s.swimming ? "true" : "false",
+       ",\"sitting\":",
+       s.sitting ? "true" : "false",
+       ",\"on_taxi\":",
+       s.on_taxi ? "true" : "false",
        ",\"in_combat\":",
        s.in_combat ? "true" : "false",
        ",\"dead\":",
        s.dead ? "true" : "false",
+       ",\"cc_mask\":",
+       base::StringPrintf("%u", s.cc_mask),
+       ",\"bag_free_slots\":",
+       base::StringPrintf("%u", s.bag_free_slots),
+       ",\"pet_hp_pct\":",
+       base::StringPrintf("%.1f", s.pet_hp_pct),
        ",\"level\":",
        base::StringPrintf("%u", s.level),
        ",\"xp\":",

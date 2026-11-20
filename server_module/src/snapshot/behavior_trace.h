@@ -37,8 +37,15 @@ struct TraceSample {
   float orientation = 0.0f;
   bool moving = false;
   bool jumping = false;
+  bool mounted = false;
+  bool swimming = false;
+  bool sitting = false;
+  bool on_taxi = false;
   bool in_combat = false;
   bool dead = false;
+  uint32_t cc_mask = 0;
+  uint32_t bag_free_slots = 0;
+  float pet_hp_pct = -1.0f;
   uint32_t level = 0;
   uint32_t xp = 0;
   float hp_pct = 0.0f;

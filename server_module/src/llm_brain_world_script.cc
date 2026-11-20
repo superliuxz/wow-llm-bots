@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "Bag.h"
 #include "Creature.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
@@ -22,6 +23,7 @@
 #include "Log.h"
 #include "Map.h"
 #include "ObjectAccessor.h"
+#include "Pet.h"
 #include "Player.h"
 #include "Playerbots.h"
 #include "SharedDefines.h"
@@ -1149,8 +1151,32 @@ class LlmBrainWorldScript : public WorldScript {
     s.orientation = player->GetOrientation();
     s.moving = player->isMoving();
     s.jumping = player->HasUnitMovementFlag(MOVEMENTFLAG_FALLING);
+    s.mounted = player->IsMounted();
+    s.swimming = player->IsInWater();
+    s.sitting = player->getStandState() != UNIT_STAND_STATE_STAND;
+    s.on_taxi = player->IsInFlight();
     s.in_combat = player->IsInCombat();
     s.dead = !player->IsAlive();
+    s.cc_mask = ControlMask(player);
+    uint32_t free_slots = 0;
+    for (uint8_t slot = INVENTORY_SLOT_ITEM_START;
+         slot < INVENTORY_SLOT_ITEM_END; ++slot) {
+      if (!player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot)) {
+        ++free_slots;
+      }
+    }
+    for (uint8_t i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END;
+         ++i) {
+      if (const Bag* bag = player->GetBagByPos(i); IsGeneralBag(bag)) {
+        free_slots += bag->GetFreeSlots();
+      }
+    }
+    s.bag_free_slots = free_slots;
+    if (Pet* pet = player->GetPet();
+        pet && pet->IsAlive() && pet->GetMaxHealth() > 0) {
+      s.pet_hp_pct = 100.0f * static_cast<float>(pet->GetHealth()) /
+                     static_cast<float>(pet->GetMaxHealth());
+    }
     s.level = player->GetLevel();
     s.xp = player->GetUInt32Value(PLAYER_XP);
     if (player->GetMaxHealth() > 0) {
