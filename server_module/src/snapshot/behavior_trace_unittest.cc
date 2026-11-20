@@ -31,14 +31,30 @@ TEST(BehaviorTraceTest, FormatsSampleAndChatWithJsonEscaping) {
 
   const TraceSample s = TraceSampleFromSnapshot(
       snap, "bot", /*map_id=*/1, /*moving=*/true, /*jumping=*/false,
-      /*in_town=*/false);
+      /*in_town=*/false, /*in_group=*/true, /*in_dungeon=*/true);
   const std::string line = FormatTraceSample(s);
   EXPECT_NE(line.find("\"kind\":\"sample\""), std::string::npos);
   EXPECT_NE(line.find("\"role\":\"bot\""), std::string::npos);
   EXPECT_NE(line.find("\"name\":\"Loada\""), std::string::npos);
+  EXPECT_NE(line.find("\"in_group\":true"), std::string::npos);
+  EXPECT_NE(line.find("\"in_dungeon\":true"), std::string::npos);
   EXPECT_NE(line.find("\"casting\":\"Smite\""), std::string::npos);
   EXPECT_NE(line.find("\"target\":\"Mottled Boar\""), std::string::npos);
   EXPECT_NE(line.find("\"attackers\":1"), std::string::npos);
+
+  TraceEvent ev;
+  ev.time_ms = 1795064002000LL;
+  ev.monotonic_us = 323456;
+  ev.role = "human";
+  ev.name = "Hero";
+  ev.event = "damage_taken";
+  ev.detail = "Mottled Boar";
+  ev.value = 17;
+  const std::string ev_line = FormatTraceEvent(ev);
+  EXPECT_NE(ev_line.find("\"kind\":\"event\""), std::string::npos);
+  EXPECT_NE(ev_line.find("\"event\":\"damage_taken\""), std::string::npos);
+  EXPECT_NE(ev_line.find("\"detail\":\"Mottled Boar\""), std::string::npos);
+  EXPECT_NE(ev_line.find("\"value\":17"), std::string::npos);
 
   TraceChat c;
   c.time_ms = 1795064001000LL;

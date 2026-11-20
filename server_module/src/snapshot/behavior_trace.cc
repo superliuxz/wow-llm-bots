@@ -95,7 +95,9 @@ TraceSample TraceSampleFromSnapshot(const pb::Snapshot& snapshot,
                                     uint32_t map_id,
                                     bool moving,
                                     bool jumping,
-                                    bool in_town) {
+                                    bool in_town,
+                                    bool in_group,
+                                    bool in_dungeon) {
   TraceSample out;
   out.time_ms = snapshot.time_ms;
   out.monotonic_us = snapshot.monotonic_us;
@@ -104,6 +106,8 @@ TraceSample TraceSampleFromSnapshot(const pb::Snapshot& snapshot,
   out.map_id = map_id;
   out.zone = snapshot.base.where.zone;
   out.in_town = in_town;
+  out.in_group = in_group;
+  out.in_dungeon = in_dungeon;
   out.x = snapshot.base.where.position.x;
   out.y = snapshot.base.where.position.y;
   out.z = snapshot.base.where.position.z;
@@ -153,6 +157,10 @@ std::string FormatTraceSample(const TraceSample& s) {
        JsonEscape(s.zone),
        ",\"in_town\":",
        s.in_town ? "true" : "false",
+       ",\"in_group\":",
+       s.in_group ? "true" : "false",
+       ",\"in_dungeon\":",
+       s.in_dungeon ? "true" : "false",
        ",\"x\":",
        base::StringPrintf("%.2f", s.x),
        ",\"y\":",
@@ -200,6 +208,18 @@ std::string FormatTraceChat(const TraceChat& c) {
        ",\"text_len\":", base::StringPrintf("%zu", len), "}"});
 }
 
+std::string FormatTraceEvent(const TraceEvent& e) {
+  return base::StrCat(
+      {"{\"kind\":\"event\",\"t_ms\":",
+       base::StringPrintf("%lld", static_cast<long long>(e.time_ms)),
+       ",\"mono_us\":",
+       base::StringPrintf("%lld", static_cast<long long>(e.monotonic_us)),
+       ",\"role\":", JsonEscape(e.role), ",\"name\":", JsonEscape(e.name),
+       ",\"event\":", JsonEscape(e.event), ",\"detail\":", JsonEscape(e.detail),
+       ",\"value\":",
+       base::StringPrintf("%lld", static_cast<long long>(e.value)), "}"});
+}
+
 BehaviorTraceWriter::BehaviorTraceWriter(std::string root_dir,
                                          uint64_t max_file_bytes)
     : root_dir_(std::move(root_dir)), max_file_bytes_(max_file_bytes) {
@@ -233,6 +253,14 @@ bool BehaviorTraceWriter::WriteChat(const TraceChat& chat) {
     return false;
   }
   return Enqueue(chat.role, chat.name, chat.time_ms, FormatTraceChat(chat));
+}
+
+bool BehaviorTraceWriter::WriteEvent(const TraceEvent& event) {
+  if (!enabled()) {
+    return false;
+  }
+  return Enqueue(event.role, event.name, event.time_ms,
+                 FormatTraceEvent(event));
 }
 
 void BehaviorTraceWriter::Flush() {

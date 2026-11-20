@@ -161,6 +161,8 @@ def _run_once(
     minutes: float,
     human_dir: pathlib.Path | None,
     use_judge: bool,
+    baseline_trace_dir: pathlib.Path | None = None,
+    blind_ratings_path: pathlib.Path | None = None,
 ) -> dict:
     scenario = SCENARIOS[scenario_name]
     trace_dir = VAR / "soak_traces"
@@ -217,11 +219,13 @@ def _run_once(
             do_ms = []
             invalid_plans = 0
             llm_errors = 0
+            max_repeated_refusals = 0
             for bot_dir in sorted(bots_dir.iterdir()):
                 ev_dir = bot_dir / "events"
                 if not ev_dir.is_dir():
                     continue
                 decs = []
+                refusal_counts: dict[str, int] = {}
                 for f in sorted(ev_dir.glob("*.jsonl")):
                     for line in f.read_text().splitlines():
                         if not line.strip():
@@ -234,6 +238,13 @@ def _run_once(
                             invalid_plans += 1
                         if d.get("first_line_ms", 0) > 0:
                             do_ms.append(float(d["first_line_ms"]))
+                        for w in d.get("wake_reasons", []):
+                            if isinstance(w, str) and w.startswith("error:"):
+                                refusal_counts[w] = refusal_counts.get(w, 0) + 1
+                if refusal_counts:
+                    max_repeated_refusals = max(
+                        max_repeated_refusals, max(refusal_counts.values())
+                    )
                 decisions_by_bot[bot_dir.name] = decs
 
             total_decs = sum(len(v) for v in decisions_by_bot.values())
@@ -257,11 +268,14 @@ def _run_once(
                 "do_p95_ms": p95_do,
                 "llm_errors": llm_errors,
                 "invalid_plans": invalid_plans,
+                "max_repeated_refusals": max_repeated_refusals,
             }
             res = soak_scorer.score_soak(
                 trace_dir,
                 run_stats=run_stats,
                 human_dir=human_dir,
+                baseline_trace_dir=baseline_trace_dir,
+                blind_ratings_path=blind_ratings_path,
                 use_judge=use_judge,
             )
             res["scenario"] = scenario_name
@@ -288,34 +302,31 @@ def _aggregate_results(results: list[dict]) -> dict:
     if len(results) == 1:
         return results[0]
     agg = dict(results[-1])
-    agg["score"] = round(statistics.mean(r["score"] for r in results), 2)
-    agg["dist_score"] = round(statistics.mean(r["dist_score"] for r in results), 2)
+    ratings = [r["rating"] for r in results if r.get("rating") is not None]
+    ci_lows = [r["ci_low"] for r in results if r.get("ci_low") is not None]
+    ci_highs = [r["ci_high"] for r in results if r.get("ci_high") is not None]
+    agg["rating"] = round(statistics.mean(ratings), 1) if ratings else None
+    agg["ci_low"] = round(min(ci_lows), 1) if ci_lows else None
+    agg["ci_high"] = round(max(ci_highs), 1) if ci_highs else None
     agg["guardrails_ok"] = all(r["guardrails_ok"] for r in results)
-    agg["run_scores"] = [r["score"] for r in results]
+    agg["run_ratings"] = [r.get("rating") for r in results]
     agg["scenarios"] = [r.get("scenario", "soak") for r in results]
-
-    # Average per-metric bot values and scores across all runs (skipping None
-    # when a metric had no observations in a run, e.g. whispers).
-    all_keys = sorted({k for r in results for k in r.get("per_metric", {})})
-    per_metric = {}
-    for k in all_keys:
-        vals = [r["per_metric"][k] for r in results if k in r.get("per_metric", {})]
-        bot_vals = [v["bot"] for v in vals if v.get("bot") is not None]
-        target_vals = [v["target"] for v in vals if v.get("target") is not None]
-        per_metric[k] = {
-            "bot": round(statistics.mean(bot_vals), 3) if bot_vals else None,
-            "target": round(statistics.mean(target_vals), 3) if target_vals else None,
-            "score": round(statistics.mean(v["score"] for v in vals), 1),
-        }
-    agg["per_metric"] = per_metric
-    if per_metric:
-        agg["worst_metric"] = min(per_metric.items(), key=lambda kv: kv[1]["score"])[0]
+    if "ranking" in agg:
+        agg["ranking"] = dict(agg["ranking"])
+        agg["ranking"]["beats_current_outside_ci"] = all(
+            bool(r.get("ranking", {}).get("beats_current_outside_ci"))
+            for r in results
+        )
 
     # Aggregate progress across runs.
     agg["progress"] = {
         "total_xp": sum(r["progress"]["total_xp"] for r in results),
         "xp_per_hour": round(
             statistics.mean(r["progress"]["xp_per_hour"] for r in results), 1
+        ),
+        "quests_completed": sum(r["progress"].get("quests_completed", 0) for r in results),
+        "quests_per_hour": round(
+            statistics.mean(r["progress"].get("quests_per_hour", 0.0) for r in results), 2
         ),
         "deaths": sum(r["progress"]["deaths"] for r in results),
         "moved_bots": sum(r["progress"]["moved_bots"] for r in results),
@@ -331,6 +342,8 @@ def run_soak(
     runs: int = 2,
     score: bool = False,
     human_dir: pathlib.Path | None = None,
+    baseline_trace_dir: pathlib.Path | None = None,
+    blind_ratings_path: pathlib.Path | None = None,
     use_judge: bool = False,
     verify_hash: pathlib.Path | None = None,
     suite: str = "varied",
@@ -352,13 +365,16 @@ def run_soak(
                 minutes=minutes,
                 human_dir=human_dir,
                 use_judge=use_judge,
+                baseline_trace_dir=baseline_trace_dir,
+                blind_ratings_path=blind_ratings_path,
             )
             results.append(res)
             st = res["run_stats"]
             p = res["progress"]
+            rat_s = f"{res['rating']:.1f}" if res.get("rating") is not None else "unrated"
             say(
                 f"soak summary [{sc_name}] ({st['elapsed_min']:.1f} min, {ONLINE} bots): "
-                f"score={res['score']:.2f}, decisions={st['decisions']}, "
+                f"rating={rat_s}, decisions={st['decisions']}, "
                 f"max_wakes/min/bot={st['max_wakes_per_min']:.1f}, "
                 f"do_p50={st['do_p50_ms']:.0f}ms, do_p95={st['do_p95_ms']:.0f}ms, "
                 f"errors={st['llm_errors']}, invalid={st['invalid_plans']}, "

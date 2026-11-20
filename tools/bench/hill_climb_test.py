@@ -20,12 +20,20 @@ class HillClimbSafeguardsTest(unittest.TestCase):
         rels = {p.relative_to(ROOT).as_posix() for p in hill_climb._locked_files()}
         for required in (
             "tools/bench/soak_scorer.py",
-            "tools/bench/human_metrics.py",
+            "tools/bench/trace_parity.py",
+            "tools/bench/pairwise_ranker.py",
+            "tools/bench/adversary_suite.py",
+            "tools/bench/population_metrics.py",
+            "tools/bench/known_bad_bots.py",
+            "tools/bench/scorer_calibration.py",
+            "tools/bench/blind_rate.py",
             "tools/bench/hill_climb.py",
             "tools/wlblib/cases/soak.py",
             "tools/wlblib/testing.py",
             "server_module/src/snapshot/behavior_trace.h",
             "server_module/src/snapshot/behavior_trace.cc",
+            "server_module/src/snapshot/behavior_trace_scripts.h",
+            "server_module/src/snapshot/behavior_trace_scripts.cc",
             "server_module/src/snapshot/snapshot_builder.cc",
             "server_module/src/snapshot/snapshot_schedule.h",
             "server_module/src/snapshot/snapshot_schedule.cc",
@@ -136,21 +144,10 @@ class HillClimbSafeguardsTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(len(fails), 2)
 
-    def test_scorer_missing_metrics_score_zero_and_no_silent_human_fallback(self):
-        bot_summary = {"path_straightness": 0.82, "stops_per_min": 1.5}
-        human_summary = {"characters": 1, "path_straightness": 0.82}
-        score, per_metric, mode = soak_scorer._score_distributions(
-            bot_summary, human_summary, human_sample_count=soak_scorer.MIN_HUMAN_SAMPLES
-        )
-        self.assertEqual(mode, "human_baseline")
-        self.assertEqual(per_metric["path_straightness"]["score"], 100.0)
-        # stops_per_min had no human data -> must score 0, not silently use fallback.
-        self.assertEqual(per_metric["stops_per_min"]["score"], 0.0)
-        self.assertEqual(per_metric["stops_per_min"]["reason"], "no_human_data")
-        # whisper_reply_p50_s was missing -> must score 0, not be dropped.
-        self.assertIn("whisper_reply_p50_s", per_metric)
-        self.assertEqual(per_metric["whisper_reply_p50_s"]["score"], 0.0)
-        self.assertLess(score, 50.0)
+    def test_retired_composite_score_is_removed(self):
+        self.assertFalse(hasattr(soak_scorer, "FALLBACK_TARGETS"))
+        self.assertFalse(hasattr(soak_scorer, "METRIC_WEIGHTS"))
+        self.assertFalse(hasattr(soak_scorer, "_score_distributions"))
 
 
 if __name__ == "__main__":

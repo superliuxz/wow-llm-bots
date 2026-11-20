@@ -51,9 +51,9 @@ class SoakSuitesTest(unittest.TestCase):
                      "invalid_plans": 0, "max_wakes_per_min": 5.0, "do_p95_ms": 100.0}
             r1 = soak_scorer.score_soak(td, run_stats=stats)
             r2 = soak_scorer.score_soak(td, run_stats=stats)
-            self.assertIsNone(r1["per_metric"]["whisper_reply_p50_s"]["bot"])
+            self.assertIsNone(r1["rating"])
             agg = soak_case._aggregate_results([r1, r2])
-            self.assertIsNone(agg["per_metric"]["whisper_reply_p50_s"]["bot"])
+            self.assertIsNone(agg["rating"])
             self.assertTrue(agg["guardrails_ok"])
 
     def test_empty_soak_fails_guardrails(self):

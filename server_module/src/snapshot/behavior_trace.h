@@ -29,6 +29,8 @@ struct TraceSample {
   uint32_t map_id = 0;
   std::string zone;
   bool in_town = false;
+  bool in_group = false;
+  bool in_dungeon = false;
   float x = 0.0f;
   float y = 0.0f;
   float z = 0.0f;
@@ -58,17 +60,33 @@ struct TraceChat {
   size_t text_len = 0;    // Original byte length when `text` is redacted.
 };
 
+// Explicit timestamped gameplay event recorded identically for humans and bots
+// (docs/plans/self-improving-loop.md, section F).
+struct TraceEvent {
+  int64_t time_ms = 0;
+  int64_t monotonic_us = 0;
+  std::string role;  // "human" or "bot"
+  std::string name;
+  std::string event;   // "damage_taken", "combat_start", "combat_end",
+                       // "cast_start", "loot", "quest_accept", "quest_turnin"
+  std::string detail;  // Optional event detail (e.g. spell name or item).
+  int64_t value = 0;   // Optional numeric payload (e.g. damage, quest id).
+};
+
 // Extracts a `TraceSample` from a built `Snapshot` (used for bots).
 TraceSample TraceSampleFromSnapshot(const wlb::snapshot::Snapshot& snapshot,
                                     std::string_view role,
                                     uint32_t map_id,
                                     bool moving,
                                     bool jumping,
-                                    bool in_town);
+                                    bool in_town,
+                                    bool in_group = false,
+                                    bool in_dungeon = false);
 
-// Serializes a sample or chat event to a single JSONL line (no trailing '\n').
+// Serializes a sample, chat, or gameplay event to a single JSONL line.
 std::string FormatTraceSample(const TraceSample& sample);
 std::string FormatTraceChat(const TraceChat& chat);
+std::string FormatTraceEvent(const TraceEvent& event);
 
 // Appends unified JSONL traces under `<root>/<role>/<name>/<YYYY-MM-DD>.jsonl`.
 // Enqueues formatted lines without disk I/O on the caller (world) thread and
@@ -89,6 +107,7 @@ class BehaviorTraceWriter {
 
   bool WriteSample(const TraceSample& sample);
   bool WriteChat(const TraceChat& chat);
+  bool WriteEvent(const TraceEvent& event);
 
   // Blocks until all currently queued lines have been written to disk.
   void Flush();
