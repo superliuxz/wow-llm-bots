@@ -42,15 +42,16 @@ town %, aggro reaction p50, whisper reply p50.
    ranks agents from pairs of videos judged by people, fed into TrueSkill (a rating plus its
    uncertainty), with human players as reference entries; humans outranked every agent.
    Generative Agents ("Smallville") ranked believability the same way.
-3. **Human judges are noisy, and humans don't score 100 %.** BotPrize (Unreal Tournament): the best
-   bots reached ~52 % "human", and human players weren't judged fully human either. Judges who
-   watch (third person) judge better than judges who play (Togelius & Yannakakis; Mario AI Turing
-   track); results shift with protocol, context and judge expertise (Pacheco 2018; Even et al.
+3. **Human judges are noisy, and humans don't score 100 %.** BotPrize (Unreal Tournament, 2012): the
+   winning bots were rated ~52 % "human", above the human players' own average of 41.4 %. Togelius
+   & Yannakakis argue for judges who watch (third person) over judges who play, whose judgment
+   is distorted by taking part (Mario AI Turing track); results shift with protocol, context and judge expertise (Pacheco 2018; Even et al.
    2021; NTT); gamers spotted bot videos only 54 % of the time (modl.ai / Riot).
 4. **Real bot detection works over hours and across characters.** On WoW, server-side detection
    flags movement paths taken again and again (Mitterhofer et al. 2009); input timing gives bots
-   away (Gianvecchio et al.). On Lineage, Aion and Blade & Soul: self-similarity across sessions,
-   the intervals between actions (97 % on Aion), chat patterns, party play, social networks, and
+   away (Gianvecchio et al.). On Lineage, Aion and Blade & Soul: self-similarity, how regularly a
+   player repeats the same activities (AUC 0.83–0.96 alone, NDSS 2016); the intervals between
+   actions (97 % on Aion); chat patterns, party play, social networks, and
    trajectories clustered across many players (NCSoft, Lineage W). A 60-second clip shows none of
    this.
 5. **A judge that "passes" a bot proves nothing unless it is shown to catch bad ones.** The power of
@@ -84,7 +85,7 @@ town %, aggro reaction p50, whisper reply p50.
   alongside the bots) in **matched situations** (same activity, similar level band and zone type;
   names, level, zone, gear, class, and wall-clock session time stripped).
 - **Judges:**
-  - **You (`tools/bench/blind_rate.py`):** ground truth (a few minutes of blind ratings per round).
+  - **You (`tools/bench/blind_rate.py`, to build in step 2):** ground truth (a few minutes of blind ratings per round).
   - **LLM judge:** provides rating volume, and counts **only while it agrees with your blind
     ratings** (rank correlation checked every round).
 - **Separate layers:** body (movement/combat clips), decisions (offline eval + loop detectors),
@@ -105,7 +106,7 @@ anti-bot literature ("would a real MMO's detector flag it?") to diagnose *what t
   - Server-side waypoint / route repetition (Mitterhofer et al., WoW).
   - Inter-action timing regularity / entropy ("Battle of Botcraft", Gianvecchio et al., WoW;
     NCSoft Aion 2023 action-interval detector).
-  - Self-similarity across sessions (Lee et al., NCSoft).
+  - Self-similarity: how regularly a player repeats the same activities (Lee et al., NDSS 2016).
   - Collective / multi-bot trajectory clustering and habit similarity across bots vs across humans
     (NCSoft Lineage W 2024).
   - Chat phrasing repetition, party-play patterns, and whisper delay vs. message length.
@@ -123,7 +124,8 @@ Build a labelled calibration set:
   (3) an **instant-reply** bot (0.4 s whispers), (4) a bot that walks the same loop
 
 Before the scorer is allowed to drive any tuning loop, it must pass all three checks:
-1. **Correct ranking:** humans > current bots > plain playerbots / random-jumper / instant-reply.
+1. **Correct ranking:** humans > current bots > plain playerbots / random-jumper / instant-reply /
+   same-loop walker.
 2. **Repeatability:** scoring the same bot twice yields consistent ratings within uncertainty.
 3. **Human agreement:** automatic rankings agree with your `blind_rate.py` ratings, and a
    known-better change measurably moves the rating.
@@ -203,10 +205,12 @@ changes.
 - **One command:** `tools/wlb test soak --suite varied --minutes 5 --runs 2 --score` (scorer:
   `tools/bench/soak_scorer.py` + `tools/bench/human_metrics.py`; `--judge` adds the LLM judge on
   paired clips). Its guardrails are the start of the A gates.
-- **Tamper check:** `tools/bench/hill_climb.py lock-scorer` records SHA-256s of the scorer,
-  `tools/wlblib/cases/soak.py`, `snapshot/behavior_trace.{h,cc}`, the trace call sites in
-  `llm_brain_world_script.cc` and `config/tests/soak_*.llm-brain.overrides` in
-  `var/scorer.sha256`, checked on every run. For unattended runs, copy the scorer and the human
+- **Tamper check:** `tools/bench/hill_climb.py lock-scorer` writes a read-only SHA-256 manifest
+  (`LOCKED_PATTERNS` in `hill_climb.py`): the scorer, `hill_climb.py` itself, the soak case and
+  `tools/wlblib/testing.py`, `server_module/src/snapshot/behavior_trace.{h,cc}`, the snapshot
+  builder and schedule, `llm_brain_world_script.cc`, the module's config parsing and `.conf.dist`,
+  `config/llm-brain.overrides`, `config/playerbots.overrides` and
+  `config/tests/soak*.llm-brain.overrides`; every run checks it. For unattended runs, copy the scorer and the human
   traces to a read-only directory outside the repo and pass `--human-dir`.
 - **Recording the human baseline** (today's trace format, replaced by F):
   ```ini
@@ -224,10 +228,12 @@ changes.
   guardrails pass, the score beats the best by `max(min_delta, 2σ)` and a confirmation run agrees;
   every keep also runs `--suite heldout`. Guardrails include an XP/h floor (default 3000 XP/h) and
   at most 2 deaths per run.
-- **What may be changed, and how:** numbers (reaction delays, typo rate, chattiness, skill sliders)
-  by random / Bayesian search over a config knob; `content/RULES.md`, identities and prompt layout
-  by the agent, scored on soak + `tools/wlb test eval`; code (movement jitter, turning, pauses,
-  playerbots settings) by the agent with `tools/wlb check` passing. Most tells live in code.
+- **What a scored round may change** (`ALLOWED_EDIT_GLOBS` in `hill_climb.py`, enforced):
+  `server_module/src/options/human_pacing*` (pacing code and its numbers: reaction delays, typo
+  rate, chattiness, movement jitter, pauses), `content/RULES.md` and `content/identities/*`.
+  Numbers are cheaper to tune by random / Bayesian search over a knob than by an agent. Anything
+  else (other movement code, playerbots settings, bug fixes) is a separate reviewed change, never
+  part of a scored round, even though many tells live there.
 
 ---
 
@@ -252,7 +258,9 @@ changes.
 - Gianvecchio et al., "Battle of Botcraft" (WoW timing irregularity):
   https://www.eecis.udel.edu/~hnw/paper/hop.pdf
 - NCSoft & Korea University: Lineage W trajectory clustering (2024) https://arxiv.org/abs/2501.10461;
-  multi-game self-similarity (Lee et al. 2016) https://arxiv.org/abs/1606.01426; Aion action
+  self-similarity in Lineage, Aion and Blade & Soul (Lee et al., NDSS 2016)
+  https://seal.cs.ucf.edu/doc/ndss16.pdf; multimodal bot detection on behavioural characteristics
+  (Kang et al. 2016) https://arxiv.org/abs/1606.01426; Aion action
   intervals (2023) https://www.koreascience.or.kr/article/JAKO202364360080927.pdf; chatting patterns
   https://scholar.korea.ac.kr/item/070dfc78-7260-4b1e-9b37-4a5c35aa197a; party play
   https://pure.korea.ac.kr/en/publications/online-game-bot-detection-based-on-party-play-log-analysis/;
