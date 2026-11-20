@@ -78,6 +78,11 @@ Before the scorer is allowed to drive any tuning loop, it must pass all three ch
 
 Keep the random-jumper bot permanently in the regression set so rate-faking is always caught.
 
+A judge that can't tell a bot from a human proves nothing by itself: the power of a classifier
+two-sample test depends on the classifier, and a weak or badly trained one "passes" a bot that
+differs (Lopez-Paz & Oquab; Conformal C2ST). A judge's verdict on our bots counts only while it
+still catches the known-bad variants above.
+
 ### E. Anti-gaming safeguards
 - **Frozen held-out human set** outside the repo (read-only), never seen by tuning.
 - **Retrain diagnostic classifiers every round**; never optimize against a frozen classifier.
@@ -146,3 +151,5 @@ open-world questing and 5-man Tank/Healer/3DPS dungeon parties using `new:<race>
 - NCSoft & Korea University (Lee et al. 2016; Aion 2023 action intervals; Lineage W 2024
   trajectory clustering; chat & party-play bot detection)
 - World of Warcraft Avatar History dataset (MMSys 2011)
+- Lopez-Paz & Oquab, "Revisiting Classifier Two-Sample Tests" (https://arxiv.org/abs/1610.06545);
+  Conformal C2ST (https://arxiv.org/abs/2507.17026): a weak classifier "passing" proves nothing
