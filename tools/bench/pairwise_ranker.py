@@ -15,8 +15,10 @@ Implements `docs/plans/self-improving-loop.md` section B:
 
 from __future__ import annotations
 
+import datetime
 import json
 import math
+import pathlib
 import random
 import statistics
 import urllib.request
@@ -25,6 +27,61 @@ from typing import Any
 # Elo-equivalent logistic scale: 400 / ln(10) ≈ 173.7178
 BT_SCALE = 400.0 / math.log(10.0)
 HUMAN_ANCHOR_RATING = 1000.0
+DEFAULT_JUDGE_GATE_FILE = (
+    pathlib.Path.home() / ".local" / "share" / "wow-llm-bots" / "judge_gate.json"
+)
+
+
+def load_judge_gate(path: pathlib.Path = DEFAULT_JUDGE_GATE_FILE) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return {}
+
+
+def update_judge_gate(
+    updates: dict[str, Any],
+    path: pathlib.Path = DEFAULT_JUDGE_GATE_FILE,
+) -> dict[str, Any]:
+    state = load_judge_gate(path)
+    state.update(updates)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=2) + "\n")
+    return state
+
+
+def is_judge_gate_valid(
+    gate: dict[str, Any],
+    llm_url: str,
+    max_age_days: float = 14.0,
+) -> tuple[bool, str]:
+    """Enforces the plan's rule: LLM judge counts ONLY while it agrees with
+    human blind ratings AND catches the known-bad bots (Layer D)."""
+    if not gate:
+        return False, "judge_gate missing (run blind_rate.py llm-agree and scorer_calibration.py --llm-url)"
+    if gate.get("llm_url") and gate["llm_url"].rstrip("/") != llm_url.rstrip("/"):
+        return False, f"judge_gate calibrated for {gate['llm_url']}, not {llm_url}"
+    if not gate.get("agreement_valid"):
+        return False, (
+            f"LLM judge failed/missing human agreement check "
+            f"(agree={gate.get('agreement')}, kappa={gate.get('kappa')})"
+        )
+    if not gate.get("bad_bots_caught"):
+        return False, "LLM judge has not passed Layer D known-bad bot calibration"
+    now = datetime.datetime.now(datetime.timezone.utc)
+    for ts_key in ("agreement_at", "calibration_at"):
+        ts_str = gate.get(ts_key)
+        if not ts_str:
+            return False, f"judge_gate missing {ts_key}"
+        try:
+            dt = datetime.datetime.fromisoformat(ts_str)
+            if (now - dt).total_seconds() > max_age_days * 86400.0:
+                return False, f"judge_gate {ts_key} expired (> {max_age_days:.0f} days old)"
+        except ValueError:
+            return False, f"judge_gate malformed {ts_key}"
+    return True, "ok"
 
 
 def _render_ascii_path(frames: list[dict[str, Any]], width: int = 36, height: int = 12) -> str:

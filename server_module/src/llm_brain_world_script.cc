@@ -1192,7 +1192,6 @@ class LlmBrainWorldScript : public WorldScript {
     ObservedState& obs = observed_state_[key];
     const bool in_combat = player->IsInCombat();
     const bool jumping = player->HasUnitMovementFlag(MOVEMENTFLAG_FALLING);
-    const uint32_t move_time = player->m_movementInfo.time;
 
     if (obs.initialized && in_combat != obs.in_combat) {
       TraceEvent ev;
@@ -1205,20 +1204,20 @@ class LlmBrainWorldScript : public WorldScript {
       trace_writer_->WriteEvent(ev);
     }
 
-    const bool packet_keyframe =
-        obs.initialized && move_time != 0 && move_time != obs.last_move_time;
+    // Use the exact same 5 Hz (200 ms) cadence + combat/jump edge triggers for
+    // both humans and bots — never emit extra samples on human-only movement
+    // packets, which would leak packet detail into downstream parity checks.
     const bool state_edge = !obs.initialized || in_combat != obs.in_combat ||
                             jumping != obs.jumping;
     const bool interval_due =
         !obs.initialized || (now - obs.last_sample) >= kTraceInterval;
 
-    if (!packet_keyframe && !state_edge && !interval_due) {
+    if (!state_edge && !interval_due) {
       return;
     }
 
     obs.initialized = true;
     obs.last_sample = now;
-    obs.last_move_time = move_time;
     obs.in_combat = in_combat;
     obs.jumping = jumping;
     trace_writer_->WriteSample(
@@ -1265,7 +1264,6 @@ class LlmBrainWorldScript : public WorldScript {
   struct ObservedState {
     bool initialized = false;
     base::TimeTicks last_sample;
-    uint32_t last_move_time = 0;
     bool in_combat = false;
     bool jumping = false;
   };

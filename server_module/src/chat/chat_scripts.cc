@@ -18,6 +18,8 @@
 #include "ChatCommandTags.h"
 #include "CommandScript.h"
 #include "Common.h"
+#include "DBCStores.h"
+#include "DBCStructure.h"
 #include "Define.h"
 #include "Group.h"
 #include "Language.h"
@@ -146,18 +148,29 @@ class LlmBrainChatScript : public PlayerScript {
         language == LANG_ADDON || msg.empty()) {
       return true;
     }
+    // Only forward constant public channels (General / Trade); never leak
+    // custom/private channels or channels the bot has not joined.
+    if (!channel->IsConstant() || channel->HasFlag(CHANNEL_FLAG_CUSTOM) ||
+        channel->IsLFG()) {
+      return true;
+    }
+    const ChatChannelsEntry* ch_entry =
+        sChatChannelsStore.LookupEntry(channel->GetChannelId());
+    if (!ch_entry) {
+      return true;
+    }
     const std::string& cname = channel->GetName();
     pb::ChatChannel ch = pb::CUSTOM_CHANNEL;
     if (cname.starts_with("General")) {
       ch = pb::GENERAL;
-    } else if (cname.starts_with("Trade")) {
+    } else if (channel->HasFlag(CHANNEL_FLAG_TRADE) ||
+               cname.starts_with("Trade")) {
       ch = pb::TRADE;
-    } else if (cname.starts_with("LookingForGroup")) {
-      ch = pb::LFG;
+    } else {
+      return true;
     }
     const bool cross_faction =
         sWorld->getBoolConfig(CONFIG_ALLOW_TWO_SIDE_INTERACTION_CHAT);
-    const bool sender_is_human = GET_PLAYERBOT_AI(player) == nullptr;
     for (const std::string& bot_name : inbox_->Bots()) {
       if (bot_name == player->GetName()) {
         continue;
@@ -172,15 +185,20 @@ class LlmBrainChatScript : public PlayerScript {
       if (ch == pb::GENERAL && bot->GetZoneId() != player->GetZoneId()) {
         continue;
       }
+      const AreaTableEntry* bot_zone =
+          sAreaTableStore.LookupEntry(bot->GetZoneId());
+      if (!bot_zone || !bot->CanJoinConstantChannelInZone(ch_entry, bot_zone)) {
+        continue;
+      }
       pb::ChatEvent chat;
       chat.channel = ch;
       chat.channel_name = cname;
       chat.from = player->GetName();
       chat.text = msg;
-      // Wake bots on human General/LFG calls or direct name mentions (avoid
-      // bot-to-bot General chatter loops).
-      chat.at_me = MentionsName(msg, bot_name) ||
-                   (sender_is_human && (ch == pb::GENERAL || ch == pb::LFG));
+      // Wake only when the bot is explicitly named; all other General/Trade
+      // lines are queued silently for "since your last look" so one LFG call
+      // never triggers a zone-wide bot wake storm.
+      chat.at_me = MentionsName(msg, bot_name);
       inbox_->Add(bot_name, std::move(chat));
     }
     return true;

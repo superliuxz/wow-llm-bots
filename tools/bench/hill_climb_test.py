@@ -84,15 +84,27 @@ class HillClimbSafeguardsTest(unittest.TestCase):
             junk_line = json.dumps({"kind": "sample", "role": "human", "t_ms": 1000})
             p.write_text((junk_line + "\n") * soak_scorer.MIN_HUMAN_SAMPLES)
             self.assertFalse(hill_climb._has_human_traces(d))
-            # Reaching MIN_HUMAN_SAMPLES real movement rows passes.
-            real_rows = [
+            # 1 Hz traces must be rejected by the 5 Hz source-rate parity check.
+            old_1hz_rows = [
                 json.dumps({
                     "kind": "sample", "role": "human", "name": "Alice",
                     "t_ms": 1000 * i, "map": 1, "x": float(i * 4), "y": 0.0, "z": 0.0,
-                    "facing": 0.0, "moving": (i % 5 != 0), "jumping": False,
+                    "o": 0.0, "moving": (i % 5 != 0), "jumping": False,
                     "in_combat": False, "dead": False, "in_town": False,
                 })
                 for i in range(1, soak_scorer.MIN_HUMAN_SAMPLES + 1)
+            ]
+            p.write_text("\n".join(old_1hz_rows) + "\n")
+            self.assertFalse(hill_climb._has_human_traces(d))
+            # Reaching MIN_HUMAN_SAMPLES real 5 Hz movement rows (>= 60 s) passes.
+            real_rows = [
+                json.dumps({
+                    "kind": "sample", "role": "human", "name": "Alice",
+                    "t_ms": 200 * i, "map": 1, "x": float(i * 1.4), "y": 0.0, "z": 0.0,
+                    "o": 0.0, "moving": (i % 25 != 0), "jumping": False,
+                    "in_combat": False, "dead": False, "in_town": False,
+                })
+                for i in range(1, max(soak_scorer.MIN_HUMAN_SAMPLES, 350) + 1)
             ]
             p.write_text("\n".join(real_rows) + "\n")
             self.assertTrue(hill_climb._has_human_traces(d))

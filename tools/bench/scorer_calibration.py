@@ -13,6 +13,7 @@ Implements `docs/plans/self-improving-loop.md` section 3D:
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import math
 import pathlib
@@ -110,12 +111,53 @@ def _run_tournament(
 def run_calibration(
     human_traces: dict[str, list[dict[str, Any]]] | None = None,
     current_bot_traces: dict[str, list[dict[str, Any]]] | None = None,
+    plain_playerbots_traces: dict[str, list[dict[str, Any]]] | None = None,
     llm_url: str | None = None,
     blind_ratings_path: pathlib.Path | None = None,
+    judge_gate_path: pathlib.Path = pairwise_ranker.DEFAULT_JUDGE_GATE_FILE,
     pairs_per_matchup: int = 12,
     seed: int = 42,
+    allow_synthetic: bool = False,
 ) -> dict[str, Any]:
-    """Runs all Layer D scorer meta-checks and returns a pass/fail report."""
+    """Runs all Layer D scorer meta-checks and returns a pass/fail report.
+
+    Real calibration requires real `human_traces`, real `current_bot_traces`,
+    matching source sample rates (>= 3.5 Hz, ratio <= 1.5), and a real judge
+    (`--llm-url`). Pass `allow_synthetic=True` ONLY for offline unit tests.
+    """
+    if (not human_traces or not current_bot_traces or not plain_playerbots_traces) and not allow_synthetic:
+        return {
+            "passed": False,
+            "error": (
+                "real human_traces, current_bot_traces, and plain_playerbots_traces "
+                "(--plain-playerbots-dir, a test-server soak with the brain off) are "
+                "required for calibration (pass --allow-synthetic for offline unit tests only)"
+            ),
+            "ratings_run1": {},
+            "ratings_run2": {},
+            "ranking_ok": False,
+            "ranking_failures": ["missing real human, bot, or plain-playerbots traces"],
+            "repeatable": False,
+            "bad_variants_caught": {},
+            "blind_agreement": None,
+        }
+    if not llm_url and not allow_synthetic:
+        return {
+            "passed": False,
+            "error": (
+                "a real judge (--llm-url) is required for Layer D calibration; "
+                "refusing feature-distance stand-in without --allow-synthetic"
+            ),
+            "ratings_run1": {},
+            "ratings_run2": {},
+            "ranking_ok": False,
+            "ranking_failures": ["no real judge provided"],
+            "repeatable": False,
+            "bad_variants_caught": {},
+            "blind_agreement": None,
+        }
+
+    using_real_bots = bool(current_bot_traces)
     if not human_traces:
         human_traces = {
             "RefHuman1": known_bad_bots.generate_synthetic_human("RefHuman1", seed=201),
@@ -127,7 +169,26 @@ def run_calibration(
             "CurrBot2": known_bad_bots.generate_synthetic_current_bot("CurrBot2", seed=302),
         }
 
-    bad_suite = known_bad_bots.build_known_bad_suite()
+    # Source-rate parity check (rejects old 1 Hz human traces vs 5 Hz bot traces).
+    parity = trace_parity.check_source_rate_parity(human_traces, current_bot_traces)
+    if not parity["ok"] and not allow_synthetic:
+        return {
+            "passed": False,
+            "error": f"recording parity check failed: {parity['reason']}",
+            "parity": parity,
+            "ratings_run1": {},
+            "ratings_run2": {},
+            "ranking_ok": False,
+            "ranking_failures": [parity["reason"]],
+            "repeatable": False,
+            "bad_variants_caught": {},
+            "blind_agreement": None,
+        }
+
+    bad_suite = known_bad_bots.build_known_bad_suite(
+        real_bot_traces=current_bot_traces if using_real_bots else None,
+        plain_playerbots_traces=plain_playerbots_traces,
+    )
 
     entrants_clips: dict[str, list[dict[str, Any]]] = {
         "heldout_human": _extract_all_clips(human_traces),
@@ -203,8 +264,20 @@ def run_calibration(
         and (blind_agree is None or blind_agree["valid"])
     )
 
+    # Persist Layer D gate verdict when calibrating a real LLM judge.
+    if llm_url:
+        pairwise_ranker.update_judge_gate(
+            {
+                "llm_url": llm_url,
+                "bad_bots_caught": bool(passed and len(ranking_failures) == 0 and all(bad_caught.values())),
+                "calibration_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+            path=judge_gate_path,
+        )
+
     return {
         "passed": passed,
+        "parity": parity,
         "ratings_run1": r1,
         "ratings_run2": r2,
         "ranking_ok": len(ranking_failures) == 0,
@@ -219,25 +292,38 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Run Layer D scorer calibration meta-checks")
     ap.add_argument("--human-dir", type=pathlib.Path, default=None)
     ap.add_argument("--bot-dir", type=pathlib.Path, default=None)
+    ap.add_argument("--plain-playerbots-dir", type=pathlib.Path, default=None)
     ap.add_argument("--llm-url", default=None)
     ap.add_argument("--blind-ratings", type=pathlib.Path, default=None)
+    ap.add_argument("--judge-gate", type=pathlib.Path, default=pairwise_ranker.DEFAULT_JUDGE_GATE_FILE)
     ap.add_argument("--pairs", type=int, default=12)
+    ap.add_argument("--allow-synthetic", action="store_true")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
     h_tr = trace_parity.load_traces(args.human_dir)["human"] if args.human_dir else None
     b_tr = trace_parity.load_traces(args.bot_dir)["bot"] if args.bot_dir else None
+    p_tr = (
+        trace_parity.load_traces(args.plain_playerbots_dir)["bot"]
+        if args.plain_playerbots_dir
+        else None
+    )
     res = run_calibration(
         human_traces=h_tr,
         current_bot_traces=b_tr,
+        plain_playerbots_traces=p_tr,
         llm_url=args.llm_url,
         blind_ratings_path=args.blind_ratings,
+        judge_gate_path=args.judge_gate,
         pairs_per_matchup=args.pairs,
+        allow_synthetic=args.allow_synthetic,
     )
     if args.json:
         print(json.dumps(res, indent=2))
     else:
         print(f"== Scorer Calibration (Layer D): {'PASS' if res['passed'] else 'FAIL'} ==")
+        if res.get("error"):
+            print(f"  ERROR: {res['error']}")
         for name, info in sorted(res["ratings_run1"].items(), key=lambda kv: -kv[1]["rating"]):
             print(f"  {name:20s}: {info['rating']:6.1f} [{info['ci_low']:6.1f} .. {info['ci_high']:6.1f}]")
         print(f"  ranking_ok={res['ranking_ok']}  repeatable={res['repeatable']}  bad_caught={res['bad_variants_caught']}")

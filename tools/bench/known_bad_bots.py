@@ -275,11 +275,137 @@ def generate_synthetic_current_bot(
     return rows
 
 
-def build_known_bad_suite(duration_s: int = 240) -> dict[str, dict[str, list[dict[str, Any]]]]:
-    """Returns `{variant_name: {char_name: rows}}` for all 4 known-bad variants."""
+def perturb_random_jumper(
+    real_bot_traces: dict[str, list[dict[str, Any]]],
+    jump_every_s: float = 26.0,
+) -> dict[str, list[dict[str, Any]]]:
+    """Adds mechanical periodic jumps (~2.3/min) to real bot traces (rate-faking sentinel)."""
+    out: dict[str, list[dict[str, Any]]] = {}
+    gap_ms = int(jump_every_s * 1000.0)
+    for name, rows in real_bot_traces.items():
+        mutated: list[dict[str, Any]] = []
+        last_jump_t: int | None = None
+        for r in rows:
+            c = dict(r)
+            if c.get("kind") == "sample":
+                t = int(c.get("t_ms", 0))
+                if last_jump_t is None or (t - last_jump_t) >= gap_ms:
+                    c["jumping"] = True
+                    last_jump_t = t
+            mutated.append(c)
+        out[f"{name}_RandomJumper"] = mutated
+    return out
+
+
+def perturb_instant_reply(
+    real_bot_traces: dict[str, list[dict[str, Any]]],
+    seed: int = 103,
+) -> dict[str, list[dict[str, Any]]]:
+    """Injects 0.35-0.45 s overly formal whisper replies into real bot traces."""
+    rng = random.Random(seed)
+    prompts = [
+        ("PlayerA", "hey wanna group for boars?"),
+        ("PlayerB", "where is the quest giver?"),
+        ("PlayerA", "nice pull"),
+    ]
+    replies = [
+        "Greetings, fellow adventurer! I would be delighted to assist you with that quest.",
+        "Certainly! The quest giver is located directly ahead near the main camp.",
+        "Thank you kindly for the compliment! I strive for optimal combat efficiency.",
+    ]
+    out: dict[str, list[dict[str, Any]]] = {}
+    for name, rows in real_bot_traces.items():
+        samples = [r for r in rows if r.get("kind") == "sample" and "t_ms" in r]
+        if not samples:
+            continue
+        t0 = int(samples[0]["t_ms"])
+        mutated = [dict(r) for r in rows]
+        for idx, ((peer, q), ans) in enumerate(zip(prompts, replies)):
+            t_in = t0 + (idx + 1) * 15_000
+            delay_ms = int(rng.uniform(350, 450))
+            mutated.append({
+                "kind": "chat", "t_ms": t_in, "mono_us": t_in * 1000,
+                "role": "bot", "name": name, "dir": "in", "channel": "whisper",
+                "peer": peer, "text": q, "text_len": len(q),
+            })
+            mutated.append({
+                "kind": "chat", "t_ms": t_in + delay_ms, "mono_us": (t_in + delay_ms) * 1000,
+                "role": "bot", "name": name, "dir": "out", "channel": "whisper",
+                "peer": peer, "text": ans, "text_len": len(ans),
+            })
+        mutated.sort(key=lambda r: (int(r.get("t_ms", 0)), int(r.get("mono_us", 0))))
+        out[f"{name}_InstantReply"] = mutated
+    return out
+
+
+def perturb_same_loop(
+    real_bot_traces: dict[str, list[dict[str, Any]]],
+    loop_s: float = 40.0,
+    laps: int = 5,
+) -> dict[str, list[dict[str, Any]]]:
+    """Builds a real-route same-loop walker by repeating a real moving segment."""
+    out: dict[str, list[dict[str, Any]]] = {}
+    for name, rows in real_bot_traces.items():
+        samples = [
+            r for r in rows
+            if r.get("kind") == "sample" and all(k in r for k in ("t_ms", "x", "y", "z"))
+        ]
+        if len(samples) < 20:
+            continue
+        # Take the first ~loop_s of real samples and ping-pong/repeat that exact
+        # real route `laps` times so Mitterhofer waypoint repetition sees a real
+        # repeated path on real terrain.
+        t0 = int(samples[0]["t_ms"])
+        seg = [s for s in samples if int(s["t_ms"]) - t0 <= int(loop_s * 1000)]
+        if len(seg) < 10:
+            seg = samples
+        # Append reverse path so the loop closes smoothly without teleporting.
+        one_lap = seg + list(reversed(seg[1:-1]))
+        if len(one_lap) < 4:
+            continue
+        step_ms = 200
+        tiled: list[dict[str, Any]] = []
+        cur_t = t0
+        for _ in range(laps):
+            for s in one_lap:
+                c = dict(s)
+                c["t_ms"] = cur_t
+                c["mono_us"] = cur_t * 1000
+                tiled.append(c)
+                cur_t += step_ms
+        out[f"{name}_SameLoop"] = tiled
+    return out
+
+
+def build_known_bad_suite(
+    duration_s: int = 240,
+    real_bot_traces: dict[str, list[dict[str, Any]]] | None = None,
+    plain_playerbots_traces: dict[str, list[dict[str, Any]]] | None = None,
+) -> dict[str, dict[str, list[dict[str, Any]]]]:
+    """Returns `{variant_name: {char_name: rows}}` for all 4 known-bad variants.
+
+    When `real_bot_traces` are provided, `random_jumper`, `instant_reply`, and
+    `same_loop_walker` are all derived from those real traces.
+    """
     return {
-        "plain_playerbots": {"BadPlain": generate_plain_playerbots(duration_s=duration_s)},
-        "random_jumper": {"BadJumper": generate_random_jumper(duration_s=duration_s)},
-        "instant_reply": {"BadInstant": generate_instant_reply(duration_s=duration_s)},
-        "same_loop_walker": {"BadLooper": generate_same_loop_walker(duration_s=duration_s)},
+        "plain_playerbots": (
+            plain_playerbots_traces
+            if plain_playerbots_traces
+            else {"BadPlain": generate_plain_playerbots(duration_s=duration_s)}
+        ),
+        "random_jumper": (
+            perturb_random_jumper(real_bot_traces)
+            if real_bot_traces
+            else {"BadJumper": generate_random_jumper(duration_s=duration_s)}
+        ),
+        "instant_reply": (
+            perturb_instant_reply(real_bot_traces)
+            if real_bot_traces
+            else {"BadInstant": generate_instant_reply(duration_s=duration_s)}
+        ),
+        "same_loop_walker": (
+            perturb_same_loop(real_bot_traces)
+            if real_bot_traces
+            else {"BadLooper": generate_same_loop_walker(duration_s=duration_s)}
+        ),
     }

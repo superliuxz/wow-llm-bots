@@ -145,18 +145,24 @@ def _clips_by_situation(traces: dict[str, list[dict]], clip_s: float = 45.0) -> 
 def _run_layer_b_ranking(
     bot_traces: dict[str, list[dict]],
     human_traces: dict[str, list[dict]],
+    candidate_id: str = "",
+    current_id: str = "",
     baseline_traces: dict[str, list[dict]] | None = None,
     blind_ratings_path: pathlib.Path | None = None,
+    judge_gate_path: pathlib.Path = pairwise_ranker.DEFAULT_JUDGE_GATE_FILE,
     use_judge: bool = False,
     llm_url: str = "http://127.0.0.1:8090",
     pairs: int = 24,
     seed: int = 0,
+    parity_ok: bool = True,
 ) -> dict[str, Any]:
     """Runs Layer B pairwise Bradley-Terry ranking anchored to human clips."""
     comparisons: list[dict[str, Any]] = []
     mode = "unrated_awaiting_blind_batch"
+    judge_gate_error = ""
 
-    # 1. Include any recorded ground-truth human blind ratings.
+    # 1. Include ONLY blind ratings tagged with this exact candidate_id (and
+    #    current_id when referencing current) so old candidates never leak in.
     if blind_ratings_path and blind_ratings_path.exists():
         for line in blind_ratings_path.read_text().splitlines():
             line = line.strip()
@@ -164,46 +170,73 @@ def _run_layer_b_ranking(
                 continue
             try:
                 r = json.loads(line)
-                if r.get("a") and r.get("b") and r.get("winner") in ("a", "b", "tie"):
-                    comparisons.append({"a": r["a"], "b": r["b"], "winner": r["winner"]})
             except json.JSONDecodeError:
                 continue
+            a, b, w = r.get("a"), r.get("b"), r.get("winner")
+            if not a or not b or w not in ("a", "b", "tie"):
+                continue
+            a_id = str(r.get("a_id", ""))
+            b_id = str(r.get("b_id", ""))
+            if a == "candidate" and (not candidate_id or a_id != candidate_id):
+                continue
+            if b == "candidate" and (not candidate_id or b_id != candidate_id):
+                continue
+            if a == "current" and (not current_id or a_id != current_id):
+                continue
+            if b == "current" and (not current_id or b_id != current_id):
+                continue
+            comparisons.append({"a": a, "b": b, "winner": w})
         if comparisons:
             mode = "blind_human"
 
-    # 2. Optionally add order-debiased LLM pairwise comparisons across matched situations.
-    if use_judge and bot_traces and human_traces:
-        rng = random.Random(seed)
-        sources: dict[str, dict[str, list[dict]]] = {
-            "human": _clips_by_situation(human_traces),
-            "candidate": _clips_by_situation(bot_traces),
-        }
-        if baseline_traces:
-            sources["current"] = _clips_by_situation(baseline_traces)
+    # 2. Enforce the LLM judge gate (agreement with human blind ratings AND
+    #    Layer D known-bad bot detection) before allowing --judge comparisons.
+    if use_judge:
+        if not parity_ok:
+            judge_gate_error = "source-rate parity failed (refusing LLM judge on mismatched rates)"
+            mode = "llm_judge_blocked_parity"
+        else:
+            gate = pairwise_ranker.load_judge_gate(judge_gate_path)
+            gate_ok, gate_msg = pairwise_ranker.is_judge_gate_valid(gate, llm_url)
+            if not gate_ok:
+                judge_gate_error = gate_msg
+                if mode == "unrated_awaiting_blind_batch":
+                    mode = "llm_judge_blocked_uncalibrated"
+            elif bot_traces and human_traces:
+                rng = random.Random(seed)
+                sources: dict[str, dict[str, list[dict]]] = {
+                    "human": _clips_by_situation(human_traces),
+                    "candidate": _clips_by_situation(bot_traces),
+                }
+                if baseline_traces:
+                    sources["current"] = _clips_by_situation(baseline_traces)
 
-        names = sorted(sources.keys())
-        matchups: list[tuple[str, str, str]] = []
-        for i in range(len(names)):
-            for j in range(i + 1, len(names)):
-                ni, nj = names[i], names[j]
-                shared = sorted(set(sources[ni].keys()) & set(sources[nj].keys()))
-                for sit in shared:
-                    matchups.append((sit, ni, nj))
+                names = sorted(sources.keys())
+                matchups: list[tuple[str, str, str]] = []
+                for i in range(len(names)):
+                    for j in range(i + 1, len(names)):
+                        ni, nj = names[i], names[j]
+                        shared = sorted(set(sources[ni].keys()) & set(sources[nj].keys()))
+                        for sit in shared:
+                            matchups.append((sit, ni, nj))
 
-        if matchups:
-            for _ in range(pairs):
-                sit, left, right = rng.choice(matchups)
-                ca = rng.choice(sources[left][sit])
-                cb = rng.choice(sources[right][sit])
-                layer = "social" if sit == "chatting" else "body"
-                ans = pairwise_ranker.judge_pair_llm(ca, cb, llm_url=llm_url, layer=layer)
-                if ans in ("a", "b", "tie"):
-                    comparisons.append({"a": left, "b": right, "winner": ans})
-            mode = "blind_human+llm" if mode == "blind_human" else "llm_pairwise"
+                if matchups:
+                    for _ in range(pairs):
+                        sit, left, right = rng.choice(matchups)
+                        ca = rng.choice(sources[left][sit])
+                        cb = rng.choice(sources[right][sit])
+                        layer = "social" if sit == "chatting" else "body"
+                        ans = pairwise_ranker.judge_pair_llm(ca, cb, llm_url=llm_url, layer=layer)
+                        if ans in ("a", "b", "tie"):
+                            comparisons.append({"a": left, "b": right, "winner": ans})
+                    mode = "blind_human+llm" if mode == "blind_human" else "llm_pairwise"
 
     if not comparisons:
         return {
             "mode": mode,
+            "judge_gate_error": judge_gate_error,
+            "candidate_id": candidate_id,
+            "current_id": current_id,
             "comparisons": 0,
             "rating": None,
             "ci_low": None,
@@ -223,6 +256,9 @@ def _run_layer_b_ranking(
     )
     return {
         "mode": mode,
+        "judge_gate_error": judge_gate_error,
+        "candidate_id": candidate_id,
+        "current_id": current_id,
         "comparisons": bt["comparisons"],
         "rating": cand_info["rating"] if cand_info else None,
         "ci_low": cand_info["ci_low"] if cand_info else None,
@@ -240,6 +276,7 @@ def score_soak(
     human_dir: pathlib.Path | None = None,
     baseline_trace_dir: pathlib.Path | None = None,
     blind_ratings_path: pathlib.Path | None = None,
+    judge_gate_path: pathlib.Path = pairwise_ranker.DEFAULT_JUDGE_GATE_FILE,
     use_judge: bool = False,
     llm_url: str = "http://127.0.0.1:8090",
     min_eval_passed: int | None = None,
@@ -257,28 +294,52 @@ def score_soak(
         b_extra = trace_parity.load_traces(baseline_trace_dir)
         baseline_traces = _filter_role_rows(b_extra["bot"], "bot") or None
 
+    candidate_id = trace_parity.trace_set_hash(trace_dir, role="bot")
+    current_id = (
+        trace_parity.trace_set_hash(baseline_trace_dir, role="bot")
+        if baseline_trace_dir and baseline_trace_dir.exists()
+        else ""
+    )
+
     human_sample_count = sum(
         sum(1 for r in rows if r.get("kind") == "sample")
         for rows in human_traces.values()
     )
     has_human = len(human_traces) > 0 and human_sample_count >= MIN_HUMAN_SAMPLES
-    baseline_mode = "human_baseline" if has_human else "no_human_baseline"
+    parity = (
+        trace_parity.check_source_rate_parity(human_traces, bot_traces)
+        if has_human and bot_traces
+        else {"ok": True, "human_hz": None, "bot_hz": None, "reason": "no_human_comparison"}
+    )
+    baseline_mode = (
+        "human_baseline"
+        if (has_human and parity["ok"])
+        else ("parity_mismatch" if has_human else "no_human_baseline")
+    )
 
     progress = _progress_metrics(bot_traces)
 
-    # Layer C: Diagnostics (never a reward).
-    adversary = adversary_suite.run_adversary_suite(bot_traces, human_traces)
-    population = population_metrics.analyze_population(bot_traces, human_traces)
+    # Layer C: Diagnostics (never a reward). Skip human comparison if source rates mismatch.
+    adversary = adversary_suite.run_adversary_suite(
+        bot_traces, human_traces if parity["ok"] else {}
+    )
+    population = population_metrics.analyze_population(
+        bot_traces, human_traces if parity["ok"] else {}
+    )
     tells = list(dict.fromkeys(adversary.get("tells", []) + population.get("tells", [])))
 
     # Layer B: Pairwise ranking anchored to human clips.
     ranking = _run_layer_b_ranking(
         bot_traces=bot_traces,
         human_traces=human_traces,
+        candidate_id=candidate_id,
+        current_id=current_id,
         baseline_traces=baseline_traces,
         blind_ratings_path=blind_ratings_path,
+        judge_gate_path=judge_gate_path,
         use_judge=use_judge,
         llm_url=llm_url,
+        parity_ok=parity["ok"],
     )
 
     # Layer A: Hard gates (must pass, never traded off).
@@ -321,6 +382,10 @@ def score_soak(
     check("human_react_timing", react_ok,
           f"react_p10={react_pcts[0] if react_pcts else None}ms (>= {MIN_HUMAN_REACTION_MS:.0f}ms)")
 
+    if has_human:
+        check("recording_parity", parity["ok"],
+              f"human={parity['human_hz']}Hz bot={parity['bot_hz']}Hz ({parity['reason']})")
+
     if min_eval_passed is not None and eval_passed is not None:
         check("offline_eval", eval_passed >= min_eval_passed,
               f"eval={eval_passed} (>= {min_eval_passed})")
@@ -332,6 +397,7 @@ def score_soak(
         "ci_low": ranking["ci_low"],
         "ci_high": ranking["ci_high"],
         "ranking": ranking,
+        "parity": parity,
         "baseline_mode": baseline_mode,
         "human_provenance": {
             "dir": str(human_dir) if human_dir else "",

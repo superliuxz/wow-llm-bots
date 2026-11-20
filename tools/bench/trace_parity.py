@@ -14,9 +14,11 @@ Implements `docs/plans/self-improving-loop.md` section F:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import pathlib
+import statistics
 from typing import Any
 
 SITUATIONS = ("in_group", "chatting", "solo_fight", "looting", "in_town", "travel")
@@ -38,6 +40,73 @@ def _signed_angle_diff(a: float, b: float) -> float:
 def _interp_angle(a: float, b: float, alpha: float) -> float:
     """Shortest-arc linear interpolation between angles a and b."""
     return (a + _signed_angle_diff(a, b) * alpha) % (2.0 * math.pi)
+
+
+def trace_set_hash(trace_dir: pathlib.Path, role: str | None = None) -> str:
+    """Deterministic SHA-256 over a trace directory (identifies a candidate/baseline)."""
+    h = hashlib.sha256()
+    if not trace_dir.exists():
+        return ""
+    roles = (role,) if role else ("human", "bot")
+    files: list[pathlib.Path] = []
+    for r in roles:
+        rdir = trace_dir / r
+        if rdir.is_dir():
+            files.extend(sorted(rdir.rglob("*.jsonl")))
+    if not files:
+        return ""
+    for f in files:
+        h.update(f.relative_to(trace_dir).as_posix().encode("utf-8"))
+        h.update(b"\0")
+        h.update(f.read_bytes())
+        h.update(b"\0")
+    return h.hexdigest()[:16]
+
+
+def estimate_source_hz(rows: list[dict[str, Any]], max_gap_ms: int = 5000) -> float | None:
+    """Estimates the raw source sampling rate (Hz) from median contiguous dt."""
+    ts = sorted(
+        int(r["t_ms"])
+        for r in rows
+        if r.get("kind") == "sample" and "t_ms" in r
+    )
+    dts = [ts[i] - ts[i - 1] for i in range(1, len(ts)) if 0 < ts[i] - ts[i - 1] <= max_gap_ms]
+    if not dts:
+        return None
+    med_ms = statistics.median(dts)
+    return round(1000.0 / med_ms, 2) if med_ms > 0 else None
+
+
+def check_source_rate_parity(
+    human_traces: dict[str, list[dict[str, Any]]],
+    bot_traces: dict[str, list[dict[str, Any]]],
+    min_hz: float = 3.5,
+    max_ratio: float = 1.5,
+) -> dict[str, Any]:
+    """Rejects comparisons where human/bot source rates differ or are too coarse (e.g. old 1 Hz)."""
+    h_rates = [hz for r in human_traces.values() if (hz := estimate_source_hz(r)) is not None]
+    b_rates = [hz for r in bot_traces.values() if (hz := estimate_source_hz(r)) is not None]
+    h_hz = round(statistics.median(h_rates), 2) if h_rates else None
+    b_hz = round(statistics.median(b_rates), 2) if b_rates else None
+    if h_hz is None or b_hz is None:
+        return {"ok": False, "human_hz": h_hz, "bot_hz": b_hz, "reason": "missing_traces"}
+    if h_hz < min_hz:
+        return {
+            "ok": False, "human_hz": h_hz, "bot_hz": b_hz,
+            "reason": f"human source rate too low ({h_hz} Hz < {min_hz} Hz; re-record at 5 Hz)",
+        }
+    if b_hz < min_hz:
+        return {
+            "ok": False, "human_hz": h_hz, "bot_hz": b_hz,
+            "reason": f"bot source rate too low ({b_hz} Hz < {min_hz} Hz)",
+        }
+    ratio = max(h_hz, b_hz) / max(min(h_hz, b_hz), 1e-6)
+    if ratio > max_ratio:
+        return {
+            "ok": False, "human_hz": h_hz, "bot_hz": b_hz,
+            "reason": f"source rate mismatch ({h_hz} Hz vs {b_hz} Hz, ratio {ratio:.2f} > {max_ratio})",
+        }
+    return {"ok": True, "human_hz": h_hz, "bot_hz": b_hz, "reason": "ok"}
 
 
 def load_traces(trace_dir: pathlib.Path) -> dict[str, dict[str, list[dict[str, Any]]]]:
@@ -68,6 +137,77 @@ def load_traces(trace_dir: pathlib.Path) -> dict[str, dict[str, list[dict[str, A
     return out
 
 
+def _extract_parity_keyframes(
+    span: list[dict[str, Any]],
+    keyframe_dt_ms: int = 500,
+    pause_threshold_ms: int = 600,
+) -> list[dict[str, Any]]:
+    """Reduces BOTH human and bot spans to identical change-point keyframes.
+
+    Fixes human 500 ms movement-packet stair-steps vs smooth bot ticks:
+      1. Drops redundant unchanged samples while moving (keeping pause endpoints
+         when stationary for >= `pause_threshold_ms` so real stops survive).
+      2. Thins continuous-motion keyframes to `>= keyframe_dt_ms` (matching
+         human client heartbeat spacing) while preserving stop/start, jump,
+         combat, and dead state transitions.
+    Both humans and bots are then interpolated onto the same 5 Hz grid.
+    """
+    if len(span) <= 2:
+        return span
+
+    def _same_pose(a: dict[str, Any], b: dict[str, Any]) -> bool:
+        return (
+            math.hypot(float(a["x"]) - float(b["x"]), float(a["y"]) - float(b["y"])) < 0.01
+            and abs(float(a["z"]) - float(b["z"])) < 0.01
+            and angle_diff(float(a.get("o", 0.0)), float(b.get("o", 0.0))) < 0.005
+        )
+
+    def _state_changed(a: dict[str, Any], b: dict[str, Any]) -> bool:
+        return (
+            bool(a.get("in_combat")) != bool(b.get("in_combat"))
+            or bool(a.get("jumping")) != bool(b.get("jumping"))
+            or bool(a.get("dead")) != bool(b.get("dead"))
+            or bool(a.get("casting")) != bool(b.get("casting"))
+        )
+
+    # Pass 1: Collapse runs of identical pose (human packet stair-steps).
+    # If a run lasts >= pause_threshold_ms, keep BOTH its first and last sample
+    # (a real stop); if shorter (< pause_threshold_ms), keep only the first
+    # sample so interpolation glides smoothly across the ~500 ms heartbeat gap.
+    change_pts: list[dict[str, Any]] = [span[0]]
+    run_start_idx = 0
+    for i in range(1, len(span)):
+        cur = span[i]
+        prev = span[run_start_idx]
+        if _same_pose(prev, cur) and not _state_changed(prev, cur):
+            continue
+        run_dur = int(span[i - 1]["t_ms"]) - int(prev["t_ms"])
+        if i - 1 > run_start_idx and run_dur >= pause_threshold_ms:
+            change_pts.append(span[i - 1])
+        change_pts.append(cur)
+        run_start_idx = i
+    if run_start_idx < len(span) - 1:
+        change_pts.append(span[-1])
+
+    # Pass 2: Thin continuous-motion keyframes to `>= keyframe_dt_ms` so smooth
+    # 5 Hz bot splines carry the exact same temporal resolution as ~500 ms human
+    # movement heartbeats (preserving real pauses and state edges).
+    thinned: list[dict[str, Any]] = [change_pts[0]]
+    for i in range(1, len(change_pts) - 1):
+        cur = change_pts[i]
+        prev = thinned[-1]
+        dt = int(cur["t_ms"]) - int(prev["t_ms"])
+        if (
+            dt >= keyframe_dt_ms
+            or _state_changed(prev, cur)
+            or _same_pose(prev, cur)  # real pause endpoint
+        ):
+            thinned.append(cur)
+    if change_pts[-1] is not thinned[-1]:
+        thinned.append(change_pts[-1])
+    return thinned
+
+
 def reconstruct_trajectory(
     rows: list[dict[str, Any]],
     step_ms: int = DEFAULT_STEP_MS,
@@ -95,12 +235,18 @@ def reconstruct_trajectory(
     if len(samples) < 2:
         return []
 
-    # Deduplicate identical timestamps (keep last state at that millisecond).
+    # Deduplicate and thin any sub-grid burst samples to at most 1 sample per
+    # `step_ms` (preserving jump/combat transitions) so a higher-rate source
+    # never carries extra detail into the fixed-time grid.
     dedup: list[dict[str, Any]] = []
     for s in samples:
-        if dedup and int(s["t_ms"]) == int(dedup[-1]["t_ms"]):
+        if not dedup:
+            dedup.append(s)
+            continue
+        dt = int(s["t_ms"]) - int(dedup[-1]["t_ms"])
+        if dt == 0:
             dedup[-1] = s
-        else:
+        elif dt >= step_ms or bool(s.get("jumping")) != bool(dedup[-1].get("jumping")) or bool(s.get("in_combat")) != bool(dedup[-1].get("in_combat")):
             dedup.append(s)
     samples = dedup
     if len(samples) < 2:
@@ -155,21 +301,25 @@ def reconstruct_trajectory(
             continue
 
         # Collect jump pulse timestamps from raw rising edges so brief jumps
-        # between 200 ms ticks are never lost by subsampling.
+        # between ticks are never lost by thinning/resampling.
         jump_times: set[int] = set()
         for i, s in enumerate(span):
             if bool(s.get("jumping")) and (i == 0 or not bool(span[i - 1].get("jumping"))):
                 grid_idx = round((int(s["t_ms"]) - t_start) / step_ms)
                 jump_times.add(max(0, min(n_steps - 1, grid_idx)))
 
+        # Reduce BOTH humans and bots to identical change-point keyframes at
+        # human-packet resolution (~500 ms) before interpolating onto the 5 Hz grid.
+        kf_span = _extract_parity_keyframes(span)
+
         frames: list[dict[str, Any]] = []
         raw_idx = 0
         for k in range(n_steps):
             t_cur = t_start + k * step_ms
-            while raw_idx + 1 < len(span) and int(span[raw_idx + 1]["t_ms"]) < t_cur:
+            while raw_idx + 1 < len(kf_span) and int(kf_span[raw_idx + 1]["t_ms"]) < t_cur:
                 raw_idx += 1
-            s0 = span[raw_idx]
-            s1 = span[min(raw_idx + 1, len(span) - 1)]
+            s0 = kf_span[raw_idx]
+            s1 = kf_span[min(raw_idx + 1, len(kf_span) - 1)]
             t0 = int(s0["t_ms"])
             t1 = int(s1["t_ms"])
             if t1 > t0:

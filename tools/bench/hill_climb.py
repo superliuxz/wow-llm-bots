@@ -162,7 +162,7 @@ def _verify_all_locks(lock_file: pathlib.Path = DEFAULT_LOCK_FILE) -> tuple[bool
     return True, f"all {len(recorded)} measurement locks verified"
 
 
-def _has_human_traces(human_dir: pathlib.Path) -> bool:
+def _has_human_traces(human_dir: pathlib.Path, min_hz: float = 3.5) -> bool:
     hdir = human_dir / "human"
     if not hdir.is_dir():
         return False
@@ -171,6 +171,7 @@ def _has_human_traces(human_dir: pathlib.Path) -> bool:
     valid_samples = 0
     total_span_ms = 0
     has_clips = False
+    has_5hz = False
     for rows in human_traces.values():
         ts = [
             int(r["t_ms"])
@@ -181,12 +182,16 @@ def _has_human_traces(human_dir: pathlib.Path) -> bool:
         valid_samples += len(ts)
         if len(ts) >= 2:
             total_span_ms += max(ts) - min(ts)
+        hz = trace_parity.estimate_source_hz(rows)
+        if hz is not None and hz >= min_hz:
+            has_5hz = True
         if trace_parity.extract_clips(rows, clip_s=30.0):
             has_clips = True
     return (
         valid_samples >= soak_scorer.MIN_HUMAN_SAMPLES
         and total_span_ms >= 60_000
         and has_clips
+        and has_5hz
     )
 
 
@@ -281,13 +286,22 @@ def cmd_calibrate(args) -> int:
     h_tr = trace_parity.load_traces(args.human_dir)["human"] if args.human_dir.exists() else None
     b_dir = BASELINE_TRACES_ROOT / args.suite
     b_tr = trace_parity.load_traces(b_dir)["bot"] if b_dir.exists() else None
+    p_tr = (
+        trace_parity.load_traces(args.plain_playerbots_dir)["bot"]
+        if args.plain_playerbots_dir and args.plain_playerbots_dir.exists()
+        else None
+    )
     res = scorer_calibration.run_calibration(
         human_traces=h_tr,
         current_bot_traces=b_tr,
+        plain_playerbots_traces=p_tr,
         llm_url=args.llm_url if args.judge else None,
         blind_ratings_path=args.blind_ratings if args.blind_ratings.exists() else None,
+        allow_synthetic=args.allow_synthetic,
     )
     print(f"== Scorer Calibration (Layer D): {'PASS' if res['passed'] else 'FAIL'} ==")
+    if res.get("error"):
+        print(f"  ERROR: {res['error']}")
     for name, info in sorted(res["ratings_run1"].items(), key=lambda kv: -kv[1]["rating"]):
         print(f"  {name:20s}: {info['rating']:6.1f} [{info['ci_low']:6.1f} .. {info['ci_high']:6.1f}]")
     print(
@@ -562,9 +576,11 @@ def main() -> int:
     p_cal = sub.add_parser("calibrate", help="Run Layer D scorer calibration meta-checks")
     p_cal.add_argument("--suite", default="varied")
     p_cal.add_argument("--human-dir", type=pathlib.Path, default=DEFAULT_HUMAN_DIR)
+    p_cal.add_argument("--plain-playerbots-dir", type=pathlib.Path, default=None)
     p_cal.add_argument("--blind-ratings", type=pathlib.Path, default=DEFAULT_BLIND_RATINGS)
     p_cal.add_argument("--judge", action="store_true", default=False)
     p_cal.add_argument("--llm-url", default="http://127.0.0.1:8090")
+    p_cal.add_argument("--allow-synthetic", action="store_true")
 
     p_init = sub.add_parser("init", help="Verify/create lock manifest and record baseline")
     p_init.add_argument("--minutes", type=float, default=5.0)

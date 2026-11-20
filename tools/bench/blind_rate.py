@@ -40,25 +40,29 @@ def _load_clips_by_situation(
     source_dir: pathlib.Path,
     role_filter: str | None = None,
     clip_s: float = 45.0,
-) -> dict[str, list[dict[str, Any]]]:
+) -> tuple[dict[str, list[dict[str, Any]]], set[str]]:
     traces = trace_parity.load_traces(source_dir)
     by_sit: dict[str, list[dict[str, Any]]] = {}
+    players: set[str] = set()
     roles = (role_filter,) if role_filter else ("human", "bot")
     for role in roles:
-        for _name, rows in traces.get(role, {}).items():
+        for name, rows in traces.get(role, {}).items():
+            players.add(name)
             for clip in trace_parity.extract_clips(rows, clip_s=clip_s):
                 by_sit.setdefault(clip["situation"], []).append(clip)
-    return by_sit
+    return by_sit, players
 
 
 def sample_matched_pairs(
     sources: dict[str, dict[str, list[dict[str, Any]]]],
     n_pairs: int = 30,
     seed: int | None = None,
+    exclude_labels: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Samples `n_pairs` situation-matched anonymized pairs across sources."""
     rng = random.Random(seed) if seed is not None else random.SystemRandom()
-    names = sorted(sources.keys())
+    excluded = exclude_labels or set()
+    names = sorted(k for k in sources.keys() if k not in excluded)
     if len(names) < 2:
         return []
 
@@ -113,21 +117,40 @@ def append_rating(path: pathlib.Path, row: dict[str, Any]) -> None:
 
 def cmd_rate(args) -> int:
     sources: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    source_ids: dict[str, str] = {}
+    exclude_labels: set[str] = set()
     for spec in args.source:
         if "=" not in spec:
             print(f"ERROR: --source must be LABEL=PATH, got {spec}", file=sys.stderr)
             return 2
         label, path_str = spec.split("=", 1)
+        src_path = pathlib.Path(path_str)
         role_filter = "human" if label.startswith("human") else None
-        sources[label] = _load_clips_by_situation(
-            pathlib.Path(path_str), role_filter=role_filter, clip_s=args.clip_s
+        clips_by_sit, players = _load_clips_by_situation(
+            src_path, role_filter=role_filter, clip_s=args.clip_s
         )
-        total_clips = sum(len(v) for v in sources[label].values())
-        print(f"loaded {label}: {total_clips} clips across {sorted(sources[label].keys())}")
+        sources[label] = clips_by_sit
+        source_ids[label] = trace_parity.trace_set_hash(src_path, role=role_filter) or label
+        total_clips = sum(len(v) for v in clips_by_sit.values())
+        print(
+            f"loaded {label} (id={source_ids[label]}): {total_clips} clips across "
+            f"{sorted(clips_by_sit.keys())} ({len(players)} player(s))"
+        )
+        # Prevent self-recognition bias: when you are the only human player,
+        # human-vs-bot pairs aren't blind, so show bot-vs-bot pairs only unless
+        # external judges or multiple human players exist (--include-human-anchors).
+        if label.startswith("human") and not args.include_human_anchors and len(players) < 2:
+            exclude_labels.add(label)
+            print(
+                f"note: excluding '{label}' from self-blind batch (only {len(players)} human "
+                "player; pass --include-human-anchors when rating other humans or using external judges)"
+            )
 
-    pairs = sample_matched_pairs(sources, n_pairs=args.pairs, seed=args.seed)
+    pairs = sample_matched_pairs(
+        sources, n_pairs=args.pairs, seed=args.seed, exclude_labels=exclude_labels
+    )
     if not pairs:
-        print("ERROR: no matched-situation pairs available across sources.", file=sys.stderr)
+        print("ERROR: no matched-situation pairs available across non-excluded sources.", file=sys.stderr)
         return 1
 
     layer = "social" if args.layer == "social" else "body"
@@ -155,6 +178,8 @@ def cmd_rate(args) -> int:
             "situation": p["situation"],
             "a": p["a_label"],
             "b": p["b_label"],
+            "a_id": source_ids.get(p["a_label"], ""),
+            "b_id": source_ids.get(p["b_label"], ""),
             "winner": winner,
             "view_a": pairwise_ranker.render_clip_view(p["clip_a"], layer=layer),
             "view_b": pairwise_ranker.render_clip_view(p["clip_b"], layer=layer),
@@ -193,10 +218,21 @@ def cmd_llm_agree(args) -> int:
         llm_labels.append(llm_ans)
 
     res = pairwise_ranker.check_judge_agreement(human_labels, llm_labels)
+    pairwise_ranker.update_judge_gate(
+        {
+            "llm_url": args.llm_url,
+            "agreement": res["agreement"],
+            "kappa": res["kappa"],
+            "agreement_n": res["n"],
+            "agreement_valid": res["valid"],
+            "agreement_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        },
+        path=args.judge_gate,
+    )
     print(
         f"LLM judge agreement on {res['n']} blind pairs: "
         f"agree={res['agreement']*100:.1f}%, kappa={res['kappa']:.3f}, "
-        f"valid={'YES' if res['valid'] else 'NO'}"
+        f"valid={'YES' if res['valid'] else 'NO'} (saved -> {args.judge_gate})"
     )
     return 0 if res["valid"] else 1
 
@@ -229,10 +265,18 @@ def main() -> int:
     p_rate.add_argument("--clip-s", type=float, default=45.0)
     p_rate.add_argument("--layer", choices=["body", "social"], default="body")
     p_rate.add_argument("--seed", type=int, default=None)
+    p_rate.add_argument(
+        "--include-human-anchors",
+        action="store_true",
+        help="Include human clips even with <2 distinct human players (for external judges)",
+    )
 
     p_agree = sub.add_parser("llm-agree", help="Check LLM judge agreement with your blind ratings")
     p_agree.add_argument("--llm-url", default="http://127.0.0.1:8090")
     p_agree.add_argument("--last", type=int, default=30)
+    p_agree.add_argument(
+        "--judge-gate", type=pathlib.Path, default=pairwise_ranker.DEFAULT_JUDGE_GATE_FILE
+    )
 
     sub.add_parser("summary", help="Print Bradley-Terry ratings from recorded blind ratings")
 
