@@ -51,6 +51,8 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"questcomplete", HandleQuestComplete, SEC_ADMINISTRATOR, Console::Yes},
         {"item", HandleItem, SEC_ADMINISTRATOR, Console::Yes},
         {"checkstrat", HandleCheckStrat, SEC_ADMINISTRATOR, Console::Yes},
+        {"resetbot", HandleResetBot, SEC_ADMINISTRATOR, Console::Yes},
+        {"where", HandleWhere, SEC_ADMINISTRATOR, Console::Yes},
     };
     static ChatCommandTable root_table = {
         {"llmtest", test_table},
@@ -171,8 +173,8 @@ class LlmBrainTestCommandScript : public CommandScript {
       return false;
     }
     handler->PSendSysMessage(
-        "llmtest: teleported {} to map {} ({:.1f}, {:.1f}, {:.1f})",
-        player->GetName(), map_id, x, y, z);
+        "llmtest: teleported {} to map {} ({:.1f}, {:.1f}, {:.1f}) instance={}",
+        player->GetName(), map_id, x, y, z, player->GetInstanceId());
     return true;
   }
 
@@ -255,6 +257,49 @@ class LlmBrainTestCommandScript : public CommandScript {
     }
     handler->PSendSysMessage("llmtest: added item {} to {}", item_id,
                              player->GetName());
+    return true;
+  }
+
+  static bool HandleResetBot(ChatHandler* handler, std::string player_name) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player) {
+      return false;
+    }
+    if (!player->IsAlive()) {
+      player->ResurrectPlayer(1.0f);
+      player->SpawnCorpseBones();
+    }
+    player->CombatStopWithPets(true);
+    player->RemoveAllAuras();
+    player->RemoveAllSpellCooldown();
+    player->DurabilityRepairAll(false, 0, false);
+    player->SetFullHealth();
+    player->SetPower(POWER_MANA, player->GetMaxPower(POWER_MANA));
+    if (Group* group = player->GetGroup()) {
+      if (group->GetLeaderGUID() == player->GetGUID()) {
+        group->ResetInstances(INSTANCE_RESET_ALL, false, player);
+        group->ResetInstances(INSTANCE_RESET_ALL, true, player);
+      }
+    } else {
+      Player::ResetInstances(player->GetGUID(), INSTANCE_RESET_ALL, false);
+      Player::ResetInstances(player->GetGUID(), INSTANCE_RESET_ALL, true);
+    }
+    handler->PSendSysMessage(
+        "llmtest: resetbot {} alive={} hp={}/{} mana={}/{} inst={}",
+        player->GetName(), player->IsAlive() ? 1 : 0, player->GetHealth(),
+        player->GetMaxHealth(), player->GetPower(POWER_MANA),
+        player->GetMaxPower(POWER_MANA), player->GetInstanceId());
+    return true;
+  }
+
+  static bool HandleWhere(ChatHandler* handler, std::string player_name) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player) {
+      return false;
+    }
+    handler->PSendSysMessage(
+        "llmtest: where {} map={} instance={} alive={}", player->GetName(),
+        player->GetMapId(), player->GetInstanceId(), player->IsAlive() ? 1 : 0);
     return true;
   }
 };

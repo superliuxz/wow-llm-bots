@@ -9,7 +9,7 @@ Last updated 2026-11-20.
 
 ## In progress
 
-- Re-run the 4-mode boss benchmark (`no_brain`, `llm_no_notes`, `llm`, `baseline`) with the fixed runner (`bench_bosses.py`) and sufficient trials per boss once boss-mechanic fixes (radius-based `away`, `"Attack <tank>'s target"`, usable bag items for Eregos) are ready.
+- Run the clean 4-mode boss benchmark (`no_brain`, `llm_no_notes`, `llm`, `baseline`) with `--parallel 3` (and 6–9 runs per boss) to get statistically valid comparison data.
 
 ## Next, in order
 
@@ -91,6 +91,14 @@ Last updated 2026-11-20.
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-20: **Fast parallel 3-party boss benchmark (`tools/bench/bench_bosses.py`, `test_commands.cc`):**
+  added `llmtest resetbot` (revive, clear all auras/Sated/cooldowns, repair, full HP/mana, reset
+  instances) and `llmtest where` (`map=<id> instance=<id> alive=1`), raised
+  `AccountInstancesPerHour = 1000` on the test server, and upgraded `bench_bosses.py` to run
+  `--parallel 3` identical 5-man parties in one persistent `worldserver` with verified distinct
+  dungeon instance IDs, fresh `--bots-dir` per wave, and `p50`/`p95` decision latency logging.
+  Live-verified on Ikiss (`--runs 3 --parallel 3`): 3 distinct instances (`[1, 2, 3]`), all 15
+  bots passed role + `resetbot` + post-arrival `checkstrat tbc-seth`, finished in ~2.2 min total.
 - 2026-11-20: **Review fixes on `trace-all-events` (all 9 open items verified):**
   `server.console()` now returns captured output (`tools/wlblib/server.py`); `bench_bosses.py`
   stages bots inside the dungeon before starting `harness`, enforces unconditional role checks and
