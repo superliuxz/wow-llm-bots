@@ -223,16 +223,16 @@ class LlmBrainChatScript : public PlayerScript {
               .count();
       const int64_t mono_us =
           (base::TimeTicks::Now() - base::TimeTicks()).InMicroseconds();
-      // Record timing and byte length only (never private whisper text) so
-      // human-baseline reply delay / length metrics work without logging chat
-      // contents.
+      // Record timing and byte length only (never private whisper text or
+      // other players' names) so human-baseline reply delay / length metrics
+      // work without logging chat contents or peer identities.
       if (!GET_PLAYERBOT_AI(player)) {
         trace->WriteChat({t_ms, mono_us, "human", player->GetName(), "out",
-                          "whisper", receiver->GetName(), "", msg.size()});
+                          "whisper", "", "", msg.size()});
       }
       if (!GET_PLAYERBOT_AI(receiver)) {
         trace->WriteChat({t_ms, mono_us, "human", receiver->GetName(), "in",
-                          "whisper", player->GetName(), "", msg.size()});
+                          "whisper", "", "", msg.size()});
       }
     }
     pb::ChatEvent chat;

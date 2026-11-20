@@ -27,20 +27,21 @@ from wlblib import build, server  # noqa: E402
 from wlblib.common import OUT, TEST, VAR, say  # noqa: E402
 from wlblib.testing import LlamaServer  # noqa: E402
 
+# (name, race:class, spec_tab, expected_role)
 PARTY_5 = [
-    ("Loada", "human:warrior"),    # Tank
-    ("Loadb", "human:priest"),     # Healer
-    ("Loadc", "human:mage"),       # DPS
-    ("Loadd", "human:warlock"),    # DPS
-    ("Loade", "nightelf:hunter"),  # DPS
+    ("Loada", "human:warrior", 2, "tank"),     # Protection Warrior (Tank)
+    ("Loadb", "human:priest", 1, "heal"),      # Holy Priest (Healer)
+    ("Loadc", "human:mage", 2, "dps"),         # Frost Mage (DPS)
+    ("Loadd", "human:warlock", 2, "dps"),      # Destruction Warlock (DPS)
+    ("Loade", "nightelf:hunter", 1, "dps"),    # Marksmanship Hunter (DPS)
 ]
 
 RAID_10 = PARTY_5 + [
-    ("Loadf", "dwarf:paladin"),    # Off-tank (Hateful Strike soaker)
-    ("Loadg", "nightelf:druid"),   # Healer 2
-    ("Loadh", "human:rogue"),      # Melee DPS
-    ("Loadi", "dwarf:warrior"),    # Melee DPS
-    ("Loadj", "human:mage"),       # Ranged DPS
+    ("Loadf", "dwarf:paladin", 1, "tank"),     # Protection Paladin (Off-tank)
+    ("Loadg", "nightelf:druid", 2, "heal"),    # Restoration Druid (Healer 2)
+    ("Loadh", "human:rogue", 1, "dps"),        # Combat Rogue (Melee DPS)
+    ("Loadi", "dwarf:warrior", 1, "dps"),      # Fury Warrior (Melee DPS)
+    ("Loadj", "human:mage", 0, "dps"),         # Arcane Mage (Ranged DPS)
 ]
 
 ICK_NOTES = """# Pit of Saron — Ick & Krick
@@ -92,11 +93,11 @@ KAELTHAS_NOTES = """# Magisters' Terrace — Kael'thas Sunstrider
 - **Gravity Lapse**: floats everyone in the air and spawns Arcane Spheres; stay clear of spheres.
 """
 
-DRAKKISATH_NOTES = """# Upper Blackrock Spire — General Drakkisath
-- **Conflagration**: incapacitates the current target for 10s and drops threat; healers keep the off-target alive and DPS watch threat.
-- **Flamestrike**: fiery ground AoE; move out immediately.
-  - Standing order: `Flamestrike appears -> avoid Flamestrike`
-- **Cleave**: frontal melee cleave; non-tanks stay behind General Drakkisath.
+THERADRAS_NOTES = """# Maraudon — Princess Theradras
+- **Dust Field**: heavy physical AoE + knockback around the boss; ranged/healers stay far back and melee run out during Dust Field.
+  - Standing order: `Dust Field cast -> away Princess Theradras 20`
+- **Repulsive Gaze**: fears the current target and drops threat; tank re-taunts promptly and healers keep the off-target alive.
+- **Boulder**: throws a boulder at a ranged player, stunning them; stay spread.
 """
 
 RATTLEGORE_NOTES = """# Scholomance — Rattlegore
@@ -159,7 +160,7 @@ BOSSES = {
         level=70,
         map_id=555,
         spawn_xyz=(-157.9, -475.0, 15.9),
-        strip_strat="tbc-sl",
+        strip_strat="",
         notes_md=MURMUR_NOTES,
         max_s=210.0,
     ),
@@ -170,7 +171,7 @@ BOSSES = {
         level=68,
         map_id=556,
         spawn_xyz=(44.7, 265.0, 25.2),
-        strip_strat="tbc-sh",
+        strip_strat="tbc-seth",
         notes_md=IKISS_NOTES,
         max_s=210.0,
     ),
@@ -186,14 +187,14 @@ BOSSES = {
         notes_md=KAELTHAS_NOTES,
         max_s=210.0,
     ),
-    "drakkisath": dict(
+    "theradras": dict(
         era="Classic",
-        tag="drakkisath_ubrs",
-        boss_name="General Drakkisath",
-        level=60,
-        map_id=229,
-        spawn_xyz=(36.5, -268.0, 111.0),
-        notes_md=DRAKKISATH_NOTES,
+        tag="theradras_mara",
+        boss_name="Princess Theradras",
+        level=50,
+        map_id=349,
+        spawn_xyz=(27.9, 65.0, -124.5),
+        notes_md=THERADRAS_NOTES,
         max_s=210.0,
     ),
     "rattlegore": dict(
@@ -287,35 +288,41 @@ def run_boss(
         server.wait_online_count(len(party), inst=TEST)
 
         leader = party[0][0]
-        for name, _ in party[1:]:
+        for name, _, _, _ in party[1:]:
             server.console(f"llmtest group {leader} {name}", inst=TEST)
-        for idx, (name, _) in enumerate(party):
-            server.console(f"llmtest gear {name} {level}", inst=TEST)
+        for idx, (name, _, spec_tab, expected_role) in enumerate(party):
+            out = server.console(f"llmtest gear {name} {level} {spec_tab}", inst=TEST)
+            if out and f"role={expected_role}" not in out:
+                raise RuntimeError(
+                    f"role mismatch for {name}: expected role={expected_role}, got: {out!r}"
+                )
             for qid in (attune_quests or []):
                 server.console(f"llmtest questcomplete {name} {qid}", inst=TEST)
             if role_items and idx in role_items:
                 server.console(f"llmtest item {name} {role_items[idx]}", inst=TEST)
 
-        # Pre-pull prep window so Mage/Warlock/Priest conjure & buff before pull.
-        time.sleep(10.0)
-        x, y, z = spawn_xyz
-        for idx, (name, _) in enumerate(party):
-            server.console(
-                f"llmtest tele {name} {map_id} {x + (idx % 5) * 0.8:.2f} {y + (idx // 5) * 0.8:.2f} {z:.2f} 0",
-                inst=TEST,
-            )
-        time.sleep(3.0)
+        # Wait for BotManager::EnsureStrategies to re-apply strategies after gear/spec reset,
+        # then verify any stripped dungeon boss script actually exists and is OFF.
+        time.sleep(2.5)
+        if strip_strat:
+            chk = server.console(f"llmtest checkstrat {leader} {strip_strat}", inst=TEST)
+            if chk and "exists=1" not in chk:
+                raise RuntimeError(f"stripped strategy {strip_strat!r} does not exist: {chk!r}")
+            if not baseline and chk and ("combat=0" not in chk or "noncombat=0" not in chk):
+                raise RuntimeError(f"strategy {strip_strat!r} was not stripped: {chk!r}")
 
         with tempfile.TemporaryDirectory(prefix=f"wlb-boss-{mode_tag}-") as tmp:
             tmp_dir = pathlib.Path(tmp)
             bots_dir = tmp_dir / "bots"
             bots_dir.mkdir(parents=True)
             if notes_md and not baseline:
-                for name, _ in party:
+                for name, _, _, _ in party:
                     bdir = bots_dir / name
                     bdir.mkdir(parents=True, exist_ok=True)
                     (bdir / "notes.md").write_text(notes_md)
             harness_log = tmp_dir / "harness.log"
+            # Start harness BEFORE teleporting to the boss so the LLM brain is live
+            # before pull and handles the opening instead of playerbots acting alone.
             proc = subprocess.Popen(
                 [
                     str(OUT / "common" / "harness"),
@@ -332,6 +339,15 @@ def run_boss(
                 stdout=harness_log.open("w"),
                 stderr=subprocess.STDOUT,
             )
+            # Pre-pull prep window: let harness connect and bots buff/conjure safely.
+            time.sleep(10.0)
+            x, y, z = spawn_xyz
+            for idx, (name, _, _, _) in enumerate(party):
+                server.console(
+                    f"llmtest tele {name} {map_id} {x + (idx % 5) * 0.8:.2f} {y + (idx // 5) * 0.8:.2f} {z:.2f} 0",
+                    inst=TEST,
+                )
+            time.sleep(2.0)
             t0 = time.monotonic()
             say(f"boss benchmark [{era} | {mode_tag}]: {boss_name} (L{level} {len(party)}-man, cap {max_s:.0f}s)")
             try:

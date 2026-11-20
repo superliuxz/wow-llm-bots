@@ -13,7 +13,9 @@
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "Player.h"
+#include "PlayerbotAI.h"
 #include "PlayerbotFactory.h"
+#include "Playerbots.h"
 #include "SharedDefines.h"
 
 namespace llm_brain {
@@ -48,6 +50,7 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"gear", HandleGear, SEC_ADMINISTRATOR, Console::Yes},
         {"questcomplete", HandleQuestComplete, SEC_ADMINISTRATOR, Console::Yes},
         {"item", HandleItem, SEC_ADMINISTRATOR, Console::Yes},
+        {"checkstrat", HandleCheckStrat, SEC_ADMINISTRATOR, Console::Yes},
     };
     static ChatCommandTable root_table = {
         {"llmtest", test_table},
@@ -175,18 +178,54 @@ class LlmBrainTestCommandScript : public CommandScript {
 
   static bool HandleGear(ChatHandler* handler,
                          std::string player_name,
-                         uint32_t level) {
+                         uint32_t level,
+                         Optional<int32_t> spec_tab) {
     Player* player = FindOnlinePlayer(handler, std::move(player_name));
     if (!player) {
       return false;
     }
     PlayerbotFactory factory(player, level, ITEM_QUALITY_EPIC);
     factory.Randomize(false);
+    if (spec_tab && *spec_tab >= 0 && *spec_tab <= 3) {
+      PlayerbotFactory::InitTalentsBySpecNo(player, *spec_tab, true);
+      factory.InitEquipment(false);
+      if (PlayerbotAI* ai = GET_PLAYERBOT_AI(player)) {
+        ai->ResetStrategies();
+      }
+    }
     player->SetFullHealth();
     player->SetPower(POWER_MANA, player->GetMaxPower(POWER_MANA));
-    handler->PSendSysMessage("llmtest: geared {} at level {} (hp={})",
-                             player->GetName(), level, player->GetMaxHealth());
+    const char* role = PlayerbotAI::IsTank(player)
+                           ? "tank"
+                           : (PlayerbotAI::IsHeal(player) ? "heal" : "dps");
+    handler->PSendSysMessage("llmtest: geared {} at level {} (role={}, hp={})",
+                             player->GetName(), level, role,
+                             player->GetMaxHealth());
     return true;
+  }
+
+  static bool HandleCheckStrat(ChatHandler* handler,
+                               std::string player_name,
+                               std::string strat_name) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player) {
+      return false;
+    }
+    PlayerbotAI* ai = GET_PLAYERBOT_AI(player);
+    if (!ai || !ai->GetAiObjectContext()) {
+      handler->SendErrorMessage("llmtest: {} has no PlayerbotAI",
+                                player->GetName());
+      return false;
+    }
+    const bool exists =
+        ai->GetAiObjectContext()->GetStrategy(strat_name) != nullptr;
+    const bool in_combat = ai->HasStrategy(strat_name, BOT_STATE_COMBAT);
+    const bool non_combat = ai->HasStrategy(strat_name, BOT_STATE_NON_COMBAT);
+    handler->PSendSysMessage(
+        "llmtest: strat {} on {} exists={} combat={} noncombat={}", strat_name,
+        player->GetName(), exists ? 1 : 0, in_combat ? 1 : 0,
+        non_combat ? 1 : 0);
+    return exists;
   }
 
   static bool HandleQuestComplete(ChatHandler* handler,
