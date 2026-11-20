@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <optional>
 #include <string>
@@ -17,6 +18,7 @@
 #include "DBCStructure.h"
 #include "Define.h"
 #include "GameObject.h"
+#include "Group.h"
 #include "Log.h"
 #include "Map.h"
 #include "ObjectAccessor.h"
@@ -158,6 +160,10 @@ TargetProgress OptionTargetProgress(Player* bot,
       }
       return bot->IsInCombat() ? cut("you are in combat") : pending();
     case OptionTarget::Kind::kKeep:
+    case OptionTarget::Kind::kInvite:
+    case OptionTarget::Kind::kAcceptInvite:
+    case OptionTarget::Kind::kDeclineInvite:
+    case OptionTarget::Kind::kLeaveGroup:
       return done();
   }
   return done();
@@ -329,6 +335,7 @@ class LlmBrainWorldScript : public WorldScript {
         continue;  // Offline (or not in the world yet).
       }
       StepActiveOption(bot, i, config_.bots[i], now);
+      CheckPendingGroupInvite(bot, i, config_.bots[i]);
       const SnapshotSchedule::Flags flags = CurrentFlags(bot, i);
       if (schedule_->IsDue(i, now, flags)) {
         SendSnapshot(i, config_.bots[i], bot);
@@ -459,13 +466,37 @@ class LlmBrainWorldScript : public WorldScript {
     return config_.bots.size();
   }
 
-  // Whispers the bots heard since the last update, each sent to the harness
-  // as an event (with a fresh snapshot first, like any alerting event).
+  static std::string TraceChannelName(wlb::snapshot::ChatChannel ch) {
+    switch (ch) {
+      case wlb::snapshot::WHISPER:
+        return "whisper";
+      case wlb::snapshot::SAY:
+        return "say";
+      case wlb::snapshot::YELL:
+        return "yell";
+      case wlb::snapshot::PARTY:
+        return "party";
+      case wlb::snapshot::RAID:
+        return "raid";
+      case wlb::snapshot::GENERAL:
+        return "general";
+      case wlb::snapshot::TRADE:
+        return "trade";
+      case wlb::snapshot::LFG:
+        return "lfg";
+      default:
+        return "chat";
+    }
+  }
+
+  // Chat lines (whisper, say, party, general) the bots heard since the last
+  // update, sent to the harness as events.
   void DeliverChat() {
     if (const size_t dropped = inbox_->TakeDropped()) {
       LOG_WARN("module", "mod-llm-brain: {} chat lines dropped (inbox full)",
                dropped);
     }
+    const base::TimeTicks now = base::TimeTicks::Now();
     for (ChatInbox::Line& line : inbox_->TakeAll()) {
       const size_t index = BotIndex(line.to);
       Player* bot = ObjectAccessor::FindPlayerByName(line.to);
@@ -473,25 +504,67 @@ class LlmBrainWorldScript : public WorldScript {
           !bridge_->connected()) {
         continue;  // Nobody to tell: like a whisper while away.
       }
-      LOG_INFO("module", "mod-llm-brain: {} heard a whisper from {}: {}",
-               line.to, line.chat.from, line.chat.text);
+      const std::string ch_name = TraceChannelName(line.chat.channel);
+      LOG_INFO("module", "mod-llm-brain: {} heard {} from {}: {}", line.to,
+               ch_name, line.chat.from, line.chat.text);
+      if (!line.chat.from.empty() && line.chat.from != line.to) {
+        auto& chatters = bots_[index].recent_chatters;
+        std::erase_if(chatters, [&](const RecentChatter& rc) {
+          return rc.name == line.chat.from;
+        });
+        chatters.push_front({line.chat.from, now});
+        while (chatters.size() > 5) {
+          chatters.pop_back();
+        }
+      }
       if (trace_writer_ && trace_writer_->enabled()) {
-        const base::TimeTicks now = base::TimeTicks::Now();
         TraceChat tc;
         tc.time_ms = base::Time::Now().InMillisecondsSinceUnixEpoch();
         tc.monotonic_us = (now - base::TimeTicks()).InMicroseconds();
         tc.role = "bot";
         tc.name = line.to;
         tc.direction = "in";
-        tc.channel = "whisper";
+        tc.channel = ch_name;
         tc.peer = line.chat.from;
         tc.text_len = line.chat.text.size();
         trace_writer_->WriteChat(tc);
       }
+      const bool alerting =
+          line.chat.channel == wlb::snapshot::WHISPER ||
+          line.chat.channel == wlb::snapshot::MONSTER_WHISPER ||
+          line.chat.channel == wlb::snapshot::RAID_WARNING ||
+          line.chat.channel == wlb::snapshot::BOSS_EMOTE || line.chat.at_me;
       wlb::snapshot::Event payload;
       payload.chat = std::move(line.chat);
-      EmitAlertingEvent(index, line.to, bot, std::move(payload));
+      if (alerting) {
+        EmitAlertingEvent(index, line.to, bot, std::move(payload));
+      } else {
+        SendImmediateEvent(index, line.to, std::move(payload));
+      }
     }
+  }
+
+  void CheckPendingGroupInvite(Player* bot,
+                               size_t index,
+                               const std::string& name) {
+    Group* invite = bot->GetGroupInvite();
+    BotState& state = bots_[index];
+    if (!invite) {
+      state.seen_group_invite_leader.clear();
+      return;
+    }
+    const std::string leader = invite->GetLeaderName();
+    if (leader.empty() || leader == state.seen_group_invite_leader) {
+      return;
+    }
+    state.seen_group_invite_leader = leader;
+    LOG_INFO("module", "mod-llm-brain: {} received group invite from {}", name,
+             leader);
+    wlb::snapshot::Event payload;
+    wlb::snapshot::PromptEvent& prompt = payload.prompt.emplace();
+    prompt.kind = wlb::snapshot::PromptEvent::GROUP_INVITE;
+    prompt.from = leader;
+    EmitAlertingEvent(index, name, bot, std::move(payload));
   }
 
   // A command from the harness (docs/specs/snapshot.md §9): Choose and Say.
@@ -691,7 +764,7 @@ class LlmBrainWorldScript : public WorldScript {
       tc.role = "bot";
       tc.name = name;
       tc.direction = "out";
-      tc.channel = say.channel == wlb::snapshot::WHISPER ? "whisper" : "say";
+      tc.channel = TraceChannelName(say.channel);
       tc.peer = say.to;
       tc.text = say.text;
       trace_writer_->WriteChat(tc);
@@ -1008,6 +1081,32 @@ class LlmBrainWorldScript : public WorldScript {
     const NearbyBuilder::Stats nearby =
         state.builder->Build(bot, &snapshot, &facts, world_places_.get(),
                              &state.ui, item_spell_texts_.get(), start);
+    if (Group* invite = bot->GetGroupInvite()) {
+      facts.pending_group_invite_from = invite->GetLeaderName();
+    }
+    Group* cur_group = bot->GetGroup();
+    facts.can_leave_group = (cur_group != nullptr && !bot->IsInCombat());
+    const bool can_invite =
+        !bot->IsInCombat() &&
+        (!cur_group || ((cur_group->IsLeader(bot->GetGUID()) ||
+                         cur_group->IsAssistant(bot->GetGUID())) &&
+                        !cur_group->IsFull()));
+    if (can_invite) {
+      static constexpr base::TimeDelta kChatterMemory = base::Minutes(5);
+      for (const RecentChatter& rc : state.recent_chatters) {
+        if (start - rc.at > kChatterMemory ||
+            facts.invite_candidates.size() >= 3) {
+          break;
+        }
+        Player* other = ObjectAccessor::FindPlayerByName(rc.name);
+        if (!other || !other->IsInWorld() || other == bot ||
+            other->GetTeamId() != bot->GetTeamId() ||
+            other->GetGroup() != nullptr) {
+          continue;
+        }
+        facts.invite_candidates.push_back(rc.name);
+      }
+    }
     state.history.Add(snapshot.seq, start, AddOptions(&snapshot, facts));
     std::string bytes = wlb::snapshot::WriteBeve(message);
     stats_.Add({base::TimeTicks::Now() - start, bytes.size(), nearby.units,
@@ -1175,6 +1274,10 @@ class LlmBrainWorldScript : public WorldScript {
   size_t max_update_snapshots_ = 0;
   base::TimeDelta max_update_time_;
   SnapshotStats stats_;
+  struct RecentChatter {
+    std::string name;
+    base::TimeTicks at;
+  };
   struct BotState {
     // Snapshot counter (gaps tell the harness something was dropped).
     uint32_t seq = 0;
@@ -1204,6 +1307,10 @@ class LlmBrainWorldScript : public WorldScript {
     std::optional<ActiveAct> active_act;
     // Casts and auras on bot/target/attackers at the last sent snapshot.
     ReactiveSnapshotState last_reactive;
+    // Players who recently chatted to/near this bot (for group invite options).
+    std::deque<RecentChatter> recent_chatters;
+    // Leader name of the currently surfaced pending group invite.
+    std::string seen_group_invite_leader;
   };
   std::vector<BotState> bots_;
   // A wrong-version command was logged on this connection.

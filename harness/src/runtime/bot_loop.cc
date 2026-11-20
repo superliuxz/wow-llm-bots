@@ -162,14 +162,30 @@ constexpr size_t kMaxWhisperers = 4;
 void BotLoop::NoteWhisperer(BotState* state,
                             const pb::Event& event,
                             base::TimeTicks now) {
-  if (!event.chat || event.chat->channel != pb::WHISPER ||
-      event.chat->from.empty()) {
+  std::string from;
+  if (event.chat && !event.chat->from.empty()) {
+    switch (event.chat->channel) {
+      case pb::WHISPER:
+      case pb::PARTY:
+      case pb::SAY:
+      case pb::GENERAL:
+      case pb::LFG:
+        from = event.chat->from;
+        break;
+      default:
+        break;
+    }
+  } else if (event.prompt &&
+             event.prompt->kind == pb::PromptEvent::GROUP_INVITE &&
+             !event.prompt->from.empty()) {
+    from = event.prompt->from;
+  }
+  if (from.empty()) {
     return;
   }
-  const std::string& from = event.chat->from;
   std::erase_if(state->whisperers,
                 [&](const BotState::Whisperer& w) { return w.name == from; });
-  state->whisperers.push_front({from, now});
+  state->whisperers.push_front({std::move(from), now});
   if (state->whisperers.size() > kMaxWhisperers) {
     state->whisperers.pop_back();
   }
@@ -706,7 +722,21 @@ void BotLoop::OnReply(const std::string& bot,
           state.look_deadline = now + base::Seconds(plan->look_s);
         }
         if (!plan->say.empty()) {
-          SendSay(bot, pb::SAY, "", plan->say);
+          pb::ChatChannel ch = pb::SAY;
+          if (state.latest_snapshot->ext.party &&
+              !state.latest_snapshot->ext.party->members.empty()) {
+            for (const std::string& r : asked_reasons) {
+              if (r.find("party from ") != std::string::npos) {
+                ch = pb::PARTY;
+                break;
+              }
+              if (r.find("raid from ") != std::string::npos) {
+                ch = pb::RAID;
+                break;
+              }
+            }
+          }
+          SendSay(bot, ch, "", plan->say);
         }
         if (!plan->tell.empty()) {
           SendSay(bot, pb::WHISPER, plan->tell_to, plan->tell);

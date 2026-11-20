@@ -2,18 +2,24 @@
 
 #include "chat/chat_scripts.h"
 
+#include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
+#include "Channel.h"
 #include "Chat.h"
 #include "ChatCommand.h"
 #include "ChatCommandTags.h"
 #include "CommandScript.h"
 #include "Common.h"
 #include "Define.h"
+#include "Group.h"
 #include "Language.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
@@ -40,16 +46,145 @@ using Acore::ChatCommands::ChatCommandTable;
 using Acore::ChatCommands::Console;
 using Acore::ChatCommands::Tail;
 
-// Whispers to the bots. Runs on the sender's thread (a map update thread for
-// playerbots), so it only hands the line to the inbox.
+// Whispers, Say/Yell, Party/Raid, and General/Trade/LFG channel chat heard by
+// brain-run bots. Runs on the sender's thread, so it only hands lines to the
+// thread-safe ChatInbox.
 class LlmBrainChatScript : public PlayerScript {
  public:
   LlmBrainChatScript(ChatInbox* inbox,
                      std::atomic<BehaviorTraceWriter*>* human_trace)
       : PlayerScript("LlmBrainChatScript",
-                     {PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT}),
+                     {PLAYERHOOK_CAN_PLAYER_USE_CHAT,
+                      PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT,
+                      PLAYERHOOK_CAN_PLAYER_USE_GROUP_CHAT,
+                      PLAYERHOOK_CAN_PLAYER_USE_CHANNEL_CHAT}),
         inbox_(inbox),
         human_trace_(human_trace) {}
+
+  bool OnPlayerCanUseChat(Player* player,
+                          uint32 type,
+                          uint32 language,
+                          std::string& msg) override {
+    if (!player || language == LANG_ADDON || msg.empty()) {
+      return true;
+    }
+    if (type != CHAT_MSG_SAY && type != CHAT_MSG_YELL) {
+      return true;
+    }
+    const bool is_yell = (type == CHAT_MSG_YELL);
+    const float max_dist =
+        is_yell ? sWorld->getFloatConfig(CONFIG_LISTEN_RANGE_YELL)
+                : sWorld->getFloatConfig(CONFIG_LISTEN_RANGE_SAY);
+    const bool cross_faction =
+        sWorld->getBoolConfig(CONFIG_ALLOW_TWO_SIDE_INTERACTION_CHAT);
+    const bool sender_is_human = GET_PLAYERBOT_AI(player) == nullptr;
+    for (const std::string& bot_name : inbox_->Bots()) {
+      if (bot_name == player->GetName()) {
+        continue;
+      }
+      Player* bot = ObjectAccessor::FindPlayerByName(bot_name);
+      if (!bot || !bot->IsInWorld() || bot->GetMapId() != player->GetMapId()) {
+        continue;
+      }
+      if (!cross_faction && bot->GetTeamId() != player->GetTeamId()) {
+        continue;
+      }
+      const float dist = bot->GetDistance(player);
+      if (dist > max_dist) {
+        continue;
+      }
+      pb::ChatEvent chat;
+      chat.channel = is_yell ? pb::YELL : pb::SAY;
+      chat.from = player->GetName();
+      chat.text = msg;
+      chat.from_dist_yd = dist;
+      chat.at_me = MentionsName(msg, bot_name) ||
+                   (!is_yell && sender_is_human && dist <= 15.0f);
+      inbox_->Add(bot_name, std::move(chat));
+    }
+    return true;
+  }
+
+  bool OnPlayerCanUseChat(Player* player,
+                          uint32 type,
+                          uint32 language,
+                          std::string& msg,
+                          Group* group) override {
+    if (!player || !group || language == LANG_ADDON || msg.empty()) {
+      return true;
+    }
+    if (type != CHAT_MSG_PARTY && type != CHAT_MSG_PARTY_LEADER &&
+        type != CHAT_MSG_RAID && type != CHAT_MSG_RAID_LEADER) {
+      return true;
+    }
+    const bool is_raid =
+        (type == CHAT_MSG_RAID || type == CHAT_MSG_RAID_LEADER);
+    for (const std::string& bot_name : inbox_->Bots()) {
+      if (bot_name == player->GetName()) {
+        continue;
+      }
+      Player* bot = ObjectAccessor::FindPlayerByName(bot_name);
+      if (!bot || !bot->IsInWorld() || bot->GetGroup() != group) {
+        continue;
+      }
+      pb::ChatEvent chat;
+      chat.channel = is_raid ? pb::RAID : pb::PARTY;
+      chat.from = player->GetName();
+      chat.text = msg;
+      chat.at_me = !is_raid || MentionsName(msg, bot_name);
+      inbox_->Add(bot_name, std::move(chat));
+    }
+    return true;
+  }
+
+  bool OnPlayerCanUseChat(Player* player,
+                          uint32 type,
+                          uint32 language,
+                          std::string& msg,
+                          Channel* channel) override {
+    if (!player || !channel || type != CHAT_MSG_CHANNEL ||
+        language == LANG_ADDON || msg.empty()) {
+      return true;
+    }
+    const std::string& cname = channel->GetName();
+    pb::ChatChannel ch = pb::CUSTOM_CHANNEL;
+    if (cname.starts_with("General")) {
+      ch = pb::GENERAL;
+    } else if (cname.starts_with("Trade")) {
+      ch = pb::TRADE;
+    } else if (cname.starts_with("LookingForGroup")) {
+      ch = pb::LFG;
+    }
+    const bool cross_faction =
+        sWorld->getBoolConfig(CONFIG_ALLOW_TWO_SIDE_INTERACTION_CHAT);
+    const bool sender_is_human = GET_PLAYERBOT_AI(player) == nullptr;
+    for (const std::string& bot_name : inbox_->Bots()) {
+      if (bot_name == player->GetName()) {
+        continue;
+      }
+      Player* bot = ObjectAccessor::FindPlayerByName(bot_name);
+      if (!bot || !bot->IsInWorld()) {
+        continue;
+      }
+      if (!cross_faction && bot->GetTeamId() != player->GetTeamId()) {
+        continue;
+      }
+      if (ch == pb::GENERAL && bot->GetZoneId() != player->GetZoneId()) {
+        continue;
+      }
+      pb::ChatEvent chat;
+      chat.channel = ch;
+      chat.channel_name = cname;
+      chat.from = player->GetName();
+      chat.text = msg;
+      // Wake bots on human General/LFG calls or direct name mentions (avoid
+      // bot-to-bot General chatter loops).
+      chat.at_me = MentionsName(msg, bot_name) ||
+                   (sender_is_human && (ch == pb::GENERAL || ch == pb::LFG));
+      inbox_->Add(bot_name, std::move(chat));
+    }
+    return true;
+  }
 
   bool OnPlayerCanUseChat(Player* player,
                           uint32 type,
@@ -139,6 +274,18 @@ class LlmBrainChatScript : public PlayerScript {
   }
 
  private:
+  static bool MentionsName(std::string_view text, std::string_view name) {
+    if (name.empty() || text.size() < name.size()) {
+      return false;
+    }
+    auto it = std::search(
+        text.begin(), text.end(), name.begin(), name.end(), [](char a, char b) {
+          return std::tolower(static_cast<unsigned char>(a)) ==
+                 std::tolower(static_cast<unsigned char>(b));
+        });
+    return it != text.end();
+  }
+
   const base::raw_ptr<ChatInbox> inbox_;
   const base::raw_ptr<std::atomic<BehaviorTraceWriter*>> human_trace_;
 };

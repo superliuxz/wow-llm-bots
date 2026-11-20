@@ -41,6 +41,10 @@ enum class OptionKind {
   kExplore,  // Explore somewhere new.
   kRest,
   kTown,  // Go to the nearest town.
+  kInvite,
+  kAcceptInvite,
+  kDeclineInvite,
+  kLeaveGroup,
 };
 
 // "attack", "talk", "loot", ...

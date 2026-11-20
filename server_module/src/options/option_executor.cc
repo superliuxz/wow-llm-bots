@@ -1117,6 +1117,64 @@ ExecuteResult ExecuteOption(Player* bot,
       target.kind == OptionTarget::Kind::kGoTo) {
     return ExecuteWalkOption(bot, target, walk);
   }
+  if (target.kind == OptionTarget::Kind::kInvite) {
+    WorldSession* session = bot->GetSession();
+    if (!session) {
+      return {"no session"};
+    }
+    std::string player_name = target.name;
+    Player* other = normalizePlayerName(player_name)
+                        ? ObjectAccessor::FindPlayerByName(player_name)
+                        : nullptr;
+    if (!other || !other->IsInWorld()) {
+      return {target.name + " is not online"};
+    }
+    if (other == bot) {
+      return {"you can't invite yourself"};
+    }
+    if (other->GetGroup() != nullptr) {
+      return {target.name + " is already in a group"};
+    }
+    if (Group* g = bot->GetGroup();
+        g && !g->IsLeader(bot->GetGUID()) && !g->IsAssistant(bot->GetGUID())) {
+      return {"only the group leader can invite"};
+    }
+    WorldPacket pkt(CMSG_GROUP_INVITE, player_name.size() + 5);
+    pkt << player_name << uint32(0);
+    session->HandleGroupInviteOpcode(pkt);
+    return {.used = true, .info = "invited " + target.name + " to group"};
+  }
+  if (target.kind == OptionTarget::Kind::kAcceptInvite) {
+    WorldSession* session = bot->GetSession();
+    if (!session || !bot->GetGroupInvite()) {
+      return {"no pending group invite"};
+    }
+    WorldPacket pkt(CMSG_GROUP_ACCEPT, 4);
+    pkt << uint32(0);
+    session->HandleGroupAcceptOpcode(pkt);
+    if (!bot->GetGroup()) {
+      return {"couldn't join group"};
+    }
+    return {.used = true, .info = "joined " + target.name + "'s group"};
+  }
+  if (target.kind == OptionTarget::Kind::kDeclineInvite) {
+    WorldSession* session = bot->GetSession();
+    if (!session || !bot->GetGroupInvite()) {
+      return {"no pending group invite"};
+    }
+    WorldPacket pkt(CMSG_GROUP_DECLINE, 0);
+    session->HandleGroupDeclineOpcode(pkt);
+    return {.used = true, .info = "declined group invite from " + target.name};
+  }
+  if (target.kind == OptionTarget::Kind::kLeaveGroup) {
+    WorldSession* session = bot->GetSession();
+    if (!session || !bot->GetGroup()) {
+      return {"you are not in a group"};
+    }
+    WorldPacket pkt(CMSG_GROUP_DISBAND, 0);
+    session->HandleGroupDisbandOpcode(pkt);
+    return {.used = true, .info = "left the group"};
+  }
 
   Unit* unit = ObjectAccessor::GetUnit(*bot, ParseSnapshotGuid(target.guid));
   if (!unit || !unit->IsInWorld()) {
@@ -1173,6 +1231,10 @@ ExecuteResult ExecuteOption(Player* bot,
     case OptionTarget::Kind::kExplore:
     case OptionTarget::Kind::kGoTo:
     case OptionTarget::Kind::kKeep:
+    case OptionTarget::Kind::kInvite:
+    case OptionTarget::Kind::kAcceptInvite:
+    case OptionTarget::Kind::kDeclineInvite:
+    case OptionTarget::Kind::kLeaveGroup:
       break;  // Handled above.
   }
   return {};

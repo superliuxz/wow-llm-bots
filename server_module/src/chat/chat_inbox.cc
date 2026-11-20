@@ -23,6 +23,11 @@ void ChatInbox::SetBots(std::vector<std::string> bots) {
   bots_ = std::move(bots);
 }
 
+std::vector<std::string> ChatInbox::Bots() {
+  base::AutoLock lock(lock_);
+  return bots_;
+}
+
 bool ChatInbox::Add(std::string_view to, wlb::snapshot::ChatEvent chat) {
   base::AutoLock lock(lock_);
   if (std::find(bots_.begin(), bots_.end(), to) == bots_.end()) {

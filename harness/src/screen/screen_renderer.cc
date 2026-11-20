@@ -311,6 +311,10 @@ std::string_view OptionVerb(OptionKind kind) {
     case OptionKind::kExplore:
     case OptionKind::kRest:
     case OptionKind::kTown:
+    case OptionKind::kInvite:
+    case OptionKind::kAcceptInvite:
+    case OptionKind::kDeclineInvite:
+    case OptionKind::kLeaveGroup:
       return "";
   }
   return "";
@@ -342,6 +346,18 @@ ScreenOption FromModuleOption(const pb::Option& option) {
       break;
     case pb::Option::GO_TO:
       kind = OptionKind::kTown;
+      break;
+    case pb::Option::INVITE:
+      kind = OptionKind::kInvite;
+      break;
+    case pb::Option::ACCEPT_INVITE:
+      kind = OptionKind::kAcceptInvite;
+      break;
+    case pb::Option::DECLINE_INVITE:
+      kind = OptionKind::kDeclineInvite;
+      break;
+    case pb::Option::LEAVE_GROUP:
+      kind = OptionKind::kLeaveGroup;
       break;
     case pb::Option::KEEP:
     case pb::Option::KIND_UNSPECIFIED:
@@ -1223,6 +1239,14 @@ std::string_view OptionKindName(OptionKind kind) {
       return "rest";
     case OptionKind::kTown:
       return "go to town";
+    case OptionKind::kInvite:
+      return "invite";
+    case OptionKind::kAcceptInvite:
+      return "accept invite";
+    case OptionKind::kDeclineInvite:
+      return "decline invite";
+    case OptionKind::kLeaveGroup:
+      return "leave group";
   }
   return "?";
 }

@@ -25,8 +25,10 @@ choosing — don't pick option 1 out of habit. `around me:` is what is already a
   only show in the tooltip when you `hover:` an item.
 - When nothing on screen is worth doing, pick `Keep doing what I'm doing`: your body carries on
   by itself until something happens.
-- When a player whispers you, answer them in character with a `tell <their name>:` line (keep
-  playing while you do); ignore gold sellers and other spam.
+- When a player whispers you, talks to you nearby, or calls for help in General/Party chat,
+  answer them in character with a `tell <their name>:` or `say:` line (keep playing while you do),
+  and use the `Invite`, `Accept group invite`, or `Decline group invite` options when teaming up
+  for quests; ignore gold sellers and other spam.
 - Standing orders (`order: <when> -> <act>`, up to 3 steps joined by `, then `) carry out a fast
   reaction while your plan runs, without waiting for a wake: use `<name> cast` for a spell cast,
   `<name> on <who>` for an aura/debuff, and `<name> appears` for a unit or ground effect appearing

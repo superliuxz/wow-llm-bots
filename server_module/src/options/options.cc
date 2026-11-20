@@ -210,6 +210,14 @@ std::string TargetedOptionText(const OptionTarget& target) {
       return target.name;
     case OptionTarget::Kind::kKeep:
       return "Keep doing what I'm doing";
+    case OptionTarget::Kind::kInvite:
+      return "Invite " + target.name + " to group";
+    case OptionTarget::Kind::kAcceptInvite:
+      return "Accept group invite from " + target.name;
+    case OptionTarget::Kind::kDeclineInvite:
+      return "Decline group invite from " + target.name;
+    case OptionTarget::Kind::kLeaveGroup:
+      return "Leave group";
   }
   return "?";
 }
@@ -234,6 +242,14 @@ pb::Option::Kind ToProtoKind(OptionTarget::Kind kind) {
       return pb::Option::GO_TO;
     case OptionTarget::Kind::kKeep:
       return pb::Option::KEEP;
+    case OptionTarget::Kind::kInvite:
+      return pb::Option::INVITE;
+    case OptionTarget::Kind::kAcceptInvite:
+      return pb::Option::ACCEPT_INVITE;
+    case OptionTarget::Kind::kDeclineInvite:
+      return pb::Option::DECLINE_INVITE;
+    case OptionTarget::Kind::kLeaveGroup:
+      return pb::Option::LEAVE_GROUP;
   }
   return pb::Option::KIND_UNSPECIFIED;
 }
@@ -260,6 +276,14 @@ std::string_view OptionKindName(OptionTarget::Kind kind) {
       return "go to";
     case OptionTarget::Kind::kKeep:
       return "keep";
+    case OptionTarget::Kind::kInvite:
+      return "invite";
+    case OptionTarget::Kind::kAcceptInvite:
+      return "accept invite";
+    case OptionTarget::Kind::kDeclineInvite:
+      return "decline invite";
+    case OptionTarget::Kind::kLeaveGroup:
+      return "leave group";
   }
   return "?";
 }
@@ -344,6 +368,37 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       option.kind = pb::Option::GO_TO;
       option.name = place.name;
     }
+  }
+
+  if (!facts.pending_group_invite_from.empty()) {
+    const std::string& from = facts.pending_group_invite_from;
+    targets.push_back({OptionTarget::Kind::kAcceptInvite, "", from});
+    pb::Option& acc = snapshot->options.emplace_back();
+    acc.text = "Accept group invite from " + from;
+    acc.kind = pb::Option::ACCEPT_INVITE;
+    acc.name = from;
+
+    targets.push_back({OptionTarget::Kind::kDeclineInvite, "", from});
+    pb::Option& dec = snapshot->options.emplace_back();
+    dec.text = "Decline group invite from " + from;
+    dec.kind = pb::Option::DECLINE_INVITE;
+    dec.name = from;
+  }
+  for (const std::string& player_name : facts.invite_candidates) {
+    if (player_name.empty()) {
+      continue;
+    }
+    targets.push_back({OptionTarget::Kind::kInvite, "", player_name});
+    pb::Option& inv = snapshot->options.emplace_back();
+    inv.text = "Invite " + player_name + " to group";
+    inv.kind = pb::Option::INVITE;
+    inv.name = player_name;
+  }
+  if (facts.can_leave_group && !self.in_combat) {
+    targets.push_back({OptionTarget::Kind::kLeaveGroup, "", ""});
+    pb::Option& lv = snapshot->options.emplace_back();
+    lv.text = "Leave group";
+    lv.kind = pb::Option::LEAVE_GROUP;
   }
 
   targets.push_back({OptionTarget::Kind::kKeep, "", ""});

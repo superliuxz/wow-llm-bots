@@ -38,6 +38,11 @@ std::optional<base::TimeDelta> TimeoutForKind(OptionKind kind) {
     case OptionKind::kKeep:
       // `Keep` runs until the plan's own `look` timer or a surprise trigger.
       return std::nullopt;
+    case OptionKind::kInvite:
+    case OptionKind::kAcceptInvite:
+    case OptionKind::kDeclineInvite:
+    case OptionKind::kLeaveGroup:
+      return base::Seconds(10);
   }
   return std::nullopt;
 }
@@ -102,6 +107,10 @@ bool IsTargetDone(OptionKind kind,
     case OptionKind::kKeep:
     case OptionKind::kExplore:
     case OptionKind::kTown:
+    case OptionKind::kInvite:
+    case OptionKind::kAcceptInvite:
+    case OptionKind::kDeclineInvite:
+    case OptionKind::kLeaveGroup:
       return false;
   }
   return false;

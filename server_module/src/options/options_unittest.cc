@@ -269,6 +269,27 @@ TEST(OptionsTest, NothingForPlayersOrUnitsTooFarToName) {
             std::vector<std::string>{"Keep doing what I'm doing"});
 }
 
+TEST(OptionsTest, GroupInviteAcceptDeclineAndLeaveOptions) {
+  pb::Snapshot snapshot;
+  OptionFacts facts;
+  facts.pending_group_invite_from = "Hele";
+  facts.invite_candidates = {"Kelra"};
+  facts.can_leave_group = true;
+  const std::vector<OptionTarget> targets = AddOptions(&snapshot, facts);
+  EXPECT_EQ(Texts(snapshot),
+            (std::vector<std::string>{"Accept group invite from Hele",
+                                      "Decline group invite from Hele",
+                                      "Invite Kelra to group", "Leave group",
+                                      "Keep doing what I'm doing"}));
+  ASSERT_EQ(targets.size(), 5u);
+  EXPECT_EQ(targets[0].kind, OptionTarget::Kind::kAcceptInvite);
+  EXPECT_EQ(targets[0].name, "Hele");
+  EXPECT_EQ(targets[1].kind, OptionTarget::Kind::kDeclineInvite);
+  EXPECT_EQ(targets[2].kind, OptionTarget::Kind::kInvite);
+  EXPECT_EQ(targets[2].name, "Kelra");
+  EXPECT_EQ(targets[3].kind, OptionTarget::Kind::kLeaveGroup);
+}
+
 pb::GameObject* AddObject(pb::Snapshot* snapshot,
                           const std::string& name,
                           const std::string& guid,

@@ -306,7 +306,11 @@ struct glz::meta<wlb::snapshot::Option::Kind> {
                                                REST,
                                                EXPLORE,
                                                GO_TO,
-                                               KEEP);
+                                               KEEP,
+                                               INVITE,
+                                               ACCEPT_INVITE,
+                                               DECLINE_INVITE,
+                                               LEAVE_GROUP);
 };
 
 template <>

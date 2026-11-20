@@ -46,9 +46,13 @@ struct OptionTarget {
     kUse,     // Any other game object the body can click (chest, quest object).
     kTalk,    // A friendly NPC with a quest or service.
     kRest,    // Eat, drink or sit until full health and mana.
-    kExplore,  // Walk to a grind spot in the bot's zone.
-    kGoTo,     // Walk to a nearby hub, service or quest objective area.
-    kKeep,     // Keep doing what I'm doing: the body carries on.
+    kExplore,        // Walk to a grind spot in the bot's zone.
+    kGoTo,           // Walk to a nearby hub, service or quest objective area.
+    kKeep,           // Keep doing what I'm doing: the body carries on.
+    kInvite,         // Invite a player to a group.
+    kAcceptInvite,   // Accept a pending group invite.
+    kDeclineInvite,  // Decline a pending group invite.
+    kLeaveGroup,     // Leave the current party/raid.
   };
   Kind kind = Kind::kKeep;
   // The unit's or game object's guid ("0x..."), or stable spot/place id

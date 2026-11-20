@@ -5,7 +5,13 @@
 #include <cstdint>
 #include <string>
 
+#include "Channel.h"
+#include "ChannelMgr.h"
+#include "Chat.h"
 #include "Common.h"
+#include "DBCStores.h"
+#include "DBCStructure.h"
+#include "Group.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "Player.h"
@@ -13,6 +19,7 @@
 #include "SharedDefines.h"
 #include "World.h"
 #include "WorldConfig.h"
+#include "WorldPacket.h"
 #include "WorldSession.h"
 #include "chat/chat_text.h"
 #include "snapshot/snapshot.h"
@@ -116,6 +123,59 @@ std::string Speak(Player* bot, const pb::Command::Say& say) {
     case pb::YELL:
       bot->Yell(text, language);
       return "";
+    case pb::PARTY: {
+      Group* group = bot->GetGroup();
+      if (!group) {
+        return "you are not in a party";
+      }
+      WorldPacket data;
+      const ChatMsg msg_type = group->IsLeader(bot->GetGUID())
+                                   ? CHAT_MSG_PARTY_LEADER
+                                   : CHAT_MSG_PARTY;
+      ChatHandler::BuildChatPacket(data, msg_type, language, bot, bot, text);
+      group->BroadcastPacket(&data, false,
+                             group->GetMemberGroup(bot->GetGUID()));
+      return "";
+    }
+    case pb::RAID: {
+      Group* group = bot->GetGroup();
+      if (!group || !group->isRaidGroup()) {
+        return "you are not in a raid";
+      }
+      WorldPacket data;
+      const ChatMsg msg_type = group->IsLeader(bot->GetGUID())
+                                   ? CHAT_MSG_RAID_LEADER
+                                   : CHAT_MSG_RAID;
+      ChatHandler::BuildChatPacket(data, msg_type, language, bot, bot, text);
+      group->BroadcastPacket(&data, false);
+      return "";
+    }
+    case pb::GENERAL: {
+      ChannelMgr* cmgr = ChannelMgr::forTeam(bot->GetTeamId());
+      if (!cmgr) {
+        return "no channel manager";
+      }
+      std::string zone_name;
+      if (const AreaTableEntry* area =
+              sAreaTableStore.LookupEntry(bot->GetZoneId())) {
+        const char* zn = area->area_name[sWorld->GetDefaultDbcLocale()];
+        if (!zn || zn[0] == '\0') {
+          zn = area->area_name[0];
+        }
+        if (zn) {
+          zone_name = zn;
+        }
+      }
+      const std::string cname =
+          zone_name.empty() ? "General" : "General - " + zone_name;
+      Channel* chn = cmgr->GetJoinChannel(cname, 1);
+      if (!chn) {
+        return "cannot join " + cname;
+      }
+      chn->JoinChannel(bot, "");
+      chn->Say(bot->GetGUID(), text, language);
+      return "";
+    }
     case pb::WHISPER: {
       std::string name = say.to;
       Player* to = normalizePlayerName(name)

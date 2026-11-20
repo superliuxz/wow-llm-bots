@@ -1355,6 +1355,10 @@ struct Option {
     EXPLORE = 7,
     GO_TO = 8,
     KEEP = 9,
+    INVITE = 10,
+    ACCEPT_INVITE = 11,
+    DECLINE_INVITE = 12,
+    LEAVE_GROUP = 13,
   };
   using enum Kind;
 
@@ -2827,6 +2831,9 @@ struct OptionFacts {
   uint32_t mining_skill = 0;
   std::vector<OptionFacts_Spot> spots;
   std::vector<OptionFacts_Place> places;
+  std::string pending_group_invite_from;
+  std::vector<std::string> invite_candidates;
+  bool can_leave_group = false;
 
   bool operator==(const OptionFacts&) const = default;
 };
