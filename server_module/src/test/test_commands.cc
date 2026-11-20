@@ -46,6 +46,8 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"move", HandleMove, SEC_ADMINISTRATOR, Console::Yes},
         {"tele", HandleTele, SEC_ADMINISTRATOR, Console::Yes},
         {"gear", HandleGear, SEC_ADMINISTRATOR, Console::Yes},
+        {"questcomplete", HandleQuestComplete, SEC_ADMINISTRATOR, Console::Yes},
+        {"item", HandleItem, SEC_ADMINISTRATOR, Console::Yes},
     };
     static ChatCommandTable root_table = {
         {"llmtest", test_table},
@@ -88,6 +90,9 @@ class LlmBrainTestCommandScript : public CommandScript {
         return false;
       }
       sGroupMgr->AddGroup(group);
+    }
+    if (!group->isRaidGroup() && group->GetMembersCount() >= MAXGROUPSIZE) {
+      group->ConvertToRaid();
     }
     if (member->GetGroup() != group && !group->AddMember(member)) {
       handler->SendErrorMessage("llmtest: failed to add {} to group",
@@ -157,7 +162,7 @@ class LlmBrainTestCommandScript : public CommandScript {
     if (!player) {
       return false;
     }
-    if (!player->TeleportTo(map_id, x, y, z, o)) {
+    if (!player->TeleportTo(map_id, x, y, z, o, TELE_TO_GM_MODE)) {
       handler->SendErrorMessage("llmtest: TeleportTo map {} failed for {}",
                                 map_id, player->GetName());
       return false;
@@ -181,6 +186,36 @@ class LlmBrainTestCommandScript : public CommandScript {
     player->SetPower(POWER_MANA, player->GetMaxPower(POWER_MANA));
     handler->PSendSysMessage("llmtest: geared {} at level {} (hp={})",
                              player->GetName(), level, player->GetMaxHealth());
+    return true;
+  }
+
+  static bool HandleQuestComplete(ChatHandler* handler,
+                                  std::string player_name,
+                                  uint32_t quest_id) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player) {
+      return false;
+    }
+    player->SetRewardedQuest(quest_id);
+    handler->PSendSysMessage("llmtest: marked quest {} rewarded on {}",
+                             quest_id, player->GetName());
+    return true;
+  }
+
+  static bool HandleItem(ChatHandler* handler,
+                         std::string player_name,
+                         uint32_t item_id) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player) {
+      return false;
+    }
+    if (!player->AddItem(item_id, 1)) {
+      handler->SendErrorMessage("llmtest: AddItem {} failed on {}", item_id,
+                                player->GetName());
+      return false;
+    }
+    handler->PSendSysMessage("llmtest: added item {} to {}", item_id,
+                             player->GetName());
     return true;
   }
 };
