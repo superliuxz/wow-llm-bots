@@ -253,10 +253,13 @@ void ClearStaleCombatTarget(Player* bot) {
   if (!bot) {
     return;
   }
+  const bool is_healer = PlayerbotAI::IsHeal(bot);
+  const bool casting = bot->IsNonMeleeSpellCast(false);
   Unit* sel = bot->GetSelectedUnit();
   if (ShouldClearStaleCombatTarget(bot->IsInCombat(), bot->IsAlive(),
                                    sel != nullptr, sel && sel->IsAlive(),
-                                   sel && bot->IsFriendlyTo(sel))) {
+                                   sel && bot->IsFriendlyTo(sel), is_healer,
+                                   casting)) {
     bot->SetSelection(ObjectGuid::Empty);
   }
   if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot)) {
@@ -265,7 +268,8 @@ void ClearStaleCombatTarget(Player* bot) {
         Unit* tgt = cur->Get();
         if (ShouldClearStaleCombatTarget(bot->IsInCombat(), bot->IsAlive(),
                                          tgt != nullptr, tgt && tgt->IsAlive(),
-                                         tgt && bot->IsFriendlyTo(tgt))) {
+                                         tgt && bot->IsFriendlyTo(tgt),
+                                         is_healer, casting)) {
           cur->Set(nullptr);
         }
       }
@@ -341,12 +345,40 @@ uint32_t BestQuestRewardIndex(Player* bot,
   return best;
 }
 
-uint32_t SellGreyItemsTo(Player* bot, ObjectGuid vendor_guid) {
+bool ShouldAutoSellItem(Player* bot, const ItemTemplate* proto) {
+  if (!proto || proto->SellPrice == 0) {
+    return false;
+  }
+  // Always clear grey (poor) junk immediately at every vendor visit.
+  if (proto->Quality == ITEM_QUALITY_POOR) {
+    return true;
+  }
+  // Never auto-sell quest items, Hearthstone (6948), or rare/epic+ items.
+  if (proto->Class == ITEM_CLASS_QUEST || proto->ItemId == 6948 ||
+      proto->Quality >= ITEM_QUALITY_RARE) {
+    return false;
+  }
+  PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
+  AiObjectContext* ctx = ai ? ai->GetAiObjectContext() : nullptr;
+  if (!ctx) {
+    return false;
+  }
+  auto* val = ctx->GetValue<ItemUsage>("item usage", proto->ItemId);
+  const ItemUsage usage = val ? val->Get() : ITEM_USAGE_NONE;
+  // Sell incompatible or unneeded items (white/uncommon bad gear, vendor trash,
+  // unused white drops), while keeping food/drink (USE), upgrades (EQUIP /
+  // REPLACE), quest items (QUEST), profession mats (SKILL), ammo, and KEEP/AH.
+  if (usage == ITEM_USAGE_BAD_EQUIP || usage == ITEM_USAGE_VENDOR) {
+    return true;
+  }
+  return proto->Quality == ITEM_QUALITY_NORMAL && usage == ITEM_USAGE_NONE;
+}
+
+uint32_t SellUnwantedItemsTo(Player* bot, ObjectGuid vendor_guid) {
   uint32_t sold = 0;
   for (const BagSlotItem& entry : BagItems(bot)) {
     const ItemTemplate* proto = entry.item->GetTemplate();
-    if (!proto || proto->Quality != ITEM_QUALITY_POOR ||
-        proto->SellPrice == 0) {
+    if (!ShouldAutoSellItem(bot, proto)) {
       continue;
     }
     WorldPacket p(CMSG_SELL_ITEM);
@@ -533,14 +565,14 @@ TalkResult TalkToNpcNow(Player* bot, Creature* npc) {
     }
   }
 
-  // 3. Vendor / repair: sell grey items, repair equipment. Binding the
-  // hearthstone at an innkeeper is the brain's choice, not part of Talk
+  // 3. Vendor / repair: sell grey and unneeded items, repair equipment. Binding
+  // the hearthstone at an innkeeper is the brain's choice, not part of Talk
   // (docs/plans/options-and-panels.md, "Later").
   if (npc->HasNpcFlag(UNIT_NPC_FLAG_VENDOR)) {
-    const uint32_t sold = SellGreyItemsTo(bot, npc->GetGUID());
+    const uint32_t sold = SellUnwantedItemsTo(bot, npc->GetGUID());
     if (sold > 0) {
-      done.push_back(base::StringPrintf("sold %u grey item%s", sold,
-                                        sold == 1 ? "" : "s"));
+      done.push_back(
+          base::StringPrintf("sold %u item%s", sold, sold == 1 ? "" : "s"));
     }
   }
   if (npc->HasNpcFlag(UNIT_NPC_FLAG_REPAIR)) {
@@ -860,10 +892,22 @@ bool HasTakeableLoot(Player* bot, Creature* creature) {
   if (!bot || !creature || !creature->IsInWorld()) {
     return false;
   }
+  const std::vector<uint8_t> slots = TakeableLootSlots(bot, creature);
+  size_t storable_items = 0;
+  for (uint8_t slot : slots) {
+    const LootItem* item = creature->loot.LootItemInSlot(slot, bot);
+    if (!item || item->is_looted) {
+      continue;
+    }
+    ItemPosCountVec dest;
+    if (bot->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, item->itemid,
+                             item->count) == EQUIP_ERR_OK) {
+      ++storable_items;
+    }
+  }
   return HasCorpseTakeableLoot(
       creature->isDead(), creature->HasDynamicFlag(UNIT_DYNFLAG_LOOTABLE),
-      bot->isAllowedToLoot(creature), creature->loot.gold,
-      TakeableLootSlots(bot, creature).size());
+      bot->isAllowedToLoot(creature), creature->loot.gold, storable_items);
 }
 
 std::string LootCorpseNow(Player* bot, Creature* creature) {

@@ -29,7 +29,7 @@ Config LoadConfig() {
   config.combat_strategies = sConfigMgr->GetOption<std::string>(
       "LlmBrain.CombatStrategies", "+boost,+dps assist,-threat");
   config.non_combat_strategies = sConfigMgr->GetOption<std::string>(
-      "LlmBrain.NonCombatStrategies", "-follow,+grind,+new rpg");
+      "LlmBrain.NonCombatStrategies", "-follow,-grind,+new rpg");
   config.dead_strategies = sConfigMgr->GetOption<std::string>(
       "LlmBrain.DeadStrategies", "-follow,-stay");
   config.test_account =

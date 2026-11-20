@@ -64,6 +64,7 @@ class WorldPlaces {
     bool has_vendor = false;
     bool has_repair = false;
     bool has_flight_master = false;
+    bool has_quests = false;
     uint32_t class_trainer_mask = 0;
     wlb::snapshot::Vec3 pos;
     bool pos_from_innkeeper = false;

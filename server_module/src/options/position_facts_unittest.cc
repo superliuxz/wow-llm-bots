@@ -288,6 +288,22 @@ TEST(PositionFactsTest, ClearsStaleDeadTargetOnlyWhileAliveInCombat) {
   EXPECT_FALSE(ShouldClearStaleCombatTarget(true, true, false, false));
   EXPECT_FALSE(ShouldClearStaleCombatTarget(false, true, true, false));
   EXPECT_FALSE(ShouldClearStaleCombatTarget(true, false, true, false));
+
+  // Non-healer stuck targeting a live self/ally (e.g. pre-pull buff/conjure)
+  // clears it so combat engine acquires an enemy; healers and mid-cast bots
+  // keep their friendly target.
+  EXPECT_TRUE(ShouldClearStaleCombatTarget(
+      /*in_combat=*/true, /*bot_alive=*/true, /*has_target=*/true,
+      /*target_alive=*/true, /*target_friendly=*/true, /*bot_is_healer=*/false,
+      /*bot_casting=*/false));
+  EXPECT_FALSE(ShouldClearStaleCombatTarget(
+      /*in_combat=*/true, /*bot_alive=*/true, /*has_target=*/true,
+      /*target_alive=*/true, /*target_friendly=*/true, /*bot_is_healer=*/true,
+      /*bot_casting=*/false));
+  EXPECT_FALSE(ShouldClearStaleCombatTarget(
+      /*in_combat=*/true, /*bot_alive=*/true, /*has_target=*/true,
+      /*target_alive=*/true, /*target_friendly=*/true, /*bot_is_healer=*/false,
+      /*bot_casting=*/true));
 }
 
 }  // namespace

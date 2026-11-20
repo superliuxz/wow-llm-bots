@@ -95,14 +95,20 @@ AttackStepAction CheckAttackStep(bool in_combat,
                                  base::TimeTicks now,
                                  base::TimeTicks* idle_since);
 
-// True when a living bot in combat still holds a dead non-friendly
-// selection/target, which would stall Playerbots' combat engine from acquiring
-// a live enemy (preserves dead friendly targets for combat resurrection).
+// True when a living bot in combat still holds a stale selection/target that
+// would stall Playerbots' combat engine from acquiring a live enemy:
+//  - a dead non-friendly target (preserves dead friendly targets for combat
+//    resurrection), or
+//  - for a non-healer that isn't mid-cast, a friendly/self target left over
+//    from pre-pull buffing or conjuring (e.g. Arcane Brilliance / Mana Gem /
+//    Soulstone).
 bool ShouldClearStaleCombatTarget(bool in_combat,
                                   bool bot_alive,
                                   bool has_target,
                                   bool target_alive,
-                                  bool target_friendly = false);
+                                  bool target_friendly = false,
+                                  bool bot_is_healer = false,
+                                  bool bot_casting = false);
 
 // The Explore spots and Go to places seen from one position. Distances and
 // directions are filled for the position they were computed at; RefreshFrom
