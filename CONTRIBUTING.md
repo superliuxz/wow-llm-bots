@@ -3,13 +3,16 @@
 Design and decisions: `docs/design.md`. Current phase plan: `docs/plans/`. **Open work:
 `docs/TODO.md`: read it first in every session, and keep it current (next section).**
 
-## Keep docs/TODO.md current
+## Keep docs/TODO.md current (MUST)
 
-`docs/TODO.md` is the one list of unfinished work, so that whoever (or whichever model) comes next
-knows where things stand without this conversation. Update it **in the same commit** as the work:
+Updating `docs/TODO.md` is a **MUST** on every task — never skip it. `docs/TODO.md` is the one list
+of unfinished work, so that whoever (or whichever model) comes next knows where things stand
+without this conversation. You **MUST** update it **in the same commit** as the work:
 
-- You start something: put it under "In progress". You finish it: move it to "Done" (keep about
-  ten) and take it off the other lists.
+- You start something or receive review findings (High, Medium, **and** Low): add every open item
+  to `docs/TODO.md` under "In progress" before claiming work is done.
+- You finish an item: check it off / move it to "Done" (keep about ten) **only after** it is
+  implemented and verified (tests/checks actually executed, not assumed).
 - You defer, skip or only partly do something, find a bug you don't fix, or decide something you
   don't build: add a line to "Next", "Later" or "Loose ends", with a pointer to the document that
   has the detail. Never leave a known gap only in a chat message or a commit body.
@@ -18,7 +21,7 @@ knows where things stand without this conversation. Update it **in the same comm
   "Loose ends", with what is needed to verify it.
 - Keep it short: one entry per item, detail in the plan or spec it points to. Update "Last updated".
 
-Before ending a session or handing over, re-read TODO.md and make it match the repo.
+Before ending a session or handing over, re-read `docs/TODO.md` and make it match the repo.
 
 ## The brain decides; C++ is a pure harness
 

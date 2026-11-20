@@ -124,7 +124,8 @@ BOSSES = {
         boss_name="Ick",
         level=80,
         map_id=658,
-        spawn_xyz=(832.0, 123.5, 510.0),
+        stage_xyz=(805.0, 123.5, 510.0),
+        spawn_xyz=(835.0, 123.5, 510.0),
         strip_strat="wotlk-pos",
         attune_quests=[24499, 24511],
         notes_md=ICK_NOTES,
@@ -136,7 +137,8 @@ BOSSES = {
         boss_name="Devourer of Souls",
         level=80,
         map_id=632,
-        spawn_xyz=(5640.0, 2507.4, 708.9),
+        stage_xyz=(5615.0, 2507.4, 708.9),
+        spawn_xyz=(5645.0, 2507.4, 708.9),
         strip_strat="wotlk-fos",
         notes_md=DEVOURER_NOTES,
         max_s=210.0,
@@ -147,7 +149,8 @@ BOSSES = {
         boss_name="Ley-Guardian Eregos",
         level=80,
         map_id=578,
-        spawn_xyz=(1077.0, 1050.0, 655.5),
+        stage_xyz=(1077.0, 1020.0, 655.5),
+        spawn_xyz=(1077.0, 1055.0, 655.5),
         strip_strat="wotlk-occ",
         role_items={0: 37860, 1: 37815, 2: 37859, 3: 37859, 4: 37859},
         notes_md=EREGOS_NOTES,
@@ -159,7 +162,8 @@ BOSSES = {
         boss_name="Murmur",
         level=70,
         map_id=555,
-        spawn_xyz=(-157.9, -475.0, 15.9),
+        stage_xyz=(-157.9, -445.0, 15.9),
+        spawn_xyz=(-157.9, -478.0, 15.9),
         strip_strat="",
         notes_md=MURMUR_NOTES,
         max_s=210.0,
@@ -170,7 +174,8 @@ BOSSES = {
         boss_name="Talon King Ikiss",
         level=68,
         map_id=556,
-        spawn_xyz=(44.7, 265.0, 25.2),
+        stage_xyz=(44.7, 238.0, 25.2),
+        spawn_xyz=(44.7, 268.0, 25.2),
         strip_strat="tbc-seth",
         notes_md=IKISS_NOTES,
         max_s=210.0,
@@ -181,7 +186,8 @@ BOSSES = {
         boss_name="Kael'thas Sunstrider",
         level=70,
         map_id=585,
-        spawn_xyz=(148.5, 165.0, -16.6),
+        stage_xyz=(148.5, 138.0, -16.6),
+        spawn_xyz=(148.5, 168.0, -16.6),
         strip_strat="tbc-mgt",
         attune_quests=[11492],
         notes_md=KAELTHAS_NOTES,
@@ -193,7 +199,8 @@ BOSSES = {
         boss_name="Princess Theradras",
         level=50,
         map_id=349,
-        spawn_xyz=(27.9, 65.0, -124.5),
+        stage_xyz=(27.9, 42.0, -124.5),
+        spawn_xyz=(27.9, 68.0, -124.5),
         notes_md=THERADRAS_NOTES,
         max_s=210.0,
     ),
@@ -203,7 +210,8 @@ BOSSES = {
         boss_name="Rattlegore",
         level=60,
         map_id=289,
-        spawn_xyz=(137.1, 156.0, 96.0),
+        stage_xyz=(137.1, 138.0, 96.0),
+        spawn_xyz=(137.1, 158.0, 96.0),
         notes_md=RATTLEGORE_NOTES,
         max_s=210.0,
     ),
@@ -213,7 +221,8 @@ BOSSES = {
         boss_name="Baroness Anastari",
         level=59,
         map_id=329,
-        spawn_xyz=(3855.3, -3698.0, 148.2),
+        stage_xyz=(3855.3, -3675.0, 148.2),
+        spawn_xyz=(3855.3, -3700.0, 148.2),
         notes_md=ANASTARI_NOTES,
         max_s=210.0,
     ),
@@ -223,7 +232,8 @@ BOSSES = {
         boss_name="Patchwerk",
         level=80,
         map_id=533,
-        spawn_xyz=(3232.0, -3230.3, 294.1),
+        stage_xyz=(3205.0, -3230.3, 294.1),
+        spawn_xyz=(3234.0, -3230.3, 294.1),
         raid=True,
         notes_md=PATCHWERK_NOTES,
         max_s=240.0,
@@ -237,6 +247,7 @@ def run_boss(
     boss_name: str,
     level: int,
     map_id: int,
+    stage_xyz: tuple[float, float, float],
     spawn_xyz: tuple[float, float, float],
     strip_strat: str = "",
     attune_quests: list[int] | None = None,
@@ -248,6 +259,7 @@ def run_boss(
     run_idx: int = 1,
 ) -> dict:
     party = RAID_10 if raid else PARTY_5
+    use_harness = mode in ("llm", "llm_no_notes")
     mode_tag = f"{tag}_{mode}_r{run_idx}"
     trace_dir = VAR / f"bench_boss_{mode_tag}"
     shutil.rmtree(trace_dir, ignore_errors=True)
@@ -292,7 +304,7 @@ def run_boss(
             server.console(f"llmtest group {leader} {name}", inst=TEST)
         for idx, (name, _, spec_tab, expected_role) in enumerate(party):
             out = server.console(f"llmtest gear {name} {level} {spec_tab}", inst=TEST)
-            if out and f"role={expected_role}" not in out:
+            if f"role={expected_role}" not in (out or ""):
                 raise RuntimeError(
                     f"role mismatch for {name}: expected role={expected_role}, got: {out!r}"
                 )
@@ -301,15 +313,30 @@ def run_boss(
             if role_items and idx in role_items:
                 server.console(f"llmtest item {name} {role_items[idx]}", inst=TEST)
 
-        # Wait for BotManager::EnsureStrategies to re-apply strategies after gear/spec reset,
-        # then verify any stripped dungeon boss script actually exists and is OFF (for llm/floor).
-        time.sleep(2.5)
+        # Stage the party inside the dungeon (out of boss aggro range) FIRST so:
+        #   1) Playerbots attaches dungeon instance strategies on arrival;
+        #   2) checkstrat verifies the real post-arrival strategy state on every bot;
+        #   3) harness connects inside the dungeon instead of Northshire.
+        sx, sy, sz = stage_xyz
+        for idx, (name, _, _, _) in enumerate(party):
+            out = server.console(
+                f"llmtest tele {name} {map_id} {sx + (idx % 5) * 0.8:.2f} {sy + (idx // 5) * 0.8:.2f} {sz:.2f} 0",
+                inst=TEST,
+            )
+            if "teleported" not in (out or ""):
+                raise RuntimeError(f"stage teleport failed for {name}: {out!r}")
+
+        time.sleep(3.0)
         if strip_strat:
-            chk = server.console(f"llmtest checkstrat {leader} {strip_strat}", inst=TEST)
-            if chk and "exists=1" not in chk:
-                raise RuntimeError(f"stripped strategy {strip_strat!r} does not exist: {chk!r}")
-            if mode != "baseline" and chk and ("combat=0" not in chk or "noncombat=0" not in chk):
-                raise RuntimeError(f"strategy {strip_strat!r} was not stripped: {chk!r}")
+            for name, _, _, _ in party:
+                chk = server.console(f"llmtest checkstrat {name} {strip_strat}", inst=TEST)
+                if "exists=1" not in (chk or ""):
+                    raise RuntimeError(f"strategy {strip_strat!r} does not exist on {name}: {chk!r}")
+                if mode != "baseline":
+                    if "combat=0" not in chk or "noncombat=0" not in chk:
+                        raise RuntimeError(
+                            f"strategy {strip_strat!r} was not stripped on {name}: {chk!r}"
+                        )
 
         with tempfile.TemporaryDirectory(prefix=f"wlb-boss-{mode_tag}-") as tmp:
             tmp_dir = pathlib.Path(tmp)
@@ -320,33 +347,31 @@ def run_boss(
                     bdir = bots_dir / name
                     bdir.mkdir(parents=True, exist_ok=True)
                     (bdir / "notes.md").write_text(notes_md)
-            harness_log = tmp_dir / "harness.log"
-            # Start harness BEFORE teleporting to the boss so the LLM brain is live
-            # before pull and handles the opening instead of playerbots acting alone.
-            # In `baseline` / `floor` modes we still connect harness with no notes.md
-            # so bots initiate the pull cleanly, OR run without notes/orders.
-            proc = subprocess.Popen(
-                [
-                    str(OUT / "common" / "harness"),
-                    "run",
-                    f"--socket={TEST.run / 'brain.sock'}",
-                    f"--rules={ROOT / 'content' / 'RULES.md'}",
-                    f"--bots-dir={bots_dir}",
-                    "--host=127.0.0.1",
-                    "--port=8090",
-                    "--slots=16",
-                    "--temperature=0",
-                ],
-                cwd=ROOT,
-                stdout=harness_log.open("w"),
-                stderr=subprocess.STDOUT,
-            )
-            # Pre-pull prep window: let harness connect and bots buff/conjure safely.
-            time.sleep(10.0)
+            proc = None
+            if use_harness:
+                harness_log = tmp_dir / "harness.log"
+                proc = subprocess.Popen(
+                    [
+                        str(OUT / "common" / "harness"),
+                        "run",
+                        f"--socket={TEST.run / 'brain.sock'}",
+                        f"--rules={ROOT / 'content' / 'RULES.md'}",
+                        f"--bots-dir={bots_dir}",
+                        "--host=127.0.0.1",
+                        "--port=8090",
+                        "--slots=16",
+                        "--temperature=0",
+                    ],
+                    cwd=ROOT,
+                    stdout=harness_log.open("w"),
+                    stderr=subprocess.STDOUT,
+                )
+            # Pre-pull prep window inside the dungeon staging area.
+            time.sleep(8.0)
             x, y, z = spawn_xyz
             for idx, (name, _, _, _) in enumerate(party):
                 server.console(
-                    f"llmtest tele {name} {map_id} {x + (idx % 5) * 0.8:.2f} {y + (idx // 5) * 0.8:.2f} {z:.2f} 0",
+                    f"llmtest move {name} {x + (idx % 5) * 0.8:.2f} {y + (idx // 5) * 0.8:.2f} {z:.2f} 0",
                     inst=TEST,
                 )
             time.sleep(2.0)
@@ -354,7 +379,7 @@ def run_boss(
             say(f"boss benchmark [{era} | {mode_tag}]: {boss_name} (L{level} {len(party)}-man, cap {max_s:.0f}s)")
             try:
                 while time.monotonic() - t0 < max_s:
-                    if proc.poll() is not None:
+                    if proc is not None and proc.poll() is not None:
                         break
                     time.sleep(5.0)
                     traces = boss_meter.trace_parity.load_traces(trace_dir)["bot"]
@@ -367,11 +392,12 @@ def run_boss(
                         say(f"boss benchmark [{mode_tag}]: party wiped ({res['total_deaths']} deaths)")
                         break
             finally:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
+                if proc is not None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
     finally:
         server.server_stop(inst=TEST)
 
@@ -381,19 +407,23 @@ def run_boss(
     res["party_size"] = len(party)
     res["level"] = level
     res["mode"] = mode
+    res["invalid"] = (res["total_dps"] == 0.0 and res["total_deaths"] == 0 and not res["killed"])
     print("\n" + boss_meter.format_boss_meter(res))
+    if res["invalid"]:
+        say(f"boss benchmark [{mode_tag}]: INVALID trial (no pull / 0 DPS / 0 deaths)")
     return res
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="", help="Comma-separated subset of boss keys: " + ",".join(BOSSES))
-    ap.add_argument("--runs", type=int, default=3, help="Runs per boss (default: 3)")
+    ap.add_argument("--runs", type=int, default=3, help="Valid runs per boss (default: 3)")
     ap.add_argument(
         "--mode",
-        choices=("llm", "baseline", "floor"),
+        choices=("llm", "llm_no_notes", "no_brain", "baseline"),
         default="llm",
-        help="llm=boss scripts OFF + notes.md; baseline=playerbots C++ scripts ON; floor=boss scripts OFF, no notes.md",
+        help="llm=harness+notes, scripts OFF; llm_no_notes=harness, no notes, scripts OFF; "
+             "no_brain=no harness, scripts OFF; baseline=no harness, playerbots C++ scripts ON",
     )
     args = ap.parse_args()
     keys = [k.strip() for k in args.only.split(",") if k.strip()] if args.only else list(BOSSES.keys())
@@ -402,27 +432,41 @@ def main() -> int:
     build.server(test=True)
     out_json = VAR / f"bench_boss_10_{args.mode}.json"
     results = json.loads(out_json.read_text()) if out_json.exists() else {}
-    with LlamaServer(slots=16):
+    ctx = LlamaServer(slots=16) if args.mode in ("llm", "llm_no_notes") else None
+    if ctx is not None:
+        ctx.__enter__()
+    try:
         for k in keys:
-            runs = [
-                run_boss(**BOSSES[k], mode=args.mode, run_idx=i + 1)
-                for i in range(max(1, args.runs))
-            ]
-            kills = sum(1 for r in runs if r["killed"])
+            valid_runs: list[dict] = []
+            invalid_count = 0
+            attempt = 0
+            max_attempts = max(1, args.runs) + 2
+            while len(valid_runs) < max(1, args.runs) and attempt < max_attempts:
+                attempt += 1
+                r = run_boss(**BOSSES[k], mode=args.mode, run_idx=attempt)
+                if r.get("invalid"):
+                    invalid_count += 1
+                else:
+                    valid_runs.append(r)
+            kills = sum(1 for r in valid_runs if r["killed"])
             results[k] = {
                 "boss": BOSSES[k]["boss_name"],
                 "era": BOSSES[k]["era"],
                 "level": BOSSES[k]["level"],
                 "party_size": len(RAID_10 if BOSSES[k].get("raid") else PARTY_5),
                 "mode": args.mode,
-                "runs": len(runs),
+                "runs": len(valid_runs),
+                "invalid_runs": invalid_count,
                 "kills": kills,
-                "median_dps": round(statistics.median(r["total_dps"] for r in runs), 1),
-                "median_hps": round(statistics.median(r["total_hps"] for r in runs), 1),
-                "median_deaths": round(statistics.median(r["total_deaths"] for r in runs), 1),
-                "trials": runs,
+                "median_dps": round(statistics.median(r["total_dps"] for r in valid_runs), 1) if valid_runs else 0.0,
+                "median_hps": round(statistics.median(r["total_hps"] for r in valid_runs), 1) if valid_runs else 0.0,
+                "median_deaths": round(statistics.median(r["total_deaths"] for r in valid_runs), 1) if valid_runs else 0.0,
+                "trials": valid_runs,
             }
             out_json.write_text(json.dumps(results, indent=2) + "\n")
+    finally:
+        if ctx is not None:
+            ctx.__exit__(None, None, None)
     say(f"saved 10-boss benchmark results -> {out_json}")
     return 0
 

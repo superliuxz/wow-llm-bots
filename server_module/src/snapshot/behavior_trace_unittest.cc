@@ -123,27 +123,69 @@ TEST(BehaviorTraceTest, WritesUnifiedRoleDirectories) {
   std::filesystem::remove_all(root);
 }
 
+TEST(BehaviorTraceTest, FormatsDirectProductionTraceSampleFields) {
+  TraceSample s;
+  s.time_ms = 1795064000000LL;
+  s.monotonic_us = 999999;
+  s.role = "bot";
+  s.name = "Loada";
+  s.map_id = 602;
+  s.zone = "Halls of Lightning";
+  s.in_group = true;
+  s.in_dungeon = true;
+  s.x = 1186.5f;
+  s.y = 56.0f;
+  s.z = 60.8f;
+  s.moving = true;
+  s.in_combat = true;
+  s.level = 80;
+  s.hp_pct = 92.5f;
+  s.mana_pct = 81.0f;
+  s.bag_free_slots = 14;
+  s.target = "Loken";
+  s.target_dist = 24.5f;
+  s.target_hp_pct = 63.0f;
+  s.target_level = 82;
+  s.target_casting = "Lightning Nova";
+  s.target_hostile = true;
+  s.target_in_combat = true;
+  const std::string line = FormatTraceSample(s);
+  EXPECT_NE(line.find("\"target\":\"Loken\""), std::string::npos);
+  EXPECT_NE(line.find("\"target_dist\":24.5"), std::string::npos);
+  EXPECT_NE(line.find("\"target_casting\":\"Lightning Nova\""),
+            std::string::npos);
+  EXPECT_NE(line.find("\"bag_free_slots\":14"), std::string::npos);
+  EXPECT_NE(line.find("\"in_dungeon\":true"), std::string::npos);
+}
+
 TEST(BehaviorTraceTest, RotatesFileWhenExceedingMaxBytes) {
   const std::filesystem::path root =
       std::filesystem::path(testing::TempDir()) / "wlb_trace_rotate_test";
   std::filesystem::remove_all(root);
-  // Tiny cap so the second batch triggers rotation.
+  // Tiny cap so every subsequent batch triggers rotation up to
+  // kMaxRotatedFiles.
   BehaviorTraceWriter writer(root.string(), /*max_file_bytes=*/50);
   TraceSample s;
   s.time_ms = 1795064000000LL;
   s.role = "bot";
   s.name = "Loada";
-  ASSERT_TRUE(writer.WriteSample(s));
-  writer.Flush();
-  ASSERT_TRUE(writer.WriteSample(s));
-  writer.Flush();
+  for (int i = 0; i < 4; ++i) {
+    ASSERT_TRUE(writer.WriteSample(s));
+    writer.Flush();
+  }
 
   const std::filesystem::path active =
       root / "bot" / "Loada" / "2026-11-19.jsonl";
-  const std::filesystem::path rotated =
+  const std::filesystem::path rot1 =
       root / "bot" / "Loada" / "2026-11-19.1.jsonl";
+  const std::filesystem::path rot2 =
+      root / "bot" / "Loada" / "2026-11-19.2.jsonl";
+  const std::filesystem::path rot3 =
+      root / "bot" / "Loada" / "2026-11-19.3.jsonl";
   EXPECT_TRUE(std::filesystem::exists(active));
-  EXPECT_TRUE(std::filesystem::exists(rotated));
+  EXPECT_TRUE(std::filesystem::exists(rot1));
+  EXPECT_TRUE(std::filesystem::exists(rot2));
+  EXPECT_TRUE(std::filesystem::exists(rot3));
   std::filesystem::remove_all(root);
 }
 

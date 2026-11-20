@@ -5,11 +5,11 @@ what exists, what comes next and in which order. **Keep it current** (CONTRIBUTI
 docs/TODO.md current"): anything unfinished, deferred or decided-but-not-built goes here, not only
 in a conversation.
 
-Last updated 2026-11-19.
+Last updated 2026-11-20.
 
 ## In progress
 
-Items #1–#5 are done and verified live (2026-11-18).
+- Re-run the 4-mode boss benchmark (`no_brain`, `llm_no_notes`, `llm`, `baseline`) with the fixed runner (`bench_bosses.py`) and sufficient trials per boss once boss-mechanic fixes (radius-based `away`, `"Attack <tank>'s target"`, usable bag items for Eregos) are ready.
 
 ## Next, in order
 
@@ -91,6 +91,20 @@ Items #1–#5 are done and verified live (2026-11-18).
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-20: **Review fixes on `trace-all-events` (all 9 open items verified):**
+  `server.console()` now returns captured output (`tools/wlblib/server.py`); `bench_bosses.py`
+  stages bots inside the dungeon before starting `harness`, enforces unconditional role checks and
+  post-arrival per-bot `llmtest checkstrat`, splits `no_brain` / `llm_no_notes` / `llm` /
+  `baseline` modes, and invalidates/retries zero-pull trials; `llm_brain_world_script.cc` logs
+  `act_sent` events and `tools/bench/dodge_timeline.py` reports `acts/min`, `act_delay_ms`,
+  stationary->moving transitions, and impact distance vs spell radius; `behavior_trace_scripts.cc`
+  credits `mob_kill` to all traced group members via `OnUnitDeath` and drops unvalidated
+  `vendor_buy`; `behavior_trace_unittest.cc` covers multi-file rotation and direct production
+  `TraceSample` formatting; `docs/benchmarks/2026-11-20-boss-apples-to-apples.md` marks earlier
+  data invalidated; `CONTRIBUTING.md` makes updating `docs/TODO.md` an explicit MUST. Live-verified
+  on Ikiss (`tbc-seth` checked on all 5 bots after arrival, `dodge_timeline.py` confirmed
+  `Loadd` reached `34.1 yd` `Safe=YES` while `Loadb` died at `28.4 yd` and `Loada`/`Loadc` had
+  `0.0 acts/m`).
 - 2026-11-19: **General / Say / Party chat + quest grouping (invite/accept/decline/leave):**
   wired `/s Say`, `/y Yell`, `/p Party`, `/ra Raid`, and `/1 General` / Trade / LFG hooks in
   `server_module/src/chat/chat_scripts.cc` and `speak.cc`; added `INVITE`, `ACCEPT_INVITE`,

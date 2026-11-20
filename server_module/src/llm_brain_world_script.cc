@@ -731,6 +731,24 @@ class LlmBrainWorldScript : public WorldScript {
     LOG_INFO("module", "mod-llm-brain: {} act {} ({}): {}", name,
              wlb::snapshot::EnumName(act.verb), act.name,
              res.error.empty() ? (res.done ? "done" : "running") : res.error);
+    if (trace_writer_ && trace_writer_->enabled()) {
+      const base::TimeTicks now = base::TimeTicks::Now();
+      TraceEvent ev;
+      ev.time_ms = base::Time::Now().InMillisecondsSinceUnixEpoch();
+      ev.monotonic_us = (now - base::TimeTicks()).InMicroseconds();
+      ev.role = "bot";
+      ev.name = name;
+      ev.event = "act_sent";
+      ev.detail = std::string(wlb::snapshot::EnumName(act.verb));
+      if (!act.name.empty()) {
+        ev.detail += " " + act.name;
+      }
+      if (!res.error.empty()) {
+        ev.detail += " [err: " + res.error + "]";
+      }
+      ev.value = static_cast<int64_t>(act.yd);
+      trace_writer_->WriteEvent(ev);
+    }
     if (!res.error.empty()) {
       schedule_->SetActiveTargetPending(bot_index,
                                         state.active_option.has_value());

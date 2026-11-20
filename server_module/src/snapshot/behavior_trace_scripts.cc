@@ -137,7 +137,6 @@ class LlmBrainTracePlayerScript : public PlayerScript {
                       PLAYERHOOK_ON_PLAYER_COMPLETE_QUEST,
                       PLAYERHOOK_ON_QUEST_REWARD_ITEM,
                       PLAYERHOOK_ON_QUEST_ABANDON,
-                      PLAYERHOOK_ON_CREATURE_KILL_CREDIT,
                       PLAYERHOOK_ON_PVP_KILL,
                       PLAYERHOOK_ON_PLAYER_KILLED_BY_CREATURE,
                       PLAYERHOOK_ON_PLAYER_RELEASED_GHOST,
@@ -153,7 +152,6 @@ class LlmBrainTracePlayerScript : public PlayerScript {
                       PLAYERHOOK_ON_UNEQUIP_ITEM,
                       PLAYERHOOK_ON_AFTER_MOVE_ITEM_FROM_INVENTORY,
                       PLAYERHOOK_ON_CREATE_ITEM,
-                      PLAYERHOOK_ON_BEFORE_BUY_ITEM_FROM_VENDOR,
                       PLAYERHOOK_ON_BEFORE_DURABILITY_REPAIR,
                       PLAYERHOOK_ON_AFTER_TAKE_ITEM_FROM_MAIL,
                       PLAYERHOOK_ON_LEARN_TAXI_NODE,
@@ -252,14 +250,6 @@ class LlmBrainTracePlayerScript : public PlayerScript {
   void OnPlayerQuestAbandon(Player* player, uint32 quest_id) override {
     EmitTraceEvent(state_, player, "quest_abandon", "",
                    static_cast<int64_t>(quest_id));
-  }
-
-  void OnPlayerCreatureKillCredit(Player* player, Creature* killed) override {
-    if (!player || !killed) {
-      return;
-    }
-    EmitTraceEvent(state_, player, "mob_kill", killed->GetName(),
-                   static_cast<int64_t>(killed->GetLevel()));
   }
 
   void OnPlayerPVPKill(Player* killer, Player* killed) override {
@@ -380,18 +370,6 @@ class LlmBrainTracePlayerScript : public PlayerScript {
                    static_cast<int64_t>(count));
   }
 
-  void OnPlayerBeforeBuyItemFromVendor(Player* player,
-                                       ObjectGuid /*vendorguid*/,
-                                       uint32 /*vendorslot*/,
-                                       uint32& item_id,
-                                       uint8 count,
-                                       uint8 /*bag*/,
-                                       uint8 /*slot*/) override {
-    const ItemTemplate* proto = sObjectMgr->GetItemTemplate(item_id);
-    EmitTraceEvent(state_, player, "vendor_buy", proto ? proto->Name1 : "",
-                   static_cast<int64_t>(count));
-  }
-
   void OnPlayerBeforeDurabilityRepair(Player* player,
                                       ObjectGuid /*npcGUID*/,
                                       ObjectGuid /*itemGUID*/,
@@ -466,10 +444,38 @@ class LlmBrainTracePlayerScript : public PlayerScript {
 class LlmBrainTraceUnitScript : public UnitScript {
  public:
   explicit LlmBrainTraceUnitScript(TraceHookState* state)
-      : UnitScript("LlmBrainTraceUnitScript",
-                   true,
-                   {UNITHOOK_ON_DAMAGE, UNITHOOK_ON_HEAL}),
+      : UnitScript(
+            "LlmBrainTraceUnitScript",
+            true,
+            {UNITHOOK_ON_DAMAGE, UNITHOOK_ON_HEAL, UNITHOOK_ON_UNIT_DEATH}),
         state_(state) {}
+
+  void OnUnitDeath(Unit* unit, Unit* killer) override {
+    if (!unit || !killer) {
+      return;
+    }
+    Creature* killed = unit->ToCreature();
+    if (!killed) {
+      return;
+    }
+    Player* kp = killer->GetCharmerOrOwnerPlayerOrPlayerItself();
+    if (!kp) {
+      return;
+    }
+    const std::string name = killed->GetName();
+    const int64_t lvl = static_cast<int64_t>(killed->GetLevel());
+    if (Group* group = kp->GetGroup()) {
+      for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
+           itr = itr->next()) {
+        Player* member = itr->GetSource();
+        if (member && member->GetMapId() == killed->GetMapId()) {
+          EmitTraceEvent(state_, member, "mob_kill", name, lvl);
+        }
+      }
+      return;
+    }
+    EmitTraceEvent(state_, kp, "mob_kill", name, lvl);
+  }
 
   void OnDamage(Unit* attacker, Unit* victim, uint32& damage) override {
     if (damage == 0) {

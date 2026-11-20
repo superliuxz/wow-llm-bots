@@ -338,7 +338,9 @@ def console(command, wait_s=1.0, inst=PLAY):
     time.sleep(wait_s)
     with open(log, "rb") as f:
         f.seek(start)
-        print(f.read().decode(errors="replace"), end="")
+        text = f.read().decode(errors="replace")
+    print(text, end="")
+    return text
 
 
 def _stop_pid(name, timeout_s, inst=PLAY):
