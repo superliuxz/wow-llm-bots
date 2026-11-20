@@ -13,30 +13,12 @@ Items #1–#5 are done and verified live (2026-11-18).
 
 ## Next, in order
 
-- **Scorer redesign (blocks any hill-climbing run;** `docs/plans/self-improving-loop.md`, decided
-  2026-11-19, not built). Retire the single 0–100 movement-average score and rebuild in layers:
-  (A) hard gates (no stuck/death/refusal loops, progress floor, human timing limits, eval
-  non-regression), (B) pairwise blind ranking with TrueSkill / Bradley–Terry ratings anchored to
-  human clips (`blind_rate.py` as ground truth + an LLM judge while it agrees) — **the score the loop
-  keeps or reverts on**, (C) explainable MMO adversary suite + per-situation `scikit-learn`
-  classifier as diagnostics only (never a reward), (D) checks on the scorer against held-out
-  humans and known-bad bots (plain playerbots, random-jumper, instant-reply, same-loop walker),
-  (E) anti-gaming caps and a frozen held-out human set, (F) recording parity (observer-view
-  broadcast packets + explicit events, identical for humans and bots). Build order: (1) recording
-  parity + events, (2) pairwise harness + `blind_rate.py`, (3) known-bad bots + scorer checks,
-  (4) diagnostic classifier + adversary suite, (5) long-horizon & group tells, (6) switch
-  `hill_climb.py` to the B rating and delete the composite score. First human session recorded
-  2026-11-19 (`Hele`, 112 min, 9,180 samples); more sessions and activities needed, ideally a few
-  players, ~30 % held out. Also in the plan (2026-11-19): your rating time sets the loop's pace
-  (batches of ~30 pairs, LLM judge re-checked every few rounds); recording parity rebuilds human
-  and bot movement into one form so the packet type can't leak; a situation labeller from the
-  events (step 1); human clips for every situation; keep a candidate only beyond the rating's
-  uncertainty plus a confirmation run; the biggest movement tells are outside the loop's edit
-  scope, so they come from reviewed fixes the scorer measures.
-- **General / Say / Party chat + quest grouping (invite/accept):** wire `/1 General`, `/s Say`, and
-  `/p Party` chat hooks into `LlmBrainChatScript` (currently whisper-only) and add group invite /
-  accept / quest-teaming options so bots can respond to LFG calls in General chat and team up with
-  players for quests.
+- **Human baseline coverage & initial blind-rating batch** (`docs/plans/self-improving-loop.md`):
+  layered scorer (Steps 1–6) is built and live-verified, and General/Say/Party chat + quest
+  grouping are wired. Before running real tuning rounds: record additional human play sessions
+  under the new 5 Hz + events format across all situations (questing, fighting, looting, town,
+  dungeons, chat; ideally a few players, ~30% held out) and run an initial ~30-pair
+  `tools/bench/blind_rate.py` batch + `llm-agree` check.
 - **Named room landmarks** (`docs/specs/triggers.md`): 132 of the 218 unsayable boss actions move
   to hardcoded room coordinates; deferred until a boss fight needs per-room landmark data.
 
@@ -108,6 +90,25 @@ Items #1–#5 are done and verified live (2026-11-18).
     a working `Lightning Nova cast` order into `Loken cast` or `Lightning Nova appears`.
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-19: **General / Say / Party chat + quest grouping (invite/accept/decline/leave):**
+  wired `/s Say`, `/y Yell`, `/p Party`, `/ra Raid`, and `/1 General` / Trade / LFG hooks in
+  `server_module/src/chat/chat_scripts.cc` and `speak.cc`; added `INVITE`, `ACCEPT_INVITE`,
+  `DECLINE_INVITE`, `LEAVE_GROUP` options in `snapshot/snapshot.h`, `options.{h,cc}`,
+  `option_executor.cc` (via `HandleGroup*Opcode`), `llm_brain_world_script.cc` (pending invite
+  `PromptEvent::GROUP_INVITE` wake + recent chatter invite candidates), and harness
+  `screen_renderer.cc` / `bot_loop.cc`.
+- 2026-11-19: **Layered human-likeness scorer (Steps 1–6, `docs/plans/self-improving-loop.md`):**
+  5 Hz observer-parity recording + explicit gameplay events (`behavior_trace_scripts.{h,cc}`,
+  `trace_parity.py` fixed-time reconstructor & situation labeller), pairwise Bradley–Terry ranker
+  with bootstrapped 95% CIs + `blind_rate.py`, Layer D calibration (`known_bad_bots.py`,
+  `scorer_calibration.py`), Layer C `scikit-learn` per-situation diagnostic classifier + MMO
+  adversary suite (`adversary_suite.py`, `var/bench-venv`), Step 5 population/long-horizon metrics
+  (`population_metrics.py`), and `hill_climb.py` / `soak_scorer.py` switched to Layer A gates +
+  Layer B ranking (retired 0–100 composite score & `human_metrics.py` deleted). Live-verified on
+  10-bot soak (3,171 5 Hz samples, 204 `cast_start`, 20 `quest_accept`, 10 `quest_turnin`, 11/11
+  Layer A gates PASS, Layer C `[travel]` classifier flagged `snap_turn_rate` against real `Hele`
+  baseline, Layer D calibration PASS: `heldout_human 1000.0 > current_bots 175.1 > all 4 known-bad`).
 
 - 2026-11-19: self-improving hill-climbing loop (`docs/plans/self-improving-loop.md`,
   `tools/bench/soak_scorer.py`, `tools/bench/hill_climb.py`, `tools/wlb test soak --score --runs`,

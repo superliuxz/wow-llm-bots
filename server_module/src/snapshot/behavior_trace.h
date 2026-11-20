@@ -1,9 +1,9 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
 // Unified behavior trace logger for both human players and LLM bots
-// (docs/design.md, "Evals"). Both roles write the exact same JSONL schema so
-// `tools/bench/human_metrics.py` can compare movement, reaction timing, chat,
-// and pacing distributions directly against a human baseline.
+// (docs/plans/self-improving-loop.md, section F). Both roles write the exact
+// same JSONL schema so `tools/bench/trace_parity.py` can reconstruct both into
+// one canonical 5 Hz `(pos, facing)` + event timeline.
 
 #ifndef MOD_LLM_BRAIN_SNAPSHOT_BEHAVIOR_TRACE_H_
 #define MOD_LLM_BRAIN_SNAPSHOT_BEHAVIOR_TRACE_H_

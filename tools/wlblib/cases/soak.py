@@ -34,7 +34,6 @@ from wlblib.common import OUT, ROOT, TEST, VAR, say
 from wlblib.testing import LlamaServer, Stack, expect
 
 sys.path.insert(0, str(ROOT / "tools" / "bench"))
-import human_metrics  # noqa: E402
 import soak_scorer  # noqa: E402
 
 NAME = "soak"
@@ -383,10 +382,7 @@ def run_soak(
             )
 
     agg = _aggregate_results(results)
-    if score:
-        say(soak_scorer.format_score_report(agg))
-    else:
-        say(human_metrics.format_report(VAR / "soak_traces"))
+    say(soak_scorer.format_score_report(agg))
 
     if check_guardrails:
         expect(agg["guardrails_ok"], "one or more soak guardrails failed (see above)")

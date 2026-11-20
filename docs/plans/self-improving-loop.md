@@ -5,9 +5,15 @@ WoW players while guaranteeing stability, competence, and performance never regr
 (`docs/design.md`, "Evals").
 
 **The scorer is the key to everything:** whatever it rewards, the loop will produce. Status: the
-layered scorer (sections 1–4) is the design decided on 2026-11-19 and **not built yet**; the loop
-that exists today (section 6) runs on the old composite score, for smoke tests only, until the
-ranking (B) replaces it.
+layered scorer (sections 1–4, build steps 1–6) is **built and live-verified** (2026-11-19):
+5 Hz observer-parity recording + explicit events (`behavior_trace_scripts.{h,cc}`,
+`trace_parity.py`), pairwise Bradley–Terry ranking + `blind_rate.py`, Layer D calibration
+(`scorer_calibration.py`, verified PASS on real `Hele` + live bot traces), Layer C `scikit-learn`
+adversary suite (`adversary_suite.py`, `var/bench-venv`), Step 5 population metrics
+(`population_metrics.py`), and `hill_climb.py` / `soak_scorer.py` switched to Layer A gates +
+Layer B 95% CI ranking (old 0–100 composite score and `human_metrics.py` deleted). Remaining
+non-code prerequisite before unattended tuning: recording human sessions across all situations
+(questing, fighting, looting, town, dungeons, chat) and completing initial `blind_rate.py` batches.
 
 ---
 
@@ -222,43 +228,33 @@ in `FixtureLoader` + `llmtest group`/`gear`/`tele`:
 
 ---
 
-## 6. Today's loop (until step 6 of the build order)
+## 6. Running the loop
 
-What exists now; it runs on the old composite score, so use it for smoke tests, not to keep
-changes.
-
-- **One command:** `tools/wlb test soak --suite varied --minutes 5 --runs 2 --score` (scorer:
-  `tools/bench/soak_scorer.py` + `tools/bench/human_metrics.py`; `--judge` adds the LLM judge on
-  paired clips). Its guardrails are the start of the A gates.
-- **Tamper check:** `tools/bench/hill_climb.py lock-scorer` writes a read-only SHA-256 manifest
-  (`LOCKED_PATTERNS` in `hill_climb.py`): the scorer, `hill_climb.py` itself, the soak case and
-  `tools/wlblib/testing.py`, `server_module/src/snapshot/behavior_trace.{h,cc}`, the snapshot
-  builder and schedule, `llm_brain_world_script.cc`, the module's config parsing and `.conf.dist`,
-  `config/llm-brain.overrides`, `config/playerbots.overrides` and
-  `config/tests/soak*.llm-brain.overrides`; every run checks it. For unattended runs, copy the scorer and the human
-  traces to a read-only directory outside the repo and pass `--human-dir`.
-- **Recording the human baseline** (today's trace format, replaced by F):
+- **One command:** `tools/wlb test soak --suite varied --minutes 5 --runs 2 --score --human-dir ~/.local/share/wow-llm-bots/human_baseline`
+  (layered scorer: `tools/bench/soak_scorer.py`, `trace_parity.py`, `pairwise_ranker.py`,
+  `adversary_suite.py`, `population_metrics.py`; `--judge` adds order-debiased LLM pairwise judging).
+- **Blind rating ground truth:** `tools/bench/blind_rate.py rate --source human=... --source current=... --source candidate=... --pairs 30`,
+  `blind_rate.py llm-agree`, and `blind_rate.py summary`.
+- **Layer D calibration:** `tools/bench/hill_climb.py calibrate --human-dir ~/.local/share/wow-llm-bots/human_baseline`
+  (verified PASS on real `Hele` + live bot traces: `heldout_human 1000.0 > current_bots 175.1 > plain_playerbots 46.6 > same_loop_walker -68.9 > random_jumper -101.4 > instant_reply -128.2`).
+- **Tamper check:** `tools/bench/hill_climb.py lock-scorer` writes a read-only (0444) SHA-256 lock
+  manifest (`~/.local/share/wow-llm-bots/scorer.sha256`) covering all 28 measurement, trace, and
+  soak config files (`LOCKED_PATTERNS` in `hill_climb.py`).
+- **Recording human sessions** (5 Hz observer-parity + explicit events):
   ```ini
-  LlmBrain.TraceDir = "/mnt/storage/wow-llm-bots/var/human_baseline"
+  LlmBrain.TraceDir = "/home/will/.local/share/wow-llm-bots/human_baseline"
   LlmBrain.ObserveHumans = 1
   ```
-  Your character goes to `var/human_baseline/human/<Name>/<date>.jsonl`, bots to `.../bot/...`;
-  `hill_climb.py` refuses to score without human traces (`--allow-fallback` for smoke tests only).
-- **A round** (on a branch, while you aren't playing: the test stack shares the GPU with
-  `llama-server`): `hill_climb.py init --minutes 2 --runs 2` once (`--baseline-runs 5` measures the
-  noise σ); then `hill_climb.py status` to pick the worst tell, one hypothesis, one change, and
-  `hill_climb.py eval-candidate --category code --target <tell> --hypothesis "<one sentence>"
-  --minutes 2 --runs 2 --auto-revert`. It checks the scorer hash, runs `tools/wlb check`, the soak
-  and the scorer, logs to `var/experiments/ledger.jsonl`, and keeps a change only if the
-  guardrails pass, the score beats the best by `max(min_delta, 2σ)` and a confirmation run agrees;
-  every keep also runs `--suite heldout`. Guardrails include an XP/h floor (default 3000 XP/h) and
-  at most 2 deaths per run.
+- **A round** (on a branch, while not playing): `hill_climb.py init --minutes 5 --runs 2` once;
+  then `hill_climb.py status` to inspect Layer C diagnostic tells, make one hypothesis/change, and
+  run `hill_climb.py eval-candidate --category code --target <tell> --hypothesis "<one sentence>" --minutes 5 --runs 2 --auto-revert`.
+  Keeps only when Layer A gates pass (including XP/h floor, deaths ceiling, human timing limits,
+  no refusal loops), candidate Layer B Bradley–Terry rating beats current outside bootstrapped 95%
+  CI, a confirmation run agrees, and `--suite heldout` gates pass.
 - **What a scored round may change** (`ALLOWED_EDIT_GLOBS` in `hill_climb.py`, enforced):
-  `server_module/src/options/human_pacing*` (pacing code and its numbers: reaction delays, typo
-  rate, chattiness, movement jitter, pauses), `content/RULES.md` and `content/identities/*`.
-  Numbers are cheaper to tune by random / Bayesian search over a knob than by an agent. Anything
-  else (other movement code, playerbots settings, bug fixes) is a separate reviewed change, never
-  part of a scored round, even though many tells live there.
+  `server_module/src/options/human_pacing*`, `content/RULES.md` and `content/identities/*`. Anything
+  else (other movement code, playerbots settings, bug fixes) is a separate reviewed change measured
+  with the same Layer B ranking.
 
 ---
 
