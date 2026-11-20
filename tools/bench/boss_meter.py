@@ -33,15 +33,31 @@ def analyze_boss_fight(
     t_end: int | None = None
     per_char: dict[str, dict[str, Any]] = {}
 
-    for name, rows in sorted(traces.items()):
-        samples = [r for r in rows if r.get("kind") == "sample"]
-        events = [r for r in rows if r.get("kind") == "event"]
-
-        cbt_ts = [int(s["t_ms"]) for s in samples if s.get("in_combat")]
+    for rows in traces.values():
+        cbt_ts = [
+            int(s["t_ms"])
+            for s in rows
+            if s.get("kind") == "sample" and s.get("in_combat")
+        ]
         if cbt_ts:
             s0, s1 = min(cbt_ts), max(cbt_ts)
             t_start = s0 if t_start is None else min(t_start, s0)
             t_end = s1 if t_end is None else max(t_end, s1)
+
+    win_lo = (t_start - 500) if t_start is not None else None
+    win_hi = (t_end + 500) if t_end is not None else None
+
+    for name, rows in sorted(traces.items()):
+        samples = [
+            r for r in rows
+            if r.get("kind") == "sample"
+            and (win_lo is None or win_lo <= int(r.get("t_ms", 0)) <= win_hi)
+        ]
+        events = [
+            r for r in rows
+            if r.get("kind") == "event"
+            and (win_lo is None or win_lo <= int(r.get("t_ms", 0)) <= win_hi)
+        ]
 
         dmg_dealt = 0
         dmg_taken = 0
