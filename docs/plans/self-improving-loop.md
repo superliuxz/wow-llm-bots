@@ -4,17 +4,65 @@ A layered evaluation and tuning architecture for making bots play, move, and soc
 WoW players while guaranteeing stability, competence, and performance never regress
 (`docs/design.md`, "Evals").
 
-> **Why we retired the single 0–100 movement-average score:** Research on game Turing tests and
-> MMO bot detection shows that (a) hand-picked per-minute averages (jumps/min, idle %, stops/min)
-> measure one player's personal style rather than human-likeness and are easy to game, and
-> (b) binary human-vs-bot classifiers cannot reliably rank two candidate bots against each other
-> (Microsoft Navigation Turing Test, ICML 2021). The scorer below replaces the single scalar with
-> hard gates, pairwise blind ranking anchored to human clips, and an explainable anti-bot
-> adversary suite for diagnosis.
+**The scorer is the key to everything:** whatever it rewards, the loop will produce. Status: the
+layered scorer (sections 1–4) is the design decided on 2026-11-19 and **not built yet**; the loop
+that exists today (section 6) runs on the old composite score, for smoke tests only, until the
+ranking (B) replaces it.
 
 ---
 
-## 1. Layered scorer architecture (A–F)
+## 1. Why the single 0–100 score was retired
+
+The first scorer (`tools/bench/human_metrics.py`) compared session-wide averages of one human
+(Hele) against six bots: path straightness, stops/min, jumps/min, instant `>90°` turns/min, idle %,
+town %, aggro reaction p50, whisper reply p50.
+
+- **It measures the activity mix, not behaviour.** Idle %, town % and stops/min depend on what each
+  character happened to be doing. "Idle" is any moment not moving, fighting or casting: reading
+  quest text, eating, being AFK. A human's 55 % idle is not a target.
+- **It measures our own code and the recording.** Stops/min counts the module's ~70 yd walk steps;
+  "instant turns" compare one trace tick with the next, and a server-set facing jumps where a mouse
+  turn sweeps; aggro reaction is mostly LLM latency, and pulls that start with a cast flip
+  `in_combat` after the action.
+- **Matching it makes bots worse.** The cheapest way to 2.28 jumps/min is jumping at random, the
+  cheapest idle % is standing still: both hit the number and look more robotic.
+- **One player, single medians.** Matching one person's p50s learns their habits and ignores the
+  spread; a whisper delay without the message's length, or what the player was doing, says little.
+- **No competence.** A bot can match every number and play badly.
+
+## 2. What game research found (sources in section 7)
+
+1. **A human-vs-bot classifier tells human from bot but cannot rank bots.** In Microsoft's
+   Navigation Turing Test (Bleeding Edge), classifiers told human from agent trajectories at up to
+   85 % and agreed with human judges, yet their agreement on *which of two agents is more human*
+   was low or negative. The authors advise against using such a classifier as a reward: agents
+   exploit it. Classifiers on low-dimensional position data were more robust than ones on video,
+   which overfit.
+2. **Rankings that work come from pairwise comparisons with ratings.** MineRL BASALT (Minecraft)
+   ranks agents from pairs of videos judged by people, fed into TrueSkill (a rating plus its
+   uncertainty), with human players as reference entries; humans outranked every agent.
+   Generative Agents ("Smallville") ranked believability the same way.
+3. **Human judges are noisy, and humans don't score 100 %.** BotPrize (Unreal Tournament): the best
+   bots reached ~52 % "human", and human players weren't judged fully human either. Judges who
+   watch (third person) judge better than judges who play (Togelius & Yannakakis; Mario AI Turing
+   track); results shift with protocol, context and judge expertise (Pacheco 2018; Even et al.
+   2021; NTT); gamers spotted bot videos only 54 % of the time (modl.ai / Riot).
+4. **Real bot detection works over hours and across characters.** On WoW, server-side detection
+   flags movement paths taken again and again (Mitterhofer et al. 2009); input timing gives bots
+   away (Gianvecchio et al.). On Lineage, Aion and Blade & Soul: self-similarity across sessions,
+   the intervals between actions (97 % on Aion), chat patterns, party play, social networks, and
+   trajectories clustered across many players (NCSoft, Lineage W). A 60-second clip shows none of
+   this.
+5. **A judge that "passes" a bot proves nothing unless it is shown to catch bad ones.** The power of
+   a classifier two-sample test depends on the classifier (Lopez-Paz & Oquab; Conformal C2ST).
+6. **LLM text can look "more human than human".** Smallville's agents were rated more believable
+   than humans role-playing them: judges reward polish.
+7. **Human limits are hard rules.** Gran Turismo Sophy capped its control loop near human reaction
+   speed and treated sportsmanship as a constraint, not a trade-off.
+
+---
+
+## 3. Layered scorer architecture (A–F)
 
 ### A. Gates (must pass, never traded off)
 - **Zero broken loops or spam:** 0 crashes, 0 LLM errors, 0 invalid plans, `max_wakes/min/bot <= 20`,
@@ -38,10 +86,13 @@ WoW players while guaranteeing stability, competence, and performance never regr
 - **Judges:**
   - **You (`tools/bench/blind_rate.py`):** ground truth (a few minutes of blind ratings per round).
   - **LLM judge:** provides rating volume, and counts **only while it agrees with your blind
-    ratings**.
+    ratings** (rank correlation checked every round).
 - **Separate layers:** body (movement/combat clips), decisions (offline eval + loop detectors),
-  and social (chat judged side-by-side against real human chat, where overly polished/articulate
-  LLM prose counts as a **tell**, not a virtue — per Generative Agents "Smallville").
+  and social (chat judged side-by-side against real human chat in the same situation, where overly
+  polished/articulate LLM prose counts as a **tell**, not a virtue — per Generative Agents
+  "Smallville"). A gain in one layer is never paid for in another, and each tell is fixed in the
+  layer that owns it (most movement tells come from playerbots' movement and our walk code, not the
+  brain).
 
 ### C. Finding tells — explainable adversary suite (diagnostic only, never a reward)
 Instead of matching one player's session averages, run detectors drawn from published MMO
@@ -59,16 +110,17 @@ anti-bot literature ("would a real MMO's detector flag it?") to diagnose *what t
     (NCSoft Lineage W 2024).
   - Chat phrasing repetition, party-play patterns, and whisper delay vs. message length.
   - Optional population pacing comparison (session length, zone/level progression) against the WoW
-    Avatar History dataset (91,065 characters over 3 years).
+    Avatar History dataset (91,065 characters over 3 years, sampled every 10 minutes).
 - Hand metrics (`jumps/min`, `idle %`, walking turn rate deg/s, reaction from first hit) are kept
-  strictly as **per-situation diagnostic distributions**, never as a reward.
+  strictly as **per-situation diagnostic distributions** (whole distributions, not medians), never
+  as a reward.
 
 ### D. Meta-checks on the scorer itself (must pass before driving tuning)
 Build a labelled calibration set:
 - Frozen held-out human clips
 - Current LLM bots
 - Known-bad variants: (1) plain playerbots, (2) a **random-jumper** bot that fakes `jumps/min`,
-  (3) an **instant-reply** bot (0.4 s whispers)
+  (3) an **instant-reply** bot (0.4 s whispers), (4) a bot that walks the same loop
 
 Before the scorer is allowed to drive any tuning loop, it must pass all three checks:
 1. **Correct ranking:** humans > current bots > plain playerbots / random-jumper / instant-reply.
@@ -103,29 +155,17 @@ behaviour.
 - Reconstruct observer-visible trajectories on a common timeline before feature extraction or
   rendering clips.
 - Record **several sessions and activities** (questing, town, dungeons, chatting), ideally across
-  more than one human player, holding out ~30% of sessions for testing.
+  more than one human player, holding out ~30% of sessions for testing. One player's sessions
+  mostly measure closeness to that player.
 
 ---
 
-## 2. Varied scenario suites (anti-overfitting)
-
-To avoid overfitting to one class, starting zone, or dungeon, `soak` runs a stratified mix of
-open-world questing and 5-man Tank/Healer/3DPS dungeon parties using `new:<race>:<class>` fixtures:
-
-| Suite | Scenarios | Composition |
-|---|---|---|
-| `varied` (default tuning) | `soak_horde_rfc` + `soak_alliance_dm` | **Run 1:** 5 Horde questing classes + 5-man **Ragefire Chasm** L15. **Run 2:** 5 Alliance questing classes + 5-man **Deadmines** L20. |
-| `heldout` (generalization check, never used for KEEP/REVERT) | `soak_northrend_hol` + `soak_heldout_uk` | **Run 1:** 5 mid/high Horde questing bots + 5-man **Halls of Lightning** L80. **Run 2:** 5 unseen Alliance classes + 5-man **Utgarde Keep** L70. |
-| `quest` (legacy) | `soak` | 10× L1 Priest questing in Valley of Trials. |
-
----
-
-## 3. Build order
+## 4. Build order
 
 1. **Recording parity (F):** observer-view broadcast recording (5 Hz-equivalent movement from
    broadcast packets/splines) + explicit timestamped events (`damage_taken`, `combat_start`,
    `loot`, `quest_accept/turnin`, `cast_start`, `chat in/out` with `text_len`), identical for
-   humans and bots.
+   humans and bots. First, so every session you play from then on counts.
 2. **Pairwise rating harness + `blind_rate.py` (B):** situation-segmented, metadata-stripped
    30–60 s clips rendered as plots/timelines; TrueSkill / Bradley–Terry ranking with human anchors
    and uncertainty; interactive blind rating CLI + LLM judge agreement tracking.
@@ -136,20 +176,88 @@ open-world questing and 5-man Tank/Healer/3DPS dungeon parties using `new:<race>
    regularity, cross-session self-similarity, multi-bot clustering).
 5. **Long-horizon & population metrics:** multi-session route repetition, inter-bot vs inter-human
    similarity, chat phrasing diversity, and optional WoW Avatar History pacing comparison.
+6. **Switch the loop over:** `hill_climb.py` keeps or reverts on the B rating (with the A gates),
+   and the composite 0–100 score and its per-minute averages are deleted.
 
 ---
 
-## References
-- Navigation Turing Test (Microsoft Research, ICML 2021)
-- MineRL BASALT Competition & Retrospective (TrueSkill pairwise human/agent ranking)
-- BotPrize (Unreal Tournament believability Turing test)
-- Togelius & Yannakakis, "Assessing Believability"; Even et al. (2021) believability protocol
-- Generative Agents ("Smallville", Stanford HAI — LLM polish vs human chat warning)
-- Gran Turismo Sophy (reaction-rate caps & sportsmanship as hard gates)
-- Mitterhofer et al. (2009), Server-side Bot Detection in MMOs (WoW waypoint repetition)
-- Gianvecchio et al., "Battle of Botcraft" (WoW timing irregularity)
-- NCSoft & Korea University (Lee et al. 2016; Aion 2023 action intervals; Lineage W 2024
-  trajectory clustering; chat & party-play bot detection)
-- World of Warcraft Avatar History dataset (MMSys 2011)
-- Lopez-Paz & Oquab, "Revisiting Classifier Two-Sample Tests" (https://arxiv.org/abs/1610.06545);
-  Conformal C2ST (https://arxiv.org/abs/2507.17026): a weak classifier "passing" proves nothing
+## 5. Varied scenario suites (anti-overfitting)
+
+To avoid overfitting to one class, starting zone, or dungeon, `soak` runs a stratified mix of
+open-world questing and 5-man Tank/Healer/3DPS dungeon parties using `new:<race>:<class>` fixtures
+in `FixtureLoader` + `llmtest group`/`gear`/`tele`:
+
+| Suite | Scenarios | Composition |
+|---|---|---|
+| `varied` (default tuning) | `soak_horde_rfc` + `soak_alliance_dm` | **Run 1:** 5 Horde questing classes (Orc War, Tauren Dru, Undead Mag, BE Pal, L15 Troll Hun) + 5-man **Ragefire Chasm** L15 (War/Pri/Rog/Mag/Sha). **Run 2:** 5 Alliance questing classes (Hum Pal, NE Hun, Dwf War, Gnm Loc, L15 Dra Sha) + 5-man **Deadmines** L20 (Pal/Dru/Rog/Mag/Hun). |
+| `heldout` (generalization check, never used for KEEP/REVERT) | `soak_northrend_hol` + `soak_heldout_uk` | **Run 1:** 5 mid/high Horde questing bots (L15–L70 Silverpine/STV/Borean Tundra) + 5-man **Halls of Lightning** L80. **Run 2:** 5 unseen Alliance classes + 5-man **Utgarde Keep** L70. |
+| `quest` (legacy) | `soak` | 10× L1 Priest questing in Valley of Trials. |
+
+---
+
+## 6. Today's loop (until step 6 of the build order)
+
+What exists now; it runs on the old composite score, so use it for smoke tests, not to keep
+changes.
+
+- **One command:** `tools/wlb test soak --suite varied --minutes 5 --runs 2 --score` (scorer:
+  `tools/bench/soak_scorer.py` + `tools/bench/human_metrics.py`; `--judge` adds the LLM judge on
+  paired clips). Its guardrails are the start of the A gates.
+- **Tamper check:** `tools/bench/hill_climb.py lock-scorer` records SHA-256s of the scorer,
+  `tools/wlblib/cases/soak.py`, `snapshot/behavior_trace.{h,cc}`, the trace call sites in
+  `llm_brain_world_script.cc` and `config/tests/soak_*.llm-brain.overrides` in
+  `var/scorer.sha256`, checked on every run. For unattended runs, copy the scorer and the human
+  traces to a read-only directory outside the repo and pass `--human-dir`.
+- **Recording the human baseline** (today's trace format, replaced by F):
+  ```ini
+  LlmBrain.TraceDir = "/mnt/storage/wow-llm-bots/var/human_baseline"
+  LlmBrain.ObserveHumans = 1
+  ```
+  Your character goes to `var/human_baseline/human/<Name>/<date>.jsonl`, bots to `.../bot/...`;
+  `hill_climb.py` refuses to score without human traces (`--allow-fallback` for smoke tests only).
+- **A round** (on a branch, while you aren't playing: the test stack shares the GPU with
+  `llama-server`): `hill_climb.py init --minutes 2 --runs 2` once (`--baseline-runs 5` measures the
+  noise σ); then `hill_climb.py status` to pick the worst tell, one hypothesis, one change, and
+  `hill_climb.py eval-candidate --category code --target <tell> --hypothesis "<one sentence>"
+  --minutes 2 --runs 2 --auto-revert`. It checks the scorer hash, runs `tools/wlb check`, the soak
+  and the scorer, logs to `var/experiments/ledger.jsonl`, and keeps a change only if the
+  guardrails pass, the score beats the best by `max(min_delta, 2σ)` and a confirmation run agrees;
+  every keep also runs `--suite heldout`. Guardrails include an XP/h floor (default 3000 XP/h) and
+  at most 2 deaths per run.
+- **What may be changed, and how:** numbers (reaction delays, typo rate, chattiness, skill sliders)
+  by random / Bayesian search over a config knob; `content/RULES.md`, identities and prompt layout
+  by the agent, scored on soak + `tools/wlb test eval`; code (movement jitter, turning, pauses,
+  playerbots settings) by the agent with `tools/wlb check` passing. Most tells live in code.
+
+---
+
+## 7. References
+
+- Navigation Turing Test (Devlin et al., Microsoft Research, ICML 2021):
+  https://arxiv.org/abs/2105.09637
+- MineRL BASALT (TrueSkill pairwise human/agent ranking): https://arxiv.org/abs/2107.01969;
+  2022 retrospective https://arxiv.org/abs/2303.13512; BEDD dataset https://arxiv.org/abs/2312.02405
+- BotPrize (Unreal Tournament believability Turing test):
+  https://en.wikipedia.org/wiki/Computer_game_bot_Turing_test
+- Togelius & Yannakakis et al., "Assessing Believability":
+  https://pure.itu.dk/en/publications/assessing-believability/; Mario AI Turing track (2012);
+  Even et al. (2021) believability protocol https://www.frontiersin.org/articles/10.3389/fcomp.2021.774763/full;
+  Pacheco et al. (2018) https://gameai.eecs.qmul.ac.uk/2018/06/15/pacheco2018studying/
+- Human-like bots for tactical shooters (modl.ai / Riot, 2025): https://arxiv.org/abs/2501.00078;
+  Counter-Strike behavioural cloning (Pearce & Zhu): https://arxiv.org/abs/2104.04258
+- Generative Agents ("Smallville", LLM polish vs human chat warning): https://arxiv.org/abs/2304.03442
+- Gran Turismo Sophy (reaction-rate caps & sportsmanship as hard gates): https://ai.sony/blog/blog-043/
+- Mitterhofer et al. (2009), Server-side Bot Detection in MMOs (WoW waypoint repetition):
+  https://www.eurecom.fr/publication/2860/download/rs-publi-2860.pdf
+- Gianvecchio et al., "Battle of Botcraft" (WoW timing irregularity):
+  https://www.eecis.udel.edu/~hnw/paper/hop.pdf
+- NCSoft & Korea University: Lineage W trajectory clustering (2024) https://arxiv.org/abs/2501.10461;
+  multi-game self-similarity (Lee et al. 2016) https://arxiv.org/abs/1606.01426; Aion action
+  intervals (2023) https://www.koreascience.or.kr/article/JAKO202364360080927.pdf; chatting patterns
+  https://scholar.korea.ac.kr/item/070dfc78-7260-4b1e-9b37-4a5c35aa197a; party play
+  https://pure.korea.ac.kr/en/publications/online-game-bot-detection-based-on-party-play-log-analysis/;
+  survey https://pmc.ncbi.nlm.nih.gov/articles/PMC4844581/
+- World of Warcraft Avatar History dataset (MMSys 2011):
+  https://homepage.iis.sinica.edu.tw/~swc/pub/world_of_warcraft_avatar_history.html
+- Lopez-Paz & Oquab, "Revisiting Classifier Two-Sample Tests" https://arxiv.org/abs/1610.06545;
+  Conformal C2ST https://arxiv.org/abs/2507.17026: a weak classifier "passing" proves nothing

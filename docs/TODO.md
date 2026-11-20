@@ -13,18 +13,21 @@ Items #1–#5 are done and verified live (2026-11-18).
 
 ## Next, in order
 
-- **Scorer redesign (blocks any hill-climbing run, `docs/plans/self-improving-loop.md`):** retire
-  the single 0–100 movement-average score and rebuild in layers: (A) hard gates (no stuck/death/
-  refusal loops, progress floor, human timing limits), (B) pairwise blind ranking with TrueSkill /
-  Bradley–Terry ratings anchored to human clips (`blind_rate.py` + LLM judge while it agrees),
-  (C) explainable MMO adversary suite + per-situation `scikit-learn` classifier as diagnostics only
-  (never a reward), (D) calibration meta-tests against held-out humans and known-bad bots (plain
-  playerbots, random-jumper, instant-reply), (E) anti-gaming caps & frozen held-out human set,
-  (F) recording parity (observer-view broadcast packets + explicit events, identical for humans and
-  bots). Build order: (1) recording parity + events, (2) pairwise harness + `blind_rate.py`,
-  (3) known-bad bots + scorer checks, (4) diagnostic classifier + adversary suite, (5) long-horizon
-  & group tells. First human session recorded 2026-11-19 (`Hele`, 112 min, 9,180 samples; need more
-  sessions/activities & ~30% held out).
+- **Scorer redesign (blocks any hill-climbing run;** `docs/plans/self-improving-loop.md`, decided
+  2026-11-19, not built). Retire the single 0–100 movement-average score and rebuild in layers:
+  (A) hard gates (no stuck/death/refusal loops, progress floor, human timing limits, eval
+  non-regression), (B) pairwise blind ranking with TrueSkill / Bradley–Terry ratings anchored to
+  human clips (`blind_rate.py` as ground truth + an LLM judge while it agrees) — **the score the loop
+  keeps or reverts on**, (C) explainable MMO adversary suite + per-situation `scikit-learn`
+  classifier as diagnostics only (never a reward), (D) checks on the scorer against held-out
+  humans and known-bad bots (plain playerbots, random-jumper, instant-reply, same-loop walker),
+  (E) anti-gaming caps and a frozen held-out human set, (F) recording parity (observer-view
+  broadcast packets + explicit events, identical for humans and bots). Build order: (1) recording
+  parity + events, (2) pairwise harness + `blind_rate.py`, (3) known-bad bots + scorer checks,
+  (4) diagnostic classifier + adversary suite, (5) long-horizon & group tells, (6) switch
+  `hill_climb.py` to the B rating and delete the composite score. First human session recorded
+  2026-11-19 (`Hele`, 112 min, 9,180 samples); more sessions and activities needed, ideally a few
+  players, ~30 % held out.
 - **General / Say / Party chat + quest grouping (invite/accept):** wire `/1 General`, `/s Say`, and
   `/p Party` chat hooks into `LlmBrainChatScript` (currently whisper-only) and add group invite /
   accept / quest-teaming options so bots can respond to LFG calls in General chat and team up with
