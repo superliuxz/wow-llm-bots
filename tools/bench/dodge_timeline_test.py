@@ -572,6 +572,22 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
             self.assertIn("instance=7", res["BotA"])
             self.assertIn("instance=7", res["BotB"])
 
+    def test_slice_traces_after_excludes_prior_wave_kill_across_fast_reset(self) -> None:
+        # Fast (~1.0s) inter-wave setup puts Wave 1's mob_kill within 5s of Wave 2 pull_ms;
+        # slicing by stage_ms and inst_id must exclude Wave 1 events/samples and map-0 resets.
+        rows = [
+            {"kind": "sample", "t_ms": 98500, "inst": 1, "in_combat": True},
+            {"kind": "event", "t_ms": 98600, "event": "mob_kill", "detail": "Loken", "value": 0},
+            {"kind": "sample", "t_ms": 99200, "inst": 0, "in_combat": False},
+            {"kind": "sample", "t_ms": 101000, "inst": 5, "in_combat": True},
+            {"kind": "event", "t_ms": 102000, "event": "damage_dealt", "detail": "Loken", "value": 5000},
+            {"kind": "sample", "t_ms": 105000, "inst": 5, "in_combat": True},
+        ]
+        sub = bench_bosses._slice_traces_after({"Loada": rows}, ["Loada"], 99500, inst_id=5)
+        res = boss_meter.analyze_boss_fight(sub, boss_name="Loken")
+        self.assertFalse(res["killed"])
+        self.assertEqual(res["duration_s"], 4.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -663,11 +663,17 @@ def _slice_traces_after(
     all_traces: dict[str, list[dict]],
     names: list[str],
     t_min_ms: int,
+    inst_id: int = 0,
 ) -> dict[str, list[dict]]:
     out = {}
     for n in names:
         rows = all_traces.get(n, [])
-        out[n] = [r for r in rows if int(r.get("t_ms", 0)) >= t_min_ms]
+        out[n] = [
+            r
+            for r in rows
+            if int(r.get("t_ms", 0)) >= t_min_ms
+            and (inst_id <= 0 or r.get("kind") != "sample" or int(r.get("inst", 0)) == inst_id)
+        ]
     return out
 
 
@@ -1062,7 +1068,7 @@ def run_boss_waves(
                                 if done_flags[p_idx]:
                                     continue
                                 pnames = [b[0] for b in party]
-                                sub = _slice_traces_after(all_tr, pnames, party_pull_ms[p_idx] - 5000)
+                                sub = _slice_traces_after(all_tr, pnames, stage_ms, inst_id=party_instances[p_idx])
                                 res = boss_meter.analyze_boss_fight(sub, boss_name=boss_name)
                                 if res["killed"]:
                                     say(f"  party {p_idx + 1} ({party_modes[p_idx]}, inst {party_instances[p_idx]}): {boss_name} KILLED in {res['duration_s']:.1f}s!")
@@ -1100,7 +1106,7 @@ def run_boss_waves(
                     pnames = [b[0] for b in party]
                     arm = party_modes[p_idx]
                     pre_pull = _had_pre_pull_combat(all_tr, pnames, stage_ms, party_pull_ms[p_idx])
-                    sub = _slice_traces_after(all_tr, pnames, party_pull_ms[p_idx] - 1000)
+                    sub = _slice_traces_after(all_tr, pnames, stage_ms, inst_id=party_instances[p_idx])
                     res = boss_meter.analyze_boss_fight(sub, boss_name=boss_name)
                     res["era"] = era
                     res["party_size"] = len(party)
