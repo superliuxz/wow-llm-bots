@@ -791,13 +791,15 @@ bool SpotInsideHostileArea(Player* bot, const pb::Vec3& spot) {
   return false;
 }
 
-std::optional<pb::Vec3> PreferredEscapePos(Player* bot) {
+std::optional<pb::Vec3> PreferredEscapePos(Player* bot,
+                                           const pb::Vec3& hazard_pos,
+                                           float hazard_radius_yd) {
   Group* grp = bot->GetGroup();
   if (!grp) {
     return std::nullopt;
   }
-  // Prefer moving toward the tank (if bot is not the tank), else group
-  // centroid.
+  // Prefer moving toward the tank (if outside the hazard), else centroid of
+  // living group members who are outside the hazard radius.
   float sum_x = 0.0f;
   float sum_y = 0.0f;
   float sum_z = 0.0f;
@@ -812,13 +814,18 @@ std::optional<pb::Vec3> PreferredEscapePos(Player* bot) {
         bot->GetDistance(member) > 60.0f) {
       continue;
     }
+    const pb::Vec3 mpos = PosOf(member);
+    if (hazard_radius_yd > 0.0f &&
+        Dist2D(mpos, hazard_pos) < hazard_radius_yd + 1.0f) {
+      continue;
+    }
     if ((slot.flags & MEMBER_FLAG_MAINTANK) != 0 ||
         (slot.roles & lfg::PLAYER_ROLE_TANK) != 0) {
-      return PosOf(member);
+      return mpos;
     }
-    sum_x += member->GetPositionX();
-    sum_y += member->GetPositionY();
-    sum_z += member->GetPositionZ();
+    sum_x += mpos.x;
+    sum_y += mpos.y;
+    sum_z += mpos.z;
     ++count;
   }
   if (count > 0) {
@@ -1352,7 +1359,8 @@ ActStartResult StartAct(Player* bot,
         return {.done = true};
       }
       std::vector<pb::Vec3> candidates = CandidateSpotsForOutOf(
-          bot_pos, hazard->anchor, hazard->radius_yd, PreferredEscapePos(bot));
+          bot_pos, hazard->anchor, hazard->radius_yd,
+          PreferredEscapePos(bot, hazard->anchor.pos, hazard->radius_yd));
       if (candidates.empty()) {
         return {.done = true};
       }
@@ -1950,9 +1958,10 @@ ActStepResult StepActiveAct(Player* bot,
       active->last_repath_at = now;
       std::vector<pb::Vec3> candidates =
           (act.verb == pb::Command_Act::OUT_OF)
-              ? CandidateSpotsForOutOf(bot_pos, active->last_anchor,
-                                       active->hazard_radius_yd,
-                                       PreferredEscapePos(bot))
+              ? CandidateSpotsForOutOf(
+                    bot_pos, active->last_anchor, active->hazard_radius_yd,
+                    PreferredEscapePos(bot, active->last_anchor.pos,
+                                       active->hazard_radius_yd))
               : CandidateSpotsForAway(bot_pos, active->last_anchor, target_yd,
                                       bot_reach);
       if (candidates.empty()) {

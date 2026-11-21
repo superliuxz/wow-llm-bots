@@ -159,7 +159,7 @@ bool CanEscapeBeforeImpact(float cur_dist_yd,
   if (needed_yd <= 0.0f) {
     return true;
   }
-  return (needed_yd / bot_speed_yd_s) <= (lands_in_s + 0.15f);
+  return (needed_yd / bot_speed_yd_s) <= (lands_in_s + 0.75f);
 }
 
 std::vector<pb::Vec3> CandidateSpotsForOutOf(

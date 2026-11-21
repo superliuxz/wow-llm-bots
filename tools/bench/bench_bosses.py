@@ -86,20 +86,16 @@ ICK_NOTES = """# Pit of Saron — Ick & Krick
 """
 
 DEVOURER_NOTES = """# The Forge of Souls — Devourer of Souls
-- **Mirrored Soul**: links boss to a party member for 8s — all boss damage hits that ally!
-  - Standing order: `Mirrored Soul cast -> stop attacking`
-  - Standing order: `Mirrored Soul on anyone -> stop attacking`
 - **Wailing Souls**: sweeping frontal beam; stay behind the boss.
   - Standing order: `Wailing Souls cast -> to behind Devourer of Souls`
-- **Well of Souls**: purple void zone on the ground.
+- **Well of Souls**: purple void zone on the ground; move out immediately.
   - Standing order: `in Well of Souls -> out of it`
 - **Phantom Blast**: heavy shadow nuke on tank; interrupt when possible.
 """
 
 LOKEN_NOTES = """# Halls of Lightning — Loken
-- **Lightning Nova**: 4s cast dealing heavy AoE damage within 20 yd; step just outside the radius (you automatically return to range after it lands).
+- **Lightning Nova**: 4s cast dealing heavy AoE damage within 20 yd; step just outside the radius and you automatically return after it lands.
   - Standing order: `Lightning Nova cast -> out of it`
-- **Pulsing Shockwave**: stacks nature damage with distance; do NOT write a separate `to Loken` order since `out of it` automatically returns you after Lightning Nova.
 """
 
 EREGOS_NOTES = """# The Oculus — Ley-Guardian Eregos (3D Drake Vehicle Fight)
@@ -110,8 +106,8 @@ EREGOS_NOTES = """# The Oculus — Ley-Guardian Eregos (3D Drake Vehicle Fight)
 """
 
 MURMUR_NOTES = """# Shadow Labyrinth — Murmur
-- **Sonic Boom**: 5s cast dealing massive damage within 34 yards; step just outside the radius and return after it lands.
-  - Standing order: `Sonic Boom cast -> out of it`
+- **Sonic Boom**: 5s cast dealing massive damage within 34 yards; run 38 yd away and you automatically return after it lands.
+  - Standing order: `Sonic Boom cast -> away Murmur 38`
 - **Murmur's Touch**: bomb debuff on one player; move away from allies so you don't knock them up.
   - Standing order: `Murmur's Touch on me -> away`
 """
