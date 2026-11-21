@@ -17,4 +17,4 @@ Always follow `CONTRIBUTING.md` and keep `docs/TODO.md` current on every task:
 5. **Double-check yourself; commits must create no extra bugs:**
    - Re-read your full `git diff` line-by-line before committing (check boundary conditions, state interactions, idempotency, and callers), run `tools/wlb check` (plus live verification for server/benchmark changes), and never ship unverified assumptions or new regressions.
 6. **Never re-lock `scorer.sha256` without the user's explicit OK:**
-   - Never run `tools/bench/hill_climb.py lock-scorer --force-relock` or modify `scorer.sha256` on your own; if locked measurement files changed, leave `scorer.sha256` untouched and wait for the user's explicit approval before relocking.
+   - Never set `WLB_CONFIRM_RELOCK`, run `tools/bench/hill_climb.py lock-scorer`, or modify `scorer.sha256` on your own (`hill_climb.py` also ignores `--lock-file` in agent runs); if locked measurement files changed, leave `scorer.sha256` untouched and wait for the user's explicit approval in the current turn before relocking.

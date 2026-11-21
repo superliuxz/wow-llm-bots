@@ -53,12 +53,18 @@ class HillClimbSafeguardsTest(unittest.TestCase):
     def test_lock_manifest_is_readonly_and_rejects_deleted_line(self):
         with tempfile.TemporaryDirectory() as tmp:
             lf = pathlib.Path(tmp) / "scorer.sha256"
-            ok, _ = hill_climb._write_lock_manifest(lf)
+            # Refuses unconfirmed writes even when the lock file does not exist yet.
+            ok_unconf, _ = hill_climb._write_lock_manifest(lf)
+            self.assertFalse(ok_unconf)
+            self.assertFalse(lf.exists())
+            ok, _ = hill_climb._write_lock_manifest(lf, confirmed=True)
             self.assertTrue(ok)
             self.assertEqual(stat.S_IMODE(lf.stat().st_mode), 0o444)
-            # Refuses to overwrite without force.
-            ok2, _ = hill_climb._write_lock_manifest(lf, force=False)
+            # Refuses to overwrite without force or without confirmation.
+            ok2, _ = hill_climb._write_lock_manifest(lf, force=False, confirmed=True)
             self.assertFalse(ok2)
+            ok2b, _ = hill_climb._write_lock_manifest(lf, force=True, confirmed=False)
+            self.assertFalse(ok2b)
             # Full manifest verifies.
             ok3, _ = hill_climb._verify_all_locks(lf)
             self.assertTrue(ok3)
@@ -69,6 +75,30 @@ class HillClimbSafeguardsTest(unittest.TestCase):
             ok4, msg = hill_climb._verify_all_locks(lf)
             self.assertFalse(ok4)
             self.assertIn("missing required files", msg)
+
+    def test_agent_ignores_custom_lock_file_and_requires_relock_confirmation(self):
+        custom = pathlib.Path("/tmp/custom_scorer_lock.sha256")
+        self.assertEqual(
+            hill_climb._resolve_lock_file(custom, env={"ANTIGRAVITY_AGENT": "1"}),
+            hill_climb.DEFAULT_LOCK_FILE,
+        )
+        self.assertEqual(
+            hill_climb._resolve_lock_file(custom, env={"CLAUDECODE": "1"}),
+            hill_climb.DEFAULT_LOCK_FILE,
+        )
+        self.assertEqual(hill_climb._resolve_lock_file(custom, env={}), custom)
+
+        ok_no_env, _ = hill_climb._confirm_relock(env={"ANTIGRAVITY_AGENT": "1"})
+        self.assertFalse(ok_no_env)
+        ok_wrong, _ = hill_climb._confirm_relock(
+            env={"ANTIGRAVITY_AGENT": "1", hill_climb.CONFIRM_RELOCK_ENV: "WRONG"}
+        )
+        self.assertFalse(ok_wrong)
+        token = f"RELOCK:{soak_scorer.scorer_sha256()[:12]}"
+        ok_good, _ = hill_climb._confirm_relock(
+            env={"ANTIGRAVITY_AGENT": "1", hill_climb.CONFIRM_RELOCK_ENV: token}
+        )
+        self.assertTrue(ok_good)
 
     def test_has_human_traces_rejects_bot_rows_and_requires_min_samples(self):
         with tempfile.TemporaryDirectory() as tmp:

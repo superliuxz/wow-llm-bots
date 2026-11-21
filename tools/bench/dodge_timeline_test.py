@@ -356,6 +356,69 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
             self.assertIn("llm", res["by_arm"])
             self.assertEqual(stops, ["stop", "stop"])
 
+            # Console check RuntimeError during setup also marks boss failed.
+            FakeServer.wait_online_count = staticmethod(lambda count, inst=None: None)
+
+            def console_wrong_role(cmd, wait_s=1.0, inst=None):
+                parts = cmd.split()
+                if len(parts) >= 6 and parts[1] == "gear":
+                    name, lvl, tok = parts[2], parts[3], parts[-1]
+                    return f"llmtest: geared {name} at level {lvl} (role=dps, hp=100, specNo=3) tok={tok}\n"
+                return ""
+
+            FakeServer.console = staticmethod(console_wrong_role)
+            bench_bosses.server = FakeServer
+            bench_bosses.TEST = types.SimpleNamespace(etc=etc, logs=logs)
+            bench_bosses.VAR = var
+            try:
+                res_console = bench_bosses.run_boss_waves(
+                    era="TBC",
+                    tag="test_boss_rt",
+                    boss_name="Test Boss",
+                    level=70,
+                    map_id=556,
+                    stage_xyz=(0.0, 0.0, 0.0),
+                    spawn_xyz=(10.0, 0.0, 0.0),
+                    strip_strat="tbc-seth",
+                    mode="mixed_all",
+                    target_runs=2,
+                    parallel=2,
+                )
+            finally:
+                bench_bosses.server = orig_server
+                bench_bosses.TEST = orig_test
+                bench_bosses.VAR = orig_var
+            self.assertTrue(res_console["failed"])
+            self.assertIn("role mismatch", res_console["error"])
+
+            # A programming bug during setup must crash loudly, not become "boss failed".
+            def bug_in_setup(count, inst=None):
+                raise TypeError("bug in bench code")
+
+            FakeServer.wait_online_count = staticmethod(bug_in_setup)
+            bench_bosses.server = FakeServer
+            bench_bosses.TEST = types.SimpleNamespace(etc=etc, logs=logs)
+            bench_bosses.VAR = var
+            try:
+                with self.assertRaises(TypeError):
+                    bench_bosses.run_boss_waves(
+                        era="TBC",
+                        tag="test_boss_bug",
+                        boss_name="Test Boss",
+                        level=70,
+                        map_id=556,
+                        stage_xyz=(0.0, 0.0, 0.0),
+                        spawn_xyz=(10.0, 0.0, 0.0),
+                        strip_strat="tbc-seth",
+                        mode="mixed_all",
+                        target_runs=2,
+                        parallel=2,
+                    )
+            finally:
+                bench_bosses.server = orig_server
+                bench_bosses.TEST = orig_test
+                bench_bosses.VAR = orig_var
+
 
 if __name__ == "__main__":
     unittest.main()

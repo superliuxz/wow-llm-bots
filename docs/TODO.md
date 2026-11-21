@@ -9,23 +9,12 @@ Last updated 2026-11-20.
 
 ## In progress
 
-### Review Trace All Events 8 (`b5d00e8`) — Open Items
-
-- [ ] **New Low 1 — Setup catches every `Exception`, so a bug in the bench code shows up as `"boss failed"` (`tools/bench/bench_bosses.py`):**
-  *Fix:* catch only `Failed` and the console errors (`RuntimeError`); let anything else crash.
-- [ ] **New Low 2 — The relock is enforced only by the rule, not by the tool (`tools/bench/hill_climb.py`):**
-  `lock-scorer` without `--force` (and `init`) still relocks if the lock file is deleted, and
-  `--lock-file` can point anywhere. *Fix:* have `hill_climb.py` refuse to relock without an
-  explicit confirmation (env var or interactive prompt), and ignore `--lock-file` in agent runs.
-- [ ] **New Low 3 — The rate warning pools every character's gaps, while `trace_parity` checks bots and humans separately (`server_module/src/snapshot/behavior_trace.{h,cc}`, `server_module/src/llm_brain_world_script.cc`):**
-  *Fix:* warn per role (`"bot"` and `"human"` separately).
-
-- Next benchmark run (all Review 7 items verified; awaiting user OK to re-lock `scorer.sha256`): run
-  `bench_bosses.py` with `--runs 8` (or `10` **per arm**) for `kaelthas`, `ick`, `murmur`, and `ikiss`
-  (e.g. `--mode mixed_all --only kaelthas,ick,murmur,ikiss --runs 8 --parallel 3`), then save one
-  clean report under `docs/benchmarks/`. Note: on `kaelthas`, `stage_xyz=(7.09, -0.45, -2.5)` eliminates
-  arrival deaths and pre-pull combat, while `spawn_xyz=(148.5, 180.0, -16.2)` still pulls the
-  nearby Sunblade pack during the fight (all arms run identically).
+- Next benchmark run (all Review 8 items verified; all 28 scorer locks re-locked & verified with user
+  OK): run `bench_bosses.py` with `--runs 8` (or `10` **per arm**) for `kaelthas`, `ick`, `murmur`,
+  and `ikiss` (e.g. `--mode mixed_all --only kaelthas,ick,murmur,ikiss --runs 8 --parallel 3`), then
+  save one clean report under `docs/benchmarks/`. Note: on `kaelthas`, `stage_xyz=(7.09, -0.45, -2.5)`
+  eliminates arrival deaths and pre-pull combat, while `spawn_xyz=(148.5, 180.0, -16.2)` still pulls
+  the nearby Sunblade pack during the fight (all arms run identically).
 
 ## Next, in order
 
@@ -106,10 +95,6 @@ Last updated 2026-11-20.
     to end avoids returning early).
   - Mid-fight wakes (`attacked`, `hp<N`) replace all standing orders; Gemma 4 occasionally rewrites
     a working `Lightning Nova cast` order into `Loken cast` or `Lightning Nova appears`.
-- **Scorer lock awaiting user OK:** Low 1 updated locked files (`behavior_trace.{h,cc}`,
-  `llm_brain_world_script.cc`, `llm_brain_config.cc`, `mod-llm-brain.conf.dist`), so
-  `~/.local/share/wow-llm-bots/scorer.sha256` was intentionally left untouched until the user
-  explicitly approves running `tools/bench/hill_climb.py lock-scorer --force-relock`.
 - **Not individually live-triggered after final edits yet:** environmental/self death (`killer == killed`
   logged as non-PvP `died` with `detail="environment"` in `behavior_trace_scripts.cc`),
   `llmtest questcomplete` when a quest is already active in a bot's quest log (`CompleteQuest` +
@@ -120,6 +105,24 @@ Last updated 2026-11-20.
   adding entrance staging/dismount).
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-20: **Review 8 fixes (New Lows 1–3) + user-approved scorer relock:**
+  `tools/bench/bench_bosses.py` narrows setup, outer boss-loop, cleanup, and latency-parse
+  exception handling (`except (Failed, RuntimeError)`, `except (Failed, OSError)`,
+  `except (json.JSONDecodeError, ValueError, TypeError)`) so bench programming bugs crash loudly
+  (tested in `tools/bench/dodge_timeline_test.py` for `Failed`, console `RuntimeError`, and
+  uncaught `TypeError`); `tools/bench/hill_climb.py` refuses unconfirmed `lock-scorer` even when
+  `scorer.sha256` is missing, removes `cmd_init` auto-lock creation, requires interactive `"RELOCK"`
+  or exact `WLB_CONFIRM_RELOCK=RELOCK:<hash12>`, ignores `--lock-file` during agent runs (`cmd_lock_scorer`,
+  `cmd_init`, `cmd_eval_candidate`), and updates `CONTRIBUTING.md` / `.agents/rules/contributing.md`
+  (tested in `tools/bench/hill_climb_test.py` and CLI refusal checks);
+  `BehaviorTraceWriter::TakeMeasuredSampleHz(role, min_intervals)` (`behavior_trace.{h,cc}`) &
+  `LlmBrainWorldScript::CheckMeasuredTraceRate` check `"bot"` and `"human"` trace sample rates
+  separately matching `trace_parity.check_source_rate_parity` (unit-tested with 10 fast bots vs 1
+  slow human, and live-verified on `out/server-test` at `TraceSampleIntervalMs = 290` logging
+  `measured bot trace sample rate 3.44 Hz`). Verified via `tools/wlb check` (402 C++ + 35 Python
+  tests) and, with explicit user OK, re-locked and verified all 28 measurement locks in
+  `~/.local/share/wow-llm-bots/scorer.sha256`.
 
 - 2026-11-20: **Review 7 fixes (New Lows 1–4 + environmental-death caveat restored):**
   removed the misleading `<= 285 ms` config warning and instead measure actual recorded sample rate
@@ -242,6 +245,3 @@ Last updated 2026-11-20.
   repeatable Loken boss test (`tools/wlblib/cases/e2e_boss.py`, `-wotlk-hol`, mock brain) verifying
   `Lightning Nova` visibility over background `Pulsing Shockwave`, `1 ms` `AWAY Loken 25` dispatch,
   and mid-fight replan preservation of in-flight movement orders; all 6 `e2e orders` scenarios pass.
-- 2026-11-18: **Grammar IDL (`docs/specs/grammar-idl.md`):**
-  `tools/grammar/wlb_gen.py` generates C++ types, parser, printer, GBNF, and `content/RULES.md`
-  reply form from `harness/grammar/{orders,plan}.wlb`, verified against real `llama-grammar.cpp`.

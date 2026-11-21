@@ -321,6 +321,8 @@ def _console_bot(
     deadline = time.monotonic() + max(0.0, timeout_s - wait_s)
     while not line and time.monotonic() < deadline:
         time.sleep(0.25)
+        if not log.exists():
+            continue
         with open(log, "rb") as f:
             f.seek(start)
             out = f.read().decode(errors="replace")
@@ -395,7 +397,7 @@ def _parse_harness_latency(bots_dir: pathlib.Path, bot_names: list[str]) -> dict
                     continue
                 try:
                     d = json.loads(line)
-                except Exception:
+                except (json.JSONDecodeError, ValueError, TypeError):
                     continue
                 if d.get("first_line_ms", 0) > 0:
                     vals.append(float(d["first_line_ms"]))
@@ -622,7 +624,7 @@ def run_boss_waves(
                             raise RuntimeError(f"questcomplete {qid} failed for {name}: {qout!r}")
                     if role_items and idx in role_items:
                         server.console(f"llmtest item {name} {role_items[idx]}", wait_s=0.2, inst=TEST)
-        except Exception as exc:
+        except (Failed, RuntimeError) as exc:
             setup_error = str(exc)
             wave_errors.append(f"setup: {exc}")
             say(f"boss benchmark [{era} | {tag} | {mode}]: SETUP FAILED (marking boss failed and moving on): {exc}")
@@ -888,11 +890,11 @@ def run_boss_waves(
         if per_bot_strat_control:
             try:
                 server.console("llmtest clearstrat", wait_s=0.3, inst=TEST)
-            except Exception:
+            except (Failed, OSError):
                 pass  # The server may already be down; overrides die with it.
         try:
             server.server_stop(inst=TEST)
-        except Exception:
+        except (Failed, OSError):
             pass
 
     by_arm = {
@@ -993,7 +995,7 @@ def main() -> int:
                     target_runs=max(1, args.runs),
                     parallel=max(1, args.parallel),
                 )
-            except Exception as exc:
+            except (Failed, RuntimeError) as exc:
                 say(f"BOSS {k} FAILED (continuing to remaining bosses): {exc}")
                 results[k] = {
                     "boss": BOSSES[k]["boss_name"],

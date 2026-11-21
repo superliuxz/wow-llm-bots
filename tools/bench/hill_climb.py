@@ -42,6 +42,18 @@ DEFAULT_LOCK_FILE = EXTERNAL_STATE_DIR / "scorer.sha256"
 DEFAULT_HUMAN_DIR = EXTERNAL_STATE_DIR / "human_baseline"
 DEFAULT_BLIND_RATINGS = EXTERNAL_STATE_DIR / "blind_ratings.jsonl"
 
+CONFIRM_RELOCK_ENV = "WLB_CONFIRM_RELOCK"
+AGENT_ENV_VARS = (
+    "ANTIGRAVITY_AGENT",
+    "ANTIGRAVITY_CONVERSATION_ID",
+    "CLAUDECODE",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CODEX_SANDBOX",
+    "CODEX_CI",
+    "CURSOR_AGENT",
+    "AIDER",
+)
+
 # Every file that produces, configures, or gates the soak score is locked.
 LOCKED_PATTERNS = [
     "tools/bench/soak_scorer.py",
@@ -110,12 +122,54 @@ def _locked_files() -> list[pathlib.Path]:
     return files
 
 
-def _write_lock_manifest(lock_file: pathlib.Path, force: bool = False) -> tuple[bool, str]:
+def _is_agent_run(env: dict[str, str] | None = None) -> bool:
+    e = os.environ if env is None else env
+    return any(bool(e.get(k)) for k in AGENT_ENV_VARS)
+
+
+def _resolve_lock_file(
+    requested: pathlib.Path | None, env: dict[str, str] | None = None
+) -> pathlib.Path:
+    if requested is None:
+        return DEFAULT_LOCK_FILE
+    if _is_agent_run(env) and requested.resolve() != DEFAULT_LOCK_FILE.resolve():
+        print(
+            f"WARNING: ignoring --lock-file={requested} in agent run; "
+            f"enforcing {DEFAULT_LOCK_FILE}",
+            file=sys.stderr,
+        )
+        return DEFAULT_LOCK_FILE
+    return requested
+
+
+def _confirm_relock(env: dict[str, str] | None = None) -> tuple[bool, str]:
+    expected_token = f"RELOCK:{soak_scorer.scorer_sha256()[:12]}"
+    e = os.environ if env is None else env
+    if e.get(CONFIRM_RELOCK_ENV, "") == expected_token:
+        return True, ""
+    if not _is_agent_run(e) and sys.stdin.isatty():
+        ans = input(
+            f"Confirm writing scorer lock ({expected_token})? Type 'RELOCK' to confirm: "
+        ).strip()
+        if ans == "RELOCK":
+            return True, ""
+    return False, (
+        "refusing to write scorer lock without explicit confirmation "
+        f"(in human shell type 'RELOCK' at prompt, or set {CONFIRM_RELOCK_ENV}={expected_token} "
+        "only with user approval)"
+    )
+
+
+def _write_lock_manifest(
+    lock_file: pathlib.Path, force: bool = False, confirmed: bool = False
+) -> tuple[bool, str]:
     if lock_file.exists() and not force:
         return False, (
             f"lock file already exists: {lock_file} "
             "(pass --force-relock explicitly to overwrite)"
         )
+    if not confirmed:
+        return False, f"refusing to write lock manifest {lock_file} without confirmation"
     digest = soak_scorer.scorer_sha256()
     lock_file.parent.mkdir(parents=True, exist_ok=True)
     if lock_file.exists():
@@ -277,7 +331,19 @@ def _save_baseline_traces(suite: str) -> pathlib.Path | None:
 
 
 def cmd_lock_scorer(args) -> int:
-    ok, msg = _write_lock_manifest(args.lock_file, force=args.force_relock)
+    lock_file = _resolve_lock_file(args.lock_file)
+    if lock_file.exists() and not args.force_relock:
+        print(
+            f"lock file already exists: {lock_file} "
+            "(pass --force-relock explicitly to overwrite)",
+            file=sys.stderr,
+        )
+        return 2
+    confirmed, reason = _confirm_relock()
+    if not confirmed:
+        print(f"ABORT: {reason}", file=sys.stderr)
+        return 2
+    ok, msg = _write_lock_manifest(lock_file, force=args.force_relock, confirmed=True)
     print(msg, file=sys.stdout if ok else sys.stderr)
     return 0 if ok else 2
 
@@ -322,17 +388,11 @@ def cmd_init(args) -> int:
             return 2
         print("WARNING: running without verified human baseline (--allow-fallback)", file=sys.stderr)
 
-    if args.lock_file.exists():
-        ok, msg = _verify_all_locks(args.lock_file)
-        if not ok:
-            print(f"ABORT: {msg}", file=sys.stderr)
-            return 2
-    else:
-        ok, msg = _write_lock_manifest(args.lock_file, force=False)
-        if not ok:
-            print(f"ABORT: {msg}", file=sys.stderr)
-            return 2
-        print(msg)
+    lock_file = _resolve_lock_file(args.lock_file)
+    ok, msg = _verify_all_locks(lock_file)
+    if not ok:
+        print(f"ABORT: {msg}", file=sys.stderr)
+        return 2
 
     res = soak_case.run_soak(
         minutes=args.minutes,
@@ -341,7 +401,7 @@ def cmd_init(args) -> int:
         human_dir=args.human_dir,
         blind_ratings_path=args.blind_ratings,
         use_judge=args.judge,
-        verify_hash=args.lock_file,
+        verify_hash=lock_file,
         suite=args.suite,
         check_guardrails=False,
     )
@@ -383,7 +443,8 @@ def cmd_init(args) -> int:
 
 
 def cmd_eval_candidate(args) -> int:
-    ok, msg = _verify_all_locks(args.lock_file)
+    lock_file = _resolve_lock_file(args.lock_file)
+    ok, msg = _verify_all_locks(lock_file)
     if not ok:
         print(f"ABORT: {msg}", file=sys.stderr)
         return 2
@@ -436,7 +497,7 @@ def cmd_eval_candidate(args) -> int:
         baseline_trace_dir=baseline_dir if baseline_dir.exists() else None,
         blind_ratings_path=args.blind_ratings,
         use_judge=args.judge,
-        verify_hash=args.lock_file,
+        verify_hash=lock_file,
         suite=args.suite,
         check_guardrails=False,
     )
@@ -463,7 +524,7 @@ def cmd_eval_candidate(args) -> int:
             baseline_trace_dir=baseline_dir if baseline_dir.exists() else None,
             blind_ratings_path=args.blind_ratings,
             use_judge=args.judge,
-            verify_hash=args.lock_file,
+            verify_hash=lock_file,
             suite=args.suite,
             check_guardrails=False,
         )
@@ -482,7 +543,7 @@ def cmd_eval_candidate(args) -> int:
             score=True,
             human_dir=args.human_dir,
             use_judge=args.judge,
-            verify_hash=args.lock_file,
+            verify_hash=lock_file,
             suite="heldout",
             check_guardrails=False,
         )

@@ -382,14 +382,16 @@ class LlmBrainWorldScript : public WorldScript {
     if (!trace_writer_ || !trace_writer_->enabled()) {
       return;
     }
-    const std::optional<double> hz =
-        trace_writer_->TakeMeasuredSampleHz(min_intervals);
-    if (hz && *hz < kMinParityTraceHz) {
-      LOG_WARN("module",
-               "mod-llm-brain: measured trace sample rate {:.2f} Hz is below "
-               "the 3.5 Hz that trace_parity.py requires "
-               "(TraceSampleIntervalMs = {} ms plus world-tick rounding)",
-               *hz, config_.trace_sample_interval_ms);
+    for (std::string_view role : {"bot", "human"}) {
+      const std::optional<double> hz =
+          trace_writer_->TakeMeasuredSampleHz(role, min_intervals);
+      if (hz && *hz < kMinParityTraceHz) {
+        LOG_WARN("module",
+                 "mod-llm-brain: measured {} trace sample rate {:.2f} Hz is "
+                 "below the 3.5 Hz that trace_parity.py requires "
+                 "(TraceSampleIntervalMs = {} ms plus world-tick rounding)",
+                 role, *hz, config_.trace_sample_interval_ms);
+      }
     }
   }
 

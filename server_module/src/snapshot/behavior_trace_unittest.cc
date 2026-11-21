@@ -272,23 +272,42 @@ TEST(BehaviorTraceTest, MeasuresActualSampleHzIncludingTickRounding) {
   ASSERT_TRUE(writer.WriteSample(s));  // > 5000 ms gap ignored
 
   // Insufficient samples preserves the window instead of clearing it.
-  EXPECT_FALSE(writer.TakeMeasuredSampleHz(/*min_intervals=*/20).has_value());
+  EXPECT_FALSE(
+      writer.TakeMeasuredSampleHz("bot", /*min_intervals=*/20).has_value());
   const std::optional<double> rounded_hz =
-      writer.TakeMeasuredSampleHz(/*min_intervals=*/10);
+      writer.TakeMeasuredSampleHz("bot", /*min_intervals=*/10);
   ASSERT_TRUE(rounded_hz.has_value());
   EXPECT_DOUBLE_EQ(*rounded_hz, 3.33);
-  EXPECT_FALSE(writer.TakeMeasuredSampleHz(/*min_intervals=*/1).has_value());
+  EXPECT_FALSE(
+      writer.TakeMeasuredSampleHz("bot", /*min_intervals=*/1).has_value());
+  EXPECT_FALSE(
+      writer.TakeMeasuredSampleHz("human", /*min_intervals=*/1).has_value());
 
-  // 200 ms effective cadence -> 5.0 Hz.
+  // 200 ms effective cadence on bots vs 300 ms on a human must stay isolated
+  // per role so 10 fast bots cannot mask a slow human trace.
   const int64_t t1 = s.time_ms + 1000;
+  for (int b = 0; b < 10; ++b) {
+    s.role = "bot";
+    s.name = "Bot" + std::to_string(b);
+    for (int i = 0; i <= 12; ++i) {
+      s.time_ms = t1 + static_cast<int64_t>(i) * 200;
+      ASSERT_TRUE(writer.WriteSample(s));
+    }
+  }
+  s.role = "human";
+  s.name = "Hero";
   for (int i = 0; i <= 12; ++i) {
-    s.time_ms = t1 + static_cast<int64_t>(i) * 200;
+    s.time_ms = t1 + static_cast<int64_t>(i) * 300;
     ASSERT_TRUE(writer.WriteSample(s));
   }
-  const std::optional<double> nominal_hz =
-      writer.TakeMeasuredSampleHz(/*min_intervals=*/10);
-  ASSERT_TRUE(nominal_hz.has_value());
-  EXPECT_DOUBLE_EQ(*nominal_hz, 5.0);
+  const std::optional<double> bot_hz =
+      writer.TakeMeasuredSampleHz("bot", /*min_intervals=*/10);
+  const std::optional<double> human_hz =
+      writer.TakeMeasuredSampleHz("human", /*min_intervals=*/10);
+  ASSERT_TRUE(bot_hz.has_value());
+  ASSERT_TRUE(human_hz.has_value());
+  EXPECT_DOUBLE_EQ(*bot_hz, 5.0);
+  EXPECT_DOUBLE_EQ(*human_hz, 3.33);
 
   writer.Flush();
   std::filesystem::remove_all(root);

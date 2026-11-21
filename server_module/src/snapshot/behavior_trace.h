@@ -145,15 +145,19 @@ class BehaviorTraceWriter {
   // or the writer was stopping.
   uint64_t dropped_lines() const;
 
-  // Computes the median contiguous inter-sample rate (Hz, over 0 < dt <= 5000
-  // ms per character, matching trace_parity.estimate_source_hz) from recorded
-  // samples since the last call and clears the window. Returns std::nullopt
-  // until at least `min_intervals` contiguous deltas have been recorded.
-  std::optional<double> TakeMeasuredSampleHz(size_t min_intervals = 10);
+  // Computes the measured sample rate (Hz) for `role` ("bot" or "human")
+  // matching trace_parity.check_source_rate_parity: per-character median
+  // contiguous dt (0 < dt <= 5000 ms) converted to Hz, then median across
+  // characters of `role` with at least `min_intervals` recorded deltas
+  // (clearing those characters' windows). Returns std::nullopt until at least
+  // one character of `role` has `min_intervals` contiguous deltas.
+  std::optional<double> TakeMeasuredSampleHz(std::string_view role,
+                                             size_t min_intervals = 10);
 
  private:
   static constexpr int64_t kMaxSampleGapMs = 5000;
-  static constexpr size_t kMaxRecordedSampleDts = 16384;
+  static constexpr size_t kMaxRecordedSampleDtsPerChar = 4096;
+  static constexpr size_t kMaxTrackedCharsPerRole = 256;
 
   struct PendingLine {
     std::string role;
@@ -178,7 +182,9 @@ class BehaviorTraceWriter {
   std::condition_variable flushed_cv_;
   std::deque<PendingLine> queue_;
   std::unordered_map<std::string, int64_t> last_sample_time_ms_;
-  std::vector<int64_t> sample_dts_ms_;
+  std::unordered_map<std::string,
+                     std::unordered_map<std::string, std::vector<int64_t>>>
+      sample_dts_by_role_;
   uint64_t dropped_lines_ = 0;
   bool writing_ = false;
   bool stop_ = false;

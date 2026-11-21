@@ -344,27 +344,49 @@ uint64_t BehaviorTraceWriter::dropped_lines() const {
 }
 
 std::optional<double> BehaviorTraceWriter::TakeMeasuredSampleHz(
+    std::string_view role,
     size_t min_intervals) {
   if (min_intervals == 0) {
     min_intervals = 1;
   }
-  std::vector<int64_t> dts;
+  std::vector<std::vector<int64_t>> ready_chars;
   {
     std::lock_guard<std::mutex> lock(mu_);
-    if (sample_dts_ms_.size() < min_intervals) {
+    auto role_it = sample_dts_by_role_.find(std::string(role));
+    if (role_it == sample_dts_by_role_.end()) {
       return std::nullopt;
     }
-    dts.swap(sample_dts_ms_);
+    for (auto& [char_name, char_dts] : role_it->second) {
+      if (char_dts.size() >= min_intervals) {
+        ready_chars.emplace_back();
+        ready_chars.back().swap(char_dts);
+      }
+    }
   }
-  std::sort(dts.begin(), dts.end());
-  const size_t n = dts.size();
-  const double med_ms =
-      (n % 2 == 1) ? static_cast<double>(dts[n / 2])
-                   : 0.5 * static_cast<double>(dts[n / 2 - 1] + dts[n / 2]);
-  if (med_ms <= 0.0) {
+  if (ready_chars.empty()) {
     return std::nullopt;
   }
-  return std::round((1000.0 / med_ms) * 100.0) / 100.0;
+  std::vector<double> char_rates;
+  char_rates.reserve(ready_chars.size());
+  for (std::vector<int64_t>& dts : ready_chars) {
+    std::sort(dts.begin(), dts.end());
+    const size_t n = dts.size();
+    const double med_ms =
+        (n % 2 == 1) ? static_cast<double>(dts[n / 2])
+                     : 0.5 * static_cast<double>(dts[n / 2 - 1] + dts[n / 2]);
+    if (med_ms > 0.0) {
+      char_rates.push_back(std::round((1000.0 / med_ms) * 100.0) / 100.0);
+    }
+  }
+  if (char_rates.empty()) {
+    return std::nullopt;
+  }
+  std::sort(char_rates.begin(), char_rates.end());
+  const size_t m = char_rates.size();
+  const double role_hz =
+      (m % 2 == 1) ? char_rates[m / 2]
+                   : 0.5 * (char_rates[m / 2 - 1] + char_rates[m / 2]);
+  return std::round(role_hz * 100.0) / 100.0;
 }
 
 bool BehaviorTraceWriter::Enqueue(std::string_view role,
@@ -379,15 +401,26 @@ bool BehaviorTraceWriter::Enqueue(std::string_view role,
       return false;
     }
     if (is_sample) {
-      const std::string key = base::StrCat({role, "/", name});
-      auto it = last_sample_time_ms_.find(key);
+      const std::string role_key(role);
+      const std::string char_key(name);
+      const std::string ts_key = base::StrCat({role, "/", name});
+      auto it = last_sample_time_ms_.find(ts_key);
       if (it == last_sample_time_ms_.end()) {
-        last_sample_time_ms_.emplace(key, time_ms);
+        if (last_sample_time_ms_.size() < kMaxTrackedCharsPerRole * 4) {
+          last_sample_time_ms_.emplace(ts_key, time_ms);
+        }
       } else {
         const int64_t dt = time_ms - it->second;
         if (dt > 0 && dt <= kMaxSampleGapMs) {
-          if (sample_dts_ms_.size() < kMaxRecordedSampleDts) {
-            sample_dts_ms_.push_back(dt);
+          auto& by_char = sample_dts_by_role_[role_key];
+          auto char_it = by_char.find(char_key);
+          if (char_it == by_char.end() &&
+              by_char.size() < kMaxTrackedCharsPerRole) {
+            char_it = by_char.emplace(char_key, std::vector<int64_t>{}).first;
+          }
+          if (char_it != by_char.end() &&
+              char_it->second.size() < kMaxRecordedSampleDtsPerChar) {
+            char_it->second.push_back(dt);
           }
           it->second = time_ms;
         } else if (dt > kMaxSampleGapMs || dt < 0) {
