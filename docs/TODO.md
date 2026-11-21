@@ -9,6 +9,17 @@ Last updated 2026-11-20.
 
 ## In progress
 
+### Review Trace All Events 8 (`b5d00e8`) — Open Items
+
+- [ ] **New Low 1 — Setup catches every `Exception`, so a bug in the bench code shows up as `"boss failed"` (`tools/bench/bench_bosses.py`):**
+  *Fix:* catch only `Failed` and the console errors (`RuntimeError`); let anything else crash.
+- [ ] **New Low 2 — The relock is enforced only by the rule, not by the tool (`tools/bench/hill_climb.py`):**
+  `lock-scorer` without `--force` (and `init`) still relocks if the lock file is deleted, and
+  `--lock-file` can point anywhere. *Fix:* have `hill_climb.py` refuse to relock without an
+  explicit confirmation (env var or interactive prompt), and ignore `--lock-file` in agent runs.
+- [ ] **New Low 3 — The rate warning pools every character's gaps, while `trace_parity` checks bots and humans separately (`server_module/src/snapshot/behavior_trace.{h,cc}`, `server_module/src/llm_brain_world_script.cc`):**
+  *Fix:* warn per role (`"bot"` and `"human"` separately).
+
 - Next benchmark run (all Review 7 items verified; awaiting user OK to re-lock `scorer.sha256`): run
   `bench_bosses.py` with `--runs 8` (or `10` **per arm**) for `kaelthas`, `ick`, `murmur`, and `ikiss`
   (e.g. `--mode mixed_all --only kaelthas,ick,murmur,ikiss --runs 8 --parallel 3`), then save one
