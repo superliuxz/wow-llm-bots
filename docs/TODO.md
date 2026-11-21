@@ -9,25 +9,12 @@ Last updated 2026-11-20.
 
 ## In progress
 
-### Review Trace All Events 7 (`bdd7f55`) — Open Items
-
-- [ ] **New Low 1 — `<= 285 ms` trace-interval bound ignores world-tick rounding (`server_module/src/snapshot/behavior_trace.{h,cc}`, `server_module/src/llm_brain_world_script.cc`, `server_module/src/config/llm_brain_config.{h,cc}`, `server_module/conf/mod-llm-brain.conf.dist`, `docs/specs/trace-events.md`):**
-  at 50 ms world ticks the real interval is ~300 ms (~3.33 Hz), under `trace_parity.py`'s 3.5 Hz check,
-  with no warning. *Fix:* check the measured rate in the trace, not the configured interval.
-- [ ] **New Low 2 — New always-on rule tells agents to force-relock the scorer whenever locked files change (`CONTRIBUTING.md`, `.agents/rules/contributing.md`):**
-  undoes the point of the lock, which is to stop an agent tuning the scorer to its own changes.
-  *Fix:* require the user's explicit OK before any relock.
-- [ ] **New Low 3 — A setup error before the wave loop still ends the whole run (`tools/bench/bench_bosses.py`):**
-  *Fix:* mark that boss failed and move on.
-- [ ] **New Low 4 — A late reply from an earlier identical `where` command can match (`server_module/src/test/test_commands.cc`, `tools/bench/bench_bosses.py`):**
-  *Fix:* add a per-call token to the command.
-
-- Next benchmark run (all Review 6 items & Kael staging/arrival fixes verified): run `bench_bosses.py`
-  with `--runs 8` (or `10` **per arm**) for `kaelthas`, `ick`, `murmur`, and `ikiss` (e.g.
-  `--mode mixed_all --only kaelthas,ick,murmur,ikiss --runs 8 --parallel 3`), then save one clean
-  report under `docs/benchmarks/`. Note: on `kaelthas`, `stage_xyz=(7.09, -0.45, -2.5)` eliminates
+- Next benchmark run (all Review 7 items verified; awaiting user OK to re-lock `scorer.sha256`): run
+  `bench_bosses.py` with `--runs 8` (or `10` **per arm**) for `kaelthas`, `ick`, `murmur`, and `ikiss`
+  (e.g. `--mode mixed_all --only kaelthas,ick,murmur,ikiss --runs 8 --parallel 3`), then save one
+  clean report under `docs/benchmarks/`. Note: on `kaelthas`, `stage_xyz=(7.09, -0.45, -2.5)` eliminates
   arrival deaths and pre-pull combat, while `spawn_xyz=(148.5, 180.0, -16.2)` still pulls the
-  nearby Sunblade pack during the fight (all 3 arms run identically).
+  nearby Sunblade pack during the fight (all arms run identically).
 
 ## Next, in order
 
@@ -108,6 +95,10 @@ Last updated 2026-11-20.
     to end avoids returning early).
   - Mid-fight wakes (`attacked`, `hp<N`) replace all standing orders; Gemma 4 occasionally rewrites
     a working `Lightning Nova cast` order into `Loken cast` or `Lightning Nova appears`.
+- **Scorer lock awaiting user OK:** Low 1 updated locked files (`behavior_trace.{h,cc}`,
+  `llm_brain_world_script.cc`, `llm_brain_config.cc`, `mod-llm-brain.conf.dist`), so
+  `~/.local/share/wow-llm-bots/scorer.sha256` was intentionally left untouched until the user
+  explicitly approves running `tools/bench/hill_climb.py lock-scorer --force-relock`.
 - **Not individually live-triggered after final edits yet:** environmental/self death (`killer == killed`
   logged as non-PvP `died` with `detail="environment"` in `behavior_trace_scripts.cc`),
   `llmtest questcomplete` when a quest is already active in a bot's quest log (`CompleteQuest` +
@@ -118,6 +109,26 @@ Last updated 2026-11-20.
   adding entrance staging/dismount).
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-20: **Review 7 fixes (New Lows 1–4 + environmental-death caveat restored):**
+  removed the misleading `<= 285 ms` config warning and instead measure actual recorded sample rate
+  in `BehaviorTraceWriter::TakeMeasuredSampleHz` (`behavior_trace.{h,cc}`) checked by
+  `LlmBrainWorldScript` in `LogStats` and `OnShutdown` (warns when measured median rate < `3.5 Hz`,
+  accounting for world-tick rounding; updated `llm_brain_config.{h,cc}`, `mod-llm-brain.conf.dist`,
+  and `docs/specs/trace-events.md`); updated `CONTRIBUTING.md` & `.agents/rules/contributing.md` so
+  agents never force-relock `scorer.sha256` without explicit user OK; isolated pre-wave setup errors
+  inside `run_boss_waves` (`tools/bench/bench_bosses.py`) so a setup failure marks that boss
+  `failed: True` and moves on; added optional per-call `token` (`tok=<token>`) across `test_commands.cc`
+  (`HandleTele`, `HandleGear`, `HandleCheckStrat`, `HandleSetStrat`, `HandleQuestComplete`,
+  `HandleResetBot`, `HandleWhere`) and all `_console_bot` calls in `bench_bosses.py` so late replies
+  from earlier identical commands (`where`, etc.) can never match. Verified via `tools/wlb check`
+  (402 C++ + 34 Python tests, incl. `MeasuresActualSampleHzIncludingTickRounding` and the new token
+  + setup-failure tests in `dodge_timeline_test.py`) and two live `out/server-test` checks:
+  (1) `TraceSampleIntervalMs = 290` logged `measured trace sample rate 3.45 Hz` matching Python
+  `trace_parity.estimate_source_hz`; (2) `bench_bosses.py --only kaelthas --mode mixed_all
+  --arms no_brain,baseline --runs 1 --parallel 2` ran with `failed=False`, `invalid_runs=0`,
+  `wave_errors=[]`, and `tok=c1..c80` matched on all `gear`/`questcomplete`/`where`/`resetbot`/
+  `tele`/`setstrat`/`checkstrat` replies in `worldserver.out`.
 
 - 2026-11-20: **Review 6 fixes + Kael'thas staging/arrival fix + self-check rule (`CONTRIBUTING.md`):**
   `docs/specs/trace-events.md` rewritten to match C++ and `PARITY_ALLOWED_EVENTS` verbatim and
@@ -223,6 +234,3 @@ Last updated 2026-11-20.
 - 2026-11-18: **Grammar IDL (`docs/specs/grammar-idl.md`):**
   `tools/grammar/wlb_gen.py` generates C++ types, parser, printer, GBNF, and `content/RULES.md`
   reply form from `harness/grammar/{orders,plan}.wlb`, verified against real `llama-grammar.cpp`.
-- 2026-11-18: **Isolated test stack (`docs/design.md`):**
-  separate `out/server-test` build (port 8086, `acore_test_*` reset from `acore_golden_*`) so e2e,
-  perf, and boss benchmarks run without touching the play server (`out/server`).

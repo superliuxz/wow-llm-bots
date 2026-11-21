@@ -130,10 +130,13 @@ LlmBrain.TestFactsQueries = ""
 #    LlmBrain.TraceSampleIntervalMs
 #        Description: Minimum interval between periodic trace samples (ms),
 #                     plus immediate samples on combat/jump transitions.
-#                     trace_parity.py rejects traces below 3.5 Hz, so keep this
-#                     at 285 or less whenever traces are scored (larger values
-#                     log a warning at startup). Use the two caps below, not
-#                     this interval, to bound disk volume.
+#                     trace_parity.py rejects traces whose measured median rate
+#                     is below 3.5 Hz; world-tick rounding adds up to one tick
+#                     (~50 ms) on top of this setting, and the module warns at
+#                     runtime if the measured rate in the trace drops below
+#                     3.5 Hz, so keep the default 200 ms whenever traces are
+#                     scored. Use the two caps below, not this interval, to
+#                     bound disk volume.
 #        Default:     200
 #
 #    LlmBrain.TraceMaxFileMb

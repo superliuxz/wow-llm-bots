@@ -2,8 +2,10 @@
 
 #include "snapshot/behavior_trace.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 
 #include "gtest/gtest.h"
@@ -242,6 +244,53 @@ TEST(BehaviorTraceTest, RotationKeepsAtMostConfiguredArchives) {
   EXPECT_TRUE(std::filesystem::exists(dir / "2026-11-19.jsonl"));
   EXPECT_FALSE(std::filesystem::exists(archive(1)));
   EXPECT_FALSE(std::filesystem::exists(archive(2)));
+  std::filesystem::remove_all(root);
+}
+
+TEST(BehaviorTraceTest, MeasuresActualSampleHzIncludingTickRounding) {
+  const std::filesystem::path root =
+      std::filesystem::path(testing::TempDir()) / "wlb_trace_hz_test";
+  std::filesystem::remove_all(root);
+  BehaviorTraceWriter writer(root.string());
+  ASSERT_TRUE(writer.enabled());
+
+  TraceSample s;
+  s.role = "bot";
+  s.name = "Loada";
+  const int64_t t0 = 1795064000000LL;
+  // Simulate TraceSampleIntervalMs = 285 rounded to 50 ms world ticks -> 300 ms
+  // (3.33 Hz < 3.5 Hz parity floor), plus a 0 ms combat-edge duplicate and a
+  // 10000 ms gap that must both be ignored (matching trace_parity.py).
+  for (int i = 0; i <= 12; ++i) {
+    s.time_ms = t0 + static_cast<int64_t>(i) * 300;
+    ASSERT_TRUE(writer.WriteSample(s));
+    if (i == 4) {
+      ASSERT_TRUE(writer.WriteSample(s));  // dt == 0 duplicate
+    }
+  }
+  s.time_ms = t0 + 12LL * 300 + 10000;
+  ASSERT_TRUE(writer.WriteSample(s));  // > 5000 ms gap ignored
+
+  // Insufficient samples preserves the window instead of clearing it.
+  EXPECT_FALSE(writer.TakeMeasuredSampleHz(/*min_intervals=*/20).has_value());
+  const std::optional<double> rounded_hz =
+      writer.TakeMeasuredSampleHz(/*min_intervals=*/10);
+  ASSERT_TRUE(rounded_hz.has_value());
+  EXPECT_DOUBLE_EQ(*rounded_hz, 3.33);
+  EXPECT_FALSE(writer.TakeMeasuredSampleHz(/*min_intervals=*/1).has_value());
+
+  // 200 ms effective cadence -> 5.0 Hz.
+  const int64_t t1 = s.time_ms + 1000;
+  for (int i = 0; i <= 12; ++i) {
+    s.time_ms = t1 + static_cast<int64_t>(i) * 200;
+    ASSERT_TRUE(writer.WriteSample(s));
+  }
+  const std::optional<double> nominal_hz =
+      writer.TakeMeasuredSampleHz(/*min_intervals=*/10);
+  ASSERT_TRUE(nominal_hz.has_value());
+  EXPECT_DOUBLE_EQ(*nominal_hz, 5.0);
+
+  writer.Flush();
   std::filesystem::remove_all(root);
 }
 

@@ -35,7 +35,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "tools" / "bench"))
 import boss_meter  # noqa: E402
 from wlblib import build, server  # noqa: E402
-from wlblib.common import OUT, TEST, VAR, say  # noqa: E402
+from wlblib.common import OUT, TEST, VAR, Failed, say  # noqa: E402
 from wlblib.testing import LlamaServer  # noqa: E402
 
 # (role_suffix, race:class, spec_tab, expected_role)
@@ -290,24 +290,41 @@ def _check_strat_line(cline: str, expected_on: bool) -> tuple[bool, str]:
     return True, ""
 
 
-def _console_bot(cmd: str, prefix: str, wait_s: float = 0.3, timeout_s: float = 5.0) -> tuple[str, str]:
+_CONSOLE_SEQ = 0
+
+
+def _next_console_token() -> str:
+    global _CONSOLE_SEQ
+    _CONSOLE_SEQ += 1
+    return f"c{_CONSOLE_SEQ}"
+
+
+def _console_bot(
+    cmd: str,
+    prefix: str,
+    wait_s: float = 0.3,
+    timeout_s: float = 5.0,
+    token: str = "",
+) -> tuple[str, str]:
     """Sends a console command ONCE and waits (up to `timeout_s`) for its bot-scoped reply.
 
     Never re-sends: state-changing commands (`gear` re-rolls `Randomize`, `resetbot`, `tele`,
     `setstrat`) must run exactly once. A slow reply is picked up by re-reading the worldserver
-    log from the offset taken before the command was sent.
+    log from the offset taken before the command was sent. When `token` is non-empty, only
+    matches a line containing `tok=<token>` so a late reply from an earlier identical command
+    (such as `where`) can never match.
     """
     log = TEST.logs / "worldserver.out"
     start = log.stat().st_size if log.exists() else 0
     out = server.console(cmd, wait_s=wait_s, inst=TEST) or ""
-    line = _find_bot_line(out, prefix)
+    line = _find_bot_line(out, prefix, token)
     deadline = time.monotonic() + max(0.0, timeout_s - wait_s)
     while not line and time.monotonic() < deadline:
         time.sleep(0.25)
         with open(log, "rb") as f:
             f.seek(start)
             out = f.read().decode(errors="replace")
-        line = _find_bot_line(out, prefix)
+        line = _find_bot_line(out, prefix, token)
     return line, out
 
 
@@ -356,10 +373,11 @@ def _summarize_trials(trials: list[dict]) -> dict:
     }
 
 
-def _find_bot_line(output: str | None, prefix: str) -> str:
-    """Returns the line in `output` matching `prefix` (bot-scoped), or ''."""
+def _find_bot_line(output: str | None, prefix: str, token: str = "") -> str:
+    """Returns the line in `output` matching `prefix` (and optional `tok=<token>`), or ''."""
+    tok_re = re.compile(rf"\btok={re.escape(token)}\b") if token else None
     for line in (output or "").splitlines():
-        if prefix in line:
+        if prefix in line and (tok_re is None or tok_re.search(line)):
             return line
     return ""
 
@@ -515,41 +533,6 @@ def run_boss_waves(
     all_bots = [b for p in parties for b in p]
 
     trace_dir = VAR / f"bench_boss_{tag}_{mode}"
-    shutil.rmtree(trace_dir, ignore_errors=True)
-    trace_dir.mkdir(parents=True, exist_ok=True)
-
-    server.server_stop(inst=TEST)
-    server.test_databases_reset()
-    server.config("soak", inst=TEST)
-    _set_instances_per_hour(1000)
-
-    conf_path = TEST.etc / "modules" / "mod-llm-brain.conf"
-    bot_names = ",".join(b[0] for b in all_bots)
-    fixtures = ",".join(f"{b[0]}=new:{b[1]}" for b in all_bots)
-    lines = [
-        l for l in conf_path.read_text().splitlines()
-        if not l.startswith((
-            "LlmBrain.Bots ",
-            "LlmBrain.TestFixtures ",
-            "LlmBrain.TraceDir ",
-            "LlmBrain.CombatStrategies ",
-            "LlmBrain.NonCombatStrategies ",
-        ))
-    ]
-    lines.append(f'LlmBrain.Bots = "{bot_names}"')
-    lines.append(f'LlmBrain.TestFixtures = "{fixtures}"')
-    lines.append(f'LlmBrain.TraceDir = "{trace_dir}"')
-    c_strats = "+boost,+dps assist,-threat"
-    nc_strats = "-follow,-grind,-new rpg"
-    # When mixing baseline + non-baseline arms in the same wave, per-bot
-    # overrides (`llmtest setstrat`) control `strip_strat` per party.
-    per_bot_strat_control = bool(strip_strat and len(arms) > 1 and "baseline" in arms)
-    if strip_strat and not per_bot_strat_control and arms != ("baseline",):
-        c_strats += f",-{strip_strat}"
-        nc_strats += f",-{strip_strat}"
-    lines.append(f'LlmBrain.CombatStrategies = "{c_strats}"')
-    lines.append(f'LlmBrain.NonCombatStrategies = "{nc_strats}"')
-    conf_path.write_text("\n".join(lines) + "\n")
 
     valid_runs: list[dict] = []
     extra_trials: list[dict] = []
@@ -561,36 +544,90 @@ def run_boss_waves(
     # Enough waves for every arm to reach its target, plus slack for invalid trials.
     max_waves = -(-per_arm_target * len(arms) // n_parties) + 2 * -(-len(arms) // n_parties) + 2
     wave_errors: list[str] = []
+    per_bot_strat_control = bool(strip_strat and len(arms) > 1 and "baseline" in arms)
+    setup_error = ""
 
     try:
-        server.server_start(TEST)
-        server.wait_online(all_bots[0][0], inst=TEST)
-        server.wait_online_count(len(all_bots), inst=TEST)
+        try:
+            shutil.rmtree(trace_dir, ignore_errors=True)
+            trace_dir.mkdir(parents=True, exist_ok=True)
 
-        # Group each party separately and gear every member with exact deterministic spec.
-        for party in parties:
-            leader = party[0][0]
-            for name, _, _, _ in party[1:]:
-                server.console(f"llmtest group {leader} {name}", wait_s=0.3, inst=TEST)
-            for idx, (name, _, spec_tab, expected_role) in enumerate(party):
-                line, out = _console_bot(f"llmtest gear {name} {level} {spec_tab}", f"geared {name} at level {level}", wait_s=0.5)
-                if f"role={expected_role}" not in line:
-                    raise RuntimeError(
-                        f"role mismatch for {name}: expected role={expected_role}, got: {out!r}"
-                    )
-                sm = SPECNO_RE.search(line)
-                if not sm or int(sm.group(1)) != spec_tab + 1:
-                    raise RuntimeError(
-                        f"stored specNo mismatch for {name}: expected specNo={spec_tab + 1}, got: {line!r}"
-                    )
-                for qid in (attune_quests or []):
-                    qline, qout = _console_bot(f"llmtest questcomplete {name} {qid}", f" quest {qid} ", wait_s=0.2)
-                    if not qline or not qline.rstrip().endswith(f" on {name}"):
-                        raise RuntimeError(f"questcomplete {qid} failed for {name}: {qout!r}")
-                if role_items and idx in role_items:
-                    server.console(f"llmtest item {name} {role_items[idx]}", wait_s=0.2, inst=TEST)
+            server.server_stop(inst=TEST)
+            server.test_databases_reset()
+            server.config("soak", inst=TEST)
+            _set_instances_per_hour(1000)
 
-        while any(arm_counts[a] < per_arm_target for a in arms) and wave < max_waves:
+            conf_path = TEST.etc / "modules" / "mod-llm-brain.conf"
+            bot_names = ",".join(b[0] for b in all_bots)
+            fixtures = ",".join(f"{b[0]}=new:{b[1]}" for b in all_bots)
+            lines = [
+                l for l in conf_path.read_text().splitlines()
+                if not l.startswith((
+                    "LlmBrain.Bots ",
+                    "LlmBrain.TestFixtures ",
+                    "LlmBrain.TraceDir ",
+                    "LlmBrain.CombatStrategies ",
+                    "LlmBrain.NonCombatStrategies ",
+                ))
+            ]
+            lines.append(f'LlmBrain.Bots = "{bot_names}"')
+            lines.append(f'LlmBrain.TestFixtures = "{fixtures}"')
+            lines.append(f'LlmBrain.TraceDir = "{trace_dir}"')
+            c_strats = "+boost,+dps assist,-threat"
+            nc_strats = "-follow,-grind,-new rpg"
+            # When mixing baseline + non-baseline arms in the same wave, per-bot
+            # overrides (`llmtest setstrat`) control `strip_strat` per party.
+            if strip_strat and not per_bot_strat_control and arms != ("baseline",):
+                c_strats += f",-{strip_strat}"
+                nc_strats += f",-{strip_strat}"
+            lines.append(f'LlmBrain.CombatStrategies = "{c_strats}"')
+            lines.append(f'LlmBrain.NonCombatStrategies = "{nc_strats}"')
+            conf_path.write_text("\n".join(lines) + "\n")
+
+            server.server_start(TEST)
+            server.wait_online(all_bots[0][0], inst=TEST)
+            server.wait_online_count(len(all_bots), inst=TEST)
+
+            # Group each party separately and gear every member with exact deterministic spec.
+            for party in parties:
+                leader = party[0][0]
+                for name, _, _, _ in party[1:]:
+                    server.console(f"llmtest group {leader} {name}", wait_s=0.3, inst=TEST)
+                for idx, (name, _, spec_tab, expected_role) in enumerate(party):
+                    tok = _next_console_token()
+                    line, out = _console_bot(
+                        f"llmtest gear {name} {level} {spec_tab} {tok}",
+                        f"geared {name} at level {level}",
+                        wait_s=0.5,
+                        token=tok,
+                    )
+                    if f"role={expected_role}" not in line:
+                        raise RuntimeError(
+                            f"role mismatch for {name}: expected role={expected_role}, got: {out!r}"
+                        )
+                    sm = SPECNO_RE.search(line)
+                    if not sm or int(sm.group(1)) != spec_tab + 1:
+                        raise RuntimeError(
+                            f"stored specNo mismatch for {name}: expected specNo={spec_tab + 1}, got: {line!r}"
+                        )
+                    for qid in (attune_quests or []):
+                        qtok = _next_console_token()
+                        qline, qout = _console_bot(
+                            f"llmtest questcomplete {name} {qid} {qtok}",
+                            f" quest {qid} ",
+                            wait_s=0.2,
+                            token=qtok,
+                        )
+                        if not qline or not re.search(rf"\bon {re.escape(name)}\b", qline):
+                            raise RuntimeError(f"questcomplete {qid} failed for {name}: {qout!r}")
+                    if role_items and idx in role_items:
+                        server.console(f"llmtest item {name} {role_items[idx]}", wait_s=0.2, inst=TEST)
+        except Exception as exc:
+            setup_error = str(exc)
+            wave_errors.append(f"setup: {exc}")
+            say(f"boss benchmark [{era} | {tag} | {mode}]: SETUP FAILED (marking boss failed and moving on): {exc}")
+
+        while not setup_error and any(arm_counts[a] < per_arm_target for a in arms) and wave < max_waves:
             wave += 1
             # Every slot is filled every wave (constant party count / GPU load); a trial for an arm
             # that already has `per_arm_target` valid trials is kept as an `extra` (not scored).
@@ -609,11 +646,23 @@ def run_boss_waves(
                 time.sleep(2.0)
                 for party in active_parties:
                     for name, _, _, _ in party:
-                        wline, wout = _console_bot(f"llmtest where {name}", f"where {name} ", wait_s=0.25)
+                        tok = _next_console_token()
+                        wline, wout = _console_bot(
+                            f"llmtest where {name} {tok}",
+                            f"where {name} ",
+                            wait_s=0.25,
+                            token=tok,
+                        )
                         if "map=0 " not in wline:
                             raise RuntimeError(f"{name} did not leave dungeon before reset: {wout!r}")
                     for name, _, _, _ in party:
-                        rline, out = _console_bot(f"llmtest resetbot {name}", f"resetbot {name} ", wait_s=0.25)
+                        tok = _next_console_token()
+                        rline, out = _console_bot(
+                            f"llmtest resetbot {name} {tok}",
+                            f"resetbot {name} ",
+                            wait_s=0.25,
+                            token=tok,
+                        )
                         pm = PASSIVES_RE.search(rline)
                         if "alive=1" not in rline or not pm or int(pm.group(1)) <= 0:
                             raise RuntimeError(f"dirty start state / missing passives for {name}: {out!r}")
@@ -624,10 +673,12 @@ def run_boss_waves(
                 sx, sy, sz = stage_xyz
                 for party in active_parties:
                     for idx, (name, _, _, _) in enumerate(party):
+                        tok = _next_console_token()
                         tline, out = _console_bot(
-                            f"llmtest tele {name} {map_id} {sx + (idx % 5) * 0.8:.2f} {sy + (idx // 5) * 0.8:.2f} {sz:.2f} 0",
+                            f"llmtest tele {name} {map_id} {sx + (idx % 5) * 0.8:.2f} {sy + (idx // 5) * 0.8:.2f} {sz:.2f} 0 1 {tok}",
                             f"teleported {name} to map {map_id}",
                             wait_s=0.35,
+                            token=tok,
                         )
                         if not tline:
                             raise RuntimeError(f"stage teleport failed for {name}: {out!r}")
@@ -637,7 +688,13 @@ def run_boss_waves(
                 for party in active_parties:
                     inst_id = None
                     for name, _, _, _ in party:
-                        wline, wout = _console_bot(f"llmtest where {name}", f"where {name} ", wait_s=0.25)
+                        tok = _next_console_token()
+                        wline, wout = _console_bot(
+                            f"llmtest where {name} {tok}",
+                            f"where {name} ",
+                            wait_s=0.25,
+                            token=tok,
+                        )
                         m = INST_RE.search(wline)
                         if f"map={map_id} " not in wline or not m:
                             raise RuntimeError(f"{name} did not arrive on map {map_id}: {wout!r}")
@@ -671,12 +728,20 @@ def run_boss_waves(
                         if per_bot_strat_control:
                             delta = f"+{strip_strat}" if expected_on else f"-{strip_strat}"
                             for name, _, _, _ in party:
-                                _console_bot(f"llmtest setstrat {name} {delta}", f"setstrat {name} ", wait_s=0.2)
+                                tok = _next_console_token()
+                                _console_bot(
+                                    f"llmtest setstrat {name} {delta} {tok}",
+                                    f"setstrat {name} ",
+                                    wait_s=0.2,
+                                    token=tok,
+                                )
                         for name, _, _, _ in party:
+                            tok = _next_console_token()
                             cline, chk = _console_bot(
-                                f"llmtest checkstrat {name} {strip_strat}",
+                                f"llmtest checkstrat {name} {strip_strat} {tok}",
                                 f"strat {strip_strat} on {name} ",
                                 wait_s=0.25,
+                                token=tok,
                             )
                             ok, err = _check_strat_line(cline, expected_on=expected_on)
                             if not ok:
@@ -815,7 +880,7 @@ def run_boss_waves(
                         res["extra"] = True
                         extra_trials.append(res)
                         say(f"  party {p_idx + 1} ({arm}): extra trial (arm already has {per_arm_target}), not scored")
-            except RuntimeError as exc:
+            except (RuntimeError, Failed) as exc:
                 invalid_runs += len(active_parties)
                 wave_errors.append(f"wave {wave}: {exc}")
                 say(f"  WAVE {wave} FAILED (continuing): {exc}")
@@ -825,7 +890,10 @@ def run_boss_waves(
                 server.console("llmtest clearstrat", wait_s=0.3, inst=TEST)
             except Exception:
                 pass  # The server may already be down; overrides die with it.
-        server.server_stop(inst=TEST)
+        try:
+            server.server_stop(inst=TEST)
+        except Exception:
+            pass
 
     by_arm = {
         a: _summarize_trials([r for r in valid_runs if r["mode"] == a])
@@ -842,7 +910,7 @@ def run_boss_waves(
     if short:
         say(f"  WARNING: arms below {per_arm_target} valid trials after {wave} waves: "
             f"{ {a: arm_counts[a] for a in short} }")
-    return {
+    res = {
         "boss": boss_name,
         "era": era,
         "level": level,
@@ -857,11 +925,15 @@ def run_boss_waves(
         "median_dps": overall["median_dps"],
         "median_hps": overall["median_hps"],
         "median_deaths": overall["median_deaths"],
+        "failed": bool(setup_error) or overall["runs"] == 0,
         "by_arm": by_arm,
         "wave_errors": wave_errors,
         "trials": valid_runs,
         "extra_trials": extra_trials,
     }
+    if setup_error:
+        res["error"] = setup_error
+    return res
 
 
 def main() -> int:
@@ -923,7 +995,12 @@ def main() -> int:
                 )
             except Exception as exc:
                 say(f"BOSS {k} FAILED (continuing to remaining bosses): {exc}")
-                results[k] = {"boss": BOSSES[k]["boss_name"], "mode": args.mode, "error": str(exc)}
+                results[k] = {
+                    "boss": BOSSES[k]["boss_name"],
+                    "mode": args.mode,
+                    "failed": True,
+                    "error": str(exc),
+                }
             out_json.write_text(json.dumps(results, indent=2) + "\n")
     finally:
         if ctx is not None:

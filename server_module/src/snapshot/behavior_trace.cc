@@ -2,6 +2,8 @@
 
 #include "snapshot/behavior_trace.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <ctime>
 #include <deque>
@@ -9,6 +11,7 @@
 #include <fstream>
 #include <ios>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -309,7 +312,7 @@ bool BehaviorTraceWriter::WriteSample(const TraceSample& sample) {
     return false;
   }
   return Enqueue(sample.role, sample.name, sample.time_ms,
-                 FormatTraceSample(sample));
+                 FormatTraceSample(sample), /*is_sample=*/true);
 }
 
 bool BehaviorTraceWriter::WriteChat(const TraceChat& chat) {
@@ -340,15 +343,57 @@ uint64_t BehaviorTraceWriter::dropped_lines() const {
   return dropped_lines_;
 }
 
+std::optional<double> BehaviorTraceWriter::TakeMeasuredSampleHz(
+    size_t min_intervals) {
+  if (min_intervals == 0) {
+    min_intervals = 1;
+  }
+  std::vector<int64_t> dts;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (sample_dts_ms_.size() < min_intervals) {
+      return std::nullopt;
+    }
+    dts.swap(sample_dts_ms_);
+  }
+  std::sort(dts.begin(), dts.end());
+  const size_t n = dts.size();
+  const double med_ms =
+      (n % 2 == 1) ? static_cast<double>(dts[n / 2])
+                   : 0.5 * static_cast<double>(dts[n / 2 - 1] + dts[n / 2]);
+  if (med_ms <= 0.0) {
+    return std::nullopt;
+  }
+  return std::round((1000.0 / med_ms) * 100.0) / 100.0;
+}
+
 bool BehaviorTraceWriter::Enqueue(std::string_view role,
                                   std::string_view name,
                                   int64_t time_ms,
-                                  std::string line) {
+                                  std::string line,
+                                  bool is_sample) {
   {
     std::lock_guard<std::mutex> lock(mu_);
     if (stop_ || queue_.size() >= kMaxQueueLines) {
       ++dropped_lines_;
       return false;
+    }
+    if (is_sample) {
+      const std::string key = base::StrCat({role, "/", name});
+      auto it = last_sample_time_ms_.find(key);
+      if (it == last_sample_time_ms_.end()) {
+        last_sample_time_ms_.emplace(key, time_ms);
+      } else {
+        const int64_t dt = time_ms - it->second;
+        if (dt > 0 && dt <= kMaxSampleGapMs) {
+          if (sample_dts_ms_.size() < kMaxRecordedSampleDts) {
+            sample_dts_ms_.push_back(dt);
+          }
+          it->second = time_ms;
+        } else if (dt > kMaxSampleGapMs || dt < 0) {
+          it->second = time_ms;
+        }
+      }
     }
     queue_.push_back(
         {std::string(role), std::string(name), time_ms, std::move(line)});

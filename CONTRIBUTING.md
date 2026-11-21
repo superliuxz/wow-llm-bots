@@ -37,9 +37,11 @@ one feature never introduces extra bugs:
 - Read your full `git diff` line-by-line before committing; verify boundary conditions, state
   interactions, retries/idempotency (e.g., never re-sending state-mutating commands or breaking
   existing invariants), error handling, and all callers.
-- Run `tools/wlb check` after your final edit and verify all unit/spec/consistency checks pass; when
-  locked measurement files intentionally change, re-lock `scorer.sha256` via
-  `tools/bench/hill_climb.py lock-scorer --force-relock` and verify `_verify_all_locks()`.
+- Run `tools/wlb check` after your final edit and verify all unit/spec/consistency checks pass.
+  **Never** run `tools/bench/hill_climb.py lock-scorer --force-relock` or modify `scorer.sha256`
+  on your own — the lock exists to stop an agent tuning the scorer to its own changes. If a task
+  changes a locked measurement file, leave `scorer.sha256` untouched and ask for the user's
+  explicit OK before any relock.
 - Live-verify game, server, or benchmark changes against `out/server-test` before claiming them fixed;
   anything not live-tested must be stated honestly in `docs/TODO.md`.
 

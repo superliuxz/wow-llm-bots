@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "Config.h"
-#include "Log.h"
 #include "config/config_parsing.h"
 
 namespace llm_brain {
@@ -46,13 +45,6 @@ Config LoadConfig() {
       sConfigMgr->GetOption<uint32_t>("LlmBrain.TraceSampleIntervalMs", 200);
   if (config.trace_sample_interval_ms < 50) {
     config.trace_sample_interval_ms = 50;
-  }
-  if (config.trace_sample_interval_ms > 285) {
-    LOG_WARN("module",
-             "mod-llm-brain: LlmBrain.TraceSampleIntervalMs = {} ms is below "
-             "the 3.5 Hz that trace_parity.py requires; these traces can't "
-             "be scored",
-             config.trace_sample_interval_ms);
   }
   config.trace_max_file_mb =
       sConfigMgr->GetOption<uint32_t>("LlmBrain.TraceMaxFileMb", 64);

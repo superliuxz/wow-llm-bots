@@ -13,9 +13,12 @@
 #include <cstdint>
 #include <deque>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
+#include <vector>
 
 #include "snapshot/snapshot.h"
 
@@ -142,7 +145,16 @@ class BehaviorTraceWriter {
   // or the writer was stopping.
   uint64_t dropped_lines() const;
 
+  // Computes the median contiguous inter-sample rate (Hz, over 0 < dt <= 5000
+  // ms per character, matching trace_parity.estimate_source_hz) from recorded
+  // samples since the last call and clears the window. Returns std::nullopt
+  // until at least `min_intervals` contiguous deltas have been recorded.
+  std::optional<double> TakeMeasuredSampleHz(size_t min_intervals = 10);
+
  private:
+  static constexpr int64_t kMaxSampleGapMs = 5000;
+  static constexpr size_t kMaxRecordedSampleDts = 16384;
+
   struct PendingLine {
     std::string role;
     std::string name;
@@ -153,7 +165,8 @@ class BehaviorTraceWriter {
   bool Enqueue(std::string_view role,
                std::string_view name,
                int64_t time_ms,
-               std::string line);
+               std::string line,
+               bool is_sample = false);
   void WriterLoop();
   void WriteBatch(const std::deque<PendingLine>& batch) const;
 
@@ -164,6 +177,8 @@ class BehaviorTraceWriter {
   std::condition_variable cv_;
   std::condition_variable flushed_cv_;
   std::deque<PendingLine> queue_;
+  std::unordered_map<std::string, int64_t> last_sample_time_ms_;
+  std::vector<int64_t> sample_dts_ms_;
   uint64_t dropped_lines_ = 0;
   bool writing_ = false;
   bool stop_ = false;

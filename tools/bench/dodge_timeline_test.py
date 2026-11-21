@@ -232,6 +232,130 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
             self.assertEqual(calls, ["llmtest gear Loada 68 2"])  # never re-sent
             self.assertIn("specNo=3", line)  # the new reply, not the stale line
 
+    def test_console_bot_token_ignores_late_earlier_where_reply(self) -> None:
+        import threading
+        import types
+
+        with tempfile.TemporaryDirectory() as tmp:
+            logs = pathlib.Path(tmp)
+            log = logs / "worldserver.out"
+            log.write_text("", encoding="utf-8")
+            calls: list[str] = []
+            timers: list[threading.Timer] = []
+
+            def fake_console(cmd, wait_s=1.0, inst=None):
+                calls.append(cmd)
+
+                def late_old_where() -> None:
+                    with log.open("a", encoding="utf-8") as fp:
+                        fp.write("llmtest: where Loada map=585 instance=1 alive=1 tok=c1\n")
+                        fp.write("llmtest: where Loada map=585 instance=1 alive=1 tok=c20\n")
+
+                def current_where() -> None:
+                    with log.open("a", encoding="utf-8") as fp:
+                        fp.write("llmtest: where Loada map=0 instance=0 alive=1 tok=c2\n")
+
+                t1 = threading.Timer(0.05, late_old_where)
+                t2 = threading.Timer(0.25, current_where)
+                timers.extend([t1, t2])
+                t1.start()
+                t2.start()
+                return ""
+
+            orig_console, orig_test = bench_bosses.server.console, bench_bosses.TEST
+            bench_bosses.server.console = fake_console
+            bench_bosses.TEST = types.SimpleNamespace(logs=logs)
+            try:
+                line, _ = bench_bosses._console_bot(
+                    "llmtest where Loada c2",
+                    "where Loada ",
+                    wait_s=0.02,
+                    timeout_s=2.0,
+                    token="c2",
+                )
+            finally:
+                for t in timers:
+                    t.join(timeout=2.0)
+                bench_bosses.server.console = orig_console
+                bench_bosses.TEST = orig_test
+            self.assertEqual(calls, ["llmtest where Loada c2"])
+            self.assertIn("map=0 ", line)
+            self.assertIn("tok=c2", line)
+
+    def test_setup_error_before_wave_loop_marks_boss_failed_and_moves_on(self) -> None:
+        import types
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            etc = root / "etc"
+            (etc / "modules").mkdir(parents=True)
+            (etc / "modules" / "mod-llm-brain.conf").write_text("", encoding="utf-8")
+            logs = root / "logs"
+            logs.mkdir(parents=True)
+            var = root / "var"
+            var.mkdir(parents=True)
+            stops: list[str] = []
+
+            class FakeServer:
+                @staticmethod
+                def server_stop(inst=None):
+                    stops.append("stop")
+
+                @staticmethod
+                def test_databases_reset():
+                    pass
+
+                @staticmethod
+                def config(name, inst=None):
+                    pass
+
+                @staticmethod
+                def server_start(inst=None):
+                    pass
+
+                @staticmethod
+                def wait_online(name, inst=None):
+                    pass
+
+                @staticmethod
+                def wait_online_count(count, inst=None):
+                    raise bench_bosses.Failed("simulated pre-wave setup failure")
+
+                @staticmethod
+                def console(cmd, wait_s=1.0, inst=None):
+                    return ""
+
+            orig_server = bench_bosses.server
+            orig_test = bench_bosses.TEST
+            orig_var = bench_bosses.VAR
+            bench_bosses.server = FakeServer
+            bench_bosses.TEST = types.SimpleNamespace(etc=etc, logs=logs)
+            bench_bosses.VAR = var
+            try:
+                res = bench_bosses.run_boss_waves(
+                    era="TBC",
+                    tag="test_boss",
+                    boss_name="Test Boss",
+                    level=70,
+                    map_id=556,
+                    stage_xyz=(0.0, 0.0, 0.0),
+                    spawn_xyz=(10.0, 0.0, 0.0),
+                    strip_strat="tbc-seth",
+                    mode="mixed_all",
+                    target_runs=2,
+                    parallel=2,
+                )
+            finally:
+                bench_bosses.server = orig_server
+                bench_bosses.TEST = orig_test
+                bench_bosses.VAR = orig_var
+
+            self.assertTrue(res["failed"])
+            self.assertIn("simulated pre-wave setup failure", res["error"])
+            self.assertEqual(res["runs"], 0)
+            self.assertIn("llm", res["by_arm"])
+            self.assertEqual(stops, ["stop", "stop"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -73,6 +73,8 @@ namespace {
 constexpr size_t kMaxPendingMessages = 1000;
 // How often the snapshot cost summary is logged.
 constexpr uint32_t kStatsIntervalMs = 60000;
+// trace_parity.py rejects traces whose median source rate falls below 3.5 Hz.
+constexpr double kMinParityTraceHz = 3.5;
 // How long a bot remembers its snapshots' options, so a choice made on a
 // snapshot that is no longer the newest can still be resolved: well above an
 // urgent wake-up on a busy GPU (p95 3.8 s, docs/results.md).
@@ -371,14 +373,31 @@ class LlmBrainWorldScript : public WorldScript {
     if (trace_hooks_) {
       trace_hooks_->writer.store(nullptr, std::memory_order_release);
     }
+    CheckMeasuredTraceRate(/*min_intervals=*/5);
     trace_writer_.reset();
   }
 
  private:
+  void CheckMeasuredTraceRate(size_t min_intervals) {
+    if (!trace_writer_ || !trace_writer_->enabled()) {
+      return;
+    }
+    const std::optional<double> hz =
+        trace_writer_->TakeMeasuredSampleHz(min_intervals);
+    if (hz && *hz < kMinParityTraceHz) {
+      LOG_WARN("module",
+               "mod-llm-brain: measured trace sample rate {:.2f} Hz is below "
+               "the 3.5 Hz that trace_parity.py requires "
+               "(TraceSampleIntervalMs = {} ms plus world-tick rounding)",
+               *hz, config_.trace_sample_interval_ms);
+    }
+  }
+
   // The minute's summary: what snapshots cost to build, how many one tick
   // built at most (the spread of the bots), and how long they took to reach the
   // socket.
   void LogStats() {
+    CheckMeasuredTraceRate(/*min_intervals=*/10);
     if (stats_.count()) {
       LOG_INFO("module", "mod-llm-brain: snapshots in the last minute: {}",
                stats_.Summary());

@@ -38,8 +38,11 @@ struct Config {
   std::string trace_dir;
   // Minimum interval between periodic behavior trace samples (ms). Defaults to
   // 200 ms (5 Hz). Observer-parity scoring (tools/bench/trace_parity.py)
-  // rejects traces below 3.5 Hz, so keep it at <= 285 ms whenever traces are
-  // scored; use TraceMaxFileMb / TraceMaxRotatedFiles to bound disk volume.
+  // requires a measured median rate >= 3.5 Hz in the trace; world-tick rounding
+  // adds up to one tick (~50 ms) on top of this interval, and
+  // LlmBrainWorldScript warns when the measured rate drops below 3.5 Hz, so
+  // keep the default 200 ms whenever traces are scored. Use TraceMaxFileMb /
+  // TraceMaxRotatedFiles to bound disk volume.
   uint32_t trace_sample_interval_ms = 200;
   // Per-character, per-day trace volume cap: each day file rotates at
   // `trace_max_file_mb` and keeps `trace_max_rotated_files` archives.

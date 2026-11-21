@@ -72,6 +72,13 @@ class LlmBrainTestCommandScript : public CommandScript {
   }
 
  private:
+  static std::string FormatToken(const Optional<std::string>& token) {
+    if (!token || token->empty()) {
+      return "";
+    }
+    return " tok=" + *token;
+  }
+
   static bool HandleLearn(ChatHandler* handler,
                           std::string player_name,
                           uint32_t spell_id) {
@@ -179,7 +186,8 @@ class LlmBrainTestCommandScript : public CommandScript {
                          float y,
                          float z,
                          float o,
-                         Optional<uint32_t> gm_mode) {
+                         Optional<uint32_t> gm_mode,
+                         Optional<std::string> token) {
     Player* player = FindOnlinePlayer(handler, std::move(player_name));
     if (!player) {
       return false;
@@ -200,15 +208,18 @@ class LlmBrainTestCommandScript : public CommandScript {
       return false;
     }
     handler->PSendSysMessage(
-        "llmtest: teleported {} to map {} ({:.1f}, {:.1f}, {:.1f}) instance={}",
-        player->GetName(), map_id, x, y, z, player->GetInstanceId());
+        "llmtest: teleported {} to map {} ({:.1f}, {:.1f}, {:.1f}) "
+        "instance={}{}",
+        player->GetName(), map_id, x, y, z, player->GetInstanceId(),
+        FormatToken(token));
     return true;
   }
 
   static bool HandleGear(ChatHandler* handler,
                          std::string player_name,
                          uint32_t level,
-                         Optional<int32_t> spec_tab) {
+                         Optional<int32_t> spec_tab,
+                         Optional<std::string> token) {
     Player* player = FindOnlinePlayer(handler, std::move(player_name));
     if (!player) {
       return false;
@@ -237,15 +248,17 @@ class LlmBrainTestCommandScript : public CommandScript {
                            ? "tank"
                            : (PlayerbotAI::IsHeal(player) ? "heal" : "dps");
     handler->PSendSysMessage(
-        "llmtest: geared {} at level {} (role={}, hp={}, specNo={})",
+        "llmtest: geared {} at level {} (role={}, hp={}, specNo={}){}",
         player->GetName(), level, role, player->GetMaxHealth(),
-        sRandomPlayerbotMgr.GetValue(player->GetGUID().GetCounter(), "specNo"));
+        sRandomPlayerbotMgr.GetValue(player->GetGUID().GetCounter(), "specNo"),
+        FormatToken(token));
     return true;
   }
 
   static bool HandleCheckStrat(ChatHandler* handler,
                                std::string player_name,
-                               std::string strat_name) {
+                               std::string strat_name,
+                               Optional<std::string> token) {
     Player* player = FindOnlinePlayer(handler, std::move(player_name));
     if (!player) {
       return false;
@@ -262,15 +275,16 @@ class LlmBrainTestCommandScript : public CommandScript {
     const bool in_combat = ai->HasStrategy(strat_name, BOT_STATE_COMBAT);
     const bool non_combat = ai->HasStrategy(strat_name, BOT_STATE_NON_COMBAT);
     handler->PSendSysMessage(
-        "llmtest: strat {} on {} exists={} combat={} noncombat={}", strat_name,
-        player->GetName(), exists ? 1 : 0, in_combat ? 1 : 0,
-        non_combat ? 1 : 0);
+        "llmtest: strat {} on {} exists={} combat={} noncombat={}{}",
+        strat_name, player->GetName(), exists ? 1 : 0, in_combat ? 1 : 0,
+        non_combat ? 1 : 0, FormatToken(token));
     return exists;
   }
 
   static bool HandleSetStrat(ChatHandler* handler,
                              std::string player_name,
-                             std::string changes) {
+                             std::string changes,
+                             Optional<std::string> token) {
     Player* player = FindOnlinePlayer(handler, std::move(player_name));
     if (!player) {
       return false;
@@ -284,8 +298,8 @@ class LlmBrainTestCommandScript : public CommandScript {
     BotManager::SetBotStrategyOverride(player->GetName(), changes, changes);
     ai->ChangeStrategy(changes, BOT_STATE_COMBAT);
     ai->ChangeStrategy(changes, BOT_STATE_NON_COMBAT);
-    handler->PSendSysMessage("llmtest: setstrat {} {}", player->GetName(),
-                             changes);
+    handler->PSendSysMessage("llmtest: setstrat {} {}{}", player->GetName(),
+                             changes, FormatToken(token));
     return true;
   }
 
@@ -310,7 +324,8 @@ class LlmBrainTestCommandScript : public CommandScript {
 
   static bool HandleQuestComplete(ChatHandler* handler,
                                   std::string player_name,
-                                  uint32_t quest_id) {
+                                  uint32_t quest_id,
+                                  Optional<std::string> token) {
     Player* player = FindOnlinePlayer(handler, std::move(player_name));
     if (!player) {
       return false;
@@ -324,13 +339,14 @@ class LlmBrainTestCommandScript : public CommandScript {
     if (player->FindQuestSlot(quest_id) < MAX_QUEST_LOG_SIZE) {
       player->CompleteQuest(quest_id);
       player->RewardQuest(quest, 0, player, false);
-      handler->PSendSysMessage("llmtest: completed and rewarded quest {} on {}",
-                               quest_id, player->GetName());
+      handler->PSendSysMessage(
+          "llmtest: completed and rewarded quest {} on {}{}", quest_id,
+          player->GetName(), FormatToken(token));
       return true;
     }
     player->SetRewardedQuest(quest_id);
-    handler->PSendSysMessage("llmtest: marked quest {} rewarded on {}",
-                             quest_id, player->GetName());
+    handler->PSendSysMessage("llmtest: marked quest {} rewarded on {}{}",
+                             quest_id, player->GetName(), FormatToken(token));
     return true;
   }
 
@@ -351,7 +367,9 @@ class LlmBrainTestCommandScript : public CommandScript {
     return true;
   }
 
-  static bool HandleResetBot(ChatHandler* handler, std::string player_name) {
+  static bool HandleResetBot(ChatHandler* handler,
+                             std::string player_name,
+                             Optional<std::string> token) {
     Player* player = FindOnlinePlayer(handler, std::move(player_name));
     if (!player) {
       return false;
@@ -430,22 +448,26 @@ class LlmBrainTestCommandScript : public CommandScript {
       Player::ResetInstances(player->GetGUID(), INSTANCE_RESET_ALL, true);
     }
     handler->PSendSysMessage(
-        "llmtest: resetbot {} alive={} passives={} hp={}/{} mana={}/{} inst={}",
+        "llmtest: resetbot {} alive={} passives={} hp={}/{} mana={}/{} "
+        "inst={}{}",
         player->GetName(), player->IsAlive() ? 1 : 0, passive_count,
         player->GetHealth(), player->GetMaxHealth(),
         player->GetPower(POWER_MANA), player->GetMaxPower(POWER_MANA),
-        player->GetInstanceId());
+        player->GetInstanceId(), FormatToken(token));
     return true;
   }
 
-  static bool HandleWhere(ChatHandler* handler, std::string player_name) {
+  static bool HandleWhere(ChatHandler* handler,
+                          std::string player_name,
+                          Optional<std::string> token) {
     Player* player = FindOnlinePlayer(handler, std::move(player_name));
     if (!player) {
       return false;
     }
-    handler->PSendSysMessage(
-        "llmtest: where {} map={} instance={} alive={}", player->GetName(),
-        player->GetMapId(), player->GetInstanceId(), player->IsAlive() ? 1 : 0);
+    handler->PSendSysMessage("llmtest: where {} map={} instance={} alive={}{}",
+                             player->GetName(), player->GetMapId(),
+                             player->GetInstanceId(), player->IsAlive() ? 1 : 0,
+                             FormatToken(token));
     return true;
   }
 };

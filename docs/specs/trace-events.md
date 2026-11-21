@@ -6,7 +6,9 @@ Each line is one JSON object with a `kind` of `"sample"`, `"event"`, or `"chat"`
 
 - **Cadence:** periodic samples every `LlmBrain.TraceSampleIntervalMs` (default `200` ms = 5 Hz),
   plus an immediate sample on every combat or jump transition. `trace_parity.py` rejects traces
-  whose median source rate is below 3.5 Hz, so keep the interval at `<= 285` ms for parity scoring.
+  whose measured median source rate is below 3.5 Hz; world-tick rounding adds up to one tick
+  (~50 ms) on top of `TraceSampleIntervalMs`, and the module warns at runtime when the measured
+  rate in the trace drops below 3.5 Hz (keep the default `200` ms whenever traces are scored).
 - **Volume cap:** each day file rotates at `LlmBrain.TraceMaxFileMb` (default `64`) and keeps at
   most `LlmBrain.TraceMaxRotatedFiles` archives (default `8`: `.1.jsonl` .. `.8.jsonl`), so the cap
   per character per day is `TraceMaxFileMb * (TraceMaxRotatedFiles + 1)`; older archives are
