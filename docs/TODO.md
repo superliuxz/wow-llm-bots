@@ -97,8 +97,34 @@ Last updated 2026-11-21.
   `Murmur's Touch` `Shockwave` fall damage after post-fight `tele 0`), and the updated
   `areatrigger_teleport` entrance staging + pull coordinates for `ick`, `murmur`, and `ikiss`
   are now live-verified (`32` valid trials each, `0` arrival deaths, `0` pre-pull combat).
+- **Deliberately skipped benchmark speedup proposals (Items 4, 5, adaptive 6):** left unbuilt on
+  purpose to preserve valid boss immunity/kite phases (Item 4: `20 s` zero-damage abort would
+  cut `Gravity Lapse`/`Planar Shift` and censor `llm` bugs via survivorship bias), cross-boss DB
+  isolation + startup-bound `LlmBrain.TraceDir` (`scorer.sha256` lock) (Item 5: cross-boss
+  server reuse without `test_databases_reset()` saves only `~44 s/boss`), and unbiased fixed-`n`
+  statistics (adaptive Item 6: stopping at `n=3` has a `42.2%` false-negative rate on a `75%` arm;
+  details in [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md) §6).
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-21: **Boss benchmark runner speedups (Items 1–3) & skipped-proposal rationale:** added
+  `phase_timings` (`setup_s`, per-wave phases, `teardown_s`, `wall_s`) to benchmark JSON,
+  auto-defaulted `--parallel` to `4` in `mixed_all` (constant 10 LLM bots on 16 `llama-server`
+  slots, `3` otherwise), and replaced fixed per-command sleeps with 1-in-flight `5 ms`-polled
+  tokenized `_console_batch` (preventing GNU `readline` echo on `CliThread` from interleaving
+  into `CliHandler::SendSysMessage` output), two-stage leader-then-follower `_wait_where`
+  worldport polling, and `1.0 s` fight trace polling (`0.5 s` settle) in
+  [`tools/bench/bench_bosses.py`](../tools/bench/bench_bosses.py); documented measured
+  wall-clock budget (incl. `no_brain` + `baseline` costing `0` GPU slots and only `+2.2 min`
+  across 32 waves) and why Items 4, 5, and adaptive 6 were skipped in
+  [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md) §6.
+  Verified via `tools/wlb check` (`13/13` in
+  [`tools/bench/dodge_timeline_test.py`](../tools/bench/dodge_timeline_test.py), incl.
+  `test_console_batch_serializes_commands_to_avoid_readline_interleaving`), all `28` scorer locks
+  (`all 28 measurement locks verified`), and live `out/server-test` run
+  (`bench_bosses.py --only ikiss --mode mixed_all --runs 2`, auto `--parallel 4`: `8/8` valid,
+  `0` invalid, `0` wave errors, fresh instances `[1..4]` & `[5..8]`, `setup_s=44.10 s`, Wave 1/2
+  pre-fight overhead `1.05 s`/`1.06 s` vs `47.6 s` median gap previously).
 
 - 2026-11-21: **Multi-wave test-harness fixes & 4-boss × 4-arm parallel benchmark (`128` valid
   trials):** fixed three multi-wave bugs exposed on `murmur` and `ikiss`: in `test_commands.cc`,
@@ -236,8 +262,3 @@ Last updated 2026-11-21.
   trials; `llm_brain_world_script.cc` logs `act_sent` events; `behavior_trace_scripts.cc` credits
   group `mob_kill` via `OnUnitDeath` and drops unvalidated `vendor_buy`; `behavior_trace_unittest.cc`
   covers multi-file rotation and direct `TraceSample` formatting.
-- 2026-11-19: **General / Say / Party chat + quest grouping (invite/accept/decline/leave):**
-  wired `/s Say`, `/y Yell`, `/p Party`, `/ra Raid`, and `/1 General` / Trade / LFG hooks in
-  `server_module/src/chat/chat_scripts.cc` and `speak.cc`; added `INVITE`, `ACCEPT_INVITE`,
-  `DECLINE_INVITE`, `LEAVE_GROUP` options in `snapshot/snapshot.h`, `options.{h,cc}`,
-  `option_executor.cc`, `llm_brain_world_script.cc`, and harness `screen_renderer.cc` / `bot_loop.cc`.

@@ -133,7 +133,32 @@ On **Kael'thas**, `Flame Strike` is cast by `Flame Strike Trigger (Kael - 5Man)`
 
 ---
 
-## 6. Saved Artifacts
+## 6. Runner Speedup Decisions & Skipped Proposals
+
+### Measured Wall-Clock Breakdown & Control-Arm Impact
+Across the 128-trial run at `--parallel 4` (measured directly from `pull_ms` and per-wave `max(duration_s)` in `var/bench_boss_10_mixed_all.json`):
+- **Boss combat (`43.5 min` / `2,608.3 s` across 32 waves):** `kaelthas` `762.1 s` (`12.7 m`), `ick` `731.0 s` (`12.2 m`), `murmur` `495.3 s` (`8.3 m`), `ikiss` `619.9 s` (`10.3 m`).
+- **Control arms (`no_brain` & `baseline`) were NOT the bottleneck:** they use **0 `llama-server` GPU slots** and added only **`+2.2 min` (`132.1 s`, `+5%`)** total across all 32 waves while yielding 64 matched control trials (`sum(max_all_4) = 2,608.3 s` vs `sum(max_llm_2) = 2,476.2 s`: `+46.9 s` `kaelthas`, `+18.7 s` `ick`, `+0.0 s` `murmur`, `+66.5 s` `ikiss`). The true ceiling on throughput is the `16`-slot single-GPU `llama-server` capacity (~10 combat-rate LLM bots in `mixed_all`, or up to 3 LLM parties = 15 bots via `--mode mixed --parallel 3`) multiplied by 8 sequential waves.
+- **Between-wave staging (`20.9 min` / `1,255.1 s` across the 28 inter-wave gaps):** median gap between pull end and next wave pull was `51.6 s` (`kaelthas`), `45.6 s` (`ick`), `34.9 s` (`murmur`), and `47.6 s` (`ikiss`), dominated by fixed per-command `wait_s` sleeps (~140 console commands/wave) and `5.0 s` trace polling.
+- **Per-boss server reset + gear:** `~85 s/boss` (`~5.7 min` across 4 bosses before speedups; `44.10 s` on Ikiss after).
+
+### Implemented Validity-Preserving Speedups (Items 1–3)
+1. **Item 1 — Explicit `phase_timings` telemetry:** [`bench_bosses.py`](../../tools/bench/bench_bosses.py) now records `setup_s`, `teardown_s`, `wall_s`, and per-wave `reset_s`, `stage_s`, `strat_s`, `connect_s`, `fight_s`, `score_s`, and `total_s` in the output JSON.
+2. **Item 2 — Auto `--parallel 4` in `mixed_all`:** Defaults `--parallel` to `4` when `--mode mixed_all` (1 party per arm, holding LLM load at 10 bots on 16 `llama-server` slots) and `3` otherwise.
+3. **Item 3 — Fast-polled serialized console dispatch, `_wait_where`, and `1.0 s` fight poll:**
+   - `_console_batch` sends one tokenized command at a time (`wait_s=0.0`) and polls `worldserver.out` every `5 ms` until the `\n`-terminated reply and `AC> ` prompt appear (preventing GNU `readline` echo on `CliThread` from interleaving into `CliHandler::SendSysMessage` `utf8print` output).
+   - `_wait_where` polls worldport arrival in two stages (party leaders first, then followers so `InstanceSaveMgr` group binds exist) instead of sleeping blindly.
+   - Active fight monitoring polls `_TraceTailer` every `1.0 s` (down from `5.0 s`) with `0.5 s` post-completion settle (down from `2.0 s`).
+   - **Live verification on `out/server-test`** (`bench_bosses.py --only ikiss --mode mixed_all --runs 2`, auto `--parallel 4`, `8/8` valid, `0` invalid, `0` wave errors, fresh instances `[1..4]` & `[5..8]`): `setup_s = 44.10 s`, Wave 1 pre-fight overhead **`1.05 s`** (`reset_s=0.39 s`, `stage_s=0.25 s`, `strat_s=0.21 s`, `connect_s=0.20 s`), Wave 2 **`1.06 s`** (`reset_s=0.41 s`, `stage_s=0.24 s`, `strat_s=0.21 s`, `connect_s=0.20 s`), `teardown_s = 1.10 s` — a **`~45×` reduction** vs `47.6 s` previously on Ikiss, cutting a 128-trial 4-boss run from `~70 min` to `~47 min` (`>90%` combat).
+
+### Deliberately Skipped Proposals (Items 4, 5, and Adaptive Item 6)
+- **Item 4 (abort fight after `20 s` of zero boss damage and mark `invalid`):** Skipped because real boss mechanics legitimately produce `>= 20 s` of zero or near-zero boss damage (`Kael'thas` `Gravity Lapse` `30 s`, `Ick` `Explosive Barrage` `18 s` + `Pursuit` `12 s`, `Eregos` `Planar Shift` `18 s`), so an in-flight `20 s` cutoff would abort valid pulls mid-mechanic. Worse, if an LLM bug causes bots to stop attacking (`STOP`, bad target switch, over-kiting out of range), aborting and re-rolling as `invalid` censors real `llm` failures and introduces survivorship bias. True staging failures without combat are already caught post-hoc by `no_pull` (`total_dps == 0.0 and total_deaths == 0 and not killed`).
+- **Item 5 (reuse one `worldserver` across all bosses without DB reset / "gear once"):** Skipped because full `server_stop` + `test_databases_reset` + `server_start` + `gear` takes only `~44 s/boss` (`~3 min` across 4 bosses, `< 7%` of total runtime), whereas the 10-boss suite spans `L50`–`L80` and 5-man vs 10-man (`COMP_10` on `patchwerk`). Down-leveling bots in place without `test_databases_reset()` risks leaking higher-rank spells, `attune_quests`, and `role_items` across bosses, and `LlmBrain.TraceDir` is bound once at server startup in `scorer.sha256`-locked `llm_brain_world_script.cc`.
+- **Adaptive Item 6 (drop `--runs` from 8 to 3 after 3 matching outcomes):** Skipped because early stopping at `n = 3` on a true `75%` arm has a **`42.2%` false-stopping rate** (`0.75^3 = 0.422` — misclassifying a `6/8` arm as `3/3` `"100%"` over two-fifths of the time) and produces unequal sample sizes across bosses in aggregate tables. Subset and run count remain explicit via `--only` and `--runs` chosen up front.
+
+---
+
+## 7. Saved Artifacts
 - Raw summary JSON: `var/bench_boss_10_mixed_all.json` (untracked)
 - Unified 5 Hz + event traces:
   - `var/bench_boss_kaelthas_mgt_mixed_all/bot/`

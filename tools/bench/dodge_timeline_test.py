@@ -392,6 +392,10 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
                 bench_bosses.VAR = orig_var
             self.assertTrue(res_console["failed"])
             self.assertIn("role mismatch", res_console["error"])
+            self.assertIn("phase_timings", res_console)
+            for key in ("setup_s", "teardown_s", "wall_s", "waves"):
+                self.assertIn(key, res_console["phase_timings"])
+            self.assertEqual(res_console["phase_timings"]["waves"], [])
 
             # A programming bug during setup must crash loudly, not become "boss failed".
             def bug_in_setup(count, inst=None):
@@ -446,6 +450,127 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
                 timer.join(timeout=2.0)
             elapsed = time.monotonic() - t0
             self.assertLess(elapsed, 1.0)
+
+    def test_console_batch_serializes_commands_to_avoid_readline_interleaving(self) -> None:
+        import threading
+        import types
+
+        with tempfile.TemporaryDirectory() as tmp:
+            logs = pathlib.Path(tmp)
+            log = logs / "worldserver.out"
+            log.write_text("", encoding="utf-8")
+            calls: list[str] = []
+            lock = threading.Lock()
+            state = {"in_flight": 0, "max_in_flight": 0}
+            timers: list[threading.Timer] = []
+
+            replies = {
+                "b1": "AC> llmtest: geared BotA at level 70 (role=tank, specNo=3) tok=b1\r\nAC> ",
+                "b2": "llmtest: geared BotB at level 70 (role=heal, specNo=2) tok=b2AC> \r\nAC> ",
+                "b3": "AC> llmtest: geared BotC at level 70 (role=dps, specNo=3) tok=b3\r\nAC> ",
+            }
+
+            def fake_console(cmd, wait_s=1.0, inst=None):
+                calls.append(cmd)
+                tok = cmd.split()[-1]
+                with lock:
+                    state["in_flight"] += 1
+                    state["max_in_flight"] = max(state["max_in_flight"], state["in_flight"])
+
+                def finish() -> None:
+                    with log.open("a", encoding="utf-8") as fp:
+                        fp.write(replies[tok])
+                    with lock:
+                        state["in_flight"] -= 1
+
+                t = threading.Timer(0.02, finish)
+                timers.append(t)
+                t.start()
+                return ""
+
+            orig_console, orig_test = bench_bosses.server.console, bench_bosses.TEST
+            bench_bosses.server.console = fake_console
+            bench_bosses.TEST = types.SimpleNamespace(logs=logs)
+            try:
+                lines, _ = bench_bosses._console_batch(
+                    [
+                        ("llmtest gear BotA 70 2 b1", "geared BotA at level 70", "b1"),
+                        ("llmtest gear BotB 70 1 b2", "geared BotB at level 70", "b2"),
+                        ("llmtest gear BotC 70 2 b3", "geared BotC at level 70", "b3"),
+                    ],
+                    wait_s=0.0,
+                    timeout_s=2.0,
+                )
+            finally:
+                for t in timers:
+                    t.join(timeout=2.0)
+                bench_bosses.server.console = orig_console
+                bench_bosses.TEST = orig_test
+
+            self.assertEqual(len(calls), 3)
+            self.assertEqual(state["max_in_flight"], 1)
+            self.assertIn("tok=b1", lines[0])
+            self.assertIn("tok=b2", lines[1])
+            self.assertIn("tok=b3", lines[2])
+            self.assertNotIn("AC> ", lines[1])
+
+            # Early-abort safety: a stalled cmd_1 must prevent cmd_2 from being sent.
+            calls.clear()
+            bench_bosses.server.console = lambda cmd, wait_s=1.0, inst=None: (calls.append(cmd) or "")
+            bench_bosses.TEST = types.SimpleNamespace(logs=logs)
+            try:
+                stalled, _ = bench_bosses._console_batch(
+                    [
+                        ("llmtest gear BotA 70 2 stall1", "geared BotA at level 70", "stall1"),
+                        ("llmtest gear BotB 70 1 stall2", "geared BotB at level 70", "stall2"),
+                    ],
+                    wait_s=0.0,
+                    timeout_s=0.08,
+                )
+            finally:
+                bench_bosses.server.console = orig_console
+                bench_bosses.TEST = orig_test
+            self.assertEqual(stalled, ["", ""])
+            self.assertEqual(calls, ["llmtest gear BotA 70 2 stall1"])
+
+    def test_wait_where_polls_only_pending_bots_until_ready(self) -> None:
+        import types
+
+        with tempfile.TemporaryDirectory() as tmp:
+            logs = pathlib.Path(tmp)
+            queries: list[tuple[str, str]] = []
+            pass_num = {"BotA": 0, "BotB": 0}
+
+            def fake_console(cmd, wait_s=1.0, inst=None):
+                parts = cmd.split()
+                if len(parts) >= 4 and parts[1] == "where":
+                    name, tok = parts[2], parts[3]
+                    pass_num[name] += 1
+                    queries.append((name, tok))
+                    if name == "BotA":
+                        return f"llmtest: where BotA map=556 instance=7 alive=1 tok={tok}\n"
+                    if pass_num["BotB"] == 1:
+                        return f"llmtest: where BotB map=556 instance=0 alive=1 tok={tok}\n"
+                    return f"llmtest: where BotB map=556 instance=7 alive=1 tok={tok}\n"
+                return ""
+
+            orig_console, orig_test = bench_bosses.server.console, bench_bosses.TEST
+            bench_bosses.server.console = fake_console
+            bench_bosses.TEST = types.SimpleNamespace(logs=logs)
+            try:
+                res = bench_bosses._wait_where(
+                    ["BotA", "BotB"],
+                    expected_map=556,
+                    require_nonzero_inst=True,
+                    timeout_s=3.0,
+                )
+            finally:
+                bench_bosses.server.console = orig_console
+                bench_bosses.TEST = orig_test
+
+            self.assertEqual([n for n, _ in queries], ["BotA", "BotB", "BotB"])
+            self.assertIn("instance=7", res["BotA"])
+            self.assertIn("instance=7", res["BotB"])
 
 
 if __name__ == "__main__":
