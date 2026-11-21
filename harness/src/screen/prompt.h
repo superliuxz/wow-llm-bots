@@ -33,7 +33,7 @@ struct PromptInput {
   std::vector<std::string> whisperers;
   // Panels the bot has since closed, as it last saw them, each led by its age
   // ("bags, seen 40 s ago:"): memory, not the screen
-  // (docs/plans/options-and-panels.md).
+  // (docs/specs/options.md).
   std::vector<std::string> remembered;
   // Boss / encounter notes known to this bot (may be empty).
   std::string notes;

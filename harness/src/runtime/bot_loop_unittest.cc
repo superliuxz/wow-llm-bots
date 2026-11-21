@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <deque>
+#include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <utility>
@@ -1452,6 +1454,100 @@ TEST(BotLoopTest, OrderFailureDuringBrainCallWakesAfterReply) {
   brain.FinishReply(
       "do: 1\nexpect: none\nwatch: none\nlook: 60\ntell Thrall: hey!");
   EXPECT_EQ(brain.size(), 1u);
+}
+
+TEST(BotLoopTest,
+     PrePullCompilesOrdersOnInstanceEntryCachesAndPreservesInCombat) {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "wlb_bot_loop_a4_test";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir / "Loada");
+  {
+    std::ofstream out(tmp_dir / "Loada" / "notes.md");
+    out << "# Magisters' Terrace\n"
+        << "- **Flame Strike**: fiery ground AoE.\n"
+        << "  - Standing order: `in Flame Strike -> out of it`\n";
+  }
+
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.bots_dir = tmp_dir.string();
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& c) { sent.push_back(c); });
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  // Enter instance out of combat: triggers urgent pre-pull compilation.
+  pb::Snapshot s1 = MakeLiveSnap("Loada", 1, t0, /*in_combat=*/false);
+  s1.base.where.in_instance = true;
+  s1.base.where.map = "Magisters' Terrace";
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("compile standing orders"),
+            std::string::npos);
+
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: hp<30\nlook: 60\n"
+      "order: in Flame Strike -> out of it");
+
+  // Mid-fight wake returning empty orders must preserve compiled boss orders.
+  pb::Snapshot s2 = MakeLiveSnap("Loada", 2, t0 + base::Seconds(1),
+                                 /*in_combat=*/true);
+  s2.base.where.in_instance = true;
+  s2.base.where.map = "Magisters' Terrace";
+  s2.base.self.unit.health_pct = 20.0f;
+  AddKeep(&s2);
+  loop.OnSnapshot(s2, t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+
+  // Standing order still fires when Flame Strike appears under the bot.
+  pb::Snapshot s3 = s2;
+  s3.seq = 3;
+  pb::Area fs;
+  fs.guid = "trigger:0xF13000605A000001";
+  fs.name = "Flame Strike";
+  fs.radius_yd = 8.0f;
+  fs.inside_me = true;
+  fs.hostile = true;
+  fs.rel.emplace().dist_yd = 1.0f;
+  s3.base.nearby.areas.push_back(fs);
+  const size_t cmds_before = sent.size();
+  loop.OnSnapshot(s3, t0 + base::Seconds(2));
+  bool saw_out_of = false;
+  for (size_t i = cmds_before; i < sent.size(); ++i) {
+    if (sent[i].act && sent[i].act->verb == pb::Command::Act::OUT_OF) {
+      saw_out_of = true;
+    }
+  }
+  EXPECT_TRUE(saw_out_of);
+
+  // Reconnect into the same instance: cache hit installs orders immediately
+  // without needing a new compilation before they work.
+  loop.OnConnectionChanged(false);
+  loop.OnConnectionChanged(true);
+  pb::Snapshot s4 = s3;
+  s4.seq = 4;
+  s4.base.self.in_combat = true;
+  const size_t cmds_before_cache = sent.size();
+  loop.OnSnapshot(s4, t0 + base::Seconds(3));
+  // First snapshot after reconnect installs cached orders and also wakes
+  // first look; next snapshot fires cached order immediately.
+  pb::Snapshot s5 = s4;
+  s5.seq = 5;
+  loop.OnSnapshot(s5, t0 + base::Seconds(4));
+  bool saw_cached_out_of = false;
+  for (size_t i = cmds_before_cache; i < sent.size(); ++i) {
+    if (sent[i].act && sent[i].act->verb == pb::Command::Act::OUT_OF) {
+      saw_cached_out_of = true;
+    }
+  }
+  EXPECT_TRUE(saw_cached_out_of);
+
+  std::filesystem::remove_all(tmp_dir);
 }
 
 }  // namespace

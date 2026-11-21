@@ -11,7 +11,7 @@ class WorldPlaces;
 
 // TEST ONLY (LlmBrain.TestFactsQueries). Writes the OptionFacts of saved eval
 // snapshots with the module's own code, so the eval's options are the ones a
-// live bot at that spot would get (docs/plans/options-and-panels.md, "One code
+// live bot at that spot would get (docs/specs/options.md, "One code
 // path").
 //
 // `queries_path` holds one query per line, tab-separated:

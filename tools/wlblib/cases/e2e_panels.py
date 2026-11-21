@@ -1,6 +1,6 @@
 """Open bags, point at items, close bags: the panel and tooltips show and go.
 
-docs/plans/options-and-panels.md: `open` / `close` / `hover` commands; the module fills `ext.bags` only while
+docs/specs/options.md: `open` / `close` / `hover` commands; the module fills `ext.bags` only while
 open and the tooltip for a few snapshots; item "Use:" text comes from Spell.dbc with its values
 filled in as the client does: the hearthstone's home ($z), the bread's "61 health over 18 sec"
 ($o1 of a regen aura: per 5 s, floating point) and the potion's "70 to 90" (a range, never a

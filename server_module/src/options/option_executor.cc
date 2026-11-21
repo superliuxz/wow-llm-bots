@@ -533,9 +533,10 @@ TalkResult TalkToNpcNow(Player* bot, Creature* npc) {
     }
   }
 
-  // 3. Vendor / repair: sell grey items, repair equipment. Binding the
-  // hearthstone at an innkeeper is the brain's choice, not part of Talk
-  // (docs/plans/options-and-panels.md, "Later").
+  // 3. Vendor / repair: sell grey items, repair equipment. Non-grey items are
+  // left to the brain so BoEs, trade goods, and quest-starting items are never
+  // sold automatically. Binding the hearthstone at an innkeeper is also the
+  // brain's choice (docs/specs/options.md, "Later").
   if (npc->HasNpcFlag(UNIT_NPC_FLAG_VENDOR)) {
     const uint32_t sold = SellGreyItemsTo(bot, npc->GetGUID());
     if (sold > 0) {
@@ -860,10 +861,22 @@ bool HasTakeableLoot(Player* bot, Creature* creature) {
   if (!bot || !creature || !creature->IsInWorld()) {
     return false;
   }
+  const std::vector<uint8_t> slots = TakeableLootSlots(bot, creature);
+  size_t storable_items = 0;
+  for (uint8_t slot : slots) {
+    const LootItem* item = creature->loot.LootItemInSlot(slot, bot);
+    if (!item || item->is_looted) {
+      continue;
+    }
+    ItemPosCountVec dest;
+    if (bot->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, item->itemid,
+                             item->count) == EQUIP_ERR_OK) {
+      ++storable_items;
+    }
+  }
   return HasCorpseTakeableLoot(
       creature->isDead(), creature->HasDynamicFlag(UNIT_DYNFLAG_LOOTABLE),
-      bot->isAllowedToLoot(creature), creature->loot.gold,
-      TakeableLootSlots(bot, creature).size());
+      bot->isAllowedToLoot(creature), creature->loot.gold, storable_items);
 }
 
 std::string LootCorpseNow(Player* bot, Creature* creature) {

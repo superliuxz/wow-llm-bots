@@ -20,13 +20,34 @@ class Player;
 namespace llm_brain {
 
 struct ActiveAct {
+  enum class DodgePhase : uint8_t {
+    kMovingOut = 0,
+    kHolding = 1,
+    kReturning = 2,
+  };
+
+  struct InterruptedActivity {
+    bool active = false;
+    uint64_t target_guid = 0;
+    wlb::snapshot::Vec3 prev_pos;
+    float prev_target_dist_yd = 0.0f;
+    bool was_attacking = false;
+  };
+
   uint32_t command_id = 0;
   wlb::snapshot::Command_Act act;
-  // For `to` / `away`: current destination, last anchor geometry, and last
-  // path recompute timestamp.
+  // For `to` / `away` / `out of` / `back`: current destination, last anchor
+  // geometry, and last path recompute timestamp.
   wlb::snapshot::Vec3 dest;
   AnchorGeometry last_anchor;
   float away_target_edge_yd = 0.0f;
+  float hazard_radius_yd = 0.0f;
+  bool hazard_is_ground_area = false;
+  uint64_t hazard_caster_guid = 0;
+  uint32_t hazard_spell_id = 0;
+  DodgePhase dodge_phase = DodgePhase::kMovingOut;
+  base::TimeTicks hold_deadline;
+  InterruptedActivity interrupted;
   base::TimeTicks last_repath_at;
   // For `use` with a cast time: waiting for the cast to finish.
   bool waiting_cast = false;

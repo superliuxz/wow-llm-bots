@@ -941,6 +941,8 @@ struct Command_Act {
     PET_ATTACK = 17,
     PET = 18,
     KITE = 19,
+    OUT_OF = 20,
+    BACK = 21,
   };
   using enum Verb;
 
@@ -1390,6 +1392,11 @@ struct Cast {
   bool interruptible = false;
   std::string target;
   bool channeled = false;
+  // Server DBC max effect radius in yards (0 for single-target/non-area casts).
+  float radius_yd = 0.0f;
+  // Impact world position (ground destination if ground-targeted, else caster
+  // position when `radius_yd > 0`).
+  std::optional<Vec3> impact_pos;
 
   bool operator==(const Cast&) const = default;
 };

@@ -145,7 +145,7 @@ target_compile_options(fixture_options PRIVATE ${WLB_SAFETY_FLAGS})
 set(WLB_HARNESS_SRC "${WLB_ROOT}/harness/src")
 
 # The reply grammars, generated from harness/grammar/*.wlb by
-# tools/grammar/wlb_gen.py (docs/plans/grammar-idl.md) into
+# tools/grammar/wlb_gen.py (docs/specs/grammar-idl.md) into
 # <build>/gen/grammar/; the generator's runtime is harness/grammar/wlb_runtime.
 set(WLB_GRAMMAR_GEN "${CMAKE_CURRENT_BINARY_DIR}/gen")
 function(wlb_grammar wlb sources_var)
@@ -196,7 +196,7 @@ target_compile_features(wlb_harness PUBLIC cxx_std_26)
 target_compile_options(wlb_harness PRIVATE ${WLB_SAFETY_FLAGS})
 # TEST ONLY: llama.cpp's own grammar code, to check in unit tests that a GBNF
 # accepts what our printers write (harness/src/test/gbnf_check.h;
-# docs/plans/grammar-idl.md, "Tests"). No model, vocabulary or GGML runtime:
+# docs/specs/grammar-idl.md, "Tests"). No model, vocabulary or GGML runtime:
 # llama_grammar_stubs.cc stands in for the five functions only used with one.
 # llama.cpp's files keep their own style (no warnings of theirs are ours).
 set(WLB_LLAMA "${WLB_ROOT}/third_party/llama.cpp")

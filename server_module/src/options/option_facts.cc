@@ -288,6 +288,7 @@ void FillPlaces(const WorldPlaces& world,
     return (h.class_trainer_mask & class_bit) != 0;
   });
   pick_first([](const WorldPlaces::Hub& h) { return h.has_flight_master; });
+  pick_first([](const WorldPlaces::Hub& h) { return h.has_quests; });
 
   const GraveyardStruct* grave = sGraveyard->GetClosestGraveyard(
       view.map_id, view.pos.x, view.pos.y, view.pos.z,
@@ -314,6 +315,9 @@ void FillPlaces(const WorldPlaces& world,
     }
     if (hub->has_flight_master) {
       services.push_back("flight master");
+    }
+    if (hub->has_quests) {
+      services.push_back("quests");
     }
     if (grave && std::hypot(grave->x - hub->pos.x, grave->y - hub->pos.y) <=
                      kGraveyardMergeYd) {
@@ -464,7 +468,9 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
     const bool has_vendor = (tmpl->npcflag & UNIT_NPC_FLAG_VENDOR) != 0;
     const bool has_repair = (tmpl->npcflag & UNIT_NPC_FLAG_REPAIR) != 0;
     const bool has_fm = (tmpl->npcflag & UNIT_NPC_FLAG_FLIGHTMASTER) != 0;
-    if (!has_inn && !has_vendor && !has_repair && !has_fm && class_mask == 0) {
+    const bool has_quests = (tmpl->npcflag & UNIT_NPC_FLAG_QUESTGIVER) != 0;
+    if (!has_inn && !has_vendor && !has_repair && !has_fm && !has_quests &&
+        class_mask == 0) {
       continue;
     }
 
@@ -499,6 +505,7 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
     hub->has_vendor |= has_vendor;
     hub->has_repair |= has_repair;
     hub->has_flight_master |= has_fm;
+    hub->has_quests |= has_quests;
     hub->class_trainer_mask |= class_mask;
     if (has_inn && !hub->pos_from_innkeeper) {
       hub->pos = {data.posX, data.posY, data.posZ};

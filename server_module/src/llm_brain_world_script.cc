@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "Bag.h"
 #include "Creature.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
@@ -22,8 +23,10 @@
 #include "Log.h"
 #include "Map.h"
 #include "ObjectAccessor.h"
+#include "Pet.h"
 #include "Player.h"
 #include "Playerbots.h"
+#include "Position.h"
 #include "SharedDefines.h"
 #include "Spell.h"
 #include "SpellInfo.h"
@@ -70,6 +73,8 @@ namespace {
 constexpr size_t kMaxPendingMessages = 1000;
 // How often the snapshot cost summary is logged.
 constexpr uint32_t kStatsIntervalMs = 60000;
+// trace_parity.py rejects traces whose median source rate falls below 3.5 Hz.
+constexpr double kMinParityTraceHz = 3.5;
 // How long a bot remembers its snapshots' options, so a choice made on a
 // snapshot that is no longer the newest can still be resolved: well above an
 // urgent wake-up on a busy GPU (p95 3.8 s, docs/results.md).
@@ -263,7 +268,10 @@ class LlmBrainWorldScript : public WorldScript {
       return;
     }
     if (!config_.trace_dir.empty()) {
-      trace_writer_ = std::make_unique<BehaviorTraceWriter>(config_.trace_dir);
+      trace_writer_ = std::make_unique<BehaviorTraceWriter>(
+          config_.trace_dir,
+          static_cast<uint64_t>(config_.trace_max_file_mb) * 1024 * 1024,
+          static_cast<size_t>(config_.trace_max_rotated_files));
       if (human_trace_ && config_.observe_humans) {
         human_trace_->store(trace_writer_.get(), std::memory_order_release);
       }
@@ -365,14 +373,41 @@ class LlmBrainWorldScript : public WorldScript {
     if (trace_hooks_) {
       trace_hooks_->writer.store(nullptr, std::memory_order_release);
     }
+    CheckMeasuredTraceRate(/*min_intervals=*/5);
     trace_writer_.reset();
   }
 
  private:
+  void CheckMeasuredTraceRate(size_t min_intervals) {
+    if (!trace_writer_ || !trace_writer_->enabled()) {
+      return;
+    }
+    if (const uint64_t untracked = trace_writer_->TakeUntrackedSampleChars();
+        untracked > 0) {
+      LOG_WARN("module",
+               "mod-llm-brain: trace sample-rate tracker hit per-role active "
+               "cap ({} samples from extra concurrent characters not "
+               "rate-tracked)",
+               untracked);
+    }
+    for (std::string_view role : {"bot", "human"}) {
+      const std::optional<double> hz =
+          trace_writer_->TakeMeasuredSampleHz(role, min_intervals);
+      if (hz && *hz < kMinParityTraceHz) {
+        LOG_WARN("module",
+                 "mod-llm-brain: measured {} trace sample rate {:.2f} Hz is "
+                 "below the 3.5 Hz that trace_parity.py requires "
+                 "(TraceSampleIntervalMs = {} ms plus world-tick rounding)",
+                 role, *hz, config_.trace_sample_interval_ms);
+      }
+    }
+  }
+
   // The minute's summary: what snapshots cost to build, how many one tick
   // built at most (the spread of the bots), and how long they took to reach the
   // socket.
   void LogStats() {
+    CheckMeasuredTraceRate(/*min_intervals=*/10);
     if (stats_.count()) {
       LOG_INFO("module", "mod-llm-brain: snapshots in the last minute: {}",
                stats_.Summary());
@@ -660,7 +695,7 @@ class LlmBrainWorldScript : public WorldScript {
       }
     }
     // How old the picture was when the bot acted on it: the number that
-    // matters (docs/plans/harness.md, "Age").
+    // matters (docs/specs/harness.md, "Age").
     const int64_t age_ms =
         target
             ? (base::TimeTicks::Now() - found.snapshot_built).InMilliseconds()
@@ -729,6 +764,24 @@ class LlmBrainWorldScript : public WorldScript {
     LOG_INFO("module", "mod-llm-brain: {} act {} ({}): {}", name,
              wlb::snapshot::EnumName(act.verb), act.name,
              res.error.empty() ? (res.done ? "done" : "running") : res.error);
+    if (trace_writer_ && trace_writer_->enabled()) {
+      const base::TimeTicks now = base::TimeTicks::Now();
+      TraceEvent ev;
+      ev.time_ms = base::Time::Now().InMillisecondsSinceUnixEpoch();
+      ev.monotonic_us = (now - base::TimeTicks()).InMicroseconds();
+      ev.role = "bot";
+      ev.name = name;
+      ev.event = "act_sent";
+      ev.detail = std::string(wlb::snapshot::EnumName(act.verb));
+      if (!act.name.empty()) {
+        ev.detail += " " + act.name;
+      }
+      if (!res.error.empty()) {
+        ev.detail += " [err: " + res.error + "]";
+      }
+      ev.value = static_cast<int64_t>(act.yd);
+      trace_writer_->WriteEvent(ev);
+    }
     if (!res.error.empty()) {
       schedule_->SetActiveTargetPending(bot_index,
                                         state.active_option.has_value());
@@ -779,7 +832,7 @@ class LlmBrainWorldScript : public WorldScript {
     }
   }
 
-  // open / close / hover (docs/plans/options-and-panels.md): the next snapshot
+  // open / close / hover (docs/specs/options.md): the next snapshot
   // shows the panel or tooltip. A refusal comes back as a non-step error event.
   void OnUiCommand(size_t bot_index,
                    const std::string& name,
@@ -1130,6 +1183,7 @@ class LlmBrainWorldScript : public WorldScript {
     s.role = std::string(role);
     s.name = player->GetName();
     s.map_id = player->GetMapId();
+    s.instance_id = player->GetInstanceId();
     if (const AreaTableEntry* area =
             sAreaTableStore.LookupEntry(player->GetZoneId())) {
       const char* zname = area->area_name[sWorld->GetDefaultDbcLocale()];
@@ -1149,8 +1203,32 @@ class LlmBrainWorldScript : public WorldScript {
     s.orientation = player->GetOrientation();
     s.moving = player->isMoving();
     s.jumping = player->HasUnitMovementFlag(MOVEMENTFLAG_FALLING);
+    s.mounted = player->IsMounted();
+    s.swimming = player->IsInWater();
+    s.sitting = player->getStandState() != UNIT_STAND_STATE_STAND;
+    s.on_taxi = player->IsInFlight();
     s.in_combat = player->IsInCombat();
     s.dead = !player->IsAlive();
+    s.cc_mask = ControlMask(player);
+    uint32_t free_slots = 0;
+    for (uint8_t slot = INVENTORY_SLOT_ITEM_START;
+         slot < INVENTORY_SLOT_ITEM_END; ++slot) {
+      if (!player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot)) {
+        ++free_slots;
+      }
+    }
+    for (uint8_t i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END;
+         ++i) {
+      if (const Bag* bag = player->GetBagByPos(i); IsGeneralBag(bag)) {
+        free_slots += bag->GetFreeSlots();
+      }
+    }
+    s.bag_free_slots = free_slots;
+    if (Pet* pet = player->GetPet();
+        pet && pet->IsAlive() && pet->GetMaxHealth() > 0) {
+      s.pet_hp_pct = 100.0f * static_cast<float>(pet->GetHealth()) /
+                     static_cast<float>(pet->GetMaxHealth());
+    }
     s.level = player->GetLevel();
     s.xp = player->GetUInt32Value(PLAYER_XP);
     if (player->GetMaxHealth() > 0) {
@@ -1177,6 +1255,51 @@ class LlmBrainWorldScript : public WorldScript {
     }
     if (Unit* target = player->GetSelectedUnit()) {
       s.target = target->GetName();
+      s.target_hostile = !player->IsFriendlyTo(target) && target->IsAlive();
+      if (s.target_hostile) {
+        s.target_dist = player->GetDistance(target);
+        s.target_x = target->GetPositionX();
+        s.target_y = target->GetPositionY();
+        if (target->GetMaxHealth() > 0) {
+          s.target_hp_pct = 100.0f * static_cast<float>(target->GetHealth()) /
+                            static_cast<float>(target->GetMaxHealth());
+        }
+        s.target_level = target->GetLevel();
+        Spell* tsp = target->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+        if (!tsp || tsp->getState() != SPELL_STATE_PREPARING) {
+          tsp = target->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
+        }
+        if (tsp && tsp->GetSpellInfo()) {
+          const SpellInfo* tinfo = tsp->GetSpellInfo();
+          const char* tsn = tinfo->SpellName[sWorld->GetDefaultDbcLocale()];
+          if (!tsn || tsn[0] == '\0') {
+            tsn = tinfo->SpellName[0];
+          }
+          if (tsn) {
+            s.target_casting = tsn;
+          }
+          if (tsp->m_targets.HasDst()) {
+            if (const WorldLocation* dst = tsp->m_targets.GetDstPos()) {
+              s.target_x = dst->GetPositionX();
+              s.target_y = dst->GetPositionY();
+            }
+          }
+          float max_r = 0.0f;
+          for (uint8 eff = 0; eff < MAX_SPELL_EFFECTS; ++eff) {
+            const float r = tinfo->Effects[eff].CalcRadius(target, tsp);
+            if (r > max_r) {
+              max_r = r;
+            }
+          }
+          if (max_r > 0.0f) {
+            s.target_cast_radius = max_r;
+          }
+        }
+        s.target_moving = target->isMoving();
+        s.target_targeting_me = target->GetTarget() == player->GetGUID() ||
+                                target->GetVictim() == player;
+        s.target_in_combat = target->IsInCombat();
+      }
     }
     s.attackers = static_cast<int>(player->getAttackers().size());
     return s;
@@ -1187,7 +1310,8 @@ class LlmBrainWorldScript : public WorldScript {
                          base::TimeTicks now,
                          int64_t time_ms,
                          int64_t mono_us) {
-    static constexpr base::TimeDelta kTraceInterval = base::Milliseconds(200);
+    const base::TimeDelta trace_interval =
+        base::Milliseconds(config_.trace_sample_interval_ms);
     const uint64_t key = player->GetGUID().GetRawValue();
     ObservedState& obs = observed_state_[key];
     const bool in_combat = player->IsInCombat();
@@ -1204,13 +1328,13 @@ class LlmBrainWorldScript : public WorldScript {
       trace_writer_->WriteEvent(ev);
     }
 
-    // Use the exact same 5 Hz (200 ms) cadence + combat/jump edge triggers for
-    // both humans and bots — never emit extra samples on human-only movement
-    // packets, which would leak packet detail into downstream parity checks.
+    // Use the exact same cadence + combat/jump edge triggers for both humans
+    // and bots — never emit extra samples on human-only movement packets, which
+    // would leak packet detail into downstream parity checks.
     const bool state_edge = !obs.initialized || in_combat != obs.in_combat ||
                             jumping != obs.jumping;
     const bool interval_due =
-        !obs.initialized || (now - obs.last_sample) >= kTraceInterval;
+        !obs.initialized || (now - obs.last_sample) >= trace_interval;
 
     if (!state_edge && !interval_due) {
       return;

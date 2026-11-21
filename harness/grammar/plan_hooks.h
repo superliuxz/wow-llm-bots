@@ -1,6 +1,6 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
-// The hand-written parts of plan.wlb (docs/plans/grammar-idl.md, "escape
+// The hand-written parts of plan.wlb (docs/specs/grammar-idl.md, "escape
 // hatches"): what the generated plan parser calls for the slips an
 // unconstrained model makes and the few irregular shapes. Each has its own
 // test (plan_hooks_unittest.cc).

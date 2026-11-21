@@ -1,7 +1,7 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
 // Carries out a plan's `do:` steps one target and one repeat at a time against
-// incoming snapshots (docs/plans/harness.md, "For H4"):
+// incoming snapshots (docs/specs/harness.md, "For H4"):
 // - Sends `Command.Choose` only when the screen's option numbers came from
 //   `snapshot.options` (`screen.has_module_options`).
 // - Infers when an active target is done from later snapshots (the attacked

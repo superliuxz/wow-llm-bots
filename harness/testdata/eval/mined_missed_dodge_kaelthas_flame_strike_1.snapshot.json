@@ -1,0 +1,89 @@
+{
+  "bot": "Loada",
+  "seq": 1,
+  "time_ms": 1795263031971,
+  "monotonic_us": 583954128068,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x0000000000000101",
+        "name": "Loada",
+        "kind": "PLAYER",
+        "level": 70,
+        "health_pct": 17.7,
+        "power_pct": 0.0,
+        "player": {
+          "class": "Mage"
+        }
+      },
+      "health": 3717,
+      "health_max": 21000,
+      "power_type": "MANA",
+      "power": 0,
+      "power_max": 24500,
+      "state": "ALIVE",
+      "in_combat": true
+    },
+    "where": {
+      "map": "Magisters' Terrace",
+      "zone": "Magisters' Terrace",
+      "subzone": "Magisters' Terrace",
+      "position": {
+        "x": 145.47,
+        "y": 184.06,
+        "z": -16.73
+      },
+      "facing": -0.762,
+      "in_instance": true
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0xF130000000000001",
+          "name": "Kael'thas Sunstrider",
+          "rel": {
+            "dist_yd": 0.8,
+            "dir": "NE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": 148.5,
+              "y": 181.1,
+              "z": -16.73
+            }
+          },
+          "kind": "NPC",
+          "level": 72,
+          "level_color": "ORANGE",
+          "reaction": "HOSTILE",
+          "classification": "WORLD_BOSS",
+          "health_pct": 31.7,
+          "targeting_me": true,
+          "activity": {
+            "state": "CASTING",
+            "cast": {
+              "spell": {
+                "name": "Flame Strike"
+              },
+              "remaining_ms": 1500
+            },
+            "with": "Loada"
+          },
+          "detail": "NAMEPLATE"
+        }
+      ]
+    }
+  },
+  "options": [
+    {
+      "text": "Attack Kael'thas Sunstrider",
+      "guid": "0xF130000000000001",
+      "kind": "ATTACK",
+      "name": "Kael'thas Sunstrider"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
+}

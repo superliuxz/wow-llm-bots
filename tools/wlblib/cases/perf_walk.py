@@ -1,5 +1,5 @@
 """What the stepped mmap walk (Explore / Go to) costs on the world thread: 50 bots walking at once
-in Orgrimmar, measured from the module's own `walk paths` summary line (docs/plans/options-and-panels.md).
+in Orgrimmar, measured from the module's own `walk paths` summary line (docs/specs/options.md).
 """
 
 import json

@@ -1,0 +1,113 @@
+{
+  "bot": "Loada",
+  "seq": 1,
+  "time_ms": 1795262061664,
+  "monotonic_us": 582983990887,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x0000000000000101",
+        "name": "Loada",
+        "kind": "PLAYER",
+        "level": 80,
+        "health_pct": 99.7,
+        "power_pct": 0.0,
+        "player": {
+          "class": "Mage"
+        }
+      },
+      "health": 23928,
+      "health_max": 24000,
+      "power_type": "MANA",
+      "power": 0,
+      "power_max": 28000,
+      "state": "ALIVE",
+      "in_combat": true
+    },
+    "where": {
+      "map": "Halls of Lightning",
+      "zone": "Halls of Lightning",
+      "subzone": "Halls of Lightning",
+      "position": {
+        "x": 1175.53,
+        "y": 41.84,
+        "z": 60.73
+      },
+      "facing": 1.321,
+      "in_instance": true
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0xF130000000000001",
+          "name": "Loken",
+          "rel": {
+            "dist_yd": 7.0,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": 1173.8,
+              "y": 35.1,
+              "z": 60.73
+            }
+          },
+          "kind": "NPC",
+          "level": 81,
+          "level_color": "ORANGE",
+          "reaction": "HOSTILE",
+          "classification": "WORLD_BOSS",
+          "health_pct": 59.2,
+          "targeting_me": true,
+          "activity": {
+            "state": "CASTING",
+            "cast": {
+              "spell": {
+                "name": "Lightning Nova"
+              },
+              "remaining_ms": 1500
+            },
+            "with": "Loada"
+          },
+          "detail": "NAMEPLATE"
+        }
+      ],
+      "areas": [
+        {
+          "guid": "0xF150000000000001",
+          "name": "Lightning Nova",
+          "rel": {
+            "dist_yd": 7.0,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": 1173.8,
+              "y": 35.1,
+              "z": 60.73
+            }
+          },
+          "spell": {
+            "name": "Lightning Nova"
+          },
+          "radius_yd": 20.0,
+          "inside_me": true,
+          "hostile": true,
+          "lands_in_s": 1.5
+        }
+      ]
+    }
+  },
+  "options": [
+    {
+      "text": "Attack Loken",
+      "guid": "0xF130000000000001",
+      "kind": "ATTACK",
+      "name": "Loken"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
+}

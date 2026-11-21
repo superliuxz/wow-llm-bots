@@ -1,6 +1,6 @@
 // Standing orders (docs/specs/triggers.md, "The grammar (final, 2026-11-17)").
 // The one source of the order language: tools/grammar/wlb_gen.py generates
-// its C++ types, parser, printer and GBNF (docs/plans/grammar-idl.md).
+// its C++ types, parser, printer and GBNF (docs/specs/grammar-idl.md).
 // A choice's arms are tried in the order written: put the longer forms first
 // ("X cast on me" before "X on me").
 
@@ -48,6 +48,7 @@ choice Check {
   Cast       = mech:Name " cast";
   AppearsIn  = mech:Name " appears in last " s:Num "s";
   Appears    = mech:Name " appears";
+  InArea     = "in " mech:Name;
   Count      = mech:Name " count" cmp:Cmp n:Count;
   On         = mech:Name " on " who:Who;
   Within     = a:Thing " within " yd:Num (" of " b:Thing)?;
@@ -86,6 +87,8 @@ choice Place {
 
 choice Act {
   To        = "to " place:Place;
+  OutOf     = "out of " t:Thing;
+  Back      = "back";
   Away      = "away" (" " t:Thing)? (" " yd:Num)?;
   Avoid     = "avoid " t:Thing;
   Target    = "target " t:Thing;

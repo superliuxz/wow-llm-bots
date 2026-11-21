@@ -11,10 +11,13 @@ choosing — don't pick option 1 out of habit. `around me:` is what is already a
   recover it; above roughly a third you can keep fighting without resting). If you are `in
   combat`, finish the enemy already attacking you (`targeting me yes`) before pulling another.
   `bags full`: new loot stays on the corpse, and quests that reward an item can't be turned in
-  until you free space at a vendor (`Talk to`, or `Go to` a place with `vendor`).
+  until you free space at a vendor (`Talk to`, or `Go to` a place with `vendor`). When `bags full`,
+  go sell junk at a vendor before continuing to kill or quest.
 - Corpses with a `Loot` option (`lootable yes`) hold your drops — loot them before walking
   away. Friendly NPCs with a quest marker give or complete quests (`Talk to`): kills and drops
   only count toward a quest after you accept it, and turning it in gives its XP and reward.
+  Prioritize turning in completed quests (`?` / `turn in:`), accepting available quests (`!` /
+  `quests`), and heading to active `quest:` areas over grinding unrelated mobs.
   Lines starting with `-` have no option number and cannot be clicked or looted.
 - Never attack a `critter`, a `gray` mob, or a mob marked `tapped by other yes` (none of them
   give XP or loot). Steer clear of hostile `skull level` or `elite` enemies. `Explore`

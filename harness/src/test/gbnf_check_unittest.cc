@@ -30,7 +30,7 @@ TEST(GbnfCheckTest, ABrokenGrammarOrMissingRootIsReported) {
 
 // Today's hand-written grammar and printer agree: what FormatPlan writes, the
 // grammar the brain is held to accepts (the property the generated code must
-// keep; docs/plans/grammar-idl.md).
+// keep; docs/specs/grammar-idl.md).
 TEST(GbnfCheckTest, TodaysPlanGrammarAcceptsWhatFormatPlanWrites) {
   const std::optional<Plan> plan = ParsePlan(
       "do: 2x3, 1\nexpect: 2\nwatch: hp<35, whisper\nlook: 90\n"

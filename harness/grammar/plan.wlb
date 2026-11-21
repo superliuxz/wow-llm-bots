@@ -1,6 +1,6 @@
 // The brain's reply, a plan (docs/specs/triggers.md): the one source of its
 // line format. tools/grammar/wlb_gen.py generates the types, parser, printer
-// and GBNF (docs/plans/grammar-idl.md); RULES.md's reply form comes from the
+// and GBNF (docs/specs/grammar-idl.md); RULES.md's reply form comes from the
 // descriptions here. The hand-written hooks are in plan_hooks.{h,cc}.
 
 import "orders.wlb"

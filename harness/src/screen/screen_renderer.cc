@@ -1367,7 +1367,7 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
     lines.push_back(std::move(line));
   }
   // Open panels and the tooltip of what the bot points at
-  // (docs/plans/options-and-panels.md): last, after every option ("also:"), so
+  // (docs/specs/options.md): last, after every option ("also:"), so
   // long panels never push an option out of the model's sight.
   std::vector<std::string> looked_at;
   for (const pb::Panel panel : base.ui.open_panels) {

@@ -17,7 +17,7 @@ Design and every decision so far: [docs/design.md](docs/design.md).
 | `common/` | shared C++ used by the server module and the harness: `base/` (Chromium-style threads, epoll IO message pump, task runners, callbacks, WeakPtr, scoped_refptr, TimeDelta, strings), and `net/` (Unix socket server/client, length-prefixed framing) |
 | `snapshot/` | what the module and the harness say to each other: plain C++20 snapshot/command structs (`snapshot.h`) and the Glaze BEVE/JSON wire codecs |
 | `server_module/` | our AzerothCore module: sees the game, builds each bot's snapshot, carries out commands |
-| `harness/` | the brain's process (C++), separate from the game server: screens, plans, the llama client, prompts, the decision log, the scheduler, and `harness decide` to run one decision offline (`docs/plans/harness.md`); built as `out/common/harness` |
+| `harness/` | the brain's process (C++), separate from the game server: screens, plans, the llama client, prompts, the decision log, the scheduler, and `harness decide` to run one decision offline (`docs/specs/harness.md`); built as `out/common/harness` |
 | `content/` | shared bot knowledge: `RULES.md` (the rules every bot starts from); `concepts/` and prompts are planned |
 | `config/` | our config files (MySQL, server overrides) |
 | `tools/` | `tools/wlb`, the one command-line tool, and research scripts: see [Tools](#tools) |

@@ -4,7 +4,7 @@ processes only, found by their pid files, never by name across the machine.
 
 Two servers (common.Instance): the play server, and the isolated test server e2e and perf run on
 while you play (worldserver only, its own port, run directory, logs and databases, reset for
-every run from a golden copy: docs/plans/phase2.md, E). Functions take `inst`, the play server
+every run from a golden copy: docs/design.md, E). Functions take `inst`, the play server
 by default."""
 
 import datetime
@@ -338,7 +338,9 @@ def console(command, wait_s=1.0, inst=PLAY):
     time.sleep(wait_s)
     with open(log, "rb") as f:
         f.seek(start)
-        print(f.read().decode(errors="replace"), end="")
+        text = f.read().decode(errors="replace")
+    print(text, end="")
+    return text
 
 
 def _stop_pid(name, timeout_s, inst=PLAY):

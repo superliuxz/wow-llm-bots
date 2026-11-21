@@ -129,5 +129,41 @@ TEST(ActGeometryTest, DistancesAreEdgeToEdgeWithCombatReaches) {
   EXPECT_NEAR(EdgeDist2D(yd_from[0], bot_reach, boss), 15.0f, 1e-3f);
 }
 
+TEST(ActGeometryTest, OutOfSkipsWhenAlreadyOutsideOrBiasesTowardGroup) {
+  const AnchorGeometry hazard{
+      .pos = {0.0f, 0.0f, 0.0f}, .facing_rad = 0.0f, .radius_yd = 0.0f};
+  // Already outside 20 yd radius (+0.5 yd buffer) -> empty (skip dodge).
+  EXPECT_TRUE(
+      CandidateSpotsForOutOf({21.0f, 0.0f, 0.0f}, hazard, 20.0f).empty());
+
+  // Inside 20 yd radius at (10, 0) with tank/group at (15, 15) (+45 deg, within
+  // 90 deg of outward +0 deg): first candidate moves just past 20 + margin
+  // toward the group bearing (+45 deg).
+  std::vector<pb::Vec3> spots = CandidateSpotsForOutOf(
+      {10.0f, 0.0f, 0.0f}, hazard, 20.0f, pb::Vec3{15.0f, 15.0f, 0.0f});
+  ASSERT_FALSE(spots.empty());
+  EXPECT_NEAR(Dist2D(spots[0], hazard.pos), 20.0f + kDefaultOutOfMarginYd,
+              1e-3f);
+  EXPECT_GT(spots[0].x, 0.0f);
+  EXPECT_GT(spots[0].y, 0.0f);
+
+  // If preferred point is on the opposite side (-20, 0), do NOT walk through
+  // the hazard center: stay on the outward (+X) bearing.
+  std::vector<pb::Vec3> opposite = CandidateSpotsForOutOf(
+      {10.0f, 0.0f, 0.0f}, hazard, 20.0f, pb::Vec3{-20.0f, 0.0f, 0.0f});
+  ASSERT_FALSE(opposite.empty());
+  EXPECT_GT(opposite[0].x, 20.0f);
+  EXPECT_NEAR(opposite[0].y, 0.0f, 1e-3f);
+}
+
+TEST(ActGeometryTest, CanEscapeBeforeImpactChecksTimeVsRunSpeed) {
+  // 10 yd from 34 yd blast (24.5 yd needed) at 7 yd/s = 3.5 s:
+  // With 4.5 s left -> escapable; with 1.5 s left -> too late (skip).
+  EXPECT_TRUE(CanEscapeBeforeImpact(10.0f, 34.0f, 7.0f, 4.5f));
+  EXPECT_FALSE(CanEscapeBeforeImpact(10.0f, 34.0f, 7.0f, 1.5f));
+  // Active persistent ground area (lands_in_s == 0) is always escapable.
+  EXPECT_TRUE(CanEscapeBeforeImpact(2.0f, 8.0f, 7.0f, 0.0f));
+}
+
 }  // namespace
 }  // namespace llm_brain

@@ -101,7 +101,7 @@ def snapshot(base, units=(), *, level=None, hp_pct=None, mana_pct=None, in_comba
         me.pop("in_combat", None)
     if bags_free is not None:
         me.setdefault("indicators", {})["bag_free_slots"] = bags_free
-    if bags is not None:  # The bags panel is open (docs/plans/options-and-panels.md).
+    if bags is not None:  # The bags panel is open (docs/specs/options.md).
         snap["base"].setdefault("ui", {})["open_panels"] = ["BAGS"]
         free = 16 - len(bags) if bags_free is None else bags_free
         snap.setdefault("ext", {})["bags"] = {"items": bags, "free_slots": free,
@@ -277,7 +277,7 @@ CASES = [
     ("bags_full", "bags full, a boar 9 yd away", "heads to town instead of killing for loot",
      "plan done", snapshot(FIELD, [boar(dist=9)], bags_free=0),
      {"first_kinds": ["go to town"]}),
-    # --- looking: open panels and hover (docs/plans/options-and-panels.md) ---
+    # --- looking: open panels and hover (docs/specs/options.md) ---
     ("food_in_open_bags", "25% HP, bags open with bread and water, a boar 12 yd away",
      "rests (food is right there), doesn't attack", "plan done",
      snapshot(FIELD, [boar(dist=12)], hp_pct=25,

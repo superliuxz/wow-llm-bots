@@ -1,4 +1,4 @@
-"""Generates C++ from a `.wlb` grammar file (docs/plans/grammar-idl.md).
+"""Generates C++ from a `.wlb` grammar file (docs/specs/grammar-idl.md).
 
 From `harness/grammar/<name>.wlb` it writes `<out>/<name>.wlb.h` and `<out>/<name>.wlb.cc`:
 the types (an enum per `words`, a struct per `struct`, a struct per `choice` holding a

@@ -34,11 +34,11 @@ TEST(RunArgsTest, DefaultsAndAllFlags) {
   EXPECT_EQ(def->rules_path, "content/RULES.md");
   EXPECT_EQ(def->slots, 16u);
 
-  const auto custom =
-      ParseRunArgs({"--socket=/tmp/s.sock", "--rules=r.md",
-                    "--bots-dir=", "--host=127.0.0.2", "--port=9090",
-                    "--slots=4", "--temperature=0", "--seconds=2.5"},
-                   &error);
+  const auto custom = ParseRunArgs(
+      {"--socket=/tmp/s.sock", "--rules=r.md",
+       "--bots-dir=", "--host=127.0.0.2", "--port=9090", "--slots=4",
+       "--temperature=0", "--seconds=2.5", "--only-bots=Loada, Loadb"},
+      &error);
   ASSERT_TRUE(custom) << error;
   EXPECT_EQ(custom->socket_path, "/tmp/s.sock");
   EXPECT_EQ(custom->rules_path, "r.md");
@@ -48,6 +48,9 @@ TEST(RunArgsTest, DefaultsAndAllFlags) {
   EXPECT_EQ(custom->slots, 4u);
   EXPECT_FLOAT_EQ(custom->temperature, 0.0f);
   EXPECT_DOUBLE_EQ(custom->seconds, 2.5);
+  EXPECT_EQ(custom->only_bots.size(), 2u);
+  EXPECT_TRUE(custom->only_bots.contains("Loada"));
+  EXPECT_TRUE(custom->only_bots.contains("Loadb"));
 
   EXPECT_FALSE(ParseRunArgs({"unexpected"}, &error));
   EXPECT_FALSE(ParseRunArgs({"--slots=0"}, &error));

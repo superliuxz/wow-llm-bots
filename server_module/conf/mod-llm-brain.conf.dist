@@ -117,9 +117,39 @@ LlmBrain.TestFactsQueries = ""
 #        Description: Sample online human (non-bot) players into
 #                     LlmBrain.TraceDir (under human/<name>/) for human-baseline
 #                     scoring. Off by default; requires LlmBrain.TraceDir to be
-#                     non-empty. Whisper events record only timing and byte
-#                     length (never message text).
+#                     non-empty. Records 5 Hz kinematics/state samples (position,
+#                     facing, HP/mana/XP, hostile target state, bag free slots)
+#                     and server gameplay events (combat, casts, damage/heals,
+#                     kills, deaths, quests, loot, items, money/rep deltas,
+#                     zone/area changes, group join/leave). Does NOT record raw
+#                     keystrokes/client opcodes, other players' names in social
+#                     or PvP events, or whisper text (whispers log timing and
+#                     byte length only).
 #        Default:     0
+#
+#    LlmBrain.TraceSampleIntervalMs
+#        Description: Minimum interval between periodic trace samples (ms),
+#                     plus immediate samples on combat/jump transitions.
+#                     trace_parity.py rejects traces whose measured median rate
+#                     is below 3.5 Hz; world-tick rounding adds up to one tick
+#                     (~50 ms) on top of this setting, and the module warns at
+#                     runtime if the measured rate in the trace drops below
+#                     3.5 Hz, so keep the default 200 ms whenever traces are
+#                     scored. Use the two caps below, not this interval, to
+#                     bound disk volume.
+#        Default:     200
+#
+#    LlmBrain.TraceMaxFileMb
+#    LlmBrain.TraceMaxRotatedFiles
+#        Description: Per-character, per-day volume cap. Each day file rotates
+#                     at TraceMaxFileMb and keeps TraceMaxRotatedFiles archives
+#                     (oldest overwritten; 0 = truncate in place), so one
+#                     character's day is at most
+#                     TraceMaxFileMb * (TraceMaxRotatedFiles + 1) MB.
+#        Default:     64, 8
 
 LlmBrain.TraceDir = ""
+LlmBrain.TraceSampleIntervalMs = 200
+LlmBrain.TraceMaxFileMb = 64
+LlmBrain.TraceMaxRotatedFiles = 8
 LlmBrain.ObserveHumans = 0

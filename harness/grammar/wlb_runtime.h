@@ -1,6 +1,6 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
-// The hand-written half of the grammar IDL (docs/plans/grammar-idl.md): what
+// The hand-written half of the grammar IDL (docs/specs/grammar-idl.md): what
 // the code generated from a `.wlb` file (tools/grammar/wlb_gen.py) calls. A
 // generated sequence is a static table of `Node`s; this file matches a text
 // against it (backtracking over where each field can end) and turns the tables

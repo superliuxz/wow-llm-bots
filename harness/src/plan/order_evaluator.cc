@@ -825,6 +825,48 @@ CheckResult EvalCheck(const SnapshotView& view,
           }
           return {};
 
+        } else if constexpr (std::is_same_v<C, grammar::CheckInArea>) {
+          const pb::Area* best_area = nullptr;
+          float best_dist = std::numeric_limits<float>::infinity();
+          for (const pb::Area& a : view.snap.base.nearby.areas) {
+            if (!NameEq(AreaName(a), c.mech)) {
+              continue;
+            }
+            const float d = a.rel ? a.rel->dist_yd : 0.0f;
+            const bool inside =
+                a.inside_me || (a.rel && a.radius_yd > 0.0f &&
+                                a.rel->dist_yd <= a.radius_yd + 1.0f);
+            if (inside && d < best_dist) {
+              best_area = &a;
+              best_dist = d;
+            }
+          }
+          if (best_area) {
+            return {true, MakeAreaEntity(*best_area)};
+          }
+          for (const pb::Unit* u : view.units) {
+            if (u->dead || !IsUnitCasting(*u, c.mech) || !u->activity.cast ||
+                u->activity.cast->radius_yd <= 0.0f) {
+              continue;
+            }
+            const Entity ue = MakeUnitEntity(*u);
+            std::optional<float> dist;
+            if (u->activity.cast->impact_pos &&
+                !IsZeroVec(view.snap.base.where.position)) {
+              const pb::Vec3& ip = *u->activity.cast->impact_pos;
+              const pb::Vec3& sp = view.snap.base.where.position;
+              const float dx = ip.x - sp.x;
+              const float dy = ip.y - sp.y;
+              dist = std::sqrt(dx * dx + dy * dy);
+            } else {
+              dist = DistanceBetween(view.self, ue);
+            }
+            if (dist && *dist <= u->activity.cast->radius_yd + 1.0f) {
+              return {true, ue};
+            }
+          }
+          return {};
+
         } else if constexpr (std::is_same_v<C, grammar::CheckCount>) {
           std::vector<Entity> matches = ResolveNamed(view, c.mech);
           if (Compare(static_cast<int>(matches.size()), c.cmp, c.n)) {
@@ -1159,7 +1201,8 @@ std::string ResolveActThingGuid(const SnapshotView& view,
                              std::is_same_v<A, grammar::ActInteract> ||
                              std::is_same_v<A, grammar::ActBoard> ||
                              std::is_same_v<A, grammar::ActPetAttack> ||
-                             std::is_same_v<A, grammar::ActKite>) {
+                             std::is_same_v<A, grammar::ActKite> ||
+                             std::is_same_v<A, grammar::ActOutOf>) {
           return &a.t;
         } else {
           return nullptr;
@@ -1279,6 +1322,8 @@ bool OrderEvaluator::ActiveStepMoves() const {
   }
   const Act& act = order.steps[static_cast<size_t>(active_step_)];
   return std::holds_alternative<grammar::ActTo>(act.value) ||
+         std::holds_alternative<grammar::ActOutOf>(act.value) ||
+         std::holds_alternative<grammar::ActBack>(act.value) ||
          std::holds_alternative<grammar::ActAway>(act.value) ||
          std::holds_alternative<grammar::ActKite>(act.value) ||
          std::holds_alternative<grammar::ActInteract>(act.value) ||
@@ -1312,6 +1357,8 @@ std::optional<base::TimeDelta> OrderEvaluator::TimeoutForAct(
     return std::nullopt;
   }
   if (std::holds_alternative<grammar::ActTo>(act.value) ||
+      std::holds_alternative<grammar::ActOutOf>(act.value) ||
+      std::holds_alternative<grammar::ActBack>(act.value) ||
       std::holds_alternative<grammar::ActAway>(act.value) ||
       std::holds_alternative<grammar::ActInteract>(act.value) ||
       std::holds_alternative<grammar::ActBoard>(act.value)) {
@@ -1829,6 +1876,11 @@ std::optional<pb::Command::Act> OrderActToCommand(
                 }
               },
               a.place.value);
+        } else if constexpr (std::is_same_v<A, grammar::ActOutOf>) {
+          out.verb = pb::Command::Act::OUT_OF;
+          fill_thing(a.t, &out, /*target_slot=*/false);
+        } else if constexpr (std::is_same_v<A, grammar::ActBack>) {
+          out.verb = pb::Command::Act::BACK;
         } else if constexpr (std::is_same_v<A, grammar::ActAway>) {
           out.verb = pb::Command::Act::AWAY;
           if (a.t) {

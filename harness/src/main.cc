@@ -8,6 +8,7 @@
 //                   --temperature= --dry-run]
 //   harness parse-plans  < records (CheckPlanRecords, plan.h)
 
+#include <signal.h>
 #include <unistd.h>
 
 #include <csignal>
@@ -40,7 +41,7 @@ int Usage() {
       "usage:\n"
       "  harness run [--socket=PATH] [--rules=FILE] [--bots-dir=DIR]\n"
       "              [--host=H] [--port=N] [--slots=N] [--temperature=T]\n"
-      "              [--seconds=S]\n"
+      "              [--seconds=S] [--only-bots=NAME,NAME]\n"
       "  harness decide <snapshot.pb> [--name=BOT] [--goal=TEXT]\n"
       "                 [--reason=TEXT] [--rules=FILE] [--identity=FILE]\n"
       "                 [--log-dir=DIR] [--host=H] [--port=N] [--slot=N]\n"
@@ -118,6 +119,9 @@ int DecideCommand(const std::vector<std::string>& args) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  // Ignore SIGPIPE so a closed HTTP keep-alive or peer socket returns EPIPE
+  // instead of terminating the harness process.
+  std::signal(SIGPIPE, SIG_IGN);
   if (argc < 2) {
     return Usage();
   }

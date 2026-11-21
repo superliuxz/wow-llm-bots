@@ -1,0 +1,113 @@
+{
+  "bot": "Loada",
+  "seq": 1,
+  "time_ms": 1795266641560,
+  "monotonic_us": 587563886844,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x0000000000000101",
+        "name": "Loada",
+        "kind": "PLAYER",
+        "level": 68,
+        "health_pct": 12.1,
+        "power_pct": 0.0,
+        "player": {
+          "class": "Mage"
+        }
+      },
+      "health": 2468,
+      "health_max": 20400,
+      "power_type": "MANA",
+      "power": 0,
+      "power_max": 23800,
+      "state": "ALIVE",
+      "in_combat": true
+    },
+    "where": {
+      "map": "Sethekk Halls",
+      "zone": "Sethekk Halls",
+      "subzone": "Sethekk Halls",
+      "position": {
+        "x": 36.12,
+        "y": 311.12,
+        "z": 25.08
+      },
+      "facing": 1.66,
+      "in_instance": true
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0xF130000000000001",
+          "name": "Talon King Ikiss",
+          "rel": {
+            "dist_yd": 1.8,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": 35.5,
+              "y": 305.9,
+              "z": 25.08
+            }
+          },
+          "kind": "NPC",
+          "level": 68,
+          "level_color": "ORANGE",
+          "reaction": "HOSTILE",
+          "classification": "WORLD_BOSS",
+          "health_pct": 49.3,
+          "targeting_me": false,
+          "activity": {
+            "state": "CASTING",
+            "cast": {
+              "spell": {
+                "name": "Arcane Explosion"
+              },
+              "remaining_ms": 1500
+            },
+            "with": "Loada"
+          },
+          "detail": "NAMEPLATE"
+        }
+      ],
+      "areas": [
+        {
+          "guid": "0xF150000000000001",
+          "name": "Arcane Explosion",
+          "rel": {
+            "dist_yd": 1.8,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": 35.5,
+              "y": 305.9,
+              "z": 25.08
+            }
+          },
+          "spell": {
+            "name": "Arcane Explosion"
+          },
+          "radius_yd": 35.0,
+          "inside_me": true,
+          "hostile": true,
+          "lands_in_s": 1.5
+        }
+      ]
+    }
+  },
+  "options": [
+    {
+      "text": "Attack Talon King Ikiss",
+      "guid": "0xF130000000000001",
+      "kind": "ATTACK",
+      "name": "Talon King Ikiss"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
+}

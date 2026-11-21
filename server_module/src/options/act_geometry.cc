@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <numbers>
+#include <optional>
 #include <vector>
 
 #include "snapshot/snapshot.h"
@@ -142,6 +143,50 @@ std::vector<pb::Vec3> CandidateSpotsForAway(const pb::Vec3& bot_pos,
                                        -120.0f, 150.0f, -150.0f, 180.0f};
   std::vector<pb::Vec3> spots;
   AppendFan(&spots, anchor.pos, base, target_dist, kOffsets,
+            sizeof(kOffsets) / sizeof(kOffsets[0]));
+  return spots;
+}
+
+bool CanEscapeBeforeImpact(float cur_dist_yd,
+                           float hazard_radius_yd,
+                           float bot_speed_yd_s,
+                           float lands_in_s) {
+  if (lands_in_s <= 0.0f || bot_speed_yd_s <= 0.0f ||
+      hazard_radius_yd <= 0.0f) {
+    return true;
+  }
+  const float needed_yd = (hazard_radius_yd + 0.5f) - cur_dist_yd;
+  if (needed_yd <= 0.0f) {
+    return true;
+  }
+  return (needed_yd / bot_speed_yd_s) <= (lands_in_s + 0.75f);
+}
+
+std::vector<pb::Vec3> CandidateSpotsForOutOf(
+    const pb::Vec3& bot_pos,
+    const AnchorGeometry& hazard,
+    float hazard_radius_yd,
+    std::optional<pb::Vec3> preferred_dir_pos,
+    float margin_yd) {
+  const float cur_dist = Dist2D(bot_pos, hazard.pos);
+  if (hazard_radius_yd > 0.0f && cur_dist >= hazard_radius_yd + 0.5f) {
+    return {};
+  }
+  const float effective_radius =
+      hazard_radius_yd > 0.0f ? hazard_radius_yd : kDefaultAwayYd;
+  const float target_dist = effective_radius + std::max(0.5f, margin_yd);
+  float base = BearingFromTo(hazard.pos, bot_pos, hazard.facing_rad + kPi);
+  if (preferred_dir_pos) {
+    const float pref = BearingFromTo(hazard.pos, *preferred_dir_pos, base);
+    if (cur_dist < 1.0f || AngleDiffRad(base, pref) <= 0.5f * kPi) {
+      base = pref;
+    }
+  }
+  static constexpr float kOffsets[] = {0.0f,    30.0f,  -30.0f,  60.0f,
+                                       -60.0f,  90.0f,  -90.0f,  120.0f,
+                                       -120.0f, 150.0f, -150.0f, 180.0f};
+  std::vector<pb::Vec3> spots;
+  AppendFan(&spots, hazard.pos, base, target_dist, kOffsets,
             sizeof(kOffsets) / sizeof(kOffsets[0]));
   return spots;
 }

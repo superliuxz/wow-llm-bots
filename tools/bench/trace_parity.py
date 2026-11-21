@@ -24,6 +24,45 @@ from typing import Any
 SITUATIONS = ("in_group", "chatting", "solo_fight", "looting", "in_town", "travel")
 DEFAULT_STEP_MS = 200  # 5 Hz fixed grid
 
+# Allow-list of gameplay event types emitted through the identical server path
+# for both humans and bots. Human-only packet/UI events (e.g. `vendor_repair`,
+# `item_open`, `emote`, `mail_take_item`, `vendor_buy`, `client_input`) are
+# excluded so they can never leak role identity into blind parity clips.
+PARITY_ALLOWED_EVENTS = frozenset({
+    "combat_start",
+    "combat_end",
+    "cast_start",
+    "damage_dealt",
+    "damage_taken",
+    "heal_done",
+    "mob_kill",
+    "died",
+    "resurrect",
+    "release_spirit",
+    "xp_gain",
+    "level_up",
+    "quest_accept",
+    "quest_turnin",
+    "quest_reward",
+    "loot",
+    "item_gain",
+    "item_equip",
+    "item_remove",
+    "item_craft",
+    "spell_learn",
+    "talent_learn",
+    "skill_up",
+    "zone_change",
+    "area_change",
+    "map_change",
+    "group_join",
+    "group_leave",
+    "go_interact",
+    "item_use",
+    "login",
+    "logout",
+})
+
 
 def angle_diff(a: float, b: float) -> float:
     """Unsigned shortest angular difference in [0, pi]."""
@@ -256,9 +295,13 @@ def reconstruct_trajectory(
     for r in rows:
         kind = r.get("kind")
         if kind == "event":
+            ev_name = str(r.get("event", ""))
+            # Only pass events emitted symmetrically by both humans and bots.
+            if ev_name not in PARITY_ALLOWED_EVENTS:
+                continue
             raw_events.append({
                 "t_ms": int(r.get("t_ms", 0)),
-                "event": str(r.get("event", "")),
+                "event": ev_name,
                 "value": int(r.get("value", 0)),
             })
         elif kind == "chat":

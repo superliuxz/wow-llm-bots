@@ -24,9 +24,11 @@ import argparse
 import datetime
 import fnmatch
 import hashlib
+import hmac
 import json
 import os
 import pathlib
+import re
 import shutil
 import stat
 import statistics
@@ -39,6 +41,8 @@ LEDGER = VAR / "experiments" / "ledger.jsonl"
 BASELINE_TRACES_ROOT = VAR / "experiments" / "baseline_traces"
 EXTERNAL_STATE_DIR = pathlib.Path.home() / ".local" / "share" / "wow-llm-bots"
 DEFAULT_LOCK_FILE = EXTERNAL_STATE_DIR / "scorer.sha256"
+DEFAULT_PASSPHRASE_FILE = EXTERNAL_STATE_DIR / "relock.passphrase"
+REPO_APPROVED_LOCK_DIGEST = ROOT / "config" / "scorer-lock.sha256"
 DEFAULT_HUMAN_DIR = EXTERNAL_STATE_DIR / "human_baseline"
 DEFAULT_BLIND_RATINGS = EXTERNAL_STATE_DIR / "blind_ratings.jsonl"
 
@@ -110,12 +114,91 @@ def _locked_files() -> list[pathlib.Path]:
     return files
 
 
-def _write_lock_manifest(lock_file: pathlib.Path, force: bool = False) -> tuple[bool, str]:
+def _confirm_relock(
+    passphrase_file: pathlib.Path = DEFAULT_PASSPHRASE_FILE,
+    tty_path: str | pathlib.Path = "/dev/tty",
+) -> tuple[bool, str]:
+    # Requires typing the passphrase stored in `passphrase_file` (outside the
+    # repo) into `/dev/tty`. `passphrase_file` may hold either the plaintext
+    # passphrase or its 64-hex SHA-256 digest. Tracked
+    # `config/scorer-lock.sha256` remains the git-visible backstop.
+    try:
+        expected = passphrase_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        expected = ""
+    if not expected:
+        return False, (
+            f"refusing to write scorer lock: missing or empty passphrase file "
+            f"{passphrase_file} (create it outside the repo first)"
+        )
+    # Open separate "r" and "w" handles: character devices such as /dev/tty
+    # are non-seekable, so open("/dev/tty", "r+") raises io.UnsupportedOperation
+    # (a subclass of OSError).
+    try:
+        with open(tty_path, "r", encoding="utf-8") as tty_in:
+            if not tty_in.isatty():
+                return False, (
+                    "refusing to write scorer lock without an interactive "
+                    "controlling terminal (/dev/tty)"
+                )
+            with open(tty_path, "w", encoding="utf-8") as tty_out:
+                if not tty_out.isatty():
+                    return False, (
+                        "refusing to write scorer lock without an interactive "
+                        "controlling terminal (/dev/tty)"
+                    )
+                tty_out.write("Confirm writing scorer lock (enter passphrase): ")
+                tty_out.flush()
+                ans = tty_in.readline().strip()
+    except OSError:
+        return False, (
+            "refusing to write scorer lock without a controlling terminal "
+            "(/dev/tty; run interactively and enter your passphrase)"
+        )
+    if not ans:
+        return False, "refusing to write scorer lock: empty passphrase entered"
+    ans_sha256 = hashlib.sha256(ans.encode("utf-8")).hexdigest()
+    if hmac.compare_digest(ans, expected) or (
+        bool(re.fullmatch(r"[0-9a-fA-F]{64}", expected))
+        and hmac.compare_digest(ans_sha256, expected.lower())
+    ):
+        return True, ""
+    return False, "refusing to write scorer lock: passphrase mismatch"
+
+
+def _resolve_approved_digest_file(
+    lock_file: pathlib.Path, approved_digest_file: pathlib.Path | None
+) -> pathlib.Path | None:
+    if approved_digest_file is not None:
+        return approved_digest_file
+    if lock_file.resolve() == DEFAULT_LOCK_FILE.resolve():
+        return REPO_APPROVED_LOCK_DIGEST
+    return None
+
+
+def _read_approved_digest(digest_file: pathlib.Path) -> str | None:
+    for line in digest_file.read_text().splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        token = s.split()[0].lower()
+        return token if re.fullmatch(r"[0-9a-f]{64}", token) else None
+    return None
+
+
+def _write_lock_manifest(
+    lock_file: pathlib.Path,
+    force: bool = False,
+    confirmed: bool = False,
+    approved_digest_file: pathlib.Path | None = None,
+) -> tuple[bool, str]:
     if lock_file.exists() and not force:
         return False, (
             f"lock file already exists: {lock_file} "
             "(pass --force-relock explicitly to overwrite)"
         )
+    if not confirmed:
+        return False, f"refusing to write lock manifest {lock_file} without confirmation"
     digest = soak_scorer.scorer_sha256()
     lock_file.parent.mkdir(parents=True, exist_ok=True)
     if lock_file.exists():
@@ -126,10 +209,21 @@ def _write_lock_manifest(lock_file: pathlib.Path, force: bool = False) -> tuple[
         lines.append(f"{_sha256_file(p)}  {rel}")
     lock_file.write_text("\n".join(lines) + "\n")
     os.chmod(lock_file, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)  # 0444 read-only
+    digest_target = _resolve_approved_digest_file(lock_file, approved_digest_file)
+    if digest_target is not None:
+        digest_target.parent.mkdir(parents=True, exist_ok=True)
+        digest_target.write_text(
+            "# User-approved SHA-256 digest of ~/.local/share/wow-llm-bots/scorer.sha256.\n"
+            "# Updated by `hill_climb.py lock-scorer` so any relock is visible in git diff.\n"
+            f"{_sha256_file(lock_file)}  scorer.sha256\n"
+        )
     return True, f"locked {len(lines) - 1} measurement files (0444) -> {lock_file}"
 
 
-def _verify_all_locks(lock_file: pathlib.Path = DEFAULT_LOCK_FILE) -> tuple[bool, str]:
+def _verify_all_locks(
+    lock_file: pathlib.Path = DEFAULT_LOCK_FILE,
+    approved_digest_file: pathlib.Path | None = None,
+) -> tuple[bool, str]:
     if not lock_file.exists():
         return False, f"lock file missing: {lock_file} (run lock-scorer)"
     ok, msg = soak_scorer.verify_scorer_hash(lock_file)
@@ -159,6 +253,27 @@ def _verify_all_locks(lock_file: pathlib.Path = DEFAULT_LOCK_FILE) -> tuple[bool
                 f"locked measurement file modified: {rel} "
                 f"(expected {expected[:12]}, got {actual[:12]})"
             )
+    # Always verify against tracked `config/scorer-lock.sha256` unless a test
+    # explicitly supplies `approved_digest_file`, so overriding `--lock-file`
+    # can never bypass tracked digest verification.
+    digest_target = (
+        approved_digest_file
+        if approved_digest_file is not None
+        else REPO_APPROVED_LOCK_DIGEST
+    )
+    if not digest_target.exists():
+        return False, (
+            f"repo approved scorer digest missing: {digest_target} "
+            "(re-lock only with user OK)"
+        )
+    approved = _read_approved_digest(digest_target)
+    actual_manifest = _sha256_file(lock_file)
+    if approved != actual_manifest:
+        return False, (
+            f"lock manifest digest mismatch vs {digest_target}: "
+            f"approved={approved[:12] if approved else 'invalid'}, "
+            f"actual={actual_manifest[:12]}"
+        )
     return True, f"all {len(recorded)} measurement locks verified"
 
 
@@ -277,7 +392,19 @@ def _save_baseline_traces(suite: str) -> pathlib.Path | None:
 
 
 def cmd_lock_scorer(args) -> int:
-    ok, msg = _write_lock_manifest(args.lock_file, force=args.force_relock)
+    lock_file = args.lock_file or DEFAULT_LOCK_FILE
+    if lock_file.exists() and not args.force_relock:
+        print(
+            f"lock file already exists: {lock_file} "
+            "(pass --force-relock explicitly to overwrite)",
+            file=sys.stderr,
+        )
+        return 2
+    confirmed, reason = _confirm_relock()
+    if not confirmed:
+        print(f"ABORT: {reason}", file=sys.stderr)
+        return 2
+    ok, msg = _write_lock_manifest(lock_file, force=args.force_relock, confirmed=True)
     print(msg, file=sys.stdout if ok else sys.stderr)
     return 0 if ok else 2
 
@@ -322,17 +449,11 @@ def cmd_init(args) -> int:
             return 2
         print("WARNING: running without verified human baseline (--allow-fallback)", file=sys.stderr)
 
-    if args.lock_file.exists():
-        ok, msg = _verify_all_locks(args.lock_file)
-        if not ok:
-            print(f"ABORT: {msg}", file=sys.stderr)
-            return 2
-    else:
-        ok, msg = _write_lock_manifest(args.lock_file, force=False)
-        if not ok:
-            print(f"ABORT: {msg}", file=sys.stderr)
-            return 2
-        print(msg)
+    lock_file = args.lock_file or DEFAULT_LOCK_FILE
+    ok, msg = _verify_all_locks(lock_file)
+    if not ok:
+        print(f"ABORT: {msg}", file=sys.stderr)
+        return 2
 
     res = soak_case.run_soak(
         minutes=args.minutes,
@@ -341,7 +462,7 @@ def cmd_init(args) -> int:
         human_dir=args.human_dir,
         blind_ratings_path=args.blind_ratings,
         use_judge=args.judge,
-        verify_hash=args.lock_file,
+        verify_hash=lock_file,
         suite=args.suite,
         check_guardrails=False,
     )
@@ -383,7 +504,8 @@ def cmd_init(args) -> int:
 
 
 def cmd_eval_candidate(args) -> int:
-    ok, msg = _verify_all_locks(args.lock_file)
+    lock_file = args.lock_file or DEFAULT_LOCK_FILE
+    ok, msg = _verify_all_locks(lock_file)
     if not ok:
         print(f"ABORT: {msg}", file=sys.stderr)
         return 2
@@ -436,7 +558,7 @@ def cmd_eval_candidate(args) -> int:
         baseline_trace_dir=baseline_dir if baseline_dir.exists() else None,
         blind_ratings_path=args.blind_ratings,
         use_judge=args.judge,
-        verify_hash=args.lock_file,
+        verify_hash=lock_file,
         suite=args.suite,
         check_guardrails=False,
     )
@@ -463,7 +585,7 @@ def cmd_eval_candidate(args) -> int:
             baseline_trace_dir=baseline_dir if baseline_dir.exists() else None,
             blind_ratings_path=args.blind_ratings,
             use_judge=args.judge,
-            verify_hash=args.lock_file,
+            verify_hash=lock_file,
             suite=args.suite,
             check_guardrails=False,
         )
@@ -482,7 +604,7 @@ def cmd_eval_candidate(args) -> int:
             score=True,
             human_dir=args.human_dir,
             use_judge=args.judge,
-            verify_hash=args.lock_file,
+            verify_hash=lock_file,
             suite="heldout",
             check_guardrails=False,
         )

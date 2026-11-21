@@ -281,7 +281,9 @@
     "source": "generated (tools/snapshot/make_eval_cases.py)",
     "generated": true,
     "reason": "plan done",
-    "whisperers": ["Kelra"],
+    "whisperers": [
+      "Kelra"
+    ],
     "summary": "quiet field, nobody talking (past whisperer in memory)",
     "rule": "doesn't whisper anyone",
     "forbid_tell": true
@@ -716,6 +718,70 @@
     "must_order_contain": [
       "Mystic Buffet",
       "Ice Block"
+    ]
+  },
+  {
+    "name": "mined_missed_dodge_loken_lightning_nova_1",
+    "source": "mined trace (bot/Loada/2026-11-21.jsonl @ t=1795262061664)",
+    "reason": "entered combat",
+    "summary": "Loada took 1106 damage from Loken's Lightning Nova (20 yd radius) at 0.0 yd without dodging",
+    "rule": "writes a standing order reacting to Lightning Nova by moving out/away",
+    "notes": "# Halls of Lightning — Loken\n- **Lightning Nova**: 4s cast dealing heavy AoE damage within 20 yd; step just outside the radius and return after it lands.\n  - Standing order: `Lightning Nova cast -> out of it`\n- **Pulsing Shockwave**: deals stacking nature damage that grows with distance from Loken; stay close to Loken when not dodging Lightning Nova.",
+    "order_names": [
+      "Lightning Nova",
+      "Loken"
+    ],
+    "min_orders": 1,
+    "must_order_contain": [
+      "Lightning Nova"
+    ]
+  },
+  {
+    "name": "mined_missed_dodge_murmur_sonic_boom_1",
+    "source": "mined trace (bot/Loada/2026-11-21.jsonl @ t=1795265188662)",
+    "reason": "entered combat",
+    "summary": "Loada died to Murmur (last HP 31% during Sonic Boom)",
+    "rule": "writes a standing order for Sonic Boom and keeps fighting",
+    "notes": "# Shadow Labyrinth — Murmur\n- **Sonic Boom**: 5s cast dealing massive damage within 34 yards; step just outside the radius and return after it lands.\n  - Standing order: `Sonic Boom cast -> out of it`\n- **Murmur's Touch**: bomb debuff on one player; move away from allies so you don't knock them up.\n  - Standing order: `Murmur's Touch on me -> away`\n",
+    "order_names": [
+      "Sonic Boom",
+      "Murmur"
+    ],
+    "min_orders": 1,
+    "must_order_contain": [
+      "Sonic Boom"
+    ]
+  },
+  {
+    "name": "mined_missed_dodge_ikiss_arcane_explosion_1",
+    "source": "mined trace (bot/Loada/2026-11-21.jsonl @ t=1795266641560)",
+    "reason": "entered combat",
+    "summary": "Loada took 1447 damage from Talon King Ikiss's Arcane Explosion (35 yd radius) at 1.8 yd without dodging",
+    "rule": "writes a standing order reacting to Arcane Explosion by moving out/away",
+    "notes": "# Sethekk Halls — Talon King Ikiss\n- **Arcane Explosion**: after Blinking, casts a 5s lethal AoE; step just outside the radius and return after it lands.\n  - Standing order: `Arcane Explosion cast -> out of it`\n- **Polymorph**: sheeps a party member; dispellers dispel it promptly.\n",
+    "order_names": [
+      "Arcane Explosion",
+      "Talon King Ikiss"
+    ],
+    "min_orders": 1,
+    "must_order_contain": [
+      "Arcane Explosion"
+    ]
+  },
+  {
+    "name": "mined_missed_dodge_kaelthas_flame_strike_1",
+    "source": "mined trace (bot/Loada/2026-11-21.jsonl @ t=1795263031971)",
+    "reason": "entered combat",
+    "summary": "Loada died to Arcane Sphere (last HP 18% during Flame Strike)",
+    "rule": "writes a standing order for Flame Strike and keeps fighting",
+    "notes": "# Magisters' Terrace — Kael'thas Sunstrider\n- **Flame Strike**: fiery ground AoE pillar that explodes after 5s; move out immediately whenever you are inside it!\n  - Standing order: `in Flame Strike -> out of it`\n- **Phoenix / Phoenix Egg**: switch immediately to destroy the **Phoenix Egg** before it hatches, and stay clear of burning Phoenix aura.\n  - Standing order: `Phoenix Egg appears -> target nearest Phoenix Egg`\n  - Standing order: `Phoenix within 10 -> away Phoenix 13`\n- **Fireball**: interruptible nuke on the tank.\n- **Gravity Lapse**: floats everyone in the air and spawns Arcane Spheres; stay clear of spheres.\n",
+    "order_names": [
+      "Flame Strike",
+      "Kael'thas Sunstrider"
+    ],
+    "min_orders": 1,
+    "must_order_contain": [
+      "Flame Strike"
     ]
   }
 ]

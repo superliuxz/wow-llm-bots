@@ -1,6 +1,6 @@
 """One bot whispers another and gets a whisper back.
 
-The chat path of phase 2's first "done when" item (docs/plans/phase2.md), without the model: the
+The chat path of phase 2's first "done when" item (docs/design.md), without the model: the
 module carries out a Say command as a whisper, its whisper hook hears it on the other bot, and the
 harness gets it as a chat event. The brain is the scripted one of tools/snapshot/fake_harness.py.
 """

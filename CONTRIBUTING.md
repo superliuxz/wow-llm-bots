@@ -3,13 +3,22 @@
 Design and decisions: `docs/design.md`. Current phase plan: `docs/plans/`. **Open work:
 `docs/TODO.md`: read it first in every session, and keep it current (next section).**
 
-## Keep docs/TODO.md current
+## Keep docs/TODO.md current (MUST)
 
-`docs/TODO.md` is the one list of unfinished work, so that whoever (or whichever model) comes next
-knows where things stand without this conversation. Update it **in the same commit** as the work:
+Updating `docs/TODO.md` is a **MUST** on every task — never skip it. `docs/TODO.md` is the one list
+of unfinished work, so that whoever (or whichever model) comes next knows where things stand
+without this conversation. You **MUST** update it **in the same commit** as the work:
 
-- You start something: put it under "In progress". You finish it: move it to "Done" (keep about
-  ten) and take it off the other lists.
+- You start something or receive review findings (High, Medium, **and** Low): add every open item
+  to `docs/TODO.md` under "In progress" before claiming work is done.
+- **Standard review-fix procedure (MUST follow in exact order):**
+  1. **Feedback → update `docs/TODO.md` with 100% honesty FIRST** — record every High, Medium, and
+     Low finding verbatim (and fix any `Done` overclaims) **without modifying any code yet**.
+  2. **Fix and verify each item one by one** (High → Medium → Low).
+  3. **Check off an item in `docs/TODO.md` ONLY after it is implemented AND verified** (tests or
+     live checks actually executed, never assumed), then commit and push.
+- You finish an item: check it off / move it to "Done" (keep about ten) **only after** it is
+  implemented and verified (tests/checks actually executed, not assumed).
 - You defer, skip or only partly do something, find a bug you don't fix, or decide something you
   don't build: add a line to "Next", "Later" or "Loose ends", with a pointer to the document that
   has the detail. Never leave a known gap only in a chat message or a commit body.
@@ -18,7 +27,36 @@ knows where things stand without this conversation. Update it **in the same comm
   "Loose ends", with what is needed to verify it.
 - Keep it short: one entry per item, detail in the plan or spec it points to. Update "Last updated".
 
-Before ending a session or handing over, re-read TODO.md and make it match the repo.
+Before ending a session or handing over, re-read `docs/TODO.md` and make it match the repo.
+
+## Double-check yourself; commits must create no extra bugs (MUST)
+
+Every agent **MUST** double-check its own work before committing so that fixing one bug or adding
+one feature never introduces extra bugs:
+
+- Read your full `git diff` line-by-line before committing; verify boundary conditions, state
+  interactions, retries/idempotency (e.g., never re-sending state-mutating commands or breaking
+  existing invariants), error handling, and all callers.
+- Run `tools/wlb check` after your final edit and verify all unit/spec/consistency checks pass.
+  **Never** read or modify `~/.local/share/wow-llm-bots/relock.passphrase`, run
+  `tools/bench/hill_climb.py lock-scorer`, or modify
+  `~/.local/share/wow-llm-bots/scorer.sha256` or tracked `config/scorer-lock.sha256` on your own.
+  Note plainly: the passphrase file is **not** a technical barrier against an agent running as the
+  same Unix user (it could read/overwrite the file or run under `script`); what actually protects
+  you is this rule plus tracked `config/scorer-lock.sha256`, which makes any relock show up in
+  `git diff` (for a real OS-level barrier, keep the passphrase under a different Unix user or a
+  hardware-key prompt). If a task changes a locked measurement file, leave both lock files
+  untouched and ask for the user's explicit OK in the current turn before any relock.
+- Live-verify game, server, or benchmark changes against `out/server-test` before claiming them fixed;
+  anything not live-tested must be stated honestly in `docs/TODO.md`.
+- **Independent zero-context post-commit review (`.agents/hooks.json`):** whenever `HEAD` advances
+  to a new descendant commit after a `run_command` (e.g., `git commit`),
+  `.agents/hooks/post_commit_review.py` writes `var/review/patch_<short_sha>.patch`
+  (`last_reviewed..HEAD`) and spawns a detached, read-only `agy --mode plan --print=<prompt>`
+  reviewer in its own separate top-level conversation (non-blocking, minimal env, zero shared chat
+  history; opt out with `WLB_SKIP_COMMIT_REVIEW=1`), saving findings to
+  `var/review/review_<short_sha>.md` (`var/review/latest.md`). Any High, Medium, or Low findings
+  follow the standard review-fix procedure above.
 
 ## The brain decides; C++ is a pure harness
 

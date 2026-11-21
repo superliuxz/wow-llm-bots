@@ -40,7 +40,9 @@ struct glz::meta<wlb::snapshot::Command_Act::Verb> {
                                                EQUIP,
                                                PET_ATTACK,
                                                PET,
-                                               KITE);
+                                               KITE,
+                                               OUT_OF,
+                                               BACK);
 };
 
 template <>

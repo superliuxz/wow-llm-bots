@@ -338,7 +338,7 @@ TEST(OrdersTest, RandomOrdersRoundTripAndTheGrammarAcceptsThem) {
 }
 
 // An unconstrained model can send junk; trying every split point must not blow
-// up (docs/plans/grammar-idl.md, "Tests").
+// up (docs/specs/grammar-idl.md, "Tests").
 TEST(OrdersTest, JunkFailsFast) {
   std::string junk;
   while (junk.size() < 240) {

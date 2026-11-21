@@ -533,7 +533,7 @@ standing in the Valley of Strength (`config/tests/pressure`), 1 s interval.
   sent part once it is as big as the rest (at most twice the pending bytes, whatever was sent).
   The new test fails (buffer 1.7 MB against a 0.5 MB bound) with the fix removed.
 - **Age.** Measured now: built to socket (module, logged each minute with the count of replaced
-  snapshots) and built to received (the probe). The rest is in `docs/plans/harness.md` ("Age").
+  snapshots) and built to received (the probe). The rest is in `docs/specs/harness.md` ("Age").
 - **Python tools.** `capture_snapshots.py` and `fake_harness.py` cut the buffer per frame and built
   JSON per frame while receiving; they now read at an offset and convert afterwards.
 - **A new connection per question.** The llama client keeps connections open between questions
@@ -584,7 +584,7 @@ rescans, and every `look` value is now 60–120 s (zero 1 s loops).
 
 #### Tier 1 end-to-end latency optimizations (2026-11-16)
 
-Four changes (`docs/plans/latency.md`):
+Four changes (Tier 1 latency optimizations):
 1. `ExecuteOption` calls `ai->ResetActionDuration()` on `kAttack` and `kLoot` (`option_executor.cc`),
    eliminating 1–20 s `PlayerbotAI` check-delay stalls on loot/state choices.
 2. Reordered plan lines to `do -> expect -> watch -> look -> goal? -> say?`, added SSE streaming
