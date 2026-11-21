@@ -182,6 +182,7 @@ def bench_tests():
     run(["python3", "-I", "-B", ROOT / "tools/bench/hill_climb_test.py", "-q"])
     run(["python3", "-I", "-B", ROOT / "tools/bench/layered_scorer_test.py", "-q"])
     run(["python3", "-I", "-B", ROOT / "tools/bench/dodge_timeline_test.py", "-q"])
+    run(["python3", "-I", "-B", ROOT / "tools/bench/trace_events_spec_test.py", "-q"])
 
 
 def sanitizers():

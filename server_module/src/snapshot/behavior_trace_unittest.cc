@@ -167,8 +167,8 @@ TEST(BehaviorTraceTest, RotatesFileWhenExceedingMaxBytes) {
   const std::filesystem::path root =
       std::filesystem::path(testing::TempDir()) / "wlb_trace_rotate_test";
   std::filesystem::remove_all(root);
-  // Tiny cap so every subsequent batch triggers rotation up to
-  // kMaxRotatedFiles.
+  // Tiny cap so every subsequent batch triggers rotation (default archive
+  // count, kDefaultMaxRotatedFiles).
   BehaviorTraceWriter writer(root.string(), /*max_file_bytes=*/50);
   TraceSample s;
   s.time_ms = 1795064000000LL;
@@ -191,6 +191,57 @@ TEST(BehaviorTraceTest, RotatesFileWhenExceedingMaxBytes) {
   EXPECT_TRUE(std::filesystem::exists(rot1));
   EXPECT_TRUE(std::filesystem::exists(rot2));
   EXPECT_TRUE(std::filesystem::exists(rot3));
+  std::filesystem::remove_all(root);
+}
+
+TEST(BehaviorTraceTest, RotationKeepsAtMostConfiguredArchives) {
+  const std::filesystem::path root =
+      std::filesystem::path(testing::TempDir()) / "wlb_trace_rotate_cap_test";
+  std::filesystem::remove_all(root);
+  const std::filesystem::path dir = root / "bot" / "Loada";
+  const auto archive = [&](int idx) {
+    return dir / ("2026-11-19." + std::to_string(idx) + ".jsonl");
+  };
+  TraceSample s;
+  s.time_ms = 1795064000000LL;
+  s.role = "bot";
+  s.name = "Loada";
+  {
+    // Start with 5 archives under the default cap...
+    BehaviorTraceWriter writer(root.string(), /*max_file_bytes=*/50);
+    for (int i = 0; i < 6; ++i) {
+      ASSERT_TRUE(writer.WriteSample(s));
+      writer.Flush();
+    }
+  }
+  ASSERT_TRUE(std::filesystem::exists(archive(5)));
+  {
+    // ...then lower the cap to 2: the next rotation keeps .1 and .2 only.
+    BehaviorTraceWriter writer(root.string(), /*max_file_bytes=*/50,
+                               /*max_rotated_files=*/2);
+    for (int i = 0; i < 3; ++i) {
+      ASSERT_TRUE(writer.WriteSample(s));
+      writer.Flush();
+    }
+  }
+  EXPECT_TRUE(std::filesystem::exists(dir / "2026-11-19.jsonl"));
+  EXPECT_TRUE(std::filesystem::exists(archive(1)));
+  EXPECT_TRUE(std::filesystem::exists(archive(2)));
+  for (int idx = 3; idx <= 8; ++idx) {
+    EXPECT_FALSE(std::filesystem::exists(archive(idx))) << idx;
+  }
+  {
+    // 0 archives: the day file is truncated in place, never renamed.
+    BehaviorTraceWriter writer(root.string(), /*max_file_bytes=*/50,
+                               /*max_rotated_files=*/0);
+    for (int i = 0; i < 3; ++i) {
+      ASSERT_TRUE(writer.WriteSample(s));
+      writer.Flush();
+    }
+  }
+  EXPECT_TRUE(std::filesystem::exists(dir / "2026-11-19.jsonl"));
+  EXPECT_FALSE(std::filesystem::exists(archive(1)));
+  EXPECT_FALSE(std::filesystem::exists(archive(2)));
   std::filesystem::remove_all(root);
 }
 

@@ -282,8 +282,11 @@ std::string FormatTraceEvent(const TraceEvent& e) {
 }
 
 BehaviorTraceWriter::BehaviorTraceWriter(std::string root_dir,
-                                         uint64_t max_file_bytes)
-    : root_dir_(std::move(root_dir)), max_file_bytes_(max_file_bytes) {
+                                         uint64_t max_file_bytes,
+                                         size_t max_rotated_files)
+    : root_dir_(std::move(root_dir)),
+      max_file_bytes_(max_file_bytes),
+      max_rotated_files_(max_rotated_files) {
   if (enabled()) {
     worker_ = std::thread(&BehaviorTraceWriter::WriterLoop, this);
   }
@@ -400,21 +403,37 @@ void BehaviorTraceWriter::WriteBatch(
     if (max_file_bytes_ > 0 && std::filesystem::exists(file, ec)) {
       const uint64_t sz = std::filesystem::file_size(file, ec);
       if (!ec && sz >= max_file_bytes_) {
-        // Shift .7.jsonl -> .8.jsonl, ..., .1.jsonl -> .2.jsonl, current ->
-        // .1.jsonl so up to kMaxRotatedFiles backups survive per day.
-        for (size_t idx = kMaxRotatedFiles; idx >= 2; --idx) {
-          std::filesystem::path src = file;
-          src.replace_extension(base::StringPrintf(".%zu.jsonl", idx - 1));
-          std::filesystem::path dst = file;
-          dst.replace_extension(base::StringPrintf(".%zu.jsonl", idx));
-          std::error_code rot_ec;
-          if (std::filesystem::exists(src, rot_ec)) {
-            std::filesystem::rename(src, dst, rot_ec);
+        // Shift .(N-1).jsonl -> .N.jsonl, ..., .1.jsonl -> .2.jsonl, current
+        // -> .1.jsonl so up to `max_rotated_files_` backups survive per day
+        // (the rename onto .N.jsonl replaces the oldest archive). With 0
+        // archives the current file is truncated in place.
+        if (max_rotated_files_ == 0) {
+          std::filesystem::resize_file(file, 0, ec);
+        } else {
+          for (size_t idx = max_rotated_files_; idx >= 2; --idx) {
+            std::filesystem::path src = file;
+            src.replace_extension(base::StringPrintf(".%zu.jsonl", idx - 1));
+            std::filesystem::path dst = file;
+            dst.replace_extension(base::StringPrintf(".%zu.jsonl", idx));
+            std::error_code rot_ec;
+            if (std::filesystem::exists(src, rot_ec)) {
+              std::filesystem::rename(src, dst, rot_ec);
+            }
+          }
+          std::filesystem::path rotated = file;
+          rotated.replace_extension(".1.jsonl");
+          std::filesystem::rename(file, rotated, ec);
+        }
+        // Archives left past the cap (e.g. the cap was lowered) are removed so
+        // the per-day volume bound holds.
+        for (size_t idx = max_rotated_files_ + 1;; ++idx) {
+          std::filesystem::path stale = file;
+          stale.replace_extension(base::StringPrintf(".%zu.jsonl", idx));
+          std::error_code stale_ec;
+          if (!std::filesystem::remove(stale, stale_ec)) {
+            break;
           }
         }
-        std::filesystem::path rotated = file;
-        rotated.replace_extension(".1.jsonl");
-        std::filesystem::rename(file, rotated, ec);
       }
     }
     std::ofstream out(file, std::ios::app);

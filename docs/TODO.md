@@ -9,51 +9,12 @@ Last updated 2026-11-20.
 
 ## In progress
 
-### Review Trace All Events 6 (`a7b46eb`) — Open Items
-
-#### Medium
-- [ ] **New 1 — `docs/specs/trace-events.md` doesn't match the code:** two event names are wrong
-  (`money_change` vs `money_changed`, `reputation` vs `rep_change`); it marks `loot_roll_win`,
-  `item_open`, `group_invited`, `money_changed`, and `rep_change` as parity-allowed but they aren't,
-  and the `item_use` / `item_open` row is the wrong way round; it lists chat as events but chat rows
-  are `kind:"chat"`; it gives `act_sent` a value of `0` but the value is `act.yd`; it leaves out about
-  15 events, including some that are allow-listed. *Fix:* generate the table from the code (event
-  names and `PARITY_ALLOWED_EVENTS`), or add a test that compares the two.
-- [ ] **New 2 — `--runs` is a total split across arms (`tools/bench/bench_bosses.py`):** TODO's
-  "statistically powered" `--mode mixed_all --runs 12` gives only 3 trials per arm, the same `n` as
-  the invalidated report. *Fix:* make `--runs` per arm, and use 8–10 per arm per boss.
-
-#### Low
-- [ ] **Item 7 — Stored `specNo` comes from the random roll (`server_module/src/test/test_commands.cc`):**
-  `llmtest gear` runs `Randomize(false)` (which stores a random `specNo`) before applying the
-  requested spec, so the stored `specNo` stays the random one.
-- [ ] **Item 8 — Trace volume cap unchanged (`server_module/src/snapshot/behavior_trace.{h,cc}`):**
-  the sample rate is configurable, but the 64 MiB × 8 rotation cap is not.
-- [ ] **Item 13 — `llmtest questcomplete` marks an unknown quest id as rewarded
-  (`server_module/src/test/test_commands.cc`).**
-- [ ] **`_console_bot` retries re-send state-changing commands (`tools/bench/bench_bosses.py`):**
-  a slow reply to `gear` re-runs `Randomize`; `resetbot` / `tele` / `setstrat` are re-sent too.
-- [ ] **The global per-bot strategy override map is never cleared
-  (`server_module/src/bot_manager/bot_manager.cc`, `tools/bench/bench_bosses.py`).**
-- [ ] **Trace-interval comment conflicts with the parity rate check
-  (`server_module/conf/mod-llm-brain.conf.dist`, `llm_brain_config.h`):** it suggests 500–1000 ms,
-  which fails `trace_parity.py`'s 3.5 Hz sample-rate check.
-
-#### Self-audit caveats (`d26c869`)
-- [ ] **Per-party `pull_start_ms` (`tools/bench/bench_bosses.py`):**
-  A single `pull_start_ms` is recorded before moving all 15 bots (~3 s total at `0.2 s`/bot), so an
-  early pull by Party 3 during the ~2 s while Party 1–2 are moving would not be flagged by
-  `t < pull_start_ms`; record `party_pull_ms[p_idx]` per party instead.
-- [ ] **Final-wave GPU load (`tools/bench/bench_bosses.py`):** when `parallel` does not divide the
-  arm count evenly (e.g. 4 arms on `--parallel 3`), the final cleanup wave can run with fewer LLM
-  parties (different GPU load) than earlier waves.
-- [ ] **Live-trigger verification for source-verified C++ edge cases:**
-  L4 (null-killer `mob_kill`), L11 (fall/lava/suicide `died` with `detail="environment"`), L14
-  (`llmtest tele ... 0` non-GM entry rules), and L15 (`llmtest questcomplete` on an active log
-  quest) compiled cleanly and were source-verified, but have not been individually live-triggered.
-
-- Next benchmark run (blocked on New 2): 8–10 valid trials **per arm** per boss for Kael, Ick,
-  Murmur and Ikiss, then save one clean report under `docs/benchmarks/`.
+- Next benchmark run (all Review 6 items & Kael staging/arrival fixes verified): run `bench_bosses.py`
+  with `--runs 8` (or `10` **per arm**) for `kaelthas`, `ick`, `murmur`, and `ikiss` (e.g.
+  `--mode mixed_all --only kaelthas,ick,murmur,ikiss --runs 8 --parallel 3`), then save one clean
+  report under `docs/benchmarks/`. Note: on `kaelthas`, `stage_xyz=(7.09, -0.45, -2.5)` eliminates
+  arrival deaths and pre-pull combat, while `spawn_xyz=(148.5, 180.0, -16.2)` still pulls the
+  nearby Sunblade pack during the fight (all 3 arms run identically).
 
 ## Next, in order
 
@@ -134,8 +95,35 @@ Last updated 2026-11-20.
     to end avoids returning early).
   - Mid-fight wakes (`attacked`, `hp<N`) replace all standing orders; Gemma 4 occasionally rewrites
     a working `Lightning Nova cast` order into `Loken cast` or `Lightning Nova appears`.
+- **Not individually live-triggered after final edits yet:** `llmtest questcomplete` when a quest
+  is already active in a bot's quest log (`CompleteQuest` + `RewardQuest` branch in
+  `test_commands.cc`, source-verified), and the updated `areatrigger_teleport` entrance / pull
+  coordinates for `ick`, `murmur`, and `ikiss` (verified in `acore_world`; live Kael'thas verified
+  entrance staging after the final edit, while Ikiss and the `questcomplete`/`tele ... 0`/`clearstrat`
+  console checks passed in the prior live check before adding entrance staging/dismount).
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-20: **Review 6 fixes + Kael'thas staging/arrival fix + self-check rule (`CONTRIBUTING.md`):**
+  `docs/specs/trace-events.md` rewritten to match C++ and `PARITY_ALLOWED_EVENTS` verbatim and
+  enforced by `tools/bench/trace_events_spec_test.py` (5/5 tests, wired into `tools/wlb check`);
+  `bench_bosses.py` makes `--runs` per arm, keeps wave party count constant via slot-rotating
+  `_wave_arms` (including `gcd > 1`), gates default strategy stripping on `arms != ("baseline",)`,
+  sends console commands once and polls `worldserver.out` (`_console_bot`), records per-party
+  `party_pull_ms`, checks `alive=1` on dungeon arrival, clears strategy overrides at shutdown
+  (`llmtest clearstrat` + `BotManager::Stop()`), and stages `ick`, `murmur`, `ikiss`, and
+  `kaelthas` at `areatrigger_teleport` dungeon entrances while `llmtest tele` dismounts before
+  dungeon teleport (fixing Kael'thas arrival fall deaths and pre-pull trash combat);
+  `test_commands.cc` explicitly stores & reports requested `specNo=` and rejects unknown quest IDs in
+  `questcomplete`; `behavior_trace.{h,cc}` & `llm_brain_config.{h,cc}` add configurable
+  `LlmBrain.TraceMaxFileMb` (64) & `LlmBrain.TraceMaxRotatedFiles` (8) + `LOG_WARN` when
+  `TraceSampleIntervalMs > 285` (removing conflicting conf comment); added self-double-check MUST
+  to `CONTRIBUTING.md` & `.agents/rules/contributing.md`; re-locked & verified all 28 scorer locks.
+  Verified after final edit via `tools/wlb check` (401 C++ + 32 Python tests) and live Kael'thas
+  3-arm wave (`0` arrival deaths, `0` pre-pull combat, `0` invalid trials, `baseline` killed
+  Kael'thas in `93.3 s` with `KillSelf()` `mob_kill` credited to all 5 party members); earlier live
+  checks before final edit also verified Ikiss 3-arm wave, unknown-quest rejection, `tele ... 0`
+  entry-rule refusal, and `clearstrat`.
 
 - 2026-11-20: **Review 5 remaining items (M6, L10–L12, L14–L16; partly — see Review 6 above):**
   `harness run` adds `--only-bots=A,B,...` (`run.{h,cc}`, `run_unittest.cc`); `BotManager` adds

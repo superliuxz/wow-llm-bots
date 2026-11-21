@@ -192,11 +192,16 @@ void BotManager::SetBotStrategyOverride(const std::string& bot_name,
       BotStrategyOverride{std::move(combat_extra), std::move(non_combat_extra)};
 }
 
+void BotManager::ClearBotStrategyOverride(const std::string& bot_name) {
+  BotOverrides().erase(bot_name);
+}
+
 void BotManager::ClearBotStrategyOverrides() {
   BotOverrides().clear();
 }
 
 void BotManager::Stop() {
+  ClearBotStrategyOverrides();
   for (const Bot& bot : bots_) {
     if (bot.guid) {
       RandomPlayerbotMgr::instance().LogoutPlayerBot(ObjectGuid(bot.guid));

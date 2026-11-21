@@ -14,3 +14,5 @@ Always follow `CONTRIBUTING.md` and keep `docs/TODO.md` current on every task:
 3. **The brain decides; C++ is a pure harness:**
    - Never encode class/role/targeting or non-grey selling heuristics or hard-coded gameplay judgments in C++. Expose state and mechanically valid options transparently and let the LLM brain decide.
 4. **Update `docs/TODO.md` in the same commit as the work** and re-read it before handing over.
+5. **Double-check yourself; commits must create no extra bugs:**
+   - Re-read your full `git diff` line-by-line before committing (check boundary conditions, state interactions, idempotency, and callers), run `tools/wlb check` (plus live verification for server/benchmark changes), and never ship unverified assumptions or new regressions.

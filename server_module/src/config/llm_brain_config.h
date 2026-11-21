@@ -37,9 +37,14 @@ struct Config {
   // Unified human + bot behavior trace directory (empty disables tracing).
   std::string trace_dir;
   // Minimum interval between periodic behavior trace samples (ms). Defaults to
-  // 200 ms (5 Hz) for full observer-parity scoring; raise (e.g. 500-1000 ms)
-  // to reduce disk volume on long runs.
+  // 200 ms (5 Hz). Observer-parity scoring (tools/bench/trace_parity.py)
+  // rejects traces below 3.5 Hz, so keep it at <= 285 ms whenever traces are
+  // scored; use TraceMaxFileMb / TraceMaxRotatedFiles to bound disk volume.
   uint32_t trace_sample_interval_ms = 200;
+  // Per-character, per-day trace volume cap: each day file rotates at
+  // `trace_max_file_mb` and keeps `trace_max_rotated_files` archives.
+  uint32_t trace_max_file_mb = 64;
+  uint32_t trace_max_rotated_files = 8;
   // When true (and `trace_dir` is non-empty), also logs online human players
   // using the same trace schema so bots can be compared against a human
   // baseline.

@@ -8,6 +8,8 @@
 #include "Chat.h"
 #include "ChatCommand.h"
 #include "CommandScript.h"
+#include "DBCStores.h"
+#include "DBCStructure.h"
 #include "Group.h"
 #include "GroupMgr.h"
 #include "ObjectAccessor.h"
@@ -17,6 +19,7 @@
 #include "PlayerbotAI.h"
 #include "PlayerbotFactory.h"
 #include "Playerbots.h"
+#include "RandomPlayerbotMgr.h"
 #include "SharedDefines.h"
 #include "SpellAuraEffects.h"
 #include "SpellAuras.h"
@@ -58,6 +61,7 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"item", HandleItem, SEC_ADMINISTRATOR, Console::Yes},
         {"checkstrat", HandleCheckStrat, SEC_ADMINISTRATOR, Console::Yes},
         {"setstrat", HandleSetStrat, SEC_ADMINISTRATOR, Console::Yes},
+        {"clearstrat", HandleClearStrat, SEC_ADMINISTRATOR, Console::Yes},
         {"resetbot", HandleResetBot, SEC_ADMINISTRATOR, Console::Yes},
         {"where", HandleWhere, SEC_ADMINISTRATOR, Console::Yes},
     };
@@ -183,6 +187,13 @@ class LlmBrainTestCommandScript : public CommandScript {
     // Defaults to TELE_TO_GM_MODE (1) for benchmark staging; pass 0 to enforce
     // normal dungeon entry rules (PlayerCannotEnter / AccountInstancesPerHour).
     const uint32_t flags = (!gm_mode || *gm_mode != 0) ? TELE_TO_GM_MODE : 0;
+    if (const MapEntry* map_entry = sMapStore.LookupEntry(map_id);
+        map_entry && map_entry->IsDungeon()) {
+      // Bots that mounted outdoors on map 0 otherwise arrive inside the
+      // dungeon mounted and can trigger CheckMountStateAction fall damage.
+      player->Dismount();
+      player->RemoveAurasByType(SPELL_AURA_MOUNTED);
+    }
     if (!player->TeleportTo(map_id, x, y, z, o, flags)) {
       handler->SendErrorMessage("llmtest: TeleportTo map {} failed for {}",
                                 map_id, player->GetName());
@@ -206,6 +217,10 @@ class LlmBrainTestCommandScript : public CommandScript {
     factory.Randomize(false);
     if (spec_tab && *spec_tab >= 0 && *spec_tab <= 3) {
       PlayerbotFactory::InitTalentsBySpecNo(player, *spec_tab, true);
+      // Randomize() stored the RANDOM roll's specNo, and InitTalentsBySpecNo
+      // can return before storing ours (empty talent row), so store it here.
+      sRandomPlayerbotMgr.SetValue(player->GetGUID().GetCounter(), "specNo",
+                                   static_cast<uint32_t>(*spec_tab) + 1);
       factory.InitAvailableSpells();
       factory.InitGlyphs(false);
       factory.InitEquipment(false);
@@ -221,9 +236,10 @@ class LlmBrainTestCommandScript : public CommandScript {
     const char* role = PlayerbotAI::IsTank(player)
                            ? "tank"
                            : (PlayerbotAI::IsHeal(player) ? "heal" : "dps");
-    handler->PSendSysMessage("llmtest: geared {} at level {} (role={}, hp={})",
-                             player->GetName(), level, role,
-                             player->GetMaxHealth());
+    handler->PSendSysMessage(
+        "llmtest: geared {} at level {} (role={}, hp={}, specNo={})",
+        player->GetName(), level, role, player->GetMaxHealth(),
+        sRandomPlayerbotMgr.GetValue(player->GetGUID().GetCounter(), "specNo"));
     return true;
   }
 
@@ -273,6 +289,25 @@ class LlmBrainTestCommandScript : public CommandScript {
     return true;
   }
 
+  // `llmtest clearstrat` drops every per-bot override; `llmtest clearstrat
+  // <name>` drops one. The server-wide strategies apply again on the next tick.
+  static bool HandleClearStrat(ChatHandler* handler,
+                               Optional<std::string> player_name) {
+    if (!player_name || player_name->empty()) {
+      BotManager::ClearBotStrategyOverrides();
+      handler->PSendSysMessage("llmtest: clearstrat all");
+      return true;
+    }
+    std::string name = *player_name;
+    if (!normalizePlayerName(name)) {
+      handler->SendErrorMessage("llmtest: bad name {}", *player_name);
+      return false;
+    }
+    BotManager::ClearBotStrategyOverride(name);
+    handler->PSendSysMessage("llmtest: clearstrat {}", name);
+    return true;
+  }
+
   static bool HandleQuestComplete(ChatHandler* handler,
                                   std::string player_name,
                                   uint32_t quest_id) {
@@ -281,7 +316,12 @@ class LlmBrainTestCommandScript : public CommandScript {
       return false;
     }
     const Quest* quest = sObjectMgr->GetQuestTemplate(quest_id);
-    if (quest && player->FindQuestSlot(quest_id) < MAX_QUEST_LOG_SIZE) {
+    if (!quest) {
+      handler->SendErrorMessage("llmtest: questcomplete: no template for id {}",
+                                quest_id);
+      return false;
+    }
+    if (player->FindQuestSlot(quest_id) < MAX_QUEST_LOG_SIZE) {
       player->CompleteQuest(quest_id);
       player->RewardQuest(quest, 0, player, false);
       handler->PSendSysMessage("llmtest: completed and rewarded quest {} on {}",

@@ -126,7 +126,27 @@ LlmBrain.TestFactsQueries = ""
 #                     or PvP events, or whisper text (whispers log timing and
 #                     byte length only).
 #        Default:     0
+#
+#    LlmBrain.TraceSampleIntervalMs
+#        Description: Minimum interval between periodic trace samples (ms),
+#                     plus immediate samples on combat/jump transitions.
+#                     trace_parity.py rejects traces below 3.5 Hz, so keep this
+#                     at 285 or less whenever traces are scored (larger values
+#                     log a warning at startup). Use the two caps below, not
+#                     this interval, to bound disk volume.
+#        Default:     200
+#
+#    LlmBrain.TraceMaxFileMb
+#    LlmBrain.TraceMaxRotatedFiles
+#        Description: Per-character, per-day volume cap. Each day file rotates
+#                     at TraceMaxFileMb and keeps TraceMaxRotatedFiles archives
+#                     (oldest overwritten; 0 = truncate in place), so one
+#                     character's day is at most
+#                     TraceMaxFileMb * (TraceMaxRotatedFiles + 1) MB.
+#        Default:     64, 8
 
 LlmBrain.TraceDir = ""
 LlmBrain.TraceSampleIntervalMs = 200
+LlmBrain.TraceMaxFileMb = 64
+LlmBrain.TraceMaxRotatedFiles = 8
 LlmBrain.ObserveHumans = 0

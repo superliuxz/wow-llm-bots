@@ -109,15 +109,21 @@ std::string FormatTraceEvent(const TraceEvent& event);
 
 // Appends unified JSONL traces under `<root>/<role>/<name>/<YYYY-MM-DD>.jsonl`.
 // Enqueues formatted lines without disk I/O on the caller (world) thread and
-// flushes them on a background writer thread with size-capped file rotation.
+// flushes them on a background writer thread with size-capped file rotation:
+// each day file rotates at `max_file_bytes` and keeps `max_rotated_files`
+// archives, so one character's day is capped at
+// `max_file_bytes * (max_rotated_files + 1)`; the oldest archive is
+// overwritten.
 class BehaviorTraceWriter {
  public:
   static constexpr uint64_t kDefaultMaxFileBytes = 64ULL * 1024 * 1024;
-  static constexpr size_t kMaxRotatedFiles = 8;
+  static constexpr size_t kDefaultMaxRotatedFiles = 8;
   static constexpr size_t kMaxQueueLines = 8192;
 
-  explicit BehaviorTraceWriter(std::string root_dir,
-                               uint64_t max_file_bytes = kDefaultMaxFileBytes);
+  explicit BehaviorTraceWriter(
+      std::string root_dir,
+      uint64_t max_file_bytes = kDefaultMaxFileBytes,
+      size_t max_rotated_files = kDefaultMaxRotatedFiles);
   ~BehaviorTraceWriter();
 
   BehaviorTraceWriter(const BehaviorTraceWriter&) = delete;
@@ -153,6 +159,7 @@ class BehaviorTraceWriter {
 
   std::string root_dir_;
   uint64_t max_file_bytes_ = kDefaultMaxFileBytes;
+  size_t max_rotated_files_ = kDefaultMaxRotatedFiles;
   mutable std::mutex mu_;
   std::condition_variable cv_;
   std::condition_variable flushed_cv_;

@@ -29,6 +29,20 @@ without this conversation. You **MUST** update it **in the same commit** as the 
 
 Before ending a session or handing over, re-read `docs/TODO.md` and make it match the repo.
 
+## Double-check yourself; commits must create no extra bugs (MUST)
+
+Every agent **MUST** double-check its own work before committing so that fixing one bug or adding
+one feature never introduces extra bugs:
+
+- Read your full `git diff` line-by-line before committing; verify boundary conditions, state
+  interactions, retries/idempotency (e.g., never re-sending state-mutating commands or breaking
+  existing invariants), error handling, and all callers.
+- Run `tools/wlb check` after your final edit and verify all unit/spec/consistency checks pass; when
+  locked measurement files intentionally change, re-lock `scorer.sha256` via
+  `tools/bench/hill_climb.py lock-scorer --force-relock` and verify `_verify_all_locks()`.
+- Live-verify game, server, or benchmark changes against `out/server-test` before claiming them fixed;
+  anything not live-tested must be stated honestly in `docs/TODO.md`.
+
 ## The brain decides; C++ is a pure harness
 
 Our C++ perceives, measures, estimates, executes, and does math an LLM is bad at (geometry,

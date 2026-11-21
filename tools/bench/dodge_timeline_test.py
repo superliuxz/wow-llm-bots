@@ -186,6 +186,51 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
         self.assertEqual(w["instance_id"], 1)
         self.assertIn("Loada", w["bots"])
         self.assertNotIn("Ptwoa", w["bots"])
+    def test_wave_arms_fill_every_slot_and_balance_over_a_cycle(self) -> None:
+        arms = ("llm", "llm_no_notes", "no_brain", "baseline")
+        counts = {a: 0 for a in arms}
+        for wave in range(1, 5):  # lcm(4 arms, 3 slots) / 3 slots = 4 waves
+            modes = bench_bosses._wave_arms(arms, wave, 3)
+            self.assertEqual(len(modes), 3)
+            for m in modes:
+                counts[m] += 1
+        self.assertEqual(set(counts.values()), {3})
+        self.assertEqual(bench_bosses._wave_arms(("llm",), 2, 3), ["llm", "llm", "llm"])
+        self.assertEqual(bench_bosses._wave_arms(("llm", "llm_no_notes"), 1, 2), ["llm", "llm_no_notes"])
+        self.assertEqual(bench_bosses._wave_arms(("llm", "llm_no_notes"), 2, 2), ["llm_no_notes", "llm"])
+
+    def test_console_bot_sends_once_and_waits_for_slow_reply(self) -> None:
+        import threading
+        import types
+
+        with tempfile.TemporaryDirectory() as tmp:
+            logs = pathlib.Path(tmp)
+            log = logs / "worldserver.out"
+            log.write_text("old line: geared Loada at level 68 (stale)\n", encoding="utf-8")
+            calls: list[str] = []
+
+            def fake_console(cmd, wait_s=1.0, inst=None):
+                calls.append(cmd)
+
+                def late_reply() -> None:
+                    with log.open("a", encoding="utf-8") as fp:
+                        fp.write("llmtest: geared Loada at level 68 (role=tank, specNo=3)\n")
+
+                threading.Timer(0.6, late_reply).start()
+                return ""  # Reply not there yet when console() returns.
+
+            orig_console, orig_test = bench_bosses.server.console, bench_bosses.TEST
+            bench_bosses.server.console = fake_console
+            bench_bosses.TEST = types.SimpleNamespace(logs=logs)
+            try:
+                line, _ = bench_bosses._console_bot(
+                    "llmtest gear Loada 68 2", "geared Loada at level 68", wait_s=0.1, timeout_s=3.0
+                )
+            finally:
+                bench_bosses.server.console = orig_console
+                bench_bosses.TEST = orig_test
+            self.assertEqual(calls, ["llmtest gear Loada 68 2"])  # never re-sent
+            self.assertIn("specNo=3", line)  # the new reply, not the stale line
 
 
 if __name__ == "__main__":

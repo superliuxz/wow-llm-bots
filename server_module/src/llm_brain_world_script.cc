@@ -266,7 +266,10 @@ class LlmBrainWorldScript : public WorldScript {
       return;
     }
     if (!config_.trace_dir.empty()) {
-      trace_writer_ = std::make_unique<BehaviorTraceWriter>(config_.trace_dir);
+      trace_writer_ = std::make_unique<BehaviorTraceWriter>(
+          config_.trace_dir,
+          static_cast<uint64_t>(config_.trace_max_file_mb) * 1024 * 1024,
+          static_cast<size_t>(config_.trace_max_rotated_files));
       if (human_trace_ && config_.observe_humans) {
         human_trace_->store(trace_writer_.get(), std::memory_order_release);
       }

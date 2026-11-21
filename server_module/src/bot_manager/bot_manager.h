@@ -48,6 +48,7 @@ class BotManager {
   static void SetBotStrategyOverride(const std::string& bot_name,
                                      std::string combat_extra,
                                      std::string non_combat_extra);
+  static void ClearBotStrategyOverride(const std::string& bot_name);
   static void ClearBotStrategyOverrides();
 
  private:

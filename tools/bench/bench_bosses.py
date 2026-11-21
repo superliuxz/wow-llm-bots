@@ -20,6 +20,7 @@ Per-trial hygiene enforced before every pull:
 
 import argparse
 import json
+import math
 import pathlib
 import re
 import shutil
@@ -136,8 +137,8 @@ BOSSES = {
         boss_name="Ick",
         level=80,
         map_id=658,
-        stage_xyz=(805.0, 123.5, 510.0),
-        spawn_xyz=(835.0, 123.5, 510.0),
+        stage_xyz=(435.74, 212.41, 529.0),
+        spawn_xyz=(846.0, 132.0, 510.5),
         strip_strat="wotlk-pos",
         attune_quests=[24499, 24511],
         notes_md=ICK_NOTES,
@@ -174,8 +175,8 @@ BOSSES = {
         boss_name="Murmur",
         level=70,
         map_id=555,
-        stage_xyz=(-157.9, -445.0, 15.9),
-        spawn_xyz=(-157.9, -478.0, 15.9),
+        stage_xyz=(0.49, -0.22, -1.0),
+        spawn_xyz=(-157.9, -490.0, 16.2),
         strip_strat="",
         notes_md=MURMUR_NOTES,
         max_s=210.0,
@@ -186,8 +187,8 @@ BOSSES = {
         boss_name="Talon King Ikiss",
         level=68,
         map_id=556,
-        stage_xyz=(44.7, 238.0, 25.2),
-        spawn_xyz=(44.7, 268.0, 25.2),
+        stage_xyz=(-4.68, -0.09, 0.2),
+        spawn_xyz=(44.7, 268.0, 25.5),
         strip_strat="tbc-seth",
         notes_md=IKISS_NOTES,
         max_s=210.0,
@@ -198,8 +199,8 @@ BOSSES = {
         boss_name="Kael'thas Sunstrider",
         level=70,
         map_id=585,
-        stage_xyz=(148.5, 138.0, -16.6),
-        spawn_xyz=(148.5, 168.0, -16.6),
+        stage_xyz=(7.09, -0.45, -2.5),
+        spawn_xyz=(148.5, 180.0, -16.2),
         strip_strat="tbc-mgt",
         attune_quests=[11492],
         notes_md=KAELTHAS_NOTES,
@@ -254,6 +255,7 @@ BOSSES = {
 
 INST_RE = re.compile(r"\binstance=(\d+)")
 PASSIVES_RE = re.compile(r"\bpassives=(\d+)")
+SPECNO_RE = re.compile(r"\bspecNo=(\d+)")
 EXISTS_RE = re.compile(r"\bexists=(\d+)")
 COMBAT_RE = re.compile(r"\bcombat=(\d+)")
 NONCOMBAT_RE = re.compile(r"\bnoncombat=(\d+)")
@@ -288,15 +290,35 @@ def _check_strat_line(cline: str, expected_on: bool) -> tuple[bool, str]:
     return True, ""
 
 
-def _console_bot(cmd: str, prefix: str, wait_s: float = 0.3, retries: int = 3) -> tuple[str, str]:
-    """Runs a console command and retries if the bot-scoped reply line was slow."""
-    last_out = ""
-    for attempt in range(retries):
-        last_out = server.console(cmd, wait_s=wait_s * (1.0 + 0.5 * attempt), inst=TEST) or ""
-        line = _find_bot_line(last_out, prefix)
-        if line:
-            return line, last_out
-    return "", last_out
+def _console_bot(cmd: str, prefix: str, wait_s: float = 0.3, timeout_s: float = 5.0) -> tuple[str, str]:
+    """Sends a console command ONCE and waits (up to `timeout_s`) for its bot-scoped reply.
+
+    Never re-sends: state-changing commands (`gear` re-rolls `Randomize`, `resetbot`, `tele`,
+    `setstrat`) must run exactly once. A slow reply is picked up by re-reading the worldserver
+    log from the offset taken before the command was sent.
+    """
+    log = TEST.logs / "worldserver.out"
+    start = log.stat().st_size if log.exists() else 0
+    out = server.console(cmd, wait_s=wait_s, inst=TEST) or ""
+    line = _find_bot_line(out, prefix)
+    deadline = time.monotonic() + max(0.0, timeout_s - wait_s)
+    while not line and time.monotonic() < deadline:
+        time.sleep(0.25)
+        with open(log, "rb") as f:
+            f.seek(start)
+            out = f.read().decode(errors="replace")
+        line = _find_bot_line(out, prefix)
+    return line, out
+
+
+def _wave_arms(arms: tuple[str, ...], wave: int, n_parties: int) -> list[str]:
+    """Arms for every party slot in `wave` (1-based): fills all slots, balances arm counts
+    every `len(arms) // gcd(n_parties, len(arms))` waves, and shifts starting party slot each
+    cycle so no party prefix is permanently pinned to one arm when `gcd > 1`."""
+    cycle = max(1, len(arms) // math.gcd(n_parties, len(arms)))
+    b = (wave - 1) % cycle
+    k = (wave - 1) // cycle
+    return [arms[(b * n_parties + p_idx + k) % len(arms)] for p_idx in range(n_parties)]
 
 
 def _had_pre_pull_combat(
@@ -479,11 +501,18 @@ def run_boss_waves(
     target_runs: int = 3,
     parallel: int = 3,
 ) -> dict:
-    """Runs `target_runs` valid trials for one boss inside a single persistent worldserver."""
-    n_parties = 1 if raid else max(1, min(parallel, target_runs, len(PREFIXES)))
+    """Runs `target_runs` valid trials PER ARM for one boss inside a single persistent worldserver."""
+    if arms_override:
+        arms = arms_override
+    elif mode == "mixed":
+        arms = ("llm", "llm_no_notes")
+    elif mode == "mixed_all":
+        arms = ("llm", "llm_no_notes", "no_brain", "baseline")
+    else:
+        arms = (mode,)
+    n_parties = 1 if raid else max(1, min(parallel, target_runs * len(arms), len(PREFIXES)))
     parties = _make_parties(n_parties, raid=raid)
     all_bots = [b for p in parties for b in p]
-    use_harness = mode in ("llm", "llm_no_notes")
 
     trace_dir = VAR / f"bench_boss_{tag}_{mode}"
     shutil.rmtree(trace_dir, ignore_errors=True)
@@ -514,16 +543,8 @@ def run_boss_waves(
     nc_strats = "-follow,-grind,-new rpg"
     # When mixing baseline + non-baseline arms in the same wave, per-bot
     # overrides (`llmtest setstrat`) control `strip_strat` per party.
-    if arms_override:
-        arms = arms_override
-    elif mode == "mixed":
-        arms = ("llm", "llm_no_notes")
-    elif mode == "mixed_all":
-        arms = ("llm", "llm_no_notes", "no_brain", "baseline")
-    else:
-        arms = (mode,)
     per_bot_strat_control = bool(strip_strat and len(arms) > 1 and "baseline" in arms)
-    if strip_strat and not per_bot_strat_control and mode != "baseline":
+    if strip_strat and not per_bot_strat_control and arms != ("baseline",):
         c_strats += f",-{strip_strat}"
         nc_strats += f",-{strip_strat}"
     lines.append(f'LlmBrain.CombatStrategies = "{c_strats}"')
@@ -531,12 +552,14 @@ def run_boss_waves(
     conf_path.write_text("\n".join(lines) + "\n")
 
     valid_runs: list[dict] = []
+    extra_trials: list[dict] = []
     invalid_runs = 0
     wave = 0
     seen_instances: set[int] = set()
-    per_arm_target = target_runs if len(arms) == 1 else max(1, (target_runs + len(arms) - 1) // len(arms))
+    per_arm_target = target_runs
     arm_counts: dict[str, int] = {a: 0 for a in arms}
-    max_waves = ((per_arm_target * len(arms) + n_parties - 1) // n_parties) + 4
+    # Enough waves for every arm to reach its target, plus slack for invalid trials.
+    max_waves = -(-per_arm_target * len(arms) // n_parties) + 2 * -(-len(arms) // n_parties) + 2
     wave_errors: list[str] = []
 
     try:
@@ -555,29 +578,25 @@ def run_boss_waves(
                     raise RuntimeError(
                         f"role mismatch for {name}: expected role={expected_role}, got: {out!r}"
                     )
+                sm = SPECNO_RE.search(line)
+                if not sm or int(sm.group(1)) != spec_tab + 1:
+                    raise RuntimeError(
+                        f"stored specNo mismatch for {name}: expected specNo={spec_tab + 1}, got: {line!r}"
+                    )
                 for qid in (attune_quests or []):
-                    server.console(f"llmtest questcomplete {name} {qid}", wait_s=0.2, inst=TEST)
+                    qline, qout = _console_bot(f"llmtest questcomplete {name} {qid}", f" quest {qid} ", wait_s=0.2)
+                    if not qline or not qline.rstrip().endswith(f" on {name}"):
+                        raise RuntimeError(f"questcomplete {qid} failed for {name}: {qout!r}")
                 if role_items and idx in role_items:
                     server.console(f"llmtest item {name} {role_items[idx]}", wait_s=0.2, inst=TEST)
 
         while any(arm_counts[a] < per_arm_target for a in arms) and wave < max_waves:
             wave += 1
-            # Assign arms to parallel parties prioritizing arms that still need valid trials,
-            # while rotating starting arm across waves so party slots stay balanced.
-            rotated = [arms[(i + wave - 1) % len(arms)] for i in range(len(arms))]
-            needed: list[str] = []
-            for a in rotated:
-                rem = per_arm_target - arm_counts[a]
-                if rem > 0:
-                    needed.append(a)
-            party_modes: list[str] = []
-            for p_idx in range(n_parties):
-                if len(party_modes) >= sum(max(0, per_arm_target - arm_counts[a]) for a in arms):
-                    break
-                # Pick among still-needed arms round-robin; if only 1 arm needs trials, fill remaining slots with it.
-                a = needed[p_idx % len(needed)]
-                party_modes.append(a)
+            # Every slot is filled every wave (constant party count / GPU load); a trial for an arm
+            # that already has `per_arm_target` valid trials is kept as an `extra` (not scored).
+            party_modes = _wave_arms(arms, wave, n_parties)
             active_parties = parties[: len(party_modes)]
+            llm_parties_in_wave = sum(1 for pm in party_modes if pm in ("llm", "llm_no_notes"))
             say(f"boss benchmark [{era} | {tag} | {mode} | wave {wave}]: modes={party_modes} arm_counts={arm_counts}")
 
             try:
@@ -622,6 +641,8 @@ def run_boss_waves(
                         m = INST_RE.search(wline)
                         if f"map={map_id} " not in wline or not m:
                             raise RuntimeError(f"{name} did not arrive on map {map_id}: {wout!r}")
+                        if not re.search(r"\balive=1\b", wline):
+                            raise RuntimeError(f"{name} arrived on map {map_id} dead: {wline!r}")
                         cur_inst = int(m.group(1))
                         if inst_id is None:
                             inst_id = cur_inst
@@ -702,10 +723,13 @@ def run_boss_waves(
                     # Brief connect window (3 s) right before pull so bots don't wander/early-pull.
                     time.sleep(3.0)
 
-                    # 5. Move all active parties to spawn_xyz simultaneously to initiate the pull.
-                    pull_start_ms = int(time.time() * 1000)
+                    # 5. Move each party to spawn_xyz to initiate its pull, recording each party's
+                    #    own pull time so a party that engaged while earlier parties were being
+                    #    moved is still caught by the pre-pull combat check.
+                    party_pull_ms: list[int] = []
                     x, y, z = spawn_xyz
                     for party in active_parties:
+                        party_pull_ms.append(int(time.time() * 1000))
                         for idx, (name, _, _, _) in enumerate(party):
                             server.console(
                                 f"llmtest move {name} {x + (idx % 5) * 0.8:.2f} {y + (idx // 5) * 0.8:.2f} {z:.2f} 0",
@@ -725,7 +749,7 @@ def run_boss_waves(
                                 if done_flags[p_idx]:
                                     continue
                                 pnames = [b[0] for b in party]
-                                sub = _slice_traces_after(all_tr, pnames, pull_start_ms - 5000)
+                                sub = _slice_traces_after(all_tr, pnames, party_pull_ms[p_idx] - 5000)
                                 res = boss_meter.analyze_boss_fight(sub, boss_name=boss_name)
                                 if res["killed"]:
                                     say(f"  party {p_idx + 1} ({party_modes[p_idx]}, inst {party_instances[p_idx]}): {boss_name} KILLED in {res['duration_s']:.1f}s!")
@@ -760,8 +784,8 @@ def run_boss_waves(
                 for p_idx, party in enumerate(active_parties):
                     pnames = [b[0] for b in party]
                     arm = party_modes[p_idx]
-                    pre_pull = _had_pre_pull_combat(all_tr, pnames, stage_ms, pull_start_ms)
-                    sub = _slice_traces_after(all_tr, pnames, pull_start_ms - 1000)
+                    pre_pull = _had_pre_pull_combat(all_tr, pnames, stage_ms, party_pull_ms[p_idx])
+                    sub = _slice_traces_after(all_tr, pnames, party_pull_ms[p_idx] - 1000)
                     res = boss_meter.analyze_boss_fight(sub, boss_name=boss_name)
                     res["era"] = era
                     res["party_size"] = len(party)
@@ -771,6 +795,8 @@ def run_boss_waves(
                     res["party_index"] = p_idx
                     res["instance_id"] = party_instances[p_idx]
                     res["harness_latency"] = party_lats[p_idx]
+                    res["llm_parties_in_wave"] = llm_parties_in_wave
+                    res["pull_ms"] = party_pull_ms[p_idx]
                     res["pre_pull_combat"] = pre_pull
                     no_pull = res["total_dps"] == 0.0 and res["total_deaths"] == 0 and not res["killed"]
                     res["invalid"] = pre_pull or no_pull
@@ -785,11 +811,20 @@ def run_boss_waves(
                     elif arm_counts[arm] < per_arm_target:
                         valid_runs.append(res)
                         arm_counts[arm] += 1
+                    else:
+                        res["extra"] = True
+                        extra_trials.append(res)
+                        say(f"  party {p_idx + 1} ({arm}): extra trial (arm already has {per_arm_target}), not scored")
             except RuntimeError as exc:
                 invalid_runs += len(active_parties)
                 wave_errors.append(f"wave {wave}: {exc}")
                 say(f"  WAVE {wave} FAILED (continuing): {exc}")
     finally:
+        if per_bot_strat_control:
+            try:
+                server.console("llmtest clearstrat", wait_s=0.3, inst=TEST)
+            except Exception:
+                pass  # The server may already be down; overrides die with it.
         server.server_stop(inst=TEST)
 
     by_arm = {
@@ -803,12 +838,18 @@ def run_boss_waves(
             f"med_dps={st['median_dps']} med_deaths={st['median_deaths']} "
             f"med_lat={st['median_first_line_ms']}ms"
         )
+    short = [a for a in arms if arm_counts[a] < per_arm_target]
+    if short:
+        say(f"  WARNING: arms below {per_arm_target} valid trials after {wave} waves: "
+            f"{ {a: arm_counts[a] for a in short} }")
     return {
         "boss": boss_name,
         "era": era,
         "level": level,
         "party_size": len(COMP_10 if raid else COMP_5),
         "mode": mode,
+        "arms": list(arms),
+        "runs_per_arm_target": per_arm_target,
         "parallel": n_parties,
         "runs": overall["runs"],
         "invalid_runs": invalid_runs,
@@ -819,13 +860,19 @@ def run_boss_waves(
         "by_arm": by_arm,
         "wave_errors": wave_errors,
         "trials": valid_runs,
+        "extra_trials": extra_trials,
     }
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="", help="Comma-separated subset of boss keys: " + ",".join(BOSSES))
-    ap.add_argument("--runs", type=int, default=3, help="Valid runs per boss (default: 3)")
+    ap.add_argument(
+        "--runs",
+        type=int,
+        default=3,
+        help="Valid runs PER ARM per boss (default: 3; use 8-10 for a comparison report)",
+    )
     ap.add_argument("--parallel", type=int, default=3, help="Parallel 5-man parties in one worldserver (default: 3)")
     ap.add_argument("--append", action="store_true", help="Merge into existing output JSON instead of overwriting")
     ap.add_argument(
