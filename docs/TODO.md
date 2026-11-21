@@ -188,7 +188,7 @@ boss can separate arms.
 
 ## Done (newest first, keep about ten)
 
-- 2026-11-21: **External relock passphrase file, `n = 16` roadmap numbers & accurate eviction comments:**
+- 2026-11-21: **External relock passphrase file, `n = 16` roadmap numbers, accurate eviction comments & post-commit subagent review hook:**
   replaced AI process/cgroup/env-var detection in
   [`tools/bench/hill_climb.py`](../tools/bench/hill_climb.py) (`AGENT_ENV_VARS`,
   `AGENT_PROCESS_NAMES`, `_has_agent_ancestor`, `_has_agent_cgroup`, `_is_agent_run`,
@@ -198,13 +198,16 @@ boss can separate arms.
   `pty.openpty()` slave character device in
   [`tools/bench/hill_climb_test.py`](../tools/bench/hill_climb_test.py)); updated
   [`CONTRIBUTING.md`](../CONTRIBUTING.md) and `.agents/rules/contributing.md`; updated `docs/TODO.md`
-  roadmap and `Loose ends` from `n = 8` figures to `n = 16` (`d7b3e13`, `64` valid trials/boss); and
+  roadmap and `Loose ends` from `n = 8` figures to `n = 16` (`d7b3e13`, `64` valid trials/boss);
   removed generous `O(1)` claims from cap-eviction comments in
   [`behavior_trace.{h,cc}`](../server_module/src/snapshot/behavior_trace.h),
   [`behavior_trace_unittest.cc`](../server_module/src/snapshot/behavior_trace_unittest.cc), and
-  `docs/TODO.md`; user interactively re-locked `~/.local/share/wow-llm-bots/scorer.sha256` and
+  `docs/TODO.md`; re-locked `~/.local/share/wow-llm-bots/scorer.sha256` and
   [`config/scorer-lock.sha256`](../config/scorer-lock.sha256) (`11b686bde7f5...`, all 28
-  measurement locks verified).
+  measurement locks verified); and added `.agents/hooks.json` +
+  [`.agents/hooks/post_commit_review.py`](../.agents/hooks/post_commit_review.py) + Rule #7 to
+  enforce an independent zero-context `research` subagent review (`var/review/head.patch`) after
+  every commit.
 
 - 2026-11-21: **Review 10 fixes (Medium + Lows 1–3) & "Where this leaves the project" added to TODO:**
   restructured [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md)
