@@ -9,10 +9,7 @@ Last updated 2026-11-21.
 
 ## In progress
 
-- **Higher-power 5-boss benchmark (`--runs 16`, `devourer,loken,kaelthas,murmur,ikiss`):** run all
-  5 bosses under one commit with `16` trials per arm (`320` total valid trials) to test `notes.md`
-  kill-rate effects on `ikiss`/`murmur`/`kaelthas` and replace `ick` with `devourer`
-  (`Devourer of Souls`) + `loken` (`Loken`).
+(none)
 
 ## Next, in order
 
@@ -108,6 +105,30 @@ Last updated 2026-11-21.
   details in [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md) §6).
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-21: **Single-commit 5-boss × 4-arm × 16-runs benchmark (`320` valid trials at `d7b3e13`)
+  & multi-wave slice-isolation fix:** replaced `ick` (`8/8` ceiling) with `devourer` (`wotlk-fos`,
+  with `DEVOURER_NOTES` `Mirrored Soul on anyone` grammar fix) + `loken` (`wotlk-hol`) in
+  [`tools/bench/bench_bosses.py`](../tools/bench/bench_bosses.py); moved `loken` `spawn_xyz` to
+  `(1170.0, 33.83, 60.81)` (`16.47 yd < 20.0 yd` `detection_range`, eliminating `38` Wave 2–20
+  `no_pull`s in superseded `f553eba`), and fixed [`_slice_traces_after`](../tools/bench/bench_bosses.py#L662-L677)
+  in `_wait_fight` + scoring to slice from `stage_ms` with `inst == party_instances[p_idx]`
+  (eliminating `-5000 ms` cross-wave `mob_kill` bleed across `~1.1 s` fast resets that aborted
+  slower `llm` pulls in superseded `e5297af`, verified by
+  `test_slice_traces_after_excludes_prior_wave_kill_across_fast_reset` in
+  [`dodge_timeline_test.py`](../tools/bench/dodge_timeline_test.py) `14/14` + 3-wave live check).
+  Completed all 5 bosses × 4 arms × 16 runs at commit `d7b3e13` (`320` valid scored trials over
+  `81` waves, `110.8 min`, median wave overhead `0.90–1.21 s`, `1` `pre_pull_combat` invalid trial
+  on `murmur`, `0` `no_pull`, `0` wave errors): `devourer` & `loken` hit `16/16` across all arms;
+  **Ikiss** `llm` `8/16` (`50.0%`) & `llm_no_notes` `6/16` (`37.5%`) beat `no_brain` `1/16` (`6.2%`,
+  Fisher `p = 0.015` vs `llm`) & `baseline` `2/16` (`12.5%`; pooled LLM `14/32` vs PB `3/32`
+  `p = 0.0038`); `notes.md` standing orders drove significant trial-level AoE dodges on **Murmur**
+  (`Sonic Boom >= 34 yd`: `12/16` vs `0/16` everywhere, `p = 1.61e-05`) and **Ikiss** (`Arcane
+  Explosion >= 35 yd`: `10/16` vs `1/16` `p = 0.0021` & `0/16` `p = 0.0002`), while `baseline`
+  (`tbc-mgt`) dominated `Kael'thas` `Flame Strike` (`14/16 <= 1,000` dmg vs `1–4/16`, `p <= 0.0010`)
+  and naive `AWAY` runouts lowered DPS / increased `Loken` distance-scaled `Pulsing Shockwave`
+  damage; full report + superseded runs disclosed in
+  [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md).
 
 - 2026-11-21: **Review 9 fixes (Medium 1–3, Low 1–4, closed environmental-death caveat):**
   [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md)
@@ -274,14 +295,3 @@ Last updated 2026-11-21.
   `impact_dist_yd` & `outside_at_impact`; `bench_bosses.py` uses incremental byte-offset
   `_TraceTailer`. *(Remaining gaps from Review 5 tracked above: ground-targeted spell origin,
   cross-party scoring in shared trace dir, rotated files read twice, L10–L16.)*
-- 2026-11-20: **Review 4 fixes (Fixed: H1, M2, M5, L1, L7, L8, L9; Partly fixed: M3, M4, M6, L2, L3, L4, L6, L10, L12) + auto-loaded rules:**
-  `llmtest resetbot` preserves passive auras (`passives=` count bug tracked above) and resets
-  rage/energy/runic power, ammo, and reagents (pet revive partial, tracked above); `llmtest checkstrat`
-  uses non-allocating `GetSupportedStrategies()`; `bench_bosses.py` reads `first_line_ms` from
-  `bots_dir/*/events/*.jsonl` (fails if empty), scopes console checks to bot names (strip check
-  substring bug New 1 tracked above), verifies `map=0` pre-reset and non-reused dungeon instance IDs
-  across waves, adds `--mode mixed` for `llm`/`llm_no_notes` (per-arm summary & balancing New 2
-  tracked above), and overwrites output JSON unless `--append`; `behavior_trace_scripts.cc` bounds
-  group `mob_kill` to 100 yd (no-killer kill L4 still open); `trace_parity.py` drops `item_unequip`
-  & `quest_abandon` (scorer re-locked); standardized the 3-step review-fix procedure in
-  `CONTRIBUTING.md` + `.agents/rules/contributing.md` (`always_on`).
