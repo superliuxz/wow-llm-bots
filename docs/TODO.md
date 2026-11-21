@@ -13,25 +13,90 @@ Last updated 2026-11-21.
 
 ## Next, in order
 
-- **Where this leaves the project — boss notes & selective-dodge acts**
-  ([`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md)):
-  1. Notes reliably change behaviour: bots dodge mechanics they're told about.
-  2. They don't yet reliably change kill rates. Only Ikiss hints at it, and it doesn't survive
-     multiple-comparison correction.
-  3. Dodging costs DPS. On Loken, `llm` did `11.5k` vs `15.5k` for `llm_no_notes`.
-  4. The playerbots scripts are still better at the mechanics they cover (`Flame Strike`).
-  The next gains are in the notes and the acts (dodge only when it's worth it, then return to DPS),
-  not in the bench. Drop `Devourer` and `Loken`, or lower their gear, so every boss can show a
-  difference.
+**Priority direction (2026-11-21):** Mechanical WoW competence (dungeons, raids/ICC, clearing quests,
+soloing elite quests, smart gearing) takes priority over `"human-like"` mimicry (`D`). Where we
+stand after the 320-trial 5-boss benchmark
+([`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md)):
+plumbing and measurement work; `notes.md` reliably changes behaviour (`p <= 0.002`), doesn't yet
+reliably change kill rates after multiple-comparison correction, costs DPS (`Loken` `11.5k` vs
+`15.5k`), and trails playerbots C++ scripts on `Flame Strike` (`845` vs `80k` damage taken), while
+in open-world leveling bots get kills ~`3x` faster than human play but finish ~`1/3` as many quests
+and die more. Drop `Devourer` and `Loken` (or lower their gear) in future boss runs so every boss
+can separate arms.
 
-- **Human baseline coverage & initial blind-rating batch** (`docs/plans/self-improving-loop.md`):
-  layered scorer (Steps 1–6) is built and live-verified, and General/Say/Party chat + quest
-  grouping are wired. Before running real tuning rounds: record additional human play sessions
-  under the new 5 Hz + events format across all situations (questing, fighting, looting, town,
-  dungeons, chat; ideally a few players, ~30% held out) and run an initial ~30-pair
-  `tools/bench/blind_rate.py` batch + `llm-agree` check.
-- **Named room landmarks** (`docs/specs/triggers.md`): 132 of the 218 unsayable boss actions move
-  to hardcoded room coordinates; deferred until a boss fight needs per-room landmark data.
+1. **Phase 1 — Make boss reactions worth it (`A1` dodge-then-return, `A2` server-radius-aware acts)**
+   *(Done when: `llm` keeps its dodge rate and its DPS is within `10%` of `llm_no_notes`)*:
+   - **`A1. Dodge, then return (Decision #1: auto-resume interrupted activity when an act ends)`:**
+     Today an `away` ends and the bot stands where it ended up, out of range. When a movement act
+     ends, have the module automatically resume what was interrupted (last attack target / previous
+     position or range, plus `then back` support) — that's a fact about what was interrupted, not a
+     game judgment. Measure DPS lost per dodge and time back in range after each dodge in
+     `tools/bench/dodge_timeline.py`.
+   - **`A2. Take distances from the server, not the notes`:** Put each cast's real DBC radius,
+     impact point, and time-to-impact in the snapshot (the trace already reads the radii) so acts
+     can: (a) `out of it`: move just past the radius plus a margin, toward the group or the tank;
+     (b) skip the dodge if impact lands before the bot could get out, or if the bot is already
+     outside (removing `"34 yd vs 24.6 yd"` failures and needless `38 yd` runs).
+2. **Phase 2 — Script-generated notes, grammar parity, pre-pull orders & trace-mined evals (`A3`, `A4`, `C1`)**
+   *(Done when: the `Flame Strike` gap is closed — `llm` takes no more damage than the playerbots
+   script — and bench boss kills for `llm` are significantly above `no_brain` after correction)*:
+   - **`A3. Generate `notes.md` from playerbots' boss scripts + amend grammar to express everything the bot scripts describe (Decision #2)`:**
+     Generate draft `notes.md` from playerbots' ~20k lines of boss scripts plus spell data, then
+     edit. Where a script does something standing orders/acts cannot express yet (e.g., `Flame
+     Strike` ground placement), **amend our grammar (`docs/specs/grammar-idl.md`,
+     `docs/specs/triggers.md`) with the missing verbs/triggers so `notes.md` can express everything
+     the C++ boss scripts describe** (rather than leaving `baseline` scripts on).
+   - **`A4. Get the first plan in before the pull`:** Pre-compute standing orders from `notes.md`
+     when the bot enters the instance (not on the boss pull) and cache compiled orders per boss.
+     Keep the bench's realistic pull-on-connect, and measure the gap.
+   - **`C1. Mine traces for offline eval cases`:** Every death, wipe, missed dodge, or stall in a
+     soak or bench becomes an offline eval case (snapshot + what should have happened) so
+     `tools/wlb test eval` grows from real failures and catches regressions in seconds.
+3. **Phase 3 — Targeting, roles, items/vehicles, self-revising notes & raids / ICC (`A5`, `A6`, `C2`)**
+   *(Promoted ahead of open-world / human-likeness per Decision #4. Done when: kills on Kael and
+   Murmur up, Patchwerk with a proper comp, and raid / ICC encounter progression working)*:
+   - **`A5. Targeting and roles`:** Add an `"Attack <name/role>'s target"` option and show `"main
+     assist"` on screen; show healers who is taking damage and who is in range; show the tank loose
+     mobs (who isn't targeting it). Covers the Loken self-target death and Kael adds without C++
+     guessing.
+   - **`A6. Items and vehicles`:** Expose usable bag items as options (`Use <item>`,
+     `docs/specs/options.md`) so Eregos drakes, potions, quest items, and raid consumables/vehicles
+     are possible.
+   - **`C2. Let the brain revise its own `notes.md` (competence hill-climb loop)`:** After a wipe,
+     run a slower reflection call over the fight timeline (what hit whom, when, and which orders
+     fired) to propose a `notes.md` edit; keep the edit only if a short bench re-run doesn't get
+     worse (hill-climb loop aimed at notes, scored by **kills and damage taken**, not
+     human-likeness).
+4. **Phase 4 — Mechanical open-world competence: questing, solo elite quests, smart gearing & zero stalls (`B1–B3`)**
+   *(Done when: quests per hour within `30%` of human traces, solo elite quests & smart gear
+   upgrades working, and no `5 min` stalls in a `4 h` soak)*:
+   - **`B1. Questing over grinding`:** Show quest log objectives with the nearest place each can be
+     done, offer `"turn in"` as a single option when a quest is complete, and show distance from the
+     current quest area.
+   - **`B2. Upkeep without stalls & smart gearing`:** Full bags and broken gear lead to `"go to
+     vendor"` options (partly done), plus smart gear-upgrade evaluation across quest/dungeon/raid
+     loot; add a soak check that no bot sits still for `>= 5 min`.
+   - **`B3. Pull danger & soloing elite quests`:** Show pull danger in the snapshot (number of
+     linked mobs, elites, level difference) so the brain can decline bad pulls or use cooldowns,
+     kiting, and consumables to solo elite quests.
+5. **Phase 5 — Model bake-off (`C4`) & fine-tuning exploration (`C3`, Decision #3: keep as TODO)**
+   *(Done when: a significant bench gain at the same latency)*:
+   - **`C4. Model choice bake-off`:** Try at least one other base model on the boss bench (same 4
+     arms, `n = 16`) before investing in `C3`, so the base model choice is settled with data.
+   - **`C3. Train the model on its own good decisions (TODO — Decision #3: evaluate cost/feasibility on one RTX 5090 first)`:**
+     Once `C1` and `C2` produce a few thousand graded decisions, evaluate cost and benefit of:
+     (a) a small LoRA fine-tune of Gemma on plans that led to kills; (b) preference pairs (good vs
+     bad plan on the same snapshot), gated on offline eval plus the boss bench.
+6. **Human-likeness with human traces (`D`, `docs/plans/self-improving-loop.md` — deprioritized behind mechanical gameplay & ICC per Decision #4):**
+   - Already built/planned: record human play sessions across all situations (5 Hz + events, ~30%
+     held out), run the parity and pairwise scorer, and run `tools/bench/blind_rate.py` batches +
+     `llm-agree`.
+   - AI-side additions when resumed: draw reaction delays, pauses, and pacing from human trace
+     distributions instead of constants; compare bot choices against human choices in matched
+     situations (pulls, looting, town visits) and turn mismatches into `C1` eval cases; keep chat
+     reply rate and style rare and matched to logs.
+7. **Named room landmarks** (`docs/specs/triggers.md`): 132 of the 218 unsayable boss actions move
+   to hardcoded room coordinates; deferred until a boss fight needs per-room landmark data.
 
 ## Later
 
