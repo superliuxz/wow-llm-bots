@@ -9,11 +9,7 @@ Last updated 2026-11-21.
 
 ## In progress
 
-- **Re-lock `~/.local/share/wow-llm-bots/scorer.sha256` and `config/scorer-lock.sha256` after passphrase-guard & eviction-comment updates (awaiting user relock):**
-  `tools/bench/hill_climb.py` and `server_module/src/snapshot/behavior_trace.{h,cc}` are in
-  `LOCKED_PATTERNS`; both lock files were left untouched at `d6704ae5f8a1...` until a human sets
-  `~/.local/share/wow-llm-bots/relock.passphrase` and runs
-  `python3 tools/bench/hill_climb.py lock-scorer --force-relock`.
+(none)
 
 ## Next, in order
 
@@ -206,7 +202,9 @@ boss can separate arms.
   removed generous `O(1)` claims from cap-eviction comments in
   [`behavior_trace.{h,cc}`](../server_module/src/snapshot/behavior_trace.h),
   [`behavior_trace_unittest.cc`](../server_module/src/snapshot/behavior_trace_unittest.cc), and
-  `docs/TODO.md`.
+  `docs/TODO.md`; user interactively re-locked `~/.local/share/wow-llm-bots/scorer.sha256` and
+  [`config/scorer-lock.sha256`](../config/scorer-lock.sha256) (`11b686bde7f5...`, all 28
+  measurement locks verified).
 
 - 2026-11-21: **Review 10 fixes (Medium + Lows 1–3) & "Where this leaves the project" added to TODO:**
   restructured [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md)
