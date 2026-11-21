@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 
+#include "AiObjectContext.h"
 #include "Chat.h"
 #include "ChatCommand.h"
 #include "CommandScript.h"
@@ -13,6 +14,7 @@
 #include "Group.h"
 #include "GroupMgr.h"
 #include "ObjectAccessor.h"
+#include "ObjectGuid.h"
 #include "ObjectMgr.h"
 #include "Pet.h"
 #include "Player.h"
@@ -21,10 +23,12 @@
 #include "Playerbots.h"
 #include "RandomPlayerbotMgr.h"
 #include "SharedDefines.h"
+#include "SpellAuraDefines.h"
 #include "SpellAuraEffects.h"
 #include "SpellAuras.h"
 #include "SpellInfo.h"
 #include "Strategy.h"
+#include "Value.h"
 #include "bot_manager/bot_manager.h"
 
 namespace llm_brain {
@@ -94,7 +98,8 @@ class LlmBrainTestCommandScript : public CommandScript {
 
   static bool HandleGroup(ChatHandler* handler,
                           std::string leader_name,
-                          std::string member_name) {
+                          std::string member_name,
+                          Optional<std::string> token) {
     Player* leader = FindOnlinePlayer(handler, std::move(leader_name));
     Player* member = FindOnlinePlayer(handler, std::move(member_name));
     if (!leader || !member || leader == member) {
@@ -115,8 +120,9 @@ class LlmBrainTestCommandScript : public CommandScript {
       sGroupMgr->AddGroup(group);
     }
     if (member->GetGroup() == group) {
-      handler->PSendSysMessage("llmtest: grouped {} (leader) and {}",
-                               leader->GetName(), member->GetName());
+      handler->PSendSysMessage("llmtest: grouped {} (leader) and {}{}",
+                               leader->GetName(), member->GetName(),
+                               FormatToken(token));
       return true;
     }
     if (!group->isRaidGroup() && group->GetMembersCount() >= MAXGROUPSIZE) {
@@ -128,8 +134,9 @@ class LlmBrainTestCommandScript : public CommandScript {
       return false;
     }
     group->BroadcastGroupUpdate();
-    handler->PSendSysMessage("llmtest: grouped {} (leader) and {}",
-                             leader->GetName(), member->GetName());
+    handler->PSendSysMessage("llmtest: grouped {} (leader) and {}{}",
+                             leader->GetName(), member->GetName(),
+                             FormatToken(token));
     return true;
   }
 
@@ -173,7 +180,19 @@ class LlmBrainTestCommandScript : public CommandScript {
     if (!player) {
       return false;
     }
+    if (!player->IsInCombat()) {
+      player->AttackStop();
+      player->InterruptNonMeleeSpells(true);
+      player->SetSelection(ObjectGuid::Empty);
+      if (Pet* pet = player->GetPet()) {
+        pet->AttackStop();
+        pet->InterruptNonMeleeSpells(true);
+      }
+    }
     player->NearTeleportTo(x, y, z, o);
+    if (Pet* pet = player->GetPet(); pet && pet->IsAlive()) {
+      pet->NearTeleportTo(x, y, z, o);
+    }
     handler->PSendSysMessage("llmtest: moved {} to ({:.1f}, {:.1f}, {:.1f})",
                              player->GetName(), x, y, z);
     return true;
@@ -374,6 +393,11 @@ class LlmBrainTestCommandScript : public CommandScript {
     if (!player) {
       return false;
     }
+    // Strip Spirit of Redemption before resurrecting: removing aura 27827 while
+    // alive executes `setDeathState(DeathState::JustDied)` in SpellAuraEffects.
+    if (player->HasAuraType(SPELL_AURA_SPIRIT_OF_REDEMPTION)) {
+      player->RemoveAurasByType(SPELL_AURA_SPIRIT_OF_REDEMPTION);
+    }
     if (!player->IsAlive()) {
       player->ResurrectPlayer(1.0f);
       player->SpawnCorpseBones();
@@ -392,6 +416,10 @@ class LlmBrainTestCommandScript : public CommandScript {
         player->RemoveOwnedAura(itr);
       }
     }
+    if (!player->IsAlive()) {
+      player->ResurrectPlayer(1.0f);
+      player->SpawnCorpseBones();
+    }
     // Count passives in a separate read-only pass (RemoveOwnedAura resets `itr`
     // in Unit.cpp:4777, which would otherwise double-count passives).
     uint32_t passive_count = 0;
@@ -401,6 +429,15 @@ class LlmBrainTestCommandScript : public CommandScript {
         ++passive_count;
       }
     }
+    if (PlayerbotAI* ai = GET_PLAYERBOT_AI(player)) {
+      if (AiObjectContext* ctx = ai->GetAiObjectContext()) {
+        if (Value<uint32_t>* dc = ctx->GetValue<uint32_t>("death count")) {
+          dc->Set(0);
+        }
+      }
+    }
+    sRandomPlayerbotMgr.SetValue(player->GetGUID().GetCounter(), "dead", 0);
+    sRandomPlayerbotMgr.SetValue(player->GetGUID().GetCounter(), "revive", 0);
     player->RemoveAllSpellCooldown();
     player->DurabilityRepairAll(false, 0, false);
     player->SetFullHealth();

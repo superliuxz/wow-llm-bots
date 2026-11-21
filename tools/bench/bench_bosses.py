@@ -330,6 +330,39 @@ def _console_bot(
     return line, out
 
 
+def _ensure_party_group(party: list[tuple[str, str, int, str]]) -> None:
+    """Ensures every member in `party` belongs to `party[0]`'s group."""
+    leader = party[0][0]
+    for name, _, _, _ in party[1:]:
+        gtok = _next_console_token()
+        gline, gout = _console_bot(
+            f"llmtest group {leader} {name} {gtok}",
+            f"grouped {leader} (leader) and {name}",
+            wait_s=0.1,
+            token=gtok,
+        )
+        if not gline:
+            raise RuntimeError(f"group {leader} {name} failed: {gout!r}")
+
+
+def _wait_harness_connected(
+    harness_log: pathlib.Path,
+    proc: subprocess.Popen | None,
+    timeout_s: float = 2.0,
+) -> None:
+    """Waits briefly for `harness` to connect to `brain.sock` before issuing moves."""
+    if proc is None:
+        return
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            return
+        if harness_log.exists() and "harness: connected to mod-llm-brain" in harness_log.read_text(errors="replace"):
+            break
+        time.sleep(0.05)
+    time.sleep(0.15)
+
+
 def _wave_arms(arms: tuple[str, ...], wave: int, n_parties: int) -> list[str]:
     """Arms for every party slot in `wave` (1-based): fills all slots, balances arm counts
     every `len(arms) // gcd(n_parties, len(arms))` waves, and shifts starting party slot each
@@ -592,9 +625,7 @@ def run_boss_waves(
 
             # Group each party separately and gear every member with exact deterministic spec.
             for party in parties:
-                leader = party[0][0]
-                for name, _, _, _ in party[1:]:
-                    server.console(f"llmtest group {leader} {name}", wait_s=0.3, inst=TEST)
+                _ensure_party_group(party)
                 for idx, (name, _, spec_tab, expected_role) in enumerate(party):
                     tok = _next_console_token()
                     line, out = _console_bot(
@@ -657,6 +688,7 @@ def run_boss_waves(
                         )
                         if "map=0 " not in wline:
                             raise RuntimeError(f"{name} did not leave dungeon before reset: {wout!r}")
+                    _ensure_party_group(party)
                     for name, _, _, _ in party:
                         tok = _next_console_token()
                         rline, out = _console_bot(
@@ -770,25 +802,26 @@ def run_boss_waves(
                     harness_log = tmp_dir / "harness.log"
                     proc = None
                     if llm_bots:
-                        proc = subprocess.Popen(
-                            [
-                                str(OUT / "common" / "harness"),
-                                "run",
-                                f"--socket={TEST.run / 'brain.sock'}",
-                                f"--rules={ROOT / 'content' / 'RULES.md'}",
-                                f"--bots-dir={bots_dir}",
-                                f"--only-bots={','.join(llm_bots)}",
-                                "--host=127.0.0.1",
-                                "--port=8090",
-                                "--slots=16",
-                                "--temperature=0",
-                            ],
-                            cwd=ROOT,
-                            stdout=harness_log.open("w"),
-                            stderr=subprocess.STDOUT,
-                        )
-                    # Brief connect window (3 s) right before pull so bots don't wander/early-pull.
-                    time.sleep(3.0)
+                        with harness_log.open("w") as log_fp:
+                            proc = subprocess.Popen(
+                                [
+                                    str(OUT / "common" / "harness"),
+                                    "run",
+                                    f"--socket={TEST.run / 'brain.sock'}",
+                                    f"--rules={ROOT / 'content' / 'RULES.md'}",
+                                    f"--bots-dir={bots_dir}",
+                                    f"--only-bots={','.join(llm_bots)}",
+                                    "--host=127.0.0.1",
+                                    "--port=8090",
+                                    "--slots=16",
+                                    "--temperature=0",
+                                ],
+                                cwd=ROOT,
+                                stdout=log_fp,
+                                stderr=subprocess.STDOUT,
+                            )
+                    # Wait only until harness connects (~0.2 s) so LLM bots cannot wander into entrance trash.
+                    _wait_harness_connected(harness_log, proc, timeout_s=2.0)
 
                     # 5. Move each party to spawn_xyz to initiate its pull, recording each party's
                     #    own pull time so a party that engaged while earlier parties were being
@@ -800,7 +833,7 @@ def run_boss_waves(
                         for idx, (name, _, _, _) in enumerate(party):
                             server.console(
                                 f"llmtest move {name} {x + (idx % 5) * 0.8:.2f} {y + (idx // 5) * 0.8:.2f} {z:.2f} 0",
-                                wait_s=0.2,
+                                wait_s=0.05,
                                 inst=TEST,
                             )
                     t0 = time.monotonic()

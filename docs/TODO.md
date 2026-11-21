@@ -5,16 +5,11 @@ what exists, what comes next and in which order. **Keep it current** (CONTRIBUTI
 docs/TODO.md current"): anything unfinished, deferred or decided-but-not-built goes here, not only
 in a conversation.
 
-Last updated 2026-11-20.
+Last updated 2026-11-21.
 
 ## In progress
 
-- Next benchmark run (all Review 8 items verified; all 28 scorer locks re-locked & verified with user
-  OK): run `bench_bosses.py` with `--runs 8` (or `10` **per arm**) for `kaelthas`, `ick`, `murmur`,
-  and `ikiss` (e.g. `--mode mixed_all --only kaelthas,ick,murmur,ikiss --runs 8 --parallel 3`), then
-  save one clean report under `docs/benchmarks/`. Note: on `kaelthas`, `stage_xyz=(7.09, -0.45, -2.5)`
-  eliminates arrival deaths and pre-pull combat, while `spawn_xyz=(148.5, 180.0, -16.2)` still pulls
-  the nearby Sunblade pack during the fight (all arms run identically).
+(none)
 
 ## Next, in order
 
@@ -95,16 +90,33 @@ Last updated 2026-11-20.
     to end avoids returning early).
   - Mid-fight wakes (`attacked`, `hp<N`) replace all standing orders; Gemma 4 occasionally rewrites
     a working `Lightning Nova cast` order into `Loken cast` or `Lightning Nova appears`.
-- **Not individually live-triggered after final edits yet:** environmental/self death (`killer == killed`
-  logged as non-PvP `died` with `detail="environment"` in `behavior_trace_scripts.cc`),
-  `llmtest questcomplete` when a quest is already active in a bot's quest log (`CompleteQuest` +
-  `RewardQuest` branch in `test_commands.cc`, source-verified), and the updated
-  `areatrigger_teleport` entrance / pull coordinates for `ick`, `murmur`, and `ikiss` (verified in
-  `acore_world`; live Kael'thas verified entrance staging after the final edit, while Ikiss and the
-  `questcomplete`/`tele ... 0`/`clearstrat` console checks passed in the prior live check before
-  adding entrance staging/dismount).
+- **Not individually live-triggered after final edits yet:** `llmtest questcomplete` when a quest
+  is already active in a bot's quest log (`CompleteQuest` + `RewardQuest` branch in
+  `test_commands.cc`, source-verified). Environmental/self death (`died` with `detail="environment"`
+  in `behavior_trace_scripts.cc`) was triggered live once during `murmur` (`Pfoua` dying to
+  `Murmur's Touch` `Shockwave` fall damage after post-fight `tele 0`), and the updated
+  `areatrigger_teleport` entrance staging + pull coordinates for `ick`, `murmur`, and `ikiss`
+  are now live-verified (`32` valid trials each, `0` arrival deaths, `0` pre-pull combat).
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-21: **Multi-wave test-harness fixes & 4-boss × 4-arm parallel benchmark (`128` valid
+  trials):** fixed three multi-wave bugs exposed on `murmur` and `ikiss`: in `test_commands.cc`,
+  `HandleResetBot` strips `SPELL_AURA_SPIRIT_OF_REDEMPTION` (`27827`) before resurrection +
+  re-checks `!IsAlive()` after aura removal (preventing aura-end `JustDied`) and resets playerbots'
+  `"death count"` + `sRandomPlayerbotMgr` `"dead"`/`"revive"` (`SetValue(..., 0)`) so ghosts at
+  `death count >= 5` never trigger `RandomPlayerbotMgr::Revive` → `LeaveOrDisbandGroup()`,
+  `HandleGroup` adds optional `token`, and `HandleMove` clears non-combat attack/cast/selection +
+  moves live pets with owners; in `bench_bosses.py`, added `_ensure_party_group` before wave
+  resets, `_wait_harness_connected` replacing the `3.0 s` entrance sleep, and `wait_s=0.05` on
+  `llmtest move` (eliminating entrance `pre_pull_combat`); updated `dodge_timeline_test.py` (`11/11`
+  tests, adding `test_wait_harness_connected_returns_on_log_marker`). Verified `tools/wlb check`
+  (402 C++ + 36 Python tests), all `28` scorer locks (`all 28 measurement locks verified`), and
+  completed `bench_bosses.py --mode mixed_all --runs 8 --parallel 4` across `kaelthas`, `ick`,
+  `murmur`, and `ikiss` (`32/32` valid per boss, `0` invalid, `0` wave errors; `llm` doubled
+  `no_brain` and tripled `baseline` on Ikiss `6/8` vs `3/8` & `2/8` and cut Murmur `Sonic Boom`
+  median impact damage 32% `5,323` vs `7,769–7,894`; see
+  [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md)).
 
 - 2026-11-20: **Review 8 fixes (New Lows 1–3) + user-approved scorer relock:**
   `tools/bench/bench_bosses.py` narrows setup, outer boss-loop, cleanup, and latency-parse
@@ -229,19 +241,3 @@ Last updated 2026-11-20.
   `server_module/src/chat/chat_scripts.cc` and `speak.cc`; added `INVITE`, `ACCEPT_INVITE`,
   `DECLINE_INVITE`, `LEAVE_GROUP` options in `snapshot/snapshot.h`, `options.{h,cc}`,
   `option_executor.cc`, `llm_brain_world_script.cc`, and harness `screen_renderer.cc` / `bot_loop.cc`.
-- 2026-11-19: **Layered human-likeness scorer (Steps 1–6, `docs/plans/self-improving-loop.md`):**
-  5 Hz observer-parity recording + explicit gameplay events (`behavior_trace_scripts.{h,cc}`,
-  `trace_parity.py`), pairwise Bradley–Terry ranker with bootstrapped 95% CIs + `blind_rate.py`,
-  Layer D calibration (`known_bad_bots.py`, `scorer_calibration.py`), Layer C per-situation
-  diagnostic classifier + MMO adversary suite (`adversary_suite.py`), Step 5 population metrics
-  (`population_metrics.py`), and `soak_scorer.py` / `hill_climb.py` switched to Layer A gates +
-  Layer B ranking (retired 0–100 composite score). Live-verified on 10-bot soak (11/11 Layer A
-  gates PASS, Layer D calibration PASS: `heldout_human 1000.0 > current_bots 175.1 > all 4 known-bad`).
-- 2026-11-19: **Unified human + bot behavior tracing & live soak test:**
-  `behavior_trace.{h,cc}` (`LlmBrain.TraceDir` + `LlmBrain.ObserveHumans`) and `tools/wlb test soak`
-  (`config/tests/soak.llm-brain.overrides`, `tools/wlblib/cases/soak.py`); fixed empty-vendor `Talk`
-  loop (`TalkToNpcNow` returns refusal so `StepRefusalBackoff` engages).
-- 2026-11-18: **`e2e boss` & `e2e orders` live plumbing tests:**
-  repeatable Loken boss test (`tools/wlblib/cases/e2e_boss.py`, `-wotlk-hol`, mock brain) verifying
-  `Lightning Nova` visibility over background `Pulsing Shockwave`, `1 ms` `AWAY Loken 25` dispatch,
-  and mid-fight replan preservation of in-flight movement orders; all 6 `e2e orders` scenarios pass.

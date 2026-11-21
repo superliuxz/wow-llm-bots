@@ -361,6 +361,8 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
 
             def console_wrong_role(cmd, wait_s=1.0, inst=None):
                 parts = cmd.split()
+                if len(parts) >= 5 and parts[1] == "group":
+                    return f"llmtest: grouped {parts[2]} (leader) and {parts[3]} tok={parts[-1]}\n"
                 if len(parts) >= 6 and parts[1] == "gear":
                     name, lvl, tok = parts[2], parts[3], parts[-1]
                     return f"llmtest: geared {name} at level {lvl} (role=dps, hp=100, specNo=3) tok={tok}\n"
@@ -418,6 +420,32 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
                 bench_bosses.server = orig_server
                 bench_bosses.TEST = orig_test
                 bench_bosses.VAR = orig_var
+
+    def test_wait_harness_connected_returns_on_log_marker(self) -> None:
+        import threading
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log = pathlib.Path(tmp) / "harness.log"
+            bench_bosses._wait_harness_connected(log, None, timeout_s=2.0)
+
+            class FakeProc:
+                def poll(self):
+                    return None
+
+            t0 = time.monotonic()
+
+            def write_marker() -> None:
+                log.write_text("harness: starting\nharness: connected to mod-llm-brain\n", encoding="utf-8")
+
+            timer = threading.Timer(0.1, write_marker)
+            timer.start()
+            try:
+                bench_bosses._wait_harness_connected(log, FakeProc(), timeout_s=2.0)
+            finally:
+                timer.join(timeout=2.0)
+            elapsed = time.monotonic() - t0
+            self.assertLess(elapsed, 1.0)
 
 
 if __name__ == "__main__":
