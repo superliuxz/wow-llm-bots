@@ -107,6 +107,7 @@ test    ::= mech " on " who                                    ; an aura or debu
           | mech " cast" | mech " cast on " who                ; being cast now / aimed at someone
           | mech " cast in last " num "s"                      ; started within the last N seconds
           | mech " appears" | mech " appears in last " num "s"
+          | "in " mech                                         ; inside a ground area or cast radius
           | mech " count" cmp cnt                              ; how many of it are around
           | thing (" within " | " beyond ") num (" of " thing)?   ; yards, from me or from a thing
           | thing " targets " thing
@@ -126,7 +127,7 @@ state   ::= "flying" | "grounded" | "untargetable" | "submerged"
 mystate ::= "in vehicle" | "mounted" | "swimming" | "nearest to it"
 icon    ::= "skull" | "cross" | "square" | "moon" | "triangle" | "diamond" | "circle" | "star"
 
-act     ::= "to " place | "away" (" " thing)? (" " num)? | "avoid " thing
+act     ::= "to " place | "out of " thing | "back" | "away" (" " thing)? (" " num)? | "avoid " thing
           | "target " thing | "use " name (" on " thing)?
           | "stop" (" casting" | " attacking" | " moving")? | "face " thing | "face away " thing
           | "jump" | "cancel " name | "mark " thing " " icon | "interact " thing

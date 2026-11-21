@@ -48,6 +48,7 @@ choice Check {
   Cast       = mech:Name " cast";
   AppearsIn  = mech:Name " appears in last " s:Num "s";
   Appears    = mech:Name " appears";
+  InArea     = "in " mech:Name;
   Count      = mech:Name " count" cmp:Cmp n:Count;
   On         = mech:Name " on " who:Who;
   Within     = a:Thing " within " yd:Num (" of " b:Thing)?;
@@ -86,6 +87,8 @@ choice Place {
 
 choice Act {
   To        = "to " place:Place;
+  OutOf     = "out of " t:Thing;
+  Back      = "back";
   Away      = "away" (" " t:Thing)? (" " yd:Num)?;
   Avoid     = "avoid " t:Thing;
   Target    = "target " t:Thing;

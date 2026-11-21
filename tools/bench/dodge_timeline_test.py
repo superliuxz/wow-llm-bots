@@ -659,6 +659,198 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
                 bench_bosses.server.console = orig_console
                 bench_bosses.TEST = orig_test
 
+    def test_dodge_dps_lost_and_time_back_in_range(self) -> None:
+        # Combat starts at t=0; cast window is [10000, 13000].
+        # BotA deals 10000 dmg in [0, 10000) -> dps_before = 1000.0.
+        # BotA dodges to 40 yd during cast (0 dmg), returns to 7 yd (<= 5 + 3) at t=15000.
+        traces = {
+            "BotA": [
+                {"kind": "sample", "t_ms": 0, "in_combat": True, "x": 105.0, "y": 100.0, "moving": False},
+                {"kind": "event", "t_ms": 2000, "event": "damage_dealt", "value": 5000},
+                {"kind": "event", "t_ms": 7000, "event": "damage_dealt", "value": 5000},
+                {
+                    "kind": "sample", "t_ms": 10000, "in_combat": True,
+                    "x": 105.0, "y": 100.0, "moving": False,
+                    "target_casting": "Lightning Nova", "target_cast_radius": 30.0,
+                    "target_x": 100.0, "target_y": 100.0, "target_dist": 5.0,
+                },
+                {"kind": "event", "t_ms": 10200, "event": "act_sent", "detail": "AWAY 40"},
+                {
+                    "kind": "sample", "t_ms": 11500, "in_combat": True,
+                    "x": 125.0, "y": 100.0, "moving": True,
+                    "target_casting": "Lightning Nova", "target_cast_radius": 30.0,
+                    "target_x": 100.0, "target_y": 100.0, "target_dist": 25.0,
+                },
+                {
+                    "kind": "sample", "t_ms": 13000, "in_combat": True,
+                    "x": 140.0, "y": 100.0, "moving": True,
+                    "target_casting": "Lightning Nova", "target_cast_radius": 30.0,
+                    "target_x": 100.0, "target_y": 100.0, "target_dist": 40.0,
+                },
+                {"kind": "sample", "t_ms": 14000, "in_combat": True, "x": 120.0, "y": 100.0, "moving": True},
+                {"kind": "sample", "t_ms": 15000, "in_combat": True, "x": 107.0, "y": 100.0, "moving": False},
+            ],
+        }
+        res = dodge_timeline.extract_dodge_timelines(traces, spell_filter="Lightning Nova")
+        self.assertEqual(len(res["windows"]), 1)
+        a = res["windows"][0]["bots"]["BotA"]
+        self.assertEqual(a["dps_before"], 1000.0)
+        self.assertEqual(a["time_back_in_range_ms"], 2000)
+        self.assertEqual(a["downtime_s"], 5.0)
+        self.assertEqual(a["dps_during"], 0.0)
+        self.assertEqual(a["dps_lost"], 5000.0)
+
+        formatted = dodge_timeline.format_timelines(res)
+        self.assertIn("BackMs", formatted)
+        self.assertIn("DmgLost", formatted)
+        self.assertIn("2000ms", formatted)
+        self.assertIn("5000", formatted)
+        self.assertIn("median_back_ms=2000ms", formatted)
+        self.assertIn("median_dps_lost=5000", formatted)
+
+    def test_dodge_slow_return_vs_prompt_return(self) -> None:
+        # Both bots have 500 DPS before cast [10000, 13000] (5s of combat since t=5000).
+        # BotFast resumes casting at t=14000 (1000ms after impact) once stopped moving away.
+        # BotSlow has a DoT tick at t=13300 while STILL moving away (dist 35 -> 42), then
+        # lingers out of range until returning to start_yd+2 at t=21000 (8000ms after impact).
+        traces = {
+            "BotFast": [
+                {"kind": "sample", "t_ms": 5000, "in_combat": True, "x": 105.0, "y": 100.0, "moving": False},
+                {"kind": "event", "t_ms": 8000, "event": "damage_dealt", "value": 2500},
+                {
+                    "kind": "sample", "t_ms": 10000, "in_combat": True,
+                    "x": 105.0, "y": 100.0, "moving": False,
+                    "target_casting": "Arcane Explosion", "target_cast_radius": 34.0,
+                    "target_x": 100.0, "target_y": 100.0,
+                },
+                {"kind": "event", "t_ms": 10300, "event": "act_sent", "detail": "AWAY 38"},
+                {
+                    "kind": "sample", "t_ms": 11500, "in_combat": True,
+                    "x": 122.0, "y": 100.0, "moving": True,
+                    "target_casting": "Arcane Explosion", "target_cast_radius": 34.0,
+                    "target_x": 100.0, "target_y": 100.0,
+                },
+                {
+                    "kind": "sample", "t_ms": 13000, "in_combat": True,
+                    "x": 138.0, "y": 100.0, "moving": False,
+                    "target_casting": "Arcane Explosion", "target_cast_radius": 34.0,
+                    "target_x": 100.0, "target_y": 100.0,
+                },
+                {"kind": "event", "t_ms": 14000, "event": "cast_start", "detail": "Shadow Bolt"},
+                {"kind": "sample", "t_ms": 14500, "in_combat": True, "x": 138.0, "y": 100.0, "moving": False},
+            ],
+            "BotSlow": [
+                {"kind": "sample", "t_ms": 5000, "in_combat": True, "x": 105.0, "y": 100.0, "moving": False},
+                {"kind": "event", "t_ms": 8000, "event": "damage_dealt", "value": 2500},
+                {
+                    "kind": "sample", "t_ms": 10000, "in_combat": True,
+                    "x": 105.0, "y": 100.0, "moving": False,
+                    "target_casting": "Arcane Explosion", "target_cast_radius": 34.0,
+                    "target_x": 100.0, "target_y": 100.0,
+                },
+                {"kind": "event", "t_ms": 10300, "event": "act_sent", "detail": "AWAY 42"},
+                {
+                    "kind": "sample", "t_ms": 11500, "in_combat": True,
+                    "x": 120.0, "y": 100.0, "moving": True,
+                    "target_casting": "Arcane Explosion", "target_cast_radius": 34.0,
+                    "target_x": 100.0, "target_y": 100.0,
+                },
+                {
+                    "kind": "sample", "t_ms": 13000, "in_combat": True,
+                    "x": 135.0, "y": 100.0, "moving": True,
+                    "target_casting": "Arcane Explosion", "target_cast_radius": 34.0,
+                    "target_x": 100.0, "target_y": 100.0,
+                },
+                # DoT tick while still moving away from 35 yd -> 42 yd must NOT count as returned.
+                {"kind": "event", "t_ms": 13300, "event": "damage_dealt", "value": 200},
+                {"kind": "sample", "t_ms": 14000, "in_combat": True, "x": 142.0, "y": 100.0, "moving": True},
+                {"kind": "sample", "t_ms": 18000, "in_combat": True, "x": 142.0, "y": 100.0, "moving": False},
+                {"kind": "sample", "t_ms": 21000, "in_combat": True, "x": 107.0, "y": 100.0, "moving": False},
+            ],
+        }
+        res = dodge_timeline.extract_dodge_timelines(traces, spell_filter="Arcane Explosion")
+        bots = res["windows"][0]["bots"]
+        fast, slow = bots["BotFast"], bots["BotSlow"]
+
+        self.assertEqual(fast["dps_before"], 500.0)
+        self.assertEqual(slow["dps_before"], 500.0)
+        self.assertEqual(fast["time_back_in_range_ms"], 1000)
+        self.assertEqual(slow["time_back_in_range_ms"], 8000)
+        self.assertLess(fast["time_back_in_range_ms"], slow["time_back_in_range_ms"])
+        # fast: 500 * 4.0 - 0 = 2000.0; slow: 500 * 11.0 - 200 = 5300.0
+        self.assertEqual(fast["dps_lost"], 2000.0)
+        self.assertEqual(slow["dps_lost"], 5300.0)
+        self.assertLess(fast["dps_lost"], slow["dps_lost"])
+
+    def test_no_dodge_and_death_before_return_leave_metrics_none(self) -> None:
+        traces = {
+            "TankStay": [
+                {"kind": "sample", "t_ms": 0, "in_combat": True, "x": 104.0, "y": 100.0, "moving": False},
+                {"kind": "event", "t_ms": 5000, "event": "damage_dealt", "value": 4000},
+                {
+                    "kind": "sample", "t_ms": 10000, "in_combat": True,
+                    "x": 104.0, "y": 100.0, "moving": False,
+                    "target_casting": "Lightning Nova", "target_cast_radius": 30.0,
+                    "target_x": 100.0, "target_y": 100.0,
+                },
+                {
+                    "kind": "sample", "t_ms": 11500, "in_combat": True,
+                    "x": 104.5, "y": 100.0, "moving": False,
+                    "target_casting": "Lightning Nova", "target_cast_radius": 30.0,
+                    "target_x": 100.0, "target_y": 100.0,
+                },
+                {
+                    "kind": "sample", "t_ms": 13000, "in_combat": True,
+                    "x": 105.0, "y": 100.0, "moving": False,
+                    "target_casting": "Lightning Nova", "target_cast_radius": 30.0,
+                    "target_x": 100.0, "target_y": 100.0,
+                },
+                {"kind": "event", "t_ms": 13500, "event": "damage_dealt", "value": 500},
+            ],
+            "DodgedAndDied": [
+                {"kind": "sample", "t_ms": 0, "in_combat": True, "x": 105.0, "y": 100.0, "moving": False},
+                {"kind": "event", "t_ms": 5000, "event": "damage_dealt", "value": 4000},
+                {
+                    "kind": "sample", "t_ms": 10000, "in_combat": True,
+                    "x": 105.0, "y": 100.0, "moving": False,
+                    "target_casting": "Lightning Nova", "target_cast_radius": 30.0,
+                    "target_x": 100.0, "target_y": 100.0,
+                },
+                {"kind": "event", "t_ms": 10500, "event": "act_sent", "detail": "AWAY 35"},
+                {
+                    "kind": "sample", "t_ms": 11500, "in_combat": True,
+                    "x": 112.0, "y": 100.0, "moving": True,
+                    "target_casting": "Lightning Nova", "target_cast_radius": 30.0,
+                    "target_x": 100.0, "target_y": 100.0,
+                },
+                {
+                    "kind": "sample", "t_ms": 13000, "in_combat": True,
+                    "x": 120.0, "y": 100.0, "moving": True,
+                    "target_casting": "Lightning Nova", "target_cast_radius": 30.0,
+                    "target_x": 100.0, "target_y": 100.0,
+                },
+                {"kind": "event", "t_ms": 13200, "event": "died"},
+                {"kind": "sample", "t_ms": 14000, "in_combat": False, "x": 105.0, "y": 100.0, "moving": False},
+            ],
+        }
+        res = dodge_timeline.extract_dodge_timelines(traces, spell_filter="Lightning Nova")
+        bots = res["windows"][0]["bots"]
+
+        stay = bots["TankStay"]
+        self.assertEqual(stay["dps_before"], 400.0)
+        self.assertIsNone(stay["time_back_in_range_ms"])
+        self.assertIsNone(stay["downtime_s"])
+        self.assertIsNone(stay["dps_during"])
+        self.assertIsNone(stay["dps_lost"])
+
+        dead = bots["DodgedAndDied"]
+        self.assertEqual(dead["dps_before"], 400.0)
+        self.assertTrue(dead["died"])
+        self.assertIsNone(dead["time_back_in_range_ms"])
+        self.assertIsNone(dead["downtime_s"])
+        self.assertIsNone(dead["dps_during"])
+        self.assertIsNone(dead["dps_lost"])
+
 
 if __name__ == "__main__":
     unittest.main()

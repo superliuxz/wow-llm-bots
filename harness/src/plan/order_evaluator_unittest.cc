@@ -890,5 +890,55 @@ TEST(OrderEvaluatorTest, NamedActPrefersMatchedOrNearestUnit) {
   EXPECT_EQ(r.target_guid, "Boar-near");
 }
 
+TEST(OrderEvaluatorTest, InAreaMatchesAreaAndCastRadiusAndRearms) {
+  OrderEvaluator eval(base::Seconds(5));
+  eval.SetOrders({MustParse("in Flame Strike -> out of it, then back")}, T(0));
+
+  pb::Snapshot s = MakeBaseSnapshot();
+  s.base.self.unit.rel.position = {10.0f, 0.0f, 0.0f};
+  pb::Area fs;
+  fs.guid = "trigger:0xF13000605A000001";
+  fs.name = "Flame Strike";
+  fs.radius_yd = 8.0f;
+  fs.inside_me = true;
+  fs.hostile = true;
+  fs.rel.emplace().dist_yd = 2.0f;
+  s.base.nearby.areas.push_back(fs);
+
+  const OrderEvalResult r1 = eval.OnSnapshot(s, T(1));
+  ASSERT_TRUE(r1.act.has_value());
+  EXPECT_EQ(r1.it_guid, "trigger:0xF13000605A000001");
+  const std::optional<pb::Command::Act> wire1 =
+      OrderActToCommand(*r1.act, r1.it_guid, r1.it_name, r1.target_guid);
+  ASSERT_TRUE(wire1.has_value());
+  EXPECT_EQ(wire1->verb, pb::Command::Act::OUT_OF);
+  EXPECT_EQ(wire1->thing, pb::Command::Act::IT);
+  eval.set_pending_command_id(10);
+
+  // Finishing step 0 advances to `then back`.
+  s.done_act_command_id = 10;
+  const OrderEvalResult r2 = eval.OnSnapshot(s, T(2));
+  ASSERT_TRUE(r2.act.has_value());
+  const std::optional<pb::Command::Act> wire2 =
+      OrderActToCommand(*r2.act, r2.it_guid, r2.it_name, r2.target_guid);
+  ASSERT_TRUE(wire2.has_value());
+  EXPECT_EQ(wire2->verb, pb::Command::Act::BACK);
+  eval.set_pending_command_id(11);
+
+  // Stepping out clears the condition and re-arms the latch.
+  s.done_act_command_id = 11;
+  s.base.nearby.areas[0].inside_me = false;
+  s.base.nearby.areas[0].rel->dist_yd = 12.0f;
+  EXPECT_FALSE(eval.OnSnapshot(s, T(3)).act.has_value());
+
+  // Second Flame Strike under the bot fires again with the new GUID.
+  pb::Area fs2 = fs;
+  fs2.guid = "trigger:0xF13000605A000002";
+  s.base.nearby.areas.push_back(fs2);
+  const OrderEvalResult r3 = eval.OnSnapshot(s, T(4));
+  ASSERT_TRUE(r3.act.has_value());
+  EXPECT_EQ(r3.it_guid, "trigger:0xF13000605A000002");
+}
+
 }  // namespace
 }  // namespace harness

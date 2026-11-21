@@ -1,0 +1,89 @@
+{
+  "bot": "Loada",
+  "seq": 1,
+  "time_ms": 1795265188662,
+  "monotonic_us": 586110939697,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x0000000000000101",
+        "name": "Loada",
+        "kind": "PLAYER",
+        "level": 70,
+        "health_pct": 30.8,
+        "power_pct": 0.0,
+        "player": {
+          "class": "Mage"
+        }
+      },
+      "health": 6468,
+      "health_max": 21000,
+      "power_type": "MANA",
+      "power": 0,
+      "power_max": 24500,
+      "state": "ALIVE",
+      "in_combat": true
+    },
+    "where": {
+      "map": "Shadow Labyrinth",
+      "zone": "Shadow Labyrinth",
+      "subzone": "Shadow Labyrinth",
+      "position": {
+        "x": -157.9,
+        "y": -497.32,
+        "z": 16.87
+      },
+      "facing": 2.52,
+      "in_instance": true
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0xF130000000000001",
+          "name": "Murmur",
+          "rel": {
+            "dist_yd": 7.6,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -159.2,
+              "y": -486.5,
+              "z": 16.87
+            }
+          },
+          "kind": "NPC",
+          "level": 70,
+          "level_color": "ORANGE",
+          "reaction": "HOSTILE",
+          "classification": "WORLD_BOSS",
+          "health_pct": 100.0,
+          "targeting_me": true,
+          "activity": {
+            "state": "CASTING",
+            "cast": {
+              "spell": {
+                "name": "Sonic Boom"
+              },
+              "remaining_ms": 1500
+            },
+            "with": "Loada"
+          },
+          "detail": "NAMEPLATE"
+        }
+      ]
+    }
+  },
+  "options": [
+    {
+      "text": "Attack Murmur",
+      "guid": "0xF130000000000001",
+      "kind": "ATTACK",
+      "name": "Murmur"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
+}

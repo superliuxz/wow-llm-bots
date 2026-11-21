@@ -238,12 +238,16 @@ class LlmBrainTestCommandScript : public CommandScript {
                          std::string player_name,
                          uint32_t level,
                          Optional<int32_t> spec_tab,
-                         Optional<std::string> token) {
+                         Optional<std::string> token,
+                         Optional<uint32_t> quality) {
     Player* player = FindOnlinePlayer(handler, std::move(player_name));
     if (!player) {
       return false;
     }
-    PlayerbotFactory factory(player, level, ITEM_QUALITY_EPIC);
+    const uint32_t item_quality =
+        (quality && *quality <= ITEM_QUALITY_LEGENDARY) ? *quality
+                                                        : ITEM_QUALITY_EPIC;
+    PlayerbotFactory factory(player, level, item_quality);
     factory.Randomize(false);
     if (spec_tab && *spec_tab >= 0 && *spec_tab <= 3) {
       PlayerbotFactory::InitTalentsBySpecNo(player, *spec_tab, true);

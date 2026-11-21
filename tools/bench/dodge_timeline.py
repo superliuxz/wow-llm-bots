@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import math
 import pathlib
+import statistics
 import sys
 from typing import Any
 
@@ -26,6 +27,35 @@ DODGE_ACT_VERBS = ("AWAY", "AVOID", "TO", "KITE", "STOP")
 def _is_dodge_act(detail: str) -> bool:
     verb = detail.strip().split(" ", 1)[0].upper() if detail else ""
     return verb in DODGE_ACT_VERBS
+
+
+def _sample_dist(r: dict[str, Any], cx: float | None, cy: float | None) -> float | None:
+    if cx is not None and cy is not None and "x" in r and "y" in r:
+        return math.hypot(float(r["x"]) - cx, float(r["y"]) - cy)
+    td = float(r.get("target_dist", -1))
+    return td if td >= 0 else None
+
+
+def _is_moving_away_at(
+    t_ms: int,
+    dist_timeline: list[tuple[int, float, bool]],
+) -> bool:
+    """Returns True if the bot is still increasing distance from the cast origin at `t_ms`."""
+    prev_idx: int | None = None
+    next_idx: int | None = None
+    for i, (ts, _d, _m) in enumerate(dist_timeline):
+        if ts <= t_ms:
+            prev_idx = i
+        elif next_idx is None:
+            next_idx = i
+            break
+    if prev_idx is not None and next_idx is not None:
+        return dist_timeline[next_idx][1] > dist_timeline[prev_idx][1] + 0.5
+    if prev_idx is not None and prev_idx > 0:
+        _, d_prev, moving_prev = dist_timeline[prev_idx]
+        _, d_prev2, _ = dist_timeline[prev_idx - 1]
+        return moving_prev and d_prev > d_prev2 + 0.5
+    return False
 
 
 def extract_dodge_timelines(
@@ -125,11 +155,12 @@ def extract_dodge_timelines(
             # Measure Euclidean distance to the cast origin `(cx, cy)` when available
             # (works even if a bot wasn't targeting the boss!); fall back to target_dist.
             dists: list[float] = []
+            during_dist_timeline: list[tuple[int, float, bool]] = []
             for r in during:
-                if cx is not None and cy is not None and "x" in r and "y" in r:
-                    dists.append(math.hypot(float(r["x"]) - cx, float(r["y"]) - cy))
-                elif float(r.get("target_dist", -1)) >= 0:
-                    dists.append(float(r["target_dist"]))
+                d = _sample_dist(r, cx, cy)
+                if d is not None:
+                    dists.append(d)
+                    during_dist_timeline.append((int(r["t_ms"]), d, bool(r.get("moving"))))
             start_dist = dists[0] if dists else None
             end_dist = dists[-1] if dists else None
             max_dist = max(dists) if dists else None
@@ -159,6 +190,93 @@ def extract_dodge_timelines(
             died = any(e.get("event") == "died" for e in events_impact)
             outside = (end_dist >= radius) if (radius is not None and end_dist is not None) else None
 
+            # Pre-cast DPS in [s0 - 10000, s0), clamped to [1.0, 10.0]s via cbt_t0.
+            dps_before_raw: float | None = None
+            if cbt_t0 is not None and cbt_t0 < s0:
+                pre_dur_s = max(1.0, min(10.0, (s0 - max(s0 - 10000, cbt_t0)) / 1000.0))
+                dmg_before = sum(
+                    int(e.get("value", 0))
+                    for e in rows
+                    if e.get("kind") == "event"
+                    and e.get("event") == "damage_dealt"
+                    and s0 - 10000 <= int(e["t_ms"]) < s0
+                )
+                dps_before_raw = dmg_before / pre_dur_s
+
+            # Time back in range / resuming DPS after impact, only if the bot actually dodged.
+            dodged = (
+                act_delay_ms is not None
+                or (max_dist is not None and start_dist is not None and max_dist > start_dist + 2.0)
+            )
+            time_back_in_range_ms: int | None = None
+            if dodged:
+                died_before_impact = any(
+                    r.get("kind") == "event"
+                    and r.get("event") == "died"
+                    and s0 <= int(r["t_ms"]) < s1
+                    for r in rows
+                )
+                if not died_before_impact:
+                    post_rows = sorted(
+                        (
+                            r for r in rows
+                            if s1 <= int(r["t_ms"]) <= s1 + 20000
+                            and (
+                                r.get("kind") == "event"
+                                or (
+                                    r.get("kind") == "sample"
+                                    and (inst_id == 0 or int(r.get("inst", 0)) == inst_id)
+                                )
+                            )
+                        ),
+                        key=lambda r: (
+                            int(r["t_ms"]),
+                            0 if (r.get("kind") == "event" and r.get("event") == "died") else 1,
+                        ),
+                    )
+                    dist_timeline: list[tuple[int, float, bool]] = [
+                        pt for pt in during_dist_timeline if pt[0] < s1
+                    ]
+                    for r in post_rows:
+                        if r.get("kind") == "sample":
+                            d = _sample_dist(r, cx, cy)
+                            if d is not None:
+                                dist_timeline.append((int(r["t_ms"]), d, bool(r.get("moving"))))
+
+                    for r in post_rows:
+                        t = int(r["t_ms"])
+                        kind = r.get("kind")
+                        if kind == "event":
+                            ev = r.get("event")
+                            if ev == "died":
+                                break
+                            if ev in ("damage_dealt", "cast_start") and not _is_moving_away_at(t, dist_timeline):
+                                time_back_in_range_ms = t - s1
+                                break
+                        elif kind == "sample" and start_dist is not None:
+                            d = _sample_dist(r, cx, cy)
+                            if d is not None and d <= start_dist + 3.0:
+                                time_back_in_range_ms = t - s1
+                                break
+
+            downtime_s_raw: float | None = None
+            dps_during_raw: float | None = None
+            dps_lost_raw: float | None = None
+            if time_back_in_range_ms is not None:
+                return_t = s1 + time_back_in_range_ms
+                downtime_s_raw = (return_t - s0) / 1000.0
+                dmg_during = sum(
+                    int(e.get("value", 0))
+                    for e in rows
+                    if e.get("kind") == "event"
+                    and e.get("event") == "damage_dealt"
+                    and s0 <= int(e["t_ms"]) <= return_t
+                )
+                if downtime_s_raw > 0:
+                    dps_during_raw = dmg_during / downtime_s_raw
+                if dps_before_raw is not None:
+                    dps_lost_raw = max(0.0, dps_before_raw * downtime_s_raw - dmg_during)
+
             per_bot[name] = {
                 "start_yd": round(start_dist, 1) if start_dist is not None else None,
                 "end_yd": round(end_dist, 1) if end_dist is not None else None,
@@ -169,6 +287,11 @@ def extract_dodge_timelines(
                 "move_delay_ms": move_delay_ms,
                 "impact_dmg": impact_dmg,
                 "died": died,
+                "dps_before": round(dps_before_raw, 1) if dps_before_raw is not None else None,
+                "time_back_in_range_ms": time_back_in_range_ms,
+                "downtime_s": round(downtime_s_raw, 2) if downtime_s_raw is not None else None,
+                "dps_during": round(dps_during_raw, 1) if dps_during_raw is not None else None,
+                "dps_lost": round(dps_lost_raw, 1) if dps_lost_raw is not None else None,
             }
         windows.append({
             "spell": sp,
@@ -200,7 +323,8 @@ def format_timelines(res: dict[str, Any]) -> str:
         lines.append(f"\n== +{rel:5.1f}s | {w['spell']} (dur={w['dur_s']:.2f}s{rad}{inst_s}) ==")
         lines.append(
             f"  {'Bot':8s} {'StartYd':>7s} {'EndYd':>7s} {'Safe?':>5s} "
-            f"{'ActDelay':>9s} {'MoveDelay':>10s} {'ImpactDmg':>9s} {'Died':>4s}  Act"
+            f"{'ActDelay':>9s} {'MoveDelay':>10s} {'ImpactDmg':>9s} {'Died':>4s} "
+            f"{'BackMs':>8s} {'DmgLost':>8s}  Act"
         )
         for name, b in w["bots"].items():
             sy = f"{b['start_yd']:.1f}" if b["start_yd"] is not None else "-"
@@ -210,10 +334,32 @@ def format_timelines(res: dict[str, Any]) -> str:
             md = "NEVER" if b["move_delay_ms"] is None else (
                 "already" if b["move_delay_ms"] == "already" else f"{b['move_delay_ms']}ms"
             )
+            bm = f"{b['time_back_in_range_ms']}ms" if b.get("time_back_in_range_ms") is not None else "-"
+            dl = f"{b['dps_lost']:.0f}" if b.get("dps_lost") is not None else "-"
             lines.append(
                 f"  {name:8s} {sy:>7s} {ey:>7s} {sf:>5s} {ad:>9s} {md:>10s} "
-                f"{b['impact_dmg']:>9d} {'YES' if b['died'] else 'no':>4s}  {b['act_detail']}"
+                f"{b['impact_dmg']:>9d} {'YES' if b['died'] else 'no':>4s} "
+                f"{bm:>8s} {dl:>8s}  {b['act_detail']}"
             )
+    back_vals = [
+        b["time_back_in_range_ms"]
+        for w in windows
+        for b in w["bots"].values()
+        if b.get("time_back_in_range_ms") is not None
+    ]
+    lost_vals = [
+        b["dps_lost"]
+        for w in windows
+        for b in w["bots"].values()
+        if b.get("dps_lost") is not None
+    ]
+    if back_vals or lost_vals:
+        med_back = f"{statistics.median(back_vals):.0f}ms" if back_vals else "-"
+        med_lost = f"{statistics.median(lost_vals):.0f}" if lost_vals else "-"
+        lines.append(
+            f"\nDodge recovery summary (n={len(back_vals)}): "
+            f"median_back_ms={med_back}, median_dps_lost={med_lost}"
+        )
     return "\n".join(lines)
 
 

@@ -80,9 +80,9 @@ ICK_NOTES = """# Pit of Saron — Ick & Krick
 - **Pursuit**: Ick fixates on one player for 12s and chases them (taunt-immune).
   - Standing order: `Pursuit on me -> kite Ick`
 - **Poison Nova**: 5s cast dealing heavy nature damage within 15 yd.
-  - Standing order: `Poison Nova cast -> away Ick 22`
+  - Standing order: `Poison Nova cast -> out of it`
 - **Toxic Waste**: green poison pools on the ground.
-  - Standing order: `Toxic Waste appears -> avoid Toxic Waste`
+  - Standing order: `in Toxic Waste -> out of it`
 """
 
 DEVOURER_NOTES = """# The Forge of Souls — Devourer of Souls
@@ -92,13 +92,13 @@ DEVOURER_NOTES = """# The Forge of Souls — Devourer of Souls
 - **Wailing Souls**: sweeping frontal beam; stay behind the boss.
   - Standing order: `Wailing Souls cast -> to behind Devourer of Souls`
 - **Well of Souls**: purple void zone on the ground.
-  - Standing order: `Well of Souls appears -> avoid Well of Souls`
+  - Standing order: `in Well of Souls -> out of it`
 - **Phantom Blast**: heavy shadow nuke on tank; interrupt when possible.
 """
 
 LOKEN_NOTES = """# Halls of Lightning — Loken
-- **Lightning Nova**: 4s cast dealing heavy AoE damage within 20 yd; run >=25 yd away!
-  - Standing order: `Lightning Nova cast -> away Loken 25`
+- **Lightning Nova**: 4s cast dealing heavy AoE damage within 20 yd; step just outside the radius and return after it lands.
+  - Standing order: `Lightning Nova cast -> out of it`
 - **Pulsing Shockwave**: deals stacking nature damage that grows with distance from Loken; stay close to Loken when not dodging Lightning Nova.
 """
 
@@ -110,23 +110,24 @@ EREGOS_NOTES = """# The Oculus — Ley-Guardian Eregos (3D Drake Vehicle Fight)
 """
 
 MURMUR_NOTES = """# Shadow Labyrinth — Murmur
-- **Sonic Boom**: 5s cast dealing massive damage within 34 yards!
-  - Standing order: `Sonic Boom cast -> away Murmur 38`
+- **Sonic Boom**: 5s cast dealing massive damage within 34 yards; step just outside the radius and return after it lands.
+  - Standing order: `Sonic Boom cast -> out of it`
 - **Murmur's Touch**: bomb debuff on one player; move away from allies so you don't knock them up.
   - Standing order: `Murmur's Touch on me -> away`
 """
 
 IKISS_NOTES = """# Sethekk Halls — Talon King Ikiss
-- **Arcane Explosion**: after Blinking, casts a 5s lethal AoE; run far away or break line of sight behind a pillar.
-  - Standing order: `Arcane Explosion cast -> away Talon King Ikiss 35`
+- **Arcane Explosion**: after Blinking, casts a 5s lethal AoE; step just outside the radius and return after it lands.
+  - Standing order: `Arcane Explosion cast -> out of it`
 - **Polymorph**: sheeps a party member; dispellers dispel it promptly.
 """
 
 KAELTHAS_NOTES = """# Magisters' Terrace — Kael'thas Sunstrider
-- **Phoenix / Phoenix Egg**: switch immediately to kill the Phoenix and destroy the **Phoenix Egg** before it hatches!
+- **Flame Strike**: fiery ground AoE pillar that explodes after 5s; move out immediately whenever you are inside it!
+  - Standing order: `in Flame Strike -> out of it`
+- **Phoenix / Phoenix Egg**: switch immediately to destroy the **Phoenix Egg** before it hatches, and stay clear of burning Phoenix aura.
   - Standing order: `Phoenix Egg appears -> target nearest Phoenix Egg`
-- **Flame Strike**: fiery ground AoE; move out immediately.
-  - Standing order: `Flame Strike appears -> avoid Flame Strike`
+  - Standing order: `Phoenix within 10 -> away Phoenix 13`
 - **Fireball**: interruptible nuke on the tank.
 - **Gravity Lapse**: floats everyone in the air and spawns Arcane Spheres; stay clear of spheres.
 """
@@ -174,6 +175,7 @@ BOSSES = {
         tag="devourer_coord",
         boss_name="Devourer of Souls",
         level=80,
+        gear_quality=2,
         map_id=632,
         stage_xyz=(4922.86, 2175.63, 639.0),
         spawn_xyz=(5645.0, 2507.4, 708.9),
@@ -186,6 +188,7 @@ BOSSES = {
         tag="loken_nova",
         boss_name="Loken",
         level=80,
+        gear_quality=2,
         map_id=602,
         stage_xyz=(1331.47, 259.62, 53.4),
         spawn_xyz=(1170.0, 33.83, 60.81),
@@ -727,6 +730,7 @@ def run_boss_waves(
     map_id: int,
     stage_xyz: tuple[float, float, float],
     spawn_xyz: tuple[float, float, float],
+    gear_quality: int | None = None,
     strip_strat: str = "",
     attune_quests: list[int] | None = None,
     role_items: dict[int, int] | None = None,
@@ -818,8 +822,9 @@ def run_boss_waves(
             gear_specs = []
             for name, _, spec_tab, _ in all_bots:
                 tok = _next_console_token()
+                q_arg = f" {gear_quality}" if gear_quality is not None else ""
                 gear_specs.append((
-                    f"llmtest gear {name} {level} {spec_tab} {tok}",
+                    f"llmtest gear {name} {level} {spec_tab} {tok}{q_arg}",
                     f"geared {name} at level {level}",
                     tok,
                 ))

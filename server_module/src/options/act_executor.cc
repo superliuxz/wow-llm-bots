@@ -19,6 +19,7 @@
 #include "Cell.h"
 #include "CharmInfo.h"
 #include "Creature.h"
+#include "DBCStructure.h"
 #include "DynamicObject.h"
 #include "G3D/Vector3.h"
 #include "GameObject.h"
@@ -686,6 +687,206 @@ std::optional<BagSlotItem> FindBagItemByName(Player* bot,
   return std::nullopt;
 }
 
+// Computes max DBC effect radius in yards for a spell.
+float MaxSpellRadiusYd(const SpellInfo* info,
+                       Unit* caster,
+                       Spell* spell = nullptr) {
+  if (!info) {
+    return 0.0f;
+  }
+  float max_r = 0.0f;
+  for (uint8_t eff = 0; eff < MAX_SPELL_EFFECTS; ++eff) {
+    const float r = info->Effects[eff].CalcRadius(caster, spell);
+    if (r > max_r) {
+      max_r = r;
+    }
+  }
+  return max_r;
+}
+
+// Per-bot last interrupted activity (world thread only) so explicit `then back`
+// can return to the pre-dodge spot/range.
+std::vector<std::pair<uint64_t, ActiveAct::InterruptedActivity>>&
+LastInterruptedStore() {
+  static std::vector<std::pair<uint64_t, ActiveAct::InterruptedActivity>> store;
+  return store;
+}
+
+void SaveLastInterrupted(uint64_t bot_guid,
+                         const ActiveAct::InterruptedActivity& info) {
+  auto& store = LastInterruptedStore();
+  for (auto& [guid, saved] : store) {
+    if (guid == bot_guid) {
+      saved = info;
+      return;
+    }
+  }
+  if (store.size() >= 256) {
+    store.erase(store.begin());
+  }
+  store.emplace_back(bot_guid, info);
+}
+
+std::optional<ActiveAct::InterruptedActivity> LoadLastInterrupted(
+    uint64_t bot_guid) {
+  for (const auto& [guid, saved] : LastInterruptedStore()) {
+    if (guid == bot_guid && saved.active) {
+      return saved;
+    }
+  }
+  return std::nullopt;
+}
+
+ActiveAct::InterruptedActivity CaptureInterruptedActivity(Player* bot) {
+  ActiveAct::InterruptedActivity info;
+  info.active = true;
+  info.prev_pos = PosOf(bot);
+  Unit* target = bot->GetVictim();
+  info.was_attacking = (target != nullptr);
+  if (!target) {
+    target = bot->GetSelectedUnit();
+  }
+  if (target && target->IsAlive() && target != bot &&
+      bot->IsHostileTo(target)) {
+    info.target_guid = target->GetGUID().GetRawValue();
+    info.prev_target_dist_yd = bot->GetDistance(target);
+  }
+  return info;
+}
+
+bool IsCasterStillCasting(Player* bot,
+                          uint64_t caster_guid,
+                          uint32_t spell_id) {
+  if (caster_guid == 0 || spell_id == 0) {
+    return false;
+  }
+  Unit* caster = ObjectAccessor::GetUnit(*bot, ObjectGuid(caster_guid));
+  if (!caster || !caster->IsAlive()) {
+    return false;
+  }
+  if (Spell* sp = caster->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+      sp && sp->getState() == SPELL_STATE_PREPARING && sp->GetSpellInfo() &&
+      sp->GetSpellInfo()->Id == spell_id) {
+    return true;
+  }
+  if (Spell* ch = caster->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
+      ch && ch->getState() != SPELL_STATE_FINISHED && ch->GetSpellInfo() &&
+      ch->GetSpellInfo()->Id == spell_id) {
+    return true;
+  }
+  return false;
+}
+
+bool SpotInsideHostileArea(Player* bot, const pb::Vec3& spot) {
+  for (DynamicObject* dyn : NearbyAreas(bot, 40.0f)) {
+    Unit* caster = dyn->GetCaster();
+    if (!caster || !bot->IsHostileTo(caster)) {
+      continue;
+    }
+    const float r = std::max(dyn->GetRadius(), 3.0f);
+    if (Dist2D(spot, PosOf(dyn)) <= r + 1.0f) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::optional<pb::Vec3> PreferredEscapePos(Player* bot) {
+  Group* grp = bot->GetGroup();
+  if (!grp) {
+    return std::nullopt;
+  }
+  // Prefer moving toward the tank (if bot is not the tank), else group
+  // centroid.
+  float sum_x = 0.0f;
+  float sum_y = 0.0f;
+  float sum_z = 0.0f;
+  int count = 0;
+  for (const Group::MemberSlot& slot : grp->GetMemberSlots()) {
+    if (slot.guid == bot->GetGUID()) {
+      continue;
+    }
+    Player* member = ObjectAccessor::FindPlayer(slot.guid);
+    if (!member || !member->IsInWorld() || !member->IsAlive() ||
+        member->GetMapId() != bot->GetMapId() ||
+        bot->GetDistance(member) > 60.0f) {
+      continue;
+    }
+    if ((slot.flags & MEMBER_FLAG_MAINTANK) != 0 ||
+        (slot.roles & lfg::PLAYER_ROLE_TANK) != 0) {
+      return PosOf(member);
+    }
+    sum_x += member->GetPositionX();
+    sum_y += member->GetPositionY();
+    sum_z += member->GetPositionZ();
+    ++count;
+  }
+  if (count > 0) {
+    return pb::Vec3{sum_x / static_cast<float>(count),
+                    sum_y / static_cast<float>(count),
+                    sum_z / static_cast<float>(count)};
+  }
+  return std::nullopt;
+}
+
+struct HazardInfo {
+  AnchorGeometry anchor;
+  float radius_yd = 0.0f;
+  float lands_in_s = 0.0f;
+  uint64_t caster_guid = 0;
+  uint32_t spell_id = 0;
+  bool is_ground_area = false;
+};
+
+// Resolves a synthetic `"trigger:<guid>"` id (from `nearby_builder.cc`) to the
+// hidden trigger creature's ground position and active cast/aura radius.
+std::optional<HazardInfo> ResolveTriggerHazard(Player* bot,
+                                               std::string_view guid_str) {
+  constexpr std::string_view kPrefix = "trigger:";
+  if (!guid_str.starts_with(kPrefix)) {
+    return std::nullopt;
+  }
+  ObjectGuid trigger_guid = ParseSnapshotGuid(guid_str.substr(kPrefix.size()));
+  if (trigger_guid.IsEmpty()) {
+    return std::nullopt;
+  }
+  Creature* trigger = ObjectAccessor::GetCreature(*bot, trigger_guid);
+  if (!trigger || !trigger->IsAlive()) {
+    return std::nullopt;
+  }
+  HazardInfo h;
+  h.anchor = {PosOf(trigger), 0.0f, 0.0f};
+  h.is_ground_area = true;
+  if (Spell* cast = trigger->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+      cast && cast->getState() == SPELL_STATE_PREPARING) {
+    const SpellInfo* info = cast->GetSpellInfo();
+    h.radius_yd = MaxSpellRadiusYd(info, trigger, cast);
+    h.lands_in_s =
+        static_cast<float>(std::max(0, cast->GetCastTimeRemaining())) / 1000.0f;
+    h.caster_guid = trigger->GetGUID().GetRawValue();
+    h.spell_id = info ? info->Id : 0;
+  } else {
+    for (const auto& [spell_id, aura_app] : trigger->GetAppliedAuras()) {
+      if (!aura_app || !aura_app->GetBase()) {
+        continue;
+      }
+      const SpellInfo* ainfo = aura_app->GetBase()->GetSpellInfo();
+      if (!ainfo || ainfo->IsPassive()) {
+        continue;
+      }
+      if (ainfo->SpellVisual[0] == 0 && ainfo->SpellVisual[1] == 0) {
+        continue;
+      }
+      h.radius_yd = MaxSpellRadiusYd(ainfo, trigger);
+      break;
+    }
+  }
+  if (h.radius_yd <= 0.0f) {
+    h.radius_yd = 8.0f;
+  }
+  return h;
+}
+
 // Resolves a synthetic `"impact:<caster_guid>"` id (from `nearby_builder.cc`)
 // to the ground-targeted cast's landing spot.
 std::optional<AnchorGeometry> ResolveImpactAnchor(Player* bot,
@@ -714,12 +915,189 @@ std::optional<AnchorGeometry> ResolveImpactAnchor(Player* bot,
   return std::nullopt;
 }
 
+std::optional<HazardInfo> ResolveHazard(Player* bot,
+                                        const pb::Command_Act& act) {
+  if (!act.it_guid.empty()) {
+    if (std::optional<HazardInfo> th = ResolveTriggerHazard(bot, act.it_guid)) {
+      return th;
+    }
+    constexpr std::string_view kImpactPrefix = "impact:";
+    if (act.it_guid.starts_with(kImpactPrefix)) {
+      ObjectGuid caster_guid =
+          ParseSnapshotGuid(act.it_guid.substr(kImpactPrefix.size()));
+      if (!caster_guid.IsEmpty()) {
+        if (Unit* caster = ObjectAccessor::GetUnit(*bot, caster_guid);
+            caster && caster->IsAlive()) {
+          if (Spell* cast = caster->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+              cast && cast->getState() == SPELL_STATE_PREPARING &&
+              cast->m_targets.HasDst()) {
+            if (const WorldLocation* dst = cast->m_targets.GetDstPos()) {
+              const SpellInfo* info = cast->GetSpellInfo();
+              HazardInfo h;
+              h.anchor = {{dst->GetPositionX(), dst->GetPositionY(),
+                           dst->GetPositionZ()},
+                          0.0f,
+                          0.0f};
+              h.radius_yd = MaxSpellRadiusYd(info, caster, cast);
+              if (h.radius_yd <= 0.0f) {
+                h.radius_yd = 5.0f;
+              }
+              h.lands_in_s = static_cast<float>(
+                                 std::max(0, cast->GetCastTimeRemaining())) /
+                             1000.0f;
+              h.caster_guid = caster->GetGUID().GetRawValue();
+              h.spell_id = info ? info->Id : 0;
+              return h;
+            }
+          }
+        }
+      }
+    }
+  }
+  WorldObject* obj = nullptr;
+  if (act.thing != pb::Command_Act::THING_UNSPECIFIED) {
+    const std::string_view thing_name =
+        !act.target_name.empty() ? act.target_name : act.name;
+    obj = ResolveThing(bot, act, thing_name);
+  } else if (!act.it_guid.empty() || !act.it_name.empty()) {
+    pb::Command_Act it_act = act;
+    it_act.thing = pb::Command_Act::IT;
+    obj = ResolveThing(bot, it_act, act.it_name);
+  }
+  if (obj) {
+    if (DynamicObject* dyn = obj->ToDynObject()) {
+      HazardInfo h;
+      h.anchor = {PosOf(dyn), 0.0f, 0.0f};
+      h.radius_yd = dyn->GetRadius() > 0.0f ? dyn->GetRadius() : 5.0f;
+      h.is_ground_area = true;
+      return h;
+    }
+    if (Unit* u = obj->ToUnit()) {
+      HazardInfo h;
+      h.anchor = AnchorOf(u);
+      Spell* sp = u->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+      if (!sp || sp->getState() != SPELL_STATE_PREPARING) {
+        sp = u->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
+        if (sp && sp->getState() == SPELL_STATE_FINISHED) {
+          sp = nullptr;
+        }
+      }
+      if (sp) {
+        const SpellInfo* info = sp->GetSpellInfo();
+        const float r = MaxSpellRadiusYd(info, u, sp);
+        if (sp->m_targets.HasDst()) {
+          if (const WorldLocation* dst = sp->m_targets.GetDstPos()) {
+            h.anchor.pos = {dst->GetPositionX(), dst->GetPositionY(),
+                            dst->GetPositionZ()};
+            h.anchor.radius_yd = 0.0f;
+          }
+        }
+        if (r > 0.0f) {
+          h.radius_yd = r;
+        }
+        h.lands_in_s =
+            static_cast<float>(std::max(0, sp->GetCastTimeRemaining())) /
+            1000.0f;
+        h.caster_guid = u->GetGUID().GetRawValue();
+        h.spell_id = info ? info->Id : 0;
+      }
+      if (h.radius_yd <= 0.0f) {
+        h.radius_yd = act.yd > 0.0f ? act.yd : kDefaultAwayYd;
+      }
+      return h;
+    }
+    HazardInfo h;
+    h.anchor = AnchorOf(obj);
+    h.radius_yd = act.yd > 0.0f ? act.yd : kDefaultAwayYd;
+    return h;
+  }
+  return std::nullopt;
+}
+
+// Starts returning the bot to its interrupted engagement range/position after
+// a dodge finishes. Returns true if already in range / done (no return walk
+// needed), false if a return walk is now active (`active->dodge_phase =
+// kReturning`).
+bool StartReturnToInterrupted(Player* bot,
+                              ActiveAct* active,
+                              base::TimeTicks now) {
+  const ActiveAct::InterruptedActivity& intr = active->interrupted;
+  if (!intr.active) {
+    bot->StopMoving();
+    ClearActMovement(bot);
+    return true;
+  }
+  const pb::Vec3 bot_pos = PosOf(bot);
+  const float bot_reach = bot->GetCombatReach();
+  Unit* target = nullptr;
+  if (intr.target_guid != 0) {
+    target = ObjectAccessor::GetUnit(*bot, ObjectGuid(intr.target_guid));
+    if (target && (!target->IsAlive() || !bot->IsHostileTo(target))) {
+      target = nullptr;
+    }
+  }
+  if (target && bot->GetTarget().IsEmpty()) {
+    bot->SetSelection(target->GetGUID());
+  }
+  if (target) {
+    const float max_range = BotMaxSpellRangeYd(bot);
+    const float desired_dist = std::clamp(intr.prev_target_dist_yd, 2.0f,
+                                          std::max(5.0f, max_range - 3.0f));
+    const float cur_dist = bot->GetDistance(target);
+    if (cur_dist <= desired_dist + 2.5f) {
+      bot->StopMoving();
+      ClearActMovement(bot);
+      return true;
+    }
+    const AnchorGeometry target_anchor = AnchorOf(target);
+    std::vector<pb::Vec3> candidates =
+        CandidateSpotsForPlace(pb::Command_Act::YD_FROM, bot_pos, target_anchor,
+                               desired_dist, max_range, bot_reach);
+    std::vector<pb::Vec3> safe_candidates;
+    safe_candidates.reserve(candidates.size());
+    for (const pb::Vec3& c : candidates) {
+      if (!SpotInsideHostileArea(bot, c)) {
+        safe_candidates.push_back(c);
+      }
+    }
+    if (!safe_candidates.empty()) {
+      if (std::optional<pb::Vec3> chosen =
+              MoveToFirstValidSpot(bot, safe_candidates, &target_anchor)) {
+        active->dodge_phase = ActiveAct::DodgePhase::kReturning;
+        active->dest = *chosen;
+        active->last_repath_at = now;
+        return false;
+      }
+    }
+    bot->StopMoving();
+    ClearActMovement(bot);
+    return true;
+  }
+  if (!active->hazard_is_ground_area &&
+      Dist2D(bot_pos, intr.prev_pos) > kArrivalToleranceYd + 1.0f &&
+      !SpotInsideHostileArea(bot, intr.prev_pos)) {
+    if (std::optional<pb::Vec3> chosen =
+            MoveToFirstValidSpot(bot, {intr.prev_pos}, nullptr)) {
+      active->dodge_phase = ActiveAct::DodgePhase::kReturning;
+      active->dest = *chosen;
+      active->last_repath_at = now;
+      return false;
+    }
+  }
+  bot->StopMoving();
+  ClearActMovement(bot);
+  return true;
+}
+
 // Resolves the anchor for `to` or `away`. For bare `away` (no `thing`), uses
 // `it` when bound (including ground-spell impact spots), otherwise the nearest
 // hostile dynamic area if standing near one, otherwise `bot`'s current spot.
 std::optional<AnchorGeometry> ResolveMoveAnchor(Player* bot,
                                                 const pb::Command_Act& act) {
   if (!act.it_guid.empty()) {
+    if (std::optional<HazardInfo> th = ResolveTriggerHazard(bot, act.it_guid)) {
+      return th->anchor;
+    }
     if (std::optional<AnchorGeometry> impact =
             ResolveImpactAnchor(bot, act.it_guid)) {
       return impact;
@@ -956,6 +1334,78 @@ ActStartResult StartAct(Player* bot,
       return {.error = "unknown spell or item: " + act.name};
     }
 
+    case pb::Command_Act::OUT_OF: {
+      std::optional<HazardInfo> hazard = ResolveHazard(bot, act);
+      if (!hazard) {
+        return {.error = "hazard not found"};
+      }
+      const pb::Vec3 bot_pos = PosOf(bot);
+      const float cur_dist = Dist2D(bot_pos, hazard->anchor.pos);
+      if (hazard->radius_yd > 0.0f && cur_dist >= hazard->radius_yd + 0.5f) {
+        // Already outside the hazard radius — skip dodge.
+        return {.done = true};
+      }
+      if (hazard->lands_in_s > 0.0f &&
+          !CanEscapeBeforeImpact(cur_dist, hazard->radius_yd,
+                                 bot->GetSpeed(MOVE_RUN), hazard->lands_in_s)) {
+        // Impact lands before the bot could exit — skip wasted movement.
+        return {.done = true};
+      }
+      std::vector<pb::Vec3> candidates = CandidateSpotsForOutOf(
+          bot_pos, hazard->anchor, hazard->radius_yd, PreferredEscapePos(bot));
+      if (candidates.empty()) {
+        return {.done = true};
+      }
+      if (Dist2D(bot_pos, candidates.front()) <= kArrivalToleranceYd) {
+        return {.done = true};
+      }
+      std::optional<pb::Vec3> chosen =
+          MoveToFirstValidSpot(bot, candidates, nullptr);
+      if (!chosen) {
+        return {.error = "no path out of hazard"};
+      }
+      const ActiveAct::InterruptedActivity intr =
+          CaptureInterruptedActivity(bot);
+      SaveLastInterrupted(bot->GetGUID().GetRawValue(), intr);
+      out_active->command_id = command_id;
+      out_active->act = act;
+      out_active->dest = *chosen;
+      out_active->last_anchor = hazard->anchor;
+      out_active->away_target_edge_yd =
+          hazard->radius_yd + kDefaultOutOfMarginYd;
+      out_active->hazard_radius_yd = hazard->radius_yd;
+      out_active->hazard_is_ground_area = hazard->is_ground_area;
+      out_active->hazard_caster_guid = hazard->caster_guid;
+      out_active->hazard_spell_id = hazard->spell_id;
+      out_active->dodge_phase = ActiveAct::DodgePhase::kMovingOut;
+      out_active->hold_deadline =
+          now +
+          base::Milliseconds(static_cast<int64_t>(
+                                 std::max(0.0f, hazard->lands_in_s) * 1000.0f) +
+                             1000);
+      out_active->interrupted = intr;
+      out_active->last_repath_at = now;
+      out_active->waiting_cast = false;
+      return {.done = false};
+    }
+
+    case pb::Command_Act::BACK: {
+      std::optional<ActiveAct::InterruptedActivity> intr =
+          LoadLastInterrupted(bot->GetGUID().GetRawValue());
+      if (!intr) {
+        return {.done = true};
+      }
+      out_active->command_id = command_id;
+      out_active->act = act;
+      out_active->interrupted = *intr;
+      out_active->last_repath_at = now;
+      out_active->waiting_cast = false;
+      if (StartReturnToInterrupted(bot, out_active, now)) {
+        return {.done = true};
+      }
+      return {.done = false};
+    }
+
     case pb::Command_Act::TO:
     case pb::Command_Act::AWAY: {
       std::optional<AnchorGeometry> anchor = ResolveMoveAnchor(bot, act);
@@ -968,15 +1418,24 @@ ActStartResult StartAct(Player* bot,
                                act.place == pb::Command_Act::MAX_RANGE)
                                   ? BotMaxSpellRangeYd(bot)
                                   : kDefaultMaxRangeYd;
+      std::optional<HazardInfo> hazard;
+      if (act.verb == pb::Command_Act::AWAY) {
+        hazard = ResolveHazard(bot, act);
+      }
+      const float away_yd =
+          (act.verb == pb::Command_Act::AWAY && act.yd <= 0.0f && hazard &&
+           hazard->radius_yd > 0.0f)
+              ? (hazard->radius_yd + kDefaultOutOfMarginYd)
+              : act.yd;
       const float away_target_edge_yd =
-          act.yd > 0.0f
-              ? act.yd
+          away_yd > 0.0f
+              ? away_yd
               : (EdgeDist2D(bot_pos, bot_reach, *anchor) + kDefaultAwayYd);
       std::vector<pb::Vec3> candidates =
           (act.verb == pb::Command_Act::TO)
               ? CandidateSpotsForPlace(act.place, bot_pos, *anchor, act.yd,
                                        max_range, bot_reach)
-              : CandidateSpotsForAway(bot_pos, *anchor, act.yd, bot_reach);
+              : CandidateSpotsForAway(bot_pos, *anchor, away_yd, bot_reach);
       if (candidates.empty()) {
         // Already far enough away.
         return {.done = true};
@@ -1001,6 +1460,24 @@ ActStartResult StartAct(Player* bot,
       out_active->away_target_edge_yd = away_target_edge_yd;
       out_active->last_repath_at = now;
       out_active->waiting_cast = false;
+      if (act.verb == pb::Command_Act::AWAY) {
+        const ActiveAct::InterruptedActivity intr =
+            CaptureInterruptedActivity(bot);
+        SaveLastInterrupted(bot->GetGUID().GetRawValue(), intr);
+        out_active->interrupted = intr;
+        out_active->dodge_phase = ActiveAct::DodgePhase::kMovingOut;
+        if (hazard) {
+          out_active->hazard_radius_yd = hazard->radius_yd;
+          out_active->hazard_is_ground_area = hazard->is_ground_area;
+          out_active->hazard_caster_guid = hazard->caster_guid;
+          out_active->hazard_spell_id = hazard->spell_id;
+          out_active->hold_deadline =
+              now + base::Milliseconds(
+                        static_cast<int64_t>(
+                            std::max(0.0f, hazard->lands_in_s) * 1000.0f) +
+                        1000);
+        }
+      }
       return {.done = false};
     }
 
@@ -1367,32 +1844,127 @@ ActStepResult StepActiveAct(Player* bot,
     return {};
   }
 
-  if (act.verb != pb::Command_Act::TO && act.verb != pb::Command_Act::AWAY) {
+  if (act.verb != pb::Command_Act::TO && act.verb != pb::Command_Act::AWAY &&
+      act.verb != pb::Command_Act::OUT_OF &&
+      act.verb != pb::Command_Act::BACK) {
     return {.done = true};
   }
 
   const pb::Vec3 bot_pos = PosOf(bot);
   const float bot_reach = bot->GetCombatReach();
-  if (act.verb == pb::Command_Act::AWAY) {
-    const float target_yd = active->away_target_edge_yd > 0.0f
-                                ? active->away_target_edge_yd
-                                : (act.yd > 0.0f ? act.yd : kDefaultAwayYd);
-    if (EdgeDist2D(bot_pos, bot_reach, active->last_anchor) >= target_yd ||
-        Dist2D(bot_pos, active->dest) <= kArrivalToleranceYd) {
+  if (act.verb == pb::Command_Act::BACK ||
+      ((act.verb == pb::Command_Act::AWAY ||
+        act.verb == pb::Command_Act::OUT_OF) &&
+       active->dodge_phase == ActiveAct::DodgePhase::kReturning)) {
+    bool back_in_range =
+        Dist2D(bot_pos, active->dest) <= kArrivalToleranceYd + 1.0f;
+    if (!back_in_range && active->interrupted.target_guid != 0) {
+      if (Unit* target = ObjectAccessor::GetUnit(
+              *bot, ObjectGuid(active->interrupted.target_guid));
+          target && target->IsAlive()) {
+        const float max_range = BotMaxSpellRangeYd(bot);
+        const float desired_dist =
+            std::clamp(active->interrupted.prev_target_dist_yd, 2.0f,
+                       std::max(5.0f, max_range - 3.0f));
+        if (bot->GetDistance(target) <= desired_dist + 2.5f) {
+          back_in_range = true;
+        }
+      }
+    }
+    if (back_in_range) {
       bot->StopMoving();
       ClearActMovement(bot);
       return {.done = true};
+    }
+    if (now - active->last_repath_at >= kRepathInterval && !bot->isMoving()) {
+      active->last_repath_at = now;
+      if (StartReturnToInterrupted(bot, active, now)) {
+        return {.done = true};
+      }
+    }
+    return {};
+  }
+
+  if (act.verb == pb::Command_Act::AWAY ||
+      act.verb == pb::Command_Act::OUT_OF) {
+    const bool cast_active =
+        active->hazard_caster_guid != 0 && active->hazard_spell_id != 0 &&
+        IsCasterStillCasting(bot, active->hazard_caster_guid,
+                             active->hazard_spell_id);
+    if (active->dodge_phase == ActiveAct::DodgePhase::kHolding) {
+      if (cast_active && now < active->hold_deadline) {
+        if (now - active->last_repath_at >= kRepathInterval) {
+          active->last_repath_at = now;
+          if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot)) {
+            if (auto* last = ai->GetAiObjectContext()->GetValue<LastMovement&>(
+                    "last movement")) {
+              last->Get().Set(bot->GetMapId(), bot->GetPositionX(),
+                              bot->GetPositionY(), bot->GetPositionZ(),
+                              bot->GetOrientation(), 500.0f,
+                              MovementPriority::MOVEMENT_FORCED);
+            }
+          }
+        }
+        return {};
+      }
+      if (StartReturnToInterrupted(bot, active, now)) {
+        return {.done = true};
+      }
+      return {};
+    }
+
+    // If we were dodging a cast and the cast already ended (landed or
+    // interrupted), stop running further away and return immediately.
+    if (active->hazard_caster_guid != 0 && active->hazard_spell_id != 0 &&
+        !cast_active) {
+      if (StartReturnToInterrupted(bot, active, now)) {
+        return {.done = true};
+      }
+      return {};
+    }
+
+    const float target_yd = active->away_target_edge_yd > 0.0f
+                                ? active->away_target_edge_yd
+                                : (act.yd > 0.0f ? act.yd : kDefaultAwayYd);
+    const float cur_metric =
+        (act.verb == pb::Command_Act::OUT_OF)
+            ? Dist2D(bot_pos, active->last_anchor.pos)
+            : EdgeDist2D(bot_pos, bot_reach, active->last_anchor);
+    if (cur_metric >= target_yd ||
+        Dist2D(bot_pos, active->dest) <= kArrivalToleranceYd) {
+      if (cast_active && now < active->hold_deadline) {
+        bot->StopMoving();
+        active->dodge_phase = ActiveAct::DodgePhase::kHolding;
+        active->last_repath_at = now;
+        return {};
+      }
+      if (StartReturnToInterrupted(bot, active, now)) {
+        return {.done = true};
+      }
+      return {};
     }
     // Keep the anchor fixed from StartAct so bare `away` (anchored on the
     // starting spot) and `away <moving mob>` finish cleanly instead of
     // chasing a shifting anchor forever.
     if (now - active->last_repath_at >= kRepathInterval && !bot->isMoving()) {
       active->last_repath_at = now;
-      std::vector<pb::Vec3> candidates = CandidateSpotsForAway(
-          bot_pos, active->last_anchor, target_yd, bot_reach);
+      std::vector<pb::Vec3> candidates =
+          (act.verb == pb::Command_Act::OUT_OF)
+              ? CandidateSpotsForOutOf(bot_pos, active->last_anchor,
+                                       active->hazard_radius_yd,
+                                       PreferredEscapePos(bot))
+              : CandidateSpotsForAway(bot_pos, active->last_anchor, target_yd,
+                                      bot_reach);
       if (candidates.empty()) {
-        ClearActMovement(bot);
-        return {.done = true};
+        if (cast_active && now < active->hold_deadline) {
+          bot->StopMoving();
+          active->dodge_phase = ActiveAct::DodgePhase::kHolding;
+          return {};
+        }
+        if (StartReturnToInterrupted(bot, active, now)) {
+          return {.done = true};
+        }
+        return {};
       }
       std::optional<pb::Vec3> chosen =
           MoveToFirstValidSpot(bot, candidates, nullptr);
@@ -1455,6 +2027,7 @@ void CancelActiveAct(Player* bot, ActiveAct* active) {
   }
   const pb::Command_Act::Verb verb = active->act.verb;
   if (verb == pb::Command_Act::TO || verb == pb::Command_Act::AWAY ||
+      verb == pb::Command_Act::OUT_OF || verb == pb::Command_Act::BACK ||
       verb == pb::Command_Act::KITE || verb == pb::Command_Act::INTERACT ||
       verb == pb::Command_Act::BOARD) {
     if (bot->IsInWorld()) {

@@ -9,7 +9,8 @@ Last updated 2026-11-21.
 
 ## In progress
 
-(none)
+- **Phase 1 (`A1` dodge-then-return, `A2` server-radius-aware acts):** implementing cast `radius_yd`/`impact_pos` in snapshot, trigger-area perception (e.g., Flame Strike `24666`/`44191`), `in <mech>` / `out of <thing>` / `back` grammar + executor (with radius+margin toward tank/group, already-outside & unreachable-before-impact skip, hold-until-cast-ends + auto-resume interrupted activity), and `dodge_timeline.py` DPS-lost / time-back-in-range metrics.
+- **Phase 2 (`A3` script-generated notes + grammar parity, `A4` pre-pull standing-order compilation on instance entry, `C1` trace-mined offline eval cases):** implementing playerbots-script-to-notes extractor, instance-entry pre-pull standing-order compilation + cache + mid-fight order preservation, trace-to-eval miner, and boss benchmarking with lowered gear on Devourer/Loken (pre-registered primary comparisons + Holm–Bonferroni correction).
 
 ## Next, in order
 

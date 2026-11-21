@@ -108,6 +108,8 @@ void BotLoop::OnConnectionChanged(bool connected) {
       state.latest_snapshot.reset();
       state.look_deadline = base::TimeTicks();
       state.has_ever_woken = false;
+      state.was_in_instance = false;
+      state.last_map.clear();
       state.has_queued_wake = false;
       state.call_in_flight = false;
       state.early_steps_dispatched = false;
@@ -227,10 +229,49 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   state.latest_received_at = received_at;
 
   const bool look_woke = OnLookSnapshot(bot, &state, received_at);
+
+  // Pre-pull standing-order compilation on instance entry (A4): when a bot
+  // enters an instance with boss notes, install cached compiled orders at once
+  // or wake urgently out-of-combat to compile them before the pull.
+  const bool in_instance = state.latest_snapshot->base.where.in_instance;
+  const std::string cur_map = state.latest_snapshot->base.where.map;
+  const bool entered_instance =
+      in_instance && (!state.was_in_instance || state.last_map != cur_map);
+  state.was_in_instance = in_instance;
+  state.last_map = cur_map;
+  bool pre_pull_woke = false;
+  if (entered_instance) {
+    if (!config_.bots_dir.empty()) {
+      state.notes =
+          ReadFile(base::StrCat({config_.bots_dir, "/", bot, "/notes.md"}))
+              .value_or("");
+    }
+    if (!state.notes.empty()) {
+      const CompiledOrdersKey key{bot, cur_map, state.notes};
+      if (auto cache_it = compiled_orders_cache_.find(key);
+          cache_it != compiled_orders_cache_.end() &&
+          !cache_it->second.empty()) {
+        state.orders.SetOrders(cache_it->second, received_at);
+        Log(base::StrCat({bot, ": pre-pull orders cache hit for ", cur_map,
+                          " (", std::to_string(cache_it->second.size()),
+                          " orders)"}));
+      } else if (!state.latest_snapshot->base.self.in_combat) {
+        state.has_ever_woken = true;
+        WakeBot(bot, Urgency::kUrgent,
+                base::StrCat({"entered instance ", cur_map,
+                              ": compile standing orders from boss notes"}));
+        pre_pull_woke = true;
+      }
+    }
+  }
+
   if (!state.has_ever_woken) {
     state.has_ever_woken = true;
     WakeBot(bot, trig ? trig->urgency : Urgency::kNormal,
             trig ? trig->reason : "first look");
+    return;
+  }
+  if (pre_pull_woke) {
     return;
   }
   const uint32_t prev_order_cmd = state.orders.pending_command_id();
@@ -396,6 +437,8 @@ void BotLoop::OnTick(base::TimeTicks now) {
       state.latest_snapshot.reset();
       state.look_deadline = base::TimeTicks();
       state.has_ever_woken = false;
+      state.was_in_instance = false;
+      state.last_map.clear();
       state.has_queued_wake = false;
       state.call_in_flight = false;
       state.early_steps_dispatched = false;
@@ -715,8 +758,24 @@ void BotLoop::OnReply(const std::string& bot,
                 ? std::flat_set<std::string>{}
                 : CollectExpectedNames(plan->steps, plan->expect, ask_screen),
             &state.ask_watch_inputs);
-        if (state.orders.SetOrders(plan->orders, now)) {
-          SendStopMoving(bot);
+        const bool keep_compiled_orders =
+            plan->orders.empty() &&
+            state.latest_snapshot->base.where.in_instance &&
+            state.latest_snapshot->base.self.in_combat &&
+            !state.notes.empty() && !state.orders.orders().empty();
+        if (!keep_compiled_orders) {
+          if (state.orders.SetOrders(plan->orders, now)) {
+            SendStopMoving(bot);
+          }
+        }
+        if (!plan->orders.empty() &&
+            state.latest_snapshot->base.where.in_instance &&
+            !state.notes.empty()) {
+          const std::string& map_name = state.latest_snapshot->base.where.map;
+          compiled_orders_cache_[{bot, map_name, state.notes}] = plan->orders;
+          Log(base::StrCat({bot, ": compiled ",
+                            std::to_string(plan->orders.size()),
+                            " standing orders for ", map_name}));
         }
         if (!state.early_step_failed) {
           state.look_deadline = now + base::Seconds(plan->look_s);

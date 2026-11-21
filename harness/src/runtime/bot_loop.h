@@ -28,6 +28,7 @@
 #include "llm/llm_client.h"
 #include "llm/scheduler.h"
 #include "plan/order_evaluator.h"
+#include "plan/orders.h"
 #include "plan/plan_runner.h"
 #include "plan/triggers.h"
 #include "runtime/decision_log.h"
@@ -171,10 +172,19 @@ class BotLoop {
     };
     std::vector<Glance> glancing;
     bool was_in_combat = false;
+    bool was_in_instance = false;
+    std::string last_map;
     uint32_t last_bag_free_slots = 1;
     // The quest tracker's state; nullopt before the first snapshot (no
     // glance for what was there already).
     std::optional<std::string> last_quest_state;
+  };
+
+  struct CompiledOrdersKey {
+    std::string bot;
+    std::string map;
+    std::string notes;
+    auto operator<=>(const CompiledOrdersKey&) const = default;
   };
 
   void NoteEvent(BotState* state, const wlb::snapshot::Event& event);
@@ -266,6 +276,8 @@ class BotLoop {
   std::unique_ptr<DecisionLog> decision_log_;
   Scheduler scheduler_;
   std::flat_map<std::string, BotState> bots_;
+  // Pre-pull compiled standing orders cached by (bot, map, notes).
+  std::flat_map<CompiledOrdersKey, std::vector<Order>> compiled_orders_cache_;
   uint32_t next_command_id_ = 0;
   uint64_t decisions_completed_ = 0;
   uint64_t calls_cancelled_ = 0;
