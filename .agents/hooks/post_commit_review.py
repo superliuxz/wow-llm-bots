@@ -7,7 +7,7 @@ Events handled (configured in `.agents/hooks.json`):
   - PostToolUse (`run_command`): whenever `HEAD` advances past
     `var/review/last_reviewed_sha`, writes `var/review/head.patch` (`git show
     HEAD --stat -p` + recent log + status), updates `last_reviewed_sha`, and
-    spawns a detached `agy --print --mode plan` process in its own top-level
+    spawns a detached `agy --mode plan --print=<prompt>` process in its own top-level
     conversation (zero shared history, never blocks the authoring chat). Output
     is saved to `var/review/review_<short_sha>.md` (symlinked at
     `var/review/latest.md`).
@@ -121,13 +121,12 @@ def _spawn_reviewer(full_sha: str, patch_file: pathlib.Path) -> None:
         subprocess.Popen(
             [
                 agy_bin,
-                "--print",
                 "--mode",
                 "plan",
                 "--print-timeout",
                 "300s",
                 "--disable-slash-commands",
-                prompt,
+                f"--print={prompt}",
             ],
             cwd=ROOT,
             env=env,
