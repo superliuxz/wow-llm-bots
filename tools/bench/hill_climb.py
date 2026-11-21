@@ -44,7 +44,6 @@ REPO_APPROVED_LOCK_DIGEST = ROOT / "config" / "scorer-lock.sha256"
 DEFAULT_HUMAN_DIR = EXTERNAL_STATE_DIR / "human_baseline"
 DEFAULT_BLIND_RATINGS = EXTERNAL_STATE_DIR / "blind_ratings.jsonl"
 
-CONFIRM_RELOCK_ENV = "WLB_CONFIRM_RELOCK"
 AGENT_ENV_VARS = (
     "ANTIGRAVITY_AGENT",
     "ANTIGRAVITY_CONVERSATION_ID",
@@ -130,8 +129,31 @@ def _matches_agent_name(candidate: str) -> bool:
     return any(base == name or base.startswith(name + "-") for name in AGENT_PROCESS_NAMES)
 
 
+def _has_agent_cgroup(pdir: pathlib.Path) -> bool:
+    """Detects agent systemd service/slice/scope cgroups even after `setsid` / double-fork."""
+    try:
+        text = (pdir / "cgroup").read_text(errors="replace")
+    except OSError:
+        return False
+    for line in text.splitlines():
+        parts = line.split(":", 2)
+        if len(parts) < 3:
+            continue
+        for segment in parts[2].split("/"):
+            if not segment:
+                continue
+            unit = segment.split("@", 1)[0]
+            for suffix in (".service", ".scope", ".slice"):
+                if unit.endswith(suffix):
+                    unit = unit[: -len(suffix)]
+                    break
+            if _matches_agent_name(unit):
+                return True
+    return False
+
+
 def _has_agent_ancestor(proc_root: pathlib.Path = pathlib.Path("/proc")) -> bool:
-    """Checks `/proc` parent processes so unsetting env vars cannot disguise an agent shell."""
+    """Checks `/proc` parent processes and cgroups so `setsid`/env stripping cannot hide an agent."""
     try:
         pid = int((proc_root / "self").resolve().name) if (proc_root / "self").is_symlink() else os.getpid()
     except (OSError, ValueError):
@@ -142,6 +164,8 @@ def _has_agent_ancestor(proc_root: pathlib.Path = pathlib.Path("/proc")) -> bool
             break
         seen.add(pid)
         pdir = proc_root / str(pid)
+        if _has_agent_cgroup(pdir):
+            return True
         try:
             stat_text = (pdir / "stat").read_text(errors="replace")
         except OSError:
@@ -189,11 +213,13 @@ def _is_agent_run(
 
 
 def _resolve_lock_file(
-    requested: pathlib.Path | None, env: dict[str, str] | None = None
+    requested: pathlib.Path | None,
+    env: dict[str, str] | None = None,
+    proc_root: pathlib.Path | None = None,
 ) -> pathlib.Path:
     if requested is None:
         return DEFAULT_LOCK_FILE
-    if _is_agent_run(env) and requested.resolve() != DEFAULT_LOCK_FILE.resolve():
+    if _is_agent_run(env, proc_root=proc_root) and requested.resolve() != DEFAULT_LOCK_FILE.resolve():
         print(
             f"WARNING: ignoring --lock-file={requested} in agent run; "
             f"enforcing {DEFAULT_LOCK_FILE}",
@@ -206,21 +232,39 @@ def _resolve_lock_file(
 def _confirm_relock(
     env: dict[str, str] | None = None,
     proc_root: pathlib.Path | None = None,
+    tty_opener=None,
 ) -> tuple[bool, str]:
-    expected_token = f"RELOCK:{soak_scorer.scorer_sha256()[:12]}"
+    # Refuses any agent process (env vars, /proc ancestors, or /proc cgroup)
+    # and requires an interactive 'RELOCK' typed into /dev/tty with no
+    # computable env-var bypass. Tracked `config/scorer-lock.sha256` remains
+    # the git-visible backstop against direct filesystem edits.
     e = os.environ if env is None else env
-    if e.get(CONFIRM_RELOCK_ENV, "") == expected_token:
+    if _is_agent_run(e, proc_root=proc_root):
+        return False, (
+            "refusing to write scorer lock from an agent process "
+            "(run interactively in a human terminal outside any agent session)"
+        )
+    opener = tty_opener or (lambda: open("/dev/tty", "r+", encoding="utf-8"))
+    try:
+        with opener() as tty:
+            if not tty.isatty():
+                return False, (
+                    "refusing to write scorer lock without an interactive "
+                    "controlling terminal (/dev/tty)"
+                )
+            tty.write("Confirm writing scorer lock? Type 'RELOCK' to confirm: ")
+            tty.flush()
+            ans = tty.readline().strip()
+    except OSError:
+        return False, (
+            "refusing to write scorer lock without a controlling terminal "
+            "(/dev/tty; run interactively in a human shell and type 'RELOCK')"
+        )
+    if ans == "RELOCK":
         return True, ""
-    if not _is_agent_run(e, proc_root=proc_root) and sys.stdin.isatty():
-        ans = input(
-            "Confirm writing scorer lock? Type 'RELOCK' to confirm: "
-        ).strip()
-        if ans == "RELOCK":
-            return True, ""
     return False, (
         "refusing to write scorer lock without explicit user confirmation "
-        "(run interactively in a human shell and type 'RELOCK', or provide "
-        f"user-approved {CONFIRM_RELOCK_ENV})"
+        "(run interactively in a human shell and type 'RELOCK')"
     )
 
 

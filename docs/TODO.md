@@ -9,9 +9,24 @@ Last updated 2026-11-21.
 
 ## In progress
 
-(none)
+- **Re-lock `~/.local/share/wow-llm-bots/scorer.sha256` and `config/scorer-lock.sha256` after Review 10 Low 1 & Low 3 (awaiting explicit user OK):**
+  `tools/bench/hill_climb.py` and `server_module/src/snapshot/behavior_trace.{h,cc}` are in
+  `LOCKED_PATTERNS`; both lock files were left untouched at `46de81d26630...` per
+  `CONTRIBUTING.md` until a human runs `python3 tools/bench/hill_climb.py lock-scorer --force-relock`
+  (or explicitly approves relocking).
 
 ## Next, in order
+
+- **Where this leaves the project — boss notes & selective-dodge acts**
+  ([`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md)):
+  1. Notes reliably change behaviour: bots dodge mechanics they're told about.
+  2. They don't yet reliably change kill rates. Only Ikiss hints at it, and it doesn't survive
+     multiple-comparison correction.
+  3. Dodging costs DPS. On Loken, `llm` did `11.5k` vs `15.5k` for `llm_no_notes`.
+  4. The playerbots scripts are still better at the mechanics they cover (`Flame Strike`).
+  The next gains are in the notes and the acts (dodge only when it's worth it, then return to DPS),
+  not in the bench. Drop `Devourer` and `Loken`, or lower their gear, so every boss can show a
+  difference.
 
 - **Human baseline coverage & initial blind-rating batch** (`docs/plans/self-improving-loop.md`):
   layered scorer (Steps 1–6) is built and live-verified, and General/Say/Party chat + quest
@@ -92,10 +107,13 @@ Last updated 2026-11-21.
     a working `Lightning Nova cast` order into `Loken cast` or `Lightning Nova appears`.
 - **Not individually live-triggered after final edits yet:** `llmtest questcomplete` when a quest
   is already active in a bot's quest log (`CompleteQuest` + `RewardQuest` branch in
-  `test_commands.cc`, source-verified). *(Environmental/self death `died` with
-  `detail="environment"` caveat closed per Review 9 — live-triggered on `murmur`, and
-  entrance staging/pull coordinates for `ick`, `murmur`, and `ikiss` live-verified across `32`
-  valid trials each.)*
+  `test_commands.cc`, source-verified), plus Review 10 single-arm `_wait_checkstrat` +
+  `+{strip_strat}` (`tools/bench/bench_bosses.py`) and `O(1)` cap eviction
+  (`server_module/src/snapshot/behavior_trace.{h,cc}`), which are unit-tested and compiled into
+  `out/server-test` without starting a new live benchmark run (per user instruction).
+  *(Environmental/self death `died` with `detail="environment"` caveat closed per Review 9 —
+  live-triggered on `murmur`, and entrance staging/pull coordinates for `ick`, `murmur`, and
+  `ikiss` live-verified across `32` valid trials each.)*
 - **Deliberately skipped benchmark speedup proposals (Items 4, 5, adaptive 6):** left unbuilt on
   purpose to preserve valid boss immunity/kite phases (Item 4: `20 s` zero-damage abort would
   cut `Gravity Lapse`/`Planar Shift` and censor `llm` bugs via survivorship bias), cross-boss DB
@@ -105,6 +123,29 @@ Last updated 2026-11-21.
   details in [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md) §6).
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-21: **Review 10 fixes (Medium + Lows 1–3) & "Where this leaves the project" added to TODO:**
+  restructured [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md)
+  to lead with behaviour/mechanic results (`m = 24` Holm–Bonferroni `p_holm = 0.00039–0.0329` for
+  `Murmur` `Sonic Boom` / `Ikiss` `Arcane Explosion` dodges and `Kael'thas` `Flame Strike` script
+  superiority `p_holm = 0.0010`), added `p_holm` across all `30` pairwise kill tests (`Bonferroni
+  0.00167`), reworded `Ikiss` kill gains (`p_raw = 0.0155`, `p_holm = 0.465`) as suggestive only,
+  and documented cross-rerun `3–5` kill variance + `Devourer`/`Loken` `16/16` ceilings + DPS cost of
+  dodging (`Loken` `11.5k` vs `15.5k`); [`tools/bench/hill_climb.py`](../tools/bench/hill_climb.py)
+  removes `WLB_CONFIRM_RELOCK` completely, adds `/proc/<pid>/cgroup` agent detection
+  (`_has_agent_cgroup`) catching `setsid`/double-fork reparenting, and requires `/dev/tty` `'RELOCK'`
+  only outside agent runs (`CONTRIBUTING.md` & `.agents/rules/contributing.md` updated; tested in
+  [`hill_climb_test.py`](../tools/bench/hill_climb_test.py) incl. `ppid=1` cgroup and live
+  double-fork + `os.setsid()` + `env -i`); [`bench_bosses.py`](../tools/bench/bench_bosses.py) adds
+  `+{strip_strat}` for single-arm `baseline` and polled `_wait_checkstrat` (tested in
+  [`dodge_timeline_test.py`](../tools/bench/dodge_timeline_test.py));
+  [`behavior_trace.{h,cc}`](../server_module/src/snapshot/behavior_trace.cc) replaces full-map
+  cap-eviction scans under `mu_` with `O(1)` sorted intrusive `all`/`idle` index lists in
+  `RoleSampleTracker` (tested in `EvictsIdleTrackedCharactersAndReportsCapOverflow` with `1,000`
+  overflow samples & out-of-order stale eviction). Verified via `tools/wlb check` (`ALL CHECKS PASSED`:
+  `60 + 119 + 224` C++ tests and `4 + 7 + 9 + 15 + 5` Python tests) and `build.server(test=True)`
+  without starting a new live benchmark run (per user request; `scorer.sha256` relock kept open in
+  `In progress` awaiting explicit user OK).
 
 - 2026-11-21: **Single-commit 5-boss × 4-arm × 16-runs benchmark (`320` valid trials at `d7b3e13`)
   & multi-wave slice-isolation fix:** replaced `ick` (`8/8` ceiling) with `devourer` (`wotlk-fos`,
@@ -120,9 +161,11 @@ Last updated 2026-11-21.
   Completed all 5 bosses × 4 arms × 16 runs at commit `d7b3e13` (`320` valid scored trials over
   `81` waves, `110.8 min`, median wave overhead `0.90–1.21 s`, `1` `pre_pull_combat` invalid trial
   on `murmur`, `0` `no_pull`, `0` wave errors): `devourer` & `loken` hit `16/16` across all arms;
-  **Ikiss** `llm` `8/16` (`50.0%`) & `llm_no_notes` `6/16` (`37.5%`) beat `no_brain` `1/16` (`6.2%`,
-  Fisher `p = 0.015` vs `llm`) & `baseline` `2/16` (`12.5%`; pooled LLM `14/32` vs PB `3/32`
-  `p = 0.0038`); `notes.md` standing orders drove significant trial-level AoE dodges on **Murmur**
+  **Ikiss** `llm` `8/16` (`50.0%`) & `llm_no_notes` `6/16` (`37.5%`) vs `no_brain` `1/16` (`6.2%`,
+  Fisher `p_raw = 0.0155`, `p_holm = 0.464` across 30 kill comparisons) & `baseline` `2/16`
+  (`12.5%`; post-hoc pooled LLM `14/32` vs PB `3/32` `p_raw = 0.0038`, also above `0.0017` —
+  **suggestive only**, does not survive multiple-comparison correction, with `3–5` kill swings across
+  reruns); `notes.md` standing orders drove significant trial-level AoE dodges on **Murmur**
   (`Sonic Boom >= 34 yd`: `12/16` vs `0/16` everywhere, `p = 1.61e-05`) and **Ikiss** (`Arcane
   Explosion >= 35 yd`: `10/16` vs `1/16` `p = 0.0021` & `0/16` `p = 0.0002`), while `baseline`
   (`tbc-mgt`) dominated `Kael'thas` `Flame Strike` (`14/16 <= 1,000` dmg vs `1–4/16`, `p <= 0.0010`)
@@ -130,7 +173,7 @@ Last updated 2026-11-21.
   damage; full report + superseded runs disclosed in
   [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md).
 
-- 2026-11-21: **Review 9 fixes (Medium 1–3, Low 1–4, closed environmental-death caveat):**
+- 2026-11-21: **Review 9 fixes (Medium 1–3, Low 1–4, closed environmental-death caveat; partly — see Review 10 Low 1 & Low 3):**
   [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md)
   splits Cohort A (`523ab4c`: `kaelthas`, `ick`) vs Cohort B (`aac0546`: `murmur`, `ikiss`) with no
   cross-commit pooled row, adds Wilson 95% CIs + exact two-sided Fisher `p`-values across kills and
@@ -155,7 +198,7 @@ Last updated 2026-11-21.
   `28` measurement locks in `~/.local/share/wow-llm-bots/scorer.sha256` and
   [`config/scorer-lock.sha256`](../config/scorer-lock.sha256) (`46de81d26630...`).
 
-- 2026-11-21: **Boss benchmark runner speedups (Items 1–3) & skipped-proposal rationale:** added
+- 2026-11-21: **Boss benchmark runner speedups (Items 1–3) & skipped-proposal rationale (partly — see Review 10 Low 2: single-arm `checkstrat` race):** added
   `phase_timings` (`setup_s`, per-wave phases, `teardown_s`, `wall_s`) to benchmark JSON,
   auto-defaulted `--parallel` to `4` in `mixed_all` (constant 10 LLM bots on 16 `llama-server`
   slots, `3` otherwise), and replaced fixed per-command sleeps with 1-in-flight `5 ms`-polled
@@ -275,23 +318,15 @@ Last updated 2026-11-21.
   per-wave/per-boss error isolation; `test_commands.cc` counts `passives=` in a separate read-only
   pass after aura removal, performs full `EffectResurrectPet`-style pet revive + hunter DB summon in
   `resetbot`, refreshes spells and pets in `gear`, and avoids converting an existing 5-man to a raid
-  when re-grouping an existing member; `behavior_trace_scripts.cc` handles null-killer `OnUnitDeath`
-  via `GetLootRecipientGroup()` / `GetLootRecipient()` within 100 yd; `TraceSample` adds `inst`
-  (`instance_id`) and uses `Spell::m_targets.GetDstPos()` for ground-targeted spells, and
-  `dodge_timeline.py` isolates cast windows per `inst` (plus `--bots`). Verified via `tools/wlb check`
-  (400 C++ + 25 Python tests, 6/6 in `dodge_timeline_test.py`) and live on Ikiss (`--mode mixed
-  --runs 2 --parallel 2`: `llm` 1/1 kill `56.6 s` `0` deaths vs `llm_no_notes` 0/1 wipe `6` deaths;
-  `dodge_timeline.py` cleanly separated `inst=1` and `inst=2`).
+  when re-grouping an existing member; `behavior_trace_scripts.cc` handles null-killer `OnUnitDeath` via `GetLootRecipientGroup()` /
+  `GetLootRecipient()` within 100 yd; `TraceSample` adds `inst` (`instance_id`) and uses
+  `Spell::m_targets.GetDstPos()` for ground-targeted spells, and `dodge_timeline.py` isolates cast
+  windows per `inst` (plus `--bots`). Verified via `tools/wlb check` (400 C++ + 25 Python tests, 6/6
+  in `dodge_timeline_test.py`) and live on Ikiss (`--mode mixed --runs 2 --parallel 2`: `llm` 1/1 kill
+  `56.6 s` `0` deaths vs `llm_no_notes` 0/1 wipe `6` deaths; `dodge_timeline.py` cleanly separated
+  `inst=1` and `inst=2`).
 - 2026-11-20: **Docs cleanup:** deleted superseded/invalidated docs (`docs/reviews/2026-11-18-f40b0b6.md`,
   `docs/reports/hill-climb-2026-11-19.md`, `docs/benchmarks/2026-11-20-boss-*.md`,
   `docs/plans/{phase2,harness,latency,grammar-idl}.md`, `docs/specs/trigger-audit.md`); merged
   lasting decisions into `docs/design.md`, moved built specs to `docs/specs/{harness,grammar-idl,options}.md`,
   repointed all code/doc comments, and pruned `docs/TODO.md`.
-- 2026-11-20: **Review 4 partial follow-up (DBC spell radii, cast-origin dodge distance, impact-dodge meter, incremental trace tailing):**
-  `TraceSample` (`behavior_trace.{h,cc}`, `llm_brain_world_script.cc`) emits `target_x`, `target_y`,
-  and DBC `target_cast_radius` via `SpellInfo::Effects[eff].CalcRadius()`; `dodge_timeline.py` drops
-  the hardcoded radius table, measures Euclidean distance from caster `(target_x, target_y)` for
-  all bots, and filters `act_delay_ms` to dodge/movement verbs; `boss_meter.py` reports
-  `impact_dist_yd` & `outside_at_impact`; `bench_bosses.py` uses incremental byte-offset
-  `_TraceTailer`. *(Remaining gaps from Review 5 tracked above: ground-targeted spell origin,
-  cross-party scoring in shared trace dir, rotated files read twice, L10–L16.)*

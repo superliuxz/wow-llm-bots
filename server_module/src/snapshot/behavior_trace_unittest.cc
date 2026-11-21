@@ -386,6 +386,69 @@ TEST(BehaviorTraceTest, EvictsIdleTrackedCharactersAndReportsCapOverflow) {
   EXPECT_GT(writer.TakeUntrackedSampleChars(), 0U);
   EXPECT_EQ(writer.TakeUntrackedSampleChars(), 0U);
 
+  // Fill all 4 active slots (non-idle) at active_t+200, then verify
+  // sustained cap-full overflow (`1,000` samples across `100` overflow names)
+  // reports exact overflow count while keeping ActiveBot0..3 intact.
+  for (int b = 0; b < 4; ++b) {
+    s.role = "bot";
+    s.name = "ActiveBot" + std::to_string(b);
+    s.time_ms = active_t + 200;
+    ASSERT_TRUE(writer.WriteSample(s));
+  }
+  for (int n = 0; n < 1000; ++n) {
+    s.role = "bot";
+    s.name = "OverflowBot" + std::to_string(n % 100);
+    s.time_ms = active_t + 200;
+    ASSERT_TRUE(writer.WriteSample(s));
+  }
+  EXPECT_EQ(writer.TakeUntrackedSampleChars(), 1000U);
+
+  // Finish the remaining 9 intervals for ActiveBot0..3 and confirm 5.0 Hz.
+  for (int i = 2; i <= 10; ++i) {
+    for (int b = 0; b < 4; ++b) {
+      s.role = "bot";
+      s.name = "ActiveBot" + std::to_string(b);
+      s.time_ms = active_t + static_cast<int64_t>(i) * 200;
+      ASSERT_TRUE(writer.WriteSample(s));
+    }
+  }
+  const std::optional<double> active_hz =
+      writer.TakeMeasuredSampleHz("bot", /*min_intervals=*/10);
+  ASSERT_TRUE(active_hz.has_value());
+  EXPECT_DOUBLE_EQ(*active_hz, 5.0);
+
+  // Verify O(1) out-of-order list ordering: make BotA/B/C/D have non-empty dts
+  // at `base_t`, except `StaleOutOfOrder` inserted second with an older
+  // timestamp
+  // (`base_t - 70000`). A new char at `base_t` must evict `StaleOutOfOrder`
+  // from `all_head` in O(1) without reporting untracked overflow.
+  const int64_t base_t = active_t + 100000;
+  for (int i = 0; i <= 1; ++i) {
+    s.role = "bot";
+    s.name = "Fresh0";
+    s.time_ms = base_t + static_cast<int64_t>(i) * 200;
+    ASSERT_TRUE(writer.WriteSample(s));
+  }
+  for (int i = 0; i <= 1; ++i) {
+    s.role = "bot";
+    s.name = "StaleOutOfOrder";
+    s.time_ms = base_t - 70000 + static_cast<int64_t>(i) * 200;
+    ASSERT_TRUE(writer.WriteSample(s));
+  }
+  for (int b = 1; b <= 2; ++b) {
+    for (int i = 0; i <= 1; ++i) {
+      s.role = "bot";
+      s.name = "Fresh" + std::to_string(b);
+      s.time_ms = base_t + static_cast<int64_t>(i) * 200;
+      ASSERT_TRUE(writer.WriteSample(s));
+    }
+  }
+  s.role = "bot";
+  s.name = "Fresh3";
+  s.time_ms = base_t;
+  ASSERT_TRUE(writer.WriteSample(s));
+  EXPECT_EQ(writer.TakeUntrackedSampleChars(), 0U);
+
   writer.Flush();
   std::filesystem::remove_all(root);
 }

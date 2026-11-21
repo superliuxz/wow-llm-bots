@@ -90,8 +90,23 @@ class HillClimbSafeguardsTest(unittest.TestCase):
             self.assertIn("missing required files", msg)
 
     def test_agent_ignores_custom_lock_file_and_requires_relock_confirmation(self):
+        import io
         import subprocess
         import sys
+
+        class _FakeTty(io.StringIO):
+            def __init__(self, reply: str, is_tty: bool = True) -> None:
+                super().__init__(reply)
+                self._is_tty = is_tty
+
+            def isatty(self) -> bool:
+                return self._is_tty
+
+            def write(self, s: str) -> int:  # discard prompt before readline
+                return len(s)
+
+        # No computable WLB_CONFIRM_RELOCK token bypass exists.
+        self.assertFalse(hasattr(hill_climb, "CONFIRM_RELOCK_ENV"))
 
         custom = pathlib.Path("/tmp/custom_scorer_lock.sha256")
         self.assertEqual(
@@ -104,44 +119,93 @@ class HillClimbSafeguardsTest(unittest.TestCase):
         )
         self.assertEqual(hill_climb._resolve_lock_file(custom, env={}), custom)
 
-        ok_no_env, msg_no_env = hill_climb._confirm_relock(env={"ANTIGRAVITY_AGENT": "1"})
+        token = f"RELOCK:{soak_scorer.scorer_sha256()[:12]}"
+        # Even supplying a matching RELOCK:<hash12> env var AND a tty saying RELOCK
+        # must be refused inside an agent run.
+        ok_no_env, msg_no_env = hill_climb._confirm_relock(
+            env={"ANTIGRAVITY_AGENT": "1"},
+            tty_opener=lambda: _FakeTty("RELOCK\n"),
+        )
         self.assertFalse(ok_no_env)
-        # Refusal message must NEVER leak the RELOCK:<hash12> confirmation token.
         self.assertNotIn("RELOCK:", msg_no_env)
         self.assertNotIn(soak_scorer.scorer_sha256()[:8], msg_no_env)
-        ok_wrong, msg_wrong = hill_climb._confirm_relock(
-            env={"ANTIGRAVITY_AGENT": "1", hill_climb.CONFIRM_RELOCK_ENV: "WRONG"}
-        )
-        self.assertFalse(ok_wrong)
-        self.assertNotIn("RELOCK:", msg_wrong)
-        token = f"RELOCK:{soak_scorer.scorer_sha256()[:12]}"
-        ok_good, _ = hill_climb._confirm_relock(
-            env={"ANTIGRAVITY_AGENT": "1", hill_climb.CONFIRM_RELOCK_ENV: token}
-        )
-        self.assertTrue(ok_good)
 
-        # Synthetic /proc tree: unsetting env vars must not hide an agent ancestor,
-        # even when child comm contains spaces/parens.
+        ok_tok, msg_tok = hill_climb._confirm_relock(
+            env={"ANTIGRAVITY_AGENT": "1", "WLB_CONFIRM_RELOCK": token},
+            tty_opener=lambda: _FakeTty("RELOCK\n"),
+        )
+        self.assertFalse(ok_tok)
+        self.assertNotIn("RELOCK:", msg_tok)
+
+        # Non-agent runs require an interactive /dev/tty typing exact 'RELOCK'
+        # (env tokens, non-tty streams, and missing /dev/tty are all rejected).
+        ok_env_only, _ = hill_climb._confirm_relock(
+            env={"WLB_CONFIRM_RELOCK": token},
+            tty_opener=lambda: _FakeTty("\n"),
+        )
+        self.assertFalse(ok_env_only)
+        ok_nontty, _ = hill_climb._confirm_relock(
+            env={},
+            tty_opener=lambda: _FakeTty("RELOCK\n", is_tty=False),
+        )
+        self.assertFalse(ok_nontty)
+
+        def _raise_no_tty():
+            raise OSError("no controlling terminal")
+
+        ok_notty, _ = hill_climb._confirm_relock(env={}, tty_opener=_raise_no_tty)
+        self.assertFalse(ok_notty)
+        ok_human, _ = hill_climb._confirm_relock(
+            env={},
+            tty_opener=lambda: _FakeTty("RELOCK\n", is_tty=True),
+        )
+        self.assertTrue(ok_human)
+
+        # Synthetic /proc tree: unsetting env vars, spaces/parens in comm, and
+        # setsid/double-fork reparenting to pid 1 under an agent cgroup must
+        # still be caught.
         with tempfile.TemporaryDirectory() as tmp:
             proc_root = pathlib.Path(tmp)
-            for pid, ppid, comm, cmd in (
-                (99, 1, "agy", b"/home/user/.gemini/bin/agy\x00remote-control\x00serve\x00"),
-                (100, 99, "my (worker)", b"python3\x00worker.py\x00"),
-                (50, 1, "bash", b"/bin/bash\x00"),
+            for pid, ppid, comm, cmd, cgroup in (
+                (99, 1, "agy", b"/home/user/.gemini/bin/agy\x00remote-control\x00serve\x00", "0::/user.slice\n"),
+                (100, 99, "my (worker)", b"python3\x00worker.py\x00", "0::/user.slice\n"),
+                (
+                    200,
+                    1,
+                    "python3",
+                    b"python3\x00-c\x00...",
+                    "0::/user.slice/user-1000.slice/user@1000.service/app.slice/antigravity-cli-daemon.service\n",
+                ),
+                (50, 1, "bash", b"/bin/bash\x00", "0::/user.slice/user-1000.slice/session-1.scope\n"),
             ):
                 d = proc_root / str(pid)
                 d.mkdir()
                 (d / "stat").write_text(f"{pid} ({comm}) S {ppid} 1 1 0 0 0 0\n")
                 (d / "cmdline").write_bytes(cmd)
+                (d / "cgroup").write_text(cgroup)
             (proc_root / "self").symlink_to("100")
             self.assertTrue(hill_climb._has_agent_ancestor(proc_root))
             self.assertTrue(hill_climb._is_agent_run(env={}, proc_root=proc_root))
+            (proc_root / "self").unlink()
+            (proc_root / "self").symlink_to("200")
+            self.assertTrue(hill_climb._has_agent_ancestor(proc_root))
+            self.assertEqual(
+                hill_climb._resolve_lock_file(custom, env={}, proc_root=proc_root),
+                hill_climb.DEFAULT_LOCK_FILE,
+            )
+            ok_reparented, _ = hill_climb._confirm_relock(
+                env={},
+                proc_root=proc_root,
+                tty_opener=lambda: _FakeTty("RELOCK\n"),
+            )
+            self.assertFalse(ok_reparented)
             (proc_root / "self").unlink()
             (proc_root / "self").symlink_to("50")
             self.assertFalse(hill_climb._has_agent_ancestor(proc_root))
             self.assertFalse(hill_climb._is_agent_run(env={}, proc_root=proc_root))
 
-        # Live host /proc check with all env vars cleared via `env -i`.
+        # Live host /proc check with all env vars cleared via `env -i`, plus
+        # double-fork + os.setsid() reparenting to pid 1 when in an agent cgroup.
         expected_ancestor = hill_climb._has_agent_ancestor()
         res = subprocess.run(
             [
@@ -159,6 +223,38 @@ class HillClimbSafeguardsTest(unittest.TestCase):
             check=True,
         )
         self.assertEqual(res.stdout.strip(), str(int(expected_ancestor)))
+
+        if hill_climb._has_agent_cgroup(pathlib.Path("/proc/self")):
+            setsid_code = (
+                "import os, sys; "
+                "sys.path.insert(0, 'tools/bench'); "
+                "import hill_climb; "
+                "r, w = os.pipe(); "
+                "p1 = os.fork()\n"
+                "if p1 > 0:\n"
+                "  os.close(w); os.waitpid(p1, 0); "
+                "  out = os.read(r, 16).decode().strip(); os.close(r); print(out)\n"
+                "else:\n"
+                "  os.setsid(); p2 = os.fork()\n"
+                "  if p2 > 0: os._exit(0)\n"
+                "  os.close(r); os.write(w, str(int(hill_climb._is_agent_run())).encode()); "
+                "  os.close(w); os._exit(0)\n"
+            )
+            res2 = subprocess.run(
+                [
+                    "env",
+                    "-i",
+                    f"PATH={os.environ.get('PATH', '/usr/bin')}",
+                    sys.executable,
+                    "-c",
+                    setsid_code,
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            self.assertEqual(res2.stdout.strip(), "1")
 
     def test_has_human_traces_rejects_bot_rows_and_requires_min_samples(self):
         with tempfile.TemporaryDirectory() as tmp:

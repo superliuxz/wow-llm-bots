@@ -588,6 +588,77 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
         self.assertFalse(res["killed"])
         self.assertEqual(res["duration_s"], 4.0)
 
+    def test_wait_checkstrat_polls_pending_bots_in_single_arm_mode(self) -> None:
+        import types
+
+        with tempfile.TemporaryDirectory() as tmp:
+            logs = pathlib.Path(tmp)
+            queries: list[tuple[str, str]] = []
+            pass_num = {"BotA": 0, "BotB": 0}
+
+            def fake_console(cmd, wait_s=1.0, inst=None):
+                parts = cmd.split()
+                if len(parts) >= 4 and parts[1] == "checkstrat":
+                    name, strat, tok = parts[2], parts[3], parts[4]
+                    pass_num[name] += 1
+                    queries.append((name, tok))
+                    # Simulate BotA already stripped, BotB still converging before BotManager::Tick().
+                    if name == "BotA":
+                        return f"llmtest: strat {strat} on BotA exists=1 combat=0 noncombat=0 tok={tok}\n"
+                    if pass_num["BotB"] == 1:
+                        return f"llmtest: strat {strat} on BotB exists=1 combat=1 noncombat=0 tok={tok}\n"
+                    return f"llmtest: strat {strat} on BotB exists=1 combat=0 noncombat=0 tok={tok}\n"
+                return ""
+
+            orig_console, orig_test = bench_bosses.server.console, bench_bosses.TEST
+            bench_bosses.server.console = fake_console
+            bench_bosses.TEST = types.SimpleNamespace(logs=logs)
+            try:
+                bench_bosses._wait_checkstrat([("BotA", False), ("BotB", False)], "wotlk-hol", timeout_s=3.0)
+            finally:
+                bench_bosses.server.console = orig_console
+                bench_bosses.TEST = orig_test
+
+            self.assertEqual([n for n, _ in queries], ["BotA", "BotB", "BotB"])
+
+            # Also verify expected_on=True (--mode baseline) polling and timeout failure.
+            queries.clear()
+            pass_num = {"BotA": 0}
+
+            def fake_console_baseline(cmd, wait_s=1.0, inst=None):
+                parts = cmd.split()
+                if len(parts) >= 4 and parts[1] == "checkstrat":
+                    name, strat, tok = parts[2], parts[3], parts[4]
+                    pass_num[name] += 1
+                    queries.append((name, tok))
+                    if pass_num[name] == 1:
+                        return f"llmtest: strat {strat} on {name} exists=1 combat=0 noncombat=0 tok={tok}\n"
+                    return f"llmtest: strat {strat} on {name} exists=1 combat=1 noncombat=1 tok={tok}\n"
+                return ""
+
+            bench_bosses.server.console = fake_console_baseline
+            bench_bosses.TEST = types.SimpleNamespace(logs=logs)
+            try:
+                bench_bosses._wait_checkstrat([("BotA", True)], "wotlk-hol", timeout_s=3.0)
+            finally:
+                bench_bosses.server.console = orig_console
+                bench_bosses.TEST = orig_test
+            self.assertEqual(len(queries), 2)
+
+            bench_bosses.server.console = (
+                lambda cmd, wait_s=1.0, inst=None: (
+                    f"llmtest: strat wotlk-hol on BotA exists=1 combat=1 noncombat=1 tok={cmd.split()[-1]}\n"
+                    if "checkstrat" in cmd else ""
+                )
+            )
+            bench_bosses.TEST = types.SimpleNamespace(logs=logs)
+            try:
+                with self.assertRaises(RuntimeError):
+                    bench_bosses._wait_checkstrat([("BotA", False)], "wotlk-hol", timeout_s=0.05)
+            finally:
+                bench_bosses.server.console = orig_console
+                bench_bosses.TEST = orig_test
+
 
 if __name__ == "__main__":
     unittest.main()

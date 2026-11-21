@@ -164,6 +164,7 @@ class BehaviorTraceWriter {
   static constexpr int64_t kMaxSampleGapMs = 5000;
   static constexpr int64_t kStaleTrackedCharMs = 60000;
   static constexpr size_t kMaxRecordedSampleDtsPerChar = 4096;
+  static constexpr size_t kNoSampleNode = static_cast<size_t>(-1);
 
   struct PendingLine {
     std::string role;
@@ -172,10 +173,64 @@ class BehaviorTraceWriter {
     std::string line;
   };
 
-  struct CharSampleWindow {
+  struct CharSampleNode {
+    std::string name;
     int64_t last_time_ms = 0;
     std::vector<int64_t> dts;
+    size_t all_prev = kNoSampleNode;
+    size_t all_next = kNoSampleNode;
+    size_t idle_prev = kNoSampleNode;
+    size_t idle_next = kNoSampleNode;
+    bool in_idle = false;
   };
+
+  // Intrusive index lists inside contiguous `nodes` keep both `all` (every
+  // tracked character) and `idle` (`dts.empty()`) ordered ascending by
+  // `last_time_ms` so cap eviction checks only list heads in O(1).
+  struct RoleSampleTracker {
+    std::vector<CharSampleNode> nodes;
+    std::vector<size_t> free_indices;
+    std::unordered_map<std::string, size_t> index_by_name;
+    size_t all_head = kNoSampleNode;
+    size_t all_tail = kNoSampleNode;
+    size_t idle_head = kNoSampleNode;
+    size_t idle_tail = kNoSampleNode;
+  };
+
+  struct SampleListEnds {
+    size_t RoleSampleTracker::* head;
+    size_t RoleSampleTracker::* tail;
+    size_t CharSampleNode::* prev;
+    size_t CharSampleNode::* next;
+  };
+
+  static constexpr SampleListEnds AllSampleList() {
+    return {
+        &RoleSampleTracker::all_head,
+        &RoleSampleTracker::all_tail,
+        &CharSampleNode::all_prev,
+        &CharSampleNode::all_next,
+    };
+  }
+  static constexpr SampleListEnds IdleSampleList() {
+    return {
+        &RoleSampleTracker::idle_head,
+        &RoleSampleTracker::idle_tail,
+        &CharSampleNode::idle_prev,
+        &CharSampleNode::idle_next,
+    };
+  }
+
+  static void UnlinkSampleNode(RoleSampleTracker& tracker,
+                               size_t idx,
+                               const SampleListEnds& list);
+  static void LinkSampleNodeSorted(RoleSampleTracker& tracker,
+                                   size_t idx,
+                                   const SampleListEnds& list);
+  static void UpdateSampleNodeOrder(RoleSampleTracker& tracker,
+                                    size_t idx,
+                                    const SampleListEnds& list);
+  static void EvictSampleNode(RoleSampleTracker& tracker, size_t idx);
 
   bool Enqueue(std::string_view role,
                std::string_view name,
@@ -193,9 +248,7 @@ class BehaviorTraceWriter {
   std::condition_variable cv_;
   std::condition_variable flushed_cv_;
   std::deque<PendingLine> queue_;
-  std::unordered_map<std::string,
-                     std::unordered_map<std::string, CharSampleWindow>>
-      sample_windows_by_role_;
+  std::unordered_map<std::string, RoleSampleTracker> sample_windows_by_role_;
   uint64_t untracked_sample_chars_ = 0;
   uint64_t dropped_lines_ = 0;
   bool writing_ = false;

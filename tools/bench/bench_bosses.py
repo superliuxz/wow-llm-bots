@@ -466,6 +466,48 @@ def _wait_where(
     return confirmed
 
 
+def _wait_checkstrat(
+    chk_meta: list[tuple[str, bool]],
+    strip_strat: str,
+    timeout_s: float = 5.0,
+) -> None:
+    """Polls `llmtest checkstrat` until every bot converges to `expected_on`.
+
+    In single-arm and `mixed` modes (without synchronous `llmtest setstrat`),
+    `BotManager::Tick()` applies `LlmBrain.CombatStrategies` / `NonCombatStrategies`
+    on its 1 s cadence after zone transitions or strategy resets.
+    """
+    pending = list(chk_meta)
+    last_err = ""
+    last_raw = ""
+    deadline = time.monotonic() + timeout_s
+    while pending:
+        still_pending: list[tuple[str, bool]] = []
+        specs = []
+        for name, _ in pending:
+            tok = _next_console_token()
+            specs.append((
+                f"llmtest checkstrat {name} {strip_strat} {tok}",
+                f"strat {strip_strat} on {name} ",
+                tok,
+            ))
+        rem = deadline - time.monotonic()
+        c_lines, last_raw = _console_batch(specs, wait_s=0.0, timeout_s=max(1.0, min(5.0, rem)))
+        for (name, expected_on), cline in zip(pending, c_lines):
+            ok, err = _check_strat_line(cline, expected_on=expected_on)
+            if not ok:
+                last_err = f"{name}: {err}"
+                still_pending.append((name, expected_on))
+        pending = still_pending
+        if pending:
+            rem = deadline - time.monotonic()
+            if rem <= 0:
+                raise RuntimeError(
+                    f"checkstrat failed for {pending[0][0]} ({last_err}) (raw: {last_raw[-400:]!r})"
+                )
+            time.sleep(min(0.10, rem))
+
+
 def _wait_harness_connected(
     harness_log: pathlib.Path,
     proc: subprocess.Popen | None,
@@ -759,9 +801,10 @@ def run_boss_waves(
             nc_strats = "-follow,-grind,-new rpg"
             # When mixing baseline + non-baseline arms in the same wave, per-bot
             # overrides (`llmtest setstrat`) control `strip_strat` per party.
-            if strip_strat and not per_bot_strat_control and arms != ("baseline",):
-                c_strats += f",-{strip_strat}"
-                nc_strats += f",-{strip_strat}"
+            if strip_strat and not per_bot_strat_control:
+                delta = f"+{strip_strat}" if arms == ("baseline",) else f"-{strip_strat}"
+                c_strats += f",{delta}"
+                nc_strats += f",{delta}"
             lines.append(f'LlmBrain.CombatStrategies = "{c_strats}"')
             lines.append(f'LlmBrain.NonCombatStrategies = "{nc_strats}"')
             conf_path.write_text("\n".join(lines) + "\n")
@@ -971,23 +1014,12 @@ def run_boss_waves(
                         for name, sline in zip(set_names, s_lines):
                             if not sline:
                                 raise RuntimeError(f"setstrat failed for {name}: {s_raw[-400:]!r}")
-                    chk_specs = []
-                    chk_meta = []
-                    for p_idx, party in enumerate(active_parties):
-                        expected_on = party_modes[p_idx] == "baseline"
-                        for name, _, _, _ in party:
-                            tok = _next_console_token()
-                            chk_specs.append((
-                                f"llmtest checkstrat {name} {strip_strat} {tok}",
-                                f"strat {strip_strat} on {name} ",
-                                tok,
-                            ))
-                            chk_meta.append((name, expected_on))
-                    c_lines, c_raw = _console_batch(chk_specs, wait_s=0.0, timeout_s=10.0)
-                    for (name, expected_on), cline in zip(chk_meta, c_lines):
-                        ok, err = _check_strat_line(cline, expected_on=expected_on)
-                        if not ok:
-                            raise RuntimeError(f"checkstrat failed for {name}: {err} (raw: {c_raw[-400:]!r})")
+                    chk_meta = [
+                        (name, party_modes[p_idx] == "baseline")
+                        for p_idx, party in enumerate(active_parties)
+                        for name, _, _, _ in party
+                    ]
+                    _wait_checkstrat(chk_meta, strip_strat, timeout_s=5.0)
                 wt["strat_s"] = round(time.monotonic() - step_t0, 2)
 
                 # 4. Start fresh harness (driving ONLY llm / llm_no_notes parties via --only-bots)

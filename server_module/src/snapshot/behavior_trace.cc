@@ -93,6 +93,89 @@ std::string UtcDateString(int64_t time_ms) {
 
 }  // namespace
 
+void BehaviorTraceWriter::UnlinkSampleNode(RoleSampleTracker& tracker,
+                                           size_t idx,
+                                           const SampleListEnds& list) {
+  CharSampleNode& node = tracker.nodes[idx];
+  const size_t prev = node.*(list.prev);
+  const size_t next = node.*(list.next);
+  if (prev != kNoSampleNode) {
+    tracker.nodes[prev].*(list.next) = next;
+  } else if (tracker.*(list.head) == idx) {
+    tracker.*(list.head) = next;
+  }
+  if (next != kNoSampleNode) {
+    tracker.nodes[next].*(list.prev) = prev;
+  } else if (tracker.*(list.tail) == idx) {
+    tracker.*(list.tail) = prev;
+  }
+  node.*(list.prev) = kNoSampleNode;
+  node.*(list.next) = kNoSampleNode;
+}
+
+void BehaviorTraceWriter::LinkSampleNodeSorted(RoleSampleTracker& tracker,
+                                               size_t idx,
+                                               const SampleListEnds& list) {
+  const int64_t t = tracker.nodes[idx].last_time_ms;
+  size_t after = tracker.*(list.tail);
+  while (after != kNoSampleNode && tracker.nodes[after].last_time_ms > t) {
+    after = tracker.nodes[after].*(list.prev);
+  }
+  if (after == kNoSampleNode) {
+    const size_t head = tracker.*(list.head);
+    tracker.nodes[idx].*(list.prev) = kNoSampleNode;
+    tracker.nodes[idx].*(list.next) = head;
+    if (head != kNoSampleNode) {
+      tracker.nodes[head].*(list.prev) = idx;
+    } else {
+      tracker.*(list.tail) = idx;
+    }
+    tracker.*(list.head) = idx;
+    return;
+  }
+  const size_t before = tracker.nodes[after].*(list.next);
+  tracker.nodes[idx].*(list.prev) = after;
+  tracker.nodes[idx].*(list.next) = before;
+  tracker.nodes[after].*(list.next) = idx;
+  if (before != kNoSampleNode) {
+    tracker.nodes[before].*(list.prev) = idx;
+  } else {
+    tracker.*(list.tail) = idx;
+  }
+}
+
+void BehaviorTraceWriter::UpdateSampleNodeOrder(RoleSampleTracker& tracker,
+                                                size_t idx,
+                                                const SampleListEnds& list) {
+  const CharSampleNode& node = tracker.nodes[idx];
+  const size_t prev = node.*(list.prev);
+  const size_t next = node.*(list.next);
+  const bool ok_prev = prev == kNoSampleNode ||
+                       tracker.nodes[prev].last_time_ms <= node.last_time_ms;
+  const bool ok_next = next == kNoSampleNode ||
+                       tracker.nodes[next].last_time_ms >= node.last_time_ms;
+  if (ok_prev && ok_next) {
+    return;
+  }
+  UnlinkSampleNode(tracker, idx, list);
+  LinkSampleNodeSorted(tracker, idx, list);
+}
+
+void BehaviorTraceWriter::EvictSampleNode(RoleSampleTracker& tracker,
+                                          size_t idx) {
+  CharSampleNode& node = tracker.nodes[idx];
+  if (node.in_idle) {
+    UnlinkSampleNode(tracker, idx, IdleSampleList());
+    node.in_idle = false;
+  }
+  UnlinkSampleNode(tracker, idx, AllSampleList());
+  tracker.index_by_name.erase(node.name);
+  node.name.clear();
+  std::vector<int64_t>().swap(node.dts);
+  node.last_time_ms = 0;
+  tracker.free_indices.push_back(idx);
+}
+
 TraceSample TraceSampleFromSnapshot(const pb::Snapshot& snapshot,
                                     std::string_view role,
                                     uint32_t map_id,
@@ -364,21 +447,26 @@ std::optional<double> BehaviorTraceWriter::TakeMeasuredSampleHz(
     if (role_it == sample_windows_by_role_.end()) {
       return std::nullopt;
     }
-    int64_t newest_time_ms = 0;
-    for (const auto& [char_name, win] : role_it->second) {
-      newest_time_ms = std::max(newest_time_ms, win.last_time_ms);
+    RoleSampleTracker& tracker = role_it->second;
+    if (tracker.all_tail == kNoSampleNode) {
+      return std::nullopt;
     }
-    for (auto it = role_it->second.begin(); it != role_it->second.end();) {
-      if (it->second.dts.size() >= min_intervals) {
+    const int64_t newest_time_ms = tracker.nodes[tracker.all_tail].last_time_ms;
+    for (size_t idx = tracker.all_head; idx != kNoSampleNode;) {
+      const size_t next = tracker.nodes[idx].all_next;
+      CharSampleNode& node = tracker.nodes[idx];
+      if (node.dts.size() >= min_intervals) {
         ready_chars.emplace_back();
-        ready_chars.back().swap(it->second.dts);
-      } else if (it->second.dts.empty() &&
-                 newest_time_ms > it->second.last_time_ms &&
-                 newest_time_ms - it->second.last_time_ms > kMaxSampleGapMs) {
-        it = role_it->second.erase(it);
-        continue;
+        ready_chars.back().swap(node.dts);
+        if (!node.in_idle) {
+          node.in_idle = true;
+          LinkSampleNodeSorted(tracker, idx, IdleSampleList());
+        }
+      } else if (node.dts.empty() && newest_time_ms > node.last_time_ms &&
+                 newest_time_ms - node.last_time_ms > kMaxSampleGapMs) {
+        EvictSampleNode(tracker, idx);
       }
-      ++it;
+      idx = next;
     }
   }
   if (ready_chars.empty()) {
@@ -419,45 +507,68 @@ bool BehaviorTraceWriter::Enqueue(std::string_view role,
       return false;
     }
     if (is_sample) {
-      auto& by_char = sample_windows_by_role_[std::string(role)];
-      auto it = by_char.find(std::string(name));
-      if (it == by_char.end()) {
-        // Evict drained/idle characters first, then stale logged-out entries,
-        // so server turnover never starves newly logged-in characters.
-        if (by_char.size() >= max_tracked_chars_per_role_) {
-          for (auto p = by_char.begin(); p != by_char.end();) {
-            if (p->second.dts.empty() && time_ms > p->second.last_time_ms &&
-                time_ms - p->second.last_time_ms > kMaxSampleGapMs) {
-              p = by_char.erase(p);
-            } else {
-              ++p;
-            }
+      RoleSampleTracker& tracker = sample_windows_by_role_[std::string(role)];
+      auto it = tracker.index_by_name.find(std::string(name));
+      if (it == tracker.index_by_name.end()) {
+        // Evict one expired drained/idle or stale character via sorted list
+        // heads in O(1) so cap overflow never performs full scans under `mu_`.
+        if (tracker.index_by_name.size() >= max_tracked_chars_per_role_) {
+          if (tracker.idle_head != kNoSampleNode &&
+              time_ms > tracker.nodes[tracker.idle_head].last_time_ms &&
+              time_ms - tracker.nodes[tracker.idle_head].last_time_ms >
+                  kMaxSampleGapMs) {
+            EvictSampleNode(tracker, tracker.idle_head);
+          } else if (tracker.all_head != kNoSampleNode &&
+                     time_ms > tracker.nodes[tracker.all_head].last_time_ms &&
+                     time_ms - tracker.nodes[tracker.all_head].last_time_ms >
+                         kStaleTrackedCharMs) {
+            EvictSampleNode(tracker, tracker.all_head);
           }
         }
-        if (by_char.size() >= max_tracked_chars_per_role_) {
-          for (auto p = by_char.begin(); p != by_char.end();) {
-            if (time_ms > p->second.last_time_ms &&
-                time_ms - p->second.last_time_ms > kStaleTrackedCharMs) {
-              p = by_char.erase(p);
-            } else {
-              ++p;
-            }
+        if (tracker.index_by_name.size() < max_tracked_chars_per_role_) {
+          size_t idx = kNoSampleNode;
+          if (!tracker.free_indices.empty()) {
+            idx = tracker.free_indices.back();
+            tracker.free_indices.pop_back();
+          } else {
+            idx = tracker.nodes.size();
+            tracker.nodes.emplace_back();
           }
-        }
-        if (by_char.size() < max_tracked_chars_per_role_) {
-          by_char.emplace(std::string(name), CharSampleWindow{time_ms, {}});
+          CharSampleNode& node = tracker.nodes[idx];
+          node.name = std::string(name);
+          node.last_time_ms = time_ms;
+          node.dts.clear();
+          node.all_prev = kNoSampleNode;
+          node.all_next = kNoSampleNode;
+          node.idle_prev = kNoSampleNode;
+          node.idle_next = kNoSampleNode;
+          node.in_idle = true;
+          tracker.index_by_name.emplace(node.name, idx);
+          LinkSampleNodeSorted(tracker, idx, AllSampleList());
+          LinkSampleNodeSorted(tracker, idx, IdleSampleList());
         } else {
           ++untracked_sample_chars_;
         }
       } else {
-        const int64_t dt = time_ms - it->second.last_time_ms;
+        const size_t idx = it->second;
+        CharSampleNode& node = tracker.nodes[idx];
+        const int64_t dt = time_ms - node.last_time_ms;
         if (dt > 0 && dt <= kMaxSampleGapMs) {
-          if (it->second.dts.size() < kMaxRecordedSampleDtsPerChar) {
-            it->second.dts.push_back(dt);
+          if (node.dts.size() < kMaxRecordedSampleDtsPerChar) {
+            node.dts.push_back(dt);
           }
-          it->second.last_time_ms = time_ms;
+          node.last_time_ms = time_ms;
+          if (node.in_idle && !node.dts.empty()) {
+            UnlinkSampleNode(tracker, idx, IdleSampleList());
+            node.in_idle = false;
+          }
+          UpdateSampleNodeOrder(tracker, idx, AllSampleList());
         } else if (dt > kMaxSampleGapMs || dt < 0) {
-          it->second.last_time_ms = time_ms;
+          node.last_time_ms = time_ms;
+          UpdateSampleNodeOrder(tracker, idx, AllSampleList());
+          if (node.in_idle) {
+            UpdateSampleNodeOrder(tracker, idx, IdleSampleList());
+          }
         }
       }
     }
