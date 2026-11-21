@@ -18,46 +18,28 @@ Last updated 2026-11-21.
 
 **Priority direction (2026-11-21):** Mechanical WoW competence (dungeons, raids/ICC, clearing quests,
 soloing elite quests, smart gearing) takes priority over `"human-like"` mimicry (`D`). Where we
-stand after the 320-trial (`n = 16` per arm) 5-boss benchmark
-([`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md)):
-plumbing and measurement work; `notes.md` reliably changes behaviour (`p_holm <= 0.033`), doesn't yet
-reliably change kill rates after multiple-comparison correction, costs DPS (`Loken` `11.5k` vs
-`15.5k`), and trails playerbots C++ scripts on `Kael'thas` `Flame Strike` (`14/16 <= 1,000` dmg /
-`13.1k` total in `baseline` vs `2/16` / `128.6k` in `llm` and `2/16` / `168.4k` in `llm_no_notes`),
-while in open-world leveling bots get kills ~`3x` faster than human play but finish ~`1/3` as many
-quests and die more. Drop `Devourer` and `Loken` (or lower their gear) in future boss runs so every
-boss can separate arms.
+stand after the Phase 1 (`A1–A2`) & Phase 2 (`A3–A4`, `C1`) 160-trial (`n = 8` per arm) 5-boss
+benchmark ([`docs/benchmarks/2026-11-21-phase1-phase2-five-boss.md`](benchmarks/2026-11-21-phase1-phase2-five-boss.md)):
+`A1` dodge-then-return (`med_back_ms = 11–313 ms`), `A2` server-radius-aware `out of it` +
+trigger-area perception, `A3` script-generated notes (`41` instances / `647` triggers) + grammar
+parity (`in`, `out of`, `back`), `A4` pre-pull standing-order compilation + cache, and `C1`
+trace-mined eval cases (`4/4` passing `tools/wlb test eval`) are implemented and verified;
+`Kael'thas` `Flame Strike` parity vs `baseline` is **closed** (`7,460` / `6/8 <= 1k` vs `11,229` /
+`5/8 <= 1k`); `gear_quality=2` on `Loken` and `Devourer` broke their `16/16` ceilings without
+dropping bosses; and `llm` DPS is within `10%` of `llm_no_notes` on `kaelthas` (`-9.6%`), `ikiss`
+(`+5.2%`), and `devourer` (`-7.1%`). Remaining Phase 1/2 gaps before Phase 3: `Murmur` `0/8`
+(`-37.5%` DPS, tank leaving melee triggers `Resonance` wipe), `Loken` `2/8` (`-38.9%` DPS, ranged
+bots eat distance-scaled `Pulsing Shockwave` instead of stacking), and `llm` kills vs `no_brain`
+after Holm–Bonferroni correction (`10/40` vs `19/40`).
 
-1. **Phase 1 — Make boss reactions worth it (`A1` dodge-then-return, `A2` server-radius-aware acts)**
-   *(Done when: `llm` keeps its dodge rate and its DPS is within `10%` of `llm_no_notes`)*:
-   - **`A1. Dodge, then return (Decision #1: auto-resume interrupted activity when an act ends)`:**
-     Today an `away` ends and the bot stands where it ended up, out of range. When a movement act
-     ends, have the module automatically resume what was interrupted (last attack target / previous
-     position or range, plus `then back` support) — that's a fact about what was interrupted, not a
-     game judgment. Measure DPS lost per dodge and time back in range after each dodge in
-     `tools/bench/dodge_timeline.py`.
-   - **`A2. Take distances from the server, not the notes`:** Put each cast's real DBC radius,
-     impact point, and time-to-impact in the snapshot (the trace already reads the radii) so acts
-     can: (a) `out of it`: move just past the radius plus a margin, toward the group or the tank;
-     (b) skip the dodge if impact lands before the bot could get out, or if the bot is already
-     outside (removing `n = 16` short-run failures like `Murmur` `22.4 yd` med vs `34 yd` radius or
-     `Ikiss` `12.3 yd` med vs `35 yd` radius, and needless `52–58 yd` max over-runs).
-2. **Phase 2 — Script-generated notes, grammar parity, pre-pull orders & trace-mined evals (`A3`, `A4`, `C1`)**
-   *(Done when: the `Flame Strike` gap is closed — `llm` takes no more damage than the playerbots
-   script — and bench boss kills for `llm` are significantly above `no_brain` after correction)*:
-   - **`A3. Generate `notes.md` from playerbots' boss scripts + amend grammar to express everything the bot scripts describe (Decision #2)`:**
-     Generate draft `notes.md` from playerbots' ~20k lines of boss scripts plus spell data, then
-     edit. Where a script does something standing orders/acts cannot express yet (e.g., `Flame
-     Strike` ground placement), **amend our grammar (`docs/specs/grammar-idl.md`,
-     `docs/specs/triggers.md`) with the missing verbs/triggers so `notes.md` can express everything
-     the C++ boss scripts describe** (rather than leaving `baseline` scripts on).
-   - **`A4. Get the first plan in before the pull`:** Pre-compute standing orders from `notes.md`
-     when the bot enters the instance (not on the boss pull) and cache compiled orders per boss.
-     Keep the bench's realistic pull-on-connect, and measure the gap.
-   - **`C1. Mine traces for offline eval cases`:** Every death, wipe, missed dodge, or stall in a
-     soak or bench becomes an offline eval case (snapshot + what should have happened) so
-     `tools/wlb test eval` grows from real failures and catches regressions in seconds.
-3. **Phase 3 — Targeting, roles, items/vehicles, self-revising notes & raids / ICC (`A5`, `A6`, `C2`)**
+1. **Close Phase 1 & Phase 2 boss-kill sign-off gaps (`Murmur` `Resonance`, `Loken` `Pulsing Shockwave`, `Ikiss` LoS):**
+   *(Implementation of `A1–A4` and `C1` is done; done when: `llm` DPS is within `10%` of
+   `llm_no_notes` on all 5 bosses and `llm` boss kills beat `no_brain` significantly after
+   Holm–Bonferroni correction)*:
+   - Role-aware standing-order notes for `Murmur` (keep tank in melee during `Sonic Boom` so
+     `Resonance` never wipes the party) and `Loken` (stack close between `Lightning Nova` casts to
+     minimize `Pulsing Shockwave`), then re-verify on the 5-boss benchmark.
+2. **Phase 3 — Targeting, roles, items/vehicles, self-revising notes & raids / ICC (`A5`, `A6`, `C2`)**
    *(Promoted ahead of open-world / human-likeness per Decision #4. Done when: kills on Kael and
    Murmur up, Patchwerk with a proper comp, and raid / ICC encounter progression working)*:
    - **`A5. Targeting and roles`:** Add an `"Attack <name/role>'s target"` option and show `"main
@@ -74,20 +56,34 @@ boss can separate arms.
      human-likeness).
 4. **Phase 4 — Mechanical open-world competence: questing, solo elite quests, smart gearing & zero stalls (`B1–B3`)**
    *(Done when: quests per hour within `30%` of human traces, solo elite quests & smart gear
-   upgrades working, and no `5 min` stalls in a `4 h` soak)*:
-   - **`B1. Questing over grinding`:** Show quest log objectives with the nearest place each can be
-     done, offer `"turn in"` as a single option when a quest is complete, and show distance from the
-     current quest area.
-   - **`B2. Upkeep without stalls & smart gearing`:** Full bags and broken gear lead to `"go to
-     vendor"` options (partly done), plus smart gear-upgrade evaluation across quest/dungeon/raid
-     loot; add a soak check that no bot sits still for `>= 5 min`.
+   upgrades working, and no `5 min` stalls in a `4 h` soak. Incorporates compact adaptations from
+   Club WoW's structured-state agent while keeping our 4K-context / 16-slot / ~72 ms architecture —
+   explicitly skipping 23K-token MCP schemas, 128K single-stream loops, and blocking combat tools)*:
+   - **`B1. Questing over grinding (Atlas facts + tiny working goal + prompt inspector)`:**
+     - *Compact Atlas facts (`sObjectMgr` live; `var/atlas-335a/atlas.sqlite` + `var/wiki-335a/wiki_335a.sqlite` offline):*
+       show quest log objectives with nearest spawn distance & direction (falling back from
+       `quest_poi` to `creature`/`gameobject`/`loot` spawns to cover the `153` obtainable indoor
+       dungeon quests without POIs), offer `"Turn in <quest>"` as a single option pointing to the
+       quest-ender NPC, and surface nearby quest givers beyond vision range.
+     - *Tiny persistent working goal & outcome breadcrumbs:* carry a 1–2 line per-bot working goal
+       (~50 tokens, prefix-stable) and a 1-line last-action failure/interruption breadcrumb across
+       wakes, while live HP/mana/position/quest progress remain strictly in the fresh snapshot
+       (live-state authority).
+     - *Lightweight prompt/context inspector:* CLI/log dump of the exact assembled prompt and token
+       breakdown for any bot wake to diagnose drift or bad decisions quickly.
+   - **`B2. Upkeep without stalls & smart gearing`:** Full bags, broken gear, and trainable spells
+     lead to nearest vendor/repair/trainer options from `sObjectMgr` (partly done), plus smart
+     gear-upgrade evaluation across quest/dungeon/raid loot; add a soak check that no bot sits
+     still for `>= 5 min`.
    - **`B3. Pull danger & soloing elite quests`:** Show pull danger in the snapshot (number of
      linked mobs, elites, level difference) so the brain can decline bad pulls or use cooldowns,
      kiting, and consumables to solo elite quests.
 5. **Phase 5 — Model bake-off (`C4`) & fine-tuning exploration (`C3`, Decision #3: keep as TODO)**
    *(Done when: a significant bench gain at the same latency)*:
-   - **`C4. Model choice bake-off`:** Try at least one other base model on the boss bench (same 4
-     arms, `n = 16`) before investing in `C3`, so the base model choice is settled with data.
+   - **`C4. Model choice bake-off`:** Try at least one other base model on `tools/wlb test eval`,
+     `perf`, and the boss bench (same 4 arms, `n = 16`) before investing in `C3`, so the base model
+     choice is settled with data. Candidate GGUFs pre-downloaded in `models/`:
+     `gemma-4-E4B-it-qat-IQ4_XS-imatrix.gguf` and `Qwen3.8-27B-IQ4_XS.gguf`.
    - **`C3. Train the model on its own good decisions (TODO — Decision #3: evaluate cost/feasibility on one RTX 5090 first)`:**
      Once `C1` and `C2` produce a few thousand graded decisions, evaluate cost and benefit of:
      (a) a small LoRA fine-tune of Gemma on plans that led to kills; (b) preference pairs (good vs
@@ -166,11 +162,9 @@ boss can separate arms.
 - A flaky risk in `e2e choose`: if the boar drops nothing there is no corpse to loot, and the case
   fails with "never offered". Passed every run so far.
 - **Live boss findings (Loken, 2026-11-18):**
-  - Chaining `away 25, then to Loken` on a 4 s cast finishes `away 25` in ~3.0–3.5 s and immediately
-    runs back into the blast before the cast finishes (two separate orders or waiting for the cast
-    to end avoids returning early).
-  - Mid-fight wakes (`attacked`, `hp<N`) replace all standing orders; Gemma 4 occasionally rewrites
-    a working `Lightning Nova cast` order into `Loken cast` or `Lightning Nova appears`.
+  - *(Fixed by `A1` hold-until-cast-ends and `A4` mid-fight empty-order preservation; remaining edge
+    case:)* Gemma 4 occasionally rewrites a working `Lightning Nova cast` order into `Loken cast`
+    or `Lightning Nova appears` when a mid-fight wake emits non-empty `order:` lines.
 - **Not individually live-triggered after final edits yet:** `llmtest questcomplete` when a quest
   is already active in a bot's quest log (`CompleteQuest` + `RewardQuest` branch in
   `test_commands.cc`, source-verified), plus Review 10 single-arm `_wait_checkstrat` +
@@ -190,6 +184,19 @@ boss can separate arms.
   details in [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md) §6).
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-21: **Offline 3.3.5a Wiki & Atlas SQLite databases + candidate bake-off models:**
+  pre-downloaded `gemma-4-E4B-it-qat-IQ4_XS-imatrix.gguf` (`4.7 GB`) and
+  `Qwen3.8-27B-IQ4_XS.gguf` (`15 GB`, both with `.sha256`) into untracked `models/` for `C4`;
+  extracted full pre-Cataclysm (`<= 2010-10-11T23:59:59Z`) Warcraft Wiki from Archive.org
+  `warcraft.wiki.gg-20231113-history.xml.zst` (`637 MB`) into `var/wiki-335a/wiki_335a.sqlite`
+  (`252.2 MB`, `91,152` articles / `80,325` non-redirects incl. `9,527` `{{questbox` quest pages
+  and 3.3.5a boss tactics, FTS5 `0.3 ms`); exported local `acore_world` MySQL into
+  `var/atlas-335a/atlas.sqlite` (`35.9 MB`, `9,464` quests with `7,300` linked to
+  `wiki_335a.sqlite`, `9,762` objectives, `16,262` quest starter/ender relations, `18,801` POI
+  centroids, `150,176` creature + `96,677` GO spawns, `120,005` item drops, `4,110` service NPCs,
+  FTS5); and audited `acore_world` `quest_poi` coverage (`8,965/9,464 = 94.7%`; remaining `499`
+  are `346` unobtainable + `153` mostly indoor dungeon quests covered by spawn/loot tables).
 
 - 2026-11-21: **Review 12 fixes (Medium 1, passphrase doc honesty, & post-commit review hook Lows 1–6):**
   updated [`tools/bench/hill_climb.py`](../tools/bench/hill_climb.py) `_verify_all_locks` to always verify against tracked [`config/scorer-lock.sha256`](../config/scorer-lock.sha256) even when `--lock-file` is overridden (tested in [`tools/bench/hill_climb_test.py`](../tools/bench/hill_climb_test.py) `8/8`); stated plainly in [`CONTRIBUTING.md`](../CONTRIBUTING.md), `.agents/rules/contributing.md`, and [`docs/plans/self-improving-loop.md`](plans/self-improving-loop.md) that the external passphrase file is not a technical barrier against an agent running as the same Unix user and that protection comes from the rule + tracked digest diff; hardened [`.agents/hooks/post_commit_review.py`](../.agents/hooks/post_commit_review.py) to review `last_reviewed..HEAD` only on strict descendant moves (skipping checkout/reset/amend), pass a minimal sanitized env, guard concurrent spawns with `fcntl.flock`, update `last_reviewed_sha` only after `Popen` succeeds, document plan-mode/untrusted-diff & `jetski-hub` loop-guard boundaries and `WLB_SKIP_COMMIT_REVIEW=1` opt-out, and added unit tests in [`.agents/hooks/post_commit_review_test.py`](../.agents/hooks/post_commit_review_test.py) (`3/3`). Verified via `tools/wlb check` (`ALL CHECKS PASSED`).
