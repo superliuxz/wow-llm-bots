@@ -9,9 +9,23 @@ Last updated 2026-11-20.
 
 ## In progress
 
-- Next benchmark run (all Review 5 items closed): run `--mode mixed_all --runs 12 --parallel 3`
-  (or `--mode mixed` + `--mode baseline` + `--mode no_brain`) on `bench_bosses.py` for statistically
-  powered comparison data, and save one clean report under `docs/benchmarks/`.
+### Minor Benchmark & Verification Caveats (self-audit of `d26c869`)
+- [ ] **Per-party `pull_start_ms` (`tools/bench/bench_bosses.py`):**
+  A single `pull_start_ms` is recorded before moving all 15 bots (~3 s total at `0.2 s`/bot), so an
+  early pull by Party 3 during the ~2 s while Party 1–2 are moving would not be flagged by
+  `t < pull_start_ms`; record `party_pull_ms[p_idx]` per party instead.
+- [ ] **Mixed-mode `--runs` semantics & final-wave GPU load (`tools/bench/bench_bosses.py`):**
+  `--runs N` currently splits `ceil(N / len(arms))` per arm; when `parallel` does not divide the
+  arm count evenly (e.g. 4 arms on `--parallel 3`), the final cleanup wave can run with fewer LLM
+  parties (different GPU load) than earlier waves.
+- [ ] **Live-trigger verification for source-verified C++ edge cases:**
+  L4 (null-killer `mob_kill`), L11 (fall/lava/suicide `died` with `detail="environment"`), L14
+  (`llmtest tele ... 0` non-GM entry rules), and L15 (`llmtest questcomplete` on an active log
+  quest) compiled cleanly and were source-verified, but have not been individually live-triggered.
+
+- Next benchmark run: run `--mode mixed_all --runs 12 --parallel 3` (or `--mode mixed` +
+  `--mode baseline` + `--mode no_brain`) on `bench_bosses.py` for statistically powered comparison
+  data, and save one clean report under `docs/benchmarks/`.
 
 ## Next, in order
 
