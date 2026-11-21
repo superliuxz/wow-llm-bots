@@ -9,11 +9,7 @@ Last updated 2026-11-21.
 
 ## In progress
 
-- **Re-lock `~/.local/share/wow-llm-bots/scorer.sha256` and `config/scorer-lock.sha256` after Review 10 Low 1 & Low 3 (awaiting explicit user OK):**
-  `tools/bench/hill_climb.py` and `server_module/src/snapshot/behavior_trace.{h,cc}` are in
-  `LOCKED_PATTERNS`; both lock files were left untouched at `46de81d26630...` per
-  `CONTRIBUTING.md` until a human runs `python3 tools/bench/hill_climb.py lock-scorer --force-relock`
-  (or explicitly approves relocking).
+(none)
 
 ## Next, in order
 
@@ -123,6 +119,16 @@ Last updated 2026-11-21.
   details in [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md) §6).
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-21: **Fix `/dev/tty` `"r+"` relock error & user-approved scorer relock (`d6704ae5f8a1...`):**
+  fixed `open("/dev/tty", "r+", encoding="utf-8")` raising `io.UnsupportedOperation` (non-seekable
+  character device) in [`tools/bench/hill_climb.py`](../tools/bench/hill_climb.py#L232-L274)
+  `_confirm_relock` by opening separate `"r"` and `"w"` handles, and replaced the `io.StringIO` mock
+  in [`tools/bench/hill_climb_test.py`](../tools/bench/hill_climb_test.py#L92-L212) with a real
+  `pty.openpty()` slave character device. User interactively ran `hill_climb.py lock-scorer
+  --force-relock` over SSH, updating `~/.local/share/wow-llm-bots/scorer.sha256` and
+  [`config/scorer-lock.sha256`](../config/scorer-lock.sha256) (`d6704ae5f8a1...`); verified
+  `hill_climb._verify_all_locks()` (`all 28 measurement locks verified`) and `tools/wlb check`.
 
 - 2026-11-21: **Review 10 fixes (Medium + Lows 1–3) & "Where this leaves the project" added to TODO:**
   restructured [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md)

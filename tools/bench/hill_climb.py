@@ -232,7 +232,7 @@ def _resolve_lock_file(
 def _confirm_relock(
     env: dict[str, str] | None = None,
     proc_root: pathlib.Path | None = None,
-    tty_opener=None,
+    tty_path: str | pathlib.Path = "/dev/tty",
 ) -> tuple[bool, str]:
     # Refuses any agent process (env vars, /proc ancestors, or /proc cgroup)
     # and requires an interactive 'RELOCK' typed into /dev/tty with no
@@ -244,17 +244,25 @@ def _confirm_relock(
             "refusing to write scorer lock from an agent process "
             "(run interactively in a human terminal outside any agent session)"
         )
-    opener = tty_opener or (lambda: open("/dev/tty", "r+", encoding="utf-8"))
+    # Open separate "r" and "w" handles: character devices such as /dev/tty
+    # are non-seekable, so open("/dev/tty", "r+") raises io.UnsupportedOperation
+    # (a subclass of OSError).
     try:
-        with opener() as tty:
-            if not tty.isatty():
+        with open(tty_path, "r", encoding="utf-8") as tty_in:
+            if not tty_in.isatty():
                 return False, (
                     "refusing to write scorer lock without an interactive "
                     "controlling terminal (/dev/tty)"
                 )
-            tty.write("Confirm writing scorer lock? Type 'RELOCK' to confirm: ")
-            tty.flush()
-            ans = tty.readline().strip()
+            with open(tty_path, "w", encoding="utf-8") as tty_out:
+                if not tty_out.isatty():
+                    return False, (
+                        "refusing to write scorer lock without an interactive "
+                        "controlling terminal (/dev/tty)"
+                    )
+                tty_out.write("Confirm writing scorer lock? Type 'RELOCK' to confirm: ")
+                tty_out.flush()
+                ans = tty_in.readline().strip()
     except OSError:
         return False, (
             "refusing to write scorer lock without a controlling terminal "
