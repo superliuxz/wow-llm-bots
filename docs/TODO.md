@@ -9,9 +9,25 @@ Last updated 2026-11-20.
 
 ## In progress
 
-- Next benchmark run: run `--mode mixed` + `--mode baseline` + `--mode no_brain` with `--runs 6`
-  on the fixed runner (`bench_bosses.py`) for statistically powered comparison data, and save one
-  clean report under `docs/benchmarks/`.
+### Review Trace All Events 5 (`b26e35a`) — Open Items
+
+#### Medium
+- [ ] **M6 (Medium, partly fixed) — Baseline and no-brain modes aren't mixed into waves (`tools/bench/bench_bosses.py`):**
+  Mixed mode covers only `llm` and `llm_no_notes`; `baseline` and `no_brain` are not mixed into waves.
+
+#### Low (open / intentional test-helper limitations — do not drop)
+- [ ] **L10 (Low, partly fixed) — Trace volume (`server_module/src/snapshot/behavior_trace.cc`):**
+  Up to ~576 MB/day per observed character at 5 Hz (incremental inode-keyed polling & rotation are fixed).
+- [ ] **L11 (Low, partly fixed) — Environmental deaths (`server_module/src/snapshot/behavior_trace_scripts.cc`):**
+  Self/environmental damage is already excluded from `damage_dealt` and suicides from `pvp_kill`; environmental deaths still lack a dedicated `died` event.
+- [ ] **L12 (Low, partly fixed) — `boss_meter.py`'s combat window and "dodge" number (`tools/bench/boss_meter.py`).**
+- [ ] **L14 (Low, not fixed) — `llmtest tele` with `TELE_TO_GM_MODE` skips every entry rule (`server_module/src/test/test_commands.cc`).**
+- [ ] **L15 (Low, not fixed) — `llmtest questcomplete` only marks the quest rewarded (`server_module/src/test/test_commands.cc`).**
+- [ ] **L16 (Low, not fixed) — Smaller notes on what some trace events mean.**
+
+- Next benchmark run (ready): run `--mode mixed` + `--mode baseline` + `--mode no_brain` with
+  `--runs 6` on the fixed runner (`bench_bosses.py`) for statistically powered comparison data, and
+  save one clean report under `docs/benchmarks/`.
 
 ## Next, in order
 
@@ -95,30 +111,46 @@ Last updated 2026-11-20.
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-20: **Review 5 fixes (New 1, New 2, M4, L2/New L5, L4, L6, L13, New L1–L4):**
+  `bench_bosses.py` uses word-bounded regexes (`\bcombat=(\d+)` / `\bnoncombat=(\d+)`) in
+  `_check_strat_line` (fixing the `combat=0` substring bug), summarizes and balances mixed arms
+  separately (`by_arm`, running until every arm reaches `per_arm_target`), invalidates trials with
+  pre-pull combat (`_had_pre_pull_combat`), keys `_TraceTailer` offsets by inode `(st_dev, st_ino)`
+  so rotated files are never read twice, and retries slow console replies (`_console_bot`) with
+  per-wave/per-boss error isolation; `test_commands.cc` counts `passives=` in a separate read-only
+  pass after aura removal, performs full `EffectResurrectPet`-style pet revive + hunter DB summon in
+  `resetbot`, refreshes spells and pets in `gear`, and avoids converting an existing 5-man to a raid
+  when re-grouping an existing member; `behavior_trace_scripts.cc` handles null-killer `OnUnitDeath`
+  via `GetLootRecipientGroup()` / `GetLootRecipient()` within 100 yd; `TraceSample` adds `inst`
+  (`instance_id`) and uses `Spell::m_targets.GetDstPos()` for ground-targeted spells, and
+  `dodge_timeline.py` isolates cast windows per `inst` (plus `--bots`). Verified via `tools/wlb check`
+  (400 C++ + 25 Python tests, 6/6 in `dodge_timeline_test.py`) and live on Ikiss (`--mode mixed
+  --runs 2 --parallel 2`: `llm` 1/1 kill `56.6 s` `0` deaths vs `llm_no_notes` 0/1 wipe `6` deaths;
+  `dodge_timeline.py` cleanly separated `inst=1` and `inst=2`).
 - 2026-11-20: **Docs cleanup:** deleted superseded/invalidated docs (`docs/reviews/2026-11-18-f40b0b6.md`,
   `docs/reports/hill-climb-2026-11-19.md`, `docs/benchmarks/2026-11-20-boss-*.md`,
   `docs/plans/{phase2,harness,latency,grammar-idl}.md`, `docs/specs/trigger-audit.md`); merged
   lasting decisions into `docs/design.md`, moved built specs to `docs/specs/{harness,grammar-idl,options}.md`,
   repointed all code/doc comments, and pruned `docs/TODO.md`.
-- 2026-11-20: **Review 4 Lows 11 & 14 (DBC spell radii, cast-origin dodge distance, impact-dodge meter, incremental trace tailing):**
+- 2026-11-20: **Review 4 partial follow-up (DBC spell radii, cast-origin dodge distance, impact-dodge meter, incremental trace tailing):**
   `TraceSample` (`behavior_trace.{h,cc}`, `llm_brain_world_script.cc`) emits `target_x`, `target_y`,
   and DBC `target_cast_radius` via `SpellInfo::Effects[eff].CalcRadius()`; `dodge_timeline.py` drops
-  the hardcoded radius table, measures Euclidean distance from cast origin `(target_x, target_y)` for
+  the hardcoded radius table, measures Euclidean distance from caster `(target_x, target_y)` for
   all bots, and filters `act_delay_ms` to dodge/movement verbs; `boss_meter.py` reports
   `impact_dist_yd` & `outside_at_impact`; `bench_bosses.py` uses incremental byte-offset
-  `_TraceTailer` (partial-line safe). Unit-tested (`dodge_timeline_test.py` in `tools/wlb check`)
-  and live-verified on Ikiss (DBC `radius=35.0yd`).
-- 2026-11-20: **Review 4 fixes (High 1, Mediums 2–7, Lows 8–10, 12–13) + auto-loaded rules:**
-  `llmtest resetbot` preserves passive auras (`passives=62` live-verified) and resets pet
-  health/power, rage/energy/runic power, ammo, and reagents; `llmtest gear` refreshes glyphs, ammo,
-  and reagents; `llmtest checkstrat` uses non-allocating `GetSupportedStrategies()`;
-  `bench_bosses.py` reads `first_line_ms` from `bots_dir/*/events/*.jsonl` (fails if empty), scopes
-  console checks to bot names, verifies `map=0` pre-reset and non-reused dungeon instance IDs across
-  waves, asserts baseline scripts are ON, adds `--mode mixed` (rotates `llm`/`llm_no_notes` across
-  parallel parties in one wave), and overwrites output JSON cleanly unless `--append`;
-  `behavior_trace_scripts.cc` bounds group `mob_kill` to 100 yd; `trace_parity.py` drops
-  `item_unequip` & `quest_abandon` (scorer re-locked); standardized the 3-step review-fix procedure
-  in `CONTRIBUTING.md` + `.agents/rules/contributing.md` (`always_on`).
+  `_TraceTailer`. *(Remaining gaps from Review 5 tracked above: ground-targeted spell origin,
+  cross-party scoring in shared trace dir, rotated files read twice, L10–L16.)*
+- 2026-11-20: **Review 4 fixes (Fixed: H1, M2, M5, L1, L7, L8, L9; Partly fixed: M3, M4, M6, L2, L3, L4, L6, L10, L12) + auto-loaded rules:**
+  `llmtest resetbot` preserves passive auras (`passives=` count bug tracked above) and resets
+  rage/energy/runic power, ammo, and reagents (pet revive partial, tracked above); `llmtest checkstrat`
+  uses non-allocating `GetSupportedStrategies()`; `bench_bosses.py` reads `first_line_ms` from
+  `bots_dir/*/events/*.jsonl` (fails if empty), scopes console checks to bot names (strip check
+  substring bug New 1 tracked above), verifies `map=0` pre-reset and non-reused dungeon instance IDs
+  across waves, adds `--mode mixed` for `llm`/`llm_no_notes` (per-arm summary & balancing New 2
+  tracked above), and overwrites output JSON unless `--append`; `behavior_trace_scripts.cc` bounds
+  group `mob_kill` to 100 yd (no-killer kill L4 still open); `trace_parity.py` drops `item_unequip`
+  & `quest_abandon` (scorer re-locked); standardized the 3-step review-fix procedure in
+  `CONTRIBUTING.md` + `.agents/rules/contributing.md` (`always_on`).
 - 2026-11-20: **Review 3 fixes on `trace-all-events`:**
   `server.console()` returns captured output (`tools/wlblib/server.py`); `bench_bosses.py` stages
   bots inside the dungeon before starting `harness`, enforces role and post-arrival `checkstrat`

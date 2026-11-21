@@ -26,6 +26,7 @@
 #include "Pet.h"
 #include "Player.h"
 #include "Playerbots.h"
+#include "Position.h"
 #include "SharedDefines.h"
 #include "Spell.h"
 #include "SpellInfo.h"
@@ -1150,6 +1151,7 @@ class LlmBrainWorldScript : public WorldScript {
     s.role = std::string(role);
     s.name = player->GetName();
     s.map_id = player->GetMapId();
+    s.instance_id = player->GetInstanceId();
     if (const AreaTableEntry* area =
             sAreaTableStore.LookupEntry(player->GetZoneId())) {
       const char* zname = area->area_name[sWorld->GetDefaultDbcLocale()];
@@ -1243,6 +1245,12 @@ class LlmBrainWorldScript : public WorldScript {
           }
           if (tsn) {
             s.target_casting = tsn;
+          }
+          if (tsp->m_targets.HasDst()) {
+            if (const WorldLocation* dst = tsp->m_targets.GetDstPos()) {
+              s.target_x = dst->GetPositionX();
+              s.target_y = dst->GetPositionY();
+            }
           }
           float max_r = 0.0f;
           for (uint8 eff = 0; eff < MAX_SPELL_EFFECTS; ++eff) {

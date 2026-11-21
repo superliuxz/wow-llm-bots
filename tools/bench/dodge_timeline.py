@@ -32,9 +32,16 @@ def extract_dodge_timelines(
     traces: dict[str, list[dict[str, Any]]],
     spell_filter: str = "",
     radius_override: float | None = None,
+    bots: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Finds boss casts seen via `target_casting` and measures each bot's reaction."""
-    # Each raw window: (t_start, t_end, spell_name, radius_yd, cast_x, cast_y)
+    """Finds boss casts seen via `target_casting` and measures each bot's reaction.
+
+    Windows are isolated per `inst` (dungeon instance ID) so parallel parties
+    sharing a trace directory are never scored against another party's cast.
+    """
+    if bots:
+        traces = {n: r for n, r in traces.items() if n in bots}
+    # Each raw window: (t_start, t_end, spell_name, radius_yd, cast_x, cast_y, inst_id)
     raw_windows: list[list[Any]] = []
     act_counts: dict[str, int] = {}
     cbt_t0: int | None = None
@@ -54,14 +61,15 @@ def extract_dodge_timelines(
                 cbt_t0 = t if cbt_t0 is None else min(cbt_t0, t)
                 cbt_t1 = t if cbt_t1 is None else max(cbt_t1, t)
             sp = str(r.get("target_casting", ""))
+            inst_id = int(r.get("inst", 0))
             if sp and (not spell_filter or spell_filter.lower() in sp.lower()):
                 rad = float(r.get("target_cast_radius", -1.0))
                 tx = float(r["target_x"]) if "target_x" in r else None
                 ty = float(r["target_y"]) if "target_y" in r else None
-                if cur is None or cur[2] != sp or t - cur[1] > 1500:
+                if cur is None or cur[2] != sp or cur[6] != inst_id or t - cur[1] > 1500:
                     if cur is not None:
                         raw_windows.append(cur)
-                    cur = [t, t, sp, rad if rad > 0 else None, tx, ty]
+                    cur = [t, t, sp, rad if rad > 0 else None, tx, ty, inst_id]
                 else:
                     cur[1] = t
                     if rad > 0:
@@ -78,10 +86,10 @@ def extract_dodge_timelines(
     fight_min = max(1.0 / 60.0, ((cbt_t1 - cbt_t0) / 60000.0)) if (cbt_t0 and cbt_t1 and cbt_t1 > cbt_t0) else 1.0
     acts_per_min = {name: round(cnt / fight_min, 1) for name, cnt in act_counts.items()}
 
-    raw_windows.sort(key=lambda w: (w[0], w[1]))
+    raw_windows.sort(key=lambda w: (w[6], w[0], w[1]))
     merged: list[list[Any]] = []
     for w in raw_windows:
-        if merged and merged[-1][2] == w[2] and w[0] <= merged[-1][1] + 1000:
+        if merged and merged[-1][6] == w[6] and merged[-1][2] == w[2] and w[0] <= merged[-1][1] + 1000:
             merged[-1][1] = max(merged[-1][1], w[1])
             if w[3] is not None:
                 merged[-1][3] = w[3]
@@ -89,16 +97,21 @@ def extract_dodge_timelines(
                 merged[-1][4], merged[-1][5] = w[4], w[5]
         else:
             merged.append(list(w))
+    merged.sort(key=lambda w: (w[0], w[1], w[6]))
 
     windows: list[dict[str, Any]] = []
-    for s0, s1, sp, dbc_radius, cx, cy in merged:
+    for s0, s1, sp, dbc_radius, cx, cy, inst_id in merged:
         radius = radius_override if radius_override is not None else dbc_radius
         per_bot: dict[str, dict[str, Any]] = {}
         for name, rows in sorted(traces.items()):
             samples = [
                 r for r in rows
-                if r.get("kind") == "sample" and s0 - 600 <= int(r["t_ms"]) <= s1 + 1500
+                if r.get("kind") == "sample"
+                and s0 - 600 <= int(r["t_ms"]) <= s1 + 1500
+                and (inst_id == 0 or int(r.get("inst", 0)) == inst_id)
             ]
+            if inst_id != 0 and not samples:
+                continue  # Bot was in a different dungeon instance.
             events_during = [
                 r for r in rows
                 if r.get("kind") == "event" and s0 - 200 <= int(r["t_ms"]) <= s1 + 200
@@ -159,6 +172,7 @@ def extract_dodge_timelines(
             }
         windows.append({
             "spell": sp,
+            "instance_id": inst_id,
             "radius_yd": round(radius, 1) if radius is not None else None,
             "origin": [round(cx, 1), round(cy, 1)] if (cx is not None and cy is not None) else None,
             "start_ms": s0,
@@ -182,7 +196,8 @@ def format_timelines(res: dict[str, Any]) -> str:
     for w in windows:
         rel = (w["start_ms"] - t0) / 1000.0
         rad = f", radius={w['radius_yd']:.1f}yd" if w["radius_yd"] is not None else ""
-        lines.append(f"\n== +{rel:5.1f}s | {w['spell']} (dur={w['dur_s']:.2f}s{rad}) ==")
+        inst_s = f", inst={w['instance_id']}" if w.get("instance_id") else ""
+        lines.append(f"\n== +{rel:5.1f}s | {w['spell']} (dur={w['dur_s']:.2f}s{rad}{inst_s}) ==")
         lines.append(
             f"  {'Bot':8s} {'StartYd':>7s} {'EndYd':>7s} {'Safe?':>5s} "
             f"{'ActDelay':>9s} {'MoveDelay':>10s} {'ImpactDmg':>9s} {'Died':>4s}  Act"
@@ -207,9 +222,11 @@ def main() -> int:
     ap.add_argument("trace_dir", type=pathlib.Path)
     ap.add_argument("--spell", default="", help="Optional case-insensitive spell substring filter")
     ap.add_argument("--radius", type=float, default=None, help="Override spell impact radius (yd)")
+    ap.add_argument("--bots", default="", help="Optional comma-separated bot names to include")
     args = ap.parse_args()
+    bot_set = {b.strip() for b in args.bots.split(",") if b.strip()} or None
     traces = trace_parity.load_traces(args.trace_dir)["bot"]
-    res = extract_dodge_timelines(traces, spell_filter=args.spell, radius_override=args.radius)
+    res = extract_dodge_timelines(traces, spell_filter=args.spell, radius_override=args.radius, bots=bot_set)
     print(format_timelines(res))
     return 0
 

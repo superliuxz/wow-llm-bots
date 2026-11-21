@@ -176,6 +176,8 @@ std::string FormatTraceSample(const TraceSample& s) {
        JsonEscape(s.name),
        ",\"map\":",
        base::StringPrintf("%u", s.map_id),
+       ",\"inst\":",
+       base::StringPrintf("%u", s.instance_id),
        ",\"zone\":",
        JsonEscape(s.zone),
        ",\"in_town\":",

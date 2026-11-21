@@ -27,6 +27,7 @@ struct TraceSample {
   std::string role;  // "human" or "bot"
   std::string name;
   uint32_t map_id = 0;
+  uint32_t instance_id = 0;
   std::string zone;
   bool in_town = false;
   bool in_group = false;

@@ -101,10 +101,15 @@ class LlmBrainTestCommandScript : public CommandScript {
       }
       sGroupMgr->AddGroup(group);
     }
+    if (member->GetGroup() == group) {
+      handler->PSendSysMessage("llmtest: grouped {} (leader) and {}",
+                               leader->GetName(), member->GetName());
+      return true;
+    }
     if (!group->isRaidGroup() && group->GetMembersCount() >= MAXGROUPSIZE) {
       group->ConvertToRaid();
     }
-    if (member->GetGroup() != group && !group->AddMember(member)) {
+    if (!group->AddMember(member)) {
       handler->SendErrorMessage("llmtest: failed to add {} to group",
                                 member->GetName());
       return false;
@@ -195,10 +200,12 @@ class LlmBrainTestCommandScript : public CommandScript {
     factory.Randomize(false);
     if (spec_tab && *spec_tab >= 0 && *spec_tab <= 3) {
       PlayerbotFactory::InitTalentsBySpecNo(player, *spec_tab, true);
+      factory.InitAvailableSpells();
       factory.InitGlyphs(false);
       factory.InitEquipment(false);
       factory.InitAmmo();
       factory.InitReagents();
+      factory.InitPet();
       if (PlayerbotAI* ai = GET_PLAYERBOT_AI(player)) {
         ai->ResetStrategies();
       }
@@ -282,16 +289,23 @@ class LlmBrainTestCommandScript : public CommandScript {
     // Remove ONLY non-passive auras (clears Sated/Exhaustion, Res Sickness,
     // buffs, debuffs) while preserving passive talent, racial, and item-equip
     // auras (mirroring Unit::RemoveArenaAuras).
-    uint32_t passive_count = 0;
     auto& auras = player->GetOwnedAuras();
     for (auto itr = auras.begin(); itr != auras.end();) {
       Aura* aura = itr->second;
       const SpellInfo* info = aura ? aura->GetSpellInfo() : nullptr;
       if (aura && (aura->IsPassive() || (info && info->IsPassive()))) {
-        ++passive_count;
         ++itr;
       } else {
         player->RemoveOwnedAura(itr);
+      }
+    }
+    // Count passives in a separate read-only pass (RemoveOwnedAura resets `itr`
+    // in Unit.cpp:4777, which would otherwise double-count passives).
+    uint32_t passive_count = 0;
+    for (auto const& [spell_id, aura] : player->GetOwnedAuras()) {
+      const SpellInfo* info = aura ? aura->GetSpellInfo() : nullptr;
+      if (aura && (aura->IsPassive() || (info && info->IsPassive()))) {
+        ++passive_count;
       }
     }
     player->RemoveAllSpellCooldown();
@@ -301,9 +315,28 @@ class LlmBrainTestCommandScript : public CommandScript {
     player->SetPower(POWER_RAGE, 0);
     player->SetPower(POWER_ENERGY, player->GetMaxPower(POWER_ENERGY));
     player->SetPower(POWER_RUNIC_POWER, 0);
-    if (Pet* pet = player->GetPet()) {
+    Pet* pet = player->GetPet();
+    if (!pet && player->getClass() == CLASS_HUNTER) {
+      player->SummonPet(0, 0.0f, 0.0f, 0.0f, 0.0f, SUMMON_PET, 0ms, 100);
+      pet = player->GetPet();
+    }
+    if (pet) {
       if (!pet->IsAlive()) {
+        float px = 0.0f, py = 0.0f, pz = 0.0f;
+        player->GetClosePoint(px, py, pz, pet->GetCombatReach(),
+                              PET_FOLLOW_DIST, pet->GetFollowAngle());
+        pet->NearTeleportTo(px, py, pz, player->GetOrientation());
+        pet->Relocate(px, py, pz, player->GetOrientation());
+        pet->ReplaceAllDynamicFlags(UNIT_DYNFLAG_NONE);
+        pet->RemoveUnitFlag(UNIT_FLAG_SKINNABLE);
         pet->setDeathState(DeathState::Alive);
+        pet->ClearUnitState(
+            uint32_t(UNIT_STATE_ALL_STATE & ~(UNIT_STATE_POSSESSED)));
+        pet->SetDisplayId(pet->GetNativeDisplayId());
+        if (CharmInfo* ci = pet->GetCharmInfo()) {
+          ci->SetIsAtStay(false);
+          ci->SetIsFollowing(false);
+        }
       }
       pet->SetFullHealth();
       const Powers ptype = pet->getPowerType();

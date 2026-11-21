@@ -252,8 +252,86 @@ BOSSES = {
     ),
 }
 
-INST_RE = re.compile(r"instance=(\d+)")
-PASSIVES_RE = re.compile(r"passives=(\d+)")
+INST_RE = re.compile(r"\binstance=(\d+)")
+PASSIVES_RE = re.compile(r"\bpassives=(\d+)")
+EXISTS_RE = re.compile(r"\bexists=(\d+)")
+COMBAT_RE = re.compile(r"\bcombat=(\d+)")
+NONCOMBAT_RE = re.compile(r"\bnoncombat=(\d+)")
+
+
+def _parse_checkstrat(cline: str) -> tuple[int, int, int] | None:
+    """Parses `(exists, combat, noncombat)` from a `llmtest checkstrat` reply line.
+
+    Uses word-bounded regexes so `combat=0` never matches the substring inside `noncombat=0`.
+    """
+    em = EXISTS_RE.search(cline)
+    cm = COMBAT_RE.search(cline)
+    nm = NONCOMBAT_RE.search(cline)
+    if not (em and cm and nm):
+        return None
+    return int(em.group(1)), int(cm.group(1)), int(nm.group(1))
+
+
+def _check_strat_line(cline: str, expected_on: bool) -> tuple[bool, str]:
+    parsed = _parse_checkstrat(cline)
+    if parsed is None:
+        return False, f"unparseable checkstrat line: {cline!r}"
+    exists, combat, noncombat = parsed
+    if exists != 1:
+        return False, f"strategy does not exist (exists={exists}): {cline!r}"
+    if expected_on:
+        if combat != 1 and noncombat != 1:
+            return False, f"baseline strategy is NOT active (combat={combat}, noncombat={noncombat}): {cline!r}"
+        return True, ""
+    if combat != 0 or noncombat != 0:
+        return False, f"strategy was NOT stripped (combat={combat}, noncombat={noncombat}): {cline!r}"
+    return True, ""
+
+
+def _console_bot(cmd: str, prefix: str, wait_s: float = 0.3, retries: int = 3) -> tuple[str, str]:
+    """Runs a console command and retries if the bot-scoped reply line was slow."""
+    last_out = ""
+    for attempt in range(retries):
+        last_out = server.console(cmd, wait_s=wait_s * (1.0 + 0.5 * attempt), inst=TEST) or ""
+        line = _find_bot_line(last_out, prefix)
+        if line:
+            return line, last_out
+    return "", last_out
+
+
+def _had_pre_pull_combat(
+    all_traces: dict[str, list[dict]],
+    pnames: list[str],
+    stage_ms: int,
+    pull_start_ms: int,
+) -> bool:
+    """Returns True if any bot in `pnames` had `in_combat=True` between staging and pull."""
+    for n in pnames:
+        for r in all_traces.get(n, []):
+            if r.get("kind") != "sample":
+                continue
+            t = int(r.get("t_ms", 0))
+            if stage_ms <= t < pull_start_ms and r.get("in_combat"):
+                return True
+    return False
+
+
+def _summarize_trials(trials: list[dict]) -> dict:
+    kills = sum(1 for r in trials if r.get("killed"))
+    lat_p50s = [
+        r["harness_latency"]["p50_ms"]
+        for r in trials
+        if r.get("harness_latency") and r["harness_latency"].get("p50_ms") is not None
+    ]
+    return {
+        "runs": len(trials),
+        "kills": kills,
+        "median_dps": round(statistics.median(r["total_dps"] for r in trials), 1) if trials else 0.0,
+        "median_hps": round(statistics.median(r["total_hps"] for r in trials), 1) if trials else 0.0,
+        "median_deaths": round(statistics.median(r["total_deaths"] for r in trials), 1) if trials else 0.0,
+        "median_duration_s": round(statistics.median(r["duration_s"] for r in trials), 1) if trials else 0.0,
+        "median_first_line_ms": round(statistics.median(lat_p50s), 1) if lat_p50s else None,
+    }
 
 
 def _find_bot_line(output: str | None, prefix: str) -> str:
@@ -318,12 +396,17 @@ def _set_instances_per_hour(cap: int = 1000) -> None:
 
 
 class _TraceTailer:
-    """Incrementally tails newly appended JSONL lines per bot (avoids O(N^2) re-reads)."""
+    """Incrementally tails newly appended JSONL lines per bot (avoids O(N^2) re-reads).
+
+    Offsets are keyed by file `(st_dev, st_ino)` rather than path so that when
+    `behavior_trace.cc` renames `YYYY-MM-DD.jsonl` -> `YYYY-MM-DD.1.jsonl`, the
+    rotated file keeps its read offset and is never read twice.
+    """
 
     def __init__(self, trace_dir: pathlib.Path, bot_names: list[str]) -> None:
         self.trace_dir = trace_dir / "bot"
         self.bot_names = list(bot_names)
-        self.offsets: dict[pathlib.Path, int] = {}
+        self.offsets: dict[tuple[int, int], int] = {}
         self.rows: dict[str, list[dict]] = {n: [] for n in bot_names}
 
     def poll(self) -> dict[str, list[dict]]:
@@ -332,13 +415,15 @@ class _TraceTailer:
             if not bdir.is_dir():
                 continue
             for f in sorted(bdir.glob("*.jsonl")):
-                off = self.offsets.get(f, 0)
                 try:
-                    sz = f.stat().st_size
+                    st = f.stat()
                 except OSError:
                     continue
+                fkey = (st.st_dev, st.st_ino)
+                off = self.offsets.get(fkey, 0)
+                sz = st.st_size
                 if sz < off:
-                    off = 0  # File rotated/truncated.
+                    off = 0  # Same inode truncated in place.
                 if sz == off:
                     continue
                 with f.open("r", encoding="utf-8", errors="replace") as fp:
@@ -359,7 +444,7 @@ class _TraceTailer:
                             self.rows[name].append(json.loads(line))
                         except json.JSONDecodeError:
                             continue
-                    self.offsets[f] = fp.tell()
+                    self.offsets[fkey] = fp.tell()
         return self.rows
 
 
@@ -436,11 +521,14 @@ def run_boss_waves(
     valid_runs: list[dict] = []
     invalid_runs = 0
     wave = 0
-    max_waves = (target_runs // n_parties) + 3
     seen_instances: set[int] = set()
-    # In `mixed` mode, rotate (llm, llm_no_notes) across parallel parties so
-    # both LLM modes share identical GPU load within every wave.
-    mixed_cycle = ("llm", "llm_no_notes")
+    # In `mixed` mode, rotate (llm, llm_no_notes) across parallel parties and
+    # keep running until EVERY arm reaches `per_arm_target` valid trials.
+    arms = ("llm", "llm_no_notes") if mode == "mixed" else (mode,)
+    per_arm_target = target_runs if mode != "mixed" else max(1, (target_runs + len(arms) - 1) // len(arms))
+    arm_counts: dict[str, int] = {a: 0 for a in arms}
+    max_waves = ((per_arm_target * len(arms) + n_parties - 1) // n_parties) + 4
+    wave_errors: list[str] = []
 
     try:
         server.server_start(TEST)
@@ -453,8 +541,7 @@ def run_boss_waves(
             for name, _, _, _ in party[1:]:
                 server.console(f"llmtest group {leader} {name}", wait_s=0.3, inst=TEST)
             for idx, (name, _, spec_tab, expected_role) in enumerate(party):
-                out = server.console(f"llmtest gear {name} {level} {spec_tab}", wait_s=0.5, inst=TEST)
-                line = _find_bot_line(out, f"geared {name} at level {level}")
+                line, out = _console_bot(f"llmtest gear {name} {level} {spec_tab}", f"geared {name} at level {level}", wait_s=0.5)
                 if f"role={expected_role}" not in line:
                     raise RuntimeError(
                         f"role mismatch for {name}: expected role={expected_role}, got: {out!r}"
@@ -464,209 +551,237 @@ def run_boss_waves(
                 if role_items and idx in role_items:
                     server.console(f"llmtest item {name} {role_items[idx]}", wait_s=0.2, inst=TEST)
 
-        while len(valid_runs) < target_runs and wave < max_waves:
+        while any(arm_counts[a] < per_arm_target for a in arms) and wave < max_waves:
             wave += 1
-            active_parties = parties[: min(n_parties, target_runs - len(valid_runs))]
-            party_modes = [
-                mixed_cycle[(p_idx + wave - 1) % len(mixed_cycle)] if mode == "mixed" else mode
-                for p_idx in range(len(active_parties))
-            ]
-            say(f"boss benchmark [{era} | {tag} | {mode} | wave {wave}]: modes={party_modes}")
+            # Assign arms to parallel parties prioritizing arms that still need valid trials,
+            # while rotating starting arm across waves so party slots stay balanced.
+            rotated = [arms[(i + wave - 1) % len(arms)] for i in range(len(arms))]
+            needed: list[str] = []
+            for a in rotated:
+                rem = per_arm_target - arm_counts[a]
+                if rem > 0:
+                    needed.append(a)
+            party_modes: list[str] = []
+            for p_idx in range(n_parties):
+                if len(party_modes) >= sum(max(0, per_arm_target - arm_counts[a]) for a in arms):
+                    break
+                # Pick among still-needed arms round-robin; if only 1 arm needs trials, fill remaining slots with it.
+                a = needed[p_idx % len(needed)]
+                party_modes.append(a)
+            active_parties = parties[: len(party_modes)]
+            say(f"boss benchmark [{era} | {tag} | {mode} | wave {wave}]: modes={party_modes} arm_counts={arm_counts}")
 
-            # 1. Move ALL bots off the dungeon map (to map 0) first, confirm map=0, then resetbot
-            #    (so Group::ResetInstances never silently fails due to someone still in the dungeon).
-            for p_idx, party in enumerate(active_parties):
-                hx, hy, hz = -8949.95 + p_idx * 10.0, -132.49, 83.53
-                for name, _, _, _ in party:
-                    server.console(f"llmtest tele {name} 0 {hx:.2f} {hy:.2f} {hz:.2f} 0", wait_s=0.25, inst=TEST)
-            time.sleep(2.0)
-            for party in active_parties:
-                for name, _, _, _ in party:
-                    wout = server.console(f"llmtest where {name}", wait_s=0.2, inst=TEST)
-                    wline = _find_bot_line(wout, f"where {name} ")
-                    if "map=0 " not in wline:
-                        raise RuntimeError(f"{name} did not leave dungeon before reset: {wout!r}")
-                for name, _, _, _ in party:
-                    out = server.console(f"llmtest resetbot {name}", wait_s=0.25, inst=TEST)
-                    rline = _find_bot_line(out, f"resetbot {name} ")
-                    pm = PASSIVES_RE.search(rline)
-                    if "alive=1" not in rline or not pm or int(pm.group(1)) <= 0:
-                        raise RuntimeError(f"dirty start state / missing passives for {name}: {out!r}")
-
-            # 2. Teleport each party to its own fresh dungeon instance at stage_xyz, wait for
-            #    cross-map worldport, then assert distinct non-zero AND never-reused instance IDs.
-            sx, sy, sz = stage_xyz
-            for party in active_parties:
-                for idx, (name, _, _, _) in enumerate(party):
-                    out = server.console(
-                        f"llmtest tele {name} {map_id} {sx + (idx % 5) * 0.8:.2f} {sy + (idx // 5) * 0.8:.2f} {sz:.2f} 0",
-                        wait_s=0.35,
-                        inst=TEST,
-                    )
-                    if not _find_bot_line(out, f"teleported {name} to map {map_id}"):
-                        raise RuntimeError(f"stage teleport failed for {name}: {out!r}")
-
-            time.sleep(3.5)
-            party_instances: list[int] = []
-            for party in active_parties:
-                inst_id = None
-                for name, _, _, _ in party:
-                    wout = server.console(f"llmtest where {name}", wait_s=0.25, inst=TEST)
-                    wline = _find_bot_line(wout, f"where {name} ")
-                    m = INST_RE.search(wline)
-                    if f"map={map_id} " not in wline or not m:
-                        raise RuntimeError(f"{name} did not arrive on map {map_id}: {wout!r}")
-                    cur_inst = int(m.group(1))
-                    if inst_id is None:
-                        inst_id = cur_inst
-                    elif cur_inst != inst_id:
-                        raise RuntimeError(
-                            f"party member {name} landed in instance {cur_inst}, expected {inst_id}"
-                        )
-                if inst_id == 0:
-                    raise RuntimeError(f"expected non-zero dungeon instance id on map {map_id}")
-                if inst_id in seen_instances:
-                    raise RuntimeError(f"dungeon instance {inst_id} was reused from an earlier wave!")
-                party_instances.append(inst_id)
-
-            if len(set(party_instances)) != len(party_instances):
-                raise RuntimeError(
-                    f"parallel parties collided in same dungeon instance: {party_instances}"
-                )
-            seen_instances.update(party_instances)
-            say(f"  verified fresh distinct dungeon instances: {party_instances}")
-
-            # 3. Verify dungeon strategy state on every bot after arrival (both OFF and baseline ON).
-            if strip_strat:
+            try:
+                # 1. Move ALL bots off the dungeon map (to map 0) first, confirm map=0, then resetbot
+                #    (so Group::ResetInstances never silently fails due to someone still in the dungeon).
+                for p_idx, party in enumerate(active_parties):
+                    hx, hy, hz = -8949.95 + p_idx * 10.0, -132.49, 83.53
+                    for name, _, _, _ in party:
+                        server.console(f"llmtest tele {name} 0 {hx:.2f} {hy:.2f} {hz:.2f} 0", wait_s=0.25, inst=TEST)
+                time.sleep(2.0)
                 for party in active_parties:
                     for name, _, _, _ in party:
-                        chk = server.console(f"llmtest checkstrat {name} {strip_strat}", wait_s=0.25, inst=TEST)
-                        cline = _find_bot_line(chk, f"strat {strip_strat} on {name} ")
-                        if "exists=1" not in cline:
-                            raise RuntimeError(f"strategy {strip_strat!r} does not exist on {name}: {chk!r}")
-                        if mode == "baseline":
-                            if "combat=1" not in cline and "noncombat=1" not in cline:
-                                raise RuntimeError(
-                                    f"baseline strategy {strip_strat!r} is NOT active on {name}: {chk!r}"
-                                )
-                        else:
-                            if "combat=0" not in cline or "noncombat=0" not in cline:
-                                raise RuntimeError(
-                                    f"strategy {strip_strat!r} was not stripped on {name}: {chk!r}"
-                                )
+                        wline, wout = _console_bot(f"llmtest where {name}", f"where {name} ", wait_s=0.25)
+                        if "map=0 " not in wline:
+                            raise RuntimeError(f"{name} did not leave dungeon before reset: {wout!r}")
+                    for name, _, _, _ in party:
+                        rline, out = _console_bot(f"llmtest resetbot {name}", f"resetbot {name} ", wait_s=0.25)
+                        pm = PASSIVES_RE.search(rline)
+                        if "alive=1" not in rline or not pm or int(pm.group(1)) <= 0:
+                            raise RuntimeError(f"dirty start state / missing passives for {name}: {out!r}")
 
-            # 4. Start fresh harness (if llm / llm_no_notes / mixed) with a clean --bots-dir for this wave.
-            wave_use_harness = any(pm in ("llm", "llm_no_notes") for pm in party_modes)
-            with tempfile.TemporaryDirectory(prefix=f"wlb-boss-{tag}-{mode}-w{wave}-") as tmp:
-                tmp_dir = pathlib.Path(tmp)
-                bots_dir = tmp_dir / "bots"
-                bots_dir.mkdir(parents=True)
-                for p_idx, party in enumerate(active_parties):
-                    if notes_md and party_modes[p_idx] == "llm":
-                        for name, _, _, _ in party:
-                            bdir = bots_dir / name
-                            bdir.mkdir(parents=True, exist_ok=True)
-                            (bdir / "notes.md").write_text(notes_md)
-                harness_log = tmp_dir / "harness.log"
-                proc = None
-                if wave_use_harness:
-                    proc = subprocess.Popen(
-                        [
-                            str(OUT / "common" / "harness"),
-                            "run",
-                            f"--socket={TEST.run / 'brain.sock'}",
-                            f"--rules={ROOT / 'content' / 'RULES.md'}",
-                            f"--bots-dir={bots_dir}",
-                            "--host=127.0.0.1",
-                            "--port=8090",
-                            "--slots=16",
-                            "--temperature=0",
-                        ],
-                        cwd=ROOT,
-                        stdout=harness_log.open("w"),
-                        stderr=subprocess.STDOUT,
-                    )
-                # Brief connect window (3 s) right before pull so bots don't wander/early-pull.
-                time.sleep(3.0)
-
-                # 5. Move all active parties to spawn_xyz simultaneously to initiate the pull.
-                pull_start_ms = int(time.time() * 1000)
-                x, y, z = spawn_xyz
+                # 2. Teleport each party to its own fresh dungeon instance at stage_xyz, wait for
+                #    cross-map worldport, then assert distinct non-zero AND never-reused instance IDs.
+                stage_ms = int(time.time() * 1000)
+                sx, sy, sz = stage_xyz
                 for party in active_parties:
                     for idx, (name, _, _, _) in enumerate(party):
-                        server.console(
-                            f"llmtest move {name} {x + (idx % 5) * 0.8:.2f} {y + (idx // 5) * 0.8:.2f} {z:.2f} 0",
-                            wait_s=0.2,
-                            inst=TEST,
+                        tline, out = _console_bot(
+                            f"llmtest tele {name} {map_id} {sx + (idx % 5) * 0.8:.2f} {sy + (idx // 5) * 0.8:.2f} {sz:.2f} 0",
+                            f"teleported {name} to map {map_id}",
+                            wait_s=0.35,
                         )
-                t0 = time.monotonic()
-                done_flags = [False] * len(active_parties)
-                tailer = _TraceTailer(trace_dir, [b[0] for p in active_parties for b in p])
-                try:
-                    while time.monotonic() - t0 < max_s:
-                        if proc is not None and proc.poll() is not None:
-                            break
-                        time.sleep(5.0)
-                        all_tr = tailer.poll()
-                        for p_idx, party in enumerate(active_parties):
-                            if done_flags[p_idx]:
-                                continue
-                            pnames = [b[0] for b in party]
-                            sub = _slice_traces_after(all_tr, pnames, pull_start_ms - 5000)
-                            res = boss_meter.analyze_boss_fight(sub, boss_name=boss_name)
-                            if res["killed"]:
-                                say(f"  party {p_idx + 1} ({party_modes[p_idx]}, inst {party_instances[p_idx]}): {boss_name} KILLED in {res['duration_s']:.1f}s!")
-                                done_flags[p_idx] = True
-                            elif res["total_deaths"] >= len(party):
-                                say(f"  party {p_idx + 1} ({party_modes[p_idx]}, inst {party_instances[p_idx]}): wiped ({res['total_deaths']} deaths)")
-                                done_flags[p_idx] = True
-                        if all(done_flags):
-                            time.sleep(2.0)
-                            break
-                finally:
-                    if proc is not None:
-                        proc.terminate()
-                        try:
-                            proc.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            proc.kill()
+                        if not tline:
+                            raise RuntimeError(f"stage teleport failed for {name}: {out!r}")
 
-                # Read per-party `first_line_ms` from `bots_dir/<name>/events/*.jsonl`.
-                party_lats = []
+                time.sleep(3.5)
+                party_instances: list[int] = []
+                for party in active_parties:
+                    inst_id = None
+                    for name, _, _, _ in party:
+                        wline, wout = _console_bot(f"llmtest where {name}", f"where {name} ", wait_s=0.25)
+                        m = INST_RE.search(wline)
+                        if f"map={map_id} " not in wline or not m:
+                            raise RuntimeError(f"{name} did not arrive on map {map_id}: {wout!r}")
+                        cur_inst = int(m.group(1))
+                        if inst_id is None:
+                            inst_id = cur_inst
+                        elif cur_inst != inst_id:
+                            raise RuntimeError(
+                                f"party member {name} landed in instance {cur_inst}, expected {inst_id}"
+                            )
+                    if inst_id == 0:
+                        raise RuntimeError(f"expected non-zero dungeon instance id on map {map_id}")
+                    if inst_id in seen_instances:
+                        raise RuntimeError(f"dungeon instance {inst_id} was reused from an earlier wave!")
+                    party_instances.append(inst_id)
+
+                if len(set(party_instances)) != len(party_instances):
+                    raise RuntimeError(
+                        f"parallel parties collided in same dungeon instance: {party_instances}"
+                    )
+                seen_instances.update(party_instances)
+                say(f"  verified fresh distinct dungeon instances: {party_instances}")
+
+                # 3. Verify dungeon strategy state on every bot after arrival (word-bounded regexes).
+                if strip_strat:
+                    for p_idx, party in enumerate(active_parties):
+                        expected_on = party_modes[p_idx] == "baseline"
+                        for name, _, _, _ in party:
+                            cline, chk = _console_bot(
+                                f"llmtest checkstrat {name} {strip_strat}",
+                                f"strat {strip_strat} on {name} ",
+                                wait_s=0.25,
+                            )
+                            ok, err = _check_strat_line(cline, expected_on=expected_on)
+                            if not ok:
+                                raise RuntimeError(f"checkstrat failed for {name}: {err} (raw: {chk!r})")
+
+                # 4. Start fresh harness (if llm / llm_no_notes / mixed) with a clean --bots-dir for this wave.
+                wave_use_harness = any(pm in ("llm", "llm_no_notes") for pm in party_modes)
+                with tempfile.TemporaryDirectory(prefix=f"wlb-boss-{tag}-{mode}-w{wave}-") as tmp:
+                    tmp_dir = pathlib.Path(tmp)
+                    bots_dir = tmp_dir / "bots"
+                    bots_dir.mkdir(parents=True)
+                    for p_idx, party in enumerate(active_parties):
+                        if notes_md and party_modes[p_idx] == "llm":
+                            for name, _, _, _ in party:
+                                bdir = bots_dir / name
+                                bdir.mkdir(parents=True, exist_ok=True)
+                                (bdir / "notes.md").write_text(notes_md)
+                    harness_log = tmp_dir / "harness.log"
+                    proc = None
+                    if wave_use_harness:
+                        proc = subprocess.Popen(
+                            [
+                                str(OUT / "common" / "harness"),
+                                "run",
+                                f"--socket={TEST.run / 'brain.sock'}",
+                                f"--rules={ROOT / 'content' / 'RULES.md'}",
+                                f"--bots-dir={bots_dir}",
+                                "--host=127.0.0.1",
+                                "--port=8090",
+                                "--slots=16",
+                                "--temperature=0",
+                            ],
+                            cwd=ROOT,
+                            stdout=harness_log.open("w"),
+                            stderr=subprocess.STDOUT,
+                        )
+                    # Brief connect window (3 s) right before pull so bots don't wander/early-pull.
+                    time.sleep(3.0)
+
+                    # 5. Move all active parties to spawn_xyz simultaneously to initiate the pull.
+                    pull_start_ms = int(time.time() * 1000)
+                    x, y, z = spawn_xyz
+                    for party in active_parties:
+                        for idx, (name, _, _, _) in enumerate(party):
+                            server.console(
+                                f"llmtest move {name} {x + (idx % 5) * 0.8:.2f} {y + (idx // 5) * 0.8:.2f} {z:.2f} 0",
+                                wait_s=0.2,
+                                inst=TEST,
+                            )
+                    t0 = time.monotonic()
+                    done_flags = [False] * len(active_parties)
+                    tailer = _TraceTailer(trace_dir, [b[0] for p in active_parties for b in p])
+                    try:
+                        while time.monotonic() - t0 < max_s:
+                            if proc is not None and proc.poll() is not None:
+                                break
+                            time.sleep(5.0)
+                            all_tr = tailer.poll()
+                            for p_idx, party in enumerate(active_parties):
+                                if done_flags[p_idx]:
+                                    continue
+                                pnames = [b[0] for b in party]
+                                sub = _slice_traces_after(all_tr, pnames, pull_start_ms - 5000)
+                                res = boss_meter.analyze_boss_fight(sub, boss_name=boss_name)
+                                if res["killed"]:
+                                    say(f"  party {p_idx + 1} ({party_modes[p_idx]}, inst {party_instances[p_idx]}): {boss_name} KILLED in {res['duration_s']:.1f}s!")
+                                    done_flags[p_idx] = True
+                                elif res["total_deaths"] >= len(party):
+                                    say(f"  party {p_idx + 1} ({party_modes[p_idx]}, inst {party_instances[p_idx]}): wiped ({res['total_deaths']} deaths)")
+                                    done_flags[p_idx] = True
+                            if all(done_flags):
+                                time.sleep(2.0)
+                                break
+                    finally:
+                        if proc is not None:
+                            proc.terminate()
+                            try:
+                                proc.wait(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                proc.kill()
+
+                    # Read per-party `first_line_ms` from `bots_dir/<name>/events/*.jsonl`.
+                    party_lats = []
+                    for p_idx, party in enumerate(active_parties):
+                        pnames = [b[0] for b in party]
+                        lat = _parse_harness_latency(bots_dir, pnames)
+                        if party_modes[p_idx] in ("llm", "llm_no_notes") and lat["calls"] == 0:
+                            raise RuntimeError(
+                                f"harness recorded 0 LLM decisions (first_line_ms) for party {p_idx + 1} ({pnames})"
+                            )
+                        party_lats.append(lat)
+
+                # 6. Score each party in this wave from its post-pull slice, verifying no pre-pull combat.
+                all_tr = tailer.poll()
                 for p_idx, party in enumerate(active_parties):
                     pnames = [b[0] for b in party]
-                    lat = _parse_harness_latency(bots_dir, pnames)
-                    if party_modes[p_idx] in ("llm", "llm_no_notes") and lat["calls"] == 0:
-                        raise RuntimeError(
-                            f"harness recorded 0 LLM decisions (first_line_ms) for party {p_idx + 1} ({pnames})"
-                        )
-                    party_lats.append(lat)
-
-            # 6. Score each party in this wave from its post-pull slice.
-            all_tr = tailer.poll()
-            for p_idx, party in enumerate(active_parties):
-                pnames = [b[0] for b in party]
-                sub = _slice_traces_after(all_tr, pnames, pull_start_ms - 5000)
-                res = boss_meter.analyze_boss_fight(sub, boss_name=boss_name)
-                res["era"] = era
-                res["party_size"] = len(party)
-                res["level"] = level
-                res["mode"] = party_modes[p_idx]
-                res["wave"] = wave
-                res["party_index"] = p_idx
-                res["instance_id"] = party_instances[p_idx]
-                res["harness_latency"] = party_lats[p_idx]
-                res["invalid"] = (res["total_dps"] == 0.0 and res["total_deaths"] == 0 and not res["killed"])
-                print("\n" + boss_meter.format_boss_meter(res))
-                if res["invalid"]:
-                    invalid_runs += 1
-                    say(f"  party {p_idx + 1}: INVALID trial (no pull / 0 DPS / 0 deaths)")
-                elif len(valid_runs) < target_runs:
-                    valid_runs.append(res)
+                    arm = party_modes[p_idx]
+                    pre_pull = _had_pre_pull_combat(all_tr, pnames, stage_ms, pull_start_ms)
+                    sub = _slice_traces_after(all_tr, pnames, pull_start_ms - 1000)
+                    res = boss_meter.analyze_boss_fight(sub, boss_name=boss_name)
+                    res["era"] = era
+                    res["party_size"] = len(party)
+                    res["level"] = level
+                    res["mode"] = arm
+                    res["wave"] = wave
+                    res["party_index"] = p_idx
+                    res["instance_id"] = party_instances[p_idx]
+                    res["harness_latency"] = party_lats[p_idx]
+                    res["pre_pull_combat"] = pre_pull
+                    no_pull = res["total_dps"] == 0.0 and res["total_deaths"] == 0 and not res["killed"]
+                    res["invalid"] = pre_pull or no_pull
+                    if pre_pull:
+                        res["invalid_reason"] = "pre_pull_combat"
+                    elif no_pull:
+                        res["invalid_reason"] = "no_pull"
+                    print("\n" + boss_meter.format_boss_meter(res))
+                    if res["invalid"]:
+                        invalid_runs += 1
+                        say(f"  party {p_idx + 1} ({arm}): INVALID trial ({res['invalid_reason']})")
+                    elif arm_counts[arm] < per_arm_target:
+                        valid_runs.append(res)
+                        arm_counts[arm] += 1
+            except RuntimeError as exc:
+                invalid_runs += len(active_parties)
+                wave_errors.append(f"wave {wave}: {exc}")
+                say(f"  WAVE {wave} FAILED (continuing): {exc}")
     finally:
         server.server_stop(inst=TEST)
 
-    kills = sum(1 for r in valid_runs if r["killed"])
+    by_arm = {
+        a: _summarize_trials([r for r in valid_runs if r["mode"] == a])
+        for a in arms
+    }
+    overall = _summarize_trials(valid_runs)
+    for a, st in by_arm.items():
+        say(
+            f"  summary [{boss_name} | {a}]: kills={st['kills']}/{st['runs']} "
+            f"med_dps={st['median_dps']} med_deaths={st['median_deaths']} "
+            f"med_lat={st['median_first_line_ms']}ms"
+        )
     return {
         "boss": boss_name,
         "era": era,
@@ -674,12 +789,14 @@ def run_boss_waves(
         "party_size": len(COMP_10 if raid else COMP_5),
         "mode": mode,
         "parallel": n_parties,
-        "runs": len(valid_runs),
+        "runs": overall["runs"],
         "invalid_runs": invalid_runs,
-        "kills": kills,
-        "median_dps": round(statistics.median(r["total_dps"] for r in valid_runs), 1) if valid_runs else 0.0,
-        "median_hps": round(statistics.median(r["total_hps"] for r in valid_runs), 1) if valid_runs else 0.0,
-        "median_deaths": round(statistics.median(r["total_deaths"] for r in valid_runs), 1) if valid_runs else 0.0,
+        "kills": overall["kills"],
+        "median_dps": overall["median_dps"],
+        "median_hps": overall["median_hps"],
+        "median_deaths": overall["median_deaths"],
+        "by_arm": by_arm,
+        "wave_errors": wave_errors,
         "trials": valid_runs,
     }
 
@@ -710,12 +827,16 @@ def main() -> int:
         ctx.__enter__()
     try:
         for k in keys:
-            results[k] = run_boss_waves(
-                **BOSSES[k],
-                mode=args.mode,
-                target_runs=max(1, args.runs),
-                parallel=max(1, args.parallel),
-            )
+            try:
+                results[k] = run_boss_waves(
+                    **BOSSES[k],
+                    mode=args.mode,
+                    target_runs=max(1, args.runs),
+                    parallel=max(1, args.parallel),
+                )
+            except Exception as exc:
+                say(f"BOSS {k} FAILED (continuing to remaining bosses): {exc}")
+                results[k] = {"boss": BOSSES[k]["boss_name"], "mode": args.mode, "error": str(exc)}
             out_json.write_text(json.dumps(results, indent=2) + "\n")
     finally:
         if ctx is not None:

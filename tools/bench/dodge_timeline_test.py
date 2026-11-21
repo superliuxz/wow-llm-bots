@@ -120,6 +120,73 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
             self.assertEqual(len(rows["BotA"]), 2)
             self.assertEqual(rows["BotA"][1]["t_ms"], 200)
 
+            # Rotate trace.jsonl -> trace.1.jsonl and create a fresh trace.jsonl:
+            # rotated file shares inode, so it must NOT be read a second time.
+            f.rename(bdir / "trace.1.jsonl")
+            f.write_text(json.dumps({"t_ms": 300, "kind": "sample"}) + "\n", encoding="utf-8")
+            rows = tailer.poll()
+            self.assertEqual(len(rows["BotA"]), 3)
+            self.assertEqual([r["t_ms"] for r in rows["BotA"]], [100, 200, 300])
+
+    def test_checkstrat_regex_catches_combat_1_noncombat_0(self) -> None:
+        # Substring bug regression: "combat=0" is a substring of "noncombat=0".
+        ok, err = bench_bosses._check_strat_line(
+            "llmtest: strat tbc-seth on Loada exists=1 combat=1 noncombat=0",
+            expected_on=False,
+        )
+        self.assertFalse(ok)
+        self.assertIn("combat=1", err)
+
+        ok, _ = bench_bosses._check_strat_line(
+            "llmtest: strat tbc-seth on Loada exists=1 combat=0 noncombat=0",
+            expected_on=False,
+        )
+        self.assertTrue(ok)
+
+        ok, _ = bench_bosses._check_strat_line(
+            "llmtest: strat tbc-seth on Loada exists=1 combat=1 noncombat=0",
+            expected_on=True,
+        )
+        self.assertTrue(ok)
+
+    def test_pre_pull_combat_detection(self) -> None:
+        traces = {
+            "Loada": [
+                {"kind": "sample", "t_ms": 1000, "in_combat": False},
+                {"kind": "sample", "t_ms": 2500, "in_combat": True},
+                {"kind": "sample", "t_ms": 5000, "in_combat": True},
+            ],
+            "Loadb": [
+                {"kind": "sample", "t_ms": 1000, "in_combat": False},
+                {"kind": "sample", "t_ms": 5000, "in_combat": True},
+            ],
+        }
+        self.assertTrue(bench_bosses._had_pre_pull_combat(traces, ["Loada"], 1000, 4000))
+        self.assertFalse(bench_bosses._had_pre_pull_combat(traces, ["Loadb"], 1000, 4000))
+
+    def test_dodge_timeline_isolates_parallel_instances(self) -> None:
+        traces = {
+            "Loada": [
+                {
+                    "kind": "sample", "t_ms": 1000, "in_combat": True, "inst": 1,
+                    "x": 140.0, "y": 100.0, "target_casting": "Arcane Explosion",
+                    "target_cast_radius": 35.0, "target_x": 100.0, "target_y": 100.0,
+                },
+            ],
+            "Ptwoa": [
+                {
+                    "kind": "sample", "t_ms": 1000, "in_combat": True, "inst": 2,
+                    "x": 105.0, "y": 100.0, "target_casting": "",
+                },
+            ],
+        }
+        res = dodge_timeline.extract_dodge_timelines(traces, spell_filter="Arcane Explosion")
+        self.assertEqual(len(res["windows"]), 1)
+        w = res["windows"][0]
+        self.assertEqual(w["instance_id"], 1)
+        self.assertIn("Loada", w["bots"])
+        self.assertNotIn("Ptwoa", w["bots"])
+
 
 if __name__ == "__main__":
     unittest.main()

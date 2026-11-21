@@ -451,20 +451,22 @@ class LlmBrainTraceUnitScript : public UnitScript {
         state_(state) {}
 
   void OnUnitDeath(Unit* unit, Unit* killer) override {
-    if (!unit || !killer) {
+    if (!unit) {
       return;
     }
     Creature* killed = unit->ToCreature();
     if (!killed) {
       return;
     }
-    Player* kp = killer->GetCharmerOrOwnerPlayerOrPlayerItself();
-    if (!kp) {
-      return;
+    Player* kp =
+        killer ? killer->GetCharmerOrOwnerPlayerOrPlayerItself() : nullptr;
+    Group* group = kp ? kp->GetGroup() : killed->GetLootRecipientGroup();
+    if (!kp && !group) {
+      kp = killed->GetLootRecipient();
     }
     const std::string name = killed->GetName();
     const int64_t lvl = static_cast<int64_t>(killed->GetLevel());
-    if (Group* group = kp->GetGroup()) {
+    if (group) {
       for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
            itr = itr->next()) {
         Player* member = itr->GetSource();
@@ -476,7 +478,9 @@ class LlmBrainTraceUnitScript : public UnitScript {
       }
       return;
     }
-    EmitTraceEvent(state_, kp, "mob_kill", name, lvl);
+    if (kp) {
+      EmitTraceEvent(state_, kp, "mob_kill", name, lvl);
+    }
   }
 
   void OnDamage(Unit* attacker, Unit* victim, uint32& damage) override {
