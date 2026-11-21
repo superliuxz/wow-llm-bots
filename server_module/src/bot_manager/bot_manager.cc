@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -26,6 +27,17 @@ namespace {
 constexpr uint32_t kTickMs = 1000;
 // A failed or dropped login is retried after this long.
 constexpr uint32_t kLoginRetryMs = 10000;
+
+struct BotStrategyOverride {
+  std::string combat;
+  std::string non_combat;
+};
+
+// World-thread-only per-bot strategy overrides.
+std::unordered_map<std::string, BotStrategyOverride>& BotOverrides() {
+  static auto* map = new std::unordered_map<std::string, BotStrategyOverride>();
+  return *map;
+}
 
 // The solo combat extras playerbots' AiFactory gives random bots that aren't
 // in a group (AddDefaultCombatStrategies): healers also deal damage.
@@ -134,7 +146,23 @@ void BotManager::EnsureStrategies(Player* player) {
       base_combat += kept[i];
     }
   }
-  const std::string combat = base_combat + extras;
+  std::string combat = base_combat + extras;
+  std::string non_combat = strategies_.non_combat;
+  if (auto it = BotOverrides().find(player->GetName());
+      it != BotOverrides().end()) {
+    if (!it->second.combat.empty()) {
+      if (!combat.empty()) {
+        combat.push_back(',');
+      }
+      combat += it->second.combat;
+    }
+    if (!it->second.non_combat.empty()) {
+      if (!non_combat.empty()) {
+        non_combat.push_back(',');
+      }
+      non_combat += it->second.non_combat;
+    }
+  }
   // Still as we left it in every state: playerbots hasn't reset any of them
   // since (it resets combat alone too, e.g. SelectiveResetStrategies).
   const auto holds = [&](const std::string& changes, BotState state) {
@@ -146,15 +174,26 @@ void BotManager::EnsureStrategies(Player* player) {
     return true;
   };
   if (holds(combat, BOT_STATE_COMBAT) &&
-      holds(strategies_.non_combat, BOT_STATE_NON_COMBAT) &&
+      holds(non_combat, BOT_STATE_NON_COMBAT) &&
       holds(strategies_.dead, BOT_STATE_DEAD)) {
     return;
   }
   ai->ChangeStrategy(combat, BOT_STATE_COMBAT);
-  ai->ChangeStrategy(strategies_.non_combat, BOT_STATE_NON_COMBAT);
+  ai->ChangeStrategy(non_combat, BOT_STATE_NON_COMBAT);
   ai->ChangeStrategy(strategies_.dead, BOT_STATE_DEAD);
   LOG_INFO("module", "mod-llm-brain: applied strategies to {}",
            player->GetName());
+}
+
+void BotManager::SetBotStrategyOverride(const std::string& bot_name,
+                                        std::string combat_extra,
+                                        std::string non_combat_extra) {
+  BotOverrides()[bot_name] =
+      BotStrategyOverride{std::move(combat_extra), std::move(non_combat_extra)};
+}
+
+void BotManager::ClearBotStrategyOverrides() {
+  BotOverrides().clear();
 }
 
 void BotManager::Stop() {

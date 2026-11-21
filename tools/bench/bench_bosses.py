@@ -475,6 +475,7 @@ def run_boss_waves(
     notes_md: str = "",
     max_s: float = 210.0,
     mode: str = "llm",
+    arms_override: tuple[str, ...] | None = None,
     target_runs: int = 3,
     parallel: int = 3,
 ) -> dict:
@@ -511,7 +512,18 @@ def run_boss_waves(
     lines.append(f'LlmBrain.TraceDir = "{trace_dir}"')
     c_strats = "+boost,+dps assist,-threat"
     nc_strats = "-follow,-grind,-new rpg"
-    if strip_strat and mode != "baseline":
+    # When mixing baseline + non-baseline arms in the same wave, per-bot
+    # overrides (`llmtest setstrat`) control `strip_strat` per party.
+    if arms_override:
+        arms = arms_override
+    elif mode == "mixed":
+        arms = ("llm", "llm_no_notes")
+    elif mode == "mixed_all":
+        arms = ("llm", "llm_no_notes", "no_brain", "baseline")
+    else:
+        arms = (mode,)
+    per_bot_strat_control = bool(strip_strat and len(arms) > 1 and "baseline" in arms)
+    if strip_strat and not per_bot_strat_control and mode != "baseline":
         c_strats += f",-{strip_strat}"
         nc_strats += f",-{strip_strat}"
     lines.append(f'LlmBrain.CombatStrategies = "{c_strats}"')
@@ -522,10 +534,7 @@ def run_boss_waves(
     invalid_runs = 0
     wave = 0
     seen_instances: set[int] = set()
-    # In `mixed` mode, rotate (llm, llm_no_notes) across parallel parties and
-    # keep running until EVERY arm reaches `per_arm_target` valid trials.
-    arms = ("llm", "llm_no_notes") if mode == "mixed" else (mode,)
-    per_arm_target = target_runs if mode != "mixed" else max(1, (target_runs + len(arms) - 1) // len(arms))
+    per_arm_target = target_runs if len(arms) == 1 else max(1, (target_runs + len(arms) - 1) // len(arms))
     arm_counts: dict[str, int] = {a: 0 for a in arms}
     max_waves = ((per_arm_target * len(arms) + n_parties - 1) // n_parties) + 4
     wave_errors: list[str] = []
@@ -633,10 +642,15 @@ def run_boss_waves(
                 seen_instances.update(party_instances)
                 say(f"  verified fresh distinct dungeon instances: {party_instances}")
 
-                # 3. Verify dungeon strategy state on every bot after arrival (word-bounded regexes).
+                # 3. Apply per-party strategy override (when mixing baseline with stripped arms)
+                #    and verify dungeon strategy state on every bot after arrival.
                 if strip_strat:
                     for p_idx, party in enumerate(active_parties):
                         expected_on = party_modes[p_idx] == "baseline"
+                        if per_bot_strat_control:
+                            delta = f"+{strip_strat}" if expected_on else f"-{strip_strat}"
+                            for name, _, _, _ in party:
+                                _console_bot(f"llmtest setstrat {name} {delta}", f"setstrat {name} ", wait_s=0.2)
                         for name, _, _, _ in party:
                             cline, chk = _console_bot(
                                 f"llmtest checkstrat {name} {strip_strat}",
@@ -647,8 +661,14 @@ def run_boss_waves(
                             if not ok:
                                 raise RuntimeError(f"checkstrat failed for {name}: {err} (raw: {chk!r})")
 
-                # 4. Start fresh harness (if llm / llm_no_notes / mixed) with a clean --bots-dir for this wave.
-                wave_use_harness = any(pm in ("llm", "llm_no_notes") for pm in party_modes)
+                # 4. Start fresh harness (driving ONLY llm / llm_no_notes parties via --only-bots)
+                #    with a clean --bots-dir for this wave.
+                llm_bots = [
+                    name
+                    for p_idx, party in enumerate(active_parties)
+                    if party_modes[p_idx] in ("llm", "llm_no_notes")
+                    for name, _, _, _ in party
+                ]
                 with tempfile.TemporaryDirectory(prefix=f"wlb-boss-{tag}-{mode}-w{wave}-") as tmp:
                     tmp_dir = pathlib.Path(tmp)
                     bots_dir = tmp_dir / "bots"
@@ -661,7 +681,7 @@ def run_boss_waves(
                                 (bdir / "notes.md").write_text(notes_md)
                     harness_log = tmp_dir / "harness.log"
                     proc = None
-                    if wave_use_harness:
+                    if llm_bots:
                         proc = subprocess.Popen(
                             [
                                 str(OUT / "common" / "harness"),
@@ -669,6 +689,7 @@ def run_boss_waves(
                                 f"--socket={TEST.run / 'brain.sock'}",
                                 f"--rules={ROOT / 'content' / 'RULES.md'}",
                                 f"--bots-dir={bots_dir}",
+                                f"--only-bots={','.join(llm_bots)}",
                                 "--host=127.0.0.1",
                                 "--port=8090",
                                 "--slots=16",
@@ -809,20 +830,38 @@ def main() -> int:
     ap.add_argument("--append", action="store_true", help="Merge into existing output JSON instead of overwriting")
     ap.add_argument(
         "--mode",
-        choices=("llm", "llm_no_notes", "mixed", "no_brain", "baseline"),
+        choices=("llm", "llm_no_notes", "mixed", "mixed_all", "no_brain", "baseline"),
         default="llm",
         help="llm=harness+notes, scripts OFF; llm_no_notes=harness, no notes, scripts OFF; "
-             "mixed=rotate llm & llm_no_notes across parallel parties under shared GPU load; "
+             "mixed=rotate llm & llm_no_notes across parallel parties; "
+             "mixed_all=rotate all 4 modes (llm, llm_no_notes, no_brain, baseline) in waves; "
              "no_brain=no harness, scripts OFF; baseline=no harness, playerbots C++ scripts ON",
+    )
+    ap.add_argument(
+        "--arms",
+        default="",
+        help="Optional comma-separated arms to mix in waves (e.g. llm,llm_no_notes,no_brain,baseline)",
     )
     args = ap.parse_args()
     keys = [k.strip() for k in args.only.split(",") if k.strip()] if args.only else list(BOSSES.keys())
+    valid_arms = {"llm", "llm_no_notes", "no_brain", "baseline"}
+    arms_override: tuple[str, ...] | None = None
+    if args.arms:
+        parsed_arms = tuple(a.strip() for a in args.arms.split(",") if a.strip())
+        bad = [a for a in parsed_arms if a not in valid_arms]
+        if bad:
+            ap.error(f"invalid --arms: {bad}")
+        arms_override = parsed_arms
 
     build.common("default", tests=False)
     build.server(test=True)
     out_json = VAR / f"bench_boss_10_{args.mode}.json"
     results = json.loads(out_json.read_text()) if (args.append and out_json.exists()) else {}
-    ctx = LlamaServer(slots=16) if args.mode in ("llm", "llm_no_notes", "mixed") else None
+    needs_llm = (
+        args.mode in ("llm", "llm_no_notes", "mixed", "mixed_all")
+        or (arms_override is not None and any(a in ("llm", "llm_no_notes") for a in arms_override))
+    )
+    ctx = LlamaServer(slots=16) if needs_llm else None
     if ctx is not None:
         ctx.__enter__()
     try:
@@ -831,6 +870,7 @@ def main() -> int:
                 results[k] = run_boss_waves(
                     **BOSSES[k],
                     mode=args.mode,
+                    arms_override=arms_override,
                     target_runs=max(1, args.runs),
                     parallel=max(1, args.parallel),
                 )

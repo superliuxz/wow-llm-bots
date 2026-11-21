@@ -42,6 +42,14 @@ class BotManager {
   // Logs our bots out (server shutdown).
   void Stop();
 
+  // World thread only: optional per-bot strategy suffix applied on top of the
+  // server-wide `strategies_` (used by test benchmarks to mix baseline and
+  // stripped-strategy parties in the same wave).
+  static void SetBotStrategyOverride(const std::string& bot_name,
+                                     std::string combat_extra,
+                                     std::string non_combat_extra);
+  static void ClearBotStrategyOverrides();
+
  private:
   struct Bot {
     std::string name;

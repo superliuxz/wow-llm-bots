@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "base/functional/callback.h"
@@ -26,6 +27,8 @@ struct RunOptions {
   size_t slots = 16;
   float temperature = 0.7f;
   double seconds = 0;  // 0: run until signaled to stop.
+  // Optional allow-list of bot names to drive (empty: drive all bots).
+  std::unordered_set<std::string> only_bots;
   LlmEndpoint endpoint;
 };
 

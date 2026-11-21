@@ -1278,7 +1278,8 @@ class LlmBrainWorldScript : public WorldScript {
                          base::TimeTicks now,
                          int64_t time_ms,
                          int64_t mono_us) {
-    static constexpr base::TimeDelta kTraceInterval = base::Milliseconds(200);
+    const base::TimeDelta trace_interval =
+        base::Milliseconds(config_.trace_sample_interval_ms);
     const uint64_t key = player->GetGUID().GetRawValue();
     ObservedState& obs = observed_state_[key];
     const bool in_combat = player->IsInCombat();
@@ -1295,13 +1296,13 @@ class LlmBrainWorldScript : public WorldScript {
       trace_writer_->WriteEvent(ev);
     }
 
-    // Use the exact same 5 Hz (200 ms) cadence + combat/jump edge triggers for
-    // both humans and bots — never emit extra samples on human-only movement
-    // packets, which would leak packet detail into downstream parity checks.
+    // Use the exact same cadence + combat/jump edge triggers for both humans
+    // and bots — never emit extra samples on human-only movement packets, which
+    // would leak packet detail into downstream parity checks.
     const bool state_edge = !obs.initialized || in_combat != obs.in_combat ||
                             jumping != obs.jumping;
     const bool interval_due =
-        !obs.initialized || (now - obs.last_sample) >= kTraceInterval;
+        !obs.initialized || (now - obs.last_sample) >= trace_interval;
 
     if (!state_edge && !interval_due) {
       return;

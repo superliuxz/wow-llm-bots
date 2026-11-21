@@ -128,4 +128,5 @@ LlmBrain.TestFactsQueries = ""
 #        Default:     0
 
 LlmBrain.TraceDir = ""
+LlmBrain.TraceSampleIntervalMs = 200
 LlmBrain.ObserveHumans = 0

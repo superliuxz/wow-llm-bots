@@ -22,6 +22,7 @@
 #include "SpellAuras.h"
 #include "SpellInfo.h"
 #include "Strategy.h"
+#include "bot_manager/bot_manager.h"
 
 namespace llm_brain {
 namespace {
@@ -56,6 +57,7 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"questcomplete", HandleQuestComplete, SEC_ADMINISTRATOR, Console::Yes},
         {"item", HandleItem, SEC_ADMINISTRATOR, Console::Yes},
         {"checkstrat", HandleCheckStrat, SEC_ADMINISTRATOR, Console::Yes},
+        {"setstrat", HandleSetStrat, SEC_ADMINISTRATOR, Console::Yes},
         {"resetbot", HandleResetBot, SEC_ADMINISTRATOR, Console::Yes},
         {"where", HandleWhere, SEC_ADMINISTRATOR, Console::Yes},
     };
@@ -172,12 +174,16 @@ class LlmBrainTestCommandScript : public CommandScript {
                          float x,
                          float y,
                          float z,
-                         float o) {
+                         float o,
+                         Optional<uint32_t> gm_mode) {
     Player* player = FindOnlinePlayer(handler, std::move(player_name));
     if (!player) {
       return false;
     }
-    if (!player->TeleportTo(map_id, x, y, z, o, TELE_TO_GM_MODE)) {
+    // Defaults to TELE_TO_GM_MODE (1) for benchmark staging; pass 0 to enforce
+    // normal dungeon entry rules (PlayerCannotEnter / AccountInstancesPerHour).
+    const uint32_t flags = (!gm_mode || *gm_mode != 0) ? TELE_TO_GM_MODE : 0;
+    if (!player->TeleportTo(map_id, x, y, z, o, flags)) {
       handler->SendErrorMessage("llmtest: TeleportTo map {} failed for {}",
                                 map_id, player->GetName());
       return false;
@@ -246,12 +252,41 @@ class LlmBrainTestCommandScript : public CommandScript {
     return exists;
   }
 
+  static bool HandleSetStrat(ChatHandler* handler,
+                             std::string player_name,
+                             std::string changes) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player) {
+      return false;
+    }
+    PlayerbotAI* ai = GET_PLAYERBOT_AI(player);
+    if (!ai) {
+      handler->SendErrorMessage("llmtest: {} has no PlayerbotAI",
+                                player->GetName());
+      return false;
+    }
+    BotManager::SetBotStrategyOverride(player->GetName(), changes, changes);
+    ai->ChangeStrategy(changes, BOT_STATE_COMBAT);
+    ai->ChangeStrategy(changes, BOT_STATE_NON_COMBAT);
+    handler->PSendSysMessage("llmtest: setstrat {} {}", player->GetName(),
+                             changes);
+    return true;
+  }
+
   static bool HandleQuestComplete(ChatHandler* handler,
                                   std::string player_name,
                                   uint32_t quest_id) {
     Player* player = FindOnlinePlayer(handler, std::move(player_name));
     if (!player) {
       return false;
+    }
+    const Quest* quest = sObjectMgr->GetQuestTemplate(quest_id);
+    if (quest && player->FindQuestSlot(quest_id) < MAX_QUEST_LOG_SIZE) {
+      player->CompleteQuest(quest_id);
+      player->RewardQuest(quest, 0, player, false);
+      handler->PSendSysMessage("llmtest: completed and rewarded quest {} on {}",
+                               quest_id, player->GetName());
+      return true;
     }
     player->SetRewardedQuest(quest_id);
     handler->PSendSysMessage("llmtest: marked quest {} rewarded on {}",

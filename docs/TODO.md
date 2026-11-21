@@ -9,25 +9,9 @@ Last updated 2026-11-20.
 
 ## In progress
 
-### Review Trace All Events 5 (`b26e35a`) — Open Items
-
-#### Medium
-- [ ] **M6 (Medium, partly fixed) — Baseline and no-brain modes aren't mixed into waves (`tools/bench/bench_bosses.py`):**
-  Mixed mode covers only `llm` and `llm_no_notes`; `baseline` and `no_brain` are not mixed into waves.
-
-#### Low (open / intentional test-helper limitations — do not drop)
-- [ ] **L10 (Low, partly fixed) — Trace volume (`server_module/src/snapshot/behavior_trace.cc`):**
-  Up to ~576 MB/day per observed character at 5 Hz (incremental inode-keyed polling & rotation are fixed).
-- [ ] **L11 (Low, partly fixed) — Environmental deaths (`server_module/src/snapshot/behavior_trace_scripts.cc`):**
-  Self/environmental damage is already excluded from `damage_dealt` and suicides from `pvp_kill`; environmental deaths still lack a dedicated `died` event.
-- [ ] **L12 (Low, partly fixed) — `boss_meter.py`'s combat window and "dodge" number (`tools/bench/boss_meter.py`).**
-- [ ] **L14 (Low, not fixed) — `llmtest tele` with `TELE_TO_GM_MODE` skips every entry rule (`server_module/src/test/test_commands.cc`).**
-- [ ] **L15 (Low, not fixed) — `llmtest questcomplete` only marks the quest rewarded (`server_module/src/test/test_commands.cc`).**
-- [ ] **L16 (Low, not fixed) — Smaller notes on what some trace events mean.**
-
-- Next benchmark run (ready): run `--mode mixed` + `--mode baseline` + `--mode no_brain` with
-  `--runs 6` on the fixed runner (`bench_bosses.py`) for statistically powered comparison data, and
-  save one clean report under `docs/benchmarks/`.
+- Next benchmark run (all Review 5 items closed): run `--mode mixed_all --runs 12 --parallel 3`
+  (or `--mode mixed` + `--mode baseline` + `--mode no_brain`) on `bench_bosses.py` for statistically
+  powered comparison data, and save one clean report under `docs/benchmarks/`.
 
 ## Next, in order
 
@@ -111,6 +95,19 @@ Last updated 2026-11-20.
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-20: **Review 5 remaining items closed (M6, L10, L11, L12, L14, L15, L16):**
+  `harness run` adds `--only-bots=A,B,...` (`run.{h,cc}`, `run_unittest.cc`); `BotManager` adds
+  per-bot strategy overrides + `llmtest setstrat` (`bot_manager.{h,cc}`, `test_commands.cc`);
+  `bench_bosses.py` adds `--mode mixed_all` and `--arms` to mix `llm`, `llm_no_notes`, `no_brain`,
+  and `baseline` in the same wave; `boss_meter.py` delegates `ImpactDodge` to `dodge_timeline`
+  (works for healers, ground-target origins, DBC radii, per-instance isolation);
+  `behavior_trace_scripts.cc` logs environmental/self deaths (`killer == killed`) as non-PvP `died`
+  (`detail="environment"`); `LlmBrain.TraceSampleIntervalMs` makes trace cadence configurable
+  (default 200 ms); `llmtest tele` accepts optional `gm_mode` (0 = enforce entry rules);
+  `llmtest questcomplete` completes & rewards active log quests; added `docs/specs/trace-events.md`
+  documenting every sample field and event meaning. Verified via `tools/wlb check` and live on Ikiss
+  (`--mode mixed_all --arms llm,no_brain,baseline --runs 3 --parallel 3`: `llm` killed in `63.4 s`,
+  `no_brain` wiped in `52.4 s`, `baseline` killed in `144.5 s` in the same wave).
 - 2026-11-20: **Review 5 fixes (New 1, New 2, M4, L2/New L5, L4, L6, L13, New L1–L4):**
   `bench_bosses.py` uses word-bounded regexes (`\bcombat=(\d+)` / `\bnoncombat=(\d+)`) in
   `_check_strat_line` (fixing the `combat=0` substring bug), summarizes and balances mixed arms

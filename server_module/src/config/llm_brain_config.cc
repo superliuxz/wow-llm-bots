@@ -41,6 +41,11 @@ Config LoadConfig() {
       sConfigMgr->GetOption<std::string>("LlmBrain.TestFactsQueries", "");
   config.trace_dir =
       sConfigMgr->GetOption<std::string>("LlmBrain.TraceDir", "");
+  config.trace_sample_interval_ms =
+      sConfigMgr->GetOption<uint32_t>("LlmBrain.TraceSampleIntervalMs", 200);
+  if (config.trace_sample_interval_ms < 50) {
+    config.trace_sample_interval_ms = 50;
+  }
   config.observe_humans =
       sConfigMgr->GetOption<bool>("LlmBrain.ObserveHumans", false);
   return config;

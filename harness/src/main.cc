@@ -41,7 +41,7 @@ int Usage() {
       "usage:\n"
       "  harness run [--socket=PATH] [--rules=FILE] [--bots-dir=DIR]\n"
       "              [--host=H] [--port=N] [--slots=N] [--temperature=T]\n"
-      "              [--seconds=S]\n"
+      "              [--seconds=S] [--only-bots=NAME,NAME]\n"
       "  harness decide <snapshot.pb> [--name=BOT] [--goal=TEXT]\n"
       "                 [--reason=TEXT] [--rules=FILE] [--identity=FILE]\n"
       "                 [--log-dir=DIR] [--host=H] [--port=N] [--slot=N]\n"

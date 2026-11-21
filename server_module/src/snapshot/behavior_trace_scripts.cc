@@ -253,8 +253,13 @@ class LlmBrainTracePlayerScript : public PlayerScript {
   }
 
   void OnPlayerPVPKill(Player* killer, Player* killed) override {
-    // Ignore environmental / self-inflicted deaths (fall, lava, drowning).
-    if (!killer || !killed || killer == killed) {
+    if (!killed) {
+      return;
+    }
+    // Environmental / self-inflicted deaths (fall, lava, drowning): log as
+    // non-PvP `died` with detail="environment", never as `pvp_kill`/`died_pvp`.
+    if (!killer || killer == killed) {
+      EmitTraceEvent(state_, killed, "died", "environment", 0);
       return;
     }
     EmitTraceEvent(state_, killer, "pvp_kill", "",

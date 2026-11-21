@@ -13,6 +13,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -21,6 +22,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
@@ -60,6 +62,7 @@ class LiveSession : public base::RawPtrTarget {
               LogMessageFn log_fn,
               base::TimeDelta retry_delay)
       : log_fn_(std::move(log_fn)),
+        only_bots_(options.only_bots),
         llm_(options.endpoint, options.slots),
         module_(
             options.socket_path,
@@ -68,9 +71,15 @@ class LiveSession : public base::RawPtrTarget {
                   loop_->OnConnectionChanged(connected);
                 },
                 [this](wlb::snapshot::Snapshot snap, base::TimeTicks at) {
+                  if (!only_bots_.empty() && !only_bots_.contains(snap.bot)) {
+                    return;
+                  }
                   loop_->OnSnapshot(std::move(snap), at);
                 },
                 [this](wlb::snapshot::ImmediateEvent ev, base::TimeTicks at) {
+                  if (!only_bots_.empty() && !only_bots_.contains(ev.bot)) {
+                    return;
+                  }
                   loop_->OnEvent(std::move(ev), at);
                 }},
             retry_delay) {
@@ -152,6 +161,7 @@ class LiveSession : public base::RawPtrTarget {
   }
 
   LogMessageFn log_fn_;
+  std::unordered_set<std::string> only_bots_;
   LlmClient llm_;
   ModuleConnection module_;
   std::unique_ptr<BotLoop> loop_;
@@ -192,6 +202,11 @@ std::optional<RunOptions> ParseRunArgs(const std::vector<std::string>& args,
       options.temperature = static_cast<float>(real);
     } else if (name == "seconds" && is_real && real >= 0.0) {
       options.seconds = real;
+    } else if (name == "only-bots") {
+      for (const std::string& bot : base::SplitString(
+               value, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
+        options.only_bots.insert(bot);
+      }
     } else {
       *error = base::StrCat({"unknown or invalid option: ", arg});
       return std::nullopt;

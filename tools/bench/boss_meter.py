@@ -21,6 +21,7 @@ from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "tools" / "bench"))
+import dodge_timeline  # noqa: E402
 import trace_parity  # noqa: E402
 
 
@@ -47,17 +48,30 @@ def analyze_boss_fight(
     win_lo = (t_start - 500) if t_start is not None else None
     win_hi = (t_end + 500) if t_end is not None else None
 
+    windowed_traces: dict[str, list[dict[str, Any]]] = {}
     for name, rows in sorted(traces.items()):
-        samples = [
+        windowed_traces[name] = [
             r for r in rows
-            if r.get("kind") == "sample"
-            and (win_lo is None or win_lo <= int(r.get("t_ms", 0)) <= win_hi)
+            if win_lo is None or win_lo <= int(r.get("t_ms", 0)) <= win_hi
         ]
-        events = [
-            r for r in rows
-            if r.get("kind") == "event"
-            and (win_lo is None or win_lo <= int(r.get("t_ms", 0)) <= win_hi)
-        ]
+    # Compute impact-dodge distances via dodge_timeline so healers (not targeting
+    # the boss), ground-targeted spell origins, DBC radii, and per-instance
+    # isolation all match dodge_timeline exactly.
+    dodge_res = dodge_timeline.extract_dodge_timelines(windowed_traces)
+    dodge_by_bot: dict[str, tuple[list[float], int, int]] = {}
+    for w in dodge_res["windows"]:
+        for bname, binfo in w["bots"].items():
+            dists, out_hits, rated = dodge_by_bot.get(bname, ([], 0, 0))
+            if binfo["end_yd"] is not None:
+                dists.append(float(binfo["end_yd"]))
+            if binfo["outside_at_impact"] is not None:
+                rated += 1
+                if binfo["outside_at_impact"]:
+                    out_hits += 1
+            dodge_by_bot[bname] = (dists, out_hits, rated)
+
+    for name, rows in sorted(windowed_traces.items()):
+        events = [r for r in rows if r.get("kind") == "event"]
 
         dmg_dealt = 0
         dmg_taken = 0
@@ -85,46 +99,7 @@ def analyze_boss_fight(
                 if boss_name and det.lower() == boss_name.lower():
                     boss_killed = True
 
-        # Track distance at the impact (end) of each boss cast and whether the
-        # character was outside the spell's DBC radius (`target_cast_radius`).
-        impact_dists: list[float] = []
-        outside_hits = 0
-        total_rated_casts = 0
-        prev_casting = ""
-        last_dist: float | None = None
-        last_rad: float | None = None
-        for s in samples:
-            cur_cast = str(s.get("target_casting", ""))
-            d = float(s.get("target_dist", -1.0))
-            r = float(s.get("target_cast_radius", -1.0))
-            if cur_cast:
-                if prev_casting and cur_cast != prev_casting and last_dist is not None:
-                    impact_dists.append(last_dist)
-                    if last_rad is not None and last_rad > 0:
-                        total_rated_casts += 1
-                        if last_dist >= last_rad:
-                            outside_hits += 1
-                prev_casting = cur_cast
-                if d >= 0:
-                    last_dist = d
-                if r > 0:
-                    last_rad = r
-            elif prev_casting:
-                if last_dist is not None:
-                    impact_dists.append(last_dist)
-                    if last_rad is not None and last_rad > 0:
-                        total_rated_casts += 1
-                        if last_dist >= last_rad:
-                            outside_hits += 1
-                prev_casting = ""
-                last_dist = None
-                last_rad = None
-        if prev_casting and last_dist is not None:
-            impact_dists.append(last_dist)
-            if last_rad is not None and last_rad > 0:
-                total_rated_casts += 1
-                if last_dist >= last_rad:
-                    outside_hits += 1
+        impact_dists, outside_hits, total_rated_casts = dodge_by_bot.get(name, ([], 0, 0))
 
         per_char[name] = {
             "damage_dealt": dmg_dealt,

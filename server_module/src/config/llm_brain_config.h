@@ -36,6 +36,10 @@ struct Config {
   std::string test_facts_queries;
   // Unified human + bot behavior trace directory (empty disables tracing).
   std::string trace_dir;
+  // Minimum interval between periodic behavior trace samples (ms). Defaults to
+  // 200 ms (5 Hz) for full observer-parity scoring; raise (e.g. 500-1000 ms)
+  // to reduce disk volume on long runs.
+  uint32_t trace_sample_interval_ms = 200;
   // When true (and `trace_dir` is non-empty), also logs online human players
   // using the same trace schema so bots can be compared against a human
   // baseline.
