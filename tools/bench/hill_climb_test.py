@@ -85,9 +85,39 @@ class HillClimbSafeguardsTest(unittest.TestCase):
             os.chmod(lf, 0o644)
             lines = lf.read_text().splitlines()
             lf.write_text("\n".join(lines[:-1]) + "\n")
-            ok4, msg = hill_climb._verify_all_locks(lf)
+            ok4, msg = hill_climb._verify_all_locks(lf, approved_digest_file=df)
             self.assertFalse(ok4)
             self.assertIn("missing required files", msg)
+
+    def test_custom_lock_file_still_verifies_tracked_repo_digest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lf = pathlib.Path(tmp) / "custom_scorer.sha256"
+            # Write a valid manifest for the current working tree into a custom
+            # path without updating config/scorer-lock.sha256.
+            ok_w, _ = hill_climb._write_lock_manifest(lf, confirmed=True)
+            self.assertTrue(ok_w)
+            # Even with a custom --lock-file path, _verify_all_locks must check
+            # config/scorer-lock.sha256 unless approved_digest_file is passed.
+            expected_digest = hill_climb._read_approved_digest(
+                hill_climb.REPO_APPROVED_LOCK_DIGEST
+            )
+            actual_digest = hill_climb._sha256_file(lf)
+            if expected_digest != actual_digest:
+                ok_v, msg_v = hill_climb._verify_all_locks(lf)
+                self.assertFalse(ok_v)
+                self.assertIn("digest mismatch", msg_v)
+            # Passing a mismatched tracked digest file always fails even for a
+            # custom lock file path.
+            fake_repo_digest = pathlib.Path(tmp) / "repo-lock.sha256"
+            fake_repo_digest.write_text("f" * 64 + "  scorer.sha256\n")
+            orig = hill_climb.REPO_APPROVED_LOCK_DIGEST
+            try:
+                hill_climb.REPO_APPROVED_LOCK_DIGEST = fake_repo_digest
+                ok_v2, msg_v2 = hill_climb._verify_all_locks(lf)
+                self.assertFalse(ok_v2)
+                self.assertIn("digest mismatch", msg_v2)
+            finally:
+                hill_climb.REPO_APPROVED_LOCK_DIGEST = orig
 
     def test_relock_requires_external_passphrase_via_tty(self):
         import hashlib

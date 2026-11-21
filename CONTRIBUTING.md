@@ -40,20 +40,23 @@ one feature never introduces extra bugs:
 - Run `tools/wlb check` after your final edit and verify all unit/spec/consistency checks pass.
   **Never** read or modify `~/.local/share/wow-llm-bots/relock.passphrase`, run
   `tools/bench/hill_climb.py lock-scorer`, or modify
-  `~/.local/share/wow-llm-bots/scorer.sha256` or tracked `config/scorer-lock.sha256` on your own —
-  the lock exists to stop an agent tuning the scorer to its own changes (`hill_climb.py` requires
-  typing the passphrase from `~/.local/share/wow-llm-bots/relock.passphrase` on `/dev/tty`, while
-  tracked `config/scorer-lock.sha256` exposes any relock in `git diff`). If a task changes a locked
-  measurement file, leave both lock files untouched and ask for the user's explicit OK in the
-  current turn before any relock.
+  `~/.local/share/wow-llm-bots/scorer.sha256` or tracked `config/scorer-lock.sha256` on your own.
+  Note plainly: the passphrase file is **not** a technical barrier against an agent running as the
+  same Unix user (it could read/overwrite the file or run under `script`); what actually protects
+  you is this rule plus tracked `config/scorer-lock.sha256`, which makes any relock show up in
+  `git diff` (for a real OS-level barrier, keep the passphrase under a different Unix user or a
+  hardware-key prompt). If a task changes a locked measurement file, leave both lock files
+  untouched and ask for the user's explicit OK in the current turn before any relock.
 - Live-verify game, server, or benchmark changes against `out/server-test` before claiming them fixed;
   anything not live-tested must be stated honestly in `docs/TODO.md`.
 - **Independent zero-context post-commit review (`.agents/hooks.json`):** whenever `HEAD` advances
-  after a `run_command` (e.g., `git commit`), `.agents/hooks/post_commit_review.py` writes
-  `var/review/patch_<short_sha>.patch` and spawns a detached, read-only `agy --print --mode plan`
-  reviewer in its own separate top-level conversation (non-blocking, zero shared chat history),
-  saving findings to `var/review/review_<short_sha>.md` (`var/review/latest.md`). Any High, Medium,
-  or Low findings follow the standard review-fix procedure above.
+  to a new descendant commit after a `run_command` (e.g., `git commit`),
+  `.agents/hooks/post_commit_review.py` writes `var/review/patch_<short_sha>.patch`
+  (`last_reviewed..HEAD`) and spawns a detached, read-only `agy --mode plan --print=<prompt>`
+  reviewer in its own separate top-level conversation (non-blocking, minimal env, zero shared chat
+  history; opt out with `WLB_SKIP_COMMIT_REVIEW=1`), saving findings to
+  `var/review/review_<short_sha>.md` (`var/review/latest.md`). Any High, Medium, or Low findings
+  follow the standard review-fix procedure above.
 
 ## The brain decides; C++ is a pure harness
 

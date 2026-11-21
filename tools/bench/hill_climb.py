@@ -253,21 +253,27 @@ def _verify_all_locks(
                 f"locked measurement file modified: {rel} "
                 f"(expected {expected[:12]}, got {actual[:12]})"
             )
-    digest_target = _resolve_approved_digest_file(lock_file, approved_digest_file)
-    if digest_target is not None:
-        if not digest_target.exists():
-            return False, (
-                f"repo approved scorer digest missing: {digest_target} "
-                "(re-lock only with user OK)"
-            )
-        approved = _read_approved_digest(digest_target)
-        actual_manifest = _sha256_file(lock_file)
-        if approved != actual_manifest:
-            return False, (
-                f"lock manifest digest mismatch vs {digest_target}: "
-                f"approved={approved[:12] if approved else 'invalid'}, "
-                f"actual={actual_manifest[:12]}"
-            )
+    # Always verify against tracked `config/scorer-lock.sha256` unless a test
+    # explicitly supplies `approved_digest_file`, so overriding `--lock-file`
+    # can never bypass tracked digest verification.
+    digest_target = (
+        approved_digest_file
+        if approved_digest_file is not None
+        else REPO_APPROVED_LOCK_DIGEST
+    )
+    if not digest_target.exists():
+        return False, (
+            f"repo approved scorer digest missing: {digest_target} "
+            "(re-lock only with user OK)"
+        )
+    approved = _read_approved_digest(digest_target)
+    actual_manifest = _sha256_file(lock_file)
+    if approved != actual_manifest:
+        return False, (
+            f"lock manifest digest mismatch vs {digest_target}: "
+            f"approved={approved[:12] if approved else 'invalid'}, "
+            f"actual={actual_manifest[:12]}"
+        )
     return True, f"all {len(recorded)} measurement locks verified"
 
 

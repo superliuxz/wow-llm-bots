@@ -240,8 +240,12 @@ in `FixtureLoader` + `llmtest group`/`gear`/`tele`:
 - **Tamper check:** `tools/bench/hill_climb.py lock-scorer` writes a read-only (0444) SHA-256 lock
   manifest (`~/.local/share/wow-llm-bots/scorer.sha256`) covering all 28 measurement, trace, and
   soak config files (`LOCKED_PATTERNS` in `hill_climb.py`), and records the user-approved manifest
-  digest in tracked `config/scorer-lock.sha256` (verified by `_verify_all_locks`) so any relock
-  is visible in git review.
+  digest in tracked `config/scorer-lock.sha256` (always verified by `_verify_all_locks`, even when
+  `--lock-file` is overridden) so any relock is visible in `git diff`. Note plainly: the external
+  passphrase file (`~/.local/share/wow-llm-bots/relock.passphrase`) is **not** a technical barrier
+  against an agent running as the same Unix user (it could read/overwrite it or run under `script`);
+  protection comes from the repo rule plus the tracked `config/scorer-lock.sha256` diff (for a real
+  OS barrier, keep the passphrase under a different Unix user or a hardware-key prompt).
 - **Recording human sessions** (5 Hz observer-parity + explicit events):
   ```ini
   LlmBrain.TraceDir = "/home/will/.local/share/wow-llm-bots/human_baseline"
