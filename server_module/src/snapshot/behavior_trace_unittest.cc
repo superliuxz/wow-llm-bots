@@ -417,11 +417,11 @@ TEST(BehaviorTraceTest, EvictsIdleTrackedCharactersAndReportsCapOverflow) {
   ASSERT_TRUE(active_hz.has_value());
   EXPECT_DOUBLE_EQ(*active_hz, 5.0);
 
-  // Verify O(1) out-of-order list ordering: make BotA/B/C/D have non-empty dts
+  // Verify out-of-order list ordering: make BotA/B/C/D have non-empty dts
   // at `base_t`, except `StaleOutOfOrder` inserted second with an older
   // timestamp
   // (`base_t - 70000`). A new char at `base_t` must evict `StaleOutOfOrder`
-  // from `all_head` in O(1) without reporting untracked overflow.
+  // from `all_head` without reporting untracked overflow.
   const int64_t base_t = active_t + 100000;
   for (int i = 0; i <= 1; ++i) {
     s.role = "bot";

@@ -9,20 +9,25 @@ Last updated 2026-11-21.
 
 ## In progress
 
-(none)
+- **Re-lock `~/.local/share/wow-llm-bots/scorer.sha256` and `config/scorer-lock.sha256` after passphrase-guard & eviction-comment updates (awaiting user relock):**
+  `tools/bench/hill_climb.py` and `server_module/src/snapshot/behavior_trace.{h,cc}` are in
+  `LOCKED_PATTERNS`; both lock files were left untouched at `d6704ae5f8a1...` until a human sets
+  `~/.local/share/wow-llm-bots/relock.passphrase` and runs
+  `python3 tools/bench/hill_climb.py lock-scorer --force-relock`.
 
 ## Next, in order
 
 **Priority direction (2026-11-21):** Mechanical WoW competence (dungeons, raids/ICC, clearing quests,
 soloing elite quests, smart gearing) takes priority over `"human-like"` mimicry (`D`). Where we
-stand after the 320-trial 5-boss benchmark
+stand after the 320-trial (`n = 16` per arm) 5-boss benchmark
 ([`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md)):
-plumbing and measurement work; `notes.md` reliably changes behaviour (`p <= 0.002`), doesn't yet
+plumbing and measurement work; `notes.md` reliably changes behaviour (`p_holm <= 0.033`), doesn't yet
 reliably change kill rates after multiple-comparison correction, costs DPS (`Loken` `11.5k` vs
-`15.5k`), and trails playerbots C++ scripts on `Flame Strike` (`845` vs `80k` damage taken), while
-in open-world leveling bots get kills ~`3x` faster than human play but finish ~`1/3` as many quests
-and die more. Drop `Devourer` and `Loken` (or lower their gear) in future boss runs so every boss
-can separate arms.
+`15.5k`), and trails playerbots C++ scripts on `Kael'thas` `Flame Strike` (`14/16 <= 1,000` dmg /
+`13.1k` total in `baseline` vs `2/16` / `128.6k` in `llm` and `2/16` / `168.4k` in `llm_no_notes`),
+while in open-world leveling bots get kills ~`3x` faster than human play but finish ~`1/3` as many
+quests and die more. Drop `Devourer` and `Loken` (or lower their gear) in future boss runs so every
+boss can separate arms.
 
 1. **Phase 1 — Make boss reactions worth it (`A1` dodge-then-return, `A2` server-radius-aware acts)**
    *(Done when: `llm` keeps its dodge rate and its DPS is within `10%` of `llm_no_notes`)*:
@@ -36,7 +41,8 @@ can separate arms.
      impact point, and time-to-impact in the snapshot (the trace already reads the radii) so acts
      can: (a) `out of it`: move just past the radius plus a margin, toward the group or the tank;
      (b) skip the dodge if impact lands before the bot could get out, or if the bot is already
-     outside (removing `"34 yd vs 24.6 yd"` failures and needless `38 yd` runs).
+     outside (removing `n = 16` short-run failures like `Murmur` `22.4 yd` med vs `34 yd` radius or
+     `Ikiss` `12.3 yd` med vs `35 yd` radius, and needless `52–58 yd` max over-runs).
 2. **Phase 2 — Script-generated notes, grammar parity, pre-pull orders & trace-mined evals (`A3`, `A4`, `C1`)**
    *(Done when: the `Flame Strike` gap is closed — `llm` takes no more damage than the playerbots
    script — and bench boss kills for `llm` are significantly above `no_brain` after correction)*:
@@ -169,12 +175,13 @@ can separate arms.
 - **Not individually live-triggered after final edits yet:** `llmtest questcomplete` when a quest
   is already active in a bot's quest log (`CompleteQuest` + `RewardQuest` branch in
   `test_commands.cc`, source-verified), plus Review 10 single-arm `_wait_checkstrat` +
-  `+{strip_strat}` (`tools/bench/bench_bosses.py`) and `O(1)` cap eviction
+  `+{strip_strat}` (`tools/bench/bench_bosses.py`) and sorted list-head cap eviction
   (`server_module/src/snapshot/behavior_trace.{h,cc}`), which are unit-tested and compiled into
   `out/server-test` without starting a new live benchmark run (per user instruction).
   *(Environmental/self death `died` with `detail="environment"` caveat closed per Review 9 —
-  live-triggered on `murmur`, and entrance staging/pull coordinates for `ick`, `murmur`, and
-  `ikiss` live-verified across `32` valid trials each.)*
+  live-triggered on `murmur`, and entrance staging/pull coordinates for `devourer`, `loken`,
+  `kaelthas`, `murmur`, and `ikiss` live-verified across `64` valid trials (`n = 16` per arm)
+  each.)*
 - **Deliberately skipped benchmark speedup proposals (Items 4, 5, adaptive 6):** left unbuilt on
   purpose to preserve valid boss immunity/kite phases (Item 4: `20 s` zero-damage abort would
   cut `Gravity Lapse`/`Planar Shift` and censor `llm` bugs via survivorship bias), cross-boss DB
@@ -185,15 +192,21 @@ can separate arms.
 
 ## Done (newest first, keep about ten)
 
-- 2026-11-21: **Fix `/dev/tty` `"r+"` relock error & user-approved scorer relock (`d6704ae5f8a1...`):**
-  fixed `open("/dev/tty", "r+", encoding="utf-8")` raising `io.UnsupportedOperation` (non-seekable
-  character device) in [`tools/bench/hill_climb.py`](../tools/bench/hill_climb.py#L232-L274)
-  `_confirm_relock` by opening separate `"r"` and `"w"` handles, and replaced the `io.StringIO` mock
-  in [`tools/bench/hill_climb_test.py`](../tools/bench/hill_climb_test.py#L92-L212) with a real
-  `pty.openpty()` slave character device. User interactively ran `hill_climb.py lock-scorer
-  --force-relock` over SSH, updating `~/.local/share/wow-llm-bots/scorer.sha256` and
-  [`config/scorer-lock.sha256`](../config/scorer-lock.sha256) (`d6704ae5f8a1...`); verified
-  `hill_climb._verify_all_locks()` (`all 28 measurement locks verified`) and `tools/wlb check`.
+- 2026-11-21: **External relock passphrase file, `n = 16` roadmap numbers & accurate eviction comments:**
+  replaced AI process/cgroup/env-var detection in
+  [`tools/bench/hill_climb.py`](../tools/bench/hill_climb.py) (`AGENT_ENV_VARS`,
+  `AGENT_PROCESS_NAMES`, `_has_agent_ancestor`, `_has_agent_cgroup`, `_is_agent_run`,
+  `_resolve_lock_file`) with an external passphrase file
+  (`~/.local/share/wow-llm-bots/relock.passphrase`, supporting plaintext or 64-hex SHA-256 digest,
+  verified interactively via separate `"r"`/`"w"` handles on `/dev/tty` and tested against a real
+  `pty.openpty()` slave character device in
+  [`tools/bench/hill_climb_test.py`](../tools/bench/hill_climb_test.py)); updated
+  [`CONTRIBUTING.md`](../CONTRIBUTING.md) and `.agents/rules/contributing.md`; updated `docs/TODO.md`
+  roadmap and `Loose ends` from `n = 8` figures to `n = 16` (`d7b3e13`, `64` valid trials/boss); and
+  removed generous `O(1)` claims from cap-eviction comments in
+  [`behavior_trace.{h,cc}`](../server_module/src/snapshot/behavior_trace.h),
+  [`behavior_trace_unittest.cc`](../server_module/src/snapshot/behavior_trace_unittest.cc), and
+  `docs/TODO.md`.
 
 - 2026-11-21: **Review 10 fixes (Medium + Lows 1–3) & "Where this leaves the project" added to TODO:**
   restructured [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md)
@@ -211,9 +224,11 @@ can separate arms.
   `+{strip_strat}` for single-arm `baseline` and polled `_wait_checkstrat` (tested in
   [`dodge_timeline_test.py`](../tools/bench/dodge_timeline_test.py));
   [`behavior_trace.{h,cc}`](../server_module/src/snapshot/behavior_trace.cc) replaces full-map
-  cap-eviction scans under `mu_` with `O(1)` sorted intrusive `all`/`idle` index lists in
-  `RoleSampleTracker` (tested in `EvictsIdleTrackedCharactersAndReportsCapOverflow` with `1,000`
-  overflow samples & out-of-order stale eviction). Verified via `tools/wlb check` (`ALL CHECKS PASSED`:
+  cap-eviction scans under `mu_` with timestamp-ordered intrusive `all`/`idle` index lists in
+  `RoleSampleTracker` so cap eviction checks only list heads (appending at `tail` on monotonic
+  timestamps and walking back from `tail` on out-of-order timestamps; tested in
+  `EvictsIdleTrackedCharactersAndReportsCapOverflow` with `1,000` overflow samples & out-of-order
+  stale eviction). Verified via `tools/wlb check` (`ALL CHECKS PASSED`:
   `60 + 119 + 224` C++ tests and `4 + 7 + 9 + 15 + 5` Python tests) and `build.server(test=True)`
   without starting a new live benchmark run (per user request; `scorer.sha256` relock kept open in
   `In progress` awaiting explicit user OK).

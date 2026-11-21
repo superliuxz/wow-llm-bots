@@ -510,8 +510,9 @@ bool BehaviorTraceWriter::Enqueue(std::string_view role,
       RoleSampleTracker& tracker = sample_windows_by_role_[std::string(role)];
       auto it = tracker.index_by_name.find(std::string(name));
       if (it == tracker.index_by_name.end()) {
-        // Evict one expired drained/idle or stale character via sorted list
-        // heads in O(1) so cap overflow never performs full scans under `mu_`.
+        // Evict one expired drained/idle or stale character via the sorted
+        // list heads so cap overflow does not scan the character map under
+        // `mu_`.
         if (tracker.index_by_name.size() >= max_tracked_chars_per_role_) {
           if (tracker.idle_head != kNoSampleNode &&
               time_ms > tracker.nodes[tracker.idle_head].last_time_ms &&

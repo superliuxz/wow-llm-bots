@@ -186,7 +186,9 @@ class BehaviorTraceWriter {
 
   // Intrusive index lists inside contiguous `nodes` keep both `all` (every
   // tracked character) and `idle` (`dts.empty()`) ordered ascending by
-  // `last_time_ms` so cap eviction checks only list heads in O(1).
+  // `last_time_ms` (appending at `tail` on monotonic timestamps and walking
+  // back from `tail` on out-of-order timestamps) so cap eviction checks only
+  // the list heads instead of scanning the hash map.
   struct RoleSampleTracker {
     std::vector<CharSampleNode> nodes;
     std::vector<size_t> free_indices;

@@ -24,6 +24,7 @@ import argparse
 import datetime
 import fnmatch
 import hashlib
+import hmac
 import json
 import os
 import pathlib
@@ -40,21 +41,10 @@ LEDGER = VAR / "experiments" / "ledger.jsonl"
 BASELINE_TRACES_ROOT = VAR / "experiments" / "baseline_traces"
 EXTERNAL_STATE_DIR = pathlib.Path.home() / ".local" / "share" / "wow-llm-bots"
 DEFAULT_LOCK_FILE = EXTERNAL_STATE_DIR / "scorer.sha256"
+DEFAULT_PASSPHRASE_FILE = EXTERNAL_STATE_DIR / "relock.passphrase"
 REPO_APPROVED_LOCK_DIGEST = ROOT / "config" / "scorer-lock.sha256"
 DEFAULT_HUMAN_DIR = EXTERNAL_STATE_DIR / "human_baseline"
 DEFAULT_BLIND_RATINGS = EXTERNAL_STATE_DIR / "blind_ratings.jsonl"
-
-AGENT_ENV_VARS = (
-    "ANTIGRAVITY_AGENT",
-    "ANTIGRAVITY_CONVERSATION_ID",
-    "CLAUDECODE",
-    "CLAUDE_CODE_ENTRYPOINT",
-    "CODEX_SANDBOX",
-    "CODEX_CI",
-    "CURSOR_AGENT",
-    "AIDER",
-)
-AGENT_PROCESS_NAMES = ("agy", "antigravity", "claude", "codex", "cursor", "aider")
 
 # Every file that produces, configures, or gates the soak score is locked.
 LOCKED_PATTERNS = [
@@ -124,125 +114,22 @@ def _locked_files() -> list[pathlib.Path]:
     return files
 
 
-def _matches_agent_name(candidate: str) -> bool:
-    base = pathlib.Path(candidate).name.lower()
-    return any(base == name or base.startswith(name + "-") for name in AGENT_PROCESS_NAMES)
-
-
-def _has_agent_cgroup(pdir: pathlib.Path) -> bool:
-    """Detects agent systemd service/slice/scope cgroups even after `setsid` / double-fork."""
-    try:
-        text = (pdir / "cgroup").read_text(errors="replace")
-    except OSError:
-        return False
-    for line in text.splitlines():
-        parts = line.split(":", 2)
-        if len(parts) < 3:
-            continue
-        for segment in parts[2].split("/"):
-            if not segment:
-                continue
-            unit = segment.split("@", 1)[0]
-            for suffix in (".service", ".scope", ".slice"):
-                if unit.endswith(suffix):
-                    unit = unit[: -len(suffix)]
-                    break
-            if _matches_agent_name(unit):
-                return True
-    return False
-
-
-def _has_agent_ancestor(proc_root: pathlib.Path = pathlib.Path("/proc")) -> bool:
-    """Checks `/proc` parent processes and cgroups so `setsid`/env stripping cannot hide an agent."""
-    try:
-        pid = int((proc_root / "self").resolve().name) if (proc_root / "self").is_symlink() else os.getpid()
-    except (OSError, ValueError):
-        pid = os.getpid()
-    seen: set[int] = set()
-    for _ in range(64):
-        if pid <= 1 or pid in seen:
-            break
-        seen.add(pid)
-        pdir = proc_root / str(pid)
-        if _has_agent_cgroup(pdir):
-            return True
-        try:
-            stat_text = (pdir / "stat").read_text(errors="replace")
-        except OSError:
-            break
-        lparen = stat_text.find("(")
-        rparen = stat_text.rfind(")")
-        if lparen == -1 or rparen <= lparen:
-            break
-        comm = stat_text[lparen + 1 : rparen]
-        if _matches_agent_name(comm):
-            return True
-        try:
-            cmdline = (pdir / "cmdline").read_bytes().split(b"\x00")
-            args = [a.decode(errors="replace") for a in cmdline if a]
-        except OSError:
-            args = []
-        if args:
-            if _matches_agent_name(args[0]):
-                return True
-            for arg in args[1:]:
-                if ("/" in arg or arg.endswith(".js")) and _matches_agent_name(arg):
-                    return True
-        after = stat_text[rparen + 2 :].split()
-        if len(after) < 2:
-            break
-        try:
-            pid = int(after[1])
-        except ValueError:
-            break
-    return False
-
-
-def _is_agent_run(
-    env: dict[str, str] | None = None,
-    proc_root: pathlib.Path | None = None,
-) -> bool:
-    e = os.environ if env is None else env
-    if any(bool(e.get(k)) for k in AGENT_ENV_VARS):
-        return True
-    if proc_root is not None:
-        return _has_agent_ancestor(proc_root)
-    if env is None:
-        return _has_agent_ancestor()
-    return False
-
-
-def _resolve_lock_file(
-    requested: pathlib.Path | None,
-    env: dict[str, str] | None = None,
-    proc_root: pathlib.Path | None = None,
-) -> pathlib.Path:
-    if requested is None:
-        return DEFAULT_LOCK_FILE
-    if _is_agent_run(env, proc_root=proc_root) and requested.resolve() != DEFAULT_LOCK_FILE.resolve():
-        print(
-            f"WARNING: ignoring --lock-file={requested} in agent run; "
-            f"enforcing {DEFAULT_LOCK_FILE}",
-            file=sys.stderr,
-        )
-        return DEFAULT_LOCK_FILE
-    return requested
-
-
 def _confirm_relock(
-    env: dict[str, str] | None = None,
-    proc_root: pathlib.Path | None = None,
+    passphrase_file: pathlib.Path = DEFAULT_PASSPHRASE_FILE,
     tty_path: str | pathlib.Path = "/dev/tty",
 ) -> tuple[bool, str]:
-    # Refuses any agent process (env vars, /proc ancestors, or /proc cgroup)
-    # and requires an interactive 'RELOCK' typed into /dev/tty with no
-    # computable env-var bypass. Tracked `config/scorer-lock.sha256` remains
-    # the git-visible backstop against direct filesystem edits.
-    e = os.environ if env is None else env
-    if _is_agent_run(e, proc_root=proc_root):
+    # Requires typing the passphrase stored in `passphrase_file` (outside the
+    # repo) into `/dev/tty`. `passphrase_file` may hold either the plaintext
+    # passphrase or its 64-hex SHA-256 digest. Tracked
+    # `config/scorer-lock.sha256` remains the git-visible backstop.
+    try:
+        expected = passphrase_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        expected = ""
+    if not expected:
         return False, (
-            "refusing to write scorer lock from an agent process "
-            "(run interactively in a human terminal outside any agent session)"
+            f"refusing to write scorer lock: missing or empty passphrase file "
+            f"{passphrase_file} (create it outside the repo first)"
         )
     # Open separate "r" and "w" handles: character devices such as /dev/tty
     # are non-seekable, so open("/dev/tty", "r+") raises io.UnsupportedOperation
@@ -260,20 +147,23 @@ def _confirm_relock(
                         "refusing to write scorer lock without an interactive "
                         "controlling terminal (/dev/tty)"
                     )
-                tty_out.write("Confirm writing scorer lock? Type 'RELOCK' to confirm: ")
+                tty_out.write("Confirm writing scorer lock (enter passphrase): ")
                 tty_out.flush()
                 ans = tty_in.readline().strip()
     except OSError:
         return False, (
             "refusing to write scorer lock without a controlling terminal "
-            "(/dev/tty; run interactively in a human shell and type 'RELOCK')"
+            "(/dev/tty; run interactively and enter your passphrase)"
         )
-    if ans == "RELOCK":
+    if not ans:
+        return False, "refusing to write scorer lock: empty passphrase entered"
+    ans_sha256 = hashlib.sha256(ans.encode("utf-8")).hexdigest()
+    if hmac.compare_digest(ans, expected) or (
+        bool(re.fullmatch(r"[0-9a-fA-F]{64}", expected))
+        and hmac.compare_digest(ans_sha256, expected.lower())
+    ):
         return True, ""
-    return False, (
-        "refusing to write scorer lock without explicit user confirmation "
-        "(run interactively in a human shell and type 'RELOCK')"
-    )
+    return False, "refusing to write scorer lock: passphrase mismatch"
 
 
 def _resolve_approved_digest_file(
@@ -496,7 +386,7 @@ def _save_baseline_traces(suite: str) -> pathlib.Path | None:
 
 
 def cmd_lock_scorer(args) -> int:
-    lock_file = _resolve_lock_file(args.lock_file)
+    lock_file = args.lock_file or DEFAULT_LOCK_FILE
     if lock_file.exists() and not args.force_relock:
         print(
             f"lock file already exists: {lock_file} "
@@ -553,7 +443,7 @@ def cmd_init(args) -> int:
             return 2
         print("WARNING: running without verified human baseline (--allow-fallback)", file=sys.stderr)
 
-    lock_file = _resolve_lock_file(args.lock_file)
+    lock_file = args.lock_file or DEFAULT_LOCK_FILE
     ok, msg = _verify_all_locks(lock_file)
     if not ok:
         print(f"ABORT: {msg}", file=sys.stderr)
@@ -608,7 +498,7 @@ def cmd_init(args) -> int:
 
 
 def cmd_eval_candidate(args) -> int:
-    lock_file = _resolve_lock_file(args.lock_file)
+    lock_file = args.lock_file or DEFAULT_LOCK_FILE
     ok, msg = _verify_all_locks(lock_file)
     if not ok:
         print(f"ABORT: {msg}", file=sys.stderr)

@@ -89,28 +89,22 @@ class HillClimbSafeguardsTest(unittest.TestCase):
             self.assertFalse(ok4)
             self.assertIn("missing required files", msg)
 
-    def test_agent_ignores_custom_lock_file_and_requires_relock_confirmation(self):
+    def test_relock_requires_external_passphrase_via_tty(self):
+        import hashlib
         import pty
-        import subprocess
-        import sys
 
-        # No computable WLB_CONFIRM_RELOCK token bypass exists.
-        self.assertFalse(hasattr(hill_climb, "CONFIRM_RELOCK_ENV"))
+        # AI environment/process/cgroup detection is replaced by an external
+        # passphrase file + interactive /dev/tty confirmation.
+        for removed in (
+            "CONFIRM_RELOCK_ENV",
+            "AGENT_ENV_VARS",
+            "AGENT_PROCESS_NAMES",
+            "_is_agent_run",
+            "_has_agent_ancestor",
+            "_has_agent_cgroup",
+        ):
+            self.assertFalse(hasattr(hill_climb, removed))
 
-        custom = pathlib.Path("/tmp/custom_scorer_lock.sha256")
-        self.assertEqual(
-            hill_climb._resolve_lock_file(custom, env={"ANTIGRAVITY_AGENT": "1"}),
-            hill_climb.DEFAULT_LOCK_FILE,
-        )
-        self.assertEqual(
-            hill_climb._resolve_lock_file(custom, env={"CLAUDECODE": "1"}),
-            hill_climb.DEFAULT_LOCK_FILE,
-        )
-        self.assertEqual(hill_climb._resolve_lock_file(custom, env={}), custom)
-
-        token = f"RELOCK:{soak_scorer.scorer_sha256()[:12]}"
-        # Use a real pty character device so non-seekable TTY I/O (where "r+"
-        # fails with io.UnsupportedOperation) is exercised directly.
         master_fd, slave_fd = pty.openpty()
         try:
             pts_path = os.ttyname(slave_fd)
@@ -118,150 +112,77 @@ class HillClimbSafeguardsTest(unittest.TestCase):
                 self.assertTrue(check_tty.isatty())
                 self.assertFalse(check_tty.seekable())
 
-            # Even with a real TTY and RELOCK typed in, agent runs must refuse.
-            os.write(master_fd, b"RELOCK\n")
-            ok_no_env, msg_no_env = hill_climb._confirm_relock(
-                env={"ANTIGRAVITY_AGENT": "1"},
-                tty_path=pts_path,
-            )
-            self.assertFalse(ok_no_env)
-            self.assertNotIn("RELOCK:", msg_no_env)
-            self.assertNotIn(soak_scorer.scorer_sha256()[:8], msg_no_env)
-
-            ok_tok, msg_tok = hill_climb._confirm_relock(
-                env={"ANTIGRAVITY_AGENT": "1", "WLB_CONFIRM_RELOCK": token},
-                tty_path=pts_path,
-            )
-            self.assertFalse(ok_tok)
-            self.assertNotIn("RELOCK:", msg_tok)
-
-            # Drain both the echoed output (master_fd) and unread input (slave_fd).
-            self.assertEqual(os.read(master_fd, 64), b"RELOCK\r\n")
-            self.assertEqual(os.read(slave_fd, 64), b"RELOCK\n")
-
-            # Non-agent runs require typing exact 'RELOCK' into a real TTY
-            # (env tokens alone, regular files, and missing TTYs are rejected).
-            os.write(master_fd, b"\n")
-            ok_env_only, _ = hill_climb._confirm_relock(
-                env={"WLB_CONFIRM_RELOCK": token},
-                tty_path=pts_path,
-            )
-            self.assertFalse(ok_env_only)
-            os.read(master_fd, 4096)
-
             with tempfile.TemporaryDirectory() as tmp:
-                reg = pathlib.Path(tmp) / "not_a_tty.txt"
-                reg.write_text("RELOCK\n")
-                ok_nontty, _ = hill_climb._confirm_relock(env={}, tty_path=reg)
+                tdir = pathlib.Path(tmp)
+                pass_file = tdir / "relock.passphrase"
+
+                # Missing or empty passphrase file must be refused without reading TTY.
+                ok_missing, msg_missing = hill_climb._confirm_relock(
+                    passphrase_file=pass_file, tty_path=pts_path
+                )
+                self.assertFalse(ok_missing)
+                self.assertIn("missing or empty passphrase file", msg_missing)
+
+                pass_file.write_text("   \n")
+                ok_empty_file, _ = hill_climb._confirm_relock(
+                    passphrase_file=pass_file, tty_path=pts_path
+                )
+                self.assertFalse(ok_empty_file)
+
+                secret = "correct-horse-battery-staple"
+                pass_file.write_text(secret + "\n")
+
+                # Non-TTY regular files and missing TTY paths are refused.
+                reg = tdir / "not_a_tty.txt"
+                reg.write_text(secret + "\n")
+                ok_nontty, _ = hill_climb._confirm_relock(
+                    passphrase_file=pass_file, tty_path=reg
+                )
                 self.assertFalse(ok_nontty)
                 ok_notty, _ = hill_climb._confirm_relock(
-                    env={}, tty_path=pathlib.Path(tmp) / "missing_tty"
+                    passphrase_file=pass_file, tty_path=tdir / "missing_tty"
                 )
                 self.assertFalse(ok_notty)
 
-            os.write(master_fd, b"RELOCK\n")
-            ok_human, _ = hill_climb._confirm_relock(env={}, tty_path=pts_path)
-            self.assertTrue(ok_human)
-            prompt = os.read(master_fd, 4096)
-            self.assertIn(b"Type 'RELOCK' to confirm:", prompt)
+                # Empty input and wrong passphrase on a real TTY are refused.
+                os.write(master_fd, b"\n")
+                ok_blank, _ = hill_climb._confirm_relock(
+                    passphrase_file=pass_file, tty_path=pts_path
+                )
+                self.assertFalse(ok_blank)
+                os.read(master_fd, 4096)
 
-            # Synthetic /proc tree: unsetting env vars, spaces/parens in comm,
-            # and setsid/double-fork reparenting to pid 1 under an agent cgroup
-            # must still be caught even with a real TTY saying 'RELOCK'.
-            with tempfile.TemporaryDirectory() as tmp:
-                proc_root = pathlib.Path(tmp)
-                for pid, ppid, comm, cmd, cgroup in (
-                    (99, 1, "agy", b"/home/user/.gemini/bin/agy\x00remote-control\x00serve\x00", "0::/user.slice\n"),
-                    (100, 99, "my (worker)", b"python3\x00worker.py\x00", "0::/user.slice\n"),
-                    (
-                        200,
-                        1,
-                        "python3",
-                        b"python3\x00-c\x00...",
-                        "0::/user.slice/user-1000.slice/user@1000.service/app.slice/antigravity-cli-daemon.service\n",
-                    ),
-                    (50, 1, "bash", b"/bin/bash\x00", "0::/user.slice/user-1000.slice/session-1.scope\n"),
-                ):
-                    d = proc_root / str(pid)
-                    d.mkdir()
-                    (d / "stat").write_text(f"{pid} ({comm}) S {ppid} 1 1 0 0 0 0\n")
-                    (d / "cmdline").write_bytes(cmd)
-                    (d / "cgroup").write_text(cgroup)
-                (proc_root / "self").symlink_to("100")
-                self.assertTrue(hill_climb._has_agent_ancestor(proc_root))
-                self.assertTrue(hill_climb._is_agent_run(env={}, proc_root=proc_root))
-                (proc_root / "self").unlink()
-                (proc_root / "self").symlink_to("200")
-                self.assertTrue(hill_climb._has_agent_ancestor(proc_root))
-                self.assertEqual(
-                    hill_climb._resolve_lock_file(custom, env={}, proc_root=proc_root),
-                    hill_climb.DEFAULT_LOCK_FILE,
+                os.write(master_fd, b"wrong-passphrase\n")
+                ok_wrong, msg_wrong = hill_climb._confirm_relock(
+                    passphrase_file=pass_file, tty_path=pts_path
                 )
-                ok_reparented, _ = hill_climb._confirm_relock(
-                    env={},
-                    proc_root=proc_root,
-                    tty_path=pts_path,
+                self.assertFalse(ok_wrong)
+                self.assertIn("passphrase mismatch", msg_wrong)
+                self.assertNotIn(secret, msg_wrong)
+                os.read(master_fd, 4096)
+
+                # Matching plaintext passphrase on a real TTY succeeds.
+                os.write(master_fd, (secret + "\n").encode("utf-8"))
+                ok_plain, _ = hill_climb._confirm_relock(
+                    passphrase_file=pass_file, tty_path=pts_path
                 )
-                self.assertFalse(ok_reparented)
-                (proc_root / "self").unlink()
-                (proc_root / "self").symlink_to("50")
-                self.assertFalse(hill_climb._has_agent_ancestor(proc_root))
-                self.assertFalse(hill_climb._is_agent_run(env={}, proc_root=proc_root))
+                self.assertTrue(ok_plain)
+                prompt = os.read(master_fd, 4096)
+                self.assertIn(b"enter passphrase", prompt)
+
+                # Passphrase file storing the 64-hex SHA-256 digest also works.
+                pass_file.write_text(
+                    hashlib.sha256(secret.encode("utf-8")).hexdigest() + "\n"
+                )
+                os.write(master_fd, (secret + "\n").encode("utf-8"))
+                ok_hashed, _ = hill_climb._confirm_relock(
+                    passphrase_file=pass_file, tty_path=pts_path
+                )
+                self.assertTrue(ok_hashed)
+                os.read(master_fd, 4096)
         finally:
             os.close(slave_fd)
             os.close(master_fd)
-
-        # Live host /proc check with all env vars cleared via `env -i`, plus
-        # double-fork + os.setsid() reparenting to pid 1 when in an agent cgroup.
-        expected_ancestor = hill_climb._has_agent_ancestor()
-        res = subprocess.run(
-            [
-                "env",
-                "-i",
-                f"PATH={os.environ.get('PATH', '/usr/bin')}",
-                sys.executable,
-                "-c",
-                "import sys; sys.path.insert(0, 'tools/bench'); import hill_climb; "
-                "print(int(hill_climb._is_agent_run()))",
-            ],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        self.assertEqual(res.stdout.strip(), str(int(expected_ancestor)))
-
-        if hill_climb._has_agent_cgroup(pathlib.Path("/proc/self")):
-            setsid_code = (
-                "import os, sys; "
-                "sys.path.insert(0, 'tools/bench'); "
-                "import hill_climb; "
-                "r, w = os.pipe(); "
-                "p1 = os.fork()\n"
-                "if p1 > 0:\n"
-                "  os.close(w); os.waitpid(p1, 0); "
-                "  out = os.read(r, 16).decode().strip(); os.close(r); print(out)\n"
-                "else:\n"
-                "  os.setsid(); p2 = os.fork()\n"
-                "  if p2 > 0: os._exit(0)\n"
-                "  os.close(r); os.write(w, str(int(hill_climb._is_agent_run())).encode()); "
-                "  os.close(w); os._exit(0)\n"
-            )
-            res2 = subprocess.run(
-                [
-                    "env",
-                    "-i",
-                    f"PATH={os.environ.get('PATH', '/usr/bin')}",
-                    sys.executable,
-                    "-c",
-                    setsid_code,
-                ],
-                cwd=ROOT,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            self.assertEqual(res2.stdout.strip(), "1")
 
     def test_has_human_traces_rejects_bot_rows_and_requires_min_samples(self):
         with tempfile.TemporaryDirectory() as tmp:
