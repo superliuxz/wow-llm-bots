@@ -1,12 +1,7 @@
 # The Underbog (UB)
 
-<!-- Draft boss notes extracted from mod-playerbots (Dungeon/UB). -->
+<!-- DRAFT extracted from mod-playerbots (Dungeon/UB); hand-check before use. -->
 
 ## Hungarfen
 
-- **Foul Spores** (debuff): Debuff; spread 20 yd away from allies.
-
-Suggested standing orders:
-```
-Foul Spores on me -> away group 20
-```
+- **Foul Spores** (debuff): Aura `Foul Spores` (boss); gather/position per encounter script (hand-check).

@@ -148,19 +148,16 @@ BOSS_QUALIFIER_WORDS: Set[str] = {
     "SINDRAGOSA",
 }
 
-# Ground hazard keywords in trigger/action/symbol names.
+# Multi-word ground hazard spell/trigger names (never bare single words like
+# "fire" or "acid" that false-match unrelated triggers such as "fire resistance").
 GROUND_HAZARD_KW = (
     "flame strike",
     "flamestrike",
     "dampening field",
     "phoenix burn",
-    "puddle",
     "ooze puddle",
     "void zone",
     "defile",
-    "fire",
-    "flame",
-    "goo",
     "malleable goo",
     "blizzard",
     "consecration",
@@ -170,18 +167,12 @@ GROUND_HAZARD_KW = (
     "frost patch",
     "ice patch",
     "arcane field",
-    "slime",
-    "fissure",
-    "eruption",
+    "shadow fissure",
     "desecration",
     "death and decay",
     "rain of fire",
-    "lava",
-    "toxic",
-    "acid",
     "shadow crash",
     "living bomb",
-    "blaze",
     "ring of frost",
 )
 
@@ -430,7 +421,8 @@ def clean_enum_symbol(sym: str) -> Tuple[str, str]:
                 rest = rest[: -len(suf)]
                 changed = True
 
-    tokens = [t for t in rest.split("_") if t]
+    tokens = [re.sub(r"\d+(?:[-_]\d+)?$", "", t) for t in rest.split("_")]
+    tokens = [t for t in tokens if t and not t.isdigit()]
     # Drop trailing/leading boss qualifier on spells if other tokens remain.
     if kind == "spell" and len(tokens) > 1:
         if tokens[-1] in BOSS_QUALIFIER_WORDS:
@@ -759,37 +751,36 @@ def classify_trigger(
         )
         return mechanics
 
-    # 2. Ground hazards (escape / leave / in <hazard> / *_TRIGGER NPC / DynamicObject)
+    # Skip non-combat / gear / buff / safe-area checks that are not hazards.
+    if any(w in all_names_low for w in ("resistance", "safe area", "safe spot")):
+        return mechanics
+
+    # 2. Ground hazards (require a concrete spell/trigger-NPC symbol or a
+    # specific multi-word hazard name — never bare generic keywords).
     matched_hazard = next((kw for kw in GROUND_HAZARD_KW if kw in all_names_low), None)
     matched_aoe = next((kw for kw in CAST_AOE_KW if kw in all_names_low), None)
+    has_hazard_ref = any(k == "hazard_npc" for _, k, _ in refs)
+    has_spell_ref = any(k == "spell" for _, k, _ in refs)
     if (
         matched_hazard
         or (
             not matched_aoe
+            and (has_hazard_ref or has_spell_ref)
             and (
                 "escape" in code.lower()
                 or "leave " in acts_low
-                or (
-                    "in " in trig_low
-                    and any(w in trig_low for w in ("field", "fire", "puddle", "pool", "goo", "cloud", "void"))
-                )
-                or any(k == "hazard_npc" for _, k, _ in refs)
+                or has_hazard_ref
             )
         )
     ):
-        # Pick the cleanest hazard name.
+        # Prefer actual game symbols (hazard_npc / spell) over keyword strings.
         hazard_name = ""
-        if matched_hazard:
-            hazard_name = title_case_name(matched_hazard)
-        elif any(k == "hazard_npc" for _, k, _ in refs):
+        if has_hazard_ref:
             hazard_name = next(d for _, k, d in refs if k == "hazard_npc")
-        elif any(k == "spell" for _, k, _ in refs):
+        elif has_spell_ref:
             hazard_name = next(d for _, k, d in refs if k == "spell")
-        else:
-            # Strip instance prefix & verbs from trigger name.
-            cleaned = re.sub(r"^(?:mgt|icc|hol|fos|pos|seth|naxx|uld)\s+", "", trig_low)
-            cleaned = re.sub(r"^(?:in|leave|avoid)\s+", "", cleaned).strip()
-            hazard_name = title_case_name(cleaned)
+        elif matched_hazard:
+            hazard_name = title_case_name(matched_hazard)
         if hazard_name and not any(m.name.lower() == hazard_name.lower() for m in mechanics):
             rad = extract_radius(code, floats, hazard_name)
             order = f"in {hazard_name} -> out of it"
@@ -932,25 +923,40 @@ def classify_trigger(
         if aura_name and not any(m.name.lower() == aura_name.lower() for m in mechanics):
             rad = extract_radius(code, floats, aura_name)
             yd_str = _fmt_yd(rad) or "10"
-            if "spread" in acts_low or "MoveAway" in code:
+            # Determine whether the aura is checked on the boss/target vs on the bot.
+            on_boss = bool(
+                re.search(r"\b(?:boss|target|unit)\s*->\s*HasAura\b", code)
+                or re.search(r"HasAura\s*\([^,]+,\s*(?:boss|target|Get[A-Z][A-Za-z]+\()", code)
+                or "boss has" in trig_low
+            )
+            who = "boss" if on_boss else "me"
+            is_gather = any(
+                w in (acts_low + " " + code.lower())
+                for w in ("gather", "stack", "move to", "moveto(")
+            )
+            order: Optional[str] = None
+            if is_gather:
+                desc = f"Aura `{aura_name}` ({who}); gather/position per encounter script (hand-check)."
+            elif not on_boss and ("spread" in acts_low or "MoveAway" in code):
                 order = f"{aura_name} on me -> away group {yd_str}"
                 desc = f"Debuff; spread {yd_str} yd away from allies."
-            elif "FleePosition" in code or "move from" in acts_low:
+            elif not on_boss and ("FleePosition" in code or "move from" in acts_low):
                 order = f"{aura_name} on me -> away boss {yd_str}"
                 desc = f"Debuff; run {yd_str} yd away from {boss}."
             elif "totem" in all_names_low:
                 order = f"{aura_name} cast -> use Tremor Totem"
                 desc = "Fear/debuff mechanic; drop Tremor Totem."
             else:
-                order = f"{aura_name} on me -> away boss {yd_str}"
-                desc = f"React to `{aura_name}` aura."
+                # Never invent a fallback `away boss 10` order when the script's
+                # response is not clearly an away/spread/totem action.
+                desc = f"Aura `{aura_name}` on {who}; hand-check encounter reaction."
             mechanics.append(
                 Mechanic(
                     boss=boss,
                     name=aura_name,
                     kind="debuff",
                     description=desc,
-                    order=order if is_valid_order(order) else None,
+                    order=order if (order and is_valid_order(order)) else None,
                     radius_yd=rad,
                     source_trigger=spec.name,
                 )
@@ -1033,6 +1039,23 @@ def extract_shared_supplementary_mechanics(
                         kind="add_switch",
                         description=f"Priority add (`{sym}`); switch and burn immediately.",
                         order=order,
+                        source_trigger=sym,
+                    )
+                )
+                existing_names.add(disp.lower())
+        # Known cast-AoE spells declared in enums (e.g. SPELL_POISON_NOVA on Ick)
+        elif kind == "spell" and any(kw in disp.lower() for kw in CAST_AOE_KW):
+            rad = extract_radius(all_code, floats, disp)
+            order = f"{disp} cast -> out of it"
+            if is_valid_order(order):
+                extra.append(
+                    Mechanic(
+                        boss=infer_boss_from_symbol(sym, disp, instance_display),
+                        name=disp,
+                        kind="cast_aoe",
+                        description=f"Boss cast AoE (`{sym}`); move out during cast.",
+                        order=order,
+                        radius_yd=rad,
                         source_trigger=sym,
                     )
                 )
@@ -1122,7 +1145,7 @@ def render_notes_markdown(notes: InstanceNotes) -> str:
     lines: List[str] = [
         f"# {notes.display_name} ({notes.code})",
         "",
-        f"<!-- Draft boss notes extracted from mod-playerbots ({notes.category}/{notes.code}). -->",
+        f"<!-- DRAFT extracted from mod-playerbots ({notes.category}/{notes.code}); hand-check before use. -->",
         "",
     ]
     if not notes.mechanics:
@@ -1142,7 +1165,6 @@ def render_notes_markdown(notes: InstanceNotes) -> str:
         orders = [m.order for m in mechs if m.order]
         if orders:
             lines.append("")
-            lines.append("Suggested standing orders:")
             lines.append("```")
             for o in dict.fromkeys(orders):
                 lines.append(o)

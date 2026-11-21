@@ -1,13 +1,12 @@
 # Auchenai Crypts (AC)
 
-<!-- Draft boss notes extracted from mod-playerbots (Dungeon/AC). -->
+<!-- DRAFT extracted from mod-playerbots (Dungeon/AC); hand-check before use. -->
 
 ## Shirrak the Dead Watcher
 
 - **Shirrak Tank Position Boss** (positioning): Encounter positioning (shirrak tank position boss).
-- **Fire** (ground_hazard): Ground hazard; move out immediately.
+- **Focus Fire** (add_switch): Priority add; switch targets to `Focus Fire` immediately.
 
-Suggested standing orders:
 ```
-in Fire -> out of it
+Focus Fire appears -> target nearest Focus Fire
 ```

@@ -16,6 +16,7 @@
 #include "ObjectMgr.h"
 #include "Player.h"
 #include "RBAC.h"
+#include "ScriptMgr.h"
 #include "SharedDefines.h"
 #include "World.h"
 #include "WorldConfig.h"
@@ -128,11 +129,16 @@ std::string Speak(Player* bot, const pb::Command::Say& say) {
       if (!group) {
         return "you are not in a party";
       }
-      WorldPacket data;
       const ChatMsg msg_type = group->IsLeader(bot->GetGUID())
                                    ? CHAT_MSG_PARTY_LEADER
                                    : CHAT_MSG_PARTY;
-      ChatHandler::BuildChatPacket(data, msg_type, language, bot, bot, text);
+      std::string msg = text;
+      if (!sScriptMgr->OnPlayerCanUseChat(bot, msg_type, language, msg,
+                                          group)) {
+        return "";
+      }
+      WorldPacket data;
+      ChatHandler::BuildChatPacket(data, msg_type, language, bot, bot, msg);
       group->BroadcastPacket(&data, false,
                              group->GetMemberGroup(bot->GetGUID()));
       return "";
@@ -142,11 +148,16 @@ std::string Speak(Player* bot, const pb::Command::Say& say) {
       if (!group || !group->isRaidGroup()) {
         return "you are not in a raid";
       }
-      WorldPacket data;
       const ChatMsg msg_type = group->IsLeader(bot->GetGUID())
                                    ? CHAT_MSG_RAID_LEADER
                                    : CHAT_MSG_RAID;
-      ChatHandler::BuildChatPacket(data, msg_type, language, bot, bot, text);
+      std::string msg = text;
+      if (!sScriptMgr->OnPlayerCanUseChat(bot, msg_type, language, msg,
+                                          group)) {
+        return "";
+      }
+      WorldPacket data;
+      ChatHandler::BuildChatPacket(data, msg_type, language, bot, bot, msg);
       group->BroadcastPacket(&data, false);
       return "";
     }
@@ -173,7 +184,12 @@ std::string Speak(Player* bot, const pb::Command::Say& say) {
         return "cannot join " + cname;
       }
       chn->JoinChannel(bot, "");
-      chn->Say(bot->GetGUID(), text, language);
+      std::string msg = text;
+      if (!sScriptMgr->OnPlayerCanUseChat(bot, CHAT_MSG_CHANNEL, language, msg,
+                                          chn)) {
+        return "";
+      }
+      chn->Say(bot->GetGUID(), msg, language);
       return "";
     }
     case pb::WHISPER: {

@@ -115,7 +115,8 @@ def run_calibration(
     llm_url: str | None = None,
     blind_ratings_path: pathlib.Path | None = None,
     judge_gate_path: pathlib.Path = pairwise_ranker.DEFAULT_JUDGE_GATE_FILE,
-    pairs_per_matchup: int = 12,
+    pairs_per_matchup: int = 30,
+    min_margin_elo: float = 25.0,
     seed: int = 42,
     allow_synthetic: bool = False,
 ) -> dict[str, Any]:
@@ -209,37 +210,48 @@ def run_calibration(
     r1 = bt1["ratings"]
     r2 = bt2["ratings"]
 
-    # Check 1: Correct ranking (humans > current > every known-bad variant).
+    # Check 1: Correct ranking with a meaningful Elo margin (humans > current > every known-bad variant).
     h_rat = r1["heldout_human"]["rating"]
     c_rat = r1["current_bots"]["rating"]
     ranking_failures: list[str] = []
-    if not (h_rat > c_rat):
-        ranking_failures.append(f"heldout_human ({h_rat}) <= current_bots ({c_rat})")
+    if not (h_rat >= c_rat + min_margin_elo):
+        ranking_failures.append(
+            f"heldout_human ({h_rat}) < current_bots + {min_margin_elo} ({c_rat + min_margin_elo})"
+        )
     for bad_name in sorted(bad_suite.keys()):
         b_rat = r1[bad_name]["rating"]
-        if not (c_rat > b_rat):
-            ranking_failures.append(f"current_bots ({c_rat}) <= {bad_name} ({b_rat})")
+        if not (c_rat >= b_rat + min_margin_elo):
+            ranking_failures.append(
+                f"current_bots ({c_rat}) < {bad_name} + {min_margin_elo} ({b_rat + min_margin_elo})"
+            )
 
     # Check 2: Repeatability (same bot scored twice has overlapping 95% CIs).
     c1, c2 = r1["current_bots"], r2["current_bots"]
     repeatable = not (c1["ci_high"] < c2["ci_low"] or c2["ci_high"] < c1["ci_low"])
 
-    # Check 3: Adversary & gate detection of known-bad variants.
+    # Check 3: Adversary & gate detection of known-bad variants relative to
+    # current_bots (never trivially true just because current_bots has tells).
+    adv_curr = adversary_suite.run_adversary_suite(current_bot_traces, human_traces, clip_s=35.0)
+    curr_loop_wp = adv_curr["mmo_detectors"]["waypoint_repeat_ratio"]["bot_mean"] or 0.0
+    curr_inst_min = adv_curr["mmo_detectors"]["chat"]["bot"]["min_reply_delay_s"]
+
     bad_caught: dict[str, bool] = {}
-    # random_jumper caught by classifier / straightness
-    adv_jump = adversary_suite.run_adversary_suite(bad_suite["random_jumper"], human_traces, clip_s=35.0)
-    bad_caught["random_jumper"] = bool(adv_jump["tells"]) or (r1["random_jumper"]["rating"] < c_rat)
-    # instant_reply caught by sub-human reply delay (< 0.8 s)
+    # random_jumper caught by ranking clearly below current_bots
+    bad_caught["random_jumper"] = r1["random_jumper"]["rating"] <= c_rat - min_margin_elo
+    # instant_reply caught by sub-human reply delay (< 0.8 s) when current_bots is not sub-human
     adv_inst = adversary_suite.run_adversary_suite(bad_suite["instant_reply"], human_traces, clip_s=35.0)
     inst_min = adv_inst["mmo_detectors"]["chat"]["bot"]["min_reply_delay_s"]
-    bad_caught["instant_reply"] = inst_min is not None and inst_min < 0.8
-    # same_loop_walker caught by Mitterhofer waypoint repetition
+    bad_caught["instant_reply"] = (
+        inst_min is not None
+        and inst_min < 0.8
+        and (curr_inst_min is None or curr_inst_min >= 0.8)
+    )
+    # same_loop_walker caught by Mitterhofer waypoint repetition clearly above current_bots
     adv_loop = adversary_suite.run_adversary_suite(bad_suite["same_loop_walker"], human_traces, clip_s=35.0)
-    loop_wp = adv_loop["mmo_detectors"]["waypoint_repeat_ratio"]["bot_mean"]
-    bad_caught["same_loop_walker"] = loop_wp >= 0.45
-    # plain_playerbots caught by ranking below current & adversary tells
-    adv_plain = adversary_suite.run_adversary_suite(bad_suite["plain_playerbots"], human_traces, clip_s=35.0)
-    bad_caught["plain_playerbots"] = bool(adv_plain["tells"]) or (r1["plain_playerbots"]["rating"] < c_rat)
+    loop_wp = adv_loop["mmo_detectors"]["waypoint_repeat_ratio"]["bot_mean"] or 0.0
+    bad_caught["same_loop_walker"] = loop_wp >= max(0.45, curr_loop_wp + 0.15)
+    # plain_playerbots caught by ranking clearly below current_bots
+    bad_caught["plain_playerbots"] = r1["plain_playerbots"]["rating"] <= c_rat - min_margin_elo
 
     # Optional Check 4: agreement with recorded blind_rate.py ratings.
     blind_agree = None

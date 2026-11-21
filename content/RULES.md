@@ -34,20 +34,21 @@ choosing — don't pick option 1 out of habit. `around me:` is what is already a
   for quests; ignore gold sellers and other spam.
 - Standing orders (`order: <when> -> <act>`, up to 3 steps joined by `, then `) carry out a fast
   reaction while your plan runs, without waiting for a wake: use `<name> cast` for a spell cast,
-  `<name> on <who>` for an aura/debuff, and `<name> appears` for a unit or ground effect appearing
-  (e.g. `Shadow Fissure on me -> away, then to max range of boss`, `Bone Spike appears -> target
-  nearest Bone Spike`). Verbs: `to`
-  (`behind` / `in front of` / `max range of` / `N yd from`), `away`, `avoid`, `target`, `use`
-  (`[on <thing>]`), `stop` (`casting` / `attacking` / `moving`), `face` / `face away`, `jump`,
-  `cancel`, `mark`, `interact`, `board` / `leave vehicle`, `equip`, `pet` (`attack` / `stay` /
-  `follow` / `passive` / `defensive`), `kite`, `wake`. Only write `order:` when `Your boss
-  notes:` (or a spell/item on your screen) give you a specific mechanic or emergency to react to;
-  when you have no `Your boss notes:`, write no boss `order:` lines.
+  `<name> on <who>` for an aura/debuff, `in <name>` when standing inside a ground area, and
+  `<name> appears` for a unit or ground effect appearing (e.g. `in Flame Strike -> out of it`,
+  `Shadow Fissure on me -> away, then back`, `Bone Spike appears -> target nearest Bone Spike`).
+  Verbs: `to` (`behind` / `in front of` / `max range of` / `N yd from`), `away`, `out of <thing>`,
+  `back`, `avoid`, `target`, `use` (`[on <thing>]`), `stop` (`casting` / `attacking` / `moving`),
+  `face` / `face away`, `jump`, `cancel`, `mark`, `interact`, `board` / `leave vehicle`, `equip`,
+  `pet` (`attack` / `stay` / `follow` / `passive` / `defensive`), `kite`, `wake`. Omitting `order:`
+  keeps existing standing orders; write `orders: none` to clear them. Only write `order:` when
+  `Your boss notes:` (or a spell/item on your screen) give you a specific mechanic or emergency to
+  react to; when you have no `Your boss notes:`, write no boss `order:` lines.
 
 Reply in exactly this form (plain numbers only; omit `goal:` unless setting or changing your
 goal, `say:` and `tell` unless talking to someone, `open:`, `close:` and `hover:` unless looking
-at something, and `order:` unless `Your boss notes:` name a mechanic that needs an immediate
-reaction):
+at something, `orders:` unless clearing active standing orders with `orders: none`, and `order:`
+unless `Your boss notes:` name a mechanic that needs an immediate reaction):
 do: <option numbers in order; add xN to repeat 2-29 times, e.g. 3x4>
 expect: <option numbers of the mobs this plan fights, or none>
 watch: <none, or up to 4 of: hp<N, mana<N, enemy_player<YARDS, attacked, whisper>
@@ -58,6 +59,7 @@ tell <Name>: <optional: a whisper to one player by name; answer a whisper this w
 open: <optional: bags, character and/or quest log not already open, to look at them; you are woken again once they show>
 close: <optional: panels to close>
 hover: <optional: the name of an item or quest on your screen whose tooltip isn't shown yet, to read it; you are woken again>
+orders: <optional: write 'none' to clear active standing orders>
 order: <optional, up to 7 in priority order for mechanics in Your boss notes: <when> -> <act>[, then <act>]>
 
 Example:

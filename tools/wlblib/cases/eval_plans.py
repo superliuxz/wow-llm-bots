@@ -151,8 +151,19 @@ def check_case(case, got):
     if "min_orders" in case and len(orders) < case["min_orders"]:
         problems.append(f"wrote {len(orders)} standing orders, expected >= {case['min_orders']}")
     for needle in case.get("must_order_contain", ()):
-        if not any(needle.lower() in o.lower() for o in orders):
+        matching = [o for o in orders if needle.lower() in o.lower()]
+        if not matching:
             problems.append(f"no standing order mentions {needle!r} (orders: {orders or 'none'})")
+        elif case.get("must_order_act"):
+            acts = [a.lower() for a in case["must_order_act"]]
+            if not any(
+                "->" in o and any(a in o.split("->", 1)[1].lower() for a in acts)
+                for o in matching
+            ):
+                problems.append(
+                    f"order for {needle!r} does not perform any of {case['must_order_act']!r} "
+                    f"(orders: {matching})"
+                )
     return problems
 
 

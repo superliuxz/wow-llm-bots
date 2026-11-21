@@ -84,7 +84,9 @@ struct Plan {
   std::vector<std::string> close;
   std::string hover;
   // Standing orders, in priority order (orders.h; docs/specs/triggers.md):
-  // up to kMaxOrders `order:` lines. A new plan replaces all of them.
+  // up to kMaxOrders `order:` lines. Omitting `order:` keeps existing orders;
+  // `orders: none` (`clear_orders == true`) explicitly clears them.
+  bool clear_orders = false;
   std::vector<Order> orders;
 
   bool operator==(const Plan&) const = default;

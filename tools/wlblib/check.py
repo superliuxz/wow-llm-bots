@@ -177,12 +177,15 @@ def goldens():
 
 
 def bench_tests():
-    """Unit tests for the soak suites, scorer, and hill-climbing safeguards."""
+    """Unit tests for the soak suites, scorer, notes/eval tools, and hooks."""
     run(["python3", "-I", "-B", ROOT / "tools/bench/soak_suites_test.py", "-q"])
     run(["python3", "-I", "-B", ROOT / "tools/bench/hill_climb_test.py", "-q"])
     run(["python3", "-I", "-B", ROOT / "tools/bench/layered_scorer_test.py", "-q"])
     run(["python3", "-I", "-B", ROOT / "tools/bench/dodge_timeline_test.py", "-q"])
     run(["python3", "-I", "-B", ROOT / "tools/bench/trace_events_spec_test.py", "-q"])
+    run(["python3", "-I", "-B", ROOT / "tools/notes/extract_boss_notes_test.py", "-q"])
+    run(["python3", "-I", "-B", ROOT / "tools/eval/mine_traces_test.py", "-q"])
+    run(["python3", "-I", "-B", ROOT / ".agents/hooks/post_commit_review_test.py", "-q"])
 
 
 def sanitizers():

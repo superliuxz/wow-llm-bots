@@ -540,8 +540,8 @@ class LlmBrainWorldScript : public WorldScript {
         continue;  // Nobody to tell: like a whisper while away.
       }
       const std::string ch_name = TraceChannelName(line.chat.channel);
-      LOG_INFO("module", "mod-llm-brain: {} heard {} from {}: {}", line.to,
-               ch_name, line.chat.from, line.chat.text);
+      LOG_INFO("module", "mod-llm-brain: {} heard {} from {} (len={})", line.to,
+               ch_name, line.chat.from, line.chat.text.size());
       if (!line.chat.from.empty() && line.chat.from != line.to) {
         auto& chatters = bots_[index].recent_chatters;
         std::erase_if(chatters, [&](const RecentChatter& rc) {
@@ -805,12 +805,28 @@ class LlmBrainWorldScript : public WorldScript {
              Player* bot,
              uint32_t /*command_id*/,
              const wlb::snapshot::Command::Say& say) {
-    const std::string error = Speak(bot, say);
-    LOG_INFO("module", "mod-llm-brain: {} says ({}{}{}): {}: {}", name,
+    // Rate-limit outbound bot chat (max 5 lines per 10 s and min 1 s spacing)
+    // to prevent spam loops while matching human chat cadence.
+    const base::TimeTicks now = base::TimeTicks::Now();
+    std::deque<base::TimeTicks>& sent_times = bots_[bot_index].recent_chat_sent;
+    while (!sent_times.empty() &&
+           now - sent_times.front() > base::Seconds(10)) {
+      sent_times.pop_front();
+    }
+    std::string error;
+    if (!sent_times.empty() && (sent_times.size() >= 5 ||
+                                now - sent_times.back() < base::Seconds(1))) {
+      error = "chat rate limited";
+    } else {
+      error = Speak(bot, say);
+      if (error.empty()) {
+        sent_times.push_back(now);
+      }
+    }
+    LOG_INFO("module", "mod-llm-brain: {} says ({}{}{}, len={}): {}", name,
              wlb::snapshot::EnumName(say.channel), say.to.empty() ? "" : " to ",
-             say.to, say.text, error.empty() ? "ok" : error);
+             say.to, say.text.size(), error.empty() ? "ok" : error);
     if (error.empty() && trace_writer_ && trace_writer_->enabled()) {
-      const base::TimeTicks now = base::TimeTicks::Now();
       TraceChat tc;
       tc.time_ms = base::Time::Now().InMillisecondsSinceUnixEpoch();
       tc.monotonic_us = (now - base::TimeTicks()).InMicroseconds();
@@ -1431,6 +1447,8 @@ class LlmBrainWorldScript : public WorldScript {
     ReactiveSnapshotState last_reactive;
     // Players who recently chatted to/near this bot (for group invite options).
     std::deque<RecentChatter> recent_chatters;
+    // Timestamps of recent outbound bot chat messages (for rate limiting).
+    std::deque<base::TimeTicks> recent_chat_sent;
     // Leader name of the currently surfaced pending group invite.
     std::string seen_group_invite_leader;
   };

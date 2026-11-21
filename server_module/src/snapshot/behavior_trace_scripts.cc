@@ -205,7 +205,9 @@ class LlmBrainTracePlayerScript : public PlayerScript {
       return;
     }
     const SpellInfo* info = spell->GetSpellInfo();
-    EmitTraceEvent(state_, player, "cast_start", SpellDisplayName(info),
+    // OnPlayerSpellCast fires inside Spell::cast() when the cast completes /
+    // executes, not when a cast bar starts preparing.
+    EmitTraceEvent(state_, player, "spell_cast", SpellDisplayName(info),
                    static_cast<int64_t>(info->Id));
   }
 

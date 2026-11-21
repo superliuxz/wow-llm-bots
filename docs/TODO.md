@@ -9,36 +9,24 @@ Last updated 2026-11-21.
 
 ## In progress
 
-- **Scorer lock relock (awaiting explicit user OK):** `tools/bench/hill_climb.py` (in `LOCKED_PATTERNS`) was modified for Review 12 Medium 1; `~/.local/share/wow-llm-bots/scorer.sha256` and `config/scorer-lock.sha256` are left untouched pending user approval.
-- **Phase 1 & Phase 2 remaining benchmark sign-off criteria** (implementation + unit/eval verification complete; see [`docs/benchmarks/2026-11-21-phase1-phase2-five-boss.md`](benchmarks/2026-11-21-phase1-phase2-five-boss.md) for `n = 8` 5-boss results):
-  - **Done & verified:** `A1` dodge-then-return (`med_back_ms = 11–313 ms`), `A2` server-radius-aware `out of it` + `Cast.radius_yd`/`impact_pos` + trigger-area perception (`Flame Strike` `24666`/`44191`), `Kael'thas` `Flame Strike` gap **closed** (`llm` `7,460` total / `6/8 <= 1k` vs `baseline` `11,229` / `5/8 <= 1k`), DPS within `10%` of `llm_no_notes` on `kaelthas` (`-9.6%`), `ikiss` (`+5.2%`), and `devourer` (`-7.1%`), `A3` playerbots-script-to-notes extractor (`41` instances / `647` triggers → `content/notes/`) + grammar parity (`in <mech>`, `out of <thing>`, `back`), `A4` pre-pull standing-order compilation on instance entry + cache + mid-fight order preservation, `C1` trace-to-eval miner (`4/4` mined boss eval cases passing `tools/wlb test eval`), and `gear_quality=2` on `loken`/`devourer` breaking the `16/16` ceiling.
-  - **Still open for full Phase 1/2 sign-off:** (1) `Murmur` `0/8` (`-37.5%` DPS) because tank running 38 yd away on `Sonic Boom` triggers `Resonance` raid-wide wipe (needs role-aware notes so tank stays in melee); (2) `Loken` `2/8` (`-38.9%` DPS) because ranged bots stay at 25–30 yd eating distance-scaled `Pulsing Shockwave` instead of stacking between `Lightning Nova`s; (3) `llm` boss kills beating `no_brain` significantly after Holm–Bonferroni correction (`10/40` vs `19/40`, `p_pool = 0.062`).
+- **Scorer lock relock (awaiting explicit user OK):** `tools/bench/hill_climb.py` and scorer files (in `LOCKED_PATTERNS`) were modified for Review 12 Medium 1 and Review `ede3f6c` Highs 3–4 / Mediums 17–20; `~/.local/share/wow-llm-bots/scorer.sha256` and `config/scorer-lock.sha256` are left untouched pending explicit user approval.
+- **Phase 1 & Phase 2 remaining benchmark sign-off criteria** (see single-codebase `n = 8` 5-boss report [`docs/benchmarks/2026-11-21-phase1-phase2-five-boss.md`](benchmarks/2026-11-21-phase1-phase2-five-boss.md)):
+  - After fixing Review `ede3f6c` High 1, `llm` recovered from `10/40` to `24/40` (`60.0%`, vs `llm_no_notes` `25/40` `p = 1.0000`, `no_brain` `20/40` `p = 0.5005`, `baseline` `22/40` `p = 0.8213`; `Murmur 7/8`, `Loken 6/8`, `Ikiss 5/8`, `Kael'thas 3/8`, `Devourer 3/8`).
+  - **Still open before Phase 3 sign-off:** `llm` kills (`24/40`) do not yet significantly beat `no_brain` (`20/40`, `p = 0.5005`) after Holm–Bonferroni correction, `Ikiss` DPS is `-11.2%` vs `llm_no_notes`, and `A3` generated notes (`content/notes/`) remain **draft** (not yet loaded by harness; hand-check per boss before use).
 
 ## Next, in order
 
 **Priority direction (2026-11-21):** Mechanical WoW competence (dungeons, raids/ICC, clearing quests,
-soloing elite quests, smart gearing) takes priority over `"human-like"` mimicry (`D`). Where we
-stand after the Phase 1 (`A1–A2`) & Phase 2 (`A3–A4`, `C1`) 160-trial (`n = 8` per arm) 5-boss
-benchmark ([`docs/benchmarks/2026-11-21-phase1-phase2-five-boss.md`](benchmarks/2026-11-21-phase1-phase2-five-boss.md)):
-`A1` dodge-then-return (`med_back_ms = 11–313 ms`), `A2` server-radius-aware `out of it` +
-trigger-area perception, `A3` script-generated notes (`41` instances / `647` triggers) + grammar
-parity (`in`, `out of`, `back`), `A4` pre-pull standing-order compilation + cache, and `C1`
-trace-mined eval cases (`4/4` passing `tools/wlb test eval`) are implemented and verified;
-`Kael'thas` `Flame Strike` parity vs `baseline` is **closed** (`7,460` / `6/8 <= 1k` vs `11,229` /
-`5/8 <= 1k`); `gear_quality=2` on `Loken` and `Devourer` broke their `16/16` ceilings without
-dropping bosses; and `llm` DPS is within `10%` of `llm_no_notes` on `kaelthas` (`-9.6%`), `ikiss`
-(`+5.2%`), and `devourer` (`-7.1%`). Remaining Phase 1/2 gaps before Phase 3: `Murmur` `0/8`
-(`-37.5%` DPS, tank leaving melee triggers `Resonance` wipe), `Loken` `2/8` (`-38.9%` DPS, ranged
-bots eat distance-scaled `Pulsing Shockwave` instead of stacking), and `llm` kills vs `no_brain`
-after Holm–Bonferroni correction (`10/40` vs `19/40`).
+soloing elite quests, smart gearing) takes priority over `"human-like"` mimicry (`D`). All Review
+`ede3f6c` High (1–4), Medium (5–20), and Low findings are fixed and verified (unit tests, live e2e
+`invite`/`whisper`/`orders`, `eval` `4/4` on answer-stripped mined cases, and single-codebase 5-boss
+`n = 8` benchmark); remaining Phase 1/2 sign-off work is lifting `llm` boss kills significantly
+above `no_brain` (e.g. `Kael'thas` `3/8` vs `baseline` `6/8`, `Devourer` `3/8` vs `5/8`) and
+hand-checking draft `content/notes/` before enabling them.
 
-1. **Close Phase 1 & Phase 2 boss-kill sign-off gaps (`Murmur` `Resonance`, `Loken` `Pulsing Shockwave`, `Ikiss` LoS):**
-   *(Implementation of `A1–A4` and `C1` is done; done when: `llm` DPS is within `10%` of
-   `llm_no_notes` on all 5 bosses and `llm` boss kills beat `no_brain` significantly after
-   Holm–Bonferroni correction)*:
-   - Role-aware standing-order notes for `Murmur` (keep tank in melee during `Sonic Boom` so
-     `Resonance` never wipes the party) and `Loken` (stack close between `Lightning Nova` casts to
-     minimize `Pulsing Shockwave`), then re-verify on the 5-boss benchmark.
+1. **Close Phase 1/2 boss-kill sign-off gaps (`Kael'thas`, `Devourer`, `Ikiss` DPS):**
+   *(Done when: `llm` DPS is within `10%` of `llm_no_notes` on all 5 bosses and `llm` boss kills
+   beat `no_brain` significantly after Holm–Bonferroni correction.)*
 2. **Phase 3 — Targeting, roles, items/vehicles, self-revising notes & raids / ICC (`A5`, `A6`, `C2`)**
    *(Promoted ahead of open-world / human-likeness per Decision #4. Done when: kills on Kael and
    Murmur up, Patchwerk with a proper comp, and raid / ICC encounter progression working)*:
@@ -185,6 +173,12 @@ after Holm–Bonferroni correction (`10/40` vs `19/40`).
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-21: **Review `ede3f6c` fixes (High 1–4, Medium 5–20, and Lows; uncommitted pending user review & scorer relock OK):**
+  - *Acts & Orders (`High 1`, `M5–M8`, `Lows`):* `act_executor.cc` stops `away`/`out of` from auto-walking back (resumes attack target only; returns only on explicit `back`), adds bot combat reach to `out of` (`act_geometry.{h,cc}`), and removes `CanEscapeBeforeImpact` C++ judgment; `plan.wlb`/`plan.{h,cc}`/`bot_loop.cc` add explicit `orders: none` to clear standing orders (otherwise keeping orders consistently in/out of combat) and stop mid-fight plans from overwriting the pre-pull cache; `content/RULES.md` lists `in`, `out of`, `back`, `orders: none`; `snapshot.h` bumps `kWireVersion` to `4`.
+  - *Invite & Chat (`High 2`, `M14–M16`, `Lows`):* `bot_manager.cc` attaches `BlockAutoInviteListener` to block Playerbots' `"accept invitation"` so the brain decides (`tools/wlblib/cases/e2e_invite.py` live-verified `PASS`); `chat_scripts.cc` delivers `Say`/`Yell` via `Cell::VisitObjects` (same map, instance, phase, thread); `speak.cc` routes `PARTY`/`RAID`/`GENERAL` through `OnPlayerCanUseChat`; `bot_loop.cc` restricts `tell` to whisperers and party members; `llm_brain_world_script.cc` adds outbound chat rate limiting (5/10 s, 1 s min spacing) and logs byte length instead of full chat text; `behavior_trace_scripts.cc` renames `cast_start` → `spell_cast`.
+  - *Notes, Mined Evals, Bench (`M9–M13`):* `extract_boss_notes.py` & `orders.cc` drop bare-keyword templates, resistance/safe-area false positives, blind `away boss 10` fallbacks, digit-range junk, and non-game headings (regenerated draft `content/notes/`); `mine_traces.py` & `eval_plans.py` strip standing-order answers from notes, enforce `must_order_act`, attribute damage/deaths to the casting boss, and infer class (`4/4` mined evals passing `tools/wlb test eval`); `dodge_timeline.py` requires in-range + casting/attacking for `BackMs`; re-ran all 5 bosses on one codebase (`n = 8`, 160 valid trials, `0` invalid: `llm` recovered from `10/40` to `24/40`, `Murmur 7/8`, `Loken 6/8`; [`docs/benchmarks/2026-11-21-phase1-phase2-five-boss.md`](benchmarks/2026-11-21-phase1-phase2-five-boss.md)).
+  - *Scorer & Checks (`High 3–4`, `M17–M20`, `Lows`):* `trace_parity.py` preserves raw pre-resampling snap-turn rates and strips chat text in anonymized clips; `pairwise_ranker.py` formats human/bot social views identically as `<len=N>` and raises default `check_judge_agreement` `min_pairs` to `30`; `blind_rate.py` requires `>= 10` human-vs-bot pairs for `llm-agree`; `adversary_suite.py` computes raw reaction times before 200 ms grid snapping; `soak_scorer.py` raises judge pairs to `72` (focused on `candidate` vs `current`) and requires `>= 20` complete blind ratings; `scorer_calibration.py` requires a `25` Elo margin and relative `bad_caught`; `hill_climb.py` adds pending-candidate + `score-candidate` workflow, read-only (`0444`) baseline traces, `_RelockAuth` token instead of bare `confirmed=True`, and scoped `git add --` with `check=True`; `tools/wlblib/check.py` runs all 8 Python test suites under `-I`. Verified via `tools/wlb check` (`ALL CHECKS PASSED`), `tools/wlb test e2e invite whisper orders` (`3/3`), `tools/wlb test eval` (`4/4` mined), and 160-trial 5-boss benchmark.
+
 - 2026-11-21: **Offline 3.3.5a Wiki & Atlas SQLite databases + candidate bake-off models:**
   pre-downloaded `gemma-4-E4B-it-qat-IQ4_XS-imatrix.gguf` (`4.7 GB`) and
   `Qwen3.8-27B-IQ4_XS.gguf` (`15 GB`, both with `.sha256`) into untracked `models/` for `C4`;
@@ -201,8 +195,8 @@ after Holm–Bonferroni correction (`10/40` vs `19/40`).
 - 2026-11-21: **Review 12 fixes (Medium 1, passphrase doc honesty, & post-commit review hook Lows 1–6):**
   updated [`tools/bench/hill_climb.py`](../tools/bench/hill_climb.py) `_verify_all_locks` to always verify against tracked [`config/scorer-lock.sha256`](../config/scorer-lock.sha256) even when `--lock-file` is overridden (tested in [`tools/bench/hill_climb_test.py`](../tools/bench/hill_climb_test.py) `8/8`); stated plainly in [`CONTRIBUTING.md`](../CONTRIBUTING.md), `.agents/rules/contributing.md`, and [`docs/plans/self-improving-loop.md`](plans/self-improving-loop.md) that the external passphrase file is not a technical barrier against an agent running as the same Unix user and that protection comes from the rule + tracked digest diff; hardened [`.agents/hooks/post_commit_review.py`](../.agents/hooks/post_commit_review.py) to review `last_reviewed..HEAD` only on strict descendant moves (skipping checkout/reset/amend), pass a minimal sanitized env, guard concurrent spawns with `fcntl.flock`, update `last_reviewed_sha` only after `Popen` succeeds, document plan-mode/untrusted-diff & `jetski-hub` loop-guard boundaries and `WLB_SKIP_COMMIT_REVIEW=1` opt-out, and added unit tests in [`.agents/hooks/post_commit_review_test.py`](../.agents/hooks/post_commit_review_test.py) (`3/3`). Verified via `tools/wlb check` (`ALL CHECKS PASSED`).
 
-- 2026-11-21: **Phase 1 (`A1` + `A2`) & Phase 2 (`A3` + `A4` + `C1`) implementation, `Flame Strike` parity closed, & 5-boss (`n = 8`) benchmark (`24b4743`, `221b706`, `d7b54f4`):**
-  implemented `Cast.radius_yd`/`impact_pos` + hidden trigger-NPC visible aura perception (`24666`/`44191` `Flame Strike`) in `nearby_builder.cc`; added `in <mech>`, `out of <thing>`, and `back` to `harness/grammar/orders.wlb`, `order_evaluator.cc`, `act_geometry.{h,cc}`, `act_executor.{h,cc}` (radius+margin escape toward outside group/tank, already-outside & unreachable-before-impact skip, hold-until-cast-ends + auto-resume interrupted activity), and `docs/specs/triggers.md`; added `dps_before`/`dps_during`/`dps_lost`/`time_back_in_range_ms` to `dodge_timeline.py`; added `tools/notes/extract_boss_notes.py` (`41` playerbots instances / `647` triggers → `content/notes/`), `A4` pre-pull standing-order compilation on instance entry + `(bot, map, notes)` cache + mid-fight order preservation in `bot_loop.{h,cc}`, `tools/eval/mine_traces.py` (`4/4` trace-mined boss eval cases passing `tools/wlb test eval`), and optional `quality` on `llmtest gear` (`gear_quality=2` breaking `16/16` ceilings on `loken`/`devourer`). Verified via `tools/wlb check` (`ALL CHECKS PASSED`: `60 + 121 + 226` C++ tests + `4 + 7 + 9 + 18 + 5` + `11` Python tests), `build.server(test=True)`, `tools/wlb test eval` (`4/4`), and `160`-trial live 5-boss benchmark ([`docs/benchmarks/2026-11-21-phase1-phase2-five-boss.md`](benchmarks/2026-11-21-phase1-phase2-five-boss.md)): `Kael'thas` `Flame Strike` gap closed (`llm` `7,460` / `6/8 <= 1k` vs `baseline` `11,229` / `5/8 <= 1k`), DPS within `10%` of `llm_no_notes` on `kaelthas` (`-9.6%`), `ikiss` (`+5.2%`), and `devourer` (`-7.1%`), `med_back_ms = 11–313 ms`; remaining kill-rate / `Murmur` `Resonance` / `Loken` `Pulsing Shockwave` gaps tracked honestly under `In progress`.
+- 2026-11-21: **Phase 1 (`A1` + `A2`) & Phase 2 (`A3` + `A4` + `C1`) initial draft (`24b4743`, `221b706`, `d7b54f4` — superseded/broken per Review `ede3f6c`):**
+  implemented initial `Cast.radius_yd`/`impact_pos` + trigger-NPC perception, `in`/`out of`/`back` grammar & `act_executor`, `dodge_timeline.py` metrics, `extract_boss_notes.py` (draft), `A4` pre-pull orders, `mine_traces.py` (draft), and `gear_quality=2`. Review `ede3f6c` identified High 1 (`away` auto-walking back cut kills `10/40` vs `24/40`, `p = 0.003`), Mediums 5–13 (combat reach, order clear/cache, C++ judgment, keyword-template notes, leaking mined evals, broken `BackMs`, mixed-commit report); all tracked in `In progress`.
 
 - 2026-11-21: **External relock passphrase file, `n = 16` roadmap numbers, accurate eviction comments & post-commit subagent review hook:**
   replaced AI process/cgroup/env-var detection in

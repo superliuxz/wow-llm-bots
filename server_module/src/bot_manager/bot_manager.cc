@@ -9,8 +9,11 @@
 #include <utility>
 #include <vector>
 
+#include "Action.h"
 #include "AiFactory.h"
 #include "CharacterCache.h"
+#include "Engine.h"
+#include "Event.h"
 #include "Log.h"
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
@@ -32,6 +35,35 @@ struct BotStrategyOverride {
   std::string combat;
   std::string non_combat;
 };
+
+// Prevents Playerbots' `default` strategy (`WorldPacketHandlerStrategy`) from
+// auto-accepting or auto-declining group invitations before the LLM brain can
+// see the pending invite and decide (`Accept group invite` / `Decline group
+// invite`). Attached idempotently to each brain bot's active Engine.
+class BlockAutoInviteListener final : public ActionExecutionListener {
+ public:
+  bool Before(Action* /*action*/, Event /*event*/) override { return true; }
+  bool AllowExecution(Action* action, Event /*event*/) override {
+    return !(action && action->getName() == "accept invitation");
+  }
+  void After(Action* /*action*/, bool /*executed*/, Event /*event*/) override {}
+  bool OverrideResult(Action* /*action*/,
+                      bool executed,
+                      Event /*event*/) override {
+    return executed;
+  }
+};
+
+void EnsureBlockAutoInvite(PlayerbotAI* ai) {
+  if (!ai) {
+    return;
+  }
+  if (Engine* engine = ai->GetCurrentEngine()) {
+    static BlockAutoInviteListener listener;
+    engine->removeActionExecutionListener(&listener);
+    engine->AddActionExecutionListener(&listener);
+  }
+}
 
 // World-thread-only per-bot strategy overrides.
 std::unordered_map<std::string, BotStrategyOverride>& BotOverrides() {
@@ -117,6 +149,7 @@ void BotManager::EnsureStrategies(Player* player) {
   if (!ai || player->InBattleground()) {
     return;  // Not set up yet, or playerbots' battleground strategies apply.
   }
+  EnsureBlockAutoInvite(ai);
   // Solo, a healer also deals damage; in a group it heals, so the same extras
   // are removed (",+holy dps" becomes ",-holy dps"): joining a group must undo
   // what being solo added.

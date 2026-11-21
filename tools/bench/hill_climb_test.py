@@ -59,15 +59,16 @@ class HillClimbSafeguardsTest(unittest.TestCase):
             ok_unconf, _ = hill_climb._write_lock_manifest(lf, approved_digest_file=df)
             self.assertFalse(ok_unconf)
             self.assertFalse(lf.exists())
-            ok, _ = hill_climb._write_lock_manifest(lf, confirmed=True, approved_digest_file=df)
+            auth = hill_climb._RelockAuth(True)
+            ok, _ = hill_climb._write_lock_manifest(lf, auth=auth, approved_digest_file=df)
             self.assertTrue(ok)
             self.assertEqual(stat.S_IMODE(lf.stat().st_mode), 0o444)
             self.assertTrue(df.exists())
             self.assertEqual(hill_climb._read_approved_digest(df), hill_climb._sha256_file(lf))
-            # Refuses to overwrite without force or without confirmation.
-            ok2, _ = hill_climb._write_lock_manifest(lf, force=False, confirmed=True, approved_digest_file=df)
+            # Refuses to overwrite without force or without passphrase auth token.
+            ok2, _ = hill_climb._write_lock_manifest(lf, force=False, auth=auth, approved_digest_file=df)
             self.assertFalse(ok2)
-            ok2b, _ = hill_climb._write_lock_manifest(lf, force=True, confirmed=False, approved_digest_file=df)
+            ok2b, _ = hill_climb._write_lock_manifest(lf, force=True, auth=None, approved_digest_file=df)
             self.assertFalse(ok2b)
             # Full manifest + repo-approved digest verify.
             ok3, _ = hill_climb._verify_all_locks(lf, approved_digest_file=df)
@@ -94,7 +95,7 @@ class HillClimbSafeguardsTest(unittest.TestCase):
             lf = pathlib.Path(tmp) / "custom_scorer.sha256"
             # Write a valid manifest for the current working tree into a custom
             # path without updating config/scorer-lock.sha256.
-            ok_w, _ = hill_climb._write_lock_manifest(lf, confirmed=True)
+            ok_w, _ = hill_climb._write_lock_manifest(lf, auth=hill_climb._RelockAuth(True))
             self.assertTrue(ok_w)
             # Even with a custom --lock-file path, _verify_all_locks must check
             # config/scorer-lock.sha256 unless approved_digest_file is passed.
@@ -147,14 +148,15 @@ class HillClimbSafeguardsTest(unittest.TestCase):
                 pass_file = tdir / "relock.passphrase"
 
                 # Missing or empty passphrase file must be refused without reading TTY.
-                ok_missing, msg_missing = hill_climb._confirm_relock(
+                ok_missing, msg_missing, auth_missing = hill_climb._confirm_relock(
                     passphrase_file=pass_file, tty_path=pts_path
                 )
                 self.assertFalse(ok_missing)
+                self.assertIsNone(auth_missing)
                 self.assertIn("missing or empty passphrase file", msg_missing)
 
                 pass_file.write_text("   \n")
-                ok_empty_file, _ = hill_climb._confirm_relock(
+                ok_empty_file, _, _ = hill_climb._confirm_relock(
                     passphrase_file=pass_file, tty_path=pts_path
                 )
                 self.assertFalse(ok_empty_file)
@@ -165,38 +167,40 @@ class HillClimbSafeguardsTest(unittest.TestCase):
                 # Non-TTY regular files and missing TTY paths are refused.
                 reg = tdir / "not_a_tty.txt"
                 reg.write_text(secret + "\n")
-                ok_nontty, _ = hill_climb._confirm_relock(
+                ok_nontty, _, _ = hill_climb._confirm_relock(
                     passphrase_file=pass_file, tty_path=reg
                 )
                 self.assertFalse(ok_nontty)
-                ok_notty, _ = hill_climb._confirm_relock(
+                ok_notty, _, _ = hill_climb._confirm_relock(
                     passphrase_file=pass_file, tty_path=tdir / "missing_tty"
                 )
                 self.assertFalse(ok_notty)
 
                 # Empty input and wrong passphrase on a real TTY are refused.
                 os.write(master_fd, b"\n")
-                ok_blank, _ = hill_climb._confirm_relock(
+                ok_blank, _, _ = hill_climb._confirm_relock(
                     passphrase_file=pass_file, tty_path=pts_path
                 )
                 self.assertFalse(ok_blank)
                 os.read(master_fd, 4096)
 
                 os.write(master_fd, b"wrong-passphrase\n")
-                ok_wrong, msg_wrong = hill_climb._confirm_relock(
+                ok_wrong, msg_wrong, auth_wrong = hill_climb._confirm_relock(
                     passphrase_file=pass_file, tty_path=pts_path
                 )
                 self.assertFalse(ok_wrong)
+                self.assertIsNone(auth_wrong)
                 self.assertIn("passphrase mismatch", msg_wrong)
                 self.assertNotIn(secret, msg_wrong)
                 os.read(master_fd, 4096)
 
                 # Matching plaintext passphrase on a real TTY succeeds.
                 os.write(master_fd, (secret + "\n").encode("utf-8"))
-                ok_plain, _ = hill_climb._confirm_relock(
+                ok_plain, _, auth_plain = hill_climb._confirm_relock(
                     passphrase_file=pass_file, tty_path=pts_path
                 )
                 self.assertTrue(ok_plain)
+                self.assertIsNotNone(auth_plain)
                 prompt = os.read(master_fd, 4096)
                 self.assertIn(b"enter passphrase", prompt)
 
@@ -205,10 +209,11 @@ class HillClimbSafeguardsTest(unittest.TestCase):
                     hashlib.sha256(secret.encode("utf-8")).hexdigest() + "\n"
                 )
                 os.write(master_fd, (secret + "\n").encode("utf-8"))
-                ok_hashed, _ = hill_climb._confirm_relock(
+                ok_hashed, _, auth_hashed = hill_climb._confirm_relock(
                     passphrase_file=pass_file, tty_path=pts_path
                 )
                 self.assertTrue(ok_hashed)
+                self.assertIsNotNone(auth_hashed)
                 os.read(master_fd, 4096)
         finally:
             os.close(slave_fd)

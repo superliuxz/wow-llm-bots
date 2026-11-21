@@ -1,45 +1,44 @@
-# Phase 1 & Phase 2 Five-Boss Benchmark (2026-11-21)
+# 5-Boss Benchmark After High 1 Fix (`n = 8` per arm, 160 valid trials, single codebase)
 
-**Commit:** `221b706` (`kaelthas`) and `d7b54f4` (`murmur`, `ikiss`, `loken`, `devourer`), `n = 8` valid trials per arm per boss (`160` valid scored trials total, `0` invalid, `0` wave errors) using `bench_bosses.py --mode mixed_all --runs 8 --parallel 4`.
+**Date:** 2026-11-21
+**Codebase:** Working tree after fixing Review `ede3f6c` High 1 (`away`/`out of` no longer auto-walk back; explicit `back` only), Mediums 5–8 (`out of` combat reach, `orders: none`, pre-pull cache preservation, `CanEscapeBeforeImpact` removed), and Medium 12 (`BackMs` requires in-range + casting).
+**Command:** `python3 -u tools/bench/bench_bosses.py --only kaelthas,murmur,ikiss,loken,devourer --mode mixed_all --runs 8`
+**Artifact:** `var/bench_boss_10_mixed_all.json` (`160` valid trials, `0` invalid trials, `0` wave errors across all 5 bosses on one identical build).
 
-**Gear tuning (no bosses dropped):** `devourer` and `loken` were lowered from `ITEM_QUALITY_EPIC` (`4`) to `ITEM_QUALITY_UNCOMMON` (`2`) via `llmtest gear` optional quality parameter, breaking the prior `16/16` ceiling on both bosses so every boss separates arms.
+> [!IMPORTANT]
+> **Supersedes the earlier mixed-commit report** (`221b706` + `d7b54f4`), where High 1 (`away` walking straight back on arrival) caused boss notes to cut kills to `10/40` vs `llm_no_notes` `24/40` (`p = 0.003`; `Murmur 0/8`, `Loken 2/8`). After fixing High 1, `llm` recovered to **`24/40` (60.0%)** (`Murmur 7/8`, `Loken 6/8`), eliminating the notes regression (`24/40` vs `25/40`, Fisher `p = 1.0000`). However, **`llm` does not yet significantly beat `no_brain` (`24/40` vs `20/40`, `p = 0.5005`) or `baseline` (`22/40`, `p = 0.8213`)** at `n = 8` after Holm–Bonferroni correction.
 
-## Pre-registered primary comparisons (Holm–Bonferroni corrected)
+---
 
-1. **Primary kill comparison (`llm` vs `no_brain`, two-sided Fisher exact, Holm–Bonferroni across `m = 5` bosses):**
+## 1. Kills First (Per Boss & Pooled, `n = 8` per arm)
 
-| Boss | Gear | `llm` kills | `llm_no_notes` kills | `no_brain` kills | `baseline` kills | `llm` vs `no_brain` `p_raw` | `p_holm` (`m=5`) |
-|---|---|---|---|---|---|---|---|
-| `kaelthas` | L70 Epic | 3/8 (37.5%) | 5/8 (62.5%) | 2/8 (25.0%) | 6/8 (75.0%) | 1.0000 | 1.0000 |
-| `murmur` | L70 Epic | 0/8 (0.0%) | 7/8 (87.5%) | 8/8 (100.0%) | 7/8 (87.5%) | 0.0002 (worse) | 0.0008 |
-| `ikiss` | L68 Epic | 3/8 (37.5%) | 4/8 (50.0%) | 1/8 (12.5%) | 0/8 (0.0%) | 0.5692 | 1.0000 |
-| `loken` | L80 Uncommon | 2/8 (25.0%) | 5/8 (62.5%) | 4/8 (50.0%) | 6/8 (75.0%) | 0.6084 | 1.0000 |
-| `devourer` | L80 Uncommon | 2/8 (25.0%) | 3/8 (37.5%) | 4/8 (50.0%) | 3/8 (37.5%) | 0.6084 | 1.0000 |
-| **Pooled** | — | **10/40 (25.0%)** | **24/40 (60.0%)** | **19/40 (47.5%)** | **22/40 (55.0%)** | `0.0619` | — |
+| Boss | `llm` (notes) | `llm_no_notes` | `no_brain` | `baseline` (PB scripts) | `llm` vs `llm_no_notes` (`p_raw` / `p_holm`) | `llm` vs `no_brain` (`p_raw` / `p_holm`) | `llm` vs `baseline` (`p_raw` / `p_holm`) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **Kael'thas** (`kaelthas`) | `3/8` (37.5%) | `5/8` (62.5%) | `2/8` (25.0%) | `6/8` (75.0%) | `0.6193` / `1.0000` | `1.0000` / `1.0000` | `0.3147` / `1.0000` |
+| **Murmur** (`murmur`) | `7/8` (87.5%) | `8/8` (100.0%) | `6/8` (75.0%) | `5/8` (62.5%) | `1.0000` / `1.0000` | `1.0000` / `1.0000` | `0.5692` / `1.0000` |
+| **Ikiss** (`ikiss`) | `5/8` (62.5%) | `4/8` (50.0%) | `1/8` (12.5%) | `1/8` (12.5%) | `1.0000` / `1.0000` | `0.1189` / `1.0000` | `0.1189` / `1.0000` |
+| **Loken** (`loken`, `q=2`) | `6/8` (75.0%) | `5/8` (62.5%) | `6/8` (75.0%) | `5/8` (62.5%) | `1.0000` / `1.0000` | `1.0000` / `1.0000` | `1.0000` / `1.0000` |
+| **Devourer** (`devourer`, `q=2`) | `3/8` (37.5%) | `3/8` (37.5%) | `5/8` (62.5%) | `5/8` (62.5%) | `1.0000` / `1.0000` | `0.6193` / `1.0000` | `0.6193` / `1.0000` |
+| **Pooled (`40` trials/arm)** | **`24/40` (60.0%)** | **`25/40` (62.5%)** | **`20/40` (50.0%)** | **`22/40` (55.0%)** | **`1.0000`** | **`0.5005`** | **`0.8213`** |
 
-2. **Phase 1 DPS retention (`llm` vs `llm_no_notes` median party DPS) & `dodge_timeline.py` recovery:**
+*Exact two-sided Fisher tests; `p_holm` applies Holm–Bonferroni across all `m = 15` per-boss `llm`-vs-other comparisons. No individual boss or pooled kill difference is statistically significant at `n = 8`.*
 
-| Boss | `llm` med DPS | `llm_no_notes` med DPS | Delta vs `llm_no_notes` | `llm` AoE Safe% | `no_brain` Safe% | `llm` med `BackMs` | `llm` med `DmgLost` |
-|---|---|---|---|---|---|---|---|
-| `kaelthas` | 1691.1 | 1869.8 | **-9.6%** (within 10%) | — | — | — | — |
-| `murmur` (`Sonic Boom` 34 yd) | 1772.6 | 2836.2 | -37.5% | **81.2% (39/48)** | 0.0% (0/40) | 313 ms | 2,681 |
-| `ikiss` (`Arcane Explosion` 35 yd) | 931.2 | 885.5 | **+5.2%** (within 10%) | 11.7% (9/77) | 0.0% (0/82) | 0 ms | 150 |
-| `loken` (`Lightning Nova` 20 yd) | 3077.9 | 5038.2 | -38.9% | **64.9% (120/185)** | 22.8% (38/167) | **11 ms** (vs `baseline` 388 ms) | **1,098** (vs `baseline` 1,718) |
-| `devourer` | 4475.1 | 4817.9 | **-7.1%** (within 10%) | — | — | — | — |
+---
 
-3. **Phase 2 `Kael'thas` `Flame Strike` damage parity (`llm` vs `baseline`):**
+## 2. Party Median DPS & Median Deaths (Per Boss & Arm)
 
-| Arm | Total Flame Strike dmg (`n=8`) | Median / trial | Trials `<= 1,000` dmg |
-|---|---|---|---|
-| **`llm`** | **7,460** | **0** | **6/8** |
-| `baseline` | 11,229 | 0 | 5/8 |
-| `no_brain` | 63,482 | 6,164 | 1/8 |
-| `llm_no_notes` | 81,546 | 14,146 | 2/8 |
+| Boss | `llm` DPS (vs `llm_no_notes`) | `llm_no_notes` DPS | `no_brain` DPS | `baseline` DPS | Median Deaths (`llm` / `no_notes` / `no_brain` / `base`) |
+|---|---:|---:|---:|---:|---:|
+| **Kael'thas** | `1,783.1` (`-9.3%`) | `1,965.9` | `969.7` | `1,474.0` | `5.0` / `3.5` / `5.0` / `1.0` |
+| **Murmur** | `2,466.8` (`-0.4%`) | `2,477.8` | `3,001.5` | `2,530.9` | `1.5` / `1.0` / `1.5` / `1.5` |
+| **Ikiss** | `885.0` (`-11.2%`) | `996.9` | `924.0` | `665.0` | `4.0` / `4.0` / `5.0` / `5.0` |
+| **Loken** (`q=2`) | `5,436.2` (`+2.1%`) | `5,323.5` | `5,393.1` | `3,477.5` | `0.5` / `1.0` / `2.0` / `2.0` |
+| **Devourer** (`q=2`) | `4,911.4` (`+16.7%`) | `4,209.9` | `4,390.9` | `4,540.4` | `4.5` / `5.0` / `2.0` / `1.5` |
 
-Exposing hidden trigger creatures' active visible non-passive spell visual auras (`NPC_FLAMESTRIKE_TRIGGER` `24666` / visual `44191`) in `nearby_builder.cc` + `in Flame Strike -> out of it` completely closed the `Flame Strike` gap (`llm` took less Flame Strike damage than `baseline`, down from `128,600` in the prior `n=16` run).
+---
 
-## Root causes of remaining kill/DPS gaps
+## 3. Honest Takeaways
 
-1. **`Murmur` `0/8` (`Resonance` wipe):** Murmur is rooted and casts raid-wide `Resonance` every 1.5 s whenever no player is in melee range. Because `MURMUR_NOTES` had every bot (including the tank) run 38 yd away on `Sonic Boom`, the tank left melee and triggered `Resonance` wipes despite dodging `81.2%` of `Sonic Boom`. Needs role-aware standing-order notes (tank stays in melee / uses defensive cooldown while non-tanks dodge `Sonic Boom`).
-2. **`Loken` `-38.9%` DPS (`2/8` vs `baseline` `6/8`):** Even though `llm` returned in `11 ms` median (`DmgLost = 1,098` vs `baseline 1,718`), `baseline` (`wotlk-hol`) stacks ranged/healers close to Loken between `Lightning Nova` casts to reduce distance-scaled `Pulsing Shockwave` damage, whereas `llm` ranged bots stayed at 25–30 yd taking heavy `Pulsing Shockwave` ticks and dying early.
-3. **`Ikiss` `Arcane Explosion` (`11.7%` safe):** Ikiss blinks and casts a 35 yd 5 s AoE; `baseline` (`tbc-seth`) breaks LoS behind the room pillar rather than outrunning 35 yd in 5 s.
+1. **High 1 was indeed the cause of the `10/40` collapse:** stopping `away`/`out of` from unconditionally walking straight back lifted `llm` from `10/40` to **`24/40`**, `Murmur` from `0/8` (`-37.5%` DPS) to **`7/8` (`-0.4%` DPS)**, and `Loken` from `2/8` (`-38.9%` DPS) to **`6/8` (`+2.1%` DPS)**.
+2. **Notes no longer hurt kills** (`24/40` vs `25/40`, `p = 1.0000`), and `llm` DPS is within `10%` of `llm_no_notes` on 4 of 5 bosses (`kaelthas -9.3%`, `murmur -0.4%`, `loken +2.1%`, `devourer +16.7%`; `ikiss` is `-11.2%`).
+3. **What is still open:** `llm` kills (`24/40`) do not yet beat `no_brain` (`20/40`, `p = 0.5005`) or `baseline` (`22/40`, `p = 0.8213`) significantly, and `Kael'thas` (`3/8` vs `baseline 6/8`) and `Devourer` (`3/8` vs `5/8`) still lag `baseline` on kills.

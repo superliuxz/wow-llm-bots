@@ -1,12 +1,11 @@
 # The Culling of Stratholme (CoS)
 
-<!-- Draft boss notes extracted from mod-playerbots (Dungeon/CoS). -->
+<!-- DRAFT extracted from mod-playerbots (Dungeon/CoS); hand-check before use. -->
 
 ## Salramm the Fleshcrafter
 
 - **Ghoul Minion** (add_switch): Priority add; switch targets to `Ghoul Minion` immediately.
 
-Suggested standing orders:
 ```
 Ghoul Minion appears -> target nearest Ghoul Minion
 ```
@@ -15,7 +14,6 @@ Ghoul Minion appears -> target nearest Ghoul Minion
 
 - **Epoch Ranged** (positioning): Stack near Chrono-lord Epoch / tank.
 
-Suggested standing orders:
 ```
 always -> to boss
 ```

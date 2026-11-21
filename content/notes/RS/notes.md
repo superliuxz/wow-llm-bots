@@ -1,33 +1,25 @@
 # The Ruby Sanctum (RS)
 
-<!-- Draft boss notes extracted from mod-playerbots (Raid/RS). -->
+<!-- DRAFT extracted from mod-playerbots (Raid/RS); hand-check before use. -->
 
 ## Baltharus the Warborn
 
-- **Enervating Brand** (debuff): React to `Enervating Brand` aura.
+- **Enervating Brand** (debuff): Aura `Enervating Brand` (me); gather/position per encounter script (hand-check).
 - **Baltharus the Warborn Clone** (add_switch): Priority add; switch targets to `Baltharus the Warborn Clone` immediately.
 
-Suggested standing orders:
 ```
-Enervating Brand on me -> away boss 14
 Baltharus the Warborn Clone appears -> target nearest Baltharus the Warborn Clone
 ```
 
 ## Saviana Ragefire
 
-- **Flame Beacon** (debuff): React to `Flame Beacon` aura.
+- **Flame Beacon** (debuff): Aura `Flame Beacon` (me); gather/position per encounter script (hand-check).
 - **Rs Saviana Tank Position** (positioning): Encounter positioning (rs saviana tank position).
-
-Suggested standing orders:
-```
-Flame Beacon on me -> away boss 10
-```
 
 ## General Zarithrian
 
 - **Add** (add_switch): Priority add; switch targets to `Add` immediately.
 
-Suggested standing orders:
 ```
 Add appears -> target nearest Add
 ```
@@ -35,20 +27,25 @@ Add appears -> target nearest Add
 ## The Ruby Sanctum
 
 - **Rs Halion Start Position** (positioning): Encounter positioning (rs halion start position).
-- **Fiery Combustion** (debuff): React to `Fiery Combustion` aura.
+- **Fiery Combustion** (debuff): Aura `Fiery Combustion` (me); gather/position per encounter script (hand-check).
 - **Living Inferno** (add_switch): Priority add; switch targets to `Living Inferno` immediately.
 - **Add** (add_switch): Priority add; switch targets to `Add` immediately.
 - **Portal** (add_switch): Priority add; switch targets to `Portal` immediately.
 - **Orb Carrier** (add_switch): Priority add; switch targets to `Orb Carrier` immediately.
-- **Soul Consumption** (debuff): React to `Soul Consumption` aura.
+- **Soul Consumption** (debuff): Aura `Soul Consumption` (me); gather/position per encounter script (hand-check).
 - **Rs Halion P2 Tank Position** (positioning): Encounter positioning (rs halion p2 tank position).
+- **Flame Breath** (cast_aoe): Boss cast AoE (`SPELL_FLAME_BREATH`); move out during cast.
+- **Flame Breath Alt** (cast_aoe): Boss cast AoE (`SPELL_FLAME_BREATH_ALT1`); move out during cast.
+- **Cleave** (cast_aoe): Boss cast AoE (`SPELL_CLEAVE`); move out during cast.
+- **Dark Breath** (cast_aoe): Boss cast AoE (`SPELL_DARK_BREATH`); move out during cast.
 
-Suggested standing orders:
 ```
-Fiery Combustion on me -> away boss 10
 Living Inferno appears -> target nearest Living Inferno
 Add appears -> target nearest Add
 Portal appears -> target nearest Portal
 Orb Carrier appears -> target nearest Orb Carrier
-Soul Consumption on me -> away boss 9
+Flame Breath cast -> out of it
+Flame Breath Alt cast -> out of it
+Cleave cast -> out of it
+Dark Breath cast -> out of it
 ```

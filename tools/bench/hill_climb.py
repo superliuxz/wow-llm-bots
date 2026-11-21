@@ -39,6 +39,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 VAR = ROOT / "var"
 LEDGER = VAR / "experiments" / "ledger.jsonl"
 BASELINE_TRACES_ROOT = VAR / "experiments" / "baseline_traces"
+PENDING_CANDIDATE_ROOT = VAR / "experiments" / "pending_candidate"
 EXTERNAL_STATE_DIR = pathlib.Path.home() / ".local" / "share" / "wow-llm-bots"
 DEFAULT_LOCK_FILE = EXTERNAL_STATE_DIR / "scorer.sha256"
 DEFAULT_PASSPHRASE_FILE = EXTERNAL_STATE_DIR / "relock.passphrase"
@@ -114,10 +115,19 @@ def _locked_files() -> list[pathlib.Path]:
     return files
 
 
+class _RelockAuth:
+    """Private proof token returned ONLY by `_confirm_relock` after passphrase verification."""
+
+    __slots__ = ("_verified",)
+
+    def __init__(self, verified: bool) -> None:
+        self._verified = verified
+
+
 def _confirm_relock(
     passphrase_file: pathlib.Path = DEFAULT_PASSPHRASE_FILE,
     tty_path: str | pathlib.Path = "/dev/tty",
-) -> tuple[bool, str]:
+) -> tuple[bool, str, _RelockAuth | None]:
     # Requires typing the passphrase stored in `passphrase_file` (outside the
     # repo) into `/dev/tty`. `passphrase_file` may hold either the plaintext
     # passphrase or its 64-hex SHA-256 digest. Tracked
@@ -130,7 +140,7 @@ def _confirm_relock(
         return False, (
             f"refusing to write scorer lock: missing or empty passphrase file "
             f"{passphrase_file} (create it outside the repo first)"
-        )
+        ), None
     # Open separate "r" and "w" handles: character devices such as /dev/tty
     # are non-seekable, so open("/dev/tty", "r+") raises io.UnsupportedOperation
     # (a subclass of OSError).
@@ -140,13 +150,13 @@ def _confirm_relock(
                 return False, (
                     "refusing to write scorer lock without an interactive "
                     "controlling terminal (/dev/tty)"
-                )
+                ), None
             with open(tty_path, "w", encoding="utf-8") as tty_out:
                 if not tty_out.isatty():
                     return False, (
                         "refusing to write scorer lock without an interactive "
                         "controlling terminal (/dev/tty)"
-                    )
+                    ), None
                 tty_out.write("Confirm writing scorer lock (enter passphrase): ")
                 tty_out.flush()
                 ans = tty_in.readline().strip()
@@ -154,16 +164,16 @@ def _confirm_relock(
         return False, (
             "refusing to write scorer lock without a controlling terminal "
             "(/dev/tty; run interactively and enter your passphrase)"
-        )
+        ), None
     if not ans:
-        return False, "refusing to write scorer lock: empty passphrase entered"
+        return False, "refusing to write scorer lock: empty passphrase entered", None
     ans_sha256 = hashlib.sha256(ans.encode("utf-8")).hexdigest()
     if hmac.compare_digest(ans, expected) or (
         bool(re.fullmatch(r"[0-9a-fA-F]{64}", expected))
         and hmac.compare_digest(ans_sha256, expected.lower())
     ):
-        return True, ""
-    return False, "refusing to write scorer lock: passphrase mismatch"
+        return True, "", _RelockAuth(True)
+    return False, "refusing to write scorer lock: passphrase mismatch", None
 
 
 def _resolve_approved_digest_file(
@@ -189,7 +199,7 @@ def _read_approved_digest(digest_file: pathlib.Path) -> str | None:
 def _write_lock_manifest(
     lock_file: pathlib.Path,
     force: bool = False,
-    confirmed: bool = False,
+    auth: _RelockAuth | None = None,
     approved_digest_file: pathlib.Path | None = None,
 ) -> tuple[bool, str]:
     if lock_file.exists() and not force:
@@ -197,8 +207,8 @@ def _write_lock_manifest(
             f"lock file already exists: {lock_file} "
             "(pass --force-relock explicitly to overwrite)"
         )
-    if not confirmed:
-        return False, f"refusing to write lock manifest {lock_file} without confirmation"
+    if not isinstance(auth, _RelockAuth) or not auth._verified:
+        return False, f"refusing to write lock manifest {lock_file} without passphrase confirmation"
     digest = soak_scorer.scorer_sha256()
     lock_file.parent.mkdir(parents=True, exist_ok=True)
     if lock_file.exists():
@@ -381,14 +391,64 @@ def _best_kept(entries: list[dict], suite: str | None = None) -> dict | None:
     return kept[-1]
 
 
-def _save_baseline_traces(suite: str) -> pathlib.Path | None:
-    src = VAR / "soak_traces"
-    if not src.exists():
+def _chmod_tree(root: pathlib.Path, file_mode: int, dir_mode: int) -> None:
+    if not root.exists():
+        return
+    for p in sorted(root.rglob("*"), reverse=True):
+        try:
+            os.chmod(p, dir_mode if p.is_dir() else file_mode)
+        except OSError:
+            pass
+    try:
+        os.chmod(root, dir_mode)
+    except OSError:
+        pass
+
+
+def _save_baseline_traces(suite: str, src: pathlib.Path | None = None) -> pathlib.Path | None:
+    src_dir = src or (VAR / "soak_traces")
+    if not src_dir.exists():
         return None
     dst = BASELINE_TRACES_ROOT / suite
-    shutil.rmtree(dst, ignore_errors=True)
-    shutil.copytree(src, dst)
+    if dst.exists():
+        _chmod_tree(dst, 0o644, 0o755)
+        shutil.rmtree(dst, ignore_errors=True)
+    shutil.copytree(src_dir, dst)
+    # Mark baseline traces read-only (0444) so they cannot be casually overwritten.
+    _chmod_tree(dst, 0o444, 0o555)
     return dst
+
+
+def _save_pending_candidate(suite: str, meta: dict, src: pathlib.Path | None = None) -> pathlib.Path | None:
+    src_dir = src or (VAR / "soak_traces")
+    if not src_dir.exists():
+        return None
+    dst = PENDING_CANDIDATE_ROOT / suite
+    traces_dst = dst / "traces"
+    shutil.rmtree(dst, ignore_errors=True)
+    dst.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src_dir, traces_dst)
+    (dst / "meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+    return dst
+
+
+def _commit_kept_changes(base_ref: str, round_num: int, hypothesis: str, allow_any_files: bool) -> None:
+    changed = _changed_files_since(base_ref)
+    if not changed:
+        return
+    if not allow_any_files:
+        changed = [
+            f for f in changed
+            if any(fnmatch.fnmatch(f, pat) for pat in ALLOWED_EDIT_GLOBS)
+        ]
+    if not changed:
+        return
+    subprocess.run(["git", "add", "--", *changed], cwd=ROOT, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", f"hill-climb round {round_num}: {hypothesis}"],
+        cwd=ROOT,
+        check=True,
+    )
 
 
 def cmd_lock_scorer(args) -> int:
@@ -400,11 +460,11 @@ def cmd_lock_scorer(args) -> int:
             file=sys.stderr,
         )
         return 2
-    confirmed, reason = _confirm_relock()
-    if not confirmed:
+    confirmed, reason, auth = _confirm_relock()
+    if not confirmed or auth is None:
         print(f"ABORT: {reason}", file=sys.stderr)
         return 2
-    ok, msg = _write_lock_manifest(lock_file, force=args.force_relock, confirmed=True)
+    ok, msg = _write_lock_manifest(lock_file, force=args.force_relock, auth=auth)
     print(msg, file=sys.stdout if ok else sys.stderr)
     return 0 if ok else 2
 
@@ -570,6 +630,53 @@ def cmd_eval_candidate(args) -> int:
     for f in g_failures:
         print(f"GATE FAIL: {f}", file=sys.stderr)
 
+    # If running in blind-rating mode (no --judge) and Layer A gates passed,
+    # ratings for this brand-new candidate trace hash cannot exist yet: save the
+    # pending candidate and wait for `blind_rate.py rate` + `score-candidate`
+    # instead of immediately REVERTing.
+    ranking_mode = res.get("ranking", {}).get("mode", "")
+    if (
+        guardrails_ok
+        and not args.judge
+        and (
+            ranking_mode == "unrated_awaiting_blind_batch"
+            or ranking_mode.startswith("insufficient_blind_ratings")
+        )
+    ):
+        cand_id = res.get("ranking", {}).get("candidate_id", "")
+        pending_dir = _save_pending_candidate(
+            args.suite,
+            {
+                "round": round_num,
+                "suite": args.suite,
+                "hypothesis": args.hypothesis,
+                "target": args.target,
+                "category": args.category,
+                "base_ref": base_ref,
+                "diff_stat": diff_stat,
+                "candidate_id": cand_id,
+                "minutes": args.minutes,
+                "runs": args.runs,
+                "xp_floor": xp_floor,
+                "max_deaths": max_deaths,
+                "allow_fallback": args.allow_fallback,
+                "allow_any_files": args.allow_any_files,
+                "run_stats": res.get("run_stats", {}),
+            },
+        )
+        print(
+            f"\n== ROUND {round_num}: PENDING BLIND RATINGS (candidate_id={cand_id}, gates=PASS) ==\n"
+            f"  1. Rate candidate vs baseline:\n"
+            f"     tools/bench/blind_rate.py rate "
+            f"--source human={args.human_dir} "
+            f"--source current={baseline_dir} "
+            f"--source candidate={pending_dir / 'traces' if pending_dir else VAR / 'soak_traces'} "
+            f"--pairs 30\n"
+            f"  2. Score with ratings:\n"
+            f"     tools/bench/hill_climb.py score-candidate --suite {args.suite}"
+        )
+        return 0
+
     # Layer B keep/revert rule: beat current outside bootstrapped 95% CI.
     beats_ci = bool(res.get("ranking", {}).get("beats_current_outside_ci"))
     improved = guardrails_ok and beats_ci
@@ -615,13 +722,7 @@ def cmd_eval_candidate(args) -> int:
 
     if improved:
         _save_baseline_traces(args.suite)
-        if _changed_files_since("HEAD"):
-            subprocess.run(["git", "add", "-A"], cwd=ROOT, check=False)
-            subprocess.run(
-                ["git", "commit", "-m", f"hill-climb round {round_num}: {args.hypothesis}"],
-                cwd=ROOT,
-                check=False,
-            )
+        _commit_kept_changes(base_ref, round_num, args.hypothesis, args.allow_any_files)
 
     entry = {
         "round": round_num,
@@ -654,6 +755,102 @@ def cmd_eval_candidate(args) -> int:
         "tells": res.get("tells", []),
     }
     _append_ledger(entry)
+
+    verdict = "KEEP" if improved else "REVERT"
+    print(
+        f"\n== ROUND {round_num}: {verdict} "
+        f"(rating={res.get('rating')} [{res.get('ci_low')}..{res.get('ci_high')}], "
+        f"beats_ci={beats_ci}, gates={'PASS' if guardrails_ok else 'FAIL'}) =="
+    )
+    if not improved and args.auto_revert:
+        _revert_to(base_ref)
+        print(f"auto-reverted working tree (`git reset --hard {base_ref} && git clean -fd`)")
+    return 0 if improved else 1
+
+
+def cmd_score_candidate(args) -> int:
+    """Scores a previously saved pending candidate once blind ratings exist."""
+    lock_file = args.lock_file or DEFAULT_LOCK_FILE
+    ok, msg = _verify_all_locks(lock_file)
+    if not ok:
+        print(f"ABORT: {msg}", file=sys.stderr)
+        return 2
+
+    pending_dir = PENDING_CANDIDATE_ROOT / args.suite
+    meta_path = pending_dir / "meta.json"
+    traces_dir = pending_dir / "traces"
+    if not meta_path.is_file() or not traces_dir.is_dir():
+        print(
+            f"ABORT: no pending candidate for suite '{args.suite}' under {pending_dir} "
+            "(run eval-candidate first)",
+            file=sys.stderr,
+        )
+        return 2
+
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    baseline_dir = BASELINE_TRACES_ROOT / args.suite
+    res = soak_scorer.score_soak(
+        traces_dir,
+        run_stats=meta.get("run_stats", {}),
+        human_dir=args.human_dir,
+        baseline_trace_dir=baseline_dir if baseline_dir.exists() else None,
+        blind_ratings_path=args.blind_ratings,
+        use_judge=False,
+    )
+    xp_h, deaths = _extract_progress(res)
+    xp_floor = float(meta.get("xp_floor", DEFAULT_MIN_XP_PER_HOUR))
+    max_deaths = int(meta.get("max_deaths", DEFAULT_MAX_DEATHS_PER_RUN))
+    guardrails_ok, g_failures = _check_fixed_guardrails(res, xp_floor, max_deaths)
+    for f in g_failures:
+        print(f"GATE FAIL: {f}", file=sys.stderr)
+
+    ranking_mode = res.get("ranking", {}).get("mode", "")
+    if ranking_mode == "unrated_awaiting_blind_batch" or ranking_mode.startswith("insufficient_blind_ratings"):
+        print(
+            f"PENDING: candidate {meta.get('candidate_id')} still awaits blind ratings "
+            f"(mode={ranking_mode}); keeping pending state.",
+            file=sys.stderr,
+        )
+        return 3
+
+    beats_ci = bool(res.get("ranking", {}).get("beats_current_outside_ci"))
+    improved = guardrails_ok and beats_ci
+    round_num = int(meta.get("round", 1))
+    base_ref = str(meta.get("base_ref", "HEAD"))
+    hypothesis = str(meta.get("hypothesis", ""))
+
+    if improved:
+        _save_baseline_traces(args.suite, src=traces_dir)
+        _commit_kept_changes(base_ref, round_num, hypothesis, bool(meta.get("allow_any_files")))
+
+    entry = {
+        "round": round_num,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
+        "commit": _git("rev-parse", "--short", "HEAD"),
+        "category": meta.get("category", "code"),
+        "suite": args.suite,
+        "target_tell": meta.get("target", ""),
+        "hypothesis": hypothesis,
+        "diff_stat": meta.get("diff_stat", ""),
+        "rating": res.get("rating"),
+        "ci_low": res.get("ci_low"),
+        "ci_high": res.get("ci_high"),
+        "delta_vs_current": res.get("ranking", {}).get("delta_vs_current"),
+        "beats_outside_ci": beats_ci,
+        "ranking_mode": ranking_mode,
+        "xp_per_hour": round(xp_h, 1),
+        "deaths": deaths,
+        "xp_floor": round(xp_floor, 1),
+        "max_deaths": max_deaths,
+        "mode": res.get("baseline_mode"),
+        "guardrails_ok": guardrails_ok,
+        "kept": improved,
+        "scorer_sha256": res["scorer_sha256"],
+        "tells": res.get("tells", []),
+    }
+    _append_ledger(entry)
+    shutil.rmtree(pending_dir, ignore_errors=True)
 
     verdict = "KEEP" if improved else "REVERT"
     print(
@@ -737,6 +934,13 @@ def main() -> int:
     p_eval.add_argument("--skip-check", action="store_true")
     p_eval.add_argument("--auto-revert", action="store_true")
 
+    p_score = sub.add_parser("score-candidate", help="Score a saved pending candidate with blind ratings")
+    p_score.add_argument("--suite", default="varied")
+    p_score.add_argument("--human-dir", type=pathlib.Path, default=DEFAULT_HUMAN_DIR)
+    p_score.add_argument("--blind-ratings", type=pathlib.Path, default=DEFAULT_BLIND_RATINGS)
+    p_score.add_argument("--lock-file", type=pathlib.Path, default=DEFAULT_LOCK_FILE)
+    p_score.add_argument("--auto-revert", action="store_true")
+
     sub.add_parser("status", help="Show experiment history and current Layer C tells")
 
     args = ap.parse_args()
@@ -745,6 +949,7 @@ def main() -> int:
         "calibrate": cmd_calibrate,
         "init": cmd_init,
         "eval-candidate": cmd_eval_candidate,
+        "score-candidate": cmd_score_candidate,
         "status": cmd_status,
     }[args.cmd](args)
 

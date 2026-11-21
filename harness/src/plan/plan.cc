@@ -173,6 +173,7 @@ std::optional<Plan> ParsePlan(std::string_view text,
   plan.open = ToPanels(parsed->open);
   plan.close = ToPanels(parsed->close);
   plan.hover = parsed->hover;
+  plan.clear_orders = !parsed->clear_orders.empty();
   plan.orders = parsed->orders;
   return plan;
 }
@@ -210,6 +211,9 @@ std::string FormatPlan(const Plan& plan) {
   out.open = FromPanels(plan.open);
   out.close = FromPanels(plan.close);
   out.hover = plan.hover;
+  if (plan.clear_orders) {
+    out.clear_orders.push_back(g::ClearOrders::kNone);
+  }
   out.orders = plan.orders;
   return g::FormatPlan(out);
 }

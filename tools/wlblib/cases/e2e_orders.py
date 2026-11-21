@@ -190,8 +190,11 @@ class _MockBrainServer:
                 is_loada = user_text.startswith("You are Loada.")
                 with parent.lock:
                     if is_loada:
-                        for o in parent.orders_for_loada:
-                            lines.append(f"order: {o}")
+                        if parent.orders_for_loada:
+                            for o in parent.orders_for_loada:
+                                lines.append(f"order: {o}")
+                        else:
+                            lines.append("orders: none")
                         parent.loada_replies += 1
                         parent.loada_grammars.append(grammar)
                         for line in user_text.splitlines():

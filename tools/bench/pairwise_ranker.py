@@ -149,8 +149,12 @@ def render_clip_view(clip: dict[str, Any], layer: str = "body") -> str:
                 t_s = e["t_ms"] / 1000.0
                 direction = "IN " if e["event"] == "chat_in" else "OUT"
                 peer = e.get("peer", "Player1")
-                txt = e.get("text")
-                body = f'"{txt}"' if txt else f"<len={e.get('text_len', 0)}>"
+                # Format human and bot chat identically by length only so
+                # chatting clips never leak role identity via text presence.
+                tlen = e.get("text_len")
+                if tlen is None:
+                    tlen = len(str(e.get("text", "")))
+                body = f"<len={int(tlen)}>"
                 lines.append(f"  +{t_s:5.1f}s [{direction} {e.get('channel', 'whisper')} {peer}] {body}")
         return "\n".join(lines)
 
@@ -407,7 +411,7 @@ def judge_pair_llm(
 def check_judge_agreement(
     human_labels: list[str],
     llm_labels: list[str],
-    min_pairs: int = 10,
+    min_pairs: int = 30,
     min_agreement: float = 0.70,
     min_kappa: float = 0.40,
 ) -> dict[str, Any]:

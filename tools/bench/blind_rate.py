@@ -199,11 +199,14 @@ def cmd_llm_agree(args) -> int:
     batch = rows[-args.last :] if args.last > 0 else rows
     human_labels: list[str] = []
     llm_labels: list[str] = []
+    human_vs_bot_pairs = 0
     for r in batch:
         va = r.get("view_a")
         vb = r.get("view_b")
         if not va or not vb:
             continue
+        if str(r.get("a", "")).startswith("human") or str(r.get("b", "")).startswith("human"):
+            human_vs_bot_pairs += 1
         layer = r.get("layer", "body")
         r1 = pairwise_ranker._ask_llm_once(va, vb, args.llm_url, layer)
         r2s = pairwise_ranker._ask_llm_once(vb, va, args.llm_url, layer)
@@ -218,19 +221,23 @@ def cmd_llm_agree(args) -> int:
         llm_labels.append(llm_ans)
 
     res = pairwise_ranker.check_judge_agreement(human_labels, llm_labels)
+    if human_vs_bot_pairs < 10:
+        res["valid"] = False
+        res["reason"] = f"insufficient human-vs-bot pairs ({human_vs_bot_pairs} < 10)"
     pairwise_ranker.update_judge_gate(
         {
             "llm_url": args.llm_url,
             "agreement": res["agreement"],
             "kappa": res["kappa"],
             "agreement_n": res["n"],
+            "human_vs_bot_n": human_vs_bot_pairs,
             "agreement_valid": res["valid"],
             "agreement_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         },
         path=args.judge_gate,
     )
     print(
-        f"LLM judge agreement on {res['n']} blind pairs: "
+        f"LLM judge agreement on {res['n']} blind pairs (human-vs-bot={human_vs_bot_pairs}): "
         f"agree={res['agreement']*100:.1f}%, kappa={res['kappa']:.3f}, "
         f"valid={'YES' if res['valid'] else 'NO'} (saved -> {args.judge_gate})"
     )

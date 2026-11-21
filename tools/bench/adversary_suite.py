@@ -297,34 +297,60 @@ def chat_diagnostics(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def reaction_times_ms(rows: list[dict[str, Any]]) -> list[float]:
-    """Measures `damage_taken` / `combat_start` -> first cast or move change (ms)."""
-    segs = trace_parity.reconstruct_trajectory(rows)
+    """Measures raw `damage_taken` / `combat_start` -> first cast or move/turn change (ms).
+
+    Computed directly from raw `t_ms` timestamps BEFORE 200 ms grid quantization
+    so sub-150 ms bot reactions are measurable and can fail the Layer A timing gate.
+    """
+    sorted_rows = sorted(
+        (r for r in rows if "t_ms" in r),
+        key=lambda r: (int(r["t_ms"]), int(r.get("mono_us", 0))),
+    )
+    triggers = [
+        int(r["t_ms"])
+        for r in sorted_rows
+        if r.get("kind") == "event" and r.get("event") in ("damage_taken", "combat_start")
+    ]
+    if not triggers:
+        return []
+    casts = [
+        int(r["t_ms"])
+        for r in sorted_rows
+        if r.get("kind") == "event" and r.get("event") in ("spell_cast", "cast_start")
+    ]
+    samples = [
+        r for r in sorted_rows
+        if r.get("kind") == "sample" and all(k in r for k in ("t_ms", "x", "y"))
+    ]
     reacts: list[float] = []
-    for seg in segs:
-        frames = seg["frames"]
-        events = seg["events"]
-        triggers = [e["t_rel_ms"] for e in events if e["event"] in ("damage_taken", "combat_start")]
-        casts = [e["t_rel_ms"] for e in events if e["event"] == "cast_start"]
-        frame_by_t = {f["t_rel_ms"]: f for f in frames}
-        for t0 in triggers:
-            # First cast or significant turn/move within 5 s after trigger.
-            best: float | None = None
-            for ct in casts:
-                if t0 < ct <= t0 + 5000:
-                    best = float(ct - t0)
-                    break
-            f0 = frame_by_t.get(t0)
-            if f0 is not None:
-                for dt in range(seg["step_ms"], 5001, seg["step_ms"]):
-                    fk = frame_by_t.get(t0 + dt)
-                    if fk is None:
+    for t0 in triggers:
+        best: float | None = None
+        for ct in casts:
+            if t0 < ct <= t0 + 5000:
+                best = float(ct - t0)
+                break
+        # Find baseline sample at or just before t0, then first move/turn change after t0.
+        base_s: dict[str, Any] | None = None
+        for s in samples:
+            st = int(s["t_ms"])
+            if st <= t0:
+                base_s = s
+            elif st <= t0 + 5000:
+                if base_s is not None:
+                    dt_s = max((st - int(base_s["t_ms"])) / 1000.0, 0.05)
+                    turn_w = trace_parity.angle_diff(
+                        float(base_s.get("o", 0.0)), float(s.get("o", 0.0))
+                    ) / dt_s
+                    moved_changed = bool(s.get("moving")) != bool(base_s.get("moving"))
+                    if turn_w > 1.0 or moved_changed:
+                        dt_ms = float(st - t0)
+                        if best is None or dt_ms < best:
+                            best = dt_ms
                         break
-                    if fk["turn_rate_rad_s"] > 1.0 or (fk["moving"] != f0["moving"]):
-                        if best is None or dt < best:
-                            best = float(dt)
-                        break
-            if best is not None:
-                reacts.append(best)
+            else:
+                break
+        if best is not None:
+            reacts.append(best)
     return reacts
 
 

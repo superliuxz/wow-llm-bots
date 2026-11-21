@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <numbers>
+#include <optional>
 #include <vector>
 
 #include "snapshot/snapshot.h"
@@ -156,13 +157,25 @@ TEST(ActGeometryTest, OutOfSkipsWhenAlreadyOutsideOrBiasesTowardGroup) {
   EXPECT_NEAR(opposite[0].y, 0.0f, 1e-3f);
 }
 
-TEST(ActGeometryTest, CanEscapeBeforeImpactChecksTimeVsRunSpeed) {
-  // 10 yd from 34 yd blast (24.5 yd needed) at 7 yd/s = 3.5 s:
-  // With 4.5 s left -> escapable; with 1.5 s left -> too late (skip).
-  EXPECT_TRUE(CanEscapeBeforeImpact(10.0f, 34.0f, 7.0f, 4.5f));
-  EXPECT_FALSE(CanEscapeBeforeImpact(10.0f, 34.0f, 7.0f, 1.5f));
-  // Active persistent ground area (lands_in_s == 0) is always escapable.
-  EXPECT_TRUE(CanEscapeBeforeImpact(2.0f, 8.0f, 7.0f, 0.0f));
+TEST(ActGeometryTest, OutOfIncludesBotCombatReach) {
+  const AnchorGeometry hazard{
+      .pos = {0.0f, 0.0f, 0.0f}, .facing_rad = 0.0f, .radius_yd = 0.0f};
+  // AzerothCore area auras add the target's combat reach (1.5 yd). At 9.0 yd
+  // from an 8.0 yd ground area, a bot with 1.5 yd reach is still inside
+  // (effective radius 9.5 + 0.5 = 10.0 yd) and must move out past
+  // 9.5 + kDefaultOutOfMarginYd.
+  std::vector<pb::Vec3> spots = CandidateSpotsForOutOf(
+      {9.0f, 0.0f, 0.0f}, hazard, 8.0f, std::nullopt, kDefaultOutOfMarginYd,
+      /*bot_radius_yd=*/1.5f);
+  ASSERT_FALSE(spots.empty());
+  EXPECT_NEAR(Dist2D(spots[0], hazard.pos), 9.5f + kDefaultOutOfMarginYd,
+              1e-3f);
+
+  // At 10.1 yd (>= 8.0 + 1.5 + 0.5), the bot is genuinely outside.
+  EXPECT_TRUE(CandidateSpotsForOutOf({10.1f, 0.0f, 0.0f}, hazard, 8.0f,
+                                     std::nullopt, kDefaultOutOfMarginYd,
+                                     /*bot_radius_yd=*/1.5f)
+                  .empty());
 }
 
 }  // namespace

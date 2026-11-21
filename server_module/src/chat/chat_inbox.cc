@@ -28,6 +28,11 @@ std::vector<std::string> ChatInbox::Bots() {
   return bots_;
 }
 
+bool ChatInbox::Contains(std::string_view name) {
+  base::AutoLock lock(lock_);
+  return std::find(bots_.begin(), bots_.end(), name) != bots_.end();
+}
+
 bool ChatInbox::Add(std::string_view to, wlb::snapshot::ChatEvent chat) {
   base::AutoLock lock(lock_);
   if (std::find(bots_.begin(), bots_.end(), to) == bots_.end()) {

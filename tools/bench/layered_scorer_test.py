@@ -132,7 +132,10 @@ class LayeredScorerTest(unittest.TestCase):
         self.assertFalse(dec_fail_gate["keep"])
         self.assertEqual(dec_fail_gate["reason"], "gates_failed")
 
-        agree = pairwise_ranker.check_judge_agreement(["a"] * 8 + ["b"] * 7, ["a"] * 7 + ["b"] * 8)
+        # 15 pairs is below the default 30-pair threshold; 30 pairs with high agreement passes.
+        agree_small = pairwise_ranker.check_judge_agreement(["a"] * 8 + ["b"] * 7, ["a"] * 7 + ["b"] * 8)
+        self.assertFalse(agree_small["valid"])
+        agree = pairwise_ranker.check_judge_agreement(["a"] * 16 + ["b"] * 14, ["a"] * 15 + ["b"] * 15)
         self.assertTrue(agree["valid"])
 
     def test_step3_scorer_calibration_passes(self):
@@ -265,12 +268,56 @@ class LayeredScorerTest(unittest.TestCase):
         # Inject human-only events plus one symmetric event.
         for ev in ("vendor_repair", "item_open", "emote", "mail_take_item", "client_input", "vendor_buy", "item_unequip", "quest_abandon"):
             rows.append({"kind": "event", "t_ms": t0, "event": ev, "detail": "", "value": 1})
-        rows.append({"kind": "event", "t_ms": t0 + 200, "event": "cast_start", "detail": "Shadow Bolt", "value": 686})
+        rows.append({"kind": "event", "t_ms": t0 + 200, "event": "spell_cast", "detail": "Shadow Bolt", "value": 686})
         frames = trace_parity.reconstruct_trajectory(rows)
         seen = {e["event"] for f in frames for e in f.get("events", [])}
         for forbidden in ("vendor_repair", "item_open", "emote", "mail_take_item", "client_input", "vendor_buy", "item_unequip", "quest_abandon"):
             self.assertNotIn(forbidden, seen)
-        self.assertIn("cast_start", seen)
+        self.assertIn("spell_cast", seen)
+
+    def test_snap_turns_survive_parity_social_view_symmetric_and_raw_reaction_fails_gate(self):
+        t0 = 1_795_000_000_000
+        # High 3: 180-degree snap in 200 ms (15.7 rad/s) must NOT be erased.
+        snap_rows = []
+        for k in range(250):
+            o = math.pi if k >= 50 else 0.0
+            snap_rows.append({
+                "kind": "sample", "t_ms": t0 + k * 200, "mono_us": k * 200_000,
+                "role": "bot", "name": "SnapBot", "map": 1, "zone": "Durotar",
+                "x": float(k) * 1.4, "y": 0.0, "z": 0.0, "o": o,
+                "moving": True, "jumping": False, "in_combat": False, "dead": False,
+            })
+        segs = trace_parity.reconstruct_trajectory(snap_rows, step_ms=200)
+        max_w = max(f["turn_rate_rad_s"] for f in segs[0]["frames"])
+        self.assertGreater(max_w, 10.0)
+        clips = trace_parity.extract_clips(snap_rows, clip_s=30.0)
+        self.assertTrue(clips)
+        feats = adversary_suite.extract_clip_features(clips[0])
+        self.assertGreater(feats["snap_turn_rate"], 0.0)
+
+        # Medium 19: social view formats bot chat with text identically to human <len=N>.
+        bot_chat_clip = {
+            "situation": "chatting", "duration_s": 30.0, "frames": [],
+            "events": [{"t_ms": 1000, "event": "chat_out", "channel": "whisper", "peer": "Player1", "text": "hello there", "text_len": 11}],
+        }
+        human_chat_clip = {
+            "situation": "chatting", "duration_s": 30.0, "frames": [],
+            "events": [{"t_ms": 1000, "event": "chat_out", "channel": "whisper", "peer": "Player1", "text_len": 11}],
+        }
+        self.assertEqual(
+            pairwise_ranker.render_clip_view(bot_chat_clip, layer="social"),
+            pairwise_ranker.render_clip_view(human_chat_clip, layer="social"),
+        )
+        self.assertNotIn("hello there", pairwise_ranker.render_clip_view(bot_chat_clip, layer="social"))
+
+        # Medium 20: raw reaction time < 150 ms is measurable and fails the gate.
+        fast_rows = [
+            {"kind": "sample", "t_ms": t0, "role": "bot", "name": "FastBot", "x": 0.0, "y": 0.0, "z": 0.0, "o": 0.0, "moving": False},
+            {"kind": "event", "t_ms": t0 + 100, "role": "bot", "name": "FastBot", "event": "damage_taken", "value": 50},
+            {"kind": "event", "t_ms": t0 + 160, "role": "bot", "name": "FastBot", "event": "spell_cast", "value": 100},
+        ]
+        reacts = adversary_suite.reaction_times_ms(fast_rows)
+        self.assertEqual(reacts, [60.0])
 
 
 if __name__ == "__main__":

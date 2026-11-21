@@ -45,6 +45,8 @@ MIN_HUMAN_SAMPLES = 300
 MIN_HUMAN_WHISPER_DELAY_S = 0.8
 MIN_HUMAN_REACTION_MS = 150.0
 MAX_REPEATED_REFUSALS = 5
+MIN_BLIND_COMPARISONS = 20
+DEFAULT_JUDGE_PAIRS = 72
 
 SCORER_FILES = [
     "tools/bench/soak_scorer.py",
@@ -152,7 +154,7 @@ def _run_layer_b_ranking(
     judge_gate_path: pathlib.Path = pairwise_ranker.DEFAULT_JUDGE_GATE_FILE,
     use_judge: bool = False,
     llm_url: str = "http://127.0.0.1:8090",
-    pairs: int = 24,
+    pairs: int = DEFAULT_JUDGE_PAIRS,
     seed: int = 0,
     parity_ok: bool = True,
 ) -> dict[str, Any]:
@@ -161,8 +163,10 @@ def _run_layer_b_ranking(
     mode = "unrated_awaiting_blind_batch"
     judge_gate_error = ""
 
-    # 1. Include ONLY blind ratings tagged with this exact candidate_id (and
-    #    current_id when referencing current) so old candidates never leak in.
+    # 1. Include ONLY verified blind ratings tagged with this exact candidate_id
+    #    (and current_id when referencing current) and non-empty clip views +
+    #    timestamp (rejecting minimal forged stub rows).
+    blind_comps: list[dict[str, Any]] = []
     if blind_ratings_path and blind_ratings_path.exists():
         for line in blind_ratings_path.read_text().splitlines():
             line = line.strip()
@@ -175,6 +179,8 @@ def _run_layer_b_ranking(
             a, b, w = r.get("a"), r.get("b"), r.get("winner")
             if not a or not b or w not in ("a", "b", "tie"):
                 continue
+            if not r.get("timestamp") or not r.get("view_a") or not r.get("view_b"):
+                continue
             a_id = str(r.get("a_id", ""))
             b_id = str(r.get("b_id", ""))
             if a == "candidate" and (not candidate_id or a_id != candidate_id):
@@ -185,9 +191,12 @@ def _run_layer_b_ranking(
                 continue
             if b == "current" and (not current_id or b_id != current_id):
                 continue
-            comparisons.append({"a": a, "b": b, "winner": w})
-        if comparisons:
+            blind_comps.append({"a": a, "b": b, "winner": w})
+        if len(blind_comps) >= MIN_BLIND_COMPARISONS:
+            comparisons.extend(blind_comps)
             mode = "blind_human"
+        elif blind_comps:
+            mode = f"insufficient_blind_ratings ({len(blind_comps)}/{MIN_BLIND_COMPARISONS})"
 
     # 2. Enforce the LLM judge gate (agreement with human blind ratings AND
     #    Layer D known-bad bot detection) before allowing --judge comparisons.
@@ -221,8 +230,18 @@ def _run_layer_b_ranking(
                             matchups.append((sit, ni, nj))
 
                 if matchups:
-                    for _ in range(pairs):
-                        sit, left, right = rng.choice(matchups)
+                    # Focus >= 50% of pairs directly on candidate vs current
+                    # when baseline traces exist so keep-rule power is high.
+                    direct = [m for m in matchups if {m[1], m[2]} == {"candidate", "current"}]
+                    other = [m for m in matchups if {m[1], m[2]} != {"candidate", "current"}]
+                    n_direct = (pairs * 2 // 3) if direct else 0
+                    n_other = pairs - n_direct
+                    plan: list[tuple[str, str, str]] = []
+                    for _ in range(n_direct):
+                        plan.append(rng.choice(direct))
+                    for _ in range(n_other):
+                        plan.append(rng.choice(other if other else matchups))
+                    for sit, left, right in plan:
                         ca = rng.choice(sources[left][sit])
                         cb = rng.choice(sources[right][sit])
                         layer = "social" if sit == "chatting" else "body"

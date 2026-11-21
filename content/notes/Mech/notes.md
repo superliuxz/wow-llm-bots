@@ -1,12 +1,11 @@
 # The Mechanar (Mech)
 
-<!-- Draft boss notes extracted from mod-playerbots (Dungeon/Mech). -->
+<!-- DRAFT extracted from mod-playerbots (Dungeon/Mech); hand-check before use. -->
 
 ## The Mechanar
 
-- **Flame** (ground_hazard): Ground hazard (~12 yd); move out immediately.
+- **Kite The Mechanar** (kite): Kite `The Mechanar` away from the group.
 
-Suggested standing orders:
 ```
-in Flame -> out of it
+The Mechanar targets me -> kite it
 ```

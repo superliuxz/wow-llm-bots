@@ -7,11 +7,13 @@
 #include <cctype>
 #include <chrono>
 #include <cstdint>
+#include <list>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "Cell.h"
 #include "Channel.h"
 #include "Chat.h"
 #include "ChatCommand.h"
@@ -21,6 +23,7 @@
 #include "DBCStores.h"
 #include "DBCStructure.h"
 #include "Define.h"
+#include "GridNotifiers.h"
 #include "Group.h"
 #include "Language.h"
 #include "ObjectAccessor.h"
@@ -80,12 +83,24 @@ class LlmBrainChatScript : public PlayerScript {
     const bool cross_faction =
         sWorld->getBoolConfig(CONFIG_ALLOW_TWO_SIDE_INTERACTION_CHAT);
     const bool sender_is_human = GET_PLAYERBOT_AI(player) == nullptr;
-    for (const std::string& bot_name : inbox_->Bots()) {
-      if (bot_name == player->GetName()) {
+    // Deliver Say/Yell via the sender's map grid (same map, instance, phase,
+    // and thread) like upstream Player::Say/Yell — never cross-instance or
+    // touching Player* owned by other map threads.
+    std::list<Player*> nearby;
+    Acore::AnyPlayerInObjectRangeCheck check(player, max_dist);
+    Acore::PlayerListSearcher<Acore::AnyPlayerInObjectRangeCheck> searcher(
+        player, nearby, check);
+    Cell::VisitObjects(player, searcher, max_dist);
+    for (Player* bot : nearby) {
+      if (!bot || bot == player || !bot->IsInWorld()) {
         continue;
       }
-      Player* bot = ObjectAccessor::FindPlayerByName(bot_name);
-      if (!bot || !bot->IsInWorld() || bot->GetMapId() != player->GetMapId()) {
+      if (bot->GetInstanceId() != player->GetInstanceId() ||
+          !bot->InSamePhase(player)) {
+        continue;
+      }
+      const std::string& bot_name = bot->GetName();
+      if (!inbox_->Contains(bot_name)) {
         continue;
       }
       if (!cross_faction && bot->GetTeamId() != player->GetTeamId()) {

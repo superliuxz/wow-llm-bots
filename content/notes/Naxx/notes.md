@@ -1,21 +1,15 @@
 # Naxxramas (Naxx)
 
-<!-- Draft boss notes extracted from mod-playerbots (Raid/Naxx). -->
+<!-- DRAFT extracted from mod-playerbots (Raid/Naxx); hand-check before use. -->
 
 ## Anub'rekhan
 
-- **Locust Swarm** (debuff): React to `Locust Swarm` aura.
-
-Suggested standing orders:
-```
-Locust Swarm on me -> away boss 10
-```
+- **Locust Swarm** (debuff): Aura `Locust Swarm` (boss); gather/position per encounter script (hand-check).
 
 ## Maexxna
 
 - **Add** (add_switch): Priority add; switch targets to `Add` immediately.
 
-Suggested standing orders:
 ```
 Add appears -> target nearest Add
 ```
@@ -23,19 +17,16 @@ Add appears -> target nearest Add
 ## Thaddius
 
 - **Add** (add_switch): Priority add; switch targets to `Add` immediately.
-- **Negative Charge** (debuff): React to `Negative Charge` aura.
+- **Negative Charge** (debuff): Aura `Negative Charge` (me); gather/position per encounter script (hand-check).
 
-Suggested standing orders:
 ```
 Add appears -> target nearest Add
-Negative Charge on me -> away boss 10
 ```
 
 ## Instructor Razuvious
 
 - **Crystal** (add_switch): Priority add; switch targets to `Crystal` immediately.
 
-Suggested standing orders:
 ```
 Crystal appears -> target nearest Crystal
 ```
@@ -48,12 +39,7 @@ Crystal appears -> target nearest Crystal
 ## Gluth
 
 - **Gluth** (positioning): Encounter positioning (gluth).
-- **Mortal Wound** (debuff): React to `Mortal Wound` aura.
-
-Suggested standing orders:
-```
-Mortal Wound on me -> away boss 10
-```
+- **Mortal Wound** (debuff): Aura `Mortal Wound` (me); gather/position per encounter script (hand-check).
 
 ## Loatheb
 

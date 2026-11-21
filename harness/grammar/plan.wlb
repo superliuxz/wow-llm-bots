@@ -21,7 +21,8 @@ text  Goal    max 60 no "\n"
 text  Chat    max 80 no "\n|"
 name  Player  from whisperers @parse(CapitalizedName)  // 2-12 letters
 text  Hover   max 60 no "\n|" from hover_names
-words Panel   { bags, character, "quest log" ~"questlog" }
+words Panel       { bags, character, "quest log" ~"questlog" }
+words ClearOrders { none }
 
 struct Step = option:Option ("x" times:Repeat)?;
 
@@ -54,6 +55,8 @@ lines Plan {
       "<optional: panels to close>";
   hover?: hover:Hover default "none"
       "<optional: the name of an item or quest on your screen whose tooltip isn't shown yet, to read it; you are woken again>";
+  orders?: clear_orders:list<ClearOrders, ", ", 1..1> @needs(order_names)
+      "<optional: write 'none' to clear active standing orders>";
   order*7: orders:Order @needs(order_names)
       "<optional, up to 7 in priority order for mechanics in Your boss notes: <when> -> <act>[, then <act>]>";
 }

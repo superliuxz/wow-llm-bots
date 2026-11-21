@@ -29,6 +29,69 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 DODGE_ACT_VERBS = ("AWAY", "TO", "AVOID", "OUT_OF", "KITE")
 
 
+def _strip_standing_order_answers(notes_text: str) -> str:
+    """Strip explicit standing-order answer lines from boss notes so mined evals
+    test whether the brain can derive the order from the mechanic description
+    rather than copying a leaked answer verbatim."""
+    if not notes_text:
+        return ""
+    out: List[str] = []
+    in_code_block = False
+    for line in notes_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+        low = stripped.lower()
+        if (
+            "standing order" in low
+            or "suggested standing order" in low
+            or " -> " in stripped
+        ):
+            continue
+        out.append(line)
+    return "\n".join(out).strip()
+
+
+def _infer_player_class(sample: Dict[str, Any], recent_casts: Sequence[str]) -> str:
+    """Best-effort class inference from observed spells/resources instead of
+    hard-coding 'Mage'."""
+    casts_low = " ".join(recent_casts).lower()
+    for kw, cls in (
+        ("shadow bolt", "Warlock"),
+        ("corruption", "Warlock"),
+        ("immolate", "Warlock"),
+        ("smite", "Priest"),
+        ("mind blast", "Priest"),
+        ("flash heal", "Priest"),
+        ("renew", "Priest"),
+        ("frostbolt", "Mage"),
+        ("fireball", "Mage"),
+        ("arcane blast", "Mage"),
+        ("lightning bolt", "Shaman"),
+        ("chain heal", "Shaman"),
+        ("wrath", "Druid"),
+        ("rejuvenation", "Druid"),
+        ("holy light", "Paladin"),
+        ("judgement", "Paladin"),
+        ("steady shot", "Hunter"),
+        ("arcane shot", "Hunter"),
+        ("mortal strike", "Warrior"),
+        ("heroic strike", "Warrior"),
+        ("sinister strike", "Rogue"),
+        ("death coil", "Death Knight"),
+    ):
+        if kw in casts_low:
+            return cls
+    if float(sample.get("pet_hp_pct", -1.0) or -1.0) >= 0.0:
+        return "Hunter"
+    if float(sample.get("mana_pct", 0.0) or 0.0) <= 0.0:
+        return "Warrior"
+    return "Unknown"
+
+
 @dataclasses.dataclass
 class MinedFailure:
     kind: str  # "missed_dodge", "death", "stall"
@@ -42,6 +105,7 @@ class MinedFailure:
     damage: int = 0
     stall_s: float = 0.0
     killer: str = ""
+    player_class: str = "Unknown"
 
 
 def _slugify(text: str) -> str:
@@ -131,6 +195,7 @@ def mine_trace_rows(
     active_cast_end_ms: int = 0
     active_cast_dodged: bool = False
     active_cast_recorded: bool = False
+    recent_casts: List[str] = []
 
     # Track stall stretch.
     stall_start_sample: Optional[Dict[str, Any]] = None
@@ -207,17 +272,31 @@ def mine_trace_rows(
                 if active_cast_sample is not None and t_ms >= active_cast_start_ms - 500:
                     active_cast_dodged = True
 
+            elif ev in ("spell_cast", "cast_start"):
+                sp = str(row.get("detail", "") or "")
+                if sp:
+                    recent_casts.append(sp)
+                    if len(recent_casts) > 16:
+                        recent_casts.pop(0)
+
             elif ev == "damage_taken":
                 dmg = int(row.get("value", 0) or 0)
                 attacker = str(row.get("detail", "") or "")
+                spell_id = int(row.get("spell_id", 0) or 0)
                 if (
                     active_cast_sample is not None
                     and not active_cast_dodged
                     and not active_cast_recorded
-                    and (t_ms - active_cast_end_ms) <= 1500
+                    and (active_cast_end_ms - 500) <= t_ms <= (active_cast_end_ms + 1500)
                     and dmg >= min_damage
                 ):
-                    boss_name = str(active_cast_sample.get("target", "") or attacker or "Boss")
+                    boss_name = str(active_cast_sample.get("target", "") or "")
+                    # Require attacker (or spell_id when present) to match the
+                    # casting boss rather than attributing unrelated add/melee
+                    # damage during the cast window.
+                    if boss_name and attacker and attacker.lower() != boss_name.lower() and spell_id == 0:
+                        continue
+                    boss_name = boss_name or attacker or "Boss"
                     if boss_filter_low and boss_filter_low not in boss_name.lower() and boss_filter_low not in attacker.lower():
                         continue
                     failures.append(
@@ -231,6 +310,7 @@ def mine_trace_rows(
                             spell=str(active_cast_sample.get("target_casting", "")),
                             radius_yd=float(active_cast_sample.get("target_cast_radius", 0.0)),
                             damage=dmg,
+                            player_class=_infer_player_class(active_cast_sample, recent_casts),
                         )
                     )
                     active_cast_recorded = True
@@ -243,7 +323,18 @@ def mine_trace_rows(
                     boss_name = raw_target or killer
                     if boss_filter_low and boss_filter_low not in boss_name.lower() and boss_filter_low not in killer.lower():
                         continue
-                    spell_name = str(ctx_sample.get("target_casting", "") or "")
+                    # Only attribute the active boss cast spell to this death if
+                    # the killer actually matches the casting target (e.g., do
+                    # not attribute an Arcane Sphere death to Flame Strike).
+                    killer_matches_target = (
+                        bool(raw_target)
+                        and killer.lower() == raw_target.lower()
+                    )
+                    spell_name = (
+                        str(ctx_sample.get("target_casting", "") or "")
+                        if killer_matches_target
+                        else ""
+                    )
                     if boss_filter_low and boss_filter_low not in raw_target.lower():
                         boss_name = killer
                         spell_name = ""
@@ -258,6 +349,7 @@ def mine_trace_rows(
                             spell=spell_name,
                             radius_yd=max(0.0, float(ctx_sample.get("target_cast_radius", 0.0) or 0.0)) if spell_name else 0.0,
                             killer=killer,
+                            player_class=_infer_player_class(ctx_sample, recent_casts),
                         )
                     )
 
@@ -400,7 +492,7 @@ def build_snapshot(failure: MinedFailure, seq: int = 1) -> Dict[str, Any]:
                     "level": level,
                     "health_pct": round(hp_pct, 1),
                     "power_pct": round(mana_pct, 1),
-                    "player": {"class": "Mage"},
+                    "player": {"class": failure.player_class or "Unknown"},
                 },
                 "health": hp_cur,
                 "health_max": hp_max,
@@ -437,6 +529,8 @@ def build_case_entry(
         "source": source,
     }
 
+    clean_notes = _strip_standing_order_answers(notes_text)
+
     if failure.kind == "missed_dodge":
         dist = float(failure.sample.get("target_dist", 0.0) or 0.0)
         entry["reason"] = "entered combat"
@@ -445,13 +539,14 @@ def build_case_entry(
             f"{failure.spell} ({failure.radius_yd:.0f} yd radius) at {dist:.1f} yd without dodging"
         )
         entry["rule"] = f"writes a standing order reacting to {failure.spell} by moving out/away"
-        entry["notes"] = notes_text or (
+        entry["notes"] = clean_notes or (
             f"{failure.boss}, {failure.spell}: {failure.radius_yd:.0f} yd AoE cast; "
             f"move out immediately when cast."
         )
         entry["order_names"] = list(dict.fromkeys(n for n in (failure.spell, failure.boss) if n))
         entry["min_orders"] = 1
         entry["must_order_contain"] = [failure.spell]
+        entry["must_order_act"] = ["out of", "away"]
 
     elif failure.kind == "death":
         hp = float(failure.sample.get("hp_pct", 0.0) or 0.0)
@@ -461,17 +556,18 @@ def build_case_entry(
             f"{failure.bot} died to {failure.killer} (last HP {hp:.0f}%{cast_info})"
         )
         if failure.spell:
-            entry["rule"] = f"writes a standing order for {failure.spell} and keeps fighting"
-            entry["notes"] = notes_text or (
+            entry["rule"] = f"writes a standing order for {failure.spell} by moving out/away and keeps fighting"
+            entry["notes"] = clean_notes or (
                 f"{failure.boss}, {failure.spell}: lethal boss mechanic; react immediately."
             )
             entry["order_names"] = list(dict.fromkeys(n for n in (failure.spell, failure.boss) if n))
             entry["min_orders"] = 1
             entry["must_order_contain"] = [failure.spell]
+            entry["must_order_act"] = ["out of", "away"]
         else:
             entry["rule"] = "stays in combat (Attack or Keep); never Rest/Explore/Town"
-            if notes_text:
-                entry["notes"] = notes_text
+            if clean_notes:
+                entry["notes"] = clean_notes
             entry["order_names"] = [failure.boss] if failure.boss else []
             entry["forbid_kinds"] = ["rest", "explore", "go to town"]
 
@@ -482,7 +578,7 @@ def build_case_entry(
             f"in {failure.sample.get('zone', 'unknown zone')}"
         )
         entry["rule"] = "moves on (Explore or Go to town); does not Keep idling or Rest at full HP"
-        entry["notes"] = notes_text
+        entry["notes"] = clean_notes
         entry["order_names"] = []
         entry["first_kinds"] = ["explore", "go to town"]
         entry["forbid_kinds"] = ["keep doing what I'm doing"]

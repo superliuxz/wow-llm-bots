@@ -31,7 +31,7 @@ DEFAULT_STEP_MS = 200  # 5 Hz fixed grid
 PARITY_ALLOWED_EVENTS = frozenset({
     "combat_start",
     "combat_end",
-    "cast_start",
+    "spell_cast",
     "damage_dealt",
     "damage_taken",
     "heal_done",
@@ -343,13 +343,23 @@ def reconstruct_trajectory(
         if n_steps < 2:
             continue
 
-        # Collect jump pulse timestamps from raw rising edges so brief jumps
-        # between ticks are never lost by thinning/resampling.
+        # Collect jump pulse timestamps and peak raw turn rates from raw samples
+        # BEFORE keyframe thinning/resampling so brief jumps and instant server
+        # snap-turns (e.g. 180 deg in 200 ms = 15.7 rad/s) are never erased by
+        # interpolation onto the 5 Hz grid.
         jump_times: set[int] = set()
+        raw_turn_by_bucket: dict[int, float] = {}
         for i, s in enumerate(span):
+            t_cur_raw = int(s["t_ms"])
+            grid_idx = max(0, min(n_steps - 1, round((t_cur_raw - t_start) / step_ms)))
             if bool(s.get("jumping")) and (i == 0 or not bool(span[i - 1].get("jumping"))):
-                grid_idx = round((int(s["t_ms"]) - t_start) / step_ms)
-                jump_times.add(max(0, min(n_steps - 1, grid_idx)))
+                jump_times.add(grid_idx)
+            if i > 0:
+                dt_raw_s = max((t_cur_raw - int(span[i - 1]["t_ms"])) / 1000.0, 0.05)
+                da_raw = angle_diff(float(span[i - 1].get("o", 0.0)), float(s.get("o", 0.0)))
+                w_raw = da_raw / dt_raw_s
+                if w_raw > raw_turn_by_bucket.get(grid_idx, 0.0):
+                    raw_turn_by_bucket[grid_idx] = w_raw
 
         # Reduce BOTH humans and bots to identical change-point keyframes at
         # human-packet resolution (~500 ms) before interpolating onto the 5 Hz grid.
@@ -398,14 +408,16 @@ def reconstruct_trajectory(
                 "attackers": int(ref.get("attackers", 0)),
             })
 
-        # Derive speed, turn rate, and moving purely from the canonical grid.
+        # Derive speed and moving from the canonical grid, and preserve peak raw
+        # turn rate from pre-resampling samples so snap turns are never hidden.
         for k in range(1, len(frames)):
             prev = frames[k - 1]
             cur = frames[k]
             dist = math.hypot(cur["x"] - prev["x"], cur["y"] - prev["y"])
             speed = round(dist / dt_s, 2)
             da = angle_diff(prev["o"], cur["o"])
-            turn_rate = round(da / dt_s, 3)
+            grid_turn_rate = da / dt_s
+            turn_rate = round(max(grid_turn_rate, raw_turn_by_bucket.get(k, 0.0)), 3)
             cur["speed_yd_s"] = speed
             cur["turn_rate_rad_s"] = turn_rate
             cur["moving"] = speed >= 0.5
@@ -553,8 +565,8 @@ def _anonymize_clip(
                 ae["text_len"] = ev["text_len"]
             if "channel" in ev:
                 ae["channel"] = ev["channel"]
-            if ev.get("text"):
-                ae["text"] = ev["text"]
+            # Strip raw chat text in anonymized clips so human (<len=N>) and
+            # bot chat are represented identically in blind social views.
             if ev.get("peer"):
                 p = ev["peer"]
                 if p not in peer_map:

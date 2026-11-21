@@ -1,36 +1,24 @@
 # Tempest Keep (TK)
 
-<!-- Draft boss notes extracted from mod-playerbots (Raid/TK). -->
+<!-- DRAFT extracted from mod-playerbots (Raid/TK); hand-check before use. -->
 
 ## Shared
 
 - **Lord Sanguinar** (add_switch): Priority add; switch targets to `Lord Sanguinar` immediately.
 
-Suggested standing orders:
 ```
 Lord Sanguinar appears -> target nearest Lord Sanguinar
 ```
 
 ## Al'ar
 
-- **Misdirection** (debuff): React to `Misdirection` aura.
+- **Misdirection** (debuff): Aura `Misdirection` on me; hand-check encounter reaction.
 - **Ember of Alar** (add_switch): Priority add; switch targets to `Ember of Alar` immediately.
-- **Flame** (ground_hazard): Ground hazard (~15 yd); move out immediately.
+- **Bomb** (add_switch): Priority add; switch targets to `Bomb` immediately.
 
-Suggested standing orders:
 ```
-Misdirection on me -> away boss 10
 Ember of Alar appears -> target nearest Ember of Alar
-in Flame -> out of it
-```
-
-## Trash
-
-- **Flame** (ground_hazard): Ground hazard (~15 yd); move out immediately.
-
-Suggested standing orders:
-```
-in Flame -> out of it
+Bomb appears -> target nearest Bomb
 ```
 
 ## Void Reaver
@@ -41,7 +29,6 @@ in Flame -> out of it
 
 - **Solarium Priest** (add_switch): Priority add; switch targets to `Solarium Priest` immediately.
 
-Suggested standing orders:
 ```
 Solarium Priest appears -> target nearest Solarium Priest
 ```
@@ -50,20 +37,14 @@ Solarium Priest appears -> target nearest Solarium Priest
 
 - **Kite Thaladred the Darkener** (kite): Kite `Thaladred the Darkener` away from the group.
 
-Suggested standing orders:
 ```
 Thaladred the Darkener targets me -> kite it
 ```
 
 ## Grand Astromancer Capernian
 
-- **Misdirection** (debuff): React to `Misdirection` aura.
+- **Misdirection** (debuff): Aura `Misdirection` on me; hand-check encounter reaction.
 - **Kael'thas Sunstrider Capernian Should Be Tanked by Warlock** (positioning): Encounter positioning (kael'thas sunstrider capernian should be tanked by warlock).
-
-Suggested standing orders:
-```
-Misdirection on me -> away boss 10
-```
 
 ## Lord Sanguinar
 
@@ -74,14 +55,12 @@ Misdirection on me -> away boss 10
 - **Kael'thas Sunstrider Should Hold Phase 3 Positions** (positioning): Encounter positioning (kael'thas sunstrider should hold phase 3 positions).
 - **Netherstrand Longbow** (add_switch): Priority add; switch targets to `Netherstrand Longbow` immediately.
 - **Devastation** (add_switch): Priority add; switch targets to `Devastation` immediately.
-- **Kael'thas Mind Control** (debuff): React to `Kael'thas Mind Control` aura.
+- **Kael'thas Mind Control** (debuff): Aura `Kael'thas Mind Control` (me); gather/position per encounter script (hand-check).
 - **Gravity Lapse** (debuff): Debuff; spread 10 yd away from allies.
 
-Suggested standing orders:
 ```
 Netherstrand Longbow appears -> target nearest Netherstrand Longbow
 Devastation appears -> target nearest Devastation
-Kael'thas Mind Control on me -> away boss 10
 Gravity Lapse on me -> away group 10
 ```
 
@@ -90,7 +69,6 @@ Gravity Lapse on me -> away group 10
 - **Flame Strike** (ground_hazard): Ground hazard (~15 yd); move out immediately.
 - **Phoenix Egg** (add_switch): Priority add (`NPC_PHOENIX_EGG`); switch and burn immediately.
 
-Suggested standing orders:
 ```
 in Flame Strike -> out of it
 Phoenix Egg appears -> target nearest Phoenix Egg

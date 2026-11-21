@@ -94,8 +94,8 @@ DEVOURER_NOTES = """# The Forge of Souls — Devourer of Souls
 """
 
 LOKEN_NOTES = """# Halls of Lightning — Loken
-- **Lightning Nova**: 4s cast dealing heavy AoE damage within 20 yd; step just outside the radius and you automatically return after it lands.
-  - Standing order: `Lightning Nova cast -> out of it`
+- **Lightning Nova**: 4s cast dealing heavy AoE damage within 20 yd; step just outside the radius and return after it lands.
+  - Standing order: `Lightning Nova cast -> out of it, then back`
 """
 
 EREGOS_NOTES = """# The Oculus — Ley-Guardian Eregos (3D Drake Vehicle Fight)
@@ -106,15 +106,15 @@ EREGOS_NOTES = """# The Oculus — Ley-Guardian Eregos (3D Drake Vehicle Fight)
 """
 
 MURMUR_NOTES = """# Shadow Labyrinth — Murmur
-- **Sonic Boom**: 5s cast dealing massive damage within 34 yards; run 38 yd away and you automatically return after it lands.
-  - Standing order: `Sonic Boom cast -> away Murmur 38`
+- **Sonic Boom**: 5s cast dealing massive damage within 34 yards; run 38 yd away and return after it lands.
+  - Standing order: `Sonic Boom cast -> away Murmur 38, then back`
 - **Murmur's Touch**: bomb debuff on one player; move away from allies so you don't knock them up.
   - Standing order: `Murmur's Touch on me -> away`
 """
 
 IKISS_NOTES = """# Sethekk Halls — Talon King Ikiss
 - **Arcane Explosion**: after Blinking, casts a 5s lethal AoE; step just outside the radius and return after it lands.
-  - Standing order: `Arcane Explosion cast -> out of it`
+  - Standing order: `Arcane Explosion cast -> out of it, then back`
 - **Polymorph**: sheeps a party member; dispellers dispel it promptly.
 """
 

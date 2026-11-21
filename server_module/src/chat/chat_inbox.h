@@ -39,6 +39,7 @@ class ChatInbox : public base::RawPtrTarget {
   // The bots whose chat is kept (names as in LlmBrain.Bots). Any thread.
   void SetBots(std::vector<std::string> bots);
   std::vector<std::string> Bots();
+  bool Contains(std::string_view name);
 
   // Keeps `chat` if `to` is one of the bots. Returns whether it was kept. Any
   // thread.

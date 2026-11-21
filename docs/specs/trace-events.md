@@ -81,7 +81,7 @@ the same server path.
 | `logout` | `""` | level | Yes |
 | `combat_start` | `""` | attacker count | Yes |
 | `combat_end` | `""` | attacker count | Yes |
-| `cast_start` | spell name | spell ID | Yes |
+| `spell_cast` | spell name (fires when `Spell::cast` executes/completes) | spell ID | Yes |
 | `damage_dealt` | NPC victim name (`""` for a player victim; never self/environment) | damage | Yes |
 | `damage_taken` | NPC attacker name, `"environment"` (no attacker or self), or `""` (player attacker) | damage | Yes |
 | `heal_done` | `""` | amount healed | Yes |

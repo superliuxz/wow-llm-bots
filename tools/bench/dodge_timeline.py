@@ -243,19 +243,67 @@ def extract_dodge_timelines(
                             if d is not None:
                                 dist_timeline.append((int(r["t_ms"]), d, bool(r.get("moving"))))
 
+                    # "Back" means within engagement range of the attack target
+                    # AND actively casting/attacking again (not a DoT tick from
+                    # 40 yd away, nor walking in without resuming combat).
+                    if start_dist is not None:
+                        attack_range_yd = (
+                            max(start_dist + 4.0, 8.0)
+                            if start_dist <= 10.0
+                            else min(36.0, max(start_dist + 4.0, 30.0))
+                        )
+                    else:
+                        attack_range_yd = 30.0
+
+                    def _target_dist_of(sample_row: dict[str, Any]) -> float | None:
+                        td = float(sample_row.get("target_dist", -1.0))
+                        if td >= 0.0:
+                            return td
+                        return _sample_dist(sample_row, cx, cy)
+
+                    latest_target_dist: float | None = (
+                        _target_dist_of(during[-1]) if during else end_dist
+                    )
+
                     for r in post_rows:
                         t = int(r["t_ms"])
                         kind = r.get("kind")
-                        if kind == "event":
+                        if kind == "sample":
+                            td = _target_dist_of(r)
+                            if td is not None:
+                                latest_target_dist = td
+                            in_range = (
+                                latest_target_dist is not None
+                                and latest_target_dist <= attack_range_yd
+                            )
+                            if (
+                                in_range
+                                and bool(r.get("casting", ""))
+                                and not _is_moving_away_at(t, dist_timeline)
+                            ):
+                                time_back_in_range_ms = t - s1
+                                break
+                        elif kind == "event":
                             ev = r.get("event")
                             if ev == "died":
                                 break
-                            if ev in ("damage_dealt", "cast_start") and not _is_moving_away_at(t, dist_timeline):
+                            in_range = (
+                                latest_target_dist is not None
+                                and latest_target_dist <= attack_range_yd
+                            )
+                            if (
+                                ev in ("spell_cast", "cast_start")
+                                and in_range
+                                and not _is_moving_away_at(t, dist_timeline)
+                            ):
                                 time_back_in_range_ms = t - s1
                                 break
-                        elif kind == "sample" and start_dist is not None:
-                            d = _sample_dist(r, cx, cy)
-                            if d is not None and d <= start_dist + 3.0:
+                            if (
+                                ev == "damage_dealt"
+                                and latest_target_dist is not None
+                                and latest_target_dist <= 8.0
+                                and not _is_moving_away_at(t, dist_timeline)
+                            ):
                                 time_back_in_range_ms = t - s1
                                 break
 

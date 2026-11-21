@@ -1,12 +1,11 @@
 # Ahn'kahet: The Old Kingdom (AK)
 
-<!-- Draft boss notes extracted from mod-playerbots (Dungeon/AK). -->
+<!-- DRAFT extracted from mod-playerbots (Dungeon/AK); hand-check before use. -->
 
 ## Elder Nadox
 
 - **Guardian** (add_switch): Priority add; switch targets to `Guardian` immediately.
 
-Suggested standing orders:
 ```
 Guardian appears -> target nearest Guardian
 ```
@@ -15,7 +14,6 @@ Guardian appears -> target nearest Guardian
 
 - **Twilight Volunteer** (add_switch): Priority add; switch targets to `Twilight Volunteer` immediately.
 
-Suggested standing orders:
 ```
 Twilight Volunteer appears -> target nearest Twilight Volunteer
 ```
@@ -24,7 +22,6 @@ Twilight Volunteer appears -> target nearest Twilight Volunteer
 
 - **Shadow Crash** (ground_hazard): Ground hazard (~10 yd); move out immediately.
 
-Suggested standing orders:
 ```
 in Shadow Crash -> out of it
 ```

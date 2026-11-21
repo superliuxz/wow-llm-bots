@@ -1,93 +1,30 @@
 # Molten Core (MC)
 
-<!-- Draft boss notes extracted from mod-playerbots (Raid/MC). -->
-
-## Magmadar
-
-- **Fire** (ground_hazard): Ground hazard; move out immediately.
-
-Suggested standing orders:
-```
-in Fire -> out of it
-```
-
-## Garr
-
-- **Fire** (ground_hazard): Ground hazard; move out immediately.
-
-Suggested standing orders:
-```
-in Fire -> out of it
-```
+<!-- DRAFT extracted from mod-playerbots (Raid/MC); hand-check before use. -->
 
 ## Baron Geddon
 
-- **Fire** (ground_hazard): Ground hazard; move out immediately.
 - **Living Bomb** (ground_hazard): Ground hazard; move out immediately.
-- **Inferno** (debuff): Debuff; spread 10 yd away from allies.
+- **Inferno** (debuff): Aura `Inferno` on boss; hand-check encounter reaction.
 
-Suggested standing orders:
 ```
-in Fire -> out of it
 in Living Bomb -> out of it
-Inferno on me -> away group 10
-```
-
-## Sulfuron Harbinger
-
-- **Fire** (ground_hazard): Ground hazard; move out immediately.
-
-Suggested standing orders:
-```
-in Fire -> out of it
 ```
 
 ## Golemagg the Incinerator
 
-- **Fire** (ground_hazard): Ground hazard; move out immediately.
-- **Golemaggs Trust** (debuff): React to `Golemaggs Trust` aura.
-- **Magma Splash** (debuff): Debuff; spread 10 yd away from allies.
+- **Golemaggs Trust** (debuff): Aura `Golemaggs Trust` on me; hand-check encounter reaction.
+- **Magma Splash** (debuff): Aura `Magma Splash` (me); gather/position per encounter script (hand-check).
 - **Mc Golemagg Is Healer** (positioning): Encounter positioning (mc golemagg is healer).
-
-Suggested standing orders:
-```
-in Fire -> out of it
-Golemaggs Trust on me -> away boss 10
-Magma Splash on me -> away group 10
-```
 
 ## Majordomo Executus
 
-- **Damage Shield** (debuff): React to `Damage Shield` aura.
-
-Suggested standing orders:
-```
-Damage Shield on me -> away boss 10
-```
-
-## Ragnaros
-
-- **Fire** (ground_hazard): Ground hazard; move out immediately.
-
-Suggested standing orders:
-```
-in Fire -> out of it
-```
+- **Damage Shield** (debuff): Aura `Damage Shield` on me; hand-check encounter reaction.
 
 ## Core Hound
 
 - **Hound** (add_switch): Priority add; switch targets to `Hound` immediately.
 
-Suggested standing orders:
 ```
 Hound appears -> target nearest Hound
-```
-
-## Trash
-
-- **Lava** (ground_hazard): Ground hazard; move out immediately.
-
-Suggested standing orders:
-```
-in Lava -> out of it
 ```

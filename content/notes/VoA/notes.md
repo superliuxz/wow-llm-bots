@@ -1,23 +1,21 @@
 # Vault of Archavon (VoA)
 
-<!-- Draft boss notes extracted from mod-playerbots (Raid/VoA). -->
+<!-- DRAFT extracted from mod-playerbots (Raid/VoA); hand-check before use. -->
 
 ## Emalon the Storm Watcher
 
 - **Nova** (cast_aoe): Boss cast AoE (25 yd radius); move out during cast.
 - **Tempest Minion** (add_switch): Priority add; switch targets to `Tempest Minion` immediately.
 
-Suggested standing orders:
 ```
 Nova cast -> out of it
 Tempest Minion appears -> target nearest Tempest Minion
 ```
 
-## Koralon the Flame Watcher
+## Vault of Archavon
 
-- **Fire** (ground_hazard): Ground hazard; move out immediately.
+- **Lightning Nova Man** (cast_aoe): Boss cast AoE (`SPELL_LIGHTNING_NOVA_10_MAN`); move out during cast.
 
-Suggested standing orders:
 ```
-in Fire -> out of it
+Lightning Nova Man cast -> out of it
 ```

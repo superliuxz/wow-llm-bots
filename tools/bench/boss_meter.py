@@ -91,7 +91,7 @@ def analyze_boss_fight(
                 dmg_taken += val
             elif ev == "heal_done":
                 heal_done += val
-            elif ev == "cast_start":
+            elif ev in ("spell_cast", "cast_start"):
                 casts += 1
             elif ev == "died":
                 deaths += 1

@@ -1235,7 +1235,7 @@ TEST(BotLoopTest, NewPlanDuringKiteSendsStopMovingAndShowsActiveOrders) {
             std::string::npos);
 
   const size_t cmds_before = commands.size();
-  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60\norders: none");
   bool saw_stop_moving = false;
   for (size_t i = cmds_before; i < commands.size(); ++i) {
     if (commands[i].act && commands[i].act->verb == pb::Command::Act::STOP &&
@@ -1548,6 +1548,161 @@ TEST(BotLoopTest,
   EXPECT_TRUE(saw_cached_out_of);
 
   std::filesystem::remove_all(tmp_dir);
+}
+
+TEST(
+    BotLoopTest,
+    OrdersStayAcrossEmptyPlansInAndOutOfCombatClearWithOrdersNoneAndCacheNotOverwrittenMidFight) {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "wlb_bot_loop_m6_m7_test";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir / "Loada");
+  {
+    std::ofstream out(tmp_dir / "Loada" / "notes.md");
+    out << "# Magisters' Terrace\n"
+        << "- **Flame Strike**: fiery ground AoE.\n"
+        << "- **Phoenix**: fiery add.\n";
+  }
+
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.bots_dir = tmp_dir.string();
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& c) { sent.push_back(c); });
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  // Enter instance out of combat: compile 2 pre-pull standing orders.
+  pb::Snapshot s1 = MakeLiveSnap("Loada", 1, t0, /*in_combat=*/false);
+  s1.base.where.in_instance = true;
+  s1.base.where.map = "Magisters' Terrace";
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+      "order: in Flame Strike -> out of it\n"
+      "order: Phoenix appears -> target nearest Phoenix");
+
+  // Out-of-combat plan with no `order:` lines must KEEP the 2 pre-pull orders.
+  pb::ImmediateEvent wh;
+  wh.bot = "Loada";
+  wh.event.chat.emplace().channel = pb::WHISPER;
+  wh.event.chat->from = "Friend";
+  wh.event.chat->text = "ready?";
+  loop.OnEvent(std::move(wh), t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+
+  // Mid-fight wake replaces orders with a 1-order plan; this must NOT
+  // overwrite the 2-order pre-pull cache.
+  pb::Snapshot s2 = MakeLiveSnap("Loada", 2, t0 + base::Seconds(2),
+                                 /*in_combat=*/true);
+  s2.base.where.in_instance = true;
+  s2.base.where.map = "Magisters' Terrace";
+  AddKeep(&s2);
+  loop.OnSnapshot(s2, t0 + base::Seconds(2));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("in Flame Strike -> out of it"),
+            std::string::npos);
+  EXPECT_NE(brain.front_request().user.find(
+                "Phoenix appears -> target nearest Phoenix"),
+            std::string::npos);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+      "order: in Flame Strike -> out of it");
+
+  // Explicit `orders: none` clears orders even in combat.
+  pb::ImmediateEvent wh2;
+  wh2.bot = "Loada";
+  wh2.event.chat.emplace().channel = pb::WHISPER;
+  wh2.event.chat->from = "Friend";
+  wh2.event.chat->text = "clear";
+  loop.OnEvent(std::move(wh2), t0 + base::Seconds(3));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60\norders: none");
+
+  // Next wake in combat should have no active standing orders.
+  pb::ImmediateEvent wh3;
+  wh3.bot = "Loada";
+  wh3.event.chat.emplace().channel = pb::WHISPER;
+  wh3.event.chat->from = "Friend";
+  wh3.event.chat->text = "check";
+  loop.OnEvent(std::move(wh3), t0 + base::Seconds(4));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_EQ(brain.front_request().user.find("Active standing orders:"),
+            std::string::npos);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+
+  // Re-entering the instance restores the original 2-order pre-pull cache,
+  // NOT the 1-order mid-fight plan.
+  loop.OnConnectionChanged(false);
+  loop.OnConnectionChanged(true);
+  pb::Snapshot s3 = MakeLiveSnap("Loada", 3, t0 + base::Seconds(5),
+                                 /*in_combat=*/false);
+  s3.base.where.in_instance = true;
+  s3.base.where.map = "Magisters' Terrace";
+  AddKeep(&s3);
+  loop.OnSnapshot(s3, t0 + base::Seconds(5));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("in Flame Strike -> out of it"),
+            std::string::npos);
+  EXPECT_NE(brain.front_request().user.find(
+                "Phoenix appears -> target nearest Phoenix"),
+            std::string::npos);
+
+  std::filesystem::remove_all(tmp_dir);
+}
+
+TEST(BotLoopTest, TellGrammarIncludesOnlyWhisperersAndPartyMembers) {
+  CannedBrain brain;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  BotLoop loop(cfg, brain.Fn(), [](const pb::Command&) {});
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Gatda", 1, t0, /*in_combat=*/false);
+  AddKeep(&s1);
+  pb::Unit mate;
+  mate.name = "Partymate";
+  s1.ext.party.emplace().members.push_back(mate);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+
+  // Human whispers Gatda.
+  pb::ImmediateEvent wh;
+  wh.bot = "Gatda";
+  wh.event.chat.emplace().channel = pb::WHISPER;
+  wh.event.chat->from = "Humanpal";
+  wh.event.chat->text = "hey";
+  loop.OnEvent(std::move(wh), t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+
+  // Five General/Say/Invite events from strangers must NOT evict Humanpal or
+  // allow whispering those strangers.
+  for (int i = 0; i < 5; ++i) {
+    pb::ImmediateEvent ev;
+    ev.bot = "Gatda";
+    ev.event.chat.emplace().channel = (i % 2 == 0) ? pb::GENERAL : pb::SAY;
+    ev.event.chat->from = "Stranger" + std::to_string(i);
+    ev.event.chat->text = "lfg";
+    loop.OnEvent(std::move(ev), t0 + base::Seconds(2 + i));
+  }
+  pb::ImmediateEvent inv;
+  inv.bot = "Gatda";
+  inv.event.prompt.emplace().kind = pb::PromptEvent::GROUP_INVITE;
+  inv.event.prompt->from = "Inviter";
+  loop.OnEvent(std::move(inv), t0 + base::Seconds(8));
+  ASSERT_EQ(brain.size(), 1u);
+  const std::string& grammar = brain.front_request().grammar;
+  EXPECT_NE(grammar.find("\"Humanpal\""), std::string::npos);
+  EXPECT_NE(grammar.find("\"Partymate\""), std::string::npos);
+  EXPECT_EQ(grammar.find("\"Stranger0\""), std::string::npos);
+  EXPECT_EQ(grammar.find("\"Inviter\""), std::string::npos);
 }
 
 }  // namespace

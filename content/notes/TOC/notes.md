@@ -1,5 +1,5 @@
 # Trial of the Champion (TOC)
 
-<!-- Draft boss notes extracted from mod-playerbots (Dungeon/TOC). -->
+<!-- DRAFT extracted from mod-playerbots (Dungeon/TOC); hand-check before use. -->
 
 _No boss mechanics extracted._

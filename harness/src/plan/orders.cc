@@ -77,13 +77,43 @@ bool IsNonGameNoteHeading(std::string_view s) {
     return true;
   }
   static constexpr std::string_view kHeadings[] = {
-      "Note",      "Notes",     "Tip",          "Tips",     "Summary",
-      "Overview",  "Mechanics", "Strategy",     "Reminder", "Warning",
-      "Important", "Role",      "Roles",        "DPS",      "Melee",
-      "Ranged",    "Adds",      "Intermission",
+      "Note",
+      "Notes",
+      "Tip",
+      "Tips",
+      "Summary",
+      "Overview",
+      "Mechanics",
+      "Strategy",
+      "Reminder",
+      "Warning",
+      "Important",
+      "Role",
+      "Roles",
+      "DPS",
+      "Melee",
+      "Ranged",
+      "Adds",
+      "Intermission",
+      "Draft",
+      "Suggested standing orders",
+      "Standing order",
+      "Standing orders",
+      "Ground hazard",
+      "Boss cast AoE",
+      "Priority add",
+      "Priority interrupt target",
+      "Encounter positioning",
   };
   for (std::string_view h : kHeadings) {
     if (base::EqualsCaseInsensitiveASCII(s, h)) {
+      return true;
+    }
+  }
+  // Reject non-game names with digits attached to letters/ranges (e.g.
+  // "Kinetic Bomb1-4").
+  for (size_t i = 0; i < s.size(); ++i) {
+    if (base::IsAsciiDigit(s[i])) {
       return true;
     }
   }
@@ -126,8 +156,16 @@ void ExtractNamesFromNotes(std::string_view notes, const auto& add_name) {
     return false;
   };
 
+  bool in_code_block = false;
   for (std::string_view raw_line : base::SplitStringPiece(
            notes, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
+    if (raw_line.starts_with("```")) {
+      in_code_block = !in_code_block;
+      continue;
+    }
+    if (in_code_block || raw_line.starts_with("<!--")) {
+      continue;
+    }
     std::string_view line =
         base::TrimString(raw_line, "-*# \t", base::TRIM_LEADING);
     // 1. Headings before `:` ("The Lich King, Defile: black pool...").

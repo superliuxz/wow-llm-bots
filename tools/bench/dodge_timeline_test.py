@@ -688,7 +688,7 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
                     "target_x": 100.0, "target_y": 100.0, "target_dist": 40.0,
                 },
                 {"kind": "sample", "t_ms": 14000, "in_combat": True, "x": 120.0, "y": 100.0, "moving": True},
-                {"kind": "sample", "t_ms": 15000, "in_combat": True, "x": 107.0, "y": 100.0, "moving": False},
+                {"kind": "sample", "t_ms": 15000, "in_combat": True, "x": 107.0, "y": 100.0, "moving": False, "casting": "Lightning Bolt"},
             ],
         }
         res = dodge_timeline.extract_dodge_timelines(traces, spell_filter="Lightning Nova")
@@ -710,9 +710,10 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
 
     def test_dodge_slow_return_vs_prompt_return(self) -> None:
         # Both bots have 500 DPS before cast [10000, 13000] (5s of combat since t=5000).
-        # BotFast resumes casting at t=14000 (1000ms after impact) once stopped moving away.
-        # BotSlow has a DoT tick at t=13300 while STILL moving away (dist 35 -> 42), then
-        # lingers out of range until returning to start_yd+2 at t=21000 (8000ms after impact).
+        # BotFast walks back into range (x=108) and casts at t=14000 (1000ms after impact).
+        # BotSlow has a DoT tick at t=13010 while sitting at 42 yd (MUST NOT count as back),
+        # then returns to range and casts at t=21000 (8000ms after impact).
+        # BotNeverBack sits at 40 yd for 20s with a DoT tick at t=13010 -> BackMs must be None.
         traces = {
             "BotFast": [
                 {"kind": "sample", "t_ms": 5000, "in_combat": True, "x": 105.0, "y": 100.0, "moving": False},
@@ -736,8 +737,9 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
                     "target_casting": "Arcane Explosion", "target_cast_radius": 34.0,
                     "target_x": 100.0, "target_y": 100.0,
                 },
-                {"kind": "event", "t_ms": 14000, "event": "cast_start", "detail": "Shadow Bolt"},
-                {"kind": "sample", "t_ms": 14500, "in_combat": True, "x": 138.0, "y": 100.0, "moving": False},
+                {"kind": "sample", "t_ms": 13900, "in_combat": True, "x": 108.0, "y": 100.0, "moving": False},
+                {"kind": "event", "t_ms": 14000, "event": "spell_cast", "detail": "Shadow Bolt"},
+                {"kind": "sample", "t_ms": 14500, "in_combat": True, "x": 108.0, "y": 100.0, "moving": False},
             ],
             "BotSlow": [
                 {"kind": "sample", "t_ms": 5000, "in_combat": True, "x": 105.0, "y": 100.0, "moving": False},
@@ -761,21 +763,42 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
                     "target_casting": "Arcane Explosion", "target_cast_radius": 34.0,
                     "target_x": 100.0, "target_y": 100.0,
                 },
-                # DoT tick while still moving away from 35 yd -> 42 yd must NOT count as returned.
-                {"kind": "event", "t_ms": 13300, "event": "damage_dealt", "value": 200},
-                {"kind": "sample", "t_ms": 14000, "in_combat": True, "x": 142.0, "y": 100.0, "moving": True},
+                # DoT tick at 42 yd must NOT count as returned.
+                {"kind": "event", "t_ms": 13010, "event": "damage_dealt", "value": 200},
+                {"kind": "sample", "t_ms": 14000, "in_combat": True, "x": 142.0, "y": 100.0, "moving": False},
                 {"kind": "sample", "t_ms": 18000, "in_combat": True, "x": 142.0, "y": 100.0, "moving": False},
-                {"kind": "sample", "t_ms": 21000, "in_combat": True, "x": 107.0, "y": 100.0, "moving": False},
+                {"kind": "sample", "t_ms": 21000, "in_combat": True, "x": 107.0, "y": 100.0, "moving": False, "casting": "Shadow Bolt"},
+            ],
+            "BotNeverBack": [
+                {"kind": "sample", "t_ms": 5000, "in_combat": True, "x": 105.0, "y": 100.0, "moving": False},
+                {"kind": "event", "t_ms": 8000, "event": "damage_dealt", "value": 2500},
+                {
+                    "kind": "sample", "t_ms": 10000, "in_combat": True,
+                    "x": 105.0, "y": 100.0, "moving": False,
+                    "target_casting": "Arcane Explosion", "target_cast_radius": 34.0,
+                    "target_x": 100.0, "target_y": 100.0,
+                },
+                {"kind": "event", "t_ms": 10300, "event": "act_sent", "detail": "AWAY 40"},
+                {
+                    "kind": "sample", "t_ms": 13000, "in_combat": True,
+                    "x": 140.0, "y": 100.0, "moving": False,
+                    "target_casting": "Arcane Explosion", "target_cast_radius": 34.0,
+                    "target_x": 100.0, "target_y": 100.0,
+                },
+                # DoT tick from 40 yd while sitting out of range for 20s -> must stay None!
+                {"kind": "event", "t_ms": 13010, "event": "damage_dealt", "value": 300},
+                {"kind": "sample", "t_ms": 30000, "in_combat": True, "x": 140.0, "y": 100.0, "moving": False},
             ],
         }
         res = dodge_timeline.extract_dodge_timelines(traces, spell_filter="Arcane Explosion")
         bots = res["windows"][0]["bots"]
-        fast, slow = bots["BotFast"], bots["BotSlow"]
+        fast, slow, never_back = bots["BotFast"], bots["BotSlow"], bots["BotNeverBack"]
 
         self.assertEqual(fast["dps_before"], 500.0)
         self.assertEqual(slow["dps_before"], 500.0)
         self.assertEqual(fast["time_back_in_range_ms"], 1000)
         self.assertEqual(slow["time_back_in_range_ms"], 8000)
+        self.assertIsNone(never_back["time_back_in_range_ms"])
         self.assertLess(fast["time_back_in_range_ms"], slow["time_back_in_range_ms"])
         # fast: 500 * 4.0 - 0 = 2000.0; slow: 500 * 11.0 - 200 = 5300.0
         self.assertEqual(fast["dps_lost"], 2000.0)

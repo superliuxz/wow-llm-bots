@@ -1899,7 +1899,7 @@ struct LfgEvent {
 // `done_command_id`.
 // 3: added group Option::Kind values (INVITE, ACCEPT_INVITE, DECLINE_INVITE,
 // LEAVE_GROUP) and General/Trade/Party chat channels.
-inline constexpr uint32_t kWireVersion = 3;
+inline constexpr uint32_t kWireVersion = 4;
 
 struct Command {
   using Choose = Command_Choose;

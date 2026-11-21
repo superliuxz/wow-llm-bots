@@ -1,6 +1,6 @@
 # Gundrak (GD)
 
-<!-- Draft boss notes extracted from mod-playerbots (Dungeon/GD). -->
+<!-- DRAFT extracted from mod-playerbots (Dungeon/GD); hand-check before use. -->
 
 ## Slad'ran
 
@@ -8,7 +8,6 @@
 - **Snake Wrap** (add_switch): Priority add; switch targets to `Snake Wrap` immediately.
 - **Slad'ran Stack on Tank** (positioning): Stack near Slad'ran / tank.
 
-Suggested standing orders:
 ```
 Poison Nova cast -> out of it
 Snake Wrap appears -> target nearest Snake Wrap
@@ -17,9 +16,4 @@ always -> to boss
 
 ## Gal'darah
 
-- **Whirling Slash** (debuff): Debuff; spread 7 yd away from allies.
-
-Suggested standing orders:
-```
-Whirling Slash on me -> away group 7
-```
+- **Whirling Slash** (debuff): Aura `Whirling Slash` on boss; hand-check encounter reaction.

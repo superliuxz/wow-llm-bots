@@ -164,27 +164,14 @@ constexpr size_t kMaxWhisperers = 4;
 void BotLoop::NoteWhisperer(BotState* state,
                             const pb::Event& event,
                             base::TimeTicks now) {
-  std::string from;
-  if (event.chat && !event.chat->from.empty()) {
-    switch (event.chat->channel) {
-      case pb::WHISPER:
-      case pb::PARTY:
-      case pb::SAY:
-      case pb::GENERAL:
-      case pb::LFG:
-        from = event.chat->from;
-        break;
-      default:
-        break;
-    }
-  } else if (event.prompt &&
-             event.prompt->kind == pb::PromptEvent::GROUP_INVITE &&
-             !event.prompt->from.empty()) {
-    from = event.prompt->from;
-  }
-  if (from.empty()) {
+  // Only actual whisperers enter the bounded whisperer list; Say/General/LFG
+  // and invite senders must not evict whisperers or let bots whisper General
+  // strangers. Current party members are added separately in StartBotCall().
+  if (!event.chat || event.chat->channel != pb::WHISPER ||
+      event.chat->from.empty()) {
     return;
   }
+  std::string from = event.chat->from;
   std::erase_if(state->whisperers,
                 [&](const BotState::Whisperer& w) { return w.name == from; });
   state->whisperers.push_front({std::move(from), now});
@@ -560,6 +547,17 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
       input.whisperers.push_back(w.name);
     }
   }
+  // Party members may also be whispered via `tell` without crowding out recent
+  // human whisperers.
+  if (state.latest_snapshot->ext.party) {
+    for (const pb::Unit& m : state.latest_snapshot->ext.party->members) {
+      if (!m.name.empty() && m.name != bot &&
+          std::find(input.whisperers.begin(), input.whisperers.end(), m.name) ==
+              input.whisperers.end()) {
+        input.whisperers.push_back(m.name);
+      }
+    }
+  }
   // Ages on the snapshots' clock (seen_at is a snapshot's received time).
   input.remembered = RememberedPanels(state, state.latest_received_at,
                                       config_.remember_panels_for);
@@ -758,24 +756,26 @@ void BotLoop::OnReply(const std::string& bot,
                 ? std::flat_set<std::string>{}
                 : CollectExpectedNames(plan->steps, plan->expect, ask_screen),
             &state.ask_watch_inputs);
-        const bool keep_compiled_orders =
-            plan->orders.empty() &&
-            state.latest_snapshot->base.where.in_instance &&
-            state.latest_snapshot->base.self.in_combat &&
-            !state.notes.empty() && !state.orders.orders().empty();
-        if (!keep_compiled_orders) {
+        if (plan->clear_orders && plan->orders.empty()) {
+          if (state.orders.SetOrders({}, now)) {
+            SendStopMoving(bot);
+          }
+        } else if (!plan->orders.empty()) {
           if (state.orders.SetOrders(plan->orders, now)) {
             SendStopMoving(bot);
           }
         }
         if (!plan->orders.empty() &&
             state.latest_snapshot->base.where.in_instance &&
+            !state.latest_snapshot->base.self.in_combat &&
             !state.notes.empty()) {
           const std::string& map_name = state.latest_snapshot->base.where.map;
-          compiled_orders_cache_[{bot, map_name, state.notes}] = plan->orders;
-          Log(base::StrCat({bot, ": compiled ",
-                            std::to_string(plan->orders.size()),
-                            " standing orders for ", map_name}));
+          const CompiledOrdersKey key{bot, map_name, state.notes};
+          if (compiled_orders_cache_.try_emplace(key, plan->orders).second) {
+            Log(base::StrCat({bot, ": cached ",
+                              std::to_string(plan->orders.size()),
+                              " pre-pull standing orders for ", map_name}));
+          }
         }
         if (!state.early_step_failed) {
           state.look_deadline = now + base::Seconds(plan->look_s);

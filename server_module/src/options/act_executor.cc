@@ -778,12 +778,13 @@ bool IsCasterStillCasting(Player* bot,
 }
 
 bool SpotInsideHostileArea(Player* bot, const pb::Vec3& spot) {
+  const float bot_reach = bot->GetCombatReach();
   for (DynamicObject* dyn : NearbyAreas(bot, 40.0f)) {
     Unit* caster = dyn->GetCaster();
     if (!caster || !bot->IsHostileTo(caster)) {
       continue;
     }
-    const float r = std::max(dyn->GetRadius(), 3.0f);
+    const float r = std::max(dyn->GetRadius(), 3.0f) + bot_reach;
     if (Dist2D(spot, PosOf(dyn)) <= r + 1.0f) {
       return true;
     }
@@ -1021,9 +1022,28 @@ std::optional<HazardInfo> ResolveHazard(Player* bot,
   return std::nullopt;
 }
 
+// Finishes a dodge (`away` / `out of`) without walking back to the pre-dodge
+// spot: releases movement override and restores the interrupted attack target
+// selection so normal combat resumes immediately. Returning to the pre-dodge
+// spot happens only when an order explicitly specifies `back`.
+void FinishDodgeAct(Player* bot, const ActiveAct& active) {
+  bot->StopMoving();
+  ClearActMovement(bot);
+  const ActiveAct::InterruptedActivity& intr = active.interrupted;
+  if (intr.active && intr.target_guid != 0) {
+    if (Unit* target =
+            ObjectAccessor::GetUnit(*bot, ObjectGuid(intr.target_guid));
+        target && target->IsAlive() && bot->IsHostileTo(target)) {
+      if (bot->GetTarget().IsEmpty()) {
+        bot->SetSelection(target->GetGUID());
+      }
+    }
+  }
+}
+
 // Starts returning the bot to its interrupted engagement range/position after
-// a dodge finishes. Returns true if already in range / done (no return walk
-// needed), false if a return walk is now active (`active->dodge_phase =
+// an explicit `back` act. Returns true if already in range / done (no return
+// walk needed), false if a return walk is now active (`active->dodge_phase =
 // kReturning`).
 bool StartReturnToInterrupted(Player* bot,
                               ActiveAct* active,
@@ -1347,20 +1367,18 @@ ActStartResult StartAct(Player* bot,
         return {.error = "hazard not found"};
       }
       const pb::Vec3 bot_pos = PosOf(bot);
+      const float bot_reach = bot->GetCombatReach();
       const float cur_dist = Dist2D(bot_pos, hazard->anchor.pos);
-      if (hazard->radius_yd > 0.0f && cur_dist >= hazard->radius_yd + 0.5f) {
-        // Already outside the hazard radius — skip dodge.
-        return {.done = true};
-      }
-      if (hazard->lands_in_s > 0.0f &&
-          !CanEscapeBeforeImpact(cur_dist, hazard->radius_yd,
-                                 bot->GetSpeed(MOVE_RUN), hazard->lands_in_s)) {
-        // Impact lands before the bot could exit — skip wasted movement.
+      const float effective_radius =
+          hazard->radius_yd > 0.0f ? (hazard->radius_yd + bot_reach) : 0.0f;
+      if (effective_radius > 0.0f && cur_dist >= effective_radius + 0.5f) {
+        // Already outside the hazard radius (including bot combat reach).
         return {.done = true};
       }
       std::vector<pb::Vec3> candidates = CandidateSpotsForOutOf(
           bot_pos, hazard->anchor, hazard->radius_yd,
-          PreferredEscapePos(bot, hazard->anchor.pos, hazard->radius_yd));
+          PreferredEscapePos(bot, hazard->anchor.pos, effective_radius),
+          kDefaultOutOfMarginYd, bot_reach);
       if (candidates.empty()) {
         return {.done = true};
       }
@@ -1380,7 +1398,7 @@ ActStartResult StartAct(Player* bot,
       out_active->dest = *chosen;
       out_active->last_anchor = hazard->anchor;
       out_active->away_target_edge_yd =
-          hazard->radius_yd + kDefaultOutOfMarginYd;
+          effective_radius + kDefaultOutOfMarginYd;
       out_active->hazard_radius_yd = hazard->radius_yd;
       out_active->hazard_is_ground_area = hazard->is_ground_area;
       out_active->hazard_caster_guid = hazard->caster_guid;
@@ -1860,10 +1878,7 @@ ActStepResult StepActiveAct(Player* bot,
 
   const pb::Vec3 bot_pos = PosOf(bot);
   const float bot_reach = bot->GetCombatReach();
-  if (act.verb == pb::Command_Act::BACK ||
-      ((act.verb == pb::Command_Act::AWAY ||
-        act.verb == pb::Command_Act::OUT_OF) &&
-       active->dodge_phase == ActiveAct::DodgePhase::kReturning)) {
+  if (act.verb == pb::Command_Act::BACK) {
     bool back_in_range =
         Dist2D(bot_pos, active->dest) <= kArrivalToleranceYd + 1.0f;
     if (!back_in_range && active->interrupted.target_guid != 0) {
@@ -1915,20 +1930,16 @@ ActStepResult StepActiveAct(Player* bot,
         }
         return {};
       }
-      if (StartReturnToInterrupted(bot, active, now)) {
-        return {.done = true};
-      }
-      return {};
+      FinishDodgeAct(bot, *active);
+      return {.done = true};
     }
 
     // If we were dodging a cast and the cast already ended (landed or
-    // interrupted), stop running further away and return immediately.
+    // interrupted), stop running further away and resume attacking.
     if (active->hazard_caster_guid != 0 && active->hazard_spell_id != 0 &&
         !cast_active) {
-      if (StartReturnToInterrupted(bot, active, now)) {
-        return {.done = true};
-      }
-      return {};
+      FinishDodgeAct(bot, *active);
+      return {.done = true};
     }
 
     const float target_yd = active->away_target_edge_yd > 0.0f
@@ -1946,22 +1957,25 @@ ActStepResult StepActiveAct(Player* bot,
         active->last_repath_at = now;
         return {};
       }
-      if (StartReturnToInterrupted(bot, active, now)) {
-        return {.done = true};
-      }
-      return {};
+      FinishDodgeAct(bot, *active);
+      return {.done = true};
     }
     // Keep the anchor fixed from StartAct so bare `away` (anchored on the
     // starting spot) and `away <moving mob>` finish cleanly instead of
     // chasing a shifting anchor forever.
     if (now - active->last_repath_at >= kRepathInterval && !bot->isMoving()) {
       active->last_repath_at = now;
+      const float effective_radius =
+          active->hazard_radius_yd > 0.0f
+              ? (active->hazard_radius_yd + bot_reach)
+              : 0.0f;
       std::vector<pb::Vec3> candidates =
           (act.verb == pb::Command_Act::OUT_OF)
               ? CandidateSpotsForOutOf(
                     bot_pos, active->last_anchor, active->hazard_radius_yd,
                     PreferredEscapePos(bot, active->last_anchor.pos,
-                                       active->hazard_radius_yd))
+                                       effective_radius),
+                    kDefaultOutOfMarginYd, bot_reach)
               : CandidateSpotsForAway(bot_pos, active->last_anchor, target_yd,
                                       bot_reach);
       if (candidates.empty()) {
@@ -1970,10 +1984,8 @@ ActStepResult StepActiveAct(Player* bot,
           active->dodge_phase = ActiveAct::DodgePhase::kHolding;
           return {};
         }
-        if (StartReturnToInterrupted(bot, active, now)) {
-          return {.done = true};
-        }
-        return {};
+        FinishDodgeAct(bot, *active);
+        return {.done = true};
       }
       std::optional<pb::Vec3> chosen =
           MoveToFirstValidSpot(bot, candidates, nullptr);
