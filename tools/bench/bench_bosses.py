@@ -97,9 +97,9 @@ DEVOURER_NOTES = """# The Forge of Souls — Devourer of Souls
 """
 
 LOKEN_NOTES = """# Halls of Lightning — Loken
-- **Lightning Nova**: 4s cast dealing heavy AoE damage within 20 yd; step just outside the radius and return after it lands.
+- **Lightning Nova**: 4s cast dealing heavy AoE damage within 20 yd; step just outside the radius (you automatically return to range after it lands).
   - Standing order: `Lightning Nova cast -> out of it`
-- **Pulsing Shockwave**: deals stacking nature damage that grows with distance from Loken; stay close to Loken when not dodging Lightning Nova.
+- **Pulsing Shockwave**: stacks nature damage with distance; do NOT write a separate `to Loken` order since `out of it` automatically returns you after Lightning Nova.
 """
 
 EREGOS_NOTES = """# The Oculus — Ley-Guardian Eregos (3D Drake Vehicle Fight)

@@ -21,7 +21,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "tools" / "bench"))
 import trace_parity  # noqa: E402
 
-DODGE_ACT_VERBS = ("AWAY", "AVOID", "TO", "KITE", "STOP")
+DODGE_ACT_VERBS = ("OUT_OF", "AWAY", "AVOID", "TO", "KITE", "STOP")
 
 
 def _is_dodge_act(detail: str) -> bool:
