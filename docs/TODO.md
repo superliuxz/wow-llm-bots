@@ -9,19 +9,12 @@ Last updated 2026-11-21.
 
 ## In progress
 
-- **Re-lock `~/.local/share/wow-llm-bots/scorer.sha256` and `config/scorer-lock.sha256` (awaiting
-  user OK):** Review 9 Low 1, Low 2, and Low 4 modified locked measurement files
-  (`tools/bench/hill_climb.py`, `server_module/src/snapshot/behavior_trace.{h,cc}`,
-  `server_module/src/llm_brain_world_script.cc`); left untouched at the Review 8 digest
-  (`f58a32adcf70...`) per `CONTRIBUTING.md` Rule #6 until explicit user approval.
+- **Higher-power 5-boss benchmark (`--runs 16`, `devourer,loken,kaelthas,murmur,ikiss`):** run all
+  5 bosses under one commit with `16` trials per arm (`320` total valid trials) to test `notes.md`
+  kill-rate effects on `ikiss`/`murmur`/`kaelthas` and replace `ick` with `devourer`
+  (`Devourer of Souls`) + `loken` (`Loken`).
 
 ## Next, in order
-
-- **Higher-power Murmur/Ikiss re-run & harder boss replacement (Review 9):** report claims fixed;
-  ready to re-run `ikiss` and `murmur` with `15–20` trials per arm under one commit to test whether
-  notes change kills, replacing `ick` (`8/8` across all arms) with **`devourer` (`Devourer of Souls`,
-  Forge of Souls `map=632`, `0` trash within 80 yd, `stage_xyz` updated to entrance `(4922.86, 2175.63, 639.0)`)**
-  or `loken` (`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`).
 
 - **Human baseline coverage & initial blind-rating batch** (`docs/plans/self-improving-loop.md`):
   layered scorer (Steps 1–6) is built and live-verified, and General/Say/Party chat + quest
@@ -137,8 +130,9 @@ Last updated 2026-11-21.
   [`bench_bosses.py`](../tools/bench/bench_bosses.py). Verified via `tools/wlb check`
   (`60 + 119 + 224` C++ tests incl. `EvictsIdleTrackedCharactersAndReportsCapOverflow`; `7/7` in
   [`hill_climb_test.py`](../tools/bench/hill_climb_test.py) incl. `env -i` `/proc` ancestor and
-  digest checks) and `build.server(test=True)`. *(Re-locking `scorer.sha256` +
-  `config/scorer-lock.sha256` left pending user OK under `In progress`.)*
+  digest checks), `build.server(test=True)`, and (with explicit user OK) re-locked & verified all
+  `28` measurement locks in `~/.local/share/wow-llm-bots/scorer.sha256` and
+  [`config/scorer-lock.sha256`](../config/scorer-lock.sha256) (`46de81d26630...`).
 
 - 2026-11-21: **Boss benchmark runner speedups (Items 1–3) & skipped-proposal rationale:** added
   `phase_timings` (`setup_s`, per-wave phases, `teardown_s`, `wall_s`) to benchmark JSON,

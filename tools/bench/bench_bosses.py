@@ -88,12 +88,18 @@ ICK_NOTES = """# Pit of Saron — Ick & Krick
 DEVOURER_NOTES = """# The Forge of Souls — Devourer of Souls
 - **Mirrored Soul**: links boss to a party member for 8s — all boss damage hits that ally!
   - Standing order: `Mirrored Soul cast -> stop attacking`
-  - Standing order: `Mirrored Soul on any -> stop attacking`
+  - Standing order: `Mirrored Soul on anyone -> stop attacking`
 - **Wailing Souls**: sweeping frontal beam; stay behind the boss.
   - Standing order: `Wailing Souls cast -> to behind Devourer of Souls`
 - **Well of Souls**: purple void zone on the ground.
   - Standing order: `Well of Souls appears -> avoid Well of Souls`
 - **Phantom Blast**: heavy shadow nuke on tank; interrupt when possible.
+"""
+
+LOKEN_NOTES = """# Halls of Lightning — Loken
+- **Lightning Nova**: 4s cast dealing heavy AoE damage within 20 yd; run >=25 yd away!
+  - Standing order: `Lightning Nova cast -> away Loken 25`
+- **Pulsing Shockwave**: deals stacking nature damage that grows with distance from Loken; stay close to Loken when not dodging Lightning Nova.
 """
 
 EREGOS_NOTES = """# The Oculus — Ley-Guardian Eregos (3D Drake Vehicle Fight)
@@ -173,6 +179,18 @@ BOSSES = {
         spawn_xyz=(5645.0, 2507.4, 708.9),
         strip_strat="wotlk-fos",
         notes_md=DEVOURER_NOTES,
+        max_s=210.0,
+    ),
+    "loken": dict(
+        era="WotLK",
+        tag="loken_nova",
+        boss_name="Loken",
+        level=80,
+        map_id=602,
+        stage_xyz=(1331.47, 259.62, 53.4),
+        spawn_xyz=(1162.0, 33.83, 60.81),
+        strip_strat="wotlk-hol",
+        notes_md=LOKEN_NOTES,
         max_s=210.0,
     ),
     "eregos": dict(

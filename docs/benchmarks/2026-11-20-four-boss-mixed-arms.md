@@ -6,6 +6,9 @@
 - **Cohort A (`523ab4c`):** `Kael'thas` (`32` valid) + `Ick` (`32` valid), using the `3.0 s` entrance sleep + `0.2 s`/bot pull stagger.  
 - **Cohort B (`aac0546`):** `Murmur` (`32` valid) + `Ikiss` (`32` valid), after cutting entrance settle to `~0.2 s` (`_wait_harness_connected` + `0.05 s`/bot move) and fixing three multi-wave bugs (re-run from scratch after discarding the broken `523ab4c` waves below).
 
+> [!NOTE]
+> The single-commit 5-boss × 4-arm × 16-runs benchmark (`devourer,loken,kaelthas,murmur,ikiss`, `320` planned valid trials) replacing `ick` is currently in progress; the tables below record the prior `n = 8` two-cohort baseline.
+
 ---
 
 ## 1. Experimental Setup, Cohorts & Discarded Runs
@@ -134,7 +137,7 @@ On **Kael'thas**, `Flame Strike` is cast by `Flame Strike Trigger (Kael - 5Man)`
 3. **Methodology caveats & follow-up:**
    - **Immediate pull handicap on LLM arms:** pulling at `spawn_xyz` immediately upon connect puts `llm` and `llm_no_notes` into combat before their first boss-room LLM decision (and in Cohort B before initial `notes.md` standing-order compilation) finishes (`first_line_ms` p50 `242–479 ms`, p95 `997–1,400 ms`), whereas `baseline` starts with its C++ scripts active from tick `0`.
    - **Room trash & environmental death:** nearby trash affects all 4 arms on each pull (`kaelthas`: 6-mob pack at `34–41 yd`; `ick`: Plagueborn Horrors at `21–25 yd`; `murmur`: 3 Cabal Spellbinders at `28–30 yd`; `ikiss`: Sethekk packs at `49–65 yd`). One live environmental death (`event="died"`, `detail="environment"`) was recorded in `murmur` (`Pfoua` after post-fight `tele 0` when `Murmur's Touch` triggered `Shockwave` fall damage `3,579`).
-   - **Next experiment:** re-run `ikiss` and `murmur` with **`15–20` trials per arm under a single commit** to test whether `notes.md` actually changes kill rates, and replace `ick` with a harder boss.
+   - **Next experiment (in progress):** single-commit 5-boss × 4-arm × 16-runs benchmark (`devourer,loken,kaelthas,murmur,ikiss`, `320` total valid trials) replacing `ick` (`8/8` ceiling) with `devourer` and `loken` and testing `notes.md` kill-rate effects on `kaelthas`, `murmur`, and `ikiss`.
 
 ---
 
