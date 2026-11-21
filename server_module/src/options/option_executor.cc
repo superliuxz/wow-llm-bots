@@ -536,7 +536,7 @@ TalkResult TalkToNpcNow(Player* bot, Creature* npc) {
   // 3. Vendor / repair: sell grey items, repair equipment. Non-grey items are
   // left to the brain so BoEs, trade goods, and quest-starting items are never
   // sold automatically. Binding the hearthstone at an innkeeper is also the
-  // brain's choice (docs/plans/options-and-panels.md, "Later").
+  // brain's choice (docs/specs/options.md, "Later").
   if (npc->HasNpcFlag(UNIT_NPC_FLAG_VENDOR)) {
     const uint32_t sold = SellGreyItemsTo(bot, npc->GetGUID());
     if (sold > 0) {

@@ -20,7 +20,7 @@ MYSQL_CNF = ETC / "mysql.cnf"  # The one MySQL, shared by the play and test serv
 @dataclasses.dataclass(frozen=True)
 class Instance:
     """One game server: the play server you log in to, or the isolated test server e2e and perf
-    run on (docs/plans/phase2.md, E) while you play. Each has its own build and install, run
+    run on (docs/design.md, E) while you play. Each has its own build and install, run
     directory (pid files, console pipe, brain socket), logs, databases and world port; they
     share MySQL, the client data and llama-server."""
     name: str

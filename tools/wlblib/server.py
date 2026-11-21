@@ -4,7 +4,7 @@ processes only, found by their pid files, never by name across the machine.
 
 Two servers (common.Instance): the play server, and the isolated test server e2e and perf run on
 while you play (worldserver only, its own port, run directory, logs and databases, reset for
-every run from a golden copy: docs/plans/phase2.md, E). Functions take `inst`, the play server
+every run from a golden copy: docs/design.md, E). Functions take `inst`, the play server
 by default."""
 
 import datetime

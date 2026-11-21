@@ -1,6 +1,6 @@
 """A bot hurt by a fight, told to Rest, eats or drinks until full and the step is done.
 
-docs/plans/options-and-panels.md, "Rest": offered out of combat below full health or mana; the body uses
+docs/specs/options.md, "Rest": offered out of combat below full health or mana; the body uses
 the food and water in its bags (the fixture carries bread and water; playerbots' eat / drink
 actions, no free food) or sits. The fight comes first: the same scene as `e2e choose`. It must
 really eat or drink: a Food or Drink aura shows while resting (review of f40b0b6, finding 15:

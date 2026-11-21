@@ -3,7 +3,7 @@
 // TEST ONLY. Whether a GBNF grammar accepts a text, checked with llama.cpp's
 // own grammar code (the same that constrains llama-server), so a test can
 // prove that what our printers write is what our grammars allow
-// (docs/plans/grammar-idl.md, "Tests"). No model, vocabulary or GGML runtime
+// (docs/specs/grammar-idl.md, "Tests"). No model, vocabulary or GGML runtime
 // is involved. This header keeps llama.cpp's headers (<map>, <regex>) out of
 // the code that includes it.
 

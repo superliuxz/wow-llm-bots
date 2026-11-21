@@ -64,7 +64,7 @@ def _include_jobs():
         jobs.append((f, ["--", *HEADER_FLAGS_20]))
     for f in (ROOT / "harness").rglob("*.h"):
         # harness/ for grammar/wlb_runtime.h; the generated grammar headers
-        # (grammar/<name>.wlb.h, docs/plans/grammar-idl.md) are in out/common/gen.
+        # (grammar/<name>.wlb.h, docs/specs/grammar-idl.md) are in out/common/gen.
         jobs.append((f, ["--", *HEADER_FLAGS_26, "-Iharness/src", "-Iharness",
                          f"-I{OUT / 'common' / 'gen'}"]))
     for f in (ROOT / "server_module").rglob("*.h"):
@@ -163,7 +163,7 @@ def triggers():
 
 def rules(fix=False):
     """RULES.md's reply form is generated from plan.wlb's line descriptions
-    (docs/plans/grammar-idl.md): stale, or anchors not found, fails."""
+    (docs/specs/grammar-idl.md): stale, or anchors not found, fails."""
     run(["python3", "-I", "-B", ROOT / "tools/grammar/wlb_gen_test.py", "-q"])
     command = ["python3", "-I", "-B", ROOT / "tools/grammar/wlb_gen.py", "--rules",
                ROOT / "harness/grammar/plan.wlb", ROOT / "content/RULES.md"]

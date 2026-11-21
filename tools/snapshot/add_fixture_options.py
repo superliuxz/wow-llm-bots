@@ -1,5 +1,5 @@
 """Writes the module's options into the eval snapshots, so each case shows the screen a live bot
-sees (review 2026-11-17, finding 5; docs/plans/options-and-panels.md, "One code path, live and offline").
+sees (review 2026-11-17, finding 5; docs/specs/options.md, "One code path, live and offline").
 
 Each case's <case>.facts.json (what the module knows beside the screen: NPC flags, the Explore
 spots and Go to places at that spot, the bags and skills) is written by the module itself:

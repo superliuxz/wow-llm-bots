@@ -40,7 +40,7 @@ void Scheduler::SubmitCancelable(const std::string& bot,
   }
 
   // Preempt an obsolete lower-priority in-flight call for the same bot when a
-  // P0 combat wake arrives (docs/plans/latency.md §6).
+  // P0 combat wake arrives (docs/design.md §6).
   if (urgency == Urgency::kP0Combat) {
     if (const auto it = in_flight_.find(bot);
         it != in_flight_.end() && it->second.urgency > Urgency::kP0Combat &&

@@ -10,7 +10,8 @@ Last updated 2026-11-20.
 ## In progress
 
 - Next benchmark run: run `--mode mixed` + `--mode baseline` + `--mode no_brain` with `--runs 6`
-  on the fixed runner (`bench_bosses.py`) for statistically powered comparison data.
+  on the fixed runner (`bench_bosses.py`) for statistically powered comparison data, and save one
+  clean report under `docs/benchmarks/`.
 
 ## Next, in order
 
@@ -26,11 +27,14 @@ Last updated 2026-11-20.
 ## Later
 
 - **Bind hearthstone** at an innkeeper as an option of its own (the brain's choice, through the
-  bind spell), not part of Talk (`docs/plans/options-and-panels.md`).
+  bind spell), not part of Talk (`docs/specs/options.md`).
 - **More e2e cases:** death and respawn, harness reconnect, a failing choice reaching the brain.
 - **More perf:** a raid-wide burst (N bots woken in the same instant every M seconds; today's
-  `SURPRISES` wakes bots independently), cells past capacity, and the harness-side age points
-  (`age_at_ask`, `age_at_plan`) once H4 exists (`docs/plans/harness.md`, "Age").
+  `SURPRISES` wakes bots independently) and cells past capacity (`docs/specs/harness.md`, "Age").
+- **GPU `--backend-sampling` or thin `libllama` runner:** GBNF disables GPU `--backend-sampling`
+  (~10 ms/step CPU overhead under 16-slot load); either run unconstrained with `--backend-sampling`
+  + 1 grammar retry, or replace `llama-server` HTTP with a thin `wlb_net` `libllama` daemon that
+  masks structured fields and GPU-samples free text.
 - **Brain memory**, `var/bots/<name>/` (its own git repo): not created yet, on purpose.
 - **`IsInRandomAccountList` audit**, the remaining sites (`docs/playerbots-random-bot-audit.md`).
 - **`module/server/`** layout, when a second AzerothCore module exists.
@@ -41,14 +45,13 @@ Last updated 2026-11-20.
   `"who"` several times before switching to a real question (and stopped naturally after
   `"sounds good, let me know when you're ready"`).
 - A bot once wrote `tell <its own name>:` (Gatda, Gemma 4, live 2026-11-17); the module refuses
-  it. Likely cause, the RULES.md example `tell Gatda:`, is fixed (review finding 8); watch whether
-  it recurs.
+  it. Likely cause, the RULES.md example `tell Gatda:`, is fixed; watch whether it recurs.
 - **Eval (2026-11-18, Gemma 4):** 42/48 scored cases (88%, random 22.0; 4/4 standing-order cases
   pass, `do:` p50 `72 ms`, total `208 ms`; 7 unfailable cases not scored). Misses:
   `healthy_boar_pull`, `skip_tapped_mob`, `red_mob_nearby`, `hp_60_fine`, `bags_full` (with closed
   bags it explores; in live play the habit opens full bags, and `bags_full_open` passes),
   `new_loot_hover`. The Qwen3.6 shootout was not re-run.
-- **Panels, things not built yet** (`docs/plans/options-and-panels.md`): no `Use <item>` option
+- **Panels, things not built yet** (`docs/specs/options.md`): no `Use <item>` option
   for bag items (and thus no spec §10 use-item quest eval case yet: needs item target selection for
   unit/object/self quest items); the module sends no `quest_accepted` / `quest_complete` /
   inventory-full events, so the habits read the snapshot instead (`bag_free_slots`, the quest
@@ -92,260 +95,61 @@ Last updated 2026-11-20.
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-20: **Docs cleanup:** deleted superseded/invalidated docs (`docs/reviews/2026-11-18-f40b0b6.md`,
+  `docs/reports/hill-climb-2026-11-19.md`, `docs/benchmarks/2026-11-20-boss-*.md`,
+  `docs/plans/{phase2,harness,latency,grammar-idl}.md`, `docs/specs/trigger-audit.md`); merged
+  lasting decisions into `docs/design.md`, moved built specs to `docs/specs/{harness,grammar-idl,options}.md`,
+  repointed all code/doc comments, and pruned `docs/TODO.md`.
 - 2026-11-20: **Review 4 Lows 11 & 14 (DBC spell radii, cast-origin dodge distance, impact-dodge meter, incremental trace tailing):**
-  `TraceSample` (`behavior_trace.{h,cc}`, `llm_brain_world_script.cc`) now emits `target_x`,
-  `target_y`, and DBC `target_cast_radius` via `SpellInfo::Effects[eff].CalcRadius()`;
-  `tools/bench/dodge_timeline.py` drops the hardcoded radius table, measures Euclidean distance
-  from the cast origin `(target_x, target_y)` for all bots (even when not targeting the boss), and
-  ties `act_delay_ms` to dodge/movement verbs (`AWAY`/`AVOID`/`TO`/`KITE`/`STOP`);
-  `tools/bench/boss_meter.py` replaces max-distance `CastDodgeYd` with `impact_dist_yd` and
-  `outside_at_impact` (`ImpactDodge`); `tools/bench/bench_bosses.py` replaces full-dir trace
-  re-reads with incremental byte-offset `_TraceTailer` (partial-line safe) and clarifies
-  `AccountInstancesPerHour` vs `TELE_TO_GM_MODE`. Verified via unit tests (`behavior_trace_unittest.cc`,
-  `tools/bench/dodge_timeline_test.py` wired into `tools/wlb check`) and live on Ikiss
-  (`--mode mixed --runs 2 --parallel 2`, confirming DBC `radius=35.0yd` for Arcane Explosion and
-  `ImpactDodge` / `outside_at_impact` on real traces).
-- 2026-11-20: **Review 4 fixes (High 1, Mediums 2–7, Lows 8–10, 12–13, partial 14) + auto-loaded rules:**
-  `llmtest resetbot` preserves passive auras (`passives=62` verified live) and resets pet health/power,
-  rage/energy/runic power, ammo, and reagents (`test_commands.cc`); `llmtest gear` refreshes glyphs,
-  ammo, and reagents for the chosen spec; `llmtest checkstrat` uses non-allocating
-  `GetSupportedStrategies()` (0 leaks); `bench_bosses.py` reads `first_line_ms` from
-  `bots_dir/*/events/*.jsonl` (fails if empty), scopes all console checks to exact bot names,
-  verifies `map=0` before `resetbot` and non-reused distinct dungeon instance IDs across waves,
-  asserts baseline scripts are ON, adds `--mode mixed` (rotates `llm` and `llm_no_notes` across
-  parallel parties in the same wave under shared GPU load), and overwrites output JSON cleanly
-  unless `--append`; `behavior_trace_scripts.cc` bounds group `mob_kill` to 100 yd; `trace_parity.py`
-  drops `item_unequip` & `quest_abandon` (unit-tested, scorer re-locked); standardized the 3-step
-  review-fix procedure in `CONTRIBUTING.md` and added `.agents/rules/contributing.md` (`always_on`).
-  Live-verified on Ikiss (`--mode mixed --runs 2 --parallel 2`): inst 1 (`llm`) KILLED in `69.1 s`
-  (`Loadc`/`Loadd`/`Loade` dodged `34.0–34.1 yd`, `p50=257.4 ms`, `40` calls) vs inst 2
-  (`llm_no_notes`) wiped at `59.3 s` (`0.5–10.7 yd`, `p50=385.1 ms`, `27` calls).
-- 2026-11-20: **Parallel 3-party boss benchmark scaffolding (`tools/bench/bench_bosses.py`, `test_commands.cc`):**
-  added `llmtest resetbot` and `llmtest where`, raised `AccountInstancesPerHour = 1000` (note:
-  skipped by `TELE_TO_GM_MODE`), and upgraded `bench_bosses.py` to run `--parallel 3` identical
-  5-man parties in one persistent `worldserver` with distinct dungeon instances (`[1, 2, 3]`
-  verified on Ikiss) and fresh `--bots-dir` per wave. *(Open bugs tracked above under "In progress":
-  `resetbot` strips passive auras, `do_ms=` latency parser is empty, console matching needs bot
-  name scoping, and modes need rotation within waves.)*
-- 2026-11-20: **Review fixes on `trace-all-events` (all 9 open items verified):**
-  `server.console()` now returns captured output (`tools/wlblib/server.py`); `bench_bosses.py`
-  stages bots inside the dungeon before starting `harness`, enforces unconditional role checks and
-  post-arrival per-bot `llmtest checkstrat`, splits `no_brain` / `llm_no_notes` / `llm` /
-  `baseline` modes, and invalidates/retries zero-pull trials; `llm_brain_world_script.cc` logs
-  `act_sent` events and `tools/bench/dodge_timeline.py` reports `acts/min`, `act_delay_ms`,
-  stationary->moving transitions, and impact distance vs spell radius; `behavior_trace_scripts.cc`
-  credits `mob_kill` to all traced group members via `OnUnitDeath` and drops unvalidated
-  `vendor_buy`; `behavior_trace_unittest.cc` covers multi-file rotation and direct production
-  `TraceSample` formatting; `docs/benchmarks/2026-11-20-boss-apples-to-apples.md` marks earlier
-  data invalidated; `CONTRIBUTING.md` makes updating `docs/TODO.md` an explicit MUST. Live-verified
-  on Ikiss (`tbc-seth` checked on all 5 bots after arrival, `dodge_timeline.py` confirmed
-  `Loadd` reached `34.1 yd` `Safe=YES` while `Loadb` died at `28.4 yd` and `Loada`/`Loadc` had
-  `0.0 acts/m`).
+  `TraceSample` (`behavior_trace.{h,cc}`, `llm_brain_world_script.cc`) emits `target_x`, `target_y`,
+  and DBC `target_cast_radius` via `SpellInfo::Effects[eff].CalcRadius()`; `dodge_timeline.py` drops
+  the hardcoded radius table, measures Euclidean distance from cast origin `(target_x, target_y)` for
+  all bots, and filters `act_delay_ms` to dodge/movement verbs; `boss_meter.py` reports
+  `impact_dist_yd` & `outside_at_impact`; `bench_bosses.py` uses incremental byte-offset
+  `_TraceTailer` (partial-line safe). Unit-tested (`dodge_timeline_test.py` in `tools/wlb check`)
+  and live-verified on Ikiss (DBC `radius=35.0yd`).
+- 2026-11-20: **Review 4 fixes (High 1, Mediums 2–7, Lows 8–10, 12–13) + auto-loaded rules:**
+  `llmtest resetbot` preserves passive auras (`passives=62` live-verified) and resets pet
+  health/power, rage/energy/runic power, ammo, and reagents; `llmtest gear` refreshes glyphs, ammo,
+  and reagents; `llmtest checkstrat` uses non-allocating `GetSupportedStrategies()`;
+  `bench_bosses.py` reads `first_line_ms` from `bots_dir/*/events/*.jsonl` (fails if empty), scopes
+  console checks to bot names, verifies `map=0` pre-reset and non-reused dungeon instance IDs across
+  waves, asserts baseline scripts are ON, adds `--mode mixed` (rotates `llm`/`llm_no_notes` across
+  parallel parties in one wave), and overwrites output JSON cleanly unless `--append`;
+  `behavior_trace_scripts.cc` bounds group `mob_kill` to 100 yd; `trace_parity.py` drops
+  `item_unequip` & `quest_abandon` (scorer re-locked); standardized the 3-step review-fix procedure
+  in `CONTRIBUTING.md` + `.agents/rules/contributing.md` (`always_on`).
+- 2026-11-20: **Review 3 fixes on `trace-all-events`:**
+  `server.console()` returns captured output (`tools/wlblib/server.py`); `bench_bosses.py` stages
+  bots inside the dungeon before starting `harness`, enforces role and post-arrival `checkstrat`
+  checks, splits `no_brain` / `llm_no_notes` / `llm` / `baseline` modes, and invalidates zero-pull
+  trials; `llm_brain_world_script.cc` logs `act_sent` events; `behavior_trace_scripts.cc` credits
+  group `mob_kill` via `OnUnitDeath` and drops unvalidated `vendor_buy`; `behavior_trace_unittest.cc`
+  covers multi-file rotation and direct `TraceSample` formatting.
 - 2026-11-19: **General / Say / Party chat + quest grouping (invite/accept/decline/leave):**
   wired `/s Say`, `/y Yell`, `/p Party`, `/ra Raid`, and `/1 General` / Trade / LFG hooks in
   `server_module/src/chat/chat_scripts.cc` and `speak.cc`; added `INVITE`, `ACCEPT_INVITE`,
   `DECLINE_INVITE`, `LEAVE_GROUP` options in `snapshot/snapshot.h`, `options.{h,cc}`,
-  `option_executor.cc` (via `HandleGroup*Opcode`), `llm_brain_world_script.cc` (pending invite
-  `PromptEvent::GROUP_INVITE` wake + recent chatter invite candidates), and harness
-  `screen_renderer.cc` / `bot_loop.cc`.
+  `option_executor.cc`, `llm_brain_world_script.cc`, and harness `screen_renderer.cc` / `bot_loop.cc`.
 - 2026-11-19: **Layered human-likeness scorer (Steps 1–6, `docs/plans/self-improving-loop.md`):**
   5 Hz observer-parity recording + explicit gameplay events (`behavior_trace_scripts.{h,cc}`,
-  `trace_parity.py` fixed-time reconstructor & situation labeller), pairwise Bradley–Terry ranker
-  with bootstrapped 95% CIs + `blind_rate.py`, Layer D calibration (`known_bad_bots.py`,
-  `scorer_calibration.py`), Layer C `scikit-learn` per-situation diagnostic classifier + MMO
-  adversary suite (`adversary_suite.py`, `var/bench-venv`), Step 5 population/long-horizon metrics
-  (`population_metrics.py`), and `hill_climb.py` / `soak_scorer.py` switched to Layer A gates +
-  Layer B ranking (retired 0–100 composite score & `human_metrics.py` deleted). Live-verified on
-  10-bot soak (3,171 5 Hz samples, 204 `cast_start`, 20 `quest_accept`, 10 `quest_turnin`, 11/11
-  Layer A gates PASS, Layer C `[travel]` classifier flagged `snap_turn_rate` against real `Hele`
-  baseline, Layer D calibration PASS: `heldout_human 1000.0 > current_bots 175.1 > all 4 known-bad`).
-
-- 2026-11-19: self-improving hill-climbing loop (`docs/plans/self-improving-loop.md`,
-  `tools/bench/soak_scorer.py`, `tools/bench/hill_climb.py`, `tools/wlb test soak --score --runs`,
-  `level`/`xp` added to `TraceSample` for real XP/h guardrails): SHA-256 tamper-checked scorer
-  (0–100 human-likeness score + optional `--judge` + hard guardrails), experiment ledger in
-  `var/experiments/ledger.jsonl`, and Round 0 baseline recorded (`SCORE 20.56/100`, all 6
-  guardrails PASS, `xp/h=1949`, `max_wakes/min/bot=3.0`, `do_p95=416 ms`, `0` deaths).
-- 2026-11-19: unified human + bot behavior tracing (`server_module/src/snapshot/behavior_trace.{h,cc}`,
-  `LlmBrain.TraceDir` + `LlmBrain.ObserveHumans` in `llm_brain_world_script.cc`), distribution
-  analyzer (`tools/bench/human_metrics.py`), and multi-bot live soak test (`tools/wlb test soak`,
-  `config/tests/soak.llm-brain.overrides`, `tools/wlblib/cases/soak.py`): first 1-min 10-bot soak
-  caught a 31 wakes/min `Talk` loop on empty vendors (`TalkToNpcNow` now returns `"<NPC> has
-  nothing for you"` as a refusal so `StepRefusalBackoff` engages); re-run passed with 27 decisions,
-  `max_wakes/min/bot=7.0`, `do_p50=201 ms`, `do_p95=349 ms`, `0` errors/invalid, `10/10` moved,
-  and flagged the first real movement tells (`0.0 jumps/min`, `4.1 instant >90° turns/min`).
-- 2026-11-18: added `e2e boss` (`tools/wlblib/cases/e2e_boss.py`) as a repeatable live boss
-  plumbing regression test (Loken in Halls of Lightning, `-wotlk-hol`, mock brain): verifies
-  `Lightning Nova` visibility over background `Pulsing Shockwave` channel, `1 ms` `AWAY Loken 25`
-  dispatch, movement `2.7 -> 16.3 yd`, 0 deaths, 0 visibility/command errors; also fixed a real
-  replan interaction it caught (restating an in-flight movement order during a mid-fight wake no
-  longer cancels it with `stop moving`). Both `e2e boss` and `e2e orders` pass (`2/2`).
-- 2026-11-18: review of `e84d03e`, all 15 findings (Highs #1–#3, Mediums #4–#15) + strengthened
-  `e2e orders`: `SetOrders` preserves latches across unchanged orders, order wake/failure backoff,
-  active orders shown on prompt, `stop moving` when a new plan drops a movement act and module
-  clears `active_act` on non-`Keep` `Choose` / connect, `use` compares before/after spell/item
-  state and detects interrupted casts, ground-spell impact areas get distinct `"impact:<guid>"`
-  ids resolved to target points, `to`/`away` use `path.GetActualEndPosition()`, bare `away` uses
-  `it` and skips friendly areas, act targets use snapshot visibility filters, `cancel` uses
-  `HandleCancelAuraOpcode`, `Loot`/`Use`/`Talk` approaches re-walk if interrupted by an act,
-  `X targets me` only hides X's attacks, prompt puts screen before capped notes with a 12 KB
-  budget, `CollectOrderNames` filters structural headings (`Phase 1`), e2e rebuilds `wlb_wire_py`
-  and fails on decode errors, `--shootout` indexes scored rows, `no_whisper_unprompted` has a
-  whisperer; `wlb check` (376 unit tests) and `wlb test e2e orders` (all 6 live scenarios) pass.
-- 2026-11-18: first live boss test (Halls of Lightning — Loken, map 602, 2x level-80 Priests with
-  `-wotlk-hol` vs no-notes vs stock playerbots `wotlk-hol`, real `harness run` + Gemma 4):
-  caught and fixed a real boss bug in `server_module/src/snapshot/nearby_builder.cc` (generic
-  preparing casts now take precedence over background channeled auras like Loken's `Pulsing
-  Shockwave`, which had hidden `Lightning Nova`); added `llmtest tele`/`gear` in
-  `test_commands.cc`, `config/tests/boss.llm-brain.overrides`, and `<name> cast` / `on <who>` /
-  `appears` clarity in `content/RULES.md`. Measured: LLM + notes reacted in `0 ms` harness time
-  (`0.5 -> 23.0 yd` and `5.7 -> 30.3 yd`, 0 LLM wakes for Lightning Nova, 0 deaths); LLM without
-  notes wrote 0 orders (100% known-mechanics gate, stood at `0.5–0.7 yd`, `-34%` to `-37%` HP per
-  Nova); stock playerbots `wotlk-hol` moved to `14.2–18.1 yd` (0 deaths).
-
-- 2026-11-18: screen goldens populated with real module options (`harness/testdata/screens/*.facts.json`
-  captured on the isolated test server, `add_fixture_options.py` checking both `eval` and
-  `screens`, `tools/bench/prompt_render.py` taught module option numbering and self auras);
-  trigger audit tables (`trigger-conditions.tsv`, `trigger-actions.tsv`, `triggers.md`) re-judged
-  against the final grammar (`Points 0..99999` for `mana_points`): **483/547 (88%, 77% clean)**
-  conditions and **251/469 (54%, 43% clean)** actions fit (`OrdersTest.*Audit*` passing).
-- 2026-11-18: live standing-orders e2e suite (`tools/wlblib/cases/e2e_orders.py`,
-  `config/tests/orders.llm-brain.overrides`, `server_module/testdata/characters/priest-l80-boars.pdump`,
-  test-only `llmtest` console commands in `server_module/src/test/test_commands.{h,cc}`): runs real
-  `harness run` + `act_executor.cc` on the isolated test server across moving + `then` chain +
-  `group` with nearby mobs + edge-latching (`away group 10, then to behind Telda`), `target` +
-  `mark` (`SKULL`), `use` (`Power Word: Shield`), and >5 s `kite` + `stop moving`; also filled
-  `Unit::raid_marker` (`RaidMarkerOf` in `world_util.{h,cc}`, `nearby_builder.cc`,
-  `snapshot_builder.cc`), which the `mark` e2e caught missing. Standing orders (#5) complete.
-- 2026-11-18: turned standing orders on in live `BotLoop` calls and `RULES.md` (`CollectOrderNames`
-  from `notes.md` and the screen passed to both `PlanGrammar` and `ParsePlan`; `order:` reply line
-  generated from `plan.wlb` and verb section added to `content/RULES.md`; `harness/src/` grouped
-  into `screen/`, `plan/`, `llm/`, `runtime/`, `test/`). Eval on Gemma 4: **42/48** scored cases
-  (88%, random 22.0; **4/4** standing-order cases pass, 0 spurious orders on leveling cases,
-  first line p50 73 ms).
-- 2026-11-18: review of the standing-order commits (d912e3d..736b1f9): `group` crash, orders
-  latch per crossing, wakes covered by condition kind and subject (`WakeTrigger::kinds`,
-  `OrderCoversWake`), separate `done_act_command_id` (`kWireVersion` 2), act owns movement over a
-  plan walk, timeouts per act with `stop moving`, `kite` ends when its condition clears, bare
-  `away` anchored, `anyone` friendly only, `use` through the client's handlers and failing when
-  the cast doesn't start, bounded history. Not yet run live: no e2e case runs an order yet.
-- 2026-11-18: review of f40b0b6, all 18 findings (`docs/reviews/2026-11-18-f40b0b6.md`, "Status"),
-  plus the parts of review c80e791 left open (canned replies, say/yell checks, perf's parser copy);
-  all 7 e2e cases pass on the test server; eval 39/44 scored cases (a random option scores 21;
-  7 unfailable cases left out), failing: ignore_critter, red_mob_nearby, hp_60_fine, bags_full,
-  new_loot_hover.
-- 2026-11-18: isolated test stack (`docs/plans/phase2.md`, E): e2e and perf run on their own
-  test server (`out/server-test`, port 8086, `acore_test_*` databases reset from golden copies)
-  while the play server keeps running; perf beside a busy play server warns instead of failing.
-- 2026-11-18: grammar IDL steps 3 and 4, the plan finished (`docs/plans/grammar-idl.md`,
-  "Progress"): RULES.md's reply form generated and checked (`tools/wlb check rules`); the parser
-  prefers the names the call offered (fixes `use <name> on`); `OrderGrammar` without `oline`.
-- 2026-11-18: grammar IDL step 2: `plan.wlb` generates the plan code (`docs/plans/grammar-idl.md`,
-  "Progress"). Parity: eval 47/53 (same as before), `perf brain` PASS with every call valid
-  (capacity 8.5/s vs baseline 8.9; replay p95 1.3 s vs 0.8 s, on the llama-server already noted as slow).
-- 2026-11-18: review of 3a28d9d / fa50c95: `LootCorpseNow` says "Inventory is full" only when
-  there is no room ("You can't carry <item>" for the server's other refusals; items being rolled
-  for or held for the master looter stay and the step is done); RULES.md without the eval-shaped
-  wording; the loot trade-off documented (`docs/plans/options-and-panels.md`, "Loot").
-
-- 2026-11-18: live `harness` run (`Testpriest`, `Gatda`) verified `open:`, `close:`, `hover:`
-  (`hover: Kolkar Leaders` -> quest tooltip wake), remembered panels, and the habits in live play;
-  fixed two live findings + time-based hover (`UiState::kHoverDuration = 5 s` instead of 5
-  snapshots; `LootCorpseNow` through the server's loot opcodes so >80%-full bags no longer leave
-  grey items on corpses and loop `Loot`, returning `"Inventory is full"` when items cannot fit;
-  `FormatQuestText` for `$B`/`$N`/`$C`/`$R`/`$G` tokens in quest log and tooltips); `6/6` e2e
-  suites passing.
-
-- 2026-11-18: looking eval cases (`food_in_open_bags`, `bags_full_open`, `new_loot_hover`,
-  `forbid_look` on `healthy_boar_pull`, `eval_plans.py` `must_open`/`must_hover`/`forbid_look`);
-  aligned `PlanGrammar` + `FormatPlan` order (`goal? say? tell? open? close? hover?`) with
-  `RULES.md` so `goal:` no longer blocks `hover:`, and added panel/tooltip visibility facts +
-  example in `RULES.md`: **49/53 (92%)** on Gemma 4 (`new_loot_hover`, `quest_giver_and_boar`, and
-  `red_mob_nearby` passing), `perf brain` **PASS** (`10.2/s` capacity, `1040/1040` valid).
-
-- 2026-11-18: open panels (bags, character, quest log) and hover for items and quests
-  (`docs/plans/options-and-panels.md`): module fill and tooltips (item "Use:" text from Spell.dbc), `open:` /
-  `close:` / `hover:` reply lines with a wake once shown, remembered panels, three habits; RULES.md
-  reply form; `e2e panels`; unit tests (`ui_state`, `spell_text`, plan, screen, bot loop).
-
-- 2026-11-17: `e2e talk` and `e2e rest` (`config/tests/talk`); Rest fixes they found: the body
-  stood a sitting bot up at once (playerbots' next AI check: `SetNextCheckDelay` while sitting
-  without food, no `ResetActionDuration` after eat / drink), and a second item used in the same
-  tick was refused, so a bot ate and never drank (`ContinueRest`, once a second). `perf
-  snapshots` and `perf walk` re-baselined with OptionFacts (build p50 94 us, walk path p50
-  ~250 us).
-
-- 2026-11-17: review of 528f479 (the options), all 11 points: eval facts written by the module
-  (`test/facts_dump.cc`, `LlmBrain.TestFactsQueries`, `add_fixture_options.py --capture`);
-  `WorldPlaces` indexed at startup (76 ms), a bot's spots/places recomputed after 20 yd or 10 s,
-  quest map points cached; training through `Trainer::TeachSpell`; no hearthstone binding in
-  Talk; repair no-ops removed; place ids from position; the stall rule counts movement and paths
-  are asked for at most once a second; interrupted walks report an error; RULES.md states facts;
-  `e2e walk`; `position_facts` unit tests.
-
-- 2026-11-17: completed `#1`–`#3` and `#4` snapshot fill (`docs/results.md`,
-  `docs/plans/latency.md`): `snapshot_builder.cc` + `nearby_builder.{h,cc}` fill `ext.target`,
-  `ext.combat`, `ext.party`, `ext.quest_tracker`, and `base.self.indicators`; `herb_to_gather`
-  updated and passing (`1/1`); `wlb test perf --update-baselines --verify` passed (`2/2`) on Gemma
-  4 26B-A4B (`8.9/s` capacity, `50 bots / 30 s` p50 `0.4 s` / p95 `0.8 s`, snapshot build p50
-  `83 µs`); live run with rebuilt server verified whisper replies without running `who` as a
-  playerbots command, `ext` lines on screen, death -> `Keep` only -> `alive again`, urgent
-  state-flip `age_at_ask_ms` p50 `0.18 ms`, and `do:` p50 `109.6 ms` (`86` decisions).
-
-- 2026-11-17: follow-up review fixes on 4ce9490 (`bot_loop.cc`, `option_executor.cc`,
-  `nearby_builder.cc`, `llm_brain_world_script.cc`): preserve `say`/`tell` and refusal backoff
-  when an early-dispatched step fails during streaming; clear `last movement` before
-  `UseObjectNow`; check `GO_FLAG_INTERACT_COND`/`ActivateToQuest` and `GO_READY` for
-  `GameObject::usable`; clear stale/disconnected bot call state; send `OnSay` errors as
-  non-step events (`command_id = 0`) without an alerting snapshot; reset `step_refusals` on
-  normal `look timer`.
-
-- 2026-11-17: the rest of review c80e791 (fixed in 4ce9490): the done
-  signal (`Snapshot::done_command_id`), Gather/Use walk-then-use with the refusal reason,
-  `bag_free_slots`, loot up/down slopes, Attack aimed at the attacker, only Keep while dead, chat
-  checks (`CleanChatText`, whisper checks), stale-snapshot reset, eval fixtures with live
-  options (`fixture_options`; 13 cases `planned`), varied whisperers, test-stack restore
-  (state file, compile before stop, installed flavor, no test backups), zombie-safe `alive()`,
-  `perf brain` fails on failed calls, Glaze read limits and wire tests.
-
-- 2026-11-17: review fixes 1, 2, 7, 9, 10 (fixed in 4ce9490): whispers no
-  longer run as playerbots commands; watch latches start from the last snapshot; friendly units
-  aren't attackers; a cancelled/failed/superseded call's wake reasons and events are put back;
-  repeated step refusals back off (2-30 s).
-
-- 2026-11-17: default model switched to Gemma 4 26B-A4B (`tools/wlblib/llm.py`) by the rule
-  "the more accurate within the speed limit": 48-case eval Gemma 4 44/48 (`do:` 134 ms, full
-  306 ms) vs Qwen3.6 35/48 (118 / 218 ms); Qwen3.6 kept in `models/` (`MODEL=`).
-- 2026-11-17: replaced `protobuf` + `abseil-cpp` with `stephenberry/glaze` v9.1.0
-  (`common/proto/snapshot.h` plain C++20 structs + `snapshot_wire.cc` BEVE wire/JSON +
-  `snapshot_check` + `wire_py.py`), removed `third_party/abseil-cpp`, `third_party/protobuf`,
-  `protoc`, and `.pb` fixtures, and added GitHub Actions CI (`.github/workflows/ci.yml`) running
-  `wlb check --sanitizers`.
-- 2026-11-16: Chromium `common/base/strings/` (`strcat`, `string_util`, `string_split`,
-  `string_number_conversions`, `stringprintf`), migrated `harness/` off `absl::*`, replaced `<pthread.h>`
-  in `harness/src/main.cc` and all `<set>`/`<map>` across `harness/` + `server_module/` (`std::flat_map`,
-  `std::flat_set`, `std::vector`), enforced the bans in `CONTRIBUTING.md` + `wlb check includes`, and
-  split `*SAN` out of fast `wlb check` into `wlb check sanitizers` / `--sanitizers`.
-- 2026-11-16: H4 live harness loop (`screen_renderer` aligned with `snapshot.options`,
-  `module_connection`, `triggers`, `plan_runner`, `bot_loop`, `harness run` + `tools/wlb harness`;
-  113 harness unit tests passing across default, ASan+UBSan, TSan, MSan).
-- 2026-11-16: E2E latency Tier 1 (`option_executor.cc` `ResetActionDuration()`, `do:`-first + SSE
-  streaming early dispatch + `TCP_NODELAY`, optional `goal?`, shared-`system` checkpoint split +
-  soft slot affinity): solo `do:` `206 → 79 ms` (Qwen3.6) / `239 → 91 ms` (Gemma 4); Qwen3.6
-  capacity `7.8 → 11.3/s` (+45%) and 100-bot 15 s `2.1/3.2 s → 0.8/1.5 s` (`docs/plans/latency.md`,
-  `docs/results.md`).
-- 2026-11-16: plan quality fixes: action verbs on numbered screen lines, `look >= 10` s floor, and
-  `RULES.md` facts + example (`Gemma 4 26B` 9/15 → 13/15 at 239 ms, `Qwen3.6-35B` 6/15 → 11/15 at
-  206 ms; `docs/results.md`).
-- 2026-11-16: `tools/wlb test eval` with 15 live-capture cases (`harness/testdata/eval/`); model
-  shootout + `perf brain` on Gemma 4 26B-A4B (9/15, 8.6/s) vs Qwen3.6-35B-A3B (6/15, 7.8/s);
-  `gpt-oss-20b` dropped (`docs/results.md`).
-- 2026-11-16: `tools/wlb test perf` with baselines (snapshots, brain); `wlb test e2e` with the first
-  case (`choose`); `wlb test unit`.
-- 2026-11-16: `tools/wlb`, one Python CLI, replaces the 21 shell scripts.
-- 2026-11-16: `server_module/src` grouped (`config/`, `bridge/`, `snapshot/`, `options/`,
-  `bot_manager/`).
-- 2026-11-16: options in every snapshot and `Choose` carried out by the bot's body (M1); live: a bot
-  attacked, killed and looted a boar.
-- 2026-11-16: standing orders designed; all 595 playerbots boss triggers checked against the grammar.
-- 2026-11-16: snapshot delivery fixes (staggered, latest-wins, measured age); harness H1-H3.
+  `trace_parity.py`), pairwise Bradley–Terry ranker with bootstrapped 95% CIs + `blind_rate.py`,
+  Layer D calibration (`known_bad_bots.py`, `scorer_calibration.py`), Layer C per-situation
+  diagnostic classifier + MMO adversary suite (`adversary_suite.py`), Step 5 population metrics
+  (`population_metrics.py`), and `soak_scorer.py` / `hill_climb.py` switched to Layer A gates +
+  Layer B ranking (retired 0–100 composite score). Live-verified on 10-bot soak (11/11 Layer A
+  gates PASS, Layer D calibration PASS: `heldout_human 1000.0 > current_bots 175.1 > all 4 known-bad`).
+- 2026-11-19: **Unified human + bot behavior tracing & live soak test:**
+  `behavior_trace.{h,cc}` (`LlmBrain.TraceDir` + `LlmBrain.ObserveHumans`) and `tools/wlb test soak`
+  (`config/tests/soak.llm-brain.overrides`, `tools/wlblib/cases/soak.py`); fixed empty-vendor `Talk`
+  loop (`TalkToNpcNow` returns refusal so `StepRefusalBackoff` engages).
+- 2026-11-18: **`e2e boss` & `e2e orders` live plumbing tests:**
+  repeatable Loken boss test (`tools/wlblib/cases/e2e_boss.py`, `-wotlk-hol`, mock brain) verifying
+  `Lightning Nova` visibility over background `Pulsing Shockwave`, `1 ms` `AWAY Loken 25` dispatch,
+  and mid-fight replan preservation of in-flight movement orders; all 6 `e2e orders` scenarios pass.
+- 2026-11-18: **Grammar IDL (`docs/specs/grammar-idl.md`):**
+  `tools/grammar/wlb_gen.py` generates C++ types, parser, printer, GBNF, and `content/RULES.md`
+  reply form from `harness/grammar/{orders,plan}.wlb`, verified against real `llama-grammar.cpp`.
+- 2026-11-18: **Isolated test stack (`docs/design.md`):**
+  separate `out/server-test` build (port 8086, `acore_test_*` reset from `acore_golden_*`) so e2e,
+  perf, and boss benchmarks run without touching the play server (`out/server`).

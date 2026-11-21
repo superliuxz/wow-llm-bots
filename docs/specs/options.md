@@ -1,4 +1,4 @@
-# Plan: options and open panels (built)
+# Options and open panels
 
 The module's options beyond Attack / Loot / Gather / Use (Talk, Rest, Explore, Go to) and the
 open panels with hover (bags, character, quest log): what each targets, when it is offered, what

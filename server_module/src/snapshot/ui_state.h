@@ -13,7 +13,7 @@
 namespace llm_brain {
 
 // What one bot has open and points at in its client
-// (docs/plans/options-and-panels.md): the panels the `open` / `close` commands
+// (docs/specs/options.md): the panels the `open` / `close` commands
 // opened, and the thing the last `hover` names, whose tooltip shows for
 // kHoverDuration. Nothing of it goes to the game: the client opens bags and the
 // quest log without a packet.

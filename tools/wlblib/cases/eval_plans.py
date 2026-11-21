@@ -135,7 +135,7 @@ def check_case(case, got):
         problems.append(f"whispered {got['tell_to']}: {got['tell']}")
     if case.get("forbid_tell") and got["tell_to"]:
         problems.append(f"whispered {got['tell_to']} unprompted: {got['tell']}")
-    # Looking (docs/plans/options-and-panels.md): `open:` / `hover:` cost a second wake.
+    # Looking (docs/specs/options.md): `open:` / `hover:` cost a second wake.
     for panel in case.get("must_open", ()):
         if panel not in got["open"]:
             problems.append(f"didn't open {panel} (open: {got['open'] or 'none'})")

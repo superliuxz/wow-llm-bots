@@ -662,7 +662,7 @@ class LlmBrainWorldScript : public WorldScript {
       }
     }
     // How old the picture was when the bot acted on it: the number that
-    // matters (docs/plans/harness.md, "Age").
+    // matters (docs/specs/harness.md, "Age").
     const int64_t age_ms =
         target
             ? (base::TimeTicks::Now() - found.snapshot_built).InMilliseconds()
@@ -799,7 +799,7 @@ class LlmBrainWorldScript : public WorldScript {
     }
   }
 
-  // open / close / hover (docs/plans/options-and-panels.md): the next snapshot
+  // open / close / hover (docs/specs/options.md): the next snapshot
   // shows the panel or tooltip. A refusal comes back as a non-step error event.
   void OnUiCommand(size_t bot_index,
                    const std::string& name,

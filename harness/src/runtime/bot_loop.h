@@ -1,6 +1,6 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
-// Per-bot state and the live decision loop (`docs/plans/harness.md`, H4).
+// Per-bot state and the live decision loop (`docs/specs/harness.md`, H4).
 // Receives snapshots, immediate events, and periodic timer ticks on one
 // sequence; evaluates default triggers and active watches (`triggers.h`);
 // schedules brain calls by urgency with soft slot affinity (`scheduler.h`);
@@ -48,7 +48,7 @@ struct BotLoopConfig {
   // Snapshots come every 1 s (LlmBrain.SnapshotIntervalMs).
   base::TimeDelta stale_snapshot_after = base::Seconds(5);
   // Routine looking the harness does with no brain call (spec decision 12,
-  // docs/plans/options-and-panels.md); defaults a player has, parameters a
+  // docs/specs/options.md); defaults a player has, parameters a
   // brain can change later.
   struct Habits {
     bool open_bags_when_full = true;     // bag_free_slots reaches 0.

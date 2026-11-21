@@ -1,6 +1,6 @@
 // Standing orders (docs/specs/triggers.md, "The grammar (final, 2026-11-17)").
 // The one source of the order language: tools/grammar/wlb_gen.py generates
-// its C++ types, parser, printer and GBNF (docs/plans/grammar-idl.md).
+// its C++ types, parser, printer and GBNF (docs/specs/grammar-idl.md).
 // A choice's arms are tried in the order written: put the longer forms first
 // ("X cast on me" before "X on me").
 

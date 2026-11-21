@@ -79,7 +79,7 @@ struct Plan {
   std::string tell;
   // Panels to open / close (plan.wlb's `Panel` words), and the name of a
   // thing on screen to point at for its tooltip
-  // (docs/plans/options-and-panels.md). Empty: none.
+  // (docs/specs/options.md). Empty: none.
   std::vector<std::string> open;
   std::vector<std::string> close;
   std::string hover;

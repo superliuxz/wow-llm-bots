@@ -5,7 +5,7 @@
 // brain, watched for by the harness, carried out by the module.
 //
 // The language is harness/grammar/orders.wlb; its types, parser, printer and
-// GBNF are generated from it (grammar/orders.wlb.h, docs/plans/grammar-idl.md).
+// GBNF are generated from it (grammar/orders.wlb.h, docs/specs/grammar-idl.md).
 // This is the harness's small API on top: what plan.cc and the evaluator use.
 
 #ifndef HARNESS_PLAN_ORDERS_H_

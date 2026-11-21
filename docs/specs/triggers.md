@@ -261,9 +261,10 @@ from 3 conditions and 4 orders to 4 and 7.
 - **Coverage, measured (2026-11-16):** every one of the 595 `IsActive` bodies in
   `src/Ai/Raid` and `src/Ai/Dungeon` of the pinned playerbots commit (`ecc4a53`; 482 raid, 113
   dungeon) was read, following helpers, and written in the revised grammar or marked why it
-  can't be: `docs/specs/trigger-conditions.tsv`, one row each (how it was made:
-  `trigger-audit.md`; six readers in parallel, then 12 random rows re-read against
-  the source). The harness's parser (`harness/src/orders.cc`) parses every `when` cell
+  can't be: `docs/specs/trigger-conditions.tsv`, one row each (six LLM readers audited the
+  playerbots source in parallel under a fixed schema, writing a `when` clause or `unsayable`
+  reason per `IsActive` body, then 12 random rows were re-read against the source to verify). The
+  harness's parser (`harness/src/plan/orders.cc`) parses every `when` cell
   (all pass; `OrdersTest.*Audit*`), so the table is the grammar's regression set. Leaving out 25 `plumbing` rows (base
   classes, shared timer keepers), 18 `bugnet` rows (resetting state, stuck bots) and 5 `cheat`
   rows (the `*Cheat*` triggers, which only fire with playerbots' raid cheat on), the 547

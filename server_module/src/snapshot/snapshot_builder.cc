@@ -62,7 +62,7 @@ namespace {
 namespace pb = wlb::snapshot;
 
 // When a bot's Explore spots and Go to places are worked out again
-// (docs/plans/options-and-panels.md, "World-thread cost").
+// (docs/specs/options.md, "World-thread cost").
 constexpr float kFactsRecomputeYd = 20.0f;
 constexpr base::TimeDelta kFactsRecomputeAfter = base::Seconds(10);
 

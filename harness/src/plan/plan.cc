@@ -1,7 +1,7 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
 // The plan's format is harness/grammar/plan.wlb; its parser, printer and GBNF
-// are generated (grammar/plan.wlb.h, docs/plans/grammar-idl.md). This file is
+// are generated (grammar/plan.wlb.h, docs/specs/grammar-idl.md). This file is
 // the harness's API on top: the Plan its callers use, and the call's inputs
 // (option count, whisperers, hover and order names) as the generated env.
 

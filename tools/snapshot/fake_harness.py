@@ -234,7 +234,7 @@ def play_script(seconds, words, echo=print, tail_s=None):
             if not words or time.time() < next_at:
                 continue
             # "open:bags", "close:bags", "hover:<item in open bags>": the panel
-            # commands of docs/plans/options-and-panels.md, sent as soon as they can be.
+            # commands of docs/specs/options.md, sent as soon as they can be.
             verb, _, arg = words[0].partition(":")
             if verb in ("open", "close", "hover"):
                 cmd = {"bot": bot, "command_id": sent + 1}
