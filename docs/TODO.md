@@ -9,13 +9,42 @@ Last updated 2026-11-20.
 
 ## In progress
 
-### Minor Benchmark & Verification Caveats (self-audit of `d26c869`)
+### Review Trace All Events 6 (`a7b46eb`) — Open Items
+
+#### Medium
+- [ ] **New 1 — `docs/specs/trace-events.md` doesn't match the code:** two event names are wrong
+  (`money_change` vs `money_changed`, `reputation` vs `rep_change`); it marks `loot_roll_win`,
+  `item_open`, `group_invited`, `money_changed`, and `rep_change` as parity-allowed but they aren't,
+  and the `item_use` / `item_open` row is the wrong way round; it lists chat as events but chat rows
+  are `kind:"chat"`; it gives `act_sent` a value of `0` but the value is `act.yd`; it leaves out about
+  15 events, including some that are allow-listed. *Fix:* generate the table from the code (event
+  names and `PARITY_ALLOWED_EVENTS`), or add a test that compares the two.
+- [ ] **New 2 — `--runs` is a total split across arms (`tools/bench/bench_bosses.py`):** TODO's
+  "statistically powered" `--mode mixed_all --runs 12` gives only 3 trials per arm, the same `n` as
+  the invalidated report. *Fix:* make `--runs` per arm, and use 8–10 per arm per boss.
+
+#### Low
+- [ ] **Item 7 — Stored `specNo` comes from the random roll (`server_module/src/test/test_commands.cc`):**
+  `llmtest gear` runs `Randomize(false)` (which stores a random `specNo`) before applying the
+  requested spec, so the stored `specNo` stays the random one.
+- [ ] **Item 8 — Trace volume cap unchanged (`server_module/src/snapshot/behavior_trace.{h,cc}`):**
+  the sample rate is configurable, but the 64 MiB × 8 rotation cap is not.
+- [ ] **Item 13 — `llmtest questcomplete` marks an unknown quest id as rewarded
+  (`server_module/src/test/test_commands.cc`).**
+- [ ] **`_console_bot` retries re-send state-changing commands (`tools/bench/bench_bosses.py`):**
+  a slow reply to `gear` re-runs `Randomize`; `resetbot` / `tele` / `setstrat` are re-sent too.
+- [ ] **The global per-bot strategy override map is never cleared
+  (`server_module/src/bot_manager/bot_manager.cc`, `tools/bench/bench_bosses.py`).**
+- [ ] **Trace-interval comment conflicts with the parity rate check
+  (`server_module/conf/mod-llm-brain.conf.dist`, `llm_brain_config.h`):** it suggests 500–1000 ms,
+  which fails `trace_parity.py`'s 3.5 Hz sample-rate check.
+
+#### Self-audit caveats (`d26c869`)
 - [ ] **Per-party `pull_start_ms` (`tools/bench/bench_bosses.py`):**
   A single `pull_start_ms` is recorded before moving all 15 bots (~3 s total at `0.2 s`/bot), so an
   early pull by Party 3 during the ~2 s while Party 1–2 are moving would not be flagged by
   `t < pull_start_ms`; record `party_pull_ms[p_idx]` per party instead.
-- [ ] **Mixed-mode `--runs` semantics & final-wave GPU load (`tools/bench/bench_bosses.py`):**
-  `--runs N` currently splits `ceil(N / len(arms))` per arm; when `parallel` does not divide the
+- [ ] **Final-wave GPU load (`tools/bench/bench_bosses.py`):** when `parallel` does not divide the
   arm count evenly (e.g. 4 arms on `--parallel 3`), the final cleanup wave can run with fewer LLM
   parties (different GPU load) than earlier waves.
 - [ ] **Live-trigger verification for source-verified C++ edge cases:**
@@ -23,9 +52,8 @@ Last updated 2026-11-20.
   (`llmtest tele ... 0` non-GM entry rules), and L15 (`llmtest questcomplete` on an active log
   quest) compiled cleanly and were source-verified, but have not been individually live-triggered.
 
-- Next benchmark run: run `--mode mixed_all --runs 12 --parallel 3` (or `--mode mixed` +
-  `--mode baseline` + `--mode no_brain`) on `bench_bosses.py` for statistically powered comparison
-  data, and save one clean report under `docs/benchmarks/`.
+- Next benchmark run (blocked on New 2): 8–10 valid trials **per arm** per boss for Kael, Ick,
+  Murmur and Ikiss, then save one clean report under `docs/benchmarks/`.
 
 ## Next, in order
 
@@ -109,17 +137,16 @@ Last updated 2026-11-20.
 
 ## Done (newest first, keep about ten)
 
-- 2026-11-20: **Review 5 remaining items closed (M6, L10, L11, L12, L14, L15, L16):**
+- 2026-11-20: **Review 5 remaining items (M6, L10–L12, L14–L16; partly — see Review 6 above):**
   `harness run` adds `--only-bots=A,B,...` (`run.{h,cc}`, `run_unittest.cc`); `BotManager` adds
   per-bot strategy overrides + `llmtest setstrat` (`bot_manager.{h,cc}`, `test_commands.cc`);
   `bench_bosses.py` adds `--mode mixed_all` and `--arms` to mix `llm`, `llm_no_notes`, `no_brain`,
-  and `baseline` in the same wave; `boss_meter.py` delegates `ImpactDodge` to `dodge_timeline`
-  (works for healers, ground-target origins, DBC radii, per-instance isolation);
+  and `baseline` in the same wave; `boss_meter.py` delegates `ImpactDodge` to `dodge_timeline`;
   `behavior_trace_scripts.cc` logs environmental/self deaths (`killer == killed`) as non-PvP `died`
   (`detail="environment"`); `LlmBrain.TraceSampleIntervalMs` makes trace cadence configurable
-  (default 200 ms); `llmtest tele` accepts optional `gm_mode` (0 = enforce entry rules);
-  `llmtest questcomplete` completes & rewards active log quests; added `docs/specs/trace-events.md`
-  documenting every sample field and event meaning. Verified via `tools/wlb check` and live on Ikiss
+  (volume cap still fixed); `llmtest tele` accepts optional `gm_mode` (0 = enforce entry rules);
+  `llmtest questcomplete` completes & rewards active log quests (unknown ids still marked);
+  `docs/specs/trace-events.md` added (**inaccurate**, see Review 6 New 1). Live on Ikiss
   (`--mode mixed_all --arms llm,no_brain,baseline --runs 3 --parallel 3`: `llm` killed in `63.4 s`,
   `no_brain` wiped in `52.4 s`, `baseline` killed in `144.5 s` in the same wave).
 - 2026-11-20: **Review 5 fixes (New 1, New 2, M4, L2/New L5, L4, L6, L13, New L1–L4):**
