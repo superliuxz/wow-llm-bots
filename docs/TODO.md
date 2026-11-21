@@ -206,8 +206,8 @@ boss can separate arms.
   [`config/scorer-lock.sha256`](../config/scorer-lock.sha256) (`11b686bde7f5...`, all 28
   measurement locks verified); and added `.agents/hooks.json` +
   [`.agents/hooks/post_commit_review.py`](../.agents/hooks/post_commit_review.py) + Rule #7 to
-  enforce an independent zero-context `research` subagent review (`var/review/head.patch`) after
-  every commit.
+  spawn a detached, read-only `agy --print --mode plan` reviewer in a separate top-level
+  conversation after every commit (`var/review/review_<short_sha>.md` / `var/review/latest.md`).
 
 - 2026-11-21: **Review 10 fixes (Medium + Lows 1–3) & "Where this leaves the project" added to TODO:**
   restructured [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md)

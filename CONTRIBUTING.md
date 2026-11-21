@@ -48,12 +48,12 @@ one feature never introduces extra bugs:
   current turn before any relock.
 - Live-verify game, server, or benchmark changes against `out/server-test` before claiming them fixed;
   anything not live-tested must be stated honestly in `docs/TODO.md`.
-- **Independent zero-context subagent review after every commit (`.agents/hooks.json`):** after
-  every `git commit`, `.agents/hooks/post_commit_review.py` writes `var/review/head.patch` and the
-  `Stop` hook enforces invoking a fresh `research` subagent (`invoke_subagent` with zero chat
-  history and the neutral review prompt in `.agents/rules/contributing.md` Rule #7) to audit C++
-  rules, correctness, test coverage, and `docs/TODO.md` / statistical honesty. Any High, Medium, or
-  Low findings from the reviewer follow the standard review-fix procedure above.
+- **Independent zero-context post-commit review (`.agents/hooks.json`):** whenever `HEAD` advances
+  after a `run_command` (e.g., `git commit`), `.agents/hooks/post_commit_review.py` writes
+  `var/review/patch_<short_sha>.patch` and spawns a detached, read-only `agy --print --mode plan`
+  reviewer in its own separate top-level conversation (non-blocking, zero shared chat history),
+  saving findings to `var/review/review_<short_sha>.md` (`var/review/latest.md`). Any High, Medium,
+  or Low findings follow the standard review-fix procedure above.
 
 ## The brain decides; C++ is a pure harness
 

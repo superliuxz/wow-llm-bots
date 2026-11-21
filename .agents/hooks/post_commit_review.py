@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
-"""Antigravity lifecycle hook for independent post-commit subagent code review.
+"""Antigravity lifecycle hook for non-blocking, separate-conversation post-commit review.
 
 Events handled (configured in `.agents/hooks.json`):
   - SessionStart: initializes `var/review/last_reviewed_sha` to current `HEAD`
-    if missing and writes `var/review/head.patch`.
-  - PostToolUse (`run_command`): whenever `HEAD` changes after a shell command
-    (e.g. `git commit`), dumps `git show HEAD --stat -p` (plus recent log and
-    working-tree status) to `var/review/head.patch` so the read-only `research`
-    subagent can read the exact commit patch directly from disk.
-  - Stop: if `HEAD` advanced past `var/review/last_reviewed_sha` and no
-    `invoke_subagent` call for the new commit has been made yet, returns
-    `{"decision": "continue", "reason": "..."}` instructing the agent to spawn
-    a fresh, zero-context `research` subagent review before finishing.
+    if missing.
+  - PostToolUse (`run_command`): whenever `HEAD` advances past
+    `var/review/last_reviewed_sha`, writes `var/review/head.patch` (`git show
+    HEAD --stat -p` + recent log + status), updates `last_reviewed_sha`, and
+    spawns a detached `agy --print --mode plan` process in its own top-level
+    conversation (zero shared history, never blocks the authoring chat). Output
+    is saved to `var/review/review_<short_sha>.md` (symlinked at
+    `var/review/latest.md`).
 """
 
 from __future__ import annotations
 
 import json
+import os
 import pathlib
+import shutil
 import subprocess
 import sys
 
@@ -25,8 +26,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 REVIEW_DIR = ROOT / "var" / "review"
 HEAD_PATCH_FILE = REVIEW_DIR / "head.patch"
 LAST_REVIEWED_FILE = REVIEW_DIR / "last_reviewed_sha"
-PROMPT_STATE_FILE = REVIEW_DIR / "prompt_state.json"
-MAX_PROMPTS_PER_SHA = 2
+LATEST_LINK = REVIEW_DIR / "latest.md"
+REVIEWER_ENV = "WLB_COMMIT_REVIEWER"
 
 
 def _git(*args: str) -> str:
@@ -40,26 +41,34 @@ def _git(*args: str) -> str:
     return res.stdout.strip()
 
 
-def _write_head_patch(full_sha: str) -> None:
+def _find_agy() -> str | None:
+    found = shutil.which("agy")
+    if found:
+        return found
+    candidate = pathlib.Path.home() / ".gemini" / "bin" / "agy"
+    if candidate.is_file() and os.access(candidate, os.X_OK):
+        return str(candidate)
+    return None
+
+
+def _write_head_patch(full_sha: str) -> pathlib.Path:
     REVIEW_DIR.mkdir(parents=True, exist_ok=True)
     short_sha = full_sha[:7]
-    header = f"Commit: {full_sha} ({short_sha})\n"
-    if HEAD_PATCH_FILE.exists():
-        first_line = HEAD_PATCH_FILE.read_text(errors="replace").splitlines()[:1]
-        if first_line and first_line[0].strip() == header.strip():
-            return
     branch = _git("rev-parse", "--abbrev-ref", "HEAD")
     recent_log = _git("log", "-n", "5", "--oneline")
     status = _git("status", "--short")
     patch = _git("show", full_sha, "--stat", "-p")
     content = (
-        f"{header}"
+        f"Commit: {full_sha} ({short_sha})\n"
         f"Branch: {branch}\n\n"
         f"=== Recent Commits (git log -n 5 --oneline) ===\n{recent_log}\n\n"
         f"=== Working Tree Status (git status --short) ===\n{status or '(clean)'}\n\n"
         f"=== Full Commit Patch (git show {short_sha} --stat -p) ===\n{patch}\n"
     )
+    patch_file = REVIEW_DIR / f"patch_{short_sha}.patch"
+    patch_file.write_text(content, encoding="utf-8")
     HEAD_PATCH_FILE.write_text(content, encoding="utf-8")
+    return patch_file
 
 
 def _read_last_reviewed() -> str:
@@ -74,65 +83,67 @@ def _write_last_reviewed(full_sha: str) -> None:
     LAST_REVIEWED_FILE.write_text(full_sha + "\n", encoding="utf-8")
 
 
-def _subagent_invoked_for_commit(transcript_path_str: str, short_sha: str) -> bool:
-    """Returns True if `invoke_subagent` was called for `short_sha` (or after the last `git commit`)."""
-    if not transcript_path_str:
-        return False
-    tpath = pathlib.Path(transcript_path_str)
-    if not tpath.is_file():
-        return False
+def _build_review_prompt(short_sha: str, patch_file: pathlib.Path) -> str:
+    rel_patch = patch_file.relative_to(ROOT).as_posix()
+    return (
+        f"Independent cold review of commit {short_sha}: "
+        "1) Read CONTRIBUTING.md, docs/TODO.md, and docs/design.md. "
+        f"2) Read {rel_patch} and inspect the touched files, headers, tests, and callers in the repo. "
+        "3) Audit from two angles: "
+        "(a) Code & C++ rules (Chromium C++ style, C++20 in common/snapshot/server_module vs C++26 in harness, "
+        "banned std:: facilities vs common/base replacements, 'the brain decides; C++ is a pure harness', "
+        "boundary conditions, state interactions, algorithmic complexity claims, and unit/live test coverage); "
+        "(b) Honesty & stats/docs (every claim in the commit message, docs/TODO.md, and any report matches the "
+        "actual code and var/ artifacts, with multiple-comparison correction where applicable). "
+        "Do NOT inspect Antigravity internals or binaries outside the repo. "
+        "Report findings grouped by High, Medium, and Low (or 'No findings' if clean)."
+    )
+
+
+def _spawn_reviewer(full_sha: str, patch_file: pathlib.Path) -> None:
+    agy_bin = _find_agy()
+    if not agy_bin:
+        return
+    short_sha = full_sha[:7]
+    out_file = REVIEW_DIR / f"review_{short_sha}.md"
+    err_file = REVIEW_DIR / f"review_{short_sha}.err"
     try:
-        lines = tpath.read_text(encoding="utf-8", errors="replace").splitlines()
+        if LATEST_LINK.exists() or LATEST_LINK.is_symlink():
+            LATEST_LINK.unlink()
+        LATEST_LINK.symlink_to(out_file.name)
     except OSError:
-        return False
+        pass
 
-    last_commit_step = -1
-    last_subagent_step = -1
-    subagent_mentions_sha = False
-
-    for idx, raw in enumerate(lines):
-        if not raw.strip():
-            continue
-        try:
-            entry = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-        tool_calls = entry.get("tool_calls") or []
-        for tc in tool_calls:
-            name = tc.get("name", "")
-            args = tc.get("args") or {}
-            if name == "run_command":
-                cmd = str(args.get("CommandLine", ""))
-                if "git commit" in cmd:
-                    last_commit_step = idx
-            elif name == "invoke_subagent":
-                last_subagent_step = idx
-                prompt = str(args.get("Prompt", ""))
-                if short_sha and (short_sha in prompt or "var/review/head.patch" in prompt):
-                    subagent_mentions_sha = True
-
-    if subagent_mentions_sha and last_subagent_step > last_commit_step:
-        return True
-    if last_commit_step >= 0 and last_subagent_step > last_commit_step:
-        return True
-    return False
-
-
-def _bump_prompt_count(full_sha: str) -> int:
-    REVIEW_DIR.mkdir(parents=True, exist_ok=True)
-    state: dict[str, int] = {}
-    if PROMPT_STATE_FILE.is_file():
-        try:
-            state = json.loads(PROMPT_STATE_FILE.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            state = {}
-    count = int(state.get(full_sha, 0)) + 1
-    state = {full_sha: count}
-    PROMPT_STATE_FILE.write_text(json.dumps(state) + "\n", encoding="utf-8")
-    return count
+    env = os.environ.copy()
+    env[REVIEWER_ENV] = "1"
+    prompt = _build_review_prompt(short_sha, patch_file)
+    with out_file.open("w", encoding="utf-8") as fout, err_file.open("w", encoding="utf-8") as ferr:
+        subprocess.Popen(
+            [
+                agy_bin,
+                "--print",
+                "--mode",
+                "plan",
+                "--print-timeout",
+                "300s",
+                "--disable-slash-commands",
+                prompt,
+            ],
+            cwd=ROOT,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=fout,
+            stderr=ferr,
+            start_new_session=True,
+        )
 
 
 def main() -> int:
+    # Never trigger recursively inside a spawned reviewer session.
+    if os.environ.get(REVIEWER_ENV) == "1":
+        print("{}")
+        return 0
+
     raw_in = sys.stdin.read()
     try:
         payload = json.loads(raw_in) if raw_in.strip() else {}
@@ -145,8 +156,6 @@ def main() -> int:
         print("{}")
         return 0
 
-    _write_head_patch(full_sha)
-
     if event == "SessionStart":
         if not LAST_REVIEWED_FILE.is_file():
             _write_last_reviewed(full_sha)
@@ -154,48 +163,17 @@ def main() -> int:
         return 0
 
     if event == "PostToolUse":
-        print("{}")
-        return 0
-
-    if event == "Stop":
-        term_reason = payload.get("terminationReason", "")
-        fully_idle = bool(payload.get("fullyIdle", True))
-        if term_reason != "NO_TOOL_CALL" or not fully_idle:
-            print("{}")
-            return 0
-
         last_reviewed = _read_last_reviewed()
         if not last_reviewed:
             _write_last_reviewed(full_sha)
             print("{}")
             return 0
-
-        if full_sha == last_reviewed:
-            print("{}")
-            return 0
-
-        short_sha = full_sha[:7]
-        transcript_path = str(payload.get("transcriptPath", ""))
-        if _subagent_invoked_for_commit(transcript_path, short_sha):
+        if full_sha != last_reviewed:
+            patch_file = _write_head_patch(full_sha)
             _write_last_reviewed(full_sha)
-            print("{}")
-            return 0
-
-        prompts = _bump_prompt_count(full_sha)
-        if prompts > MAX_PROMPTS_PER_SHA:
-            _write_last_reviewed(full_sha)
-            print("{}")
-            return 0
-
-        reason = (
-            f"Commit {short_sha} has not been reviewed by an independent subagent yet, "
-            f"and `var/review/head.patch` has been written for {short_sha}. "
-            f"Invoke `invoke_subagent` (`TypeName: \"research\"`, "
-            f"`Role: \"Independent Commit Reviewer\"`) now with the neutral commit-review "
-            f"prompt from `.agents/rules/contributing.md` (Rule #7) for commit {short_sha}, "
-            f"then end your turn to wait for the subagent's review."
-        )
-        print(json.dumps({"decision": "continue", "reason": reason}))
+            if os.environ.get("WLB_SKIP_COMMIT_REVIEW") != "1":
+                _spawn_reviewer(full_sha, patch_file)
+        print("{}")
         return 0
 
     print("{}")

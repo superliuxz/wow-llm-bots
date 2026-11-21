@@ -19,13 +19,6 @@
           }
         ]
       }
-    ],
-    "Stop": [
-      {
-        "type": "command",
-        "command": "python3 ./hooks/post_commit_review.py",
-        "timeout": 15
-      }
     ]
   }
 }
