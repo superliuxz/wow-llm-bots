@@ -9,6 +9,19 @@ Last updated 2026-11-20.
 
 ## In progress
 
+### Review Trace All Events 7 (`bdd7f55`) — Open Items
+
+- [ ] **New Low 1 — `<= 285 ms` trace-interval bound ignores world-tick rounding (`server_module/src/snapshot/behavior_trace.{h,cc}`, `server_module/src/llm_brain_world_script.cc`, `server_module/src/config/llm_brain_config.{h,cc}`, `server_module/conf/mod-llm-brain.conf.dist`, `docs/specs/trace-events.md`):**
+  at 50 ms world ticks the real interval is ~300 ms (~3.33 Hz), under `trace_parity.py`'s 3.5 Hz check,
+  with no warning. *Fix:* check the measured rate in the trace, not the configured interval.
+- [ ] **New Low 2 — New always-on rule tells agents to force-relock the scorer whenever locked files change (`CONTRIBUTING.md`, `.agents/rules/contributing.md`):**
+  undoes the point of the lock, which is to stop an agent tuning the scorer to its own changes.
+  *Fix:* require the user's explicit OK before any relock.
+- [ ] **New Low 3 — A setup error before the wave loop still ends the whole run (`tools/bench/bench_bosses.py`):**
+  *Fix:* mark that boss failed and move on.
+- [ ] **New Low 4 — A late reply from an earlier identical `where` command can match (`server_module/src/test/test_commands.cc`, `tools/bench/bench_bosses.py`):**
+  *Fix:* add a per-call token to the command.
+
 - Next benchmark run (all Review 6 items & Kael staging/arrival fixes verified): run `bench_bosses.py`
   with `--runs 8` (or `10` **per arm**) for `kaelthas`, `ick`, `murmur`, and `ikiss` (e.g.
   `--mode mixed_all --only kaelthas,ick,murmur,ikiss --runs 8 --parallel 3`), then save one clean
@@ -95,12 +108,14 @@ Last updated 2026-11-20.
     to end avoids returning early).
   - Mid-fight wakes (`attacked`, `hp<N`) replace all standing orders; Gemma 4 occasionally rewrites
     a working `Lightning Nova cast` order into `Loken cast` or `Lightning Nova appears`.
-- **Not individually live-triggered after final edits yet:** `llmtest questcomplete` when a quest
-  is already active in a bot's quest log (`CompleteQuest` + `RewardQuest` branch in
-  `test_commands.cc`, source-verified), and the updated `areatrigger_teleport` entrance / pull
-  coordinates for `ick`, `murmur`, and `ikiss` (verified in `acore_world`; live Kael'thas verified
-  entrance staging after the final edit, while Ikiss and the `questcomplete`/`tele ... 0`/`clearstrat`
-  console checks passed in the prior live check before adding entrance staging/dismount).
+- **Not individually live-triggered after final edits yet:** environmental/self death (`killer == killed`
+  logged as non-PvP `died` with `detail="environment"` in `behavior_trace_scripts.cc`),
+  `llmtest questcomplete` when a quest is already active in a bot's quest log (`CompleteQuest` +
+  `RewardQuest` branch in `test_commands.cc`, source-verified), and the updated
+  `areatrigger_teleport` entrance / pull coordinates for `ick`, `murmur`, and `ikiss` (verified in
+  `acore_world`; live Kael'thas verified entrance staging after the final edit, while Ikiss and the
+  `questcomplete`/`tele ... 0`/`clearstrat` console checks passed in the prior live check before
+  adding entrance staging/dismount).
 
 ## Done (newest first, keep about ten)
 
