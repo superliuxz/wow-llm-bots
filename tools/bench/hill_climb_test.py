@@ -52,22 +52,35 @@ class HillClimbSafeguardsTest(unittest.TestCase):
 
     def test_lock_manifest_is_readonly_and_rejects_deleted_line(self):
         with tempfile.TemporaryDirectory() as tmp:
-            lf = pathlib.Path(tmp) / "scorer.sha256"
+            t = pathlib.Path(tmp)
+            lf = t / "scorer.sha256"
+            df = t / "scorer-lock.sha256"
             # Refuses unconfirmed writes even when the lock file does not exist yet.
-            ok_unconf, _ = hill_climb._write_lock_manifest(lf)
+            ok_unconf, _ = hill_climb._write_lock_manifest(lf, approved_digest_file=df)
             self.assertFalse(ok_unconf)
             self.assertFalse(lf.exists())
-            ok, _ = hill_climb._write_lock_manifest(lf, confirmed=True)
+            ok, _ = hill_climb._write_lock_manifest(lf, confirmed=True, approved_digest_file=df)
             self.assertTrue(ok)
             self.assertEqual(stat.S_IMODE(lf.stat().st_mode), 0o444)
+            self.assertTrue(df.exists())
+            self.assertEqual(hill_climb._read_approved_digest(df), hill_climb._sha256_file(lf))
             # Refuses to overwrite without force or without confirmation.
-            ok2, _ = hill_climb._write_lock_manifest(lf, force=False, confirmed=True)
+            ok2, _ = hill_climb._write_lock_manifest(lf, force=False, confirmed=True, approved_digest_file=df)
             self.assertFalse(ok2)
-            ok2b, _ = hill_climb._write_lock_manifest(lf, force=True, confirmed=False)
+            ok2b, _ = hill_climb._write_lock_manifest(lf, force=True, confirmed=False, approved_digest_file=df)
             self.assertFalse(ok2b)
-            # Full manifest verifies.
-            ok3, _ = hill_climb._verify_all_locks(lf)
+            # Full manifest + repo-approved digest verify.
+            ok3, _ = hill_climb._verify_all_locks(lf, approved_digest_file=df)
             self.assertTrue(ok3)
+            # Mismatching or deleted approved digest fails verification.
+            df.write_text("0" * 64 + "  scorer.sha256\n")
+            ok_bad_df, msg_bad_df = hill_climb._verify_all_locks(lf, approved_digest_file=df)
+            self.assertFalse(ok_bad_df)
+            self.assertIn("digest mismatch", msg_bad_df)
+            df.unlink()
+            ok_no_df, msg_no_df = hill_climb._verify_all_locks(lf, approved_digest_file=df)
+            self.assertFalse(ok_no_df)
+            self.assertIn("digest missing", msg_no_df)
             # Deleting a line from the manifest fails verification.
             os.chmod(lf, 0o644)
             lines = lf.read_text().splitlines()
@@ -77,6 +90,9 @@ class HillClimbSafeguardsTest(unittest.TestCase):
             self.assertIn("missing required files", msg)
 
     def test_agent_ignores_custom_lock_file_and_requires_relock_confirmation(self):
+        import subprocess
+        import sys
+
         custom = pathlib.Path("/tmp/custom_scorer_lock.sha256")
         self.assertEqual(
             hill_climb._resolve_lock_file(custom, env={"ANTIGRAVITY_AGENT": "1"}),
@@ -88,17 +104,61 @@ class HillClimbSafeguardsTest(unittest.TestCase):
         )
         self.assertEqual(hill_climb._resolve_lock_file(custom, env={}), custom)
 
-        ok_no_env, _ = hill_climb._confirm_relock(env={"ANTIGRAVITY_AGENT": "1"})
+        ok_no_env, msg_no_env = hill_climb._confirm_relock(env={"ANTIGRAVITY_AGENT": "1"})
         self.assertFalse(ok_no_env)
-        ok_wrong, _ = hill_climb._confirm_relock(
+        # Refusal message must NEVER leak the RELOCK:<hash12> confirmation token.
+        self.assertNotIn("RELOCK:", msg_no_env)
+        self.assertNotIn(soak_scorer.scorer_sha256()[:8], msg_no_env)
+        ok_wrong, msg_wrong = hill_climb._confirm_relock(
             env={"ANTIGRAVITY_AGENT": "1", hill_climb.CONFIRM_RELOCK_ENV: "WRONG"}
         )
         self.assertFalse(ok_wrong)
+        self.assertNotIn("RELOCK:", msg_wrong)
         token = f"RELOCK:{soak_scorer.scorer_sha256()[:12]}"
         ok_good, _ = hill_climb._confirm_relock(
             env={"ANTIGRAVITY_AGENT": "1", hill_climb.CONFIRM_RELOCK_ENV: token}
         )
         self.assertTrue(ok_good)
+
+        # Synthetic /proc tree: unsetting env vars must not hide an agent ancestor,
+        # even when child comm contains spaces/parens.
+        with tempfile.TemporaryDirectory() as tmp:
+            proc_root = pathlib.Path(tmp)
+            for pid, ppid, comm, cmd in (
+                (99, 1, "agy", b"/home/user/.gemini/bin/agy\x00remote-control\x00serve\x00"),
+                (100, 99, "my (worker)", b"python3\x00worker.py\x00"),
+                (50, 1, "bash", b"/bin/bash\x00"),
+            ):
+                d = proc_root / str(pid)
+                d.mkdir()
+                (d / "stat").write_text(f"{pid} ({comm}) S {ppid} 1 1 0 0 0 0\n")
+                (d / "cmdline").write_bytes(cmd)
+            (proc_root / "self").symlink_to("100")
+            self.assertTrue(hill_climb._has_agent_ancestor(proc_root))
+            self.assertTrue(hill_climb._is_agent_run(env={}, proc_root=proc_root))
+            (proc_root / "self").unlink()
+            (proc_root / "self").symlink_to("50")
+            self.assertFalse(hill_climb._has_agent_ancestor(proc_root))
+            self.assertFalse(hill_climb._is_agent_run(env={}, proc_root=proc_root))
+
+        # Live host /proc check with all env vars cleared via `env -i`.
+        expected_ancestor = hill_climb._has_agent_ancestor()
+        res = subprocess.run(
+            [
+                "env",
+                "-i",
+                f"PATH={os.environ.get('PATH', '/usr/bin')}",
+                sys.executable,
+                "-c",
+                "import sys; sys.path.insert(0, 'tools/bench'); import hill_climb; "
+                "print(int(hill_climb._is_agent_run()))",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertEqual(res.stdout.strip(), str(int(expected_ancestor)))
 
     def test_has_human_traces_rejects_bot_rows_and_requires_min_samples(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -150,6 +210,7 @@ class HillClimbSafeguardsTest(unittest.TestCase):
 
         ok, bad = hill_climb._check_edit_scope([
             "content/RULES.md",
+            "config/scorer-lock.sha256",
             "server_module/src/options/option_executor.cc",
             "server_module/src/llm_brain_world_script.cc",
         ])
@@ -157,6 +218,7 @@ class HillClimbSafeguardsTest(unittest.TestCase):
         self.assertEqual(
             bad,
             [
+                "config/scorer-lock.sha256",
                 "server_module/src/options/option_executor.cc",
                 "server_module/src/llm_brain_world_script.cc",
             ],

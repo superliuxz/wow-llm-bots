@@ -313,5 +313,82 @@ TEST(BehaviorTraceTest, MeasuresActualSampleHzIncludingTickRounding) {
   std::filesystem::remove_all(root);
 }
 
+TEST(BehaviorTraceTest, EvictsIdleTrackedCharactersAndReportsCapOverflow) {
+  const std::filesystem::path root =
+      std::filesystem::path(testing::TempDir()) / "wlb_trace_evict_test";
+  std::filesystem::remove_all(root);
+  BehaviorTraceWriter writer(root.string(),
+                             BehaviorTraceWriter::kDefaultMaxFileBytes,
+                             BehaviorTraceWriter::kDefaultMaxRotatedFiles,
+                             /*max_tracked_chars_per_role=*/4);
+  ASSERT_TRUE(writer.enabled());
+
+  TraceSample s;
+  const int64_t t0 = 1795064000000LL;
+  // Pass 1 eviction: after draining batch 0, advancing >5 s (kMaxSampleGapMs)
+  // lets batch 1 replace those empty slots without reaching
+  // kStaleTrackedCharMs.
+  for (int b = 0; b < 4; ++b) {
+    s.role = "bot";
+    s.name = "DrainBot" + std::to_string(b);
+    for (int i = 0; i <= 10; ++i) {
+      s.time_ms = t0 + static_cast<int64_t>(i) * 200;
+      ASSERT_TRUE(writer.WriteSample(s));
+    }
+  }
+  const std::optional<double> batch0_hz =
+      writer.TakeMeasuredSampleHz("bot", /*min_intervals=*/10);
+  ASSERT_TRUE(batch0_hz.has_value());
+  EXPECT_DOUBLE_EQ(*batch0_hz, 5.0);
+
+  // 20 sequential batches (80 distinct bots > cap=4) spaced 10 s / 70 s apart.
+  int64_t cur_t = t0 + 10000;
+  for (int batch = 0; batch < 20; ++batch) {
+    for (int b = 0; b < 4; ++b) {
+      s.role = "bot";
+      s.name = "SeqBot_" + std::to_string(batch) + "_" + std::to_string(b);
+      for (int i = 0; i <= 10; ++i) {
+        s.time_ms = cur_t + static_cast<int64_t>(i) * 200;
+        ASSERT_TRUE(writer.WriteSample(s));
+      }
+    }
+    cur_t += 70000;  // > kStaleTrackedCharMs so undrained batches also evict.
+  }
+
+  // Humans track in an independent per-role map and are unaffected by bot
+  // turnover.
+  s.role = "human";
+  s.name = "Hero";
+  for (int i = 0; i <= 10; ++i) {
+    s.time_ms = cur_t + static_cast<int64_t>(i) * 300;
+    ASSERT_TRUE(writer.WriteSample(s));
+  }
+
+  EXPECT_EQ(writer.TakeUntrackedSampleChars(), 0U);
+  const std::optional<double> bot_hz =
+      writer.TakeMeasuredSampleHz("bot", /*min_intervals=*/10);
+  const std::optional<double> human_hz =
+      writer.TakeMeasuredSampleHz("human", /*min_intervals=*/10);
+  ASSERT_TRUE(bot_hz.has_value());
+  ASSERT_TRUE(human_hz.has_value());
+  EXPECT_DOUBLE_EQ(*bot_hz, 5.0);
+  EXPECT_DOUBLE_EQ(*human_hz, 3.33);
+
+  // Now advance past 60 s so previous empty entries evict, then exceed the
+  // concurrent active cap (=4) at a single timestamp: must report overflow.
+  const int64_t active_t = cur_t + 70000;
+  for (int b = 0; b < 5; ++b) {
+    s.role = "bot";
+    s.name = "ActiveBot" + std::to_string(b);
+    s.time_ms = active_t;
+    ASSERT_TRUE(writer.WriteSample(s));
+  }
+  EXPECT_GT(writer.TakeUntrackedSampleChars(), 0U);
+  EXPECT_EQ(writer.TakeUntrackedSampleChars(), 0U);
+
+  writer.Flush();
+  std::filesystem::remove_all(root);
+}
+
 }  // namespace
 }  // namespace llm_brain

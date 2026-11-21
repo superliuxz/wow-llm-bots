@@ -27,6 +27,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import stat
 import statistics
@@ -39,6 +40,7 @@ LEDGER = VAR / "experiments" / "ledger.jsonl"
 BASELINE_TRACES_ROOT = VAR / "experiments" / "baseline_traces"
 EXTERNAL_STATE_DIR = pathlib.Path.home() / ".local" / "share" / "wow-llm-bots"
 DEFAULT_LOCK_FILE = EXTERNAL_STATE_DIR / "scorer.sha256"
+REPO_APPROVED_LOCK_DIGEST = ROOT / "config" / "scorer-lock.sha256"
 DEFAULT_HUMAN_DIR = EXTERNAL_STATE_DIR / "human_baseline"
 DEFAULT_BLIND_RATINGS = EXTERNAL_STATE_DIR / "blind_ratings.jsonl"
 
@@ -53,6 +55,7 @@ AGENT_ENV_VARS = (
     "CURSOR_AGENT",
     "AIDER",
 )
+AGENT_PROCESS_NAMES = ("agy", "antigravity", "claude", "codex", "cursor", "aider")
 
 # Every file that produces, configures, or gates the soak score is locked.
 LOCKED_PATTERNS = [
@@ -122,9 +125,67 @@ def _locked_files() -> list[pathlib.Path]:
     return files
 
 
-def _is_agent_run(env: dict[str, str] | None = None) -> bool:
+def _matches_agent_name(candidate: str) -> bool:
+    base = pathlib.Path(candidate).name.lower()
+    return any(base == name or base.startswith(name + "-") for name in AGENT_PROCESS_NAMES)
+
+
+def _has_agent_ancestor(proc_root: pathlib.Path = pathlib.Path("/proc")) -> bool:
+    """Checks `/proc` parent processes so unsetting env vars cannot disguise an agent shell."""
+    try:
+        pid = int((proc_root / "self").resolve().name) if (proc_root / "self").is_symlink() else os.getpid()
+    except (OSError, ValueError):
+        pid = os.getpid()
+    seen: set[int] = set()
+    for _ in range(64):
+        if pid <= 1 or pid in seen:
+            break
+        seen.add(pid)
+        pdir = proc_root / str(pid)
+        try:
+            stat_text = (pdir / "stat").read_text(errors="replace")
+        except OSError:
+            break
+        lparen = stat_text.find("(")
+        rparen = stat_text.rfind(")")
+        if lparen == -1 or rparen <= lparen:
+            break
+        comm = stat_text[lparen + 1 : rparen]
+        if _matches_agent_name(comm):
+            return True
+        try:
+            cmdline = (pdir / "cmdline").read_bytes().split(b"\x00")
+            args = [a.decode(errors="replace") for a in cmdline if a]
+        except OSError:
+            args = []
+        if args:
+            if _matches_agent_name(args[0]):
+                return True
+            for arg in args[1:]:
+                if ("/" in arg or arg.endswith(".js")) and _matches_agent_name(arg):
+                    return True
+        after = stat_text[rparen + 2 :].split()
+        if len(after) < 2:
+            break
+        try:
+            pid = int(after[1])
+        except ValueError:
+            break
+    return False
+
+
+def _is_agent_run(
+    env: dict[str, str] | None = None,
+    proc_root: pathlib.Path | None = None,
+) -> bool:
     e = os.environ if env is None else env
-    return any(bool(e.get(k)) for k in AGENT_ENV_VARS)
+    if any(bool(e.get(k)) for k in AGENT_ENV_VARS):
+        return True
+    if proc_root is not None:
+        return _has_agent_ancestor(proc_root)
+    if env is None:
+        return _has_agent_ancestor()
+    return False
 
 
 def _resolve_lock_file(
@@ -142,26 +203,52 @@ def _resolve_lock_file(
     return requested
 
 
-def _confirm_relock(env: dict[str, str] | None = None) -> tuple[bool, str]:
+def _confirm_relock(
+    env: dict[str, str] | None = None,
+    proc_root: pathlib.Path | None = None,
+) -> tuple[bool, str]:
     expected_token = f"RELOCK:{soak_scorer.scorer_sha256()[:12]}"
     e = os.environ if env is None else env
     if e.get(CONFIRM_RELOCK_ENV, "") == expected_token:
         return True, ""
-    if not _is_agent_run(e) and sys.stdin.isatty():
+    if not _is_agent_run(e, proc_root=proc_root) and sys.stdin.isatty():
         ans = input(
-            f"Confirm writing scorer lock ({expected_token})? Type 'RELOCK' to confirm: "
+            "Confirm writing scorer lock? Type 'RELOCK' to confirm: "
         ).strip()
         if ans == "RELOCK":
             return True, ""
     return False, (
-        "refusing to write scorer lock without explicit confirmation "
-        f"(in human shell type 'RELOCK' at prompt, or set {CONFIRM_RELOCK_ENV}={expected_token} "
-        "only with user approval)"
+        "refusing to write scorer lock without explicit user confirmation "
+        "(run interactively in a human shell and type 'RELOCK', or provide "
+        f"user-approved {CONFIRM_RELOCK_ENV})"
     )
 
 
+def _resolve_approved_digest_file(
+    lock_file: pathlib.Path, approved_digest_file: pathlib.Path | None
+) -> pathlib.Path | None:
+    if approved_digest_file is not None:
+        return approved_digest_file
+    if lock_file.resolve() == DEFAULT_LOCK_FILE.resolve():
+        return REPO_APPROVED_LOCK_DIGEST
+    return None
+
+
+def _read_approved_digest(digest_file: pathlib.Path) -> str | None:
+    for line in digest_file.read_text().splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        token = s.split()[0].lower()
+        return token if re.fullmatch(r"[0-9a-f]{64}", token) else None
+    return None
+
+
 def _write_lock_manifest(
-    lock_file: pathlib.Path, force: bool = False, confirmed: bool = False
+    lock_file: pathlib.Path,
+    force: bool = False,
+    confirmed: bool = False,
+    approved_digest_file: pathlib.Path | None = None,
 ) -> tuple[bool, str]:
     if lock_file.exists() and not force:
         return False, (
@@ -180,10 +267,21 @@ def _write_lock_manifest(
         lines.append(f"{_sha256_file(p)}  {rel}")
     lock_file.write_text("\n".join(lines) + "\n")
     os.chmod(lock_file, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)  # 0444 read-only
+    digest_target = _resolve_approved_digest_file(lock_file, approved_digest_file)
+    if digest_target is not None:
+        digest_target.parent.mkdir(parents=True, exist_ok=True)
+        digest_target.write_text(
+            "# User-approved SHA-256 digest of ~/.local/share/wow-llm-bots/scorer.sha256.\n"
+            "# Updated by `hill_climb.py lock-scorer` so any relock is visible in git diff.\n"
+            f"{_sha256_file(lock_file)}  scorer.sha256\n"
+        )
     return True, f"locked {len(lines) - 1} measurement files (0444) -> {lock_file}"
 
 
-def _verify_all_locks(lock_file: pathlib.Path = DEFAULT_LOCK_FILE) -> tuple[bool, str]:
+def _verify_all_locks(
+    lock_file: pathlib.Path = DEFAULT_LOCK_FILE,
+    approved_digest_file: pathlib.Path | None = None,
+) -> tuple[bool, str]:
     if not lock_file.exists():
         return False, f"lock file missing: {lock_file} (run lock-scorer)"
     ok, msg = soak_scorer.verify_scorer_hash(lock_file)
@@ -212,6 +310,21 @@ def _verify_all_locks(lock_file: pathlib.Path = DEFAULT_LOCK_FILE) -> tuple[bool
             return False, (
                 f"locked measurement file modified: {rel} "
                 f"(expected {expected[:12]}, got {actual[:12]})"
+            )
+    digest_target = _resolve_approved_digest_file(lock_file, approved_digest_file)
+    if digest_target is not None:
+        if not digest_target.exists():
+            return False, (
+                f"repo approved scorer digest missing: {digest_target} "
+                "(re-lock only with user OK)"
+            )
+        approved = _read_approved_digest(digest_target)
+        actual_manifest = _sha256_file(lock_file)
+        if approved != actual_manifest:
+            return False, (
+                f"lock manifest digest mismatch vs {digest_target}: "
+                f"approved={approved[:12] if approved else 'invalid'}, "
+                f"actual={actual_manifest[:12]}"
             )
     return True, f"all {len(recorded)} measurement locks verified"
 

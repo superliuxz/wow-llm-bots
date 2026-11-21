@@ -286,10 +286,13 @@ std::string FormatTraceEvent(const TraceEvent& e) {
 
 BehaviorTraceWriter::BehaviorTraceWriter(std::string root_dir,
                                          uint64_t max_file_bytes,
-                                         size_t max_rotated_files)
+                                         size_t max_rotated_files,
+                                         size_t max_tracked_chars_per_role)
     : root_dir_(std::move(root_dir)),
       max_file_bytes_(max_file_bytes),
-      max_rotated_files_(max_rotated_files) {
+      max_rotated_files_(max_rotated_files),
+      max_tracked_chars_per_role_(
+          max_tracked_chars_per_role > 0 ? max_tracked_chars_per_role : 1) {
   if (enabled()) {
     worker_ = std::thread(&BehaviorTraceWriter::WriterLoop, this);
   }
@@ -343,6 +346,11 @@ uint64_t BehaviorTraceWriter::dropped_lines() const {
   return dropped_lines_;
 }
 
+uint64_t BehaviorTraceWriter::TakeUntrackedSampleChars() {
+  std::lock_guard<std::mutex> lock(mu_);
+  return std::exchange(untracked_sample_chars_, 0);
+}
+
 std::optional<double> BehaviorTraceWriter::TakeMeasuredSampleHz(
     std::string_view role,
     size_t min_intervals) {
@@ -352,15 +360,25 @@ std::optional<double> BehaviorTraceWriter::TakeMeasuredSampleHz(
   std::vector<std::vector<int64_t>> ready_chars;
   {
     std::lock_guard<std::mutex> lock(mu_);
-    auto role_it = sample_dts_by_role_.find(std::string(role));
-    if (role_it == sample_dts_by_role_.end()) {
+    auto role_it = sample_windows_by_role_.find(std::string(role));
+    if (role_it == sample_windows_by_role_.end()) {
       return std::nullopt;
     }
-    for (auto& [char_name, char_dts] : role_it->second) {
-      if (char_dts.size() >= min_intervals) {
+    int64_t newest_time_ms = 0;
+    for (const auto& [char_name, win] : role_it->second) {
+      newest_time_ms = std::max(newest_time_ms, win.last_time_ms);
+    }
+    for (auto it = role_it->second.begin(); it != role_it->second.end();) {
+      if (it->second.dts.size() >= min_intervals) {
         ready_chars.emplace_back();
-        ready_chars.back().swap(char_dts);
+        ready_chars.back().swap(it->second.dts);
+      } else if (it->second.dts.empty() &&
+                 newest_time_ms > it->second.last_time_ms &&
+                 newest_time_ms - it->second.last_time_ms > kMaxSampleGapMs) {
+        it = role_it->second.erase(it);
+        continue;
       }
+      ++it;
     }
   }
   if (ready_chars.empty()) {
@@ -401,30 +419,45 @@ bool BehaviorTraceWriter::Enqueue(std::string_view role,
       return false;
     }
     if (is_sample) {
-      const std::string role_key(role);
-      const std::string char_key(name);
-      const std::string ts_key = base::StrCat({role, "/", name});
-      auto it = last_sample_time_ms_.find(ts_key);
-      if (it == last_sample_time_ms_.end()) {
-        if (last_sample_time_ms_.size() < kMaxTrackedCharsPerRole * 4) {
-          last_sample_time_ms_.emplace(ts_key, time_ms);
+      auto& by_char = sample_windows_by_role_[std::string(role)];
+      auto it = by_char.find(std::string(name));
+      if (it == by_char.end()) {
+        // Evict drained/idle characters first, then stale logged-out entries,
+        // so server turnover never starves newly logged-in characters.
+        if (by_char.size() >= max_tracked_chars_per_role_) {
+          for (auto p = by_char.begin(); p != by_char.end();) {
+            if (p->second.dts.empty() && time_ms > p->second.last_time_ms &&
+                time_ms - p->second.last_time_ms > kMaxSampleGapMs) {
+              p = by_char.erase(p);
+            } else {
+              ++p;
+            }
+          }
+        }
+        if (by_char.size() >= max_tracked_chars_per_role_) {
+          for (auto p = by_char.begin(); p != by_char.end();) {
+            if (time_ms > p->second.last_time_ms &&
+                time_ms - p->second.last_time_ms > kStaleTrackedCharMs) {
+              p = by_char.erase(p);
+            } else {
+              ++p;
+            }
+          }
+        }
+        if (by_char.size() < max_tracked_chars_per_role_) {
+          by_char.emplace(std::string(name), CharSampleWindow{time_ms, {}});
+        } else {
+          ++untracked_sample_chars_;
         }
       } else {
-        const int64_t dt = time_ms - it->second;
+        const int64_t dt = time_ms - it->second.last_time_ms;
         if (dt > 0 && dt <= kMaxSampleGapMs) {
-          auto& by_char = sample_dts_by_role_[role_key];
-          auto char_it = by_char.find(char_key);
-          if (char_it == by_char.end() &&
-              by_char.size() < kMaxTrackedCharsPerRole) {
-            char_it = by_char.emplace(char_key, std::vector<int64_t>{}).first;
+          if (it->second.dts.size() < kMaxRecordedSampleDtsPerChar) {
+            it->second.dts.push_back(dt);
           }
-          if (char_it != by_char.end() &&
-              char_it->second.size() < kMaxRecordedSampleDtsPerChar) {
-            char_it->second.push_back(dt);
-          }
-          it->second = time_ms;
+          it->second.last_time_ms = time_ms;
         } else if (dt > kMaxSampleGapMs || dt < 0) {
-          it->second = time_ms;
+          it->second.last_time_ms = time_ms;
         }
       }
     }

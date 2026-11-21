@@ -2,11 +2,13 @@
 
 **Date:** `2026-11-20` – `2026-11-21` (branch `trace-all-events`, `main` untouched at `2834756`)  
 **Runner:** [`tools/bench/bench_bosses.py`](../../tools/bench/bench_bosses.py) (`--mode mixed_all --runs 8 --parallel 4`)  
-**Total valid scored trials:** **128** (`4` bosses × `4` arms × `8` valid runs per arm; **`0` invalid trials**, **`0` wave errors**)
+**Valid scored cohorts:** Two **64-trial cohorts** (`8` valid runs per arm per boss, **`0` invalid trials**, **`0` wave errors** in the final cohort datasets):  
+- **Cohort A (`523ab4c`):** `Kael'thas` (`32` valid) + `Ick` (`32` valid), using the `3.0 s` entrance sleep + `0.2 s`/bot pull stagger.  
+- **Cohort B (`aac0546`):** `Murmur` (`32` valid) + `Ikiss` (`32` valid), after cutting entrance settle to `~0.2 s` (`_wait_harness_connected` + `0.05 s`/bot move) and fixing three multi-wave bugs (re-run from scratch after discarding the broken `523ab4c` waves below).
 
 ---
 
-## 1. Experimental Setup & Hygiene
+## 1. Experimental Setup, Cohorts & Discarded Runs
 
 Every boss ran in `mixed_all` mode across 4 simultaneous 5-man parties (`--parallel 4`) inside a single persistent test `worldserver` (`out/server-test`) with identical hardware/server contention:
 
@@ -17,23 +19,27 @@ Every boss ran in `mixed_all` mode across 4 simultaneous 5-man parties (`--paral
   - **`no_brain`**: pure playerbots (excluded from `--only-bots`), playerbots boss strategy stripped.
   - **`baseline`**: pure playerbots (excluded from `--only-bots`), playerbots hardcoded C++ boss strategy **ON** (`+<strip_strat>`).
 - **Note on Murmur (`Shadow Labyrinth`, `map=555`):** `strip_strat=""` because `mod-playerbots` has no dedicated Murmur/Shadow Labyrinth strategy. On Murmur, `no_brain` and `baseline` therefore act as two independent 8-trial control samples of unscripted playerbots AI.
-- **Per-trial verification & isolation:** Verified `role=` and stored `specNo=` at setup; between waves reset on `map=0` via `llmtest resetbot`, re-verified party grouping via `llmtest group`, staged at dungeon entrances (`areatrigger_teleport`) before starting `harness`, verified `alive=1` + distinct never-reused `instance_id`s, verified per-bot `llmtest checkstrat`, moved to `spawn_xyz` immediately once `harness` connected (`0` pre-pull combat, `0` zero-pull trials), and sliced traces per party `[pull_ms - 1000, pull_ms + duration_s*1000 + 3000]` matching each trial's `instance_id`.
-- **Execution provenance:** `kaelthas` and `ick` completed cleanly at `523ab4c` (`32/32` valid each, `0` invalid, `0` wave errors). Before completing `murmur` and `ikiss` with `--append`, three multi-wave test-harness bugs exposed during long waves were fixed in [`test_commands.cc`](../../server_module/src/test/test_commands.cc) and [`bench_bosses.py`](../../tools/bench/bench_bosses.py) (with **no** changes to the LLM brain, snapshot, options, or scorer):
-  1. Strip `SPELL_AURA_SPIRIT_OF_REDEMPTION` before resurrecting in `HandleResetBot` (removing `27827` while alive triggers `setDeathState(DeathState::JustDied)`).
-  2. Reset playerbots' `"death count"` and random-bot `"dead"`/`"revive"` timers in `HandleResetBot` (plus re-ensure party grouping before each wave reset) so bots hitting `death count >= 5` cannot invoke `RandomPlayerbotMgr::Revive` → `LeaveOrDisbandGroup()`.
-  3. Replace the 3.0 s entrance sleep and 0.2 s per-bot move delay with `_wait_harness_connected` (`~0.2 s` total) + `0.05 s` move delay (clearing non-combat target/attack on move) so LLM bots do not engage entrance trash before moving to `spawn_xyz`.
+- **Per-trial verification & isolation:** Verified `role=` and stored `specNo=` at setup; between waves reset on `map=0` via `llmtest resetbot`, re-verified party grouping via `llmtest group`, staged at dungeon entrances (`areatrigger_teleport`) before starting `harness`, verified `alive=1` + distinct never-reused `instance_id`s, verified per-bot `llmtest checkstrat`, moved to `spawn_xyz` (`0` pre-pull combat, `0` zero-pull trials in final cohorts), and sliced traces per party `[pull_ms - 1000, pull_ms + duration_s*1000 + 3000]` matching each trial's `instance_id`.
+- **Pre-first-plan pull handicap on LLM arms:** [`bench_bosses.py`](../../tools/bench/bench_bosses.py) teleports parties straight into boss aggro range at `spawn_xyz` as soon as `harness` connects to `brain.sock` (`~0.2 s` in Cohort B; Cohort A's `3.0 s` settle sat at the dungeon entrance out of boss line-of-sight). Thus **`llm` and `llm_no_notes` are pulled before their first boss-room LLM decision — and in Cohort B before their initial `notes.md` standing-order compilation — arrives (`first_line_ms` p50 `242–479 ms`, p95 `997–1,400 ms`, plus full-reply generation)**, whereas `baseline`'s C++ boss triggers are active from tick `0`.
+- **Execution provenance & Cohort A (`523ab4c`) vs Cohort B (`aac0546`):**
+  - `kaelthas` and `ick` completed cleanly at `523ab4c` (`32/32` valid each, `0` invalid, `0` wave errors).
+  - **Discarded pre-`aac0546` runs on `murmur` and `ikiss`:** the initial `523ab4c` attempt (`12` waves each) hit three multi-wave harness bugs and was discarded in full and re-run cleanly at `aac0546`:
+    - **Discarded `Murmur` (`523ab4c`, `12` waves):** `15` partial valid trials (`llm` `3/3` kills, `llm_no_notes` `4/4`, `no_brain` `4/4`, `baseline` `4/4`), **`1` `pre_pull_combat` invalid trial (`llm`)**, and **`8` failed waves** (`Wave 3`: `Loadb` died upon `Spirit of Redemption` removal; `Waves 6–12`: `Loadd` disbanded after `death count >= 5` `RandomPlayerbotMgr::Revive` and entered a separate instance).
+    - **Discarded `Ikiss` (`523ab4c`, `12` waves):** `8` partial valid trials (`llm` `1/1` kill, `llm_no_notes` `0/1`, `no_brain` `1/3`, `baseline` `0/3`), **`4` `pre_pull_combat` invalid trials (`2` `llm`, `2` `llm_no_notes` during the `3.0 s` entrance sleep)**, and **`9` failed waves** (`Waves 4–12`: `Pfoud` disbanded after `death count >= 5` and entered a separate instance).
+  - Fixing those three harness bugs in `aac0546` ([`test_commands.cc`](../../server_module/src/test/test_commands.cc) and [`bench_bosses.py`](../../tools/bench/bench_bosses.py), with **no** changes to the LLM brain, snapshot, options, or scorer) stripped `SPELL_AURA_SPIRIT_OF_REDEMPTION` before resurrecting, reset `"death count"` / `"dead"` / `"revive"` timers and re-checked party grouping, and replaced the `3.0 s` entrance wait with `_wait_harness_connected` (`~0.2 s`) + `0.05 s`/bot move — cutting LLM arms' entrance pre-pull window from `~3 s` to `~0.2 s` between Cohort A and Cohort B.
 
 ---
 
-## 2. Executive Summary (Kills / 8 Valid Trials)
+## 2. Executive Summary (Kills / 8 Valid Trials, Wilson 95% CIs & Fisher Tests)
 
-| Boss (Instance, Level, `strip_strat`) | `llm` | `llm_no_notes` | `no_brain` | `baseline` |
-|---|---:|---:|---:|---:|
-| **Kael'thas Sunstrider** (`585`, L70, `tbc-mgt`) | 6/8 (75.0%) | 6/8 (75.0%) | 6/8 (75.0%) | **7/8 (87.5%)** |
-| **Ick** (`658`, L80, `wotlk-pos`) | **8/8 (100.0%)** | **8/8 (100.0%)** | **8/8 (100.0%)** | **8/8 (100.0%)** |
-| **Murmur** (`555`, L70, *(none)*) | 6/8 (75.0%) | **8/8 (100.0%)** | 7/8 (87.5%) | **8/8 (100.0%)** |
-| **Talon King Ikiss** (`556`, L68, `tbc-seth`) | **6/8 (75.0%)** | **6/8 (75.0%)** | 3/8 (37.5%) | 2/8 (25.0%) |
-| **Total across all 128 valid trials** | **26/32 (81.2%)** | **28/32 (87.5%)** | **24/32 (75.0%)** | **25/32 (78.1%)** |
+Because Cohorts A and B used different pre-pull timings (`3.0 s` vs `~0.2 s`), results are reported by cohort with **no pooled total across commits**. All `p`-values are two-sided Fisher's exact tests (`n = 8` per arm).
+
+| Cohort / Boss (`inst`, Lvl, `strip_strat`) | `llm` | `llm_no_notes` | `no_brain` | `baseline` | Exact Fisher `p` (`llm` vs others) |
+|---|---:|---:|---:|---:|---|
+| **A (`523ab4c`): Kael'thas** (`585`, L70, `tbc-mgt`) | 6/8 (75.0%, `[40.9–92.9%]`) | 6/8 (75.0%, `[40.9–92.9%]`) | 6/8 (75.0%, `[40.9–92.9%]`) | 7/8 (87.5%, `[52.9–97.8%]`) | `p = 1.00` vs all 3 arms |
+| **A (`523ab4c`): Ick** (`658`, L80, `wotlk-pos`) | 8/8 (100.0%, `[67.6–100.0%]`) | 8/8 (100.0%, `[67.6–100.0%]`) | 8/8 (100.0%, `[67.6–100.0%]`) | 8/8 (100.0%, `[67.6–100.0%]`) | `p = 1.00` (ceiling: too easy to separate) |
+| **B (`aac0546`): Murmur** (`555`, L70, *(none)*) | 6/8 (75.0%, `[40.9–92.9%]`) | 8/8 (100.0%, `[67.6–100.0%]`) | 7/8 (87.5%, `[52.9–97.8%]`) | 8/8 (100.0%, `[67.6–100.0%]`) | `p = 0.47` vs `8/8`, `p = 1.00` vs `7/8` (not significant) |
+| **B (`aac0546`): Talon King Ikiss** (`556`, L68, `tbc-seth`) | 6/8 (75.0%, `[40.9–92.9%]`) | 6/8 (75.0%, `[40.9–92.9%]`) | 3/8 (37.5%, `[13.7–69.4%]`) | 2/8 (25.0%, `[7.1–59.1%]`) | Pairwise `p = 0.31` vs `no_brain`, `p = 0.13` vs `baseline` *(suggestive only at `n=8`; pooled `12/16` vs `5/16` `p = 0.032`, confounded by `baseline` trash pulls)* |
 
 ---
 
@@ -94,49 +100,48 @@ Computed via [`dodge_timeline.py`](../../tools/bench/dodge_timeline.py) across t
   - `ikiss`: `AWAY Talon King Ikiss` (58), `TO` (19), `TARGET Talon King Ikiss` (10), `STOP` (4), `TO Talon King Ikiss` (3), `FACE Talon King Ikiss` (3), `TARGET Sethekk Prophet` (1), `PET_ATTACK Talon King Ikiss` (1)
 
 ### AoE Dodge Timeline Table
-Note on `act_delay_ms`: `TraceSample` runs at ~`5 Hz` (`200 ms`), whereas `act_sent` is logged on the exact world tick when a standing order fires, so `act_delay_ms` relative to the first sampled `target_casting` row `s0` can be slightly negative (`-76.5 ms` / `-10.0 ms`) when the order dispatched between samples.
+**Independence note:** Multiple cast exposures (and multiple party members) inside the same trial are correlated, so **trials with `>= 1` safe-at-impact dodge** (`n = 8` independent trials/arm) is the primary statistical unit for two-sided Fisher tests; exposure counts below are descriptive context only. Also note `act_delay_ms`: `TraceSample` runs at ~`5 Hz` (`200 ms`), whereas `act_sent` is logged on the exact world tick when a standing order fires, so `act_delay_ms` relative to the first sampled `target_casting` row `s0` can be slightly negative (`-76.5 ms` / `-10.0 ms`) when the order dispatched between samples.
 
-| Boss & Spell (DBC Radius) | Arm | Cast Windows | Safe at Impact | Med Impact Dist | Med `act_delay_ms` | Notes |
+| Boss & Spell (DBC Radius) | Arm | Trials w/ Dodge (of cast trials / of 8) | Exposures Safe at Impact | Med Impact Dist | Med `act_delay_ms` | Fisher `p` (`llm` vs arm, trial-level) |
 |---|---|---:|---:|---:|---:|---|
-| **Ick** — `Poison Nova` (`15.0 yd`) | `llm` | 1 | 1/5 (20.0%) | 9.9 yd | 2,402.0 ms (2) | Most fights stayed `Poison Nova`-sparse; `llm` also dispatched 120 `AVOID Toxic Waste` acts |
-| | `llm_no_notes` | 2 | 2/10 (20.0%) | 10.2 yd | — | — |
-| | `no_brain` | 0 | — | — | — | — |
-| | `baseline` | 5 | **25/25 (100.0%)** | **31.5 yd** | — | Hardcoded `wotlk-pos` flee script |
-| **Murmur** — `Sonic Boom` (no DBC radius*; `34.0 yd` per notes) | `llm` | 9 | **17/40 (42.5%)** | **26.4 yd** (p75 `43.2`, max `58.0`) | -76.5 ms (26) | Cut median Sonic Boom impact dmg to **5,323** (`mean 5,193`) |
-| | `llm_no_notes` | 8 | 1/40 (2.5%) | 7.7 yd (p75 `18.2`, max `37.7`) | — | Med impact dmg **7,894** (`mean 8,787`) |
-| | `no_brain` | 8 | 0/40 (0.0%) | 7.6 yd (p75 `15.4`, max `31.8`) | — | Med impact dmg **7,780** (`mean 8,694`) |
-| | `baseline` | 8 | 0/40 (0.0%) | 7.7 yd (p75 `18.1`, max `28.5`) | — | Med impact dmg **7,769** (`mean 9,092`) |
-| **Ikiss** — `Arcane Explosion` (`35.0 yd`) | `llm` | 23 | **12/110 (10.9%)** | 10.2 yd (max `42.8`) | -10.0 ms (48) | Hunter (`5/21`, med `20.5 yd`), Tank (`4/23`, `7.1 yd`), Priest (`3/22`, `16.3 yd`) |
-| | `llm_no_notes` | 18 | 0/87 (0.0%) | 7.2 yd (max `31.9`) | — | — |
-| | `no_brain` | 15 | 0/68 (0.0%) | 7.1 yd (max `22.6`) | — | — |
-| | `baseline` | 17 | 0/65 (0.0%) | 18.5 yd (max `32.9`) | — | Tank ran to med `20.9 yd` under `tbc-seth`, pulling room trash |
+| **Ick** — `Poison Nova` (`15.0 yd`) | `llm` | 1/1 (`1/8` all) | 1/5 (20.0%) | 9.9 yd | 2,402.0 ms (2) | `llm` also dispatched 120 `AVOID Toxic Waste` acts |
+| | `llm_no_notes` | 1/2 (`1/8` all) | 2/10 (20.0%) | 10.2 yd | — | `p = 1.00` (`1/1` vs `1/2`; `1/8` vs `1/8`) |
+| | `no_brain` | 0/0 (`0/8` all) | — | — | — | `p = 1.00` (`1/8` vs `0/8`) |
+| | `baseline` | 4/4 (`4/8` all) | 25/25 (100.0%) | 31.5 yd | — | `p = 0.28` (`1/8` vs `4/8`, hardcoded `wotlk-pos`) |
+| **Murmur** — `Sonic Boom` (no DBC radius*; `34.0 yd` per notes) | `llm` | **6/7** (**85.7%**, `6/8` all) | 17/40 (42.5%) | 26.4 yd (p75 `43.2`, max `58.0`) | -76.5 ms (26) | Cut med impact dmg to **5,323** (`mean 5,193`) |
+| | `llm_no_notes` | 1/8 (`12.5%`) | 1/40 (2.5%) | 7.7 yd (p75 `18.2`, max `37.7`) | — | **`p = 0.010`** on cast trials (`p = 0.041` all 8); med dmg `7,894` |
+| | `no_brain` | 0/8 (`0.0%`) | 0/40 (0.0%) | 7.6 yd (p75 `15.4`, max `31.8`) | — | **`p = 0.0014`** on cast trials (`p = 0.0070` all 8); med dmg `7,780` |
+| | `baseline` | 0/8 (`0.0%`) | 0/40 (0.0%) | 7.7 yd (p75 `18.1`, max `28.5`) | — | **`p = 0.0014`** on cast trials (`p = 0.0070` all 8); med dmg `7,769` |
+| **Ikiss** — `Arcane Explosion` (`35.0 yd`) | `llm` | **5/8** (**62.5%**) | 12/110 (10.9%) | 10.2 yd (max `42.8`) | -10.0 ms (48) | Hunter `5/21`, Tank `4/23`, Priest `3/22` exposures |
+| | `llm_no_notes` | 0/8 (`0.0%`) | 0/87 (0.0%) | 7.2 yd (max `31.9`) | — | **`p = 0.026`** vs `llm` |
+| | `no_brain` | 0/8 (`0.0%`) | 0/68 (0.0%) | 7.1 yd (max `22.6`) | — | **`p = 0.026`** vs `llm` |
+| | `baseline` | 0/8 (`0.0%`) | 0/65 (0.0%) | 18.5 yd (max `32.9`) | — | **`p = 0.026`** vs `llm` (`tbc-seth` pulled room trash) |
 
 \*`Sonic Boom` emits `target_cast_radius = -1.0` in `TraceSample` (`CalcRadius()` on the self-cast entry returns `0`); the `>= 34.0 yd` column above evaluates Murmur's `34 yd` blast radius using `--radius 34` in `dodge_timeline.py`.  
-On **Kael'thas**, `Flame Strike` is cast by `Flame Strike Trigger (Kael - 5Man)` rather than on Kael'thas's own `target_casting` bar (`0` `Flame Strike` boss-cast windows matched by `target_casting`), so `Flame Strike` is instead reflected in total `Flame Strike` damage taken across the 8 trials per arm: **`845`** (`baseline` `tbc-mgt`), **`80,253`** (`llm_no_notes`), **`84,834`** (`llm`), and **`93,652`** (`no_brain`). Party `Phoenix Egg` kill credits were steady across all four arms (`37–41` over 8 trials).
+On **Kael'thas**, `Flame Strike` is cast by `Flame Strike Trigger (Kael - 5Man)` rather than on Kael'thas's own `target_casting` bar (`0` `Flame Strike` boss-cast windows matched by `target_casting`). At the **trial level** (`n = 8`/arm), `baseline` (`tbc-mgt`) kept `Flame Strike` damage `<= 1,000` on **`8/8` trials** (median `0.0` `[0–845]`, total **`845`**), compared with **`0/8`** on `llm` (median `6,666.0` `[3,791–25,133]`, total **`84,834`**, Fisher `p = 0.0002`), **`0/8`** on `llm_no_notes` (median `5,227.5` `[2,009–27,944]`, total **`80,253`**, `p = 0.0002`), and **`1/8`** on `no_brain` (median `13,053.5` `[0–24,803]`, total **`93,652`**, `p = 0.0014`). Party `Phoenix Egg` kill credits were steady across all four arms (`37–41` over 8 trials).
 
 ---
 
 ## 5. Key Takeaways & Honest Caveats
 
-1. **LLM arms doubled `no_brain` and tripled `baseline` kill rates on Talon King Ikiss (`75.0%` vs `37.5%` and `25.0%`):**
-   - `baseline` (`tbc-seth`) moved the whole party away from Ikiss to a median `18.5 yd` (`tank` `20.9 yd`), which body-pulled the nearby `-x` Sethekk room trash (`Sethekk Shaman`, `Sethekk Prophet`, `Sethekk Talon Lord`, `Avian Warhawk`, `Time-Lost Shadowmage`, 49–65 yd from `spawn_xyz`) in **7/8 trials** and **6/6 wipes**, depressing `baseline` throughput (`731.3` DPS, `564.9` HPS).
-   - `llm` pulled trash in **2/8 trials** (its only `2/2` wipes) when `AWAY Talon King Ikiss` moved near those mobs, while reaching full `>=35 yd` clearance on `12/110` exposures. Even **`llm_no_notes`** matched `llm`'s `6/8` kill rate with **0/8** trash pulls and fewer tank deaths (`2` vs `no_brain`'s `6`) alongside higher healer output (`773.0` vs `648.2` HPS).
-2. **Standing-order dodge verified live on Murmur (`Sonic Boom`) — with a real DPS/aggro tradeoff:**
-   - Only `llm` moved out during `Sonic Boom` (`17/40 >= 34 yd`, median impact distance `26.4 yd` vs `7.6–7.7 yd`, cutting median `Sonic Boom` impact damage by **~32%** from `7,769–7,894` to `5,323`), responding almost immediately upon cast start (`-76.5 ms` median vs `5 Hz` `s0`).
-   - However, running 38 yd away in epic L70 gear lowered party DPS (`2,845.1` / duration `58.4 s` vs `4,346.1` / `39.1 s` for pure tank-and-spank `no_brain`), and both LLM arms engaged deeper room trash (`Cabal Summoner` / `Cabal Executioner`, 54–81 yd north of `spawn_xyz`) more often (`6/8` `llm`, `5/8` `llm_no_notes`, `0/8` `no_brain` / `baseline`), resulting in `6/8` kills on `llm` vs `8/8` on `llm_no_notes` and `baseline`.
-3. **Kael'thas & Ick show where playerbots' C++ mechanics still lead vs parity:**
-   - **Ick (`8/8` all arms):** L80 epic five-mans cleared comfortably in ~80–83 s (`0.0` median deaths); `baseline` (`wotlk-pos`) cleanly dodged `25/25` `Poison Nova` casts (`31.5 yd`), while `llm` actively dispatched `AVOID Toxic Waste` (`120`), `AWAY`/`AWAY Ick` (`18`), and `KITE Ick` (`5`).
-   - **Kael'thas (`7/8` `baseline` vs `6/8` others):** `baseline` (`tbc-mgt`) avoided almost all `Flame Strike` damage (`845` total vs `80,253–93,652` in the non-scripted arms) and finished with `0.0` median deaths; across all 4 arms, `Arcane Sphere` during `Gravity Lapse` caused the majority of deaths (`50` total across the 32 trials).
-4. **Room trash caveat & live environmental death observation:**
-   - Every boss's `spawn_xyz` has nearby dungeon trash (`kaelthas`: 6-mob Sunblade/Coilskar pack at `34–41 yd`; `ick`: Plagueborn Horrors at `21–25 yd`; `murmur`: 3 Cabal Spellbinders at `28–30 yd`; `ikiss`: Sethekk packs at `49–65 yd`), affecting all 4 arms equally per pull.
-   - One live environmental death (`event="died"`, `detail="environment"`) was recorded in `murmur` when `Pfoua` was teleported to map 0 right after a fight while `Murmur's Touch` (`33760`) expired and triggered `Shockwave` (`33686`) knockback/fall damage (`3,579`).
+1. **Kill-rate differences are not statistically significant pairwise at `n = 8` (and Ikiss is suggestive only):**
+   - **Ikiss (`6/8` `llm` & `6/8` `llm_no_notes` vs `3/8` `no_brain` & `2/8` `baseline`):** pairwise differences are **suggestive, not statistically significant at `n = 8`** (Fisher `p = 0.31` vs `no_brain`, `p = 0.13` vs `baseline`). Even the pooled comparison (`12/16` LLM arms vs `5/16` playerbots arms, `p = 0.032`) is confounded because `baseline` (`tbc-seth`) body-pulled nearby `-x` Sethekk room trash (`49–65 yd` from `spawn_xyz`) in **`7/8` trials** and **`6/6` wipes**, depressing throughput (`731.3` DPS, `564.9` HPS); `llm` pulled trash in `2/8` trials (its `2/2` wipes) and `llm_no_notes` had `0/8` trash pulls.
+   - **Kael'thas (`6/8` vs `7/8`, `p = 1.00`), Murmur (`6/8` vs `8/8`, `p = 0.47`), and Ick (`8/8` everywhere, `p = 1.00`):** none shows a statistically significant kill-rate difference at `n = 8`, and Ick at L80 in epic gear is too easy to separate the arms.
+2. **What the data does support — `notes.md` standing orders change AoE dodge behavior live (`p <= 0.026` at trial level), while `baseline` avoids `Flame Strike` much better (`p = 0.0002`):**
+   - On **Murmur**, `llm` dodged `Sonic Boom` (`>= 34 yd` at impact) in **`6/7` (`85.7%`) cast trials (`6/8` overall)** vs **`1/8`** on `llm_no_notes` (`p = 0.010`) and **`0/8`** on `no_brain`/`baseline` (`p = 0.0014`), cutting median impact damage by ~32% (`5,323` vs `7,769–7,894`) while trading off sustained DPS (`2,845.1` / `58.4 s` vs `4,346.1` / `39.1 s` for pure tank-and-spank `no_brain`) and pulling deeper room trash (`6/8` `llm`, `5/8` `llm_no_notes`, `0/8` `no_brain`/`baseline`).
+   - On **Ikiss**, `llm` cleared `>= 35 yd` on `>= 1` bot in **`5/8` trials** vs **`0/8`** on all other arms (`p = 0.026`), though only `12/110` individual exposures cleared the full `35 yd` radius.
+   - On **Kael'thas**, `baseline` (`tbc-mgt`) avoided almost all `Flame Strike` damage (`845` total, `0.0` median/trial vs `5,227.5–13,053.5` median/trial in the non-scripted arms, `p <= 0.0014`); `Arcane Sphere` during `Gravity Lapse` caused the majority of deaths (`50` total across the 32 trials).
+3. **Methodology caveats & follow-up:**
+   - **Immediate pull handicap on LLM arms:** pulling at `spawn_xyz` immediately upon connect puts `llm` and `llm_no_notes` into combat before their first boss-room LLM decision (and in Cohort B before initial `notes.md` standing-order compilation) finishes (`first_line_ms` p50 `242–479 ms`, p95 `997–1,400 ms`), whereas `baseline` starts with its C++ scripts active from tick `0`.
+   - **Room trash & environmental death:** nearby trash affects all 4 arms on each pull (`kaelthas`: 6-mob pack at `34–41 yd`; `ick`: Plagueborn Horrors at `21–25 yd`; `murmur`: 3 Cabal Spellbinders at `28–30 yd`; `ikiss`: Sethekk packs at `49–65 yd`). One live environmental death (`event="died"`, `detail="environment"`) was recorded in `murmur` (`Pfoua` after post-fight `tele 0` when `Murmur's Touch` triggered `Shockwave` fall damage `3,579`).
+   - **Next experiment:** re-run `ikiss` and `murmur` with **`15–20` trials per arm under a single commit** to test whether `notes.md` actually changes kill rates, and replace `ick` with a harder boss.
 
 ---
 
 ## 6. Runner Speedup Decisions & Skipped Proposals
 
 ### Measured Wall-Clock Breakdown & Control-Arm Impact
-Across the 128-trial run at `--parallel 4` (measured directly from `pull_ms` and per-wave `max(duration_s)` in `var/bench_boss_10_mixed_all.json`):
+Across the two 64-trial cohorts (`kaelthas` + `ick` at `523ab4c`, `murmur` + `ikiss` at `aac0546`, `32` waves total) at `--parallel 4` (measured directly from `pull_ms` and per-wave `max(duration_s)` in `var/bench_boss_10_mixed_all.json`):
 - **Boss combat (`43.5 min` / `2,608.3 s` across 32 waves):** `kaelthas` `762.1 s` (`12.7 m`), `ick` `731.0 s` (`12.2 m`), `murmur` `495.3 s` (`8.3 m`), `ikiss` `619.9 s` (`10.3 m`).
 - **Control arms (`no_brain` & `baseline`) were NOT the bottleneck:** they use **0 `llama-server` GPU slots** and added only **`+2.2 min` (`132.1 s`, `+5%`)** total across all 32 waves while yielding 64 matched control trials (`sum(max_all_4) = 2,608.3 s` vs `sum(max_llm_2) = 2,476.2 s`: `+46.9 s` `kaelthas`, `+18.7 s` `ick`, `+0.0 s` `murmur`, `+66.5 s` `ikiss`). The true ceiling on throughput is the `16`-slot single-GPU `llama-server` capacity (~10 combat-rate LLM bots in `mixed_all`, or up to 3 LLM parties = 15 bots via `--mode mixed --parallel 3`) multiplied by 8 sequential waves.
 - **Between-wave staging (`20.9 min` / `1,255.1 s` across the 28 inter-wave gaps):** median gap between pull end and next wave pull was `51.6 s` (`kaelthas`), `45.6 s` (`ick`), `34.9 s` (`murmur`), and `47.6 s` (`ikiss`), dominated by fixed per-command `wait_s` sleeps (~140 console commands/wave) and `5.0 s` trace polling.

@@ -239,7 +239,9 @@ in `FixtureLoader` + `llmtest group`/`gear`/`tele`:
   (verified PASS on real `Hele` + live bot traces: `heldout_human 1000.0 > current_bots 175.1 > plain_playerbots 46.6 > same_loop_walker -68.9 > random_jumper -101.4 > instant_reply -128.2`).
 - **Tamper check:** `tools/bench/hill_climb.py lock-scorer` writes a read-only (0444) SHA-256 lock
   manifest (`~/.local/share/wow-llm-bots/scorer.sha256`) covering all 28 measurement, trace, and
-  soak config files (`LOCKED_PATTERNS` in `hill_climb.py`).
+  soak config files (`LOCKED_PATTERNS` in `hill_climb.py`), and records the user-approved manifest
+  digest in tracked `config/scorer-lock.sha256` (verified by `_verify_all_locks`) so any relock
+  is visible in git review.
 - **Recording human sessions** (5 Hz observer-parity + explicit events):
   ```ini
   LlmBrain.TraceDir = "/home/will/.local/share/wow-llm-bots/human_baseline"

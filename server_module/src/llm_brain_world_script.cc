@@ -382,6 +382,14 @@ class LlmBrainWorldScript : public WorldScript {
     if (!trace_writer_ || !trace_writer_->enabled()) {
       return;
     }
+    if (const uint64_t untracked = trace_writer_->TakeUntrackedSampleChars();
+        untracked > 0) {
+      LOG_WARN("module",
+               "mod-llm-brain: trace sample-rate tracker hit per-role active "
+               "cap ({} samples from extra concurrent characters not "
+               "rate-tracked)",
+               untracked);
+    }
     for (std::string_view role : {"bot", "human"}) {
       const std::optional<double> hz =
           trace_writer_->TakeMeasuredSampleHz(role, min_intervals);

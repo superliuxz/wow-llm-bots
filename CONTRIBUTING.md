@@ -39,10 +39,11 @@ one feature never introduces extra bugs:
   existing invariants), error handling, and all callers.
 - Run `tools/wlb check` after your final edit and verify all unit/spec/consistency checks pass.
   **Never** set `WLB_CONFIRM_RELOCK`, run `tools/bench/hill_climb.py lock-scorer`, or modify
-  `scorer.sha256` on your own — the lock exists to stop an agent tuning the scorer to its own
-  changes (and `hill_climb.py` ignores `--lock-file` during agent runs). If a task changes a locked
-  measurement file, leave `scorer.sha256` untouched and ask for the user's explicit OK in the
-  current turn before any relock.
+  `~/.local/share/wow-llm-bots/scorer.sha256` or tracked `config/scorer-lock.sha256` on your own —
+  the lock exists to stop an agent tuning the scorer to its own changes (and `hill_climb.py`
+  ignores `--lock-file` and detects agent ancestors in `/proc` even if env vars are unset). If a
+  task changes a locked measurement file, leave both lock files untouched and ask for the user's
+  explicit OK in the current turn before any relock.
 - Live-verify game, server, or benchmark changes against `out/server-test` before claiming them fixed;
   anything not live-tested must be stated honestly in `docs/TODO.md`.
 

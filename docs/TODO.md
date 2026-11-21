@@ -9,9 +9,19 @@ Last updated 2026-11-21.
 
 ## In progress
 
-(none)
+- **Re-lock `~/.local/share/wow-llm-bots/scorer.sha256` and `config/scorer-lock.sha256` (awaiting
+  user OK):** Review 9 Low 1, Low 2, and Low 4 modified locked measurement files
+  (`tools/bench/hill_climb.py`, `server_module/src/snapshot/behavior_trace.{h,cc}`,
+  `server_module/src/llm_brain_world_script.cc`); left untouched at the Review 8 digest
+  (`f58a32adcf70...`) per `CONTRIBUTING.md` Rule #6 until explicit user approval.
 
 ## Next, in order
+
+- **Higher-power Murmur/Ikiss re-run & harder boss replacement (Review 9):** report claims fixed;
+  ready to re-run `ikiss` and `murmur` with `15–20` trials per arm under one commit to test whether
+  notes change kills, replacing `ick` (`8/8` across all arms) with **`devourer` (`Devourer of Souls`,
+  Forge of Souls `map=632`, `0` trash within 80 yd, `stage_xyz` updated to entrance `(4922.86, 2175.63, 639.0)`)**
+  or `loken` (`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`).
 
 - **Human baseline coverage & initial blind-rating batch** (`docs/plans/self-improving-loop.md`):
   layered scorer (Steps 1–6) is built and live-verified, and General/Say/Party chat + quest
@@ -92,11 +102,10 @@ Last updated 2026-11-21.
     a working `Lightning Nova cast` order into `Loken cast` or `Lightning Nova appears`.
 - **Not individually live-triggered after final edits yet:** `llmtest questcomplete` when a quest
   is already active in a bot's quest log (`CompleteQuest` + `RewardQuest` branch in
-  `test_commands.cc`, source-verified). Environmental/self death (`died` with `detail="environment"`
-  in `behavior_trace_scripts.cc`) was triggered live once during `murmur` (`Pfoua` dying to
-  `Murmur's Touch` `Shockwave` fall damage after post-fight `tele 0`), and the updated
-  `areatrigger_teleport` entrance staging + pull coordinates for `ick`, `murmur`, and `ikiss`
-  are now live-verified (`32` valid trials each, `0` arrival deaths, `0` pre-pull combat).
+  `test_commands.cc`, source-verified). *(Environmental/self death `died` with
+  `detail="environment"` caveat closed per Review 9 — live-triggered on `murmur`, and
+  entrance staging/pull coordinates for `ick`, `murmur`, and `ikiss` live-verified across `32`
+  valid trials each.)*
 - **Deliberately skipped benchmark speedup proposals (Items 4, 5, adaptive 6):** left unbuilt on
   purpose to preserve valid boss immunity/kite phases (Item 4: `20 s` zero-damage abort would
   cut `Gravity Lapse`/`Planar Shift` and censor `llm` bugs via survivorship bias), cross-boss DB
@@ -106,6 +115,30 @@ Last updated 2026-11-21.
   details in [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md) §6).
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-21: **Review 9 fixes (Medium 1–3, Low 1–4, closed environmental-death caveat):**
+  [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md)
+  splits Cohort A (`523ab4c`: `kaelthas`, `ick`) vs Cohort B (`aac0546`: `murmur`, `ikiss`) with no
+  cross-commit pooled row, adds Wilson 95% CIs + exact two-sided Fisher `p`-values across kills and
+  independent trial-level AoE dodges/`Flame Strike` damage, reports all discarded pre-`aac0546`
+  `murmur`/`ikiss` waves + pre-pull invalidations, documents the pre-first-plan pull handicap on
+  LLM arms, and closes the environmental-death caveat in `Loose ends`;
+  [`tools/bench/hill_climb.py`](../tools/bench/hill_climb.py) adds `/proc` ancestor detection
+  (`_has_agent_ancestor`), drops the leaked token from `_confirm_relock` refusal/prompt messages,
+  and tracks/verifies the approved `scorer.sha256` manifest digest in
+  [`config/scorer-lock.sha256`](../config/scorer-lock.sha256) (updated docs in
+  [`docs/plans/self-improving-loop.md`](plans/self-improving-loop.md),
+  [`CONTRIBUTING.md`](../CONTRIBUTING.md), `.agents/rules/contributing.md`);
+  [`behavior_trace.{h,cc}`](../server_module/src/snapshot/behavior_trace.cc) +
+  [`llm_brain_world_script.cc`](../server_module/src/llm_brain_world_script.cc) raise
+  `kDefaultMaxTrackedCharsPerRole` to `4096`, evict drained/stale windows, and warn via
+  `TakeUntrackedSampleChars()` when concurrent active cap overflows; updated `devourer`
+  `stage_xyz` to Forge of Souls entrance `(4922.86, 2175.63, 639.0)` in
+  [`bench_bosses.py`](../tools/bench/bench_bosses.py). Verified via `tools/wlb check`
+  (`60 + 119 + 224` C++ tests incl. `EvictsIdleTrackedCharactersAndReportsCapOverflow`; `7/7` in
+  [`hill_climb_test.py`](../tools/bench/hill_climb_test.py) incl. `env -i` `/proc` ancestor and
+  digest checks) and `build.server(test=True)`. *(Re-locking `scorer.sha256` +
+  `config/scorer-lock.sha256` left pending user OK under `In progress`.)*
 
 - 2026-11-21: **Boss benchmark runner speedups (Items 1–3) & skipped-proposal rationale:** added
   `phase_timings` (`setup_s`, per-wave phases, `teardown_s`, `wall_s`) to benchmark JSON,
@@ -138,13 +171,16 @@ Last updated 2026-11-21.
   `llmtest move` (eliminating entrance `pre_pull_combat`); updated `dodge_timeline_test.py` (`11/11`
   tests, adding `test_wait_harness_connected_returns_on_log_marker`). Verified `tools/wlb check`
   (402 C++ + 36 Python tests), all `28` scorer locks (`all 28 measurement locks verified`), and
-  completed `bench_bosses.py --mode mixed_all --runs 8 --parallel 4` across `kaelthas`, `ick`,
-  `murmur`, and `ikiss` (`32/32` valid per boss, `0` invalid, `0` wave errors; `llm` doubled
-  `no_brain` and tripled `baseline` on Ikiss `6/8` vs `3/8` & `2/8` and cut Murmur `Sonic Boom`
-  median impact damage 32% `5,323` vs `7,769–7,894`; see
+  completed `bench_bosses.py --mode mixed_all --runs 8 --parallel 4` in two 64-trial cohorts
+  (`kaelthas` & `ick` at `523ab4c`; `murmur` & `ikiss` at `aac0546`; `32/32` valid per boss, `0`
+  invalid, `0` wave errors; Ikiss `6/8` & `6/8` vs `3/8` & `2/8`, suggestive, not significant
+  pairwise at `n = 8`: Fisher `p = 0.31` & `0.13`, pooled LLM `12/16` vs playerbots `5/16`
+  `p = 0.032` confounded by `baseline` trash pulls; Murmur `Sonic Boom` dodged on `6/7` cast
+  trials for `llm` vs `1/8` `llm_no_notes` `p = 0.010` and `0/8` `no_brain`/`baseline` `p = 0.0014`,
+  cutting median impact damage 32% `5,323` vs `7,769–7,894`; see
   [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md)).
 
-- 2026-11-20: **Review 8 fixes (New Lows 1–3) + user-approved scorer relock:**
+- 2026-11-20: **Review 8 fixes (New Lows 1–3; partly — see Review 9 Low 1, Low 2, Low 4) + user-approved scorer relock:**
   `tools/bench/bench_bosses.py` narrows setup, outer boss-loop, cleanup, and latency-parse
   exception handling (`except (Failed, RuntimeError)`, `except (Failed, OSError)`,
   `except (json.JSONDecodeError, ValueError, TypeError)`) so bench programming bugs crash loudly
@@ -255,10 +291,3 @@ Last updated 2026-11-21.
   group `mob_kill` to 100 yd (no-killer kill L4 still open); `trace_parity.py` drops `item_unequip`
   & `quest_abandon` (scorer re-locked); standardized the 3-step review-fix procedure in
   `CONTRIBUTING.md` + `.agents/rules/contributing.md` (`always_on`).
-- 2026-11-20: **Review 3 fixes on `trace-all-events`:**
-  `server.console()` returns captured output (`tools/wlblib/server.py`); `bench_bosses.py` stages
-  bots inside the dungeon before starting `harness`, enforces role and post-arrival `checkstrat`
-  checks, splits `no_brain` / `llm_no_notes` / `llm` / `baseline` modes, and invalidates zero-pull
-  trials; `llm_brain_world_script.cc` logs `act_sent` events; `behavior_trace_scripts.cc` credits
-  group `mob_kill` via `OnUnitDeath` and drops unvalidated `vendor_buy`; `behavior_trace_unittest.cc`
-  covers multi-file rotation and direct `TraceSample` formatting.

@@ -122,11 +122,13 @@ class BehaviorTraceWriter {
   static constexpr uint64_t kDefaultMaxFileBytes = 64ULL * 1024 * 1024;
   static constexpr size_t kDefaultMaxRotatedFiles = 8;
   static constexpr size_t kMaxQueueLines = 8192;
+  static constexpr size_t kDefaultMaxTrackedCharsPerRole = 4096;
 
   explicit BehaviorTraceWriter(
       std::string root_dir,
       uint64_t max_file_bytes = kDefaultMaxFileBytes,
-      size_t max_rotated_files = kDefaultMaxRotatedFiles);
+      size_t max_rotated_files = kDefaultMaxRotatedFiles,
+      size_t max_tracked_chars_per_role = kDefaultMaxTrackedCharsPerRole);
   ~BehaviorTraceWriter();
 
   BehaviorTraceWriter(const BehaviorTraceWriter&) = delete;
@@ -145,6 +147,10 @@ class BehaviorTraceWriter {
   // or the writer was stopping.
   uint64_t dropped_lines() const;
 
+  // Returns and clears the count of sample writes whose character was not
+  // rate-tracked because the per-role active cap was full.
+  uint64_t TakeUntrackedSampleChars();
+
   // Computes the measured sample rate (Hz) for `role` ("bot" or "human")
   // matching trace_parity.check_source_rate_parity: per-character median
   // contiguous dt (0 < dt <= 5000 ms) converted to Hz, then median across
@@ -156,14 +162,19 @@ class BehaviorTraceWriter {
 
  private:
   static constexpr int64_t kMaxSampleGapMs = 5000;
+  static constexpr int64_t kStaleTrackedCharMs = 60000;
   static constexpr size_t kMaxRecordedSampleDtsPerChar = 4096;
-  static constexpr size_t kMaxTrackedCharsPerRole = 256;
 
   struct PendingLine {
     std::string role;
     std::string name;
     int64_t time_ms = 0;
     std::string line;
+  };
+
+  struct CharSampleWindow {
+    int64_t last_time_ms = 0;
+    std::vector<int64_t> dts;
   };
 
   bool Enqueue(std::string_view role,
@@ -177,14 +188,15 @@ class BehaviorTraceWriter {
   std::string root_dir_;
   uint64_t max_file_bytes_ = kDefaultMaxFileBytes;
   size_t max_rotated_files_ = kDefaultMaxRotatedFiles;
+  size_t max_tracked_chars_per_role_ = kDefaultMaxTrackedCharsPerRole;
   mutable std::mutex mu_;
   std::condition_variable cv_;
   std::condition_variable flushed_cv_;
   std::deque<PendingLine> queue_;
-  std::unordered_map<std::string, int64_t> last_sample_time_ms_;
   std::unordered_map<std::string,
-                     std::unordered_map<std::string, std::vector<int64_t>>>
-      sample_dts_by_role_;
+                     std::unordered_map<std::string, CharSampleWindow>>
+      sample_windows_by_role_;
+  uint64_t untracked_sample_chars_ = 0;
   uint64_t dropped_lines_ = 0;
   bool writing_ = false;
   bool stop_ = false;
