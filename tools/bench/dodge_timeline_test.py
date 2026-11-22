@@ -888,6 +888,14 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
         self.assertNotEqual(d1, d2)
         self.assertTrue(str(d1).endswith("bench_boss_kaelthas_mgt_llm_llm_no_notes"))
         self.assertTrue(str(d2).endswith("bench_boss_kaelthas_mgt_no_brain_baseline"))
+        # Multi-boss --trace-dir scopes per boss tag so earlier bosses aren't wiped.
+        base = pathlib.Path("/tmp/my_traces")
+        self.assertEqual(bench_bosses._resolve_trace_dir_override(base, "ikiss_blink", False), base)
+        self.assertEqual(
+            bench_bosses._resolve_trace_dir_override(base, "ikiss_blink", True),
+            base / "ikiss_blink",
+        )
+        self.assertIsNone(bench_bosses._resolve_trace_dir_override(None, "ikiss_blink", True))
         # CLI rejects empty/comma-only --arms with SystemExit(2).
         orig_argv = sys.argv
         try:

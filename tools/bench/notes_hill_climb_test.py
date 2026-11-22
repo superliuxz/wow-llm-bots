@@ -53,38 +53,57 @@ class NotesHillClimbTest(unittest.TestCase):
         keep, _ = nhc.is_competence_improvement(base, faster_wipe)
         self.assertFalse(keep)
 
+        # Kill gain with >15% DPS collapse -> REJECT.
+        kill_with_dps_collapse = nhc.CompetenceScore(
+            kills=2, runs=3, median_dps=1600.0, median_deaths=1.0, median_damage_taken=80000.0
+        )
+        keep, _ = nhc.is_competence_improvement(base, kill_with_dps_collapse)
+        self.assertFalse(keep)
+
     def test_validate_standing_orders(self) -> None:
         good = (
             "# Kael'thas\n"
             "- Standing order: `in Flame Strike -> out of it`\n"
             "- Standing order: `Phoenix Egg appears -> target nearest Phoenix Egg`\n"
             "- Standing order: `always -> avoid Fire, then jump, then wake`\n"
+            "- Standing order: `Mirrored Soul on anyone & not phase 2 -> stop attacking, then pet passive`\n"
             "```\nArcane Explosion cast -> out of it, then back\n```\n"
         )
         ok, errs = nhc.validate_standing_orders(good)
         self.assertTrue(ok, errs)
 
         for bad in (
-            "# Broken\n- Standing order: `Flame Strike cast -> spread`\n",
+            "# Non-existent verb\n- Standing order: `Flame Strike cast -> spread`\n",
+            "# Prefix collision\n- `in Fire -> backflip`\n",
+            "# Prefix collision 2\n- `in Fire -> stomp`\n",
+            "# Zero-arg verb with arg\n- `in Fire -> jump high`\n",
+            "# Zero-arg back with arg\n- `in Fire -> back 10`\n",
+            "# Invalid stop enum\n- `in Fire -> stop dancing`\n",
+            "# Invalid pet enum\n- `in Fire -> pet dance`\n",
+            "# Unvalidated prose condition\n- `boss gets angry -> wake`\n",
             "# Too many steps\n- `in Fire -> out of it, then back, then jump, then wake`\n",
             "# Missing arg\n- `in Fire -> out of`\n",
         ):
             ok, errs = nhc.validate_standing_orders(bad)
             self.assertFalse(ok, f"expected failure for {bad!r}")
 
-    def test_summarize_fight_timeline_reads_traces(self) -> None:
+    def test_summarize_fight_timeline_reads_traces_and_bounds_by_sample_inst(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tdir = pathlib.Path(tmp)
             bot_dir = tdir / "bot" / "Loada"
             bot_dir.mkdir(parents=True)
-            events = [
-                # Prior wave (different inst=1 and t_ms < pull_ms): must be excluded.
-                {"kind": "event", "t_ms": 9500, "inst": 1, "event": "damage_taken", "detail": "OldWave", "value": 99999},
-                {"kind": "event", "t_ms": 12000, "inst": 2, "event": "damage_taken", "detail": "Arcane Sphere", "value": 9500},
-                {"kind": "event", "t_ms": 14000, "inst": 2, "event": "act_sent", "detail": "OUT_OF"},
-                {"kind": "event", "t_ms": 15500, "inst": 2, "event": "died", "detail": "Arcane Sphere"},
+            # Realistic AzerothCore trace: only `sample` carries `inst`, `event` does NOT.
+            records = [
+                {"kind": "sample", "t_ms": 10000, "inst": 2},
+                {"kind": "event", "t_ms": 12000, "event": "damage_taken", "detail": "Arcane Sphere", "value": 9500},
+                {"kind": "event", "t_ms": 14000, "event": "act_sent", "detail": "OUT_OF"},
+                {"kind": "event", "t_ms": 15500, "event": "died", "detail": "Arcane Sphere"},
+                # Fast next wave (inst=3) starts 200 ms after trial end (dur=10s -> 20000 ms),
+                # inside the +500 ms tail; sample inst transition at 20200 must exclude 20300 event.
+                {"kind": "sample", "t_ms": 20200, "inst": 3},
+                {"kind": "event", "t_ms": 20300, "event": "damage_taken", "detail": "NextWaveLeak", "value": 88888},
             ]
-            (bot_dir / "2026-11-21.jsonl").write_text("\n".join(json.dumps(e) for e in events) + "\n")
+            (bot_dir / "2026-11-21.jsonl").write_text("\n".join(json.dumps(e) for e in records) + "\n")
             boss_res = {
                 "boss": "Kael'thas Sunstrider",
                 "by_arm": {"llm": {"kills": 0, "runs": 1, "median_dps": 1500.0, "median_deaths": 5.0}},
@@ -92,7 +111,7 @@ class NotesHillClimbTest(unittest.TestCase):
                     {
                         "mode": "llm",
                         "killed": False,
-                        "duration_s": 40.0,
+                        "duration_s": 10.0,
                         "total_dps": 1500.0,
                         "total_deaths": 5,
                         "party_index": 0,
@@ -102,10 +121,57 @@ class NotesHillClimbTest(unittest.TestCase):
                 ],
             }
             summary = nhc.summarize_fight_timeline(boss_res, tdir, arm="llm")
-            self.assertNotIn("OldWave", summary)
+            self.assertNotIn("NextWaveLeak", summary)
             self.assertIn("Arcane Sphere=9500", summary)
             self.assertIn("5.5s Loada killed by Arcane Sphere", summary)
             self.assertIn("OUT_OF x1", summary)
+
+    def test_confirmation_rerun_keeps_confirmed_and_logs_conf_score_on_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = pathlib.Path(tmp) / "confirm_loop"
+            # Round 1: initial looks good (2/3), confirmation fails (0/3).
+            # Round 2: initial looks good (2/3), confirmation succeeds (3/3).
+            bench_seq = iter(
+                [
+                    (1, 3.0, 2000.0),  # baseline
+                    (2, 1.0, 2100.0),  # r1 initial
+                    (0, 5.0, 1900.0),  # r1 confirm -> fail
+                    (2, 1.0, 2100.0),  # r2 initial
+                    (3, 0.0, 2200.0),  # r2 confirm -> pass
+                ]
+            )
+
+            def fake_bench(boss_key, notes_path, runs, parallel, out_json, trace_dir):
+                kills, deaths, dps = next(bench_seq)
+                return {
+                    "boss": "Test Boss",
+                    "by_arm": {"llm": {"kills": kills, "runs": runs, "median_dps": dps, "median_deaths": deaths}},
+                    "trials": [],
+                }
+
+            proposals = iter(
+                [
+                    "# Flaky\n- `in Fire -> out of it`\n",
+                    "# Solid\n- `in Frost -> out of it`\n",
+                ]
+            )
+            res = nhc.run_notes_hill_climb(
+                boss_key="kaelthas",
+                initial_notes="# Base\n",
+                out_dir=out_dir,
+                rounds=2,
+                runs_per_eval=3,
+                confirm_runs=3,
+                bench_fn=fake_bench,
+                propose_fn=lambda bn, cn, tl, rej: next(proposals),
+            )
+            self.assertEqual(res["best_score"]["kills"], 3)
+            ledger = [json.loads(l) for l in (out_dir / "ledger.jsonl").read_text().splitlines()]
+            self.assertEqual([e["status"] for e in ledger], ["baseline", "rejected", "kept"])
+            # Failed confirmation must log conf_score (0 kills), not initial cand_score (2 kills).
+            self.assertEqual(ledger[1]["score"]["kills"], 0)
+            self.assertEqual(ledger[1]["initial_score"]["kills"], 2)
+            self.assertEqual(ledger[2]["score"]["kills"], 3)
 
     def test_hill_climb_loop_keeps_improvement_and_preserves_incumbent_traces(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -1193,33 +1193,40 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
     return {"invalid item id"};
   }
   const BagSlotItem* found = nullptr;
+  uint32_t item_spell_id = 0;
+  int spell_slot = -1;
   std::vector<BagSlotItem> items = BagItems(bot);
   for (const BagSlotItem& slot_item : items) {
-    if (slot_item.item && slot_item.item->GetEntry() == entry) {
-      found = &slot_item;
+    if (!slot_item.item || slot_item.item->GetEntry() != entry) {
+      continue;
+    }
+    const ItemTemplate* p = slot_item.item->GetTemplate();
+    if (!p || p->InventoryType != INVTYPE_NON_EQUIP) {
+      continue;
+    }
+    for (int i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i) {
+      if (p->Spells[i].SpellId > 0 &&
+          p->Spells[i].SpellTrigger == ITEM_SPELLTRIGGER_ON_USE) {
+        if (p->Spells[i].SpellCharges != 0 &&
+            slot_item.item->GetSpellCharges(i) == 0) {
+          continue;
+        }
+        found = &slot_item;
+        item_spell_id = static_cast<uint32_t>(p->Spells[i].SpellId);
+        spell_slot = i;
+        break;
+      }
+    }
+    if (found) {
       break;
     }
   }
-  if (!found) {
-    return {"you don't have " + target.name};
-  }
-  Item* item = found->item;
-  const ItemTemplate* proto = item ? item->GetTemplate() : nullptr;
-  if (!proto || proto->InventoryType != INVTYPE_NON_EQUIP) {
+  if (!found || item_spell_id == 0) {
     return {"can't use " + target.name + " now"};
   }
-  uint32_t item_spell_id = 0;
-  for (int i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i) {
-    if (proto->Spells[i].SpellId > 0 &&
-        proto->Spells[i].SpellTrigger == ITEM_SPELLTRIGGER_ON_USE) {
-      if (proto->Spells[i].SpellCharges != 0 && item->GetSpellCharges(i) == 0) {
-        continue;
-      }
-      item_spell_id = static_cast<uint32_t>(proto->Spells[i].SpellId);
-      break;
-    }
-  }
-  if (item_spell_id == 0 || bot->CanUseItem(item) != EQUIP_ERR_OK) {
+  Item* item = found->item;
+  const ItemTemplate* proto = item->GetTemplate();
+  if (!proto || bot->CanUseItem(item) != EQUIP_ERR_OK) {
     return {"can't use " + target.name + " now"};
   }
   if (bot->HasSpellCooldown(item_spell_id)) {
@@ -1252,7 +1259,12 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
     item_target = bot;
   }
   const uint32_t count_before = bot->GetItemCount(proto->ItemId);
-  const bool cd_before = bot->HasSpellCooldown(item_spell_id);
+  const int32_t charges_before =
+      spell_slot >= 0 ? item->GetSpellCharges(spell_slot) : 0;
+  const size_t auras_before = bot->GetAppliedAuras().size();
+  const uint32_t mana_before = bot->GetPower(POWER_MANA);
+  const bool gcd_before =
+      bot->GetGlobalCooldownMgr().HasGlobalCooldown(item_spell);
   const void* vehicle_before = bot->GetVehicle();
   WorldPacket p(CMSG_USE_ITEM);
   p << found->bag << found->slot << static_cast<uint8_t>(0) << item_spell_id
@@ -1265,13 +1277,26 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
   p.rpos(0);
   session->HandleUseItemOpcode(p);
   const bool count_dropped = bot->GetItemCount(proto->ItemId) < count_before;
+  // Re-check charges only if the item wasn't destroyed (count_dropped ==
+  // false).
+  const bool charges_dropped =
+      !count_dropped && spell_slot >= 0 &&
+      proto->Spells[spell_slot].SpellCharges != 0 &&
+      item->GetSpellCharges(spell_slot) != charges_before;
   const bool cast_started = bot->IsNonMeleeSpellCast(false);
-  const bool cd_started = !cd_before && bot->HasSpellCooldown(item_spell_id);
+  const bool cd_started = bot->HasSpellCooldown(item_spell_id);
+  const bool gcd_started =
+      !gcd_before && bot->GetGlobalCooldownMgr().HasGlobalCooldown(item_spell);
+  const bool aura_changed = bot->GetAppliedAuras().size() != auras_before;
+  const bool mana_changed = bot->GetPower(POWER_MANA) != mana_before;
   const bool vehicle_changed = bot->GetVehicle() != vehicle_before;
-  if (!count_dropped && !cast_started && !cd_started && !vehicle_changed) {
+  if (!count_dropped && !charges_dropped && !cast_started && !cd_started &&
+      !gcd_started && !aura_changed && !mana_changed && !vehicle_changed) {
     return {"can't use " + target.name + " now"};
   }
-  return {.used = true, .info = "used " + target.name};
+  // Cast-time items stay pending in OptionTargetProgress until the cast ends.
+  return {.used = !cast_started,
+          .info = cast_started ? "" : "used " + target.name};
 }
 
 }  // namespace

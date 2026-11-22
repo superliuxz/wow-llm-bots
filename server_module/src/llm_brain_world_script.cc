@@ -125,6 +125,13 @@ TargetProgress OptionTargetProgress(Player* bot,
     }
     case OptionTarget::Kind::kGather:
     case OptionTarget::Kind::kUse: {
+      if (target.kind == OptionTarget::Kind::kUse &&
+          target.guid.starts_with("item:")) {
+        if (used) {
+          return done();
+        }
+        return bot->IsNonMeleeSpellCast(false) ? pending() : done();
+      }
       GameObject* go =
           ObjectAccessor::GetGameObject(*bot, ParseSnapshotGuid(target.guid));
       if (go == nullptr || !go->IsInWorld() || !go->isSpawned()) {

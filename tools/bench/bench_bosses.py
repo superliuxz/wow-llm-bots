@@ -1271,6 +1271,14 @@ def run_boss_waves(
     return res
 
 
+def _resolve_trace_dir_override(
+    base: pathlib.Path | None, tag: str, multi_boss: bool
+) -> pathlib.Path | None:
+    if base is None:
+        return None
+    return (base / tag) if multi_boss else base
+
+
 def _trace_dir_for(tag: str, mode: str, arms_override: tuple[str, ...] | None) -> pathlib.Path:
     suffix = "_".join(arms_override) if arms_override else mode
     return VAR / f"bench_boss_{tag}_{suffix}"
@@ -1358,7 +1366,9 @@ def main() -> int:
                     arms_override=arms_override,
                     target_runs=max(1, args.runs),
                     parallel=max(1, parallel),
-                    trace_dir_override=trace_dir_override,
+                    trace_dir_override=_resolve_trace_dir_override(
+                        trace_dir_override, spec["tag"], len(keys) > 1
+                    ),
                 )
             except (Failed, RuntimeError) as exc:
                 say(f"BOSS {k} FAILED (continuing to remaining bosses): {exc}")

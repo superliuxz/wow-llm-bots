@@ -31,46 +31,53 @@ VAR = ROOT / "var"
 
 PREFIXES = ["Load", "Ptwo", "Pthr", "Pfou"]
 
-# Exact act verbs from harness/grammar/orders.wlb (lines 88-110).
-VALID_ACT_PREFIXES = (
+# Exact zero-arg, enum-restricted, and arg-requiring acts from harness/grammar/orders.wlb (lines 88-110).
+_ZERO_ARG_ACTS = frozenset({"back", "jump", "leave vehicle", "wake"})
+_STOP_WHAT = frozenset({"casting", "attacking", "moving"})
+_PET_CMDS = frozenset({"stay", "follow", "passive", "defensive"})
+_ARG_ACT_PREFIXES = (
     "to ",
     "out of ",
-    "back",
-    "away",
     "avoid ",
     "target ",
     "use ",
-    "stop",
     "face away ",
     "face ",
-    "jump",
     "cancel ",
     "mark ",
     "interact ",
     "board ",
-    "leave vehicle",
     "equip ",
-    "pet ",
     "kite ",
-    "wake",
 )
 
-# Acts that require a non-empty argument after the verb prefix.
-_REQUIRES_ARG_PREFIXES = (
-    "to ",
-    "out of ",
-    "avoid ",
-    "target ",
-    "use ",
-    "face away ",
-    "face ",
-    "cancel ",
-    "mark ",
-    "interact ",
-    "board ",
-    "equip ",
-    "pet ",
-    "kite ",
+# Exact LHS `Check` patterns from harness/grammar/orders.wlb (lines 43-71).
+_CHECK_PATTERNS = (
+    re.compile(r"^.+\s+stacks\s*[<>]\s*\d+\s+on\s+.+$", re.IGNORECASE),
+    re.compile(r"^.+\s+ends<\s*\d+s\s+on\s+.+$", re.IGNORECASE),
+    re.compile(r"^.+\s+cast\s+on\s+.+$", re.IGNORECASE),
+    re.compile(r"^.+\s+cast\s+in\s+last\s+\d+s$", re.IGNORECASE),
+    re.compile(r"^.+\s+cast$", re.IGNORECASE),
+    re.compile(r"^.+\s+appears\s+in\s+last\s+\d+s$", re.IGNORECASE),
+    re.compile(r"^.+\s+appears$", re.IGNORECASE),
+    re.compile(r"^in\s+.+$", re.IGNORECASE),
+    re.compile(r"^.+\s+count\s*[<>]\s*\d+$", re.IGNORECASE),
+    re.compile(r"^.+\s+on\s+.+$", re.IGNORECASE),
+    re.compile(r"^.+\s+within\s+\d+(?:\s+of\s+.+)?$", re.IGNORECASE),
+    re.compile(r"^.+\s+beyond\s+\d+(?:\s+of\s+.+)?$", re.IGNORECASE),
+    re.compile(r"^.+\s+targets\s+.+$", re.IGNORECASE),
+    re.compile(r"^.+\s+hp\s*[<>]\s*\d+$", re.IGNORECASE),
+    re.compile(r"^mana_points\s*[<>]\s*\d+$", re.IGNORECASE),
+    re.compile(r"^mana\s*[<>]\s*\d+$", re.IGNORECASE),
+    re.compile(r"^.+\s+is\s+marked\s+\S+$", re.IGNORECASE),
+    re.compile(r"^.+\s+is\s+.+$", re.IGNORECASE),
+    re.compile(r"^.+\s+(?:in|out\s+of)\s+sight$", re.IGNORECASE),
+    re.compile(r"^me\s+behind\s+.+$", re.IGNORECASE),
+    re.compile(r"^my\s+target\s+is\s+.+$", re.IGNORECASE),
+    re.compile(r"^me\s+has\s+.+$", re.IGNORECASE),
+    re.compile(r"^me\s+\S+$", re.IGNORECASE),
+    re.compile(r"^phase\s+\d+$", re.IGNORECASE),
+    re.compile(r"^(?:after|every)\s+\d+s$", re.IGNORECASE),
 )
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
@@ -184,8 +191,51 @@ def extract_standing_orders(notes_md: str) -> list[str]:
     return orders
 
 
+def _validate_when(when: str) -> str | None:
+    low = when.strip().lower()
+    if low == "always":
+        return None
+    conds = [c.strip() for c in when.split(" & ")]
+    if not (1 <= len(conds) <= 4):
+        return f"condition must have 1..4 clauses (got {len(conds)})"
+    for c in conds:
+        if not c:
+            return "empty condition clause"
+        body = c[4:].strip() if c.lower().startswith("not ") else c
+        if not any(pat.match(body) for pat in _CHECK_PATTERNS):
+            return f"unsupported condition clause: {c!r}"
+    return None
+
+
+def _validate_act(step: str) -> str | None:
+    s = step.strip()
+    low = s.lower()
+    if low in _ZERO_ARG_ACTS:
+        return None
+    if low == "stop":
+        return None
+    if low.startswith("stop "):
+        what = low[5:].strip()
+        return None if what in _STOP_WHAT else f"invalid stop target: {step!r}"
+    if low == "away" or (low.startswith("away ") and low[5:].strip()):
+        return None
+    if low.startswith("pet "):
+        rest = low[4:].strip()
+        if rest in _PET_CMDS:
+            return None
+        if rest.startswith("attack ") and rest[7:].strip():
+            return None
+        return f"invalid pet command: {step!r}"
+    for prefix in _ARG_ACT_PREFIXES:
+        if low.startswith(prefix):
+            if s[len(prefix) :].strip():
+                return None
+            return f"missing argument for {prefix.strip()!r}: {step!r}"
+    return f"unsupported act: {step!r}"
+
+
 def validate_standing_orders(notes_md: str) -> tuple[bool, list[str]]:
-    """Checks proposed notes.md for valid standing-order syntax."""
+    """Checks proposed notes.md for valid standing-order syntax aligned with orders.wlb."""
     if not notes_md.strip():
         return False, ["empty notes.md"]
     errors: list[str] = []
@@ -197,21 +247,15 @@ def validate_standing_orders(notes_md: str) -> tuple[bool, list[str]]:
         if not cond or not rhs:
             errors.append(f"empty condition or action: {order!r}")
             continue
+        if cond_err := _validate_when(cond):
+            errors.append(f"{cond_err} in {order!r}")
         steps = [s.strip() for s in re.split(r",\s*then\s+", rhs, flags=re.IGNORECASE)]
         if not (1 <= len(steps) <= 3):
             errors.append(f"order must have 1..3 steps (got {len(steps)}): {order!r}")
             continue
         for step in steps:
-            low = step.lower()
-            matched = next(
-                (p for p in VALID_ACT_PREFIXES if (low == p.strip() or low.startswith(p))),
-                None,
-            )
-            if matched is None:
-                errors.append(f"unsupported act verb in {order!r}: {step!r}")
-                continue
-            if matched in _REQUIRES_ARG_PREFIXES and not step[len(matched) :].strip():
-                errors.append(f"missing argument for {matched.strip()!r} in {order!r}")
+            if act_err := _validate_act(step):
+                errors.append(f"{act_err} in {order!r}")
     return (len(errors) == 0), errors
 
 
@@ -229,11 +273,13 @@ def summarize_fight_timeline(
     if not selected:
         return f"No {arm} trials recorded for {boss_name}."
 
-    traces_by_bot: dict[str, list[dict[str, Any]]] = {}
+    events_by_bot: dict[str, list[dict[str, Any]]] = {}
+    samples_by_bot: dict[str, list[dict[str, Any]]] = {}
     if trace_dir and trace_dir.exists():
         for fp in sorted(trace_dir.glob("bot/*/*.jsonl")):
             bot = fp.parent.name
-            evts = traces_by_bot.setdefault(bot, [])
+            evts = events_by_bot.setdefault(bot, [])
+            smps = samples_by_bot.setdefault(bot, [])
             with fp.open() as fh:
                 for raw in fh:
                     raw = raw.strip()
@@ -243,8 +289,11 @@ def summarize_fight_timeline(
                         obj = json.loads(raw)
                     except json.JSONDecodeError:
                         continue
-                    if obj.get("kind") == "event":
+                    kind = obj.get("kind")
+                    if kind == "event":
                         evts.append(obj)
+                    elif kind == "sample":
+                        smps.append(obj)
 
     lines = [
         f"Boss: {boss_name} ({arm}: {boss_res.get('by_arm', {}).get(arm, {}).get('kills', 0)}/"
@@ -260,18 +309,28 @@ def summarize_fight_timeline(
         inst = t.get("instance_id")
         pull_ms = int(t.get("pull_ms", 0))
         t0 = pull_ms
-        t1 = pull_ms + int(dur * 1000) + 2000
+        t1 = pull_ms + int(dur * 1000) + 500
         pref = PREFIXES[p_idx] if 0 <= p_idx < len(PREFIXES) else "Load"
         dmg_taken: collections.Counter[str] = collections.Counter()
         act_counts: collections.Counter[str] = collections.Counter()
         death_events: list[tuple[float, str, str]] = []
         for suf in ("a", "b", "c", "d", "e", "f", "g", "h", "i", "j"):
             bot = pref + suf
-            for e in traces_by_bot.get(bot, []):
+            # FormatTraceSample emits `inst` while FormatTraceEvent does not:
+            # bound each bot's event window before the first sample of a later instance.
+            bot_t1 = t1
+            if inst is not None:
+                for s in samples_by_bot.get(bot, []):
+                    stm = int(s.get("t_ms", 0))
+                    if stm < t0:
+                        continue
+                    s_inst = s.get("inst")
+                    if s_inst is not None and s_inst != inst:
+                        bot_t1 = min(bot_t1, stm - 1)
+                        break
+            for e in events_by_bot.get(bot, []):
                 tm = int(e.get("t_ms", 0))
-                if tm < t0 or tm > t1:
-                    continue
-                if inst is not None and e.get("inst") is not None and e.get("inst") != inst:
+                if tm < t0 or tm > bot_t1:
                     continue
                 ev = e.get("event")
                 if ev == "damage_taken":
@@ -461,6 +520,8 @@ def run_notes_hill_climb(
         keep, reason = is_competence_improvement(best_score, cand_score)
 
         # Optional confirmation re-run guards against binomial noise on small n.
+        logged_score = cand_score
+        initial_score_for_log: CompetenceScore | None = None
         if keep and confirm_runs > 0:
             conf_json = out_dir / f"round_{r}_confirm.json"
             conf_trace_dir = out_dir / f"round_{r}_confirm_traces"
@@ -469,6 +530,8 @@ def run_notes_hill_climb(
             )
             conf_score = score_from_boss_result(conf_res, arm="llm")
             keep, conf_reason = is_competence_improvement(best_score, conf_score)
+            initial_score_for_log = cand_score
+            logged_score = conf_score
             if keep:
                 cand_res = conf_res
                 cand_score = conf_score
@@ -483,24 +546,26 @@ def run_notes_hill_climb(
             best_score = cand_score
             best_trace_dir = cand_trace_dir
             best_notes_path.write_text(best_notes)
-            log_entry(
-                {
-                    "round": r,
-                    "status": "kept",
-                    "reason": reason,
-                    "score": cand_score.to_dict(),
-                }
-            )
+            entry: dict[str, Any] = {
+                "round": r,
+                "status": "kept",
+                "reason": reason,
+                "score": logged_score.to_dict(),
+            }
+            if initial_score_for_log is not None:
+                entry["initial_score"] = initial_score_for_log.to_dict()
+            log_entry(entry)
         else:
             rejected_history.append(f"round {r} [{orders_preview}]: {reason}")
-            log_entry(
-                {
-                    "round": r,
-                    "status": "rejected",
-                    "reason": reason,
-                    "score": cand_score.to_dict(),
-                }
-            )
+            entry = {
+                "round": r,
+                "status": "rejected",
+                "reason": reason,
+                "score": logged_score.to_dict(),
+            }
+            if initial_score_for_log is not None:
+                entry["initial_score"] = initial_score_for_log.to_dict()
+            log_entry(entry)
 
     return {
         "boss": boss_name,
