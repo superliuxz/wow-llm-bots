@@ -233,8 +233,11 @@ std::vector<Player*> GroupTanks(Player* bot) {
 }
 
 // Resolves a synthetic `"trigger:<guid>"` id to a live, visible-hazard hidden
-// trigger creature.
-Creature* ResolveHiddenTriggerByGuid(Player* bot, std::string_view guid_str) {
+// trigger creature. When `required_name` is non-empty, requires the hazard's
+// player-visible spell name to match `required_name`.
+Creature* ResolveHiddenTriggerByGuid(Player* bot,
+                                     std::string_view guid_str,
+                                     std::string_view required_name = {}) {
   constexpr std::string_view kPrefix = "trigger:";
   if (!guid_str.starts_with(kPrefix)) {
     return nullptr;
@@ -245,8 +248,14 @@ Creature* ResolveHiddenTriggerByGuid(Player* bot, std::string_view guid_str) {
   }
   Creature* trigger = ObjectAccessor::GetCreature(*bot, trigger_guid);
   if (!trigger || !trigger->IsAlive() || !bot->CanSeeOrDetect(trigger) ||
-      !HiddenFromPlayers(trigger->IsTrigger(), trigger->GetDisplayId()) ||
-      !InspectTriggerHazard(trigger)) {
+      !HiddenFromPlayers(trigger->IsTrigger(), trigger->GetDisplayId())) {
+    return nullptr;
+  }
+  std::optional<TriggerHazardInfo> hz = InspectTriggerHazard(trigger);
+  if (!hz) {
+    return nullptr;
+  }
+  if (!required_name.empty() && !NameEq(hz->name, required_name)) {
     return nullptr;
   }
   return trigger;
@@ -264,8 +273,16 @@ WorldObject* ResolveThing(Player* bot,
       act.thing != pb::Command_Act::ME && act.thing != pb::Command_Act::FOCUS &&
       !act.it_guid.empty()) {
     if (allow_hidden_triggers) {
-      if (Creature* trigger = ResolveHiddenTriggerByGuid(bot, act.it_guid)) {
-        return trigger;
+      if (act.thing == pb::Command_Act::IT) {
+        if (Creature* trigger = ResolveHiddenTriggerByGuid(bot, act.it_guid)) {
+          return trigger;
+        }
+      } else if (act.thing == pb::Command_Act::NAMED ||
+                 act.thing == pb::Command_Act::NEAREST_NAMED) {
+        if (Creature* trigger =
+                ResolveHiddenTriggerByGuid(bot, act.it_guid, thing_name)) {
+          return trigger;
+        }
       }
     }
     ObjectGuid guid = ParseSnapshotGuid(act.it_guid);
@@ -282,23 +299,9 @@ WorldObject* ResolveThing(Player* bot,
     case pb::Command_Act::ME:
       return bot;
     case pb::Command_Act::IT: {
-      if (!act.it_guid.empty()) {
-        if (allow_hidden_triggers) {
-          if (Creature* trigger =
-                  ResolveHiddenTriggerByGuid(bot, act.it_guid)) {
-            return trigger;
-          }
-        }
-        ObjectGuid guid = ParseSnapshotGuid(act.it_guid);
-        if (!guid.IsEmpty()) {
-          if (WorldObject* obj = ObjectAccessor::GetWorldObject(*bot, guid);
-              obj && IsVisibleToBot(bot, obj)) {
-            return obj;
-          }
-        }
-      }
       if (!act.it_name.empty()) {
         pb::Command_Act by_name = act;
+        by_name.it_guid.clear();
         by_name.thing = pb::Command_Act::NEAREST_NAMED;
         return ResolveThing(bot, by_name, act.it_name, allow_hidden_triggers);
       }

@@ -766,14 +766,14 @@ TEST(ScreenRendererTest, RendersNearbyAreasNearestFirst) {
   nameless.rel.emplace().dist_yd = 1.0f;
   snap.base.nearby.areas.push_back(nameless);
 
-  // Far hostile area with lands_in_s.
+  // Far hostile area with lands_in_s (> 999 yd to pin the infinity() sentinel).
   pb::Area far_area;
   far_area.guid = "trigger:0x1";
   far_area.name = "Flame Strike";
   far_area.hostile = true;
   far_area.radius_yd = 8.0f;
   far_area.lands_in_s = 2.5f;
-  far_area.rel.emplace().dist_yd = 14.0f;
+  far_area.rel.emplace().dist_yd = 1200.0f;
   far_area.rel->dir = pb::N;
   snap.base.nearby.areas.push_back(far_area);
 
@@ -838,7 +838,7 @@ TEST(ScreenRendererTest, RendersNearbyAreasNearestFirst) {
       s.text.find("  Arcane Sphere (hostile, 4 yd E, inside)");
   const size_t consec_pos = s.text.find("  Consecration (friendly, 6 yd S)");
   const size_t flame_pos =
-      s.text.find("  Flame Strike (hostile, 14 yd N, lands in 2.5s)");
+      s.text.find("  Flame Strike (hostile, 1200 yd N, lands in 2.5s)");
   ASSERT_NE(sphere_pos, std::string::npos) << s.text;
   ASSERT_NE(consec_pos, std::string::npos) << s.text;
   ASSERT_NE(flame_pos, std::string::npos) << s.text;
