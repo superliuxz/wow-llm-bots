@@ -14,9 +14,10 @@ override path with `WLB_REMOTES_FILE` for tests):
 Guarantees:
   - Per-remote `flock` (`var/remote/<name>.lock`) serializes syncs, builds, and runs so a
     `post-commit` background sync and a `remote run` never collide.
-  - Exact source stamp (`HEAD` + `git diff HEAD` + untracked non-ignored files) stored in remote
-    `var/.built_stamp` only after `build common --no-tests` + `build server --test` succeed, so
-    `remote run` can never execute an outdated binary.
+  - Exact source stamp (`HEAD` + `git diff HEAD` + untracked non-ignored files) is invalidated on
+    the remote *before* pushing and written to `var/.built_stamp` only after `build common
+    --no-tests` (+ `build server --test`) succeeds, so `remote run` can never execute an outdated
+    or half-built binary.
   - Automatic SSH reverse tunnel (`-R 127.0.0.1:<port>:127.0.0.1:<port>`) whenever a local
     `llama-server` is listening on `<port>`, keeping `llama-server` bound to `127.0.0.1` with zero
     LAN exposure.
@@ -35,28 +36,42 @@ import re
 import shlex
 import socket
 import subprocess
-import sys
 
 from wlblib.common import ROOT, VAR, Failed, output, run, say
 
 DEFAULT_REMOTES_FILE = ROOT / "private" / "remotes.json"
 DEFAULT_LLM_PORT = 8090
 STAMP_REL = "var/.built_stamp"
+MAP_DATA_SENTINEL_REL = "out/server/data/.synced"
+ACTIVE_PGID_REL = "var/.active_remote_pgid"
 HOOK_MARKER = "# wlb-remote-post-commit"
 
-# Sync source tree cleanly with --delete while never touching remote build outputs, DBs, or links.
+# Sync source tree cleanly with --delete while never touching remote build outputs, DBs, links,
+# or untracked local caches/reference dumps. `.git` (unanchored) excludes both root `/.git/` and
+# submodule gitdir pointer files (`third_party/*/.git`).
 RSYNC_EXCLUDES = (
     "/out/",
     "/var/",
     "/models/",
     "/private/",
-    "/.git/",
+    "/reference/",
+    "/.cache/",
+    ".git",
+    "__pycache__/",
+    "*.pyc",
     "/third_party/azerothcore-wotlk/modules/mod-llm-brain",
     "/third_party/azerothcore-wotlk/modules/mod-playerbots",
     "/compile_commands.json",
 )
 
 _SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_SSH_COMMON_OPTS = (
+    "-o", "BatchMode=yes",
+    "-o", "ConnectTimeout=5",
+    "-o", "ServerAliveInterval=30",
+    "-o", "ServerAliveCountMax=3",
+)
+_VALID_ACTIONS = ("sync", "status", "run", "pull", "stop", "install-hook")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -120,13 +135,7 @@ def _remote_cd_expr(repo: str) -> str:
 
 
 def _ssh_base_args(spec: RemoteSpec, *, tunnel_port: int | None = None) -> list[str]:
-    args = [
-        "ssh",
-        "-o", "BatchMode=yes",
-        "-o", "ConnectTimeout=5",
-        "-o", "ServerAliveInterval=30",
-        "-o", "ServerAliveCountMax=3",
-    ]
+    args = ["ssh", *_SSH_COMMON_OPTS]
     if tunnel_port is not None:
         args += [
             "-o", "ExitOnForwardFailure=yes",
@@ -134,6 +143,10 @@ def _ssh_base_args(spec: RemoteSpec, *, tunnel_port: int | None = None) -> list[
         ]
     args.append(spec.ssh)
     return args
+
+
+def _rsync_ssh_cmd() -> str:
+    return shlex.join(["ssh", *_SSH_COMMON_OPTS])
 
 
 def _local_port_open(port: int, host: str = "127.0.0.1", timeout_s: float = 0.3) -> bool:
@@ -148,9 +161,9 @@ def _excluded_from_stamp(rel: str) -> bool:
     parts = pathlib.PurePosixPath(rel).parts
     if not parts:
         return True
-    if parts[0] in ("out", "var", "models", "private", ".git"):
+    if parts[0] in ("out", "var", "models", "private", "reference", ".cache", ".git"):
         return True
-    if rel == "compile_commands.json":
+    if "__pycache__" in parts or rel.endswith(".pyc") or rel == "compile_commands.json":
         return True
     return False
 
@@ -205,7 +218,7 @@ def _remote_lock(name: str):
 def read_remote_stamp(spec: RemoteSpec) -> str | None:
     cmd = [
         *_ssh_base_args(spec),
-        f"cd {_remote_cd_expr(spec.repo)} && cat {shlex.quote(STAMP_REL)} 2>/dev/null || true",
+        f"cd {_remote_cd_expr(spec.repo)} 2>/dev/null && cat {shlex.quote(STAMP_REL)} 2>/dev/null || true",
     ]
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0:
@@ -214,30 +227,44 @@ def read_remote_stamp(spec: RemoteSpec) -> str | None:
     return stamp or None
 
 
+def _invalidate_remote_stamp(spec: RemoteSpec) -> None:
+    """Remove remote `var/.built_stamp` before mutating sources so failed builds never look fresh."""
+    run([
+        *_ssh_base_args(spec),
+        f"cd {_remote_cd_expr(spec.repo)} 2>/dev/null && rm -f {shlex.quote(STAMP_REL)} || true",
+    ])
+
+
 def _ensure_remote_map_data(spec: RemoteSpec, repo: pathlib.Path = ROOT) -> None:
-    """One-time push of static 3.3.5a client data (`out/server/data/`) if absent on the remote."""
+    """One-time push of static 3.3.5a client data (`out/server/data/`) guarded by `.synced`."""
     local_data = repo / "out" / "server" / "data"
     if not local_data.is_dir():
         raise Failed(f"local map data missing ({local_data}); run tools/wlb setup data first")
     probe = (
         f"cd {_remote_cd_expr(spec.repo)} 2>/dev/null && "
-        "test -d out/server/data/dbc && test -d out/server/data/maps && "
-        "test -d out/server/data/vmaps && test -d out/server/data/mmaps"
+        f"test -f {shlex.quote(MAP_DATA_SENTINEL_REL)}"
     )
     res = subprocess.run([*_ssh_base_args(spec), probe], capture_output=True, text=True)
     if res.returncode == 0:
         return
     say(f"remote {spec.name}: pushing static 3.3.5a map data (one-time) -> {spec.ssh}:{spec.repo}/out/server/data")
     run([*_ssh_base_args(spec), f"mkdir -p {_remote_cd_expr(spec.repo)}/out/server/data"])
-    run(["rsync", "-a", "--info=progress2", f"{local_data}/", f"{spec.ssh}:{spec.repo}/out/server/data/"])
+    run([
+        "rsync", "-a", "--info=progress2", "-e", _rsync_ssh_cmd(), "--",
+        f"{local_data}/", f"{spec.ssh}:{spec.repo}/out/server/data/",
+    ])
+    run([
+        *_ssh_base_args(spec),
+        f"cd {_remote_cd_expr(spec.repo)} && touch {shlex.quote(MAP_DATA_SENTINEL_REL)}",
+    ])
 
 
 def _rsync_to_remote(spec: RemoteSpec, repo: pathlib.Path = ROOT) -> None:
     run([*_ssh_base_args(spec), f"mkdir -p {_remote_cd_expr(spec.repo)}"])
-    cmd = ["rsync", "-a", "--delete"]
+    cmd = ["rsync", "-a", "--delete", "-e", _rsync_ssh_cmd()]
     for pat in RSYNC_EXCLUDES:
         cmd.append(f"--exclude={pat}")
-    cmd += [f"{repo}/", f"{spec.ssh}:{spec.repo}/"]
+    cmd += ["--", f"{repo}/", f"{spec.ssh}:{spec.repo}/"]
     run(cmd)
 
 
@@ -271,6 +298,7 @@ def _sync_unlocked(spec: RemoteSpec, *, force: bool = False, server_build: bool 
             say(f"remote {spec.name}: up to date ({remote_stamp})")
             return remote_stamp
 
+    _invalidate_remote_stamp(spec)
     say(f"remote {spec.name}: pushing source tree -> {spec.ssh}:{spec.repo}")
     _rsync_to_remote(spec)
     if server_build:
@@ -292,9 +320,9 @@ def _sync_unlocked(spec: RemoteSpec, *, force: bool = False, server_build: bool 
         build_steps.append(f"printf '%s\\n' {shlex.quote(sub_key)} > var/.golden_submodules")
     build_steps.append(f"printf '%s\\n' {shlex.quote(target_stamp)} > {shlex.quote(STAMP_REL)}")
 
-    remote_script = f"set -euo pipefail; cd {_remote_cd_expr(spec.repo)}; " + "; ".join(build_steps)
+    inner_script = f"cd {_remote_cd_expr(spec.repo)} && " + " && ".join(build_steps)
     say(f"remote {spec.name}: building ({'common + server-test' if server_build else 'common'})...")
-    run([*_ssh_base_args(spec), remote_script])
+    run([*_ssh_base_args(spec), f"bash -euo pipefail -c {shlex.quote(inner_script)}"])
     say(f"remote {spec.name}: ready ({target_stamp})")
     return target_stamp
 
@@ -323,77 +351,49 @@ def status(name: str) -> None:
     say(f"remote {spec.name} ({spec.ssh}:{spec.repo}): {state}")
     say(f"  local  stamp: {local_stamp}:full")
     say(f"  remote stamp: {remote_stamp or '(none)'}")
-    probe = (
-        f"cd {_remote_cd_expr(spec.repo)} && "
-        "pgrep -a 'worldserver|mysqld|harness' 2>/dev/null || echo '  (no server/harness processes running)'"
+    probe_inner = (
+        f"REPO_ABS=$(cd {_remote_cd_expr(spec.repo)} 2>/dev/null && pwd) || exit 0; "
+        'ps -eo pid=,args= | grep -F "$REPO_ABS" | grep -E "worldserver|mysqld|harness|bench_bosses" '
+        '| grep -v grep || echo "(no repo server/harness processes running)"'
     )
-    res = subprocess.run([*_ssh_base_args(spec), probe], capture_output=True, text=True)
+    res = subprocess.run(
+        [*_ssh_base_args(spec), f"bash -c {shlex.quote(probe_inner)}"],
+        capture_output=True, text=True,
+    )
     if res.stdout.strip():
         say("  processes:")
         for line in res.stdout.strip().splitlines():
-            say(f"    {line}")
+            say(f"    {line.strip()}")
 
 
 def stop(name: str) -> None:
     spec = get_remote(name)
     with _remote_lock(spec.name):
-        script = (
+        inner = (
             f"cd {_remote_cd_expr(spec.repo)} && "
             "(tools/wlb server stop --test || true) && "
             "(tools/wlb db stop || true)"
         )
-        run([*_ssh_base_args(spec), script])
+        run([*_ssh_base_args(spec), f"bash -c {shlex.quote(inner)}"])
         say(f"remote {spec.name}: stopped test server and db")
 
 
-def pull(name: str, remote_rel: str, local_path: str | pathlib.Path) -> None:
-    spec = get_remote(name)
-    if pathlib.PurePosixPath(remote_rel).is_absolute() or ".." in pathlib.PurePosixPath(remote_rel).parts:
+def _validate_remote_rel(remote_rel: str) -> None:
+    p = pathlib.PurePosixPath(remote_rel)
+    if not remote_rel or p.is_absolute() or ".." in p.parts:
         raise Failed(f"remote path must be relative inside repo: {remote_rel!r}")
+
+
+def pull(name: str, remote_rel: str, local_path: str | pathlib.Path) -> None:
+    _validate_remote_rel(remote_rel)
+    spec = get_remote(name)
     dest = pathlib.Path(local_path)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    run(["rsync", "-a", f"{spec.ssh}:{spec.repo}/{remote_rel}", str(dest)])
+    run([
+        "rsync", "-a", "-e", _rsync_ssh_cmd(), "--",
+        f"{spec.ssh}:{spec.repo}/{remote_rel}", str(dest),
+    ])
     say(f"remote {spec.name}: pulled {remote_rel} -> {dest}")
-
-
-def split_action_flags(tokens: list[str]) -> tuple[dict, list[str]]:
-    """Parse leading wlb-remote flags that follow `<action>` (before `--` or the command)."""
-    opts: dict = {
-        "force": False,
-        "no_sync": False,
-        "no_tunnel": False,
-        "no_server_build": False,
-        "pull": [],
-    }
-    i = 0
-    while i < len(tokens):
-        tok = tokens[i]
-        if tok == "--":
-            i += 1
-            break
-        if tok == "--force":
-            opts["force"] = True
-            i += 1
-        elif tok == "--no-sync":
-            opts["no_sync"] = True
-            i += 1
-        elif tok == "--no-tunnel":
-            opts["no_tunnel"] = True
-            i += 1
-        elif tok == "--no-server-build":
-            opts["no_server_build"] = True
-            i += 1
-        elif tok == "--pull":
-            if i + 1 >= len(tokens):
-                raise Failed("--pull requires REMOTE_REL:LOCAL_PATH")
-            opts["pull"].append(tokens[i + 1])
-            i += 2
-        elif tok.startswith("--pull="):
-            opts["pull"].append(tok.split("=", 1)[1])
-            i += 1
-        else:
-            break
-    return opts, tokens[i:]
 
 
 def _parse_pull_spec(spec_str: str) -> tuple[str, pathlib.Path]:
@@ -402,7 +402,26 @@ def _parse_pull_spec(spec_str: str) -> tuple[str, pathlib.Path]:
     remote_rel, local_str = spec_str.split(":", 1)
     if not remote_rel or not local_str:
         raise Failed(f"--pull must be REMOTE_REL:LOCAL_PATH, got {spec_str!r}")
+    _validate_remote_rel(remote_rel)
     return remote_rel, pathlib.Path(local_str)
+
+
+def _kill_remote_pgid(spec: RemoteSpec) -> None:
+    """Terminate the active remote process group (SIGTERM -> 5s -> SIGKILL) and stop test server."""
+    cleanup_inner = (
+        f"cd {_remote_cd_expr(spec.repo)} 2>/dev/null || exit 0; "
+        f"if [ -f {shlex.quote(ACTIVE_PGID_REL)} ]; then "
+        f"  PGID=$(cat {shlex.quote(ACTIVE_PGID_REL)} 2>/dev/null || true); "
+        '  if [ -n "$PGID" ]; then '
+        '    kill -TERM -"$PGID" 2>/dev/null || true; '
+        '    for _ in 1 2 3 4 5; do kill -0 -"$PGID" 2>/dev/null || break; sleep 1; done; '
+        '    kill -KILL -"$PGID" 2>/dev/null || true; '
+        "  fi; "
+        f"  rm -f {shlex.quote(ACTIVE_PGID_REL)}; "
+        "fi; "
+        "(tools/wlb server stop --test || true)"
+    )
+    subprocess.run([*_ssh_base_args(spec), f"bash -c {shlex.quote(cleanup_inner)}"], check=False)
 
 
 def run_remote(
@@ -427,15 +446,27 @@ def run_remote(
             tunnel_port = spec.llm_port
             say(f"remote {spec.name}: reverse-tunneling local 127.0.0.1:{tunnel_port} -> remote")
 
-        remote_cmd = f"cd {_remote_cd_expr(spec.repo)} && exec {shlex.join(cmd)}"
+        # Run inside a dedicated session/process-group so Ctrl-C can cleanly kill the entire tree.
+        inner = (
+            f"cd {_remote_cd_expr(spec.repo)} && "
+            f"mkdir -p var && echo $$ > {shlex.quote(ACTIVE_PGID_REL)} && "
+            f"exec {shlex.join(cmd)}"
+        )
+        remote_cmd = f"setsid bash -c {shlex.quote(inner)}"
         ssh_cmd = [*_ssh_base_args(spec, tunnel_port=tunnel_port), remote_cmd]
         try:
             proc = subprocess.run(ssh_cmd)
         except KeyboardInterrupt:
-            say(f"\nremote {spec.name}: interrupted; stopping remote test server...")
-            cleanup = f"cd {_remote_cd_expr(spec.repo)} && (tools/wlb server stop --test || true)"
-            subprocess.run([*_ssh_base_args(spec), cleanup], check=False)
+            say(f"\nremote {spec.name}: interrupted; killing remote process group and stopping test server...")
+            _kill_remote_pgid(spec)
             raise Failed("interrupted")
+        finally:
+            rm_pgid = (
+                f"cd {_remote_cd_expr(spec.repo)} 2>/dev/null && "
+                f"rm -f {shlex.quote(ACTIVE_PGID_REL)} || true"
+            )
+            subprocess.run([*_ssh_base_args(spec), rm_pgid], check=False,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         for remote_rel, local_dest in parsed_pulls:
             try:
@@ -450,16 +481,19 @@ def run_remote(
 
 
 def install_hook(name: str, repo: pathlib.Path = ROOT) -> pathlib.Path:
-    """Install an untracked `.git/hooks/post-commit` that pre-warms `name` in the background."""
+    """Install an untracked git `post-commit` hook (worktree-safe) that pre-warms `name`."""
     spec = get_remote(name)
-    hook_path = repo / ".git" / "hooks" / "post-commit"
+    hook_rel = output(["git", "-C", str(repo), "rev-parse", "--git-path", "hooks/post-commit"]).strip()
+    hook_path = pathlib.Path(hook_rel)
+    if not hook_path.is_absolute():
+        hook_path = (repo / hook_path).resolve()
     if hook_path.exists():
         existing = hook_path.read_text()
         if HOOK_MARKER not in existing:
             raise Failed(
                 f"{hook_path} already exists and was not created by wlb remote; edit it manually"
             )
-    log_path = VAR / "remote" / f"{spec.name}-sync.log"
+    log_path = repo / "var" / "remote" / f"{spec.name}-sync.log"
     content = (
         "#!/usr/bin/env bash\n"
         f"{HOOK_MARKER}\n"
@@ -474,3 +508,124 @@ def install_hook(name: str, repo: pathlib.Path = ROOT) -> pathlib.Path:
     hook_path.chmod(0o755)
     say(f"installed post-commit auto-sync hook for remote {spec.name} -> {hook_path}")
     return hook_path
+
+
+def parse_remote_argv(argv: list[str]) -> dict:
+    """Strict CLI parser for `tools/wlb remote ...` so typos never get silently discarded."""
+    if not argv or argv[0] in ("-h", "--help"):
+        return {"help": True}
+    target = argv[0]
+    rest = argv[1:]
+    if target == "list":
+        if rest:
+            raise Failed(f"unexpected arguments to `tools/wlb remote list`: {rest}")
+        return {"help": False, "target": "list", "action": None}
+    if not rest:
+        raise Failed(
+            f"tools/wlb remote {target} requires an action: {'|'.join(_VALID_ACTIONS)}"
+        )
+    action = rest[0]
+    if action not in _VALID_ACTIONS:
+        raise Failed(f"unknown remote action {action!r} (expected one of: {', '.join(_VALID_ACTIONS)})")
+    tokens = rest[1:]
+
+    opts: dict = {
+        "help": False,
+        "target": target,
+        "action": action,
+        "force": False,
+        "no_sync": False,
+        "no_tunnel": False,
+        "no_server_build": False,
+        "pull": [],
+        "cmd": [],
+    }
+    if action in ("status", "stop", "install-hook"):
+        if tokens:
+            raise Failed(f"unexpected arguments to `tools/wlb remote {target} {action}`: {tokens}")
+        return opts
+
+    if action == "sync":
+        for tok in tokens:
+            if tok == "--force":
+                opts["force"] = True
+            elif tok == "--no-server-build":
+                opts["no_server_build"] = True
+            else:
+                raise Failed(f"unknown option/argument for `remote sync`: {tok!r}")
+        return opts
+
+    if action == "pull":
+        if len(tokens) != 2 or any(t.startswith("-") for t in tokens):
+            raise Failed("usage: tools/wlb remote <name> pull REMOTE_REL LOCAL_PATH")
+        opts["cmd"] = tokens
+        return opts
+
+    # action == "run"
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "--":
+            i += 1
+            break
+        if not tok.startswith("-"):
+            break
+        if tok == "--no-sync":
+            opts["no_sync"] = True
+            i += 1
+        elif tok == "--no-tunnel":
+            opts["no_tunnel"] = True
+            i += 1
+        elif tok == "--no-server-build":
+            opts["no_server_build"] = True
+            i += 1
+        elif tok == "--pull":
+            if i + 1 >= len(tokens):
+                raise Failed("--pull requires REMOTE_REL:LOCAL_PATH")
+            opts["pull"].append(tokens[i + 1])
+            i += 2
+        elif tok.startswith("--pull="):
+            opts["pull"].append(tok.split("=", 1)[1])
+            i += 1
+        else:
+            raise Failed(f"unknown option for `remote run`: {tok!r} (put `--` before remote command flags)")
+    opts["cmd"] = tokens[i:]
+    return opts
+
+
+def dispatch_cli(argv: list[str]) -> None:
+    parsed = parse_remote_argv(argv)
+    if parsed["help"]:
+        say(
+            "usage:\n"
+            "  tools/wlb remote list\n"
+            "  tools/wlb remote <name> sync [--force] [--no-server-build]\n"
+            "  tools/wlb remote <name> status | stop | install-hook\n"
+            "  tools/wlb remote <name> pull REMOTE_REL LOCAL_PATH\n"
+            "  tools/wlb remote <name> run [--no-sync] [--no-tunnel] [--no-server-build]\n"
+            "                              [--pull REMOTE_REL:LOCAL_PATH ...] [--] <cmd...>"
+        )
+        return
+    if parsed["target"] == "list":
+        list_remotes()
+        return
+    target, action = parsed["target"], parsed["action"]
+    if action == "sync":
+        sync(target, force=parsed["force"], server_build=not parsed["no_server_build"])
+    elif action == "status":
+        status(target)
+    elif action == "stop":
+        stop(target)
+    elif action == "install-hook":
+        install_hook(target)
+    elif action == "pull":
+        pull(target, parsed["cmd"][0], parsed["cmd"][1])
+    else:
+        run_remote(
+            target,
+            parsed["cmd"],
+            no_sync=parsed["no_sync"],
+            no_tunnel=parsed["no_tunnel"],
+            server_build=not parsed["no_server_build"],
+            pulls=parsed["pull"],
+        )

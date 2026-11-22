@@ -118,25 +118,17 @@ def parse(argv):
     p.add_argument("args", nargs=argparse.REMAINDER,
                    help="subcommand and flags (default: run)")
 
-    p = sub.add_parser("remote", help="sync, build, and run commands on a remote CPU worker (private/remotes.json)")
-    p.add_argument("target", help="'list' or a remote name from private/remotes.json")
-    p.add_argument("action", nargs="?",
-                   choices=["sync", "status", "run", "pull", "stop", "install-hook"],
-                   help="action to run on the remote")
-    p.add_argument("--force", action="store_true", help="sync: re-sync and rebuild even if stamp matches")
-    p.add_argument("--no-sync", action="store_true", help="run: skip pre-flight sync/build check")
-    p.add_argument("--no-tunnel", action="store_true",
-                   help="run: do not reverse-tunnel local llama-server port")
-    p.add_argument("--no-server-build", action="store_true",
-                   help="sync/run: build common only (skip server-test)")
-    p.add_argument("--pull", action="append", default=[], metavar="REMOTE_REL:LOCAL_PATH",
-                   help="run: copy remote repo file back after command finishes (repeatable)")
-    p.add_argument("cmd", nargs=argparse.REMAINDER,
-                   help="for run: command to execute; for pull: REMOTE_REL LOCAL_PATH")
+    p = sub.add_parser("remote", add_help=False,
+                       help="sync, build, and run commands on a remote CPU worker (private/remotes.json)")
+    p.add_argument("args", nargs=argparse.REMAINDER,
+                   help="list | <name> sync|status|run|pull|stop|install-hook ...")
     return parser.parse_args(argv)
 
 
 def main():
+    if sys.argv[1:2] == ["remote"]:
+        remote.dispatch_cli(sys.argv[2:])
+        return
     a = parse(sys.argv[1:])
     if a.command == "build":
         if a.what == "common":
@@ -211,37 +203,7 @@ def main():
         bin_path = str(OUT / "common" / "harness")
         os.execv(bin_path, [bin_path, *hargs])
     elif a.command == "remote":
-        if a.target == "list":
-            remote.list_remotes()
-            return
-        if not a.action:
-            raise common.Failed("tools/wlb remote <name> requires an action: sync|status|run|pull|stop|install-hook")
-        extra_opts, cmd = remote.split_action_flags(a.cmd)
-        force = a.force or extra_opts["force"]
-        no_sync = a.no_sync or extra_opts["no_sync"]
-        no_tunnel = a.no_tunnel or extra_opts["no_tunnel"]
-        no_server_build = a.no_server_build or extra_opts["no_server_build"]
-        pulls = [*a.pull, *extra_opts["pull"]]
-        if a.action == "sync":
-            remote.sync(a.target, force=force, server_build=not no_server_build)
-        elif a.action == "status":
-            remote.status(a.target)
-        elif a.action == "stop":
-            remote.stop(a.target)
-        elif a.action == "install-hook":
-            remote.install_hook(a.target)
-        elif a.action == "pull":
-            if len(cmd) != 2:
-                raise common.Failed("usage: tools/wlb remote <name> pull REMOTE_REL LOCAL_PATH")
-            remote.pull(a.target, cmd[0], cmd[1])
-        else:
-            remote.run_remote(
-                a.target, cmd,
-                no_sync=no_sync,
-                no_tunnel=no_tunnel,
-                server_build=not no_server_build,
-                pulls=pulls,
-            )
+        remote.dispatch_cli(a.args)
 
 
 if __name__ == "__main__":

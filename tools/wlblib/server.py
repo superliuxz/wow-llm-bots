@@ -47,13 +47,24 @@ def _mysql_up():
 
 
 def _ensure_local_db_initialized():
-    """Creates required MySQL dirs/secret and initializes an empty datadir on a fresh checkout."""
+    """Creates required MySQL dirs/secret (mode 700/600) and initializes an empty datadir."""
     for d in (VAR / "mysql-data", VAR / "mysql-files", LOGS, PLAY.run, SECRETS):
         d.mkdir(parents=True, exist_ok=True)
+    # Protect the passwordless-root MySQL socket dir and DB secret dir on test-only workers.
+    PLAY.run.chmod(0o700)
+    SECRETS.chmod(0o700)
     if not DB_PASSWORD.exists():
-        import secrets as _secrets
-        DB_PASSWORD.write_text(_secrets.token_hex(16) + "\n")
-        DB_PASSWORD.chmod(0o600)
+        old = ETC / ".acore-db-password"  # Legacy location; migrate before generating a new one.
+        if old.exists():
+            old.rename(DB_PASSWORD)
+            DB_PASSWORD.chmod(0o600)
+        else:
+            import secrets as _secrets
+            fd = os.open(DB_PASSWORD, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                os.write(fd, (_secrets.token_hex(16) + "\n").encode("ascii"))
+            finally:
+                os.close(fd)
     if not (VAR / "mysql-data" / "mysql").is_dir():
         say("initializing fresh project-local MySQL datadir...")
         run(["mysqld", f"--defaults-file={MYSQL_CNF}", "--initialize-insecure"])
@@ -72,15 +83,15 @@ def db_start():
     ETC.mkdir(parents=True, exist_ok=True)
     MYSQL_CNF.write_text((ROOT / "config" / "mysql.cnf.in").read_text()
                          .replace("@ROOT@", str(ROOT)))
-    fresh = _ensure_local_db_initialized()
+    _ensure_local_db_initialized()
     if _mysql_up():
+        _ensure_acore_users()
         say("mysql already running")
         return
     run(["mysqld", f"--defaults-file={MYSQL_CNF}", "--daemonize"])
     for _ in range(30):
         if _mysql_up():
-            if fresh:
-                _ensure_acore_users()
+            _ensure_acore_users()
             say("mysql up")
             return
         time.sleep(1)
