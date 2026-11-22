@@ -167,12 +167,13 @@ class PostCommitReviewHookTest(unittest.TestCase):
                 failed = post_commit_review.format_review_status(review_dir)
             self.assertIn("FAILED (print_timeout)", failed)
 
-            # Non-empty partial output with print_timeout in .err still reports FAILED.
-            out.write_text("# Partial truncated review\n", encoding="utf-8")
+            # Non-empty partial output with print_timeout in .err still reports FAILED with exact byte count.
+            partial_text = "# Partial truncated review\n"
+            out.write_text(partial_text, encoding="utf-8")
             with mock.patch.object(post_commit_review, "_pid_is_reviewer", return_value=False):
                 partial_failed = post_commit_review.format_review_status(review_dir)
             self.assertIn("FAILED (print_timeout)", partial_failed)
-            self.assertIn("bytes)", partial_failed)
+            self.assertIn(f"({len(partial_text)} bytes)", partial_failed)
 
             # Capital "Error:" in .err reports FAILED regardless of case.
             out.write_text("", encoding="utf-8")
@@ -190,19 +191,30 @@ class PostCommitReviewHookTest(unittest.TestCase):
             self.assertIn("FAILED (empty_output)", empty_fail)
 
     def test_watch_review_status_and_cli_flags(self):
+        import contextlib
+        import io
         from unittest import mock
 
-        # _watch_review_status polls RUNNING -> DONE and exits cleanly.
+        # _watch_review_status polls RUNNING -> DONE, prints both lines, and exits cleanly.
         statuses = iter(["RUNNING: independent reviewer for abc1234", "DONE: latest review review_abc1234.md"])
+        buf = io.StringIO()
         with mock.patch.object(post_commit_review, "format_review_status", side_effect=lambda _: next(statuses)), \
-             mock.patch.object(post_commit_review.time, "sleep") as m_sleep:
+             mock.patch.object(post_commit_review.time, "sleep") as m_sleep, \
+             contextlib.redirect_stdout(buf):
             post_commit_review._watch_review_status(interval_s=0.01)
         m_sleep.assert_called_once_with(0.01)
+        self.assertEqual(
+            buf.getvalue().splitlines(),
+            ["RUNNING: independent reviewer for abc1234", "DONE: latest review review_abc1234.md"],
+        )
 
-        # _watch_review_status exits cleanly on KeyboardInterrupt.
+        # _watch_review_status exits cleanly on KeyboardInterrupt without leaking stdout.
+        buf_int = io.StringIO()
         with mock.patch.object(post_commit_review, "format_review_status", return_value="RUNNING: x"), \
-             mock.patch.object(post_commit_review.time, "sleep", side_effect=KeyboardInterrupt):
+             mock.patch.object(post_commit_review.time, "sleep", side_effect=KeyboardInterrupt), \
+             contextlib.redirect_stdout(buf_int):
             post_commit_review._watch_review_status(interval_s=0.01)
+        self.assertEqual(buf_int.getvalue().splitlines(), ["RUNNING: x"])
 
         # CLI argument validation on tools/wlb review and post_commit_review.py --status.
         wlb_bin = post_commit_review.ROOT / "tools" / "wlb"
