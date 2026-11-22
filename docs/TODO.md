@@ -9,7 +9,6 @@ Last updated 2026-11-21.
 
 ## In progress
 
-- **Scorer lock relock (awaiting explicit user OK):** `tools/bench/hill_climb.py` and scorer files (in `LOCKED_PATTERNS`) were modified for Review 12 Medium 1 and Review `ede3f6c` Highs 3–4 / Mediums 17–20; `~/.local/share/wow-llm-bots/scorer.sha256` and `config/scorer-lock.sha256` are left untouched pending explicit user approval.
 - **Phase 1 & Phase 2 remaining benchmark sign-off criteria** (see single-codebase `n = 8` 5-boss report [`docs/benchmarks/2026-11-21-phase1-phase2-five-boss.md`](benchmarks/2026-11-21-phase1-phase2-five-boss.md)):
   - After fixing Review `ede3f6c` High 1, `llm` recovered from `10/40` to `24/40` (`60.0%`, vs `llm_no_notes` `25/40` `p = 1.0000`, `no_brain` `20/40` `p = 0.5005`, `baseline` `22/40` `p = 0.8213`; `Murmur 7/8`, `Loken 6/8`, `Ikiss 5/8`, `Kael'thas 3/8`, `Devourer 3/8`).
   - **Still open before Phase 3 sign-off:** `llm` kills (`24/40`) do not yet significantly beat `no_brain` (`20/40`, `p = 0.5005`) after Holm–Bonferroni correction, `Ikiss` DPS is `-11.2%` vs `llm_no_notes`, and `A3` generated notes (`content/notes/`) remain **draft** (not yet loaded by harness; hand-check per boss before use).
@@ -172,6 +171,9 @@ hand-checking draft `content/notes/` before enabling them.
   details in [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md) §6).
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-21: **User-approved scorer lock update (`951d4cc17f25...`):**
+  recorded user-approved [`config/scorer-lock.sha256`](../config/scorer-lock.sha256) digest (`951d4cc17f25...`) after interactive `hill_climb.py lock-scorer --force-relock` for Review 12 Medium 1 and Review `ede3f6c` scorer fixes, verified via `hill_climb._verify_all_locks()`.
 
 - 2026-11-21: **Review `1ba5b4b` & `97cbca4` fixes (`97cbca4`, follow-up Low 1) & `tools/wlb review --watch` (`1ba5b4b`):**
   [`.agents/hooks/post_commit_review.py`](../.agents/hooks/post_commit_review.py) bumps `--print-timeout` to `600s`, adds `--watch`, reports `FAILED` on `AGY_ERROR` or case-insensitive `error:` in `.err` regardless of partial stdout size (`M1`/`M2`), reports `FAILED (empty_output)` on 0-byte `.md` files (`M2`), and rejects unknown trailing args after `--status` (`M3`); [`tools/wlb`](../tools/wlb) routes `review [--watch]` through `parse()` so `--help` works and unknown flags fail (`M3`); [`.agents/hooks/post_commit_review_test.py`](../.agents/hooks/post_commit_review_test.py) (`5/5`) tests `600s`, exact partial-output byte count / capital-`Error:` / empty-output `FAILED` states, `_watch_review_status()` with captured stdout assertions, and CLI flag validation (`L1`); updated `docs/TODO.md` (`M4`). Verified via `tools/wlb check` (`ALL CHECKS PASSED`) and live `tools/wlb review --help` / `tools/wlb review`.
