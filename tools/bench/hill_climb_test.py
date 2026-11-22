@@ -4,6 +4,7 @@
 import json
 import os
 import pathlib
+import select
 import stat
 import sys
 import tempfile
@@ -176,13 +177,23 @@ class HillClimbSafeguardsTest(unittest.TestCase):
                 )
                 self.assertFalse(ok_notty)
 
+                def drain_master() -> bytes:
+                    # Drain all buffered PTY output (echoed input + prompt) across chunk boundaries.
+                    chunks = []
+                    while select.select([master_fd], [], [], 0.05)[0]:
+                        chunk = os.read(master_fd, 4096)
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                    return b"".join(chunks)
+
                 # Empty input and wrong passphrase on a real TTY are refused.
                 os.write(master_fd, b"\n")
                 ok_blank, _, _ = hill_climb._confirm_relock(
                     passphrase_file=pass_file, tty_path=pts_path
                 )
                 self.assertFalse(ok_blank)
-                os.read(master_fd, 4096)
+                drain_master()
 
                 os.write(master_fd, b"wrong-passphrase\n")
                 ok_wrong, msg_wrong, auth_wrong = hill_climb._confirm_relock(
@@ -192,7 +203,7 @@ class HillClimbSafeguardsTest(unittest.TestCase):
                 self.assertIsNone(auth_wrong)
                 self.assertIn("passphrase mismatch", msg_wrong)
                 self.assertNotIn(secret, msg_wrong)
-                os.read(master_fd, 4096)
+                drain_master()
 
                 # Matching plaintext passphrase on a real TTY succeeds.
                 os.write(master_fd, (secret + "\n").encode("utf-8"))
@@ -201,7 +212,7 @@ class HillClimbSafeguardsTest(unittest.TestCase):
                 )
                 self.assertTrue(ok_plain)
                 self.assertIsNotNone(auth_plain)
-                prompt = os.read(master_fd, 4096)
+                prompt = drain_master()
                 self.assertIn(b"enter passphrase", prompt)
 
                 # Passphrase file storing the 64-hex SHA-256 digest also works.
@@ -214,7 +225,7 @@ class HillClimbSafeguardsTest(unittest.TestCase):
                 )
                 self.assertTrue(ok_hashed)
                 self.assertIsNotNone(auth_hashed)
-                os.read(master_fd, 4096)
+                drain_master()
         finally:
             os.close(slave_fd)
             os.close(master_fd)
