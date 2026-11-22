@@ -602,6 +602,9 @@ void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink) {
 void CollectUsableBagItems(Player* bot,
                            std::vector<pb::OptionFacts_Item>* out) {
   out->clear();
+  if (!bot || bot->IsNonMeleeSpellCast(false) || bot->m_mover != bot) {
+    return;
+  }
   static constexpr size_t kMaxUsableBagItems = 12;
   for (const BagSlotItem& entry : BagItems(bot)) {
     if (out->size() >= kMaxUsableBagItems) {
@@ -643,6 +646,13 @@ void CollectUsableBagItems(Player* bot,
     }
     const SpellInfo* info = sSpellMgr->GetSpellInfo(spell_id);
     if (!info) {
+      continue;
+    }
+    // Match Spell.cpp:5910: in 3.3.5a, only one potion can be used per combat
+    // (cooldown starts only after leaving combat, so HasSpellCooldown is
+    // false).
+    if (bot->GetLastPotionId() &&
+        (entry.item->IsPotion() || info->IsCooldownStartedOnEvent())) {
       continue;
     }
     // Match SpellHandler.cpp: check combat usability across all spells on item.

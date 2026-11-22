@@ -3,16 +3,22 @@
 #include "test/test_commands.h"
 
 #include <cstdint>
+#include <list>
 #include <string>
 #include <vector>
 
 #include "AiObjectContext.h"
+#include "Cell.h"
+#include "CellImpl.h"
 #include "Chat.h"
 #include "ChatCommand.h"
 #include "CommandScript.h"
+#include "Creature.h"
 #include "DBCEnums.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
+#include "GridNotifiers.h"
+#include "GridNotifiersImpl.h"
 #include "Group.h"
 #include "GroupMgr.h"
 #include "InstanceSaveMgr.h"
@@ -71,6 +77,7 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"clearstrat", HandleClearStrat, SEC_ADMINISTRATOR, Console::Yes},
         {"resetbot", HandleResetBot, SEC_ADMINISTRATOR, Console::Yes},
         {"where", HandleWhere, SEC_ADMINISTRATOR, Console::Yes},
+        {"cleartrash", HandleClearTrash, SEC_ADMINISTRATOR, Console::Yes},
     };
     static ChatCommandTable root_table = {
         {"llmtest", test_table},
@@ -135,6 +142,11 @@ class LlmBrainTestCommandScript : public CommandScript {
       handler->SendErrorMessage("llmtest: failed to add {} to group",
                                 member->GetName());
       return false;
+    }
+    if (group->isRaidGroup()) {
+      group->SetGroupMemberFlag(leader->GetGUID(), true, MEMBER_FLAG_MAINTANK);
+      group->SetGroupMemberFlag(leader->GetGUID(), true,
+                                MEMBER_FLAG_MAINASSIST);
     }
     group->BroadcastGroupUpdate();
     handler->PSendSysMessage("llmtest: grouped {} (leader) and {}{}",
@@ -531,6 +543,47 @@ class LlmBrainTestCommandScript : public CommandScript {
     handler->PSendSysMessage("llmtest: where {} map={} instance={} alive={}{}",
                              player->GetName(), player->GetMapId(),
                              player->GetInstanceId(), player->IsAlive() ? 1 : 0,
+                             FormatToken(token));
+    return true;
+  }
+
+  static bool HandleClearTrash(ChatHandler* handler,
+                               std::string player_name,
+                               float radius,
+                               Optional<std::string> token) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player) {
+      return false;
+    }
+    if (radius <= 0.0f || radius > 300.0f) {
+      handler->SendErrorMessage(
+          "llmtest: cleartrash radius must be in (0, 300]");
+      return false;
+    }
+    struct HostileTrashCheck {
+      Player* player;
+      float range;
+      bool operator()(Creature* c) const {
+        return c && c->IsInWorld() && c->IsAlive() && !c->IsDungeonBoss() &&
+               !c->IsPet() && !c->IsTotem() && !c->IsTrigger() &&
+               c->GetInstanceId() == player->GetInstanceId() &&
+               player->IsHostileTo(c) && player->IsWithinDistInMap(c, range);
+      }
+    };
+    std::list<Creature*> trash;
+    HostileTrashCheck check{player, radius};
+    Acore::CreatureListSearcher<HostileTrashCheck> searcher(player, trash,
+                                                            check);
+    Cell::VisitObjects(player, searcher, radius);
+    uint32_t cleared = 0;
+    for (Creature* c : trash) {
+      if (c && c->IsInWorld()) {
+        c->DespawnOrUnsummon();
+        ++cleared;
+      }
+    }
+    handler->PSendSysMessage("llmtest: cleartrash {} radius={} cleared={}{}",
+                             player->GetName(), radius, cleared,
                              FormatToken(token));
     return true;
   }

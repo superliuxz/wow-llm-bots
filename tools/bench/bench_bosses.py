@@ -294,6 +294,7 @@ BOSSES = {
         stage_xyz=(3205.0, -3230.3, 294.1),
         spawn_xyz=(3234.0, -3230.3, 294.1),
         raid=True,
+        clear_trash_yd=300.0,
         notes_md=PATCHWERK_NOTES,
         max_s=360.0,
     ),
@@ -754,6 +755,7 @@ def run_boss_waves(
     attune_quests: list[int] | None = None,
     role_items: dict[int, int] | None = None,
     raid: bool = False,
+    clear_trash_yd: float = 0.0,
     notes_md: str = "",
     max_s: float = 210.0,
     mode: str = "llm",
@@ -1022,6 +1024,16 @@ def run_boss_waves(
                     )
                 seen_instances.update(party_instances)
                 say(f"  verified fresh distinct dungeon instances: {party_instances}")
+                if clear_trash_yd > 0:
+                    ct_specs = []
+                    for leader_name in leaders:
+                        tok = _next_console_token()
+                        ct_specs.append((
+                            f"llmtest cleartrash {leader_name} {clear_trash_yd:.1f} {tok}",
+                            f"cleartrash {leader_name}",
+                            tok,
+                        ))
+                    _console_batch(ct_specs, wait_s=0.0, timeout_s=10.0)
                 wt["stage_s"] = round(time.monotonic() - step_t0, 2)
 
                 # 3. Apply per-party strategy override (when mixing baseline with stripped arms)
