@@ -3,6 +3,7 @@
 
 import io
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -69,6 +70,8 @@ class NotesHillClimbTest(unittest.TestCase):
             "- Standing order: `Phoenix Egg appears -> target nearest Phoenix Egg`\n"
             "- Standing order: `Valkyr appears in last 2.5s -> target nearest Valkyr`\n"
             "- Standing order: `not me in vehicle -> use Ruby Essence`\n"
+            "- Standing order: `always -> use Lay on Hands`\n"
+            "- Standing order: `always -> use Lay on Hands on tank`\n"
             "- Standing order: `me nearest to it -> away boss 12`\n"
             "- Standing order: `always -> avoid Fire, then jump, then wake`\n"
             "- Standing order: `Mirrored Soul on anyone & not phase 2 -> stop attacking, then pet passive`\n"
@@ -90,6 +93,19 @@ class NotesHillClimbTest(unittest.TestCase):
                     fits_checked += 1
         self.assertGreater(fits_checked, 300)
 
+        # Cross-check against every `fits` row in docs/specs/trigger-actions.tsv.
+        acts_tsv = ROOT / "docs" / "specs" / "trigger-actions.tsv"
+        acts_checked = 0
+        for line in acts_tsv.read_text().splitlines()[1:]:
+            cols = line.split("\t")
+            if len(cols) >= 7 and cols[5] == "fits":
+                act = cols[6].strip()
+                if act and act != "-":
+                    ok_row, err_row = nhc.validate_standing_orders(f"- `always -> {act}`\n")
+                    self.assertTrue(ok_row, f"rejected audited action {act!r}: {err_row}")
+                    acts_checked += 1
+        self.assertGreater(acts_checked, 200)
+
         for bad in (
             "# Non-existent verb\n- Standing order: `Flame Strike cast -> spread`\n",
             "# Uppercase keyword\n- `BOSS HP<20 -> WAKE`\n",
@@ -105,6 +121,14 @@ class NotesHillClimbTest(unittest.TestCase):
             "# Out-of-range Num on away\n- `always -> away 1000`\n",
             "# 2dp Num on away\n- `always -> away 10.55`\n",
             "# Out-of-range second numeric arg on away\n- `always -> away boss 10 1000`\n",
+            "# Negative numeric arg on away\n- `always -> away boss -5`\n",
+            "# Malformed use ... on ...\n- `always -> use Potion on  boss`\n",
+            "# Double space before on in use\n- `always -> use Potion  on boss`\n",
+            "# Digits-only target in use\n- `always -> use Potion on 123`\n",
+            "# Invalid marker in use\n- `always -> use Potion on marker purple`\n",
+            "# Out-of-range Num in to yd from\n- `always -> to 1000 yd from boss`\n",
+            "# Double space in to in front of\n- `always -> to in front  of boss`\n",
+            "# Double space before cast on me\n- `Flame Strike  cast on me -> wake`\n",
             "# Missing spaces around ->\n- `Flame Strike cast->wake`\n",
             "# Double space before cast\n- `Flame Strike  cast -> wake`\n",
             "# Double space after not\n- `not  boss hp<20 -> wake`\n",
@@ -285,60 +309,66 @@ class NotesHillClimbTest(unittest.TestCase):
 
     def test_hill_climb_loop_keeps_improvement_and_preserves_incumbent_traces(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            out_dir = pathlib.Path(tmp) / "loop"
-            calls = {"n": 0}
-            seen_trace_dirs: list[pathlib.Path] = []
-            seen_rejected: list[list[str]] = []
+            orig_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                out_dir = pathlib.Path("loop")
+                self.assertFalse(out_dir.is_absolute())
+                calls = {"n": 0}
+                seen_trace_dirs: list[pathlib.Path] = []
+                seen_rejected: list[list[str]] = []
 
-            def fake_bench(boss_key, notes_path, runs, parallel, out_json, trace_dir):
-                calls["n"] += 1
-                seen_trace_dirs.append(trace_dir)
-                txt = notes_path.read_text()
-                if "IMPROVED" in txt:
-                    kills, deaths, dps = 2, 1.0, 2100.0
-                elif "WORSE" in txt:
-                    kills, deaths, dps = 0, 5.0, 1200.0
-                else:
-                    kills, deaths, dps = 1, 3.0, 2000.0
-                return {
-                    "boss": "Test Boss",
-                    "by_arm": {"llm": {"kills": kills, "runs": runs, "median_dps": dps, "median_deaths": deaths}},
-                    "trials": [{"mode": "llm", "killed": kills > 0, "duration_s": 50.0, "total_dps": dps, "total_deaths": int(deaths), "party_index": 0, "instance_id": calls["n"], "pull_ms": 1000, "characters": {"Loada": {"damage_taken": 50000}}}],
-                }
+                def fake_bench(boss_key, notes_path, runs, parallel, out_json, trace_dir):
+                    calls["n"] += 1
+                    seen_trace_dirs.append(trace_dir)
+                    txt = notes_path.read_text()
+                    if "IMPROVED" in txt:
+                        kills, deaths, dps = 2, 1.0, 2100.0
+                    elif "WORSE" in txt:
+                        kills, deaths, dps = 0, 5.0, 1200.0
+                    else:
+                        kills, deaths, dps = 1, 3.0, 2000.0
+                    return {
+                        "boss": "Test Boss",
+                        "by_arm": {"llm": {"kills": kills, "runs": runs, "median_dps": dps, "median_deaths": deaths}},
+                        "trials": [{"mode": "llm", "killed": kills > 0, "duration_s": 50.0, "total_dps": dps, "total_deaths": int(deaths), "party_index": 0, "instance_id": calls["n"], "pull_ms": 1000, "characters": {"Loada": {"damage_taken": 50000}}}],
+                    }
 
-            proposals = iter(
-                [
-                    "# Bad syntax\n- `Foo cast -> bogus_verb`\n",
-                    "# WORSE\n- `in Fire -> out of it`\n",
-                    "# IMPROVED\n- `in Fire -> out of it`\n",
-                ]
-            )
+                proposals = iter(
+                    [
+                        "# Bad syntax\n- `Foo cast -> bogus_verb`\n",
+                        "# WORSE\n- `in Fire -> out of it`\n",
+                        "# IMPROVED\n- `in Fire -> out of it`\n",
+                    ]
+                )
 
-            def fake_propose(bn, cn, tl, rej):
-                seen_rejected.append(list(rej))
-                return next(proposals)
+                def fake_propose(bn, cn, tl, rej):
+                    seen_rejected.append(list(rej))
+                    return next(proposals)
 
-            res = nhc.run_notes_hill_climb(
-                boss_key="kaelthas",
-                initial_notes="# Base\n",
-                out_dir=out_dir,
-                rounds=3,
-                runs_per_eval=3,
-                confirm_runs=0,
-                bench_fn=fake_bench,
-                propose_fn=fake_propose,
-            )
-            self.assertEqual(calls["n"], 3)
-            # Each bench call got an isolated absolute trace_dir so rejected rounds never clobber incumbent traces.
-            self.assertEqual(len(set(seen_trace_dirs)), 3)
-            self.assertTrue(all(p.is_absolute() for p in seen_trace_dirs))
-            # Rejected history passed to round 3 includes the rejected standing order text.
-            self.assertTrue(any("in Fire -> out of it" in r for r in seen_rejected[-1]))
-            self.assertEqual(res["best_score"]["kills"], 2)
-            self.assertIn("IMPROVED", (out_dir / "best_notes.md").read_text())
-            ledger_lines = [json.loads(l) for l in (out_dir / "ledger.jsonl").read_text().splitlines()]
-            statuses = [e["status"] for e in ledger_lines]
-            self.assertEqual(statuses, ["baseline", "rejected_syntax", "rejected", "kept"])
+                res = nhc.run_notes_hill_climb(
+                    boss_key="kaelthas",
+                    initial_notes="# Base\n",
+                    out_dir=out_dir,
+                    rounds=3,
+                    runs_per_eval=3,
+                    confirm_runs=0,
+                    bench_fn=fake_bench,
+                    propose_fn=fake_propose,
+                )
+                self.assertEqual(calls["n"], 3)
+                # Each bench call got an isolated absolute trace_dir even when out_dir is relative.
+                self.assertEqual(len(set(seen_trace_dirs)), 3)
+                self.assertTrue(all(p.is_absolute() for p in seen_trace_dirs))
+                # Rejected history passed to round 3 includes the rejected standing order text.
+                self.assertTrue(any("in Fire -> out of it" in r for r in seen_rejected[-1]))
+                self.assertEqual(res["best_score"]["kills"], 2)
+                self.assertIn("IMPROVED", (out_dir / "best_notes.md").read_text())
+                ledger_lines = [json.loads(l) for l in (out_dir / "ledger.jsonl").read_text().splitlines()]
+                statuses = [e["status"] for e in ledger_lines]
+                self.assertEqual(statuses, ["baseline", "rejected_syntax", "rejected", "kept"])
+            finally:
+                os.chdir(orig_cwd)
 
 
 if __name__ == "__main__":

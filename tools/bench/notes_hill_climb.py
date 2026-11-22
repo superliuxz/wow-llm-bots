@@ -41,11 +41,11 @@ _ZERO_ARG_ACTS = frozenset({"back", "jump", "leave vehicle", "wake"})
 _STOP_WHAT = frozenset({"casting", "attacking", "moving"})
 _PET_CMDS = frozenset({"stay", "follow", "passive", "defensive"})
 
-_NAME_ALLOWED_RE = re.compile(r"^[A-Za-z0-9'][A-Za-z0-9' :,-]*$")
+_NAME_ALLOWED_RE = re.compile(r"^[A-Za-z0-9'][A-Za-z0-9' :,-]*\Z")
 _HAS_ASCII_LETTER_RE = re.compile(r"[A-Za-z]")
-_INT_RE = re.compile(r"^[0-9]{1,9}$")
-_NUM_SYNTAX_RE = re.compile(r"^[0-9]{1,9}(?:\.[0-9])?$")
-_NUMERIC_TOKEN_RE = re.compile(r"^[0-9]+(?:\.[0-9]+)?$")
+_INT_RE = re.compile(r"^[0-9]{1,9}\Z")
+_NUM_SYNTAX_RE = re.compile(r"^[0-9]{1,9}(?:\.[0-9])?\Z")
+_NUMERIC_TOKEN_RE = re.compile(r"^-?[0-9]+(?:\.[0-9]+)?\Z")
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _CODE_FENCE_RE = re.compile(r"```(?:markdown|md)?\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
@@ -53,8 +53,8 @@ _BACKTICK_ORDER_RE = re.compile(r"`([^`\n]+->[^`\n]+)`")
 
 
 def _is_name(s: str) -> bool:
-    """Matches rt::IsName in harness/grammar/wlb_runtime.cc."""
-    if not s or s.endswith(" "):
+    """Matches rt::IsName in harness/grammar/wlb_runtime.cc (plus no consecutive spaces)."""
+    if not s or s.endswith(" ") or "  " in s:
         return False
     return bool(_NAME_ALLOWED_RE.match(s) and _HAS_ASCII_LETTER_RE.search(s))
 
@@ -94,9 +94,9 @@ def _is_place(s: str) -> bool:
     for prefix in ("behind ", "in front of ", "max range of "):
         if s.startswith(prefix):
             return _is_thing(s[len(prefix) :])
-    idx = s.find(" yd from ")
-    if idx > 0 and _is_num(s[:idx]) and _is_thing(s[idx + 9 :]):
-        return True
+    if " yd from " in s:
+        lhs, rhs = s.split(" yd from ", 1)
+        return _is_num(lhs) and _is_thing(rhs)
     return _is_thing(s)
 
 
@@ -383,10 +383,12 @@ def _validate_act(step: str) -> str | None:
         return None if _is_place(step[3:]) else f"invalid place for 'to': {step!r}"
     if step.startswith("use "):
         rest = step[4:]
+        if " on " in rest:
+            idx = rest.rfind(" on ")
+            if idx > 0 and _is_name(rest[:idx]) and _is_thing(rest[idx + 4 :]):
+                return None
+            return f"invalid 'use' arguments: {step!r}"
         if _is_name(rest):
-            return None
-        idx = rest.find(" on ")
-        if idx > 0 and _is_name(rest[:idx]) and _is_thing(rest[idx + 4 :]):
             return None
         return f"invalid 'use' arguments: {step!r}"
     if step.startswith("mark "):

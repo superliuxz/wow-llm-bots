@@ -2,6 +2,7 @@
 """Unit tests for dodge_timeline, boss_meter impact-dodge, and bench_bosses._TraceTailer."""
 
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -355,6 +356,40 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
             self.assertEqual(res["runs"], 0)
             self.assertIn("llm", res["by_arm"])
             self.assertEqual(stops, ["stop", "stop"])
+
+            # Relative trace_dir_override must be resolved to an absolute LlmBrain.TraceDir.
+            orig_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                rel_trace = pathlib.Path("rel_trace_dir")
+                self.assertFalse(rel_trace.is_absolute())
+                bench_bosses.server = FakeServer
+                bench_bosses.TEST = types.SimpleNamespace(etc=etc, logs=logs)
+                bench_bosses.VAR = var
+                try:
+                    bench_bosses.run_boss_waves(
+                        era="TBC",
+                        tag="test_boss_rel",
+                        boss_name="Test Boss",
+                        level=70,
+                        map_id=556,
+                        stage_xyz=(0.0, 0.0, 0.0),
+                        spawn_xyz=(10.0, 0.0, 0.0),
+                        strip_strat="tbc-seth",
+                        mode="mixed_all",
+                        target_runs=2,
+                        parallel=2,
+                        trace_dir_override=rel_trace,
+                    )
+                finally:
+                    bench_bosses.server = orig_server
+                    bench_bosses.TEST = orig_test
+                    bench_bosses.VAR = orig_var
+                conf_text = (etc / "modules" / "mod-llm-brain.conf").read_text()
+                expected_abs = str((pathlib.Path(tmp) / "rel_trace_dir").resolve())
+                self.assertIn(f'LlmBrain.TraceDir = "{expected_abs}"', conf_text)
+            finally:
+                os.chdir(orig_cwd)
 
             # Console check RuntimeError during setup also marks boss failed.
             FakeServer.wait_online_count = staticmethod(lambda count, inst=None: None)

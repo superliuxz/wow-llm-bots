@@ -516,7 +516,7 @@ src/Ai/Raid/Uld/UldActions.cpp	1138	IronAssemblyOverloadAction	Iron Assembly	any
 src/Ai/Raid/Uld/UldActions.cpp	1160	IronAssemblyRuneOfPowerAction	Iron Assembly	any	fits	away	-	-	Moves 10yd away from current target to exit Rune of Power
 src/Ai/Raid/Uld/UldActions.cpp	1175	KologarnMarkDpsTargetAction	Kologarn	tank	plumbing	-	-	-	Tank assigns Skull/Cross/Moon raid markers to Rubble, Right Arm, Kologarn, and Left Arm
 src/Ai/Raid/Uld/UldActions.cpp	1297	KologarnFallFromFloorAction	Kologarn	any	bugnet	-	-	-	Teleports bot back to restore position if it falls off the Kologarn floor
-src/Ai/Raid/Uld/UldActions.cpp	1311	KologarnRubbleSlowdownAction	Kologarn	hunter	fits	use Frost Trap on marker Skull	-	-	Hunter casts Frost Trap on Skull-marked Rubble
+src/Ai/Raid/Uld/UldActions.cpp	1311	KologarnRubbleSlowdownAction	Kologarn	hunter	fits	use Frost Trap on marker skull	-	-	Hunter casts Frost Trap on Skull-marked Rubble
 src/Ai/Raid/Uld/UldActions.cpp	1326	KologarnEyebeamAction	Kologarn	any	cheat	-	-	-	Requires raid cheat; teleports bot to hardcoded left or right Eyebeam safe position
 src/Ai/Raid/Uld/UldActions.cpp	1377	KologarnRtiTargetAction	Kologarn	any	plumbing	-	-	-	Sets internal rti AI value to cross for tanks or skull for others
 src/Ai/Raid/Uld/UldActions.cpp	1398	KologarnCrunchArmorAction	Kologarn	tank	cheat	-	-	-	Requires raid cheat; directly removes Crunch Armor aura from bot
