@@ -31,10 +31,20 @@ VAR = ROOT / "var"
 
 PREFIXES = ["Load", "Ptwo", "Pthr", "Pfou"]
 
-# Exact zero-arg, enum-restricted, and arg-requiring acts from harness/grammar/orders.wlb (lines 88-110).
+# Exact enums & tokens from harness/grammar/orders.wlb (case-sensitive).
+_WHO_RE = r"(?:me|tank|offtank|healer|leader|anyone|boss|it)"
+_ICON_RE = r"(?:skull|cross|square|moon|triangle|diamond|circle|star)"
+_STATE_RE = r"(?:flying|grounded|untargetable|submerged)"
+_MY_STATE_RE = r"(?:in vehicle|mounted|swimming|nearest to it)"
+_NUM_RE = r"\d{1,3}(?:\.\d)?"
+_COUNT_RE = r"\d{1,3}"
+_POINTS_RE = r"\d{1,5}"
+_DIGIT_RE = r"[0-9]"
+
 _ZERO_ARG_ACTS = frozenset({"back", "jump", "leave vehicle", "wake"})
 _STOP_WHAT = frozenset({"casting", "attacking", "moving"})
 _PET_CMDS = frozenset({"stay", "follow", "passive", "defensive"})
+_ICONS = frozenset({"skull", "cross", "square", "moon", "triangle", "diamond", "circle", "star"})
 _ARG_ACT_PREFIXES = (
     "to ",
     "out of ",
@@ -44,41 +54,42 @@ _ARG_ACT_PREFIXES = (
     "face away ",
     "face ",
     "cancel ",
-    "mark ",
     "interact ",
     "board ",
     "equip ",
     "kite ",
 )
 
-# Exact LHS `Check` patterns from harness/grammar/orders.wlb (lines 43-71).
+# Exact case-sensitive LHS `Check` patterns from harness/grammar/orders.wlb (lines 43-71).
 _CHECK_PATTERNS = (
-    re.compile(r"^.+\s+stacks\s*[<>]\s*\d+\s+on\s+.+$", re.IGNORECASE),
-    re.compile(r"^.+\s+ends<\s*\d+s\s+on\s+.+$", re.IGNORECASE),
-    re.compile(r"^.+\s+cast\s+on\s+.+$", re.IGNORECASE),
-    re.compile(r"^.+\s+cast\s+in\s+last\s+\d+s$", re.IGNORECASE),
-    re.compile(r"^.+\s+cast$", re.IGNORECASE),
-    re.compile(r"^.+\s+appears\s+in\s+last\s+\d+s$", re.IGNORECASE),
-    re.compile(r"^.+\s+appears$", re.IGNORECASE),
-    re.compile(r"^in\s+.+$", re.IGNORECASE),
-    re.compile(r"^.+\s+count\s*[<>]\s*\d+$", re.IGNORECASE),
-    re.compile(r"^.+\s+on\s+.+$", re.IGNORECASE),
-    re.compile(r"^.+\s+within\s+\d+(?:\s+of\s+.+)?$", re.IGNORECASE),
-    re.compile(r"^.+\s+beyond\s+\d+(?:\s+of\s+.+)?$", re.IGNORECASE),
-    re.compile(r"^.+\s+targets\s+.+$", re.IGNORECASE),
-    re.compile(r"^.+\s+hp\s*[<>]\s*\d+$", re.IGNORECASE),
-    re.compile(r"^mana_points\s*[<>]\s*\d+$", re.IGNORECASE),
-    re.compile(r"^mana\s*[<>]\s*\d+$", re.IGNORECASE),
-    re.compile(r"^.+\s+is\s+marked\s+\S+$", re.IGNORECASE),
-    re.compile(r"^.+\s+is\s+.+$", re.IGNORECASE),
-    re.compile(r"^.+\s+(?:in|out\s+of)\s+sight$", re.IGNORECASE),
-    re.compile(r"^me\s+behind\s+.+$", re.IGNORECASE),
-    re.compile(r"^my\s+target\s+is\s+.+$", re.IGNORECASE),
-    re.compile(r"^me\s+has\s+.+$", re.IGNORECASE),
-    re.compile(r"^me\s+\S+$", re.IGNORECASE),
-    re.compile(r"^phase\s+\d+$", re.IGNORECASE),
-    re.compile(r"^(?:after|every)\s+\d+s$", re.IGNORECASE),
+    re.compile(rf"^.+\s+stacks[<>]{_COUNT_RE} on {_WHO_RE}$"),
+    re.compile(rf"^.+\s+ends<{_NUM_RE}s on {_WHO_RE}$"),
+    re.compile(rf"^.+\s+cast on {_WHO_RE}$"),
+    re.compile(rf"^.+\s+cast in last {_NUM_RE}s$"),
+    re.compile(r"^.+\s+cast$"),
+    re.compile(rf"^.+\s+appears in last {_NUM_RE}s$"),
+    re.compile(r"^.+\s+appears$"),
+    re.compile(r"^in .+$"),
+    re.compile(rf"^.+\s+count[<>]{_COUNT_RE}$"),
+    re.compile(rf"^.+\s+on {_WHO_RE}$"),
+    re.compile(rf"^.+\s+within {_NUM_RE}(?: of .+)?$"),
+    re.compile(rf"^.+\s+beyond {_NUM_RE}(?: of .+)?$"),
+    re.compile(r"^.+\s+targets .+$"),
+    re.compile(rf"^.+\s+hp[<>]{_NUM_RE}$"),
+    re.compile(rf"^mana_points[<>]{_POINTS_RE}$"),
+    re.compile(rf"^mana[<>]{_NUM_RE}$"),
+    re.compile(rf"^.+\s+is marked {_ICON_RE}$"),
+    re.compile(rf"^.+\s+is {_STATE_RE}$"),
+    re.compile(r"^.+\s+(?:in|out of) sight$"),
+    re.compile(r"^me behind .+$"),
+    re.compile(r"^my target is .+$"),
+    re.compile(r"^me has .+$"),
+    re.compile(rf"^me {_MY_STATE_RE}$"),
+    re.compile(rf"^phase {_DIGIT_RE}$"),
+    re.compile(rf"^(?:after|every) {_NUM_RE}s$"),
 )
+
+_NUM_FULL_RE = re.compile(rf"^{_NUM_RE}$")
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _CODE_FENCE_RE = re.compile(r"```(?:markdown|md)?\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
@@ -192,16 +203,16 @@ def extract_standing_orders(notes_md: str) -> list[str]:
 
 
 def _validate_when(when: str) -> str | None:
-    low = when.strip().lower()
-    if low == "always":
+    s = when.strip()
+    if s == "always":
         return None
-    conds = [c.strip() for c in when.split(" & ")]
+    conds = [c.strip() for c in s.split(" & ")]
     if not (1 <= len(conds) <= 4):
         return f"condition must have 1..4 clauses (got {len(conds)})"
     for c in conds:
         if not c:
             return "empty condition clause"
-        body = c[4:].strip() if c.lower().startswith("not ") else c
+        body = c[4:].strip() if c.startswith("not ") else c
         if not any(pat.match(body) for pat in _CHECK_PATTERNS):
             return f"unsupported condition clause: {c!r}"
     return None
@@ -209,25 +220,39 @@ def _validate_when(when: str) -> str | None:
 
 def _validate_act(step: str) -> str | None:
     s = step.strip()
-    low = s.lower()
-    if low in _ZERO_ARG_ACTS:
+    if s in _ZERO_ARG_ACTS:
         return None
-    if low == "stop":
+    if s == "stop":
         return None
-    if low.startswith("stop "):
-        what = low[5:].strip()
+    if s.startswith("stop "):
+        what = s[5:].strip()
         return None if what in _STOP_WHAT else f"invalid stop target: {step!r}"
-    if low == "away" or (low.startswith("away ") and low[5:].strip()):
+    if s == "away":
         return None
-    if low.startswith("pet "):
-        rest = low[4:].strip()
+    if s.startswith("away "):
+        rest = s[5:].strip()
+        if not rest:
+            return f"missing argument for 'away': {step!r}"
+        parts = rest.split()
+        # `away` allows `<Thing>` and/or trailing `<Num>`, never two trailing numbers.
+        if len(parts) >= 2 and _NUM_FULL_RE.match(parts[-1]) and _NUM_FULL_RE.match(parts[-2]):
+            return f"too many numeric args for 'away': {step!r}"
+        return None
+    if s.startswith("mark "):
+        rest = s[5:].strip()
+        parts = rest.rsplit(" ", 1)
+        if len(parts) == 2 and parts[0].strip() and parts[1] in _ICONS:
+            return None
+        return f"invalid mark target/icon: {step!r}"
+    if s.startswith("pet "):
+        rest = s[4:].strip()
         if rest in _PET_CMDS:
             return None
         if rest.startswith("attack ") and rest[7:].strip():
             return None
         return f"invalid pet command: {step!r}"
     for prefix in _ARG_ACT_PREFIXES:
-        if low.startswith(prefix):
+        if s.startswith(prefix):
             if s[len(prefix) :].strip():
                 return None
             return f"missing argument for {prefix.strip()!r}: {step!r}"
@@ -249,7 +274,7 @@ def validate_standing_orders(notes_md: str) -> tuple[bool, list[str]]:
             continue
         if cond_err := _validate_when(cond):
             errors.append(f"{cond_err} in {order!r}")
-        steps = [s.strip() for s in re.split(r",\s*then\s+", rhs, flags=re.IGNORECASE)]
+        steps = [s.strip() for s in rhs.split(", then ")]
         if not (1 <= len(steps) <= 3):
             errors.append(f"order must have 1..3 steps (got {len(steps)}): {order!r}")
             continue
@@ -294,6 +319,8 @@ def summarize_fight_timeline(
                         evts.append(obj)
                     elif kind == "sample":
                         smps.append(obj)
+        for smps in samples_by_bot.values():
+            smps.sort(key=lambda s: int(s.get("t_ms", 0)))
 
     lines = [
         f"Boss: {boss_name} ({arm}: {boss_res.get('by_arm', {}).get(arm, {}).get('kills', 0)}/"
@@ -401,6 +428,7 @@ def propose_notes_edit(
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.2,
             "max_tokens": 1024,
+            "chat_template_kwargs": {"enable_thinking": False},
         }
     ).encode("utf-8")
     req = urllib.request.Request(

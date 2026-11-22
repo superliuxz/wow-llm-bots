@@ -5,7 +5,7 @@ what exists, what comes next and in which order. **Keep it current** (CONTRIBUTI
 docs/TODO.md current"): anything unfinished, deferred or decided-but-not-built goes here, not only
 in a conversation.
 
-Last updated 2026-11-21.
+Last updated 2026-11-22.
 
 ## In progress
 
@@ -14,7 +14,7 @@ Last updated 2026-11-21.
   - Exploratory split-host `n = 8` run (`var/bench_boss_p12_llm.json` local `mixed, parallel=2` vs `var/bench_boss_p12_nonllm.json` remote `mixed_all, parallel=4` — **confounded by host/parallelism, not apples-to-apples**): `Ikiss` `llm` `5/8` (`1,022` DPS = `+1.4%` vs `llm_no_notes` `1,007`, `3/8`; remote `no_brain` `1/8`, `baseline` `0/8`), `Loken` `llm` `7/8` (`+15.4%` DPS) vs `llm_no_notes` `7/8`, `Devourer` `llm` `3/8` (`-0.6%` DPS) vs `llm_no_notes` `1/8` (remote `no_brain` `3/8` `4,797` DPS, `baseline` `1/8`), `Murmur` `llm` `4/8` (`-5.1%` DPS) vs `llm_no_notes` `6/8`, and `Kael'thas` `llm` `2/8` (`-23.3%` DPS regression: `1,453` vs `llm_no_notes` `1,894`, `4/8` — `Arcane Sphere` order reverted in `f644f1b`).
   - **Still open before Phase 3 sign-off:** `llm` kills do not yet significantly beat `no_brain` after Holm–Bonferroni correction, and `A3` draft notes (`content/notes/`) remain draft (only 1 boss section each in `FoS`/`Seth`/`ICC` was edited so far).
 - **Phase 3 (`A5`, `A6`, `C2`, Patchwerk & ICC) live verification:**
-  - `A5`, `A6`, and `C2` (`tools/bench/notes_hill_climb.py`) are implemented, unit-tested, and compiled into `out/server-test`; live 10-man raids verified (`var/bench_boss_raids_llm.json`: `Patchwerk` `11,291` DPS / `41.6 s`, `Lord Marrowgar` ICC 10-man with `-icc` stripped `26,709` DPS / `11,248` HPS / `220.7 s`; note: multi-wave raid instance reuse on wave 2+ still needs raid-reset handling). Live `C2` reflection run + `eregos` vehicle check remain open.
+  - `A5`, `A6`, and `C2` (`tools/bench/notes_hill_climb.py`) are implemented, unit-tested, and compiled into `out/server-test`; initial 10-man raid smoke runs completed (`var/bench_boss_raids_llm.json`: `Patchwerk` `0/1` kill, wipe `11` deaths, `11,291` DPS / `41.6 s`; `Lord Marrowgar` ICC 10-man with `-icc` stripped `0/1` kill, wipe `10` deaths, `26,709` DPS / `11,248` HPS / `220.7 s` vs remote `no_brain` `0/1` kill `17,129` DPS; both had `1` valid wave + `5` invalid waves from raid instance reuse on wave 2+). Live `C2` reflection re-run (with `enable_thinking: False`) and `eregos` vehicle check remain open.
 - **Pending user-approved `scorer.sha256` relock (Rule #6):** `server_module/src/snapshot/snapshot_builder.cc` (`A5` `self.unit.group` + `OptionFacts::party_targets`, `A6` `CollectUsableBagItems`) and `server_module/src/llm_brain_world_script.cc` (`A6` cast-time `kUse` item progress) were modified. Both `~/.local/share/wow-llm-bots/scorer.sha256` and tracked `config/scorer-lock.sha256` were left untouched awaiting explicit user OK.
 
 ## Next, in order
@@ -177,6 +177,10 @@ hand-checking draft `content/notes/` before enabling them.
   details in [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md) §6).
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-22: **Review `ed78f6c` fixes (Medium 1–2, Low 1–2) & `C2` `enable_thinking: False`:**
+  - *`A6` `SpellQueue`, specific spell tracking, & safe post-use lookup (`M1`, `L1`):* [`option_executor.{h,cc}`](../server_module/src/options/option_executor.cc) adds `ExecuteResult::pending_spell_id`, checks `Player::SpellQueue` growth and `IsCastingSpecificSpell(bot, item_spell_id)` (excluding `CURRENT_AUTOREPEAT_SPELL`), and re-fetches the post-use `Item*` via `GetItemByPos` + GUID verification; [`llm_brain_world_script.cc`](../server_module/src/llm_brain_world_script.cc) tracks `active_item_spell_id` + `SpellQueue` in `OptionTargetProgress` and early-returns for `"item:"` in `StepActiveOption`.
+  - *`C2` `orders.wlb` validation, chronological sample sort, & Gemma 4 thinking toggle (`M2`, `L2`):* [`notes_hill_climb.py`](../tools/bench/notes_hill_climb.py) enforces case-sensitive `orders.wlb` `Who`/`Icon`/`State`/`MyState` (`in vehicle`, `nearest to it`)/`Digit`/`Num` (`1dp`)/no-space `<`/`>`/`away` arg bounds, sorts `samples_by_bot` by `t_ms`, and passes `chat_template_kwargs.enable_thinking=False`; [`notes_hill_climb_test.py`](../tools/bench/notes_hill_climb_test.py) cross-checks all `>300` audited `fits` rows in [`docs/specs/trigger-conditions.tsv`](specs/trigger-conditions.tsv) plus 20 negative cases. Updated `docs/TODO.md` raid wipe figures and `Last updated` (`L2`). Verified via `tools/wlb check` (`ALL CHECKS PASSED`) and `tools/wlb build server --test`.
 
 - 2026-11-22: **Review `f6def2d` fixes (High 1, Medium 1–3, Low 1–2):**
   - *`A6` cast-time & charged bag items (`H1`, `M1`):* [`option_executor.cc`](../server_module/src/options/option_executor.cc) skips depleted charged bag stacks when resolving `item:<entry>`, detects item use via count/charges/cast/cooldown/GCD/aura/mana/vehicle changes, and returns `used = !cast_started`; [`llm_brain_world_script.cc`](../server_module/src/llm_brain_world_script.cc) `OptionTargetProgress` holds `kUse` `"item:<entry>"` options `pending()` while casting until the cast finishes.

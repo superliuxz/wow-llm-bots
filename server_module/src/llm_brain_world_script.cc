@@ -89,10 +89,26 @@ struct TargetProgress {
   std::string interrupted;
 };
 
+bool IsCastingItemSpell(const Player* bot, uint32_t spell_id) {
+  if (spell_id == 0) {
+    return false;
+  }
+  for (CurrentSpellTypes slot :
+       {CURRENT_GENERIC_SPELL, CURRENT_CHANNELED_SPELL}) {
+    if (const Spell* sp = bot->GetCurrentSpell(slot);
+        sp && sp->getState() != SPELL_STATE_FINISHED && sp->GetSpellInfo() &&
+        sp->GetSpellInfo()->Id == spell_id) {
+      return true;
+    }
+  }
+  return false;
+}
+
 TargetProgress OptionTargetProgress(Player* bot,
                                     const OptionTarget& target,
                                     bool used,
-                                    bool* had_food_drink_aura) {
+                                    bool* had_food_drink_aura,
+                                    uint32_t pending_item_spell_id = 0) {
   const auto pending = [] { return TargetProgress{.pending = true}; };
   const auto done = [] { return TargetProgress{}; };
   const auto cut = [](std::string why) {
@@ -130,7 +146,11 @@ TargetProgress OptionTargetProgress(Player* bot,
         if (used) {
           return done();
         }
-        return bot->IsNonMeleeSpellCast(false) ? pending() : done();
+        if (IsCastingItemSpell(bot, pending_item_spell_id) ||
+            !bot->SpellQueue.empty()) {
+          return pending();
+        }
+        return done();
       }
       GameObject* go =
           ObjectAccessor::GetGameObject(*bot, ParseSnapshotGuid(target.guid));
@@ -689,11 +709,13 @@ class LlmBrainWorldScript : public WorldScript {
       state.attack_idle_since = base::TimeTicks();
       state.walk = PendingWalk{};
     }
+    uint32_t pending_spell_id = 0;
     if (target) {
       ExecuteResult result = ExecuteOption(bot, *target, &state.walk);
       error = std::move(result.error);
       used = result.used;
       info = std::move(result.info);
+      pending_spell_id = result.pending_spell_id;
       if (!result.path_time.is_zero()) {
         path_times_.push_back(result.path_time);
       }
@@ -738,9 +760,10 @@ class LlmBrainWorldScript : public WorldScript {
         SendImmediateEvent(bot_index, name, std::move(payload));
       }
       state.object_used = used;
+      state.active_item_spell_id = pending_spell_id;
       state.active_command_id = command.command_id;
-      const TargetProgress progress =
-          OptionTargetProgress(bot, *target, used, &state.had_food_drink_aura);
+      const TargetProgress progress = OptionTargetProgress(
+          bot, *target, used, &state.had_food_drink_aura, pending_spell_id);
       if (progress.pending) {
         state.active_option = *target;
         schedule_->SetActiveTargetPending(bot_index, true);
@@ -989,6 +1012,10 @@ class LlmBrainWorldScript : public WorldScript {
     }
     if (kind == OptionTarget::Kind::kUse ||
         kind == OptionTarget::Kind::kGather) {
+      if (kind == OptionTarget::Kind::kUse &&
+          state.active_option->guid.starts_with("item:")) {
+        return;
+      }
       GameObject* go = ObjectAccessor::GetGameObject(
           *bot, ParseSnapshotGuid(state.active_option->guid));
       if (go == nullptr) {
@@ -1081,9 +1108,9 @@ class LlmBrainWorldScript : public WorldScript {
     BotState* state = &bots_[index];
     bool pending = false;
     if (state->active_option) {
-      const TargetProgress progress =
-          OptionTargetProgress(bot, *state->active_option, state->object_used,
-                               &state->had_food_drink_aura);
+      const TargetProgress progress = OptionTargetProgress(
+          bot, *state->active_option, state->object_used,
+          &state->had_food_drink_aura, state->active_item_spell_id);
       pending = progress.pending;
       if (!progress.interrupted.empty()) {
         LOG_INFO("module", "mod-llm-brain: {}: {} interrupted: {}",
@@ -1437,6 +1464,7 @@ class LlmBrainWorldScript : public WorldScript {
     uint32_t done_act_command_id = 0;
     // Gather / Use / Talk / Explore / GoTo: finished at once or on arrival.
     bool object_used = false;
+    uint32_t active_item_spell_id = 0;
     // Rest: whether a food or drink aura was observed while resting.
     bool had_food_drink_aura = false;
     // What the bot has open and points at (open / close / hover).

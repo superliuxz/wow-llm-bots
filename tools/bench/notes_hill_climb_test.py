@@ -65,6 +65,9 @@ class NotesHillClimbTest(unittest.TestCase):
             "# Kael'thas\n"
             "- Standing order: `in Flame Strike -> out of it`\n"
             "- Standing order: `Phoenix Egg appears -> target nearest Phoenix Egg`\n"
+            "- Standing order: `Valkyr appears in last 2.5s -> target nearest Valkyr`\n"
+            "- Standing order: `not me in vehicle -> use Ruby Essence`\n"
+            "- Standing order: `me nearest to it -> away boss 12`\n"
             "- Standing order: `always -> avoid Fire, then jump, then wake`\n"
             "- Standing order: `Mirrored Soul on anyone & not phase 2 -> stop attacking, then pet passive`\n"
             "```\nArcane Explosion cast -> out of it, then back\n```\n"
@@ -72,8 +75,31 @@ class NotesHillClimbTest(unittest.TestCase):
         ok, errs = nhc.validate_standing_orders(good)
         self.assertTrue(ok, errs)
 
+        # Cross-check against every `fits` row in docs/specs/trigger-conditions.tsv.
+        tsv = ROOT / "docs" / "specs" / "trigger-conditions.tsv"
+        fits_checked = 0
+        for line in tsv.read_text().splitlines()[1:]:
+            cols = line.split("\t")
+            if len(cols) >= 7 and cols[5] == "fits":
+                cond = cols[6].strip()
+                if cond and cond != "-":
+                    ok_row, err_row = nhc.validate_standing_orders(f"- `{cond} -> wake`\n")
+                    self.assertTrue(ok_row, f"rejected audited trigger {cond!r}: {err_row}")
+                    fits_checked += 1
+        self.assertGreater(fits_checked, 300)
+
         for bad in (
             "# Non-existent verb\n- Standing order: `Flame Strike cast -> spread`\n",
+            "# Uppercase keyword\n- `BOSS HP<20 -> WAKE`\n",
+            "# Uppercase act\n- `Defile on me -> OUT OF it`\n",
+            "# Invalid Who\n- `Defile on somebody -> away`\n",
+            "# Invalid State\n- `boss is dancing -> wake`\n",
+            "# Invalid Icon in cond\n- `boss is marked purple -> wake`\n",
+            "# Invalid Icon in act\n- `always -> mark boss purple`\n",
+            "# Invalid MyState\n- `me dancing -> wake`\n",
+            "# Invalid Digit\n- `phase 12 -> wake`\n",
+            "# Spaces around Cmp\n- `boss hp < 20 -> wake`\n",
+            "# Extra numeric arg on away\n- `always -> away boss 10 20`\n",
             "# Prefix collision\n- `in Fire -> backflip`\n",
             "# Prefix collision 2\n- `in Fire -> stomp`\n",
             "# Zero-arg verb with arg\n- `in Fire -> jump high`\n",

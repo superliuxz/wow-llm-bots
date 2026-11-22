@@ -1175,6 +1175,21 @@ ExecuteResult ExecuteWalkOption(Player* bot,
   return {"", /*used=*/step.arrived, "", step.path_time};
 }
 
+bool IsCastingSpecificSpell(const Player* bot, uint32_t spell_id) {
+  if (spell_id == 0) {
+    return false;
+  }
+  for (CurrentSpellTypes slot :
+       {CURRENT_GENERIC_SPELL, CURRENT_CHANNELED_SPELL}) {
+    if (const Spell* sp = bot->GetCurrentSpell(slot);
+        sp && sp->getState() != SPELL_STATE_FINISHED && sp->GetSpellInfo() &&
+        sp->GetSpellInfo()->Id == spell_id) {
+      return true;
+    }
+  }
+  return false;
+}
+
 ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
   WorldSession* session = bot->GetSession();
   if (!session) {
@@ -1258,6 +1273,7 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
       !bot->IsFriendlyTo(item_target)) {
     item_target = bot;
   }
+  const ObjectGuid item_guid = item->GetGUID();
   const uint32_t count_before = bot->GetItemCount(proto->ItemId);
   const int32_t charges_before =
       spell_slot >= 0 ? item->GetSpellCharges(spell_slot) : 0;
@@ -1265,10 +1281,11 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
   const uint32_t mana_before = bot->GetPower(POWER_MANA);
   const bool gcd_before =
       bot->GetGlobalCooldownMgr().HasGlobalCooldown(item_spell);
+  const size_t queue_before = bot->SpellQueue.size();
   const void* vehicle_before = bot->GetVehicle();
   WorldPacket p(CMSG_USE_ITEM);
   p << found->bag << found->slot << static_cast<uint8_t>(0) << item_spell_id
-    << item->GetGUID() << static_cast<uint32_t>(0) << static_cast<uint8_t>(0);
+    << item_guid << static_cast<uint32_t>(0) << static_cast<uint8_t>(0);
   SpellCastTargets targets;
   if (item_target) {
     targets.SetUnitTarget(item_target);
@@ -1277,26 +1294,36 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
   p.rpos(0);
   session->HandleUseItemOpcode(p);
   const bool count_dropped = bot->GetItemCount(proto->ItemId) < count_before;
-  // Re-check charges only if the item wasn't destroyed (count_dropped ==
-  // false).
-  const bool charges_dropped =
-      !count_dropped && spell_slot >= 0 &&
-      proto->Spells[spell_slot].SpellCharges != 0 &&
-      item->GetSpellCharges(spell_slot) != charges_before;
-  const bool cast_started = bot->IsNonMeleeSpellCast(false);
+  // Re-fetch by bag/slot + GUID after HandleUseItemOpcode to avoid dangling
+  // `Item*` dereference if an OnItemUse script destroyed/replaced the stack.
+  bool charges_dropped = false;
+  if (!count_dropped && spell_slot >= 0 &&
+      proto->Spells[spell_slot].SpellCharges != 0) {
+    if (Item* post_item = bot->GetItemByPos(found->bag, found->slot);
+        post_item && post_item->GetGUID() == item_guid) {
+      charges_dropped =
+          post_item->GetSpellCharges(spell_slot) != charges_before;
+    }
+  }
+  const bool cast_started = IsCastingSpecificSpell(bot, item_spell_id);
+  const bool queued_now = bot->SpellQueue.size() > queue_before;
   const bool cd_started = bot->HasSpellCooldown(item_spell_id);
   const bool gcd_started =
       !gcd_before && bot->GetGlobalCooldownMgr().HasGlobalCooldown(item_spell);
   const bool aura_changed = bot->GetAppliedAuras().size() != auras_before;
   const bool mana_changed = bot->GetPower(POWER_MANA) != mana_before;
   const bool vehicle_changed = bot->GetVehicle() != vehicle_before;
-  if (!count_dropped && !charges_dropped && !cast_started && !cd_started &&
-      !gcd_started && !aura_changed && !mana_changed && !vehicle_changed) {
+  if (!count_dropped && !charges_dropped && !cast_started && !queued_now &&
+      !cd_started && !gcd_started && !aura_changed && !mana_changed &&
+      !vehicle_changed) {
     return {"can't use " + target.name + " now"};
   }
-  // Cast-time items stay pending in OptionTargetProgress until the cast ends.
-  return {.used = !cast_started,
-          .info = cast_started ? "" : "used " + target.name};
+  // Cast-time or SpellQueue-pending items stay pending in OptionTargetProgress
+  // until the specific item spell finishes.
+  const bool still_pending = cast_started || queued_now;
+  return {.used = !still_pending,
+          .info = still_pending ? "" : "used " + target.name,
+          .pending_spell_id = still_pending ? item_spell_id : 0};
 }
 
 }  // namespace

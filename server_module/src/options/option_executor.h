@@ -56,6 +56,9 @@ struct ExecuteResult {
   std::string info;
   // Time spent in PathGenerator when starting an Explore or GoTo walk.
   base::TimeDelta path_time;
+  // Non-zero when a bag item use started a cast or queued into SpellQueue and
+  // should stay pending until that spell finishes.
+  uint32_t pending_spell_id = 0;
 };
 
 // Carries out a chosen option with the bot's body: playerbots' own actions
