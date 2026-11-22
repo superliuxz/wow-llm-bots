@@ -1,11 +1,9 @@
 # Halls of Lightning (HoL)
 
-<!-- DRAFT extracted from mod-playerbots (Dungeon/HoL); hand-check before use. -->
-
 ## General Bjarngrim
 
-- **Stormforged Lieutenant** (add_switch): Priority add; switch targets to `Stormforged Lieutenant` immediately.
-- **Whirlwind** (cast_aoe): Boss cast AoE (10 yd radius); move out during cast.
+- **Stormforged Lieutenant**: priority add; kill lieutenants first before focusing Bjarngrim.
+- **Whirlwind**: melee AoE; step out of melee range during Whirlwind.
 
 ```
 Stormforged Lieutenant appears -> target nearest Stormforged Lieutenant
@@ -14,22 +12,20 @@ Whirlwind cast -> out of it
 
 ## Ionar
 
-- **Ionar Disperse** (positioning): Boss disperses into sparks; move to safe disperse position.
-- **Ionar Tank Aggro** (positioning): Encounter positioning (ionar tank aggro).
-- **Static Overload** (debuff): Aura `Static Overload` on boss; hand-check encounter reaction.
-- **Ball Lightning** (cast_aoe): Boss cast AoE (7 yd radius); move out during cast.
+- **Static Overload**: debuff on a player that pulses AoE damage to nearby allies; spread out when afflicted.
+- **Disperse**: splits into **Spark of Ionar** chasing players; kite sparks until Ionar reforms.
+- **Ball Lightning**: targeted AoE; spread out.
 
 ```
+Static Overload on me -> away
 Disperse cast -> away boss 15
-Ball Lightning cast -> out of it
 ```
 
 ## Loken
 
-- **Lightning Nova** (cast_aoe): Boss cast AoE (22 yd radius); move out during cast.
-- **Loken Ranged** (positioning): Stack near Loken / tank.
+- **Pulsing Shockwave**: deals more damage the farther you stand from Loken; keep the group tight near Loken except during Lightning Nova.
+- **Lightning Nova**: 4s cast dealing heavy AoE damage within 20 yd; step just outside the radius and return after it lands.
 
 ```
 Lightning Nova cast -> out of it, then back
-always -> to boss
 ```

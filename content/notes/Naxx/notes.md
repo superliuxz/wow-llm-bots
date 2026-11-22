@@ -1,46 +1,32 @@
 # Naxxramas (Naxx)
 
-<!-- DRAFT extracted from mod-playerbots (Raid/Naxx); hand-check before use. -->
+## Patchwerk
 
-## Anub'rekhan
+- Pure tank-and-spank throughput check.
+- **Hateful Strike**: hits the highest-HP melee target after the main tank; off-tank stays in melee range and healers keep both tanks topped.
 
-- **Locust Swarm** (debuff): Aura `Locust Swarm` (boss); gather/position per encounter script (hand-check).
+## Anub'Rekhan
+
+- **Locust Swarm**: boss moves slowly and deals heavy nature AoE around himself; main tank kites Anub'Rekhan around the room perimeter while DPS kills **Crypt Guard** adds.
 
 ## Maexxna
 
-- **Add** (add_switch): Priority add; switch targets to `Add` immediately.
+- **Web Wrap**: cocoons players against the wall; ranged DPS breaks **Web Wrap** immediately.
+- **Maexxna Spiderling**: spawns small spiders; AoE them down before Web Spray.
 
 ```
-Add appears -> target nearest Add
+Web Wrap appears -> target nearest Web Wrap
 ```
 
 ## Thaddius
 
-- **Add** (add_switch): Priority add; switch targets to `Add` immediately.
-- **Negative Charge** (debuff): Aura `Negative Charge` (me); gather/position per encounter script (hand-check).
-
-```
-Add appears -> target nearest Add
-```
-
-## Instructor Razuvious
-
-- **Crystal** (add_switch): Priority add; switch targets to `Crystal` immediately.
-
-```
-Crystal appears -> target nearest Crystal
-```
+- **Polarity Shift**: assigns Positive or Negative Charge; stack with same-charge players and stay away from opposite-charge players.
 
 ## Sapphiron
 
-- **Sapphiron Ground** (positioning): Encounter positioning (sapphiron ground).
-- **Sapphiron Flight** (positioning): Encounter positioning (sapphiron flight).
+- **Blizzard**: moving frost AoE; move out immediately.
+- **Frost Breath**: during air phase, hide behind an **Ice Block** before Frost Breath lands.
 
-## Gluth
-
-- **Gluth** (positioning): Encounter positioning (gluth).
-- **Mortal Wound** (debuff): Aura `Mortal Wound` (me); gather/position per encounter script (hand-check).
-
-## Loatheb
-
-- **Loatheb** (positioning): Encounter positioning (loatheb).
+```
+in Blizzard -> out of it
+```

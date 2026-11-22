@@ -71,7 +71,7 @@ COMP_10 = COMP_5 + [
     ("g", "nightelf:druid", 2, "heal"),    # Restoration Druid (Healer 2)
     ("h", "human:rogue", 1, "dps"),        # Combat Rogue (Melee DPS)
     ("i", "dwarf:warrior", 1, "dps"),      # Fury Warrior (Melee DPS)
-    ("j", "human:mage", 0, "dps"),         # Arcane Mage (Ranged DPS)
+    ("j", "human:paladin", 0, "heal"),     # Holy Paladin (Healer 3)
 ]
 
 PREFIXES = ["Load", "Ptwo", "Pthr", "Pfou"]
@@ -295,7 +295,7 @@ BOSSES = {
         spawn_xyz=(3234.0, -3230.3, 294.1),
         raid=True,
         notes_md=PATCHWERK_NOTES,
-        max_s=240.0,
+        max_s=360.0,
     ),
     "marrowgar": dict(
         era="WotLK Raid",
@@ -308,7 +308,7 @@ BOSSES = {
         strip_strat="icc",
         raid=True,
         notes_md=MARROWGAR_NOTES,
-        max_s=240.0,
+        max_s=360.0,
     ),
 }
 

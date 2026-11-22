@@ -1,43 +1,17 @@
 # Sethekk Halls (Seth)
 
-<!-- DRAFT extracted from mod-playerbots (Dungeon/Seth); hand-check before use. -->
-
-## Time-lost Controller
-
-- **Charming Totem** (add_switch): Priority add; switch targets to `Charming Totem` immediately.
-
-```
-Charming Totem appears -> target nearest Charming Totem
-```
-
-## Sethekk Prophet
-
-- **Tremor Totem** (debuff): Keep Tremor Totem down for Fear.
-
-```
-always -> use Tremor Totem
-```
-
 ## Darkweaver Syth
 
-- **Elemental** (add_switch): Priority add; switch targets to `Elemental` immediately.
-
-```
-Elemental appears -> target nearest Elemental
-```
+- **Elementals**: summons four elemental adds at 90%, 55%, and 15% HP; switch and burn elementals quickly.
 
 ## Anzu
 
-- **Banish** (debuff): Aura `Banish` on me; hand-check encounter reaction.
-- **Hawk Spirit** (add_switch): Priority add; switch targets to `Hawk Spirit` immediately.
-
-```
-Hawk Spirit appears -> target nearest Hawk Spirit
-```
+- **Spell Bomb / Banish**: at 75% and 33% HP Anzu banishes himself and summons **Brood of Anzu** birds; cleave/burn adds while Anzu is banished.
+- **Paralyzing Screech**: stuns the party; healers keep tank topped through the stun.
 
 ## Talon King Ikiss
 
-- **Arcane Explosion** (cast_aoe): Boss blinks and casts a 5s AoE; move out during cast (do not return to pre-Blink spot).
+- **Arcane Explosion**: after Blinking, casts a 5s lethal AoE; move outside the radius during the cast (do not walk back to his pre-Blink position).
 
 ```
 Arcane Explosion cast -> out of it

@@ -13,6 +13,7 @@
 #include "DBCStructure.h"
 #include "Group.h"
 #include "GroupMgr.h"
+#include "InstanceSaveMgr.h"
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
 #include "ObjectMgr.h"
@@ -487,6 +488,25 @@ class LlmBrainTestCommandScript : public CommandScript {
     } else {
       Player::ResetInstances(player->GetGUID(), INSTANCE_RESET_ALL, false);
       Player::ResetInstances(player->GetGUID(), INSTANCE_RESET_ALL, true);
+    }
+    // `Group::ResetInstances(INSTANCE_RESET_ALL, ...)` skips raids; explicitly
+    // unbind all off-map dungeon/raid saves across all difficulties so
+    // multi-wave raid benchmarks get a fresh instance on every wave.
+    const ObjectGuid guid = player->GetGUID();
+    const uint32_t current_map_id = player->GetMapId();
+    for (uint8_t diff = 0; diff < MAX_DIFFICULTY; ++diff) {
+      BoundInstancesMap const& bound =
+          sInstanceSaveMgr->PlayerGetBoundInstances(
+              guid, static_cast<Difficulty>(diff));
+      for (auto itr = bound.begin(); itr != bound.end();) {
+        if (itr->first != current_map_id) {
+          sInstanceSaveMgr->PlayerUnbindInstance(
+              guid, itr->first, static_cast<Difficulty>(diff), true, player);
+          itr = bound.begin();
+        } else {
+          ++itr;
+        }
+      }
     }
     handler->PSendSysMessage(
         "llmtest: resetbot {} alive={} passives={} hp={}/{} mana={}/{} "

@@ -1,49 +1,33 @@
 # Magisters' Terrace (MgT)
 
-<!-- DRAFT extracted from mod-playerbots (Dungeon/MgT); hand-check before use. -->
-
 ## Selin Fireheart
 
-- **Mgt Out of Room** (positioning): Stay inside the boss room to avoid leashing/resetting.
-- **Crystal** (add_switch): Priority add; switch targets to `Crystal` immediately.
-- **Fel Crystal** (add_switch): Priority add (`NPC_FEL_CRYSTAL`); switch and burn immediately.
+- **Fel Crystal**: Selin channels from Fel Crystals to empower himself; switch and destroy active **Fel Crystal** targets immediately.
 
 ```
-boss beyond 30 -> to boss
-Crystal appears -> target nearest Crystal
 Fel Crystal appears -> target nearest Fel Crystal
 ```
 
-## Magisters' Terrace
+## Vexallus
 
-- **Dampening Field** (ground_hazard): Ground hazard (~5 yd); move out immediately.
-- **Mgt Priority Interrupt** (interrupt): Priority interrupt target: Mgt Priority Interrupt.
-- **Arcane Nova** (cast_aoe): Boss cast AoE (16 yd radius); move out during cast.
+- **Pure Energy**: spawns lightning orbs that debuff their killer with increased damage taken and dealt; switch and burn **Pure Energy** adds promptly.
 
 ```
-in Dampening Field -> out of it
-Arcane Nova cast -> out of it
+Pure Energy appears -> target nearest Pure Energy
 ```
 
 ## Priestess Delrissa
 
-- **Mgt Delrissa Interrupt** (interrupt): Priority interrupt target: Mgt Delrissa Interrupt.
-- **Tremor Totem** (debuff): Keep Tremor Totem down for Fear.
-
-```
-always -> use Tremor Totem
-```
+- Council-style PvP fight with four random adds; focus-fire healer adds first, interrupt casts, and dispel crowd control.
 
 ## Kael'thas Sunstrider
 
-- **Flame Strike** (ground_hazard): Ground hazard (~7.5 yd); move out immediately.
-- **Phoenix Burn** (ground_hazard): Ground hazard (~8 yd); move out immediately.
-- **Mgt Kael Interrupt** (interrupt): Priority interrupt target: Mgt Kael Interrupt.
-- **Mgt Gravity Lapse** (positioning): Encounter positioning (mgt gravity lapse).
-- **Phoenix Egg** (add_switch): Priority add (`NPC_PHOENIX_EGG`); switch and burn immediately.
+- **Flame Strike**: 2s cast spawning a burning fire column on the ground; move out immediately!
+- **Phoenix / Phoenix Egg**: summons a Phoenix that turns into a **Phoenix Egg** when killed; burn the egg quickly.
+- **Gravity Lapse**: floats the raid in the air and spawns **Arcane Sphere** orbs; keep damaging Kael'thas and avoid spheres.
+- **Shock Barrier / Pyroblast**: burn through the shield and interrupt Pyroblast.
 
 ```
 in Flame Strike -> out of it
-in Phoenix Burn -> out of it
 Phoenix Egg appears -> target nearest Phoenix Egg
 ```

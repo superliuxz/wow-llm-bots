@@ -1,31 +1,22 @@
 # The Forge of Souls (FoS)
 
-<!-- DRAFT extracted from mod-playerbots (Dungeon/FoS); hand-check before use. -->
-
 ## Bronjahm
 
-- **Corrupt Soul** (cast_aoe): Boss cast AoE (15 yd radius); move out during cast.
-- **Corrupted Soul Fragment** (add_switch): Priority add; switch targets to `Corrupted Soul Fragment` immediately.
+- **Corrupt Soul**: 4s cast linking a player and spawning a **Corrupted Soul Fragment**; switch and kill the fragment before it reaches Bronjahm.
+- **Soulstorm**: massive shadow AoE outside the inner ring in phase 2; stack inside the safe inner circle around Bronjahm.
 
 ```
-Corrupt Soul cast -> out of it
 Corrupted Soul Fragment appears -> target nearest Corrupted Soul Fragment
 ```
 
 ## Devourer of Souls
 
-- **Mirrored Soul** (reflect): Reflects 45% of damage dealt to Devourer onto the linked party member; stop attacking while active on anyone.
-- **Well of Souls** (ground_hazard): Purple void zone on the ground; move out immediately.
+- **Mirrored Soul**: reflects 45% of damage dealt to Devourer onto the linked party member; stop attacking while active on anyone.
+- **Well of Souls**: purple void zone on the ground; move out immediately.
+- **Wailing Souls**: sweeping frontal beam; avoid standing directly in front of the boss.
+- **Phantom Blast**: heavy shadow nuke on tank; interrupt when possible.
 
 ```
 Mirrored Soul on anyone -> stop attacking
 in Well of Souls -> out of it
-```
-
-## The Forge of Souls
-
-- **Soulstorm** (cast_aoe): Boss cast AoE (`SPELL_SOULSTORM_VISUAL`); move out during cast.
-
-```
-Soulstorm cast -> out of it
 ```

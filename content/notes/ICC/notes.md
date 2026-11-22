@@ -4,11 +4,14 @@
 
 ## Lord Marrowgar
 
-- **Coldflame** (ground_hazard): Moving line of blue fire; move out immediately.
-- **Bone Storm** (cast_aoe): Boss spins and deals heavy melee AoE while moving; spread and avoid standing in him.
+- **Coldflame**: moving line of blue fire; move out immediately.
+- **Bone Spike Graveyard**: impales players on **Bone Spike** targets; switch and destroy Bone Spikes immediately.
+- **Bone Storm**: boss spins and deals heavy melee AoE while moving; move away from Marrowgar during Bone Storm.
 
 ```
 in Coldflame -> out of it
+Bone Spike appears -> target nearest Bone Spike
+Bone Storm cast -> away Lord Marrowgar 15
 ```
 
 ## Lady Deathwhisper
