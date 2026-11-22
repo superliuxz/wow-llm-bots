@@ -236,7 +236,8 @@ std::vector<Player*> GroupTanks(Player* bot) {
 // or dynamic area) in the world.
 WorldObject* ResolveThing(Player* bot,
                           const pb::Command_Act& act,
-                          std::string_view thing_name) {
+                          std::string_view thing_name,
+                          bool allow_hidden_triggers = false) {
   // Prefer the exact GUID chosen by the harness when present so condition
   // evaluation and act execution always land on the same world entity.
   if (act.thing != pb::Command_Act::THING_UNSPECIFIED &&
@@ -268,7 +269,7 @@ WorldObject* ResolveThing(Player* bot,
       if (!act.it_name.empty()) {
         pb::Command_Act by_name = act;
         by_name.thing = pb::Command_Act::NEAREST_NAMED;
-        return ResolveThing(bot, by_name, act.it_name);
+        return ResolveThing(bot, by_name, act.it_name, allow_hidden_triggers);
       }
       return nullptr;
     }
@@ -451,17 +452,18 @@ WorldObject* ResolveThing(Player* bot,
           }
         }
       }
-      for (Creature* trigger : NearbyHiddenTriggers(bot)) {
-        std::optional<TriggerHazardInfo> hz = InspectTriggerHazard(trigger);
-        if (!hz) {
-          continue;
-        }
-        if (NameEq(hz->name, thing_name) ||
-            NameEq(trigger->GetName(), thing_name)) {
-          const float d = bot->GetDistance(trigger);
-          if (d < best_dist) {
-            best = trigger;
-            best_dist = d;
+      if (allow_hidden_triggers) {
+        for (Creature* trigger : NearbyHiddenTriggers(bot)) {
+          std::optional<TriggerHazardInfo> hz = InspectTriggerHazard(trigger);
+          if (!hz) {
+            continue;
+          }
+          if (NameEq(hz->name, thing_name)) {
+            const float d = bot->GetDistance(trigger);
+            if (d < best_dist) {
+              best = trigger;
+              best_dist = d;
+            }
           }
         }
       }
@@ -782,19 +784,24 @@ bool IsCasterStillCasting(Player* bot,
   return false;
 }
 
-bool SpotInsideHostileArea(Player* bot, const pb::Vec3& spot) {
+struct HostileCircle {
+  pb::Vec3 pos;
+  float radius_yd = 0.0f;
+};
+
+std::vector<HostileCircle> CollectHostileAreas(Player* bot,
+                                               float search_radius = 40.0f) {
+  std::vector<HostileCircle> out;
   const float bot_reach = bot->GetCombatReach();
-  for (DynamicObject* dyn : NearbyAreas(bot, 40.0f)) {
+  for (DynamicObject* dyn : NearbyAreas(bot, search_radius)) {
     Unit* caster = dyn->GetCaster();
     if (!caster || !bot->IsHostileTo(caster)) {
       continue;
     }
-    const float r = std::max(dyn->GetRadius(), 3.0f) + bot_reach;
-    if (Dist2D(spot, PosOf(dyn)) <= r + 1.0f) {
-      return true;
-    }
+    const float r = std::max(dyn->GetRadius(), 3.0f) + bot_reach + 1.0f;
+    out.push_back({PosOf(dyn), r});
   }
-  for (Creature* trigger : NearbyHiddenTriggers(bot, 40.0f)) {
+  for (Creature* trigger : NearbyHiddenTriggers(bot, search_radius)) {
     if (bot->IsFriendlyTo(trigger)) {
       continue;
     }
@@ -803,12 +810,25 @@ bool SpotInsideHostileArea(Player* bot, const pb::Vec3& spot) {
       continue;
     }
     const float r =
-        std::max(hz->radius_yd > 0.0f ? hz->radius_yd : 8.0f, 3.0f) + bot_reach;
-    if (Dist2D(spot, PosOf(trigger)) <= r + 1.0f) {
+        std::max(hz->radius_yd > 0.0f ? hz->radius_yd : 8.0f, 3.0f) +
+        bot_reach + 1.0f;
+    out.push_back({PosOf(trigger), r});
+  }
+  return out;
+}
+
+bool SpotInsideHostileAreas(const std::vector<HostileCircle>& areas,
+                            const pb::Vec3& spot) {
+  for (const HostileCircle& a : areas) {
+    if (Dist2D(spot, a.pos) <= a.radius_yd) {
       return true;
     }
   }
   return false;
+}
+
+bool SpotInsideHostileArea(Player* bot, const pb::Vec3& spot) {
+  return SpotInsideHostileAreas(CollectHostileAreas(bot), spot);
 }
 
 std::optional<pb::Vec3> PreferredEscapePos(Player* bot,
@@ -865,22 +885,7 @@ struct HazardInfo {
   bool is_ground_area = false;
 };
 
-// Resolves a synthetic `"trigger:<guid>"` id (from `nearby_builder.cc`) to the
-// hidden trigger creature's ground position and active cast/aura radius.
-std::optional<HazardInfo> ResolveTriggerHazard(Player* bot,
-                                               std::string_view guid_str) {
-  constexpr std::string_view kPrefix = "trigger:";
-  if (!guid_str.starts_with(kPrefix)) {
-    return std::nullopt;
-  }
-  ObjectGuid trigger_guid = ParseSnapshotGuid(guid_str.substr(kPrefix.size()));
-  if (trigger_guid.IsEmpty()) {
-    return std::nullopt;
-  }
-  Creature* trigger = ObjectAccessor::GetCreature(*bot, trigger_guid);
-  if (!trigger || !trigger->IsAlive()) {
-    return std::nullopt;
-  }
+HazardInfo MakeTriggerHazardInfo(Creature* trigger) {
   HazardInfo h;
   h.anchor = {PosOf(trigger), 0.0f, 0.0f};
   h.is_ground_area = true;
@@ -898,6 +903,25 @@ std::optional<HazardInfo> ResolveTriggerHazard(Player* bot,
     h.radius_yd = 8.0f;
   }
   return h;
+}
+
+// Resolves a synthetic `"trigger:<guid>"` id (from `nearby_builder.cc`) to the
+// hidden trigger creature's ground position and active cast/aura radius.
+std::optional<HazardInfo> ResolveTriggerHazard(Player* bot,
+                                               std::string_view guid_str) {
+  constexpr std::string_view kPrefix = "trigger:";
+  if (!guid_str.starts_with(kPrefix)) {
+    return std::nullopt;
+  }
+  ObjectGuid trigger_guid = ParseSnapshotGuid(guid_str.substr(kPrefix.size()));
+  if (trigger_guid.IsEmpty()) {
+    return std::nullopt;
+  }
+  Creature* trigger = ObjectAccessor::GetCreature(*bot, trigger_guid);
+  if (!trigger || !trigger->IsAlive()) {
+    return std::nullopt;
+  }
+  return MakeTriggerHazardInfo(trigger);
 }
 
 // Resolves a synthetic `"impact:<caster_guid>"` id (from `nearby_builder.cc`)
@@ -971,11 +995,12 @@ std::optional<HazardInfo> ResolveHazard(Player* bot,
   if (act.thing != pb::Command_Act::THING_UNSPECIFIED) {
     const std::string_view thing_name =
         !act.target_name.empty() ? act.target_name : act.name;
-    obj = ResolveThing(bot, act, thing_name);
+    obj = ResolveThing(bot, act, thing_name, /*allow_hidden_triggers=*/true);
   } else if (!act.it_guid.empty() || !act.it_name.empty()) {
     pb::Command_Act it_act = act;
     it_act.thing = pb::Command_Act::IT;
-    obj = ResolveThing(bot, it_act, act.it_name);
+    obj =
+        ResolveThing(bot, it_act, act.it_name, /*allow_hidden_triggers=*/true);
   }
   if (obj) {
     if (DynamicObject* dyn = obj->ToDynObject()) {
@@ -987,23 +1012,7 @@ std::optional<HazardInfo> ResolveHazard(Player* bot,
     }
     if (Creature* c = obj->ToCreature();
         c && HiddenFromPlayers(c->IsTrigger(), c->GetDisplayId())) {
-      HazardInfo h;
-      h.anchor = {PosOf(c), 0.0f, 0.0f};
-      h.is_ground_area = true;
-      if (std::optional<TriggerHazardInfo> hz = InspectTriggerHazard(c)) {
-        h.radius_yd = hz->radius_yd;
-        if (hz->lands_in_s) {
-          h.lands_in_s = *hz->lands_in_s;
-        }
-        if (hz->is_preparing_cast) {
-          h.caster_guid = c->GetGUID().GetRawValue();
-          h.spell_id = hz->spell_id;
-        }
-      }
-      if (h.radius_yd <= 0.0f) {
-        h.radius_yd = 8.0f;
-      }
-      return h;
+      return MakeTriggerHazardInfo(c);
     }
     if (Unit* u = obj->ToUnit()) {
       HazardInfo h;
@@ -1107,8 +1116,9 @@ bool StartReturnToInterrupted(Player* bot,
                                desired_dist, max_range, bot_reach);
     std::vector<pb::Vec3> safe_candidates;
     safe_candidates.reserve(candidates.size());
+    const std::vector<HostileCircle> hostile_areas = CollectHostileAreas(bot);
     for (const pb::Vec3& c : candidates) {
-      if (!SpotInsideHostileArea(bot, c)) {
+      if (!SpotInsideHostileAreas(hostile_areas, c)) {
         safe_candidates.push_back(c);
       }
     }
@@ -1158,7 +1168,8 @@ std::optional<AnchorGeometry> ResolveMoveAnchor(Player* bot,
   if (act.thing != pb::Command_Act::THING_UNSPECIFIED) {
     const std::string_view thing_name =
         !act.target_name.empty() ? act.target_name : act.name;
-    WorldObject* obj = ResolveThing(bot, act, thing_name);
+    WorldObject* obj =
+        ResolveThing(bot, act, thing_name, /*allow_hidden_triggers=*/true);
     if (!obj) {
       return std::nullopt;
     }
@@ -1172,7 +1183,8 @@ std::optional<AnchorGeometry> ResolveMoveAnchor(Player* bot,
     }
     pb::Command_Act it_act = act;
     it_act.thing = pb::Command_Act::IT;
-    if (WorldObject* obj = ResolveThing(bot, it_act, act.it_name)) {
+    if (WorldObject* obj = ResolveThing(bot, it_act, act.it_name,
+                                        /*allow_hidden_triggers=*/true)) {
       return AnchorOf(obj);
     }
   }
@@ -1547,7 +1559,8 @@ ActStartResult StartAct(Player* bot,
     case pb::Command_Act::FACE_AWAY: {
       const std::string_view thing_name =
           !act.target_name.empty() ? act.target_name : act.name;
-      WorldObject* obj = ResolveThing(bot, act, thing_name);
+      WorldObject* obj =
+          ResolveThing(bot, act, thing_name, /*allow_hidden_triggers=*/true);
       if (!obj) {
         return {.error = "target to face not found"};
       }

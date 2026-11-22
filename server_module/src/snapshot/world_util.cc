@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -205,15 +206,15 @@ bool HasNewCastOrAura(Player* bot, const ReactiveSnapshotState& last) {
   return false;
 }
 
-std::string SpellLocalizedName(const SpellInfo* info) {
+std::string_view SpellLocalizedName(const SpellInfo* info) {
   if (!info) {
-    return "";
+    return {};
   }
-  const std::string& name = info->SpellName[sWorld->GetDefaultDbcLocale()];
-  if (!name.empty()) {
-    return name;
+  const char* name = info->SpellName[sWorld->GetDefaultDbcLocale()];
+  if (!name || name[0] == '\0') {
+    name = info->SpellName[LOCALE_enUS];
   }
-  return info->SpellName[LOCALE_enUS];
+  return name ? std::string_view(name) : std::string_view();
 }
 
 float MaxSpellRadiusYd(const SpellInfo* info, Unit* caster, Spell* spell) {
@@ -237,11 +238,10 @@ std::optional<TriggerHazardInfo> InspectTriggerHazard(Creature* trigger) {
   if (Spell* cast = trigger->GetCurrentSpell(CURRENT_GENERIC_SPELL);
       cast && cast->getState() == SPELL_STATE_PREPARING) {
     const SpellInfo* info = cast->GetSpellInfo();
-    const std::string name = SpellLocalizedName(info);
+    const std::string_view name = SpellLocalizedName(info);
     if (info && !name.empty()) {
       TriggerHazardInfo h;
-      h.spell = info;
-      h.name = name;
+      h.name = std::string(name);
       h.radius_yd = MaxSpellRadiusYd(info, trigger, cast);
       h.lands_in_s =
           static_cast<float>(std::max(0, cast->GetCastTimeRemaining())) /
@@ -254,11 +254,10 @@ std::optional<TriggerHazardInfo> InspectTriggerHazard(Creature* trigger) {
   if (Spell* ch = trigger->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
       ch && ch->getState() != SPELL_STATE_FINISHED) {
     const SpellInfo* info = ch->GetSpellInfo();
-    const std::string name = SpellLocalizedName(info);
+    const std::string_view name = SpellLocalizedName(info);
     if (info && !name.empty()) {
       TriggerHazardInfo h;
-      h.spell = info;
-      h.name = name;
+      h.name = std::string(name);
       h.radius_yd = MaxSpellRadiusYd(info, trigger, ch);
       h.remaining_s =
           static_cast<float>(std::max(0, ch->GetCastTimeRemaining())) / 1000.0f;
@@ -269,6 +268,10 @@ std::optional<TriggerHazardInfo> InspectTriggerHazard(Creature* trigger) {
   auto has_visual = [](const SpellInfo* s) {
     return s && (s->SpellVisual[0] != 0 || s->SpellVisual[1] != 0);
   };
+  // Prefer periodic-trigger / non-zero-radius auras over visual-only dummy
+  // auras (GetAppliedAuras is ordered by ascending spell_id).
+  std::optional<TriggerHazardInfo> best;
+  int best_rank = -1;
   for (const auto& [spell_id, aura_app] : trigger->GetAppliedAuras()) {
     (void)spell_id;
     if (!aura_app || !aura_app->GetBase()) {
@@ -296,25 +299,30 @@ std::optional<TriggerHazardInfo> InspectTriggerHazard(Creature* trigger) {
     const SpellInfo* effective =
         (triggered && !SpellLocalizedName(triggered).empty()) ? triggered
                                                               : ainfo;
-    const std::string name = SpellLocalizedName(effective);
+    const std::string_view name = SpellLocalizedName(effective);
     if (name.empty()) {
       continue;
     }
-    TriggerHazardInfo h;
-    h.spell = effective;
-    h.name = name;
-    h.radius_yd = MaxSpellRadiusYd(effective, trigger);
-    if (h.radius_yd <= 0.0f && effective != ainfo) {
-      h.radius_yd = MaxSpellRadiusYd(ainfo, trigger);
+    float radius = MaxSpellRadiusYd(effective, trigger);
+    if (radius <= 0.0f && effective != ainfo) {
+      radius = MaxSpellRadiusYd(ainfo, trigger);
     }
+    const int rank = (triggered ? 2 : 0) + (radius > 0.0f ? 1 : 0);
+    if (rank <= best_rank) {
+      continue;
+    }
+    TriggerHazardInfo h;
+    h.name = std::string(name);
+    h.radius_yd = radius;
     if (aura_app->GetBase()->GetDuration() > 0) {
       h.remaining_s =
           static_cast<float>(aura_app->GetBase()->GetDuration()) / 1000.0f;
     }
     h.spell_id = effective->Id;
-    return h;
+    best = std::move(h);
+    best_rank = rank;
   }
-  return std::nullopt;
+  return best;
 }
 
 }  // namespace llm_brain

@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -758,6 +759,14 @@ TEST(ScreenRendererTest, RendersNearbyAreasNearestFirst) {
   snap.base.self.unit.name = "Loada";
   snap.base.self.in_combat = true;
 
+  // Nameless area is skipped.
+  pb::Area nameless;
+  nameless.guid = "trigger:0x0";
+  nameless.hostile = true;
+  nameless.rel.emplace().dist_yd = 1.0f;
+  snap.base.nearby.areas.push_back(nameless);
+
+  // Far hostile area with lands_in_s.
   pb::Area far_area;
   far_area.guid = "trigger:0x1";
   far_area.name = "Flame Strike";
@@ -768,6 +777,7 @@ TEST(ScreenRendererTest, RendersNearbyAreasNearestFirst) {
   far_area.rel->dir = pb::N;
   snap.base.nearby.areas.push_back(far_area);
 
+  // Near hostile area with inside_me.
   pb::Area near_area;
   near_area.guid = "trigger:0x2";
   near_area.name = "Arcane Sphere";
@@ -778,16 +788,67 @@ TEST(ScreenRendererTest, RendersNearbyAreasNearestFirst) {
   near_area.rel->dir = pb::E;
   snap.base.nearby.areas.push_back(near_area);
 
+  // Friendly area using spell->name fallback when area.name is empty.
+  pb::Area friendly;
+  friendly.guid = "dyn:0x3";
+  friendly.spell.emplace().name = "Consecration";
+  friendly.hostile = false;
+  friendly.rel.emplace().dist_yd = 6.0f;
+  friendly.rel->dir = pb::S;
+  snap.base.nearby.areas.push_back(friendly);
+
+  // Area with NaN dist_yd and NaN lands_in_s must not break sorting or output.
+  pb::Area broken;
+  broken.guid = "trigger:0x4";
+  broken.name = "Broken Pool";
+  broken.hostile = true;
+  broken.lands_in_s = std::numeric_limits<float>::quiet_NaN();
+  broken.rel.emplace().dist_yd = std::numeric_limits<float>::quiet_NaN();
+  broken.rel->dir = pb::W;
+  snap.base.nearby.areas.push_back(broken);
+
+  // Area with missing rel (sorts after finite distances).
+  pb::Area no_rel;
+  no_rel.guid = "trigger:0x5";
+  no_rel.name = "Distant Pool";
+  no_rel.hostile = true;
+  snap.base.nearby.areas.push_back(no_rel);
+
+  // Extra areas to verify the 6-area cap.
+  pb::Area extra1;
+  extra1.guid = "trigger:0x6";
+  extra1.name = "Mid Pool A";
+  extra1.hostile = true;
+  extra1.rel.emplace().dist_yd = 8.0f;
+  extra1.rel->dir = pb::N;
+  snap.base.nearby.areas.push_back(extra1);
+
+  pb::Area extra2;
+  extra2.guid = "trigger:0x7";
+  extra2.name = "Mid Pool B";
+  extra2.hostile = true;
+  extra2.rel.emplace().dist_yd = 10.0f;
+  extra2.rel->dir = pb::N;
+  snap.base.nearby.areas.push_back(extra2);
+
   const Screen s = RenderScreen(snap);
   const size_t areas_pos = s.text.find("areas:\n");
   ASSERT_NE(areas_pos, std::string::npos) << s.text;
   const size_t sphere_pos =
       s.text.find("  Arcane Sphere (hostile, 4 yd E, inside)");
+  const size_t consec_pos = s.text.find("  Consecration (friendly, 6 yd S)");
   const size_t flame_pos =
       s.text.find("  Flame Strike (hostile, 14 yd N, lands in 2.5s)");
   ASSERT_NE(sphere_pos, std::string::npos) << s.text;
+  ASSERT_NE(consec_pos, std::string::npos) << s.text;
   ASSERT_NE(flame_pos, std::string::npos) << s.text;
-  EXPECT_LT(sphere_pos, flame_pos) << s.text;
+  EXPECT_LT(sphere_pos, consec_pos) << s.text;
+  EXPECT_LT(consec_pos, flame_pos) << s.text;
+  // Broken Pool is the 6th entry (no NaN lands_in_s); Distant Pool is capped.
+  EXPECT_NE(s.text.find("  Broken Pool (hostile, 0 yd W)"), std::string::npos)
+      << s.text;
+  EXPECT_EQ(s.text.find("lands in nan"), std::string::npos) << s.text;
+  EXPECT_EQ(s.text.find("Distant Pool"), std::string::npos) << s.text;
 }
 
 }  // namespace

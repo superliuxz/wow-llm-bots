@@ -1455,12 +1455,17 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
         sorted_areas.push_back(&a);
       }
     }
-    std::stable_sort(sorted_areas.begin(), sorted_areas.end(),
-                     [](const pb::Area* a, const pb::Area* b) {
-                       const float da = a->rel ? a->rel->dist_yd : 999.0f;
-                       const float db = b->rel ? b->rel->dist_yd : 999.0f;
-                       return da < db;
-                     });
+    std::stable_sort(
+        sorted_areas.begin(), sorted_areas.end(),
+        [](const pb::Area* a, const pb::Area* b) {
+          const float da = (a->rel && std::isfinite(a->rel->dist_yd))
+                               ? a->rel->dist_yd
+                               : 999.0f;
+          const float db = (b->rel && std::isfinite(b->rel->dist_yd))
+                               ? b->rel->dist_yd
+                               : 999.0f;
+          return da < db;
+        });
     if (!sorted_areas.empty()) {
       lines.push_back("areas:");
       const size_t limit = std::min<size_t>(sorted_areas.size(), 6);

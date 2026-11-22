@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -67,7 +68,7 @@ ReactiveSnapshotState CollectReactiveState(Player* bot);
 bool HasNewCastOrAura(Player* bot, const ReactiveSnapshotState& last);
 
 // Localized spell name in the server's default DBC locale, or "" if unknown.
-std::string SpellLocalizedName(const SpellInfo* info);
+std::string_view SpellLocalizedName(const SpellInfo* info);
 
 // Maximum effect radius (yards) across all effects of `info`.
 float MaxSpellRadiusYd(const SpellInfo* info,
@@ -78,7 +79,6 @@ float MaxSpellRadiusYd(const SpellInfo* info,
 // channel, or visual/periodic-trigger aura such as Flame Strike, Arcane Sphere,
 // Coldflame, or Defile).
 struct TriggerHazardInfo {
-  const SpellInfo* spell = nullptr;
   std::string name;
   float radius_yd = 0.0f;
   std::optional<float> remaining_s;
