@@ -158,6 +158,15 @@ class PostCommitReviewHookTest(unittest.TestCase):
             self.assertIn("DONE", done)
             self.assertIn("review_abc1234.md", done)
 
+            # 0-byte output with AGY_ERROR/print_timeout in .err reports FAILED instead of DONE.
+            out.write_text("", encoding="utf-8")
+            (review_dir / "review_abc1234.err").write_text(
+                'AGY_ERROR: {"reason":"print_timeout"}\n', encoding="utf-8"
+            )
+            with mock.patch.object(post_commit_review, "_pid_is_reviewer", return_value=False):
+                failed = post_commit_review.format_review_status(review_dir)
+            self.assertIn("FAILED (print_timeout)", failed)
+
 
 if __name__ == "__main__":
     unittest.main()

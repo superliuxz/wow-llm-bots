@@ -188,7 +188,7 @@ def _spawn_reviewer(
                     "--mode",
                     "plan",
                     "--print-timeout",
-                    "300s",
+                    "600s",
                     "--disable-slash-commands",
                     f"--print={prompt}",
                 ],
@@ -263,8 +263,30 @@ def format_review_status(review_dir: pathlib.Path = REVIEW_DIR) -> str:
     if latest.exists():
         resolved = latest.resolve()
         size = resolved.stat().st_size
+        err_file = resolved.with_suffix(".err")
+        err_text = ""
+        if err_file.is_file():
+            try:
+                err_text = err_file.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                err_text = ""
+        if size == 0 and ("AGY_ERROR" in err_text or "error:" in err_text):
+            reason = "print_timeout" if "print_timeout" in err_text else "error"
+            return f"FAILED ({reason}): {resolved.name} (0 bytes) -> see var/review/{err_file.name}"
         return f"DONE: latest review {resolved.name} ({size} bytes) -> var/review/{resolved.name}"
     return "IDLE: no post-commit reviews recorded yet"
+
+
+def _watch_review_status(review_dir: pathlib.Path = REVIEW_DIR, interval_s: float = 2.0) -> None:
+    try:
+        while True:
+            line = format_review_status(review_dir)
+            print(line, flush=True)
+            if not line.startswith("RUNNING:"):
+                return
+            time.sleep(interval_s)
+    except KeyboardInterrupt:
+        return
 
 
 def handle_post_tool_use(
@@ -331,7 +353,10 @@ def handle_post_tool_use(
 
 def main() -> int:
     if sys.argv[1:2] == ["--status"]:
-        print(format_review_status())
+        if "--watch" in sys.argv[2:]:
+            _watch_review_status()
+        else:
+            print(format_review_status())
         return 0
 
     # Never trigger recursively inside a spawned reviewer session.
