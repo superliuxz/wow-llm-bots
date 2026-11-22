@@ -2,7 +2,7 @@
 
 ## Ick
 
-- **Pursuit** (cast_aoe): Boss cast AoE; move out during cast.
+- **Pursuit**: boss cast; follow standing order (`out of it`).
 
 ```
 Pursuit cast -> out of it
@@ -10,8 +10,7 @@ Pursuit cast -> out of it
 
 ## Pit of Saron
 
-- **Poison Nova Pos** (cast_aoe): Boss cast AoE (`SPELL_POISON_NOVA_POS`); move out during cast.
-- **Poison Nova Pos Hc** (cast_aoe): Boss cast AoE (`SPELL_POISON_NOVA_POS_HC`); move out during cast.
+- **Poison Nova**: boss cast; follow standing order (`out of it`).
 
 ```
 Poison Nova cast -> out of it

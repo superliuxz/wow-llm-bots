@@ -2,7 +2,7 @@
 
 ## Krystallus
 
-- **Shatter** (cast_aoe): Boss cast AoE (40 yd radius); move out during cast.
+- **Shatter**: boss cast; follow standing order (`out of it`).
 
 ```
 Shatter cast -> out of it
@@ -10,7 +10,7 @@ Shatter cast -> out of it
 
 ## Sjonnir the Ironshaper
 
-- **Lightning Ring** (cast_aoe): Boss cast AoE (12 yd radius); move out during cast.
+- **Lightning Ring**: boss cast; follow standing order (`out of it`).
 
 ```
 Lightning Ring cast -> out of it

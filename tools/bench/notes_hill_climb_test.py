@@ -373,6 +373,29 @@ class NotesHillClimbTest(unittest.TestCase):
             finally:
                 os.chdir(orig_cwd)
 
+    def test_all_content_notes_standing_orders_valid(self) -> None:
+        notes_files = sorted((ROOT / "content" / "notes").glob("*/notes.md"))
+        self.assertGreaterEqual(len(notes_files), 40)
+        for path in notes_files:
+            txt = path.read_text(encoding="utf-8")
+            ok, errs = nhc.validate_standing_orders(txt)
+            self.assertTrue(ok, f"{path.relative_to(ROOT)}: {errs}")
+            self.assertNotIn("DRAFT", txt, f"{path.relative_to(ROOT)} still marked DRAFT")
+            self.assertNotIn("hand-check", txt.lower(), f"{path.relative_to(ROOT)} has hand-check prose")
+            seen_in_block: set[str] = set()
+            in_code = False
+            for line in txt.splitlines():
+                s = line.strip()
+                if s == "```":
+                    in_code = not in_code
+                    seen_in_block.clear()
+                    continue
+                if in_code and "->" in s:
+                    lhs = s.split("->", 1)[0].strip()
+                    self.assertNotIn(" on boss", lhs, f"{path.relative_to(ROOT)}: unexported boss aura {s!r}")
+                    self.assertNotIn(s, seen_in_block, f"{path.relative_to(ROOT)}: duplicate order {s!r}")
+                    seen_in_block.add(s)
+
 
 if __name__ == "__main__":
     unittest.main()

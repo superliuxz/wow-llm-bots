@@ -12,47 +12,27 @@ Bone Spike appears -> target nearest Bone Spike
 Bone Storm cast -> away Lord Marrowgar 15
 ```
 
+
 ## Lady Deathwhisper
 
-- **Dark Reckoning** (debuff): Aura `Dark Reckoning` on me; hand-check encounter reaction.
-- **Shade** (add_switch): Priority add; switch targets to `Shade` immediately.
+- **Vengeful Shade**: react immediately (`away Vengeful Shade 15`).
 
 ```
 Vengeful Shade appears -> away Vengeful Shade 15
 ```
 
-## Rotting Frost Giant
-
-- **Icc Rotting Frost Giant Tank Position** (positioning): Encounter positioning (icc rotting frost giant tank position).
-
-## Gunship Battle
-
-- **Below Zero** (debuff): Aura `Below Zero` on me; hand-check encounter reaction.
-- **Cannona** (add_switch): Priority add; switch targets to `Cannona` immediately.
-
 ## Deathbringer Saurfang
 
-- **Blood Beast** (add_switch): Priority add; switch targets to `Blood Beast` immediately.
+- **Blood Beast**: priority add; switch and burn promptly.
 
 ```
 Blood Beast appears -> target nearest Blood Beast
 ```
 
-## Stinky
-
-- **Mortal Wound** (debuff): Aura `Mortal Wound` (me); gather/position per encounter script (hand-check).
-
-## Festergut
-
-- **Icc Festergut Group Position** (positioning): Encounter positioning (icc festergut group position).
-- **Gas Spore** (debuff): Aura `Gas Spore` on me; hand-check encounter reaction.
-
 ## Rotface
 
-- **Icc Rotface Tank Position** (positioning): Encounter positioning (icc rotface tank position).
-- **Icc Rotface Group Position** (positioning): Encounter positioning (icc rotface group position).
-- **Explosion** (cast_aoe): Boss cast AoE; move out during cast.
-- **Vile Gas** (ground_hazard): Ground hazard; move out immediately.
+- **Explosion**: boss cast; follow standing order (`out of it, then back`).
+- **Vile Gas**: ground hazard; move out immediately.
 
 ```
 Explosion cast -> out of it, then back
@@ -61,7 +41,7 @@ in Vile Gas -> out of it
 
 ## Volatile Ooze
 
-- **Ooze** (add_switch): Priority add; switch targets to `Ooze` immediately.
+- **Volatile Ooze**: priority add; switch and burn promptly.
 
 ```
 Volatile Ooze appears -> target nearest Volatile Ooze
@@ -69,17 +49,15 @@ Volatile Ooze appears -> target nearest Volatile Ooze
 
 ## Gas Cloud
 
-- **Gas Cloud** (ground_hazard): Ground hazard; move out immediately.
+- **Gas Cloud**: stay clear (`away Gas Cloud 14`).
 
 ```
-in Gas Cloud -> out of it
+Gas Cloud within 10 -> away Gas Cloud 14
 ```
 
 ## Professor Putricide
 
-- **Ooze Puddle** (ground_hazard): Ground hazard (~8 yd); move out immediately.
-- **Spitefull Fury** (ground_hazard): Ground hazard; move out immediately.
-- **Mutated Abomination** (add_switch): Priority add; switch targets to `Mutated Abomination` immediately.
+- **Slime Puddle**: ground hazard; move out immediately.
 
 ```
 in Slime Puddle -> out of it
@@ -87,7 +65,7 @@ in Slime Puddle -> out of it
 
 ## Prince Keleseth
 
-- **Dark Nucleus** (add_switch): Priority add; switch targets to `Dark Nucleus` immediately.
+- **Dark Nucleus**: priority add; switch and burn promptly.
 
 ```
 Dark Nucleus appears -> target nearest Dark Nucleus
@@ -95,8 +73,8 @@ Dark Nucleus appears -> target nearest Dark Nucleus
 
 ## Prince Valanar
 
-- **Empowered Shock Vortex** (cast_aoe): Boss cast AoE; move out during cast.
-- **Ball of Flame** (add_switch): Priority add; switch targets to `Ball of Flame` immediately.
+- **Empowered Shock Vortex**: boss cast; follow standing order (`out of it`).
+- **Ball of Flame**: priority add; switch and burn promptly.
 
 ```
 Empowered Shock Vortex cast -> out of it
@@ -105,27 +83,15 @@ Ball of Flame appears -> target nearest Ball of Flame
 
 ## Blood Prince Council
 
-- **Kinetic Bomb** (add_switch): Priority add; switch targets to `Kinetic Bomb` immediately.
+- **Kinetic Bomb**: priority add; switch and burn promptly.
 
 ```
 Kinetic Bomb appears -> target nearest Kinetic Bomb
 ```
 
-## Blood-queen Lana'thel
-
-- **Frenzied Bloodthirst** (debuff): Aura `Frenzied Bloodthirst` on me; hand-check encounter reaction.
-- **Pact of the Darkfallen** (debuff): Aura `Pact of the Darkfallen` (me); gather/position per encounter script (hand-check).
-
-## Sister Svalna
-
-- **Aether Shield** (debuff): Aura `Aether Shield` on me; hand-check encounter reaction.
-
 ## Valithria Dreamwalker
 
-- **Dream State** (cast_aoe): Boss cast AoE (11 yd radius); move out during cast.
-- **Kite Blistering Zombie** (kite): Kite `Blistering Zombie` away from the group.
-- **Dream Portal** (add_switch): Priority add; switch targets to `Dream Portal` immediately.
-- **Dream Cloud** (add_switch): Priority add; switch targets to `Dream Cloud` immediately.
+- **Blistering Zombie**: fixates on you; kite it.
 
 ```
 Blistering Zombie targets me -> kite it
@@ -133,30 +99,19 @@ Blistering Zombie targets me -> kite it
 
 ## Sindragosa
 
-- **Tomb** (add_switch): Priority add; switch targets to `Tomb` immediately.
-- **Frost Beacon** (debuff): Aura `Frost Beacon` on me; hand-check encounter reaction.
-- **Blistering Cold** (cast_aoe): Boss cast AoE; move out during cast.
-- **Unchained Magic** (debuff): Aura `Unchained Magic` (me); gather/position per encounter script (hand-check).
-- **Chilled to the Bone** (debuff): Aura `Chilled to the Bone` (me); gather/position per encounter script (hand-check).
-- **Ice Tomb** (facing): When `Ice Tomb` is active on Sindragosa, face away and stop attacking.
+- **Ice Tomb**: priority add; switch and burn promptly.
+- **Blistering Cold**: boss cast; follow standing order (`out of it`).
 
 ```
 Ice Tomb appears -> target nearest Ice Tomb
 Blistering Cold cast -> out of it
 ```
 
-## The Lich King
-
-- **Valithria Dreamwalker** (add_switch): Priority add; switch targets to `Valithria Dreamwalker` immediately.
-- **Nitro Boosts** (ground_hazard): Ground hazard; move out immediately.
-
 ## Icecrown Citadel
 
-- **Spike** (add_switch): Priority add (`NPC_SPIKE1`); switch and burn immediately.
-- **Choking Gas Bomb** (add_switch): Priority add (`NPC_CHOKING_GAS_BOMB`); switch and burn immediately.
-- **Spirit Bomb** (add_switch): Priority add (`NPC_SPIRIT_BOMB`); switch and burn immediately.
-- **Unstable Ooze Explosion** (cast_aoe): Boss cast AoE (`SPELL_UNSTABLE_OOZE_EXPLOSION`); move out during cast.
-- **Quake** (cast_aoe): Boss cast AoE (`SPELL_QUAKE`); move out during cast.
+- **Choking Gas Explosion**: ground hazard; move out immediately.
+- **Unstable Ooze Explosion**: boss cast; follow standing order (`out of it`).
+- **Quake**: boss cast; follow standing order (`out of it`).
 
 ```
 in Choking Gas Explosion -> out of it

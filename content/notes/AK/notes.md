@@ -2,7 +2,7 @@
 
 ## Elder Nadox
 
-- **Guardian** (add_switch): Priority add; switch targets to `Guardian` immediately.
+- **Ahn'kahar Guardian**: priority add; switch and burn promptly.
 
 ```
 Ahn'kahar Guardian appears -> target nearest Ahn'kahar Guardian
@@ -10,7 +10,7 @@ Ahn'kahar Guardian appears -> target nearest Ahn'kahar Guardian
 
 ## Jedoga Shadowseeker
 
-- **Twilight Volunteer** (add_switch): Priority add; switch targets to `Twilight Volunteer` immediately.
+- **Twilight Volunteer**: priority add; switch and burn promptly.
 
 ```
 Twilight Volunteer appears -> target nearest Twilight Volunteer
@@ -18,7 +18,7 @@ Twilight Volunteer appears -> target nearest Twilight Volunteer
 
 ## Forgotten One
 
-- **Shadow Crash** (ground_hazard): Ground hazard (~10 yd); move out immediately.
+- **Shadow Crash**: ground hazard; move out immediately.
 
 ```
 in Shadow Crash -> out of it

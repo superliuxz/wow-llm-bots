@@ -2,24 +2,16 @@
 
 ## Drakos the Interrogator
 
-- **Unstable Sphere** (add_switch): Priority add; switch targets to `Unstable Sphere` immediately.
+- **Unstable Sphere**: stay clear (`away Unstable Sphere 12`).
 
 ```
 Unstable Sphere within 8 -> away Unstable Sphere 12
 ```
 
-## Ley-guardian Eregos
-
-- **Planar Shift** (debuff): Aura `Planar Shift` on boss; hand-check encounter reaction.
-
-## Drakes
-
-- **Amber Drake** (add_switch): Priority add; switch targets to `Amber Drake` immediately.
-
 ## Mage-lord Urom
 
-- **Arcane Explosion** (cast_aoe): Boss cast AoE; move out during cast.
-- **Time Bomb** (debuff): Debuff; spread 12 yd away from allies.
+- **Arcane Explosion**: boss cast; follow standing order (`out of it, then back`).
+- **Time Bomb**: debuff on you; follow standing order (`away group 12`).
 
 ```
 Arcane Explosion cast -> out of it, then back
@@ -28,7 +20,7 @@ Time Bomb on me -> away group 12
 
 ## The Oculus
 
-- **Empowered Arcane Explosion** (cast_aoe): Boss cast AoE (`SPELL_EMPOWERED_ARCANE_EXPLOSION_N`); move out during cast.
+- **Empowered Arcane Explosion**: boss cast; follow standing order (`out of it`).
 
 ```
 Empowered Arcane Explosion cast -> out of it

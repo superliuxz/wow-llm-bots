@@ -2,7 +2,7 @@
 
 ## Prince Keleseth
 
-- **Frost Tomb** (add_switch): Priority add; switch targets to `Frost Tomb` immediately.
+- **Frost Tomb**: priority add; switch and burn promptly.
 
 ```
 Frost Tomb appears -> target nearest Frost Tomb

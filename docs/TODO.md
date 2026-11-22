@@ -9,14 +9,14 @@ Last updated 2026-11-22.
 
 ## In progress
 
-- **Phase 1 & Phase 2 single-codebase `n = 16` benchmark sign-off (`d5b8516`, `var/bench_boss_p12_signoff_v3_n16.json`, `mixed_all`, `parallel=4`, `320` valid trials, `0` invalid):**
+- **Phase 1 & Phase 2 single-codebase `n = 16` benchmark sign-off** (full report: [`docs/benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md`](benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md); `d5b8516`, `var/bench_boss_p12_signoff_v3_n16.json`, `mixed_all`, `parallel=4`, `320` valid trials, `0` invalid; 3rd full 5-boss evaluation `v1`/`v2`/`v3`):
   - **Devourer:** `llm` **`7/16`** (`4,572.1` DPS = **`+5.3%`** vs `llm_no_notes` `5/16`, `4,343.8` DPS; `4.0` vs `5.0` med deaths) vs `no_brain` `7/16` (`4,794.2` DPS, `5.0` deaths) and `baseline` `6/16` (`4,421.8` DPS).
   - **Loken:** `llm` **`14/16`** (`5,654.0` DPS = **`-2.7%`** vs `llm_no_notes` `14/16`, `5,810.1` DPS; **`0.0`** vs `1.0` med deaths) vs `no_brain` `14/16` (`5,762.6` DPS, `1.0` deaths) and `baseline` `9/16` (`4,286.6` DPS).
-  - **Murmur:** `llm` **`10/16`** (`2,485.8` DPS = **`-3.0%`** vs `llm_no_notes` `14/16`, `2,563.6` DPS; `1.0` vs `1.0` med deaths) vs `no_brain` `9/16` (`3,135.8` DPS, `3.0` deaths) and `baseline` `12/16` (`3,067.8` DPS).
-  - **Ikiss:** `llm` **`12/16`** (`1,016.8` DPS = **`-2.7%`** vs `llm_no_notes` `6/16`, `1,044.7` DPS; `3.0` vs `5.0` med deaths) vs `no_brain` `2/16` (`1,029.2` DPS, **`p = 0.0010, p_holm = 0.0048`**) and `baseline` `1/16` (`612.9` DPS).
-  - **Kael'thas:** `llm` **`9/16`** (`1,708.4` DPS = `-20.2%` vs `llm_no_notes` `4/16`, `2,142.1` DPS; `2.5` vs `5.0` med deaths; kill-only DPS `1,983` vs `2,357`) vs `no_brain` `3/16` (`1,512.4` DPS, `p = 0.0659, p_holm = 0.2636`) and `baseline` `12/16` (`1,548.0` DPS, `0.5` deaths — note both `llm` and `baseline` trade turret DPS for dodging `Arcane Sphere`/`Flame Strike` and killing `Phoenix Egg`, lifting kills from `3–4/16` to `9–12/16`).
-  - **Pooled (`n = 80` per arm):** `llm` **`52/80` (`65.0%`)** vs `no_brain` `35/80` (`43.8%`, **Fisher two-sided `p = 0.0109`**), `llm_no_notes` `43/80` (`53.8%`, `p = 0.1977`), and hand-written `baseline` `40/80` (`50.0%`, `p = 0.0782`).
-  - **Notes audit:** All **41/41** `content/notes/*/notes.md` files (`150` standing orders) are audited and validated against `orders.wlb`, `Spell.dbc`, and `creature_template.sql` (`0` syntax errors, `0` missing DBC/SQL names, `0` `on boss` aura conditions, `0` draft banners). *(Note: `bench_bosses.py` still uses inline constants rather than reading `content/notes/` directly; Kael'thas all-trial DPS `-20.2%` vs `llm_no_notes` is the only remaining exception to the `<10%` DPS criterion, due to dodging/movement that more than doubles kills `9/16` vs `4/16` and still exceeds `baseline` DPS `1,548.0`.)*
+  - **Murmur:** `llm` **`10/16`** (`2,485.8` DPS = **`-3.0%`** vs `llm_no_notes` `14/16`, `2,563.6` DPS, `p_raw = 0.2200`; `1.0` vs `1.0` med deaths) vs `no_brain` `9/16` (`3,135.8` DPS, `3.0` deaths) and `baseline` `12/16` (`3,067.8` DPS, `p_raw = 0.7043`).
+  - **Ikiss:** `llm` **`12/16`** (`1,016.8` DPS = **`-2.7%`** vs `llm_no_notes` `6/16`, `1,044.7` DPS; `3.0` vs `5.0` med deaths) vs `no_brain` `2/16` (`1,029.2` DPS, **`p_raw = 0.0010, p_holm15 = 0.0135`** [`p_holm5 = 0.0048`]) and `baseline` `1/16` (`612.9` DPS, **`p_raw = 0.0002, p_holm15 = 0.0026`**).
+  - **Kael'thas:** `llm` **`9/16`** (`1,708.4` DPS = `-20.2%` all-trial / `-15.9%` kill-only `1,983` vs `2,357` vs `llm_no_notes` `4/16`, `2,142.1` DPS; `2.5` vs `5.0` med deaths) vs `no_brain` `3/16` (`1,512.4` DPS, `p_raw = 0.0659, p_holm15 = 0.8566` [`p_holm5 = 0.2636`]) and `baseline` `12/16` (`1,548.0` DPS, `0.5` deaths — explicit waiver on `<10%` DPS for Kael'thas since both `llm` and `baseline` trade turret DPS for dodging `Arcane Sphere`/`Flame Strike` and killing `Phoenix Egg`, lifting kills from `3–4/16` to `9–12/16`).
+  - **Pooled (`n = 80` per arm; `m = 3` Holm–Bonferroni):** `llm` **`52/80` (`65.0%`)** beats `no_brain` `35/80` (`43.8%`, **Fisher `p_raw = 0.0109, p_holm3 = 0.0326`**; `+17` kill edge comes from `Ikiss +10` and `Kael'thas +6`, other 3 bosses `31/48` vs `30/48`), and numerically leads `llm_no_notes` `43/80` (`53.8%`, `p_raw = 0.1977, p_holm3 = 0.1977`, n.s.) and hand-written `baseline` `40/80` (`50.0%`, `p_raw = 0.0782, p_holm3 = 0.1564`, n.s.).
+  - **Notes audit:** All **41/41** `content/notes/*/notes.md` files (`141` standing orders) pass `orders.wlb` syntax + zero-draft/duplicate/boss-aura checks in [`notes_hill_climb_test.py`](../tools/bench/notes_hill_climb_test.py) (`tools/wlb check`) and table-separated DBC/SQL checks (`in`/`cast`/`on` vs `Spell.dbc`, `appears` vs `creature_template.sql`, `0` errors, `0` `hand-check` leftovers; `bench_bosses.py` still uses inline constants rather than reading `content/notes/` directly).
 - **Phase 3 (`A5`, `A6`, `C2`, Patchwerk & ICC) status:**
   - **`A5` (targeting/roles):** implemented and unit-tested; assist option **live-verified** in 10-man Naxx (`HandleGroup` sets `MEMBER_FLAG_MAINTANK` + `MEMBER_FLAG_MAINASSIST` on raid leaders; `worldserver.out` logged `Loadc`, `Loadi`, `Loadd` and `Loadb`/`Loade`/`Loadf`/`Loadj` choosing `attack Loada's target: ok`; `party hurt:` and `loose mobs:` screen formatting are unit-tested, not separately captured from live `harness.log`).
   - **`A6` (bag items/vehicles):** implemented, unit-tested, and **live-verified** (`worldserver.out` logged `: ok` for `Runic Healing Potion`, `Runic Healing Injector`, `Ruby Essence`, `Emerald Essence`, `Amber Essence`, and `Hearthstone`, and `var/bench_boss_eregos_drake_llm/` logged `Call Ruby/Amber Drake` + `mounted=True`; `CollectUsableBagItems` explicitly checks `GetLastPotionId()` combat lockout per `Spell.cpp:5910` — which `ExecuteUseItemOption` delegates to `HandleUseItemOpcode` — and both check `IsNonMeleeSpellCast(..., skipAutorepeat=true)` / `m_mover != bot`; `eregos` itself still had `no_pull` because Oculus requires flying drake engagement/boss trigger).
@@ -29,12 +29,15 @@ Last updated 2026-11-22.
 
 **Priority direction (2026-11-21):** Mechanical WoW competence (dungeons, raids/ICC, clearing quests,
 soloing elite quests, smart gearing) takes priority over `"human-like"` mimicry (`D`). **Phases 1–3
-are complete** (`d5b8516` single-codebase `n = 16` 5-boss benchmark: `llm` `52/80` (`65.0%`) beats
-`no_brain` `35/80` (`43.8%`, `p = 0.0109`), `llm_no_notes` `43/80`, and `baseline` `40/80`; `Ikiss`
-`12/16` vs `2/16` `p_holm = 0.0048`; 4/5 bosses within `3%` DPS of `llm_no_notes` and Kael'thas
-`9/16` vs `4/16` trading turret DPS for dodging; all 41/41 `content/notes/` audited & validated;
-`A5`/`A6`/`C2`, Patchwerk `2/2`, and ICC Lord Marrowgar `1/2` live-verified). **Phase 4 (`B1–B3`)
-is next.**
+are signed off** (see [`docs/benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md`](benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md):
+single-codebase `n = 16` 5-boss benchmark `llm` `52/80` (`65.0%`) beats `no_brain` `35/80` (`43.8%`,
+`p_raw = 0.0109, p_holm3 = 0.0326`; `Ikiss` `12/16` vs `2/16`, `p_holm15 = 0.0135`, with `+10` Ikiss
+and `+6` Kael'thas driving the edge; numerically ahead of `llm_no_notes` `43/80` `p_holm3 = 0.1977`
+and `baseline` `40/80` `p_holm3 = 0.1564`, n.s.; 4/5 bosses within `3%` DPS of `llm_no_notes`, with
+an explicit waiver for Kael'thas `-20.2%` all-trial / `-15.9%` kill-only DPS trade-off that lifts
+kills `9/16` vs `4/16`, and caveats on Murmur `10/16` vs `14/16` and `n = 2` split-host Patchwerk
+`2/2` / ICC Marrowgar `1/2`; all 41/41 `content/notes/` audited & regression-tested). **Phase 4
+(`B1–B3`) is next.**
 
 1. **Phase 4 — Mechanical open-world competence: questing, solo elite quests, smart gearing & zero stalls (`B1–B3`)**
    *(Done when: quests per hour within `30%` of human traces, solo elite quests & smart gear
@@ -60,7 +63,7 @@ is next.**
    - **`B3. Pull danger & soloing elite quests`:** Show pull danger in the snapshot (number of
      linked mobs, elites, level difference) so the brain can decline bad pulls or use cooldowns,
      kiting, and consumables to solo elite quests.
-5. **Phase 5 — Model bake-off (`C4`) & fine-tuning exploration (`C3`, Decision #3: keep as TODO)**
+2. **Phase 5 — Model bake-off (`C4`) & fine-tuning exploration (`C3`, Decision #3: keep as TODO)**
    *(Done when: a significant bench gain at the same latency)*:
    - **`C4. Model choice bake-off`:** Try at least one other base model on `tools/wlb test eval`,
      `perf`, and the boss bench (same 4 arms, `n = 16`) before investing in `C3`, so the base model
@@ -70,7 +73,7 @@ is next.**
      Once `C1` and `C2` produce a few thousand graded decisions, evaluate cost and benefit of:
      (a) a small LoRA fine-tune of Gemma on plans that led to kills; (b) preference pairs (good vs
      bad plan on the same snapshot), gated on offline eval plus the boss bench.
-6. **Human-likeness with human traces (`D`, `docs/plans/self-improving-loop.md` — deprioritized behind mechanical gameplay & ICC per Decision #4):**
+3. **Human-likeness with human traces (`D`, `docs/plans/self-improving-loop.md` — deprioritized behind mechanical gameplay & ICC per Decision #4):**
    - Already built/planned: record human play sessions across all situations (5 Hz + events, ~30%
      held out), run the parity and pairwise scorer, and run `tools/bench/blind_rate.py` batches +
      `llm-agree`.
@@ -78,7 +81,7 @@ is next.**
      distributions instead of constants; compare bot choices against human choices in matched
      situations (pulls, looting, town visits) and turn mismatches into `C1` eval cases; keep chat
      reply rate and style rare and matched to logs.
-7. **Named room landmarks** (`docs/specs/triggers.md`): 132 of the 218 unsayable boss actions move
+4. **Named room landmarks** (`docs/specs/triggers.md`): 132 of the 218 unsayable boss actions move
    to hardcoded room coordinates; deferred until a boss fight needs per-room landmark data.
 
 ## Later
@@ -167,6 +170,10 @@ is next.**
   details in [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md) §6).
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-22: **Review `711c8c7` fixes (Medium 1–3, Low 1) & `n = 16` benchmark report:**
+  - *`content/notes/` table-separated validation & prose sync (`M1`, `M2`, `L1`):* fixed the 5 wrong-table orders (`BWL` `Corrupted Fire Nova Totem V` / `Corrupted Stoneskin Totem VI` / `Corrupted Windfury Totem III`, `SSC` `Coilfang Guardian`, `ICC` `Gas Cloud within 10 -> away Gas Cloud 14`), removed inverted/untargetable/duplicate orders (`OS` `Safe Area`/`Twilight Fissure`/`Flame Tsunami`, `RS` `Orb Carrier` + duplicate `Flame Breath`, `Nex` `Spike`/`Crystal Spike`, `Ramp` `Tremor Totem`, duplicate `Uld` `## Dark Rune Acolyte`), and synced prose bullets 1:1 with validated standing orders across all 36 auto-extracted files (`0` `hand-check`/stale draft prose, `141` orders, `0` strict DBC/SQL table errors); added `test_all_content_notes_standing_orders_valid` in [`notes_hill_climb_test.py`](../tools/bench/notes_hill_climb_test.py) so `tools/wlb check` validates all 41 `content/notes/*/notes.md` files automatically.
+  - *Benchmark report & `TODO.md` precision (`M3`, `L1`):* added [`docs/benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md`](benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md) with full `m = 15` per-boss and `m = 3` pooled Holm–Bonferroni tables (`p_holm3 = 0.0326` vs `no_brain`, `p_holm15 = 0.0135` on Ikiss), explicit Kael'thas DPS waiver, and Murmur/raid caveats; fixed `## Next, in order` list numbering (`1.–4.`). Verified via `tools/wlb check` (`ALL CHECKS PASSED`).
 
 - 2026-11-22: **Phase 1–3 sign-off benchmark (`n = 16`, `320` valid trials, `0` invalid) & full 41/41 `content/notes/` audit:**
   - *Single-codebase `n = 16` 5-boss benchmark at `d5b8516` (`var/bench_boss_p12_signoff_v3_n16.json`, `mixed_all`, `parallel=4`):* `llm` **`52/80` (`65.0%`)** pooled kills beats `no_brain` `35/80` (`43.8%`, **Fisher `p = 0.0109`**), `llm_no_notes` `43/80` (`53.8%`, `p = 0.1977`), and hand-written `baseline` `40/80` (`50.0%`, `p = 0.0782`); **Ikiss** `12/16` vs `no_brain` `2/16` (**`p = 0.0010, p_holm = 0.0048`**, `-2.7%` DPS), **Loken** `14/16` (`0.0` med deaths, `-2.7%` DPS), **Devourer** `7/16` (`+5.3%` DPS), **Murmur** `10/16` (`-3.0%` DPS), **Kael'thas** `9/16` (`1,708.4` DPS vs `baseline` `1,548.0` DPS / `12/16` and `llm_no_notes` `2,142.1` DPS / `4/16`, `p = 0.0659` vs `no_brain` `3/16`).

@@ -2,9 +2,8 @@
 
 ## Onyxia
 
-- **Breath** (cast_aoe): Boss cast AoE; move out during cast.
-- **Ony Fireball Splash Incoming** (cast_aoe): Boss cast AoE; move out during cast.
-- **Whelp** (add_switch): Priority add; switch targets to `Whelp` immediately.
+- **Breath**: boss cast; follow standing order (`out of it`).
+- **Onyxian Whelp**: priority add; switch and burn promptly.
 
 ```
 Breath cast -> out of it

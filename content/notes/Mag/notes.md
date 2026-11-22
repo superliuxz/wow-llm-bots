@@ -2,18 +2,12 @@
 
 ## Magtheridon's Lair
 
-- **Hellfire Channeler** (add_switch): Priority add; switch targets to `Hellfire Channeler` immediately.
-- **Misdirection** (debuff): Aura `Misdirection` on me; hand-check encounter reaction.
-- **Banish** (debuff): Aura `Banish` on me; hand-check encounter reaction.
-- **Blast Nova** (cast_aoe): Boss cast AoE (`SPELL_BLAST_NOVA`); move out during cast.
-- **Quake** (cast_aoe): Boss cast AoE (`SPELL_QUAKE`); move out during cast.
+- **Hellfire Channeler**: priority add; switch and burn promptly.
+- **Blast Nova**: boss cast; follow standing order (`out of it`).
+- **Quake**: boss cast; follow standing order (`out of it`).
 
 ```
 Hellfire Channeler appears -> target nearest Hellfire Channeler
 Blast Nova cast -> out of it
 Quake cast -> out of it
 ```
-
-## Magtheridon
-
-- **Magtheridon Should Be Tanked** (positioning): Encounter positioning (magtheridon should be tanked).

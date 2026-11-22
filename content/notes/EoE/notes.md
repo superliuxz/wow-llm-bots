@@ -2,7 +2,7 @@
 
 ## Malygos
 
-- **Power Spark** (add_switch): Priority add; switch targets to `Power Spark` immediately.
+- **Power Spark**: priority add; switch and burn promptly.
 
 ```
 Power Spark appears -> target nearest Power Spark
