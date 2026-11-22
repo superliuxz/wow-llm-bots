@@ -460,7 +460,7 @@ def _clear_trash_for_leaders(leaders: list[str], clear_trash_yd: float) -> None:
         tok = _next_console_token()
         ct_specs.append((
             f"llmtest cleartrash {leader_name} {clear_trash_yd:.1f} {tok}",
-            f"cleartrash {leader_name}",
+            f"cleartrash {leader_name} ",
             tok,
         ))
     ct_lines, ct_raw = _console_batch(ct_specs, wait_s=0.0, timeout_s=10.0)

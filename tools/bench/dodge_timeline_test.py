@@ -451,14 +451,21 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
                     return [f"llmtest: cleartrash Loada radius=300 cleared=25 tok={specs[0][2]}"], "ok"
 
                 bench_bosses._console_batch = ok_batch
+                bench_bosses._clear_trash_for_leaders(["Loada"], 0.0)
+                self.assertEqual(len(seen_specs), 0)
+
                 bench_bosses._clear_trash_for_leaders(["Loada"], 300.0)
                 self.assertEqual(len(seen_specs), 1)
                 self.assertIn("llmtest cleartrash Loada 300.0 ", seen_specs[0][0])
+                self.assertEqual(seen_specs[0][1], "cleartrash Loada ")
 
-                bench_bosses._console_batch = lambda specs, wait_s=0.0, timeout_s=10.0: ([""], "err")
+                bench_bosses._console_batch = lambda specs, wait_s=0.0, timeout_s=10.0: (
+                    [f"llmtest: cleartrash Loada radius=300 cleared=25 tok={specs[0][2]}", ""],
+                    "partial err",
+                )
                 with self.assertRaises(RuntimeError) as ctx:
-                    bench_bosses._clear_trash_for_leaders(["Loada"], 300.0)
-                self.assertIn("cleartrash failed for Loada", str(ctx.exception))
+                    bench_bosses._clear_trash_for_leaders(["Loada", "Ptwoa"], 300.0)
+                self.assertIn("cleartrash failed for Ptwoa", str(ctx.exception))
             finally:
                 bench_bosses._console_batch = orig_batch
 
