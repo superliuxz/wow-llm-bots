@@ -452,6 +452,25 @@ def _ensure_party_group(party: list[tuple[str, str, int, str]]) -> None:
     _ensure_party_groups([party])
 
 
+def _clear_trash_for_leaders(leaders: list[str], clear_trash_yd: float) -> None:
+    if clear_trash_yd <= 0:
+        return
+    ct_specs = []
+    for leader_name in leaders:
+        tok = _next_console_token()
+        ct_specs.append((
+            f"llmtest cleartrash {leader_name} {clear_trash_yd:.1f} {tok}",
+            f"cleartrash {leader_name}",
+            tok,
+        ))
+    ct_lines, ct_raw = _console_batch(ct_specs, wait_s=0.0, timeout_s=10.0)
+    for leader_name, ct_line in zip(leaders, ct_lines):
+        if not ct_line:
+            raise RuntimeError(
+                f"cleartrash failed for {leader_name}: {ct_raw[-400:]!r}"
+            )
+
+
 def _wait_where(
     bot_names: list[str],
     expected_map: int,
@@ -1024,16 +1043,7 @@ def run_boss_waves(
                     )
                 seen_instances.update(party_instances)
                 say(f"  verified fresh distinct dungeon instances: {party_instances}")
-                if clear_trash_yd > 0:
-                    ct_specs = []
-                    for leader_name in leaders:
-                        tok = _next_console_token()
-                        ct_specs.append((
-                            f"llmtest cleartrash {leader_name} {clear_trash_yd:.1f} {tok}",
-                            f"cleartrash {leader_name}",
-                            tok,
-                        ))
-                    _console_batch(ct_specs, wait_s=0.0, timeout_s=10.0)
+                _clear_trash_for_leaders(leaders, clear_trash_yd)
                 wt["stage_s"] = round(time.monotonic() - step_t0, 2)
 
                 # 3. Apply per-party strategy override (when mixing baseline with stripped arms)

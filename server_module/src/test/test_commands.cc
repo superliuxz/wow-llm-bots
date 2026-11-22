@@ -129,7 +129,28 @@ class LlmBrainTestCommandScript : public CommandScript {
       }
       sGroupMgr->AddGroup(group);
     }
+    auto ensure_raid_leader_flags = [group, leader]() {
+      if (!group->isRaidGroup()) {
+        return;
+      }
+      uint8_t flags = 0;
+      for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+        if (slot.guid == leader->GetGUID()) {
+          flags = slot.flags;
+          break;
+        }
+      }
+      if ((flags & MEMBER_FLAG_MAINTANK) == 0) {
+        group->SetGroupMemberFlag(leader->GetGUID(), true,
+                                  MEMBER_FLAG_MAINTANK);
+      }
+      if ((flags & MEMBER_FLAG_MAINASSIST) == 0) {
+        group->SetGroupMemberFlag(leader->GetGUID(), true,
+                                  MEMBER_FLAG_MAINASSIST);
+      }
+    };
     if (member->GetGroup() == group) {
+      ensure_raid_leader_flags();
       handler->PSendSysMessage("llmtest: grouped {} (leader) and {}{}",
                                leader->GetName(), member->GetName(),
                                FormatToken(token));
@@ -143,11 +164,7 @@ class LlmBrainTestCommandScript : public CommandScript {
                                 member->GetName());
       return false;
     }
-    if (group->isRaidGroup()) {
-      group->SetGroupMemberFlag(leader->GetGUID(), true, MEMBER_FLAG_MAINTANK);
-      group->SetGroupMemberFlag(leader->GetGUID(), true,
-                                MEMBER_FLAG_MAINASSIST);
-    }
+    ensure_raid_leader_flags();
     group->BroadcastGroupUpdate();
     handler->PSendSysMessage("llmtest: grouped {} (leader) and {}{}",
                              leader->GetName(), member->GetName(),
@@ -555,7 +572,12 @@ class LlmBrainTestCommandScript : public CommandScript {
     if (!player) {
       return false;
     }
-    if (radius <= 0.0f || radius > 300.0f) {
+    if (!player->GetMap() || !player->GetMap()->IsDungeon()) {
+      handler->SendErrorMessage(
+          "llmtest: cleartrash requires a dungeon or raid instance");
+      return false;
+    }
+    if (!(radius > 0.0f && radius <= 300.0f)) {
       handler->SendErrorMessage(
           "llmtest: cleartrash radius must be in (0, 300]");
       return false;
@@ -564,8 +586,9 @@ class LlmBrainTestCommandScript : public CommandScript {
       Player* player;
       float range;
       bool operator()(Creature* c) const {
-        return c && c->IsInWorld() && c->IsAlive() && !c->IsDungeonBoss() &&
-               !c->IsPet() && !c->IsTotem() && !c->IsTrigger() &&
+        return c && c->IsInWorld() && c->IsAlive() && !c->isWorldBoss() &&
+               !c->IsDungeonBoss() && !c->IsPet() && !c->IsTotem() &&
+               !c->IsTrigger() &&
                c->GetInstanceId() == player->GetInstanceId() &&
                player->IsHostileTo(c) && player->IsWithinDistInMap(c, range);
       }

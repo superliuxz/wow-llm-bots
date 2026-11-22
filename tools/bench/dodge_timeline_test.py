@@ -439,7 +439,28 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
             self.assertEqual(roles.count("heal"), 3)
             self.assertEqual(roles.count("dps"), 5)
             self.assertEqual(bench_bosses.BOSSES["patchwerk"]["max_s"], 360.0)
+            self.assertEqual(bench_bosses.BOSSES["patchwerk"]["clear_trash_yd"], 300.0)
             self.assertEqual(bench_bosses.BOSSES["marrowgar"]["max_s"], 360.0)
+
+            # Verify _clear_trash_for_leaders dispatches cleartrash and raises on failure.
+            orig_batch = bench_bosses._console_batch
+            seen_specs = []
+            try:
+                def ok_batch(specs, wait_s=0.0, timeout_s=10.0):
+                    seen_specs.extend(specs)
+                    return [f"llmtest: cleartrash Loada radius=300 cleared=25 tok={specs[0][2]}"], "ok"
+
+                bench_bosses._console_batch = ok_batch
+                bench_bosses._clear_trash_for_leaders(["Loada"], 300.0)
+                self.assertEqual(len(seen_specs), 1)
+                self.assertIn("llmtest cleartrash Loada 300.0 ", seen_specs[0][0])
+
+                bench_bosses._console_batch = lambda specs, wait_s=0.0, timeout_s=10.0: ([""], "err")
+                with self.assertRaises(RuntimeError) as ctx:
+                    bench_bosses._clear_trash_for_leaders(["Loada"], 300.0)
+                self.assertIn("cleartrash failed for Loada", str(ctx.exception))
+            finally:
+                bench_bosses._console_batch = orig_batch
 
             # A programming bug during setup must crash loudly, not become "boss failed".
             def bug_in_setup(count, inst=None):

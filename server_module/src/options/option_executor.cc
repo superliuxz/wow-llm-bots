@@ -602,7 +602,10 @@ void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink) {
 void CollectUsableBagItems(Player* bot,
                            std::vector<pb::OptionFacts_Item>* out) {
   out->clear();
-  if (!bot || bot->IsNonMeleeSpellCast(false) || bot->m_mover != bot) {
+  if (!bot ||
+      bot->IsNonMeleeSpellCast(false, /*skipChanneled=*/false,
+                               /*skipAutorepeat=*/true) ||
+      bot->m_mover != bot) {
     return;
   }
   static constexpr size_t kMaxUsableBagItems = 12;
@@ -1272,7 +1275,9 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
   if (bot->HasSpellCooldown(item_spell_id)) {
     return {target.name + " is on cooldown"};
   }
-  if (bot->IsNonMeleeSpellCast(false) || bot->m_mover != bot) {
+  if (bot->IsNonMeleeSpellCast(false, /*skipChanneled=*/false,
+                               /*skipAutorepeat=*/true) ||
+      bot->m_mover != bot) {
     return {"can't use " + target.name + " now"};
   }
   const SpellInfo* item_spell = sSpellMgr->GetSpellInfo(item_spell_id);
