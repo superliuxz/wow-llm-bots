@@ -153,6 +153,15 @@ PATCHWERK_NOTES = """# Naxxramas (10-man) — Patchwerk
 - Maximize DPS and HPS; no movement mechanics.
 """
 
+MARROWGAR_NOTES = """# Icecrown Citadel (10-man) — Lord Marrowgar
+- **Coldflame**: moving lines of blue fire; move out immediately whenever you are inside one!
+  - Standing order: `in Coldflame -> out of it`
+- **Bone Spike Graveyard**: impales players on Bone Spikes; switch targets immediately to destroy Bone Spikes!
+  - Standing order: `Bone Spike appears -> target nearest Bone Spike`
+- **Bone Storm**: boss spins and charges around the room dealing heavy melee AoE; move away from Marrowgar during Bone Storm.
+  - Standing order: `Bone Storm cast -> away Lord Marrowgar 15`
+"""
+
 BOSSES = {
     "ick": dict(
         era="WotLK",
@@ -286,6 +295,18 @@ BOSSES = {
         spawn_xyz=(3234.0, -3230.3, 294.1),
         raid=True,
         notes_md=PATCHWERK_NOTES,
+        max_s=240.0,
+    ),
+    "marrowgar": dict(
+        era="WotLK Raid",
+        tag="marrowgar_icc10",
+        boss_name="Lord Marrowgar",
+        level=80,
+        map_id=631,
+        stage_xyz=(76.86, 2211.37, 30.0),
+        spawn_xyz=(-385.0, 2211.14, 42.08),
+        raid=True,
+        notes_md=MARROWGAR_NOTES,
         max_s=240.0,
     ),
 }
@@ -752,7 +773,7 @@ def run_boss_waves(
     parties = _make_parties(n_parties, raid=raid)
     all_bots = [b for p in parties for b in p]
 
-    trace_dir = VAR / f"bench_boss_{tag}_{mode}"
+    trace_dir = _trace_dir_for(tag, mode, arms_override)
 
     valid_runs: list[dict] = []
     extra_trials: list[dict] = []
@@ -1248,8 +1269,13 @@ def run_boss_waves(
     return res
 
 
+def _trace_dir_for(tag: str, mode: str, arms_override: tuple[str, ...] | None) -> pathlib.Path:
+    suffix = "_".join(arms_override) if arms_override else mode
+    return VAR / f"bench_boss_{tag}_{suffix}"
+
+
 def _needs_llm(mode: str, arms_override: tuple[str, ...] | None) -> bool:
-    if arms_override is not None:
+    if arms_override:
         return any(a in ("llm", "llm_no_notes") for a in arms_override)
     return mode in ("llm", "llm_no_notes", "mixed", "mixed_all")
 
@@ -1271,6 +1297,7 @@ def main() -> int:
     )
     ap.add_argument("--append", action="store_true", help="Merge into existing output JSON instead of overwriting")
     ap.add_argument("--out", default="", help="Optional output JSON path (default: var/bench_boss_10_<mode>.json)")
+    ap.add_argument("--notes-file", default="", help="Optional path to custom notes.md override for all selected bosses")
     ap.add_argument(
         "--mode",
         choices=("llm", "llm_no_notes", "mixed", "mixed_all", "no_brain", "baseline"),
@@ -1291,6 +1318,8 @@ def main() -> int:
     arms_override: tuple[str, ...] | None = None
     if args.arms:
         parsed_arms = tuple(a.strip() for a in args.arms.split(",") if a.strip())
+        if not parsed_arms:
+            ap.error("invalid --arms: must specify at least one arm")
         bad = [a for a in parsed_arms if a not in valid_arms]
         if bad:
             ap.error(f"invalid --arms: {bad}")
@@ -1311,11 +1340,15 @@ def main() -> int:
     ctx = LlamaServer(slots=16) if needs_llm else None
     if ctx is not None:
         ctx.__enter__()
+    notes_override = pathlib.Path(args.notes_file).read_text() if args.notes_file else None
     try:
         for k in keys:
+            spec = dict(BOSSES[k])
+            if notes_override is not None:
+                spec["notes_md"] = notes_override
             try:
                 results[k] = run_boss_waves(
-                    **BOSSES[k],
+                    **spec,
                     mode=args.mode,
                     arms_override=arms_override,
                     target_runs=max(1, args.runs),

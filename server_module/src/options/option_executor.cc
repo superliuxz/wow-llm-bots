@@ -50,6 +50,7 @@
 #include "Position.h"
 #include "QuestDef.h"
 #include "SharedDefines.h"
+#include "Spell.h"
 #include "SpellAuras.h"
 #include "SpellDefines.h"
 #include "SpellInfo.h"
@@ -598,6 +599,62 @@ void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink) {
   }
 }
 
+void CollectUsableBagItems(Player* bot,
+                           std::vector<pb::OptionFacts_Item>* out) {
+  out->clear();
+  static constexpr size_t kMaxUsableBagItems = 12;
+  for (const BagSlotItem& entry : BagItems(bot)) {
+    if (out->size() >= kMaxUsableBagItems) {
+      break;
+    }
+    const ItemTemplate* proto = entry.item->GetTemplate();
+    if (!proto || proto->Name1.empty() ||
+        bot->CanUseItem(entry.item) != EQUIP_ERR_OK) {
+      continue;
+    }
+    uint32_t spell_id = 0;
+    uint32_t spell_cat = 0;
+    for (int i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i) {
+      if (proto->Spells[i].SpellId != 0 &&
+          proto->Spells[i].SpellTrigger == ITEM_SPELLTRIGGER_ON_USE) {
+        spell_id = proto->Spells[i].SpellId;
+        spell_cat = proto->Spells[i].SpellCategory;
+        break;
+      }
+    }
+    if (spell_id == 0) {
+      continue;
+    }
+    // Food and drink are already surfaced by Rest.
+    if (spell_cat == kSpellCategoryFood || spell_cat == kSpellCategoryDrink) {
+      continue;
+    }
+    if (bot->HasSpellCooldown(spell_id)) {
+      continue;
+    }
+    const SpellInfo* info = sSpellMgr->GetSpellInfo(spell_id);
+    if (!info) {
+      continue;
+    }
+    bool dup = false;
+    for (const pb::OptionFacts_Item& existing : *out) {
+      if (existing.entry == proto->ItemId) {
+        dup = true;
+        break;
+      }
+    }
+    if (dup) {
+      continue;
+    }
+    pb::OptionFacts_Item item;
+    item.entry = proto->ItemId;
+    item.name = proto->Name1;
+    item.in_combat_usable =
+        !info->HasAttribute(SPELL_ATTR0_NOT_IN_COMBAT_ONLY_PEACEFUL);
+    out->push_back(std::move(item));
+  }
+}
+
 bool HasFoodOrDrinkAura(Player* bot) {
   return bot->HasAura(kSpellGraccusFruitcake) ||
          HasCategoryAura(bot, kSpellCategoryFood) ||
@@ -1098,6 +1155,69 @@ ExecuteResult ExecuteWalkOption(Player* bot,
   return {"", /*used=*/step.arrived, "", step.path_time};
 }
 
+ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
+  WorldSession* session = bot->GetSession();
+  if (!session) {
+    return {"no session"};
+  }
+  constexpr std::string_view kPrefix = "item:";
+  if (!target.guid.starts_with(kPrefix)) {
+    return {"invalid item option"};
+  }
+  std::string_view id_str = target.guid;
+  id_str.remove_prefix(kPrefix.size());
+  uint32_t entry = 0;
+  const auto [end, ec] =
+      std::from_chars(id_str.data(), id_str.data() + id_str.size(), entry);
+  if (ec != std::errc() || end != id_str.data() + id_str.size() || entry == 0) {
+    return {"invalid item id"};
+  }
+  const BagSlotItem* found = nullptr;
+  std::vector<BagSlotItem> items = BagItems(bot);
+  for (const BagSlotItem& slot_item : items) {
+    if (slot_item.item && slot_item.item->GetEntry() == entry) {
+      found = &slot_item;
+      break;
+    }
+  }
+  if (!found) {
+    return {"you don't have " + target.name};
+  }
+  Item* item = found->item;
+  const ItemTemplate* proto = item->GetTemplate();
+  uint32_t item_spell_id = 0;
+  for (int i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i) {
+    if (proto->Spells[i].SpellId != 0 &&
+        proto->Spells[i].SpellTrigger == ITEM_SPELLTRIGGER_ON_USE) {
+      item_spell_id = proto->Spells[i].SpellId;
+      break;
+    }
+  }
+  if (item_spell_id == 0 || bot->CanUseItem(item) != EQUIP_ERR_OK) {
+    return {"can't use " + target.name + " now"};
+  }
+  if (bot->HasSpellCooldown(item_spell_id)) {
+    return {target.name + " is on cooldown"};
+  }
+  const SpellInfo* item_spell = sSpellMgr->GetSpellInfo(item_spell_id);
+  Unit* item_target = bot->GetSelectedUnit();
+  if (item_spell && item_spell->IsPositive() && item_target &&
+      item_target != bot && !bot->IsFriendlyTo(item_target)) {
+    item_target = bot;
+  }
+  WorldPacket p(CMSG_USE_ITEM);
+  p << found->bag << found->slot << static_cast<uint8_t>(0) << item_spell_id
+    << item->GetGUID() << static_cast<uint32_t>(0) << static_cast<uint8_t>(0);
+  SpellCastTargets targets;
+  if (item_target) {
+    targets.SetUnitTarget(item_target);
+  }
+  targets.Write(p);
+  p.rpos(0);
+  session->HandleUseItemOpcode(p);
+  return {.used = true, .info = "used " + target.name};
+}
+
 }  // namespace
 
 ExecuteResult ExecuteOption(Player* bot,
@@ -1115,6 +1235,10 @@ ExecuteResult ExecuteOption(Player* bot,
   }
   if (target.kind == OptionTarget::Kind::kLoot) {
     return ExecuteLootOption(bot, target);
+  }
+  if (target.kind == OptionTarget::Kind::kUse &&
+      target.guid.starts_with("item:")) {
+    return ExecuteUseItemOption(bot, target);
   }
   if (target.kind == OptionTarget::Kind::kGather ||
       target.kind == OptionTarget::Kind::kUse) {

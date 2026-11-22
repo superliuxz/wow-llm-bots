@@ -323,14 +323,29 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
   // Party assist options (A5): let the brain attack the main assist's or
   // tank's current target without C++ guessing target priority.
   if (alive && snapshot->ext.party) {
+    auto find_party_target_guid =
+        [&](std::string_view member_name) -> std::optional<std::string_view> {
+      for (const OptionFacts::PartyTarget& pt : facts.party_targets) {
+        if (pt.member_name == member_name && !pt.target_guid.empty()) {
+          return pt.target_guid;
+        }
+      }
+      return std::nullopt;
+    };
     std::vector<const pb::Unit*> callers;
     for (const pb::Unit& m : snapshot->ext.party->members) {
+      if (m.name == snapshot->bot) {
+        continue;
+      }
       if (!m.dead && m.group && m.group->online && !m.target.empty() &&
           m.group->main_assist) {
         callers.push_back(&m);
       }
     }
     for (const pb::Unit& m : snapshot->ext.party->members) {
+      if (m.name == snapshot->bot) {
+        continue;
+      }
       if (!m.dead && m.group && m.group->online && !m.target.empty() &&
           !m.group->main_assist &&
           (m.group->main_tank || m.group->role == pb::TANK)) {
@@ -342,9 +357,15 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       if (seen_assist_guids.size() >= 2) {
         break;
       }
+      const std::optional<std::string_view> exact_guid =
+          find_party_target_guid(caller->name);
       const pb::Unit* best = nullptr;
       for (const pb::Unit& u : snapshot->base.nearby.units) {
-        if (u.name != caller->target) {
+        if (exact_guid) {
+          if (u.guid != *exact_guid) {
+            continue;
+          }
+        } else if (u.name != caller->target) {
           continue;
         }
         if (UnitKind(u, self.in_combat, facts) != OptionTarget::Kind::kAttack) {
@@ -376,9 +397,31 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       targets.push_back({OptionTarget::Kind::kAttack, best->guid, assist_name});
       pb::Option& option = snapshot->options.emplace_back();
       option.text = text;
-      option.guid = best->guid;
+      // Distinct synthetic guid so PlanRunner::MatchOptionInScreen matches the
+      // assist option rather than colliding with the regular Attack <mob> row;
+      // OptionTarget::guid above still carries the real unit guid for
+      // execution.
+      option.guid = "assist:" + best->guid;
       option.kind = pb::Option::ATTACK;
       option.name = assist_name;
+    }
+  }
+
+  if (alive) {
+    for (const OptionFacts::Item& item : facts.usable_items) {
+      if (item.entry == 0 || item.name.empty()) {
+        continue;
+      }
+      if (self.in_combat && !item.in_combat_usable) {
+        continue;
+      }
+      const std::string item_guid = "item:" + std::to_string(item.entry);
+      targets.push_back({OptionTarget::Kind::kUse, item_guid, item.name});
+      pb::Option& option = snapshot->options.emplace_back();
+      option.text = "Use " + item.name;
+      option.guid = item_guid;
+      option.kind = pb::Option::USE;
+      option.name = item.name;
     }
   }
 

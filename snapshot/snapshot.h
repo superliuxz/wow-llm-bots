@@ -2825,6 +2825,21 @@ struct OptionFacts_Place {
   bool operator==(const OptionFacts_Place&) const = default;
 };
 
+struct OptionFacts_Item {
+  uint32_t entry = 0;
+  std::string name;
+  bool in_combat_usable = true;
+
+  bool operator==(const OptionFacts_Item&) const = default;
+};
+
+struct OptionFacts_PartyTarget {
+  std::string member_name;
+  std::string target_guid;
+
+  bool operator==(const OptionFacts_PartyTarget&) const = default;
+};
+
 // Game data a player knows (or sees on hover) that the glance snapshot does
 // not carry, read by llm_brain::AddOptions both live and in fixture_options
 // (<case>.facts.json).
@@ -2832,6 +2847,8 @@ struct OptionFacts {
   using Npc = OptionFacts_Npc;
   using Spot = OptionFacts_Spot;
   using Place = OptionFacts_Place;
+  using Item = OptionFacts_Item;
+  using PartyTarget = OptionFacts_PartyTarget;
 
   std::vector<OptionFacts_Npc> npcs;
   bool has_food = false;
@@ -2840,6 +2857,8 @@ struct OptionFacts {
   uint32_t mining_skill = 0;
   std::vector<OptionFacts_Spot> spots;
   std::vector<OptionFacts_Place> places;
+  std::vector<OptionFacts_Item> usable_items;
+  std::vector<OptionFacts_PartyTarget> party_targets;
   std::string pending_group_invite_from;
   std::vector<std::string> invite_candidates;
   bool can_leave_group = false;

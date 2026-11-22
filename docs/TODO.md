@@ -10,11 +10,12 @@ Last updated 2026-11-21.
 ## In progress
 
 - **Phase 1 & Phase 2 remaining benchmark sign-off criteria** (see single-codebase `n = 8` 5-boss report [`docs/benchmarks/2026-11-21-phase1-phase2-five-boss.md`](benchmarks/2026-11-21-phase1-phase2-five-boss.md)):
-  - Follow-up 5-boss `n = 8` run (`var/bench_boss_p12_llm.json` local + `var/bench_boss_p12_nonllm.json` on remote worker): removing `, then back` from `Ikiss` closed the `Ikiss` DPS gap (`llm` `5/8` kills, `1,022` DPS = `+1.4%` vs `llm_no_notes` `1,007`, vs `no_brain` `1/8`, `baseline` `0/8`), `Loken` hit `7/8` (`+15.4%` DPS), and `Devourer` `Mirrored Soul` note hit `3/8` (`-0.6%` DPS vs `llm_no_notes` `1/8`, `baseline` `1/8`).
-  - **Still open before Phase 3 sign-off:** `llm` kills (`21/40` vs `no_brain` `17/40`, `p = 0.5021`; `Kael'thas` `2/8` vs `baseline` `5/8`) do not yet significantly beat `no_brain` after Holm–Bonferroni correction; hand-checked `FoS`/`Seth`/`ICC` draft notes (`content/notes/`), remaining draft files still unverified.
-- **Phase 3 (`A5`, `A6`, `C2`, Patchwerk & ICC):**
-  - `A5` (Targeting & roles: `"Attack <main assist/tank> <name>'s target (<mob>)"` option, `"main tank"`/`"main assist"` tags, factual `party hurt:` with 40 yd heal range/LOS, and `loose mobs:` targeting non-tank allies) implemented & unit-tested; live boss verification pending alongside `A6` and `C2`.
-  - `A6` (Items & vehicles: `Use <item>` bag item options) and `C2` (self-revising `notes.md` competence hill-climb loop) next.
+  - Single-codebase `n = 8` report (`var/bench_boss_10_mixed_all.json`): `llm` `24/40` (`60.0%`) vs `llm_no_notes` `25/40` (`p = 1.0000`), `no_brain` `20/40` (`p = 0.5005`), `baseline` `22/40` (`p = 0.8213`).
+  - Exploratory split-host `n = 8` run (`var/bench_boss_p12_llm.json` local `mixed, parallel=2` vs `var/bench_boss_p12_nonllm.json` remote `mixed_all, parallel=4` — **confounded by host/parallelism, not apples-to-apples**): `Ikiss` `llm` `5/8` (`1,022` DPS = `+1.4%` vs `llm_no_notes` `1,007`, `3/8`; remote `no_brain` `1/8`, `baseline` `0/8`), `Loken` `llm` `7/8` (`+15.4%` DPS) vs `llm_no_notes` `7/8`, `Devourer` `llm` `3/8` (`-0.6%` DPS) vs `llm_no_notes` `1/8` (remote `no_brain` `3/8` `4,797` DPS, `baseline` `1/8`), `Murmur` `llm` `4/8` (`-5.1%` DPS) vs `llm_no_notes` `6/8`, and `Kael'thas` `llm` `2/8` (`-23.3%` DPS regression: `1,453` vs `llm_no_notes` `1,894`, `4/8` — `Arcane Sphere` order reverted in `f644f1b`).
+  - **Still open before Phase 3 sign-off:** `llm` kills do not yet significantly beat `no_brain` after Holm–Bonferroni correction, and `A3` draft notes (`content/notes/`) remain draft (only 1 boss section each in `FoS`/`Seth`/`ICC` was edited so far).
+- **Phase 3 (`A5`, `A6`, `C2`, Patchwerk & ICC) live verification:**
+  - `A5` (Targeting & roles), `A6` (Items & vehicles: `Use <item>` bag item options), and `C2` (`tools/bench/notes_hill_climb.py` + `marrowgar` ICC 10-man) are implemented, unit-tested, and compiled into `out/server-test`; live verification (`eregos`, `patchwerk`, `marrowgar`, `C2` loop, and updated boss bench) is next.
+- **Pending user-approved `scorer.sha256` relock (Rule #6):** `server_module/src/snapshot/snapshot_builder.cc` was modified for `A5` (`self.unit.group` + `OptionFacts::party_targets`) and `A6` (`CollectUsableBagItems`). Both `~/.local/share/wow-llm-bots/scorer.sha256` and tracked `config/scorer-lock.sha256` were left untouched awaiting explicit user OK.
 
 ## Next, in order
 
@@ -26,24 +27,24 @@ soloing elite quests, smart gearing) takes priority over `"human-like"` mimicry 
 above `no_brain` (e.g. `Kael'thas` `3/8` vs `baseline` `6/8`, `Devourer` `3/8` vs `5/8`) and
 hand-checking draft `content/notes/` before enabling them.
 
-1. **Close Phase 1/2 boss-kill sign-off gaps (`Kael'thas`, `Devourer`, `Ikiss` DPS):**
+1. **Close Phase 1/2 boss-kill sign-off gaps (`Kael'thas`, `Devourer` & pooled kill significance):**
    *(Done when: `llm` DPS is within `10%` of `llm_no_notes` on all 5 bosses and `llm` boss kills
-   beat `no_brain` significantly after Holm–Bonferroni correction.)*
+   beat `no_brain` significantly after Holm–Bonferroni correction on a single-codebase apples-to-apples run.)*
 2. **Phase 3 — Targeting, roles, items/vehicles, self-revising notes & raids / ICC (`A5`, `A6`, `C2`)**
    *(Promoted ahead of open-world / human-likeness per Decision #4. Done when: kills on Kael and
    Murmur up, Patchwerk with a proper comp, and raid / ICC encounter progression working)*:
-   - **`A5. Targeting and roles`:** Add an `"Attack <name/role>'s target"` option and show `"main
-     assist"` on screen; show healers who is taking damage and who is in range; show the tank loose
-     mobs (who isn't targeting it). Covers the Loken self-target death and Kael adds without C++
-     guessing.
-   - **`A6. Items and vehicles`:** Expose usable bag items as options (`Use <item>`,
-     `docs/specs/options.md`) so Eregos drakes, potions, quest items, and raid consumables/vehicles
-     are possible.
-   - **`C2. Let the brain revise its own `notes.md` (competence hill-climb loop)`:** After a wipe,
-     run a slower reflection call over the fight timeline (what hit whom, when, and which orders
-     fired) to propose a `notes.md` edit; keep the edit only if a short bench re-run doesn't get
-     worse (hill-climb loop aimed at notes, scored by **kills and damage taken**, not
-     human-likeness).
+   - **`A5. Targeting and roles` (implemented & unit-tested; live verification pending):** `"Attack
+     <main assist/tank> <name>'s target (<mob>)"` option resolved by exact target GUID, `"main
+     tank"` / `"main assist"` on screen, factual `party hurt:` (distance + LoS) and `loose mobs:`
+     (when a tank is designated).
+   - **`A6. Items and vehicles` (implemented & unit-tested; live verification pending; touches locked `snapshot_builder.cc` — relock pending explicit user OK):**
+     exposes usable on-use bag items as `Use <item>` options (`docs/specs/options.md`) so Eregos
+     drakes, potions, quest items, Hearthstone, and raid consumables/vehicles work.
+   - **`C2. Let the brain revise its own `notes.md` (competence hill-climb loop)` (implemented & unit-tested; live verification pending):**
+     [`tools/bench/notes_hill_climb.py`](../tools/bench/notes_hill_climb.py) summarizes fight
+     timelines from wipes, runs a reflection LLM call to propose revised `notes.md`, validates
+     standing orders, and gates edits on a short boss bench re-run scored by **kills, deaths, and
+     damage taken** (`bench_bosses.py --notes-file`, plus `marrowgar` ICC 10-man).
 4. **Phase 4 — Mechanical open-world competence: questing, solo elite quests, smart gearing & zero stalls (`B1–B3`)**
    *(Done when: quests per hour within `30%` of human traces, solo elite quests & smart gear
    upgrades working, and no `5 min` stalls in a `4 h` soak. Incorporates compact adaptations from
@@ -174,6 +175,10 @@ hand-checking draft `content/notes/` before enabling them.
   details in [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md) §6).
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-21: **Review `f644f1b` fixes (High 1–3, Medium 1–3, Low 1–3) + Phase 3 `A6` (usable bag items) & `C2` (`notes_hill_climb.py` + ICC `marrowgar`):**
+  - *Review `f644f1b` (`A5` & `bench_bosses.py`):* [`snapshot_builder.cc`](../server_module/src/snapshot/snapshot_builder.cc) populates `base.self.unit.group` (`FillSelf`) and `OptionFacts::party_targets` (`FillOptionFacts`); [`options.cc`](../server_module/src/options/options.cc) resolves assist options by exact `target_guid`, emits distinct synthetic `option.guid = "assist:" + best->guid` (avoiding `PlanRunner` collision with regular `Attack <mob>`), and skips `m.name == snapshot->bot`; [`screen_renderer.cc`](../harness/src/screen/screen_renderer.cc) includes `self` in `tank_names`, suppresses `loose mobs:` when no tank is designated (preventing non-LFG 5-man inversion), includes pulled `NEUTRAL` mobs, removes the hardcoded 40 yd heal-range verdict from `party hurt:` (pure distance + LoS), and checks `std::lround(*u.health_pct) < 100`; [`bench_bosses.py`](../tools/bench/bench_bosses.py) rejects empty `--arms`, aligns `_needs_llm()` with `run_boss_waves()`, and scopes `trace_dir` by `--arms`; expanded unit tests in [`screen_renderer_unittest.cc`](../harness/src/screen/screen_renderer_unittest.cc), [`options_unittest.cc`](../server_module/src/options/options_unittest.cc), and [`dodge_timeline_test.py`](../tools/bench/dodge_timeline_test.py); corrected `docs/TODO.md` benchmark/draft-notes honesty (`H3`, `M1`, `L2`).
+  - *Phase 3 `A6` & `C2`:* added `OptionFacts_Item` ([`snapshot.h`](../snapshot/snapshot.h)), `CollectUsableBagItems` & `ExecuteUseItemOption` ([`option_executor.{h,cc}`](../server_module/src/options/option_executor.cc)), and `Use <item>` bag options ([`options.cc`](../server_module/src/options/options.cc)); added [`tools/bench/notes_hill_climb.py`](../tools/bench/notes_hill_climb.py) + [`tools/bench/notes_hill_climb_test.py`](../tools/bench/notes_hill_climb_test.py) (`4/4`, wired into [`tools/wlblib/check.py`](../tools/wlblib/check.py)), `--notes-file`, and `marrowgar` (ICC 10-man) in [`bench_bosses.py`](../tools/bench/bench_bosses.py). Verified via `tools/wlb check` (`ALL CHECKS PASSED`) and `tools/wlb build server --test`.
 
 - 2026-11-21: **User-approved scorer lock update (`951d4cc17f25...`):**
   recorded user-approved [`config/scorer-lock.sha256`](../config/scorer-lock.sha256) digest (`951d4cc17f25...`) after interactive `hill_climb.py lock-scorer --force-relock` for Review 12 Medium 1 and Review `ede3f6c` scorer fixes, verified via `hill_climb._verify_all_locks()`.

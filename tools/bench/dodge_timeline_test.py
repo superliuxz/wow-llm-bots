@@ -874,11 +874,20 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
         self.assertIsNone(dead["dps_during"])
         self.assertIsNone(dead["dps_lost"])
 
-    def test_needs_llm_respects_arms_override(self) -> None:
+    def test_needs_llm_and_trace_dir_for_arms_override(self) -> None:
         self.assertFalse(bench_bosses._needs_llm("mixed_all", ("no_brain", "baseline")))
         self.assertFalse(bench_bosses._needs_llm("no_brain", None))
         self.assertTrue(bench_bosses._needs_llm("mixed_all", ("llm", "no_brain")))
         self.assertTrue(bench_bosses._needs_llm("mixed_all", None))
+        # Empty tuple falls back to mode just like run_boss_waves.
+        self.assertTrue(bench_bosses._needs_llm("mixed_all", ()))
+        self.assertFalse(bench_bosses._needs_llm("no_brain", ()))
+        # Split-arm runs get distinct trace dirs so they don't clobber each other.
+        d1 = bench_bosses._trace_dir_for("kaelthas_mgt", "mixed_all", ("llm", "llm_no_notes"))
+        d2 = bench_bosses._trace_dir_for("kaelthas_mgt", "mixed_all", ("no_brain", "baseline"))
+        self.assertNotEqual(d1, d2)
+        self.assertTrue(str(d1).endswith("bench_boss_kaelthas_mgt_llm_llm_no_notes"))
+        self.assertTrue(str(d2).endswith("bench_boss_kaelthas_mgt_no_brain_baseline"))
 
 
 if __name__ == "__main__":

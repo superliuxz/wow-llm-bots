@@ -486,10 +486,112 @@ TEST(OptionsTest, AssistOptionOfferedForMainAssistAndTankTargets) {
   ASSERT_EQ(targets.size(), 5u);
   EXPECT_EQ(snapshot.options[2].text,
             "Attack main assist Loadc's target (Phoenix Egg)");
+  EXPECT_EQ(snapshot.options[2].guid, "assist:0x20");
   EXPECT_EQ(targets[2].guid, "0x20");
   EXPECT_EQ(snapshot.options[3].text,
             "Attack tank Loada's target (Kael'thas Sunstrider)");
+  EXPECT_EQ(snapshot.options[3].guid, "assist:0x21");
   EXPECT_EQ(targets[3].guid, "0x21");
+}
+
+TEST(OptionsTest, AssistResolvesExactGuidCapAndEdgeCases) {
+  pb::Snapshot snapshot;
+  snapshot.bot = "SelfTank";
+  // Two identical-name adds: 0x30 is nearer (8 yd), 0x31 is farther (22 yd).
+  pb::Unit* egg_near = AddUnit(&snapshot, "Phoenix Egg", "0x30", 8);
+  egg_near->reaction = pb::Unit::HOSTILE;
+  pb::Unit* egg_far = AddUnit(&snapshot, "Phoenix Egg", "0x31", 22);
+  egg_far->reaction = pb::Unit::HOSTILE;
+  pb::Unit* mob2 = AddUnit(&snapshot, "Blood Beast", "0x32", 15);
+  mob2->reaction = pb::Unit::HOSTILE;
+  pb::Unit* mob3 = AddUnit(&snapshot, "Val'kyr", "0x33", 18);
+  mob3->reaction = pb::Unit::HOSTILE;
+  pb::Unit* dead_mob = AddUnit(&snapshot, "Dead Add", "0x34", 10);
+  dead_mob->reaction = pb::Unit::HOSTILE;
+  dead_mob->dead = true;
+
+  pb::Party& party = snapshot.ext.party.emplace();
+  // Self in party.members must be skipped.
+  pb::Unit& self_m = party.members.emplace_back();
+  self_m.name = "SelfTank";
+  self_m.target = "Val'kyr";
+  self_m.group.emplace().online = true;
+  self_m.group->main_assist = true;
+
+  // Main assist targets the FARTHER Phoenix Egg (0x31) via party_targets.
+  pb::Unit& ma = party.members.emplace_back();
+  ma.name = "Loadc";
+  ma.target = "Phoenix Egg";
+  ma.group.emplace().online = true;
+  ma.group->main_assist = true;
+
+  // Tank 1 targets Blood Beast (0x32), Tank 2 targets Val'kyr (0x33) -> capped
+  // at 2.
+  pb::Unit& t1 = party.members.emplace_back();
+  t1.name = "Loada";
+  t1.target = "Blood Beast";
+  t1.group.emplace().online = true;
+  t1.group->role = pb::TANK;
+
+  pb::Unit& t2 = party.members.emplace_back();
+  t2.name = "Loadf";
+  t2.target = "Val'kyr";
+  t2.group.emplace().online = true;
+  t2.group->role = pb::TANK;
+
+  // Caller targeting dead mob must be skipped.
+  pb::Unit& dead_caller = party.members.emplace_back();
+  dead_caller.name = "Loadg";
+  dead_caller.target = "Dead Add";
+  dead_caller.group.emplace().online = true;
+  dead_caller.group->main_assist = true;
+
+  OptionFacts facts;
+  facts.party_targets.push_back({"Loadc", "0x31"});
+  facts.party_targets.push_back({"Loada", "0x32"});
+  facts.party_targets.push_back({"Loadf", "0x33"});
+  facts.party_targets.push_back({"Loadg", "0x34"});
+
+  const std::vector<OptionTarget> targets = AddOptions(&snapshot, facts);
+  // 3 unique nearby Attack options (Phoenix Egg, Blood Beast, Val'kyr) +
+  // 2 capped assist options (0x31 far egg, 0x32 Blood Beast) + Keep = 6.
+  ASSERT_EQ(targets.size(), 6u);
+  EXPECT_EQ(targets[3].guid, "0x31");  // Farther egg, NOT nearer 0x30!
+  EXPECT_EQ(snapshot.options[3].guid, "assist:0x31");
+  EXPECT_EQ(targets[4].guid, "0x32");
+  EXPECT_EQ(snapshot.options[4].guid, "assist:0x32");
+
+  // Dead self gets no assist options.
+  pb::Snapshot dead_snap = snapshot;
+  dead_snap.options.clear();
+  dead_snap.base.self.state = pb::Self::DEAD_BODY;
+  const std::vector<OptionTarget> dead_targets = AddOptions(&dead_snap, facts);
+  EXPECT_EQ(dead_targets.size(), 1u);
+}
+
+TEST(OptionsTest, UsableBagItemsOfferedAsUseOptionsAndFilteredInCombat) {
+  OptionFacts facts;
+  facts.usable_items.push_back({37860, "Ruby Essence", false});
+  facts.usable_items.push_back({33447, "Runic Healing Potion", true});
+
+  pb::Snapshot ooc;
+  ooc.base.self.in_combat = false;
+  const std::vector<OptionTarget> ooc_targets = AddOptions(&ooc, facts);
+  EXPECT_EQ(Texts(ooc), (std::vector<std::string>{
+                            "Use Ruby Essence", "Use Runic Healing Potion",
+                            "Keep doing what I'm doing"}));
+  ASSERT_EQ(ooc_targets.size(), 3u);
+  EXPECT_EQ(ooc_targets[0].kind, OptionTarget::Kind::kUse);
+  EXPECT_EQ(ooc_targets[0].guid, "item:37860");
+  EXPECT_EQ(ooc_targets[1].guid, "item:33447");
+
+  pb::Snapshot ic;
+  ic.base.self.in_combat = true;
+  const std::vector<OptionTarget> ic_targets = AddOptions(&ic, facts);
+  EXPECT_EQ(Texts(ic), (std::vector<std::string>{"Use Runic Healing Potion",
+                                                 "Keep doing what I'm doing"}));
+  ASSERT_EQ(ic_targets.size(), 2u);
+  EXPECT_EQ(ic_targets[0].guid, "item:33447");
 }
 
 }  // namespace

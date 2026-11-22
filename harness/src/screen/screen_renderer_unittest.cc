@@ -670,8 +670,8 @@ TEST(ScreenRendererTest, RendersMainAssistHurtAndLooseMobsInParty) {
   const Screen screen = RenderScreen(snap);
   EXPECT_NE(screen.text.find("main tank"), std::string::npos) << screen.text;
   EXPECT_NE(screen.text.find("main assist"), std::string::npos) << screen.text;
-  EXPECT_NE(screen.text.find("party hurt: Loada 62% (18 yd, in range), "
-                             "Loadc 85% (46 yd, out of range, out of sight), "
+  EXPECT_NE(screen.text.find("party hurt: Loada 62% (18 yd), "
+                             "Loadc 85% (46 yd, out of sight), "
                              "Loadd 90% (out of range)"),
             std::string::npos)
       << screen.text;
@@ -682,6 +682,74 @@ TEST(ScreenRendererTest, RendersMainAssistHurtAndLooseMobsInParty) {
   EXPECT_EQ(screen.text.find("Kael'thas Sunstrider (targeting Loada"),
             std::string::npos)
       << screen.text;
+}
+
+TEST(ScreenRendererTest, LooseMobsAndPartyHurtEdgeCases) {
+  // 1. Two-tank raid where self is Tank 1: mob targeting self is NOT loose,
+  //    pulled neutral mob targeting healer IS loose, 99.6% HP is NOT hurt.
+  pb::Snapshot two_tank;
+  two_tank.bot = "Tank1";
+  two_tank.base.self.state = pb::Self::ALIVE;
+  two_tank.base.self.in_combat = true;
+  two_tank.base.self.unit.group.emplace().role = pb::TANK;
+  two_tank.base.self.unit.group->main_tank = true;
+
+  pb::Party& party = two_tank.ext.party.emplace();
+  pb::Unit& tank2 = party.members.emplace_back();
+  tank2.name = "Tank2";
+  tank2.guid = "0x100";
+  tank2.health_pct = 99.6f;  // Rounds to 100%: must not appear in party hurt.
+  tank2.group.emplace().online = true;
+  tank2.group->in_range = true;
+  tank2.group->role = pb::TANK;
+
+  pb::Unit& healer = party.members.emplace_back();
+  healer.name = "Heal1";
+  healer.guid = "0x101";
+  healer.health_pct = 100.0f;
+  healer.group.emplace().online = true;
+  healer.group->in_range = true;
+  healer.group->role = pb::HEALER;
+
+  pb::Unit& boss = two_tank.base.nearby.units.emplace_back();
+  boss.guid = "0x200";
+  boss.name = "Patchwerk";
+  boss.kind = pb::Unit::NPC;
+  boss.reaction = pb::Unit::HOSTILE;
+  boss.target = "Tank1";
+  boss.rel.dist_yd = 5.0f;
+
+  pb::Unit& pulled_neutral = two_tank.base.nearby.units.emplace_back();
+  pulled_neutral.guid = "0x201";
+  pulled_neutral.name = "Sludge Belcher";
+  pulled_neutral.kind = pb::Unit::NPC;
+  pulled_neutral.reaction = pb::Unit::NEUTRAL;
+  pulled_neutral.target = "Heal1";
+  pulled_neutral.rel.dist_yd = 12.0f;
+
+  const Screen s_two = RenderScreen(two_tank);
+  EXPECT_EQ(s_two.text.find("party hurt:"), std::string::npos) << s_two.text;
+  EXPECT_EQ(s_two.text.find("Patchwerk (targeting Tank1"), std::string::npos)
+      << s_two.text;
+  EXPECT_NE(
+      s_two.text.find("loose mobs: Sludge Belcher (targeting Heal1, 12 yd)"),
+      std::string::npos)
+      << s_two.text;
+
+  // 2. Out of combat: loose mobs suppressed.
+  two_tank.base.self.in_combat = false;
+  const Screen s_ooc = RenderScreen(two_tank);
+  EXPECT_EQ(s_ooc.text.find("loose mobs:"), std::string::npos) << s_ooc.text;
+
+  // 3. Group with no tank role/flag assigned: loose mobs suppressed (no
+  // inversion).
+  pb::Snapshot no_tank = two_tank;
+  no_tank.base.self.in_combat = true;
+  no_tank.base.self.unit.group.reset();
+  no_tank.ext.party->members[0].group->role = pb::ROLE_UNSPECIFIED;
+  const Screen s_no_tank = RenderScreen(no_tank);
+  EXPECT_EQ(s_no_tank.text.find("loose mobs:"), std::string::npos)
+      << s_no_tank.text;
 }
 
 }  // namespace

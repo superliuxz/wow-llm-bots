@@ -211,6 +211,23 @@ void FillSelf(Player* bot, pb::Self* self) {
   unit.power_pct = Percent(bot->GetPower(power), bot->GetMaxPower(power));
   unit.dead = bot->isDead();
   unit.player.emplace().class_ = ClassName(bot->getClass());
+  if (Group* group = bot->GetGroup()) {
+    for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+      if (slot.guid == bot->GetGUID()) {
+        pb::GroupPart& gp = unit.group.emplace();
+        gp.subgroup = static_cast<uint32_t>(slot.group) + 1;
+        gp.leader = slot.guid == group->GetLeaderGUID();
+        gp.assistant = (slot.flags & MEMBER_FLAG_ASSISTANT) != 0;
+        gp.main_tank = (slot.flags & MEMBER_FLAG_MAINTANK) != 0;
+        gp.main_assist = (slot.flags & MEMBER_FLAG_MAINASSIST) != 0;
+        gp.role = PartyRole(slot.roles);
+        gp.online = true;
+        gp.in_range = true;
+        gp.aggro = !bot->getAttackers().empty();
+        break;
+      }
+    }
+  }
   // Populate Self::casting using the same visible cast-bar rules as
   // FillActivity (ignore flying projectiles and finished instants).
   if (Spell* sp = bot->GetCurrentSpell(CURRENT_GENERIC_SPELL);
@@ -680,6 +697,21 @@ void SnapshotBuilder::FillOptionFacts(Player* bot,
   *out = OptionFacts{};
   FillNpcFacts(bot, *snapshot, out);
   CheckBagFoodAndDrink(bot, &out->has_food, &out->has_drink);
+  CollectUsableBagItems(bot, &out->usable_items);
+  if (Group* group = bot->GetGroup()) {
+    for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+      if (slot.guid == bot->GetGUID()) {
+        continue;
+      }
+      if (Player* member = ObjectAccessor::FindConnectedPlayer(slot.guid);
+          member && member->IsInWorld()) {
+        if (Unit* sel = member->GetSelectedUnit()) {
+          out->party_targets.push_back(
+              {slot.name, GuidString(sel->GetGUID().GetRawValue())});
+        }
+      }
+    }
+  }
   out->herbalism_skill = bot->GetSkillValue(SKILL_HERBALISM);
   out->mining_skill = bot->GetSkillValue(SKILL_MINING);
 

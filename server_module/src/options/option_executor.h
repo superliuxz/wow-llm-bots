@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "base/time/time.h"
 #include "options/options.h"
@@ -109,6 +110,12 @@ bool HasFoodOrDrinkAura(Player* bot);
 
 // Whether the bags hold food / drink the bot can use now.
 void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink);
+
+// Collects distinct usable on-use bag items (potions, quest items, drake
+// essences, Hearthstone, etc., excluding food/drink handled by Rest) that are
+// off cooldown and usable by `bot`.
+void CollectUsableBagItems(Player* bot,
+                           std::vector<wlb::snapshot::OptionFacts_Item>* out);
 
 // While a Rest step runs: starts eating or drinking when that one isn't going
 // yet (a second item used in the same tick as the first is refused, so a bot

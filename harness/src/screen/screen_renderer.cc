@@ -814,11 +814,13 @@ std::string MemberLine(const pb::Unit& u, bool around_me, bool leader) {
 }
 
 // "party: leader you; loot group loot" and a line per member.
-std::vector<std::string> PartyLines(const pb::Party& p,
-                                    const std::flat_set<std::string>& guids,
-                                    std::string_view my_name,
-                                    const std::vector<pb::Unit>& nearby_units,
-                                    bool in_combat) {
+std::vector<std::string> PartyLines(
+    const pb::Party& p,
+    const std::flat_set<std::string>& guids,
+    std::string_view my_name,
+    const std::optional<pb::GroupPart>& self_group,
+    const std::vector<pb::Unit>& nearby_units,
+    bool in_combat) {
   std::vector<std::string> header;
   bool leader_listed = false;
   for (const pb::Unit& u : p.members) {
@@ -851,11 +853,12 @@ std::vector<std::string> PartyLines(const pb::Party& p,
         base::StrCat({"  - ", MemberLine(u, IsAroundMe(u, guids), leader)}));
   }
 
-  // Factual heal-range & damage summary (A5): who is hurt and within 40 yd.
+  // Factual hurt summary (A5): who is below 100% HP (rounded) with pure
+  // distance + LoS facts (no hardcoded heal-range threshold).
   std::vector<const pb::Unit*> hurt;
   for (const pb::Unit& u : p.members) {
     if (!u.dead && u.group && u.group->online && u.health_pct &&
-        *u.health_pct < 100.0f) {
+        std::lround(*u.health_pct) < 100) {
       hurt.push_back(&u);
     }
   }
@@ -875,10 +878,8 @@ std::vector<std::string> PartyLines(const pb::Party& p,
                                   *u->health_pct);
       } else {
         const float dist = Finite(u->rel.dist_yd);
-        const bool in_heal_range = dist <= 40.0f;
-        info = base::StringPrintf("%s %.0f%% (%.0f yd, %s", u->name.c_str(),
-                                  *u->health_pct, dist,
-                                  in_heal_range ? "in range" : "out of range");
+        info = base::StringPrintf("%s %.0f%% (%.0f yd", u->name.c_str(),
+                                  *u->health_pct, dist);
         if (u->rel.in_los && !*u->rel.in_los) {
           info += ", out of sight";
         }
@@ -890,44 +891,44 @@ std::vector<std::string> PartyLines(const pb::Party& p,
         base::StrCat({"  party hurt: ", base::JoinString(parts, ", ")}));
   }
 
-  // Factual loose-mob summary (A5): hostile mobs targeting a non-tank ally.
+  // Factual loose-mob summary (A5): only when at least one designated tank
+  // exists in the group (including `self` when marked tank), flag living
+  // hostile or pulled neutral mobs targeting a non-tank party member.
   if (in_combat) {
     std::flat_set<std::string> tank_names;
     std::flat_set<std::string> member_names;
+    if (self_group && (self_group->main_tank || self_group->role == pb::TANK) &&
+        !my_name.empty()) {
+      tank_names.insert(std::string(my_name));
+    }
     for (const pb::Unit& u : p.members) {
       member_names.insert(u.name);
       if (u.group && (u.group->main_tank || u.group->role == pb::TANK)) {
         tank_names.insert(u.name);
       }
     }
-    std::vector<std::string> loose;
-    for (const pb::Unit& u : nearby_units) {
-      if (u.dead || u.reaction != pb::Unit::HOSTILE || u.target.empty()) {
-        continue;
-      }
-      const bool target_is_party = member_names.contains(u.target) ||
-                                   (!my_name.empty() && u.target == my_name);
-      if (!target_is_party) {
-        continue;
-      }
-      if (!tank_names.empty()) {
-        if (tank_names.contains(u.target)) {
+    if (!tank_names.empty()) {
+      std::vector<std::string> loose;
+      for (const pb::Unit& u : nearby_units) {
+        if (u.dead ||
+            (u.reaction != pb::Unit::HOSTILE &&
+             u.reaction != pb::Unit::NEUTRAL) ||
+            u.target.empty()) {
           continue;
         }
-      } else {
-        // No other party member is marked tank (self may be the tank):
-        // flag mobs targeting any other party member.
-        if (!my_name.empty() && u.target == my_name) {
+        const bool target_is_party = member_names.contains(u.target) ||
+                                     (!my_name.empty() && u.target == my_name);
+        if (!target_is_party || tank_names.contains(u.target)) {
           continue;
         }
+        loose.push_back(base::StringPrintf("%s (targeting %s, %.0f yd)",
+                                           u.name.c_str(), u.target.c_str(),
+                                           Finite(u.rel.dist_yd)));
       }
-      loose.push_back(base::StringPrintf("%s (targeting %s, %.0f yd)",
-                                         u.name.c_str(), u.target.c_str(),
-                                         Finite(u.rel.dist_yd)));
-    }
-    if (!loose.empty()) {
-      lines.push_back(
-          base::StrCat({"  loose mobs: ", base::JoinString(loose, ", ")}));
+      if (!loose.empty()) {
+        lines.push_back(
+            base::StrCat({"  loose mobs: ", base::JoinString(loose, ", ")}));
+      }
     }
   }
   return lines;
@@ -1447,8 +1448,9 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
     }
   }
   if (ext.party) {
-    for (std::string& line : PartyLines(*ext.party, around_me, snapshot.bot,
-                                        nearby.units, base.self.in_combat)) {
+    for (std::string& line :
+         PartyLines(*ext.party, around_me, snapshot.bot, base.self.unit.group,
+                    nearby.units, base.self.in_combat)) {
       lines.push_back(std::move(line));
     }
   }
