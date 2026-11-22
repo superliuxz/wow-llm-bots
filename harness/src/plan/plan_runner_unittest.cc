@@ -274,5 +274,88 @@ TEST(PlanRunnerTest, MultipleExploreAndGoToOptionsDoNotCollideAcrossSnapshots) {
   EXPECT_EQ(a3.choose->option, 4u);
 }
 
+TEST(PlanRunnerTest, AssistGuidTracksUnitAndItemGuidWaitsForDoneCommand) {
+  PlanRunner runner;
+  const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
+
+  // Assist option ("assist:0x20"): must NOT finish prematurely out of combat,
+  // must refresh combat timeout on HP drop, and must finish when unit dies.
+  pb::Snapshot s1 = MakeSnap(1);
+  s1.base.self.in_combat = false;
+  pb::Unit& mob = s1.base.nearby.units.emplace_back();
+  mob.guid = "0x20";
+  mob.name = "Phoenix Egg";
+  mob.kind = pb::Unit::NPC;
+  mob.reaction = pb::Unit::HOSTILE;
+  mob.health_pct = 100.0f;
+  AddModuleOption(&s1, pb::Option::ATTACK, "Attack Phoenix Egg", "0x20",
+                  "Phoenix Egg");
+  AddModuleOption(&s1, pb::Option::ATTACK,
+                  "Attack main assist Loadc's target (Phoenix Egg)",
+                  "assist:0x20", "Loadc's target");
+  AddModuleOption(&s1, pb::Option::USE, "Use Ruby Essence", "item:37860",
+                  "Ruby Essence");
+  AddModuleOption(&s1, pb::Option::KEEP, "Keep doing what I'm doing");
+
+  const Screen scr1 = RenderScreen(s1);
+  const RunnerAction start = runner.Start({{2, 1}, {3, 1}}, 1, scr1, t0);
+  ASSERT_TRUE(start.choose);
+  EXPECT_EQ(start.choose->option, 2u);
+  runner.set_last_command_id(10);
+
+  // Next snapshot still out of combat: assist target is alive, must stay
+  // active.
+  pb::Snapshot s2 = s1;
+  s2.seq = 2;
+  const RunnerAction a2 =
+      runner.OnSnapshot(s2, RenderScreen(s2), t0 + base::Seconds(1));
+  EXPECT_FALSE(a2.choose.has_value());
+  EXPECT_TRUE(a2.finished_reason.empty());
+
+  // Combat HP drop refreshes timeout past 45 s.
+  pb::Snapshot s3 = s1;
+  s3.seq = 3;
+  s3.base.self.in_combat = true;
+  s3.base.nearby.units[0].health_pct = 60.0f;
+  const RunnerAction a3 =
+      runner.OnSnapshot(s3, RenderScreen(s3), t0 + base::Seconds(30));
+  EXPECT_FALSE(a3.choose.has_value());
+  EXPECT_TRUE(a3.finished_reason.empty());
+
+  pb::Snapshot s4 = s3;
+  s4.seq = 4;
+  s4.base.nearby.units[0].health_pct = 30.0f;
+  const RunnerAction a4 =
+      runner.OnSnapshot(s4, RenderScreen(s4), t0 + base::Seconds(60));
+  EXPECT_FALSE(a4.choose.has_value());
+  EXPECT_TRUE(a4.finished_reason.empty());
+
+  // Unit dies -> advances to step 2 ("Use Ruby Essence", option 3).
+  pb::Snapshot s5 = s4;
+  s5.seq = 5;
+  s5.base.nearby.units[0].dead = true;
+  const RunnerAction a5 =
+      runner.OnSnapshot(s5, RenderScreen(s5), t0 + base::Seconds(65));
+  ASSERT_TRUE(a5.choose);
+  EXPECT_EQ(a5.choose->option, 3u);
+  runner.set_last_command_id(11);
+
+  // Snapshot before done_command_id arrives: bag item must NOT finish early.
+  pb::Snapshot s6 = s5;
+  s6.seq = 6;
+  const RunnerAction a6 =
+      runner.OnSnapshot(s6, RenderScreen(s6), t0 + base::Seconds(66));
+  EXPECT_FALSE(a6.choose.has_value());
+  EXPECT_TRUE(a6.finished_reason.empty());
+
+  // done_command_id == 11 arrives -> plan completes cleanly.
+  pb::Snapshot s7 = s6;
+  s7.seq = 7;
+  s7.done_command_id = 11;
+  const RunnerAction a7 =
+      runner.OnSnapshot(s7, RenderScreen(s7), t0 + base::Seconds(67));
+  EXPECT_EQ(a7.finished_reason, "plan done");
+}
+
 }  // namespace
 }  // namespace harness

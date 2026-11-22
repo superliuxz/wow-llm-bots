@@ -305,6 +305,7 @@ BOSSES = {
         map_id=631,
         stage_xyz=(76.86, 2211.37, 30.0),
         spawn_xyz=(-385.0, 2211.14, 42.08),
+        strip_strat="icc",
         raid=True,
         notes_md=MARROWGAR_NOTES,
         max_s=240.0,
@@ -759,6 +760,7 @@ def run_boss_waves(
     arms_override: tuple[str, ...] | None = None,
     target_runs: int = 3,
     parallel: int = 3,
+    trace_dir_override: pathlib.Path | None = None,
 ) -> dict:
     """Runs `target_runs` valid trials PER ARM for one boss inside a single persistent worldserver."""
     if arms_override:
@@ -773,7 +775,7 @@ def run_boss_waves(
     parties = _make_parties(n_parties, raid=raid)
     all_bots = [b for p in parties for b in p]
 
-    trace_dir = _trace_dir_for(tag, mode, arms_override)
+    trace_dir = trace_dir_override or _trace_dir_for(tag, mode, arms_override)
 
     valid_runs: list[dict] = []
     extra_trials: list[dict] = []
@@ -1298,6 +1300,7 @@ def main() -> int:
     ap.add_argument("--append", action="store_true", help="Merge into existing output JSON instead of overwriting")
     ap.add_argument("--out", default="", help="Optional output JSON path (default: var/bench_boss_10_<mode>.json)")
     ap.add_argument("--notes-file", default="", help="Optional path to custom notes.md override for all selected bosses")
+    ap.add_argument("--trace-dir", default="", help="Optional isolated trace directory override")
     ap.add_argument(
         "--mode",
         choices=("llm", "llm_no_notes", "mixed", "mixed_all", "no_brain", "baseline"),
@@ -1331,6 +1334,9 @@ def main() -> int:
         else (4 if (args.mode == "mixed_all" and not arms_override) else 3)
     )
 
+    notes_override = pathlib.Path(args.notes_file).read_text() if args.notes_file else None
+    trace_dir_override = pathlib.Path(args.trace_dir) if args.trace_dir else None
+
     build.common("default", tests=False)
     build.server(test=True)
     out_json = pathlib.Path(args.out) if args.out else (VAR / f"bench_boss_10_{args.mode}.json")
@@ -1340,7 +1346,6 @@ def main() -> int:
     ctx = LlamaServer(slots=16) if needs_llm else None
     if ctx is not None:
         ctx.__enter__()
-    notes_override = pathlib.Path(args.notes_file).read_text() if args.notes_file else None
     try:
         for k in keys:
             spec = dict(BOSSES[k])
@@ -1353,6 +1358,7 @@ def main() -> int:
                     arms_override=arms_override,
                     target_runs=max(1, args.runs),
                     parallel=max(1, parallel),
+                    trace_dir_override=trace_dir_override,
                 )
             except (Failed, RuntimeError) as exc:
                 say(f"BOSS {k} FAILED (continuing to remaining bosses): {exc}")

@@ -31,21 +31,46 @@ VAR = ROOT / "var"
 
 PREFIXES = ["Load", "Ptwo", "Pthr", "Pfou"]
 
+# Exact act verbs from harness/grammar/orders.wlb (lines 88-110).
 VALID_ACT_PREFIXES = (
-    "out of",
-    "away",
     "to ",
-    "kite",
-    "stop",
+    "out of ",
+    "back",
+    "away",
+    "avoid ",
     "target ",
     "use ",
+    "stop",
+    "face away ",
     "face ",
-    "back",
-    "follow ",
+    "jump",
+    "cancel ",
+    "mark ",
     "interact ",
-    "stay ",
-    "spread",
-    "stack",
+    "board ",
+    "leave vehicle",
+    "equip ",
+    "pet ",
+    "kite ",
+    "wake",
+)
+
+# Acts that require a non-empty argument after the verb prefix.
+_REQUIRES_ARG_PREFIXES = (
+    "to ",
+    "out of ",
+    "avoid ",
+    "target ",
+    "use ",
+    "face away ",
+    "face ",
+    "cancel ",
+    "mark ",
+    "interact ",
+    "board ",
+    "equip ",
+    "pet ",
+    "kite ",
 )
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
@@ -102,16 +127,27 @@ def is_competence_improvement(
             f"{incumbent.kills}/{incumbent.runs})",
         )
     if cand_rate > inc_rate + 1e-9:
+        if incumbent.median_dps > 0 and candidate.median_dps < incumbent.median_dps * 0.85:
+            return (
+                False,
+                f"DPS regressed >15% despite kill gain ({candidate.median_dps:.1f} vs "
+                f"{incumbent.median_dps:.1f})",
+            )
         return (
             True,
             f"kill rate improved ({candidate.kills}/{candidate.runs} > "
             f"{incumbent.kills}/{incumbent.runs})",
         )
-    # Equal kill rate: guard against DPS collapse (>10% drop).
+    # Equal kill rate: guard against DPS collapse (>10% drop) and death increase.
     if incumbent.median_dps > 0 and candidate.median_dps < incumbent.median_dps * 0.90:
         return (
             False,
             f"DPS regressed >10% ({candidate.median_dps:.1f} vs {incumbent.median_dps:.1f})",
+        )
+    if candidate.median_deaths > incumbent.median_deaths + 1e-9:
+        return (
+            False,
+            f"deaths increased ({candidate.median_deaths:.1f} > {incumbent.median_deaths:.1f})",
         )
     if candidate.median_deaths < incumbent.median_deaths - 1e-9:
         return (
@@ -162,10 +198,20 @@ def validate_standing_orders(notes_md: str) -> tuple[bool, list[str]]:
             errors.append(f"empty condition or action: {order!r}")
             continue
         steps = [s.strip() for s in re.split(r",\s*then\s+", rhs, flags=re.IGNORECASE)]
+        if not (1 <= len(steps) <= 3):
+            errors.append(f"order must have 1..3 steps (got {len(steps)}): {order!r}")
+            continue
         for step in steps:
             low = step.lower()
-            if not any(low == p.strip() or low.startswith(p) for p in VALID_ACT_PREFIXES):
+            matched = next(
+                (p for p in VALID_ACT_PREFIXES if (low == p.strip() or low.startswith(p))),
+                None,
+            )
+            if matched is None:
                 errors.append(f"unsupported act verb in {order!r}: {step!r}")
+                continue
+            if matched in _REQUIRES_ARG_PREFIXES and not step[len(matched) :].strip():
+                errors.append(f"missing argument for {matched.strip()!r} in {order!r}")
     return (len(errors) == 0), errors
 
 
@@ -211,8 +257,9 @@ def summarize_fight_timeline(
         outcome = "KILL" if t.get("killed") else "WIPE"
         lines.append(f"\nTrial {idx} ({outcome}, {dur:.1f}s, party DPS={dps:.0f}, deaths={deaths}):")
         p_idx = int(t.get("party_index", 0))
+        inst = t.get("instance_id")
         pull_ms = int(t.get("pull_ms", 0))
-        t0 = pull_ms - 2000
+        t0 = pull_ms
         t1 = pull_ms + int(dur * 1000) + 2000
         pref = PREFIXES[p_idx] if 0 <= p_idx < len(PREFIXES) else "Load"
         dmg_taken: collections.Counter[str] = collections.Counter()
@@ -223,6 +270,8 @@ def summarize_fight_timeline(
             for e in traces_by_bot.get(bot, []):
                 tm = int(e.get("t_ms", 0))
                 if tm < t0 or tm > t1:
+                    continue
+                if inst is not None and e.get("inst") is not None and e.get("inst") != inst:
                     continue
                 ev = e.get("event")
                 if ev == "damage_taken":
@@ -308,7 +357,12 @@ def propose_notes_edit(
 
 
 def _default_bench_runner(
-    boss_key: str, notes_path: pathlib.Path, runs: int, parallel: int, out_json: pathlib.Path
+    boss_key: str,
+    notes_path: pathlib.Path,
+    runs: int,
+    parallel: int,
+    out_json: pathlib.Path,
+    trace_dir: pathlib.Path,
 ) -> dict[str, Any]:
     cmd = [
         sys.executable,
@@ -324,6 +378,8 @@ def _default_bench_runner(
         str(parallel),
         "--notes-file",
         str(notes_path),
+        "--trace-dir",
+        str(trace_dir),
         "--out",
         str(out_json),
     ]
@@ -338,9 +394,12 @@ def run_notes_hill_climb(
     out_dir: pathlib.Path,
     rounds: int = 3,
     runs_per_eval: int = 3,
+    confirm_runs: int = 0,
     parallel: int = 2,
-    trace_dir: pathlib.Path | None = None,
-    bench_fn: Callable[[str, pathlib.Path, int, int, pathlib.Path], dict[str, Any]] | None = None,
+    bench_fn: Callable[
+        [str, pathlib.Path, int, int, pathlib.Path, pathlib.Path], dict[str, Any]
+    ]
+    | None = None,
     propose_fn: Callable[[str, str, str, list[str]], str] | None = None,
     llm_url: str = "http://127.0.0.1:8090/v1/chat/completions",
 ) -> dict[str, Any]:
@@ -357,7 +416,8 @@ def run_notes_hill_climb(
     best_notes_path.write_text(best_notes)
 
     base_json = out_dir / "round_0_base.json"
-    best_res = bench(boss_key, best_notes_path, runs_per_eval, parallel, base_json)
+    best_trace_dir = out_dir / "round_0_traces"
+    best_res = bench(boss_key, best_notes_path, runs_per_eval, parallel, base_json, best_trace_dir)
     best_score = score_from_boss_result(best_res, arm="llm")
     boss_name = best_res.get("boss", boss_key)
 
@@ -373,17 +433,18 @@ def run_notes_hill_climb(
     log_entry({"round": 0, "status": "baseline", "score": best_score.to_dict()})
 
     for r in range(1, rounds + 1):
-        timeline = summarize_fight_timeline(best_res, trace_dir, arm="llm")
+        timeline = summarize_fight_timeline(best_res, best_trace_dir, arm="llm")
         candidate_notes = propose(boss_name, best_notes, timeline, rejected_history)
+        orders_preview = "; ".join(extract_standing_orders(candidate_notes)) or "(no orders)"
         valid, errs = validate_standing_orders(candidate_notes)
         if not valid:
             reason = "invalid standing orders: " + "; ".join(errs)
-            rejected_history.append(reason)
+            rejected_history.append(f"round {r} [{orders_preview}]: {reason}")
             log_entry({"round": r, "status": "rejected_syntax", "reason": reason})
             continue
         if candidate_notes.strip() == best_notes.strip():
             reason = "proposed notes identical to current best"
-            rejected_history.append(reason)
+            rejected_history.append(f"round {r}: {reason}")
             log_entry({"round": r, "status": "rejected_noop", "reason": reason})
             continue
 
@@ -394,14 +455,33 @@ def run_notes_hill_climb(
             cand_path = pathlib.Path(tf.name)
 
         cand_json = out_dir / f"round_{r}_cand.json"
-        cand_res = bench(boss_key, cand_path, runs_per_eval, parallel, cand_json)
+        cand_trace_dir = out_dir / f"round_{r}_traces"
+        cand_res = bench(boss_key, cand_path, runs_per_eval, parallel, cand_json, cand_trace_dir)
         cand_score = score_from_boss_result(cand_res, arm="llm")
         keep, reason = is_competence_improvement(best_score, cand_score)
+
+        # Optional confirmation re-run guards against binomial noise on small n.
+        if keep and confirm_runs > 0:
+            conf_json = out_dir / f"round_{r}_confirm.json"
+            conf_trace_dir = out_dir / f"round_{r}_confirm_traces"
+            conf_res = bench(
+                boss_key, cand_path, confirm_runs, parallel, conf_json, conf_trace_dir
+            )
+            conf_score = score_from_boss_result(conf_res, arm="llm")
+            keep, conf_reason = is_competence_improvement(best_score, conf_score)
+            if keep:
+                cand_res = conf_res
+                cand_score = conf_score
+                cand_trace_dir = conf_trace_dir
+                reason = f"confirmed ({conf_reason})"
+            else:
+                reason = f"failed confirmation ({conf_reason})"
 
         if keep:
             best_notes = candidate_notes
             best_res = cand_res
             best_score = cand_score
+            best_trace_dir = cand_trace_dir
             best_notes_path.write_text(best_notes)
             log_entry(
                 {
@@ -412,7 +492,7 @@ def run_notes_hill_climb(
                 }
             )
         else:
-            rejected_history.append(f"round {r}: {reason}")
+            rejected_history.append(f"round {r} [{orders_preview}]: {reason}")
             log_entry(
                 {
                     "round": r,
@@ -431,13 +511,21 @@ def run_notes_hill_climb(
 
 
 def main() -> int:
+    sys.path.insert(0, str(ROOT / "tools"))
     sys.path.insert(0, str(ROOT / "tools" / "bench"))
     import bench_bosses  # noqa: E402
+    from wlblib.testing import LlamaServer  # noqa: E402
 
     ap = argparse.ArgumentParser(description="C2: self-revising notes.md hill-climb loop")
     ap.add_argument("--boss", required=True, choices=sorted(bench_bosses.BOSSES))
     ap.add_argument("--rounds", type=int, default=3)
     ap.add_argument("--runs", type=int, default=3, help="Short bench runs per candidate")
+    ap.add_argument(
+        "--confirm-runs",
+        type=int,
+        default=3,
+        help="Confirmation bench runs before keeping an improvement (0 disables)",
+    )
     ap.add_argument("--parallel", type=int, default=2)
     ap.add_argument("--notes-file", default="", help="Starting notes.md (default: BOSSES[boss]['notes_md'])")
     ap.add_argument("--out-dir", default="", help="Output dir (default: var/notes_hill_climb/<boss>)")
@@ -449,18 +537,19 @@ def main() -> int:
         pathlib.Path(args.notes_file).read_text() if args.notes_file else spec["notes_md"]
     )
     out_dir = pathlib.Path(args.out_dir) if args.out_dir else (VAR / "notes_hill_climb" / args.boss)
-    trace_dir = VAR / f"bench_boss_{spec['tag']}_llm"
 
-    summary = run_notes_hill_climb(
-        boss_key=args.boss,
-        initial_notes=initial_notes,
-        out_dir=out_dir,
-        rounds=args.rounds,
-        runs_per_eval=args.runs,
-        parallel=args.parallel,
-        trace_dir=trace_dir,
-        llm_url=args.llm_url,
-    )
+    # Keep one persistent LlamaServer alive across both bench_bosses.py and reflection calls.
+    with LlamaServer(slots=16):
+        summary = run_notes_hill_climb(
+            boss_key=args.boss,
+            initial_notes=initial_notes,
+            out_dir=out_dir,
+            rounds=args.rounds,
+            runs_per_eval=args.runs,
+            confirm_runs=args.confirm_runs,
+            parallel=args.parallel,
+            llm_url=args.llm_url,
+        )
     print(json.dumps(summary, indent=2))
     return 0
 

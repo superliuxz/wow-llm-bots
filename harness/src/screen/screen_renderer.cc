@@ -858,7 +858,7 @@ std::vector<std::string> PartyLines(
   std::vector<const pb::Unit*> hurt;
   for (const pb::Unit& u : p.members) {
     if (!u.dead && u.group && u.group->online && u.health_pct &&
-        std::lround(*u.health_pct) < 100) {
+        std::isfinite(*u.health_pct) && std::lround(*u.health_pct) < 100) {
       hurt.push_back(&u);
     }
   }

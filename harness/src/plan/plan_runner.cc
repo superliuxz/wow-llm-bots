@@ -73,12 +73,20 @@ const pb::GameObject* FindObjectByGuid(const pb::Snapshot& snapshot,
   return nullptr;
 }
 
+std::string_view StripAssistPrefix(std::string_view guid) {
+  constexpr std::string_view kAssistPrefix = "assist:";
+  if (guid.starts_with(kAssistPrefix)) {
+    guid.remove_prefix(kAssistPrefix.size());
+  }
+  return guid;
+}
+
 bool IsTargetDone(OptionKind kind,
                   std::string_view guid,
                   const pb::Snapshot& snapshot) {
   switch (kind) {
     case OptionKind::kAttack: {
-      const pb::Unit* unit = FindUnitByGuid(snapshot, guid);
+      const pb::Unit* unit = FindUnitByGuid(snapshot, StripAssistPrefix(guid));
       if (unit != nullptr) {
         return unit->dead;
       }
@@ -90,6 +98,11 @@ bool IsTargetDone(OptionKind kind,
     }
     case OptionKind::kGather:
     case OptionKind::kUse: {
+      // Bag item options ("item:<entry>") are not nearby GameObjects; they
+      // finish via `done_command_id` from the module.
+      if (kind == OptionKind::kUse && guid.starts_with("item:")) {
+        return false;
+      }
       const pb::GameObject* obj = FindObjectByGuid(snapshot, guid);
       return obj == nullptr || !obj->usable;
     }
@@ -239,7 +252,8 @@ RunnerAction PlanRunner::OnSnapshot(const pb::Snapshot& snapshot,
     // time out mid-fight on long elite/boss encounters; only stalled attacks
     // hit the 45 s safety limit.
     if (active_kind_ == OptionKind::kAttack) {
-      if (const pb::Unit* unit = FindUnitByGuid(snapshot, active_guid_);
+      if (const pb::Unit* unit =
+              FindUnitByGuid(snapshot, StripAssistPrefix(active_guid_));
           unit && !unit->dead) {
         if (!active_target_hp_pct_.has_value()) {
           active_target_hp_pct_ = unit->health_pct;

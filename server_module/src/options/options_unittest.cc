@@ -369,6 +369,8 @@ TEST(OptionsTest, OptionFactsJsonRoundTrip) {
                           pb::N,
                           900.0f,
                           {300, -4700, 10}});
+  facts.usable_items.push_back({37860, "Ruby Essence", true});
+  facts.party_targets.push_back({"Loada", "0x20"});
 
   const std::string json = pb::WriteJson(facts, /*pretty=*/true);
   ASSERT_FALSE(json.empty());
@@ -571,8 +573,8 @@ TEST(OptionsTest, AssistResolvesExactGuidCapAndEdgeCases) {
 
 TEST(OptionsTest, UsableBagItemsOfferedAsUseOptionsAndFilteredInCombat) {
   OptionFacts facts;
-  facts.usable_items.push_back({37860, "Ruby Essence", false});
-  facts.usable_items.push_back({33447, "Runic Healing Potion", true});
+  facts.usable_items.push_back({37860, "Ruby Essence", true});
+  facts.usable_items.push_back({33447, "Runic Healing Potion", false});
 
   pb::Snapshot ooc;
   ooc.base.self.in_combat = false;

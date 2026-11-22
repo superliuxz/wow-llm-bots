@@ -412,7 +412,7 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       if (item.entry == 0 || item.name.empty()) {
         continue;
       }
-      if (self.in_combat && !item.in_combat_usable) {
+      if (self.in_combat && item.out_of_combat_only) {
         continue;
       }
       const std::string item_guid = "item:" + std::to_string(item.entry);

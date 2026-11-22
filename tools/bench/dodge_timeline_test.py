@@ -888,6 +888,15 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
         self.assertNotEqual(d1, d2)
         self.assertTrue(str(d1).endswith("bench_boss_kaelthas_mgt_llm_llm_no_notes"))
         self.assertTrue(str(d2).endswith("bench_boss_kaelthas_mgt_no_brain_baseline"))
+        # CLI rejects empty/comma-only --arms with SystemExit(2).
+        orig_argv = sys.argv
+        try:
+            sys.argv = ["bench_bosses.py", "--arms", " , "]
+            with self.assertRaises(SystemExit) as ctx:
+                bench_bosses.main()
+            self.assertEqual(ctx.exception.code, 2)
+        finally:
+            sys.argv = orig_argv
 
 
 if __name__ == "__main__":

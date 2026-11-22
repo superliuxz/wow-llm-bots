@@ -38,8 +38,9 @@ hand-checking draft `content/notes/` before enabling them.
      tank"` / `"main assist"` on screen, factual `party hurt:` (distance + LoS) and `loose mobs:`
      (when a tank is designated).
    - **`A6. Items and vehicles` (implemented & unit-tested; live verification pending; touches locked `snapshot_builder.cc` — relock pending explicit user OK):**
-     exposes usable on-use bag items as `Use <item>` options (`docs/specs/options.md`) so Eregos
-     drakes, potions, quest items, Hearthstone, and raid consumables/vehicles work.
+     exposes usable non-equip on-use bag items as `Use <item>` options (`docs/specs/options.md`,
+     self/selected-target) so Eregos drakes, potions, Hearthstone, and raid consumables/vehicles
+     work (unit/object/corpse quest-item targeting tracked in `Loose ends`).
    - **`C2. Let the brain revise its own `notes.md` (competence hill-climb loop)` (implemented & unit-tested; live verification pending):**
      [`tools/bench/notes_hill_climb.py`](../tools/bench/notes_hill_climb.py) summarizes fight
      timelines from wipes, runs a reflection LLM call to propose revised `notes.md`, validates
@@ -117,12 +118,12 @@ hand-checking draft `content/notes/` before enabling them.
   `healthy_boar_pull`, `skip_tapped_mob`, `red_mob_nearby`, `hp_60_fine`, `bags_full` (with closed
   bags it explores; in live play the habit opens full bags, and `bags_full_open` passes),
   `new_loot_hover`. The Qwen3.6 shootout was not re-run.
-- **Panels, things not built yet** (`docs/specs/options.md`): no `Use <item>` option
-  for bag items (and thus no spec §10 use-item quest eval case yet: needs item target selection for
-  unit/object/self quest items); the module sends no `quest_accepted` / `quest_complete` /
-  inventory-full events, so the habits read the snapshot instead (`bag_free_slots`, the quest
-  tracker); "open bags at a vendor" waits for vendor windows (`interaction`); hover only for items
-  and quests (spells, auras, units, places later).
+- **Panels, things not built yet** (`docs/specs/options.md`): `Use <item>` for bag items now works
+  for self/selected-target on-use items (`A6`), while explicit unit/object/corpse target selection
+  for spec §10 quest items (and its eval case) is not built yet; the module sends no
+  `quest_accepted` / `quest_complete` / inventory-full events, so the habits read the snapshot
+  instead (`bag_free_slots`, the quest tracker); "open bags at a vendor" waits for vendor windows
+  (`interaction`); hover only for items and quests (spells, auras, units, places later).
 - Dead bots: only Keep is offered while dead, refused steps back off (2-30 s), and coming back
   to life wakes the brain ("alive again"). Release spirit / run to corpse are not options yet
   (the body's playerbots dead strategy handles it).
@@ -166,6 +167,7 @@ hand-checking draft `content/notes/` before enabling them.
   live-triggered on `murmur`, and entrance staging/pull coordinates for `devourer`, `loken`,
   `kaelthas`, `murmur`, and `ikiss` live-verified across `64` valid trials (`n = 16` per arm)
   each.)*
+- **Human trace GM-speed cleanup:** `2026-11-22.1.jsonl` in `~/.local/share/wow-llm-bots/human_baseline/human/Hele/` was cleaned of `> 10 yd/s` GM-fly/speed segments; strip `> 10 yd/s` segments from the still-open `2026-11-22.jsonl` after the play server stops.
 - **Deliberately skipped benchmark speedup proposals (Items 4, 5, adaptive 6):** left unbuilt on
   purpose to preserve valid boss immunity/kite phases (Item 4: `20 s` zero-damage abort would
   cut `Gravity Lapse`/`Planar Shift` and censor `llm` bugs via survivorship bias), cross-boss DB
@@ -176,8 +178,14 @@ hand-checking draft `content/notes/` before enabling them.
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-21: **Review `4d362db` fixes (High 1–4, Medium 1–4, Low 1–2):**
+  - *`PlanRunner` (`H1`):* [`plan_runner.cc`](../harness/src/plan/plan_runner.cc) strips `"assist:"` before `FindUnitByGuid` in `IsTargetDone` and combat HP-drop timeout tracking, and keeps `kUse` `"item:<entry>"` options active until `done_command_id` arrives (tested in [`plan_runner_unittest.cc`](../harness/src/plan/plan_runner_unittest.cc)).
+  - *`A6` bag items (`H2`, `L2`):* [`snapshot.h`](../snapshot/snapshot.h) changes `OptionFacts_Item::out_of_combat_only` to default `false` (fixing Glaze JSON round-trip tested in [`options_unittest.cc`](../server_module/src/options/options_unittest.cc)); [`option_executor.cc`](../server_module/src/options/option_executor.cc) filters `INVTYPE_NON_EQUIP`, `SpellId > 0`, depleted `SpellCharges`, all-spell combat restrictions, `StopMoving()` on cast-time items, and verifies item count drop / cast start / cooldown / vehicle change before returning `used = true`.
+  - *`bench_bosses.py` & `C2` (`H3`, `H4`, `M1–M3`, `L2`):* [`bench_bosses.py`](../tools/bench/bench_bosses.py) adds `strip_strat="icc"` to `marrowgar`, reads `--notes-file` before `LlamaServer.__enter__()`, and adds `--trace-dir`; [`notes_hill_climb.py`](../tools/bench/notes_hill_climb.py) isolates per-round `trace_dir`, holds one persistent `LlamaServer` in `main()`, guards against death increases / DPS collapse and supports `--confirm-runs`, aligns `validate_standing_orders()` with `orders.wlb` (incl. `1..3` steps and required args), records rejected standing orders in `rejected_history`, and filters traces by `instance_id` + `t_ms >= pull_ms` (tested in [`notes_hill_climb_test.py`](../tools/bench/notes_hill_climb_test.py) & [`dodge_timeline_test.py`](../tools/bench/dodge_timeline_test.py)).
+  - *`screen_renderer.cc` & `TODO.md` (`L1`, `M4`):* guarded `hurt` with `std::isfinite(*u.health_pct)` before `std::lround` and aligned `docs/TODO.md` `Loose ends` / `Next` / `Done`. Verified via `tools/wlb check` (`ALL CHECKS PASSED`) and `tools/wlb build server --test`.
+
 - 2026-11-21: **Review `f644f1b` fixes (High 1–3, Medium 1–3, Low 1–3) + Phase 3 `A6` (usable bag items) & `C2` (`notes_hill_climb.py` + ICC `marrowgar`):**
-  - *Review `f644f1b` (`A5` & `bench_bosses.py`):* [`snapshot_builder.cc`](../server_module/src/snapshot/snapshot_builder.cc) populates `base.self.unit.group` (`FillSelf`) and `OptionFacts::party_targets` (`FillOptionFacts`); [`options.cc`](../server_module/src/options/options.cc) resolves assist options by exact `target_guid`, emits distinct synthetic `option.guid = "assist:" + best->guid` (avoiding `PlanRunner` collision with regular `Attack <mob>`), and skips `m.name == snapshot->bot`; [`screen_renderer.cc`](../harness/src/screen/screen_renderer.cc) includes `self` in `tank_names`, suppresses `loose mobs:` when no tank is designated (preventing non-LFG 5-man inversion), includes pulled `NEUTRAL` mobs, removes the hardcoded 40 yd heal-range verdict from `party hurt:` (pure distance + LoS), and checks `std::lround(*u.health_pct) < 100`; [`bench_bosses.py`](../tools/bench/bench_bosses.py) rejects empty `--arms`, aligns `_needs_llm()` with `run_boss_waves()`, and scopes `trace_dir` by `--arms`; expanded unit tests in [`screen_renderer_unittest.cc`](../harness/src/screen/screen_renderer_unittest.cc), [`options_unittest.cc`](../server_module/src/options/options_unittest.cc), and [`dodge_timeline_test.py`](../tools/bench/dodge_timeline_test.py); corrected `docs/TODO.md` benchmark/draft-notes honesty (`H3`, `M1`, `L2`).
+  - *Review `f644f1b` (`A5` & `bench_bosses.py`):* [`snapshot_builder.cc`](../server_module/src/snapshot/snapshot_builder.cc) populates `base.self.unit.group` (`FillSelf`) and `OptionFacts::party_targets` (`FillOptionFacts`); [`options.cc`](../server_module/src/options/options.cc) resolves assist options by exact `target_guid`, emits distinct synthetic `option.guid = "assist:" + best->guid` (tracked in `plan_runner.cc` in the follow-up fix above), and skips `m.name == snapshot->bot`; [`screen_renderer.cc`](../harness/src/screen/screen_renderer.cc) includes `self` in `tank_names`, suppresses `loose mobs:` when no tank is designated (preventing non-LFG 5-man inversion), includes pulled `NEUTRAL` mobs, removes the hardcoded 40 yd heal-range verdict from `party hurt:` (pure distance + LoS), and checks `std::lround(*u.health_pct) < 100`; [`bench_bosses.py`](../tools/bench/bench_bosses.py) rejects empty `--arms`, aligns `_needs_llm()` with `run_boss_waves()`, and scopes `trace_dir` by `--arms`; expanded unit tests in [`screen_renderer_unittest.cc`](../harness/src/screen/screen_renderer_unittest.cc), [`options_unittest.cc`](../server_module/src/options/options_unittest.cc), and [`dodge_timeline_test.py`](../tools/bench/dodge_timeline_test.py); corrected `docs/TODO.md` benchmark/draft-notes honesty (`H3`, `M1`, `L2`).
   - *Phase 3 `A6` & `C2`:* added `OptionFacts_Item` ([`snapshot.h`](../snapshot/snapshot.h)), `CollectUsableBagItems` & `ExecuteUseItemOption` ([`option_executor.{h,cc}`](../server_module/src/options/option_executor.cc)), and `Use <item>` bag options ([`options.cc`](../server_module/src/options/options.cc)); added [`tools/bench/notes_hill_climb.py`](../tools/bench/notes_hill_climb.py) + [`tools/bench/notes_hill_climb_test.py`](../tools/bench/notes_hill_climb_test.py) (`4/4`, wired into [`tools/wlblib/check.py`](../tools/wlblib/check.py)), `--notes-file`, and `marrowgar` (ICC 10-man) in [`bench_bosses.py`](../tools/bench/bench_bosses.py). Verified via `tools/wlb check` (`ALL CHECKS PASSED`) and `tools/wlb build server --test`.
 
 - 2026-11-21: **User-approved scorer lock update (`951d4cc17f25...`):**

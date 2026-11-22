@@ -2828,7 +2828,7 @@ struct OptionFacts_Place {
 struct OptionFacts_Item {
   uint32_t entry = 0;
   std::string name;
-  bool in_combat_usable = true;
+  bool out_of_combat_only = false;
 
   bool operator==(const OptionFacts_Item&) const = default;
 };

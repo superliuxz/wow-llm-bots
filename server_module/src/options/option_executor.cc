@@ -607,22 +607,31 @@ void CollectUsableBagItems(Player* bot,
     if (out->size() >= kMaxUsableBagItems) {
       break;
     }
-    const ItemTemplate* proto = entry.item->GetTemplate();
+    const ItemTemplate* proto =
+        entry.item ? entry.item->GetTemplate() : nullptr;
     if (!proto || proto->Name1.empty() ||
+        proto->InventoryType != INVTYPE_NON_EQUIP ||
         bot->CanUseItem(entry.item) != EQUIP_ERR_OK) {
       continue;
     }
     uint32_t spell_id = 0;
     uint32_t spell_cat = 0;
+    bool has_charges = true;
     for (int i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i) {
-      if (proto->Spells[i].SpellId != 0 &&
+      if (proto->Spells[i].SpellId > 0 &&
           proto->Spells[i].SpellTrigger == ITEM_SPELLTRIGGER_ON_USE) {
-        spell_id = proto->Spells[i].SpellId;
+        if (proto->Spells[i].SpellCharges != 0 &&
+            entry.item->GetSpellCharges(i) == 0) {
+          has_charges = false;
+          continue;
+        }
+        spell_id = static_cast<uint32_t>(proto->Spells[i].SpellId);
         spell_cat = proto->Spells[i].SpellCategory;
+        has_charges = true;
         break;
       }
     }
-    if (spell_id == 0) {
+    if (spell_id == 0 || !has_charges) {
       continue;
     }
     // Food and drink are already surfaced by Rest.
@@ -635,6 +644,18 @@ void CollectUsableBagItems(Player* bot,
     const SpellInfo* info = sSpellMgr->GetSpellInfo(spell_id);
     if (!info) {
       continue;
+    }
+    // Match SpellHandler.cpp: check combat usability across all spells on item.
+    bool out_of_combat_only = false;
+    for (int i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i) {
+      if (proto->Spells[i].SpellId > 0) {
+        if (const SpellInfo* si = sSpellMgr->GetSpellInfo(
+                static_cast<uint32_t>(proto->Spells[i].SpellId));
+            si && si->HasAttribute(SPELL_ATTR0_NOT_IN_COMBAT_ONLY_PEACEFUL)) {
+          out_of_combat_only = true;
+          break;
+        }
+      }
     }
     bool dup = false;
     for (const pb::OptionFacts_Item& existing : *out) {
@@ -649,8 +670,7 @@ void CollectUsableBagItems(Player* bot,
     pb::OptionFacts_Item item;
     item.entry = proto->ItemId;
     item.name = proto->Name1;
-    item.in_combat_usable =
-        !info->HasAttribute(SPELL_ATTR0_NOT_IN_COMBAT_ONLY_PEACEFUL);
+    item.out_of_combat_only = out_of_combat_only;
     out->push_back(std::move(item));
   }
 }
@@ -1184,12 +1204,18 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
     return {"you don't have " + target.name};
   }
   Item* item = found->item;
-  const ItemTemplate* proto = item->GetTemplate();
+  const ItemTemplate* proto = item ? item->GetTemplate() : nullptr;
+  if (!proto || proto->InventoryType != INVTYPE_NON_EQUIP) {
+    return {"can't use " + target.name + " now"};
+  }
   uint32_t item_spell_id = 0;
   for (int i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i) {
-    if (proto->Spells[i].SpellId != 0 &&
+    if (proto->Spells[i].SpellId > 0 &&
         proto->Spells[i].SpellTrigger == ITEM_SPELLTRIGGER_ON_USE) {
-      item_spell_id = proto->Spells[i].SpellId;
+      if (proto->Spells[i].SpellCharges != 0 && item->GetSpellCharges(i) == 0) {
+        continue;
+      }
+      item_spell_id = static_cast<uint32_t>(proto->Spells[i].SpellId);
       break;
     }
   }
@@ -1199,12 +1225,35 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
   if (bot->HasSpellCooldown(item_spell_id)) {
     return {target.name + " is on cooldown"};
   }
+  if (bot->IsNonMeleeSpellCast(false) || bot->m_mover != bot) {
+    return {"can't use " + target.name + " now"};
+  }
   const SpellInfo* item_spell = sSpellMgr->GetSpellInfo(item_spell_id);
+  if (!item_spell) {
+    return {"can't use " + target.name + " now"};
+  }
+  if (bot->IsInCombat()) {
+    for (int i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i) {
+      if (proto->Spells[i].SpellId > 0) {
+        if (const SpellInfo* si = sSpellMgr->GetSpellInfo(
+                static_cast<uint32_t>(proto->Spells[i].SpellId));
+            si && si->HasAttribute(SPELL_ATTR0_NOT_IN_COMBAT_ONLY_PEACEFUL)) {
+          return {"can't use " + target.name + " in combat"};
+        }
+      }
+    }
+  }
+  if (item_spell->CalcCastTime() > 0) {
+    bot->StopMoving();
+  }
   Unit* item_target = bot->GetSelectedUnit();
-  if (item_spell && item_spell->IsPositive() && item_target &&
-      item_target != bot && !bot->IsFriendlyTo(item_target)) {
+  if (item_spell->IsPositive() && item_target && item_target != bot &&
+      !bot->IsFriendlyTo(item_target)) {
     item_target = bot;
   }
+  const uint32_t count_before = bot->GetItemCount(proto->ItemId);
+  const bool cd_before = bot->HasSpellCooldown(item_spell_id);
+  const void* vehicle_before = bot->GetVehicle();
   WorldPacket p(CMSG_USE_ITEM);
   p << found->bag << found->slot << static_cast<uint8_t>(0) << item_spell_id
     << item->GetGUID() << static_cast<uint32_t>(0) << static_cast<uint8_t>(0);
@@ -1215,6 +1264,13 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
   targets.Write(p);
   p.rpos(0);
   session->HandleUseItemOpcode(p);
+  const bool count_dropped = bot->GetItemCount(proto->ItemId) < count_before;
+  const bool cast_started = bot->IsNonMeleeSpellCast(false);
+  const bool cd_started = !cd_before && bot->HasSpellCooldown(item_spell_id);
+  const bool vehicle_changed = bot->GetVehicle() != vehicle_before;
+  if (!count_dropped && !cast_started && !cd_started && !vehicle_changed) {
+    return {"can't use " + target.name + " now"};
+  }
   return {.used = true, .info = "used " + target.name};
 }
 
