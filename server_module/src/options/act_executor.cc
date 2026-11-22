@@ -233,11 +233,12 @@ std::vector<Player*> GroupTanks(Player* bot) {
 }
 
 // Resolves a synthetic `"trigger:<guid>"` id to a live, visible-hazard hidden
-// trigger creature. When `required_name` is non-empty, requires the hazard's
-// player-visible spell name to match `required_name`.
-Creature* ResolveHiddenTriggerByGuid(Player* bot,
-                                     std::string_view guid_str,
-                                     std::string_view required_name = {}) {
+// trigger creature. When `required_name` is set, requires the hazard's
+// player-visible spell name to match `*required_name`.
+Creature* ResolveHiddenTriggerByGuid(
+    Player* bot,
+    std::string_view guid_str,
+    std::optional<std::string_view> required_name = std::nullopt) {
   constexpr std::string_view kPrefix = "trigger:";
   if (!guid_str.starts_with(kPrefix)) {
     return nullptr;
@@ -255,7 +256,7 @@ Creature* ResolveHiddenTriggerByGuid(Player* bot,
   if (!hz) {
     return nullptr;
   }
-  if (!required_name.empty() && !NameEq(hz->name, required_name)) {
+  if (required_name && !NameEq(hz->name, *required_name)) {
     return nullptr;
   }
   return trigger;
@@ -939,20 +940,25 @@ HazardInfo MakeTriggerHazardInfo(Creature* trigger) {
   return h;
 }
 
-// Resolves a synthetic `"trigger:<guid>"` id (from `nearby_builder.cc`) to the
-// hidden trigger creature's ground position and active cast/aura radius.
+// Resolves a synthetic `"trigger:<guid>"` id on `act` when `act.thing` refers
+// to the bound trigger (`THING_UNSPECIFIED`, `IT`, or `NAMED`/`NEAREST_NAMED`
+// matching the trigger's visible hazard name).
 std::optional<HazardInfo> ResolveTriggerHazard(Player* bot,
-                                               std::string_view guid_str) {
-  constexpr std::string_view kPrefix = "trigger:";
-  if (!guid_str.starts_with(kPrefix)) {
+                                               const pb::Command_Act& act) {
+  if (act.it_guid.empty()) {
     return std::nullopt;
   }
-  ObjectGuid trigger_guid = ParseSnapshotGuid(guid_str.substr(kPrefix.size()));
-  if (trigger_guid.IsEmpty()) {
-    return std::nullopt;
+  Creature* trigger = nullptr;
+  if (act.thing == pb::Command_Act::THING_UNSPECIFIED ||
+      act.thing == pb::Command_Act::IT) {
+    trigger = ResolveHiddenTriggerByGuid(bot, act.it_guid);
+  } else if (act.thing == pb::Command_Act::NAMED ||
+             act.thing == pb::Command_Act::NEAREST_NAMED) {
+    const std::string_view thing_name =
+        !act.target_name.empty() ? act.target_name : act.name;
+    trigger = ResolveHiddenTriggerByGuid(bot, act.it_guid, thing_name);
   }
-  Creature* trigger = ObjectAccessor::GetCreature(*bot, trigger_guid);
-  if (!trigger || !trigger->IsAlive()) {
+  if (!trigger) {
     return std::nullopt;
   }
   return MakeTriggerHazardInfo(trigger);
@@ -989,7 +995,7 @@ std::optional<AnchorGeometry> ResolveImpactAnchor(Player* bot,
 std::optional<HazardInfo> ResolveHazard(Player* bot,
                                         const pb::Command_Act& act) {
   if (!act.it_guid.empty()) {
-    if (std::optional<HazardInfo> th = ResolveTriggerHazard(bot, act.it_guid)) {
+    if (std::optional<HazardInfo> th = ResolveTriggerHazard(bot, act)) {
       return th;
     }
     constexpr std::string_view kImpactPrefix = "impact:";
@@ -1191,7 +1197,7 @@ bool StartReturnToInterrupted(Player* bot,
 std::optional<AnchorGeometry> ResolveMoveAnchor(Player* bot,
                                                 const pb::Command_Act& act) {
   if (!act.it_guid.empty()) {
-    if (std::optional<HazardInfo> th = ResolveTriggerHazard(bot, act.it_guid)) {
+    if (std::optional<HazardInfo> th = ResolveTriggerHazard(bot, act)) {
       return th->anchor;
     }
     if (std::optional<AnchorGeometry> impact =
