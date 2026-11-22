@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Unit tests for C2 self-revising notes.md competence hill-climb loop."""
 
+import io
 import json
 import pathlib
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
@@ -100,6 +102,16 @@ class NotesHillClimbTest(unittest.TestCase):
             "# Invalid Digit\n- `phase 12 -> wake`\n",
             "# Spaces around Cmp\n- `boss hp < 20 -> wake`\n",
             "# Extra numeric arg on away\n- `always -> away boss 10 20`\n",
+            "# Out-of-range Num on away\n- `always -> away 1000`\n",
+            "# 2dp Num on away\n- `always -> away 10.55`\n",
+            "# Out-of-range second numeric arg on away\n- `always -> away boss 10 1000`\n",
+            "# Missing spaces around ->\n- `Flame Strike cast->wake`\n",
+            "# Double space before cast\n- `Flame Strike  cast -> wake`\n",
+            "# Double space after not\n- `not  boss hp<20 -> wake`\n",
+            "# Non-name punctuation\n- `!!! cast -> wake`\n",
+            "# Digits-only name\n- `123 cast -> wake`\n",
+            "# Double space in stop\n- `always -> stop  casting`\n",
+            "# Double space in mark\n- `always -> mark boss  skull`\n",
             "# Prefix collision\n- `in Fire -> backflip`\n",
             "# Prefix collision 2\n- `in Fire -> stomp`\n",
             "# Zero-arg verb with arg\n- `in Fire -> jump high`\n",
@@ -151,6 +163,78 @@ class NotesHillClimbTest(unittest.TestCase):
             self.assertIn("Arcane Sphere=9500", summary)
             self.assertIn("5.5s Loada killed by Arcane Sphere", summary)
             self.assertIn("OUT_OF x1", summary)
+
+    def test_summarize_fight_timeline_sorts_unsorted_multifile_shards(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tdir = pathlib.Path(tmp)
+            bot_dir = tdir / "bot" / "Loada"
+            bot_dir.mkdir(parents=True)
+            # Newer shard sorts lexicographically AFTER `.jsonl`, yet holds an earlier
+            # instance-transition sample at 15200 (and unsorted samples within `.jsonl`).
+            (bot_dir / "2026-11-21.jsonl").write_text(
+                "\n".join(
+                    json.dumps(r)
+                    for r in [
+                        {"kind": "sample", "t_ms": 19000, "inst": 3},
+                        {"kind": "sample", "t_ms": 10000, "inst": 2},
+                        {"kind": "event", "t_ms": 12000, "event": "damage_taken", "detail": "InTrialHit", "value": 4200},
+                        {"kind": "event", "t_ms": 15300, "event": "damage_taken", "detail": "LeakedAfterEarlyShard", "value": 99999},
+                    ]
+                )
+                + "\n"
+            )
+            (bot_dir / "2026-11-21.1.jsonl").write_text(
+                json.dumps({"kind": "sample", "t_ms": 15200, "inst": 3}) + "\n"
+            )
+            boss_res = {
+                "boss": "Test Boss",
+                "by_arm": {"llm": {"kills": 0, "runs": 1, "median_dps": 1000.0, "median_deaths": 5.0}},
+                "trials": [
+                    {
+                        "mode": "llm",
+                        "killed": False,
+                        "duration_s": 10.0,
+                        "total_dps": 1000.0,
+                        "total_deaths": 5,
+                        "party_index": 0,
+                        "instance_id": 2,
+                        "pull_ms": 10000,
+                    }
+                ],
+            }
+            summary = nhc.summarize_fight_timeline(boss_res, tdir, arm="llm")
+            self.assertIn("InTrialHit=4200", summary)
+            self.assertNotIn("LeakedAfterEarlyShard", summary)
+
+    def test_propose_notes_edit_disables_thinking_in_request_payload(self) -> None:
+        captured: list[dict] = []
+
+        class FakeResp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def fake_urlopen(req, timeout=0):
+            captured.append(json.loads(req.data.decode("utf-8")))
+            body = {
+                "choices": [
+                    {"message": {"content": "```markdown\n# Boss\n- `in Fire -> out of it`\n```"}}
+                ]
+            }
+            return FakeResp(json.dumps(body).encode("utf-8"))
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            out = nhc.propose_notes_edit(
+                boss_name="Test Boss",
+                current_notes="# Boss\n",
+                timeline_summary="Boss: Test Boss",
+                rejected_history=[],
+            )
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0].get("chat_template_kwargs"), {"enable_thinking": False})
+        self.assertIn("in Fire -> out of it", out)
 
     def test_confirmation_rerun_keeps_confirmed_and_logs_conf_score_on_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -245,8 +329,9 @@ class NotesHillClimbTest(unittest.TestCase):
                 propose_fn=fake_propose,
             )
             self.assertEqual(calls["n"], 3)
-            # Each bench call got an isolated trace_dir so rejected rounds never clobber incumbent traces.
+            # Each bench call got an isolated absolute trace_dir so rejected rounds never clobber incumbent traces.
             self.assertEqual(len(set(seen_trace_dirs)), 3)
+            self.assertTrue(all(p.is_absolute() for p in seen_trace_dirs))
             # Rejected history passed to round 3 includes the rejected standing order text.
             self.assertTrue(any("in Fire -> out of it" in r for r in seen_rejected[-1]))
             self.assertEqual(res["best_score"]["kills"], 2)

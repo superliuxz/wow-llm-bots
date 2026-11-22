@@ -775,7 +775,9 @@ def run_boss_waves(
     parties = _make_parties(n_parties, raid=raid)
     all_bots = [b for p in parties for b in p]
 
-    trace_dir = trace_dir_override or _trace_dir_for(tag, mode, arms_override)
+    trace_dir = (
+        trace_dir_override or _trace_dir_for(tag, mode, arms_override)
+    ).resolve()
 
     valid_runs: list[dict] = []
     extra_trials: list[dict] = []

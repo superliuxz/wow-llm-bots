@@ -32,68 +32,202 @@ VAR = ROOT / "var"
 PREFIXES = ["Load", "Ptwo", "Pthr", "Pfou"]
 
 # Exact enums & tokens from harness/grammar/orders.wlb (case-sensitive).
-_WHO_RE = r"(?:me|tank|offtank|healer|leader|anyone|boss|it)"
-_ICON_RE = r"(?:skull|cross|square|moon|triangle|diamond|circle|star)"
-_STATE_RE = r"(?:flying|grounded|untargetable|submerged)"
-_MY_STATE_RE = r"(?:in vehicle|mounted|swimming|nearest to it)"
-_NUM_RE = r"\d{1,3}(?:\.\d)?"
-_COUNT_RE = r"\d{1,3}"
-_POINTS_RE = r"\d{1,5}"
-_DIGIT_RE = r"[0-9]"
-
+_WHO = frozenset({"me", "tank", "offtank", "healer", "leader", "anyone", "boss", "it"})
+_ICONS = frozenset({"skull", "cross", "square", "moon", "triangle", "diamond", "circle", "star"})
+_STATES = frozenset({"flying", "grounded", "untargetable", "submerged"})
+_MY_STATES = frozenset({"in vehicle", "mounted", "swimming", "nearest to it"})
+_NEAREST_WORDS = frozenset({"ally", "player", "enemy"})
 _ZERO_ARG_ACTS = frozenset({"back", "jump", "leave vehicle", "wake"})
 _STOP_WHAT = frozenset({"casting", "attacking", "moving"})
 _PET_CMDS = frozenset({"stay", "follow", "passive", "defensive"})
-_ICONS = frozenset({"skull", "cross", "square", "moon", "triangle", "diamond", "circle", "star"})
-_ARG_ACT_PREFIXES = (
-    "to ",
-    "out of ",
-    "avoid ",
-    "target ",
-    "use ",
-    "face away ",
-    "face ",
-    "cancel ",
-    "interact ",
-    "board ",
-    "equip ",
-    "kite ",
-)
 
-# Exact case-sensitive LHS `Check` patterns from harness/grammar/orders.wlb (lines 43-71).
-_CHECK_PATTERNS = (
-    re.compile(rf"^.+\s+stacks[<>]{_COUNT_RE} on {_WHO_RE}$"),
-    re.compile(rf"^.+\s+ends<{_NUM_RE}s on {_WHO_RE}$"),
-    re.compile(rf"^.+\s+cast on {_WHO_RE}$"),
-    re.compile(rf"^.+\s+cast in last {_NUM_RE}s$"),
-    re.compile(r"^.+\s+cast$"),
-    re.compile(rf"^.+\s+appears in last {_NUM_RE}s$"),
-    re.compile(r"^.+\s+appears$"),
-    re.compile(r"^in .+$"),
-    re.compile(rf"^.+\s+count[<>]{_COUNT_RE}$"),
-    re.compile(rf"^.+\s+on {_WHO_RE}$"),
-    re.compile(rf"^.+\s+within {_NUM_RE}(?: of .+)?$"),
-    re.compile(rf"^.+\s+beyond {_NUM_RE}(?: of .+)?$"),
-    re.compile(r"^.+\s+targets .+$"),
-    re.compile(rf"^.+\s+hp[<>]{_NUM_RE}$"),
-    re.compile(rf"^mana_points[<>]{_POINTS_RE}$"),
-    re.compile(rf"^mana[<>]{_NUM_RE}$"),
-    re.compile(rf"^.+\s+is marked {_ICON_RE}$"),
-    re.compile(rf"^.+\s+is {_STATE_RE}$"),
-    re.compile(r"^.+\s+(?:in|out of) sight$"),
-    re.compile(r"^me behind .+$"),
-    re.compile(r"^my target is .+$"),
-    re.compile(r"^me has .+$"),
-    re.compile(rf"^me {_MY_STATE_RE}$"),
-    re.compile(rf"^phase {_DIGIT_RE}$"),
-    re.compile(rf"^(?:after|every) {_NUM_RE}s$"),
-)
-
-_NUM_FULL_RE = re.compile(rf"^{_NUM_RE}$")
+_NAME_ALLOWED_RE = re.compile(r"^[A-Za-z0-9'][A-Za-z0-9' :,-]*$")
+_HAS_ASCII_LETTER_RE = re.compile(r"[A-Za-z]")
+_INT_RE = re.compile(r"^[0-9]{1,9}$")
+_NUM_SYNTAX_RE = re.compile(r"^[0-9]{1,9}(?:\.[0-9])?$")
+_NUMERIC_TOKEN_RE = re.compile(r"^[0-9]+(?:\.[0-9]+)?$")
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _CODE_FENCE_RE = re.compile(r"```(?:markdown|md)?\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
 _BACKTICK_ORDER_RE = re.compile(r"`([^`\n]+->[^`\n]+)`")
+
+
+def _is_name(s: str) -> bool:
+    """Matches rt::IsName in harness/grammar/wlb_runtime.cc."""
+    if not s or s.endswith(" "):
+        return False
+    return bool(_NAME_ALLOWED_RE.match(s) and _HAS_ASCII_LETTER_RE.search(s))
+
+
+def _is_int_in(s: str, lo: int, hi: int) -> bool:
+    """Matches rt::ParseIntIn in harness/grammar/wlb_runtime.cc."""
+    if not _INT_RE.match(s):
+        return False
+    val = int(s)
+    return lo <= val <= hi
+
+
+def _is_num(s: str) -> bool:
+    """Matches `num Num 0..999 1dp` -> rt::ParseNumIn(s, 0, 999, 1)."""
+    if not _NUM_SYNTAX_RE.match(s):
+        return False
+    val = float(s)
+    return 0.0 <= val <= 999.0
+
+
+def _is_thing(s: str) -> bool:
+    """Matches `choice Thing` in harness/grammar/orders.wlb."""
+    if s in _WHO or s in ("my target", "group", "allies", "focus"):
+        return True
+    if s.startswith("marker "):
+        return s[7:] in _ICONS
+    if s.startswith("nearest "):
+        kind = s[8:]
+        return kind in _NEAREST_WORDS or _is_name(kind)
+    if s.startswith("ally with "):
+        return _is_name(s[10:])
+    return _is_name(s)
+
+
+def _is_place(s: str) -> bool:
+    """Matches `choice Place` in harness/grammar/orders.wlb."""
+    for prefix in ("behind ", "in front of ", "max range of "):
+        if s.startswith(prefix):
+            return _is_thing(s[len(prefix) :])
+    idx = s.find(" yd from ")
+    if idx > 0 and _is_num(s[:idx]) and _is_thing(s[idx + 9 :]):
+        return True
+    return _is_thing(s)
+
+
+def _split_cmp_num(s: str, marker: str, rhs_check: Callable[[str], bool]) -> tuple[str, str] | None:
+    for cmp_op in ("<", ">"):
+        token = marker + cmp_op
+        idx = s.find(token)
+        if idx >= 0:
+            lhs = s[:idx]
+            rhs = s[idx + len(token) :]
+            if rhs_check(rhs):
+                return lhs, rhs
+    return None
+
+
+def _is_check(s: str) -> bool:
+    """Matches `choice Check` in harness/grammar/orders.wlb (exact single-space literals)."""
+    # Stacks = mech:Name " stacks" cmp:Cmp n:Count " on " who:Who
+    for cmp_op in ("<", ">"):
+        tok = f" stacks{cmp_op}"
+        idx = s.find(tok)
+        if idx > 0:
+            mech = s[:idx]
+            rest = s[idx + len(tok) :]
+            on_idx = rest.find(" on ")
+            if (
+                on_idx > 0
+                and _is_name(mech)
+                and _is_int_in(rest[:on_idx], 0, 999)
+                and rest[on_idx + 4 :] in _WHO
+            ):
+                return True
+    # Ends = mech:Name " ends<" s:Num "s on " who:Who
+    idx = s.find(" ends<")
+    if idx > 0:
+        mech = s[:idx]
+        rest = s[idx + 6 :]
+        on_idx = rest.find("s on ")
+        if (
+            on_idx > 0
+            and _is_name(mech)
+            and _is_num(rest[:on_idx])
+            and rest[on_idx + 5 :] in _WHO
+        ):
+            return True
+    # CastOn = mech:Name " cast on " who:Who
+    idx = s.find(" cast on ")
+    if idx > 0 and _is_name(s[:idx]) and s[idx + 9 :] in _WHO:
+        return True
+    # CastInLast = mech:Name " cast in last " s:Num "s"
+    idx = s.find(" cast in last ")
+    if idx > 0 and s.endswith("s") and _is_name(s[:idx]) and _is_num(s[idx + 14 : -1]):
+        return True
+    # Cast = mech:Name " cast"
+    if s.endswith(" cast") and _is_name(s[:-5]):
+        return True
+    # AppearsIn = mech:Name " appears in last " s:Num "s"
+    idx = s.find(" appears in last ")
+    if idx > 0 and s.endswith("s") and _is_name(s[:idx]) and _is_num(s[idx + 17 : -1]):
+        return True
+    # Appears = mech:Name " appears"
+    if s.endswith(" appears") and _is_name(s[:-8]):
+        return True
+    # InArea = "in " mech:Name
+    if s.startswith("in ") and _is_name(s[3:]):
+        return True
+    # Count = mech:Name " count" cmp:Cmp n:Count
+    if res := _split_cmp_num(s, " count", lambda r: _is_int_in(r, 0, 999)):
+        if _is_name(res[0]):
+            return True
+    # On = mech:Name " on " who:Who
+    idx = s.rfind(" on ")
+    if idx > 0 and _is_name(s[:idx]) and s[idx + 4 :] in _WHO:
+        return True
+    # Within / Beyond = a:Thing (" within "|" beyond ") yd:Num (" of " b:Thing)?
+    for kw in (" within ", " beyond "):
+        idx = s.find(kw)
+        if idx > 0 and _is_thing(s[:idx]):
+            rest = s[idx + len(kw) :]
+            if _is_num(rest):
+                return True
+            of_idx = rest.find(" of ")
+            if of_idx > 0 and _is_num(rest[:of_idx]) and _is_thing(rest[of_idx + 4 :]):
+                return True
+    # Targets = a:Thing " targets " b:Thing
+    idx = s.find(" targets ")
+    if idx > 0 and _is_thing(s[:idx]) and _is_thing(s[idx + 9 :]):
+        return True
+    # Hp = a:Thing " hp" cmp:Cmp pct:Num
+    if res := _split_cmp_num(s, " hp", _is_num):
+        if _is_thing(res[0]):
+            return True
+    # ManaPoints = "mana_points" cmp:Cmp n:Points
+    if (s.startswith("mana_points<") or s.startswith("mana_points>")) and _is_int_in(
+        s[12:], 0, 99999
+    ):
+        return True
+    # Mana = "mana" cmp:Cmp pct:Num
+    if (s.startswith("mana<") or s.startswith("mana>")) and _is_num(s[5:]):
+        return True
+    # IsMarked = a:Thing " is marked " icon:Icon
+    idx = s.find(" is marked ")
+    if idx > 0 and _is_thing(s[:idx]) and s[idx + 11 :] in _ICONS:
+        return True
+    # Is = a:Thing " is " state:State
+    idx = s.find(" is ")
+    if idx > 0 and _is_thing(s[:idx]) and s[idx + 4 :] in _STATES:
+        return True
+    # InSight / OutOfSight
+    if s.endswith(" in sight") and _is_thing(s[:-9]):
+        return True
+    if s.endswith(" out of sight") and _is_thing(s[:-13]):
+        return True
+    # MeBehind / MyTargetIs / MeHas / Me
+    if s.startswith("me behind ") and _is_thing(s[10:]):
+        return True
+    if s.startswith("my target is ") and _is_thing(s[13:]):
+        return True
+    if s.startswith("me has ") and _is_name(s[7:]):
+        return True
+    if s.startswith("me ") and s[3:] in _MY_STATES:
+        return True
+    # Phase = "phase " n:Digit
+    if s.startswith("phase ") and _is_int_in(s[6:], 0, 9):
+        return True
+    # After / Every = ("after "|"every ") s:Num "s"
+    if s.startswith("after ") and s.endswith("s") and _is_num(s[6:-1]):
+        return True
+    if s.startswith("every ") and s.endswith("s") and _is_num(s[6:-1]):
+        return True
+    return False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -203,59 +337,83 @@ def extract_standing_orders(notes_md: str) -> list[str]:
 
 
 def _validate_when(when: str) -> str | None:
-    s = when.strip()
-    if s == "always":
+    if when == "always":
         return None
-    conds = [c.strip() for c in s.split(" & ")]
+    conds = when.split(" & ")
     if not (1 <= len(conds) <= 4):
         return f"condition must have 1..4 clauses (got {len(conds)})"
     for c in conds:
         if not c:
             return "empty condition clause"
-        body = c[4:].strip() if c.startswith("not ") else c
-        if not any(pat.match(body) for pat in _CHECK_PATTERNS):
+        body = c[4:] if c.startswith("not ") else c
+        if not _is_check(body):
             return f"unsupported condition clause: {c!r}"
     return None
 
 
 def _validate_act(step: str) -> str | None:
-    s = step.strip()
-    if s in _ZERO_ARG_ACTS:
+    if step in _ZERO_ARG_ACTS:
         return None
-    if s == "stop":
+    if step == "stop":
         return None
-    if s.startswith("stop "):
-        what = s[5:].strip()
-        return None if what in _STOP_WHAT else f"invalid stop target: {step!r}"
-    if s == "away":
+    if step.startswith("stop "):
+        return None if step[5:] in _STOP_WHAT else f"invalid stop target: {step!r}"
+    if step == "away":
         return None
-    if s.startswith("away "):
-        rest = s[5:].strip()
+    if step.startswith("away "):
+        rest = step[5:]
         if not rest:
             return f"missing argument for 'away': {step!r}"
-        parts = rest.split()
-        # `away` allows `<Thing>` and/or trailing `<Num>`, never two trailing numbers.
-        if len(parts) >= 2 and _NUM_FULL_RE.match(parts[-1]) and _NUM_FULL_RE.match(parts[-2]):
-            return f"too many numeric args for 'away': {step!r}"
-        return None
-    if s.startswith("mark "):
-        rest = s[5:].strip()
-        parts = rest.rsplit(" ", 1)
-        if len(parts) == 2 and parts[0].strip() and parts[1] in _ICONS:
+        if _is_num(rest):
+            return None
+        # Reject trailing numeric tokens that violate `Num` (e.g. 1000, 10.55) or
+        # double trailing numeric args (e.g. `away boss 10 20`, `away boss 10 1000`).
+        tokens = rest.split(" ")
+        if any(t == "" for t in tokens):
+            return f"extra whitespace in 'away': {step!r}"
+        if len(tokens) >= 2 and _NUMERIC_TOKEN_RE.match(tokens[-1]):
+            if not _is_num(tokens[-1]) or _NUMERIC_TOKEN_RE.match(tokens[-2]):
+                return f"invalid numeric args for 'away': {step!r}"
+            head = " ".join(tokens[:-1])
+            return None if _is_thing(head) else f"invalid target for 'away': {step!r}"
+        if _is_thing(rest):
+            return None
+        return f"invalid 'away' arguments: {step!r}"
+    if step.startswith("to "):
+        return None if _is_place(step[3:]) else f"invalid place for 'to': {step!r}"
+    if step.startswith("use "):
+        rest = step[4:]
+        if _is_name(rest):
+            return None
+        idx = rest.find(" on ")
+        if idx > 0 and _is_name(rest[:idx]) and _is_thing(rest[idx + 4 :]):
+            return None
+        return f"invalid 'use' arguments: {step!r}"
+    if step.startswith("mark "):
+        rest = step[5:]
+        idx = rest.rfind(" ")
+        if idx > 0 and _is_thing(rest[:idx]) and rest[idx + 1 :] in _ICONS:
             return None
         return f"invalid mark target/icon: {step!r}"
-    if s.startswith("pet "):
-        rest = s[4:].strip()
-        if rest in _PET_CMDS:
-            return None
-        if rest.startswith("attack ") and rest[7:].strip():
-            return None
-        return f"invalid pet command: {step!r}"
-    for prefix in _ARG_ACT_PREFIXES:
-        if s.startswith(prefix):
-            if s[len(prefix) :].strip():
-                return None
-            return f"missing argument for {prefix.strip()!r}: {step!r}"
+    if step.startswith("pet attack "):
+        return None if _is_thing(step[11:]) else f"invalid pet attack target: {step!r}"
+    if step.startswith("pet "):
+        return None if step[4:] in _PET_CMDS else f"invalid pet command: {step!r}"
+    for prefix in ("cancel ", "equip "):
+        if step.startswith(prefix):
+            return None if _is_name(step[len(prefix) :]) else f"invalid name for {prefix.strip()!r}: {step!r}"
+    for prefix in (
+        "out of ",
+        "avoid ",
+        "target ",
+        "face away ",
+        "face ",
+        "interact ",
+        "board ",
+        "kite ",
+    ):
+        if step.startswith(prefix):
+            return None if _is_thing(step[len(prefix) :]) else f"invalid target for {prefix.strip()!r}: {step!r}"
     return f"unsupported act: {step!r}"
 
 
@@ -265,16 +423,16 @@ def validate_standing_orders(notes_md: str) -> tuple[bool, list[str]]:
         return False, ["empty notes.md"]
     errors: list[str] = []
     for order in extract_standing_orders(notes_md):
-        if order.count("->") != 1:
-            errors.append(f"malformed order (expected one '->'): {order!r}")
+        if order.count("->") != 1 or " -> " not in order:
+            errors.append(f"malformed order (expected exact ' -> '): {order!r}")
             continue
-        cond, rhs = (p.strip() for p in order.split("->", 1))
+        cond, rhs = order.split(" -> ", 1)
         if not cond or not rhs:
             errors.append(f"empty condition or action: {order!r}")
             continue
         if cond_err := _validate_when(cond):
             errors.append(f"{cond_err} in {order!r}")
-        steps = [s.strip() for s in rhs.split(", then ")]
+        steps = rhs.split(", then ")
         if not (1 <= len(steps) <= 3):
             errors.append(f"order must have 1..3 steps (got {len(steps)}): {order!r}")
             continue
@@ -491,6 +649,7 @@ def run_notes_hill_climb(
     llm_url: str = "http://127.0.0.1:8090/v1/chat/completions",
 ) -> dict[str, Any]:
     """Runs the C2 competence hill-climb loop on `notes.md` for one boss."""
+    out_dir = out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     best_notes_path = out_dir / "best_notes.md"
     ledger_path = out_dir / "ledger.jsonl"

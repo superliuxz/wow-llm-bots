@@ -89,21 +89,6 @@ struct TargetProgress {
   std::string interrupted;
 };
 
-bool IsCastingItemSpell(const Player* bot, uint32_t spell_id) {
-  if (spell_id == 0) {
-    return false;
-  }
-  for (CurrentSpellTypes slot :
-       {CURRENT_GENERIC_SPELL, CURRENT_CHANNELED_SPELL}) {
-    if (const Spell* sp = bot->GetCurrentSpell(slot);
-        sp && sp->getState() != SPELL_STATE_FINISHED && sp->GetSpellInfo() &&
-        sp->GetSpellInfo()->Id == spell_id) {
-      return true;
-    }
-  }
-  return false;
-}
-
 TargetProgress OptionTargetProgress(Player* bot,
                                     const OptionTarget& target,
                                     bool used,
@@ -146,11 +131,8 @@ TargetProgress OptionTargetProgress(Player* bot,
         if (used) {
           return done();
         }
-        if (IsCastingItemSpell(bot, pending_item_spell_id) ||
-            !bot->SpellQueue.empty()) {
-          return pending();
-        }
-        return done();
+        return IsSpellCastPending(bot, pending_item_spell_id) ? pending()
+                                                              : done();
       }
       GameObject* go =
           ObjectAccessor::GetGameObject(*bot, ParseSnapshotGuid(target.guid));
@@ -500,6 +482,7 @@ class LlmBrainWorldScript : public WorldScript {
       }
       if (connected) {
         bots_[i].active_option.reset();
+        bots_[i].active_item_spell_id = 0;
         bots_[i].active_command_id = 0;
         bots_[i].done_command_id = 0;
         bots_[i].done_act_command_id = 0;
@@ -740,6 +723,7 @@ class LlmBrainWorldScript : public WorldScript {
              target ? target->name : "", error.empty() ? "ok" : error, age_ms);
     if (!error.empty()) {
       state.active_option.reset();
+      state.active_item_spell_id = 0;
       schedule_->SetActiveTargetPending(bot_index, false);
       // The bot sees it like the client's red error line; attach a fresh
       // snapshot first so the harness acts on current world state rather than a
@@ -772,6 +756,7 @@ class LlmBrainWorldScript : public WorldScript {
         FailActiveOption(bot_index, name, bot, progress.interrupted);
       } else {
         state.active_option.reset();
+        state.active_item_spell_id = 0;
         state.done_command_id = command.command_id;
         schedule_->SetActiveTargetPending(bot_index, false);
       }
@@ -1096,6 +1081,7 @@ class LlmBrainWorldScript : public WorldScript {
     BotState& state = bots_[index];
     const uint32_t command_id = state.active_command_id;
     state.active_option.reset();
+    state.active_item_spell_id = 0;
     schedule_->SetActiveTargetPending(index, false);
     wlb::snapshot::Event payload;
     wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
@@ -1119,6 +1105,7 @@ class LlmBrainWorldScript : public WorldScript {
         FailActiveOption(index, bot->GetName(), bot, progress.interrupted);
       } else if (!pending) {
         state->active_option.reset();
+        state->active_item_spell_id = 0;
         state->done_command_id = state->active_command_id;
       }
     }

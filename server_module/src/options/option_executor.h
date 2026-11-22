@@ -120,6 +120,11 @@ void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink);
 void CollectUsableBagItems(Player* bot,
                            std::vector<wlb::snapshot::OptionFacts_Item>* out);
 
+// Whether `bot` is currently preparing, channeling, or has a non-cancelling
+// queued cast for `spell_id` (excluding SPELL_STATE_DELAYED projectiles and
+// unrelated SpellQueue entries).
+bool IsSpellCastPending(const Player* bot, uint32_t spell_id);
+
 // While a Rest step runs: starts eating or drinking when that one isn't going
 // yet (a second item used in the same tick as the first is refused, so a bot
 // would eat and never drink). Call at most about once a second.

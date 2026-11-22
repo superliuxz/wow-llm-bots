@@ -1175,17 +1175,32 @@ ExecuteResult ExecuteWalkOption(Player* bot,
   return {"", /*used=*/step.arrived, "", step.path_time};
 }
 
-bool IsCastingSpecificSpell(const Player* bot, uint32_t spell_id) {
-  if (spell_id == 0) {
+size_t QueuedSpellCount(const Player* bot, uint32_t spell_id) {
+  if (!bot || spell_id == 0) {
+    return 0;
+  }
+  size_t count = 0;
+  for (const PendingSpellCastRequest& req : bot->SpellQueue) {
+    if (!req.cancelInProgress && req.spellId == spell_id) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+bool IsPreparingOrChannelingSpell(const Player* bot, uint32_t spell_id) {
+  if (!bot || spell_id == 0) {
     return false;
   }
-  for (CurrentSpellTypes slot :
-       {CURRENT_GENERIC_SPELL, CURRENT_CHANNELED_SPELL}) {
-    if (const Spell* sp = bot->GetCurrentSpell(slot);
-        sp && sp->getState() != SPELL_STATE_FINISHED && sp->GetSpellInfo() &&
-        sp->GetSpellInfo()->Id == spell_id) {
-      return true;
-    }
+  if (const Spell* g = bot->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+      g && g->getState() == SPELL_STATE_PREPARING && g->GetSpellInfo() &&
+      g->GetSpellInfo()->Id == spell_id) {
+    return true;
+  }
+  if (const Spell* c = bot->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
+      c && c->getState() != SPELL_STATE_FINISHED && c->GetSpellInfo() &&
+      c->GetSpellInfo()->Id == spell_id) {
+    return true;
   }
   return false;
 }
@@ -1281,7 +1296,7 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
   const uint32_t mana_before = bot->GetPower(POWER_MANA);
   const bool gcd_before =
       bot->GetGlobalCooldownMgr().HasGlobalCooldown(item_spell);
-  const size_t queue_before = bot->SpellQueue.size();
+  const size_t queue_before = QueuedSpellCount(bot, item_spell_id);
   const void* vehicle_before = bot->GetVehicle();
   WorldPacket p(CMSG_USE_ITEM);
   p << found->bag << found->slot << static_cast<uint8_t>(0) << item_spell_id
@@ -1305,8 +1320,8 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
           post_item->GetSpellCharges(spell_slot) != charges_before;
     }
   }
-  const bool cast_started = IsCastingSpecificSpell(bot, item_spell_id);
-  const bool queued_now = bot->SpellQueue.size() > queue_before;
+  const bool cast_started = IsPreparingOrChannelingSpell(bot, item_spell_id);
+  const bool queued_now = QueuedSpellCount(bot, item_spell_id) > queue_before;
   const bool cd_started = bot->HasSpellCooldown(item_spell_id);
   const bool gcd_started =
       !gcd_before && bot->GetGlobalCooldownMgr().HasGlobalCooldown(item_spell);
@@ -1327,6 +1342,11 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
 }
 
 }  // namespace
+
+bool IsSpellCastPending(const Player* bot, uint32_t spell_id) {
+  return QueuedSpellCount(bot, spell_id) > 0 ||
+         IsPreparingOrChannelingSpell(bot, spell_id);
+}
 
 ExecuteResult ExecuteOption(Player* bot,
                             const OptionTarget& target,
