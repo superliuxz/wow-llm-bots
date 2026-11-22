@@ -134,6 +134,30 @@ class PostCommitReviewHookTest(unittest.TestCase):
                 finally:
                     fcntl.flock(held.fileno(), fcntl.LOCK_UN)
 
+    def test_format_review_status_idle_running_and_done(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            review_dir = pathlib.Path(tmp)
+            self.assertIn("IDLE", post_commit_review.format_review_status(review_dir))
+
+            out = review_dir / "review_abc1234.md"
+            out.write_text("findings\n", encoding="utf-8")
+            (review_dir / "latest.md").symlink_to(out.name)
+            (review_dir / "active.json").write_text(
+                '{"pid": 999999, "sha": "abc1234", "started_at": 100.0, "out": "var/review/review_abc1234.md"}\n',
+                encoding="utf-8",
+            )
+            with mock.patch.object(post_commit_review, "_pid_is_reviewer", return_value=True):
+                running = post_commit_review.format_review_status(review_dir)
+            self.assertIn("RUNNING", running)
+            self.assertIn("abc1234", running)
+            self.assertIn("pid=999999", running)
+
+            with mock.patch.object(post_commit_review, "_pid_is_reviewer", return_value=False):
+                done = post_commit_review.format_review_status(review_dir)
+            self.assertIn("DONE", done)
+            self.assertIn("review_abc1234.md", done)
+
 
 if __name__ == "__main__":
     unittest.main()

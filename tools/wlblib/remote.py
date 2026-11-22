@@ -350,10 +350,10 @@ def status(name: str) -> None:
     say(f"  local  stamp: {local_stamp}:full")
     say(f"  remote stamp: {remote_stamp or '(none)'}")
     probe_inner = (
-        f'REPO_ABS=$(cd {_remote_cd_expr(spec.repo)} 2>/dev/null && pwd) || exit 0; '
+        f'REPO_ABS=$(cd {_remote_cd_expr(spec.repo)} 2>/dev/null && pwd -P) || exit 0; '
         'found=0; '
         'for p in /proc/[0-9]*; do '
-        '  pid=${p#/proc/}; [ "$pid" = "$$" ] && continue; '
+        '  pid=${p#/proc/}; [ "$pid" = "$$" ] || [ "$pid" = "$PPID" ] && continue; '
         '  args=$(tr "\\0" " " < "$p/cmdline" 2>/dev/null || true); '
         '  case "$args" in *worldserver*|*mysqld*|*harness*|*bench_bosses*) ;; *) continue ;; esac; '
         '  cwd=$(readlink -f "$p/cwd" 2>/dev/null || true); '
@@ -361,7 +361,7 @@ def status(name: str) -> None:
         '  match=0; '
         '  case "$cwd" in "$REPO_ABS"|"$REPO_ABS"/*) match=1 ;; esac; '
         '  case "$exe" in "$REPO_ABS"|"$REPO_ABS"/*) match=1 ;; esac; '
-        '  case "$args" in *"$REPO_ABS"*) match=1 ;; esac; '
+        '  case "$args" in *"$REPO_ABS/"*|*"$REPO_ABS "*) match=1 ;; esac; '
         '  [ "$match" = 1 ] || continue; '
         '  printf "%s %s\\n" "$pid" "$args"; found=1; '
         'done; '

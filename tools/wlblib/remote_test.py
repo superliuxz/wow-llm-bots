@@ -232,8 +232,80 @@ class RemoteLibTest(unittest.TestCase):
              mock.patch("subprocess.run", return_value=mock.Mock(stdout="123 ./worldserver\n")) as m_sub:
             remote.status("worker1")
         status_cmd = m_sub.call_args[0][0][-1]
+        self.assertIn("pwd -P", status_cmd)
+        self.assertIn("$PPID", status_cmd)
         self.assertIn("/proc/[0-9]*", status_cmd)
-        self.assertIn("readlink -f", status_cmd)
+
+    def test_generated_shell_snippets_execute_correctly_locally(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            real_repo = root / "real_repo"
+            sib_repo = root / "real_repo-2"
+            link_repo = root / "link_repo"
+            (real_repo / "var").mkdir(parents=True)
+            sib_repo.mkdir()
+            link_repo.symlink_to(real_repo)
+
+            # 1) _invalidate_remote_stamp: missing dir -> ok; existing stamp -> deleted; unwritable -> fails.
+            missing_spec = remote.RemoteSpec(name="w", ssh="u@h", repo=str(root / "does_not_exist"))
+            with mock.patch.object(remote, "run") as m_run:
+                remote._invalidate_remote_stamp(missing_spec)
+            res = subprocess.run(["bash", "-c", m_run.call_args[0][0][-1]], capture_output=True, text=True)
+            self.assertEqual(res.returncode, 0, res.stderr)
+
+            real_spec = remote.RemoteSpec(name="w", ssh="u@h", repo=str(link_repo))
+            stamp_file = real_repo / "var" / ".built_stamp"
+            stamp_file.write_text("old\n")
+            with mock.patch.object(remote, "run") as m_run:
+                remote._invalidate_remote_stamp(real_spec)
+            inv_cmd = m_run.call_args[0][0][-1]
+            res = subprocess.run(["bash", "-c", inv_cmd], capture_output=True, text=True)
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertFalse(stamp_file.exists())
+
+            # 2) _kill_remote_pgid: invalid PGIDs (0, 1, -1, abc) are ignored safely and file removed.
+            with mock.patch("subprocess.run") as m_sub:
+                remote._kill_remote_pgid(real_spec)
+            kill_cmd = m_sub.call_args[0][0][-1]
+            pgid_file = real_repo / "var" / ".active_remote_pgid"
+            for bad_pgid in ("0", "1", "-1", "abc", ""):
+                pgid_file.write_text(bad_pgid + "\n")
+                res = subprocess.run(["bash", "-c", kill_cmd], capture_output=True, text=True)
+                self.assertEqual(res.returncode, 0, res.stderr)
+                self.assertFalse(pgid_file.exists())
+
+            # 3) status() probe: matches symlinked repo process, ignores sibling-prefix & non-exec $PPID.
+            with mock.patch.object(remote, "get_remote", return_value=real_spec), \
+                 mock.patch.object(remote, "compute_local_stamp", return_value="a:b"), \
+                 mock.patch.object(remote, "read_remote_stamp", return_value="a:b:full"), \
+                 mock.patch("subprocess.run", return_value=mock.Mock(stdout="")) as m_sub:
+                remote.status("w")
+            status_cmd = m_sub.call_args[0][0][-1]
+
+            # Spawn one dummy process in real_repo and one in sibling real_repo-2.
+            p_in = subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(30)", "bench_bosses_in.py"],
+                cwd=real_repo,
+            )
+            p_sib = subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(30)", str(sib_repo / "bench_bosses_sib.py")],
+                cwd=sib_repo,
+            )
+            try:
+                # Run under a non-exec parent bash (`; true`) to verify $PPID never self-matches.
+                res = subprocess.run(
+                    ["bash", "-c", f"{status_cmd}; true"],
+                    capture_output=True, text=True, check=True,
+                )
+                lines = [ln.strip() for ln in res.stdout.splitlines() if ln.strip()]
+                self.assertTrue(any(ln.startswith(f"{p_in.pid} ") for ln in lines), lines)
+                self.assertFalse(any(ln.startswith(f"{p_sib.pid} ") for ln in lines), lines)
+                self.assertEqual(len(lines), 1, lines)
+            finally:
+                p_in.terminate()
+                p_sib.terminate()
+                p_in.wait(timeout=5)
+                p_sib.wait(timeout=5)
 
     def test_run_remote_interrupt_kills_remote_pgid_before_releasing_lock(self) -> None:
         spec = remote.RemoteSpec(name="worker1", ssh="wlb@192.0.2.10", repo="~/wow-llm-bots")
@@ -250,9 +322,10 @@ class RemoteLibTest(unittest.TestCase):
             with mock.patch.object(remote, "get_remote", return_value=spec), \
                  mock.patch.object(remote, "_remote_lock", return_value=_Lock()), \
                  mock.patch.object(remote, "_local_port_open", return_value=False), \
-                 mock.patch("subprocess.run", side_effect=[KeyboardInterrupt(), mock.Mock(returncode=0)]):
+                 mock.patch("subprocess.run", side_effect=KeyboardInterrupt()) as m_sub:
                 with self.assertRaises(Failed):
                     remote.run_remote("worker1", ["sleep", "60"], no_sync=True)
+                self.assertEqual(m_sub.call_count, 1)
 
         _go()
         self.assertEqual(events, ["lock_acquire", "kill_pgid", "lock_release"])

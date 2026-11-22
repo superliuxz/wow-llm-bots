@@ -16,6 +16,7 @@
   tools/wlb llm [--slots N] [--ctx N] [--model FILE] [-- llama-server args...]
   tools/wlb harness [run|decide ...]     build and run the C++ brain harness (default: run)
   tools/wlb remote list | <name> sync|status|run|pull|stop|install-hook  run on a remote worker (private/remotes.json)
+  tools/wlb review                       show whether the post-commit independent reviewer is RUNNING or DONE
 
 `tools/wlb <command> --help` says more. Python standard library only.
 """
@@ -122,12 +123,17 @@ def parse(argv):
                        help="sync, build, and run commands on a remote CPU worker (private/remotes.json)")
     p.add_argument("args", nargs=argparse.REMAINDER,
                    help="list | <name> sync|status|run|pull|stop|install-hook ...")
+
+    sub.add_parser("review", help="show whether the post-commit independent reviewer is RUNNING or DONE")
     return parser.parse_args(argv)
 
 
 def main():
     if sys.argv[1:2] == ["remote"]:
         remote.dispatch_cli(sys.argv[2:])
+        return
+    if sys.argv[1:2] == ["review"]:
+        common.run(["python3", "-I", "-B", common.ROOT / ".agents" / "hooks" / "post_commit_review.py", "--status"])
         return
     a = parse(sys.argv[1:])
     if a.command == "build":

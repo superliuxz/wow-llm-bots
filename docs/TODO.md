@@ -155,7 +155,7 @@ hand-checking draft `content/notes/` before enabling them.
     or `Lightning Nova appears` when a mid-fight wake emits non-empty `order:` lines.
 - **Not individually live-triggered after final edits yet:** `llmtest questcomplete` when a quest
   is already active in a bot's quest log (`CompleteQuest` + `RewardQuest` branch in
-  `test_commands.cc`, source-verified), plus Review 10 single-arm `_wait_checkstrat` +
+  `test_commands.cc`, source-verified), `tools/wlb remote` live `Ctrl-C` PGID termination / SSH-drop `255` cleanup / `status` with an active `worldserver` (unit-tested locally against real subprocesses & mocks in `tools/wlblib/remote_test.py`), plus Review 10 single-arm `_wait_checkstrat` +
   `+{strip_strat}` (`tools/bench/bench_bosses.py`) and sorted list-head cap eviction
   (`server_module/src/snapshot/behavior_trace.{h,cc}`), which are unit-tested and compiled into
   `out/server-test` without starting a new live benchmark run (per user instruction).
@@ -173,7 +173,10 @@ hand-checking draft `content/notes/` before enabling them.
 
 ## Done (newest first, keep about ten)
 
-- 2026-11-21: **Review `e6fa063` fixes (High 1, Medium 1–2, Low 1–3):**
+- 2026-11-21: **Review `d568a0f` fixes (Medium 1, Low 1–2) & post-commit reviewer visibility (`tools/wlb review`):**
+  [`tools/wlblib/remote.py`](../tools/wlblib/remote.py) `status()` `/proc` probe now uses `pwd -P` (symlinked repos), requires a path boundary in `$args` (`*"$REPO_ABS/"*|*"$REPO_ABS "*`, avoiding sibling-prefix matches), and skips `$PPID` (`M1`); [`tools/wlblib/remote_test.py`](../tools/wlblib/remote_test.py) (`22/22`) now executes the generated `status()`, `_kill_remote_pgid()`, and `_invalidate_remote_stamp()` bash snippets directly against real subprocesses in a `TemporaryDirectory` (symlinked repo, sibling prefix, invalid PGIDs `0`/`1`/`-1`/`abc`, single `KeyboardInterrupt` mock, `L1`) and records unverified live `Ctrl-C`/SSH-drop paths in `Loose ends` (`L2`); [`.agents/hooks/post_commit_review.py`](../.agents/hooks/post_commit_review.py) records spawned reviewer PID/SHA/start time in `var/review/active.json`, emits a `systemMessage` on spawn, and exposes `--status` wired as `tools/wlb review` in [`tools/wlb`](../tools/wlb) (tested in [`.agents/hooks/post_commit_review_test.py`](../.agents/hooks/post_commit_review_test.py) `4/4`). Verified via `tools/wlb check` (`ALL CHECKS PASSED`) and live `tools/wlb review`.
+
+- 2026-11-21: **Review `e6fa063` fixes (`d568a0f`; High 1, Medium 1–2, Low 1–3):**
   [`tools/wlblib/remote.py`](../tools/wlblib/remote.py) switches `run_remote()` to `setsid --wait bash -c ...` with an in-shell `EXIT` trap for `var/.active_remote_pgid` (propagating non-zero exit codes cleanly and avoiding a redundant second SSH round-trip on normal exit, `High 1` / `M2`), kills the remote PGID on SSH transport drop (`rc == 255`, `M2`), validates `$PGID > 1` before `kill -TERM/-KILL -"$PGID"` (`M2`), scopes `status()` process detection via `/proc/[0-9]*/{cwd,exe,cmdline}` so relative `./worldserver` and `bench_bosses.py` processes are detected (`M1`), and fixes `_invalidate_remote_stamp()` to only skip a missing repo dir (`L3`); [`tools/wlb`](../tools/wlb) removes the unreachable `elif a.command == "remote":` branch (`L3`); [`tools/wlblib/remote_test.py`](../tools/wlblib/remote_test.py) expands to `21/21` tests adding `status()`, `_kill_remote_pgid()`, `_invalidate_remote_stamp()`, `_rsync_to_remote()`, SSH-drop `255`, atomic fresh `os.open(..., 0o600)` DB password creation, and real `git worktree` `install_hook()` (`L2`); scrubbed personal worker name from `docs/TODO.md` (`L1`). Verified via `tools/wlb check` (`ALL CHECKS PASSED`) and live remote worker checks (`exit 7` propagation, `--pull` round-trip, and `status`).
 
 - 2026-11-21: **Review `693eb3a` fixes (`e6fa063`; High 1, Medium 1–5, Low 1–5):**

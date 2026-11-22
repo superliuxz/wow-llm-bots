@@ -33,11 +33,13 @@ import pathlib
 import shutil
 import subprocess
 import sys
+import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 REVIEW_DIR = ROOT / "var" / "review"
 HEAD_PATCH_FILE = REVIEW_DIR / "head.patch"
 LAST_REVIEWED_FILE = REVIEW_DIR / "last_reviewed_sha"
+ACTIVE_FILE = REVIEW_DIR / "active.json"
 LOCK_FILE = REVIEW_DIR / "review.lock"
 LATEST_LINK = REVIEW_DIR / "latest.md"
 REVIEWER_ENV = "WLB_COMMIT_REVIEWER"
@@ -180,7 +182,7 @@ def _spawn_reviewer(
     prompt = _build_review_prompt(short_sha, patch_file, root=root)
     try:
         with out_file.open("w", encoding="utf-8") as fout, err_file.open("w", encoding="utf-8") as ferr:
-            popen_fn(
+            proc = popen_fn(
                 [
                     bin_path,
                     "--mode",
@@ -200,12 +202,69 @@ def _spawn_reviewer(
     except OSError:
         return False
     try:
+        pid = getattr(proc, "pid", None)
+        (review_dir / "active.json").write_text(
+            json.dumps(
+                {
+                    "pid": pid,
+                    "sha": short_sha,
+                    "full_sha": full_sha,
+                    "started_at": time.time(),
+                    "out": out_file.relative_to(root).as_posix()
+                    if out_file.is_relative_to(root)
+                    else str(out_file),
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+    try:
         if latest_link.exists() or latest_link.is_symlink():
             latest_link.unlink()
         latest_link.symlink_to(out_file.name)
     except OSError:
         pass
     return True
+
+
+def _pid_is_reviewer(pid: int) -> bool:
+    if not isinstance(pid, int) or pid <= 1:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    try:
+        cmdline = pathlib.Path(f"/proc/{pid}/cmdline").read_bytes().decode("utf-8", "replace")
+    except OSError:
+        return False
+    return "agy" in cmdline and "--print=" in cmdline
+
+
+def format_review_status(review_dir: pathlib.Path = REVIEW_DIR) -> str:
+    active_path = review_dir / "active.json"
+    info: dict = {}
+    if active_path.is_file():
+        try:
+            info = json.loads(active_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            info = {}
+    pid = info.get("pid")
+    sha = info.get("sha") or ""
+    out_rel = info.get("out") or (f"var/review/review_{sha}.md" if sha else "var/review/latest.md")
+    started = info.get("started_at")
+    if isinstance(pid, int) and _pid_is_reviewer(pid):
+        elapsed = f", elapsed={int(max(0.0, time.time() - started))}s" if isinstance(started, (int, float)) else ""
+        return f"RUNNING: independent reviewer for {sha or '?'} (pid={pid}{elapsed}) -> {out_rel}"
+    latest = review_dir / "latest.md"
+    if latest.exists():
+        resolved = latest.resolve()
+        size = resolved.stat().st_size
+        return f"DONE: latest review {resolved.name} ({size} bytes) -> var/review/{resolved.name}"
+    return "IDLE: no post-commit reviews recorded yet"
 
 
 def handle_post_tool_use(
@@ -271,6 +330,10 @@ def handle_post_tool_use(
 
 
 def main() -> int:
+    if sys.argv[1:2] == ["--status"]:
+        print(format_review_status())
+        return 0
+
     # Never trigger recursively inside a spawned reviewer session.
     if os.environ.get(REVIEWER_ENV) == "1":
         print("{}")
@@ -295,8 +358,11 @@ def main() -> int:
         return 0
 
     if event == "PostToolUse":
-        handle_post_tool_use()
-        print("{}")
+        outcome = handle_post_tool_use()
+        if outcome == "spawned":
+            print(json.dumps({"systemMessage": f"Post-commit reviewer spawned: {format_review_status()}"}))
+        else:
+            print("{}")
         return 0
 
     print("{}")
