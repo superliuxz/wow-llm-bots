@@ -374,6 +374,18 @@ class NotesHillClimbTest(unittest.TestCase):
                 os.chdir(orig_cwd)
 
     def test_all_content_notes_standing_orders_valid(self) -> None:
+        def has_unexported_boss_aura(lhs: str) -> bool:
+            for clause in lhs.split(" & "):
+                c = clause.strip()
+                if c.endswith(" on boss") and not c.endswith(" cast on boss"):
+                    return True
+            return False
+
+        self.assertTrue(has_unexported_boss_aura("Shield on boss & not phase 2"))
+        self.assertTrue(has_unexported_boss_aura("Flame Breath cast on boss & Shield on boss"))
+        self.assertFalse(has_unexported_boss_aura("Flame Breath cast on boss"))
+        self.assertFalse(has_unexported_boss_aura("Flame Breath cast on boss & not phase 2"))
+
         notes_files = sorted((ROOT / "content" / "notes").glob("*/notes.md"))
         self.assertGreaterEqual(len(notes_files), 40)
         for path in notes_files:
@@ -384,8 +396,10 @@ class NotesHillClimbTest(unittest.TestCase):
             self.assertNotIn("hand-check", txt.lower(), f"{path.relative_to(ROOT)} has hand-check prose")
             for order in nhc.extract_standing_orders(txt):
                 lhs = order.split("->", 1)[0].strip()
-                is_boss_aura = lhs.endswith(" on boss") and not lhs.endswith(" cast on boss")
-                self.assertFalse(is_boss_aura, f"{path.relative_to(ROOT)}: unexported boss aura {order!r}")
+                self.assertFalse(
+                    has_unexported_boss_aura(lhs),
+                    f"{path.relative_to(ROOT)}: unexported boss aura {order!r}",
+                )
             seen_in_block: set[str] = set()
             in_code = False
             for line in txt.splitlines():

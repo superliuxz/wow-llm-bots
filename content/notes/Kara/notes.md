@@ -26,8 +26,8 @@ in Void Zone -> out of it
 
 ## Prince Malchezaar
 
-- **Netherspite Infernal**: unkillable Hellfire hazard; stay clear (`away Netherspite Infernal 16`).
+- **Netherspite Infernal**: unkillable 20 yd Hellfire hazard; stay clear (`away Netherspite Infernal 23`).
 
 ```
-Netherspite Infernal within 12 -> away Netherspite Infernal 16
+Netherspite Infernal within 20 -> away Netherspite Infernal 23
 ```

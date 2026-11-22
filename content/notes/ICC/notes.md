@@ -74,19 +74,19 @@ Dark Nucleus appears -> target nearest Dark Nucleus
 ## Prince Valanar
 
 - **Empowered Shock Vortex**: boss cast; follow standing order (`out of it`).
-- **Ball of Flame**: unkillable chasing orb; stay clear (`away Ball of Flame 16`).
 
 ```
 Empowered Shock Vortex cast -> out of it
-Ball of Flame within 12 -> away Ball of Flame 16
 ```
 
 ## Blood Prince Council
 
 - **Kinetic Bomb**: priority add; switch and burn promptly.
+- **Ball of Flames Visual**: chasing flame orb summoned by Prince Taldaram; stay clear (`away Ball of Flames Visual 16`).
 
 ```
 Kinetic Bomb appears -> target nearest Kinetic Bomb
+Ball of Flames Visual within 12 -> away Ball of Flames Visual 16
 ```
 
 ## Valithria Dreamwalker

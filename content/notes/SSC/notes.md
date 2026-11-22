@@ -10,11 +10,7 @@ Coilfang Guardian appears -> target nearest Coilfang Guardian
 
 ## Leotheras the Blind
 
-- **Whirlwind**: boss cast; follow standing order (`away boss 15`).
-
-```
-Whirlwind cast -> away boss 15
-```
+- **Whirlwind**: instant-cast 12s spinning AoE; spread out and stay clear of Leotheras during Whirlwind.
 
 ## Morogrim Tidewalker
 

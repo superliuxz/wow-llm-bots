@@ -21,7 +21,7 @@
 | **Kael'thas** (`kaelthas`) | `9/16` (56.2%) | `4/16` (25.0%) | `3/16` (18.8%) | `12/16` (75.0%) | `0.1489` / `1.0000` | `0.0659` / `0.8566` | `0.4578` / `1.0000` |
 | **Pooled (`80` trials/arm)** | **`52/80` (65.0%)** | **`43/80` (53.8%)** | **`35/80` (43.8%)** | **`40/80` (50.0%)** | `0.1977` / `0.1977` (`m=3`) | **`0.0109` / `0.0326` (`m=3`)** | `0.0782` / `0.1564` (`m=3`) |
 
-*Exact two-sided Fisher tests. Per-boss `p_holm15` applies Holm–Bonferroni across all `m = 15` (`5 bosses × 3 arms`) comparisons; against `no_brain` only (`m = 5`), Ikiss is `p_holm5 = 0.0048` and Kael'thas is `p_holm5 = 0.2636`. Pooled row applies Holm–Bonferroni across `m = 3` arm comparisons. Note: this is the 3rd Phase 1–2 sign-off 5-boss evaluation (`v1`/`v2`/`v3`; 5th 4-arm 5-boss `mixed_all` run overall in `var/`) after iterative bug fixes (`A6` potion lockout, generic trigger-hazard perception).*
+*Exact two-sided Fisher tests. Per-boss `p_holm15` applies Holm–Bonferroni across all `m = 15` (`5 bosses × 3 arms`) comparisons; against `no_brain` only (`m = 5`), Ikiss is `p_holm5 = 0.0048` and Kael'thas is `p_holm5 = 0.2636`. Pooled row applies Holm–Bonferroni across `m = 3` arm comparisons. Note: this is the 3rd Phase 1–2 sign-off 5-boss evaluation (`v1`/`v2`/`v3`; 6th 4-arm 5-boss `mixed_all` run overall in `var/`) after iterative bug fixes (`A6` potion lockout, generic trigger-hazard perception).*
 
 ---
 
