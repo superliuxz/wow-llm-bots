@@ -1,7 +1,5 @@
 # The Obsidian Sanctum (OS)
 
-<!-- DRAFT extracted from mod-playerbots (Raid/OS); hand-check before use. -->
-
 ## Sartharion
 
 - **Shadron** (add_switch): Priority add; switch targets to `Shadron` immediately.
@@ -14,16 +12,11 @@
 Shadron appears -> target nearest Shadron
 Twilight Fissure appears -> target nearest Twilight Fissure
 Flame Tsunami appears -> target nearest Flame Tsunami
-Portal appears -> target nearest Portal
 ```
 
 ## Acolyte of Shadron
 
 - **Portal** (add_switch): Priority add; switch targets to `Portal` immediately.
-
-```
-Portal appears -> target nearest Portal
-```
 
 ## The Obsidian Sanctum
 
@@ -35,8 +28,8 @@ Portal appears -> target nearest Portal
 
 ```
 Shadow Breath cast -> out of it
-Sartharion Cleave cast -> out of it
-Sartharion Flame Breath cast -> out of it
+Cleave cast -> out of it
+Flame Breath cast -> out of it
 Twilight Egg appears -> target nearest Twilight Egg
 in Safe Area -> out of it
 ```

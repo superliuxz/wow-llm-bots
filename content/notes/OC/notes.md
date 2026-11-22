@@ -1,13 +1,11 @@
 # The Oculus (OC)
 
-<!-- DRAFT extracted from mod-playerbots (Dungeon/OC); hand-check before use. -->
-
 ## Drakos the Interrogator
 
 - **Unstable Sphere** (add_switch): Priority add; switch targets to `Unstable Sphere` immediately.
 
 ```
-Unstable Sphere appears -> target nearest Unstable Sphere
+Unstable Sphere within 8 -> away Unstable Sphere 12
 ```
 
 ## Ley-guardian Eregos
@@ -17,10 +15,6 @@ Unstable Sphere appears -> target nearest Unstable Sphere
 ## Drakes
 
 - **Amber Drake** (add_switch): Priority add; switch targets to `Amber Drake` immediately.
-
-```
-Amber Drake appears -> target nearest Amber Drake
-```
 
 ## Mage-lord Urom
 

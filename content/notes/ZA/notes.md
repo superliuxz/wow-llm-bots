@@ -1,7 +1,5 @@
 # Zul'Aman (ZA)
 
-<!-- DRAFT extracted from mod-playerbots (Raid/ZA); hand-check before use. -->
-
 ## Shared
 
 - **Hex Lord Malacrass** (add_switch): Priority add; switch targets to `Hex Lord Malacrass` immediately.
@@ -38,10 +36,6 @@ Breath cast -> out of it
 
 - **Spirit** (add_switch): Priority add; switch targets to `Spirit` immediately.
 
-```
-Spirit appears -> target nearest Spirit
-```
-
 ## Halazzi
 
 - **Corrupted Lightning Totem** (add_switch): Priority add; switch targets to `Corrupted Lightning Totem` immediately.
@@ -58,7 +52,7 @@ Corrupted Lightning Totem appears -> target nearest Corrupted Lightning Totem
 
 ```
 Alyson Antille appears -> target nearest Alyson Antille
-Whirlwind cast -> out of it
+Whirlwind cast -> away boss 12
 ```
 
 ## Zul'jin
@@ -69,7 +63,7 @@ Whirlwind cast -> out of it
 - **Zul'jin Summoning Cyclones in Eagle Form** (positioning): Encounter positioning (zul'jin summoning cyclones in eagle form).
 
 ```
-Whirlwind cast -> out of it
+Whirlwind cast -> away boss 12
 ```
 
 ## Zul'Aman
@@ -78,8 +72,3 @@ Whirlwind cast -> out of it
 - **Zuljin Whirlwind** (cast_aoe): Boss cast AoE (`SPELL_ZULJIN_WHIRLWIND`); move out during cast.
 - **Fire Bomb** (add_switch): Priority add (`NPC_FIRE_BOMB`); switch and burn immediately.
 
-```
-Hex Lord Whirlwind cast -> out of it
-Zuljin Whirlwind cast -> out of it
-Fire Bomb appears -> target nearest Fire Bomb
-```

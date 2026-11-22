@@ -1,14 +1,12 @@
 # Vault of Archavon (VoA)
 
-<!-- DRAFT extracted from mod-playerbots (Raid/VoA); hand-check before use. -->
-
 ## Emalon the Storm Watcher
 
 - **Nova** (cast_aoe): Boss cast AoE (25 yd radius); move out during cast.
 - **Tempest Minion** (add_switch): Priority add; switch targets to `Tempest Minion` immediately.
 
 ```
-Nova cast -> out of it
+Lightning Nova cast -> out of it
 Tempest Minion appears -> target nearest Tempest Minion
 ```
 
@@ -16,6 +14,3 @@ Tempest Minion appears -> target nearest Tempest Minion
 
 - **Lightning Nova Man** (cast_aoe): Boss cast AoE (`SPELL_LIGHTNING_NOVA_10_MAN`); move out during cast.
 
-```
-Lightning Nova Man cast -> out of it
-```

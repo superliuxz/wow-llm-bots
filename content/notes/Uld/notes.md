@@ -1,14 +1,8 @@
 # Ulduar (Uld)
 
-<!-- DRAFT extracted from mod-playerbots (Raid/Uld); hand-check before use. -->
-
 ## Flame Leviathan
 
 - **Salvaged Siege Engine** (add_switch): Priority add; switch targets to `Salvaged Siege Engine` immediately.
-
-```
-Salvaged Siege Engine appears -> target nearest Salvaged Siege Engine
-```
 
 ## Razorscale
 
@@ -16,7 +10,7 @@ Salvaged Siege Engine appears -> target nearest Salvaged Siege Engine
 - **Fusearmor** (debuff): Aura `Fusearmor` (me); gather/position per encounter script (hand-check).
 
 ```
-Whirlwind cast -> out of it
+Whirlwind cast -> away boss 12
 ```
 
 ## Stormcaller Brundir
@@ -44,10 +38,6 @@ Rubble appears -> target nearest Rubble
 - **Snowpacked Icicle** (add_switch): Priority add; switch targets to `Snowpacked Icicle` immediately.
 - **Biting Cold Player** (debuff): Aura `Biting Cold Player` on me; hand-check encounter reaction.
 
-```
-Snowpacked Icicle appears -> target nearest Snowpacked Icicle
-```
-
 ## Freya
 
 - **Bomb** (add_switch): Priority add; switch targets to `Bomb` immediately.
@@ -55,9 +45,8 @@ Snowpacked Icicle appears -> target nearest Snowpacked Icicle
 - **Healthy Spore** (add_switch): Priority add; switch targets to `Healthy Spore` immediately.
 
 ```
-Bomb appears -> target nearest Bomb
+Detonating Lasher appears -> target nearest Detonating Lasher
 Snaplasher appears -> target nearest Snaplasher
-Healthy Spore appears -> target nearest Healthy Spore
 ```
 
 ## Thorim
@@ -68,7 +57,7 @@ Healthy Spore appears -> target nearest Healthy Spore
 - **Thorim Phase 2 Positioning Trigger** (positioning): Encounter positioning (thorim phase 2 positioning trigger).
 
 ```
-Dark Rune Acolyte I appears -> target nearest Dark Rune Acolyte I
+Dark Rune Acolyte appears -> target nearest Dark Rune Acolyte
 ```
 
 ## Dark Rune Acolyte
@@ -76,7 +65,7 @@ Dark Rune Acolyte I appears -> target nearest Dark Rune Acolyte I
 - **Dark Rune Acolyte I** (add_switch): Priority add; switch targets to `Dark Rune Acolyte I` immediately.
 
 ```
-Dark Rune Acolyte I appears -> target nearest Dark Rune Acolyte I
+Dark Rune Acolyte appears -> target nearest Dark Rune Acolyte
 ```
 
 ## Vx-001
@@ -85,7 +74,7 @@ Dark Rune Acolyte I appears -> target nearest Dark Rune Acolyte I
 - **Vx** (add_switch): Priority add; switch targets to `Vx` immediately.
 
 ```
-Vx appears -> target nearest Vx
+VX-001 appears -> target nearest VX-001
 ```
 
 ## Leviathan Mk Ii
@@ -102,7 +91,7 @@ Shock Blast cast -> out of it
 - **Bomb Bot** (add_switch): Priority add; switch targets to `Bomb Bot` immediately.
 
 ```
-Leviathan Mkii appears -> target nearest Leviathan Mkii
+Leviathan Mk II appears -> target nearest Leviathan Mk II
 Bomb Bot appears -> target nearest Bomb Bot
 ```
 
@@ -112,7 +101,7 @@ Bomb Bot appears -> target nearest Bomb Bot
 - **Mark of the Faceless** (debuff): Aura `Mark of the Faceless` (me); gather/position per encounter script (hand-check).
 
 ```
-in Vezax Shadow Crash -> out of it
+in Shadow Crash -> out of it
 ```
 
 ## Yogg-saron
@@ -128,12 +117,10 @@ in Vezax Shadow Crash -> out of it
 - **Immortal Guardian** (add_switch): Priority add; switch targets to `Immortal Guardian` immediately.
 
 ```
-Ominous Cloud appears -> target nearest Ominous Cloud
-Guardian of Ys appears -> target nearest Guardian of Ys
-Yogg Saron appears -> target nearest Yogg Saron
-Descend Into Madness appears -> target nearest Descend Into Madness
-Brain appears -> target nearest Brain
-Lunatic Gaze Ys on boss -> face away boss, then stop attacking
+Ominous Cloud within 10 -> away Ominous Cloud 14
+Guardian of Yogg-Saron appears -> target nearest Guardian of Yogg-Saron
+Brain of Yogg-Saron appears -> target nearest Brain of Yogg-Saron
+Lunatic Gaze cast -> face away boss, then stop attacking
 Immortal Guardian appears -> target nearest Immortal Guardian
 ```
 
@@ -141,6 +128,3 @@ Immortal Guardian appears -> target nearest Immortal Guardian
 
 - **Sentinel Whirlwind** (cast_aoe): Boss cast AoE (`SPELL_SENTINEL_WHIRLWIND`); move out during cast.
 
-```
-Sentinel Whirlwind cast -> out of it
-```

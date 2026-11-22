@@ -1,7 +1,5 @@
 # Utgarde Pinnacle (UP)
 
-<!-- DRAFT extracted from mod-playerbots (Dungeon/UP); hand-check before use. -->
-
 ## Grauf
 
 - **Breath** (ground_hazard): Ground hazard (~6 yd); move out immediately.
@@ -15,7 +13,7 @@ in Breath -> out of it
 - **Whirlwind** (cast_aoe): Boss cast AoE (7 yd radius); move out during cast.
 
 ```
-Whirlwind cast -> out of it
+Whirlwind cast -> away boss 12
 ```
 
 ## King Ymiron
@@ -28,6 +26,5 @@ Whirlwind cast -> out of it
 - **Skadi Whirlwind** (cast_aoe): Boss cast AoE (`SPELL_SKADI_WHIRLWIND_N`); move out during cast.
 
 ```
-Freezing Cloud Breath cast -> out of it
-Skadi Whirlwind cast -> out of it
+in Freezing Cloud -> out of it
 ```

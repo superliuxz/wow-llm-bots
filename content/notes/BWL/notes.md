@@ -1,7 +1,5 @@
 # Blackwing Lair (BWL)
 
-<!-- DRAFT extracted from mod-playerbots (Raid/BWL); hand-check before use. -->
-
 ## Razorgore the Untamed
 
 - **Mindcontrol** (debuff): Aura `Mindcontrol` (boss); gather/position per encounter script (hand-check).
@@ -25,7 +23,6 @@
 Breath cast -> out of it
 Corrupted Fire Nova Totem appears -> target nearest Corrupted Fire Nova Totem
 Corrupted Stoneskin Totem appears -> target nearest Corrupted Stoneskin Totem
-Corrupted Healing Totem appears -> target nearest Corrupted Healing Totem
 Corrupted Windfury Totem appears -> target nearest Corrupted Windfury Totem
 ```
 
@@ -34,6 +31,3 @@ Corrupted Windfury Totem appears -> target nearest Corrupted Windfury Totem
 - **Bwl Nefarian Positioning** (positioning): Encounter positioning (bwl nefarian positioning).
 - **Totem** (add_switch): Priority add; switch targets to `Totem` immediately.
 
-```
-Totem appears -> target nearest Totem
-```

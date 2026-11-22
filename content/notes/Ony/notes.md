@@ -1,7 +1,5 @@
 # Onyxia's Lair (Ony)
 
-<!-- DRAFT extracted from mod-playerbots (Raid/Ony); hand-check before use. -->
-
 ## Onyxia
 
 - **Breath** (cast_aoe): Boss cast AoE; move out during cast.
@@ -10,6 +8,5 @@
 
 ```
 Breath cast -> out of it
-Ony Fireball Splash Incoming cast -> out of it
-Whelp appears -> target nearest Whelp
+Onyxian Whelp appears -> target nearest Onyxian Whelp
 ```

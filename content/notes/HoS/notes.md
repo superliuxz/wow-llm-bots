@@ -1,7 +1,5 @@
 # Halls of Stone (HoS)
 
-<!-- DRAFT extracted from mod-playerbots (Dungeon/HoS); hand-check before use. -->
-
 ## Krystallus
 
 - **Shatter** (cast_aoe): Boss cast AoE (40 yd radius); move out during cast.

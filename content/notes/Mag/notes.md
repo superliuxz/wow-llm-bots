@@ -1,7 +1,5 @@
 # Magtheridon's Lair (Mag)
 
-<!-- DRAFT extracted from mod-playerbots (Raid/Mag); hand-check before use. -->
-
 ## Magtheridon's Lair
 
 - **Hellfire Channeler** (add_switch): Priority add; switch targets to `Hellfire Channeler` immediately.

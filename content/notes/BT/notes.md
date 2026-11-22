@@ -1,18 +1,11 @@
 # Black Temple (BT)
 
-<!-- DRAFT extracted from mod-playerbots (Raid/BT); hand-check before use. -->
-
 ## High Warlord Naj'entus
 
 - **Misdirection** (debuff): Aura `Misdirection` on me; hand-check encounter reaction.
 - **High Warlord Naj'entus Boss Engaged by Tanks** (positioning): Encounter positioning (high warlord naj'entus boss engaged by tanks).
 - **High Warlord Naj'entus Casts Needle Spines** (positioning): Boss disperses into sparks; move to safe disperse position.
 - **Imp** (add_switch): Priority add; switch targets to `Imp` immediately.
-
-```
-Disperse cast -> away boss 15
-Imp appears -> target nearest Imp
-```
 
 ## Supremus
 
@@ -21,7 +14,6 @@ Imp appears -> target nearest Imp
 - **Kite Supremus** (kite): Kite `Supremus` away from the group.
 
 ```
-Snare Self on me -> away boss 10
 Supremus targets me -> kite it
 ```
 
@@ -86,10 +78,6 @@ Shadowy Construct appears -> target nearest Shadowy Construct
 - **Illidari Council Mage Tank Needs Dedicated Healer** (positioning): Encounter positioning (illidari council mage tank needs dedicated healer).
 - **Illidari Council Zerevor Casts Dangerous Aoes** (positioning): Boss disperses into sparks; move to safe disperse position.
 
-```
-Disperse cast -> away boss 15
-```
-
 ## Illidan Stormrage
 
 - **Illidan Stormrage Boss Casts Flame Crash in Front of Main Tank** (positioning): Encounter positioning (illidan stormrage boss casts flame crash in front of main tank).
@@ -103,9 +91,8 @@ Disperse cast -> away boss 15
 - **Flame of Azzinoth** (add_switch): Priority add; switch targets to `Flame of Azzinoth` immediately.
 
 ```
-Parasite appears -> target nearest Parasite
-Totem appears -> target nearest Totem
-Demon Fire appears -> target nearest Demon Fire
+Parasitic Shadowfiend appears -> target nearest Parasitic Shadowfiend
+in Demon Fire -> out of it
 Shadow Demon appears -> target nearest Shadow Demon
 Flame of Azzinoth appears -> target nearest Flame of Azzinoth
 ```

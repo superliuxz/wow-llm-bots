@@ -1,7 +1,5 @@
 # Azjol-Nerub (AN)
 
-<!-- DRAFT extracted from mod-playerbots (Dungeon/AN); hand-check before use. -->
-
 ## Krik'thir the Gatewatcher
 
 - **Web Wrap** (add_switch): Priority add; switch targets to `Web Wrap` immediately.
@@ -9,7 +7,6 @@
 
 ```
 Web Wrap appears -> target nearest Web Wrap
-Krikthir appears -> target nearest Krikthir
 ```
 
 ## Azjol-Nerub

@@ -1,7 +1,5 @@
 # Gundrak (GD)
 
-<!-- DRAFT extracted from mod-playerbots (Dungeon/GD); hand-check before use. -->
-
 ## Slad'ran
 
 - **Poison Nova** (cast_aoe): Boss cast AoE (17 yd radius); move out during cast.
@@ -11,7 +9,6 @@
 ```
 Poison Nova cast -> out of it
 Snake Wrap appears -> target nearest Snake Wrap
-always -> to boss
 ```
 
 ## Gal'darah

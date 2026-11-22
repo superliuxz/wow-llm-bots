@@ -1,14 +1,12 @@
 # Molten Core (MC)
 
-<!-- DRAFT extracted from mod-playerbots (Raid/MC); hand-check before use. -->
-
 ## Baron Geddon
 
 - **Living Bomb** (ground_hazard): Ground hazard; move out immediately.
 - **Inferno** (debuff): Aura `Inferno` on boss; hand-check encounter reaction.
 
 ```
-in Living Bomb -> out of it
+Living Bomb on me -> away group 15
 ```
 
 ## Golemagg the Incinerator
@@ -26,5 +24,5 @@ in Living Bomb -> out of it
 - **Hound** (add_switch): Priority add; switch targets to `Hound` immediately.
 
 ```
-Hound appears -> target nearest Hound
+Core Hound appears -> target nearest Core Hound
 ```

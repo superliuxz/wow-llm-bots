@@ -1,13 +1,11 @@
 # Ahn'kahet: The Old Kingdom (AK)
 
-<!-- DRAFT extracted from mod-playerbots (Dungeon/AK); hand-check before use. -->
-
 ## Elder Nadox
 
 - **Guardian** (add_switch): Priority add; switch targets to `Guardian` immediately.
 
 ```
-Guardian appears -> target nearest Guardian
+Ahn'kahar Guardian appears -> target nearest Ahn'kahar Guardian
 ```
 
 ## Jedoga Shadowseeker

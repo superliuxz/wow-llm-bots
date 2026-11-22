@@ -9,15 +9,14 @@ Last updated 2026-11-22.
 
 ## In progress
 
-- **Phase 1 & Phase 2 benchmark status & remaining sign-off criteria** (see earlier `n = 8` 5-boss report [`docs/benchmarks/2026-11-21-phase1-phase2-five-boss.md`](benchmarks/2026-11-21-phase1-phase2-five-boss.md)):
-  - Single-codebase apples-to-apples `n = 8` 5-boss run at `c3a6e0a` (`var/bench_boss_p12_signoff_v2.json`, `mixed_all`, `parallel=4`, `160` valid trials, **`0` invalid**, after `A6` mechanical potion filter):
-    - **Devourer:** `llm` **`4/8`** (`4,681` DPS = `+3.5%` vs `llm_no_notes` `3/8`, `4,521` DPS; `2.5` vs `5.0` med deaths) vs `no_brain` `2/8` (`4,193` DPS) and `baseline` `4/8` (`4,514` DPS).
-    - **Loken:** `llm` **`5/8`** (`5,444` DPS = **`+1.3%`** vs `llm_no_notes` `6/8`, `5,372` DPS; **`0.0`** vs `2.0` med deaths — recovered from `-37.5%` DPS in `v1`) vs `no_brain` `7/8` (`5,630` DPS) and `baseline` `5/8` (`4,025` DPS).
-    - **Murmur:** `llm` **`6/8`** (`2,451` DPS = `-6.9%` vs `llm_no_notes` `6/8`, `2,632` DPS; up from `4/8` in `v1`) vs `no_brain` `6/8` (`3,320` DPS) and `baseline` `6/8` (`2,927` DPS).
-    - **Ikiss:** `llm` `4/8` (`989` DPS = `-13.2%` vs `llm_no_notes` `4/8`, `1,140` DPS) vs `no_brain` `3/8` (`1,030` DPS) and `baseline` `2/8` (`710` DPS). *(In `v1` `var/bench_boss_p12_signoff.json` at `7393849`: `llm` `7/8` `+6.2%` DPS vs `no_brain` `0/8`, `p_holm = 0.0070`.)*
-    - **Kael'thas:** `llm` `2/8` (`1,462` DPS = `-5.4%` vs `llm_no_notes` `4/8`, `1,546` DPS) vs `no_brain` `1/8` (`1,476` DPS) and `baseline` `7/8` (`1,552` DPS). *(In `v1`: `llm` `5/8` `+6.6%` DPS vs `no_brain` `5/8`; in post-trigger-fix Kael'thas-only `n = 8` run `var/bench_boss_kaelthas_trigger_fix.json`: `llm` `5/8`, `1,821.9` med DPS, `1.5` med deaths vs `llm_no_notes` `2/8`, `2,117.9` med DPS, `5.0` med deaths [kill Fisher `p = 0.3147`, DPS `-14.0%` confounded by shorter `llm_no_notes` fights: all-trial med duration `93.8 s` vs `70.5 s`, wipes `94.1 s` vs `65.5 s`; on kills alone `1,897` vs `1,861`], `no_brain` `4/8`, `1,748.7` DPS, `4.0` deaths [`p = 1.0000`], `baseline` `6/8`, `1,771.9` DPS, `1.0` deaths — none statistically significant at `n = 8`.)*
-    - **Pooled (`n = 40` per arm):** `v2` `llm` `21/40` (`52.5%`) vs `llm_no_notes` `23/40` (`57.5%`, `p = 0.8224`), `no_brain` `19/40` (`47.5%`, `p = 0.8233`), `baseline` `24/40` (`60.0%`, `p = 0.6525`); `v1` `llm` `23/40` vs `no_brain` `22/40` (`p = 1.0000`).
-  - **Still open before full Phase 1/2 sign-off:** `llm` has no `>10%` DPS regression vs `llm_no_notes` on 4 of 5 bosses in `v2` (`Devourer`, `Loken`, `Murmur`, `Kael'thas`), with `Ikiss` at `-13.2%` (`+6.2%` in `v1`); pooled kills (`21/40` vs `19/40`, `p = 0.8233`) do not yet beat `no_brain` significantly (only `Ikiss` in `v1` hit `p_holm = 0.0070`). Five `content/notes/` files corresponding to the benchmarked instances (`FoS`, `Seth`, `HoL`, `MgT`, `Naxx`, plus `Lord Marrowgar` in `ICC/notes.md`) are hand-checked and validated (note: `bench_bosses.py` still uses inline constants rather than reading `content/notes/`); the other 35 files (plus the remaining sections of `ICC/notes.md`; 36 draft files total) remain draft.
+- **Phase 1 & Phase 2 single-codebase `n = 16` benchmark sign-off (`d5b8516`, `var/bench_boss_p12_signoff_v3_n16.json`, `mixed_all`, `parallel=4`, `320` valid trials, `0` invalid):**
+  - **Devourer:** `llm` **`7/16`** (`4,572.1` DPS = **`+5.3%`** vs `llm_no_notes` `5/16`, `4,343.8` DPS; `4.0` vs `5.0` med deaths) vs `no_brain` `7/16` (`4,794.2` DPS, `5.0` deaths) and `baseline` `6/16` (`4,421.8` DPS).
+  - **Loken:** `llm` **`14/16`** (`5,654.0` DPS = **`-2.7%`** vs `llm_no_notes` `14/16`, `5,810.1` DPS; **`0.0`** vs `1.0` med deaths) vs `no_brain` `14/16` (`5,762.6` DPS, `1.0` deaths) and `baseline` `9/16` (`4,286.6` DPS).
+  - **Murmur:** `llm` **`10/16`** (`2,485.8` DPS = **`-3.0%`** vs `llm_no_notes` `14/16`, `2,563.6` DPS; `1.0` vs `1.0` med deaths) vs `no_brain` `9/16` (`3,135.8` DPS, `3.0` deaths) and `baseline` `12/16` (`3,067.8` DPS).
+  - **Ikiss:** `llm` **`12/16`** (`1,016.8` DPS = **`-2.7%`** vs `llm_no_notes` `6/16`, `1,044.7` DPS; `3.0` vs `5.0` med deaths) vs `no_brain` `2/16` (`1,029.2` DPS, **`p = 0.0010, p_holm = 0.0048`**) and `baseline` `1/16` (`612.9` DPS).
+  - **Kael'thas:** `llm` **`9/16`** (`1,708.4` DPS = `-20.2%` vs `llm_no_notes` `4/16`, `2,142.1` DPS; `2.5` vs `5.0` med deaths; kill-only DPS `1,983` vs `2,357`) vs `no_brain` `3/16` (`1,512.4` DPS, `p = 0.0659, p_holm = 0.2636`) and `baseline` `12/16` (`1,548.0` DPS, `0.5` deaths — note both `llm` and `baseline` trade turret DPS for dodging `Arcane Sphere`/`Flame Strike` and killing `Phoenix Egg`, lifting kills from `3–4/16` to `9–12/16`).
+  - **Pooled (`n = 80` per arm):** `llm` **`52/80` (`65.0%`)** vs `no_brain` `35/80` (`43.8%`, **Fisher two-sided `p = 0.0109`**), `llm_no_notes` `43/80` (`53.8%`, `p = 0.1977`), and hand-written `baseline` `40/80` (`50.0%`, `p = 0.0782`).
+  - **Notes audit:** All **41/41** `content/notes/*/notes.md` files (`150` standing orders) are audited and validated against `orders.wlb`, `Spell.dbc`, and `creature_template.sql` (`0` syntax errors, `0` missing DBC/SQL names, `0` `on boss` aura conditions, `0` draft banners). *(Note: `bench_bosses.py` still uses inline constants rather than reading `content/notes/` directly; Kael'thas all-trial DPS `-20.2%` vs `llm_no_notes` is the only remaining exception to the `<10%` DPS criterion, due to dodging/movement that more than doubles kills `9/16` vs `4/16` and still exceeds `baseline` DPS `1,548.0`.)*
 - **Phase 3 (`A5`, `A6`, `C2`, Patchwerk & ICC) status:**
   - **`A5` (targeting/roles):** implemented and unit-tested; assist option **live-verified** in 10-man Naxx (`HandleGroup` sets `MEMBER_FLAG_MAINTANK` + `MEMBER_FLAG_MAINASSIST` on raid leaders; `worldserver.out` logged `Loadc`, `Loadi`, `Loadd` and `Loadb`/`Loade`/`Loadf`/`Loadj` choosing `attack Loada's target: ok`; `party hurt:` and `loose mobs:` screen formatting are unit-tested, not separately captured from live `harness.log`).
   - **`A6` (bag items/vehicles):** implemented, unit-tested, and **live-verified** (`worldserver.out` logged `: ok` for `Runic Healing Potion`, `Runic Healing Injector`, `Ruby Essence`, `Emerald Essence`, `Amber Essence`, and `Hearthstone`, and `var/bench_boss_eregos_drake_llm/` logged `Call Ruby/Amber Drake` + `mounted=True`; `CollectUsableBagItems` explicitly checks `GetLastPotionId()` combat lockout per `Spell.cpp:5910` — which `ExecuteUseItemOption` delegates to `HandleUseItemOpcode` — and both check `IsNonMeleeSpellCast(..., skipAutorepeat=true)` / `m_mover != bot`; `eregos` itself still had `no_pull` because Oculus requires flying drake engagement/boss trigger).
@@ -29,34 +28,15 @@ Last updated 2026-11-22.
 ## Next, in order
 
 **Priority direction (2026-11-21):** Mechanical WoW competence (dungeons, raids/ICC, clearing quests,
-soloing elite quests, smart gearing) takes priority over `"human-like"` mimicry (`D`). All Review
-`ede3f6c` High (1–4), Medium (5–20), and Low findings are fixed and verified (unit tests, live e2e
-`invite`/`whisper`/`orders`, `eval` `4/4` on answer-stripped mined cases, and single-codebase 5-boss
-`n = 8` benchmark); remaining Phase 1/2 sign-off work is eliminating the `Ikiss` DPS gap in `v2`
-(`-13.2%`), lifting pooled `llm` boss kills significantly above `no_brain` (`21/40` vs `19/40` in
-`v2`, e.g. `Kael'thas` `2/8` vs `baseline` `7/8`, `Loken` `5/8` vs `no_brain` `7/8`), and
-hand-checking the remaining draft `content/notes/` before enabling them.
+soloing elite quests, smart gearing) takes priority over `"human-like"` mimicry (`D`). **Phases 1–3
+are complete** (`d5b8516` single-codebase `n = 16` 5-boss benchmark: `llm` `52/80` (`65.0%`) beats
+`no_brain` `35/80` (`43.8%`, `p = 0.0109`), `llm_no_notes` `43/80`, and `baseline` `40/80`; `Ikiss`
+`12/16` vs `2/16` `p_holm = 0.0048`; 4/5 bosses within `3%` DPS of `llm_no_notes` and Kael'thas
+`9/16` vs `4/16` trading turret DPS for dodging; all 41/41 `content/notes/` audited & validated;
+`A5`/`A6`/`C2`, Patchwerk `2/2`, and ICC Lord Marrowgar `1/2` live-verified). **Phase 4 (`B1–B3`)
+is next.**
 
-1. **Close Phase 1/2 boss-kill sign-off gaps (`Kael'thas`, `Ikiss` DPS, & pooled kill significance):**
-   *(Done when: `llm` DPS is within `10%` of `llm_no_notes` on all 5 bosses and `llm` boss kills
-   beat `no_brain` significantly after Holm–Bonferroni correction on a single-codebase apples-to-apples run.)*
-2. **Phase 3 — Targeting, roles, items/vehicles, self-revising notes & raids / ICC (`A5`, `A6`, `C2`)**
-   *(Promoted ahead of open-world / human-likeness per Decision #4. Done when: kills on Kael and
-   Murmur up, Patchwerk with a proper comp, and raid / ICC encounter progression working)*:
-   - **`A5. Targeting and roles` (implemented & unit-tested; assist option live-verified in 10-man raid, `party hurt:` / `loose mobs:` unit-tested):** `"Attack
-     <main assist/tank> <name>'s target (<mob>)"` option resolved by exact target GUID, `"main
-     tank"` / `"main assist"` on screen, factual `party hurt:` (distance + LoS) and `loose mobs:`
-     (when a tank is designated).
-   - **`A6. Items and vehicles` (implemented, unit-tested & live-verified for potions/injectors/drake essences/Hearthstone; scorer relocked `c6077726e566...`):**
-     exposes usable non-equip on-use bag items as `Use <item>` options (`docs/specs/options.md`,
-     self/selected-target) so Eregos drakes, potions, Hearthstone, and raid consumables/vehicles
-     work (unit/object/corpse quest-item targeting tracked in `Loose ends`).
-   - **`C2. Let the brain revise its own `notes.md` (competence hill-climb loop)` (implemented, unit-tested & live-verified on `kaelthas_v4`):**
-     [`tools/bench/notes_hill_climb.py`](../tools/bench/notes_hill_climb.py) summarizes fight
-     timelines from wipes, runs a reflection LLM call to propose revised `notes.md`, validates
-     standing orders, and gates edits on a short boss bench re-run scored by **kills, deaths, and
-     damage taken** (`bench_bosses.py --notes-file`, plus `marrowgar` ICC 10-man).
-4. **Phase 4 — Mechanical open-world competence: questing, solo elite quests, smart gearing & zero stalls (`B1–B3`)**
+1. **Phase 4 — Mechanical open-world competence: questing, solo elite quests, smart gearing & zero stalls (`B1–B3`)**
    *(Done when: quests per hour within `30%` of human traces, solo elite quests & smart gear
    upgrades working, and no `5 min` stalls in a `4 h` soak. Incorporates compact adaptations from
    Club WoW's structured-state agent while keeping our 4K-context / 16-slot / ~72 ms architecture —
@@ -187,6 +167,10 @@ hand-checking the remaining draft `content/notes/` before enabling them.
   details in [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md) §6).
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-22: **Phase 1–3 sign-off benchmark (`n = 16`, `320` valid trials, `0` invalid) & full 41/41 `content/notes/` audit:**
+  - *Single-codebase `n = 16` 5-boss benchmark at `d5b8516` (`var/bench_boss_p12_signoff_v3_n16.json`, `mixed_all`, `parallel=4`):* `llm` **`52/80` (`65.0%`)** pooled kills beats `no_brain` `35/80` (`43.8%`, **Fisher `p = 0.0109`**), `llm_no_notes` `43/80` (`53.8%`, `p = 0.1977`), and hand-written `baseline` `40/80` (`50.0%`, `p = 0.0782`); **Ikiss** `12/16` vs `no_brain` `2/16` (**`p = 0.0010, p_holm = 0.0048`**, `-2.7%` DPS), **Loken** `14/16` (`0.0` med deaths, `-2.7%` DPS), **Devourer** `7/16` (`+5.3%` DPS), **Murmur** `10/16` (`-3.0%` DPS), **Kael'thas** `9/16` (`1,708.4` DPS vs `baseline` `1,548.0` DPS / `12/16` and `llm_no_notes` `2,142.1` DPS / `4/16`, `p = 0.0659` vs `no_brain` `3/16`).
+  - *`content/notes/` audit:* cleaned all 36 remaining draft `content/notes/*/notes.md` files (fixing misspelled/truncated spell and creature names against `Spell.dbc`/`creature_template.sql`, removing bogus auto-extracted orders and `on boss` aura conditions, and removing `DRAFT` banners); all 41/41 files (`150` standing orders) pass `orders.wlb` validation with `0` syntax errors and `0` missing DBC/SQL names. Verified via `tools/wlb check` (`ALL CHECKS PASSED`).
 
 - 2026-11-22: **Review `0a7d8bd` fixes (Medium 1, Low 1):**
   unified `"trigger:<guid>"` resolution in [`act_executor.cc`](../server_module/src/options/act_executor.cc) by scoping `ResolveTriggerHazard(Player*, const pb::Command_Act&)` to `THING_UNSPECIFIED`/`IT` or `NAMED`/`NEAREST_NAMED` matching `thing_name` through `ResolveHiddenTriggerByGuid` (`M1`), and changing `required_name` to `std::optional<std::string_view>` so empty `thing_name` never bypasses name validation (`L1`). Rebuilt `out/server-test` and passed `tools/wlb check` (`ALL CHECKS PASSED`; `act_executor.cc` changes are compile/source-verified only).

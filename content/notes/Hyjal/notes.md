@@ -1,7 +1,5 @@
 # Hyjal Summit (Hyjal)
 
-<!-- DRAFT extracted from mod-playerbots (Raid/Hyjal); hand-check before use. -->
-
 ## Rage Winterchill
 
 - **Misdirection** (debuff): Aura `Misdirection` on boss; hand-check encounter reaction.
@@ -36,7 +34,6 @@ Stomp cast -> out of it
 - **Rain of Fire** (ground_hazard): Ground hazard (~17 yd); move out immediately.
 
 ```
-Disperse cast -> away boss 15
 in Rain of Fire -> out of it
 ```
 
@@ -52,6 +49,5 @@ in Rain of Fire -> out of it
 - **Air Burst** (cast_aoe): Boss cast AoE; move out during cast.
 
 ```
-always -> use Tremor Totem
 Air Burst cast -> out of it
 ```

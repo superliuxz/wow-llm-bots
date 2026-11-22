@@ -1,7 +1,5 @@
 # Drak'Tharon Keep (DTK)
 
-<!-- DRAFT extracted from mod-playerbots (Dungeon/DTK); hand-check before use. -->
-
 ## Trollgore
 
 - **Drakkari Invader** (add_switch): Priority add; switch targets to `Drakkari Invader` immediately.

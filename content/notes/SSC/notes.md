@@ -1,24 +1,14 @@
 # Serpentshrine Cavern (SSC)
 
-<!-- DRAFT extracted from mod-playerbots (Raid/SSC); hand-check before use. -->
-
 ## Shared
 
 - **Fathom Lord Karathress** (add_switch): Priority add; switch targets to `Fathom Lord Karathress` immediately.
-
-```
-Fathom Lord Karathress appears -> target nearest Fathom Lord Karathress
-```
 
 ## Trash
 
 - **Totem** (add_switch): Priority add; switch targets to `Totem` immediately.
 - **Hydross the Unstable Should Be Tanked by Frost Tank** (positioning): Encounter positioning (hydross the unstable should be tanked by frost tank).
 - **Hydross the Unstable Should Be Tanked by Nature Tank** (positioning): Encounter positioning (hydross the unstable should be tanked by nature tank).
-
-```
-Totem appears -> target nearest Totem
-```
 
 ## The Lurker Below
 
@@ -37,7 +27,6 @@ Guardian appears -> target nearest Guardian
 
 ```
 Whirlwind cast -> out of it
-always -> to boss
 ```
 
 ## Fathom-lord Karathress
@@ -58,10 +47,8 @@ always -> to boss
 - **Elemental** (add_switch): Priority add; switch targets to `Elemental` immediately.
 
 ```
-always -> to boss
-Totem appears -> target nearest Totem
 Coilfang Elite appears -> target nearest Coilfang Elite
-Elemental appears -> target nearest Elemental
+Tainted Elemental appears -> target nearest Tainted Elemental
 ```
 
 ## Serpentshrine Cavern
@@ -71,7 +58,7 @@ Elemental appears -> target nearest Elemental
 - **Spitfire Totem** (add_switch): Priority add (`NPC_SPITFIRE_TOTEM`); switch and burn immediately.
 
 ```
-Leotheras Whirlwind cast -> out of it
+Whirlwind cast -> away boss 15
 Water Elemental Totem appears -> target nearest Water Elemental Totem
 Spitfire Totem appears -> target nearest Spitfire Totem
 ```

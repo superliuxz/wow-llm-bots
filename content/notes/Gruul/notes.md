@@ -1,7 +1,5 @@
 # Gruul's Lair (Gruul)
 
-<!-- DRAFT extracted from mod-playerbots (Raid/Gruul); hand-check before use. -->
-
 ## Shared
 
 - **High King Maulgar** (add_switch): Priority add; switch targets to `High King Maulgar` immediately.

@@ -1,7 +1,5 @@
 # Icecrown Citadel (ICC)
 
-<!-- DRAFT extracted from mod-playerbots (Raid/ICC); hand-check before use. -->
-
 ## Lord Marrowgar
 
 - **Coldflame**: moving line of blue fire; move out immediately.
@@ -20,7 +18,7 @@ Bone Storm cast -> away Lord Marrowgar 15
 - **Shade** (add_switch): Priority add; switch targets to `Shade` immediately.
 
 ```
-Shade appears -> target nearest Shade
+Vengeful Shade appears -> away Vengeful Shade 15
 ```
 
 ## Rotting Frost Giant
@@ -31,10 +29,6 @@ Shade appears -> target nearest Shade
 
 - **Below Zero** (debuff): Aura `Below Zero` on me; hand-check encounter reaction.
 - **Cannona** (add_switch): Priority add; switch targets to `Cannona` immediately.
-
-```
-Cannona appears -> target nearest Cannona
-```
 
 ## Deathbringer Saurfang
 
@@ -70,7 +64,7 @@ in Vile Gas -> out of it
 - **Ooze** (add_switch): Priority add; switch targets to `Ooze` immediately.
 
 ```
-Ooze appears -> target nearest Ooze
+Volatile Ooze appears -> target nearest Volatile Ooze
 ```
 
 ## Gas Cloud
@@ -88,9 +82,7 @@ in Gas Cloud -> out of it
 - **Mutated Abomination** (add_switch): Priority add; switch targets to `Mutated Abomination` immediately.
 
 ```
-in Ooze Puddle -> out of it
-in Spitefull Fury -> out of it
-Mutated Abomination appears -> target nearest Mutated Abomination
+in Slime Puddle -> out of it
 ```
 
 ## Prince Keleseth
@@ -136,10 +128,7 @@ Kinetic Bomb appears -> target nearest Kinetic Bomb
 - **Dream Cloud** (add_switch): Priority add; switch targets to `Dream Cloud` immediately.
 
 ```
-Dream State cast -> out of it
 Blistering Zombie targets me -> kite it
-Dream Portal appears -> target nearest Dream Portal
-Dream Cloud appears -> target nearest Dream Cloud
 ```
 
 ## Sindragosa
@@ -152,20 +141,14 @@ Dream Cloud appears -> target nearest Dream Cloud
 - **Ice Tomb** (facing): When `Ice Tomb` is active on Sindragosa, face away and stop attacking.
 
 ```
-Tomb appears -> target nearest Tomb
+Ice Tomb appears -> target nearest Ice Tomb
 Blistering Cold cast -> out of it
-Ice Tomb on boss -> face away boss, then stop attacking
 ```
 
 ## The Lich King
 
 - **Valithria Dreamwalker** (add_switch): Priority add; switch targets to `Valithria Dreamwalker` immediately.
 - **Nitro Boosts** (ground_hazard): Ground hazard; move out immediately.
-
-```
-Valithria Dreamwalker appears -> target nearest Valithria Dreamwalker
-in Nitro Boosts -> out of it
-```
 
 ## Icecrown Citadel
 
@@ -176,9 +159,7 @@ in Nitro Boosts -> out of it
 - **Quake** (cast_aoe): Boss cast AoE (`SPELL_QUAKE`); move out during cast.
 
 ```
-Spike appears -> target nearest Spike
-Choking Gas Bomb appears -> target nearest Choking Gas Bomb
-Spirit Bomb appears -> target nearest Spirit Bomb
+in Choking Gas Explosion -> out of it
 Unstable Ooze Explosion cast -> out of it
 Quake cast -> out of it
 ```

@@ -1,7 +1,5 @@
 # Tempest Keep (TK)
 
-<!-- DRAFT extracted from mod-playerbots (Raid/TK); hand-check before use. -->
-
 ## Shared
 
 - **Lord Sanguinar** (add_switch): Priority add; switch targets to `Lord Sanguinar` immediately.
@@ -15,11 +13,6 @@ Lord Sanguinar appears -> target nearest Lord Sanguinar
 - **Misdirection** (debuff): Aura `Misdirection` on me; hand-check encounter reaction.
 - **Ember of Alar** (add_switch): Priority add; switch targets to `Ember of Alar` immediately.
 - **Bomb** (add_switch): Priority add; switch targets to `Bomb` immediately.
-
-```
-Ember of Alar appears -> target nearest Ember of Alar
-Bomb appears -> target nearest Bomb
-```
 
 ## Void Reaver
 
@@ -59,8 +52,6 @@ Thaladred the Darkener targets me -> kite it
 - **Gravity Lapse** (debuff): Debuff; spread 10 yd away from allies.
 
 ```
-Netherstrand Longbow appears -> target nearest Netherstrand Longbow
-Devastation appears -> target nearest Devastation
 Gravity Lapse on me -> away group 10
 ```
 

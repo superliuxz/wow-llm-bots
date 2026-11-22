@@ -1,7 +1,5 @@
 # The Violet Hold (VH)
 
-<!-- DRAFT extracted from mod-playerbots (Dungeon/VH); hand-check before use. -->
-
 ## Ichoron
 
 - **Ichor Globule** (add_switch): Priority add; switch targets to `Ichor Globule` immediately.

@@ -1,15 +1,9 @@
 # The Ruby Sanctum (RS)
 
-<!-- DRAFT extracted from mod-playerbots (Raid/RS); hand-check before use. -->
-
 ## Baltharus the Warborn
 
 - **Enervating Brand** (debuff): Aura `Enervating Brand` (me); gather/position per encounter script (hand-check).
 - **Baltharus the Warborn Clone** (add_switch): Priority add; switch targets to `Baltharus the Warborn Clone` immediately.
-
-```
-Baltharus the Warborn Clone appears -> target nearest Baltharus the Warborn Clone
-```
 
 ## Saviana Ragefire
 
@@ -19,10 +13,6 @@ Baltharus the Warborn Clone appears -> target nearest Baltharus the Warborn Clon
 ## General Zarithrian
 
 - **Add** (add_switch): Priority add; switch targets to `Add` immediately.
-
-```
-Add appears -> target nearest Add
-```
 
 ## The Ruby Sanctum
 
@@ -41,11 +31,9 @@ Add appears -> target nearest Add
 
 ```
 Living Inferno appears -> target nearest Living Inferno
-Add appears -> target nearest Add
-Portal appears -> target nearest Portal
 Orb Carrier appears -> target nearest Orb Carrier
 Flame Breath cast -> out of it
-Flame Breath Alt cast -> out of it
+Flame Breath cast -> out of it
 Cleave cast -> out of it
 Dark Breath cast -> out of it
 ```

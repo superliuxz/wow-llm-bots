@@ -1,34 +1,20 @@
 # Karazhan (Kara)
 
-<!-- DRAFT extracted from mod-playerbots (Raid/Kara); hand-check before use. -->
-
 ## Nightbane
 
 - **Tremor Totem** (debuff): Keep Tremor Totem down for Fear.
 - **Nightbane Boss Engaged by Tanks** (positioning): Encounter positioning (nightbane boss engaged by tanks).
 - **Charred Earth** (debuff): Aura `Charred Earth` (me); gather/position per encounter script (hand-check).
 
-```
-always -> use Tremor Totem
-```
-
 ## Moroes
 
 - **Add** (add_switch): Priority add; switch targets to `Add` immediately.
-
-```
-Add appears -> target nearest Add
-```
 
 ## Maiden of Virtue
 
 - **Repentance** (debuff): Aura `Repentance` (me); gather/position per encounter script (hand-check).
 - **Maiden of Virtue Holy Wrath Deals Chain Damage** (positioning): Encounter positioning (maiden of virtue holy wrath deals chain damage).
 - **Totem** (add_switch): Priority add; switch targets to `Totem` immediately.
-
-```
-Totem appears -> target nearest Totem
-```
 
 ## The Big Bad Wolf
 
@@ -52,7 +38,7 @@ Arcane Explosion cast -> out of it, then back
 - **Elemental** (add_switch): Priority add; switch targets to `Elemental` immediately.
 
 ```
-Elemental appears -> target nearest Elemental
+Conjured Elemental appears -> target nearest Conjured Elemental
 ```
 
 ## Netherspite
@@ -63,9 +49,6 @@ Elemental appears -> target nearest Elemental
 - **Void Zone** (ground_hazard): Ground hazard (~4 yd); move out immediately.
 
 ```
-Red Portal appears -> target nearest Red Portal
-Blue Portal appears -> target nearest Blue Portal
-Green Portal appears -> target nearest Green Portal
 in Void Zone -> out of it
 ```
 
