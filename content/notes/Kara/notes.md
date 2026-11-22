@@ -26,8 +26,8 @@ in Void Zone -> out of it
 
 ## Prince Malchezaar
 
-- **Netherspite Infernal**: priority add; switch and burn promptly.
+- **Netherspite Infernal**: unkillable Hellfire hazard; stay clear (`away Netherspite Infernal 16`).
 
 ```
-Netherspite Infernal appears -> target nearest Netherspite Infernal
+Netherspite Infernal within 12 -> away Netherspite Infernal 16
 ```

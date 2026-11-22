@@ -10,10 +10,10 @@ Coilfang Guardian appears -> target nearest Coilfang Guardian
 
 ## Leotheras the Blind
 
-- **Whirlwind**: boss cast; follow standing order (`out of it`).
+- **Whirlwind**: boss cast; follow standing order (`away boss 15`).
 
 ```
-Whirlwind cast -> out of it
+Whirlwind cast -> away boss 15
 ```
 
 ## Morogrim Tidewalker
@@ -28,12 +28,10 @@ Tainted Elemental appears -> target nearest Tainted Elemental
 
 ## Serpentshrine Cavern
 
-- **Whirlwind**: boss cast; follow standing order (`away boss 15`).
 - **Water Elemental Totem**: priority add; switch and burn promptly.
 - **Spitfire Totem**: priority add; switch and burn promptly.
 
 ```
-Whirlwind cast -> away boss 15
 Water Elemental Totem appears -> target nearest Water Elemental Totem
 Spitfire Totem appears -> target nearest Spitfire Totem
 ```

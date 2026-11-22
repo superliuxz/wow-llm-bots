@@ -74,11 +74,11 @@ Dark Nucleus appears -> target nearest Dark Nucleus
 ## Prince Valanar
 
 - **Empowered Shock Vortex**: boss cast; follow standing order (`out of it`).
-- **Ball of Flame**: priority add; switch and burn promptly.
+- **Ball of Flame**: unkillable chasing orb; stay clear (`away Ball of Flame 16`).
 
 ```
 Empowered Shock Vortex cast -> out of it
-Ball of Flame appears -> target nearest Ball of Flame
+Ball of Flame within 12 -> away Ball of Flame 16
 ```
 
 ## Blood Prince Council

@@ -382,17 +382,19 @@ class NotesHillClimbTest(unittest.TestCase):
             self.assertTrue(ok, f"{path.relative_to(ROOT)}: {errs}")
             self.assertNotIn("DRAFT", txt, f"{path.relative_to(ROOT)} still marked DRAFT")
             self.assertNotIn("hand-check", txt.lower(), f"{path.relative_to(ROOT)} has hand-check prose")
+            for order in nhc.extract_standing_orders(txt):
+                lhs = order.split("->", 1)[0].strip()
+                is_boss_aura = lhs.endswith(" on boss") and not lhs.endswith(" cast on boss")
+                self.assertFalse(is_boss_aura, f"{path.relative_to(ROOT)}: unexported boss aura {order!r}")
             seen_in_block: set[str] = set()
             in_code = False
             for line in txt.splitlines():
                 s = line.strip()
-                if s == "```":
+                if s.startswith("```"):
                     in_code = not in_code
                     seen_in_block.clear()
                     continue
                 if in_code and "->" in s:
-                    lhs = s.split("->", 1)[0].strip()
-                    self.assertNotIn(" on boss", lhs, f"{path.relative_to(ROOT)}: unexported boss aura {s!r}")
                     self.assertNotIn(s, seen_in_block, f"{path.relative_to(ROOT)}: duplicate order {s!r}")
                     seen_in_block.add(s)
 
