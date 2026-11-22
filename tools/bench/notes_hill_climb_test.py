@@ -258,6 +258,9 @@ class NotesHillClimbTest(unittest.TestCase):
             )
         self.assertEqual(len(captured), 1)
         self.assertEqual(captured[0].get("chat_template_kwargs"), {"enable_thinking": False})
+        prompt_text = captured[0]["messages"][0]["content"]
+        for verb in ("out of", "away", "target", "use", "stop", "kite", "wake"):
+            self.assertIn(verb, prompt_text)
         self.assertIn("in Fire -> out of it", out)
 
     def test_confirmation_rerun_keeps_confirmed_and_logs_conf_score_on_failure(self) -> None:

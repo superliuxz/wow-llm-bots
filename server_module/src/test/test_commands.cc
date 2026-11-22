@@ -4,11 +4,13 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "AiObjectContext.h"
 #include "Chat.h"
 #include "ChatCommand.h"
 #include "CommandScript.h"
+#include "DBCEnums.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
 #include "Group.h"
@@ -495,17 +497,18 @@ class LlmBrainTestCommandScript : public CommandScript {
     const ObjectGuid guid = player->GetGUID();
     const uint32_t current_map_id = player->GetMapId();
     for (uint8_t diff = 0; diff < MAX_DIFFICULTY; ++diff) {
-      BoundInstancesMap const& bound =
-          sInstanceSaveMgr->PlayerGetBoundInstances(
-              guid, static_cast<Difficulty>(diff));
-      for (auto itr = bound.begin(); itr != bound.end();) {
-        if (itr->first != current_map_id) {
-          sInstanceSaveMgr->PlayerUnbindInstance(
-              guid, itr->first, static_cast<Difficulty>(diff), true, player);
-          itr = bound.begin();
-        } else {
-          ++itr;
+      const auto difficulty = static_cast<Difficulty>(diff);
+      const BoundInstancesMap& bound =
+          sInstanceSaveMgr->PlayerGetBoundInstances(guid, difficulty);
+      std::vector<uint32_t> to_unbind;
+      for (const auto& [map_id, bind] : bound) {
+        if (map_id != current_map_id) {
+          to_unbind.push_back(map_id);
         }
+      }
+      for (uint32_t map_id : to_unbind) {
+        sInstanceSaveMgr->PlayerUnbindInstance(guid, map_id, difficulty, true,
+                                               player);
       }
     }
     handler->PSendSysMessage(

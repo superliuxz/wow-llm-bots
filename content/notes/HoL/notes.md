@@ -7,7 +7,7 @@
 
 ```
 Stormforged Lieutenant appears -> target nearest Stormforged Lieutenant
-Whirlwind cast -> out of it
+Whirlwind on boss -> away boss 12
 ```
 
 ## Ionar

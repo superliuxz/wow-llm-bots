@@ -432,6 +432,15 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
                 self.assertIn(key, res_console["phase_timings"])
             self.assertEqual(res_console["phase_timings"]["waves"], [])
 
+            # Verify 2T/3H/5D 10-man raid comp and 360s raid fight caps.
+            self.assertEqual(len(bench_bosses.COMP_10), 10)
+            roles = [role for _, _, _, role in bench_bosses.COMP_10]
+            self.assertEqual(roles.count("tank"), 2)
+            self.assertEqual(roles.count("heal"), 3)
+            self.assertEqual(roles.count("dps"), 5)
+            self.assertEqual(bench_bosses.BOSSES["patchwerk"]["max_s"], 360.0)
+            self.assertEqual(bench_bosses.BOSSES["marrowgar"]["max_s"], 360.0)
+
             # A programming bug during setup must crash loudly, not become "boss failed".
             def bug_in_setup(count, inst=None):
                 raise TypeError("bug in bench code")

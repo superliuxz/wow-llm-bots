@@ -78,6 +78,29 @@ class ExtractBossNotesTest(unittest.TestCase):
                 '}\n',
                 encoding="utf-8",
             )
+            (mgt / "MgTActions.h").write_text(
+                'class MgTAvoidFlameStrikeAction : public Action {\n'
+                'public:\n'
+                '    MgTAvoidFlameStrikeAction(PlayerbotAI* botAI) : Action(botAI, "mgt avoid flame strike") {}\n'
+                '    bool Execute(Event& event) override;\n'
+                '};\n'
+                'class MgTAttackPhoenixEggAction : public Action {\n'
+                'public:\n'
+                '    MgTAttackPhoenixEggAction(PlayerbotAI* botAI) : Action(botAI, "mgt attack phoenix egg") {}\n'
+                '    bool Execute(Event& event) override;\n'
+                '};\n',
+                encoding="utf-8",
+            )
+            (mgt / "MgTActions.cpp").write_text(
+                'bool MgTAvoidFlameStrikeAction::Execute(Event& event) {\n'
+                '    return MoveAway(event);\n'
+                '}\n'
+                'bool MgTAttackPhoenixEggAction::Execute(Event& event) {\n'
+                '    Unit* egg = FindNearestCreature(NPC_PHOENIX_EGG, 40.0f);\n'
+                '    return egg ? Attack(egg) : false;\n'
+                '}\n',
+                encoding="utf-8",
+            )
             (mgt / "MgTStrategy.cpp").write_text(
                 'void MgTStrategy::InitTriggers(std::vector<TriggerNode*>& triggers) {\n'
                 '    triggers.push_back(new TriggerNode("mgt kael flame strike",\n'
@@ -91,9 +114,11 @@ class ExtractBossNotesTest(unittest.TestCase):
             md = ebn.render_notes_markdown(notes)
             self.assertIn("Magisters' Terrace", md)
             self.assertIn("Flame Strike", md)
+            self.assertIn("in Flame Strike -> out of it", md)
             self.assertIn("Phoenix Egg", md)
             self.assertIn("Phoenix Egg appears -> target nearest Phoenix Egg", md)
-            self.assertGreater(notes.triggers_parsed, 0)
+            self.assertEqual(notes.triggers_parsed, 2)
+            self.assertEqual(notes.triggers_mapped, 2)
             for m in notes.mechanics:
                 if m.order:
                     self.assertTrue(ebn.is_valid_order(m.order), f"Invalid order: {m.order}")
@@ -109,7 +134,9 @@ class ExtractBossNotesTest(unittest.TestCase):
                 ])
             self.assertEqual(rc, 0)
             self.assertIn("Instances: 1", buf.getvalue())
-            self.assertTrue((out_dir / "MgT" / "notes.md").is_file())
+            out_file = out_dir / "MgT" / "notes.md"
+            self.assertTrue(out_file.is_file())
+            self.assertIn("in Flame Strike -> out of it", out_file.read_text(encoding="utf-8"))
 
     @unittest.skipUnless(HAS_PLAYERBOTS, "third_party/mod-playerbots submodule not checked out")
     def test_mgt_extraction(self) -> None:
