@@ -10,6 +10,7 @@
 #include <flat_set>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -1460,10 +1461,10 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
         [](const pb::Area* a, const pb::Area* b) {
           const float da = (a->rel && std::isfinite(a->rel->dist_yd))
                                ? a->rel->dist_yd
-                               : 999.0f;
+                               : std::numeric_limits<float>::infinity();
           const float db = (b->rel && std::isfinite(b->rel->dist_yd))
                                ? b->rel->dist_yd
-                               : 999.0f;
+                               : std::numeric_limits<float>::infinity();
           return da < db;
         });
     if (!sorted_areas.empty()) {

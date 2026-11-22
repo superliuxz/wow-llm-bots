@@ -844,9 +844,11 @@ TEST(ScreenRendererTest, RendersNearbyAreasNearestFirst) {
   ASSERT_NE(flame_pos, std::string::npos) << s.text;
   EXPECT_LT(sphere_pos, consec_pos) << s.text;
   EXPECT_LT(consec_pos, flame_pos) << s.text;
-  // Broken Pool is the 6th entry (no NaN lands_in_s); Distant Pool is capped.
-  EXPECT_NE(s.text.find("  Broken Pool (hostile, 0 yd W)"), std::string::npos)
-      << s.text;
+  // Broken Pool is the 6th entry (after all finite distances, no NaN
+  // lands_in_s); Distant Pool is capped.
+  const size_t broken_pos = s.text.find("  Broken Pool (hostile, 0 yd W)");
+  ASSERT_NE(broken_pos, std::string::npos) << s.text;
+  EXPECT_LT(flame_pos, broken_pos) << s.text;
   EXPECT_EQ(s.text.find("lands in nan"), std::string::npos) << s.text;
   EXPECT_EQ(s.text.find("Distant Pool"), std::string::npos) << s.text;
 }

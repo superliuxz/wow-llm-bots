@@ -232,6 +232,26 @@ std::vector<Player*> GroupTanks(Player* bot) {
   return tanks;
 }
 
+// Resolves a synthetic `"trigger:<guid>"` id to a live, visible-hazard hidden
+// trigger creature.
+Creature* ResolveHiddenTriggerByGuid(Player* bot, std::string_view guid_str) {
+  constexpr std::string_view kPrefix = "trigger:";
+  if (!guid_str.starts_with(kPrefix)) {
+    return nullptr;
+  }
+  ObjectGuid trigger_guid = ParseSnapshotGuid(guid_str.substr(kPrefix.size()));
+  if (trigger_guid.IsEmpty()) {
+    return nullptr;
+  }
+  Creature* trigger = ObjectAccessor::GetCreature(*bot, trigger_guid);
+  if (!trigger || !trigger->IsAlive() || !bot->CanSeeOrDetect(trigger) ||
+      !HiddenFromPlayers(trigger->IsTrigger(), trigger->GetDisplayId()) ||
+      !InspectTriggerHazard(trigger)) {
+    return nullptr;
+  }
+  return trigger;
+}
+
 // Resolves a `Command_Act::ThingKind` to a live `WorldObject*` (unit, object,
 // or dynamic area) in the world.
 WorldObject* ResolveThing(Player* bot,
@@ -243,6 +263,11 @@ WorldObject* ResolveThing(Player* bot,
   if (act.thing != pb::Command_Act::THING_UNSPECIFIED &&
       act.thing != pb::Command_Act::ME && act.thing != pb::Command_Act::FOCUS &&
       !act.it_guid.empty()) {
+    if (allow_hidden_triggers) {
+      if (Creature* trigger = ResolveHiddenTriggerByGuid(bot, act.it_guid)) {
+        return trigger;
+      }
+    }
     ObjectGuid guid = ParseSnapshotGuid(act.it_guid);
     if (!guid.IsEmpty()) {
       if (WorldObject* obj = ObjectAccessor::GetWorldObject(*bot, guid);
@@ -258,6 +283,12 @@ WorldObject* ResolveThing(Player* bot,
       return bot;
     case pb::Command_Act::IT: {
       if (!act.it_guid.empty()) {
+        if (allow_hidden_triggers) {
+          if (Creature* trigger =
+                  ResolveHiddenTriggerByGuid(bot, act.it_guid)) {
+            return trigger;
+          }
+        }
         ObjectGuid guid = ParseSnapshotGuid(act.it_guid);
         if (!guid.IsEmpty()) {
           if (WorldObject* obj = ObjectAccessor::GetWorldObject(*bot, guid);
