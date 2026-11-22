@@ -19,7 +19,6 @@
 #include "Cell.h"
 #include "CharmInfo.h"
 #include "Creature.h"
-#include "DBCStructure.h"
 #include "DynamicObject.h"
 #include "G3D/Vector3.h"
 #include "GameObject.h"
@@ -117,17 +116,6 @@ uint8_t RaidMarkerIconIndex(pb::RaidMarker m) {
   return 255;
 }
 
-std::string_view SpellLocalizedName(const SpellInfo* info) {
-  if (!info) {
-    return {};
-  }
-  const char* name = info->SpellName[sWorld->GetDefaultDbcLocale()];
-  if (!name || name[0] == '\0') {
-    name = info->SpellName[0];
-  }
-  return name ? std::string_view(name) : std::string_view();
-}
-
 bool UnitHasAuraNamed(const Unit* unit, std::string_view name) {
   for (const auto& [spell_id, aura] : unit->GetAppliedAuras()) {
     (void)spell_id;
@@ -167,6 +155,26 @@ std::vector<Unit*> NearbyUnits(Player* bot, float radius = kActSearchRadiusYd) {
   Cell::VisitObjects(bot, searcher, radius);
   std::erase_if(units, [&](Unit* u) { return !IsVisibleToBot(bot, u); });
   return units;
+}
+
+// Collects nearby living hidden trigger creatures (carriers of visible ground
+// or orb spell hazards such as Flame Strike, Arcane Sphere, Coldflame, Defile).
+std::vector<Creature*> NearbyHiddenTriggers(Player* bot,
+                                            float radius = kActSearchRadiusYd) {
+  std::vector<Unit*> units;
+  Acore::AnyUnitInObjectRangeCheck check(bot, radius);
+  Acore::UnitListSearcher<Acore::AnyUnitInObjectRangeCheck> searcher(bot, units,
+                                                                     check);
+  Cell::VisitObjects(bot, searcher, radius);
+  std::vector<Creature*> triggers;
+  for (Unit* u : units) {
+    if (Creature* c = u->ToCreature();
+        c && c->IsAlive() && bot->CanSeeOrDetect(c) &&
+        HiddenFromPlayers(c->IsTrigger(), c->GetDisplayId())) {
+      triggers.push_back(c);
+    }
+  }
+  return triggers;
 }
 
 // Collects nearby game objects around `bot`.
@@ -443,6 +451,20 @@ WorldObject* ResolveThing(Player* bot,
           }
         }
       }
+      for (Creature* trigger : NearbyHiddenTriggers(bot)) {
+        std::optional<TriggerHazardInfo> hz = InspectTriggerHazard(trigger);
+        if (!hz) {
+          continue;
+        }
+        if (NameEq(hz->name, thing_name) ||
+            NameEq(trigger->GetName(), thing_name)) {
+          const float d = bot->GetDistance(trigger);
+          if (d < best_dist) {
+            best = trigger;
+            best_dist = d;
+          }
+        }
+      }
       return best;
     }
   }
@@ -687,23 +709,6 @@ std::optional<BagSlotItem> FindBagItemByName(Player* bot,
   return std::nullopt;
 }
 
-// Computes max DBC effect radius in yards for a spell.
-float MaxSpellRadiusYd(const SpellInfo* info,
-                       Unit* caster,
-                       Spell* spell = nullptr) {
-  if (!info) {
-    return 0.0f;
-  }
-  float max_r = 0.0f;
-  for (uint8_t eff = 0; eff < MAX_SPELL_EFFECTS; ++eff) {
-    const float r = info->Effects[eff].CalcRadius(caster, spell);
-    if (r > max_r) {
-      max_r = r;
-    }
-  }
-  return max_r;
-}
-
 // Per-bot last interrupted activity (world thread only) so explicit `then back`
 // can return to the pre-dodge spot/range.
 std::vector<std::pair<uint64_t, ActiveAct::InterruptedActivity>>&
@@ -789,6 +794,20 @@ bool SpotInsideHostileArea(Player* bot, const pb::Vec3& spot) {
       return true;
     }
   }
+  for (Creature* trigger : NearbyHiddenTriggers(bot, 40.0f)) {
+    if (bot->IsFriendlyTo(trigger)) {
+      continue;
+    }
+    std::optional<TriggerHazardInfo> hz = InspectTriggerHazard(trigger);
+    if (!hz) {
+      continue;
+    }
+    const float r =
+        std::max(hz->radius_yd > 0.0f ? hz->radius_yd : 8.0f, 3.0f) + bot_reach;
+    if (Dist2D(spot, PosOf(trigger)) <= r + 1.0f) {
+      return true;
+    }
+  }
   return false;
 }
 
@@ -865,28 +884,14 @@ std::optional<HazardInfo> ResolveTriggerHazard(Player* bot,
   HazardInfo h;
   h.anchor = {PosOf(trigger), 0.0f, 0.0f};
   h.is_ground_area = true;
-  if (Spell* cast = trigger->GetCurrentSpell(CURRENT_GENERIC_SPELL);
-      cast && cast->getState() == SPELL_STATE_PREPARING) {
-    const SpellInfo* info = cast->GetSpellInfo();
-    h.radius_yd = MaxSpellRadiusYd(info, trigger, cast);
-    h.lands_in_s =
-        static_cast<float>(std::max(0, cast->GetCastTimeRemaining())) / 1000.0f;
-    h.caster_guid = trigger->GetGUID().GetRawValue();
-    h.spell_id = info ? info->Id : 0;
-  } else {
-    for (const auto& [spell_id, aura_app] : trigger->GetAppliedAuras()) {
-      if (!aura_app || !aura_app->GetBase()) {
-        continue;
-      }
-      const SpellInfo* ainfo = aura_app->GetBase()->GetSpellInfo();
-      if (!ainfo || ainfo->IsPassive()) {
-        continue;
-      }
-      if (ainfo->SpellVisual[0] == 0 && ainfo->SpellVisual[1] == 0) {
-        continue;
-      }
-      h.radius_yd = MaxSpellRadiusYd(ainfo, trigger);
-      break;
+  if (std::optional<TriggerHazardInfo> hz = InspectTriggerHazard(trigger)) {
+    h.radius_yd = hz->radius_yd;
+    if (hz->lands_in_s) {
+      h.lands_in_s = *hz->lands_in_s;
+    }
+    if (hz->is_preparing_cast) {
+      h.caster_guid = trigger->GetGUID().GetRawValue();
+      h.spell_id = hz->spell_id;
     }
   }
   if (h.radius_yd <= 0.0f) {
@@ -978,6 +983,26 @@ std::optional<HazardInfo> ResolveHazard(Player* bot,
       h.anchor = {PosOf(dyn), 0.0f, 0.0f};
       h.radius_yd = dyn->GetRadius() > 0.0f ? dyn->GetRadius() : 5.0f;
       h.is_ground_area = true;
+      return h;
+    }
+    if (Creature* c = obj->ToCreature();
+        c && HiddenFromPlayers(c->IsTrigger(), c->GetDisplayId())) {
+      HazardInfo h;
+      h.anchor = {PosOf(c), 0.0f, 0.0f};
+      h.is_ground_area = true;
+      if (std::optional<TriggerHazardInfo> hz = InspectTriggerHazard(c)) {
+        h.radius_yd = hz->radius_yd;
+        if (hz->lands_in_s) {
+          h.lands_in_s = *hz->lands_in_s;
+        }
+        if (hz->is_preparing_cast) {
+          h.caster_guid = c->GetGUID().GetRawValue();
+          h.spell_id = hz->spell_id;
+        }
+      }
+      if (h.radius_yd <= 0.0f) {
+        h.radius_yd = 8.0f;
+      }
       return h;
     }
     if (Unit* u = obj->ToUnit()) {

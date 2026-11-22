@@ -4,11 +4,14 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "Bag.h"
+#include "Common.h"
+#include "Creature.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
 #include "Group.h"
@@ -16,7 +19,10 @@
 #include "ItemTemplate.h"
 #include "Player.h"
 #include "Spell.h"
+#include "SpellAuraDefines.h"
+#include "SpellAuras.h"
 #include "SpellInfo.h"
+#include "SpellMgr.h"
 #include "StringFormat.h"
 #include "Unit.h"
 #include "UnitDefines.h"
@@ -197,6 +203,118 @@ bool HasNewCastOrAura(Player* bot, const ReactiveSnapshotState& last) {
     }
   }
   return false;
+}
+
+std::string SpellLocalizedName(const SpellInfo* info) {
+  if (!info) {
+    return "";
+  }
+  const std::string& name = info->SpellName[sWorld->GetDefaultDbcLocale()];
+  if (!name.empty()) {
+    return name;
+  }
+  return info->SpellName[LOCALE_enUS];
+}
+
+float MaxSpellRadiusYd(const SpellInfo* info, Unit* caster, Spell* spell) {
+  if (!info) {
+    return 0.0f;
+  }
+  float max_r = 0.0f;
+  for (uint8_t eff = 0; eff < MAX_SPELL_EFFECTS; ++eff) {
+    const float r = info->Effects[eff].CalcRadius(caster, spell);
+    if (r > max_r) {
+      max_r = r;
+    }
+  }
+  return max_r;
+}
+
+std::optional<TriggerHazardInfo> InspectTriggerHazard(Creature* trigger) {
+  if (!trigger || !trigger->IsAlive()) {
+    return std::nullopt;
+  }
+  if (Spell* cast = trigger->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+      cast && cast->getState() == SPELL_STATE_PREPARING) {
+    const SpellInfo* info = cast->GetSpellInfo();
+    const std::string name = SpellLocalizedName(info);
+    if (info && !name.empty()) {
+      TriggerHazardInfo h;
+      h.spell = info;
+      h.name = name;
+      h.radius_yd = MaxSpellRadiusYd(info, trigger, cast);
+      h.lands_in_s =
+          static_cast<float>(std::max(0, cast->GetCastTimeRemaining())) /
+          1000.0f;
+      h.spell_id = info->Id;
+      h.is_preparing_cast = true;
+      return h;
+    }
+  }
+  if (Spell* ch = trigger->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
+      ch && ch->getState() != SPELL_STATE_FINISHED) {
+    const SpellInfo* info = ch->GetSpellInfo();
+    const std::string name = SpellLocalizedName(info);
+    if (info && !name.empty()) {
+      TriggerHazardInfo h;
+      h.spell = info;
+      h.name = name;
+      h.radius_yd = MaxSpellRadiusYd(info, trigger, ch);
+      h.remaining_s =
+          static_cast<float>(std::max(0, ch->GetCastTimeRemaining())) / 1000.0f;
+      h.spell_id = info->Id;
+      return h;
+    }
+  }
+  auto has_visual = [](const SpellInfo* s) {
+    return s && (s->SpellVisual[0] != 0 || s->SpellVisual[1] != 0);
+  };
+  for (const auto& [spell_id, aura_app] : trigger->GetAppliedAuras()) {
+    (void)spell_id;
+    if (!aura_app || !aura_app->GetBase()) {
+      continue;
+    }
+    const SpellInfo* ainfo = aura_app->GetBase()->GetSpellInfo();
+    if (!ainfo || ainfo->IsPassive()) {
+      continue;
+    }
+    const SpellInfo* triggered = nullptr;
+    for (uint8_t eff = 0; eff < MAX_SPELL_EFFECTS; ++eff) {
+      const SpellEffectInfo& e = ainfo->Effects[eff];
+      if ((e.ApplyAuraName == SPELL_AURA_PERIODIC_TRIGGER_SPELL ||
+           e.ApplyAuraName == SPELL_AURA_PERIODIC_TRIGGER_SPELL_WITH_VALUE) &&
+          e.TriggerSpell != 0) {
+        if (const SpellInfo* t = sSpellMgr->GetSpellInfo(e.TriggerSpell)) {
+          triggered = t;
+          break;
+        }
+      }
+    }
+    if (!has_visual(ainfo) && !has_visual(triggered)) {
+      continue;
+    }
+    const SpellInfo* effective =
+        (triggered && !SpellLocalizedName(triggered).empty()) ? triggered
+                                                              : ainfo;
+    const std::string name = SpellLocalizedName(effective);
+    if (name.empty()) {
+      continue;
+    }
+    TriggerHazardInfo h;
+    h.spell = effective;
+    h.name = name;
+    h.radius_yd = MaxSpellRadiusYd(effective, trigger);
+    if (h.radius_yd <= 0.0f && effective != ainfo) {
+      h.radius_yd = MaxSpellRadiusYd(ainfo, trigger);
+    }
+    if (aura_app->GetBase()->GetDuration() > 0) {
+      h.remaining_s =
+          static_cast<float>(aura_app->GetBase()->GetDuration()) / 1000.0f;
+    }
+    h.spell_id = effective->Id;
+    return h;
+  }
+  return std::nullopt;
 }
 
 }  // namespace llm_brain

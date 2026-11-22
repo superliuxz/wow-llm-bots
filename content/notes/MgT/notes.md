@@ -30,4 +30,5 @@ Pure Energy appears -> target nearest Pure Energy
 ```
 in Flame Strike -> out of it
 Phoenix Egg appears -> target nearest Phoenix Egg
+Arcane Sphere within 9 -> away Arcane Sphere 13
 ```

@@ -127,6 +127,7 @@ KAELTHAS_NOTES = """# Magisters' Terrace — Kael'thas Sunstrider
   - Standing order: `Phoenix within 10 -> away Phoenix 13`
 - **Fireball**: interruptible nuke on the tank.
 - **Gravity Lapse**: floats everyone in the air and spawns Arcane Spheres; stay clear of spheres.
+  - Standing order: `Arcane Sphere within 9 -> away Arcane Sphere 13`
 """
 
 THERADRAS_NOTES = """# Maraudon — Princess Theradras

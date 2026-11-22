@@ -218,22 +218,6 @@ bool Interruptible(Unit* unit, const SpellInfo* info) {
   return flagged && !ImmuneToInterrupt(unit);
 }
 
-float MaxSpellRadiusYd(const SpellInfo* info,
-                       Unit* caster,
-                       Spell* spell = nullptr) {
-  if (!info) {
-    return 0.0f;
-  }
-  float max_r = 0.0f;
-  for (uint8_t eff = 0; eff < MAX_SPELL_EFFECTS; ++eff) {
-    const float r = info->Effects[eff].CalcRadius(caster, spell);
-    if (r > max_r) {
-      max_r = r;
-    }
-  }
-  return max_r;
-}
-
 void FillCast(Unit* unit, Spell* spell, pb::Cast* cast) {
   const SpellInfo* info = spell->GetSpellInfo();
   pb::Spell& sp = cast->spell.emplace();
@@ -573,71 +557,26 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
       continue;
     }
     if (HiddenFromPlayer(object)) {
-      // Hidden trigger NPCs (e.g. Kael'thas Flame Strike trigger 24666) draw
-      // no creature model/nameplate, but their active spell casts or visible
-      // non-passive spell visual auras ARE visible ground effects to players.
+      // Hidden trigger NPCs (e.g. Flame Strike, Arcane Sphere, Coldflame,
+      // Defile) draw no creature model/nameplate, but their active spell casts
+      // or visible spell visual / periodic-trigger auras ARE visible effects.
       if (Creature* trigger = object->ToCreature();
           trigger && trigger->IsAlive()) {
         const float dist_to_trigger = bot->GetExactDist2d(trigger);
         if (dist_to_trigger <= 60.0f) {
-          const SpellInfo* effect_info = nullptr;
-          float effect_radius = 0.0f;
-          std::optional<float> remaining_s;
-          std::optional<float> lands_in_s;
-          if (Spell* cast = trigger->GetCurrentSpell(CURRENT_GENERIC_SPELL);
-              cast && cast->getState() == SPELL_STATE_PREPARING) {
-            effect_info = cast->GetSpellInfo();
-            effect_radius = MaxSpellRadiusYd(effect_info, trigger, cast);
-            lands_in_s =
-                static_cast<float>(std::max(0, cast->GetCastTimeRemaining())) /
-                1000.0f;
-          } else if (Spell* ch =
-                         trigger->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
-                     ch && ch->getState() != SPELL_STATE_FINISHED) {
-            effect_info = ch->GetSpellInfo();
-            effect_radius = MaxSpellRadiusYd(effect_info, trigger, ch);
-            remaining_s =
-                static_cast<float>(std::max(0, ch->GetCastTimeRemaining())) /
-                1000.0f;
-          } else {
-            for (const auto& [spell_id, aura_app] :
-                 trigger->GetAppliedAuras()) {
-              if (!aura_app || !aura_app->GetBase()) {
-                continue;
-              }
-              const SpellInfo* ainfo = aura_app->GetBase()->GetSpellInfo();
-              if (!ainfo || ainfo->IsPassive()) {
-                continue;
-              }
-              if (ainfo->SpellVisual[0] == 0 && ainfo->SpellVisual[1] == 0) {
-                continue;
-              }
-              const std::string aname = Localized(ainfo->SpellName);
-              if (aname.empty()) {
-                continue;
-              }
-              effect_info = ainfo;
-              effect_radius = MaxSpellRadiusYd(ainfo, trigger);
-              if (aura_app->GetBase()->GetDuration() > 0) {
-                remaining_s =
-                    static_cast<float>(aura_app->GetBase()->GetDuration()) /
-                    1000.0f;
-              }
-              break;
-            }
-          }
-          if (effect_info) {
+          if (std::optional<TriggerHazardInfo> hz =
+                  InspectTriggerHazard(trigger)) {
             pb::Area& out = nearby->areas.emplace_back();
             out.guid = "trigger:" + GuidString(guid.GetRawValue());
-            out.name = Localized(effect_info->SpellName);
+            out.name = hz->name;
             pb::Spell& sp = out.spell.emplace();
-            sp.id = effect_info->Id;
-            sp.name = out.name;
-            out.radius_yd = effect_radius > 0.0f ? effect_radius : 8.0f;
+            sp.id = hz->spell_id;
+            sp.name = hz->name;
+            out.radius_yd = hz->radius_yd > 0.0f ? hz->radius_yd : 8.0f;
             out.inside_me = dist_to_trigger <= out.radius_yd;
             out.hostile = !bot->IsFriendlyTo(trigger);
-            out.remaining_s = remaining_s;
-            out.lands_in_s = lands_in_s;
+            out.remaining_s = hz->remaining_s;
+            out.lands_in_s = hz->lands_in_s;
             pb::Relative& rel = out.rel.emplace();
             FillRelative(bot, trigger, &rel);
             ++stats.areas;

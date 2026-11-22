@@ -752,5 +752,43 @@ TEST(ScreenRendererTest, LooseMobsAndPartyHurtEdgeCases) {
       << s_no_tank.text;
 }
 
+TEST(ScreenRendererTest, RendersNearbyAreasNearestFirst) {
+  pb::Snapshot snap;
+  snap.bot = "Loada";
+  snap.base.self.unit.name = "Loada";
+  snap.base.self.in_combat = true;
+
+  pb::Area far_area;
+  far_area.guid = "trigger:0x1";
+  far_area.name = "Flame Strike";
+  far_area.hostile = true;
+  far_area.radius_yd = 8.0f;
+  far_area.lands_in_s = 2.5f;
+  far_area.rel.emplace().dist_yd = 14.0f;
+  far_area.rel->dir = pb::N;
+  snap.base.nearby.areas.push_back(far_area);
+
+  pb::Area near_area;
+  near_area.guid = "trigger:0x2";
+  near_area.name = "Arcane Sphere";
+  near_area.hostile = true;
+  near_area.radius_yd = 5.0f;
+  near_area.inside_me = true;
+  near_area.rel.emplace().dist_yd = 4.0f;
+  near_area.rel->dir = pb::E;
+  snap.base.nearby.areas.push_back(near_area);
+
+  const Screen s = RenderScreen(snap);
+  const size_t areas_pos = s.text.find("areas:\n");
+  ASSERT_NE(areas_pos, std::string::npos) << s.text;
+  const size_t sphere_pos =
+      s.text.find("  Arcane Sphere (hostile, 4 yd E, inside)");
+  const size_t flame_pos =
+      s.text.find("  Flame Strike (hostile, 14 yd N, lands in 2.5s)");
+  ASSERT_NE(sphere_pos, std::string::npos) << s.text;
+  ASSERT_NE(flame_pos, std::string::npos) << s.text;
+  EXPECT_LT(sphere_pos, flame_pos) << s.text;
+}
+
 }  // namespace
 }  // namespace harness

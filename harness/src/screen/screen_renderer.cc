@@ -1447,6 +1447,46 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
       lines.push_back("  " + line);
     }
   }
+  if (!nearby.areas.empty()) {
+    std::vector<const pb::Area*> sorted_areas;
+    sorted_areas.reserve(nearby.areas.size());
+    for (const pb::Area& a : nearby.areas) {
+      if (!a.name.empty() || (a.spell && !a.spell->name.empty())) {
+        sorted_areas.push_back(&a);
+      }
+    }
+    std::stable_sort(sorted_areas.begin(), sorted_areas.end(),
+                     [](const pb::Area* a, const pb::Area* b) {
+                       const float da = a->rel ? a->rel->dist_yd : 999.0f;
+                       const float db = b->rel ? b->rel->dist_yd : 999.0f;
+                       return da < db;
+                     });
+    if (!sorted_areas.empty()) {
+      lines.push_back("areas:");
+      const size_t limit = std::min<size_t>(sorted_areas.size(), 6);
+      for (size_t i = 0; i < limit; ++i) {
+        const pb::Area& a = *sorted_areas[i];
+        const std::string& aname = !a.name.empty() ? a.name : a.spell->name;
+        std::vector<std::string> parts;
+        parts.push_back(a.hostile ? "hostile" : "friendly");
+        if (a.rel) {
+          const std::string where = Where(*a.rel);
+          if (!where.empty()) {
+            parts.push_back(where);
+          }
+        }
+        if (a.lands_in_s && std::isfinite(*a.lands_in_s) &&
+            *a.lands_in_s > 0.0f) {
+          parts.push_back(base::StringPrintf("lands in %.1fs", *a.lands_in_s));
+        }
+        if (a.inside_me) {
+          parts.push_back("inside");
+        }
+        lines.push_back("  " + aname + " (" + base::JoinString(parts, ", ") +
+                        ")");
+      }
+    }
+  }
   if (ext.party) {
     for (std::string& line :
          PartyLines(*ext.party, around_me, snapshot.bot, base.self.unit.group,

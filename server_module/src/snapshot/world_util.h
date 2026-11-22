@@ -8,6 +8,7 @@
 #define MOD_LLM_BRAIN_SNAPSHOT_WORLD_UTIL_H_
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -15,8 +16,12 @@
 #include "snapshot/snapshot.h"
 
 class Bag;
+class Creature;
 class Item;
 class Player;
+class Spell;
+class SpellInfo;
+class Unit;
 
 namespace llm_brain {
 
@@ -60,6 +65,32 @@ ReactiveSnapshotState CollectReactiveState(Player* bot);
 // True if any cast started or any aura appeared on `bot`, its target, or an
 // attacker that was not present in `last`.
 bool HasNewCastOrAura(Player* bot, const ReactiveSnapshotState& last);
+
+// Localized spell name in the server's default DBC locale, or "" if unknown.
+std::string SpellLocalizedName(const SpellInfo* info);
+
+// Maximum effect radius (yards) across all effects of `info`.
+float MaxSpellRadiusYd(const SpellInfo* info,
+                       Unit* caster,
+                       Spell* spell = nullptr);
+
+// Visible ground/orb hazard carried by a hidden trigger creature (active cast,
+// channel, or visual/periodic-trigger aura such as Flame Strike, Arcane Sphere,
+// Coldflame, or Defile).
+struct TriggerHazardInfo {
+  const SpellInfo* spell = nullptr;
+  std::string name;
+  float radius_yd = 0.0f;
+  std::optional<float> remaining_s;
+  std::optional<float> lands_in_s;
+  uint32_t spell_id = 0;
+  bool is_preparing_cast = false;
+};
+
+// Inspects a living hidden trigger creature for a player-visible spell cast or
+// visual aura, following periodic-trigger auras to their triggered spell so
+// both name and effect radius match what players see and take damage from.
+std::optional<TriggerHazardInfo> InspectTriggerHazard(Creature* trigger);
 
 }  // namespace llm_brain
 
