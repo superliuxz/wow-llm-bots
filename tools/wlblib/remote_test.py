@@ -182,11 +182,58 @@ class RemoteLibTest(unittest.TestCase):
              mock.patch("subprocess.run", return_value=fake_proc) as m_sub:
             remote.run_remote("worker1", ["tools/wlb", "test", "e2e"])
         m_sync.assert_called_once()
-        ssh_cmd = m_sub.call_args_list[0][0][0]
+        # Normal exit uses a single SSH call (no redundant second SSH rm -f).
+        self.assertEqual(m_sub.call_count, 1)
+        ssh_cmd = m_sub.call_args[0][0]
         self.assertIn("-R", ssh_cmd)
         self.assertIn("127.0.0.1:8090:127.0.0.1:8090", ssh_cmd)
-        self.assertTrue(ssh_cmd[-1].startswith("setsid bash -c "))
+        self.assertTrue(ssh_cmd[-1].startswith("setsid --wait bash -c "))
         self.assertIn(remote.ACTIVE_PGID_REL, ssh_cmd[-1])
+        self.assertIn("trap ", ssh_cmd[-1])
+
+    def test_run_remote_ssh_drop_255_kills_remote_pgid(self) -> None:
+        spec = remote.RemoteSpec(name="worker1", ssh="wlb@192.0.2.10", repo="~/wow-llm-bots")
+        with mock.patch.object(remote, "get_remote", return_value=spec), \
+             mock.patch.object(remote, "_remote_lock", side_effect=lambda _: mock.MagicMock()), \
+             mock.patch.object(remote, "_local_port_open", return_value=False), \
+             mock.patch("subprocess.run", return_value=mock.Mock(returncode=255)), \
+             mock.patch.object(remote, "_kill_remote_pgid") as m_kill:
+            with self.assertRaisesRegex(Failed, r"command failed \(255\)"):
+                remote.run_remote("worker1", ["sleep", "60"], no_sync=True)
+        m_kill.assert_called_once_with(spec)
+
+    def test_invalidate_rsync_status_and_kill_pgid_commands(self) -> None:
+        spec = remote.RemoteSpec(name="worker1", ssh="wlb@192.0.2.10", repo="~/wow-llm-bots")
+        with mock.patch.object(remote, "run") as m_run:
+            remote._invalidate_remote_stamp(spec)
+        inv_cmd = m_run.call_args[0][0][-1]
+        self.assertIn('[ ! -d "$d" ] || rm -f', inv_cmd)
+        self.assertNotIn("|| true", inv_cmd)
+
+        with mock.patch.object(remote, "run") as m_run:
+            remote._rsync_to_remote(spec, repo=pathlib.Path("/tmp/src"))
+        rsync_cmd = m_run.call_args_list[1][0][0]
+        self.assertEqual(rsync_cmd[0], "rsync")
+        self.assertIn("--delete", rsync_cmd)
+        self.assertIn("-e", rsync_cmd)
+        self.assertIn("--exclude=.git", rsync_cmd)
+        self.assertIn("--", rsync_cmd)
+
+        with mock.patch("subprocess.run") as m_sub:
+            remote._kill_remote_pgid(spec)
+        kill_cmd = m_sub.call_args[0][0][-1]
+        self.assertIn('[ "$PGID" -gt 1 ]', kill_cmd)
+        self.assertIn('kill -TERM -"$PGID"', kill_cmd)
+        self.assertIn('kill -KILL -"$PGID"', kill_cmd)
+
+        with mock.patch.object(remote, "get_remote", return_value=spec), \
+             mock.patch.object(remote, "compute_local_stamp", return_value="abc:123"), \
+             mock.patch.object(remote, "read_remote_stamp", return_value="abc:123:full"), \
+             mock.patch("subprocess.run", return_value=mock.Mock(stdout="123 ./worldserver\n")) as m_sub:
+            remote.status("worker1")
+        status_cmd = m_sub.call_args[0][0][-1]
+        self.assertIn("/proc/[0-9]*", status_cmd)
+        self.assertIn("readlink -f", status_cmd)
 
     def test_run_remote_interrupt_kills_remote_pgid_before_releasing_lock(self) -> None:
         spec = remote.RemoteSpec(name="worker1", ssh="wlb@192.0.2.10", repo="~/wow-llm-bots")
@@ -257,21 +304,62 @@ class RemoteLibTest(unittest.TestCase):
     def test_install_hook_worktree_safe_and_refuses_foreign_hook(self) -> None:
         spec = remote.RemoteSpec(name="worker1", ssh="wlb@192.0.2.10", repo="~/wow-llm-bots")
         with tempfile.TemporaryDirectory() as tmp:
-            repo = pathlib.Path(tmp)
-            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            root = pathlib.Path(tmp)
+            repo = root / "main"
+            wt = root / "wt"
+            env = {
+                **os.environ,
+                "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+            }
+            subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env)
+            (repo / "f.txt").write_text("hi\n")
+            subprocess.run(["git", "-C", str(repo), "add", "f.txt"], check=True, env=env)
+            subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "init"], check=True, env=env)
+            subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", "-b", "wt", str(wt)],
+                           check=True, env=env)
+            self.assertTrue((wt / ".git").is_file())
             with mock.patch.object(remote, "get_remote", return_value=spec):
-                hook = remote.install_hook("worker1", repo=repo)
+                hook = remote.install_hook("worker1", repo=wt)
                 self.assertTrue(hook.exists())
                 body = hook.read_text()
                 self.assertIn(remote.HOOK_MARKER, body)
-                self.assertIn(str(repo / "var" / "remote"), body)
-                remote.install_hook("worker1", repo=repo)
+                self.assertIn(str(wt / "var" / "remote"), body)
+                remote.install_hook("worker1", repo=wt)
                 hook.write_text("#!/bin/sh\necho custom\n")
                 with self.assertRaises(Failed):
-                    remote.install_hook("worker1", repo=repo)
+                    remote.install_hook("worker1", repo=wt)
 
 
 class ServerRemoteBootstrapTest(unittest.TestCase):
+    def test_ensure_local_db_initialized_creates_fresh_atomic_password(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            var = root / "var"
+            out = root / "out"
+            play_run = out / "server" / "run"
+            etc = out / "server" / "etc"
+            secrets_dir = var / "secrets"
+            db_pw = secrets_dir / "db-password"
+
+            fake_play = mock.Mock(run=play_run)
+            with mock.patch.object(server, "VAR", var), \
+                 mock.patch.object(server, "LOGS", var / "logs"), \
+                 mock.patch.object(server, "PLAY", fake_play), \
+                 mock.patch.object(server, "SECRETS", secrets_dir), \
+                 mock.patch.object(server, "ETC", etc), \
+                 mock.patch.object(server, "DB_PASSWORD", db_pw), \
+                 mock.patch.object(server, "MYSQL_CNF", etc / "mysql.cnf"), \
+                 mock.patch.object(server, "run") as m_run:
+                fresh = server._ensure_local_db_initialized()
+
+            self.assertTrue(fresh)
+            self.assertEqual(stat.S_IMODE(play_run.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(secrets_dir.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(db_pw.stat().st_mode), 0o600)
+            self.assertEqual(len(db_pw.read_text().strip()), 32)
+            m_run.assert_called_once()
+
     def test_ensure_local_db_initialized_modes_and_legacy_migration(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)

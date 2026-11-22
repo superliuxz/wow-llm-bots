@@ -202,8 +202,6 @@ def main():
             hargs = ["run", *hargs]
         bin_path = str(OUT / "common" / "harness")
         os.execv(bin_path, [bin_path, *hargs])
-    elif a.command == "remote":
-        remote.dispatch_cli(a.args)
 
 
 if __name__ == "__main__":

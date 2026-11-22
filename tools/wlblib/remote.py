@@ -229,10 +229,8 @@ def read_remote_stamp(spec: RemoteSpec) -> str | None:
 
 def _invalidate_remote_stamp(spec: RemoteSpec) -> None:
     """Remove remote `var/.built_stamp` before mutating sources so failed builds never look fresh."""
-    run([
-        *_ssh_base_args(spec),
-        f"cd {_remote_cd_expr(spec.repo)} 2>/dev/null && rm -f {shlex.quote(STAMP_REL)} || true",
-    ])
+    inner = f'd={_remote_cd_expr(spec.repo)}; [ ! -d "$d" ] || rm -f "$d"/{shlex.quote(STAMP_REL)}'
+    run([*_ssh_base_args(spec), f"bash -eu -c {shlex.quote(inner)}"])
 
 
 def _ensure_remote_map_data(spec: RemoteSpec, repo: pathlib.Path = ROOT) -> None:
@@ -352,9 +350,22 @@ def status(name: str) -> None:
     say(f"  local  stamp: {local_stamp}:full")
     say(f"  remote stamp: {remote_stamp or '(none)'}")
     probe_inner = (
-        f"REPO_ABS=$(cd {_remote_cd_expr(spec.repo)} 2>/dev/null && pwd) || exit 0; "
-        'ps -eo pid=,args= | grep -F "$REPO_ABS" | grep -E "worldserver|mysqld|harness|bench_bosses" '
-        '| grep -v grep || echo "(no repo server/harness processes running)"'
+        f'REPO_ABS=$(cd {_remote_cd_expr(spec.repo)} 2>/dev/null && pwd) || exit 0; '
+        'found=0; '
+        'for p in /proc/[0-9]*; do '
+        '  pid=${p#/proc/}; [ "$pid" = "$$" ] && continue; '
+        '  args=$(tr "\\0" " " < "$p/cmdline" 2>/dev/null || true); '
+        '  case "$args" in *worldserver*|*mysqld*|*harness*|*bench_bosses*) ;; *) continue ;; esac; '
+        '  cwd=$(readlink -f "$p/cwd" 2>/dev/null || true); '
+        '  exe=$(readlink -f "$p/exe" 2>/dev/null || true); '
+        '  match=0; '
+        '  case "$cwd" in "$REPO_ABS"|"$REPO_ABS"/*) match=1 ;; esac; '
+        '  case "$exe" in "$REPO_ABS"|"$REPO_ABS"/*) match=1 ;; esac; '
+        '  case "$args" in *"$REPO_ABS"*) match=1 ;; esac; '
+        '  [ "$match" = 1 ] || continue; '
+        '  printf "%s %s\\n" "$pid" "$args"; found=1; '
+        'done; '
+        '[ "$found" = 1 ] || echo "(no repo server/harness processes running)"'
     )
     res = subprocess.run(
         [*_ssh_base_args(spec), f"bash -c {shlex.quote(probe_inner)}"],
@@ -412,6 +423,7 @@ def _kill_remote_pgid(spec: RemoteSpec) -> None:
         f"cd {_remote_cd_expr(spec.repo)} 2>/dev/null || exit 0; "
         f"if [ -f {shlex.quote(ACTIVE_PGID_REL)} ]; then "
         f"  PGID=$(cat {shlex.quote(ACTIVE_PGID_REL)} 2>/dev/null || true); "
+        '  case "$PGID" in ""|*[!0-9]*) PGID="" ;; *) [ "$PGID" -gt 1 ] || PGID="" ;; esac; '
         '  if [ -n "$PGID" ]; then '
         '    kill -TERM -"$PGID" 2>/dev/null || true; '
         '    for _ in 1 2 3 4 5; do kill -0 -"$PGID" 2>/dev/null || break; sleep 1; done; '
@@ -446,13 +458,16 @@ def run_remote(
             tunnel_port = spec.llm_port
             say(f"remote {spec.name}: reverse-tunneling local 127.0.0.1:{tunnel_port} -> remote")
 
-        # Run inside a dedicated session/process-group so Ctrl-C can cleanly kill the entire tree.
+        # Run inside a dedicated session/process-group with `setsid --wait` so exit status
+        # propagates cleanly, normal exit removes ACTIVE_PGID_REL via trap, and Ctrl-C / SSH drop
+        # can cleanly kill the entire remote process group before releasing the local lock.
         inner = (
             f"cd {_remote_cd_expr(spec.repo)} && "
             f"mkdir -p var && echo $$ > {shlex.quote(ACTIVE_PGID_REL)} && "
-            f"exec {shlex.join(cmd)}"
+            f"trap 'rm -f {shlex.quote(ACTIVE_PGID_REL)}' EXIT && "
+            f"{shlex.join(cmd)}"
         )
-        remote_cmd = f"setsid bash -c {shlex.quote(inner)}"
+        remote_cmd = f"setsid --wait bash -c {shlex.quote(inner)}"
         ssh_cmd = [*_ssh_base_args(spec, tunnel_port=tunnel_port), remote_cmd]
         try:
             proc = subprocess.run(ssh_cmd)
@@ -460,13 +475,10 @@ def run_remote(
             say(f"\nremote {spec.name}: interrupted; killing remote process group and stopping test server...")
             _kill_remote_pgid(spec)
             raise Failed("interrupted")
-        finally:
-            rm_pgid = (
-                f"cd {_remote_cd_expr(spec.repo)} 2>/dev/null && "
-                f"rm -f {shlex.quote(ACTIVE_PGID_REL)} || true"
-            )
-            subprocess.run([*_ssh_base_args(spec), rm_pgid], check=False,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        if proc.returncode == 255:
+            say(f"remote {spec.name}: SSH transport dropped (255); killing remote process group...")
+            _kill_remote_pgid(spec)
 
         for remote_rel, local_dest in parsed_pulls:
             try:
