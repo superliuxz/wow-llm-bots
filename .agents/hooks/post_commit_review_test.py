@@ -74,7 +74,7 @@ class PostCommitReviewHookTest(unittest.TestCase):
             self.assertEqual(status, "spawned")
             self.assertEqual(len(calls), 1)
             cmd, kw = calls[0]
-            self.assertEqual(cmd[:3], ["/usr/bin/agy", "--mode", "plan"])
+            self.assertEqual(cmd[:5], ["/usr/bin/agy", "--mode", "plan", "--print-timeout", "600s"])
             self.assertTrue(cmd[-1].startswith("--print="))
             self.assertEqual(kw["env"].get(post_commit_review.REVIEWER_ENV), "1")
             patch_text = (review_dir / f"patch_{c3[:7]}.patch").read_text(encoding="utf-8")
@@ -166,6 +166,59 @@ class PostCommitReviewHookTest(unittest.TestCase):
             with mock.patch.object(post_commit_review, "_pid_is_reviewer", return_value=False):
                 failed = post_commit_review.format_review_status(review_dir)
             self.assertIn("FAILED (print_timeout)", failed)
+
+            # Non-empty partial output with print_timeout in .err still reports FAILED.
+            out.write_text("# Partial truncated review\n", encoding="utf-8")
+            with mock.patch.object(post_commit_review, "_pid_is_reviewer", return_value=False):
+                partial_failed = post_commit_review.format_review_status(review_dir)
+            self.assertIn("FAILED (print_timeout)", partial_failed)
+            self.assertIn("bytes)", partial_failed)
+
+            # Capital "Error:" in .err reports FAILED regardless of case.
+            out.write_text("", encoding="utf-8")
+            (review_dir / "review_abc1234.err").write_text(
+                'Error: --print took "--mode"\n', encoding="utf-8"
+            )
+            with mock.patch.object(post_commit_review, "_pid_is_reviewer", return_value=False):
+                cap_err = post_commit_review.format_review_status(review_dir)
+            self.assertIn("FAILED (error)", cap_err)
+
+            # Empty 0-byte output with clean .err reports FAILED (empty_output).
+            (review_dir / "review_abc1234.err").write_text("", encoding="utf-8")
+            with mock.patch.object(post_commit_review, "_pid_is_reviewer", return_value=False):
+                empty_fail = post_commit_review.format_review_status(review_dir)
+            self.assertIn("FAILED (empty_output)", empty_fail)
+
+    def test_watch_review_status_and_cli_flags(self):
+        from unittest import mock
+
+        # _watch_review_status polls RUNNING -> DONE and exits cleanly.
+        statuses = iter(["RUNNING: independent reviewer for abc1234", "DONE: latest review review_abc1234.md"])
+        with mock.patch.object(post_commit_review, "format_review_status", side_effect=lambda _: next(statuses)), \
+             mock.patch.object(post_commit_review.time, "sleep") as m_sleep:
+            post_commit_review._watch_review_status(interval_s=0.01)
+        m_sleep.assert_called_once_with(0.01)
+
+        # _watch_review_status exits cleanly on KeyboardInterrupt.
+        with mock.patch.object(post_commit_review, "format_review_status", return_value="RUNNING: x"), \
+             mock.patch.object(post_commit_review.time, "sleep", side_effect=KeyboardInterrupt):
+            post_commit_review._watch_review_status(interval_s=0.01)
+
+        # CLI argument validation on tools/wlb review and post_commit_review.py --status.
+        wlb_bin = post_commit_review.ROOT / "tools" / "wlb"
+        help_res = subprocess.run([str(wlb_bin), "review", "--help"], capture_output=True, text=True)
+        self.assertEqual(help_res.returncode, 0, help_res.stderr)
+        self.assertIn("--watch", help_res.stdout)
+
+        bad_wlb = subprocess.run([str(wlb_bin), "review", "--wathc"], capture_output=True, text=True)
+        self.assertNotEqual(bad_wlb.returncode, 0)
+
+        hook_bin = HOOKS_DIR / "post_commit_review.py"
+        bad_hook = subprocess.run(
+            [sys.executable, "-I", "-B", str(hook_bin), "--status", "--bogus"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(bad_hook.returncode, 2)
 
 
 if __name__ == "__main__":

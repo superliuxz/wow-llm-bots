@@ -124,17 +124,14 @@ def parse(argv):
     p.add_argument("args", nargs=argparse.REMAINDER,
                    help="list | <name> sync|status|run|pull|stop|install-hook ...")
 
-    sub.add_parser("review", help="show whether the post-commit independent reviewer is RUNNING or DONE")
+    p = sub.add_parser("review", help="show whether the post-commit independent reviewer is RUNNING/DONE/FAILED")
+    p.add_argument("--watch", action="store_true", help="poll every 2 s until the active reviewer finishes")
     return parser.parse_args(argv)
 
 
 def main():
     if sys.argv[1:2] == ["remote"]:
         remote.dispatch_cli(sys.argv[2:])
-        return
-    if sys.argv[1:2] == ["review"]:
-        extra = ["--watch"] if "--watch" in sys.argv[2:] else []
-        common.run(["python3", "-I", "-B", common.ROOT / ".agents" / "hooks" / "post_commit_review.py", "--status", *extra])
         return
     a = parse(sys.argv[1:])
     if a.command == "build":
@@ -209,6 +206,10 @@ def main():
             hargs = ["run", *hargs]
         bin_path = str(OUT / "common" / "harness")
         os.execv(bin_path, [bin_path, *hargs])
+    elif a.command == "review":
+        extra = ["--watch"] if a.watch else []
+        common.run(["python3", "-I", "-B", common.ROOT / ".agents" / "hooks" / "post_commit_review.py",
+                    "--status", *extra])
 
 
 if __name__ == "__main__":

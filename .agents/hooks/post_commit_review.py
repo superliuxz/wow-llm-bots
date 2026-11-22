@@ -270,9 +270,11 @@ def format_review_status(review_dir: pathlib.Path = REVIEW_DIR) -> str:
                 err_text = err_file.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 err_text = ""
-        if size == 0 and ("AGY_ERROR" in err_text or "error:" in err_text):
+        if "AGY_ERROR" in err_text or "error:" in err_text.lower():
             reason = "print_timeout" if "print_timeout" in err_text else "error"
-            return f"FAILED ({reason}): {resolved.name} (0 bytes) -> see var/review/{err_file.name}"
+            return f"FAILED ({reason}): {resolved.name} ({size} bytes) -> see var/review/{err_file.name}"
+        if size == 0:
+            return f"FAILED (empty_output): {resolved.name} (0 bytes) -> see var/review/{err_file.name}"
         return f"DONE: latest review {resolved.name} ({size} bytes) -> var/review/{resolved.name}"
     return "IDLE: no post-commit reviews recorded yet"
 
@@ -353,11 +355,15 @@ def handle_post_tool_use(
 
 def main() -> int:
     if sys.argv[1:2] == ["--status"]:
-        if "--watch" in sys.argv[2:]:
-            _watch_review_status()
-        else:
+        rest = sys.argv[2:]
+        if rest == []:
             print(format_review_status())
-        return 0
+            return 0
+        if rest == ["--watch"]:
+            _watch_review_status()
+            return 0
+        print("usage: post_commit_review.py --status [--watch]", file=sys.stderr)
+        return 2
 
     # Never trigger recursively inside a spawned reviewer session.
     if os.environ.get(REVIEWER_ENV) == "1":
