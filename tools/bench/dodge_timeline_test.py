@@ -874,6 +874,12 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
         self.assertIsNone(dead["dps_during"])
         self.assertIsNone(dead["dps_lost"])
 
+    def test_needs_llm_respects_arms_override(self) -> None:
+        self.assertFalse(bench_bosses._needs_llm("mixed_all", ("no_brain", "baseline")))
+        self.assertFalse(bench_bosses._needs_llm("no_brain", None))
+        self.assertTrue(bench_bosses._needs_llm("mixed_all", ("llm", "no_brain")))
+        self.assertTrue(bench_bosses._needs_llm("mixed_all", None))
+
 
 if __name__ == "__main__":
     unittest.main()

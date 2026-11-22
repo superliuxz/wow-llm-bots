@@ -615,5 +615,74 @@ TEST(ScreenRendererTest, RendersSelfAurasAsBuffsAndDebuffs) {
       << screen.text;
 }
 
+TEST(ScreenRendererTest, RendersMainAssistHurtAndLooseMobsInParty) {
+  pb::Snapshot snap;
+  snap.bot = "Loadb";
+  snap.base.self.state = pb::Self::ALIVE;
+  snap.base.self.in_combat = true;
+
+  pb::Party& party = snap.ext.party.emplace();
+  pb::Unit& tank = party.members.emplace_back();
+  tank.name = "Loada";
+  tank.guid = "0x100";
+  tank.health_pct = 62.0f;
+  tank.rel.dist_yd = 18.0f;
+  tank.group.emplace().online = true;
+  tank.group->in_range = true;
+  tank.group->role = pb::TANK;
+  tank.group->main_tank = true;
+
+  pb::Unit& dps = party.members.emplace_back();
+  dps.name = "Loadc";
+  dps.guid = "0x101";
+  dps.health_pct = 85.0f;
+  dps.rel.dist_yd = 46.0f;
+  dps.rel.in_los = false;
+  dps.group.emplace().online = true;
+  dps.group->in_range = true;
+  dps.group->role = pb::DPS;
+  dps.group->main_assist = true;
+
+  pb::Unit& far_ally = party.members.emplace_back();
+  far_ally.name = "Loadd";
+  far_ally.guid = "0x102";
+  far_ally.health_pct = 90.0f;
+  far_ally.group.emplace().online = true;
+  far_ally.group->in_range = false;
+  far_ally.group->role = pb::DPS;
+
+  pb::Unit& mob = snap.base.nearby.units.emplace_back();
+  mob.guid = "0x200";
+  mob.name = "Phoenix";
+  mob.kind = pb::Unit::NPC;
+  mob.reaction = pb::Unit::HOSTILE;
+  mob.target = "Loadc";
+  mob.rel.dist_yd = 14.0f;
+
+  pb::Unit& boss = snap.base.nearby.units.emplace_back();
+  boss.guid = "0x201";
+  boss.name = "Kael'thas Sunstrider";
+  boss.kind = pb::Unit::NPC;
+  boss.reaction = pb::Unit::HOSTILE;
+  boss.target = "Loada";
+  boss.rel.dist_yd = 20.0f;
+
+  const Screen screen = RenderScreen(snap);
+  EXPECT_NE(screen.text.find("main tank"), std::string::npos) << screen.text;
+  EXPECT_NE(screen.text.find("main assist"), std::string::npos) << screen.text;
+  EXPECT_NE(screen.text.find("party hurt: Loada 62% (18 yd, in range), "
+                             "Loadc 85% (46 yd, out of range, out of sight), "
+                             "Loadd 90% (out of range)"),
+            std::string::npos)
+      << screen.text;
+  EXPECT_NE(screen.text.find("loose mobs: Phoenix (targeting Loadc, 14 yd)"),
+            std::string::npos)
+      << screen.text;
+  // Boss targeting tank Loada must not be listed as a loose mob.
+  EXPECT_EQ(screen.text.find("Kael'thas Sunstrider (targeting Loada"),
+            std::string::npos)
+      << screen.text;
+}
+
 }  // namespace
 }  // namespace harness

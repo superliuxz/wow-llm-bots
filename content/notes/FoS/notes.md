@@ -14,10 +14,12 @@ Corrupted Soul Fragment appears -> target nearest Corrupted Soul Fragment
 
 ## Devourer of Souls
 
-- **Mirrored Soul** (facing): When `Mirrored Soul` is active on Devourer of Souls, face away and stop attacking.
+- **Mirrored Soul** (reflect): Reflects 45% of damage dealt to Devourer onto the linked party member; stop attacking while active on anyone.
+- **Well of Souls** (ground_hazard): Purple void zone on the ground; move out immediately.
 
 ```
-Mirrored Soul on boss -> face away boss, then stop attacking
+Mirrored Soul on anyone -> stop attacking
+in Well of Souls -> out of it
 ```
 
 ## The Forge of Souls

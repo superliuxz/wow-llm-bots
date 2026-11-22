@@ -453,5 +453,44 @@ TEST(OptionsTest, NonAttackableNeutralAndHostileNpcsAreNotOfferedAsAttack) {
   EXPECT_EQ(targets[0].guid, "0x12");
 }
 
+TEST(OptionsTest, AssistOptionOfferedForMainAssistAndTankTargets) {
+  pb::Snapshot snapshot;
+  pb::Unit* egg = AddUnit(&snapshot, "Phoenix Egg", "0x20", 14);
+  egg->reaction = pb::Unit::HOSTILE;
+  pb::Unit* boss = AddUnit(&snapshot, "Kael'thas Sunstrider", "0x21", 20);
+  boss->reaction = pb::Unit::HOSTILE;
+
+  pb::Party& party = snapshot.ext.party.emplace();
+  pb::Unit& tank = party.members.emplace_back();
+  tank.name = "Loada";
+  tank.target = "Kael'thas Sunstrider";
+  tank.group.emplace().online = true;
+  tank.group->role = pb::TANK;
+
+  pb::Unit& ma = party.members.emplace_back();
+  ma.name = "Loadc";
+  ma.target = "Phoenix Egg";
+  ma.group.emplace().online = true;
+  ma.group->main_assist = true;
+
+  // Duplicate target with tank: should deduplicate by guid.
+  pb::Unit& ot = party.members.emplace_back();
+  ot.name = "Loadf";
+  ot.target = "Kael'thas Sunstrider";
+  ot.group.emplace().online = true;
+  ot.group->main_tank = true;
+
+  const std::vector<OptionTarget> targets = AddOptions(&snapshot);
+  // Expect: Attack Phoenix Egg, Attack Kael'thas, Attack main assist Loadc's
+  // target (Phoenix Egg), Attack tank Loada's target (Kael'thas), Keep.
+  ASSERT_EQ(targets.size(), 5u);
+  EXPECT_EQ(snapshot.options[2].text,
+            "Attack main assist Loadc's target (Phoenix Egg)");
+  EXPECT_EQ(targets[2].guid, "0x20");
+  EXPECT_EQ(snapshot.options[3].text,
+            "Attack tank Loada's target (Kael'thas Sunstrider)");
+  EXPECT_EQ(targets[3].guid, "0x21");
+}
+
 }  // namespace
 }  // namespace llm_brain

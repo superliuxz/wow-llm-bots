@@ -786,6 +786,12 @@ std::string MemberLine(const pb::Unit& u, bool around_me, bool leader) {
     if (!role.empty()) {
       bits.push_back(Word(role));
     }
+    if (u.group->main_tank) {
+      bits.push_back("main tank");
+    }
+    if (u.group->main_assist) {
+      bits.push_back("main assist");
+    }
     if (!u.group->online) {
       bits.push_back("offline");
     } else if (!u.group->in_range) {
@@ -810,7 +816,9 @@ std::string MemberLine(const pb::Unit& u, bool around_me, bool leader) {
 // "party: leader you; loot group loot" and a line per member.
 std::vector<std::string> PartyLines(const pb::Party& p,
                                     const std::flat_set<std::string>& guids,
-                                    std::string_view my_name) {
+                                    std::string_view my_name,
+                                    const std::vector<pb::Unit>& nearby_units,
+                                    bool in_combat) {
   std::vector<std::string> header;
   bool leader_listed = false;
   for (const pb::Unit& u : p.members) {
@@ -841,6 +849,86 @@ std::vector<std::string> PartyLines(const pb::Party& p,
                         (u.group && u.group->leader);
     lines.push_back(
         base::StrCat({"  - ", MemberLine(u, IsAroundMe(u, guids), leader)}));
+  }
+
+  // Factual heal-range & damage summary (A5): who is hurt and within 40 yd.
+  std::vector<const pb::Unit*> hurt;
+  for (const pb::Unit& u : p.members) {
+    if (!u.dead && u.group && u.group->online && u.health_pct &&
+        *u.health_pct < 100.0f) {
+      hurt.push_back(&u);
+    }
+  }
+  if (!hurt.empty()) {
+    std::sort(hurt.begin(), hurt.end(),
+              [](const pb::Unit* a, const pb::Unit* b) {
+                if (*a->health_pct != *b->health_pct) {
+                  return *a->health_pct < *b->health_pct;
+                }
+                return a->name < b->name;
+              });
+    std::vector<std::string> parts;
+    for (const pb::Unit* u : hurt) {
+      std::string info;
+      if (!u->group->in_range) {
+        info = base::StringPrintf("%s %.0f%% (out of range)", u->name.c_str(),
+                                  *u->health_pct);
+      } else {
+        const float dist = Finite(u->rel.dist_yd);
+        const bool in_heal_range = dist <= 40.0f;
+        info = base::StringPrintf("%s %.0f%% (%.0f yd, %s", u->name.c_str(),
+                                  *u->health_pct, dist,
+                                  in_heal_range ? "in range" : "out of range");
+        if (u->rel.in_los && !*u->rel.in_los) {
+          info += ", out of sight";
+        }
+        info += ")";
+      }
+      parts.push_back(std::move(info));
+    }
+    lines.push_back(
+        base::StrCat({"  party hurt: ", base::JoinString(parts, ", ")}));
+  }
+
+  // Factual loose-mob summary (A5): hostile mobs targeting a non-tank ally.
+  if (in_combat) {
+    std::flat_set<std::string> tank_names;
+    std::flat_set<std::string> member_names;
+    for (const pb::Unit& u : p.members) {
+      member_names.insert(u.name);
+      if (u.group && (u.group->main_tank || u.group->role == pb::TANK)) {
+        tank_names.insert(u.name);
+      }
+    }
+    std::vector<std::string> loose;
+    for (const pb::Unit& u : nearby_units) {
+      if (u.dead || u.reaction != pb::Unit::HOSTILE || u.target.empty()) {
+        continue;
+      }
+      const bool target_is_party = member_names.contains(u.target) ||
+                                   (!my_name.empty() && u.target == my_name);
+      if (!target_is_party) {
+        continue;
+      }
+      if (!tank_names.empty()) {
+        if (tank_names.contains(u.target)) {
+          continue;
+        }
+      } else {
+        // No other party member is marked tank (self may be the tank):
+        // flag mobs targeting any other party member.
+        if (!my_name.empty() && u.target == my_name) {
+          continue;
+        }
+      }
+      loose.push_back(base::StringPrintf("%s (targeting %s, %.0f yd)",
+                                         u.name.c_str(), u.target.c_str(),
+                                         Finite(u.rel.dist_yd)));
+    }
+    if (!loose.empty()) {
+      lines.push_back(
+          base::StrCat({"  loose mobs: ", base::JoinString(loose, ", ")}));
+    }
   }
   return lines;
 }
@@ -1359,7 +1447,8 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
     }
   }
   if (ext.party) {
-    for (std::string& line : PartyLines(*ext.party, around_me, snapshot.bot)) {
+    for (std::string& line : PartyLines(*ext.party, around_me, snapshot.bot,
+                                        nearby.units, base.self.in_combat)) {
       lines.push_back(std::move(line));
     }
   }

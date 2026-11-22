@@ -37,10 +37,8 @@ Hawk Spirit appears -> target nearest Hawk Spirit
 
 ## Talon King Ikiss
 
-- **Talon King Ikiss Should Be Tanked** (positioning): Encounter positioning (talon king ikiss should be tanked).
-- **Arcane Bubble** (debuff): Aura `Arcane Bubble` (me); gather/position per encounter script (hand-check).
-- **Arcane Explosion** (cast_aoe): Boss cast AoE; move out during cast.
+- **Arcane Explosion** (cast_aoe): Boss blinks and casts a 5s AoE; move out during cast (do not return to pre-Blink spot).
 
 ```
-Arcane Explosion cast -> out of it, then back
+Arcane Explosion cast -> out of it
 ```

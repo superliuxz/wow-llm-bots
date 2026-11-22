@@ -86,10 +86,11 @@ ICK_NOTES = """# Pit of Saron — Ick & Krick
 """
 
 DEVOURER_NOTES = """# The Forge of Souls — Devourer of Souls
-- **Wailing Souls**: sweeping frontal beam; stay behind the boss.
-  - Standing order: `Wailing Souls cast -> to behind Devourer of Souls`
+- **Mirrored Soul**: reflects 45% of damage dealt to Devourer onto the linked party member; stop attacking while Mirrored Soul is active on anyone.
+  - Standing order: `Mirrored Soul on anyone -> stop attacking`
 - **Well of Souls**: purple void zone on the ground; move out immediately.
   - Standing order: `in Well of Souls -> out of it`
+- **Wailing Souls**: sweeping frontal beam; avoid standing directly in front of the boss.
 - **Phantom Blast**: heavy shadow nuke on tank; interrupt when possible.
 """
 
@@ -113,8 +114,8 @@ MURMUR_NOTES = """# Shadow Labyrinth — Murmur
 """
 
 IKISS_NOTES = """# Sethekk Halls — Talon King Ikiss
-- **Arcane Explosion**: after Blinking, casts a 5s lethal AoE; step just outside the radius and return after it lands.
-  - Standing order: `Arcane Explosion cast -> out of it, then back`
+- **Arcane Explosion**: after Blinking, casts a 5s lethal AoE; step just outside the radius (do not return to the old pre-Blink spot).
+  - Standing order: `Arcane Explosion cast -> out of it`
 - **Polymorph**: sheeps a party member; dispellers dispel it promptly.
 """
 
@@ -1247,6 +1248,12 @@ def run_boss_waves(
     return res
 
 
+def _needs_llm(mode: str, arms_override: tuple[str, ...] | None) -> bool:
+    if arms_override is not None:
+        return any(a in ("llm", "llm_no_notes") for a in arms_override)
+    return mode in ("llm", "llm_no_notes", "mixed", "mixed_all")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="", help="Comma-separated subset of boss keys: " + ",".join(BOSSES))
@@ -1263,6 +1270,7 @@ def main() -> int:
         help="Parallel 5-man parties in one worldserver (default: 4 for mixed_all, 3 otherwise)",
     )
     ap.add_argument("--append", action="store_true", help="Merge into existing output JSON instead of overwriting")
+    ap.add_argument("--out", default="", help="Optional output JSON path (default: var/bench_boss_10_<mode>.json)")
     ap.add_argument(
         "--mode",
         choices=("llm", "llm_no_notes", "mixed", "mixed_all", "no_brain", "baseline"),
@@ -1296,12 +1304,10 @@ def main() -> int:
 
     build.common("default", tests=False)
     build.server(test=True)
-    out_json = VAR / f"bench_boss_10_{args.mode}.json"
+    out_json = pathlib.Path(args.out) if args.out else (VAR / f"bench_boss_10_{args.mode}.json")
+    out_json.parent.mkdir(parents=True, exist_ok=True)
     results = json.loads(out_json.read_text()) if (args.append and out_json.exists()) else {}
-    needs_llm = (
-        args.mode in ("llm", "llm_no_notes", "mixed", "mixed_all")
-        or (arms_override is not None and any(a in ("llm", "llm_no_notes") for a in arms_override))
-    )
+    needs_llm = _needs_llm(args.mode, arms_override)
     ctx = LlamaServer(slots=16) if needs_llm else None
     if ctx is not None:
         ctx.__enter__()

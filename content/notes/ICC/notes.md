@@ -4,10 +4,11 @@
 
 ## Lord Marrowgar
 
-- **Coldflame** (add_switch): Priority add; switch targets to `Coldflame` immediately.
+- **Coldflame** (ground_hazard): Moving line of blue fire; move out immediately.
+- **Bone Storm** (cast_aoe): Boss spins and deals heavy melee AoE while moving; spread and avoid standing in him.
 
 ```
-Coldflame appears -> target nearest Coldflame
+in Coldflame -> out of it
 ```
 
 ## Lady Deathwhisper

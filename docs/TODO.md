@@ -10,8 +10,11 @@ Last updated 2026-11-21.
 ## In progress
 
 - **Phase 1 & Phase 2 remaining benchmark sign-off criteria** (see single-codebase `n = 8` 5-boss report [`docs/benchmarks/2026-11-21-phase1-phase2-five-boss.md`](benchmarks/2026-11-21-phase1-phase2-five-boss.md)):
-  - After fixing Review `ede3f6c` High 1, `llm` recovered from `10/40` to `24/40` (`60.0%`, vs `llm_no_notes` `25/40` `p = 1.0000`, `no_brain` `20/40` `p = 0.5005`, `baseline` `22/40` `p = 0.8213`; `Murmur 7/8`, `Loken 6/8`, `Ikiss 5/8`, `Kael'thas 3/8`, `Devourer 3/8`).
-  - **Still open before Phase 3 sign-off:** `llm` kills (`24/40`) do not yet significantly beat `no_brain` (`20/40`, `p = 0.5005`) after Holm–Bonferroni correction, `Ikiss` DPS is `-11.2%` vs `llm_no_notes`, and `A3` generated notes (`content/notes/`) remain **draft** (not yet loaded by harness; hand-check per boss before use).
+  - Follow-up 5-boss `n = 8` run (`var/bench_boss_p12_llm.json` local + `var/bench_boss_p12_nonllm.json` on remote worker): removing `, then back` from `Ikiss` closed the `Ikiss` DPS gap (`llm` `5/8` kills, `1,022` DPS = `+1.4%` vs `llm_no_notes` `1,007`, vs `no_brain` `1/8`, `baseline` `0/8`), `Loken` hit `7/8` (`+15.4%` DPS), and `Devourer` `Mirrored Soul` note hit `3/8` (`-0.6%` DPS vs `llm_no_notes` `1/8`, `baseline` `1/8`).
+  - **Still open before Phase 3 sign-off:** `llm` kills (`21/40` vs `no_brain` `17/40`, `p = 0.5021`; `Kael'thas` `2/8` vs `baseline` `5/8`) do not yet significantly beat `no_brain` after Holm–Bonferroni correction; hand-checked `FoS`/`Seth`/`ICC` draft notes (`content/notes/`), remaining draft files still unverified.
+- **Phase 3 (`A5`, `A6`, `C2`, Patchwerk & ICC):**
+  - `A5` (Targeting & roles: `"Attack <main assist/tank> <name>'s target (<mob>)"` option, `"main tank"`/`"main assist"` tags, factual `party hurt:` with 40 yd heal range/LOS, and `loose mobs:` targeting non-tank allies) implemented & unit-tested; live boss verification pending alongside `A6` and `C2`.
+  - `A6` (Items & vehicles: `Use <item>` bag item options) and `C2` (self-revising `notes.md` competence hill-climb loop) next.
 
 ## Next, in order
 

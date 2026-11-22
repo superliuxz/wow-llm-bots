@@ -320,6 +320,68 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
     option.name = target.name;
   }
 
+  // Party assist options (A5): let the brain attack the main assist's or
+  // tank's current target without C++ guessing target priority.
+  if (alive && snapshot->ext.party) {
+    std::vector<const pb::Unit*> callers;
+    for (const pb::Unit& m : snapshot->ext.party->members) {
+      if (!m.dead && m.group && m.group->online && !m.target.empty() &&
+          m.group->main_assist) {
+        callers.push_back(&m);
+      }
+    }
+    for (const pb::Unit& m : snapshot->ext.party->members) {
+      if (!m.dead && m.group && m.group->online && !m.target.empty() &&
+          !m.group->main_assist &&
+          (m.group->main_tank || m.group->role == pb::TANK)) {
+        callers.push_back(&m);
+      }
+    }
+    std::vector<std::string> seen_assist_guids;
+    for (const pb::Unit* caller : callers) {
+      if (seen_assist_guids.size() >= 2) {
+        break;
+      }
+      const pb::Unit* best = nullptr;
+      for (const pb::Unit& u : snapshot->base.nearby.units) {
+        if (u.name != caller->target) {
+          continue;
+        }
+        if (UnitKind(u, self.in_combat, facts) != OptionTarget::Kind::kAttack) {
+          continue;
+        }
+        if (!best || u.rel.dist_yd < best->rel.dist_yd) {
+          best = &u;
+        }
+      }
+      if (!best) {
+        continue;
+      }
+      bool dup = false;
+      for (const std::string& g : seen_assist_guids) {
+        if (g == best->guid) {
+          dup = true;
+          break;
+        }
+      }
+      if (dup) {
+        continue;
+      }
+      seen_assist_guids.push_back(best->guid);
+      const std::string_view role_prefix =
+          caller->group->main_assist ? "main assist " : "tank ";
+      const std::string assist_name = caller->name + "'s target";
+      const std::string text = "Attack " + std::string(role_prefix) +
+                               assist_name + " (" + best->name + ")";
+      targets.push_back({OptionTarget::Kind::kAttack, best->guid, assist_name});
+      pb::Option& option = snapshot->options.emplace_back();
+      option.text = text;
+      option.guid = best->guid;
+      option.kind = pb::Option::ATTACK;
+      option.name = assist_name;
+    }
+  }
+
   if (alive && !self.in_combat) {
     const bool hurt = self.health_max > 0 && self.health < self.health_max;
     const bool low_mana = self.power_type == pb::Self::MANA &&
