@@ -153,3 +153,4 @@ their names. It must never block the world thread.
   installed game server, rebuilt by `tools/wlb build server` and friends). Anything that must survive is
   in `var/` (untracked): the MySQL database, logs, bot memory. Never put state worth keeping in `out/`.
 - Settings live in `config/*.overrides`, rendered by `tools/wlb config`.
+- **Optional remote CPU workers (`private/remotes.json`):** discover configured workers with `tools/wlb remote list` and offload CPU/benchmark runs via `tools/wlb remote <name> run [--pull REMOTE_REL:LOCAL_PATH] -- <cmd...>` (auto-syncs, verifies fresh build via stamp + `flock`, and reverse-tunnels local `llama-server` `:8090`).

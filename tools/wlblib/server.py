@@ -46,17 +46,41 @@ def _mysql_up():
                           capture_output=True).returncode == 0
 
 
+def _ensure_local_db_initialized():
+    """Creates required MySQL dirs/secret and initializes an empty datadir on a fresh checkout."""
+    for d in (VAR / "mysql-data", VAR / "mysql-files", LOGS, PLAY.run, SECRETS):
+        d.mkdir(parents=True, exist_ok=True)
+    if not DB_PASSWORD.exists():
+        import secrets as _secrets
+        DB_PASSWORD.write_text(_secrets.token_hex(16) + "\n")
+        DB_PASSWORD.chmod(0o600)
+    if not (VAR / "mysql-data" / "mysql").is_dir():
+        say("initializing fresh project-local MySQL datadir...")
+        run(["mysqld", f"--defaults-file={MYSQL_CNF}", "--initialize-insecure"])
+        return True
+    return False
+
+
+def _ensure_acore_users():
+    pw = _db_password().replace("'", "''")
+    for host in ("127.0.0.1", "localhost"):
+        _sql(f"CREATE USER IF NOT EXISTS 'acore'@'{host}' IDENTIFIED BY '{pw}'")
+
+
 def db_start():
     """Starts the project-local MySQL (Percona) in the background, from config/mysql.cnf.in."""
     ETC.mkdir(parents=True, exist_ok=True)
     MYSQL_CNF.write_text((ROOT / "config" / "mysql.cnf.in").read_text()
                          .replace("@ROOT@", str(ROOT)))
+    fresh = _ensure_local_db_initialized()
     if _mysql_up():
         say("mysql already running")
         return
     run(["mysqld", f"--defaults-file={MYSQL_CNF}", "--daemonize"])
     for _ in range(30):
         if _mysql_up():
+            if fresh:
+                _ensure_acore_users()
             say("mysql up")
             return
         time.sleep(1)
@@ -449,10 +473,18 @@ def _copy_database(source, target):
 
 def _golden_key():
     """What the golden copy depends on: the commits of AzerothCore and playerbots, whose SQL
-    sets the databases up."""
+    sets the databases up. Falls back to `var/.golden_submodules` on `.git`-less remote slaves."""
     third = ROOT / "third_party"
-    return " ".join(output(["git", "-C", third / name, "rev-parse", "HEAD"]).strip()
-                    for name in ("azerothcore-wotlk", "mod-playerbots"))
+    try:
+        return " ".join(output(["git", "-C", third / name, "rev-parse", "HEAD"]).strip()
+                        for name in ("azerothcore-wotlk", "mod-playerbots"))
+    except Failed:
+        fallback = VAR / ".golden_submodules"
+        if fallback.exists():
+            key = fallback.read_text().strip()
+            if key:
+                return key
+        raise
 
 
 def _grant(name):
