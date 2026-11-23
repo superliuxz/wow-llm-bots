@@ -508,6 +508,58 @@ class HillClimbSafeguardsTest(unittest.TestCase):
                  mock.patch.object(hill_climb, "LEDGER", t / "ledger.jsonl"):
                 self.assertEqual(hill_climb.cmd_eval_candidate(bad_args), 2)
 
+    def test_eval_candidate_preserves_candidate_traces_across_heldout_overwrite(self):
+        from unittest import mock
+        import argparse
+
+        with tempfile.TemporaryDirectory() as tmp:
+            t = pathlib.Path(tmp)
+            var_dir = t / "var"
+            soak_traces = var_dir / "soak_traces"
+            saved_marker: list[str] = []
+
+            def fake_run_soak(**kwargs):
+                suite = kwargs["suite"]
+                soak_traces.mkdir(parents=True, exist_ok=True)
+                (soak_traces / "marker.txt").write_text(f"traces_from_{suite}")
+                return {
+                    "rating": 900.0, "ci_low": 860.0, "ci_high": 940.0,
+                    "ranking": {"mode": "judge", "beats_current_outside_ci": True, "delta_vs_current": 50.0},
+                    "baseline_mode": "human_baseline",
+                    "guardrails_ok": True,
+                    "progress": {"xp_per_hour": 5000.0, "deaths": 0},
+                    "scorer_sha256": "abc123",
+                    "tells": [],
+                }
+
+            def fake_save_baseline(suite, src=None):
+                self.assertIsNotNone(src)
+                saved_marker.append((src / "marker.txt").read_text())
+
+            args = argparse.Namespace(
+                hypothesis="h", target="", category="code", minutes=1.0, runs=1,
+                suite="varied", base_ref="HEAD", min_xp_per_hour=1000.0,
+                max_deaths_per_run=5, human_dir=t, blind_ratings=t / "b",
+                lock_file=t / "l", judge=True, allow_fallback=False,
+                allow_any_files=True, no_confirm=True, no_heldout=False,
+                skip_check=True, auto_revert=False, min_eval_passed=None,
+                eval_passed=None,
+            )
+            with mock.patch.object(hill_climb, "VAR", var_dir), \
+                 mock.patch.object(hill_climb, "BASELINE_TRACES_ROOT", t / "base"), \
+                 mock.patch.object(hill_climb, "LEDGER", t / "ledger.jsonl"), \
+                 mock.patch.object(hill_climb, "_verify_all_locks", return_value=(True, "ok")), \
+                 mock.patch.object(hill_climb, "_has_human_traces", return_value=True), \
+                 mock.patch.object(hill_climb, "_git", return_value="deadbeef"), \
+                 mock.patch.object(hill_climb.soak_case, "run_soak", side_effect=fake_run_soak), \
+                 mock.patch.object(hill_climb, "_save_baseline_traces", side_effect=fake_save_baseline), \
+                 mock.patch.object(hill_climb, "_commit_kept_changes"):
+                rc = hill_climb.cmd_eval_candidate(args)
+            self.assertEqual(rc, 0)
+            # Even though heldout overwrote VAR/soak_traces, baseline saved candidate's `varied` traces.
+            self.assertEqual((soak_traces / "marker.txt").read_text(), "traces_from_heldout")
+            self.assertEqual(saved_marker, ["traces_from_varied"])
+
 
 if __name__ == "__main__":
     unittest.main()

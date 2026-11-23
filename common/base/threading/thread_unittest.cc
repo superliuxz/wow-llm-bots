@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <memory>
+#include <vector>
 
 #include "base/memory/raw_ptr.h"
 #include "base/message_loop/message_pump.h"
@@ -266,6 +267,50 @@ TEST(MessagePumpEpollTest, OneShotReadWriteAndControllerReuse) {
     destroy_check.Signal();
   });
   ASSERT_TRUE(destroy_check.TimedWait(Seconds(2)));
+
+  // Re-registering the same controller on a different fd inside
+  // OnFileCanWriteWithoutBlocking during non-persistent WATCH_READ_WRITE must
+  // also suppress OnFileCanReadWithoutBlocking on the original fd.
+  class ControllerRearmOtherFdWatcher : public MessagePumpEpoll::FdWatcher {
+   public:
+    ControllerRearmOtherFdWatcher(MessagePumpEpoll::FdWatchController* ctrl,
+                                  int other_fd)
+        : ctrl_(ctrl), other_fd_(other_fd) {}
+    void OnFileCanWriteWithoutBlocking(int /*fd*/) override {
+      rearm_ok = CurrentIOThread::Get()->WatchFileDescriptor(
+          other_fd_, /*persistent=*/false, MessagePumpForIO::WATCH_READ, ctrl_,
+          this);
+      ++writes;
+      write_done.Signal();
+    }
+    void OnFileCanReadWithoutBlocking(int fd) override {
+      read_fds.push_back(fd);
+      read_done.Signal();
+    }
+    raw_ptr<MessagePumpEpoll::FdWatchController> ctrl_;
+    int other_fd_;
+    bool rearm_ok = false;
+    int writes = 0;
+    std::vector<int> read_fds;
+    WaitableEvent write_done;
+    WaitableEvent read_done;
+  };
+  ControllerRearmOtherFdWatcher rearm_watcher(&controller, p1[0]);
+  io.task_runner()->PostTask([&] {
+    EXPECT_TRUE(CurrentIOThread::Get()->WatchFileDescriptor(
+        sp[0], /*persistent=*/false, MessagePumpForIO::WATCH_READ_WRITE,
+        &controller, &rearm_watcher));
+  });
+  ASSERT_TRUE(rearm_watcher.write_done.TimedWait(Seconds(2)));
+  ASSERT_TRUE(rearm_watcher.read_done.TimedWait(Seconds(2)));
+  WaitableEvent rearm_check;
+  io.task_runner()->PostTask([&] {
+    EXPECT_TRUE(rearm_watcher.rearm_ok);
+    EXPECT_EQ(rearm_watcher.writes, 1);
+    EXPECT_EQ(rearm_watcher.read_fds, std::vector<int>{p1[0]});
+    rearm_check.Signal();
+  });
+  ASSERT_TRUE(rearm_check.TimedWait(Seconds(2)));
 
   io.Stop();
   close(sp[0]);
