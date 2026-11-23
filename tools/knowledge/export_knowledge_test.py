@@ -113,6 +113,18 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
             305, 'Firelands', '', '',
             '{{Infobox instance |name=Firelands |level=85}} Cataclysm raid.'
         );
+        INSERT INTO pages VALUES (
+            306, 'Naxxramas (Classic)', '', '',
+            '{{removedfromgame|patch=3.0.2}} {{Infobox instance |name=Naxxramas |level=60}} Vanilla 40-man.'
+        );
+        INSERT INTO pages VALUES (
+            307, 'Naxxramas', '', '',
+            '{{Infobox instance |name=Naxxramas |level=80}} === Wings === WotLK level-80 raid.'
+        );
+        INSERT INTO pages VALUES (
+            308, 'Slave Pens', '', '',
+            '{{Infobox instance |name=The Slave Pens |level=62-64}} Coilfang Reservoir wing.'
+        );
         """
     )
     con_w.commit()
@@ -166,6 +178,10 @@ class ExportKnowledgeTest(unittest.TestCase):
             self.assertIn("The Deadmines", data["dungeons"])
             self.assertIn("Pull patrols carefully", data["dungeons"]["The Deadmines"]["summary"])
             self.assertNotIn("&aring;", data["dungeons"]["Deadmines"]["summary"])
+            # Pre-4.0 removed `(Classic)` raid (Naxxramas 3.0.2) must NOT overwrite level-80 WotLK Naxxramas.
+            self.assertEqual(data["dungeons"]["Naxxramas"]["level"], "80")
+            self.assertNotIn("===", data["dungeons"]["Naxxramas"]["summary"])
+            self.assertIn("The Slave Pens", data["dungeons"])
 
 
 if __name__ == "__main__":

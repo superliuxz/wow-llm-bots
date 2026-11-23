@@ -189,17 +189,23 @@ WOTLK_335A_DUNGEONS: frozenset[str] = frozenset({
 _DUNGEON_TITLE_ALIASES: dict[str, str] = {
     "Ahn'Qiraj": "Temple of Ahn'Qiraj",
     "Battle for Mount Hyjal": "Hyjal Summit",
+    "Blood Furnace": "The Blood Furnace",
     "Culling of Stratholme": "The Culling of Stratholme",
+    "Eye (Tempest Keep)": "The Eye",
     "Eye of Eternity": "The Eye of Eternity",
     "Forge of Souls": "The Forge of Souls",
-    "Lower Blackrock Spire": "Blackrock Spire",
     "Nexus": "The Nexus",
     "Obsidian Sanctum": "The Obsidian Sanctum",
     "Oculus": "The Oculus",
+    "Opening the Dark Portal": "The Black Morass",
     "Ruby Sanctum": "The Ruby Sanctum",
+    "Shattered Halls": "The Shattered Halls",
+    "Slave Pens": "The Slave Pens",
+    "Steamvault": "The Steamvault",
+    "Stormwind Stockade": "The Stockade",
     "Temple of Atal'Hakkar": "Sunken Temple",
     "The Shadowfang Keep": "Shadowfang Keep",
-    "Upper Blackrock Spire": "Blackrock Spire",
+    "Underbog": "The Underbog",
     "Violet Hold": "The Violet Hold",
 }
 
@@ -222,6 +228,10 @@ _RE_FILE_LINK = re.compile(
 _RE_WIKILINK = re.compile(r"\[\[([^|\]]+\|)?([^\]]+)\]\]")
 _RE_EXTLINK = re.compile(r"\[https?://[^\s\]]+(?:\s+([^\]]+))?\]")
 _RE_BOLD_ITALIC = re.compile(r"'{2,5}")
+_RE_HEADING = re.compile(r"={2,6}\s*([^=\n]+?)\s*={2,6}")
+_RE_REMOVED_PRE_CATA = re.compile(
+    r"\{\{\s*removedfromgame[^}]*patch\s*=\s*([123])\.", re.IGNORECASE
+)
 _RE_MULTI_SPACE = re.compile(r"\s+")
 _RE_QUEST_BREAK = re.compile(r"\$[bB]")
 _RE_QUEST_GENDER = re.compile(r"\$[gG]\s*([^:;]+):([^;]+);")
@@ -267,6 +277,7 @@ def strip_wikitext(text: str, max_chars: int = 200) -> str:
     s = _RE_EXTLINK.sub(lambda m: m.group(1) or "", s)
     s = _RE_HTML.sub(" ", s)
     s = html.unescape(s)
+    s = _RE_HEADING.sub(r"\1:", s)
     s = _RE_BOLD_ITALIC.sub("", s)
     lines = []
     for raw in s.splitlines():
@@ -597,6 +608,10 @@ def export_knowledge(
                 dname, is_classic = _canonical_335a_dungeon(title, info.get("name", ""))
                 if not dname:
                     continue
+                # Skip Vanilla `(Classic)` pages removed before 4.0 (e.g. level-60
+                # Naxxramas 3.0.2 / Onyxia 3.2.2) so WotLK 3.3.5a versions stay intact.
+                if is_classic and _RE_REMOVED_PRE_CATA.search(wikitext):
+                    continue
                 # Prefer `(Classic)` pre-Cataclysm page over post-Cataclysm revamp.
                 if dname in dungeons and dungeon_is_classic.get(dname, False) and not is_classic:
                     continue
@@ -620,6 +635,12 @@ def export_knowledge(
             ):
                 if rtitle in WOTLK_335A_DUNGEONS and rtarget in dungeons and rtitle not in dungeons:
                     dungeons[rtitle] = dict(dungeons[rtarget])
+            # Mirror canonical short/long pairs (e.g. Stockade <-> The Stockade).
+            for a, b in (("Stockade", "The Stockade"), ("Deadmines", "The Deadmines")):
+                if a in dungeons and b not in dungeons:
+                    dungeons[b] = dict(dungeons[a])
+                elif b in dungeons and a not in dungeons:
+                    dungeons[a] = dict(dungeons[b])
 
         payload = {
             "version": 1,

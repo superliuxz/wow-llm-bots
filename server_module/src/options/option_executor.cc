@@ -600,6 +600,44 @@ void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink) {
   }
 }
 
+// Picks the best valid equipment slot for `bag_item` (shared by both option
+// discovery and execution). For dual-slot items (rings, trinkets, and 1H
+// weapons when dual-wielding), prefers the empty or lower-ilvl slot and falls
+// back to the alternate slot if `CanEquipItem` rejects the first (e.g., 2H
+// weapon equipped in main hand, or Unique-Equipped replacement).
+bool PickEquipSlot(Player* bot,
+                   Item* bag_item,
+                   const ItemTemplate* proto,
+                   uint16_t* out_dest) {
+  auto try_dual = [&](uint8_t s1, uint8_t s2) -> bool {
+    const Item* i1 = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, s1);
+    const Item* i2 = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, s2);
+    const uint32_t l1 =
+        i1 && i1->GetTemplate() ? i1->GetTemplate()->ItemLevel : 0;
+    const uint32_t l2 =
+        i2 && i2->GetTemplate() ? i2->GetTemplate()->ItemLevel : 0;
+    const uint8_t preferred = (l2 < l1) ? s2 : s1;
+    const uint8_t alternate = (preferred == s1) ? s2 : s1;
+    if (bot->CanEquipItem(preferred, *out_dest, bag_item, true) ==
+        EQUIP_ERR_OK) {
+      return true;
+    }
+    return bot->CanEquipItem(alternate, *out_dest, bag_item, true) ==
+           EQUIP_ERR_OK;
+  };
+  if (proto->InventoryType == INVTYPE_FINGER) {
+    return try_dual(EQUIPMENT_SLOT_FINGER1, EQUIPMENT_SLOT_FINGER2);
+  }
+  if (proto->InventoryType == INVTYPE_TRINKET) {
+    return try_dual(EQUIPMENT_SLOT_TRINKET1, EQUIPMENT_SLOT_TRINKET2);
+  }
+  if (proto->InventoryType == INVTYPE_WEAPON && bot->CanDualWield()) {
+    return try_dual(EQUIPMENT_SLOT_MAINHAND, EQUIPMENT_SLOT_OFFHAND);
+  }
+  return bot->CanEquipItem(NULL_SLOT, *out_dest, bag_item, true) ==
+         EQUIP_ERR_OK;
+}
+
 void CollectUsableBagItems(Player* bot,
                            std::vector<pb::OptionFacts_Item>* out) {
   out->clear();
@@ -780,7 +818,7 @@ void CollectUsableBagItems(Player* bot,
         case INVTYPE_WEAPON:
           return "1H";
         case INVTYPE_SHIELD:
-          return "Shield";
+          return "Off Hand";
         case INVTYPE_RANGED:
         case INVTYPE_RANGEDRIGHT:
         case INVTYPE_THROWN:
@@ -831,32 +869,6 @@ void CollectUsableBagItems(Player* bot,
           return "Weapon";
       }
     };
-    const auto pick_equip_slot = [&](Item* bag_item, const ItemTemplate* proto,
-                                     uint16_t* out_dest) -> bool {
-      auto try_dual = [&](uint8_t s1, uint8_t s2) -> bool {
-        const Item* i1 = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, s1);
-        const Item* i2 = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, s2);
-        const uint32_t l1 =
-            i1 && i1->GetTemplate() ? i1->GetTemplate()->ItemLevel : 0;
-        const uint32_t l2 =
-            i2 && i2->GetTemplate() ? i2->GetTemplate()->ItemLevel : 0;
-        const uint8_t preferred = (l2 < l1) ? s2 : s1;
-        return bot->CanEquipItem(preferred, *out_dest, bag_item, true) ==
-               EQUIP_ERR_OK;
-      };
-      if (proto->InventoryType == INVTYPE_FINGER) {
-        return try_dual(EQUIPMENT_SLOT_FINGER1, EQUIPMENT_SLOT_FINGER2);
-      }
-      if (proto->InventoryType == INVTYPE_TRINKET) {
-        return try_dual(EQUIPMENT_SLOT_TRINKET1, EQUIPMENT_SLOT_TRINKET2);
-      }
-      if (proto->InventoryType == INVTYPE_WEAPON && bot->CanDualWield()) {
-        return try_dual(EQUIPMENT_SLOT_MAINHAND, EQUIPMENT_SLOT_OFFHAND);
-      }
-      return bot->CanEquipItem(NULL_SLOT, *out_dest, bag_item, true) ==
-             EQUIP_ERR_OK;
-    };
-
     struct RankedEquip {
       int32_t ilvl_delta = 0;
       pb::OptionFacts_Item item;
@@ -873,7 +885,7 @@ void CollectUsableBagItems(Player* bot,
         continue;
       }
       uint16_t dest = 0;
-      if (!pick_equip_slot(bag_item, proto, &dest)) {
+      if (!PickEquipSlot(bot, bag_item, proto, &dest)) {
         continue;
       }
       const uint8_t equip_slot = static_cast<uint8_t>(dest & 0xFF);
@@ -923,8 +935,11 @@ void CollectUsableBagItems(Player* bot,
                                   : "ilvl " + std::to_string(proto->ItemLevel) +
                                         ", empty slot";
       if (proto->Class == ITEM_CLASS_WEAPON && proto->Delay > 0) {
-        const float avg_dmg =
-            (proto->Damage[0].DamageMin + proto->Damage[0].DamageMax) * 0.5f;
+        float avg_dmg = 0.0f;
+        for (int i = 0; i < MAX_ITEM_PROTO_DAMAGES; ++i) {
+          avg_dmg +=
+              (proto->Damage[i].DamageMin + proto->Damage[i].DamageMax) * 0.5f;
+        }
         const float dps =
             avg_dmg / (static_cast<float>(proto->Delay) / 1000.0f);
         if (dps >= 0.5f) {
@@ -1682,29 +1697,7 @@ ExecuteResult ExecuteEquipItemOption(Player* bot, const OptionTarget& target) {
     }
     const ItemTemplate* proto = slot_item.item->GetTemplate();
     uint16_t dest = 0;
-    uint8_t req_slot = NULL_SLOT;
-    if (proto &&
-        (proto->InventoryType == INVTYPE_FINGER ||
-         proto->InventoryType == INVTYPE_TRINKET ||
-         (proto->InventoryType == INVTYPE_WEAPON && bot->CanDualWield()))) {
-      const uint8_t s1 =
-          proto->InventoryType == INVTYPE_FINGER    ? EQUIPMENT_SLOT_FINGER1
-          : proto->InventoryType == INVTYPE_TRINKET ? EQUIPMENT_SLOT_TRINKET1
-                                                    : EQUIPMENT_SLOT_MAINHAND;
-      const uint8_t s2 =
-          proto->InventoryType == INVTYPE_FINGER    ? EQUIPMENT_SLOT_FINGER2
-          : proto->InventoryType == INVTYPE_TRINKET ? EQUIPMENT_SLOT_TRINKET2
-                                                    : EQUIPMENT_SLOT_OFFHAND;
-      const Item* i1 = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, s1);
-      const Item* i2 = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, s2);
-      const uint32_t l1 =
-          i1 && i1->GetTemplate() ? i1->GetTemplate()->ItemLevel : 0;
-      const uint32_t l2 =
-          i2 && i2->GetTemplate() ? i2->GetTemplate()->ItemLevel : 0;
-      req_slot = (l2 < l1) ? s2 : s1;
-    }
-    if (bot->CanEquipItem(req_slot, dest, slot_item.item, true) !=
-        EQUIP_ERR_OK) {
+    if (!proto || !PickEquipSlot(bot, slot_item.item, proto, &dest)) {
       return {"cannot equip " + target.name};
     }
     const uint16_t src = static_cast<uint16_t>(

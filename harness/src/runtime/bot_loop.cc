@@ -923,7 +923,8 @@ void BotLoop::OnReply(const std::string& bot,
         }
       } else {
         // Superseded by a newer wake while in flight: that call answers.
-        Requeue(&state, std::move(asked_reasons), std::move(asked_events));
+        Requeue(&state, std::move(asked_reasons), std::move(asked_events),
+                std::move(asked_outcome));
       }
     }
   }
