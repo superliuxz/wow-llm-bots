@@ -28,6 +28,7 @@ import hmac
 import json
 import os
 import pathlib
+import tempfile
 import re
 import shutil
 import stat
@@ -377,12 +378,16 @@ def _revert_to(base_ref: str, *, allow_any_files: bool = False) -> bool:
         return False
     added = [
         p
-        for p in _git("diff", "--name-only", "--diff-filter=A", base_ref).splitlines()
+        for p in _git(
+            "diff", "--no-renames", "--name-only", "--diff-filter=A", base_ref
+        ).splitlines()
         if p.strip()
     ]
     modified_or_deleted = [
         p
-        for p in _git("diff", "--name-only", "--diff-filter=a", base_ref).splitlines()
+        for p in _git(
+            "diff", "--no-renames", "--name-only", "--diff-filter=a", base_ref
+        ).splitlines()
         if p.strip()
     ]
     untracked = [
@@ -607,6 +612,12 @@ def cmd_init(args) -> int:
 
 
 def cmd_eval_candidate(args) -> int:
+    if (args.min_eval_passed is None) != (args.eval_passed is None):
+        print(
+            "ABORT: --min-eval-passed and --eval-passed must be passed together.",
+            file=sys.stderr,
+        )
+        return 2
     lock_file = args.lock_file or DEFAULT_LOCK_FILE
     ok, msg = _verify_all_locks(lock_file)
     if not ok:
@@ -646,13 +657,6 @@ def cmd_eval_candidate(args) -> int:
             if args.auto_revert:
                 _revert_to(base_ref, allow_any_files=args.allow_any_files)
             return 1
-
-    if (args.min_eval_passed is None) != (args.eval_passed is None):
-        print(
-            "ABORT: --min-eval-passed and --eval-passed must be passed together.",
-            file=sys.stderr,
-        )
-        return 2
 
     xp_floor = float(args.min_xp_per_hour)
     max_deaths = int(args.max_deaths_per_run) * max(1, int(args.runs))
@@ -735,59 +739,71 @@ def cmd_eval_candidate(args) -> int:
     beats_ci = bool(res.get("ranking", {}).get("beats_current_outside_ci"))
     improved = guardrails_ok and beats_ci
 
-    confirm_beats = None
-    if improved and not args.no_confirm:
-        print("\n== Candidate beat current outside 95% CI; running confirmation soak ==")
-        confirm = soak_case.run_soak(
-            minutes=args.minutes,
-            runs=args.runs,
-            score=True,
-            human_dir=args.human_dir,
-            baseline_trace_dir=baseline_dir if baseline_dir.exists() else None,
-            blind_ratings_path=args.blind_ratings,
-            use_judge=args.judge,
-            verify_hash=lock_file,
-            suite=args.suite,
-            check_guardrails=False,
-            min_eval_passed=args.min_eval_passed,
-            eval_passed=args.eval_passed,
-        )
-        confirm_ok, _ = _check_fixed_guardrails(confirm, xp_floor, max_deaths)
-        if not args.allow_fallback and confirm.get("baseline_mode") != "human_baseline":
-            confirm_ok = False
-        confirm_beats = bool(confirm.get("ranking", {}).get("beats_current_outside_ci"))
-        if not (confirm_ok and confirm_beats):
-            print("CONFIRMATION FAILED: reverting candidate", file=sys.stderr)
-            improved = False
+    # Preserve candidate traces before confirm / held-out soaks overwrite VAR/soak_traces.
+    saved_cand_tmp = None
+    saved_cand_traces: pathlib.Path | None = None
+    if improved and (VAR / "soak_traces").exists():
+        saved_cand_tmp = tempfile.TemporaryDirectory(prefix="wlb-cand-traces-")
+        saved_cand_traces = pathlib.Path(saved_cand_tmp.name) / "traces"
+        shutil.copytree(VAR / "soak_traces", saved_cand_traces)
 
-    heldout_ok = None
-    if improved and not args.no_heldout and args.suite != "heldout":
-        print("\n== Running held-out generalization gate (--suite heldout) ==")
-        ho = soak_case.run_soak(
-            minutes=args.minutes,
-            runs=args.runs,
-            score=True,
-            human_dir=args.human_dir,
-            use_judge=args.judge,
-            verify_hash=lock_file,
-            suite="heldout",
-            check_guardrails=False,
-            min_eval_passed=args.min_eval_passed,
-            eval_passed=args.eval_passed,
-        )
-        heldout_ok, ho_failures = _check_fixed_guardrails(ho, xp_floor, max_deaths)
-        if not args.allow_fallback and ho.get("baseline_mode") != "human_baseline":
-            heldout_ok = False
-            ho_failures.append(
-                f"heldout ran in {ho.get('baseline_mode')} instead of human_baseline"
+    try:
+        confirm_beats = None
+        if improved and not args.no_confirm:
+            print("\n== Candidate beat current outside 95% CI; running confirmation soak ==")
+            confirm = soak_case.run_soak(
+                minutes=args.minutes,
+                runs=args.runs,
+                score=True,
+                human_dir=args.human_dir,
+                baseline_trace_dir=baseline_dir if baseline_dir.exists() else None,
+                blind_ratings_path=args.blind_ratings,
+                use_judge=args.judge,
+                verify_hash=lock_file,
+                suite=args.suite,
+                check_guardrails=False,
+                min_eval_passed=args.min_eval_passed,
+                eval_passed=args.eval_passed,
             )
-        if not heldout_ok:
-            print(f"HELD-OUT GATE FAILED ({ho_failures}): reverting candidate", file=sys.stderr)
-            improved = False
+            confirm_ok, _ = _check_fixed_guardrails(confirm, xp_floor, max_deaths)
+            if not args.allow_fallback and confirm.get("baseline_mode") != "human_baseline":
+                confirm_ok = False
+            confirm_beats = bool(confirm.get("ranking", {}).get("beats_current_outside_ci"))
+            if not (confirm_ok and confirm_beats):
+                print("CONFIRMATION FAILED: reverting candidate", file=sys.stderr)
+                improved = False
 
-    if improved:
-        _save_baseline_traces(args.suite)
-        _commit_kept_changes(base_ref, round_num, args.hypothesis, args.allow_any_files)
+        heldout_ok = None
+        if improved and not args.no_heldout and args.suite != "heldout":
+            print("\n== Running held-out generalization gate (--suite heldout) ==")
+            ho = soak_case.run_soak(
+                minutes=args.minutes,
+                runs=args.runs,
+                score=True,
+                human_dir=args.human_dir,
+                use_judge=args.judge,
+                verify_hash=lock_file,
+                suite="heldout",
+                check_guardrails=False,
+                min_eval_passed=args.min_eval_passed,
+                eval_passed=args.eval_passed,
+            )
+            heldout_ok, ho_failures = _check_fixed_guardrails(ho, xp_floor, max_deaths)
+            if not args.allow_fallback and ho.get("baseline_mode") != "human_baseline":
+                heldout_ok = False
+                ho_failures.append(
+                    f"heldout ran in {ho.get('baseline_mode')} instead of human_baseline"
+                )
+            if not heldout_ok:
+                print(f"HELD-OUT GATE FAILED ({ho_failures}): reverting candidate", file=sys.stderr)
+                improved = False
+
+        if improved:
+            _save_baseline_traces(args.suite, src=saved_cand_traces)
+            _commit_kept_changes(base_ref, round_num, args.hypothesis, args.allow_any_files)
+    finally:
+        if saved_cand_tmp is not None:
+            saved_cand_tmp.cleanup()
 
     entry = {
         "round": round_num,

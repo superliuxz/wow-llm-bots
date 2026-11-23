@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <memory>
 
 #include "base/memory/raw_ptr.h"
 #include "base/message_loop/message_pump.h"
@@ -233,6 +234,38 @@ TEST(MessagePumpEpollTest, OneShotReadWriteAndControllerReuse) {
   ASSERT_TRUE(handoff_read_watcher.on_read.TimedWait(Seconds(2)));
   EXPECT_TRUE(handoff_watcher.handoff_ok);
   EXPECT_EQ(handoff_read_watcher.read_fd, sp[0]);
+
+  // Destroying the controller inside OnFileCanWriteWithoutBlocking during
+  // non-persistent WATCH_READ_WRITE must suppress OnFileCanReadWithoutBlocking.
+  class ControllerDestroyingWatcher : public MessagePumpEpoll::FdWatcher {
+   public:
+    void OnFileCanWriteWithoutBlocking(int /*fd*/) override {
+      ctrl.reset();
+      ++writes;
+      done.Signal();
+    }
+    void OnFileCanReadWithoutBlocking(int /*fd*/) override { ++reads; }
+    std::unique_ptr<MessagePumpEpoll::FdWatchController> ctrl;
+    int writes = 0;
+    int reads = 0;
+    WaitableEvent done;
+  };
+  ControllerDestroyingWatcher destroy_watcher;
+  destroy_watcher.ctrl =
+      std::make_unique<MessagePumpEpoll::FdWatchController>();
+  io.task_runner()->PostTask([&] {
+    EXPECT_TRUE(CurrentIOThread::Get()->WatchFileDescriptor(
+        sp[0], /*persistent=*/false, MessagePumpForIO::WATCH_READ_WRITE,
+        destroy_watcher.ctrl.get(), &destroy_watcher));
+  });
+  ASSERT_TRUE(destroy_watcher.done.TimedWait(Seconds(2)));
+  WaitableEvent destroy_check;
+  io.task_runner()->PostTask([&] {
+    EXPECT_EQ(destroy_watcher.writes, 1);
+    EXPECT_EQ(destroy_watcher.reads, 0);
+    destroy_check.Signal();
+  });
+  ASSERT_TRUE(destroy_check.TimedWait(Seconds(2)));
 
   io.Stop();
   close(sp[0]);

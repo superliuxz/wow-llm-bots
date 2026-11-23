@@ -252,7 +252,8 @@ class BotLoop {
   bool DispatchOrderEval(const std::string& bot,
                          BotState* state,
                          const OrderEvalResult& eval,
-                         base::TimeTicks now);
+                         base::TimeTicks now,
+                         std::string_view extra_wake_reason = {});
   bool WakeForOrder(const std::string& bot,
                     BotState* state,
                     std::string_view reason,

@@ -353,46 +353,6 @@ def _aggregate_run_stats(results: list[dict]) -> dict:
     }
 
 
-def _aggregate_results(results: list[dict]) -> dict:
-    if len(results) == 1:
-        return results[0]
-    agg = dict(results[-1])
-    ratings = [r["rating"] for r in results if r.get("rating") is not None]
-    ci_lows = [r["ci_low"] for r in results if r.get("ci_low") is not None]
-    ci_highs = [r["ci_high"] for r in results if r.get("ci_high") is not None]
-    agg["rating"] = round(statistics.mean(ratings), 1) if ratings else None
-    agg["ci_low"] = round(min(ci_lows), 1) if ci_lows else None
-    agg["ci_high"] = round(max(ci_highs), 1) if ci_highs else None
-    agg["guardrails_ok"] = all(r["guardrails_ok"] for r in results)
-    agg["run_ratings"] = [r.get("rating") for r in results]
-    agg["scenarios"] = [r.get("scenario", "soak") for r in results]
-    agg["run_stats"] = _aggregate_run_stats(results)
-    if "ranking" in agg:
-        agg["ranking"] = dict(agg["ranking"])
-        agg["ranking"]["beats_current_outside_ci"] = all(
-            bool(r.get("ranking", {}).get("beats_current_outside_ci"))
-            for r in results
-        )
-
-    # Aggregate progress across runs.
-    agg["progress"] = {
-        "total_xp": sum(r["progress"]["total_xp"] for r in results),
-        "xp_per_hour": round(
-            statistics.mean(r["progress"]["xp_per_hour"] for r in results), 1
-        ),
-        "quests_completed": sum(r["progress"].get("quests_completed", 0) for r in results),
-        "quests_per_hour": round(
-            statistics.mean(r["progress"].get("quests_per_hour", 0.0) for r in results), 2
-        ),
-        "deaths": sum(r["progress"]["deaths"] for r in results),
-        "moved_bots": sum(r["progress"]["moved_bots"] for r in results),
-        "stuck_bots": sum(r["progress"]["stuck_bots"] for r in results),
-        "traced_bots": sum(r["progress"]["traced_bots"] for r in results),
-    }
-    agg["tells"] = sorted({t for r in results for t in r.get("tells", [])})
-    return agg
-
-
 def run_soak(
     minutes: float = 5.0,
     runs: int = 2,

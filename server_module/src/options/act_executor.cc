@@ -1646,7 +1646,10 @@ ActStartResult StartAct(Player* bot,
 
     case pb::Command_Act::JUMP: {
       if (bot->HasUnitState(UNIT_STATE_ROOT | UNIT_STATE_STUNNED |
-                            UNIT_STATE_CONFUSED | UNIT_STATE_FLEEING)) {
+                            UNIT_STATE_CONFUSED | UNIT_STATE_FLEEING |
+                            UNIT_STATE_POSSESSED) ||
+          bot->HasUnitMovementFlag(MOVEMENTFLAG_ROOT) || bot->IsFalling() ||
+          bot->IsInFlight()) {
         return {.error = "cannot jump right now"};
       }
       // Match real WoW jump airborne time (~0.83 s for speedZ = 8.0 yd/s under
@@ -1654,21 +1657,27 @@ ActStartResult StartAct(Player* bot,
       // does not clamp to a 1 ms orientation-only spline.
       constexpr float kJumpSpeedZ = 8.0f;
       constexpr float kJumpAirTimeS = 0.83f;
+      constexpr float kStepYd = 0.5f;
       const float o = bot->GetOrientation();
-      float step_yd = 0.5f;
-      float jx = bot->GetPositionX() + step_yd * std::cos(o);
-      float jy = bot->GetPositionY() + step_yd * std::sin(o);
+      float jx = bot->GetPositionX() + kStepYd * std::cos(o);
+      float jy = bot->GetPositionY() + kStepYd * std::sin(o);
       float jz = bot->GetPositionZ();
       bot->UpdateAllowedPositionZ(jx, jy, jz);
       if (std::abs(jz - bot->GetPositionZ()) > 1.5f ||
           !bot->IsWithinLOS(jx, jy, jz + 0.5f)) {
-        // Blocked by wall or cliff: tiny in-place hop without leaving ledge.
-        step_yd = 0.1f;
-        jx = bot->GetPositionX() + step_yd * std::cos(o);
-        jy = bot->GetPositionY() + step_yd * std::sin(o);
+        // Forward step blocked by wall or cliff: try a small backward hop
+        // checked with the same LoS/Z guards rather than nudging past a ledge.
+        jx = bot->GetPositionX() - kStepYd * std::cos(o);
+        jy = bot->GetPositionY() - kStepYd * std::sin(o);
         jz = bot->GetPositionZ();
+        bot->UpdateAllowedPositionZ(jx, jy, jz);
+        if (std::abs(jz - bot->GetPositionZ()) > 1.5f ||
+            !bot->IsWithinLOS(jx, jy, jz + 0.5f)) {
+          return {.error = "blocked from jumping"};
+        }
       }
-      const float speed_xy = std::max(0.15f, step_yd / kJumpAirTimeS);
+      const float dist_3d = std::hypot(kStepYd, jz - bot->GetPositionZ());
+      const float speed_xy = std::max(0.15f, dist_3d / kJumpAirTimeS);
       bot->GetMotionMaster()->MoveJump(jx, jy, jz, speed_xy, kJumpSpeedZ);
       return {.done = true};
     }

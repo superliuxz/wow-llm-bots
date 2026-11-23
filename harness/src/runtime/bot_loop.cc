@@ -322,17 +322,11 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
       OrderCoversWake(
           state.orders.orders()[static_cast<size_t>(ord.order_index)],
           trig->kinds, trig->attackers);
-  // If both an order wake and an uncovered snapshot trigger fire on the same
-  // snapshot, merge the trigger's reason before DispatchOrderEval so a single
-  // WakeBot/LLM call carries both reasons instead of double-waking.
-  if (!ord.wake_reason.empty() && trig && !trig_covered &&
-      !trig->reason.empty()) {
-    if (std::find(state.pending_reasons.begin(), state.pending_reasons.end(),
-                  trig->reason) == state.pending_reasons.end()) {
-      state.pending_reasons.push_back(trig->reason);
-    }
-  }
-  const bool order_woke = DispatchOrderEval(bot, &state, ord, received_at);
+  const std::string_view extra_trig_reason =
+      (trig && !trig_covered) ? std::string_view(trig->reason)
+                              : std::string_view{};
+  const bool order_woke =
+      DispatchOrderEval(bot, &state, ord, received_at, extra_trig_reason);
   if (order_woke) {
     return;
   }
@@ -1185,7 +1179,18 @@ bool BotLoop::WakeForOrder(const std::string& bot,
 bool BotLoop::DispatchOrderEval(const std::string& bot,
                                 BotState* state,
                                 const OrderEvalResult& eval,
-                                base::TimeTicks now) {
+                                base::TimeTicks now,
+                                std::string_view extra_wake_reason) {
+  auto merge_extra = [&] {
+    if (!extra_wake_reason.empty()) {
+      const std::string r(extra_wake_reason);
+      if (std::find(state->pending_reasons.begin(),
+                    state->pending_reasons.end(),
+                    r) == state->pending_reasons.end()) {
+        state->pending_reasons.push_back(r);
+      }
+    }
+  };
   if (eval.kite_ended) {
     SendStopMoving(bot);
     return false;
@@ -1197,6 +1202,7 @@ bool BotLoop::DispatchOrderEval(const std::string& bot,
       SendStopMoving(bot);
     }
     state->runner.Stop();
+    merge_extra();
     return WakeForOrder(bot, state, eval.wake_reason, now,
                         /*is_failure=*/eval.timed_out);
   }
@@ -1213,6 +1219,7 @@ bool BotLoop::DispatchOrderEval(const std::string& bot,
     state->runner.Stop();
     state->look_deadline = base::TimeTicks();
     if (!failed.wake_reason.empty()) {
+      merge_extra();
       return WakeForOrder(bot, state, failed.wake_reason, now,
                           /*is_failure=*/true);
     }

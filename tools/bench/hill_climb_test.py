@@ -326,11 +326,34 @@ class HillClimbSafeguardsTest(unittest.TestCase):
         self.assertFalse(hasattr(soak_scorer, "_score_distributions"))
 
     def test_bradley_terry_reports_unanchored_when_anchor_missing(self):
+        import io
+        from contextlib import redirect_stdout
+        import argparse
+        import blind_rate
         import pairwise_ranker
 
         comps = [{"a": "cand", "b": "curr", "winner": "a"}] * 6
         bt = pairwise_ranker.fit_bradley_terry(comps, anchor_label="human", n_bootstrap=20, seed=0)
         self.assertFalse(bt["anchored"])
+        # Verify UNANCHORED formatting in both soak_scorer and blind_rate.
+        rep = soak_scorer.format_score_report({
+            "rating": 1050.0, "ci_low": 980.0, "ci_high": 1120.0,
+            "guardrails_ok": True, "guardrails": [], "tells": [],
+            "scorer_sha256": "deadbeef1234",
+            "progress": {"xp_per_hour": 0.0, "total_xp": 0, "quests_completed": 0,
+                         "deaths": 0, "moved_bots": 0, "traced_bots": 0},
+            "ranking": {"human_anchor_rating": 1000.0, "anchored": False,
+                        "mode": "blind", "comparisons": 6},
+        })
+        self.assertIn("UNANCHORED", rep)
+        with tempfile.TemporaryDirectory() as tmp:
+            rf = pathlib.Path(tmp) / "ratings.jsonl"
+            rf.write_text("\n".join(json.dumps(c) for c in comps) + "\n")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                blind_rate.cmd_summary(argparse.Namespace(ratings=rf, anchor="human"))
+            self.assertIn("UNANCHORED", buf.getvalue())
+
         comps_with_human = comps + [{"a": "human", "b": "curr", "winner": "a"}] * 4
         bt2 = pairwise_ranker.fit_bradley_terry(
             comps_with_human, anchor_label="human", n_bootstrap=20, seed=0
@@ -339,6 +362,7 @@ class HillClimbSafeguardsTest(unittest.TestCase):
 
     def test_revert_to_refuses_unrelated_dirty_files(self):
         from unittest import mock
+        import subprocess
 
         with mock.patch.object(
             hill_climb, "_check_edit_scope", return_value=(False, ["unrelated.txt"])
@@ -346,6 +370,32 @@ class HillClimbSafeguardsTest(unittest.TestCase):
             ok = hill_climb._revert_to("HEAD")
         self.assertFalse(ok)
         m_run.assert_not_called()
+
+        # Real git repo test covering modified, added, renamed, and untracked files.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp)
+            env = {
+                **os.environ,
+                "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+            }
+            subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env)
+            (repo / "content" / "identities").mkdir(parents=True)
+            (repo / "content" / "RULES.md").write_text("v1\n")
+            (repo / "content" / "identities" / "a.md").write_text("idA\n")
+            subprocess.run(["git", "-C", str(repo), "add", "."], check=True, env=env)
+            subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "init"], check=True, env=env)
+            # Modify RULES.md, rename a.md -> b.md, add new untracked c.md.
+            (repo / "content" / "RULES.md").write_text("v2\n")
+            subprocess.run(["git", "-C", str(repo), "mv", "content/identities/a.md", "content/identities/b.md"], check=True, env=env)
+            (repo / "content" / "identities" / "c.md").write_text("untracked\n")
+            with mock.patch.object(hill_climb, "ROOT", repo):
+                ok2 = hill_climb._revert_to("HEAD")
+            self.assertTrue(ok2)
+            self.assertEqual((repo / "content" / "RULES.md").read_text(), "v1\n")
+            self.assertTrue((repo / "content" / "identities" / "a.md").is_file())
+            self.assertFalse((repo / "content" / "identities" / "b.md").exists())
+            self.assertFalse((repo / "content" / "identities" / "c.md").exists())
 
     def test_score_candidate_enforces_human_baseline_confirm_and_heldout(self):
         from unittest import mock

@@ -199,8 +199,9 @@ void MessagePumpEpoll::Dispatch(int fd, uint32_t events) {
           controller->watch_id_ != watch_id) {
         return;  // Stopped, replaced, or re-armed by the write callback.
       }
-    } else if (controllers_.find(fd) != controllers_.end()) {
-      return;  // Handed off or re-registered by the one-shot write callback.
+    } else if (controller->watch_id_ != 0 ||
+               controllers_.find(fd) != controllers_.end()) {
+      return;  // Handed off or re-registered (on fd or another fd) by write.
     }
     watcher->OnFileCanReadWithoutBlocking(fd);
     return;

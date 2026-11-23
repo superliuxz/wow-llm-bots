@@ -30,7 +30,7 @@ class SoakSuitesTest(unittest.TestCase):
                 if sc != "soak":
                     self.assertTrue(cfg.exists(), f"missing override config: {cfg}")
 
-    def test_aggregate_results_handles_real_score_soak_with_none_metrics(self):
+    def test_score_soak_handles_none_metrics_and_aggregate_run_stats(self):
         with tempfile.TemporaryDirectory() as tmp:
             td = pathlib.Path(tmp)
             bot_dir = td / "bot" / "Loada"
@@ -52,9 +52,10 @@ class SoakSuitesTest(unittest.TestCase):
             r1 = soak_scorer.score_soak(td, run_stats=stats)
             r2 = soak_scorer.score_soak(td, run_stats=stats)
             self.assertIsNone(r1["rating"])
-            agg = soak_case._aggregate_results([r1, r2])
-            self.assertIsNone(agg["rating"])
-            self.assertTrue(agg["guardrails_ok"])
+            self.assertTrue(r1["guardrails_ok"])
+            merged_stats = soak_case._aggregate_run_stats([r1, r2])
+            self.assertEqual(merged_stats["bots"], 2)
+            self.assertEqual(merged_stats["decisions"], 10)
 
     def test_empty_soak_fails_guardrails(self):
         with tempfile.TemporaryDirectory() as tmp:
