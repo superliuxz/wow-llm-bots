@@ -26,6 +26,7 @@ namespace {
 
 constexpr size_t kMaxKnowledgeBytes = 1200;
 constexpr size_t kMaxQuestsInPrompt = 3;
+constexpr size_t kMaxBossesInPrompt = 2;
 
 std::string OneLineClean(std::string_view s) {
   std::string out(s);
@@ -165,6 +166,19 @@ std::optional<WorldKnowledge> WorldKnowledge::ParseJson(
       }
     }
   }
+  if (auto it = root.find("bosses"); it != root.end() && it->is_object()) {
+    for (const auto& [k, v] : it->items()) {
+      if (!v.is_object() || k.empty()) {
+        continue;
+      }
+      BossInfo bi;
+      bi.abilities = StringField(v, "abilities");
+      bi.strategy = StringField(v, "strategy");
+      if (!bi.abilities.empty() || !bi.strategy.empty()) {
+        wk.bosses_.emplace(k, std::move(bi));
+      }
+    }
+  }
   return wk;
 }
 
@@ -177,6 +191,86 @@ std::string WorldKnowledge::SelectRelevant(
   std::string out;
   const wlb::snapshot::Where& where = snapshot.base.where;
   const uint32_t bot_level = snapshot.base.self.unit.level.value_or(0);
+
+  // 0) Nearby / targeted boss abilities & strategy (highest priority so boss
+  // mechanics never get crowded out by instance overview or quests).
+  if (!bosses_.empty() && !snapshot.base.nearby.units.empty()) {
+    auto lookup_boss = [&](std::string_view name) -> const BossInfo* {
+      if (where.in_instance && !where.zone.empty()) {
+        if (auto it = bosses_.find(base::StrCat({where.zone, "::", name}));
+            it != bosses_.end()) {
+          return &it->second;
+        }
+      }
+      if (where.in_instance && !where.map.empty() && where.map != where.zone) {
+        if (auto it = bosses_.find(base::StrCat({where.map, "::", name}));
+            it != bosses_.end()) {
+          return &it->second;
+        }
+      }
+      if (auto it = bosses_.find(std::string(name)); it != bosses_.end()) {
+        return &it->second;
+      }
+      return nullptr;
+    };
+
+    struct BossCandidate {
+      std::string_view name;
+      const BossInfo* info = nullptr;
+      bool is_target = false;
+      float dist_yd = 0.0f;
+    };
+    const std::string_view target_guid = snapshot.base.self.unit.target;
+    std::vector<BossCandidate> cands;
+    for (const wlb::snapshot::Unit& u : snapshot.base.nearby.units) {
+      if (u.dead || u.name.empty() || u.kind == wlb::snapshot::Unit::PLAYER ||
+          u.kind == wlb::snapshot::Unit::PET ||
+          u.kind == wlb::snapshot::Unit::CRITTER) {
+        continue;
+      }
+      const BossInfo* bi = lookup_boss(u.name);
+      if (!bi) {
+        continue;
+      }
+      cands.push_back({u.name, bi,
+                       !target_guid.empty() && u.guid == target_guid,
+                       u.rel.dist_yd});
+    }
+    std::sort(cands.begin(), cands.end(),
+              [](const BossCandidate& a, const BossCandidate& b) {
+                if (a.is_target != b.is_target) {
+                  return a.is_target > b.is_target;
+                }
+                if (a.dist_yd != b.dist_yd) {
+                  return a.dist_yd < b.dist_yd;
+                }
+                return a.name < b.name;
+              });
+    std::flat_set<std::string_view> seen_bosses;
+    size_t bosses_emitted = 0;
+    for (const BossCandidate& bc : cands) {
+      if (bosses_emitted >= kMaxBossesInPrompt) {
+        break;
+      }
+      if (!seen_bosses.insert(bc.name).second) {
+        continue;
+      }
+      bool any = false;
+      if (!bc.info->abilities.empty()) {
+        any |= AppendLineCapped(
+            &out, base::StrCat({"- Boss ", bc.name,
+                                " — Abilities: ", bc.info->abilities}));
+      }
+      if (!bc.info->strategy.empty()) {
+        any |= AppendLineCapped(
+            &out, base::StrCat({"- Boss ", bc.name,
+                                " — Strategy: ", bc.info->strategy}));
+      }
+      if (any) {
+        ++bosses_emitted;
+      }
+    }
+  }
 
   // 1) Open-world zone level range + outleveled-zone guidance.
   if (!where.in_instance && !where.zone.empty()) {

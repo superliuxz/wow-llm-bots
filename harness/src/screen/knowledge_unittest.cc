@@ -45,6 +45,20 @@ constexpr const char* kSampleKnowledgeJson = R"json({
       "level": "15-21",
       "summary": "Pull Defias patrols carefully."
     }
+  },
+  "bosses": {
+    "Loken": {
+      "abilities": "Lightning Nova: 20 yd AoE, 5 sec cast.",
+      "strategy": "Stay close for Pulsing Shockwave, run 20 yd away on Lightning Nova."
+    },
+    "Kael'thas Sunstrider": {
+      "abilities": "Pyroblast: heavy fire nuke.",
+      "strategy": "Tempest Keep five-phase raid encounter."
+    },
+    "Magisters' Terrace::Kael'thas Sunstrider": {
+      "abilities": "Shock Barrier: shield before Pyroblast.",
+      "strategy": "Magisters' Terrace 5-man: break Shock Barrier and interrupt Pyroblast."
+    }
   }
 })json";
 
@@ -109,6 +123,46 @@ TEST(WorldKnowledgeTest, DungeonFallbackSuppressedWhenBossNotesExist) {
   const std::string with_notes =
       wk->SelectRelevant(snap, /*has_boss_notes=*/true);
   EXPECT_TRUE(with_notes.empty());
+}
+
+TEST(WorldKnowledgeTest, BossStrategyLookupInstanceScopedAndTargetPriority) {
+  const std::optional<WorldKnowledge> wk =
+      WorldKnowledge::ParseJson(kSampleKnowledgeJson);
+  ASSERT_TRUE(wk.has_value());
+  EXPECT_EQ(wk->boss_count(), 3u);
+
+  wlb::snapshot::Snapshot snap;
+  snap.base.where.in_instance = true;
+  snap.base.where.zone = "Magisters' Terrace";
+  snap.base.self.unit.target = "0xkael";
+
+  wlb::snapshot::Unit dead_loken;
+  dead_loken.guid = "0xloken";
+  dead_loken.name = "Loken";
+  dead_loken.kind = wlb::snapshot::Unit::NPC;
+  dead_loken.dead = true;
+  dead_loken.rel.dist_yd = 5.0f;
+  snap.base.nearby.units.push_back(dead_loken);
+
+  wlb::snapshot::Unit kael;
+  kael.guid = "0xkael";
+  kael.name = "Kael'thas Sunstrider";
+  kael.kind = wlb::snapshot::Unit::NPC;
+  kael.rel.dist_yd = 25.0f;
+  snap.base.nearby.units.push_back(kael);
+
+  const std::string md = wk->SelectRelevant(snap, /*has_boss_notes=*/false);
+  // Instance-scoped Magisters' Terrace entry wins over unqualified Tempest Keep
+  // entry.
+  EXPECT_NE(md.find("Boss Kael'thas Sunstrider — Abilities: Shock Barrier"),
+            std::string::npos);
+  EXPECT_NE(md.find("Magisters' Terrace 5-man"), std::string::npos);
+  EXPECT_EQ(md.find("Tempest Keep five-phase"), std::string::npos);
+  // Dead boss is skipped.
+  EXPECT_EQ(md.find("Loken"), std::string::npos);
+
+  // Suppressed when curated boss notes are present.
+  EXPECT_TRUE(wk->SelectRelevant(snap, /*has_boss_notes=*/true).empty());
 }
 
 TEST(WorldKnowledgeTest, RejectsInvalidJson) {

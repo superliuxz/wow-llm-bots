@@ -43,17 +43,24 @@ class WorldKnowledge {
     std::string summary;
   };
 
+  struct BossInfo {
+    std::string abilities;
+    std::string strategy;
+  };
+
   static std::optional<WorldKnowledge> LoadFile(std::string_view path,
                                                 std::string* error = nullptr);
   static std::optional<WorldKnowledge> ParseJson(std::string_view json_text,
                                                  std::string* error = nullptr);
 
   bool empty() const {
-    return quests_.empty() && zones_.empty() && dungeons_.empty();
+    return quests_.empty() && zones_.empty() && dungeons_.empty() &&
+           bosses_.empty();
   }
   size_t quest_count() const { return quests_.size(); }
   size_t zone_count() const { return zones_.size(); }
   size_t dungeon_count() const { return dungeons_.size(); }
+  size_t boss_count() const { return bosses_.size(); }
 
   // Returns a compact Markdown snippet (<= 1,200 bytes) relevant to `snapshot`.
   // When `has_boss_notes` is true, returns empty so combat-critical boss notes
@@ -65,6 +72,7 @@ class WorldKnowledge {
   std::flat_map<uint32_t, QuestInfo> quests_;
   std::flat_map<std::string, ZoneInfo> zones_;
   std::flat_map<std::string, DungeonInfo> dungeons_;
+  std::flat_map<std::string, BossInfo> bosses_;
 };
 
 }  // namespace harness

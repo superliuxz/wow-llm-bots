@@ -37,6 +37,16 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
             item_entry INTEGER, source_kind TEXT, source_entry INTEGER,
             source_name TEXT, chance REAL, quest_required INTEGER
         );
+        CREATE TABLE creatures (
+            entry INTEGER PRIMARY KEY, name TEXT, rank INTEGER
+        );
+        INSERT INTO creatures VALUES
+            (28923, 'Loken', 1),
+            (36597, 'The Lich King', 3),
+            (10184, 'Onyxia', 3),
+            (19622, 'Kael''thas Sunstrider', 3),
+            (11502, 'Ragnaros', 3),
+            (40, 'Kobold Miner', 0);
         INSERT INTO quests VALUES
             (7, 'Kobold Camp Cleanup', 2, 1, 'Kill 8 Kobold Vermin.$bReturn to Marshal McBride, $N $g fella:lady;.', 101);
         INSERT INTO quests VALUES
@@ -129,6 +139,45 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
             309, 'Stormwind Stockade', '', '',
             '{{Infobox instance |name=Stormwind Stockade |level=22-30}} Prison wing in Stormwind.'
         );
+        INSERT INTO pages VALUES (
+            401, 'Loken', '', '',
+            'Biography page.\n==Strategy==\nOld stub.'
+        );
+        INSERT INTO pages VALUES (
+            402, 'Loken (tactics)', '', '',
+            '==Abilities==\n*{{abilities|Lightning Nova|20 yd AoE Nature damage.|id=52960|notes=5 sec cast}}\n==Tactics==\nRun 20 yd away when he casts {{spell|52960|Lightning Nova}}.'
+        );
+        INSERT INTO pages VALUES (
+            403, 'The Lich King', 'Lich King', '', '#REDIRECT [[Lich King]]'
+        );
+        INSERT INTO pages VALUES (
+            404, 'Lich King (tactics)', '', '',
+            '==Abilities==\n*{{abilities|Defile|Growing shadow void zone.}}\n==Tactics==\nSpread out for Defile.'
+        );
+        INSERT INTO pages VALUES (
+            405, 'Onyxia (Classic)', '', '',
+            '{{removedfromgame|patch=3.2.2}}\n==Strategy==\nLevel 60 vanilla encounter.'
+        );
+        INSERT INTO pages VALUES (
+            406, 'Onyxia (tactics)', '', '',
+            '==Abilities==\n*Deep Breath\n==Strategy==\nWotLK level 80 encounter.'
+        );
+        INSERT INTO pages VALUES (
+            407, 'Kael''thas Sunstrider (tactics)', '', '',
+            '==Strategy==\nTempest Keep five-phase raid.'
+        );
+        INSERT INTO pages VALUES (
+            408, 'Kael''thas Sunstrider (Magisters'' Terrace tactics)', '', '',
+            '==Abilities==\n*{{abilities|Shock Barrier|Absorbs damage.}}\n==Strategy==\nBreak Shock Barrier and interrupt Pyroblast.'
+        );
+        INSERT INTO pages VALUES (
+            409, 'Ragnaros (Firelands tactics)', '', '',
+            '==Strategy==\nCataclysm Firelands raid.'
+        );
+        INSERT INTO pages VALUES (
+            410, 'Deathwing (tactics)', '', '',
+            '==Strategy==\nCataclysm-only boss.'
+        );
         """
     )
     con_w.commit()
@@ -140,6 +189,10 @@ class ExportKnowledgeTest(unittest.TestCase):
     def test_strip_wikitext_cleans_markup(self) -> None:
         raw = "{{Template|a={{nested}}}} '''Hello''' [[Target|World]]<ref>cite</ref> [[File:Foo.png]]"
         self.assertEqual(ek.strip_wikitext(raw), "Hello World")
+        ab = "*{{abilities|Lightning Nova|20 yd AoE.|id=52960|notes=5 sec cast}} and {{spell|52960|Lightning Nova}}"
+        cleaned = ek.strip_wikitext(ab, max_chars=200)
+        self.assertIn("Lightning Nova: 20 yd AoE. (5 sec cast)", cleaned)
+        self.assertIn("and Lightning Nova", cleaned)
 
     def test_export_335a_era_pinning_and_quest_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -191,6 +244,25 @@ class ExportKnowledgeTest(unittest.TestCase):
             self.assertIn("The Stockade", data["dungeons"])
             self.assertIn("Stockade", data["dungeons"])
             self.assertIn("Prison wing in Stormwind.", data["dungeons"]["Stockade"]["summary"])
+
+            # Boss strategy export: (tactics) beats biography, redirect resolves
+            # The Lich King -> Lich King (tactics), pre-4.0 Onyxia (Classic) skipped,
+            # 3.3.5a multi-instance tactics scoped, Cataclysm bosses/instances excluded.
+            bosses = data["bosses"]
+            self.assertIn("Loken", bosses)
+            self.assertIn("Lightning Nova: 20 yd AoE Nature damage. (5 sec cast)", bosses["Loken"]["abilities"])
+            self.assertIn("Run 20 yd away when he casts Lightning Nova.", bosses["Loken"]["strategy"])
+            self.assertIn("The Lich King", bosses)
+            self.assertIn("Spread out for Defile.", bosses["The Lich King"]["strategy"])
+            self.assertIn("Onyxia", bosses)
+            self.assertIn("WotLK level 80", bosses["Onyxia"]["strategy"])
+            self.assertNotIn("Level 60 vanilla", bosses["Onyxia"]["strategy"])
+            self.assertIn("Kael'thas Sunstrider", bosses)
+            self.assertIn("Tempest Keep", bosses["Kael'thas Sunstrider"]["strategy"])
+            self.assertIn("Magisters' Terrace::Kael'thas Sunstrider", bosses)
+            self.assertIn("Shock Barrier", bosses["Magisters' Terrace::Kael'thas Sunstrider"]["abilities"])
+            self.assertNotIn("Deathwing", bosses)
+            self.assertFalse(any("Firelands" in k for k in bosses))
 
 
 if __name__ == "__main__":

@@ -242,25 +242,114 @@ _RE_SECTION = re.compile(
     r"^==\s*(Notes|Tips|Walkthrough|Strategy|Tactics|Overview)\s*==\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
+_RE_BOSS_ABILITIES = re.compile(
+    r"^==\s*(Abilities|Attacks and abilities|Skills|Boss abilities)\s*==\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_RE_BOSS_STRATEGY = re.compile(
+    r"^==\s*(Strategy|Tactics|Encounter|Walkthrough)\s*==\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_RE_INST_TACTICS = re.compile(r"^(.+?)\s+\((.+?)\s+tactics\)$")
 _RE_NEXT_HEADING = re.compile(r"^==[^=]", re.MULTILINE)
 
 
-def _strip_templates(text: str) -> str:
-    """Removes balanced `{{...}}` MediaWiki templates."""
+def _split_top_level_pipes(body: str) -> list[str]:
+    """Splits a MediaWiki template body on top-level `|` characters."""
+    parts: list[str] = []
+    cur: list[str] = []
+    d_brace = 0
+    d_brack = 0
+    j = 0
+    bn = len(body)
+    while j < bn:
+        ch = body[j]
+        nxt = body[j + 1] if j + 1 < bn else ""
+        if ch == "{" and nxt == "{":
+            d_brace += 1
+            cur.append("{{")
+            j += 2
+            continue
+        if ch == "}" and nxt == "}" and d_brace > 0:
+            d_brace -= 1
+            cur.append("}}")
+            j += 2
+            continue
+        if ch == "[" and nxt == "[":
+            d_brack += 1
+            cur.append("[[")
+            j += 2
+            continue
+        if ch == "]" and nxt == "]" and d_brack > 0:
+            d_brack -= 1
+            cur.append("]]")
+            j += 2
+            continue
+        if ch == "|" and d_brace == 0 and d_brack == 0:
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+        j += 1
+    if cur:
+        parts.append("".join(cur))
+    return parts
+
+
+def _expand_or_strip_templates(text: str) -> str:
+    """Expands `{{abilities|...}}`/`{{spell|...}}` and strips all other `{{...}}`."""
     out: list[str] = []
-    depth = 0
     i = 0
     n = len(text)
     while i < n:
         if i + 1 < n and text[i] == "{" and text[i + 1] == "{":
-            depth += 1
-            i += 2
-        elif i + 1 < n and text[i] == "}" and text[i + 1] == "}" and depth > 0:
-            depth -= 1
-            i += 2
+            depth = 1
+            start = i + 2
+            j = start
+            while j < n and depth > 0:
+                if j + 1 < n and text[j] == "{" and text[j + 1] == "{":
+                    depth += 1
+                    j += 2
+                elif j + 1 < n and text[j] == "}" and text[j + 1] == "}":
+                    depth -= 1
+                    j += 2
+                else:
+                    j += 1
+            body = text[start : max(start, j - 2)]
+            parts = _split_top_level_pipes(body)
+            tname = parts[0].strip().lower() if parts else ""
+            if tname in ("abilities", "ability") and len(parts) >= 2:
+                pos: list[str] = []
+                named: dict[str, str] = {}
+                for p in parts[1:]:
+                    if "=" in p:
+                        k, v = p.split("=", 1)
+                        named[k.strip().lower()] = _expand_or_strip_templates(v).strip()
+                    else:
+                        pos.append(_expand_or_strip_templates(p).strip())
+                name = pos[0] if pos else ""
+                desc = pos[1] if len(pos) > 1 else ""
+                notes = named.get("notes", "")
+                if name:
+                    frag = name
+                    if desc:
+                        frag = f"{frag}: {desc}"
+                    if notes:
+                        frag = f"{frag} ({notes})"
+                    out.append(frag)
+            elif tname == "spell" and len(parts) >= 2:
+                pos = [
+                    _expand_or_strip_templates(p).strip()
+                    for p in parts[1:]
+                    if "=" not in p
+                ]
+                if len(pos) >= 2 and pos[0].isdigit():
+                    out.append(pos[1])
+                elif pos:
+                    out.append(pos[0])
+            i = j
         else:
-            if depth == 0:
-                out.append(text[i])
+            out.append(text[i])
             i += 1
     return "".join(out)
 
@@ -271,7 +360,7 @@ def strip_wikitext(text: str, max_chars: int = 200) -> str:
         return ""
     s = _RE_COMMENT.sub(" ", text)
     s = _RE_REF.sub(" ", s)
-    s = _strip_templates(s)
+    s = _expand_or_strip_templates(s)
     s = _RE_FILE_LINK.sub(" ", s)
     s = _RE_WIKILINK.sub(r"\2", s)
     s = _RE_EXTLINK.sub(lambda m: m.group(1) or "", s)
@@ -318,43 +407,7 @@ def _extract_infobox(wikitext: str, prefix: str) -> dict[str, str]:
             i += 1
     body = wikitext[start : max(start, i - 2)]
     fields: dict[str, str] = {}
-    parts: list[str] = []
-    cur: list[str] = []
-    d_brace = 0
-    d_brack = 0
-    j = 0
-    bn = len(body)
-    while j < bn:
-        ch = body[j]
-        nxt = body[j + 1] if j + 1 < bn else ""
-        if ch == "{" and nxt == "{":
-            d_brace += 1
-            cur.append("{{")
-            j += 2
-            continue
-        if ch == "}" and nxt == "}" and d_brace > 0:
-            d_brace -= 1
-            cur.append("}}")
-            j += 2
-            continue
-        if ch == "[" and nxt == "[":
-            d_brack += 1
-            cur.append("[[")
-            j += 2
-            continue
-        if ch == "]" and nxt == "]" and d_brack > 0:
-            d_brack -= 1
-            cur.append("]]")
-            j += 2
-            continue
-        if ch == "|" and d_brace == 0 and d_brack == 0:
-            parts.append("".join(cur))
-            cur = []
-        else:
-            cur.append(ch)
-        j += 1
-    if cur:
-        parts.append("".join(cur))
+    parts = _split_top_level_pipes(body)
 
     for part in parts:
         if "=" not in part:
@@ -367,15 +420,22 @@ def _extract_infobox(wikitext: str, prefix: str) -> dict[str, str]:
     return fields
 
 
-def _extract_wiki_tip(wikitext: str, max_chars: int = 200) -> str:
-    """Extracts a concise tip from Notes/Tips/Walkthrough/Strategy sections."""
-    m = _RE_SECTION.search(wikitext)
+def _extract_section(
+    wikitext: str, heading_re: re.Pattern[str], max_chars: int = 200
+) -> str:
+    """Extracts and cleans the body of the first level-2 section matching `heading_re`."""
+    m = heading_re.search(wikitext)
     if not m:
         return ""
     rest = wikitext[m.end() :]
     nxt = _RE_NEXT_HEADING.search(rest)
     sec = rest[: nxt.start()] if nxt else rest
     return strip_wikitext(sec, max_chars=max_chars)
+
+
+def _extract_wiki_tip(wikitext: str, max_chars: int = 200) -> str:
+    """Extracts a concise tip from Notes/Tips/Walkthrough/Strategy sections."""
+    return _extract_section(wikitext, _RE_SECTION, max_chars=max_chars)
 
 
 def _extract_lead_summary(wikitext: str, max_chars: int = 180) -> str:
@@ -630,9 +690,11 @@ def export_knowledge(
                 dungeons[dname] = d_entry
                 dungeon_is_classic[dname] = is_classic
 
+            redirects: dict[str, str] = {}
             for rtitle, rtarget in wiki_con.execute(
                 "SELECT title, redirect FROM pages WHERE redirect != ''"
             ):
+                redirects[rtitle] = rtarget
                 if rtitle in WOTLK_335A_DUNGEONS and rtarget in dungeons and rtitle not in dungeons:
                     dungeons[rtitle] = dict(dungeons[rtarget])
             # Mirror canonical short/long pairs (e.g. Stockade <-> The Stockade).
@@ -642,11 +704,83 @@ def export_knowledge(
                 elif b in dungeons and a not in dungeons:
                     dungeons[a] = dict(dungeons[b])
 
+        # 3) 3.3.5a Boss strategies (pinned to creatures existing in atlas.sqlite).
+        bosses: dict[str, dict[str, Any]] = {}
+        if wiki_con is not None:
+            boss_names = {
+                r[0]
+                for r in atlas_con.execute(
+                    "SELECT DISTINCT name FROM creatures "
+                    "WHERE rank IN (1, 3) AND name != ''"
+                )
+            }
+            alias_to_boss: dict[str, set[str]] = {}
+            for bname in boss_names:
+                alias_to_boss.setdefault(bname, set()).add(bname)
+                cur_t = bname
+                for _ in range(2):
+                    nxt_t = redirects.get(cur_t, "")
+                    if not nxt_t or nxt_t == cur_t:
+                        break
+                    alias_to_boss.setdefault(nxt_t, set()).add(bname)
+                    cur_t = nxt_t
+
+            boss_rank: dict[str, tuple[int, int]] = {}
+            for title, wikitext in wiki_con.execute(
+                "SELECT title, wikitext FROM pages WHERE redirect = ''"
+            ):
+                if not wikitext:
+                    continue
+                inst = ""
+                is_classic = False
+                if title.endswith(" (tactics)"):
+                    base = title[: -len(" (tactics)")]
+                    prio = 3
+                elif m_inst := _RE_INST_TACTICS.match(title):
+                    base = m_inst.group(1)
+                    inst, _ = _canonical_335a_dungeon(m_inst.group(2), "")
+                    if not inst:
+                        continue
+                    prio = 3
+                elif title.endswith(" (Classic)"):
+                    base = title[: -len(" (Classic)")]
+                    prio = 2
+                    is_classic = True
+                else:
+                    base = title
+                    prio = 1
+
+                matched_names = alias_to_boss.get(base)
+                if not matched_names:
+                    continue
+                if is_classic and _RE_REMOVED_PRE_CATA.search(wikitext):
+                    continue
+
+                abilities = _extract_section(wikitext, _RE_BOSS_ABILITIES, max_chars=360)
+                strategy = _extract_section(wikitext, _RE_BOSS_STRATEGY, max_chars=420)
+                if not strategy and not (prio == 3 and abilities):
+                    continue
+
+                b_entry: dict[str, Any] = {}
+                if abilities:
+                    b_entry["abilities"] = abilities
+                if strategy:
+                    b_entry["strategy"] = strategy
+
+                for bname in matched_names:
+                    key = f"{inst}::{bname}" if inst else bname
+                    score = (prio, 1 if base == bname else 0)
+                    if score <= boss_rank.get(key, (0, 0)):
+                        continue
+                    bosses[key] = dict(b_entry)
+                    boss_rank[key] = score
+
         payload = {
             "version": 1,
             "quests": quests,
             "zones": zones,
             "dungeons": dungeons,
+            "bosses": bosses,
         }
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
@@ -677,7 +811,8 @@ def main() -> int:
     size_mb = args.out.stat().st_size / (1024 * 1024)
     print(
         f"exported {len(data['quests'])} quests, {len(data['zones'])} zones, "
-        f"{len(data['dungeons'])} dungeons -> {args.out} ({size_mb:.2f} MiB)"
+        f"{len(data['dungeons'])} dungeons, {len(data['bosses'])} bosses "
+        f"-> {args.out} ({size_mb:.2f} MiB)"
     )
     return 0
 
