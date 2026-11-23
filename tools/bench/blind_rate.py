@@ -250,7 +250,12 @@ def cmd_summary(args) -> int:
         print(f"No blind ratings yet in {args.ratings}")
         return 0
     bt = pairwise_ranker.fit_bradley_terry(rows, anchor_label=args.anchor)
-    print(f"\n== Blind Bradley-Terry ratings ({bt['comparisons']} pairs, anchor={bt['anchor']}={pairwise_ranker.HUMAN_ANCHOR_RATING:.0f}) ==")
+    anchor_str = (
+        f"anchor={bt['anchor']}={pairwise_ranker.HUMAN_ANCHOR_RATING:.0f}"
+        if bt.get("anchored")
+        else f"UNANCHORED (anchor '{bt['anchor']}' missing from ratings)"
+    )
+    print(f"\n== Blind Bradley-Terry ratings ({bt['comparisons']} pairs, {anchor_str}) ==")
     for name, info in sorted(bt["ratings"].items(), key=lambda kv: -kv[1]["rating"]):
         print(
             f"  {name:20s}: {info['rating']:6.1f}  "

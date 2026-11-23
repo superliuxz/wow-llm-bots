@@ -261,6 +261,7 @@ def _run_layer_b_ranking(
             "ci_low": None,
             "ci_high": None,
             "human_anchor_rating": pairwise_ranker.HUMAN_ANCHOR_RATING,
+            "anchored": False,
             "beats_current_outside_ci": False,
             "delta_vs_current": None,
             "ratings": {},
@@ -283,6 +284,7 @@ def _run_layer_b_ranking(
         "ci_low": cand_info["ci_low"] if cand_info else None,
         "ci_high": cand_info["ci_high"] if cand_info else None,
         "human_anchor_rating": pairwise_ranker.HUMAN_ANCHOR_RATING,
+        "anchored": bool(bt.get("anchored", False)),
         "beats_current_outside_ci": beats,
         "delta_vs_current": delta_info if "current" in bt["ratings"] else None,
         "ratings": bt["ratings"],
@@ -437,9 +439,14 @@ def score_soak(
 def format_score_report(res: dict[str, Any]) -> str:
     r = res["ranking"]
     if res["rating"] is not None:
+        anchor_note = (
+            f"human anchor={r['human_anchor_rating']:.0f}"
+            if r.get("anchored", True)
+            else "UNANCHORED (human anchor missing)"
+        )
         rat_str = (
             f"RATING: {res['rating']:.1f} [95% CI {res['ci_low']:.1f}..{res['ci_high']:.1f}] "
-            f"(human anchor={r['human_anchor_rating']:.0f}, mode={r['mode']}, n={r['comparisons']})"
+            f"({anchor_note}, mode={r['mode']}, n={r['comparisons']})"
         )
     else:
         rat_str = f"RATING: unrated ({r['mode']}; run blind_rate.py or pass --judge)"

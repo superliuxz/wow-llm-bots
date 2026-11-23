@@ -30,6 +30,9 @@ uint32_t ToEpollEvents(int mode) {
 }  // namespace
 
 MessagePumpEpoll::FdWatchController::~FdWatchController() {
+  if (destroyed_flag_) {
+    *destroyed_flag_ = true;
+  }
   StopWatchingFileDescriptor();
 }
 
@@ -169,16 +172,27 @@ void MessagePumpEpoll::Dispatch(int fd, uint32_t events) {
   }
   if (write_ready && read_ready) {
     bool watcher_destroyed = false;
-    bool* prev_flag = watcher->destroyed_flag_;
+    bool* prev_watcher_flag = watcher->destroyed_flag_;
     watcher->destroyed_flag_ = &watcher_destroyed;
+    bool controller_destroyed = false;
+    bool* prev_controller_flag = controller->destroyed_flag_;
+    controller->destroyed_flag_ = &controller_destroyed;
     watcher->OnFileCanWriteWithoutBlocking(fd);
+    if (controller_destroyed && prev_controller_flag) {
+      *prev_controller_flag = true;
+    } else if (!controller_destroyed) {
+      controller->destroyed_flag_ = prev_controller_flag;
+    }
     if (watcher_destroyed) {
-      if (prev_flag) {
-        *prev_flag = true;
+      if (prev_watcher_flag) {
+        *prev_watcher_flag = true;
       }
       return;
     }
-    watcher->destroyed_flag_ = prev_flag;
+    watcher->destroyed_flag_ = prev_watcher_flag;
+    if (controller_destroyed) {
+      return;  // Controller destroyed by the write callback.
+    }
     if (persistent) {
       it = controllers_.find(fd);
       if (it == controllers_.end() || it->second.get() != controller ||

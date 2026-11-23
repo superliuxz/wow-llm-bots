@@ -316,17 +316,24 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   } else {
     state.order_quiet_since = base::TimeTicks();
   }
-  const bool order_woke = DispatchOrderEval(bot, &state, ord, received_at);
   const bool trig_covered =
       trig && ord.covered && ord.order_index >= 0 &&
       static_cast<size_t>(ord.order_index) < state.orders.orders().size() &&
       OrderCoversWake(
           state.orders.orders()[static_cast<size_t>(ord.order_index)],
           trig->kinds, trig->attackers);
-  if (order_woke) {
-    if (trig && !trig_covered) {
-      WakeBot(bot, trig->urgency, trig->reason);
+  // If both an order wake and an uncovered snapshot trigger fire on the same
+  // snapshot, merge the trigger's reason before DispatchOrderEval so a single
+  // WakeBot/LLM call carries both reasons instead of double-waking.
+  if (!ord.wake_reason.empty() && trig && !trig_covered &&
+      !trig->reason.empty()) {
+    if (std::find(state.pending_reasons.begin(), state.pending_reasons.end(),
+                  trig->reason) == state.pending_reasons.end()) {
+      state.pending_reasons.push_back(trig->reason);
     }
+  }
+  const bool order_woke = DispatchOrderEval(bot, &state, ord, received_at);
+  if (order_woke) {
     return;
   }
   if (trig && !trig_covered) {

@@ -2049,5 +2049,114 @@ TEST(BotLoopTest, LastOutcomeDeliveredOnceAndKnowledgeInjected) {
             std::string::npos);
 }
 
+TEST(BotLoopTest, OrderWakeAndTriggerCoalesceIntoSingleCall) {
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "rules";
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& c) { sent.push_back(c); });
+  const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
+
+  // First snapshot installs a standing order that wakes on `Fire`.
+  pb::Snapshot s1 = MakeLiveSnap("Gatda", 1, t0);
+  s1.base.self.in_combat = true;
+  s1.base.self.unit.health_pct = 100;
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 1\norder: in Fire -> wake\nexpect: none\nwatch: none\nlook: 60");
+  ASSERT_EQ(brain.size(), 0u);
+
+  // Next snapshot triggers BOTH the standing-order wake (`in Fire`) AND an
+  // uncovered snapshot trigger (stunned). BotLoop must coalesce both into a
+  // single LLM call carrying both reasons (no double-wake).
+  pb::Snapshot s2 = s1;
+  s2.seq = 2;
+  s2.base.self.control.stunned = true;
+  pb::Area fire;
+  fire.guid = "area:fire";
+  fire.name = "Fire";
+  fire.inside_me = true;
+  fire.hostile = true;
+  s2.base.nearby.areas.push_back(fire);
+  loop.OnSnapshot(s2, t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("in Fire"), std::string::npos);
+  EXPECT_NE(brain.front_request().user.find("lost control (stunned)"),
+            std::string::npos);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  // No second call queued for the same snapshot.
+  EXPECT_EQ(brain.size(), 0u);
+}
+
+TEST(BotLoopTest, EdgeTriggerNotDroppedDuringOrderRefusalBackoff) {
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "rules";
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& c) { sent.push_back(c); });
+  const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
+
+  // Install a standing order `in Fire -> out of it`.
+  pb::Snapshot s1 = MakeLiveSnap("Gatda", 1, t0);
+  s1.base.self.in_combat = true;
+  s1.base.self.unit.health_pct = 100;
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 1\norder: in Fire -> out of it\nexpect: none\nwatch: none\nlook: "
+      "60");
+
+  // Trigger the order -> sends act command_id.
+  pb::Snapshot s2 = s1;
+  s2.seq = 2;
+  pb::Area fire;
+  fire.guid = "area:fire";
+  fire.name = "Fire";
+  fire.inside_me = true;
+  fire.hostile = true;
+  s2.base.nearby.areas.push_back(fire);
+  loop.OnSnapshot(s2, t0 + base::Seconds(1));
+  uint32_t act_id1 = 0;
+  for (const pb::Command& c : sent) {
+    if (c.act) {
+      act_id1 = c.command_id;
+    }
+  }
+  ASSERT_NE(act_id1, 0u);
+
+  // First failure wakes immediately (order_wakes == 1, backoff == 0).
+  pb::ImmediateEvent err1;
+  err1.bot = "Gatda";
+  err1.event.error.emplace().command_id = act_id1;
+  err1.event.error->text = "no path";
+  loop.OnEvent(std::move(err1), t0 + base::Seconds(2));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 1\norder: in Fire -> out of it\nexpect: none\nwatch: none\nlook: "
+      "60");
+
+  // Fire again to arm a second act.
+  pb::Snapshot s3 = s2;
+  s3.seq = 3;
+  loop.OnSnapshot(s3, t0 + base::Seconds(3));
+  ASSERT_EQ(brain.size(), 0u);
+
+  // Let the second act time out (order_wakes == 2 -> backoff 2 s, deferred)
+  // on the exact same snapshot where an uncovered edge trigger (stunned) fires.
+  pb::Snapshot s4 = s2;
+  s4.seq = 4;
+  s4.base.self.control.stunned = true;
+  loop.OnSnapshot(s4, t0 + base::Seconds(30));
+  // Edge trigger must wake the bot instead of being dropped during backoff.
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("lost control (stunned)"),
+            std::string::npos);
+}
+
 }  // namespace
 }  // namespace harness

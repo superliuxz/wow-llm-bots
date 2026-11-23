@@ -64,6 +64,41 @@ class SoakSuitesTest(unittest.TestCase):
             self.assertIn("has_traced_bots", failed)
             self.assertIn("has_decisions", failed)
 
+    def test_merge_trace_dirs_namespaces_bots_per_run_preserving_stuck_detection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            t = pathlib.Path(tmp)
+            # Run 0: Loada is stuck at (0, 0) on map 1.
+            # Run 1: Loada is stuck at (500, 500) on map 0.
+            # Without per-run namespacing, merging would fake 707 yd movement.
+            for run_idx, (m_id, xy, t0) in enumerate(((1, 0.0, 1000), (0, 500.0, 60000))):
+                bdir = t / f"run{run_idx}" / "bot" / "Loada"
+                bdir.mkdir(parents=True)
+                rows = [
+                    json.dumps({
+                        "kind": "sample", "role": "bot", "name": "Loada",
+                        "t_ms": t0 + 1000 * i, "map": m_id, "x": xy, "y": xy, "z": 0.0,
+                        "facing": 0.0, "moving": False, "jumping": False, "in_combat": False,
+                        "dead": False, "in_town": False, "level": 1, "xp": 0,
+                        "hp_pct": 100.0, "mana_pct": 100.0, "casting": "", "target": "",
+                        "attackers": 0,
+                    })
+                    for i in range(5)
+                ]
+                (bdir / "2026-11-23.jsonl").write_text("\n".join(rows) + "\n")
+            merged = t / "merged"
+            soak_case._merge_trace_dirs([t / "run0", t / "run1"], merged)
+            stats = soak_case._aggregate_run_stats([
+                {"run_stats": {"scenario": "a", "bots": 1, "elapsed_min": 1.0, "decisions": 5, "do_p50_ms": 50.0, "do_p95_ms": 100.0}},
+                {"run_stats": {"scenario": "b", "bots": 1, "elapsed_min": 1.0, "decisions": 7, "do_p50_ms": 70.0, "do_p95_ms": 120.0}},
+            ])
+            self.assertEqual(stats["bots"], 2)
+            self.assertEqual(stats["decisions"], 12)
+            res = soak_scorer.score_soak(merged, run_stats=stats)
+            self.assertEqual(res["progress"]["traced_bots"], 2)
+            self.assertEqual(res["progress"]["stuck_bots"], 2)
+            self.assertEqual(res["progress"]["moved_bots"], 0)
+            self.assertFalse(res["guardrails_ok"])
+
 
 if __name__ == "__main__":
     unittest.main()

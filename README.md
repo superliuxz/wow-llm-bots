@@ -50,7 +50,7 @@ more. It acts on this checkout's processes only (by their pid files), never by n
 |---|---|
 | `tools/wlb check` | fast everyday checks before review or commit: format, RULES.md reply form, trigger table, default build + unit tests, snapshot examples, includes, screen goldens, bench/loop tests |
 | `tools/wlb check sanitizers` | build and run unit tests under ASan+UBSan, TSan, and MSan (`--sanitizers` / `--san` on `wlb check` runs everything) |
-| `tools/wlb check format\|rules\|includes\|snapshots\|triggers\|goldens\|bench_tests\|sanitizers` | one of those (`--fix` for format, rules, and includes) |
+| `tools/wlb check format\|rules\|includes\|snapshots\|triggers\|goldens\|sanitizers` | one of those (`--fix` for format, rules, and includes) |
 | `tools/wlb build common [asan\|tsan\|msan\|server]` | build `common/` (and the harness) and run the unit tests; `server` is the copy linked into AzerothCore |
 | `tools/wlb build server [--test]` | build and install AzerothCore with our module into `out/server` (`--test`: the test server in `out/server-test`, with the test-only fixtures) |
 | `tools/wlb test unit\|e2e\|perf\|eval [NAME...]` | the four test targets: `unit` (gtest, `--filter`, `--variant`), `e2e` (live scenarios on the isolated test server: own build, port 8086 and databases reset for every run; the play server keeps running), `perf` (measurements checked against `tools/wlblib/cases/perf_baselines.json` and hard limits; `--update-baselines` records a run, `--capture` records the brain replay's input), `eval`; `--list` shows the cases |

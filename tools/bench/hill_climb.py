@@ -375,23 +375,40 @@ def _revert_to(base_ref: str, *, allow_any_files: bool = False) -> bool:
             file=sys.stderr,
         )
         return False
-    tracked = [
-        p for p in _git("diff", "--name-only", base_ref).splitlines() if p.strip()
+    added = [
+        p
+        for p in _git("diff", "--name-only", "--diff-filter=A", base_ref).splitlines()
+        if p.strip()
+    ]
+    modified_or_deleted = [
+        p
+        for p in _git("diff", "--name-only", "--diff-filter=a", base_ref).splitlines()
+        if p.strip()
     ]
     untracked = [
         p
         for p in _git("ls-files", "--others", "--exclude-standard").splitlines()
         if p.strip()
     ]
-    if tracked:
-        subprocess.run(
-            ["git", "checkout", base_ref, "--", *tracked], cwd=ROOT, check=False
+    ok = True
+    if added:
+        r = subprocess.run(
+            ["git", "rm", "-f", "--", *added], cwd=ROOT, check=False
         )
+        ok = ok and (r.returncode == 0)
+    if modified_or_deleted:
+        r = subprocess.run(
+            ["git", "checkout", base_ref, "--", *modified_or_deleted],
+            cwd=ROOT,
+            check=False,
+        )
+        ok = ok and (r.returncode == 0)
     if untracked:
-        subprocess.run(
+        r = subprocess.run(
             ["git", "clean", "-fd", "--", *untracked], cwd=ROOT, check=False
         )
-    return True
+        ok = ok and (r.returncode == 0)
+    return ok
 
 
 def _load_ledger() -> list[dict]:
@@ -630,6 +647,13 @@ def cmd_eval_candidate(args) -> int:
                 _revert_to(base_ref, allow_any_files=args.allow_any_files)
             return 1
 
+    if (args.min_eval_passed is None) != (args.eval_passed is None):
+        print(
+            "ABORT: --min-eval-passed and --eval-passed must be passed together.",
+            file=sys.stderr,
+        )
+        return 2
+
     xp_floor = float(args.min_xp_per_hour)
     max_deaths = int(args.max_deaths_per_run) * max(1, int(args.runs))
     round_num = (entries[-1]["round"] + 1) if entries else 1
@@ -696,9 +720,8 @@ def cmd_eval_candidate(args) -> int:
         )
         print(
             f"\n== ROUND {round_num}: PENDING BLIND RATINGS (candidate_id={cand_id}, gates=PASS) ==\n"
-            f"  1. Rate candidate vs baseline (include --include-human-anchors for external/multi-human judging):\n"
+            f"  1. Rate candidate vs baseline (add --include-human-anchors for external/multi-human judging):\n"
             f"     tools/bench/blind_rate.py rate "
-            f"--include-human-anchors "
             f"--source human={args.human_dir} "
             f"--source current={baseline_dir} "
             f"--source candidate={pending_dir / 'traces' if pending_dir else VAR / 'soak_traces'} "
@@ -726,8 +749,12 @@ def cmd_eval_candidate(args) -> int:
             verify_hash=lock_file,
             suite=args.suite,
             check_guardrails=False,
+            min_eval_passed=args.min_eval_passed,
+            eval_passed=args.eval_passed,
         )
         confirm_ok, _ = _check_fixed_guardrails(confirm, xp_floor, max_deaths)
+        if not args.allow_fallback and confirm.get("baseline_mode") != "human_baseline":
+            confirm_ok = False
         confirm_beats = bool(confirm.get("ranking", {}).get("beats_current_outside_ci"))
         if not (confirm_ok and confirm_beats):
             print("CONFIRMATION FAILED: reverting candidate", file=sys.stderr)
@@ -745,8 +772,15 @@ def cmd_eval_candidate(args) -> int:
             verify_hash=lock_file,
             suite="heldout",
             check_guardrails=False,
+            min_eval_passed=args.min_eval_passed,
+            eval_passed=args.eval_passed,
         )
         heldout_ok, ho_failures = _check_fixed_guardrails(ho, xp_floor, max_deaths)
+        if not args.allow_fallback and ho.get("baseline_mode") != "human_baseline":
+            heldout_ok = False
+            ho_failures.append(
+                f"heldout ran in {ho.get('baseline_mode')} instead of human_baseline"
+            )
         if not heldout_ok:
             print(f"HELD-OUT GATE FAILED ({ho_failures}): reverting candidate", file=sys.stderr)
             improved = False
@@ -862,7 +896,7 @@ def cmd_score_candidate(args) -> int:
 
     confirm_ok = None
     if improved and not getattr(args, "no_confirm", False):
-        print("\n== Candidate beat current outside 95% CI; running confirmation soak ==")
+        print("\n== Candidate beat current outside 95% CI; running confirmation guardrail soak ==")
         confirm = soak_case.run_soak(
             minutes=minutes,
             runs=runs,
@@ -874,6 +908,8 @@ def cmd_score_candidate(args) -> int:
             verify_hash=lock_file,
             suite=args.suite,
             check_guardrails=False,
+            min_eval_passed=meta.get("min_eval_passed"),
+            eval_passed=meta.get("eval_passed"),
         )
         confirm_ok, _ = _check_fixed_guardrails(confirm, xp_floor, max_deaths)
         if not allow_fallback and confirm.get("baseline_mode") != "human_baseline":
@@ -894,6 +930,8 @@ def cmd_score_candidate(args) -> int:
             verify_hash=lock_file,
             suite="heldout",
             check_guardrails=False,
+            min_eval_passed=meta.get("min_eval_passed"),
+            eval_passed=meta.get("eval_passed"),
         )
         heldout_ok, ho_failures = _check_fixed_guardrails(ho, xp_floor, max_deaths)
         if not allow_fallback and ho.get("baseline_mode") != "human_baseline":

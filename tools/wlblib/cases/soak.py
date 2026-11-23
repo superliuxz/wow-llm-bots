@@ -162,6 +162,8 @@ def _run_once(
     use_judge: bool,
     baseline_trace_dir: pathlib.Path | None = None,
     blind_ratings_path: pathlib.Path | None = None,
+    min_eval_passed: int | None = None,
+    eval_passed: int | None = None,
 ) -> dict:
     scenario = SCENARIOS[scenario_name]
     trace_dir = VAR / "soak_traces"
@@ -276,6 +278,8 @@ def _run_once(
                 baseline_trace_dir=baseline_trace_dir,
                 blind_ratings_path=blind_ratings_path,
                 use_judge=use_judge,
+                min_eval_passed=min_eval_passed,
+                eval_passed=eval_passed,
             )
             res["scenario"] = scenario_name
             return res
@@ -298,7 +302,13 @@ def _resolve_scenarios(suite: str, runs: int) -> list[str]:
 
 
 def _merge_trace_dirs(src_dirs: list[pathlib.Path], dest_dir: pathlib.Path) -> None:
-    """Merges per-run `<src>/<role>/<name>/*.jsonl` into `dest_dir` without overwriting."""
+    """Merges per-run `<src>/<role>/<name>/*.jsonl` into `dest_dir`.
+
+    Bot character directories are namespaced per run (`<name>_r00`, `<name>_r01`)
+    so distinct scenarios reusing `Loada..Loadj` across different maps/levels
+    never concatenate into one trajectory (preserving per-run duration, stuck
+    distance, XP/death deltas, and population stats).
+    """
     shutil.rmtree(dest_dir, ignore_errors=True)
     dest_dir.mkdir(parents=True, exist_ok=True)
     for run_idx, src in enumerate(src_dirs):
@@ -311,7 +321,8 @@ def _merge_trace_dirs(src_dirs: list[pathlib.Path], dest_dir: pathlib.Path) -> N
             for cdir in sorted(rdir.iterdir()):
                 if not cdir.is_dir():
                     continue
-                out_cdir = dest_dir / role / cdir.name
+                char_name = f"{cdir.name}_r{run_idx:02d}" if role == "bot" else cdir.name
+                out_cdir = dest_dir / role / char_name
                 out_cdir.mkdir(parents=True, exist_ok=True)
                 for f in sorted(cdir.glob("*.jsonl")):
                     target = out_cdir / f"{f.stem}_run{run_idx:02d}{f.suffix}"
@@ -326,7 +337,9 @@ def _aggregate_run_stats(results: list[dict]) -> dict:
     p95s = [float(s["do_p95_ms"]) for s in stats_list if s.get("do_p95_ms", 0) > 0]
     return {
         "scenario": "+".join(str(s.get("scenario", "soak")) for s in stats_list),
-        "bots": max(int(s.get("bots", 0)) for s in stats_list),
+        # Multi-run merged traces namespace bots per run (`Loada_r00`, `Loada_r01`),
+        # so total traced bot-runs equals the sum across runs.
+        "bots": sum(int(s.get("bots", 0)) for s in stats_list),
         "elapsed_min": sum(float(s.get("elapsed_min", 0.0)) for s in stats_list),
         "decisions": sum(int(s.get("decisions", 0)) for s in stats_list),
         "max_wakes_per_min": max(float(s.get("max_wakes_per_min", 0.0)) for s in stats_list),
@@ -411,9 +424,11 @@ def run_soak(
                     scenario_name=sc_name,
                     minutes=minutes,
                     human_dir=human_dir,
-                    use_judge=use_judge,
+                    use_judge=(use_judge if len(scenarios) == 1 else False),
                     baseline_trace_dir=baseline_trace_dir,
                     blind_ratings_path=blind_ratings_path,
+                    min_eval_passed=(min_eval_passed if len(scenarios) == 1 else None),
+                    eval_passed=(eval_passed if len(scenarios) == 1 else None),
                 )
                 results.append(res)
                 if len(scenarios) > 1:
@@ -434,30 +449,12 @@ def run_soak(
                     f"moved={p['moved_bots']}/{p['traced_bots']}"
                 )
 
-        if len(scenarios) > 1:
-            _merge_trace_dirs(per_run_dirs, VAR / "soak_traces")
-            merged_stats = _aggregate_run_stats(results)
-            agg = soak_scorer.score_soak(
-                VAR / "soak_traces",
-                run_stats=merged_stats,
-                human_dir=human_dir,
-                baseline_trace_dir=baseline_trace_dir,
-                blind_ratings_path=blind_ratings_path,
-                use_judge=use_judge,
-                min_eval_passed=min_eval_passed,
-                eval_passed=eval_passed,
-            )
-            agg["run_ratings"] = [r.get("rating") for r in results]
-            agg["scenarios"] = [r.get("scenario", "soak") for r in results]
-            agg["guardrails_ok"] = bool(agg["guardrails_ok"]) and all(
-                r["guardrails_ok"] for r in results
-            )
-        else:
-            agg = _aggregate_results(results)
-            if min_eval_passed is not None and eval_passed is not None:
+            if len(scenarios) > 1:
+                _merge_trace_dirs(per_run_dirs, VAR / "soak_traces")
+                merged_stats = _aggregate_run_stats(results)
                 agg = soak_scorer.score_soak(
                     VAR / "soak_traces",
-                    run_stats=agg.get("run_stats", {}),
+                    run_stats=merged_stats,
                     human_dir=human_dir,
                     baseline_trace_dir=baseline_trace_dir,
                     blind_ratings_path=blind_ratings_path,
@@ -465,6 +462,13 @@ def run_soak(
                     min_eval_passed=min_eval_passed,
                     eval_passed=eval_passed,
                 )
+                agg["run_ratings"] = [r.get("rating") for r in results]
+                agg["scenarios"] = [r.get("scenario", "soak") for r in results]
+                agg["guardrails_ok"] = bool(agg["guardrails_ok"]) and all(
+                    r["guardrails_ok"] for r in results
+                )
+            else:
+                agg = results[0]
     say(soak_scorer.format_score_report(agg))
 
     if check_guardrails:

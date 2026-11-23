@@ -396,21 +396,67 @@ class HillClimbSafeguardsTest(unittest.TestCase):
                 rc = hill_climb.cmd_score_candidate(args)
             self.assertEqual(rc, 1)  # Rejected because baseline_mode != human_baseline.
 
+            # Now test human_baseline passing -> runs confirmation & heldout gates!
+            (pending / "traces").mkdir(parents=True, exist_ok=True)
+            (pending / "meta.json").write_text(json.dumps({
+                "round": 3,
+                "suite": "varied",
+                "hypothesis": "test2",
+                "base_ref": "HEAD",
+                "xp_floor": 1000.0,
+                "max_deaths": 5,
+                "allow_fallback": False,
+                "minutes": 1.0,
+                "runs": 1,
+                "run_stats": {"decisions": 10},
+            }))
+            fake_score_ok = dict(fake_score, baseline_mode="human_baseline")
+            soak_calls: list[str] = []
+
+            def fake_run_soak(**kwargs):
+                soak_calls.append(kwargs["suite"])
+                return {
+                    "guardrails_ok": True,
+                    "baseline_mode": "human_baseline",
+                    "progress": {"xp_per_hour": 5000.0, "deaths": 0},
+                    "ranking": {"beats_current_outside_ci": True},
+                }
+
+            with mock.patch.object(hill_climb, "PENDING_CANDIDATE_ROOT", t / "pending"), \
+                 mock.patch.object(hill_climb, "BASELINE_TRACES_ROOT", t / "base"), \
+                 mock.patch.object(hill_climb, "LEDGER", t / "ledger.jsonl"), \
+                 mock.patch.object(hill_climb, "_verify_all_locks", return_value=(True, "ok")), \
+                 mock.patch.object(hill_climb.soak_scorer, "score_soak", return_value=fake_score_ok), \
+                 mock.patch.object(hill_climb.soak_case, "run_soak", side_effect=fake_run_soak), \
+                 mock.patch.object(hill_climb, "_save_baseline_traces"), \
+                 mock.patch.object(hill_climb, "_commit_kept_changes"), \
+                 mock.patch.object(hill_climb, "_git", return_value="deadbeef"):
+                rc2 = hill_climb.cmd_score_candidate(args)
+            self.assertEqual(rc2, 0)
+            self.assertEqual(soak_calls, ["varied", "heldout"])
+
     def test_cli_subcommands_stubbed(self):
         from unittest import mock
+        import argparse
 
-        for argv, target_fn in (
-            (["hill_climb.py", "status"], "cmd_status"),
-            (["hill_climb.py", "init", "--minutes", "1"], "cmd_init"),
-            (["hill_climb.py", "calibrate"], "cmd_calibrate"),
-            (["hill_climb.py", "eval-candidate", "--hypothesis", "h", "--min-eval-passed", "40", "--eval-passed", "42"], "cmd_eval_candidate"),
-            (["hill_climb.py", "score-candidate", "--no-confirm", "--no-heldout"], "cmd_score_candidate"),
-        ):
-            with mock.patch.object(sys, "argv", argv), \
-                 mock.patch.object(hill_climb, target_fn, return_value=0) as m_fn:
-                rc = hill_climb.main()
-            self.assertEqual(rc, 0)
-            m_fn.assert_called_once()
+        with tempfile.TemporaryDirectory() as tmp:
+            t = pathlib.Path(tmp)
+            # cmd_status on empty ledger succeeds.
+            with mock.patch.object(hill_climb, "LEDGER", t / "ledger.jsonl"):
+                self.assertEqual(hill_climb.cmd_status(argparse.Namespace()), 0)
+            # cmd_eval_candidate rejects mismatched --min-eval-passed / --eval-passed.
+            bad_args = argparse.Namespace(
+                hypothesis="h", target="", category="code", minutes=1.0, runs=1,
+                suite="varied", base_ref="HEAD", min_xp_per_hour=1000.0,
+                max_deaths_per_run=5, human_dir=t, blind_ratings=t / "b",
+                lock_file=t / "l", judge=False, allow_fallback=True,
+                allow_any_files=True, no_confirm=True, no_heldout=True,
+                skip_check=True, auto_revert=False, min_eval_passed=40,
+                eval_passed=None,
+            )
+            with mock.patch.object(hill_climb, "_verify_all_locks", return_value=(True, "ok")), \
+                 mock.patch.object(hill_climb, "LEDGER", t / "ledger.jsonl"):
+                self.assertEqual(hill_climb.cmd_eval_candidate(bad_args), 2)
 
 
 if __name__ == "__main__":

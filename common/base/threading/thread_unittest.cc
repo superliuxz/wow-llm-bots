@@ -7,6 +7,7 @@
 
 #include <atomic>
 
+#include "base/memory/raw_ptr.h"
 #include "base/message_loop/message_pump.h"
 #include "base/message_loop/message_pump_epoll.h"
 #include "base/synchronization/waitable_event.h"
@@ -153,8 +154,8 @@ class HandoffWatcher : public MessagePumpEpoll::FdWatcher {
   WaitableEvent done;
 
  private:
-  MessagePumpEpoll::FdWatchController* next_controller_;
-  MessagePumpEpoll::FdWatcher* next_watcher_;
+  raw_ptr<MessagePumpEpoll::FdWatchController> next_controller_;
+  raw_ptr<MessagePumpEpoll::FdWatcher> next_watcher_;
 };
 
 TEST(MessagePumpEpollTest, OneShotReadWriteAndControllerReuse) {

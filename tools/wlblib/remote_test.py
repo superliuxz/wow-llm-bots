@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import select
 import shlex
 import stat
 import subprocess
@@ -286,7 +285,8 @@ class RemoteLibTest(unittest.TestCase):
         self.assertIn("--exclude=.git", rsync_cmd)
         self.assertIn("--", rsync_cmd)
 
-        # Live rsync test with a local sh -c SSH wrapper verifying ~/ expands to $HOME.
+        # Live rsync test calling remote.pull() and remote._rsync_to_remote()
+        # via a local sh -c SSH wrapper, verifying ~/ expansion and spaced paths.
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             fake_home = root / "home"
@@ -295,18 +295,23 @@ class RemoteLibTest(unittest.TestCase):
             src.mkdir(parents=True)
             dst.mkdir(parents=True)
             (src / "hello.txt").write_text("ok\n")
+            (dst / remote.REPO_SENTINEL_REL).write_text("")
+            (dst / "var").mkdir(parents=True)
+            (dst / "var" / "my file.json").write_text('{"x":1}\n')
             wrapper = root / "fake_ssh.sh"
             wrapper.write_text(
                 f"#!/bin/sh\nexport HOME={shlex.quote(str(fake_home))}\nshift\nexec sh -c \"$*\"\n"
             )
             wrapper.chmod(0o755)
-            res = subprocess.run(
-                ["rsync", "-a", "-e", str(wrapper), "--", f"{src}/", "fakehost:~/wow-llm-bots/"],
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(res.returncode, 0, res.stderr)
+            live_spec = remote.RemoteSpec(name="w", ssh="fakehost", repo="~/wow-llm-bots")
+            pulled = root / "pulled.json"
+            with mock.patch.object(remote, "_rsync_ssh_cmd", return_value=str(wrapper)), \
+                 mock.patch.object(remote, "get_remote", return_value=live_spec), \
+                 mock.patch.object(remote, "_verify_remote_sync_target"):
+                remote._rsync_to_remote(live_spec, repo=src)
+                remote.pull("w", "var/my file.json", pulled)
             self.assertTrue((dst / "hello.txt").is_file())
+            self.assertEqual(pulled.read_text(), '{"x":1}\n')
             self.assertFalse((root / "~").exists())
 
         with mock.patch("subprocess.run") as m_sub:

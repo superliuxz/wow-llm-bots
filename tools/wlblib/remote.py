@@ -476,10 +476,10 @@ def pull(name: str, remote_rel: str, local_path: str | pathlib.Path) -> None:
     dest = pathlib.Path(local_path)
     dest.parent.mkdir(parents=True, exist_ok=True)
     # Omit -s (--protect-args) so leading ~/ in spec.repo expands on the remote
-    # shell; shell-quote remote_rel so spaces/special chars stay safe.
+    # shell; rsync >= 3.2.4 (--new-args) escapes spaces/metachars natively.
     run([
         "rsync", "-a", "-e", _rsync_ssh_cmd(), "--",
-        f"{spec.ssh}:{spec.repo}/{shlex.quote(remote_rel)}", str(dest),
+        f"{spec.ssh}:{spec.repo}/{remote_rel}", str(dest),
     ])
     say(f"remote {spec.name}: pulled {remote_rel} -> {dest}")
 

@@ -246,9 +246,9 @@ in `FixtureLoader` + `llmtest group`/`gear`/`tele`:
   against an agent running as the same Unix user (it could read/overwrite it or run under `script`);
   protection comes from the repo rule plus the tracked `config/scorer-lock.sha256` diff (for a real
   OS barrier, keep the passphrase under a different Unix user or a hardware-key prompt).
-- **Recording human sessions** (5 Hz observer-parity + explicit events):
+- **Recording human sessions** (5 Hz observer-parity + explicit events; use an explicit absolute path since AzerothCore `.conf` files do not expand `~` or `$HOME`):
   ```ini
-  LlmBrain.TraceDir = "$HOME/.local/share/wow-llm-bots/human_baseline"
+  LlmBrain.TraceDir = "/path/to/home/.local/share/wow-llm-bots/human_baseline"
   LlmBrain.ObserveHumans = 1
   ```
 - **A round** (on a branch, while not playing): `hill_climb.py init --minutes 5 --runs 2` once;

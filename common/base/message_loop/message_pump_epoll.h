@@ -37,6 +37,7 @@ class MessagePumpEpoll : public MessagePump {
 
    private:
     friend class MessagePumpEpoll;
+    // Stack-local lifetime sentinel during Dispatch (not a RawPtrTarget).
     bool* destroyed_flag_ = nullptr;
   };
 
@@ -59,6 +60,8 @@ class MessagePumpEpoll : public MessagePump {
     int mode_ = 0;
     bool persistent_ = false;
     uint64_t watch_id_ = 0;
+    // Stack-local lifetime sentinel during Dispatch (not a RawPtrTarget).
+    bool* destroyed_flag_ = nullptr;
   };
 
   MessagePumpEpoll();

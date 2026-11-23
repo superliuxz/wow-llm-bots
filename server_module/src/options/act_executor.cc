@@ -1645,15 +1645,31 @@ ActStartResult StartAct(Player* bot,
     }
 
     case pb::Command_Act::JUMP: {
-      // Non-zero horizontal step avoids MoveSplineInit's isOrientationOnly
-      // 1 ms clamp when start == end.
+      if (bot->HasUnitState(UNIT_STATE_ROOT | UNIT_STATE_STUNNED |
+                            UNIT_STATE_CONFUSED | UNIT_STATE_FLEEING)) {
+        return {.error = "cannot jump right now"};
+      }
+      // Match real WoW jump airborne time (~0.83 s for speedZ = 8.0 yd/s under
+      // 19.29 yd/s^2 gravity) while keeping SegLength > 0 so MoveSplineInit
+      // does not clamp to a 1 ms orientation-only spline.
+      constexpr float kJumpSpeedZ = 8.0f;
+      constexpr float kJumpAirTimeS = 0.83f;
       const float o = bot->GetOrientation();
-      const float jx = bot->GetPositionX() + 0.5f * std::cos(o);
-      const float jy = bot->GetPositionY() + 0.5f * std::sin(o);
+      float step_yd = 0.5f;
+      float jx = bot->GetPositionX() + step_yd * std::cos(o);
+      float jy = bot->GetPositionY() + step_yd * std::sin(o);
       float jz = bot->GetPositionZ();
       bot->UpdateAllowedPositionZ(jx, jy, jz);
-      bot->GetMotionMaster()->MoveJump(jx, jy, jz, bot->GetSpeed(MOVE_RUN),
-                                       8.0f);
+      if (std::abs(jz - bot->GetPositionZ()) > 1.5f ||
+          !bot->IsWithinLOS(jx, jy, jz + 0.5f)) {
+        // Blocked by wall or cliff: tiny in-place hop without leaving ledge.
+        step_yd = 0.1f;
+        jx = bot->GetPositionX() + step_yd * std::cos(o);
+        jy = bot->GetPositionY() + step_yd * std::sin(o);
+        jz = bot->GetPositionZ();
+      }
+      const float speed_xy = std::max(0.15f, step_yd / kJumpAirTimeS);
+      bot->GetMotionMaster()->MoveJump(jx, jy, jz, speed_xy, kJumpSpeedZ);
       return {.done = true};
     }
 
@@ -1805,12 +1821,12 @@ ActStartResult StartAct(Player* bot,
             EQUIP_ERR_OK) {
           return {.error = "cannot equip " + act.name};
         }
-        const uint32_t entry_id = proto->ItemId;
+        const ObjectGuid src_guid = entry.item->GetGUID();
         const uint16_t src = static_cast<uint16_t>(
             (static_cast<uint16_t>(entry.bag) << 8) | entry.slot);
         bot->SwapItem(src, dest);
         Item* now_equipped = bot->GetItemByPos(dest);
-        if (!now_equipped || now_equipped->GetEntry() != entry_id) {
+        if (!now_equipped || now_equipped->GetGUID() != src_guid) {
           return {.error = "couldn't equip " + act.name};
         }
         return {.done = true};

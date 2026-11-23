@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -436,24 +437,46 @@ TEST(OrdersTest, AllContentNotesParseWithRealOrdersParser) {
     ASSERT_TRUE(in.is_open()) << notes_file;
     const std::string content((std::istreambuf_iterator<char>(in)),
                               std::istreambuf_iterator<char>());
-    const std::vector<std::string> names =
-        CollectOrderNames(wlb::snapshot::Snapshot{}, content);
-    const grammar::rt::Env env{.names = {{"order_names", names}}, .counts = {}};
-    bool in_fence = false;
+    // Validate per `## ` section (matching SelectRelevantNotes on large files)
+    // so a name in one boss section cannot mask a missing name in another.
+    std::vector<std::string> sections;
+    std::string cur;
     for (std::string_view raw_line : base::SplitStringPiece(
              content, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
-      const std::string_view trimmed =
-          base::TrimWhitespaceASCII(raw_line, base::TRIM_ALL);
-      if (trimmed.starts_with("```")) {
-        in_fence = !in_fence;
-        continue;
+      if (raw_line.starts_with("## ") && !cur.empty()) {
+        sections.push_back(std::move(cur));
+        cur.clear();
       }
-      if (in_fence && trimmed.find("->") != std::string_view::npos) {
-        const std::optional<Order> parsed = grammar::ParseOrder(trimmed, env);
-        EXPECT_TRUE(parsed.has_value())
-            << notes_file.string() << ": failed to parse order against "
-            << "ExtractNamesFromNotes: " << trimmed;
-        ++orders_checked;
+      cur.append(raw_line);
+      cur.push_back('\n');
+    }
+    if (!cur.empty()) {
+      sections.push_back(std::move(cur));
+    }
+    for (const std::string& sec : sections) {
+      const std::vector<std::string> names =
+          CollectOrderNames(wlb::snapshot::Snapshot{}, sec);
+      const grammar::rt::Env env{.names = {{"order_names", names}},
+                                 .counts = {}};
+      bool in_fence = false;
+      for (std::string_view raw_line : base::SplitStringPiece(
+               sec, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
+        const std::string_view trimmed =
+            base::TrimWhitespaceASCII(raw_line, base::TRIM_ALL);
+        if (trimmed.starts_with("```")) {
+          in_fence = !in_fence;
+          continue;
+        }
+        if (in_fence && trimmed.find("->") != std::string_view::npos) {
+          EXPECT_FALSE(names.empty())
+              << notes_file.string()
+              << ": 0 names extracted for section with: " << trimmed;
+          const std::optional<Order> parsed = grammar::ParseOrder(trimmed, env);
+          EXPECT_TRUE(parsed.has_value())
+              << notes_file.string() << ": failed to parse order against "
+              << "ExtractNamesFromNotes: " << trimmed;
+          ++orders_checked;
+        }
       }
     }
   }
