@@ -15,16 +15,16 @@ Last updated 2026-11-23.
     2. Item spam & equip ping-pong eliminated cleanly at root cause (`BrainPolicyListener` in `bot_manager.cc`, `CollectUsableBagItems` in `option_executor.cc`, and `content/RULES.md`, `eval` held `47/52` / `90%`): `Heavy Sharpening Stone` spam dropped from `51` → `0` invalid uses (`1` valid use on a level-appropriate weapon), and `item_equip` ping-pong dropped from `61` → `0` post-gear swaps.
     3. Dungeon death/corpse-run (`BrainPolicyListener` + `RecoverStuckDungeonGhost` in `bot_manager.cc`, source-verified; `0` dungeon deaths occurred in the verification run): standalone bots now wait for a party healer rez inside a dungeon when a living party member is on the same map, and cross-map dungeon ghosts stuck `>= 30 s` recover via `sObjectMgr->GetMapEntranceTrigger`.
   - **Remaining before 4 h endurance soak:** (a) the screen (`screen_renderer.cc`) labels *other* party members as `leader` but doesn't tell the leader itself on `me:` that it is the party leader, so after clearing a dungeon room `Loadf` still picked `Keep` (`453.8 s` stall in RFC `r00`; `301.9 s` on `Loadh`/`Loadi` in DM `r01`), and `Loadh_r00` still chose `Use Hearthstone` once in RFC; (b) live-trigger `RecoverStuckDungeonGhost` on an actual dungeon death, then run a full 4 h soak with `stall_check.py`.
-  - *(Note: `human_react_timing` passed at `193.0 ms >= 150 ms` in the verification run; user confirmed slightly faster Playerbots combat reflexes are acceptable as long as there are no cheater moves.)*
+  - *(Note: `human_react_timing` passed at `193.0 ms >= 150 ms` in the verification run; user confirmed slightly faster Playerbots combat reflexes are acceptable as long as there are no cheater moves. CI `rsync` dependency fixed in `a670917`.)*
 - [ ] **B1-POI-fallback (`snapshot_builder.cc`, deferred):** `quest_poi` → `creature`/`gameobject`/`loot` spawn fallback (`499` quests in `atlas.sqlite` lack any `quest_poi_spots`; `547` lack turn-in POI; `2,717` have objectives lacking POI). *(The explicit `target.guid.starts_with("equip:")` guard in `llm_brain_world_script.cc` is implemented and relocked.)*
 
 ## Next, in order
 
 **Priority direction (2026-11-21):** Mechanical WoW competence (dungeons, raids/ICC, clearing quests,
 soloing elite quests, smart gearing) takes priority over `"human-like"` mimicry (`D`). **Phases 1–3
-are signed off** (see [`docs/benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md`](benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md) §4: `llm` matches/slightly leads hand-written C++ boss scripts generically without boss-specific C++; real ceilings are Playerbots' class AI, `gemma-4-26B-A4B-it` (26B MoE / 4B active) order reliability, and generic movement vs. hardcoded room landmarks). **Phase 4 (`B1–B3`) core is implemented; live soak verification & Phase 5 (`C4`) are next.**
+are signed off** (see [`docs/benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md`](benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md) §4: `llm` matches/slightly leads hand-written C++ boss scripts generically without boss-specific C++; real ceilings are Playerbots' class AI, `gemma-4-26B-A4B-it` (26B MoE / 4B active) order reliability, and generic movement vs. hardcoded room landmarks). **Phase 4 (`B1–B3`) core and initial dungeon-cohesion/loop fixes (`5814b75`) are implemented; Phase 5 (`C4`) is signed off (`gemma-4-26B-A4B-it` remains default).**
 
-1. **Phase 4 follow-up & 4 h endurance soak:** fix dungeon-party follower stalls (`8/15` in 1 h soak) and the `4 ms` `human_react_timing` miss (`146.0 ms` vs `>= 150 ms`), then run a full 4 h soak with `stall_check.py`.
+1. **Phase 4 follow-up & 4 h endurance soak:** add a `party leader` self-tag on `me:` in `screen_renderer.cc` so dungeon leaders pick `Explore` reliably after clearing a room, live-trigger `RecoverStuckDungeonGhost` on an actual dungeon death, then run a full 4 h soak with `stall_check.py`.
 2. **Phase 5 — Fine-tuning exploration (`C3`, Decision #3: keep as TODO; `C4` model bake-off DONE — keep `gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf`):**
    - **`C4` (DONE 2026-11-23):** See [`docs/benchmarks/2026-11-23-phase4-soak-and-phase5-c4-faceoff.md`](benchmarks/2026-11-23-phase4-soak-and-phase5-c4-faceoff.md). `Qwen3.8-27B-IQ4_XS.gguf` scored `49/52` (`94%`) on offline eval vs `gemma-4-26B-A4B-it` `47/52` (`90%`), but tied on live 5-boss kills (`51/80` `63.8%` vs `52/80` `65.0%`, `p = 1.0000`) while being `2.1×` lower throughput (`4.6` vs `9.6 wake-ups/s`), `3–4×` slower in live combat (`552–970 ms` vs `168–249 ms`), and saturating at 100 bots (`21.69 s` vs `0.41 s`). Keep `gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf` as default.
    - **`C3. Train the model on its own good decisions (TODO — Decision #3: evaluate cost/feasibility on one RTX 5090 first)`:**
@@ -44,6 +44,11 @@ are signed off** (see [`docs/benchmarks/2026-11-22-phase1-phase3-five-boss-n16.m
 
 ## Later
 
+- **Optional brain-chosen group movement / formation tuning:** currently out-of-combat group members
+  use Playerbots' non-combat `+follow` formation movement controller between pulls when the brain
+  picks `Keep` (combat & boss positioning are brain-owned). If less formation-followy movement or
+  explicit brain-chosen split/regroup is desired later, tune formation spacing or expose a
+  `Regroup` / `Go to <leader>` option.
 - **Bind hearthstone** at an innkeeper as an option of its own (the brain's choice, through the
   bind spell), not part of Talk (`docs/specs/options.md`).
 - **More e2e cases:** death and respawn, harness reconnect, a failing choice reaching the brain.
