@@ -29,6 +29,8 @@ class HillClimbSafeguardsTest(unittest.TestCase):
             "tools/bench/scorer_calibration.py",
             "tools/bench/blind_rate.py",
             "tools/bench/hill_climb.py",
+            "tools/bench/notes_hill_climb.py",
+            "tools/bench/bench_bosses.py",
             "tools/wlblib/cases/soak.py",
             "tools/wlblib/testing.py",
             "server_module/src/snapshot/behavior_trace.h",

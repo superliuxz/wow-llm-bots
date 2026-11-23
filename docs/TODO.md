@@ -9,10 +9,8 @@ Last updated 2026-11-22.
 
 ## In progress
 
-**Open (awaiting user decision / external data)**
-- [ ] **M3d — Lock `notes_hill_climb.py` and `bench_bosses.py` in `scorer.sha256`:** flags + SHA-256 hashes + git HEAD are now logged in `ledger.jsonl`, but adding both scripts to `hill_climb.py` lock manifest requires user-approved relock of `scorer.sha256` / `config/scorer-lock.sha256` (Rule #6).
+**Open (awaiting user decision)**
 - [ ] **M4 — Phase 1–3 sign-off decision (user's call):** all three runs (`v1` `23/40` vs `22/40`, `v2` `21/40` vs `19/40`, `v3` `52/80` vs `35/80`; combined `96/160` vs `76/160`, `p_raw = 0.0330`, `p_holm3 = 0.0990` n.s.) and the Kael'thas `-20.2%` DPS trade-off are now reported honestly in [`docs/benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md`](benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md); awaiting user decision on sign-off.
-- [ ] **Unconfirmed — Raw-turn fix:** may read smooth human mouse turns as snaps; needs one human trace check to settle.
 
 ## Next, in order
 
@@ -147,7 +145,7 @@ v1 `23/40` vs `22/40`, v2 `21/40` vs `19/40`, v3 `52/80` vs `35/80`; combined `p
 - **Phase 1–3 open caveats & deferred polish:** `tools/bench/bench_bosses.py` still uses inline boss-note constants rather than reading `content/notes/*/notes.md` directly; `A5` `party hurt:` and `loose mobs:` screen formatting are unit-tested only (not separately captured from live `harness.log`); `eregos` (`bench_bosses.py`) still hits `no_pull` because Oculus requires flying drake engagement/boss trigger; `tools/bench/notes_hill_climb.py --confirm-runs > 0` re-run is unit-tested only (not live-verified).
 - **Phase 4 live play observation (2026-11-22):** level 14 priest observed still farming mobs in Northshire Abbey (level 1 starting zone) — directly motivates Phase 4 `B1` (level-appropriate questing/zone guidance over grinding grey mobs).
 - **`private/BigFootAddOns` licensing reminder:** private nested submodule rehosting proprietary addons (DBM, Omen, etc.); fine while private — never publish it or copy any of it into the public GPL repo.
-- **Human trace GM-speed cleanup:** `2026-11-22.1.jsonl` in `~/.local/share/wow-llm-bots/human_baseline/human/Hele/` was cleaned of `> 10 yd/s` GM-fly/speed segments; strip `> 10 yd/s` segments from the still-open `2026-11-22.jsonl` after the play server stops.
+- **Human trace GM-speed cleanup & raw-turn check (deprioritized — Phase D only):** `2026-11-22.1.jsonl` in `~/.local/share/wow-llm-bots/human_baseline/human/Hele/` was cleaned of `> 10 yd/s` GM-fly/speed segments; strip `> 10 yd/s` segments from `2026-11-22.jsonl` if Phase D human-likeness scoring is resumed, and optionally check `trace_parity.py` raw-turn snap rates on human traces (user deprioritized movement-mimicry metrics in favor of mechanical WoW competence).
 - **Deliberately skipped benchmark speedup proposals (Items 4, 5, adaptive 6):** left unbuilt on
   purpose to preserve valid boss immunity/kite phases (Item 4: `20 s` zero-damage abort would
   cut `Gravity Lapse`/`Planar Shift` and censor `llm` bugs via survivorship bias), cross-boss DB
@@ -157,6 +155,9 @@ v1 `23/40` vs `22/40`, v2 `21/40` vs `19/40`, v3 `52/80` vs `35/80`; combined `p
   details in [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md) §6).
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-22: **User-approved `scorer.sha256` relock (`6983fb57e2b7...`, `M3d`):**
+  added [`tools/bench/notes_hill_climb.py`](../tools/bench/notes_hill_climb.py) and [`tools/bench/bench_bosses.py`](../tools/bench/bench_bosses.py) to `LOCKED_PATTERNS` in [`tools/bench/hill_climb.py`](../tools/bench/hill_climb.py) (and [`hill_climb_test.py`](../tools/bench/hill_climb_test.py)), ran user-approved `hill_climb.py lock-scorer --force-relock` (`30` locked files), and updated [`config/scorer-lock.sha256`](../config/scorer-lock.sha256) (`6983fb57e2b7...`, verified via `hill_climb._verify_all_locks()` and `hill_climb_test.py` `8/8`).
 
 - 2026-11-22: **Comprehensive review fixes (`6cfed30`, `52c4c0c`, `458047b`, `c046bd5`, `c3daf8c`) & Review `c3daf8c` Low 1–3 polish:**
   - *Server module & acts (`H1`, `M6–M8`, `L-Act1–3`, `L-Mod1–5`):* heap-allocated `BlockAutoInviteListener` per `Engine` with live offline→relogin→snapshot verification in `e2e_invite.py` (`PASS 10.0 s`); named `A5` assist options after the mob; queued rate-limited outbound chats (`<= 4`) with tracked `command_id` errors (waking brain without stopping active `PlanRunner`, verified in `BotLoopTest.ChatErrorWakesBrainWithoutStoppingActiveRunner`); suppressed self-cancelled movement wakes and cleared standing orders + `STOP/MOVING` on instance exit (`BotLoopTest.LeavingInstanceClearsOrdersAndSelfCancelDoesNotWake`); multi-target `AvoidedTargetsByBot()` cleared on combat exit/disconnect; 60 s invite auto-decline, dead bots hear `say`/`yell`, script-blocked chat error, cached hidden-trigger LoS raycasts + `IsHostileTo`, and safe `ObjectGuid`/duration-based item-use aura check (`had_aura_before`, no raw `Aura*` or immutable `GetApplyTime()`).
@@ -188,8 +189,3 @@ v1 `23/40` vs `22/40`, v2 `21/40` vs `19/40`, v3 `52/80` vs `35/80`; combined `p
 
 - 2026-11-22: **Review `a1b6dfe` fixes (Low 1–3):**
   added `ResolveHiddenTriggerByGuid` inside `ResolveThing(..., allow_hidden_triggers=true)` in [`act_executor.cc`](../server_module/src/options/act_executor.cc) so `"trigger:<guid>"` pinning works consistently for `FACE`/`FACE_AWAY` (`L1`); switched `nearby.areas` sort sentinel from `999.0f` to `std::numeric_limits<float>::infinity()` in [`screen_renderer.cc`](../harness/src/screen/screen_renderer.cc) and asserted `flame_pos < broken_pos` in [`screen_renderer_unittest.cc`](../harness/src/screen/screen_renderer_unittest.cc) (`L2`); clarified Kael'thas all-trial vs wipe-only median durations in `docs/TODO.md` (`L3`). Rebuilt `out/server-test` and passed `tools/wlb check` (`ALL CHECKS PASSED`; `ResolveHiddenTriggerByGuid` in `act_executor.cc` is compile/source-verified only).
-
-- 2026-11-22: **Review `3b5cae8` fixes (High 1–2, Medium 1–3, Low 1–3):**
-  - *`world_util.{h,cc}` (`H1`, `M2`, `L3`):* `SpellLocalizedName` returns `std::string_view` with explicit `nullptr`/empty checks on `SpellInfo::SpellName` (`char const*`); removed unused raw `const SpellInfo* spell` field from `TriggerHazardInfo`; `InspectTriggerHazard` ranks periodic-trigger / non-zero-radius auras above visual-only dummy auras.
-  - *`act_executor.cc` (`H2`, `L1`, `L2`):* `ResolveThing` gates hidden-trigger lookup behind `allow_hidden_triggers = false` (enabled only in `ResolveMoveAnchor`, `ResolveHazard`, and `FACE`/`FACE_AWAY`, matching only player-visible `hz->name` — never `trigger->GetName()`, so `TARGET`/`MARK`/`USE`/`INTERACT`/`BOARD`/`PET_ATTACK` never hit hidden triggers); extracted `MakeTriggerHazardInfo(Creature*)` and `CollectHostileAreas()` so `StartReturnToInterrupted` scans the grid once instead of per candidate.
-  - *`screen_renderer.cc`, tests & `TODO.md` (`M1`, `M3`, `L3`):* guarded `nearby.areas` `std::stable_sort` comparator with `std::isfinite(dist_yd)`; expanded `ScreenRendererTest.RendersNearbyAreasNearestFirst` in [`screen_renderer_unittest.cc`](../harness/src/screen/screen_renderer_unittest.cc) (nameless skip, `spell->name` fallback, friendly area, `NaN` `dist_yd`/`lands_in_s`, missing `rel`, 6-area cap); narrowed `3b5cae8` live-verification scope and added `n = 8` statistical caveats (`L3`). Rebuilt `out/server-test` and passed `tools/wlb check` (`ALL CHECKS PASSED`; C++ changes are compile/unit-test verified, not yet re-benchmarked live).
