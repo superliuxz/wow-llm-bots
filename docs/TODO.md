@@ -9,8 +9,7 @@ Last updated 2026-11-23.
 
 ## In progress
 
-- [ ] **Phase 4 live soak validation:** run live open-world soak with `var/knowledge/world_knowledge.json` + [`tools/bench/stall_check.py`](../tools/bench/stall_check.py) to verify zero `>= 5 min` stalls, outleveled-zone travel, quest turn-ins, and gear upgrades in live play.
-- [ ] **Phase 5 model face-off (`C4`):** evaluate candidate models in `models/` (`gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf`, `gemma-4-E4B-it-qat-IQ4_XS-imatrix.gguf`, `Qwen3.8-27B-IQ4_XS.gguf`, etc.) on `tools/wlb test eval --shootout` and the boss bench (`bench_bosses.py`).
+- [ ] **Phase 4 follow-ups from 1 h live soak (`2026-11-23-phase4-soak-and-phase5-c4-faceoff.md`):** open-world questing passed with **`0/15` stalls**, `44` quest turn-ins, `29` level-ups, `263` item equips, and live cross-zone travel, but two issues surfaced: (1) **`8/15` dungeon-party followers** (`Loadf..Loadj` in RFC/DM) stalled `525.9–1,078.0 s` (`stall_check.py`), and (2) `human_react_timing` missed the Layer A floor by `4 ms` (`react_p10 = 146.0 ms` vs `>= 150 ms`). Fix dungeon-follower stalls and run a full 4 h soak when ready.
 - [ ] **B1-POI-fallback (`snapshot_builder.cc`, deferred):** `quest_poi` → `creature`/`gameobject`/`loot` spawn fallback (`499` quests in `atlas.sqlite` lack any `quest_poi_spots`; `547` lack turn-in POI; `2,717` have objectives lacking POI). *(The explicit `target.guid.starts_with("equip:")` guard in `llm_brain_world_script.cc` is implemented and relocked.)*
 
 ## Next, in order
@@ -19,13 +18,9 @@ Last updated 2026-11-23.
 soloing elite quests, smart gearing) takes priority over `"human-like"` mimicry (`D`). **Phases 1–3
 are signed off** (see [`docs/benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md`](benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md) §4: `llm` matches/slightly leads hand-written C++ boss scripts generically without boss-specific C++; real ceilings are Playerbots' class AI, `gemma-4-26B-A4B-it` (26B MoE / 4B active) order reliability, and generic movement vs. hardcoded room landmarks). **Phase 4 (`B1–B3`) core is implemented; live soak verification & Phase 5 (`C4`) are next.**
 
-1. **Phase 4 live validation (4 h soak & quests/hr):** run live open-world soak with `var/knowledge/world_knowledge.json` + [`tools/bench/stall_check.py`](../tools/bench/stall_check.py) to verify zero `>= 5 min` stalls, outleveled-zone travel, quest turn-ins, and gear upgrades in live play.
-2. **Phase 5 — Model bake-off (`C4`) & fine-tuning exploration (`C3`, Decision #3: keep as TODO)**
-   *(Done when: a significant bench gain at the same latency)*:
-   - **`C4. Model choice bake-off`:** Try at least one other base model on `tools/wlb test eval`,
-     `perf`, and the boss bench (same 4 arms, `n = 16`) before investing in `C3`, so the base model
-     choice is settled with data. Candidate GGUFs pre-downloaded in `models/`:
-     `gemma-4-E4B-it-qat-IQ4_XS-imatrix.gguf` and `Qwen3.8-27B-IQ4_XS.gguf`.
+1. **Phase 4 follow-up & 4 h endurance soak:** fix dungeon-party follower stalls (`8/15` in 1 h soak) and the `4 ms` `human_react_timing` miss (`146.0 ms` vs `>= 150 ms`), then run a full 4 h soak with `stall_check.py`.
+2. **Phase 5 — Fine-tuning exploration (`C3`, Decision #3: keep as TODO; `C4` model bake-off DONE — keep `gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf`):**
+   - **`C4` (DONE 2026-11-23):** See [`docs/benchmarks/2026-11-23-phase4-soak-and-phase5-c4-faceoff.md`](benchmarks/2026-11-23-phase4-soak-and-phase5-c4-faceoff.md). `Qwen3.8-27B-IQ4_XS.gguf` scored `49/52` (`94%`) on offline eval vs `gemma-4-26B-A4B-it` `47/52` (`90%`), but tied on live 5-boss kills (`51/80` `63.8%` vs `52/80` `65.0%`, `p = 1.0000`) while being `2.1×` lower throughput (`4.6` vs `9.6 wake-ups/s`), `3–4×` slower in live combat (`552–970 ms` vs `168–249 ms`), and saturating at 100 bots (`21.69 s` vs `0.41 s`). Keep `gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf` as default.
    - **`C3. Train the model on its own good decisions (TODO — Decision #3: evaluate cost/feasibility on one RTX 5090 first)`:**
      Once `C1` and `C2` produce a few thousand graded decisions, evaluate cost and benefit of:
      (a) a small LoRA fine-tune of Gemma on plans that led to kills; (b) preference pairs (good vs
@@ -130,6 +125,10 @@ are signed off** (see [`docs/benchmarks/2026-11-22-phase1-phase3-five-boss-n16.m
   details in [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md) §6).
 
 ## Done (newest first, keep about ten)
+
+- 2026-11-23: **Phase 4 live soak (1 h / `10` bot-hours) & Phase 5 (`C4`) model face-off (`docs/benchmarks/2026-11-23-phase4-soak-and-phase5-c4-faceoff.md`):**
+  - *Phase 4 live soak (`3 × 20 min`, `soak_horde_rfc` / `soak_alliance_dm`, `world_knowledge.json`, `scorer.sha256` verified):* `2,186` decisions (`0` LLM errors, `0` invalid plans, `0` repeated refusals, `do_p95 = 352 ms`), `4,476 XP/h`, `7` deaths, `30/30` moved, `4.98 Hz` parity. Open-world (`15` bot-runs): **`0/15` stalls**, `80` quests accepted, **`44` quest turn-ins**, `29` level-ups, `582` mob kills, `263` item equips, live cross-zone travel (`Tirisfal -> Silverpine`, `Elwynn -> Westfall`, `Silverpine -> Durotar -> The Barrens`). Honest gaps logged in `## In progress`: `8/15` dungeon-party followers stalled (`525.9–1,078.0 s`) and `human_react_timing` missed by `4 ms` (`146.0 ms` vs `>= 150 ms`).
+  - *Phase 5 (`C4`) model face-off — **keep `gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf` as default**:* 5-model `tools/wlb test eval` (`52` cases): `Qwen3.8-27B-IQ4_XS` **`49/52` (`94%`, `153/418 ms`)**, `gemma-4-26B-A4B-it` **`47/52` (`90%`, `68/232 ms`)**, `Qwen3.6-35B-A3B` `37/52` (`71%`), `gemma-4-E4B` `31/52` (`60%`), `Qwen3-4B` `28/52` (`54%`). `perf brain`: `gemma-4-26B-A4B-it` `9.6 wake-ups/s` (100-bot `wake->do` p50 `0.41 s`) vs `Qwen3.8-27B` `4.6 wake-ups/s` (100-bot saturates at `21.69 s`). Full 4-arm `n = 16` (`320` valid trials, `0` invalid) 5-boss bench (`var/bench_boss_c4_qwen38_27b_n16.json`): `Qwen3.8-27B` `llm` **`51/80` (`63.8%`)** vs `no_brain` `33/80` (`p_holm3 = 0.0208`) and `Ikiss` `13/16` vs `3/16` (`p_holm15 = 0.0164`), statistically identical to `gemma-4-26B-A4B-it` `52/80` (`65.0%`, `p_raw = 1.0000`, `p_holm5 = 1.0000` on every boss) while `3.1×–4.4×` slower in live combat (`552–970 ms` vs `168–249 ms`).
 
 - 2026-11-23: **Full-codebase review `7727a71` (all 6 High, 11 Medium, 7 Low) + all post-commit review follow-ups (`9045684`–`231a326`) & user-approved `scorer.sha256` relock (`1a867dcdf2fd...`):**
   - *`common/base/` & `common/net/` (`H1, M1–M3, L2`):* drained active `TaskQueue` wakeups before `Thread::Stop()` destroys `pump_`; pinned `RepeatingCallback::Run` `impl_`, moved `unique_ptr<FramedConnection>` into deferred cleanup, and called `ScheduleRetry()` before `on_disconnected`; checked all `pthread_mutex_*` return values in `base::Lock` (`LockDeathTest`); fixed `PlatformThread::Sleep` non-positive duration / `EINTR`; fixed `MessagePumpEpoll` controller reuse and dual non-persistent `WATCH_READ_WRITE` with pump-monotonic `watch_id_` + watcher/controller lifetime sentinels + re-arm suppression (`wlb_common_unittests` `67/67`).
