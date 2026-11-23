@@ -27,7 +27,7 @@ Lock::Lock() {
 }
 
 Lock::~Lock() {
-  pthread_mutex_destroy(&mutex_);
+  CheckZero(pthread_mutex_destroy(&mutex_));
 }
 
 void Lock::Acquire() {

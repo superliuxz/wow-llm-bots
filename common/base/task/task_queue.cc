@@ -57,6 +57,7 @@ bool TaskQueue::PostDelayedTask(OnceClosure task, TimeDelta delay) {
   }
   if (wakeup) {
     wakeup.Run();
+    wakeup = {};
     AutoLock lock(lock_);
     if (--active_wakeups_ == 0) {
       wakeups_drained_.Broadcast();
@@ -111,10 +112,11 @@ void TaskQueue::SetWakeupCallback(RepeatingClosure wakeup) {
   {
     AutoLock lock(lock_);
     old = std::move(wakeup_);
-    wakeup_ = std::move(wakeup);
+    wakeup_ = {};
     while (active_wakeups_ > 0) {
       wakeups_drained_.Wait();
     }
+    wakeup_ = std::move(wakeup);
   }
 }
 

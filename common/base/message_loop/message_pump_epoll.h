@@ -29,7 +29,15 @@ class MessagePumpEpoll : public MessagePump {
     virtual void OnFileCanWriteWithoutBlocking(int fd) = 0;
 
    protected:
-    virtual ~FdWatcher() = default;
+    virtual ~FdWatcher() {
+      if (destroyed_flag_) {
+        *destroyed_flag_ = true;
+      }
+    }
+
+   private:
+    friend class MessagePumpEpoll;
+    bool* destroyed_flag_ = nullptr;
   };
 
   // Owns one watch. Destroying it (or StopWatchingFileDescriptor) stops it.
@@ -50,7 +58,7 @@ class MessagePumpEpoll : public MessagePump {
     int fd_ = -1;
     int mode_ = 0;
     bool persistent_ = false;
-    uint64_t generation_ = 0;
+    uint64_t watch_id_ = 0;
   };
 
   MessagePumpEpoll();
@@ -79,6 +87,7 @@ class MessagePumpEpoll : public MessagePump {
   const int epoll_fd_;
   const int wake_fd_;
   bool quit_ = false;
+  uint64_t next_watch_id_ = 0;
   // Watched fd -> its controller. Looked up at dispatch time, so a controller
   // destroyed by an earlier callback in the same epoll batch is never touched.
   std::unordered_map<int, raw_ptr<FdWatchController>> controllers_;

@@ -89,6 +89,9 @@ class BrainBridge {
   bool connected() const { return connected_; }
 
  private:
+  struct IoCoreHandle : public base::RawPtrTarget {
+    virtual ~IoCoreHandle() = default;
+  };
   class IoCore;              // Lives on the IO thread.
   class SendStatsCollector;  // Written on the IO thread, read on the world's.
   class Generation;          // Bumped on the IO thread, read on the world's.
@@ -109,8 +112,9 @@ class BrainBridge {
   base::Thread io_thread_;
   // Owned here but created, used and destroyed only on io_thread_. Tasks that
   // use it are posted before the task that deletes it, so it outlives them;
-  // raw_ptr crashes at deletion if any copy of it is still alive.
-  base::raw_ptr<IoCore> io_core_ = nullptr;
+  // raw_ptr crashes at deletion if any copy of it is still alive. Uses complete
+  // base IoCoreHandle so raw_ptr<T> never inspects an incomplete type.
+  base::raw_ptr<IoCoreHandle> io_core_ = nullptr;
   bool connected_ = false;
   base::WeakPtrFactory<BrainBridge> weak_factory_{this};
 };

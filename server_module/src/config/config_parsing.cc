@@ -1,28 +1,20 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
 #include "config/config_parsing.h"
-#include <algorithm>
 
+#include <algorithm>
 #include <cstddef>
-#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "base/strings/string_split.h"
+
 namespace llm_brain {
 
 std::vector<std::string> SplitList(const std::string& csv) {
-  std::vector<std::string> items;
-  std::stringstream ss(csv);
-  std::string item;
-  while (std::getline(ss, item, ',')) {
-    const size_t begin = item.find_first_not_of(" \t");
-    const size_t end = item.find_last_not_of(" \t");
-    if (begin != std::string::npos) {
-      items.push_back(item.substr(begin, end - begin + 1));
-    }
-  }
-  return items;
+  return base::SplitString(csv, ",", base::TRIM_WHITESPACE,
+                           base::SPLIT_WANT_NONEMPTY);
 }
 
 std::vector<std::pair<std::string, std::string>> ParseFixtures(

@@ -249,11 +249,11 @@ class BotLoop {
   void DispatchRunnerAction(const std::string& bot,
                             BotState* state,
                             const RunnerAction& action);
-  void DispatchOrderEval(const std::string& bot,
+  bool DispatchOrderEval(const std::string& bot,
                          BotState* state,
                          const OrderEvalResult& eval,
                          base::TimeTicks now);
-  void WakeForOrder(const std::string& bot,
+  bool WakeForOrder(const std::string& bot,
                     BotState* state,
                     std::string_view reason,
                     base::TimeTicks now,

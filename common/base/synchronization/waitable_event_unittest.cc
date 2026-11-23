@@ -2,6 +2,8 @@
 
 #include "base/synchronization/waitable_event.h"
 
+#include "base/synchronization/lock.h"
+#include "base/thread_annotations.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "gtest/gtest.h"
@@ -40,6 +42,25 @@ TEST(WaitableEventTest, SignaledFromAnotherThread) {
   thread.task_runner()->PostDelayedTask([&] { event.Signal(); },
                                         Milliseconds(10));
   EXPECT_TRUE(event.TimedWait(Seconds(2)));
+}
+
+void DoubleAcquireForDeathTest() NO_THREAD_SAFETY_ANALYSIS {
+  Lock lock;
+  lock.Acquire();
+  lock.Acquire();
+}
+
+void UnlockNotHeldForDeathTest() NO_THREAD_SAFETY_ANALYSIS {
+  Lock lock;
+  lock.Release();
+}
+
+TEST(LockDeathTest, DoubleAcquireAborts) {
+  EXPECT_DEATH(DoubleAcquireForDeathTest(), "");
+}
+
+TEST(LockDeathTest, UnlockWhenNotHeldAborts) {
+  EXPECT_DEATH(UnlockNotHeldForDeathTest(), "");
 }
 
 }  // namespace

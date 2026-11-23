@@ -316,20 +316,26 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   } else {
     state.order_quiet_since = base::TimeTicks();
   }
-  DispatchOrderEval(bot, &state, ord, received_at);
-  if (!ord.wake_reason.empty()) {
-    return;
-  }
+  const bool order_woke = DispatchOrderEval(bot, &state, ord, received_at);
   const bool trig_covered =
       trig && ord.covered && ord.order_index >= 0 &&
       static_cast<size_t>(ord.order_index) < state.orders.orders().size() &&
       OrderCoversWake(
           state.orders.orders()[static_cast<size_t>(ord.order_index)],
           trig->kinds, trig->attackers);
+  if (order_woke) {
+    if (trig && !trig_covered) {
+      WakeBot(bot, trig->urgency, trig->reason);
+    }
+    return;
+  }
   if (trig && !trig_covered) {
     state.runner.Stop();
     state.look_deadline = base::TimeTicks();
     WakeBot(bot, trig->urgency, trig->reason);
+    return;
+  }
+  if (!ord.wake_reason.empty()) {
     return;
   }
   if (look_woke || state.call_in_flight || state.has_queued_wake ||
@@ -1136,7 +1142,7 @@ void BotLoop::SendStopMoving(const std::string& bot) {
   SendAct(bot, std::move(stop_moving));
 }
 
-void BotLoop::WakeForOrder(const std::string& bot,
+bool BotLoop::WakeForOrder(const std::string& bot,
                            BotState* state,
                            std::string_view reason,
                            base::TimeTicks now,
@@ -1145,7 +1151,7 @@ void BotLoop::WakeForOrder(const std::string& bot,
     state->order_wakes = 0;
     state->look_deadline = base::TimeTicks();
     WakeBot(bot, Urgency::kUrgent, std::string(reason), /*refusal=*/false);
-    return;
+    return true;
   }
   const base::TimeDelta backoff = StepRefusalBackoff(++state->order_wakes);
   if (backoff.is_positive()) {
@@ -1162,19 +1168,20 @@ void BotLoop::WakeForOrder(const std::string& bot,
     Log(base::StringPrintf(
         "harness: %s order failure %d in a row; next look in %.0f s",
         bot.c_str(), state->order_wakes, backoff.InSecondsF()));
-    return;
+    return false;
   }
   state->look_deadline = base::TimeTicks();
   WakeBot(bot, Urgency::kUrgent, std::string(reason), /*refusal=*/true);
+  return true;
 }
 
-void BotLoop::DispatchOrderEval(const std::string& bot,
+bool BotLoop::DispatchOrderEval(const std::string& bot,
                                 BotState* state,
                                 const OrderEvalResult& eval,
                                 base::TimeTicks now) {
   if (eval.kite_ended) {
     SendStopMoving(bot);
-    return;
+    return false;
   }
   if (!eval.wake_reason.empty()) {
     if (eval.timed_out || eval.preempted) {
@@ -1183,12 +1190,11 @@ void BotLoop::DispatchOrderEval(const std::string& bot,
       SendStopMoving(bot);
     }
     state->runner.Stop();
-    WakeForOrder(bot, state, eval.wake_reason, now,
-                 /*is_failure=*/eval.timed_out);
-    return;
+    return WakeForOrder(bot, state, eval.wake_reason, now,
+                        /*is_failure=*/eval.timed_out);
   }
   if (!eval.act) {
-    return;
+    return false;
   }
   if (eval.preempted) {
     SendStopMoving(bot);
@@ -1200,12 +1206,14 @@ void BotLoop::DispatchOrderEval(const std::string& bot,
     state->runner.Stop();
     state->look_deadline = base::TimeTicks();
     if (!failed.wake_reason.empty()) {
-      WakeForOrder(bot, state, failed.wake_reason, now, /*is_failure=*/true);
+      return WakeForOrder(bot, state, failed.wake_reason, now,
+                          /*is_failure=*/true);
     }
-    return;
+    return false;
   }
   const uint32_t id = SendAct(bot, std::move(*wire));
   state->orders.set_pending_command_id(id);
+  return false;
 }
 
 uint32_t BotLoop::SendAct(const std::string& bot, pb::Command::Act act) {

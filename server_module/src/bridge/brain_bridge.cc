@@ -61,7 +61,7 @@ class BrainBridge::Generation : public base::RawPtrTarget {
   std::atomic<uint64_t> value_{0};
 };
 
-class BrainBridge::IoCore : public base::RawPtrTarget {
+class BrainBridge::IoCore : public BrainBridge::IoCoreHandle {
  public:
   IoCore(std::string path,
          base::scoped_refptr<base::TaskQueue> world_queue,
@@ -245,7 +245,7 @@ void BrainBridge::Send(std::string message, std::string flush_key) {
   io_thread_.task_runner()->PostTask(
       [core = io_core_, message = std::move(message),
        flush_key = std::move(flush_key), queued = base::TimeTicks::Now()] {
-        core->Send(message, queued, flush_key);
+        static_cast<IoCore*>(core.get())->Send(message, queued, flush_key);
       });
 }
 
@@ -256,7 +256,8 @@ void BrainBridge::SendLatest(std::string key, std::string message) {
   io_thread_.task_runner()->PostTask(
       [core = io_core_, key = std::move(key), message = std::move(message),
        queued = base::TimeTicks::Now()]() mutable {
-        core->SendLatest(std::move(key), std::move(message), queued);
+        static_cast<IoCore*>(core.get())
+            ->SendLatest(std::move(key), std::move(message), queued);
       });
 }
 

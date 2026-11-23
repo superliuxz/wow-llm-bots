@@ -2,14 +2,12 @@
 
 #include "llm/llm_client.h"
 
-#include <chrono>
 #include <cstddef>
 #include <flat_set>
 #include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -19,7 +17,9 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/thread_annotations.h"
+#include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
+#include "base/time/time.h"
 #include "gtest/gtest.h"
 #include "httplib.h"
 #include "nlohmann/json.hpp"
@@ -132,7 +132,7 @@ class FakeLlamaServer {
         tail_delay_ms = stream_tail_delay_ms_;
       }
       if (delay_ms_ > 0) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms_));
+        base::PlatformThread::Sleep(base::Milliseconds(delay_ms_));
       }
       response.status = status_;
       if (status_ != 200) {
@@ -146,8 +146,8 @@ class FakeLlamaServer {
                                     httplib::DataSink& sink) {
               for (size_t i = 0; i < chunks.size(); ++i) {
                 if (i == 1 && tail_delay_ms > 0) {
-                  std::this_thread::sleep_for(
-                      std::chrono::milliseconds(tail_delay_ms));
+                  base::PlatformThread::Sleep(
+                      base::Milliseconds(tail_delay_ms));
                 }
                 sink.write(chunks[i].data(), chunks[i].size());
               }
@@ -162,7 +162,7 @@ class FakeLlamaServer {
     thread_.Start();
     thread_.task_runner()->PostTask([this] { server_.listen_after_bind(); });
     while (!server_.is_running()) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      base::PlatformThread::Sleep(base::Milliseconds(1));
     }
   }
   ~FakeLlamaServer() {
@@ -291,7 +291,7 @@ TEST(LlmClientTest, AnIdleConnectionTheServerClosedIsOpenedAgain) {
   server.set_keep_alive_timeout_s(1);  // The server hangs up on idle clients.
   auto pool = base::MakeRefCounted<ConnectionPool>(server.endpoint());
   ASSERT_TRUE(pool->Call(SampleRequest()).reply);
-  std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+  base::PlatformThread::Sleep(base::Milliseconds(1500));
   const LlmResult result = pool->Call(SampleRequest());
   EXPECT_TRUE(result.reply) << result.error;
 }

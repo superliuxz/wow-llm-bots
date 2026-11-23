@@ -130,6 +130,10 @@ TargetProgress OptionTargetProgress(Player* bot,
     case OptionTarget::Kind::kGather:
     case OptionTarget::Kind::kUse: {
       if (target.kind == OptionTarget::Kind::kUse &&
+          target.guid.starts_with("equip:")) {
+        return done();
+      }
+      if (target.kind == OptionTarget::Kind::kUse &&
           target.guid.starts_with("item:")) {
         if (used) {
           return done();

@@ -90,7 +90,8 @@ Messages (`snapshot/snapshot.h`): the module sends `ModuleMessage` (a `Snapshot`
   recordings, decision logs and eval cases, and the reverse for `harness decide <snapshot.json>`.
 - JSON omits default values (false, 0, empty), so absence means false / zero.
 - Each snapshot is **complete** (not a diff). `ext` holds only the active extensions.
-  `events` repeats every event since the previous snapshot (they were also sent live).
+  `events` carries events bundled with a snapshot (the module sends live events via
+  `ImmediateEvent` and leaves `Snapshot::events` empty so events are not processed twice).
 - No caps on content: the module sends everything the client could show (§4 `nearby`, §7).
   Typical sizes: a few KB in the open world, up to ~50 KB in a busy city. The only hard limit
   is the bridge's 1 MiB frame (the module drops the least salient `nearby` entries if a

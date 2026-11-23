@@ -10,18 +10,19 @@
 #include <filesystem>
 #include <fstream>
 #include <ios>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "base/strings/strcat.h"
 #include "base/strings/stringprintf.h"
+#include "base/synchronization/condition_variable.h"
+#include "base/synchronization/lock.h"
+#include "base/threading/platform_thread.h"
 #include "snapshot/snapshot.h"
 
 namespace llm_brain {
@@ -377,20 +378,21 @@ BehaviorTraceWriter::BehaviorTraceWriter(std::string root_dir,
       max_tracked_chars_per_role_(
           max_tracked_chars_per_role > 0 ? max_tracked_chars_per_role : 1) {
   if (enabled()) {
-    worker_ = std::thread(&BehaviorTraceWriter::WriterLoop, this);
+    worker_ = base::PlatformThread::Create("behavior-trace",
+                                           [this] { WriterLoop(); });
   }
 }
 
 BehaviorTraceWriter::~BehaviorTraceWriter() {
-  if (!worker_.joinable()) {
+  if (worker_.is_null()) {
     return;
   }
   {
-    std::lock_guard<std::mutex> lock(mu_);
+    base::AutoLock lock(mu_);
     stop_ = true;
   }
-  cv_.notify_one();
-  worker_.join();
+  cv_.Signal();
+  base::PlatformThread::Join(worker_);
 }
 
 bool BehaviorTraceWriter::WriteSample(const TraceSample& sample) {
@@ -417,20 +419,22 @@ bool BehaviorTraceWriter::WriteEvent(const TraceEvent& event) {
 }
 
 void BehaviorTraceWriter::Flush() {
-  if (!worker_.joinable()) {
+  if (worker_.is_null()) {
     return;
   }
-  std::unique_lock<std::mutex> lock(mu_);
-  flushed_cv_.wait(lock, [this] { return queue_.empty() && !writing_; });
+  base::AutoLock lock(mu_);
+  while (!queue_.empty() || writing_) {
+    flushed_cv_.Wait();
+  }
 }
 
 uint64_t BehaviorTraceWriter::dropped_lines() const {
-  std::lock_guard<std::mutex> lock(mu_);
+  base::AutoLock lock(mu_);
   return dropped_lines_;
 }
 
 uint64_t BehaviorTraceWriter::TakeUntrackedSampleChars() {
-  std::lock_guard<std::mutex> lock(mu_);
+  base::AutoLock lock(mu_);
   return std::exchange(untracked_sample_chars_, 0);
 }
 
@@ -442,7 +446,7 @@ std::optional<double> BehaviorTraceWriter::TakeMeasuredSampleHz(
   }
   std::vector<std::vector<int64_t>> ready_chars;
   {
-    std::lock_guard<std::mutex> lock(mu_);
+    base::AutoLock lock(mu_);
     auto role_it = sample_windows_by_role_.find(std::string(role));
     if (role_it == sample_windows_by_role_.end()) {
       return std::nullopt;
@@ -501,7 +505,7 @@ bool BehaviorTraceWriter::Enqueue(std::string_view role,
                                   std::string line,
                                   bool is_sample) {
   {
-    std::lock_guard<std::mutex> lock(mu_);
+    base::AutoLock lock(mu_);
     if (stop_ || queue_.size() >= kMaxQueueLines) {
       ++dropped_lines_;
       return false;
@@ -576,7 +580,7 @@ bool BehaviorTraceWriter::Enqueue(std::string_view role,
     queue_.push_back(
         {std::string(role), std::string(name), time_ms, std::move(line)});
   }
-  cv_.notify_one();
+  cv_.Signal();
   return true;
 }
 
@@ -584,10 +588,12 @@ void BehaviorTraceWriter::WriterLoop() {
   for (;;) {
     std::deque<PendingLine> batch;
     {
-      std::unique_lock<std::mutex> lock(mu_);
-      cv_.wait(lock, [this] { return stop_ || !queue_.empty(); });
+      base::AutoLock lock(mu_);
+      while (!stop_ && queue_.empty()) {
+        cv_.Wait();
+      }
       if (queue_.empty() && stop_) {
-        flushed_cv_.notify_all();
+        flushed_cv_.Broadcast();
         return;
       }
       batch.swap(queue_);
@@ -595,10 +601,10 @@ void BehaviorTraceWriter::WriterLoop() {
     }
     WriteBatch(batch);
     {
-      std::lock_guard<std::mutex> lock(mu_);
+      base::AutoLock lock(mu_);
       writing_ = false;
       if (queue_.empty()) {
-        flushed_cv_.notify_all();
+        flushed_cv_.Broadcast();
       }
     }
   }

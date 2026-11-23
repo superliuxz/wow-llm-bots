@@ -1644,10 +1644,18 @@ ActStartResult StartAct(Player* bot,
       return {.done = true};
     }
 
-    case pb::Command_Act::JUMP:
-      bot->GetMotionMaster()->MoveJump(bot->GetPositionX(), bot->GetPositionY(),
-                                       bot->GetPositionZ(), 1.0f, 8.0f);
+    case pb::Command_Act::JUMP: {
+      // Non-zero horizontal step avoids MoveSplineInit's isOrientationOnly
+      // 1 ms clamp when start == end.
+      const float o = bot->GetOrientation();
+      const float jx = bot->GetPositionX() + 0.5f * std::cos(o);
+      const float jy = bot->GetPositionY() + 0.5f * std::sin(o);
+      float jz = bot->GetPositionZ();
+      bot->UpdateAllowedPositionZ(jx, jy, jz);
+      bot->GetMotionMaster()->MoveJump(jx, jy, jz, bot->GetSpeed(MOVE_RUN),
+                                       8.0f);
       return {.done = true};
+    }
 
     case pb::Command_Act::CANCEL: {
       uint32_t cancel_id = 0;
@@ -1797,9 +1805,14 @@ ActStartResult StartAct(Player* bot,
             EQUIP_ERR_OK) {
           return {.error = "cannot equip " + act.name};
         }
+        const uint32_t entry_id = proto->ItemId;
         const uint16_t src = static_cast<uint16_t>(
             (static_cast<uint16_t>(entry.bag) << 8) | entry.slot);
         bot->SwapItem(src, dest);
+        Item* now_equipped = bot->GetItemByPos(dest);
+        if (!now_equipped || now_equipped->GetEntry() != entry_id) {
+          return {.error = "couldn't equip " + act.name};
+        }
         return {.done = true};
       }
       return {.error = "item not in bags: " + act.name};

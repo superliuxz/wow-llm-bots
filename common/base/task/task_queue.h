@@ -57,7 +57,8 @@ class TaskQueue : public SequencedTaskRunner {
   void Shutdown();
 
   // Called (on the posting thread) whenever a new task is posted, so an
-  // external loop can wake up. Set once, before posting starts.
+  // external loop can wake up. Thread-safe; waits for any in-flight wakeup
+  // calls from the previous callback to finish before returning.
   void SetWakeupCallback(RepeatingClosure wakeup);
 
   std::optional<TimeTicks> NextDelayedRunTime() const;

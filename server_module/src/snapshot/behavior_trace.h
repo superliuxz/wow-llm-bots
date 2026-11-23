@@ -8,18 +8,19 @@
 #ifndef MOD_LLM_BRAIN_SNAPSHOT_BEHAVIOR_TRACE_H_
 #define MOD_LLM_BRAIN_SNAPSHOT_BEHAVIOR_TRACE_H_
 
-#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <unordered_map>
 #include <vector>
 
+#include "base/synchronization/condition_variable.h"
+#include "base/synchronization/lock.h"
+#include "base/thread_annotations.h"
+#include "base/threading/platform_thread.h"
 #include "snapshot/snapshot.h"
 
 namespace llm_brain {
@@ -246,16 +247,17 @@ class BehaviorTraceWriter {
   uint64_t max_file_bytes_ = kDefaultMaxFileBytes;
   size_t max_rotated_files_ = kDefaultMaxRotatedFiles;
   size_t max_tracked_chars_per_role_ = kDefaultMaxTrackedCharsPerRole;
-  mutable std::mutex mu_;
-  std::condition_variable cv_;
-  std::condition_variable flushed_cv_;
-  std::deque<PendingLine> queue_;
-  std::unordered_map<std::string, RoleSampleTracker> sample_windows_by_role_;
-  uint64_t untracked_sample_chars_ = 0;
-  uint64_t dropped_lines_ = 0;
-  bool writing_ = false;
-  bool stop_ = false;
-  std::thread worker_;
+  mutable base::Lock mu_;
+  base::ConditionVariable cv_{&mu_};
+  base::ConditionVariable flushed_cv_{&mu_};
+  std::deque<PendingLine> queue_ GUARDED_BY(mu_);
+  std::unordered_map<std::string, RoleSampleTracker> sample_windows_by_role_
+      GUARDED_BY(mu_);
+  uint64_t untracked_sample_chars_ GUARDED_BY(mu_) = 0;
+  uint64_t dropped_lines_ GUARDED_BY(mu_) = 0;
+  bool writing_ GUARDED_BY(mu_) = false;
+  bool stop_ GUARDED_BY(mu_) = false;
+  base::PlatformThreadHandle worker_;
 };
 
 }  // namespace llm_brain

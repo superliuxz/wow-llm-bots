@@ -120,15 +120,41 @@ class RecordingWatcher : public MessagePumpEpoll::FdWatcher {
   void OnFileCanReadWithoutBlocking(int fd) override {
     read_fd = fd;
     ++reads;
+    on_read.Signal();
   }
   void OnFileCanWriteWithoutBlocking(int fd) override {
     write_fd = fd;
     ++writes;
+    on_write.Signal();
   }
   int read_fd = -1;
   int write_fd = -1;
   int reads = 0;
   int writes = 0;
+  WaitableEvent on_read;
+  WaitableEvent on_write;
+};
+
+class HandoffWatcher : public MessagePumpEpoll::FdWatcher {
+ public:
+  HandoffWatcher(MessagePumpEpoll::FdWatchController* next_controller,
+                 MessagePumpEpoll::FdWatcher* next_watcher)
+      : next_controller_(next_controller), next_watcher_(next_watcher) {}
+
+  void OnFileCanReadWithoutBlocking(int /*fd*/) override {}
+  void OnFileCanWriteWithoutBlocking(int fd) override {
+    handoff_ok = CurrentIOThread::Get()->WatchFileDescriptor(
+        fd, /*persistent=*/false, MessagePumpForIO::WATCH_READ,
+        next_controller_, next_watcher_);
+    done.Signal();
+  }
+
+  bool handoff_ok = false;
+  WaitableEvent done;
+
+ private:
+  MessagePumpEpoll::FdWatchController* next_controller_;
+  MessagePumpEpoll::FdWatcher* next_watcher_;
 };
 
 TEST(MessagePumpEpollTest, OneShotReadWriteAndControllerReuse) {
@@ -140,12 +166,15 @@ TEST(MessagePumpEpollTest, OneShotReadWriteAndControllerReuse) {
   ASSERT_EQ(write(p1[1], &byte, 1), 1);
   ASSERT_EQ(write(p2[1], &byte, 1), 1);
 
+  RecordingWatcher watcher;
+  RecordingWatcher rw_watcher;
+  RecordingWatcher handoff_read_watcher;
+  MessagePumpEpoll::FdWatchController controller;
+  MessagePumpEpoll::FdWatchController next_controller;
+  HandoffWatcher handoff_watcher(&next_controller, &handoff_read_watcher);
   Thread io("io");
   ASSERT_TRUE(io.StartWithOptions({MessagePumpType::IO}));
-  RecordingWatcher watcher;
-  MessagePumpEpoll::FdWatchController controller;
 
-  WaitableEvent setup_done;
   io.task_runner()->PostTask([&] {
     // Watch p1[0], then immediately reuse the same controller for p2[0].
     EXPECT_TRUE(CurrentIOThread::Get()->WatchFileDescriptor(
@@ -154,11 +183,8 @@ TEST(MessagePumpEpollTest, OneShotReadWriteAndControllerReuse) {
     EXPECT_TRUE(CurrentIOThread::Get()->WatchFileDescriptor(
         p2[0], /*persistent=*/false, MessagePumpForIO::WATCH_READ, &controller,
         &watcher));
-    setup_done.Signal();
   });
-  ASSERT_TRUE(setup_done.TimedWait(Seconds(2)));
-  // Give the IO pump a turn to dispatch.
-  PlatformThread::Sleep(Milliseconds(20));
+  ASSERT_TRUE(watcher.on_read.TimedWait(Seconds(2)));
 
   WaitableEvent check1;
   io.task_runner()->PostTask([&] {
@@ -169,23 +195,19 @@ TEST(MessagePumpEpollTest, OneShotReadWriteAndControllerReuse) {
   });
   ASSERT_TRUE(check1.TimedWait(Seconds(2)));
 
-  // Now test non-persistent WATCH_READ_WRITE on a socketpair (both readable
-  // and writable at once).
+  // Non-persistent WATCH_READ_WRITE fires both write and read before stopping.
   int sp[2] = {-1, -1};
   ASSERT_EQ(
       socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, sp),
       0);
   ASSERT_EQ(write(sp[1], &byte, 1), 1);
-  RecordingWatcher rw_watcher;
-  WaitableEvent rw_setup;
   io.task_runner()->PostTask([&] {
     EXPECT_TRUE(CurrentIOThread::Get()->WatchFileDescriptor(
         sp[0], /*persistent=*/false, MessagePumpForIO::WATCH_READ_WRITE,
         &controller, &rw_watcher));
-    rw_setup.Signal();
   });
-  ASSERT_TRUE(rw_setup.TimedWait(Seconds(2)));
-  PlatformThread::Sleep(Milliseconds(20));
+  ASSERT_TRUE(rw_watcher.on_write.TimedWait(Seconds(2)));
+  ASSERT_TRUE(rw_watcher.on_read.TimedWait(Seconds(2)));
 
   WaitableEvent rw_check;
   io.task_runner()->PostTask([&] {
@@ -197,6 +219,19 @@ TEST(MessagePumpEpollTest, OneShotReadWriteAndControllerReuse) {
     rw_check.Signal();
   });
   ASSERT_TRUE(rw_check.TimedWait(Seconds(2)));
+
+  // One-shot WATCH_WRITE can hand off the same fd to a new FdWatchController
+  // (as UnixSocketClient does on async EINPROGRESS connect ->
+  // FramedConnection).
+  io.task_runner()->PostTask([&] {
+    EXPECT_TRUE(CurrentIOThread::Get()->WatchFileDescriptor(
+        sp[0], /*persistent=*/false, MessagePumpForIO::WATCH_WRITE, &controller,
+        &handoff_watcher));
+  });
+  ASSERT_TRUE(handoff_watcher.done.TimedWait(Seconds(2)));
+  ASSERT_TRUE(handoff_read_watcher.on_read.TimedWait(Seconds(2)));
+  EXPECT_TRUE(handoff_watcher.handoff_ok);
+  EXPECT_EQ(handoff_read_watcher.read_fd, sp[0]);
 
   io.Stop();
   close(sp[0]);

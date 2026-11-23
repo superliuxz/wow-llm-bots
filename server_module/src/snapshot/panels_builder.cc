@@ -180,9 +180,10 @@ pb::EquipmentPart::Slot SlotOfEquipmentPos(uint8_t slot) {
 // "Cloth", "Mace", ...: the item's subclass as the tooltip names it.
 std::string TypeWord(const ItemTemplate* p) {
   if (p->Class == ITEM_CLASS_ARMOR) {
-    static constexpr const char* kArmor[] = {"", "Cloth", "Leather", "Mail",
-                                             "", "Plate", "",        "Shield",
-                                             "", "",      "",        "Relic"};
+    // Matches upstream enum ItemSubclassArmor (ItemTemplate.h).
+    static constexpr const char* kArmor[] = {
+        "",       "Cloth",  "Leather", "Mail",  "Plate", "Buckler",
+        "Shield", "Libram", "Idol",    "Totem", "Sigil"};
     return p->SubClass < std::size(kArmor) ? kArmor[p->SubClass] : "";
   }
   if (p->Class == ITEM_CLASS_WEAPON) {
@@ -303,13 +304,19 @@ pb::Item BasicItem(const ItemTemplate* p, uint32_t count) {
   return item;
 }
 
-const _Spell* UseSpell(const ItemTemplate* p) {
-  for (const _Spell& spell : p->Spells) {
+struct UseSpellMatch {
+  const _Spell* spell = nullptr;
+  uint8_t index = 0;
+};
+
+std::optional<UseSpellMatch> UseSpell(const ItemTemplate* p) {
+  for (uint8_t i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i) {
+    const _Spell& spell = p->Spells[i];
     if (spell.SpellId > 0 && spell.SpellTrigger == ITEM_SPELLTRIGGER_ON_USE) {
-      return &spell;
+      return UseSpellMatch{&spell, i};
     }
   }
-  return nullptr;
+  return std::nullopt;
 }
 
 pb::Item BagItem(Player* bot, Item* item, uint8_t bag, uint8_t slot) {
@@ -321,12 +328,14 @@ pb::Item BagItem(Player* bot, Item* item, uint8_t bag, uint8_t slot) {
                                slot - INVENTORY_SLOT_ITEM_START + 1)
           : base::StringPrintf("bag %u slot %u",
                                bag - INVENTORY_SLOT_BAG_START + 1, slot + 1);
-  if (const _Spell* use = UseSpell(p)) {
+  if (const std::optional<UseSpellMatch> use = UseSpell(p)) {
     out.usable = bot->CanUseItem(item) == EQUIP_ERR_OK;
     out.cooldown_s =
-        static_cast<float>(bot->GetSpellCooldownDelay(use->SpellId)) / 1000.0f;
-    if (use->SpellCharges != 0) {
-      out.charges = static_cast<uint32_t>(std::abs(item->GetSpellCharges()));
+        static_cast<float>(bot->GetSpellCooldownDelay(use->spell->SpellId)) /
+        1000.0f;
+    if (use->spell->SpellCharges != 0) {
+      out.charges =
+          static_cast<uint32_t>(std::abs(item->GetSpellCharges(use->index)));
     }
   }
   return out;

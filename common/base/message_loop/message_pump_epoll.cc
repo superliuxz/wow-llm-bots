@@ -125,7 +125,7 @@ bool MessagePumpEpoll::WatchFileDescriptor(int fd,
   controller->fd_ = fd;
   controller->mode_ = new_mode;
   controller->persistent_ = persistent;
-  ++controller->generation_;
+  controller->watch_id_ = ++next_watch_id_;
   controllers_[fd] = controller;
   return true;
 }
@@ -141,7 +141,7 @@ bool MessagePumpEpoll::StopWatching(FdWatchController* controller) {
   controller->watcher_ = nullptr;
   controller->fd_ = -1;
   controller->mode_ = 0;
-  ++controller->generation_;
+  controller->watch_id_ = 0;
   return true;
 }
 
@@ -154,7 +154,7 @@ void MessagePumpEpoll::Dispatch(int fd, uint32_t events) {
     return;
   }
   FdWatchController* controller = it->second.get();
-  const uint64_t generation = controller->generation_;
+  const uint64_t watch_id = controller->watch_id_;
   const bool write_ready =
       (controller->mode_ & WATCH_WRITE) && (error || (events & EPOLLOUT));
   const bool read_ready =
@@ -162,21 +162,39 @@ void MessagePumpEpoll::Dispatch(int fd, uint32_t events) {
   if (!write_ready && !read_ready) {
     return;
   }
-  if (write_ready) {
-    controller->watcher_->OnFileCanWriteWithoutBlocking(fd);
-  }
-  if (read_ready) {
-    it = controllers_.find(fd);
-    if (it == controllers_.end() || it->second.get() != controller ||
-        controller->generation_ != generation) {
-      return;  // Stopped, destroyed, or re-armed by the write callback.
-    }
-    controller->watcher_->OnFileCanReadWithoutBlocking(fd);
-  }
-  it = controllers_.find(fd);
-  if (it != controllers_.end() && it->second.get() == controller &&
-      controller->generation_ == generation && !controller->persistent_) {
+  const bool persistent = controller->persistent_;
+  FdWatcher* watcher = controller->watcher_.get();
+  if (!persistent) {
     StopWatching(controller);
+  }
+  if (write_ready && read_ready) {
+    bool watcher_destroyed = false;
+    bool* prev_flag = watcher->destroyed_flag_;
+    watcher->destroyed_flag_ = &watcher_destroyed;
+    watcher->OnFileCanWriteWithoutBlocking(fd);
+    if (watcher_destroyed) {
+      if (prev_flag) {
+        *prev_flag = true;
+      }
+      return;
+    }
+    watcher->destroyed_flag_ = prev_flag;
+    if (persistent) {
+      it = controllers_.find(fd);
+      if (it == controllers_.end() || it->second.get() != controller ||
+          controller->watch_id_ != watch_id) {
+        return;  // Stopped, replaced, or re-armed by the write callback.
+      }
+    } else if (controllers_.find(fd) != controllers_.end()) {
+      return;  // Handed off or re-registered by the one-shot write callback.
+    }
+    watcher->OnFileCanReadWithoutBlocking(fd);
+    return;
+  }
+  if (write_ready) {
+    watcher->OnFileCanWriteWithoutBlocking(fd);
+  } else {
+    watcher->OnFileCanReadWithoutBlocking(fd);
   }
 }
 
