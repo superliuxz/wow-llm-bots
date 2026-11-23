@@ -684,6 +684,62 @@ void CollectUsableBagItems(Player* bot,
     item.out_of_combat_only = out_of_combat_only;
     out->push_back(std::move(item));
   }
+
+  // Also expose up to 4 equippable gear upgrades from bags (B2: mechanical
+  // CanEquipItem + item-level comparison; the brain decides whether to equip).
+  if (!bot->IsInCombat()) {
+    static constexpr size_t kMaxEquipCandidates = 4;
+    size_t equip_added = 0;
+    for (const BagSlotItem& entry : BagItems(bot)) {
+      if (equip_added >= kMaxEquipCandidates ||
+          out->size() >= kMaxUsableBagItems) {
+        break;
+      }
+      Item* bag_item = entry.item;
+      const ItemTemplate* proto = bag_item ? bag_item->GetTemplate() : nullptr;
+      if (!proto || proto->Name1.empty() ||
+          proto->InventoryType == INVTYPE_NON_EQUIP ||
+          (proto->Class != ITEM_CLASS_ARMOR &&
+           proto->Class != ITEM_CLASS_WEAPON)) {
+        continue;
+      }
+      uint16_t dest = 0;
+      if (bot->CanEquipItem(NULL_SLOT, dest, bag_item, true) != EQUIP_ERR_OK) {
+        continue;
+      }
+      const uint8_t equip_slot = static_cast<uint8_t>(dest & 0xFF);
+      const Item* equipped =
+          bot->GetItemByPos(INVENTORY_SLOT_BAG_0, equip_slot);
+      const uint32_t equipped_ilvl = equipped && equipped->GetTemplate()
+                                         ? equipped->GetTemplate()->ItemLevel
+                                         : 0;
+      if (proto->ItemLevel <= equipped_ilvl) {
+        continue;
+      }
+      bool dup = false;
+      for (const pb::OptionFacts_Item& existing : *out) {
+        if (existing.equippable && existing.entry == proto->ItemId) {
+          dup = true;
+          break;
+        }
+      }
+      if (dup) {
+        continue;
+      }
+      pb::OptionFacts_Item item;
+      item.entry = proto->ItemId;
+      item.name = proto->Name1;
+      item.out_of_combat_only = true;
+      item.equippable = true;
+      item.detail =
+          equipped_ilvl > 0
+              ? "ilvl " + std::to_string(proto->ItemLevel) + " vs " +
+                    std::to_string(equipped_ilvl)
+              : "ilvl " + std::to_string(proto->ItemLevel) + ", empty slot";
+      out->push_back(std::move(item));
+      ++equip_added;
+    }
+  }
 }
 
 bool HasFoodOrDrinkAura(Player* bot) {
@@ -1367,6 +1423,43 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
           .pending_spell_id = still_pending ? item_spell_id : 0};
 }
 
+ExecuteResult ExecuteEquipItemOption(Player* bot, const OptionTarget& target) {
+  if (bot->IsInCombat()) {
+    return {"you are in combat"};
+  }
+  constexpr std::string_view kPrefix = "equip:";
+  if (!target.guid.starts_with(kPrefix)) {
+    return {"invalid equip option"};
+  }
+  std::string_view id_str = target.guid;
+  id_str.remove_prefix(kPrefix.size());
+  uint32_t entry = 0;
+  const auto [end, ec] =
+      std::from_chars(id_str.data(), id_str.data() + id_str.size(), entry);
+  if (ec != std::errc() || end != id_str.data() + id_str.size() || entry == 0) {
+    return {"invalid item id"};
+  }
+  for (const BagSlotItem& slot_item : BagItems(bot)) {
+    if (!slot_item.item || slot_item.item->GetEntry() != entry) {
+      continue;
+    }
+    uint16_t dest = 0;
+    if (bot->CanEquipItem(NULL_SLOT, dest, slot_item.item, true) !=
+        EQUIP_ERR_OK) {
+      return {"cannot equip " + target.name};
+    }
+    const uint16_t src = static_cast<uint16_t>(
+        (static_cast<uint16_t>(slot_item.bag) << 8) | slot_item.slot);
+    bot->SwapItem(src, dest);
+    Item* now_equipped = bot->GetItemByPos(dest);
+    if (!now_equipped || now_equipped->GetEntry() != entry) {
+      return {"couldn't equip " + target.name};
+    }
+    return {.used = true, .info = "equipped " + target.name};
+  }
+  return {target.name + " is not in your bags"};
+}
+
 }  // namespace
 
 bool IsSpellCastPending(const Player* bot, uint32_t spell_id) {
@@ -1393,6 +1486,10 @@ ExecuteResult ExecuteOption(Player* bot,
   if (target.kind == OptionTarget::Kind::kUse &&
       target.guid.starts_with("item:")) {
     return ExecuteUseItemOption(bot, target);
+  }
+  if (target.kind == OptionTarget::Kind::kUse &&
+      target.guid.starts_with("equip:")) {
+    return ExecuteEquipItemOption(bot, target);
   }
   if (target.kind == OptionTarget::Kind::kGather ||
       target.kind == OptionTarget::Kind::kUse) {

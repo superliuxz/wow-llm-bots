@@ -100,7 +100,8 @@ bool IsTargetDone(OptionKind kind,
     case OptionKind::kUse: {
       // Bag item options ("item:<entry>") are not nearby GameObjects; they
       // finish via `done_command_id` from the module.
-      if (kind == OptionKind::kUse && guid.starts_with("item:")) {
+      if (kind == OptionKind::kUse &&
+          (guid.starts_with("item:") || guid.starts_with("equip:"))) {
         return false;
       }
       const pb::GameObject* obj = FindObjectByGuid(snapshot, guid);

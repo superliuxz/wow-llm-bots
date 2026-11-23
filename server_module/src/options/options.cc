@@ -412,13 +412,20 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       if (item.entry == 0 || item.name.empty()) {
         continue;
       }
-      if (self.in_combat && item.out_of_combat_only) {
+      if (self.in_combat && (item.out_of_combat_only || item.equippable)) {
         continue;
       }
-      const std::string item_guid = "item:" + std::to_string(item.entry);
+      const std::string item_guid =
+          (item.equippable ? "equip:" : "item:") + std::to_string(item.entry);
       targets.push_back({OptionTarget::Kind::kUse, item_guid, item.name});
       pb::Option& option = snapshot->options.emplace_back();
-      option.text = "Use " + item.name;
+      if (item.equippable) {
+        option.text = item.detail.empty()
+                          ? "Equip " + item.name
+                          : "Equip " + item.name + " (" + item.detail + ")";
+      } else {
+        option.text = "Use " + item.name;
+      }
       option.guid = item_guid;
       option.kind = pb::Option::USE;
       option.name = item.name;

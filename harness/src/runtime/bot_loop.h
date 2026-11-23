@@ -32,15 +32,17 @@
 #include "plan/plan_runner.h"
 #include "plan/triggers.h"
 #include "runtime/decision_log.h"
+#include "screen/knowledge.h"
 #include "screen/screen_renderer.h"
 #include "snapshot/snapshot.h"
 
 namespace harness {
 
 struct BotLoopConfig {
-  std::string rules;          // Shared RULES.md text.
-  std::string bots_dir;       // Optional: var/bots (identity.md + logs).
-  size_t max_in_flight = 16;  // llama-server slots / concurrent calls.
+  std::string rules;           // Shared RULES.md text.
+  std::string bots_dir;        // Optional: var/bots (identity.md + logs).
+  std::string knowledge_path;  // Optional: var/knowledge/world_knowledge.json.
+  size_t max_in_flight = 16;   // llama-server slots / concurrent calls.
   float temperature = 0.7f;
   size_t max_recent_events = 12;
   // A bot with no snapshot for this long has left the world (logged out,
@@ -117,6 +119,7 @@ class BotLoop {
     std::string identity;
     std::string notes;
     std::string current_goal;
+    std::string last_outcome;
     std::deque<std::string> recent_events;
     std::vector<std::string> pending_reasons;
     // Who whispered the bot lately, newest first: the names its `tell` line
@@ -281,6 +284,7 @@ class BotLoop {
   SendCommandFn send_command_;
   LogMessageFn log_message_;
   std::unique_ptr<DecisionLog> decision_log_;
+  WorldKnowledge knowledge_;
   Scheduler scheduler_;
   std::flat_map<std::string, BotState> bots_;
   // Pre-pull compiled standing orders cached by (bot, map, notes).

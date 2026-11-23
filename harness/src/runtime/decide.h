@@ -29,6 +29,8 @@ struct DecideOptions {
   int slot = -1;
   float temperature = 0.7f;
   bool dry_run = false;  // Print the prompt; don't ask the model.
+  // Print the assembled prompt + section-by-section token/byte breakdown.
+  bool inspect_prompt = false;
   // Print only the request body the harness would send, as JSON
   // ({"kinds": [option kinds], "body": {...}}), for tools/bench; don't ask
   // the model.
@@ -42,6 +44,8 @@ struct DecideOptions {
   // Optional boss notes text (or loaded from `notes_path`).
   std::string notes;
   std::string notes_path;
+  // Optional Atlas+Wiki world knowledge JSON path.
+  std::string knowledge_path;
   // Known mechanic/spell/item/unit names enabled for `order:` lines.
   std::vector<std::string> order_names;
   LlmEndpoint endpoint;

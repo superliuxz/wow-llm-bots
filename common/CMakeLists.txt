@@ -183,6 +183,7 @@ add_library(wlb_harness STATIC "${WLB_HARNESS_SRC}/llm/llm_client.cc"
             "${WLB_HARNESS_SRC}/runtime/file_util.cc"
             "${WLB_HARNESS_SRC}/runtime/module_connection.cc"
             "${WLB_HARNESS_SRC}/runtime/run.cc"
+            "${WLB_HARNESS_SRC}/screen/knowledge.cc"
             "${WLB_HARNESS_SRC}/screen/prompt.cc"
             "${WLB_HARNESS_SRC}/screen/screen_renderer.cc")
 target_include_directories(wlb_harness PUBLIC "${WLB_HARNESS_SRC}"
@@ -234,6 +235,7 @@ add_executable(harness_unittests
   "${WLB_HARNESS_SRC}/runtime/file_util_unittest.cc"
   "${WLB_HARNESS_SRC}/runtime/module_connection_unittest.cc"
   "${WLB_HARNESS_SRC}/runtime/run_unittest.cc"
+  "${WLB_HARNESS_SRC}/screen/knowledge_unittest.cc"
   "${WLB_HARNESS_SRC}/screen/prompt_unittest.cc"
   "${WLB_HARNESS_SRC}/screen/screen_renderer_unittest.cc"
   "${WLB_HARNESS_SRC}/test/gbnf_check_unittest.cc")

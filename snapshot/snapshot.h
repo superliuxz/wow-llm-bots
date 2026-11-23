@@ -2829,6 +2829,8 @@ struct OptionFacts_Item {
   uint32_t entry = 0;
   std::string name;
   bool out_of_combat_only = false;
+  bool equippable = false;
+  std::string detail;
 
   bool operator==(const OptionFacts_Item&) const = default;
 };

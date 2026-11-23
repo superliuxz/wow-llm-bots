@@ -30,6 +30,7 @@
 #include "plan/triggers.h"
 #include "runtime/decision_log.h"
 #include "runtime/file_util.h"
+#include "screen/knowledge.h"
 #include "screen/prompt.h"
 #include "screen/screen_renderer.h"
 #include "snapshot/snapshot.h"
@@ -89,7 +90,20 @@ BotLoop::BotLoop(BotLoopConfig config,
       decision_log_(config_.bots_dir.empty()
                         ? nullptr
                         : std::make_unique<DecisionLog>(config_.bots_dir)),
-      scheduler_(config_.max_in_flight) {}
+      scheduler_(config_.max_in_flight) {
+  if (!config_.knowledge_path.empty()) {
+    std::string err;
+    if (std::optional<WorldKnowledge> wk =
+            WorldKnowledge::LoadFile(config_.knowledge_path, &err)) {
+      knowledge_ = std::move(*wk);
+      Log(base::StringPrintf(
+          "harness: loaded world knowledge (%zu quests, %zu zones, %zu "
+          "dungeons) from %s",
+          knowledge_.quest_count(), knowledge_.zone_count(),
+          knowledge_.dungeon_count(), config_.knowledge_path.c_str()));
+    }
+  }
+}
 
 BotLoop::~BotLoop() = default;
 
@@ -117,6 +131,7 @@ void BotLoop::OnConnectionChanged(bool connected) {
       state.early_steps_dispatched = false;
       state.early_step_failed = false;
       state.step_refusals = 0;
+      state.last_outcome.clear();
       state.order_wakes = 0;
       state.pending_reasons.clear();
       state.recent_events.clear();
@@ -318,6 +333,7 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
       *state.latest_snapshot, state.latest_screen, received_at);
   if (action.step_done) {
     state.step_refusals = 0;
+    state.last_outcome.clear();
   }
   DispatchRunnerAction(bot, &state, action);
   if (!state.has_queued_wake && !state.call_in_flight &&
@@ -406,6 +422,9 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
       return;
     } else {
       state.runner.Stop();
+      if (!imm.event.error->text.empty()) {
+        state.last_outcome = imm.event.error->text;
+      }
       if (state.call_in_flight) {
         state.early_step_failed = true;
       }
@@ -466,6 +485,7 @@ void BotLoop::OnTick(base::TimeTicks now) {
       state.early_steps_dispatched = false;
       state.early_step_failed = false;
       state.step_refusals = 0;
+      state.last_outcome.clear();
       state.order_wakes = 0;
       state.pending_reasons.clear();
       state.recent_events.clear();
@@ -596,7 +616,10 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
   // Ages on the snapshots' clock (seen_at is a snapshot's received time).
   input.remembered = RememberedPanels(state, state.latest_received_at,
                                       config_.remember_panels_for);
+  input.last_outcome = state.last_outcome;
   input.notes = SelectRelevantNotes(state.notes, *state.latest_snapshot);
+  input.knowledge =
+      knowledge_.SelectRelevant(*state.latest_snapshot, !input.notes.empty());
   state.last_selected_notes = input.notes;
   for (const Order& o : state.orders.orders()) {
     input.active_orders.push_back(FormatOrder(o));

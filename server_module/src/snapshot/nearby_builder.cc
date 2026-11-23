@@ -696,6 +696,41 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
       ++stats.areas;
     }
   }
+
+  // Pull danger (B3): for living hostile/neutral NPCs without an explicit
+  // CreatureGroup formation, count nearby living hostile/neutral NPCs within
+  // social aggro range (15 yd) so the brain sees pack density before pulling.
+  constexpr float kSocialPullRadiusYd = 15.0f;
+  const auto is_live_pullable_npc = [](const pb::Unit& u) {
+    return !u.dead && u.kind == pb::Unit::NPC &&
+           (u.reaction == pb::Unit::HOSTILE || u.reaction == pb::Unit::NEUTRAL);
+  };
+  for (size_t i = 0; i < nearby->units.size(); ++i) {
+    pb::Unit& u = nearby->units[i];
+    if (u.pack || !is_live_pullable_npc(u)) {
+      continue;
+    }
+    uint32_t nearby_count = 1;
+    const pb::Vec3& p = u.rel.position;
+    for (size_t j = 0; j < nearby->units.size(); ++j) {
+      if (i == j || !is_live_pullable_npc(nearby->units[j])) {
+        continue;
+      }
+      const pb::Vec3& q = nearby->units[j].rel.position;
+      const float dx = p.x - q.x;
+      const float dy = p.y - q.y;
+      const float dz = p.z - q.z;
+      if (dx * dx + dy * dy + dz * dz <=
+          kSocialPullRadiusYd * kSocialPullRadiusYd) {
+        ++nearby_count;
+      }
+    }
+    if (nearby_count >= 2) {
+      pb::Unit::Pack& pack = u.pack.emplace();
+      pack.id = 0;
+      pack.size = nearby_count;
+    }
+  }
   return stats;
 }
 

@@ -24,6 +24,7 @@
 #include "plan/plan.h"
 #include "runtime/decision_log.h"
 #include "runtime/file_util.h"
+#include "screen/knowledge.h"
 #include "screen/prompt.h"
 #include "screen/screen_renderer.h"
 #include "snapshot/snapshot.h"
@@ -102,6 +103,8 @@ std::optional<DecideOptions> ParseDecideArgs(
       options.temperature = static_cast<float>(real);
     } else if (name == "dry-run" && value.empty()) {
       options.dry_run = true;
+    } else if (name == "inspect-prompt" && value.empty()) {
+      options.inspect_prompt = true;
     } else if (name == "print-request" && value.empty()) {
       options.print_request = true;
     } else if (name == "json" && value.empty()) {
@@ -113,6 +116,8 @@ std::optional<DecideOptions> ParseDecideArgs(
       options.notes = value;
     } else if (name == "notes-file") {
       options.notes_path = value;
+    } else if (name == "knowledge") {
+      options.knowledge_path = value;
     } else if (name == "order-names") {
       options.order_names = base::SplitString(value, ",", base::TRIM_WHITESPACE,
                                               base::SPLIT_WANT_NONEMPTY);
@@ -180,6 +185,16 @@ int RunDecide(const DecideOptions& options,
   if (!input.notes.empty()) {
     input.notes = SelectRelevantNotes(input.notes, snapshot);
   }
+  if (!options.knowledge_path.empty()) {
+    std::string kerr;
+    const std::optional<WorldKnowledge> wk =
+        WorldKnowledge::LoadFile(options.knowledge_path, &kerr);
+    if (!wk) {
+      base::StrAppend(report, {kerr, "\n"});
+      return 1;
+    }
+    input.knowledge = wk->SelectRelevant(snapshot, !input.notes.empty());
+  }
   input.order_names = CollectOrderNames(snapshot, input.notes);
   for (const std::string& extra : options.order_names) {
     if (std::find(input.order_names.begin(), input.order_names.end(), extra) ==
@@ -200,6 +215,10 @@ int RunDecide(const DecideOptions& options,
   }
 
   const Screen screen = RenderScreen(snapshot);
+  if (options.inspect_prompt) {
+    base::StrAppend(report, {FormatPromptInspection(input, screen)});
+    return 0;
+  }
   const LlmRequest request = BuildPlanRequest(input, screen);
   if (options.print_request) {
     // Kind names are plain words (OptionKindName): no JSON escaping needed.

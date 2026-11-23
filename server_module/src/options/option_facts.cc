@@ -154,7 +154,10 @@ void FillSpots(const WorldPlaces& world,
                   bucket ? bucket->Label() : "");
   }
 
-  // None in this zone at this level: the zone's buckets within 6 levels.
+  // None in this zone at this level: try the zone's buckets within 6 levels,
+  // then fall back to neighboring zones on the same continent (within
+  // kMaxTravelDistYd) so an outleveled bot (e.g. level 14 in Elwynn Forest)
+  // always gets concrete travel options into the next zone.
   if (candidates.empty()) {
     for (const auto& [key, b] : world.buckets()) {
       if (b.map_id != view.map_id || (!in_city && b.zone_id != view.zone_id) ||
@@ -166,6 +169,22 @@ void FillSpots(const WorldPlaces& world,
         continue;
       }
       add_candidate(b.centroid.x, b.centroid.y, b.centroid.z, b.Label());
+    }
+  }
+  if (candidates.empty() && !in_city) {
+    for (const auto& [key, b] : world.buckets()) {
+      if (b.map_id != view.map_id || b.zone_id == view.zone_id || b.count < 2) {
+        continue;
+      }
+      if (b.min_level > view.level + 4u ||
+          (view.level > 4 && b.max_level + 4u < view.level)) {
+        continue;
+      }
+      std::string label = b.Label();
+      if (const std::string zname = AreaName(b.zone_id); !zname.empty()) {
+        label = label.empty() ? zname : base::StrCat({zname, ": ", label});
+      }
+      add_candidate(b.centroid.x, b.centroid.y, b.centroid.z, std::move(label));
     }
   }
 
@@ -289,6 +308,11 @@ void FillPlaces(const WorldPlaces& world,
   });
   pick_first([](const WorldPlaces::Hub& h) { return h.has_flight_master; });
   pick_first([](const WorldPlaces::Hub& h) { return h.has_quests; });
+  pick_first([&](const WorldPlaces::Hub& h) {
+    return h.has_quests && h.min_quest_level > 0 &&
+           h.min_quest_level <= view.level + 3u &&
+           h.max_quest_level + 3u >= view.level;
+  });
 
   const GraveyardStruct* grave = sGraveyard->GetClosestGraveyard(
       view.map_id, view.pos.x, view.pos.y, view.pos.z,
@@ -317,7 +341,16 @@ void FillPlaces(const WorldPlaces& world,
       services.push_back("flight master");
     }
     if (hub->has_quests) {
-      services.push_back("quests");
+      if (hub->min_quest_level > 0 &&
+          hub->max_quest_level >= hub->min_quest_level) {
+        services.push_back(
+            hub->min_quest_level == hub->max_quest_level
+                ? Acore::StringFormat("quests lvl {}", hub->min_quest_level)
+                : Acore::StringFormat("quests lvl {}-{}", hub->min_quest_level,
+                                      hub->max_quest_level));
+      } else {
+        services.push_back("quests");
+      }
     }
     if (grave && std::hypot(grave->x - hub->pos.x, grave->y - hub->pos.y) <=
                      kGraveyardMergeYd) {
@@ -436,11 +469,11 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
       continue;
     }
 
-    // A service NPC, for Go to <place>.
+    // A service or quest-giver NPC, for Go to <place>.
     constexpr uint32_t kHubFlags =
         UNIT_NPC_FLAG_INNKEEPER | UNIT_NPC_FLAG_VENDOR | UNIT_NPC_FLAG_REPAIR |
         UNIT_NPC_FLAG_FLIGHTMASTER | UNIT_NPC_FLAG_TRAINER |
-        UNIT_NPC_FLAG_TRAINER_CLASS;
+        UNIT_NPC_FLAG_TRAINER_CLASS | UNIT_NPC_FLAG_QUESTGIVER;
     if ((tmpl->npcflag & kHubFlags) == 0) {
       continue;
     }
@@ -506,6 +539,20 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
     hub->has_repair |= has_repair;
     hub->has_flight_master |= has_fm;
     hub->has_quests |= has_quests;
+    if (has_quests) {
+      const auto bounds =
+          sObjectMgr->GetCreatureQuestRelationBounds(tmpl->Entry);
+      for (auto it = bounds.first; it != bounds.second; ++it) {
+        if (const Quest* q = sObjectMgr->GetQuestTemplate(it->second);
+            q && q->GetQuestLevel() > 0) {
+          const uint32_t ql = static_cast<uint32_t>(q->GetQuestLevel());
+          if (hub->min_quest_level == 0 || ql < hub->min_quest_level) {
+            hub->min_quest_level = ql;
+          }
+          hub->max_quest_level = std::max(hub->max_quest_level, ql);
+        }
+      }
+    }
     hub->class_trainer_mask |= class_mask;
     if (has_inn && !hub->pos_from_innkeeper) {
       hub->pos = {data.posX, data.posY, data.posZ};

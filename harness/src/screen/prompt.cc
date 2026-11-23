@@ -11,6 +11,7 @@
 
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "llm/llm_client.h"
 #include "plan/plan.h"
 #include "screen/screen_renderer.h"
@@ -295,6 +296,10 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
     base::StrAppend(&prefix,
                     {"Current goal: ", OneLine(input.current_goal), ".\n"});
   }
+  if (!input.last_outcome.empty()) {
+    base::StrAppend(&prefix,
+                    {"Last outcome: ", OneLine(input.last_outcome), ".\n"});
+  }
   base::StrAppend(&prefix, {"Woken: ", OneLine(input.wake_reason), "."});
   if (!input.recent_events.empty()) {
     base::StrAppend(&prefix, {"\n\nSince your last look:"});
@@ -340,7 +345,19 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
 
   request.user = base::StrCat({prefix, remembered_block, screen_block});
 
-  // Put boss notes after the live screen and only within remaining budget.
+  // Put world guide and boss notes after the live screen and only within
+  // remaining budget so live screen & options are never crowded out.
+  if (!input.knowledge.empty() && request.user.size() < max_user_bytes) {
+    const size_t remaining = max_user_bytes - request.user.size();
+    constexpr std::string_view kHeader = "\n\nWorld guide:\n";
+    if (remaining > kHeader.size() + 32) {
+      constexpr size_t kMaxKnowledgePromptBytes = 1200;
+      const size_t budget =
+          std::min(kMaxKnowledgePromptBytes, remaining - kHeader.size());
+      base::StrAppend(&request.user,
+                      {kHeader, CapText(input.knowledge, budget)});
+    }
+  }
   if (!input.notes.empty() && request.user.size() < max_user_bytes) {
     const size_t remaining = max_user_bytes - request.user.size();
     constexpr std::string_view kHeader = "\n\nYour boss notes:\n";
@@ -363,6 +380,66 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
   request.slot = input.slot;
   request.temperature = input.temperature;
   return request;
+}
+
+PromptBreakdown InspectPrompt(const PromptInput& input, const Screen& screen) {
+  const LlmRequest req = BuildPlanRequest(input, screen);
+  PromptBreakdown b;
+  b.system_bytes = req.system.size();
+  b.user_bytes = req.user.size();
+  b.slot_budget_tokens = kSlotMaxTokens;
+
+  const size_t rem_pos = req.user.find("\n\nYou remember (not on screen now):");
+  const size_t scr_pos = req.user.find("\n\nYour screen now:\n");
+  const size_t know_pos = req.user.find("\n\nWorld guide:\n");
+  const size_t notes_pos = req.user.find("\n\nYour boss notes:\n");
+
+  const size_t prefix_end = rem_pos != std::string::npos   ? rem_pos
+                            : scr_pos != std::string::npos ? scr_pos
+                                                           : req.user.size();
+  b.prefix_bytes = prefix_end;
+  if (rem_pos != std::string::npos && scr_pos != std::string::npos &&
+      scr_pos > rem_pos) {
+    b.remembered_bytes = scr_pos - rem_pos;
+  }
+  if (scr_pos != std::string::npos) {
+    const size_t scr_end = know_pos != std::string::npos    ? know_pos
+                           : notes_pos != std::string::npos ? notes_pos
+                                                            : req.user.size();
+    if (scr_end > scr_pos) {
+      b.screen_bytes = scr_end - scr_pos;
+    }
+  }
+  if (know_pos != std::string::npos) {
+    const size_t know_end =
+        notes_pos != std::string::npos ? notes_pos : req.user.size();
+    if (know_end > know_pos) {
+      b.knowledge_bytes = know_end - know_pos;
+    }
+  }
+  if (notes_pos != std::string::npos && req.user.size() > notes_pos) {
+    b.notes_bytes = req.user.size() - notes_pos;
+  }
+  b.est_system_tokens = EstimateTokens(req.system);
+  b.est_user_tokens = EstimateTokens(req.user);
+  b.est_total_tokens = b.est_system_tokens + b.est_user_tokens;
+  return b;
+}
+
+std::string FormatPromptInspection(const PromptInput& input,
+                                   const Screen& screen) {
+  const LlmRequest req = BuildPlanRequest(input, screen);
+  const PromptBreakdown b = InspectPrompt(input, screen);
+  return base::StringPrintf(
+      "== prompt inspection (%s, %zu options)\n"
+      "tokens (est): total=%zu / %zu (system=%zu, user=%zu)\n"
+      "bytes: system=%zu, prefix=%zu, remembered=%zu, screen=%zu, "
+      "knowledge=%zu, notes=%zu, user_total=%zu\n"
+      "-- user prompt --\n%s\n",
+      input.bot_name.c_str(), screen.options.size(), b.est_total_tokens,
+      b.slot_budget_tokens, b.est_system_tokens, b.est_user_tokens,
+      b.system_bytes, b.prefix_bytes, b.remembered_bytes, b.screen_bytes,
+      b.knowledge_bytes, b.notes_bytes, b.user_bytes, req.user.c_str());
 }
 
 }  // namespace harness

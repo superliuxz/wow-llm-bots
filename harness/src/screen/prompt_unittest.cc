@@ -212,5 +212,42 @@ TEST(PromptTest, SelectRelevantNotesPicksActiveBossAndNeverCutsMidOrder) {
   EXPECT_EQ(SelectRelevantNotes(small_notes, sarth), small_notes);
 }
 
+TEST(PromptTest, KnowledgeOutcomeAndInspectPromptBreakdown) {
+  PromptInput input;
+  input.rules = "You play WoW.";
+  input.bot_name = "Testpriest";
+  input.current_goal = "Finish Kobold Candles";
+  input.last_outcome = "out of range";
+  input.wake_reason = "plan done";
+  input.knowledge =
+      "- Zone: Elwynn Forest (levels 1-10)\n- Outleveled zone: next zones: "
+      "Westfall (10-20)";
+  input.notes = "## Hogger\n- Watch for adds.";
+
+  Screen screen;
+  screen.text = "level 14 priest\n  1. Go to Westfall\n  2. Keep\n";
+  screen.options = {OptionKind::kAttack, OptionKind::kKeep};
+
+  const LlmRequest req = BuildPlanRequest(input, screen);
+  EXPECT_NE(req.user.find("Last outcome: out of range."), std::string::npos);
+  EXPECT_NE(req.user.find("World guide:\n- Zone: Elwynn Forest"),
+            std::string::npos);
+  EXPECT_NE(req.user.find("Your boss notes:\n## Hogger"), std::string::npos);
+
+  const PromptBreakdown b = InspectPrompt(input, screen);
+  EXPECT_EQ(b.system_bytes, input.rules.size());
+  EXPECT_GT(b.prefix_bytes, 0u);
+  EXPECT_GT(b.screen_bytes, 0u);
+  EXPECT_GT(b.knowledge_bytes, 0u);
+  EXPECT_GT(b.notes_bytes, 0u);
+  EXPECT_EQ(b.user_bytes, req.user.size());
+  EXPECT_EQ(b.est_total_tokens, b.est_system_tokens + b.est_user_tokens);
+
+  const std::string dump = FormatPromptInspection(input, screen);
+  EXPECT_NE(dump.find("== prompt inspection (Testpriest, 2 options)"),
+            std::string::npos);
+  EXPECT_NE(dump.find("knowledge="), std::string::npos);
+}
+
 }  // namespace
 }  // namespace harness

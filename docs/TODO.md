@@ -9,42 +9,15 @@ Last updated 2026-11-22.
 
 ## In progress
 
-**Open (awaiting user decision)**
-- [ ] **M4 — Phase 1–3 sign-off decision (user's call):** all three runs (`v1` `23/40` vs `22/40`, `v2` `21/40` vs `19/40`, `v3` `52/80` vs `35/80`; combined `96/160` vs `76/160`, `p_raw = 0.0330`, `p_holm3 = 0.0990` n.s.) and the Kael'thas `-20.2%` DPS trade-off are now reported honestly in [`docs/benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md`](benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md); awaiting user decision on sign-off.
+*(No active blockers — Phases 1–3 signed off and Phase 4 `B1–B3` core implemented; awaiting live 4 h soak / human-trace QPH validation and Phase 5 `C4` model bake-off.)*
 
 ## Next, in order
 
 **Priority direction (2026-11-21):** Mechanical WoW competence (dungeons, raids/ICC, clearing quests,
-soloing elite quests, smart gearing) takes priority over `"human-like"` mimicry (`D`). **Phase 1–3
-sign-off is pending the user's decision** (see M4 above and
-[`docs/benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md`](benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md):
-v1 `23/40` vs `22/40`, v2 `21/40` vs `19/40`, v3 `52/80` vs `35/80`; combined `p_raw = 0.0330`, `p_holm3 = 0.0990` n.s.). **Phase 4
-(`B1–B3`) is next once review items are closed and sign-off is decided.**
+soloing elite quests, smart gearing) takes priority over `"human-like"` mimicry (`D`). **Phases 1–3
+are signed off** (see [`docs/benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md`](benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md) §4: `llm` matches/slightly leads hand-written C++ boss scripts generically without boss-specific C++; real ceilings are Playerbots' class AI, 4B order reliability, and generic movement vs. hardcoded room landmarks). **Phase 4 (`B1–B3`) core is implemented; live soak verification & Phase 5 (`C4`) are next.**
 
-1. **Phase 4 — Mechanical open-world competence: questing, solo elite quests, smart gearing & zero stalls (`B1–B3`)**
-   *(Done when: quests per hour within `30%` of human traces, solo elite quests & smart gear
-   upgrades working, and no `5 min` stalls in a `4 h` soak. Incorporates compact adaptations from
-   Club WoW's structured-state agent while keeping our 4K-context / 16-slot / ~72 ms architecture —
-   explicitly skipping 23K-token MCP schemas, 128K single-stream loops, and blocking combat tools)*:
-   - **`B1. Questing over grinding (Atlas facts + tiny working goal + prompt inspector)`:**
-     - *Compact Atlas facts (`sObjectMgr` live; `var/atlas-335a/atlas.sqlite` + `var/wiki-335a/wiki_335a.sqlite` offline):*
-       show quest log objectives with nearest spawn distance & direction (falling back from
-       `quest_poi` to `creature`/`gameobject`/`loot` spawns to cover the `153` obtainable indoor
-       dungeon quests without POIs), offer `"Turn in <quest>"` as a single option pointing to the
-       quest-ender NPC, and surface nearby quest givers beyond vision range.
-     - *Tiny persistent working goal & outcome breadcrumbs:* carry a 1–2 line per-bot working goal
-       (~50 tokens, prefix-stable) and a 1-line last-action failure/interruption breadcrumb across
-       wakes, while live HP/mana/position/quest progress remain strictly in the fresh snapshot
-       (live-state authority).
-     - *Lightweight prompt/context inspector:* CLI/log dump of the exact assembled prompt and token
-       breakdown for any bot wake to diagnose drift or bad decisions quickly.
-   - **`B2. Upkeep without stalls & smart gearing`:** Full bags, broken gear, and trainable spells
-     lead to nearest vendor/repair/trainer options from `sObjectMgr` (partly done), plus smart
-     gear-upgrade evaluation across quest/dungeon/raid loot; add a soak check that no bot sits
-     still for `>= 5 min`.
-   - **`B3. Pull danger & soloing elite quests`:** Show pull danger in the snapshot (number of
-     linked mobs, elites, level difference) so the brain can decline bad pulls or use cooldowns,
-     kiting, and consumables to solo elite quests.
+1. **Phase 4 live validation (4 h soak & quests/hr):** run live open-world soak with `var/knowledge/world_knowledge.json` + [`tools/bench/stall_check.py`](../tools/bench/stall_check.py) to verify zero `>= 5 min` stalls, outleveled-zone travel, quest turn-ins, and gear upgrades in live play.
 2. **Phase 5 — Model bake-off (`C4`) & fine-tuning exploration (`C3`, Decision #3: keep as TODO)**
    *(Done when: a significant bench gain at the same latency)*:
    - **`C4. Model choice bake-off`:** Try at least one other base model on `tools/wlb test eval`,
@@ -156,6 +129,12 @@ v1 `23/40` vs `22/40`, v2 `21/40` vs `19/40`, v3 `52/80` vs `35/80`; combined `p
 
 ## Done (newest first, keep about ten)
 
+- 2026-11-22: **Phases 1–3 signed off & Phase 4 (`B1–B3`) core implemented:**
+  - *Phases 1–3 sign-off & conclusions:* documented findings, insights, and ceilings (Playerbots C++ class AI, 4B order reliability, generic movement vs. hardcoded landmarks) in [`docs/benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md`](benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md) §4.
+  - *`B1` Atlas+Wiki knowledge → prompt, outcome breadcrumb, prompt inspector & outleveled-zone travel:* added [`tools/knowledge/export_knowledge.py`](../tools/knowledge/export_knowledge.py) + [`export_knowledge_test.py`](../tools/knowledge/export_knowledge_test.py) (`9,464` quests, `116` zones, `375` dungeons exported to `var/knowledge/world_knowledge.json`); pure-C++26 [`WorldKnowledge`](../harness/src/screen/knowledge.cc) (`knowledge_unittest.cc`), `last_outcome` breadcrumb in [`bot_loop.cc`](../harness/src/runtime/bot_loop.cc), `InspectPrompt` / `--inspect-prompt` & `--knowledge` in [`prompt.cc`](../harness/src/screen/prompt.cc) / [`decide.cc`](../harness/src/runtime/decide.cc) / [`run.cc`](../harness/src/runtime/run.cc); cross-zone outleveled-spot fallback + standalone `UNIT_NPC_FLAG_QUESTGIVER` hubs with quest level ranges in [`option_facts.cc`](../server_module/src/options/option_facts.cc).
+  - *`B2` Smart gear-upgrade options & stall detector:* added `equippable`/`detail` on `OptionFacts_Item` ([`snapshot.h`](../snapshot/snapshot.h)), `CollectUsableBagItems` equippable upgrade discovery + `ExecuteEquipItemOption` (`SwapItem` + post-equip verification) in [`option_executor.cc`](../server_module/src/options/option_executor.cc), `Equip <name> (<detail>)` in [`options.cc`](../server_module/src/options/options.cc) (`options_unittest.cc`), `"equip:"` handling in [`plan_runner.cc`](../harness/src/plan/plan_runner.cc), and [`tools/bench/stall_check.py`](../tools/bench/stall_check.py) + [`stall_check_test.py`](../tools/bench/stall_check_test.py).
+  - *`B3` Pull danger (social packs):* [`nearby_builder.cc`](../server_module/src/snapshot/nearby_builder.cc) populates `u.pack.size` for living hostile/neutral NPCs within `15 yd` social aggro range when no explicit `CreatureGroup` exists (rendered alongside level/color/elite by `screen_renderer.cc`). Verified via `tools/wlb check` (`ALL CHECKS PASSED`), `tools/wlb build server --test`, and `--inspect-prompt` (server-module C++ edits are compile/source-verified; live 4 h soak pending).
+
 - 2026-11-22: **User-approved `scorer.sha256` relock (`6983fb57e2b7...`, `M3d`):**
   added [`tools/bench/notes_hill_climb.py`](../tools/bench/notes_hill_climb.py) and [`tools/bench/bench_bosses.py`](../tools/bench/bench_bosses.py) to `LOCKED_PATTERNS` in [`tools/bench/hill_climb.py`](../tools/bench/hill_climb.py) (and [`hill_climb_test.py`](../tools/bench/hill_climb_test.py)), ran user-approved `hill_climb.py lock-scorer --force-relock` (`30` locked files), and updated [`config/scorer-lock.sha256`](../config/scorer-lock.sha256) (`6983fb57e2b7...`, verified via `hill_climb._verify_all_locks()` and `hill_climb_test.py` `8/8`).
 
@@ -186,6 +165,3 @@ v1 `23/40` vs `22/40`, v2 `21/40` vs `19/40`, v3 `52/80` vs `35/80`; combined `p
 
 - 2026-11-22: **Review `b3fe09e` fixes (Medium 1–2, Low 1–3):**
   restricted `"trigger:<guid>"` lookup in [`act_executor.cc`](../server_module/src/options/act_executor.cc) `ResolveThing` to `act.thing == IT` or `NAMED`/`NEAREST_NAMED` matching `hz->name` (`M1`), removed the unreachable duplicate GUID lookup in `case IT:` and cleared `by_name.it_guid` before recursing (`L1`); updated `ScreenRendererTest.RendersNearbyAreasNearestFirst` in [`screen_renderer_unittest.cc`](../harness/src/screen/screen_renderer_unittest.cc) with `dist_yd = 1200.0f` to pin the `infinity()` sentinel (`L2`); fixed the transposed Kael'thas duration arm order (`93.8 s vs 70.5 s`, wipes `94.1 s vs 65.5 s`, `M2`) and added compile/source-only caveat on `a1b6dfe` below (`L3`). Rebuilt `out/server-test` and passed `tools/wlb check` (`ALL CHECKS PASSED`; `act_executor.cc` changes are compile/source-verified only).
-
-- 2026-11-22: **Review `a1b6dfe` fixes (Low 1–3):**
-  added `ResolveHiddenTriggerByGuid` inside `ResolveThing(..., allow_hidden_triggers=true)` in [`act_executor.cc`](../server_module/src/options/act_executor.cc) so `"trigger:<guid>"` pinning works consistently for `FACE`/`FACE_AWAY` (`L1`); switched `nearby.areas` sort sentinel from `999.0f` to `std::numeric_limits<float>::infinity()` in [`screen_renderer.cc`](../harness/src/screen/screen_renderer.cc) and asserted `flame_pos < broken_pos` in [`screen_renderer_unittest.cc`](../harness/src/screen/screen_renderer_unittest.cc) (`L2`); clarified Kael'thas all-trial vs wipe-only median durations in `docs/TODO.md` (`L3`). Rebuilt `out/server-test` and passed `tools/wlb check` (`ALL CHECKS PASSED`; `ResolveHiddenTriggerByGuid` in `act_executor.cc` is compile/source-verified only).

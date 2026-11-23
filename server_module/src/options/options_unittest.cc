@@ -369,7 +369,8 @@ TEST(OptionsTest, OptionFactsJsonRoundTrip) {
                           pb::N,
                           900.0f,
                           {300, -4700, 10}});
-  facts.usable_items.push_back({37860, "Ruby Essence", true});
+  facts.usable_items.push_back(
+      {.entry = 37860, .name = "Ruby Essence", .out_of_combat_only = true});
   facts.party_targets.push_back({"Loada", "0x20"});
 
   const std::string json = pb::WriteJson(facts, /*pretty=*/true);
@@ -577,8 +578,11 @@ TEST(OptionsTest, AssistResolvesExactGuidCapAndEdgeCases) {
 
 TEST(OptionsTest, UsableBagItemsOfferedAsUseOptionsAndFilteredInCombat) {
   OptionFacts facts;
-  facts.usable_items.push_back({37860, "Ruby Essence", true});
-  facts.usable_items.push_back({33447, "Runic Healing Potion", false});
+  facts.usable_items.push_back(
+      {.entry = 37860, .name = "Ruby Essence", .out_of_combat_only = true});
+  facts.usable_items.push_back({.entry = 33447,
+                                .name = "Runic Healing Potion",
+                                .out_of_combat_only = false});
 
   pb::Snapshot ooc;
   ooc.base.self.in_combat = false;
@@ -598,6 +602,30 @@ TEST(OptionsTest, UsableBagItemsOfferedAsUseOptionsAndFilteredInCombat) {
                                                  "Keep doing what I'm doing"}));
   ASSERT_EQ(ic_targets.size(), 2u);
   EXPECT_EQ(ic_targets[0].guid, "item:33447");
+}
+
+TEST(OptionsTest, EquippableBagUpgradesOfferedOutOfCombatWithDetail) {
+  OptionFacts facts;
+  facts.usable_items.push_back(
+      {1234, "Robes of the Arugal", true, true, "ilvl 29 vs 14"});
+
+  pb::Snapshot ooc;
+  ooc.base.self.in_combat = false;
+  const std::vector<OptionTarget> ooc_targets = AddOptions(&ooc, facts);
+  EXPECT_EQ(Texts(ooc), (std::vector<std::string>{
+                            "Equip Robes of the Arugal (ilvl 29 vs 14)",
+                            "Keep doing what I'm doing"}));
+  ASSERT_EQ(ooc_targets.size(), 2u);
+  EXPECT_EQ(ooc_targets[0].kind, OptionTarget::Kind::kUse);
+  EXPECT_EQ(ooc_targets[0].guid, "equip:1234");
+  EXPECT_EQ(ooc_targets[0].name, "Robes of the Arugal");
+  EXPECT_EQ(ooc.options[0].guid, "equip:1234");
+
+  pb::Snapshot ic;
+  ic.base.self.in_combat = true;
+  const std::vector<OptionTarget> ic_targets = AddOptions(&ic, facts);
+  EXPECT_EQ(Texts(ic), (std::vector<std::string>{"Keep doing what I'm doing"}));
+  ASSERT_EQ(ic_targets.size(), 1u);
 }
 
 }  // namespace

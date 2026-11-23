@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""Unit tests for tools/knowledge/export_knowledge.py (self-contained SQLite fixture)."""
+
+from __future__ import annotations
+
+import json
+import pathlib
+import sqlite3
+import sys
+import tempfile
+import unittest
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(ROOT / "tools" / "knowledge"))
+import export_knowledge as ek  # noqa: E402
+
+
+def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
+    atlas = tmp / "atlas.sqlite"
+    wiki = tmp / "wiki.sqlite"
+
+    con_a = sqlite3.connect(atlas)
+    con_a.executescript(
+        """
+        CREATE TABLE quests (
+            quest_id INTEGER PRIMARY KEY, title TEXT, quest_level INTEGER,
+            min_level INTEGER, log_description TEXT, wiki_page_id INTEGER
+        );
+        CREATE TABLE quest_relations (
+            quest_id INTEGER, role TEXT, kind TEXT, entry INTEGER, name TEXT
+        );
+        CREATE TABLE quest_objectives (
+            quest_id INTEGER, obj_index INTEGER, kind TEXT, target_entry INTEGER,
+            target_name TEXT, req_count INTEGER, objective_text TEXT
+        );
+        CREATE TABLE item_drops (
+            item_entry INTEGER, source_kind TEXT, source_entry INTEGER,
+            source_name TEXT, chance REAL, quest_required INTEGER
+        );
+        INSERT INTO quests VALUES
+            (7, 'Kobold Camp Cleanup', 2, 1, 'Kill 8 Kobold Vermin.$BReturn to Marshal McBride.', 101);
+        INSERT INTO quests VALUES
+            (60, 'Kobold Candles', 7, 4, 'Collect 8 Large Candles.', 102);
+        INSERT INTO quest_relations VALUES
+            (7, 'starter', 'creature', 197, 'Marshal McBride'),
+            (7, 'ender', 'creature', 197, 'Marshal McBride'),
+            (60, 'starter', 'creature', 253, 'William Pestle'),
+            (60, 'ender', 'creature', 253, 'William Pestle');
+        INSERT INTO quest_objectives VALUES
+            (60, 0, 'item', 772, 'Large Candle', 8, '');
+        INSERT INTO item_drops VALUES
+            (772, 'creature', 40, 'Kobold Miner', 80.0, 1),
+            (772, 'creature', 475, 'Kobold Tunneler', 60.0, 1);
+        """
+    )
+    con_a.commit()
+    con_a.close()
+
+    con_w = sqlite3.connect(wiki)
+    con_w.executescript(
+        """
+        CREATE TABLE pages (
+            page_id INTEGER PRIMARY KEY, title TEXT UNIQUE, redirect TEXT,
+            categories TEXT, wikitext TEXT
+        );
+        INSERT INTO pages VALUES (
+            101, 'Kobold Camp Cleanup', '', '',
+            'Intro text.\n==Notes==\n* [[Kobold Vermin]] are north of [[Northshire Abbey|the abbey]].{{fact}}\n==Rewards==\nXP.'
+        );
+        INSERT INTO pages VALUES (
+            201, 'Elwynn Forest', '', '',
+            '{{Infobox zone |name=Elwynn Forest |faction=Alliance |level=1-10}} Elwynn Forest is the [[Human]] starting zone.<ref>src</ref>'
+        );
+        INSERT INTO pages VALUES (
+            202, 'Westfall', '', '',
+            '{{Infobox zone |name=Westfall |faction=Alliance |level=10-20}} Westfall lies west of Elwynn Forest.'
+        );
+        INSERT INTO pages VALUES (
+            203, 'The Barrens', '', '',
+            '{{Infobox zone |name=The Barrens |faction=Horde |level=10-25}} Horde leveling zone.'
+        );
+        INSERT INTO pages VALUES (
+            301, 'Deadmines', '', '',
+            '{{Infobox instance |name=Deadmines |level=17-26}} ==Strategy== Pull patrols carefully and watch for [[Defias]] adds.'
+        );
+        INSERT INTO pages VALUES (
+            302, 'The Deadmines', 'Deadmines', '', '#REDIRECT [[Deadmines]]'
+        );
+        """
+    )
+    con_w.commit()
+    con_w.close()
+    return atlas, wiki
+
+
+class ExportKnowledgeTest(unittest.TestCase):
+    def test_strip_wikitext_cleans_markup(self) -> None:
+        raw = "{{Template|a={{nested}}}} '''Hello''' [[Target|World]]<ref>cite</ref> [[File:Foo.png]]"
+        self.assertEqual(ek.strip_wikitext(raw), "Hello World")
+
+    def test_export_quests_zones_dungeons_and_next_zones(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            t = pathlib.Path(tmp)
+            atlas, wiki = _make_fixture_dbs(t)
+            out = t / "world_knowledge.json"
+            ek.export_knowledge(atlas, wiki, out)
+            data = json.loads(out.read_text(encoding="utf-8"))
+
+            self.assertEqual(data["version"], 1)
+            q7 = data["quests"]["7"]
+            self.assertEqual(q7["title"], "Kobold Camp Cleanup")
+            self.assertEqual(q7["starter"], "Marshal McBride")
+            self.assertEqual(q7["ender"], "Marshal McBride")
+            self.assertIn("Kobold Vermin are north of the abbey.", q7["tip"])
+            self.assertNotIn("{{", q7["tip"])
+
+            q60 = data["quests"]["60"]
+            self.assertEqual(q60["drops"], ["Kobold Miner", "Kobold Tunneler"])
+
+            elwynn = data["zones"]["Elwynn Forest"]
+            self.assertEqual(elwynn["min_level"], 1)
+            self.assertEqual(elwynn["max_level"], 10)
+            self.assertEqual(elwynn["faction"], "Alliance")
+            # Alliance zone recommends Westfall (Alliance), NOT The Barrens (Horde).
+            self.assertIn("Westfall (10-20)", elwynn["next_zones"])
+            self.assertFalse(any("Barrens" in z for z in elwynn["next_zones"]))
+
+            # Redirect alias works for dungeons.
+            self.assertIn("Deadmines", data["dungeons"])
+            self.assertIn("The Deadmines", data["dungeons"])
+            self.assertIn("Pull patrols carefully", data["dungeons"]["The Deadmines"]["summary"])
+
+
+if __name__ == "__main__":
+    unittest.main()

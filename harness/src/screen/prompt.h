@@ -12,6 +12,7 @@
 #ifndef HARNESS_SCREEN_PROMPT_H_
 #define HARNESS_SCREEN_PROMPT_H_
 
+#include <cstddef>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -30,7 +31,9 @@ struct PromptInput {
   std::string bot_name;
   std::string identity;      // var/bots/<name>/identity.md; may be empty
   std::string current_goal;  // Empty when the bot has no goal yet.
-  std::string wake_reason;   // "plan done", "attacked", ...
+  // 1-line breadcrumb of the last action failure/interruption (if any).
+  std::string last_outcome;
+  std::string wake_reason;  // "plan done", "attacked", ...
   // Events noted since the bot's last look (chat, loot, errors).
   std::vector<std::string> recent_events;
   // Players who recently whispered the bot, newest first: who a `tell` line
@@ -40,6 +43,8 @@ struct PromptInput {
   // ("bags, seen 40 s ago:"): memory, not the screen
   // (docs/specs/options.md).
   std::vector<std::string> remembered;
+  // Compact Markdown world/quest/zone guide selected from Atlas+Wiki knowledge.
+  std::string knowledge;
   // Boss / encounter notes known to this bot (may be empty).
   std::string notes;
   // Standing orders currently in force (formatted strings; may be empty).
@@ -62,6 +67,25 @@ std::string SelectRelevantNotes(std::string_view full_notes,
 // The request that asks for a plan for this screen. The plan grammar allows
 // only the screen's own option numbers.
 LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen);
+
+// Token/byte breakdown of one assembled plan prompt for diagnostics.
+struct PromptBreakdown {
+  size_t system_bytes = 0;
+  size_t prefix_bytes = 0;
+  size_t remembered_bytes = 0;
+  size_t screen_bytes = 0;
+  size_t knowledge_bytes = 0;
+  size_t notes_bytes = 0;
+  size_t user_bytes = 0;
+  size_t est_system_tokens = 0;
+  size_t est_user_tokens = 0;
+  size_t est_total_tokens = 0;
+  size_t slot_budget_tokens = 0;
+};
+
+PromptBreakdown InspectPrompt(const PromptInput& input, const Screen& screen);
+std::string FormatPromptInspection(const PromptInput& input,
+                                   const Screen& screen);
 
 }  // namespace harness
 

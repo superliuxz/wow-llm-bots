@@ -40,13 +40,13 @@ int Usage() {
   std::fputs(
       "usage:\n"
       "  harness run [--socket=PATH] [--rules=FILE] [--bots-dir=DIR]\n"
-      "              [--host=H] [--port=N] [--slots=N] [--temperature=T]\n"
-      "              [--seconds=S] [--only-bots=NAME,NAME]\n"
+      "              [--knowledge=FILE] [--host=H] [--port=N] [--slots=N]\n"
+      "              [--temperature=T] [--seconds=S] [--only-bots=NAME,NAME]\n"
       "  harness decide <snapshot.pb> [--name=BOT] [--goal=TEXT]\n"
       "                 [--reason=TEXT] [--rules=FILE] [--identity=FILE]\n"
-      "                 [--log-dir=DIR] [--host=H] [--port=N] [--slot=N]\n"
-      "                 [--temperature=T] [--dry-run] [--print-request] "
-      "[--json]\n"
+      "                 [--knowledge=FILE] [--log-dir=DIR] [--host=H]\n"
+      "                 [--port=N] [--slot=N] [--temperature=T] [--dry-run]\n"
+      "                 [--inspect-prompt] [--print-request] [--json]\n"
       "                 [--whisperers=NAME,NAME]\n"
       "  harness parse-plans < records   (\"<options>\\t<reply>\" each, NUL-"
       "separated)\n",
