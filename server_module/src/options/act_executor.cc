@@ -1097,11 +1097,11 @@ std::optional<HazardInfo> ResolveHazard(Player* bot,
   return std::nullopt;
 }
 
-// World-thread-only map from bot raw GUID -> last avoided unit raw GUID so
+// World-thread-only map from bot raw GUID -> avoided unit raw GUIDs so
 // FinishDodgeAct / StartReturnToInterrupted never re-select a target the brain
 // explicitly told the bot to avoid.
-std::unordered_map<uint64_t, uint64_t>& AvoidedTargetByBot() {
-  static auto* map = new std::unordered_map<uint64_t, uint64_t>();
+std::unordered_map<uint64_t, std::vector<uint64_t>>& AvoidedTargetsByBot() {
+  static auto* map = new std::unordered_map<uint64_t, std::vector<uint64_t>>();
   return *map;
 }
 
@@ -1109,9 +1109,13 @@ bool IsTargetAvoidedByBot(const Player* bot, uint64_t target_guid) {
   if (!bot || target_guid == 0) {
     return false;
   }
-  const auto& map = AvoidedTargetByBot();
+  const auto& map = AvoidedTargetsByBot();
   auto it = map.find(bot->GetGUID().GetRawValue());
-  return it != map.end() && it->second == target_guid;
+  if (it == map.end()) {
+    return false;
+  }
+  return std::find(it->second.begin(), it->second.end(), target_guid) !=
+         it->second.end();
 }
 
 // Finishes a dodge (`away` / `out of`) without walking back to the pre-dodge
@@ -1331,7 +1335,8 @@ ActStartResult StartAct(Player* bot,
       if (!unit) {
         return {.error = "target not found"};
       }
-      AvoidedTargetByBot().erase(bot->GetGUID().GetRawValue());
+      ClearAvoidedTargetForBot(bot->GetGUID().GetRawValue(),
+                               unit->GetGUID().GetRawValue());
       // Same call as WorldSession::HandleSetSelectionOpcode.
       bot->SetSelection(unit->GetGUID());
       return {.done = true};
@@ -1609,8 +1614,11 @@ ActStartResult StartAct(Player* bot,
           !act.target_name.empty() ? act.target_name : act.name;
       WorldObject* obj = ResolveThing(bot, act, thing_name);
       if (obj) {
-        AvoidedTargetByBot()[bot->GetGUID().GetRawValue()] =
-            obj->GetGUID().GetRawValue();
+        auto& avoided = AvoidedTargetsByBot()[bot->GetGUID().GetRawValue()];
+        const uint64_t raw = obj->GetGUID().GetRawValue();
+        if (std::find(avoided.begin(), avoided.end(), raw) == avoided.end()) {
+          avoided.push_back(raw);
+        }
         if (bot->GetTarget() == obj->GetGUID()) {
           bot->AttackStop();
           bot->SetSelection(ObjectGuid::Empty);
@@ -2160,6 +2168,23 @@ void CancelActiveAct(Player* bot, ActiveAct* active) {
     }
   }
   *active = ActiveAct{};
+}
+
+void ClearAvoidedTargetsForBot(uint64_t bot_guid) {
+  AvoidedTargetsByBot().erase(bot_guid);
+}
+
+void ClearAvoidedTargetForBot(uint64_t bot_guid, uint64_t target_guid) {
+  auto& map = AvoidedTargetsByBot();
+  auto it = map.find(bot_guid);
+  if (it == map.end()) {
+    return;
+  }
+  auto& vec = it->second;
+  vec.erase(std::remove(vec.begin(), vec.end(), target_guid), vec.end());
+  if (vec.empty()) {
+    map.erase(it);
+  }
 }
 
 }  // namespace llm_brain

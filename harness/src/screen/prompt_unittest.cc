@@ -163,6 +163,8 @@ TEST(PromptTest, SelectRelevantNotesPicksActiveBossAndNeverCutsMidOrder) {
   wlb::snapshot::Snapshot snap;
   wlb::snapshot::Unit boss;
   boss.name = "Sindragosa";
+  boss.kind = wlb::snapshot::Unit::NPC;
+  boss.reaction = wlb::snapshot::Unit::HOSTILE;
   snap.base.nearby.units.push_back(boss);
   const std::string selected = SelectRelevantNotes(icc, snap);
   EXPECT_LE(selected.size(), 2000u);
@@ -171,11 +173,28 @@ TEST(PromptTest, SelectRelevantNotesPicksActiveBossAndNeverCutsMidOrder) {
             std::string::npos);
   EXPECT_EQ(selected.find("## Boss 0"), std::string::npos);
 
+  // Friendly players or short names must NOT hijack boss-section matching,
+  // while `snapshot.ext.encounter->boss` matches cleanly.
+  wlb::snapshot::Snapshot friendly_snap;
+  wlb::snapshot::Unit friendly;
+  friendly.name = "Sindragosa";
+  friendly.kind = wlb::snapshot::Unit::PLAYER;
+  friendly.reaction = wlb::snapshot::Unit::FRIENDLY;
+  friendly_snap.base.nearby.units.push_back(friendly);
+  EXPECT_EQ(SelectRelevantNotes(icc, friendly_snap).find("## Sindragosa"),
+            std::string::npos);
+
+  wlb::snapshot::Snapshot enc_snap;
+  enc_snap.ext.encounter.emplace().boss.emplace().name = "Sindragosa";
+  EXPECT_NE(SelectRelevantNotes(icc, enc_snap).find("## Sindragosa"),
+            std::string::npos);
+
   // When no boss matches yet, truncation stops on a section boundary (never
-  // mid-order).
+  // mid-order) and never returns only a bare preamble with zero sections.
   wlb::snapshot::Snapshot empty;
   const std::string capped = SelectRelevantNotes(icc, empty);
   EXPECT_LE(capped.size(), 2000u);
+  EXPECT_NE(capped.find("## Boss 0"), std::string::npos);
   EXPECT_EQ(capped.find("[truncated]"), std::string::npos);
 }
 

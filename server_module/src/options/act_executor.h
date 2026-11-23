@@ -90,6 +90,11 @@ ActStepResult StepActiveAct(Player* bot,
 // movement if it was a movement act). World thread only.
 void CancelActiveAct(Player* bot, ActiveAct* active);
 
+// Clears avoided-target memory for `bot_guid` (all targets on combat exit /
+// disconnect, or one specific `target_guid` on explicit Attack/TARGET).
+void ClearAvoidedTargetsForBot(uint64_t bot_guid);
+void ClearAvoidedTargetForBot(uint64_t bot_guid, uint64_t target_guid);
+
 }  // namespace llm_brain
 
 #endif  // MOD_LLM_BRAIN_OPTIONS_ACT_EXECUTOR_H_

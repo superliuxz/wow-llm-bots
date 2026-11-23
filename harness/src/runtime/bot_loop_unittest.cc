@@ -1705,5 +1705,61 @@ TEST(BotLoopTest, TellGrammarIncludesOnlyWhisperersAndPartyMembers) {
   EXPECT_EQ(grammar.find("\"Inviter\""), std::string::npos);
 }
 
+TEST(BotLoopTest, LeavingInstanceClearsOrdersAndSelfCancelDoesNotWake) {
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& c) { sent.push_back(c); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+
+  // Bot inside ICC gets a standing order and triggers it.
+  pb::Snapshot s1 = MakeLiveSnap("Gatda", 1, t0, /*in_combat=*/false);
+  AddKeep(&s1);
+  s1.base.where.in_instance = true;
+  s1.base.where.map = "Icecrown Citadel";
+  pb::Area& fire = s1.base.nearby.areas.emplace_back();
+  fire.guid = "0xa1";
+  fire.name = "Coldflame";
+  fire.hostile = true;
+  fire.inside_me = false;
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+      "order: in Coldflame -> out of it");
+
+  // Trigger Coldflame so an act is dispatched.
+  pb::Snapshot s2 = s1;
+  s2.seq = 2;
+  s2.base.nearby.areas[0].inside_me = true;
+  loop.OnSnapshot(s2, t0 + base::Seconds(1));
+  ASSERT_FALSE(sent.empty());
+  const uint32_t act_cmd_id = sent.back().command_id;
+  ASSERT_TRUE(sent.back().act.has_value());
+
+  // M7: "act cancelled by new choice" arriving with !call_in_flight must NOT
+  // wake the brain urgently.
+  pb::ImmediateEvent cancel_ev;
+  cancel_ev.bot = "Gatda";
+  cancel_ev.event.error.emplace().command_id = act_cmd_id;
+  cancel_ev.event.error->text = "act cancelled by new choice";
+  loop.OnEvent(std::move(cancel_ev), t0 + base::Seconds(2));
+  EXPECT_EQ(brain.size(), 0u);
+
+  // L-Act1: leaving the instance clears standing orders so Coldflame never
+  // fires again outside the instance.
+  pb::Snapshot s3 = s2;
+  s3.seq = 3;
+  s3.base.where.in_instance = false;
+  s3.base.where.map = "Northrend";
+  const size_t cmds_before = sent.size();
+  loop.OnSnapshot(s3, t0 + base::Seconds(3));
+  for (size_t i = cmds_before; i < sent.size(); ++i) {
+    EXPECT_FALSE(sent[i].act.has_value());
+  }
+}
+
 }  // namespace
 }  // namespace harness

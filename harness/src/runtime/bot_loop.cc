@@ -110,6 +110,8 @@ void BotLoop::OnConnectionChanged(bool connected) {
       state.has_ever_woken = false;
       state.was_in_instance = false;
       state.last_map.clear();
+      state.last_selected_notes.clear();
+      state.recent_chat_command_ids.clear();
       state.has_queued_wake = false;
       state.call_in_flight = false;
       state.early_steps_dispatched = false;
@@ -225,7 +227,9 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   const bool left_or_changed_instance =
       state.was_in_instance && (!in_instance || state.last_map != cur_map);
   if (left_or_changed_instance && !state.orders.orders().empty()) {
-    state.orders.SetOrders({}, received_at);
+    if (state.orders.SetOrders({}, received_at)) {
+      SendStopMoving(bot);
+    }
     Log(base::StrCat(
         {bot, ": cleared standing orders after leaving ", state.last_map}));
   }
@@ -240,8 +244,10 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
           ReadFile(base::StrCat({config_.bots_dir, "/", bot, "/notes.md"}))
               .value_or("");
     }
-    if (!state.notes.empty()) {
-      const CompiledOrdersKey key{bot, cur_map, state.notes};
+    const std::string selected_notes =
+        SelectRelevantNotes(state.notes, *state.latest_snapshot);
+    if (!selected_notes.empty()) {
+      const CompiledOrdersKey key{bot, cur_map, selected_notes};
       if (auto cache_it = compiled_orders_cache_.find(key);
           cache_it != compiled_orders_cache_.end() &&
           !cache_it->second.empty()) {
@@ -377,29 +383,37 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
       }
       return;
     }
-    if (!state.runner.active() ||
-        imm.event.error->command_id != state.runner.last_command_id()) {
+    auto chat_it = std::find(state.recent_chat_command_ids.begin(),
+                             state.recent_chat_command_ids.end(),
+                             imm.event.error->command_id);
+    if (chat_it != state.recent_chat_command_ids.end()) {
+      state.recent_chat_command_ids.erase(chat_it);
+      // Chat error with real command_id: fall through to EvaluateEventTrigger
+      // so the brain learns from the refusal without stopping the active step.
+    } else if (!state.runner.active() ||
+               imm.event.error->command_id != state.runner.last_command_id()) {
       return;
-    }
-    state.runner.Stop();
-    if (state.call_in_flight) {
-      state.early_step_failed = true;
-    }
-    const base::TimeDelta backoff = StepRefusalBackoff(++state.step_refusals);
-    if (backoff.is_positive()) {
-      if (const std::optional<WakeTrigger> trig =
-              EvaluateEventTrigger(imm.event, state.triggers.watches());
-          trig &&
-          std::find(state.pending_reasons.begin(), state.pending_reasons.end(),
-                    trig->reason) == state.pending_reasons.end()) {
-        state.pending_reasons.push_back(trig->reason);
+    } else {
+      state.runner.Stop();
+      if (state.call_in_flight) {
+        state.early_step_failed = true;
       }
-      SetEarlierDeadline(&state.look_deadline, received_at + backoff);
-      Log(base::StringPrintf(
-          "harness: %s step refused %d times in a row; "
-          "next look in %.0f s",
-          bot.c_str(), state.step_refusals, backoff.InSecondsF()));
-      return;
+      const base::TimeDelta backoff = StepRefusalBackoff(++state.step_refusals);
+      if (backoff.is_positive()) {
+        if (const std::optional<WakeTrigger> trig =
+                EvaluateEventTrigger(imm.event, state.triggers.watches());
+            trig && std::find(state.pending_reasons.begin(),
+                              state.pending_reasons.end(),
+                              trig->reason) == state.pending_reasons.end()) {
+          state.pending_reasons.push_back(trig->reason);
+        }
+        SetEarlierDeadline(&state.look_deadline, received_at + backoff);
+        Log(base::StringPrintf(
+            "harness: %s step refused %d times in a row; "
+            "next look in %.0f s",
+            bot.c_str(), state.step_refusals, backoff.InSecondsF()));
+        return;
+      }
     }
   }
   const bool refusal = imm.event.error && imm.event.error->command_id != 0;
@@ -434,6 +448,8 @@ void BotLoop::OnTick(base::TimeTicks now) {
       state.has_ever_woken = false;
       state.was_in_instance = false;
       state.last_map.clear();
+      state.last_selected_notes.clear();
+      state.recent_chat_command_ids.clear();
       state.has_queued_wake = false;
       state.call_in_flight = false;
       state.early_steps_dispatched = false;
@@ -570,6 +586,7 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
   input.remembered = RememberedPanels(state, state.latest_received_at,
                                       config_.remember_panels_for);
   input.notes = SelectRelevantNotes(state.notes, *state.latest_snapshot);
+  state.last_selected_notes = input.notes;
   for (const Order& o : state.orders.orders()) {
     input.active_orders.push_back(FormatOrder(o));
   }
@@ -776,9 +793,9 @@ void BotLoop::OnReply(const std::string& bot,
         if (!plan->orders.empty() &&
             state.latest_snapshot->base.where.in_instance &&
             !state.latest_snapshot->base.self.in_combat &&
-            !state.notes.empty()) {
+            !state.last_selected_notes.empty()) {
           const std::string& map_name = state.latest_snapshot->base.where.map;
-          const CompiledOrdersKey key{bot, map_name, state.notes};
+          const CompiledOrdersKey key{bot, map_name, state.last_selected_notes};
           if (compiled_orders_cache_.try_emplace(key, plan->orders).second) {
             Log(base::StrCat({bot, ": cached ",
                               std::to_string(plan->orders.size()),
@@ -1162,6 +1179,11 @@ void BotLoop::SendSay(const std::string& bot,
   say.channel = channel;
   say.to = to;
   say.text = text;
+  auto& ids = bots_[bot].recent_chat_command_ids;
+  ids.push_back(cmd.command_id);
+  while (ids.size() > 16) {
+    ids.pop_front();
+  }
   ++commands_sent_;
   if (send_command_) {
     send_command_.Run(cmd);

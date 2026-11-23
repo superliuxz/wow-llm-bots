@@ -355,6 +355,9 @@ class LlmBrainWorldScript : public WorldScript {
         continue;  // Offline (or not in the world yet).
       }
       StepActiveOption(bot, i, config_.bots[i], now);
+      if (!bot->IsInCombat()) {
+        ClearAvoidedTargetsForBot(bot->GetGUID().GetRawValue());
+      }
       CheckPendingGroupInvite(bot, i, config_.bots[i], now);
       DrainPendingChat(bot, i, config_.bots[i], now);
       const SnapshotSchedule::Flags flags = CurrentFlags(bot, i);
@@ -481,9 +484,11 @@ class LlmBrainWorldScript : public WorldScript {
       if (bots_[i].active_act) {
         if (Player* bot = ObjectAccessor::FindPlayerByName(config_.bots[i])) {
           CancelActiveAct(bot, &*bots_[i].active_act);
+          ClearAvoidedTargetsForBot(bot->GetGUID().GetRawValue());
         }
         bots_[i].active_act.reset();
       }
+      bots_[i].pending_chats.clear();
       if (connected) {
         bots_[i].active_option.reset();
         bots_[i].active_item_spell_id = 0;

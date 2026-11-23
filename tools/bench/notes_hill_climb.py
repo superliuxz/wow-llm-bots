@@ -4,9 +4,10 @@
 After a wipe (or sub-optimal boss run), summarizes the fight timeline from
 behavior traces (what hit whom, when bots died, and which standing orders
 fired), asks a slower reflection LLM call to propose a revised `notes.md`,
-validates the proposed standing orders, and keeps the edit ONLY if a short
-boss benchmark re-run improves mechanical competence (kills, deaths, damage
-taken) without regressing kills or collapsing DPS.
+validates the proposed standing orders, and keeps the edit ONLY if a two-stage
+boss benchmark re-run proves a statistically significant improvement in
+mechanical competence (kills / deaths on fixed `n`) without regressing kills or
+collapsing DPS.
 """
 
 from __future__ import annotations
@@ -314,6 +315,66 @@ def _fisher_one_sided_greater(cand_k: int, cand_n: int, inc_k: int, inc_n: int) 
         if 0 <= rem <= inc_n:
             p += math.comb(total_k, x) * math.comb(total_n - total_k, cand_n - x) / denom
     return min(1.0, p)
+
+
+def _binomial_one_sided_greater(k: int, n: int, p0: float = 0.5) -> float:
+    """Exact one-sided binomial p-value P(Bin(n, p0) >= k)."""
+    if n <= 0:
+        return 1.0
+    p = 0.0
+    for x in range(max(k, 0), n + 1):
+        p += math.comb(n, x) * (p0**x) * ((1.0 - p0) ** (n - x))
+    return min(1.0, p)
+
+
+def _pool_boss_results(
+    res_a: dict[str, Any],
+    score_a: CompetenceScore,
+    res_b: dict[str, Any],
+    score_b: CompetenceScore,
+    arm: str = "llm",
+) -> CompetenceScore:
+    """Pools two stage results accurately (using pooled trial lists when available)."""
+    trials_a = [t for t in res_a.get("trials", []) if t.get("mode") == arm]
+    trials_b = [t for t in res_b.get("trials", []) if t.get("mode") == arm]
+    pooled_trials = trials_a + trials_b
+    pooled_kills = score_a.kills + score_b.kills
+    pooled_runs = score_a.runs + score_b.runs
+    if pooled_trials:
+        med_dps = round(statistics.median(float(t.get("total_dps", 0.0)) for t in pooled_trials), 1)
+        med_deaths = round(
+            statistics.median(float(t.get("total_deaths", 0.0)) for t in pooled_trials), 1
+        )
+        dmg_totals = [
+            sum(float(c.get("damage_taken", 0.0)) for c in t.get("characters", {}).values())
+            for t in pooled_trials
+            if t.get("characters")
+        ]
+        med_dmg = round(statistics.median(dmg_totals), 1) if dmg_totals else 0.0
+    else:
+        total_w = max(1, score_a.runs + score_b.runs)
+        med_dps = round(
+            (score_a.median_dps * score_a.runs + score_b.median_dps * score_b.runs) / total_w, 1
+        )
+        med_deaths = round(
+            (score_a.median_deaths * score_a.runs + score_b.median_deaths * score_b.runs) / total_w,
+            1,
+        )
+        med_dmg = round(
+            (
+                score_a.median_damage_taken * score_a.runs
+                + score_b.median_damage_taken * score_b.runs
+            )
+            / total_w,
+            1,
+        )
+    return CompetenceScore(
+        kills=pooled_kills,
+        runs=pooled_runs,
+        median_dps=med_dps,
+        median_deaths=med_deaths,
+        median_damage_taken=med_dmg,
+    )
 
 
 def is_competence_improvement(
@@ -741,10 +802,15 @@ def run_notes_hill_climb(
     best_notes = initial_notes.strip() + "\n"
     best_notes_path.write_text(best_notes)
 
+    base_runs = runs_per_eval + confirm_runs
     base_json = out_dir / "round_0_base.json"
     best_trace_dir = out_dir / "round_0_traces"
-    best_res = bench(boss_key, best_notes_path, runs_per_eval, parallel, base_json, best_trace_dir)
+    best_res = bench(boss_key, best_notes_path, base_runs, parallel, base_json, best_trace_dir)
     best_score = score_from_boss_result(best_res, arm="llm")
+    if best_score.runs < base_runs:
+        raise RuntimeError(
+            f"baseline incomplete ({best_score.runs}/{base_runs} valid runs); aborting hill-climb"
+        )
     boss_name = best_res.get("boss", boss_key)
 
     held_out_base_score: CompetenceScore | None = None
@@ -753,6 +819,10 @@ def run_notes_hill_climb(
         ho_traces = out_dir / "round_0_held_out_traces"
         ho_res = bench(held_out_boss, best_notes_path, held_out_runs, parallel, ho_json, ho_traces)
         held_out_base_score = score_from_boss_result(ho_res, arm="llm")
+        if held_out_base_score.runs < held_out_runs:
+            raise RuntimeError(
+                f"held-out baseline incomplete ({held_out_base_score.runs}/{held_out_runs} valid runs)"
+            )
 
     rejected_history: list[str] = []
     history: list[dict[str, Any]] = []
@@ -819,6 +889,7 @@ def run_notes_hill_climb(
         # candidate trials vs incumbent to control the family-wise false-keep rate.
         logged_score = cand_score
         initial_score_for_log: CompetenceScore | None = None
+        confirm_score_for_log: CompetenceScore | None = None
         fisher_p: float | None = None
         held_out_cand_score: CompetenceScore | None = None
         if keep:
@@ -832,17 +903,46 @@ def run_notes_hill_climb(
                 best_score, conf_score, expected_runs=confirm_runs
             )
             initial_score_for_log = cand_score
-            logged_score = conf_score
+            confirm_score_for_log = conf_score
+            pooled_score = _pool_boss_results(cand_res, cand_score, conf_res, conf_score, arm="llm")
+            logged_score = pooled_score
             if not conf_ok:
                 keep = False
+                logged_score = conf_score
                 reason = f"failed confirmation ({conf_reason})"
             else:
-                pooled_kills = cand_score.kills + conf_score.kills
-                pooled_runs = cand_score.runs + conf_score.runs
+                pooled_kills = pooled_score.kills
+                pooled_runs = pooled_score.runs
                 inc_perfect = best_score.runs > 0 and best_score.kills == best_score.runs
                 cand_perfect = pooled_runs > 0 and pooled_kills == pooled_runs
                 if inc_perfect and cand_perfect:
-                    reason = f"confirmed deaths improvement ({conf_reason})"
+                    # Require a statistically significant per-trial deaths reduction
+                    # (exact one-sided sign test against p0 = 0.5) — no uncontrolled bypass.
+                    pooled_trials = [
+                        t
+                        for t in (cand_res.get("trials", []) + conf_res.get("trials", []))
+                        if t.get("mode") == "llm"
+                    ]
+                    better_trials = sum(
+                        1
+                        for t in pooled_trials
+                        if float(t.get("total_deaths", 0.0)) < best_score.median_deaths - 1e-9
+                    )
+                    fisher_p = _binomial_one_sided_greater(
+                        better_trials, len(pooled_trials), p0=0.5
+                    )
+                    if pooled_trials and fisher_p <= per_round_alpha:
+                        reason = (
+                            f"confirmed deaths improvement ({conf_reason}; "
+                            f"{better_trials}/{len(pooled_trials)} trials < {best_score.median_deaths:.1f} deaths, "
+                            f"p={fisher_p:.4f} <= {per_round_alpha:.4f})"
+                        )
+                    else:
+                        keep = False
+                        reason = (
+                            f"deaths improvement not statistically significant "
+                            f"(p={fisher_p:.4f} > {per_round_alpha:.4f})"
+                        )
                 else:
                     fisher_p = _fisher_one_sided_greater(
                         pooled_kills, pooled_runs, best_score.kills, best_score.runs
@@ -874,26 +974,25 @@ def run_notes_hill_climb(
                 else:
                     ho_base_rate = held_out_base_score.kills / max(1, held_out_base_score.runs)
                     ho_cand_rate = held_out_cand_score.kills / held_out_cand_score.runs
-                    if ho_cand_rate < ho_base_rate - 1e-9:
+                    ho_p_regress = _fisher_one_sided_greater(
+                        held_out_base_score.kills,
+                        held_out_base_score.runs,
+                        held_out_cand_score.kills,
+                        held_out_cand_score.runs,
+                    )
+                    if ho_cand_rate < ho_base_rate - 1e-9 and ho_p_regress <= 0.10:
                         keep = False
                         reason = (
                             f"held-out regression on {held_out_boss} "
                             f"({held_out_cand_score.kills}/{held_out_cand_score.runs} < "
-                            f"{held_out_base_score.kills}/{held_out_base_score.runs})"
+                            f"{held_out_base_score.kills}/{held_out_base_score.runs}, "
+                            f"p={ho_p_regress:.4f})"
                         )
 
             if keep:
                 cand_res = conf_res
-                cand_score = CompetenceScore(
-                    kills=cand_score.kills + conf_score.kills,
-                    runs=cand_score.runs + conf_score.runs,
-                    median_dps=conf_score.median_dps,
-                    median_deaths=conf_score.median_deaths,
-                    median_damage_taken=conf_score.median_damage_taken,
-                )
+                cand_score = pooled_score
                 cand_trace_dir = conf_trace_dir
-                if held_out_cand_score is not None:
-                    held_out_base_score = held_out_cand_score
 
         if keep:
             best_notes = candidate_notes
@@ -909,6 +1008,8 @@ def run_notes_hill_climb(
             }
             if initial_score_for_log is not None:
                 entry["initial_score"] = initial_score_for_log.to_dict()
+            if confirm_score_for_log is not None:
+                entry["confirm_score"] = confirm_score_for_log.to_dict()
             if fisher_p is not None:
                 entry["fisher_p"] = round(fisher_p, 6)
             if held_out_cand_score is not None:
@@ -924,6 +1025,8 @@ def run_notes_hill_climb(
             }
             if initial_score_for_log is not None:
                 entry["initial_score"] = initial_score_for_log.to_dict()
+            if confirm_score_for_log is not None:
+                entry["confirm_score"] = confirm_score_for_log.to_dict()
             if fisher_p is not None:
                 entry["fisher_p"] = round(fisher_p, 6)
             if held_out_cand_score is not None:

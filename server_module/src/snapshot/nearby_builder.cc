@@ -524,7 +524,14 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
   candidates.reserve(visible->size());
   for (const auto& [guid, object] : *visible) {
     if (HiddenFromPlayer(object)) {
-      continue;  // Not worth a ray cast.
+      // Include living hidden-trigger hazards within 60 yd so their LoS is
+      // raycasted and cached rather than blindly skipped.
+      Creature* trigger = object->ToCreature();
+      if (!trigger || !trigger->IsAlive() ||
+          bot->GetExactDist2d(trigger) > 60.0f ||
+          !InspectTriggerHazard(trigger)) {
+        continue;
+      }
     }
     candidates.push_back({guid.GetRawValue(), bot->GetDistance(object)});
   }
@@ -569,8 +576,9 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
             const float radius = hz->radius_yd > 0.0f ? hz->radius_yd : 8.0f;
             const bool inside = dist_to_trigger <= radius;
             const std::optional<bool> in_los = los_.Get(guid.GetRawValue());
-            if (!inside && dist_to_trigger > options_.nameplate_range_yd &&
-                !in_los.value_or(false)) {
+            if (!inside && ((in_los.has_value() && !*in_los) ||
+                            (dist_to_trigger > options_.nameplate_range_yd &&
+                             !in_los.value_or(false)))) {
               ++stats.hidden;
               continue;
             }

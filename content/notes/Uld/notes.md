@@ -36,29 +36,17 @@ Snaplasher appears -> target nearest Snaplasher
 Dark Rune Acolyte appears -> target nearest Dark Rune Acolyte
 ```
 
-## Vx-001
-
-- **VX-001**: priority add; switch and burn promptly.
-
-```
-VX-001 appears -> target nearest VX-001
-```
-
-## Leviathan Mk Ii
+## Mimiron (Leviathan Mk II, VX-001)
 
 - **Shock Blast**: boss cast; follow standing order (`out of it`).
-
-```
-Shock Blast cast -> out of it
-```
-
-## Mimiron
-
 - **Leviathan Mk II**: priority add; switch and burn promptly.
+- **VX-001**: priority add; switch and burn promptly.
 - **Bomb Bot**: priority add; switch and burn promptly.
 
 ```
+Shock Blast cast -> out of it
 Leviathan Mk II appears -> target nearest Leviathan Mk II
+VX-001 appears -> target nearest VX-001
 Bomb Bot appears -> target nearest Bomb Bot
 ```
 

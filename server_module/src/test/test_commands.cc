@@ -328,8 +328,7 @@ class LlmBrainTestCommandScript : public CommandScript {
                                 player->GetName());
       return false;
     }
-    const std::set<std::string> supported =
-        ai->GetAiObjectContext()->GetSupportedStrategies();
+    const auto supported = ai->GetAiObjectContext()->GetSupportedStrategies();
     const bool exists = supported.count(strat_name) != 0;
     const bool in_combat = ai->HasStrategy(strat_name, BOT_STATE_COMBAT);
     const bool non_combat = ai->HasStrategy(strat_name, BOT_STATE_NON_COMBAT);

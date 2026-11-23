@@ -53,6 +53,8 @@ class RemoteLibTest(unittest.TestCase):
                 {"ok": {"ssh": "u@h", "repo": "/tmp/."}},
                 {"ok": {"ssh": "u@h", "repo": "~/../other"}},
                 {"ok": {"ssh": "u@h", "repo": "~/a;id"}},
+                {"ok": {"ssh": "u@h", "repo": "~/my repo"}},
+                {"ok": {"ssh": "u@h", "repo": "~/a#b"}},
                 {"ok": {"ssh": "u@h", "repo": "$HOME"}},
                 {"ok": {"ssh": "u@h", "repo": "/r", "llm_port": True}},
                 {"ok": {"ssh": "u@h", "repo": "/r", "llm_port": 70000}},
@@ -257,6 +259,7 @@ class RemoteLibTest(unittest.TestCase):
         self.assertEqual(m_kill.call_args.args, (spec,))
         self.assertTrue(m_kill.call_args.kwargs.get("only_if_active"))
         self.assertTrue(m_kill.call_args.kwargs.get("pgid_rel", "").startswith(remote.ACTIVE_PGID_REL + "."))
+        self.assertTrue(m_kill.call_args.kwargs.get("waiter_rel", "").startswith("var/.waiter_remote_pgid."))
 
     def test_invalidate_rsync_status_and_kill_pgid_commands(self) -> None:
         spec = remote.RemoteSpec(name="worker1", ssh="wlb@192.0.2.10", repo="~/wow-llm-bots")

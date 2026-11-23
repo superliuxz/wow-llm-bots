@@ -10,7 +10,7 @@
 - `v3` (`d5b8516`, `n = 16`/boss): `var/bench_boss_p12_signoff_v3_n16.json` (`320` valid trials, `0` invalid, `0` pre-pull-combat, timestamps `2026-11-22 15:35:13`–`18:00:44`)
 
 > [!IMPORTANT]
-> **Full three-run history & disclosure:** `v3` was the **third** 5-boss sign-off attempt after iterative fixes between runs (`3b5cae8` added the Kael'thas `Arcane Sphere` standing order between `v2` and `v3`). The pooled comparison was **not** pre-declared before running `v3`. Across all three runs combined (`160` trials/arm), `llm` achieved **`96/160` (60.0%)** vs `no_brain` **`76/160` (47.5%)** (exact two-sided Fisher `p = 0.0330`), vs `llm_no_notes` `90/160` (`56.2%`, `p = 0.5711`), and vs `baseline` `90/160` (`56.2%`, `p = 0.5711`). In `v3` alone (`n = 16`/boss), `llm` achieved **`52/80` (65.0%)** vs `no_brain` `35/80` (`43.8%`, `p_raw = 0.0109`, `p_holm3 = 0.0326`), with Ikiss (`+10`) and Kael'thas (`+6`) accounting for `+16` of the `+17` kill edge. **Whether to accept Kael'thas's `-20.2%` DPS trade-off and sign off Phases 1–3 is the user's decision.**
+> **Full three-run history & disclosure:** `v3` was the **third** 5-boss sign-off attempt after iterative fixes between runs (`3b5cae8` added the Kael'thas `Arcane Sphere` standing order between `v2` and `v3`). The pooled comparison was **not** pre-declared before running `v3`. Across all three runs combined (`160` trials/arm), `llm` achieved **`96/160` (60.0%)** vs `no_brain` **`76/160` (47.5%)** (exact two-sided Fisher `p_raw = 0.0330`, **`p_holm3 = 0.0990`**, not significant at `α = 0.05` after Holm–Bonferroni across the 3 arm comparisons), vs `llm_no_notes` `90/160` (`56.2%`, `p_raw = 0.5711`), and vs `baseline` `90/160` (`56.2%`, `p_raw = 0.5711`). In `v3` alone (`n = 16`/boss), `llm` achieved **`52/80` (65.0%)** vs `no_brain` `35/80` (`43.8%`, `p_raw = 0.0109`, `p_holm3 = 0.0326`), with Ikiss (`+10`) and Kael'thas (`+6`) accounting for `+16` of the `+17` kill edge. **Whether to accept Kael'thas's `-20.2%` DPS trade-off and sign off Phases 1–3 is the user's decision.**
 
 ---
 
@@ -21,7 +21,7 @@
 | **`v1`** (`bench_boss_p12_signoff.json`) | `7393849` | `8` | `23/40` (57.5%) | `24/40` (60.0%) | `22/40` (55.0%) | `26/40` (65.0%) | `1.0000` |
 | **`v2`** (`bench_boss_p12_signoff_v2.json`) | `c3a6e0a` | `8` | `21/40` (52.5%) | `23/40` (57.5%) | `19/40` (47.5%) | `24/40` (60.0%) | `0.8233` |
 | **`v3`** (`bench_boss_p12_signoff_v3_n16.json`) | `d5b8516` | `16` | **`52/80` (65.0%)** | `43/80` (53.8%) | `35/80` (43.8%) | `40/80` (50.0%) | `0.0109` (`p_holm3 = 0.0326`) |
-| **Combined (`v1 + v2 + v3`)** | — | `32` | **`96/160` (60.0%)** | `90/160` (56.2%) | `76/160` (47.5%) | `90/160` (56.2%) | **`0.0330`** (`p = 0.5711` vs `llm_no_notes` / `baseline`) |
+| **Combined (`v1 + v2 + v3`)** | — | `32` | **`96/160` (60.0%)** | `90/160` (56.2%) | `76/160` (47.5%) | `90/160` (56.2%) | `p_raw = 0.0330` (**`p_holm3 = 0.0990`**, n.s.; `p_raw = 0.5711` vs `llm_no_notes` / `baseline`) |
 
 ---
 

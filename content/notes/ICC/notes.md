@@ -39,52 +39,30 @@ Unstable Ooze Explosion cast -> out of it, then back
 in Vile Gas -> out of it
 ```
 
-## Volatile Ooze
-
-- **Volatile Ooze**: priority add; switch and burn promptly.
-
-```
-Volatile Ooze appears -> target nearest Volatile Ooze
-```
-
-## Gas Cloud
-
-- **Gas Cloud**: stay clear (`away Gas Cloud 14`).
-
-```
-Gas Cloud within 10 -> away Gas Cloud 14
-```
-
 ## Professor Putricide
 
 - **Slime Puddle**: ground hazard; move out immediately.
+- **Choking Gas Explosion**: ground hazard; move out immediately.
+- **Volatile Ooze**: priority add; switch and burn promptly.
+- **Gas Cloud**: stay clear (`away Gas Cloud 14`).
 
 ```
 in Slime Puddle -> out of it
+in Choking Gas Explosion -> out of it
+Volatile Ooze appears -> target nearest Volatile Ooze
+Gas Cloud within 10 -> away Gas Cloud 14
 ```
 
-## Prince Keleseth
+## Blood Prince Council (Prince Valanar, Prince Keleseth, Prince Taldaram)
 
 - **Dark Nucleus**: priority add; switch and burn promptly.
-
-```
-Dark Nucleus appears -> target nearest Dark Nucleus
-```
-
-## Prince Valanar
-
 - **Empowered Shock Vortex**: boss cast; follow standing order (`out of it`).
-
-```
-Empowered Shock Vortex cast -> out of it
-```
-
-## Blood Prince Council
-
 - **Kinetic Bomb**: priority add; switch and burn promptly.
 - **Ball of Flames Visual**: unempowered chasing flame orb summoned by Prince Taldaram; stay clear (`away Ball of Flames Visual 16`). Empowered orbs pulse **Empowered Flare** (`10 yd`); soak briefly if assigned to shrink their explosion before impact.
 
 ```
+Dark Nucleus appears -> target nearest Dark Nucleus
+Empowered Shock Vortex cast -> out of it
 Kinetic Bomb appears -> target nearest Kinetic Bomb
 Ball of Flames Visual within 12 -> away Ball of Flames Visual 16
 ```
@@ -104,6 +82,7 @@ Blistering Zombie targets me -> kite it
 
 ```
 Ice Tomb appears & Ice Tomb hp>50 -> target nearest Ice Tomb
+Ice Tomb hp<51 -> target boss
 Blistering Cold cast -> out of it
 ```
 
@@ -113,12 +92,4 @@ Blistering Cold cast -> out of it
 
 ```
 Quake cast -> to 40 yd from boss
-```
-
-## Icecrown Citadel
-
-- **Choking Gas Explosion**: ground hazard; move out immediately.
-
-```
-in Choking Gas Explosion -> out of it
 ```

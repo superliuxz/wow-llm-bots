@@ -174,6 +174,13 @@ class BotLoop {
     bool was_in_combat = false;
     bool was_in_instance = false;
     std::string last_map;
+    // Notes slice actually shown to the brain on the last call (used to key
+    // compiled_orders_cache_ so truncated entrance notes never pollute the
+    // full-file key).
+    std::string last_selected_notes;
+    // Outbound chat command IDs so chat error events with a real command_id
+    // are recognized and wake the brain instead of being dropped as stale.
+    std::deque<uint32_t> recent_chat_command_ids;
     uint32_t last_bag_free_slots = 1;
     // The quest tracker's state; nullopt before the first snapshot (no
     // glance for what was there already).

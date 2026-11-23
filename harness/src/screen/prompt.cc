@@ -202,15 +202,21 @@ std::string SelectRelevantNotes(std::string_view full_notes,
                : CapText(full_notes, kMaxNotesBytes);
   }
 
-  // Collect living nearby unit names (and current target) to match the active
-  // boss section(s).
+  // Collect active boss / hostile NPC unit names (plus encounter boss and
+  // current target) to match the active boss section(s). Never match friendly
+  // players, pets, totems, or short (< 3 char) unit names.
   std::vector<std::string_view> active_units;
+  if (snapshot.ext.encounter && snapshot.ext.encounter->boss &&
+      !snapshot.ext.encounter->boss->name.empty()) {
+    active_units.push_back(snapshot.ext.encounter->boss->name);
+  }
   for (const wlb::snapshot::Unit& u : snapshot.base.nearby.units) {
-    if (!u.dead && !u.name.empty()) {
+    if (!u.dead && u.kind == wlb::snapshot::Unit::NPC &&
+        u.reaction != wlb::snapshot::Unit::FRIENDLY && u.name.size() >= 3) {
       active_units.push_back(u.name);
     }
   }
-  if (!snapshot.base.self.unit.target.empty()) {
+  if (snapshot.base.self.unit.target.size() >= 3) {
     active_units.push_back(snapshot.base.self.unit.target);
   }
 
@@ -222,8 +228,9 @@ std::string SelectRelevantNotes(std::string_view full_notes,
     bool hit = false;
     for (std::string_view unit_name : active_units) {
       if (base::EqualsCaseInsensitiveASCII(sec.heading, unit_name) ||
-          ContainsIgnoreCase(unit_name, sec.heading) ||
-          ContainsIgnoreCase(sec.heading, unit_name)) {
+          (sec.heading.size() >= 4 && unit_name.size() >= 4 &&
+           (ContainsIgnoreCase(unit_name, sec.heading) ||
+            ContainsIgnoreCase(sec.heading, unit_name)))) {
         hit = true;
         break;
       }
@@ -235,28 +242,36 @@ std::string SelectRelevantNotes(std::string_view full_notes,
 
   if (!matched.empty()) {
     std::string out(preamble);
+    bool added_section = false;
     for (const Section* sec : matched) {
-      if (out.size() + sec->body.size() > kMaxNotesBytes && !out.empty()) {
+      if (out.size() + sec->body.size() > kMaxNotesBytes && added_section) {
         break;
       }
       out.append(sec->body);
+      added_section = true;
+    }
+    if (out.size() > kMaxNotesBytes) {
+      return CapText(out, kMaxNotesBytes);
     }
     return out;
   }
 
   // No specific boss in range yet: keep full file if it fits, otherwise stop on
-  // a complete `## ` section boundary so we never cut mid-order.
+  // a complete `## ` section boundary so we never cut mid-order (and never
+  // return only a bare preamble with zero sections).
   if (full_notes.size() <= kMaxNotesBytes) {
     return std::string(full_notes);
   }
   std::string out(preamble);
+  bool added_section = false;
   for (const Section& sec : sections) {
     if (out.size() + sec.body.size() > kMaxNotesBytes) {
       break;
     }
     out.append(sec.body);
+    added_section = true;
   }
-  return out.empty() ? CapText(full_notes, kMaxNotesBytes) : out;
+  return added_section ? out : CapText(full_notes, kMaxNotesBytes);
 }
 
 LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {

@@ -94,7 +94,7 @@ def remotes_config_path() -> pathlib.Path:
 _FORBIDDEN_REPO_ROOTS = frozenset({
     "/", "/home", "/root", "/tmp", "/var", "/etc", "/usr", "/opt", "/srv", "/mnt", "/media",
 })
-_UNSAFE_REPO_CHARS_RE = re.compile(r"[;&|`$\n\r<>()*?\[\]'\"\\]")
+_UNSAFE_REPO_CHARS_RE = re.compile(r"[\s;&|`$\n\r<>()*?\[\]'\"\\#{}!]")
 
 
 def _validate_remote_repo(repo: str) -> str:
@@ -323,10 +323,11 @@ def _verify_remote_sync_target(spec: RemoteSpec) -> None:
 
 def _rsync_to_remote(spec: RemoteSpec, repo: pathlib.Path = ROOT) -> None:
     _verify_remote_sync_target(spec)
-    rsync_path = (
-        f"bash -c 'cd {_remote_cd_expr(spec.repo)} && mkdir -p var && "
-        f"flock -o {shlex.quote(REMOTE_LOCK_REL)} rsync \"$@\"' _"
+    inner_rsync = (
+        f'cd {_remote_cd_expr(spec.repo)} && mkdir -p var && '
+        f'flock -o {shlex.quote(REMOTE_LOCK_REL)} rsync "$@"'
     )
+    rsync_path = f"bash -c {shlex.quote(inner_rsync)} _"
     cmd = ["rsync", "-a", "-s", "--delete", f"--rsync-path={rsync_path}", "-e", _rsync_ssh_cmd()]
     for pat in RSYNC_EXCLUDES:
         cmd.append(f"--exclude={pat}")
@@ -495,19 +496,30 @@ def _kill_remote_pgid(
     spec: RemoteSpec,
     *,
     pgid_rel: str = ACTIVE_PGID_REL,
+    waiter_rel: str = "",
     only_if_active: bool = False,
 ) -> None:
-    """Terminate the active remote process group (SIGTERM -> 5s -> SIGKILL) and stop test server.
+    """Terminate a remote process group (and any pre-lock flock waiter) cleanly.
 
-    Uses a per-invocation `pgid_rel` so a queued client interrupted while waiting
-    on `REMOTE_LOCK_REL` never kills another client's active job. When
-    `only_if_active=True` (used on exit code 255 or queued interrupt), skips
-    stopping the test server if `pgid_rel` does not exist.
+    Uses per-invocation `waiter_rel` / `pgid_rel` files so a queued client
+    interrupted while waiting on `REMOTE_LOCK_REL` kills its own waiting `flock`
+    without ever touching another client's active job or test server.
     """
     stop_test = "(tools/wlb server stop --test || true)"
+    waiter_cleanup = ""
+    if waiter_rel:
+        waiter_cleanup = (
+            f"if [ -f {shlex.quote(waiter_rel)} ]; then "
+            f"  WPID=$(cat {shlex.quote(waiter_rel)} 2>/dev/null || true); "
+            '  case "$WPID" in ""|*[!0-9]*) WPID="" ;; *) [ "$WPID" -gt 1 ] || WPID="" ;; esac; '
+            '  if [ -n "$WPID" ]; then kill -TERM -"$WPID" "$WPID" 2>/dev/null || true; fi; '
+            f"  rm -f {shlex.quote(waiter_rel)}; "
+            "fi; "
+        )
     if only_if_active:
         cleanup_inner = (
             f"cd {_remote_cd_expr(spec.repo)} 2>/dev/null || exit 0; "
+            f"{waiter_cleanup}"
             f"if [ -f {shlex.quote(pgid_rel)} ]; then "
             f"  PGID=$(cat {shlex.quote(pgid_rel)} 2>/dev/null || true); "
             '  case "$PGID" in ""|*[!0-9]*) PGID="" ;; *) [ "$PGID" -gt 1 ] || PGID="" ;; esac; '
@@ -523,6 +535,7 @@ def _kill_remote_pgid(
     else:
         cleanup_inner = (
             f"cd {_remote_cd_expr(spec.repo)} 2>/dev/null || exit 0; "
+            f"{waiter_cleanup}"
             f"if [ -f {shlex.quote(pgid_rel)} ]; then "
             f"  PGID=$(cat {shlex.quote(pgid_rel)} 2>/dev/null || true); "
             '  case "$PGID" in ""|*[!0-9]*) PGID="" ;; *) [ "$PGID" -gt 1 ] || PGID="" ;; esac; '
@@ -562,31 +575,37 @@ def run_remote(
 
         # Run inside a dedicated session/process-group with `setsid --wait` and
         # remote `flock -o` (closes lock FD in child so daemons never deadlock the
-        # lock). A per-run PGID file ensures an interrupted queued client never
-        # kills another client's active job.
-        pgid_rel = f"{ACTIVE_PGID_REL}.{secrets.token_hex(6)}"
+        # lock). Separate per-run waiter/active PGID files ensure an interrupted
+        # queued client kills its own waiting `flock` without touching another
+        # client's active job.
+        token = secrets.token_hex(6)
+        waiter_rel = f"var/.waiter_remote_pgid.{token}"
+        pgid_rel = f"{ACTIVE_PGID_REL}.{token}"
         locked_body = (
+            f"rm -f {shlex.quote(waiter_rel)} && "
             f"echo $$ > {shlex.quote(pgid_rel)} && "
             f"trap 'rm -f {shlex.quote(pgid_rel)}' EXIT && "
             f"{shlex.join(cmd)}"
         )
         inner = (
             f"cd {_remote_cd_expr(spec.repo)} && "
-            f"mkdir -p var && flock -o {shlex.quote(REMOTE_LOCK_REL)} "
+            f"mkdir -p var && echo $$ > {shlex.quote(waiter_rel)} && "
+            f"trap 'rm -f {shlex.quote(waiter_rel)}' EXIT && "
+            f"flock -o {shlex.quote(REMOTE_LOCK_REL)} "
             f"setsid --wait bash -c {shlex.quote(locked_body)}"
         )
-        remote_cmd = f"bash -c {shlex.quote(inner)}"
+        remote_cmd = f"setsid --wait bash -c {shlex.quote(inner)}"
         ssh_cmd = [*_ssh_base_args(spec, tunnel_port=tunnel_port), remote_cmd]
         try:
             proc = subprocess.run(ssh_cmd)
         except KeyboardInterrupt:
             say(f"\nremote {spec.name}: interrupted; killing remote process group if active...")
-            _kill_remote_pgid(spec, pgid_rel=pgid_rel, only_if_active=True)
+            _kill_remote_pgid(spec, pgid_rel=pgid_rel, waiter_rel=waiter_rel, only_if_active=True)
             raise Failed("interrupted")
 
         if proc.returncode == 255:
             say(f"remote {spec.name}: exit 255 (checking for orphaned remote process group)...")
-            _kill_remote_pgid(spec, pgid_rel=pgid_rel, only_if_active=True)
+            _kill_remote_pgid(spec, pgid_rel=pgid_rel, waiter_rel=waiter_rel, only_if_active=True)
 
         for remote_rel, local_dest in parsed_pulls:
             try:

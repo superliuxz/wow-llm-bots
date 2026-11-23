@@ -299,11 +299,11 @@ class NotesHillClimbTest(unittest.TestCase):
             # Round 2: initial looks good (7/8), confirmation succeeds (8/8) -> Fisher p < 0.025 -> KEEP.
             bench_seq = iter(
                 [
-                    (2, 3.0, 2000.0),  # baseline (2/8)
+                    (4, 3.0, 2000.0),  # baseline (4/16)
                     (6, 1.0, 2100.0),  # r1 initial
                     (1, 5.0, 1900.0),  # r1 confirm -> fail
                     (7, 1.0, 2100.0),  # r2 initial
-                    (8, 0.0, 2200.0),  # r2 confirm -> pass (pooled 15/16 vs 2/8)
+                    (8, 0.0, 2200.0),  # r2 confirm -> pass (pooled 15/16 vs 4/16)
                 ]
             )
 
@@ -343,7 +343,10 @@ class NotesHillClimbTest(unittest.TestCase):
             # Failed confirmation must log conf_score (1 kill), not initial cand_score (6 kills).
             self.assertEqual(ledger[1]["score"]["kills"], 1)
             self.assertEqual(ledger[1]["initial_score"]["kills"], 6)
-            self.assertEqual(ledger[2]["score"]["kills"], 8)
+            # Kept round logs pooled score (15/16) matching best_score, plus confirm_score (8/8).
+            self.assertEqual(ledger[2]["score"]["kills"], 15)
+            self.assertEqual(ledger[2]["score"]["runs"], 16)
+            self.assertEqual(ledger[2]["confirm_score"]["kills"], 8)
             self.assertLessEqual(ledger[2]["fisher_p"], 0.025)
 
     def test_hill_climb_loop_keeps_improvement_and_preserves_incumbent_traces(self) -> None:
@@ -417,10 +420,10 @@ class NotesHillClimbTest(unittest.TestCase):
             def fake_bench(boss_key, notes_path, runs, parallel, out_json, trace_dir):
                 txt = notes_path.read_text()
                 if boss_key == "loken":
-                    # Held-out boss regresses on OVERFIT notes.
-                    kills = 1 if "OVERFIT" in txt else 4
+                    # Held-out boss regresses sharply on OVERFIT notes (0/8 vs 8/8).
+                    kills = 0 if "OVERFIT" in txt else runs
                 else:
-                    kills = runs if "OVERFIT" in txt else 1
+                    kills = runs if "OVERFIT" in txt else 2
                 return {
                     "boss": boss_key,
                     "by_arm": {"llm": {"kills": kills, "runs": runs, "median_dps": 2000.0, "median_deaths": 1.0}},
@@ -435,11 +438,11 @@ class NotesHillClimbTest(unittest.TestCase):
                 runs_per_eval=8,
                 confirm_runs=8,
                 held_out_boss="loken",
-                held_out_runs=4,
+                held_out_runs=8,
                 bench_fn=fake_bench,
                 propose_fn=lambda *a: "# OVERFIT\n- `in Fire -> out of it`\n",
             )
-            self.assertEqual(res["best_score"]["kills"], 1)
+            self.assertEqual(res["best_score"]["kills"], 2)
             ledger = [json.loads(l) for l in (out_dir / "ledger.jsonl").read_text().splitlines()]
             self.assertEqual(ledger[1]["status"], "rejected")
             self.assertIn("held-out regression", ledger[1]["reason"])

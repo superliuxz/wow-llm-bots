@@ -66,6 +66,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
+#include "options/act_executor.h"
 #include "options/options.h"
 #include "position_facts.h"
 #include "snapshot/snapshot.h"
@@ -1272,9 +1273,7 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
   if (bot->HasSpellCooldown(item_spell_id)) {
     return {target.name + " is on cooldown"};
   }
-  if (bot->IsNonMeleeSpellCast(false, /*skipChanneled=*/false,
-                               /*skipAutorepeat=*/true) ||
-      bot->m_mover != bot) {
+  if (bot->m_mover != bot) {
     return {"can't use " + target.name + " now"};
   }
   const SpellInfo* item_spell = sSpellMgr->GetSpellInfo(item_spell_id);
@@ -1304,7 +1303,9 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
   const uint32_t count_before = bot->GetItemCount(proto->ItemId);
   const int32_t charges_before =
       spell_slot >= 0 ? item->GetSpellCharges(spell_slot) : 0;
-  const bool had_item_aura_before = bot->HasAura(item_spell_id);
+  Unit* aura_unit = item_target ? item_target : bot;
+  const Aura* aura_before = aura_unit->GetAura(item_spell_id);
+  const int32_t aura_dur_before = aura_before ? aura_before->GetDuration() : -1;
   const uint32_t last_potion_before = bot->GetLastPotionId();
   const bool gcd_before =
       bot->GetGlobalCooldownMgr().HasGlobalCooldown(item_spell);
@@ -1337,8 +1338,10 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
   const bool cd_started = bot->HasSpellCooldown(item_spell_id);
   const bool gcd_started =
       !gcd_before && bot->GetGlobalCooldownMgr().HasGlobalCooldown(item_spell);
+  const Aura* aura_after = aura_unit->GetAura(item_spell_id);
   const bool aura_applied =
-      !had_item_aura_before && bot->HasAura(item_spell_id);
+      aura_after != nullptr &&
+      (aura_before == nullptr || aura_after->GetDuration() > aura_dur_before);
   const bool potion_recorded = last_potion_before != proto->ItemId &&
                                bot->GetLastPotionId() == proto->ItemId;
   const bool vehicle_changed = bot->GetVehicle() != vehicle_before;
@@ -1471,6 +1474,8 @@ ExecuteResult ExecuteOption(Player* bot,
       // Playerbots' attack action attacks the "current target" and runs its
       // own checks; the combat strategies take over from there.
       {
+        ClearAvoidedTargetForBot(bot->GetGUID().GetRawValue(),
+                                 unit->GetGUID().GetRawValue());
         Unit* old_target = current_target->Get();
         current_target->Set(unit);
         if (!ai->DoSpecificAction("attack", Event(), /*silent=*/true)) {
