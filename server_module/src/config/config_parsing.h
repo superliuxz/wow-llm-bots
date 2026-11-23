@@ -30,6 +30,17 @@ struct StrategyCheck {
 };
 std::vector<StrategyCheck> StrategyChecks(const std::string& changes);
 
+// Adjusts `LlmBrain.NonCombatStrategies` for group and dungeon play without
+// touching stripped test configs (where `+grind` is not enabled):
+//  - Grouped non-leader bots keep `+follow,-grind,-new rpg` so the party runs
+//    together naturally instead of splitting or hearthing via `+new rpg`.
+//  - Dungeon leaders/solo bots strip `+new rpg` (`-new rpg`) so Playerbots'
+//    open-world RPG travel does not Hearthstone them out of the instance.
+std::string AdjustNonCombatStrategies(const std::string& base_non_combat,
+                                      bool in_group,
+                                      bool is_leader,
+                                      bool in_dungeon);
+
 }  // namespace llm_brain
 
 #endif  // MOD_LLM_BRAIN_CONFIG_CONFIG_PARSING_H_

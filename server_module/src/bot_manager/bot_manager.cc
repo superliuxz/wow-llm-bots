@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -13,16 +14,25 @@
 #include "Action.h"
 #include "AiFactory.h"
 #include "CharacterCache.h"
+#include "Corpse.h"
+#include "DBCStores.h"
 #include "Engine.h"
 #include "Event.h"
+#include "Group.h"
+#include "Item.h"
+#include "ItemTemplate.h"
 #include "Log.h"
+#include "Map.h"
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
+#include "ObjectMgr.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
 #include "Playerbots.h"
 #include "RandomPlayerbotMgr.h"
 #include "SharedDefines.h"
+#include "SpellInfo.h"
+#include "SpellMgr.h"
 #include "config/config_parsing.h"
 
 namespace llm_brain {
@@ -31,6 +41,10 @@ namespace {
 constexpr uint32_t kTickMs = 1000;
 // A failed or dropped login is retried after this long.
 constexpr uint32_t kLoginRetryMs = 10000;
+// Seconds a ghost whose corpse is inside a dungeon waits before cross-map
+// dungeon entrance recovery fires (after Playerbots' FindCorpseAction fails
+// to path across maps).
+constexpr int64_t kStuckDungeonGhostSec = 30;
 
 struct BotStrategyOverride {
   std::string combat;
@@ -38,32 +52,134 @@ struct BotStrategyOverride {
 };
 
 // World-thread-only set of Engines that currently own a
-// BlockAutoInviteListener. Keyed by uintptr_t so the listener's destructor can
+// BrainPolicyListener. Keyed by uintptr_t so the listener's destructor can
 // deregister itself when ActionExecutionListeners::~ActionExecutionListeners()
 // deletes it on bot logout/shutdown, preventing duplicate registrations and
 // address-reuse bugs.
-std::unordered_set<uintptr_t>& AutoInviteBlockedEngines() {
+std::unordered_set<uintptr_t>& PolicyListenerEngines() {
   static auto* set = new std::unordered_set<uintptr_t>();
   return *set;
 }
 
-// Prevents Playerbots' `default` strategy (`WorldPacketHandlerStrategy`) from
-// auto-accepting or auto-declining group invitations before the LLM brain can
-// see the pending invite and decide (`Accept group invite` / `Decline group
-// invite`). Owned by the Engine's ActionExecutionListeners (which `delete`s
-// every listener on Engine destruction).
-class BlockAutoInviteListener final : public ActionExecutionListener {
- public:
-  explicit BlockAutoInviteListener(uintptr_t engine_key)
-      : engine_key_(engine_key) {
-    AutoInviteBlockedEngines().insert(engine_key_);
+// Matches AzerothCore Spell::CheckItems for SPELL_EFFECT_ENCHANT_ITEM_TEMPORARY
+// (Spell.cpp:7857-7869) so Playerbots' `"apply stone"` / `"apply oil"` reflex
+// does not loop every 5 s with SPELL_FAILED_LOWLEVEL on low-ilvl weapons.
+bool CanApplyTempEnchant(Player* bot, Item* consumable, Item* weapon) {
+  if (!bot || !consumable || !weapon ||
+      weapon->GetEnchantmentId(TEMP_ENCHANTMENT_SLOT) != 0) {
+    return false;
   }
-  ~BlockAutoInviteListener() override {
-    AutoInviteBlockedEngines().erase(engine_key_);
+  if (bot->CanUseItem(consumable) != EQUIP_ERR_OK) {
+    return false;
+  }
+  const ItemTemplate* cproto = consumable->GetTemplate();
+  const ItemTemplate* wproto = weapon->GetTemplate();
+  if (!cproto || !wproto) {
+    return false;
+  }
+  uint32_t spell_id = 0;
+  for (uint8_t i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i) {
+    if (cproto->Spells[i].SpellId > 0) {
+      spell_id = static_cast<uint32_t>(cproto->Spells[i].SpellId);
+      break;
+    }
+  }
+  const SpellInfo* spell =
+      spell_id ? sSpellMgr->GetSpellInfo(spell_id) : nullptr;
+  if (!spell) {
+    return false;
+  }
+  if (!spell->HasAttribute(SPELL_ATTR2_ALLOW_LOW_LEVEL_BUFF)) {
+    uint32_t req_level = wproto->RequiredLevel;
+    if (!req_level) {
+      req_level = wproto->ItemLevel;
+    }
+    if (req_level < spell->BaseLevel) {
+      return false;
+    }
+  }
+  if (spell->MaxLevel > 0 && wproto->ItemLevel > spell->MaxLevel) {
+    return false;
+  }
+  return true;
+}
+
+bool HasEligibleTempEnchant(Player* bot, PlayerbotAI* ai, bool is_stone) {
+  if (!bot || !ai) {
+    return false;
+  }
+  for (uint8_t slot : {EQUIPMENT_SLOT_MAINHAND, EQUIPMENT_SLOT_OFFHAND}) {
+    Item* weapon = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
+    if (!weapon || weapon->GetEnchantmentId(TEMP_ENCHANTMENT_SLOT) != 0) {
+      continue;
+    }
+    Item* consumable =
+        is_stone ? ai->FindStoneFor(weapon) : ai->FindOilFor(weapon);
+    if (CanApplyTempEnchant(bot, consumable, weapon)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool HasLivingGroupMemberOnSameMap(Player* bot) {
+  if (!bot || !bot->GetGroup()) {
+    return false;
+  }
+  for (GroupReference* itr = bot->GetGroup()->GetFirstMember(); itr != nullptr;
+       itr = itr->next()) {
+    Player* member = itr->GetSource();
+    if (member && member != bot && member->IsInWorld() && member->IsAlive() &&
+        member->GetMapId() == bot->GetMapId() &&
+        member->GetInstanceId() == bot->GetInstanceId()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Enforces clean ownership boundaries between the LLM brain and Playerbots'
+// reflex layer on each Engine:
+//  - Blocks `"accept invitation"` so the brain decides group invites.
+//  - Blocks `"equip upgrades packet action"` / `"equip upgrade"` so Playerbots'
+//    auto-equipper never fights the brain's `Equip` choices.
+//  - Gates `"apply stone"` / `"apply oil"` on actual AzerothCore temp-enchant
+//    eligibility to stop SPELL_FAILED_LOWLEVEL 5-second spam loops.
+//  - Gates `"auto release"` inside dungeons when a living party member is on
+//    the same map so standalone bots wait for a healer rez (instead of
+//    releasing after 4 s to an outside graveyard).
+// Owned by the Engine's ActionExecutionListeners (which `delete`s every
+// listener on Engine destruction).
+class BrainPolicyListener final : public ActionExecutionListener {
+ public:
+  BrainPolicyListener(uintptr_t engine_key, Player* bot, PlayerbotAI* ai)
+      : engine_key_(engine_key), bot_(bot), ai_(ai) {
+    PolicyListenerEngines().insert(engine_key_);
+  }
+  ~BrainPolicyListener() override {
+    PolicyListenerEngines().erase(engine_key_);
   }
   bool Before(Action* /*action*/, Event /*event*/) override { return true; }
   bool AllowExecution(Action* action, Event /*event*/) override {
-    return !(action && action->getName() == "accept invitation");
+    if (!action) {
+      return true;
+    }
+    const std::string& name = action->getName();
+    if (name == "accept invitation" || name == "equip upgrades packet action" ||
+        name == "equip upgrade") {
+      return false;
+    }
+    if (name == "apply stone") {
+      return HasEligibleTempEnchant(bot_, ai_, /*is_stone=*/true);
+    }
+    if (name == "apply oil") {
+      return HasEligibleTempEnchant(bot_, ai_, /*is_stone=*/false);
+    }
+    if (name == "auto release" && bot_ && bot_->GetMap() &&
+        bot_->GetMap()->IsDungeon() && HasLivingGroupMemberOnSameMap(bot_)) {
+      return false;
+    }
+    return true;
   }
   void After(Action* /*action*/, bool /*executed*/, Event /*event*/) override {}
   bool OverrideResult(Action* /*action*/,
@@ -74,19 +190,58 @@ class BlockAutoInviteListener final : public ActionExecutionListener {
 
  private:
   uintptr_t engine_key_;
+  Player* bot_;
+  PlayerbotAI* ai_;
 };
 
-void EnsureBlockAutoInvite(PlayerbotAI* ai) {
-  if (!ai) {
+void EnsurePolicyListener(Player* player, PlayerbotAI* ai) {
+  if (!player || !ai) {
     return;
   }
   if (Engine* engine = ai->GetCurrentEngine()) {
     const uintptr_t key = reinterpret_cast<uintptr_t>(engine);
-    if (AutoInviteBlockedEngines().contains(key)) {
+    if (PolicyListenerEngines().contains(key)) {
       return;
     }
-    engine->AddActionExecutionListener(new BlockAutoInviteListener(key));
+    engine->AddActionExecutionListener(
+        new BrainPolicyListener(key, player, ai));
   }
+}
+
+// Recovers a ghost stuck at an outside graveyard whose corpse is inside a
+// dungeon (Playerbots' FindCorpseAction fails cross-map pathing). Enters the
+// dungeon entrance portal via AzerothCore's AreaTriggerTeleport (the standard
+// WoW dungeon corpse-run mechanic).
+void RecoverStuckDungeonGhost(Player* player) {
+  if (!player || !player->HasPlayerFlag(PLAYER_FLAGS_GHOST) ||
+      player->isMoving() || player->IsBeingTeleported()) {
+    return;
+  }
+  Corpse* corpse = player->GetCorpse();
+  if (!corpse || corpse->GetMapId() == player->GetMapId()) {
+    return;
+  }
+  const MapEntry* corpse_map = sMapStore.LookupEntry(corpse->GetMapId());
+  if (!corpse_map || !corpse_map->IsDungeon()) {
+    return;
+  }
+  const int64_t dead_sec =
+      static_cast<int64_t>(std::time(nullptr)) - corpse->GetGhostTime();
+  if (dead_sec < kStuckDungeonGhostSec) {
+    return;
+  }
+  const AreaTriggerTeleport* entrance =
+      sObjectMgr->GetMapEntranceTrigger(corpse->GetMapId());
+  player->ResurrectPlayer(1.0f);
+  player->SpawnCorpseBones();
+  if (entrance) {
+    player->TeleportTo(entrance->target_mapId, entrance->target_X,
+                       entrance->target_Y, entrance->target_Z,
+                       entrance->target_Orientation);
+  }
+  LOG_INFO("module",
+           "mod-llm-brain: recovered dungeon ghost {} into map {} entrance",
+           player->GetName(), corpse->GetMapId());
 }
 
 // World-thread-only per-bot strategy overrides.
@@ -155,6 +310,7 @@ void BotManager::Tick() {
       // of the world: wait, never log it in a second time.
       if (player->IsInWorld()) {
         EnsureStrategies(player);
+        RecoverStuckDungeonGhost(player);
       }
       continue;
     }
@@ -173,7 +329,7 @@ void BotManager::EnsureStrategies(Player* player) {
   if (!ai || player->InBattleground()) {
     return;  // Not set up yet, or playerbots' battleground strategies apply.
   }
-  EnsureBlockAutoInvite(ai);
+  EnsurePolicyListener(player, ai);
   // Solo, a healer also deals damage; in a group it heals, so the same extras
   // are removed (",+holy dps" becomes ",-holy dps"): joining a group must undo
   // what being solo added.
@@ -204,7 +360,14 @@ void BotManager::EnsureStrategies(Player* player) {
     }
   }
   std::string combat = base_combat + extras;
-  std::string non_combat = strategies_.non_combat;
+  Group* group = player->GetGroup();
+  const bool in_group = group != nullptr;
+  const bool is_leader =
+      in_group && group->GetLeaderGUID() == player->GetGUID();
+  const bool in_dungeon =
+      player->GetMap() != nullptr && player->GetMap()->IsDungeon();
+  std::string non_combat = AdjustNonCombatStrategies(
+      strategies_.non_combat, in_group, is_leader, in_dungeon);
   if (auto it = BotOverrides().find(player->GetName());
       it != BotOverrides().end()) {
     if (!it->second.combat.empty()) {

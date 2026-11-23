@@ -53,5 +53,39 @@ TEST(ConfigParsingTest, StrategyChecksCoverEveryChange) {
   EXPECT_EQ(StrategyChecks("grind, +"), Checks{});
 }
 
+TEST(ConfigParsingTest, AdjustNonCombatStrategiesRespectsGroupAndDungeon) {
+  const std::string live = "-follow,+grind,+new rpg";
+  // Solo open-world: unchanged.
+  EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/false,
+                                      /*is_leader=*/false,
+                                      /*in_dungeon=*/false),
+            live);
+  // Grouped leader in open world: unchanged.
+  EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
+                                      /*is_leader=*/true,
+                                      /*in_dungeon=*/false),
+            live);
+  // Grouped leader in dungeon: keeps +grind, strips +new rpg.
+  EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
+                                      /*is_leader=*/true,
+                                      /*in_dungeon=*/true),
+            "-follow,+grind,-new rpg");
+  // Grouped follower (open-world or dungeon): runs with leader (+follow).
+  EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
+                                      /*is_leader=*/false,
+                                      /*in_dungeon=*/true),
+            "+follow,-grind,-new rpg");
+  EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
+                                      /*is_leader=*/false,
+                                      /*in_dungeon=*/false),
+            "+follow,-grind,-new rpg");
+  // Stripped test configs (no +grind) are never altered.
+  const std::string boss = "-follow,-grind,-new rpg,-wotlk-hol";
+  EXPECT_EQ(AdjustNonCombatStrategies(boss, /*in_group=*/true,
+                                      /*is_leader=*/false,
+                                      /*in_dungeon=*/true),
+            boss);
+}
+
 }  // namespace
 }  // namespace llm_brain

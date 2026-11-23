@@ -690,6 +690,21 @@ void CollectUsableBagItems(Player* bot,
     if (!info) {
       continue;
     }
+    // Skip item-targeted enchants (sharpening stones, weightstones, weapon
+    // oils): ExecuteUseItemOption only targets units/self, never an item slot.
+    bool requires_item_target = false;
+    for (uint8_t eff = 0; eff < MAX_SPELL_EFFECTS; ++eff) {
+      const uint32_t e = info->Effects[eff].Effect;
+      if (e == SPELL_EFFECT_ENCHANT_ITEM ||
+          e == SPELL_EFFECT_ENCHANT_ITEM_TEMPORARY ||
+          e == SPELL_EFFECT_ENCHANT_HELD_ITEM) {
+        requires_item_target = true;
+        break;
+      }
+    }
+    if (requires_item_target) {
+      continue;
+    }
     // Match Spell.cpp:5910: in 3.3.5a, only one potion can be used per combat
     // (cooldown starts only after leaving combat, so HasSpellCooldown is
     // false).
