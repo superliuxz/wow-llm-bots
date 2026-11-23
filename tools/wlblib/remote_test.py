@@ -7,6 +7,7 @@ import json
 import os
 import pathlib
 import shlex
+import shutil
 import stat
 import subprocess
 import sys
@@ -285,6 +286,25 @@ class RemoteLibTest(unittest.TestCase):
         self.assertIn("--exclude=.git", rsync_cmd)
         self.assertIn("--", rsync_cmd)
 
+        with mock.patch("subprocess.run") as m_sub:
+            remote._kill_remote_pgid(spec)
+        kill_cmd = m_sub.call_args[0][0][-1]
+        self.assertIn('[ "$PGID" -gt 1 ]', kill_cmd)
+        self.assertIn('kill -TERM -"$PGID"', kill_cmd)
+        self.assertIn('kill -KILL -"$PGID"', kill_cmd)
+
+        with mock.patch.object(remote, "get_remote", return_value=spec), \
+             mock.patch.object(remote, "compute_local_stamp", return_value="abc:123"), \
+             mock.patch.object(remote, "read_remote_stamp", return_value="abc:123:full"), \
+             mock.patch("subprocess.run", return_value=mock.Mock(stdout="123 ./worldserver\n")) as m_sub:
+            remote.status("worker1")
+        status_cmd = m_sub.call_args[0][0][-1]
+        self.assertIn("pwd -P", status_cmd)
+        self.assertIn("$PPID", status_cmd)
+        self.assertIn("/proc/[0-9]*", status_cmd)
+
+    @unittest.skipUnless(shutil.which("rsync"), "rsync not installed")
+    def test_live_rsync_tilde_and_spaced_pull(self) -> None:
         # Live rsync test calling remote.pull() and remote._rsync_to_remote()
         # via a local sh -c SSH wrapper, verifying ~/ expansion and spaced paths.
         with tempfile.TemporaryDirectory() as tmp:
@@ -313,23 +333,6 @@ class RemoteLibTest(unittest.TestCase):
             self.assertTrue((dst / "hello.txt").is_file())
             self.assertEqual(pulled.read_text(), '{"x":1}\n')
             self.assertFalse((root / "~").exists())
-
-        with mock.patch("subprocess.run") as m_sub:
-            remote._kill_remote_pgid(spec)
-        kill_cmd = m_sub.call_args[0][0][-1]
-        self.assertIn('[ "$PGID" -gt 1 ]', kill_cmd)
-        self.assertIn('kill -TERM -"$PGID"', kill_cmd)
-        self.assertIn('kill -KILL -"$PGID"', kill_cmd)
-
-        with mock.patch.object(remote, "get_remote", return_value=spec), \
-             mock.patch.object(remote, "compute_local_stamp", return_value="abc:123"), \
-             mock.patch.object(remote, "read_remote_stamp", return_value="abc:123:full"), \
-             mock.patch("subprocess.run", return_value=mock.Mock(stdout="123 ./worldserver\n")) as m_sub:
-            remote.status("worker1")
-        status_cmd = m_sub.call_args[0][0][-1]
-        self.assertIn("pwd -P", status_cmd)
-        self.assertIn("$PPID", status_cmd)
-        self.assertIn("/proc/[0-9]*", status_cmd)
 
     def test_generated_shell_snippets_execute_correctly_locally(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
