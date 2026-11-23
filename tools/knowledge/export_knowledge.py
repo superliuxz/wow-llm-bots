@@ -230,6 +230,11 @@ _RE_REMOVED_PRE_CATA = re.compile(
     r"\{\{\s*removedfromgame[^}]*patch\s*=\s*([123])\.", re.IGNORECASE
 )
 _RE_CATA_BANNER = re.compile(r"\{\{\s*Cataclysm\s*(?:\||\}\})", re.IGNORECASE)
+_RE_CATA_TACTICS_REVAMP = re.compile(
+    r"\{\{\s*Stub/Cataclysm\b|\{\{\s*(?:for|this)\b[^}]*pre-Cataclysm",
+    re.IGNORECASE,
+)
+_RE_SEE_STUB = re.compile(r"^(?:please\s+)?see\b", re.IGNORECASE)
 _RE_MULTI_SPACE = re.compile(r"\s+")
 _RE_QUEST_BREAK = re.compile(r"\$[bB]")
 _RE_QUEST_GENDER = re.compile(r"\$[gG]\s*([^:;]+):([^;]+);")
@@ -245,7 +250,7 @@ _RE_BOSS_ABILITIES_EXACT = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 _RE_BOSS_ABILITIES_BROAD = re.compile(
-    r"^==\s*[^=\n]*?\b(?:Abilities|Abilites|Attacks and abilities|Skills)\b[^=\n]*?==\s*$",
+    r"^==\s*(?![^=\n]*\b(?:Powers|Appearance)\s+and\s+abilities\b)[^=\n]*?\b(?:Abilities|Abilites|Attacks and abilities|Skills)\b[^=\n]*?==\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
 _RE_BOSS_STRATEGY_EXACT = re.compile(
@@ -471,7 +476,7 @@ def _is_stub_section(text: str) -> bool:
         return True
     if low in ("to be announced", "tba", "tbd", "coming soon", "none", "unknown", "stub"):
         return True
-    if ("to be announced" in low or low.startswith("see ")) and len(s) < 120:
+    if ("to be announced" in low or _RE_SEE_STUB.match(low)) and len(s) < 120:
         return True
     return False
 
@@ -822,6 +827,8 @@ def export_knowledge(
                 if is_classic and _RE_REMOVED_PRE_CATA.search(wikitext):
                     continue
                 if _RE_CATA_BANNER.search(wikitext):
+                    continue
+                if prio == 3 and _RE_CATA_TACTICS_REVAMP.search(wikitext):
                     continue
 
                 abilities = _extract_section(

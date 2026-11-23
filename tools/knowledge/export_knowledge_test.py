@@ -54,6 +54,11 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
             (33523, 'Neltharion', 3),
             (34797, 'Icehowl', 3),
             (33988, 'Immortal Guardian', 1),
+            (16065, 'Lady Blaumeux', 3),
+            (26917, 'Alexstrasza the Life-Binder', 3),
+            (448, 'Hogger', 1),
+            (10813, 'Balnazzar', 1),
+            (99999, 'Minor Elite Guard', 1),
             (40, 'Kobold Miner', 0);
         INSERT INTO quests VALUES
             (7, 'Kobold Camp Cleanup', 2, 1, 'Kill 8 Kobold Vermin.$bReturn to Marshal McBride, $N $g fella:lady;.', 101);
@@ -221,6 +226,34 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
             419, 'Immortal Guardian', '', '',
             '==Attacks and abilities==\n*{{abilities|Empowered|Increases damage done by 100% until brought low on health.}}\n*{{abilities|Shadow Beacon|Marks target for healing.}}\n==Strategy==\n...'
         );
+        INSERT INTO pages VALUES (
+            420, 'Lady Blaumeux', '', '',
+            '==Abilities==\nPlease see the "Attacks and Abilities" section in the Four Horsemen article.'
+        );
+        INSERT INTO pages VALUES (
+            421, 'Alexstrasza the Life-Binder', '', '',
+            '==Powers and abilities==\nAmong Alexstrasza''s abilities, she can regrow forests and heal the land across Azeroth.'
+        );
+        INSERT INTO pages VALUES (
+            422, 'Hogger', '', '',
+            '==Abilities==\n*Head Butt — knocks target back.\n==Strategy==\nLevel 11 Elwynn Forest gnoll elite.'
+        );
+        INSERT INTO pages VALUES (
+            423, 'Hogger (tactics)', '', '',
+            '{{Stub/Cataclysm}}\n==Abilities==\n*Vicious Slice\n==Strategy==\nLevel 25 Cataclysm Stormwind Stockade boss.'
+        );
+        INSERT INTO pages VALUES (
+            424, 'Balnazzar (Classic)', '', '',
+            '==Abilities==\n*Mind Blast and Crusader''s Hammer.\n==Strategy==\nStratholme Scarlet Bastion final boss.'
+        );
+        INSERT INTO pages VALUES (
+            425, 'Balnazzar (tactics)', '', '',
+            '{{for|his encounter pre-Cataclysm|Balnazzar (original)}}\n==Strategy==\nPost-Cataclysm Stratholme revamp.'
+        );
+        INSERT INTO pages VALUES (
+            426, 'Minor Elite Guard', '', '',
+            '==Abilities==\n*Cleave and Shield Bash.'
+        );
         """
     )
     con_w.commit()
@@ -338,6 +371,19 @@ class ExportKnowledgeTest(unittest.TestCase):
             self.assertIn("Immortal Guardian", bosses)
             self.assertIn("Empowered", bosses["Immortal Guardian"]["abilities"])
             self.assertNotIn("strategy", bosses["Immortal Guardian"])
+            # "Please see..." pointer stubs, lore-only Powers/Appearance headings, and short (<60 char)
+            # prio=1 abilities-only elites without a strategy are excluded.
+            self.assertNotIn("Lady Blaumeux", bosses)
+            self.assertNotIn("Alexstrasza the Life-Binder", bosses)
+            self.assertNotIn("Minor Elite Guard", bosses)
+            # Cataclysm-revamp (tactics) pages ({{Stub/Cataclysm}} / pre-Cataclysm banner) do not
+            # overwrite 3.3.5a Hogger or Balnazzar (Classic).
+            self.assertIn("Hogger", bosses)
+            self.assertIn("Elwynn Forest", bosses["Hogger"]["strategy"])
+            self.assertNotIn("Stockade", bosses["Hogger"]["strategy"])
+            self.assertIn("Balnazzar", bosses)
+            self.assertIn("Mind Blast", bosses["Balnazzar"]["abilities"])
+            self.assertIn("Scarlet Bastion", bosses["Balnazzar"]["strategy"])
 
 
 if __name__ == "__main__":
