@@ -14,7 +14,7 @@ Last updated 2026-11-23.
   - **Step 1 — Close remaining dungeon-execution gaps:**
     - [x] Add `party leader` self-tag on `me:` in `harness/src/screen/screen_renderer.cc` so dungeon leaders know they are the leader and pick `Explore` after clearing a room (`36/36` screen tests, `0` golden diffs, `47/52` eval parity).
     - [x] Pass explicit `tank`/`heal`/`dps` roles in `soak.py` and add `llmtest difficulty heroic` + `llmtest setskill` in `server_module/src/test/test_commands.cc` (live-verified across all 6 endurance scenarios).
-    - [ ] Live-verify `RecoverStuckDungeonGhost` on an actual dungeon wipe/death.
+    - [x] Live-verify `RecoverStuckDungeonGhost` on an actual dungeon wipe/death (caught `Player::GetCorpse()` cross-map `nullptr` bug, switched to `Player::GetCorpseLocation()` + `stuck_ghost_since_ms`, live-verified L12 bot die in Deadmines -> release to Westfall `map=0` -> recover into `map=36 instance=1 alive=1` after 30 s).
   - **Step 2 — Expand open-world bot mix (longer quests, professions & world activities):**
     - [x] Spread open-world soak bots across Classic, TBC, and WotLK zones (`L32–L78`: STV, Tanaris, EPL, Hellfire, Nagrand, Borean Tundra, Dragonblight, Zul'Drak, Icecrown) with multi-step quest chains, item drops, vendors, trainers, and flight paths.
     - [x] Seed gathering & secondary professions (Herbalism, Mining, Skinning, First Aid, Cooking, Fishing + tools) on open-world bots via `llmtest learn`/`setskill`/`additem`.

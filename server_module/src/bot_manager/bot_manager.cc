@@ -4,7 +4,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <ctime>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -14,7 +13,6 @@
 #include "Action.h"
 #include "AiFactory.h"
 #include "CharacterCache.h"
-#include "Corpse.h"
 #include "DBCStores.h"
 #include "Engine.h"
 #include "Event.h"
@@ -41,10 +39,10 @@ namespace {
 constexpr uint32_t kTickMs = 1000;
 // A failed or dropped login is retried after this long.
 constexpr uint32_t kLoginRetryMs = 10000;
-// Seconds a ghost whose corpse is inside a dungeon waits before cross-map
+// Milliseconds a ghost whose corpse is inside a dungeon waits before cross-map
 // dungeon entrance recovery fires (after Playerbots' FindCorpseAction fails
-// to path across maps).
-constexpr int64_t kStuckDungeonGhostSec = 30;
+// because Player::GetCorpse() returns nullptr across maps).
+constexpr uint64_t kStuckDungeonGhostMs = 30000;
 
 struct BotStrategyOverride {
   std::string combat;
@@ -209,29 +207,39 @@ void EnsurePolicyListener(Player* player, PlayerbotAI* ai) {
 }
 
 // Recovers a ghost stuck at an outside graveyard whose corpse is inside a
-// dungeon (Playerbots' FindCorpseAction fails cross-map pathing). Enters the
+// dungeon. Uses `Player::GetCorpseLocation()` (not `GetCorpse()`, which only
+// checks `player->GetMap()` and returns nullptr across maps). Enters the
 // dungeon entrance portal via AzerothCore's AreaTriggerTeleport (the standard
 // WoW dungeon corpse-run mechanic).
-void RecoverStuckDungeonGhost(Player* player) {
+void RecoverStuckDungeonGhost(Player* player,
+                              uint64_t now_ms,
+                              uint64_t* stuck_since_ms) {
   if (!player || !player->HasPlayerFlag(PLAYER_FLAGS_GHOST) ||
       player->isMoving() || player->IsBeingTeleported()) {
+    *stuck_since_ms = 0;
     return;
   }
-  Corpse* corpse = player->GetCorpse();
-  if (!corpse || corpse->GetMapId() == player->GetMapId()) {
+  const WorldLocation corpse_loc = player->GetCorpseLocation();
+  const uint32_t corpse_map_id = corpse_loc.GetMapId();
+  if (corpse_map_id == player->GetMapId()) {
+    *stuck_since_ms = 0;
     return;
   }
-  const MapEntry* corpse_map = sMapStore.LookupEntry(corpse->GetMapId());
+  const MapEntry* corpse_map = sMapStore.LookupEntry(corpse_map_id);
   if (!corpse_map || !corpse_map->IsDungeon()) {
+    *stuck_since_ms = 0;
     return;
   }
-  const int64_t dead_sec =
-      static_cast<int64_t>(std::time(nullptr)) - corpse->GetGhostTime();
-  if (dead_sec < kStuckDungeonGhostSec) {
+  if (*stuck_since_ms == 0) {
+    *stuck_since_ms = now_ms;
     return;
   }
+  if (now_ms - *stuck_since_ms < kStuckDungeonGhostMs) {
+    return;
+  }
+  *stuck_since_ms = 0;
   const AreaTriggerTeleport* entrance =
-      sObjectMgr->GetMapEntranceTrigger(corpse->GetMapId());
+      sObjectMgr->GetMapEntranceTrigger(corpse_map_id);
   player->ResurrectPlayer(1.0f);
   player->SpawnCorpseBones();
   if (entrance) {
@@ -241,7 +249,7 @@ void RecoverStuckDungeonGhost(Player* player) {
   }
   LOG_INFO("module",
            "mod-llm-brain: recovered dungeon ghost {} into map {} entrance",
-           player->GetName(), corpse->GetMapId());
+           player->GetName(), corpse_map_id);
 }
 
 // World-thread-only per-bot strategy overrides.
@@ -310,7 +318,7 @@ void BotManager::Tick() {
       // of the world: wait, never log it in a second time.
       if (player->IsInWorld()) {
         EnsureStrategies(player);
-        RecoverStuckDungeonGhost(player);
+        RecoverStuckDungeonGhost(player, now_ms_, &bot.stuck_ghost_since_ms);
       }
       continue;
     }
