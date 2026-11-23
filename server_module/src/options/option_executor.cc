@@ -750,6 +750,87 @@ void CollectUsableBagItems(Player* bot,
           return "";
       }
     };
+    const auto slot_name = [](uint32_t inv) -> const char* {
+      switch (inv) {
+        case INVTYPE_HEAD:
+          return "Head";
+        case INVTYPE_NECK:
+          return "Neck";
+        case INVTYPE_SHOULDERS:
+          return "Shoulders";
+        case INVTYPE_CHEST:
+        case INVTYPE_ROBE:
+          return "Chest";
+        case INVTYPE_WAIST:
+          return "Waist";
+        case INVTYPE_LEGS:
+          return "Legs";
+        case INVTYPE_FEET:
+          return "Feet";
+        case INVTYPE_WRISTS:
+          return "Wrists";
+        case INVTYPE_HANDS:
+          return "Hands";
+        case INVTYPE_FINGER:
+          return "Finger";
+        case INVTYPE_TRINKET:
+          return "Trinket";
+        case INVTYPE_CLOAK:
+          return "Back";
+        case INVTYPE_WEAPON:
+          return "1H";
+        case INVTYPE_SHIELD:
+          return "Shield";
+        case INVTYPE_RANGED:
+        case INVTYPE_RANGEDRIGHT:
+        case INVTYPE_THROWN:
+          return "Ranged";
+        case INVTYPE_2HWEAPON:
+          return "2H";
+        case INVTYPE_WEAPONMAINHAND:
+          return "Main Hand";
+        case INVTYPE_WEAPONOFFHAND:
+        case INVTYPE_HOLDABLE:
+          return "Off Hand";
+        case INVTYPE_RELIC:
+          return "Relic";
+        default:
+          return "";
+      }
+    };
+    const auto weapon_subclass_name = [](uint32_t sub) -> const char* {
+      switch (sub) {
+        case ITEM_SUBCLASS_WEAPON_AXE:
+        case ITEM_SUBCLASS_WEAPON_AXE2:
+          return "Axe";
+        case ITEM_SUBCLASS_WEAPON_BOW:
+          return "Bow";
+        case ITEM_SUBCLASS_WEAPON_GUN:
+          return "Gun";
+        case ITEM_SUBCLASS_WEAPON_MACE:
+        case ITEM_SUBCLASS_WEAPON_MACE2:
+          return "Mace";
+        case ITEM_SUBCLASS_WEAPON_POLEARM:
+          return "Polearm";
+        case ITEM_SUBCLASS_WEAPON_SWORD:
+        case ITEM_SUBCLASS_WEAPON_SWORD2:
+          return "Sword";
+        case ITEM_SUBCLASS_WEAPON_STAFF:
+          return "Staff";
+        case ITEM_SUBCLASS_WEAPON_FIST:
+          return "Fist";
+        case ITEM_SUBCLASS_WEAPON_DAGGER:
+          return "Dagger";
+        case ITEM_SUBCLASS_WEAPON_THROWN:
+          return "Thrown";
+        case ITEM_SUBCLASS_WEAPON_CROSSBOW:
+          return "Crossbow";
+        case ITEM_SUBCLASS_WEAPON_WAND:
+          return "Wand";
+        default:
+          return "Weapon";
+      }
+    };
     const auto pick_equip_slot = [&](Item* bag_item, const ItemTemplate* proto,
                                      uint16_t* out_dest) -> bool {
       auto try_dual = [&](uint8_t s1, uint8_t s2) -> bool {
@@ -769,16 +850,19 @@ void CollectUsableBagItems(Player* bot,
       if (proto->InventoryType == INVTYPE_TRINKET) {
         return try_dual(EQUIPMENT_SLOT_TRINKET1, EQUIPMENT_SLOT_TRINKET2);
       }
+      if (proto->InventoryType == INVTYPE_WEAPON && bot->CanDualWield()) {
+        return try_dual(EQUIPMENT_SLOT_MAINHAND, EQUIPMENT_SLOT_OFFHAND);
+      }
       return bot->CanEquipItem(NULL_SLOT, *out_dest, bag_item, true) ==
              EQUIP_ERR_OK;
     };
 
-    size_t equip_added = 0;
+    struct RankedEquip {
+      int32_t ilvl_delta = 0;
+      pb::OptionFacts_Item item;
+    };
+    std::vector<RankedEquip> candidates;
     for (const BagSlotItem& entry : BagItems(bot)) {
-      if (equip_added >= kMaxEquipCandidates ||
-          out->size() >= kMaxUsableBagItems) {
-        break;
-      }
       Item* bag_item = entry.item;
       const ItemTemplate* proto = bag_item ? bag_item->GetTemplate() : nullptr;
       if (!proto || proto->Name1.empty() ||
@@ -799,8 +883,8 @@ void CollectUsableBagItems(Player* bot,
                                          ? equipped->GetTemplate()->ItemLevel
                                          : 0;
       bool dup = false;
-      for (const pb::OptionFacts_Item& existing : *out) {
-        if (existing.equippable && existing.entry == proto->ItemId) {
+      for (const RankedEquip& existing : candidates) {
+        if (existing.item.entry == proto->ItemId) {
           dup = true;
           break;
         }
@@ -809,7 +893,13 @@ void CollectUsableBagItems(Player* bot,
         continue;
       }
       std::string detail;
+      if (const char* sl = slot_name(proto->InventoryType); *sl) {
+        detail += sl;
+      }
       if (const char* qn = quality_name(proto->Quality); *qn) {
+        if (!detail.empty()) {
+          detail += " ";
+        }
         detail += qn;
       }
       if (proto->Class == ITEM_CLASS_ARMOR) {
@@ -823,7 +913,7 @@ void CollectUsableBagItems(Player* bot,
         if (!detail.empty()) {
           detail += " ";
         }
-        detail += "Weapon";
+        detail += weapon_subclass_name(proto->SubClass);
       }
       if (!detail.empty()) {
         detail += ", ";
@@ -832,6 +922,18 @@ void CollectUsableBagItems(Player* bot,
                                         " vs " + std::to_string(equipped_ilvl)
                                   : "ilvl " + std::to_string(proto->ItemLevel) +
                                         ", empty slot";
+      if (proto->Class == ITEM_CLASS_WEAPON && proto->Delay > 0) {
+        const float avg_dmg =
+            (proto->Damage[0].DamageMin + proto->Damage[0].DamageMax) * 0.5f;
+        const float dps =
+            avg_dmg / (static_cast<float>(proto->Delay) / 1000.0f);
+        if (dps >= 0.5f) {
+          detail += ", " + std::to_string(static_cast<int>(std::lround(dps))) +
+                    " DPS";
+        }
+      } else if (proto->Armor > 0) {
+        detail += ", " + std::to_string(proto->Armor) + " Armor";
+      }
       size_t stats_added = 0;
       for (uint32_t s = 0; s < proto->StatsCount && s < MAX_ITEM_PROTO_STATS;
            ++s) {
@@ -848,13 +950,30 @@ void CollectUsableBagItems(Player* bot,
           break;
         }
       }
+      if (proto->Bonding == BIND_WHEN_EQUIPPED && !bag_item->IsSoulBound()) {
+        detail += ", BoE";
+      }
       pb::OptionFacts_Item item;
       item.entry = proto->ItemId;
       item.name = proto->Name1;
       item.out_of_combat_only = true;
       item.equippable = true;
       item.detail = std::move(detail);
-      out->push_back(std::move(item));
+      candidates.push_back({static_cast<int32_t>(proto->ItemLevel) -
+                                static_cast<int32_t>(equipped_ilvl),
+                            std::move(item)});
+    }
+    std::stable_sort(candidates.begin(), candidates.end(),
+                     [](const RankedEquip& a, const RankedEquip& b) {
+                       return a.ilvl_delta > b.ilvl_delta;
+                     });
+    size_t equip_added = 0;
+    for (RankedEquip& cand : candidates) {
+      if (equip_added >= kMaxEquipCandidates ||
+          out->size() >= kMaxUsableBagItems) {
+        break;
+      }
+      out->push_back(std::move(cand.item));
       ++equip_added;
     }
   }
@@ -1564,14 +1683,18 @@ ExecuteResult ExecuteEquipItemOption(Player* bot, const OptionTarget& target) {
     const ItemTemplate* proto = slot_item.item->GetTemplate();
     uint16_t dest = 0;
     uint8_t req_slot = NULL_SLOT;
-    if (proto && (proto->InventoryType == INVTYPE_FINGER ||
-                  proto->InventoryType == INVTYPE_TRINKET)) {
-      const uint8_t s1 = proto->InventoryType == INVTYPE_FINGER
-                             ? EQUIPMENT_SLOT_FINGER1
-                             : EQUIPMENT_SLOT_TRINKET1;
-      const uint8_t s2 = proto->InventoryType == INVTYPE_FINGER
-                             ? EQUIPMENT_SLOT_FINGER2
-                             : EQUIPMENT_SLOT_TRINKET2;
+    if (proto &&
+        (proto->InventoryType == INVTYPE_FINGER ||
+         proto->InventoryType == INVTYPE_TRINKET ||
+         (proto->InventoryType == INVTYPE_WEAPON && bot->CanDualWield()))) {
+      const uint8_t s1 =
+          proto->InventoryType == INVTYPE_FINGER    ? EQUIPMENT_SLOT_FINGER1
+          : proto->InventoryType == INVTYPE_TRINKET ? EQUIPMENT_SLOT_TRINKET1
+                                                    : EQUIPMENT_SLOT_MAINHAND;
+      const uint8_t s2 =
+          proto->InventoryType == INVTYPE_FINGER    ? EQUIPMENT_SLOT_FINGER2
+          : proto->InventoryType == INVTYPE_TRINKET ? EQUIPMENT_SLOT_TRINKET2
+                                                    : EQUIPMENT_SLOT_OFFHAND;
       const Item* i1 = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, s1);
       const Item* i2 = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, s2);
       const uint32_t l1 =

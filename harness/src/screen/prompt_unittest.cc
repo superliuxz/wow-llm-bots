@@ -230,9 +230,20 @@ TEST(PromptTest, KnowledgeOutcomeAndInspectPromptBreakdown) {
 
   const LlmRequest req = BuildPlanRequest(input, screen);
   EXPECT_NE(req.user.find("Last outcome: out of range."), std::string::npos);
-  EXPECT_NE(req.user.find("World guide:\n- Zone: Elwynn Forest"),
-            std::string::npos);
-  EXPECT_NE(req.user.find("Your boss notes:\n## Hogger"), std::string::npos);
+  const size_t notes_pos = req.user.find("Your boss notes:\n## Hogger");
+  const size_t know_pos = req.user.find("World guide:\n- Zone: Elwynn Forest");
+  ASSERT_NE(notes_pos, std::string::npos);
+  ASSERT_NE(know_pos, std::string::npos);
+  // Combat-critical boss notes always precede World guide.
+  EXPECT_LT(notes_pos, know_pos);
+
+  // Under a tight budget, boss notes win remaining bytes ahead of World guide.
+  PromptInput tight = input;
+  tight.rules = std::string(12000, 'r');
+  tight.notes = "## Hogger\n" + std::string(600, 'x');
+  const LlmRequest tight_req = BuildPlanRequest(tight, screen);
+  EXPECT_NE(tight_req.user.find("Your boss notes:"), std::string::npos);
+  EXPECT_EQ(tight_req.user.find("World guide:"), std::string::npos);
 
   const PromptBreakdown b = InspectPrompt(input, screen);
   EXPECT_EQ(b.system_bytes, input.rules.size());

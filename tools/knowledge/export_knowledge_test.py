@@ -38,7 +38,7 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
             source_name TEXT, chance REAL, quest_required INTEGER
         );
         INSERT INTO quests VALUES
-            (7, 'Kobold Camp Cleanup', 2, 1, 'Kill 8 Kobold Vermin.$bReturn to Marshal McBride, $N.', 101);
+            (7, 'Kobold Camp Cleanup', 2, 1, 'Kill 8 Kobold Vermin.$bReturn to Marshal McBride, $N $g fella:lady;.', 101);
         INSERT INTO quests VALUES
             (60, 'Kobold Candles', 7, 4, 'Collect 8 Large Candles.', 102);
         INSERT INTO quest_relations VALUES
@@ -79,8 +79,12 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
             '{{Infobox zone |name=Westfall |faction=Alliance |level=10-15}} Post-Cataclysm Westfall.'
         );
         INSERT INTO pages VALUES (
-            204, 'The Barrens', '', '',
-            '{{Infobox zone |name=The Barrens |faction=Horde |level=10-25}} Horde leveling zone.'
+            204, 'Durotar', '', '',
+            '{{Infobox zone |name=Durotar |faction=Horde |level=1-10}} Horde starting zone.'
+        );
+        INSERT INTO pages VALUES (
+            207, 'The Barrens', '', '',
+            '{{Infobox zone |name=The Barrens |faction=Horde |level=7-30}} Horde leveling zone.'
         );
         INSERT INTO pages VALUES (
             205, 'Northern Barrens', '', '',
@@ -92,10 +96,22 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
         );
         INSERT INTO pages VALUES (
             301, 'Deadmines', '', '',
-            '{{Infobox instance |name=Deadmines |level=17-26}} ==Strategy== Pull patrols carefully and watch for [[Defias]] adds.'
+            '{{Infobox instance |name=Deadmines |level=17-26}} ==Strategy== Pull patrols carefully and watch for [[Defias]] adds &aring;.'
         );
         INSERT INTO pages VALUES (
             302, 'The Deadmines', 'Deadmines', '', '#REDIRECT [[Deadmines]]'
+        );
+        INSERT INTO pages VALUES (
+            303, 'Shadowfang Keep (Classic)', '', '',
+            '{{Infobox instance |name=Shadowfang Keep |level=18-24}} Classic SFK.'
+        );
+        INSERT INTO pages VALUES (
+            304, 'Shadowfang Keep', '', '',
+            '{{Infobox instance |name=Shadowfang Keep |level=18-24 / 85}} Cataclysm SFK.'
+        );
+        INSERT INTO pages VALUES (
+            305, 'Firelands', '', '',
+            '{{Infobox instance |name=Firelands |level=85}} Cataclysm raid.'
         );
         """
     )
@@ -123,26 +139,33 @@ class ExportKnowledgeTest(unittest.TestCase):
             self.assertEqual(q7["ender"], "Marshal McBride")
             self.assertNotIn("$b", q7["log"])
             self.assertNotIn("$N", q7["log"])
+            self.assertNotIn("$g", q7["log"])
+            self.assertIn("fella", q7["log"])
             self.assertIn("Kobold Vermin are north of the abbey.", q7["tip"])
 
             q60 = data["quests"]["60"]
             self.assertEqual(q60["drops"], ["Kobold Miner", "Kobold Tunneler"])
 
             # Era pinning: Cataclysm zone excluded; Classic Westfall (10-20) wins
-            # over post-Cata Westfall (10-15); Badlands normalized to AreaTable name.
+            # over post-Cata Westfall (10-15); Badlands normalized; Durotar recommends The Barrens (7-30).
             self.assertNotIn("Northern Barrens", data["zones"])
             self.assertNotIn("Westfall (Classic)", data["zones"])
             self.assertEqual(data["zones"]["Westfall"]["max_level"], 20)
             self.assertIn("Badlands", data["zones"])
             self.assertEqual(data["zones"]["Badlands"]["min_level"], 35)
+            self.assertIn("The Barrens (7-30)", data["zones"]["Durotar"]["next_zones"])
 
             elwynn = data["zones"]["Elwynn Forest"]
             self.assertEqual(elwynn["next_zones"], ["Westfall (10-20)"])
 
-            # Redirect alias works for dungeons.
+            # Dungeon era pinning: Cataclysm Firelands excluded, Classic SFK wins, HTML entity unescaped.
+            self.assertNotIn("Firelands", data["dungeons"])
+            self.assertNotIn("Shadowfang Keep (Classic)", data["dungeons"])
+            self.assertEqual(data["dungeons"]["Shadowfang Keep"]["level"], "18-24")
             self.assertIn("Deadmines", data["dungeons"])
             self.assertIn("The Deadmines", data["dungeons"])
             self.assertIn("Pull patrols carefully", data["dungeons"]["The Deadmines"]["summary"])
+            self.assertNotIn("&aring;", data["dungeons"]["Deadmines"]["summary"])
 
 
 if __name__ == "__main__":

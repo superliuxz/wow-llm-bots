@@ -10,6 +10,7 @@ sub-millisecond latency without linking libsqlite3 into sanitizer builds.
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import pathlib
 import re
@@ -93,6 +94,115 @@ WOTLK_335A_ZONES: frozenset[str] = frozenset({
     "Zul'Drak",
 })
 
+# Questless / PvP zones that exist in 3.3.5a (for current-zone info) but should
+# never be recommended as `next_zones` leveling targets.
+_NON_LEVELING_NEXT_ZONES: frozenset[str] = frozenset({
+    "Deadwind Pass",
+    "Wintergrasp",
+})
+
+# Canonical WotLK 3.3.5a dungeons & raids (Vanilla + TBC + WotLK). Excludes
+# Cataclysm (4.0+) instances and `(Classic)` duplicates.
+WOTLK_335A_DUNGEONS: frozenset[str] = frozenset({
+    # Classic dungeons & raids
+    "Blackfathom Deeps",
+    "Blackrock Depths",
+    "Blackrock Spire",
+    "Blackwing Lair",
+    "Deadmines",
+    "Dire Maul",
+    "Gnomeregan",
+    "Maraudon",
+    "Molten Core",
+    "Onyxia's Lair",
+    "Ragefire Chasm",
+    "Razorfen Downs",
+    "Razorfen Kraul",
+    "Ruins of Ahn'Qiraj",
+    "Scarlet Monastery",
+    "Scholomance",
+    "Shadowfang Keep",
+    "Stockade",
+    "Stratholme",
+    "Sunken Temple",
+    "Temple of Ahn'Qiraj",
+    "The Deadmines",
+    "The Stockade",
+    "Uldaman",
+    "Wailing Caverns",
+    "Zul'Farrak",
+    "Zul'Gurub",
+    # TBC dungeons & raids
+    "Auchenai Crypts",
+    "Black Temple",
+    "Gruul's Lair",
+    "Hellfire Ramparts",
+    "Hyjal Summit",
+    "Karazhan",
+    "Magisters' Terrace",
+    "Magtheridon's Lair",
+    "Mana-Tombs",
+    "Old Hillsbrad Foothills",
+    "Serpentshrine Cavern",
+    "Sethekk Halls",
+    "Shadow Labyrinth",
+    "Sunwell Plateau",
+    "Tempest Keep",
+    "The Arcatraz",
+    "The Black Morass",
+    "The Blood Furnace",
+    "The Botanica",
+    "The Eye",
+    "The Mechanar",
+    "The Shattered Halls",
+    "The Slave Pens",
+    "The Steamvault",
+    "The Underbog",
+    "Zul'Aman",
+    # WotLK dungeons & raids
+    "Ahn'kahet: The Old Kingdom",
+    "Azjol-Nerub",
+    "Drak'Tharon Keep",
+    "Gundrak",
+    "Halls of Lightning",
+    "Halls of Reflection",
+    "Halls of Stone",
+    "Icecrown Citadel",
+    "Naxxramas",
+    "Pit of Saron",
+    "The Culling of Stratholme",
+    "The Eye of Eternity",
+    "The Forge of Souls",
+    "The Nexus",
+    "The Obsidian Sanctum",
+    "The Oculus",
+    "The Ruby Sanctum",
+    "The Violet Hold",
+    "Trial of the Champion",
+    "Trial of the Crusader",
+    "Ulduar",
+    "Utgarde Keep",
+    "Utgarde Pinnacle",
+    "Vault of Archavon",
+})
+
+_DUNGEON_TITLE_ALIASES: dict[str, str] = {
+    "Ahn'Qiraj": "Temple of Ahn'Qiraj",
+    "Battle for Mount Hyjal": "Hyjal Summit",
+    "Culling of Stratholme": "The Culling of Stratholme",
+    "Eye of Eternity": "The Eye of Eternity",
+    "Forge of Souls": "The Forge of Souls",
+    "Lower Blackrock Spire": "Blackrock Spire",
+    "Nexus": "The Nexus",
+    "Obsidian Sanctum": "The Obsidian Sanctum",
+    "Oculus": "The Oculus",
+    "Ruby Sanctum": "The Ruby Sanctum",
+    "Temple of Atal'Hakkar": "Sunken Temple",
+    "The Shadowfang Keep": "Shadowfang Keep",
+    "Upper Blackrock Spire": "Blackrock Spire",
+    "Violet Hold": "The Violet Hold",
+}
+
 _ZONE_TITLE_ALIASES: dict[str, str] = {
     "Barrens": "The Barrens",
     "Hinterlands": "The Hinterlands",
@@ -114,6 +224,7 @@ _RE_EXTLINK = re.compile(r"\[https?://[^\s\]]+(?:\s+([^\]]+))?\]")
 _RE_BOLD_ITALIC = re.compile(r"'{2,5}")
 _RE_MULTI_SPACE = re.compile(r"\s+")
 _RE_QUEST_BREAK = re.compile(r"\$[bB]")
+_RE_QUEST_GENDER = re.compile(r"\$[gG]\s*([^:;]+):([^;]+);")
 _RE_QUEST_PLACEHOLDER = re.compile(r"\$[nNcCrR]")
 _RE_LEVEL_PAIR = re.compile(r"(\d{1,2})\s*[-–—]\s*(\d{1,2})")
 _RE_LEVEL_SINGLE = re.compile(r"\b(\d{1,2})\b")
@@ -155,6 +266,7 @@ def strip_wikitext(text: str, max_chars: int = 200) -> str:
     s = _RE_WIKILINK.sub(r"\2", s)
     s = _RE_EXTLINK.sub(lambda m: m.group(1) or "", s)
     s = _RE_HTML.sub(" ", s)
+    s = html.unescape(s)
     s = _RE_BOLD_ITALIC.sub("", s)
     lines = []
     for raw in s.splitlines():
@@ -305,10 +417,26 @@ def _canonical_335a_zone(page_title: str, infobox_name: str) -> tuple[str, bool]
     return ("", False)
 
 
+def _canonical_335a_dungeon(page_title: str, infobox_name: str) -> tuple[str, bool]:
+    """Maps a wiki instance title to its canonical 3.3.5a dungeon/raid name."""
+    is_classic = page_title.endswith(" (Classic)")
+    stripped = page_title[: -len(" (Classic)")] if is_classic else page_title
+    for cand in (
+        stripped,
+        _DUNGEON_TITLE_ALIASES.get(stripped, ""),
+        infobox_name,
+        _DUNGEON_TITLE_ALIASES.get(infobox_name, ""),
+    ):
+        if cand in WOTLK_335A_DUNGEONS:
+            return (cand, is_classic)
+    return ("", False)
+
+
 def _clean_quest_log(raw: str) -> str:
     if not raw:
         return ""
     s = _RE_QUEST_BREAK.sub(" ", raw)
+    s = _RE_QUEST_GENDER.sub(lambda m: m.group(1).strip(), s)
     s = _RE_QUEST_PLACEHOLDER.sub("you", s)
     s = _RE_MULTI_SPACE.sub(" ", s).strip()
     if len(s) > 200:
@@ -331,8 +459,8 @@ def export_knowledge(
     try:
         # 1) Quests: ender NPC and item drop sources.
         enders: dict[int, str] = {}
-        for qid, role, name in atlas_con.execute(
-            "SELECT quest_id, role, name FROM quest_relations "
+        for qid, name in atlas_con.execute(
+            "SELECT quest_id, name FROM quest_relations "
             "WHERE role = 'ender' ORDER BY quest_id, entry"
         ):
             if qid not in enders and name:
@@ -437,12 +565,10 @@ def export_knowledge(
                     continue
                 cands: list[tuple[int, int, str]] = []
                 for other_name, odata in unique_zones:
-                    if other_name == zname:
+                    if other_name == zname or other_name in _NON_LEVELING_NEXT_ZONES:
                         continue
                     o_lo, o_hi = odata["min_level"], odata["max_level"]
-                    if o_hi - o_lo > 20:
-                        continue
-                    if o_lo < max(1, z_hi - 2) or o_lo > z_hi + 6 or o_hi <= z_hi:
+                    if o_lo < max(1, z_hi - 3) or o_lo > z_hi + 6 or o_hi <= z_hi:
                         continue
                     o_fac = odata.get("faction", "")
                     if z_fac == "Alliance" and o_fac == "Horde":
@@ -460,6 +586,7 @@ def export_knowledge(
                 if dedup:
                     zdata["next_zones"] = dedup
 
+            dungeon_is_classic: dict[str, bool] = {}
             for title, wikitext in wiki_con.execute(
                 "SELECT title, wikitext FROM pages "
                 "WHERE redirect = '' AND wikitext LIKE '%Infobox instance%'"
@@ -467,8 +594,16 @@ def export_knowledge(
                 info = _extract_infobox(wikitext, "instance")
                 if not info:
                     continue
-                dname = info.get("name") or title
+                dname, is_classic = _canonical_335a_dungeon(title, info.get("name", ""))
+                if not dname:
+                    continue
+                # Prefer `(Classic)` pre-Cataclysm page over post-Cataclysm revamp.
+                if dname in dungeons and dungeon_is_classic.get(dname, False) and not is_classic:
+                    continue
                 lvl = info.get("level", "")
+                # Strip any post-80 Cataclysm heroic level suffix (e.g. "18-24 / 85").
+                if "/" in lvl and any(int(x) > 80 for x in re.findall(r"\b\d+\b", lvl)):
+                    lvl = lvl.split("/", 1)[0].strip()
                 summary = _extract_wiki_tip(wikitext, max_chars=220) or _extract_lead_summary(
                     wikitext, max_chars=220
                 )
@@ -478,13 +613,12 @@ def export_knowledge(
                 if lvl:
                     d_entry["level"] = lvl
                 dungeons[dname] = d_entry
-                if title != dname and title not in dungeons:
-                    dungeons[title] = dict(d_entry)
+                dungeon_is_classic[dname] = is_classic
 
             for rtitle, rtarget in wiki_con.execute(
                 "SELECT title, redirect FROM pages WHERE redirect != ''"
             ):
-                if rtarget in dungeons and rtitle not in dungeons:
+                if rtitle in WOTLK_335A_DUNGEONS and rtarget in dungeons and rtitle not in dungeons:
                     dungeons[rtitle] = dict(dungeons[rtarget])
 
         payload = {

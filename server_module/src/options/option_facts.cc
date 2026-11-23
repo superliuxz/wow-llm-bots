@@ -419,7 +419,7 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
   // Hash index `(map_id|name) -> indices in world->hubs_` avoids O(N*M) scans
   // while merging nearby service/quest-giver NPCs.
   std::unordered_map<std::string, std::vector<size_t>> hubs_by_key;
-  std::vector<std::vector<uint32_t>> hub_quest_levels;
+  std::vector<std::unordered_map<uint32_t, uint32_t>> hub_quests;
   for (const auto& [guid, data] : sObjectMgr->GetAllCreatureData()) {
     const CreatureTemplate* tmpl = sObjectMgr->GetCreatureTemplate(data.id);
     if (!tmpl || tmpl->Name.starts_with("[DND]")) {
@@ -540,7 +540,7 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
       created.for_horde = for_horde;
       created.pos = {data.posX, data.posY, data.posZ};
       bucket_indices.push_back(hub_idx);
-      hub_quest_levels.emplace_back();
+      hub_quests.emplace_back();
     }
     Hub* hub = &world->hubs_[hub_idx];
     hub->has_innkeeper |= has_inn;
@@ -554,8 +554,8 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
       for (auto it = bounds.first; it != bounds.second; ++it) {
         if (const Quest* q = sObjectMgr->GetQuestTemplate(it->second);
             q && q->GetQuestLevel() > 0 && !q->IsDaily() && !q->IsWeekly()) {
-          hub_quest_levels[hub_idx].push_back(
-              static_cast<uint32_t>(q->GetQuestLevel()));
+          hub_quests[hub_idx].emplace(
+              q->GetQuestId(), static_cast<uint32_t>(q->GetQuestLevel()));
         }
       }
     }
@@ -565,18 +565,28 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
       hub->pos_from_innkeeper = true;
     }
   }
-  // Ids from the final position, and IQR (25th-75th percentile) quest levels
-  // so one high-level seasonal/breadcrumb quest in a starter town does not
-  // inflate the hub's level range.
+  // Ids from the final position, and deduplicated quest-level ranges: full
+  // [min, max] for small hubs (< 4 unique quests) and IQR (25th-75th
+  // percentile) for larger hubs so one high-level seasonal/breadcrumb quest
+  // does not inflate a starter town's level range.
   for (size_t i = 0; i < world->hubs_.size(); ++i) {
     Hub& hub = world->hubs_[i];
     hub.id = PlaceId(hub.map_id, hub.pos.x, hub.pos.y);
-    auto& qlevels = hub_quest_levels[i];
+    std::vector<uint32_t> qlevels;
+    qlevels.reserve(hub_quests[i].size());
+    for (const auto& [qid, ql] : hub_quests[i]) {
+      qlevels.push_back(ql);
+    }
     if (!qlevels.empty()) {
       std::sort(qlevels.begin(), qlevels.end());
       const size_t n = qlevels.size();
-      hub.min_quest_level = qlevels[n / 4];
-      hub.max_quest_level = qlevels[(3 * (n - 1)) / 4];
+      if (n < 4) {
+        hub.min_quest_level = qlevels.front();
+        hub.max_quest_level = qlevels.back();
+      } else {
+        hub.min_quest_level = qlevels[n / 4];
+        hub.max_quest_level = qlevels[(3 * (n - 1)) / 4];
+      }
     }
   }
   return world;

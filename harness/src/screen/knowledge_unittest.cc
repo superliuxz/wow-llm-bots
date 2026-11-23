@@ -93,6 +93,10 @@ TEST(WorldKnowledgeTest, DungeonFallbackSuppressedWhenBossNotesExist) {
   wlb::snapshot::Snapshot snap;
   snap.base.where.in_instance = true;
   snap.base.where.zone = "Deadmines";
+  wlb::snapshot::Objective q_open;
+  q_open.quest.emplace().quest_id = 60;
+  q_open.quest->complete = false;
+  snap.ext.quest_tracker.push_back(q_open);
 
   const std::string without_notes =
       wk->SelectRelevant(snap, /*has_boss_notes=*/false);
@@ -100,10 +104,11 @@ TEST(WorldKnowledgeTest, DungeonFallbackSuppressedWhenBossNotesExist) {
             std::string::npos);
   EXPECT_NE(without_notes.find("Pull Defias patrols carefully."),
             std::string::npos);
+  EXPECT_NE(without_notes.find("Kobold Candles"), std::string::npos);
 
   const std::string with_notes =
       wk->SelectRelevant(snap, /*has_boss_notes=*/true);
-  EXPECT_EQ(with_notes.find("Instance: Deadmines"), std::string::npos);
+  EXPECT_TRUE(with_notes.empty());
 }
 
 TEST(WorldKnowledgeTest, RejectsInvalidJson) {

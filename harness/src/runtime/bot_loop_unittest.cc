@@ -13,6 +13,7 @@
 #include <fstream>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -1882,10 +1883,18 @@ TEST(BotLoopTest, ChatErrorWakesBrainWithoutStoppingActiveRunner) {
 
 TEST(BotLoopTest, LastOutcomeDeliveredOnceAndKnowledgeInjected) {
   namespace fs = std::filesystem;
-  const fs::path tmp =
-      fs::temp_directory_path() / "wlb_bot_loop_knowledge_test.json";
+  struct ScopedTempFile {
+    fs::path path;
+    ~ScopedTempFile() {
+      std::error_code ec;
+      fs::remove(path, ec);
+    }
+  };
+  ScopedTempFile tmp{fs::temp_directory_path() /
+                     ("wlb_bot_loop_knowledge_" +
+                      std::to_string(static_cast<long>(::getpid())) + ".json")};
   {
-    std::ofstream out(tmp);
+    std::ofstream out(tmp.path);
     out << R"json({
       "version": 1,
       "quests": {},
@@ -1905,7 +1914,7 @@ TEST(BotLoopTest, LastOutcomeDeliveredOnceAndKnowledgeInjected) {
   std::vector<pb::Command> sent;
   BotLoopConfig cfg;
   cfg.rules = "rules";
-  cfg.knowledge_path = tmp.string();
+  cfg.knowledge_path = tmp.path.string();
   BotLoop loop(cfg, brain.Fn(),
                [&](const pb::Command& cmd) { sent.push_back(cmd); });
 
@@ -1944,20 +1953,42 @@ TEST(BotLoopTest, LastOutcomeDeliveredOnceAndKnowledgeInjected) {
   EXPECT_NE(
       brain.front_request().user.find("Last outcome: target out of range."),
       std::string::npos);
-  // Bot answers with Keep (which never produces step_done); the next wake must
-  // NOT repeat the stale `Last outcome:` breadcrumb.
+
+  // An unparseable plan requeues `Last outcome:` for the retry wake.
+  brain.FinishReply("garbage not a valid plan");
+  pb::ImmediateEvent w0;
+  w0.bot = "Gatda";
+  w0.event.chat.emplace().channel = pb::WHISPER;
+  w0.event.chat->from = "Ally";
+  w0.event.chat->text = "ping";
+  loop.OnEvent(std::move(w0), t0 + base::Seconds(2));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(
+      brain.front_request().user.find("Last outcome: target out of range."),
+      std::string::npos);
+
+  // A valid Keep reply consumes `Last outcome:` so the next wake does NOT
+  // repeat it.
   brain.FinishReply("do: 2\nexpect: none\nwatch: none\nlook: 60");
   pb::ImmediateEvent whisper;
   whisper.bot = "Gatda";
   whisper.event.chat.emplace().channel = pb::WHISPER;
   whisper.event.chat->from = "Ally";
   whisper.event.chat->text = "ready?";
-  loop.OnEvent(std::move(whisper), t0 + base::Seconds(2));
+  loop.OnEvent(std::move(whisper), t0 + base::Seconds(3));
   ASSERT_EQ(brain.size(), 1u);
   EXPECT_EQ(brain.front_request().user.find("Last outcome:"),
             std::string::npos);
 
-  fs::remove(tmp);
+  // Disconnect increments call_epoch and clears last_outcome: a late cancelled
+  // reply from the old epoch must NOT resurrect a stale outcome.
+  loop.OnConnectionChanged(false);
+  brain.FinishCancelled();
+  loop.OnConnectionChanged(true);
+  loop.OnSnapshot(s1, t0 + base::Seconds(4));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_EQ(brain.front_request().user.find("Last outcome:"),
+            std::string::npos);
 }
 
 }  // namespace

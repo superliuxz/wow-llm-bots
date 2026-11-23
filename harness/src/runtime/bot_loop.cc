@@ -201,7 +201,8 @@ void BotLoop::NoteWhisperer(BotState* state,
 
 void BotLoop::Requeue(BotState* state,
                       std::vector<std::string> reasons,
-                      std::vector<std::string> events) {
+                      std::vector<std::string> events,
+                      std::string outcome) {
   for (std::string& r : state->pending_reasons) {
     if (std::find(reasons.begin(), reasons.end(), r) == reasons.end()) {
       reasons.push_back(std::move(r));
@@ -214,6 +215,9 @@ void BotLoop::Requeue(BotState* state,
   while (state->recent_events.size() >
          std::max<size_t>(config_.max_recent_events, 1)) {
     state->recent_events.pop_front();
+  }
+  if (state->last_outcome.empty() && !outcome.empty()) {
+    state->last_outcome = std::move(outcome);
   }
 }
 
@@ -674,18 +678,12 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
           std::move(done).Run();
           return;
         }
-        if (result.cancelled || !result.reply) {
-          if (auto it = self->bots_.find(bot);
-              it != self->bots_.end() && it->second.last_outcome.empty() &&
-              !asked_outcome.empty()) {
-            it->second.last_outcome = std::move(asked_outcome);
-          }
-        }
         self->OnReply(bot, epoch, ask_seq, std::move(ask_screen),
                       std::move(order_names), std::move(wake_reason),
                       std::move(asked_reasons), std::move(asked_events),
-                      std::move(request_copy), snap_mono_us, age_at_ask_ms,
-                      *holder, std::move(done), std::move(result));
+                      std::move(asked_outcome), std::move(request_copy),
+                      snap_mono_us, age_at_ask_ms, *holder, std::move(done),
+                      std::move(result));
       },
       std::move(on_first_line));
   if (!handle) {
@@ -738,6 +736,7 @@ void BotLoop::OnReply(const std::string& bot,
                       std::string wake_reason,
                       std::vector<std::string> asked_reasons,
                       std::vector<std::string> asked_events,
+                      std::string asked_outcome,
                       LlmRequest request,
                       int64_t snapshot_monotonic_us,
                       std::optional<double> age_at_ask_ms,
@@ -752,7 +751,8 @@ void BotLoop::OnReply(const std::string& bot,
     if (auto it = bots_.find(bot);
         it != bots_.end() && it->second.call_epoch == epoch) {
       it->second.call_in_flight = false;
-      Requeue(&it->second, std::move(asked_reasons), std::move(asked_events));
+      Requeue(&it->second, std::move(asked_reasons), std::move(asked_events),
+              std::move(asked_outcome));
     }
     ++calls_cancelled_;
     Log(base::StringPrintf("harness: %s call cancelled after %.0f ms",
@@ -798,12 +798,14 @@ void BotLoop::OnReply(const std::string& bot,
                              bot.c_str(), decision.result.round_trip_ms,
                              decision.result.error.c_str()));
       state.look_deadline = now + base::Seconds(10);
-      Requeue(&state, std::move(asked_reasons), std::move(asked_events));
+      Requeue(&state, std::move(asked_reasons), std::move(asked_events),
+              std::move(asked_outcome));
     } else if (!plan) {
       Log(base::StringPrintf("harness: %s invalid plan (%.0f ms)", bot.c_str(),
                              decision.result.round_trip_ms));
       state.look_deadline = now + base::Seconds(10);
-      Requeue(&state, std::move(asked_reasons), std::move(asked_events));
+      Requeue(&state, std::move(asked_reasons), std::move(asked_events),
+              std::move(asked_outcome));
     } else {
       if (!plan->goal.empty()) {
         state.current_goal = plan->goal;

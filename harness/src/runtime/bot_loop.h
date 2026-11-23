@@ -211,7 +211,8 @@ class BotLoop {
   // still sees them (a whisper is not lost to a cancelled or failed call).
   void Requeue(BotState* state,
                std::vector<std::string> reasons,
-               std::vector<std::string> events);
+               std::vector<std::string> events,
+               std::string outcome = "");
   // `refusal`: woken because a step was refused (the refusal count stays;
   // any other wake starts it over, so one late refusal after, say, entering
   // combat doesn't hold the bot back up to 30 s: review of f40b0b6, finding 6).
@@ -238,6 +239,7 @@ class BotLoop {
                std::string wake_reason,
                std::vector<std::string> asked_reasons,
                std::vector<std::string> asked_events,
+               std::string asked_outcome,
                LlmRequest request,
                int64_t snapshot_monotonic_us,
                std::optional<double> age_at_ask_ms,
