@@ -104,6 +104,10 @@ bool MessagePumpEpoll::WatchFileDescriptor(int fd,
                                            int mode,
                                            FdWatchController* controller,
                                            FdWatcher* watcher) {
+  if (controller->pump_ &&
+      (controller->pump_ != this || controller->fd_ != fd)) {
+    controller->StopWatchingFileDescriptor();
+  }
   auto it = controllers_.find(fd);
   if (it != controllers_.end() && it->second != controller) {
     return false;  // Another controller already watches this fd.
@@ -121,6 +125,7 @@ bool MessagePumpEpoll::WatchFileDescriptor(int fd,
   controller->fd_ = fd;
   controller->mode_ = new_mode;
   controller->persistent_ = persistent;
+  ++controller->generation_;
   controllers_[fd] = controller;
   return true;
 }
@@ -136,6 +141,7 @@ bool MessagePumpEpoll::StopWatching(FdWatchController* controller) {
   controller->watcher_ = nullptr;
   controller->fd_ = -1;
   controller->mode_ = 0;
+  ++controller->generation_;
   return true;
 }
 
@@ -143,27 +149,34 @@ void MessagePumpEpoll::Dispatch(int fd, uint32_t events) {
   // Errors and hangups are reported as readable/writable:
   // the next read/write returns the error or EOF.
   const bool error = events & (EPOLLERR | EPOLLHUP);
-  for (int mode : {WATCH_WRITE, WATCH_READ}) {
-    auto it = controllers_.find(fd);
-    if (it == controllers_.end()) {
-      return;  // Stopped by an earlier callback.
+  auto it = controllers_.find(fd);
+  if (it == controllers_.end()) {
+    return;
+  }
+  FdWatchController* controller = it->second.get();
+  const uint64_t generation = controller->generation_;
+  const bool write_ready =
+      (controller->mode_ & WATCH_WRITE) && (error || (events & EPOLLOUT));
+  const bool read_ready =
+      (controller->mode_ & WATCH_READ) && (error || (events & EPOLLIN));
+  if (!write_ready && !read_ready) {
+    return;
+  }
+  if (write_ready) {
+    controller->watcher_->OnFileCanWriteWithoutBlocking(fd);
+  }
+  if (read_ready) {
+    it = controllers_.find(fd);
+    if (it == controllers_.end() || it->second.get() != controller ||
+        controller->generation_ != generation) {
+      return;  // Stopped, destroyed, or re-armed by the write callback.
     }
-    FdWatchController* controller = it->second.get();
-    const bool ready =
-        (controller->mode_ & mode) &&
-        (error || (events & (mode == WATCH_READ ? EPOLLIN : EPOLLOUT)));
-    if (!ready) {
-      continue;
-    }
-    FdWatcher* watcher = controller->watcher_.get();
-    if (!controller->persistent_) {
-      StopWatching(controller);
-    }
-    if (mode == WATCH_READ) {
-      watcher->OnFileCanReadWithoutBlocking(fd);
-    } else {
-      watcher->OnFileCanWriteWithoutBlocking(fd);
-    }
+    controller->watcher_->OnFileCanReadWithoutBlocking(fd);
+  }
+  it = controllers_.find(fd);
+  if (it != controllers_.end() && it->second.get() == controller &&
+      controller->generation_ == generation && !controller->persistent_) {
+    StopWatching(controller);
   }
 }
 

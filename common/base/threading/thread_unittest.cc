@@ -2,8 +2,13 @@
 
 #include "base/threading/thread.h"
 
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include <atomic>
 
+#include "base/message_loop/message_pump.h"
+#include "base/message_loop/message_pump_epoll.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/post_task_and_reply.h"
 #include "base/task/sequenced_task_runner.h"
@@ -82,6 +87,124 @@ TEST(ThreadPoolTest, ReplyComesBackOnOriginSequence) {
   done.Wait();
   EXPECT_EQ(value, 42);
   EXPECT_TRUE(on_origin);
+}
+
+TEST(ThreadTest, StopWithConcurrentPostTask) {
+  for (int round = 0; round < 20; ++round) {
+    Thread target("target");
+    ASSERT_TRUE(target.Start());
+    auto runner = target.task_runner();
+    std::atomic<bool> stop_posting{false};
+    PlatformThreadHandle poster =
+        PlatformThread::Create("poster", [&stop_posting, runner] {
+          while (!stop_posting.load(std::memory_order_relaxed)) {
+            runner->PostTask([] {});
+          }
+        });
+    PlatformThread::Sleep(Milliseconds(1));
+    target.Stop();
+    stop_posting.store(true, std::memory_order_relaxed);
+    PlatformThread::Join(poster);
+  }
+}
+
+TEST(PlatformThreadTest, SleepNonPositiveReturnsImmediately) {
+  const TimeTicks start = TimeTicks::Now();
+  PlatformThread::Sleep(Microseconds(-1000));
+  PlatformThread::Sleep(TimeDelta());
+  EXPECT_LT(TimeTicks::Now() - start, Milliseconds(100));
+}
+
+class RecordingWatcher : public MessagePumpEpoll::FdWatcher {
+ public:
+  void OnFileCanReadWithoutBlocking(int fd) override {
+    read_fd = fd;
+    ++reads;
+  }
+  void OnFileCanWriteWithoutBlocking(int fd) override {
+    write_fd = fd;
+    ++writes;
+  }
+  int read_fd = -1;
+  int write_fd = -1;
+  int reads = 0;
+  int writes = 0;
+};
+
+TEST(MessagePumpEpollTest, OneShotReadWriteAndControllerReuse) {
+  int p1[2] = {-1, -1};
+  int p2[2] = {-1, -1};
+  ASSERT_EQ(pipe(p1), 0);
+  ASSERT_EQ(pipe(p2), 0);
+  const char byte = 'x';
+  ASSERT_EQ(write(p1[1], &byte, 1), 1);
+  ASSERT_EQ(write(p2[1], &byte, 1), 1);
+
+  Thread io("io");
+  ASSERT_TRUE(io.StartWithOptions({MessagePumpType::IO}));
+  RecordingWatcher watcher;
+  MessagePumpEpoll::FdWatchController controller;
+
+  WaitableEvent setup_done;
+  io.task_runner()->PostTask([&] {
+    // Watch p1[0], then immediately reuse the same controller for p2[0].
+    EXPECT_TRUE(CurrentIOThread::Get()->WatchFileDescriptor(
+        p1[0], /*persistent=*/true, MessagePumpForIO::WATCH_READ, &controller,
+        &watcher));
+    EXPECT_TRUE(CurrentIOThread::Get()->WatchFileDescriptor(
+        p2[0], /*persistent=*/false, MessagePumpForIO::WATCH_READ, &controller,
+        &watcher));
+    setup_done.Signal();
+  });
+  ASSERT_TRUE(setup_done.TimedWait(Seconds(2)));
+  // Give the IO pump a turn to dispatch.
+  PlatformThread::Sleep(Milliseconds(20));
+
+  WaitableEvent check1;
+  io.task_runner()->PostTask([&] {
+    EXPECT_EQ(watcher.read_fd, p2[0]);
+    EXPECT_EQ(watcher.reads, 1);
+    EXPECT_FALSE(controller.is_watching());
+    check1.Signal();
+  });
+  ASSERT_TRUE(check1.TimedWait(Seconds(2)));
+
+  // Now test non-persistent WATCH_READ_WRITE on a socketpair (both readable
+  // and writable at once).
+  int sp[2] = {-1, -1};
+  ASSERT_EQ(
+      socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, sp),
+      0);
+  ASSERT_EQ(write(sp[1], &byte, 1), 1);
+  RecordingWatcher rw_watcher;
+  WaitableEvent rw_setup;
+  io.task_runner()->PostTask([&] {
+    EXPECT_TRUE(CurrentIOThread::Get()->WatchFileDescriptor(
+        sp[0], /*persistent=*/false, MessagePumpForIO::WATCH_READ_WRITE,
+        &controller, &rw_watcher));
+    rw_setup.Signal();
+  });
+  ASSERT_TRUE(rw_setup.TimedWait(Seconds(2)));
+  PlatformThread::Sleep(Milliseconds(20));
+
+  WaitableEvent rw_check;
+  io.task_runner()->PostTask([&] {
+    EXPECT_EQ(rw_watcher.write_fd, sp[0]);
+    EXPECT_EQ(rw_watcher.read_fd, sp[0]);
+    EXPECT_EQ(rw_watcher.writes, 1);
+    EXPECT_EQ(rw_watcher.reads, 1);
+    EXPECT_FALSE(controller.is_watching());
+    rw_check.Signal();
+  });
+  ASSERT_TRUE(rw_check.TimedWait(Seconds(2)));
+
+  io.Stop();
+  close(sp[0]);
+  close(sp[1]);
+  close(p1[0]);
+  close(p1[1]);
+  close(p2[0]);
+  close(p2[1]);
 }
 
 }  // namespace

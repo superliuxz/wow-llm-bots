@@ -14,6 +14,7 @@
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
+#include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/thread_annotations.h"
@@ -78,12 +79,14 @@ class TaskQueue : public SequencedTaskRunner {
   std::vector<OnceClosure> TakeReadyTasks() LOCKS_EXCLUDED(lock_);
 
   mutable Lock lock_;
+  ConditionVariable wakeups_drained_{&lock_};
   std::deque<OnceClosure> immediate_ GUARDED_BY(lock_);
   std::priority_queue<DelayedTask, std::vector<DelayedTask>, std::greater<>>
       delayed_ GUARDED_BY(lock_);
   uint64_t next_sequence_ GUARDED_BY(lock_) = 0;
   bool shut_down_ GUARDED_BY(lock_) = false;
   RepeatingClosure wakeup_ GUARDED_BY(lock_);
+  size_t active_wakeups_ GUARDED_BY(lock_) = 0;
 };
 
 }  // namespace base

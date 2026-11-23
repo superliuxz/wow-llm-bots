@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <time.h>
 
+#include <cerrno>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -58,10 +59,13 @@ void PlatformThread::SetName(const std::string& name) {
 
 // static
 void PlatformThread::Sleep(TimeDelta duration) {
+  if (!duration.is_positive()) {
+    return;
+  }
   const int64_t us = duration.InMicroseconds();
   timespec ts{static_cast<time_t>(us / 1000000),
               static_cast<long>((us % 1000000) * 1000)};
-  while (nanosleep(&ts, &ts) != 0) {
+  while (nanosleep(&ts, &ts) != 0 && errno == EINTR) {
   }
 }
 

@@ -117,8 +117,9 @@ void UnixSocketServer::OnClientDrained() {
 
 void UnixSocketServer::OnClientClosed() {
   // We're inside the connection's callback: destroy it after it returns.
+  // Transfer ownership via unique_ptr so TaskQueue::Shutdown() still frees it.
   base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
-      [connection = client_.release()] { delete connection; });
+      [connection = std::move(client_)]() mutable { connection.reset(); });
   if (callbacks_.on_disconnected) {
     callbacks_.on_disconnected.Run();
   }

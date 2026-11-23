@@ -185,5 +185,37 @@ TEST(UnixSocketTest, ServerClosesClientOnCorruptFrame) {
   RunOn(io, [&] { server.reset(); });
 }
 
+TEST(UnixSocketTest, ClientCanDestroySelfInOnDisconnected) {
+  const std::string path = TestSocketPath();
+  base::Thread server_io("server"), client_io("client");
+  ASSERT_TRUE(server_io.StartWithOptions(IoOptions()));
+  ASSERT_TRUE(client_io.StartWithOptions(IoOptions()));
+  std::unique_ptr<UnixSocketServer> server;
+  std::unique_ptr<UnixSocketClient> client;
+  base::WaitableEvent connected, disconnected;
+
+  RunOn(server_io, [&] {
+    server =
+        std::make_unique<UnixSocketServer>(path, UnixSocketServer::Callbacks{});
+    ASSERT_TRUE(server->Listen());
+  });
+  RunOn(client_io, [&] {
+    client = std::make_unique<UnixSocketClient>(
+        path,
+        UnixSocketClient::Callbacks{[&] { connected.Signal(); },
+                                    {},
+                                    [&] {
+                                      client.reset();
+                                      disconnected.Signal();
+                                    }},
+        base::Milliseconds(50));
+    client->Start();
+  });
+  ASSERT_TRUE(connected.TimedWait(kTimeout));
+  // Server drops connection -> client's on_disconnected destroys client.
+  RunOn(server_io, [&] { server.reset(); });
+  ASSERT_TRUE(disconnected.TimedWait(kTimeout));
+}
+
 }  // namespace
 }  // namespace net

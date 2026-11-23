@@ -51,9 +51,16 @@ bool TaskQueue::PostDelayedTask(OnceClosure task, TimeDelta delay) {
                                 std::move(task)});
     }
     wakeup = wakeup_;
+    if (wakeup) {
+      ++active_wakeups_;
+    }
   }
   if (wakeup) {
     wakeup.Run();
+    AutoLock lock(lock_);
+    if (--active_wakeups_ == 0) {
+      wakeups_drained_.Broadcast();
+    }
   }
   return true;
 }
@@ -100,8 +107,15 @@ void TaskQueue::Shutdown() {
 }
 
 void TaskQueue::SetWakeupCallback(RepeatingClosure wakeup) {
-  AutoLock lock(lock_);
-  wakeup_ = std::move(wakeup);
+  RepeatingClosure old;
+  {
+    AutoLock lock(lock_);
+    old = std::move(wakeup_);
+    wakeup_ = std::move(wakeup);
+    while (active_wakeups_ > 0) {
+      wakeups_drained_.Wait();
+    }
+  }
 }
 
 std::optional<TimeTicks> TaskQueue::NextDelayedRunTime() const {

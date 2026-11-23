@@ -79,7 +79,9 @@ class RepeatingCallback<R(Args...)> {
   bool is_null() const { return !impl_; }
 
   R Run(Args... args) const {
-    return impl_->Invoke(std::forward<Args>(args)...);
+    // Pin impl_ locally in case Invoke destroys this RepeatingCallback.
+    scoped_refptr<Concept> impl = impl_;
+    return impl->Invoke(std::forward<Args>(args)...);
   }
 
  private:

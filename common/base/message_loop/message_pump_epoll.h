@@ -50,6 +50,7 @@ class MessagePumpEpoll : public MessagePump {
     int fd_ = -1;
     int mode_ = 0;
     bool persistent_ = false;
+    uint64_t generation_ = 0;
   };
 
   MessagePumpEpoll();

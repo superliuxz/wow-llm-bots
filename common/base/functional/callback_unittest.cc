@@ -61,5 +61,17 @@ TEST(WeakPtrTest, InvalidatedOnFactoryDestruction) {
   EXPECT_FALSE(weak);
 }
 
+TEST(CallbackTest, RepeatingCallbackCanDestroySelfDuringRun) {
+  auto cb = std::make_unique<RepeatingClosure>();
+  int after_reset = 0;
+  *cb = [cb_ptr = &cb, &after_reset, sentinel = std::string("alive")] {
+    cb_ptr->reset();
+    after_reset = static_cast<int>(sentinel.size());
+  };
+  cb->Run();
+  EXPECT_EQ(cb, nullptr);
+  EXPECT_EQ(after_reset, 5);
+}
+
 }  // namespace
 }  // namespace base

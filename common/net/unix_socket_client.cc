@@ -120,12 +120,14 @@ void UnixSocketClient::OnConnected(int fd) {
 
 void UnixSocketClient::OnConnectionClosed() {
   // We're inside the connection's callback: destroy it after it returns.
+  // Transfer ownership via unique_ptr so TaskQueue::Shutdown() still frees it.
   io_task_runner_->PostTask(
-      [connection = connection_.release()] { delete connection; });
+      [connection = std::move(connection_)]() mutable { connection.reset(); });
+  // ScheduleRetry before on_disconnected in case the callback destroys `this`.
+  ScheduleRetry();
   if (callbacks_.on_disconnected) {
     callbacks_.on_disconnected.Run();
   }
-  ScheduleRetry();
 }
 
 void UnixSocketClient::ScheduleRetry() {
