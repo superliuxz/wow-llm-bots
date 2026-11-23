@@ -59,6 +59,7 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
             (448, 'Hogger', 1),
             (10813, 'Balnazzar', 1),
             (99999, 'Minor Elite Guard', 1),
+            (16474, 'Blizzard', 3),
             (40, 'Kobold Miner', 0);
         INSERT INTO quests VALUES
             (7, 'Kobold Camp Cleanup', 2, 1, 'Kill 8 Kobold Vermin.$bReturn to Marshal McBride, $N $g fella:lady;.', 101);
@@ -254,6 +255,10 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
             426, 'Minor Elite Guard', '', '',
             '==Abilities==\n*Cleave and Shield Bash.'
         );
+        INSERT INTO pages VALUES (
+            427, 'Blizzard', '', '',
+            '{{Infobox ability |name=Blizzard |class=Mage}}\n==Tips and tactics==\nChanneled AoE frost spell for mages.'
+        );
         """
     )
     con_w.commit()
@@ -376,6 +381,7 @@ class ExportKnowledgeTest(unittest.TestCase):
             self.assertNotIn("Lady Blaumeux", bosses)
             self.assertNotIn("Alexstrasza the Life-Binder", bosses)
             self.assertNotIn("Minor Elite Guard", bosses)
+            self.assertNotIn("Blizzard", bosses)
             # Cataclysm-revamp (tactics) pages ({{Stub/Cataclysm}} / pre-Cataclysm banner) do not
             # overwrite 3.3.5a Hogger or Balnazzar (Classic).
             self.assertIn("Hogger", bosses)

@@ -234,6 +234,7 @@ _RE_CATA_TACTICS_REVAMP = re.compile(
     r"\{\{\s*Stub/Cataclysm\b|\{\{\s*(?:for|this)\b[^}]*pre-Cataclysm",
     re.IGNORECASE,
 )
+_RE_PLAYER_SPELL_PAGE = re.compile(r"\{\{\s*Infobox\s+ability\b", re.IGNORECASE)
 _RE_SEE_STUB = re.compile(r"^(?:please\s+)?see\b", re.IGNORECASE)
 _RE_MULTI_SPACE = re.compile(r"\s+")
 _RE_QUEST_BREAK = re.compile(r"\$[bB]")
@@ -829,6 +830,8 @@ def export_knowledge(
                 if _RE_CATA_BANNER.search(wikitext):
                     continue
                 if prio == 3 and _RE_CATA_TACTICS_REVAMP.search(wikitext):
+                    continue
+                if prio == 1 and _RE_PLAYER_SPELL_PAGE.search(wikitext):
                     continue
 
                 abilities = _extract_section(
