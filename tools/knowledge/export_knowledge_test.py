@@ -38,13 +38,12 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
             source_name TEXT, chance REAL, quest_required INTEGER
         );
         INSERT INTO quests VALUES
-            (7, 'Kobold Camp Cleanup', 2, 1, 'Kill 8 Kobold Vermin.$BReturn to Marshal McBride.', 101);
+            (7, 'Kobold Camp Cleanup', 2, 1, 'Kill 8 Kobold Vermin.$bReturn to Marshal McBride, $N.', 101);
         INSERT INTO quests VALUES
             (60, 'Kobold Candles', 7, 4, 'Collect 8 Large Candles.', 102);
         INSERT INTO quest_relations VALUES
             (7, 'starter', 'creature', 197, 'Marshal McBride'),
             (7, 'ender', 'creature', 197, 'Marshal McBride'),
-            (60, 'starter', 'creature', 253, 'William Pestle'),
             (60, 'ender', 'creature', 253, 'William Pestle');
         INSERT INTO quest_objectives VALUES
             (60, 0, 'item', 772, 'Large Candle', 8, '');
@@ -69,15 +68,27 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
         );
         INSERT INTO pages VALUES (
             201, 'Elwynn Forest', '', '',
-            '{{Infobox zone |name=Elwynn Forest |faction=Alliance |level=1-10}} Elwynn Forest is the [[Human]] starting zone.<ref>src</ref>'
+            '{{Infobox zone |name=Elwynn Forest |faction=Alliance |level=1-10}} Elwynn Forest is the [[Human]] starting zone.'
         );
         INSERT INTO pages VALUES (
-            202, 'Westfall', '', '',
-            '{{Infobox zone |name=Westfall |faction=Alliance |level=10-20}} Westfall lies west of Elwynn Forest.'
+            202, 'Westfall (Classic)', '', '',
+            '{{Infobox zone |name=Westfall |faction=Alliance |level=10-20}} Classic Westfall.'
         );
         INSERT INTO pages VALUES (
-            203, 'The Barrens', '', '',
+            203, 'Westfall', '', '',
+            '{{Infobox zone |name=Westfall |faction=Alliance |level=10-15}} Post-Cataclysm Westfall.'
+        );
+        INSERT INTO pages VALUES (
+            204, 'The Barrens', '', '',
             '{{Infobox zone |name=The Barrens |faction=Horde |level=10-25}} Horde leveling zone.'
+        );
+        INSERT INTO pages VALUES (
+            205, 'Northern Barrens', '', '',
+            '{{Infobox zone |name=Northern Barrens |faction=Horde |level=10-20}} Cataclysm zone.'
+        );
+        INSERT INTO pages VALUES (
+            206, 'Badlands (Classic)', '', '',
+            '{{Infobox zone |name=The Badlands |faction=Contested |level=35-45}} Badlands.'
         );
         INSERT INTO pages VALUES (
             301, 'Deadmines', '', '',
@@ -98,7 +109,7 @@ class ExportKnowledgeTest(unittest.TestCase):
         raw = "{{Template|a={{nested}}}} '''Hello''' [[Target|World]]<ref>cite</ref> [[File:Foo.png]]"
         self.assertEqual(ek.strip_wikitext(raw), "Hello World")
 
-    def test_export_quests_zones_dungeons_and_next_zones(self) -> None:
+    def test_export_335a_era_pinning_and_quest_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             t = pathlib.Path(tmp)
             atlas, wiki = _make_fixture_dbs(t)
@@ -109,21 +120,24 @@ class ExportKnowledgeTest(unittest.TestCase):
             self.assertEqual(data["version"], 1)
             q7 = data["quests"]["7"]
             self.assertEqual(q7["title"], "Kobold Camp Cleanup")
-            self.assertEqual(q7["starter"], "Marshal McBride")
             self.assertEqual(q7["ender"], "Marshal McBride")
+            self.assertNotIn("$b", q7["log"])
+            self.assertNotIn("$N", q7["log"])
             self.assertIn("Kobold Vermin are north of the abbey.", q7["tip"])
-            self.assertNotIn("{{", q7["tip"])
 
             q60 = data["quests"]["60"]
             self.assertEqual(q60["drops"], ["Kobold Miner", "Kobold Tunneler"])
 
+            # Era pinning: Cataclysm zone excluded; Classic Westfall (10-20) wins
+            # over post-Cata Westfall (10-15); Badlands normalized to AreaTable name.
+            self.assertNotIn("Northern Barrens", data["zones"])
+            self.assertNotIn("Westfall (Classic)", data["zones"])
+            self.assertEqual(data["zones"]["Westfall"]["max_level"], 20)
+            self.assertIn("Badlands", data["zones"])
+            self.assertEqual(data["zones"]["Badlands"]["min_level"], 35)
+
             elwynn = data["zones"]["Elwynn Forest"]
-            self.assertEqual(elwynn["min_level"], 1)
-            self.assertEqual(elwynn["max_level"], 10)
-            self.assertEqual(elwynn["faction"], "Alliance")
-            # Alliance zone recommends Westfall (Alliance), NOT The Barrens (Horde).
-            self.assertIn("Westfall (10-20)", elwynn["next_zones"])
-            self.assertFalse(any("Barrens" in z for z in elwynn["next_zones"]))
+            self.assertEqual(elwynn["next_zones"], ["Westfall (10-20)"])
 
             # Redirect alias works for dungeons.
             self.assertIn("Deadmines", data["dungeons"])

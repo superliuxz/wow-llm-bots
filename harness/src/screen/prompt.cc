@@ -345,8 +345,17 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
 
   request.user = base::StrCat({prefix, remembered_block, screen_block});
 
-  // Put world guide and boss notes after the live screen and only within
+  // Put combat-critical boss notes ahead of open-world guide, strictly within
   // remaining budget so live screen & options are never crowded out.
+  if (!input.notes.empty() && request.user.size() < max_user_bytes) {
+    const size_t remaining = max_user_bytes - request.user.size();
+    constexpr std::string_view kHeader = "\n\nYour boss notes:\n";
+    if (remaining > kHeader.size() + 32) {
+      const size_t budget =
+          std::min(kMaxNotesBytes, remaining - kHeader.size());
+      base::StrAppend(&request.user, {kHeader, CapText(input.notes, budget)});
+    }
+  }
   if (!input.knowledge.empty() && request.user.size() < max_user_bytes) {
     const size_t remaining = max_user_bytes - request.user.size();
     constexpr std::string_view kHeader = "\n\nWorld guide:\n";
@@ -356,15 +365,6 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
           std::min(kMaxKnowledgePromptBytes, remaining - kHeader.size());
       base::StrAppend(&request.user,
                       {kHeader, CapText(input.knowledge, budget)});
-    }
-  }
-  if (!input.notes.empty() && request.user.size() < max_user_bytes) {
-    const size_t remaining = max_user_bytes - request.user.size();
-    constexpr std::string_view kHeader = "\n\nYour boss notes:\n";
-    if (remaining > kHeader.size() + 32) {
-      const size_t budget =
-          std::min(kMaxNotesBytes, remaining - kHeader.size());
-      base::StrAppend(&request.user, {kHeader, CapText(input.notes, budget)});
     }
   }
   if (request.user.size() > max_user_bytes) {
@@ -382,8 +382,9 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
   return request;
 }
 
-PromptBreakdown InspectPrompt(const PromptInput& input, const Screen& screen) {
-  const LlmRequest req = BuildPlanRequest(input, screen);
+namespace {
+
+PromptBreakdown BreakdownOf(const LlmRequest& req) {
   PromptBreakdown b;
   b.system_bytes = req.system.size();
   b.user_bytes = req.user.size();
@@ -391,8 +392,8 @@ PromptBreakdown InspectPrompt(const PromptInput& input, const Screen& screen) {
 
   const size_t rem_pos = req.user.find("\n\nYou remember (not on screen now):");
   const size_t scr_pos = req.user.find("\n\nYour screen now:\n");
-  const size_t know_pos = req.user.find("\n\nWorld guide:\n");
   const size_t notes_pos = req.user.find("\n\nYour boss notes:\n");
+  const size_t know_pos = req.user.find("\n\nWorld guide:\n");
 
   const size_t prefix_end = rem_pos != std::string::npos   ? rem_pos
                             : scr_pos != std::string::npos ? scr_pos
@@ -403,22 +404,24 @@ PromptBreakdown InspectPrompt(const PromptInput& input, const Screen& screen) {
     b.remembered_bytes = scr_pos - rem_pos;
   }
   if (scr_pos != std::string::npos) {
-    const size_t scr_end = know_pos != std::string::npos    ? know_pos
-                           : notes_pos != std::string::npos ? notes_pos
-                                                            : req.user.size();
-    if (scr_end > scr_pos) {
-      b.screen_bytes = scr_end - scr_pos;
+    size_t scr_end = req.user.size();
+    if (notes_pos != std::string::npos && notes_pos > scr_pos) {
+      scr_end = std::min(scr_end, notes_pos);
     }
-  }
-  if (know_pos != std::string::npos) {
-    const size_t know_end =
-        notes_pos != std::string::npos ? notes_pos : req.user.size();
-    if (know_end > know_pos) {
-      b.knowledge_bytes = know_end - know_pos;
+    if (know_pos != std::string::npos && know_pos > scr_pos) {
+      scr_end = std::min(scr_end, know_pos);
     }
+    b.screen_bytes = scr_end - scr_pos;
   }
-  if (notes_pos != std::string::npos && req.user.size() > notes_pos) {
-    b.notes_bytes = req.user.size() - notes_pos;
+  if (notes_pos != std::string::npos) {
+    const size_t notes_end =
+        (know_pos != std::string::npos && know_pos > notes_pos)
+            ? know_pos
+            : req.user.size();
+    b.notes_bytes = notes_end - notes_pos;
+  }
+  if (know_pos != std::string::npos && req.user.size() > know_pos) {
+    b.knowledge_bytes = req.user.size() - know_pos;
   }
   b.est_system_tokens = EstimateTokens(req.system);
   b.est_user_tokens = EstimateTokens(req.user);
@@ -426,10 +429,16 @@ PromptBreakdown InspectPrompt(const PromptInput& input, const Screen& screen) {
   return b;
 }
 
+}  // namespace
+
+PromptBreakdown InspectPrompt(const PromptInput& input, const Screen& screen) {
+  return BreakdownOf(BuildPlanRequest(input, screen));
+}
+
 std::string FormatPromptInspection(const PromptInput& input,
                                    const Screen& screen) {
   const LlmRequest req = BuildPlanRequest(input, screen);
-  const PromptBreakdown b = InspectPrompt(input, screen);
+  const PromptBreakdown b = BreakdownOf(req);
   return base::StringPrintf(
       "== prompt inspection (%s, %zu options)\n"
       "tokens (est): total=%zu / %zu (system=%zu, user=%zu)\n"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exports compact, prompt-ready world knowledge from Atlas + Wiki SQLite DBs.
+"""Exports compact, prompt-ready 3.3.5a world knowledge from Atlas + Wiki SQLite DBs.
 
 Reads `var/atlas-335a/atlas.sqlite` and `var/wiki-335a/wiki_335a.sqlite` and
 writes `var/knowledge/world_knowledge.json` so the C++ harness can inject
@@ -22,6 +22,87 @@ DEFAULT_ATLAS = ROOT / "var" / "atlas-335a" / "atlas.sqlite"
 DEFAULT_WIKI = ROOT / "var" / "wiki-335a" / "wiki_335a.sqlite"
 DEFAULT_OUT = ROOT / "var" / "knowledge" / "world_knowledge.json"
 
+# Canonical WotLK 3.3.5a open-world leveling zones (matching in-game AreaTable
+# zone names verbatim). Pins era strictly to 3.3.5a: excludes Cataclysm (4.0+)
+# zones, continents, battlegrounds, and `(Classic)` duplicates.
+WOTLK_335A_ZONES: frozenset[str] = frozenset({
+    # Eastern Kingdoms
+    "Alterac Mountains",
+    "Arathi Highlands",
+    "Badlands",
+    "Blasted Lands",
+    "Burning Steppes",
+    "Deadwind Pass",
+    "Dun Morogh",
+    "Duskwood",
+    "Eastern Plaguelands",
+    "Elwynn Forest",
+    "Eversong Woods",
+    "Ghostlands",
+    "Hillsbrad Foothills",
+    "Isle of Quel'Danas",
+    "Loch Modan",
+    "Redridge Mountains",
+    "Searing Gorge",
+    "Silverpine Forest",
+    "Stranglethorn Vale",
+    "Swamp of Sorrows",
+    "The Hinterlands",
+    "Tirisfal Glades",
+    "Western Plaguelands",
+    "Westfall",
+    "Wetlands",
+    # Kalimdor
+    "Ashenvale",
+    "Azshara",
+    "Azuremyst Isle",
+    "Bloodmyst Isle",
+    "Darkshore",
+    "Desolace",
+    "Durotar",
+    "Dustwallow Marsh",
+    "Felwood",
+    "Feralas",
+    "Mulgore",
+    "Silithus",
+    "Stonetalon Mountains",
+    "Tanaris",
+    "Teldrassil",
+    "The Barrens",
+    "Thousand Needles",
+    "Un'Goro Crater",
+    "Winterspring",
+    # Outland
+    "Blade's Edge Mountains",
+    "Hellfire Peninsula",
+    "Nagrand",
+    "Netherstorm",
+    "Shadowmoon Valley",
+    "Terokkar Forest",
+    "Zangarmarsh",
+    # Northrend
+    "Borean Tundra",
+    "Crystalsong Forest",
+    "Dragonblight",
+    "Grizzly Hills",
+    "Howling Fjord",
+    "Icecrown",
+    "Sholazar Basin",
+    "The Storm Peaks",
+    "Wintergrasp",
+    "Zul'Drak",
+})
+
+_ZONE_TITLE_ALIASES: dict[str, str] = {
+    "Barrens": "The Barrens",
+    "Hinterlands": "The Hinterlands",
+    "Storm Peaks": "The Storm Peaks",
+    "The Badlands": "Badlands",
+    "The Blasted Lands": "Blasted Lands",
+    "The Dragonblight": "Dragonblight",
+    "The Western Plaguelands": "Western Plaguelands",
+}
+
 _RE_REF = re.compile(r"<ref[^>]*>.*?</ref>|<ref[^>]*/>", re.DOTALL | re.IGNORECASE)
 _RE_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _RE_HTML = re.compile(r"<[^>]+>")
@@ -32,7 +113,8 @@ _RE_WIKILINK = re.compile(r"\[\[([^|\]]+\|)?([^\]]+)\]\]")
 _RE_EXTLINK = re.compile(r"\[https?://[^\s\]]+(?:\s+([^\]]+))?\]")
 _RE_BOLD_ITALIC = re.compile(r"'{2,5}")
 _RE_MULTI_SPACE = re.compile(r"\s+")
-_RE_REDIRECT = re.compile(r"^\s*#REDIRECT\s*\[\[([^\]|#]+)", re.IGNORECASE)
+_RE_QUEST_BREAK = re.compile(r"\$[bB]")
+_RE_QUEST_PLACEHOLDER = re.compile(r"\$[nNcCrR]")
 _RE_LEVEL_PAIR = re.compile(r"(\d{1,2})\s*[-–—]\s*(\d{1,2})")
 _RE_LEVEL_SINGLE = re.compile(r"\b(\d{1,2})\b")
 _RE_SECTION = re.compile(
@@ -74,7 +156,6 @@ def strip_wikitext(text: str, max_chars: int = 200) -> str:
     s = _RE_EXTLINK.sub(lambda m: m.group(1) or "", s)
     s = _RE_HTML.sub(" ", s)
     s = _RE_BOLD_ITALIC.sub("", s)
-    # Drop leading bullet/table noise.
     lines = []
     for raw in s.splitlines():
         line = raw.strip()
@@ -114,7 +195,6 @@ def _extract_infobox(wikitext: str, prefix: str) -> dict[str, str]:
             i += 1
     body = wikitext[start : max(start, i - 2)]
     fields: dict[str, str] = {}
-    # Split on top-level `|` (depth 0 inside the infobox).
     parts: list[str] = []
     cur: list[str] = []
     d_brace = 0
@@ -188,12 +268,12 @@ def _parse_level_range(raw: str) -> tuple[int, int]:
     m = _RE_LEVEL_PAIR.search(raw)
     if m:
         lo, hi = int(m.group(1)), int(m.group(2))
-        if 1 <= lo <= hi <= 85:
+        if 1 <= lo <= hi <= 80:
             return (lo, hi)
     m1 = _RE_LEVEL_SINGLE.search(raw)
     if m1:
         lv = int(m1.group(1))
-        if 1 <= lv <= 85:
+        if 1 <= lv <= 80:
             return (lv, lv)
     return (0, 0)
 
@@ -211,29 +291,29 @@ def _norm_faction(raw: str) -> str:
     return ""
 
 
-def _resolve_wiki_page(
-    wiki_con: sqlite3.Connection,
-    title: str,
-    max_hops: int = 2,
-) -> tuple[str, str] | None:
-    cur_title = title
-    for _ in range(max_hops + 1):
-        row = wiki_con.execute(
-            "SELECT title, redirect, wikitext FROM pages WHERE title = ?",
-            (cur_title,),
-        ).fetchone()
-        if not row:
-            return None
-        resolved_title, redirect, wikitext = row[0], row[1] or "", row[2] or ""
-        if redirect:
-            cur_title = redirect
-            continue
-        m = _RE_REDIRECT.match(wikitext)
-        if m:
-            cur_title = m.group(1).strip()
-            continue
-        return (resolved_title, wikitext)
-    return None
+def _canonical_335a_zone(page_title: str, infobox_name: str) -> tuple[str, bool]:
+    """Maps a wiki zone title to its canonical 3.3.5a AreaTable name.
+
+    Returns `(canonical_name, is_classic_page)` or `("", False)` if the zone is
+    not a WotLK 3.3.5a open-world leveling zone.
+    """
+    is_classic = page_title.endswith(" (Classic)")
+    stripped = page_title[: -len(" (Classic)")] if is_classic else page_title
+    for cand in (stripped, _ZONE_TITLE_ALIASES.get(stripped, ""), infobox_name, _ZONE_TITLE_ALIASES.get(infobox_name, "")):
+        if cand in WOTLK_335A_ZONES:
+            return (cand, is_classic)
+    return ("", False)
+
+
+def _clean_quest_log(raw: str) -> str:
+    if not raw:
+        return ""
+    s = _RE_QUEST_BREAK.sub(" ", raw)
+    s = _RE_QUEST_PLACEHOLDER.sub("you", s)
+    s = _RE_MULTI_SPACE.sub(" ", s).strip()
+    if len(s) > 200:
+        s = s[:197].rsplit(" ", 1)[0] + "..."
+    return s
 
 
 def export_knowledge(
@@ -249,15 +329,13 @@ def export_knowledge(
     )
 
     try:
-        # 1) Quests: relations (starter/ender) and item drop sources.
-        starters: dict[int, str] = {}
+        # 1) Quests: ender NPC and item drop sources.
         enders: dict[int, str] = {}
         for qid, role, name in atlas_con.execute(
-            "SELECT quest_id, role, name FROM quest_relations ORDER BY quest_id, entry"
+            "SELECT quest_id, role, name FROM quest_relations "
+            "WHERE role = 'ender' ORDER BY quest_id, entry"
         ):
-            if role == "starter" and qid not in starters and name:
-                starters[qid] = name
-            elif role == "ender" and qid not in enders and name:
+            if qid not in enders and name:
                 enders[qid] = name
 
         item_sources: dict[int, list[str]] = {}
@@ -270,8 +348,8 @@ def export_knowledge(
                 lst.append(src_name)
 
         quest_drops: dict[int, list[str]] = {}
-        for qid, kind, target_entry in atlas_con.execute(
-            "SELECT quest_id, kind, target_entry FROM quest_objectives "
+        for qid, target_entry in atlas_con.execute(
+            "SELECT quest_id, target_entry FROM quest_objectives "
             "WHERE kind = 'item' ORDER BY quest_id, obj_index"
         ):
             for src in item_sources.get(target_entry, []):
@@ -279,44 +357,49 @@ def export_knowledge(
                 if len(lst) < 3 and src not in lst:
                     lst.append(src)
 
+        quest_rows = list(
+            atlas_con.execute(
+                "SELECT quest_id, title, quest_level, log_description, wiki_page_id "
+                "FROM quests ORDER BY quest_id"
+            )
+        )
+        needed_pids = sorted({int(r[4]) for r in quest_rows if r[4]})
         wiki_by_id: dict[int, str] = {}
-        if wiki_con is not None:
-            for pid, wt in wiki_con.execute(
-                "SELECT page_id, wikitext FROM pages WHERE page_id IN "
-                "(SELECT page_id FROM pages) AND wikitext LIKE '%==%'"
-            ):
-                if wt:
-                    wiki_by_id[pid] = wt
+        if wiki_con is not None and needed_pids:
+            # Query only the quest wiki_page_ids referenced by atlas.sqlite.
+            chunk = 900
+            for start in range(0, len(needed_pids), chunk):
+                batch = needed_pids[start : start + chunk]
+                placeholders = ",".join("?" * len(batch))
+                for pid, wt in wiki_con.execute(
+                    f"SELECT page_id, wikitext FROM pages WHERE page_id IN ({placeholders})",
+                    batch,
+                ):
+                    if wt:
+                        wiki_by_id[int(pid)] = wt
 
         quests: dict[str, dict[str, Any]] = {}
-        for qid, title, qlevel, min_level, log_desc, wiki_pid in atlas_con.execute(
-            "SELECT quest_id, title, quest_level, min_level, log_description, wiki_page_id "
-            "FROM quests ORDER BY quest_id"
-        ):
+        for qid, title, qlevel, log_desc, wiki_pid in quest_rows:
             entry: dict[str, Any] = {
                 "title": title or "",
                 "level": int(qlevel or 0),
-                "min_level": int(min_level or 0),
             }
-            cleaned_log = _RE_MULTI_SPACE.sub(" ", (log_desc or "").replace("$B", " ")).strip()
-            if len(cleaned_log) > 200:
-                cleaned_log = cleaned_log[:197].rsplit(" ", 1)[0] + "..."
+            cleaned_log = _clean_quest_log(log_desc or "")
             if cleaned_log:
                 entry["log"] = cleaned_log
-            if qid in starters:
-                entry["starter"] = starters[qid]
             if qid in enders:
                 entry["ender"] = enders[qid]
             if qid in quest_drops:
                 entry["drops"] = quest_drops[qid]
-            if wiki_pid and wiki_pid in wiki_by_id:
-                tip = _extract_wiki_tip(wiki_by_id[wiki_pid], max_chars=200)
+            if wiki_pid and int(wiki_pid) in wiki_by_id:
+                tip = _extract_wiki_tip(wiki_by_id[int(wiki_pid)], max_chars=200)
                 if tip:
                     entry["tip"] = tip
             quests[str(qid)] = entry
 
-        # 2) Zones & Dungeons from wiki infoboxes.
+        # 2) Zones & Dungeons from wiki infoboxes (strictly pinned to 3.3.5a).
         zones: dict[str, dict[str, Any]] = {}
+        zone_is_classic: dict[str, bool] = {}
         dungeons: dict[str, dict[str, Any]] = {}
         if wiki_con is not None:
             for title, wikitext in wiki_con.execute(
@@ -326,25 +409,26 @@ def export_knowledge(
                 info = _extract_infobox(wikitext, "zone")
                 if not info:
                     continue
+                zname, is_classic = _canonical_335a_zone(title, info.get("name", ""))
+                if not zname:
+                    continue
                 lo, hi = _parse_level_range(info.get("level", ""))
                 if lo == 0 or hi == 0:
                     continue
-                zname = info.get("name") or title
+                # Prefer `(Classic)` pre-Cataclysm page over post-Cataclysm revamp.
+                if zname in zones and zone_is_classic.get(zname, False) and not is_classic:
+                    continue
                 faction = _norm_faction(info.get("faction", ""))
-                summary = _extract_lead_summary(wikitext, max_chars=160)
                 z_entry: dict[str, Any] = {
                     "min_level": lo,
                     "max_level": hi,
                 }
                 if faction:
                     z_entry["faction"] = faction
-                if summary:
-                    z_entry["summary"] = summary
                 zones[zname] = z_entry
-                if title != zname and title not in zones:
-                    zones[title] = dict(z_entry)
+                zone_is_classic[zname] = is_classic
 
-            # Compute next_zones for each zone (up to 3 zones at the next bracket).
+            # Compute next_zones strictly among canonical 3.3.5a leveling zones.
             unique_zones = sorted(zones.items(), key=lambda kv: (kv[1]["min_level"], kv[0]))
             for zname, zdata in zones.items():
                 z_hi = zdata["max_level"]
@@ -356,7 +440,6 @@ def export_knowledge(
                     if other_name == zname:
                         continue
                     o_lo, o_hi = odata["min_level"], odata["max_level"]
-                    # Skip battlegrounds / wide-span non-leveling hubs (e.g. 10-80).
                     if o_hi - o_lo > 20:
                         continue
                     if o_lo < max(1, z_hi - 2) or o_lo > z_hi + 6 or o_hi <= z_hi:
@@ -398,7 +481,6 @@ def export_knowledge(
                 if title != dname and title not in dungeons:
                     dungeons[title] = dict(d_entry)
 
-            # Also alias redirects pointing to known dungeons (e.g. "The Deadmines" -> "Deadmines").
             for rtitle, rtarget in wiki_con.execute(
                 "SELECT title, redirect FROM pages WHERE redirect != ''"
             ):

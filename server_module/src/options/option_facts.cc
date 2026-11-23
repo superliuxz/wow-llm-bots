@@ -154,18 +154,18 @@ void FillSpots(const WorldPlaces& world,
                   bucket ? bucket->Label() : "");
   }
 
-  // None in this zone at this level: try the zone's buckets within 6 levels,
+  // None in this zone at this level: try the zone's buckets within 3 levels,
   // then fall back to neighboring zones on the same continent (within
-  // kMaxTravelDistYd) so an outleveled bot (e.g. level 14 in Elwynn Forest)
-  // always gets concrete travel options into the next zone.
+  // kMaxTravelDistYd) so an outleveled bot (e.g. level 14 in Elwynn Forest,
+  // where max mob level is 10) gets concrete travel options into the next zone.
   if (candidates.empty()) {
     for (const auto& [key, b] : world.buckets()) {
       if (b.map_id != view.map_id || (!in_city && b.zone_id != view.zone_id) ||
           b.count < 2) {
         continue;
       }
-      if (b.min_level > view.level + 6u ||
-          (view.level > 6 && b.max_level + 6u < view.level)) {
+      if (b.min_level > view.level + 3u ||
+          (view.level > 3 && b.max_level + 3u < view.level)) {
         continue;
       }
       add_candidate(b.centroid.x, b.centroid.y, b.centroid.z, b.Label());
@@ -416,6 +416,10 @@ WorldPlaces::~WorldPlaces() = default;
 
 std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
   std::unique_ptr<WorldPlaces> world(new WorldPlaces());
+  // Hash index `(map_id|name) -> indices in world->hubs_` avoids O(N*M) scans
+  // while merging nearby service/quest-giver NPCs.
+  std::unordered_map<std::string, std::vector<size_t>> hubs_by_key;
+  std::vector<std::vector<uint32_t>> hub_quest_levels;
   for (const auto& [guid, data] : sObjectMgr->GetAllCreatureData()) {
     const CreatureTemplate* tmpl = sObjectMgr->GetCreatureTemplate(data.id);
     if (!tmpl || tmpl->Name.starts_with("[DND]")) {
@@ -515,25 +519,30 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
     if (name.empty()) {
       name = tmpl->Name;
     }
-    Hub* hub = nullptr;
-    for (Hub& existing : world->hubs_) {
-      if (existing.map_id == map_id && existing.name == name &&
-          existing.for_alliance == for_alliance &&
+    const std::string hub_key = Acore::StringFormat("{}|{}", map_id, name);
+    size_t hub_idx = world->hubs_.size();
+    auto& bucket_indices = hubs_by_key[hub_key];
+    for (size_t idx : bucket_indices) {
+      const Hub& existing = world->hubs_[idx];
+      if (existing.for_alliance == for_alliance &&
           existing.for_horde == for_horde &&
           std::hypot(existing.pos.x - data.posX, existing.pos.y - data.posY) <=
               kHubMergeRadiusYd) {
-        hub = &existing;
+        hub_idx = idx;
         break;
       }
     }
-    if (!hub) {
-      hub = &world->hubs_.emplace_back();
-      hub->map_id = map_id;
-      hub->name = name;
-      hub->for_alliance = for_alliance;
-      hub->for_horde = for_horde;
-      hub->pos = {data.posX, data.posY, data.posZ};
+    if (hub_idx == world->hubs_.size()) {
+      Hub& created = world->hubs_.emplace_back();
+      created.map_id = map_id;
+      created.name = name;
+      created.for_alliance = for_alliance;
+      created.for_horde = for_horde;
+      created.pos = {data.posX, data.posY, data.posZ};
+      bucket_indices.push_back(hub_idx);
+      hub_quest_levels.emplace_back();
     }
+    Hub* hub = &world->hubs_[hub_idx];
     hub->has_innkeeper |= has_inn;
     hub->has_vendor |= has_vendor;
     hub->has_repair |= has_repair;
@@ -544,12 +553,9 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
           sObjectMgr->GetCreatureQuestRelationBounds(tmpl->Entry);
       for (auto it = bounds.first; it != bounds.second; ++it) {
         if (const Quest* q = sObjectMgr->GetQuestTemplate(it->second);
-            q && q->GetQuestLevel() > 0) {
-          const uint32_t ql = static_cast<uint32_t>(q->GetQuestLevel());
-          if (hub->min_quest_level == 0 || ql < hub->min_quest_level) {
-            hub->min_quest_level = ql;
-          }
-          hub->max_quest_level = std::max(hub->max_quest_level, ql);
+            q && q->GetQuestLevel() > 0 && !q->IsDaily() && !q->IsWeekly()) {
+          hub_quest_levels[hub_idx].push_back(
+              static_cast<uint32_t>(q->GetQuestLevel()));
         }
       }
     }
@@ -559,9 +565,19 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
       hub->pos_from_innkeeper = true;
     }
   }
-  // Ids from the final position (the innkeeper's, when the hub has one).
-  for (Hub& hub : world->hubs_) {
+  // Ids from the final position, and IQR (25th-75th percentile) quest levels
+  // so one high-level seasonal/breadcrumb quest in a starter town does not
+  // inflate the hub's level range.
+  for (size_t i = 0; i < world->hubs_.size(); ++i) {
+    Hub& hub = world->hubs_[i];
     hub.id = PlaceId(hub.map_id, hub.pos.x, hub.pos.y);
+    auto& qlevels = hub_quest_levels[i];
+    if (!qlevels.empty()) {
+      std::sort(qlevels.begin(), qlevels.end());
+      const size_t n = qlevels.size();
+      hub.min_quest_level = qlevels[n / 4];
+      hub.max_quest_level = qlevels[(3 * (n - 1)) / 4];
+    }
   }
   return world;
 }

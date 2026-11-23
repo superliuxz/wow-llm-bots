@@ -178,9 +178,17 @@ std::string ExploreText(const OptionFacts::Spot& spot) {
 std::string GoToText(const OptionFacts::Place& place) {
   const std::string_view dir = DirText(place.dir);
   const int dist = static_cast<int>(std::lround(place.dist_yd));
-  std::string text = "Go to " + place.name;
-  if (!place.services.empty()) {
-    text += " (" + place.services + ")";
+  constexpr std::string_view kTurnInPrefix = "turn in: ";
+  std::string text;
+  if (place.id.starts_with("place:quest:") && place.id.ends_with(":turnin") &&
+      place.services.starts_with(kTurnInPrefix)) {
+    text = "Turn in " + place.services.substr(kTurnInPrefix.size()) + " at " +
+           place.name;
+  } else {
+    text = "Go to " + place.name;
+    if (!place.services.empty()) {
+      text += " (" + place.services + ")";
+    }
   }
   if (dist > 0) {
     text += base::StringPrintf(", %d yd", dist);

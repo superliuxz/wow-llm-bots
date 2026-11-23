@@ -294,5 +294,30 @@ TEST(DecideTest, OrderNamesAndBossNotesGateGrammarAndEmitOrdersInJson) {
   EXPECT_EQ(seen_plain.grammar.find("Defile"), std::string::npos);
 }
 
+TEST(DecideTest, InspectPromptAndKnowledgeFlagWorkWithoutCallingModel) {
+  std::string err;
+  const std::optional<DecideOptions> parsed = ParseDecideArgs(
+      {"snap.json", "--inspect-prompt", "--knowledge=wk.json"}, &err);
+  ASSERT_TRUE(parsed.has_value()) << err;
+  EXPECT_TRUE(parsed->inspect_prompt);
+  EXPECT_EQ(parsed->knowledge_path, "wk.json");
+
+  DecideOptions options = Options();
+  options.inspect_prompt = true;
+  bool called = false;
+  std::string report;
+  const int rc = RunDecide(
+      options,
+      [&](const LlmRequest&) {
+        called = true;
+        return LlmResult{};
+      },
+      &report);
+  EXPECT_EQ(rc, 0);
+  EXPECT_FALSE(called);
+  EXPECT_NE(report.find("== prompt inspection"), std::string::npos) << report;
+  EXPECT_NE(report.find("tokens (est):"), std::string::npos) << report;
+}
+
 }  // namespace
 }  // namespace harness

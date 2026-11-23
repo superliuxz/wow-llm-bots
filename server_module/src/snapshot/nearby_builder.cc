@@ -564,6 +564,7 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
   }
   los_.Prune(now, kLosForgetAfter);
 
+  std::vector<Creature*> unit_creatures;
   for (const auto& [guid, object] : *visible) {
     if (object == bot) {
       continue;
@@ -618,6 +619,7 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
     }
     if (Unit* unit = object->ToUnit()) {
       pb::Unit& out = nearby->units.emplace_back();
+      unit_creatures.push_back(unit->ToCreature());
       FillModel(unit, bot, &out);
       FillRelative(bot, unit, &out.rel);
       SetInLos(in_los, &out.rel);
@@ -697,23 +699,38 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
     }
   }
 
-  // Pull danger (B3): for living hostile/neutral NPCs without an explicit
-  // CreatureGroup formation, count nearby living hostile/neutral NPCs within
-  // social aggro range (15 yd) so the brain sees pack density before pulling.
+  // Pull danger (B3): for living hostile attackable NPCs without an explicit
+  // CreatureGroup formation, count nearby living hostile attackable NPCs of
+  // mutually friendly factions within social aggro range (15 yd) so the brain
+  // sees real linked pack density without counting neutral wildlife or
+  // mutually hostile faction skirmishes.
   constexpr float kSocialPullRadiusYd = 15.0f;
-  const auto is_live_pullable_npc = [](const pb::Unit& u) {
-    return !u.dead && u.kind == pb::Unit::NPC &&
-           (u.reaction == pb::Unit::HOSTILE || u.reaction == pb::Unit::NEUTRAL);
+  const auto is_social_hostile = [&](size_t idx) -> Creature* {
+    const pb::Unit& u = nearby->units[idx];
+    Creature* c = unit_creatures[idx];
+    if (!c || u.dead || u.kind != pb::Unit::NPC ||
+        u.reaction != pb::Unit::HOSTILE || !bot->IsValidAttackTarget(c)) {
+      return nullptr;
+    }
+    return c;
   };
   for (size_t i = 0; i < nearby->units.size(); ++i) {
     pb::Unit& u = nearby->units[i];
-    if (u.pack || !is_live_pullable_npc(u)) {
+    if (u.pack) {
+      continue;
+    }
+    Creature* ci = is_social_hostile(i);
+    if (!ci) {
       continue;
     }
     uint32_t nearby_count = 1;
     const pb::Vec3& p = u.rel.position;
     for (size_t j = 0; j < nearby->units.size(); ++j) {
-      if (i == j || !is_live_pullable_npc(nearby->units[j])) {
+      if (i == j) {
+        continue;
+      }
+      Creature* cj = is_social_hostile(j);
+      if (!cj || !ci->IsFriendlyTo(cj)) {
         continue;
       }
       const pb::Vec3& q = nearby->units[j].rel.position;

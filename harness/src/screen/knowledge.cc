@@ -2,13 +2,15 @@
 
 #include "screen/knowledge.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <flat_set>
+#include <limits>
 #include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -45,9 +47,21 @@ std::string StringField(const nlohmann::json& obj, const char* key) {
 
 uint32_t UintField(const nlohmann::json& obj, const char* key) {
   auto it = obj.find(key);
-  if (it != obj.end() && it->is_number_integer()) {
+  if (it == obj.end()) {
+    return 0u;
+  }
+  if (it->is_number_unsigned()) {
+    const uint64_t v = it->get<uint64_t>();
+    return static_cast<uint32_t>(
+        std::min<uint64_t>(v, std::numeric_limits<uint32_t>::max()));
+  }
+  if (it->is_number_integer()) {
     const int64_t v = it->get<int64_t>();
-    return v > 0 ? static_cast<uint32_t>(v) : 0u;
+    if (v <= 0) {
+      return 0u;
+    }
+    return static_cast<uint32_t>(std::min<uint64_t>(
+        static_cast<uint64_t>(v), std::numeric_limits<uint32_t>::max()));
   }
   return 0u;
 }
@@ -69,18 +83,19 @@ std::vector<std::string> StringListField(const nlohmann::json& obj,
   return out;
 }
 
-void AppendLineCapped(std::string* out, std::string_view line) {
+bool AppendLineCapped(std::string* out, std::string_view line) {
   if (line.empty()) {
-    return;
+    return false;
   }
   const size_t sep = out->empty() ? 0 : 1;
   if (out->size() + sep + line.size() > kMaxKnowledgeBytes) {
-    return;
+    return false;
   }
   if (!out->empty()) {
     out->push_back('\n');
   }
   out->append(line);
+  return true;
 }
 
 }  // namespace
@@ -117,9 +132,7 @@ std::optional<WorldKnowledge> WorldKnowledge::ParseJson(
       QuestInfo qi;
       qi.title = StringField(v, "title");
       qi.level = UintField(v, "level");
-      qi.min_level = UintField(v, "min_level");
       qi.log = StringField(v, "log");
-      qi.starter = StringField(v, "starter");
       qi.ender = StringField(v, "ender");
       qi.drops = StringListField(v, "drops");
       qi.tip = StringField(v, "tip");
@@ -135,7 +148,6 @@ std::optional<WorldKnowledge> WorldKnowledge::ParseJson(
       zi.min_level = UintField(v, "min_level");
       zi.max_level = UintField(v, "max_level");
       zi.faction = StringField(v, "faction");
-      zi.summary = StringField(v, "summary");
       zi.next_zones = StringListField(v, "next_zones");
       wk.zones_.emplace(k, std::move(zi));
     }
@@ -159,7 +171,7 @@ std::optional<WorldKnowledge> WorldKnowledge::ParseJson(
 std::string WorldKnowledge::SelectRelevant(
     const wlb::snapshot::Snapshot& snapshot,
     bool has_boss_notes) const {
-  if (empty()) {
+  if (empty() || has_boss_notes) {
     return {};
   }
   std::string out;
@@ -192,7 +204,7 @@ std::string WorldKnowledge::SelectRelevant(
   }
 
   // 2) Dungeon/instance wiki fallback when no curated boss notes exist.
-  if (where.in_instance && !has_boss_notes) {
+  if (where.in_instance) {
     const std::string* key = nullptr;
     auto it = dungeons_.find(where.zone);
     if (it != dungeons_.end()) {
@@ -219,7 +231,7 @@ std::string WorldKnowledge::SelectRelevant(
     bool complete = false;
   };
   std::vector<TrackedQuest> ordered;
-  std::unordered_set<uint32_t> seen_qids;
+  std::flat_set<uint32_t> seen_qids;
   for (const wlb::snapshot::Objective& obj : snapshot.ext.quest_tracker) {
     if (!obj.quest || obj.quest->quest_id == 0) {
       continue;
@@ -266,8 +278,9 @@ std::string WorldKnowledge::SelectRelevant(
           base::StrAppend(&line, {" Tip: ", qi.tip});
         }
       }
-      AppendLineCapped(&out, line);
-      ++emitted;
+      if (AppendLineCapped(&out, line)) {
+        ++emitted;
+      }
     }
   }
   return out;

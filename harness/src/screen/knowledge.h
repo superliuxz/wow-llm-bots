@@ -10,10 +10,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <flat_map>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 #include "snapshot/snapshot.h"
@@ -25,9 +25,7 @@ class WorldKnowledge {
   struct QuestInfo {
     std::string title;
     uint32_t level = 0;
-    uint32_t min_level = 0;
     std::string log;
-    std::string starter;
     std::string ender;
     std::vector<std::string> drops;
     std::string tip;
@@ -37,7 +35,6 @@ class WorldKnowledge {
     uint32_t min_level = 0;
     uint32_t max_level = 0;
     std::string faction;
-    std::string summary;
     std::vector<std::string> next_zones;
   };
 
@@ -59,15 +56,15 @@ class WorldKnowledge {
   size_t dungeon_count() const { return dungeons_.size(); }
 
   // Returns a compact Markdown snippet (<= 1,200 bytes) relevant to `snapshot`.
-  // When `has_boss_notes` is true, dungeon wiki fallback is omitted to avoid
-  // duplicating curated `content/notes/<Instance>/notes.md`.
+  // When `has_boss_notes` is true, returns empty so combat-critical boss notes
+  // are never diluted or crowded out by open-world/quest lore.
   std::string SelectRelevant(const wlb::snapshot::Snapshot& snapshot,
                              bool has_boss_notes = false) const;
 
  private:
-  std::unordered_map<uint32_t, QuestInfo> quests_;
-  std::unordered_map<std::string, ZoneInfo> zones_;
-  std::unordered_map<std::string, DungeonInfo> dungeons_;
+  std::flat_map<uint32_t, QuestInfo> quests_;
+  std::flat_map<std::string, ZoneInfo> zones_;
+  std::flat_map<std::string, DungeonInfo> dungeons_;
 };
 
 }  // namespace harness

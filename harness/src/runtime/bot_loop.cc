@@ -101,6 +101,8 @@ BotLoop::BotLoop(BotLoopConfig config,
           "dungeons) from %s",
           knowledge_.quest_count(), knowledge_.zone_count(),
           knowledge_.dungeon_count(), config_.knowledge_path.c_str()));
+    } else {
+      Log(base::StrCat({"harness: world knowledge unavailable (", err, ")"}));
     }
   }
 }
@@ -616,7 +618,11 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
   // Ages on the snapshots' clock (seen_at is a snapshot's received time).
   input.remembered = RememberedPanels(state, state.latest_received_at,
                                       config_.remember_panels_for);
-  input.last_outcome = state.last_outcome;
+  // Consume `last_outcome` once delivered so it never goes stale across
+  // unrelated future wakes (requeued on cancel/error via `asked_outcome`).
+  std::string asked_outcome = std::move(state.last_outcome);
+  state.last_outcome.clear();
+  input.last_outcome = asked_outcome;
   input.notes = SelectRelevantNotes(state.notes, *state.latest_snapshot);
   input.knowledge =
       knowledge_.SelectRelevant(*state.latest_snapshot, !input.notes.empty());
@@ -660,12 +666,20 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
        order_names = std::move(order_names), wake_reason,
        asked_reasons = std::move(asked_reasons),
        asked_events = std::move(asked_events),
+       asked_outcome = std::move(asked_outcome),
        request_copy = std::move(request_copy), snap_mono_us, age_at_ask_ms,
        holder = std::move(first_line_age_holder),
        done = std::move(done)](LlmResult result) mutable {
         if (!self) {
           std::move(done).Run();
           return;
+        }
+        if (result.cancelled || !result.reply) {
+          if (auto it = self->bots_.find(bot);
+              it != self->bots_.end() && it->second.last_outcome.empty() &&
+              !asked_outcome.empty()) {
+            it->second.last_outcome = std::move(asked_outcome);
+          }
         }
         self->OnReply(bot, epoch, ask_seq, std::move(ask_screen),
                       std::move(order_names), std::move(wake_reason),

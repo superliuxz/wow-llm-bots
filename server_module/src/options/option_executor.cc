@@ -685,10 +685,94 @@ void CollectUsableBagItems(Player* bot,
     out->push_back(std::move(item));
   }
 
-  // Also expose up to 4 equippable gear upgrades from bags (B2: mechanical
-  // CanEquipItem + item-level comparison; the brain decides whether to equip).
+  // Also expose up to 8 equippable non-grey gear items from bags (B2: pure
+  // harness — exposes factual quality, type, ilvl vs equipped slot, and stats
+  // without hardcoded upgrade heuristics; the brain decides whether to equip).
   if (!bot->IsInCombat()) {
-    static constexpr size_t kMaxEquipCandidates = 4;
+    static constexpr size_t kMaxEquipCandidates = 8;
+    const auto quality_name = [](uint32_t q) -> const char* {
+      switch (q) {
+        case ITEM_QUALITY_NORMAL:
+          return "common";
+        case ITEM_QUALITY_UNCOMMON:
+          return "uncommon";
+        case ITEM_QUALITY_RARE:
+          return "rare";
+        case ITEM_QUALITY_EPIC:
+          return "epic";
+        case ITEM_QUALITY_LEGENDARY:
+          return "legendary";
+        case ITEM_QUALITY_HEIRLOOM:
+          return "heirloom";
+        default:
+          return "";
+      }
+    };
+    const auto armor_subclass_name = [](uint32_t sub) -> const char* {
+      switch (sub) {
+        case ITEM_SUBCLASS_ARMOR_CLOTH:
+          return "Cloth";
+        case ITEM_SUBCLASS_ARMOR_LEATHER:
+          return "Leather";
+        case ITEM_SUBCLASS_ARMOR_MAIL:
+          return "Mail";
+        case ITEM_SUBCLASS_ARMOR_PLATE:
+          return "Plate";
+        case ITEM_SUBCLASS_ARMOR_SHIELD:
+          return "Shield";
+        default:
+          return "";
+      }
+    };
+    const auto stat_short_name = [](uint32_t st) -> const char* {
+      switch (st) {
+        case ITEM_MOD_AGILITY:
+          return "Agi";
+        case ITEM_MOD_STRENGTH:
+          return "Str";
+        case ITEM_MOD_INTELLECT:
+          return "Int";
+        case ITEM_MOD_SPIRIT:
+          return "Spi";
+        case ITEM_MOD_STAMINA:
+          return "Sta";
+        case ITEM_MOD_SPELL_POWER:
+          return "SP";
+        case ITEM_MOD_ATTACK_POWER:
+          return "AP";
+        case ITEM_MOD_CRIT_RATING:
+          return "Crit";
+        case ITEM_MOD_HIT_RATING:
+          return "Hit";
+        case ITEM_MOD_HASTE_RATING:
+          return "Haste";
+        default:
+          return "";
+      }
+    };
+    const auto pick_equip_slot = [&](Item* bag_item, const ItemTemplate* proto,
+                                     uint16_t* out_dest) -> bool {
+      auto try_dual = [&](uint8_t s1, uint8_t s2) -> bool {
+        const Item* i1 = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, s1);
+        const Item* i2 = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, s2);
+        const uint32_t l1 =
+            i1 && i1->GetTemplate() ? i1->GetTemplate()->ItemLevel : 0;
+        const uint32_t l2 =
+            i2 && i2->GetTemplate() ? i2->GetTemplate()->ItemLevel : 0;
+        const uint8_t preferred = (l2 < l1) ? s2 : s1;
+        return bot->CanEquipItem(preferred, *out_dest, bag_item, true) ==
+               EQUIP_ERR_OK;
+      };
+      if (proto->InventoryType == INVTYPE_FINGER) {
+        return try_dual(EQUIPMENT_SLOT_FINGER1, EQUIPMENT_SLOT_FINGER2);
+      }
+      if (proto->InventoryType == INVTYPE_TRINKET) {
+        return try_dual(EQUIPMENT_SLOT_TRINKET1, EQUIPMENT_SLOT_TRINKET2);
+      }
+      return bot->CanEquipItem(NULL_SLOT, *out_dest, bag_item, true) ==
+             EQUIP_ERR_OK;
+    };
+
     size_t equip_added = 0;
     for (const BagSlotItem& entry : BagItems(bot)) {
       if (equip_added >= kMaxEquipCandidates ||
@@ -698,13 +782,14 @@ void CollectUsableBagItems(Player* bot,
       Item* bag_item = entry.item;
       const ItemTemplate* proto = bag_item ? bag_item->GetTemplate() : nullptr;
       if (!proto || proto->Name1.empty() ||
+          proto->Quality <= ITEM_QUALITY_POOR ||
           proto->InventoryType == INVTYPE_NON_EQUIP ||
           (proto->Class != ITEM_CLASS_ARMOR &&
            proto->Class != ITEM_CLASS_WEAPON)) {
         continue;
       }
       uint16_t dest = 0;
-      if (bot->CanEquipItem(NULL_SLOT, dest, bag_item, true) != EQUIP_ERR_OK) {
+      if (!pick_equip_slot(bag_item, proto, &dest)) {
         continue;
       }
       const uint8_t equip_slot = static_cast<uint8_t>(dest & 0xFF);
@@ -713,9 +798,6 @@ void CollectUsableBagItems(Player* bot,
       const uint32_t equipped_ilvl = equipped && equipped->GetTemplate()
                                          ? equipped->GetTemplate()->ItemLevel
                                          : 0;
-      if (proto->ItemLevel <= equipped_ilvl) {
-        continue;
-      }
       bool dup = false;
       for (const pb::OptionFacts_Item& existing : *out) {
         if (existing.equippable && existing.entry == proto->ItemId) {
@@ -726,16 +808,52 @@ void CollectUsableBagItems(Player* bot,
       if (dup) {
         continue;
       }
+      std::string detail;
+      if (const char* qn = quality_name(proto->Quality); *qn) {
+        detail += qn;
+      }
+      if (proto->Class == ITEM_CLASS_ARMOR) {
+        if (const char* sn = armor_subclass_name(proto->SubClass); *sn) {
+          if (!detail.empty()) {
+            detail += " ";
+          }
+          detail += sn;
+        }
+      } else if (proto->Class == ITEM_CLASS_WEAPON) {
+        if (!detail.empty()) {
+          detail += " ";
+        }
+        detail += "Weapon";
+      }
+      if (!detail.empty()) {
+        detail += ", ";
+      }
+      detail += equipped_ilvl > 0 ? "ilvl " + std::to_string(proto->ItemLevel) +
+                                        " vs " + std::to_string(equipped_ilvl)
+                                  : "ilvl " + std::to_string(proto->ItemLevel) +
+                                        ", empty slot";
+      size_t stats_added = 0;
+      for (uint32_t s = 0; s < proto->StatsCount && s < MAX_ITEM_PROTO_STATS;
+           ++s) {
+        if (proto->ItemStat[s].ItemStatValue <= 0) {
+          continue;
+        }
+        const char* sname = stat_short_name(proto->ItemStat[s].ItemStatType);
+        if (!*sname) {
+          continue;
+        }
+        detail += ", +" + std::to_string(proto->ItemStat[s].ItemStatValue) +
+                  " " + sname;
+        if (++stats_added >= 3) {
+          break;
+        }
+      }
       pb::OptionFacts_Item item;
       item.entry = proto->ItemId;
       item.name = proto->Name1;
       item.out_of_combat_only = true;
       item.equippable = true;
-      item.detail =
-          equipped_ilvl > 0
-              ? "ilvl " + std::to_string(proto->ItemLevel) + " vs " +
-                    std::to_string(equipped_ilvl)
-              : "ilvl " + std::to_string(proto->ItemLevel) + ", empty slot";
+      item.detail = std::move(detail);
       out->push_back(std::move(item));
       ++equip_added;
     }
@@ -1443,8 +1561,26 @@ ExecuteResult ExecuteEquipItemOption(Player* bot, const OptionTarget& target) {
     if (!slot_item.item || slot_item.item->GetEntry() != entry) {
       continue;
     }
+    const ItemTemplate* proto = slot_item.item->GetTemplate();
     uint16_t dest = 0;
-    if (bot->CanEquipItem(NULL_SLOT, dest, slot_item.item, true) !=
+    uint8_t req_slot = NULL_SLOT;
+    if (proto && (proto->InventoryType == INVTYPE_FINGER ||
+                  proto->InventoryType == INVTYPE_TRINKET)) {
+      const uint8_t s1 = proto->InventoryType == INVTYPE_FINGER
+                             ? EQUIPMENT_SLOT_FINGER1
+                             : EQUIPMENT_SLOT_TRINKET1;
+      const uint8_t s2 = proto->InventoryType == INVTYPE_FINGER
+                             ? EQUIPMENT_SLOT_FINGER2
+                             : EQUIPMENT_SLOT_TRINKET2;
+      const Item* i1 = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, s1);
+      const Item* i2 = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, s2);
+      const uint32_t l1 =
+          i1 && i1->GetTemplate() ? i1->GetTemplate()->ItemLevel : 0;
+      const uint32_t l2 =
+          i2 && i2->GetTemplate() ? i2->GetTemplate()->ItemLevel : 0;
+      req_slot = (l2 < l1) ? s2 : s1;
+    }
+    if (bot->CanEquipItem(req_slot, dest, slot_item.item, true) !=
         EQUIP_ERR_OK) {
       return {"cannot equip " + target.name};
     }

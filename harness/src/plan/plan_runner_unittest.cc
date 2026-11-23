@@ -357,5 +357,40 @@ TEST(PlanRunnerTest, AssistGuidTracksUnitAndItemGuidWaitsForDoneCommand) {
   EXPECT_EQ(a7.finished_reason, "plan done");
 }
 
+TEST(PlanRunnerTest, EquipOptionWaitsForDoneCommandId) {
+  const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
+  pb::Snapshot s1;
+  s1.bot = "Testpriest";
+  s1.seq = 1;
+  pb::Option& eq = s1.options.emplace_back();
+  eq.text = "Equip Robes of the Arugal (rare Cloth, ilvl 29 vs 14)";
+  eq.guid = "equip:6324";
+  eq.kind = pb::Option::USE;
+  eq.name = "Robes of the Arugal";
+
+  PlanRunner runner;
+  const RunnerAction start =
+      runner.Start({{1, 1}}, s1.seq, RenderScreen(s1), t0);
+  ASSERT_TRUE(start.choose);
+  EXPECT_EQ(start.choose->option, 1u);
+  runner.set_last_command_id(42);
+
+  // Before done_command_id arrives, equip option stays pending.
+  pb::Snapshot s2 = s1;
+  s2.seq = 2;
+  const RunnerAction a2 =
+      runner.OnSnapshot(s2, RenderScreen(s2), t0 + base::Seconds(1));
+  EXPECT_FALSE(a2.choose.has_value());
+  EXPECT_TRUE(a2.finished_reason.empty());
+
+  // done_command_id == 42 completes the plan.
+  pb::Snapshot s3 = s2;
+  s3.seq = 3;
+  s3.done_command_id = 42;
+  const RunnerAction a3 =
+      runner.OnSnapshot(s3, RenderScreen(s3), t0 + base::Seconds(2));
+  EXPECT_EQ(a3.finished_reason, "plan done");
+}
+
 }  // namespace
 }  // namespace harness

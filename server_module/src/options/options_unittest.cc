@@ -369,8 +369,11 @@ TEST(OptionsTest, OptionFactsJsonRoundTrip) {
                           pb::N,
                           900.0f,
                           {300, -4700, 10}});
-  facts.usable_items.push_back(
-      {.entry = 37860, .name = "Ruby Essence", .out_of_combat_only = true});
+  facts.usable_items.push_back({.entry = 37860,
+                                .name = "Ruby Essence",
+                                .out_of_combat_only = true,
+                                .equippable = false,
+                                .detail = ""});
   facts.party_targets.push_back({"Loada", "0x20"});
 
   const std::string json = pb::WriteJson(facts, /*pretty=*/true);
@@ -578,11 +581,16 @@ TEST(OptionsTest, AssistResolvesExactGuidCapAndEdgeCases) {
 
 TEST(OptionsTest, UsableBagItemsOfferedAsUseOptionsAndFilteredInCombat) {
   OptionFacts facts;
-  facts.usable_items.push_back(
-      {.entry = 37860, .name = "Ruby Essence", .out_of_combat_only = true});
+  facts.usable_items.push_back({.entry = 37860,
+                                .name = "Ruby Essence",
+                                .out_of_combat_only = true,
+                                .equippable = false,
+                                .detail = ""});
   facts.usable_items.push_back({.entry = 33447,
                                 .name = "Runic Healing Potion",
-                                .out_of_combat_only = false});
+                                .out_of_combat_only = false,
+                                .equippable = false,
+                                .detail = ""});
 
   pb::Snapshot ooc;
   ooc.base.self.in_combat = false;
@@ -626,6 +634,23 @@ TEST(OptionsTest, EquippableBagUpgradesOfferedOutOfCombatWithDetail) {
   const std::vector<OptionTarget> ic_targets = AddOptions(&ic, facts);
   EXPECT_EQ(Texts(ic), (std::vector<std::string>{"Keep doing what I'm doing"}));
   ASSERT_EQ(ic_targets.size(), 1u);
+}
+
+TEST(OptionsTest, QuestTurnInPlaceFormattedAsTurnInOption) {
+  OptionFacts facts;
+  facts.places.push_back({"place:quest:7:turnin",
+                          "Northshire Abbey",
+                          "turn in: Kobold Camp Cleanup",
+                          pb::Direction::N,
+                          120.0f,
+                          {10.0f, 20.0f, 0.0f}});
+  pb::Snapshot snap;
+  snap.base.self.in_combat = false;
+  const std::vector<OptionTarget> targets = AddOptions(&snap, facts);
+  ASSERT_EQ(targets.size(), 2u);
+  EXPECT_EQ(snap.options[0].text,
+            "Turn in Kobold Camp Cleanup at Northshire Abbey, 120 yd N");
+  EXPECT_EQ(targets[0].kind, OptionTarget::Kind::kGoTo);
 }
 
 }  // namespace

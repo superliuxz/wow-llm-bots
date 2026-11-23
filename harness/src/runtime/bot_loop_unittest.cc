@@ -1880,5 +1880,85 @@ TEST(BotLoopTest, ChatErrorWakesBrainWithoutStoppingActiveRunner) {
   EXPECT_TRUE(dispatched_step2);
 }
 
+TEST(BotLoopTest, LastOutcomeDeliveredOnceAndKnowledgeInjected) {
+  namespace fs = std::filesystem;
+  const fs::path tmp =
+      fs::temp_directory_path() / "wlb_bot_loop_knowledge_test.json";
+  {
+    std::ofstream out(tmp);
+    out << R"json({
+      "version": 1,
+      "quests": {},
+      "zones": {
+        "Elwynn Forest": {
+          "min_level": 1,
+          "max_level": 10,
+          "faction": "Alliance",
+          "next_zones": ["Westfall (10-20)"]
+        }
+      },
+      "dungeons": {}
+    })json";
+  }
+
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "rules";
+  cfg.knowledge_path = tmp.string();
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { sent.push_back(cmd); });
+
+  const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
+  pb::Snapshot s1 = MakeLiveSnap("Gatda", 1, t0);
+  s1.base.self.unit.level = 14;
+  s1.base.where.zone = "Elwynn Forest";
+  pb::Option& atk = s1.options.emplace_back();
+  atk.text = "Attack Boar";
+  atk.kind = pb::Option::ATTACK;
+  atk.guid = "0xb1";
+  atk.name = "Boar";
+  AddKeep(&s1);
+
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(
+      brain.front_request().user.find("Outleveled zone: you are level 14"),
+      std::string::npos);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  uint32_t attack_cmd_id = 0;
+  for (const pb::Command& c : sent) {
+    if (c.choose) {
+      attack_cmd_id = c.command_id;
+    }
+  }
+  ASSERT_NE(attack_cmd_id, 0u);
+
+  // Refusal populates `Last outcome:` on the immediately following wake.
+  pb::ImmediateEvent err;
+  err.bot = "Gatda";
+  err.event.error.emplace().command_id = attack_cmd_id;
+  err.event.error->text = "target out of range";
+  loop.OnEvent(std::move(err), t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(
+      brain.front_request().user.find("Last outcome: target out of range."),
+      std::string::npos);
+  // Bot answers with Keep (which never produces step_done); the next wake must
+  // NOT repeat the stale `Last outcome:` breadcrumb.
+  brain.FinishReply("do: 2\nexpect: none\nwatch: none\nlook: 60");
+  pb::ImmediateEvent whisper;
+  whisper.bot = "Gatda";
+  whisper.event.chat.emplace().channel = pb::WHISPER;
+  whisper.event.chat->from = "Ally";
+  whisper.event.chat->text = "ready?";
+  loop.OnEvent(std::move(whisper), t0 + base::Seconds(2));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_EQ(brain.front_request().user.find("Last outcome:"),
+            std::string::npos);
+
+  fs::remove(tmp);
+}
+
 }  // namespace
 }  // namespace harness
