@@ -297,6 +297,49 @@ def _resolve_scenarios(suite: str, runs: int) -> list[str]:
     raise ValueError(f"unknown soak suite/scenario: {suite}")
 
 
+def _merge_trace_dirs(src_dirs: list[pathlib.Path], dest_dir: pathlib.Path) -> None:
+    """Merges per-run `<src>/<role>/<name>/*.jsonl` into `dest_dir` without overwriting."""
+    shutil.rmtree(dest_dir, ignore_errors=True)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    for run_idx, src in enumerate(src_dirs):
+        if not src.exists():
+            continue
+        for role in ("human", "bot"):
+            rdir = src / role
+            if not rdir.is_dir():
+                continue
+            for cdir in sorted(rdir.iterdir()):
+                if not cdir.is_dir():
+                    continue
+                out_cdir = dest_dir / role / cdir.name
+                out_cdir.mkdir(parents=True, exist_ok=True)
+                for f in sorted(cdir.glob("*.jsonl")):
+                    target = out_cdir / f"{f.stem}_run{run_idx:02d}{f.suffix}"
+                    shutil.copy2(f, target)
+
+
+def _aggregate_run_stats(results: list[dict]) -> dict:
+    stats_list = [r.get("run_stats", {}) for r in results if r.get("run_stats")]
+    if not stats_list:
+        return {}
+    p50s = [float(s["do_p50_ms"]) for s in stats_list if s.get("do_p50_ms", 0) > 0]
+    p95s = [float(s["do_p95_ms"]) for s in stats_list if s.get("do_p95_ms", 0) > 0]
+    return {
+        "scenario": "+".join(str(s.get("scenario", "soak")) for s in stats_list),
+        "bots": max(int(s.get("bots", 0)) for s in stats_list),
+        "elapsed_min": sum(float(s.get("elapsed_min", 0.0)) for s in stats_list),
+        "decisions": sum(int(s.get("decisions", 0)) for s in stats_list),
+        "max_wakes_per_min": max(float(s.get("max_wakes_per_min", 0.0)) for s in stats_list),
+        "do_p50_ms": statistics.median(p50s) if p50s else 0.0,
+        "do_p95_ms": max(p95s) if p95s else 0.0,
+        "llm_errors": sum(int(s.get("llm_errors", 0)) for s in stats_list),
+        "invalid_plans": sum(int(s.get("invalid_plans", 0)) for s in stats_list),
+        "max_repeated_refusals": max(
+            int(s.get("max_repeated_refusals", 0)) for s in stats_list
+        ),
+    }
+
+
 def _aggregate_results(results: list[dict]) -> dict:
     if len(results) == 1:
         return results[0]
@@ -310,6 +353,7 @@ def _aggregate_results(results: list[dict]) -> dict:
     agg["guardrails_ok"] = all(r["guardrails_ok"] for r in results)
     agg["run_ratings"] = [r.get("rating") for r in results]
     agg["scenarios"] = [r.get("scenario", "soak") for r in results]
+    agg["run_stats"] = _aggregate_run_stats(results)
     if "ranking" in agg:
         agg["ranking"] = dict(agg["ranking"])
         agg["ranking"]["beats_current_outside_ci"] = all(
@@ -347,6 +391,8 @@ def run_soak(
     verify_hash: pathlib.Path | None = None,
     suite: str = "varied",
     check_guardrails: bool = True,
+    min_eval_passed: int | None = None,
+    eval_passed: int | None = None,
 ) -> dict:
     if verify_hash:
         ok, msg = soak_scorer.verify_scorer_hash(verify_hash)
@@ -355,33 +401,70 @@ def run_soak(
     scenarios = _resolve_scenarios(suite, runs)
     build.common("default", tests=False)
     results = []
-    with LlamaServer(slots=16):
-        for idx, sc_name in enumerate(scenarios):
-            if len(scenarios) > 1:
-                say(f"== soak run {idx + 1}/{len(scenarios)} ({sc_name}) ==")
-            res = _run_once(
-                scenario_name=sc_name,
-                minutes=minutes,
+    with tempfile.TemporaryDirectory(prefix="wlb-soak-runs-") as runs_tmp:
+        per_run_dirs: list[pathlib.Path] = []
+        with LlamaServer(slots=16):
+            for idx, sc_name in enumerate(scenarios):
+                if len(scenarios) > 1:
+                    say(f"== soak run {idx + 1}/{len(scenarios)} ({sc_name}) ==")
+                res = _run_once(
+                    scenario_name=sc_name,
+                    minutes=minutes,
+                    human_dir=human_dir,
+                    use_judge=use_judge,
+                    baseline_trace_dir=baseline_trace_dir,
+                    blind_ratings_path=blind_ratings_path,
+                )
+                results.append(res)
+                if len(scenarios) > 1:
+                    run_trace_dst = pathlib.Path(runs_tmp) / f"run_{idx:02d}_{sc_name}"
+                    if (VAR / "soak_traces").exists():
+                        shutil.copytree(VAR / "soak_traces", run_trace_dst)
+                    per_run_dirs.append(run_trace_dst)
+                st = res["run_stats"]
+                p = res["progress"]
+                rat_s = f"{res['rating']:.1f}" if res.get("rating") is not None else "unrated"
+                say(
+                    f"soak summary [{sc_name}] ({st['elapsed_min']:.1f} min, {ONLINE} bots): "
+                    f"rating={rat_s}, decisions={st['decisions']}, "
+                    f"max_wakes/min/bot={st['max_wakes_per_min']:.1f}, "
+                    f"do_p50={st['do_p50_ms']:.0f}ms, do_p95={st['do_p95_ms']:.0f}ms, "
+                    f"errors={st['llm_errors']}, invalid={st['invalid_plans']}, "
+                    f"xp/h={p['xp_per_hour']:.0f}, deaths={p['deaths']}, "
+                    f"moved={p['moved_bots']}/{p['traced_bots']}"
+                )
+
+        if len(scenarios) > 1:
+            _merge_trace_dirs(per_run_dirs, VAR / "soak_traces")
+            merged_stats = _aggregate_run_stats(results)
+            agg = soak_scorer.score_soak(
+                VAR / "soak_traces",
+                run_stats=merged_stats,
                 human_dir=human_dir,
-                use_judge=use_judge,
                 baseline_trace_dir=baseline_trace_dir,
                 blind_ratings_path=blind_ratings_path,
+                use_judge=use_judge,
+                min_eval_passed=min_eval_passed,
+                eval_passed=eval_passed,
             )
-            results.append(res)
-            st = res["run_stats"]
-            p = res["progress"]
-            rat_s = f"{res['rating']:.1f}" if res.get("rating") is not None else "unrated"
-            say(
-                f"soak summary [{sc_name}] ({st['elapsed_min']:.1f} min, {ONLINE} bots): "
-                f"rating={rat_s}, decisions={st['decisions']}, "
-                f"max_wakes/min/bot={st['max_wakes_per_min']:.1f}, "
-                f"do_p50={st['do_p50_ms']:.0f}ms, do_p95={st['do_p95_ms']:.0f}ms, "
-                f"errors={st['llm_errors']}, invalid={st['invalid_plans']}, "
-                f"xp/h={p['xp_per_hour']:.0f}, deaths={p['deaths']}, "
-                f"moved={p['moved_bots']}/{p['traced_bots']}"
+            agg["run_ratings"] = [r.get("rating") for r in results]
+            agg["scenarios"] = [r.get("scenario", "soak") for r in results]
+            agg["guardrails_ok"] = bool(agg["guardrails_ok"]) and all(
+                r["guardrails_ok"] for r in results
             )
-
-    agg = _aggregate_results(results)
+        else:
+            agg = _aggregate_results(results)
+            if min_eval_passed is not None and eval_passed is not None:
+                agg = soak_scorer.score_soak(
+                    VAR / "soak_traces",
+                    run_stats=agg.get("run_stats", {}),
+                    human_dir=human_dir,
+                    baseline_trace_dir=baseline_trace_dir,
+                    blind_ratings_path=blind_ratings_path,
+                    use_judge=use_judge,
+                    min_eval_passed=min_eval_passed,
+                    eval_passed=eval_passed,
+                )
     say(soak_scorer.format_score_report(agg))
 
     if check_guardrails:

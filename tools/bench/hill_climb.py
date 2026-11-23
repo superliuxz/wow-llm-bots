@@ -365,9 +365,33 @@ def _check_fixed_guardrails(
     return len(failures) == 0, failures
 
 
-def _revert_to(base_ref: str) -> None:
-    subprocess.run(["git", "reset", "--hard", base_ref], cwd=ROOT, check=False)
-    subprocess.run(["git", "clean", "-fd"], cwd=ROOT, check=False)
+def _revert_to(base_ref: str, *, allow_any_files: bool = False) -> bool:
+    """Safely reverts only allowed-scope edits (refuses if unrelated files are dirty/untracked)."""
+    scope_ok, disallowed = _check_edit_scope(base_ref=base_ref)
+    if not allow_any_files and not scope_ok:
+        print(
+            f"REFUSING --auto-revert: unrelated dirty/untracked files outside "
+            f"{ALLOWED_EDIT_GLOBS} would be lost: {disallowed}",
+            file=sys.stderr,
+        )
+        return False
+    tracked = [
+        p for p in _git("diff", "--name-only", base_ref).splitlines() if p.strip()
+    ]
+    untracked = [
+        p
+        for p in _git("ls-files", "--others", "--exclude-standard").splitlines()
+        if p.strip()
+    ]
+    if tracked:
+        subprocess.run(
+            ["git", "checkout", base_ref, "--", *tracked], cwd=ROOT, check=False
+        )
+    if untracked:
+        subprocess.run(
+            ["git", "clean", "-fd", "--", *untracked], cwd=ROOT, check=False
+        )
+    return True
 
 
 def _load_ledger() -> list[dict]:
@@ -603,7 +627,7 @@ def cmd_eval_candidate(args) -> int:
         if chk.returncode != 0:
             print("REJECT: `tools/wlb check` failed", file=sys.stderr)
             if args.auto_revert:
-                _revert_to(base_ref)
+                _revert_to(base_ref, allow_any_files=args.allow_any_files)
             return 1
 
     xp_floor = float(args.min_xp_per_hour)
@@ -623,6 +647,8 @@ def cmd_eval_candidate(args) -> int:
         verify_hash=lock_file,
         suite=args.suite,
         check_guardrails=False,
+        min_eval_passed=args.min_eval_passed,
+        eval_passed=args.eval_passed,
     )
     xp_h, deaths = _extract_progress(res)
     guardrails_ok, g_failures = _check_fixed_guardrails(res, xp_floor, max_deaths)
@@ -663,13 +689,16 @@ def cmd_eval_candidate(args) -> int:
                 "max_deaths": max_deaths,
                 "allow_fallback": args.allow_fallback,
                 "allow_any_files": args.allow_any_files,
+                "min_eval_passed": args.min_eval_passed,
+                "eval_passed": args.eval_passed,
                 "run_stats": res.get("run_stats", {}),
             },
         )
         print(
             f"\n== ROUND {round_num}: PENDING BLIND RATINGS (candidate_id={cand_id}, gates=PASS) ==\n"
-            f"  1. Rate candidate vs baseline:\n"
+            f"  1. Rate candidate vs baseline (include --include-human-anchors for external/multi-human judging):\n"
             f"     tools/bench/blind_rate.py rate "
+            f"--include-human-anchors "
             f"--source human={args.human_dir} "
             f"--source current={baseline_dir} "
             f"--source candidate={pending_dir / 'traces' if pending_dir else VAR / 'soak_traces'} "
@@ -765,8 +794,8 @@ def cmd_eval_candidate(args) -> int:
         f"beats_ci={beats_ci}, gates={'PASS' if guardrails_ok else 'FAIL'}) =="
     )
     if not improved and args.auto_revert:
-        _revert_to(base_ref)
-        print(f"auto-reverted working tree (`git reset --hard {base_ref} && git clean -fd`)")
+        if _revert_to(base_ref, allow_any_files=args.allow_any_files):
+            print(f"auto-reverted scoped working-tree changes to {base_ref}")
     return 0 if improved else 1
 
 
@@ -790,6 +819,7 @@ def cmd_score_candidate(args) -> int:
         return 2
 
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    allow_fallback = bool(meta.get("allow_fallback"))
     baseline_dir = BASELINE_TRACES_ROOT / args.suite
     res = soak_scorer.score_soak(
         traces_dir,
@@ -798,11 +828,18 @@ def cmd_score_candidate(args) -> int:
         baseline_trace_dir=baseline_dir if baseline_dir.exists() else None,
         blind_ratings_path=args.blind_ratings,
         use_judge=False,
+        min_eval_passed=meta.get("min_eval_passed"),
+        eval_passed=meta.get("eval_passed"),
     )
     xp_h, deaths = _extract_progress(res)
     xp_floor = float(meta.get("xp_floor", DEFAULT_MIN_XP_PER_HOUR))
     max_deaths = int(meta.get("max_deaths", DEFAULT_MAX_DEATHS_PER_RUN))
     guardrails_ok, g_failures = _check_fixed_guardrails(res, xp_floor, max_deaths)
+    if not allow_fallback and res.get("baseline_mode") != "human_baseline":
+        guardrails_ok = False
+        g_failures.append(
+            f"scorer ran in {res.get('baseline_mode')} instead of human_baseline"
+        )
     for f in g_failures:
         print(f"GATE FAIL: {f}", file=sys.stderr)
 
@@ -820,6 +857,53 @@ def cmd_score_candidate(args) -> int:
     round_num = int(meta.get("round", 1))
     base_ref = str(meta.get("base_ref", "HEAD"))
     hypothesis = str(meta.get("hypothesis", ""))
+    minutes = float(meta.get("minutes", 5.0))
+    runs = int(meta.get("runs", 2))
+
+    confirm_ok = None
+    if improved and not getattr(args, "no_confirm", False):
+        print("\n== Candidate beat current outside 95% CI; running confirmation soak ==")
+        confirm = soak_case.run_soak(
+            minutes=minutes,
+            runs=runs,
+            score=True,
+            human_dir=args.human_dir,
+            baseline_trace_dir=baseline_dir if baseline_dir.exists() else None,
+            blind_ratings_path=args.blind_ratings,
+            use_judge=False,
+            verify_hash=lock_file,
+            suite=args.suite,
+            check_guardrails=False,
+        )
+        confirm_ok, _ = _check_fixed_guardrails(confirm, xp_floor, max_deaths)
+        if not allow_fallback and confirm.get("baseline_mode") != "human_baseline":
+            confirm_ok = False
+        if not confirm_ok:
+            print("CONFIRMATION FAILED: reverting candidate", file=sys.stderr)
+            improved = False
+
+    heldout_ok = None
+    if improved and not getattr(args, "no_heldout", False) and args.suite != "heldout":
+        print("\n== Running held-out generalization gate (--suite heldout) ==")
+        ho = soak_case.run_soak(
+            minutes=minutes,
+            runs=runs,
+            score=True,
+            human_dir=args.human_dir,
+            use_judge=False,
+            verify_hash=lock_file,
+            suite="heldout",
+            check_guardrails=False,
+        )
+        heldout_ok, ho_failures = _check_fixed_guardrails(ho, xp_floor, max_deaths)
+        if not allow_fallback and ho.get("baseline_mode") != "human_baseline":
+            heldout_ok = False
+            ho_failures.append(
+                f"heldout ran in {ho.get('baseline_mode')} instead of human_baseline"
+            )
+        if not heldout_ok:
+            print(f"HELD-OUT GATE FAILED ({ho_failures}): reverting candidate", file=sys.stderr)
+            improved = False
 
     if improved:
         _save_baseline_traces(args.suite, src=traces_dir)
@@ -840,6 +924,8 @@ def cmd_score_candidate(args) -> int:
         "ci_high": res.get("ci_high"),
         "delta_vs_current": res.get("ranking", {}).get("delta_vs_current"),
         "beats_outside_ci": beats_ci,
+        "confirm_ok": confirm_ok,
+        "heldout_guardrails_ok": heldout_ok,
         "ranking_mode": ranking_mode,
         "xp_per_hour": round(xp_h, 1),
         "deaths": deaths,
@@ -861,8 +947,8 @@ def cmd_score_candidate(args) -> int:
         f"beats_ci={beats_ci}, gates={'PASS' if guardrails_ok else 'FAIL'}) =="
     )
     if not improved and args.auto_revert:
-        _revert_to(base_ref)
-        print(f"auto-reverted working tree (`git reset --hard {base_ref} && git clean -fd`)")
+        if _revert_to(base_ref, allow_any_files=bool(meta.get("allow_any_files"))):
+            print(f"auto-reverted scoped working-tree changes to {base_ref}")
     return 0 if improved else 1
 
 
@@ -935,12 +1021,16 @@ def main() -> int:
     p_eval.add_argument("--no-heldout", action="store_true")
     p_eval.add_argument("--skip-check", action="store_true")
     p_eval.add_argument("--auto-revert", action="store_true")
+    p_eval.add_argument("--min-eval-passed", type=int, default=None)
+    p_eval.add_argument("--eval-passed", type=int, default=None)
 
     p_score = sub.add_parser("score-candidate", help="Score a saved pending candidate with blind ratings")
     p_score.add_argument("--suite", default="varied")
     p_score.add_argument("--human-dir", type=pathlib.Path, default=DEFAULT_HUMAN_DIR)
     p_score.add_argument("--blind-ratings", type=pathlib.Path, default=DEFAULT_BLIND_RATINGS)
     p_score.add_argument("--lock-file", type=pathlib.Path, default=DEFAULT_LOCK_FILE)
+    p_score.add_argument("--no-confirm", action="store_true")
+    p_score.add_argument("--no-heldout", action="store_true")
     p_score.add_argument("--auto-revert", action="store_true")
 
     sub.add_parser("status", help="Show experiment history and current Layer C tells")

@@ -285,8 +285,15 @@ def fit_bradley_terry(
     """
     entrants = sorted({c["a"] for c in comparisons} | {c["b"] for c in comparisons})
     if not entrants:
-        return {"ratings": {}, "comparisons": 0, "anchor": anchor_label, "bootstrap_samples": {}}
+        return {
+            "ratings": {},
+            "comparisons": 0,
+            "anchor": anchor_label,
+            "anchored": False,
+            "bootstrap_samples": {},
+        }
 
+    anchored = anchor_label in entrants
     games = {e: 0 for e in entrants}
     for c in comparisons:
         games[c["a"]] += 1
@@ -322,6 +329,7 @@ def fit_bradley_terry(
         "ratings": out_ratings,
         "comparisons": m,
         "anchor": anchor_label,
+        "anchored": anchored,
         "bootstrap_samples": boot_vals,
     }
 

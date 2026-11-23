@@ -325,6 +325,93 @@ class HillClimbSafeguardsTest(unittest.TestCase):
         self.assertFalse(hasattr(soak_scorer, "METRIC_WEIGHTS"))
         self.assertFalse(hasattr(soak_scorer, "_score_distributions"))
 
+    def test_bradley_terry_reports_unanchored_when_anchor_missing(self):
+        import pairwise_ranker
+
+        comps = [{"a": "cand", "b": "curr", "winner": "a"}] * 6
+        bt = pairwise_ranker.fit_bradley_terry(comps, anchor_label="human", n_bootstrap=20, seed=0)
+        self.assertFalse(bt["anchored"])
+        comps_with_human = comps + [{"a": "human", "b": "curr", "winner": "a"}] * 4
+        bt2 = pairwise_ranker.fit_bradley_terry(
+            comps_with_human, anchor_label="human", n_bootstrap=20, seed=0
+        )
+        self.assertTrue(bt2["anchored"])
+
+    def test_revert_to_refuses_unrelated_dirty_files(self):
+        from unittest import mock
+
+        with mock.patch.object(
+            hill_climb, "_check_edit_scope", return_value=(False, ["unrelated.txt"])
+        ), mock.patch("subprocess.run") as m_run:
+            ok = hill_climb._revert_to("HEAD")
+        self.assertFalse(ok)
+        m_run.assert_not_called()
+
+    def test_score_candidate_enforces_human_baseline_confirm_and_heldout(self):
+        from unittest import mock
+        import argparse
+
+        with tempfile.TemporaryDirectory() as tmp:
+            t = pathlib.Path(tmp)
+            pending = t / "pending" / "varied"
+            (pending / "traces").mkdir(parents=True)
+            (pending / "meta.json").write_text(json.dumps({
+                "round": 2,
+                "suite": "varied",
+                "hypothesis": "test",
+                "base_ref": "HEAD",
+                "xp_floor": 1000.0,
+                "max_deaths": 5,
+                "allow_fallback": False,
+                "minutes": 1.0,
+                "runs": 1,
+                "run_stats": {"decisions": 10},
+            }))
+            args = argparse.Namespace(
+                suite="varied",
+                human_dir=t / "human",
+                blind_ratings=t / "blind.jsonl",
+                lock_file=t / "lock",
+                no_confirm=False,
+                no_heldout=False,
+                auto_revert=False,
+            )
+            fake_score = {
+                "rating": 900.0,
+                "ci_low": 850.0,
+                "ci_high": 950.0,
+                "ranking": {"mode": "blind", "beats_current_outside_ci": True},
+                "baseline_mode": "no_human_baseline",
+                "guardrails_ok": True,
+                "progress": {"xp_per_hour": 5000.0, "deaths": 0},
+                "scorer_sha256": "abc",
+                "tells": [],
+            }
+            with mock.patch.object(hill_climb, "PENDING_CANDIDATE_ROOT", t / "pending"), \
+                 mock.patch.object(hill_climb, "BASELINE_TRACES_ROOT", t / "base"), \
+                 mock.patch.object(hill_climb, "LEDGER", t / "ledger.jsonl"), \
+                 mock.patch.object(hill_climb, "_verify_all_locks", return_value=(True, "ok")), \
+                 mock.patch.object(hill_climb.soak_scorer, "score_soak", return_value=fake_score), \
+                 mock.patch.object(hill_climb, "_git", return_value="deadbeef"):
+                rc = hill_climb.cmd_score_candidate(args)
+            self.assertEqual(rc, 1)  # Rejected because baseline_mode != human_baseline.
+
+    def test_cli_subcommands_stubbed(self):
+        from unittest import mock
+
+        for argv, target_fn in (
+            (["hill_climb.py", "status"], "cmd_status"),
+            (["hill_climb.py", "init", "--minutes", "1"], "cmd_init"),
+            (["hill_climb.py", "calibrate"], "cmd_calibrate"),
+            (["hill_climb.py", "eval-candidate", "--hypothesis", "h", "--min-eval-passed", "40", "--eval-passed", "42"], "cmd_eval_candidate"),
+            (["hill_climb.py", "score-candidate", "--no-confirm", "--no-heldout"], "cmd_score_candidate"),
+        ):
+            with mock.patch.object(sys, "argv", argv), \
+                 mock.patch.object(hill_climb, target_fn, return_value=0) as m_fn:
+                rc = hill_climb.main()
+            self.assertEqual(rc, 0)
+            m_fn.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

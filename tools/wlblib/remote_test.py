@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import select
+import shlex
 import stat
 import subprocess
 import sys
@@ -198,6 +200,7 @@ class RemoteLibTest(unittest.TestCase):
             self.assertIn(remote.MAP_DATA_SENTINEL_REL, m_probe.call_args[0][0][-1])
             rsync_cmd = m_run.call_args_list[1][0][0]
             self.assertEqual(rsync_cmd[0], "rsync")
+            self.assertNotIn("-s", rsync_cmd)
             self.assertIn("-e", rsync_cmd)
             self.assertIn("ConnectTimeout=5", rsync_cmd[rsync_cmd.index("-e") + 1])
             self.assertIn("--", rsync_cmd)
@@ -276,12 +279,35 @@ class RemoteLibTest(unittest.TestCase):
         self.assertIn(remote.REPO_SENTINEL_REL, guard_cmd)
         rsync_cmd = m_run.call_args_list[1][0][0]
         self.assertEqual(rsync_cmd[0], "rsync")
-        self.assertIn("-s", rsync_cmd)
+        self.assertNotIn("-s", rsync_cmd)
         self.assertIn("--delete", rsync_cmd)
         self.assertTrue(any(a.startswith("--rsync-path=") and "flock -o" in a for a in rsync_cmd))
         self.assertIn("-e", rsync_cmd)
         self.assertIn("--exclude=.git", rsync_cmd)
         self.assertIn("--", rsync_cmd)
+
+        # Live rsync test with a local sh -c SSH wrapper verifying ~/ expands to $HOME.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            fake_home = root / "home"
+            src = root / "src"
+            dst = fake_home / "wow-llm-bots"
+            src.mkdir(parents=True)
+            dst.mkdir(parents=True)
+            (src / "hello.txt").write_text("ok\n")
+            wrapper = root / "fake_ssh.sh"
+            wrapper.write_text(
+                f"#!/bin/sh\nexport HOME={shlex.quote(str(fake_home))}\nshift\nexec sh -c \"$*\"\n"
+            )
+            wrapper.chmod(0o755)
+            res = subprocess.run(
+                ["rsync", "-a", "-e", str(wrapper), "--", f"{src}/", "fakehost:~/wow-llm-bots/"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertTrue((dst / "hello.txt").is_file())
+            self.assertFalse((root / "~").exists())
 
         with mock.patch("subprocess.run") as m_sub:
             remote._kill_remote_pgid(spec)

@@ -284,7 +284,7 @@ def _ensure_remote_map_data(spec: RemoteSpec, repo: pathlib.Path = ROOT) -> None
     say(f"remote {spec.name}: pushing static 3.3.5a map data (one-time) -> {spec.ssh}:{spec.repo}/out/server/data")
     run([*_ssh_base_args(spec), f"mkdir -p {_remote_cd_expr(spec.repo)}/out/server/data"])
     run([
-        "rsync", "-a", "-s", "--info=progress2", "-e", _rsync_ssh_cmd(), "--",
+        "rsync", "-a", "--info=progress2", "-e", _rsync_ssh_cmd(), "--",
         f"{local_data}/", f"{spec.ssh}:{spec.repo}/out/server/data/",
     ])
     run([
@@ -328,7 +328,7 @@ def _rsync_to_remote(spec: RemoteSpec, repo: pathlib.Path = ROOT) -> None:
         f'flock -o {shlex.quote(REMOTE_LOCK_REL)} rsync "$@"'
     )
     rsync_path = f"bash -c {shlex.quote(inner_rsync)} _"
-    cmd = ["rsync", "-a", "-s", "--delete", f"--rsync-path={rsync_path}", "-e", _rsync_ssh_cmd()]
+    cmd = ["rsync", "-a", "--delete", f"--rsync-path={rsync_path}", "-e", _rsync_ssh_cmd()]
     for pat in RSYNC_EXCLUDES:
         cmd.append(f"--exclude={pat}")
     cmd += ["--", f"{repo}/", f"{spec.ssh}:{spec.repo}/"]
@@ -475,9 +475,11 @@ def pull(name: str, remote_rel: str, local_path: str | pathlib.Path) -> None:
     spec = get_remote(name)
     dest = pathlib.Path(local_path)
     dest.parent.mkdir(parents=True, exist_ok=True)
+    # Omit -s (--protect-args) so leading ~/ in spec.repo expands on the remote
+    # shell; shell-quote remote_rel so spaces/special chars stay safe.
     run([
-        "rsync", "-a", "-s", "-e", _rsync_ssh_cmd(), "--",
-        f"{spec.ssh}:{spec.repo}/{remote_rel}", str(dest),
+        "rsync", "-a", "-e", _rsync_ssh_cmd(), "--",
+        f"{spec.ssh}:{spec.repo}/{shlex.quote(remote_rel)}", str(dest),
     ])
     say(f"remote {spec.name}: pulled {remote_rel} -> {dest}")
 
