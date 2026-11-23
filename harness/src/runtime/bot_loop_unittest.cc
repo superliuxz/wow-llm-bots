@@ -1981,6 +1981,19 @@ TEST(BotLoopTest, LastOutcomeDeliveredOnceAndKnowledgeInjected) {
       brain.front_request().user.find("Last outcome: target out of range."),
       std::string::npos);
 
+  // A transport/brain error also requeues `Last outcome:` for the retry wake.
+  brain.FinishError("timeout");
+  pb::ImmediateEvent w_err;
+  w_err.bot = "Gatda";
+  w_err.event.chat.emplace().channel = pb::WHISPER;
+  w_err.event.chat->from = "Ally";
+  w_err.event.chat->text = "retry";
+  loop.OnEvent(std::move(w_err), t0 + base::Seconds(4));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(
+      brain.front_request().user.find("Last outcome: target out of range."),
+      std::string::npos);
+
   // An unparseable plan requeues `Last outcome:` for the retry wake.
   brain.FinishReply("garbage not a valid plan");
   pb::ImmediateEvent w0;
@@ -1988,7 +2001,7 @@ TEST(BotLoopTest, LastOutcomeDeliveredOnceAndKnowledgeInjected) {
   w0.event.chat.emplace().channel = pb::WHISPER;
   w0.event.chat->from = "Ally";
   w0.event.chat->text = "ping";
-  loop.OnEvent(std::move(w0), t0 + base::Seconds(4));
+  loop.OnEvent(std::move(w0), t0 + base::Seconds(5));
   ASSERT_EQ(brain.size(), 1u);
   EXPECT_NE(
       brain.front_request().user.find("Last outcome: target out of range."),
@@ -2002,17 +2015,35 @@ TEST(BotLoopTest, LastOutcomeDeliveredOnceAndKnowledgeInjected) {
   whisper.event.chat.emplace().channel = pb::WHISPER;
   whisper.event.chat->from = "Ally";
   whisper.event.chat->text = "ready?";
-  loop.OnEvent(std::move(whisper), t0 + base::Seconds(5));
+  loop.OnEvent(std::move(whisper), t0 + base::Seconds(6));
   ASSERT_EQ(brain.size(), 1u);
   EXPECT_EQ(brain.front_request().user.find("Last outcome:"),
             std::string::npos);
 
-  // Disconnect increments call_epoch and clears last_outcome: a late cancelled
-  // reply from the old epoch must NOT resurrect a stale outcome.
+  // Trigger a fresh refusal so an in-flight call actually carries a non-empty
+  // `asked_outcome`, then disconnect before it cancels: the late cancelled
+  // reply from the old epoch must NOT resurrect the stale outcome.
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  uint32_t attack_cmd_id_2 = 0;
+  for (const pb::Command& c : sent) {
+    if (c.choose) {
+      attack_cmd_id_2 = c.command_id;
+    }
+  }
+  ASSERT_NE(attack_cmd_id_2, attack_cmd_id);
+  pb::ImmediateEvent err2;
+  err2.bot = "Gatda";
+  err2.event.error.emplace().command_id = attack_cmd_id_2;
+  err2.event.error->text = "not enough mana";
+  loop.OnEvent(std::move(err2), t0 + base::Seconds(7));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("Last outcome: not enough mana."),
+            std::string::npos);
+
   loop.OnConnectionChanged(false);
   brain.FinishCancelled();
   loop.OnConnectionChanged(true);
-  loop.OnSnapshot(s1, t0 + base::Seconds(6));
+  loop.OnSnapshot(s1, t0 + base::Seconds(8));
   ASSERT_EQ(brain.size(), 1u);
   EXPECT_EQ(brain.front_request().user.find("Last outcome:"),
             std::string::npos);

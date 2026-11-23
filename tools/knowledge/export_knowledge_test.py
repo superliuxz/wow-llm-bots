@@ -186,9 +186,11 @@ class ExportKnowledgeTest(unittest.TestCase):
             self.assertEqual(data["dungeons"]["Naxxramas"]["level"], "80")
             self.assertNotIn("===", data["dungeons"]["Naxxramas"]["summary"])
             self.assertIn("The Slave Pens", data["dungeons"])
-            # Short/long mirror fallback populates canonical "The Stockade" from "Stormwind Stockade".
+            # Alias maps "Stormwind Stockade" -> "The Stockade", and the short/long
+            # mirror fallback populates "Stockade" from "The Stockade".
             self.assertIn("The Stockade", data["dungeons"])
-            self.assertIn("Prison wing in Stormwind.", data["dungeons"]["The Stockade"]["summary"])
+            self.assertIn("Stockade", data["dungeons"])
+            self.assertIn("Prison wing in Stormwind.", data["dungeons"]["Stockade"]["summary"])
 
 
 if __name__ == "__main__":
