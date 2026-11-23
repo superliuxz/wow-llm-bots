@@ -2,7 +2,7 @@
 """wlb: the project's one command-line tool (build, run, check, set up).
 
   tools/wlb build common [VARIANT] [--no-tests] | server [--test]   (--test: out/server-test)
-  tools/wlb db start | stop | backup [--keep N]
+  tools/wlb db start [--init] | stop | backup [--keep N]
   tools/wlb config [TEST]                render out/server/etc/*.conf (TEST: config/tests/TEST.*)
   tools/wlb server start | stop [--test]   (--test: the isolated test server)
   tools/wlb console [--test] COMMAND...   send a command to worldserver's console

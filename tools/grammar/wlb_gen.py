@@ -402,6 +402,34 @@ def enumerator(spelling):
     return "k" + "".join(w[:1].upper() + w[1:] for w in words)
 
 
+def _gbnf_fixed(a, b, digits):
+    """Exact GBNF for same-width decimal integers a..b (each `digits` wide)."""
+    if digits == 1:
+        return f'"{a}"' if a == b else f"[{a}-{b}]"
+    sa, sb = str(a).zfill(digits), str(b).zfill(digits)
+    if sa[0] == sb[0]:
+        inner = _gbnf_fixed(int(sa[1:]), int(sb[1:]), digits - 1)
+        return f'"{sa[0]}" ({inner})' if " | " in inner else f'"{sa[0]}" {inner}'
+    step = 10 ** (digits - 1)
+    lo_d, hi_d = int(sa[0]), int(sb[0])
+    parts = []
+    if a % step != 0:
+        inner = _gbnf_fixed(a % step, step - 1, digits - 1)
+        parts.append(f'"{lo_d}" ({inner})' if " | " in inner else f'"{lo_d}" {inner}')
+        lo_d += 1
+    tail = None
+    if b % step != step - 1:
+        inner = _gbnf_fixed(0, b % step, digits - 1)
+        tail = f'"{hi_d}" ({inner})' if " | " in inner else f'"{hi_d}" {inner}'
+        hi_d -= 1
+    if lo_d <= hi_d:
+        head = f'"{lo_d}"' if lo_d == hi_d else f"[{lo_d}-{hi_d}]"
+        parts.append(head + " [0-9]" * (digits - 1))
+    if tail:
+        parts.append(tail)
+    return " | ".join(parts)
+
+
 def gbnf_range(lo, hi):
     """GBNF for exactly the whole numbers lo..hi (no leading zeros)."""
     if hi - lo + 1 <= 40:
@@ -418,10 +446,8 @@ def gbnf_range(lo, hi):
             alts.append(head + " [0-9]" * (digits - 1))
         elif digits == 1:
             alts.append(f"[{a}-{b}]")
-        elif b - a + 1 <= 200:
-            alts += [f'"{n}"' for n in range(a, b + 1)]
         else:
-            raise WlbError(f"range {lo}..{hi}: can't write {a}..{b} in GBNF yet")
+            alts.append(_gbnf_fixed(a, b, digits))
     return " | ".join(alts)
 
 
@@ -1161,10 +1187,16 @@ class Gen:
                 spec["count"] = f"\"{t['hi_env']}\""
                 spec["count_from"] = str(t["lo"])
             elif k in ("int", "num"):
-                raw = gbnf_range(t["lo"], t["hi"])
                 if t["decimals"]:
-                    raw = f"({raw})" + (' ("." [0-9])?' if t["decimals"] == 1 else
-                                        f' ("." [0-9]{{1,{t["decimals"]}}})?')
+                    frac = ' ("." [0-9])?' if t["decimals"] == 1 else f' ("." [0-9]{{1,{t["decimals"]}}})?'
+                    zero_frac = ' ("." "0")?' if t["decimals"] == 1 else f' ("." "0"{{1,{t["decimals"]}}})?'
+                    if t["hi"] > t["lo"]:
+                        lo_range = gbnf_range(t["lo"], t["hi"] - 1)
+                        raw = f'({lo_range}){frac} | "{t["hi"]}"{zero_frac}'
+                    else:
+                        raw = f'"{t["hi"]}"{zero_frac}'
+                else:
+                    raw = gbnf_range(t["lo"], t["hi"])
                 spec["raw"] = cpp_string(raw)
             elif k == "name":
                 spec["env"] = f"\"{t['env']}\""

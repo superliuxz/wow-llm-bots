@@ -135,7 +135,7 @@ std::string Speak(Player* bot, const pb::Command::Say& say) {
       std::string msg = text;
       if (!sScriptMgr->OnPlayerCanUseChat(bot, msg_type, language, msg,
                                           group)) {
-        return "";
+        return "chat blocked";
       }
       WorldPacket data;
       ChatHandler::BuildChatPacket(data, msg_type, language, bot, bot, msg);
@@ -154,7 +154,7 @@ std::string Speak(Player* bot, const pb::Command::Say& say) {
       std::string msg = text;
       if (!sScriptMgr->OnPlayerCanUseChat(bot, msg_type, language, msg,
                                           group)) {
-        return "";
+        return "chat blocked";
       }
       WorldPacket data;
       ChatHandler::BuildChatPacket(data, msg_type, language, bot, bot, msg);
@@ -187,7 +187,7 @@ std::string Speak(Player* bot, const pb::Command::Say& say) {
       std::string msg = text;
       if (!sScriptMgr->OnPlayerCanUseChat(bot, CHAT_MSG_CHANNEL, language, msg,
                                           chn)) {
-        return "";
+        return "chat blocked";
       }
       chn->Say(bot->GetGUID(), msg, language);
       return "";

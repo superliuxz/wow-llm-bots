@@ -264,6 +264,22 @@ TEST(PlanTest, TheGrammarOnlyAllowsTheBotsOwnOptions) {
   EXPECT_TRUE(Accepts(PlanGrammar(0), ""));
 }
 
+TEST(PlanTest, MistypedOrdersLineFailsParseInsteadOfSilentDrop) {
+  const std::vector<std::string> names = {"Fire"};
+  EXPECT_TRUE(
+      ParsePlan("do: 1\nexpect: none\nwatch: none\nlook: 60\norders: none", 2,
+                names)
+          .has_value());
+  EXPECT_FALSE(ParsePlan("do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+                         "orders: in Fire -> out of it",
+                         2, names)
+                   .has_value());
+  EXPECT_FALSE(ParsePlan("do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+                         "orders: clear",
+                         2, names)
+                   .has_value());
+}
+
 TEST(PlanTest, ATellLineIsAWhisperToOnePlayer) {
   const std::optional<Plan> plan = ParsePlan(
       "do: 1\nexpect: none\nwatch: none\nlook: 60\n"

@@ -177,6 +177,9 @@ int RunDecide(const DecideOptions& options,
     }
     input.notes = std::move(*notes);
   }
+  if (!input.notes.empty()) {
+    input.notes = SelectRelevantNotes(input.notes, snapshot);
+  }
   input.order_names = CollectOrderNames(snapshot, input.notes);
   for (const std::string& extra : options.order_names) {
     if (std::find(input.order_names.begin(), input.order_names.end(), extra) ==

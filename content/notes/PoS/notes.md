@@ -2,10 +2,10 @@
 
 ## Ick
 
-- **Pursuit**: boss cast; follow standing order (`out of it`).
+- **Pursuit**: fixate debuff on a target; kite Ick away while pursued (`kite boss`).
 
 ```
-Pursuit cast -> out of it
+Pursuit on me -> kite boss
 ```
 
 ## Pit of Saron

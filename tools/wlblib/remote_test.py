@@ -47,8 +47,12 @@ class RemoteLibTest(unittest.TestCase):
                 {"ok": {"ssh": "u@h", "repo": "~"}},
                 {"ok": {"ssh": "u@h", "repo": "~/"}},
                 {"ok": {"ssh": "u@h", "repo": "/"}},
+                {"ok": {"ssh": "u@h", "repo": "/."}},
                 {"ok": {"ssh": "u@h", "repo": "/home"}},
+                {"ok": {"ssh": "u@h", "repo": "/home/."}},
+                {"ok": {"ssh": "u@h", "repo": "/tmp/."}},
                 {"ok": {"ssh": "u@h", "repo": "~/../other"}},
+                {"ok": {"ssh": "u@h", "repo": "~/a;id"}},
                 {"ok": {"ssh": "u@h", "repo": "$HOME"}},
                 {"ok": {"ssh": "u@h", "repo": "/r", "llm_port": True}},
                 {"ok": {"ssh": "u@h", "repo": "/r", "llm_port": 70000}},
@@ -177,7 +181,7 @@ class RemoteLibTest(unittest.TestCase):
         self.assertIn("mod-llm-brain", cmd[-1])
         self.assertIn("tools/wlb build common --no-tests", cmd[-1])
         self.assertIn("tools/wlb build server --test", cmd[-1])
-        self.assertIn("flock 9", cmd[-1])
+        self.assertIn("flock -o var/.remote.lock", cmd[-1])
         self.assertIn("var/.built_stamp", cmd[-1])
 
     def test_ensure_remote_map_data_uses_synced_sentinel_and_ssh_opts(self) -> None:
@@ -235,8 +239,9 @@ class RemoteLibTest(unittest.TestCase):
         ssh_cmd = m_sub.call_args[0][0]
         self.assertIn("-R", ssh_cmd)
         self.assertIn("127.0.0.1:8090:127.0.0.1:8090", ssh_cmd)
-        self.assertTrue(ssh_cmd[-1].startswith("setsid --wait bash -c "))
-        self.assertIn(remote.ACTIVE_PGID_REL, ssh_cmd[-1])
+        self.assertIn("flock -o var/.remote.lock", ssh_cmd[-1])
+        self.assertIn("setsid --wait bash -c ", ssh_cmd[-1])
+        self.assertIn(remote.ACTIVE_PGID_REL + ".", ssh_cmd[-1])
         self.assertIn("trap ", ssh_cmd[-1])
 
     def test_run_remote_ssh_drop_255_kills_remote_pgid_only_if_active(self) -> None:
@@ -248,14 +253,18 @@ class RemoteLibTest(unittest.TestCase):
              mock.patch.object(remote, "_kill_remote_pgid") as m_kill:
             with self.assertRaisesRegex(Failed, r"command failed \(255\)"):
                 remote.run_remote("worker1", ["sleep", "60"], no_sync=True)
-        m_kill.assert_called_once_with(spec, only_if_active=True)
+        m_kill.assert_called_once()
+        self.assertEqual(m_kill.call_args.args, (spec,))
+        self.assertTrue(m_kill.call_args.kwargs.get("only_if_active"))
+        self.assertTrue(m_kill.call_args.kwargs.get("pgid_rel", "").startswith(remote.ACTIVE_PGID_REL + "."))
 
     def test_invalidate_rsync_status_and_kill_pgid_commands(self) -> None:
         spec = remote.RemoteSpec(name="worker1", ssh="wlb@192.0.2.10", repo="~/wow-llm-bots")
         with mock.patch.object(remote, "run") as m_run:
             remote._invalidate_remote_stamp(spec)
         inv_cmd = m_run.call_args[0][0][-1]
-        self.assertIn('[ ! -d "$d" ] || rm -f', inv_cmd)
+        self.assertIn('[ ! -d "$d" ] ||', inv_cmd)
+        self.assertIn("flock -o var/.remote.lock rm -f", inv_cmd)
         self.assertNotIn("|| true", inv_cmd)
 
         with mock.patch.object(remote, "run") as m_run:
@@ -264,7 +273,9 @@ class RemoteLibTest(unittest.TestCase):
         self.assertIn(remote.REPO_SENTINEL_REL, guard_cmd)
         rsync_cmd = m_run.call_args_list[1][0][0]
         self.assertEqual(rsync_cmd[0], "rsync")
+        self.assertIn("-s", rsync_cmd)
         self.assertIn("--delete", rsync_cmd)
+        self.assertTrue(any(a.startswith("--rsync-path=") and "flock -o" in a for a in rsync_cmd))
         self.assertIn("-e", rsync_cmd)
         self.assertIn("--exclude=.git", rsync_cmd)
         self.assertIn("--", rsync_cmd)
@@ -324,6 +335,24 @@ class RemoteLibTest(unittest.TestCase):
                 self.assertEqual(res.returncode, 0, res.stderr)
                 self.assertFalse(pgid_file.exists())
 
+            # 2b) _kill_remote_pgid(only_if_active=True): skips test-server stop when pgid file is absent.
+            per_run_rel = f"{remote.ACTIVE_PGID_REL}.deadbeef"
+            with mock.patch("subprocess.run") as m_sub:
+                remote._kill_remote_pgid(real_spec, pgid_rel=per_run_rel, only_if_active=True)
+            only_active_cmd = m_sub.call_args[0][0][-1]
+            self.assertIn(per_run_rel, only_active_cmd)
+            res_inactive = subprocess.run(["bash", "-c", only_active_cmd], capture_output=True, text=True)
+            self.assertEqual(res_inactive.returncode, 0, res_inactive.stderr)
+
+            # 2c) stop(): does not block on REMOTE_LOCK_REL so stuck servers can always be stopped.
+            with mock.patch.object(remote, "get_remote", return_value=real_spec), \
+                 mock.patch.object(remote, "_remote_lock", side_effect=lambda _: mock.MagicMock()), \
+                 mock.patch.object(remote, "run") as m_run:
+                remote.stop("w")
+            stop_cmd = m_run.call_args[0][0][-1]
+            self.assertIn("tools/wlb server stop --test", stop_cmd)
+            self.assertNotIn("flock", stop_cmd)
+
             # 3) status() probe: matches symlinked repo process, ignores sibling-prefix & non-exec $PPID.
             with mock.patch.object(remote, "get_remote", return_value=real_spec), \
                  mock.patch.object(remote, "compute_local_stamp", return_value="a:b"), \
@@ -361,7 +390,7 @@ class RemoteLibTest(unittest.TestCase):
         spec = remote.RemoteSpec(name="worker1", ssh="wlb@192.0.2.10", repo="~/wow-llm-bots")
         events: list[str] = []
 
-        @mock.patch.object(remote, "_kill_remote_pgid", side_effect=lambda _: events.append("kill_pgid"))
+        @mock.patch.object(remote, "_kill_remote_pgid", side_effect=lambda *a, **kw: events.append("kill_pgid"))
         def _go(_m_kill):
             class _Lock:
                 def __enter__(self):
@@ -548,6 +577,31 @@ class ServerRemoteBootstrapTest(unittest.TestCase):
                  mock.patch.object(server, "VAR", var), \
                  mock.patch.object(server, "output", side_effect=Failed("not a git repo")):
                 self.assertEqual(server._golden_key(), "aaa111 bbb222")
+
+    def test_partial_nonempty_datadir_refuses_init_and_drops_tcp_root_users(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            var = root / "var"
+            (var / "mysql-data").mkdir(parents=True)
+            (var / "mysql-data" / "stray.ibd").write_text("partial\n")
+            with mock.patch.object(server, "VAR", var):
+                with self.assertRaisesRegex(Failed, r"non-empty"):
+                    server._ensure_local_db_initialized(allow_init=True)
+
+        sql_calls: list[str] = []
+        with mock.patch.object(server, "_db_password", return_value="pw123"), \
+             mock.patch.object(server, "_sql", side_effect=sql_calls.append):
+            server._ensure_acore_users()
+        self.assertIn("DROP USER IF EXISTS 'root'@'127.0.0.1'", sql_calls)
+        self.assertIn("DROP USER IF EXISTS 'root'@'::1'", sql_calls)
+        self.assertIn("DROP USER IF EXISTS 'root'@'%'", sql_calls)
+        self.assertTrue(any("CREATE USER IF NOT EXISTS 'acore'@'127.0.0.1'" in s for s in sql_calls))
+
+        # CLI `tools/wlb db start --init` parses cleanly.
+        wlb_bin = TOOLS_DIR / "wlb"
+        res = subprocess.run([str(wlb_bin), "db", "--help"], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("--init", res.stdout)
 
 
 if __name__ == "__main__":

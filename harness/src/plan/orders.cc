@@ -110,10 +110,11 @@ bool IsNonGameNoteHeading(std::string_view s) {
       return true;
     }
   }
-  // Reject non-game names with digits attached to letters/ranges (e.g.
-  // "Kinetic Bomb1-4").
-  for (size_t i = 0; i < s.size(); ++i) {
-    if (base::IsAsciiDigit(s[i])) {
+  // Reject non-game names with digits directly attached to a preceding letter
+  // (e.g. "Kinetic Bomb1-4"), while preserving hyphenated/spaced real names
+  // like "VX-001" or "XT-002 Deconstructor".
+  for (size_t i = 1; i < s.size(); ++i) {
+    if (base::IsAsciiDigit(s[i]) && base::IsAsciiAlpha(s[i - 1])) {
       return true;
     }
   }

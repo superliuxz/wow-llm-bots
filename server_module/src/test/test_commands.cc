@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <list>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "AiObjectContext.h"
@@ -26,6 +27,7 @@
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
 #include "ObjectMgr.h"
+#include "Optional.h"
 #include "Pet.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
@@ -620,8 +622,14 @@ class LlmBrainTestCommandScript : public CommandScript {
     if (!player) {
       return false;
     }
+    const ObjectGuid guid = player->GetGUID();
+    if (!RandomPlayerbotMgr::instance().GetPlayerBot(guid)) {
+      handler->SendErrorMessage("{} is not a random playerbot",
+                                player->GetName());
+      return false;
+    }
     const std::string name = player->GetName();
-    RandomPlayerbotMgr::instance().LogoutPlayerBot(player->GetGUID());
+    RandomPlayerbotMgr::instance().LogoutPlayerBot(guid);
     handler->PSendSysMessage("llmtest: logged out {}{}", name,
                              FormatToken(token));
     return true;

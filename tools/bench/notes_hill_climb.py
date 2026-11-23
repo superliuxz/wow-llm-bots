@@ -15,7 +15,9 @@ import argparse
 import collections
 import dataclasses
 import datetime
+import hashlib
 import json
+import math
 import pathlib
 import re
 import statistics
@@ -264,12 +266,70 @@ def score_from_boss_result(boss_res: dict[str, Any], arm: str = "llm") -> Compet
     )
 
 
+def _sha256_file(path: pathlib.Path) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+def _code_provenance() -> dict[str, Any]:
+    """Records exact script hashes and git HEAD in the ledger for reproducibility."""
+    git_head = ""
+    git_dirty: bool | None = None
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=False
+        )
+        if res.returncode == 0:
+            git_head = res.stdout.strip()
+        st = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True, check=False
+        )
+        if st.returncode == 0:
+            git_dirty = bool(st.stdout.strip())
+    except OSError:
+        pass
+    return {
+        "notes_hill_climb_sha256": _sha256_file(ROOT / "tools" / "bench" / "notes_hill_climb.py"),
+        "bench_bosses_sha256": _sha256_file(ROOT / "tools" / "bench" / "bench_bosses.py"),
+        "git_head": git_head,
+        "git_dirty": git_dirty,
+    }
+
+
+def _fisher_one_sided_greater(cand_k: int, cand_n: int, inc_k: int, inc_n: int) -> float:
+    """Exact one-sided Fisher p-value for H1: candidate kill rate > incumbent kill rate."""
+    if cand_n <= 0 or inc_n <= 0:
+        return 1.0
+    total_n = cand_n + inc_n
+    total_k = cand_k + inc_k
+    denom = math.comb(total_n, cand_n)
+    if denom == 0:
+        return 1.0
+    hi = min(cand_n, total_k)
+    p = 0.0
+    for x in range(max(cand_k, 0), hi + 1):
+        rem = total_k - x
+        if 0 <= rem <= inc_n:
+            p += math.comb(total_k, x) * math.comb(total_n - total_k, cand_n - x) / denom
+    return min(1.0, p)
+
+
 def is_competence_improvement(
-    incumbent: CompetenceScore, candidate: CompetenceScore
+    incumbent: CompetenceScore,
+    candidate: CompetenceScore,
+    *,
+    expected_runs: int | None = None,
 ) -> tuple[bool, str]:
-    """Mechanical competence gate (kills, deaths, damage taken — never human-likeness)."""
+    """Mechanical competence gate (kills and deaths on fixed n; never raw damage taken)."""
     if candidate.runs <= 0:
         return False, "candidate produced 0 valid runs"
+    if expected_runs is not None and candidate.runs < expected_runs:
+        return (
+            False,
+            f"incomplete runs ({candidate.runs}/{expected_runs} valid)",
+        )
     inc_rate = incumbent.kills / max(1, incumbent.runs)
     cand_rate = candidate.kills / candidate.runs
     if cand_rate < inc_rate - 1e-9:
@@ -291,6 +351,7 @@ def is_competence_improvement(
             f"{incumbent.kills}/{incumbent.runs})",
         )
     # Equal kill rate: guard against DPS collapse (>10% drop) and death increase.
+    # Never reward lower total damage taken (wiping faster takes less total damage).
     if incumbent.median_dps > 0 and candidate.median_dps < incumbent.median_dps * 0.90:
         return (
             False,
@@ -306,17 +367,7 @@ def is_competence_improvement(
             True,
             f"deaths decreased ({candidate.median_deaths:.1f} < {incumbent.median_deaths:.1f})",
         )
-    if (
-        incumbent.median_damage_taken > 0
-        and candidate.median_damage_taken > 0
-        and candidate.median_damage_taken <= incumbent.median_damage_taken * 0.95
-    ):
-        return (
-            True,
-            f"damage taken decreased >=5% ({candidate.median_damage_taken:.0f} vs "
-            f"{incumbent.median_damage_taken:.0f})",
-        )
-    return False, "no measurable improvement in kills, deaths, or damage taken"
+    return False, "no measurable improvement in kills or deaths"
 
 
 def extract_standing_orders(notes_md: str) -> list[str]:
@@ -434,11 +485,17 @@ def validate_standing_orders(notes_md: str) -> tuple[bool, list[str]]:
             continue
         if cond_err := _validate_when(cond):
             errors.append(f"{cond_err} in {order!r}")
+        if rhs.endswith(", then") or ", then," in rhs:
+            errors.append(f"dangling ', then' in {order!r}")
+            continue
         steps = rhs.split(", then ")
         if not (1 <= len(steps) <= 3):
             errors.append(f"order must have 1..3 steps (got {len(steps)}): {order!r}")
             continue
         for step in steps:
+            if not step or ", then" in step:
+                errors.append(f"malformed step {step!r} in {order!r}")
+                continue
             if act_err := _validate_act(step):
                 errors.append(f"{act_err} in {order!r}")
     return (len(errors) == 0), errors
@@ -646,8 +703,11 @@ def run_notes_hill_climb(
     initial_notes: str,
     out_dir: pathlib.Path,
     rounds: int = 3,
-    runs_per_eval: int = 3,
-    confirm_runs: int = 0,
+    runs_per_eval: int = 8,
+    confirm_runs: int = 8,
+    alpha: float = 0.05,
+    held_out_boss: str = "",
+    held_out_runs: int = 4,
     parallel: int = 2,
     bench_fn: Callable[
         [str, pathlib.Path, int, int, pathlib.Path, pathlib.Path], dict[str, Any]
@@ -656,7 +716,19 @@ def run_notes_hill_climb(
     propose_fn: Callable[[str, str, str, list[str]], str] | None = None,
     llm_url: str = "http://127.0.0.1:8090/v1/chat/completions",
 ) -> dict[str, Any]:
-    """Runs the C2 competence hill-climb loop on `notes.md` for one boss."""
+    """Runs the C2 competence hill-climb loop on `notes.md` for one boss.
+
+    Requires confirmation runs (`confirm_runs >= 1`) and a Bonferroni-corrected
+    one-sided Fisher test on pooled candidate + confirmation trials vs incumbent
+    to control the false-positive keep rate across rounds.
+    """
+    if runs_per_eval < 1:
+        raise ValueError("runs_per_eval must be >= 1")
+    if confirm_runs < 1:
+        raise ValueError("confirm_runs must be >= 1 to guard against binomial noise")
+    if not (0.0 < alpha <= 1.0):
+        raise ValueError("alpha must be in (0, 1]")
+
     out_dir = out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     best_notes_path = out_dir / "best_notes.md"
@@ -675,8 +747,16 @@ def run_notes_hill_climb(
     best_score = score_from_boss_result(best_res, arm="llm")
     boss_name = best_res.get("boss", boss_key)
 
+    held_out_base_score: CompetenceScore | None = None
+    if held_out_boss and held_out_runs > 0:
+        ho_json = out_dir / "round_0_held_out.json"
+        ho_traces = out_dir / "round_0_held_out_traces"
+        ho_res = bench(held_out_boss, best_notes_path, held_out_runs, parallel, ho_json, ho_traces)
+        held_out_base_score = score_from_boss_result(ho_res, arm="llm")
+
     rejected_history: list[str] = []
     history: list[dict[str, Any]] = []
+    per_round_alpha = alpha / max(1, rounds)
 
     def log_entry(entry: dict[str, Any]) -> None:
         entry["timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -684,7 +764,26 @@ def run_notes_hill_climb(
         with ledger_path.open("a") as fh:
             fh.write(json.dumps(entry) + "\n")
 
-    log_entry({"round": 0, "status": "baseline", "score": best_score.to_dict()})
+    baseline_entry: dict[str, Any] = {
+        "round": 0,
+        "status": "baseline",
+        "score": best_score.to_dict(),
+        "flags": {
+            "boss_key": boss_key,
+            "rounds": rounds,
+            "runs_per_eval": runs_per_eval,
+            "confirm_runs": confirm_runs,
+            "alpha": alpha,
+            "per_round_alpha": per_round_alpha,
+            "held_out_boss": held_out_boss,
+            "held_out_runs": held_out_runs,
+            "parallel": parallel,
+        },
+        "code_provenance": _code_provenance(),
+    }
+    if held_out_base_score is not None:
+        baseline_entry["held_out_score"] = held_out_base_score.to_dict()
+    log_entry(baseline_entry)
 
     for r in range(1, rounds + 1):
         timeline = summarize_fight_timeline(best_res, best_trace_dir, arm="llm")
@@ -712,28 +811,89 @@ def run_notes_hill_climb(
         cand_trace_dir = out_dir / f"round_{r}_traces"
         cand_res = bench(boss_key, cand_path, runs_per_eval, parallel, cand_json, cand_trace_dir)
         cand_score = score_from_boss_result(cand_res, arm="llm")
-        keep, reason = is_competence_improvement(best_score, cand_score)
+        keep, reason = is_competence_improvement(
+            best_score, cand_score, expected_runs=runs_per_eval
+        )
 
-        # Optional confirmation re-run guards against binomial noise on small n.
+        # Mandatory confirmation re-run + exact one-sided Fisher test on pooled
+        # candidate trials vs incumbent to control the family-wise false-keep rate.
         logged_score = cand_score
         initial_score_for_log: CompetenceScore | None = None
-        if keep and confirm_runs > 0:
+        fisher_p: float | None = None
+        held_out_cand_score: CompetenceScore | None = None
+        if keep:
             conf_json = out_dir / f"round_{r}_confirm.json"
             conf_trace_dir = out_dir / f"round_{r}_confirm_traces"
             conf_res = bench(
                 boss_key, cand_path, confirm_runs, parallel, conf_json, conf_trace_dir
             )
             conf_score = score_from_boss_result(conf_res, arm="llm")
-            keep, conf_reason = is_competence_improvement(best_score, conf_score)
+            conf_ok, conf_reason = is_competence_improvement(
+                best_score, conf_score, expected_runs=confirm_runs
+            )
             initial_score_for_log = cand_score
             logged_score = conf_score
+            if not conf_ok:
+                keep = False
+                reason = f"failed confirmation ({conf_reason})"
+            else:
+                pooled_kills = cand_score.kills + conf_score.kills
+                pooled_runs = cand_score.runs + conf_score.runs
+                inc_perfect = best_score.runs > 0 and best_score.kills == best_score.runs
+                cand_perfect = pooled_runs > 0 and pooled_kills == pooled_runs
+                if inc_perfect and cand_perfect:
+                    reason = f"confirmed deaths improvement ({conf_reason})"
+                else:
+                    fisher_p = _fisher_one_sided_greater(
+                        pooled_kills, pooled_runs, best_score.kills, best_score.runs
+                    )
+                    if fisher_p <= per_round_alpha:
+                        reason = (
+                            f"confirmed ({conf_reason}; pooled {pooled_kills}/{pooled_runs} vs "
+                            f"{best_score.kills}/{best_score.runs}, p={fisher_p:.4f} <= {per_round_alpha:.4f})"
+                        )
+                    else:
+                        keep = False
+                        reason = (
+                            f"not statistically significant (pooled {pooled_kills}/{pooled_runs} vs "
+                            f"{best_score.kills}/{best_score.runs}, p={fisher_p:.4f} > {per_round_alpha:.4f})"
+                        )
+
+            if keep and held_out_boss and held_out_runs > 0 and held_out_base_score is not None:
+                ho_json = out_dir / f"round_{r}_held_out.json"
+                ho_traces = out_dir / f"round_{r}_held_out_traces"
+                ho_res = bench(
+                    held_out_boss, cand_path, held_out_runs, parallel, ho_json, ho_traces
+                )
+                held_out_cand_score = score_from_boss_result(ho_res, arm="llm")
+                if held_out_cand_score.runs < held_out_runs:
+                    keep = False
+                    reason = (
+                        f"held-out incomplete ({held_out_cand_score.runs}/{held_out_runs})"
+                    )
+                else:
+                    ho_base_rate = held_out_base_score.kills / max(1, held_out_base_score.runs)
+                    ho_cand_rate = held_out_cand_score.kills / held_out_cand_score.runs
+                    if ho_cand_rate < ho_base_rate - 1e-9:
+                        keep = False
+                        reason = (
+                            f"held-out regression on {held_out_boss} "
+                            f"({held_out_cand_score.kills}/{held_out_cand_score.runs} < "
+                            f"{held_out_base_score.kills}/{held_out_base_score.runs})"
+                        )
+
             if keep:
                 cand_res = conf_res
-                cand_score = conf_score
+                cand_score = CompetenceScore(
+                    kills=cand_score.kills + conf_score.kills,
+                    runs=cand_score.runs + conf_score.runs,
+                    median_dps=conf_score.median_dps,
+                    median_deaths=conf_score.median_deaths,
+                    median_damage_taken=conf_score.median_damage_taken,
+                )
                 cand_trace_dir = conf_trace_dir
-                reason = f"confirmed ({conf_reason})"
-            else:
-                reason = f"failed confirmation ({conf_reason})"
+                if held_out_cand_score is not None:
+                    held_out_base_score = held_out_cand_score
 
         if keep:
             best_notes = candidate_notes
@@ -749,6 +909,10 @@ def run_notes_hill_climb(
             }
             if initial_score_for_log is not None:
                 entry["initial_score"] = initial_score_for_log.to_dict()
+            if fisher_p is not None:
+                entry["fisher_p"] = round(fisher_p, 6)
+            if held_out_cand_score is not None:
+                entry["held_out_score"] = held_out_cand_score.to_dict()
             log_entry(entry)
         else:
             rejected_history.append(f"round {r} [{orders_preview}]: {reason}")
@@ -760,6 +924,10 @@ def run_notes_hill_climb(
             }
             if initial_score_for_log is not None:
                 entry["initial_score"] = initial_score_for_log.to_dict()
+            if fisher_p is not None:
+                entry["fisher_p"] = round(fisher_p, 6)
+            if held_out_cand_score is not None:
+                entry["held_out_score"] = held_out_cand_score.to_dict()
             log_entry(entry)
 
     return {
@@ -779,13 +947,26 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="C2: self-revising notes.md hill-climb loop")
     ap.add_argument("--boss", required=True, choices=sorted(bench_bosses.BOSSES))
     ap.add_argument("--rounds", type=int, default=3)
-    ap.add_argument("--runs", type=int, default=3, help="Short bench runs per candidate")
+    ap.add_argument("--runs", type=int, default=8, help="Fixed-n bench runs per candidate stage 1")
     ap.add_argument(
         "--confirm-runs",
         type=int,
-        default=3,
-        help="Confirmation bench runs before keeping an improvement (0 disables)",
+        default=8,
+        help="Mandatory confirmation bench runs (>= 1) before keeping an improvement",
     )
+    ap.add_argument(
+        "--alpha",
+        type=float,
+        default=0.05,
+        help="Family-wise false-positive rate across rounds (Bonferroni-corrected)",
+    )
+    ap.add_argument(
+        "--held-out-boss",
+        default="",
+        choices=["", *sorted(bench_bosses.BOSSES)],
+        help="Optional held-out boss to guard against overfitting",
+    )
+    ap.add_argument("--held-out-runs", type=int, default=4, help="Fixed-n runs on held-out boss")
     ap.add_argument("--parallel", type=int, default=2)
     ap.add_argument("--notes-file", default="", help="Starting notes.md (default: BOSSES[boss]['notes_md'])")
     ap.add_argument("--out-dir", default="", help="Output dir (default: var/notes_hill_climb/<boss>)")
@@ -807,6 +988,9 @@ def main() -> int:
             rounds=args.rounds,
             runs_per_eval=args.runs,
             confirm_runs=args.confirm_runs,
+            alpha=args.alpha,
+            held_out_boss=args.held_out_boss,
+            held_out_runs=args.held_out_runs,
             parallel=args.parallel,
             llm_url=args.llm_url,
         )

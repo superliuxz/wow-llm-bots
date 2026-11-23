@@ -23,6 +23,7 @@
 #include "Log.h"
 #include "Map.h"
 #include "ObjectAccessor.h"
+#include "Opcodes.h"
 #include "Pet.h"
 #include "Player.h"
 #include "Playerbots.h"
@@ -34,7 +35,9 @@
 #include "UnitDefines.h"
 #include "UpdateFields.h"
 #include "World.h"
+#include "WorldPacket.h"
 #include "WorldScript.h"
+#include "WorldSession.h"
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -352,7 +355,8 @@ class LlmBrainWorldScript : public WorldScript {
         continue;  // Offline (or not in the world yet).
       }
       StepActiveOption(bot, i, config_.bots[i], now);
-      CheckPendingGroupInvite(bot, i, config_.bots[i]);
+      CheckPendingGroupInvite(bot, i, config_.bots[i], now);
+      DrainPendingChat(bot, i, config_.bots[i], now);
       const SnapshotSchedule::Flags flags = CurrentFlags(bot, i);
       if (schedule_->IsDue(i, now, flags)) {
         SendSnapshot(i, config_.bots[i], bot);
@@ -591,18 +595,39 @@ class LlmBrainWorldScript : public WorldScript {
 
   void CheckPendingGroupInvite(Player* bot,
                                size_t index,
-                               const std::string& name) {
+                               const std::string& name,
+                               base::TimeTicks now) {
     Group* invite = bot->GetGroupInvite();
     BotState& state = bots_[index];
     if (!invite) {
       state.seen_group_invite_leader.clear();
+      state.pending_invite_since = base::TimeTicks();
       return;
     }
     const std::string leader = invite->GetLeaderName();
-    if (leader.empty() || leader == state.seen_group_invite_leader) {
+    if (leader.empty()) {
+      return;
+    }
+    if (leader == state.seen_group_invite_leader) {
+      // Match the WoW client's 60 s group-invite timeout so an unanswered
+      // invite never stays pending forever and blocks other invites.
+      static constexpr base::TimeDelta kInviteTimeout = base::Seconds(60);
+      if (!state.pending_invite_since.is_null() &&
+          now - state.pending_invite_since >= kInviteTimeout) {
+        if (WorldSession* session = bot->GetSession()) {
+          WorldPacket pkt(CMSG_GROUP_DECLINE, 0);
+          session->HandleGroupDeclineOpcode(pkt);
+          LOG_INFO("module",
+                   "mod-llm-brain: {} auto-declined stale group invite from {}",
+                   name, leader);
+        }
+        state.seen_group_invite_leader.clear();
+        state.pending_invite_since = base::TimeTicks();
+      }
       return;
     }
     state.seen_group_invite_leader = leader;
+    state.pending_invite_since = now;
     LOG_INFO("module", "mod-llm-brain: {} received group invite from {}", name,
              leader);
     wlb::snapshot::Event payload;
@@ -815,28 +840,25 @@ class LlmBrainWorldScript : public WorldScript {
     }
   }
 
-  void OnSay(size_t bot_index,
-             const std::string& name,
-             Player* bot,
-             uint32_t /*command_id*/,
-             const wlb::snapshot::Command::Say& say) {
-    // Rate-limit outbound bot chat (max 5 lines per 10 s and min 1 s spacing)
-    // to prevent spam loops while matching human chat cadence.
-    const base::TimeTicks now = base::TimeTicks::Now();
+  bool CanSendChatNow(size_t bot_index, base::TimeTicks now) {
     std::deque<base::TimeTicks>& sent_times = bots_[bot_index].recent_chat_sent;
     while (!sent_times.empty() &&
            now - sent_times.front() > base::Seconds(10)) {
       sent_times.pop_front();
     }
-    std::string error;
-    if (!sent_times.empty() && (sent_times.size() >= 5 ||
-                                now - sent_times.back() < base::Seconds(1))) {
-      error = "chat rate limited";
-    } else {
-      error = Speak(bot, say);
-      if (error.empty()) {
-        sent_times.push_back(now);
-      }
+    return sent_times.empty() || (sent_times.size() < 5 &&
+                                  now - sent_times.back() >= base::Seconds(1));
+  }
+
+  void SendChatNow(size_t bot_index,
+                   const std::string& name,
+                   Player* bot,
+                   uint32_t command_id,
+                   const wlb::snapshot::Command::Say& say,
+                   base::TimeTicks now) {
+    const std::string error = Speak(bot, say);
+    if (error.empty()) {
+      bots_[bot_index].recent_chat_sent.push_back(now);
     }
     LOG_INFO("module", "mod-llm-brain: {} says ({}{}{}, len={}): {}", name,
              wlb::snapshot::EnumName(say.channel), say.to.empty() ? "" : " to ",
@@ -854,13 +876,56 @@ class LlmBrainWorldScript : public WorldScript {
       trace_writer_->WriteChat(tc);
     }
     if (!error.empty()) {
-      // Chat error (command_id = 0): recorded in recent_events without
-      // cancelling the active step or building an extra snapshot.
       wlb::snapshot::Event payload;
       wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
       failed.text = error;
+      failed.command_id = command_id;
       SendImmediateEvent(bot_index, name, std::move(payload));
     }
+  }
+
+  void DrainPendingChat(Player* bot,
+                        size_t bot_index,
+                        const std::string& name,
+                        base::TimeTicks now) {
+    BotState& state = bots_[bot_index];
+    if (state.pending_chats.empty() || !CanSendChatNow(bot_index, now)) {
+      return;
+    }
+    BotState::PendingChat next = std::move(state.pending_chats.front());
+    state.pending_chats.pop_front();
+    SendChatNow(bot_index, name, bot, next.command_id, next.say, now);
+  }
+
+  void OnSay(size_t bot_index,
+             const std::string& name,
+             Player* bot,
+             uint32_t command_id,
+             const wlb::snapshot::Command::Say& say) {
+    // Rate-limit outbound bot chat (max 5 lines per 10 s and min 1 s spacing)
+    // to prevent spam loops while matching human chat cadence. Queue up to 4
+    // messages so a plan with both `say:` and `tell:` spaces them rather than
+    // dropping the second line.
+    const base::TimeTicks now = base::TimeTicks::Now();
+    BotState& state = bots_[bot_index];
+    if (state.pending_chats.empty() && CanSendChatNow(bot_index, now)) {
+      SendChatNow(bot_index, name, bot, command_id, say, now);
+      return;
+    }
+    static constexpr size_t kMaxPendingChats = 4;
+    if (state.pending_chats.size() < kMaxPendingChats) {
+      state.pending_chats.push_back({command_id, say});
+      return;
+    }
+    LOG_INFO("module",
+             "mod-llm-brain: {} says ({}{}{}, len={}): chat rate limited", name,
+             wlb::snapshot::EnumName(say.channel), say.to.empty() ? "" : " to ",
+             say.to, say.text.size());
+    wlb::snapshot::Event payload;
+    wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
+    failed.text = "chat rate limited";
+    failed.command_id = command_id;
+    SendImmediateEvent(bot_index, name, std::move(payload));
   }
 
   // open / close / hover (docs/specs/options.md): the next snapshot
@@ -1471,8 +1536,14 @@ class LlmBrainWorldScript : public WorldScript {
     std::deque<RecentChatter> recent_chatters;
     // Timestamps of recent outbound bot chat messages (for rate limiting).
     std::deque<base::TimeTicks> recent_chat_sent;
-    // Leader name of the currently surfaced pending group invite.
+    struct PendingChat {
+      uint32_t command_id = 0;
+      wlb::snapshot::Command::Say say;
+    };
+    std::deque<PendingChat> pending_chats;
+    // Leader name and arrival time of the currently surfaced pending invite.
     std::string seen_group_invite_leader;
+    base::TimeTicks pending_invite_since;
   };
   std::vector<BotState> bots_;
   // A wrong-version command was logged on this connection.

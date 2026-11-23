@@ -394,16 +394,16 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       const std::string assist_name = caller->name + "'s target";
       const std::string text = "Attack " + std::string(role_prefix) +
                                assist_name + " (" + best->name + ")";
-      targets.push_back({OptionTarget::Kind::kAttack, best->guid, assist_name});
+      targets.push_back({OptionTarget::Kind::kAttack, best->guid, best->name});
       pb::Option& option = snapshot->options.emplace_back();
       option.text = text;
       // Distinct synthetic guid so PlanRunner::MatchOptionInScreen matches the
       // assist option rather than colliding with the regular Attack <mob> row;
       // OptionTarget::guid above still carries the real unit guid for
-      // execution.
+      // execution, and option.name carries the mob name so `expect:` matches.
       option.guid = "assist:" + best->guid;
       option.kind = pb::Option::ATTACK;
-      option.name = assist_name;
+      option.name = best->name;
     }
   }
 

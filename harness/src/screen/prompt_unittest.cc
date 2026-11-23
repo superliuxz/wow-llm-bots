@@ -9,6 +9,7 @@
 #include "llm/llm_client.h"
 #include "plan/plan.h"
 #include "screen/screen_renderer.h"
+#include "snapshot/snapshot.h"
 #include "test/gbnf_check.h"
 
 namespace harness {
@@ -140,6 +141,42 @@ TEST(PromptTest, TokenCapDropsRememberedPanelsBeforeScreenAndPreservesAlso) {
   EXPECT_NE(request.user.find("Your screen now:"), std::string::npos);
   EXPECT_NE(request.user.find("also:\n  2. Keep doing what I'm doing"),
             std::string::npos);
+}
+
+TEST(PromptTest, SelectRelevantNotesPicksActiveBossAndNeverCutsMidOrder) {
+  std::string icc = "# Icecrown Citadel (ICC)\n\n";
+  for (int i = 0; i < 10; ++i) {
+    icc += "## Boss " + std::to_string(i) + "\n\n" + std::string(220, 'A') +
+           "\n\n```\nFire cast -> out of it\n```\n\n";
+  }
+  icc +=
+      "## Sindragosa\n\n"
+      "- **Ice Tomb**: hold at 50%.\n\n"
+      "```\n"
+      "Ice Tomb appears & Ice Tomb hp>50 -> target nearest Ice Tomb\n"
+      "Blistering Cold cast -> out of it\n"
+      "```\n";
+  ASSERT_GT(icc.size(), 2000u);
+
+  // When Sindragosa is nearby, only Sindragosa's section (plus title) is
+  // loaded — well under 2,000 B, never truncated.
+  wlb::snapshot::Snapshot snap;
+  wlb::snapshot::Unit boss;
+  boss.name = "Sindragosa";
+  snap.base.nearby.units.push_back(boss);
+  const std::string selected = SelectRelevantNotes(icc, snap);
+  EXPECT_LE(selected.size(), 2000u);
+  EXPECT_NE(selected.find("## Sindragosa"), std::string::npos);
+  EXPECT_NE(selected.find("Blistering Cold cast -> out of it"),
+            std::string::npos);
+  EXPECT_EQ(selected.find("## Boss 0"), std::string::npos);
+
+  // When no boss matches yet, truncation stops on a section boundary (never
+  // mid-order).
+  wlb::snapshot::Snapshot empty;
+  const std::string capped = SelectRelevantNotes(icc, empty);
+  EXPECT_LE(capped.size(), 2000u);
+  EXPECT_EQ(capped.find("[truncated]"), std::string::npos);
 }
 
 }  // namespace

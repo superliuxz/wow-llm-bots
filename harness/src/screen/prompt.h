@@ -13,10 +13,15 @@
 #define HARNESS_SCREEN_PROMPT_H_
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "llm/llm_client.h"
 #include "screen/screen_renderer.h"
+
+namespace wlb::snapshot {
+struct Snapshot;
+}  // namespace wlb::snapshot
 
 namespace harness {
 
@@ -45,6 +50,13 @@ struct PromptInput {
   int slot = -1;  // llama-server slot, or -1
   float temperature = 0.7f;
 };
+
+// Selects the current boss's `## <Boss>` section(s) from a multi-boss notes
+// file based on nearby/targeted units in `snapshot`, or caps at a complete
+// section/line boundary within the notes budget so large raid files (ICC,
+// Ulduar) are never cut mid-order and stay in sync with `CollectOrderNames`.
+std::string SelectRelevantNotes(std::string_view full_notes,
+                                const wlb::snapshot::Snapshot& snapshot);
 
 // The request that asks for a plan for this screen. The plan grammar allows
 // only the screen's own option numbers.

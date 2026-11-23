@@ -566,19 +566,28 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
         if (dist_to_trigger <= 60.0f) {
           if (std::optional<TriggerHazardInfo> hz =
                   InspectTriggerHazard(trigger)) {
+            const float radius = hz->radius_yd > 0.0f ? hz->radius_yd : 8.0f;
+            const bool inside = dist_to_trigger <= radius;
+            const std::optional<bool> in_los = los_.Get(guid.GetRawValue());
+            if (!inside && dist_to_trigger > options_.nameplate_range_yd &&
+                !in_los.value_or(false)) {
+              ++stats.hidden;
+              continue;
+            }
             pb::Area& out = nearby->areas.emplace_back();
             out.guid = "trigger:" + GuidString(guid.GetRawValue());
             out.name = hz->name;
             pb::Spell& sp = out.spell.emplace();
             sp.id = hz->spell_id;
             sp.name = hz->name;
-            out.radius_yd = hz->radius_yd > 0.0f ? hz->radius_yd : 8.0f;
-            out.inside_me = dist_to_trigger <= out.radius_yd;
-            out.hostile = !bot->IsFriendlyTo(trigger);
+            out.radius_yd = radius;
+            out.inside_me = inside;
+            out.hostile = trigger->IsHostileTo(bot);
             out.remaining_s = hz->remaining_s;
             out.lands_in_s = hz->lands_in_s;
             pb::Relative& rel = out.rel.emplace();
             FillRelative(bot, trigger, &rel);
+            SetInLos(in_los, &rel);
             ++stats.areas;
           }
         }

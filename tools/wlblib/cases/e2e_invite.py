@@ -145,27 +145,45 @@ def run(stack):
     expect(grouped, "Telda did not join Loada's party after brain accepted invite")
 
     # Verify bot logout destroys the Engine + BlockAutoInviteListener cleanly without
-    # crashing worldserver (regression test for static-listener double-free on logout).
-    log_path = TEST.logs / "worldserver.out"
-    log_before = log_path.read_text(errors="replace") if log_path.exists() else ""
-    logins_before = log_before.count("Bot Telda logged in")
+    # crashing worldserver, and that BotManager logs Telda back in and delivers fresh
+    # snapshots after relogin (regression test for static-listener double-free on logout).
     server.console("llmtest logout Telda", inst=TEST)
-    # Wait for logout confirmation and BotManager to log Telda back in.
-    relogin_deadline = time.time() + 25.0
-    saw_logout = False
-    saw_relogin = False
-    while time.time() < relogin_deadline:
+    # Wait for Telda to actually go offline in the characters table.
+    offline_deadline = time.time() + 15.0
+    saw_offline = False
+    while time.time() < offline_deadline:
         expect(running_pid("worldserver", TEST) is not None,
                "worldserver crashed after logging out Telda!")
-        text = log_path.read_text(errors="replace") if log_path.exists() else ""
-        if "llmtest: logged out Telda" in text:
-            saw_logout = True
-        if saw_logout and text.count("Bot Telda logged in") > logins_before:
-            saw_relogin = True
+        if "Telda" not in server.online_characters(TEST):
+            saw_offline = True
             break
-        time.sleep(0.5)
-    expect(saw_logout, "llmtest logout Telda did not execute")
-    expect(saw_relogin, "Telda did not log back in after logout")
+        time.sleep(0.25)
+    expect(saw_offline, "Telda never went offline after `llmtest logout Telda`")
+    # Wait for BotManager to log Telda back in.
+    server.wait_online("Telda", timeout_s=30, inst=TEST)
     expect(running_pid("worldserver", TEST) is not None,
            "worldserver crashed after Telda logged back in!")
+    # Reconnect and confirm Telda produces a fresh snapshot post-relogin.
+    sock2 = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock2.settimeout(0.5)
+    sock2.connect(str(TEST.run / "brain.sock"))
+    reader2 = FrameReader()
+    saw_relogin_snap = False
+    snap_deadline = time.time() + 15.0
+    try:
+        while time.time() < snap_deadline and not saw_relogin_snap:
+            try:
+                chunk = sock2.recv(1 << 20)
+            except socket.timeout:
+                continue
+            if not chunk:
+                break
+            for payload in reader2.feed(chunk):
+                msg = wire_py.decode_module_message(payload)
+                if msg and msg.get("snapshot", {}).get("bot") == "Telda":
+                    saw_relogin_snap = True
+                    break
+    finally:
+        sock2.close()
+    expect(saw_relogin_snap, "Telda did not emit a fresh snapshot after relogin")
     return "Telda held invite >= 2.0 s, joined Loada's party, and survived logout/relogin without crash"

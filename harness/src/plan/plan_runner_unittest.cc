@@ -292,7 +292,7 @@ TEST(PlanRunnerTest, AssistGuidTracksUnitAndItemGuidWaitsForDoneCommand) {
                   "Phoenix Egg");
   AddModuleOption(&s1, pb::Option::ATTACK,
                   "Attack main assist Loadc's target (Phoenix Egg)",
-                  "assist:0x20", "Loadc's target");
+                  "assist:0x20", "Phoenix Egg");
   AddModuleOption(&s1, pb::Option::USE, "Use Ruby Essence", "item:37860",
                   "Ruby Essence");
   AddModuleOption(&s1, pb::Option::KEEP, "Keep doing what I'm doing");

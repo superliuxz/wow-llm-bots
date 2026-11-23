@@ -602,13 +602,10 @@ void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink) {
 void CollectUsableBagItems(Player* bot,
                            std::vector<pb::OptionFacts_Item>* out) {
   out->clear();
-  if (!bot ||
-      bot->IsNonMeleeSpellCast(false, /*skipChanneled=*/false,
-                               /*skipAutorepeat=*/true) ||
-      bot->m_mover != bot) {
+  if (!bot || bot->m_mover != bot) {
     return;
   }
-  static constexpr size_t kMaxUsableBagItems = 12;
+  static constexpr size_t kMaxUsableBagItems = 32;
   for (const BagSlotItem& entry : BagItems(bot)) {
     if (out->size() >= kMaxUsableBagItems) {
       break;
@@ -1307,8 +1304,8 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
   const uint32_t count_before = bot->GetItemCount(proto->ItemId);
   const int32_t charges_before =
       spell_slot >= 0 ? item->GetSpellCharges(spell_slot) : 0;
-  const size_t auras_before = bot->GetAppliedAuras().size();
-  const uint32_t mana_before = bot->GetPower(POWER_MANA);
+  const bool had_item_aura_before = bot->HasAura(item_spell_id);
+  const uint32_t last_potion_before = bot->GetLastPotionId();
   const bool gcd_before =
       bot->GetGlobalCooldownMgr().HasGlobalCooldown(item_spell);
   const size_t queue_before = QueuedSpellCount(bot, item_spell_id);
@@ -1340,11 +1337,13 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
   const bool cd_started = bot->HasSpellCooldown(item_spell_id);
   const bool gcd_started =
       !gcd_before && bot->GetGlobalCooldownMgr().HasGlobalCooldown(item_spell);
-  const bool aura_changed = bot->GetAppliedAuras().size() != auras_before;
-  const bool mana_changed = bot->GetPower(POWER_MANA) != mana_before;
+  const bool aura_applied =
+      !had_item_aura_before && bot->HasAura(item_spell_id);
+  const bool potion_recorded = last_potion_before != proto->ItemId &&
+                               bot->GetLastPotionId() == proto->ItemId;
   const bool vehicle_changed = bot->GetVehicle() != vehicle_before;
   if (!count_dropped && !charges_dropped && !cast_started && !queued_now &&
-      !cd_started && !gcd_started && !aura_changed && !mana_changed &&
+      !cd_started && !gcd_started && !aura_applied && !potion_recorded &&
       !vehicle_changed) {
     return {"can't use " + target.name + " now"};
   }

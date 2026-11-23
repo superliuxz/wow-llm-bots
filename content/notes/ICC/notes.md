@@ -31,11 +31,11 @@ Blood Beast appears -> target nearest Blood Beast
 
 ## Rotface
 
-- **Explosion**: boss cast; follow standing order (`out of it, then back`).
+- **Unstable Ooze Explosion**: cast by Big Ooze; move out immediately and return once safe (`out of it, then back`).
 - **Vile Gas**: ground hazard; move out immediately.
 
 ```
-Explosion cast -> out of it, then back
+Unstable Ooze Explosion cast -> out of it, then back
 in Vile Gas -> out of it
 ```
 
@@ -99,22 +99,26 @@ Blistering Zombie targets me -> kite it
 
 ## Sindragosa
 
-- **Ice Tomb**: priority add; switch and burn promptly.
+- **Ice Tomb**: damage tombs down to ~50% HP and hold them for line-of-sight cover during Frost Bomb before finishing them.
 - **Blistering Cold**: boss cast; follow standing order (`out of it`).
 
 ```
-Ice Tomb appears -> target nearest Ice Tomb
+Ice Tomb appears & Ice Tomb hp>50 -> target nearest Ice Tomb
 Blistering Cold cast -> out of it
+```
+
+## The Lich King
+
+- **Quake**: boss cast; move to 40 yd from the boss to stay on the safe inner platform ring (`to 40 yd from boss`).
+
+```
+Quake cast -> to 40 yd from boss
 ```
 
 ## Icecrown Citadel
 
 - **Choking Gas Explosion**: ground hazard; move out immediately.
-- **Unstable Ooze Explosion**: boss cast; follow standing order (`out of it`).
-- **Quake**: boss cast; follow standing order (`out of it`).
 
 ```
 in Choking Gas Explosion -> out of it
-Unstable Ooze Explosion cast -> out of it
-Quake cast -> out of it
 ```

@@ -35,11 +35,26 @@ class NotesHillClimbTest(unittest.TestCase):
         keep, _ = nhc.is_competence_improvement(base, worse_kills)
         self.assertFalse(keep)
 
-        # Same kills, >=5% lower damage taken without DPS collapse -> KEEP.
+        # Same kills, lower damage taken alone does NOT buy a KEEP (would reward wiping faster).
         less_dmg = nhc.CompetenceScore(
             kills=1, runs=3, median_dps=1900.0, median_deaths=4.0, median_damage_taken=90000.0
         )
-        keep, _ = nhc.is_competence_improvement(base, less_dmg)
+        keep, _ = nhc.is_competence_improvement(base, less_dmg, expected_runs=3)
+        self.assertFalse(keep)
+
+        # Incomplete runs cannot buy a KEEP (1/1 must NOT beat 1/3).
+        incomplete = nhc.CompetenceScore(
+            kills=1, runs=1, median_dps=2200.0, median_deaths=0.0, median_damage_taken=10000.0
+        )
+        keep, reason = nhc.is_competence_improvement(base, incomplete, expected_runs=3)
+        self.assertFalse(keep)
+        self.assertIn("incomplete", reason)
+
+        # Same kills, lower deaths without DPS collapse on fixed n -> KEEP.
+        fewer_deaths = nhc.CompetenceScore(
+            kills=1, runs=3, median_dps=1950.0, median_deaths=2.0, median_damage_taken=100000.0
+        )
+        keep, _ = nhc.is_competence_improvement(base, fewer_deaths, expected_runs=3)
         self.assertTrue(keep)
 
         # Same kills, lower deaths, but >10% DPS collapse -> REJECT.
@@ -145,6 +160,7 @@ class NotesHillClimbTest(unittest.TestCase):
             "# Unvalidated prose condition\n- `boss gets angry -> wake`\n",
             "# Too many steps\n- `in Fire -> out of it, then back, then jump, then wake`\n",
             "# Missing arg\n- `in Fire -> out of`\n",
+            "# Dangling ', then'\n- `Blistering Zombie targets me -> kite it, then`\n",
         ):
             ok, errs = nhc.validate_standing_orders(bad)
             self.assertFalse(ok, f"expected failure for {bad!r}")
@@ -266,15 +282,28 @@ class NotesHillClimbTest(unittest.TestCase):
     def test_confirmation_rerun_keeps_confirmed_and_logs_conf_score_on_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = pathlib.Path(tmp) / "confirm_loop"
-            # Round 1: initial looks good (2/3), confirmation fails (0/3).
-            # Round 2: initial looks good (2/3), confirmation succeeds (3/3).
+            # confirm_runs=0 must be refused (mandatory confirmation).
+            with self.assertRaises(ValueError):
+                nhc.run_notes_hill_climb(
+                    boss_key="kaelthas",
+                    initial_notes="# Base\n",
+                    out_dir=out_dir,
+                    rounds=1,
+                    runs_per_eval=4,
+                    confirm_runs=0,
+                    bench_fn=lambda *a: {},
+                    propose_fn=lambda *a: "",
+                )
+
+            # Round 1: initial looks good (6/8), confirmation fails (1/8).
+            # Round 2: initial looks good (7/8), confirmation succeeds (8/8) -> Fisher p < 0.025 -> KEEP.
             bench_seq = iter(
                 [
-                    (1, 3.0, 2000.0),  # baseline
-                    (2, 1.0, 2100.0),  # r1 initial
-                    (0, 5.0, 1900.0),  # r1 confirm -> fail
-                    (2, 1.0, 2100.0),  # r2 initial
-                    (3, 0.0, 2200.0),  # r2 confirm -> pass
+                    (2, 3.0, 2000.0),  # baseline (2/8)
+                    (6, 1.0, 2100.0),  # r1 initial
+                    (1, 5.0, 1900.0),  # r1 confirm -> fail
+                    (7, 1.0, 2100.0),  # r2 initial
+                    (8, 0.0, 2200.0),  # r2 confirm -> pass (pooled 15/16 vs 2/8)
                 ]
             )
 
@@ -297,18 +326,25 @@ class NotesHillClimbTest(unittest.TestCase):
                 initial_notes="# Base\n",
                 out_dir=out_dir,
                 rounds=2,
-                runs_per_eval=3,
-                confirm_runs=3,
+                runs_per_eval=8,
+                confirm_runs=8,
                 bench_fn=fake_bench,
                 propose_fn=lambda bn, cn, tl, rej: next(proposals),
             )
-            self.assertEqual(res["best_score"]["kills"], 3)
+            self.assertEqual(res["best_score"]["kills"], 15)
+            self.assertEqual(res["best_score"]["runs"], 16)
             ledger = [json.loads(l) for l in (out_dir / "ledger.jsonl").read_text().splitlines()]
             self.assertEqual([e["status"] for e in ledger], ["baseline", "rejected", "kept"])
-            # Failed confirmation must log conf_score (0 kills), not initial cand_score (2 kills).
-            self.assertEqual(ledger[1]["score"]["kills"], 0)
-            self.assertEqual(ledger[1]["initial_score"]["kills"], 2)
-            self.assertEqual(ledger[2]["score"]["kills"], 3)
+            # Baseline logs flags and code provenance hashes.
+            self.assertEqual(ledger[0]["flags"]["runs_per_eval"], 8)
+            self.assertEqual(ledger[0]["flags"]["confirm_runs"], 8)
+            self.assertEqual(len(ledger[0]["code_provenance"]["notes_hill_climb_sha256"]), 64)
+            self.assertEqual(len(ledger[0]["code_provenance"]["bench_bosses_sha256"]), 64)
+            # Failed confirmation must log conf_score (1 kill), not initial cand_score (6 kills).
+            self.assertEqual(ledger[1]["score"]["kills"], 1)
+            self.assertEqual(ledger[1]["initial_score"]["kills"], 6)
+            self.assertEqual(ledger[2]["score"]["kills"], 8)
+            self.assertLessEqual(ledger[2]["fisher_p"], 0.025)
 
     def test_hill_climb_loop_keeps_improvement_and_preserves_incumbent_traces(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -326,7 +362,7 @@ class NotesHillClimbTest(unittest.TestCase):
                     seen_trace_dirs.append(trace_dir)
                     txt = notes_path.read_text()
                     if "IMPROVED" in txt:
-                        kills, deaths, dps = 2, 1.0, 2100.0
+                        kills, deaths, dps = runs, 1.0, 2100.0
                     elif "WORSE" in txt:
                         kills, deaths, dps = 0, 5.0, 1200.0
                     else:
@@ -354,24 +390,59 @@ class NotesHillClimbTest(unittest.TestCase):
                     initial_notes="# Base\n",
                     out_dir=out_dir,
                     rounds=3,
-                    runs_per_eval=3,
-                    confirm_runs=0,
+                    runs_per_eval=8,
+                    confirm_runs=8,
                     bench_fn=fake_bench,
                     propose_fn=fake_propose,
                 )
-                self.assertEqual(calls["n"], 3)
+                # 1 baseline + 1 WORSE + 1 IMPROVED stage1 + 1 IMPROVED confirm = 4 calls.
+                self.assertEqual(calls["n"], 4)
                 # Each bench call got an isolated absolute trace_dir even when out_dir is relative.
-                self.assertEqual(len(set(seen_trace_dirs)), 3)
+                self.assertEqual(len(set(seen_trace_dirs)), 4)
                 self.assertTrue(all(p.is_absolute() for p in seen_trace_dirs))
                 # Rejected history passed to round 3 includes the rejected standing order text.
                 self.assertTrue(any("in Fire -> out of it" in r for r in seen_rejected[-1]))
-                self.assertEqual(res["best_score"]["kills"], 2)
+                self.assertEqual(res["best_score"]["kills"], 16)
                 self.assertIn("IMPROVED", (out_dir / "best_notes.md").read_text())
                 ledger_lines = [json.loads(l) for l in (out_dir / "ledger.jsonl").read_text().splitlines()]
                 statuses = [e["status"] for e in ledger_lines]
                 self.assertEqual(statuses, ["baseline", "rejected_syntax", "rejected", "kept"])
             finally:
                 os.chdir(orig_cwd)
+
+    def test_held_out_boss_regression_rejects_overfit_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = pathlib.Path(tmp) / "held_out"
+
+            def fake_bench(boss_key, notes_path, runs, parallel, out_json, trace_dir):
+                txt = notes_path.read_text()
+                if boss_key == "loken":
+                    # Held-out boss regresses on OVERFIT notes.
+                    kills = 1 if "OVERFIT" in txt else 4
+                else:
+                    kills = runs if "OVERFIT" in txt else 1
+                return {
+                    "boss": boss_key,
+                    "by_arm": {"llm": {"kills": kills, "runs": runs, "median_dps": 2000.0, "median_deaths": 1.0}},
+                    "trials": [],
+                }
+
+            res = nhc.run_notes_hill_climb(
+                boss_key="kaelthas",
+                initial_notes="# Base\n",
+                out_dir=out_dir,
+                rounds=1,
+                runs_per_eval=8,
+                confirm_runs=8,
+                held_out_boss="loken",
+                held_out_runs=4,
+                bench_fn=fake_bench,
+                propose_fn=lambda *a: "# OVERFIT\n- `in Fire -> out of it`\n",
+            )
+            self.assertEqual(res["best_score"]["kills"], 1)
+            ledger = [json.loads(l) for l in (out_dir / "ledger.jsonl").read_text().splitlines()]
+            self.assertEqual(ledger[1]["status"], "rejected")
+            self.assertIn("held-out regression", ledger[1]["reason"])
 
     def test_all_content_notes_standing_orders_valid(self) -> None:
         def has_unexported_boss_aura(lhs: str) -> bool:

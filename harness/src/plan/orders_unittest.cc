@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -13,6 +15,7 @@
 
 #include "base/strings/strcat.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "grammar/orders.wlb.h"
 #include "grammar/wlb_runtime.h"
@@ -376,7 +379,9 @@ TEST(OrdersTest, CollectOrderNamesExtractsFromNotesAndSnapshot) {
       "- Phase 1: The Lich King, Defile: Black pool under target; run away "
       "immediately.\n"
       "- Sindragosa, Mystic Buffet: when above 4 stacks, use Ice Block or "
-      "Hand of Protection.";
+      "Hand of Protection.\n"
+      "- VX-001: priority add.\n"
+      "- Kinetic Bomb1-4: synthetic range label.";
 
   const std::vector<std::string> names = CollectOrderNames(snap, notes);
   auto has = [&](std::string_view want) {
@@ -391,19 +396,63 @@ TEST(OrdersTest, CollectOrderNamesExtractsFromNotesAndSnapshot) {
   EXPECT_TRUE(has("Arcane Brilliance"));
   EXPECT_TRUE(has("Power Word: Shield"));
   EXPECT_TRUE(has("Runic Mana Potion"));
-  // Dead corpses, the bot's own unit name, structural headings, and sentence
-  // stop-words stay out.
+  EXPECT_TRUE(has("VX-001"));
+  // Dead corpses, the bot's own unit name, structural headings, attached
+  // digit ranges, and sentence stop-words stay out.
   EXPECT_FALSE(has("Rimefang"));
   EXPECT_FALSE(has("Aelindra"));
   EXPECT_FALSE(has("The"));
   EXPECT_FALSE(has("Use"));
   EXPECT_FALSE(has("Phase 1"));
   EXPECT_FALSE(has("Defile: Black"));
+  EXPECT_FALSE(has("Kinetic Bomb1-4"));
 }
 
 TEST(OrdersTest, CollectOrderNamesIsEmptyOnBlankSnapshotAndNotes) {
   wlb::snapshot::Snapshot empty;
   EXPECT_TRUE(CollectOrderNames(empty).empty());
+}
+
+TEST(OrdersTest, AllContentNotesParseWithRealOrdersParser) {
+  // Resolve repo root from this test file's path so the real C++ orders.wlb
+  // parser validates every standing order across all 41 content/notes files.
+  const std::filesystem::path notes_root = std::filesystem::path(__FILE__)
+                                               .parent_path()
+                                               .parent_path()
+                                               .parent_path()
+                                               .parent_path() /
+                                           "content" / "notes";
+  ASSERT_TRUE(std::filesystem::is_directory(notes_root)) << notes_root;
+  int files_checked = 0;
+  int orders_checked = 0;
+  for (const auto& entry : std::filesystem::directory_iterator(notes_root)) {
+    const std::filesystem::path notes_file = entry.path() / "notes.md";
+    if (!std::filesystem::is_regular_file(notes_file)) {
+      continue;
+    }
+    ++files_checked;
+    std::ifstream in(notes_file);
+    ASSERT_TRUE(in.is_open()) << notes_file;
+    std::string line;
+    bool in_fence = false;
+    while (std::getline(in, line)) {
+      const std::string_view trimmed =
+          base::TrimWhitespaceASCII(line, base::TRIM_ALL);
+      if (trimmed.starts_with("```")) {
+        in_fence = !in_fence;
+        continue;
+      }
+      if (in_fence && trimmed.find("->") != std::string_view::npos) {
+        const std::optional<Order> parsed =
+            grammar::ParseOrder(trimmed, grammar::rt::Env{});
+        EXPECT_TRUE(parsed.has_value())
+            << notes_file.string() << ": failed to parse order: " << trimmed;
+        ++orders_checked;
+      }
+    }
+  }
+  EXPECT_GE(files_checked, 40);
+  EXPECT_GT(orders_checked, 100);
 }
 
 }  // namespace

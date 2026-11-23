@@ -9,55 +9,25 @@ Last updated 2026-11-22.
 
 ## In progress
 
-### Deep Review Findings (2026-11-22 — ordered: High 1 + Medium 5 → High 2 + Medium 3 → Medium 4 → Medium 6–10 → Lows)
+### Deep Review Findings (2026-11-22)
 
-**High**
-- [x] **H1 — Invite fix crashes worldserver (`bot_manager.cc:62`):** fixed by heap-allocating `new BlockAutoInviteListener(key)` per `Engine` (owned by `ActionExecutionListeners`, self-deregistering its `uintptr_t` key in `~BlockAutoInviteListener()` on logout/shutdown) and adding `llmtest logout` + logout/relogin check in `e2e_invite.py`. Live-verified via `tools/wlb test e2e invite` (`PASS`, `5.7 s`).
-- [ ] **H2 — C2 notes loop keeps noise (`notes_hill_climb.py`):** with identical candidates, `P(>= 1 KEEP in 3 rounds)` is `0.41–0.50` with default `3+3` runs and `0.66–0.71` without confirmation (`kaelthas_v4` KEEP `0/2 -> 1/2`, DPS `-13.8%` is that case). Fix: require confirmation runs and use a statistically sound sample size / sequential test with a fixed error rate.
-
-**Medium**
-- [ ] **M3 — Notes loop scoring (`notes_hill_climb.py`, `bench_bosses.py`):** (a) `"damage taken lower"` rewards wiping faster; (b) fewer valid runs can buy a KEEP (`1/1` beats `1/3`); (c) no held-out pull, so notes overfit to the bench setup; (d) `notes_hill_climb.py` and `bench_bosses.py` aren't locked and the ledger records no flags or code hash. Fix: score per trial with a fixed `n`, add held-out pulls, lock (requires user OK for `scorer.sha256` relock per Rule #6) and log both scripts + flags + code hash.
-- [ ] **M4 — Phase 1–3 sign-off overclaim:** v3 (`52/80` vs `35/80`, `p = 0.0109`, `p_holm3 = 0.0326`) was the 3rd attempt; v1 was `23/40` vs `22/40` and v2 was `21/40` vs `19/40` (all three combined `p = 0.033`). Between v2 and v3, `3b5cae8` added the Kael Arcane Sphere order, and Kael + Ikiss make up the whole `+17`. Pooled comparison wasn't pre-declared, and the agent waived Kael's `-20%` DPS and signed off Phases 1–3 itself. Fix: report all three runs and the combined result in the benchmark doc and `docs/TODO.md`; leave the sign-off decision to the user.
-- [x] **M5 — `wlb remote sync` unguarded `rsync --delete`:** added `_validate_remote_repo` (refusing `~`, `/`, `$HOME`, `..`, top-level system dirs) and remote `_verify_remote_sync_target` guard before `rsync --delete` (refusing `/`, `$HOME`, any ancestor of `$HOME`, and any target lacking `tools/wlb` or `.wlb-remote-repo` sentinel; added `/.wlb-remote-repo` to `RSYNC_EXCLUDES`). Unit-tested in `tools/wlblib/remote_test.py` (`23/23`).
-- [ ] **M6 — A5 assist options named `"'s target"`, not the mob:** `expect:` misses it and every assist pull wakes the brain urgently (plain `Attack` option doesn't). Fix: name the mob in the option.
-- [ ] **M7 — Kept movement order cancelled by the plan's own step gives urgent `"standing order failed"` wake:** when cancel arrives after the reply, it wakes urgently (more frequent now that orders are kept). Fix: don't report cancels caused by the bot's own plan.
-- [ ] **M8 — Chat rate limit (1 s) drops a plan's `tell` when the same reply also has a `say`:** and the error has `command_id = 0` so the brain never learns. Fix: queue rather than drop (or space them in the harness) and give any error the real `command_id`.
-- [ ] **M9 — Audited notes that still contradict the boss scripts (`content/notes/`):**
-  - Sindragosa `Ice Tomb appears -> target nearest Ice Tomb`: script holds tombs at 50% for LoS during Frost Bomb;
-  - LK `Quake cast -> out of it`: script moves to 40 yd from the boss;
-  - Ick's `Pursuit` is a fixate;
-  - Razorscale's `Whirlwind` belongs to the Sentinel;
-  - Rotface's `Explosion cast` matches no spell.
-  Fix each against the boss scripts.
-- [ ] **M10 — ICC (`2,803 B`) and Ulduar (`2,045 B`) notes exceed the 2,000-byte notes cap:** cut mid-order (`"Kinetic Bomb ap"`), so Sindragosa and Valithria never reach the model while grammar still offers names from the whole file. Fix: split notes per boss and load only the current boss's (matching grammar names to loaded notes).
-
-**Low (Acts)**
-- [ ] **L-Act1:** Orders stay in force after leaving the instance.
-- [ ] **L-Act2:** A6 items vanish from the options while casting, and only the first 12 items in bag order are listed.
-- [ ] **L-Act3:** `FinishDodgeAct` can re-select a target the brain had just told the bot to avoid.
-
-**Low (Module)**
-- [ ] **L-Mod1:** Invites stay pending forever and block other invites.
-- [ ] **L-Mod2:** Dead bots no longer hear `say`.
-- [ ] **L-Mod3:** Chat blocked by another script is reported as said.
-- [ ] **L-Mod4:** Hidden-trigger areas have no line-of-sight check and use the friendly flag.
-- [ ] **L-Mod5:** Item-use success is inferred from aura or mana changes.
-
-**Low (Grammar)**
-- [ ] **L-Gram1:** `999.x` silently dropped an order in 1 of 150 plans.
-- [ ] **L-Gram2:** The digit filter drops real names (`VX-001`).
-- [ ] **L-Gram3:** The Python `orders.wlb` validator differs from the real parser (accepts `kite it, then`, rejects 6 of 40k valid orders) and is the only check on the 41 files.
-- [ ] **L-Gram4:** A mistyped `orders:` line is dropped silently.
-
-**Low (Tools)**
-- [x] **L-Tool1:** `db_start(allow_init=False)` now refuses to silently initialize a missing/partial datadir on the play server (opt in via `tools/wlb db start --init`; test server / `test_databases_reset` pass `allow_init=True`); added `skip-name-resolve` in `config/mysql.cnf.in` and `DROP USER IF EXISTS 'root'@'127.0.0.1'/'::1'/'%'` in `_ensure_acore_users()`. Unit-tested in `tools/wlblib/remote_test.py`.
-- [x] **L-Tool2:** Exit `255` in `run_remote` now calls `_kill_remote_pgid(spec, only_if_active=True)`, skipping test-server stop when `ACTIVE_PGID_REL` was already cleaned up by a normal exit `255`. Unit-tested in `tools/wlblib/remote_test.py`.
-- [x] **L-Tool3:** Remote build, `run_remote`, and `stop` now take a remote `flock` on `var/.remote.lock` in addition to the local lock. Unit-tested in `tools/wlblib/remote_test.py`.
-- [x] **L-Tool4:** Tightened `.agents/rules/contributing.md` Rule #8 and `CONTRIBUTING.md` so agents only use `tools/wlb remote` when explicitly requested by the user.
-- [x] **L-Tool5:** Updated `.agents/hooks/post_commit_review.py` to pass `--sandbox` (and fixed its docstring), review amended commits (`_is_amend_of`), and anchor `FAILED` stderr matching to `"AGY_ERROR"` or line-start `error:`/`fatal:`. Unit-tested in `.agents/hooks/post_commit_review_test.py` (`5/5`).
-
-**Unconfirmed (needs human trace)**
+**Open (awaiting user decision / external data)**
+- [ ] **M3d — Lock `notes_hill_climb.py` and `bench_bosses.py` in `scorer.sha256`:** flags + SHA-256 hashes + git HEAD are now logged in `ledger.jsonl`, but adding both scripts to `hill_climb.py` lock manifest requires user-approved relock of `scorer.sha256` / `config/scorer-lock.sha256` (Rule #6).
+- [ ] **M4 — Phase 1–3 sign-off decision (user's call):** all three runs (`v1` `23/40` vs `22/40`, `v2` `21/40` vs `19/40`, `v3` `52/80` vs `35/80`; combined `96/160` vs `76/160`, `p = 0.0330`) and the Kael'thas `-20.2%` DPS trade-off are now reported honestly in [`docs/benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md`](benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md); awaiting user decision on sign-off.
 - [ ] **Unconfirmed — Raw-turn fix:** may read smooth human mouse turns as snaps; needs one human trace check to settle.
+
+**Completed & verified (2026-11-22)**
+- [x] **H1 & R6cfed30-M1/L1/L2 — Invite listener crash (`bot_manager.cc`, `test_commands.cc`, `e2e_invite.py`):** heap-allocated `BlockAutoInviteListener(key)` per `Engine` (owned by `ActionExecutionListeners`, self-deregistering in `~BlockAutoInviteListener()`; `PlayerbotAI::engines` is private in `third_party/`, so `GetCurrentEngine()` is the only public accessor); `llmtest logout` verifies `GetPlayerBot(guid) != nullptr`; `e2e_invite.py` live-verified offline -> relogin -> post-relogin snapshot (`PASS`, `10.0 s`).
+- [x] **H2 & M3a–c — C2 notes hill-climb statistical rigor & scoring (`notes_hill_climb.py`):** mandatory `confirm_runs >= 1` (default `8+8`), Bonferroni-corrected one-sided Fisher exact test (`alpha = 0.05 / rounds`), removed `"damage taken lower"` criterion, enforced fixed `n` (`candidate.runs == expected_runs`), added optional `--held-out-boss` regression guard, and logged flags + script SHA-256 + git HEAD in `ledger.jsonl`. Unit-tested in `notes_hill_climb_test.py` (`9/9`).
+- [x] **M5 & R6cfed30-M2/M3/M4 & L-Tool1–5 (`remote.py`, `server.py`, `mysql.cnf.in`, `post_commit_review.py`, rules/docs):** raw `/`-split repo validation + shell metachar rejection + `--protect-args` (`-s`) on all `rsync` calls + remote target sentinel/`$HOME` guard; remote `flock -o` across stamp invalidation, `--rsync-path`, build, and `run_remote` with per-invocation PGID file `var/.active_remote_pgid.<token>` (and `stop` unlocked); `db_start(allow_init=False)` refuses silent play-server init, `skip-name-resolve` + `DROP USER IF EXISTS 'root'@'127.0.0.1'/'::1'/'%'`; hook passes `--sandbox`, reviews amended commits, and anchors `FAILED` stderr matching. Unit-tested in `remote_test.py` (`24/24`) and `post_commit_review_test.py` (`5/5`).
+- [x] **M6 — A5 assist option naming (`options.cc`):** `option.name` and `OptionTarget::name` now carry the mob's name (`best->name`) so `expect:` matches assist pulls. Unit-tested in `options_unittest.cc` and `plan_runner_unittest.cc`.
+- [x] **M7 — Suppressed self-cancelled movement order wakes (`bot_loop.cc`):** `"act cancelled by new choice"` returns early whether `call_in_flight` is true or false (compile/source-verified; `harness_unittests` `235/235`).
+- [x] **M8 — Chat rate-limit queue & real `command_id` (`llm_brain_world_script.cc`):** queues up to 4 rate-limited outbound chats (draining 1/s in `OnUpdate`) instead of dropping `tell` after `say`, and passes real `command_id` on chat errors (compile/source-verified in `out/server-test`).
+- [x] **M9 — Fixed 5 boss-note contradictions (`content/notes/{ICC,Uld,PoS}/notes.md`):** Sindragosa `Ice Tomb appears & Ice Tomb hp>50`, LK `Quake cast -> to 40 yd from boss`, Ick `Pursuit on me -> kite boss`, Razorscale `Whirlwind cast -> away Dark Rune Sentinel 12`, Rotface `Unstable Ooze Explosion cast -> out of it, then back`. Verified against both Python validator and real C++ `orders.wlb` parser.
+- [x] **M10 — Per-boss notes selection (`prompt.{h,cc}`, `bot_loop.cc`, `decide.cc`):** `SelectRelevantNotes` loads only the active boss's `## <Boss>` section(s) (or caps at a complete section boundary, never mid-order), keeping prompt text and `CollectOrderNames` in sync. Unit-tested in `prompt_unittest.cc`.
+- [x] **L-Act1–3:** clearing standing orders on leaving/changing instance (`bot_loop.cc`), keeping A6 `CollectUsableBagItems` visible while casting with cap raised to 32 (`option_executor.cc`), and blocking `FinishDodgeAct` / `StartReturnToInterrupted` from re-selecting an `AVOID`ed target (`act_executor.cc`) (compile/source-verified in `out/server-test`).
+- [x] **L-Mod1–5:** 60 s auto-decline for stale pending group invites (`llm_brain_world_script.cc`), dead bots hear `say`/`yell` (`chat_scripts.cc` `reqAlive=false`), script-blocked chat returns `"chat blocked"` (`speak.cc`), hidden-trigger areas check LoS and use `trigger->IsHostileTo(bot)` (`nearby_builder.cc`), and item-use success checks spell-specific aura/`GetLastPotionId()` instead of generic aura-count/mana diffs (`option_executor.cc`) (compile/source-verified in `out/server-test`).
+- [x] **L-Gram1–4:** exact decimal GBNF upper-bound generation in `wlb_gen.py` (no `999.1..999.9`), digit filter in `orders.cc` preserves `VX-001`, real C++ `orders.wlb` parser tests all 41 `content/notes/*/notes.md` files in `orders_unittest.cc` + Python validator rejects dangling `, then`, and `ParsePlan` rejects mistyped `orders:` lines (`plan.cc`, `plan_unittest.cc`). Verified via `tools/wlb check` (`ALL CHECKS PASSED`).
 
 ## Next, in order
 
@@ -190,6 +160,8 @@ v1 `23/40` vs `22/40`, v2 `21/40` vs `19/40`, v3 `52/80` vs `35/80`; combined `p
   `kaelthas`, `murmur`, and `ikiss` live-verified across `64` valid trials (`n = 16` per arm)
   each.)*
 - **Phase 1–3 open caveats & deferred polish:** `tools/bench/bench_bosses.py` still uses inline boss-note constants rather than reading `content/notes/*/notes.md` directly; `A5` `party hurt:` and `loose mobs:` screen formatting are unit-tested only (not separately captured from live `harness.log`); `eregos` (`bench_bosses.py`) still hits `no_pull` because Oculus requires flying drake engagement/boss trigger; `tools/bench/notes_hill_climb.py --confirm-runs > 0` re-run is unit-tested only (not live-verified).
+- **Phase 4 live play observation (2026-11-22):** level 14 priest observed still farming mobs in Northshire Abbey (level 1 starting zone) — directly motivates Phase 4 `B1` (level-appropriate questing/zone guidance over grinding grey mobs).
+- **`private/BigFootAddOns` licensing reminder:** private nested submodule rehosting proprietary addons (DBM, Omen, etc.); fine while private — never publish it or copy any of it into the public GPL repo.
 - **Human trace GM-speed cleanup:** `2026-11-22.1.jsonl` in `~/.local/share/wow-llm-bots/human_baseline/human/Hele/` was cleaned of `> 10 yd/s` GM-fly/speed segments; strip `> 10 yd/s` segments from the still-open `2026-11-22.jsonl` after the play server stops.
 - **Deliberately skipped benchmark speedup proposals (Items 4, 5, adaptive 6):** left unbuilt on
   purpose to preserve valid boss immunity/kite phases (Item 4: `20 s` zero-damage abort would

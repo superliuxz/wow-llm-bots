@@ -489,11 +489,15 @@ TEST(OptionsTest, AssistOptionOfferedForMainAssistAndTankTargets) {
   EXPECT_EQ(snapshot.options[2].text,
             "Attack main assist Loadc's target (Phoenix Egg)");
   EXPECT_EQ(snapshot.options[2].guid, "assist:0x20");
+  EXPECT_EQ(snapshot.options[2].name, "Phoenix Egg");
   EXPECT_EQ(targets[2].guid, "0x20");
+  EXPECT_EQ(targets[2].name, "Phoenix Egg");
   EXPECT_EQ(snapshot.options[3].text,
             "Attack tank Loada's target (Kael'thas Sunstrider)");
   EXPECT_EQ(snapshot.options[3].guid, "assist:0x21");
+  EXPECT_EQ(snapshot.options[3].name, "Kael'thas Sunstrider");
   EXPECT_EQ(targets[3].guid, "0x21");
+  EXPECT_EQ(targets[3].name, "Kael'thas Sunstrider");
 }
 
 TEST(OptionsTest, AssistResolvesExactGuidCapAndEdgeCases) {

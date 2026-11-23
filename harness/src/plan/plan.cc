@@ -156,6 +156,16 @@ std::string_view StripTruncatedLastLine(std::string_view text,
 std::optional<Plan> ParsePlan(std::string_view text,
                               int option_count,
                               const std::vector<std::string>& order_names) {
+  // Never silently drop a mistyped `orders:` line (only `orders: none` is
+  // valid; anything else on an `orders:` line must fail parsing).
+  for (std::string_view line : g::rt::SplitLines(text)) {
+    std::string_view key, raw;
+    if (g::rt::SplitLine(line, &key, &raw) &&
+        g::rt::EqualsIgnoreCase(key, "orders") &&
+        !g::rt::EqualsIgnoreCase(raw, "none")) {
+      return std::nullopt;
+    }
+  }
   const std::optional<g::Plan> parsed =
       g::ParsePlan(text, PlanEnv(option_count, {}, {}, order_names));
   if (!parsed) {

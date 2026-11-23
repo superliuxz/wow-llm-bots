@@ -222,6 +222,13 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   // or wake urgently out-of-combat to compile them before the pull.
   const bool in_instance = state.latest_snapshot->base.where.in_instance;
   const std::string cur_map = state.latest_snapshot->base.where.map;
+  const bool left_or_changed_instance =
+      state.was_in_instance && (!in_instance || state.last_map != cur_map);
+  if (left_or_changed_instance && !state.orders.orders().empty()) {
+    state.orders.SetOrders({}, received_at);
+    Log(base::StrCat(
+        {bot, ": cleared standing orders after leaving ", state.last_map}));
+  }
   const bool entered_instance =
       in_instance && (!state.was_in_instance || state.last_map != cur_map);
   state.was_in_instance = in_instance;
@@ -345,14 +352,15 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
         imm.event.error->command_id == state.orders.pending_command_id()) {
       OrderEvalResult failed = state.orders.OnStepFailed(imm.event.error->text);
       state.order_quiet_since = base::TimeTicks();
+      // An "act cancelled by new choice" event is our own plan's choice
+      // replacing an old movement act (whether it arrives mid-call or after
+      // the reply): never report it as a standing-order failure or stop the
+      // new plan.
+      if (imm.event.error->text == "act cancelled by new choice") {
+        return;
+      }
       if (state.call_in_flight) {
-        // Don't cancel a call already being answered (e.g. a cancel event
-        // arriving mid-stream would throw away the plan and its `tell`). An
-        // "act cancelled by new choice" event is our own early-dispatched
-        // choice replacing an old movement act and needs no extra wake; real
-        // order failures queue the reason and wake once the reply finishes.
-        if (imm.event.error->text != "act cancelled by new choice" &&
-            !failed.wake_reason.empty()) {
+        if (!failed.wake_reason.empty()) {
           if (std::find(state.pending_reasons.begin(),
                         state.pending_reasons.end(),
                         failed.wake_reason) == state.pending_reasons.end()) {
@@ -561,11 +569,11 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
   // Ages on the snapshots' clock (seen_at is a snapshot's received time).
   input.remembered = RememberedPanels(state, state.latest_received_at,
                                       config_.remember_panels_for);
-  input.notes = state.notes;
+  input.notes = SelectRelevantNotes(state.notes, *state.latest_snapshot);
   for (const Order& o : state.orders.orders()) {
     input.active_orders.push_back(FormatOrder(o));
   }
-  input.order_names = CollectOrderNames(*state.latest_snapshot, state.notes);
+  input.order_names = CollectOrderNames(*state.latest_snapshot, input.notes);
   std::vector<std::string> order_names = input.order_names;
   input.slot = slot;
   input.temperature = config_.temperature;

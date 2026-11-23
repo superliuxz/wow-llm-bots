@@ -12,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -1096,6 +1097,23 @@ std::optional<HazardInfo> ResolveHazard(Player* bot,
   return std::nullopt;
 }
 
+// World-thread-only map from bot raw GUID -> last avoided unit raw GUID so
+// FinishDodgeAct / StartReturnToInterrupted never re-select a target the brain
+// explicitly told the bot to avoid.
+std::unordered_map<uint64_t, uint64_t>& AvoidedTargetByBot() {
+  static auto* map = new std::unordered_map<uint64_t, uint64_t>();
+  return *map;
+}
+
+bool IsTargetAvoidedByBot(const Player* bot, uint64_t target_guid) {
+  if (!bot || target_guid == 0) {
+    return false;
+  }
+  const auto& map = AvoidedTargetByBot();
+  auto it = map.find(bot->GetGUID().GetRawValue());
+  return it != map.end() && it->second == target_guid;
+}
+
 // Finishes a dodge (`away` / `out of`) without walking back to the pre-dodge
 // spot: releases movement override and restores the interrupted attack target
 // selection so normal combat resumes immediately. Returning to the pre-dodge
@@ -1104,7 +1122,8 @@ void FinishDodgeAct(Player* bot, const ActiveAct& active) {
   bot->StopMoving();
   ClearActMovement(bot);
   const ActiveAct::InterruptedActivity& intr = active.interrupted;
-  if (intr.active && intr.target_guid != 0) {
+  if (intr.active && intr.target_guid != 0 &&
+      !IsTargetAvoidedByBot(bot, intr.target_guid)) {
     if (Unit* target =
             ObjectAccessor::GetUnit(*bot, ObjectGuid(intr.target_guid));
         target && target->IsAlive() && bot->IsHostileTo(target)) {
@@ -1131,7 +1150,7 @@ bool StartReturnToInterrupted(Player* bot,
   const pb::Vec3 bot_pos = PosOf(bot);
   const float bot_reach = bot->GetCombatReach();
   Unit* target = nullptr;
-  if (intr.target_guid != 0) {
+  if (intr.target_guid != 0 && !IsTargetAvoidedByBot(bot, intr.target_guid)) {
     target = ObjectAccessor::GetUnit(*bot, ObjectGuid(intr.target_guid));
     if (target && (!target->IsAlive() || !bot->IsHostileTo(target))) {
       target = nullptr;
@@ -1312,6 +1331,7 @@ ActStartResult StartAct(Player* bot,
       if (!unit) {
         return {.error = "target not found"};
       }
+      AvoidedTargetByBot().erase(bot->GetGUID().GetRawValue());
       // Same call as WorldSession::HandleSetSelectionOpcode.
       bot->SetSelection(unit->GetGUID());
       return {.done = true};
@@ -1588,9 +1608,13 @@ ActStartResult StartAct(Player* bot,
       const std::string_view thing_name =
           !act.target_name.empty() ? act.target_name : act.name;
       WorldObject* obj = ResolveThing(bot, act, thing_name);
-      if (obj && bot->GetTarget() == obj->GetGUID()) {
-        bot->AttackStop();
-        bot->SetSelection(ObjectGuid::Empty);
+      if (obj) {
+        AvoidedTargetByBot()[bot->GetGUID().GetRawValue()] =
+            obj->GetGUID().GetRawValue();
+        if (bot->GetTarget() == obj->GetGUID()) {
+          bot->AttackStop();
+          bot->SetSelection(ObjectGuid::Empty);
+        }
       }
       return {.done = true};
     }

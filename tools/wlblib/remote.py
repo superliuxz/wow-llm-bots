@@ -33,6 +33,7 @@ import json
 import os
 import pathlib
 import re
+import secrets
 import shlex
 import socket
 import subprocess
@@ -93,20 +94,24 @@ def remotes_config_path() -> pathlib.Path:
 _FORBIDDEN_REPO_ROOTS = frozenset({
     "/", "/home", "/root", "/tmp", "/var", "/etc", "/usr", "/opt", "/srv", "/mnt", "/media",
 })
+_UNSAFE_REPO_CHARS_RE = re.compile(r"[;&|`$\n\r<>()*?\[\]'\"\\]")
 
 
 def _validate_remote_repo(repo: str) -> str:
-    """Refuse unsafe remote repo paths (`~`, `/`, `$HOME`, `..`, top-level dirs) before rsync --delete."""
+    """Refuse unsafe remote repo paths (`~`, `/`, `$HOME`, `.`, `..`, shell metachars, top-level dirs)."""
     cleaned = repo.strip().rstrip("/")
     if not cleaned:
         raise Failed("remote 'repo' must be a non-empty subdirectory path")
-    if cleaned in ("~", ".", "..", "$HOME", "${HOME}") or cleaned.startswith("$"):
+    if _UNSAFE_REPO_CHARS_RE.search(cleaned):
+        raise Failed(f"refusing unsafe remote 'repo' {repo!r}: contains shell metacharacters")
+    if cleaned in ("~", ".", ".."):
         raise Failed(f"refusing unsafe remote 'repo' {repo!r}: must be a dedicated subdirectory below $HOME")
     if cleaned.startswith("~") and not cleaned.startswith("~/"):
         raise Failed(f"refusing unsafe remote 'repo' {repo!r}: use '~/subdir' or an absolute subdirectory path")
     sub = cleaned[2:] if cleaned.startswith("~/") else cleaned
-    parts = pathlib.PurePosixPath(sub).parts
-    if not parts or any(p in ("", ".", "..") for p in parts):
+    # Check raw `/`-split segments BEFORE PurePosixPath normalization so `/.` and `/home/.` are caught.
+    raw_segments = [seg for seg in sub.split("/") if seg != ""]
+    if not raw_segments or any(seg in (".", "..") for seg in raw_segments):
         raise Failed(f"refusing unsafe remote 'repo' {repo!r}: must not contain '.' or '..' components")
     if cleaned in _FORBIDDEN_REPO_ROOTS:
         raise Failed(f"refusing unsafe remote 'repo' {repo!r}: must be a dedicated subdirectory")
@@ -255,8 +260,12 @@ def read_remote_stamp(spec: RemoteSpec) -> str | None:
 
 
 def _invalidate_remote_stamp(spec: RemoteSpec) -> None:
-    """Remove remote `var/.built_stamp` before mutating sources so failed builds never look fresh."""
-    inner = f'd={_remote_cd_expr(spec.repo)}; [ ! -d "$d" ] || rm -f "$d"/{shlex.quote(STAMP_REL)}'
+    """Remove remote `var/.built_stamp` under remote lock before mutating sources."""
+    inner = (
+        f'd={_remote_cd_expr(spec.repo)}; '
+        f'[ ! -d "$d" ] || (cd "$d" && mkdir -p var && '
+        f'flock -o {shlex.quote(REMOTE_LOCK_REL)} rm -f {shlex.quote(STAMP_REL)})'
+    )
     run([*_ssh_base_args(spec), f"bash -eu -c {shlex.quote(inner)}"])
 
 
@@ -275,7 +284,7 @@ def _ensure_remote_map_data(spec: RemoteSpec, repo: pathlib.Path = ROOT) -> None
     say(f"remote {spec.name}: pushing static 3.3.5a map data (one-time) -> {spec.ssh}:{spec.repo}/out/server/data")
     run([*_ssh_base_args(spec), f"mkdir -p {_remote_cd_expr(spec.repo)}/out/server/data"])
     run([
-        "rsync", "-a", "--info=progress2", "-e", _rsync_ssh_cmd(), "--",
+        "rsync", "-a", "-s", "--info=progress2", "-e", _rsync_ssh_cmd(), "--",
         f"{local_data}/", f"{spec.ssh}:{spec.repo}/out/server/data/",
     ])
     run([
@@ -314,7 +323,11 @@ def _verify_remote_sync_target(spec: RemoteSpec) -> None:
 
 def _rsync_to_remote(spec: RemoteSpec, repo: pathlib.Path = ROOT) -> None:
     _verify_remote_sync_target(spec)
-    cmd = ["rsync", "-a", "--delete", "-e", _rsync_ssh_cmd()]
+    rsync_path = (
+        f"bash -c 'cd {_remote_cd_expr(spec.repo)} && mkdir -p var && "
+        f"flock -o {shlex.quote(REMOTE_LOCK_REL)} rsync \"$@\"' _"
+    )
+    cmd = ["rsync", "-a", "-s", "--delete", f"--rsync-path={rsync_path}", "-e", _rsync_ssh_cmd()]
     for pat in RSYNC_EXCLUDES:
         cmd.append(f"--exclude={pat}")
     cmd += ["--", f"{repo}/", f"{spec.ssh}:{spec.repo}/"]
@@ -375,8 +388,8 @@ def _sync_unlocked(spec: RemoteSpec, *, force: bool = False, server_build: bool 
 
     inner_script = (
         f"cd {_remote_cd_expr(spec.repo)} && "
-        f"mkdir -p var && exec 9>{shlex.quote(REMOTE_LOCK_REL)} && flock 9 && "
-        + " && ".join(build_steps)
+        f"mkdir -p var && flock -o {shlex.quote(REMOTE_LOCK_REL)} bash -euo pipefail -c "
+        + shlex.quote(" && ".join(build_steps))
     )
     say(f"remote {spec.name}: building ({'common + server-test' if server_build else 'common'})...")
     run([*_ssh_base_args(spec), f"bash -euo pipefail -c {shlex.quote(inner_script)}"])
@@ -439,9 +452,10 @@ def status(name: str) -> None:
 def stop(name: str) -> None:
     spec = get_remote(name)
     with _remote_lock(spec.name):
+        # Intentionally does NOT block on REMOTE_LOCK_REL so `stop` can always
+        # halt a stuck test server/db even if another session holds the lock.
         inner = (
             f"cd {_remote_cd_expr(spec.repo)} && "
-            f"mkdir -p var && exec 9>{shlex.quote(REMOTE_LOCK_REL)} && flock 9 && "
             "(tools/wlb server stop --test || true) && "
             "(tools/wlb db stop || true)"
         )
@@ -461,7 +475,7 @@ def pull(name: str, remote_rel: str, local_path: str | pathlib.Path) -> None:
     dest = pathlib.Path(local_path)
     dest.parent.mkdir(parents=True, exist_ok=True)
     run([
-        "rsync", "-a", "-e", _rsync_ssh_cmd(), "--",
+        "rsync", "-a", "-s", "-e", _rsync_ssh_cmd(), "--",
         f"{spec.ssh}:{spec.repo}/{remote_rel}", str(dest),
     ])
     say(f"remote {spec.name}: pulled {remote_rel} -> {dest}")
@@ -477,41 +491,47 @@ def _parse_pull_spec(spec_str: str) -> tuple[str, pathlib.Path]:
     return remote_rel, pathlib.Path(local_str)
 
 
-def _kill_remote_pgid(spec: RemoteSpec, *, only_if_active: bool = False) -> None:
+def _kill_remote_pgid(
+    spec: RemoteSpec,
+    *,
+    pgid_rel: str = ACTIVE_PGID_REL,
+    only_if_active: bool = False,
+) -> None:
     """Terminate the active remote process group (SIGTERM -> 5s -> SIGKILL) and stop test server.
 
-    When `only_if_active=True` (used on exit code 255), skips stopping the test server if
-    `ACTIVE_PGID_REL` was already cleaned up by the normal EXIT trap (meaning the remote command
-    itself exited 255 rather than an SSH transport drop).
+    Uses a per-invocation `pgid_rel` so a queued client interrupted while waiting
+    on `REMOTE_LOCK_REL` never kills another client's active job. When
+    `only_if_active=True` (used on exit code 255 or queued interrupt), skips
+    stopping the test server if `pgid_rel` does not exist.
     """
     stop_test = "(tools/wlb server stop --test || true)"
     if only_if_active:
         cleanup_inner = (
             f"cd {_remote_cd_expr(spec.repo)} 2>/dev/null || exit 0; "
-            f"if [ -f {shlex.quote(ACTIVE_PGID_REL)} ]; then "
-            f"  PGID=$(cat {shlex.quote(ACTIVE_PGID_REL)} 2>/dev/null || true); "
+            f"if [ -f {shlex.quote(pgid_rel)} ]; then "
+            f"  PGID=$(cat {shlex.quote(pgid_rel)} 2>/dev/null || true); "
             '  case "$PGID" in ""|*[!0-9]*) PGID="" ;; *) [ "$PGID" -gt 1 ] || PGID="" ;; esac; '
             '  if [ -n "$PGID" ]; then '
             '    kill -TERM -"$PGID" 2>/dev/null || true; '
             '    for _ in 1 2 3 4 5; do kill -0 -"$PGID" 2>/dev/null || break; sleep 1; done; '
             '    kill -KILL -"$PGID" 2>/dev/null || true; '
             "  fi; "
-            f"  rm -f {shlex.quote(ACTIVE_PGID_REL)}; "
+            f"  rm -f {shlex.quote(pgid_rel)}; "
             f"  {stop_test}; "
             "fi"
         )
     else:
         cleanup_inner = (
             f"cd {_remote_cd_expr(spec.repo)} 2>/dev/null || exit 0; "
-            f"if [ -f {shlex.quote(ACTIVE_PGID_REL)} ]; then "
-            f"  PGID=$(cat {shlex.quote(ACTIVE_PGID_REL)} 2>/dev/null || true); "
+            f"if [ -f {shlex.quote(pgid_rel)} ]; then "
+            f"  PGID=$(cat {shlex.quote(pgid_rel)} 2>/dev/null || true); "
             '  case "$PGID" in ""|*[!0-9]*) PGID="" ;; *) [ "$PGID" -gt 1 ] || PGID="" ;; esac; '
             '  if [ -n "$PGID" ]; then '
             '    kill -TERM -"$PGID" 2>/dev/null || true; '
             '    for _ in 1 2 3 4 5; do kill -0 -"$PGID" 2>/dev/null || break; sleep 1; done; '
             '    kill -KILL -"$PGID" 2>/dev/null || true; '
             "  fi; "
-            f"  rm -f {shlex.quote(ACTIVE_PGID_REL)}; "
+            f"  rm -f {shlex.quote(pgid_rel)}; "
             "fi; "
             f"{stop_test}"
         )
@@ -540,28 +560,33 @@ def run_remote(
             tunnel_port = spec.llm_port
             say(f"remote {spec.name}: reverse-tunneling local 127.0.0.1:{tunnel_port} -> remote")
 
-        # Run inside a dedicated session/process-group with `setsid --wait` and remote `flock`
-        # so multi-client runs serialize on the worker, exit status propagates cleanly, normal
-        # exit removes ACTIVE_PGID_REL via trap, and Ctrl-C / SSH drop cleanly kills the PGID.
-        inner = (
-            f"cd {_remote_cd_expr(spec.repo)} && "
-            f"mkdir -p var && exec 9>{shlex.quote(REMOTE_LOCK_REL)} && flock 9 && "
-            f"echo $$ > {shlex.quote(ACTIVE_PGID_REL)} && "
-            f"trap 'rm -f {shlex.quote(ACTIVE_PGID_REL)}' EXIT && "
+        # Run inside a dedicated session/process-group with `setsid --wait` and
+        # remote `flock -o` (closes lock FD in child so daemons never deadlock the
+        # lock). A per-run PGID file ensures an interrupted queued client never
+        # kills another client's active job.
+        pgid_rel = f"{ACTIVE_PGID_REL}.{secrets.token_hex(6)}"
+        locked_body = (
+            f"echo $$ > {shlex.quote(pgid_rel)} && "
+            f"trap 'rm -f {shlex.quote(pgid_rel)}' EXIT && "
             f"{shlex.join(cmd)}"
         )
-        remote_cmd = f"setsid --wait bash -c {shlex.quote(inner)}"
+        inner = (
+            f"cd {_remote_cd_expr(spec.repo)} && "
+            f"mkdir -p var && flock -o {shlex.quote(REMOTE_LOCK_REL)} "
+            f"setsid --wait bash -c {shlex.quote(locked_body)}"
+        )
+        remote_cmd = f"bash -c {shlex.quote(inner)}"
         ssh_cmd = [*_ssh_base_args(spec, tunnel_port=tunnel_port), remote_cmd]
         try:
             proc = subprocess.run(ssh_cmd)
         except KeyboardInterrupt:
-            say(f"\nremote {spec.name}: interrupted; killing remote process group and stopping test server...")
-            _kill_remote_pgid(spec)
+            say(f"\nremote {spec.name}: interrupted; killing remote process group if active...")
+            _kill_remote_pgid(spec, pgid_rel=pgid_rel, only_if_active=True)
             raise Failed("interrupted")
 
         if proc.returncode == 255:
             say(f"remote {spec.name}: exit 255 (checking for orphaned remote process group)...")
-            _kill_remote_pgid(spec, only_if_active=True)
+            _kill_remote_pgid(spec, pgid_rel=pgid_rel, only_if_active=True)
 
         for remote_rel, local_dest in parsed_pulls:
             try:

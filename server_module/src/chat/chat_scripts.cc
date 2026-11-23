@@ -87,7 +87,7 @@ class LlmBrainChatScript : public PlayerScript {
     // and thread) like upstream Player::Say/Yell — never cross-instance or
     // touching Player* owned by other map threads.
     std::list<Player*> nearby;
-    Acore::AnyPlayerInObjectRangeCheck check(player, max_dist);
+    Acore::AnyPlayerInObjectRangeCheck check(player, max_dist, false);
     Acore::PlayerListSearcher<Acore::AnyPlayerInObjectRangeCheck> searcher(
         player, nearby, check);
     Cell::VisitObjects(player, searcher, max_dist);

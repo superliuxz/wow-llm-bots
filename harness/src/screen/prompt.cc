@@ -10,9 +10,11 @@
 #include <vector>
 
 #include "base/strings/strcat.h"
+#include "base/strings/string_util.h"
 #include "llm/llm_client.h"
 #include "plan/plan.h"
 #include "screen/screen_renderer.h"
+#include "snapshot/snapshot.h"
 
 namespace harness {
 
@@ -138,7 +140,124 @@ std::string CapUserPreservingAlso(std::string_view user, size_t max_bytes) {
   return CapText(user, max_bytes);
 }
 
+bool ContainsIgnoreCase(std::string_view haystack, std::string_view needle) {
+  if (needle.empty() || haystack.size() < needle.size()) {
+    return false;
+  }
+  for (size_t i = 0; i + needle.size() <= haystack.size(); ++i) {
+    if (base::EqualsCaseInsensitiveASCII(haystack.substr(i, needle.size()),
+                                         needle)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace
+
+std::string SelectRelevantNotes(std::string_view full_notes,
+                                const wlb::snapshot::Snapshot& snapshot) {
+  if (full_notes.empty()) {
+    return "";
+  }
+  // Parse into optional preamble (`# Instance ...`) + `## <Heading>` sections.
+  struct Section {
+    std::string_view heading;
+    std::string_view body;
+  };
+  std::string_view preamble;
+  std::vector<Section> sections;
+  size_t pos = 0;
+  size_t cur_start = 0;
+  std::string_view cur_heading;
+  bool in_section = false;
+  while (pos <= full_notes.size()) {
+    const size_t nl = full_notes.find('\n', pos);
+    const size_t line_end =
+        (nl == std::string_view::npos) ? full_notes.size() : nl;
+    const std::string_view line = full_notes.substr(pos, line_end - pos);
+    if (line.starts_with("## ")) {
+      if (in_section) {
+        sections.push_back(
+            {cur_heading, full_notes.substr(cur_start, pos - cur_start)});
+      } else {
+        preamble = full_notes.substr(0, pos);
+      }
+      cur_heading = base::TrimWhitespaceASCII(line.substr(3), base::TRIM_ALL);
+      cur_start = pos;
+      in_section = true;
+    }
+    if (nl == std::string_view::npos) {
+      break;
+    }
+    pos = nl + 1;
+  }
+  if (in_section) {
+    sections.push_back({cur_heading, full_notes.substr(cur_start)});
+  }
+
+  if (sections.empty()) {
+    return full_notes.size() <= kMaxNotesBytes
+               ? std::string(full_notes)
+               : CapText(full_notes, kMaxNotesBytes);
+  }
+
+  // Collect living nearby unit names (and current target) to match the active
+  // boss section(s).
+  std::vector<std::string_view> active_units;
+  for (const wlb::snapshot::Unit& u : snapshot.base.nearby.units) {
+    if (!u.dead && !u.name.empty()) {
+      active_units.push_back(u.name);
+    }
+  }
+  if (!snapshot.base.self.unit.target.empty()) {
+    active_units.push_back(snapshot.base.self.unit.target);
+  }
+
+  std::vector<const Section*> matched;
+  for (const Section& sec : sections) {
+    if (sec.heading.empty()) {
+      continue;
+    }
+    bool hit = false;
+    for (std::string_view unit_name : active_units) {
+      if (base::EqualsCaseInsensitiveASCII(sec.heading, unit_name) ||
+          ContainsIgnoreCase(unit_name, sec.heading) ||
+          ContainsIgnoreCase(sec.heading, unit_name)) {
+        hit = true;
+        break;
+      }
+    }
+    if (hit) {
+      matched.push_back(&sec);
+    }
+  }
+
+  if (!matched.empty()) {
+    std::string out(preamble);
+    for (const Section* sec : matched) {
+      if (out.size() + sec->body.size() > kMaxNotesBytes && !out.empty()) {
+        break;
+      }
+      out.append(sec->body);
+    }
+    return out;
+  }
+
+  // No specific boss in range yet: keep full file if it fits, otherwise stop on
+  // a complete `## ` section boundary so we never cut mid-order.
+  if (full_notes.size() <= kMaxNotesBytes) {
+    return std::string(full_notes);
+  }
+  std::string out(preamble);
+  for (const Section& sec : sections) {
+    if (out.size() + sec.body.size() > kMaxNotesBytes) {
+      break;
+    }
+    out.append(sec.body);
+  }
+  return out.empty() ? CapText(full_notes, kMaxNotesBytes) : out;
+}
 
 LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
   LlmRequest request;
