@@ -1306,10 +1306,12 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
       spell_slot >= 0 ? item->GetSpellCharges(spell_slot) : 0;
   Unit* aura_unit = item_target ? item_target : bot;
   const ObjectGuid aura_unit_guid = aura_unit->GetGUID();
-  const Aura* aura_before = aura_unit->GetAura(item_spell_id);
-  const int32_t aura_dur_before = aura_before ? aura_before->GetDuration() : -1;
-  const time_t aura_apply_before =
-      aura_before ? aura_before->GetApplyTime() : 0;
+  bool had_aura_before = false;
+  int32_t aura_dur_before = -1;
+  if (const Aura* aura_before = aura_unit->GetAura(item_spell_id)) {
+    had_aura_before = true;
+    aura_dur_before = aura_before->GetDuration();
+  }
   const uint32_t last_potion_before = bot->GetLastPotionId();
   const bool gcd_before =
       bot->GetGlobalCooldownMgr().HasGlobalCooldown(item_spell);
@@ -1349,8 +1351,7 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
       post_aura_unit ? post_aura_unit->GetAura(item_spell_id) : nullptr;
   const bool aura_applied =
       aura_after != nullptr &&
-      (aura_before == nullptr || aura_after->GetDuration() > aura_dur_before ||
-       aura_after->GetApplyTime() > aura_apply_before);
+      (!had_aura_before || aura_after->GetDuration() > aura_dur_before);
   const bool potion_recorded = last_potion_before != proto->ItemId &&
                                bot->GetLastPotionId() == proto->ItemId;
   const bool vehicle_changed = bot->GetVehicle() != vehicle_before;

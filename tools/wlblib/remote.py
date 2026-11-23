@@ -577,23 +577,23 @@ def run_remote(
             tunnel_port = spec.llm_port
             say(f"remote {spec.name}: reverse-tunneling local 127.0.0.1:{tunnel_port} -> remote")
 
-        # Run inside a single `setsid --wait` session with remote `flock -o`
-        # (no nested `setsid`, so waiter_rel and pgid_rel share one PGID with
-        # zero handoff race). Separate per-run waiter/active PGID files ensure
-        # an interrupted queued client kills its own waiting `flock` without
-        # touching another client's active job.
+        # Run inside a single `setsid --wait` session with remote `flock -o`.
+        # Pass the outer session PGID (`WLB_PGID=$$`) into `locked_body` and
+        # write `pgid_rel` BEFORE removing `waiter_rel` so there is zero gap
+        # window and `kill -TERM -"$PGID"` always signals the true session PGID.
         token = secrets.token_hex(6)
         waiter_rel = f"var/.waiter_remote_pgid.{token}"
         pgid_rel = f"{ACTIVE_PGID_REL}.{token}"
         locked_body = (
+            f'echo "$WLB_PGID" > {shlex.quote(pgid_rel)} && '
             f"rm -f {shlex.quote(waiter_rel)} && "
-            f"echo $$ > {shlex.quote(pgid_rel)} && "
             f"trap 'rm -f {shlex.quote(pgid_rel)}' EXIT && "
             f"{shlex.join(cmd)}"
         )
         inner = (
             f"cd {_remote_cd_expr(spec.repo)} && "
-            f"mkdir -p var && echo $$ > {shlex.quote(waiter_rel)} && "
+            f"mkdir -p var && WLB_PGID=$$ && export WLB_PGID && "
+            f'echo "$WLB_PGID" > {shlex.quote(waiter_rel)} && '
             f"trap 'rm -f {shlex.quote(waiter_rel)}' EXIT && "
             f"flock -o {shlex.quote(REMOTE_LOCK_REL)} "
             f"bash -c {shlex.quote(locked_body)}"

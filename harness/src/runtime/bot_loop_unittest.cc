@@ -74,6 +74,15 @@ class CannedBrain {
     std::move(call.reply).Run(std::move(res));
   }
 
+  void FinishError(const std::string& error) {
+    ASSERT_FALSE(calls_.empty());
+    PendingCall call = std::move(calls_.front());
+    calls_.pop_front();
+    LlmResult res;
+    res.error = error;
+    std::move(call.reply).Run(std::move(res));
+  }
+
   void FinishReply(const std::string& full_text,
                    double first_ms = 60.0,
                    double total_ms = 150.0) {
@@ -1813,12 +1822,17 @@ TEST(BotLoopTest, ChatErrorWakesBrainWithoutStoppingActiveRunner) {
   ASSERT_EQ(brain.size(), 1u);
   brain.FinishReply(
       "do: 1, 2\nexpect: none\nwatch: none\nlook: 60\nsay: pulling boar");
+  uint32_t attack_cmd_id = 0;
   uint32_t say_cmd_id = 0;
   for (const pb::Command& c : sent) {
+    if (c.choose.has_value()) {
+      attack_cmd_id = c.command_id;
+    }
     if (c.say.has_value()) {
       say_cmd_id = c.command_id;
     }
   }
+  ASSERT_NE(attack_cmd_id, 0u);
   ASSERT_NE(say_cmd_id, 0u);
 
   // Chat error with the real say command_id wakes the brain (refusal=false)
@@ -1831,6 +1845,23 @@ TEST(BotLoopTest, ChatErrorWakesBrainWithoutStoppingActiveRunner) {
   ASSERT_EQ(brain.size(), 1u);
   EXPECT_NE(brain.front_request().user.find("chat rate limited"),
             std::string::npos);
+
+  // Even if the chat-error wake fails to return a new plan, state.runner must
+  // still be active: completing attack_cmd_id dispatches step 2 (Keep).
+  brain.FinishError("timeout");
+  pb::Snapshot s2 = s1;
+  s2.seq = 2;
+  s2.done_command_id = attack_cmd_id;
+  s2.base.nearby.units[0].dead = true;
+  const size_t cmds_before_step2 = sent.size();
+  loop.OnSnapshot(s2, t0 + base::Seconds(2));
+  bool dispatched_step2 = false;
+  for (size_t i = cmds_before_step2; i < sent.size(); ++i) {
+    if (sent[i].choose && sent[i].choose->option == 2u) {
+      dispatched_step2 = true;
+    }
+  }
+  EXPECT_TRUE(dispatched_step2);
 }
 
 }  // namespace

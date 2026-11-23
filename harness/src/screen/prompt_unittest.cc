@@ -173,14 +173,15 @@ TEST(PromptTest, SelectRelevantNotesPicksActiveBossAndNeverCutsMidOrder) {
             std::string::npos);
   EXPECT_EQ(selected.find("## Boss 0"), std::string::npos);
 
-  // Friendly players or short names must NOT hijack boss-section matching,
-  // while `snapshot.ext.encounter->boss` matches cleanly.
+  // Friendly players or `self.unit.target` must NOT hijack boss-section
+  // matching, while `snapshot.ext.encounter->boss` matches cleanly.
   wlb::snapshot::Snapshot friendly_snap;
   wlb::snapshot::Unit friendly;
   friendly.name = "Sindragosa";
   friendly.kind = wlb::snapshot::Unit::PLAYER;
   friendly.reaction = wlb::snapshot::Unit::FRIENDLY;
   friendly_snap.base.nearby.units.push_back(friendly);
+  friendly_snap.base.self.unit.target = "Sindragosa";
   EXPECT_EQ(SelectRelevantNotes(icc, friendly_snap).find("## Sindragosa"),
             std::string::npos);
 
@@ -195,6 +196,8 @@ TEST(PromptTest, SelectRelevantNotesPicksActiveBossAndNeverCutsMidOrder) {
   const std::string capped = SelectRelevantNotes(icc, empty);
   EXPECT_LE(capped.size(), 2000u);
   EXPECT_NE(capped.find("## Boss 0"), std::string::npos);
+  EXPECT_EQ(capped.find("[truncated]"), std::string::npos);
+
   // Small files (<= 2,000 B) stay intact so companion/shared sections are never
   // dropped even when a specific boss heading matches.
   const std::string small_notes =

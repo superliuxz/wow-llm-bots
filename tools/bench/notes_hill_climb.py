@@ -317,14 +317,46 @@ def _fisher_one_sided_greater(cand_k: int, cand_n: int, inc_k: int, inc_n: int) 
     return min(1.0, p)
 
 
-def _mood_median_deaths_p(inc_deaths: list[float], cand_deaths: list[float]) -> float:
-    """Two-sample exact Mood's median Fisher test for H1: candidate deaths < incumbent deaths."""
-    if not inc_deaths or not cand_deaths:
+def _mann_whitney_less_p(inc_vals: list[float], cand_vals: list[float]) -> float:
+    """Exact one-sided two-sample Mann-Whitney U permutation p-value (midranks for ties).
+
+    Tests H1: candidate values are stochastically smaller than incumbent values.
+    Handles discrete ties at 0 cleanly without collapsing.
+    """
+    n_inc = len(inc_vals)
+    n_cand = len(cand_vals)
+    if n_inc == 0 or n_cand == 0:
         return 1.0
-    pooled_med = statistics.median(inc_deaths + cand_deaths)
-    cand_below = sum(1 for d in cand_deaths if d < pooled_med - 1e-9)
-    inc_below = sum(1 for d in inc_deaths if d < pooled_med - 1e-9)
-    return _fisher_one_sided_greater(cand_below, len(cand_deaths), inc_below, len(inc_deaths))
+    combined = [(v, 0) for v in inc_vals] + [(v, 1) for v in cand_vals]
+    combined.sort(key=lambda x: x[0])
+    # Assign doubled midranks (always exact integers: 2 * midrank).
+    doubled_ranks: list[int] = [0] * len(combined)
+    i = 0
+    while i < len(combined):
+        j = i + 1
+        while j < len(combined) and abs(combined[j][0] - combined[i][0]) <= 1e-9:
+            j += 1
+        # 1-based positions are (i+1)..j; average is (i+1+j)/2, doubled is (i+1+j).
+        dr = i + 1 + j
+        for k in range(i, j):
+            doubled_ranks[k] = dr
+        i = j
+    obs_sum = sum(dr for dr, (_, grp) in zip(doubled_ranks, combined) if grp == 1)
+    # Exact DP: dp[c][s] = number of subsets of size c with doubled-rank sum s.
+    dp: list[dict[int, int]] = [collections.defaultdict(int) for _ in range(n_cand + 1)]
+    dp[0][0] = 1
+    for dr in doubled_ranks:
+        for c in range(min(n_cand, len(doubled_ranks)) - 1, -1, -1):
+            if not dp[c]:
+                continue
+            dst = dp[c + 1]
+            for s, cnt in dp[c].items():
+                dst[s + dr] += cnt
+    total_ways = math.comb(n_inc + n_cand, n_cand)
+    if total_ways == 0:
+        return 1.0
+    le_ways = sum(cnt for s, cnt in dp[n_cand].items() if s <= obs_sum)
+    return min(1.0, le_ways / total_ways)
 
 
 def _pool_boss_results(
@@ -564,7 +596,7 @@ def validate_standing_orders(notes_md: str) -> tuple[bool, list[str]]:
 
 def summarize_fight_timeline(
     boss_res: dict[str, Any],
-    trace_dir: pathlib.Path | None,
+    trace_dir: pathlib.Path | list[pathlib.Path] | None,
     arm: str = "llm",
     max_wipes: int = 2,
 ) -> str:
@@ -578,8 +610,13 @@ def summarize_fight_timeline(
 
     events_by_bot: dict[str, list[dict[str, Any]]] = {}
     samples_by_bot: dict[str, list[dict[str, Any]]] = {}
-    if trace_dir and trace_dir.exists():
-        for fp in sorted(trace_dir.glob("bot/*/*.jsonl")):
+    trace_dirs: list[pathlib.Path] = []
+    if isinstance(trace_dir, list):
+        trace_dirs = [d for d in trace_dir if d and d.exists()]
+    elif trace_dir and trace_dir.exists():
+        trace_dirs = [trace_dir]
+    for td in trace_dirs:
+        for fp in sorted(td.glob("bot/*/*.jsonl")):
             bot = fp.parent.name
             evts = events_by_bot.setdefault(bot, [])
             smps = samples_by_bot.setdefault(bot, [])
@@ -804,8 +841,8 @@ def run_notes_hill_climb(
 
     base_runs = runs_per_eval + confirm_runs
     base_json = out_dir / "round_0_base.json"
-    best_trace_dir = out_dir / "round_0_traces"
-    best_res = bench(boss_key, best_notes_path, base_runs, parallel, base_json, best_trace_dir)
+    best_trace_dirs: list[pathlib.Path] = [out_dir / "round_0_traces"]
+    best_res = bench(boss_key, best_notes_path, base_runs, parallel, base_json, best_trace_dirs[0])
     best_score = score_from_boss_result(best_res, arm="llm")
     if best_score.runs < base_runs:
         raise RuntimeError(
@@ -856,7 +893,7 @@ def run_notes_hill_climb(
     log_entry(baseline_entry)
 
     for r in range(1, rounds + 1):
-        timeline = summarize_fight_timeline(best_res, best_trace_dir, arm="llm")
+        timeline = summarize_fight_timeline(best_res, best_trace_dirs, arm="llm")
         candidate_notes = propose(boss_name, best_notes, timeline, rejected_history)
         orders_preview = "; ".join(extract_standing_orders(candidate_notes)) or "(no orders)"
         valid, errs = validate_standing_orders(candidate_notes)
@@ -916,8 +953,8 @@ def run_notes_hill_climb(
                 inc_perfect = best_score.runs > 0 and best_score.kills == best_score.runs
                 cand_perfect = pooled_runs > 0 and pooled_kills == pooled_runs
                 if inc_perfect and cand_perfect:
-                    # Two-sample exact Mood's median Fisher test on incumbent vs
-                    # pooled candidate trial death lists (no sample-median Type I inflation).
+                    # Exact two-sample Mann-Whitney U permutation test on incumbent vs
+                    # pooled candidate trial death lists (handles 0-death ties cleanly).
                     inc_trials = [
                         float(t.get("total_deaths", 0.0))
                         for t in best_res.get("trials", [])
@@ -928,17 +965,17 @@ def run_notes_hill_climb(
                         for t in (cand_res.get("trials", []) + conf_res.get("trials", []))
                         if t.get("mode") == "llm"
                     ]
-                    fisher_p = _mood_median_deaths_p(inc_trials, cand_trials)
+                    fisher_p = _mann_whitney_less_p(inc_trials, cand_trials)
                     if inc_trials and cand_trials and fisher_p <= per_round_alpha:
                         reason = (
                             f"confirmed deaths improvement ({conf_reason}; "
-                            f"two-sample Mood median p={fisher_p:.4f} <= {per_round_alpha:.4f})"
+                            f"Mann-Whitney p={fisher_p:.4f} <= {per_round_alpha:.4f})"
                         )
                     else:
                         keep = False
                         reason = (
                             f"deaths improvement not statistically significant "
-                            f"(two-sample Mood median p={fisher_p:.4f} > {per_round_alpha:.4f})"
+                            f"(Mann-Whitney p={fisher_p:.4f} > {per_round_alpha:.4f})"
                         )
                 else:
                     fisher_p = _fisher_one_sided_greater(
@@ -1004,13 +1041,13 @@ def run_notes_hill_climb(
                     ],
                 }
                 cand_score = pooled_score
-                cand_trace_dir = conf_trace_dir
+                new_trace_dirs = [cand_trace_dir, conf_trace_dir]
 
         if keep:
             best_notes = candidate_notes
             best_res = cand_res
             best_score = cand_score
-            best_trace_dir = cand_trace_dir
+            best_trace_dirs = new_trace_dirs
             best_notes_path.write_text(best_notes)
             entry: dict[str, Any] = {
                 "round": r,

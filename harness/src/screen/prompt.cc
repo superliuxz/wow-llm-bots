@@ -203,9 +203,7 @@ std::string SelectRelevantNotes(std::string_view full_notes,
   }
 
   if (sections.empty()) {
-    return full_notes.size() <= kMaxNotesBytes
-               ? std::string(full_notes)
-               : CapText(full_notes, kMaxNotesBytes);
+    return CapText(full_notes, kMaxNotesBytes);
   }
 
   // Collect active boss / hostile NPC unit names (plus encounter boss) to match
@@ -259,12 +257,9 @@ std::string SelectRelevantNotes(std::string_view full_notes,
     return out;
   }
 
-  // No specific boss in range yet: keep full file if it fits, otherwise stop on
-  // a complete `## ` section boundary so we never cut mid-order (and never
-  // return only a bare preamble with zero sections).
-  if (full_notes.size() <= kMaxNotesBytes) {
-    return std::string(full_notes);
-  }
+  // No specific boss in range yet: stop on a complete `## ` section boundary so
+  // we never cut mid-order (and never return only a bare preamble with zero
+  // sections).
   std::string out(preamble);
   bool added_section = false;
   for (const Section& sec : sections) {

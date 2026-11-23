@@ -371,6 +371,36 @@ class RemoteLibTest(unittest.TestCase):
                 finally:
                     _fcntl.flock(held_lock.fileno(), _fcntl.LOCK_UN)
 
+            # 2b-ii) Execute the actual run_remote() setsid+flock+locked_body command locally
+            # and verify _kill_remote_pgid kills the active job using the true session PGID.
+            captured_cmds: list[str] = []
+            with mock.patch.object(remote, "get_remote", return_value=real_spec), \
+                 mock.patch.object(remote, "_remote_lock", side_effect=lambda _: mock.MagicMock()), \
+                 mock.patch.object(remote, "_local_port_open", return_value=False), \
+                 mock.patch("subprocess.run", side_effect=lambda cmd, **kw: (captured_cmds.append(cmd[-1]), mock.Mock(returncode=0))[1]):
+                remote.run_remote("w", ["sleep", "30"], no_sync=True)
+            active_proc = subprocess.Popen(["bash", "-c", captured_cmds[0]])
+            try:
+                pgid_files = []
+                for _ in range(40):
+                    pgid_files = list((real_repo / "var").glob(".active_remote_pgid.*"))
+                    if pgid_files:
+                        break
+                    import time as _time
+                    _time.sleep(0.05)
+                self.assertEqual(len(pgid_files), 1)
+                active_pgid_rel = f"var/{pgid_files[0].name}"
+                with mock.patch("subprocess.run") as m_sub:
+                    remote._kill_remote_pgid(real_spec, pgid_rel=active_pgid_rel, only_if_active=True)
+                kill_active_cmd = m_sub.call_args[0][0][-1]
+                subprocess.run(["bash", "-c", kill_active_cmd], capture_output=True, text=True, check=True)
+                active_proc.wait(timeout=5)
+                self.assertNotEqual(active_proc.returncode, 0)
+            finally:
+                if active_proc.poll() is None:
+                    active_proc.kill()
+                    active_proc.wait(timeout=5)
+
             # 2c) stop(): does not block on REMOTE_LOCK_REL so stuck servers can always be stopped.
             with mock.patch.object(remote, "get_remote", return_value=real_spec), \
                  mock.patch.object(remote, "_remote_lock", side_effect=lambda _: mock.MagicMock()), \

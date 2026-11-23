@@ -483,14 +483,16 @@ class NotesHillClimbTest(unittest.TestCase):
             self.assertEqual(pooled.median_dps, 1600.0)
             self.assertEqual(pooled.median_deaths, 1.0)
 
-            # 3) 100%-kill two-sample Mood's median test keeps clear deaths drop and rejects noise.
-            def make_trials(n, deaths):
-                return [{"mode": "llm", "killed": True, "total_dps": 2000.0, "total_deaths": deaths} for _ in range(n)]
+            # 3) 100%-kill exact Mann-Whitney test handles 0-death ties cleanly (keeps clear
+            # drop even when >=50% of pooled trials have 0 deaths, and rejects noise).
+            def make_trials_list(deaths_list):
+                return [{"mode": "llm", "killed": True, "total_dps": 2000.0, "total_deaths": d} for d in deaths_list]
 
-            seq = iter([
-                {"boss": "B", "by_arm": {"llm": {"kills": 16, "runs": 16, "median_dps": 2000.0, "median_deaths": 3.0}}, "trials": make_trials(16, 3)},
-                {"boss": "B", "by_arm": {"llm": {"kills": 8, "runs": 8, "median_dps": 2000.0, "median_deaths": 0.0}}, "trials": make_trials(8, 0)},
-                {"boss": "B", "by_arm": {"llm": {"kills": 8, "runs": 8, "median_dps": 2000.0, "median_deaths": 0.0}}, "trials": make_trials(8, 0)},
+            # 3a) Zero-tie case: incumbent [0] + [1]*15 vs candidate [0]*16 -> MUST KEEP.
+            seq_zero = iter([
+                {"boss": "B", "by_arm": {"llm": {"kills": 16, "runs": 16, "median_dps": 2000.0, "median_deaths": 1.0}}, "trials": make_trials_list([0] + [1] * 15)},
+                {"boss": "B", "by_arm": {"llm": {"kills": 8, "runs": 8, "median_dps": 2000.0, "median_deaths": 0.0}}, "trials": make_trials_list([0] * 8)},
+                {"boss": "B", "by_arm": {"llm": {"kills": 8, "runs": 8, "median_dps": 2000.0, "median_deaths": 0.0}}, "trials": make_trials_list([0] * 8)},
             ])
             res_d = nhc.run_notes_hill_climb(
                 boss_key="loken",
@@ -499,11 +501,57 @@ class NotesHillClimbTest(unittest.TestCase):
                 rounds=1,
                 runs_per_eval=8,
                 confirm_runs=8,
-                bench_fn=lambda *a: next(seq),
+                bench_fn=lambda *a: next(seq_zero),
                 propose_fn=lambda *a: "# Better\n- `in Fire -> out of it`\n",
             )
             self.assertEqual(res_d["rounds"][1]["status"], "kept")
             self.assertEqual(res_d["best_score"]["median_deaths"], 0.0)
+
+            # 3b) Noise case: incumbent [0]*7 + [1]*9 vs candidate [0]*9 + [1]*7 -> MUST REJECT.
+            seq_noise = iter([
+                {"boss": "B", "by_arm": {"llm": {"kills": 16, "runs": 16, "median_dps": 2000.0, "median_deaths": 1.0}}, "trials": make_trials_list([0] * 7 + [1] * 9)},
+                {"boss": "B", "by_arm": {"llm": {"kills": 8, "runs": 8, "median_dps": 2000.0, "median_deaths": 0.0}}, "trials": make_trials_list([0] * 5 + [1] * 3)},
+                {"boss": "B", "by_arm": {"llm": {"kills": 8, "runs": 8, "median_dps": 2000.0, "median_deaths": 0.5}}, "trials": make_trials_list([0] * 4 + [1] * 4)},
+            ])
+            res_noise = nhc.run_notes_hill_climb(
+                boss_key="loken",
+                initial_notes="# Base\n",
+                out_dir=pathlib.Path(tmp) / "deaths_noise",
+                rounds=1,
+                runs_per_eval=8,
+                confirm_runs=8,
+                bench_fn=lambda *a: next(seq_noise),
+                propose_fn=lambda *a: "# Noisy\n- `in Fire -> out of it`\n",
+            )
+            self.assertEqual(res_noise["rounds"][1]["status"], "rejected")
+            self.assertIn("not statistically significant", res_noise["rounds"][1]["reason"])
+
+            # 3c) summarize_fight_timeline reads traces across a list of trace dirs (cand + confirm).
+            td1 = pathlib.Path(tmp) / "td1"
+            td2 = pathlib.Path(tmp) / "td2"
+            (td1 / "bot" / "Loada").mkdir(parents=True)
+            (td2 / "bot" / "Loada").mkdir(parents=True)
+            (td1 / "bot" / "Loada" / "t.jsonl").write_text(
+                json.dumps({"kind": "event", "t_ms": 11000, "event": "damage_taken", "detail": "CandSpell", "value": 5000}) + "\n"
+            )
+            (td2 / "bot" / "Loada" / "t.jsonl").write_text(
+                json.dumps({"kind": "event", "t_ms": 21000, "event": "damage_taken", "detail": "ConfSpell", "value": 6000}) + "\n"
+            )
+            tl = nhc.summarize_fight_timeline(
+                {
+                    "boss": "B",
+                    "by_arm": {"llm": {"kills": 0, "runs": 2}},
+                    "trials": [
+                        {"mode": "llm", "killed": False, "duration_s": 5.0, "total_dps": 1000, "total_deaths": 5, "party_index": 0, "pull_ms": 10000},
+                        {"mode": "llm", "killed": False, "duration_s": 5.0, "total_dps": 1000, "total_deaths": 5, "party_index": 0, "pull_ms": 20000},
+                    ],
+                },
+                [td1, td2],
+                arm="llm",
+                max_wipes=2,
+            )
+            self.assertIn("CandSpell=5000", tl)
+            self.assertIn("ConfSpell=6000", tl)
 
             # 4) Noisy 1-kill held-out dip (7/8 vs 8/8, p=0.5 > 0.10) does NOT falsely reject.
             def fake_ho(boss_key, notes_path, runs, parallel, out_json, trace_dir):
