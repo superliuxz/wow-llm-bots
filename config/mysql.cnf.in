@@ -6,6 +6,7 @@ pid-file=@ROOT@/out/server/run/mysqld.pid
 log-error=@ROOT@/var/logs/mysql.log
 bind-address=127.0.0.1
 port=3306
+skip-name-resolve
 mysqlx=OFF
 secure-file-priv=@ROOT@/var/mysql-files
 character-set-server=utf8mb4

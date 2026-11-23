@@ -46,11 +46,24 @@ def _mysql_up():
                           capture_output=True).returncode == 0
 
 
-def _ensure_local_db_initialized():
-    """Creates required MySQL dirs/secret (mode 700/600) and initializes an empty datadir."""
-    for d in (VAR / "mysql-data", VAR / "mysql-files", LOGS, PLAY.run, SECRETS):
+def _ensure_local_db_initialized(*, allow_init: bool = False):
+    """Creates required MySQL dirs/secret (mode 700/600) and initializes an empty datadir when allowed."""
+    mysql_data = VAR / "mysql-data"
+    if not (mysql_data / "mysql").is_dir():
+        if not allow_init:
+            raise Failed(
+                f"MySQL datadir missing ({mysql_data}/mysql). "
+                "Refusing to silently initialize a fresh database on the play server; "
+                "pass `tools/wlb db start --init` if you intend to create a brand-new database."
+            )
+        if mysql_data.is_dir() and any(mysql_data.iterdir()):
+            raise Failed(
+                f"MySQL datadir {mysql_data} is non-empty but missing mysql/ system tables; "
+                "refusing to run --initialize-insecure over existing files"
+            )
+    for d in (mysql_data, VAR / "mysql-files", LOGS, PLAY.run, SECRETS):
         d.mkdir(parents=True, exist_ok=True)
-    # Protect the passwordless-root MySQL socket dir and DB secret dir on test-only workers.
+    # Protect the passwordless-root MySQL socket dir and DB secret dir.
     PLAY.run.chmod(0o700)
     SECRETS.chmod(0o700)
     if not DB_PASSWORD.exists():
@@ -65,7 +78,7 @@ def _ensure_local_db_initialized():
                 os.write(fd, (_secrets.token_hex(16) + "\n").encode("ascii"))
             finally:
                 os.close(fd)
-    if not (VAR / "mysql-data" / "mysql").is_dir():
+    if not (mysql_data / "mysql").is_dir():
         say("initializing fresh project-local MySQL datadir...")
         run(["mysqld", f"--defaults-file={MYSQL_CNF}", "--initialize-insecure"])
         return True
@@ -74,16 +87,20 @@ def _ensure_local_db_initialized():
 
 def _ensure_acore_users():
     pw = _db_password().replace("'", "''")
+    # Never leave passwordless TCP root accounts on 127.0.0.1 / ::1 / %; root is
+    # Unix-socket-only via the mode-0700 out/server/run/mysql.sock (with skip-name-resolve).
+    for host in ("127.0.0.1", "::1", "%"):
+        _sql(f"DROP USER IF EXISTS 'root'@'{host}'")
     for host in ("127.0.0.1", "localhost"):
         _sql(f"CREATE USER IF NOT EXISTS 'acore'@'{host}' IDENTIFIED BY '{pw}'")
 
 
-def db_start():
+def db_start(*, allow_init: bool = False):
     """Starts the project-local MySQL (Percona) in the background, from config/mysql.cnf.in."""
     ETC.mkdir(parents=True, exist_ok=True)
     MYSQL_CNF.write_text((ROOT / "config" / "mysql.cnf.in").read_text()
                          .replace("@ROOT@", str(ROOT)))
-    _ensure_local_db_initialized()
+    _ensure_local_db_initialized(allow_init=allow_init)
     if _mysql_up():
         _ensure_acore_users()
         say("mysql already running")
@@ -299,7 +316,7 @@ def server_start(inst=PLAY):
     # MySQL's socket (root, no password) and the brain and console pipes: this user only.
     inst.run.chmod(0o700)
     inst.logs.mkdir(parents=True, exist_ok=True)
-    db_start()
+    db_start(allow_init=not play)
     if play and not running_pid("authserver"):
         _start_detached("authserver", ["./authserver", "-c", "../etc/authserver.conf"],
                         inst.bin, LOGS / "authserver.out")
@@ -509,7 +526,7 @@ def test_databases_reset():
     AzerothCore or playerbots moved on), the test server is started once on its databases to set
     them up (a few minutes for an empty world database), and the golden copy is made from the
     result. The test server must be stopped."""
-    db_start()
+    db_start(allow_init=True)
     have = _databases()
     golden = all(GOLDEN_PREFIX + n in have for n in STATE_NAMES)
     key = _golden_key()

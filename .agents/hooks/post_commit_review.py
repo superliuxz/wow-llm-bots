@@ -6,17 +6,17 @@ Events handled (configured in `.agents/hooks.json`):
     if missing.
   - PostToolUse (`run_command`): under an exclusive non-blocking file lock
     (`var/review/review.lock`), whenever `HEAD` advances to a strict descendant
-    of `var/review/last_reviewed_sha`, writes `var/review/patch_<short_sha>.patch`
-    (`last_reviewed..HEAD`, plus `var/review/head.patch`), spawns a detached
-    `agy --mode plan --print=<prompt>` process in its own top-level conversation
-    with a minimal sanitized environment, and updates `last_reviewed_sha` ONLY
-    after the spawn succeeds. Non-descendant `HEAD` moves (checkout, reset,
-    amend) advance `last_reviewed_sha` without spawning a review.
+    or an amend of `var/review/last_reviewed_sha`, writes `var/review/patch_<short_sha>.patch`
+    (`last_reviewed..HEAD` or `git show HEAD` for an amend, plus `var/review/head.patch`),
+    spawns a detached `agy --mode plan --sandbox --print=<prompt>` process in its own
+    top-level conversation with a minimal sanitized environment, and updates
+    `last_reviewed_sha` ONLY after the spawn succeeds. Other non-descendant `HEAD` moves
+    (checkout, reset) advance `last_reviewed_sha` without spawning a review.
 
 Security / operational notes:
-  - `agy` currently has no `--sandbox` flag; `--mode plan` restricts the
-    reviewer to read-only inspection, and the prompt instructs it to treat
-    commit messages/diffs as untrusted data.
+  - `--mode plan --sandbox` restricts the reviewer to read-only inspection with
+    terminal restrictions enabled, and the prompt instructs it to treat commit
+    messages/diffs as untrusted data.
   - Loop guard: `WLB_COMMIT_REVIEWER=1` is passed in the child env (note: may
     not propagate if tool execution occurs inside a separate daemon such as
     `jetski-hub`; non-descendant skipping + `review.lock` provide additional
@@ -30,6 +30,7 @@ import fcntl
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -82,6 +83,23 @@ def _is_ancestor(ancestor: str, descendant: str, cwd: pathlib.Path = ROOT) -> bo
     return _git("merge-base", "--is-ancestor", ancestor, descendant, cwd=cwd).returncode == 0
 
 
+def _commit_parents(sha: str, cwd: pathlib.Path = ROOT) -> list[str] | None:
+    res = _git("rev-list", "--parents", "-n", "1", sha, cwd=cwd)
+    if res.returncode != 0:
+        return None
+    parts = res.stdout.strip().split()
+    return parts[1:] if parts else None
+
+
+def _is_amend_of(prev_sha: str, head_sha: str, cwd: pathlib.Path = ROOT) -> bool:
+    """True when `head_sha` is a different commit sharing the exact same parent(s) as `prev_sha`."""
+    if not prev_sha or not head_sha or prev_sha == head_sha:
+        return False
+    prev_parents = _commit_parents(prev_sha, cwd=cwd)
+    head_parents = _commit_parents(head_sha, cwd=cwd)
+    return prev_parents is not None and head_parents is not None and prev_parents == head_parents
+
+
 def _find_agy() -> str | None:
     found = shutil.which("agy")
     if found:
@@ -104,6 +122,8 @@ def _write_range_patch(
     head_sha: str,
     cwd: pathlib.Path = ROOT,
     review_dir: pathlib.Path = REVIEW_DIR,
+    *,
+    is_amend: bool = False,
 ) -> pathlib.Path:
     review_dir.mkdir(parents=True, exist_ok=True)
     short_head = head_sha[:7]
@@ -111,16 +131,22 @@ def _write_range_patch(
     branch = _git_stdout("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd)
     recent_log = _git_stdout("log", "-n", "5", "--oneline", cwd=cwd)
     status = _git_stdout("status", "--short", cwd=cwd)
-    rev_range = f"{base_sha}..{head_sha}"
-    commit_count = _git_stdout("rev-list", "--count", rev_range, cwd=cwd)
-    if commit_count == "1":
+    if is_amend:
         patch = _git_stdout("show", head_sha, "--stat", "-p", cwd=cwd)
-        range_label = f"git show {short_head} --stat -p"
+        range_label = f"git show {short_head} --stat -p (amended from {short_base})"
+        range_header = f"Amended Commit: {short_head} (replaced {short_base}, HEAD={head_sha})"
     else:
-        patch = _git_stdout("log", "--reverse", "--stat", "-p", rev_range, cwd=cwd)
-        range_label = f"git log --reverse --stat -p {short_base}..{short_head}"
+        rev_range = f"{base_sha}..{head_sha}"
+        commit_count = _git_stdout("rev-list", "--count", rev_range, cwd=cwd)
+        if commit_count == "1":
+            patch = _git_stdout("show", head_sha, "--stat", "-p", cwd=cwd)
+            range_label = f"git show {short_head} --stat -p"
+        else:
+            patch = _git_stdout("log", "--reverse", "--stat", "-p", rev_range, cwd=cwd)
+            range_label = f"git log --reverse --stat -p {short_base}..{short_head}"
+        range_header = f"Commit Range: {short_base}..{short_head} ({commit_count or '?'} commit(s), HEAD={head_sha})"
     content = (
-        f"Commit Range: {short_base}..{short_head} ({commit_count or '?'} commit(s), HEAD={head_sha})\n"
+        f"{range_header}\n"
         f"Branch: {branch}\n\n"
         f"=== Recent Commits (git log -n 5 --oneline) ===\n{recent_log}\n\n"
         f"=== Working Tree Status (git status --short) ===\n{status or '(clean)'}\n\n"
@@ -187,6 +213,7 @@ def _spawn_reviewer(
                     bin_path,
                     "--mode",
                     "plan",
+                    "--sandbox",
                     "--print-timeout",
                     "600s",
                     "--disable-slash-commands",
@@ -270,7 +297,7 @@ def format_review_status(review_dir: pathlib.Path = REVIEW_DIR) -> str:
                 err_text = err_file.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 err_text = ""
-        if "AGY_ERROR" in err_text or "error:" in err_text.lower():
+        if "AGY_ERROR" in err_text or re.search(r"(?im)^(?:error|fatal):", err_text):
             reason = "print_timeout" if "print_timeout" in err_text else "error"
             return f"FAILED ({reason}): {resolved.name} ({size} bytes) -> see var/review/{err_file.name}"
         if size == 0:
@@ -324,12 +351,18 @@ def handle_post_tool_use(
                 return "seeded"
             if full_sha == last_reviewed:
                 return "unchanged"
+            is_amend = False
             if not _is_ancestor(last_reviewed, full_sha, cwd=root):
-                # Checkout, reset, or amend: advance marker without spawning a review.
-                _write_last_reviewed(full_sha, last_file)
-                return "non_descendant"
+                if _is_amend_of(last_reviewed, full_sha, cwd=root):
+                    is_amend = True
+                else:
+                    # Checkout or reset: advance marker without spawning a review.
+                    _write_last_reviewed(full_sha, last_file)
+                    return "non_descendant"
 
-            patch_file = _write_range_patch(last_reviewed, full_sha, cwd=root, review_dir=review_dir)
+            patch_file = _write_range_patch(
+                last_reviewed, full_sha, cwd=root, review_dir=review_dir, is_amend=is_amend
+            )
             do_skip = (
                 (os.environ.get("WLB_SKIP_COMMIT_REVIEW") == "1")
                 if skip_review is None

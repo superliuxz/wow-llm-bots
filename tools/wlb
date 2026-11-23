@@ -50,6 +50,8 @@ def parse(argv):
     p = sub.add_parser("db", help="the project-local MySQL")
     p.add_argument("action", choices=["start", "stop", "backup"])
     p.add_argument("--keep", type=int, default=14, help="for backup: how many to keep")
+    p.add_argument("--init", action="store_true",
+                   help="for start: allow initializing a brand-new MySQL datadir if missing")
 
     p = sub.add_parser("config", help="render the server's config from config/*.overrides")
     p.add_argument("test", nargs="?", help="a test config: config/tests/TEST.*.overrides")
@@ -140,7 +142,7 @@ def main():
         else:
             build.server(test=a.test)
     elif a.command == "db":
-        {"start": server.db_start, "stop": server.db_stop,
+        {"start": lambda: server.db_start(allow_init=a.init), "stop": server.db_stop,
          "backup": lambda: server.db_backup(a.keep)}[a.action]()
     elif a.command == "config":
         server.config(a.test)

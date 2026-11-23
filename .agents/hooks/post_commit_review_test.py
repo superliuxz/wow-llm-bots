@@ -74,13 +74,31 @@ class PostCommitReviewHookTest(unittest.TestCase):
             self.assertEqual(status, "spawned")
             self.assertEqual(len(calls), 1)
             cmd, kw = calls[0]
-            self.assertEqual(cmd[:5], ["/usr/bin/agy", "--mode", "plan", "--print-timeout", "600s"])
+            self.assertEqual(cmd[:6], ["/usr/bin/agy", "--mode", "plan", "--sandbox", "--print-timeout", "600s"])
             self.assertTrue(cmd[-1].startswith("--print="))
             self.assertEqual(kw["env"].get(post_commit_review.REVIEWER_ENV), "1")
             patch_text = (review_dir / f"patch_{c3[:7]}.patch").read_text(encoding="utf-8")
             self.assertIn("commit two", patch_text)
             self.assertIn("commit three", patch_text)
             self.assertEqual((review_dir / "last_reviewed_sha").read_text(encoding="utf-8").strip(), c3)
+
+            # Amended commit (same parent, new SHA) MUST be reviewed.
+            (repo / "c.txt").write_text("c2-amended\n", encoding="utf-8")
+            subprocess.run(["git", "add", "c.txt"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "--amend", "-m", "commit three amended"], cwd=repo, check=True)
+            c3_amended = post_commit_review._git_stdout("rev-parse", "HEAD", cwd=repo)
+            status_amend = post_commit_review.handle_post_tool_use(
+                root=repo,
+                review_dir=review_dir,
+                agy_bin="/usr/bin/agy",
+                popen_fn=lambda cmd, **kw: calls.append((cmd, kw)),
+                skip_review=False,
+            )
+            self.assertEqual(status_amend, "spawned")
+            self.assertEqual(len(calls), 2)
+            amend_patch = (review_dir / f"patch_{c3_amended[:7]}.patch").read_text(encoding="utf-8")
+            self.assertIn("commit three amended", amend_patch)
+            self.assertIn("c2-amended", amend_patch)
 
             # Non-descendant move (reset back to c1) updates marker without spawning.
             subprocess.run(["git", "reset", "--hard", "-q", c1], cwd=repo, check=True)
@@ -92,7 +110,7 @@ class PostCommitReviewHookTest(unittest.TestCase):
                 skip_review=False,
             )
             self.assertEqual(status_reset, "non_descendant")
-            self.assertEqual(len(calls), 1)
+            self.assertEqual(len(calls), 2)
             self.assertEqual((review_dir / "last_reviewed_sha").read_text(encoding="utf-8").strip(), c1)
 
     def test_failed_spawn_does_not_advance_last_reviewed_and_flock_blocks_concurrent(self):
@@ -184,7 +202,17 @@ class PostCommitReviewHookTest(unittest.TestCase):
                 cap_err = post_commit_review.format_review_status(review_dir)
             self.assertIn("FAILED (error)", cap_err)
 
+            # Benign info log mentioning "error:" mid-line does NOT falsely mark DONE as FAILED.
+            out.write_text("clean review\n", encoding="utf-8")
+            (review_dir / "review_abc1234.err").write_text(
+                "info: checked handling of error: code paths\n", encoding="utf-8"
+            )
+            with mock.patch.object(post_commit_review, "_pid_is_reviewer", return_value=False):
+                benign_ok = post_commit_review.format_review_status(review_dir)
+            self.assertIn("DONE", benign_ok)
+
             # Empty 0-byte output with clean .err reports FAILED (empty_output).
+            out.write_text("", encoding="utf-8")
             (review_dir / "review_abc1234.err").write_text("", encoding="utf-8")
             with mock.patch.object(post_commit_review, "_pid_is_reviewer", return_value=False):
                 empty_fail = post_commit_review.format_review_status(review_dir)

@@ -9,21 +9,64 @@ Last updated 2026-11-22.
 
 ## In progress
 
-*(None — Phases 1–3 are signed off; see [`docs/benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md`](benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md) and `## Done` below. Phase 4 `B1–B3` is next.)*
+### Deep Review Findings (2026-11-22 — ordered: High 1 + Medium 5 → High 2 + Medium 3 → Medium 4 → Medium 6–10 → Lows)
+
+**High**
+- [x] **H1 — Invite fix crashes worldserver (`bot_manager.cc:62`):** fixed by heap-allocating `new BlockAutoInviteListener(key)` per `Engine` (owned by `ActionExecutionListeners`, self-deregistering its `uintptr_t` key in `~BlockAutoInviteListener()` on logout/shutdown) and adding `llmtest logout` + logout/relogin check in `e2e_invite.py`. Live-verified via `tools/wlb test e2e invite` (`PASS`, `5.7 s`).
+- [ ] **H2 — C2 notes loop keeps noise (`notes_hill_climb.py`):** with identical candidates, `P(>= 1 KEEP in 3 rounds)` is `0.41–0.50` with default `3+3` runs and `0.66–0.71` without confirmation (`kaelthas_v4` KEEP `0/2 -> 1/2`, DPS `-13.8%` is that case). Fix: require confirmation runs and use a statistically sound sample size / sequential test with a fixed error rate.
+
+**Medium**
+- [ ] **M3 — Notes loop scoring (`notes_hill_climb.py`, `bench_bosses.py`):** (a) `"damage taken lower"` rewards wiping faster; (b) fewer valid runs can buy a KEEP (`1/1` beats `1/3`); (c) no held-out pull, so notes overfit to the bench setup; (d) `notes_hill_climb.py` and `bench_bosses.py` aren't locked and the ledger records no flags or code hash. Fix: score per trial with a fixed `n`, add held-out pulls, lock (requires user OK for `scorer.sha256` relock per Rule #6) and log both scripts + flags + code hash.
+- [ ] **M4 — Phase 1–3 sign-off overclaim:** v3 (`52/80` vs `35/80`, `p = 0.0109`, `p_holm3 = 0.0326`) was the 3rd attempt; v1 was `23/40` vs `22/40` and v2 was `21/40` vs `19/40` (all three combined `p = 0.033`). Between v2 and v3, `3b5cae8` added the Kael Arcane Sphere order, and Kael + Ikiss make up the whole `+17`. Pooled comparison wasn't pre-declared, and the agent waived Kael's `-20%` DPS and signed off Phases 1–3 itself. Fix: report all three runs and the combined result in the benchmark doc and `docs/TODO.md`; leave the sign-off decision to the user.
+- [x] **M5 — `wlb remote sync` unguarded `rsync --delete`:** added `_validate_remote_repo` (refusing `~`, `/`, `$HOME`, `..`, top-level system dirs) and remote `_verify_remote_sync_target` guard before `rsync --delete` (refusing `/`, `$HOME`, any ancestor of `$HOME`, and any target lacking `tools/wlb` or `.wlb-remote-repo` sentinel; added `/.wlb-remote-repo` to `RSYNC_EXCLUDES`). Unit-tested in `tools/wlblib/remote_test.py` (`23/23`).
+- [ ] **M6 — A5 assist options named `"'s target"`, not the mob:** `expect:` misses it and every assist pull wakes the brain urgently (plain `Attack` option doesn't). Fix: name the mob in the option.
+- [ ] **M7 — Kept movement order cancelled by the plan's own step gives urgent `"standing order failed"` wake:** when cancel arrives after the reply, it wakes urgently (more frequent now that orders are kept). Fix: don't report cancels caused by the bot's own plan.
+- [ ] **M8 — Chat rate limit (1 s) drops a plan's `tell` when the same reply also has a `say`:** and the error has `command_id = 0` so the brain never learns. Fix: queue rather than drop (or space them in the harness) and give any error the real `command_id`.
+- [ ] **M9 — Audited notes that still contradict the boss scripts (`content/notes/`):**
+  - Sindragosa `Ice Tomb appears -> target nearest Ice Tomb`: script holds tombs at 50% for LoS during Frost Bomb;
+  - LK `Quake cast -> out of it`: script moves to 40 yd from the boss;
+  - Ick's `Pursuit` is a fixate;
+  - Razorscale's `Whirlwind` belongs to the Sentinel;
+  - Rotface's `Explosion cast` matches no spell.
+  Fix each against the boss scripts.
+- [ ] **M10 — ICC (`2,803 B`) and Ulduar (`2,045 B`) notes exceed the 2,000-byte notes cap:** cut mid-order (`"Kinetic Bomb ap"`), so Sindragosa and Valithria never reach the model while grammar still offers names from the whole file. Fix: split notes per boss and load only the current boss's (matching grammar names to loaded notes).
+
+**Low (Acts)**
+- [ ] **L-Act1:** Orders stay in force after leaving the instance.
+- [ ] **L-Act2:** A6 items vanish from the options while casting, and only the first 12 items in bag order are listed.
+- [ ] **L-Act3:** `FinishDodgeAct` can re-select a target the brain had just told the bot to avoid.
+
+**Low (Module)**
+- [ ] **L-Mod1:** Invites stay pending forever and block other invites.
+- [ ] **L-Mod2:** Dead bots no longer hear `say`.
+- [ ] **L-Mod3:** Chat blocked by another script is reported as said.
+- [ ] **L-Mod4:** Hidden-trigger areas have no line-of-sight check and use the friendly flag.
+- [ ] **L-Mod5:** Item-use success is inferred from aura or mana changes.
+
+**Low (Grammar)**
+- [ ] **L-Gram1:** `999.x` silently dropped an order in 1 of 150 plans.
+- [ ] **L-Gram2:** The digit filter drops real names (`VX-001`).
+- [ ] **L-Gram3:** The Python `orders.wlb` validator differs from the real parser (accepts `kite it, then`, rejects 6 of 40k valid orders) and is the only check on the 41 files.
+- [ ] **L-Gram4:** A mistyped `orders:` line is dropped silently.
+
+**Low (Tools)**
+- [x] **L-Tool1:** `db_start(allow_init=False)` now refuses to silently initialize a missing/partial datadir on the play server (opt in via `tools/wlb db start --init`; test server / `test_databases_reset` pass `allow_init=True`); added `skip-name-resolve` in `config/mysql.cnf.in` and `DROP USER IF EXISTS 'root'@'127.0.0.1'/'::1'/'%'` in `_ensure_acore_users()`. Unit-tested in `tools/wlblib/remote_test.py`.
+- [x] **L-Tool2:** Exit `255` in `run_remote` now calls `_kill_remote_pgid(spec, only_if_active=True)`, skipping test-server stop when `ACTIVE_PGID_REL` was already cleaned up by a normal exit `255`. Unit-tested in `tools/wlblib/remote_test.py`.
+- [x] **L-Tool3:** Remote build, `run_remote`, and `stop` now take a remote `flock` on `var/.remote.lock` in addition to the local lock. Unit-tested in `tools/wlblib/remote_test.py`.
+- [x] **L-Tool4:** Tightened `.agents/rules/contributing.md` Rule #8 and `CONTRIBUTING.md` so agents only use `tools/wlb remote` when explicitly requested by the user.
+- [x] **L-Tool5:** Updated `.agents/hooks/post_commit_review.py` to pass `--sandbox` (and fixed its docstring), review amended commits (`_is_amend_of`), and anchor `FAILED` stderr matching to `"AGY_ERROR"` or line-start `error:`/`fatal:`. Unit-tested in `.agents/hooks/post_commit_review_test.py` (`5/5`).
+
+**Unconfirmed (needs human trace)**
+- [ ] **Unconfirmed — Raw-turn fix:** may read smooth human mouse turns as snaps; needs one human trace check to settle.
 
 ## Next, in order
 
 **Priority direction (2026-11-21):** Mechanical WoW competence (dungeons, raids/ICC, clearing quests,
-soloing elite quests, smart gearing) takes priority over `"human-like"` mimicry (`D`). **Phases 1–3
-are signed off** (see [`docs/benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md`](benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md):
-single-codebase `n = 16` 5-boss benchmark `llm` `52/80` (`65.0%`) beats `no_brain` `35/80` (`43.8%`,
-`p_raw = 0.0109, p_holm3 = 0.0326`; `Ikiss` `12/16` vs `2/16`, `p_holm15 = 0.0135`, with `+10` Ikiss
-and `+6` Kael'thas driving the edge; numerically ahead of `llm_no_notes` `43/80` `p_holm3 = 0.1977`
-and `baseline` `40/80` `p_holm3 = 0.1564`, n.s.; 4/5 bosses within `3%` DPS of `llm_no_notes`, with
-an explicit waiver for Kael'thas `-20.2%` all-trial / `-15.9%` kill-only DPS trade-off that lifts
-kills `9/16` vs `4/16`, and caveats on Murmur `10/16` vs `14/16` and `n = 2` split-host Patchwerk
-`2/2` / ICC Marrowgar `1/2`; all 41/41 `content/notes/` audited & regression-tested). **Phase 4
-(`B1–B3`) is next.**
+soloing elite quests, smart gearing) takes priority over `"human-like"` mimicry (`D`). **Phase 1–3
+sign-off is pending the user's decision** (see M4 above and
+[`docs/benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md`](benchmarks/2026-11-22-phase1-phase3-five-boss-n16.md):
+v1 `23/40` vs `22/40`, v2 `21/40` vs `19/40`, v3 `52/80` vs `35/80`; combined `p = 0.033`). **Phase 4
+(`B1–B3`) is next once review items are closed and sign-off is decided.**
 
 1. **Phase 4 — Mechanical open-world competence: questing, solo elite quests, smart gearing & zero stalls (`B1–B3`)**
    *(Done when: quests per hour within `30%` of human traces, solo elite quests & smart gear

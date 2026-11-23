@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -36,12 +37,30 @@ struct BotStrategyOverride {
   std::string non_combat;
 };
 
+// World-thread-only set of Engines that currently own a
+// BlockAutoInviteListener. Keyed by uintptr_t so the listener's destructor can
+// deregister itself when ActionExecutionListeners::~ActionExecutionListeners()
+// deletes it on bot logout/shutdown, preventing duplicate registrations and
+// address-reuse bugs.
+std::unordered_set<uintptr_t>& AutoInviteBlockedEngines() {
+  static auto* set = new std::unordered_set<uintptr_t>();
+  return *set;
+}
+
 // Prevents Playerbots' `default` strategy (`WorldPacketHandlerStrategy`) from
 // auto-accepting or auto-declining group invitations before the LLM brain can
 // see the pending invite and decide (`Accept group invite` / `Decline group
-// invite`). Attached idempotently to each brain bot's active Engine.
+// invite`). Owned by the Engine's ActionExecutionListeners (which `delete`s
+// every listener on Engine destruction).
 class BlockAutoInviteListener final : public ActionExecutionListener {
  public:
+  explicit BlockAutoInviteListener(uintptr_t engine_key)
+      : engine_key_(engine_key) {
+    AutoInviteBlockedEngines().insert(engine_key_);
+  }
+  ~BlockAutoInviteListener() override {
+    AutoInviteBlockedEngines().erase(engine_key_);
+  }
   bool Before(Action* /*action*/, Event /*event*/) override { return true; }
   bool AllowExecution(Action* action, Event /*event*/) override {
     return !(action && action->getName() == "accept invitation");
@@ -52,6 +71,9 @@ class BlockAutoInviteListener final : public ActionExecutionListener {
                       Event /*event*/) override {
     return executed;
   }
+
+ private:
+  uintptr_t engine_key_;
 };
 
 void EnsureBlockAutoInvite(PlayerbotAI* ai) {
@@ -59,9 +81,11 @@ void EnsureBlockAutoInvite(PlayerbotAI* ai) {
     return;
   }
   if (Engine* engine = ai->GetCurrentEngine()) {
-    static BlockAutoInviteListener listener;
-    engine->removeActionExecutionListener(&listener);
-    engine->AddActionExecutionListener(&listener);
+    const uintptr_t key = reinterpret_cast<uintptr_t>(engine);
+    if (AutoInviteBlockedEngines().contains(key)) {
+      return;
+    }
+    engine->AddActionExecutionListener(new BlockAutoInviteListener(key));
   }
 }
 

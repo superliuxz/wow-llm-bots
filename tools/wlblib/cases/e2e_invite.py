@@ -13,7 +13,8 @@ import socket
 import sys
 import time
 
-from wlblib.common import ROOT, TEST
+from wlblib import server
+from wlblib.common import ROOT, TEST, running_pid
 from wlblib.testing import expect
 
 sys.path.insert(0, str(ROOT / "tools" / "snapshot"))
@@ -142,4 +143,29 @@ def run(stack):
     expect(accept_sent, "Test never reached brain-driven Accept group invite")
     expect(not errors, f"Invite/Accept produced errors: {errors}")
     expect(grouped, "Telda did not join Loada's party after brain accepted invite")
-    return "Telda held invite >= 2.0 s and joined Loada's party when brain accepted"
+
+    # Verify bot logout destroys the Engine + BlockAutoInviteListener cleanly without
+    # crashing worldserver (regression test for static-listener double-free on logout).
+    log_path = TEST.logs / "worldserver.out"
+    log_before = log_path.read_text(errors="replace") if log_path.exists() else ""
+    logins_before = log_before.count("Bot Telda logged in")
+    server.console("llmtest logout Telda", inst=TEST)
+    # Wait for logout confirmation and BotManager to log Telda back in.
+    relogin_deadline = time.time() + 25.0
+    saw_logout = False
+    saw_relogin = False
+    while time.time() < relogin_deadline:
+        expect(running_pid("worldserver", TEST) is not None,
+               "worldserver crashed after logging out Telda!")
+        text = log_path.read_text(errors="replace") if log_path.exists() else ""
+        if "llmtest: logged out Telda" in text:
+            saw_logout = True
+        if saw_logout and text.count("Bot Telda logged in") > logins_before:
+            saw_relogin = True
+            break
+        time.sleep(0.5)
+    expect(saw_logout, "llmtest logout Telda did not execute")
+    expect(saw_relogin, "Telda did not log back in after logout")
+    expect(running_pid("worldserver", TEST) is not None,
+           "worldserver crashed after Telda logged back in!")
+    return "Telda held invite >= 2.0 s, joined Loada's party, and survived logout/relogin without crash"

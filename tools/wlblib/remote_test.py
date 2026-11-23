@@ -44,12 +44,59 @@ class RemoteLibTest(unittest.TestCase):
             for bad in (
                 {"../escape": {"ssh": "u@h", "repo": "/r"}},
                 {"ok": {"ssh": "", "repo": "/r"}},
+                {"ok": {"ssh": "u@h", "repo": "~"}},
+                {"ok": {"ssh": "u@h", "repo": "~/"}},
+                {"ok": {"ssh": "u@h", "repo": "/"}},
+                {"ok": {"ssh": "u@h", "repo": "/home"}},
+                {"ok": {"ssh": "u@h", "repo": "~/../other"}},
+                {"ok": {"ssh": "u@h", "repo": "$HOME"}},
                 {"ok": {"ssh": "u@h", "repo": "/r", "llm_port": True}},
                 {"ok": {"ssh": "u@h", "repo": "/r", "llm_port": 70000}},
             ):
                 cfg.write_text(json.dumps(bad))
                 with self.assertRaises(Failed):
                     remote.load_remotes(cfg)
+
+    def test_verify_remote_sync_target_refuses_home_ancestors_and_missing_sentinel(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            fake_home = root / "home" / "u"
+            target = fake_home / "wow-llm-bots"
+            target.mkdir(parents=True)
+            env = {**os.environ, "HOME": str(fake_home)}
+
+            def _exec_guard(spec: remote.RemoteSpec) -> subprocess.CompletedProcess[str]:
+                with mock.patch.object(remote, "run") as m_run:
+                    remote._verify_remote_sync_target(spec)
+                guard_cmd = m_run.call_args[0][0][-1]
+                return subprocess.run(["bash", "-c", guard_cmd], env=env, capture_output=True, text=True)
+
+            # Target without sentinel fails.
+            res_no_sentinel = _exec_guard(remote.RemoteSpec(name="w", ssh="u@h", repo=str(target)))
+            self.assertNotEqual(res_no_sentinel.returncode, 0)
+            self.assertIn("sentinel", res_no_sentinel.stderr)
+
+            # Target equal to $HOME fails even if a sentinel exists.
+            (fake_home / remote.REPO_SENTINEL_REL).write_text("")
+            res_home = _exec_guard(remote.RemoteSpec(name="w", ssh="u@h", repo=str(fake_home)))
+            self.assertNotEqual(res_home.returncode, 0)
+
+            # Ancestor of $HOME fails even if a sentinel exists.
+            (root / "home" / remote.REPO_SENTINEL_REL).write_text("")
+            res_anc = _exec_guard(remote.RemoteSpec(name="w", ssh="u@h", repo=str(root / "home")))
+            self.assertNotEqual(res_anc.returncode, 0)
+
+            # Dedicated subdir with .wlb-remote-repo sentinel succeeds.
+            (target / remote.REPO_SENTINEL_REL).write_text("")
+            res_ok = _exec_guard(remote.RemoteSpec(name="w", ssh="u@h", repo=str(target)))
+            self.assertEqual(res_ok.returncode, 0, res_ok.stderr)
+
+            # Dedicated subdir with tools/wlb sentinel succeeds.
+            (target / remote.REPO_SENTINEL_REL).unlink()
+            (target / "tools").mkdir()
+            (target / "tools" / "wlb").write_text("#!/bin/sh\n")
+            res_wlb = _exec_guard(remote.RemoteSpec(name="w", ssh="u@h", repo=str(target)))
+            self.assertEqual(res_wlb.returncode, 0, res_wlb.stderr)
 
     def test_remote_cd_expr_handles_tilde_and_spaces(self) -> None:
         self.assertEqual(remote._remote_cd_expr("~"), '"$HOME"')
@@ -130,6 +177,7 @@ class RemoteLibTest(unittest.TestCase):
         self.assertIn("mod-llm-brain", cmd[-1])
         self.assertIn("tools/wlb build common --no-tests", cmd[-1])
         self.assertIn("tools/wlb build server --test", cmd[-1])
+        self.assertIn("flock 9", cmd[-1])
         self.assertIn("var/.built_stamp", cmd[-1])
 
     def test_ensure_remote_map_data_uses_synced_sentinel_and_ssh_opts(self) -> None:
@@ -191,7 +239,7 @@ class RemoteLibTest(unittest.TestCase):
         self.assertIn(remote.ACTIVE_PGID_REL, ssh_cmd[-1])
         self.assertIn("trap ", ssh_cmd[-1])
 
-    def test_run_remote_ssh_drop_255_kills_remote_pgid(self) -> None:
+    def test_run_remote_ssh_drop_255_kills_remote_pgid_only_if_active(self) -> None:
         spec = remote.RemoteSpec(name="worker1", ssh="wlb@192.0.2.10", repo="~/wow-llm-bots")
         with mock.patch.object(remote, "get_remote", return_value=spec), \
              mock.patch.object(remote, "_remote_lock", side_effect=lambda _: mock.MagicMock()), \
@@ -200,7 +248,7 @@ class RemoteLibTest(unittest.TestCase):
              mock.patch.object(remote, "_kill_remote_pgid") as m_kill:
             with self.assertRaisesRegex(Failed, r"command failed \(255\)"):
                 remote.run_remote("worker1", ["sleep", "60"], no_sync=True)
-        m_kill.assert_called_once_with(spec)
+        m_kill.assert_called_once_with(spec, only_if_active=True)
 
     def test_invalidate_rsync_status_and_kill_pgid_commands(self) -> None:
         spec = remote.RemoteSpec(name="worker1", ssh="wlb@192.0.2.10", repo="~/wow-llm-bots")
@@ -212,6 +260,8 @@ class RemoteLibTest(unittest.TestCase):
 
         with mock.patch.object(remote, "run") as m_run:
             remote._rsync_to_remote(spec, repo=pathlib.Path("/tmp/src"))
+        guard_cmd = m_run.call_args_list[0][0][0][-1]
+        self.assertIn(remote.REPO_SENTINEL_REL, guard_cmd)
         rsync_cmd = m_run.call_args_list[1][0][0]
         self.assertEqual(rsync_cmd[0], "rsync")
         self.assertIn("--delete", rsync_cmd)
@@ -424,7 +474,10 @@ class ServerRemoteBootstrapTest(unittest.TestCase):
                  mock.patch.object(server, "DB_PASSWORD", db_pw), \
                  mock.patch.object(server, "MYSQL_CNF", etc / "mysql.cnf"), \
                  mock.patch.object(server, "run") as m_run:
-                fresh = server._ensure_local_db_initialized()
+                # Without allow_init=True, missing datadir must fail (never silently wipe/init play DB).
+                with self.assertRaises(Failed):
+                    server._ensure_local_db_initialized(allow_init=False)
+                fresh = server._ensure_local_db_initialized(allow_init=True)
 
             self.assertTrue(fresh)
             self.assertEqual(stat.S_IMODE(play_run.stat().st_mode), 0o700)
@@ -455,7 +508,10 @@ class ServerRemoteBootstrapTest(unittest.TestCase):
                  mock.patch.object(server, "DB_PASSWORD", db_pw), \
                  mock.patch.object(server, "MYSQL_CNF", etc / "mysql.cnf"), \
                  mock.patch.object(server, "run") as m_run:
-                fresh = server._ensure_local_db_initialized()
+                # Without allow_init=True, missing datadir must fail (never silently wipe/init play DB).
+                with self.assertRaises(Failed):
+                    server._ensure_local_db_initialized(allow_init=False)
+                fresh = server._ensure_local_db_initialized(allow_init=True)
 
             self.assertTrue(fresh)
             self.assertEqual(stat.S_IMODE(play_run.stat().st_mode), 0o700)

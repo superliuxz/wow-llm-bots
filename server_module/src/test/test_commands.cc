@@ -79,6 +79,7 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"resetbot", HandleResetBot, SEC_ADMINISTRATOR, Console::Yes},
         {"where", HandleWhere, SEC_ADMINISTRATOR, Console::Yes},
         {"cleartrash", HandleClearTrash, SEC_ADMINISTRATOR, Console::Yes},
+        {"logout", HandleLogout, SEC_ADMINISTRATOR, Console::Yes},
     };
     static ChatCommandTable root_table = {
         {"llmtest", test_table},
@@ -608,6 +609,20 @@ class LlmBrainTestCommandScript : public CommandScript {
     }
     handler->PSendSysMessage("llmtest: cleartrash {} radius={} cleared={}{}",
                              player->GetName(), radius, cleared,
+                             FormatToken(token));
+    return true;
+  }
+
+  static bool HandleLogout(ChatHandler* handler,
+                           std::string player_name,
+                           Optional<std::string> token) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player) {
+      return false;
+    }
+    const std::string name = player->GetName();
+    RandomPlayerbotMgr::instance().LogoutPlayerBot(player->GetGUID());
+    handler->PSendSysMessage("llmtest: logged out {}{}", name,
                              FormatToken(token));
     return true;
   }
