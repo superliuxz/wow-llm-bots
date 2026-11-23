@@ -578,33 +578,12 @@ bool HasCategoryAura(Player* bot, uint32_t category) {
   return false;
 }
 
-}  // namespace
-
-void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink) {
-  *has_food = false;
-  *has_drink = false;
-  for (const BagSlotItem& entry : BagItems(bot)) {
-    const ItemTemplate* proto = entry.item->GetTemplate();
-    if (!proto || proto->Class != ITEM_CLASS_CONSUMABLE ||
-        (proto->SubClass != ITEM_SUBCLASS_FOOD &&
-         proto->SubClass != ITEM_SUBCLASS_CONSUMABLE) ||
-        bot->CanUseItem(proto) != EQUIP_ERR_OK) {
-      continue;
-    }
-    const uint32_t cat = proto->Spells[0].SpellCategory;
-    if (cat == kSpellCategoryFood) {
-      *has_food = true;
-    } else if (cat == kSpellCategoryDrink) {
-      *has_drink = true;
-    }
-  }
-}
-
 // Picks the best valid equipment slot for `bag_item` (shared by both option
-// discovery and execution). For dual-slot items (rings, trinkets, and 1H
-// weapons when dual-wielding), prefers the empty or lower-ilvl slot and falls
-// back to the alternate slot if `CanEquipItem` rejects the first (e.g., 2H
-// weapon equipped in main hand, or Unique-Equipped replacement).
+// discovery and execution). For dual-slot items (rings, trinkets, 1H weapons
+// when dual-wielding, and 2H weapons with Titan's Grip), prefers the empty or
+// lower-ilvl slot and falls back to the alternate slot if `CanEquipItem`
+// rejects the first (e.g., 2H weapon equipped in main hand, offhand staff/
+// polearm restriction, or Unique-Equipped replacement).
 bool PickEquipSlot(Player* bot,
                    Item* bag_item,
                    const ItemTemplate* proto,
@@ -631,11 +610,35 @@ bool PickEquipSlot(Player* bot,
   if (proto->InventoryType == INVTYPE_TRINKET) {
     return try_dual(EQUIPMENT_SLOT_TRINKET1, EQUIPMENT_SLOT_TRINKET2);
   }
-  if (proto->InventoryType == INVTYPE_WEAPON && bot->CanDualWield()) {
+  if ((proto->InventoryType == INVTYPE_WEAPON && bot->CanDualWield()) ||
+      (proto->InventoryType == INVTYPE_2HWEAPON && bot->CanDualWield() &&
+       bot->CanTitanGrip())) {
     return try_dual(EQUIPMENT_SLOT_MAINHAND, EQUIPMENT_SLOT_OFFHAND);
   }
   return bot->CanEquipItem(NULL_SLOT, *out_dest, bag_item, true) ==
          EQUIP_ERR_OK;
+}
+
+}  // namespace
+
+void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink) {
+  *has_food = false;
+  *has_drink = false;
+  for (const BagSlotItem& entry : BagItems(bot)) {
+    const ItemTemplate* proto = entry.item->GetTemplate();
+    if (!proto || proto->Class != ITEM_CLASS_CONSUMABLE ||
+        (proto->SubClass != ITEM_SUBCLASS_FOOD &&
+         proto->SubClass != ITEM_SUBCLASS_CONSUMABLE) ||
+        bot->CanUseItem(proto) != EQUIP_ERR_OK) {
+      continue;
+    }
+    const uint32_t cat = proto->Spells[0].SpellCategory;
+    if (cat == kSpellCategoryFood) {
+      *has_food = true;
+    } else if (cat == kSpellCategoryDrink) {
+      *has_drink = true;
+    }
+  }
 }
 
 void CollectUsableBagItems(Player* bot,

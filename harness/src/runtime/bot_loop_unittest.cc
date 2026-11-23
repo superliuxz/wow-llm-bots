@@ -1954,6 +1954,33 @@ TEST(BotLoopTest, LastOutcomeDeliveredOnceAndKnowledgeInjected) {
       brain.front_request().user.find("Last outcome: target out of range."),
       std::string::npos);
 
+  // A newer wake arriving while the call is in flight supersedes the reply and
+  // requeues `Last outcome:` for the queued wake.
+  pb::ImmediateEvent w_super;
+  w_super.bot = "Gatda";
+  w_super.event.chat.emplace().channel = pb::WHISPER;
+  w_super.event.chat->from = "Ally";
+  w_super.event.chat->text = "hold on";
+  loop.OnEvent(std::move(w_super), t0 + base::Seconds(2));
+  brain.FinishReply("do: 2\nexpect: none\nwatch: none\nlook: 60");
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(
+      brain.front_request().user.find("Last outcome: target out of range."),
+      std::string::npos);
+
+  // Same-epoch cancellation also requeues `Last outcome:` for the next wake.
+  brain.FinishCancelled();
+  pb::ImmediateEvent w_cancel;
+  w_cancel.bot = "Gatda";
+  w_cancel.event.chat.emplace().channel = pb::WHISPER;
+  w_cancel.event.chat->from = "Ally";
+  w_cancel.event.chat->text = "still there?";
+  loop.OnEvent(std::move(w_cancel), t0 + base::Seconds(3));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(
+      brain.front_request().user.find("Last outcome: target out of range."),
+      std::string::npos);
+
   // An unparseable plan requeues `Last outcome:` for the retry wake.
   brain.FinishReply("garbage not a valid plan");
   pb::ImmediateEvent w0;
@@ -1961,7 +1988,7 @@ TEST(BotLoopTest, LastOutcomeDeliveredOnceAndKnowledgeInjected) {
   w0.event.chat.emplace().channel = pb::WHISPER;
   w0.event.chat->from = "Ally";
   w0.event.chat->text = "ping";
-  loop.OnEvent(std::move(w0), t0 + base::Seconds(2));
+  loop.OnEvent(std::move(w0), t0 + base::Seconds(4));
   ASSERT_EQ(brain.size(), 1u);
   EXPECT_NE(
       brain.front_request().user.find("Last outcome: target out of range."),
@@ -1975,7 +2002,7 @@ TEST(BotLoopTest, LastOutcomeDeliveredOnceAndKnowledgeInjected) {
   whisper.event.chat.emplace().channel = pb::WHISPER;
   whisper.event.chat->from = "Ally";
   whisper.event.chat->text = "ready?";
-  loop.OnEvent(std::move(whisper), t0 + base::Seconds(3));
+  loop.OnEvent(std::move(whisper), t0 + base::Seconds(5));
   ASSERT_EQ(brain.size(), 1u);
   EXPECT_EQ(brain.front_request().user.find("Last outcome:"),
             std::string::npos);
@@ -1985,7 +2012,7 @@ TEST(BotLoopTest, LastOutcomeDeliveredOnceAndKnowledgeInjected) {
   loop.OnConnectionChanged(false);
   brain.FinishCancelled();
   loop.OnConnectionChanged(true);
-  loop.OnSnapshot(s1, t0 + base::Seconds(4));
+  loop.OnSnapshot(s1, t0 + base::Seconds(6));
   ASSERT_EQ(brain.size(), 1u);
   EXPECT_EQ(brain.front_request().user.find("Last outcome:"),
             std::string::npos);

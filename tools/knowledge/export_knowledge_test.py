@@ -125,6 +125,10 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
             308, 'Slave Pens', '', '',
             '{{Infobox instance |name=The Slave Pens |level=62-64}} Coilfang Reservoir wing.'
         );
+        INSERT INTO pages VALUES (
+            309, 'Stormwind Stockade', '', '',
+            '{{Infobox instance |name=Stormwind Stockade |level=22-30}} Prison wing in Stormwind.'
+        );
         """
     )
     con_w.commit()
@@ -182,6 +186,9 @@ class ExportKnowledgeTest(unittest.TestCase):
             self.assertEqual(data["dungeons"]["Naxxramas"]["level"], "80")
             self.assertNotIn("===", data["dungeons"]["Naxxramas"]["summary"])
             self.assertIn("The Slave Pens", data["dungeons"])
+            # Short/long mirror fallback populates canonical "The Stockade" from "Stormwind Stockade".
+            self.assertIn("The Stockade", data["dungeons"])
+            self.assertIn("Prison wing in Stormwind.", data["dungeons"]["The Stockade"]["summary"])
 
 
 if __name__ == "__main__":
