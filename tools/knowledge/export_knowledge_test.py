@@ -52,6 +52,8 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
             (23035, 'Anzu', 1),
             (36626, 'Festergut', 3),
             (33523, 'Neltharion', 3),
+            (34797, 'Icehowl', 3),
+            (33988, 'Immortal Guardian', 1),
             (40, 'Kobold Miner', 0);
         INSERT INTO quests VALUES
             (7, 'Kobold Camp Cleanup', 2, 1, 'Kill 8 Kobold Vermin.$bReturn to Marshal McBride, $N $g fella:lady;.', 101);
@@ -182,11 +184,11 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
         );
         INSERT INTO pages VALUES (
             410, 'Deathwing (tactics)', '', '',
-            '{{Cataclysm}}\n==Abilities==\nTo be announced...\n==Strategy==\nTo be announced...'
+            '{{Cataclysm}}\n==Abilities==\nCataclysm breath destroys platforms.\n==Strategy==\nCataclysm dragon aspect fight on the Maelstrom.'
         );
         INSERT INTO pages VALUES (
             411, 'Kel''Thuzad (tactics)', '', '',
-            '== 25-man abilities ==\n*Frost Blast freezes players.\n== 25-man strategy ==\nSpread 10 yards apart.'
+            '{{Cataclysm/Update}}\n== 25-man abilities ==\n*Frost Blast freezes players.\n== 25-man strategy ==\nSpread 10 yards apart.'
         );
         INSERT INTO pages VALUES (
             412, 'Yogg-Saron (tactics)', '', '',
@@ -198,7 +200,7 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
         );
         INSERT INTO pages VALUES (
             414, 'Baron Rivendare (tactics)', '', '',
-            '==Abilities==\nSee [[Four Horsemen (tactics)|Four Horsemen]].'
+            '==Abilities==\nSee [[Four Horsemen (tactics)|Four Horsemen]] for full encounter details.'
         );
         INSERT INTO pages VALUES (
             415, 'Anzu', '', '',
@@ -210,6 +212,14 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
         );
         INSERT INTO pages VALUES (
             417, 'Neltharion', 'Deathwing', '', '#REDIRECT [[Deathwing]]'
+        );
+        INSERT INTO pages VALUES (
+            418, 'Icehowl', '', '',
+            '== 25-player abilities ==\nTo be announced...\n== 10-player abilities ==\n*{{abilities|Ferocious Butt|Heavy headbutt on tank.}}\n== Strategy ==\nMove out of Massive Crash path.'
+        );
+        INSERT INTO pages VALUES (
+            419, 'Immortal Guardian', '', '',
+            '==Attacks and abilities==\n*{{abilities|Empowered|Increases damage done by 100% until brought low on health.}}\n*{{abilities|Shadow Beacon|Marks target for healing.}}\n==Strategy==\n...'
         );
         """
     )
@@ -293,6 +303,7 @@ class ExportKnowledgeTest(unittest.TestCase):
             self.assertIn("The Lich King", bosses)
             self.assertIn("Spread out for Defile.", bosses["The Lich King"]["strategy"])
             self.assertIn("Onyxia", bosses)
+            self.assertEqual(bosses["Onyxia"]["abilities"], "Deep Breath")
             self.assertIn("WotLK level 80", bosses["Onyxia"]["strategy"])
             self.assertNotIn("Level 60 vanilla", bosses["Onyxia"]["strategy"])
             self.assertIn("Kael'thas Sunstrider", bosses)
@@ -317,8 +328,16 @@ class ExportKnowledgeTest(unittest.TestCase):
             # Empty `== 25-man abilities ==` does not shadow populated `== 10-man abilities ==`.
             self.assertIn("Festergut", bosses)
             self.assertIn("Gas Spore", bosses["Festergut"]["abilities"])
-            # Redirected Cataclysm-banner boss (Neltharion -> Deathwing (tactics)) is excluded.
+            # Redirected Cataclysm-banner boss (Neltharion -> Deathwing (tactics), with non-stub text) is excluded,
+            # while Kel'Thuzad with {{Cataclysm/Update}} above is retained.
             self.assertNotIn("Neltharion", bosses)
+            # Placeholder "To be announced..." in 25-player abilities falls through to 10-player abilities.
+            self.assertIn("Icehowl", bosses)
+            self.assertIn("Ferocious Butt", bosses["Icehowl"]["abilities"])
+            # Rich prio=1 abilities-only add (with "..." stub strategy) is retained without the stub strategy.
+            self.assertIn("Immortal Guardian", bosses)
+            self.assertIn("Empowered", bosses["Immortal Guardian"]["abilities"])
+            self.assertNotIn("strategy", bosses["Immortal Guardian"])
 
 
 if __name__ == "__main__":

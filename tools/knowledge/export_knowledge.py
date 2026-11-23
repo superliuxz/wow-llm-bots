@@ -229,7 +229,7 @@ _RE_HEADING = re.compile(r"={2,6}\s*([^=\n]+?)\s*={2,6}")
 _RE_REMOVED_PRE_CATA = re.compile(
     r"\{\{\s*removedfromgame[^}]*patch\s*=\s*([123])\.", re.IGNORECASE
 )
-_RE_CATA_BANNER = re.compile(r"\{\{\s*Cataclysm\b", re.IGNORECASE)
+_RE_CATA_BANNER = re.compile(r"\{\{\s*Cataclysm\s*(?:\||\}\})", re.IGNORECASE)
 _RE_MULTI_SPACE = re.compile(r"\s+")
 _RE_QUEST_BREAK = re.compile(r"\$[bB]")
 _RE_QUEST_GENDER = re.compile(r"\$[gG]\s*([^:;]+):([^;]+);")
@@ -466,10 +466,10 @@ def _extract_infobox(wikitext: str, prefix: str) -> dict[str, str]:
 def _is_stub_section(text: str) -> bool:
     """Returns True if a cleaned wiki section is empty or a placeholder/stub."""
     s = text.strip()
-    if len(s) < 20:
+    low = s.lower().strip(".!?:; -–—")
+    if not low:
         return True
-    low = s.lower().rstrip(".! ")
-    if low in ("to be announced", "tba", "tbd", "coming soon", "none", "unknown"):
+    if low in ("to be announced", "tba", "tbd", "coming soon", "none", "unknown", "stub"):
         return True
     if ("to be announced" in low or low.startswith("see ")) and len(s) < 120:
         return True
@@ -840,7 +840,9 @@ def export_knowledge(
                     max_chars=420,
                     skip_stubs=True,
                 )
-                if not strategy and not (prio == 3 and abilities):
+                if not strategy and not (
+                    abilities and (prio == 3 or len(abilities) >= 60)
+                ):
                     continue
 
                 b_entry: dict[str, Any] = {}
