@@ -1,0 +1,7 @@
+# Endurance soak scenario 2 (Classic cap): 5 Alliance quest+profession bots
+# (L50-L58 Tanaris/EPL) + 5-man Alliance Stratholme L60 (ProtPal/HolyPri/3DPS).
+LlmBrain.Bots = "Loada,Loadb,Loadc,Loadd,Loade,Loadf,Loadg,Loadh,Loadi,Loadj"
+LlmBrain.TestFixtures = "Loada=new:human:paladin,Loadb=new:nightelf:druid,Loadc=new:dwarf:hunter,Loadd=new:gnome:warlock,Loade=new:draenei:shaman,Loadf=new:dwarf:paladin,Loadg=new:human:priest,Loadh=new:nightelf:rogue,Loadi=new:gnome:mage,Loadj=new:dwarf:hunter"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.TraceDir = "@ROOT@/var/soak_traces"
+LlmBrain.ObserveHumans = 1

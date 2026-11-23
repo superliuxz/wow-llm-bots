@@ -16,6 +16,14 @@ Suites (`--suite`):
          5-man Halls of Lightning (L80)
       2. `soak_heldout_uk`: 5 unseen Alliance questing classes +
          5-man Utgarde Keep (L70)
+  - `endurance`: 6 Classic + TBC + WotLK scenarios (quest+professions + hard 5-man
+    dungeons across leveling brackets and endgame/heroic caps) —
+      1. `soak_classic_ulda`: L30-L45 Classic quest+prof + Uldaman (L42)
+      2. `soak_classic_strat`: L50-L58 Classic quest+prof + Stratholme (L60)
+      3. `soak_tbc_seth`: L60-L66 TBC quest+prof + Sethekk Halls (L67)
+      4. `soak_tbc_mgt`: L65-L69 TBC quest+prof + Magisters' Terrace (L70 Heroic)
+      5. `soak_wotlk_ak`: L70-L75 WotLK quest+prof + Ahn'kahet (L74)
+      6. `soak_wotlk_pos`: L75-L78 WotLK quest+prof + Pit of Saron (L80 Heroic)
   - `quest`: legacy 10-bot level-1 Priest Valley of Trials soak (`soak`)
   - Or any single scenario name above.
 """
@@ -43,6 +51,89 @@ BOT = "Loada"
 ONLINE = 10
 
 DUNGEON_PARTY = ["Loadf", "Loadg", "Loadh", "Loadi", "Loadj"]
+
+# Verified WotLK 3.3.5a profession definitions (Spell.dbc + item_template):
+#   name -> (skill_id, [(cap, learn_spell_id), ...], extra_spells, tool_item_id)
+PROFESSIONS = {
+    "herbalism": (
+        182,
+        [
+            (75, 2366),
+            (150, 2368),
+            (225, 3570),
+            (300, 11993),
+            (375, 28695),
+            (450, 50300),
+        ],
+        (2383,),  # Find Herbs
+        None,
+    ),
+    "mining": (
+        186,
+        [
+            (75, 2575),
+            (150, 2576),
+            (225, 3564),
+            (300, 10248),
+            (375, 29354),
+            (450, 50310),
+        ],
+        (2580,),  # Find Minerals
+        2901,  # Mining Pick
+    ),
+    "skinning": (
+        393,
+        [
+            (75, 8613),
+            (150, 8617),
+            (225, 8618),
+            (300, 10768),
+            (375, 32678),
+            (450, 50305),
+        ],
+        (),
+        7005,  # Skinning Knife
+    ),
+    "first_aid": (
+        129,
+        [
+            (75, 3273),
+            (150, 3274),
+            (225, 7924),
+            (300, 10846),
+            (375, 27028),
+            (450, 45542),
+        ],
+        (),
+        None,
+    ),
+    "cooking": (
+        185,
+        [
+            (75, 2550),
+            (150, 3102),
+            (225, 3413),
+            (300, 18260),
+            (375, 33359),
+            (450, 51296),
+        ],
+        (),
+        None,
+    ),
+    "fishing": (
+        356,
+        [
+            (75, 7620),
+            (150, 7731),
+            (225, 7732),
+            (300, 18248),
+            (375, 33095),
+            (450, 51294),
+        ],
+        (),
+        6256,  # Fishing Pole
+    ),
+}
 
 # Each scenario specifies its test config override plus optional per-bot gear/tele
 # and 5-man dungeon party setup run via `llmtest` right after login.
@@ -79,6 +170,8 @@ SCENARIOS = {
             "level": 20,
             "map": 36,
             "pos": (-16.4, -383.07, 61.78),
+            # ProtPal(1), RestoDru(2), CombatRog(1), FrostMag(2), BMHun(0)
+            "spec_tabs": [1, 2, 1, 2, 0],
         },
     },
     "soak_northrend_hol": {
@@ -96,6 +189,7 @@ SCENARIOS = {
             "level": 80,
             "map": 602,
             "pos": (1331.47, 259.619, 53.398),
+            "notes": "HoL",
         },
     },
     "soak_heldout_uk": {
@@ -109,6 +203,162 @@ SCENARIOS = {
             "level": 70,
             "map": 574,
             "pos": (153.789, -86.548, 12.551),
+            "notes": "UK",
+        },
+    },
+    # Endurance suite: 6 Classic + TBC + WotLK scenarios (quest+professions +
+    # hard 5-man dungeons with explicit Tank/Healer/3DPS spec tabs).
+    "soak_classic_ulda": {
+        "config": "soak_classic_ulda",
+        "desc": "Classic L30-L45 Horde quest+prof (STV/Tanaris) + 5-man Uldaman L42 (ProtWar/HolyPri/3DPS)",
+        "quest_setup": [
+            # Loada: L32 Orc Warrior at Nesingwary's Expedition (STV, neutral)
+            ("Loada", 32, (0, -11616.7, -54.83, 11.14), [("herbalism", 160), ("skinning", 160), ("first_aid", 160)]),
+            # Loadb: L36 Tauren Druid at Grom'gol Base Camp (STV, Horde)
+            ("Loadb", 36, (0, -12347.4, 161.43, 3.24), [("mining", 180), ("skinning", 180), ("cooking", 180)]),
+            # Loadc: L38 Undead Warlock at Booty Bay (STV, neutral)
+            ("Loadc", 38, (0, -14453.3, 501.46, 26.36), [("herbalism", 190), ("mining", 190), ("fishing", 190)]),
+            # Loadd: L42 Blood Elf Paladin at Grom'gol Base Camp (STV, Horde)
+            ("Loadd", 42, (0, -12347.4, 161.43, 3.24), [("skinning", 210), ("first_aid", 210), ("cooking", 210)]),
+            # Loade: L45 Troll Hunter at Gadgetzan (Tanaris, neutral)
+            ("Loade", 45, (1, -7139.19, -3683.27, 21.03), [("herbalism", 220), ("fishing", 220), ("first_aid", 220)]),
+        ],
+        "dungeon": {
+            "name": "Uldaman",
+            "level": 42,
+            "map": 70,
+            "pos": (-226.8, 49.09, -46.03),
+            # ProtWar(2), HolyPri(1), CombatRog(1), FrostMag(2), BMHun(0)
+            "spec_tabs": [2, 1, 1, 2, 0],
+            "notes": "Ulda",
+        },
+    },
+    "soak_classic_strat": {
+        "config": "soak_classic_strat",
+        "desc": "Classic L50-L58 Alliance quest+prof (Tanaris/EPL) + 5-man Stratholme L60 (ProtPal/HolyPri/3DPS)",
+        "quest_setup": [
+            # Loada: L50 Human Paladin at Gadgetzan (Tanaris, neutral)
+            ("Loada", 50, (1, -7139.19, -3683.27, 21.03), [("herbalism", 250), ("skinning", 250), ("first_aid", 250)]),
+            # Loadb: L52 Night Elf Druid at Gadgetzan (Tanaris, neutral)
+            ("Loadb", 52, (1, -7139.19, -3683.27, 21.03), [("mining", 260), ("skinning", 260), ("cooking", 260)]),
+            # Loadc: L55 Dwarf Hunter at Light's Hope Chapel (EPL, neutral)
+            ("Loadc", 55, (0, 2257.31, -5340.87, 86.8), [("herbalism", 275), ("mining", 275), ("fishing", 275)]),
+            # Loadd: L56 Gnome Warlock at Light's Hope Chapel (EPL, neutral)
+            ("Loadd", 56, (0, 2257.31, -5340.87, 86.8), [("skinning", 280), ("first_aid", 280), ("cooking", 280)]),
+            # Loade: L58 Draenei Shaman at Light's Hope Chapel (EPL, neutral)
+            ("Loade", 58, (0, 2257.31, -5340.87, 86.8), [("herbalism", 290), ("fishing", 290), ("first_aid", 290)]),
+        ],
+        "dungeon": {
+            "name": "Stratholme",
+            "level": 60,
+            "map": 329,
+            # Service / Undead Entrance (areatrigger 2214)
+            "pos": (3593.15, -3646.56, 138.5),
+            # ProtPal(1), HolyPri(1), CombatRog(1), FrostMag(2), BMHun(0)
+            "spec_tabs": [1, 1, 1, 2, 0],
+            "notes": "Strat",
+        },
+    },
+    "soak_tbc_seth": {
+        "config": "soak_tbc_seth",
+        "desc": "TBC L60-L66 Horde quest+prof (Hellfire/Nagrand) + 5-man Sethekk Halls L67 (BearDru/RestoSha/3DPS)",
+        "quest_setup": [
+            # Loada: L60 Tauren Warrior at Thrallmar (Hellfire Peninsula, Horde)
+            ("Loada", 60, (530, 243.0, 2698.2, 89.84), [("herbalism", 300), ("skinning", 300), ("first_aid", 300)]),
+            # Loadb: L61 Orc Hunter at Thrallmar (Hellfire Peninsula, Horde)
+            ("Loadb", 61, (530, 243.0, 2698.2, 89.84), [("mining", 310), ("skinning", 310), ("cooking", 310)]),
+            # Loadc: L64 Blood Elf Mage at Garadar (Nagrand, Horde)
+            ("Loadc", 64, (530, -1344.14, 7226.02, 33.59), [("herbalism", 330), ("mining", 330), ("fishing", 330)]),
+            # Loadd: L65 Undead Rogue at Garadar (Nagrand, Horde)
+            ("Loadd", 65, (530, -1344.14, 7226.02, 33.59), [("skinning", 340), ("first_aid", 340), ("cooking", 340)]),
+            # Loade: L66 Troll Shaman at Nesingwary Safari (Nagrand, neutral)
+            ("Loade", 66, (530, -1461.78, 6344.3, 37.27), [("herbalism", 350), ("fishing", 350), ("first_aid", 350)]),
+        ],
+        "dungeon": {
+            "name": "Sethekk Halls",
+            "level": 67,
+            "map": 556,
+            "pos": (-4.68, -0.09, 0.01),
+            # BearDru(1), RestoSha(2), DestroLoc(2), FireMag(1), CombatRog(1)
+            "spec_tabs": [1, 2, 2, 1, 1],
+            "notes": "Seth",
+        },
+    },
+    "soak_tbc_mgt": {
+        "config": "soak_tbc_mgt",
+        "desc": "TBC L65-L69 Alliance quest+prof (Hellfire/Nagrand) + 5-man Magisters' Terrace L70H (ProtWar/RestoDru/3DPS)",
+        "quest_setup": [
+            # Loada: L65 Dwarf Warrior at Honor Hold (Hellfire Peninsula, Alliance)
+            ("Loada", 65, (530, -815.61, 2614.2, 124.47), [("herbalism", 335), ("skinning", 335), ("first_aid", 335)]),
+            # Loadb: L66 Night Elf Hunter at Telaar (Nagrand, Alliance)
+            ("Loadb", 66, (530, -2568.84, 7271.46, 15.49), [("mining", 345), ("skinning", 345), ("cooking", 345)]),
+            # Loadc: L67 Human Mage at Telaar (Nagrand, Alliance)
+            ("Loadc", 67, (530, -2568.84, 7271.46, 15.49), [("herbalism", 350), ("mining", 350), ("fishing", 350)]),
+            # Loadd: L68 Draenei Paladin at Nesingwary Safari (Nagrand, neutral)
+            ("Loadd", 68, (530, -1461.78, 6344.3, 37.27), [("skinning", 355), ("first_aid", 355), ("cooking", 355)]),
+            # Loade: L69 Gnome Rogue at Nesingwary Safari (Nagrand, neutral)
+            ("Loade", 69, (530, -1461.78, 6344.3, 37.27), [("herbalism", 360), ("fishing", 360), ("first_aid", 360)]),
+        ],
+        "dungeon": {
+            "name": "Magisters' Terrace",
+            "level": 70,
+            "heroic": True,
+            "map": 585,
+            "pos": (7.09, -0.45, -2.8),
+            # ProtWar(2), RestoDru(2), EleSha(0), DestroLoc(2), MMHun(1)
+            "spec_tabs": [2, 2, 0, 2, 1],
+            "notes": "MgT",
+        },
+    },
+    "soak_wotlk_ak": {
+        "config": "soak_wotlk_ak",
+        "desc": "WotLK L70-L75 Horde quest+prof (Borean/Dragonblight/Zul'Drak) + 5-man Ahn'kahet L74 (ProtPal/RestoDru/3DPS)",
+        "quest_setup": [
+            # Loada: L70 Orc Shaman at Warsong Hold (Borean Tundra, Horde)
+            ("Loada", 70, (571, 2835.02, 6182.44, 84.68), [("herbalism", 375), ("skinning", 375), ("first_aid", 375)]),
+            # Loadb: L71 Undead Priest at Warsong Hold (Borean Tundra, Horde)
+            ("Loadb", 71, (571, 2835.02, 6182.44, 84.68), [("mining", 385), ("skinning", 385), ("cooking", 385)]),
+            # Loadc: L73 Tauren Warrior at Agmar's Hammer (Dragonblight, Horde)
+            ("Loadc", 73, (571, 3833.26, 1573.53, 86.78), [("herbalism", 395), ("mining", 395), ("fishing", 395)]),
+            # Loadd: L74 Blood Elf Hunter at Agmar's Hammer (Dragonblight, Horde)
+            ("Loadd", 74, (571, 3833.26, 1573.53, 86.78), [("skinning", 405), ("first_aid", 405), ("cooking", 405)]),
+            # Loade: L75 Troll Rogue at The Argent Stand (Zul'Drak, neutral)
+            ("Loade", 75, (571, 5450.91, -2610.93, 306.99), [("herbalism", 415), ("fishing", 415), ("first_aid", 415)]),
+        ],
+        "dungeon": {
+            "name": "Ahn'kahet: The Old Kingdom",
+            "level": 74,
+            "map": 619,
+            "pos": (333.35, -1109.94, 69.77),
+            # ProtPal(1), RestoDru(2), FuryWar(1), MMHun(1), ArcaneMag(0)
+            "spec_tabs": [1, 2, 1, 1, 0],
+            "notes": "AK",
+        },
+    },
+    "soak_wotlk_pos": {
+        "config": "soak_wotlk_pos",
+        "desc": "WotLK L75-L78 Alliance quest+prof (Dragonblight/Zul'Drak/Icecrown) + 5-man Pit of Saron L80H (ProtWar/HolyPri/3DPS)",
+        "quest_setup": [
+            # Loada: L75 Human Warlock at Wintergarde Keep (Dragonblight, Alliance)
+            ("Loada", 75, (571, 3767.5, -775.05, 196.09), [("herbalism", 415), ("skinning", 415), ("first_aid", 415)]),
+            # Loadb: L76 Night Elf Druid at The Argent Stand (Zul'Drak, neutral)
+            ("Loadb", 76, (571, 5450.91, -2610.93, 306.99), [("mining", 420), ("skinning", 420), ("cooking", 420)]),
+            # Loadc: L77 Dwarf Hunter at The Argent Stand (Zul'Drak, neutral)
+            ("Loadc", 77, (571, 5450.91, -2610.93, 306.99), [("herbalism", 425), ("mining", 425), ("fishing", 425)]),
+            # Loadd: L78 Draenei Shaman at Argent Vanguard (Icecrown, neutral)
+            ("Loadd", 78, (571, 6383.94, 246.87, 396.43), [("skinning", 430), ("first_aid", 430), ("cooking", 430)]),
+            # Loade: L78 Gnome Mage at Argent Vanguard (Icecrown, neutral)
+            ("Loade", 78, (571, 6383.94, 246.87, 396.43), [("herbalism", 430), ("fishing", 430), ("first_aid", 430)]),
+        ],
+        "dungeon": {
+            "name": "Pit of Saron",
+            "level": 80,
+            "heroic": True,
+            "map": 658,
+            "pos": (435.74, 212.41, 528.71),
+            # ProtWar(2), HolyPri(1), RetPal(2), CombatRog(1), ArcaneMag(0)
+            "spec_tabs": [2, 1, 2, 1, 0],
+            "notes": "PoS",
         },
     },
 }
@@ -116,15 +366,48 @@ SCENARIOS = {
 SUITES = {
     "varied": ["soak_horde_rfc", "soak_alliance_dm"],
     "heldout": ["soak_northrend_hol", "soak_heldout_uk"],
+    "endurance": [
+        "soak_classic_ulda",
+        "soak_classic_strat",
+        "soak_tbc_seth",
+        "soak_tbc_mgt",
+        "soak_wotlk_ak",
+        "soak_wotlk_pos",
+    ],
     "quest": ["soak"],
 }
 
 
+def _profession_setup_cmds(bot_name: str, prof_name: str, rank: int) -> list[str]:
+    """Builds `llmtest learn`/`setskill`/`additem` commands for a profession."""
+    skill_id, tiers, extra_spells, tool_item = PROFESSIONS[prof_name]
+    chosen_cap, chosen_spell = tiers[-1]
+    for cap, spell_id in tiers:
+        if rank <= cap:
+            chosen_cap, chosen_spell = cap, spell_id
+            break
+    value = max(1, min(int(rank), chosen_cap))
+    out = [f"llmtest learn {bot_name} {chosen_spell}"]
+    for extra in extra_spells:
+        out.append(f"llmtest learn {bot_name} {extra}")
+    out.append(f"llmtest setskill {bot_name} {skill_id} {value} {chosen_cap}")
+    if tool_item is not None:
+        out.append(f"llmtest additem {bot_name} {tool_item}")
+    return out
+
+
 def _apply_scenario_setup(scenario: dict) -> None:
-    """Runs `llmtest gear` / `group` / `tele` for mid/high quest bots and the 5-man party."""
+    """Runs `llmtest gear` / professions / `group` / `difficulty` / `tele`."""
     cmds = []
-    for bot_name, level, tele in scenario.get("quest_setup", []):
+    for entry in scenario.get("quest_setup", []):
+        if len(entry) == 4:
+            bot_name, level, tele, professions = entry
+        else:
+            bot_name, level, tele = entry
+            professions = ()
         cmds.append(f"llmtest gear {bot_name} {level}")
+        for prof_name, rank in professions or ():
+            cmds.extend(_profession_setup_cmds(bot_name, prof_name, rank))
         if tele:
             m, x, y, z = tele
             cmds.append(f"llmtest tele {bot_name} {m} {x} {y} {z} 0")
@@ -134,9 +417,20 @@ def _apply_scenario_setup(scenario: dict) -> None:
         leader = DUNGEON_PARTY[0]
         for member in DUNGEON_PARTY[1:]:
             cmds.append(f"llmtest group {leader} {member}")
+        if dungeon.get("heroic"):
+            cmds.append(f"llmtest difficulty {leader} heroic")
         lvl = dungeon["level"]
-        for member in DUNGEON_PARTY:
-            cmds.append(f"llmtest gear {member} {lvl}")
+        spec_tabs = dungeon.get("spec_tabs")
+        if spec_tabs is not None:
+            expect(
+                len(spec_tabs) == len(DUNGEON_PARTY),
+                f"dungeon spec_tabs length {len(spec_tabs)} != {len(DUNGEON_PARTY)}",
+            )
+            for member, spec_tab in zip(DUNGEON_PARTY, spec_tabs):
+                cmds.append(f"llmtest gear {member} {lvl} {spec_tab}")
+        else:
+            for member in DUNGEON_PARTY:
+                cmds.append(f"llmtest gear {member} {lvl}")
 
     if not cmds:
         return
@@ -177,6 +471,16 @@ def _run_once(
             tmp_dir = pathlib.Path(tmp)
             bots_dir = tmp_dir / "bots"
             bots_dir.mkdir(parents=True)
+            dungeon = scenario.get("dungeon")
+            notes_key = dungeon.get("notes") if dungeon else None
+            if notes_key:
+                notes_src = ROOT / "content" / "notes" / notes_key / "notes.md"
+                if notes_src.is_file():
+                    notes_text = notes_src.read_text(encoding="utf-8")
+                    for member in DUNGEON_PARTY:
+                        mdir = bots_dir / member
+                        mdir.mkdir(parents=True, exist_ok=True)
+                        (mdir / "notes.md").write_text(notes_text, encoding="utf-8")
             harness_log = tmp_dir / "harness.log"
             proc = subprocess.Popen(
                 [
@@ -293,7 +597,7 @@ def _resolve_scenarios(suite: str, runs: int) -> list[str]:
         # Repeat/cycle through the suite so `runs` matches requested run count,
         # or if `runs == 1` and suite has multiple scenarios, run the full suite
         # only when runs >= len(base).
-        if suite in ("varied", "heldout") and runs == 1:
+        if suite in ("varied", "heldout", "endurance") and runs == 1:
             return list(base)
         return [base[i % len(base)] for i in range(runs)]
     if suite in SCENARIOS:

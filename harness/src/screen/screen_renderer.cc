@@ -521,7 +521,22 @@ void IndicatorBits(const pb::Self_Indicators& ind,
   }
 }
 
-std::string SelfLine(const pb::Self& s) {
+bool IsSelfPartyLeader(const pb::Snapshot& snapshot) {
+  const pb::Self& self = snapshot.base.self;
+  if (self.group_leader || (self.unit.group && self.unit.group->leader)) {
+    return true;
+  }
+  if (snapshot.ext.party && !snapshot.ext.party->leader.empty()) {
+    const std::string& leader = snapshot.ext.party->leader;
+    if ((!snapshot.bot.empty() && leader == snapshot.bot) ||
+        (!self.unit.name.empty() && leader == self.unit.name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::string SelfLine(const pb::Self& s, bool party_leader) {
   std::vector<std::string> who;
   who.push_back(
       s.unit.level.value_or(0) != 0
@@ -573,7 +588,8 @@ std::string SelfLine(const pb::Self& s) {
                {s.swimming, "swimming"},
                {s.in_flight, "in flight"},
                {s.camping, "camping"},
-               {s.drunk != pb::Self::DRUNK_UNSPECIFIED, "drunk"}};
+               {s.drunk != pb::Self::DRUNK_UNSPECIFIED, "drunk"},
+               {party_leader, "party leader"}};
   for (const auto& flag : flags) {
     if (flag.value) {
       bits.push_back(flag.word);
@@ -820,16 +836,22 @@ std::vector<std::string> PartyLines(
     const std::flat_set<std::string>& guids,
     std::string_view my_name,
     const std::optional<pb::GroupPart>& self_group,
+    bool self_is_leader,
     const std::vector<pb::Unit>& nearby_units,
     bool in_combat) {
   std::vector<std::string> header;
   bool leader_listed = false;
   for (const pb::Unit& u : p.members) {
-    leader_listed |= !p.leader.empty() && u.name == p.leader;
+    leader_listed |= (!p.leader.empty() && u.name == p.leader) ||
+                     (u.group && u.group->leader);
   }
-  if (!p.leader.empty() && !leader_listed) {
-    header.push_back(base::StrCat(
-        {"leader ", p.leader == my_name ? std::string("you") : p.leader}));
+  if (!leader_listed) {
+    if (self_is_leader) {
+      header.push_back("leader you");
+    } else if (!p.leader.empty()) {
+      header.push_back(base::StrCat(
+          {"leader ", p.leader == my_name ? std::string("you") : p.leader}));
+    }
   }
   if (!p.loot_method.empty()) {
     header.push_back(base::StrCat({"loot ", Word(p.loot_method)}));
@@ -1366,9 +1388,10 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
   };
 
   const pb::Base& base = snapshot.base;
+  const bool self_is_leader = IsSelfPartyLeader(snapshot);
   std::vector<std::string> lines;
   if (base.self != pb::Self{}) {
-    lines.push_back("me: " + SelfLine(base.self));
+    lines.push_back("me: " + SelfLine(base.self, self_is_leader));
   }
   if (base.where != pb::Where{}) {
     lines.push_back("where: " + WhereLine(base.where));
@@ -1494,9 +1517,11 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
     }
   }
   if (ext.party) {
+    const std::string_view my_name =
+        !snapshot.bot.empty() ? snapshot.bot : base.self.unit.name;
     for (std::string& line :
-         PartyLines(*ext.party, around_me, snapshot.bot, base.self.unit.group,
-                    nearby.units, base.self.in_combat)) {
+         PartyLines(*ext.party, around_me, my_name, base.self.unit.group,
+                    self_is_leader, nearby.units, base.self.in_combat)) {
       lines.push_back(std::move(line));
     }
   }

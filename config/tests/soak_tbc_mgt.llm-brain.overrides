@@ -1,0 +1,7 @@
+# Endurance soak scenario 4 (TBC Heroic cap): 5 Alliance quest+profession bots
+# (L65-L69 Hellfire/Nagrand) + 5-man Alliance Magisters' Terrace L70H (ProtWar/RestoDru/3DPS).
+LlmBrain.Bots = "Loada,Loadb,Loadc,Loadd,Loade,Loadf,Loadg,Loadh,Loadi,Loadj"
+LlmBrain.TestFixtures = "Loada=new:dwarf:warrior,Loadb=new:nightelf:hunter,Loadc=new:human:mage,Loadd=new:draenei:paladin,Loade=new:gnome:rogue,Loadf=new:human:warrior,Loadg=new:nightelf:druid,Loadh=new:draenei:shaman,Loadi=new:gnome:warlock,Loadj=new:nightelf:hunter"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.TraceDir = "@ROOT@/var/soak_traces"
+LlmBrain.ObserveHumans = 1

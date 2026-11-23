@@ -853,5 +853,69 @@ TEST(ScreenRendererTest, RendersNearbyAreasNearestFirst) {
   EXPECT_EQ(s.text.find("Distant Pool"), std::string::npos) << s.text;
 }
 
+TEST(ScreenRendererTest, RendersPartyLeaderTagOnSelfOnlyWhenSelfIsLeader) {
+  // 1. Self is party leader via self.unit.group->leader and party.leader.
+  pb::Snapshot leader_snap = NewSnapshot();
+  leader_snap.bot = "Tess";
+  leader_snap.base.self.unit.guid = "0x10";
+  leader_snap.base.self.unit.group.emplace().leader = true;
+  pb::Party& leader_party = leader_snap.ext.party.emplace();
+  leader_party.leader = "Tess";
+  leader_party.loot_method = "GROUP_LOOT";
+  pb::Unit& mate = leader_party.members.emplace_back();
+  mate.guid = "0x11";
+  mate.name = "Gatda";
+  mate.group.emplace().online = true;
+  mate.group->in_range = true;
+  mate.group->leader = false;
+
+  const Screen leader_screen = RenderScreen(leader_snap);
+  const std::string leader_me =
+      leader_screen.text.substr(0, leader_screen.text.find('\n'));
+  EXPECT_NE(leader_me.find("; party leader"), std::string::npos) << leader_me;
+  EXPECT_NE(leader_screen.text.find("party: leader you; loot group loot\n"
+                                    "  - Gatda"),
+            std::string::npos)
+      << leader_screen.text;
+
+  // 2. Self is party leader via self.unit.group->leader alone (empty
+  //    party.leader).
+  pb::Snapshot group_only = leader_snap;
+  group_only.ext.party->leader.clear();
+  const Screen group_only_screen = RenderScreen(group_only);
+  EXPECT_NE(group_only_screen.text.find("; party leader"), std::string::npos)
+      << group_only_screen.text;
+  EXPECT_NE(group_only_screen.text.find("party: leader you; loot group loot"),
+            std::string::npos)
+      << group_only_screen.text;
+
+  // 3. Self is a follower: me: must NOT say party leader, and the leader
+  //    member line carries the "leader" tag.
+  pb::Snapshot follower_snap = NewSnapshot();
+  follower_snap.bot = "Tess";
+  follower_snap.base.self.unit.guid = "0x10";
+  follower_snap.base.self.unit.group.emplace().leader = false;
+  pb::Party& follower_party = follower_snap.ext.party.emplace();
+  follower_party.leader = "Gatda";
+  follower_party.loot_method = "GROUP_LOOT";
+  pb::Unit& other_leader = follower_party.members.emplace_back();
+  other_leader.guid = "0x11";
+  other_leader.name = "Gatda";
+  other_leader.group.emplace().online = true;
+  other_leader.group->in_range = true;
+  other_leader.group->leader = true;
+
+  const Screen follower_screen = RenderScreen(follower_snap);
+  const std::string follower_me =
+      follower_screen.text.substr(0, follower_screen.text.find('\n'));
+  EXPECT_EQ(follower_me.find("party leader"), std::string::npos) << follower_me;
+  EXPECT_EQ(follower_screen.text.find("leader you"), std::string::npos)
+      << follower_screen.text;
+  EXPECT_NE(follower_screen.text.find("party: loot group loot\n"
+                                      "  - Gatda: leader"),
+            std::string::npos)
+      << follower_screen.text;
+}
+
 }  // namespace
 }  // namespace harness

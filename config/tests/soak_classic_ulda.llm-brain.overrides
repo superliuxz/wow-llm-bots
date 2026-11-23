@@ -1,0 +1,7 @@
+# Endurance soak scenario 1 (Classic leveling): 5 Horde quest+profession bots
+# (L30-L45 STV/Tanaris) + 5-man Horde Uldaman L42 (ProtWar/HolyPri/3DPS).
+LlmBrain.Bots = "Loada,Loadb,Loadc,Loadd,Loade,Loadf,Loadg,Loadh,Loadi,Loadj"
+LlmBrain.TestFixtures = "Loada=new:orc:warrior,Loadb=new:tauren:druid,Loadc=new:undead:warlock,Loadd=new:bloodelf:paladin,Loade=new:troll:hunter,Loadf=new:orc:warrior,Loadg=new:troll:priest,Loadh=new:undead:rogue,Loadi=new:bloodelf:mage,Loadj=new:orc:hunter"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.TraceDir = "@ROOT@/var/soak_traces"
+LlmBrain.ObserveHumans = 1

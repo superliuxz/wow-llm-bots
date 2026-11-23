@@ -1,0 +1,7 @@
+# Endurance soak scenario 6 (WotLK Heroic cap): 5 Alliance quest+profession bots
+# (L75-L78 Dragonblight/Zul'Drak/Icecrown) + 5-man Alliance Pit of Saron L80H (ProtWar/HolyPri/3DPS).
+LlmBrain.Bots = "Loada,Loadb,Loadc,Loadd,Loade,Loadf,Loadg,Loadh,Loadi,Loadj"
+LlmBrain.TestFixtures = "Loada=new:human:warlock,Loadb=new:nightelf:druid,Loadc=new:dwarf:hunter,Loadd=new:draenei:shaman,Loade=new:gnome:mage,Loadf=new:dwarf:warrior,Loadg=new:draenei:priest,Loadh=new:human:paladin,Loadi=new:gnome:rogue,Loadj=new:draenei:mage"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.TraceDir = "@ROOT@/var/soak_traces"
+LlmBrain.ObserveHumans = 1

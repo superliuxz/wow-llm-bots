@@ -2,6 +2,8 @@
 
 #include "test/test_commands.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <list>
 #include <string>
@@ -81,6 +83,8 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"resetbot", HandleResetBot, SEC_ADMINISTRATOR, Console::Yes},
         {"where", HandleWhere, SEC_ADMINISTRATOR, Console::Yes},
         {"cleartrash", HandleClearTrash, SEC_ADMINISTRATOR, Console::Yes},
+        {"difficulty", HandleDifficulty, SEC_ADMINISTRATOR, Console::Yes},
+        {"setskill", HandleSetSkill, SEC_ADMINISTRATOR, Console::Yes},
         {"logout", HandleLogout, SEC_ADMINISTRATOR, Console::Yes},
     };
     static ChatCommandTable root_table = {
@@ -611,6 +615,93 @@ class LlmBrainTestCommandScript : public CommandScript {
     handler->PSendSysMessage("llmtest: cleartrash {} radius={} cleared={}{}",
                              player->GetName(), radius, cleared,
                              FormatToken(token));
+    return true;
+  }
+
+  static bool HandleDifficulty(ChatHandler* handler,
+                               std::string player_name,
+                               std::string mode,
+                               Optional<std::string> token) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player) {
+      return false;
+    }
+    std::string mode_lower = mode;
+    std::transform(
+        mode_lower.begin(), mode_lower.end(), mode_lower.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    Difficulty diff = DUNGEON_DIFFICULTY_NORMAL;
+    if (mode_lower == "normal") {
+      diff = DUNGEON_DIFFICULTY_NORMAL;
+    } else if (mode_lower == "heroic") {
+      diff = DUNGEON_DIFFICULTY_HEROIC;
+    } else {
+      handler->SendErrorMessage(
+          "llmtest: difficulty must be normal or heroic (got {})", mode);
+      return false;
+    }
+    player->SetDungeonDifficulty(diff);
+    Group* group = player->GetGroup();
+    if (group) {
+      group->SetDungeonDifficulty(diff);
+    } else {
+      player->SendDungeonDifficulty(false);
+    }
+    handler->PSendSysMessage(
+        "llmtest: difficulty {} mode={} group={}{}", player->GetName(),
+        diff == DUNGEON_DIFFICULTY_HEROIC ? "heroic" : "normal", group ? 1 : 0,
+        FormatToken(token));
+    return true;
+  }
+
+  static bool HandleSetSkill(ChatHandler* handler,
+                             std::string player_name,
+                             uint16_t skill_id,
+                             uint16_t value,
+                             uint16_t max_value,
+                             Optional<std::string> token) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player) {
+      return false;
+    }
+    const SkillLineEntry* skill_line = sSkillLineStore.LookupEntry(skill_id);
+    if (!skill_line) {
+      handler->SendErrorMessage("llmtest: setskill: invalid skill_id {}",
+                                skill_id);
+      return false;
+    }
+    if (value == 0 || max_value == 0 || value > max_value) {
+      handler->SendErrorMessage(
+          "llmtest: setskill: require 0 < value <= max (got value={} max={})",
+          value, max_value);
+      return false;
+    }
+    uint16_t step =
+        player->HasSkill(skill_id) ? player->GetSkillStep(skill_id) : 0;
+    if (const SkillRaceClassInfoEntry* rc_entry = GetSkillRaceClassInfo(
+            skill_id, player->getRace(), player->getClass())) {
+      if (const SkillTiersEntry* tier =
+              sSkillTiersStore.LookupEntry(rc_entry->SkillTierID)) {
+        uint16_t computed_step = 0;
+        for (uint32_t i = 0; i < MAX_SKILL_STEP; ++i) {
+          if (tier->Value[i] == 0) {
+            continue;
+          }
+          computed_step = static_cast<uint16_t>(i + 1);
+          if (tier->Value[i] >= max_value) {
+            break;
+          }
+        }
+        if (computed_step > 0) {
+          step = computed_step;
+        }
+      }
+    }
+    player->SetSkill(skill_id, step, value, max_value);
+    handler->PSendSysMessage(
+        "llmtest: setskill {} skill={} step={} value={} max={}{}",
+        player->GetName(), skill_id, step, value, max_value,
+        FormatToken(token));
     return true;
   }
 

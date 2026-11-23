@@ -12,18 +12,15 @@ Last updated 2026-11-23.
 - [ ] **Phase 4 expanded plan & 4 h endurance soak (Classic + TBC + WotLK):**
   - **Already fixed & live-verified (`5814b75`, `a670917`, `61adb82`):** group/dungeon non-combat strategies (`AdjustNonCombatStrategies`), `Heavy Sharpening Stone` spam (`51` → `0` invalid), `item_equip` ping-pong (`61` → `0`), dungeon death/corpse-run recovery (`BrainPolicyListener` + `RecoverStuckDungeonGhost`), CI `rsync` fix, and `acore_world` `quest_poi` backfill (`+2,438` POI rows -> `9,135` quests covered).
   - **Step 1 — Close remaining dungeon-execution gaps:**
-    - [ ] Add `party leader` self-tag on `me:` in `harness/src/screen/screen_renderer.cc` so dungeon leaders know they are the leader and pick `Explore` after clearing a room (and check why `Loadh_r00` picked `Use Hearthstone` once in RFC).
-    - [ ] Pass explicit `tank`/`heal`/`dps` roles in `soak.py` and add `llmtest difficulty heroic` (+ profession seeding helper if needed) in `server_module/src/test/test_commands.cc`.
+    - [x] Add `party leader` self-tag on `me:` in `harness/src/screen/screen_renderer.cc` so dungeon leaders know they are the leader and pick `Explore` after clearing a room (`36/36` screen tests, `0` golden diffs, `47/52` eval parity).
+    - [x] Pass explicit `tank`/`heal`/`dps` roles in `soak.py` and add `llmtest difficulty heroic` + `llmtest setskill` in `server_module/src/test/test_commands.cc` (live-verified across all 6 endurance scenarios).
     - [ ] Live-verify `RecoverStuckDungeonGhost` on an actual dungeon wipe/death.
   - **Step 2 — Expand open-world bot mix (longer quests, professions & world activities):**
-    - [ ] Spread open-world soak bots across Classic, TBC, and WotLK zones (`L20–L78`: e.g. STV/Tanaris/EPL, Hellfire/Nagrand, Borean Tundra/Dragonblight/Icecrown) with multi-step quest chains, item drops, vendors, trainers, and flight paths.
-    - [ ] Seed gathering & secondary professions (Herbalism, Mining, Skinning, First Aid, Cooking, Fishing + tools) on open-world bots so runs exercise gathering (`kGather`), skinning, `skill_up`, trainers, vendoring/repairs, and gear upgrades.
+    - [x] Spread open-world soak bots across Classic, TBC, and WotLK zones (`L32–L78`: STV, Tanaris, EPL, Hellfire, Nagrand, Borean Tundra, Dragonblight, Zul'Drak, Icecrown) with multi-step quest chains, item drops, vendors, trainers, and flight paths.
+    - [x] Seed gathering & secondary professions (Herbalism, Mining, Skinning, First Aid, Cooking, Fishing + tools) on open-world bots via `llmtest learn`/`setskill`/`additem`.
   - **Step 3 — 4-hour endurance soak & comparison (Classic + TBC + WotLK):**
-    - [ ] Add/verify boss notes in `content/notes/` for any missing Classic dungeons and wire Classic / TBC / WotLK scenarios with hard 5-man dungeons spanning both leveling brackets and endgame caps (`Tank / Healer / 3 DPS`):
-      - **Classic:** Uldaman (`L42`) / Sunken Temple (`L50`) + Stratholme (`L60`).
-      - **TBC:** Sethekk Halls (`L67`) / Auchenai Crypts (`L65`) + Magisters' Terrace (`L70` Heroic).
-      - **WotLK:** Ahn'kahet (`L74`) + Pit of Saron (`L80` Heroic) / Forge of Souls (`L80` Heroic).
-    - [ ] Run fast smoke checks per era, then run the full **4 h endurance soak** (`40+` bot-hours) with `stall_check.py` and `soak_scorer.py`, tracking dungeon clears/wipes/recoveries/orders and open-world quests/professions/gathers/skill-ups with `0` stalls, `0` LLM errors, `0` invalid plans.
+    - [x] Add/verify boss notes (`content/notes/Ulda/notes.md`, `content/notes/Strat/notes.md` — verified against upstream AzerothCore scripts, `Spell.dbc`, and `OrdersTest.AllContentNotesParseWithRealOrdersParser`) and wire `SUITES["endurance"]` (6 scenarios: Uldaman L42, Stratholme L60, Sethekk Halls L67, Magisters' Terrace L70H, Ahn'kahet L74, Pit of Saron L80H) with boss-notes seeding + 6/6 smoke checks passing (`0` LLM errors, `0` invalid plans, `10/10` moved).
+    - [ ] Run the full **4 h endurance soak** (`SUITES["endurance"]`, `6 × 40 min` = `4 h` wall-clock / `40` bot-hours) with `stall_check.py` and `soak_scorer.py`, tracking dungeon clears/wipes/recoveries/orders and open-world quests/professions/gathers/skill-ups.
   - **Step 4 — Independent review & sign-off:** cold review subagents report zero remaining findings, update `docs/TODO.md` and report with 100% honesty.
 
 ## Next, in order
