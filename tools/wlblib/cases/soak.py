@@ -659,7 +659,7 @@ def _aggregate_run_stats(results: list[dict]) -> dict:
 
 def run_soak(
     minutes: float = 5.0,
-    runs: int = 2,
+    runs: int = 0,
     score: bool = False,
     human_dir: pathlib.Path | None = None,
     baseline_trace_dir: pathlib.Path | None = None,

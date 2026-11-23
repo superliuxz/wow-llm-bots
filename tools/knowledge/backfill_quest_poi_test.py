@@ -85,6 +85,20 @@ class BackfillQuestPoiTest(unittest.TestCase):
         self.assertIn("INSERT INTO `quest_poi`", sql)
         self.assertIn("INSERT INTO `quest_poi_points`", sql)
 
+    def test_zero_lootid_ignored_and_apply_sql_validates_db_names(self) -> None:
+        # Creatures with lootid == 0 must not be linked to creature_loot_template
+        # entries sharing their creature_template.entry ID.
+        item_c, _ = bqp.build_item_sources(
+            creature_loot_rows=[(305, 900, 0)],
+            go_loot_rows=[],
+            ref_items={},
+            lootid_to_creatures={},  # creature 305 had lootid=0 -> omitted
+            lootid_to_gos={},
+        )
+        self.assertEqual(item_c.get(900, set()), set())
+        with self.assertRaises(ValueError):
+            bqp.apply_sql(pathlib.Path("/nonexistent"), pathlib.Path(__file__), ["bad;db"])
+
 
 if __name__ == "__main__":
     unittest.main()

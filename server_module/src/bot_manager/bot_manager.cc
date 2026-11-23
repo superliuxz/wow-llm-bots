@@ -106,8 +106,12 @@ bool HasEligibleTempEnchant(Player* bot, PlayerbotAI* ai, bool is_stone) {
   if (!bot || !ai) {
     return false;
   }
-  for (uint8_t slot : {EQUIPMENT_SLOT_MAINHAND, EQUIPMENT_SLOT_OFFHAND}) {
-    Item* weapon = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
+  // ImbueWithStoneAction enchants mainhand + offhand; ImbueWithOilAction only
+  // ever enchants mainhand (ImbueAction.cpp:166-175).
+  const uint8_t slots[2] = {EQUIPMENT_SLOT_MAINHAND, EQUIPMENT_SLOT_OFFHAND};
+  const size_t slot_count = is_stone ? 2 : 1;
+  for (size_t i = 0; i < slot_count; ++i) {
+    Item* weapon = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slots[i]);
     if (!weapon || weapon->GetEnchantmentId(TEMP_ENCHANTMENT_SLOT) != 0) {
       continue;
     }
@@ -158,14 +162,17 @@ class BrainPolicyListener final : public ActionExecutionListener {
     PolicyListenerEngines().erase(engine_key_);
   }
   bool Before(Action* /*action*/, Event /*event*/) override { return true; }
-  bool AllowExecution(Action* action, Event /*event*/) override {
+  bool AllowExecution(Action* action, Event event) override {
     if (!action) {
       return true;
     }
     const std::string& name = action->getName();
-    if (name == "accept invitation" || name == "equip upgrades packet action" ||
-        name == "equip upgrade") {
+    if (name == "accept invitation" || name == "equip upgrade") {
       return false;
+    }
+    if (name == "equip upgrades packet action") {
+      // Allow Hunter "no ammo" trigger to re-equip arrows/bullets from bags.
+      return event.GetSource() == "no ammo";
     }
     if (name == "apply stone") {
       return HasEligibleTempEnchant(bot_, ai_, /*is_stone=*/true);
@@ -240,15 +247,22 @@ void RecoverStuckDungeonGhost(Player* player,
   *stuck_since_ms = 0;
   const AreaTriggerTeleport* entrance =
       sObjectMgr->GetMapEntranceTrigger(corpse_map_id);
-  player->ResurrectPlayer(1.0f);
-  player->SpawnCorpseBones();
-  if (entrance) {
-    player->TeleportTo(entrance->target_mapId, entrance->target_X,
-                       entrance->target_Y, entrance->target_Z,
-                       entrance->target_Orientation);
+  if (entrance && player->TeleportTo(entrance->target_mapId, entrance->target_X,
+                                     entrance->target_Y, entrance->target_Z,
+                                     entrance->target_Orientation)) {
+    // AzerothCore's HandleMoveWorldportAck resurrects the ghost and converts
+    // its dungeon corpse to bones on the destination dungeon map.
+    LOG_INFO("module",
+             "mod-llm-brain: recovered dungeon ghost {} into map {} entrance",
+             player->GetName(), corpse_map_id);
+    return;
   }
+  // Fallback when no entrance trigger exists or TeleportTo failed.
+  player->ResurrectPlayer(0.5f);
+  player->SpawnCorpseBones();
   LOG_INFO("module",
-           "mod-llm-brain: recovered dungeon ghost {} into map {} entrance",
+           "mod-llm-brain: revived stuck dungeon ghost {} in place (map {} "
+           "entrance unavailable)",
            player->GetName(), corpse_map_id);
 }
 
@@ -290,6 +304,18 @@ BotManager::~BotManager() = default;
 
 void BotManager::Update(uint32_t diff_ms) {
   now_ms_ += diff_ms;
+  // Attach BrainPolicyListener on every world tick (O(1) hash lookup) so newly
+  // entered Engines (especially BOT_STATE_DEAD on first dungeon death) are
+  // protected before the 1 s Tick() runs.
+  for (const Bot& bot : bots_) {
+    if (!bot.guid) {
+      continue;
+    }
+    Player* player = ObjectAccessor::FindConnectedPlayer(ObjectGuid(bot.guid));
+    if (player && player->IsInWorld() && !player->InBattleground()) {
+      EnsurePolicyListener(player, GET_PLAYERBOT_AI(player));
+    }
+  }
   since_tick_ms_ += diff_ms;
   if (since_tick_ms_ < kTickMs) {
     return;

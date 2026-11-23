@@ -15,6 +15,7 @@ import argparse
 from collections import defaultdict
 from dataclasses import dataclass
 import pathlib
+import re
 import statistics
 import subprocess
 import sys
@@ -354,7 +355,10 @@ def generate_from_mysql(
             kill_credit_to_creatures[kc1].add(entry)
         if kc2 > 0:
             kill_credit_to_creatures[kc2].add(entry)
-        lootid_to_creatures[lootid if lootid > 0 else entry].add(entry)
+        # In AzerothCore (Unit.cpp:13741), lootid == 0 means no loot; never
+        # fall back to creature_template.entry.
+        if lootid > 0:
+            lootid_to_creatures[lootid].add(entry)
 
     lootid_to_gos: dict[int, set[int]] = defaultdict(set)
     for r in _mysql_query(
@@ -405,7 +409,9 @@ def generate_from_mysql(
 
 def apply_sql(mysql_cnf: pathlib.Path, sql_path: pathlib.Path, dbs: list[str]) -> None:
     sql_text = sql_path.read_text(encoding="utf-8")
-    for db in dbs:
+    for db in list(dict.fromkeys(dbs)):
+        if not re.fullmatch(r"[A-Za-z0-9_]+", db):
+            raise ValueError(f"invalid MySQL database name: {db!r}")
         exists = _mysql_query(mysql_cnf, "information_schema",
                               f"SELECT SCHEMA_NAME FROM SCHEMATA WHERE SCHEMA_NAME='{db}'")
         if not exists:

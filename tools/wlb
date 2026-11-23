@@ -95,10 +95,10 @@ def parse(argv):
                    help="eval: run the same cases across every candidate model in models/")
     p.add_argument("--minutes", type=float, default=5.0,
                    help="soak: duration in minutes per run (default: 5.0)")
-    p.add_argument("--runs", type=int, default=2,
-                   help="soak: number of runs to average (default: 2)")
+    p.add_argument("--runs", type=int, default=0,
+                   help="soak: number of runs (default: 0 = full suite once)")
     p.add_argument("--suite", default="varied",
-                   help="soak: scenario suite (varied, heldout, quest, or a scenario name)")
+                   help="soak: scenario suite (varied, heldout, endurance, quest, or a scenario name)")
     p.add_argument("--score", action="store_true",
                    help="soak: print composite 0-100 human-likeness score + guardrails")
     p.add_argument("--human-dir", type=pathlib.Path, default=None,

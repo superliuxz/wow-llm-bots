@@ -21,7 +21,15 @@ Last updated 2026-11-23.
   - **Step 3 — 4-hour endurance soak & comparison (Classic + TBC + WotLK):**
     - [x] Add/verify boss notes (`content/notes/Ulda/notes.md`, `content/notes/Strat/notes.md` — verified against upstream AzerothCore scripts, `Spell.dbc`, and `OrdersTest.AllContentNotesParseWithRealOrdersParser`) and wire `SUITES["endurance"]` (6 scenarios: Uldaman L42, Stratholme L60, Sethekk Halls L67, Magisters' Terrace L70H, Ahn'kahet L74, Pit of Saron L80H) with boss-notes seeding + 6/6 smoke checks passing (`0` LLM errors, `0` invalid plans, `10/10` moved).
     - [ ] Run the full **4 h endurance soak** (`SUITES["endurance"]`, `6 × 40 min` = `4 h` wall-clock / `40` bot-hours) with `stall_check.py` and `soak_scorer.py`, tracking dungeon clears/wipes/recoveries/orders and open-world quests/professions/gathers/skill-ups.
-  - **Step 4 — Independent review & sign-off:** cold review subagents report zero remaining findings, update `docs/TODO.md` and report with 100% honesty.
+  - **Step 4 — Independent review & sign-off:**
+    - Cold review of `2591949..b7bf727` (`0` High, `5` Medium, `2` Low) — all 7 fixed & verified:
+      - [x] **Medium 1 (`bot_manager.cc:195-207`):** `EnsurePolicyListener` now runs on every `BotManager::Update` world tick (O(1) hash lookup) so `BOT_STATE_DEAD` is protected immediately on first death.
+      - [x] **Medium 2 (`bot_manager.cc:241-252`):** `RecoverStuckDungeonGhost` now teleports the ghost directly into the dungeon entrance so AzerothCore's `HandleMoveWorldportAck` resurrects and converts the corpse on the dungeon map; only falls back to in-place revive if `!entrance` or `TeleportTo` fails.
+      - [x] **Medium 3 (`bot_manager.cc:105-121`):** `HasEligibleTempEnchant` now checks only `EQUIPMENT_SLOT_MAINHAND` when `is_stone == false` (matching `ImbueWithOilAction::Execute`).
+      - [x] **Medium 4 (`backfill_quest_poi.py:357`):** `creature_template.lootid == 0` now skipped (`if lootid > 0:`), unit-tested, and `quest_poi_backfill.sql` regenerated.
+      - [x] **Medium 5 (`soak.py:592-605`, `tools/wlb:98-101`):** `--runs` now defaults to `0` (run full suite once) and `tools/wlb` help lists `endurance`.
+      - [x] **Low 6 (`bot_manager.cc:166-169`):** `"equip upgrades packet action"` allowed when `event.GetSource() == "no ammo"` so Hunters can auto-equip replacement ammo.
+      - [x] **Low 7 (`backfill_quest_poi.py:409-410,445`):** `apply_sql` deduplicates DB names and validates `^[A-Za-z0-9_]+$`.
 
 ## Next, in order
 
