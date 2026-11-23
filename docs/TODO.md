@@ -9,13 +9,22 @@ Last updated 2026-11-23.
 
 ## In progress
 
-- [ ] **Phase 4 follow-ups from live soak (`2026-11-23-phase4-soak-and-phase5-c4-faceoff.md`):**
-  - **Fixed & live-verified (`2 × 10 min` RFC + DM soak, `var/phase4_dungeon_fix_verify2_2026-11-23.log`, `11/11` Layer A gates PASS, `5,471 XP/h`, `22` quests, `0` LLM errors/invalid plans):**
-    1. Group/dungeon non-combat strategies (`AdjustNonCombatStrategies` in `config_parsing.{h,cc}` + `bot_manager.cc`): grouped followers now run with the leader (`+follow,-grind,-new rpg`) and dungeon leaders strip `+new rpg` while keeping `+grind` (stripped test configs untouched). In DM (`r01`), all 5 party members stayed within ~20 yd, scored `25` kills each, `0` deaths, and `7,005 XP/h`.
-    2. Item spam & equip ping-pong eliminated cleanly at root cause (`BrainPolicyListener` in `bot_manager.cc`, `CollectUsableBagItems` in `option_executor.cc`, and `content/RULES.md`, `eval` held `47/52` / `90%`): `Heavy Sharpening Stone` spam dropped from `51` → `0` invalid uses (`1` valid use on a level-appropriate weapon), and `item_equip` ping-pong dropped from `61` → `0` post-gear swaps.
-    3. Dungeon death/corpse-run (`BrainPolicyListener` + `RecoverStuckDungeonGhost` in `bot_manager.cc`, source-verified; `0` dungeon deaths occurred in the verification run): standalone bots now wait for a party healer rez inside a dungeon when a living party member is on the same map, and cross-map dungeon ghosts stuck `>= 30 s` recover via `sObjectMgr->GetMapEntranceTrigger`.
-  - **Remaining before 4 h endurance soak:** (a) the screen (`screen_renderer.cc`) labels *other* party members as `leader` but doesn't tell the leader itself on `me:` that it is the party leader, so after clearing a dungeon room `Loadf` still picked `Keep` (`453.8 s` stall in RFC `r00`; `301.9 s` on `Loadh`/`Loadi` in DM `r01`), and `Loadh_r00` still chose `Use Hearthstone` once in RFC; (b) live-trigger `RecoverStuckDungeonGhost` on an actual dungeon death, then run a full 4 h soak with `stall_check.py`.
-  - *(Note: `human_react_timing` passed at `193.0 ms >= 150 ms` in the verification run; user confirmed slightly faster Playerbots combat reflexes are acceptable as long as there are no cheater moves. CI `rsync` dependency fixed in `a670917`; missing `quest_poi`/`quest_poi_points` backfilled directly into `server_module/data/sql/db-world/quest_poi_backfill.sql` via `tools/knowledge/backfill_quest_poi.py` (`+2,438` POI rows: `152` turn-ins, `115` NPC/GO objectives, `1,310` item objectives; `8,965` → `9,135` quests covered), removing the need for a runtime `B1-POI-fallback` in `snapshot_builder.cc`.)*
+- [ ] **Phase 4 expanded plan & 4 h endurance soak (Classic + TBC + WotLK):**
+  - **Already fixed & live-verified (`5814b75`, `a670917`, `61adb82`):** group/dungeon non-combat strategies (`AdjustNonCombatStrategies`), `Heavy Sharpening Stone` spam (`51` → `0` invalid), `item_equip` ping-pong (`61` → `0`), dungeon death/corpse-run recovery (`BrainPolicyListener` + `RecoverStuckDungeonGhost`), CI `rsync` fix, and `acore_world` `quest_poi` backfill (`+2,438` POI rows -> `9,135` quests covered).
+  - **Step 1 — Close remaining dungeon-execution gaps:**
+    - [ ] Add `party leader` self-tag on `me:` in `harness/src/screen/screen_renderer.cc` so dungeon leaders know they are the leader and pick `Explore` after clearing a room (and check why `Loadh_r00` picked `Use Hearthstone` once in RFC).
+    - [ ] Pass explicit `tank`/`heal`/`dps` roles in `soak.py` and add `llmtest difficulty heroic` (+ profession seeding helper if needed) in `server_module/src/test/test_commands.cc`.
+    - [ ] Live-verify `RecoverStuckDungeonGhost` on an actual dungeon wipe/death.
+  - **Step 2 — Expand open-world bot mix (longer quests, professions & world activities):**
+    - [ ] Spread open-world soak bots across Classic, TBC, and WotLK zones (`L20–L78`: e.g. STV/Tanaris/EPL, Hellfire/Nagrand, Borean Tundra/Dragonblight/Icecrown) with multi-step quest chains, item drops, vendors, trainers, and flight paths.
+    - [ ] Seed gathering & secondary professions (Herbalism, Mining, Skinning, First Aid, Cooking, Fishing + tools) on open-world bots so runs exercise gathering (`kGather`), skinning, `skill_up`, trainers, vendoring/repairs, and gear upgrades.
+  - **Step 3 — 4-hour endurance soak & comparison (Classic + TBC + WotLK):**
+    - [ ] Add/verify boss notes in `content/notes/` for any missing Classic dungeons and wire Classic / TBC / WotLK scenarios with hard 5-man dungeons spanning both leveling brackets and endgame caps (`Tank / Healer / 3 DPS`):
+      - **Classic:** Uldaman (`L42`) / Sunken Temple (`L50`) + Stratholme (`L60`).
+      - **TBC:** Sethekk Halls (`L67`) / Auchenai Crypts (`L65`) + Magisters' Terrace (`L70` Heroic).
+      - **WotLK:** Ahn'kahet (`L74`) + Pit of Saron (`L80` Heroic) / Forge of Souls (`L80` Heroic).
+    - [ ] Run fast smoke checks per era, then run the full **4 h endurance soak** (`40+` bot-hours) with `stall_check.py` and `soak_scorer.py`, tracking dungeon clears/wipes/recoveries/orders and open-world quests/professions/gathers/skill-ups with `0` stalls, `0` LLM errors, `0` invalid plans.
+  - **Step 4 — Independent review & sign-off:** cold review subagents report zero remaining findings, update `docs/TODO.md` and report with 100% honesty.
 
 ## Next, in order
 
@@ -43,6 +52,11 @@ are signed off** (see [`docs/benchmarks/2026-11-22-phase1-phase3-five-boss-n16.m
 
 ## Later
 
+- **Dungeon Finder (LFG / RDF) integration (`server_module/`):** wire AzerothCore's `sLFGMgr` state
+  (`queued`, `proposal`, `role_check`, `in_dungeon`) and brain-chosen LFG options (`Queue Dungeon
+  Finder`, `Accept/Decline proposal`, `Leave queue`, `Teleport to/out of dungeon`) so bots can queue
+  organically while questing (snapshot schema and `harness/src/plan/triggers.cc` LFG wake triggers
+  already exist).
 - **Optional brain-chosen group movement / formation tuning:** currently out-of-combat group members
   use Playerbots' non-combat `+follow` formation movement controller between pulls when the brain
   picks `Keep` (combat & boss positioning are brain-owned). If less formation-followy movement or
