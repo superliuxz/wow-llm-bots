@@ -195,7 +195,18 @@ TEST(PromptTest, SelectRelevantNotesPicksActiveBossAndNeverCutsMidOrder) {
   const std::string capped = SelectRelevantNotes(icc, empty);
   EXPECT_LE(capped.size(), 2000u);
   EXPECT_NE(capped.find("## Boss 0"), std::string::npos);
-  EXPECT_EQ(capped.find("[truncated]"), std::string::npos);
+  // Small files (<= 2,000 B) stay intact so companion/shared sections are never
+  // dropped even when a specific boss heading matches.
+  const std::string small_notes =
+      "# Obsidian Sanctum (OS)\n\n## Sartharion\n- Boss\n\n"
+      "## The Obsidian Sanctum\n- Shadow Breath\n";
+  wlb::snapshot::Snapshot sarth;
+  wlb::snapshot::Unit sb;
+  sb.name = "Sartharion";
+  sb.kind = wlb::snapshot::Unit::NPC;
+  sb.reaction = wlb::snapshot::Unit::HOSTILE;
+  sarth.base.nearby.units.push_back(sb);
+  EXPECT_EQ(SelectRelevantNotes(small_notes, sarth), small_notes);
 }
 
 }  // namespace

@@ -77,12 +77,10 @@ Blistering Zombie targets me -> kite it
 
 ## Sindragosa
 
-- **Ice Tomb**: damage tombs down to ~50% HP and hold them for line-of-sight cover during Frost Bomb before finishing them.
+- **Ice Tomb**: damage tombs down to ~50% HP and hold them for line-of-sight cover during Frost Bomb before finishing them (decide per tomb rather than auto-burning all tombs).
 - **Blistering Cold**: boss cast; follow standing order (`out of it`).
 
 ```
-Ice Tomb appears & Ice Tomb hp>50 -> target nearest Ice Tomb
-Ice Tomb hp<51 -> target boss
 Blistering Cold cast -> out of it
 ```
 

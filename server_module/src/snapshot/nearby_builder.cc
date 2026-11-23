@@ -520,18 +520,23 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
                  bot->GetPositionZ(), kLosMovedYd);
 
   // Line of sight first, on the budget, nearest unknown or stale first.
+  // Cache TriggerHazardInfo per hidden trigger GUID so InspectTriggerHazard is
+  // called at most once per trigger per snapshot.
+  std::vector<std::pair<uint64_t, TriggerHazardInfo>> hidden_hazards;
   std::vector<LosCache::Candidate> candidates;
   candidates.reserve(visible->size());
   for (const auto& [guid, object] : *visible) {
     if (HiddenFromPlayer(object)) {
-      // Include living hidden-trigger hazards within 60 yd so their LoS is
-      // raycasted and cached rather than blindly skipped.
       Creature* trigger = object->ToCreature();
       if (!trigger || !trigger->IsAlive() ||
-          bot->GetExactDist2d(trigger) > 60.0f ||
-          !InspectTriggerHazard(trigger)) {
+          bot->GetExactDist2d(trigger) > 60.0f) {
         continue;
       }
+      std::optional<TriggerHazardInfo> hz = InspectTriggerHazard(trigger);
+      if (!hz) {
+        continue;
+      }
+      hidden_hazards.emplace_back(guid.GetRawValue(), std::move(*hz));
     }
     candidates.push_back({guid.GetRawValue(), bot->GetDistance(object)});
   }
@@ -567,38 +572,38 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
       // Hidden trigger NPCs (e.g. Flame Strike, Arcane Sphere, Coldflame,
       // Defile) draw no creature model/nameplate, but their active spell casts
       // or visible spell visual / periodic-trigger auras ARE visible effects.
+      const uint64_t raw_guid = guid.GetRawValue();
+      const auto hz_it = std::find_if(
+          hidden_hazards.begin(), hidden_hazards.end(),
+          [raw_guid](const auto& p) { return p.first == raw_guid; });
       if (Creature* trigger = object->ToCreature();
-          trigger && trigger->IsAlive()) {
+          trigger && hz_it != hidden_hazards.end()) {
+        const TriggerHazardInfo& hz = hz_it->second;
         const float dist_to_trigger = bot->GetExactDist2d(trigger);
-        if (dist_to_trigger <= 60.0f) {
-          if (std::optional<TriggerHazardInfo> hz =
-                  InspectTriggerHazard(trigger)) {
-            const float radius = hz->radius_yd > 0.0f ? hz->radius_yd : 8.0f;
-            const bool inside = dist_to_trigger <= radius;
-            const std::optional<bool> in_los = los_.Get(guid.GetRawValue());
-            if (!inside && ((in_los.has_value() && !*in_los) ||
-                            (dist_to_trigger > options_.nameplate_range_yd &&
-                             !in_los.value_or(false)))) {
-              ++stats.hidden;
-              continue;
-            }
-            pb::Area& out = nearby->areas.emplace_back();
-            out.guid = "trigger:" + GuidString(guid.GetRawValue());
-            out.name = hz->name;
-            pb::Spell& sp = out.spell.emplace();
-            sp.id = hz->spell_id;
-            sp.name = hz->name;
-            out.radius_yd = radius;
-            out.inside_me = inside;
-            out.hostile = trigger->IsHostileTo(bot);
-            out.remaining_s = hz->remaining_s;
-            out.lands_in_s = hz->lands_in_s;
-            pb::Relative& rel = out.rel.emplace();
-            FillRelative(bot, trigger, &rel);
-            SetInLos(in_los, &rel);
-            ++stats.areas;
-          }
+        const float radius = hz.radius_yd > 0.0f ? hz.radius_yd : 8.0f;
+        const bool inside = dist_to_trigger <= radius;
+        const std::optional<bool> in_los = los_.Get(raw_guid);
+        if (!inside && ((in_los.has_value() && !*in_los) ||
+                        (dist_to_trigger > options_.nameplate_range_yd &&
+                         !in_los.value_or(false)))) {
+          ++stats.hidden;
+          continue;
         }
+        pb::Area& out = nearby->areas.emplace_back();
+        out.guid = "trigger:" + GuidString(raw_guid);
+        out.name = hz.name;
+        pb::Spell& sp = out.spell.emplace();
+        sp.id = hz.spell_id;
+        sp.name = hz.name;
+        out.radius_yd = radius;
+        out.inside_me = inside;
+        out.hostile = trigger->IsHostileTo(bot);
+        out.remaining_s = hz.remaining_s;
+        out.lands_in_s = hz.lands_in_s;
+        pb::Relative& rel = out.rel.emplace();
+        FillRelative(bot, trigger, &rel);
+        SetInLos(in_los, &rel);
+        ++stats.areas;
       }
       ++stats.hidden;
       continue;

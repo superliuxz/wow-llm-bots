@@ -9,9 +9,20 @@ Last updated 2026-11-22.
 
 ## In progress
 
-### Deep Review Findings (2026-11-22)
+### Review `458047b` Findings (2026-11-22)
 
-### Review `52c4c0c` Findings (2026-11-22 — all resolved & verified)
+- [x] **R458047b-H1 (`prompt.cc`, `prompt_unittest.cc`):** `SelectRelevantNotes` now returns `full_notes` immediately when `<= kMaxNotesBytes` (keeping all 39 small files and their `## Shared`/`## <Instance>` sections intact) and drops `self.unit.target` from boss-heading matching so friendly targets never hijack sections. Unit-tested in `prompt_unittest.cc`.
+- [x] **R458047b-M1 (`llm_brain_world_script.cc`):** moved `ClearAvoidedTargetsForBot` outside `if (bots_[i].active_act)` in `OnHarnessConnection` so synchronous `AVOID` state is always cleared on disconnect/reconnect (compile/source-verified in `out/server-test`).
+- [x] **R458047b-M2 (`bot_loop.cc`, `bot_loop_unittest.cc`):** tracked chat `command_id` errors now wake the brain with `refusal = false` without stopping `state.runner`; unit-tested in `BotLoopTest.ChatErrorWakesBrainWithoutStoppingActiveRunner`.
+- [x] **R458047b-M3 (`notes_hill_climb.py`, `notes_hill_climb_test.py`):** replaced 100%-kill one-sample sign test with two-sample exact Mood's median Fisher test on incumbent vs pooled candidate trial deaths, pooled `best_res` trials on KEEP, and added unit tests for incomplete baseline abort, pooled trial medians, two-sample deaths test, and noisy held-out non-rejection (`10/10`).
+- [x] **R458047b-M4 (`bot_loop_unittest.cc`):** updated `LeavingInstanceClearsOrdersAndSelfCancelDoesNotWake` to re-trigger Coldflame before exiting ICC, assert `STOP/MOVING` is dispatched, and verify a post-exit snapshot dispatches no act (`237/237`).
+- [x] **R458047b-L1 (`content/notes/ICC/notes.md`):** removed conflicting multi-tomb `Ice Tomb hp>50`/`hp<51` standing orders under `## Sindragosa`, keeping `Blistering Cold cast -> out of it` and describing 50% Frost Bomb LoS holding in prose.
+- [x] **R458047b-L2 (`option_executor.cc`):** re-fetches `post_aura_unit` by `ObjectGuid` after `HandleUseItemOpcode` and also checks `GetApplyTime()` refresh (compile/source-verified in `out/server-test`).
+- [x] **R458047b-L3 (`remote.py`, `remote_test.py`):** removed nested `setsid` handoff race (single `setsid --wait` session), added `SIGKILL` escalation to `waiter_cleanup`, and locally executed `waiter_cleanup` against a real blocked `flock` subprocess (`24/24`).
+- [x] **R458047b-L4 (`nearby_builder.cc`):** cached `TriggerHazardInfo` per hidden trigger GUID during `NearbyBuilder::Build` so `InspectTriggerHazard(trigger)` runs at most once per trigger per snapshot (compile/source-verified in `out/server-test`).
+- [x] **R458047b-L5 (`docs/TODO.md`):** removed empty heading above `### Review 52c4c0c Findings`.
+
+### Review `52c4c0c` Findings (2026-11-22)
 
 - [x] **R52c4c0c-H1 (`nearby_builder.cc`):** included living hidden-trigger hazards (`<= 60 yd` matching `InspectTriggerHazard`) in `los_.PickChecks(...)` so `los_.Get(guid)` actually raycasts and caches LoS for hidden triggers (both `<= 20 yd` wall occlusion and `20–60 yd` visibility; compile/source-verified in `out/server-test`).
 - [x] **R52c4c0c-H2 (`prompt.cc`, `bot_loop.cc`, `content/notes/{ICC,Uld,PoS}/notes.md`):** consolidated companion sections under their boss headings (`Professor Putricide`, `Blood Prince Council (Prince Valanar, Prince Keleseth, Prince Taldaram)`, `Ick`, `Mimiron (Leviathan Mk II, VX-001)`), restricted `SelectRelevantNotes` matching to `snapshot.ext.encounter->boss` + living non-friendly NPCs (`>= 3` chars) + target (min-len `>= 4` for substring matching), eliminated preamble-only returns, and keyed `compiled_orders_cache_` on `selected_notes` (`state.last_selected_notes`). Unit-tested in `prompt_unittest.cc`.

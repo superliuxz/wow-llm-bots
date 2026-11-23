@@ -447,6 +447,91 @@ class NotesHillClimbTest(unittest.TestCase):
             self.assertEqual(ledger[1]["status"], "rejected")
             self.assertIn("held-out regression", ledger[1]["reason"])
 
+    def test_baseline_incomplete_and_two_sample_deaths_and_pooling(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1) Incomplete baseline aborts with RuntimeError.
+            with self.assertRaisesRegex(RuntimeError, r"baseline incomplete"):
+                nhc.run_notes_hill_climb(
+                    boss_key="kaelthas",
+                    initial_notes="# Base\n",
+                    out_dir=pathlib.Path(tmp) / "inc_base",
+                    rounds=1,
+                    runs_per_eval=4,
+                    confirm_runs=4,
+                    bench_fn=lambda *a: {"boss": "B", "by_arm": {"llm": {"kills": 1, "runs": 2, "median_dps": 1000, "median_deaths": 2}}, "trials": []},
+                    propose_fn=lambda *a: "# X\n",
+                )
+
+            # 2) _pool_boss_results computes exact medians from pooled non-empty trials.
+            res_a = {
+                "trials": [
+                    {"mode": "llm", "total_dps": 1000.0, "total_deaths": 2, "characters": {"a": {"damage_taken": 100}}},
+                    {"mode": "llm", "total_dps": 1200.0, "total_deaths": 4, "characters": {"a": {"damage_taken": 200}}},
+                ]
+            }
+            res_b = {
+                "trials": [
+                    {"mode": "llm", "total_dps": 2000.0, "total_deaths": 0, "characters": {"a": {"damage_taken": 300}}},
+                    {"mode": "llm", "total_dps": 2200.0, "total_deaths": 0, "characters": {"a": {"damage_taken": 400}}},
+                ]
+            }
+            pooled = nhc._pool_boss_results(
+                res_a, nhc.CompetenceScore(1, 2, 1100.0, 3.0, 150.0),
+                res_b, nhc.CompetenceScore(2, 2, 2100.0, 0.0, 350.0),
+            )
+            self.assertEqual((pooled.kills, pooled.runs), (3, 4))
+            self.assertEqual(pooled.median_dps, 1600.0)
+            self.assertEqual(pooled.median_deaths, 1.0)
+
+            # 3) 100%-kill two-sample Mood's median test keeps clear deaths drop and rejects noise.
+            def make_trials(n, deaths):
+                return [{"mode": "llm", "killed": True, "total_dps": 2000.0, "total_deaths": deaths} for _ in range(n)]
+
+            seq = iter([
+                {"boss": "B", "by_arm": {"llm": {"kills": 16, "runs": 16, "median_dps": 2000.0, "median_deaths": 3.0}}, "trials": make_trials(16, 3)},
+                {"boss": "B", "by_arm": {"llm": {"kills": 8, "runs": 8, "median_dps": 2000.0, "median_deaths": 0.0}}, "trials": make_trials(8, 0)},
+                {"boss": "B", "by_arm": {"llm": {"kills": 8, "runs": 8, "median_dps": 2000.0, "median_deaths": 0.0}}, "trials": make_trials(8, 0)},
+            ])
+            res_d = nhc.run_notes_hill_climb(
+                boss_key="loken",
+                initial_notes="# Base\n",
+                out_dir=pathlib.Path(tmp) / "deaths_ok",
+                rounds=1,
+                runs_per_eval=8,
+                confirm_runs=8,
+                bench_fn=lambda *a: next(seq),
+                propose_fn=lambda *a: "# Better\n- `in Fire -> out of it`\n",
+            )
+            self.assertEqual(res_d["rounds"][1]["status"], "kept")
+            self.assertEqual(res_d["best_score"]["median_deaths"], 0.0)
+
+            # 4) Noisy 1-kill held-out dip (7/8 vs 8/8, p=0.5 > 0.10) does NOT falsely reject.
+            def fake_ho(boss_key, notes_path, runs, parallel, out_json, trace_dir):
+                txt = notes_path.read_text()
+                if boss_key == "loken":
+                    kills = 7 if "CAND" in txt else 8
+                else:
+                    kills = runs if "CAND" in txt else 2
+                return {
+                    "boss": boss_key,
+                    "by_arm": {"llm": {"kills": kills, "runs": runs, "median_dps": 2000.0, "median_deaths": 1.0}},
+                    "trials": [],
+                }
+
+            res_ho = nhc.run_notes_hill_climb(
+                boss_key="kaelthas",
+                initial_notes="# Base\n",
+                out_dir=pathlib.Path(tmp) / "ho_noisy",
+                rounds=1,
+                runs_per_eval=8,
+                confirm_runs=8,
+                held_out_boss="loken",
+                held_out_runs=8,
+                bench_fn=fake_ho,
+                propose_fn=lambda *a: "# CAND\n- `in Fire -> out of it`\n",
+            )
+            self.assertEqual(res_ho["rounds"][1]["status"], "kept")
+
     def test_all_content_notes_standing_orders_valid(self) -> None:
         def has_unexported_boss_aura(lhs: str) -> bool:
             for clause in lhs.split(" & "):

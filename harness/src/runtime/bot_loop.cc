@@ -388,8 +388,19 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
                              imm.event.error->command_id);
     if (chat_it != state.recent_chat_command_ids.end()) {
       state.recent_chat_command_ids.erase(chat_it);
-      // Chat error with real command_id: fall through to EvaluateEventTrigger
-      // so the brain learns from the refusal without stopping the active step.
+      // Chat error with real command_id: wake the brain so it sees the refusal
+      // without stopping the active runner step or freezing step_refusals.
+      if (const std::optional<WakeTrigger> trig =
+              EvaluateEventTrigger(imm.event, state.triggers.watches())) {
+        if (state.latest_snapshot) {
+          WakeBot(bot, trig->urgency, trig->reason, /*refusal=*/false);
+        } else if (std::find(state.pending_reasons.begin(),
+                             state.pending_reasons.end(),
+                             trig->reason) == state.pending_reasons.end()) {
+          state.pending_reasons.push_back(trig->reason);
+        }
+      }
+      return;
     } else if (!state.runner.active() ||
                imm.event.error->command_id != state.runner.last_command_id()) {
       return;

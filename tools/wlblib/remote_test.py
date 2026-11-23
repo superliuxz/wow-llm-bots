@@ -338,14 +338,38 @@ class RemoteLibTest(unittest.TestCase):
                 self.assertEqual(res.returncode, 0, res.stderr)
                 self.assertFalse(pgid_file.exists())
 
-            # 2b) _kill_remote_pgid(only_if_active=True): skips test-server stop when pgid file is absent.
+            # 2b) _kill_remote_pgid(only_if_active=True): skips test-server stop when pgid file is absent,
+            # and kills a real blocked flock waiter via waiter_rel without touching active jobs.
             per_run_rel = f"{remote.ACTIVE_PGID_REL}.deadbeef"
-            with mock.patch("subprocess.run") as m_sub:
-                remote._kill_remote_pgid(real_spec, pgid_rel=per_run_rel, only_if_active=True)
-            only_active_cmd = m_sub.call_args[0][0][-1]
-            self.assertIn(per_run_rel, only_active_cmd)
-            res_inactive = subprocess.run(["bash", "-c", only_active_cmd], capture_output=True, text=True)
-            self.assertEqual(res_inactive.returncode, 0, res_inactive.stderr)
+            waiter_rel = "var/.waiter_remote_pgid.deadbeef"
+            lock_file = real_repo / "var" / ".remote.lock"
+            with lock_file.open("a+") as held_lock:
+                import fcntl as _fcntl
+                _fcntl.flock(held_lock.fileno(), _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+                try:
+                    waiter_proc = subprocess.Popen(
+                        [
+                            "setsid", "--wait", "bash", "-c",
+                            f"echo $$ > {real_repo / waiter_rel} && flock -o {lock_file} true",
+                        ]
+                    )
+                    for _ in range(40):
+                        if (real_repo / waiter_rel).exists():
+                            break
+                        import time as _time
+                        _time.sleep(0.05)
+                    self.assertTrue((real_repo / waiter_rel).exists())
+                    with mock.patch("subprocess.run") as m_sub:
+                        remote._kill_remote_pgid(
+                            real_spec, pgid_rel=per_run_rel, waiter_rel=waiter_rel, only_if_active=True
+                        )
+                    only_active_cmd = m_sub.call_args[0][0][-1]
+                    res_inactive = subprocess.run(["bash", "-c", only_active_cmd], capture_output=True, text=True)
+                    self.assertEqual(res_inactive.returncode, 0, res_inactive.stderr)
+                    waiter_proc.wait(timeout=5)
+                    self.assertFalse((real_repo / waiter_rel).exists())
+                finally:
+                    _fcntl.flock(held_lock.fileno(), _fcntl.LOCK_UN)
 
             # 2c) stop(): does not block on REMOTE_LOCK_REL so stuck servers can always be stopped.
             with mock.patch.object(remote, "get_remote", return_value=real_spec), \

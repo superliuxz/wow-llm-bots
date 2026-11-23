@@ -1748,17 +1748,89 @@ TEST(BotLoopTest, LeavingInstanceClearsOrdersAndSelfCancelDoesNotWake) {
   loop.OnEvent(std::move(cancel_ev), t0 + base::Seconds(2));
   EXPECT_EQ(brain.size(), 0u);
 
-  // L-Act1: leaving the instance clears standing orders so Coldflame never
-  // fires again outside the instance.
-  pb::Snapshot s3 = s2;
-  s3.seq = 3;
+  // L-Act1: re-trigger Coldflame so a movement order is ACTIVE, then leave the
+  // instance. Leaving must clear standing orders AND emit STOP/MOVING.
+  pb::Snapshot s2b = s1;
+  s2b.seq = 3;
+  s2b.base.nearby.areas[0].inside_me = false;
+  loop.OnSnapshot(s2b, t0 + base::Seconds(3));
+  pb::Snapshot s2c = s1;
+  s2c.seq = 4;
+  s2c.base.nearby.areas[0].inside_me = true;
+  loop.OnSnapshot(s2c, t0 + base::Seconds(4));
+  ASSERT_TRUE(sent.back().act.has_value());
+  EXPECT_EQ(sent.back().act->verb, pb::Command_Act::OUT_OF);
+
+  pb::Snapshot s3 = s2c;
+  s3.seq = 5;
   s3.base.where.in_instance = false;
   s3.base.where.map = "Northrend";
-  const size_t cmds_before = sent.size();
-  loop.OnSnapshot(s3, t0 + base::Seconds(3));
-  for (size_t i = cmds_before; i < sent.size(); ++i) {
+  const size_t cmds_before_exit = sent.size();
+  loop.OnSnapshot(s3, t0 + base::Seconds(5));
+  bool saw_stop_moving = false;
+  for (size_t i = cmds_before_exit; i < sent.size(); ++i) {
+    if (sent[i].act && sent[i].act->verb == pb::Command_Act::STOP &&
+        sent[i].act->stop == pb::Command_Act::MOVING) {
+      saw_stop_moving = true;
+    }
+  }
+  EXPECT_TRUE(saw_stop_moving);
+
+  // Post-exit snapshot with Coldflame still present must NOT dispatch any act.
+  pb::Snapshot s4 = s3;
+  s4.seq = 6;
+  const size_t cmds_after_exit = sent.size();
+  loop.OnSnapshot(s4, t0 + base::Seconds(6));
+  for (size_t i = cmds_after_exit; i < sent.size(); ++i) {
     EXPECT_FALSE(sent[i].act.has_value());
   }
+}
+
+TEST(BotLoopTest, ChatErrorWakesBrainWithoutStoppingActiveRunner) {
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& c) { sent.push_back(c); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+
+  pb::Snapshot s1 = MakeLiveSnap("Gatda", 1, t0, /*in_combat=*/false);
+  pb::Option& attack = s1.options.emplace_back();
+  attack.kind = pb::Option::ATTACK;
+  attack.text = "Attack Boar";
+  attack.guid = "0xb1";
+  attack.name = "Boar";
+  pb::Unit& boar = s1.base.nearby.units.emplace_back();
+  boar.guid = "0xb1";
+  boar.name = "Boar";
+  boar.kind = pb::Unit::NPC;
+  boar.reaction = pb::Unit::HOSTILE;
+  boar.health_pct = 100.0f;
+  AddKeep(&s1);
+
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 1, 2\nexpect: none\nwatch: none\nlook: 60\nsay: pulling boar");
+  uint32_t say_cmd_id = 0;
+  for (const pb::Command& c : sent) {
+    if (c.say.has_value()) {
+      say_cmd_id = c.command_id;
+    }
+  }
+  ASSERT_NE(say_cmd_id, 0u);
+
+  // Chat error with the real say command_id wakes the brain (refusal=false)
+  // without stopping the active Attack step.
+  pb::ImmediateEvent err;
+  err.bot = "Gatda";
+  err.event.error.emplace().command_id = say_cmd_id;
+  err.event.error->text = "chat rate limited";
+  loop.OnEvent(std::move(err), t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("chat rate limited"),
+            std::string::npos);
 }
 
 }  // namespace

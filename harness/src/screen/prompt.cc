@@ -160,6 +160,12 @@ std::string SelectRelevantNotes(std::string_view full_notes,
   if (full_notes.empty()) {
     return "";
   }
+  // If the entire file fits within the notes budget (39 of 41 dungeon/raid
+  // files), keep it intact so companion/shared/instance sections are never
+  // dropped.
+  if (full_notes.size() <= kMaxNotesBytes) {
+    return std::string(full_notes);
+  }
   // Parse into optional preamble (`# Instance ...`) + `## <Heading>` sections.
   struct Section {
     std::string_view heading;
@@ -202,9 +208,9 @@ std::string SelectRelevantNotes(std::string_view full_notes,
                : CapText(full_notes, kMaxNotesBytes);
   }
 
-  // Collect active boss / hostile NPC unit names (plus encounter boss and
-  // current target) to match the active boss section(s). Never match friendly
-  // players, pets, totems, or short (< 3 char) unit names.
+  // Collect active boss / hostile NPC unit names (plus encounter boss) to match
+  // the active boss section(s). Never match friendly players, pets, totems, or
+  // short (< 3 char) unit names (including friendly `self.unit.target`).
   std::vector<std::string_view> active_units;
   if (snapshot.ext.encounter && snapshot.ext.encounter->boss &&
       !snapshot.ext.encounter->boss->name.empty()) {
@@ -215,9 +221,6 @@ std::string SelectRelevantNotes(std::string_view full_notes,
         u.reaction != wlb::snapshot::Unit::FRIENDLY && u.name.size() >= 3) {
       active_units.push_back(u.name);
     }
-  }
-  if (snapshot.base.self.unit.target.size() >= 3) {
-    active_units.push_back(snapshot.base.self.unit.target);
   }
 
   std::vector<const Section*> matched;

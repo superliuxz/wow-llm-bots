@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -1304,8 +1305,11 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
   const int32_t charges_before =
       spell_slot >= 0 ? item->GetSpellCharges(spell_slot) : 0;
   Unit* aura_unit = item_target ? item_target : bot;
+  const ObjectGuid aura_unit_guid = aura_unit->GetGUID();
   const Aura* aura_before = aura_unit->GetAura(item_spell_id);
   const int32_t aura_dur_before = aura_before ? aura_before->GetDuration() : -1;
+  const time_t aura_apply_before =
+      aura_before ? aura_before->GetApplyTime() : 0;
   const uint32_t last_potion_before = bot->GetLastPotionId();
   const bool gcd_before =
       bot->GetGlobalCooldownMgr().HasGlobalCooldown(item_spell);
@@ -1338,10 +1342,15 @@ ExecuteResult ExecuteUseItemOption(Player* bot, const OptionTarget& target) {
   const bool cd_started = bot->HasSpellCooldown(item_spell_id);
   const bool gcd_started =
       !gcd_before && bot->GetGlobalCooldownMgr().HasGlobalCooldown(item_spell);
-  const Aura* aura_after = aura_unit->GetAura(item_spell_id);
+  Unit* post_aura_unit = (aura_unit_guid == bot->GetGUID())
+                             ? static_cast<Unit*>(bot)
+                             : ObjectAccessor::GetUnit(*bot, aura_unit_guid);
+  const Aura* aura_after =
+      post_aura_unit ? post_aura_unit->GetAura(item_spell_id) : nullptr;
   const bool aura_applied =
       aura_after != nullptr &&
-      (aura_before == nullptr || aura_after->GetDuration() > aura_dur_before);
+      (aura_before == nullptr || aura_after->GetDuration() > aura_dur_before ||
+       aura_after->GetApplyTime() > aura_apply_before);
   const bool potion_recorded = last_potion_before != proto->ItemId &&
                                bot->GetLastPotionId() == proto->ItemId;
   const bool vehicle_changed = bot->GetVehicle() != vehicle_before;

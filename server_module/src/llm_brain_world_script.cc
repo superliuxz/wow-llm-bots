@@ -481,10 +481,13 @@ class LlmBrainWorldScript : public WorldScript {
              connected ? "connected" : "disconnected");
     wrong_version_logged_ = false;
     for (size_t i = 0; i < bots_.size(); ++i) {
+      Player* bot = ObjectAccessor::FindPlayerByName(config_.bots[i]);
+      if (bot) {
+        ClearAvoidedTargetsForBot(bot->GetGUID().GetRawValue());
+      }
       if (bots_[i].active_act) {
-        if (Player* bot = ObjectAccessor::FindPlayerByName(config_.bots[i])) {
+        if (bot) {
           CancelActiveAct(bot, &*bots_[i].active_act);
-          ClearAvoidedTargetsForBot(bot->GetGUID().GetRawValue());
         }
         bots_[i].active_act.reset();
       }

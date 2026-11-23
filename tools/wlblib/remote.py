@@ -512,7 +512,11 @@ def _kill_remote_pgid(
             f"if [ -f {shlex.quote(waiter_rel)} ]; then "
             f"  WPID=$(cat {shlex.quote(waiter_rel)} 2>/dev/null || true); "
             '  case "$WPID" in ""|*[!0-9]*) WPID="" ;; *) [ "$WPID" -gt 1 ] || WPID="" ;; esac; '
-            '  if [ -n "$WPID" ]; then kill -TERM -"$WPID" "$WPID" 2>/dev/null || true; fi; '
+            '  if [ -n "$WPID" ]; then '
+            '    kill -TERM -"$WPID" "$WPID" 2>/dev/null || true; '
+            '    for _ in 1 2 3; do kill -0 -"$WPID" 2>/dev/null || break; sleep 1; done; '
+            '    kill -KILL -"$WPID" "$WPID" 2>/dev/null || true; '
+            "  fi; "
             f"  rm -f {shlex.quote(waiter_rel)}; "
             "fi; "
         )
@@ -573,11 +577,11 @@ def run_remote(
             tunnel_port = spec.llm_port
             say(f"remote {spec.name}: reverse-tunneling local 127.0.0.1:{tunnel_port} -> remote")
 
-        # Run inside a dedicated session/process-group with `setsid --wait` and
-        # remote `flock -o` (closes lock FD in child so daemons never deadlock the
-        # lock). Separate per-run waiter/active PGID files ensure an interrupted
-        # queued client kills its own waiting `flock` without touching another
-        # client's active job.
+        # Run inside a single `setsid --wait` session with remote `flock -o`
+        # (no nested `setsid`, so waiter_rel and pgid_rel share one PGID with
+        # zero handoff race). Separate per-run waiter/active PGID files ensure
+        # an interrupted queued client kills its own waiting `flock` without
+        # touching another client's active job.
         token = secrets.token_hex(6)
         waiter_rel = f"var/.waiter_remote_pgid.{token}"
         pgid_rel = f"{ACTIVE_PGID_REL}.{token}"
@@ -592,7 +596,7 @@ def run_remote(
             f"mkdir -p var && echo $$ > {shlex.quote(waiter_rel)} && "
             f"trap 'rm -f {shlex.quote(waiter_rel)}' EXIT && "
             f"flock -o {shlex.quote(REMOTE_LOCK_REL)} "
-            f"setsid --wait bash -c {shlex.quote(locked_body)}"
+            f"bash -c {shlex.quote(locked_body)}"
         )
         remote_cmd = f"setsid --wait bash -c {shlex.quote(inner)}"
         ssh_cmd = [*_ssh_base_args(spec, tunnel_port=tunnel_port), remote_cmd]

@@ -317,14 +317,14 @@ def _fisher_one_sided_greater(cand_k: int, cand_n: int, inc_k: int, inc_n: int) 
     return min(1.0, p)
 
 
-def _binomial_one_sided_greater(k: int, n: int, p0: float = 0.5) -> float:
-    """Exact one-sided binomial p-value P(Bin(n, p0) >= k)."""
-    if n <= 0:
+def _mood_median_deaths_p(inc_deaths: list[float], cand_deaths: list[float]) -> float:
+    """Two-sample exact Mood's median Fisher test for H1: candidate deaths < incumbent deaths."""
+    if not inc_deaths or not cand_deaths:
         return 1.0
-    p = 0.0
-    for x in range(max(k, 0), n + 1):
-        p += math.comb(n, x) * (p0**x) * ((1.0 - p0) ** (n - x))
-    return min(1.0, p)
+    pooled_med = statistics.median(inc_deaths + cand_deaths)
+    cand_below = sum(1 for d in cand_deaths if d < pooled_med - 1e-9)
+    inc_below = sum(1 for d in inc_deaths if d < pooled_med - 1e-9)
+    return _fisher_one_sided_greater(cand_below, len(cand_deaths), inc_below, len(inc_deaths))
 
 
 def _pool_boss_results(
@@ -916,32 +916,29 @@ def run_notes_hill_climb(
                 inc_perfect = best_score.runs > 0 and best_score.kills == best_score.runs
                 cand_perfect = pooled_runs > 0 and pooled_kills == pooled_runs
                 if inc_perfect and cand_perfect:
-                    # Require a statistically significant per-trial deaths reduction
-                    # (exact one-sided sign test against p0 = 0.5) — no uncontrolled bypass.
-                    pooled_trials = [
-                        t
+                    # Two-sample exact Mood's median Fisher test on incumbent vs
+                    # pooled candidate trial death lists (no sample-median Type I inflation).
+                    inc_trials = [
+                        float(t.get("total_deaths", 0.0))
+                        for t in best_res.get("trials", [])
+                        if t.get("mode") == "llm"
+                    ]
+                    cand_trials = [
+                        float(t.get("total_deaths", 0.0))
                         for t in (cand_res.get("trials", []) + conf_res.get("trials", []))
                         if t.get("mode") == "llm"
                     ]
-                    better_trials = sum(
-                        1
-                        for t in pooled_trials
-                        if float(t.get("total_deaths", 0.0)) < best_score.median_deaths - 1e-9
-                    )
-                    fisher_p = _binomial_one_sided_greater(
-                        better_trials, len(pooled_trials), p0=0.5
-                    )
-                    if pooled_trials and fisher_p <= per_round_alpha:
+                    fisher_p = _mood_median_deaths_p(inc_trials, cand_trials)
+                    if inc_trials and cand_trials and fisher_p <= per_round_alpha:
                         reason = (
                             f"confirmed deaths improvement ({conf_reason}; "
-                            f"{better_trials}/{len(pooled_trials)} trials < {best_score.median_deaths:.1f} deaths, "
-                            f"p={fisher_p:.4f} <= {per_round_alpha:.4f})"
+                            f"two-sample Mood median p={fisher_p:.4f} <= {per_round_alpha:.4f})"
                         )
                     else:
                         keep = False
                         reason = (
                             f"deaths improvement not statistically significant "
-                            f"(p={fisher_p:.4f} > {per_round_alpha:.4f})"
+                            f"(two-sample Mood median p={fisher_p:.4f} > {per_round_alpha:.4f})"
                         )
                 else:
                     fisher_p = _fisher_one_sided_greater(
@@ -990,7 +987,22 @@ def run_notes_hill_climb(
                         )
 
             if keep:
-                cand_res = conf_res
+                cand_res = {
+                    "boss": boss_name,
+                    "by_arm": {
+                        "llm": {
+                            "kills": pooled_score.kills,
+                            "runs": pooled_score.runs,
+                            "median_dps": pooled_score.median_dps,
+                            "median_deaths": pooled_score.median_deaths,
+                        }
+                    },
+                    "trials": [
+                        t
+                        for t in (cand_res.get("trials", []) + conf_res.get("trials", []))
+                        if t.get("mode") == "llm"
+                    ],
+                }
                 cand_score = pooled_score
                 cand_trace_dir = conf_trace_dir
 
