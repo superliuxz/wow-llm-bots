@@ -3,7 +3,7 @@
 // The brain's process:
 //   harness run    [--socket= --rules= --bots-dir= --host= --port=
 //                   --slots= --temperature= --seconds=]
-//   harness decide <snapshot.pb> [--name= --goal= --reason= --rules=
+//   harness decide <snapshot.json> [--name= --goal= --reason= --rules=
 //                   --identity= --log-dir= --host= --port= --slot=
 //                   --temperature= --dry-run]
 //   harness parse-plans  < records (CheckPlanRecords, plan.h)
@@ -42,7 +42,7 @@ int Usage() {
       "  harness run [--socket=PATH] [--rules=FILE] [--bots-dir=DIR]\n"
       "              [--knowledge=FILE] [--host=H] [--port=N] [--slots=N]\n"
       "              [--temperature=T] [--seconds=S] [--only-bots=NAME,NAME]\n"
-      "  harness decide <snapshot.pb> [--name=BOT] [--goal=TEXT]\n"
+      "  harness decide <snapshot.json> [--name=BOT] [--goal=TEXT]\n"
       "                 [--reason=TEXT] [--rules=FILE] [--identity=FILE]\n"
       "                 [--knowledge=FILE] [--log-dir=DIR] [--host=H]\n"
       "                 [--port=N] [--slot=N] [--temperature=T] [--dry-run]\n"

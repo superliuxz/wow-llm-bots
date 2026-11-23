@@ -16,14 +16,6 @@ Hex Lord Malacrass appears -> target nearest Hex Lord Malacrass
 Amani Healing Ward appears -> target nearest Amani Healing Ward
 ```
 
-## Trash
-
-- **Breath**: boss cast; follow standing order (`out of it`).
-
-```
-Breath cast -> out of it
-```
-
 ## Halazzi
 
 - **Corrupted Lightning Totem**: priority add; switch and burn promptly.

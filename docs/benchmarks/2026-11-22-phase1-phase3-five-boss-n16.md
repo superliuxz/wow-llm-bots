@@ -63,7 +63,7 @@
 
 ## 4. Phase 1–3 Conclusions & Strategic Insights (2026-11-22)
 
-- **Matches hand-written C++ scripts generically, without boss-specific C++:** In `v3`, `llm` achieved `52/80` (`65.0%`) vs `baseline` `40/80` (`50.0%`, `p_raw = 0.0782`, n.s.) and `no_brain` `35/80` (`43.8%`, `p_holm3 = 0.0326`), crushing weak C++ scripts (`Ikiss` `12/16` vs `1/16`, `Loken` `14/16` vs `9/16`) while slightly trailing tightly scripted C++ on `Kael'thas` (`9/16` vs `12/16`) and `Murmur` (`10/16` vs `12/16`).
+- **Matches hand-written C++ scripts generically, without boss-specific C++:** In `v3`, `llm` achieved `52/80` (`65.0%`) vs `baseline` `40/80` (`50.0%`, `p_raw = 0.0782`, n.s.) and `no_brain` `35/80` (`43.8%`, `p_holm3 = 0.0326`), crushing weak C++ scripts (`Ikiss` `12/16` vs `1/16`, `Loken` `14/16` vs `9/16`) while slightly trailing tightly scripted C++ on `Kael'thas` (`9/16` vs `12/16`) and default Playerbots on `Murmur` (`10/16` vs `12/16`, `strip_strat=""`).
 - **Neither reflex latency nor missing boss knowledge is the bottleneck:** Standing orders execute in C++ at ~0 ms LLM latency (and live wakes take ~70–200 ms), and `notes.md` lifts kills (`52/80` vs `llm_no_notes` `43/80`).
 - **Three real ceilings observed:**
   1. *Playerbots C++ class AI* (rotation, interrupts, healer triage, threat) is shared across all arms and caps fights like Devourer (`5–7/16` across all 4 arms).

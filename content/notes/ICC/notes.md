@@ -32,11 +32,9 @@ Blood Beast appears -> target nearest Blood Beast
 ## Rotface
 
 - **Unstable Ooze Explosion**: cast by Big Ooze; move out immediately and return once safe (`out of it, then back`).
-- **Vile Gas**: ground hazard; move out immediately.
 
 ```
 Unstable Ooze Explosion cast -> out of it, then back
-in Vile Gas -> out of it
 ```
 
 ## Professor Putricide

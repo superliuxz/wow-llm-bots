@@ -18,11 +18,9 @@ Ashtongue Channeler appears -> target nearest Ashtongue Channeler
 
 ## Teron Gorefiend
 
-- **Shadow of Death**: boss cast; follow standing order (`out of it`).
 - **Shadowy Construct**: priority add; switch and burn promptly.
 
 ```
-Shadow of Death cast -> out of it
 Shadowy Construct appears -> target nearest Shadowy Construct
 ```
 

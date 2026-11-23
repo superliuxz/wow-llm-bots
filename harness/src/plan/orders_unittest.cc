@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -433,20 +434,25 @@ TEST(OrdersTest, AllContentNotesParseWithRealOrdersParser) {
     ++files_checked;
     std::ifstream in(notes_file);
     ASSERT_TRUE(in.is_open()) << notes_file;
-    std::string line;
+    const std::string content((std::istreambuf_iterator<char>(in)),
+                              std::istreambuf_iterator<char>());
+    const std::vector<std::string> names =
+        CollectOrderNames(wlb::snapshot::Snapshot{}, content);
+    const grammar::rt::Env env{.names = {{"order_names", names}}, .counts = {}};
     bool in_fence = false;
-    while (std::getline(in, line)) {
+    for (std::string_view raw_line : base::SplitStringPiece(
+             content, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
       const std::string_view trimmed =
-          base::TrimWhitespaceASCII(line, base::TRIM_ALL);
+          base::TrimWhitespaceASCII(raw_line, base::TRIM_ALL);
       if (trimmed.starts_with("```")) {
         in_fence = !in_fence;
         continue;
       }
       if (in_fence && trimmed.find("->") != std::string_view::npos) {
-        const std::optional<Order> parsed =
-            grammar::ParseOrder(trimmed, grammar::rt::Env{});
+        const std::optional<Order> parsed = grammar::ParseOrder(trimmed, env);
         EXPECT_TRUE(parsed.has_value())
-            << notes_file.string() << ": failed to parse order: " << trimmed;
+            << notes_file.string() << ": failed to parse order against "
+            << "ExtractNamesFromNotes: " << trimmed;
         ++orders_checked;
       }
     }

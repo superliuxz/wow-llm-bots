@@ -2,7 +2,7 @@
 
 ## Razorscale
 
-- **Dark Rune Sentinel** **Whirlwind**: sentinel add cast; move away from the Dark Rune Sentinel (`away Dark Rune Sentinel 12`).
+- **Dark Rune Sentinel**, **Whirlwind**: sentinel add cast; move away from the Dark Rune Sentinel (`away Dark Rune Sentinel 12`).
 
 ```
 Whirlwind cast -> away Dark Rune Sentinel 12

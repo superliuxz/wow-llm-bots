@@ -238,7 +238,7 @@ in `FixtureLoader` + `llmtest group`/`gear`/`tele`:
 - **Layer D calibration:** `tools/bench/hill_climb.py calibrate --human-dir ~/.local/share/wow-llm-bots/human_baseline`
   (verified PASS on real `Hele` + live bot traces: `heldout_human 1000.0 > current_bots 175.1 > plain_playerbots 46.6 > same_loop_walker -68.9 > random_jumper -101.4 > instant_reply -128.2`).
 - **Tamper check:** `tools/bench/hill_climb.py lock-scorer` writes a read-only (0444) SHA-256 lock
-  manifest (`~/.local/share/wow-llm-bots/scorer.sha256`) covering all 28 measurement, trace, and
+  manifest (`~/.local/share/wow-llm-bots/scorer.sha256`) covering all 30 measurement, trace, and
   soak config files (`LOCKED_PATTERNS` in `hill_climb.py`), and records the user-approved manifest
   digest in tracked `config/scorer-lock.sha256` (always verified by `_verify_all_locks`, even when
   `--lock-file` is overridden) so any relock is visible in `git diff`. Note plainly: the external
@@ -248,7 +248,7 @@ in `FixtureLoader` + `llmtest group`/`gear`/`tele`:
   OS barrier, keep the passphrase under a different Unix user or a hardware-key prompt).
 - **Recording human sessions** (5 Hz observer-parity + explicit events):
   ```ini
-  LlmBrain.TraceDir = "/home/will/.local/share/wow-llm-bots/human_baseline"
+  LlmBrain.TraceDir = "$HOME/.local/share/wow-llm-bots/human_baseline"
   LlmBrain.ObserveHumans = 1
   ```
 - **A round** (on a branch, while not playing): `hill_climb.py init --minutes 5 --runs 2` once;

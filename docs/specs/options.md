@@ -123,7 +123,7 @@ when it is offered, and what carries it out. Like the existing options, the modu
   distance and direction in it change as the bot walks (`NE, 300 yd` becomes `N, 280 yd`), so a
   queued step would stop matching its own option. Instead:
   - each spot and place gets a stable id in the option's `guid` (`place:<hub id>`,
-    `spot:<map>:<x>:<y>`), which `MatchOptionInScreen` already tries first;
+    `place:quest:<quest_id>`, `spot:<map>:<x>:<y>`), which `MatchOptionInScreen` already tries first;
   - `ScreenOption::name` keeps only the part that doesn't change: the place name, or what lives
     at the spot (`boars, scorpids, level 3-5`), never the distance or direction;
   - the spots are chosen the same way from one snapshot to the next (nearest per direction from
@@ -145,7 +145,7 @@ eval tests something live bots never see (review 2026-11-17, finding 5). So `Add
 only the snapshot plus an `OptionFacts` struct: the game data a player knows but the snapshot
 doesn't show (NPC flags by guid, food and drink in the bags, nearby places with their services,
 learned gathering skills). Spot and place ids come from their position (`spot:<map>:<x>:<y>`,
-`place:<map>:<x>:<y>`), never from a name two places can share. Each `Explore` spot and `Go to` place in `OptionFacts` carries its
+`place:<map>:<x>:<y>`, or `place:quest:<quest_id>` for quest turn-in destinations), never from a name two places can share. Each `Explore` spot and `Go to` place in `OptionFacts` carries its
 destination `pb::Vec3 pos`, which `AddOptions` copies onto `OptionTarget::pos` so
 `OptionExecutor` walks straight to that coordinate without re-querying `sTravelMgr`. The live
 module builds `OptionFacts` from the game. For the eval fixtures the test server runs the same
