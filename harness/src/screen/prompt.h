@@ -52,9 +52,10 @@ struct PromptInput {
 };
 
 // Selects the current boss's `## <Boss>` section(s) from a multi-boss notes
-// file based on nearby/targeted units in `snapshot`, or caps at a complete
-// section/line boundary within the notes budget so large raid files (ICC,
-// Ulduar) are never cut mid-order and stay in sync with `CollectOrderNames`.
+// file based on `snapshot.ext.encounter->boss` and nearby living non-friendly
+// NPCs, or caps at a complete section/line boundary within the notes budget so
+// large raid files (ICC, Ulduar) are never cut mid-order and stay in sync with
+// `CollectOrderNames`.
 std::string SelectRelevantNotes(std::string_view full_notes,
                                 const wlb::snapshot::Snapshot& snapshot);
 

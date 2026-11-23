@@ -634,8 +634,8 @@ def summarize_fight_timeline(
                         evts.append(obj)
                     elif kind == "sample":
                         smps.append(obj)
-        for smps in samples_by_bot.values():
-            smps.sort(key=lambda s: int(s.get("t_ms", 0)))
+    for smps in samples_by_bot.values():
+        smps.sort(key=lambda s: int(s.get("t_ms", 0)))
 
     lines = [
         f"Boss: {boss_name} ({arm}: {boss_res.get('by_arm', {}).get(arm, {}).get('kills', 0)}/"
@@ -817,8 +817,10 @@ def run_notes_hill_climb(
     """Runs the C2 competence hill-climb loop on `notes.md` for one boss.
 
     Requires confirmation runs (`confirm_runs >= 1`) and a Bonferroni-corrected
-    one-sided Fisher test on pooled candidate + confirmation trials vs incumbent
-    to control the false-positive keep rate across rounds.
+    exact one-sided test (Fisher on kills, or Mann-Whitney U permutation on
+    deaths when both incumbent and candidate are 100% kills) on pooled
+    candidate + confirmation trials vs incumbent to control the false-positive
+    keep rate across rounds.
     """
     if runs_per_eval < 1:
         raise ValueError("runs_per_eval must be >= 1")
@@ -922,12 +924,14 @@ def run_notes_hill_climb(
             best_score, cand_score, expected_runs=runs_per_eval
         )
 
-        # Mandatory confirmation re-run + exact one-sided Fisher test on pooled
+        # Mandatory confirmation re-run + exact one-sided test (Fisher on kills,
+        # or Mann-Whitney U permutation on deaths at 100% kills) on pooled
         # candidate trials vs incumbent to control the family-wise false-keep rate.
         logged_score = cand_score
         initial_score_for_log: CompetenceScore | None = None
         confirm_score_for_log: CompetenceScore | None = None
-        fisher_p: float | None = None
+        p_value: float | None = None
+        p_test: str | None = None
         held_out_cand_score: CompetenceScore | None = None
         if keep:
             conf_json = out_dir / f"round_{r}_confirm.json"
@@ -965,32 +969,34 @@ def run_notes_hill_climb(
                         for t in (cand_res.get("trials", []) + conf_res.get("trials", []))
                         if t.get("mode") == "llm"
                     ]
-                    fisher_p = _mann_whitney_less_p(inc_trials, cand_trials)
-                    if inc_trials and cand_trials and fisher_p <= per_round_alpha:
+                    p_test = "mann_whitney"
+                    p_value = _mann_whitney_less_p(inc_trials, cand_trials)
+                    if inc_trials and cand_trials and p_value <= per_round_alpha:
                         reason = (
                             f"confirmed deaths improvement ({conf_reason}; "
-                            f"Mann-Whitney p={fisher_p:.4f} <= {per_round_alpha:.4f})"
+                            f"Mann-Whitney p={p_value:.4f} <= {per_round_alpha:.4f})"
                         )
                     else:
                         keep = False
                         reason = (
                             f"deaths improvement not statistically significant "
-                            f"(Mann-Whitney p={fisher_p:.4f} > {per_round_alpha:.4f})"
+                            f"(Mann-Whitney p={p_value:.4f} > {per_round_alpha:.4f})"
                         )
                 else:
-                    fisher_p = _fisher_one_sided_greater(
+                    p_test = "fisher"
+                    p_value = _fisher_one_sided_greater(
                         pooled_kills, pooled_runs, best_score.kills, best_score.runs
                     )
-                    if fisher_p <= per_round_alpha:
+                    if p_value <= per_round_alpha:
                         reason = (
                             f"confirmed ({conf_reason}; pooled {pooled_kills}/{pooled_runs} vs "
-                            f"{best_score.kills}/{best_score.runs}, p={fisher_p:.4f} <= {per_round_alpha:.4f})"
+                            f"{best_score.kills}/{best_score.runs}, p={p_value:.4f} <= {per_round_alpha:.4f})"
                         )
                     else:
                         keep = False
                         reason = (
                             f"not statistically significant (pooled {pooled_kills}/{pooled_runs} vs "
-                            f"{best_score.kills}/{best_score.runs}, p={fisher_p:.4f} > {per_round_alpha:.4f})"
+                            f"{best_score.kills}/{best_score.runs}, p={p_value:.4f} > {per_round_alpha:.4f})"
                         )
 
             if keep and held_out_boss and held_out_runs > 0 and held_out_base_score is not None:
@@ -1059,8 +1065,10 @@ def run_notes_hill_climb(
                 entry["initial_score"] = initial_score_for_log.to_dict()
             if confirm_score_for_log is not None:
                 entry["confirm_score"] = confirm_score_for_log.to_dict()
-            if fisher_p is not None:
-                entry["fisher_p"] = round(fisher_p, 6)
+            if p_value is not None:
+                entry["p_value"] = round(p_value, 6)
+            if p_test is not None:
+                entry["p_test"] = p_test
             if held_out_cand_score is not None:
                 entry["held_out_score"] = held_out_cand_score.to_dict()
             log_entry(entry)
@@ -1076,8 +1084,10 @@ def run_notes_hill_climb(
                 entry["initial_score"] = initial_score_for_log.to_dict()
             if confirm_score_for_log is not None:
                 entry["confirm_score"] = confirm_score_for_log.to_dict()
-            if fisher_p is not None:
-                entry["fisher_p"] = round(fisher_p, 6)
+            if p_value is not None:
+                entry["p_value"] = round(p_value, 6)
+            if p_test is not None:
+                entry["p_test"] = p_test
             if held_out_cand_score is not None:
                 entry["held_out_score"] = held_out_cand_score.to_dict()
             log_entry(entry)

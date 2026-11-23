@@ -347,7 +347,8 @@ class NotesHillClimbTest(unittest.TestCase):
             self.assertEqual(ledger[2]["score"]["kills"], 15)
             self.assertEqual(ledger[2]["score"]["runs"], 16)
             self.assertEqual(ledger[2]["confirm_score"]["kills"], 8)
-            self.assertLessEqual(ledger[2]["fisher_p"], 0.025)
+            self.assertEqual(ledger[2]["p_test"], "fisher")
+            self.assertLessEqual(ledger[2]["p_value"], 0.025)
 
     def test_hill_climb_loop_keeps_improvement_and_preserves_incumbent_traces(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -552,6 +553,67 @@ class NotesHillClimbTest(unittest.TestCase):
             )
             self.assertIn("CandSpell=5000", tl)
             self.assertIn("ConfSpell=6000", tl)
+
+            # 3d) End-to-end 2-round post-KEEP check: round 2's propose_fn receives
+            # traces from BOTH cand_trace_dir and conf_trace_dir of round 1's KEEP.
+            seen_timelines: list[str] = []
+
+            def fake_2round_bench(boss_key, notes_path, runs, parallel, out_json, trace_dir):
+                (trace_dir / "bot" / "Loada").mkdir(parents=True, exist_ok=True)
+                is_r1_cand = "round_1_traces" in str(trace_dir)
+                is_r1_conf = "round_1_confirm_traces" in str(trace_dir)
+                if is_r1_cand:
+                    (trace_dir / "bot" / "Loada" / "t.jsonl").write_text(
+                        json.dumps({"kind": "event", "t_ms": 11000, "event": "damage_taken", "detail": "R1CandSpell", "value": 4100}) + "\n"
+                    )
+                    trials = [{"mode": "llm", "killed": False, "duration_s": 5.0, "total_dps": 2000, "total_deaths": 5, "party_index": 0, "pull_ms": 10000}] + [
+                        {"mode": "llm", "killed": True, "duration_s": 30.0, "total_dps": 2000, "total_deaths": 0, "party_index": 0, "pull_ms": 30000 + i * 1000}
+                        for i in range(runs - 1)
+                    ]
+                    kills = runs - 1
+                elif is_r1_conf:
+                    (trace_dir / "bot" / "Loada" / "t.jsonl").write_text(
+                        json.dumps({"kind": "event", "t_ms": 21000, "event": "damage_taken", "detail": "R1ConfSpell", "value": 4200}) + "\n"
+                    )
+                    trials = [{"mode": "llm", "killed": False, "duration_s": 5.0, "total_dps": 2000, "total_deaths": 5, "party_index": 0, "pull_ms": 20000}] + [
+                        {"mode": "llm", "killed": True, "duration_s": 30.0, "total_dps": 2000, "total_deaths": 0, "party_index": 0, "pull_ms": 50000 + i * 1000}
+                        for i in range(runs - 1)
+                    ]
+                    kills = runs - 1
+                else:
+                    trials = [
+                        {"mode": "llm", "killed": False, "duration_s": 10.0, "total_dps": 1500, "total_deaths": 5, "party_index": 0, "pull_ms": 1000 + i * 1000}
+                        for i in range(runs)
+                    ]
+                    kills = 0
+                return {
+                    "boss": "B",
+                    "by_arm": {"llm": {"kills": kills, "runs": runs, "median_dps": 2000.0, "median_deaths": 1.0}},
+                    "trials": trials,
+                }
+
+            def fake_2round_propose(boss_name, cur_notes, timeline, rej):
+                seen_timelines.append(timeline)
+                if len(seen_timelines) == 1:
+                    return "# Round 1\n- `in Fire -> out of it`\n"
+                return cur_notes  # noop on round 2
+
+            res_2r = nhc.run_notes_hill_climb(
+                boss_key="loken",
+                initial_notes="# Base\n",
+                out_dir=pathlib.Path(tmp) / "two_round_traces",
+                rounds=2,
+                runs_per_eval=8,
+                confirm_runs=8,
+                bench_fn=fake_2round_bench,
+                propose_fn=fake_2round_propose,
+            )
+            self.assertEqual(res_2r["rounds"][1]["status"], "kept")
+            self.assertEqual(res_2r["rounds"][1]["p_test"], "fisher")
+            self.assertIn("p_value", res_2r["rounds"][1])
+            self.assertEqual(len(seen_timelines), 2)
+            self.assertIn("R1CandSpell=4100", seen_timelines[1])
+            self.assertIn("R1ConfSpell=4200", seen_timelines[1])
 
             # 4) Noisy 1-kill held-out dip (7/8 vs 8/8, p=0.5 > 0.10) does NOT falsely reject.
             def fake_ho(boss_key, notes_path, runs, parallel, out_json, trace_dir):

@@ -1821,22 +1821,29 @@ TEST(BotLoopTest, ChatErrorWakesBrainWithoutStoppingActiveRunner) {
   loop.OnSnapshot(s1, t0);
   ASSERT_EQ(brain.size(), 1u);
   brain.FinishReply(
-      "do: 1, 2\nexpect: none\nwatch: none\nlook: 60\nsay: pulling boar");
+      "do: 1, 2\nexpect: none\nwatch: none\nlook: 60\n"
+      "say: pulling boar\ntell Ally: incoming");
   uint32_t attack_cmd_id = 0;
   uint32_t say_cmd_id = 0;
+  uint32_t tell_cmd_id = 0;
   for (const pb::Command& c : sent) {
     if (c.choose.has_value()) {
       attack_cmd_id = c.command_id;
     }
     if (c.say.has_value()) {
-      say_cmd_id = c.command_id;
+      if (say_cmd_id == 0u) {
+        say_cmd_id = c.command_id;
+      } else {
+        tell_cmd_id = c.command_id;
+      }
     }
   }
   ASSERT_NE(attack_cmd_id, 0u);
   ASSERT_NE(say_cmd_id, 0u);
+  ASSERT_NE(tell_cmd_id, 0u);
 
   // Chat error with the real say command_id wakes the brain (refusal=false)
-  // without stopping the active Attack step.
+  // without stopping the active Attack step or arming refusal backoff.
   pb::ImmediateEvent err;
   err.bot = "Gatda";
   err.event.error.emplace().command_id = say_cmd_id;
@@ -1846,8 +1853,17 @@ TEST(BotLoopTest, ChatErrorWakesBrainWithoutStoppingActiveRunner) {
   EXPECT_NE(brain.front_request().user.find("chat rate limited"),
             std::string::npos);
 
-  // Even if the chat-error wake fails to return a new plan, state.runner must
-  // still be active: completing attack_cmd_id dispatches step 2 (Keep).
+  // Even if the chat-error wake fails to return a new plan, refusal backoff
+  // is NOT armed (a second chat error 0.5 s later still wakes immediately),
+  // and state.runner stays active: completing attack_cmd_id dispatches step 2.
+  brain.FinishError("timeout");
+  pb::ImmediateEvent err2;
+  err2.bot = "Gatda";
+  err2.event.error.emplace().command_id = tell_cmd_id;
+  err2.event.error->text = "chat blocked";
+  loop.OnEvent(std::move(err2), t0 + base::Milliseconds(1500));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("chat blocked"), std::string::npos);
   brain.FinishError("timeout");
   pb::Snapshot s2 = s1;
   s2.seq = 2;
