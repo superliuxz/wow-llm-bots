@@ -171,8 +171,10 @@ class BrainPolicyListener final : public ActionExecutionListener {
       return false;
     }
     if (name == "equip upgrades packet action") {
-      // Allow Hunter "no ammo" trigger to re-equip arrows/bullets from bags.
-      return event.GetSource() == "no ammo";
+      // Allow Hunter "no ammo" trigger (ItemCountTrigger::getName() returns
+      // "item count") to re-equip arrows/bullets from bags.
+      return event.GetSource() == "item count" && bot_ &&
+             bot_->getClass() == CLASS_HUNTER;
     }
     if (name == "apply stone") {
       return HasEligibleTempEnchant(bot_, ai_, /*is_stone=*/true);

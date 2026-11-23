@@ -30,6 +30,9 @@ Last updated 2026-11-23.
       - [x] **Medium 5 (`soak.py:592-605`, `tools/wlb:98-101`):** `--runs` now defaults to `0` (run full suite once) and `tools/wlb` help lists `endurance`.
       - [x] **Low 6 (`bot_manager.cc:166-169`):** `"equip upgrades packet action"` allowed when `event.GetSource() == "no ammo"` so Hunters can auto-equip replacement ammo.
       - [x] **Low 7 (`backfill_quest_poi.py:409-410,445`):** `apply_sql` deduplicates DB names and validates `^[A-Za-z0-9_]+$`.
+    - Follow-up cold review of `ee34a87` (`0` High, `1` Medium, `1` Low) — both fixed & verified:
+      - [x] **Medium (`bot_manager.cc:173-176`):** `HunterNoAmmoTrigger` inherits `ItemCountTrigger::getName()` (`"item count"`), so updated carveout to `event.GetSource() == "item count" && bot_ && bot_->getClass() == CLASS_HUNTER`.
+      - [x] **Low (`tools/wlblib/testing.py:439`):** updated wrapper `def soak(..., runs=0, ...)`.
 
 ## Next, in order
 
