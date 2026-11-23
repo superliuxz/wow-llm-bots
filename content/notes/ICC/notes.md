@@ -82,7 +82,7 @@ Empowered Shock Vortex cast -> out of it
 ## Blood Prince Council
 
 - **Kinetic Bomb**: priority add; switch and burn promptly.
-- **Ball of Flames Visual**: chasing flame orb summoned by Prince Taldaram; stay clear (`away Ball of Flames Visual 16`).
+- **Ball of Flames Visual**: unempowered chasing flame orb summoned by Prince Taldaram; stay clear (`away Ball of Flames Visual 16`). Empowered orbs pulse **Empowered Flare** (`10 yd`); soak briefly if assigned to shrink their explosion before impact.
 
 ```
 Kinetic Bomb appears -> target nearest Kinetic Bomb
