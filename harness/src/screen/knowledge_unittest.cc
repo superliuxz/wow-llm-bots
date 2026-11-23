@@ -2,6 +2,8 @@
 
 #include "screen/knowledge.h"
 
+#include <cstddef>
+#include <limits>
 #include <optional>
 #include <string>
 
@@ -58,6 +60,14 @@ constexpr const char* kSampleKnowledgeJson = R"json({
     "Magisters' Terrace::Kael'thas Sunstrider": {
       "abilities": "Shock Barrier: shield before Pyroblast.",
       "strategy": "Magisters' Terrace 5-man: break Shock Barrier and interrupt Pyroblast."
+    },
+    "Murmur": {
+      "abilities": "Sonic Boom: 35 yd AoE.",
+      "strategy": "Run out for Sonic Boom."
+    },
+    "Thrall": {
+      "abilities": "Chain Lightning.",
+      "strategy": "Give the Horde as little warning as possible."
     }
   }
 })json";
@@ -129,37 +139,102 @@ TEST(WorldKnowledgeTest, BossStrategyLookupInstanceScopedAndTargetPriority) {
   const std::optional<WorldKnowledge> wk =
       WorldKnowledge::ParseJson(kSampleKnowledgeJson);
   ASSERT_TRUE(wk.has_value());
-  EXPECT_EQ(wk->boss_count(), 3u);
+  EXPECT_EQ(wk->boss_count(), 5u);
 
   wlb::snapshot::Snapshot snap;
   snap.base.where.in_instance = true;
-  snap.base.where.zone = "Magisters' Terrace";
+  snap.base.where.zone = "Grand Magister's Asylum";
+  snap.base.where.map = "Magisters' Terrace";
   snap.base.self.unit.target = "0xkael";
 
-  wlb::snapshot::Unit dead_loken;
-  dead_loken.guid = "0xloken";
-  dead_loken.name = "Loken";
-  dead_loken.kind = wlb::snapshot::Unit::NPC;
-  dead_loken.dead = true;
-  dead_loken.rel.dist_yd = 5.0f;
-  snap.base.nearby.units.push_back(dead_loken);
+  // Friendly own-faction leader and totems must be ignored even if in bosses_.
+  wlb::snapshot::Unit friendly_thrall;
+  friendly_thrall.guid = "0xthrall";
+  friendly_thrall.name = "Thrall";
+  friendly_thrall.kind = wlb::snapshot::Unit::NPC;
+  friendly_thrall.reaction = wlb::snapshot::Unit::FRIENDLY;
+  friendly_thrall.rel.dist_yd = 2.0f;
+  snap.base.nearby.units.push_back(friendly_thrall);
 
+  wlb::snapshot::Unit totem;
+  totem.guid = "0xtotem";
+  totem.name = "Loken";
+  totem.kind = wlb::snapshot::Unit::TOTEM;
+  totem.reaction = wlb::snapshot::Unit::HOSTILE;
+  totem.rel.dist_yd = 3.0f;
+  snap.base.nearby.units.push_back(totem);
+
+  // Dead boss skipped.
+  wlb::snapshot::Unit dead_murmur;
+  dead_murmur.guid = "0xdead";
+  dead_murmur.name = "Murmur";
+  dead_murmur.kind = wlb::snapshot::Unit::NPC;
+  dead_murmur.reaction = wlb::snapshot::Unit::HOSTILE;
+  dead_murmur.dead = true;
+  dead_murmur.rel.dist_yd = 4.0f;
+  snap.base.nearby.units.push_back(dead_murmur);
+
+  // Closer untargeted boss (Loken, 10 yd) and duplicate Loken (12 yd).
+  wlb::snapshot::Unit loken1;
+  loken1.guid = "0xloken1";
+  loken1.name = "Loken";
+  loken1.kind = wlb::snapshot::Unit::NPC;
+  loken1.reaction = wlb::snapshot::Unit::HOSTILE;
+  loken1.rel.dist_yd = 10.0f;
+  snap.base.nearby.units.push_back(loken1);
+
+  wlb::snapshot::Unit loken2 = loken1;
+  loken2.guid = "0xloken2";
+  loken2.rel.dist_yd = 12.0f;
+  snap.base.nearby.units.push_back(loken2);
+
+  // Farther living Murmur (NaN dist -> treated as +inf, capped out by 2-boss
+  // max).
+  wlb::snapshot::Unit murmur_far;
+  murmur_far.guid = "0xmurmur";
+  murmur_far.name = "Murmur";
+  murmur_far.kind = wlb::snapshot::Unit::NPC;
+  murmur_far.reaction = wlb::snapshot::Unit::HOSTILE;
+  murmur_far.rel.dist_yd = std::numeric_limits<float>::quiet_NaN();
+  snap.base.nearby.units.push_back(murmur_far);
+
+  // Farther targeted boss (Kael'thas, 25 yd) must rank AHEAD of closer
+  // untargeted Loken (10 yd), and match via `where.map` ("Magisters' Terrace")
+  // when `where.zone` is a subzone.
   wlb::snapshot::Unit kael;
   kael.guid = "0xkael";
   kael.name = "Kael'thas Sunstrider";
   kael.kind = wlb::snapshot::Unit::NPC;
+  kael.reaction = wlb::snapshot::Unit::HOSTILE;
   kael.rel.dist_yd = 25.0f;
   snap.base.nearby.units.push_back(kael);
 
   const std::string md = wk->SelectRelevant(snap, /*has_boss_notes=*/false);
-  // Instance-scoped Magisters' Terrace entry wins over unqualified Tempest Keep
-  // entry.
-  EXPECT_NE(md.find("Boss Kael'thas Sunstrider — Abilities: Shock Barrier"),
-            std::string::npos);
+  const size_t pos_kael =
+      md.find("Boss Kael'thas Sunstrider — Abilities: Shock Barrier");
+  const size_t pos_loken = md.find("Boss Loken — Abilities: Lightning Nova");
+  ASSERT_NE(pos_kael, std::string::npos);
+  ASSERT_NE(pos_loken, std::string::npos);
+  // Targeted Kael'thas appears before closer untargeted Loken.
+  EXPECT_LT(pos_kael, pos_loken);
+  // Instance-scoped map fallback wins over unqualified Tempest Keep entry.
   EXPECT_NE(md.find("Magisters' Terrace 5-man"), std::string::npos);
   EXPECT_EQ(md.find("Tempest Keep five-phase"), std::string::npos);
-  // Dead boss is skipped.
-  EXPECT_EQ(md.find("Loken"), std::string::npos);
+  // Friendly Thrall excluded; Murmur capped out by kMaxBossesInPrompt=2; Loken
+  // deduplicated.
+  EXPECT_EQ(md.find("Thrall"), std::string::npos);
+  EXPECT_EQ(md.find("Murmur"), std::string::npos);
+  EXPECT_EQ(md.find("Boss Loken — Abilities:", pos_loken + 1),
+            std::string::npos);
+
+  // Active encounter boss works even when nearby.units is empty.
+  wlb::snapshot::Snapshot enc_snap;
+  enc_snap.base.where.in_instance = true;
+  enc_snap.ext.encounter.emplace().boss.emplace().name = "Murmur";
+  const std::string enc_md =
+      wk->SelectRelevant(enc_snap, /*has_boss_notes=*/false);
+  EXPECT_NE(enc_md.find("Boss Murmur — Strategy: Run out for Sonic Boom."),
+            std::string::npos);
 
   // Suppressed when curated boss notes are present.
   EXPECT_TRUE(wk->SelectRelevant(snap, /*has_boss_notes=*/true).empty());

@@ -222,9 +222,6 @@ _ZONE_TITLE_ALIASES: dict[str, str] = {
 _RE_REF = re.compile(r"<ref[^>]*>.*?</ref>|<ref[^>]*/>", re.DOTALL | re.IGNORECASE)
 _RE_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _RE_HTML = re.compile(r"<[^>]+>")
-_RE_FILE_LINK = re.compile(
-    r"\[\[(?:File|Image|Category):[^\]]*\]\]", re.IGNORECASE
-)
 _RE_WIKILINK = re.compile(r"\[\[([^|\]]+\|)?([^\]]+)\]\]")
 _RE_EXTLINK = re.compile(r"\[https?://[^\s\]]+(?:\s+([^\]]+))?\]")
 _RE_BOLD_ITALIC = re.compile(r"'{2,5}")
@@ -243,11 +240,15 @@ _RE_SECTION = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 _RE_BOSS_ABILITIES = re.compile(
-    r"^==\s*(Abilities|Attacks and abilities|Skills|Boss abilities)\s*==\s*$",
+    r"^==\s*[^=\n]*?\b(?:Abilities|Abilites|Attacks and abilities|Skills)\b[^=\n]*?==\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
 _RE_BOSS_STRATEGY = re.compile(
-    r"^==\s*(Strategy|Tactics|Encounter|Walkthrough)\s*==\s*$",
+    r"^==\s*[^=\n]*?\b(?:Strategy|Strategies|Tactics|Encounter|Walkthrough)\b[^=\n]*?==\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_RE_BOSS_PHASE_FALLBACK = re.compile(
+    r"^==\s*Phase\s+(?:1|One)\b[^=\n]*==\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
 _RE_INST_TACTICS = re.compile(r"^(.+?)\s+\((.+?)\s+tactics\)$")
@@ -315,7 +316,8 @@ def _expand_or_strip_templates(text: str) -> str:
                     j += 2
                 else:
                     j += 1
-            body = text[start : max(start, j - 2)]
+            end = j - 2 if depth == 0 else j
+            body = text[start : max(start, end)]
             parts = _split_top_level_pipes(body)
             tname = parts[0].strip().lower() if parts else ""
             if tname in ("abilities", "ability") and len(parts) >= 2:
@@ -354,6 +356,35 @@ def _expand_or_strip_templates(text: str) -> str:
     return "".join(out)
 
 
+def _strip_file_links(text: str) -> str:
+    """Removes balanced `[[File:...]]`, `[[Image:...]]`, and `[[Category:...]]` links."""
+    out: list[str] = []
+    i = 0
+    n = len(text)
+    prefixes = ("file:", "image:", "category:")
+    while i < n:
+        if i + 1 < n and text[i] == "[" and text[i + 1] == "[":
+            head = text[i + 2 : i + 12].lstrip().lower()
+            if any(head.startswith(p) for p in prefixes):
+                depth = 1
+                j = i + 2
+                while j < n and depth > 0:
+                    if j + 1 < n and text[j] == "[" and text[j + 1] == "[":
+                        depth += 1
+                        j += 2
+                    elif j + 1 < n and text[j] == "]" and text[j + 1] == "]":
+                        depth -= 1
+                        j += 2
+                    else:
+                        j += 1
+                out.append(" ")
+                i = j
+                continue
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
 def strip_wikitext(text: str, max_chars: int = 200) -> str:
     """Converts MediaWiki markup into clean, single-line plain text."""
     if not text:
@@ -361,7 +392,7 @@ def strip_wikitext(text: str, max_chars: int = 200) -> str:
     s = _RE_COMMENT.sub(" ", text)
     s = _RE_REF.sub(" ", s)
     s = _expand_or_strip_templates(s)
-    s = _RE_FILE_LINK.sub(" ", s)
+    s = _strip_file_links(s)
     s = _RE_WIKILINK.sub(r"\2", s)
     s = _RE_EXTLINK.sub(lambda m: m.group(1) or "", s)
     s = _RE_HTML.sub(" ", s)
@@ -757,8 +788,17 @@ def export_knowledge(
                     continue
 
                 abilities = _extract_section(wikitext, _RE_BOSS_ABILITIES, max_chars=360)
-                strategy = _extract_section(wikitext, _RE_BOSS_STRATEGY, max_chars=420)
-                if not strategy and not (prio == 3 and abilities):
+                strategy = _extract_section(
+                    wikitext, _RE_BOSS_STRATEGY, max_chars=420
+                ) or _extract_section(wikitext, _RE_BOSS_PHASE_FALLBACK, max_chars=420)
+                # Ignore stub-only `(tactics)` pages like `"See Four Horsemen."` so
+                # a richer canonical boss page is not overwritten by a 2-word stub.
+                has_real_abilities = bool(
+                    abilities
+                    and len(abilities) >= 30
+                    and not abilities.lower().startswith("see ")
+                )
+                if not strategy and not (prio == 3 and has_real_abilities):
                     continue
 
                 b_entry: dict[str, Any] = {}

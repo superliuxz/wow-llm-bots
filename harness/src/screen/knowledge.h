@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <flat_map>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -72,7 +73,7 @@ class WorldKnowledge {
   std::flat_map<uint32_t, QuestInfo> quests_;
   std::flat_map<std::string, ZoneInfo> zones_;
   std::flat_map<std::string, DungeonInfo> dungeons_;
-  std::flat_map<std::string, BossInfo> bosses_;
+  std::flat_map<std::string, BossInfo, std::less<>> bosses_;
 };
 
 }  // namespace harness

@@ -98,9 +98,10 @@ BotLoop::BotLoop(BotLoopConfig config,
       knowledge_ = std::move(*wk);
       Log(base::StringPrintf(
           "harness: loaded world knowledge (%zu quests, %zu zones, %zu "
-          "dungeons) from %s",
+          "dungeons, %zu bosses) from %s",
           knowledge_.quest_count(), knowledge_.zone_count(),
-          knowledge_.dungeon_count(), config_.knowledge_path.c_str()));
+          knowledge_.dungeon_count(), knowledge_.boss_count(),
+          config_.knowledge_path.c_str()));
     } else {
       Log(base::StrCat({"harness: world knowledge unavailable (", err, ")"}));
     }

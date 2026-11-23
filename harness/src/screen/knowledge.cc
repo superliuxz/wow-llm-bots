@@ -3,6 +3,7 @@
 #include "screen/knowledge.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <flat_set>
@@ -192,9 +193,11 @@ std::string WorldKnowledge::SelectRelevant(
   const wlb::snapshot::Where& where = snapshot.base.where;
   const uint32_t bot_level = snapshot.base.self.unit.level.value_or(0);
 
-  // 0) Nearby / targeted boss abilities & strategy (highest priority so boss
-  // mechanics never get crowded out by instance overview or quests).
-  if (!bosses_.empty() && !snapshot.base.nearby.units.empty()) {
+  // 0) Active encounter / targeted / nearby boss abilities & strategy (highest
+  // priority so boss mechanics never get crowded out by instance overview or
+  // quests). Friendly NPCs (e.g., own-faction capital leaders) and totems are
+  // excluded.
+  if (!bosses_.empty()) {
     auto lookup_boss = [&](std::string_view name) -> const BossInfo* {
       if (where.in_instance && !where.zone.empty()) {
         if (auto it = bosses_.find(base::StrCat({where.zone, "::", name}));
@@ -208,7 +211,7 @@ std::string WorldKnowledge::SelectRelevant(
           return &it->second;
         }
       }
-      if (auto it = bosses_.find(std::string(name)); it != bosses_.end()) {
+      if (auto it = bosses_.find(name); it != bosses_.end()) {
         return &it->second;
       }
       return nullptr;
@@ -217,14 +220,25 @@ std::string WorldKnowledge::SelectRelevant(
     struct BossCandidate {
       std::string_view name;
       const BossInfo* info = nullptr;
-      bool is_target = false;
+      bool is_priority = false;
       float dist_yd = 0.0f;
     };
-    const std::string_view target_guid = snapshot.base.self.unit.target;
     std::vector<BossCandidate> cands;
+    if (snapshot.ext.encounter && snapshot.ext.encounter->boss &&
+        !snapshot.ext.encounter->boss->dead &&
+        !snapshot.ext.encounter->boss->name.empty()) {
+      const std::string_view boss_name = snapshot.ext.encounter->boss->name;
+      if (const BossInfo* bi = lookup_boss(boss_name)) {
+        cands.push_back({boss_name, bi, true, -1.0f});
+      }
+    }
+    const std::string_view target_guid = snapshot.base.self.unit.target;
     for (const wlb::snapshot::Unit& u : snapshot.base.nearby.units) {
-      if (u.dead || u.name.empty() || u.kind == wlb::snapshot::Unit::PLAYER ||
+      if (u.dead || u.name.empty() ||
+          u.reaction == wlb::snapshot::Unit::FRIENDLY ||
+          u.kind == wlb::snapshot::Unit::PLAYER ||
           u.kind == wlb::snapshot::Unit::PET ||
+          u.kind == wlb::snapshot::Unit::TOTEM ||
           u.kind == wlb::snapshot::Unit::CRITTER) {
         continue;
       }
@@ -232,14 +246,17 @@ std::string WorldKnowledge::SelectRelevant(
       if (!bi) {
         continue;
       }
+      const float safe_dist = std::isnan(u.rel.dist_yd)
+                                  ? std::numeric_limits<float>::infinity()
+                                  : u.rel.dist_yd;
       cands.push_back({u.name, bi,
                        !target_guid.empty() && u.guid == target_guid,
-                       u.rel.dist_yd});
+                       safe_dist});
     }
     std::sort(cands.begin(), cands.end(),
               [](const BossCandidate& a, const BossCandidate& b) {
-                if (a.is_target != b.is_target) {
-                  return a.is_target > b.is_target;
+                if (a.is_priority != b.is_priority) {
+                  return a.is_priority > b.is_priority;
                 }
                 if (a.dist_yd != b.dist_yd) {
                   return a.dist_yd < b.dist_yd;

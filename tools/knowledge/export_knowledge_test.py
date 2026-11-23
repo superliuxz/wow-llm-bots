@@ -46,6 +46,9 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
             (10184, 'Onyxia', 3),
             (19622, 'Kael''thas Sunstrider', 3),
             (11502, 'Ragnaros', 3),
+            (15990, 'Kel''Thuzad', 3),
+            (33288, 'Yogg-Saron', 3),
+            (10440, 'Baron Rivendare', 1),
             (40, 'Kobold Miner', 0);
         INSERT INTO quests VALUES
             (7, 'Kobold Camp Cleanup', 2, 1, 'Kill 8 Kobold Vermin.$bReturn to Marshal McBride, $N $g fella:lady;.', 101);
@@ -178,6 +181,22 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
             410, 'Deathwing (tactics)', '', '',
             '==Strategy==\nCataclysm-only boss.'
         );
+        INSERT INTO pages VALUES (
+            411, 'Kel''Thuzad (tactics)', '', '',
+            '== 25-man abilities ==\n*Frost Blast freezes players.\n== 25-man strategy ==\nSpread 10 yards apart.'
+        );
+        INSERT INTO pages VALUES (
+            412, 'Yogg-Saron (tactics)', '', '',
+            '==Abilites==\n*Malady of the Mind.\n==Phase One: Sara==\nKill Guardians of Yogg-Saron next to Sara.'
+        );
+        INSERT INTO pages VALUES (
+            413, 'Baron Rivendare', '', '',
+            '==Strategy==\nKill skeletal adds in Stratholme.'
+        );
+        INSERT INTO pages VALUES (
+            414, 'Baron Rivendare (tactics)', '', '',
+            '==Abilities==\nSee [[Four Horsemen (tactics)|Four Horsemen]].'
+        );
         """
     )
     con_w.commit()
@@ -193,6 +212,11 @@ class ExportKnowledgeTest(unittest.TestCase):
         cleaned = ek.strip_wikitext(ab, max_chars=200)
         self.assertIn("Lightning Nova: 20 yd AoE. (5 sec cast)", cleaned)
         self.assertIn("and Lightning Nova", cleaned)
+        # Nested wikilink inside File caption must not leak stray `]]`.
+        nested_img = "[[File:King Magni.jpg|thumb|Magni from [[TCG]].]] Dwarven king."
+        self.assertEqual(ek.strip_wikitext(nested_img), "Dwarven king.")
+        # Unclosed template does not crash or corrupt surrounding text.
+        self.assertEqual(ek.strip_wikitext("Before {{unclosed"), "Before")
 
     def test_export_335a_era_pinning_and_quest_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -263,6 +287,15 @@ class ExportKnowledgeTest(unittest.TestCase):
             self.assertIn("Shock Barrier", bosses["Magisters' Terrace::Kael'thas Sunstrider"]["abilities"])
             self.assertNotIn("Deathwing", bosses)
             self.assertFalse(any("Firelands" in k for k in bosses))
+            # Broadened heading matches (25-man abilities/strategy, Abilites typo, Phase One fallback).
+            self.assertIn("Kel'Thuzad", bosses)
+            self.assertIn("Spread 10 yards apart.", bosses["Kel'Thuzad"]["strategy"])
+            self.assertIn("Yogg-Saron", bosses)
+            self.assertIn("Malady of the Mind.", bosses["Yogg-Saron"]["abilities"])
+            self.assertIn("Kill Guardians of Yogg-Saron", bosses["Yogg-Saron"]["strategy"])
+            # Stub-only `(tactics)` page ("See Four Horsemen.") must not overwrite real Stratholme strategy.
+            self.assertIn("Baron Rivendare", bosses)
+            self.assertIn("Kill skeletal adds in Stratholme.", bosses["Baron Rivendare"]["strategy"])
 
 
 if __name__ == "__main__":
