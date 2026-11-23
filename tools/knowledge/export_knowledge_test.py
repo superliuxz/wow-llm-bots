@@ -49,6 +49,9 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
             (15990, 'Kel''Thuzad', 3),
             (33288, 'Yogg-Saron', 3),
             (10440, 'Baron Rivendare', 1),
+            (23035, 'Anzu', 1),
+            (36626, 'Festergut', 3),
+            (33523, 'Neltharion', 3),
             (40, 'Kobold Miner', 0);
         INSERT INTO quests VALUES
             (7, 'Kobold Camp Cleanup', 2, 1, 'Kill 8 Kobold Vermin.$bReturn to Marshal McBride, $N $g fella:lady;.', 101);
@@ -179,7 +182,7 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
         );
         INSERT INTO pages VALUES (
             410, 'Deathwing (tactics)', '', '',
-            '==Strategy==\nCataclysm-only boss.'
+            '{{Cataclysm}}\n==Abilities==\nTo be announced...\n==Strategy==\nTo be announced...'
         );
         INSERT INTO pages VALUES (
             411, 'Kel''Thuzad (tactics)', '', '',
@@ -187,7 +190,7 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
         );
         INSERT INTO pages VALUES (
             412, 'Yogg-Saron (tactics)', '', '',
-            '==Abilites==\n*Malady of the Mind.\n==Phase One: Sara==\nKill Guardians of Yogg-Saron next to Sara.'
+            '==Abilites==\n*Malady of the Mind deals shadow damage and fears.\n==Phase One: Sara==\nKill Guardians of Yogg-Saron next to Sara.'
         );
         INSERT INTO pages VALUES (
             413, 'Baron Rivendare', '', '',
@@ -196,6 +199,17 @@ def _make_fixture_dbs(tmp: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
         INSERT INTO pages VALUES (
             414, 'Baron Rivendare (tactics)', '', '',
             '==Abilities==\nSee [[Four Horsemen (tactics)|Four Horsemen]].'
+        );
+        INSERT INTO pages VALUES (
+            415, 'Anzu', '', '',
+            '== Level 80 druid solo strategy ==\nProwl past trash as a feral druid.\n== Strategy ==\nStandard 5-man group fight: dispel Spell Bomb and kill birds.'
+        );
+        INSERT INTO pages VALUES (
+            416, 'Festergut', '', '',
+            '== 25-man abilities ==\n{{stub}}\n== 10-man abilities ==\n*{{abilities|Gas Spore|Infects 2 players with spores.}}\n== Strategy ==\nStack on Gas Spore targets to build Inoculated.'
+        );
+        INSERT INTO pages VALUES (
+            417, 'Neltharion', 'Deathwing', '', '#REDIRECT [[Deathwing]]'
         );
         """
     )
@@ -212,8 +226,8 @@ class ExportKnowledgeTest(unittest.TestCase):
         cleaned = ek.strip_wikitext(ab, max_chars=200)
         self.assertIn("Lightning Nova: 20 yd AoE. (5 sec cast)", cleaned)
         self.assertIn("and Lightning Nova", cleaned)
-        # Nested wikilink inside File caption must not leak stray `]]`.
-        nested_img = "[[File:King Magni.jpg|thumb|Magni from [[TCG]].]] Dwarven king."
+        # Nested wikilink inside File caption must not leak stray `]]`, even with leading spaces.
+        nested_img = "[[File:King Magni.jpg|thumb|Magni from [[TCG]].]] [[   Category:Bosses]] Dwarven king."
         self.assertEqual(ek.strip_wikitext(nested_img), "Dwarven king.")
         # Unclosed template does not crash or corrupt surrounding text.
         self.assertEqual(ek.strip_wikitext("Before {{unclosed"), "Before")
@@ -291,11 +305,20 @@ class ExportKnowledgeTest(unittest.TestCase):
             self.assertIn("Kel'Thuzad", bosses)
             self.assertIn("Spread 10 yards apart.", bosses["Kel'Thuzad"]["strategy"])
             self.assertIn("Yogg-Saron", bosses)
-            self.assertIn("Malady of the Mind.", bosses["Yogg-Saron"]["abilities"])
+            self.assertIn("Malady of the Mind", bosses["Yogg-Saron"]["abilities"])
             self.assertIn("Kill Guardians of Yogg-Saron", bosses["Yogg-Saron"]["strategy"])
             # Stub-only `(tactics)` page ("See Four Horsemen.") must not overwrite real Stratholme strategy.
             self.assertIn("Baron Rivendare", bosses)
             self.assertIn("Kill skeletal adds in Stratholme.", bosses["Baron Rivendare"]["strategy"])
+            # Exact `== Strategy ==` wins over earlier `== Level 80 druid solo strategy ==`.
+            self.assertIn("Anzu", bosses)
+            self.assertIn("Standard 5-man group fight", bosses["Anzu"]["strategy"])
+            self.assertNotIn("feral druid", bosses["Anzu"]["strategy"])
+            # Empty `== 25-man abilities ==` does not shadow populated `== 10-man abilities ==`.
+            self.assertIn("Festergut", bosses)
+            self.assertIn("Gas Spore", bosses["Festergut"]["abilities"])
+            # Redirected Cataclysm-banner boss (Neltharion -> Deathwing (tactics)) is excluded.
+            self.assertNotIn("Neltharion", bosses)
 
 
 if __name__ == "__main__":

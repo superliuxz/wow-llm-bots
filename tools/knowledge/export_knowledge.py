@@ -229,6 +229,7 @@ _RE_HEADING = re.compile(r"={2,6}\s*([^=\n]+?)\s*={2,6}")
 _RE_REMOVED_PRE_CATA = re.compile(
     r"\{\{\s*removedfromgame[^}]*patch\s*=\s*([123])\.", re.IGNORECASE
 )
+_RE_CATA_BANNER = re.compile(r"\{\{\s*Cataclysm\b", re.IGNORECASE)
 _RE_MULTI_SPACE = re.compile(r"\s+")
 _RE_QUEST_BREAK = re.compile(r"\$[bB]")
 _RE_QUEST_GENDER = re.compile(r"\$[gG]\s*([^:;]+):([^;]+);")
@@ -239,11 +240,19 @@ _RE_SECTION = re.compile(
     r"^==\s*(Notes|Tips|Walkthrough|Strategy|Tactics|Overview)\s*==\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
-_RE_BOSS_ABILITIES = re.compile(
+_RE_BOSS_ABILITIES_EXACT = re.compile(
+    r"^==\s*(?:Abilities|Abilites|Attacks and abilities|Skills|Boss abilities)\s*==\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_RE_BOSS_ABILITIES_BROAD = re.compile(
     r"^==\s*[^=\n]*?\b(?:Abilities|Abilites|Attacks and abilities|Skills)\b[^=\n]*?==\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
-_RE_BOSS_STRATEGY = re.compile(
+_RE_BOSS_STRATEGY_EXACT = re.compile(
+    r"^==\s*(?:Strategy|Strategies|Tactics|Encounter|Walkthrough)\s*==\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_RE_BOSS_STRATEGY_BROAD = re.compile(
     r"^==\s*[^=\n]*?\b(?:Strategy|Strategies|Tactics|Encounter|Walkthrough)\b[^=\n]*?==\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
@@ -364,7 +373,10 @@ def _strip_file_links(text: str) -> str:
     prefixes = ("file:", "image:", "category:")
     while i < n:
         if i + 1 < n and text[i] == "[" and text[i + 1] == "[":
-            head = text[i + 2 : i + 12].lstrip().lower()
+            k = i + 2
+            while k < n and text[k].isspace():
+                k += 1
+            head = text[k : k + 9].lower()
             if any(head.startswith(p) for p in prefixes):
                 depth = 1
                 j = i + 2
@@ -451,17 +463,40 @@ def _extract_infobox(wikitext: str, prefix: str) -> dict[str, str]:
     return fields
 
 
+def _is_stub_section(text: str) -> bool:
+    """Returns True if a cleaned wiki section is empty or a placeholder/stub."""
+    s = text.strip()
+    if len(s) < 20:
+        return True
+    low = s.lower().rstrip(".! ")
+    if low in ("to be announced", "tba", "tbd", "coming soon", "none", "unknown"):
+        return True
+    if ("to be announced" in low or low.startswith("see ")) and len(s) < 120:
+        return True
+    return False
+
+
 def _extract_section(
-    wikitext: str, heading_re: re.Pattern[str], max_chars: int = 200
+    wikitext: str,
+    heading_res: tuple[re.Pattern[str], ...] | re.Pattern[str],
+    max_chars: int = 200,
+    *,
+    skip_stubs: bool = False,
 ) -> str:
-    """Extracts and cleans the body of the first level-2 section matching `heading_re`."""
-    m = heading_re.search(wikitext)
-    if not m:
-        return ""
-    rest = wikitext[m.end() :]
-    nxt = _RE_NEXT_HEADING.search(rest)
-    sec = rest[: nxt.start()] if nxt else rest
-    return strip_wikitext(sec, max_chars=max_chars)
+    """Extracts the first non-empty section body matching `heading_res` in priority order."""
+    patterns = (heading_res,) if isinstance(heading_res, re.Pattern) else heading_res
+    for heading_re in patterns:
+        for m in heading_re.finditer(wikitext):
+            rest = wikitext[m.end() :]
+            nxt = _RE_NEXT_HEADING.search(rest)
+            sec = rest[: nxt.start()] if nxt else rest
+            cleaned = strip_wikitext(sec, max_chars=max_chars)
+            if not cleaned:
+                continue
+            if skip_stubs and _is_stub_section(cleaned):
+                continue
+            return cleaned
+    return ""
 
 
 def _extract_wiki_tip(wikitext: str, max_chars: int = 200) -> str:
@@ -786,19 +821,26 @@ def export_knowledge(
                     continue
                 if is_classic and _RE_REMOVED_PRE_CATA.search(wikitext):
                     continue
+                if _RE_CATA_BANNER.search(wikitext):
+                    continue
 
-                abilities = _extract_section(wikitext, _RE_BOSS_ABILITIES, max_chars=360)
-                strategy = _extract_section(
-                    wikitext, _RE_BOSS_STRATEGY, max_chars=420
-                ) or _extract_section(wikitext, _RE_BOSS_PHASE_FALLBACK, max_chars=420)
-                # Ignore stub-only `(tactics)` pages like `"See Four Horsemen."` so
-                # a richer canonical boss page is not overwritten by a 2-word stub.
-                has_real_abilities = bool(
-                    abilities
-                    and len(abilities) >= 30
-                    and not abilities.lower().startswith("see ")
+                abilities = _extract_section(
+                    wikitext,
+                    (_RE_BOSS_ABILITIES_EXACT, _RE_BOSS_ABILITIES_BROAD),
+                    max_chars=360,
+                    skip_stubs=True,
                 )
-                if not strategy and not (prio == 3 and has_real_abilities):
+                strategy = _extract_section(
+                    wikitext,
+                    (
+                        _RE_BOSS_STRATEGY_EXACT,
+                        _RE_BOSS_STRATEGY_BROAD,
+                        _RE_BOSS_PHASE_FALLBACK,
+                    ),
+                    max_chars=420,
+                    skip_stubs=True,
+                )
+                if not strategy and not (prio == 3 and abilities):
                     continue
 
                 b_entry: dict[str, Any] = {}
