@@ -28,7 +28,7 @@ What the brain thinks and what a plan contains are specified in `docs/specs/trig
 | `module_connection` | Unix socket client to the server module: BEVE frames in, commands out, reconnect, delivery stats. |
 | `triggers` | Client-equivalent default alerts, edge-latched watches, `expect` suppression, `look` timer. |
 | `plan_runner` | Carries a plan out step by step (counts, expectations, per-kind safety timeouts) and sends `choose`. |
-| `main` | `harness run` (live) and `harness decide <snapshot.json>` (offline eval entry point). |
+| `main` | `harness run` (live), `harness decide <snapshot.json>` (offline eval), `harness render-screen` (screen goldens), and `harness replay` (capacity & real-time load replay). |
 
 ## Core contracts
 

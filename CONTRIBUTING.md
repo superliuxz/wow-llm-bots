@@ -1,148 +1,63 @@
-# wow-llm-bots: rules for working in this repo
+# Contributing to wow-llm-bots
 
-Design and decisions: `docs/design.md`. Current phase plan: `docs/plans/`. **Open work:
-`docs/TODO.md`: read it first in every session, and keep it current (next section).**
+Design: [docs/design.md](docs/design.md). Open work: [docs/TODO.md](docs/TODO.md) (update it in
+the same commit when open priorities change; `git log` is the history of finished work).
 
-## Keep docs/TODO.md current (MUST)
+## Core Rules
 
-Updating `docs/TODO.md` is a **MUST** on every task — never skip it. `docs/TODO.md` is the one list
-of unfinished work, so that whoever (or whichever model) comes next knows where things stand
-without this conversation. You **MUST** update it **in the same commit** as the work:
+1. **The brain decides; C++ is a pure harness.** C++ perceives, measures, enforces client rules,
+   and runs geometry/pathing/timing. Never hard-code class/role/targeting, non-grey selling, or
+   gameplay judgments in C++ — expose facts and mechanically valid options and let the LLM decide.
+2. **Verify before committing.** Re-read your `git diff`, run `tools/wlb check`, and rebuild
+   `out/server-test` (`tools/wlb build server --test`) after any `server_module/` edit. Live-verify
+   behavior changes when practical and note anything unverified honestly.
+3. **Never re-lock scorer manifests without explicit user approval.** Never read or modify
+   `~/.local/share/wow-llm-bots/relock.passphrase`, `~/.local/share/wow-llm-bots/scorer.sha256`,
+   or `experimental/human_likeness/scorer-lock.sha256` on your own.
+4. **Never run `tools/wlb remote` unprompted.** Only offload work to configured workers
+   (`private/remotes.json`) when the user explicitly asks.
 
-- You start something or receive review findings (High, Medium, **and** Low): add every open item
-  to `docs/TODO.md` under "In progress" before claiming work is done.
-- **Standard review-fix procedure (MUST follow in exact order):**
-  1. **Feedback → update `docs/TODO.md` with 100% honesty FIRST** — record every High, Medium, and
-     Low finding verbatim (and fix any `Done` overclaims) **without modifying any code yet**.
-  2. **Fix and verify each item one by one** (High → Medium → Low).
-  3. **Check off an item in `docs/TODO.md` ONLY after it is implemented AND verified** (tests or
-     live checks actually executed, never assumed), then commit and push.
-- You finish an item: check it off / move it to "Done" (keep about ten) **only after** it is
-  implemented and verified (tests/checks actually executed, not assumed).
-- You defer, skip or only partly do something, find a bug you don't fix, or decide something you
-  don't build: add a line to "Next", "Later" or "Loose ends", with a pointer to the document that
-  has the detail. Never leave a known gap only in a chat message or a commit body.
-- A plan or spec changes what is open: change the same lines in TODO.md.
-- Something you could not verify (a command you did not run, a claim you could not check) goes in
-  "Loose ends", with what is needed to verify it.
-- Keep it short: one entry per item, detail in the plan or spec it points to. Update "Last updated".
+## C++ Style (`common/`, `snapshot/`, `harness/`, `server_module/`)
 
-Before ending a session or handing over, re-read `docs/TODO.md` and make it match the repo.
+Follow Google/Chromium C++ style (`.clang-format`, `BasedOnStyle: Chromium`). `common/`,
+`snapshot/`, and `server_module/` stay **C++20** (AzerothCore compatibility); `harness/` uses
+**C++26**. `common/base/` is **frozen** (see `common/base/README.md`).
 
-## Double-check yourself; commits must create no extra bugs (MUST)
-
-Every agent **MUST** double-check its own work before committing so that fixing one bug or adding
-one feature never introduces extra bugs:
-
-- Read your full `git diff` line-by-line before committing; verify boundary conditions, state
-  interactions, retries/idempotency (e.g., never re-sending state-mutating commands or breaking
-  existing invariants), error handling, and all callers.
-- Run `tools/wlb check` after your final edit and verify all unit/spec/consistency checks pass.
-  **Never** read or modify `~/.local/share/wow-llm-bots/relock.passphrase`, run
-  `tools/bench/hill_climb.py lock-scorer`, or modify
-  `~/.local/share/wow-llm-bots/scorer.sha256` or tracked `config/scorer-lock.sha256` on your own.
-  Note plainly: the passphrase file is **not** a technical barrier against an agent running as the
-  same Unix user (it could read/overwrite the file or run under `script`); what actually protects
-  you is this rule plus tracked `config/scorer-lock.sha256`, which makes any relock show up in
-  `git diff` (for a real OS-level barrier, keep the passphrase under a different Unix user or a
-  hardware-key prompt). If a task changes a locked measurement file, leave both lock files
-  untouched and ask for the user's explicit OK in the current turn before any relock.
-- Live-verify game, server, or benchmark changes against `out/server-test` before claiming them fixed;
-  anything not live-tested must be stated honestly in `docs/TODO.md`.
-
-## The brain decides; C++ is a pure harness
-
-Our C++ perceives, measures, estimates, executes, and does math an LLM is bad at (geometry,
-routing, timing). Judgments (what's worth doing, risk, priorities, when to act) belong to the
-LLM brain: expose them as parameters the brain sets, with neutral defaults. No hard-coded
-"if this then that" game logic in C++: it defeats the purpose (docs/design.md).
-
-## C++ (our code: `common/`, `snapshot/`, `harness/`, `server_module/`)
-
-**When in doubt, do what Chromium does.** Follow the
-[Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html) and the
-[Chromium C++ style guide](https://chromium.googlesource.com/chromium/src/+/main/styleguide/c++/c++.md)
-(naming, comments, ownership, headers, etc.); clang-format `BasedOnStyle: Chromium` (root
-`.clang-format`). Code in `third_party/` keeps its own style.
-
-**Before using any `std::` facility, look up how Chromium does it:** check Chromium's
-[allowed/banned C++ features list](https://chromium.googlesource.com/chromium/src/+/main/styleguide/c++/c++-features.md)
-and whether `//base` has an equivalent. If Chromium bans or wraps it, use (or add to
-`common/base`) the Chromium-style equivalent instead. Only use it directly if Chromium allows it.
-
-**Why Chromium restricts things:** C++ makes memory and lifetime bugs easy, and chasing them
-is miserable. Most bans exist for safety (use-after-free through callbacks, unclear ownership,
-unchecked locking); some only because `//base` already has an equivalent. **Chromium's list is
-the default. Deviate only when the ban's reason clearly doesn't apply, and write the reason in a
-comment next to the code.**
-
-Strict (safety reasons), use `common/base`:
-
-| Don't | Use |
+| Avoid | Use instead |
 |---|---|
-| `std::function`, `std::bind`, lambdas capturing `this` posted across threads | `base::OnceCallback` / `RepeatingCallback`, `base::BindOnce` / `BindRepeating` with a `base::WeakPtr` receiver |
-| `std::shared_ptr`, `std::make_shared`, `enable_shared_from_this` | single ownership (`std::unique_ptr`), or `base::RefCountedThreadSafe<T>` + `base::scoped_refptr<T>` (`base::MakeRefCounted`) |
-| `std::mutex`, `lock_guard`, `unique_lock`, `std::condition_variable` | `base::Lock` + `base::AutoLock` + `base::ConditionVariable` (`base/synchronization/`), with `GUARDED_BY(lock_)` on guarded members (`base/thread_annotations.h`); `-Werror=thread-safety` checks it at compile time |
-| `std::thread`, `std::this_thread`, `<pthread.h>` (outside `common/base/`) | `base::Thread`, `base::ThreadPool`, `base::PlatformThread` (`Sleep`, `CurrentId`); `<pthread.h>` is encapsulated inside `common/base/` only |
-| `std::promise`, `std::future` | post a reply task (`PostTaskAndReplyWithResult`); block only in startup handshakes and tests, with `base::WaitableEvent` |
-| Boost.Asio, libevent, custom event loops | `base::Thread` with `MessagePumpType::IO` + `CurrentIOThread::Get()->WatchFileDescriptor(...)`; sockets in `common/net` |
-| shared state across threads | post tasks to the owning sequence (`SequencedTaskRunner::PostTask`) |
-| `absl::*` / `#include "absl/..."`, `protobuf` | `common/base/` (`base/strings/` for `StrCat`, `StringPrintf`, `JoinString`, `SplitString`, `TrimWhitespaceASCII`, `StringToInt`, `NumberToString`, ...) and `snapshot/snapshot.h` (plain C++20 structs serialized with Glaze BEVE/JSON in `snapshot_wire.cc`). |
-| `std::set`, `std::map`, `std::multiset`, `std::multimap` (`<set>`, `<map>`) | `std::vector` (in C++20 `common/`, `snapshot/` and `server_module/`) or C++23 `std::flat_map` / `std::flat_set` (`<flat_map>`, `<flat_set>` in C++26 `harness/`) — contiguous storage instead of per-node red-black tree allocations |
-| raw `T*` pointer **fields** (non-owning) | `base::raw_ptr<T>` (`base/memory/raw_ptr.h`); make the pointee a `base::RawPtrTarget` so destroying it while a `raw_ptr` still points to it crashes immediately ("dangling raw_ptr"); `base::MayBeDangling<T>` only for fields that dangle by design (with a comment); delete through one with `ClearAndDelete()`. Locals and parameters stay plain `T*`; owning pointers are `std::unique_ptr` / `scoped_refptr`. |
+| `std::function`, `std::bind`, raw `this` lambdas across threads | `base::OnceCallback` / `RepeatingCallback` + `base::BindOnce`/`BindRepeating` with `base::WeakPtr` |
+| `std::shared_ptr` / `enable_shared_from_this` | `std::unique_ptr`, or `base::RefCountedThreadSafe<T>` + `base::scoped_refptr<T>` |
+| `std::mutex`, `std::condition_variable` | `base::Lock` + `base::AutoLock` + `base::ConditionVariable` with `GUARDED_BY(lock_)` (`-Werror=thread-safety`) |
+| `std::thread`, `<pthread.h>` (outside `common/base/`) | `base::Thread`, `base::ThreadPool`, `base::PlatformThread` |
+| `std::promise` / `std::future` | `base::PostTaskAndReplyWithResult` (`base::WaitableEvent` only in startup/tests) |
+| `std::set`, `std::map`, `absl::*` | `std::vector` (C++20) or `std::flat_map`/`std::flat_set` (C++26 `harness/`); `common/base/strings/` |
+| Non-owning raw `T*` **fields** | `base::raw_ptr<T>` (locals and params stay plain `T*`) |
+| `std::chrono` in APIs; `std::to_string` on floats | `base::TimeTicks` / `base::TimeDelta`; `base::StringPrintf` |
 
-Loosened (the reason doesn't apply to us):
+- **IWYU:** Every file includes exactly what it uses (`tools/wlb check includes [--fix]`). Never
+  include `<bits/...>` or `<asm/...>`; keep non-self-contained third-party headers via
+  `// IWYU pragma: keep`.
+- **World thread:** `server_module/` must never block the AzerothCore world thread.
 
-| Facility | Rule |
-|---|---|
-| `std::chrono` | Banned in APIs (use `base::TimeDelta`, `base::TimeTicks`); fine inside `common/base` implementation. |
-| `std::to_string` | Fine for integers (its ban is about locale-dependent floats); never for floating point. |
+## Checks & Tests
 
-Allowed as in Chromium: `std::unique_ptr`/`make_unique`, `std::optional`, `std::string_view`,
-`std::atomic`, `std::invoke`/`apply`, standard containers, `<compare>`.
+- **`tools/wlb check`** (~10 s): `clang-format`, `RULES.md` grammar sync, default build + unit
+  tests (`wlb_common_unittests`, `llm_brain_unittests`, `harness_unittests`), snapshot validation
+  + hover/fixture checks, `clang-include-cleaner`, C++ screen goldens, and Python bench/tool unit
+  tests.
+- **Do not run sanitizers locally** (`tools/wlb check sanitizers` — ASan/UBSan/TSan/MSan); leave
+  those to CI unless explicitly asked.
+- **Test targets (`tools/wlb test <target>`):** `unit`, `e2e` (6 grouped files in
+  `tools/wlblib/cases/e2e_*.py` on isolated `out/server-test`), `perf`, `eval`, `soak`.
 
-Layout mirrors Chromium: `base/functional/`, `base/memory/`, `base/strings/`, `base/task/`,
-`base/threading/`, `base/synchronization/`, `base/message_loop/`, `base/time/`,
-`base/compiler_specific.h`.
+## Repo Layout
 
-**Safety build settings:** our code builds with `-Wthread-safety -Werror=thread-safety`.
-Hardened standard library (`_GLIBCXX_ASSERTIONS`, libc++ extensive hardening) is on for
-whole-program builds we own (`common/` tests, the harness); it is off for the copy of `common/`
-linked into AzerothCore (`out/common-server`) and for the module's sources, because hardening
-must cover a whole program and AzerothCore isn't built hardened.
-
-**C++ standard:** `common/`, `snapshot/` and the server module stay C++20 (AzerothCore's `modules` target is
-C++20 and includes our headers). The harness, a separate build, may use C++26.
-
-**Include what you use.** Every file includes exactly the headers whose symbols it uses: no
-unused includes, no relying on transitive includes. Check with `tools/wlb check includes`
-(`--fix` to apply). glibc's internal headers (`<bits/...>`, `<asm-generic/...>`) are never
-included: use the public header and mark it `// IWYU pragma: keep`.
-
-**Before showing C++ for review or committing it, `tools/wlb check` must pass:**
-clang-format, snapshot/trigger validation, default build + unit tests, include check, and screen
-goldens (~5 s). **Do not run sanitizers locally** (`tools/wlb check sanitizers` / `--sanitizers`:
-ASan+UBSan, TSan, MSan)—leave those to CI unless explicitly asked. New code comes with unit
-tests. A syscall MSan has no interceptor for gets `MSAN_UNPOISON` (`base/compiler_specific.h`),
-never a suppression.
-
-**Four test targets**, each its own `tools/wlb test <target>`: `unit` (gtest suites, no game or
-GPU; the `unit_tests` CMake target; `tools/wlb check sanitizers` runs it under every sanitizer), `e2e` (live
-scenarios against a real worldserver, pass or fail), `perf` (what things cost, each against a
-stored baseline and a hard limit: `tools/wlblib/cases/perf_baselines.json`) and `eval` (how well the brain decides, scored). Cases are modules in
-`tools/wlblib/cases/<target>_<name>.py`. A change to what the bot sees or does gets a unit test, and
-an e2e case when it only shows in the game.
-
-Our AzerothCore module (`server_module/`) follows the same rules; AzerothCore's own APIs keep
-their names. It must never block the world thread.
-
-## Repo
-
-- Public-ready private repo: no secrets or personal details in tracked files; those go in the
-  `private/` submodule. Commits use the noreply email set in the repo config.
-- Upstream code only in `third_party/` (pinned submodules); never edit it.
-- Everything generated is in `out/<name>` (untracked) and may be deleted at any time (`out/server` is the
-  installed game server, rebuilt by `tools/wlb build server` and friends). Anything that must survive is
-  in `var/` (untracked): the MySQL database, logs, bot memory. Never put state worth keeping in `out/`.
-- Settings live in `config/*.overrides`, rendered by `tools/wlb config`.
-- **Optional remote CPU workers (`private/remotes.json`):** only use `tools/wlb remote` when the user explicitly asks to offload work to a remote worker (never run remote commands or syncs unprompted). When requested, discover configured workers with `tools/wlb remote list` and offload via `tools/wlb remote <name> run [--pull REMOTE_REL:LOCAL_PATH] -- <cmd...>` (auto-syncs, verifies fresh build via stamp + `flock`, and reverse-tunnels local `llama-server` `:8090`).
+- `common/`, `snapshot/`, `server_module/`, `harness/`: production C++.
+- `content/`: `RULES.md`, boss `notes.md`, character identities (model inputs, not docs).
+- `tools/wlb` + `tools/wlblib/`: single CLI entry point (`check`, `build`, `test`, `server`,
+  `db`, `config`, `console`, `llm`, `snap`, `trace`, `gen`, `remote`).
+- `experimental/`: parked research code and docs (skipped by `wlb check` and CI; never imported
+  by core code).
+- `third_party/`: pinned upstream submodules — never edit.
+- `out/` (untracked, regenerable) vs `var/` (untracked, persistent DB/logs/bot memory) vs
+  `private/` (untracked/private submodule for secrets and `remotes.json`).

@@ -1,109 +1,65 @@
 # wow-llm-bots
 
 A WoW 3.3.5a (WotLK) private server where LLM-driven bots play like real people:
-they level from 1 to 80, quest, chat, form guilds, run dungeons and raid with you.
-Everything runs locally (AzerothCore + mod-playerbots, local models on one GPU).
+they level from 1 to 80, quest, chat, form groups, run dungeons, and raid with you.
+Everything runs locally (AzerothCore + `mod-playerbots`, local models on one GPU).
 
-Design and every decision so far: [docs/design.md](docs/design.md).
+Design: [docs/design.md](docs/design.md). Open work: [docs/TODO.md](docs/TODO.md). Measured
+numbers: [docs/results.md](docs/results.md).
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `CONTRIBUTING.md` | the rules for working in this repo (C++ style and checks, layout); `CLAUDE.md` only imports it, for Claude Code |
-| `docs/` | the design (`design.md`), plans, specs and measured results; **`TODO.md` is the list of open work** |
-| `private/` | private submodule (accounts, personal data); not accessible to others |
-| `third_party/` | upstream code as pinned git submodules: AzerothCore (mod-playerbots fork, `Playerbot` branch), mod-playerbots (`master`), harness/common deps: Glaze `v9.1.0`, GoogleTest `v1.18.0`, cpp-httplib `v0.66.0`, nlohmann/json `v3.12.0`, and llama.cpp `v1.0.0` |
-| `common/` | shared C++ used by the server module and the harness: `base/` (Chromium-style threads, epoll IO message pump, task runners, callbacks, WeakPtr, scoped_refptr, TimeDelta, strings), and `net/` (Unix socket server/client, length-prefixed framing) |
-| `snapshot/` | what the module and the harness say to each other: plain C++20 snapshot/command structs (`snapshot.h`) and the Glaze BEVE/JSON wire codecs |
-| `server_module/` | our AzerothCore module: sees the game, builds each bot's snapshot, carries out commands |
-| `harness/` | the brain's process (C++), separate from the game server: screens, plans, the llama client, prompts, the decision log, the scheduler, and `harness decide` to run one decision offline (`docs/specs/harness.md`); built as `out/common/harness` |
-| `content/` | shared bot knowledge: `RULES.md` (the rules every bot starts from); `concepts/` and prompts are planned |
-| `config/` | our config files (MySQL, server overrides) |
-| `tools/` | `tools/wlb`, the one command-line tool, and research scripts: see [Tools](#tools) |
-| `out/` | everything generated, as `out/<name>` for what builds it (not tracked). **Safe to delete: every part comes back from a command.** `out/server` is the installed game server (binaries, configs, the extracted map data, sockets); rebuild it with `tools/wlb build server`, `tools/wlb config` and `tools/wlb setup data`. `out/server-test` is the isolated test server e2e and perf run on (`tools/wlb build server --test`; shares the map data) |
-| `var/` | **state worth keeping, not tracked.** `backups/` (database dumps, one per server stop), `mysql-data/` (the database: accounts, characters, bot progress), `logs/` (server logs and the samples of your own play), and, once the harness exists, `bots/` (live bot memory: `<name>/identity.md`, goals, `events/*.jsonl`; its own git repo) |
-| `models/` | the GGUF model files llama-server loads (not tracked) |
-| `reference/` | downloaded addon sources (not tracked) |
+| `CONTRIBUTING.md` | C++ style, checks, pure-harness rule, repo layout (`CLAUDE.md` and `.agents/rules/contributing.md` point here) |
+| `docs/` | `design.md`, `TODO.md`, `results.md`, and `specs/` (`snapshot.md`, `triggers.md`, `options.md`, `grammar-idl.md`, `harness.md`) |
+| `common/` | shared C++20: frozen `base/` runtime primitives and `net/` Unix socket framing |
+| `snapshot/` | C++20 snapshot/command wire structs (`snapshot.h`) and Glaze BEVE/JSON codecs |
+| `server_module/` | AzerothCore module (`mod-llm-brain`): snapshots, unified `BotAction` + area-split executors, `BotSession`, combat/soak tracing |
+| `harness/` | C++26 brain process (`out/common/harness`): `run`, `decide`, `render-screen`, `replay` |
+| `content/` | LLM inputs: `RULES.md`, 54 dungeon/raid `notes.md`, character `identities/` |
+| `config/` | MySQL and server `.overrides` rendered by `tools/wlb config` |
+| `tools/` | `tools/wlb` CLI (`tools/wlblib/`) plus focused bench/eval/generator scripts |
+| `experimental/` | parked research (human-likeness scorer, `notes_hill_climb`, parked design docs); skipped by `wlb check` and CI |
+| `third_party/` | pinned upstream submodules (AzerothCore, `mod-playerbots`, Glaze, GoogleTest, cpp-httplib, nlohmann/json, llama.cpp) |
+| `out/` | generated builds and `out/server` / `out/server-test` (untracked, safe to delete) |
+| `var/` | persistent MySQL data, backups, logs, bot memory (untracked) |
+| `models/`, `private/` | local GGUF models and private submodule (untracked) |
 
 ## Setup
 
 ```sh
 git submodule update --init   # private/ will fail without access; that's fine
 tools/wlb setup links         # link modules into AzerothCore, clangd compile_commands.json
-tools/wlb build common        # shared C++ (common/) + unit tests
+tools/wlb build common        # shared C++ + harness + unit tests
 tools/wlb setup configure     # CMake: clang + lld + Ninja, Percona client
 tools/wlb build server        # build and install into out/server
 tools/wlb setup data          # extract maps/vmaps/mmaps/DBC from the 3.3.5a client
 tools/wlb db start            # project-local MySQL (Percona)
 ```
 
-## Tools
+## Tools (`tools/wlb`)
 
-One command-line tool, `tools/wlb` (Python standard library only; modules in `tools/wlblib/`).
-Run it from anywhere: it finds the repo from its own location. `tools/wlb <command> --help` says
-more. It acts on this checkout's processes only (by their pid files), never by name.
-
-**Daily**
+Single Python stdlib CLI (`tools/wlb <command> --help`). Acts only on this checkout's PID files.
 
 | Command | What |
 |---|---|
-| `tools/wlb check` | fast everyday checks before review or commit: format, RULES.md reply form, trigger table, default build + unit tests, snapshot examples, includes, screen goldens, bench/loop tests |
-| `tools/wlb check sanitizers` | build and run unit tests under ASan+UBSan, TSan, and MSan (`--sanitizers` / `--san` on `wlb check` runs everything) |
-| `tools/wlb check format\|rules\|includes\|snapshots\|triggers\|goldens\|sanitizers` | one of those (`--fix` for format, rules, and includes) |
-| `tools/wlb build common [asan\|tsan\|msan\|server]` | build `common/` (and the harness) and run the unit tests; `server` is the copy linked into AzerothCore |
-| `tools/wlb build server [--test]` | build and install AzerothCore with our module into `out/server` (`--test`: the test server in `out/server-test`, with the test-only fixtures) |
-| `tools/wlb test unit\|e2e\|perf\|eval [NAME...]` | the four test targets: `unit` (gtest, `--filter`, `--variant`), `e2e` (live scenarios on the isolated test server: own build, port 8086 and databases reset for every run; the play server keeps running), `perf` (measurements checked against `tools/wlblib/cases/perf_baselines.json` and hard limits; `--update-baselines` records a run, `--capture` records the brain replay's input), `eval`; `--list` shows the cases |
-| `tools/wlb config [test]` | render `out/server/etc/*.conf` from the templates plus `config/*.overrides` (and `config/tests/<test>.*`) |
-| `tools/wlb server start\|stop [--test]` | MySQL, authserver and worldserver together (stop backs the databases up first); `--test`: the test server's worldserver |
-| `tools/wlb db start\|stop\|backup` | the project-local MySQL alone; `backup` dumps accounts, characters and playerbots' tables to `var/backups/` (compressed, newest 14 kept; the restore command is in `tools/wlblib/server.py`) |
-| `tools/wlb console [--test] <command>` | send a command to the worldserver console |
-| `tools/wlb llm` | llama-server with the settings measured fastest (`docs/results.md`) |
+| `tools/wlb check [format\|rules\|includes\|snapshots\|triggers\|goldens\|sanitizers]` | fast pre-commit checks (`--fix` for format/rules/includes; leave sanitizers to CI) |
+| `tools/wlb build common [asan\|tsan\|msan\|server]` | build `common/` + `harness` and run unit tests |
+| `tools/wlb build server [--test]` | build and install AzerothCore + `mod-llm-brain` (`out/server` or `out/server-test`) |
+| `tools/wlb test unit\|e2e\|perf\|eval\|soak [NAME...]` | test suites (`--list` shows all cases; e2e runs in 6 grouped suites on `out/server-test`) |
+| `tools/wlb config [test]` | render `out/server/etc/*.conf` from templates + `config/*.overrides` |
+| `tools/wlb server start\|stop [--test]` | start/stop MySQL + authserver + worldserver (stop backs up DBs first) |
+| `tools/wlb db start\|stop\|backup` | manage project-local Percona MySQL |
+| `tools/wlb console [--test] <cmd>` | send a command to the worldserver console |
+| `tools/wlb llm` | start `llama-server` with the measured fastest settings |
+| `tools/wlb snap capture\|fake` | capture live snapshots to JSON or run the stand-in socket harness (`wlblib/wire.py`) |
+| `tools/wlb trace meter\|dodge\|stalls\|mine` | boss DPS/HPS meter, dodge timeline, soak stall detector, failure-case miner |
+| `tools/wlb gen invisible-displays\|quest-poi\|knowledge\|boss-notes\|grammar\|fixture-options` | regenerate derived tables, knowledge JSON, boss notes, grammars, or fixture options |
+| `tools/wlb setup links\|configure\|data\|llama\|msan\|client-ui` | one-time local environment setup |
+| `tools/wlb remote list\|<name> sync\|run\|status\|stop\|pull\|install-hook` | optional remote CPU worker offload (`private/remotes.json`, explicit use only) |
 
-**Once**
+Code style: Google/Chromium C++ style (`.clang-format`). License: GPL-2.0 ([LICENSE](LICENSE)).
 
-| Command | What |
-|---|---|
-| `tools/wlb setup links` | link our modules into AzerothCore, `compile_commands.json` for clangd |
-| `tools/wlb setup configure` | CMake for the server (clang, lld, Ninja, Percona client) |
-| `tools/wlb setup data` | maps, vmaps, mmaps and DBC from the 3.3.5a client |
-| `tools/wlb setup llama` | llama.cpp with CUDA |
-| `tools/wlb setup msan` | MSan-instrumented libc++ (built by `tools/wlb build common msan` when missing) |
-| `tools/wlb setup client-ui` | the client's UI code and event names, for the client-event audit |
-
-**Remote CPU workers (optional)**
-
-Long CPU jobs (e2e, soak, boss benches) can run on another machine. Workers are listed in
-`private/remotes.json` (untracked; `WLB_REMOTES_FILE` overrides the path), for example a worker
-named `10700k`:
-
-```json
-{ "10700k": { "ssh": "wlb@192.0.2.10", "repo": "~/wow-llm-bots", "llm_port": 8090 } }
-```
-
-| Command | What |
-|---|---|
-| `tools/wlb remote list` | the configured workers |
-| `tools/wlb remote <name> sync [--force] [--no-server-build]` | rsync the source tree and build it there (`out/`, `var/`, `models/`, `private/` are never synced) |
-| `tools/wlb remote <name> run [--no-sync] [--no-tunnel] [--no-server-build] [--pull REMOTE_REL:LOCAL_PATH ...] -- <cmd...>` | sync, check the build stamp matches this checkout, then run the command, e.g. `tools/wlb remote 10700k run -- tools/wlb test e2e playability`; reverse-tunnels the local `llama-server` port so the remote uses this GPU |
-| `tools/wlb remote <name> status\|stop\|install-hook` | what is running there, stop it, or install a post-commit hook that syncs in the background |
-| `tools/wlb remote <name> pull REMOTE_REL LOCAL_PATH` | copy a result file back |
-
-Each worker has a lock, so syncs, builds and runs never overlap. Only use it when you mean to
-offload work (CONTRIBUTING.md).
-
-**Snapshot and brain research** (Python, dev only; production is C++)
-
-| Path | What |
-|---|---|
-| `tools/snapshot/` | `wire_py.py` (`ctypes` wrapper for `libwlb_wire_py.so`), `fake_harness.py` (a stand-in harness that prints what the module sends) |
-| `tools/audit/` | the client-event audit: the scripts `tools/wlb setup client-ui` feeds (`docs/specs/coverage.md`); `gen_invisible_displays.py` regenerates the table of invisible creature models (`server_module/src/snapshot/invisible_displays.h`) |
-| `tools/bench/` | brain load benches: `capture_snapshots.py` (live snapshots to files), `trigger_sim.py` (how often bots wake), `brain_load.py` (wake-ups replayed against llama-server), `throughput.py` (capacity), `prompt_render.py` (the compact prompt) |
-
-
-Code style: Google/Chromium C++ style (`.clang-format`).
-
-License: GPL-2.0 (same as AzerothCore and mod-playerbots), see [LICENSE](LICENSE).
-
-System toolchain (`common/` + `harness/`): `clang lld cmake ninja python ccache`.
-Upstream AzerothCore server deps (`worldserver` only): `boost percona-server percona-server-clients`.
+Toolchain (`common/` + `harness/`): `clang lld cmake ninja python ccache`.
+Server deps (`worldserver`): `boost percona-server percona-server-clients`.

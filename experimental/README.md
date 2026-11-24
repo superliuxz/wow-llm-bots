@@ -17,3 +17,7 @@ Code and docs parked here are **not** run by `tools/wlb check` or CI, and nothin
   - *Last commit where all tests passed:* `f703c90`.
   - *How to bring back:* move back to `tools/bench/`, fix screening vs confirmation split, and
     re-add `notes_hill_climb_test.py` to `tools/wlblib/check.py`.
+- **`docs/`** — Parked design docs (`self-improving-loop.md`, `trace-events.md`).
+  - *Last commit where referenced:* `5e93be7`.
+  - *How to bring back:* move back to `docs/plans/` or `docs/specs/` if the parked research loop
+    is revived.
