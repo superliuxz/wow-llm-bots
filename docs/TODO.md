@@ -64,6 +64,8 @@ Last updated 2026-11-23.
     - [x] **High 1 (`option_executor.cc:1254-1260`, `docs/TODO.md`):** Fixed controlled-slot guard from `IDLE_MOTION_TYPE` to `NULL_MOTION_TYPE` so the `TickLongWalk` seam-hop branch is reachable.
     - [x] **Low 1 (`option_executor.cc:1250-1275`):** Deferred seam-hop launch (returning `{.path_time = path_time}` instead of `"stuck"`) when movement is transiently prevented, and checked `init.Launch() > 0` before incrementing `consecutive_seam_hops` / updating `step_dest`.
     - [x] **Low 2 (`option_facts.cc:232-265`):** Guarded unloaded-grid dungeon hostiles against permanently dead `DONE` bosses via `probe_map->ToInstanceMap()->GetInstanceScript()->IsBossSpawnDone(sp.spawn_id)`.
+  - **Step 7 — Cold-review fixes from `review_eb048e5.md` (`0` High, `1` Medium, `0` Low — fixed & verified via `tools/wlb check` + `out/server-test` link + `clang-include-cleaner`; server-module C++ fix compile/source-verified only):**
+    - [x] **Medium 1 (`option_executor.cc:1174-1180`):** Gated `TickLongWalk`'s `kWalkRepathEvery` (1 s) throttle on `!walk->last_path_at.is_null()` instead of `walk->has_step` so deferred seam-hop retries do not re-run pathfinding/terrain/LOS sweeps on every world tick.
 
 ## Next, in order
 

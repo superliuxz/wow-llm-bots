@@ -1171,8 +1171,10 @@ WalkStepResult TickLongWalk(Player* bot,
       return {};
     }
   }
-  // Not moving yet (or pushed off the path): ask again, but not every tick.
-  if (walk->has_step && now - walk->last_path_at < kWalkRepathEvery) {
+  // Not moving yet (or pushed off the path, or deferred while casting/locked):
+  // ask again, but not every tick.
+  if (!walk->last_path_at.is_null() &&
+      now - walk->last_path_at < kWalkRepathEvery) {
     return {};
   }
   walk->last_path_at = now;
