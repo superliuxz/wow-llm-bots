@@ -1,0 +1,7 @@
+# Party tests: Dungeon Finder testing mode (AzerothCore `Debug.LFG`), so a proposal forms for a
+# group of fewer than 5 (the test has 4 bots, none a tank); and the LookingForGroup channel open
+# to players not in the queue and outside cities (as `LFG.Location.All` allows), so its chat can be
+# tested on its own.
+Debug.LFG = 1
+Channel.RestrictedLfg = 0
+LFG.Location.All = 1

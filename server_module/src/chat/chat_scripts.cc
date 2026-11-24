@@ -51,6 +51,29 @@ using Acore::ChatCommands::ChatCommandTable;
 using Acore::ChatCommands::Console;
 using Acore::ChatCommands::Tail;
 
+#if defined(LLM_BRAIN_TEST_HOOKS)
+// Names whose lines count as a human's (SetTestHuman; test builds only).
+std::vector<std::string>& TestHumans() {
+  static auto* names = new std::vector<std::string>();
+  return *names;
+}
+#endif
+
+// Whether a line from `player` is a human's: no playerbots AI, or a bot a
+// test stands in for the user (`llmtest testhuman`).
+bool IsHumanSender(Player* player) {
+  if (GET_PLAYERBOT_AI(player) == nullptr) {
+    return true;
+  }
+#if defined(LLM_BRAIN_TEST_HOOKS)
+  const std::vector<std::string>& names = TestHumans();
+  return std::find(names.begin(), names.end(), player->GetName()) !=
+         names.end();
+#else
+  return false;
+#endif
+}
+
 // Whispers, Say/Yell, Party/Raid, and General/Trade/LFG channel chat heard by
 // brain-run bots. Runs on the sender's thread, so it only hands lines to the
 // thread-safe ChatInbox.
@@ -82,7 +105,7 @@ class LlmBrainChatScript : public PlayerScript {
                 : sWorld->getFloatConfig(CONFIG_LISTEN_RANGE_SAY);
     const bool cross_faction =
         sWorld->getBoolConfig(CONFIG_ALLOW_TWO_SIDE_INTERACTION_CHAT);
-    const bool sender_is_human = GET_PLAYERBOT_AI(player) == nullptr;
+    const bool sender_is_human = IsHumanSender(player);
     // Deliver Say/Yell via the sender's map grid (same map, instance, phase,
     // and thread) like upstream Player::Say/Yell — never cross-instance or
     // touching Player* owned by other map threads.
@@ -137,7 +160,7 @@ class LlmBrainChatScript : public PlayerScript {
     }
     const bool is_raid =
         (type == CHAT_MSG_RAID || type == CHAT_MSG_RAID_LEADER);
-    const bool sender_is_human = GET_PLAYERBOT_AI(player) == nullptr;
+    const bool sender_is_human = IsHumanSender(player);
     for (const std::string& bot_name : inbox_->Bots()) {
       if (bot_name == player->GetName()) {
         continue;
@@ -374,6 +397,19 @@ void AddLlmBrainChatScripts(ChatInbox* inbox,
                             std::atomic<BehaviorTraceWriter*>* human_trace) {
   new LlmBrainChatScript(inbox, human_trace);
   new LlmBrainCommandScript();
+}
+
+void SetTestHuman(const std::string& name, bool human) {
+#if defined(LLM_BRAIN_TEST_HOOKS)
+  std::vector<std::string>& names = TestHumans();
+  std::erase(names, name);
+  if (human) {
+    names.push_back(name);
+  }
+#else
+  (void)name;
+  (void)human;
+#endif
 }
 
 }  // namespace llm_brain

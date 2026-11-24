@@ -1,0 +1,8 @@
+# Party tests (e2e_lfg_proposal, e2e_lfg_channel, e2e_party_reply): four fresh level-1 Troll
+# Priests at the Valley of Trials start (reset from the fixture on every server start), standing
+# still. The cases group them and act as players on them through test console commands. Needs a
+# test build (tools/wlb build server --test).
+LlmBrain.Bots = "Loada,Loadb,Loadc,Loadd"
+LlmBrain.TestFixtures = "Loada=priest-l1-valley.pdump,Loadb=priest-l1-valley.pdump,Loadc=priest-l1-valley.pdump,Loadd=priest-l1-valley.pdump"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.NonCombatStrategies = "-follow,-grind,-new rpg"

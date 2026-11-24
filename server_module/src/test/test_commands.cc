@@ -14,8 +14,11 @@
 #include "Bag.h"
 #include "Cell.h"
 #include "CellImpl.h"
+#include "Channel.h"
+#include "ChannelMgr.h"
 #include "Chat.h"
 #include "ChatCommand.h"
+#include "ChatCommandTags.h"
 #include "CommandScript.h"
 #include "Creature.h"
 #include "DBCEnums.h"
@@ -47,12 +50,14 @@
 #include "Strategy.h"
 #include "Value.h"
 #include "bot_manager/bot_manager.h"
+#include "chat/chat_scripts.h"
 
 namespace llm_brain {
 namespace {
 
 using Acore::ChatCommands::ChatCommandTable;
 using Acore::ChatCommands::Console;
+using Acore::ChatCommands::Tail;
 
 Player* FindOnlinePlayer(ChatHandler* handler, std::string name) {
   Player* player = normalizePlayerName(name)
@@ -85,6 +90,9 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"istank", HandleIsTank, SEC_ADMINISTRATOR, Console::Yes},
         {"maketank", HandleMakeTank, SEC_ADMINISTRATOR, Console::Yes},
         {"lootroll", HandleLootRoll, SEC_ADMINISTRATOR, Console::Yes},
+        {"chat", HandleChat, SEC_ADMINISTRATOR, Console::Yes},
+        {"joinchannel", HandleJoinChannel, SEC_ADMINISTRATOR, Console::Yes},
+        {"testhuman", HandleTestHuman, SEC_ADMINISTRATOR, Console::Yes},
         {"rezoffer", HandleRezOffer, SEC_ADMINISTRATOR, Console::Yes},
         {"item", HandleItem, SEC_ADMINISTRATOR, Console::Yes},
         {"checkstrat", HandleCheckStrat, SEC_ADMINISTRATOR, Console::Yes},
@@ -450,6 +458,90 @@ class LlmBrainTestCommandScript : public CommandScript {
     player->SetRewardedQuest(quest_id);
     handler->PSendSysMessage("llmtest: marked quest {} rewarded on {}{}",
                              quest_id, player->GetName(), FormatToken(token));
+    return true;
+  }
+
+  // `llmtest chat <name> <party|raid|say|channel:<Name>> <text>`: the player
+  // types a chat line, through the client's own CMSG_MESSAGECHAT handler (so
+  // the chat hooks run exactly as for a client).
+  static bool HandleChat(ChatHandler* handler,
+                         std::string player_name,
+                         std::string where,
+                         Tail text) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player || !player->GetSession()) {
+      return false;
+    }
+    uint32_t type = 0;
+    std::string channel;
+    if (where == "party") {
+      type = CHAT_MSG_PARTY;
+    } else if (where == "raid") {
+      type = CHAT_MSG_RAID;
+    } else if (where == "say") {
+      type = CHAT_MSG_SAY;
+    } else if (where.starts_with("channel:")) {
+      type = CHAT_MSG_CHANNEL;
+      channel = where.substr(8);
+    } else {
+      handler->SendErrorMessage("llmtest: chat: unknown channel {}", where);
+      return false;
+    }
+    WorldPacket packet(CMSG_MESSAGECHAT, 64);
+    packet << type << static_cast<uint32_t>(LANG_ORCISH);
+    if (type == CHAT_MSG_CHANNEL) {
+      packet << channel;
+    }
+    packet << std::string(text);
+    packet.rpos(0);
+    player->GetSession()->HandleMessagechatOpcode(packet);
+    handler->PSendSysMessage("llmtest: {} typed in {}", player->GetName(),
+                             where);
+    return true;
+  }
+
+  // `llmtest joinchannel <name> <channel>`: the player joins a chat channel
+  // (for the LookingForGroup channel the client joins by itself).
+  static bool HandleJoinChannel(ChatHandler* handler,
+                                std::string player_name,
+                                std::string channel_name) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player) {
+      return false;
+    }
+    ChannelMgr* mgr = ChannelMgr::forTeam(player->GetTeamId());
+    Channel* channel = nullptr;
+    for (uint32_t i = 0; i < sChatChannelsStore.GetNumRows() && !channel; ++i) {
+      const ChatChannelsEntry* e = sChatChannelsStore.LookupEntry(i);
+      if (e && std::string(e->pattern[0]).starts_with(channel_name)) {
+        channel =
+            mgr ? mgr->GetJoinChannel(channel_name, e->ChannelID) : nullptr;
+      }
+    }
+    if (!channel) {
+      handler->SendErrorMessage("llmtest: joinchannel: no channel {}",
+                                channel_name);
+      return false;
+    }
+    channel->JoinChannel(player, "");
+    handler->PSendSysMessage("llmtest: {} joined {} ({} members, id {})",
+                             player->GetName(), channel->GetName(),
+                             channel->GetNumPlayers(), channel->GetChannelId());
+    return true;
+  }
+
+  // `llmtest testhuman <name> <0|1>`: the chat hooks treat the player's lines
+  // as a human's (test builds only), so party-chat rules can be tested with
+  // bots standing in for the user.
+  static bool HandleTestHuman(ChatHandler* handler,
+                              std::string player_name,
+                              uint32_t human) {
+    if (!normalizePlayerName(player_name)) {
+      return false;
+    }
+    SetTestHuman(player_name, human != 0);
+    handler->PSendSysMessage("llmtest: {} {} a human in chat", player_name,
+                             human ? "is" : "is not");
     return true;
   }
 

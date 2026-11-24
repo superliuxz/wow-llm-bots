@@ -4,6 +4,7 @@
 #define MOD_LLM_BRAIN_CHAT_CHAT_SCRIPTS_H_
 
 #include <atomic>
+#include <string>
 
 namespace llm_brain {
 
@@ -19,6 +20,11 @@ class ChatInbox;
 void AddLlmBrainChatScripts(
     ChatInbox* inbox,
     std::atomic<BehaviorTraceWriter*>* human_trace = nullptr);
+
+// Test builds only (`llmtest testhuman`): the chat hooks treat `name`'s lines
+// as a human player's, so e2e cases can stand a bot in for the user. World
+// thread only. A no-op in production builds.
+void SetTestHuman(const std::string& name, bool human);
 
 }  // namespace llm_brain
 
