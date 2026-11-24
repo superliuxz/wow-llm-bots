@@ -968,7 +968,6 @@ void CollectGroupAndUpkeepActions(Player* bot,
   if (!bot || !bot->IsInWorld()) {
     return;
   }
-  PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
 
   // 1. Need / Greed / Pass loot rolls (allowed even in combat or dead).
   if (Group* group = bot->GetGroup()) {
@@ -2381,7 +2380,10 @@ ExecuteResult ExecuteOption(Player* bot,
   if (target.kind == OptionTarget::Kind::kUse &&
       target.guid.starts_with("ready:")) {
     WorldSession* session = bot->GetSession();
-    if (!session || !bot->GetGroup()) {
+    if (!session) {
+      return {"no session"};
+    }
+    if (!bot->GetGroup()) {
       BotManager::ClearPendingReadyCheck(bot);
       return {"you are not in a group"};
     }
@@ -2440,6 +2442,9 @@ ExecuteResult ExecuteOption(Player* bot,
       }
       lfg::LfgDungeonSet dungeons = {did};
       sLFGMgr->JoinLfg(bot, static_cast<uint8_t>(role_mask), dungeons, "");
+      if (sLFGMgr->GetState(bot->GetGUID()) == lfg::LFG_STATE_NONE) {
+        return {"could not join Dungeon Finder queue"};
+      }
       return {.used = true, .info = "queued for Random Dungeon"};
     }
     if (target.guid == "lfg:leave") {
@@ -2527,10 +2532,16 @@ ExecuteResult ExecuteOption(Player* bot,
     if (bot->IsInCombat()) {
       return {"cannot mount in combat"};
     }
+    if (bot->isMoving()) {
+      bot->StopMoving();
+    }
     bot->CastSpell(bot, spell_id, false);
     const bool casting = IsSpellCastPending(bot, spell_id);
+    if (!casting && !bot->IsMounted()) {
+      return {"cannot mount now"};
+    }
     return {.used = !casting,
-            .info = "mounting " + target.name,
+            .info = casting ? "" : ("mounted " + target.name),
             .pending_spell_id = casting ? spell_id : 0};
   }
   if (target.kind == OptionTarget::Kind::kUse &&
@@ -2618,10 +2629,9 @@ ExecuteResult ExecuteOption(Player* bot,
         if (!bot->HasEnoughMoney(cost)) {
           continue;
         }
-        const bool had_spell = bot->HasSpell(sp.SpellId);
         const uint32_t money_before = bot->GetMoney();
         trainer->TeachSpell(npc, bot, sp.SpellId);
-        if ((!had_spell && bot->HasSpell(sp.SpellId)) ||
+        if (!trainer->CanTeachSpell(bot, &sp) ||
             (cost > 0 && bot->GetMoney() != money_before)) {
           ++learned;
         }

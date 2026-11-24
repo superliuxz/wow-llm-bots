@@ -38,6 +38,8 @@
 #include "Timer.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
+#include "base/synchronization/lock.h"
+#include "base/thread_annotations.h"
 #include "config/config_parsing.h"
 
 namespace llm_brain {
@@ -196,21 +198,18 @@ struct PendingLfgProposalEntry {
   uint32_t received_ms = 0;
 };
 
-std::unordered_map<uint64_t, PendingSharedQuestEntry>& PendingSharedQuests() {
-  static auto* map =
-      new std::unordered_map<uint64_t, PendingSharedQuestEntry>();
-  return *map;
-}
+struct PendingPromptsState {
+  base::Lock lock;
+  std::unordered_map<uint64_t, PendingSharedQuestEntry> shared_quests
+      GUARDED_BY(lock);
+  std::unordered_map<uint64_t, uint32_t> ready_checks GUARDED_BY(lock);
+  std::unordered_map<uint64_t, PendingLfgProposalEntry> lfg_proposals
+      GUARDED_BY(lock);
+};
 
-std::unordered_map<uint64_t, uint32_t>& PendingReadyChecks() {
-  static auto* map = new std::unordered_map<uint64_t, uint32_t>();
-  return *map;
-}
-
-std::unordered_map<uint64_t, PendingLfgProposalEntry>& PendingLfgProposals() {
-  static auto* map =
-      new std::unordered_map<uint64_t, PendingLfgProposalEntry>();
-  return *map;
+PendingPromptsState& PendingPrompts() {
+  static auto* state = new PendingPromptsState();
+  return *state;
 }
 
 // Observes outgoing packets even on socketless (standalone) bot sessions so
@@ -218,7 +217,8 @@ std::unordered_map<uint64_t, PendingLfgProposalEntry>& PendingLfgProposals() {
 // without relying on Playerbots' master-only packet handlers.
 class LlmBrainPacketScript final : public ServerScript {
  public:
-  LlmBrainPacketScript() : ServerScript("LlmBrainPacketScript") {}
+  LlmBrainPacketScript()
+      : ServerScript("LlmBrainPacketScript", {SERVERHOOK_ON_PACKET_SENT}) {}
 
   void OnPacketSent(WorldSession* session, WorldPacket const& packet) override {
     if (!session) {
@@ -233,41 +233,77 @@ class LlmBrainPacketScript final : public ServerScript {
       case MSG_RAID_READY_CHECK: {
         if (packet.size() >= 8) {
           ByteBuffer copy(packet);
+          copy.rpos(0);
           ObjectGuid starter;
           copy >> starter;
           if (starter != bot->GetGUID()) {
-            PendingReadyChecks()[key] = getMSTime();
+            PendingPromptsState& prompts = PendingPrompts();
+            base::AutoLock lock(prompts.lock);
+            prompts.ready_checks[key] = getMSTime();
           }
         }
         break;
       }
-      case MSG_RAID_READY_CHECK_FINISHED:
-        PendingReadyChecks().erase(key);
+      case MSG_RAID_READY_CHECK_FINISHED: {
+        PendingPromptsState& prompts = PendingPrompts();
+        base::AutoLock lock(prompts.lock);
+        prompts.ready_checks.erase(key);
         break;
+      }
       case SMSG_QUESTGIVER_QUEST_DETAILS: {
         if (packet.size() >= 20) {
           ByteBuffer copy(packet);
+          copy.rpos(0);
           ObjectGuid npc_guid;
           ObjectGuid divider_guid;
           uint32_t quest_id = 0;
           copy >> npc_guid >> divider_guid >> quest_id;
-          if (divider_guid && quest_id != 0) {
-            PendingSharedQuests()[key] = {quest_id, getMSTime()};
+          // Real quest shares pass the recipient's own GUID as `npc_guid`
+          // alongside a non-empty `divider_guid` (QuestHandler.cpp).
+          if (npc_guid == bot->GetGUID() && divider_guid && quest_id != 0) {
+            PendingPromptsState& prompts = PendingPrompts();
+            base::AutoLock lock(prompts.lock);
+            prompts.shared_quests[key] = {quest_id, getMSTime()};
           }
         }
         break;
       }
       case SMSG_LFG_PROPOSAL_UPDATE: {
-        if (packet.size() >= 9) {
+        if (packet.size() >= 15) {
           ByteBuffer copy(packet);
+          copy.rpos(0);
           uint32_t dungeon_entry = 0;
           uint8_t state = 0;
           uint32_t proposal_id = 0;
-          copy >> dungeon_entry >> state >> proposal_id;
-          if (state == lfg::LFG_PROPOSAL_INITIATING && proposal_id != 0) {
-            PendingLfgProposals()[key] = {proposal_id, getMSTime()};
+          uint32_t encounters = 0;
+          uint8_t silent = 0;
+          uint8_t count = 0;
+          copy >> dungeon_entry >> state >> proposal_id >> encounters >>
+              silent >> count;
+          bool self_unanswered = false;
+          if (state == lfg::LFG_PROPOSAL_INITIATING && proposal_id != 0 &&
+              silent == 0 && packet.size() >= 15u + 9u * count) {
+            for (uint8_t i = 0; i < count; ++i) {
+              uint32_t role = 0;
+              uint8_t is_self = 0;
+              uint8_t in_dungeon = 0;
+              uint8_t same_group = 0;
+              uint8_t answered = 0;
+              uint8_t accepted = 0;
+              copy >> role >> is_self >> in_dungeon >> same_group >> answered >>
+                  accepted;
+              if (is_self != 0) {
+                self_unanswered = (answered == 0);
+                break;
+              }
+            }
+          }
+          PendingPromptsState& prompts = PendingPrompts();
+          base::AutoLock lock(prompts.lock);
+          if (self_unanswered) {
+            prompts.lfg_proposals[key] = {proposal_id, getMSTime()};
           } else {
-            PendingLfgProposals().erase(key);
+            prompts.lfg_proposals.erase(key);
           }
         }
         break;
@@ -451,9 +487,13 @@ void BotManager::Tick() {
       continue;
     }
     DungeonDeadSinceMs().erase(bot.guid);
-    PendingSharedQuests().erase(bot.guid);
-    PendingReadyChecks().erase(bot.guid);
-    PendingLfgProposals().erase(bot.guid);
+    {
+      PendingPromptsState& prompts = PendingPrompts();
+      base::AutoLock lock(prompts.lock);
+      prompts.shared_quests.erase(bot.guid);
+      prompts.ready_checks.erase(bot.guid);
+      prompts.lfg_proposals.erase(bot.guid);
+    }
     if (now_ms_ >= bot.next_login_ms) {
       // No master: playerbots runs it as a standalone bot. With autologin off,
       // its random-bot manager does nothing else with it.
@@ -560,54 +600,77 @@ void BotManager::ClearBotStrategyOverrides() {
 }
 
 uint32_t BotManager::GetPendingSharedQuest(Player* bot) {
-  if (!bot || !bot->GetDivider()) {
-    if (bot) {
-      PendingSharedQuests().erase(bot->GetGUID().GetRawValue());
-    }
+  if (!bot) {
     return 0;
   }
   const uint64_t key = bot->GetGUID().GetRawValue();
-  auto it = PendingSharedQuests().find(key);
-  if (it == PendingSharedQuests().end()) {
+  PendingPromptsState& prompts = PendingPrompts();
+  if (!bot->GetDivider()) {
+    base::AutoLock lock(prompts.lock);
+    prompts.shared_quests.erase(key);
     return 0;
   }
-  if (GetMSTimeDiffToNow(it->second.received_ms) >=
-      kPendingSharedQuestTimeoutMs) {
-    PendingSharedQuests().erase(it);
+  bool timed_out = false;
+  uint32_t quest_id = 0;
+  {
+    base::AutoLock lock(prompts.lock);
+    auto it = prompts.shared_quests.find(key);
+    if (it == prompts.shared_quests.end()) {
+      return 0;
+    }
+    if (GetMSTimeDiffToNow(it->second.received_ms) >=
+        kPendingSharedQuestTimeoutMs) {
+      prompts.shared_quests.erase(it);
+      timed_out = true;
+    } else {
+      quest_id = it->second.quest_id;
+    }
+  }
+  if (timed_out) {
+    bot->SetDivider(ObjectGuid::Empty);
     return 0;
   }
-  return it->second.quest_id;
+  return quest_id;
 }
 
 void BotManager::ClearPendingSharedQuest(Player* bot) {
-  if (bot) {
-    PendingSharedQuests().erase(bot->GetGUID().GetRawValue());
+  if (!bot) {
+    return;
   }
+  PendingPromptsState& prompts = PendingPrompts();
+  base::AutoLock lock(prompts.lock);
+  prompts.shared_quests.erase(bot->GetGUID().GetRawValue());
 }
 
 bool BotManager::HasPendingReadyCheck(Player* bot) {
-  if (!bot || !bot->GetGroup()) {
-    if (bot) {
-      PendingReadyChecks().erase(bot->GetGUID().GetRawValue());
-    }
+  if (!bot) {
     return false;
   }
   const uint64_t key = bot->GetGUID().GetRawValue();
-  auto it = PendingReadyChecks().find(key);
-  if (it == PendingReadyChecks().end()) {
+  PendingPromptsState& prompts = PendingPrompts();
+  base::AutoLock lock(prompts.lock);
+  if (!bot->GetGroup()) {
+    prompts.ready_checks.erase(key);
+    return false;
+  }
+  auto it = prompts.ready_checks.find(key);
+  if (it == prompts.ready_checks.end()) {
     return false;
   }
   if (GetMSTimeDiffToNow(it->second) >= kPendingReadyCheckTimeoutMs) {
-    PendingReadyChecks().erase(it);
+    prompts.ready_checks.erase(it);
     return false;
   }
   return true;
 }
 
 void BotManager::ClearPendingReadyCheck(Player* bot) {
-  if (bot) {
-    PendingReadyChecks().erase(bot->GetGUID().GetRawValue());
+  if (!bot) {
+    return;
   }
+  PendingPromptsState& prompts = PendingPrompts();
+  base::AutoLock lock(prompts.lock);
+  prompts.ready_checks.erase(bot->GetGUID().GetRawValue());
 }
 
 uint32_t BotManager::GetPendingLfgProposal(Player* bot) {
@@ -615,30 +678,39 @@ uint32_t BotManager::GetPendingLfgProposal(Player* bot) {
     return 0;
   }
   const uint64_t key = bot->GetGUID().GetRawValue();
-  auto it = PendingLfgProposals().find(key);
-  if (it == PendingLfgProposals().end()) {
+  PendingPromptsState& prompts = PendingPrompts();
+  base::AutoLock lock(prompts.lock);
+  auto it = prompts.lfg_proposals.find(key);
+  if (it == prompts.lfg_proposals.end()) {
     return 0;
   }
   if (GetMSTimeDiffToNow(it->second.received_ms) >=
       kPendingLfgProposalTimeoutMs) {
-    PendingLfgProposals().erase(it);
+    prompts.lfg_proposals.erase(it);
     return 0;
   }
   return it->second.proposal_id;
 }
 
 void BotManager::ClearPendingLfgProposal(Player* bot) {
-  if (bot) {
-    PendingLfgProposals().erase(bot->GetGUID().GetRawValue());
+  if (!bot) {
+    return;
   }
+  PendingPromptsState& prompts = PendingPrompts();
+  base::AutoLock lock(prompts.lock);
+  prompts.lfg_proposals.erase(bot->GetGUID().GetRawValue());
 }
 
 void BotManager::Stop() {
   ClearBotStrategyOverrides();
   DungeonDeadSinceMs().clear();
-  PendingSharedQuests().clear();
-  PendingReadyChecks().clear();
-  PendingLfgProposals().clear();
+  {
+    PendingPromptsState& prompts = PendingPrompts();
+    base::AutoLock lock(prompts.lock);
+    prompts.shared_quests.clear();
+    prompts.ready_checks.clear();
+    prompts.lfg_proposals.clear();
+  }
   for (const Bot& bot : bots_) {
     if (bot.guid) {
       RandomPlayerbotMgr::instance().LogoutPlayerBot(ObjectGuid(bot.guid));

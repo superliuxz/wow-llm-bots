@@ -26,7 +26,20 @@ Last updated 2026-11-24.
     - [x] **R8614690-L2:** Removed Playerbots premade-spec talent delegation and duplicate `SendTalentsInfoData` (resolved with R8614690-H4).
     - [x] **R8614690-L3:** Updated `e2e_playability.py` docstring, `docs/TODO.md` date (`2026-11-24`), and `polyline.reserve(samples + 2)` in `option_facts.cc`.
 
-- [x] **Review `752373e` + `b689245` fixes (High → Medium → Low — all 14 items fixed & verified):**
+- [x] **Review `09163e7` fixes (`var/review/review_09163e7.md` + subagent review — all 8 items fixed; `server_module/` compile/build-verified on `10700k`, `e2e_playability` & `e2e_talk` passed live):**
+  - **High:**
+    - [x] **R09163e7-H1:** `LlmBrainPacketScript::OnPacketSent` (`bot_manager.cc`) now parses `encounters`, `silent`, `count`, and per-player `(role, is_self, in_dungeon, same_group, answered, accepted)` records from `SMSG_LFG_PROPOSAL_UPDATE` with bounds checks and records `PendingLfgProposals` only when `state == LFG_PROPOSAL_INITIATING && proposal_id != 0 && silent == 0` and `is_self && answered == 0`, otherwise erases.
+  - **Medium:**
+    - [x] **R09163e7-M1:** `mount:` (`option_executor.cc`) calls `bot->StopMoving()`, returns `"cannot mount now"` when `!casting && !bot->IsMounted()`, leaves `.info` empty while casting, and `StepActiveOption` (`llm_brain_world_script.cc`) skips all non-`0x` `kUse` guids (`"mount:"`, etc.) while casting.
+    - [x] **R09163e7-M2:** `npc_train` (`option_executor.cc`) now checks `!trainer->CanTeachSpell(bot, &sp)` (alongside `cost > 0 && money_before` change) so zero-cost `SPELL_EFFECT_LEARN_SPELL` castable trainer spells are counted properly.
+    - [x] **R09163e7-M3:** Checked `npc_guid == bot->GetGUID()` in `SMSG_QUESTGIVER_QUEST_DETAILS`, cleared `bot->SetDivider(ObjectGuid::Empty)` on shared-quest timeout, and guarded all three `OnPacketSent` maps in `PendingPromptsState` (`bot_manager.cc`) with `base::Lock` (`GUARDED_BY`).
+  - **Low:**
+    - [x] **R09163e7-L1:** Passed `{SERVERHOOK_ON_PACKET_SENT}` to `ServerScript("LlmBrainPacketScript", ...)` and called `copy.rpos(0)` on every `ByteBuffer copy(packet)` in `OnPacketSent`.
+    - [x] **R09163e7-L2:** Removed unused `PlayerbotAI* ai` in `CollectGroupAndUpkeepActions` and separated `!session` (`"no session"`) from `!bot->GetGroup()` in `ready:` (`option_executor.cc`).
+    - [x] **R09163e7-L3:** Checked `sLFGMgr->GetState(bot->GetGUID()) == lfg::LFG_STATE_NONE` after `JoinLfg` in `lfg:queue:<mask>` so silent refusals surface an error.
+    - [x] **R09163e7-L4:** Clarified `docs/TODO.md` verification scope honestly across both review sections.
+
+- [x] **Review `752373e` + `b689245` fixes (High → Medium → Low — all 14 items fixed; `harness/`/`soak.py`/`HoR` unit-tested, `server_module/` compile/build-verified on `10700k`):**
   - **High:**
     - [x] **Rb689245-H1:** Removed mistaken `PendingSharedQuests` / `PendingReadyChecks` erases from the alive/non-dungeon branch in `BotManager::Tick()` (now erased only when offline or in `BotManager::Stop()`).
     - [x] **Rb689245-H2:** Added `LlmBrainPacketScript : public ServerScript` (`OnPacketSent` in `bot_manager.cc`, registered in `AddLlmBrainScripts()`) to capture `MSG_RAID_READY_CHECK` / `MSG_RAID_READY_CHECK_FINISHED` and `SMSG_QUESTGIVER_QUEST_DETAILS` (with non-empty `divider_guid`) directly on socketless standalone bot sessions.

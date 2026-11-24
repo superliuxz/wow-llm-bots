@@ -1084,7 +1084,7 @@ class LlmBrainWorldScript : public WorldScript {
     if (kind == OptionTarget::Kind::kUse ||
         kind == OptionTarget::Kind::kGather) {
       if (kind == OptionTarget::Kind::kUse &&
-          state.active_option->guid.starts_with("item:")) {
+          !state.active_option->guid.starts_with("0x")) {
         return;
       }
       GameObject* go = ObjectAccessor::GetGameObject(
