@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <string>
+#include <vector>
 
 #include "gtest/gtest.h"
 #include "llm/llm_client.h"
@@ -319,6 +320,33 @@ TEST(PromptTest, HugeIdentityMemoryAndEventsNeverHideAroundMeOptions) {
   PromptInput with_orders = SampleInput();
   with_orders.order_names = {"Defile", "Lich King"};
   EXPECT_GE(BuildPlanRequest(with_orders, SampleScreen()).max_tokens, 300);
+}
+
+TEST(PromptTest, AssemblePromptInputUnifiesLiveAndOfflineFields) {
+  wlb::snapshot::Snapshot snap;
+  snap.bot = "Tess";
+  wlb::snapshot::Unit& ally = snap.ext.party.emplace().members.emplace_back();
+  ally.name = "Hele";
+
+  PromptAssemblyContext ctx;
+  ctx.rules = "RULES";
+  ctx.raw_memory = "## Earlier summary\n- ran RFC\n\n## Recent\n- met Hele\n";
+  ctx.raw_relationships =
+      "## Hele\n- good tank\n\n## Stranger\n- never shown\n";
+  ctx.wake_reason = "party from Hele: pull?";
+  ctx.party_reply_muted = true;
+  ctx.remembered = {"bags, seen 10 s ago: bread"};
+
+  const PromptInput input = AssemblePromptInput(ctx, snap);
+  EXPECT_EQ(input.bot_name, "Tess");
+  EXPECT_NE(input.memory.find("met Hele"), std::string::npos);
+  EXPECT_NE(input.relationships.find("Hele"), std::string::npos);
+  EXPECT_EQ(input.relationships.find("Stranger"), std::string::npos);
+  EXPECT_NE(input.wake_reason.find("another party member answers"),
+            std::string::npos);
+  EXPECT_EQ(input.whisperers, std::vector<std::string>{"Hele"});
+  EXPECT_EQ(input.remembered,
+            std::vector<std::string>{"bags, seen 10 s ago: bread"});
 }
 
 }  // namespace

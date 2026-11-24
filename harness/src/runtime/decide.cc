@@ -2,7 +2,6 @@
 
 #include "runtime/decide.h"
 
-#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <nlohmann/json_fwd.hpp>
@@ -91,6 +90,14 @@ std::optional<DecideOptions> ParseDecideArgs(
       options.rules_path = value;
     } else if (name == "identity") {
       options.identity_path = value;
+    } else if (name == "memory") {
+      options.memory_path = value;
+    } else if (name == "relationships") {
+      options.relationships_path = value;
+    } else if (name == "remembered") {
+      options.remembered.push_back(value);
+    } else if (name == "party-muted" && value.empty()) {
+      options.party_reply_muted = true;
     } else if (name == "log-dir") {
       options.log_dir = value;
     } else if (name == "host") {
@@ -155,11 +162,9 @@ int RunDecide(const DecideOptions& options,
                     {"can't read the rules ", options.rules_path, "\n"});
     return 1;
   }
-  PromptInput input;
-  input.rules = *rules;
-  input.bot_name = !options.bot_name.empty() ? options.bot_name
-                   : !snapshot.bot.empty()   ? snapshot.bot
-                                             : "bot";
+  PromptAssemblyContext ctx;
+  ctx.rules = *rules;
+  ctx.bot_name = options.bot_name;
   if (!options.identity_path.empty()) {
     const std::optional<std::string> identity = ReadFile(options.identity_path);
     if (!identity) {
@@ -167,12 +172,33 @@ int RunDecide(const DecideOptions& options,
           report, {"can't read the identity ", options.identity_path, "\n"});
       return 1;
     }
-    input.identity = *identity;
+    ctx.identity = *identity;
   }
-  input.current_goal = options.current_goal;
-  input.wake_reason = options.wake_reason;
+  if (!options.memory_path.empty()) {
+    const std::optional<std::string> memory = ReadFile(options.memory_path);
+    if (!memory) {
+      base::StrAppend(report,
+                      {"can't read memory ", options.memory_path, "\n"});
+      return 1;
+    }
+    ctx.raw_memory = *memory;
+  }
+  if (!options.relationships_path.empty()) {
+    const std::optional<std::string> rels =
+        ReadFile(options.relationships_path);
+    if (!rels) {
+      base::StrAppend(report, {"can't read relationships ",
+                               options.relationships_path, "\n"});
+      return 1;
+    }
+    ctx.raw_relationships = *rels;
+  }
+  ctx.current_goal = options.current_goal;
+  ctx.wake_reason = options.wake_reason;
+  ctx.party_reply_muted = options.party_reply_muted;
+  ctx.remembered = options.remembered;
   if (!options.notes.empty()) {
-    input.notes = options.notes;
+    ctx.raw_notes = options.notes;
   } else if (!options.notes_path.empty()) {
     std::optional<std::string> notes = ReadFile(options.notes_path);
     if (!notes) {
@@ -180,40 +206,24 @@ int RunDecide(const DecideOptions& options,
                       {"cannot read notes: ", options.notes_path, "\n"});
       return 1;
     }
-    input.notes = std::move(*notes);
+    ctx.raw_notes = std::move(*notes);
   }
-  if (!input.notes.empty()) {
-    input.notes = SelectRelevantNotes(input.notes, snapshot);
-  }
+  std::optional<WorldKnowledge> wk;
   if (!options.knowledge_path.empty()) {
     std::string kerr;
-    const std::optional<WorldKnowledge> wk =
-        WorldKnowledge::LoadFile(options.knowledge_path, &kerr);
+    wk = WorldKnowledge::LoadFile(options.knowledge_path, &kerr);
     if (!wk) {
       base::StrAppend(report, {kerr, "\n"});
       return 1;
     }
-    input.knowledge = wk->SelectRelevant(snapshot, !input.notes.empty());
   }
-  input.order_names = CollectOrderNames(snapshot, input.notes);
-  for (const std::string& extra : options.order_names) {
-    if (std::find(input.order_names.begin(), input.order_names.end(), extra) ==
-        input.order_names.end()) {
-      input.order_names.push_back(extra);
-    }
-  }
-  input.slot = options.slot;
-  input.temperature = options.temperature;
-  input.whisperers = options.whisperers;
-  for (const wlb::snapshot::Event& event : snapshot.events) {
-    if (event.chat && event.chat->channel == wlb::snapshot::WHISPER &&
-        !event.chat->from.empty() &&
-        std::find(input.whisperers.begin(), input.whisperers.end(),
-                  event.chat->from) == input.whisperers.end()) {
-      input.whisperers.push_back(event.chat->from);
-    }
-  }
+  ctx.whisperers = options.whisperers;
+  ctx.extra_order_names = options.order_names;
+  ctx.slot = options.slot;
+  ctx.temperature = options.temperature;
 
+  const PromptInput input =
+      AssemblePromptInput(ctx, snapshot, wk ? &*wk : nullptr);
   const Screen screen = RenderScreen(snapshot);
   if (options.inspect_prompt) {
     base::StrAppend(report, {FormatPromptInspection(input, screen)});

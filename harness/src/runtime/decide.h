@@ -25,7 +25,12 @@ struct DecideOptions {
   std::string wake_reason = "plan done";
   std::string rules_path = "content/RULES.md";
   std::string identity_path;  // Optional.
-  std::string log_dir;        // Optional: var/bots.
+  std::string memory_path;    // Optional: var/bots/<name>/memory.md.
+  std::string
+      relationships_path;  // Optional: var/bots/<name>/relationships.md.
+  std::vector<std::string> remembered;
+  bool party_reply_muted = false;
+  std::string log_dir;  // Optional: var/bots.
   int slot = -1;
   float temperature = 0.7f;
   bool dry_run = false;  // Print the prompt; don't ask the model.

@@ -10,10 +10,13 @@
 #include <vector>
 
 #include "base/strings/strcat.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "llm/llm_client.h"
+#include "plan/orders.h"
 #include "plan/plan.h"
+#include "screen/knowledge.h"
 #include "screen/screen_renderer.h"
 #include "snapshot/snapshot.h"
 
@@ -266,7 +269,283 @@ bool ContainsIgnoreCase(std::string_view haystack, std::string_view needle) {
   return false;
 }
 
+constexpr std::string_view kEarlierSummaryHeading = "## Earlier summary";
+constexpr size_t kMaxSummaryBullets = 6;
+constexpr size_t kMaxRelationshipsBudgetBytes = 800;
+
+bool IsAsciiLetterChar(char c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
+void AddUniquePlayer(std::vector<std::string>* out,
+                     std::string_view bot,
+                     std::string_view name) {
+  name = base::TrimWhitespaceASCII(name, base::TRIM_ALL);
+  if (name.size() < 2 || name.size() > 12 ||
+      base::EqualsCaseInsensitiveASCII(name, bot)) {
+    return;
+  }
+  for (char c : name) {
+    if (!IsAsciiLetterChar(c)) {
+      return;
+    }
+  }
+  for (const std::string& existing : *out) {
+    if (base::EqualsCaseInsensitiveASCII(existing, name)) {
+      return;
+    }
+  }
+  out->emplace_back(name);
+}
+
 }  // namespace
+
+std::string FormatMemoryForPrompt(std::string_view raw_memory,
+                                  size_t max_recent) {
+  std::vector<std::string> summary;
+  std::vector<std::string> recent;
+  bool in_summary = false;
+  for (std::string_view raw :
+       base::SplitStringPiece(raw_memory, "\n", base::TRIM_WHITESPACE,
+                              base::SPLIT_WANT_NONEMPTY)) {
+    if (raw == kEarlierSummaryHeading) {
+      in_summary = true;
+      continue;
+    }
+    if (raw.starts_with("## ")) {
+      in_summary = false;
+      continue;
+    }
+    if (in_summary) {
+      summary.emplace_back(raw);
+    } else {
+      recent.emplace_back(raw);
+    }
+  }
+  std::vector<std::string> lines;
+  const size_t summary_cap = std::min(summary.size(), kMaxSummaryBullets + 2);
+  lines.reserve(summary_cap + std::min(recent.size(), max_recent));
+  for (size_t i = 0; i < summary_cap; ++i) {
+    lines.push_back(std::move(summary[i]));
+  }
+  const size_t start =
+      recent.size() > max_recent ? recent.size() - max_recent : 0;
+  for (size_t i = start; i < recent.size(); ++i) {
+    lines.push_back(std::move(recent[i]));
+  }
+  return base::JoinString(lines, "\n");
+}
+
+std::string SelectRelationshipsForPrompt(
+    std::string_view raw_relationships,
+    const std::vector<std::string>& present_players) {
+  if (raw_relationships.empty()) {
+    return "";
+  }
+  struct RelSection {
+    std::string player;
+    std::vector<std::string> notes;
+  };
+  std::vector<std::string> preamble;
+  std::vector<RelSection> sections;
+  RelSection* current = nullptr;
+  for (std::string_view raw :
+       base::SplitStringPiece(raw_relationships, "\n", base::TRIM_WHITESPACE,
+                              base::SPLIT_WANT_NONEMPTY)) {
+    if (raw.starts_with("# ")) {
+      continue;
+    }
+    if (raw.starts_with("## ")) {
+      const std::string_view name =
+          base::TrimWhitespaceASCII(raw.substr(3), base::TRIM_ALL);
+      if (name.empty()) {
+        current = nullptr;
+        continue;
+      }
+      current = nullptr;
+      for (RelSection& sec : sections) {
+        if (base::EqualsCaseInsensitiveASCII(sec.player, name)) {
+          current = &sec;
+          break;
+        }
+      }
+      if (!current) {
+        current = &sections.emplace_back(RelSection{std::string(name), {}});
+      }
+      continue;
+    }
+    if (current) {
+      current->notes.emplace_back(raw);
+    } else {
+      preamble.emplace_back(raw);
+    }
+  }
+
+  std::string out;
+  auto append_line = [&](std::string_view line) {
+    if (line.empty()) {
+      return false;
+    }
+    const size_t sep = out.empty() ? 0 : 1;
+    if (out.size() + sep + line.size() > kMaxRelationshipsBudgetBytes) {
+      return false;
+    }
+    if (sep) {
+      out.push_back('\n');
+    }
+    out.append(line);
+    return true;
+  };
+  for (const std::string& line : preamble) {
+    if (!append_line(line)) {
+      return out;
+    }
+  }
+  std::vector<const RelSection*> matched;
+  for (const RelSection& sec : sections) {
+    if (sec.notes.empty()) {
+      continue;
+    }
+    const bool relevant =
+        std::any_of(present_players.begin(), present_players.end(),
+                    [&](const std::string& p) {
+                      return base::EqualsCaseInsensitiveASCII(p, sec.player);
+                    });
+    if (relevant) {
+      matched.push_back(&sec);
+    }
+  }
+  for (size_t i = 0; i < matched.size(); ++i) {
+    const RelSection& sec = *matched[i];
+    const size_t sep = out.empty() ? 0 : 1;
+    if (out.size() + sep >= kMaxRelationshipsBudgetBytes) {
+      break;
+    }
+    const size_t remaining = kMaxRelationshipsBudgetBytes - out.size() - sep;
+    const size_t players_left = matched.size() - i;
+    const size_t share = std::max(remaining / players_left, size_t{1});
+    const std::string header = base::StrCat({"## ", sec.player});
+    if (header.size() + 1 >= remaining) {
+      continue;
+    }
+    std::vector<std::string_view> picked;
+    size_t used = header.size();
+    for (auto it = sec.notes.rbegin(); it != sec.notes.rend(); ++it) {
+      const size_t next = used + 1 + it->size();
+      const size_t limit = picked.empty() ? remaining : share;
+      if (next > limit) {
+        break;
+      }
+      picked.push_back(*it);
+      used = next;
+    }
+    if (picked.empty()) {
+      continue;
+    }
+    std::reverse(picked.begin(), picked.end());
+    if (sep) {
+      out.push_back('\n');
+    }
+    out.append(header);
+    for (std::string_view note : picked) {
+      out.push_back('\n');
+      out.append(note);
+    }
+  }
+  return out;
+}
+
+PromptInput AssemblePromptInput(const PromptAssemblyContext& ctx,
+                                const wlb::snapshot::Snapshot& snapshot,
+                                const WorldKnowledge* knowledge) {
+  PromptInput out;
+  out.rules = ctx.rules;
+  out.bot_name = !ctx.bot_name.empty()   ? ctx.bot_name
+                 : !snapshot.bot.empty() ? snapshot.bot
+                                         : "bot";
+  out.identity = ctx.identity;
+  if (!ctx.raw_memory.empty()) {
+    out.memory = FormatMemoryForPrompt(ctx.raw_memory);
+  }
+  if (!ctx.raw_relationships.empty()) {
+    std::vector<std::string> present;
+    if (snapshot.ext.party) {
+      for (const wlb::snapshot::Unit& m : snapshot.ext.party->members) {
+        AddUniquePlayer(&present, out.bot_name, m.name);
+      }
+    }
+    if (snapshot.ext.raid) {
+      for (const wlb::snapshot::Unit& m : snapshot.ext.raid->members) {
+        AddUniquePlayer(&present, out.bot_name, m.name);
+      }
+    }
+    for (const wlb::snapshot::Unit& u : snapshot.base.nearby.units) {
+      if (u.kind == wlb::snapshot::Unit::PLAYER) {
+        AddUniquePlayer(&present, out.bot_name, u.name);
+      }
+    }
+    for (const std::string& w : ctx.whisperers) {
+      AddUniquePlayer(&present, out.bot_name, w);
+    }
+    for (const std::string& p : ctx.extra_present_players) {
+      AddUniquePlayer(&present, out.bot_name, p);
+    }
+    for (const wlb::snapshot::Event& ev : snapshot.events) {
+      if (ev.chat && !ev.chat->from.empty()) {
+        AddUniquePlayer(&present, out.bot_name, ev.chat->from);
+      }
+    }
+    out.relationships =
+        SelectRelationshipsForPrompt(ctx.raw_relationships, present);
+  }
+  out.current_goal = ctx.current_goal;
+  out.last_outcome = ctx.last_outcome;
+  out.wake_reason = ctx.wake_reason;
+  if (ctx.party_reply_muted) {
+    base::StrAppend(&out.wake_reason,
+                    {" (another party member answers this for the group: act "
+                     "on it if it asks something of you, but don't reply)"});
+  }
+  out.recent_events = ctx.recent_events;
+  auto add_whisperer = [&](const std::string& name) {
+    if (!name.empty() && name != out.bot_name &&
+        std::find(out.whisperers.begin(), out.whisperers.end(), name) ==
+            out.whisperers.end()) {
+      out.whisperers.push_back(name);
+    }
+  };
+  for (const std::string& w : ctx.whisperers) {
+    add_whisperer(w);
+  }
+  for (const wlb::snapshot::Event& ev : snapshot.events) {
+    if (ev.chat && ev.chat->channel == wlb::snapshot::WHISPER) {
+      add_whisperer(ev.chat->from);
+    }
+  }
+  if (snapshot.ext.party) {
+    for (const wlb::snapshot::Unit& m : snapshot.ext.party->members) {
+      add_whisperer(m.name);
+    }
+  }
+  out.remembered = ctx.remembered;
+  if (!ctx.raw_notes.empty()) {
+    out.notes = SelectRelevantNotes(ctx.raw_notes, snapshot);
+  }
+  if (knowledge) {
+    out.knowledge = knowledge->SelectRelevant(snapshot, !out.notes.empty());
+  }
+  out.active_orders = ctx.active_orders;
+  out.order_names = CollectOrderNames(snapshot, out.notes);
+  for (const std::string& extra : ctx.extra_order_names) {
+    if (std::find(out.order_names.begin(), out.order_names.end(), extra) ==
+        out.order_names.end()) {
+      out.order_names.push_back(extra);
+    }
+  }
+  out.slot = ctx.slot;
+  out.temperature = ctx.temperature;
+  return out;
+}
 
 std::string SelectRelevantNotes(std::string_view full_notes,
                                 const wlb::snapshot::Snapshot& snapshot) {

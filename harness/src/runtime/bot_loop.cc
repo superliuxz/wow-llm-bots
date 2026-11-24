@@ -188,7 +188,6 @@ constexpr std::string_view kRecentMemoryHeading = "## Recent";
 constexpr size_t kMaxSummaryBullets = 6;
 constexpr size_t kMaxSummaryLineBytes = 140;
 constexpr size_t kMaxRelationshipNotesPerPlayer = 8;
-constexpr size_t kMaxRelationshipsPromptBytes = 800;
 
 struct ParsedMemory {
   std::vector<std::string> summary;
@@ -215,23 +214,6 @@ ParsedMemory ParseMemoryFile(std::string_view text) {
     }
   }
   return out;
-}
-
-std::string FormatMemoryForPrompt(std::string_view text, size_t max_recent) {
-  ParsedMemory mem = ParseMemoryFile(text);
-  std::vector<std::string> lines;
-  const size_t summary_cap =
-      std::min(mem.summary.size(), kMaxSummaryBullets + 2);
-  lines.reserve(summary_cap + std::min(mem.recent.size(), max_recent));
-  for (size_t i = 0; i < summary_cap; ++i) {
-    lines.push_back(std::move(mem.summary[i]));
-  }
-  const size_t start =
-      mem.recent.size() > max_recent ? mem.recent.size() - max_recent : 0;
-  for (size_t i = start; i < mem.recent.size(); ++i) {
-    lines.push_back(std::move(mem.recent[i]));
-  }
-  return base::JoinString(lines, "\n");
 }
 
 std::string FormatMemoryFile(const std::vector<std::string>& summary,
@@ -405,90 +387,6 @@ void AddUniquePlayerName(std::vector<std::string>* out,
     }
   }
   out->emplace_back(name);
-}
-
-std::string SelectRelationshipsForPrompt(
-    std::string_view rel_text,
-    const std::vector<std::string>& present_players) {
-  if (rel_text.empty()) {
-    return "";
-  }
-  const ParsedRelationships rels = ParseRelationshipsFile(rel_text);
-  std::string out;
-  auto append_line = [&](std::string_view line) {
-    if (line.empty()) {
-      return false;
-    }
-    const size_t sep = out.empty() ? 0 : 1;
-    if (out.size() + sep + line.size() > kMaxRelationshipsPromptBytes) {
-      return false;
-    }
-    if (sep) {
-      out.push_back('\n');
-    }
-    out.append(line);
-    return true;
-  };
-  for (const std::string& line : rels.preamble) {
-    if (!append_line(line)) {
-      return out;
-    }
-  }
-  std::vector<const RelationshipSection*> matched;
-  for (const RelationshipSection& sec : rels.sections) {
-    if (sec.notes.empty()) {
-      continue;
-    }
-    const bool relevant =
-        std::any_of(present_players.begin(), present_players.end(),
-                    [&](const std::string& p) {
-                      return base::EqualsCaseInsensitiveASCII(p, sec.player);
-                    });
-    if (relevant) {
-      matched.push_back(&sec);
-    }
-  }
-  for (size_t i = 0; i < matched.size(); ++i) {
-    const RelationshipSection& sec = *matched[i];
-    const size_t sep = out.empty() ? 0 : 1;
-    if (out.size() + sep >= kMaxRelationshipsPromptBytes) {
-      break;
-    }
-    const size_t remaining = kMaxRelationshipsPromptBytes - out.size() - sep;
-    const size_t players_left = matched.size() - i;
-    const size_t share = std::max(remaining / players_left, size_t{1});
-    const std::string header = base::StrCat({"## ", sec.player});
-    if (header.size() + 1 >= remaining) {
-      continue;
-    }
-    // Pick the newest notes that fit in this player's share of the remaining
-    // budget (expanding up to `remaining` if needed for at least the newest
-    // single note so an active player with long notes is never dropped).
-    std::vector<std::string_view> picked;
-    size_t used = header.size();
-    for (auto it = sec.notes.rbegin(); it != sec.notes.rend(); ++it) {
-      const size_t next = used + 1 + it->size();
-      const size_t limit = picked.empty() ? remaining : share;
-      if (next > limit) {
-        break;
-      }
-      picked.push_back(*it);
-      used = next;
-    }
-    if (picked.empty()) {
-      continue;
-    }
-    std::reverse(picked.begin(), picked.end());
-    if (sep) {
-      out.push_back('\n');
-    }
-    out.append(header);
-    for (std::string_view note : picked) {
-      out.push_back('\n');
-      out.append(note);
-    }
-  }
-  return out;
 }
 
 std::string NormalizeInstanceKey(std::string_view raw) {
@@ -1304,98 +1202,55 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
   state.pending_chats.clear();
 
   const base::TimeTicks asked_at_for_whisperers = base::TimeTicks::Now();
-  PromptInput input;
-  input.rules = config_.rules;
-  input.bot_name = bot;
-  input.identity = state.identity;
-  // What the brain chose to remember (`remember:`), newest last (RH-M4, F5,
-  // A-H3: kept separate from identity so prompt budgeting caps it cleanly).
+  PromptAssemblyContext ctx;
+  ctx.rules = config_.rules;
+  ctx.bot_name = bot;
+  ctx.identity = state.identity;
   if (!config_.bots_dir.empty()) {
-    input.memory = FormatMemoryForPrompt(
-        ReadFileIfChanged(
-            base::StrCat({config_.bots_dir, "/", bot, "/memory.md"})),
-        kMemoryLinesInPrompt);
-    const std::string rel_raw = ReadFileIfChanged(
+    ctx.raw_memory = ReadFileIfChanged(
+        base::StrCat({config_.bots_dir, "/", bot, "/memory.md"}));
+    ctx.raw_relationships = ReadFileIfChanged(
         base::StrCat({config_.bots_dir, "/", bot, "/relationships.md"}));
-    if (!rel_raw.empty()) {
-      std::vector<std::string> present;
-      if (state.latest_snapshot->ext.party) {
-        for (const pb::Unit& m : state.latest_snapshot->ext.party->members) {
-          AddUniquePlayerName(&present, bot, m.name);
-        }
+    for (const BotState::ObservedChat& c : asked_chats) {
+      if (IsPlayerChatChannel(c.channel)) {
+        ctx.extra_present_players.push_back(c.from);
       }
-      if (state.latest_snapshot->ext.raid) {
-        for (const pb::Unit& m : state.latest_snapshot->ext.raid->members) {
-          AddUniquePlayerName(&present, bot, m.name);
-        }
-      }
-      for (const pb::Unit& u : state.latest_snapshot->base.nearby.units) {
-        if (u.kind == pb::Unit::PLAYER) {
-          AddUniquePlayerName(&present, bot, u.name);
-        }
-      }
-      for (const BotState::Whisperer& w : state.whisperers) {
-        if (asked_at_for_whisperers - w.at <= kWhispererMemory) {
-          AddUniquePlayerName(&present, bot, w.name);
-        }
-      }
-      for (const BotState::ObservedChat& c : asked_chats) {
-        if (IsPlayerChatChannel(c.channel)) {
-          AddUniquePlayerName(&present, bot, c.from);
-        }
-      }
-      // Dynamic per-player relationships go into `input.relationships` (after
-      // static boss notes and world guide) to preserve KV-cache prefix reuse.
-      input.relationships = SelectRelationshipsForPrompt(rel_raw, present);
     }
   }
-  input.current_goal = state.current_goal;
-  input.wake_reason = wake_reason;
+  ctx.current_goal = state.current_goal;
+  ctx.wake_reason = wake_reason;
   if (!AnswersPartyChat(bot, asked_chats, *state.latest_snapshot)) {
     state.party_reply_muted_epoch = epoch;
-    base::StrAppend(&input.wake_reason,
-                    {" (another party member answers this for the group: act "
-                     "on it if it asks something of you, but don't reply)"});
+    ctx.party_reply_muted = true;
   }
-  input.recent_events.assign(state.recent_events.begin(),
-                             state.recent_events.end());
+  ctx.recent_events.assign(state.recent_events.begin(),
+                           state.recent_events.end());
   state.recent_events.clear();
-  std::vector<std::string> asked_events = input.recent_events;
+  std::vector<std::string> asked_events = ctx.recent_events;
   for (const BotState::Whisperer& w : state.whisperers) {
     if (asked_at_for_whisperers - w.at <= kWhispererMemory) {
-      input.whisperers.push_back(w.name);
-    }
-  }
-  // Party members may also be whispered via `tell` without crowding out recent
-  // human whisperers.
-  if (state.latest_snapshot->ext.party) {
-    for (const pb::Unit& m : state.latest_snapshot->ext.party->members) {
-      if (!m.name.empty() && m.name != bot &&
-          std::find(input.whisperers.begin(), input.whisperers.end(), m.name) ==
-              input.whisperers.end()) {
-        input.whisperers.push_back(m.name);
-      }
+      ctx.whisperers.push_back(w.name);
     }
   }
   // Ages on the snapshots' clock (seen_at is a snapshot's received time).
-  input.remembered = RememberedPanels(state, state.latest_received_at,
-                                      config_.remember_panels_for);
+  ctx.remembered = RememberedPanels(state, state.latest_received_at,
+                                    config_.remember_panels_for);
   // Consume `last_outcome` once delivered so it never goes stale across
   // unrelated future wakes (requeued on cancel/error via `asked_outcome`).
   std::string asked_outcome = std::move(state.last_outcome);
   state.last_outcome.clear();
-  input.last_outcome = asked_outcome;
-  input.notes = SelectRelevantNotes(state.notes, *state.latest_snapshot);
-  input.knowledge =
-      knowledge_.SelectRelevant(*state.latest_snapshot, !input.notes.empty());
-  state.last_selected_notes = input.notes;
+  ctx.last_outcome = asked_outcome;
+  ctx.raw_notes = state.notes;
   for (const Order& o : state.orders.orders()) {
-    input.active_orders.push_back(FormatOrder(o));
+    ctx.active_orders.push_back(FormatOrder(o));
   }
-  input.order_names = CollectOrderNames(*state.latest_snapshot, input.notes);
+  ctx.slot = slot;
+  ctx.temperature = config_.temperature;
+
+  const PromptInput input =
+      AssemblePromptInput(ctx, *state.latest_snapshot, &knowledge_);
+  state.last_selected_notes = input.notes;
   std::vector<std::string> order_names = input.order_names;
-  input.slot = slot;
-  input.temperature = config_.temperature;
 
   const uint32_t ask_seq = state.latest_snapshot->seq;
   state.ask_watch_inputs = TriggerEvaluator::InputsOf(*state.latest_snapshot);

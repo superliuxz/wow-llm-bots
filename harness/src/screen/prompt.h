@@ -26,6 +26,8 @@ struct Snapshot;
 
 namespace harness {
 
+class WorldKnowledge;
+
 struct PromptInput {
   std::string rules;  // content/RULES.md
   std::string bot_name;
@@ -67,6 +69,47 @@ struct PromptInput {
 // `CollectOrderNames`.
 std::string SelectRelevantNotes(std::string_view full_notes,
                                 const wlb::snapshot::Snapshot& snapshot);
+
+// Formats raw `memory.md` (optional `## Earlier summary` + newest `max_recent`
+// lines) for `PromptInput::memory`.
+std::string FormatMemoryForPrompt(std::string_view raw_memory,
+                                  size_t max_recent = 12);
+
+// Filters raw `relationships.md` to sections matching `present_players` within
+// the relationships prompt budget.
+std::string SelectRelationshipsForPrompt(
+    std::string_view raw_relationships,
+    const std::vector<std::string>& present_players);
+
+// Shared inputs for assembling a live or offline `PromptInput` through one
+// code path (`bot_loop.cc` and `decide.cc`).
+struct PromptAssemblyContext {
+  std::string rules;
+  std::string bot_name;
+  std::string identity;
+  std::string raw_memory;
+  std::string raw_relationships;
+  std::string current_goal;
+  std::string last_outcome;
+  std::string wake_reason;
+  bool party_reply_muted = false;
+  std::vector<std::string> recent_events;
+  std::vector<std::string> whisperers;
+  std::vector<std::string> extra_present_players;
+  std::vector<std::string> remembered;
+  std::string raw_notes;
+  std::vector<std::string> active_orders;
+  std::vector<std::string> extra_order_names;
+  int slot = -1;
+  float temperature = 0.7f;
+};
+
+// Assembles a complete `PromptInput` from `ctx` and `snapshot` (memory,
+// relationships for present players, party-mute suffix, whisperers + party
+// members, relevant boss notes, world guide, and standing-order names).
+PromptInput AssemblePromptInput(const PromptAssemblyContext& ctx,
+                                const wlb::snapshot::Snapshot& snapshot,
+                                const WorldKnowledge* knowledge = nullptr);
 
 // The request that asks for a plan for this screen. The plan grammar allows
 // only the screen's own option numbers.
