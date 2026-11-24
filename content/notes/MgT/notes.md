@@ -23,12 +23,13 @@ Pure Energy appears -> target nearest Pure Energy
 ## Kael'thas Sunstrider
 
 - **Flame Strike**: 2s cast spawning a burning fire column on the ground; move out immediately!
-- **Phoenix / Phoenix Egg**: summons a Phoenix that turns into a **Phoenix Egg** when killed; burn the egg quickly.
+- **Phoenix** / **Phoenix Egg**: summons a **Phoenix** that turns into a **Phoenix Egg** when killed; burn the egg quickly and stay clear of the burning Phoenix aura.
 - **Gravity Lapse**: floats the raid in the air and spawns **Arcane Sphere** orbs; keep damaging Kael'thas and avoid spheres.
 - **Shock Barrier / Pyroblast**: burn through the shield and interrupt Pyroblast.
 
 ```
 in Flame Strike -> out of it
 Phoenix Egg appears -> target nearest Phoenix Egg
+Phoenix within 10 -> away Phoenix 13
 Arcane Sphere within 9 -> away Arcane Sphere 13
 ```

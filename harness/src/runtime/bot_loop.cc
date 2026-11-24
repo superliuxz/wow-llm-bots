@@ -340,14 +340,33 @@ void AddUniquePlayerName(std::vector<std::string>* out,
 void ExtractChatSendersFromLines(const std::vector<std::string>& lines,
                                  std::string_view bot,
                                  std::vector<std::string>* out) {
+  // Match only player-originated chat prefixes from `DescribeEvent`
+  // (`triggers.cc`), never `monster ... from `, `boss emote from `, or
+  // `[system] ...` lines.
+  static constexpr std::string_view kPlayerChatPrefixes[] = {
+      "whisper from ",      "say from ",
+      "yell from ",         "party from ",
+      "raid from ",         "raid warning from ",
+      "guild from ",        "officer from ",
+      "general from ",      "trade from ",
+      "lfg from ",          "emote from ",
+      "battleground from ", "custom channel from ",
+  };
   for (const std::string& line : lines) {
     for (std::string_view seg : base::SplitStringPieceUsingSubstr(
              line, "; ", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
-      const size_t from_pos = seg.find(" from ");
-      if (from_pos == std::string_view::npos) {
+      std::string_view after;
+      bool matched = false;
+      for (std::string_view prefix : kPlayerChatPrefixes) {
+        if (seg.starts_with(prefix)) {
+          after = seg.substr(prefix.size());
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
         continue;
       }
-      const std::string_view after = seg.substr(from_pos + 6);
       const size_t colon = after.find(':');
       if (colon == std::string_view::npos) {
         continue;
@@ -365,25 +384,26 @@ std::string SelectRelationshipsForPrompt(
   }
   const ParsedRelationships rels = ParseRelationshipsFile(rel_text);
   std::string out;
-  auto append_capped = [&](std::string_view chunk) {
-    if (chunk.empty()) {
+  auto append_line = [&](std::string_view line) {
+    if (line.empty()) {
       return false;
     }
     const size_t sep = out.empty() ? 0 : 1;
-    if (out.size() + sep + chunk.size() > kMaxRelationshipsPromptBytes) {
+    if (out.size() + sep + line.size() > kMaxRelationshipsPromptBytes) {
       return false;
     }
     if (sep) {
       out.push_back('\n');
     }
-    out.append(chunk);
+    out.append(line);
     return true;
   };
   for (const std::string& line : rels.preamble) {
-    if (!append_capped(line)) {
+    if (!append_line(line)) {
       return out;
     }
   }
+  std::vector<const RelationshipSection*> matched;
   for (const RelationshipSection& sec : rels.sections) {
     if (sec.notes.empty()) {
       continue;
@@ -393,13 +413,48 @@ std::string SelectRelationshipsForPrompt(
                     [&](const std::string& p) {
                       return base::EqualsCaseInsensitiveASCII(p, sec.player);
                     });
-    if (!relevant) {
+    if (relevant) {
+      matched.push_back(&sec);
+    }
+  }
+  for (size_t i = 0; i < matched.size(); ++i) {
+    const RelationshipSection& sec = *matched[i];
+    const size_t sep = out.empty() ? 0 : 1;
+    if (out.size() + sep >= kMaxRelationshipsPromptBytes) {
+      break;
+    }
+    const size_t remaining = kMaxRelationshipsPromptBytes - out.size() - sep;
+    const size_t players_left = matched.size() - i;
+    const size_t share = std::max(remaining / players_left, size_t{1});
+    const std::string header = base::StrCat({"## ", sec.player});
+    if (header.size() + 1 >= remaining) {
       continue;
     }
-    const std::string block = base::StrCat(
-        {"## ", sec.player, "\n", base::JoinString(sec.notes, "\n")});
-    if (!append_capped(block)) {
-      break;
+    // Pick the newest notes that fit in this player's share of the remaining
+    // budget (expanding up to `remaining` if needed for at least the newest
+    // single note so an active player with long notes is never dropped).
+    std::vector<std::string_view> picked;
+    size_t used = header.size();
+    for (auto it = sec.notes.rbegin(); it != sec.notes.rend(); ++it) {
+      const size_t next = used + 1 + it->size();
+      const size_t limit = picked.empty() ? remaining : share;
+      if (next > limit) {
+        break;
+      }
+      picked.push_back(*it);
+      used = next;
+    }
+    if (picked.empty()) {
+      continue;
+    }
+    std::reverse(picked.begin(), picked.end());
+    if (sep) {
+      out.push_back('\n');
+    }
+    out.append(header);
+    for (std::string_view note : picked) {
+      out.push_back('\n');
+      out.append(note);
     }
   }
   return out;
@@ -612,7 +667,7 @@ void BotLoop::OnConnectionChanged(bool connected) {
       state.pending_reasons.clear();
       state.recent_events.clear();
       state.whisperers.clear();
-      state.condensing_memory = false;
+      state.condense_state = BotState::CondenseState::kIdle;
       ++state.memory_condense_epoch;
       state.condense_retry_after = base::TimeTicks();
       ResetLooking(&state);
@@ -1055,6 +1110,11 @@ void BotLoop::WakeBot(const std::string& bot,
     state.pending_reasons.push_back(reason);
   }
   state.has_queued_wake = true;
+  // Replacing a queued P4 condense job with a real wake returns condensing to
+  // idle so it can be re-scheduled after the gameplay reply finishes.
+  if (state.condense_state == BotState::CondenseState::kQueued) {
+    state.condense_state = BotState::CondenseState::kIdle;
+  }
   base::WeakPtr<BotLoop> self = weak_factory_.GetWeakPtr();
   scheduler_.SubmitCancelable(
       bot, urgency, [self, bot](int slot, base::OnceClosure done) {
@@ -1163,14 +1223,9 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
           std::vector<std::string>(state.recent_events.begin(),
                                    state.recent_events.end()),
           bot, &present);
-      const std::string rels = SelectRelationshipsForPrompt(rel_raw, present);
-      if (!rels.empty()) {
-        base::StrAppend(&input.identity, {input.identity.empty() ? "" : "\n\n",
-                                          "People you know:\n", rels});
-      }
-    }
-    if (!state.latest_snapshot->base.self.in_combat) {
-      MaybeScheduleMemoryCondense(bot, &state, asked_at_for_whisperers);
+      // Dynamic per-player relationships go into `input.relationships` (after
+      // static boss notes and world guide) to preserve KV-cache prefix reuse.
+      input.relationships = SelectRelationshipsForPrompt(rel_raw, present);
     }
   }
   input.current_goal = state.current_goal;
@@ -1492,7 +1547,6 @@ void BotLoop::OnReply(const std::string& bot,
             file_cache_.erase(mem_path);
             RecordRelationshipNotes(bot, state, asked_reasons, asked_events,
                                     date, plan->remember);
-            MaybeScheduleMemoryCondense(bot, &state, now);
           }
         }
         for (const std::string& name : plan->close) {
@@ -1540,6 +1594,10 @@ void BotLoop::OnReply(const std::string& bot,
         if (state.order_failure_during_call) {
           state.order_failure_during_call = false;
           WakeForOrder(bot, &state, "", now, /*is_failure=*/true);
+        }
+        if (!state.has_queued_wake && state.latest_snapshot &&
+            !state.latest_snapshot->base.self.in_combat) {
+          MaybeScheduleMemoryCondense(bot, &state, now);
         }
       } else {
         // Superseded by a newer wake while in flight: that call answers.
@@ -1886,7 +1944,10 @@ void BotLoop::MaybeScheduleMemoryCondense(const std::string& bot,
                                           BotState* state,
                                           base::TimeTicks now) {
   if (config_.bots_dir.empty() || config_.memory_condense_threshold == 0 ||
-      state->condensing_memory || now < state->condense_retry_after) {
+      state->condense_state != BotState::CondenseState::kIdle ||
+      state->call_in_flight || state->has_queued_wake ||
+      !state->latest_snapshot || state->latest_snapshot->base.self.in_combat ||
+      now < state->condense_retry_after) {
     return;
   }
   const std::string mem_path =
@@ -1895,43 +1956,56 @@ void BotLoop::MaybeScheduleMemoryCondense(const std::string& bot,
   if (mem.recent.size() < config_.memory_condense_threshold) {
     return;
   }
-  state->condensing_memory = true;
+  state->condense_state = BotState::CondenseState::kQueued;
   base::WeakPtr<BotLoop> self = weak_factory_.GetWeakPtr();
-  scheduler_.SubmitCancelable(bot + "#memory", Urgency::kP4Reflect,
-                              [self, bot](int slot, base::OnceClosure done) {
-                                if (!self) {
-                                  std::move(done).Run();
-                                  return base::OnceClosure{};
-                                }
-                                return self->StartMemoryCondense(
-                                    bot, slot, std::move(done));
-                              });
+  // Scheduled under `bot` itself at P4 so it reuses `bot`'s warm slot without
+  // evicting another bot's KV cache, yields to any newer wake, and is
+  // preempted immediately by a P0 combat wake.
+  scheduler_.SubmitCancelable(
+      bot, Urgency::kP4Reflect, [self, bot](int slot, base::OnceClosure done) {
+        if (!self) {
+          std::move(done).Run();
+          return base::OnceClosure{};
+        }
+        return self->StartMemoryCondense(bot, slot, std::move(done));
+      });
 }
 
 base::OnceClosure BotLoop::StartMemoryCondense(const std::string& bot,
                                                int slot,
                                                base::OnceClosure done) {
   auto it = bots_.find(bot);
-  if (it == bots_.end() || !it->second.condensing_memory ||
-      config_.bots_dir.empty() || config_.memory_condense_threshold == 0) {
-    if (it != bots_.end()) {
-      it->second.condensing_memory = false;
+  if (it == bots_.end() ||
+      it->second.condense_state != BotState::CondenseState::kQueued ||
+      config_.bots_dir.empty() || config_.memory_condense_threshold == 0 ||
+      !it->second.latest_snapshot ||
+      it->second.latest_snapshot->base.self.in_combat) {
+    if (it != bots_.end() &&
+        it->second.condense_state == BotState::CondenseState::kQueued) {
+      it->second.condense_state = BotState::CondenseState::kIdle;
     }
     std::move(done).Run();
     return base::OnceClosure{};
   }
   const std::string mem_path =
       base::StrCat({config_.bots_dir, "/", bot, "/memory.md"});
-  const ParsedMemory mem = ParseMemoryFile(ReadFile(mem_path).value_or(""));
+  const std::optional<std::string> disk = ReadFile(mem_path);
+  if (!disk) {
+    it->second.condense_state = BotState::CondenseState::kIdle;
+    std::move(done).Run();
+    return base::OnceClosure{};
+  }
+  const ParsedMemory mem = ParseMemoryFile(*disk);
   const size_t keep_recent = std::min(config_.memory_keep_recent,
                                       config_.memory_condense_threshold - 1);
   if (mem.recent.size() < config_.memory_condense_threshold ||
       mem.recent.size() <= keep_recent) {
-    it->second.condensing_memory = false;
+    it->second.condense_state = BotState::CondenseState::kIdle;
     std::move(done).Run();
     return base::OnceClosure{};
   }
   const size_t condense_count = mem.recent.size() - keep_recent;
+  it->second.condense_state = BotState::CondenseState::kInFlight;
   const uint64_t condense_epoch = ++it->second.memory_condense_epoch;
   std::string user =
       base::StrCat({"Player: ", bot, "\n\nCondense these older memories:"});
@@ -1985,7 +2059,7 @@ void BotLoop::OnMemoryCondensed(const std::string& bot,
     std::move(done).Run();
     return;
   }
-  it->second.condensing_memory = false;
+  it->second.condense_state = BotState::CondenseState::kIdle;
   if (result.cancelled || config_.bots_dir.empty()) {
     std::move(done).Run();
     return;
@@ -2008,8 +2082,16 @@ void BotLoop::OnMemoryCondensed(const std::string& bot,
   const std::string mem_path =
       base::StrCat({config_.bots_dir, "/", bot, "/memory.md"});
   // Re-read from disk so any `remember:` lines appended while this P4 call was
-  // in flight are preserved verbatim at the end of `## Recent`.
-  const ParsedMemory cur = ParseMemoryFile(ReadFile(mem_path).value_or(""));
+  // in flight are preserved verbatim at the end of `## Recent`; abort without
+  // overwriting if the read fails.
+  const std::optional<std::string> disk = ReadFile(mem_path);
+  if (!disk) {
+    it->second.condense_retry_after = now + base::Seconds(60);
+    Log(base::StrCat({bot, ": could not re-read memory.md after condensing"}));
+    std::move(done).Run();
+    return;
+  }
+  const ParsedMemory cur = ParseMemoryFile(*disk);
   const size_t drop = std::min(condensed_recent_count, cur.recent.size());
   std::vector<std::string> kept_recent(
       cur.recent.begin() + static_cast<ptrdiff_t>(drop), cur.recent.end());

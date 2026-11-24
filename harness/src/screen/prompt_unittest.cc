@@ -259,6 +259,23 @@ TEST(PromptTest, KnowledgeOutcomeAndInspectPromptBreakdown) {
   EXPECT_NE(dump.find("== prompt inspection (Testpriest, 2 options)"),
             std::string::npos);
   EXPECT_NE(dump.find("knowledge="), std::string::npos);
+
+  // Dynamic relationships follow static boss notes and world guide so
+  // changing nearby players does not bust the KV-cache prefix.
+  PromptInput with_rels = input;
+  with_rels.relationships = "## Hele\n- 2026-11-24 reliable tank";
+  const LlmRequest rel_req = BuildPlanRequest(with_rels, screen);
+  const size_t rel_notes_pos = rel_req.user.find("Your boss notes:\n");
+  const size_t rel_know_pos = rel_req.user.find("World guide:\n");
+  const size_t rel_pos = rel_req.user.find("People you know:\n## Hele");
+  const size_t rel_scr_pos = rel_req.user.find("Your screen now:\n");
+  ASSERT_NE(rel_notes_pos, std::string::npos);
+  ASSERT_NE(rel_know_pos, std::string::npos);
+  ASSERT_NE(rel_pos, std::string::npos);
+  ASSERT_NE(rel_scr_pos, std::string::npos);
+  EXPECT_LT(rel_notes_pos, rel_know_pos);
+  EXPECT_LT(rel_know_pos, rel_pos);
+  EXPECT_LT(rel_pos, rel_scr_pos);
 }
 
 }  // namespace

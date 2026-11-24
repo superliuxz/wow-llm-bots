@@ -1041,8 +1041,20 @@ std::vector<std::string> QuestLines(const std::vector<pb::Objective>& tracker) {
       about.push_back(base::StringPrintf("%.0f s left", q.part.timer_s));
     }
     if (!q.part.party_members.empty()) {
-      about.push_back(base::StrCat(
-          {"also on quest: ", base::JoinString(q.part.party_members, ", ")}));
+      static constexpr size_t kMaxShownQuestMembers = 5;
+      if (q.part.party_members.size() <= kMaxShownQuestMembers) {
+        about.push_back(base::StrCat(
+            {"also on quest: ", base::JoinString(q.part.party_members, ", ")}));
+      } else {
+        const std::vector<std::string> shown(
+            q.part.party_members.begin(),
+            q.part.party_members.begin() + kMaxShownQuestMembers);
+        about.push_back(base::StrCat(
+            {"also on quest: ", base::JoinString(shown, ", "), " +",
+             base::NumberToString(q.part.party_members.size() -
+                                  kMaxShownQuestMembers),
+             " more"}));
+      }
     }
     std::string line =
         base::StrCat({"  ", q.part.quest.empty() ? "?" : q.part.quest});

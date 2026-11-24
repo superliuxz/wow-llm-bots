@@ -78,19 +78,40 @@ class _DroppableProxy:
             pass
 
     def _run(self):
-        try:
-            self.listen_path.unlink()
-        except OSError:
-            pass
-        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        srv.bind(str(self.listen_path))
-        srv.listen(1)
-        srv.settimeout(0.1)
+        srv = None
+
+        def open_listener():
+            try:
+                self.listen_path.unlink()
+            except OSError:
+                pass
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.bind(str(self.listen_path))
+            s.listen(1)
+            s.settimeout(0.1)
+            return s
+
+        def close_listener(s):
+            if s is not None:
+                try:
+                    s.close()
+                except OSError:
+                    pass
+            try:
+                self.listen_path.unlink()
+            except OSError:
+                pass
+
         try:
             while not self._stop.is_set():
                 if not self._allow_accept.is_set():
+                    if srv is not None:
+                        close_listener(srv)
+                        srv = None
                     time.sleep(0.05)
                     continue
+                if srv is None:
+                    srv = open_listener()
                 try:
                     cli, _ = srv.accept()
                 except socket.timeout:
@@ -106,8 +127,11 @@ class _DroppableProxy:
                     self.generations += 1
                     gen = self.generations
                 self._pump(cli, up, gen)
+                if not self._allow_accept.is_set() and srv is not None:
+                    close_listener(srv)
+                    srv = None
         finally:
-            srv.close()
+            close_listener(srv)
 
     def _pump(self, cli, up, gen):
         c2u = FrameReader()

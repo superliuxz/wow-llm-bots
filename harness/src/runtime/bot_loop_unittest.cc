@@ -2586,9 +2586,11 @@ TEST(BotLoopTest, MemoryCondensingKeepsRecentHeadingAndBacksOffOnError) {
   pb::Snapshot s1 = MakeLiveSnap("Loada", 1, t0, /*in_combat=*/false);
   AddKeep(&s1);
   loop.OnSnapshot(s1, t0);
-  // StartBotCall schedules both gameplay call and P4 condense call.
-  ASSERT_EQ(brain.size(), 2u);
+  // Gameplay call runs first; P4 condense queues on the same bot key and starts
+  // after OnReply completes.
+  ASSERT_EQ(brain.size(), 1u);
   brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  ASSERT_EQ(brain.size(), 1u);
   // Fail the condense call: memory.md stays untouched and backs off.
   brain.FinishError("connection refused");
   EXPECT_EQ(ReadFile(mem_path), "- 2026-11-20 Note A\n- 2026-11-21 Note B\n");
@@ -2608,14 +2610,102 @@ TEST(BotLoopTest, MemoryCondensingKeepsRecentHeadingAndBacksOffOnError) {
   pb::Snapshot s3 = MakeLiveSnap("Loada", 3, t0 + base::Seconds(80), false);
   AddKeep(&s3);
   loop.OnSnapshot(s3, t0 + base::Seconds(80));
-  ASSERT_EQ(brain.size(), 2u);
+  ASSERT_EQ(brain.size(), 1u);
   brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  ASSERT_EQ(brain.size(), 1u);
   brain.FinishReply("- Summarised A and B");
   const std::optional<std::string> after = ReadFile(mem_path);
   ASSERT_TRUE(after.has_value());
   EXPECT_NE(
       after->find("## Earlier summary\n- Summarised A and B\n\n## Recent\n"),
       std::string::npos);
+  std::filesystem::remove_all(tmp_dir);
+}
+
+// R6b08106-M1/M2/L1: active players with 8 long notes still show newest notes
+// alongside other present players, boss/NPC chat lines are never recorded as
+// players, and P0 combat wakes preempt an in-flight P4 memory condense call.
+TEST(BotLoopTest, RelationshipsSlicingIgnoresNpcChatAndCombatPreemptsCondense) {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "wlb_bot_loop_rel_budget_test";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir / "bots" / "Loada");
+  const std::string rel_path =
+      (tmp_dir / "bots" / "Loada" / "relationships.md").string();
+  const std::string mem_path =
+      (tmp_dir / "bots" / "Loada" / "memory.md").string();
+  {
+    std::ofstream rf(rel_path);
+    rf << "## Hele\n";
+    for (int i = 1; i <= 8; ++i) {
+      rf << "- 2026-11-24 Note #" << i << " " << std::string(85, 'x') << "\n";
+    }
+    rf << "\n## Telda\n- 2026-11-24 dependable healer\n";
+    std::ofstream mf(mem_path);
+    mf << "- 2026-11-20 Old note 1\n- 2026-11-21 Old note 2\n";
+  }
+
+  CannedBrain brain;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.bots_dir = (tmp_dir / "bots").string();
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  cfg.memory_condense_threshold = 2;
+  cfg.memory_keep_recent = 1;
+  BotLoop loop(cfg, brain.Fn(), [](const pb::Command&) {});
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Loada", 1, t0, /*in_combat=*/false);
+  AddKeep(&s1);
+  pb::Party& p = s1.ext.party.emplace();
+  p.leader = "Hele";
+  for (const char* name : {"Hele", "Telda"}) {
+    pb::Unit m;
+    m.name = name;
+    p.members.push_back(m);
+  }
+  // Boss yell / monster say must NOT classify Loken as a player.
+  pb::Event boss_chat;
+  boss_chat.chat.emplace().channel = pb::MONSTER_YELL;
+  boss_chat.chat->from = "Loken";
+  boss_chat.chat->text = "You shall fall!";
+  s1.events.push_back(boss_chat);
+
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  const std::string user = brain.front_request().user;
+  // Both Hele (newest note #8) and Telda fit under `People you know:`.
+  EXPECT_NE(user.find("People you know:\n## Hele\n"), std::string::npos);
+  EXPECT_NE(user.find("Note #8 "), std::string::npos);
+  EXPECT_NE(user.find("## Telda\n- 2026-11-24 dependable healer"),
+            std::string::npos);
+
+  // Mentioning Loken in `remember:` must NOT add `## Loken` to
+  // relationships.md. Finishing the out-of-combat reply starts P4 condense on
+  // Loada's own slot.
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+      "remember: Loken hit hard with Lightning Nova");
+  const std::optional<std::string> rels = ReadFile(rel_path);
+  ASSERT_TRUE(rels.has_value());
+  EXPECT_EQ(rels->find("## Loken"), std::string::npos);
+
+  // P4 condense call is now in flight; entering combat (P0) preempts/cancels
+  // it on Loada's scheduler key.
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_FALSE(brain.front_request().stream);
+  pb::Snapshot combat = MakeLiveSnap("Loada", 2, t0 + base::Seconds(2),
+                                     /*in_combat=*/true);
+  AddKeep(&combat);
+  loop.OnSnapshot(combat, t0 + base::Seconds(2));
+  EXPECT_TRUE(brain.front_cancelled());
+  brain.FinishCancelled();
+  // The queued P0 combat gameplay call starts immediately after cancel.
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_TRUE(brain.front_request().stream);
+  // Finishing a combat reply must NOT re-schedule memory condensing.
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  EXPECT_EQ(brain.size(), 0u);
   std::filesystem::remove_all(tmp_dir);
 }
 

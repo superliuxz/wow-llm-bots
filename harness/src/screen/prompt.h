@@ -47,6 +47,9 @@ struct PromptInput {
   std::string knowledge;
   // Boss / encounter notes known to this bot (may be empty).
   std::string notes;
+  // Dynamic per-player relationship notes for players currently present or
+  // talking to this bot (placed after static notes/guide to preserve KV cache).
+  std::string relationships;
   // Standing orders currently in force (formatted strings; may be empty).
   std::vector<std::string> active_orders;
   // Known mechanic, spell, item, and unit names that `order:` lines may use

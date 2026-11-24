@@ -490,6 +490,22 @@ TEST(ScreenRendererTest, QuestTrackerShowsPartyQuestOverlap) {
                 "    - Kobold Worker slain 1/8"),
             std::string::npos)
       << screen.text;
+
+  // Raid-sized overlap caps displayed names to keep the screen compact.
+  pb::Snapshot raid_snap = BoarAround("0x1");
+  pb::Objective& ro = raid_snap.ext.quest_tracker.emplace_back();
+  ro.title = "Boss slain";
+  ro.progress.emplace().have = 0;
+  ro.progress->need = 1;
+  pb::QuestPart& rq = ro.quest.emplace();
+  rq.quest_id = 99;
+  rq.quest = "Raid Weekly";
+  rq.party_members = {"A", "B", "C", "D", "E", "F", "G"};
+  const Screen raid_screen = RenderScreen(raid_snap);
+  EXPECT_NE(raid_screen.text.find(
+                "  Raid Weekly (also on quest: A, B, C, D, E +2 more)\n"),
+            std::string::npos)
+      << raid_screen.text;
 }
 
 TEST(ScreenRendererTest, BagSpaceShowsOnlyWhenLowOrFull) {

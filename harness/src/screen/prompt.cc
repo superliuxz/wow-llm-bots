@@ -355,6 +355,19 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
     }
   }
 
+  std::string relationships_block;
+  if (!input.relationships.empty()) {
+    constexpr std::string_view kHeader = "\n\nPeople you know:\n";
+    if (remaining > kHeader.size() + 32) {
+      constexpr size_t kMaxRelationshipsPromptBytes = 900;
+      const size_t budget =
+          std::min(kMaxRelationshipsPromptBytes, remaining - kHeader.size());
+      relationships_block =
+          base::StrCat({kHeader, CapText(input.relationships, budget)});
+      remaining -= relationships_block.size();
+    }
+  }
+
   std::string remembered_block;
   if (!input.remembered.empty()) {
     constexpr std::string_view kRemHeader =
@@ -376,8 +389,9 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
     }
   }
 
-  request.user = base::StrCat({static_prefix, notes_block, knowledge_block,
-                               dynamic_prefix, remembered_block, screen_block});
+  request.user =
+      base::StrCat({static_prefix, notes_block, knowledge_block, dynamic_prefix,
+                    relationships_block, remembered_block, screen_block});
   if (request.user.size() > max_user_bytes) {
     request.user = CapUserPreservingAlso(request.user, max_user_bytes);
   }
@@ -402,6 +416,7 @@ PromptBreakdown BreakdownOf(const LlmRequest& req) {
   b.slot_budget_tokens = kSlotMaxTokens;
 
   const size_t rem_pos = req.user.find("\n\nYou remember (not on screen now):");
+  const size_t rel_pos = req.user.find("\n\nPeople you know:\n");
   const size_t scr_pos = req.user.find("\n\nYour screen now:\n");
   const size_t notes_pos = req.user.find("\n\nYour boss notes:\n");
   const size_t know_pos = req.user.find("\n\nWorld guide:\n");
@@ -418,7 +433,7 @@ PromptBreakdown BreakdownOf(const LlmRequest& req) {
   const size_t dyn_pos = find_dyn_start();
   auto next_boundary = [&](size_t start) -> size_t {
     size_t end = req.user.size();
-    for (size_t p : {notes_pos, know_pos, dyn_pos, rem_pos, scr_pos}) {
+    for (size_t p : {notes_pos, know_pos, dyn_pos, rel_pos, rem_pos, scr_pos}) {
       if (p != std::string::npos && p > start) {
         end = std::min(end, p);
       }

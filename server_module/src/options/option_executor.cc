@@ -735,6 +735,12 @@ bool ParseUint32(std::string_view s, uint32_t* out) {
   return true;
 }
 
+bool IsBoundNearHere(const Player* bot) {
+  return bot->m_homebindMapId == bot->GetMapId() &&
+         bot->m_homebindAreaId == bot->GetAreaId() &&
+         bot->GetExactDist2d(bot->m_homebindX, bot->m_homebindY) <= 50.0f;
+}
+
 }  // namespace
 
 void CollectNpcActions(Player* bot,
@@ -967,11 +973,7 @@ void CollectNpcActions(Player* bot,
         npc->HasNpcFlag(UNIT_NPC_FLAG_INNKEEPER) && bot->GetMap() &&
         !bot->GetMap()->Instanceable() &&
         bot->GetNPCIfCanInteractWith(npc->GetGUID(), UNIT_NPC_FLAG_INNKEEPER)) {
-      const bool already_bound_here =
-          bot->m_homebindMapId == bot->GetMapId() &&
-          bot->m_homebindAreaId == bot->GetAreaId() &&
-          bot->GetExactDist2d(bot->m_homebindX, bot->m_homebindY) <= 50.0f;
-      if (!already_bound_here) {
+      if (!IsBoundNearHere(bot)) {
         const std::string area = AreaName(bot->GetAreaId());
         std::string label = "Bind hearthstone at " + npc_name;
         if (!area.empty()) {
@@ -3027,6 +3029,9 @@ ExecuteResult ExecuteOption(Player* bot,
       p << npc->GetGUID();
       p.rpos(0);
       session->HandleBinderActivateOpcode(p);
+      if (!IsBoundNearHere(bot)) {
+        return {"could not bind hearthstone at " + npc->GetName()};
+      }
       return {.used = true, .info = "bound hearthstone at " + npc->GetName()};
     }
     return {"unknown NPC action"};

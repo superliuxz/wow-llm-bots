@@ -984,6 +984,9 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
             notes = spec["notes_md"]
             self.assertTrue(notes.startswith("# "), f"{key}: missing instance header")
             self.assertIn(f"## {spec['boss_name']}", notes, f"{key}: missing boss heading")
+        # Headline 5-boss benchmark orders stay intact after content/notes unification.
+        self.assertIn("in Toxic Waste -> out of it", bench_bosses.BOSSES["ick"]["notes_md"])
+        self.assertIn("Phoenix within 10 -> away Phoenix 13", bench_bosses.BOSSES["kaelthas"]["notes_md"])
         # Unknown heading raises ValueError instead of silently returning empty notes.
         with self.assertRaises(ValueError):
             bench_bosses._load_boss_notes("PoS", "Nonexistent Boss")
