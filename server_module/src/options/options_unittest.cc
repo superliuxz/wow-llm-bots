@@ -876,5 +876,29 @@ TEST(OptionsTest, GroupAndUpkeepActionsAreExposedToTheBrain) {
   EXPECT_EQ(targets[4].guid, "lfg:accept:42");
 }
 
+TEST(OptionsTest, BindHearthstoneReplacesGenericTalkAtInnkeeper) {
+  pb::Snapshot snap;
+  snap.base.self.in_combat = false;
+  pb::Unit& inn = snap.base.nearby.units.emplace_back();
+  inn.guid = "0x0000000000006928";
+  inn.name = "Innkeeper Grosk";
+  inn.kind = pb::Unit::NPC;
+  inn.reaction = pb::Unit::FRIENDLY;
+
+  OptionFacts facts;
+  facts.npcs.push_back({inn.guid, kNpcFlagInnkeeper});
+  facts.npc_actions.push_back(
+      {"npc_bind:0x0000000000006928", inn.guid,
+       "Bind hearthstone at Innkeeper Grosk (Razor Hill)"});
+
+  const std::vector<OptionTarget> targets = AddOptions(&snap, facts);
+  EXPECT_EQ(Texts(snap), (std::vector<std::string>{
+                             "Bind hearthstone at Innkeeper Grosk (Razor Hill)",
+                             "Keep doing what I'm doing"}));
+  ASSERT_EQ(targets.size(), 2u);
+  EXPECT_EQ(targets[0].kind, OptionTarget::Kind::kUse);
+  EXPECT_EQ(targets[0].guid, "npc_bind:0x0000000000006928");
+}
+
 }  // namespace
 }  // namespace llm_brain

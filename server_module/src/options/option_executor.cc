@@ -960,6 +960,26 @@ void CollectNpcActions(Player* bot,
         }
       }
     }
+
+    // 6. Innkeeper: bind hearthstone (through the server's bind spell, not
+    //    SetHomebind directly; docs/specs/options.md).
+    if (out->size() < kMaxNpcActions &&
+        npc->HasNpcFlag(UNIT_NPC_FLAG_INNKEEPER) && bot->GetMap() &&
+        !bot->GetMap()->Instanceable() &&
+        bot->GetNPCIfCanInteractWith(npc->GetGUID(), UNIT_NPC_FLAG_INNKEEPER)) {
+      const bool already_bound_here =
+          bot->m_homebindMapId == bot->GetMapId() &&
+          bot->m_homebindAreaId == bot->GetAreaId() &&
+          bot->GetExactDist2d(bot->m_homebindX, bot->m_homebindY) <= 50.0f;
+      if (!already_bound_here) {
+        const std::string area = AreaName(bot->GetAreaId());
+        std::string label = "Bind hearthstone at " + npc_name;
+        if (!area.empty()) {
+          label += " (" + area + ")";
+        }
+        out->push_back({"npc_bind:" + u.guid, u.guid, std::move(label)});
+      }
+    }
   }
 }
 
@@ -2987,6 +3007,27 @@ ExecuteResult ExecuteOption(Player* bot,
         return {"could not start flight"};
       }
       return {.used = true, .info = "took flight path"};
+    }
+    if (parts[0] == "npc_bind") {
+      WorldSession* session = bot->GetSession();
+      if (!session) {
+        return {"no session"};
+      }
+      if (!npc->HasNpcFlag(UNIT_NPC_FLAG_INNKEEPER)) {
+        return {"that NPC is not an innkeeper"};
+      }
+      if (!bot->GetMap() || bot->GetMap()->Instanceable()) {
+        return {"cannot bind hearthstone inside an instance"};
+      }
+      if (!bot->GetNPCIfCanInteractWith(npc->GetGUID(),
+                                        UNIT_NPC_FLAG_INNKEEPER)) {
+        return {"cannot bind hearthstone with " + npc->GetName()};
+      }
+      WorldPacket p(CMSG_BINDER_ACTIVATE, 8);
+      p << npc->GetGUID();
+      p.rpos(0);
+      session->HandleBinderActivateOpcode(p);
+      return {.used = true, .info = "bound hearthstone at " + npc->GetName()};
     }
     return {"unknown NPC action"};
   }

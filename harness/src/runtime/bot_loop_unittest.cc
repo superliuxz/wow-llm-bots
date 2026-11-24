@@ -2406,5 +2406,218 @@ TEST(BotLoopTest, OnlyOneBotAnswersAHumansPartyLine) {
   EXPECT_EQ(party_says_by("Telda"), 1);  // `say:` answers in party.
 }
 
+// F5: once `memory.md` reaches `memory_condense_threshold`, older notes are
+// summarised in a P4 call while preserving notes appended in flight, and both
+// summary + recent notes appear in later prompts.
+TEST(BotLoopTest, MemoryCondensingSummarisesOldNotesAndPreservesNewAppends) {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "wlb_bot_loop_condense_test";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir / "bots" / "Loada");
+  {
+    std::ofstream f(tmp_dir / "bots" / "Loada" / "memory.md");
+    f << "- 2026-11-20 Met Hele outside RFC\n"
+      << "- 2026-11-21 Cleared Deadmines with Hele\n"
+      << "- 2026-11-22 Learned Prayer of Healing\n";
+  }
+
+  CannedBrain brain;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.bots_dir = (tmp_dir / "bots").string();
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  cfg.memory_condense_threshold = 4;
+  cfg.memory_keep_recent = 1;
+  BotLoop loop(cfg, brain.Fn(), [](const pb::Command&) {});
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Loada", 1, t0, /*in_combat=*/false);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  // 4th note crosses threshold -> queues P4 condense call right after OnReply.
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+      "remember: Tanked RFC with Telda healing");
+  ASSERT_EQ(brain.size(), 1u);
+  const LlmRequest condense_req = brain.front_request();
+  EXPECT_FALSE(condense_req.stream);
+  EXPECT_NE(condense_req.user.find("Met Hele outside RFC"), std::string::npos);
+  EXPECT_NE(condense_req.user.find("Learned Prayer of Healing"),
+            std::string::npos);
+  // The newest kept line (index 3) is NOT in the batch being condensed.
+  EXPECT_EQ(condense_req.user.find("Tanked RFC with Telda healing"),
+            std::string::npos);
+
+  // Simulate another `remember:` written while the P4 condense call is in
+  // flight: it must be preserved verbatim after condensing finishes.
+  ASSERT_TRUE(AppendToFile((tmp_dir / "bots" / "Loada" / "memory.md").string(),
+                           "- 2026-11-24 Appended while condensing\n"));
+
+  brain.FinishReply(
+      "- Met Hele and cleared Deadmines together\n"
+      "- Learned Prayer of Healing");
+  EXPECT_EQ(brain.size(), 0u);
+
+  const std::optional<std::string> condensed =
+      ReadFile((tmp_dir / "bots" / "Loada" / "memory.md").string());
+  ASSERT_TRUE(condensed.has_value());
+  EXPECT_NE(condensed->find("## Earlier summary\n"), std::string::npos);
+  EXPECT_NE(condensed->find("- Met Hele and cleared Deadmines together"),
+            std::string::npos);
+  EXPECT_NE(condensed->find("## Recent\n"), std::string::npos);
+  EXPECT_NE(condensed->find("Tanked RFC with Telda healing"),
+            std::string::npos);
+  EXPECT_NE(condensed->find("Appended while condensing"), std::string::npos);
+  EXPECT_EQ(condensed->find("Met Hele outside RFC"), std::string::npos);
+
+  // Next gameplay prompt shows both the earlier summary and recent notes.
+  pb::Snapshot s2 = MakeLiveSnap("Loada", 2, t0 + base::Seconds(70), false);
+  AddKeep(&s2);
+  loop.OnSnapshot(s2, t0 + base::Seconds(70));
+  loop.OnTick(t0 + base::Seconds(70));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find(
+                "Met Hele and cleared Deadmines together"),
+            std::string::npos);
+  EXPECT_NE(brain.front_request().user.find("Appended while condensing"),
+            std::string::npos);
+  std::filesystem::remove_all(tmp_dir);
+}
+
+// F5: `remember:` notes naming a known player update `relationships.md`, and
+// only relevant players' sections are injected under `People you know:`.
+TEST(BotLoopTest, RelationshipsFileRecordsPlayersAndInjectsOnlyRelevant) {
+  const std::filesystem::path tmp_dir = std::filesystem::temp_directory_path() /
+                                        "wlb_bot_loop_relationships_test";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir / "bots" / "Loada");
+  // Pre-seed an unrelated player to verify selective prompt injection.
+  {
+    std::ofstream f(tmp_dir / "bots" / "Loada" / "relationships.md");
+    f << "## Strangers\n- 2026-11-20 met in Orgrimmar\n";
+  }
+
+  CannedBrain brain;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.bots_dir = (tmp_dir / "bots").string();
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(), [](const pb::Command&) {});
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Loada", 1, t0, /*in_combat=*/false);
+  AddKeep(&s1);
+  pb::Party& p = s1.ext.party.emplace();
+  p.leader = "Hele";
+  pb::Unit hele;
+  hele.name = "Hele";
+  p.members.push_back(hele);
+  pb::Unit al;
+  al.name = "Al";
+  p.members.push_back(al);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  // Strangers is not present -> must not be injected.
+  EXPECT_EQ(brain.front_request().user.find("People you know:"),
+            std::string::npos);
+
+  // Mention Hele (whole word) and "always" (must NOT match player "Al").
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+      "remember: Hele always marks skull before pulling");
+
+  const std::optional<std::string> rels =
+      ReadFile((tmp_dir / "bots" / "Loada" / "relationships.md").string());
+  ASSERT_TRUE(rels.has_value());
+  EXPECT_NE(rels->find("## Hele\n"), std::string::npos);
+  EXPECT_NE(rels->find("Hele always marks skull before pulling"),
+            std::string::npos);
+  EXPECT_NE(rels->find("## Strangers\n"), std::string::npos);
+  EXPECT_EQ(rels->find("## Al\n"), std::string::npos);
+
+  // Next wake with Hele still in party injects Hele, not Strangers.
+  pb::Snapshot s2 = s1;
+  s2.seq = 2;
+  loop.OnSnapshot(s2, t0 + base::Seconds(70));
+  loop.OnTick(t0 + base::Seconds(70));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("People you know:\n## Hele\n"),
+            std::string::npos);
+  EXPECT_EQ(brain.front_request().user.find("Strangers"), std::string::npos);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+
+  // Once solo (Hele gone), Hele is no longer injected.
+  pb::Snapshot s3 = MakeLiveSnap("Loada", 3, t0 + base::Seconds(140), false);
+  AddKeep(&s3);
+  loop.OnSnapshot(s3, t0 + base::Seconds(140));
+  loop.OnTick(t0 + base::Seconds(140));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_EQ(brain.front_request().user.find("People you know:"),
+            std::string::npos);
+  std::filesystem::remove_all(tmp_dir);
+}
+
+// F5: condensing with `memory_keep_recent == 0` keeps a `## Recent` heading so
+// subsequent `remember:` appends land in recent notes (not under summary), and
+// a failed condense call leaves `memory.md` untouched and backs off.
+TEST(BotLoopTest, MemoryCondensingKeepsRecentHeadingAndBacksOffOnError) {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "wlb_bot_loop_condense_err_test";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir / "bots" / "Loada");
+  const std::string mem_path =
+      (tmp_dir / "bots" / "Loada" / "memory.md").string();
+  {
+    std::ofstream f(mem_path);
+    f << "- 2026-11-20 Note A\n- 2026-11-21 Note B\n";
+  }
+
+  CannedBrain brain;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.bots_dir = (tmp_dir / "bots").string();
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  cfg.memory_condense_threshold = 2;
+  cfg.memory_keep_recent = 0;
+  BotLoop loop(cfg, brain.Fn(), [](const pb::Command&) {});
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Loada", 1, t0, /*in_combat=*/false);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  // StartBotCall schedules both gameplay call and P4 condense call.
+  ASSERT_EQ(brain.size(), 2u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  // Fail the condense call: memory.md stays untouched and backs off.
+  brain.FinishError("connection refused");
+  EXPECT_EQ(ReadFile(mem_path), "- 2026-11-20 Note A\n- 2026-11-21 Note B\n");
+
+  // Immediate wake while backed off does not re-queue condensing.
+  pb::Snapshot s2 = MakeLiveSnap("Loada", 2, t0 + base::Seconds(5), false);
+  AddKeep(&s2);
+  loop.OnSnapshot(s2, t0 + base::Seconds(5));
+  loop.OnTick(t0 + base::Seconds(70));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  EXPECT_EQ(brain.size(), 0u);
+
+  // Disconnect resets backoff; next wake condenses with keep_recent == 0 and
+  // writes an empty `## Recent` section so later appends land under it.
+  loop.OnConnectionChanged(false);
+  pb::Snapshot s3 = MakeLiveSnap("Loada", 3, t0 + base::Seconds(80), false);
+  AddKeep(&s3);
+  loop.OnSnapshot(s3, t0 + base::Seconds(80));
+  ASSERT_EQ(brain.size(), 2u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  brain.FinishReply("- Summarised A and B");
+  const std::optional<std::string> after = ReadFile(mem_path);
+  ASSERT_TRUE(after.has_value());
+  EXPECT_NE(
+      after->find("## Earlier summary\n- Summarised A and B\n\n## Recent\n"),
+      std::string::npos);
+  std::filesystem::remove_all(tmp_dir);
+}
+
 }  // namespace
 }  // namespace harness

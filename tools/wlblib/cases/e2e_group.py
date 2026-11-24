@@ -56,6 +56,8 @@ def run(stack):
     role_seen = None
     share_prompt = False
     share_gone = False
+    loada_overlap = False
+    telda_overlap = False
     wait_done = False
     follow_offered = False
     errors = []
@@ -69,7 +71,9 @@ def run(stack):
 
     deadline = time.time() + 45.0
     try:
-        while time.time() < deadline and not (share_gone and follow_offered):
+        while time.time() < deadline and not (
+            share_gone and follow_offered and loada_overlap and telda_overlap
+        ):
             try:
                 chunk = sock.recv(1 << 20)
             except socket.timeout:
@@ -97,10 +101,15 @@ def run(stack):
                 bot, seq = snap.get("bot", ""), snap.get("seq", 0)
                 options = snap.get("options", [])
                 members = snap.get("ext", {}).get("party", {}).get("members", [])
+                tracker = snap.get("ext", {}).get("quest_tracker", [])
                 if bot == "Telda":
                     for m in members:
                         if m.get("name") == "Loada":
                             role_seen = m.get("group", {}).get("role") or role_seen
+                    for obj in tracker:
+                        q = obj.get("quest") or {}
+                        if q.get("quest_id") == QUEST_ID and "Loada" in (q.get("party_members") or []):
+                            telda_overlap = True
                     if share_prompt and "accept" not in sent:
                         idx = _find(options, "Accept shared quest")
                         if idx:
@@ -114,6 +123,10 @@ def run(stack):
                         follow_offered = _find(
                             options, "Follow the party leader again") is not None
                 if bot == "Loada":
+                    for obj in tracker:
+                        q = obj.get("quest") or {}
+                        if q.get("quest_id") == QUEST_ID and "Telda" in (q.get("party_members") or []):
+                            loada_overlap = True
                     idx = _find(options, "Share quest")
                     if "share" not in sent and idx and members:
                         choose("Loada", idx, seq, "share")
@@ -129,8 +142,10 @@ def run(stack):
     expect(share_prompt, "Telda got no QUEST_SHARE prompt event after Loada shared")
     expect("accept" in sent, "Telda was never offered `Accept shared quest`")
     expect(share_gone, "Loada's share option stayed after Telda took the quest")
+    expect(loada_overlap and telda_overlap,
+           f"quest overlap missing after share (loada={loada_overlap}, telda={telda_overlap})")
     expect(wait_done and follow_offered,
            "`Wait here` did not turn into `Follow the party leader again`")
     expect(not errors, f"group choices produced errors: {errors}")
-    return (f"Loada's role shown as {role_seen}; quest shared and accepted; "
+    return (f"Loada's role shown as {role_seen}; quest shared, accepted, and overlap shown; "
             "wait/follow toggled")

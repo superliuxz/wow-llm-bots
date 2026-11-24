@@ -978,6 +978,16 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
         finally:
             sys.argv = orig_argv
 
+    def test_boss_notes_loaded_from_content_notes(self) -> None:
+        self.assertGreaterEqual(len(bench_bosses.BOSSES), 12)
+        for key, spec in bench_bosses.BOSSES.items():
+            notes = spec["notes_md"]
+            self.assertTrue(notes.startswith("# "), f"{key}: missing instance header")
+            self.assertIn(f"## {spec['boss_name']}", notes, f"{key}: missing boss heading")
+        # Unknown heading raises ValueError instead of silently returning empty notes.
+        with self.assertRaises(ValueError):
+            bench_bosses._load_boss_notes("PoS", "Nonexistent Boss")
+
 
 if __name__ == "__main__":
     unittest.main()

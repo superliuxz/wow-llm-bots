@@ -22,6 +22,10 @@ bool MakeDirectories(const std::string& dir);
 // appenders' lines don't interleave.
 bool AppendToFile(const std::string& path, std::string_view text);
 
+// Replaces `path` atomically via a temporary file in the same directory and
+// rename(2) (docs/design.md: "All file writes atomic (temp + rename)").
+bool WriteFileAtomic(const std::string& path, std::string_view text);
+
 }  // namespace harness
 
 #endif  // HARNESS_RUNTIME_FILE_UTIL_H_

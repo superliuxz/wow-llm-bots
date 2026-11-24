@@ -1541,6 +1541,8 @@ struct QuestPart {
   std::string tag;
   uint32_t level = 0;
   std::optional<Spell> item_button;
+  // Party members who also have this quest in their quest log (F3).
+  std::vector<std::string> party_members;
 
   bool operator==(const QuestPart&) const = default;
 };

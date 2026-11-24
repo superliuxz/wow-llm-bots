@@ -61,6 +61,15 @@ TEST_F(FileUtilTest, FailsQuietlyWhenItCant) {
   // A file is in the way of the directory.
   EXPECT_FALSE(MakeDirectories(dir_ + "/file.txt/sub"));
   EXPECT_FALSE(AppendToFile(dir_ + "/missing-dir/log.txt", "x"));
+  EXPECT_FALSE(WriteFileAtomic(dir_ + "/missing-dir/file.txt", "x"));
+}
+
+TEST_F(FileUtilTest, WriteFileAtomicCreatesAndReplaces) {
+  const std::string path = dir_ + "/file.txt";
+  ASSERT_TRUE(WriteFileAtomic(path, "first\n"));
+  EXPECT_EQ(ReadFile(path), "first\n");
+  ASSERT_TRUE(WriteFileAtomic(path, "second\n"));
+  EXPECT_EQ(ReadFile(path), "second\n");
 }
 
 }  // namespace

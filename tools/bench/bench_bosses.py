@@ -76,92 +76,29 @@ COMP_10 = COMP_5 + [
 
 PREFIXES = ["Load", "Ptwo", "Pthr", "Pfou"]
 
-ICK_NOTES = """# Pit of Saron — Ick & Krick
-- **Pursuit**: Ick fixates on one player for 12s and chases them (taunt-immune).
-  - Standing order: `Pursuit on me -> kite Ick`
-- **Poison Nova**: 5s cast dealing heavy nature damage within 15 yd.
-  - Standing order: `Poison Nova cast -> out of it`
-- **Toxic Waste**: green poison pools on the ground.
-  - Standing order: `in Toxic Waste -> out of it`
-"""
 
-DEVOURER_NOTES = """# The Forge of Souls — Devourer of Souls
-- **Mirrored Soul**: reflects 45% of damage dealt to Devourer onto the linked party member; stop attacking while Mirrored Soul is active on anyone.
-  - Standing order: `Mirrored Soul on anyone -> stop attacking`
-- **Well of Souls**: purple void zone on the ground; move out immediately.
-  - Standing order: `in Well of Souls -> out of it`
-- **Wailing Souls**: sweeping frontal beam; avoid standing directly in front of the boss.
-- **Phantom Blast**: heavy shadow nuke on tank; interrupt when possible.
-"""
+def _load_boss_notes(notes_dir: str, boss_heading: str) -> str:
+    """Reads `# <Instance>` + the `## <boss_heading>` section from `content/notes/<notes_dir>/notes.md`."""
+    path = ROOT / "content" / "notes" / notes_dir / "notes.md"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    header = next((line for line in lines if line.startswith("# ")), "")
+    target = f"## {boss_heading}".lower()
+    section: list[str] = []
+    collecting = False
+    for line in lines:
+        if line.startswith("## "):
+            if collecting:
+                break
+            if line.strip().lower() == target:
+                collecting = True
+        if collecting:
+            section.append(line)
+    if not section:
+        raise ValueError(f"boss section {boss_heading!r} not found in {path}")
+    parts = [header, ""] if header else []
+    parts.extend(section)
+    return "\n".join(parts).rstrip() + "\n"
 
-LOKEN_NOTES = """# Halls of Lightning — Loken
-- **Lightning Nova**: 4s cast dealing heavy AoE damage within 20 yd; step just outside the radius and return after it lands.
-  - Standing order: `Lightning Nova cast -> out of it, then back`
-"""
-
-EREGOS_NOTES = """# The Oculus — Ley-Guardian Eregos (3D Drake Vehicle Fight)
-- Before pulling, use your Drake Essence in your bags (`Ruby Essence` Tank, `Emerald Essence` Healer, `Amber Essence` DPS) to mount your drake!
-- **Planar Shift**: Eregos becomes immune and spawns **Planar Anomaly** orbs that explode for heavy arcane damage; fly away from orbs while he is shifted.
-  - Standing order: `Planar Anomaly appears -> away Planar Anomaly 25`
-- **Enraged Assault**: heavy damage phase; tank drake uses Martyr / Evasive Maneuvers and healer drake focuses tank.
-"""
-
-MURMUR_NOTES = """# Shadow Labyrinth — Murmur
-- **Sonic Boom**: 5s cast dealing massive damage within 34 yards; run 38 yd away and return after it lands.
-  - Standing order: `Sonic Boom cast -> away Murmur 38, then back`
-- **Murmur's Touch**: bomb debuff on one player; move away from allies so you don't knock them up.
-  - Standing order: `Murmur's Touch on me -> away`
-"""
-
-IKISS_NOTES = """# Sethekk Halls — Talon King Ikiss
-- **Arcane Explosion**: after Blinking, casts a 5s lethal AoE; step just outside the radius (do not return to the old pre-Blink spot).
-  - Standing order: `Arcane Explosion cast -> out of it`
-- **Polymorph**: sheeps a party member; dispellers dispel it promptly.
-"""
-
-KAELTHAS_NOTES = """# Magisters' Terrace — Kael'thas Sunstrider
-- **Flame Strike**: fiery ground AoE pillar that explodes after 5s; move out immediately whenever you are inside it!
-  - Standing order: `in Flame Strike -> out of it`
-- **Phoenix / Phoenix Egg**: switch immediately to destroy the **Phoenix Egg** before it hatches, and stay clear of burning Phoenix aura.
-  - Standing order: `Phoenix Egg appears -> target nearest Phoenix Egg`
-  - Standing order: `Phoenix within 10 -> away Phoenix 13`
-- **Fireball**: interruptible nuke on the tank.
-- **Gravity Lapse**: floats everyone in the air and spawns Arcane Spheres; stay clear of spheres.
-  - Standing order: `Arcane Sphere within 9 -> away Arcane Sphere 13`
-"""
-
-THERADRAS_NOTES = """# Maraudon — Princess Theradras
-- **Dust Field**: heavy physical AoE + knockback around the boss; ranged/healers stay far back and melee run out during Dust Field.
-  - Standing order: `Dust Field cast -> away Princess Theradras 20`
-- **Repulsive Gaze**: fears the current target and drops threat; tank re-taunts promptly and healers keep the off-target alive.
-- **Boulder**: throws a boulder at a ranged player, stunning them; stay spread.
-"""
-
-RATTLEGORE_NOTES = """# Scholomance — Rattlegore
-- **Knock Away / War Stomp**: heavy melee knockback and stun; ranged/healers stay at max range and tank repositions promptly.
-- **Strike**: heavy physical burst on the tank; keep tank topped.
-"""
-
-ANASTARI_NOTES = """# Stratholme — Baroness Anastari
-- **Possess**: mind-controls a party member! Do not kill them — damage/CC them until Possess breaks (~50% HP), then resume the boss.
-- **Banshee Curse**: reduces hit chance; dispel curses when available.
-- **Silence**: interrupts casting nearby; ranged/healers stay spread.
-"""
-
-PATCHWERK_NOTES = """# Naxxramas (10-man) — Patchwerk
-- Pure tank-and-spank throughput check.
-- **Hateful Strike**: hits the highest-HP melee target after the main tank; off-tank stays in melee range and healers keep both tanks topped.
-- Maximize DPS and HPS; no movement mechanics.
-"""
-
-MARROWGAR_NOTES = """# Icecrown Citadel (10-man) — Lord Marrowgar
-- **Coldflame**: moving lines of blue fire; move out immediately whenever you are inside one!
-  - Standing order: `in Coldflame -> out of it`
-- **Bone Spike Graveyard**: impales players on Bone Spikes; switch targets immediately to destroy Bone Spikes!
-  - Standing order: `Bone Spike appears -> target nearest Bone Spike`
-- **Bone Storm**: boss spins and charges around the room dealing heavy melee AoE; move away from Marrowgar during Bone Storm.
-  - Standing order: `Bone Storm cast -> away Lord Marrowgar 15`
-"""
 
 BOSSES = {
     "ick": dict(
@@ -174,7 +111,7 @@ BOSSES = {
         spawn_xyz=(846.0, 132.0, 510.5),
         strip_strat="wotlk-pos",
         attune_quests=[24499, 24511],
-        notes_md=ICK_NOTES,
+        notes_md=_load_boss_notes("PoS", "Ick"),
         max_s=210.0,
     ),
     "devourer": dict(
@@ -187,7 +124,7 @@ BOSSES = {
         stage_xyz=(4922.86, 2175.63, 639.0),
         spawn_xyz=(5645.0, 2507.4, 708.9),
         strip_strat="wotlk-fos",
-        notes_md=DEVOURER_NOTES,
+        notes_md=_load_boss_notes("FoS", "Devourer of Souls"),
         max_s=210.0,
     ),
     "loken": dict(
@@ -200,7 +137,7 @@ BOSSES = {
         stage_xyz=(1331.47, 259.62, 53.4),
         spawn_xyz=(1170.0, 33.83, 60.81),
         strip_strat="wotlk-hol",
-        notes_md=LOKEN_NOTES,
+        notes_md=_load_boss_notes("HoL", "Loken"),
         max_s=210.0,
     ),
     "eregos": dict(
@@ -213,7 +150,7 @@ BOSSES = {
         spawn_xyz=(1077.0, 1055.0, 655.5),
         strip_strat="wotlk-occ",
         role_items={0: 37860, 1: 37815, 2: 37859, 3: 37859, 4: 37859},
-        notes_md=EREGOS_NOTES,
+        notes_md=_load_boss_notes("OC", "Ley-Guardian Eregos"),
         max_s=210.0,
     ),
     "murmur": dict(
@@ -225,7 +162,7 @@ BOSSES = {
         stage_xyz=(0.49, -0.22, -1.0),
         spawn_xyz=(-157.9, -490.0, 16.2),
         strip_strat="",
-        notes_md=MURMUR_NOTES,
+        notes_md=_load_boss_notes("SL", "Murmur"),
         max_s=210.0,
     ),
     "ikiss": dict(
@@ -237,7 +174,7 @@ BOSSES = {
         stage_xyz=(-4.68, -0.09, 0.2),
         spawn_xyz=(44.7, 268.0, 25.5),
         strip_strat="tbc-seth",
-        notes_md=IKISS_NOTES,
+        notes_md=_load_boss_notes("Seth", "Talon King Ikiss"),
         max_s=210.0,
     ),
     "kaelthas": dict(
@@ -250,7 +187,7 @@ BOSSES = {
         spawn_xyz=(148.5, 180.0, -16.2),
         strip_strat="tbc-mgt",
         attune_quests=[11492],
-        notes_md=KAELTHAS_NOTES,
+        notes_md=_load_boss_notes("MgT", "Kael'thas Sunstrider"),
         max_s=210.0,
     ),
     "theradras": dict(
@@ -261,7 +198,7 @@ BOSSES = {
         map_id=349,
         stage_xyz=(27.9, 42.0, -124.5),
         spawn_xyz=(27.9, 68.0, -124.5),
-        notes_md=THERADRAS_NOTES,
+        notes_md=_load_boss_notes("Mara", "Princess Theradras"),
         max_s=210.0,
     ),
     "rattlegore": dict(
@@ -272,7 +209,7 @@ BOSSES = {
         map_id=289,
         stage_xyz=(137.1, 138.0, 96.0),
         spawn_xyz=(137.1, 158.0, 96.0),
-        notes_md=RATTLEGORE_NOTES,
+        notes_md=_load_boss_notes("Scholo", "Rattlegore"),
         max_s=210.0,
     ),
     "anastari": dict(
@@ -283,7 +220,7 @@ BOSSES = {
         map_id=329,
         stage_xyz=(3855.3, -3675.0, 148.2),
         spawn_xyz=(3855.3, -3700.0, 148.2),
-        notes_md=ANASTARI_NOTES,
+        notes_md=_load_boss_notes("Strat", "Baroness Anastari"),
         max_s=210.0,
     ),
     "patchwerk": dict(
@@ -296,7 +233,7 @@ BOSSES = {
         spawn_xyz=(3234.0, -3230.3, 294.1),
         raid=True,
         clear_trash_yd=300.0,
-        notes_md=PATCHWERK_NOTES,
+        notes_md=_load_boss_notes("Naxx", "Patchwerk"),
         max_s=360.0,
     ),
     "marrowgar": dict(
@@ -309,7 +246,7 @@ BOSSES = {
         spawn_xyz=(-385.0, 2211.14, 42.08),
         strip_strat="icc",
         raid=True,
-        notes_md=MARROWGAR_NOTES,
+        notes_md=_load_boss_notes("ICC", "Lord Marrowgar"),
         max_s=360.0,
     ),
 }

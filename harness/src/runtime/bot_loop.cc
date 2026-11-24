@@ -111,14 +111,298 @@ std::vector<GroupChatLine> GroupChatLines(
   return out;
 }
 
-// The last `n` non-empty lines of `text`, joined with newlines.
-std::string LastLines(std::string_view text, size_t n) {
-  std::vector<std::string_view> lines = base::SplitStringPiece(
-      text, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
-  if (lines.size() > n) {
-    lines.erase(lines.begin(), lines.end() - static_cast<ptrdiff_t>(n));
+// Structured `memory.md` (F5): optional `## Earlier summary` section followed
+// by `## Recent` (or flat lines for legacy/hand-edited files).
+constexpr std::string_view kEarlierSummaryHeading = "## Earlier summary";
+constexpr std::string_view kRecentMemoryHeading = "## Recent";
+constexpr size_t kMaxSummaryBullets = 6;
+constexpr size_t kMaxSummaryLineBytes = 140;
+constexpr size_t kMaxRelationshipNotesPerPlayer = 8;
+constexpr size_t kMaxRelationshipsPromptBytes = 800;
+
+struct ParsedMemory {
+  std::vector<std::string> summary;
+  std::vector<std::string> recent;
+};
+
+ParsedMemory ParseMemoryFile(std::string_view text) {
+  ParsedMemory out;
+  bool in_summary = false;
+  for (std::string_view raw : base::SplitStringPiece(
+           text, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
+    if (raw == kEarlierSummaryHeading) {
+      in_summary = true;
+      continue;
+    }
+    if (raw.starts_with("## ")) {
+      in_summary = false;
+      continue;
+    }
+    if (in_summary) {
+      out.summary.emplace_back(raw);
+    } else {
+      out.recent.emplace_back(raw);
+    }
+  }
+  return out;
+}
+
+std::string FormatMemoryForPrompt(std::string_view text, size_t max_recent) {
+  ParsedMemory mem = ParseMemoryFile(text);
+  std::vector<std::string> lines;
+  const size_t summary_cap =
+      std::min(mem.summary.size(), kMaxSummaryBullets + 2);
+  lines.reserve(summary_cap + std::min(mem.recent.size(), max_recent));
+  for (size_t i = 0; i < summary_cap; ++i) {
+    lines.push_back(std::move(mem.summary[i]));
+  }
+  const size_t start =
+      mem.recent.size() > max_recent ? mem.recent.size() - max_recent : 0;
+  for (size_t i = start; i < mem.recent.size(); ++i) {
+    lines.push_back(std::move(mem.recent[i]));
   }
   return base::JoinString(lines, "\n");
+}
+
+std::string FormatMemoryFile(const std::vector<std::string>& summary,
+                             const std::vector<std::string>& recent) {
+  std::string out;
+  if (!summary.empty()) {
+    base::StrAppend(
+        &out, {kEarlierSummaryHeading, "\n", base::JoinString(summary, "\n"),
+               "\n\n", kRecentMemoryHeading, "\n"});
+    if (!recent.empty()) {
+      base::StrAppend(&out, {base::JoinString(recent, "\n"), "\n"});
+    }
+    return out;
+  }
+  if (!recent.empty()) {
+    base::StrAppend(&out, {kRecentMemoryHeading, "\n",
+                           base::JoinString(recent, "\n"), "\n"});
+  }
+  return out;
+}
+
+std::string_view TruncateUtf8(std::string_view text, size_t max_bytes) {
+  if (text.size() <= max_bytes) {
+    return text;
+  }
+  size_t end = max_bytes;
+  while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xC0) == 0x80) {
+    --end;
+  }
+  return text.substr(0, end);
+}
+
+std::vector<std::string> ParseCondensedBullets(std::string_view text) {
+  std::vector<std::string> bullets;
+  for (std::string_view raw : base::SplitStringPiece(
+           text, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
+    if (raw.starts_with("#") || raw.starts_with("```")) {
+      continue;
+    }
+    if (raw.starts_with("- ") || raw.starts_with("* ")) {
+      raw.remove_prefix(2);
+    } else if (raw.starts_with("• ")) {
+      raw.remove_prefix(4);
+    }
+    raw = base::TrimWhitespaceASCII(raw, base::TRIM_ALL);
+    if (raw.empty()) {
+      continue;
+    }
+    std::string line(TruncateUtf8(raw, kMaxSummaryLineBytes));
+    for (char& c : line) {
+      if (c == '\r' || c == '\n') {
+        c = ' ';
+      }
+    }
+    bullets.push_back(base::StrCat({"- ", line}));
+    if (bullets.size() >= kMaxSummaryBullets) {
+      break;
+    }
+  }
+  return bullets;
+}
+
+bool IsAsciiWordChar(char c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+         (c >= '0' && c <= '9') || c == '_';
+}
+
+bool IsAsciiLetter(char c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
+bool ContainsWholeWordIgnoringCase(std::string_view haystack,
+                                   std::string_view word) {
+  if (word.size() < 2 || haystack.size() < word.size()) {
+    return false;
+  }
+  for (size_t i = 0; i + word.size() <= haystack.size(); ++i) {
+    const bool left_ok = i == 0 || !IsAsciiWordChar(haystack[i - 1]);
+    const bool right_ok = i + word.size() == haystack.size() ||
+                          !IsAsciiWordChar(haystack[i + word.size()]);
+    if (left_ok && right_ok &&
+        base::EqualsCaseInsensitiveASCII(haystack.substr(i, word.size()),
+                                         word)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+struct RelationshipSection {
+  std::string player;
+  std::vector<std::string> notes;
+};
+
+struct ParsedRelationships {
+  std::vector<std::string> preamble;
+  std::vector<RelationshipSection> sections;
+};
+
+ParsedRelationships ParseRelationshipsFile(std::string_view text) {
+  ParsedRelationships out;
+  RelationshipSection* current = nullptr;
+  for (std::string_view raw : base::SplitStringPiece(
+           text, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
+    if (raw.starts_with("# ")) {
+      continue;  // Ignore top-level document title headings.
+    }
+    if (raw.starts_with("## ")) {
+      const std::string_view name =
+          base::TrimWhitespaceASCII(raw.substr(3), base::TRIM_ALL);
+      if (name.empty()) {
+        current = nullptr;
+        continue;
+      }
+      current = nullptr;
+      for (RelationshipSection& sec : out.sections) {
+        if (base::EqualsCaseInsensitiveASCII(sec.player, name)) {
+          current = &sec;
+          break;
+        }
+      }
+      if (!current) {
+        current = &out.sections.emplace_back(
+            RelationshipSection{std::string(name), {}});
+      }
+      continue;
+    }
+    if (current) {
+      current->notes.emplace_back(raw);
+    } else {
+      out.preamble.emplace_back(raw);
+    }
+  }
+  return out;
+}
+
+std::string FormatRelationshipsFile(const ParsedRelationships& rels) {
+  std::string out;
+  if (!rels.preamble.empty()) {
+    base::StrAppend(&out, {base::JoinString(rels.preamble, "\n"), "\n"});
+  }
+  for (const RelationshipSection& sec : rels.sections) {
+    if (sec.player.empty() || sec.notes.empty()) {
+      continue;
+    }
+    if (!out.empty()) {
+      out.push_back('\n');
+    }
+    base::StrAppend(&out, {"## ", sec.player, "\n",
+                           base::JoinString(sec.notes, "\n"), "\n"});
+  }
+  return out;
+}
+
+void AddUniquePlayerName(std::vector<std::string>* out,
+                         std::string_view bot,
+                         std::string_view name) {
+  name = base::TrimWhitespaceASCII(name, base::TRIM_ALL);
+  if (name.size() < 2 || name.size() > 12 ||
+      base::EqualsCaseInsensitiveASCII(name, bot)) {
+    return;
+  }
+  for (char c : name) {
+    if (!IsAsciiLetter(c)) {
+      return;
+    }
+  }
+  for (const std::string& existing : *out) {
+    if (base::EqualsCaseInsensitiveASCII(existing, name)) {
+      return;
+    }
+  }
+  out->emplace_back(name);
+}
+
+void ExtractChatSendersFromLines(const std::vector<std::string>& lines,
+                                 std::string_view bot,
+                                 std::vector<std::string>* out) {
+  for (const std::string& line : lines) {
+    for (std::string_view seg : base::SplitStringPieceUsingSubstr(
+             line, "; ", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
+      const size_t from_pos = seg.find(" from ");
+      if (from_pos == std::string_view::npos) {
+        continue;
+      }
+      const std::string_view after = seg.substr(from_pos + 6);
+      const size_t colon = after.find(':');
+      if (colon == std::string_view::npos) {
+        continue;
+      }
+      AddUniquePlayerName(out, bot, after.substr(0, colon));
+    }
+  }
+}
+
+std::string SelectRelationshipsForPrompt(
+    std::string_view rel_text,
+    const std::vector<std::string>& present_players) {
+  if (rel_text.empty()) {
+    return "";
+  }
+  const ParsedRelationships rels = ParseRelationshipsFile(rel_text);
+  std::string out;
+  auto append_capped = [&](std::string_view chunk) {
+    if (chunk.empty()) {
+      return false;
+    }
+    const size_t sep = out.empty() ? 0 : 1;
+    if (out.size() + sep + chunk.size() > kMaxRelationshipsPromptBytes) {
+      return false;
+    }
+    if (sep) {
+      out.push_back('\n');
+    }
+    out.append(chunk);
+    return true;
+  };
+  for (const std::string& line : rels.preamble) {
+    if (!append_capped(line)) {
+      return out;
+    }
+  }
+  for (const RelationshipSection& sec : rels.sections) {
+    if (sec.notes.empty()) {
+      continue;
+    }
+    const bool relevant =
+        std::any_of(present_players.begin(), present_players.end(),
+                    [&](const std::string& p) {
+                      return base::EqualsCaseInsensitiveASCII(p, sec.player);
+                    });
+    if (!relevant) {
+      continue;
+    }
+    const std::string block = base::StrCat(
+        {"## ", sec.player, "\n", base::JoinString(sec.notes, "\n")});
+    if (!append_capped(block)) {
+      break;
+    }
+  }
+  return out;
 }
 
 bool ContainsNameIgnoringCase(std::string_view text, std::string_view name) {
@@ -328,6 +612,9 @@ void BotLoop::OnConnectionChanged(bool connected) {
       state.pending_reasons.clear();
       state.recent_events.clear();
       state.whisperers.clear();
+      state.condensing_memory = false;
+      ++state.memory_condense_epoch;
+      state.condense_retry_after = base::TimeTicks();
       ResetLooking(&state);
       ++state.call_epoch;
     }
@@ -836,16 +1123,54 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
   input.rules = config_.rules;
   input.bot_name = bot;
   input.identity = state.identity;
-  // What the brain chose to remember (`remember:`), newest last (RH-M4).
+  // What the brain chose to remember (`remember:`), newest last (RH-M4, F5).
   if (!config_.bots_dir.empty()) {
-    const std::string memory =
-        LastLines(ReadFileIfChanged(
-                      base::StrCat({config_.bots_dir, "/", bot, "/memory.md"})),
-                  kMemoryLinesInPrompt);
+    const std::string memory = FormatMemoryForPrompt(
+        ReadFileIfChanged(
+            base::StrCat({config_.bots_dir, "/", bot, "/memory.md"})),
+        kMemoryLinesInPrompt);
     if (!memory.empty()) {
       base::StrAppend(&input.identity,
                       {input.identity.empty() ? "" : "\n\n",
                        "What you remember from earlier:\n", memory});
+    }
+    const std::string rel_raw = ReadFileIfChanged(
+        base::StrCat({config_.bots_dir, "/", bot, "/relationships.md"}));
+    if (!rel_raw.empty()) {
+      std::vector<std::string> present;
+      if (state.latest_snapshot->ext.party) {
+        for (const pb::Unit& m : state.latest_snapshot->ext.party->members) {
+          AddUniquePlayerName(&present, bot, m.name);
+        }
+      }
+      if (state.latest_snapshot->ext.raid) {
+        for (const pb::Unit& m : state.latest_snapshot->ext.raid->members) {
+          AddUniquePlayerName(&present, bot, m.name);
+        }
+      }
+      for (const pb::Unit& u : state.latest_snapshot->base.nearby.units) {
+        if (u.kind == pb::Unit::PLAYER) {
+          AddUniquePlayerName(&present, bot, u.name);
+        }
+      }
+      for (const BotState::Whisperer& w : state.whisperers) {
+        if (asked_at_for_whisperers - w.at <= kWhispererMemory) {
+          AddUniquePlayerName(&present, bot, w.name);
+        }
+      }
+      ExtractChatSendersFromLines(asked_reasons, bot, &present);
+      ExtractChatSendersFromLines(
+          std::vector<std::string>(state.recent_events.begin(),
+                                   state.recent_events.end()),
+          bot, &present);
+      const std::string rels = SelectRelationshipsForPrompt(rel_raw, present);
+      if (!rels.empty()) {
+        base::StrAppend(&input.identity, {input.identity.empty() ? "" : "\n\n",
+                                          "People you know:\n", rels});
+      }
+    }
+    if (!state.latest_snapshot->base.self.in_combat) {
+      MaybeScheduleMemoryCondense(bot, &state, asked_at_for_whisperers);
     }
   }
   input.current_goal = state.current_goal;
@@ -1157,11 +1482,17 @@ void BotLoop::OnReply(const std::string& bot,
         }
         if (!plan->remember.empty() && !config_.bots_dir.empty()) {
           const std::string dir = base::StrCat({config_.bots_dir, "/", bot});
+          const std::string mem_path = dir + "/memory.md";
+          const std::string date = DateUtc(base::Time::Now());
           if (!MakeDirectories(dir) ||
-              !AppendToFile(dir + "/memory.md",
-                            base::StrCat({"- ", DateUtc(base::Time::Now()), " ",
-                                          plan->remember, "\n"}))) {
+              !AppendToFile(mem_path, base::StrCat({"- ", date, " ",
+                                                    plan->remember, "\n"}))) {
             Log(base::StrCat({bot, ": could not write memory.md"}));
+          } else {
+            file_cache_.erase(mem_path);
+            RecordRelationshipNotes(bot, state, asked_reasons, asked_events,
+                                    date, plan->remember);
+            MaybeScheduleMemoryCondense(bot, &state, now);
           }
         }
         for (const std::string& name : plan->close) {
@@ -1548,6 +1879,229 @@ void BotLoop::SendSay(const std::string& bot,
 void BotLoop::Log(const std::string& line) {
   if (log_message_) {
     log_message_.Run(line);
+  }
+}
+
+void BotLoop::MaybeScheduleMemoryCondense(const std::string& bot,
+                                          BotState* state,
+                                          base::TimeTicks now) {
+  if (config_.bots_dir.empty() || config_.memory_condense_threshold == 0 ||
+      state->condensing_memory || now < state->condense_retry_after) {
+    return;
+  }
+  const std::string mem_path =
+      base::StrCat({config_.bots_dir, "/", bot, "/memory.md"});
+  const ParsedMemory mem = ParseMemoryFile(ReadFileIfChanged(mem_path));
+  if (mem.recent.size() < config_.memory_condense_threshold) {
+    return;
+  }
+  state->condensing_memory = true;
+  base::WeakPtr<BotLoop> self = weak_factory_.GetWeakPtr();
+  scheduler_.SubmitCancelable(bot + "#memory", Urgency::kP4Reflect,
+                              [self, bot](int slot, base::OnceClosure done) {
+                                if (!self) {
+                                  std::move(done).Run();
+                                  return base::OnceClosure{};
+                                }
+                                return self->StartMemoryCondense(
+                                    bot, slot, std::move(done));
+                              });
+}
+
+base::OnceClosure BotLoop::StartMemoryCondense(const std::string& bot,
+                                               int slot,
+                                               base::OnceClosure done) {
+  auto it = bots_.find(bot);
+  if (it == bots_.end() || !it->second.condensing_memory ||
+      config_.bots_dir.empty() || config_.memory_condense_threshold == 0) {
+    if (it != bots_.end()) {
+      it->second.condensing_memory = false;
+    }
+    std::move(done).Run();
+    return base::OnceClosure{};
+  }
+  const std::string mem_path =
+      base::StrCat({config_.bots_dir, "/", bot, "/memory.md"});
+  const ParsedMemory mem = ParseMemoryFile(ReadFile(mem_path).value_or(""));
+  const size_t keep_recent = std::min(config_.memory_keep_recent,
+                                      config_.memory_condense_threshold - 1);
+  if (mem.recent.size() < config_.memory_condense_threshold ||
+      mem.recent.size() <= keep_recent) {
+    it->second.condensing_memory = false;
+    std::move(done).Run();
+    return base::OnceClosure{};
+  }
+  const size_t condense_count = mem.recent.size() - keep_recent;
+  const uint64_t condense_epoch = ++it->second.memory_condense_epoch;
+  std::string user =
+      base::StrCat({"Player: ", bot, "\n\nCondense these older memories:"});
+  if (!mem.summary.empty()) {
+    base::StrAppend(&user, {"\n\nPrevious summary:\n",
+                            base::JoinString(mem.summary, "\n")});
+  }
+  base::StrAppend(&user, {"\n\nOlder notes to merge in:"});
+  for (size_t i = 0; i < condense_count; ++i) {
+    base::StrAppend(&user, {"\n", mem.recent[i]});
+  }
+
+  LlmRequest req;
+  req.system =
+      "You condense a World of Warcraft player's older session notes into a "
+      "short bullet list of lasting memories. Keep player names, dungeons, "
+      "bosses, lessons learned, and unfinished goals. Write at most 6 short "
+      "lines, each starting with '- ', plain facts only, no preamble.";
+  req.user = std::move(user);
+  req.slot = slot;
+  req.max_tokens = 200;
+  req.temperature = 0.2f;
+  req.stream = false;
+
+  base::WeakPtr<BotLoop> self = weak_factory_.GetWeakPtr();
+  base::scoped_refptr<LlmCancelHandle> handle =
+      ask_.Run(std::move(req),
+               [self, bot, condense_epoch, condense_count,
+                done = std::move(done)](LlmResult result) mutable {
+                 if (!self) {
+                   std::move(done).Run();
+                   return;
+                 }
+                 self->OnMemoryCondensed(bot, condense_epoch, condense_count,
+                                         std::move(done), std::move(result));
+               },
+               {});
+  if (!handle) {
+    return base::OnceClosure{};
+  }
+  return [handle = std::move(handle)]() { handle->Cancel(); };
+}
+
+void BotLoop::OnMemoryCondensed(const std::string& bot,
+                                uint64_t condense_epoch,
+                                size_t condensed_recent_count,
+                                base::OnceClosure done,
+                                LlmResult result) {
+  auto it = bots_.find(bot);
+  if (it == bots_.end() || it->second.memory_condense_epoch != condense_epoch) {
+    std::move(done).Run();
+    return;
+  }
+  it->second.condensing_memory = false;
+  if (result.cancelled || config_.bots_dir.empty()) {
+    std::move(done).Run();
+    return;
+  }
+  const base::TimeTicks now = base::TimeTicks::Now();
+  if (!result.reply) {
+    it->second.condense_retry_after = now + base::Seconds(60);
+    Log(base::StrCat({bot, ": memory condensing failed: ", result.error}));
+    std::move(done).Run();
+    return;
+  }
+  const std::vector<std::string> summary =
+      ParseCondensedBullets(result.reply->text);
+  if (summary.empty()) {
+    it->second.condense_retry_after = now + base::Seconds(60);
+    Log(base::StrCat({bot, ": memory condensing returned no summary bullets"}));
+    std::move(done).Run();
+    return;
+  }
+  const std::string mem_path =
+      base::StrCat({config_.bots_dir, "/", bot, "/memory.md"});
+  // Re-read from disk so any `remember:` lines appended while this P4 call was
+  // in flight are preserved verbatim at the end of `## Recent`.
+  const ParsedMemory cur = ParseMemoryFile(ReadFile(mem_path).value_or(""));
+  const size_t drop = std::min(condensed_recent_count, cur.recent.size());
+  std::vector<std::string> kept_recent(
+      cur.recent.begin() + static_cast<ptrdiff_t>(drop), cur.recent.end());
+  if (!WriteFileAtomic(mem_path, FormatMemoryFile(summary, kept_recent))) {
+    it->second.condense_retry_after = now + base::Seconds(60);
+    Log(base::StrCat({bot, ": could not write condensed memory.md"}));
+  } else {
+    file_cache_.erase(mem_path);
+    Log(base::StringPrintf(
+        "%s: condensed %zu memory note(s) into %zu summary bullet(s)",
+        bot.c_str(), drop, summary.size()));
+  }
+  std::move(done).Run();
+}
+
+void BotLoop::RecordRelationshipNotes(
+    const std::string& bot,
+    const BotState& state,
+    const std::vector<std::string>& asked_reasons,
+    const std::vector<std::string>& asked_events,
+    std::string_view date,
+    std::string_view memo) {
+  if (config_.bots_dir.empty() || memo.empty()) {
+    return;
+  }
+  const std::string dir = base::StrCat({config_.bots_dir, "/", bot});
+  const std::string rel_path = dir + "/relationships.md";
+  ParsedRelationships rels =
+      ParseRelationshipsFile(ReadFile(rel_path).value_or(""));
+
+  std::vector<std::string> candidates;
+  if (state.latest_snapshot) {
+    if (state.latest_snapshot->ext.party) {
+      for (const pb::Unit& m : state.latest_snapshot->ext.party->members) {
+        AddUniquePlayerName(&candidates, bot, m.name);
+      }
+    }
+    if (state.latest_snapshot->ext.raid) {
+      for (const pb::Unit& m : state.latest_snapshot->ext.raid->members) {
+        AddUniquePlayerName(&candidates, bot, m.name);
+      }
+    }
+    for (const pb::Unit& u : state.latest_snapshot->base.nearby.units) {
+      if (u.kind == pb::Unit::PLAYER) {
+        AddUniquePlayerName(&candidates, bot, u.name);
+      }
+    }
+  }
+  for (const BotState::Whisperer& w : state.whisperers) {
+    AddUniquePlayerName(&candidates, bot, w.name);
+  }
+  ExtractChatSendersFromLines(asked_reasons, bot, &candidates);
+  ExtractChatSendersFromLines(asked_events, bot, &candidates);
+  for (const RelationshipSection& sec : rels.sections) {
+    AddUniquePlayerName(&candidates, bot, sec.player);
+  }
+
+  bool changed = false;
+  const std::string entry = base::StrCat({"- ", date, " ", memo});
+  for (const std::string& player : candidates) {
+    if (!ContainsWholeWordIgnoringCase(memo, player)) {
+      continue;
+    }
+    RelationshipSection* sec = nullptr;
+    for (RelationshipSection& existing : rels.sections) {
+      if (base::EqualsCaseInsensitiveASCII(existing.player, player)) {
+        sec = &existing;
+        break;
+      }
+    }
+    if (!sec) {
+      sec = &rels.sections.emplace_back(RelationshipSection{player, {}});
+    }
+    if (!sec->notes.empty() && sec->notes.back() == entry) {
+      continue;
+    }
+    sec->notes.push_back(entry);
+    if (sec->notes.size() > kMaxRelationshipNotesPerPlayer) {
+      sec->notes.erase(sec->notes.begin(),
+                       sec->notes.end() - static_cast<ptrdiff_t>(
+                                              kMaxRelationshipNotesPerPlayer));
+    }
+    changed = true;
+  }
+  if (!changed) {
+    return;
+  }
+  if (!MakeDirectories(dir) ||
+      !WriteFileAtomic(rel_path, FormatRelationshipsFile(rels))) {
+    Log(base::StrCat({bot, ": could not write relationships.md"}));
+  } else {
+    file_cache_.erase(rel_path);
   }
 }
 

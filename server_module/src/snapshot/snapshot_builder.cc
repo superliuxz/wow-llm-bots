@@ -566,6 +566,22 @@ void FillQuestTracker(Player* bot,
     if (status_it != status_map.end() && status_it->second.Timer > 0) {
       part.timer_s = static_cast<float>(status_it->second.Timer) / 1000.0f;
     }
+    if (Group* group = bot->GetGroup()) {
+      for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+        if (slot.guid == bot->GetGUID() || slot.name.empty()) {
+          continue;
+        }
+        Player* member = ObjectAccessor::FindConnectedPlayer(slot.guid);
+        if (!member || !member->IsInWorld()) {
+          continue;
+        }
+        const QuestStatus ms = member->GetQuestStatus(quest_id);
+        if (ms == QUEST_STATUS_INCOMPLETE || ms == QUEST_STATUS_COMPLETE) {
+          part.party_members.push_back(slot.name);
+        }
+      }
+      std::sort(part.party_members.begin(), part.party_members.end());
+    }
     const std::optional<pb::Place> turnin_where =
         part.complete ? FindQuestPoiPlace(bot, q, -1, pois) : std::nullopt;
 

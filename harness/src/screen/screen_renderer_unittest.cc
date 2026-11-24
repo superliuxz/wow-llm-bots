@@ -469,6 +469,29 @@ TEST(ScreenRendererTest, PartyListsMembersAndQuestTrackerGroupsObjectives) {
       << screen.text;
 }
 
+TEST(ScreenRendererTest, QuestTrackerShowsPartyQuestOverlap) {
+  pb::Snapshot snap = BoarAround("0x1");
+  for (const char* title : {"Kobold Vermin slain", "Kobold Worker slain"}) {
+    pb::Objective& o = snap.ext.quest_tracker.emplace_back();
+    o.title = title;
+    o.progress.emplace().have = 1;
+    o.progress->need = 8;
+    pb::QuestPart& q = o.quest.emplace();
+    q.quest_id = 7;
+    q.quest = "Kobold Camp Cleanup";
+    q.level = 2;
+    q.party_members = {"Gatda", "Hele"};
+  }
+  const Screen screen = RenderScreen(snap);
+  EXPECT_NE(screen.text.find(
+                "quests:\n"
+                "  Kobold Camp Cleanup (level 2, also on quest: Gatda, Hele)\n"
+                "    - Kobold Vermin slain 1/8\n"
+                "    - Kobold Worker slain 1/8"),
+            std::string::npos)
+      << screen.text;
+}
+
 TEST(ScreenRendererTest, BagSpaceShowsOnlyWhenLowOrFull) {
   pb::Snapshot snap = BoarAround("0x1");
   snap.base.self.indicators.bag_free_slots = 12;

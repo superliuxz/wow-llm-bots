@@ -70,6 +70,12 @@ struct BotLoopConfig {
   // then it is forgotten (the prompt has to fit the slot: review of f40b0b6,
   // finding 7).
   base::TimeDelta remember_panels_for = base::Minutes(5);
+  // Condense older `remember:` notes in `memory.md` into an `## Earlier
+  // summary` section via a P4 LLM call once recent notes reach this threshold
+  // (0 disables condensing), keeping the newest `memory_keep_recent` raw lines
+  // verbatim (F5).
+  size_t memory_condense_threshold = 24;
+  size_t memory_keep_recent = 10;
 };
 
 // Starts one brain call. Returns a handle whose Cancel() aborts it early (the
@@ -196,6 +202,11 @@ class BotLoop {
     // The quest tracker's state; nullopt before the first snapshot (no
     // glance for what was there already).
     std::optional<std::string> last_quest_state;
+    // Memory condensing (F5): at most one P4 reflection call per bot at a
+    // time, guarded by `memory_condense_epoch`, with backoff after errors.
+    bool condensing_memory = false;
+    uint64_t memory_condense_epoch = 0;
+    base::TimeTicks condense_retry_after;
   };
 
   struct CompiledOrdersKey {
@@ -241,6 +252,23 @@ class BotLoop {
   base::OnceClosure StartBotCall(const std::string& bot,
                                  int slot,
                                  base::OnceClosure done);
+  void MaybeScheduleMemoryCondense(const std::string& bot,
+                                   BotState* state,
+                                   base::TimeTicks now);
+  base::OnceClosure StartMemoryCondense(const std::string& bot,
+                                        int slot,
+                                        base::OnceClosure done);
+  void OnMemoryCondensed(const std::string& bot,
+                         uint64_t condense_epoch,
+                         size_t condensed_recent_count,
+                         base::OnceClosure done,
+                         LlmResult result);
+  void RecordRelationshipNotes(const std::string& bot,
+                               const BotState& state,
+                               const std::vector<std::string>& asked_reasons,
+                               const std::vector<std::string>& asked_events,
+                               std::string_view date,
+                               std::string_view memo);
   void OnFirstLine(const std::string& bot,
                    uint64_t epoch,
                    uint32_t ask_seq,

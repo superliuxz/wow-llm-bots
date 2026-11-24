@@ -1005,6 +1005,14 @@ std::vector<std::string> QuestLines(const std::vector<pb::Objective>& tracker) {
     if (quest->part.timer_s == 0) {
       quest->part.timer_s = part.timer_s;
     }
+    for (const std::string& member : part.party_members) {
+      if (!member.empty() &&
+          std::find(quest->part.party_members.begin(),
+                    quest->part.party_members.end(),
+                    member) == quest->part.party_members.end()) {
+        quest->part.party_members.push_back(member);
+      }
+    }
     if (!(o.title.empty() || o.title == part.quest) || o.progress) {
       quest->objectives.push_back(&o);
     }
@@ -1031,6 +1039,10 @@ std::vector<std::string> QuestLines(const std::vector<pb::Objective>& tracker) {
     }
     if (Finite(q.part.timer_s) > 0) {
       about.push_back(base::StringPrintf("%.0f s left", q.part.timer_s));
+    }
+    if (!q.part.party_members.empty()) {
+      about.push_back(base::StrCat(
+          {"also on quest: ", base::JoinString(q.part.party_members, ", ")}));
     }
     std::string line =
         base::StrCat({"  ", q.part.quest.empty() ? "?" : q.part.quest});
