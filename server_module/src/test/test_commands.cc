@@ -81,6 +81,11 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"questcomplete", HandleQuestComplete, SEC_ADMINISTRATOR, Console::Yes},
         {"questadd", HandleQuestAdd, SEC_ADMINISTRATOR, Console::Yes},
         {"ungroup", HandleUngroup, SEC_ADMINISTRATOR, Console::Yes},
+        {"readycheck", HandleReadyCheck, SEC_ADMINISTRATOR, Console::Yes},
+        {"istank", HandleIsTank, SEC_ADMINISTRATOR, Console::Yes},
+        {"maketank", HandleMakeTank, SEC_ADMINISTRATOR, Console::Yes},
+        {"lootroll", HandleLootRoll, SEC_ADMINISTRATOR, Console::Yes},
+        {"rezoffer", HandleRezOffer, SEC_ADMINISTRATOR, Console::Yes},
         {"item", HandleItem, SEC_ADMINISTRATOR, Console::Yes},
         {"checkstrat", HandleCheckStrat, SEC_ADMINISTRATOR, Console::Yes},
         {"setstrat", HandleSetStrat, SEC_ADMINISTRATOR, Console::Yes},
@@ -445,6 +450,117 @@ class LlmBrainTestCommandScript : public CommandScript {
     player->SetRewardedQuest(quest_id);
     handler->PSendSysMessage("llmtest: marked quest {} rewarded on {}{}",
                              quest_id, player->GetName(), FormatToken(token));
+    return true;
+  }
+
+  // `llmtest istank <name>`: whether playerbots runs the bot as a tank (a
+  // tank-type strategy such as `tank assist` is on: PlayerbotAI::IsTank).
+  static bool HandleIsTank(ChatHandler* handler, std::string player_name) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player || !GET_PLAYERBOT_AI(player)) {
+      handler->SendErrorMessage("llmtest: istank: not a bot");
+      return false;
+    }
+    handler->PSendSysMessage("llmtest: istank {}={}", player->GetName(),
+                             PlayerbotAI::IsTank(player) ? 1 : 0);
+    return true;
+  }
+
+  // `llmtest lootroll <leader> <item id>`: kills the nearest living Mottled
+  // Boar (entry 3098, next to the test fixtures' Valley of Trials spawn)
+  // within 60 yd of the leader, makes `item` its only loot and starts the
+  // group's roll on it, as opening the corpse under group loot does.
+  static bool HandleLootRoll(ChatHandler* handler,
+                             std::string leader_name,
+                             uint32_t item_id) {
+    Player* leader = FindOnlinePlayer(handler, std::move(leader_name));
+    Group* group = leader ? leader->GetGroup() : nullptr;
+    if (!group || !sObjectMgr->GetItemTemplate(item_id)) {
+      handler->SendErrorMessage(
+          "llmtest: lootroll: needs a grouped leader and "
+          "a real item");
+      return false;
+    }
+    Creature* victim = nullptr;
+    std::list<Creature*> nearby;
+    constexpr uint32_t kMottledBoar = 3098;
+    leader->GetCreatureListWithEntryInGrid(nearby, kMottledBoar, 60.0f);
+    for (Creature* c : nearby) {
+      if (c && c->IsAlive() && !c->IsPlayer() && !c->IsTotem() &&
+          (!victim || leader->GetDistance(c) < leader->GetDistance(victim))) {
+        victim = c;
+      }
+    }
+    if (!victim) {
+      // None about: a temporary one next to the leader (gone in 2 min).
+      victim = leader->SummonCreature(
+          kMottledBoar, leader->GetPositionX() + 3.0f, leader->GetPositionY(),
+          leader->GetPositionZ(), 0.0f, TEMPSUMMON_TIMED_DESPAWN, 120000);
+    }
+    if (!victim) {
+      handler->SendErrorMessage("llmtest: lootroll: no creature to loot");
+      return false;
+    }
+    group->SetLootMethod(GROUP_LOOT);
+    group->SetLootThreshold(ITEM_QUALITY_UNCOMMON);
+    Unit::Kill(leader, victim);
+    victim->loot.clear();
+    victim->loot.items.emplace_back(
+        LootStoreItem(item_id, 0, 100.0f, false, 1, 0, 1, 1));
+    victim->loot.unlootedCount = 1;
+    group->GroupLoot(&victim->loot, victim);
+    handler->PSendSysMessage("llmtest: roll started on {} from {}", item_id,
+                             victim->GetName());
+    return true;
+  }
+
+  // `llmtest maketank <name>`: gives the bot playerbots' `tank assist`
+  // strategy as a test override (setstrat can't pass a name with a space).
+  static bool HandleMakeTank(ChatHandler* handler, std::string player_name) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    PlayerbotAI* ai = player ? GET_PLAYERBOT_AI(player) : nullptr;
+    if (!ai) {
+      handler->SendErrorMessage("llmtest: maketank: not a bot");
+      return false;
+    }
+    BotManager::SetBotStrategyOverride(player->GetName(), "+tank assist", "");
+    ai->ChangeStrategy("+tank assist", BOT_STATE_COMBAT);
+    handler->PSendSysMessage("llmtest: {} tanks", player->GetName());
+    return true;
+  }
+
+  // `llmtest readycheck <leader>`: the leader starts a ready check, as the
+  // client's button does (an empty MSG_RAID_READY_CHECK).
+  static bool HandleReadyCheck(ChatHandler* handler, std::string leader_name) {
+    Player* leader = FindOnlinePlayer(handler, std::move(leader_name));
+    if (!leader || !leader->GetSession() || !leader->GetGroup()) {
+      handler->SendErrorMessage("llmtest: readycheck: no grouped leader");
+      return false;
+    }
+    WorldPacket request(MSG_RAID_READY_CHECK, 0);
+    leader->GetSession()->HandleRaidReadyCheckOpcode(request);
+    handler->PSendSysMessage("llmtest: {} started a ready check",
+                             leader->GetName());
+    return true;
+  }
+
+  // `llmtest rezoffer <dead> <caster>`: `caster` offers `dead` a resurrection
+  // at its body, as a finished Resurrection cast does (full health/mana).
+  static bool HandleRezOffer(ChatHandler* handler,
+                             std::string dead_name,
+                             std::string caster_name) {
+    Player* dead = FindOnlinePlayer(handler, std::move(dead_name));
+    Player* caster = FindOnlinePlayer(handler, std::move(caster_name));
+    if (!dead || !caster || dead->IsAlive()) {
+      handler->SendErrorMessage("llmtest: rezoffer: needs a dead player");
+      return false;
+    }
+    dead->setResurrectRequestData(caster->GetGUID(), dead->GetMapId(),
+                                  dead->GetPositionX(), dead->GetPositionY(),
+                                  dead->GetPositionZ(), dead->GetMaxHealth(),
+                                  dead->GetMaxPower(POWER_MANA));
+    handler->PSendSysMessage("llmtest: {} offered {} a resurrection",
+                             caster->GetName(), dead->GetName());
     return true;
   }
 

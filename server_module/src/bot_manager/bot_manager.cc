@@ -590,13 +590,6 @@ void BotManager::EnsureStrategies(Player* player) {
       player->GetMap() != nullptr && player->GetMap()->IsDungeon();
   std::string non_combat = AdjustNonCombatStrategies(
       strategies_.non_combat, in_group, is_leader, in_dungeon);
-  const GroupPolicy policy = GetGroupPolicy(player);  // Empty outside it.
-  if (policy.not_tank) {
-    combat += ",-tank assist,-pull back,+dps assist";
-  }
-  if (policy.stay) {
-    non_combat += ",-follow,+stay";
-  }
   if (auto it = BotOverrides().find(player->GetName());
       it != BotOverrides().end()) {
     if (!it->second.combat.empty()) {
@@ -611,6 +604,14 @@ void BotManager::EnsureStrategies(Player* player) {
       }
       non_combat += it->second.non_combat;
     }
+  }
+  // The brain's own choice for this group comes last, so it wins (RH-M1/M2).
+  const GroupPolicy policy = GetGroupPolicy(player);  // Empty outside it.
+  if (policy.not_tank) {
+    combat += ",-tank assist,-pull back,+dps assist";
+  }
+  if (policy.stay) {
+    non_combat += ",-follow,+stay";
   }
   // Still as we left it in every state: playerbots hasn't reset any of them
   // since (it resets combat alone too, e.g. SelectiveResetStrategies).
