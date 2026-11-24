@@ -8,12 +8,10 @@ pressure test (docs/results.md): under 5 ms added per world update on average, n
 build over 2 ms, no dropped frames.
 """
 
-import json
 import re
-import subprocess
 
-from wlblib import build
-from wlblib.common import OUT, ROOT, Failed
+from wlblib import build, wire
+from wlblib.common import OUT
 from wlblib.testing import expect
 
 NAME = "snapshots"
@@ -48,13 +46,7 @@ def last_full_minute(log):
 def run(perf):
     if not (OUT / "common" / "libwlb_wire_py.so").exists():
         build.common("default", tests=False)
-    result = subprocess.run(
-        ["python3", "-I", ROOT / "tools/snapshot/fake_harness.py", "--stats", "--json",
-         f"--socket={perf.stack.socket}",
-         str(RECEIVE_S)], capture_output=True, text=True)
-    if result.returncode != 0:
-        raise Failed(f"the harness stand-in failed:\n{result.stderr.strip()[-600:]}")
-    r = json.loads(result.stdout)
+    r = wire.measure_delivery(str(perf.stack.socket), RECEIVE_S)
     expect("steady" in r, f"no steady state: {r}")
     st = r["steady"]
     expect(r["bots"] == BOTS, f"snapshots from {r['bots']} bots, expected {BOTS}")

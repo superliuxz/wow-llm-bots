@@ -26,6 +26,11 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+ROOT = Path(__file__).resolve().parent.parent.parent
+if str(ROOT / "tools") not in sys.path:
+    sys.path.insert(0, str(ROOT / "tools"))
+from wlblib import trace as trace_lib  # noqa: E402
+
 DODGE_ACT_VERBS = ("AWAY", "TO", "AVOID", "OUT_OF", "KITE")
 
 
@@ -154,19 +159,7 @@ def _inside_cast_radius(sample: Dict[str, Any]) -> bool:
 
 
 def load_trace_rows(jsonl_path: Path) -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
-    with jsonl_path.open("r", encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(obj, dict):
-                rows.append(obj)
-    return rows
+    return trace_lib.load_jsonl_files([jsonl_path])
 
 
 def discover_trace_files(trace_dir: Path) -> List[Path]:

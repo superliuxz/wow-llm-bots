@@ -18,7 +18,7 @@ import pathlib
 import subprocess
 import tempfile
 
-from wlblib import build
+from wlblib import build, wire
 from wlblib.common import OUT, ROOT, SERVER, Failed, run, say
 
 # glibc's internal headers and Glaze's umbrella internals carry no IWYU mappings: include the
@@ -147,7 +147,8 @@ def snapshots(files=()):
         *sorted((ROOT / "harness/testdata/screens").glob("*.snapshot.json")),
     ]
     run([checker, *files])
-    run(["python3", "-I", "-B", ROOT / "tools/snapshot/check_hover_fields.py"])
+    if wire.check_hover_fields() != 0:
+        raise Failed("hover fields check failed")
     run(["python3", "-I", "-B", ROOT / "tools/audit/check_client_events.py", checker])
     # Eval snapshots show the options the module offers (review 2026-11-17, finding 5).
     run(["python3", "-I", "-B", ROOT / "tools/snapshot/add_fixture_options.py", "--check"])
@@ -172,8 +173,11 @@ def rules(fix=False):
 
 
 def goldens():
-    """The screen renderer's goldens come from the Python prototype: it must still write them."""
-    run(["python3", "-I", ROOT / "tools/snapshot/make_screen_fixtures.py", "--check"])
+    """The screen renderer's goldens match C++ `RenderScreen`."""
+    harness_bin = OUT / "common" / "harness"
+    if not harness_bin.exists():
+        build.common("default", tests=False)
+    run([harness_bin, "render-screen", ROOT / "harness/testdata/screens"])
 
 
 def bench_tests():

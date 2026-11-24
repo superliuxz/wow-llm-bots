@@ -18,12 +18,14 @@ import importlib
 import json
 import pathlib
 import pkgutil
+import select
 import shutil
+import socket
 import subprocess
+import threading
 import time
-import urllib.request
 
-from wlblib import build, cases, server
+from wlblib import build, cases, llm, server, wire
 from wlblib.common import OUT, PLAY, ROOT, TEST, Failed, output, run, running_pid, say
 
 TARGETS = ("unit", "e2e", "perf", "eval", "soak")
@@ -35,13 +37,132 @@ def expect(condition, message):
         raise Failed(message)
 
 
+def send_cmd(sock, cmd):
+    """Encodes and sends one length-prefixed BEVE Command frame over `sock`."""
+    wire.send_frame(sock, wire.encode_command(cmd))
+
+
+def find_option(options, prefix, avoid=None):
+    """1-based option index whose text starts with `prefix` (and skips `avoid`)."""
+    return next(
+        (i for i, o in enumerate(options, 1)
+         if o.get("text", "").startswith(prefix)
+         and not (avoid and avoid in o.get("text", ""))),
+        None,
+    )
+
+
+class ProxyRecorder:
+    """Forwards BEVE frames between `harness run` and `mod-llm-brain` while
+    recording decoded snapshots, events, visibility errors, and commands."""
+
+    def __init__(self, real_sock: pathlib.Path, proxy_sock: pathlib.Path):
+        self.real_sock = real_sock
+        self.proxy_sock = proxy_sock
+        self.lock = threading.Lock()
+        self.snapshots = []
+        self.events = []
+        self.commands = []
+        self.visibility_errors = []
+        self._stop = threading.Event()
+        self._listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        proxy_sock.unlink(missing_ok=True)
+        self._listener.bind(str(proxy_sock))
+        self._listener.listen(2)
+        self._listener.settimeout(0.2)
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        try:
+            self._listener.close()
+        except OSError:
+            pass
+        self._thread.join(timeout=5)
+        self.proxy_sock.unlink(missing_ok=True)
+
+    def _serve(self):
+        client = None
+        upstream = None
+        try:
+            while not self._stop.is_set():
+                try:
+                    client, _ = self._listener.accept()
+                    break
+                except socket.timeout:
+                    continue
+            if client is None:
+                return
+            upstream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            upstream.connect(str(self.real_sock))
+            in_mod = wire.FrameReader()
+            in_cmd = wire.FrameReader()
+            while not self._stop.is_set():
+                r, _, _ = select.select([client, upstream], [], [], 0.1)
+                now = time.monotonic()
+                if upstream in r:
+                    data = upstream.recv(1 << 20)
+                    if not data:
+                        break
+                    client.sendall(data)
+                    for payload in in_mod.feed(data):
+                        verr = wire.visibility_errors(payload)
+                        msg = wire.decode_module_message(payload)
+                        with self.lock:
+                            if verr is None:
+                                if len(self.visibility_errors) < 10:
+                                    self.visibility_errors.append(
+                                        "failed to decode module frame for visibility check"
+                                    )
+                            elif verr and len(self.visibility_errors) < 10:
+                                self.visibility_errors.extend(verr[:5])
+                            if msg and "snapshot" in msg:
+                                self.snapshots.append((now, msg["snapshot"]))
+                            elif msg and "event" in msg:
+                                self.events.append((now, msg["event"]))
+                if client in r:
+                    data = client.recv(1 << 20)
+                    if not data:
+                        break
+                    upstream.sendall(data)
+                    for payload in in_cmd.feed(data):
+                        cmd = wire.decode_command(payload)
+                        if cmd:
+                            with self.lock:
+                                self.commands.append((now, cmd))
+        finally:
+            for s in (client, upstream):
+                if s is not None:
+                    try:
+                        s.close()
+                    except OSError:
+                        pass
+
+    def wait_until(self, pred, timeout_s=30.0, desc="condition"):
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            with self.lock:
+                val = pred(self)
+                if val:
+                    return val
+            time.sleep(0.05)
+        raise AssertionError(f"timed out ({timeout_s}s) waiting for {desc}")
+
+
 def discover(target):
-    """The cases of a target, by name."""
+    """The cases of a target, by name (supports both single-case and grouped `CASES` modules)."""
     found = {}
     for info in pkgutil.iter_modules(cases.__path__):
         if info.name.startswith(f"{target}_"):
             module = importlib.import_module(f"wlblib.cases.{info.name}")
-            found[module.NAME] = module
+            if hasattr(module, "CASES"):
+                for case in module.CASES:
+                    found[case.NAME] = case
+            else:
+                found[module.NAME] = module
     return dict(sorted(found.items()))
 
 
@@ -128,30 +249,29 @@ class Stack:
         except OSError:
             return ""
 
-    def _fake_harness(self, *args):
-        if not (OUT / "common" / "libwlb_wire_py.so").exists():
-            build.common("default", tests=False)
-        result = subprocess.run(
-            ["python3", "-I", ROOT / "tools/snapshot/fake_harness.py", f"--socket={self.socket}",
-             *map(str, args)], capture_output=True, text=True)
-        if result.returncode != 0:
-            raise Failed(f"the scripted brain failed:\n{result.stderr.strip()[-600:]}")
-        transcript = json.loads(result.stdout)
+    def _check_transcript(self, transcript):
         if transcript.get("visibility_errors"):
             raise Failed("the module sent what the bot can't see:\n  " +
                          "\n  ".join(transcript["visibility_errors"]))
         return transcript
 
     def play(self, words, seconds=90, tail_s=15):
-        """Runs the scripted brain (tools/snapshot/fake_harness.py --choose) against the module
-        and returns its transcript: snapshots, events, commands sent, words never offered. It
-        stops `tail_s` after the last word was sent, or after `seconds`."""
-        return self._fake_harness("--choose", "--json", f"--tail={tail_s}", seconds, *words)
+        """Runs the scripted brain (`wlblib.wire.play_script`) against the module."""
+        if not (OUT / "common" / "libwlb_wire_py.so").exists():
+            build.common("default", tests=False)
+        return self._check_transcript(
+            wire.play_script(str(self.socket), seconds, words, echo=lambda _line: None,
+                             tail_s=tail_s)
+        )
 
     def whisper(self, sender, receiver, text, reply, seconds=60):
-        """Runs tools/snapshot/fake_harness.py --whisper: `sender` whispers `text` to `receiver`,
-        which whispers `reply` back. Returns its transcript (what each bot heard)."""
-        return self._fake_harness("--whisper", "--json", seconds, sender, receiver, text, reply)
+        """Runs `wlblib.wire.whisper_script`: `sender` whispers `text` to `receiver`."""
+        if not (OUT / "common" / "libwlb_wire_py.so").exists():
+            build.common("default", tests=False)
+        return self._check_transcript(
+            wire.whisper_script(str(self.socket), seconds, sender, receiver, text, reply,
+                                echo=lambda _line: None)
+        )
 
 
 def _select(target, names):
@@ -356,21 +476,10 @@ class LlamaServer:
         self.slots, self.timeout_s, self.model, self.proc = slots, timeout_s, model, None
 
     def healthy(self):
-        try:
-            with urllib.request.urlopen(self.URL, timeout=2) as r:
-                return r.status == 200
-        except OSError:
-            return False
+        return llm.health_check()
 
     def loaded_model_matches(self):
-        if not self.model:
-            return True
-        try:
-            with urllib.request.urlopen(self.MODELS_URL, timeout=2) as r:
-                body = r.read().decode(errors="replace")
-                return self.model in body
-        except OSError:
-            return False
+        return llm.loaded_model_matches(self.model)
 
     def __enter__(self):
         if self.healthy():
@@ -420,10 +529,9 @@ def capture_snapshots(seconds=300):
         tmp.mkdir(parents=True, exist_ok=True)
         say(f"capturing {seconds} s of snapshots from {stack.socket} into {target.relative_to(ROOT)}")
         try:
-            run([
-                "python3", "-I", ROOT / "tools/bench/capture_snapshots.py",
-                tmp, str(seconds), str(stack.socket),
-            ])
+            rc = wire.capture_snapshots(tmp, seconds=seconds, sock_path=str(stack.socket))
+            if rc != 0:
+                raise Failed("capture_snapshots failed")
         except Exception:
             shutil.rmtree(tmp, ignore_errors=True)
             raise

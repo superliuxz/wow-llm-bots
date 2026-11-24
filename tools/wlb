@@ -14,7 +14,10 @@
   tools/wlb test --list
   tools/wlb setup links|configure|data|llama|msan|client-ui
   tools/wlb llm [--slots N] [--ctx N] [--model FILE] [-- llama-server args...]
-  tools/wlb harness [run|decide ...]     build and run the C++ brain harness (default: run)
+  tools/wlb harness [run|decide|replay|render-screen ...]  build and run the C++ brain harness
+  tools/wlb snap capture|fake ...        capture snapshots or run the scripted harness stand-in
+  tools/wlb trace meter|dodge|stalls|mine ...  analyze behavior traces and mine eval cases
+  tools/wlb gen invisible-displays|quest-poi|knowledge|boss-notes|grammar|fixture-options ...
   tools/wlb remote list | <name> sync|status|run|pull|stop|install-hook  run on a remote worker (private/remotes.json)
 
 `tools/wlb <command> --help` says more. Python standard library only.
@@ -28,7 +31,7 @@ import sys
 # -I (isolated) leaves the script's own directory off the path: add the tools directory.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from wlblib import build, check, common, llm, remote, server, setup, testing  # noqa: E402
+from wlblib import build, check, common, llm, remote, server, setup, testing, wire  # noqa: E402
 from wlblib.common import OUT, main_guard  # noqa: E402
 
 
@@ -116,6 +119,16 @@ def parse(argv):
     p.add_argument("args", nargs=argparse.REMAINDER,
                    help="subcommand and flags (default: run)")
 
+    p = sub.add_parser("snap", add_help=False, help="capture snapshots or run fake harness")
+    p.add_argument("args", nargs=argparse.REMAINDER, help="capture <out> [s] [sock] | fake ...")
+
+    p = sub.add_parser("trace", add_help=False, help="analyze behavior traces")
+    p.add_argument("args", nargs=argparse.REMAINDER, help="meter | dodge | stalls | mine ...")
+
+    p = sub.add_parser("gen", add_help=False, help="run code/data generators")
+    p.add_argument("args", nargs=argparse.REMAINDER,
+                   help="invisible-displays | quest-poi | knowledge | boss-notes | grammar | fixture-options ...")
+
     p = sub.add_parser("remote", add_help=False,
                        help="sync, build, and run commands on a remote CPU worker (private/remotes.json)")
     p.add_argument("args", nargs=argparse.REMAINDER,
@@ -123,9 +136,62 @@ def parse(argv):
     return parser.parse_args(argv)
 
 
+def _dispatch_snap(args):
+    if not args or args[0] not in ("capture", "fake"):
+        raise common.Failed("usage: tools/wlb snap capture <out_dir> [seconds] [sock] | fake ...")
+    if not (OUT / "common" / "libwlb_wire_py.so").exists():
+        build.common("default", tests=False)
+    sub, rest = args[0], args[1:]
+    if sub == "capture":
+        if not rest:
+            raise common.Failed("usage: tools/wlb snap capture <out_dir> [seconds=15] [sock]")
+        out_dir = pathlib.Path(rest[0])
+        secs = float(rest[1]) if len(rest) > 1 else 15.0
+        sock = rest[2] if len(rest) > 2 else wire.DEFAULT_SOCK
+        if wire.capture_snapshots(out_dir, secs, sock) != 0:
+            raise common.Failed("captured 0 snapshots")
+    else:
+        wire.fake_harness_cli(rest)
+
+
+def _dispatch_trace(args):
+    scripts = {
+        "meter": common.ROOT / "tools/bench/boss_meter.py",
+        "dodge": common.ROOT / "tools/bench/dodge_timeline.py",
+        "stalls": common.ROOT / "tools/bench/stall_check.py",
+        "mine": common.ROOT / "tools/eval/mine_traces.py",
+    }
+    if not args or args[0] not in scripts:
+        raise common.Failed(f"usage: tools/wlb trace {{{'|'.join(scripts)}}} [args...]")
+    common.run(["python3", "-I", "-B", scripts[args[0]], *args[1:]])
+
+
+def _dispatch_gen(args):
+    scripts = {
+        "invisible-displays": common.ROOT / "tools/audit/gen_invisible_displays.py",
+        "quest-poi": common.ROOT / "tools/knowledge/backfill_quest_poi.py",
+        "knowledge": common.ROOT / "tools/knowledge/export_knowledge.py",
+        "boss-notes": common.ROOT / "tools/notes/extract_boss_notes.py",
+        "grammar": common.ROOT / "tools/grammar/wlb_gen.py",
+        "fixture-options": common.ROOT / "tools/snapshot/add_fixture_options.py",
+    }
+    if not args or args[0] not in scripts:
+        raise common.Failed(f"usage: tools/wlb gen {{{'|'.join(scripts)}}} [args...]")
+    common.run(["python3", "-I", "-B", scripts[args[0]], *args[1:]])
+
+
 def main():
     if sys.argv[1:2] == ["remote"]:
         remote.dispatch_cli(sys.argv[2:])
+        return
+    if sys.argv[1:2] == ["snap"]:
+        _dispatch_snap(sys.argv[2:])
+        return
+    if sys.argv[1:2] == ["trace"]:
+        _dispatch_trace(sys.argv[2:])
+        return
+    if sys.argv[1:2] == ["gen"]:
+        _dispatch_gen(sys.argv[2:])
         return
     a = parse(sys.argv[1:])
     if a.command == "build":

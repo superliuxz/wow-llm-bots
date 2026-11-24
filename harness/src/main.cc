@@ -17,11 +17,13 @@
 #include <string>
 #include <vector>
 
+#include "base/functional/callback.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "llm/llm_client.h"
 #include "plan/plan.h"
 #include "runtime/decide.h"
+#include "runtime/replay.h"
 #include "runtime/run.h"
 
 namespace {
@@ -52,7 +54,11 @@ int Usage() {
       "                 [--inspect-prompt] [--print-request] [--json]\n"
       "                 [--whisperers=NAME,NAME]\n"
       "  harness parse-plans < records   (\"<options>\\t<reply>\" each, NUL-"
-      "separated)\n",
+      "separated)\n"
+      "  harness render-screen [--rewrite] <screens_dir>\n"
+      "  harness replay <snapshot_dir> [--mode=capacity|load] [--bots=N]\n"
+      "                 [--plan-s=S] [--slots=N] [--seconds=S] [--warmup=S]\n"
+      "                 [--rules=FILE] [--host=H] [--port=N]\n",
       stderr);
   return 2;
 }
@@ -145,6 +151,44 @@ int main(int argc, char** argv) {
     }
     std::fputs(harness::CheckPlanRecords(input).c_str(), stdout);
     return 0;
+  }
+  if (sub == "render-screen") {
+    bool rewrite = false;
+    std::string dir;
+    for (const std::string& a : args) {
+      if (a == "--rewrite") {
+        rewrite = true;
+      } else if (dir.empty()) {
+        dir = a;
+      }
+    }
+    if (dir.empty()) {
+      return Usage();
+    }
+    std::string report;
+    const int code = harness::RenderScreenGoldens(dir, rewrite, &report);
+    std::fputs(report.c_str(), stdout);
+    return code;
+  }
+  if (sub == "replay") {
+    std::string error;
+    const std::optional<harness::ReplayOptions> options =
+        harness::ParseReplayArgs(args, &error);
+    if (!options) {
+      std::fprintf(stderr, "%s\n", error.c_str());
+      return Usage();
+    }
+    const harness::LlmEndpoint endpoint = options->endpoint;
+    std::string report;
+    const int code = harness::RunReplay(
+        *options,
+        base::RepeatingCallback<harness::LlmResult(const harness::LlmRequest&)>(
+            [endpoint](const harness::LlmRequest& request) {
+              return harness::CallLlama(endpoint, request);
+            }),
+        &report);
+    std::fputs(report.c_str(), stdout);
+    return code;
   }
   return Usage();
 }

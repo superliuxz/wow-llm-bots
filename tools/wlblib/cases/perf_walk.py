@@ -2,12 +2,10 @@
 in Orgrimmar, measured from the module's own `walk paths` summary line (docs/specs/options.md).
 """
 
-import json
 import re
-import subprocess
 
-from wlblib import build
-from wlblib.common import OUT, ROOT, Failed
+from wlblib import build, wire
+from wlblib.common import OUT
 from wlblib.testing import expect
 
 NAME = "walk"
@@ -24,13 +22,7 @@ WALK_PATHS = re.compile(r"walk paths n=(\d+) \(path_us p50=(\d+) max=(\d+)\)")
 def run(perf):
     if not (OUT / "common" / "libwlb_wire_py.so").exists():
         build.common("default", tests=False)
-    result = subprocess.run(
-        ["python3", "-I", ROOT / "tools/snapshot/fake_harness.py", "--walk", "--json",
-         f"--socket={perf.stack.socket}",
-         str(WALK_S)], capture_output=True, text=True)
-    if result.returncode != 0:
-        raise Failed(f"the walk harness failed:\n{result.stderr.strip()[-600:]}")
-    r = json.loads(result.stdout)
+    r = wire.run_walk(str(perf.stack.socket), WALK_S)
     expect(r["bots_walked"] == BOTS,
            f"walked {r['bots_walked']} bots, expected {BOTS}")
 
