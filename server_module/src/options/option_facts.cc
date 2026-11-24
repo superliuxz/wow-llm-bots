@@ -25,6 +25,7 @@
 #include "GameTime.h"
 #include "GridTerrainData.h"
 #include "IVMapMgr.h"
+#include "InstanceScript.h"
 #include "Map.h"
 #include "MapDefines.h"
 #include "MapMgr.h"
@@ -230,6 +231,10 @@ void FillSpots(const WorldPlaces& world,
       std::vector<DungeonHostile> hostiles;
       const auto& spawned = probe_map->GetCreatureBySpawnIdStore();
       const FactionTemplateEntry* bot_ft = bot->GetFactionTemplateEntry();
+      const InstanceScript* instance_script = nullptr;
+      if (const InstanceMap* im = probe_map->ToInstanceMap()) {
+        instance_script = im->GetInstanceScript();
+      }
       if (const auto* db_spawns = world.DungeonSpawns(view.map_id)) {
         const uint8_t mode_bit =
             static_cast<uint8_t>(1u << probe_map->GetSpawnMode());
@@ -257,6 +262,8 @@ void FillSpots(const WorldPlaces& world,
           } else if (bot_ft && !probe_map->IsGridLoaded(sp.pos.x, sp.pos.y) &&
                      probe_map->GetCreatureRespawnTime(sp.spawn_id) <=
                          GameTime::GetGameTime().count() &&
+                     !(instance_script &&
+                       instance_script->IsBossSpawnDone(sp.spawn_id)) &&
                      (sp.phase_mask & view.phase_mask) != 0) {
             // Grid not yet loaded in this instance and spawn has no pending
             // respawn timer: check template faction hostility so long empty
