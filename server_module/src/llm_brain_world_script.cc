@@ -49,6 +49,7 @@
 #include "chat/chat_scripts.h"
 #include "chat/speak.h"
 #include "config/llm_brain_config.h"
+#include "net/frame_codec.h"
 #include "options/act_executor.h"
 #include "options/option_executor.h"
 #include "options/option_facts.h"
@@ -363,9 +364,24 @@ class LlmBrainWorldScript : public WorldScript {
     size_t built = 0;
     for (size_t i = 0; i < config_.bots.size(); ++i) {
       Player* bot = ObjectAccessor::FindPlayerByName(config_.bots[i]);
-      if (!bot || !bot->IsInWorld()) {
-        continue;  // Offline (or not in the world yet).
+      if (!IsControlledBot(bot)) {
+        continue;  // Offline, not in world, or logged in by a real human.
       }
+      // Clear any active act or saved `back` coordinates if the bot changed
+      // maps/instances so old-map coordinates are never reused (A-L1).
+      const uint32_t cur_map = bot->GetMapId();
+      const uint32_t cur_inst = bot->GetInstanceId();
+      if (bots_[i].has_last_map && (bots_[i].last_map_id != cur_map ||
+                                    bots_[i].last_instance_id != cur_inst)) {
+        if (bots_[i].active_act) {
+          CancelActiveAct(bot, &*bots_[i].active_act);
+          bots_[i].active_act.reset();
+        }
+        ClearLastInterruptedForBot(bot->GetGUID().GetRawValue());
+      }
+      bots_[i].has_last_map = true;
+      bots_[i].last_map_id = cur_map;
+      bots_[i].last_instance_id = cur_inst;
       StepActiveOption(bot, i, config_.bots[i], now);
       if (!bot->IsInCombat()) {
         ClearAvoidedTargetsForBot(bot->GetGUID().GetRawValue());
@@ -393,6 +409,7 @@ class LlmBrainWorldScript : public WorldScript {
   }
 
   void OnShutdown() override {
+    BotManager::SetBrainConnected(false);
     if (bot_manager_) {
       bot_manager_->Stop();
       bot_manager_.reset();
@@ -503,14 +520,16 @@ class LlmBrainWorldScript : public WorldScript {
   void OnHarnessConnection(bool connected) {
     LOG_INFO("module", "mod-llm-brain: harness {}",
              connected ? "connected" : "disconnected");
+    BotManager::SetBrainConnected(connected);
     wrong_version_logged_ = false;
     for (size_t i = 0; i < bots_.size(); ++i) {
       Player* bot = ObjectAccessor::FindPlayerByName(config_.bots[i]);
-      if (bot) {
+      if (bot && GET_PLAYERBOT_AI(bot) != nullptr) {
         ClearAvoidedTargetsForBot(bot->GetGUID().GetRawValue());
+        ClearLastInterruptedForBot(bot->GetGUID().GetRawValue());
       }
       if (bots_[i].active_act) {
-        if (bot) {
+        if (bot && GET_PLAYERBOT_AI(bot) != nullptr) {
           CancelActiveAct(bot, &*bots_[i].active_act);
         }
         bots_[i].active_act.reset();
@@ -537,6 +556,14 @@ class LlmBrainWorldScript : public WorldScript {
       // them all on the next tick.
       schedule_->Restart(base::TimeTicks::Now());
     }
+  }
+
+  // True only when `player` is in the world and controlled by Playerbots AI
+  // (never a human player who logged into a character name listed in
+  // `LlmBrain.Bots`).
+  static bool IsControlledBot(Player* player) {
+    return player != nullptr && player->IsInWorld() &&
+           GET_PLAYERBOT_AI(player) != nullptr;
   }
 
   // The index of `name` in LlmBrain.Bots, or config_.bots.size().
@@ -583,7 +610,7 @@ class LlmBrainWorldScript : public WorldScript {
     for (ChatInbox::Line& line : inbox_->TakeAll()) {
       const size_t index = BotIndex(line.to);
       Player* bot = ObjectAccessor::FindPlayerByName(line.to);
-      if (index == config_.bots.size() || !bot || !bot->IsInWorld() ||
+      if (index == config_.bots.size() || !IsControlledBot(bot) ||
           !bridge_->connected()) {
         continue;  // Nobody to tell: like a whisper while away.
       }
@@ -699,7 +726,8 @@ class LlmBrainWorldScript : public WorldScript {
     }
     const size_t bot_index = BotIndex(name);
     Player* bot = ObjectAccessor::FindPlayerByName(name);
-    if (bot_index == config_.bots.size() || !bot || bots_[bot_index].seq == 0) {
+    if (bot_index == config_.bots.size() || !IsControlledBot(bot) ||
+        bots_[bot_index].seq == 0) {
       LOG_INFO("module", "mod-llm-brain: command for {}: no such bot online",
                name);
       return;
@@ -823,16 +851,25 @@ class LlmBrainWorldScript : public WorldScript {
     }
   }
 
+  static bool IsMovementActVerb(wlb::snapshot::Command_Act::Verb verb) {
+    return verb == wlb::snapshot::Command_Act::TO ||
+           verb == wlb::snapshot::Command_Act::AWAY ||
+           verb == wlb::snapshot::Command_Act::OUT_OF ||
+           verb == wlb::snapshot::Command_Act::BACK ||
+           verb == wlb::snapshot::Command_Act::KITE ||
+           verb == wlb::snapshot::Command_Act::INTERACT ||
+           verb == wlb::snapshot::Command_Act::BOARD;
+  }
+
   void OnAct(size_t bot_index,
              const std::string& name,
              Player* bot,
              uint32_t command_id,
              const wlb::snapshot::Command::Act& act) {
     BotState& state = bots_[bot_index];
-    if (state.active_act) {
-      CancelActiveAct(bot, &*state.active_act);
-      state.active_act.reset();
-    }
+    // Validate and start the new act BEFORE cancelling any running act so a
+    // failed act (e.g. unknown `use Foo` during `out of Defile`) never aborts
+    // an active boss dodge (A-M11).
     ActiveAct pending;
     ActStartResult res =
         StartAct(bot, command_id, act, base::TimeTicks::Now(), &pending);
@@ -858,18 +895,36 @@ class LlmBrainWorldScript : public WorldScript {
       trace_writer_->WriteEvent(ev);
     }
     if (!res.error.empty()) {
-      schedule_->SetActiveTargetPending(bot_index,
-                                        state.active_option.has_value());
+      schedule_->SetActiveTargetPending(
+          bot_index,
+          state.active_option.has_value() || state.active_act.has_value());
       wlb::snapshot::Event payload;
       wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
       failed.text = std::move(res.error);
       failed.command_id = command_id;
       EmitAlertingEvent(bot_index, name, bot, std::move(payload));
     } else if (res.done) {
+      const bool stops_movement =
+          (act.verb == wlb::snapshot::Command_Act::STOP &&
+           (act.stop == wlb::snapshot::Command_Act::MOVING ||
+            act.stop == wlb::snapshot::Command_Act::STOP_UNSPECIFIED)) ||
+          IsMovementActVerb(act.verb);
+      if (stops_movement && state.active_act) {
+        if (act.verb != wlb::snapshot::Command_Act::STOP) {
+          CancelActiveAct(bot, &*state.active_act);
+        }
+        state.active_act.reset();
+      }
       state.done_act_command_id = command_id;
-      schedule_->SetActiveTargetPending(bot_index,
-                                        state.active_option.has_value());
+      schedule_->SetActiveTargetPending(
+          bot_index,
+          state.active_option.has_value() || state.active_act.has_value());
     } else {
+      if (state.active_act && !IsMovementActVerb(act.verb)) {
+        // Non-movement multi-tick act (e.g. cast-time `use`) supersedes an old
+        // movement act's forced priority.
+        CancelActiveAct(bot, &*state.active_act);
+      }
       state.active_act = std::move(pending);
       schedule_->SetActiveTargetPending(bot_index, true);
     }
@@ -1236,7 +1291,18 @@ class LlmBrainWorldScript : public WorldScript {
     event.event = std::move(payload);
     // Flush any pending snapshot for `name` first so an alerting event never
     // overtakes the snapshot sent right before it when the socket backs up.
-    bridge_->Send(wlb::snapshot::WriteBeve(message), name);
+    std::string bytes = wlb::snapshot::WriteBeve(message);
+    if (bytes.empty()) {
+      LOG_ERROR("module", "mod-llm-brain: failed to encode event for {}", name);
+      return;
+    }
+    if (bytes.size() > net::kMaxFramePayloadBytes) {
+      LOG_ERROR("module",
+                "mod-llm-brain: dropping oversize event for {} ({} B > {} B)",
+                name, bytes.size(), net::kMaxFramePayloadBytes);
+      return;
+    }
+    bridge_->Send(std::move(bytes), name);
   }
 
   void EmitAlertingEvent(size_t index,
@@ -1302,6 +1368,19 @@ class LlmBrainWorldScript : public WorldScript {
     }
     state.history.Add(snapshot.seq, start, AddOptions(&snapshot, facts));
     std::string bytes = wlb::snapshot::WriteBeve(message);
+    if (bytes.empty()) {
+      LOG_ERROR("module", "mod-llm-brain: failed to encode snapshot for {}",
+                name);
+      return;
+    }
+    if (bytes.size() > net::kMaxFramePayloadBytes) {
+      LOG_ERROR("module",
+                "mod-llm-brain: dropping oversize snapshot for {} ({} B > {} B"
+                ", units={}, objects={})",
+                name, bytes.size(), net::kMaxFramePayloadBytes, nearby.units,
+                nearby.objects);
+      return;
+    }
     stats_.Add({base::TimeTicks::Now() - start, bytes.size(), nearby.units,
                 nearby.objects, nearby.hidden, nearby.raycasts});
     // The newest snapshot of a bot wins if the harness is behind.
@@ -1493,7 +1572,7 @@ class LlmBrainWorldScript : public WorldScript {
     const int64_t mono_us = (now - base::TimeTicks()).InMicroseconds();
     for (const std::string& bot_name : config_.bots) {
       Player* bot = ObjectAccessor::FindPlayerByName(bot_name);
-      if (bot && bot->IsInWorld()) {
+      if (IsControlledBot(bot)) {
         SampleOneObserved(bot, "bot", now, time_ms, mono_us);
       }
     }
@@ -1577,6 +1656,10 @@ class LlmBrainWorldScript : public WorldScript {
     PendingWalk walk;
     // Active standing-order act (to / away / cast-time use).
     std::optional<ActiveAct> active_act;
+    // Last observed map/instance so map changes clear active acts & `back`.
+    bool has_last_map = false;
+    uint32_t last_map_id = 0;
+    uint32_t last_instance_id = 0;
     // Casts and auras on bot/target/attackers at the last sent snapshot.
     ReactiveSnapshotState last_reactive;
     // Players who recently chatted to/near this bot (for group invite options).

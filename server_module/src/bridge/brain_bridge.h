@@ -27,9 +27,10 @@ namespace llm_brain {
 // thread pumps from WorldScript::OnUpdate via RunWorldTasks(). The world thread
 // only ever posts tasks, so it never waits on the socket or the harness.
 //
-// One harness at a time (a new connection replaces the old one). Outbound
-// messages are dropped while no harness is connected; inbound messages are
-// dropped when the world thread falls more than `max_pending_messages` behind.
+// One harness at a time (a second connection while one is live is refused).
+// Outbound messages are dropped while no harness is connected; inbound messages
+// are dropped when the world thread falls more than `max_pending_messages`
+// behind.
 //
 // Two ways to send. Send() is for events: every one must arrive, in order.
 // SendLatest() is for state that goes stale (a bot's snapshot): if the harness

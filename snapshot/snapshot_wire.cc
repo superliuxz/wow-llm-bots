@@ -796,7 +796,10 @@ struct PrettyJsonWriteOpts : glz::opts {
 template <typename T>
 std::string WriteBeveOf(const T& value) {
   std::string out;
-  (void)glz::write<WireBeveOpts{}>(value, out);
+  const auto ec = glz::write<WireBeveOpts{}>(value, out);
+  if (ec) {
+    return "";
+  }
   return out;
 }
 

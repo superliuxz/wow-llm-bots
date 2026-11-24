@@ -29,21 +29,55 @@ constexpr size_t kTemplateOverheadTokens = 128;
 constexpr size_t kMinUserBudgetTokens = 256;
 constexpr size_t kBytesPerTokenEstimate = 3;
 constexpr size_t kMaxNotesBytes = 2000;
+constexpr size_t kMaxIdentityBytes = 900;
+constexpr size_t kMaxMemoryBytes = 900;
+constexpr size_t kMaxRecentEventsBytes = 700;
+constexpr size_t kMaxActiveOrdersBytes = 700;
+constexpr size_t kMaxEventLineBytes = 180;
+constexpr size_t kMaxInlineFieldBytes = 200;
+constexpr int kDefaultPlanMaxTokens = 150;
+constexpr int kOrdersPlanMaxTokens = 350;
 
 size_t EstimateTokens(std::string_view text) {
   return (text.size() + kBytesPerTokenEstimate - 1) / kBytesPerTokenEstimate;
 }
 
 // Text from the game or the harness that goes into one line of the prompt: a
-// line break in it could write a fake line ("4. Attack ...").
+// line break or control byte in it could write a fake line ("4. Attack ...").
 std::string OneLine(std::string_view text) {
-  std::string out(text);
-  for (char& c : out) {
-    if (c == '\n' || c == '\r') {
-      c = ' ';
+  std::string out;
+  out.reserve(text.size());
+  for (unsigned char uc : text) {
+    if (uc == '\n' || uc == '\r' || uc == '\t') {
+      out.push_back(' ');
+    } else if (uc >= 0x20 && uc != 0x7f) {
+      out.push_back(static_cast<char>(uc));
     }
   }
   return out;
+}
+
+std::string_view TruncateUtf8Safe(std::string_view text, size_t max_bytes) {
+  if (text.size() <= max_bytes) {
+    return text;
+  }
+  size_t end = max_bytes;
+  while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xC0) == 0x80) {
+    --end;
+  }
+  return text.substr(0, end);
+}
+
+std::string CapInline(std::string_view text, size_t max_bytes) {
+  if (text.size() <= max_bytes) {
+    return std::string(text);
+  }
+  constexpr std::string_view kEllipsis = "...";
+  if (max_bytes <= kEllipsis.size()) {
+    return std::string(TruncateUtf8Safe(text, max_bytes));
+  }
+  return base::StrCat(
+      {TruncateUtf8Safe(text, max_bytes - kEllipsis.size()), kEllipsis});
 }
 
 std::string CapText(std::string_view text, size_t max_bytes) {
@@ -52,9 +86,55 @@ std::string CapText(std::string_view text, size_t max_bytes) {
   }
   constexpr std::string_view kSuffix = "\n[truncated]";
   if (max_bytes <= kSuffix.size()) {
-    return std::string(text.substr(0, max_bytes));
+    return std::string(TruncateUtf8Safe(text, max_bytes));
   }
-  return base::StrCat({text.substr(0, max_bytes - kSuffix.size()), kSuffix});
+  return base::StrCat(
+      {TruncateUtf8Safe(text, max_bytes - kSuffix.size()), kSuffix});
+}
+
+// Keeps the newest whole lines of `text` within `max_bytes` (so recent
+// `memory.md` entries survive when memory fills).
+std::string CapTailLines(std::string_view text, size_t max_bytes) {
+  if (text.size() <= max_bytes) {
+    return std::string(text);
+  }
+  std::vector<std::string_view> lines;
+  size_t pos = 0;
+  while (pos <= text.size()) {
+    const size_t nl = text.find('\n', pos);
+    if (nl == std::string_view::npos) {
+      if (pos < text.size()) {
+        lines.push_back(text.substr(pos));
+      }
+      break;
+    }
+    lines.push_back(text.substr(pos, nl - pos));
+    pos = nl + 1;
+  }
+  std::vector<std::string_view> kept;
+  size_t used = 0;
+  for (size_t i = lines.size(); i > 0; --i) {
+    const std::string_view l = lines[i - 1];
+    const size_t need = l.size() + (kept.empty() ? 0 : 1);
+    if (used + need > max_bytes) {
+      break;
+    }
+    kept.push_back(l);
+    used += need;
+  }
+  if (kept.empty()) {
+    return CapText(text, max_bytes);
+  }
+  std::reverse(kept.begin(), kept.end());
+  std::string out;
+  out.reserve(used);
+  for (size_t i = 0; i < kept.size(); ++i) {
+    if (i > 0) {
+      out.push_back('\n');
+    }
+    out.append(kept[i]);
+  }
+  return out;
 }
 
 // True when `line` is a numbered option line (e.g. `"  12. Attack ..."`),
@@ -73,10 +153,9 @@ bool IsNumberedOptionLine(std::string_view line) {
   return i + 1 < line.size() && line[i] == '.' && line[i + 1] == ' ';
 }
 
-// Truncates `user` to `max_bytes` by first dropping non-option description
-// lines inside `Your screen now:` (keeping numbered option lines and `also:`)
-// so a crowded unit list does not hide its last options from the brain while
-// they remain in the grammar.
+// Truncates `user` to `max_bytes` while keeping ALL numbered option lines (both
+// `around me:` and `also:`) visible so the grammar never allows option numbers
+// the brain cannot see.
 std::string CapUserPreservingAlso(std::string_view user, size_t max_bytes) {
   if (user.size() <= max_bytes) {
     return std::string(user);
@@ -101,8 +180,8 @@ std::string CapUserPreservingAlso(std::string_view user, size_t max_bytes) {
     }
     std::vector<bool> keep(lines.size(), true);
     size_t cur_size = user.size();
-    // Drop non-option description lines inside the screen body from bottom up
-    // (preserving `also:` and all numbered option lines).
+    // Pass 1: drop non-option description lines inside the screen body from
+    // bottom up (preserving `also:` and every numbered option line).
     for (size_t i = lines.size(); i > 0 && cur_size > max_bytes; --i) {
       const std::string_view l = lines[i - 1];
       if (l == "also:" || IsNumberedOptionLine(l)) {
@@ -111,32 +190,65 @@ std::string CapUserPreservingAlso(std::string_view user, size_t max_bytes) {
       keep[i - 1] = false;
       cur_size -= l.size() + 1;
     }
-    std::string rebuilt(head);
+    std::string screen_rebuilt;
     bool first = true;
     for (size_t i = 0; i < lines.size(); ++i) {
       if (!keep[i]) {
         continue;
       }
       if (!first) {
-        rebuilt.push_back('\n');
+        screen_rebuilt.push_back('\n');
       }
-      rebuilt.append(lines[i]);
+      screen_rebuilt.append(lines[i]);
       first = false;
     }
-    if (rebuilt.size() <= max_bytes) {
-      return rebuilt;
+    if (head.size() + screen_rebuilt.size() <= max_bytes) {
+      return base::StrCat({head, screen_rebuilt});
     }
-    user = rebuilt;
-    const size_t also_pos = user.rfind("\nalso:\n");
-    if (also_pos != std::string_view::npos) {
-      const std::string_view tail = user.substr(also_pos);
-      constexpr std::string_view kGap = "\n[truncated]";
-      if (tail.size() + kGap.size() + 32 < max_bytes) {
-        const size_t head_budget = max_bytes - tail.size() - kGap.size();
-        return base::StrCat({user.substr(0, head_budget), kGap, tail});
+    // Pass 2: trim the prefix before `Your screen now:` (keeping line 1
+    // "You are <name>.") instead of ever slicing off `around me:` options.
+    const size_t first_nl = head.find('\n');
+    const std::string_view first_line =
+        first_nl == std::string_view::npos ? head : head.substr(0, first_nl);
+    const std::string minimal_head = base::StrCat({first_line, kScreenMarker});
+    if (minimal_head.size() + screen_rebuilt.size() <= max_bytes) {
+      return base::StrCat({minimal_head, screen_rebuilt});
+    }
+    // Pass 3: even the numbered option lines alone exceed `max_bytes`: shorten
+    // long option descriptions proportionally so EVERY option number stays
+    // visible in the prompt.
+    std::vector<std::string> opt_lines;
+    size_t opt_total = 0;
+    for (size_t i = 0; i < lines.size(); ++i) {
+      if (keep[i]) {
+        opt_lines.emplace_back(lines[i]);
+        opt_total += lines[i].size() + (opt_lines.size() > 1 ? 1 : 0);
       }
     }
-    return CapText(user, max_bytes);
+    const size_t body_budget =
+        max_bytes > minimal_head.size() ? max_bytes - minimal_head.size() : 0;
+    if (body_budget > 0 && !opt_lines.empty() && opt_total > body_budget) {
+      const size_t sep_bytes = opt_lines.size() - 1;
+      const size_t per_line =
+          body_budget > sep_bytes
+              ? std::max<size_t>(16,
+                                 (body_budget - sep_bytes) / opt_lines.size())
+              : 16;
+      std::string compact = minimal_head;
+      for (size_t i = 0; i < opt_lines.size(); ++i) {
+        if (i > 0) {
+          compact.push_back('\n');
+        }
+        compact.append(opt_lines[i].size() > per_line
+                           ? CapInline(opt_lines[i], per_line)
+                           : opt_lines[i]);
+      }
+      if (compact.size() <= max_bytes) {
+        return compact;
+      }
+      return CapText(compact, max_bytes);
+    }
+    return CapText(base::StrCat({minimal_head, screen_rebuilt}), max_bytes);
   }
   return CapText(user, max_bytes);
 }
@@ -276,6 +388,10 @@ std::string SelectRelevantNotes(std::string_view full_notes,
 LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
   LlmRequest request;
   request.system = input.rules;
+  // Give replies room for up to 7 standing `order:` lines when orders are
+  // enabled so `max_tokens` does not silently cut them off (A-L9).
+  request.max_tokens =
+      input.order_names.empty() ? kDefaultPlanMaxTokens : kOrdersPlanMaxTokens;
 
   const size_t reserved_tokens =
       EstimateTokens(request.system) +
@@ -287,49 +403,104 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
           : kMinUserBudgetTokens;
   const size_t max_user_bytes = user_budget_tokens * kBytesPerTokenEstimate;
 
-  // Static prefix: bot identity + static reference sections (boss notes, world
-  // guide) come before dynamic per-wake fields and the live screen so llama.cpp
-  // can reuse the KV-cache prefix across consecutive wakes.
-  std::string static_prefix =
+  // Mandatory minimum: bot name, capped wake reason, and the live screen
+  // (so numbered options are never pushed out by identity, memory, or events).
+  const std::string name_line =
       base::StrCat({"You are ", OneLine(input.bot_name), "."});
-  if (!input.identity.empty()) {
-    base::StrAppend(&static_prefix, {"\n\n", input.identity});
-  }
-
-  std::string dynamic_prefix = "\n\n";
-  if (!input.current_goal.empty()) {
-    base::StrAppend(&dynamic_prefix,
-                    {"Current goal: ", OneLine(input.current_goal), ".\n"});
-  }
-  if (!input.last_outcome.empty()) {
-    base::StrAppend(&dynamic_prefix,
-                    {"Last outcome: ", OneLine(input.last_outcome), ".\n"});
-  }
-  base::StrAppend(&dynamic_prefix,
-                  {"Woken: ", OneLine(input.wake_reason), "."});
-  if (!input.recent_events.empty()) {
-    base::StrAppend(&dynamic_prefix, {"\n\nSince your last look:"});
-    for (const std::string& event : input.recent_events) {
-      base::StrAppend(&dynamic_prefix, {"\n- ", OneLine(event)});
-    }
-  }
-  if (!input.active_orders.empty()) {
-    base::StrAppend(&dynamic_prefix, {"\n\nActive standing orders:"});
-    for (const std::string& ord : input.active_orders) {
-      base::StrAppend(&dynamic_prefix, {"\n- ", OneLine(ord)});
-    }
-  }
-
+  const std::string woken_line = base::StrCat(
+      {"Woken: ", CapInline(OneLine(input.wake_reason), kMaxInlineFieldBytes),
+       "."});
   const std::string screen_block =
       base::StrCat({"\n\nYour screen now:\n", screen.text});
 
-  // Reserve room for mandatory blocks (static identity + dynamic state + live
-  // screen) first, then allocate remaining budget in priority order:
-  // boss notes -> world guide -> relationships -> remembered panels.
   const size_t mandatory_bytes =
-      static_prefix.size() + dynamic_prefix.size() + screen_block.size();
+      name_line.size() + 2 + woken_line.size() + screen_block.size();
   size_t remaining =
       max_user_bytes > mandatory_bytes ? max_user_bytes - mandatory_bytes : 0;
+
+  std::string goal_line;
+  if (!input.current_goal.empty()) {
+    std::string candidate = base::StrCat(
+        {"Current goal: ",
+         CapInline(OneLine(input.current_goal), kMaxInlineFieldBytes), ".\n"});
+    if (candidate.size() <= remaining) {
+      remaining -= candidate.size();
+      goal_line = std::move(candidate);
+    }
+  }
+
+  std::string outcome_line;
+  if (!input.last_outcome.empty()) {
+    std::string candidate = base::StrCat(
+        {"Last outcome: ",
+         CapInline(OneLine(input.last_outcome), kMaxInlineFieldBytes), ".\n"});
+    if (candidate.size() <= remaining) {
+      remaining -= candidate.size();
+      outcome_line = std::move(candidate);
+    }
+  }
+
+  std::string orders_block;
+  if (!input.active_orders.empty()) {
+    constexpr std::string_view kHeader = "\n\nActive standing orders:";
+    const size_t budget = std::min(kMaxActiveOrdersBytes, remaining);
+    if (budget > kHeader.size() + 16) {
+      std::string buf(kHeader);
+      bool added_any = false;
+      for (const std::string& ord : input.active_orders) {
+        const std::string line = base::StrCat({"\n- ", OneLine(ord)});
+        if (buf.size() + line.size() > budget) {
+          break;
+        }
+        buf.append(line);
+        added_any = true;
+      }
+      if (added_any) {
+        remaining -= buf.size();
+        orders_block = std::move(buf);
+      }
+    }
+  }
+
+  std::string events_block;
+  if (!input.recent_events.empty()) {
+    constexpr std::string_view kHeader = "\n\nSince your last look:";
+    const size_t budget = std::min(kMaxRecentEventsBytes, remaining);
+    if (budget > kHeader.size() + 16) {
+      std::vector<std::string> kept;
+      size_t used = kHeader.size();
+      // Prefer the newest events when capped.
+      for (size_t i = input.recent_events.size(); i > 0; --i) {
+        std::string line =
+            base::StrCat({"\n- ", CapInline(OneLine(input.recent_events[i - 1]),
+                                            kMaxEventLineBytes)});
+        if (used + line.size() > budget) {
+          break;
+        }
+        used += line.size();
+        kept.push_back(std::move(line));
+      }
+      if (!kept.empty()) {
+        std::reverse(kept.begin(), kept.end());
+        events_block.assign(kHeader);
+        for (const std::string& l : kept) {
+          events_block.append(l);
+        }
+        remaining -= events_block.size();
+      }
+    }
+  }
+
+  std::string identity_block;
+  if (!input.identity.empty()) {
+    constexpr std::string_view kHeader = "\n\n";
+    if (remaining > kHeader.size() + 16) {
+      const size_t budget =
+          std::min(kMaxIdentityBytes, remaining - kHeader.size());
+      identity_block = base::StrCat({kHeader, CapText(input.identity, budget)});
+      remaining -= identity_block.size();
+    }
+  }
 
   std::string notes_block;
   if (!input.notes.empty()) {
@@ -339,6 +510,19 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
           std::min(kMaxNotesBytes, remaining - kHeader.size());
       notes_block = base::StrCat({kHeader, CapText(input.notes, budget)});
       remaining -= notes_block.size();
+    }
+  }
+
+  std::string memory_block;
+  if (!input.memory.empty()) {
+    constexpr std::string_view kHeader =
+        "\n\nWhat you remember from earlier:\n";
+    if (remaining > kHeader.size() + 32) {
+      const size_t budget =
+          std::min(kMaxMemoryBytes, remaining - kHeader.size());
+      memory_block =
+          base::StrCat({kHeader, CapTailLines(input.memory, budget)});
+      remaining -= memory_block.size();
     }
   }
 
@@ -389,9 +573,16 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
     }
   }
 
-  request.user =
-      base::StrCat({static_prefix, notes_block, knowledge_block, dynamic_prefix,
-                    relationships_block, remembered_block, screen_block});
+  // Static prefix first (`name`, `identity`, `memory`, `notes`, `knowledge`)
+  // then dynamic per-wake fields (`goal`, `outcome`, `woken`, `events`,
+  // `active_orders`, `relationships`, `remembered`) then live screen for
+  // llama.cpp KV-cache prefix reuse.
+  const std::string dynamic_prefix =
+      base::StrCat({"\n\n", goal_line, outcome_line, woken_line, events_block,
+                    orders_block});
+  request.user = base::StrCat(
+      {name_line, identity_block, memory_block, notes_block, knowledge_block,
+       dynamic_prefix, relationships_block, remembered_block, screen_block});
   if (request.user.size() > max_user_bytes) {
     request.user = CapUserPreservingAlso(request.user, max_user_bytes);
   }

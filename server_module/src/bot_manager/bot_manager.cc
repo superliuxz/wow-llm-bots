@@ -2,6 +2,7 @@
 
 #include "bot_manager/bot_manager.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -57,14 +58,39 @@ struct BotStrategyOverride {
   std::string non_combat;
 };
 
-// World-thread-only set of Engines that currently own a
-// BrainPolicyListener. Keyed by uintptr_t so the listener's destructor can
-// deregister itself when ActionExecutionListeners::~ActionExecutionListeners()
-// deletes it on bot logout/shutdown, preventing duplicate registrations and
-// address-reuse bugs.
-std::unordered_set<uintptr_t>& PolicyListenerEngines() {
-  static auto* set = new std::unordered_set<uintptr_t>();
-  return *set;
+// Whether an LLM harness is currently connected (A-M9).
+std::atomic<bool>& BrainConnectedFlag() {
+  static auto* flag = new std::atomic<bool>(false);
+  return *flag;
+}
+
+// Thread-safe state shared between the world thread (BotManager,
+// OptionExecutor) and map threads (Playerbots' UpdateAI -> BrainPolicyListener,
+// Engine destruction) so `MapUpdate.Threads > 1` is race-free (A-M10).
+struct PolicySharedState {
+  base::Lock lock;
+  // Engines that currently own a BrainPolicyListener (keyed by uintptr_t so
+  // ~BrainPolicyListener can deregister on Engine destruction).
+  std::unordered_set<uintptr_t> listener_engines GUARDED_BY(lock);
+  // `bot guid -> first dead ms` inside a dungeon (cleared when alive/offline).
+  std::unordered_map<uint64_t, uint32_t> dungeon_dead_since_ms GUARDED_BY(lock);
+  // `bot guid -> getMSTime() deadline` the brain chose to wait for rez until.
+  std::unordered_map<uint64_t, uint32_t> rez_wait_until_ms GUARDED_BY(lock);
+  // Per-bot strategy overrides.
+  std::unordered_map<std::string, BotStrategyOverride> bot_overrides
+      GUARDED_BY(lock);
+  // Per-bot group policies keyed by bot guid.
+  struct StoredGroupPolicy {
+    uint64_t group_guid = 0;
+    BotManager::GroupPolicy policy;
+  };
+  std::unordered_map<uint64_t, StoredGroupPolicy> group_policies
+      GUARDED_BY(lock);
+};
+
+PolicySharedState& PolicyState() {
+  static auto* state = new PolicySharedState();
+  return *state;
 }
 
 // Matches AzerothCore Spell::CheckItems for SPELL_EFFECT_ENCHANT_ITEM_TEMPORARY
@@ -176,24 +202,6 @@ bool HasLivingResurrectorOnSameMap(Player* bot) {
 // (or the brain can choose `Release spirit` / `Accept resurrection` at any
 // time).
 constexpr uint32_t kMaxWaitForRezMs = 90000;
-
-// World-thread-only map of `bot->GetGUID().GetRawValue() -> first dead ms`
-// inside a dungeon. Cleared by `BotManager::Tick()` whenever the bot is alive,
-// outside a dungeon, or offline — so death #2+ always starts a fresh 90 s
-// rez-wait window (unlike per-Engine state on `BOT_STATE_DEAD`, which is never
-// invoked while alive).
-std::unordered_map<uint64_t, uint32_t>& DungeonDeadSinceMs() {
-  static auto* map = new std::unordered_map<uint64_t, uint32_t>();
-  return *map;
-}
-
-// World-thread-only `bot guid -> getMSTime() deadline` the brain chose to wait
-// for a resurrection until (`rez:wait`, RH-M3). Cleared with
-// DungeonDeadSinceMs() whenever the bot is alive or offline.
-std::unordered_map<uint64_t, uint32_t>& RezWaitUntilMs() {
-  static auto* map = new std::unordered_map<uint64_t, uint32_t>();
-  return *map;
-}
 
 struct PendingSharedQuestEntry {
   uint32_t quest_id = 0;
@@ -341,10 +349,14 @@ class BrainPolicyListener final : public ActionExecutionListener {
  public:
   BrainPolicyListener(uintptr_t engine_key, Player* bot, PlayerbotAI* ai)
       : engine_key_(engine_key), bot_(bot), ai_(ai) {
-    PolicyListenerEngines().insert(engine_key_);
+    PolicySharedState& st = PolicyState();
+    base::AutoLock lock(st.lock);
+    st.listener_engines.insert(engine_key_);
   }
   ~BrainPolicyListener() override {
-    PolicyListenerEngines().erase(engine_key_);
+    PolicySharedState& st = PolicyState();
+    base::AutoLock lock(st.lock);
+    st.listener_engines.erase(engine_key_);
   }
   bool Before(Action* /*action*/, Event /*event*/) override { return true; }
   bool AllowExecution(Action* action, Event event) override {
@@ -352,39 +364,56 @@ class BrainPolicyListener final : public ActionExecutionListener {
       return true;
     }
     const std::string& name = action->getName();
-    if (name == "accept invitation" || name == "equip upgrade" ||
-        name == "equip upgrades packet action" || name == "loot roll" ||
-        name == "roll" || name == "accept quest share" ||
-        name == "ready check" || name == "lfg join" || name == "lfg accept" ||
-        name == "lfg role check" || name == "lfg leave" ||
-        name == "lfg teleport") {
-      return false;
-    }
     if (name == "apply stone") {
       return HasEligibleTempEnchant(bot_, ai_, /*is_stone=*/true);
     }
     if (name == "apply oil") {
       return HasEligibleTempEnchant(bot_, ai_, /*is_stone=*/false);
     }
+    // When no LLM harness is connected, let Playerbots answer invites, loot
+    // rolls, ready checks, quest shares, and LFG popups so human groupmates do
+    // not stall waiting for timeouts (A-M9).
+    const bool brain_connected = BotManager::IsBrainConnected();
+    if (brain_connected &&
+        (name == "accept invitation" || name == "equip upgrade" ||
+         name == "equip upgrades packet action" || name == "loot roll" ||
+         name == "roll" || name == "accept quest share" ||
+         name == "ready check" || name == "lfg join" || name == "lfg accept" ||
+         name == "lfg role check" || name == "lfg leave" ||
+         name == "lfg teleport")) {
+      return false;
+    }
     if (name == "auto release" && bot_ && !bot_->IsAlive()) {
       const uint64_t key = bot_->GetGUID().GetRawValue();
-      if (auto it = RezWaitUntilMs().find(key); it != RezWaitUntilMs().end()) {
+      PolicySharedState& st = PolicyState();
+      base::AutoLock lock(st.lock);
+      if (auto it = st.rez_wait_until_ms.find(key);
+          it != st.rez_wait_until_ms.end()) {
         // The brain chose to wait (signed difference: getMSTime wraps).
-        if (static_cast<int32_t>(it->second - getMSTime()) > 0) {
+        if (brain_connected &&
+            static_cast<int32_t>(it->second - getMSTime()) > 0) {
           return false;
         }
-        RezWaitUntilMs().erase(it);
+        st.rez_wait_until_ms.erase(it);
       }
     }
     if (name == "auto release" && bot_ && bot_->GetMap() &&
         bot_->GetMap()->IsDungeon()) {
       const uint64_t key = bot_->GetGUID().GetRawValue();
+      PolicySharedState& st = PolicyState();
       if (bot_->IsAlive()) {
-        DungeonDeadSinceMs().erase(key);
+        base::AutoLock lock(st.lock);
+        st.dungeon_dead_since_ms.erase(key);
         return true;
       }
-      auto [it, inserted] = DungeonDeadSinceMs().try_emplace(key, getMSTime());
-      if (GetMSTimeDiffToNow(it->second) < kMaxWaitForRezMs &&
+      uint32_t dead_since = 0;
+      {
+        base::AutoLock lock(st.lock);
+        auto [it, inserted] =
+            st.dungeon_dead_since_ms.try_emplace(key, getMSTime());
+        dead_since = it->second;
+      }
+      if (GetMSTimeDiffToNow(dead_since) < kMaxWaitForRezMs &&
           HasLivingResurrectorOnSameMap(bot_)) {
         return false;
       }
@@ -414,29 +443,16 @@ void EnsurePolicyListener(Player* player, PlayerbotAI* ai) {
   }
   if (Engine* engine = ai->GetCurrentEngine()) {
     const uintptr_t key = reinterpret_cast<uintptr_t>(engine);
-    if (PolicyListenerEngines().contains(key)) {
-      return;
+    {
+      PolicySharedState& st = PolicyState();
+      base::AutoLock lock(st.lock);
+      if (st.listener_engines.contains(key)) {
+        return;
+      }
     }
     engine->AddActionExecutionListener(
         new BrainPolicyListener(key, player, ai));
   }
-}
-
-// World-thread-only per-bot strategy overrides.
-std::unordered_map<std::string, BotStrategyOverride>& BotOverrides() {
-  static auto* map = new std::unordered_map<std::string, BotStrategyOverride>();
-  return *map;
-}
-
-// World-thread-only per-bot group policies the brain chose, keyed by bot guid,
-// with the guid of the group they were chosen in.
-struct StoredGroupPolicy {
-  uint64_t group_guid = 0;
-  BotManager::GroupPolicy policy;
-};
-std::unordered_map<uint64_t, StoredGroupPolicy>& GroupPolicies() {
-  static auto* map = new std::unordered_map<uint64_t, StoredGroupPolicy>();
-  return *map;
 }
 
 // The solo combat extras playerbots' AiFactory gives random bots that aren't
@@ -512,10 +528,14 @@ void BotManager::Tick() {
       if (player->IsInWorld()) {
         if (player->IsAlive() || !player->GetMap() ||
             !player->GetMap()->IsDungeon()) {
-          DungeonDeadSinceMs().erase(bot.guid);
+          PolicySharedState& st = PolicyState();
+          base::AutoLock lock(st.lock);
+          st.dungeon_dead_since_ms.erase(bot.guid);
         }
         if (player->IsAlive()) {
-          RezWaitUntilMs().erase(bot.guid);
+          PolicySharedState& st = PolicyState();
+          base::AutoLock lock(st.lock);
+          st.rez_wait_until_ms.erase(bot.guid);
         }
         EnsureStrategies(player);
       }
@@ -528,8 +548,12 @@ void BotManager::Tick() {
       bot.was_online = false;
       bot.next_login_ms = now_ms_ + kLoginRetryMs;
     }
-    DungeonDeadSinceMs().erase(bot.guid);
-    RezWaitUntilMs().erase(bot.guid);
+    {
+      PolicySharedState& st = PolicyState();
+      base::AutoLock lock(st.lock);
+      st.dungeon_dead_since_ms.erase(bot.guid);
+      st.rez_wait_until_ms.erase(bot.guid);
+    }
     {
       PendingPromptsState& prompts = PendingPrompts();
       base::AutoLock lock(prompts.lock);
@@ -590,19 +614,23 @@ void BotManager::EnsureStrategies(Player* player) {
       player->GetMap() != nullptr && player->GetMap()->IsDungeon();
   std::string non_combat = AdjustNonCombatStrategies(
       strategies_.non_combat, in_group, is_leader, in_dungeon);
-  if (auto it = BotOverrides().find(player->GetName());
-      it != BotOverrides().end()) {
-    if (!it->second.combat.empty()) {
-      if (!combat.empty()) {
-        combat.push_back(',');
+  {
+    PolicySharedState& st = PolicyState();
+    base::AutoLock lock(st.lock);
+    if (auto it = st.bot_overrides.find(player->GetName());
+        it != st.bot_overrides.end()) {
+      if (!it->second.combat.empty()) {
+        if (!combat.empty()) {
+          combat.push_back(',');
+        }
+        combat += it->second.combat;
       }
-      combat += it->second.combat;
-    }
-    if (!it->second.non_combat.empty()) {
-      if (!non_combat.empty()) {
-        non_combat.push_back(',');
+      if (!it->second.non_combat.empty()) {
+        if (!non_combat.empty()) {
+          non_combat.push_back(',');
+        }
+        non_combat += it->second.non_combat;
       }
-      non_combat += it->second.non_combat;
     }
   }
   // The brain's own choice for this group comes last, so it wins (RH-M1/M2).
@@ -635,10 +663,20 @@ void BotManager::EnsureStrategies(Player* player) {
            player->GetName());
 }
 
+void BotManager::SetBrainConnected(bool connected) {
+  BrainConnectedFlag().store(connected, std::memory_order_release);
+}
+
+bool BotManager::IsBrainConnected() {
+  return BrainConnectedFlag().load(std::memory_order_acquire);
+}
+
 void BotManager::SetBotStrategyOverride(const std::string& bot_name,
                                         std::string combat_extra,
                                         std::string non_combat_extra) {
-  BotOverrides()[bot_name] =
+  PolicySharedState& st = PolicyState();
+  base::AutoLock lock(st.lock);
+  st.bot_overrides[bot_name] =
       BotStrategyOverride{std::move(combat_extra), std::move(non_combat_extra)};
 }
 
@@ -646,13 +684,16 @@ BotManager::GroupPolicy BotManager::GetGroupPolicy(Player* bot) {
   if (!bot) {
     return {};
   }
-  auto it = GroupPolicies().find(bot->GetGUID().GetRawValue());
-  if (it == GroupPolicies().end()) {
+  const Group* group = bot->GetGroup();
+  const uint64_t key = bot->GetGUID().GetRawValue();
+  PolicySharedState& st = PolicyState();
+  base::AutoLock lock(st.lock);
+  auto it = st.group_policies.find(key);
+  if (it == st.group_policies.end()) {
     return {};
   }
-  const Group* group = bot->GetGroup();
   if (!group || group->GetGUID().GetRawValue() != it->second.group_guid) {
-    GroupPolicies().erase(it);  // Chosen for a group it is no longer in.
+    st.group_policies.erase(it);  // Chosen for a group it is no longer in.
     return {};
   }
   return it->second.policy;
@@ -664,19 +705,25 @@ void BotManager::SetGroupPolicy(Player* bot, GroupPolicy policy) {
   }
   const Group* group = bot->GetGroup();
   const uint64_t key = bot->GetGUID().GetRawValue();
+  PolicySharedState& st = PolicyState();
+  base::AutoLock lock(st.lock);
   if (!group || policy == GroupPolicy{}) {
-    GroupPolicies().erase(key);
+    st.group_policies.erase(key);
   } else {
-    GroupPolicies()[key] = {group->GetGUID().GetRawValue(), policy};
+    st.group_policies[key] = {group->GetGUID().GetRawValue(), policy};
   }
 }
 
 void BotManager::ClearBotStrategyOverride(const std::string& bot_name) {
-  BotOverrides().erase(bot_name);
+  PolicySharedState& st = PolicyState();
+  base::AutoLock lock(st.lock);
+  st.bot_overrides.erase(bot_name);
 }
 
 void BotManager::ClearBotStrategyOverrides() {
-  BotOverrides().clear();
+  PolicySharedState& st = PolicyState();
+  base::AutoLock lock(st.lock);
+  st.bot_overrides.clear();
 }
 
 uint32_t BotManager::GetPendingSharedQuest(Player* bot) {
@@ -838,15 +885,22 @@ PopupState BotManager::ReadPopupState(Player* bot) {
 
 void BotManager::WaitForResurrection(Player* bot, uint32_t wait_ms) {
   if (bot) {
-    RezWaitUntilMs()[bot->GetGUID().GetRawValue()] = getMSTime() + wait_ms;
+    PolicySharedState& st = PolicyState();
+    base::AutoLock lock(st.lock);
+    st.rez_wait_until_ms[bot->GetGUID().GetRawValue()] = getMSTime() + wait_ms;
   }
 }
 
 void BotManager::Stop() {
-  ClearBotStrategyOverrides();
-  GroupPolicies().clear();
-  RezWaitUntilMs().clear();
-  DungeonDeadSinceMs().clear();
+  SetBrainConnected(false);
+  {
+    PolicySharedState& st = PolicyState();
+    base::AutoLock lock(st.lock);
+    st.bot_overrides.clear();
+    st.group_policies.clear();
+    st.rez_wait_until_ms.clear();
+    st.dungeon_dead_since_ms.clear();
+  }
   {
     PendingPromptsState& prompts = PendingPrompts();
     base::AutoLock lock(prompts.lock);

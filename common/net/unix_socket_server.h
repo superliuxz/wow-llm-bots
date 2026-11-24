@@ -16,9 +16,11 @@
 
 namespace net {
 
-// Unix socket server for length-prefixed frames (net/frame_codec.h), with at
-// most one client: a new connection replaces the old one. Create, use and
-// destroy on one IO thread (a base::Thread with MessagePumpType::IO).
+// Unix socket server for length-prefixed frames (net/frame_codec.h), bound
+// owner-only (0600, same-UID SO_PEERCRED) with at most one client: a second
+// connection while a client is live is refused so a stray tool or second
+// harness cannot kick the live harness out. Create, use and destroy on one IO
+// thread (a base::Thread with MessagePumpType::IO).
 class UnixSocketServer : public base::MessagePumpForIO::FdWatcher {
  public:
   struct Callbacks {
@@ -34,6 +36,7 @@ class UnixSocketServer : public base::MessagePumpForIO::FdWatcher {
     uint64_t frames_received = 0;
     uint64_t frames_dropped = 0;  // Not connected, or output backed up.
     uint64_t connections = 0;
+    uint64_t connections_rejected = 0;  // Busy or unauthorized peer UID.
   };
 
   UnixSocketServer(std::string path,

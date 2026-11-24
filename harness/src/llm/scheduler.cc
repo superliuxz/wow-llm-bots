@@ -11,15 +11,46 @@
 
 #include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 
 namespace harness {
 
-Scheduler::Scheduler(size_t max_in_flight)
+Scheduler::Scheduler(size_t max_in_flight, base::TimeDelta aging_step)
     // Zero would never start anything.
     : max_in_flight_(std::max<size_t>(max_in_flight, 1)),
+      aging_step_(aging_step),
       slot_busy_(max_in_flight_, false) {}
 
 Scheduler::~Scheduler() = default;
+
+void Scheduler::SetNowForTesting(
+    base::RepeatingCallback<base::TimeTicks()> now_fn) {
+  now_fn_ = std::move(now_fn);
+}
+
+base::TimeTicks Scheduler::Now() const {
+  return now_fn_ ? now_fn_.Run() : base::TimeTicks::Now();
+}
+
+int Scheduler::EffectivePriority(const Waiting& w, base::TimeTicks now) const {
+  const int base_prio = static_cast<int>(w.urgency);
+  if (base_prio == 0 || !aging_step_.is_positive() || w.enqueued_at.is_null()) {
+    return base_prio;
+  }
+  const base::TimeDelta waited = now - w.enqueued_at;
+  if (!waited.is_positive()) {
+    return base_prio;
+  }
+  const int64_t steps = waited.InMicroseconds() / aging_step_.InMicroseconds();
+  // Background reflection (P4) never jumps ahead of P1/P0 gameplay wakes;
+  // interactive/routine wakes (P1..P3) can age all the way to P0 so they
+  // cannot starve indefinitely under continuous load (A-M7).
+  const int floor_prio = w.urgency == Urgency::kP4Reflect
+                             ? static_cast<int>(Urgency::kP2Routine)
+                             : static_cast<int>(Urgency::kP0Combat);
+  return std::max(floor_prio,
+                  base_prio - static_cast<int>(std::min<int64_t>(steps, 10)));
+}
 
 void Scheduler::SubmitCancelable(const std::string& bot,
                                  Urgency urgency,
@@ -36,7 +67,7 @@ void Scheduler::SubmitCancelable(const std::string& bot,
     }
   }
   if (!replaced) {
-    queue_.push_back({bot, urgency, next_order_++, std::move(work)});
+    queue_.push_back({bot, urgency, next_order_++, Now(), std::move(work)});
   }
 
   // Preempt an obsolete lower-priority in-flight call for the same bot when a
@@ -111,17 +142,21 @@ void Scheduler::StartWaiting() {
   }
   starting_ = true;
   while (in_flight_.size() < max_in_flight_) {
-    // The next to start: urgent first, then the longest waiting, skipping bots
-    // that already have a question in progress.
+    // The next to start: lowest effective priority (with aging so lower tiers
+    // cannot starve under load), then the longest waiting, skipping bots that
+    // already have a question in progress.
+    const base::TimeTicks now = Now();
     size_t best = queue_.size();
+    int best_prio = 0;
     for (size_t i = 0; i < queue_.size(); ++i) {
       if (in_flight_.count(queue_[i].bot) > 0) {
         continue;
       }
-      if (best == queue_.size() || queue_[i].urgency < queue_[best].urgency ||
-          (queue_[i].urgency == queue_[best].urgency &&
-           queue_[i].order < queue_[best].order)) {
+      const int prio = EffectivePriority(queue_[i], now);
+      if (best == queue_.size() || prio < best_prio ||
+          (prio == best_prio && queue_[i].order < queue_[best].order)) {
         best = i;
+        best_prio = prio;
       }
     }
     if (best == queue_.size()) {

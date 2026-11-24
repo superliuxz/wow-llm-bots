@@ -1,6 +1,7 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -215,6 +216,65 @@ TEST(UnixSocketTest, ClientCanDestroySelfInOnDisconnected) {
   // Server drops connection -> client's on_disconnected destroys client.
   RunOn(server_io, [&] { server.reset(); });
   ASSERT_TRUE(disconnected.TimedWait(kTimeout));
+}
+
+TEST(UnixSocketTest, SocketIsOwnerOnlyAndRejectsSecondClientWhileLive) {
+  const std::string path = TestSocketPath();
+  base::Thread server_io("server"), client_io("client");
+  ASSERT_TRUE(server_io.StartWithOptions(IoOptions()));
+  ASSERT_TRUE(client_io.StartWithOptions(IoOptions()));
+  std::unique_ptr<UnixSocketServer> server;
+  std::unique_ptr<UnixSocketClient> first;
+  base::WaitableEvent first_connected, first_disconnected;
+  Recorder at_first;
+
+  RunOn(server_io, [&] {
+    server =
+        std::make_unique<UnixSocketServer>(path, UnixSocketServer::Callbacks{});
+    ASSERT_TRUE(server->Listen());
+    struct stat st{};
+    ASSERT_EQ(stat(path.c_str(), &st), 0);
+    EXPECT_EQ(st.st_mode & 0777, 0600u);
+  });
+
+  RunOn(client_io, [&] {
+    first = std::make_unique<UnixSocketClient>(
+        path,
+        UnixSocketClient::Callbacks{
+            [&] { first_connected.Signal(); },
+            [&](std::string f) { at_first.OnFrame(std::move(f)); },
+            [&] { first_disconnected.Signal(); }},
+        base::Milliseconds(50));
+    first->Start();
+  });
+  ASSERT_TRUE(first_connected.TimedWait(kTimeout));
+
+  // A second raw client connecting while `first` is live is refused and closed
+  // without kicking `first` off.
+  const int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  ASSERT_GE(fd, 0);
+  sockaddr_un addr = {};
+  addr.sun_family = AF_UNIX;
+  std::strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
+  ASSERT_EQ(connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)),
+            0);
+  char buf[16];
+  // Server immediately closes the rejected socket -> EOF.
+  EXPECT_EQ(recv(fd, buf, sizeof(buf), 0), 0);
+  close(fd);
+
+  RunOn(server_io, [&] {
+    EXPECT_TRUE(server->connected());
+    EXPECT_EQ(server->stats().connections, 1u);
+    EXPECT_EQ(server->stats().connections_rejected, 1u);
+    EXPECT_TRUE(server->SendFrame("still alive"));
+  });
+  ASSERT_TRUE(at_first.WaitForFrame());
+  EXPECT_EQ(at_first.frames(), std::vector<std::string>{"still alive"});
+  EXPECT_FALSE(first_disconnected.TimedWait(base::Milliseconds(50)));
+
+  RunOn(client_io, [&] { first.reset(); });
+  RunOn(server_io, [&] { server.reset(); });
 }
 
 }  // namespace

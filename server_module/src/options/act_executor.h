@@ -28,6 +28,8 @@ struct ActiveAct {
 
   struct InterruptedActivity {
     bool active = false;
+    uint32_t map_id = 0;
+    uint32_t instance_id = 0;
     uint64_t target_guid = 0;
     wlb::snapshot::Vec3 prev_pos;
     float prev_target_dist_yd = 0.0f;
@@ -35,6 +37,8 @@ struct ActiveAct {
   };
 
   uint32_t command_id = 0;
+  uint32_t map_id = 0;
+  uint32_t instance_id = 0;
   wlb::snapshot::Command_Act act;
   // For `to` / `away` / `out of` / `back`: current destination, last anchor
   // geometry, and last path recompute timestamp.
@@ -94,6 +98,10 @@ void CancelActiveAct(Player* bot, ActiveAct* active);
 // disconnect, or one specific `target_guid` on explicit Attack/TARGET).
 void ClearAvoidedTargetsForBot(uint64_t bot_guid);
 void ClearAvoidedTargetForBot(uint64_t bot_guid, uint64_t target_guid);
+
+// Clears saved pre-dodge `back` position for `bot_guid` (e.g. on map/instance
+// change or disconnect so old-map coordinates are never reused, A-L1).
+void ClearLastInterruptedForBot(uint64_t bot_guid);
 
 }  // namespace llm_brain
 

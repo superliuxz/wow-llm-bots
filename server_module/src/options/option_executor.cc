@@ -770,22 +770,35 @@ void CollectNpcActions(Player* bot,
     const std::string& npc_name = npc->GetName();
 
     // 1. Quest turn-ins (with explicit per-reward options when > 1 choice)
-    //    and quest accepts (one option per available quest).
+    //    and quest accepts (one option per available quest). Read quest
+    //    relations directly without calling `bot->PrepareQuestMenu()` so
+    //    snapshot reads never overwrite `PlayerTalkClass` while Playerbots'
+    //    own quest/RPG actions are using it (A-M12).
     if (npc->HasNpcFlag(UNIT_NPC_FLAG_QUESTGIVER) &&
         bot->CanInteractWithQuestGiver(npc)) {
-      bot->PrepareQuestMenu(npc->GetGUID());
-      const QuestMenu& menu = bot->PlayerTalkClass->GetQuestMenu();
-      for (uint8_t idx = 0;
-           idx < menu.GetMenuItemCount() && out->size() < kMaxNpcActions;
-           ++idx) {
-        const QuestMenuItem& item = menu.GetItem(idx);
-        const Quest* quest = sObjectMgr->GetQuestTemplate(item.QuestId);
+      std::vector<uint32_t> seen_quests;
+      const auto record_seen = [&](uint32_t qid) {
+        if (std::find(seen_quests.begin(), seen_quests.end(), qid) !=
+            seen_quests.end()) {
+          return false;
+        }
+        seen_quests.push_back(qid);
+        return true;
+      };
+      const QuestRelationBounds involved =
+          sObjectMgr->GetCreatureQuestInvolvedRelationBounds(npc->GetEntry());
+      for (auto itr = involved.first;
+           itr != involved.second && out->size() < kMaxNpcActions; ++itr) {
+        const uint32_t qid = itr->second;
+        if (!record_seen(qid)) {
+          continue;
+        }
+        const Quest* quest = sObjectMgr->GetQuestTemplate(qid);
         if (!quest) {
           continue;
         }
-        const QuestStatus status = bot->GetQuestStatus(item.QuestId);
-        if (status == QUEST_STATUS_COMPLETE &&
-            !bot->GetQuestRewardStatus(item.QuestId) &&
+        if (bot->GetQuestStatus(qid) == QUEST_STATUS_COMPLETE &&
+            !bot->GetQuestRewardStatus(qid) &&
             bot->CanRewardQuest(quest, false)) {
           const uint32_t choices = quest->GetRewChoiceItemsCount();
           if (choices > 1) {
@@ -811,9 +824,22 @@ void CollectNpcActions(Player* bot,
                  u.guid,
                  "Turn in \"" + quest->GetTitle() + "\" to " + npc_name});
           }
-        } else if (status == QUEST_STATUS_NONE &&
-                   bot->CanTakeQuest(quest, false) &&
-                   bot->CanAddQuest(quest, false)) {
+        }
+      }
+      const QuestRelationBounds starters =
+          sObjectMgr->GetCreatureQuestRelationBounds(npc->GetEntry());
+      for (auto itr = starters.first;
+           itr != starters.second && out->size() < kMaxNpcActions; ++itr) {
+        const uint32_t qid = itr->second;
+        if (!record_seen(qid)) {
+          continue;
+        }
+        const Quest* quest = sObjectMgr->GetQuestTemplate(qid);
+        if (!quest) {
+          continue;
+        }
+        if (bot->GetQuestStatus(qid) == QUEST_STATUS_NONE &&
+            bot->CanTakeQuest(quest, false) && bot->CanAddQuest(quest, false)) {
           out->push_back(
               {"npc_qaccept:" + u.guid + ":" +
                    std::to_string(quest->GetQuestId()),
@@ -1918,8 +1944,11 @@ WalkStepResult TickLongWalk(Player* bot,
         // Defer instead of aborting as "stuck" when movement is transiently
         // prevented (e.g., casting a buff, brief root/stun, or controlled
         // motion); CheckWalkProgress's 10 s timeout bounds true stalls.
-        if (bot->HasUnitFlag(UNIT_FLAG_DISABLE_MOVE) ||
-            bot->HasUnitState(UNIT_STATE_NOT_MOVE) ||
+        if (bot->IsInFlight() || bot->HasUnitFlag(UNIT_FLAG_DISABLE_MOVE) ||
+            bot->HasUnitState(UNIT_STATE_NOT_MOVE | UNIT_STATE_IN_FLIGHT |
+                              UNIT_STATE_FLEEING | UNIT_STATE_CONFUSED |
+                              UNIT_STATE_STUNNED | UNIT_STATE_CHARMED |
+                              UNIT_STATE_POSSESSED | UNIT_STATE_DISTRACTED) ||
             bot->IsMovementPreventedByCasting() ||
             bot->GetMotionMaster()->GetMotionSlotType(MOTION_SLOT_CONTROLLED) !=
                 NULL_MOTION_TYPE) {
@@ -2647,21 +2676,42 @@ ExecuteResult ExecuteOption(Player* bot,
     if (parts.size() != 3 || !ParseUint32(parts[2], &qid)) {
       return {"invalid shared quest"};
     }
-    BotManager::ClearPendingSharedQuest(bot);
+    // Verify the pending share still matches `qid` before acting so a stale
+    // choice from an older snapshot can never accept a different/expired share
+    // (A-L2).
+    const uint32_t pending_qid = BotManager::GetPendingSharedQuest(bot);
     if (parts[1] == "decline") {
-      bot->SetDivider(ObjectGuid::Empty);
+      if (pending_qid == qid) {
+        BotManager::ClearPendingSharedQuest(bot);
+        if (Player* sharer =
+                ObjectAccessor::FindConnectedPlayer(bot->GetDivider())) {
+          sharer->SendPushToPartyResponse(bot, QUEST_PARTY_MSG_DECLINE_QUEST);
+        }
+        bot->SetDivider(ObjectGuid::Empty);
+      }
       return {.used = true, .info = "declined shared quest"};
     }
+    if (parts[1] != "accept") {
+      return {"invalid shared quest action"};
+    }
+    WorldSession* session = bot->GetSession();
+    const ObjectGuid divider = bot->GetDivider();
     const Quest* quest = sObjectMgr->GetQuestTemplate(qid);
-    if (!quest || !bot->GetDivider()) {
+    if (!session || !quest || !divider || pending_qid != qid) {
       return {"shared quest is no longer available"};
     }
-    if (!bot->CanTakeQuest(quest, false) || !bot->CanAddQuest(quest, false)) {
+    BotManager::ClearPendingSharedQuest(bot);
+    // Route through AzerothCore's real `CMSG_QUESTGIVER_ACCEPT_QUEST` opcode
+    // handler so sharer validity, sellable-src-item exploit checks, party
+    // response packets, and src-spell casting match a human client (A-L2).
+    WorldPacket p(CMSG_QUESTGIVER_ACCEPT_QUEST, 8 + 4 + 4);
+    p << divider << qid << uint32_t(0);
+    p.rpos(0);
+    session->HandleQuestgiverAcceptQuestOpcode(p);
+    if (bot->GetQuestStatus(qid) == QUEST_STATUS_NONE) {
       bot->SetDivider(ObjectGuid::Empty);
       return {"cannot accept shared quest"};
     }
-    bot->AddQuestAndCheckCompletion(quest, nullptr);
-    bot->SetDivider(ObjectGuid::Empty);
     ai->RecordQuestAccepted(qid);
     return {.used = true, .info = "accepted shared quest " + quest->GetTitle()};
   }
@@ -2767,8 +2817,16 @@ ExecuteResult ExecuteOption(Player* bot,
       info = "tanking again";
     } else if (what == "stay") {
       policy.stay = true;
-      bot->StopMoving();
-      bot->GetMotionMaster()->Clear();
+      if (!bot->IsInFlight() &&
+          !bot->HasUnitState(UNIT_STATE_IN_FLIGHT | UNIT_STATE_FLEEING |
+                             UNIT_STATE_CONFUSED | UNIT_STATE_STUNNED |
+                             UNIT_STATE_CHARMED | UNIT_STATE_POSSESSED |
+                             UNIT_STATE_DISTRACTED) &&
+          bot->GetMotionMaster()->GetMotionSlotType(MOTION_SLOT_CONTROLLED) ==
+              NULL_MOTION_TYPE) {
+        bot->StopMoving();
+        bot->GetMotionMaster()->Clear();
+      }
       info = "waiting here";
     } else if (what == "follow") {
       policy.stay = false;

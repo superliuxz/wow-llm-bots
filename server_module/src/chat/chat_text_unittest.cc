@@ -53,5 +53,15 @@ TEST(ChatTextTest, TrivialLinesAskNothing) {
   }
 }
 
+TEST(ChatTextTest, MentionsNameMatchesWholeWordsOnly) {
+  EXPECT_FALSE(MentionsName("need heals please", "Ed"));
+  EXPECT_FALSE(MentionsName("freddy come here", "Ed"));
+  EXPECT_FALSE(MentionsName("edited the pull", "Ed"));
+  EXPECT_TRUE(MentionsName("Ed can you heal?", "Ed"));
+  EXPECT_TRUE(MentionsName("hey ed!", "Ed"));
+  EXPECT_TRUE(MentionsName("wait, ED.", "Ed"));
+  EXPECT_FALSE(MentionsName("hello", ""));
+}
+
 }  // namespace
 }  // namespace llm_brain

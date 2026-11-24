@@ -2,13 +2,11 @@
 
 #include "chat/chat_scripts.h"
 
-#include <algorithm>
+#include <algorithm>  // IWYU pragma: keep (LLM_BRAIN_TEST_HOOKS)
 #include <atomic>
-#include <cctype>
 #include <cstdint>
 #include <list>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -335,18 +333,6 @@ class LlmBrainChatScript : public PlayerScript {
   }
 
  private:
-  static bool MentionsName(std::string_view text, std::string_view name) {
-    if (name.empty() || text.size() < name.size()) {
-      return false;
-    }
-    auto it = std::search(
-        text.begin(), text.end(), name.begin(), name.end(), [](char a, char b) {
-          return std::tolower(static_cast<unsigned char>(a)) ==
-                 std::tolower(static_cast<unsigned char>(b));
-        });
-    return it != text.end();
-  }
-
   const base::raw_ptr<ChatInbox> inbox_;
   const base::raw_ptr<std::atomic<BehaviorTraceWriter*>> human_trace_;
 };
@@ -381,7 +367,7 @@ class LlmBrainCommandScript : public CommandScript {
     say.channel = pb::WHISPER;
     say.to = to;
     say.text = std::string(text);
-    const std::string error = Speak(sender, say);
+    const std::string error = Speak(sender, say, /*allow_non_bot=*/true);
     if (!error.empty()) {
       handler->SendErrorMessage("{}", error);
       return false;

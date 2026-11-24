@@ -8,6 +8,9 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <cerrno>
+#include <climits>
 #include <cstdint>
 
 #include "base/compiler_specific.h"
@@ -67,6 +70,7 @@ void MessagePumpEpoll::Run(Delegate* delegate) {
     }
     timespec timeout{};
     timespec* timeout_ptr = nullptr;  // Wait forever.
+    int timeout_ms = -1;
     if (!next.is_null()) {
       TimeDelta wait = next - TimeTicks::Now();
       if (wait.is_negative()) {
@@ -76,8 +80,29 @@ void MessagePumpEpoll::Run(Delegate* delegate) {
       timeout = {static_cast<time_t>(us / 1000000),
                  static_cast<long>((us % 1000000) * 1000)};
       timeout_ptr = &timeout;
+      // Round positive sub-millisecond waits up to 1 ms for epoll_wait so
+      // kernels without epoll_pwait2 never busy-spin.
+      const int64_t ms = (us <= 0) ? 0 : (us + 999) / 1000;
+      timeout_ms = static_cast<int>(std::min<int64_t>(ms, INT_MAX));
     }
-    const int n = epoll_pwait2(epoll_fd_, events, 64, timeout_ptr, nullptr);
+    int n = -1;
+    if (use_epoll_pwait2_) {
+      n = epoll_pwait2(epoll_fd_, events, 64, timeout_ptr, nullptr);
+      if (n < 0 && errno == ENOSYS) {
+        // Kernels before 5.11 lack epoll_pwait2: fall back permanently to
+        // epoll_wait instead of spinning on ENOSYS (A-L6).
+        use_epoll_pwait2_ = false;
+        n = epoll_wait(epoll_fd_, events, 64, timeout_ms);
+      }
+    } else {
+      n = epoll_wait(epoll_fd_, events, 64, timeout_ms);
+    }
+    if (n < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      continue;
+    }
     if (n > 0) {
       // MSan has no epoll_pwait2 interceptor; the kernel filled `events`.
       MSAN_UNPOISON(events, sizeof(events[0]) * static_cast<size_t>(n));

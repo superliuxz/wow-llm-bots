@@ -15,7 +15,8 @@ words MyState { "in vehicle", mounted, swimming, "nearest to it" }
 words Cmp     { "<", ">" }
 words Stop    { casting, attacking, moving }
 words PetCmd  { stay, follow, passive, defensive }
-num   Num   0..999 1dp
+num   Num    0..999 1dp
+num   PosSec 1..999 1dp
 int   Count  0..999
 int   Points 0..99999
 int   Digit  0..9
@@ -67,7 +68,7 @@ choice Check {
   Me         = "me " state:MyState;
   Phase      = "phase " n:Digit;
   After      = "after " s:Num "s";
-  Every      = "every " s:Num "s";
+  Every      = "every " s:PosSec "s";
 }
 
 struct Condition = (negated:"not ")? check:Check;

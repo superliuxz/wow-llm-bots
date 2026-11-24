@@ -282,5 +282,44 @@ TEST(PromptTest, KnowledgeOutcomeAndInspectPromptBreakdown) {
             std::string::npos);
 }
 
+TEST(PromptTest, HugeIdentityMemoryAndEventsNeverHideAroundMeOptions) {
+  PromptInput input = SampleInput();
+  // Realistic ~8 KB RULES.md leaving ~3.4 KB user budget.
+  input.rules = std::string(8021, 'R');
+  input.identity = std::string(4000, 'I');
+  input.memory =
+      "- 2026-11-20 " + std::string(1500, 'M') + "\n- 2026-11-24 newest";
+  for (int i = 0; i < 12; ++i) {
+    input.recent_events.push_back("event " + std::to_string(i) + " " +
+                                  std::string(200, 'E'));
+  }
+  Screen screen;
+  screen.text = "me: Tess\naround me:\n";
+  for (int i = 1; i <= 15; ++i) {
+    screen.text += "  " + std::to_string(i) + ". Attack Kobold Worker " +
+                   std::to_string(i) + "\n";
+    screen.options.push_back(OptionKind::kAttack);
+  }
+  screen.text += "also:\n  16. Keep doing what I'm doing";
+  screen.options.push_back(OptionKind::kKeep);
+
+  const LlmRequest req = BuildPlanRequest(input, screen);
+  const size_t est_tokens = (req.system.size() + 2) / 3 +
+                            (req.user.size() + 2) / 3 +
+                            static_cast<size_t>(req.max_tokens);
+  EXPECT_LE(est_tokens, 4096u);
+  // Every single option offered in the grammar must stay visible in the prompt.
+  for (int i = 1; i <= 16; ++i) {
+    EXPECT_NE(req.user.find("  " + std::to_string(i) + ". "), std::string::npos)
+        << "missing option " << i << " in:\n"
+        << req.user;
+  }
+
+  // Enabling standing orders raises max_tokens so 7 `order:` lines are not cut.
+  PromptInput with_orders = SampleInput();
+  with_orders.order_names = {"Defile", "Lich King"};
+  EXPECT_GE(BuildPlanRequest(with_orders, SampleScreen()).max_tokens, 300);
+}
+
 }  // namespace
 }  // namespace harness

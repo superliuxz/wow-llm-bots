@@ -158,19 +158,28 @@ TEST(BrainBridgeTest, SendWithoutHarnessIsDropped) {
   EXPECT_FALSE(bridge.connected());
 }
 
-TEST(BrainBridgeTest, NewHarnessReplacesOldOne) {
+TEST(BrainBridgeTest, SecondConnectionRejectedWhileLiveHarnessConnected) {
   WorldRecorder world;
   BrainBridge bridge(TestSocketPath(), 100, world.Callbacks());
   ASSERT_TRUE(bridge.Start());
   FakeHarness first(TestSocketPath());
   ASSERT_TRUE(RunWorldUntil(bridge, [&] { return bridge.connected(); }));
-  FakeHarness second(TestSocketPath());
-  ASSERT_TRUE(second.WaitConnected());
-  EXPECT_TRUE(first.WaitDisconnected());
+  // A stray second client must not kick out the live harness.
+  const int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  ASSERT_GE(fd, 0);
+  sockaddr_un addr{};
+  addr.sun_family = AF_UNIX;
+  std::strncpy(addr.sun_path, TestSocketPath().c_str(),
+               sizeof(addr.sun_path) - 1);
+  ASSERT_EQ(::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)), 0);
+  char buf[16];
+  EXPECT_EQ(::recv(fd, buf, sizeof(buf), 0), 0);  // Refused and closed.
+  ::close(fd);
 
-  bridge.Send("to the new harness");
-  ASSERT_TRUE(RunWorldUntil(bridge, [&] { return !second.frames().empty(); }));
-  EXPECT_TRUE(first.frames().empty());
+  bridge.Send("still to the first harness");
+  ASSERT_TRUE(RunWorldUntil(bridge, [&] { return !first.frames().empty(); }));
+  EXPECT_EQ(first.frames(),
+            std::vector<std::string>{"still to the first harness"});
 }
 
 TEST(BrainBridgeTest, FramesFromAHarnessThatLeftAreNotApplied) {
@@ -183,10 +192,11 @@ TEST(BrainBridgeTest, FramesFromAHarnessThatLeftAreNotApplied) {
   first->Send("old 1");
   first->Send("old 2");
   base::PlatformThread::Sleep(base::Milliseconds(100));
-  // ...while it goes and a new one connects, before the next world tick.
+  // ...while it disconnects and a new one connects, before the next world tick.
+  first.reset();
+  base::PlatformThread::Sleep(base::Milliseconds(50));
   FakeHarness second(TestSocketPath());
   ASSERT_TRUE(second.WaitConnected());
-  ASSERT_TRUE(first->WaitDisconnected());
   second.Send("new");
   ASSERT_TRUE(RunWorldUntil(bridge, [&] {
     return !world.messages.empty() && world.messages.back() == "new";

@@ -90,6 +90,7 @@ class MessagePumpEpoll : public MessagePump {
   const int epoll_fd_;
   const int wake_fd_;
   bool quit_ = false;
+  bool use_epoll_pwait2_ = true;
   uint64_t next_watch_id_ = 0;
   // Watched fd -> its controller. Looked up at dispatch time, so a controller
   // destroyed by an earlier callback in the same epoll batch is never touched.

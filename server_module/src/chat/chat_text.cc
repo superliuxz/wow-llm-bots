@@ -2,6 +2,7 @@
 
 #include "chat/chat_text.h"
 
+#include <cctype>
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -66,6 +67,36 @@ bool IsTrivialChat(std::string_view text) {
       "gg",   "nice", "cool", "xd",  "hehe",   "rofl"};
   for (std::string_view t : kTrivial) {
     if (word == t) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool MentionsName(std::string_view text, std::string_view name) {
+  if (name.empty() || text.size() < name.size()) {
+    return false;
+  }
+  const auto is_word = [](char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '_';
+  };
+  for (size_t i = 0; i + name.size() <= text.size(); ++i) {
+    const bool left_ok = (i == 0) || !is_word(text[i - 1]);
+    const bool right_ok =
+        (i + name.size() == text.size()) || !is_word(text[i + name.size()]);
+    if (!left_ok || !right_ok) {
+      continue;
+    }
+    bool match = true;
+    for (size_t j = 0; j < name.size(); ++j) {
+      if (std::tolower(static_cast<unsigned char>(text[i + j])) !=
+          std::tolower(static_cast<unsigned char>(name[j]))) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
       return true;
     }
   }

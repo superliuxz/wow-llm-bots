@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/functional/callback.h"
+#include "base/time/time.h"
 #include "gtest/gtest.h"
 
 namespace harness {
@@ -296,6 +297,21 @@ TEST(SchedulerTest, TheCancelOfAFinishedRunIsNeverKeptForTheNextRun) {
   scheduler.Submit("a", Urgency::kP2Routine, r.Work("a"));
   scheduler.Submit("a", Urgency::kP0Combat, r.Work("a"));
   EXPECT_EQ(stale_cancels, 0);
+}
+
+TEST(SchedulerTest, PriorityAgingPreventsLowerTierStarvation) {
+  base::TimeTicks now = base::TimeTicks() + base::Seconds(100);
+  Scheduler scheduler(1, /*aging_step=*/base::Seconds(2));
+  scheduler.SetNowForTesting([&] { return now; });
+  Recorder r;
+
+  scheduler.Submit("busy", Urgency::kP2Routine, r.Work("busy"));
+  scheduler.Submit("chat", Urgency::kP3Chat, r.Work("chat"));
+  // Advance clock by 5 s so "chat" (P3) ages 2 tiers -> effective P1.
+  now = now + base::Seconds(5);
+  scheduler.Submit("routine", Urgency::kP2Routine, r.Work("routine"));
+  r.Finish("busy");
+  EXPECT_EQ(r.started(), (Names{"busy", "chat"}));
 }
 
 }  // namespace

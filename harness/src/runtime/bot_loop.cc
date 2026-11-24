@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <flat_map>
 #include <flat_set>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
@@ -81,35 +82,104 @@ std::flat_set<std::string> CollectExpectedNames(
   return names;
 }
 
-// The party and raid chat lines among wake reasons ("party from Hele: pull?"
-// -> PARTY, "pull?"). A reason may be several joined with "; " (Consider()),
-// so only a segment that starts with the prefix counts.
-struct GroupChatLine {
-  pb::ChatChannel channel = pb::PARTY;
-  std::string_view text;
-};
-std::vector<GroupChatLine> GroupChatLines(
-    const std::vector<std::string>& reasons) {
-  std::vector<GroupChatLine> out;
-  for (const std::string& r : reasons) {
-    for (std::string_view seg : base::SplitStringPieceUsingSubstr(
-             r, "; ", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
-      pb::ChatChannel ch;
-      if (seg.starts_with("party from ")) {
-        ch = pb::PARTY;
-      } else if (seg.starts_with("raid from ")) {
-        ch = pb::RAID;
-      } else {
-        continue;
-      }
-      const size_t colon = seg.find(": ");
-      out.push_back({ch, colon == std::string_view::npos
-                             ? std::string_view{}
-                             : seg.substr(colon + 2)});
+// True for player-originated chat channels (excludes monster/boss/system lines
+// so NPC chatter never enters relationships or player-chat rate limits).
+bool IsPlayerChatChannel(pb::ChatChannel ch) {
+  switch (ch) {
+    case pb::WHISPER:
+    case pb::SAY:
+    case pb::YELL:
+    case pb::PARTY:
+    case pb::RAID:
+    case pb::RAID_WARNING:
+    case pb::GUILD:
+    case pb::OFFICER:
+    case pb::GENERAL:
+    case pb::TRADE:
+    case pb::LFG:
+    case pb::EMOTE:
+    case pb::BATTLEGROUND:
+    case pb::CUSTOM_CHANNEL:
+      return true;
+    default:
+      return false;
+  }
+}
+
+// Sanitizes a `remember:` note before writing to `memory.md` /
+// `relationships.md` (A-MH6): strips newlines, control bytes, and leading `#`
+// heading syntax; when player chat was present in the wake, rejects prompt-
+// injection directives and tags provenance so untrusted chat cannot masquerade
+// as bot instructions.
+std::string SanitizeRememberNote(
+    std::string_view raw,
+    const std::vector<std::string>& player_chat_texts) {
+  std::string cleaned;
+  cleaned.reserve(raw.size());
+  for (unsigned char uc : raw) {
+    if (uc == '\r' || uc == '\n' || uc == '\t') {
+      cleaned.push_back(' ');
+    } else if (uc >= 0x20 && uc != 0x7f) {
+      cleaned.push_back(static_cast<char>(uc));
     }
   }
-  return out;
+  std::string_view view = base::TrimWhitespaceASCII(cleaned, base::TRIM_ALL);
+  while (!view.empty() && (view.front() == '#' || view.front() == ' ')) {
+    view.remove_prefix(1);
+  }
+  view = base::TrimWhitespaceASCII(view, base::TRIM_ALL);
+  if (view.empty()) {
+    return "";
+  }
+  std::string out(view);
+  if (player_chat_texts.empty()) {
+    return out;
+  }
+  const std::string lower = base::ToLowerASCII(out);
+  static constexpr std::string_view kInjectionMarkers[] = {
+      "remember:",   "ignore previous", "ignore all",   "ignore rules",
+      "ignore your", "system prompt",   "system:",      "from now on",
+      "override",    "you must",        "always leave", "never heal",
+      "always pass", "always decline",  "do:",          "order:",
+      "orders:",     "watch:",          "new rule",
+  };
+  for (std::string_view marker : kInjectionMarkers) {
+    if (lower.find(marker) != std::string::npos) {
+      return "";
+    }
+  }
+  static constexpr std::string_view kImperativeWords[] = {
+      "always ", "never ", "must ", "leave ", "ignore ", "remember",
+  };
+  for (const std::string& chat : player_chat_texts) {
+    const std::string chat_lower = base::ToLowerASCII(chat);
+    bool has_imperative = false;
+    for (std::string_view w : kImperativeWords) {
+      if (chat_lower.find(w) != std::string::npos) {
+        has_imperative = true;
+        break;
+      }
+    }
+    if (!has_imperative) {
+      continue;
+    }
+    // Reject if the memo parrots a >= 20-byte slice of an imperative player
+    // chat line.
+    constexpr size_t kSlice = 20;
+    for (size_t i = 0; i + kSlice <= lower.size(); i += 4) {
+      if (chat_lower.find(std::string_view(lower).substr(i, kSlice)) !=
+          std::string::npos) {
+        return "";
+      }
+    }
+  }
+  return base::StrCat({out, " [heard in chat]"});
 }
+
+// Per-sender chat wake rate limit (A-M8): at most 3 chat-triggered LLM wakes
+// per sender in a 10 s sliding window (messages still appear in recent_events).
+constexpr base::TimeDelta kChatWakeWindow = base::Seconds(10);
+constexpr size_t kMaxChatWakesPerSender = 3;
 
 // Structured `memory.md` (F5): optional `## Earlier summary` section followed
 // by `## Recent` (or flat lines for legacy/hand-edited files).
@@ -337,45 +407,6 @@ void AddUniquePlayerName(std::vector<std::string>* out,
   out->emplace_back(name);
 }
 
-void ExtractChatSendersFromLines(const std::vector<std::string>& lines,
-                                 std::string_view bot,
-                                 std::vector<std::string>* out) {
-  // Match only player-originated chat prefixes from `DescribeEvent`
-  // (`triggers.cc`), never `monster ... from `, `boss emote from `, or
-  // `[system] ...` lines.
-  static constexpr std::string_view kPlayerChatPrefixes[] = {
-      "whisper from ",      "say from ",
-      "yell from ",         "party from ",
-      "raid from ",         "raid warning from ",
-      "guild from ",        "officer from ",
-      "general from ",      "trade from ",
-      "lfg from ",          "emote from ",
-      "battleground from ", "custom channel from ",
-  };
-  for (const std::string& line : lines) {
-    for (std::string_view seg : base::SplitStringPieceUsingSubstr(
-             line, "; ", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
-      std::string_view after;
-      bool matched = false;
-      for (std::string_view prefix : kPlayerChatPrefixes) {
-        if (seg.starts_with(prefix)) {
-          after = seg.substr(prefix.size());
-          matched = true;
-          break;
-        }
-      }
-      if (!matched) {
-        continue;
-      }
-      const size_t colon = after.find(':');
-      if (colon == std::string_view::npos) {
-        continue;
-      }
-      AddUniquePlayerName(out, bot, after.substr(0, colon));
-    }
-  }
-}
-
 std::string SelectRelationshipsForPrompt(
     std::string_view rel_text,
     const std::vector<std::string>& present_players) {
@@ -458,11 +489,6 @@ std::string SelectRelationshipsForPrompt(
     }
   }
   return out;
-}
-
-bool ContainsNameIgnoringCase(std::string_view text, std::string_view name) {
-  return !name.empty() && base::ToLowerASCII(text).find(
-                              base::ToLowerASCII(name)) != std::string::npos;
 }
 
 std::string NormalizeInstanceKey(std::string_view raw) {
@@ -596,10 +622,15 @@ std::string BotLoop::ReadFileIfChanged(const std::string& path) {
 }
 
 bool BotLoop::AnswersPartyChat(const std::string& bot,
-                               const std::vector<std::string>& reasons,
+                               const std::vector<BotState::ObservedChat>& chats,
                                const pb::Snapshot& snapshot) const {
-  const std::vector<GroupChatLine> lines = GroupChatLines(reasons);
-  if (lines.empty()) {
+  std::vector<const BotState::ObservedChat*> group_lines;
+  for (const BotState::ObservedChat& c : chats) {
+    if (c.triggered_wake && (c.channel == pb::PARTY || c.channel == pb::RAID)) {
+      group_lines.push_back(&c);
+    }
+  }
+  if (group_lines.empty()) {
     return true;  // Not woken by party chat: nothing to share out.
   }
   // The brain bots in this party (this harness runs them), this one included.
@@ -620,10 +651,10 @@ bool BotLoop::AnswersPartyChat(const std::string& bot,
   std::sort(brain_bots.begin(), brain_bots.end());
   brain_bots.erase(std::unique(brain_bots.begin(), brain_bots.end()),
                    brain_bots.end());
-  for (const GroupChatLine& line : lines) {
+  for (const BotState::ObservedChat* line : group_lines) {
     bool named_any = false;
     for (const std::string& name : brain_bots) {
-      if (ContainsNameIgnoringCase(line.text, name)) {
+      if (ContainsWholeWordIgnoringCase(line->text, name)) {
         named_any = true;
         if (name == bot) {
           return true;  // Asked by name.
@@ -658,13 +689,19 @@ void BotLoop::OnConnectionChanged(bool connected) {
       state.last_selected_notes.clear();
       state.recent_chat_command_ids.clear();
       state.has_queued_wake = false;
+      state.queued_urgency = Urgency::kP2Routine;
       state.call_in_flight = false;
+      state.in_flight_cancel.reset();
+      state.call_deadline = base::TimeTicks();
+      state.call_timed_out_epoch = 0;
       state.early_steps_dispatched = false;
       state.early_step_failed = false;
       state.step_refusals = 0;
       state.last_outcome.clear();
       state.order_wakes = 0;
       state.pending_reasons.clear();
+      state.pending_chats.clear();
+      state.chat_wake_times_by_sender.clear();
       state.recent_events.clear();
       state.whisperers.clear();
       state.condense_state = BotState::CondenseState::kIdle;
@@ -678,8 +715,19 @@ void BotLoop::OnConnectionChanged(bool connected) {
   }
 }
 
-void BotLoop::NoteEvent(BotState* state, const pb::Event& event) {
+void BotLoop::NoteEvent(BotState* state,
+                        const pb::Event& event,
+                        bool triggered_wake) {
   NoteText(state, DescribeEvent(event));
+  if (event.chat) {
+    const size_t cap = std::max<size_t>(config_.max_recent_events, 1) * 2;
+    if (state->pending_chats.size() >= cap) {
+      state->pending_chats.erase(state->pending_chats.begin());
+    }
+    state->pending_chats.push_back({event.chat->channel, event.chat->from,
+                                    event.chat->text, event.chat->at_me,
+                                    triggered_wake});
+  }
 }
 
 // static
@@ -734,6 +782,7 @@ void BotLoop::NoteWhisperer(BotState* state,
 void BotLoop::Requeue(BotState* state,
                       std::vector<std::string> reasons,
                       std::vector<std::string> events,
+                      std::vector<BotState::ObservedChat> chats,
                       std::string outcome) {
   for (std::string& r : state->pending_reasons) {
     if (std::find(reasons.begin(), reasons.end(), r) == reasons.end()) {
@@ -741,6 +790,14 @@ void BotLoop::Requeue(BotState* state,
     }
   }
   state->pending_reasons = std::move(reasons);
+  const size_t chat_cap = std::max<size_t>(config_.max_recent_events, 1) * 2;
+  chats.insert(chats.end(),
+               std::make_move_iterator(state->pending_chats.begin()),
+               std::make_move_iterator(state->pending_chats.end()));
+  if (chats.size() > chat_cap) {
+    chats.erase(chats.begin(), chats.end() - static_cast<ptrdiff_t>(chat_cap));
+  }
+  state->pending_chats = std::move(chats);
   for (auto it = events.rbegin(); it != events.rend(); ++it) {
     state->recent_events.push_front(std::move(*it));
   }
@@ -760,7 +817,9 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   }
   BotState& state = bots_[bot];
   for (const pb::Event& ev : snapshot.events) {
-    NoteEvent(&state, ev);
+    const bool wakes =
+        EvaluateEventTrigger(ev, state.triggers.watches()).has_value();
+    NoteEvent(&state, ev, wakes);
     NoteWhisperer(&state, ev, received_at);
   }
   Screen screen = RenderScreen(snapshot);
@@ -943,8 +1002,38 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
     return;
   }
   BotState& state = bots_[bot];
-  NoteEvent(&state, imm.event);
+  const bool is_player_chat = imm.event.chat.has_value() &&
+                              IsPlayerChatChannel(imm.event.chat->channel) &&
+                              imm.event.chat->channel != pb::RAID_WARNING;
+  const std::optional<WakeTrigger> chat_trig =
+      is_player_chat ? EvaluateEventTrigger(imm.event, state.triggers.watches())
+                     : std::nullopt;
+  bool chat_rate_limited = false;
+  if (is_player_chat && chat_trig && !imm.event.chat->from.empty()) {
+    // Per-sender sliding-window rate limit (A-M8): cap spam at 3 LLM wakes
+    // per sender per 10 s while still recording the message in recent_events.
+    if (state.chat_wake_times_by_sender.size() >= 64) {
+      std::erase_if(state.chat_wake_times_by_sender, [&](const auto& kv) {
+        return kv.second.empty() ||
+               received_at - kv.second.back() > kChatWakeWindow;
+      });
+    }
+    auto& times = state.chat_wake_times_by_sender[imm.event.chat->from];
+    while (!times.empty() && received_at - times.front() > kChatWakeWindow) {
+      times.pop_front();
+    }
+    if (times.size() >= kMaxChatWakesPerSender) {
+      chat_rate_limited = true;
+    } else {
+      times.push_back(received_at);
+    }
+  }
+  NoteEvent(&state, imm.event,
+            /*triggered_wake=*/chat_trig.has_value() && !chat_rate_limited);
   NoteWhisperer(&state, imm.event, received_at);
+  if (chat_rate_limited) {
+    return;
+  }
   if (imm.event.error && imm.event.error->command_id != 0) {
     if (state.orders.active() &&
         imm.event.error->command_id == state.orders.pending_command_id()) {
@@ -1024,14 +1113,22 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
   }
   const bool refusal = imm.event.error && imm.event.error->command_id != 0;
   const std::optional<WakeTrigger> trig =
-      EvaluateEventTrigger(imm.event, state.triggers.watches());
+      is_player_chat
+          ? chat_trig
+          : EvaluateEventTrigger(imm.event, state.triggers.watches());
   if (!trig) {
     return;
   }
-  state.runner.Stop();
-  state.look_deadline = base::TimeTicks();
+  // Player whispers and party/say chat must not abort a running plan mid-pull
+  // or clear refusal backoffs (A-M8); the brain wakes and can change course in
+  // its next plan if needed.
+  if (!is_player_chat) {
+    state.runner.Stop();
+    state.look_deadline = base::TimeTicks();
+  }
   if (state.latest_snapshot) {
-    WakeBot(bot, trig->urgency, trig->reason, refusal);
+    WakeBot(bot, trig->urgency, trig->reason,
+            /*preserve_backoffs=*/refusal || is_player_chat);
   } else if (std::find(state.pending_reasons.begin(),
                        state.pending_reasons.end(),
                        trig->reason) == state.pending_reasons.end()) {
@@ -1058,16 +1155,37 @@ void BotLoop::OnTick(base::TimeTicks now) {
       state.last_selected_notes.clear();
       state.recent_chat_command_ids.clear();
       state.has_queued_wake = false;
+      state.queued_urgency = Urgency::kP2Routine;
       state.call_in_flight = false;
+      if (state.in_flight_cancel) {
+        auto cancel = std::move(state.in_flight_cancel);
+        cancel->Cancel();
+      }
+      state.call_deadline = base::TimeTicks();
+      state.call_timed_out_epoch = 0;
       state.early_steps_dispatched = false;
       state.early_step_failed = false;
       state.step_refusals = 0;
       state.last_outcome.clear();
       state.order_wakes = 0;
       state.pending_reasons.clear();
+      state.pending_chats.clear();
+      state.chat_wake_times_by_sender.clear();
       state.recent_events.clear();
       ResetLooking(&state);
       ++state.call_epoch;
+      continue;
+    }
+    // Enforce overall wall-clock deadline on stalled in-flight LLM calls
+    // (A-M13) so a wedged llama-server never blocks a bot for 60 s.
+    if (state.call_in_flight && !state.call_deadline.is_null() &&
+        now >= state.call_deadline) {
+      state.call_deadline = base::TimeTicks();
+      state.call_timed_out_epoch = state.call_epoch;
+      if (state.in_flight_cancel) {
+        auto cancel = std::move(state.in_flight_cancel);
+        cancel->Cancel();
+      }
       continue;
     }
     if (!state.latest_snapshot || state.call_in_flight ||
@@ -1098,9 +1216,9 @@ void BotLoop::OnTick(base::TimeTicks now) {
 void BotLoop::WakeBot(const std::string& bot,
                       Urgency urgency,
                       const std::string& reason,
-                      bool refusal) {
+                      bool preserve_backoffs) {
   BotState& state = bots_[bot];
-  if (!refusal) {
+  if (!preserve_backoffs) {
     state.step_refusals = 0;
     state.order_wakes = 0;
   }
@@ -1109,6 +1227,8 @@ void BotLoop::WakeBot(const std::string& bot,
                 reason) == state.pending_reasons.end()) {
     state.pending_reasons.push_back(reason);
   }
+  state.queued_urgency =
+      state.has_queued_wake ? std::min(state.queued_urgency, urgency) : urgency;
   state.has_queued_wake = true;
   // Replacing a queued P4 condense job with a real wake returns condensing to
   // idle so it can be re-scheduled after the gameplay reply finishes.
@@ -1164,7 +1284,9 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
     }
   }
 
+  const Urgency call_urgency = state.queued_urgency;
   state.has_queued_wake = false;
+  state.queued_urgency = Urgency::kP2Routine;
   state.call_in_flight = true;
   state.early_steps_dispatched = false;
   state.early_step_failed = false;
@@ -1177,23 +1299,22 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
           : base::JoinString(state.pending_reasons, "; ");
   std::vector<std::string> asked_reasons = std::move(state.pending_reasons);
   state.pending_reasons.clear();
+  std::vector<BotState::ObservedChat> asked_chats =
+      std::move(state.pending_chats);
+  state.pending_chats.clear();
 
   const base::TimeTicks asked_at_for_whisperers = base::TimeTicks::Now();
   PromptInput input;
   input.rules = config_.rules;
   input.bot_name = bot;
   input.identity = state.identity;
-  // What the brain chose to remember (`remember:`), newest last (RH-M4, F5).
+  // What the brain chose to remember (`remember:`), newest last (RH-M4, F5,
+  // A-H3: kept separate from identity so prompt budgeting caps it cleanly).
   if (!config_.bots_dir.empty()) {
-    const std::string memory = FormatMemoryForPrompt(
+    input.memory = FormatMemoryForPrompt(
         ReadFileIfChanged(
             base::StrCat({config_.bots_dir, "/", bot, "/memory.md"})),
         kMemoryLinesInPrompt);
-    if (!memory.empty()) {
-      base::StrAppend(&input.identity,
-                      {input.identity.empty() ? "" : "\n\n",
-                       "What you remember from earlier:\n", memory});
-    }
     const std::string rel_raw = ReadFileIfChanged(
         base::StrCat({config_.bots_dir, "/", bot, "/relationships.md"}));
     if (!rel_raw.empty()) {
@@ -1218,11 +1339,11 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
           AddUniquePlayerName(&present, bot, w.name);
         }
       }
-      ExtractChatSendersFromLines(asked_reasons, bot, &present);
-      ExtractChatSendersFromLines(
-          std::vector<std::string>(state.recent_events.begin(),
-                                   state.recent_events.end()),
-          bot, &present);
+      for (const BotState::ObservedChat& c : asked_chats) {
+        if (IsPlayerChatChannel(c.channel)) {
+          AddUniquePlayerName(&present, bot, c.from);
+        }
+      }
       // Dynamic per-player relationships go into `input.relationships` (after
       // static boss notes and world guide) to preserve KV-cache prefix reuse.
       input.relationships = SelectRelationshipsForPrompt(rel_raw, present);
@@ -1230,7 +1351,7 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
   }
   input.current_goal = state.current_goal;
   input.wake_reason = wake_reason;
-  if (!AnswersPartyChat(bot, asked_reasons, *state.latest_snapshot)) {
+  if (!AnswersPartyChat(bot, asked_chats, *state.latest_snapshot)) {
     state.party_reply_muted_epoch = epoch;
     base::StrAppend(&input.wake_reason,
                     {" (another party member answers this for the group: act "
@@ -1285,6 +1406,17 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
       AgeMsSince(snap_mono_us, asked_at);
 
   LlmRequest request = BuildPlanRequest(input, ask_screen);
+  const base::TimeDelta call_limit = (call_urgency == Urgency::kP0Combat)
+                                         ? config_.combat_call_timeout
+                                         : config_.call_timeout;
+  if (call_limit.is_positive()) {
+    request.timeout_ms = static_cast<int>(call_limit.InMilliseconds());
+    const base::TimeTicks call_start =
+        std::max(asked_at, state.latest_received_at);
+    state.call_deadline = call_start + call_limit;
+  } else {
+    state.call_deadline = base::TimeTicks();
+  }
   LlmRequest request_copy = request;
 
   // Shared strictly on this single sequence between OnFirstLine and OnReply.
@@ -1307,6 +1439,7 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
        order_names = std::move(order_names), wake_reason,
        asked_reasons = std::move(asked_reasons),
        asked_events = std::move(asked_events),
+       asked_chats = std::move(asked_chats),
        asked_outcome = std::move(asked_outcome),
        request_copy = std::move(request_copy), snap_mono_us, age_at_ask_ms,
        holder = std::move(first_line_age_holder),
@@ -1318,11 +1451,12 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
         self->OnReply(bot, epoch, ask_seq, std::move(ask_screen),
                       std::move(order_names), std::move(wake_reason),
                       std::move(asked_reasons), std::move(asked_events),
-                      std::move(asked_outcome), std::move(request_copy),
-                      snap_mono_us, age_at_ask_ms, *holder, std::move(done),
-                      std::move(result));
+                      std::move(asked_chats), std::move(asked_outcome),
+                      std::move(request_copy), snap_mono_us, age_at_ask_ms,
+                      *holder, std::move(done), std::move(result));
       },
       std::move(on_first_line));
+  state.in_flight_cancel = handle;
   if (!handle) {
     return base::OnceClosure{};
   }
@@ -1373,6 +1507,7 @@ void BotLoop::OnReply(const std::string& bot,
                       std::string wake_reason,
                       std::vector<std::string> asked_reasons,
                       std::vector<std::string> asked_events,
+                      std::vector<BotState::ObservedChat> asked_chats,
                       std::string asked_outcome,
                       LlmRequest request,
                       int64_t snapshot_monotonic_us,
@@ -1382,18 +1517,25 @@ void BotLoop::OnReply(const std::string& bot,
                       LlmResult result) {
   const base::TimeTicks now = base::TimeTicks::Now();
   if (result.cancelled) {
-    // Preempted by a more urgent wake, or the module disconnected: not a
-    // decision and not a brain error, so no retry timer. A newer wake (if any)
-    // is already queued and starts once `done` frees the slot.
+    // Preempted by a more urgent wake, timed out on tick (A-M13), or the module
+    // disconnected.
+    bool was_timeout = false;
     if (auto it = bots_.find(bot);
         it != bots_.end() && it->second.call_epoch == epoch) {
       it->second.call_in_flight = false;
+      it->second.in_flight_cancel.reset();
+      it->second.call_deadline = base::TimeTicks();
+      was_timeout = it->second.call_timed_out_epoch == epoch;
       Requeue(&it->second, std::move(asked_reasons), std::move(asked_events),
-              std::move(asked_outcome));
+              std::move(asked_chats), std::move(asked_outcome));
+      if (was_timeout && !it->second.has_queued_wake) {
+        it->second.look_deadline = now + base::Seconds(2);
+      }
     }
     ++calls_cancelled_;
-    Log(base::StringPrintf("harness: %s call cancelled after %.0f ms",
-                           bot.c_str(), result.round_trip_ms));
+    Log(base::StringPrintf("harness: %s call %s after %.0f ms", bot.c_str(),
+                           was_timeout ? "timed out" : "cancelled",
+                           result.round_trip_ms));
     std::move(done).Run();
     return;
   }
@@ -1402,6 +1544,11 @@ void BotLoop::OnReply(const std::string& bot,
 
   std::optional<Plan> plan;
   if (result.reply) {
+    if (result.reply->finish_reason == "length") {
+      Log(base::StringPrintf(
+          "harness: %s reply hit max_tokens (%d); truncated last line dropped",
+          bot.c_str(), request.max_tokens));
+    }
     plan = ParsePlan(
         StripTruncatedLastLine(result.reply->text, result.reply->finish_reason),
         static_cast<int>(ask_screen.options.size()), order_names);
@@ -1430,19 +1577,21 @@ void BotLoop::OnReply(const std::string& bot,
   if (it != bots_.end() && it->second.call_epoch == epoch) {
     BotState& state = it->second;
     state.call_in_flight = false;
+    state.in_flight_cancel.reset();
+    state.call_deadline = base::TimeTicks();
     if (!decision.result.reply) {
       Log(base::StringPrintf("harness: %s brain error (%.0f ms): %s",
                              bot.c_str(), decision.result.round_trip_ms,
                              decision.result.error.c_str()));
       state.look_deadline = now + base::Seconds(10);
       Requeue(&state, std::move(asked_reasons), std::move(asked_events),
-              std::move(asked_outcome));
+              std::move(asked_chats), std::move(asked_outcome));
     } else if (!plan) {
       Log(base::StringPrintf("harness: %s invalid plan (%.0f ms)", bot.c_str(),
                              decision.result.round_trip_ms));
       state.look_deadline = now + base::Seconds(10);
       Requeue(&state, std::move(asked_reasons), std::move(asked_events),
-              std::move(asked_outcome));
+              std::move(asked_chats), std::move(asked_outcome));
     } else {
       if (!plan->goal.empty()) {
         state.current_goal = plan->goal;
@@ -1472,6 +1621,14 @@ void BotLoop::OnReply(const std::string& bot,
           if (state.orders.SetOrders({}, now)) {
             SendStopMoving(bot);
           }
+          state.order_wakes = 0;
+          if (state.latest_snapshot->base.where.in_instance &&
+              !state.latest_snapshot->base.self.in_combat &&
+              !state.last_selected_notes.empty()) {
+            compiled_orders_cache_.erase(
+                CompiledOrdersKey{bot, state.latest_snapshot->base.where.map,
+                                  state.last_selected_notes});
+          }
         } else if (!plan->orders.empty()) {
           if (state.orders.SetOrders(plan->orders, now)) {
             SendStopMoving(bot);
@@ -1485,29 +1642,35 @@ void BotLoop::OnReply(const std::string& bot,
           const CompiledOrdersKey key{bot, map_name, state.last_selected_notes};
           // Bounded (RH-L5): a long session visits many instance/notes pairs;
           // dropping all of them only costs one recompile per instance entry.
-          if (compiled_orders_cache_.size() >= kMaxCompiledOrdersCache) {
+          // Always overwrite with the newest compiled orders (A-L8).
+          if (compiled_orders_cache_.size() >= kMaxCompiledOrdersCache &&
+              !compiled_orders_cache_.contains(key)) {
             compiled_orders_cache_.clear();
           }
-          if (compiled_orders_cache_.try_emplace(key, plan->orders).second) {
-            Log(base::StrCat({bot, ": cached ",
-                              std::to_string(plan->orders.size()),
-                              " pre-pull standing orders for ", map_name}));
-          }
+          const bool inserted =
+              compiled_orders_cache_.insert_or_assign(key, plan->orders).second;
+          Log(base::StrCat({bot, inserted ? ": cached " : ": updated cached ",
+                            std::to_string(plan->orders.size()),
+                            " pre-pull standing orders for ", map_name}));
         }
         if (!state.early_step_failed) {
           state.look_deadline = now + base::Seconds(plan->look_s);
         }
         const bool party_reply_muted = state.party_reply_muted_epoch == epoch;
         if (!plan->say.empty() && !party_reply_muted) {
-          // Answer a party/raid line in that channel (RH-L1: decided by the
-          // wake's own channel, never by words inside the chat text).
+          // Answer a party/raid line in that channel (RH-L1, A-M14: decided by
+          // the structured chat event's channel, never by splitting strings).
           pb::ChatChannel ch = pb::SAY;
-          if (state.latest_snapshot->ext.party &&
-              !state.latest_snapshot->ext.party->members.empty()) {
-            if (const std::vector<GroupChatLine> lines =
-                    GroupChatLines(asked_reasons);
-                !lines.empty()) {
-              ch = lines.front().channel;
+          if ((state.latest_snapshot->ext.party &&
+               !state.latest_snapshot->ext.party->members.empty()) ||
+              (state.latest_snapshot->ext.raid &&
+               !state.latest_snapshot->ext.raid->members.empty())) {
+            for (const BotState::ObservedChat& c : asked_chats) {
+              if (c.triggered_wake &&
+                  (c.channel == pb::PARTY || c.channel == pb::RAID)) {
+                ch = c.channel;
+                break;
+              }
             }
           }
           // A `party:` line already says it there (RH-L6: no double post).
@@ -1536,17 +1699,29 @@ void BotLoop::OnReply(const std::string& bot,
           SendSay(bot, pb::LFG, "", plan->lfg);
         }
         if (!plan->remember.empty() && !config_.bots_dir.empty()) {
-          const std::string dir = base::StrCat({config_.bots_dir, "/", bot});
-          const std::string mem_path = dir + "/memory.md";
-          const std::string date = DateUtc(base::Time::Now());
-          if (!MakeDirectories(dir) ||
-              !AppendToFile(mem_path, base::StrCat({"- ", date, " ",
-                                                    plan->remember, "\n"}))) {
-            Log(base::StrCat({bot, ": could not write memory.md"}));
+          std::vector<std::string> player_chat_texts;
+          for (const BotState::ObservedChat& c : asked_chats) {
+            if (IsPlayerChatChannel(c.channel)) {
+              player_chat_texts.push_back(c.text);
+            }
+          }
+          const std::string safe_memo =
+              SanitizeRememberNote(plan->remember, player_chat_texts);
+          if (safe_memo.empty()) {
+            Log(base::StrCat(
+                {bot, ": ignored unsafe remember note from chat wake"}));
           } else {
-            file_cache_.erase(mem_path);
-            RecordRelationshipNotes(bot, state, asked_reasons, asked_events,
-                                    date, plan->remember);
+            const std::string dir = base::StrCat({config_.bots_dir, "/", bot});
+            const std::string mem_path = dir + "/memory.md";
+            const std::string date = DateUtc(base::Time::Now());
+            if (!MakeDirectories(dir) ||
+                !AppendToFile(mem_path, base::StrCat({"- ", date, " ",
+                                                      safe_memo, "\n"}))) {
+              Log(base::StrCat({bot, ": could not write memory.md"}));
+            } else {
+              file_cache_.erase(mem_path);
+              RecordRelationshipNotes(bot, state, asked_chats, date, safe_memo);
+            }
           }
         }
         for (const std::string& name : plan->close) {
@@ -1600,9 +1775,25 @@ void BotLoop::OnReply(const std::string& bot,
           MaybeScheduleMemoryCondense(bot, &state, now);
         }
       } else {
-        // Superseded by a newer wake while in flight: that call answers.
+        // Superseded by a newer wake while in flight: that call answers. Still
+        // honor an explicit `orders: none` clear so a runaway standing-order
+        // wake can never trap the bot in a livelock (A-H2).
+        if (plan->clear_orders && plan->orders.empty() &&
+            state.latest_snapshot) {
+          if (state.orders.SetOrders({}, now)) {
+            SendStopMoving(bot);
+          }
+          state.order_wakes = 0;
+          if (state.latest_snapshot->base.where.in_instance &&
+              !state.latest_snapshot->base.self.in_combat &&
+              !state.last_selected_notes.empty()) {
+            compiled_orders_cache_.erase(
+                CompiledOrdersKey{bot, state.latest_snapshot->base.where.map,
+                                  state.last_selected_notes});
+          }
+        }
         Requeue(&state, std::move(asked_reasons), std::move(asked_events),
-                std::move(asked_outcome));
+                std::move(asked_chats), std::move(asked_outcome));
       }
     }
   }
@@ -1818,12 +2009,10 @@ bool BotLoop::WakeForOrder(const std::string& bot,
                            std::string_view reason,
                            base::TimeTicks now,
                            bool is_failure) {
-  if (!is_failure) {
-    state->order_wakes = 0;
-    state->look_deadline = base::TimeTicks();
-    WakeBot(bot, Urgency::kUrgent, std::string(reason), /*refusal=*/false);
-    return true;
-  }
+  // Apply exponential backoff to BOTH repeated order failures and rapid
+  // consecutive `-> wake` orders (A-H2) so a runaway `every Xs -> wake` cannot
+  // livelock the bot or starve other bots at P0. The first wake (`order_wakes
+  // == 1`) always fires immediately at P0 with zero delay.
   const base::TimeDelta backoff = StepRefusalBackoff(++state->order_wakes);
   if (backoff.is_positive()) {
     if (!reason.empty()) {
@@ -1837,12 +2026,14 @@ bool BotLoop::WakeForOrder(const std::string& bot,
     // Never push an earlier plan/backoff look deadline further out.
     SetEarlierDeadline(&state->look_deadline, now + backoff);
     Log(base::StringPrintf(
-        "harness: %s order failure %d in a row; next look in %.0f s",
-        bot.c_str(), state->order_wakes, backoff.InSecondsF()));
+        "harness: %s order %s %d in a row; next look in %.0f s", bot.c_str(),
+        is_failure ? "failure" : "wake", state->order_wakes,
+        backoff.InSecondsF()));
     return false;
   }
   state->look_deadline = base::TimeTicks();
-  WakeBot(bot, Urgency::kUrgent, std::string(reason), /*refusal=*/true);
+  WakeBot(bot, Urgency::kUrgent, std::string(reason),
+          /*preserve_backoffs=*/true);
   return true;
 }
 
@@ -2112,8 +2303,7 @@ void BotLoop::OnMemoryCondensed(const std::string& bot,
 void BotLoop::RecordRelationshipNotes(
     const std::string& bot,
     const BotState& state,
-    const std::vector<std::string>& asked_reasons,
-    const std::vector<std::string>& asked_events,
+    const std::vector<BotState::ObservedChat>& asked_chats,
     std::string_view date,
     std::string_view memo) {
   if (config_.bots_dir.empty() || memo.empty()) {
@@ -2145,8 +2335,11 @@ void BotLoop::RecordRelationshipNotes(
   for (const BotState::Whisperer& w : state.whisperers) {
     AddUniquePlayerName(&candidates, bot, w.name);
   }
-  ExtractChatSendersFromLines(asked_reasons, bot, &candidates);
-  ExtractChatSendersFromLines(asked_events, bot, &candidates);
+  for (const BotState::ObservedChat& c : asked_chats) {
+    if (IsPlayerChatChannel(c.channel)) {
+      AddUniquePlayerName(&candidates, bot, c.from);
+    }
+  }
   for (const RelationshipSection& sec : rels.sections) {
     AddUniquePlayerName(&candidates, bot, sec.player);
   }

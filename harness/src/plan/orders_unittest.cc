@@ -484,5 +484,18 @@ TEST(OrdersTest, AllContentNotesParseWithRealOrdersParser) {
   EXPECT_GT(orders_checked, 100);
 }
 
+TEST(OrdersTest, EveryZeroSecondsIsRejectedByParserAndGrammar) {
+  EXPECT_FALSE(ParseOrder("every 0s -> wake").has_value());
+  EXPECT_FALSE(ParseOrder("every 0.5s -> wake").has_value());
+  EXPECT_TRUE(ParseOrder("every 1s -> wake").has_value());
+  EXPECT_TRUE(ParseOrder("every 1.5s -> wake").has_value());
+  const std::string gbnf = OrderGrammar({"Defile"});
+  ASSERT_FALSE(gbnf.empty());
+  EXPECT_FALSE(GbnfAccepts(gbnf, "orders-Order", "every 0s -> wake").accepted);
+  EXPECT_FALSE(
+      GbnfAccepts(gbnf, "orders-Order", "every 0.5s -> wake").accepted);
+  EXPECT_TRUE(GbnfAccepts(gbnf, "orders-Order", "every 1s -> wake").accepted);
+}
+
 }  // namespace
 }  // namespace harness

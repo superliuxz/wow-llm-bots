@@ -187,6 +187,10 @@ void ModuleConnection::SendCommand(const pb::Command& command) {
   pb::Command versioned = command;
   versioned.version = pb::kWireVersion;
   std::string bytes = pb::WriteBeve(versioned);
+  if (bytes.empty()) {
+    stats_->RecordDroppedOutbound();
+    return;
+  }
   io_thread_.task_runner()->PostTask(
       [core = io_core_, bytes = std::move(bytes)] { core->Send(bytes); });
 }

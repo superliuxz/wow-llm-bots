@@ -770,11 +770,17 @@ void SaveLastInterrupted(uint64_t bot_guid,
   store.emplace_back(bot_guid, info);
 }
 
-std::optional<ActiveAct::InterruptedActivity> LoadLastInterrupted(
-    uint64_t bot_guid) {
-  for (const auto& [guid, saved] : LastInterruptedStore()) {
-    if (guid == bot_guid && saved.active) {
-      return saved;
+std::optional<ActiveAct::InterruptedActivity>
+LoadLastInterrupted(uint64_t bot_guid, uint32_t map_id, uint32_t instance_id) {
+  auto& store = LastInterruptedStore();
+  for (auto it = store.begin(); it != store.end(); ++it) {
+    if (it->first == bot_guid && it->second.active) {
+      if (it->second.map_id != map_id ||
+          it->second.instance_id != instance_id) {
+        store.erase(it);  // Never reuse coordinates from another map (A-L1).
+        return std::nullopt;
+      }
+      return it->second;
     }
   }
   return std::nullopt;
@@ -783,6 +789,8 @@ std::optional<ActiveAct::InterruptedActivity> LoadLastInterrupted(
 ActiveAct::InterruptedActivity CaptureInterruptedActivity(Player* bot) {
   ActiveAct::InterruptedActivity info;
   info.active = true;
+  info.map_id = bot->GetMapId();
+  info.instance_id = bot->GetInstanceId();
   info.prev_pos = PosOf(bot);
   Unit* target = bot->GetVictim();
   info.was_attacking = (target != nullptr);
@@ -1283,6 +1291,26 @@ bool PlaceCaresAboutFacing(pb::Command_Act::PlaceKind place) {
   return place == pb::Command_Act::BEHIND || place == pb::Command_Act::IN_FRONT;
 }
 
+// True when the player is allowed to cancel their own movement (never while on
+// a taxi flight path or under server-controlled movement such as fear/stun).
+bool CanClearBotMovement(const Player* bot) {
+  if (!bot || !bot->IsInWorld()) {
+    return false;
+  }
+  if (bot->IsInFlight() || bot->GetVehicle() != nullptr ||
+      bot->HasUnitState(UNIT_STATE_IN_FLIGHT | UNIT_STATE_FLEEING |
+                        UNIT_STATE_CONFUSED | UNIT_STATE_STUNNED |
+                        UNIT_STATE_CHARMED | UNIT_STATE_POSSESSED |
+                        UNIT_STATE_DISTRACTED)) {
+    return false;
+  }
+  if (const MotionMaster* mm = bot->GetMotionMaster();
+      mm && mm->GetMotionSlotType(MOTION_SLOT_CONTROLLED) != NULL_MOTION_TYPE) {
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 ActStartResult StartAct(Player* bot,
@@ -1292,6 +1320,9 @@ ActStartResult StartAct(Player* bot,
                         ActiveAct* out_active) {
   if (!bot || !bot->IsInWorld()) {
     return {.error = "bot not in world"};
+  }
+  if (GET_PLAYERBOT_AI(bot) == nullptr) {
+    return {.error = "not a bot"};
   }
   if (act.verb != pb::Command_Act::WAKE && !bot->IsAlive()) {
     return {.error = "you are dead"};
@@ -1313,15 +1344,19 @@ ActStartResult StartAct(Player* bot,
           bot->AttackStop();
           break;
         case pb::Command_Act::MOVING:
-          bot->StopMoving();
-          bot->GetMotionMaster()->Clear();
+          if (CanClearBotMovement(bot)) {
+            bot->StopMoving();
+            bot->GetMotionMaster()->Clear();
+          }
           ClearActMovement(bot);
           break;
         case pb::Command_Act::STOP_UNSPECIFIED:
           bot->InterruptNonMeleeSpells(false);
           bot->AttackStop();
-          bot->StopMoving();
-          bot->GetMotionMaster()->Clear();
+          if (CanClearBotMovement(bot)) {
+            bot->StopMoving();
+            bot->GetMotionMaster()->Clear();
+          }
           ClearActMovement(bot);
           break;
       }
@@ -1373,7 +1408,11 @@ ActStartResult StartAct(Player* bot,
         WorldPacket p(CMSG_CAST_SPELL);
         p << static_cast<uint8_t>(0) << spell->Id << static_cast<uint8_t>(0);
         SpellCastTargets targets;
-        targets.SetUnitTarget(cast_target);
+        if ((spell->GetExplicitTargetMask() & TARGET_FLAG_DEST_LOCATION) != 0) {
+          targets.SetDst(*cast_target);
+        } else {
+          targets.SetUnitTarget(cast_target);
+        }
         targets.Write(p);
         p.rpos(0);
         bot->GetSession()->HandleCastSpellOpcode(p);
@@ -1382,6 +1421,8 @@ ActStartResult StartAct(Player* bot,
         }
         if (IsCurrentlyCastingSpell(bot, spell->Id)) {
           out_active->command_id = command_id;
+          out_active->map_id = bot->GetMapId();
+          out_active->instance_id = bot->GetInstanceId();
           out_active->act = act;
           out_active->waiting_cast = true;
           out_active->cast_spell_id = spell->Id;
@@ -1436,7 +1477,10 @@ ActStartResult StartAct(Player* bot,
           << item_spell_id << item->GetGUID() << static_cast<uint32_t>(0)
           << static_cast<uint8_t>(0);
         SpellCastTargets targets;
-        if (item_target) {
+        if (item_spell && (item_spell->GetExplicitTargetMask() &
+                           TARGET_FLAG_DEST_LOCATION) != 0) {
+          targets.SetDst(*(item_target ? item_target : bot));
+        } else if (item_target) {
           targets.SetUnitTarget(item_target);
         }
         targets.Write(p);
@@ -1449,6 +1493,8 @@ ActStartResult StartAct(Player* bot,
         }
         if (IsCurrentlyCastingSpell(bot, item_spell_id)) {
           out_active->command_id = command_id;
+          out_active->map_id = bot->GetMapId();
+          out_active->instance_id = bot->GetInstanceId();
           out_active->act = act;
           out_active->waiting_cast = true;
           out_active->cast_spell_id = item_spell_id;
@@ -1496,6 +1542,8 @@ ActStartResult StartAct(Player* bot,
           CaptureInterruptedActivity(bot);
       SaveLastInterrupted(bot->GetGUID().GetRawValue(), intr);
       out_active->command_id = command_id;
+      out_active->map_id = bot->GetMapId();
+      out_active->instance_id = bot->GetInstanceId();
       out_active->act = act;
       out_active->dest = *chosen;
       out_active->last_anchor = hazard->anchor;
@@ -1518,12 +1566,14 @@ ActStartResult StartAct(Player* bot,
     }
 
     case pb::Command_Act::BACK: {
-      std::optional<ActiveAct::InterruptedActivity> intr =
-          LoadLastInterrupted(bot->GetGUID().GetRawValue());
+      std::optional<ActiveAct::InterruptedActivity> intr = LoadLastInterrupted(
+          bot->GetGUID().GetRawValue(), bot->GetMapId(), bot->GetInstanceId());
       if (!intr) {
         return {.done = true};
       }
       out_active->command_id = command_id;
+      out_active->map_id = bot->GetMapId();
+      out_active->instance_id = bot->GetInstanceId();
       out_active->act = act;
       out_active->interrupted = *intr;
       out_active->last_repath_at = now;
@@ -1582,6 +1632,8 @@ ActStartResult StartAct(Player* bot,
         return {.error = "no path to destination"};
       }
       out_active->command_id = command_id;
+      out_active->map_id = bot->GetMapId();
+      out_active->instance_id = bot->GetInstanceId();
       out_active->act = act;
       out_active->dest = *chosen;
       out_active->last_anchor = *anchor;
@@ -1760,6 +1812,8 @@ ActStartResult StartAct(Player* bot,
         return {.error = "no path to interact target"};
       }
       out_active->command_id = command_id;
+      out_active->map_id = bot->GetMapId();
+      out_active->instance_id = bot->GetInstanceId();
       out_active->act = act;
       out_active->dest = *chosen;
       out_active->last_anchor = anchor;
@@ -1792,6 +1846,8 @@ ActStartResult StartAct(Player* bot,
         return {.error = "no path to vehicle"};
       }
       out_active->command_id = command_id;
+      out_active->map_id = bot->GetMapId();
+      out_active->instance_id = bot->GetInstanceId();
       out_active->act = act;
       out_active->dest = *chosen;
       out_active->last_anchor = anchor;
@@ -1807,6 +1863,14 @@ ActStartResult StartAct(Player* bot,
           return {.error = "could not leave vehicle"};
         }
         return {.done = true};
+      }
+      if (bot->IsInFlight()) {
+        return {.error = "cannot dismount while on a flight path"};
+      }
+      if (bot->HasUnitState(UNIT_STATE_STUNNED | UNIT_STATE_CONFUSED |
+                            UNIT_STATE_FLEEING | UNIT_STATE_CHARMED |
+                            UNIT_STATE_POSSESSED)) {
+        return {.error = "cannot dismount right now"};
       }
       if (bot->IsMounted()) {
         bot->Dismount();
@@ -1905,6 +1969,8 @@ ActStartResult StartAct(Player* bot,
         return {.error = "no path to kite"};
       }
       out_active->command_id = command_id;
+      out_active->map_id = bot->GetMapId();
+      out_active->instance_id = bot->GetInstanceId();
       out_active->act = act;
       out_active->dest = *chosen;
       out_active->last_anchor = *anchor;
@@ -1919,9 +1985,18 @@ ActStartResult StartAct(Player* bot,
 ActStepResult StepActiveAct(Player* bot,
                             base::TimeTicks now,
                             ActiveAct* active) {
-  if (!bot || !bot->IsInWorld() || !bot->IsAlive()) {
-    ClearActMovement(bot);
+  if (!bot || !bot->IsInWorld() || GET_PLAYERBOT_AI(bot) == nullptr ||
+      !bot->IsAlive()) {
+    if (bot && GET_PLAYERBOT_AI(bot) != nullptr) {
+      ClearActMovement(bot);
+    }
     return {.error = "you died"};
+  }
+  if (active->map_id != bot->GetMapId() ||
+      active->instance_id != bot->GetInstanceId()) {
+    ClearActMovement(bot);
+    ClearLastInterruptedForBot(bot->GetGUID().GetRawValue());
+    return {.error = "map changed"};
   }
   if (active->waiting_cast) {
     if (IsCurrentlyCastingSpell(bot, active->cast_spell_id)) {
@@ -2191,7 +2266,7 @@ ActStepResult StepActiveAct(Player* bot,
 }
 
 void CancelActiveAct(Player* bot, ActiveAct* active) {
-  if (!bot || !active) {
+  if (!bot || !active || GET_PLAYERBOT_AI(bot) == nullptr) {
     return;
   }
   const pb::Command_Act::Verb verb = active->act.verb;
@@ -2200,8 +2275,10 @@ void CancelActiveAct(Player* bot, ActiveAct* active) {
       verb == pb::Command_Act::KITE || verb == pb::Command_Act::INTERACT ||
       verb == pb::Command_Act::BOARD) {
     if (bot->IsInWorld()) {
-      bot->StopMoving();
-      bot->GetMotionMaster()->Clear();
+      if (CanClearBotMovement(bot)) {
+        bot->StopMoving();
+        bot->GetMotionMaster()->Clear();
+      }
       ClearActMovement(bot);
     }
   }
@@ -2223,6 +2300,11 @@ void ClearAvoidedTargetForBot(uint64_t bot_guid, uint64_t target_guid) {
   if (vec.empty()) {
     map.erase(it);
   }
+}
+
+void ClearLastInterruptedForBot(uint64_t bot_guid) {
+  auto& store = LastInterruptedStore();
+  std::erase_if(store, [&](const auto& kv) { return kv.first == bot_guid; });
 }
 
 }  // namespace llm_brain

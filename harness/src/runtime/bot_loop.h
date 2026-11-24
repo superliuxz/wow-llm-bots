@@ -76,6 +76,11 @@ struct BotLoopConfig {
   // verbatim (F5).
   size_t memory_condense_threshold = 24;
   size_t memory_keep_recent = 10;
+  // Overall wall-clock deadlines for in-flight LLM calls (A-M13): a slow or
+  // wedged llama-server is cancelled on tick rather than stalling a bot for
+  // 60 s.
+  base::TimeDelta combat_call_timeout = base::Seconds(10);
+  base::TimeDelta call_timeout = base::Seconds(30);
 };
 
 // Starts one brain call. Returns a handle whose Cancel() aborts it early (the
@@ -133,6 +138,21 @@ class BotLoop {
     std::string last_outcome;
     std::deque<std::string> recent_events;
     std::vector<std::string> pending_reasons;
+    // Structured chat metadata recorded directly from `pb::ChatEvent` so reply
+    // routing, party-chat responder selection, and relationship attribution
+    // never re-parse joined wake strings (A-M14, A-MH6).
+    struct ObservedChat {
+      wlb::snapshot::ChatChannel channel =
+          wlb::snapshot::CHAT_CHANNEL_UNSPECIFIED;
+      std::string from;
+      std::string text;
+      bool at_me = false;
+      bool triggered_wake = false;
+    };
+    std::vector<ObservedChat> pending_chats;
+    // Per-sender recent chat wake timestamps for spam rate limiting (A-M8).
+    std::flat_map<std::string, std::deque<base::TimeTicks>>
+        chat_wake_times_by_sender;
     // Who whispered the bot lately, newest first: the names its `tell` line
     // may answer (kWhispererMemory, kMaxWhisperers in bot_loop.cc).
     struct Whisperer {
@@ -150,7 +170,11 @@ class BotLoop {
 
     bool has_ever_woken = false;
     bool has_queued_wake = false;
+    Urgency queued_urgency = Urgency::kP2Routine;
     bool call_in_flight = false;
+    base::scoped_refptr<LlmCancelHandle> in_flight_cancel;
+    base::TimeTicks call_deadline;
+    uint64_t call_timed_out_epoch = 0;
     bool early_steps_dispatched = false;
     bool early_step_failed = false;
     bool order_failure_during_call = false;
@@ -219,7 +243,9 @@ class BotLoop {
     auto operator<=>(const CompiledOrdersKey&) const = default;
   };
 
-  void NoteEvent(BotState* state, const wlb::snapshot::Event& event);
+  void NoteEvent(BotState* state,
+                 const wlb::snapshot::Event& event,
+                 bool triggered_wake = false);
   // A line for the next prompt's "Since your last look".
   void NoteText(BotState* state, std::string text);
   // What a habit or a disconnect leaves behind: forgotten.
@@ -227,30 +253,31 @@ class BotLoop {
   // `path`'s text, re-read only when its modification time changed (it is
   // read on every brain call: RH-L5); "" when missing.
   std::string ReadFileIfChanged(const std::string& path);
-  // Whether `bot` answers the party/raid chat lines among `reasons` (RH-H4):
+  // Whether `bot` answers the party/raid chat lines among `chats` (RH-H4):
   // a bot named in the line does; when no brain bot of the group is named,
   // only the first of them by name does. True when no such line woke it.
   bool AnswersPartyChat(const std::string& bot,
-                        const std::vector<std::string>& reasons,
+                        const std::vector<BotState::ObservedChat>& chats,
                         const wlb::snapshot::Snapshot& snapshot) const;
   // Remembers who whispered (for the `tell` grammar).
   static void NoteWhisperer(BotState* state,
                             const wlb::snapshot::Event& event,
                             base::TimeTicks now);
-  // Puts a call's wake reasons and recent events back in front of any newer
-  // ones, for a call that ended without installing a plan, so the next call
-  // still sees them (a whisper is not lost to a cancelled or failed call).
+  // Puts a call's wake reasons, chats, and recent events back in front of any
+  // newer ones, for a call that ended without installing a plan, so the next
+  // call still sees them (a whisper is not lost to a cancelled or failed call).
   void Requeue(BotState* state,
                std::vector<std::string> reasons,
                std::vector<std::string> events,
+               std::vector<BotState::ObservedChat> chats,
                std::string outcome);
-  // `refusal`: woken because a step was refused (the refusal count stays;
-  // any other wake starts it over, so one late refusal after, say, entering
-  // combat doesn't hold the bot back up to 30 s: review of f40b0b6, finding 6).
+  // `preserve_backoffs`: keep `step_refusals` and `order_wakes` intact (set
+  // for refusal retries, chat wakes, and order-wake backoff so chat spam or
+  // repeated refusals never clear refusal backoff).
   void WakeBot(const std::string& bot,
                Urgency urgency,
                const std::string& reason,
-               bool refusal = false);
+               bool preserve_backoffs = false);
   // Returns a closure that cancels the started call (empty if none started).
   base::OnceClosure StartBotCall(const std::string& bot,
                                  int slot,
@@ -266,12 +293,12 @@ class BotLoop {
                          size_t condensed_recent_count,
                          base::OnceClosure done,
                          LlmResult result);
-  void RecordRelationshipNotes(const std::string& bot,
-                               const BotState& state,
-                               const std::vector<std::string>& asked_reasons,
-                               const std::vector<std::string>& asked_events,
-                               std::string_view date,
-                               std::string_view memo);
+  void RecordRelationshipNotes(
+      const std::string& bot,
+      const BotState& state,
+      const std::vector<BotState::ObservedChat>& asked_chats,
+      std::string_view date,
+      std::string_view memo);
   void OnFirstLine(const std::string& bot,
                    uint64_t epoch,
                    uint32_t ask_seq,
@@ -287,6 +314,7 @@ class BotLoop {
                std::string wake_reason,
                std::vector<std::string> asked_reasons,
                std::vector<std::string> asked_events,
+               std::vector<BotState::ObservedChat> asked_chats,
                std::string asked_outcome,
                LlmRequest request,
                int64_t snapshot_monotonic_us,

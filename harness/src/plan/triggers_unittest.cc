@@ -232,7 +232,29 @@ TEST(TriggersTest, EventsAlertOnlyOnClientAttentionEvents) {
   wchat.text = "want to group?";
   EXPECT_EQ(
       EvaluateEventTrigger(whisper),
-      (std::optional<WakeTrigger>{{Urgency::kP3Chat, "whisper from Tess"}}));
+      (std::optional<WakeTrigger>{{Urgency::kP1Danger, "whisper from Tess"}}));
+
+  // Party `at_me` outranks routine P2 wakes (A-M7); ambient Say `at_me` stays
+  // P3 (protected by scheduler aging).
+  pb::Event party_at_me;
+  pb::ChatEvent& p_at = party_at_me.chat.emplace();
+  p_at.channel = pb::PARTY;
+  p_at.from = "Hele";
+  p_at.text = "pull?";
+  p_at.at_me = true;
+  EXPECT_EQ(EvaluateEventTrigger(party_at_me),
+            (std::optional<WakeTrigger>{
+                {Urgency::kP1Danger, "party from Hele: pull?"}}));
+
+  pb::Event say_at_me;
+  pb::ChatEvent& s_at = say_at_me.chat.emplace();
+  s_at.channel = pb::SAY;
+  s_at.from = "Stranger";
+  s_at.text = "hey";
+  s_at.at_me = true;
+  EXPECT_EQ(EvaluateEventTrigger(say_at_me),
+            (std::optional<WakeTrigger>{
+                {Urgency::kP3Chat, "say from Stranger: hey"}}));
 
   pb::Event invite;
   pb::PromptEvent& prompt = invite.prompt.emplace();

@@ -15,6 +15,7 @@
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "Player.h"
+#include "Playerbots.h"
 #include "RBAC.h"
 #include "ScriptMgr.h"
 #include "SharedDefines.h"
@@ -101,7 +102,15 @@ std::string WhyCantTalk(Player* bot, bool out_loud) {
 
 }  // namespace
 
-std::string Speak(Player* bot, const pb::Command::Say& say) {
+std::string Speak(Player* bot,
+                  const pb::Command::Say& say,
+                  bool allow_non_bot) {
+  if (!bot || !bot->IsInWorld()) {
+    return "bot not in world";
+  }
+  if (!allow_non_bot && GET_PLAYERBOT_AI(bot) == nullptr) {
+    return "not a bot";
+  }
   const std::string text = CleanChatText(say.text);
   if (text.empty()) {
     return "nothing to say";

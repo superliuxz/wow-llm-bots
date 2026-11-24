@@ -23,6 +23,7 @@
 
 #include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 
 namespace harness {
 
@@ -53,10 +54,14 @@ class Scheduler {
   using CancelableSlotWork =
       base::OnceCallback<base::OnceClosure(int slot, base::OnceClosure done)>;
 
-  explicit Scheduler(size_t max_in_flight);
+  explicit Scheduler(size_t max_in_flight,
+                     base::TimeDelta aging_step = base::Seconds(2));
   Scheduler(const Scheduler&) = delete;
   Scheduler& operator=(const Scheduler&) = delete;
   ~Scheduler();
+
+  // Optional test clock for deterministic aging tests.
+  void SetNowForTesting(base::RepeatingCallback<base::TimeTicks()> now_fn);
 
   void SubmitCancelable(const std::string& bot,
                         Urgency urgency,
@@ -75,6 +80,7 @@ class Scheduler {
     std::string bot;
     Urgency urgency = Urgency::kP2Routine;
     uint64_t order = 0;  // Lower waited longer.
+    base::TimeTicks enqueued_at;
     CancelableSlotWork work;
   };
 
@@ -85,11 +91,15 @@ class Scheduler {
     base::OnceClosure cancel;
   };
 
+  base::TimeTicks Now() const;
+  int EffectivePriority(const Waiting& w, base::TimeTicks now) const;
   int PickSlot(const std::string& bot);
   void StartWaiting();
   void OnDone(const std::string& bot, uint64_t run_id);
 
   const size_t max_in_flight_;
+  const base::TimeDelta aging_step_;
+  base::RepeatingCallback<base::TimeTicks()> now_fn_;
   uint64_t next_order_ = 0;
   uint64_t next_run_id_ = 0;
   size_t next_slot_ = 0;

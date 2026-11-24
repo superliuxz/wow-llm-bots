@@ -221,14 +221,19 @@ std::optional<WakeTrigger> EvaluateEventTrigger(
   if (event.chat) {
     const pb::ChatEvent& chat = *event.chat;
     if (chat.channel == pb::WHISPER || chat.channel == pb::MONSTER_WHISPER) {
-      return WakeTrigger{Urgency::kP3Chat,
+      // Direct whispers outrank routine P2 wakes so a human's message is not
+      // starved behind routine questing/navigation under load (A-M7).
+      return WakeTrigger{Urgency::kP1Danger,
                          base::StrCat({"whisper from ", chat.from})};
     }
     if (chat.channel == pb::RAID_WARNING || chat.channel == pb::BOSS_EMOTE) {
       return WakeTrigger{Urgency::kP0Combat, DescribeEvent(event)};
     }
     if (chat.at_me && chat.channel != pb::WHISPER_SENT) {
-      return WakeTrigger{Urgency::kP3Chat, DescribeEvent(event)};
+      const Urgency u = (chat.channel == pb::PARTY || chat.channel == pb::RAID)
+                            ? Urgency::kP1Danger
+                            : Urgency::kP3Chat;
+      return WakeTrigger{u, DescribeEvent(event)};
     }
     return std::nullopt;
   }

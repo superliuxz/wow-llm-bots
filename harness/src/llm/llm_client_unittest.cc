@@ -431,5 +431,29 @@ TEST(LlmClientTest, CancelAbortsAStreamingCallAndDropsItsConnection) {
   EXPECT_LT(got.round_trip_ms, 1000.0);  // Did not wait for the tail.
 }
 
+TEST(LlmClientTest, OverallDeadlineAbortsSlowDripStream) {
+  FakeLlamaServer server;
+  // Chunks spaced 120 ms apart: each individual read finishes well under the
+  // 250 ms idle read timeout, but total elapsed time crosses the overall
+  // 250 ms wall-clock deadline (A-M13).
+  server.set_stream_chunks(
+      {
+          "data: {\"choices\":[{\"delta\":{\"content\":\"do: 1\\n\"}}]}\n\n",
+          "data: {\"choices\":[{\"delta\":{\"content\":\"expect: "
+          "none\\n\"}}]}\n\n",
+          "data: {\"choices\":[{\"delta\":{\"content\":\"watch: "
+          "none\\n\"}}]}\n\n",
+          "data: {\"choices\":[{\"delta\":{\"content\":\"look: 60\"}}]}\n\n",
+          "data: [DONE]\n\n",
+      },
+      /*tail_delay_ms=*/300);
+  LlmRequest req = SampleRequest();
+  req.timeout_ms = 200;
+  const LlmResult result = CallLlama(server.endpoint(), req);
+  EXPECT_FALSE(result.reply);
+  EXPECT_FALSE(result.cancelled);
+  EXPECT_NE(result.error.find("deadline"), std::string::npos) << result.error;
+}
+
 }  // namespace
 }  // namespace harness

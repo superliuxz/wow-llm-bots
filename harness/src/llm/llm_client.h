@@ -49,6 +49,9 @@ struct LlmRequest {
   int max_tokens = 150;
   float temperature = 0.7f;
   bool stream = true;  // Stream SSE so line 1 (`do: ...`) arrives early.
+  // Optional overall wall-clock deadline in milliseconds (0 = endpoint
+  // default).
+  int timeout_ms = 0;
 };
 
 struct LlmReply {

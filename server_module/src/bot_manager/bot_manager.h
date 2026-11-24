@@ -45,9 +45,16 @@ class BotManager {
   // Logs our bots out (server shutdown).
   void Stop();
 
-  // World thread only: optional per-bot strategy suffix applied on top of the
-  // server-wide `strategies_` (used by test benchmarks to mix baseline and
-  // stripped-strategy parties in the same wave).
+  // Thread-safe: whether an LLM harness is currently connected. While false,
+  // BrainPolicyListener lets Playerbots handle invites, loot rolls, ready
+  // checks, quest shares, and LFG popups so human groupmates never stall when
+  // the harness is down (A-M9).
+  static void SetBrainConnected(bool connected);
+  static bool IsBrainConnected();
+
+  // Optional per-bot strategy suffix applied on top of the server-wide
+  // `strategies_` (used by test benchmarks to mix baseline and stripped-
+  // strategy parties in the same wave). Thread-safe.
   static void SetBotStrategyOverride(const std::string& bot_name,
                                      std::string combat_extra,
                                      std::string non_combat_extra);

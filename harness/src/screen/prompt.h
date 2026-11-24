@@ -30,6 +30,7 @@ struct PromptInput {
   std::string rules;  // content/RULES.md
   std::string bot_name;
   std::string identity;      // var/bots/<name>/identity.md; may be empty
+  std::string memory;        // var/bots/<name>/memory.md condensed/recent notes
   std::string current_goal;  // Empty when the bot has no goal yet.
   // 1-line breadcrumb of the last action failure/interruption (if any).
   std::string last_outcome;

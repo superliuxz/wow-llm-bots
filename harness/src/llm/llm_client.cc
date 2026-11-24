@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
 #include <optional>
@@ -182,9 +183,23 @@ LlmResult LlamaConnection::Call(const LlmRequest& request,
     return aborted;
   }
   const LlmEndpoint& endpoint = impl_->endpoint;
+  const int effective_timeout_ms = request.timeout_ms > 0
+                                       ? request.timeout_ms
+                                       : endpoint.reply_timeout_s * 1000;
+  if (effective_timeout_ms > 0) {
+    const time_t sec = effective_timeout_ms / 1000;
+    const time_t usec = (effective_timeout_ms % 1000) * 1000;
+    impl_->client.set_read_timeout(sec, usec);
+    impl_->client.set_write_timeout(sec, usec);
+  }
+  const base::TimeTicks deadline =
+      effective_timeout_ms > 0
+          ? start + base::Milliseconds(effective_timeout_ms)
+          : base::TimeTicks();
 
   int status = 0;
   bool is_event_stream = false;
+  bool timed_out = false;
   std::string raw_body;
   std::string sse_pending;
   LlmReply streamed_reply;
@@ -267,6 +282,10 @@ LlmResult LlamaConnection::Call(const LlmRequest& request,
     if (cancel && cancel->cancelled()) {
       return false;
     }
+    if (!deadline.is_null() && base::TimeTicks::Now() >= deadline) {
+      timed_out = true;
+      return false;
+    }
     status = res.status;
     is_event_stream =
         res.get_header_value("Content-Type").find("text/event-stream") !=
@@ -276,6 +295,10 @@ LlmResult LlamaConnection::Call(const LlmRequest& request,
   http_req.content_receiver = [&](const char* data, size_t len,
                                   uint64_t /*offset*/, uint64_t /*total*/) {
     if (cancel && cancel->cancelled()) {
+      return false;
+    }
+    if (!deadline.is_null() && base::TimeTicks::Now() >= deadline) {
+      timed_out = true;
       return false;
     }
     if (status != 200) {
@@ -313,6 +336,15 @@ LlmResult LlamaConnection::Call(const LlmRequest& request,
   if (was_cancelled) {
     result.cancelled = true;
     result.error = "cancelled";
+    result.first_line_ms = first_line_ms;
+    result.round_trip_ms = end_ms;
+    return result;
+  }
+  if (timed_out || (!response && !deadline.is_null() &&
+                    base::TimeTicks::Now() >= deadline)) {
+    result.error =
+        base::StrCat({"llama-server reply exceeded overall deadline (",
+                      base::NumberToString(effective_timeout_ms), " ms)"});
     result.first_line_ms = first_line_ms;
     result.round_trip_ms = end_ms;
     return result;

@@ -1132,9 +1132,12 @@ CheckResult EvalCheck(const SnapshotView& view,
                   std::nullopt};
 
         } else if constexpr (std::is_same_v<C, grammar::CheckEvery>) {
+          constexpr double kMinEverySeconds = 1.0;
           const base::TimeTicks ref =
               view.order_last_every.value_or(view.installed_at);
-          return {(view.now - ref) >= base::Seconds(c.s), std::nullopt};
+          return {(view.now - ref) >=
+                      base::Seconds(std::max(c.s, kMinEverySeconds)),
+                  std::nullopt};
         }
       },
       check.value);

@@ -3,6 +3,7 @@
 #include "net/unix_socket_server.h"
 
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -50,11 +51,12 @@ bool UnixSocketServer::Listen() {
   }
   unlink(path_.c_str());  // A stale file from a crash would block bind().
   if (bind(listen_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0 ||
-      listen(listen_fd_, SOMAXCONN) != 0 ||
+      chmod(path_.c_str(), 0600) != 0 || listen(listen_fd_, SOMAXCONN) != 0 ||
       !base::CurrentIOThread::Get()->WatchFileDescriptor(
           listen_fd_, /*persistent=*/true, base::MessagePumpForIO::WATCH_READ,
           &listen_controller_, this)) {
     close(listen_fd_);
+    unlink(path_.c_str());
     listen_fd_ = -1;
     return false;
   }
@@ -80,10 +82,17 @@ void UnixSocketServer::OnFileCanReadWithoutBlocking(int /*fd*/) {
       }
       return;  // EAGAIN: no more pending connections (or a transient error).
     }
-    const bool had_client = client_ != nullptr;
-    client_.reset();  // A new harness replaces the old one.
-    if (had_client && callbacks_.on_disconnected) {
-      callbacks_.on_disconnected.Run();
+    // Reject connections from other local users even during the narrow window
+    // between bind() and chmod(0600), and reject any second connection while a
+    // live harness is already attached.
+    ucred cred{};
+    socklen_t cred_len = sizeof(cred);
+    if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &cred_len) != 0 ||
+        cred_len != sizeof(cred) || cred.uid != geteuid() ||
+        client_ != nullptr) {
+      close(fd);
+      ++stats_.connections_rejected;
+      continue;
     }
     client_ = std::make_unique<FramedConnection>(
         fd,

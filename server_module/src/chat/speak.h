@@ -14,8 +14,11 @@ namespace llm_brain {
 // Says `say` with the bot's own voice, as a player types it: out loud in its
 // race's language (say, yell), or whispered to someone by name. Returns what
 // went wrong, phrased like the client's error line, or "" when it was said.
-// World thread only.
-std::string Speak(Player* bot, const wlb::snapshot::Command::Say& say);
+// Refuses non-bot players unless `allow_non_bot` is explicitly set (admin
+// console test hook). World thread only.
+std::string Speak(Player* bot,
+                  const wlb::snapshot::Command::Say& say,
+                  bool allow_non_bot = false);
 
 }  // namespace llm_brain
 

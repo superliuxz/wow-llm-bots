@@ -25,6 +25,10 @@ std::string CleanChatText(std::string_view text,
 // but nobody needs to wake for it (RH-H4).
 bool IsTrivialChat(std::string_view text);
 
+// True when `name` appears in `text` as a whole ASCII word (case-insensitive),
+// so a bot named "Ed" does not wake on "need" (A-L4).
+bool MentionsName(std::string_view text, std::string_view name);
+
 }  // namespace llm_brain
 
 #endif  // MOD_LLM_BRAIN_CHAT_CHAT_TEXT_H_
