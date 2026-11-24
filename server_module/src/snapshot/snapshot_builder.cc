@@ -700,6 +700,9 @@ void SnapshotBuilder::FillOptionFacts(Player* bot,
   CheckBagFoodAndDrink(bot, &out->has_food, &out->has_drink);
   CollectUsableBagItems(bot, &out->usable_items);
   CollectTalentTrees(bot, &out->talent_trees);
+  CollectNpcActions(bot, *snapshot, out->has_food, out->has_drink,
+                    &out->npc_actions);
+  CollectGroupAndUpkeepActions(bot, *snapshot, &out->group_and_upkeep_actions);
   out->has_pending_resurrect = !bot->IsAlive() && bot->isResurrectRequested();
   if (Group* group = bot->GetGroup()) {
     for (const Group::MemberSlot& slot : group->GetMemberSlots()) {

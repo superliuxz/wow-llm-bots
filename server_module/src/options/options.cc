@@ -304,10 +304,22 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
   // A dead player (body or ghost) can't attack, loot or click anything nearby.
   const bool alive =
       self.state != pb::Self::DEAD_BODY && self.state != pb::Self::GHOST;
+  auto has_explicit_npc_actions = [&](std::string_view npc_guid) {
+    for (const OptionFacts::NpcAction& act : facts.npc_actions) {
+      if (act.npc_guid == npc_guid) {
+        return true;
+      }
+    }
+    return false;
+  };
   for (const pb::Unit& u : snapshot->base.nearby.units) {
     if (const std::optional<OptionTarget::Kind> kind =
             UnitKind(u, self.in_combat, facts);
         kind && alive) {
+      if (*kind == OptionTarget::Kind::kTalk &&
+          has_explicit_npc_actions(u.guid)) {
+        continue;
+      }
       AddTarget(*kind, u.guid, u.name, {u.targeting_me, u.rel.dist_yd},
                 &targets, &ranks);
     }
@@ -490,6 +502,36 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       option.kind = pb::Option::USE;
       option.name = item.name;
     }
+  }
+
+  if (alive && !self.in_combat) {
+    for (const OptionFacts::NpcAction& act : facts.npc_actions) {
+      if (act.action_guid.empty() || act.label.empty()) {
+        continue;
+      }
+      targets.push_back({OptionTarget::Kind::kUse, act.action_guid, act.label});
+      pb::Option& option = snapshot->options.emplace_back();
+      option.text = act.label;
+      option.guid = act.action_guid;
+      option.kind = pb::Option::USE;
+      option.name = act.label;
+    }
+  }
+
+  // Grouping and upkeep actions (loot rolls, ready check, shared quest, LFG,
+  // follow/regroup, raid marking, mounting). Loot rolls and ready checks are
+  // valid even while in combat or dead; non-combat upkeep options are filtered
+  // by `CollectGroupAndUpkeepActions`.
+  for (const OptionFacts::Action& act : facts.group_and_upkeep_actions) {
+    if (act.guid.empty() || act.label.empty()) {
+      continue;
+    }
+    targets.push_back({OptionTarget::Kind::kUse, act.guid, act.label});
+    pb::Option& option = snapshot->options.emplace_back();
+    option.text = act.label;
+    option.guid = act.guid;
+    option.kind = pb::Option::USE;
+    option.name = act.label;
   }
 
   if (alive && !self.in_combat) {

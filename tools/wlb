@@ -107,6 +107,10 @@ def parse(argv):
                    help="soak: also run anonymized LLM human-vs-bot clip judge")
     p.add_argument("--verify-hash", type=pathlib.Path, default=None,
                    help="soak: verify scorer SHA-256 against lock file before running")
+    p.add_argument("--temperature", type=float, default=0.7,
+                   help="soak: LLM sampling temperature (default: 0.7; use 0 for deterministic)")
+    p.add_argument("--no-brain", action="store_true",
+                   help="soak: playerbots-only comparison run without launching the LLM harness")
 
     p = sub.add_parser("setup", help="one-time setup steps")
     p.add_argument("step", choices=["links", "configure", "data", "llama", "msan", "client-ui"])
@@ -193,6 +197,8 @@ def main():
                 judge=a.judge,
                 verify_hash=a.verify_hash,
                 suite=a.suite,
+                temperature=a.temperature,
+                no_brain=a.no_brain,
             )
         else:
             testing.eval_(a.names, model=a.model, shootout=a.shootout)

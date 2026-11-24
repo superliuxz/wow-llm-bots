@@ -98,12 +98,11 @@ bool IsTargetDone(OptionKind kind,
     }
     case OptionKind::kGather:
     case OptionKind::kUse: {
-      // Non-GameObject `kUse` options (`item:`, `equip:`, `talent:`, `rez:`)
-      // finish via `done_command_id` from the module rather than a nearby
-      // GameObject disappearing.
-      if (kind == OptionKind::kUse &&
-          (guid.starts_with("item:") || guid.starts_with("equip:") ||
-           guid.starts_with("talent:") || guid.starts_with("rez:"))) {
+      // Non-GameObject `kUse` options (`item:`, `equip:`, `talent:`, `rez:`,
+      // `npc_*`, `qshare:`, `roll:`, `ready:`, `lfg:`, `follow:`, `mark:`,
+      // `mount:`) finish via `done_command_id` from the module rather than a
+      // nearby GameObject disappearing.
+      if (kind == OptionKind::kUse && !guid.starts_with("0x")) {
         return false;
       }
       const pb::GameObject* obj = FindObjectByGuid(snapshot, guid);

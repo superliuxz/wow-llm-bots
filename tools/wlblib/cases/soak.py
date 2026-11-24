@@ -28,6 +28,7 @@ Suites (`--suite`):
   - Or any single scenario name above.
 """
 
+import contextlib
 import json
 import pathlib
 import shutil
@@ -449,6 +450,55 @@ def _apply_scenario_setup(scenario: dict) -> None:
         time.sleep(3.0)
 
 
+def _classify_option_text(text: str) -> str:
+    low = text.strip().lower()
+    if low.startswith("keep doing"):
+        return "Keep"
+    if low.startswith("attack ") or low.startswith("assist "):
+        return "Attack"
+    if low.startswith("loot "):
+        return "Loot"
+    if low.startswith("talk to ") or low.startswith("accept quest ") or low.startswith("turn in "):
+        return "Talk"
+    if low.startswith("explore"):
+        return "Explore"
+    if low.startswith("go to ") or low.startswith("follow "):
+        return "GoTo"
+    if low.startswith("rest"):
+        return "Rest"
+    if low.startswith("gather "):
+        return "Gather"
+    if low.startswith("equip "):
+        return "Equip"
+    if low.startswith("spend talent"):
+        return "Talent"
+    if low.startswith("use ") or low.startswith("buy ") or low.startswith("train ") or low.startswith("sell ") or low.startswith("repair ") or low.startswith("fly ") or low.startswith("mount "):
+        return "Use"
+    return "Other"
+
+
+def _extract_first_option_kind(decision: dict) -> str | None:
+    """Extracts the option category of step 1 from a decision log record."""
+    plan_text = decision.get("plan")
+    if not isinstance(plan_text, str):
+        return None
+    do_line = next((ln for ln in plan_text.splitlines() if ln.startswith("do:")), "")
+    if not do_line:
+        return None
+    first_tok = do_line[3:].strip().split(",")[0].strip().split("x")[0].strip()
+    if not first_tok.isdigit():
+        return None
+    opt_num = int(first_tok)
+    prompt = decision.get("prompt_user", "")
+    if not isinstance(prompt, str):
+        return None
+    prefix = f"  {opt_num}. "
+    for ln in prompt.splitlines():
+        if ln.startswith(prefix):
+            return _classify_option_text(ln[len(prefix):])
+    return None
+
+
 def _run_once(
     scenario_name: str,
     minutes: float,
@@ -458,30 +508,42 @@ def _run_once(
     blind_ratings_path: pathlib.Path | None = None,
     min_eval_passed: int | None = None,
     eval_passed: int | None = None,
+    temperature: float = 0.7,
+    no_brain: bool = False,
 ) -> dict:
     scenario = SCENARIOS[scenario_name]
     trace_dir = VAR / "soak_traces"
     shutil.rmtree(trace_dir, ignore_errors=True)
     trace_dir.mkdir(parents=True, exist_ok=True)
 
-    say(f"soak scenario [{scenario_name}]: {scenario['desc']}")
+    run_stamp = time.strftime("%Y%m%d-%H%M%S")
+    mode_tag = "no_brain" if no_brain else f"temp{temperature:g}"
+    run_dir = VAR / "soak_decisions" / f"{scenario_name}_{mode_tag}_{run_stamp}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    bots_dir = run_dir / "bots"
+    bots_dir.mkdir(parents=True, exist_ok=True)
+
+    say(
+        f"soak scenario [{scenario_name}] ({mode_tag}): {scenario['desc']} "
+        f"(logs: {run_dir.relative_to(ROOT)})"
+    )
     with Stack(scenario["config"], BOT, online=ONLINE) as stack:
         _apply_scenario_setup(scenario)
-        with tempfile.TemporaryDirectory(prefix="wlb-soak-") as tmp:
-            tmp_dir = pathlib.Path(tmp)
-            bots_dir = tmp_dir / "bots"
-            bots_dir.mkdir(parents=True)
-            dungeon = scenario.get("dungeon")
-            notes_key = dungeon.get("notes") if dungeon else None
-            if notes_key:
-                notes_src = ROOT / "content" / "notes" / notes_key / "notes.md"
-                if notes_src.is_file():
-                    notes_text = notes_src.read_text(encoding="utf-8")
-                    for member in DUNGEON_PARTY:
-                        mdir = bots_dir / member
-                        mdir.mkdir(parents=True, exist_ok=True)
-                        (mdir / "notes.md").write_text(notes_text, encoding="utf-8")
-            harness_log = tmp_dir / "harness.log"
+        dungeon = scenario.get("dungeon")
+        notes_key = dungeon.get("notes") if dungeon else None
+        if notes_key:
+            notes_src = ROOT / "content" / "notes" / notes_key / "notes.md"
+            if notes_src.is_file():
+                notes_text = notes_src.read_text(encoding="utf-8")
+                for member in DUNGEON_PARTY:
+                    mdir = bots_dir / member
+                    mdir.mkdir(parents=True, exist_ok=True)
+                    (mdir / "notes.md").write_text(notes_text, encoding="utf-8")
+        harness_log = run_dir / "harness.log"
+        proc = None
+        log_fh = None
+        if not no_brain:
+            log_fh = harness_log.open("w")
             proc = subprocess.Popen(
                 [
                     str(OUT / "common" / "harness"),
@@ -492,101 +554,113 @@ def _run_once(
                     "--host=127.0.0.1",
                     "--port=8090",
                     "--slots=16",
-                    "--temperature=0",
+                    f"--temperature={temperature}",
                 ],
                 cwd=ROOT,
-                stdout=harness_log.open("w"),
+                stdout=log_fh,
                 stderr=subprocess.STDOUT,
             )
-            duration_s = max(30.0, minutes * 60.0)
-            t0 = time.monotonic()
-            try:
-                say(
-                    f"soak [{scenario_name}]: running {ONLINE} bots for {duration_s:.0f} s "
-                    "with real llama-server..."
-                )
-                while time.monotonic() - t0 < duration_s:
-                    if proc.poll() is not None:
-                        tail = "\n".join(harness_log.read_text().splitlines()[-20:])
-                        raise AssertionError(
-                            f"harness exited early (rc={proc.returncode}):\n{tail}"
-                        )
-                    time.sleep(2.0)
-            finally:
+        duration_s = max(30.0, minutes * 60.0)
+        t0 = time.monotonic()
+        try:
+            say(
+                f"soak [{scenario_name}]: running {ONLINE} bots for {duration_s:.0f} s "
+                + ("(playerbots-only, no brain)..." if no_brain else f"with real llama-server (temp={temperature})...")
+            )
+            while time.monotonic() - t0 < duration_s:
+                if proc is not None and proc.poll() is not None:
+                    tail = "\n".join(harness_log.read_text().splitlines()[-20:])
+                    raise AssertionError(
+                        f"harness exited early (rc={proc.returncode}):\n{tail}"
+                    )
+                time.sleep(2.0)
+        finally:
+            if proc is not None:
                 proc.terminate()
                 try:
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     proc.kill()
+            if log_fh is not None:
+                log_fh.close()
 
-            elapsed_min = max((time.monotonic() - t0) / 60.0, 1e-6)
-            decisions_by_bot = {}
-            do_ms = []
-            invalid_plans = 0
-            llm_errors = 0
-            max_repeated_refusals = 0
-            for bot_dir in sorted(bots_dir.iterdir()):
-                ev_dir = bot_dir / "events"
-                if not ev_dir.is_dir():
-                    continue
-                decs = []
-                refusal_counts: dict[str, int] = {}
-                for f in sorted(ev_dir.glob("*.jsonl")):
-                    for line in f.read_text().splitlines():
-                        if not line.strip():
-                            continue
-                        d = json.loads(line)
-                        decs.append(d)
-                        if d.get("error"):
-                            llm_errors += 1
-                        elif d.get("plan") is None:
-                            invalid_plans += 1
-                        if d.get("first_line_ms", 0) > 0:
-                            do_ms.append(float(d["first_line_ms"]))
-                        for w in d.get("wake_reasons", []):
-                            if isinstance(w, str) and w.startswith("error:"):
-                                refusal_counts[w] = refusal_counts.get(w, 0) + 1
-                if refusal_counts:
-                    max_repeated_refusals = max(
-                        max_repeated_refusals, max(refusal_counts.values())
-                    )
-                decisions_by_bot[bot_dir.name] = decs
+        elapsed_min = max((time.monotonic() - t0) / 60.0, 1e-6)
+        decisions_by_bot = {}
+        option_counts: dict[str, int] = {}
+        do_ms = []
+        invalid_plans = 0
+        llm_errors = 0
+        max_repeated_refusals = 0
+        for bot_dir in sorted(bots_dir.iterdir()):
+            ev_dir = bot_dir / "events"
+            if not ev_dir.is_dir():
+                continue
+            decs = []
+            refusal_counts: dict[str, int] = {}
+            for f in sorted(ev_dir.glob("*.jsonl")):
+                for line in f.read_text().splitlines():
+                    if not line.strip():
+                        continue
+                    d = json.loads(line)
+                    decs.append(d)
+                    if d.get("error"):
+                        llm_errors += 1
+                    elif d.get("plan") is None:
+                        invalid_plans += 1
+                    else:
+                        kind = _extract_first_option_kind(d)
+                        if kind:
+                            option_counts[kind] = option_counts.get(kind, 0) + 1
+                    if d.get("first_line_ms", 0) > 0:
+                        do_ms.append(float(d["first_line_ms"]))
+                    for w in d.get("wake_reasons", []):
+                        if isinstance(w, str) and w.startswith("error:"):
+                            refusal_counts[w] = refusal_counts.get(w, 0) + 1
+            if refusal_counts:
+                max_repeated_refusals = max(
+                    max_repeated_refusals, max(refusal_counts.values())
+                )
+            decisions_by_bot[bot_dir.name] = decs
 
-            total_decs = sum(len(v) for v in decisions_by_bot.values())
-            max_wakes_per_min = max(
-                (len(v) / elapsed_min for v in decisions_by_bot.values()),
-                default=0.0,
-            )
-            p50_do = statistics.median(do_ms) if do_ms else 0.0
-            p95_do = (
-                sorted(do_ms)[min(len(do_ms) - 1, int(0.95 * (len(do_ms) - 1)))]
-                if do_ms
-                else 0.0
-            )
-            run_stats = {
-                "scenario": scenario_name,
-                "bots": ONLINE,
-                "elapsed_min": elapsed_min,
-                "decisions": total_decs,
-                "max_wakes_per_min": max_wakes_per_min,
-                "do_p50_ms": p50_do,
-                "do_p95_ms": p95_do,
-                "llm_errors": llm_errors,
-                "invalid_plans": invalid_plans,
-                "max_repeated_refusals": max_repeated_refusals,
-            }
-            res = soak_scorer.score_soak(
-                trace_dir,
-                run_stats=run_stats,
-                human_dir=human_dir,
-                baseline_trace_dir=baseline_trace_dir,
-                blind_ratings_path=blind_ratings_path,
-                use_judge=use_judge,
-                min_eval_passed=min_eval_passed,
-                eval_passed=eval_passed,
-            )
-            res["scenario"] = scenario_name
-            return res
+        total_decs = sum(len(v) for v in decisions_by_bot.values())
+        max_wakes_per_min = max(
+            (len(v) / elapsed_min for v in decisions_by_bot.values()),
+            default=0.0,
+        )
+        p50_do = statistics.median(do_ms) if do_ms else 0.0
+        p95_do = (
+            sorted(do_ms)[min(len(do_ms) - 1, int(0.95 * (len(do_ms) - 1)))]
+            if do_ms
+            else 0.0
+        )
+        run_stats = {
+            "scenario": scenario_name,
+            "mode": "no_brain" if no_brain else "llm",
+            "temperature": None if no_brain else temperature,
+            "decisions_dir": str(run_dir.relative_to(ROOT)),
+            "bots": ONLINE,
+            "elapsed_min": elapsed_min,
+            "decisions": total_decs,
+            "option_counts": option_counts,
+            "max_wakes_per_min": max_wakes_per_min,
+            "do_p50_ms": p50_do,
+            "do_p95_ms": p95_do,
+            "llm_errors": llm_errors,
+            "invalid_plans": invalid_plans,
+            "max_repeated_refusals": max_repeated_refusals,
+        }
+        res = soak_scorer.score_soak(
+            trace_dir,
+            run_stats=run_stats,
+            human_dir=human_dir,
+            baseline_trace_dir=baseline_trace_dir,
+            blind_ratings_path=blind_ratings_path,
+            use_judge=use_judge,
+            min_eval_passed=min_eval_passed,
+            eval_passed=eval_passed,
+        )
+        res["scenario"] = scenario_name
+        return res
 
 
 def _resolve_scenarios(suite: str, runs: int) -> list[str]:
@@ -670,17 +744,21 @@ def run_soak(
     check_guardrails: bool = True,
     min_eval_passed: int | None = None,
     eval_passed: int | None = None,
+    temperature: float = 0.7,
+    no_brain: bool = False,
 ) -> dict:
     if verify_hash:
         ok, msg = soak_scorer.verify_scorer_hash(verify_hash)
         expect(ok, f"scorer integrity check failed: {msg}")
 
     scenarios = _resolve_scenarios(suite, runs)
-    build.common("default", tests=False)
+    if not no_brain:
+        build.common("default", tests=False)
     results = []
     with tempfile.TemporaryDirectory(prefix="wlb-soak-runs-") as runs_tmp:
         per_run_dirs: list[pathlib.Path] = []
-        with LlamaServer(slots=16):
+        llm_ctx = contextlib.nullcontext() if no_brain else LlamaServer(slots=16)
+        with llm_ctx:
             for idx, sc_name in enumerate(scenarios):
                 if len(scenarios) > 1:
                     say(f"== soak run {idx + 1}/{len(scenarios)} ({sc_name}) ==")
@@ -693,6 +771,8 @@ def run_soak(
                     blind_ratings_path=blind_ratings_path,
                     min_eval_passed=(min_eval_passed if len(scenarios) == 1 else None),
                     eval_passed=(eval_passed if len(scenarios) == 1 else None),
+                    temperature=temperature,
+                    no_brain=no_brain,
                 )
                 results.append(res)
                 if len(scenarios) > 1:
@@ -703,14 +783,23 @@ def run_soak(
                 st = res["run_stats"]
                 p = res["progress"]
                 rat_s = f"{res['rating']:.1f}" if res.get("rating") is not None else "unrated"
+                opt_counts = st.get("option_counts") or {}
+                opt_total = sum(opt_counts.values())
+                opt_str = ""
+                if opt_total > 0:
+                    top = sorted(opt_counts.items(), key=lambda kv: -kv[1])[:6]
+                    opt_str = ", options={" + ", ".join(
+                        f"{k}:{100.0 * v / opt_total:.0f}%" for k, v in top
+                    ) + "}"
                 say(
-                    f"soak summary [{sc_name}] ({st['elapsed_min']:.1f} min, {ONLINE} bots): "
+                    f"soak summary [{sc_name}] ({st['elapsed_min']:.1f} min, {ONLINE} bots, "
+                    f"mode={st.get('mode', 'llm')}): "
                     f"rating={rat_s}, decisions={st['decisions']}, "
                     f"max_wakes/min/bot={st['max_wakes_per_min']:.1f}, "
                     f"do_p50={st['do_p50_ms']:.0f}ms, do_p95={st['do_p95_ms']:.0f}ms, "
                     f"errors={st['llm_errors']}, invalid={st['invalid_plans']}, "
                     f"xp/h={p['xp_per_hour']:.0f}, deaths={p['deaths']}, "
-                    f"moved={p['moved_bots']}/{p['traced_bots']}"
+                    f"moved={p['moved_bots']}/{p['traced_bots']}{opt_str}"
                 )
 
             if len(scenarios) > 1:
@@ -735,6 +824,6 @@ def run_soak(
                 agg = results[0]
     say(soak_scorer.format_score_report(agg))
 
-    if check_guardrails:
+    if check_guardrails and not no_brain:
         expect(agg["guardrails_ok"], "one or more soak guardrails failed (see above)")
     return agg

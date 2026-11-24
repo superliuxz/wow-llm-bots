@@ -758,5 +758,68 @@ TEST(OptionsTest, DeadBodyOffersAcceptResurrectionAndReleaseSpirit) {
             (std::vector<std::string>{"Keep doing what I'm doing"}));
 }
 
+TEST(OptionsTest, ExplicitNpcActionsReplaceGenericTalkToOption) {
+  pb::Snapshot snap;
+  snap.base.self.in_combat = false;
+  pb::Unit& npc = snap.base.nearby.units.emplace_back();
+  npc.guid = "0x0000000000001234";
+  npc.name = "Kaltunk";
+  npc.kind = pb::Unit::NPC;
+  npc.reaction = pb::Unit::FRIENDLY;
+  npc.quest_marker = pb::Unit::QUEST_AVAILABLE;
+
+  OptionFacts facts;
+  facts.npcs.push_back({npc.guid, kNpcFlagQuestGiver});
+  facts.npc_actions.push_back(
+      {"npc_qaccept:0x0000000000001234:4641", npc.guid,
+       "Accept quest \"Your Place In The World\" from Kaltunk"});
+  facts.npc_actions.push_back(
+      {"npc_qturnin:0x0000000000001234:788:0", npc.guid,
+       "Turn in \"Cutting Teeth\" to Kaltunk (pick Rugged Boots, ilvl 5)"});
+  facts.npc_actions.push_back(
+      {"npc_qturnin:0x0000000000001234:788:1", npc.guid,
+       "Turn in \"Cutting Teeth\" to Kaltunk (pick Cloth Gloves, ilvl 5)"});
+
+  const std::vector<OptionTarget> targets = AddOptions(&snap, facts);
+  EXPECT_EQ(
+      Texts(snap),
+      (std::vector<std::string>{
+          "Accept quest \"Your Place In The World\" from Kaltunk",
+          "Turn in \"Cutting Teeth\" to Kaltunk (pick Rugged Boots, ilvl 5)",
+          "Turn in \"Cutting Teeth\" to Kaltunk (pick Cloth Gloves, ilvl 5)",
+          "Keep doing what I'm doing"}));
+  ASSERT_EQ(targets.size(), 4u);
+  EXPECT_EQ(targets[0].guid, "npc_qaccept:0x0000000000001234:4641");
+  EXPECT_EQ(targets[2].guid, "npc_qturnin:0x0000000000001234:788:1");
+}
+
+TEST(OptionsTest, GroupAndUpkeepActionsAreExposedToTheBrain) {
+  OptionFacts facts;
+  facts.group_and_upkeep_actions.push_back(
+      {"roll:0x100:0:1", "Need Dal'Rend's Sacred Charge (ilvl 63)"});
+  facts.group_and_upkeep_actions.push_back(
+      {"roll:0x100:0:2", "Greed Dal'Rend's Sacred Charge (ilvl 63)"});
+  facts.group_and_upkeep_actions.push_back(
+      {"roll:0x100:0:0", "Pass Dal'Rend's Sacred Charge"});
+  facts.group_and_upkeep_actions.push_back(
+      {"ready:yes", "Ready (confirm ready check)"});
+  facts.group_and_upkeep_actions.push_back(
+      {"lfg:accept:42", "Accept Dungeon Finder proposal"});
+
+  pb::Snapshot snap;
+  snap.base.self.in_combat = true;
+  const std::vector<OptionTarget> targets = AddOptions(&snap, facts);
+  EXPECT_EQ(
+      Texts(snap),
+      (std::vector<std::string>{
+          "Need Dal'Rend's Sacred Charge (ilvl 63)",
+          "Greed Dal'Rend's Sacred Charge (ilvl 63)",
+          "Pass Dal'Rend's Sacred Charge", "Ready (confirm ready check)",
+          "Accept Dungeon Finder proposal", "Keep doing what I'm doing"}));
+  ASSERT_EQ(targets.size(), 6u);
+  EXPECT_EQ(targets[0].guid, "roll:0x100:0:1");
+  EXPECT_EQ(targets[4].guid, "lfg:accept:42");
+}
+
 }  // namespace
 }  // namespace llm_brain

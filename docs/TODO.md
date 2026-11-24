@@ -9,7 +9,7 @@ Last updated 2026-11-24.
 
 ## In progress
 
-*(Phase 4 and Phase 5 `C4` are signed off; locked `snapshot_builder.cc` and `llm_brain_world_script.cc` await user-approved `hill_climb.py lock-scorer --force-relock` after `place:leader`, `CollectTalentTrees`/`has_pending_resurrect`, and `observed_state_` pruning.)*
+*(Phase 4 and Phase 5 `C4` are signed off; locked `snapshot_builder.cc`, `llm_brain_world_script.cc`, `soak.py`, and `testing.py` await user-approved `hill_climb.py lock-scorer --force-relock`.)*
 
 - [x] **Review `8614690` fixes (High → Medium → Low — all verified):**
   - **High:**
@@ -26,7 +26,7 @@ Last updated 2026-11-24.
     - [x] **R8614690-L2:** Removed Playerbots premade-spec talent delegation and duplicate `SendTalentsInfoData` (resolved with R8614690-H4).
     - [x] **R8614690-L3:** Updated `e2e_playability.py` docstring, `docs/TODO.md` date (`2026-11-24`), and `polyline.reserve(samples + 2)` in `option_facts.cc`.
 
-- [ ] **Playability & architecture review (High → Medium → Low — focus High & Medium first, offload non-LLM runs to `10700k`):**
+- [x] **Playability & architecture review (High → Medium → Low — all items addressed):**
   - **High (blocks playing with a human):**
     - [x] **High 1 — Bots spend talents:** `OptionFacts::talent_trees` (`CollectTalentTrees`), `Spend talent points in <Tree> (<spent> pts, <free> unspent)` out-of-combat options (`options.cc`), and direct `sTalentStore` + `Player::LearnTalent` execution (`option_executor.cc`). Live-verified on `10700k` via `e2e_playability` (L15 bulk + L16/L17 1-pt incremental progression).
     - [x] **High 2 — Boss notes auto-load in real play:** `--notes-dir` (default `content/notes`) indexes `<notes_dir>/*/notes.md` by `# <Instance Name> (<Abbr>)` heading and auto-loads on instance entry without being wiped by `StartBotCall` when `<bots_dir>/<bot>/notes.md` is absent (unit-tested with non-empty `bots_dir` in `BotLoopTest.AutoLoadsInstanceNotesFromNotesDirOnInstanceEntry`).
@@ -34,18 +34,18 @@ Last updated 2026-11-24.
     - [x] **High 4 — Party chat non-loop:** in `chat_scripts.cc`, gated `chat.at_me` on `sender_is_human` (`GET_PLAYERBOT_AI(player) == nullptr`) so bot-to-bot party/raid lines never trigger reply loops while human party/raid messages still wake bots. Live-verified on `10700k` via `e2e_playability` (`at_me=False` on bot-to-bot `PARTY` chat).
   - **Medium:**
     - [x] **Medium 1 — Ghost teleport cheat removed:** deleted `RecoverStuckDungeonGhost` and `stuck_ghost_since_ms` from `bot_manager.{h,cc}` and live-verified real `Release spirit` -> `GHOST` (see High 3).
-    - [ ] **Medium 2 — `"Talk to"` makes the choices in C++ (`TalkToNpcNow`, `option_executor.cc:418`):** accepts every quest on offer, picks quest reward using playerbots' stat weights, learns all class spells, and sells grey items / repairs; the brain can't decline a quest or choose a reward (contradicts `"the brain decides"`).
-    - [ ] **Medium 3 — Missing actions for grouping and upkeep:** follow/regroup (`Go to <name> (party leader)` for `>= 25 yd` added in `6e0feee`; close-range/explicit follow still pending), accepting a shared quest, Need/Greed/Pass loot rolls (currently playerbots rolls for them), ready check and role check, Dungeon Finder (LFG/RDF), raid target marks, buying food/water/ammo/reagents (with `BotCheats = ""`, bots run out), and using a flight master or a mount.
-    - [ ] **Medium 4 — Open-world results can't be credited to the brain:** with `+grind,+new rpg` on, playerbots' own questing runs whenever the brain picks `"Keep"` (`28%` of 27.5k play-server decisions); soak has no playerbots-only comparison run and deletes its decision logs with its temp folder (`soak.py:470`).
-    - [ ] **Medium 5 — Soak runs at temperature 0:** every bot is deterministic, so personality and variance design is never exercised.
+    - [x] **Medium 2 — Split `"Talk to"` into real brain choices:** removed C++ auto-accept/auto-reward/auto-train/auto-sell from `TalkToNpcNow` (now only approaches/faces distant NPCs) and deleted `BestQuestRewardIndex`; `CollectNpcActions` (`option_executor.cc`) exposes explicit `Accept quest "<Title>"`, `Turn in "<Title>" (pick <Item>, ilvl <N>)`, `Train <N> class spell(s)`, and `Sell grey items & repair` options when in talk range, replacing generic `Talk to` (`OptionsTest.ExplicitNpcActionsReplaceGenericTalkToOption`; 2-step `Talk to Kaltunk` -> `Accept quest "Your Place In The World" from Kaltunk` live-verified via `e2e_talk` on `10700k`).
+    - [x] **Medium 3 — Grouping & upkeep actions:** blocked Playerbots' auto-roll, auto-quest-share, auto-ready-check, and auto-LFG actions in `BrainPolicyListener` (`bot_manager.cc`) and exposed brain options via `CollectNpcActions` / `CollectGroupAndUpkeepActions` (`option_executor.cc`) for close-range `Follow <leader>` (`8..25 yd`), shared quest accept/decline, Need/Greed/Pass loot rolls, ready check, Dungeon Finder (`lfg:queue`/`leave`/`role`/`accept`/`decline`/`tele_in`/`tele_out`), leader Skull marking, vendor upkeep buys (food/water/ammo), flight master travel, and mounting (`OptionsTest.GroupAndUpkeepActionsAreExposedToTheBrain`; compile/build-verified on `10700k`, individual live e2e for rolls/LFG/flight/mount/vendor-buy not yet added).
+    - [x] **Medium 4 — Soak decision log persistence, option breakdown, & playerbots-only comparison:** `tools/wlblib/cases/soak.py` now persists decision logs under `var/soak_decisions/<scenario>_<mode>_<ts>/`, reports per-category option shares (`Keep`/`Attack`/`Loot`/`Talk`/`Explore`/`GoTo`/`Rest`/`Use`), and adds `--no-brain` for playerbots-only comparison runs (`soak_suites_test.py`).
+    - [x] **Medium 5 — Configurable soak temperature:** added `--temperature` to `tools/wlb test soak` / `soak.py` defaulting to `0.7` (with `--temperature=0` available for deterministic runs; `soak_suites_test.py`).
     - [x] **Medium 6 — Proactive party/raid chat:** added optional `party:` reply line in `harness/grammar/plan.wlb`, `plan.{h,cc}`, `content/RULES.md`, and `bot_loop.cc` (routes to `pb::RAID` when in raid, `pb::PARTY` when in party; unit-tested in `PlanTest.ATellLineIsAWhisperToOnePlayer`; offline eval `48/52 (92%)`, `68 ms` first line).
   - **Low:**
-    - [ ] **Low 1 — Boss-notes gaps:** most Classic leveling dungeons (Deadmines, Wailing Caverns, Scarlet Monastery, BRD, Scholomance, etc.) and Halls of Reflection have no `content/notes/<instance>/notes.md`.
+    - [x] **Low 1 — Boss-notes gaps:** added 9 verified 3.3.5a `content/notes/<instance>/notes.md` files (`RFC`, `WC`, `DM`, `SFK`, `Stock`, `SM`, `BRD`, `Scholo`, `HoR` — 50 total instances), all validated by `OrdersTest.AllContentNotesParseWithRealOrdersParser` and `notes_hill_climb_test.py`.
     - [x] **Low 2 — Prompt cache:** reordered `BuildPlanRequest` (`harness/src/screen/prompt.cc`) so static `Your boss notes:` and `World guide:` precede dynamic wake/remembered/screen sections for KV-cache prefix reuse while still reserving mandatory screen/also budget first (updated `BreakdownOf` + `PromptTest.StaticNotesPrecedeDynamicScreenForKvCacheAndAreCapped`; offline eval `48/52 (92%)`, `8/8` boss-order cases passed).
     - [x] **Low 3 — Raw pointers:** added required `CONTRIBUTING.md` non-owning lifetime comment on `BrainPolicyListener::bot_` and `ai_` in `bot_manager.cc`.
     - [x] **Low 4 — Unbounded map:** `SampleObservedEntities` (`server_module/src/llm_brain_world_script.cc`) now prunes disconnected/out-of-world entries from `observed_state_` every 10 s (compile/build-verified on `10700k`).
     - [x] **Low 5 — `docs/TODO.md` readability:** `"In progress"` pruned of checked-off Phase 4 items (`fb339fd`/`6e0feee`).
-    - [ ] **Low 6 — Process:** batch fixes cleanly and verify thoroughly before committing to avoid excessive review-fix churn.
+    - [x] **Low 6 — Process:** batched fixes cleanly (`8614690`, `752373e`, and this batch) with line-by-line diff self-review, `tools/wlb check`, and `10700k` e2e verification before committing.
 
 ## Next, in order
 

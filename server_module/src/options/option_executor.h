@@ -130,6 +130,23 @@ void CollectTalentTrees(
     Player* bot,
     std::vector<wlb::snapshot::OptionFacts_TalentTree>* out);
 
+// Collects explicit per-quest, per-reward, class-trainer, vendor
+// (sell-grey/repair & buy upkeep), and flight-master actions for friendly NPCs
+// within talk range so the brain chooses instead of C++ deciding.
+void CollectNpcActions(Player* bot,
+                       const wlb::snapshot::Snapshot& snapshot,
+                       bool has_food,
+                       bool has_drink,
+                       std::vector<wlb::snapshot::OptionFacts_NpcAction>* out);
+
+// Collects grouping & upkeep actions (shared quest accept/decline, Need/Greed/
+// Pass loot rolls, ready check, Dungeon Finder, close-range follow/regroup,
+// leader Skull marking, and mounting).
+void CollectGroupAndUpkeepActions(
+    Player* bot,
+    const wlb::snapshot::Snapshot& snapshot,
+    std::vector<wlb::snapshot::OptionFacts_Action>* out);
+
 // Whether `bot` is currently preparing, channeling, or has a non-cancelling
 // queued cast for `spell_id` (excluding SPELL_STATE_DELAYED projectiles and
 // unrelated SpellQueue entries).

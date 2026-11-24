@@ -118,6 +118,31 @@ class SoakSuitesTest(unittest.TestCase):
             ["soak_classic_ulda"],
         )
         # Profession tool seeding must emit `llmtest item` (not `llmtest additem`).
+        self.assertEqual(
+            soak_case._extract_first_option_kind(
+                {
+                    "plan": "do: 2x3, 4\nexpect: 2\nwatch: none\nlook: 60",
+                    "prompt_user": "also:\n  1. Keep doing what I'm doing\n  2. Attack Mottled Boar\n",
+                }
+            ),
+            "Attack",
+        )
+        self.assertEqual(
+            soak_case._extract_first_option_kind(
+                {
+                    "plan": "do: 1\nexpect: none\nwatch: none\nlook: 60",
+                    "prompt_user": "also:\n  1. Accept quest \"Your Place\" from Kaltunk\n",
+                }
+            ),
+            "Talk",
+        )
+        self.assertGreater(
+            inspect.signature(soak_case.run_soak).parameters["temperature"].default,
+            0.0,
+        )
+        self.assertFalse(
+            inspect.signature(soak_case.run_soak).parameters["no_brain"].default
+        )
         mining_cmds = soak_case._profession_setup_cmds("Loada", "mining", 150)
         self.assertIn("llmtest item Loada 2901", mining_cmds)
         self.assertFalse(any("additem" in c for c in mining_cmds))

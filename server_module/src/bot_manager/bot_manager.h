@@ -52,6 +52,13 @@ class BotManager {
   static void ClearBotStrategyOverride(const std::string& bot_name);
   static void ClearBotStrategyOverrides();
 
+  // World thread only: pending shared-quest / ready-check prompts captured when
+  // BrainPolicyListener blocks Playerbots' auto-handlers so the brain decides.
+  static uint32_t GetPendingSharedQuest(Player* bot);
+  static void ClearPendingSharedQuest(Player* bot);
+  static bool HasPendingReadyCheck(Player* bot);
+  static void ClearPendingReadyCheck(Player* bot);
+
  private:
   struct Bot {
     std::string name;

@@ -103,7 +103,9 @@ TargetProgress OptionTargetProgress(Player* bot,
     return TargetProgress{.interrupted = std::move(why)};
   };
   if ((target.kind == OptionTarget::Kind::kUse &&
-       (target.guid == "rez:release" || target.guid == "rez:accept")) ||
+       (target.guid == "rez:release" || target.guid == "rez:accept" ||
+        target.guid.starts_with("roll:") ||
+        target.guid.starts_with("ready:"))) ||
       target.kind == OptionTarget::Kind::kLeaveGroup) {
     return done();
   }
@@ -135,17 +137,16 @@ TargetProgress OptionTargetProgress(Player* bot,
     case OptionTarget::Kind::kGather:
     case OptionTarget::Kind::kUse: {
       if (target.kind == OptionTarget::Kind::kUse &&
-          (target.guid.starts_with("equip:") ||
-           target.guid.starts_with("talent:"))) {
-        return done();
-      }
-      if (target.kind == OptionTarget::Kind::kUse &&
           target.guid.starts_with("item:")) {
         if (used) {
           return done();
         }
         return IsSpellCastPending(bot, pending_item_spell_id) ? pending()
                                                               : done();
+      }
+      if (target.kind == OptionTarget::Kind::kUse &&
+          !target.guid.starts_with("0x")) {
+        return done();
       }
       GameObject* go =
           ObjectAccessor::GetGameObject(*bot, ParseSnapshotGuid(target.guid));

@@ -1,6 +1,7 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
 #include "options/option_executor.h"
+#include <math.h>
 
 #include <algorithm>
 #include <charconv>
@@ -16,6 +17,7 @@
 #include "AiObjectContext.h"
 #include "ByteBuffer.h"
 #include "Creature.h"
+#include "CreatureData.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
 #include "Define.h"
@@ -30,6 +32,8 @@
 #include "ItemPackets.h"
 #include "ItemTemplate.h"
 #include "ItemUsageValue.h"
+#include "LFG.h"
+#include "LFGMgr.h"
 #include "LastMovementValue.h"
 #include "LootMgr.h"
 #include "LootObjectStack.h"
@@ -52,11 +56,11 @@
 #include "QuestDef.h"
 #include "SharedDefines.h"
 #include "Spell.h"
+#include "SpellAuraDefines.h"
 #include "SpellAuras.h"
 #include "SpellDefines.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
-#include "StatsWeightCalculator.h"
 #include "Trainer.h"
 #include "Unit.h"
 #include "UnitDefines.h"
@@ -64,9 +68,11 @@
 #include "World.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
+#include "bot_manager/bot_manager.h"
 #include "options/act_executor.h"
 #include "options/option_facts.h"
 #include "options/options.h"
@@ -304,51 +310,6 @@ void ClearLastMovement(Player* bot) {
   }
 }
 
-// Picks the quest reward index using playerbots' item usage + stat weight
-// calculator (NewRpgBaseAction::BestRewardIndex).
-uint32_t BestQuestRewardIndex(Player* bot,
-                              PlayerbotAI* ai,
-                              const Quest* quest) {
-  if (!ai || quest->GetRewChoiceItemsCount() <= 1) {
-    return 0;
-  }
-  AiObjectContext* ctx = ai->GetAiObjectContext();
-  ItemUsage best_usage = ITEM_USAGE_NONE;
-  for (uint8_t i = 0; i < quest->GetRewChoiceItemsCount(); ++i) {
-    auto* val =
-        ctx->GetValue<ItemUsage>("item usage", quest->RewardChoiceItemId[i]);
-    const ItemUsage usage = val ? val->Get() : ITEM_USAGE_NONE;
-    if (usage == ITEM_USAGE_EQUIP || usage == ITEM_USAGE_REPLACE) {
-      best_usage = ITEM_USAGE_EQUIP;
-    } else if (usage == ITEM_USAGE_BAD_EQUIP &&
-               best_usage != ITEM_USAGE_EQUIP) {
-      best_usage = usage;
-    } else if (usage != ITEM_USAGE_NONE && best_usage == ITEM_USAGE_NONE) {
-      best_usage = usage;
-    }
-  }
-  StatsWeightCalculator calc(bot);
-  uint32_t best = 0;
-  float best_score = 0.0f;
-  for (uint8_t i = 0; i < quest->GetRewChoiceItemsCount(); ++i) {
-    auto* val =
-        ctx->GetValue<ItemUsage>("item usage", quest->RewardChoiceItemId[i]);
-    const ItemUsage usage = val ? val->Get() : ITEM_USAGE_NONE;
-    if (usage == best_usage || usage == ITEM_USAGE_REPLACE) {
-      const uint32_t item_id = quest->RewardChoiceItemId[i];
-      const ItemTemplate* proto = sObjectMgr->GetItemTemplate(item_id);
-      const uint8_t slot =
-          proto ? ai->FindEquipSlot(proto, NULL_SLOT, true) : NULL_SLOT;
-      const float score = calc.CalculateItem(item_id, 0, slot);
-      if (score > best_score) {
-        best_score = score;
-        best = i;
-      }
-    }
-  }
-  return best;
-}
-
 uint32_t SellGreyItemsTo(Player* bot, ObjectGuid vendor_guid) {
   uint32_t sold = 0;
   for (const BagSlotItem& entry : BagItems(bot)) {
@@ -434,136 +395,12 @@ TalkResult TalkToNpcNow(Player* bot, Creature* npc) {
   }
   bot->SetFacingToObject(npc);
   bot->SetSelection(npc->GetGUID());
-
-  std::vector<std::string> done;
-
-  // 1. Quest giver: turn in completed quests first, then accept available ones
-  // (two passes so a follow-up quest unlocked by a turn-in is also accepted).
-  if (npc->HasNpcFlag(UNIT_NPC_FLAG_QUESTGIVER) &&
-      bot->CanInteractWithQuestGiver(npc)) {
-    for (int pass = 0; pass < 2; ++pass) {
-      bot->PrepareQuestMenu(npc->GetGUID());
-      const QuestMenu& menu = bot->PlayerTalkClass->GetQuestMenu();
-      bool turned_in_any = false;
-      for (uint8_t idx = 0; idx < menu.GetMenuItemCount(); ++idx) {
-        const QuestMenuItem& item = menu.GetItem(idx);
-        const Quest* quest = sObjectMgr->GetQuestTemplate(item.QuestId);
-        if (!quest) {
-          continue;
-        }
-        const QuestStatus status = bot->GetQuestStatus(item.QuestId);
-        if (status == QUEST_STATUS_COMPLETE &&
-            !bot->GetQuestRewardStatus(item.QuestId) &&
-            bot->CanRewardQuest(quest, false)) {
-          const uint32_t reward_idx = BestQuestRewardIndex(bot, ai, quest);
-          if (bot->CanRewardQuest(quest, reward_idx, false)) {
-            WorldPacket p(CMSG_QUESTGIVER_CHOOSE_REWARD);
-            p << npc->GetGUID() << quest->GetQuestId() << reward_idx;
-            p.rpos(0);
-            bot->GetSession()->HandleQuestgiverChooseRewardOpcode(p);
-            ai->RecordQuestRewarded(quest->GetQuestId());
-            done.push_back("turned in " + quest->GetTitle());
-            turned_in_any = true;
-          }
-        } else if (status == QUEST_STATUS_NONE &&
-                   bot->CanTakeQuest(quest, false) &&
-                   bot->CanAddQuest(quest, false)) {
-          WorldPacket p(CMSG_QUESTGIVER_ACCEPT_QUEST);
-          uint32_t unk1 = 0;
-          p << npc->GetGUID() << quest->GetQuestId() << unk1;
-          p.rpos(0);
-          bot->GetSession()->HandleQuestgiverAcceptQuestOpcode(p);
-          ai->RecordQuestAccepted(quest->GetQuestId());
-          done.push_back("accepted " + quest->GetTitle());
-        }
-      }
-      if (!turned_in_any) {
-        break;
-      }
-    }
-  }
-
-  std::string trainer_refusal;
-  // 2. Trainer: learn what the bot can afford, through the server's own
-  // trainer code (Trainer::TeachSpell: the checks, the cost, the packets),
-  // as a click on "Train" would.
-  if (npc->HasNpcFlag(UNIT_NPC_FLAG_TRAINER | UNIT_NPC_FLAG_TRAINER_CLASS)) {
-    if (Trainer::Trainer* trainer = sObjectMgr->GetTrainer(npc->GetEntry());
-        trainer && trainer->GetTrainerType() != Trainer::Type::Class) {
-      // A profession, riding or pet trainer: what to learn there (a new
-      // profession is a big choice) is the brain's, and there is no option
-      // for it yet: Talk learns nothing (review of f40b0b6, finding 13).
-      if (done.empty()) {
-        return {
-            npc->GetName() + " trains a profession or skill, not your class",
-            ""};
-      }
-    } else if (trainer) {
-      if (!trainer->IsTrainerValidForPlayer(bot)) {
-        if (done.empty()) {
-          return {npc->GetName() + " cannot train your class", ""};
-        }
-      } else {
-        const float discount = bot->GetReputationPriceDiscount(npc);
-        std::vector<std::string> learned;
-        bool too_expensive = false;
-        for (const Trainer::Spell& sp : trainer->GetSpells()) {
-          if (!PlayerbotFactory::IsTrainerSpellAllowedForBot(bot, trainer,
-                                                             &sp) ||
-              !trainer->CanTeachSpell(bot, &sp)) {
-            continue;
-          }
-          const int32_t cost = static_cast<int32_t>(sp.MoneyCost * discount);
-          if (!bot->HasEnoughMoney(cost)) {
-            too_expensive = true;
-            continue;
-          }
-          const uint32_t money_before = bot->GetMoney();
-          trainer->TeachSpell(npc, bot, sp.SpellId);
-          if (bot->GetMoney() == money_before && cost > 0) {
-            continue;  // Refused.
-          }
-          if (const SpellInfo* info = sSpellMgr->GetSpellInfo(sp.SpellId)) {
-            const char* name = info->SpellName[sWorld->GetDefaultDbcLocale()];
-            if (name && *name) {
-              learned.push_back(name);
-            }
-          }
-        }
-        if (!learned.empty()) {
-          done.push_back("learned " + base::JoinString(learned, ", "));
-        } else if (too_expensive) {
-          trainer_refusal = "not enough money for new spells";
-        } else {
-          trainer_refusal = "no new spells to learn";
-        }
-      }
-    }
-  }
-
-  // 3. Vendor / repair: sell grey items, repair equipment. Non-grey items are
-  // left to the brain so BoEs, trade goods, and quest-starting items are never
-  // sold automatically. Binding the hearthstone at an innkeeper is also the
-  // brain's choice (docs/specs/options.md, "Later").
-  if (npc->HasNpcFlag(UNIT_NPC_FLAG_VENDOR)) {
-    const uint32_t sold = SellGreyItemsTo(bot, npc->GetGUID());
-    if (sold > 0) {
-      done.push_back(base::StringPrintf("sold %u grey item%s", sold,
-                                        sold == 1 ? "" : "s"));
-    }
-  }
-  if (npc->HasNpcFlag(UNIT_NPC_FLAG_REPAIR)) {
-    // Equipped items and bags; items the bot can't afford stay broken (and
-    // cost nothing).
-    if (bot->DurabilityRepairAll(true, bot->GetReputationPriceDiscount(npc),
-                                 false) > 0) {
-      done.push_back("repaired gear");
-    }
-  }
-
   ai->ResetActionDuration();
-  TalkOutcome out = FormatTalkOutcome(npc->GetName(), done, trainer_refusal);
-  return {std::move(out.error), std::move(out.info)};
+  // Pure harness: approaching an NPC never makes quest, reward, trainer, or
+  // vendor choices in C++; once in talk range, `CollectNpcActions` exposes the
+  // concrete per-quest, per-reward, train, vendor, and flight options so the
+  // brain decides.
+  return {"", "approached " + npc->GetName()};
 }
 
 namespace {
@@ -779,6 +616,497 @@ void CollectTalentTrees(Player* bot,
   }
   for (const TabInfo& t : tabs) {
     out->push_back({t.tab_page, t.name, t.spent, free_points});
+  }
+}
+
+namespace {
+
+bool HasGreySellableItem(Player* bot) {
+  for (const BagSlotItem& entry : BagItems(bot)) {
+    const ItemTemplate* proto =
+        entry.item ? entry.item->GetTemplate() : nullptr;
+    if (proto && proto->Quality == ITEM_QUALITY_POOR && proto->SellPrice > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool HasDamagedEquipment(Player* bot) {
+  for (uint8_t slot = EQUIPMENT_SLOT_START; slot < EQUIPMENT_SLOT_END; ++slot) {
+    Item* item = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
+    if (!item) {
+      continue;
+    }
+    const uint32_t max_dur = item->GetUInt32Value(ITEM_FIELD_MAXDURABILITY);
+    if (max_dur > 0 && item->GetUInt32Value(ITEM_FIELD_DURABILITY) < max_dur) {
+      return true;
+    }
+  }
+  return false;
+}
+
+uint32_t CountItemInBags(Player* bot, uint32_t item_entry) {
+  return bot->GetItemCount(item_entry, false);
+}
+
+bool IsAmmoForHunter(Player* bot, const ItemTemplate* proto) {
+  if (!bot || bot->getClass() != CLASS_HUNTER || !proto ||
+      proto->Class != ITEM_CLASS_PROJECTILE) {
+    return false;
+  }
+  Item* ranged = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_RANGED);
+  if (!ranged || !ranged->GetTemplate()) {
+    return false;
+  }
+  const uint32_t rsub = ranged->GetTemplate()->SubClass;
+  if (rsub == ITEM_SUBCLASS_WEAPON_BOW ||
+      rsub == ITEM_SUBCLASS_WEAPON_CROSSBOW) {
+    return proto->SubClass == ITEM_SUBCLASS_ARROW;
+  }
+  if (rsub == ITEM_SUBCLASS_WEAPON_GUN) {
+    return proto->SubClass == ITEM_SUBCLASS_BULLET;
+  }
+  return false;
+}
+
+uint32_t DefaultLfgRoleMask(Player* bot) {
+  if (!bot) {
+    return lfg::PLAYER_ROLE_DAMAGE;
+  }
+  switch (bot->getClass()) {
+    case CLASS_PRIEST:
+      return lfg::PLAYER_ROLE_HEALER | lfg::PLAYER_ROLE_DAMAGE;
+    case CLASS_WARRIOR:
+    case CLASS_DEATH_KNIGHT:
+      return lfg::PLAYER_ROLE_TANK | lfg::PLAYER_ROLE_DAMAGE;
+    case CLASS_PALADIN:
+    case CLASS_DRUID:
+      return lfg::PLAYER_ROLE_TANK | lfg::PLAYER_ROLE_HEALER |
+             lfg::PLAYER_ROLE_DAMAGE;
+    case CLASS_SHAMAN:
+      return lfg::PLAYER_ROLE_HEALER | lfg::PLAYER_ROLE_DAMAGE;
+    default:
+      return lfg::PLAYER_ROLE_DAMAGE;
+  }
+}
+
+uint32_t FindRandomLfgDungeonId(Player* bot) {
+  if (!bot) {
+    return 0;
+  }
+  const uint8_t lvl = bot->GetLevel();
+  uint32_t best_id = 0;
+  uint32_t best_max_lvl = 0;
+  for (uint32_t i = 0; i < sLFGDungeonStore.GetNumRows(); ++i) {
+    const LFGDungeonEntry* d = sLFGDungeonStore.LookupEntry(i);
+    if (!d || d->TypeID != lfg::LFG_TYPE_RANDOM) {
+      continue;
+    }
+    if (lvl < d->MinLevel || lvl > d->MaxLevel) {
+      continue;
+    }
+    if (d->MaxLevel >= best_max_lvl) {
+      best_max_lvl = d->MaxLevel;
+      best_id = d->ID;
+    }
+  }
+  return best_id;
+}
+
+bool ParseUint32(std::string_view s, uint32_t* out) {
+  if (s.empty()) {
+    return false;
+  }
+  uint32_t val = 0;
+  const auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), val);
+  if (ec != std::errc{} || ptr != s.data() + s.size()) {
+    return false;
+  }
+  *out = val;
+  return true;
+}
+
+}  // namespace
+
+void CollectNpcActions(Player* bot,
+                       const pb::Snapshot& snapshot,
+                       bool has_food,
+                       bool has_drink,
+                       std::vector<pb::OptionFacts_NpcAction>* out) {
+  out->clear();
+  if (!bot || !bot->IsAlive() || bot->IsInCombat()) {
+    return;
+  }
+  static constexpr size_t kMaxNpcActions = 20;
+  for (const pb::Unit& u : snapshot.base.nearby.units) {
+    if (out->size() >= kMaxNpcActions) {
+      break;
+    }
+    if (u.kind != pb::Unit::NPC || u.reaction != pb::Unit::FRIENDLY || u.dead ||
+        u.guid.empty()) {
+      continue;
+    }
+    Creature* npc =
+        ObjectAccessor::GetCreature(*bot, ParseSnapshotGuid(u.guid));
+    if (!npc || !npc->IsInWorld() || !npc->IsAlive() ||
+        !IsInTalkRange(bot, npc)) {
+      continue;
+    }
+    const std::string& npc_name = npc->GetName();
+
+    // 1. Quest turn-ins (with explicit per-reward options when > 1 choice)
+    //    and quest accepts (one option per available quest).
+    if (npc->HasNpcFlag(UNIT_NPC_FLAG_QUESTGIVER) &&
+        bot->CanInteractWithQuestGiver(npc)) {
+      bot->PrepareQuestMenu(npc->GetGUID());
+      const QuestMenu& menu = bot->PlayerTalkClass->GetQuestMenu();
+      for (uint8_t idx = 0;
+           idx < menu.GetMenuItemCount() && out->size() < kMaxNpcActions;
+           ++idx) {
+        const QuestMenuItem& item = menu.GetItem(idx);
+        const Quest* quest = sObjectMgr->GetQuestTemplate(item.QuestId);
+        if (!quest) {
+          continue;
+        }
+        const QuestStatus status = bot->GetQuestStatus(item.QuestId);
+        if (status == QUEST_STATUS_COMPLETE &&
+            !bot->GetQuestRewardStatus(item.QuestId) &&
+            bot->CanRewardQuest(quest, false)) {
+          const uint32_t choices = quest->GetRewChoiceItemsCount();
+          if (choices > 1) {
+            for (uint32_t r = 0; r < choices && out->size() < kMaxNpcActions;
+                 ++r) {
+              const ItemTemplate* rproto =
+                  sObjectMgr->GetItemTemplate(quest->RewardChoiceItemId[r]);
+              const std::string rdesc =
+                  rproto ? (rproto->Name1 + ", ilvl " +
+                            std::to_string(rproto->ItemLevel))
+                         : ("reward #" + std::to_string(r + 1));
+              out->push_back({"npc_qturnin:" + u.guid + ":" +
+                                  std::to_string(quest->GetQuestId()) + ":" +
+                                  std::to_string(r),
+                              u.guid,
+                              "Turn in \"" + quest->GetTitle() + "\" to " +
+                                  npc_name + " (pick " + rdesc + ")"});
+            }
+          } else {
+            out->push_back(
+                {"npc_qturnin:" + u.guid + ":" +
+                     std::to_string(quest->GetQuestId()) + ":0",
+                 u.guid,
+                 "Turn in \"" + quest->GetTitle() + "\" to " + npc_name});
+          }
+        } else if (status == QUEST_STATUS_NONE &&
+                   bot->CanTakeQuest(quest, false) &&
+                   bot->CanAddQuest(quest, false)) {
+          out->push_back(
+              {"npc_qaccept:" + u.guid + ":" +
+                   std::to_string(quest->GetQuestId()),
+               u.guid,
+               "Accept quest \"" + quest->GetTitle() + "\" from " + npc_name});
+        }
+      }
+    }
+
+    // 2. Class trainer: count affordable learnable class spells.
+    if (out->size() < kMaxNpcActions &&
+        npc->HasNpcFlag(UNIT_NPC_FLAG_TRAINER | UNIT_NPC_FLAG_TRAINER_CLASS)) {
+      if (Trainer::Trainer* trainer = sObjectMgr->GetTrainer(npc->GetEntry());
+          trainer && trainer->GetTrainerType() == Trainer::Type::Class &&
+          trainer->IsTrainerValidForPlayer(bot)) {
+        const float discount = bot->GetReputationPriceDiscount(npc);
+        uint32_t affordable = 0;
+        for (const Trainer::Spell& sp : trainer->GetSpells()) {
+          if (!PlayerbotFactory::IsTrainerSpellAllowedForBot(bot, trainer,
+                                                             &sp) ||
+              !trainer->CanTeachSpell(bot, &sp)) {
+            continue;
+          }
+          const int32_t cost = static_cast<int32_t>(sp.MoneyCost * discount);
+          if (bot->HasEnoughMoney(cost)) {
+            ++affordable;
+          }
+        }
+        if (affordable > 0) {
+          out->push_back({"npc_train:" + u.guid, u.guid,
+                          "Train " + std::to_string(affordable) +
+                              " class spell" + (affordable == 1 ? "" : "s") +
+                              " at " + npc_name});
+        }
+      }
+    }
+
+    // 3. Vendor sell grey items & repair.
+    if (out->size() < kMaxNpcActions &&
+        (npc->HasNpcFlag(UNIT_NPC_FLAG_VENDOR) ||
+         npc->HasNpcFlag(UNIT_NPC_FLAG_REPAIR))) {
+      const bool can_sell_grey =
+          npc->HasNpcFlag(UNIT_NPC_FLAG_VENDOR) && HasGreySellableItem(bot);
+      const bool can_repair =
+          npc->HasNpcFlag(UNIT_NPC_FLAG_REPAIR) && HasDamagedEquipment(bot);
+      if (can_sell_grey || can_repair) {
+        std::string label = can_sell_grey && can_repair
+                                ? "Sell grey items & repair at "
+                            : can_sell_grey ? "Sell grey items at "
+                                            : "Repair gear at ";
+        out->push_back({"npc_vendor:" + u.guid, u.guid, label + npc_name});
+      }
+    }
+
+    // 4. Vendor upkeep buy: food, water, ammo, or class reagents when low/out.
+    if (out->size() < kMaxNpcActions && npc->HasNpcFlag(UNIT_NPC_FLAG_VENDOR)) {
+      if (const VendorItemData* vitems = npc->GetVendorItems()) {
+        const float discount = bot->GetReputationPriceDiscount(npc);
+        const bool need_drink = !has_drink && bot->getPowerType() == POWER_MANA;
+        const bool need_ammo =
+            bot->getClass() == CLASS_HUNTER &&
+            (bot->GetUInt32Value(PLAYER_AMMO_ID) == 0 ||
+             CountItemInBags(bot, bot->GetUInt32Value(PLAYER_AMMO_ID)) < 200);
+        const ItemTemplate* best_food = nullptr;
+        const ItemTemplate* best_drink = nullptr;
+        const ItemTemplate* best_ammo = nullptr;
+        for (uint32_t slot = 0; slot < vitems->GetItemCount(); ++slot) {
+          const VendorItem* vi = vitems->GetItem(slot);
+          if (!vi || vi->ExtendedCost != 0) {
+            continue;
+          }
+          const ItemTemplate* proto = sObjectMgr->GetItemTemplate(vi->item);
+          if (!proto || proto->Name1.empty() ||
+              proto->RequiredLevel > bot->GetLevel()) {
+            continue;
+          }
+          const uint32_t price =
+              static_cast<uint32_t>(proto->BuyPrice * discount);
+          if (!bot->HasEnoughMoney(price)) {
+            continue;
+          }
+          if (!has_food && proto->Class == ITEM_CLASS_CONSUMABLE &&
+              proto->SubClass == ITEM_SUBCLASS_FOOD &&
+              (!best_food || proto->ItemLevel > best_food->ItemLevel)) {
+            // Distinguish food from drink via first spell category.
+            const SpellInfo* sp =
+                proto->Spells[0].SpellId
+                    ? sSpellMgr->GetSpellInfo(proto->Spells[0].SpellId)
+                    : nullptr;
+            if (sp && sp->GetCategory() == 11) {
+              best_food = proto;
+            }
+          }
+          if (need_drink && proto->Class == ITEM_CLASS_CONSUMABLE &&
+              proto->SubClass == ITEM_SUBCLASS_FOOD &&
+              (!best_drink || proto->ItemLevel > best_drink->ItemLevel)) {
+            const SpellInfo* sp =
+                proto->Spells[0].SpellId
+                    ? sSpellMgr->GetSpellInfo(proto->Spells[0].SpellId)
+                    : nullptr;
+            if (sp && sp->GetCategory() == 59) {
+              best_drink = proto;
+            }
+          }
+          if (need_ammo && IsAmmoForHunter(bot, proto) &&
+              (!best_ammo || proto->ItemLevel > best_ammo->ItemLevel)) {
+            best_ammo = proto;
+          }
+        }
+        for (const ItemTemplate* pick : {best_food, best_drink, best_ammo}) {
+          if (pick && out->size() < kMaxNpcActions) {
+            out->push_back(
+                {"npc_buy:" + u.guid + ":" + std::to_string(pick->ItemId),
+                 u.guid, "Buy " + pick->Name1 + " from " + npc_name});
+          }
+        }
+      }
+    }
+
+    // 5. Flight master travel: known connected destinations.
+    if (out->size() < kMaxNpcActions &&
+        npc->HasNpcFlag(UNIT_NPC_FLAG_FLIGHTMASTER)) {
+      const uint32_t cur_node =
+          sObjectMgr->GetNearestTaxiNode(*npc, bot->GetTeamId(true));
+      if (cur_node != 0 && bot->m_taxi.IsTaximaskNodeKnown(cur_node)) {
+        size_t added_flights = 0;
+        const uint32_t locale = sWorld->GetDefaultDbcLocale();
+        for (uint32_t i = 0; i < sTaxiPathStore.GetNumRows() &&
+                             added_flights < 4 && out->size() < kMaxNpcActions;
+             ++i) {
+          const TaxiPathEntry* path = sTaxiPathStore.LookupEntry(i);
+          if (!path || path->from != cur_node ||
+              !bot->m_taxi.IsTaximaskNodeKnown(path->to) ||
+              !bot->HasEnoughMoney(path->price)) {
+            continue;
+          }
+          const TaxiNodesEntry* dest = sTaxiNodesStore.LookupEntry(path->to);
+          if (!dest || !dest->name[locale] || !*dest->name[locale]) {
+            continue;
+          }
+          out->push_back({"npc_fly:" + u.guid + ":" + std::to_string(path->to),
+                          u.guid,
+                          std::string("Fly to ") + dest->name[locale] +
+                              " via " + npc_name});
+          ++added_flights;
+        }
+      }
+    }
+  }
+}
+
+void CollectGroupAndUpkeepActions(Player* bot,
+                                  const pb::Snapshot& snapshot,
+                                  std::vector<pb::OptionFacts_Action>* out) {
+  out->clear();
+  if (!bot || !bot->IsInWorld()) {
+    return;
+  }
+  PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
+
+  // 1. Need / Greed / Pass loot rolls (allowed even in combat or dead).
+  if (Group* group = bot->GetGroup()) {
+    size_t rolls_added = 0;
+    for (const Roll* roll : group->GetRolls()) {
+      if (!roll || rolls_added >= 2) {
+        break;
+      }
+      auto it = roll->playerVote.find(bot->GetGUID());
+      if (it == roll->playerVote.end() || it->second != NOT_EMITED_YET) {
+        continue;
+      }
+      const ItemTemplate* proto = sObjectMgr->GetItemTemplate(roll->itemid);
+      const std::string item_name =
+          proto ? proto->Name1 : ("item #" + std::to_string(roll->itemid));
+      const std::string detail =
+          proto ? (" (ilvl " + std::to_string(proto->ItemLevel) + ")") : "";
+      const std::string prefix = base::StringPrintf(
+          "roll:0x%016llx:%u:",
+          static_cast<unsigned long long>(roll->itemGUID.GetRawValue()),
+          static_cast<unsigned>(roll->itemSlot));
+      if (roll->rollVoteMask & ROLL_FLAG_TYPE_NEED) {
+        out->push_back({prefix + "1", "Need " + item_name + detail});
+      }
+      if (roll->rollVoteMask & ROLL_FLAG_TYPE_GREED) {
+        out->push_back({prefix + "2", "Greed " + item_name + detail});
+      }
+      out->push_back({prefix + "0", "Pass " + item_name});
+      ++rolls_added;
+    }
+  }
+
+  // 2. Ready check (allowed in combat or dead).
+  if (BotManager::HasPendingReadyCheck(bot)) {
+    out->push_back({"ready:yes", "Ready (confirm ready check)"});
+    out->push_back({"ready:no", "Not ready (decline ready check)"});
+  }
+
+  // 3. Shared quest accept / decline (alive).
+  if (bot->IsAlive()) {
+    if (const uint32_t qid = BotManager::GetPendingSharedQuest(bot); qid != 0) {
+      if (const Quest* q = sObjectMgr->GetQuestTemplate(qid)) {
+        out->push_back({"qshare:accept:" + std::to_string(qid),
+                        "Accept shared quest \"" + q->GetTitle() + "\""});
+        out->push_back({"qshare:decline:" + std::to_string(qid),
+                        "Decline shared quest \"" + q->GetTitle() + "\""});
+      }
+    }
+  }
+
+  // 4. Dungeon Finder (LFG / RDF).
+  if (bot->IsAlive()) {
+    const lfg::LfgState st = sLFGMgr->GetState(bot->GetGUID());
+    if (st == lfg::LFG_STATE_ROLECHECK) {
+      out->push_back({"lfg:role", "Confirm Dungeon Finder role"});
+    } else if (st == lfg::LFG_STATE_PROPOSAL && ai &&
+               ai->GetAiObjectContext()) {
+      const uint32_t pid =
+          ai->GetAiObjectContext()->GetValue<uint32>("lfg proposal")->Get();
+      if (pid != 0) {
+        out->push_back({"lfg:accept:" + std::to_string(pid),
+                        "Accept Dungeon Finder proposal"});
+        out->push_back({"lfg:decline:" + std::to_string(pid),
+                        "Decline Dungeon Finder proposal"});
+      }
+    } else if (st == lfg::LFG_STATE_QUEUED) {
+      out->push_back({"lfg:leave", "Leave Dungeon Finder queue"});
+    } else if (st == lfg::LFG_STATE_DUNGEON && !bot->IsInCombat()) {
+      if (bot->GetMap() && !bot->GetMap()->IsDungeon()) {
+        out->push_back({"lfg:tele_in", "Teleport to LFG dungeon"});
+      } else {
+        out->push_back({"lfg:tele_out", "Teleport out of LFG dungeon"});
+      }
+    } else if (st == lfg::LFG_STATE_NONE && !bot->IsInCombat() &&
+               bot->GetLevel() >= 15 && bot->GetMap() &&
+               !bot->GetMap()->IsDungeon() &&
+               FindRandomLfgDungeonId(bot) != 0) {
+      out->push_back({"lfg:queue", "Queue Random Dungeon (LFG)"});
+    }
+  }
+
+  // 5. Close-range Follow / Regroup with party leader (8..25 yd out of combat;
+  //    >= 25 yd already has `Go to <leader> (party leader)`).
+  if (bot->IsAlive() && !bot->IsInCombat()) {
+    if (Group* group = bot->GetGroup()) {
+      const ObjectGuid leader_guid = group->GetLeaderGUID();
+      if (leader_guid && leader_guid != bot->GetGUID()) {
+        if (Player* leader = ObjectAccessor::FindConnectedPlayer(leader_guid);
+            leader && leader->IsInWorld() && leader->IsAlive() &&
+            leader->GetMapId() == bot->GetMapId() &&
+            leader->GetInstanceId() == bot->GetInstanceId()) {
+          const float dist = bot->GetDistance(leader);
+          if (dist >= 8.0f && dist < 25.0f) {
+            out->push_back({base::StringPrintf("follow:0x%016llx",
+                                               static_cast<unsigned long long>(
+                                                   leader_guid.GetRawValue())),
+                            "Follow " + leader->GetName() + " (party leader)"});
+          }
+        }
+      }
+    }
+  }
+
+  // 6. Leader raid target mark: mark nearest living hostile mob with Skull.
+  if (bot->IsAlive()) {
+    if (Group* group = bot->GetGroup(); group &&
+                                        (group->IsLeader(bot->GetGUID()) ||
+                                         group->IsAssistant(bot->GetGUID())) &&
+                                        group->GetTargetIcon(7).IsEmpty()) {
+      const pb::Unit* best = nullptr;
+      for (const pb::Unit& u : snapshot.base.nearby.units) {
+        if (u.dead || u.kind != pb::Unit::NPC ||
+            u.reaction != pb::Unit::HOSTILE || u.guid.empty() ||
+            u.rel.dist_yd > 40.0f) {
+          continue;
+        }
+        if (!best || u.rel.dist_yd < best->rel.dist_yd) {
+          best = &u;
+        }
+      }
+      if (best) {
+        out->push_back({"mark:" + best->guid + ":7",
+                        "Mark " + best->name + " with Skull"});
+      }
+    }
+  }
+
+  // 7. Mount (outdoors, out of combat, not mounted, not in dungeon).
+  if (bot->IsAlive() && !bot->IsInCombat() && !bot->IsMounted() &&
+      bot->GetMap() && !bot->GetMap()->IsDungeon() && bot->IsOutdoors()) {
+    const uint32_t locale = sWorld->GetDefaultDbcLocale();
+    for (const auto& [spell_id, state] : bot->GetSpellMap()) {
+      if (!state || !state->Active || state->State == PLAYERSPELL_REMOVED) {
+        continue;
+      }
+      const SpellInfo* info = sSpellMgr->GetSpellInfo(spell_id);
+      if (!info || !info->HasAura(SPELL_AURA_MOUNTED) ||
+          info->HasAura(SPELL_AURA_MOD_INCREASE_MOUNTED_FLIGHT_SPEED)) {
+        continue;
+      }
+      const char* name = info->SpellName[locale];
+      if (!name || !*name) {
+        continue;
+      }
+      out->push_back(
+          {"mount:" + std::to_string(spell_id), std::string("Mount ") + name});
+      break;
+    }
   }
 }
 
@@ -2007,8 +2335,307 @@ ExecuteResult ExecuteOption(Player* bot,
     session->HandleGroupDisbandOpcode(pkt);
     return {.used = true, .info = "left the group"};
   }
+  if (target.kind == OptionTarget::Kind::kUse &&
+      target.guid.starts_with("roll:")) {
+    // Format: roll:<item_guid>:<slot>:<roll_type>
+    const std::vector<std::string_view> parts = base::SplitStringPiece(
+        target.guid, ":", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+    uint32_t slot = 0;
+    uint32_t vote = 0;
+    if (parts.size() != 4 || !ParseUint32(parts[2], &slot) ||
+        !ParseUint32(parts[3], &vote) || vote > 2) {
+      return {"invalid loot roll"};
+    }
+    WorldPacket p(CMSG_LOOT_ROLL, 8 + 4 + 1);
+    p << ParseSnapshotGuid(parts[1]) << slot << static_cast<uint8_t>(vote);
+    p.rpos(0);
+    bot->GetSession()->HandleLootRoll(p);
+    return {.used = true, .info = target.name};
+  }
+  if (target.kind == OptionTarget::Kind::kUse &&
+      target.guid.starts_with("ready:")) {
+    if (!bot->GetGroup()) {
+      BotManager::ClearPendingReadyCheck(bot);
+      return {"you are not in a group"};
+    }
+    const uint8_t state = target.guid == "ready:yes" ? 1 : 0;
+    WorldPacket p(MSG_RAID_READY_CHECK, 1);
+    p << state;
+    p.rpos(0);
+    bot->GetSession()->HandleRaidReadyCheckOpcode(p);
+    BotManager::ClearPendingReadyCheck(bot);
+    return {.used = true,
+            .info = state ? "confirmed ready check" : "declined ready check"};
+  }
   if (!bot->IsAlive()) {
     return {"you are dead"};  // A choice from before the bot died.
+  }
+  if (target.kind == OptionTarget::Kind::kUse &&
+      target.guid.starts_with("qshare:")) {
+    const std::vector<std::string_view> parts = base::SplitStringPiece(
+        target.guid, ":", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+    uint32_t qid = 0;
+    if (parts.size() != 3 || !ParseUint32(parts[2], &qid)) {
+      return {"invalid shared quest"};
+    }
+    BotManager::ClearPendingSharedQuest(bot);
+    if (parts[1] == "decline") {
+      bot->SetDivider(ObjectGuid::Empty);
+      return {.used = true, .info = "declined shared quest"};
+    }
+    const Quest* quest = sObjectMgr->GetQuestTemplate(qid);
+    if (!quest || !bot->GetDivider()) {
+      return {"shared quest is no longer available"};
+    }
+    if (!bot->CanTakeQuest(quest, false) || !bot->CanAddQuest(quest, false)) {
+      bot->SetDivider(ObjectGuid::Empty);
+      return {"cannot accept shared quest"};
+    }
+    bot->AddQuestAndCheckCompletion(quest, nullptr);
+    bot->SetDivider(ObjectGuid::Empty);
+    ai->RecordQuestAccepted(qid);
+    return {.used = true, .info = "accepted shared quest " + quest->GetTitle()};
+  }
+  if (target.kind == OptionTarget::Kind::kUse &&
+      target.guid.starts_with("lfg:")) {
+    if (target.guid == "lfg:queue") {
+      const uint32_t did = FindRandomLfgDungeonId(bot);
+      if (did == 0) {
+        return {"no random dungeon available for your level"};
+      }
+      lfg::LfgDungeonSet dungeons = {did};
+      sLFGMgr->JoinLfg(bot, static_cast<uint8_t>(DefaultLfgRoleMask(bot)),
+                       dungeons, "");
+      return {.used = true, .info = "queued for Random Dungeon"};
+    }
+    if (target.guid == "lfg:leave") {
+      sLFGMgr->LeaveLfg(bot->GetGUID());
+      return {.used = true, .info = "left Dungeon Finder queue"};
+    }
+    if (target.guid == "lfg:role") {
+      if (Group* g = bot->GetGroup()) {
+        sLFGMgr->UpdateRoleCheck(g->GetGUID(), bot->GetGUID(),
+                                 static_cast<uint8_t>(DefaultLfgRoleMask(bot)));
+        return {.used = true, .info = "confirmed Dungeon Finder role"};
+      }
+      return {"you are not in a group"};
+    }
+    if (target.guid == "lfg:tele_in" || target.guid == "lfg:tele_out") {
+      sLFGMgr->TeleportPlayer(bot, target.guid == "lfg:tele_out");
+      return {.used = true,
+              .info = target.guid == "lfg:tele_out"
+                          ? "teleported out of LFG dungeon"
+                          : "teleported to LFG dungeon"};
+    }
+    if (target.guid.starts_with("lfg:accept:") ||
+        target.guid.starts_with("lfg:decline:")) {
+      const bool accept = target.guid.starts_with("lfg:accept:");
+      uint32_t pid = 0;
+      if (!ParseUint32(std::string_view(target.guid).substr(accept ? 11 : 12),
+                       &pid)) {
+        return {"invalid LFG proposal"};
+      }
+      sLFGMgr->UpdateProposal(pid, bot->GetGUID(), accept);
+      if (ai->GetAiObjectContext()) {
+        ai->GetAiObjectContext()->GetValue<uint32>("lfg proposal")->Set(0);
+      }
+      return {.used = true,
+              .info = accept ? "accepted Dungeon Finder proposal"
+                             : "declined Dungeon Finder proposal"};
+    }
+    return {"unknown LFG action"};
+  }
+  if (target.kind == OptionTarget::Kind::kUse &&
+      target.guid.starts_with("follow:")) {
+    Player* leader = ObjectAccessor::FindConnectedPlayer(
+        ParseSnapshotGuid(std::string_view(target.guid).substr(7)));
+    if (!leader || !leader->IsInWorld() || !leader->IsAlive() ||
+        leader->GetMapId() != bot->GetMapId()) {
+      return {"party leader is not nearby"};
+    }
+    bot->GetMotionMaster()->MoveFollow(leader, 4.0f, static_cast<float>(M_PI));
+    return {.used = true, .info = "following " + leader->GetName()};
+  }
+  if (target.kind == OptionTarget::Kind::kUse &&
+      target.guid.starts_with("mark:")) {
+    Group* group = bot->GetGroup();
+    if (!group || (!group->IsLeader(bot->GetGUID()) &&
+                   !group->IsAssistant(bot->GetGUID()))) {
+      return {"you cannot mark targets"};
+    }
+    const std::vector<std::string_view> parts = base::SplitStringPiece(
+        target.guid, ":", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+    uint32_t icon = 0;
+    if (parts.size() != 3 || !ParseUint32(parts[2], &icon) || icon >= 8) {
+      return {"invalid raid mark"};
+    }
+    Unit* u = ObjectAccessor::GetUnit(*bot, ParseSnapshotGuid(parts[1]));
+    if (!u || !u->IsInWorld() || !u->IsAlive()) {
+      return {"target is gone"};
+    }
+    group->SetTargetIcon(static_cast<uint8_t>(icon), bot->GetGUID(),
+                         u->GetGUID());
+    return {.used = true, .info = "marked " + u->GetName() + " with Skull"};
+  }
+  if (target.kind == OptionTarget::Kind::kUse &&
+      target.guid.starts_with("mount:")) {
+    uint32_t spell_id = 0;
+    if (!ParseUint32(std::string_view(target.guid).substr(6), &spell_id)) {
+      return {"invalid mount"};
+    }
+    if (bot->IsInCombat()) {
+      return {"cannot mount in combat"};
+    }
+    bot->CastSpell(bot, spell_id, false);
+    return {.used = true, .info = "mounting " + target.name};
+  }
+  if (target.kind == OptionTarget::Kind::kUse &&
+      target.guid.starts_with("npc_")) {
+    if (bot->IsInCombat()) {
+      return {"you are in combat"};
+    }
+    const std::vector<std::string_view> parts = base::SplitStringPiece(
+        target.guid, ":", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+    if (parts.size() < 2) {
+      return {"invalid NPC action"};
+    }
+    Creature* npc =
+        ObjectAccessor::GetCreature(*bot, ParseSnapshotGuid(parts[1]));
+    if (!npc || !npc->IsInWorld() || !npc->IsAlive() ||
+        !IsInTalkRange(bot, npc)) {
+      return {"that NPC is not in talk range"};
+    }
+    bot->SetFacingToObject(npc);
+    bot->SetSelection(npc->GetGUID());
+    if (parts[0] == "npc_qaccept" && parts.size() == 3) {
+      uint32_t qid = 0;
+      if (!ParseUint32(parts[2], &qid)) {
+        return {"invalid quest id"};
+      }
+      const Quest* quest = sObjectMgr->GetQuestTemplate(qid);
+      if (!quest || !bot->CanTakeQuest(quest, false) ||
+          !bot->CanAddQuest(quest, false)) {
+        return {"cannot accept that quest"};
+      }
+      WorldPacket p(CMSG_QUESTGIVER_ACCEPT_QUEST);
+      uint32_t unk1 = 0;
+      p << npc->GetGUID() << quest->GetQuestId() << unk1;
+      p.rpos(0);
+      bot->GetSession()->HandleQuestgiverAcceptQuestOpcode(p);
+      ai->RecordQuestAccepted(quest->GetQuestId());
+      return {.used = true, .info = "accepted " + quest->GetTitle()};
+    }
+    if (parts[0] == "npc_qturnin" && parts.size() == 4) {
+      uint32_t qid = 0;
+      uint32_t reward_idx = 0;
+      if (!ParseUint32(parts[2], &qid) || !ParseUint32(parts[3], &reward_idx)) {
+        return {"invalid quest turn-in"};
+      }
+      const Quest* quest = sObjectMgr->GetQuestTemplate(qid);
+      const uint32_t choices = quest ? quest->GetRewChoiceItemsCount() : 0;
+      const bool valid_idx =
+          (choices == 0 && reward_idx == 0) || reward_idx < choices;
+      if (!quest || !valid_idx ||
+          bot->GetQuestStatus(qid) != QUEST_STATUS_COMPLETE ||
+          bot->GetQuestRewardStatus(qid) ||
+          !bot->CanRewardQuest(quest, false) ||
+          !bot->CanRewardQuest(quest, reward_idx, false)) {
+        return {"cannot turn in that quest"};
+      }
+      WorldPacket p(CMSG_QUESTGIVER_CHOOSE_REWARD);
+      p << npc->GetGUID() << quest->GetQuestId() << reward_idx;
+      p.rpos(0);
+      bot->GetSession()->HandleQuestgiverChooseRewardOpcode(p);
+      ai->RecordQuestRewarded(quest->GetQuestId());
+      return {.used = true, .info = "turned in " + quest->GetTitle()};
+    }
+    if (parts[0] == "npc_train") {
+      Trainer::Trainer* trainer = sObjectMgr->GetTrainer(npc->GetEntry());
+      if (!trainer || trainer->GetTrainerType() != Trainer::Type::Class ||
+          !trainer->IsTrainerValidForPlayer(bot)) {
+        return {"cannot train your class"};
+      }
+      const float discount = bot->GetReputationPriceDiscount(npc);
+      uint32_t learned = 0;
+      for (const Trainer::Spell& sp : trainer->GetSpells()) {
+        if (!PlayerbotFactory::IsTrainerSpellAllowedForBot(bot, trainer, &sp) ||
+            !trainer->CanTeachSpell(bot, &sp)) {
+          continue;
+        }
+        const int32_t cost = static_cast<int32_t>(sp.MoneyCost * discount);
+        if (!bot->HasEnoughMoney(cost)) {
+          continue;
+        }
+        const uint32_t money_before = bot->GetMoney();
+        trainer->TeachSpell(npc, bot, sp.SpellId);
+        if (bot->GetMoney() != money_before || cost == 0) {
+          ++learned;
+        }
+      }
+      if (learned == 0) {
+        return {"no affordable spells to learn"};
+      }
+      return {.used = true,
+              .info = "learned " + std::to_string(learned) + " class spell(s)"};
+    }
+    if (parts[0] == "npc_vendor") {
+      std::vector<std::string> done;
+      if (npc->HasNpcFlag(UNIT_NPC_FLAG_VENDOR)) {
+        const uint32_t sold = SellGreyItemsTo(bot, npc->GetGUID());
+        if (sold > 0) {
+          done.push_back("sold " + std::to_string(sold) + " grey item(s)");
+        }
+      }
+      if (npc->HasNpcFlag(UNIT_NPC_FLAG_REPAIR) &&
+          bot->DurabilityRepairAll(true, bot->GetReputationPriceDiscount(npc),
+                                   false) > 0) {
+        done.push_back("repaired gear");
+      }
+      if (done.empty()) {
+        return {"nothing to sell or repair"};
+      }
+      return {.used = true, .info = base::JoinString(done, ", ")};
+    }
+    if (parts[0] == "npc_buy" && parts.size() == 3) {
+      uint32_t item_entry = 0;
+      if (!ParseUint32(parts[2], &item_entry)) {
+        return {"invalid vendor item"};
+      }
+      const VendorItemData* vitems = npc->GetVendorItems();
+      if (!vitems) {
+        return {"vendor has no items"};
+      }
+      for (uint32_t slot = 0; slot < vitems->GetItemCount(); ++slot) {
+        const VendorItem* vi = vitems->GetItem(slot);
+        if (vi && vi->item == item_entry) {
+          const ItemTemplate* proto = sObjectMgr->GetItemTemplate(item_entry);
+          // Count 1 buys one vendor stack (e.g. 5 food/water or 200 arrows).
+          if (!bot->BuyItemFromVendorSlot(npc->GetGUID(), slot, item_entry, 1,
+                                          NULL_BAG, NULL_SLOT)) {
+            return {"could not buy " +
+                    (proto ? proto->Name1 : std::string("item"))};
+          }
+          return {
+              .used = true,
+              .info = "bought " + (proto ? proto->Name1 : std::string("item"))};
+        }
+      }
+      return {"item not sold by this vendor"};
+    }
+    if (parts[0] == "npc_fly" && parts.size() == 3) {
+      uint32_t dest_node = 0;
+      if (!ParseUint32(parts[2], &dest_node)) {
+        return {"invalid flight destination"};
+      }
+      const uint32_t cur_node =
+          sObjectMgr->GetNearestTaxiNode(*npc, bot->GetTeamId(true));
+      if (cur_node == 0 ||
+          !bot->ActivateTaxiPathTo({cur_node, dest_node}, npc)) {
+        return {"could not start flight"};
+      }
+      return {.used = true, .info = "took flight path"};
+    }
+    return {"unknown NPC action"};
   }
   if (target.kind == OptionTarget::Kind::kLoot) {
     return ExecuteLootOption(bot, target);

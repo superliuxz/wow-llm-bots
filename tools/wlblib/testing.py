@@ -436,7 +436,8 @@ def capture_snapshots(seconds=300):
     say(f"captured {count} snapshots")
 
 
-def soak(minutes=5.0, runs=0, score=False, human_dir=None, judge=False, verify_hash=None, suite="varied"):
+def soak(minutes=5.0, runs=0, score=False, human_dir=None, judge=False,
+         verify_hash=None, suite="varied", temperature=0.7, no_brain=False):
     from wlblib.cases import soak as soak_case
 
     return soak_case.run_soak(
@@ -447,6 +448,8 @@ def soak(minutes=5.0, runs=0, score=False, human_dir=None, judge=False, verify_h
         use_judge=judge,
         verify_hash=verify_hash,
         suite=suite,
+        temperature=temperature,
+        no_brain=no_brain,
     )
 
 

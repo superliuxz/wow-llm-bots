@@ -176,6 +176,25 @@ std::unordered_map<uint64_t, uint32_t>& DungeonDeadSinceMs() {
   return *map;
 }
 
+struct PendingSharedQuestEntry {
+  uint32_t quest_id = 0;
+  uint32_t received_ms = 0;
+};
+
+constexpr uint32_t kPendingSharedQuestTimeoutMs = 60000;
+constexpr uint32_t kPendingReadyCheckTimeoutMs = 30000;
+
+std::unordered_map<uint64_t, PendingSharedQuestEntry>& PendingSharedQuests() {
+  static auto* map =
+      new std::unordered_map<uint64_t, PendingSharedQuestEntry>();
+  return *map;
+}
+
+std::unordered_map<uint64_t, uint32_t>& PendingReadyChecks() {
+  static auto* map = new std::unordered_map<uint64_t, uint32_t>();
+  return *map;
+}
+
 // Enforces clean ownership boundaries between the LLM brain and Playerbots'
 // reflex layer on each Engine:
 //  - Blocks `"accept invitation"` so the brain decides group invites.
@@ -204,7 +223,39 @@ class BrainPolicyListener final : public ActionExecutionListener {
     }
     const std::string& name = action->getName();
     if (name == "accept invitation" || name == "equip upgrade" ||
-        name == "equip upgrades packet action") {
+        name == "equip upgrades packet action" || name == "loot roll" ||
+        name == "roll" || name == "lfg join" || name == "lfg accept" ||
+        name == "lfg role check" || name == "lfg leave" ||
+        name == "lfg teleport") {
+      return false;
+    }
+    if (name == "accept quest share") {
+      if (bot_) {
+        WorldPacket p = event.getPacket();
+        p.rpos(0);
+        uint32_t qid = 0;
+        if (p.size() >= sizeof(uint32_t)) {
+          p >> qid;
+        }
+        if (qid != 0) {
+          PendingSharedQuests()[bot_->GetGUID().GetRawValue()] = {qid,
+                                                                  getMSTime()};
+        }
+      }
+      return false;
+    }
+    if (name == "ready check") {
+      if (bot_) {
+        WorldPacket p = event.getPacket();
+        p.rpos(0);
+        ObjectGuid starter;
+        if (p.size() >= 8) {
+          p >> starter;
+        }
+        if (starter != bot_->GetGUID()) {
+          PendingReadyChecks()[bot_->GetGUID().GetRawValue()] = getMSTime();
+        }
+      }
       return false;
     }
     if (name == "apply stone") {
@@ -339,12 +390,16 @@ void BotManager::Tick() {
         if (player->IsAlive() || !player->GetMap() ||
             !player->GetMap()->IsDungeon()) {
           DungeonDeadSinceMs().erase(bot.guid);
+          PendingSharedQuests().erase(bot.guid);
+          PendingReadyChecks().erase(bot.guid);
         }
         EnsureStrategies(player);
       }
       continue;
     }
     DungeonDeadSinceMs().erase(bot.guid);
+    PendingSharedQuests().erase(bot.guid);
+    PendingReadyChecks().erase(bot.guid);
     if (now_ms_ >= bot.next_login_ms) {
       // No master: playerbots runs it as a standalone bot. With autologin off,
       // its random-bot manager does nothing else with it.
@@ -448,6 +503,57 @@ void BotManager::ClearBotStrategyOverride(const std::string& bot_name) {
 
 void BotManager::ClearBotStrategyOverrides() {
   BotOverrides().clear();
+}
+
+uint32_t BotManager::GetPendingSharedQuest(Player* bot) {
+  if (!bot || !bot->GetDivider()) {
+    if (bot) {
+      PendingSharedQuests().erase(bot->GetGUID().GetRawValue());
+    }
+    return 0;
+  }
+  const uint64_t key = bot->GetGUID().GetRawValue();
+  auto it = PendingSharedQuests().find(key);
+  if (it == PendingSharedQuests().end()) {
+    return 0;
+  }
+  if (GetMSTimeDiffToNow(it->second.received_ms) >=
+      kPendingSharedQuestTimeoutMs) {
+    PendingSharedQuests().erase(it);
+    return 0;
+  }
+  return it->second.quest_id;
+}
+
+void BotManager::ClearPendingSharedQuest(Player* bot) {
+  if (bot) {
+    PendingSharedQuests().erase(bot->GetGUID().GetRawValue());
+  }
+}
+
+bool BotManager::HasPendingReadyCheck(Player* bot) {
+  if (!bot || !bot->GetGroup()) {
+    if (bot) {
+      PendingReadyChecks().erase(bot->GetGUID().GetRawValue());
+    }
+    return false;
+  }
+  const uint64_t key = bot->GetGUID().GetRawValue();
+  auto it = PendingReadyChecks().find(key);
+  if (it == PendingReadyChecks().end()) {
+    return false;
+  }
+  if (GetMSTimeDiffToNow(it->second) >= kPendingReadyCheckTimeoutMs) {
+    PendingReadyChecks().erase(it);
+    return false;
+  }
+  return true;
+}
+
+void BotManager::ClearPendingReadyCheck(Player* bot) {
+  if (bot) {
+    PendingReadyChecks().erase(bot->GetGUID().GetRawValue());
+  }
 }
 
 void BotManager::Stop() {
