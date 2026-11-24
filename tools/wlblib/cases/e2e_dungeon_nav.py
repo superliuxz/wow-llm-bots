@@ -56,7 +56,8 @@ def run(stack):
             e["event"]["error"]
             for e in t["events"]
             if e["event"].get("error", {}).get("command_id") == explore["command_id"]
-            and "in combat" not in e["event"].get("error", {}).get("text", "")
+            and e["event"].get("error", {}).get("text", "")
+            != "walk interrupted: you are in combat"
         ]
         expect(not failed, f"{name}: Explore '{explore['text']}' failed: {failed}")
 

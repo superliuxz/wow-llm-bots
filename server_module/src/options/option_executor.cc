@@ -1248,9 +1248,10 @@ WalkStepResult TickLongWalk(Player* bot,
     constexpr uint8_t kMaxConsecutiveSeamHops = 2;
     if (walk->consecutive_seam_hops < kMaxConsecutiveSeamHops) {
       pb::Vec3 hop;
+      std::vector<pb::Vec3> hop_path;
       if (FindDungeonSeamHop(bot->GetMap(), bot->GetPhaseMask(), pos,
                              bot->GetAngle(walk->dest.x, walk->dest.y),
-                             dist_to_dest, dungeon_nav, &hop)) {
+                             dist_to_dest, dungeon_nav, &hop, &hop_path)) {
         // Defer instead of aborting as "stuck" when movement is transiently
         // prevented (e.g., casting a buff, brief root/stun, or controlled
         // motion); CheckWalkProgress's 10 s timeout bounds true stalls.
@@ -1262,11 +1263,20 @@ WalkStepResult TickLongWalk(Player* bot,
           return {.path_time = path_time};
         }
         // Clear overlying active generators (MoveIdle only mutates slot 0)
-        // before launching MoveSplineInit(generatePath=false) directly onto
-        // the validated navmesh landing point.
+        // before launching a spline along the validated terrain polyline onto
+        // the navmesh landing point.
         bot->GetMotionMaster()->Clear(/*reset=*/false);
         Movement::MoveSplineInit init(bot);
-        init.MoveTo(hop.x, hop.y, hop.z, /*generatePath=*/false);
+        if (hop_path.size() >= 2) {
+          Movement::PointsArray points;
+          points.reserve(hop_path.size());
+          for (const pb::Vec3& p : hop_path) {
+            points.emplace_back(p.x, p.y, p.z);
+          }
+          init.MovebyPath(points);
+        } else {
+          init.MoveTo(hop.x, hop.y, hop.z, /*generatePath=*/false);
+        }
         init.SetWalk(false);
         if (init.Launch() > 0) {
           ++walk->consecutive_seam_hops;

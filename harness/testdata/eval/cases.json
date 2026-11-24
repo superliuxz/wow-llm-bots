@@ -158,7 +158,7 @@
     "source": "hand-edited capture (14% HP)",
     "reason": "plan done",
     "summary": "10/72 HP (14%) out of combat with hostile Scorpid Worker 7 yd away (1)",
-    "rule": "does not Attack (1); picks Rest (8) or Go to town (9)",
+    "rule": "does not Attack (1); picks Rest (8) or Go to town (6-7)",
     "first_kinds": [
       "rest",
       "go to town"
@@ -172,7 +172,7 @@
     "source": "hand-edited capture (4% mana)",
     "reason": "plan done",
     "summary": "priest at 4/91 mana (4%) out of combat next to Mottled Boar (1)",
-    "rule": "does not Attack (1) while OOM; picks Rest (8) or Go to town (9)",
+    "rule": "does not Attack (1) while OOM; picks Rest (8) or Go to town (6-7)",
     "first_kinds": [
       "rest",
       "go to town"

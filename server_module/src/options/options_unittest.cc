@@ -668,6 +668,12 @@ TEST(OptionsTest, MovementAndRestAppearBeforeBagUtilityItems) {
                          187.0f,
                          "Deep Crawler (3)",
                          {460.0f, -1035.0f, 30.3f}});
+  facts.places.push_back({"place:leader",
+                          "Loadf",
+                          "party leader",
+                          pb::Direction::NW,
+                          175.0f,
+                          {450.0f, -1030.0f, 31.0f}});
   facts.usable_items.push_back({.entry = 6948,
                                 .name = "Hearthstone",
                                 .out_of_combat_only = true,
@@ -686,13 +692,15 @@ TEST(OptionsTest, MovementAndRestAppearBeforeBagUtilityItems) {
   const std::vector<OptionTarget> targets = AddOptions(&snap, facts);
   EXPECT_EQ(Texts(snap),
             (std::vector<std::string>{
-                "Explore N, 187 yd (Deep Crawler (3))", "Rest (eat)",
+                "Explore N, 187 yd (Deep Crawler (3))",
+                "Go to Loadf (party leader), 175 yd NW", "Rest (eat)",
                 "Use Hearthstone (teleports home to Sunstrider Isle)",
                 "Use Runic Healing Potion", "Keep doing what I'm doing"}));
-  ASSERT_EQ(targets.size(), 5u);
+  ASSERT_EQ(targets.size(), 6u);
   EXPECT_EQ(targets[0].kind, OptionTarget::Kind::kExplore);
-  EXPECT_EQ(targets[1].kind, OptionTarget::Kind::kRest);
-  EXPECT_EQ(targets[2].kind, OptionTarget::Kind::kUse);
+  EXPECT_EQ(targets[1].kind, OptionTarget::Kind::kGoTo);
+  EXPECT_EQ(targets[2].kind, OptionTarget::Kind::kRest);
+  EXPECT_EQ(targets[3].kind, OptionTarget::Kind::kUse);
 }
 
 }  // namespace

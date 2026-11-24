@@ -24,14 +24,12 @@
 #include "GameGraveyard.h"
 #include "GameTime.h"
 #include "GridTerrainData.h"
-#include "Group.h"
 #include "IVMapMgr.h"
 #include "InstanceScript.h"
 #include "Map.h"
 #include "MapDefines.h"
 #include "MapMgr.h"
 #include "Object.h"
-#include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "PathGenerator.h"
 #include "Player.h"
@@ -421,35 +419,7 @@ void FillSpots(const WorldPlaces& world,
 
 void FillPlaces(const WorldPlaces& world,
                 const Viewpoint& view,
-                const WorldObject* path_owner,
                 PositionFacts* out) {
-  // When grouped as a non-leader and the living party leader is in the same
-  // map/instance/phase at travel distance, expose a factual `Go to <leader>`
-  // option so followers can regroup via stepped navigation (including across
-  // dungeon navmesh seams where Playerbots' +follow gets stuck).
-  if (const Player* bot = path_owner ? path_owner->ToPlayer() : nullptr) {
-    if (const Group* group = bot->GetGroup();
-        group && !group->IsLeader(bot->GetGUID())) {
-      if (const Player* leader =
-              ObjectAccessor::FindConnectedPlayer(group->GetLeaderGUID());
-          leader && leader->IsInWorld() && leader->IsAlive() &&
-          leader->GetMapId() == view.map_id &&
-          leader->GetInstanceId() == bot->GetInstanceId() &&
-          (leader->GetPhaseMask() & view.phase_mask) != 0) {
-        const pb::Vec3 leader_pos{leader->GetPositionX(),
-                                  leader->GetPositionY(),
-                                  leader->GetPositionZ()};
-        const float dist =
-            Dist(view.pos, leader_pos.x, leader_pos.y, leader_pos.z);
-        if (dist >= kMinTravelDistYd && dist <= kMaxTravelDistYd) {
-          out->places.push_back({"place:leader", leader->GetName(),
-                                 "party leader",
-                                 DirFrom(view.pos, leader_pos.x, leader_pos.y),
-                                 dist, leader_pos});
-        }
-      }
-    }
-  }
   const uint32_t class_bit = 1u << view.class_id;
   const std::string trainer_label =
       base::StrCat({base::ToLowerASCII(ClassName(view.class_id)), " trainer"});
@@ -824,7 +794,8 @@ bool FindDungeonSeamHop(Map* map,
                         float base_angle,
                         float max_dist_yd,
                         const DungeonNavConfig& dungeon_nav,
-                        wlb::snapshot::Vec3* out_hop) {
+                        wlb::snapshot::Vec3* out_hop,
+                        std::vector<wlb::snapshot::Vec3>* out_path) {
   if (!dungeon_nav.seam_bridge_enable || !map || !map->IsDungeon() ||
       !out_hop) {
     return false;
@@ -854,6 +825,9 @@ bool FindDungeonSeamHop(Map* map,
   for (float d : kSeamDists) {
     const float step_d = std::min(d, max_dist_yd);
     if (step_d < 3.0f) {
+      if (d >= max_dist_yd) {
+        break;
+      }
       continue;
     }
     const int samples = std::max(2, static_cast<int>(std::ceil(step_d / 2.0f)));
@@ -861,20 +835,15 @@ bool FindDungeonSeamHop(Map* map,
       const float a = base_angle + off;
       const float hx = from.x + step_d * std::cos(a);
       const float hy = from.y + step_d * std::sin(a);
-      const float hz =
-          map->GetHeight(phase_mask, hx, hy, from.z + height_probe_z);
-      if (hz == INVALID_HEIGHT || hz == VMAP_INVALID_HEIGHT_VALUE) {
-        continue;
-      }
-      const float dz = hz - from.z;
-      if (dz < -max_drop || dz > max_climb) {
-        continue;
-      }
-      // Verify continuous walkable terrain and dual-height LOS (+0.6 yd low
-      // railing, +1.5 yd torso/wall) piecewise along the hop so convex stair
+      // Track continuous walkable terrain and dual-height LOS (+0.6 yd low
+      // railing, +1.5 yd torso/wall) piecewise from `from` so overhangs above
+      // (hx, hy) do not falsely reject descending stairs and convex stair
       // crests do not clip a single chord while walls/railings/pits still fail.
-      const float floor_min = std::min(from.z, hz) - 2.0f;
-      const float ceil_max = std::max(from.z, hz) + 1.5f;
+      std::vector<pb::Vec3> polyline;
+      if (out_path) {
+        polyline.reserve(static_cast<size_t>(samples) + 1);
+        polyline.push_back(from);
+      }
       float prev_x = from.x;
       float prev_y = from.y;
       float prev_z = from.z;
@@ -886,8 +855,8 @@ bool FindDungeonSeamHop(Map* map,
         const float sz =
             map->GetHeight(phase_mask, sx, sy, prev_z + height_probe_z);
         if (sz == INVALID_HEIGHT || sz == VMAP_INVALID_HEIGHT_VALUE ||
-            sz < floor_min || sz > ceil_max || sz - prev_z > max_climb ||
-            prev_z - sz > max_drop) {
+            sz - prev_z > max_climb || prev_z - sz > max_drop ||
+            sz - from.z > max_climb || from.z - sz > max_drop) {
           terrain_ok = false;
           break;
         }
@@ -900,17 +869,14 @@ bool FindDungeonSeamHop(Map* map,
           terrain_ok = false;
           break;
         }
+        if (out_path && i < samples) {
+          polyline.push_back({sx, sy, sz});
+        }
         prev_x = sx;
         prev_y = sy;
         prev_z = sz;
       }
       if (!terrain_ok) {
-        continue;
-      }
-      // `prev_z` is the continuous terrain-following floor height at (hx, hy);
-      // validate it against drop/climb bounds and snap it onto the navmesh.
-      const float end_dz = prev_z - from.z;
-      if (end_dz < -max_drop || end_dz > max_climb) {
         continue;
       }
       // Confirm the landing point lies on a walkable navmesh polygon so the
@@ -946,7 +912,14 @@ bool FindDungeonSeamHop(Map* map,
         continue;
       }
       *out_hop = {snap_x, snap_y, snap_z};
+      if (out_path) {
+        polyline.push_back(*out_hop);
+        *out_path = std::move(polyline);
+      }
       return true;
+    }
+    if (d >= max_dist_yd) {
+      break;
     }
   }
   return false;
@@ -958,7 +931,7 @@ PositionFacts ComputePositionFacts(const WorldPlaces& world,
                                    const DungeonNavConfig& dungeon_nav) {
   PositionFacts facts;
   FillSpots(world, view, path_owner, dungeon_nav, &facts.spots);
-  FillPlaces(world, view, path_owner, &facts);
+  FillPlaces(world, view, &facts);
   RefreshFrom(view.pos, &facts);
   return facts;
 }

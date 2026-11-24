@@ -110,14 +110,16 @@ class WorldPlaces {
 
 // Probes a short, terrain- and navmesh-validated hop across a disconnected
 // dungeon navmesh seam (e.g. an entrance ledge/stair drop-off) toward
-// `base_angle`. Shared by FillSpots() and TickLongWalk().
+// `base_angle`. When `out_path` is non-null, writes the sampled terrain
+// polyline `[from, ..., snap]` for `MoveSplineInit::MovebyPath`.
 bool FindDungeonSeamHop(Map* map,
                         uint32_t phase_mask,
                         const wlb::snapshot::Vec3& from,
                         float base_angle,
                         float max_dist_yd,
                         const DungeonNavConfig& dungeon_nav,
-                        wlb::snapshot::Vec3* out_hop);
+                        wlb::snapshot::Vec3* out_hop,
+                        std::vector<wlb::snapshot::Vec3>* out_path = nullptr);
 
 // `path_owner` (the bot) enables the walkable-ray fallback when no grind spot
 // is near; without one (an offline fixture dump) that fallback is skipped.

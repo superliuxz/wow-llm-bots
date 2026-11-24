@@ -1390,8 +1390,14 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
 
   const pb::Base& base = snapshot.base;
   const bool self_is_leader = IsSelfPartyLeader(snapshot);
+  const bool has_nonempty_party =
+      snapshot.ext.party &&
+      (!snapshot.ext.party->leader.empty() ||
+       !snapshot.ext.party->loot_method.empty() ||
+       !snapshot.ext.party->missing_buffs_i_can_give.empty() ||
+       !snapshot.ext.party->members.empty());
   const bool self_in_party =
-      snapshot.ext.party.has_value() || base.self.unit.group.has_value();
+      has_nonempty_party || base.self.unit.group.has_value();
   std::vector<std::string> lines;
   if (base.self != pb::Self{}) {
     lines.push_back("me: " + SelfLine(base.self, self_is_leader,

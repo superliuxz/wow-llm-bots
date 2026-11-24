@@ -751,6 +751,29 @@ void SnapshotBuilder::FillOptionFacts(Player* bot,
   }
   AddPositionFacts(current, view.pos, snapshot->ext.quest_tracker, out,
                    &minimap);
+  // Expose a live per-snapshot `Go to <leader>` option for non-leader group
+  // members when the living leader is on the same map/instance/phase at travel
+  // distance (never cached in `position_facts_` so moving leaders and group
+  // changes are reflected immediately).
+  if (Group* group = bot->GetGroup();
+      group && !group->IsLeader(bot->GetGUID())) {
+    if (Player* leader =
+            ObjectAccessor::FindConnectedPlayer(group->GetLeaderGUID());
+        leader && leader->IsInWorld() && leader->IsAlive() &&
+        leader->GetMapId() == view.map_id &&
+        leader->GetInstanceId() == bot->GetInstanceId() &&
+        (leader->GetPhaseMask() & view.phase_mask) != 0) {
+      const pb::Vec3 leader_pos{leader->GetPositionX(), leader->GetPositionY(),
+                                leader->GetPositionZ()};
+      const float dist =
+          Dist(view.pos, leader_pos.x, leader_pos.y, leader_pos.z);
+      if (dist >= kMinTravelDistYd && dist <= kMaxTravelDistYd) {
+        out->places.push_back(
+            {"place:leader", leader->GetName(), "party leader",
+             DirFrom(view.pos, leader_pos.x, leader_pos.y), dist, leader_pos});
+      }
+    }
+  }
 }
 
 }  // namespace llm_brain
