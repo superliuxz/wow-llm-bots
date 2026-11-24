@@ -93,103 +93,28 @@ are signed off** (see [`docs/benchmarks/2026-11-22-phase1-phase3-five-boss-n16.m
 4. **Named room landmarks** (`docs/specs/triggers.md`): 132 of the 218 unsayable boss actions move
    to hardcoded room coordinates; deferred until a boss fight needs per-room landmark data.
 
-## Later
+## Later & loose ends
 
-- **Dungeon Finder (LFG / RDF) integration (`server_module/`):** wire AzerothCore's `sLFGMgr` state
-  (`queued`, `proposal`, `role_check`, `in_dungeon`) and brain-chosen LFG options (`Queue Dungeon
-  Finder`, `Accept/Decline proposal`, `Leave queue`, `Teleport to/out of dungeon`) so bots can queue
-  organically while questing (snapshot schema and `harness/src/plan/triggers.cc` LFG wake triggers
-  already exist).
-- **Optional brain-chosen group movement / formation tuning:** currently out-of-combat group members
-  use Playerbots' non-combat `+follow` formation movement controller between pulls when the brain
-  picks `Keep` (combat & boss positioning are brain-owned). If less formation-followy movement or
-  explicit brain-chosen split/regroup is desired later, tune formation spacing or expose a
-  `Regroup` / `Go to <leader>` option.
-- **Bind hearthstone** at an innkeeper as an option of its own (the brain's choice, through the
-  bind spell), not part of Talk (`docs/specs/options.md`).
-- **More e2e cases:** death and respawn, harness reconnect, a failing choice reaching the brain.
-- **More perf:** a raid-wide burst (N bots woken in the same instant every M seconds; today's
-  `SURPRISES` wakes bots independently) and cells past capacity (`docs/specs/harness.md`, "Age").
-- **GPU `--backend-sampling` or thin `libllama` runner:** GBNF disables GPU `--backend-sampling`
-  (~10 ms/step CPU overhead under 16-slot load); either run unconstrained with `--backend-sampling`
-  + 1 grammar retry, or replace `llama-server` HTTP with a thin `wlb_net` `libllama` daemon that
-  masks structured fields and GPU-samples free text.
-- **Brain memory**, `var/bots/<name>/` (its own git repo): not created yet, on purpose.
-- **`IsInRandomAccountList` audit**, the remaining sites (`docs/playerbots-random-bot-audit.md`).
-- **`module/server/`** layout, when a second AzerothCore module exists.
-
-## Loose ends
-
-- When two brain-run bots whisper `"who"` back and forth (`Gatda` -> `Testpriest`), they echoed
-  `"who"` several times before switching to a real question (and stopped naturally after
-  `"sounds good, let me know when you're ready"`).
-- A bot once wrote `tell <its own name>:` (Gatda, Gemma 4, live 2026-11-17); the module refuses
-  it. Likely cause, the RULES.md example `tell Gatda:`, is fixed; watch whether it recurs.
-- **Eval (2026-11-18, Gemma 4):** 42/48 scored cases (88%, random 22.0; 4/4 standing-order cases
-  pass, `do:` p50 `72 ms`, total `208 ms`; 7 unfailable cases not scored). Misses:
-  `healthy_boar_pull`, `skip_tapped_mob`, `red_mob_nearby`, `hp_60_fine`, `bags_full` (with closed
-  bags it explores; in live play the habit opens full bags, and `bags_full_open` passes),
-  `new_loot_hover`. The Qwen3.6 shootout was not re-run.
-- **Panels, things not built yet** (`docs/specs/options.md`): `Use <item>` for bag items now works
-  for self/selected-target on-use items (`A6`), while explicit unit/object/corpse target selection
-  for spec §10 quest items (and its eval case) is not built yet; the module sends no
-  `quest_accepted` / `quest_complete` / inventory-full events, so the habits read the snapshot
-  instead (`bag_free_slots`, the quest tracker); "open bags at a vendor" waits for vendor windows
-  (`interaction`); hover only for items and quests (spells, auras, units, places later).
-- Dead bots: only Keep is offered while dead, refused steps back off (2-30 s), and coming back
-  to life wakes the brain ("alive again"). Release spirit / run to corpse are not options yet
-  (the body's playerbots dead strategy handles it).
-- **Running an agent unattended:** an Antigravity chat in the VS Code Remote-SSH sidebar runs as
-  `agy --hub` under VS Code's extension host. When the SSH client drops, VS Code Server keeps it for
-  3 h, or for only 5 min if the laptop dark-wakes and reconnects briefly. Then it kills the session
-  (this happened 2026-11-17: disconnect 01:59:57, reconnect 02:00:21, killed 02:05:23;
-  `~/.vscode-server/data/logs/20261116T091853/remoteagent.log`). Processes started detached
-  (`worldserver`, `mysqld`, `llama-server`) survive. For overnight work, run the agent outside VS
-  Code. `agy remote-control` daemon: set up and active since 2026-11-17 09:42 (systemd user unit
-  `antigravity-cli-daemon.service`, `Linger=yes`, instance `cachyos`). Not yet tested: whether a
-  conversation started through it survives the laptop closing. Alternative: `agy` in `tmux` on
-  CachyOS.
-- `tools/wlb setup data`, `llama` and `msan` were ported from shell and **not run** (each
-  overwrites something that works). Test them in a scratch directory, or on the next fresh checkout.
-- `CLAUDE.md` imports `CONTRIBUTING.md` with `@CONTRIBUTING.md`: **not yet confirmed** that a fresh
-  Claude Code session loads the rules through it.
-- The human player's account name is in the git history (commit `c8ae0f4`,
-  `tools/server-start.sh`; and `test_accounts_unittest.cc` until 2026-11-17); it is out of the
-  current files. Removing it means rewriting history and a force-push: their decision.
-- Unit tests for the AzerothCore-dependent module code (`bot_manager`, `option_executor`,
-  `nearby_builder`, ...) can't run without the game server: only the e2e cases cover them.
-- `BrainBridge`: a connection generation drops stale frames, but a stalled old connection's
-  commands still arrive in order before its disconnect is seen. Judged not worth more yet.
-- Bugs found in playerbots (not ours, `third_party/`): `RangeTriggers.cpp:275` returns before its
-  distance loop (Yogg-Saron Brain Link); `NotBehindIngvarTrigger` fires when the bot *is* behind its
-  target. Five `*Cheat*` boss triggers fire only with playerbots' raid cheat on.
-- A flaky risk in `e2e choose`: if the boar drops nothing there is no corpse to loot, and the case
-  fails with "never offered". Passed every run so far.
-- **Live boss findings (Loken, 2026-11-18):**
-  - *(Fixed by `A1` hold-until-cast-ends and `A4` mid-fight empty-order preservation; remaining edge
-    case:)* Gemma 4 occasionally rewrites a working `Lightning Nova cast` order into `Loken cast`
-    or `Lightning Nova appears` when a mid-fight wake emits non-empty `order:` lines.
-- **Not individually live-triggered after final edits yet:** `llmtest questcomplete` when a quest
-  is already active in a bot's quest log (`CompleteQuest` + `RewardQuest` branch in
-  `test_commands.cc`, source-verified), `tools/wlb remote` live `Ctrl-C` PGID termination / SSH-drop `255` cleanup / `status` with an active `worldserver` (unit-tested locally against real subprocesses & mocks in `tools/wlblib/remote_test.py`), plus Review 10 single-arm `_wait_checkstrat` +
-  `+{strip_strat}` (`tools/bench/bench_bosses.py`) and sorted list-head cap eviction
-  (`server_module/src/snapshot/behavior_trace.{h,cc}`), which are unit-tested and compiled into
-  `out/server-test` without starting a new live benchmark run (per user instruction).
-  *(Environmental/self death `died` with `detail="environment"` caveat closed per Review 9 —
-  live-triggered on `murmur`, and entrance staging/pull coordinates for `devourer`, `loken`,
-  `kaelthas`, `murmur`, and `ikiss` live-verified across `64` valid trials (`n = 16` per arm)
-  each.)*
-- **Phase 1–3 open caveats & deferred polish:** `tools/bench/bench_bosses.py` still uses inline boss-note constants rather than reading `content/notes/*/notes.md` directly; `A5` `party hurt:` and `loose mobs:` screen formatting are unit-tested only (not separately captured from live `harness.log`); `eregos` (`bench_bosses.py`) still hits `no_pull` because Oculus requires flying drake engagement/boss trigger; `tools/bench/notes_hill_climb.py --confirm-runs > 0` re-run is unit-tested only (not live-verified).
-- **Phase 4 live play observation (2026-11-22):** level 14 priest observed still farming mobs in Northshire Abbey (level 1 starting zone) — directly motivates Phase 4 `B1` (level-appropriate questing/zone guidance over grinding grey mobs).
-- **`private/BigFootAddOns` licensing reminder:** private nested submodule rehosting proprietary addons (DBM, Omen, etc.); fine while private — never publish it or copy any of it into the public GPL repo.
-- **Human trace GM-speed cleanup & raw-turn check (deprioritized — Phase D only):** `2026-11-22.1.jsonl` in `~/.local/share/wow-llm-bots/human_baseline/human/Hele/` was cleaned of `> 10 yd/s` GM-fly/speed segments; strip `> 10 yd/s` segments from `2026-11-22.jsonl` if Phase D human-likeness scoring is resumed, and optionally check `trace_parity.py` raw-turn snap rates on human traces (user deprioritized movement-mimicry metrics in favor of mechanical WoW competence).
-- **Deliberately skipped benchmark speedup proposals (Items 4, 5, adaptive 6):** left unbuilt on
-  purpose to preserve valid boss immunity/kite phases (Item 4: `20 s` zero-damage abort would
-  cut `Gravity Lapse`/`Planar Shift` and censor `llm` bugs via survivorship bias), cross-boss DB
-  isolation + startup-bound `LlmBrain.TraceDir` (`scorer.sha256` lock) (Item 5: cross-boss
-  server reuse without `test_databases_reset()` saves only `~44 s/boss`), and unbiased fixed-`n`
-  statistics (adaptive Item 6: stopping at `n=3` has a `42.2%` false-negative rate on a `75%` arm;
-  details in [`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md) §6).
+- **Gameplay & brain features (deferred):**
+  - **Dungeon Finder (LFG / RDF) integration (`server_module/`):** wire AzerothCore's `sLFGMgr` state (`queued`, `proposal`, `role_check`, `in_dungeon`) and brain-chosen LFG options (`Queue Dungeon Finder`, `Accept/Decline proposal`, `Leave queue`, `Teleport to/out of dungeon`) — snapshot schema and `harness/src/plan/triggers.cc` LFG wake triggers already exist.
+  - **Optional brain-chosen group movement / formation tuning:** out-of-combat group followers currently use Playerbots' `+follow` formation when picking `Keep`; tune formation spacing or expose a `Regroup` / `Go to <leader>` option if desired later.
+  - **Bind hearthstone as its own option** at an innkeeper (through the bind spell), not part of `Talk` (`docs/specs/options.md`).
+  - **Panels & targeted quest-item use (`docs/specs/options.md`):** explicit unit/object/corpse target selection for spec §10 quest items (and its eval case), `quest_accepted` / `quest_complete` / inventory-full events (habits currently read snapshot fields), vendor-window bag opening (`interaction`), and hover for spells/auras/units/places (currently items and quests only).
+  - **Dead-bot options:** release spirit / run to corpse are handled by Playerbots' dead strategy (plus `BrainPolicyListener` dungeon `auto release` gating and `RecoverStuckDungeonGhost`), not brain options yet.
+  - **Persistent brain memory (`var/bots/<name>/`):** per-bot episodic memory git repo not built yet (`var/bots/` currently holds only runtime/notes files).
+  - **Loken mid-fight order rewrite edge case:** Gemma 4 occasionally rewrites a working `Lightning Nova cast` order into `Loken cast` or `Lightning Nova appears` when emitting non-empty `order:` lines mid-fight.
+- **Infrastructure, performance & testing (deferred):**
+  - **GPU `--backend-sampling` or thin `libllama` runner:** GBNF disables GPU `--backend-sampling` (~10 ms/step CPU overhead under 16-slot load); either run unconstrained with `--backend-sampling` + 1 grammar retry, or replace `llama-server` HTTP with a thin `wlb_net` `libllama` daemon that masks structured fields and GPU-samples free text.
+  - **More e2e & perf cases:** e2e death/respawn, harness reconnect, and failing choice reaching the brain (`e2e_choose` also has a minor flaky risk if the boar drops nothing); perf raid-wide simultaneous burst and cells past capacity (`docs/specs/harness.md`, "Age").
+  - **Bench & boss-notes polish:** `tools/bench/bench_bosses.py` still uses inline boss-note constants instead of reading `content/notes/*/notes.md` directly; `eregos` still hits `no_pull` (Oculus flying drake); `notes_hill_climb.py --confirm-runs > 0` and `A5` `party hurt:` / `loose mobs:` screen formatting are unit-tested only.
+  - **Not individually live-triggered after final edits yet:** `llmtest questcomplete` active-quest branch (`test_commands.cc`), `tools/wlb remote` live `Ctrl-C`/SSH-drop `255`/`status` (unit-tested in `remote_test.py`), `bench_bosses.py` single-arm `_wait_checkstrat` + `+{strip_strat}`, `behavior_trace.{h,cc}` cap eviction, and the Phase 4 review fixes in `server_module/` (`bot_manager.cc`, `option_facts.cc`, `option_executor.cc`, `llm_brain_config.cc`).
+  - **Untested setup/tooling scripts:** `tools/wlb setup data`, `llama`, and `msan` (ported from shell, not run against a scratch checkout); `CLAUDE.md` `@CONTRIBUTING.md` import not yet confirmed in a fresh Claude Code session.
+  - **Codebase & architecture housekeeping:** remaining `IsInRandomAccountList` audit sites (`docs/playerbots-random-bot-audit.md`); `module/server/` layout when a second AzerothCore module exists; AzerothCore-dependent module code (`bot_manager`, `option_executor`, `nearby_builder`, ...) is covered by e2e rather than unit tests; `BrainBridge` stalled-old-connection command ordering (judged not worth more yet).
+- **External, policy & deprioritized notes:**
+  - **Upstream `third_party/` Playerbots bugs (not ours):** `RangeTriggers.cpp:275` returns before its distance loop (Yogg-Saron Brain Link); `NotBehindIngvarTrigger` fires when the bot *is* behind its target; five `*Cheat*` boss triggers require playerbots' raid cheat on.
+  - **Human trace cleanup (Phase D only — deprioritized):** strip `> 10 yd/s` GM-fly/speed segments from `~/.local/share/wow-llm-bots/human_baseline/human/Hele/2026-11-22.jsonl` (and optionally check raw-turn snap rates) if Phase D human-likeness scoring is resumed.
+  - **Deliberately skipped benchmark speedup proposals (Items 4, 5, adaptive 6):** left unbuilt on purpose to preserve valid boss immunity/kite phases, cross-boss DB isolation, and unbiased fixed-`n` statistics ([`docs/benchmarks/2026-11-20-four-boss-mixed-arms.md`](benchmarks/2026-11-20-four-boss-mixed-arms.md) §6).
+  - **Repo & licensing reminders:** `private/BigFootAddOns` holds proprietary addons — never publish or copy into the public GPL repo; the human player's account name remains in old git history (`c8ae0f4`, out of current files — rewriting history is the user's decision).
 
 ## Done (newest first, keep about ten)
 
