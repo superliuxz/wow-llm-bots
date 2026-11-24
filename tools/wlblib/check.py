@@ -140,19 +140,17 @@ def includes(fix=False):
 
 def snapshots(files=()):
     """Validates snapshot JSON files against wlb::snapshot::Snapshot (strict JSON keys +
-    visibility rules) and checks docs/specs/client-events.tsv against the reflected C++ schema."""
+    visibility rules) and verifies hover-field annotations and fixture options."""
     checker = OUT / "common" / "snapshot_check"
     if not checker.exists():
         build.common("default", tests=False)
     files = list(files) or [
-        *sorted((ROOT / "docs/specs/examples").glob("*.json")),
         *sorted((ROOT / "harness/testdata/eval").glob("*.snapshot.json")),
         *sorted((ROOT / "harness/testdata/screens").glob("*.snapshot.json")),
     ]
     run([checker, *files])
     if wire.check_hover_fields() != 0:
         raise Failed("hover fields check failed")
-    run(["python3", "-I", "-B", ROOT / "tools/audit/check_client_events.py", checker])
     # Eval snapshots show the options the module offers (review 2026-11-17, finding 5).
     run(["python3", "-I", "-B", ROOT / "tools/snapshot/add_fixture_options.py", "--check"])
 

@@ -483,102 +483,12 @@ struct Instance_Boss {
   bool operator==(const Instance_Boss&) const = default;
 };
 
-struct Interaction_Gossip_Option {
-  std::string text;
-  std::string icon;
-  uint32_t cost = 0;
-  bool needs_text = false;
-
-  bool operator==(const Interaction_Gossip_Option&) const = default;
-};
-
-struct Interaction_RaidBrowserEntry {
-  std::string leader;
-  std::string raid;
-  std::string comment;
-  uint32_t members = 0;
-
-  bool operator==(const Interaction_RaidBrowserEntry&) const = default;
-};
-
-struct Interaction_Barber {
-  uint32_t cost = 0;
-  std::vector<std::string> options;
-
-  bool operator==(const Interaction_Barber&) const = default;
-};
-
-struct Interaction_Petition {
-  std::string kind;
-  std::string name;
-  std::vector<std::string> signatures;
-  uint32_t needed = 0;
-
-  bool operator==(const Interaction_Petition&) const = default;
-};
-
-struct Interaction_Registrar {
-  uint32_t charter_cost = 0;
-
-  bool operator==(const Interaction_Registrar&) const = default;
-};
-
-struct Interaction_ItemText {
-  std::string title;
-  std::string text;
-  uint32_t page = 0;
-  bool has_next_page = false;
-
-  bool operator==(const Interaction_ItemText&) const = default;
-};
-
-struct Interaction_Tabard {
-  uint32_t cost = 0;
-
-  bool operator==(const Interaction_Tabard&) const = default;
-};
-
-struct Interaction_Battlemaster {
-  std::vector<std::string> battlegrounds;
-
-  bool operator==(const Interaction_Battlemaster&) const = default;
-};
-
 struct PetFrame_Totem {
   std::string name;
   std::string element;
   float remaining_s = 0.0f;
 
   bool operator==(const PetFrame_Totem&) const = default;
-};
-
-struct Environment_Falling {
-  float height_yd = 0.0f;
-
-  bool operator==(const Environment_Falling&) const = default;
-};
-
-struct Battleground_Objective {
-  std::string name;
-  std::string owner;
-
-  bool operator==(const Battleground_Objective&) const = default;
-};
-
-struct Scoreboard_Row {
-  std::string name;
-  std::string class_;
-  std::string team;
-  uint32_t killing_blows = 0;
-  uint32_t honorable_kills = 0;
-  uint32_t deaths = 0;
-  uint32_t bonus_honor = 0;
-  uint32_t damage_done = 0;
-  uint32_t healing_done = 0;
-  std::vector<std::pair<std::string, uint32_t>> objectives;
-  int32_t rating_change = 0;
-
-  bool operator==(const Scoreboard_Row&) const = default;
 };
 
 struct Bags_Hearthstone {
@@ -593,97 +503,6 @@ struct Character_EquipmentSet {
   bool complete = false;
 
   bool operator==(const Character_EquipmentSet&) const = default;
-};
-
-struct Talents_Talent {
-  std::string name;
-  uint32_t rank = 0;
-  uint32_t max_rank = 0;
-  std::string tree;
-  bool available = false;
-
-  bool operator==(const Talents_Talent&) const = default;
-};
-
-struct Talents_Glyph {
-  std::string type;
-  std::string name;
-  uint32_t unlocks_at = 0;
-
-  bool operator==(const Talents_Glyph&) const = default;
-};
-
-struct Talents_Spec {
-  std::vector<uint32_t> points_per_tree;
-  bool active = false;
-
-  bool operator==(const Talents_Spec&) const = default;
-};
-
-struct Skills_Skill {
-  std::string name;
-  uint32_t skill = 0;
-  uint32_t max = 0;
-  std::string category;
-
-  bool operator==(const Skills_Skill&) const = default;
-};
-
-struct Reputation_Faction {
-  std::string faction;
-  std::string standing;
-  int32_t value = 0;
-  int32_t next = 0;
-  bool at_war = false;
-
-  bool operator==(const Reputation_Faction&) const = default;
-};
-
-struct Social_Friend {
-  std::string name;
-  bool online = false;
-  uint32_t level = 0;
-  std::string class_;
-  std::string zone;
-  std::string note;
-
-  bool operator==(const Social_Friend&) const = default;
-};
-
-struct Calendar_Entry {
-  enum class Status : uint8_t {
-    STATUS_UNSPECIFIED = 0,
-    INVITED = 1,
-    ACCEPTED = 2,
-    DECLINED = 3,
-    TENTATIVE = 4,
-  };
-  using enum Status;
-
-  std::string title;
-  std::string when;
-  Calendar_Entry::Status my_status = Calendar_Entry::Status::STATUS_UNSPECIFIED;
-  std::string creator;
-
-  bool operator==(const Calendar_Entry&) const = default;
-};
-
-struct DungeonFinder_Queue {
-  float waited_s = 0.0f;
-  float average_wait_s = 0.0f;
-  uint32_t tanks_needed = 0;
-  uint32_t healers_needed = 0;
-  uint32_t dps_needed = 0;
-
-  bool operator==(const DungeonFinder_Queue&) const = default;
-};
-
-struct Pvp_ArenaTeam {
-  std::string name;
-  uint32_t size = 0;
-  uint32_t rating = 0;
-
-  bool operator==(const Pvp_ArenaTeam&) const = default;
 };
 
 struct ErrorEvent {
@@ -723,13 +542,6 @@ struct MoneyChangedEvent {
   bool operator==(const MoneyChangedEvent&) const = default;
 };
 
-struct SkillUpEvent {
-  std::string skill;
-  uint32_t value = 0;
-
-  bool operator==(const SkillUpEvent&) const = default;
-};
-
 struct QuestEvent {
   std::string quest;
   uint32_t xp = 0;
@@ -750,44 +562,6 @@ struct ResurrectedEvent {
   bool resurrection_sickness = false;
 
   bool operator==(const ResurrectedEvent&) const = default;
-};
-
-struct RollEvent {
-  std::string who;
-  uint32_t result = 0;
-  uint32_t min = 0;
-  uint32_t max = 0;
-
-  bool operator==(const RollEvent&) const = default;
-};
-
-struct MailEvent {
-  std::string from;
-
-  bool operator==(const MailEvent&) const = default;
-};
-
-struct ZoneEvent {
-  std::string zone;
-  std::string subzone;
-  uint32_t xp = 0;
-
-  bool operator==(const ZoneEvent&) const = default;
-};
-
-struct InstanceEvent {
-  std::string name;
-  std::string difficulty;
-  std::string what;
-
-  bool operator==(const InstanceEvent&) const = default;
-};
-
-struct CalendarAlarmEvent {
-  std::string title;
-  float starts_in_s = 0.0f;
-
-  bool operator==(const CalendarAlarmEvent&) const = default;
 };
 
 struct DisplacedEvent {
@@ -815,12 +589,6 @@ struct DuelEvent {
   bool operator==(const DuelEvent&) const = default;
 };
 
-struct TitleEvent {
-  std::string title;
-
-  bool operator==(const TitleEvent&) const = default;
-};
-
 struct KickedEvent {
   std::string from;
   std::string by;
@@ -829,28 +597,10 @@ struct KickedEvent {
   bool operator==(const KickedEvent&) const = default;
 };
 
-struct HearthstoneBoundEvent {
-  std::string place;
-
-  bool operator==(const HearthstoneBoundEvent&) const = default;
-};
-
 struct DbmWarningEvent {
   std::string text;
 
   bool operator==(const DbmWarningEvent&) const = default;
-};
-
-struct CinematicEvent {
-  bool started = false;
-
-  bool operator==(const CinematicEvent&) const = default;
-};
-
-struct TalentPointEvent {
-  uint32_t unspent = 0;
-
-  bool operator==(const TalentPointEvent&) const = default;
 };
 
 struct Blank {
@@ -1212,137 +962,11 @@ struct World {
   bool operator==(const World&) const = default;
 };
 
-struct Interaction_Gossip {
-  using Option = Interaction_Gossip_Option;
-
-  std::string text;
-  std::vector<Interaction_Gossip_Option> options;
-  std::vector<std::string> quests;
-
-  bool operator==(const Interaction_Gossip&) const = default;
-};
-
-struct Interaction_RaidBrowser {
-  std::vector<Interaction_RaidBrowserEntry> entries;
-
-  bool operator==(const Interaction_RaidBrowser&) const = default;
-};
-
-struct Environment {
-  using Falling = Environment_Falling;
-
-  std::optional<float> breath_s;
-  float fatigue_s = 0.0f;
-  std::optional<Environment_Falling> falling;
-
-  bool operator==(const Environment&) const = default;
-};
-
-struct Battleground {
-  using Objective = Battleground_Objective;
-
-  std::string name;
-  std::vector<std::pair<std::string, int32_t>> score;
-  std::vector<Battleground_Objective> objectives;
-  std::vector<std::string> flag_carriers;
-  float remaining_s = 0.0f;
-
-  bool operator==(const Battleground&) const = default;
-};
-
-struct Scoreboard {
-  using Row = Scoreboard_Row;
-
-  std::vector<Scoreboard_Row> rows;
-
-  bool operator==(const Scoreboard&) const = default;
-};
-
 struct Map_Zone {
   std::string name;
   std::optional<LevelRange> level_range;
 
   bool operator==(const Map_Zone&) const = default;
-};
-
-struct Talents {
-  using Talent = Talents_Talent;
-  using Glyph = Talents_Glyph;
-  using Spec = Talents_Spec;
-
-  uint32_t unspent = 0;
-  std::vector<std::string> trees;
-  std::vector<uint32_t> points_per_tree;
-  std::vector<Talents_Talent> talents;
-  std::vector<Talents_Glyph> glyphs;
-  std::vector<Talents_Spec> specs;
-  std::vector<Talents_Talent> pet_talents;
-  uint32_t pet_unspent = 0;
-
-  bool operator==(const Talents&) const = default;
-};
-
-struct Skills {
-  using Skill = Skills_Skill;
-
-  std::vector<Skills_Skill> skills;
-
-  bool operator==(const Skills&) const = default;
-};
-
-struct Reputation {
-  using Faction = Reputation_Faction;
-
-  std::vector<Reputation_Faction> factions;
-
-  bool operator==(const Reputation&) const = default;
-};
-
-struct Social_Guild {
-  std::string name;
-  std::string rank;
-  std::string motd;
-  uint32_t online = 0;
-  std::vector<Social_Friend> roster_online;
-
-  bool operator==(const Social_Guild&) const = default;
-};
-
-struct Social_WhoResult {
-  std::string query;
-  std::vector<Social_Friend> players;
-
-  bool operator==(const Social_WhoResult&) const = default;
-};
-
-struct Calendar {
-  using Entry = Calendar_Entry;
-
-  std::vector<Calendar_Entry> events;
-
-  bool operator==(const Calendar&) const = default;
-};
-
-struct DungeonFinder_Dungeon {
-  std::string name;
-  std::optional<LevelRange> level_range;
-  std::string difficulty;
-  bool selected = false;
-  std::string locked_reason;
-
-  bool operator==(const DungeonFinder_Dungeon&) const = default;
-};
-
-struct Pvp {
-  using ArenaTeam = Pvp_ArenaTeam;
-
-  uint32_t honor = 0;
-  uint32_t arena_points = 0;
-  uint32_t honorable_kills_today = 0;
-  uint32_t honorable_kills_total = 0;
-  std::vector<Pvp_ArenaTeam> arena_teams;
-
-  bool operator==(const Pvp&) const = default;
 };
 
 struct Option {
@@ -1558,16 +1182,6 @@ struct ActionBars {
   bool operator==(const ActionBars&) const = default;
 };
 
-struct Interaction_Merchant {
-  std::vector<Item> items;
-  std::vector<Item> buyback;
-  bool can_repair = false;
-  uint32_t repair_cost = 0;
-  std::vector<CurrencyAmount> my_currency;
-
-  bool operator==(const Interaction_Merchant&) const = default;
-};
-
 struct Interaction_QuestDialog {
   std::string title;
   std::string text;
@@ -1579,108 +1193,6 @@ struct Interaction_QuestDialog {
   std::string stage;
 
   bool operator==(const Interaction_QuestDialog&) const = default;
-};
-
-struct Interaction_Mail {
-  std::string from;
-  std::string subject;
-  std::string body;
-  uint32_t money = 0;
-  uint32_t cod = 0;
-  std::vector<Item> items;
-  float expires_in_days = 0.0f;
-  std::string kind;
-  bool read = false;
-
-  bool operator==(const Interaction_Mail&) const = default;
-};
-
-struct Interaction_AuctionHouse {
-  std::vector<Item> my_auctions;
-  std::vector<Item> my_bids;
-  std::vector<Item> results;
-  std::string query;
-
-  bool operator==(const Interaction_AuctionHouse&) const = default;
-};
-
-struct Interaction_Recipe_Reagent {
-  std::optional<Item> item;
-  uint32_t have = 0;
-  uint32_t need = 0;
-
-  bool operator==(const Interaction_Recipe_Reagent&) const = default;
-};
-
-struct Interaction_Bank {
-  std::vector<Item> items;
-  uint32_t bag_slots_purchased = 0;
-  uint32_t next_slot_cost = 0;
-
-  bool operator==(const Interaction_Bank&) const = default;
-};
-
-struct Interaction_GuildBank_Tab {
-  std::string name;
-  std::vector<Item> items;
-  uint32_t withdrawals_left = 0;
-  bool can_view = false;
-  bool can_deposit = false;
-
-  bool operator==(const Interaction_GuildBank_Tab&) const = default;
-};
-
-struct Interaction_Trainer {
-  std::vector<Spell> spells;
-
-  bool operator==(const Interaction_Trainer&) const = default;
-};
-
-struct TradeLoot_Trade {
-  std::string with;
-  std::vector<Item> mine;
-  std::vector<Item> theirs;
-  uint32_t my_money = 0;
-  uint32_t their_money = 0;
-  bool they_accepted = false;
-  bool i_accepted = false;
-  std::optional<Item> mine_not_traded;
-  std::optional<Item> theirs_not_traded;
-
-  bool operator==(const TradeLoot_Trade&) const = default;
-};
-
-struct TradeLoot_Roll {
-  std::optional<Item> item;
-  uint32_t roll_id = 0;
-  float time_left_s = 0.0f;
-  bool can_need = false;
-  bool can_disenchant = false;
-
-  bool operator==(const TradeLoot_Roll&) const = default;
-};
-
-struct Surroundings_Obstacle {
-  enum class Kind : uint8_t {
-    KIND_UNSPECIFIED = 0,
-    WALL = 1,
-    SLOPE = 2,
-    DROP = 3,
-    WATER = 4,
-    LEDGE = 5,
-    OPENING = 6,
-    DOOR = 7,
-    TREE = 8,
-    ROCK = 9,
-  };
-  using enum Kind;
-
-  Surroundings_Obstacle::Kind kind =
-      Surroundings_Obstacle::Kind::KIND_UNSPECIFIED;
-  std::optional<Relative> rel;
-  float height_yd = 0.0f;
-
-  bool operator==(const Surroundings_Obstacle&) const = default;
 };
 
 struct Bags {
@@ -1709,60 +1221,11 @@ struct Character {
   bool operator==(const Character&) const = default;
 };
 
-struct Companions {
-  std::vector<Spell> mounts;
-  std::vector<Spell> pets;
-
-  bool operator==(const Companions&) const = default;
-};
-
 struct Spellbook {
   std::vector<Spell> spells;
   std::vector<Spell> pet_spells;
 
   bool operator==(const Spellbook&) const = default;
-};
-
-struct Social {
-  using Friend = Social_Friend;
-  using Guild = Social_Guild;
-  using WhoResult = Social_WhoResult;
-
-  std::vector<Social_Friend> friends;
-  std::vector<std::string> ignored;
-  std::optional<Social_Guild> guild;
-  std::vector<std::string> lfg_listings;
-  std::vector<std::string> channels;
-  std::optional<Social_WhoResult> who;
-
-  bool operator==(const Social&) const = default;
-};
-
-struct Achievements {
-  uint32_t points = 0;
-  std::vector<Achievement> recent;
-  std::string category;
-  std::vector<Achievement> in_category;
-
-  bool operator==(const Achievements&) const = default;
-};
-
-struct DungeonFinder {
-  using Dungeon = DungeonFinder_Dungeon;
-  using Queue = DungeonFinder_Queue;
-
-  std::string mode;
-  std::string random_dungeon;
-  std::vector<Item> random_rewards;
-  uint32_t random_reward_money = 0;
-  uint32_t random_reward_xp = 0;
-  bool random_done_today = false;
-  std::vector<DungeonFinder_Dungeon> dungeons;
-  std::vector<Role> my_roles;
-  std::optional<DungeonFinder_Queue> queue;
-  bool in_lfg_group = false;
-
-  bool operator==(const DungeonFinder&) const = default;
 };
 
 struct PromptEvent {
@@ -1832,58 +1295,6 @@ struct LootRollEvent {
   uint32_t roll_id = 0;
 
   bool operator==(const LootRollEvent&) const = default;
-};
-
-struct LootWonEvent {
-  std::optional<Item> item;
-  std::string by;
-  std::string roll_type;
-  uint32_t roll = 0;
-
-  bool operator==(const LootWonEvent&) const = default;
-};
-
-struct LootRollChoiceEvent {
-  uint32_t roll_id = 0;
-  std::optional<Item> item;
-  std::string who;
-  std::string choice;
-  uint32_t roll = 0;
-
-  bool operator==(const LootRollChoiceEvent&) const = default;
-};
-
-struct AuctionEvent {
-  std::optional<Item> item;
-  uint32_t money = 0;
-  std::string outcome;
-
-  bool operator==(const AuctionEvent&) const = default;
-};
-
-struct MinimapPingEvent {
-  std::string from;
-  std::optional<Relative> where;
-
-  bool operator==(const MinimapPingEvent&) const = default;
-};
-
-struct AchievementEvent {
-  std::optional<Achievement> achievement;
-  std::string who;
-  bool server_first = false;
-
-  bool operator==(const AchievementEvent&) const = default;
-};
-
-struct BattlegroundEvent {
-  std::string what;
-  std::string text;
-  std::string winner;
-  uint32_t honor = 0;
-  std::vector<Item> rewards;
-
-  bool operator==(const BattlegroundEvent&) const = default;
 };
 
 struct LfgEvent {
@@ -2057,86 +1468,6 @@ struct Death {
   std::string self_resurrect;
 
   bool operator==(const Death&) const = default;
-};
-
-struct Interaction_FlightMap_Destination {
-  std::optional<Place> place;
-  uint32_t price = 0;
-  bool unreachable = false;
-
-  bool operator==(const Interaction_FlightMap_Destination&) const = default;
-};
-
-struct Interaction_Recipe {
-  using Reagent = Interaction_Recipe_Reagent;
-
-  std::string name;
-  std::vector<Interaction_Recipe_Reagent> reagents;
-  std::string skillup_color;
-  uint32_t can_craft = 0;
-  float cooldown_s = 0.0f;
-
-  bool operator==(const Interaction_Recipe&) const = default;
-};
-
-struct Interaction_GuildBank {
-  using Tab = Interaction_GuildBank_Tab;
-
-  std::vector<Interaction_GuildBank_Tab> tabs;
-  uint32_t money = 0;
-  uint32_t withdraw_money_left = 0;
-  std::vector<std::string> log;
-
-  bool operator==(const Interaction_GuildBank&) const = default;
-};
-
-struct Interaction_Socketing {
-  std::optional<Item> item;
-  std::vector<Item> gems_in_bags;
-  std::vector<EquipmentPart_Socket> sockets;
-  std::string socket_bonus;
-  bool bonus_active = false;
-  std::vector<Item> pending;
-
-  bool operator==(const Interaction_Socketing&) const = default;
-};
-
-struct MailInbox {
-  std::vector<Interaction_Mail> mails;
-
-  bool operator==(const MailInbox&) const = default;
-};
-
-struct TradeLoot {
-  using Trade = TradeLoot_Trade;
-  using Roll = TradeLoot_Roll;
-
-  std::optional<TradeLoot_Trade> trade;
-  std::vector<Item> loot;
-  uint32_t loot_money = 0;
-  std::vector<TradeLoot_Roll> rolls;
-
-  bool operator==(const TradeLoot&) const = default;
-};
-
-struct Travel_Transport {
-  std::string to;
-  std::optional<Place> from;
-  float departs_in_s = 0.0f;
-
-  bool operator==(const Travel_Transport&) const = default;
-};
-
-struct Surroundings {
-  using Obstacle = Surroundings_Obstacle;
-
-  std::vector<Direction> walkable;
-  std::vector<Surroundings_Obstacle> obstacles;
-  std::optional<Relative> goal;
-  std::string image;
-  std::string description;
-
-  bool operator==(const Surroundings&) const = default;
 };
 
 struct Map_Questie {
@@ -2330,36 +1661,6 @@ struct Unit {
   std::optional<VehiclePart> vehicle;
 
   bool operator==(const Unit&) const = default;
-};
-
-struct Interaction_FlightMap {
-  using Destination = Interaction_FlightMap_Destination;
-
-  std::vector<Interaction_FlightMap_Destination> destinations;
-
-  bool operator==(const Interaction_FlightMap&) const = default;
-};
-
-struct Interaction_Tradeskill {
-  std::string profession;
-  uint32_t skill = 0;
-  uint32_t max = 0;
-  std::vector<Interaction_Recipe> recipes;
-
-  bool operator==(const Interaction_Tradeskill&) const = default;
-};
-
-struct Travel {
-  using Transport = Travel_Transport;
-
-  std::vector<Place> known_flight_paths;
-  std::optional<Place> nearest_flight_master;
-  std::optional<Item> mount;
-  std::vector<Travel_Transport> transports;
-  std::string flying_to;
-  float arrives_in_s = 0.0f;
-
-  bool operator==(const Travel&) const = default;
 };
 
 struct Map {
@@ -2571,25 +1872,6 @@ struct Encounter {
   bool operator==(const Encounter&) const = default;
 };
 
-struct Interaction_Inspect {
-  std::optional<Unit> player;
-  std::vector<Item> equipped;
-  std::vector<uint32_t> points_per_tree;
-  uint32_t honorable_kills = 0;
-  std::vector<std::string> arena_teams;
-  uint32_t achievement_points = 0;
-
-  bool operator==(const Interaction_Inspect&) const = default;
-};
-
-struct Interaction_Stable {
-  std::vector<Unit> stabled;
-  uint32_t slots = 0;
-  uint32_t next_slot_cost = 0;
-
-  bool operator==(const Interaction_Stable&) const = default;
-};
-
 struct PetFrame {
   using Totem = PetFrame_Totem;
 
@@ -2597,18 +1879,6 @@ struct PetFrame {
   std::vector<PetFrame_Totem> totems;
 
   bool operator==(const PetFrame&) const = default;
-};
-
-struct Arena {
-  std::string name;
-  float starts_in_s = 0.0f;
-  std::string my_team;
-  std::string enemy_team;
-  uint32_t my_team_rating = 0;
-  uint32_t enemy_team_rating = 0;
-  std::vector<Unit> enemies;
-
-  bool operator==(const Arena&) const = default;
 };
 
 struct QuestLog {
@@ -2628,34 +1898,17 @@ struct Event {
   std::optional<XpGainedEvent> xp_gained;
   std::optional<MoneyChangedEvent> money_changed;
   std::optional<ItemReceivedEvent> item_received;
-  std::optional<SkillUpEvent> skill_up;
   std::optional<QuestEvent> quest_complete;
   std::optional<QuestEvent> quest_failed;
   std::optional<QuestEvent> quest_accepted;
   std::optional<DiedEvent> died;
   std::optional<ResurrectedEvent> resurrected;
   std::optional<LootRollEvent> loot_roll;
-  std::optional<LootWonEvent> loot_won;
-  std::optional<RollEvent> roll;
-  std::optional<MailEvent> mail_received;
-  std::optional<AuctionEvent> auction;
-  std::optional<ZoneEvent> zone_changed;
-  std::optional<ZoneEvent> discovered_area;
-  std::optional<InstanceEvent> instance;
   std::optional<PathFailedEvent> path_failed;
   std::optional<DuelEvent> duel;
-  std::optional<AchievementEvent> achievement_earned;
-  std::optional<TitleEvent> title_earned;
   std::optional<KickedEvent> kicked;
-  std::optional<HearthstoneBoundEvent> hearthstone_bound;
-  std::optional<BattlegroundEvent> battleground;
   std::optional<DbmWarningEvent> dbm_warning;  // addon: DBM
-  std::optional<CinematicEvent> cinematic;
-  std::optional<TalentPointEvent> talent_point_gained;
-  std::optional<LootRollChoiceEvent> loot_roll_choice;
   std::optional<LfgEvent> lfg;
-  std::optional<MinimapPingEvent> minimap_ping;
-  std::optional<CalendarAlarmEvent> calendar_alarm;
   std::optional<DisplacedEvent> displaced;
 
   bool operator==(const Event&) const = default;
@@ -2673,50 +1926,10 @@ struct Base {
 };
 
 struct Interaction {
-  using Merchant = Interaction_Merchant;
   using QuestDialog = Interaction_QuestDialog;
-  using Gossip = Interaction_Gossip;
-  using FlightMap = Interaction_FlightMap;
-  using Mail = Interaction_Mail;
-  using AuctionHouse = Interaction_AuctionHouse;
-  using Recipe = Interaction_Recipe;
-  using Tradeskill = Interaction_Tradeskill;
-  using Inspect = Interaction_Inspect;
-  using RaidBrowserEntry = Interaction_RaidBrowserEntry;
-  using RaidBrowser = Interaction_RaidBrowser;
-  using Bank = Interaction_Bank;
-  using GuildBank = Interaction_GuildBank;
-  using Socketing = Interaction_Socketing;
-  using Barber = Interaction_Barber;
-  using Stable = Interaction_Stable;
-  using Petition = Interaction_Petition;
-  using Registrar = Interaction_Registrar;
-  using Trainer = Interaction_Trainer;
-  using ItemText = Interaction_ItemText;
-  using Tabard = Interaction_Tabard;
-  using Battlemaster = Interaction_Battlemaster;
 
   std::string with;
-  std::optional<Interaction_Merchant> merchant;
-  std::optional<Interaction_Trainer> trainer;
   std::optional<Interaction_QuestDialog> quest;
-  std::optional<Interaction_Gossip> gossip;
-  std::optional<Interaction_FlightMap> flight_map;
-  std::optional<Interaction_Bank> bank;
-  std::optional<MailInbox> mail;
-  std::optional<Interaction_AuctionHouse> auction_house;
-  std::optional<Interaction_Tradeskill> tradeskill;
-  std::optional<Interaction_Inspect> inspect;
-  std::optional<Interaction_ItemText> item_text;
-  std::optional<Interaction_RaidBrowser> raid_browser;
-  std::optional<Interaction_GuildBank> guild_bank;
-  std::optional<Interaction_Socketing> socketing;
-  std::optional<Interaction_Barber> barber;
-  std::optional<Interaction_Stable> stable;
-  std::optional<Interaction_Petition> petition;
-  std::optional<Interaction_Registrar> guild_registrar;
-  std::optional<Interaction_Tabard> tabard;
-  std::optional<Interaction_Battlemaster> battlemaster;
 
   bool operator==(const Interaction&) const = default;
 };
@@ -2745,29 +1958,13 @@ struct Extensions {
   std::optional<Death> death;
   std::optional<Unit> vehicle;
   std::optional<Interaction> interaction;
-  std::optional<TradeLoot> trade_loot;
-  std::optional<Travel> travel;
   std::optional<PetFrame> pet;
-  std::optional<Environment> environment;
-  std::optional<Battleground> battleground;
-  std::optional<Surroundings> surroundings;
   std::optional<Unit> possessed;
-  std::optional<Arena> arena;
-  std::optional<Bags> bags;                     // visibility: OPEN
-  std::optional<Map> map;                       // visibility: OPEN
-  std::optional<Character> character;           // visibility: OPEN
-  std::optional<QuestLog> quest_log;            // visibility: OPEN
-  std::optional<Spellbook> spellbook;           // visibility: OPEN
-  std::optional<Talents> talents;               // visibility: OPEN
-  std::optional<Skills> skills;                 // visibility: OPEN
-  std::optional<Reputation> reputation;         // visibility: OPEN
-  std::optional<Social> social;                 // visibility: OPEN
-  std::optional<Calendar> calendar;             // visibility: OPEN
-  std::optional<Achievements> achievements;     // visibility: OPEN
-  std::optional<Pvp> pvp;                       // visibility: OPEN
-  std::optional<Companions> companions;         // visibility: OPEN
-  std::optional<DungeonFinder> dungeon_finder;  // visibility: OPEN
-  std::optional<Scoreboard> scoreboard;         // visibility: OPEN
+  std::optional<Bags> bags;            // visibility: OPEN
+  std::optional<Map> map;              // visibility: OPEN
+  std::optional<Character> character;  // visibility: OPEN
+  std::optional<QuestLog> quest_log;   // visibility: OPEN
+  std::optional<Spellbook> spellbook;  // visibility: OPEN
 
   bool operator==(const Extensions&) const = default;
 };
@@ -2941,7 +2138,6 @@ std::string_view EnumName(ChatChannel value);
 std::string_view EnumName(Self_Indicators_Durability::Level value);
 std::string_view EnumName(GoalPart::Kind value);
 std::string_view EnumName(HoverRef::Kind value);
-std::string_view EnumName(Calendar_Entry::Status value);
 std::string_view EnumName(DisplacedEvent::How value);
 std::string_view EnumName(Blank::Kind value);
 std::string_view EnumName(Option::Kind value);
@@ -2958,7 +2154,6 @@ std::string_view EnumName(Item::Binding value);
 std::string_view EnumName(PetPart::Happiness value);
 std::string_view EnumName(GameObject::Kind value);
 std::string_view EnumName(Place::Kind value);
-std::string_view EnumName(Surroundings_Obstacle::Kind value);
 std::string_view EnumName(PromptEvent::Kind value);
 std::string_view EnumName(Activity::State value);
 std::string_view EnumName(EquipmentPart::Slot value);

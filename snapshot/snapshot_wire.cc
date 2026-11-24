@@ -273,16 +273,6 @@ struct glz::meta<wlb::snapshot::HoverRef::Kind> {
 };
 
 template <>
-struct glz::meta<wlb::snapshot::Calendar_Entry::Status> {
-  using enum wlb::snapshot::Calendar_Entry::Status;
-  static constexpr auto value = glz::enumerate(STATUS_UNSPECIFIED,
-                                               INVITED,
-                                               ACCEPTED,
-                                               DECLINED,
-                                               TENTATIVE);
-};
-
-template <>
 struct glz::meta<wlb::snapshot::DisplacedEvent::How> {
   using enum wlb::snapshot::DisplacedEvent::How;
   static constexpr auto value =
@@ -439,21 +429,6 @@ struct glz::meta<wlb::snapshot::Place::Kind> {
                                                GUILD_BANK,
                                                BARBER_SHOP,
                                                STABLE);
-};
-
-template <>
-struct glz::meta<wlb::snapshot::Surroundings_Obstacle::Kind> {
-  using enum wlb::snapshot::Surroundings_Obstacle::Kind;
-  static constexpr auto value = glz::enumerate(KIND_UNSPECIFIED,
-                                               WALL,
-                                               SLOPE,
-                                               DROP,
-                                               WATER,
-                                               LEDGE,
-                                               OPENING,
-                                               DOOR,
-                                               TREE,
-                                               ROCK);
 };
 
 template <>
@@ -1064,46 +1039,6 @@ std::vector<std::string> ValidateSnapshotVisibility(const Snapshot& snap) {
     errors.push_back(
         "$.ext.spellbook: panel present but not in base.ui.open_panels");
   }
-  if (snap.ext.talents.has_value() && !has_panel(Panel::TALENTS)) {
-    errors.push_back(
-        "$.ext.talents: panel present but not in base.ui.open_panels");
-  }
-  if (snap.ext.skills.has_value() && !has_panel(Panel::SKILLS)) {
-    errors.push_back(
-        "$.ext.skills: panel present but not in base.ui.open_panels");
-  }
-  if (snap.ext.reputation.has_value() && !has_panel(Panel::REPUTATION)) {
-    errors.push_back(
-        "$.ext.reputation: panel present but not in base.ui.open_panels");
-  }
-  if (snap.ext.social.has_value() && !has_panel(Panel::SOCIAL)) {
-    errors.push_back(
-        "$.ext.social: panel present but not in base.ui.open_panels");
-  }
-  if (snap.ext.calendar.has_value() && !has_panel(Panel::CALENDAR)) {
-    errors.push_back(
-        "$.ext.calendar: panel present but not in base.ui.open_panels");
-  }
-  if (snap.ext.achievements.has_value() && !has_panel(Panel::ACHIEVEMENTS)) {
-    errors.push_back(
-        "$.ext.achievements: panel present but not in base.ui.open_panels");
-  }
-  if (snap.ext.pvp.has_value() && !has_panel(Panel::PVP)) {
-    errors.push_back("$.ext.pvp: panel present but not in base.ui.open_panels");
-  }
-  if (snap.ext.companions.has_value() && !has_panel(Panel::COMPANIONS)) {
-    errors.push_back(
-        "$.ext.companions: panel present but not in base.ui.open_panels");
-  }
-  if (snap.ext.dungeon_finder.has_value() &&
-      !has_panel(Panel::DUNGEON_FINDER)) {
-    errors.push_back(
-        "$.ext.dungeon_finder: panel present but not in base.ui.open_panels");
-  }
-  if (snap.ext.scoreboard.has_value() && !has_panel(Panel::SCOREBOARD)) {
-    errors.push_back(
-        "$.ext.scoreboard: panel present but not in base.ui.open_panels");
-  }
   return errors;
 }
 
@@ -1268,10 +1203,6 @@ std::string_view EnumName(HoverRef::Kind value) {
   return glz::get_enum_name(value);
 }
 
-std::string_view EnumName(Calendar_Entry::Status value) {
-  return glz::get_enum_name(value);
-}
-
 std::string_view EnumName(DisplacedEvent::How value) {
   return glz::get_enum_name(value);
 }
@@ -1329,10 +1260,6 @@ std::string_view EnumName(GameObject::Kind value) {
 }
 
 std::string_view EnumName(Place::Kind value) {
-  return glz::get_enum_name(value);
-}
-
-std::string_view EnumName(Surroundings_Obstacle::Kind value) {
   return glz::get_enum_name(value);
 }
 

@@ -13,7 +13,6 @@
 #include <utility>
 #include <vector>
 
-#include "Bag.h"
 #include "Creature.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
@@ -84,8 +83,6 @@ namespace {
 constexpr size_t kMaxPendingMessages = 1000;
 // How often the snapshot cost summary is logged.
 constexpr uint32_t kStatsIntervalMs = 60000;
-// trace_parity.py rejects traces whose median source rate falls below 3.5 Hz.
-constexpr double kMinParityTraceHz = 3.5;
 // How long a bot remembers its snapshots' options, so a choice made on a
 // snapshot that is no longer the newest can still be resolved: well above an
 // urgent wake-up on a busy GPU (p95 3.8 s, docs/results.md).
@@ -425,41 +422,14 @@ class LlmBrainWorldScript : public WorldScript {
     if (trace_hooks_) {
       trace_hooks_->writer.store(nullptr, std::memory_order_release);
     }
-    CheckMeasuredTraceRate(/*min_intervals=*/5);
     trace_writer_.reset();
   }
 
  private:
-  void CheckMeasuredTraceRate(size_t min_intervals) {
-    if (!trace_writer_ || !trace_writer_->enabled()) {
-      return;
-    }
-    if (const uint64_t untracked = trace_writer_->TakeUntrackedSampleChars();
-        untracked > 0) {
-      LOG_WARN("module",
-               "mod-llm-brain: trace sample-rate tracker hit per-role active "
-               "cap ({} samples from extra concurrent characters not "
-               "rate-tracked)",
-               untracked);
-    }
-    for (std::string_view role : {"bot", "human"}) {
-      const std::optional<double> hz =
-          trace_writer_->TakeMeasuredSampleHz(role, min_intervals);
-      if (hz && *hz < kMinParityTraceHz) {
-        LOG_WARN("module",
-                 "mod-llm-brain: measured {} trace sample rate {:.2f} Hz is "
-                 "below the 3.5 Hz that trace_parity.py requires "
-                 "(TraceSampleIntervalMs = {} ms plus world-tick rounding)",
-                 role, *hz, config_.trace_sample_interval_ms);
-      }
-    }
-  }
-
   // The minute's summary: what snapshots cost to build, how many one tick
   // built at most (the spread of the bots), and how long they took to reach the
   // socket.
   void LogStats() {
-    CheckMeasuredTraceRate(/*min_intervals=*/10);
     if (stats_.count()) {
       LOG_INFO("module", "mod-llm-brain: snapshots in the last minute: {}",
                stats_.Summary());
@@ -627,18 +597,6 @@ class LlmBrainWorldScript : public WorldScript {
         while (chatters.size() > 5) {
           chatters.pop_back();
         }
-      }
-      if (trace_writer_ && trace_writer_->enabled()) {
-        TraceChat tc;
-        tc.time_ms = base::Time::Now().InMillisecondsSinceUnixEpoch();
-        tc.monotonic_us = (now - base::TimeTicks()).InMicroseconds();
-        tc.role = "bot";
-        tc.name = line.to;
-        tc.direction = "in";
-        tc.channel = ch_name;
-        tc.peer = line.chat.from;
-        tc.text_len = line.chat.text.size();
-        trace_writer_->WriteChat(tc);
       }
       const bool alerting =
           line.chat.channel == wlb::snapshot::WHISPER ||
@@ -950,18 +908,6 @@ class LlmBrainWorldScript : public WorldScript {
     LOG_INFO("module", "mod-llm-brain: {} says ({}{}{}, len={}): {}", name,
              wlb::snapshot::EnumName(say.channel), say.to.empty() ? "" : " to ",
              say.to, say.text.size(), error.empty() ? "ok" : error);
-    if (error.empty() && trace_writer_ && trace_writer_->enabled()) {
-      TraceChat tc;
-      tc.time_ms = base::Time::Now().InMillisecondsSinceUnixEpoch();
-      tc.monotonic_us = (now - base::TimeTicks()).InMicroseconds();
-      tc.role = "bot";
-      tc.name = name;
-      tc.direction = "out";
-      tc.channel = TraceChannelName(say.channel);
-      tc.peer = say.to;
-      tc.text = say.text;
-      trace_writer_->WriteChat(tc);
-    }
     if (!error.empty()) {
       wlb::snapshot::Event payload;
       wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
@@ -1409,36 +1355,13 @@ class LlmBrainWorldScript : public WorldScript {
         s.zone = zname;
       }
     }
-    s.in_town = player->HasPlayerFlag(PLAYER_FLAGS_RESTING);
-    s.in_group = player->GetGroup() != nullptr;
     s.in_dungeon = player->GetMap() != nullptr && player->GetMap()->IsDungeon();
     s.x = player->GetPositionX();
     s.y = player->GetPositionY();
     s.z = player->GetPositionZ();
-    s.orientation = player->GetOrientation();
     s.moving = player->isMoving();
-    s.jumping = player->HasUnitMovementFlag(MOVEMENTFLAG_FALLING);
-    s.mounted = player->IsMounted();
-    s.swimming = player->IsInWater();
-    s.sitting = player->getStandState() != UNIT_STAND_STATE_STAND;
-    s.on_taxi = player->IsInFlight();
     s.in_combat = player->IsInCombat();
     s.dead = !player->IsAlive();
-    s.cc_mask = ControlMask(player);
-    uint32_t free_slots = 0;
-    for (uint8_t slot = INVENTORY_SLOT_ITEM_START;
-         slot < INVENTORY_SLOT_ITEM_END; ++slot) {
-      if (!player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot)) {
-        ++free_slots;
-      }
-    }
-    for (uint8_t i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END;
-         ++i) {
-      if (const Bag* bag = player->GetBagByPos(i); IsGeneralBag(bag)) {
-        free_slots += bag->GetFreeSlots();
-      }
-    }
-    s.bag_free_slots = free_slots;
     if (Pet* pet = player->GetPet();
         pet && pet->IsAlive() && pet->GetMaxHealth() > 0) {
       s.pet_hp_pct = 100.0f * static_cast<float>(pet->GetHealth()) /
@@ -1470,8 +1393,9 @@ class LlmBrainWorldScript : public WorldScript {
     }
     if (Unit* target = player->GetSelectedUnit()) {
       s.target = target->GetName();
-      s.target_hostile = !player->IsFriendlyTo(target) && target->IsAlive();
-      if (s.target_hostile) {
+      const bool target_hostile =
+          !player->IsFriendlyTo(target) && target->IsAlive();
+      if (target_hostile) {
         s.target_dist = player->GetDistance(target);
         s.target_x = target->GetPositionX();
         s.target_y = target->GetPositionY();
@@ -1510,13 +1434,10 @@ class LlmBrainWorldScript : public WorldScript {
             s.target_cast_radius = max_r;
           }
         }
-        s.target_moving = target->isMoving();
         s.target_targeting_me = target->GetTarget() == player->GetGUID() ||
                                 target->GetVictim() == player;
-        s.target_in_combat = target->IsInCombat();
       }
     }
-    s.attackers = static_cast<int>(player->getAttackers().size());
     return s;
   }
 

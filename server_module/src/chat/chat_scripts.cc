@@ -4,7 +4,6 @@
 
 #include <algorithm>  // IWYU pragma: keep (LLM_BRAIN_TEST_HOOKS)
 #include <atomic>
-#include <cstdint>
 #include <list>
 #include <string>
 #include <utility>
@@ -34,7 +33,6 @@
 #include "WorldConfig.h"
 #include "WorldPacket.h"
 #include "base/memory/raw_ptr.h"
-#include "base/time/time.h"
 #include "chat/chat_inbox.h"
 #include "chat/chat_text.h"
 #include "chat/speak.h"
@@ -256,25 +254,6 @@ class LlmBrainChatScript : public PlayerScript {
     if (type != CHAT_MSG_WHISPER || language == LANG_ADDON || !player ||
         !receiver) {
       return true;
-    }
-    if (BehaviorTraceWriter* trace =
-            human_trace_ ? human_trace_->load(std::memory_order_acquire)
-                         : nullptr;
-        trace && trace->enabled()) {
-      const int64_t t_ms = base::Time::Now().InMillisecondsSinceUnixEpoch();
-      const int64_t mono_us =
-          (base::TimeTicks::Now() - base::TimeTicks()).InMicroseconds();
-      // Record timing and byte length only (never private whisper text or
-      // other players' names) so human-baseline reply delay / length metrics
-      // work without logging chat contents or peer identities.
-      if (!GET_PLAYERBOT_AI(player)) {
-        trace->WriteChat({t_ms, mono_us, "human", player->GetName(), "out",
-                          "whisper", "", "", msg.size()});
-      }
-      if (!GET_PLAYERBOT_AI(receiver)) {
-        trace->WriteChat({t_ms, mono_us, "human", receiver->GetName(), "in",
-                          "whisper", "", "", msg.size()});
-      }
     }
     pb::ChatEvent chat;
     chat.channel = pb::WHISPER;

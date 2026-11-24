@@ -1,9 +1,10 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
-// Unified behavior trace logger for both human players and LLM bots
-// (docs/plans/self-improving-loop.md, section F). Both roles write the exact
-// same JSONL schema so `tools/bench/trace_parity.py` can reconstruct both into
-// one canonical 5 Hz `(pos, facing)` + event timeline.
+// Combat and soak behavior trace logger (C++ cleanup #5). Writes JSONL samples
+// and combat/soak events (`damage_dealt`, `damage_taken`, `heal_done`,
+// `spell_cast`, `combat_start`, `combat_end`, `mob_kill`, `died`, `xp_gain`,
+// `quest_turnin`, `act_sent`) read by `boss_meter`, `dodge_timeline`,
+// `stall_check`, `soak_scorer`, and `mine_traces`.
 
 #ifndef MOD_LLM_BRAIN_SNAPSHOT_BEHAVIOR_TRACE_H_
 #define MOD_LLM_BRAIN_SNAPSHOT_BEHAVIOR_TRACE_H_
@@ -11,11 +12,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
-#include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
-#include <vector>
 
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
@@ -33,23 +31,13 @@ struct TraceSample {
   uint32_t map_id = 0;
   uint32_t instance_id = 0;
   std::string zone;
-  bool in_town = false;
-  bool in_group = false;
   bool in_dungeon = false;
   float x = 0.0f;
   float y = 0.0f;
   float z = 0.0f;
-  float orientation = 0.0f;
   bool moving = false;
-  bool jumping = false;
-  bool mounted = false;
-  bool swimming = false;
-  bool sitting = false;
-  bool on_taxi = false;
   bool in_combat = false;
   bool dead = false;
-  uint32_t cc_mask = 0;
-  uint32_t bag_free_slots = 0;
   float pet_hp_pct = -1.0f;
   uint32_t level = 0;
   uint32_t xp = 0;
@@ -64,72 +52,42 @@ struct TraceSample {
   uint32_t target_level = 0;
   std::string target_casting;
   float target_cast_radius = -1.0f;
-  bool target_moving = false;
-  bool target_hostile = false;
   bool target_targeting_me = false;
-  bool target_in_combat = false;
-  int attackers = 0;
 };
 
-struct TraceChat {
-  int64_t time_ms = 0;
-  int64_t monotonic_us = 0;
-  std::string role;       // "human" or "bot"
-  std::string name;       // whose trace file this belongs to
-  std::string direction;  // "in" or "out"
-  std::string channel;    // "whisper", "say", "party", ...
-  std::string peer;       // sender (for "in") or recipient (for "out")
-  std::string text;       // Empty when redacted (e.g. human whisper privacy).
-  size_t text_len = 0;    // Original byte length when `text` is redacted.
-};
-
-// Explicit timestamped gameplay event recorded identically for humans and bots
-// (docs/plans/self-improving-loop.md, section F).
 struct TraceEvent {
   int64_t time_ms = 0;
   int64_t monotonic_us = 0;
   std::string role;  // "human" or "bot"
   std::string name;
-  std::string event;   // "damage_taken", "combat_start", "combat_end",
-                       // "cast_start", "loot", "quest_accept", "quest_turnin"
-  std::string detail;  // Optional event detail (e.g. spell name or item).
-  int64_t value = 0;   // Optional numeric payload (e.g. damage, quest id).
+  std::string event;   // Combat/soak event name.
+  std::string detail;  // Optional event detail (spell/mob/quest name).
+  int64_t value = 0;   // Optional numeric payload (damage/heal/xp/quest id).
 };
 
-// Extracts a `TraceSample` from a built `Snapshot` (used for bots).
+// Extracts a `TraceSample` from a built `Snapshot`.
 TraceSample TraceSampleFromSnapshot(const wlb::snapshot::Snapshot& snapshot,
                                     std::string_view role,
                                     uint32_t map_id,
                                     bool moving,
-                                    bool jumping,
-                                    bool in_town,
-                                    bool in_group = false,
                                     bool in_dungeon = false);
 
-// Serializes a sample, chat, or gameplay event to a single JSONL line.
+// Serializes a sample or event to a single JSONL line.
 std::string FormatTraceSample(const TraceSample& sample);
-std::string FormatTraceChat(const TraceChat& chat);
 std::string FormatTraceEvent(const TraceEvent& event);
 
-// Appends unified JSONL traces under `<root>/<role>/<name>/<YYYY-MM-DD>.jsonl`.
-// Enqueues formatted lines without disk I/O on the caller (world) thread and
-// flushes them on a background writer thread with size-capped file rotation:
-// each day file rotates at `max_file_bytes` and keeps `max_rotated_files`
-// archives, so one character's day is capped at
-// `max_file_bytes * (max_rotated_files + 1)`; the oldest archive is
-// overwritten.
+// Appends JSONL traces under `<root>/<role>/<name>/<YYYY-MM-DD>.jsonl` on a
+// background writer thread with size-capped file rotation.
 class BehaviorTraceWriter {
  public:
   static constexpr uint64_t kDefaultMaxFileBytes = 64ULL * 1024 * 1024;
   static constexpr size_t kDefaultMaxRotatedFiles = 8;
   static constexpr size_t kMaxQueueLines = 8192;
-  static constexpr size_t kDefaultMaxTrackedCharsPerRole = 4096;
 
   explicit BehaviorTraceWriter(
       std::string root_dir,
       uint64_t max_file_bytes = kDefaultMaxFileBytes,
-      size_t max_rotated_files = kDefaultMaxRotatedFiles,
-      size_t max_tracked_chars_per_role = kDefaultMaxTrackedCharsPerRole);
+      size_t max_rotated_files = kDefaultMaxRotatedFiles);
   ~BehaviorTraceWriter();
 
   BehaviorTraceWriter(const BehaviorTraceWriter&) = delete;
@@ -138,35 +96,14 @@ class BehaviorTraceWriter {
   bool enabled() const { return !root_dir_.empty(); }
 
   bool WriteSample(const TraceSample& sample);
-  bool WriteChat(const TraceChat& chat);
   bool WriteEvent(const TraceEvent& event);
 
   // Blocks until all currently queued lines have been written to disk.
   void Flush();
 
-  // Number of trace lines dropped because the queue reached `kMaxQueueLines`
-  // or the writer was stopping.
   uint64_t dropped_lines() const;
 
-  // Returns and clears the count of sample writes whose character was not
-  // rate-tracked because the per-role active cap was full.
-  uint64_t TakeUntrackedSampleChars();
-
-  // Computes the measured sample rate (Hz) for `role` ("bot" or "human")
-  // matching trace_parity.check_source_rate_parity: per-character median
-  // contiguous dt (0 < dt <= 5000 ms) converted to Hz, then median across
-  // characters of `role` with at least `min_intervals` recorded deltas
-  // (clearing those characters' windows). Returns std::nullopt until at least
-  // one character of `role` has `min_intervals` contiguous deltas.
-  std::optional<double> TakeMeasuredSampleHz(std::string_view role,
-                                             size_t min_intervals = 10);
-
  private:
-  static constexpr int64_t kMaxSampleGapMs = 5000;
-  static constexpr int64_t kStaleTrackedCharMs = 60000;
-  static constexpr size_t kMaxRecordedSampleDtsPerChar = 4096;
-  static constexpr size_t kNoSampleNode = static_cast<size_t>(-1);
-
   struct PendingLine {
     std::string role;
     std::string name;
@@ -174,86 +111,20 @@ class BehaviorTraceWriter {
     std::string line;
   };
 
-  struct CharSampleNode {
-    std::string name;
-    int64_t last_time_ms = 0;
-    std::vector<int64_t> dts;
-    size_t all_prev = kNoSampleNode;
-    size_t all_next = kNoSampleNode;
-    size_t idle_prev = kNoSampleNode;
-    size_t idle_next = kNoSampleNode;
-    bool in_idle = false;
-  };
-
-  // Intrusive index lists inside contiguous `nodes` keep both `all` (every
-  // tracked character) and `idle` (`dts.empty()`) ordered ascending by
-  // `last_time_ms` (appending at `tail` on monotonic timestamps and walking
-  // back from `tail` on out-of-order timestamps) so cap eviction checks only
-  // the list heads instead of scanning the hash map.
-  struct RoleSampleTracker {
-    std::vector<CharSampleNode> nodes;
-    std::vector<size_t> free_indices;
-    std::unordered_map<std::string, size_t> index_by_name;
-    size_t all_head = kNoSampleNode;
-    size_t all_tail = kNoSampleNode;
-    size_t idle_head = kNoSampleNode;
-    size_t idle_tail = kNoSampleNode;
-  };
-
-  struct SampleListEnds {
-    size_t RoleSampleTracker::* head;
-    size_t RoleSampleTracker::* tail;
-    size_t CharSampleNode::* prev;
-    size_t CharSampleNode::* next;
-  };
-
-  static constexpr SampleListEnds AllSampleList() {
-    return {
-        &RoleSampleTracker::all_head,
-        &RoleSampleTracker::all_tail,
-        &CharSampleNode::all_prev,
-        &CharSampleNode::all_next,
-    };
-  }
-  static constexpr SampleListEnds IdleSampleList() {
-    return {
-        &RoleSampleTracker::idle_head,
-        &RoleSampleTracker::idle_tail,
-        &CharSampleNode::idle_prev,
-        &CharSampleNode::idle_next,
-    };
-  }
-
-  static void UnlinkSampleNode(RoleSampleTracker& tracker,
-                               size_t idx,
-                               const SampleListEnds& list);
-  static void LinkSampleNodeSorted(RoleSampleTracker& tracker,
-                                   size_t idx,
-                                   const SampleListEnds& list);
-  static void UpdateSampleNodeOrder(RoleSampleTracker& tracker,
-                                    size_t idx,
-                                    const SampleListEnds& list);
-  static void EvictSampleNode(RoleSampleTracker& tracker, size_t idx);
-
   bool Enqueue(std::string_view role,
                std::string_view name,
                int64_t time_ms,
-               std::string line,
-               bool is_sample = false);
+               std::string line);
   void WriterLoop();
   void WriteBatch(const std::deque<PendingLine>& batch) const;
 
   std::string root_dir_;
   uint64_t max_file_bytes_ = kDefaultMaxFileBytes;
   size_t max_rotated_files_ = kDefaultMaxRotatedFiles;
-  size_t max_tracked_chars_per_role_ = kDefaultMaxTrackedCharsPerRole;
   mutable base::Lock mu_;
   base::ConditionVariable cv_{&mu_};
   base::ConditionVariable flushed_cv_{&mu_};
   std::deque<PendingLine> queue_ GUARDED_BY(mu_);
-  std::unordered_map<std::string, RoleSampleTracker> sample_windows_by_role_
-      GUARDED_BY(mu_);
-  uint64_t untracked_sample_chars_ GUARDED_BY(mu_) = 0;
   uint64_t dropped_lines_ GUARDED_BY(mu_) = 0;
   bool writing_ GUARDED_BY(mu_) = false;
   bool stop_ GUARDED_BY(mu_) = false;
