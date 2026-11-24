@@ -276,6 +276,10 @@ TEST(PromptTest, KnowledgeOutcomeAndInspectPromptBreakdown) {
   EXPECT_LT(rel_notes_pos, rel_know_pos);
   EXPECT_LT(rel_know_pos, rel_pos);
   EXPECT_LT(rel_pos, rel_scr_pos);
+  const PromptBreakdown rel_b = InspectPrompt(with_rels, screen);
+  EXPECT_GT(rel_b.relationships_bytes, 0u);
+  EXPECT_NE(FormatPromptInspection(with_rels, screen).find("relationships="),
+            std::string::npos);
 }
 
 }  // namespace

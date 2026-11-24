@@ -325,7 +325,7 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
 
   // Reserve room for mandatory blocks (static identity + dynamic state + live
   // screen) first, then allocate remaining budget in priority order:
-  // boss notes -> world guide -> remembered panels.
+  // boss notes -> world guide -> relationships -> remembered panels.
   const size_t mandatory_bytes =
       static_prefix.size() + dynamic_prefix.size() + screen_block.size();
   size_t remaining =
@@ -446,14 +446,18 @@ PromptBreakdown BreakdownOf(const LlmRequest& req) {
   if (know_pos != std::string::npos) {
     b.knowledge_bytes = next_boundary(know_pos) - know_pos;
   }
+  if (rel_pos != std::string::npos) {
+    b.relationships_bytes = next_boundary(rel_pos) - rel_pos;
+  }
   if (rem_pos != std::string::npos) {
     b.remembered_bytes = next_boundary(rem_pos) - rem_pos;
   }
   if (scr_pos != std::string::npos) {
     b.screen_bytes = next_boundary(scr_pos) - scr_pos;
   }
-  const size_t accounted =
-      b.notes_bytes + b.knowledge_bytes + b.remembered_bytes + b.screen_bytes;
+  const size_t accounted = b.notes_bytes + b.knowledge_bytes +
+                           b.relationships_bytes + b.remembered_bytes +
+                           b.screen_bytes;
   b.prefix_bytes =
       req.user.size() > accounted ? req.user.size() - accounted : 0;
   b.est_system_tokens = EstimateTokens(req.system);
@@ -475,13 +479,14 @@ std::string FormatPromptInspection(const PromptInput& input,
   return base::StringPrintf(
       "== prompt inspection (%s, %zu options)\n"
       "tokens (est): total=%zu / %zu (system=%zu, user=%zu)\n"
-      "bytes: system=%zu, prefix=%zu, remembered=%zu, screen=%zu, "
-      "knowledge=%zu, notes=%zu, user_total=%zu\n"
+      "bytes: system=%zu, prefix=%zu, relationships=%zu, remembered=%zu, "
+      "screen=%zu, knowledge=%zu, notes=%zu, user_total=%zu\n"
       "-- user prompt --\n%s\n",
       input.bot_name.c_str(), screen.options.size(), b.est_total_tokens,
       b.slot_budget_tokens, b.est_system_tokens, b.est_user_tokens,
-      b.system_bytes, b.prefix_bytes, b.remembered_bytes, b.screen_bytes,
-      b.knowledge_bytes, b.notes_bytes, b.user_bytes, req.user.c_str());
+      b.system_bytes, b.prefix_bytes, b.relationships_bytes, b.remembered_bytes,
+      b.screen_bytes, b.knowledge_bytes, b.notes_bytes, b.user_bytes,
+      req.user.c_str());
 }
 
 }  // namespace harness

@@ -491,7 +491,8 @@ TEST(ScreenRendererTest, QuestTrackerShowsPartyQuestOverlap) {
             std::string::npos)
       << screen.text;
 
-  // Raid-sized overlap caps displayed names to keep the screen compact.
+  // Raid-sized overlap caps displayed names while reporting the exact unclipped
+  // remainder from `party_member_count` (or `party_members.size()` when 0).
   pb::Snapshot raid_snap = BoarAround("0x1");
   pb::Objective& ro = raid_snap.ext.quest_tracker.emplace_back();
   ro.title = "Boss slain";
@@ -506,6 +507,14 @@ TEST(ScreenRendererTest, QuestTrackerShowsPartyQuestOverlap) {
                 "  Raid Weekly (also on quest: A, B, C, D, E +2 more)\n"),
             std::string::npos)
       << raid_screen.text;
+
+  rq.party_members = {"A", "B", "C", "D", "E"};
+  rq.party_member_count = 20;
+  const Screen large_raid_screen = RenderScreen(raid_snap);
+  EXPECT_NE(large_raid_screen.text.find(
+                "  Raid Weekly (also on quest: A, B, C, D, E +15 more)\n"),
+            std::string::npos)
+      << large_raid_screen.text;
 }
 
 TEST(ScreenRendererTest, BagSpaceShowsOnlyWhenLowOrFull) {

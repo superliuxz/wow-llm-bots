@@ -1541,8 +1541,11 @@ struct QuestPart {
   std::string tag;
   uint32_t level = 0;
   std::optional<Spell> item_button;
-  // Party members who also have this quest in their quest log (F3).
+  // Party/raid members who also have this quest in their quest log (F3);
+  // `party_members` is capped for raid snapshots while `party_member_count`
+  // carries the true unclipped total (0 falls back to `party_members.size()`).
   std::vector<std::string> party_members;
+  uint32_t party_member_count = 0;
 
   bool operator==(const QuestPart&) const = default;
 };

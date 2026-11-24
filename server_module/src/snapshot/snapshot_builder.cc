@@ -581,9 +581,11 @@ void FillQuestTracker(Player* bot,
         }
       }
       std::sort(part.party_members.begin(), part.party_members.end());
-      // Keep raid snapshots bounded while still listing every member of a
-      // 5-man party (up to 4 others) plus extra slots for larger groups.
-      static constexpr size_t kMaxQuestPartyMembers = 8;
+      part.party_member_count =
+          static_cast<uint32_t>(part.party_members.size());
+      // Keep raid snapshots bounded (matching screen display cap of 5 names)
+      // while preserving the exact total in `party_member_count`.
+      static constexpr size_t kMaxQuestPartyMembers = 5;
       if (part.party_members.size() > kMaxQuestPartyMembers) {
         part.party_members.resize(kMaxQuestPartyMembers);
       }

@@ -1013,6 +1013,8 @@ std::vector<std::string> QuestLines(const std::vector<pb::Objective>& tracker) {
         quest->part.party_members.push_back(member);
       }
     }
+    quest->part.party_member_count =
+        std::max(quest->part.party_member_count, part.party_member_count);
     if (!(o.title.empty() || o.title == part.quest) || o.progress) {
       quest->objectives.push_back(&o);
     }
@@ -1042,18 +1044,20 @@ std::vector<std::string> QuestLines(const std::vector<pb::Objective>& tracker) {
     }
     if (!q.part.party_members.empty()) {
       static constexpr size_t kMaxShownQuestMembers = 5;
-      if (q.part.party_members.size() <= kMaxShownQuestMembers) {
-        about.push_back(base::StrCat(
-            {"also on quest: ", base::JoinString(q.part.party_members, ", ")}));
+      const size_t shown_count =
+          std::min(q.part.party_members.size(), kMaxShownQuestMembers);
+      const size_t total = std::max<size_t>(q.part.party_members.size(),
+                                            q.part.party_member_count);
+      const std::vector<std::string> shown(
+          q.part.party_members.begin(),
+          q.part.party_members.begin() + static_cast<ptrdiff_t>(shown_count));
+      if (total <= shown_count) {
+        about.push_back(
+            base::StrCat({"also on quest: ", base::JoinString(shown, ", ")}));
       } else {
-        const std::vector<std::string> shown(
-            q.part.party_members.begin(),
-            q.part.party_members.begin() + kMaxShownQuestMembers);
         about.push_back(base::StrCat(
             {"also on quest: ", base::JoinString(shown, ", "), " +",
-             base::NumberToString(q.part.party_members.size() -
-                                  kMaxShownQuestMembers),
-             " more"}));
+             base::NumberToString(total - shown_count), " more"}));
       }
     }
     std::string line =

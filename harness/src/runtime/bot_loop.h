@@ -203,8 +203,9 @@ class BotLoop {
     // glance for what was there already).
     std::optional<std::string> last_quest_state;
     // Memory condensing (F5): at most one P4 reflection call per bot at a
-    // time, scheduled under the bot's own scheduler key (reusing its slot and
-    // preemptible by P0 combat wakes), guarded by `memory_condense_epoch`.
+    // time, scheduled under the bot's own scheduler key (so it does not evict
+    // other bots' slots and is preemptible by P0 combat wakes), guarded by
+    // `memory_condense_epoch`.
     enum class CondenseState { kIdle, kQueued, kInFlight };
     CondenseState condense_state = CondenseState::kIdle;
     uint64_t memory_condense_epoch = 0;

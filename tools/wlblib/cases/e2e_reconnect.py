@@ -3,9 +3,11 @@
 Runs `out/common/harness run` against a mock LLM through a droppable Unix-socket proxy to
 `worldserver`'s `brain.sock`:
   1. Harness connects, wakes Loada, and sends a valid `Choose` command.
-  2. Proxy forcibly drops both the harness-side and module-side sockets and briefly stops
-     accepting (exercising both `ModuleConnection` reconnect + `BotLoop` disconnect reset and
-     `BrainBridge` peer disconnect + accept).
+  2. Proxy forcibly drops both the harness-side and module-side sockets, closes
+     and unlinks its listening socket, and pauses for 1.5 s (strictly longer
+     than `UnixSocketClient`'s 1 s fixed `retry_delay`, exercising both
+     `ModuleConnection` fixed-interval reconnect retry + `BotLoop` disconnect
+     reset and `BrainBridge` peer disconnect + accept).
   3. Proxy resumes accepting; harness reconnects, wakes Loada fresh on the new connection, and
      sends another valid `Choose` command with zero module errors.
 """
@@ -51,6 +53,7 @@ class _DroppableProxy:
         self.errors = []  # (generation, text)
         self._stop = threading.Event()
         self._drop = threading.Event()
+        self._closed = threading.Event()
         self._allow_accept = threading.Event()
         self._allow_accept.set()
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -61,9 +64,11 @@ class _DroppableProxy:
         while not self.listen_path.exists() and time.monotonic() < deadline:
             time.sleep(0.02)
 
-    def drop_and_pause(self, pause_s=1.0):
+    def drop_and_pause(self, pause_s=1.5):
+        self._closed.clear()
         self._allow_accept.clear()
         self._drop.set()
+        self._closed.wait(timeout=5.0)
         time.sleep(pause_s)
         self._allow_accept.set()
 
@@ -108,6 +113,7 @@ class _DroppableProxy:
                     if srv is not None:
                         close_listener(srv)
                         srv = None
+                    self._closed.set()
                     time.sleep(0.05)
                     continue
                 if srv is None:
@@ -117,6 +123,7 @@ class _DroppableProxy:
                 except socket.timeout:
                     continue
                 self._drop.clear()
+                self._closed.clear()
                 up = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 try:
                     up.connect(str(self.upstream_path))
@@ -127,9 +134,11 @@ class _DroppableProxy:
                     self.generations += 1
                     gen = self.generations
                 self._pump(cli, up, gen)
-                if not self._allow_accept.is_set() and srv is not None:
-                    close_listener(srv)
-                    srv = None
+                if not self._allow_accept.is_set():
+                    if srv is not None:
+                        close_listener(srv)
+                        srv = None
+                    self._closed.set()
         finally:
             close_listener(srv)
 
@@ -243,8 +252,9 @@ def run(stack):
             with brain.lock:
                 wakes_before = brain.wakes
 
-            # 2. Drop both sides of the socket and briefly hold the listener off.
-            proxy.drop_and_pause(pause_s=1.0)
+            # 2. Drop both sides of the socket, unlink the listener, and hold it
+            #    closed for 1.5 s (> UnixSocketClient's 1 s retry_delay).
+            proxy.drop_and_pause(pause_s=1.5)
 
             # 3. Verify harness reconnects (generation >= 2), wakes again, and sends Choose.
             deadline = time.monotonic() + 25.0

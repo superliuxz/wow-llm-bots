@@ -1958,8 +1958,8 @@ void BotLoop::MaybeScheduleMemoryCondense(const std::string& bot,
   }
   state->condense_state = BotState::CondenseState::kQueued;
   base::WeakPtr<BotLoop> self = weak_factory_.GetWeakPtr();
-  // Scheduled under `bot` itself at P4 so it reuses `bot`'s warm slot without
-  // evicting another bot's KV cache, yields to any newer wake, and is
+  // Scheduled under `bot` itself at P4 so it runs on `bot`'s own slot without
+  // evicting other bots' KV-cache slots, yields to any newer wake, and is
   // preempted immediately by a P0 combat wake.
   scheduler_.SubmitCancelable(
       bot, Urgency::kP4Reflect, [self, bot](int slot, base::OnceClosure done) {
@@ -1992,6 +1992,8 @@ base::OnceClosure BotLoop::StartMemoryCondense(const std::string& bot,
   const std::optional<std::string> disk = ReadFile(mem_path);
   if (!disk) {
     it->second.condense_state = BotState::CondenseState::kIdle;
+    it->second.condense_retry_after =
+        base::TimeTicks::Now() + base::Seconds(60);
     std::move(done).Run();
     return base::OnceClosure{};
   }

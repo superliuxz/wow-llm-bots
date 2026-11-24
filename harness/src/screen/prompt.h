@@ -75,6 +75,7 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen);
 struct PromptBreakdown {
   size_t system_bytes = 0;
   size_t prefix_bytes = 0;
+  size_t relationships_bytes = 0;
   size_t remembered_bytes = 0;
   size_t screen_bytes = 0;
   size_t knowledge_bytes = 0;
