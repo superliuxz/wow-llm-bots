@@ -12,7 +12,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -59,6 +58,7 @@
 #include "WorldSession.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
+#include "bot_session.h"
 #include "options/act_geometry.h"
 #include "options/option_executor.h"
 #include "snapshot/perception.h"
@@ -747,43 +747,36 @@ std::optional<BagSlotItem> FindBagItemByName(Player* bot,
   return std::nullopt;
 }
 
-// Per-bot last interrupted activity (world thread only) so explicit `then back`
-// can return to the pre-dodge spot/range.
-std::vector<std::pair<uint64_t, ActiveAct::InterruptedActivity>>&
-LastInterruptedStore() {
-  static std::vector<std::pair<uint64_t, ActiveAct::InterruptedActivity>> store;
-  return store;
-}
-
 void SaveLastInterrupted(uint64_t bot_guid,
                          const ActiveAct::InterruptedActivity& info) {
-  auto& store = LastInterruptedStore();
-  for (auto& [guid, saved] : store) {
-    if (guid == bot_guid) {
-      saved = info;
-      return;
-    }
-  }
-  if (store.size() >= 256) {
-    store.erase(store.begin());
-  }
-  store.emplace_back(bot_guid, info);
+  BotSessionRegistry::Instance().WithSession(bot_guid, [&](BotSession& s) {
+    s.last_interrupted = {info.active,       info.map_id,
+                          info.instance_id,  info.target_guid,
+                          info.prev_pos,     info.prev_target_dist_yd,
+                          info.was_attacking};
+  });
 }
 
 std::optional<ActiveAct::InterruptedActivity>
 LoadLastInterrupted(uint64_t bot_guid, uint32_t map_id, uint32_t instance_id) {
-  auto& store = LastInterruptedStore();
-  for (auto it = store.begin(); it != store.end(); ++it) {
-    if (it->first == bot_guid && it->second.active) {
-      if (it->second.map_id != map_id ||
-          it->second.instance_id != instance_id) {
-        store.erase(it);  // Never reuse coordinates from another map (A-L1).
-        return std::nullopt;
-      }
-      return it->second;
-    }
-  }
-  return std::nullopt;
+  return BotSessionRegistry::Instance().WithSession(
+      bot_guid,
+      [map_id, instance_id](
+          BotSession& s) -> std::optional<ActiveAct::InterruptedActivity> {
+        if (!s.last_interrupted.active) {
+          return std::nullopt;
+        }
+        if (s.last_interrupted.map_id != map_id ||
+            s.last_interrupted.instance_id != instance_id) {
+          s.last_interrupted = {};  // Never reuse old-map coordinates (A-L1).
+          return std::nullopt;
+        }
+        const BotSession::InterruptedSpot& p = s.last_interrupted;
+        return ActiveAct::InterruptedActivity{
+            p.active,       p.map_id,   p.instance_id,
+            p.target_guid,  p.prev_pos, p.prev_target_dist_yd,
+            p.was_attacking};
+      });
 }
 
 ActiveAct::InterruptedActivity CaptureInterruptedActivity(Player* bot) {
@@ -1105,25 +1098,18 @@ std::optional<HazardInfo> ResolveHazard(Player* bot,
   return std::nullopt;
 }
 
-// World-thread-only map from bot raw GUID -> avoided unit raw GUIDs so
-// FinishDodgeAct / StartReturnToInterrupted never re-select a target the brain
-// explicitly told the bot to avoid.
-std::unordered_map<uint64_t, std::vector<uint64_t>>& AvoidedTargetsByBot() {
-  static auto* map = new std::unordered_map<uint64_t, std::vector<uint64_t>>();
-  return *map;
-}
-
 bool IsTargetAvoidedByBot(const Player* bot, uint64_t target_guid) {
   if (!bot || target_guid == 0) {
     return false;
   }
-  const auto& map = AvoidedTargetsByBot();
-  auto it = map.find(bot->GetGUID().GetRawValue());
-  if (it == map.end()) {
-    return false;
-  }
-  return std::find(it->second.begin(), it->second.end(), target_guid) !=
-         it->second.end();
+  return BotSessionRegistry::Instance().InspectSession(
+      bot->GetGUID().GetRawValue(), [target_guid](const BotSession* s) {
+        if (!s) {
+          return false;
+        }
+        return std::find(s->avoided_targets.begin(), s->avoided_targets.end(),
+                         target_guid) != s->avoided_targets.end();
+      });
 }
 
 // Finishes a dodge (`away` / `out of`) without walking back to the pre-dodge
@@ -1666,11 +1652,14 @@ ActStartResult StartAct(Player* bot,
           !act.target_name.empty() ? act.target_name : act.name;
       WorldObject* obj = ResolveThing(bot, act, thing_name);
       if (obj) {
-        auto& avoided = AvoidedTargetsByBot()[bot->GetGUID().GetRawValue()];
         const uint64_t raw = obj->GetGUID().GetRawValue();
-        if (std::find(avoided.begin(), avoided.end(), raw) == avoided.end()) {
-          avoided.push_back(raw);
-        }
+        BotSessionRegistry::Instance().WithSession(
+            bot->GetGUID().GetRawValue(), [raw](BotSession& s) {
+              if (std::find(s.avoided_targets.begin(), s.avoided_targets.end(),
+                            raw) == s.avoided_targets.end()) {
+                s.avoided_targets.push_back(raw);
+              }
+            });
         if (bot->GetTarget() == obj->GetGUID()) {
           bot->AttackStop();
           bot->SetSelection(ObjectGuid::Empty);
@@ -2286,25 +2275,21 @@ void CancelActiveAct(Player* bot, ActiveAct* active) {
 }
 
 void ClearAvoidedTargetsForBot(uint64_t bot_guid) {
-  AvoidedTargetsByBot().erase(bot_guid);
+  BotSessionRegistry::Instance().WithSession(
+      bot_guid, [](BotSession& s) { s.avoided_targets.clear(); });
 }
 
 void ClearAvoidedTargetForBot(uint64_t bot_guid, uint64_t target_guid) {
-  auto& map = AvoidedTargetsByBot();
-  auto it = map.find(bot_guid);
-  if (it == map.end()) {
-    return;
-  }
-  auto& vec = it->second;
-  vec.erase(std::remove(vec.begin(), vec.end(), target_guid), vec.end());
-  if (vec.empty()) {
-    map.erase(it);
-  }
+  BotSessionRegistry::Instance().WithSession(
+      bot_guid, [target_guid](BotSession& s) {
+        auto& vec = s.avoided_targets;
+        vec.erase(std::remove(vec.begin(), vec.end(), target_guid), vec.end());
+      });
 }
 
 void ClearLastInterruptedForBot(uint64_t bot_guid) {
-  auto& store = LastInterruptedStore();
-  std::erase_if(store, [&](const auto& kv) { return kv.first == bot_guid; });
+  BotSessionRegistry::Instance().WithSession(
+      bot_guid, [](BotSession& s) { s.last_interrupted = {}; });
 }
 
 }  // namespace llm_brain

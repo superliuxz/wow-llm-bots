@@ -44,6 +44,7 @@
 #include "base/time/time.h"
 #include "bot_manager/bot_manager.h"
 #include "bot_manager/popup_watch.h"
+#include "bot_session.h"
 #include "bridge/brain_bridge.h"
 #include "chat/chat_inbox.h"
 #include "chat/chat_scripts.h"
@@ -377,7 +378,8 @@ class LlmBrainWorldScript : public WorldScript {
           CancelActiveAct(bot, &*bots_[i].active_act);
           bots_[i].active_act.reset();
         }
-        ClearLastInterruptedForBot(bot->GetGUID().GetRawValue());
+        BotSessionRegistry::Instance().ResetOnMapChange(
+            bot->GetGUID().GetRawValue());
       }
       bots_[i].has_last_map = true;
       bots_[i].last_map_id = cur_map;
@@ -525,8 +527,8 @@ class LlmBrainWorldScript : public WorldScript {
     for (size_t i = 0; i < bots_.size(); ++i) {
       Player* bot = ObjectAccessor::FindPlayerByName(config_.bots[i]);
       if (bot && GET_PLAYERBOT_AI(bot) != nullptr) {
-        ClearAvoidedTargetsForBot(bot->GetGUID().GetRawValue());
-        ClearLastInterruptedForBot(bot->GetGUID().GetRawValue());
+        BotSessionRegistry::Instance().ResetOnDisconnect(
+            bot->GetGUID().GetRawValue());
       }
       if (bots_[i].active_act) {
         if (bot && GET_PLAYERBOT_AI(bot) != nullptr) {

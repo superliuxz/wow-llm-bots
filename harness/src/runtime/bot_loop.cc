@@ -576,41 +576,51 @@ void BotLoop::OnConnectionChanged(bool connected) {
                 : "harness: disconnected from mod-llm-brain");
   if (!connected) {
     for (auto&& [name, state] : bots_) {
-      state.runner.Stop();
-      state.orders.Clear();
-      state.latest_snapshot.reset();
-      state.look_deadline = base::TimeTicks();
-      state.has_ever_woken = false;
-      state.was_in_instance = false;
-      state.last_map.clear();
-      state.notes.clear();
-      state.last_selected_notes.clear();
-      state.recent_chat_command_ids.clear();
-      state.has_queued_wake = false;
-      state.queued_urgency = Urgency::kP2Routine;
-      state.call_in_flight = false;
-      state.in_flight_cancel.reset();
-      state.call_deadline = base::TimeTicks();
-      state.call_timed_out_epoch = 0;
-      state.early_steps_dispatched = false;
-      state.early_step_failed = false;
-      state.step_refusals = 0;
-      state.last_outcome.clear();
-      state.order_wakes = 0;
-      state.pending_reasons.clear();
-      state.pending_chats.clear();
-      state.chat_wake_times_by_sender.clear();
-      state.recent_events.clear();
-      state.whisperers.clear();
-      state.condense_state = BotState::CondenseState::kIdle;
-      ++state.memory_condense_epoch;
-      state.condense_retry_after = base::TimeTicks();
-      ResetLooking(&state);
-      ++state.call_epoch;
+      ResetBotSession(&state, /*cancel_in_flight=*/false);
     }
     // Answers to screens of the old connection are useless: free the slots.
     scheduler_.CancelAllInFlight();
   }
+}
+
+// static
+void BotLoop::ResetBotSession(BotState* state, bool cancel_in_flight) {
+  state->runner.Stop();
+  state->orders.Clear();
+  state->latest_snapshot.reset();
+  state->look_deadline = base::TimeTicks();
+  state->has_ever_woken = false;
+  state->was_in_instance = false;
+  state->last_map.clear();
+  state->notes.clear();
+  state->last_selected_notes.clear();
+  state->recent_chat_command_ids.clear();
+  state->call_state = BotState::CallState::kIdle;
+  state->queued_urgency = Urgency::kP2Routine;
+  if (state->in_flight_cancel) {
+    auto cancel = std::move(state->in_flight_cancel);
+    if (cancel_in_flight) {
+      cancel->Cancel();
+    }
+  }
+  state->call_deadline = base::TimeTicks();
+  state->call_timed_out_epoch = 0;
+  state->early_steps_dispatched = false;
+  state->early_step_failed = false;
+  state->step_refusals = 0;
+  state->last_outcome.clear();
+  state->order_wakes = 0;
+  state->order_quiet_since = base::TimeTicks();
+  state->pending_reasons.clear();
+  state->pending_chats.clear();
+  state->chat_wake_times_by_sender.clear();
+  state->recent_events.clear();
+  state->whisperers.clear();
+  state->condense_state = BotState::CondenseState::kIdle;
+  ++state->memory_condense_epoch;
+  state->condense_retry_after = base::TimeTicks();
+  ResetLooking(state);
+  ++state->call_epoch;
 }
 
 void BotLoop::NoteEvent(BotState* state,
@@ -858,7 +868,7 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   if (!ord.wake_reason.empty()) {
     return;
   }
-  if (look_woke || state.call_in_flight || state.has_queued_wake ||
+  if (look_woke || state.call_in_flight() || state.has_queued_wake() ||
       ord.covered) {
     return;
   }
@@ -869,7 +879,7 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
     state.last_outcome.clear();
   }
   DispatchRunnerAction(bot, &state, action);
-  if (!state.has_queued_wake && !state.call_in_flight &&
+  if (!state.has_queued_wake() && !state.call_in_flight() &&
       !state.look_deadline.is_null() && received_at >= state.look_deadline) {
     state.look_deadline = base::TimeTicks();
     state.runner.Stop();
@@ -944,7 +954,7 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
       if (imm.event.error->text == "act cancelled by new choice") {
         return;
       }
-      if (state.call_in_flight) {
+      if (state.call_in_flight()) {
         if (!failed.wake_reason.empty()) {
           if (std::find(state.pending_reasons.begin(),
                         state.pending_reasons.end(),
@@ -988,7 +998,7 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
       if (!imm.event.error->text.empty()) {
         state.last_outcome = imm.event.error->text;
       }
-      if (state.call_in_flight) {
+      if (state.call_in_flight()) {
         state.early_step_failed = true;
       }
       const base::TimeDelta backoff = StepRefusalBackoff(++state.step_refusals);
@@ -1042,41 +1052,12 @@ void BotLoop::OnTick(base::TimeTicks now) {
           "harness: %s: no snapshot for %.0f s; waiting "
           "for it to come back",
           bot.c_str(), (now - state.latest_received_at).InSecondsF()));
-      state.runner.Stop();
-      state.orders.Clear();
-      state.latest_snapshot.reset();
-      state.look_deadline = base::TimeTicks();
-      state.has_ever_woken = false;
-      state.was_in_instance = false;
-      state.last_map.clear();
-      state.notes.clear();
-      state.last_selected_notes.clear();
-      state.recent_chat_command_ids.clear();
-      state.has_queued_wake = false;
-      state.queued_urgency = Urgency::kP2Routine;
-      state.call_in_flight = false;
-      if (state.in_flight_cancel) {
-        auto cancel = std::move(state.in_flight_cancel);
-        cancel->Cancel();
-      }
-      state.call_deadline = base::TimeTicks();
-      state.call_timed_out_epoch = 0;
-      state.early_steps_dispatched = false;
-      state.early_step_failed = false;
-      state.step_refusals = 0;
-      state.last_outcome.clear();
-      state.order_wakes = 0;
-      state.pending_reasons.clear();
-      state.pending_chats.clear();
-      state.chat_wake_times_by_sender.clear();
-      state.recent_events.clear();
-      ResetLooking(&state);
-      ++state.call_epoch;
+      ResetBotSession(&state, /*cancel_in_flight=*/true);
       continue;
     }
     // Enforce overall wall-clock deadline on stalled in-flight LLM calls
     // (A-M13) so a wedged llama-server never blocks a bot for 60 s.
-    if (state.call_in_flight && !state.call_deadline.is_null() &&
+    if (state.call_in_flight() && !state.call_deadline.is_null() &&
         now >= state.call_deadline) {
       state.call_deadline = base::TimeTicks();
       state.call_timed_out_epoch = state.call_epoch;
@@ -1086,8 +1067,8 @@ void BotLoop::OnTick(base::TimeTicks now) {
       }
       continue;
     }
-    if (!state.latest_snapshot || state.call_in_flight ||
-        state.has_queued_wake) {
+    if (!state.latest_snapshot ||
+        state.call_state != BotState::CallState::kIdle) {
       continue;
     }
     if (const OrderEvalResult timeout = state.orders.CheckTimeout(now);
@@ -1125,9 +1106,10 @@ void BotLoop::WakeBot(const std::string& bot,
                 reason) == state.pending_reasons.end()) {
     state.pending_reasons.push_back(reason);
   }
-  state.queued_urgency =
-      state.has_queued_wake ? std::min(state.queued_urgency, urgency) : urgency;
-  state.has_queued_wake = true;
+  state.queued_urgency = state.has_queued_wake()
+                             ? std::min(state.queued_urgency, urgency)
+                             : urgency;
+  state.MarkQueued();
   // Replacing a queued P4 condense job with a real wake returns condensing to
   // idle so it can be re-scheduled after the gameplay reply finishes.
   if (state.condense_state == BotState::CondenseState::kQueued) {
@@ -1150,7 +1132,7 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
   auto it = bots_.find(bot);
   if (it == bots_.end() || !it->second.latest_snapshot) {
     if (it != bots_.end()) {
-      it->second.has_queued_wake = false;
+      it->second.ClearQueued();
       it->second.pending_reasons.clear();
     }
     std::move(done).Run();
@@ -1183,9 +1165,8 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
   }
 
   const Urgency call_urgency = state.queued_urgency;
-  state.has_queued_wake = false;
   state.queued_urgency = Urgency::kP2Routine;
-  state.call_in_flight = true;
+  state.MarkStarted();
   state.early_steps_dispatched = false;
   state.early_step_failed = false;
   state.order_failure_during_call = false;
@@ -1336,8 +1317,8 @@ void BotLoop::OnFirstLine(const std::string& bot,
     return;
   }
   BotState& state = it->second;
-  if (!state.call_in_flight || state.call_epoch != epoch ||
-      state.has_queued_wake || !state.latest_snapshot) {
+  if (!state.call_in_flight() || state.call_epoch != epoch ||
+      state.has_queued_wake() || !state.latest_snapshot) {
     return;
   }
   const std::optional<std::vector<PlanStep>> steps =
@@ -1377,13 +1358,13 @@ void BotLoop::OnReply(const std::string& bot,
     bool was_timeout = false;
     if (auto it = bots_.find(bot);
         it != bots_.end() && it->second.call_epoch == epoch) {
-      it->second.call_in_flight = false;
+      it->second.MarkFinished();
       it->second.in_flight_cancel.reset();
       it->second.call_deadline = base::TimeTicks();
       was_timeout = it->second.call_timed_out_epoch == epoch;
       Requeue(&it->second, std::move(asked_reasons), std::move(asked_events),
               std::move(asked_chats), std::move(asked_outcome));
-      if (was_timeout && !it->second.has_queued_wake) {
+      if (was_timeout && !it->second.has_queued_wake()) {
         it->second.look_deadline = now + base::Seconds(2);
       }
     }
@@ -1431,7 +1412,7 @@ void BotLoop::OnReply(const std::string& bot,
   auto it = bots_.find(bot);
   if (it != bots_.end() && it->second.call_epoch == epoch) {
     BotState& state = it->second;
-    state.call_in_flight = false;
+    state.MarkFinished();
     state.in_flight_cancel.reset();
     state.call_deadline = base::TimeTicks();
     if (!decision.result.reply) {
@@ -1464,7 +1445,7 @@ void BotLoop::OnReply(const std::string& bot,
       // same call failed before the reply finished, still deliver say/tell and
       // watches, and keep the refusal wake or backoff timer instead of
       // requeueing the already-answered wake reasons.
-      if ((!state.has_queued_wake || state.early_step_failed) &&
+      if ((!state.has_queued_wake() || state.early_step_failed) &&
           state.latest_snapshot) {
         state.triggers.SetPlanContext(
             plan->watches,
@@ -1625,7 +1606,7 @@ void BotLoop::OnReply(const std::string& bot,
           state.order_failure_during_call = false;
           WakeForOrder(bot, &state, "", now, /*is_failure=*/true);
         }
-        if (!state.has_queued_wake && state.latest_snapshot &&
+        if (!state.has_queued_wake() && state.latest_snapshot &&
             !state.latest_snapshot->base.self.in_combat) {
           MaybeScheduleMemoryCondense(bot, &state, now);
         }
@@ -1791,7 +1772,7 @@ bool BotLoop::OnLookSnapshot(const std::string& bot,
     what.push_back(look.hover);
   }
   state->pending_look.reset();
-  if (state->call_in_flight || state->has_queued_wake) {
+  if (state->call_state != BotState::CallState::kIdle) {
     return false;  // A newer call sees it anyway.
   }
   state->look_deadline = base::TimeTicks();
@@ -1991,7 +1972,7 @@ void BotLoop::MaybeScheduleMemoryCondense(const std::string& bot,
                                           base::TimeTicks now) {
   if (config_.bots_dir.empty() || config_.memory_condense_threshold == 0 ||
       state->condense_state != BotState::CondenseState::kIdle ||
-      state->call_in_flight || state->has_queued_wake ||
+      state->call_state != BotState::CallState::kIdle ||
       !state->latest_snapshot || state->latest_snapshot->base.self.in_combat ||
       now < state->condense_retry_after) {
     return;

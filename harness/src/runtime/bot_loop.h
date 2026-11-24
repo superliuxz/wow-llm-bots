@@ -168,10 +168,37 @@ class BotLoop {
     PlanRunner runner;
     OrderEvaluator orders;
 
+    // Explicit brain-call lifecycle state (replaces separate `call_in_flight` +
+    // `has_queued_wake` booleans so transitions and resets stay consistent).
+    enum class CallState {
+      kIdle,
+      kQueued,
+      kInFlight,
+      kInFlightQueued,
+    };
+    CallState call_state = CallState::kIdle;
+    bool has_queued_wake() const {
+      return call_state == CallState::kQueued ||
+             call_state == CallState::kInFlightQueued;
+    }
+    bool call_in_flight() const {
+      return call_state == CallState::kInFlight ||
+             call_state == CallState::kInFlightQueued;
+    }
+    void MarkQueued() {
+      call_state =
+          call_in_flight() ? CallState::kInFlightQueued : CallState::kQueued;
+    }
+    void ClearQueued() {
+      call_state = call_in_flight() ? CallState::kInFlight : CallState::kIdle;
+    }
+    void MarkStarted() { call_state = CallState::kInFlight; }
+    void MarkFinished() {
+      call_state = has_queued_wake() ? CallState::kQueued : CallState::kIdle;
+    }
+
     bool has_ever_woken = false;
-    bool has_queued_wake = false;
     Urgency queued_urgency = Urgency::kP2Routine;
-    bool call_in_flight = false;
     base::scoped_refptr<LlmCancelHandle> in_flight_cancel;
     base::TimeTicks call_deadline;
     uint64_t call_timed_out_epoch = 0;
@@ -248,6 +275,7 @@ class BotLoop {
                  bool triggered_wake = false);
   // A line for the next prompt's "Since your last look".
   void NoteText(BotState* state, std::string text);
+  static void ResetBotSession(BotState* state, bool cancel_in_flight);
   // What a habit or a disconnect leaves behind: forgotten.
   static void ResetLooking(BotState* state);
   // `path`'s text, re-read only when its modification time changed (it is

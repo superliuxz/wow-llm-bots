@@ -73,8 +73,9 @@ def _include_jobs():
               *(ROOT / "harness").rglob("*.cc")]:
         jobs.append((f, ["-p", common_db]))
     for f in (ROOT / "server_module").rglob("*.cc"):
-        if f.name.endswith("_unittest.cc") or f.parent.name == "tools":
-            # Unit tests and tools (server_module/tools/) are built by common/.
+        if (f.name.endswith("_unittest.cc") or f.parent.name == "tools" or
+                _in_compile_commands(common_db, f)):
+            # Unit tests, tools, and AzerothCore-independent module files built by common/.
             jobs.append((f, ["-p", common_db]))
         elif not have_server:
             notes.append(f"{f.relative_to(ROOT)} not checked (no server build)")
@@ -213,7 +214,7 @@ def all_(with_sanitizers=False):
     snapshots()
     say("== includes")
     includes()
-    say("== screen goldens vs the prototype")
+    say("== screen goldens")
     goldens()
     say("== bench & loop unit tests")
     bench_tests()
