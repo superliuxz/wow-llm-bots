@@ -286,6 +286,26 @@ def _mysql_query(mysql_cnf: pathlib.Path, db: str, sql: str) -> list[list[str]]:
     return out
 
 
+def build_creature_loot_map(
+    rows: list[tuple[int, int, int, int]],
+) -> tuple[dict[int, set[int]], dict[int, set[int]]]:
+    """Maps KillCredit -> creature entries and lootid -> creature entries.
+
+    In AzerothCore (Unit.cpp:13741), lootid == 0 means no loot; never fall
+    back to creature_template.entry.
+    """
+    kill_credit_to_creatures: dict[int, set[int]] = defaultdict(set)
+    lootid_to_creatures: dict[int, set[int]] = defaultdict(set)
+    for entry, kc1, kc2, lootid in rows:
+        if kc1 > 0:
+            kill_credit_to_creatures[kc1].add(entry)
+        if kc2 > 0:
+            kill_credit_to_creatures[kc2].add(entry)
+        if lootid > 0:
+            lootid_to_creatures[lootid].add(entry)
+    return kill_credit_to_creatures, lootid_to_creatures
+
+
 def generate_from_mysql(
     mysql_cnf: pathlib.Path,
     db: str = "acore_world",
@@ -345,20 +365,13 @@ def generate_from_mysql(
     for r in _mysql_query(mysql_cnf, db, "SELECT id, map, position_x, position_y FROM gameobject"):
         go_spawns[int(r[0])][int(r[1])].append((float(r[2]), float(r[3])))
 
-    kill_credit_to_creatures: dict[int, set[int]] = defaultdict(set)
-    lootid_to_creatures: dict[int, set[int]] = defaultdict(set)
-    for r in _mysql_query(
-        mysql_cnf, db, "SELECT entry, KillCredit1, KillCredit2, lootid FROM creature_template"
-    ):
-        entry, kc1, kc2, lootid = int(r[0]), int(r[1]), int(r[2]), int(r[3])
-        if kc1 > 0:
-            kill_credit_to_creatures[kc1].add(entry)
-        if kc2 > 0:
-            kill_credit_to_creatures[kc2].add(entry)
-        # In AzerothCore (Unit.cpp:13741), lootid == 0 means no loot; never
-        # fall back to creature_template.entry.
-        if lootid > 0:
-            lootid_to_creatures[lootid].add(entry)
+    ct_rows = [
+        (int(r[0]), int(r[1]), int(r[2]), int(r[3]))
+        for r in _mysql_query(
+            mysql_cnf, db, "SELECT entry, KillCredit1, KillCredit2, lootid FROM creature_template"
+        )
+    ]
+    kill_credit_to_creatures, lootid_to_creatures = build_creature_loot_map(ct_rows)
 
     lootid_to_gos: dict[int, set[int]] = defaultdict(set)
     for r in _mysql_query(

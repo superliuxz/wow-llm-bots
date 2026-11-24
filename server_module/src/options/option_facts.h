@@ -12,6 +12,7 @@
 #include "options/position_facts.h"
 #include "snapshot/snapshot.h"
 
+class Map;
 class Player;
 class WorldObject;
 
@@ -77,6 +78,7 @@ class WorldPlaces {
     std::string name;
     wlb::snapshot::Vec3 pos;
     uint32_t faction = 0;
+    uint32_t phase_mask = 1;  // PHASEMASK_NORMAL (Object.h).
     uint8_t spawn_mask = 0;
     bool is_boss = false;
   };
@@ -105,6 +107,17 @@ class WorldPlaces {
   std::vector<Hub> hubs_;
   std::unordered_map<uint32_t, std::vector<DungeonSpawn>> dungeon_spawns_;
 };
+
+// Probes a short, terrain- and navmesh-validated hop across a disconnected
+// dungeon navmesh seam (e.g. an entrance ledge/stair drop-off) toward
+// `base_angle`. Shared by FillSpots() and TickLongWalk().
+bool FindDungeonSeamHop(Map* map,
+                        uint32_t phase_mask,
+                        const wlb::snapshot::Vec3& from,
+                        float base_angle,
+                        float max_dist_yd,
+                        const DungeonNavConfig& dungeon_nav,
+                        wlb::snapshot::Vec3* out_hop);
 
 // `path_owner` (the bot) enables the walkable-ray fallback when no grind spot
 // is near; without one (an offline fixture dump) that fallback is skipped.

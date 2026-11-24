@@ -167,14 +167,9 @@ class BrainPolicyListener final : public ActionExecutionListener {
       return true;
     }
     const std::string& name = action->getName();
-    if (name == "accept invitation" || name == "equip upgrade") {
+    if (name == "accept invitation" || name == "equip upgrade" ||
+        name == "equip upgrades packet action") {
       return false;
-    }
-    if (name == "equip upgrades packet action") {
-      // Allow Hunter "no ammo" trigger (ItemCountTrigger::getName() returns
-      // "item count") to re-equip arrows/bullets from bags.
-      return event.GetSource() == "item count" && bot_ &&
-             bot_->getClass() == CLASS_HUNTER;
     }
     if (name == "apply stone") {
       return HasEligibleTempEnchant(bot_, ai_, /*is_stone=*/true);
@@ -224,7 +219,8 @@ void RecoverStuckDungeonGhost(Player* player,
                               uint64_t now_ms,
                               uint64_t* stuck_since_ms) {
   if (!player || !player->HasPlayerFlag(PLAYER_FLAGS_GHOST) ||
-      player->isMoving() || player->IsBeingTeleported()) {
+      !player->HasCorpse() || player->isMoving() ||
+      player->IsBeingTeleported()) {
     *stuck_since_ms = 0;
     return;
   }
@@ -246,12 +242,20 @@ void RecoverStuckDungeonGhost(Player* player,
   if (now_ms - *stuck_since_ms < kStuckDungeonGhostMs) {
     return;
   }
-  *stuck_since_ms = 0;
   const AreaTriggerTeleport* entrance =
       sObjectMgr->GetMapEntranceTrigger(corpse_map_id);
-  if (entrance && player->TeleportTo(entrance->target_mapId, entrance->target_X,
-                                     entrance->target_Y, entrance->target_Z,
-                                     entrance->target_Orientation)) {
+  if (!entrance) {
+    *stuck_since_ms = now_ms;
+    LOG_INFO("module",
+             "mod-llm-brain: dungeon ghost {} cannot enter map {} (no entrance "
+             "trigger)",
+             player->GetName(), corpse_map_id);
+    return;
+  }
+  if (player->TeleportTo(entrance->target_mapId, entrance->target_X,
+                         entrance->target_Y, entrance->target_Z,
+                         entrance->target_Orientation)) {
+    *stuck_since_ms = 0;
     // AzerothCore's HandleMoveWorldportAck resurrects the ghost and converts
     // its dungeon corpse to bones on the destination dungeon map.
     LOG_INFO("module",
@@ -259,12 +263,13 @@ void RecoverStuckDungeonGhost(Player* player,
              player->GetName(), corpse_map_id);
     return;
   }
-  // Fallback when no entrance trigger exists or TeleportTo failed.
-  player->ResurrectPlayer(0.5f);
-  player->SpawnCorpseBones();
+  // Transient denial (e.g., CANNOT_ENTER_ZONE_IN_COMBAT during an active
+  // encounter): retry after kStuckDungeonGhostMs rather than free-reviving
+  // outside the instance or calling cross-map SpawnCorpseBones().
+  *stuck_since_ms = now_ms;
   LOG_INFO("module",
-           "mod-llm-brain: revived stuck dungeon ghost {} in place (map {} "
-           "entrance unavailable)",
+           "mod-llm-brain: dungeon ghost {} teleport to map {} entrance "
+           "deferred; will retry",
            player->GetName(), corpse_map_id);
 }
 
@@ -347,9 +352,12 @@ void BotManager::Tick() {
       if (player->IsInWorld()) {
         EnsureStrategies(player);
         RecoverStuckDungeonGhost(player, now_ms_, &bot.stuck_ghost_since_ms);
+      } else {
+        bot.stuck_ghost_since_ms = 0;
       }
       continue;
     }
+    bot.stuck_ghost_since_ms = 0;
     if (now_ms_ >= bot.next_login_ms) {
       // No master: playerbots runs it as a standalone bot. With autologin off,
       // its random-bot manager does nothing else with it.
@@ -365,7 +373,6 @@ void BotManager::EnsureStrategies(Player* player) {
   if (!ai || player->InBattleground()) {
     return;  // Not set up yet, or playerbots' battleground strategies apply.
   }
-  EnsurePolicyListener(player, ai);
   // Solo, a healer also deals damage; in a group it heals, so the same extras
   // are removed (",+holy dps" becomes ",-holy dps"): joining a group must undo
   // what being solo added.

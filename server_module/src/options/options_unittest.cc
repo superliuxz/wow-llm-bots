@@ -591,17 +591,24 @@ TEST(OptionsTest, UsableBagItemsOfferedAsUseOptionsAndFilteredInCombat) {
                                 .out_of_combat_only = false,
                                 .equippable = false,
                                 .detail = ""});
+  facts.usable_items.push_back({.entry = 6948,
+                                .name = "Hearthstone",
+                                .out_of_combat_only = true,
+                                .equippable = false,
+                                .detail = "teleports home to Orgrimmar"});
 
   pb::Snapshot ooc;
   ooc.base.self.in_combat = false;
   const std::vector<OptionTarget> ooc_targets = AddOptions(&ooc, facts);
   EXPECT_EQ(Texts(ooc), (std::vector<std::string>{
                             "Use Ruby Essence", "Use Runic Healing Potion",
+                            "Use Hearthstone (teleports home to Orgrimmar)",
                             "Keep doing what I'm doing"}));
-  ASSERT_EQ(ooc_targets.size(), 3u);
+  ASSERT_EQ(ooc_targets.size(), 4u);
   EXPECT_EQ(ooc_targets[0].kind, OptionTarget::Kind::kUse);
   EXPECT_EQ(ooc_targets[0].guid, "item:37860");
   EXPECT_EQ(ooc_targets[1].guid, "item:33447");
+  EXPECT_EQ(ooc_targets[2].guid, "item:6948");
 
   pb::Snapshot ic;
   ic.base.self.in_combat = true;

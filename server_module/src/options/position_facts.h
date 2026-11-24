@@ -40,7 +40,7 @@ struct DungeonNavConfig {
   float unloaded_probe_yd = 60.0f;
   float incomplete_progress_slack_yd = 15.0f;
   bool seam_bridge_enable = true;
-  float seam_bridge_max_drop_yd = 12.0f;
+  float seam_bridge_max_drop_yd = 6.0f;
   float seam_bridge_max_climb_yd = 2.5f;
 };
 

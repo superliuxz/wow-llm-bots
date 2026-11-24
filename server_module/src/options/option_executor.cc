@@ -35,6 +35,7 @@
 #include "LootObjectStack.h"
 #include "Map.h"
 #include "MotionMaster.h"
+#include "MoveSplineInit.h"
 #include "MoveSplineInitArgs.h"
 #include "ObjectAccessor.h"
 #include "ObjectDefines.h"
@@ -67,6 +68,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "options/act_executor.h"
+#include "options/option_facts.h"
 #include "options/options.h"
 #include "position_facts.h"
 #include "snapshot/snapshot.h"
@@ -742,8 +744,9 @@ void CollectUsableBagItems(Player* bot,
     item.entry = proto->ItemId;
     item.name = proto->Name1;
     item.out_of_combat_only = out_of_combat_only;
-    // Any homebind teleport item (Hearthstone, Innkeeper's Daughter, etc.):
-    // attach factual homebind destination from the spell effect itself.
+    // Any homebind teleport item (Hearthstone, Scroll of Recall, Ethereal
+    // Portal, etc.): attach factual homebind destination from the spell effect
+    // itself.
     for (uint8_t i = 0; i < MAX_SPELL_EFFECTS; ++i) {
       const SpellEffectInfo& eff = info->Effects[i];
       if (eff.Effect == SPELL_EFFECT_TELEPORT_UNITS &&
@@ -966,9 +969,9 @@ void CollectUsableBagItems(Player* bot,
       if (!detail.empty()) {
         detail += ", ";
       }
-      if (equipped_ilvl > 0) {
+      if (equipped_proto) {
         detail += "ilvl " + std::to_string(proto->ItemLevel) + " vs ";
-        if (equipped_proto && !equipped_proto->Name1.empty()) {
+        if (!equipped_proto->Name1.empty()) {
           detail += equipped_proto->Name1 + " ";
         }
         detail += "ilvl " + std::to_string(equipped_ilvl);
@@ -1170,8 +1173,8 @@ WalkStepResult TickLongWalk(Player* bot,
   walk->last_path_at = now;
 
   const base::TimeTicks path_start = base::TimeTicks::Now();
-  constexpr uint32_t kTypeOk = PATHFIND_NORMAL | PATHFIND_INCOMPLETE |
-                               PATHFIND_SHORT | PATHFIND_FARFROMPOLY;
+  constexpr uint32_t kTypeOk =
+      PATHFIND_NORMAL | PATHFIND_INCOMPLETE | PATHFIND_FARFROMPOLY;
   G3D::Vector3 next_pt;
   bool found = false;
 
@@ -1231,51 +1234,29 @@ WalkStepResult TickLongWalk(Player* bot,
   const base::TimeDelta path_time = base::TimeTicks::Now() - path_start;
   if (!found) {
     // Disconnected dungeon navmesh seam (e.g. an entrance stair/ledge drop-off
-    // where Detour cannot cross between polygons): if there is clear line of
-    // sight onto walkable ground 10-16 yd toward the destination, take one
-    // direct step across the seam so the next tick resumes normal navmesh
-    // pathing.
-    if (dungeon_nav.seam_bridge_enable) {
-      if (Map* map = bot->GetMap(); map && map->IsDungeon()) {
-        const float base_angle = bot->GetAngle(walk->dest.x, walk->dest.y);
-        static constexpr float kSeamAngles[] = {0.0f, 0.35f, -0.35f, 0.7f,
-                                                -0.7f};
-        static constexpr float kSeamDists[] = {10.0f, 14.0f, 18.0f};
-        for (float d : kSeamDists) {
-          const float step_d = std::min(d, dist_to_dest);
-          if (step_d < 3.0f) {
-            continue;
-          }
-          for (float off : kSeamAngles) {
-            const float a = base_angle + off;
-            const float hx = pos.x + std::cos(a) * step_d;
-            const float hy = pos.y + std::sin(a) * step_d;
-            const float hz =
-                map->GetHeight(bot->GetPhaseMask(), hx, hy, pos.z + 4.0f);
-            if (hz == INVALID_HEIGHT || hz == VMAP_INVALID_HEIGHT_VALUE) {
-              continue;
-            }
-            const float dz = hz - pos.z;
-            if (dz < -dungeon_nav.seam_bridge_max_drop_yd ||
-                dz > dungeon_nav.seam_bridge_max_climb_yd) {
-              continue;
-            }
-            if (!map->isInLineOfSight(pos.x, pos.y, pos.z + 1.5f, hx, hy,
-                                      hz + 1.5f, bot->GetPhaseMask(),
-                                      LINEOFSIGHT_ALL_CHECKS,
-                                      VMAP::ModelIgnoreFlags::Nothing)) {
-              continue;
-            }
-            walk->step_dest = {hx, hy, hz};
-            walk->has_step = true;
-            bot->GetMotionMaster()->MovePoint(
-                /*id=*/0, hx, hy, hz, FORCED_MOVEMENT_NONE, /*speed=*/0.0f,
-                /*orientation=*/0.0f, /*generatePath=*/false,
-                /*forceDestination=*/false);
-            RecordLastMovement(bot, hx, hy, hz);
-            return {.path_time = path_time};
-          }
-        }
+    // where Detour cannot cross between polygons): if a terrain- and navmesh-
+    // validated hop exists toward the destination, launch a direct spline
+    // across the seam (capped at kMaxConsecutiveSeamHops) so the next tick
+    // resumes normal navmesh pathing.
+    constexpr uint8_t kMaxConsecutiveSeamHops = 2;
+    if (walk->consecutive_seam_hops < kMaxConsecutiveSeamHops) {
+      pb::Vec3 hop;
+      if (FindDungeonSeamHop(bot->GetMap(), bot->GetPhaseMask(), pos,
+                             bot->GetAngle(walk->dest.x, walk->dest.y),
+                             dist_to_dest, dungeon_nav, &hop)) {
+        ++walk->consecutive_seam_hops;
+        walk->step_dest = hop;
+        walk->has_step = true;
+        // Bypass PointMovementGenerator (whose generatePath=false branch still
+        // runs PathGenerator::CalculatePath) by launching MoveSplineInit with
+        // generatePath=false directly onto the validated navmesh landing point.
+        bot->GetMotionMaster()->MoveIdle();
+        Movement::MoveSplineInit init(bot);
+        init.MoveTo(hop.x, hop.y, hop.z, /*generatePath=*/false);
+        init.SetWalk(false);
+        init.Launch();
+        RecordLastMovement(bot, hop.x, hop.y, hop.z);
+        return {.path_time = path_time};
       }
     }
     ClearLastMovement(bot);
@@ -1285,6 +1266,7 @@ WalkStepResult TickLongWalk(Player* bot,
     return {.error = "stuck", .path_time = path_time};
   }
 
+  walk->consecutive_seam_hops = 0;
   walk->step_dest = {next_pt.x, next_pt.y, next_pt.z};
   walk->has_step = true;
   if (!WalkTo(bot, next_pt.x, next_pt.y, next_pt.z)) {

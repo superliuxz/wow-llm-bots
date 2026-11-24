@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "AiObjectContext.h"
+#include "Bag.h"
 #include "Cell.h"
 #include "CellImpl.h"
 #include "Chat.h"
@@ -25,6 +26,8 @@
 #include "Group.h"
 #include "GroupMgr.h"
 #include "InstanceSaveMgr.h"
+#include "Item.h"
+#include "ItemTemplate.h"
 #include "Map.h"
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"

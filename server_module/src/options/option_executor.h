@@ -33,6 +33,8 @@ struct PendingWalk {
   WalkProgressTracker progress;
   // When the path was last worked out: at most once a second.
   base::TimeTicks last_path_at;
+  // Consecutive disconnected-seam hops taken without a normal navmesh step.
+  uint8_t consecutive_seam_hops = 0;
 };
 
 struct WalkStepResult {

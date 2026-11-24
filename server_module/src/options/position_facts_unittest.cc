@@ -5,6 +5,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string>
 #include <vector>
@@ -128,6 +129,46 @@ TEST(PositionFactsTest, ClusterDungeonHostilesGroupsRoomsAndKeepsNearestBoss) {
   // Nearest boss replaces last slot when beyond max_candidates trash packs.
   EXPECT_EQ(clusters[1].label, "Selin Fireheart (boss)");
   EXPECT_TRUE(clusters[1].has_boss);
+}
+
+TEST(PositionFactsTest, ClusterDungeonHostilesEdgeCasesAndConfigClamps) {
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  const std::vector<DungeonHostile> hostiles = {
+      {"", {60, 0, 0}, false},             // Empty name skipped.
+      {"NaN Mob", {nan, 0, 0}, false},     // NaN coord safely skipped.
+      {"Trash Guard", {80, 0, 0}, false},  // Cluster 1 leader initially.
+      {"Room Boss", {85, 0, 0}, true},     // Promotes cluster 1 to boss.
+      {"Far Pack A", {120, 0, 0}, false},  // 40 yd from Trash Guard.
+      {"Far Pack B", {130, 0, 0}, false},  // 10 yd from Far Pack A.
+  };
+
+  // max_cluster_candidates=0 and cluster_radius_yd<=0 clamp safely to 1 / 1.0.
+  const std::vector<DungeonCluster> clamped =
+      ClusterDungeonHostiles({0, 0, 0}, hostiles,
+                             DungeonNavConfig{.cluster_radius_yd = -5.0f,
+                                              .max_cluster_candidates = 0});
+  ASSERT_EQ(clamped.size(), 1u);
+  EXPECT_EQ(clamped[0].label, "Room Boss (boss)");
+  EXPECT_TRUE(clamped[0].has_boss);
+
+  // Small cluster_radius_yd=5 keeps Far Pack A and Far Pack B separate;
+  // boss promotion within radius 10 merges Trash Guard + Room Boss.
+  const std::vector<DungeonCluster> split = ClusterDungeonHostiles(
+      {0, 0, 0}, hostiles,
+      DungeonNavConfig{.cluster_radius_yd = 6.0f, .max_cluster_candidates = 5});
+  ASSERT_EQ(split.size(), 3u);
+  EXPECT_EQ(split[0].label, "Room Boss (boss)");
+  EXPECT_EQ(split[1].label, "Far Pack A");
+  EXPECT_EQ(split[2].label, "Far Pack B");
+
+  // Larger cluster_radius_yd=20 merges Far Pack A + Far Pack B into one pack.
+  const std::vector<DungeonCluster> merged =
+      ClusterDungeonHostiles({0, 0, 0}, hostiles,
+                             DungeonNavConfig{.cluster_radius_yd = 20.0f,
+                                              .max_cluster_candidates = 5});
+  ASSERT_EQ(merged.size(), 2u);
+  EXPECT_EQ(merged[0].label, "Room Boss (boss)");
+  EXPECT_EQ(merged[1].label, "Far Pack A (2)");
 }
 
 TEST(PositionFactsTest, NearestTurnInAndNearestObjectiveBecomePlaces) {

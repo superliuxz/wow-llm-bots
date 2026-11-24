@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Unit tests for varied and held-out soak suite definitions."""
 
+import inspect
 import json
 import pathlib
 import sys
@@ -10,6 +11,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "tools" / "bench"))
+from wlblib import testing as wlb_testing  # noqa: E402
 from wlblib.cases import soak as soak_case  # noqa: E402
 import soak_scorer  # noqa: E402
 
@@ -99,6 +101,26 @@ class SoakSuitesTest(unittest.TestCase):
             self.assertEqual(res["progress"]["stuck_bots"], 2)
             self.assertEqual(res["progress"]["moved_bots"], 0)
             self.assertFalse(res["guardrails_ok"])
+
+    def test_runs_zero_defaults_and_profession_tool_command(self):
+        # testing.soak() defaults runs=0 (run full suite once).
+        self.assertEqual(inspect.signature(wlb_testing.soak).parameters["runs"].default, 0)
+        self.assertEqual(
+            soak_case._resolve_scenarios("endurance", 0),
+            list(soak_case.SUITES["endurance"]),
+        )
+        self.assertEqual(
+            soak_case._resolve_scenarios("varied", 0),
+            list(soak_case.SUITES["varied"]),
+        )
+        self.assertEqual(
+            soak_case._resolve_scenarios("soak_classic_ulda", 0),
+            ["soak_classic_ulda"],
+        )
+        # Profession tool seeding must emit `llmtest item` (not `llmtest additem`).
+        mining_cmds = soak_case._profession_setup_cmds("Loada", "mining", 150)
+        self.assertIn("llmtest item Loada 2901", mining_cmds)
+        self.assertFalse(any("additem" in c for c in mining_cmds))
 
 
 if __name__ == "__main__":

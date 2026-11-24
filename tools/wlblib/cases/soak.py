@@ -379,7 +379,7 @@ SUITES = {
 
 
 def _profession_setup_cmds(bot_name: str, prof_name: str, rank: int) -> list[str]:
-    """Builds `llmtest learn`/`setskill`/`additem` commands for a profession."""
+    """Builds `llmtest learn`/`setskill`/`item` commands for a profession."""
     skill_id, tiers, extra_spells, tool_item = PROFESSIONS[prof_name]
     chosen_cap, chosen_spell = tiers[-1]
     for cap, spell_id in tiers:
@@ -392,7 +392,7 @@ def _profession_setup_cmds(bot_name: str, prof_name: str, rank: int) -> list[str
         out.append(f"llmtest learn {bot_name} {extra}")
     out.append(f"llmtest setskill {bot_name} {skill_id} {value} {chosen_cap}")
     if tool_item is not None:
-        out.append(f"llmtest additem {bot_name} {tool_item}")
+        out.append(f"llmtest item {bot_name} {tool_item}")
     return out
 
 

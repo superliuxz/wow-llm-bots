@@ -36,8 +36,9 @@ class BotManager {
   BotManager& operator=(const BotManager&) = delete;
   ~BotManager();
 
-  // Every world update: logs bots in (and back in after a drop) and keeps
-  // their strategies applied. Does real work at most once per second.
+  // Every world update: attaches policy listeners on every tick (O(1) hash
+  // lookup) and runs Tick() at most once per second to log bots in and keep
+  // their strategies applied.
   void Update(uint32_t diff_ms);
   // Logs our bots out (server shutdown).
   void Stop();

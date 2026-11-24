@@ -164,12 +164,12 @@ LlmBrain.ObserveHumans = 0
 #    LlmBrain.DungeonSeamBridgeMaxClimbYd
 #        Description: Geometry thresholds for multi-room dungeon Explore spots
 #                     and disconnected navmesh seam bridging (e.g. entrance
-#                     stairs/ledges). Defaults: 30, 12, 60, 15, 1, 12, 2.5.
+#                     stairs/ledges). Defaults: 30, 12, 60, 15, 1, 6, 2.5.
 
 LlmBrain.DungeonClusterRadiusYd = 30
 LlmBrain.DungeonMaxClusterCandidates = 12
 LlmBrain.DungeonUnloadedProbeYd = 60
 LlmBrain.DungeonIncompleteProgressSlackYd = 15
 LlmBrain.DungeonSeamBridgeEnable = 1
-LlmBrain.DungeonSeamBridgeMaxDropYd = 12
+LlmBrain.DungeonSeamBridgeMaxDropYd = 6
 LlmBrain.DungeonSeamBridgeMaxClimbYd = 2.5

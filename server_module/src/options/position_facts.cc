@@ -49,7 +49,10 @@ std::vector<DungeonCluster> ClusterDungeonHostiles(
     const wlb::snapshot::Vec3& from,
     const std::vector<DungeonHostile>& hostiles,
     const DungeonNavConfig& nav) {
-  const float cluster_radius_yd = std::max(1.0f, nav.cluster_radius_yd);
+  const float cluster_radius_yd =
+      (!std::isfinite(nav.cluster_radius_yd) || nav.cluster_radius_yd < 1.0f)
+          ? 1.0f
+          : nav.cluster_radius_yd;
   const size_t max_candidates = std::max<size_t>(1, nav.max_cluster_candidates);
   struct Pending {
     const DungeonHostile* h = nullptr;
@@ -62,7 +65,7 @@ std::vector<DungeonCluster> ClusterDungeonHostiles(
       continue;
     }
     const float d = Dist(from, h.pos.x, h.pos.y, h.pos.z);
-    if (d < kMinTravelDistYd || d > kMaxTravelDistYd) {
+    if (!(d >= kMinTravelDistYd && d <= kMaxTravelDistYd)) {
       continue;
     }
     sorted.push_back({&h, d});

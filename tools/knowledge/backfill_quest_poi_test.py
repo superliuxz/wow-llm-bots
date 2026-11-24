@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import pathlib
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import backfill_quest_poi as bqp  # noqa: E402
@@ -85,19 +87,45 @@ class BackfillQuestPoiTest(unittest.TestCase):
         self.assertIn("INSERT INTO `quest_poi`", sql)
         self.assertIn("INSERT INTO `quest_poi_points`", sql)
 
-    def test_zero_lootid_ignored_and_apply_sql_validates_db_names(self) -> None:
+    def test_zero_lootid_ignored_and_apply_sql_dedupes_and_validates_db_names(self) -> None:
         # Creatures with lootid == 0 must not be linked to creature_loot_template
         # entries sharing their creature_template.entry ID.
+        kc_map, loot_map = bqp.build_creature_loot_map([
+            (305, 0, 0, 0),    # lootid == 0 -> omitted
+            (306, 99, 0, 700), # lootid == 700 -> mapped
+        ])
+        self.assertEqual(kc_map, {99: {306}})
+        self.assertEqual(loot_map, {700: {306}})
         item_c, _ = bqp.build_item_sources(
-            creature_loot_rows=[(305, 900, 0)],
+            creature_loot_rows=[(305, 900, 0), (700, 901, 0)],
             go_loot_rows=[],
             ref_items={},
-            lootid_to_creatures={},  # creature 305 had lootid=0 -> omitted
+            lootid_to_creatures=loot_map,
             lootid_to_gos={},
         )
         self.assertEqual(item_c.get(900, set()), set())
+        self.assertEqual(item_c.get(901, set()), {306})
+
         with self.assertRaises(ValueError):
             bqp.apply_sql(pathlib.Path("/nonexistent"), pathlib.Path(__file__), ["bad;db"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            sql_file = pathlib.Path(tmp) / "test.sql"
+            sql_file.write_text("SELECT 1;\n", encoding="utf-8")
+            with (
+                mock.patch.object(bqp, "_mysql_query", return_value=[["acore_world"]]) as mq,
+                mock.patch.object(bqp.subprocess, "run") as srun,
+            ):
+                bqp.apply_sql(
+                    pathlib.Path("/tmp/my.cnf"),
+                    sql_file,
+                    ["acore_world", "acore_world", "acore_world_test"],
+                )
+            # Duplicate "acore_world" must be deduplicated so each DB is applied once.
+            self.assertEqual(mq.call_count, 2)
+            self.assertEqual(srun.call_count, 2)
+            applied_dbs = [call.args[0][-1] for call in srun.call_args_list]
+            self.assertEqual(applied_dbs, ["acore_world", "acore_world_test"])
 
 
 if __name__ == "__main__":
