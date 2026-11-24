@@ -102,7 +102,7 @@ TEST(PromptTest, TheSystemPromptIsIdenticalAcrossEveryBot) {
   EXPECT_EQ(system_a, system_b);
 }
 
-TEST(PromptTest, ScreenComesBeforeNotesAndNotesAreCapped) {
+TEST(PromptTest, StaticNotesPrecedeDynamicScreenForKvCacheAndAreCapped) {
   PromptInput input = SampleInput();
   input.active_orders = {"Defile on me -> away 25"};
   input.notes = std::string(5000, 'X');
@@ -113,7 +113,8 @@ TEST(PromptTest, ScreenComesBeforeNotesAndNotesAreCapped) {
   ASSERT_NE(screen_pos, std::string::npos);
   ASSERT_NE(notes_pos, std::string::npos);
   ASSERT_NE(orders_pos, std::string::npos);
-  EXPECT_LT(screen_pos, notes_pos);
+  EXPECT_LT(notes_pos, orders_pos);
+  EXPECT_LT(orders_pos, screen_pos);
   EXPECT_NE(request.user.find("Defile on me -> away 25"), std::string::npos);
   EXPECT_NE(request.user.find("[truncated]"), std::string::npos);
   EXPECT_LE(request.user.size(), 12000u);

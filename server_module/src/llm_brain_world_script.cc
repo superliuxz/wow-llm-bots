@@ -102,6 +102,11 @@ TargetProgress OptionTargetProgress(Player* bot,
   const auto cut = [](std::string why) {
     return TargetProgress{.interrupted = std::move(why)};
   };
+  if ((target.kind == OptionTarget::Kind::kUse &&
+       (target.guid == "rez:release" || target.guid == "rez:accept")) ||
+      target.kind == OptionTarget::Kind::kLeaveGroup) {
+    return done();
+  }
   if (target.kind != OptionTarget::Kind::kKeep && !bot->IsAlive()) {
     return cut("you died");
   }
@@ -130,7 +135,8 @@ TargetProgress OptionTargetProgress(Player* bot,
     case OptionTarget::Kind::kGather:
     case OptionTarget::Kind::kUse: {
       if (target.kind == OptionTarget::Kind::kUse &&
-          target.guid.starts_with("equip:")) {
+          (target.guid.starts_with("equip:") ||
+           target.guid.starts_with("talent:"))) {
         return done();
       }
       if (target.kind == OptionTarget::Kind::kUse &&
@@ -1475,16 +1481,24 @@ class LlmBrainWorldScript : public WorldScript {
         SampleOneObserved(bot, "bot", now, time_ms, mono_us);
       }
     }
-    if (!config_.observe_humans) {
-      return;
-    }
-    for (const auto& [guid, player] : ObjectAccessor::GetPlayers()) {
-      if (!player || !player->IsInWorld() ||
-          GET_PLAYERBOT_AI(player) != nullptr ||
-          BotIndex(player->GetName()) != config_.bots.size()) {
-        continue;
+    if (config_.observe_humans) {
+      for (const auto& [guid, player] : ObjectAccessor::GetPlayers()) {
+        if (!player || !player->IsInWorld() ||
+            GET_PLAYERBOT_AI(player) != nullptr ||
+            BotIndex(player->GetName()) != config_.bots.size()) {
+          continue;
+        }
+        SampleOneObserved(player, "human", now, time_ms, mono_us);
       }
-      SampleOneObserved(player, "human", now, time_ms, mono_us);
+    }
+    if (!observed_state_.empty() &&
+        (last_observed_prune_.is_null() ||
+         now - last_observed_prune_ >= base::Seconds(10))) {
+      last_observed_prune_ = now;
+      std::erase_if(observed_state_, [](const auto& kv) {
+        Player* p = ObjectAccessor::FindConnectedPlayer(ObjectGuid(kv.first));
+        return !p || !p->IsInWorld();
+      });
     }
   }
 
@@ -1510,6 +1524,7 @@ class LlmBrainWorldScript : public WorldScript {
     bool jumping = false;
   };
   std::unordered_map<uint64_t, ObservedState> observed_state_;
+  base::TimeTicks last_observed_prune_;
   uint32 since_stats_ms_ = 0;
   size_t max_update_snapshots_ = 0;
   base::TimeDelta max_update_time_;

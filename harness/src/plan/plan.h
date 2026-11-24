@@ -72,8 +72,9 @@ struct Plan {
   std::vector<int>
       expect;  // Options this plan deals with (don't wake for them).
   std::vector<Watch> watches;
-  int look_s = 0;   // Wake anyway after this many seconds.
-  std::string say;  // Out loud. Empty: nothing to say.
+  int look_s = 0;     // Wake anyway after this many seconds.
+  std::string say;    // Out loud. Empty: nothing to say.
+  std::string party;  // Party or raid chat. Empty: none.
   // A whisper: to `tell_to` (a character name), `tell`. Empty: none.
   std::string tell_to;
   std::string tell;

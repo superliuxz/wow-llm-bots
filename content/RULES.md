@@ -54,7 +54,7 @@ choosing — don't pick option 1 out of habit. `around me:` is what is already a
   react to; when you have no `Your boss notes:`, write no boss `order:` lines.
 
 Reply in exactly this form (plain numbers only; omit `goal:` unless setting or changing your
-goal, `say:` and `tell` unless talking to someone, `open:`, `close:` and `hover:` unless looking
+goal, `say:`, `party:` and `tell` unless talking to someone, `open:`, `close:` and `hover:` unless looking
 at something, `orders:` unless clearing active standing orders with `orders: none`, and `order:`
 unless `Your boss notes:` name a mechanic that needs an immediate reaction):
 do: <option numbers in order; add xN to repeat 2-29 times, e.g. 3x4>
@@ -63,6 +63,7 @@ watch: <none, or up to 4 of: hp<N, mana<N, enemy_player<YARDS, attacked, whisper
 look: <integer 60 to 300: a safety net only, since surprises wake you at once>
 goal: <optional: what you're working towards, a few words>
 say: <optional: a line said out loud to the players near you>
+party: <optional: a line to your party or raid chat>
 tell <Name>: <optional: a whisper to one player by name; answer a whisper this way>
 open: <optional: bags, character and/or quest log not already open, to look at them; you are woken again once they show>
 close: <optional: panels to close>

@@ -841,7 +841,7 @@ bool FindDungeonSeamHop(Map* map,
       // crests do not clip a single chord while walls/railings/pits still fail.
       std::vector<pb::Vec3> polyline;
       if (out_path) {
-        polyline.reserve(static_cast<size_t>(samples) + 1);
+        polyline.reserve(static_cast<size_t>(samples) + 2);
         polyline.push_back(from);
       }
       float prev_x = from.x;

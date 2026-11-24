@@ -283,10 +283,12 @@ TEST(PlanTest, MistypedOrdersLineFailsParseInsteadOfSilentDrop) {
 TEST(PlanTest, ATellLineIsAWhisperToOnePlayer) {
   const std::optional<Plan> plan = ParsePlan(
       "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
-      "say: hello all\ntell Gatda: sure, inviting you now",
+      "say: hello all\nparty: oom, drinking\n"
+      "tell Gatda: sure, inviting you now",
       2);
   ASSERT_TRUE(plan);
   EXPECT_EQ(plan->say, "hello all");
+  EXPECT_EQ(plan->party, "oom, drinking");
   EXPECT_EQ(plan->tell_to, "Gatda");
   EXPECT_EQ(plan->tell, "sure, inviting you now");
   EXPECT_EQ(ParsePlan(FormatPlan(*plan), 2), plan);

@@ -106,11 +106,15 @@ std::flat_map<std::string, std::string> LoadInstanceNotesIndex(
     return index;
   }
   for (const auto& entry : std::filesystem::directory_iterator(notes_dir, ec)) {
-    if (ec || !entry.is_directory(ec)) {
+    if (ec) {
+      break;
+    }
+    std::error_code entry_ec;
+    if (!entry.is_directory(entry_ec) || entry_ec) {
       continue;
     }
     const std::filesystem::path notes_path = entry.path() / "notes.md";
-    if (!std::filesystem::is_regular_file(notes_path, ec)) {
+    if (!std::filesystem::is_regular_file(notes_path, entry_ec) || entry_ec) {
       continue;
     }
     const std::optional<std::string> text = ReadFile(notes_path.string());
@@ -207,6 +211,7 @@ void BotLoop::OnConnectionChanged(bool connected) {
       state.has_ever_woken = false;
       state.was_in_instance = false;
       state.last_map.clear();
+      state.notes.clear();
       state.last_selected_notes.clear();
       state.recent_chat_command_ids.clear();
       state.has_queued_wake = false;
@@ -603,6 +608,7 @@ void BotLoop::OnTick(base::TimeTicks now) {
       state.has_ever_woken = false;
       state.was_in_instance = false;
       state.last_map.clear();
+      state.notes.clear();
       state.last_selected_notes.clear();
       state.recent_chat_command_ids.clear();
       state.has_queued_wake = false;
@@ -692,9 +698,14 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
     }
   }
   if (!config_.bots_dir.empty()) {
-    state.notes =
+    const std::string per_bot =
         ReadFile(base::StrCat({config_.bots_dir, "/", bot, "/notes.md"}))
             .value_or("");
+    if (!per_bot.empty()) {
+      state.notes = per_bot;
+    } else if (!state.latest_snapshot->base.where.in_instance) {
+      state.notes.clear();
+    }
   }
 
   state.has_queued_wake = false;
@@ -990,6 +1001,14 @@ void BotLoop::OnReply(const std::string& bot,
             }
           }
           SendSay(bot, ch, "", plan->say);
+        }
+        const bool in_party =
+            state.latest_snapshot->ext.party &&
+            !state.latest_snapshot->ext.party->members.empty();
+        const bool in_raid = state.latest_snapshot->ext.raid &&
+                             !state.latest_snapshot->ext.raid->members.empty();
+        if (!plan->party.empty() && (in_party || in_raid)) {
+          SendSay(bot, in_raid ? pb::RAID : pb::PARTY, "", plan->party);
         }
         if (!plan->tell.empty()) {
           SendSay(bot, pb::WHISPER, plan->tell_to, plan->tell);

@@ -1,13 +1,15 @@
-"""Live verification of playability fixes: party chat non-loop & talent spending.
+"""Live verification of playability fixes: party chat, incremental talents, dead release.
 
-Verifies:
+Verifies on the isolated `playability` test stack:
   1. High 4: When Loada and Telda are grouped and Loada sends a PARTY chat line,
      Telda hears it with `at_me=False` (bot-to-bot party chat must not trigger
      wake/reply loops).
-  2. High 1: When Loada levels to 20 (gaining unspent talent points), Loada's
-     snapshot offers `Spend talent points in <Tree>`, choosing it spends all
-     free points, and the option disappears on subsequent snapshots.
-  3. Cleanup: Loada leaves the group so shared `whisper` stack stays clean.
+  2. High 1 + R8614690-H4: When Loada levels to 15 (6 points) and then levels
+     1 point at a time (16, then 17), `Spend talent points in <Tree>` spends all
+     free points each time and clears `self.indicators.talent_points_unspent`.
+  3. High 3 + Medium 1 + R8614690-H2: When Loada is killed (`llmtest kill Loada`),
+     Loada's snapshot enters `DEAD_BODY`, offers `Release spirit`, choosing it
+     succeeds without `"you died"` error, and Loada transitions to `GHOST`.
 """
 
 import socket
@@ -23,7 +25,7 @@ import wire_py  # noqa: E402
 from frame_reader import FrameReader  # noqa: E402
 
 NAME = "playability"
-DESCRIPTION = "Bot-to-bot party chat has at_me=False; bot spends unspent talent points"
+DESCRIPTION = "Party chat non-loop, incremental 1-pt talent spending, and dead Release spirit"
 TEST_CONFIG = "playability"
 BOT = "Loada"
 ONLINE = 2
@@ -36,7 +38,7 @@ def _send_cmd(sock, cmd):
 
 def run(stack):
     server.console("llmtest group Loada Telda", inst=TEST)
-    server.console("character level Loada 20", inst=TEST)
+    server.console("character level Loada 15", inst=TEST)
 
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(0.5)
@@ -46,15 +48,23 @@ def run(stack):
     cmd_id = 0
     party_sent = False
     heard_party_event = None
-    talent_chosen = False
-    talent_spent_verified = False
+    # Talent stages: 0 = spend L15 (6 pts), 1 = spend L16 (1 pt), 2 = spend L17 (1 pt), 3 = done.
+    talent_stage = 0
+    talent_cmd_in_flight = False
+    kill_issued = False
+    release_cmd_sent = False
+    ghost_verified = False
+    leave_sent = False
     left_group = False
     errors = []
 
-    deadline = time.time() + 30.0
+    deadline = time.time() + 45.0
     try:
         while time.time() < deadline and not (
-            heard_party_event is not None and talent_spent_verified and left_group
+            heard_party_event is not None
+            and talent_stage == 3
+            and ghost_verified
+            and left_group
         ):
             try:
                 chunk = sock.recv(1 << 20)
@@ -85,14 +95,18 @@ def run(stack):
                 if not snap:
                     continue
                 bot = snap.get("bot", "")
+                if bot != "Loada":
+                    continue
                 seq = snap.get("seq", 0)
                 options = snap.get("options", [])
+                self_info = snap.get("base", {}).get("self", {})
+                indicators = self_info.get("indicators", {})
                 party_members = [
                     m.get("name", "")
                     for m in snap.get("ext", {}).get("party", {}).get("members", [])
                 ]
 
-                if bot == "Loada" and not party_sent and "Telda" in party_members:
+                if not party_sent and "Telda" in party_members:
                     cmd_id += 1
                     _send_cmd(
                         sock,
@@ -104,43 +118,80 @@ def run(stack):
                     )
                     party_sent = True
 
-                if bot == "Loada" and not talent_chosen:
+                # Incremental talent spending across L15 -> L16 (+1 pt) -> L17 (+1 pt).
+                if talent_stage < 3:
                     talent_idx = next(
                         (
                             i
                             for i, o in enumerate(options, 1)
-                            if o.get("guid", "").startswith("talent:")
+                            if o.get("guid") == "talent:0"
                         ),
                         None,
                     )
-                    if talent_idx is not None:
-                        cmd_id += 1
-                        _send_cmd(
-                            sock,
-                            {
-                                "bot": "Loada",
-                                "command_id": cmd_id,
-                                "choose": {"option": talent_idx, "seq": seq},
-                            },
-                        )
-                        talent_chosen = True
-                elif bot == "Loada" and talent_chosen and not talent_spent_verified:
-                    has_talent_opt = any(
-                        o.get("guid", "").startswith("talent:") for o in options
-                    )
-                    unspent = snap.get("base", {}).get("self", {}).get("unspent_talents", 0)
-                    if not has_talent_opt and unspent == 0:
-                        talent_spent_verified = True
+                    unspent_flag = bool(indicators.get("talent_points_unspent", False))
+                    if not talent_cmd_in_flight:
+                        if talent_idx is not None:
+                            cmd_id += 1
+                            _send_cmd(
+                                sock,
+                                {
+                                    "bot": "Loada",
+                                    "command_id": cmd_id,
+                                    "choose": {"option": talent_idx, "seq": seq},
+                                },
+                            )
+                            talent_cmd_in_flight = True
+                    elif talent_idx is None and not unspent_flag:
+                        talent_cmd_in_flight = False
+                        talent_stage += 1
+                        if talent_stage == 1:
+                            server.console("character level Loada 16", inst=TEST)
+                        elif talent_stage == 2:
+                            server.console("character level Loada 17", inst=TEST)
 
+                # Once talents + party chat are verified, move both into Ragefire
+                # Chasm with Telda knowing Resurrection (2006) so BrainPolicyListener
+                # holds auto-release, kill Loada, and verify Release spirit -> GHOST.
                 if (
-                    bot == "Loada"
+                    talent_stage == 3
                     and heard_party_event is not None
-                    and talent_spent_verified
-                    and not left_group
+                    and not ghost_verified
                 ):
+                    state = self_info.get("state", "")
+                    if not kill_issued:
+                        server.console("llmtest learn Telda 2006", inst=TEST)
+                        server.console("llmtest tele Loada 389 2.0 -8.0 -15.0 0", inst=TEST)
+                        server.console("llmtest tele Telda 389 2.0 -8.0 -15.0 0", inst=TEST)
+                        time.sleep(1.5)
+                        server.console("llmtest kill Loada", inst=TEST)
+                        kill_issued = True
+                    elif state == "DEAD_BODY" and not release_cmd_sent:
+                        rel_idx = next(
+                            (
+                                i
+                                for i, o in enumerate(options, 1)
+                                if o.get("guid") == "rez:release"
+                            ),
+                            None,
+                        )
+                        if rel_idx is not None:
+                            cmd_id += 1
+                            _send_cmd(
+                                sock,
+                                {
+                                    "bot": "Loada",
+                                    "command_id": cmd_id,
+                                    "choose": {"option": rel_idx, "seq": seq},
+                                },
+                            )
+                            release_cmd_sent = True
+                    elif release_cmd_sent and state == "GHOST":
+                        ghost_verified = True
+
+                if ghost_verified and not left_group:
                     if "Telda" not in party_members:
                         left_group = True
-                    else:
+                    elif not leave_sent:
                         leave_idx = next(
                             (
                                 i
@@ -159,6 +210,7 @@ def run(stack):
                                     "choose": {"option": leave_idx, "seq": seq},
                                 },
                             )
+                            leave_sent = True
     finally:
         sock.close()
 
@@ -171,9 +223,12 @@ def run(stack):
         not heard_party_event.get("at_me", False),
         f"bot-to-bot PARTY chat must have at_me=False, got {heard_party_event}",
     )
-    expect(talent_chosen, "Loada never saw a Spend talent points option at level 20")
     expect(
-        talent_spent_verified,
-        "Loada's unspent talent points did not drop to 0 after choosing talent option",
+        talent_stage == 3,
+        f"incremental talent spending stalled at stage {talent_stage} (expected 3)",
     )
-    return "bot-to-bot PARTY chat at_me=False; level-20 talent points spent cleanly"
+    expect(
+        release_cmd_sent and ghost_verified,
+        f"dead Release spirit failed (release_cmd_sent={release_cmd_sent}, ghost_verified={ghost_verified})",
+    )
+    return "PARTY at_me=False; L15->L16->L17 incremental talents spent; DEAD_BODY->Release spirit->GHOST ok"

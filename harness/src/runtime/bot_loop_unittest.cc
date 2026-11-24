@@ -1670,9 +1670,10 @@ TEST(BotLoopTest, AutoLoadsInstanceNotesFromNotesDirOnInstanceEntry) {
   const std::filesystem::path tmp_dir =
       std::filesystem::temp_directory_path() / "wlb_bot_loop_notes_dir_test";
   std::filesystem::remove_all(tmp_dir);
-  std::filesystem::create_directories(tmp_dir / "ICC");
+  std::filesystem::create_directories(tmp_dir / "notes" / "ICC");
+  std::filesystem::create_directories(tmp_dir / "bots");
   {
-    std::ofstream f(tmp_dir / "ICC" / "notes.md");
+    std::ofstream f(tmp_dir / "notes" / "ICC" / "notes.md");
     f << "# Icecrown Citadel (ICC)\n\n"
       << "## The Lich King\n"
       << "- Defile: move out immediately.\n"
@@ -1682,7 +1683,11 @@ TEST(BotLoopTest, AutoLoadsInstanceNotesFromNotesDirOnInstanceEntry) {
   CannedBrain brain;
   BotLoopConfig cfg;
   cfg.rules = "RULES";
-  cfg.notes_dir = tmp_dir.string();
+  // Real play always has a non-empty `bots_dir` (default `var/bots`) with no
+  // per-bot `notes.md`; `StartBotCall` must not wipe auto-loaded instance
+  // notes.
+  cfg.bots_dir = (tmp_dir / "bots").string();
+  cfg.notes_dir = (tmp_dir / "notes").string();
   cfg.stale_snapshot_after = base::Seconds(3600);
   BotLoop loop(cfg, brain.Fn(), [](const pb::Command&) {});
 

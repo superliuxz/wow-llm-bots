@@ -287,50 +287,83 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
           : kMinUserBudgetTokens;
   const size_t max_user_bytes = user_budget_tokens * kBytesPerTokenEstimate;
 
-  std::string prefix = base::StrCat({"You are ", OneLine(input.bot_name), "."});
+  // Static prefix: bot identity + static reference sections (boss notes, world
+  // guide) come before dynamic per-wake fields and the live screen so llama.cpp
+  // can reuse the KV-cache prefix across consecutive wakes.
+  std::string static_prefix =
+      base::StrCat({"You are ", OneLine(input.bot_name), "."});
   if (!input.identity.empty()) {
-    base::StrAppend(&prefix, {"\n\n", input.identity});
+    base::StrAppend(&static_prefix, {"\n\n", input.identity});
   }
-  base::StrAppend(&prefix, {"\n\n"});
+
+  std::string dynamic_prefix = "\n\n";
   if (!input.current_goal.empty()) {
-    base::StrAppend(&prefix,
+    base::StrAppend(&dynamic_prefix,
                     {"Current goal: ", OneLine(input.current_goal), ".\n"});
   }
   if (!input.last_outcome.empty()) {
-    base::StrAppend(&prefix,
+    base::StrAppend(&dynamic_prefix,
                     {"Last outcome: ", OneLine(input.last_outcome), ".\n"});
   }
-  base::StrAppend(&prefix, {"Woken: ", OneLine(input.wake_reason), "."});
+  base::StrAppend(&dynamic_prefix,
+                  {"Woken: ", OneLine(input.wake_reason), "."});
   if (!input.recent_events.empty()) {
-    base::StrAppend(&prefix, {"\n\nSince your last look:"});
+    base::StrAppend(&dynamic_prefix, {"\n\nSince your last look:"});
     for (const std::string& event : input.recent_events) {
-      base::StrAppend(&prefix, {"\n- ", OneLine(event)});
+      base::StrAppend(&dynamic_prefix, {"\n- ", OneLine(event)});
     }
   }
   if (!input.active_orders.empty()) {
-    base::StrAppend(&prefix, {"\n\nActive standing orders:"});
+    base::StrAppend(&dynamic_prefix, {"\n\nActive standing orders:"});
     for (const std::string& ord : input.active_orders) {
-      base::StrAppend(&prefix, {"\n- ", OneLine(ord)});
+      base::StrAppend(&dynamic_prefix, {"\n- ", OneLine(ord)});
     }
   }
 
   const std::string screen_block =
       base::StrCat({"\n\nYour screen now:\n", screen.text});
 
-  // Drop remembered panels first when tight on token budget so they never
-  // crowd out the live screen or `also:` options.
+  // Reserve room for mandatory blocks (static identity + dynamic state + live
+  // screen) first, then allocate remaining budget in priority order:
+  // boss notes -> world guide -> remembered panels.
+  const size_t mandatory_bytes =
+      static_prefix.size() + dynamic_prefix.size() + screen_block.size();
+  size_t remaining =
+      max_user_bytes > mandatory_bytes ? max_user_bytes - mandatory_bytes : 0;
+
+  std::string notes_block;
+  if (!input.notes.empty()) {
+    constexpr std::string_view kHeader = "\n\nYour boss notes:\n";
+    if (remaining > kHeader.size() + 32) {
+      const size_t budget =
+          std::min(kMaxNotesBytes, remaining - kHeader.size());
+      notes_block = base::StrCat({kHeader, CapText(input.notes, budget)});
+      remaining -= notes_block.size();
+    }
+  }
+
+  std::string knowledge_block;
+  if (!input.knowledge.empty()) {
+    constexpr std::string_view kHeader = "\n\nWorld guide:\n";
+    if (remaining > kHeader.size() + 32) {
+      constexpr size_t kMaxKnowledgePromptBytes = 1200;
+      const size_t budget =
+          std::min(kMaxKnowledgePromptBytes, remaining - kHeader.size());
+      knowledge_block =
+          base::StrCat({kHeader, CapText(input.knowledge, budget)});
+      remaining -= knowledge_block.size();
+    }
+  }
+
   std::string remembered_block;
-  if (!input.remembered.empty() &&
-      prefix.size() + screen_block.size() < max_user_bytes) {
-    const size_t rem_budget =
-        max_user_bytes - prefix.size() - screen_block.size();
+  if (!input.remembered.empty()) {
     constexpr std::string_view kRemHeader =
         "\n\nYou remember (not on screen now):";
-    if (rem_budget > kRemHeader.size() + 32) {
+    if (remaining > kRemHeader.size() + 32) {
       std::string buf(kRemHeader);
       bool added_any = false;
       for (const std::string& line : input.remembered) {
-        if (buf.size() + 1 + line.size() > rem_budget) {
+        if (buf.size() + 1 + line.size() > remaining) {
           break;
         }
         buf.push_back('\n');
@@ -343,30 +376,8 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
     }
   }
 
-  request.user = base::StrCat({prefix, remembered_block, screen_block});
-
-  // Put combat-critical boss notes ahead of open-world guide, strictly within
-  // remaining budget so live screen & options are never crowded out.
-  if (!input.notes.empty() && request.user.size() < max_user_bytes) {
-    const size_t remaining = max_user_bytes - request.user.size();
-    constexpr std::string_view kHeader = "\n\nYour boss notes:\n";
-    if (remaining > kHeader.size() + 32) {
-      const size_t budget =
-          std::min(kMaxNotesBytes, remaining - kHeader.size());
-      base::StrAppend(&request.user, {kHeader, CapText(input.notes, budget)});
-    }
-  }
-  if (!input.knowledge.empty() && request.user.size() < max_user_bytes) {
-    const size_t remaining = max_user_bytes - request.user.size();
-    constexpr std::string_view kHeader = "\n\nWorld guide:\n";
-    if (remaining > kHeader.size() + 32) {
-      constexpr size_t kMaxKnowledgePromptBytes = 1200;
-      const size_t budget =
-          std::min(kMaxKnowledgePromptBytes, remaining - kHeader.size());
-      base::StrAppend(&request.user,
-                      {kHeader, CapText(input.knowledge, budget)});
-    }
-  }
+  request.user = base::StrCat({static_prefix, notes_block, knowledge_block,
+                               dynamic_prefix, remembered_block, screen_block});
   if (request.user.size() > max_user_bytes) {
     request.user = CapUserPreservingAlso(request.user, max_user_bytes);
   }
@@ -394,35 +405,42 @@ PromptBreakdown BreakdownOf(const LlmRequest& req) {
   const size_t scr_pos = req.user.find("\n\nYour screen now:\n");
   const size_t notes_pos = req.user.find("\n\nYour boss notes:\n");
   const size_t know_pos = req.user.find("\n\nWorld guide:\n");
-
-  const size_t prefix_end = rem_pos != std::string::npos   ? rem_pos
-                            : scr_pos != std::string::npos ? scr_pos
-                                                           : req.user.size();
-  b.prefix_bytes = prefix_end;
-  if (rem_pos != std::string::npos && scr_pos != std::string::npos &&
-      scr_pos > rem_pos) {
-    b.remembered_bytes = scr_pos - rem_pos;
+  const auto find_dyn_start = [&]() -> size_t {
+    size_t pos = req.user.size();
+    for (std::string_view marker :
+         {"\n\nCurrent goal: ", "\n\nLast outcome: ", "\n\nWoken: "}) {
+      if (const size_t p = req.user.find(marker); p != std::string::npos) {
+        pos = std::min(pos, p);
+      }
+    }
+    return pos;
+  };
+  const size_t dyn_pos = find_dyn_start();
+  auto next_boundary = [&](size_t start) -> size_t {
+    size_t end = req.user.size();
+    for (size_t p : {notes_pos, know_pos, dyn_pos, rem_pos, scr_pos}) {
+      if (p != std::string::npos && p > start) {
+        end = std::min(end, p);
+      }
+    }
+    return end;
+  };
+  if (notes_pos != std::string::npos) {
+    b.notes_bytes = next_boundary(notes_pos) - notes_pos;
+  }
+  if (know_pos != std::string::npos) {
+    b.knowledge_bytes = next_boundary(know_pos) - know_pos;
+  }
+  if (rem_pos != std::string::npos) {
+    b.remembered_bytes = next_boundary(rem_pos) - rem_pos;
   }
   if (scr_pos != std::string::npos) {
-    size_t scr_end = req.user.size();
-    if (notes_pos != std::string::npos && notes_pos > scr_pos) {
-      scr_end = std::min(scr_end, notes_pos);
-    }
-    if (know_pos != std::string::npos && know_pos > scr_pos) {
-      scr_end = std::min(scr_end, know_pos);
-    }
-    b.screen_bytes = scr_end - scr_pos;
+    b.screen_bytes = next_boundary(scr_pos) - scr_pos;
   }
-  if (notes_pos != std::string::npos) {
-    const size_t notes_end =
-        (know_pos != std::string::npos && know_pos > notes_pos)
-            ? know_pos
-            : req.user.size();
-    b.notes_bytes = notes_end - notes_pos;
-  }
-  if (know_pos != std::string::npos && req.user.size() > know_pos) {
-    b.knowledge_bytes = req.user.size() - know_pos;
-  }
+  const size_t accounted =
+      b.notes_bytes + b.knowledge_bytes + b.remembered_bytes + b.screen_bytes;
+  b.prefix_bytes =
+      req.user.size() > accounted ? req.user.size() - accounted : 0;
   b.est_system_tokens = EstimateTokens(req.system);
   b.est_user_tokens = EstimateTokens(req.user);
   b.est_total_tokens = b.est_system_tokens + b.est_user_tokens;

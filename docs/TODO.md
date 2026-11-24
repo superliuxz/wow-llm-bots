@@ -5,30 +5,45 @@ what exists, what comes next and in which order. **Keep it current** (CONTRIBUTI
 docs/TODO.md current"): anything unfinished, deferred or decided-but-not-built goes here, not only
 in a conversation.
 
-Last updated 2026-11-23.
+Last updated 2026-11-24.
 
 ## In progress
 
-*(Phase 4 and Phase 5 `C4` are signed off; `snapshot_builder.cc` awaits user-approved `hill_climb.py lock-scorer --force-relock` after the `place:leader` per-snapshot fix.)*
+*(Phase 4 and Phase 5 `C4` are signed off; locked `snapshot_builder.cc` and `llm_brain_world_script.cc` await user-approved `hill_climb.py lock-scorer --force-relock` after `place:leader`, `CollectTalentTrees`/`has_pending_resurrect`, and `observed_state_` pruning.)*
+
+- [x] **Review `8614690` fixes (High → Medium → Low — all verified):**
+  - **High:**
+    - [x] **R8614690-H1:** `BotLoop::StartBotCall` no longer wipes auto-loaded `content/notes/` when `<bots_dir>/<bot>/notes.md` is absent; `state.notes` is cleared on disconnect, stale-snapshot reset, and leaving an instance; verified with non-empty `cfg.bots_dir` in `BotLoopTest.AutoLoadsInstanceNotesFromNotesDirOnInstanceEntry`.
+    - [x] **R8614690-H2:** `Release spirit` (`rez:release`) now routes through `WorldSession::HandleRepopRequestOpcode` (real corpse + ghost state), `OptionTargetProgress` completes `rez:release` / `rez:accept` / `kLeaveGroup` cleanly while dead, and `e2e_playability` live-verified `DEAD_BODY -> Release spirit -> GHOST` + dead `Leave group` on `10700k`.
+    - [x] **R8614690-H3:** Replaced per-Engine `BrainPolicyListener::dead_since_ms_` with world-thread-only `DungeonDeadSinceMs()` cleared by `BotManager::Tick()` whenever alive, outside a dungeon, or offline so death #2+ always gets a fresh 90 s rez-wait window.
+    - [x] **R8614690-H4:** Replaced `PlayerbotFactory::InitTalentsBySpecNo` with direct `sTalentStore` + `Player::LearnTalent` spending in `option_executor.cc` (respecting 5-pts/row and prerequisites); live-verified L15 -> L16 (+1 pt) -> L17 (+1 pt) incremental talent spending in `e2e_playability` on `10700k`.
+  - **Medium:**
+    - [x] **R8614690-M1:** `PlanRunner::IsTargetDone` and `OptionTargetProgress` now handle `"talent:"` and `"rez:"` explicitly.
+    - [x] **R8614690-M2:** `e2e_playability.py` now checks `self.indicators.talent_points_unspent` and guards `LEAVE_GROUP` with `leave_sent`.
+    - [x] **R8614690-M3:** `docs/TODO.md` overclaims corrected and locked-file notice updated to include `snapshot_builder.cc` and `llm_brain_world_script.cc`.
+  - **Low:**
+    - [x] **R8614690-L1:** Used per-entry `std::error_code entry_ec` in `LoadInstanceNotesIndex`.
+    - [x] **R8614690-L2:** Removed Playerbots premade-spec talent delegation and duplicate `SendTalentsInfoData` (resolved with R8614690-H4).
+    - [x] **R8614690-L3:** Updated `e2e_playability.py` docstring, `docs/TODO.md` date (`2026-11-24`), and `polyline.reserve(samples + 2)` in `option_facts.cc`.
 
 - [ ] **Playability & architecture review (High → Medium → Low — focus High & Medium first, offload non-LLM runs to `10700k`):**
   - **High (blocks playing with a human):**
-    - [x] **High 1 — Bots spend talents:** added `OptionFacts::talent_trees` (`CollectTalentTrees` in `option_executor.cc`), `Spend talent points in <Tree> (<spent> pts, <free> unspent)` out-of-combat options (`options.cc`, `OptionsTest.TalentTreeOptionsOfferedOutOfCombatWhenPointsUnspent`), and `PlayerbotFactory::InitTalentsBySpecNo(bot, tab, /*reset=*/false)` execution. Live-verified on `10700k` via `e2e_playability` (level-20 bot spends all unspent points cleanly).
-    - [x] **High 2 — Boss notes auto-load in real play:** added `--notes-dir` (default `content/notes`) to `harness/src/main.cc` / `run.{h,cc}` / `bot_loop.{h,cc}` with `LoadInstanceNotesIndex` indexing `<notes_dir>/*/notes.md` by `# <Instance Name> (<Abbr>)` heading (plus dir name and `"the "`-stripped alias), auto-loading on `entered_instance` whenever `<bots_dir>/<bot>/notes.md` is absent/empty (unit-tested in `BotLoopTest.AutoLoadsInstanceNotesFromNotesDirOnInstanceEntry`).
-    - [x] **High 3 — Dead bots release/rez cleanly in dungeons:** gated Playerbots' `"auto release"` in `bot_manager.cc` on `HasLivingResurrectorOnSameMap` (checks active DBC `SPELL_EFFECT_RESURRECT` / `SPELL_EFFECT_RESURRECT_NEW`) AND `kMaxWaitForRezMs = 90000` (90 s cap), and exposed explicit `Accept resurrection` (`rez:accept`) and `Release spirit` (`rez:release`) brain options while `DEAD_BODY` (`options.cc`, `option_executor.cc`, `snapshot_builder.cc`; unit-tested in `OptionsTest.DeadBodyOffersAcceptResurrectionAndReleaseSpirit`, compile/build-verified on `10700k`, live dead-bot e2e pending).
+    - [x] **High 1 — Bots spend talents:** `OptionFacts::talent_trees` (`CollectTalentTrees`), `Spend talent points in <Tree> (<spent> pts, <free> unspent)` out-of-combat options (`options.cc`), and direct `sTalentStore` + `Player::LearnTalent` execution (`option_executor.cc`). Live-verified on `10700k` via `e2e_playability` (L15 bulk + L16/L17 1-pt incremental progression).
+    - [x] **High 2 — Boss notes auto-load in real play:** `--notes-dir` (default `content/notes`) indexes `<notes_dir>/*/notes.md` by `# <Instance Name> (<Abbr>)` heading and auto-loads on instance entry without being wiped by `StartBotCall` when `<bots_dir>/<bot>/notes.md` is absent (unit-tested with non-empty `bots_dir` in `BotLoopTest.AutoLoadsInstanceNotesFromNotesDirOnInstanceEntry`).
+    - [x] **High 3 — Dead bots release/rez cleanly in dungeons:** gated Playerbots' `"auto release"` in `bot_manager.cc` on `HasLivingResurrectorOnSameMap` + per-death `DungeonDeadSinceMs()` 90 s cap, and exposed explicit `Accept resurrection` (`rez:accept`) and `Release spirit` (`rez:release` via `HandleRepopRequestOpcode`) options while `DEAD_BODY` (unit-tested in `OptionsTest.DeadBodyOffersAcceptResurrectionAndReleaseSpirit`; `DEAD_BODY -> Release spirit -> GHOST` live-verified in Ragefire Chasm via `e2e_playability` on `10700k`).
     - [x] **High 4 — Party chat non-loop:** in `chat_scripts.cc`, gated `chat.at_me` on `sender_is_human` (`GET_PLAYERBOT_AI(player) == nullptr`) so bot-to-bot party/raid lines never trigger reply loops while human party/raid messages still wake bots. Live-verified on `10700k` via `e2e_playability` (`at_me=False` on bot-to-bot `PARTY` chat).
   - **Medium:**
-    - [x] **Medium 1 — Ghost teleport cheat removed:** deleted `RecoverStuckDungeonGhost` and `stuck_ghost_since_ms` from `bot_manager.{h,cc}` and gave the brain explicit `Accept resurrection` and `Release spirit` options (see High 3).
+    - [x] **Medium 1 — Ghost teleport cheat removed:** deleted `RecoverStuckDungeonGhost` and `stuck_ghost_since_ms` from `bot_manager.{h,cc}` and live-verified real `Release spirit` -> `GHOST` (see High 3).
     - [ ] **Medium 2 — `"Talk to"` makes the choices in C++ (`TalkToNpcNow`, `option_executor.cc:418`):** accepts every quest on offer, picks quest reward using playerbots' stat weights, learns all class spells, and sells grey items / repairs; the brain can't decline a quest or choose a reward (contradicts `"the brain decides"`).
     - [ ] **Medium 3 — Missing actions for grouping and upkeep:** follow/regroup (`Go to <name> (party leader)` for `>= 25 yd` added in `6e0feee`; close-range/explicit follow still pending), accepting a shared quest, Need/Greed/Pass loot rolls (currently playerbots rolls for them), ready check and role check, Dungeon Finder (LFG/RDF), raid target marks, buying food/water/ammo/reagents (with `BotCheats = ""`, bots run out), and using a flight master or a mount.
     - [ ] **Medium 4 — Open-world results can't be credited to the brain:** with `+grind,+new rpg` on, playerbots' own questing runs whenever the brain picks `"Keep"` (`28%` of 27.5k play-server decisions); soak has no playerbots-only comparison run and deletes its decision logs with its temp folder (`soak.py:470`).
     - [ ] **Medium 5 — Soak runs at temperature 0:** every bot is deterministic, so personality and variance design is never exercised.
-    - [ ] **Medium 6 — Brain can't initiate party/raid chat:** only `say:` and `tell <Name>:` exist; party chat only happens as a reply (can't proactively say `"oom"` or `"pull?"`).
+    - [x] **Medium 6 — Proactive party/raid chat:** added optional `party:` reply line in `harness/grammar/plan.wlb`, `plan.{h,cc}`, `content/RULES.md`, and `bot_loop.cc` (routes to `pb::RAID` when in raid, `pb::PARTY` when in party; unit-tested in `PlanTest.ATellLineIsAWhisperToOnePlayer`; offline eval `48/52 (92%)`, `68 ms` first line).
   - **Low:**
     - [ ] **Low 1 — Boss-notes gaps:** most Classic leveling dungeons (Deadmines, Wailing Caverns, Scarlet Monastery, BRD, Scholomance, etc.) and Halls of Reflection have no `content/notes/<instance>/notes.md`.
-    - [ ] **Low 2 — Prompt cache:** boss notes and world guide come after the screen (which changes every wake), so they are never in the cached prompt prefix.
+    - [x] **Low 2 — Prompt cache:** reordered `BuildPlanRequest` (`harness/src/screen/prompt.cc`) so static `Your boss notes:` and `World guide:` precede dynamic wake/remembered/screen sections for KV-cache prefix reuse while still reserving mandatory screen/also budget first (updated `BreakdownOf` + `PromptTest.StaticNotesPrecedeDynamicScreenForKvCacheAndAreCapped`; offline eval `48/52 (92%)`, `8/8` boss-order cases passed).
     - [x] **Low 3 — Raw pointers:** added required `CONTRIBUTING.md` non-owning lifetime comment on `BrainPolicyListener::bot_` and `ai_` in `bot_manager.cc`.
-    - [ ] **Low 4 — Unbounded map:** `observed_state_` keeps one entry per human player forever.
+    - [x] **Low 4 — Unbounded map:** `SampleObservedEntities` (`server_module/src/llm_brain_world_script.cc`) now prunes disconnected/out-of-world entries from `observed_state_` every 10 s (compile/build-verified on `10700k`).
     - [x] **Low 5 — `docs/TODO.md` readability:** `"In progress"` pruned of checked-off Phase 4 items (`fb339fd`/`6e0feee`).
     - [ ] **Low 6 — Process:** batch fixes cleanly and verify thoroughly before committing to avoid excessive review-fix churn.
 

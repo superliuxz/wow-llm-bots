@@ -4,7 +4,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -167,6 +166,16 @@ bool HasLivingResurrectorOnSameMap(Player* bot) {
 // time).
 constexpr uint32_t kMaxWaitForRezMs = 90000;
 
+// World-thread-only map of `bot->GetGUID().GetRawValue() -> first dead ms`
+// inside a dungeon. Cleared by `BotManager::Tick()` whenever the bot is alive,
+// outside a dungeon, or offline — so death #2+ always starts a fresh 90 s
+// rez-wait window (unlike per-Engine state on `BOT_STATE_DEAD`, which is never
+// invoked while alive).
+std::unordered_map<uint64_t, uint32_t>& DungeonDeadSinceMs() {
+  static auto* map = new std::unordered_map<uint64_t, uint32_t>();
+  return *map;
+}
+
 // Enforces clean ownership boundaries between the LLM brain and Playerbots'
 // reflex layer on each Engine:
 //  - Blocks `"accept invitation"` so the brain decides group invites.
@@ -206,19 +215,16 @@ class BrainPolicyListener final : public ActionExecutionListener {
     }
     if (name == "auto release" && bot_ && bot_->GetMap() &&
         bot_->GetMap()->IsDungeon()) {
+      const uint64_t key = bot_->GetGUID().GetRawValue();
       if (bot_->IsAlive()) {
-        dead_since_ms_.reset();
+        DungeonDeadSinceMs().erase(key);
         return true;
       }
-      if (!dead_since_ms_) {
-        dead_since_ms_ = getMSTime();
-      }
-      if (GetMSTimeDiffToNow(*dead_since_ms_) < kMaxWaitForRezMs &&
+      auto [it, inserted] = DungeonDeadSinceMs().try_emplace(key, getMSTime());
+      if (GetMSTimeDiffToNow(it->second) < kMaxWaitForRezMs &&
           HasLivingResurrectorOnSameMap(bot_)) {
         return false;
       }
-    } else if (bot_ && bot_->IsAlive()) {
-      dead_since_ms_.reset();
     }
     return true;
   }
@@ -237,7 +243,6 @@ class BrainPolicyListener final : public ActionExecutionListener {
   // this listener).
   Player* bot_;
   PlayerbotAI* ai_;
-  std::optional<uint32_t> dead_since_ms_;
 };
 
 void EnsurePolicyListener(Player* player, PlayerbotAI* ai) {
@@ -331,10 +336,15 @@ void BotManager::Tick() {
       // Connected. Between maps (a teleport, an instance) it is briefly out
       // of the world: wait, never log it in a second time.
       if (player->IsInWorld()) {
+        if (player->IsAlive() || !player->GetMap() ||
+            !player->GetMap()->IsDungeon()) {
+          DungeonDeadSinceMs().erase(bot.guid);
+        }
         EnsureStrategies(player);
       }
       continue;
     }
+    DungeonDeadSinceMs().erase(bot.guid);
     if (now_ms_ >= bot.next_login_ms) {
       // No master: playerbots runs it as a standalone bot. With autologin off,
       // its random-bot manager does nothing else with it.

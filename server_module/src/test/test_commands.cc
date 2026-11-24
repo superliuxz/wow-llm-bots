@@ -89,6 +89,7 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"difficulty", HandleDifficulty, SEC_ADMINISTRATOR, Console::Yes},
         {"setskill", HandleSetSkill, SEC_ADMINISTRATOR, Console::Yes},
         {"logout", HandleLogout, SEC_ADMINISTRATOR, Console::Yes},
+        {"kill", HandleKill, SEC_ADMINISTRATOR, Console::Yes},
     };
     static ChatCommandTable root_table = {
         {"llmtest", test_table},
@@ -754,6 +755,21 @@ class LlmBrainTestCommandScript : public CommandScript {
     const std::string name = player->GetName();
     RandomPlayerbotMgr::instance().LogoutPlayerBot(guid);
     handler->PSendSysMessage("llmtest: logged out {}{}", name,
+                             FormatToken(token));
+    return true;
+  }
+
+  static bool HandleKill(ChatHandler* handler,
+                         std::string player_name,
+                         Optional<std::string> token) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player) {
+      return false;
+    }
+    if (player->IsAlive()) {
+      player->KillPlayer();
+    }
+    handler->PSendSysMessage("llmtest: killed {}{}", player->GetName(),
                              FormatToken(token));
     return true;
   }

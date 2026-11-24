@@ -98,10 +98,12 @@ bool IsTargetDone(OptionKind kind,
     }
     case OptionKind::kGather:
     case OptionKind::kUse: {
-      // Bag item options ("item:<entry>") are not nearby GameObjects; they
-      // finish via `done_command_id` from the module.
+      // Non-GameObject `kUse` options (`item:`, `equip:`, `talent:`, `rez:`)
+      // finish via `done_command_id` from the module rather than a nearby
+      // GameObject disappearing.
       if (kind == OptionKind::kUse &&
-          (guid.starts_with("item:") || guid.starts_with("equip:"))) {
+          (guid.starts_with("item:") || guid.starts_with("equip:") ||
+           guid.starts_with("talent:") || guid.starts_with("rez:"))) {
         return false;
       }
       const pb::GameObject* obj = FindObjectByGuid(snapshot, guid);

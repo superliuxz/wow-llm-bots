@@ -1986,8 +1986,26 @@ ExecuteResult ExecuteOption(Player* bot,
     if (bot->HasPlayerFlag(PLAYER_FLAGS_GHOST)) {
       return {"already released"};
     }
-    bot->RepopAtGraveyard();
+    if (bot->HasPreventResurectionAura()) {
+      return {"release spirit is currently prevented"};
+    }
+    // Route through AzerothCore's real repop opcode handler so JustDied,
+    // RemovePet, BuildPlayerRepop (corpse + ghost aura/flag), and
+    // RepopAtGraveyard all run exactly as for a human client.
+    WorldPacket p(CMSG_REPOP_REQUEST, 1);
+    p << uint8_t(0);
+    p.rpos(0);
+    bot->GetSession()->HandleRepopRequestOpcode(p);
     return {.used = true, .info = "released spirit"};
+  }
+  if (target.kind == OptionTarget::Kind::kLeaveGroup) {
+    WorldSession* session = bot->GetSession();
+    if (!session || !bot->GetGroup()) {
+      return {"you are not in a group"};
+    }
+    WorldPacket pkt(CMSG_GROUP_DISBAND, 0);
+    session->HandleGroupDisbandOpcode(pkt);
+    return {.used = true, .info = "left the group"};
   }
   if (!bot->IsAlive()) {
     return {"you are dead"};  // A choice from before the bot died.
@@ -2004,20 +2022,103 @@ ExecuteResult ExecuteOption(Player* bot,
     if (before == 0) {
       return {"no unspent talent points"};
     }
-    uint32_t tab = 0;
+    uint32_t tab_page = 0;
     const std::string_view suffix = std::string_view(target.guid).substr(7);
     const auto [ptr, ec] =
-        std::from_chars(suffix.data(), suffix.data() + suffix.size(), tab);
-    if (ec != std::errc{} || ptr != suffix.data() + suffix.size() || tab > 2) {
+        std::from_chars(suffix.data(), suffix.data() + suffix.size(), tab_page);
+    if (ec != std::errc{} || ptr != suffix.data() + suffix.size() ||
+        tab_page > 2) {
       return {"invalid talent tree"};
     }
-    PlayerbotFactory::InitTalentsBySpecNo(bot, static_cast<int>(tab),
-                                          /*reset=*/false);
-    bot->SendTalentsInfoData(false);
+    const uint32_t class_mask = bot->getClassMask();
+    uint32_t target_tab_id = 0;
+    for (uint32_t i = 0; i < sTalentTabStore.GetNumRows(); ++i) {
+      const TalentTabEntry* entry = sTalentTabStore.LookupEntry(i);
+      if (entry && (entry->ClassMask & class_mask) != 0 &&
+          entry->tabpage == tab_page) {
+        target_tab_id = entry->TalentTabID;
+        break;
+      }
+    }
+    if (target_tab_id == 0) {
+      return {"invalid talent tree"};
+    }
+    std::vector<const TalentEntry*> tab_talents;
+    for (uint32_t i = 0; i < sTalentStore.GetNumRows(); ++i) {
+      const TalentEntry* t = sTalentStore.LookupEntry(i);
+      if (t && t->TalentTab == target_tab_id) {
+        tab_talents.push_back(t);
+      }
+    }
+    std::sort(tab_talents.begin(), tab_talents.end(),
+              [](const TalentEntry* a, const TalentEntry* b) {
+                if (a->Row != b->Row) {
+                  return a->Row < b->Row;
+                }
+                if (a->Col != b->Col) {
+                  return a->Col < b->Col;
+                }
+                return a->TalentID < b->TalentID;
+              });
+    const uint8_t active_spec = bot->GetActiveSpec();
+    auto learned_rank = [&](const TalentEntry* t) -> int {
+      const PlayerTalentMap& tmap = bot->GetTalentMap();
+      for (int r = MAX_TALENT_RANK - 1; r >= 0; --r) {
+        const uint32_t sid = t->RankID[r];
+        if (!sid) {
+          continue;
+        }
+        auto it = tmap.find(sid);
+        if (it != tmap.end() && it->second &&
+            it->second->State != PLAYERSPELL_REMOVED &&
+            it->second->IsInSpec(active_spec)) {
+          return r;
+        }
+      }
+      return -1;
+    };
+    uint32_t spent_in_tab = 0;
+    for (const TalentEntry* t : tab_talents) {
+      const int r = learned_rank(t);
+      if (r >= 0) {
+        spent_in_tab += static_cast<uint32_t>(r + 1);
+      }
+    }
+    while (bot->GetFreeTalentPoints() > 0) {
+      bool progressed = false;
+      for (const TalentEntry* t : tab_talents) {
+        if (t->Row * 5 > spent_in_tab) {
+          continue;
+        }
+        if (t->DependsOn != 0) {
+          const TalentEntry* prereq = sTalentStore.LookupEntry(t->DependsOn);
+          if (!prereq ||
+              learned_rank(prereq) < static_cast<int>(t->DependsOnRank)) {
+            continue;
+          }
+        }
+        const int cur = learned_rank(t);
+        const int next = cur + 1;
+        if (next >= MAX_TALENT_RANK || t->RankID[next] == 0) {
+          continue;
+        }
+        const uint32_t free_before = bot->GetFreeTalentPoints();
+        bot->LearnTalent(t->TalentID, static_cast<uint32_t>(next));
+        if (bot->GetFreeTalentPoints() < free_before) {
+          ++spent_in_tab;
+          progressed = true;
+          break;
+        }
+      }
+      if (!progressed) {
+        break;
+      }
+    }
     const uint32_t after = bot->GetFreeTalentPoints();
     if (after >= before) {
       return {"no learnable talents in " + target.name};
     }
+    bot->SendTalentsInfoData(false);
     return {.used = true,
             .info = "spent " + std::to_string(before - after) +
                     " talent point(s) in " + target.name};
@@ -2092,15 +2193,6 @@ ExecuteResult ExecuteOption(Player* bot,
     WorldPacket pkt(CMSG_GROUP_DECLINE, 0);
     session->HandleGroupDeclineOpcode(pkt);
     return {.used = true, .info = "declined group invite from " + target.name};
-  }
-  if (target.kind == OptionTarget::Kind::kLeaveGroup) {
-    WorldSession* session = bot->GetSession();
-    if (!session || !bot->GetGroup()) {
-      return {"you are not in a group"};
-    }
-    WorldPacket pkt(CMSG_GROUP_DISBAND, 0);
-    session->HandleGroupDisbandOpcode(pkt);
-    return {.used = true, .info = "left the group"};
   }
 
   Unit* unit = ObjectAccessor::GetUnit(*bot, ParseSnapshotGuid(target.guid));
