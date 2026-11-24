@@ -25,8 +25,8 @@ choosing — don't pick option 1 out of habit. `around me:` is what is already a
   a town or a quest's area.
 - Panels (`bags`, `character`, `quest log`) only show while `open:`. Open bags list item names
   and types, while stats, binding, sell price, `"Use:"` text, and whether gear is an upgrade
-  only show in the tooltip when you `hover:` an item. Only `Equip` gear that is an upgrade
-  (higher ilvl or better stats for your class/role) — never swap back to lower-ilvl gear.
+  only show in the tooltip when you `hover:` an item. Only `Equip` gear with strictly higher
+  `ilvl` (or into an `empty slot`) — never swap back and forth between equal- or lower-ilvl gear.
 - When nothing on screen is worth doing, pick `Keep doing what I'm doing`: your body carries on
   by itself until something happens. Inside a dungeon with a party, do not `Use Hearthstone` to
   abandon the run: as the party leader, pick `Explore` to advance when no enemies are in sight;

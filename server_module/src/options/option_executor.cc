@@ -214,6 +214,23 @@ std::string WhyCantUse(Player* bot, GameObject* go) {
 // false (and no move) when none gets there; never a straight line through
 // walls, which MovePoint's forced destination drew (review of f40b0b6,
 // finding 11).
+void RecordLastMovement(Player* bot, float x, float y, float z) {
+  PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
+  if (!ai) {
+    return;
+  }
+  auto* last =
+      ai->GetAiObjectContext()->GetValue<LastMovement&>("last movement");
+  if (!last) {
+    return;
+  }
+  const float speed = bot->GetSpeed(MOVE_RUN);
+  const float ms =
+      speed > 0 ? bot->GetExactDist(x, y, z) / speed * 1000.0f : 1000.0f;
+  last->Get().Set(bot->GetMapId(), x, y, z, bot->GetOrientation(), ms + 500.0f,
+                  MovementPriority::MOVEMENT_NORMAL);
+}
+
 bool WalkTo(Player* bot, float x, float y, float z) {
   PathGenerator path(bot);
   path.CalculatePath(x, y, z);
@@ -228,20 +245,7 @@ bool WalkTo(Player* bot, float x, float y, float z) {
                                     /*speed=*/0.0f, /*orientation=*/0.0f,
                                     /*generatePath=*/true,
                                     /*forceDestination=*/false);
-  PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
-  if (!ai) {
-    return true;
-  }
-  auto* last =
-      ai->GetAiObjectContext()->GetValue<LastMovement&>("last movement");
-  if (!last) {
-    return true;
-  }
-  const float speed = bot->GetSpeed(MOVE_RUN);
-  const float ms =
-      speed > 0 ? bot->GetExactDist(x, y, z) / speed * 1000.0f : 1000.0f;
-  last->Get().Set(bot->GetMapId(), x, y, z, bot->GetOrientation(), ms + 500.0f,
-                  MovementPriority::MOVEMENT_NORMAL);
+  RecordLastMovement(bot, x, y, z);
   return true;
 }
 
@@ -738,6 +742,11 @@ void CollectUsableBagItems(Player* bot,
     item.entry = proto->ItemId;
     item.name = proto->Name1;
     item.out_of_combat_only = out_of_combat_only;
+    if (proto->ItemId == 6948) {  // Hearthstone: factual homebind tooltip.
+      const std::string home = AreaName(bot->m_homebindAreaId);
+      item.detail =
+          home.empty() ? "teleports home" : "teleports home to " + home;
+    }
     out->push_back(std::move(item));
   }
 
@@ -909,9 +918,10 @@ void CollectUsableBagItems(Player* bot,
       const uint8_t equip_slot = static_cast<uint8_t>(dest & 0xFF);
       const Item* equipped =
           bot->GetItemByPos(INVENTORY_SLOT_BAG_0, equip_slot);
-      const uint32_t equipped_ilvl = equipped && equipped->GetTemplate()
-                                         ? equipped->GetTemplate()->ItemLevel
-                                         : 0;
+      const ItemTemplate* equipped_proto =
+          equipped ? equipped->GetTemplate() : nullptr;
+      const uint32_t equipped_ilvl =
+          equipped_proto ? equipped_proto->ItemLevel : 0;
       bool dup = false;
       for (const RankedEquip& existing : candidates) {
         if (existing.item.entry == proto->ItemId) {
@@ -948,10 +958,15 @@ void CollectUsableBagItems(Player* bot,
       if (!detail.empty()) {
         detail += ", ";
       }
-      detail += equipped_ilvl > 0 ? "ilvl " + std::to_string(proto->ItemLevel) +
-                                        " vs " + std::to_string(equipped_ilvl)
-                                  : "ilvl " + std::to_string(proto->ItemLevel) +
-                                        ", empty slot";
+      if (equipped_ilvl > 0) {
+        detail += "ilvl " + std::to_string(proto->ItemLevel) + " vs ";
+        if (equipped_proto && !equipped_proto->Name1.empty()) {
+          detail += equipped_proto->Name1 + " ";
+        }
+        detail += "ilvl " + std::to_string(equipped_ilvl);
+      } else {
+        detail += "ilvl " + std::to_string(proto->ItemLevel) + ", empty slot";
+      }
       if (proto->Class == ITEM_CLASS_WEAPON && proto->Delay > 0) {
         float avg_dmg = 0.0f;
         for (int i = 0; i < MAX_ITEM_PROTO_DAMAGES; ++i) {
@@ -1146,8 +1161,8 @@ WalkStepResult TickLongWalk(Player* bot,
   walk->last_path_at = now;
 
   const base::TimeTicks path_start = base::TimeTicks::Now();
-  constexpr uint32_t kTypeOk =
-      PATHFIND_NORMAL | PATHFIND_INCOMPLETE | PATHFIND_FARFROMPOLY;
+  constexpr uint32_t kTypeOk = PATHFIND_NORMAL | PATHFIND_INCOMPLETE |
+                               PATHFIND_SHORT | PATHFIND_FARFROMPOLY;
   G3D::Vector3 next_pt;
   bool found = false;
 
@@ -1206,6 +1221,50 @@ WalkStepResult TickLongWalk(Player* bot,
 
   const base::TimeDelta path_time = base::TimeTicks::Now() - path_start;
   if (!found) {
+    // Disconnected dungeon navmesh seam (e.g. an entrance stair/ledge drop-off
+    // where Detour cannot cross between polygons): if there is clear line of
+    // sight onto walkable ground 10-16 yd toward the destination, take one
+    // direct step across the seam so the next tick resumes normal navmesh
+    // pathing.
+    if (Map* map = bot->GetMap(); map && map->IsDungeon()) {
+      const float base_angle = bot->GetAngle(walk->dest.x, walk->dest.y);
+      static constexpr float kSeamAngles[] = {0.0f, 0.35f, -0.35f, 0.7f, -0.7f};
+      static constexpr float kSeamDists[] = {10.0f, 14.0f, 18.0f};
+      for (float d : kSeamDists) {
+        const float step_d = std::min(d, dist_to_dest);
+        if (step_d < 3.0f) {
+          continue;
+        }
+        for (float off : kSeamAngles) {
+          const float a = base_angle + off;
+          const float hx = pos.x + std::cos(a) * step_d;
+          const float hy = pos.y + std::sin(a) * step_d;
+          const float hz =
+              map->GetHeight(bot->GetPhaseMask(), hx, hy, pos.z + 4.0f);
+          if (hz == INVALID_HEIGHT || hz == VMAP_INVALID_HEIGHT_VALUE) {
+            continue;
+          }
+          const float dz = hz - pos.z;
+          if (dz < -12.0f || dz > 2.5f) {
+            continue;
+          }
+          if (!map->isInLineOfSight(pos.x, pos.y, pos.z + 1.5f, hx, hy,
+                                    hz + 1.5f, bot->GetPhaseMask(),
+                                    LINEOFSIGHT_ALL_CHECKS,
+                                    VMAP::ModelIgnoreFlags::Nothing)) {
+            continue;
+          }
+          walk->step_dest = {hx, hy, hz};
+          walk->has_step = true;
+          bot->GetMotionMaster()->MovePoint(
+              /*id=*/0, hx, hy, hz, FORCED_MOVEMENT_NONE, /*speed=*/0.0f,
+              /*orientation=*/0.0f, /*generatePath=*/false,
+              /*forceDestination=*/false);
+          RecordLastMovement(bot, hx, hy, hz);
+          return {.path_time = path_time};
+        }
+      }
+    }
     ClearLastMovement(bot);
     if (bot->isMoving()) {
       bot->StopMoving();

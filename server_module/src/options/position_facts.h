@@ -32,6 +32,25 @@ wlb::snapshot::Direction DirFrom(const wlb::snapshot::Vec3& from,
 std::span<const float> ExploreRayAngles();
 std::span<const float> ExploreRayDistancesYd();
 
+// Living hostile creature in a dungeon instance, clustered into room/pack
+// navigation targets so multi-room dungeons expose concrete, pathable next
+// rooms and bosses instead of blind straight-line rays.
+struct DungeonHostile {
+  std::string name;
+  wlb::snapshot::Vec3 pos;
+  bool is_boss = false;
+};
+struct DungeonCluster {
+  std::string label;
+  wlb::snapshot::Vec3 pos;
+  float dist_yd = 0.0f;
+  bool has_boss = false;
+};
+std::vector<DungeonCluster> ClusterDungeonHostiles(
+    const wlb::snapshot::Vec3& from,
+    const std::vector<DungeonHostile>& hostiles,
+    size_t max_candidates = 12);
+
 // Pure progress check for stepped long walks (Explore / GoTo). Detects both
 // stationary stalls (no 5 yd move in 10 s) and ping-pong loops (moving without
 // getting >= 3 yd closer to dest in 30 s). Arrives if within 10 yd, or within

@@ -298,6 +298,36 @@ class LlmBrainTestCommandScript : public CommandScript {
       factory.InitAvailableSpells();
       factory.InitGlyphs(false);
       factory.InitEquipment(false);
+      // Randomize() equipped a random spec before InitEquipment(false) swapped
+      // in the requested spec_tab, leaving a full off-spec gear set in bags.
+      // Clear unequipped bag gear so freshly geared bots start cleanly.
+      for (uint8_t slot = INVENTORY_SLOT_ITEM_START;
+           slot < INVENTORY_SLOT_ITEM_END; ++slot) {
+        if (Item* it = player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot)) {
+          if (const ItemTemplate* p = it->GetTemplate();
+              p && p->InventoryType != INVTYPE_NON_EQUIP &&
+              (p->Class == ITEM_CLASS_ARMOR || p->Class == ITEM_CLASS_WEAPON)) {
+            player->DestroyItem(INVENTORY_SLOT_BAG_0, slot, true);
+          }
+        }
+      }
+      for (uint8_t bag = INVENTORY_SLOT_BAG_START; bag < INVENTORY_SLOT_BAG_END;
+           ++bag) {
+        Bag* b = player->GetBagByPos(bag);
+        if (!b) {
+          continue;
+        }
+        for (uint8_t slot = 0; slot < b->GetBagSize(); ++slot) {
+          if (Item* it = b->GetItemByPos(slot)) {
+            if (const ItemTemplate* p = it->GetTemplate();
+                p && p->InventoryType != INVTYPE_NON_EQUIP &&
+                (p->Class == ITEM_CLASS_ARMOR ||
+                 p->Class == ITEM_CLASS_WEAPON)) {
+              player->DestroyItem(bag, slot, true);
+            }
+          }
+        }
+      }
       factory.InitAmmo();
       factory.InitReagents();
       factory.InitPet();

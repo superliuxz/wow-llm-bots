@@ -206,9 +206,9 @@ void FillSpots(const WorldPlaces& world,
     out->push_back(std::move(spot));
   }
 
-  // No grind spot at all (an instance, a city): walkable rays along 8 compass
-  // directions at multiple distances on the bot's actual map (including
-  // dungeon instances) so narrow/sloped corridors yield a valid Explore option.
+  // No grind spot at all (an instance, a city): in dungeon instances, first
+  // expose navmesh-reachable clusters of living hostile packs/bosses so the
+  // leader can navigate multi-room corridors and turns instead of blind rays.
   if (!out->empty() || !path_owner) {
     return;
   }
@@ -218,6 +218,166 @@ void FillSpots(const WorldPlaces& world,
   }
   if (!probe_map) {
     return;
+  }
+  if (probe_map->IsDungeon()) {
+    if (const Player* bot = path_owner->ToPlayer()) {
+      std::vector<DungeonHostile> hostiles;
+      const auto& spawned = probe_map->GetCreatureBySpawnIdStore();
+      const FactionTemplateEntry* bot_ft = bot->GetFactionTemplateEntry();
+      if (const auto* db_spawns = world.DungeonSpawns(view.map_id)) {
+        const uint8_t mode_bit =
+            static_cast<uint8_t>(1u << probe_map->GetSpawnMode());
+        for (const WorldPlaces::DungeonSpawn& sp : *db_spawns) {
+          if (sp.spawn_mask != 0 && (sp.spawn_mask & mode_bit) == 0) {
+            continue;
+          }
+          const auto [begin, end] = spawned.equal_range(sp.spawn_id);
+          if (begin != end) {
+            for (auto it = begin; it != end; ++it) {
+              Creature* c = it->second;
+              if (!c || !c->IsInWorld() || !c->IsAlive() || c->IsCritter() ||
+                  c->IsTotem() || c->IsPet() ||
+                  c->HasUnitFlag(UNIT_FLAG_NON_ATTACKABLE |
+                                 UNIT_FLAG_NOT_SELECTABLE) ||
+                  !bot->IsHostileTo(c)) {
+                continue;
+              }
+              hostiles.push_back(
+                  {c->GetName(),
+                   {c->GetPositionX(), c->GetPositionY(), c->GetPositionZ()},
+                   sp.is_boss || c->IsDungeonBoss() || c->isWorldBoss()});
+            }
+          } else if (bot_ft) {
+            // Grid not yet loaded in this instance: check template faction
+            // hostility so long empty entrance corridors (e.g. MgT 69 yd,
+            // Ahn'kahet 147 yd) still expose concrete rooms/bosses ahead.
+            // Check mob->bot too: player factions have hostileMask for the
+            // opposite player faction, while monster factions (e.g. 16) set
+            // hostileMask for players.
+            const FactionTemplateEntry* mob_ft =
+                sFactionTemplateStore.LookupEntry(sp.faction);
+            if (mob_ft && (mob_ft->IsHostileTo(*bot_ft) ||
+                           bot_ft->IsHostileTo(*mob_ft))) {
+              hostiles.push_back({sp.name, sp.pos, sp.is_boss});
+            }
+          }
+        }
+      }
+      const std::vector<DungeonCluster> clusters =
+          ClusterDungeonHostiles(view.pos, hostiles);
+      constexpr uint32_t kDungeonPathOk = PATHFIND_NORMAL |
+                                          PATHFIND_INCOMPLETE | PATHFIND_SHORT |
+                                          PATHFIND_FARFROMPOLY;
+      for (const DungeonCluster& cl : clusters) {
+        if (out->size() >= kMaxSpots) {
+          break;
+        }
+        PathGenerator path(path_owner);
+        path.CalculatePath(cl.pos.x, cl.pos.y, cl.pos.z);
+        uint32_t pt = path.GetPathType();
+        bool normal = (pt & PATHFIND_NORMAL) != 0;
+        bool incomplete = (pt & PATHFIND_INCOMPLETE) != 0;
+        if ((pt & ~kDungeonPathOk) != 0 || (!normal && !incomplete)) {
+          // Far cluster in an unloaded grid: probe a 60 yd step toward it.
+          if (cl.dist_yd > 60.0f) {
+            const float scale = 60.0f / cl.dist_yd;
+            const float mx = view.pos.x + (cl.pos.x - view.pos.x) * scale;
+            const float my = view.pos.y + (cl.pos.y - view.pos.y) * scale;
+            const float mz = probe_map->GetHeight(view.phase_mask, mx, my,
+                                                  view.pos.z + 15.0f);
+            if (mz != INVALID_HEIGHT && mz != VMAP_INVALID_HEIGHT_VALUE) {
+              path.CalculatePath(mx, my, mz);
+              pt = path.GetPathType();
+              normal = (pt & PATHFIND_NORMAL) != 0;
+              incomplete = (pt & PATHFIND_INCOMPLETE) != 0;
+            }
+          }
+          if ((pt & ~kDungeonPathOk) != 0 || (!normal && !incomplete)) {
+            continue;
+          }
+        }
+        const G3D::Vector3& end = path.GetActualEndPosition();
+        const float step_dist = Dist(view.pos, end.x, end.y, end.z);
+        if (step_dist < kMinTravelDistYd) {
+          continue;
+        }
+        if (incomplete &&
+            Dist({end.x, end.y, end.z}, cl.pos.x, cl.pos.y, cl.pos.z) + 15.0f >=
+                cl.dist_yd) {
+          continue;
+        }
+        const pb::Direction dir = DirFrom(view.pos, end.x, end.y);
+        if (dir == pb::DIRECTION_UNSPECIFIED || dir == pb::HERE ||
+            (seen_dirs & DirBit(dir)) != 0) {
+          continue;
+        }
+        seen_dirs |= DirBit(dir);
+        out->push_back({SpotId(view.map_id, end.x, end.y),
+                        dir,
+                        step_dist,
+                        cl.label,
+                        {end.x, end.y, end.z}});
+      }
+      if (!out->empty()) {
+        return;
+      }
+      // Disconnected entrance ledge/stair seam (e.g. Ahn'kahet portal ledge
+      // where Detour stops 5 yd away at a small drop-off): if a short
+      // line-of-sight step onto walkable ground exists toward the nearest
+      // hostile cluster, expose that cluster so TickLongWalk can step across
+      // the seam and resume normal navmesh pathing.
+      for (const DungeonCluster& cl : clusters) {
+        if (out->size() >= kMaxSpots) {
+          break;
+        }
+        const float base_angle =
+            std::atan2(cl.pos.y - view.pos.y, cl.pos.x - view.pos.x);
+        static constexpr float kHopAngles[] = {0.0f, 0.35f, -0.35f, 0.7f,
+                                               -0.7f};
+        static constexpr float kHopDists[] = {12.0f, 16.0f};
+        bool clear_hop = false;
+        for (float d : kHopDists) {
+          for (float off : kHopAngles) {
+            const float a = base_angle + off;
+            const float hx = view.pos.x + d * std::cos(a);
+            const float hy = view.pos.y + d * std::sin(a);
+            const float hz = probe_map->GetHeight(view.phase_mask, hx, hy,
+                                                  view.pos.z + 4.0f);
+            if (hz == INVALID_HEIGHT || hz == VMAP_INVALID_HEIGHT_VALUE) {
+              continue;
+            }
+            const float dz = hz - view.pos.z;
+            if (dz < -12.0f || dz > 2.5f) {
+              continue;
+            }
+            if (probe_map->isInLineOfSight(
+                    view.pos.x, view.pos.y, view.pos.z + 1.5f, hx, hy,
+                    hz + 1.5f, view.phase_mask, LINEOFSIGHT_ALL_CHECKS,
+                    VMAP::ModelIgnoreFlags::Nothing)) {
+              clear_hop = true;
+              break;
+            }
+          }
+          if (clear_hop) {
+            break;
+          }
+        }
+        if (!clear_hop) {
+          continue;
+        }
+        const pb::Direction dir = DirFrom(view.pos, cl.pos.x, cl.pos.y);
+        if (dir == pb::DIRECTION_UNSPECIFIED || dir == pb::HERE ||
+            (seen_dirs & DirBit(dir)) != 0) {
+          continue;
+        }
+        seen_dirs |= DirBit(dir);
+        out->push_back({SpotId(view.map_id, cl.pos.x, cl.pos.y), dir,
+                        cl.dist_yd, cl.label, cl.pos});
+      }
+      if (!out->empty()) {
+        return;
+      }
+    }
   }
   for (const float angle : ExploreRayAngles()) {
     if (out->size() >= kMaxSpots) {
@@ -233,8 +393,8 @@ void FillSpots(const WorldPlaces& world,
       }
       PathGenerator path(path_owner);
       path.CalculatePath(tx, ty, tz);
-      constexpr uint32_t kOk =
-          PATHFIND_NORMAL | PATHFIND_INCOMPLETE | PATHFIND_FARFROMPOLY;
+      constexpr uint32_t kOk = PATHFIND_NORMAL | PATHFIND_INCOMPLETE |
+                               PATHFIND_SHORT | PATHFIND_FARFROMPOLY;
       if ((path.GetPathType() & ~kOk) != 0) {
         continue;
       }
@@ -434,7 +594,22 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
     }
     const uint32_t map_id = data.mapid;
     if (map_id != 0 && map_id != 1 && map_id != 530 && map_id != 571) {
-      continue;  // Continents only.
+      const MapEntry* me = sMapStore.LookupEntry(map_id);
+      if (me && me->IsDungeon() && tmpl->type != CREATURE_TYPE_CRITTER &&
+          (tmpl->unit_flags &
+           (UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_NOT_SELECTABLE)) == 0) {
+        const bool is_boss =
+            (tmpl->flags_extra & CREATURE_FLAG_EXTRA_INSTANCE_BIND) != 0 ||
+            tmpl->rank == CREATURE_ELITE_WORLDBOSS;
+        world->dungeon_spawns_[map_id].push_back(
+            {guid,
+             tmpl->Name,
+             {data.posX, data.posY, data.posZ},
+             tmpl->faction,
+             data.spawnMask,
+             is_boss});
+      }
+      continue;  // Continents only for open-world grind buckets/hubs.
     }
     uint32_t zone_id = 0;
     uint32_t area_id = 0;
@@ -598,6 +773,12 @@ const WorldPlaces::SpotBucket* WorldPlaces::FindBucket(uint32_t map_id,
                                                        float z) const {
   const auto it = buckets_.find(BucketKey(map_id, x, y, z));
   return it == buckets_.end() ? nullptr : &it->second;
+}
+
+const std::vector<WorldPlaces::DungeonSpawn>* WorldPlaces::DungeonSpawns(
+    uint32_t map_id) const {
+  const auto it = dungeon_spawns_.find(map_id);
+  return it == dungeon_spawns_.end() ? nullptr : &it->second;
 }
 
 PositionFacts ComputePositionFacts(const WorldPlaces& world,

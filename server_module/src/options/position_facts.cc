@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "base/strings/strcat.h"
@@ -42,6 +43,104 @@ std::span<const float> ExploreRayAngles() {
 std::span<const float> ExploreRayDistancesYd() {
   static constexpr float kDists[] = {60.0f, 35.0f, 80.0f};
   return kDists;
+}
+
+std::vector<DungeonCluster> ClusterDungeonHostiles(
+    const wlb::snapshot::Vec3& from,
+    const std::vector<DungeonHostile>& hostiles,
+    size_t max_candidates) {
+  constexpr float kClusterRadiusYd = 30.0f;
+  struct Pending {
+    const DungeonHostile* h = nullptr;
+    float dist = 0.0f;
+  };
+  std::vector<Pending> sorted;
+  sorted.reserve(hostiles.size());
+  for (const DungeonHostile& h : hostiles) {
+    if (h.name.empty()) {
+      continue;
+    }
+    const float d = Dist(from, h.pos.x, h.pos.y, h.pos.z);
+    if (d < kMinTravelDistYd || d > kMaxTravelDistYd) {
+      continue;
+    }
+    sorted.push_back({&h, d});
+  }
+  std::sort(sorted.begin(), sorted.end(),
+            [](const Pending& a, const Pending& b) {
+              if (a.dist != b.dist) {
+                return a.dist < b.dist;
+              }
+              return a.h->name < b.h->name;
+            });
+
+  struct Accum {
+    std::string rep_name;
+    pb::Vec3 pos;
+    float dist = 0.0f;
+    size_t count = 0;
+    bool has_boss = false;
+  };
+  std::vector<Accum> clusters;
+  for (const Pending& p : sorted) {
+    Accum* match = nullptr;
+    for (Accum& c : clusters) {
+      if (Dist(c.pos, p.h->pos.x, p.h->pos.y, p.h->pos.z) <= kClusterRadiusYd) {
+        match = &c;
+        break;
+      }
+    }
+    if (!match) {
+      clusters.push_back({p.h->name, p.h->pos, p.dist, 1, p.h->is_boss});
+    } else {
+      ++match->count;
+      if (p.h->is_boss && !match->has_boss) {
+        match->has_boss = true;
+        match->rep_name = p.h->name;
+        match->pos = p.h->pos;
+        match->dist = p.dist;
+      }
+    }
+  }
+
+  std::vector<DungeonCluster> out;
+  out.reserve(std::min(clusters.size(), max_candidates));
+  auto format_cluster = [](const Accum& c) -> DungeonCluster {
+    std::string label;
+    if (c.has_boss) {
+      label = base::StrCat({c.rep_name, " (boss)"});
+    } else if (c.count > 1) {
+      label = base::StringPrintf("%s (%zu)", c.rep_name.c_str(), c.count);
+    } else {
+      label = c.rep_name;
+    }
+    return {std::move(label), c.pos, c.dist, c.has_boss};
+  };
+
+  for (const Accum& c : clusters) {
+    if (out.size() >= max_candidates) {
+      break;
+    }
+    out.push_back(format_cluster(c));
+  }
+  // Ensure the nearest alive boss is represented even in dense dungeons with
+  // more than `max_candidates` trash packs ahead of it.
+  bool has_boss_in_out = false;
+  for (const DungeonCluster& c : out) {
+    if (c.has_boss) {
+      has_boss_in_out = true;
+      break;
+    }
+  }
+  if (!has_boss_in_out && !out.empty()) {
+    for (size_t i = out.size(); i < clusters.size(); ++i) {
+      if (clusters[i].has_boss) {
+        out.back() = format_cluster(clusters[i]);
+        break;
+      }
+    }
+  }
+  return out;
 }
 
 WalkProgressVerdict CheckWalkProgress(const pb::Vec3& pos,

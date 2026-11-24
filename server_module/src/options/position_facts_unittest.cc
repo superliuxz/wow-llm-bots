@@ -111,6 +111,25 @@ TEST(PositionFactsTest, MinimapShowsOnlyHubsInRangeMeasuredFromPos) {
   EXPECT_EQ(minimap.places[0].rel.dir, pb::W);  // +y is west.
 }
 
+TEST(PositionFactsTest, ClusterDungeonHostilesGroupsRoomsAndKeepsNearestBoss) {
+  const std::vector<DungeonHostile> hostiles = {
+      {"Too Close Mob", {10, 0, 0}, false},
+      {"Sunblade Guard", {70, 0, 0}, false},
+      {"Sunblade Mage", {78, 5, 0}, false},
+      {"Sunblade Sentinel", {140, 20, 0}, false},
+      {"Selin Fireheart", {220, 0, 0}, true},
+  };
+  const std::vector<DungeonCluster> clusters =
+      ClusterDungeonHostiles({0, 0, 0}, hostiles, /*max_candidates=*/2);
+  ASSERT_EQ(clusters.size(), 2u);
+  EXPECT_EQ(clusters[0].label, "Sunblade Guard (2)");
+  EXPECT_NEAR(clusters[0].dist_yd, 70.0f, 0.1f);
+  EXPECT_FALSE(clusters[0].has_boss);
+  // Nearest boss replaces last slot when beyond max_candidates trash packs.
+  EXPECT_EQ(clusters[1].label, "Selin Fireheart (boss)");
+  EXPECT_TRUE(clusters[1].has_boss);
+}
+
 TEST(PositionFactsTest, NearestTurnInAndNearestObjectiveBecomePlaces) {
   const std::vector<pb::Objective> tracker = {
       Objective(1, /*complete=*/true, 400), Objective(2, true, 200),

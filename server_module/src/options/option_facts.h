@@ -72,6 +72,15 @@ class WorldPlaces {
     bool pos_from_innkeeper = false;
   };
 
+  struct DungeonSpawn {
+    uint32_t spawn_id = 0;
+    std::string name;
+    wlb::snapshot::Vec3 pos;
+    uint32_t faction = 0;
+    uint8_t spawn_mask = 0;
+    bool is_boss = false;
+  };
+
   static std::unique_ptr<WorldPlaces> Build();
 
   WorldPlaces(const WorldPlaces&) = delete;
@@ -83,6 +92,7 @@ class WorldPlaces {
                                float x,
                                float y,
                                float z) const;
+  const std::vector<DungeonSpawn>* DungeonSpawns(uint32_t map_id) const;
   const std::unordered_map<uint64_t, SpotBucket>& buckets() const {
     return buckets_;
   }
@@ -93,6 +103,7 @@ class WorldPlaces {
 
   std::unordered_map<uint64_t, SpotBucket> buckets_;
   std::vector<Hub> hubs_;
+  std::unordered_map<uint32_t, std::vector<DungeonSpawn>> dungeon_spawns_;
 };
 
 // `path_owner` (the bot) enables the walkable-ray fallback when no grind spot

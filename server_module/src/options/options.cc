@@ -432,7 +432,9 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
                           ? "Equip " + item.name
                           : "Equip " + item.name + " (" + item.detail + ")";
       } else {
-        option.text = "Use " + item.name;
+        option.text = item.detail.empty()
+                          ? "Use " + item.name
+                          : "Use " + item.name + " (" + item.detail + ")";
       }
       option.guid = item_guid;
       option.kind = pb::Option::USE;
