@@ -72,9 +72,11 @@ struct Plan {
   std::vector<int>
       expect;  // Options this plan deals with (don't wake for them).
   std::vector<Watch> watches;
-  int look_s = 0;     // Wake anyway after this many seconds.
-  std::string say;    // Out loud. Empty: nothing to say.
-  std::string party;  // Party or raid chat. Empty: none.
+  int look_s = 0;       // Wake anyway after this many seconds.
+  std::string say;      // Out loud. Empty: nothing to say.
+  std::string party;    // Party or raid chat. Empty: none.
+  std::string general;  // The zone's General channel (F1). Empty: none.
+  std::string lfg;      // The LookingForGroup channel (F1). Empty: none.
   // A note for the bot's long-term memory (RH-M4). Empty: none.
   std::string remember;
   // A whisper: to `tell_to` (a character name), `tell`. Empty: none.

@@ -192,6 +192,38 @@ std::string Speak(Player* bot, const pb::Command::Say& say) {
       chn->Say(bot->GetGUID(), msg, language);
       return "";
     }
+    case pb::LFG: {
+      // The LookingForGroup channel (F1), under the server's own rules:
+      // Channel.RestrictedLfg (queued in Dungeon Finder) and LFG.Location.All.
+      ChannelMgr* cmgr = ChannelMgr::forTeam(bot->GetTeamId());
+      constexpr uint32_t kLfgChannelId = 26;  // ChatChannels.dbc
+      const ChatChannelsEntry* entry =
+          sChatChannelsStore.LookupEntry(kLfgChannelId);
+      const AreaTableEntry* zone =
+          sAreaTableStore.LookupEntry(bot->GetZoneId());
+      if (!cmgr || !entry || !zone) {
+        return "no LookingForGroup channel";
+      }
+      if (sWorld->getBoolConfig(CONFIG_RESTRICTED_LFG_CHANNEL) &&
+          !bot->IsUsingLfg()) {
+        return "you must be queued in Dungeon Finder to use LookingForGroup";
+      }
+      if (!bot->CanJoinConstantChannelInZone(entry, zone)) {
+        return "you can't use LookingForGroup here";
+      }
+      Channel* chn = cmgr->GetJoinChannel("LookingForGroup", kLfgChannelId);
+      if (!chn) {
+        return "cannot join LookingForGroup";
+      }
+      chn->JoinChannel(bot, "");
+      std::string msg = text;
+      if (!sScriptMgr->OnPlayerCanUseChat(bot, CHAT_MSG_CHANNEL, language, msg,
+                                          chn)) {
+        return "chat blocked";
+      }
+      chn->Say(bot->GetGUID(), msg, language);
+      return "";
+    }
     case pb::WHISPER: {
       std::string name = say.to;
       Player* to = normalizePlayerName(name)

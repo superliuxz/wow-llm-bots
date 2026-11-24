@@ -1147,6 +1147,14 @@ void BotLoop::OnReply(const std::string& bot,
         if (!plan->tell.empty()) {
           SendSay(bot, pb::WHISPER, plan->tell_to, plan->tell);
         }
+        // Public channels (F1): a refusal (not queued, wrong place) comes back
+        // as a chat error event, which wakes the brain to see it.
+        if (!plan->general.empty()) {
+          SendSay(bot, pb::GENERAL, "", plan->general);
+        }
+        if (!plan->lfg.empty()) {
+          SendSay(bot, pb::LFG, "", plan->lfg);
+        }
         if (!plan->remember.empty() && !config_.bots_dir.empty()) {
           const std::string dir = base::StrCat({config_.bots_dir, "/", bot});
           if (!MakeDirectories(dir) ||

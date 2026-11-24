@@ -50,6 +50,10 @@ lines Plan {
       "<optional: a line said out loud to the players near you>";
   party?: party:Chat
       "<optional: a line to your party or raid chat>";
+  general?: general:Chat
+      "<optional: a line to your zone's General channel>";
+  lfg?: lfg:Chat
+      "<optional: a line to the LookingForGroup channel, e.g. LFM RFC need heals>";
   tell? <tell_to:Player "Name">: tell:Chat
       "<optional: a whisper to one player by name; answer a whisper this way>";
   remember?: remember:Memo

@@ -2257,6 +2257,34 @@ TEST(BotLoopTest, PartyChatRoutesToPartyOrRaidAndSuppressesWhenSolo) {
   EXPECT_EQ(say_it->say->text, "pull in 5");
 }
 
+// F1: `lfg:` and `general:` lines post to those channels.
+TEST(BotLoopTest, LfgAndGeneralLinesPostToTheirChannels) {
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { sent.push_back(cmd); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot snap = MakeLiveSnap("Loada", 1, t0, /*in_combat=*/false);
+  AddKeep(&snap);
+  loop.OnSnapshot(snap, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+      "general: anyone selling linen?\nlfg: LFM RFC need heals");
+  std::vector<std::pair<pb::ChatChannel, std::string>> says;
+  for (const pb::Command& c : sent) {
+    if (c.say) {
+      says.push_back({c.say->channel, c.say->text});
+    }
+  }
+  EXPECT_EQ(says, (std::vector<std::pair<pb::ChatChannel, std::string>>{
+                      {pb::GENERAL, "anyone selling linen?"},
+                      {pb::LFG, "LFM RFC need heals"}}));
+}
+
 // RH-M4: a bot without its own identity.md gets the shipped one, and its
 // `remember:` notes are kept in memory.md and shown in later prompts.
 TEST(BotLoopTest, ShippedIdentityAndRememberedNotes) {

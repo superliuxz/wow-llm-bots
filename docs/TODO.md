@@ -11,6 +11,13 @@ Last updated 2026-11-24.
 
 *(Phase 4, Phase 5 `C4`, and the playability & architecture review are complete; `scorer.sha256` relocked with user approval at `6e3f4a12699e`, 36 files.)*
 
+- [ ] **Low-hanging play-with-a-human follow-ups (2026-11-24, [`docs/plans/play-with-human.md`](plans/play-with-human.md)):**
+  - [x] **F1:** `general:` / `lfg:` reply lines post to the zone's General and LookingForGroup channels (`Speak` LFG case honours `Channel.RestrictedLfg` / `LFG.Location.All`; refusals come back as chat errors); RULES "Finding a group". *unit* `BotLoopTest.LfgAndGeneralLinesPostToTheirChannels`; *live* `e2e_lfg_channel` (posted LFM heard by another bot). Trade not added (city-only; add when needed).
+  - [ ] **F2:** loot etiquette: upgrade / usable facts on Need-Greed-Pass options + RULES rule.
+  - [ ] **F3:** quest overlap on screen: which party members share each of the bot's quests.
+  - [ ] **F4:** small TODO items: `Bind hearthstone` option at innkeepers; e2e death/respawn and harness reconnect; `bench_bosses.py` reads `content/notes` (scorer-locked: needs a user relock).
+  - [ ] **F5:** memory condensing (old `remember:` notes summarised) and a per-player relationships file.
+
 - [x] **Play-with-a-human review (2026-11-24; all items fixed; all live-tested; plan: [`docs/plans/play-with-human.md`](plans/play-with-human.md)).**
   Overclaim fixed: "Medium 3 — Grouping & upkeep actions" below was wired but not usable in play
   until RH-H1 (popups never woke the brain). Locked files changed (`llm_brain_world_script.cc`,

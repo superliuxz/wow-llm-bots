@@ -178,6 +178,8 @@ std::optional<Plan> ParsePlan(std::string_view text,
   plan.look_s = parsed->look_s;
   plan.goal = parsed->goal;
   plan.say = parsed->say;
+  plan.general = parsed->general;
+  plan.lfg = parsed->lfg;
   plan.remember = parsed->remember;
   plan.party = parsed->party;
   plan.tell_to = parsed->tell_to;
@@ -218,6 +220,8 @@ std::string FormatPlan(const Plan& plan) {
   out.look_s = plan.look_s;
   out.goal = plan.goal;
   out.say = plan.say;
+  out.general = plan.general;
+  out.lfg = plan.lfg;
   out.remember = plan.remember;
   out.party = plan.party;
   out.tell_to = plan.tell_to;
