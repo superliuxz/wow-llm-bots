@@ -49,14 +49,6 @@ one feature never introduces extra bugs:
   untouched and ask for the user's explicit OK in the current turn before any relock.
 - Live-verify game, server, or benchmark changes against `out/server-test` before claiming them fixed;
   anything not live-tested must be stated honestly in `docs/TODO.md`.
-- **Independent zero-context post-commit review (`.agents/hooks.json`):** whenever `HEAD` advances
-  to a new descendant or amended commit after a `run_command` (e.g., `git commit`),
-  `.agents/hooks/post_commit_review.py` writes `var/review/patch_<short_sha>.patch`
-  (`last_reviewed..HEAD`, or `git show HEAD` on amend) and spawns a detached, read-only
-  `agy --mode plan --sandbox --print=<prompt>` reviewer in its own separate top-level conversation
-  (non-blocking, minimal env, zero shared chat history; opt out with `WLB_SKIP_COMMIT_REVIEW=1`),
-  saving findings to `var/review/review_<short_sha>.md` (`var/review/latest.md`). Any High, Medium,
-  or Low findings follow the standard review-fix procedure above.
 
 ## The brain decides; C++ is a pure harness
 

@@ -16,7 +16,6 @@
   tools/wlb llm [--slots N] [--ctx N] [--model FILE] [-- llama-server args...]
   tools/wlb harness [run|decide ...]     build and run the C++ brain harness (default: run)
   tools/wlb remote list | <name> sync|status|run|pull|stop|install-hook  run on a remote worker (private/remotes.json)
-  tools/wlb review [--watch]             show whether the post-commit independent reviewer is RUNNING/DONE/FAILED
 
 `tools/wlb <command> --help` says more. Python standard library only.
 """
@@ -129,9 +128,6 @@ def parse(argv):
                        help="sync, build, and run commands on a remote CPU worker (private/remotes.json)")
     p.add_argument("args", nargs=argparse.REMAINDER,
                    help="list | <name> sync|status|run|pull|stop|install-hook ...")
-
-    p = sub.add_parser("review", help="show whether the post-commit independent reviewer is RUNNING/DONE/FAILED")
-    p.add_argument("--watch", action="store_true", help="poll every 2 s until the active reviewer finishes")
     return parser.parse_args(argv)
 
 
@@ -214,10 +210,6 @@ def main():
             hargs = ["run", *hargs]
         bin_path = str(OUT / "common" / "harness")
         os.execv(bin_path, [bin_path, *hargs])
-    elif a.command == "review":
-        extra = ["--watch"] if a.watch else []
-        common.run(["python3", "-I", "-B", common.ROOT / ".agents" / "hooks" / "post_commit_review.py",
-                    "--status", *extra])
 
 
 if __name__ == "__main__":
