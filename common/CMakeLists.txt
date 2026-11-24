@@ -112,6 +112,8 @@ add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/chat/chat_text_unittest.cc"
   "${WLB_MODULE_SRC}/config/config_parsing.cc"
   "${WLB_MODULE_SRC}/config/config_parsing_unittest.cc"
+  "${WLB_MODULE_SRC}/options/action_types.cc"
+  "${WLB_MODULE_SRC}/options/action_types_unittest.cc"
   "${WLB_MODULE_SRC}/options/act_geometry.cc"
   "${WLB_MODULE_SRC}/options/act_geometry_unittest.cc"
   "${WLB_MODULE_SRC}/options/options.cc"
@@ -139,6 +141,7 @@ target_compile_options(llm_brain_unittests PRIVATE ${WLB_SAFETY_FLAGS})
 
 # Writes the module's options into saved snapshots (eval and screen fixtures).
 add_executable(fixture_options "${WLB_ROOT}/server_module/tools/fixture_options.cc"
+               "${WLB_MODULE_SRC}/options/action_types.cc"
                "${WLB_MODULE_SRC}/options/options.cc")
 target_include_directories(fixture_options PRIVATE "${WLB_MODULE_SRC}")
 target_link_libraries(fixture_options PRIVATE wlb_base wlb_snapshot)

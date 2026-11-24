@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/time/time.h"
+#include "options/action_types.h"
 #include "snapshot/snapshot.h"
 
 namespace llm_brain {
@@ -61,6 +62,9 @@ struct OptionTarget {
   std::string name;
   // Destination world coordinates for kExplore and kGoTo (from OptionFacts).
   std::optional<wlb::snapshot::Vec3> pos = std::nullopt;
+  // Typed action payload decoded once when `AddOptions` builds the option
+  // (C++ cleanup #1: executors dispatch on `action` without `substr` parsing).
+  BotAction action = KeepAction{};
 };
 
 std::string_view OptionKindName(OptionTarget::Kind kind);

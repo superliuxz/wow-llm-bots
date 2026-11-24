@@ -14,6 +14,7 @@
 
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
+#include "options/action_types.h"
 #include "snapshot/snapshot.h"
 
 namespace llm_brain {
@@ -121,6 +122,25 @@ struct Rank {
   }
 };
 
+BotAction MakeTargetAction(OptionTarget::Kind kind,
+                           const std::string& guid,
+                           const std::string& name) {
+  switch (kind) {
+    case OptionTarget::Kind::kAttack:
+      return AttackAction{guid, name};
+    case OptionTarget::Kind::kLoot:
+      return LootAction{guid, name};
+    case OptionTarget::Kind::kGather:
+      return GatherAction{guid, name};
+    case OptionTarget::Kind::kUse:
+      return UseObjectAction{guid, name};
+    case OptionTarget::Kind::kTalk:
+      return TalkAction{guid, name};
+    default:
+      return KeepAction{};
+  }
+}
+
 // One option per (kind, name), in the order the names first appear; its
 // target is the best-ranked thing of that name.
 void AddTarget(OptionTarget::Kind kind,
@@ -133,12 +153,14 @@ void AddTarget(OptionTarget::Kind kind,
     if ((*targets)[i].kind == kind && (*targets)[i].name == name) {
       if (rank.BetterThan((*ranks)[i])) {
         (*targets)[i].guid = guid;
+        (*targets)[i].action = MakeTargetAction(kind, guid, name);
         (*ranks)[i] = rank;
       }
       return;
     }
   }
-  targets->push_back({kind, guid, name});
+  targets->push_back(
+      {kind, guid, name, std::nullopt, MakeTargetAction(kind, guid, name)});
   ranks->push_back(rank);
 }
 
@@ -454,7 +476,8 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       const std::string assist_name = caller->name + "'s target";
       const std::string text = "Attack " + std::string(role_prefix) +
                                assist_name + " (" + best->name + ")";
-      targets.push_back({OptionTarget::Kind::kAttack, best->guid, best->name});
+      targets.push_back({OptionTarget::Kind::kAttack, best->guid, best->name,
+                         std::nullopt, AttackAction{best->guid, best->name}});
       pb::Option& option = snapshot->options.emplace_back();
       option.text = text;
       // Distinct synthetic guid so PlanRunner::MatchOptionInScreen matches the
@@ -481,8 +504,9 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       seen_dirs |= dir_bit;
       ++explore_count;
       const std::string text = ExploreText(spot);
-      targets.push_back(
-          {OptionTarget::Kind::kExplore, spot.id, spot.label, spot.pos});
+      targets.push_back({OptionTarget::Kind::kExplore, spot.id, spot.label,
+                         spot.pos,
+                         WalkAction{spot.id, spot.label, spot.pos, true}});
       pb::Option& option = snapshot->options.emplace_back();
       option.text = text;
       option.guid = spot.id;
@@ -496,8 +520,9 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
         continue;
       }
       const std::string text = GoToText(place);
-      targets.push_back(
-          {OptionTarget::Kind::kGoTo, place.id, place.name, place.pos});
+      targets.push_back({OptionTarget::Kind::kGoTo, place.id, place.name,
+                         place.pos,
+                         WalkAction{place.id, place.name, place.pos, false}});
       pb::Option& option = snapshot->options.emplace_back();
       option.text = text;
       option.guid = place.id;
@@ -510,7 +535,8 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
                           self.power_max > 0 && self.power < self.power_max;
     if (!self.mounted && !self.swimming && (hurt || low_mana)) {
       const std::string text = RestText(facts);
-      targets.push_back({OptionTarget::Kind::kRest, "", text});
+      targets.push_back(
+          {OptionTarget::Kind::kRest, "", text, std::nullopt, RestAction{}});
       pb::Option& option = snapshot->options.emplace_back();
       option.text = text;
       option.kind = pb::Option::REST;
@@ -527,7 +553,11 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       }
       const std::string item_guid =
           (item.equippable ? "equip:" : "item:") + std::to_string(item.entry);
-      targets.push_back({OptionTarget::Kind::kUse, item_guid, item.name});
+      BotAction item_action =
+          item.equippable ? BotAction{EquipItemAction{item.entry, item.name}}
+                          : BotAction{UseBagItemAction{item.entry, item.name}};
+      targets.push_back({OptionTarget::Kind::kUse, item_guid, item.name,
+                         std::nullopt, std::move(item_action)});
       pb::Option& option = snapshot->options.emplace_back();
       if (item.equippable) {
         option.text = item.detail.empty()
@@ -549,7 +579,9 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       if (act.action_guid.empty() || act.label.empty()) {
         continue;
       }
-      targets.push_back({OptionTarget::Kind::kUse, act.action_guid, act.label});
+      targets.push_back({OptionTarget::Kind::kUse, act.action_guid, act.label,
+                         std::nullopt,
+                         DecodeOptionFactAction(act.action_guid, act.label)});
       pb::Option& option = snapshot->options.emplace_back();
       option.text = act.label;
       option.guid = act.action_guid;
@@ -566,7 +598,9 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
     if (act.guid.empty() || act.label.empty()) {
       continue;
     }
-    targets.push_back({OptionTarget::Kind::kUse, act.guid, act.label});
+    targets.push_back({OptionTarget::Kind::kUse, act.guid, act.label,
+                       std::nullopt,
+                       DecodeOptionFactAction(act.guid, act.label)});
     pb::Option& option = snapshot->options.emplace_back();
     option.text = act.label;
     option.guid = act.guid;
@@ -583,7 +617,9 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       const std::string text = "Spend talent points in " + tree.name + " (" +
                                std::to_string(tree.spent) + " pts, " +
                                std::to_string(tree.free_points) + " unspent)";
-      targets.push_back({OptionTarget::Kind::kUse, guid, tree.name});
+      targets.push_back({OptionTarget::Kind::kUse, guid, tree.name,
+                         std::nullopt,
+                         SpendTalentsAction{tree.tab, tree.name}});
       pb::Option& option = snapshot->options.emplace_back();
       option.text = text;
       option.guid = guid;
@@ -594,16 +630,18 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
 
   if (self.state == pb::Self::DEAD_BODY) {
     if (facts.has_pending_resurrect) {
-      targets.push_back(
-          {OptionTarget::Kind::kUse, "rez:accept", "Accept resurrection"});
+      targets.push_back({OptionTarget::Kind::kUse, "rez:accept",
+                         "Accept resurrection", std::nullopt,
+                         ResurrectAction{ResurrectAction::Mode::kAccept}});
       pb::Option& acc = snapshot->options.emplace_back();
       acc.text = "Accept resurrection";
       acc.guid = "rez:accept";
       acc.kind = pb::Option::USE;
       acc.name = "Accept resurrection";
     }
-    targets.push_back(
-        {OptionTarget::Kind::kUse, "rez:release", "Release spirit"});
+    targets.push_back({OptionTarget::Kind::kUse, "rez:release",
+                       "Release spirit", std::nullopt,
+                       ResurrectAction{ResurrectAction::Mode::kRelease}});
     pb::Option& rel = snapshot->options.emplace_back();
     rel.text = "Release spirit";
     rel.guid = "rez:release";
@@ -613,7 +651,8 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
     if (!facts.has_pending_resurrect && snapshot->ext.party &&
         !snapshot->ext.party->members.empty()) {
       targets.push_back({OptionTarget::Kind::kUse, "rez:wait",
-                         "Wait for a resurrection (up to 5 min)"});
+                         "Wait for a resurrection (up to 5 min)", std::nullopt,
+                         ResurrectAction{ResurrectAction::Mode::kWait}});
       pb::Option& wait = snapshot->options.emplace_back();
       wait.text = "Wait for a resurrection (up to 5 min)";
       wait.guid = "rez:wait";
@@ -624,13 +663,15 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
 
   if (!facts.pending_group_invite_from.empty()) {
     const std::string& from = facts.pending_group_invite_from;
-    targets.push_back({OptionTarget::Kind::kAcceptInvite, "", from});
+    targets.push_back({OptionTarget::Kind::kAcceptInvite, "", from,
+                       std::nullopt, AcceptInviteAction{from}});
     pb::Option& acc = snapshot->options.emplace_back();
     acc.text = "Accept group invite from " + from;
     acc.kind = pb::Option::ACCEPT_INVITE;
     acc.name = from;
 
-    targets.push_back({OptionTarget::Kind::kDeclineInvite, "", from});
+    targets.push_back({OptionTarget::Kind::kDeclineInvite, "", from,
+                       std::nullopt, DeclineInviteAction{from}});
     pb::Option& dec = snapshot->options.emplace_back();
     dec.text = "Decline group invite from " + from;
     dec.kind = pb::Option::DECLINE_INVITE;
@@ -640,20 +681,23 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
     if (player_name.empty()) {
       continue;
     }
-    targets.push_back({OptionTarget::Kind::kInvite, "", player_name});
+    targets.push_back({OptionTarget::Kind::kInvite, "", player_name,
+                       std::nullopt, InviteAction{player_name}});
     pb::Option& inv = snapshot->options.emplace_back();
     inv.text = "Invite " + player_name + " to group";
     inv.kind = pb::Option::INVITE;
     inv.name = player_name;
   }
   if (facts.can_leave_group && !self.in_combat) {
-    targets.push_back({OptionTarget::Kind::kLeaveGroup, "", ""});
+    targets.push_back({OptionTarget::Kind::kLeaveGroup, "", "", std::nullopt,
+                       LeaveGroupAction{}});
     pb::Option& lv = snapshot->options.emplace_back();
     lv.text = "Leave group";
     lv.kind = pb::Option::LEAVE_GROUP;
   }
 
-  targets.push_back({OptionTarget::Kind::kKeep, "", ""});
+  targets.push_back(
+      {OptionTarget::Kind::kKeep, "", "", std::nullopt, KeepAction{}});
   pb::Option& keep = snapshot->options.emplace_back();
   keep.text = "Keep doing what I'm doing";
   keep.kind = pb::Option::KEEP;

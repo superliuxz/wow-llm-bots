@@ -1,0 +1,51 @@
+// Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
+//
+// Group, LFG, loot roll, ready check, resurrection, shared quest, follow,
+// raid marking, and mount discovery & execution.
+
+#ifndef MOD_LLM_BRAIN_OPTIONS_EXEC_SOCIAL_H_
+#define MOD_LLM_BRAIN_OPTIONS_EXEC_SOCIAL_H_
+
+#include <vector>
+
+#include "options/action_types.h"
+#include "options/exec_items.h"
+#include "options/exec_shared.h"
+#include "snapshot/snapshot.h"
+
+class Player;
+
+namespace llm_brain {
+
+void CollectGroupAndUpkeepActions(
+    Player* bot,
+    const wlb::snapshot::Snapshot& snapshot,
+    std::vector<wlb::snapshot::OptionFacts_Action>* out);
+
+ActionOutcome ExecuteInviteAction(Player* bot, const InviteAction& action);
+ActionOutcome ExecuteAcceptInviteAction(Player* bot,
+                                        const AcceptInviteAction& action);
+ActionOutcome ExecuteDeclineInviteAction(Player* bot,
+                                         const DeclineInviteAction& action);
+ActionOutcome ExecuteLeaveGroupAction(Player* bot);
+ActionOutcome ExecuteResurrectAction(Player* bot,
+                                     const ResurrectAction& action);
+ActionOutcome ExecuteLootRollAction(Player* bot, const LootRollAction& action);
+ActionOutcome ExecuteReadyCheckAction(Player* bot,
+                                      const ReadyCheckAction& action);
+ActionOutcome ExecuteSharedQuestAction(Player* bot,
+                                       const SharedQuestAction& action);
+ActionOutcome ExecuteShareQuestAction(Player* bot,
+                                      const ShareQuestAction& action);
+ActionOutcome ExecuteLfgAction(Player* bot, const LfgAction& action);
+ActionOutcome ExecuteGroupPolicyAction(Player* bot,
+                                       const GroupPolicyAction& action);
+ActionOutcome ExecuteFollowLeaderAction(Player* bot,
+                                        const FollowLeaderAction& action);
+ActionOutcome ExecuteMarkTargetAction(Player* bot,
+                                      const MarkTargetAction& action);
+ItemActionOutcome ExecuteMountAction(Player* bot, const MountAction& action);
+
+}  // namespace llm_brain
+
+#endif  // MOD_LLM_BRAIN_OPTIONS_EXEC_SOCIAL_H_

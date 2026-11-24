@@ -60,7 +60,8 @@
 #include "base/time/time.h"
 #include "bot_session.h"
 #include "options/act_geometry.h"
-#include "options/option_executor.h"
+#include "options/exec_npc.h"
+#include "options/exec_shared.h"
 #include "snapshot/perception.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/world_util.h"
@@ -1277,26 +1278,6 @@ bool PlaceCaresAboutFacing(pb::Command_Act::PlaceKind place) {
   return place == pb::Command_Act::BEHIND || place == pb::Command_Act::IN_FRONT;
 }
 
-// True when the player is allowed to cancel their own movement (never while on
-// a taxi flight path or under server-controlled movement such as fear/stun).
-bool CanClearBotMovement(const Player* bot) {
-  if (!bot || !bot->IsInWorld()) {
-    return false;
-  }
-  if (bot->IsInFlight() || bot->GetVehicle() != nullptr ||
-      bot->HasUnitState(UNIT_STATE_IN_FLIGHT | UNIT_STATE_FLEEING |
-                        UNIT_STATE_CONFUSED | UNIT_STATE_STUNNED |
-                        UNIT_STATE_CHARMED | UNIT_STATE_POSSESSED |
-                        UNIT_STATE_DISTRACTED)) {
-    return false;
-  }
-  if (const MotionMaster* mm = bot->GetMotionMaster();
-      mm && mm->GetMotionSlotType(MOTION_SLOT_CONTROLLED) != NULL_MOTION_TYPE) {
-    return false;
-  }
-  return true;
-}
-
 }  // namespace
 
 ActStartResult StartAct(Player* bot,
@@ -1748,18 +1729,7 @@ ActStartResult StartAct(Player* bot,
     }
 
     case pb::Command_Act::MARK: {
-      Group* grp = bot->GetGroup();
-      if (!grp) {
-        return {.error = "not in a group"};
-      }
-      if (grp->isRaidGroup() && !grp->IsLeader(bot->GetGUID()) &&
-          !grp->IsAssistant(bot->GetGUID())) {
-        return {.error = "must be raid leader or assistant to mark"};
-      }
       const uint8_t icon = RaidMarkerIconIndex(act.marker);
-      if (icon >= TARGETICONCOUNT) {
-        return {.error = "invalid raid marker"};
-      }
       const std::string_view thing_name =
           !act.target_name.empty() ? act.target_name : act.name;
       WorldObject* obj = ResolveThing(bot, act, thing_name);
@@ -1767,8 +1737,9 @@ ActStartResult StartAct(Player* bot,
       if (!unit) {
         return {.error = "unit to mark not found"};
       }
-      grp->SetTargetIcon(icon, bot->GetGUID(), unit->GetGUID());
-      return {.done = true};
+      ActionOutcome res = MarkUnitWithIcon(bot, unit, icon);
+      return res.error.empty() ? ActStartResult{.done = true}
+                               : ActStartResult{.error = std::move(res.error)};
     }
 
     case pb::Command_Act::INTERACT: {
@@ -1878,20 +1849,11 @@ ActStartResult StartAct(Player* bot,
         if (!proto || !NameEq(proto->Name1, act.name)) {
           continue;
         }
-        uint16_t dest = 0;
-        if (bot->CanEquipItem(NULL_SLOT, dest, entry.item, true) !=
-            EQUIP_ERR_OK) {
-          return {.error = "cannot equip " + act.name};
-        }
-        const ObjectGuid src_guid = entry.item->GetGUID();
-        const uint16_t src = static_cast<uint16_t>(
-            (static_cast<uint16_t>(entry.bag) << 8) | entry.slot);
-        bot->SwapItem(src, dest);
-        Item* now_equipped = bot->GetItemByPos(dest);
-        if (!now_equipped || now_equipped->GetGUID() != src_guid) {
-          return {.error = "couldn't equip " + act.name};
-        }
-        return {.done = true};
+        ActionOutcome res =
+            EquipBagItem(bot, entry.item, entry.bag, entry.slot, act.name);
+        return res.error.empty()
+                   ? ActStartResult{.done = true}
+                   : ActStartResult{.error = std::move(res.error)};
       }
       return {.error = "item not in bags: " + act.name};
     }

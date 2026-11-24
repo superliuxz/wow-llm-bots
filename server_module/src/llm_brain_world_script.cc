@@ -52,6 +52,11 @@
 #include "config/llm_brain_config.h"
 #include "net/frame_codec.h"
 #include "options/act_executor.h"
+#include "options/action_types.h"
+#include "options/exec_items.h"
+#include "options/exec_movement.h"
+#include "options/exec_npc.h"
+#include "options/exec_shared.h"
 #include "options/option_executor.h"
 #include "options/option_facts.h"
 #include "options/options.h"
@@ -105,13 +110,10 @@ TargetProgress OptionTargetProgress(Player* bot,
   const auto cut = [](std::string why) {
     return TargetProgress{.interrupted = std::move(why)};
   };
-  if ((target.kind == OptionTarget::Kind::kUse &&
-       (target.guid.starts_with("rez:") || target.guid.starts_with("roll:") ||
-        target.guid.starts_with("ready:"))) ||
-      target.kind == OptionTarget::Kind::kLeaveGroup) {
+  if (IsDeadAllowedAction(target.action) && !IsKeepAction(target.action)) {
     return done();
   }
-  if (target.kind != OptionTarget::Kind::kKeep && !bot->IsAlive()) {
+  if (!IsKeepAction(target.action) && !bot->IsAlive()) {
     return cut("you died");
   }
   switch (target.kind) {
@@ -138,17 +140,14 @@ TargetProgress OptionTargetProgress(Player* bot,
     }
     case OptionTarget::Kind::kGather:
     case OptionTarget::Kind::kUse: {
-      if (target.kind == OptionTarget::Kind::kUse &&
-          (target.guid.starts_with("item:") ||
-           target.guid.starts_with("mount:"))) {
+      if (IsPendingCastAction(target.action)) {
         if (used) {
           return done();
         }
         return IsSpellCastPending(bot, pending_item_spell_id) ? pending()
                                                               : done();
       }
-      if (target.kind == OptionTarget::Kind::kUse &&
-          !target.guid.starts_with("0x")) {
+      if (!IsGameObjectAction(target.action)) {
         return done();
       }
       GameObject* go =
@@ -761,39 +760,43 @@ class LlmBrainWorldScript : public WorldScript {
     std::string info;
     // Keep carries on with what the body is doing: its walk and its rest stay
     // as they are (a reset walk would send the bot towards (0, 0, 0)).
-    const bool keep = target && target->kind == OptionTarget::Kind::kKeep;
-    const bool attack = target && target->kind == OptionTarget::Kind::kAttack;
-    if (target && !keep) {
-      // Cancel an active movement act on a new valid non-Keep, non-Attack
-      // choice (an expired/invalid choice must not cancel a boss dodge; a
-      // replan that still fights keeps an in-flight `away` running).
-      if (!attack && state.active_act) {
-        const uint32_t cancelled_cmd_id = state.active_act->command_id;
-        CancelActiveAct(bot, &*state.active_act);
-        state.active_act.reset();
-        wlb::snapshot::Event payload;
-        wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
-        failed.text = "act cancelled by new choice";
-        failed.command_id = cancelled_cmd_id;
-        EmitAlertingEvent(bot_index, name, bot, std::move(payload));
-      }
-      state.had_food_drink_aura = false;
-      state.attack_idle_since = base::TimeTicks();
-      state.walk = PendingWalk{};
-    }
+    const bool keep = target && IsKeepAction(target->action);
+    const bool attack = target && IsAttackAction(target->action);
     uint32_t pending_spell_id = 0;
     if (target) {
-      ExecuteResult result =
-          ExecuteOption(bot, *target, &state.walk, config_.dungeon_nav);
-      error = std::move(result.error);
-      used = result.used;
-      info = std::move(result.info);
-      pending_spell_id = result.pending_spell_id;
-      if (!result.path_time.is_zero()) {
-        path_times_.push_back(result.path_time);
-      }
-      if (target->kind == OptionTarget::Kind::kRest) {
-        state.had_food_drink_aura = HasFoodOrDrinkAura(bot);
+      // Validate BEFORE cancelling any active dodge/movement act so an invalid
+      // or combat-blocked choice never aborts an active boss dodge.
+      error = ValidateAction(bot, target->action);
+      if (error.empty()) {
+        if (!keep) {
+          if (!attack && state.active_act) {
+            const uint32_t cancelled_cmd_id = state.active_act->command_id;
+            CancelActiveAct(bot, &*state.active_act);
+            state.active_act.reset();
+            wlb::snapshot::Event payload;
+            wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
+            failed.text = "act cancelled by new choice";
+            failed.command_id = cancelled_cmd_id;
+            EmitAlertingEvent(bot_index, name, bot, std::move(payload));
+          }
+          state.had_food_drink_aura = false;
+          state.attack_idle_since = base::TimeTicks();
+          state.walk = PendingWalk{};
+        }
+        ActionRunContext ctx;
+        ctx.walk = &state.walk;
+        ctx.dungeon_nav = &config_.dungeon_nav;
+        ExecuteResult result = ExecuteAction(bot, target->action, &ctx);
+        error = std::move(result.error);
+        used = result.used;
+        info = std::move(result.info);
+        pending_spell_id = result.pending_spell_id;
+        if (!result.path_time.is_zero()) {
+          path_times_.push_back(result.path_time);
+        }
+        if (IsRestAction(target->action)) {
+          state.had_food_drink_aura = HasFoodOrDrinkAura(bot);
+        }
       }
     }
     // How old the picture was when the bot acted on it: the number that
@@ -853,31 +856,23 @@ class LlmBrainWorldScript : public WorldScript {
     }
   }
 
-  static bool IsMovementActVerb(wlb::snapshot::Command_Act::Verb verb) {
-    return verb == wlb::snapshot::Command_Act::TO ||
-           verb == wlb::snapshot::Command_Act::AWAY ||
-           verb == wlb::snapshot::Command_Act::OUT_OF ||
-           verb == wlb::snapshot::Command_Act::BACK ||
-           verb == wlb::snapshot::Command_Act::KITE ||
-           verb == wlb::snapshot::Command_Act::INTERACT ||
-           verb == wlb::snapshot::Command_Act::BOARD;
-  }
-
   void OnAct(size_t bot_index,
              const std::string& name,
              Player* bot,
              uint32_t command_id,
              const wlb::snapshot::Command::Act& act) {
     BotState& state = bots_[bot_index];
-    // Validate and start the new act BEFORE cancelling any running act so a
-    // failed act (e.g. unknown `use Foo` during `out of Defile`) never aborts
-    // an active boss dodge (A-M11).
+    // Validate and run via the unified `ExecuteAction` path BEFORE cancelling
+    // any running act so a failed act never aborts an active boss dodge.
     ActiveAct pending;
-    ActStartResult res =
-        StartAct(bot, command_id, act, base::TimeTicks::Now(), &pending);
+    ActionRunContext ctx;
+    ctx.out_active_act = &pending;
+    ctx.now = base::TimeTicks::Now();
+    ExecuteResult res =
+        ExecuteAction(bot, StandingActAction{command_id, act}, &ctx);
     LOG_INFO("module", "mod-llm-brain: {} act {} ({}): {}", name,
              wlb::snapshot::EnumName(act.verb), act.name,
-             res.error.empty() ? (res.done ? "done" : "running") : res.error);
+             res.error.empty() ? (res.used ? "done" : "running") : res.error);
     if (trace_writer_ && trace_writer_->enabled()) {
       const base::TimeTicks now = base::TimeTicks::Now();
       TraceEvent ev;
@@ -905,7 +900,7 @@ class LlmBrainWorldScript : public WorldScript {
       failed.text = std::move(res.error);
       failed.command_id = command_id;
       EmitAlertingEvent(bot_index, name, bot, std::move(payload));
-    } else if (res.done) {
+    } else if (res.used) {
       const bool stops_movement =
           (act.verb == wlb::snapshot::Command_Act::STOP &&
            (act.stop == wlb::snapshot::Command_Act::MOVING ||
@@ -1154,8 +1149,7 @@ class LlmBrainWorldScript : public WorldScript {
     }
     if (kind == OptionTarget::Kind::kUse ||
         kind == OptionTarget::Kind::kGather) {
-      if (kind == OptionTarget::Kind::kUse &&
-          !state.active_option->guid.starts_with("0x")) {
+      if (!IsGameObjectAction(state.active_option->action)) {
         return;
       }
       GameObject* go = ObjectAccessor::GetGameObject(

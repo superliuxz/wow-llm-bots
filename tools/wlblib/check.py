@@ -56,10 +56,11 @@ def _in_compile_commands(build_dir, path):
 def _include_jobs():
     """(file, extra clang-include-cleaner args) for every file of ours, and notes on skips."""
     jobs, notes = [], []
-    common_db, server_db = OUT / "common", SERVER
+    common_db, server_db, server_test_db = OUT / "common", SERVER, OUT / "server-test"
     if not (common_db / "compile_commands.json").exists():
         raise Failed("missing out/common/compile_commands.json: tools/wlb build common")
     have_server = (server_db / "compile_commands.json").exists()
+    have_server_test = (server_test_db / "compile_commands.json").exists()
     for f in [*(ROOT / "common").rglob("*.h"), *(ROOT / "snapshot").rglob("*.h")]:
         jobs.append((f, ["--", *HEADER_FLAGS_20]))
     for f in (ROOT / "harness").rglob("*.h"):
@@ -77,13 +78,14 @@ def _include_jobs():
                 _in_compile_commands(common_db, f)):
             # Unit tests, tools, and AzerothCore-independent module files built by common/.
             jobs.append((f, ["-p", common_db]))
-        elif not have_server:
-            notes.append(f"{f.relative_to(ROOT)} not checked (no server build)")
-        elif "/src/test/" in str(f) and not _in_compile_commands(server_db, f):
-            # Test-only module code is only in a test build's compile commands.
-            notes.append(f"{f.relative_to(ROOT)} not checked (out/server is a production build)")
-        else:
+        elif have_server_test and _in_compile_commands(server_test_db, f):
+            jobs.append((f, ["-p", server_test_db]))
+        elif have_server and _in_compile_commands(server_db, f):
             jobs.append((f, ["-p", server_db]))
+        elif not have_server and not have_server_test:
+            notes.append(f"{f.relative_to(ROOT)} not checked (no server build)")
+        else:
+            notes.append(f"{f.relative_to(ROOT)} not checked (not in server compile_commands)")
     return jobs, notes
 
 
