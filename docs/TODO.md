@@ -9,7 +9,7 @@ Last updated 2026-11-24.
 
 ## In progress
 
-*(Phase 4, Phase 5 `C4`, and the playability & architecture review are complete; `scorer.sha256` relocked with user approval at `6e3f4a12699e`, 36 files.)*
+*(Phase 4, Phase 5 `C4`, the playability & architecture review, and play-with-a-human F1–F5 are complete; `scorer.sha256` relocked with user approval at `e50a1d4cd573`, 36 files verified.)*
 
 - [x] **Review `eb8e708` fixes (`var/review/review_eb8e708.md`, 0 High, 0 Medium, 3 Low — all verified):**
   - **Low:**
@@ -30,7 +30,7 @@ Last updated 2026-11-24.
     - [x] **R6b08106-L5:** Updated `RH-M4` note below to point to F5, and updated `_DroppableProxy` in `tools/wlblib/cases/e2e_reconnect.py` to close and unlink the listening socket during `drop_and_pause` so fixed-interval reconnect retry is genuinely exercised (*live* `e2e_reconnect`).
 
 - [x] **Low-hanging play-with-a-human follow-ups (2026-11-24, [`docs/plans/play-with-human.md`](plans/play-with-human.md)):**
-  Locked files changed (`server_module/src/snapshot/snapshot_builder.cc`, `tools/bench/bench_bosses.py`): both lock files left untouched pending user-approved relock.
+  Locked files changed (`server_module/src/snapshot/snapshot_builder.cc`, `tools/bench/bench_bosses.py`): relocked with user approval at `e50a1d4cd573` (36 files verified).
   - [x] **F1:** `general:` / `lfg:` reply lines post to the zone's General and LookingForGroup channels (`Speak` LFG case honours `Channel.RestrictedLfg` / `LFG.Location.All`; refusals come back as chat errors); RULES "Finding a group". *unit* `BotLoopTest.LfgAndGeneralLinesPostToTheirChannels`; *live* `e2e_lfg_channel` (posted LFM heard by another bot). Trade not added (city-only; add when needed).
   - [x] **F2:** roll options state `ilvl N` plus `not gear` / `you can't use it` / `usable, upgrade over ilvl M` (or `(empty slot)`) / `usable, not an upgrade` (`RollItemFacts`, `option_executor.cc`); RULES loot rule (Need only usable upgrades). *live* `e2e_lootroll` (facts on the real roll option); *eval* 3 new roll cases 9/9 (Needs the upgrade, never Needs unusable or non-upgrade gear).
   - [x] **F3:** quest overlap on screen: `QuestPart::party_members` populated from online party members who share each quest (`snapshot_builder.cc`) and rendered as `also on quest: <names>` (`screen_renderer.cc`). *unit* `ScreenRendererTest.QuestTrackerShowsPartyQuestOverlap`; *live* `e2e_group` (both Loada and Telda show each other in `quest.party_members` after sharing).
