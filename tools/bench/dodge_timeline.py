@@ -18,8 +18,9 @@ import sys
 from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(ROOT / "tools" / "bench"))
-import trace_parity  # noqa: E402
+if str(ROOT / "tools") not in sys.path:
+    sys.path.insert(0, str(ROOT / "tools"))
+from wlblib import trace as trace_lib  # noqa: E402
 
 DODGE_ACT_VERBS = ("OUT_OF", "AWAY", "AVOID", "TO", "KITE", "STOP")
 
@@ -419,7 +420,7 @@ def main() -> int:
     ap.add_argument("--bots", default="", help="Optional comma-separated bot names to include")
     args = ap.parse_args()
     bot_set = {b.strip() for b in args.bots.split(",") if b.strip()} or None
-    traces = trace_parity.load_traces(args.trace_dir)["bot"]
+    traces = trace_lib.load_traces(args.trace_dir)["bot"]
     res = extract_dodge_timelines(traces, spell_filter=args.spell, radius_override=args.radius, bots=bot_set)
     print(format_timelines(res))
     return 0

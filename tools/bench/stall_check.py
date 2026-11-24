@@ -9,10 +9,15 @@ event names) for `>= max_stall_s` (default 300 s = 5 min).
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import pathlib
+import sys
 from typing import Any
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+if str(ROOT / "tools") not in sys.path:
+    sys.path.insert(0, str(ROOT / "tools"))
+from wlblib import trace as trace_lib  # noqa: E402
 
 # Exact event names emitted by `server_module` (`docs/specs/trace-events.md`).
 PROGRESS_EVENTS = frozenset({
@@ -44,27 +49,17 @@ PROGRESS_EVENTS = frozenset({
 LOGOUT_GAP_MS = 60_000
 
 
-def check_bot_trace(
-    trace_paths: list[pathlib.Path],
+def check_bot_records(
+    records: list[dict[str, Any]],
     *,
     max_stall_s: float = 300.0,
     radius_yd: float = 15.0,
 ) -> list[dict[str, Any]]:
-    """Scans one bot's sorted `.jsonl` trace shards and returns full stall spans."""
-    records: list[dict[str, Any]] = []
-    for path in sorted(trace_paths):
-        with path.open(encoding="utf-8", errors="replace") as fh:
-            for raw in fh:
-                raw = raw.strip()
-                if not raw:
-                    continue
-                try:
-                    obj = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(obj, dict) and "t_ms" in obj:
-                    records.append(obj)
-    records.sort(key=lambda r: int(r.get("t_ms", 0)))
+    """Scans one bot's sorted trace records and returns full stall spans."""
+    records = sorted(
+        (r for r in records if isinstance(r, dict) and "t_ms" in r),
+        key=lambda r: int(r.get("t_ms", 0)),
+    )
 
     stalls: list[dict[str, Any]] = []
     anchor_t_ms: int | None = None
@@ -133,6 +128,20 @@ def check_bot_trace(
 
     close_span(last_alive_t_ms)
     return stalls
+
+
+def check_bot_trace(
+    trace_paths: list[pathlib.Path],
+    *,
+    max_stall_s: float = 300.0,
+    radius_yd: float = 15.0,
+) -> list[dict[str, Any]]:
+    """Scans one bot's sorted `.jsonl` trace shards and returns full stall spans."""
+    return check_bot_records(
+        trace_lib.load_jsonl_files(trace_paths),
+        max_stall_s=max_stall_s,
+        radius_yd=radius_yd,
+    )
 
 
 def check_trace_dir(

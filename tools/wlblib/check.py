@@ -177,14 +177,10 @@ def goldens():
 
 
 def bench_tests():
-    """Unit tests for the soak suites, scorer, notes/eval tools, and remote worker."""
+    """Unit tests for the soak checks, trace analyzers, generators, and remote worker."""
     run(["python3", "-I", "-B", ROOT / "tools/bench/soak_suites_test.py", "-q"])
-    run(["python3", "-I", "-B", ROOT / "tools/bench/hill_climb_test.py", "-q"])
-    run(["python3", "-I", "-B", ROOT / "tools/bench/layered_scorer_test.py", "-q"])
     run(["python3", "-I", "-B", ROOT / "tools/bench/dodge_timeline_test.py", "-q"])
-    run(["python3", "-I", "-B", ROOT / "tools/bench/notes_hill_climb_test.py", "-q"])
     run(["python3", "-I", "-B", ROOT / "tools/bench/stall_check_test.py", "-q"])
-    run(["python3", "-I", "-B", ROOT / "tools/bench/trace_events_spec_test.py", "-q"])
     run(["python3", "-I", "-B", ROOT / "tools/notes/extract_boss_notes_test.py", "-q"])
     run(["python3", "-I", "-B", ROOT / "tools/knowledge/export_knowledge_test.py", "-q"])
     run(["python3", "-I", "-B", ROOT / "tools/knowledge/backfill_quest_poi_test.py", "-q"])

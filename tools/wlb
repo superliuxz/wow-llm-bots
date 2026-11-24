@@ -98,14 +98,6 @@ def parse(argv):
                    help="soak: number of runs (default: 0 = full suite once)")
     p.add_argument("--suite", default="varied",
                    help="soak: scenario suite (varied, heldout, endurance, quest, or a scenario name)")
-    p.add_argument("--score", action="store_true",
-                   help="soak: print composite 0-100 human-likeness score + guardrails")
-    p.add_argument("--human-dir", type=pathlib.Path, default=None,
-                   help="soak: directory containing human/ baseline traces")
-    p.add_argument("--judge", action="store_true",
-                   help="soak: also run anonymized LLM human-vs-bot clip judge")
-    p.add_argument("--verify-hash", type=pathlib.Path, default=None,
-                   help="soak: verify scorer SHA-256 against lock file before running")
     p.add_argument("--temperature", type=float, default=0.7,
                    help="soak: LLM sampling temperature (default: 0.7; use 0 for deterministic)")
     p.add_argument("--no-brain", action="store_true",
@@ -188,10 +180,6 @@ def main():
             testing.soak(
                 minutes=a.minutes,
                 runs=a.runs,
-                score=a.score,
-                human_dir=a.human_dir,
-                judge=a.judge,
-                verify_hash=a.verify_hash,
                 suite=a.suite,
                 temperature=a.temperature,
                 no_brain=a.no_brain,

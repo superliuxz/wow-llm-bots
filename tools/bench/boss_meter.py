@@ -20,9 +20,11 @@ import sys
 from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(ROOT / "tools" / "bench"))
+for _p in (ROOT / "tools", ROOT / "tools" / "bench"):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 import dodge_timeline  # noqa: E402
-import trace_parity  # noqa: E402
+from wlblib import trace as trace_lib  # noqa: E402
 
 
 def analyze_boss_fight(
@@ -169,7 +171,7 @@ def main() -> int:
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
-    traces = trace_parity.load_traces(args.trace_dir)[args.role]
+    traces = trace_lib.load_traces(args.trace_dir)[args.role]
     res = analyze_boss_fight(traces, boss_name=args.boss)
     if args.json:
         print(json.dumps(res, indent=2))

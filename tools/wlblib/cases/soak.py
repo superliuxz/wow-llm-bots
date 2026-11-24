@@ -502,10 +502,6 @@ def _extract_first_option_kind(decision: dict) -> str | None:
 def _run_once(
     scenario_name: str,
     minutes: float,
-    human_dir: pathlib.Path | None,
-    use_judge: bool,
-    baseline_trace_dir: pathlib.Path | None = None,
-    blind_ratings_path: pathlib.Path | None = None,
     min_eval_passed: int | None = None,
     eval_passed: int | None = None,
     temperature: float = 0.7,
@@ -652,10 +648,6 @@ def _run_once(
         res = soak_scorer.score_soak(
             trace_dir,
             run_stats=run_stats,
-            human_dir=human_dir,
-            baseline_trace_dir=baseline_trace_dir,
-            blind_ratings_path=blind_ratings_path,
-            use_judge=use_judge,
             min_eval_passed=min_eval_passed,
             eval_passed=eval_passed,
         )
@@ -744,12 +736,6 @@ def _aggregate_run_stats(results: list[dict]) -> dict:
 def run_soak(
     minutes: float = 5.0,
     runs: int = 0,
-    score: bool = False,
-    human_dir: pathlib.Path | None = None,
-    baseline_trace_dir: pathlib.Path | None = None,
-    blind_ratings_path: pathlib.Path | None = None,
-    use_judge: bool = False,
-    verify_hash: pathlib.Path | None = None,
     suite: str = "varied",
     check_guardrails: bool = True,
     min_eval_passed: int | None = None,
@@ -757,10 +743,6 @@ def run_soak(
     temperature: float = 0.7,
     no_brain: bool = False,
 ) -> dict:
-    if verify_hash:
-        ok, msg = soak_scorer.verify_scorer_hash(verify_hash)
-        expect(ok, f"scorer integrity check failed: {msg}")
-
     scenarios = _resolve_scenarios(suite, runs)
     if not no_brain:
         build.common("default", tests=False)
@@ -775,10 +757,6 @@ def run_soak(
                 res = _run_once(
                     scenario_name=sc_name,
                     minutes=minutes,
-                    human_dir=human_dir,
-                    use_judge=(use_judge if len(scenarios) == 1 else False),
-                    baseline_trace_dir=baseline_trace_dir,
-                    blind_ratings_path=blind_ratings_path,
                     min_eval_passed=(min_eval_passed if len(scenarios) == 1 else None),
                     eval_passed=(eval_passed if len(scenarios) == 1 else None),
                     temperature=temperature,
@@ -792,7 +770,6 @@ def run_soak(
                     per_run_dirs.append(run_trace_dst)
                 st = res["run_stats"]
                 p = res["progress"]
-                rat_s = f"{res['rating']:.1f}" if res.get("rating") is not None else "unrated"
                 opt_counts = st.get("option_counts") or {}
                 opt_total = sum(opt_counts.values())
                 opt_str = ""
@@ -804,12 +781,13 @@ def run_soak(
                 say(
                     f"soak summary [{sc_name}] ({st['elapsed_min']:.1f} min, {ONLINE} bots, "
                     f"mode={st.get('mode', 'llm')}): "
-                    f"rating={rat_s}, decisions={st['decisions']}, "
+                    f"decisions={st['decisions']}, "
                     f"max_wakes/min/bot={st['max_wakes_per_min']:.1f}, "
                     f"do_p50={st['do_p50_ms']:.0f}ms, do_p95={st['do_p95_ms']:.0f}ms, "
                     f"errors={st['llm_errors']}, invalid={st['invalid_plans']}, "
                     f"xp/h={p['xp_per_hour']:.0f}, deaths={p['deaths']}, "
-                    f"moved={p['moved_bots']}/{p['traced_bots']}{opt_str}"
+                    f"moved={p['moved_bots']}/{p['traced_bots']}, "
+                    f"stalled={p['stalled_bots']}{opt_str}"
                 )
 
             if len(scenarios) > 1:
@@ -818,14 +796,9 @@ def run_soak(
                 agg = soak_scorer.score_soak(
                     VAR / "soak_traces",
                     run_stats=merged_stats,
-                    human_dir=human_dir,
-                    baseline_trace_dir=baseline_trace_dir,
-                    blind_ratings_path=blind_ratings_path,
-                    use_judge=use_judge,
                     min_eval_passed=min_eval_passed,
                     eval_passed=eval_passed,
                 )
-                agg["run_ratings"] = [r.get("rating") for r in results]
                 agg["scenarios"] = [r.get("scenario", "soak") for r in results]
                 agg["guardrails_ok"] = bool(agg["guardrails_ok"]) and all(
                     r["guardrails_ok"] for r in results
