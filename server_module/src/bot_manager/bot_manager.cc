@@ -20,6 +20,7 @@
 #include "Group.h"
 #include "Item.h"
 #include "ItemTemplate.h"
+#include "LFG.h"
 #include "LFGMgr.h"
 #include "Log.h"
 #include "Map.h"
@@ -30,6 +31,7 @@
 #include "Player.h"
 #include "PlayerbotAI.h"
 #include "Playerbots.h"
+#include "QuestDef.h"
 #include "RandomPlayerbotMgr.h"
 #include "ServerScript.h"
 #include "SharedDefines.h"
@@ -41,6 +43,7 @@
 #include "base/synchronization/lock.h"
 #include "base/thread_annotations.h"
 #include "config/config_parsing.h"
+#include "popup_watch.h"
 
 namespace llm_brain {
 namespace {
@@ -699,6 +702,54 @@ void BotManager::ClearPendingLfgProposal(Player* bot) {
   PendingPromptsState& prompts = PendingPrompts();
   base::AutoLock lock(prompts.lock);
   prompts.lfg_proposals.erase(bot->GetGUID().GetRawValue());
+}
+
+PopupState BotManager::ReadPopupState(Player* bot) {
+  PopupState s;
+  if (!bot || !bot->IsInWorld()) {
+    return s;
+  }
+  s.ready_check = HasPendingReadyCheck(bot);
+  const lfg::LfgState lfg_state = sLFGMgr->GetState(bot->GetGUID());
+  s.role_check = lfg_state == lfg::LFG_STATE_ROLECHECK;
+  if (lfg_state == lfg::LFG_STATE_PROPOSAL) {
+    s.lfg_proposal_id = GetPendingLfgProposal(bot);
+  }
+  if (bot->IsAlive()) {
+    s.shared_quest_id = GetPendingSharedQuest(bot);
+    if (s.shared_quest_id != 0) {
+      if (const Quest* q = sObjectMgr->GetQuestTemplate(s.shared_quest_id)) {
+        s.shared_quest_title = q->GetTitle();
+      }
+      if (Player* from =
+              ObjectAccessor::FindConnectedPlayer(bot->GetDivider())) {
+        s.shared_quest_from = from->GetName();
+      }
+    }
+  } else {
+    s.resurrect_offer = bot->isResurrectRequested();
+  }
+  if (Group* group = bot->GetGroup()) {
+    for (const Roll* roll : group->GetRolls()) {
+      if (!roll) {
+        continue;
+      }
+      auto it = roll->playerVote.find(bot->GetGUID());
+      if (it == roll->playerVote.end() || it->second != NOT_EMITED_YET) {
+        continue;
+      }
+      PopupState::Roll r;
+      r.item_guid = roll->itemGUID.GetRawValue();
+      r.item_slot = roll->itemSlot;
+      r.item_id = roll->itemid;
+      if (const ItemTemplate* proto =
+              sObjectMgr->GetItemTemplate(roll->itemid)) {
+        r.item_name = proto->Name1;
+      }
+      s.rolls.push_back(std::move(r));
+    }
+  }
+  return s;
 }
 
 void BotManager::Stop() {

@@ -43,6 +43,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "bot_manager/bot_manager.h"
+#include "bot_manager/popup_watch.h"
 #include "bridge/brain_bridge.h"
 #include "chat/chat_inbox.h"
 #include "chat/chat_scripts.h"
@@ -371,6 +372,12 @@ class LlmBrainWorldScript : public WorldScript {
         ClearAvoidedTargetsForBot(bot->GetGUID().GetRawValue());
       }
       CheckPendingGroupInvite(bot, i, config_.bots[i], now);
+      // Timed popups (ready check, LFG, loot roll, quest share, rez) wake the
+      // brain while they are still open (RH-H1).
+      for (wlb::snapshot::Event& ev :
+           bots_[i].popups.Update(BotManager::ReadPopupState(bot))) {
+        EmitAlertingEvent(i, config_.bots[i], bot, std::move(ev));
+      }
       DrainPendingChat(bot, i, config_.bots[i], now);
       const SnapshotSchedule::Flags flags = CurrentFlags(bot, i);
       if (schedule_->IsDue(i, now, flags)) {
@@ -504,6 +511,8 @@ class LlmBrainWorldScript : public WorldScript {
         bots_[i].active_act.reset();
       }
       bots_[i].pending_chats.clear();
+      // A new harness has heard of no popup yet: report open ones again.
+      bots_[i].popups.Reset();
       if (connected) {
         bots_[i].active_option.reset();
         bots_[i].active_item_spell_id = 0;
@@ -1577,6 +1586,8 @@ class LlmBrainWorldScript : public WorldScript {
     // Leader name and arrival time of the currently surfaced pending invite.
     std::string seen_group_invite_leader;
     base::TimeTicks pending_invite_since;
+    // Which timed popups the harness was already told about.
+    PopupWatch popups;
   };
   std::vector<BotState> bots_;
   // A wrong-version command was logged on this connection.

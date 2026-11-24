@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "bot_manager/popup_watch.h"
+
 class Player;
 
 namespace llm_brain {
@@ -61,6 +63,11 @@ class BotManager {
   static void ClearPendingReadyCheck(Player* bot);
   static uint32_t GetPendingLfgProposal(Player* bot);
   static void ClearPendingLfgProposal(Player* bot);
+
+  // World thread only: the timed popups open for `bot` right now (ready
+  // check, LFG role check / proposal, shared quest, resurrect offer, loot
+  // rolls it hasn't voted on), for PopupWatch to turn into wake events.
+  static PopupState ReadPopupState(Player* bot);
 
  private:
   struct Bot {

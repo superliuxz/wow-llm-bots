@@ -71,6 +71,27 @@ more. It acts on this checkout's processes only (by their pid files), never by n
 | `tools/wlb setup msan` | MSan-instrumented libc++ (built by `tools/wlb build common msan` when missing) |
 | `tools/wlb setup client-ui` | the client's UI code and event names, for the client-event audit |
 
+**Remote CPU workers (optional)**
+
+Long CPU jobs (e2e, soak, boss benches) can run on another machine. Workers are listed in
+`private/remotes.json` (untracked; `WLB_REMOTES_FILE` overrides the path), for example a worker
+named `10700k`:
+
+```json
+{ "10700k": { "ssh": "wlb@192.0.2.10", "repo": "~/wow-llm-bots", "llm_port": 8090 } }
+```
+
+| Command | What |
+|---|---|
+| `tools/wlb remote list` | the configured workers |
+| `tools/wlb remote <name> sync [--force] [--no-server-build]` | rsync the source tree and build it there (`out/`, `var/`, `models/`, `private/` are never synced) |
+| `tools/wlb remote <name> run [--no-sync] [--no-tunnel] [--no-server-build] [--pull REMOTE_REL:LOCAL_PATH ...] -- <cmd...>` | sync, check the build stamp matches this checkout, then run the command, e.g. `tools/wlb remote 10700k run -- tools/wlb test e2e playability`; reverse-tunnels the local `llama-server` port so the remote uses this GPU |
+| `tools/wlb remote <name> status\|stop\|install-hook` | what is running there, stop it, or install a post-commit hook that syncs in the background |
+| `tools/wlb remote <name> pull REMOTE_REL LOCAL_PATH` | copy a result file back |
+
+Each worker has a lock, so syncs, builds and runs never overlap. Only use it when you mean to
+offload work (CONTRIBUTING.md).
+
 **Snapshot and brain research** (Python, dev only; production is C++)
 
 | Path | What |

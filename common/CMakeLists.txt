@@ -98,6 +98,8 @@ target_compile_options(wlb_common_unittests PRIVATE ${WLB_SAFETY_FLAGS})
 # sit next to the code; mod-llm-brain.cmake keeps them out of the server.
 set(WLB_MODULE_SRC "${WLB_ROOT}/server_module/src")
 add_executable(llm_brain_unittests
+  "${WLB_MODULE_SRC}/bot_manager/popup_watch.cc"
+  "${WLB_MODULE_SRC}/bot_manager/popup_watch_unittest.cc"
   "${WLB_MODULE_SRC}/bridge/brain_bridge.cc"
   "${WLB_MODULE_SRC}/bridge/brain_bridge_unittest.cc"
   "${WLB_MODULE_SRC}/bridge/latest_wins.cc"
