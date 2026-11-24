@@ -21,6 +21,10 @@ inline constexpr size_t kMaxChatBytes = 255;
 std::string CleanChatText(std::string_view text,
                           size_t max_bytes = kMaxChatBytes);
 
+// A line that asks nothing of anyone ("ok", "lol", "ty", "kk", ":)"): heard,
+// but nobody needs to wake for it (RH-H4).
+bool IsTrivialChat(std::string_view text);
+
 }  // namespace llm_brain
 
 #endif  // MOD_LLM_BRAIN_CHAT_CHAT_TEXT_H_

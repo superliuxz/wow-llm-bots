@@ -2257,5 +2257,126 @@ TEST(BotLoopTest, PartyChatRoutesToPartyOrRaidAndSuppressesWhenSolo) {
   EXPECT_EQ(say_it->say->text, "pull in 5");
 }
 
+// RH-M4: a bot without its own identity.md gets the shipped one, and its
+// `remember:` notes are kept in memory.md and shown in later prompts.
+TEST(BotLoopTest, ShippedIdentityAndRememberedNotes) {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "wlb_bot_loop_memory_test";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir / "identities");
+  std::filesystem::create_directories(tmp_dir / "bots");
+  {
+    std::ofstream f(tmp_dir / "identities" / "Loada.md");
+    f << "You are Loada, a cheerful troll priest.";
+  }
+  CannedBrain brain;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.bots_dir = (tmp_dir / "bots").string();
+  cfg.identities_dir = (tmp_dir / "identities").string();
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(), [](const pb::Command&) {});
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot snap = MakeLiveSnap("Loada", 1, t0, /*in_combat=*/false);
+  AddKeep(&snap);
+  loop.OnSnapshot(snap, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("cheerful troll priest"),
+            std::string::npos);
+  EXPECT_EQ(brain.front_request().user.find("What you remember"),
+            std::string::npos);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+      "remember: Hele is a good tank, grouped for Deadmines");
+
+  const std::optional<std::string> memory =
+      ReadFile((tmp_dir / "bots" / "Loada" / "memory.md").string());
+  ASSERT_TRUE(memory.has_value());
+  EXPECT_NE(memory->find("Hele is a good tank"), std::string::npos);
+
+  // The next call shows the note.
+  pb::Snapshot later = MakeLiveSnap("Loada", 2, t0 + base::Seconds(70), false);
+  AddKeep(&later);
+  loop.OnSnapshot(later, t0 + base::Seconds(70));
+  loop.OnTick(t0 + base::Seconds(70));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(
+      brain.front_request().user.find("What you remember from earlier:\n- "),
+      std::string::npos);
+  EXPECT_NE(brain.front_request().user.find("Hele is a good tank"),
+            std::string::npos);
+  std::filesystem::remove_all(tmp_dir);
+}
+
+// RH-H4: a human's party line wakes every brain bot of the party, but only
+// one answers it: the one named, else the first by name.
+TEST(BotLoopTest, OnlyOneBotAnswersAHumansPartyLine) {
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { sent.push_back(cmd); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  const auto snap_for = [&](const std::string& bot, const std::string& other,
+                            uint32_t seq) {
+    pb::Snapshot s = MakeLiveSnap(bot, seq, t0, /*in_combat=*/false);
+    AddKeep(&s);
+    pb::Party& p = s.ext.party.emplace();
+    p.leader = "Hele";
+    for (const char* name : {"Hele", other.c_str()}) {
+      pb::Unit m;
+      m.name = name;
+      p.members.push_back(m);
+    }
+    return s;
+  };
+  // First looks for both bots, answered with Keep.
+  loop.OnSnapshot(snap_for("Loada", "Telda", 1), t0);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300");
+  loop.OnSnapshot(snap_for("Telda", "Loada", 1), t0);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300");
+  ASSERT_EQ(brain.size(), 0u);
+
+  const auto party_line = [&](const std::string& bot, const std::string& text) {
+    pb::ImmediateEvent imm;
+    imm.bot = bot;
+    pb::ChatEvent& chat = imm.event.chat.emplace();
+    chat.channel = pb::PARTY;
+    chat.from = "Hele";
+    chat.text = text;
+    chat.at_me = true;
+    loop.OnEvent(imm, t0 + base::Seconds(1));
+  };
+  const auto party_says_by = [&](const std::string& bot) {
+    return std::count_if(sent.begin(), sent.end(), [&](const pb::Command& c) {
+      return c.bot == bot && c.say && c.say->channel == pb::PARTY;
+    });
+  };
+
+  // Nobody named: both wake, only Loada (first by name) answers.
+  sent.clear();
+  party_line("Loada", "pull?");
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300\nparty: go");
+  party_line("Telda", "pull?");
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("don't reply"), std::string::npos);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300\nparty: ok");
+  EXPECT_EQ(party_says_by("Loada"), 1);
+  EXPECT_EQ(party_says_by("Telda"), 0);
+
+  // Telda named: only Telda answers.
+  sent.clear();
+  party_line("Loada", "telda can you heal?");
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300\nparty: no");
+  party_line("Telda", "telda can you heal?");
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300\nsay: sure");
+  EXPECT_EQ(party_says_by("Loada"), 0);
+  EXPECT_EQ(party_says_by("Telda"), 1);  // `say:` answers in party.
+}
+
 }  // namespace
 }  // namespace harness

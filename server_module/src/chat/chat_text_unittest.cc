@@ -42,5 +42,16 @@ TEST(ChatTextTest, NeverCutsAUtf8CharacterInHalf) {
   EXPECT_EQ(CleanChatText(std::string(300, 'x')).size(), kMaxChatBytes);
 }
 
+TEST(ChatTextTest, TrivialLinesAskNothing) {
+  for (const char* t :
+       {"ok", "OK!", "kk", "lol", "ty", "thx!", ":)", "...", "gg", "Nice."}) {
+    EXPECT_TRUE(IsTrivialChat(t)) << t;
+  }
+  for (const char* t : {"ok?", "pull", "wait here", "telda heal me", "lol wait",
+                        "need mana?", "inv pls"}) {
+    EXPECT_FALSE(IsTrivialChat(t)) << t;
+  }
+}
+
 }  // namespace
 }  // namespace llm_brain

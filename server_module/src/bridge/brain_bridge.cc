@@ -42,6 +42,10 @@ class BrainBridge::SendStatsCollector : public base::RawPtrTarget {
     base::AutoLock lock(lock_);
     ++stats_.dropped;
   }
+  void AddDroppedInbound() {
+    base::AutoLock lock(lock_);
+    ++stats_.dropped_inbound;
+  }
   SendStats Take() {
     base::AutoLock lock(lock_);
     return std::exchange(stats_, {});
@@ -129,7 +133,7 @@ class BrainBridge::IoCore : public BrainBridge::IoCoreHandle {
  private:
   void OnFrame(std::string frame) {
     if (world_queue_->PendingTaskCount() >= max_pending_messages_) {
-      ++dropped_inbound_;
+      stats_->AddDroppedInbound();  // Logged by the world script (RH-M6).
       return;
     }
     // on_message_ runs on the world thread (it's posted there), unless the
@@ -170,7 +174,6 @@ class BrainBridge::IoCore : public BrainBridge::IoCoreHandle {
   const base::raw_ptr<Generation> generation_;
   LatestWins waiting_;
   net::UnixSocketServer server_;
-  uint64_t dropped_inbound_ = 0;
 };
 
 BrainBridge::BrainBridge(std::string socket_path,

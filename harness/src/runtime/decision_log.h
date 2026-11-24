@@ -37,6 +37,9 @@ struct Decision {
 // (the rules and identity change rarely).
 std::string DecisionJson(const Decision& decision);
 
+// `time` as "YYYY-MM-DD" in UTC (the events file name; memory notes).
+std::string DateUtc(base::Time time);
+
 class DecisionLog {
  public:
   explicit DecisionLog(std::string root) : root_(std::move(root)) {}

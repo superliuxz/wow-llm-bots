@@ -38,7 +38,12 @@ def run(stack):
     expect(loada, f"Loada never heard Telda's answer (heard: {t['heard']})")
     expect(loada["t"] - answer["t"] <= HEARD_WITHIN_S,
            f"Loada heard it {loada['t'] - answer['t']:.2f} s after it was sent")
-    said = [line for line in stack.server_log().splitlines() if " says (WHISPER to " in line]
+    # Only this case's two whispers: the log also holds earlier cases' lines
+    # when several run on one server.
+    ours = (f"Loada says (WHISPER to Telda, len={len(ASK)})",
+            f"Telda says (WHISPER to Loada, len={len(ANSWER)})")
+    said = [line for line in stack.server_log().splitlines()
+            if any(o in line for o in ours)][-2:]
     expect(len(said) == 2 and all(line.endswith(": ok") for line in said),
            f"the module's record of the whispers: {said}")
     return (f"heard in {telda['t'] - ask['t']:.2f} s and {loada['t'] - answer['t']:.2f} s")

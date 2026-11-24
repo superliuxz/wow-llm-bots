@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
-#include <chrono>
 #include <cstdint>
 #include <list>
 #include <string>
@@ -39,6 +38,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 #include "chat/chat_inbox.h"
+#include "chat/chat_text.h"
 #include "chat/speak.h"
 #include "snapshot/behavior_trace.h"
 #include "snapshot/snapshot.h"
@@ -115,8 +115,9 @@ class LlmBrainChatScript : public PlayerScript {
       chat.from = player->GetName();
       chat.text = msg;
       chat.from_dist_yd = dist;
-      chat.at_me = MentionsName(msg, bot_name) ||
-                   (!is_yell && sender_is_human && dist <= 15.0f);
+      chat.at_me =
+          MentionsName(msg, bot_name) ||
+          (!is_yell && sender_is_human && dist <= 15.0f && !IsTrivialChat(msg));
       inbox_->Add(bot_name, std::move(chat));
     }
     return true;
@@ -151,7 +152,9 @@ class LlmBrainChatScript : public PlayerScript {
       chat.text = msg;
       // Only human party/raid messages wake bots directly; bot-to-bot party
       // lines remain visible in the chat log without triggering reply loops.
-      chat.at_me = sender_is_human && (!is_raid || MentionsName(msg, bot_name));
+      // "ok" / "lol" asks nothing of anyone: heard, not woken for (RH-H4).
+      chat.at_me = sender_is_human && !IsTrivialChat(msg) &&
+                   (!is_raid || MentionsName(msg, bot_name));
       inbox_->Add(bot_name, std::move(chat));
     }
     return true;
@@ -166,10 +169,10 @@ class LlmBrainChatScript : public PlayerScript {
         language == LANG_ADDON || msg.empty()) {
       return true;
     }
-    // Only forward constant public channels (General / Trade); never leak
-    // custom/private channels or channels the bot has not joined.
-    if (!channel->IsConstant() || channel->HasFlag(CHANNEL_FLAG_CUSTOM) ||
-        channel->IsLFG()) {
+    // Only forward constant public channels (General / Trade /
+    // LookingForGroup); never leak custom/private channels or channels the bot
+    // has not joined. LookingForGroup is where pugs formed on 3.3.5a (RH-M7).
+    if (!channel->IsConstant() || channel->HasFlag(CHANNEL_FLAG_CUSTOM)) {
       return true;
     }
     const ChatChannelsEntry* ch_entry =
@@ -179,7 +182,9 @@ class LlmBrainChatScript : public PlayerScript {
     }
     const std::string& cname = channel->GetName();
     pb::ChatChannel ch = pb::CUSTOM_CHANNEL;
-    if (cname.starts_with("General")) {
+    if (channel->IsLFG()) {
+      ch = pb::LFG;
+    } else if (cname.starts_with("General")) {
       ch = pb::GENERAL;
     } else if (channel->HasFlag(CHANNEL_FLAG_TRADE) ||
                cname.starts_with("Trade")) {
@@ -235,10 +240,7 @@ class LlmBrainChatScript : public PlayerScript {
             human_trace_ ? human_trace_->load(std::memory_order_acquire)
                          : nullptr;
         trace && trace->enabled()) {
-      const int64_t t_ms =
-          std::chrono::duration_cast<std::chrono::milliseconds>(
-              std::chrono::system_clock::now().time_since_epoch())
-              .count();
+      const int64_t t_ms = base::Time::Now().InMillisecondsSinceUnixEpoch();
       const int64_t mono_us =
           (base::TimeTicks::Now() - base::TimeTicks()).InMicroseconds();
       // Record timing and byte length only (never private whisper text or

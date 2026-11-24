@@ -87,6 +87,7 @@ class LiveSession : public base::RawPtrTarget {
     cfg.rules = std::move(rules);
     cfg.bots_dir = options.bots_dir;
     cfg.notes_dir = options.notes_dir;
+    cfg.identities_dir = options.identities_dir;
     cfg.knowledge_path = options.knowledge_path;
     cfg.max_in_flight = options.slots;
     cfg.temperature = options.temperature;
@@ -196,6 +197,8 @@ std::optional<RunOptions> ParseRunArgs(const std::vector<std::string>& args,
       options.bots_dir = value;
     } else if (name == "notes-dir") {
       options.notes_dir = value;
+    } else if (name == "identities-dir") {
+      options.identities_dir = value;
     } else if (name == "knowledge") {
       options.knowledge_path = value;
     } else if (name == "host" && !value.empty()) {

@@ -79,6 +79,9 @@ class BrainBridge {
     uint64_t replaced = 0;
     // Messages the socket refused (no harness, or its buffer full).
     uint64_t dropped = 0;
+    // Harness commands dropped because the world thread fell behind (its
+    // queue held max_pending_messages): the harness never sees them done.
+    uint64_t dropped_inbound = 0;
   };
   SendStats TakeSendStats();
   // World thread. Runs pending tasks posted from the IO thread (incoming

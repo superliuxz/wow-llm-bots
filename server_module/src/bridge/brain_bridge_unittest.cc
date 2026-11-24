@@ -208,6 +208,9 @@ TEST(BrainBridgeTest, DropsInboundWhenWorldFallsBehind) {
   bridge.RunWorldTasks();
   EXPECT_GT(world.messages.size(), 0u);
   EXPECT_LE(world.messages.size(), 5u);
+  // Every message that didn't reach the world is counted (RH-M6).
+  const BrainBridge::SendStats stats = bridge.TakeSendStats();
+  EXPECT_EQ(world.messages.size() + stats.dropped_inbound, 50u);
 }
 
 TEST(BrainBridgeTest, StopRemovesSocketAndCanRestart) {

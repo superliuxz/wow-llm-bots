@@ -75,6 +75,8 @@ struct Plan {
   int look_s = 0;     // Wake anyway after this many seconds.
   std::string say;    // Out loud. Empty: nothing to say.
   std::string party;  // Party or raid chat. Empty: none.
+  // A note for the bot's long-term memory (RH-M4). Empty: none.
+  std::string remember;
   // A whisper: to `tell_to` (a character name), `tell`. Empty: none.
   std::string tell_to;
   std::string tell;

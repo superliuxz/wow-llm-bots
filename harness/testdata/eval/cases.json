@@ -799,5 +799,58 @@
       "out of",
       "away"
     ]
+  },
+  {
+    "name": "party_follower_assists_leader",
+    "source": "built from healthy_boar_pull (RH-H2)",
+    "reason": "plan done",
+    "summary": "party member (priest) next to leader Hele, who fights a Mottled Boar; an idle Scorpid Worker 9 yd away nobody has pulled",
+    "rule": "attacks what the party fights (the boar), never the not-pulled Scorpid Worker",
+    "first_kinds": [
+      "attack"
+    ],
+    "forbid_options": [
+      2
+    ]
+  },
+  {
+    "name": "party_follower_never_pulls",
+    "source": "built from healthy_boar_pull (RH-H2)",
+    "reason": "plan done",
+    "summary": "party member (priest), leader Hele 31 yd away fighting nothing; only idle mobs around (boar, Scorpid Worker), all not pulled",
+    "rule": "does not pull: no Attack; goes to the leader or keeps following",
+    "forbid_kinds": [
+      "attack"
+    ],
+    "first_options": [
+      3,
+      7,
+      10
+    ]
+  },
+  {
+    "name": "party_follower_in_dungeon_never_pulls",
+    "source": "built from healthy_boar_pull (RH-H2)",
+    "reason": "plan done",
+    "summary": "in an instance: party member (priest), leader Hele 31 yd away fighting nothing; only not-pulled mobs around",
+    "rule": "does not pull ahead of the tank: no Attack; goes to the leader or keeps following",
+    "forbid_kinds": [
+      "attack"
+    ],
+    "first_options": [
+      3,
+      7,
+      10
+    ]
+  },
+  {
+    "name": "party_follower_next_to_tank_in_dungeon",
+    "source": "built from healthy_boar_pull (RH-H2)",
+    "reason": "plan done",
+    "summary": "in an instance: party member (priest) 5 yd from tank/leader Hele, who fights nothing; a boar and a Scorpid Worker nobody has pulled",
+    "rule": "waits for the tank's pull: no Attack (old rule 'if there is an Attack option, do that' pulled here)",
+    "forbid_kinds": [
+      "attack"
+    ]
   }
 ]

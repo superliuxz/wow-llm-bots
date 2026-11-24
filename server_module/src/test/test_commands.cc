@@ -79,6 +79,8 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"tele", HandleTele, SEC_ADMINISTRATOR, Console::Yes},
         {"gear", HandleGear, SEC_ADMINISTRATOR, Console::Yes},
         {"questcomplete", HandleQuestComplete, SEC_ADMINISTRATOR, Console::Yes},
+        {"questadd", HandleQuestAdd, SEC_ADMINISTRATOR, Console::Yes},
+        {"ungroup", HandleUngroup, SEC_ADMINISTRATOR, Console::Yes},
         {"item", HandleItem, SEC_ADMINISTRATOR, Console::Yes},
         {"checkstrat", HandleCheckStrat, SEC_ADMINISTRATOR, Console::Yes},
         {"setstrat", HandleSetStrat, SEC_ADMINISTRATOR, Console::Yes},
@@ -443,6 +445,42 @@ class LlmBrainTestCommandScript : public CommandScript {
     player->SetRewardedQuest(quest_id);
     handler->PSendSysMessage("llmtest: marked quest {} rewarded on {}{}",
                              quest_id, player->GetName(), FormatToken(token));
+    return true;
+  }
+
+  // `llmtest ungroup <name>`: takes the player out of its group (e2e cleanup,
+  // so a later case starts ungrouped).
+  static bool HandleUngroup(ChatHandler* handler, std::string player_name) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player) {
+      return false;
+    }
+    if (Group* group = player->GetGroup()) {
+      group->RemoveMember(player->GetGUID());
+    }
+    handler->PSendSysMessage("llmtest: {} is not in a group",
+                             player->GetName());
+    return true;
+  }
+
+  // `llmtest questadd <name> <quest id>`: puts the quest in the log, as if
+  // accepted (e2e_popups shares it).
+  static bool HandleQuestAdd(ChatHandler* handler,
+                             std::string player_name,
+                             uint32_t quest_id) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player) {
+      return false;
+    }
+    const Quest* quest = sObjectMgr->GetQuestTemplate(quest_id);
+    if (!quest || !player->CanAddQuest(quest, false)) {
+      handler->SendErrorMessage("llmtest: questadd: can't add quest {} to {}",
+                                quest_id, player->GetName());
+      return false;
+    }
+    player->AddQuestAndCheckCompletion(quest, nullptr);
+    handler->PSendSysMessage("llmtest: added quest {} to {}", quest_id,
+                             player->GetName());
     return true;
   }
 

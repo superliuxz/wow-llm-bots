@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <filesystem>
 #include <flat_map>
 #include <memory>
 #include <optional>
@@ -39,9 +40,12 @@
 namespace harness {
 
 struct BotLoopConfig {
-  std::string rules;           // Shared RULES.md text.
-  std::string bots_dir;        // Optional: var/bots (identity.md + logs).
-  std::string notes_dir;       // Optional: content/notes (<instance>/notes.md).
+  std::string rules;      // Shared RULES.md text.
+  std::string bots_dir;   // Optional: var/bots (identity.md + logs).
+  std::string notes_dir;  // Optional: content/notes (<instance>/notes.md).
+  // Optional: content/identities (<bot>.md), used when <bots_dir>/<bot>/
+  // identity.md is missing (RH-M4).
+  std::string identities_dir;
   std::string knowledge_path;  // Optional: var/knowledge/world_knowledge.json.
   size_t max_in_flight = 16;   // llama-server slots / concurrent calls.
   float temperature = 0.7f;
@@ -153,6 +157,9 @@ class BotLoop {
     int order_wakes = 0;
     base::TimeTicks order_quiet_since;
     uint64_t call_epoch = 0;
+    // The call (epoch) woken by a party/raid line that another bot answers
+    // for the group (RH-H4): its `say:` / `party:` lines are not sent.
+    uint64_t party_reply_muted_epoch = 0;
     base::TimeTicks look_deadline;
     // Panels as the bot last saw them, for the prompt once they are closed.
     struct SeenPanel {
@@ -203,6 +210,15 @@ class BotLoop {
   void NoteText(BotState* state, std::string text);
   // What a habit or a disconnect leaves behind: forgotten.
   static void ResetLooking(BotState* state);
+  // `path`'s text, re-read only when its modification time changed (it is
+  // read on every brain call: RH-L5); "" when missing.
+  std::string ReadFileIfChanged(const std::string& path);
+  // Whether `bot` answers the party/raid chat lines among `reasons` (RH-H4):
+  // a bot named in the line does; when no brain bot of the group is named,
+  // only the first of them by name does. True when no such line woke it.
+  bool AnswersPartyChat(const std::string& bot,
+                        const std::vector<std::string>& reasons,
+                        const wlb::snapshot::Snapshot& snapshot) const;
   // Remembers who whispered (for the `tell` grammar).
   static void NoteWhisperer(BotState* state,
                             const wlb::snapshot::Event& event,
@@ -294,7 +310,15 @@ class BotLoop {
   Scheduler scheduler_;
   std::flat_map<std::string, BotState> bots_;
   // Pre-pull compiled standing orders cached by (bot, map, notes).
+  static constexpr size_t kMaxCompiledOrdersCache = 256;
+  // How many of the newest `remember:` notes go into each prompt (RH-M4).
+  static constexpr size_t kMemoryLinesInPrompt = 15;
   std::flat_map<CompiledOrdersKey, std::vector<Order>> compiled_orders_cache_;
+  struct CachedFile {
+    std::filesystem::file_time_type mtime;
+    std::string text;
+  };
+  std::flat_map<std::string, CachedFile> file_cache_;
   uint32_t next_command_id_ = 0;
   uint64_t decisions_completed_ = 0;
   uint64_t calls_cancelled_ = 0;

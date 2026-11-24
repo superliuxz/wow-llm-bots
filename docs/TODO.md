@@ -11,30 +11,36 @@ Last updated 2026-11-24.
 
 *(Phase 4, Phase 5 `C4`, and the playability & architecture review are complete; `scorer.sha256` relocked with user approval at `6e3f4a12699e`, 36 files.)*
 
-- [ ] **Play-with-a-human review (2026-11-24, read-only code review; nothing below live-verified yet).**
-  Overclaim fix: "Medium 3 — Grouping & upkeep actions" below is wired but not usable in play
-  until RH-H1 is fixed (the popups never wake the brain).
+- [ ] **Play-with-a-human review (2026-11-24; plan: [`docs/plans/play-with-human.md`](plans/play-with-human.md)).**
+  Overclaim fixed: "Medium 3 — Grouping & upkeep actions" below was wired but not usable in play
+  until RH-H1 (popups never woke the brain). Locked files changed (`llm_brain_world_script.cc`,
+  `snapshot_builder.cc`): lock files left untouched; scored hill-climb runs need a user-approved
+  relock. Verification legend: *unit* = gtest; *live* = e2e on `out/server-test`; *eval* = offline
+  brain eval with the default Gemma model.
   - **High:**
-    - [x] **RH-H1 (fix):** `PopupWatch` (`server_module/src/bot_manager/popup_watch.{h,cc}`, 4 unit tests) + `BotManager::ReadPopupState` now emit one alerting event per newly opened popup (ready check, LFG role check, LFG proposal, quest share, resurrect offer as `PromptEvent`s; loot rolls as `LootRollEvent`); hooked into the world script next to the invite check. Live-verified for the LFG role check only: new `e2e_popups` (`ROLE_CHECK` wakes the member at once; role confirmed without error) on `out/server-test`; `e2e invite/choose/keep` still pass. **Touches locked `llm_brain_world_script.cc`: lock files left untouched; scored hill-climb runs need a user-approved relock.** Still to live-test: ready check, LFG proposal, loot roll, quest share, rez offer (see Loose ends).
-      *Finding (kept for reference):* group popups never woke the bot. Only `GROUP_INVITE` emits a `PromptEvent` (`llm_brain_world_script.cc:654`); ready check, LFG role check, LFG proposal, loot roll (`triggers.cc` handles `event.loot_roll`, but nothing emits it), shared quest and resurrect offer only show as options on the next unrelated wake (60-300 s), so they time out (LFG queue with bots fails, every roll waits 60 s).
-    - [ ] **RH-H2:** Followers pull ahead of the tank. Every hostile/neutral NPC is an `Attack` option (`options.cc:68-72`), and `RULES.md` dungeon rule says "if there is an `Attack` option, do that". Assist-the-tank options need the `main_tank`/`TANK` role, which is only set in LFG groups.
-    - [ ] **RH-H3:** Outside instances, grouped non-leaders still get `Explore`/`Go to`/quest options and have no party rule, so they wander off from a human leader; they can't see the leader's quests and have no `Share quest` option.
-    - [ ] **RH-H4:** Every human party line sets `at_me` for every bot (`chat_scripts.cc:154`), so all party bots wake and reply (pile-on); no single responder, no skipping lines like "ok".
+    - [x] **RH-H1:** timed popups wake the brain while open: `PopupWatch` (`bot_manager/popup_watch.{h,cc}`) + `BotManager::ReadPopupState` emit one event per new ready check / LFG role check / LFG proposal / quest share / rez offer (`PromptEvent`) and loot roll (`LootRollEvent`). A shared quest that AzerothCore already auto-accepted is no longer offered. *unit* (4); *live* `e2e_popups` (role check) and `e2e_group` (quest share prompt → accept).
+    - [x] **RH-H2:** followers no longer pull. `Attack` options on mobs nobody in the party fights are labelled `(not pulled)`; `Attack leader <name>'s target` is offered in every group; party roles come from spec in every group (RH-M1), so tank-assist options appear too; RULES party rule: the tank/leader pulls, followers assist and stay. *unit* `OptionsTest.PartyFollowerSeesLeaderAssistAndNotPulledMobs`; *eval* 4 new party cases; A/B on `party_follower_next_to_tank_in_dungeon`: old rules+options pulled 3/3, new waited 3/3. The party block sits after the solo rules (placed first it made the solo `healthy_boar_pull` pick Explore 3/3); full eval **55/56 (98%)**, only `whisper_while_low_hp` failing (also fails with the old RULES).
+    - [x] **RH-H3:** outside instances the RULES party rule keeps members with the leader; `Share quest "<title>" with the party` option (`qpush:`, through `HandlePushQuestToParty`) for quests a nearby member lacks. *live* `e2e_group`; *eval* `party_follower_never_pulls` (goes to the leader). Not built: showing party members' quest objectives on screen (plan item 5).
+    - [x] **RH-H4:** one bot answers a human's party/raid line (the one named, else the first brain bot of the group by name); the others still wake but their `say:`/`party:` lines are muted. "ok"/"lol"/"ty"-style lines wake nobody (`IsTrivialChat`; "yes"/"sure" still wake). *unit* `BotLoopTest.OnlyOneBotAnswersAHumansPartyLine`, `ChatTextTest.TrivialLinesAskNothing`. Not live-tested with a human typing.
   - **Medium:**
-    - [ ] **RH-M1:** No group roles outside LFG; a bot tank keeps tank strategies next to a human tank (`bot_manager.cc` `EnsureStrategies`).
-    - [ ] **RH-M2:** No options for a leader's usual commands: "Stay/Wait here", always-on "Assist <leader>", follow beyond 8-25 yd, "wait for mana".
-    - [ ] **RH-M3:** Hard-coded 90 s rez wait before playerbots' auto release in dungeons (`kMaxWaitForRezMs`, `bot_manager.cc`); should be a brain-set parameter.
-    - [ ] **RH-M4:** No `identity.md` for any bot in `var/bots/`; per-bot memory/relationships not built (see "Persistent brain memory" under Later).
-    - [ ] **RH-M5:** Talent spending picks talents in row/column order inside the chosen tree (`option_executor.cc` `talent:`), giving weak specs; C++ makes the judgment.
-    - [ ] **RH-M6:** `brain_bridge.cc` `OnFrame` drops harness commands silently when the world queue is full (`dropped_inbound_` never logged or reported).
-    - [ ] **RH-M7:** `chat_scripts.cc` skips `IsLFG()` channels, so bots never hear LookingForGroup.
+    - [x] **RH-M1:** roles from spec/stance in every group (`MemberRole`, `snapshot_builder.cc`); brain options `Let <name> tank (stop tanking)` / `Tank for the group again` (group-scoped `BotManager::GroupPolicy`: `-tank assist,-pull back,+dps assist`). *live* role shown (`e2e_group`: HEALER). Tank stand-down not live-tested (needs two tanks).
+    - [x] **RH-M2:** `Wait here (stop following the leader)` / `Follow the party leader again` (policy `-follow,+stay`) and the leader assist option (RH-H2); "wait for mana" is the leader's RULES pacing rule. *live* wait/follow toggle (`e2e_group`).
+    - [x] **RH-M3:** `Wait for a resurrection (up to 5 min)` while dead in a party (`rez:wait`; blocks playerbots' auto release anywhere until then); the 90 s dungeon default stays for when the brain says nothing. *unit* options; not live-tested.
+    - [x] **RH-M4:** shipped identities `content/identities/<bot>.md` (Gatda, Testpriest) when `var/bots/<bot>/identity.md` is missing (`--identities-dir`); new `remember:` reply line appends to `var/bots/<bot>/memory.md`, and the newest 15 notes go into every prompt. *unit* `BotLoopTest.ShippedIdentityAndRememberedNotes`. Still not built: reflection/condensing of memory, relationships file (plan item 7).
+    - [x] **RH-M5:** talent spending follows playerbots' premade build for the chosen tree first (`PremadeBuildForTree`), then the old order for leftovers. *live* `e2e_playability` (L15 → L16 → L17 incremental spending). Which talents the build picked was not inspected.
+    - [x] **RH-M6:** dropped harness commands are counted (`SendStats::dropped_inbound`) and logged as a warning. *unit* `BrainBridgeTest.DropsInboundWhenWorldFallsBehind`.
+    - [x] **RH-M7:** bots hear the LookingForGroup channel (`pb::LFG`, wakes only when named). Compile-verified only: not live-tested (needs a client in the channel).
   - **Low:**
-    - [ ] **RH-L1:** `bot_loop.cc` picks the `say:` channel by substring "party from " in the wake reason, which includes raw chat text.
-    - [ ] **RH-L2:** `mark:` info always says "with Skull" whatever the icon (`option_executor.cc`).
-    - [ ] **RH-L3:** `std::chrono::system_clock` in `chat_scripts.cc` whisper trace; use `base::Time::Now()`.
-    - [ ] **RH-L4:** Confirm no bot-side chat path reaches the party/channel chat hooks from a map thread (they read other players' state via `FindPlayerByName`).
-    - [ ] **RH-L5:** `notes.md` re-read from disk on every brain call; `compiled_orders_cache_` never evicted (scale note).
-    - [ ] **RH-L6:** A reply with both `say:` and `party:` double-posts.
+    - [x] **RH-L1:** `say:` channel comes from the wake's own channel segment (`GroupChatLines`), never words in the chat text. *unit* (responder test).
+    - [x] **RH-L2:** `mark:` info names the icon used.
+    - [x] **RH-L3:** whisper trace uses `base::Time::Now()`.
+    - [x] **RH-L4:** verified by reading: the chat hooks only run from `WorldSession::HandleMessagechatOpcode` (client packets, `PROCESS_THREADUNSAFE`, world thread); playerbots and our `Speak` never call it.
+    - [x] **RH-L5:** `notes.md`/`memory.md` re-read only when their mtime changes (`ReadFileIfChanged`); `compiled_orders_cache_` capped at 256.
+    - [x] **RH-L6:** a `say:` routed to party/raid is dropped when the same reply has a `party:` line.
+  - **Found while verifying:**
+    - [x] `BotManager` logged a dropped bot back in on the next 1 s tick; it now waits `kLoginRetryMs` (10 s) like after a failed login (made `e2e invite` fail after a longer server uptime). *live* `e2e group invite`.
+    - [x] `e2e_whisper` counted earlier cases' whispers; now matches only its own two. *live* batch.
+    - [x] New test-only console commands `llmtest questadd` / `llmtest ungroup`; `e2e_popups`/`e2e_group` leave no group behind.
 
 - [x] **Review `8614690` fixes (High → Medium → Low — all verified):**
   - **High:**
@@ -143,8 +149,7 @@ and Phase 5 (`C4`) are signed off** (Phases 1–3: [`docs/benchmarks/2026-11-22-
   - **Persistent brain memory (`var/bots/<name>/`):** per-bot episodic memory git repo not built yet (`var/bots/` currently holds only runtime/notes files).
   - **Loken mid-fight order rewrite edge case:** Gemma 4 occasionally rewrites a working `Lightning Nova cast` order into `Loken cast` or `Lightning Nova appears` when emitting non-empty `order:` lines mid-fight.
   - **Higher-level temporary weapon enchant reuse:** while low-level `Heavy Sharpening Stone` invalid spam is fixed and `item_equip` ping-pong dropped to `0` on `Loadf..Loadj` in the 6-min `soak_wotlk_ak` verification run, higher-level sharpening-stone/oil reuse still occurred (`Loadf` logged `20` post-teleport uses in 6 min; `Loadg..Loadj` `1–3` each; see [`var/phase4_signoff_verify_2026-11-23.log`](../var/phase4_signoff_verify_2026-11-23.log)).
-- **Popup wakes not live-tested yet (RH-H1):** ready check, LFG proposal, loot roll, quest share and resurrect offer go through the same unit-tested `PopupWatch` path as the live-verified role check, but no e2e drives them yet (needs a scripted ready check / roll / rez in the test fixture).
-- **`e2e whisper` fails when run right after `e2e invite`** (it counts Telda's earlier "group up?" whisper; passes alone, 2026-11-24): the module-log check should only look at lines from its own run.
+- **Not live-tested from the play-with-a-human review:** popup wakes for ready check, LFG proposal, loot roll and rez offer (same unit-tested `PopupWatch` path as the live role check and quest share); tank stand-down (`Let <name> tank`), `Wait for a resurrection`, LookingForGroup channel, and the single-responder rule with a real human typing. Needs: an e2e with a scripted ready check / roll / rez and a second tank, then a play session with the user.
 - **Infrastructure, performance & testing (deferred):**
   - **GPU `--backend-sampling` or thin `libllama` runner:** GBNF disables GPU `--backend-sampling` (~10 ms/step CPU overhead under 16-slot load); either run unconstrained with `--backend-sampling` + 1 grammar retry, or replace `llama-server` HTTP with a thin `wlb_net` `libllama` daemon that masks structured fields and GPU-samples free text.
   - **More e2e & perf cases:** e2e death/respawn, harness reconnect, failing choice reaching the brain (`e2e_choose` also has a minor flaky risk if the boar drops nothing), and an offline dungeon-party leader/follower eval case; perf raid-wide simultaneous burst and cells past capacity (`docs/specs/harness.md`, "Age").

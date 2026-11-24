@@ -33,6 +33,8 @@ uint64_t Fnv1a(std::string_view text) {
   return hash;
 }
 
+}  // namespace
+
 std::string DateUtc(base::Time time) {
   // Floor, not truncation, so a time before 1970 doesn't land on the next day.
   const int64_t ms = time.InMillisecondsSinceUnixEpoch();
@@ -45,6 +47,8 @@ std::string DateUtc(base::Time time) {
   return base::StringPrintf("%04d-%02d-%02d", parts.tm_year + 1900,
                             parts.tm_mon + 1, parts.tm_mday);
 }
+
+namespace {
 
 std::string SafeName(const std::string& name) {
   std::string out;

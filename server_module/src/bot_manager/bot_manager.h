@@ -54,6 +54,27 @@ class BotManager {
   static void ClearBotStrategyOverride(const std::string& bot_name);
   static void ClearBotStrategyOverrides();
 
+  // World thread only: how the brain chose to play in its current group
+  // (RH-M1, RH-M2). Applied as playerbots strategies on top of the defaults;
+  // it belongs to that one group, so it is gone once the bot is in another
+  // group or none.
+  struct GroupPolicy {
+    // Someone else tanks: no taunts, pulls or tank assist.
+    bool not_tank = false;
+    // Wait here instead of following the leader.
+    bool stay = false;
+
+    bool operator==(const GroupPolicy&) const = default;
+  };
+  static GroupPolicy GetGroupPolicy(Player* bot);
+  static void SetGroupPolicy(Player* bot, GroupPolicy policy);
+
+  // World thread only: the brain chose to lie dead hoping for a rez (RH-M3):
+  // playerbots' auto release waits `wait_ms` from now, anywhere (by default
+  // it waits up to 90 s, and only in a dungeon with a living resurrector).
+  // Forgotten once the bot is alive again.
+  static void WaitForResurrection(Player* bot, uint32_t wait_ms);
+
   // World thread only: pending shared-quest / ready-check / LFG-proposal
   // prompts captured via ServerScript::OnPacketSent (works for standalone
   // no-master bots) while BrainPolicyListener blocks Playerbots' auto-handlers.
@@ -74,6 +95,9 @@ class BotManager {
     std::string name;
     uint64_t guid = 0;  // 0: unknown character name.
     uint64_t next_login_ms = 0;
+    // Seen connected on the last tick: a bot that just dropped waits
+    // kLoginRetryMs before it is logged in again, like a failed login.
+    bool was_online = false;
   };
 
   void Tick();

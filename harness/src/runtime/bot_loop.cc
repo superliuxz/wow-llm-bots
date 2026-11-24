@@ -21,6 +21,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
@@ -78,6 +79,51 @@ std::flat_set<std::string> CollectExpectedNames(
     }
   }
   return names;
+}
+
+// The party and raid chat lines among wake reasons ("party from Hele: pull?"
+// -> PARTY, "pull?"). A reason may be several joined with "; " (Consider()),
+// so only a segment that starts with the prefix counts.
+struct GroupChatLine {
+  pb::ChatChannel channel = pb::PARTY;
+  std::string_view text;
+};
+std::vector<GroupChatLine> GroupChatLines(
+    const std::vector<std::string>& reasons) {
+  std::vector<GroupChatLine> out;
+  for (const std::string& r : reasons) {
+    for (std::string_view seg : base::SplitStringPieceUsingSubstr(
+             r, "; ", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
+      pb::ChatChannel ch;
+      if (seg.starts_with("party from ")) {
+        ch = pb::PARTY;
+      } else if (seg.starts_with("raid from ")) {
+        ch = pb::RAID;
+      } else {
+        continue;
+      }
+      const size_t colon = seg.find(": ");
+      out.push_back({ch, colon == std::string_view::npos
+                             ? std::string_view{}
+                             : seg.substr(colon + 2)});
+    }
+  }
+  return out;
+}
+
+// The last `n` non-empty lines of `text`, joined with newlines.
+std::string LastLines(std::string_view text, size_t n) {
+  std::vector<std::string_view> lines = base::SplitStringPiece(
+      text, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
+  if (lines.size() > n) {
+    lines.erase(lines.begin(), lines.end() - static_cast<ptrdiff_t>(n));
+  }
+  return base::JoinString(lines, "\n");
+}
+
+bool ContainsNameIgnoringCase(std::string_view text, std::string_view name) {
+  return !name.empty() && base::ToLowerASCII(text).find(
+                              base::ToLowerASCII(name)) != std::string::npos;
 }
 
 std::string NormalizeInstanceKey(std::string_view raw) {
@@ -193,6 +239,64 @@ BotLoop::BotLoop(BotLoopConfig config,
 }
 
 BotLoop::~BotLoop() = default;
+
+std::string BotLoop::ReadFileIfChanged(const std::string& path) {
+  std::error_code ec;
+  const auto mtime = std::filesystem::last_write_time(path, ec);
+  if (ec) {
+    file_cache_.erase(path);
+    return "";  // No such file.
+  }
+  if (auto it = file_cache_.find(path);
+      it != file_cache_.end() && it->second.mtime == mtime) {
+    return it->second.text;
+  }
+  std::string text = ReadFile(path).value_or("");
+  file_cache_[path] = {mtime, text};
+  return text;
+}
+
+bool BotLoop::AnswersPartyChat(const std::string& bot,
+                               const std::vector<std::string>& reasons,
+                               const pb::Snapshot& snapshot) const {
+  const std::vector<GroupChatLine> lines = GroupChatLines(reasons);
+  if (lines.empty()) {
+    return true;  // Not woken by party chat: nothing to share out.
+  }
+  // The brain bots in this party (this harness runs them), this one included.
+  std::vector<std::string> brain_bots{bot};
+  const auto add_members = [&](const std::vector<pb::Unit>& members) {
+    for (const pb::Unit& m : members) {
+      if (!m.name.empty() && m.name != bot && bots_.contains(m.name)) {
+        brain_bots.push_back(m.name);
+      }
+    }
+  };
+  if (snapshot.ext.party) {
+    add_members(snapshot.ext.party->members);
+  }
+  if (snapshot.ext.raid) {
+    add_members(snapshot.ext.raid->members);
+  }
+  std::sort(brain_bots.begin(), brain_bots.end());
+  brain_bots.erase(std::unique(brain_bots.begin(), brain_bots.end()),
+                   brain_bots.end());
+  for (const GroupChatLine& line : lines) {
+    bool named_any = false;
+    for (const std::string& name : brain_bots) {
+      if (ContainsNameIgnoringCase(line.text, name)) {
+        named_any = true;
+        if (name == bot) {
+          return true;  // Asked by name.
+        }
+      }
+    }
+    if (!named_any && brain_bots.front() == bot) {
+      return true;  // Nobody named: one bot answers for the group.
+    }
+  }
+  return false;
+}
 
 std::string BotLoop::CurrentGoal(const std::string& bot) const {
   const auto it = bots_.find(bot);
@@ -696,11 +800,16 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
         state.identity = *id;
       }
     }
+    // The shipped identity when the bot has none of its own yet (RH-M4).
+    if (state.identity.empty() && !config_.identities_dir.empty()) {
+      state.identity =
+          ReadFile(base::StrCat({config_.identities_dir, "/", bot, ".md"}))
+              .value_or("");
+    }
   }
   if (!config_.bots_dir.empty()) {
-    const std::string per_bot =
-        ReadFile(base::StrCat({config_.bots_dir, "/", bot, "/notes.md"}))
-            .value_or("");
+    const std::string per_bot = ReadFileIfChanged(
+        base::StrCat({config_.bots_dir, "/", bot, "/notes.md"}));
     if (!per_bot.empty()) {
       state.notes = per_bot;
     } else if (!state.latest_snapshot->base.where.in_instance) {
@@ -727,8 +836,26 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
   input.rules = config_.rules;
   input.bot_name = bot;
   input.identity = state.identity;
+  // What the brain chose to remember (`remember:`), newest last (RH-M4).
+  if (!config_.bots_dir.empty()) {
+    const std::string memory =
+        LastLines(ReadFileIfChanged(
+                      base::StrCat({config_.bots_dir, "/", bot, "/memory.md"})),
+                  kMemoryLinesInPrompt);
+    if (!memory.empty()) {
+      base::StrAppend(&input.identity,
+                      {input.identity.empty() ? "" : "\n\n",
+                       "What you remember from earlier:\n", memory});
+    }
+  }
   input.current_goal = state.current_goal;
   input.wake_reason = wake_reason;
+  if (!AnswersPartyChat(bot, asked_reasons, *state.latest_snapshot)) {
+    state.party_reply_muted_epoch = epoch;
+    base::StrAppend(&input.wake_reason,
+                    {" (another party member answers this for the group: act "
+                     "on it if it asks something of you, but don't reply)"});
+  }
   input.recent_events.assign(state.recent_events.begin(),
                              state.recent_events.end());
   state.recent_events.clear();
@@ -976,6 +1103,11 @@ void BotLoop::OnReply(const std::string& bot,
             !state.last_selected_notes.empty()) {
           const std::string& map_name = state.latest_snapshot->base.where.map;
           const CompiledOrdersKey key{bot, map_name, state.last_selected_notes};
+          // Bounded (RH-L5): a long session visits many instance/notes pairs;
+          // dropping all of them only costs one recompile per instance entry.
+          if (compiled_orders_cache_.size() >= kMaxCompiledOrdersCache) {
+            compiled_orders_cache_.clear();
+          }
           if (compiled_orders_cache_.try_emplace(key, plan->orders).second) {
             Log(base::StrCat({bot, ": cached ",
                               std::to_string(plan->orders.size()),
@@ -985,33 +1117,44 @@ void BotLoop::OnReply(const std::string& bot,
         if (!state.early_step_failed) {
           state.look_deadline = now + base::Seconds(plan->look_s);
         }
-        if (!plan->say.empty()) {
+        const bool party_reply_muted = state.party_reply_muted_epoch == epoch;
+        if (!plan->say.empty() && !party_reply_muted) {
+          // Answer a party/raid line in that channel (RH-L1: decided by the
+          // wake's own channel, never by words inside the chat text).
           pb::ChatChannel ch = pb::SAY;
           if (state.latest_snapshot->ext.party &&
               !state.latest_snapshot->ext.party->members.empty()) {
-            for (const std::string& r : asked_reasons) {
-              if (r.find("party from ") != std::string::npos) {
-                ch = pb::PARTY;
-                break;
-              }
-              if (r.find("raid from ") != std::string::npos) {
-                ch = pb::RAID;
-                break;
-              }
+            if (const std::vector<GroupChatLine> lines =
+                    GroupChatLines(asked_reasons);
+                !lines.empty()) {
+              ch = lines.front().channel;
             }
           }
-          SendSay(bot, ch, "", plan->say);
+          // A `party:` line already says it there (RH-L6: no double post).
+          if (ch == pb::SAY || plan->party.empty()) {
+            SendSay(bot, ch, "", plan->say);
+          }
         }
         const bool in_party =
             state.latest_snapshot->ext.party &&
             !state.latest_snapshot->ext.party->members.empty();
         const bool in_raid = state.latest_snapshot->ext.raid &&
                              !state.latest_snapshot->ext.raid->members.empty();
-        if (!plan->party.empty() && (in_party || in_raid)) {
+        if (!plan->party.empty() && (in_party || in_raid) &&
+            !party_reply_muted) {
           SendSay(bot, in_raid ? pb::RAID : pb::PARTY, "", plan->party);
         }
         if (!plan->tell.empty()) {
           SendSay(bot, pb::WHISPER, plan->tell_to, plan->tell);
+        }
+        if (!plan->remember.empty() && !config_.bots_dir.empty()) {
+          const std::string dir = base::StrCat({config_.bots_dir, "/", bot});
+          if (!MakeDirectories(dir) ||
+              !AppendToFile(dir + "/memory.md",
+                            base::StrCat({"- ", DateUtc(base::Time::Now()), " ",
+                                          plan->remember, "\n"}))) {
+            Log(base::StrCat({bot, ": could not write memory.md"}));
+          }
         }
         for (const std::string& name : plan->close) {
           SendPanel(bot, PanelFromName(name), /*open=*/false);

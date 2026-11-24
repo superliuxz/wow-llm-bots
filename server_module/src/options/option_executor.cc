@@ -18,6 +18,7 @@
 #include "ByteBuffer.h"
 #include "Creature.h"
 #include "CreatureData.h"
+#include "DBCEnums.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
 #include "Define.h"
@@ -54,6 +55,7 @@
 #include "Playerbots.h"
 #include "Position.h"
 #include "QuestDef.h"
+#include "QuestPackets.h"
 #include "SharedDefines.h"
 #include "Spell.h"
 #include "SpellAuraDefines.h"
@@ -1074,6 +1076,74 @@ void CollectGroupAndUpkeepActions(Player* bot,
                                                    leader_guid.GetRawValue())),
                             "Follow " + leader->GetName() + " (party leader)"});
           }
+        }
+      }
+    }
+  }
+
+  // 5a. Share a quest with the party (RH-H3): only quests some nearby member
+  //     doesn't have yet and could take, at most two, out of combat.
+  if (bot->IsAlive() && !bot->IsInCombat()) {
+    if (Group* group = bot->GetGroup()) {
+      size_t shares = 0;
+      for (uint16_t slot = 0; slot < MAX_QUEST_LOG_SIZE && shares < 2; ++slot) {
+        const uint32_t qid = bot->GetQuestSlotQuestId(slot);
+        const Quest* quest = qid ? sObjectMgr->GetQuestTemplate(qid) : nullptr;
+        if (!quest || !bot->CanShareQuest(qid)) {
+          continue;
+        }
+        bool someone_lacks_it = false;
+        for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
+             itr = itr->next()) {
+          Player* m = itr->GetSource();
+          if (m && m != bot && m->IsInWorld() &&
+              m->GetMapId() == bot->GetMapId() &&
+              bot->GetDistance(m) <= 40.0f &&
+              m->GetQuestStatus(qid) == QUEST_STATUS_NONE &&
+              m->CanTakeQuest(quest, false)) {
+            someone_lacks_it = true;
+            break;
+          }
+        }
+        if (someone_lacks_it) {
+          out->push_back(
+              {"qpush:" + std::to_string(qid),
+               "Share quest \"" + quest->GetTitle() + "\" with the party"});
+          ++shares;
+        }
+      }
+    }
+  }
+
+  // 5b. Group policies the brain sets (RH-M1, RH-M2): stop tanking when
+  //     someone else tanks, and wait here instead of following the leader.
+  if (bot->IsAlive() && !bot->IsInCombat()) {
+    if (Group* group = bot->GetGroup()) {
+      const BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
+      if (policy.not_tank) {
+        out->push_back({"grouppolicy:tank", "Tank for the group again"});
+      } else if (PlayerbotAI::IsTank(bot)) {
+        for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
+             itr = itr->next()) {
+          Player* m = itr->GetSource();
+          if (m && m != bot && m->IsInWorld() &&
+              m->GetMapId() == bot->GetMapId() &&
+              PlayerbotAI::IsTank(m,
+                                  /*bySpec=*/GET_PLAYERBOT_AI(m) == nullptr)) {
+            out->push_back({"grouppolicy:notank",
+                            "Let " + m->GetName() + " tank (stop tanking)"});
+            break;
+          }
+        }
+      }
+      const ObjectGuid leader_guid = group->GetLeaderGUID();
+      if (leader_guid && leader_guid != bot->GetGUID()) {
+        if (policy.stay) {
+          out->push_back(
+              {"grouppolicy:follow", "Follow the party leader again"});
+        } else {
+          out->push_back(
+              {"grouppolicy:stay", "Wait here (stop following the leader)"});
         }
       }
     }
@@ -2300,6 +2370,56 @@ bool IsSpellCastPending(const Player* bot, uint32_t spell_id) {
          IsPreparingOrChannelingSpell(bot, spell_id);
 }
 
+namespace {
+
+// The talent at (tab page, row, column) of a class, or null.
+const TalentEntry* FindClassTalent(uint32_t class_mask,
+                                   uint32_t tab_page,
+                                   uint32_t row,
+                                   uint32_t col) {
+  for (uint32_t i = 0; i < sTalentStore.GetNumRows(); ++i) {
+    const TalentEntry* t = sTalentStore.LookupEntry(i);
+    if (!t || t->Row != row || t->Col != col) {
+      continue;
+    }
+    const TalentTabEntry* tab = sTalentTabStore.LookupEntry(t->TalentTab);
+    if (tab && (tab->ClassMask & class_mask) != 0 && tab->tabpage == tab_page) {
+      return t;
+    }
+  }
+  return nullptr;
+}
+
+// The learning order of the first premade build (playerbots.conf
+// `PremadeSpecLink.<class>.<spec>.<level>`, highest level given) whose main
+// tree is `tab_page`, or null when the class has none. ParseTempTalentsOrder
+// puts the build's biggest tree first, row by row.
+const std::vector<std::vector<uint32>>* PremadeBuildForTree(uint8_t cls,
+                                                            uint32_t tab_page) {
+  if (cls >= MAX_CLASSES) {
+    return nullptr;
+  }
+  for (uint32_t spec = 0; spec < MAX_SPECNO; ++spec) {
+    if (sPlayerbotAIConfig.PremadeSpecName[cls][spec].empty()) {
+      continue;
+    }
+    for (int level = MAX_LEVEL - 1; level >= 0; --level) {
+      const std::vector<std::vector<uint32>>& order =
+          sPlayerbotAIConfig.ParsedSpecLinkOrder[cls][spec][level];
+      if (order.empty()) {
+        continue;
+      }
+      if (!order.front().empty() && order.front()[0] == tab_page) {
+        return &order;
+      }
+      break;  // This build's main tree is another one.
+    }
+  }
+  return nullptr;
+}
+
+}  // namespace
+
 ExecuteResult ExecuteOption(Player* bot,
                             const OptionTarget& target,
                             PendingWalk* walk,
@@ -2323,6 +2443,13 @@ ExecuteResult ExecuteOption(Player* bot,
     }
     bot->ResurectUsingRequestData();
     return {.used = true, .info = "accepted resurrection"};
+  }
+  if (target.kind == OptionTarget::Kind::kUse && target.guid == "rez:wait") {
+    if (bot->IsAlive() || bot->HasPlayerFlag(PLAYER_FLAGS_GHOST)) {
+      return {"you are not lying dead"};
+    }
+    BotManager::WaitForResurrection(bot, /*wait_ms=*/5 * 60 * 1000);
+    return {.used = true, .info = "waiting for a resurrection"};
   }
   if (target.kind == OptionTarget::Kind::kUse && target.guid == "rez:release") {
     if (bot->IsAlive()) {
@@ -2489,7 +2616,63 @@ ExecuteResult ExecuteOption(Player* bot,
     return {"unknown LFG action"};
   }
   if (target.kind == OptionTarget::Kind::kUse &&
+      target.guid.starts_with("qpush:")) {
+    WorldSession* session = bot->GetSession();
+    uint32_t qid = 0;
+    if (!session) {
+      return {"no session"};
+    }
+    if (!ParseUint32(std::string_view(target.guid).substr(6), &qid) ||
+        !bot->CanShareQuest(qid)) {
+      return {"you can't share that quest"};
+    }
+    // The client's own packet, so AzerothCore's checks and replies (busy,
+    // already has it, too low level) apply as for a player.
+    WorldPacket raw(CMSG_PUSHQUESTTOPARTY, 4);
+    raw << qid;
+    WorldPackets::Quest::PushQuestToParty packet(std::move(raw));
+    packet.Read();
+    session->HandlePushQuestToParty(packet);
+    const Quest* quest = sObjectMgr->GetQuestTemplate(qid);
+    return {.used = true,
+            .info = "shared quest " +
+                    (quest ? quest->GetTitle() : std::to_string(qid))};
+  }
+  if (target.kind == OptionTarget::Kind::kUse &&
+      target.guid.starts_with("grouppolicy:")) {
+    if (!bot->GetGroup()) {
+      return {"you are not in a group"};
+    }
+    BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
+    const std::string_view what = std::string_view(target.guid).substr(12);
+    std::string info;
+    if (what == "notank") {
+      policy.not_tank = true;
+      info = "stopped tanking";
+    } else if (what == "tank") {
+      policy.not_tank = false;
+      info = "tanking again";
+    } else if (what == "stay") {
+      policy.stay = true;
+      bot->StopMoving();
+      bot->GetMotionMaster()->Clear();
+      info = "waiting here";
+    } else if (what == "follow") {
+      policy.stay = false;
+      info = "following the leader again";
+    } else {
+      return {"unknown group policy"};
+    }
+    BotManager::SetGroupPolicy(bot, policy);
+    return {.used = true, .info = std::move(info)};
+  }
+  if (target.kind == OptionTarget::Kind::kUse &&
       target.guid.starts_with("follow:")) {
+    {
+      BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
+      policy.stay = false;
+      BotManager::SetGroupPolicy(bot, policy);
+    }
     Player* leader = ObjectAccessor::FindConnectedPlayer(
         ParseSnapshotGuid(std::string_view(target.guid).substr(7)));
     if (!leader || !leader->IsInWorld() || !leader->IsAlive() ||
@@ -2521,7 +2704,11 @@ ExecuteResult ExecuteOption(Player* bot,
     }
     group->SetTargetIcon(static_cast<uint8_t>(icon), bot->GetGUID(),
                          u->GetGUID());
-    return {.used = true, .info = "marked " + u->GetName() + " with Skull"};
+    static constexpr const char* kIconNames[8] = {
+        "Star", "Circle", "Diamond", "Triangle",
+        "Moon", "Square", "Cross",   "Skull"};
+    return {.used = true,
+            .info = "marked " + u->GetName() + " with " + kIconNames[icon]};
   }
   if (target.kind == OptionTarget::Kind::kUse &&
       target.guid.starts_with("mount:")) {
@@ -2784,6 +2971,43 @@ ExecuteResult ExecuteOption(Player* bot,
       const int r = learned_rank(t);
       if (r >= 0) {
         spent_in_tab += static_cast<uint32_t>(r + 1);
+      }
+    }
+    // Follow a known build for this tree first (RH-M5), as a player follows a
+    // guide: playerbots' premade spec links (playerbots.conf) whose most
+    // points go into the chosen tree, in their learning order. The brain
+    // picked the tree; the build only orders the points.
+    if (const std::vector<std::vector<uint32>>* build =
+            PremadeBuildForTree(bot->getClass(), tab_page)) {
+      for (const std::vector<uint32>& step : *build) {
+        if (bot->GetFreeTalentPoints() == 0) {
+          break;
+        }
+        if (step.size() < 4) {
+          continue;
+        }
+        const TalentEntry* t =
+            FindClassTalent(class_mask, step[0], step[1], step[2]);
+        if (!t) {
+          continue;
+        }
+        // step[3] is the rank the build wants (1-based).
+        for (int next = learned_rank(t) + 1;
+             next < static_cast<int>(step[3]) && next < MAX_TALENT_RANK &&
+             t->RankID[next] != 0 && bot->GetFreeTalentPoints() > 0;
+             ++next) {
+          const uint32_t free_before = bot->GetFreeTalentPoints();
+          bot->LearnTalent(t->TalentID, static_cast<uint32_t>(next));
+          if (bot->GetFreeTalentPoints() >= free_before) {
+            break;  // Not learnable yet (row or prerequisite).
+          }
+        }
+      }
+      spent_in_tab = 0;
+      for (const TalentEntry* t : tab_talents) {
+        if (const int r = learned_rank(t); r >= 0) {
+          spent_in_tab += static_cast<uint32_t>(r + 1);
+        }
       }
     }
     while (bot->GetFreeTalentPoints() > 0) {

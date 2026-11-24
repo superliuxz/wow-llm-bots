@@ -2,6 +2,7 @@
 
 #include "options/options.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -332,9 +333,36 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
     }
   }
 
+  // In a party, say which mobs nobody in it is fighting yet (RH-H2): a fact a
+  // player reads off the nameplates, so the brain can leave pulls to the tank.
+  std::vector<std::string> party_names;
+  if (snapshot->ext.party) {
+    for (const pb::Unit& m : snapshot->ext.party->members) {
+      party_names.push_back(m.name);
+    }
+  }
+  const auto not_pulled = [&](const OptionTarget& t) {
+    if (party_names.empty() || t.kind != OptionTarget::Kind::kAttack) {
+      return false;
+    }
+    for (const pb::Unit& u : snapshot->base.nearby.units) {
+      if (u.guid != t.guid) {
+        continue;
+      }
+      const bool fights_party =
+          u.targeting_me || u.target == snapshot->bot ||
+          std::find(party_names.begin(), party_names.end(), u.target) !=
+              party_names.end();
+      return !fights_party;
+    }
+    return false;
+  };
   for (const OptionTarget& target : targets) {
     pb::Option& option = snapshot->options.emplace_back();
     option.text = TargetedOptionText(target);
+    if (not_pulled(target)) {
+      option.text += " (not pulled)";
+    }
     option.guid = target.guid;
     option.kind = ToProtoKind(target.kind);
     option.name = target.name;
@@ -369,6 +397,15 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       if (!m.dead && m.group && m.group->online && !m.target.empty() &&
           !m.group->main_assist &&
           (m.group->main_tank || m.group->role == pb::TANK)) {
+        callers.push_back(&m);
+      }
+    }
+    // The party leader's target too (RH-H2): in a group the leader formed by
+    // hand nobody may be flagged tank, yet followers assist the leader.
+    for (const pb::Unit& m : snapshot->ext.party->members) {
+      if (m.name != snapshot->bot && !m.dead && m.group && m.group->online &&
+          !m.target.empty() && m.group->leader &&
+          std::find(callers.begin(), callers.end(), &m) == callers.end()) {
         callers.push_back(&m);
       }
     }
@@ -410,7 +447,10 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       }
       seen_assist_guids.push_back(best->guid);
       const std::string_view role_prefix =
-          caller->group->main_assist ? "main assist " : "tank ";
+          caller->group->main_assist ? "main assist "
+          : (caller->group->main_tank || caller->group->role == pb::TANK)
+              ? "tank "
+              : "leader ";
       const std::string assist_name = caller->name + "'s target";
       const std::string text = "Attack " + std::string(role_prefix) +
                                assist_name + " (" + best->name + ")";
@@ -569,6 +609,17 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
     rel.guid = "rez:release";
     rel.kind = pb::Option::USE;
     rel.name = "Release spirit";
+    // RH-M3: how long to lie dead hoping for a rez is the brain's call.
+    if (!facts.has_pending_resurrect && snapshot->ext.party &&
+        !snapshot->ext.party->members.empty()) {
+      targets.push_back({OptionTarget::Kind::kUse, "rez:wait",
+                         "Wait for a resurrection (up to 5 min)"});
+      pb::Option& wait = snapshot->options.emplace_back();
+      wait.text = "Wait for a resurrection (up to 5 min)";
+      wait.guid = "rez:wait";
+      wait.kind = pb::Option::USE;
+      wait.name = "Wait for a resurrection";
+    }
   }
 
   if (!facts.pending_group_invite_from.empty()) {

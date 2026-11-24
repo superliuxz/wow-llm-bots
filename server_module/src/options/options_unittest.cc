@@ -2,6 +2,7 @@
 
 #include "options/options.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -510,6 +511,51 @@ TEST(OptionsTest, AssistOptionOfferedForMainAssistAndTankTargets) {
   EXPECT_EQ(targets[3].name, "Kael'thas Sunstrider");
 }
 
+// RH-H2: in a hand-formed party (no tank flag), followers get the leader's
+// target, and mobs nobody in the party fights yet are labelled.
+TEST(OptionsTest, PartyFollowerSeesLeaderAssistAndNotPulledMobs) {
+  pb::Snapshot snapshot;
+  snapshot.bot = "Telda";
+  pb::Unit* pulled = AddUnit(&snapshot, "Kobold Miner", "0x40", 10);
+  pulled->reaction = pb::Unit::HOSTILE;
+  pulled->target = "Hele";  // Fighting the leader.
+  pb::Unit* idle = AddUnit(&snapshot, "Kobold Tunneler", "0x41", 20);
+  idle->reaction = pb::Unit::HOSTILE;
+  pb::Unit* on_me = AddUnit(&snapshot, "Kobold Laborer", "0x42", 5);
+  on_me->reaction = pb::Unit::HOSTILE;
+  on_me->targeting_me = true;
+
+  pb::Party& party = snapshot.ext.party.emplace();
+  pb::Unit& leader = party.members.emplace_back();
+  leader.name = "Hele";
+  leader.target = "Kobold Miner";
+  leader.group.emplace().online = true;
+  leader.group->leader = true;
+  leader.group->role = pb::DPS;
+
+  AddOptions(&snapshot);
+  const std::vector<std::string> texts = Texts(snapshot);
+  EXPECT_NE(std::find(texts.begin(), texts.end(), "Attack Kobold Miner"),
+            texts.end());
+  EXPECT_NE(std::find(texts.begin(), texts.end(),
+                      "Attack Kobold Tunneler (not pulled)"),
+            texts.end());
+  EXPECT_NE(std::find(texts.begin(), texts.end(), "Attack Kobold Laborer"),
+            texts.end());
+  EXPECT_NE(std::find(texts.begin(), texts.end(),
+                      "Attack leader Hele's target (Kobold Miner)"),
+            texts.end());
+
+  // Solo, nothing is labelled.
+  pb::Snapshot solo = snapshot;
+  solo.options.clear();
+  solo.ext.party.reset();
+  AddOptions(&solo);
+  for (const std::string& t : Texts(solo)) {
+    EXPECT_EQ(t.find("(not pulled)"), std::string::npos) << t;
+  }
+}
+
 TEST(OptionsTest, AssistResolvesExactGuidCapAndEdgeCases) {
   pb::Snapshot snapshot;
   snapshot.bot = "SelfTank";
@@ -577,15 +623,24 @@ TEST(OptionsTest, AssistResolvesExactGuidCapAndEdgeCases) {
   EXPECT_EQ(targets[4].guid, "0x32");
   EXPECT_EQ(snapshot.options[4].guid, "assist:0x32");
 
-  // Dead self gets no attack or assist options (only Release spirit + Keep).
+  // Dead self gets no attack or assist options (only Release spirit, the
+  // party-only Wait for a resurrection (RH-M3), and Keep).
   pb::Snapshot dead_snap = snapshot;
   dead_snap.options.clear();
   dead_snap.base.self.state = pb::Self::DEAD_BODY;
   const std::vector<OptionTarget> dead_targets = AddOptions(&dead_snap, facts);
   EXPECT_EQ(Texts(dead_snap),
             (std::vector<std::string>{"Release spirit",
+                                      "Wait for a resurrection (up to 5 min)",
                                       "Keep doing what I'm doing"}));
-  EXPECT_EQ(dead_targets.size(), 2u);
+  EXPECT_EQ(dead_targets.size(), 3u);
+  // With a rez already offered there is nothing to wait for.
+  facts.has_pending_resurrect = true;
+  dead_snap.options.clear();
+  AddOptions(&dead_snap, facts);
+  EXPECT_EQ(Texts(dead_snap),
+            (std::vector<std::string>{"Accept resurrection", "Release spirit",
+                                      "Keep doing what I'm doing"}));
 }
 
 TEST(OptionsTest, UsableBagItemsOfferedAsUseOptionsAndFilteredInCombat) {

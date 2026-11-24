@@ -32,6 +32,7 @@
 #include "ObjectMgr.h"
 #include "PathGenerator.h"
 #include "Player.h"
+#include "PlayerbotAI.h"
 #include "QuestDef.h"
 #include "SharedDefines.h"
 #include "Spell.h"
@@ -200,6 +201,23 @@ pb::Role PartyRole(uint8_t roles) {
   return pb::Role::ROLE_UNSPECIFIED;
 }
 
+// The Dungeon Finder role when one was picked, else what the player's spec
+// and stance say (what a player learns by inspecting: a prot warrior tanks, a
+// holy priest heals), so roles show in every group, not only LFG (RH-M1).
+pb::Role MemberRole(Player* member, uint8_t lfg_roles) {
+  const pb::Role lfg = PartyRole(lfg_roles);
+  if (lfg != pb::Role::ROLE_UNSPECIFIED || member == nullptr) {
+    return lfg;
+  }
+  if (PlayerbotAI::IsTank(member)) {
+    return pb::Role::TANK;
+  }
+  if (PlayerbotAI::IsHeal(member)) {
+    return pb::Role::HEALER;
+  }
+  return pb::Role::DPS;
+}
+
 void FillSelf(Player* bot, pb::Self* self) {
   const Powers power = bot->getPowerType();
   pb::Unit& unit = self->unit;
@@ -220,7 +238,7 @@ void FillSelf(Player* bot, pb::Self* self) {
         gp.assistant = (slot.flags & MEMBER_FLAG_ASSISTANT) != 0;
         gp.main_tank = (slot.flags & MEMBER_FLAG_MAINTANK) != 0;
         gp.main_assist = (slot.flags & MEMBER_FLAG_MAINASSIST) != 0;
-        gp.role = PartyRole(slot.roles);
+        gp.role = MemberRole(bot, slot.roles);
         gp.online = true;
         gp.in_range = true;
         gp.aggro = !bot->getAttackers().empty();
@@ -422,6 +440,7 @@ void FillParty(Player* bot, NearbyBuilder* nearby, pb::Extensions* ext) {
     gp.role = PartyRole(slot.roles);
     if (Player* member = ObjectAccessor::FindConnectedPlayer(slot.guid);
         member && member->IsInWorld()) {
+      gp.role = MemberRole(member, slot.roles);
       gp.online = true;
       m.level = member->GetLevel();
       m.dead = member->isDead();

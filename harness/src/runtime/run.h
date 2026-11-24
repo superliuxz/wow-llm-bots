@@ -25,6 +25,7 @@ struct RunOptions {
   std::string rules_path = "content/RULES.md";
   std::string bots_dir = "var/bots";
   std::string notes_dir = "content/notes";
+  std::string identities_dir = "content/identities";
   std::string knowledge_path = "var/knowledge/world_knowledge.json";
   size_t slots = 16;
   float temperature = 0.7f;

@@ -122,6 +122,7 @@ def run(stack):
     finally:
         sock.close()
         server.console("lfg clean", inst=TEST)
+        server.console("llmtest ungroup Telda", inst=TEST)  # Leave no group.
 
     expect(queue_cmd is not None, "Loada never offered `Queue Random Dungeon` while grouped")
     expect(role_prompt_at is not None,

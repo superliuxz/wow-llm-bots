@@ -104,8 +104,7 @@ TargetProgress OptionTargetProgress(Player* bot,
     return TargetProgress{.interrupted = std::move(why)};
   };
   if ((target.kind == OptionTarget::Kind::kUse &&
-       (target.guid == "rez:release" || target.guid == "rez:accept" ||
-        target.guid.starts_with("roll:") ||
+       (target.guid.starts_with("rez:") || target.guid.starts_with("roll:") ||
         target.guid.starts_with("ready:"))) ||
       target.kind == OptionTarget::Kind::kLeaveGroup) {
     return done();
@@ -474,6 +473,12 @@ class LlmBrainWorldScript : public WorldScript {
       path_times_.clear();
     }
     BrainBridge::SendStats sent = bridge_->TakeSendStats();
+    if (sent.dropped_inbound > 0) {
+      LOG_WARN("module",
+               "mod-llm-brain: {} harness command(s) dropped: the world thread "
+               "fell behind (LlmBrain max pending messages reached)",
+               sent.dropped_inbound);
+    }
     if (!sent.delays.empty() || sent.replaced > 0 || sent.dropped > 0) {
       std::sort(sent.delays.begin(), sent.delays.end());
       const auto at = [&](double q) {

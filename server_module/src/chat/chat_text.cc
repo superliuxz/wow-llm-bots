@@ -39,4 +39,37 @@ std::string CleanChatText(std::string_view text, size_t max_bytes) {
   return out;
 }
 
+bool IsTrivialChat(std::string_view text) {
+  // Lowercase letters only; punctuation, spaces and smileys are dropped.
+  std::string word;
+  bool other = false;
+  for (const char c : text) {
+    if (c >= 'A' && c <= 'Z') {
+      word.push_back(static_cast<char>(c - 'A' + 'a'));
+    } else if (c >= 'a' && c <= 'z') {
+      word.push_back(c);
+    } else if (c == '?') {
+      other = true;  // A question always asks something.
+    }
+  }
+  if (other) {
+    return false;
+  }
+  if (word.empty()) {
+    return true;  // ":)", "!!!", "..."
+  }
+  // Acknowledgements only: "yes" / "sure" may answer a bot's question, so
+  // they still wake it.
+  static constexpr std::string_view kTrivial[] = {
+      "ok",   "okay", "k",    "kk",  "kkk",    "lol", "lmao",
+      "haha", "hah",  "ty",   "thx", "thanks", "np",  "yw",
+      "gg",   "nice", "cool", "xd",  "hehe",   "rofl"};
+  for (std::string_view t : kTrivial) {
+    if (word == t) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace llm_brain

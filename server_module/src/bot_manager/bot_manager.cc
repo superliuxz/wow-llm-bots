@@ -187,6 +187,14 @@ std::unordered_map<uint64_t, uint32_t>& DungeonDeadSinceMs() {
   return *map;
 }
 
+// World-thread-only `bot guid -> getMSTime() deadline` the brain chose to wait
+// for a resurrection until (`rez:wait`, RH-M3). Cleared with
+// DungeonDeadSinceMs() whenever the bot is alive or offline.
+std::unordered_map<uint64_t, uint32_t>& RezWaitUntilMs() {
+  static auto* map = new std::unordered_map<uint64_t, uint32_t>();
+  return *map;
+}
+
 struct PendingSharedQuestEntry {
   uint32_t quest_id = 0;
   uint32_t received_ms = 0;
@@ -358,6 +366,16 @@ class BrainPolicyListener final : public ActionExecutionListener {
     if (name == "apply oil") {
       return HasEligibleTempEnchant(bot_, ai_, /*is_stone=*/false);
     }
+    if (name == "auto release" && bot_ && !bot_->IsAlive()) {
+      const uint64_t key = bot_->GetGUID().GetRawValue();
+      if (auto it = RezWaitUntilMs().find(key); it != RezWaitUntilMs().end()) {
+        // The brain chose to wait (signed difference: getMSTime wraps).
+        if (static_cast<int32_t>(it->second - getMSTime()) > 0) {
+          return false;
+        }
+        RezWaitUntilMs().erase(it);
+      }
+    }
     if (name == "auto release" && bot_ && bot_->GetMap() &&
         bot_->GetMap()->IsDungeon()) {
       const uint64_t key = bot_->GetGUID().GetRawValue();
@@ -407,6 +425,17 @@ void EnsurePolicyListener(Player* player, PlayerbotAI* ai) {
 // World-thread-only per-bot strategy overrides.
 std::unordered_map<std::string, BotStrategyOverride>& BotOverrides() {
   static auto* map = new std::unordered_map<std::string, BotStrategyOverride>();
+  return *map;
+}
+
+// World-thread-only per-bot group policies the brain chose, keyed by bot guid,
+// with the guid of the group they were chosen in.
+struct StoredGroupPolicy {
+  uint64_t group_guid = 0;
+  BotManager::GroupPolicy policy;
+};
+std::unordered_map<uint64_t, StoredGroupPolicy>& GroupPolicies() {
+  static auto* map = new std::unordered_map<uint64_t, StoredGroupPolicy>();
   return *map;
 }
 
@@ -485,11 +514,22 @@ void BotManager::Tick() {
             !player->GetMap()->IsDungeon()) {
           DungeonDeadSinceMs().erase(bot.guid);
         }
+        if (player->IsAlive()) {
+          RezWaitUntilMs().erase(bot.guid);
+        }
         EnsureStrategies(player);
       }
+      bot.was_online = true;
       continue;
     }
+    if (bot.was_online) {
+      // Just dropped (logged out, kicked): wait like after a failed login
+      // instead of logging it straight back in on the next tick.
+      bot.was_online = false;
+      bot.next_login_ms = now_ms_ + kLoginRetryMs;
+    }
     DungeonDeadSinceMs().erase(bot.guid);
+    RezWaitUntilMs().erase(bot.guid);
     {
       PendingPromptsState& prompts = PendingPrompts();
       base::AutoLock lock(prompts.lock);
@@ -550,6 +590,13 @@ void BotManager::EnsureStrategies(Player* player) {
       player->GetMap() != nullptr && player->GetMap()->IsDungeon();
   std::string non_combat = AdjustNonCombatStrategies(
       strategies_.non_combat, in_group, is_leader, in_dungeon);
+  const GroupPolicy policy = GetGroupPolicy(player);  // Empty outside it.
+  if (policy.not_tank) {
+    combat += ",-tank assist,-pull back,+dps assist";
+  }
+  if (policy.stay) {
+    non_combat += ",-follow,+stay";
+  }
   if (auto it = BotOverrides().find(player->GetName());
       it != BotOverrides().end()) {
     if (!it->second.combat.empty()) {
@@ -594,6 +641,35 @@ void BotManager::SetBotStrategyOverride(const std::string& bot_name,
       BotStrategyOverride{std::move(combat_extra), std::move(non_combat_extra)};
 }
 
+BotManager::GroupPolicy BotManager::GetGroupPolicy(Player* bot) {
+  if (!bot) {
+    return {};
+  }
+  auto it = GroupPolicies().find(bot->GetGUID().GetRawValue());
+  if (it == GroupPolicies().end()) {
+    return {};
+  }
+  const Group* group = bot->GetGroup();
+  if (!group || group->GetGUID().GetRawValue() != it->second.group_guid) {
+    GroupPolicies().erase(it);  // Chosen for a group it is no longer in.
+    return {};
+  }
+  return it->second.policy;
+}
+
+void BotManager::SetGroupPolicy(Player* bot, GroupPolicy policy) {
+  if (!bot) {
+    return;
+  }
+  const Group* group = bot->GetGroup();
+  const uint64_t key = bot->GetGUID().GetRawValue();
+  if (!group || policy == GroupPolicy{}) {
+    GroupPolicies().erase(key);
+  } else {
+    GroupPolicies()[key] = {group->GetGUID().GetRawValue(), policy};
+  }
+}
+
 void BotManager::ClearBotStrategyOverride(const std::string& bot_name) {
   BotOverrides().erase(bot_name);
 }
@@ -630,6 +706,13 @@ uint32_t BotManager::GetPendingSharedQuest(Player* bot) {
     }
   }
   if (timed_out) {
+    bot->SetDivider(ObjectGuid::Empty);
+    return 0;
+  }
+  // An auto-accept quest is already in the log when its details popup comes
+  // (QuestHandler.cpp HandlePushQuestToParty): nothing left to answer.
+  if (bot->GetQuestStatus(quest_id) != QUEST_STATUS_NONE) {
+    ClearPendingSharedQuest(bot);
     bot->SetDivider(ObjectGuid::Empty);
     return 0;
   }
@@ -752,8 +835,16 @@ PopupState BotManager::ReadPopupState(Player* bot) {
   return s;
 }
 
+void BotManager::WaitForResurrection(Player* bot, uint32_t wait_ms) {
+  if (bot) {
+    RezWaitUntilMs()[bot->GetGUID().GetRawValue()] = getMSTime() + wait_ms;
+  }
+}
+
 void BotManager::Stop() {
   ClearBotStrategyOverrides();
+  GroupPolicies().clear();
+  RezWaitUntilMs().clear();
   DungeonDeadSinceMs().clear();
   {
     PendingPromptsState& prompts = PendingPrompts();
