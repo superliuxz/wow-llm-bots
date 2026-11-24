@@ -13,7 +13,7 @@ Last updated 2026-11-24.
 
 - [ ] **Low-hanging play-with-a-human follow-ups (2026-11-24, [`docs/plans/play-with-human.md`](plans/play-with-human.md)):**
   - [x] **F1:** `general:` / `lfg:` reply lines post to the zone's General and LookingForGroup channels (`Speak` LFG case honours `Channel.RestrictedLfg` / `LFG.Location.All`; refusals come back as chat errors); RULES "Finding a group". *unit* `BotLoopTest.LfgAndGeneralLinesPostToTheirChannels`; *live* `e2e_lfg_channel` (posted LFM heard by another bot). Trade not added (city-only; add when needed).
-  - [ ] **F2:** loot etiquette: upgrade / usable facts on Need-Greed-Pass options + RULES rule.
+  - [x] **F2:** roll options state `ilvl N` plus `not gear` / `you can't use it` / `usable, upgrade over ilvl M` (or `(empty slot)`) / `usable, not an upgrade` (`RollItemFacts`, `option_executor.cc`); RULES loot rule (Need only usable upgrades). *live* `e2e_lootroll` (facts on the real roll option); *eval* 3 new roll cases 9/9 (Needs the upgrade, never Needs unusable or non-upgrade gear).
   - [ ] **F3:** quest overlap on screen: which party members share each of the bot's quests.
   - [ ] **F4:** small TODO items: `Bind hearthstone` option at innkeepers; e2e death/respawn and harness reconnect; `bench_bosses.py` reads `content/notes` (scorer-locked: needs a user relock).
   - [ ] **F5:** memory condensing (old `remember:` notes summarised) and a per-player relationships file.

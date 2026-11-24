@@ -963,6 +963,97 @@ void CollectNpcActions(Player* bot,
   }
 }
 
+namespace {
+
+// The equipment slots an item of `inventory_type` goes into (both for rings,
+// trinkets, and one-hand weapons when dual-wielding); empty for non-gear.
+std::vector<uint8_t> SlotsFor(Player* bot, uint32_t inventory_type) {
+  switch (inventory_type) {
+    case INVTYPE_HEAD:
+      return {EQUIPMENT_SLOT_HEAD};
+    case INVTYPE_NECK:
+      return {EQUIPMENT_SLOT_NECK};
+    case INVTYPE_SHOULDERS:
+      return {EQUIPMENT_SLOT_SHOULDERS};
+    case INVTYPE_BODY:
+      return {EQUIPMENT_SLOT_BODY};
+    case INVTYPE_CHEST:
+    case INVTYPE_ROBE:
+      return {EQUIPMENT_SLOT_CHEST};
+    case INVTYPE_WAIST:
+      return {EQUIPMENT_SLOT_WAIST};
+    case INVTYPE_LEGS:
+      return {EQUIPMENT_SLOT_LEGS};
+    case INVTYPE_FEET:
+      return {EQUIPMENT_SLOT_FEET};
+    case INVTYPE_WRISTS:
+      return {EQUIPMENT_SLOT_WRISTS};
+    case INVTYPE_HANDS:
+      return {EQUIPMENT_SLOT_HANDS};
+    case INVTYPE_FINGER:
+      return {EQUIPMENT_SLOT_FINGER1, EQUIPMENT_SLOT_FINGER2};
+    case INVTYPE_TRINKET:
+      return {EQUIPMENT_SLOT_TRINKET1, EQUIPMENT_SLOT_TRINKET2};
+    case INVTYPE_CLOAK:
+      return {EQUIPMENT_SLOT_BACK};
+    case INVTYPE_WEAPON:
+      if (bot->CanDualWield()) {
+        return {EQUIPMENT_SLOT_MAINHAND, EQUIPMENT_SLOT_OFFHAND};
+      }
+      return {EQUIPMENT_SLOT_MAINHAND};
+    case INVTYPE_2HWEAPON:
+    case INVTYPE_WEAPONMAINHAND:
+      return {EQUIPMENT_SLOT_MAINHAND};
+    case INVTYPE_SHIELD:
+    case INVTYPE_WEAPONOFFHAND:
+    case INVTYPE_HOLDABLE:
+      return {EQUIPMENT_SLOT_OFFHAND};
+    case INVTYPE_RANGED:
+    case INVTYPE_RANGEDRIGHT:
+    case INVTYPE_THROWN:
+    case INVTYPE_RELIC:
+      return {EQUIPMENT_SLOT_RANGED};
+    default:
+      return {};
+  }
+}
+
+// What a player sees about an item up for a roll (F2): its item level,
+// whether it can use it, and, for gear it can use, how it compares with what
+// it wears in that slot (the lowest of two ring/trinket/weapon slots). Facts
+// only: whether to Need is the brain's call.
+std::string RollItemFacts(Player* bot, const ItemTemplate* proto) {
+  std::string out = "ilvl " + std::to_string(proto->ItemLevel);
+  const std::vector<uint8_t> slots = SlotsFor(bot, proto->InventoryType);
+  if (slots.empty()) {
+    return out + ", not gear";
+  }
+  if (bot->CanUseItem(proto) != EQUIP_ERR_OK) {
+    return out + ", you can't use it";
+  }
+  uint32_t worn = UINT32_MAX;
+  bool empty_slot = false;
+  for (const uint8_t slot : slots) {
+    const Item* item = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
+    const ItemTemplate* p = item ? item->GetTemplate() : nullptr;
+    if (!p) {
+      empty_slot = true;
+      break;
+    }
+    worn = std::min(worn, p->ItemLevel);
+  }
+  if (empty_slot) {
+    return out + ", usable, upgrade (empty slot)";
+  }
+  if (proto->ItemLevel > worn) {
+    return out + ", usable, upgrade over ilvl " + std::to_string(worn);
+  }
+  return out + ", usable, not an upgrade (you wear ilvl " +
+         std::to_string(worn) + ")";
+}
+
+}  // namespace
+
 void CollectGroupAndUpkeepActions(Player* bot,
                                   const pb::Snapshot& snapshot,
                                   std::vector<pb::OptionFacts_Action>* out) {
@@ -986,7 +1077,7 @@ void CollectGroupAndUpkeepActions(Player* bot,
       const std::string item_name =
           proto ? proto->Name1 : ("item #" + std::to_string(roll->itemid));
       const std::string detail =
-          proto ? (" (ilvl " + std::to_string(proto->ItemLevel) + ")") : "";
+          proto ? " (" + RollItemFacts(bot, proto) + ")" : std::string();
       const std::string prefix = base::StringPrintf(
           "roll:0x%016llx:%u:",
           static_cast<unsigned long long>(roll->itemGUID.GetRawValue()),

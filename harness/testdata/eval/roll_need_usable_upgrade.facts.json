@@ -1,0 +1,79 @@
+{
+  "has_food": true,
+  "has_drink": true,
+  "spots": [
+    {
+      "id": "spot:1:-715:-4286",
+      "dir": "SW",
+      "dist_yd": 53.160194,
+      "label": "boars, level 1-2",
+      "pos": {
+        "x": -714.713,
+        "y": -4286.47,
+        "z": 43.2732
+      }
+    },
+    {
+      "id": "spot:1:-616:-4418",
+      "dir": "NE",
+      "dist_yd": 112.4699,
+      "label": "boars, level 1-2",
+      "pos": {
+        "x": -616.183,
+        "y": -4417.66,
+        "z": 45.7873
+      }
+    },
+    {
+      "id": "spot:1:-517:-4287",
+      "dir": "N",
+      "dist_yd": 162.40146,
+      "label": "boars, level 1-2",
+      "pos": {
+        "x": -516.59,
+        "y": -4286.81,
+        "z": 40.0634
+      }
+    }
+  ],
+  "places": [
+    {
+      "id": "place:1:-1050:-3665",
+      "name": "Ratchet",
+      "services": "innkeeper, vendor, repair, flight master",
+      "dir": "SW",
+      "dist_yd": 756.80725,
+      "pos": {
+        "x": -1050.04,
+        "y": -3664.8,
+        "z": 23.9684
+      }
+    },
+    {
+      "id": "place:1:-627:-4230",
+      "name": "Valley of Trials",
+      "services": "vendor, repair, priest trainer, graveyard",
+      "dir": "NW",
+      "dist_yd": 103.736145,
+      "pos": {
+        "x": -627.102,
+        "y": -4229.93,
+        "z": 42.0365
+      }
+    }
+  ],
+  "group_and_upkeep_actions": [
+    {
+      "guid": "roll:0x0000000000123456:0:1",
+      "label": "Need Buckskin Cape (ilvl 15, usable, upgrade over ilvl 8)"
+    },
+    {
+      "guid": "roll:0x0000000000123456:0:2",
+      "label": "Greed Buckskin Cape (ilvl 15, usable, upgrade over ilvl 8)"
+    },
+    {
+      "guid": "roll:0x0000000000123456:0:0",
+      "label": "Pass Buckskin Cape"
+    }
+  ]
+}

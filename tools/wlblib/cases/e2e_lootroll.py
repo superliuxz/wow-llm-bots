@@ -49,6 +49,7 @@ def run(stack):
     roll_event_at = None
     greed_cmd = None
     greed_sent_at = None
+    greed_text = ""
     options_gone = False
     errors = []
     deadline = time.time() + 30.0
@@ -79,6 +80,7 @@ def run(stack):
                 greed = next((i for i, o in enumerate(options, 1)
                               if o.get("text", "").startswith("Greed Buckskin Cape")), None)
                 if greed_cmd is None and roll_event_at is not None and greed:
+                    greed_text = options[greed - 1].get("text", "")
                     greed_cmd = 99
                     _send_cmd(sock, {"bot": "Telda", "command_id": greed_cmd,
                                      "choose": {"option": greed, "seq": snap.get("seq", 0)}})
@@ -94,6 +96,8 @@ def run(stack):
     delay = roll_event_at - started_at
     expect(delay <= 5.0, f"loot_roll event took {delay:.1f} s (> 5 s)")
     expect(greed_cmd is not None, "Telda was never offered `Greed Buckskin Cape`")
+    # F2: the option says whether the item is usable and an upgrade (a fresh priest wears no cloak).
+    expect("usable, upgrade" in greed_text, f"roll option lacks usable/upgrade facts: {greed_text!r}")
     expect(not errors, f"Greed produced errors: {errors}")
     expect(options_gone, "the roll options stayed after Telda chose Greed")
     return f"loot_roll woke Telda {delay:.2f} s after the roll started; Greed accepted"

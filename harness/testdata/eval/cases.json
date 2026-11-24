@@ -852,5 +852,43 @@
     "forbid_kinds": [
       "attack"
     ]
+  },
+  {
+    "name": "roll_need_usable_upgrade",
+    "source": "built (F2)",
+    "reason": "loot roll: Buckskin Cape",
+    "summary": "group loot roll on a cloak the bot can use and that beats its ilvl 8 cloak",
+    "rule": "Needs it (an upgrade it can use)",
+    "first_options": [
+      8
+    ]
+  },
+  {
+    "name": "roll_not_usable",
+    "source": "built (F2)",
+    "reason": "loot roll: Scaled Leather Leggings",
+    "summary": "group loot roll on leather leggings a priest can't wear",
+    "rule": "does not Need what it can't use",
+    "forbid_options": [
+      8
+    ],
+    "first_options": [
+      9,
+      10
+    ]
+  },
+  {
+    "name": "roll_not_an_upgrade",
+    "source": "built (F2)",
+    "reason": "loot roll: Frayed Robe",
+    "summary": "group loot roll on an ilvl 5 robe while wearing ilvl 15",
+    "rule": "does not Need what isn't an upgrade",
+    "forbid_options": [
+      8
+    ],
+    "first_options": [
+      9,
+      10
+    ]
   }
 ]
