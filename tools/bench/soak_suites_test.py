@@ -91,11 +91,15 @@ class SoakSuitesTest(unittest.TestCase):
             merged = t / "merged"
             soak_case._merge_trace_dirs([t / "run0", t / "run1"], merged)
             stats = soak_case._aggregate_run_stats([
-                {"run_stats": {"scenario": "a", "bots": 1, "elapsed_min": 1.0, "decisions": 5, "do_p50_ms": 50.0, "do_p95_ms": 100.0}},
-                {"run_stats": {"scenario": "b", "bots": 1, "elapsed_min": 1.0, "decisions": 7, "do_p50_ms": 70.0, "do_p95_ms": 120.0}},
+                {"run_stats": {"scenario": "a", "mode": "llm", "temperature": 0.7, "decisions_dir": "var/soak_decisions/a", "bots": 1, "elapsed_min": 1.0, "decisions": 5, "option_counts": {"Attack": 3, "Keep": 2}, "do_p50_ms": 50.0, "do_p95_ms": 100.0}},
+                {"run_stats": {"scenario": "b", "mode": "llm", "temperature": 0.7, "decisions_dir": "var/soak_decisions/b", "bots": 1, "elapsed_min": 1.0, "decisions": 7, "option_counts": {"Attack": 4, "Loot": 3}, "do_p50_ms": 70.0, "do_p95_ms": 120.0}},
             ])
             self.assertEqual(stats["bots"], 2)
             self.assertEqual(stats["decisions"], 12)
+            self.assertEqual(stats["option_counts"], {"Attack": 7, "Keep": 2, "Loot": 3})
+            self.assertEqual(stats["mode"], "llm")
+            self.assertEqual(stats["temperature"], 0.7)
+            self.assertEqual(stats["decisions_dirs"], ["var/soak_decisions/a", "var/soak_decisions/b"])
             res = soak_scorer.score_soak(merged, run_stats=stats)
             self.assertEqual(res["progress"]["traced_bots"], 2)
             self.assertEqual(res["progress"]["stuck_bots"], 2)

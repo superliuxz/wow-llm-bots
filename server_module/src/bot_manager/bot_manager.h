@@ -52,12 +52,15 @@ class BotManager {
   static void ClearBotStrategyOverride(const std::string& bot_name);
   static void ClearBotStrategyOverrides();
 
-  // World thread only: pending shared-quest / ready-check prompts captured when
-  // BrainPolicyListener blocks Playerbots' auto-handlers so the brain decides.
+  // World thread only: pending shared-quest / ready-check / LFG-proposal
+  // prompts captured via ServerScript::OnPacketSent (works for standalone
+  // no-master bots) while BrainPolicyListener blocks Playerbots' auto-handlers.
   static uint32_t GetPendingSharedQuest(Player* bot);
   static void ClearPendingSharedQuest(Player* bot);
   static bool HasPendingReadyCheck(Player* bot);
   static void ClearPendingReadyCheck(Player* bot);
+  static uint32_t GetPendingLfgProposal(Player* bot);
+  static void ClearPendingLfgProposal(Player* bot);
 
  private:
   struct Bot {
@@ -74,6 +77,11 @@ class BotManager {
   uint64_t now_ms_ = 0;
   uint32_t since_tick_ms_ = 0;
 };
+
+// Registers the ServerScript that captures outgoing server prompts
+// (MSG_RAID_READY_CHECK, SMSG_QUESTGIVER_QUEST_DETAILS with divider,
+// SMSG_LFG_PROPOSAL_UPDATE) for standalone bots.
+void AddLlmBrainBotManagerScripts();
 
 }  // namespace llm_brain
 

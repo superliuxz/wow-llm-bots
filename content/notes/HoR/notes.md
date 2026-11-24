@@ -17,8 +17,4 @@ in Well of Corruption -> out of it
 
 ## The Lich King
 
-- **Escape Event**: stay ahead of The Lich King, focus down Raging Ghoul and Lumbering Abomination waves at each ice wall, and avoid Remorseless Winter.
-
-```
-in Remorseless Winter -> out of it
-```
+- **Escape Event**: stay ahead of The Lich King, focus down Raging Ghoul and Lumbering Abomination waves at each ice wall, and stay out of Remorseless Winter's aura range around him.

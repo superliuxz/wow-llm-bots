@@ -713,13 +713,23 @@ def _aggregate_run_stats(results: list[dict]) -> dict:
         return {}
     p50s = [float(s["do_p50_ms"]) for s in stats_list if s.get("do_p50_ms", 0) > 0]
     p95s = [float(s["do_p95_ms"]) for s in stats_list if s.get("do_p95_ms", 0) > 0]
+    merged_options: dict[str, int] = {}
+    for s in stats_list:
+        for k, v in (s.get("option_counts") or {}).items():
+            merged_options[k] = merged_options.get(k, 0) + int(v)
     return {
         "scenario": "+".join(str(s.get("scenario", "soak")) for s in stats_list),
+        "mode": stats_list[0].get("mode", "llm"),
+        "temperature": stats_list[0].get("temperature"),
+        "decisions_dirs": [
+            s["decisions_dir"] for s in stats_list if s.get("decisions_dir")
+        ],
         # Multi-run merged traces namespace bots per run (`Loada_r00`, `Loada_r01`),
         # so total traced bot-runs equals the sum across runs.
         "bots": sum(int(s.get("bots", 0)) for s in stats_list),
         "elapsed_min": sum(float(s.get("elapsed_min", 0.0)) for s in stats_list),
         "decisions": sum(int(s.get("decisions", 0)) for s in stats_list),
+        "option_counts": merged_options,
         "max_wakes_per_min": max(float(s.get("max_wakes_per_min", 0.0)) for s in stats_list),
         "do_p50_ms": statistics.median(p50s) if p50s else 0.0,
         "do_p95_ms": max(p95s) if p95s else 0.0,

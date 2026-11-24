@@ -2199,5 +2199,63 @@ TEST(BotLoopTest, EdgeTriggerNotDroppedDuringOrderRefusalBackoff) {
             std::string::npos);
 }
 
+TEST(BotLoopTest, PartyChatRoutesToPartyOrRaidAndSuppressesWhenSolo) {
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { sent.push_back(cmd); });
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  // 1. Solo: `party:` line is suppressed (no Say command emitted).
+  pb::Snapshot solo = MakeLiveSnap("Loada", 1, t0, /*in_combat=*/false);
+  AddKeep(&solo);
+  loop.OnSnapshot(solo, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\nparty: oom, drinking");
+  EXPECT_EQ(
+      std::count_if(sent.begin(), sent.end(),
+                    [](const pb::Command& c) { return c.say.has_value(); }),
+      0);
+
+  // 2. Party: `party:` line routes to pb::PARTY.
+  sent.clear();
+  pb::Snapshot party = MakeLiveSnap("Loada", 2, t0 + base::Seconds(70), false);
+  AddKeep(&party);
+  pb::Unit m;
+  m.name = "Telda";
+  party.ext.party.emplace().members.push_back(m);
+  loop.OnSnapshot(party, t0 + base::Seconds(70));
+  loop.OnTick(t0 + base::Seconds(70));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\nparty: oom, drinking");
+  auto say_it =
+      std::find_if(sent.begin(), sent.end(),
+                   [](const pb::Command& c) { return c.say.has_value(); });
+  ASSERT_NE(say_it, sent.end());
+  EXPECT_EQ(say_it->say->channel, pb::PARTY);
+  EXPECT_EQ(say_it->say->text, "oom, drinking");
+
+  // 3. Raid: `party:` line routes to pb::RAID.
+  sent.clear();
+  pb::Snapshot raid = MakeLiveSnap("Loada", 3, t0 + base::Seconds(140), false);
+  AddKeep(&raid);
+  raid.ext.raid.emplace().members.push_back(m);
+  loop.OnSnapshot(raid, t0 + base::Seconds(140));
+  loop.OnTick(t0 + base::Seconds(140));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\nparty: pull in 5");
+  say_it = std::find_if(sent.begin(), sent.end(),
+                        [](const pb::Command& c) { return c.say.has_value(); });
+  ASSERT_NE(say_it, sent.end());
+  EXPECT_EQ(say_it->say->channel, pb::RAID);
+  EXPECT_EQ(say_it->say->text, "pull in 5");
+}
+
 }  // namespace
 }  // namespace harness

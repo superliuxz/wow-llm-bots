@@ -1,13 +1,13 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
 #include "options/option_executor.h"
-#include <math.h>
 
 #include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <numbers>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -670,24 +670,30 @@ bool IsAmmoForHunter(Player* bot, const ItemTemplate* proto) {
   return false;
 }
 
-uint32_t DefaultLfgRoleMask(Player* bot) {
-  if (!bot) {
-    return lfg::PLAYER_ROLE_DAMAGE;
-  }
-  switch (bot->getClass()) {
-    case CLASS_PRIEST:
-      return lfg::PLAYER_ROLE_HEALER | lfg::PLAYER_ROLE_DAMAGE;
+struct LfgRoleChoice {
+  uint8_t mask = lfg::PLAYER_ROLE_DAMAGE;
+  const char* name = "DPS";
+};
+
+// Mechanically valid WotLK 3.3.5a LFG roles for `cls` (the brain chooses which
+// role to queue or confirm, rather than C++ guessing by class).
+std::vector<LfgRoleChoice> ClassLfgRoles(uint8_t cls) {
+  switch (cls) {
     case CLASS_WARRIOR:
     case CLASS_DEATH_KNIGHT:
-      return lfg::PLAYER_ROLE_TANK | lfg::PLAYER_ROLE_DAMAGE;
+      return {{lfg::PLAYER_ROLE_TANK, "Tank"},
+              {lfg::PLAYER_ROLE_DAMAGE, "DPS"}};
+    case CLASS_PRIEST:
+    case CLASS_SHAMAN:
+      return {{lfg::PLAYER_ROLE_HEALER, "Healer"},
+              {lfg::PLAYER_ROLE_DAMAGE, "DPS"}};
     case CLASS_PALADIN:
     case CLASS_DRUID:
-      return lfg::PLAYER_ROLE_TANK | lfg::PLAYER_ROLE_HEALER |
-             lfg::PLAYER_ROLE_DAMAGE;
-    case CLASS_SHAMAN:
-      return lfg::PLAYER_ROLE_HEALER | lfg::PLAYER_ROLE_DAMAGE;
+      return {{lfg::PLAYER_ROLE_TANK, "Tank"},
+              {lfg::PLAYER_ROLE_HEALER, "Healer"},
+              {lfg::PLAYER_ROLE_DAMAGE, "DPS"}};
     default:
-      return lfg::PLAYER_ROLE_DAMAGE;
+      return {{lfg::PLAYER_ROLE_DAMAGE, "DPS"}};
   }
 }
 
@@ -919,12 +925,16 @@ void CollectNpcActions(Player* bot,
       }
     }
 
-    // 5. Flight master travel: known connected destinations.
+    // 5. Flight master travel: discover unknown node or fly to known
+    //    connected destinations.
     if (out->size() < kMaxNpcActions &&
         npc->HasNpcFlag(UNIT_NPC_FLAG_FLIGHTMASTER)) {
       const uint32_t cur_node =
           sObjectMgr->GetNearestTaxiNode(*npc, bot->GetTeamId(true));
-      if (cur_node != 0 && bot->m_taxi.IsTaximaskNodeKnown(cur_node)) {
+      if (cur_node != 0 && !bot->m_taxi.IsTaximaskNodeKnown(cur_node)) {
+        out->push_back({"npc_fly_discover:" + u.guid, u.guid,
+                        "Discover flight path at " + npc_name});
+      } else if (cur_node != 0) {
         size_t added_flights = 0;
         const uint32_t locale = sWorld->GetDefaultDbcLocale();
         for (uint32_t i = 0; i < sTaxiPathStore.GetNumRows() &&
@@ -1013,12 +1023,14 @@ void CollectGroupAndUpkeepActions(Player* bot,
   if (bot->IsAlive()) {
     const lfg::LfgState st = sLFGMgr->GetState(bot->GetGUID());
     if (st == lfg::LFG_STATE_ROLECHECK) {
-      out->push_back({"lfg:role", "Confirm Dungeon Finder role"});
-    } else if (st == lfg::LFG_STATE_PROPOSAL && ai &&
-               ai->GetAiObjectContext()) {
-      const uint32_t pid =
-          ai->GetAiObjectContext()->GetValue<uint32>("lfg proposal")->Get();
-      if (pid != 0) {
+      for (const LfgRoleChoice& rc : ClassLfgRoles(bot->getClass())) {
+        out->push_back(
+            {"lfg:role:" + std::to_string(rc.mask),
+             std::string("Confirm Dungeon Finder role (") + rc.name + ")"});
+      }
+    } else if (st == lfg::LFG_STATE_PROPOSAL) {
+      if (const uint32_t pid = BotManager::GetPendingLfgProposal(bot);
+          pid != 0) {
         out->push_back({"lfg:accept:" + std::to_string(pid),
                         "Accept Dungeon Finder proposal"});
         out->push_back({"lfg:decline:" + std::to_string(pid),
@@ -1035,8 +1047,14 @@ void CollectGroupAndUpkeepActions(Player* bot,
     } else if (st == lfg::LFG_STATE_NONE && !bot->IsInCombat() &&
                bot->GetLevel() >= 15 && bot->GetMap() &&
                !bot->GetMap()->IsDungeon() &&
+               (!bot->GetGroup() ||
+                bot->GetGroup()->IsLeader(bot->GetGUID())) &&
                FindRandomLfgDungeonId(bot) != 0) {
-      out->push_back({"lfg:queue", "Queue Random Dungeon (LFG)"});
+      for (const LfgRoleChoice& rc : ClassLfgRoles(bot->getClass())) {
+        out->push_back(
+            {"lfg:queue:" + std::to_string(rc.mask),
+             std::string("Queue Random Dungeon (LFG: ") + rc.name + ")"});
+      }
     }
   }
 
@@ -2317,13 +2335,17 @@ ExecuteResult ExecuteOption(Player* bot,
     if (bot->HasPreventResurectionAura()) {
       return {"release spirit is currently prevented"};
     }
+    WorldSession* session = bot->GetSession();
+    if (!session) {
+      return {"no session"};
+    }
     // Route through AzerothCore's real repop opcode handler so JustDied,
     // RemovePet, BuildPlayerRepop (corpse + ghost aura/flag), and
     // RepopAtGraveyard all run exactly as for a human client.
     WorldPacket p(CMSG_REPOP_REQUEST, 1);
     p << uint8_t(0);
     p.rpos(0);
-    bot->GetSession()->HandleRepopRequestOpcode(p);
+    session->HandleRepopRequestOpcode(p);
     return {.used = true, .info = "released spirit"};
   }
   if (target.kind == OptionTarget::Kind::kLeaveGroup) {
@@ -2337,6 +2359,10 @@ ExecuteResult ExecuteOption(Player* bot,
   }
   if (target.kind == OptionTarget::Kind::kUse &&
       target.guid.starts_with("roll:")) {
+    WorldSession* session = bot->GetSession();
+    if (!session) {
+      return {"no session"};
+    }
     // Format: roll:<item_guid>:<slot>:<roll_type>
     const std::vector<std::string_view> parts = base::SplitStringPiece(
         target.guid, ":", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
@@ -2349,12 +2375,13 @@ ExecuteResult ExecuteOption(Player* bot,
     WorldPacket p(CMSG_LOOT_ROLL, 8 + 4 + 1);
     p << ParseSnapshotGuid(parts[1]) << slot << static_cast<uint8_t>(vote);
     p.rpos(0);
-    bot->GetSession()->HandleLootRoll(p);
+    session->HandleLootRoll(p);
     return {.used = true, .info = target.name};
   }
   if (target.kind == OptionTarget::Kind::kUse &&
       target.guid.starts_with("ready:")) {
-    if (!bot->GetGroup()) {
+    WorldSession* session = bot->GetSession();
+    if (!session || !bot->GetGroup()) {
       BotManager::ClearPendingReadyCheck(bot);
       return {"you are not in a group"};
     }
@@ -2362,7 +2389,7 @@ ExecuteResult ExecuteOption(Player* bot,
     WorldPacket p(MSG_RAID_READY_CHECK, 1);
     p << state;
     p.rpos(0);
-    bot->GetSession()->HandleRaidReadyCheckOpcode(p);
+    session->HandleRaidReadyCheckOpcode(p);
     BotManager::ClearPendingReadyCheck(bot);
     return {.used = true,
             .info = state ? "confirmed ready check" : "declined ready check"};
@@ -2398,24 +2425,37 @@ ExecuteResult ExecuteOption(Player* bot,
   }
   if (target.kind == OptionTarget::Kind::kUse &&
       target.guid.starts_with("lfg:")) {
-    if (target.guid == "lfg:queue") {
+    if (target.guid.starts_with("lfg:queue:")) {
+      if (bot->GetGroup() && !bot->GetGroup()->IsLeader(bot->GetGUID())) {
+        return {"only the group leader can queue for Dungeon Finder"};
+      }
+      uint32_t role_mask = 0;
+      if (!ParseUint32(std::string_view(target.guid).substr(10), &role_mask) ||
+          role_mask == 0) {
+        return {"invalid LFG role"};
+      }
       const uint32_t did = FindRandomLfgDungeonId(bot);
       if (did == 0) {
         return {"no random dungeon available for your level"};
       }
       lfg::LfgDungeonSet dungeons = {did};
-      sLFGMgr->JoinLfg(bot, static_cast<uint8_t>(DefaultLfgRoleMask(bot)),
-                       dungeons, "");
+      sLFGMgr->JoinLfg(bot, static_cast<uint8_t>(role_mask), dungeons, "");
       return {.used = true, .info = "queued for Random Dungeon"};
     }
     if (target.guid == "lfg:leave") {
       sLFGMgr->LeaveLfg(bot->GetGUID());
+      BotManager::ClearPendingLfgProposal(bot);
       return {.used = true, .info = "left Dungeon Finder queue"};
     }
-    if (target.guid == "lfg:role") {
+    if (target.guid.starts_with("lfg:role:")) {
+      uint32_t role_mask = 0;
+      if (!ParseUint32(std::string_view(target.guid).substr(9), &role_mask) ||
+          role_mask == 0) {
+        return {"invalid LFG role"};
+      }
       if (Group* g = bot->GetGroup()) {
         sLFGMgr->UpdateRoleCheck(g->GetGUID(), bot->GetGUID(),
-                                 static_cast<uint8_t>(DefaultLfgRoleMask(bot)));
+                                 static_cast<uint8_t>(role_mask));
         return {.used = true, .info = "confirmed Dungeon Finder role"};
       }
       return {"you are not in a group"};
@@ -2436,9 +2476,7 @@ ExecuteResult ExecuteOption(Player* bot,
         return {"invalid LFG proposal"};
       }
       sLFGMgr->UpdateProposal(pid, bot->GetGUID(), accept);
-      if (ai->GetAiObjectContext()) {
-        ai->GetAiObjectContext()->GetValue<uint32>("lfg proposal")->Set(0);
-      }
+      BotManager::ClearPendingLfgProposal(bot);
       return {.used = true,
               .info = accept ? "accepted Dungeon Finder proposal"
                              : "declined Dungeon Finder proposal"};
@@ -2450,10 +2488,13 @@ ExecuteResult ExecuteOption(Player* bot,
     Player* leader = ObjectAccessor::FindConnectedPlayer(
         ParseSnapshotGuid(std::string_view(target.guid).substr(7)));
     if (!leader || !leader->IsInWorld() || !leader->IsAlive() ||
-        leader->GetMapId() != bot->GetMapId()) {
+        leader->GetMapId() != bot->GetMapId() ||
+        leader->GetInstanceId() != bot->GetInstanceId()) {
       return {"party leader is not nearby"};
     }
-    bot->GetMotionMaster()->MoveFollow(leader, 4.0f, static_cast<float>(M_PI));
+    RecordLastMovement(bot, leader->GetPositionX(), leader->GetPositionY(),
+                       leader->GetPositionZ());
+    bot->GetMotionMaster()->MoveFollow(leader, 4.0f, std::numbers::pi_v<float>);
     return {.used = true, .info = "following " + leader->GetName()};
   }
   if (target.kind == OptionTarget::Kind::kUse &&
@@ -2487,7 +2528,10 @@ ExecuteResult ExecuteOption(Player* bot,
       return {"cannot mount in combat"};
     }
     bot->CastSpell(bot, spell_id, false);
-    return {.used = true, .info = "mounting " + target.name};
+    const bool casting = IsSpellCastPending(bot, spell_id);
+    return {.used = !casting,
+            .info = "mounting " + target.name,
+            .pending_spell_id = casting ? spell_id : 0};
   }
   if (target.kind == OptionTarget::Kind::kUse &&
       target.guid.starts_with("npc_")) {
@@ -2508,6 +2552,10 @@ ExecuteResult ExecuteOption(Player* bot,
     bot->SetFacingToObject(npc);
     bot->SetSelection(npc->GetGUID());
     if (parts[0] == "npc_qaccept" && parts.size() == 3) {
+      WorldSession* session = bot->GetSession();
+      if (!session) {
+        return {"no session"};
+      }
       uint32_t qid = 0;
       if (!ParseUint32(parts[2], &qid)) {
         return {"invalid quest id"};
@@ -2521,11 +2569,15 @@ ExecuteResult ExecuteOption(Player* bot,
       uint32_t unk1 = 0;
       p << npc->GetGUID() << quest->GetQuestId() << unk1;
       p.rpos(0);
-      bot->GetSession()->HandleQuestgiverAcceptQuestOpcode(p);
+      session->HandleQuestgiverAcceptQuestOpcode(p);
       ai->RecordQuestAccepted(quest->GetQuestId());
       return {.used = true, .info = "accepted " + quest->GetTitle()};
     }
     if (parts[0] == "npc_qturnin" && parts.size() == 4) {
+      WorldSession* session = bot->GetSession();
+      if (!session) {
+        return {"no session"};
+      }
       uint32_t qid = 0;
       uint32_t reward_idx = 0;
       if (!ParseUint32(parts[2], &qid) || !ParseUint32(parts[3], &reward_idx)) {
@@ -2545,7 +2597,7 @@ ExecuteResult ExecuteOption(Player* bot,
       WorldPacket p(CMSG_QUESTGIVER_CHOOSE_REWARD);
       p << npc->GetGUID() << quest->GetQuestId() << reward_idx;
       p.rpos(0);
-      bot->GetSession()->HandleQuestgiverChooseRewardOpcode(p);
+      session->HandleQuestgiverChooseRewardOpcode(p);
       ai->RecordQuestRewarded(quest->GetQuestId());
       return {.used = true, .info = "turned in " + quest->GetTitle()};
     }
@@ -2566,9 +2618,11 @@ ExecuteResult ExecuteOption(Player* bot,
         if (!bot->HasEnoughMoney(cost)) {
           continue;
         }
+        const bool had_spell = bot->HasSpell(sp.SpellId);
         const uint32_t money_before = bot->GetMoney();
         trainer->TeachSpell(npc, bot, sp.SpellId);
-        if (bot->GetMoney() != money_before || cost == 0) {
+        if ((!had_spell && bot->HasSpell(sp.SpellId)) ||
+            (cost > 0 && bot->GetMoney() != money_before)) {
           ++learned;
         }
       }
@@ -2621,6 +2675,17 @@ ExecuteResult ExecuteOption(Player* bot,
         }
       }
       return {"item not sold by this vendor"};
+    }
+    if (parts[0] == "npc_fly_discover") {
+      WorldSession* session = bot->GetSession();
+      if (!session) {
+        return {"no session"};
+      }
+      if (!session->SendLearnNewTaxiNode(npc)) {
+        return {"flight path already known or unavailable"};
+      }
+      return {.used = true,
+              .info = "discovered flight path at " + npc->GetName()};
     }
     if (parts[0] == "npc_fly" && parts.size() == 3) {
       uint32_t dest_node = 0;

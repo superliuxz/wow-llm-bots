@@ -12,6 +12,7 @@
 
 #include "Action.h"
 #include "AiFactory.h"
+#include "ByteBuffer.h"
 #include "CharacterCache.h"
 #include "DBCStructure.h"
 #include "Engine.h"
@@ -19,19 +20,24 @@
 #include "Group.h"
 #include "Item.h"
 #include "ItemTemplate.h"
+#include "LFGMgr.h"
 #include "Log.h"
 #include "Map.h"
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
 #include "ObjectMgr.h"
+#include "Opcodes.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
 #include "Playerbots.h"
 #include "RandomPlayerbotMgr.h"
+#include "ServerScript.h"
 #include "SharedDefines.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "Timer.h"
+#include "WorldPacket.h"
+#include "WorldSession.h"
 #include "config/config_parsing.h"
 
 namespace llm_brain {
@@ -183,6 +189,12 @@ struct PendingSharedQuestEntry {
 
 constexpr uint32_t kPendingSharedQuestTimeoutMs = 60000;
 constexpr uint32_t kPendingReadyCheckTimeoutMs = 30000;
+constexpr uint32_t kPendingLfgProposalTimeoutMs = 45000;
+
+struct PendingLfgProposalEntry {
+  uint32_t proposal_id = 0;
+  uint32_t received_ms = 0;
+};
 
 std::unordered_map<uint64_t, PendingSharedQuestEntry>& PendingSharedQuests() {
   static auto* map =
@@ -194,6 +206,77 @@ std::unordered_map<uint64_t, uint32_t>& PendingReadyChecks() {
   static auto* map = new std::unordered_map<uint64_t, uint32_t>();
   return *map;
 }
+
+std::unordered_map<uint64_t, PendingLfgProposalEntry>& PendingLfgProposals() {
+  static auto* map =
+      new std::unordered_map<uint64_t, PendingLfgProposalEntry>();
+  return *map;
+}
+
+// Observes outgoing packets even on socketless (standalone) bot sessions so
+// ready checks, shared quests, and LFG proposals are captured for the brain
+// without relying on Playerbots' master-only packet handlers.
+class LlmBrainPacketScript final : public ServerScript {
+ public:
+  LlmBrainPacketScript() : ServerScript("LlmBrainPacketScript") {}
+
+  void OnPacketSent(WorldSession* session, WorldPacket const& packet) override {
+    if (!session) {
+      return;
+    }
+    Player* bot = session->GetPlayer();
+    if (!bot || !GET_PLAYERBOT_AI(bot)) {
+      return;
+    }
+    const uint64_t key = bot->GetGUID().GetRawValue();
+    switch (packet.GetOpcode()) {
+      case MSG_RAID_READY_CHECK: {
+        if (packet.size() >= 8) {
+          ByteBuffer copy(packet);
+          ObjectGuid starter;
+          copy >> starter;
+          if (starter != bot->GetGUID()) {
+            PendingReadyChecks()[key] = getMSTime();
+          }
+        }
+        break;
+      }
+      case MSG_RAID_READY_CHECK_FINISHED:
+        PendingReadyChecks().erase(key);
+        break;
+      case SMSG_QUESTGIVER_QUEST_DETAILS: {
+        if (packet.size() >= 20) {
+          ByteBuffer copy(packet);
+          ObjectGuid npc_guid;
+          ObjectGuid divider_guid;
+          uint32_t quest_id = 0;
+          copy >> npc_guid >> divider_guid >> quest_id;
+          if (divider_guid && quest_id != 0) {
+            PendingSharedQuests()[key] = {quest_id, getMSTime()};
+          }
+        }
+        break;
+      }
+      case SMSG_LFG_PROPOSAL_UPDATE: {
+        if (packet.size() >= 9) {
+          ByteBuffer copy(packet);
+          uint32_t dungeon_entry = 0;
+          uint8_t state = 0;
+          uint32_t proposal_id = 0;
+          copy >> dungeon_entry >> state >> proposal_id;
+          if (state == lfg::LFG_PROPOSAL_INITIATING && proposal_id != 0) {
+            PendingLfgProposals()[key] = {proposal_id, getMSTime()};
+          } else {
+            PendingLfgProposals().erase(key);
+          }
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+};
 
 // Enforces clean ownership boundaries between the LLM brain and Playerbots'
 // reflex layer on each Engine:
@@ -224,38 +307,10 @@ class BrainPolicyListener final : public ActionExecutionListener {
     const std::string& name = action->getName();
     if (name == "accept invitation" || name == "equip upgrade" ||
         name == "equip upgrades packet action" || name == "loot roll" ||
-        name == "roll" || name == "lfg join" || name == "lfg accept" ||
+        name == "roll" || name == "accept quest share" ||
+        name == "ready check" || name == "lfg join" || name == "lfg accept" ||
         name == "lfg role check" || name == "lfg leave" ||
         name == "lfg teleport") {
-      return false;
-    }
-    if (name == "accept quest share") {
-      if (bot_) {
-        WorldPacket p = event.getPacket();
-        p.rpos(0);
-        uint32_t qid = 0;
-        if (p.size() >= sizeof(uint32_t)) {
-          p >> qid;
-        }
-        if (qid != 0) {
-          PendingSharedQuests()[bot_->GetGUID().GetRawValue()] = {qid,
-                                                                  getMSTime()};
-        }
-      }
-      return false;
-    }
-    if (name == "ready check") {
-      if (bot_) {
-        WorldPacket p = event.getPacket();
-        p.rpos(0);
-        ObjectGuid starter;
-        if (p.size() >= 8) {
-          p >> starter;
-        }
-        if (starter != bot_->GetGUID()) {
-          PendingReadyChecks()[bot_->GetGUID().GetRawValue()] = getMSTime();
-        }
-      }
       return false;
     }
     if (name == "apply stone") {
@@ -390,8 +445,6 @@ void BotManager::Tick() {
         if (player->IsAlive() || !player->GetMap() ||
             !player->GetMap()->IsDungeon()) {
           DungeonDeadSinceMs().erase(bot.guid);
-          PendingSharedQuests().erase(bot.guid);
-          PendingReadyChecks().erase(bot.guid);
         }
         EnsureStrategies(player);
       }
@@ -400,6 +453,7 @@ void BotManager::Tick() {
     DungeonDeadSinceMs().erase(bot.guid);
     PendingSharedQuests().erase(bot.guid);
     PendingReadyChecks().erase(bot.guid);
+    PendingLfgProposals().erase(bot.guid);
     if (now_ms_ >= bot.next_login_ms) {
       // No master: playerbots runs it as a standalone bot. With autologin off,
       // its random-bot manager does nothing else with it.
@@ -556,13 +610,44 @@ void BotManager::ClearPendingReadyCheck(Player* bot) {
   }
 }
 
+uint32_t BotManager::GetPendingLfgProposal(Player* bot) {
+  if (!bot) {
+    return 0;
+  }
+  const uint64_t key = bot->GetGUID().GetRawValue();
+  auto it = PendingLfgProposals().find(key);
+  if (it == PendingLfgProposals().end()) {
+    return 0;
+  }
+  if (GetMSTimeDiffToNow(it->second.received_ms) >=
+      kPendingLfgProposalTimeoutMs) {
+    PendingLfgProposals().erase(it);
+    return 0;
+  }
+  return it->second.proposal_id;
+}
+
+void BotManager::ClearPendingLfgProposal(Player* bot) {
+  if (bot) {
+    PendingLfgProposals().erase(bot->GetGUID().GetRawValue());
+  }
+}
+
 void BotManager::Stop() {
   ClearBotStrategyOverrides();
+  DungeonDeadSinceMs().clear();
+  PendingSharedQuests().clear();
+  PendingReadyChecks().clear();
+  PendingLfgProposals().clear();
   for (const Bot& bot : bots_) {
     if (bot.guid) {
       RandomPlayerbotMgr::instance().LogoutPlayerBot(ObjectGuid(bot.guid));
     }
   }
+}
+
+void AddLlmBrainBotManagerScripts() {
+  new LlmBrainPacketScript();
 }
 
 }  // namespace llm_brain

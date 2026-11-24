@@ -137,7 +137,8 @@ TargetProgress OptionTargetProgress(Player* bot,
     case OptionTarget::Kind::kGather:
     case OptionTarget::Kind::kUse: {
       if (target.kind == OptionTarget::Kind::kUse &&
-          target.guid.starts_with("item:")) {
+          (target.guid.starts_with("item:") ||
+           target.guid.starts_with("mount:"))) {
         if (used) {
           return done();
         }
@@ -1597,6 +1598,7 @@ void AddLlmBrainScripts() {
   auto* human_trace = new std::atomic<llm_brain::BehaviorTraceWriter*>(nullptr);
   auto* trace_hooks = new llm_brain::TraceHookState();
   new llm_brain::LlmBrainWorldScript(inbox, human_trace, trace_hooks);
+  llm_brain::AddLlmBrainBotManagerScripts();
   llm_brain::AddLlmBrainChatScripts(inbox, human_trace);
   llm_brain::AddLlmBrainTraceScripts(trace_hooks);
 #if defined(LLM_BRAIN_TEST_HOOKS)

@@ -26,6 +26,25 @@ Last updated 2026-11-24.
     - [x] **R8614690-L2:** Removed Playerbots premade-spec talent delegation and duplicate `SendTalentsInfoData` (resolved with R8614690-H4).
     - [x] **R8614690-L3:** Updated `e2e_playability.py` docstring, `docs/TODO.md` date (`2026-11-24`), and `polyline.reserve(samples + 2)` in `option_facts.cc`.
 
+- [x] **Review `752373e` + `b689245` fixes (High → Medium → Low — all 14 items fixed & verified):**
+  - **High:**
+    - [x] **Rb689245-H1:** Removed mistaken `PendingSharedQuests` / `PendingReadyChecks` erases from the alive/non-dungeon branch in `BotManager::Tick()` (now erased only when offline or in `BotManager::Stop()`).
+    - [x] **Rb689245-H2:** Added `LlmBrainPacketScript : public ServerScript` (`OnPacketSent` in `bot_manager.cc`, registered in `AddLlmBrainScripts()`) to capture `MSG_RAID_READY_CHECK` / `MSG_RAID_READY_CHECK_FINISHED` and `SMSG_QUESTGIVER_QUEST_DETAILS` (with non-empty `divider_guid`) directly on socketless standalone bot sessions.
+    - [x] **Rb689245-H3:** Captured `SMSG_LFG_PROPOSAL_UPDATE` (`proposal_id` + `LFG_PROPOSAL_INITIATING` state) in `LlmBrainPacketScript::OnPacketSent` and wired `BotManager::GetPendingLfgProposal` / `ClearPendingLfgProposal` in `option_executor.cc`.
+  - **Medium:**
+    - [x] **Rb689245-M1:** Replaced hardcoded `DefaultLfgRoleMask` with brain-selectable per-role LFG options (`ClassLfgRoles` -> `lfg:queue:<mask>` and `lfg:role:<mask>`), guarded `lfg:queue` on solo or group leader; `ext.dungeon_finder` panel population & `LfgEvent` wake events are cleanly scoped as deferred in `## Later & loose ends`.
+    - [x] **Rb689245-M2:** Removed non-firing `in Remorseless Winter -> out of it` order from `content/notes/HoR/notes.md`.
+    - [x] **Rb689245-M3:** `mount:` now returns `pending_spell_id` and waits on `IsSpellCastPending` in `OptionTargetProgress`; `follow:` now checks `leader->GetInstanceId() != bot->GetInstanceId()` and calls `RecordLastMovement`.
+    - [x] **Rb689245-M4:** Added `Discover flight path at <NPC>` (`npc_fly_discover:<npc_guid>` via `SendLearnNewTaxiNode`) when `cur_node` is unknown.
+    - [x] **Rb689245-M5:** Added `bot->GetSession()` null checks in `rez:release`, `roll:`, `ready:`, `npc_qaccept`, `npc_qturnin`, and `npc_fly_discover`.
+    - [x] **Rb689245-M6:** Updated Medium 3 and `## Later & loose ends` so LFG scope is 100% consistent and honest.
+  - **Low:**
+    - [x] **Rb689245-L1:** Replaced `<math.h>` / `M_PI` with `<numbers>` / `std::numbers::pi_v<float>` in `option_executor.cc`.
+    - [x] **Rb689245-L2:** Added `BotLoopTest.PartyChatRoutesToPartyOrRaidAndSuppressesWhenSolo` (`harness_unittests` `250/250`).
+    - [x] **Rb689245-L3:** Preserved `option_counts`, `mode`, `temperature`, and `decisions_dirs` in `soak.py`'s `_aggregate_run_stats` (`soak_suites_test.py`).
+    - [x] **Rb689245-L4:** Cleared `DungeonDeadSinceMs()`, `PendingSharedQuests()`, `PendingReadyChecks()`, and `PendingLfgProposals()` in `BotManager::Stop()`.
+    - [x] **Rb689245-L5:** Checked `!had_spell && bot->HasSpell(sp.SpellId)` for `cost == 0` spells in `npc_train`.
+
 - [x] **Playability & architecture review (High → Medium → Low — all items addressed):**
   - **High (blocks playing with a human):**
     - [x] **High 1 — Bots spend talents:** `OptionFacts::talent_trees` (`CollectTalentTrees`), `Spend talent points in <Tree> (<spent> pts, <free> unspent)` out-of-combat options (`options.cc`), and direct `sTalentStore` + `Player::LearnTalent` execution (`option_executor.cc`). Live-verified on `10700k` via `e2e_playability` (L15 bulk + L16/L17 1-pt incremental progression).
@@ -35,7 +54,7 @@ Last updated 2026-11-24.
   - **Medium:**
     - [x] **Medium 1 — Ghost teleport cheat removed:** deleted `RecoverStuckDungeonGhost` and `stuck_ghost_since_ms` from `bot_manager.{h,cc}` and live-verified real `Release spirit` -> `GHOST` (see High 3).
     - [x] **Medium 2 — Split `"Talk to"` into real brain choices:** removed C++ auto-accept/auto-reward/auto-train/auto-sell from `TalkToNpcNow` (now only approaches/faces distant NPCs) and deleted `BestQuestRewardIndex`; `CollectNpcActions` (`option_executor.cc`) exposes explicit `Accept quest "<Title>"`, `Turn in "<Title>" (pick <Item>, ilvl <N>)`, `Train <N> class spell(s)`, and `Sell grey items & repair` options when in talk range, replacing generic `Talk to` (`OptionsTest.ExplicitNpcActionsReplaceGenericTalkToOption`; 2-step `Talk to Kaltunk` -> `Accept quest "Your Place In The World" from Kaltunk` live-verified via `e2e_talk` on `10700k`).
-    - [x] **Medium 3 — Grouping & upkeep actions:** blocked Playerbots' auto-roll, auto-quest-share, auto-ready-check, and auto-LFG actions in `BrainPolicyListener` (`bot_manager.cc`) and exposed brain options via `CollectNpcActions` / `CollectGroupAndUpkeepActions` (`option_executor.cc`) for close-range `Follow <leader>` (`8..25 yd`), shared quest accept/decline, Need/Greed/Pass loot rolls, ready check, Dungeon Finder (`lfg:queue`/`leave`/`role`/`accept`/`decline`/`tele_in`/`tele_out`), leader Skull marking, vendor upkeep buys (food/water/ammo), flight master travel, and mounting (`OptionsTest.GroupAndUpkeepActionsAreExposedToTheBrain`; compile/build-verified on `10700k`, individual live e2e for rolls/LFG/flight/mount/vendor-buy not yet added).
+    - [x] **Medium 3 — Grouping & upkeep actions:** blocked Playerbots' auto-roll, auto-quest-share, auto-ready-check, and auto-LFG actions in `BrainPolicyListener`, captured standalone-bot ready checks, shared quests, and LFG proposals via `LlmBrainPacketScript::OnPacketSent` (`bot_manager.cc`), and exposed brain options (`option_executor.cc`) for close-range `Follow <leader>` (`8..25 yd`), shared quest accept/decline, Need/Greed/Pass loot rolls, ready check, brain-chosen-role Dungeon Finder (`lfg:queue:<role>`, `lfg:role:<role>`, `lfg:accept`/`decline`/`leave`/`tele_in`/`tele_out`), leader Skull marking, vendor upkeep buys (food/water/ammo), flight path discovery & travel, and cast-tracked mounting (`OptionsTest.GroupAndUpkeepActionsAreExposedToTheBrain`; compile/build-verified on `10700k`, individual live e2e for rolls/LFG/flight/mount/vendor-buy not yet added).
     - [x] **Medium 4 — Soak decision log persistence, option breakdown, & playerbots-only comparison:** `tools/wlblib/cases/soak.py` now persists decision logs under `var/soak_decisions/<scenario>_<mode>_<ts>/`, reports per-category option shares (`Keep`/`Attack`/`Loot`/`Talk`/`Explore`/`GoTo`/`Rest`/`Use`), and adds `--no-brain` for playerbots-only comparison runs (`soak_suites_test.py`).
     - [x] **Medium 5 — Configurable soak temperature:** added `--temperature` to `tools/wlb test soak` / `soak.py` defaulting to `0.7` (with `--temperature=0` available for deterministic runs; `soak_suites_test.py`).
     - [x] **Medium 6 — Proactive party/raid chat:** added optional `party:` reply line in `harness/grammar/plan.wlb`, `plan.{h,cc}`, `content/RULES.md`, and `bot_loop.cc` (routes to `pb::RAID` when in raid, `pb::PARTY` when in party; unit-tested in `PlanTest.ATellLineIsAWhisperToOnePlayer`; offline eval `48/52 (92%)`, `68 ms` first line).
@@ -73,7 +92,7 @@ and Phase 5 (`C4`) are signed off** (Phases 1–3: [`docs/benchmarks/2026-11-22-
 ## Later & loose ends
 
 - **Gameplay & brain features (deferred):**
-  - **Dungeon Finder (LFG / RDF) integration (`server_module/`):** wire AzerothCore's `sLFGMgr` state (`queued`, `proposal`, `role_check`, `in_dungeon`) and brain-chosen LFG options (`Queue Dungeon Finder`, `Accept/Decline proposal`, `Leave queue`, `Teleport to/out of dungeon`) — snapshot schema and `harness/src/plan/triggers.cc` LFG wake triggers already exist.
+  - **Dungeon Finder panel & wake events (`server_module/`):** brain-chosen LFG actions (`Queue/Role/Accept/Decline/Leave/Teleport`) are wired via `sLFGMgr` + `LlmBrainPacketScript::OnPacketSent`; populating the `OPEN`-gated `ext.dungeon_finder` panel and emitting `pb::LfgEvent` wake events remains deferred.
   - **Optional group formation spacing tuning:** followers now get a factual `Go to <name> (party leader)` option when `>= 25 yd` from the leader (crossing dungeon seams via stepped navigation); out-of-combat close-range following still uses Playerbots' `+follow` formation.
   - **Bind hearthstone as its own option** at an innkeeper (through the bind spell), not part of `Talk` (`docs/specs/options.md`).
   - **Panels & targeted quest-item use (`docs/specs/options.md`):** explicit unit/object/corpse target selection for spec §10 quest items (and its eval case), `quest_accepted` / `quest_complete` / inventory-full events (habits currently read snapshot fields), vendor-window bag opening (`interaction`), and hover for spells/auras/units/places (currently items and quests only).
