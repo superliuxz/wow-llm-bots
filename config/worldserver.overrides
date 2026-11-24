@@ -22,3 +22,8 @@ Logger.chat.channel = 4,Chat
 # whether to queue or to form groups in chat. Mask: 1 dungeon finder, 2 raid browser,
 # 4 seasonal bosses.
 DungeonFinder.OptionsMask = 7
+# LookingForGroup channel usable anywhere and without queueing (decided 2026-11-24), so the user
+# and the bots can form pugs in chat ("LFM RFC need heals"), as on most 3.3.5a servers.
+# AzerothCore's defaults (0 / 1) keep it to cities and to players queued in Dungeon Finder.
+LFG.Location.All = 1
+Channel.RestrictedLfg = 0
