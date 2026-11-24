@@ -9,7 +9,7 @@ Last updated 2026-11-24.
 
 ## In progress
 
-*(Phase 4 and Phase 5 `C4` are signed off; locked `snapshot_builder.cc`, `llm_brain_world_script.cc`, `soak.py`, and `testing.py` await user-approved `hill_climb.py lock-scorer --force-relock`.)*
+*(Phase 4, Phase 5 `C4`, and the playability & architecture review are complete; `scorer.sha256` relocked with user approval at `6e3f4a12699e`, 36 files.)*
 
 - [x] **Review `8614690` fixes (High → Medium → Low — all verified):**
   - **High:**

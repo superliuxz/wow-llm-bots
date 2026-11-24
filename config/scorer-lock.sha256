@@ -1,3 +1,3 @@
 # User-approved SHA-256 digest of ~/.local/share/wow-llm-bots/scorer.sha256.
 # Updated by `hill_climb.py lock-scorer` so any relock is visible in git diff.
-6af78dbceda418cf3d4eabd59ec9c76b6a24e12148517535cd2d7b9ab368593f  scorer.sha256
+6e3f4a12699ebb240ddbbf9091e8ea4bec47e06a9794302272e323a22ead97a8  scorer.sha256
