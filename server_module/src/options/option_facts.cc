@@ -113,6 +113,7 @@ bool IsCapital(uint32_t zone_id) {
 void FillSpots(const WorldPlaces& world,
                const Viewpoint& view,
                const WorldObject* path_owner,
+               const DungeonNavConfig& dungeon_nav,
                std::vector<pb::OptionFacts::Spot>* out) {
   const bool in_city = IsCapital(view.zone_id);
   Map* map = sMapMgr->CreateBaseMap(view.map_id);
@@ -264,7 +265,7 @@ void FillSpots(const WorldPlaces& world,
         }
       }
       const std::vector<DungeonCluster> clusters =
-          ClusterDungeonHostiles(view.pos, hostiles);
+          ClusterDungeonHostiles(view.pos, hostiles, dungeon_nav);
       constexpr uint32_t kDungeonPathOk = PATHFIND_NORMAL |
                                           PATHFIND_INCOMPLETE | PATHFIND_SHORT |
                                           PATHFIND_FARFROMPOLY;
@@ -278,9 +279,10 @@ void FillSpots(const WorldPlaces& world,
         bool normal = (pt & PATHFIND_NORMAL) != 0;
         bool incomplete = (pt & PATHFIND_INCOMPLETE) != 0;
         if ((pt & ~kDungeonPathOk) != 0 || (!normal && !incomplete)) {
-          // Far cluster in an unloaded grid: probe a 60 yd step toward it.
-          if (cl.dist_yd > 60.0f) {
-            const float scale = 60.0f / cl.dist_yd;
+          // Far cluster in an unloaded grid: probe an intermediate step toward
+          // it.
+          if (cl.dist_yd > dungeon_nav.unloaded_probe_yd) {
+            const float scale = dungeon_nav.unloaded_probe_yd / cl.dist_yd;
             const float mx = view.pos.x + (cl.pos.x - view.pos.x) * scale;
             const float my = view.pos.y + (cl.pos.y - view.pos.y) * scale;
             const float mz = probe_map->GetHeight(view.phase_mask, mx, my,
@@ -302,7 +304,8 @@ void FillSpots(const WorldPlaces& world,
           continue;
         }
         if (incomplete &&
-            Dist({end.x, end.y, end.z}, cl.pos.x, cl.pos.y, cl.pos.z) + 15.0f >=
+            Dist({end.x, end.y, end.z}, cl.pos.x, cl.pos.y, cl.pos.z) +
+                    dungeon_nav.incomplete_progress_slack_yd >=
                 cl.dist_yd) {
           continue;
         }
@@ -326,56 +329,59 @@ void FillSpots(const WorldPlaces& world,
       // line-of-sight step onto walkable ground exists toward the nearest
       // hostile cluster, expose that cluster so TickLongWalk can step across
       // the seam and resume normal navmesh pathing.
-      for (const DungeonCluster& cl : clusters) {
-        if (out->size() >= kMaxSpots) {
-          break;
-        }
-        const float base_angle =
-            std::atan2(cl.pos.y - view.pos.y, cl.pos.x - view.pos.x);
-        static constexpr float kHopAngles[] = {0.0f, 0.35f, -0.35f, 0.7f,
-                                               -0.7f};
-        static constexpr float kHopDists[] = {12.0f, 16.0f};
-        bool clear_hop = false;
-        for (float d : kHopDists) {
-          for (float off : kHopAngles) {
-            const float a = base_angle + off;
-            const float hx = view.pos.x + d * std::cos(a);
-            const float hy = view.pos.y + d * std::sin(a);
-            const float hz = probe_map->GetHeight(view.phase_mask, hx, hy,
-                                                  view.pos.z + 4.0f);
-            if (hz == INVALID_HEIGHT || hz == VMAP_INVALID_HEIGHT_VALUE) {
-              continue;
+      if (dungeon_nav.seam_bridge_enable) {
+        for (const DungeonCluster& cl : clusters) {
+          if (out->size() >= kMaxSpots) {
+            break;
+          }
+          const float base_angle =
+              std::atan2(cl.pos.y - view.pos.y, cl.pos.x - view.pos.x);
+          static constexpr float kHopAngles[] = {0.0f, 0.35f, -0.35f, 0.7f,
+                                                 -0.7f};
+          static constexpr float kHopDists[] = {12.0f, 16.0f};
+          bool clear_hop = false;
+          for (float d : kHopDists) {
+            for (float off : kHopAngles) {
+              const float a = base_angle + off;
+              const float hx = view.pos.x + d * std::cos(a);
+              const float hy = view.pos.y + d * std::sin(a);
+              const float hz = probe_map->GetHeight(view.phase_mask, hx, hy,
+                                                    view.pos.z + 4.0f);
+              if (hz == INVALID_HEIGHT || hz == VMAP_INVALID_HEIGHT_VALUE) {
+                continue;
+              }
+              const float dz = hz - view.pos.z;
+              if (dz < -dungeon_nav.seam_bridge_max_drop_yd ||
+                  dz > dungeon_nav.seam_bridge_max_climb_yd) {
+                continue;
+              }
+              if (probe_map->isInLineOfSight(
+                      view.pos.x, view.pos.y, view.pos.z + 1.5f, hx, hy,
+                      hz + 1.5f, view.phase_mask, LINEOFSIGHT_ALL_CHECKS,
+                      VMAP::ModelIgnoreFlags::Nothing)) {
+                clear_hop = true;
+                break;
+              }
             }
-            const float dz = hz - view.pos.z;
-            if (dz < -12.0f || dz > 2.5f) {
-              continue;
-            }
-            if (probe_map->isInLineOfSight(
-                    view.pos.x, view.pos.y, view.pos.z + 1.5f, hx, hy,
-                    hz + 1.5f, view.phase_mask, LINEOFSIGHT_ALL_CHECKS,
-                    VMAP::ModelIgnoreFlags::Nothing)) {
-              clear_hop = true;
+            if (clear_hop) {
               break;
             }
           }
-          if (clear_hop) {
-            break;
+          if (!clear_hop) {
+            continue;
           }
+          const pb::Direction dir = DirFrom(view.pos, cl.pos.x, cl.pos.y);
+          if (dir == pb::DIRECTION_UNSPECIFIED || dir == pb::HERE ||
+              (seen_dirs & DirBit(dir)) != 0) {
+            continue;
+          }
+          seen_dirs |= DirBit(dir);
+          out->push_back({SpotId(view.map_id, cl.pos.x, cl.pos.y), dir,
+                          cl.dist_yd, cl.label, cl.pos});
         }
-        if (!clear_hop) {
-          continue;
+        if (!out->empty()) {
+          return;
         }
-        const pb::Direction dir = DirFrom(view.pos, cl.pos.x, cl.pos.y);
-        if (dir == pb::DIRECTION_UNSPECIFIED || dir == pb::HERE ||
-            (seen_dirs & DirBit(dir)) != 0) {
-          continue;
-        }
-        seen_dirs |= DirBit(dir);
-        out->push_back({SpotId(view.map_id, cl.pos.x, cl.pos.y), dir,
-                        cl.dist_yd, cl.label, cl.pos});
-      }
-      if (!out->empty()) {
-        return;
       }
     }
   }
@@ -783,9 +789,10 @@ const std::vector<WorldPlaces::DungeonSpawn>* WorldPlaces::DungeonSpawns(
 
 PositionFacts ComputePositionFacts(const WorldPlaces& world,
                                    const Viewpoint& view,
-                                   const WorldObject* path_owner) {
+                                   const WorldObject* path_owner,
+                                   const DungeonNavConfig& dungeon_nav) {
   PositionFacts facts;
-  FillSpots(world, view, path_owner, &facts.spots);
+  FillSpots(world, view, path_owner, dungeon_nav, &facts.spots);
   FillPlaces(world, view, &facts);
   RefreshFrom(view.pos, &facts);
   return facts;

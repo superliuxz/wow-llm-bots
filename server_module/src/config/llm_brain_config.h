@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include "options/position_facts.h"
+
 namespace llm_brain {
 
 struct Config {
@@ -52,6 +54,8 @@ struct Config {
   // using the same trace schema so bots can be compared against a human
   // baseline.
   bool observe_humans = false;
+  // Multi-room dungeon navigation geometry thresholds (LlmBrain.Dungeon*).
+  DungeonNavConfig dungeon_nav;
 };
 
 // Reads LlmBrain.* options from the loaded worldserver config.

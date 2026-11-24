@@ -153,3 +153,23 @@ LlmBrain.TraceSampleIntervalMs = 200
 LlmBrain.TraceMaxFileMb = 64
 LlmBrain.TraceMaxRotatedFiles = 8
 LlmBrain.ObserveHumans = 0
+
+#
+#    LlmBrain.DungeonClusterRadiusYd
+#    LlmBrain.DungeonMaxClusterCandidates
+#    LlmBrain.DungeonUnloadedProbeYd
+#    LlmBrain.DungeonIncompleteProgressSlackYd
+#    LlmBrain.DungeonSeamBridgeEnable
+#    LlmBrain.DungeonSeamBridgeMaxDropYd
+#    LlmBrain.DungeonSeamBridgeMaxClimbYd
+#        Description: Geometry thresholds for multi-room dungeon Explore spots
+#                     and disconnected navmesh seam bridging (e.g. entrance
+#                     stairs/ledges). Defaults: 30, 12, 60, 15, 1, 12, 2.5.
+
+LlmBrain.DungeonClusterRadiusYd = 30
+LlmBrain.DungeonMaxClusterCandidates = 12
+LlmBrain.DungeonUnloadedProbeYd = 60
+LlmBrain.DungeonIncompleteProgressSlackYd = 15
+LlmBrain.DungeonSeamBridgeEnable = 1
+LlmBrain.DungeonSeamBridgeMaxDropYd = 12
+LlmBrain.DungeonSeamBridgeMaxClimbYd = 2.5

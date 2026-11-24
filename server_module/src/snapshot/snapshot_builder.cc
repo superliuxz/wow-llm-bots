@@ -646,8 +646,9 @@ void FillNpcFacts(Player* bot, const pb::Snapshot& snapshot, OptionFacts* out) {
 
 }  // namespace
 
-SnapshotBuilder::SnapshotBuilder(NearbyBuilder::Options nearby_options)
-    : nearby_(nearby_options) {}
+SnapshotBuilder::SnapshotBuilder(NearbyBuilder::Options nearby_options,
+                                 DungeonNavConfig dungeon_nav)
+    : nearby_(nearby_options), dungeon_nav_(dungeon_nav) {}
 
 SnapshotBuilder::~SnapshotBuilder() = default;
 
@@ -743,7 +744,7 @@ void SnapshotBuilder::FillOptionFacts(Player* bot,
     }
   }
   if (stale) {
-    position_facts_ = ComputePositionFacts(*world, view, bot);
+    position_facts_ = ComputePositionFacts(*world, view, bot, dungeon_nav_);
     position_view_ = view;
     position_time_ = now;
     current = *position_facts_;

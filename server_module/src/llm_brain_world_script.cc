@@ -731,7 +731,8 @@ class LlmBrainWorldScript : public WorldScript {
     }
     uint32_t pending_spell_id = 0;
     if (target) {
-      ExecuteResult result = ExecuteOption(bot, *target, &state.walk);
+      ExecuteResult result =
+          ExecuteOption(bot, *target, &state.walk, config_.dungeon_nav);
       error = std::move(result.error);
       used = result.used;
       info = std::move(result.info);
@@ -1135,7 +1136,8 @@ class LlmBrainWorldScript : public WorldScript {
     }
     if (kind == OptionTarget::Kind::kExplore ||
         kind == OptionTarget::Kind::kGoTo) {
-      const WalkStepResult step = TickLongWalk(bot, now, &state.walk);
+      const WalkStepResult step =
+          TickLongWalk(bot, now, &state.walk, config_.dungeon_nav);
       if (!step.path_time.is_zero()) {
         path_times_.push_back(step.path_time);
       }
@@ -1231,8 +1233,10 @@ class LlmBrainWorldScript : public WorldScript {
   void SendSnapshot(size_t index, const std::string& name, Player* bot) {
     BotState& state = bots_[index];
     if (!state.builder) {
-      state.builder = std::make_unique<SnapshotBuilder>(NearbyBuilder::Options{
-          config_.nameplate_range_yd, config_.los_raycasts_per_snapshot});
+      state.builder = std::make_unique<SnapshotBuilder>(
+          NearbyBuilder::Options{config_.nameplate_range_yd,
+                                 config_.los_raycasts_per_snapshot},
+          config_.dungeon_nav);
     }
     wlb::snapshot::ModuleMessage message;
     message.version = wlb::snapshot::kWireVersion;

@@ -68,12 +68,14 @@ struct ExecuteResult {
 // destination.
 ExecuteResult ExecuteOption(Player* bot,
                             const OptionTarget& target,
-                            PendingWalk* walk = nullptr);
+                            PendingWalk* walk = nullptr,
+                            const DungeonNavConfig& dungeon_nav = {});
 
 // Advances an active Explore / GoTo walk in ~70 yd steps along the mmap path.
 WalkStepResult TickLongWalk(Player* bot,
                             base::TimeTicks now,
-                            PendingWalk* walk);
+                            PendingWalk* walk,
+                            const DungeonNavConfig& dungeon_nav = {});
 
 // Walks `bot` toward (x, y, z) along the navmesh; returns false if no path
 // exists.

@@ -119,8 +119,8 @@ TEST(PositionFactsTest, ClusterDungeonHostilesGroupsRoomsAndKeepsNearestBoss) {
       {"Sunblade Sentinel", {140, 20, 0}, false},
       {"Selin Fireheart", {220, 0, 0}, true},
   };
-  const std::vector<DungeonCluster> clusters =
-      ClusterDungeonHostiles({0, 0, 0}, hostiles, /*max_candidates=*/2);
+  const std::vector<DungeonCluster> clusters = ClusterDungeonHostiles(
+      {0, 0, 0}, hostiles, DungeonNavConfig{.max_cluster_candidates = 2});
   ASSERT_EQ(clusters.size(), 2u);
   EXPECT_EQ(clusters[0].label, "Sunblade Guard (2)");
   EXPECT_NEAR(clusters[0].dist_yd, 70.0f, 0.1f);

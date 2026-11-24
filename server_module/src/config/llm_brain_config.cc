@@ -58,6 +58,39 @@ Config LoadConfig() {
   }
   config.observe_humans =
       sConfigMgr->GetOption<bool>("LlmBrain.ObserveHumans", false);
+  config.dungeon_nav.cluster_radius_yd =
+      sConfigMgr->GetOption<float>("LlmBrain.DungeonClusterRadiusYd", 30.0f);
+  if (config.dungeon_nav.cluster_radius_yd < 1.0f) {
+    config.dungeon_nav.cluster_radius_yd = 1.0f;
+  }
+  config.dungeon_nav.max_cluster_candidates = sConfigMgr->GetOption<uint32_t>(
+      "LlmBrain.DungeonMaxClusterCandidates", 12);
+  if (config.dungeon_nav.max_cluster_candidates < 1) {
+    config.dungeon_nav.max_cluster_candidates = 1;
+  }
+  config.dungeon_nav.unloaded_probe_yd =
+      sConfigMgr->GetOption<float>("LlmBrain.DungeonUnloadedProbeYd", 60.0f);
+  if (config.dungeon_nav.unloaded_probe_yd < 10.0f) {
+    config.dungeon_nav.unloaded_probe_yd = 10.0f;
+  }
+  config.dungeon_nav.incomplete_progress_slack_yd =
+      sConfigMgr->GetOption<float>("LlmBrain.DungeonIncompleteProgressSlackYd",
+                                   15.0f);
+  if (config.dungeon_nav.incomplete_progress_slack_yd < 0.0f) {
+    config.dungeon_nav.incomplete_progress_slack_yd = 0.0f;
+  }
+  config.dungeon_nav.seam_bridge_enable =
+      sConfigMgr->GetOption<bool>("LlmBrain.DungeonSeamBridgeEnable", true);
+  config.dungeon_nav.seam_bridge_max_drop_yd = sConfigMgr->GetOption<float>(
+      "LlmBrain.DungeonSeamBridgeMaxDropYd", 12.0f);
+  if (config.dungeon_nav.seam_bridge_max_drop_yd < 0.0f) {
+    config.dungeon_nav.seam_bridge_max_drop_yd = 0.0f;
+  }
+  config.dungeon_nav.seam_bridge_max_climb_yd = sConfigMgr->GetOption<float>(
+      "LlmBrain.DungeonSeamBridgeMaxClimbYd", 2.5f);
+  if (config.dungeon_nav.seam_bridge_max_climb_yd < 0.0f) {
+    config.dungeon_nav.seam_bridge_max_climb_yd = 0.0f;
+  }
   return config;
 }
 

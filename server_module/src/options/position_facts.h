@@ -32,6 +32,18 @@ wlb::snapshot::Direction DirFrom(const wlb::snapshot::Vec3& from,
 std::span<const float> ExploreRayAngles();
 std::span<const float> ExploreRayDistancesYd();
 
+// Server-configurable geometry thresholds for multi-room dungeon navigation
+// (loaded from LlmBrain.Dungeon* in mod-llm-brain.conf).
+struct DungeonNavConfig {
+  float cluster_radius_yd = 30.0f;
+  size_t max_cluster_candidates = 12;
+  float unloaded_probe_yd = 60.0f;
+  float incomplete_progress_slack_yd = 15.0f;
+  bool seam_bridge_enable = true;
+  float seam_bridge_max_drop_yd = 12.0f;
+  float seam_bridge_max_climb_yd = 2.5f;
+};
+
 // Living hostile creature in a dungeon instance, clustered into room/pack
 // navigation targets so multi-room dungeons expose concrete, pathable next
 // rooms and bosses instead of blind straight-line rays.
@@ -49,7 +61,7 @@ struct DungeonCluster {
 std::vector<DungeonCluster> ClusterDungeonHostiles(
     const wlb::snapshot::Vec3& from,
     const std::vector<DungeonHostile>& hostiles,
-    size_t max_candidates = 12);
+    const DungeonNavConfig& nav = {});
 
 // Pure progress check for stepped long walks (Explore / GoTo). Detects both
 // stationary stalls (no 5 yd move in 10 s) and ping-pong loops (moving without

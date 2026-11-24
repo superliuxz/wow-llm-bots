@@ -48,8 +48,9 @@ std::span<const float> ExploreRayDistancesYd() {
 std::vector<DungeonCluster> ClusterDungeonHostiles(
     const wlb::snapshot::Vec3& from,
     const std::vector<DungeonHostile>& hostiles,
-    size_t max_candidates) {
-  constexpr float kClusterRadiusYd = 30.0f;
+    const DungeonNavConfig& nav) {
+  const float cluster_radius_yd = std::max(1.0f, nav.cluster_radius_yd);
+  const size_t max_candidates = std::max<size_t>(1, nav.max_cluster_candidates);
   struct Pending {
     const DungeonHostile* h = nullptr;
     float dist = 0.0f;
@@ -85,7 +86,8 @@ std::vector<DungeonCluster> ClusterDungeonHostiles(
   for (const Pending& p : sorted) {
     Accum* match = nullptr;
     for (Accum& c : clusters) {
-      if (Dist(c.pos, p.h->pos.x, p.h->pos.y, p.h->pos.z) <= kClusterRadiusYd) {
+      if (Dist(c.pos, p.h->pos.x, p.h->pos.y, p.h->pos.z) <=
+          cluster_radius_yd) {
         match = &c;
         break;
       }

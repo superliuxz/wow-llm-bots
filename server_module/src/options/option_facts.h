@@ -110,7 +110,8 @@ class WorldPlaces {
 // is near; without one (an offline fixture dump) that fallback is skipped.
 PositionFacts ComputePositionFacts(const WorldPlaces& world,
                                    const Viewpoint& view,
-                                   const WorldObject* path_owner);
+                                   const WorldObject* path_owner,
+                                   const DungeonNavConfig& dungeon_nav = {});
 
 }  // namespace llm_brain
 

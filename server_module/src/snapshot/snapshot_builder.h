@@ -32,7 +32,8 @@ namespace llm_brain {
 // points), so use one per bot. World thread only.
 class SnapshotBuilder {
  public:
-  explicit SnapshotBuilder(NearbyBuilder::Options nearby_options);
+  explicit SnapshotBuilder(NearbyBuilder::Options nearby_options,
+                           DungeonNavConfig dungeon_nav = {});
   SnapshotBuilder(const SnapshotBuilder&) = delete;
   SnapshotBuilder& operator=(const SnapshotBuilder&) = delete;
   ~SnapshotBuilder();
@@ -66,6 +67,7 @@ class SnapshotBuilder {
                        base::TimeTicks now);
 
   NearbyBuilder nearby_;
+  DungeonNavConfig dungeon_nav_;
   std::vector<QuestPoi> quest_pois_;
   std::optional<PositionFacts> position_facts_;
   Viewpoint position_view_;
