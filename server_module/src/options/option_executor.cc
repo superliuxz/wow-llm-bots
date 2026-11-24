@@ -1162,7 +1162,12 @@ WalkStepResult TickLongWalk(Player* bot,
   if (walk->has_step && bot->isMoving()) {
     const float dist_to_step = bot->GetExactDist(
         walk->step_dest.x, walk->step_dest.y, walk->step_dest.z);
-    if (dist_to_step > kWalkStepAdvanceYd) {
+    // Hold an active seam hop until the bot nears its validated landing point
+    // (or the spline finishes), so kWalkStepAdvanceYd (10 yd) does not repath
+    // mid-hop and prematurely exhaust kMaxConsecutiveSeamHops.
+    const float advance_yd =
+        walk->consecutive_seam_hops > 0 ? 2.0f : kWalkStepAdvanceYd;
+    if (dist_to_step > advance_yd) {
       return {};
     }
   }
@@ -1239,7 +1244,12 @@ WalkStepResult TickLongWalk(Player* bot,
     // across the seam (capped at kMaxConsecutiveSeamHops) so the next tick
     // resumes normal navmesh pathing.
     constexpr uint8_t kMaxConsecutiveSeamHops = 2;
-    if (walk->consecutive_seam_hops < kMaxConsecutiveSeamHops) {
+    if (walk->consecutive_seam_hops < kMaxConsecutiveSeamHops &&
+        !bot->HasUnitFlag(UNIT_FLAG_DISABLE_MOVE) &&
+        !bot->HasUnitState(UNIT_STATE_NOT_MOVE) &&
+        !bot->IsMovementPreventedByCasting() &&
+        bot->GetMotionMaster()->GetMotionSlotType(MOTION_SLOT_CONTROLLED) ==
+            IDLE_MOTION_TYPE) {
       pb::Vec3 hop;
       if (FindDungeonSeamHop(bot->GetMap(), bot->GetPhaseMask(), pos,
                              bot->GetAngle(walk->dest.x, walk->dest.y),
@@ -1247,10 +1257,10 @@ WalkStepResult TickLongWalk(Player* bot,
         ++walk->consecutive_seam_hops;
         walk->step_dest = hop;
         walk->has_step = true;
-        // Bypass PointMovementGenerator (whose generatePath=false branch still
-        // runs PathGenerator::CalculatePath) by launching MoveSplineInit with
-        // generatePath=false directly onto the validated navmesh landing point.
-        bot->GetMotionMaster()->MoveIdle();
+        // Clear overlying active generators (MoveIdle only mutates slot 0)
+        // before launching MoveSplineInit(generatePath=false) directly onto
+        // the validated navmesh landing point.
+        bot->GetMotionMaster()->Clear(/*reset=*/false);
         Movement::MoveSplineInit init(bot);
         init.MoveTo(hop.x, hop.y, hop.z, /*generatePath=*/false);
         init.SetWalk(false);

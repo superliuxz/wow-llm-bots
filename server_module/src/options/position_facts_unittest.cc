@@ -151,8 +151,9 @@ TEST(PositionFactsTest, ClusterDungeonHostilesEdgeCasesAndConfigClamps) {
   EXPECT_EQ(clamped[0].label, "Room Boss (boss)");
   EXPECT_TRUE(clamped[0].has_boss);
 
-  // Small cluster_radius_yd=5 keeps Far Pack A and Far Pack B separate;
-  // boss promotion within radius 10 merges Trash Guard + Room Boss.
+  // cluster_radius_yd=6 merges Trash Guard + Room Boss (5 yd apart, promoting
+  // the cluster to boss) while keeping Far Pack A and Far Pack B (10 yd apart)
+  // separate.
   const std::vector<DungeonCluster> split = ClusterDungeonHostiles(
       {0, 0, 0}, hostiles,
       DungeonNavConfig{.cluster_radius_yd = 6.0f, .max_cluster_candidates = 5});

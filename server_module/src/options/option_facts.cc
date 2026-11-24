@@ -22,6 +22,7 @@
 #include "DetourStatus.h"
 #include "G3D/Vector3.h"
 #include "GameGraveyard.h"
+#include "GameTime.h"
 #include "GridTerrainData.h"
 #include "IVMapMgr.h"
 #include "Map.h"
@@ -254,7 +255,8 @@ void FillSpots(const WorldPlaces& world,
                    sp.is_boss || c->IsDungeonBoss() || c->isWorldBoss()});
             }
           } else if (bot_ft && !probe_map->IsGridLoaded(sp.pos.x, sp.pos.y) &&
-                     probe_map->GetCreatureRespawnTime(sp.spawn_id) == 0 &&
+                     probe_map->GetCreatureRespawnTime(sp.spawn_id) <=
+                         GameTime::GetGameTime().count() &&
                      (sp.phase_mask & view.phase_mask) != 0) {
             // Grid not yet loaded in this instance and spawn has no pending
             // respawn timer: check template faction hostility so long empty
@@ -588,11 +590,13 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
     const uint32_t map_id = data.mapid;
     if (map_id != 0 && map_id != 1 && map_id != 530 && map_id != 571) {
       const MapEntry* me = sMapStore.LookupEntry(map_id);
-      const uint32_t combined_flags = tmpl->unit_flags | data.unit_flags;
+      // Match ObjectMgr::ChooseCreatureFlags: non-zero per-spawn unit_flags
+      // replaces creature_template.unit_flags.
+      const uint32_t unit_flags =
+          data.unit_flags ? data.unit_flags : tmpl->unit_flags;
       if (me && me->IsDungeon() && tmpl->type != CREATURE_TYPE_CRITTER &&
-          (combined_flags &
-           (UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_NOT_SELECTABLE |
-            UNIT_FLAG_IMMUNE_TO_PC)) == 0) {
+          (unit_flags & (UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_NOT_SELECTABLE |
+                         UNIT_FLAG_IMMUNE_TO_PC)) == 0) {
         const bool is_boss =
             (tmpl->flags_extra & CREATURE_FLAG_EXTRA_INSTANCE_BIND) != 0 ||
             tmpl->rank == CREATURE_ELITE_WORLDBOSS;
@@ -876,7 +880,26 @@ bool FindDungeonSeamHop(Map* map,
           std::abs(closest[1] - hz) > 2.0f) {
         continue;
       }
-      *out_hop = {closest[2], closest[0], closest[1]};
+      // Re-validate drop/climb bounds and dual-height LOS to the snapped
+      // polygon point so snapping cannot exceed bounds or cross a thin wall.
+      const float snap_x = closest[2];
+      const float snap_y = closest[0];
+      const float snap_z = closest[1];
+      const float snap_dz = snap_z - from.z;
+      if (snap_dz < -max_drop || snap_dz > max_climb) {
+        continue;
+      }
+      if (!map->isInLineOfSight(from.x, from.y, from.z + 0.6f, snap_x, snap_y,
+                                snap_z + 0.6f, phase_mask,
+                                LINEOFSIGHT_ALL_CHECKS,
+                                VMAP::ModelIgnoreFlags::Nothing) ||
+          !map->isInLineOfSight(from.x, from.y, from.z + 1.5f, snap_x, snap_y,
+                                snap_z + 1.5f, phase_mask,
+                                LINEOFSIGHT_ALL_CHECKS,
+                                VMAP::ModelIgnoreFlags::Nothing)) {
+        continue;
+      }
+      *out_hop = {snap_x, snap_y, snap_z};
       return true;
     }
   }
