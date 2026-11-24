@@ -647,6 +647,141 @@ void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink) {
   }
 }
 
+const char* TalentTabName(uint32_t tab_id) {
+  switch (tab_id) {
+    case TALENT_TREE_WARRIOR_ARMS:
+      return "Arms";
+    case TALENT_TREE_WARRIOR_FURY:
+      return "Fury";
+    case TALENT_TREE_WARRIOR_PROTECTION:
+      return "Protection";
+    case TALENT_TREE_PALADIN_HOLY:
+      return "Holy";
+    case TALENT_TREE_PALADIN_PROTECTION:
+      return "Protection";
+    case TALENT_TREE_PALADIN_RETRIBUTION:
+      return "Retribution";
+    case TALENT_TREE_HUNTER_BEAST_MASTERY:
+      return "Beast Mastery";
+    case TALENT_TREE_HUNTER_MARKSMANSHIP:
+      return "Marksmanship";
+    case TALENT_TREE_HUNTER_SURVIVAL:
+      return "Survival";
+    case TALENT_TREE_ROGUE_ASSASSINATION:
+      return "Assassination";
+    case TALENT_TREE_ROGUE_COMBAT:
+      return "Combat";
+    case TALENT_TREE_ROGUE_SUBTLETY:
+      return "Subtlety";
+    case TALENT_TREE_PRIEST_DISCIPLINE:
+      return "Discipline";
+    case TALENT_TREE_PRIEST_HOLY:
+      return "Holy";
+    case TALENT_TREE_PRIEST_SHADOW:
+      return "Shadow";
+    case TALENT_TREE_DEATH_KNIGHT_BLOOD:
+      return "Blood";
+    case TALENT_TREE_DEATH_KNIGHT_FROST:
+      return "Frost";
+    case TALENT_TREE_DEATH_KNIGHT_UNHOLY:
+      return "Unholy";
+    case TALENT_TREE_SHAMAN_ELEMENTAL:
+      return "Elemental";
+    case TALENT_TREE_SHAMAN_ENHANCEMENT:
+      return "Enhancement";
+    case TALENT_TREE_SHAMAN_RESTORATION:
+      return "Restoration";
+    case TALENT_TREE_MAGE_ARCANE:
+      return "Arcane";
+    case TALENT_TREE_MAGE_FIRE:
+      return "Fire";
+    case TALENT_TREE_MAGE_FROST:
+      return "Frost";
+    case TALENT_TREE_WARLOCK_AFFLICTION:
+      return "Affliction";
+    case TALENT_TREE_WARLOCK_DEMONOLOGY:
+      return "Demonology";
+    case TALENT_TREE_WARLOCK_DESTRUCTION:
+      return "Destruction";
+    case TALENT_TREE_DRUID_BALANCE:
+      return "Balance";
+    case TALENT_TREE_DRUID_FERAL_COMBAT:
+      return "Feral Combat";
+    case TALENT_TREE_DRUID_RESTORATION:
+      return "Restoration";
+    default:
+      return nullptr;
+  }
+}
+
+void CollectTalentTrees(Player* bot,
+                        std::vector<pb::OptionFacts_TalentTree>* out) {
+  out->clear();
+  if (!bot || !bot->IsAlive() || bot->IsInCombat()) {
+    return;
+  }
+  const uint32_t free_points = bot->GetFreeTalentPoints();
+  if (free_points == 0) {
+    return;
+  }
+  const uint32_t class_mask = bot->getClassMask();
+  struct TabInfo {
+    uint32_t tab_id = 0;
+    uint32_t tab_page = 0;
+    std::string name;
+    uint32_t spent = 0;
+  };
+  std::vector<TabInfo> tabs;
+  for (uint32_t i = 0; i < sTalentTabStore.GetNumRows(); ++i) {
+    const TalentTabEntry* entry = sTalentTabStore.LookupEntry(i);
+    if (!entry || (entry->ClassMask & class_mask) == 0) {
+      continue;
+    }
+    const char* name = TalentTabName(entry->TalentTabID);
+    if (!name || !*name) {
+      continue;
+    }
+    tabs.push_back({entry->TalentTabID, entry->tabpage, name, 0});
+  }
+  std::sort(tabs.begin(), tabs.end(), [](const TabInfo& a, const TabInfo& b) {
+    return a.tab_page < b.tab_page;
+  });
+  const uint8_t active_spec = bot->GetActiveSpec();
+  const PlayerTalentMap& talent_map = bot->GetTalentMap();
+  for (uint32_t i = 0; i < sTalentStore.GetNumRows(); ++i) {
+    const TalentEntry* talent = sTalentStore.LookupEntry(i);
+    if (!talent) {
+      continue;
+    }
+    TabInfo* owner = nullptr;
+    for (TabInfo& t : tabs) {
+      if (t.tab_id == talent->TalentTab) {
+        owner = &t;
+        break;
+      }
+    }
+    if (!owner) {
+      continue;
+    }
+    for (int rank = MAX_TALENT_RANK - 1; rank >= 0; --rank) {
+      const uint32_t spell_id = talent->RankID[rank];
+      if (!spell_id) {
+        continue;
+      }
+      auto it = talent_map.find(spell_id);
+      if (it != talent_map.end() && it->second &&
+          it->second->State != PLAYERSPELL_REMOVED &&
+          it->second->IsInSpec(active_spec)) {
+        owner->spent += static_cast<uint32_t>(rank + 1);
+        break;
+      }
+    }
+  }
+  for (const TabInfo& t : tabs) {
+    out->push_back({t.tab_page, t.name, t.spent, free_points});
+  }
+}
+
 void CollectUsableBagItems(Player* bot,
                            std::vector<pb::OptionFacts_Item>* out) {
   out->clear();
@@ -1831,11 +1966,61 @@ ExecuteResult ExecuteOption(Player* bot,
   if (!ai) {
     return {"not a bot"};
   }
+  if (target.kind == OptionTarget::Kind::kUse && target.guid == "rez:accept") {
+    if (bot->IsAlive()) {
+      return {"you are already alive"};
+    }
+    if (!bot->isResurrectRequested()) {
+      return {"no resurrection pending"};
+    }
+    if (bot->HasPreventResurectionAura()) {
+      return {"resurrection is currently prevented"};
+    }
+    bot->ResurectUsingRequestData();
+    return {.used = true, .info = "accepted resurrection"};
+  }
+  if (target.kind == OptionTarget::Kind::kUse && target.guid == "rez:release") {
+    if (bot->IsAlive()) {
+      return {"you are already alive"};
+    }
+    if (bot->HasPlayerFlag(PLAYER_FLAGS_GHOST)) {
+      return {"already released"};
+    }
+    bot->RepopAtGraveyard();
+    return {.used = true, .info = "released spirit"};
+  }
   if (!bot->IsAlive()) {
     return {"you are dead"};  // A choice from before the bot died.
   }
   if (target.kind == OptionTarget::Kind::kLoot) {
     return ExecuteLootOption(bot, target);
+  }
+  if (target.kind == OptionTarget::Kind::kUse &&
+      target.guid.starts_with("talent:")) {
+    if (bot->IsInCombat()) {
+      return {"cannot spend talents in combat"};
+    }
+    const uint32_t before = bot->GetFreeTalentPoints();
+    if (before == 0) {
+      return {"no unspent talent points"};
+    }
+    uint32_t tab = 0;
+    const std::string_view suffix = std::string_view(target.guid).substr(7);
+    const auto [ptr, ec] =
+        std::from_chars(suffix.data(), suffix.data() + suffix.size(), tab);
+    if (ec != std::errc{} || ptr != suffix.data() + suffix.size() || tab > 2) {
+      return {"invalid talent tree"};
+    }
+    PlayerbotFactory::InitTalentsBySpecNo(bot, static_cast<int>(tab),
+                                          /*reset=*/false);
+    bot->SendTalentsInfoData(false);
+    const uint32_t after = bot->GetFreeTalentPoints();
+    if (after >= before) {
+      return {"no learnable talents in " + target.name};
+    }
+    return {.used = true,
+            .info = "spent " + std::to_string(before - after) +
+                    " talent point(s) in " + target.name};
   }
   if (target.kind == OptionTarget::Kind::kUse &&
       target.guid.starts_with("item:")) {

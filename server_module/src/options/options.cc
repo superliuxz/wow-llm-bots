@@ -492,6 +492,43 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
     }
   }
 
+  if (alive && !self.in_combat) {
+    for (const OptionFacts::TalentTree& tree : facts.talent_trees) {
+      if (tree.name.empty() || tree.free_points == 0) {
+        continue;
+      }
+      const std::string guid = "talent:" + std::to_string(tree.tab);
+      const std::string text = "Spend talent points in " + tree.name + " (" +
+                               std::to_string(tree.spent) + " pts, " +
+                               std::to_string(tree.free_points) + " unspent)";
+      targets.push_back({OptionTarget::Kind::kUse, guid, tree.name});
+      pb::Option& option = snapshot->options.emplace_back();
+      option.text = text;
+      option.guid = guid;
+      option.kind = pb::Option::USE;
+      option.name = tree.name;
+    }
+  }
+
+  if (self.state == pb::Self::DEAD_BODY) {
+    if (facts.has_pending_resurrect) {
+      targets.push_back(
+          {OptionTarget::Kind::kUse, "rez:accept", "Accept resurrection"});
+      pb::Option& acc = snapshot->options.emplace_back();
+      acc.text = "Accept resurrection";
+      acc.guid = "rez:accept";
+      acc.kind = pb::Option::USE;
+      acc.name = "Accept resurrection";
+    }
+    targets.push_back(
+        {OptionTarget::Kind::kUse, "rez:release", "Release spirit"});
+    pb::Option& rel = snapshot->options.emplace_back();
+    rel.text = "Release spirit";
+    rel.guid = "rez:release";
+    rel.kind = pb::Option::USE;
+    rel.name = "Release spirit";
+  }
+
   if (!facts.pending_group_invite_from.empty()) {
     const std::string& from = facts.pending_group_invite_from;
     targets.push_back({OptionTarget::Kind::kAcceptInvite, "", from});

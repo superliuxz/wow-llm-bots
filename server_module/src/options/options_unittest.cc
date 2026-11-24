@@ -99,8 +99,14 @@ TEST(OptionsTest, OnlyKeepWhileDead) {
                             {0, 0, 0}});
     EXPECT_EQ(Texts(snapshot).size(), 0u);
     AddOptions(&snapshot, facts);
-    EXPECT_EQ(Texts(snapshot),
-              std::vector<std::string>{"Keep doing what I'm doing"});
+    if (state == pb::Self::DEAD_BODY) {
+      EXPECT_EQ(Texts(snapshot),
+                (std::vector<std::string>{"Release spirit",
+                                          "Keep doing what I'm doing"}));
+    } else {
+      EXPECT_EQ(Texts(snapshot),
+                std::vector<std::string>{"Keep doing what I'm doing"});
+    }
   }
 }
 
@@ -571,12 +577,15 @@ TEST(OptionsTest, AssistResolvesExactGuidCapAndEdgeCases) {
   EXPECT_EQ(targets[4].guid, "0x32");
   EXPECT_EQ(snapshot.options[4].guid, "assist:0x32");
 
-  // Dead self gets no assist options.
+  // Dead self gets no attack or assist options (only Release spirit + Keep).
   pb::Snapshot dead_snap = snapshot;
   dead_snap.options.clear();
   dead_snap.base.self.state = pb::Self::DEAD_BODY;
   const std::vector<OptionTarget> dead_targets = AddOptions(&dead_snap, facts);
-  EXPECT_EQ(dead_targets.size(), 1u);
+  EXPECT_EQ(Texts(dead_snap),
+            (std::vector<std::string>{"Release spirit",
+                                      "Keep doing what I'm doing"}));
+  EXPECT_EQ(dead_targets.size(), 2u);
 }
 
 TEST(OptionsTest, UsableBagItemsOfferedAsUseOptionsAndFilteredInCombat) {
@@ -701,6 +710,52 @@ TEST(OptionsTest, MovementAndRestAppearBeforeBagUtilityItems) {
   EXPECT_EQ(targets[1].kind, OptionTarget::Kind::kGoTo);
   EXPECT_EQ(targets[2].kind, OptionTarget::Kind::kRest);
   EXPECT_EQ(targets[3].kind, OptionTarget::Kind::kUse);
+}
+
+TEST(OptionsTest, TalentTreeOptionsOfferedOutOfCombatWhenPointsUnspent) {
+  OptionFacts facts;
+  facts.talent_trees.push_back({0, "Holy", 0, 2});
+  facts.talent_trees.push_back({1, "Protection", 14, 2});
+  facts.talent_trees.push_back({2, "Retribution", 0, 2});
+
+  pb::Snapshot ooc;
+  ooc.base.self.in_combat = false;
+  const std::vector<OptionTarget> ooc_targets = AddOptions(&ooc, facts);
+  EXPECT_EQ(Texts(ooc), (std::vector<std::string>{
+                            "Spend talent points in Holy (0 pts, 2 unspent)",
+                            "Spend talent points in Protection (14 pts, 2 "
+                            "unspent)",
+                            "Spend talent points in Retribution (0 pts, 2 "
+                            "unspent)",
+                            "Keep doing what I'm doing"}));
+  ASSERT_EQ(ooc_targets.size(), 4u);
+  EXPECT_EQ(ooc_targets[1].guid, "talent:1");
+
+  pb::Snapshot ic;
+  ic.base.self.in_combat = true;
+  AddOptions(&ic, facts);
+  EXPECT_EQ(Texts(ic), (std::vector<std::string>{"Keep doing what I'm doing"}));
+}
+
+TEST(OptionsTest, DeadBodyOffersAcceptResurrectionAndReleaseSpirit) {
+  OptionFacts facts;
+  facts.has_pending_resurrect = true;
+
+  pb::Snapshot dead;
+  dead.base.self.state = pb::Self::DEAD_BODY;
+  const std::vector<OptionTarget> targets = AddOptions(&dead, facts);
+  EXPECT_EQ(Texts(dead),
+            (std::vector<std::string>{"Accept resurrection", "Release spirit",
+                                      "Keep doing what I'm doing"}));
+  ASSERT_EQ(targets.size(), 3u);
+  EXPECT_EQ(targets[0].guid, "rez:accept");
+  EXPECT_EQ(targets[1].guid, "rez:release");
+
+  pb::Snapshot ghost;
+  ghost.base.self.state = pb::Self::GHOST;
+  AddOptions(&ghost, facts);
+  EXPECT_EQ(Texts(ghost),
+            (std::vector<std::string>{"Keep doing what I'm doing"}));
 }
 
 }  // namespace

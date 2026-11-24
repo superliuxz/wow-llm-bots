@@ -913,6 +913,12 @@ bool FindDungeonSeamHop(Map* map,
       }
       *out_hop = {snap_x, snap_y, snap_z};
       if (out_path) {
+        // Include the final terrain sample `(hx, hy, prev_z)` when `snap`
+        // shifted materially so every spline segment follows a LOS-checked
+        // edge (`s_{samples-1} -> (hx, hy, prev_z) -> snap`).
+        if (Dist({hx, hy, prev_z}, snap_x, snap_y, snap_z) > 0.1f) {
+          polyline.push_back({hx, hy, prev_z});
+        }
         polyline.push_back(*out_hop);
         *out_path = std::move(polyline);
       }

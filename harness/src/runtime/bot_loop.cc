@@ -5,11 +5,14 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <flat_map>
 #include <flat_set>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -77,6 +80,74 @@ std::flat_set<std::string> CollectExpectedNames(
   return names;
 }
 
+std::string NormalizeInstanceKey(std::string_view raw) {
+  std::string s = base::ToLowerASCII(base::TrimWhitespaceASCII(raw));
+  return s;
+}
+
+std::string StripLeadingThe(std::string_view key) {
+  if (key.starts_with("the ")) {
+    return std::string(key.substr(4));
+  }
+  return std::string(key);
+}
+
+// Indexes `<notes_dir>/*/notes.md` by the `# <Instance Name> (<Abbr>)` heading
+// on line 1 (plus directory name and `"the "`-stripped alias) so bots entering
+// any dungeon/raid in real play load boss notes automatically.
+std::flat_map<std::string, std::string> LoadInstanceNotesIndex(
+    const std::string& notes_dir) {
+  std::flat_map<std::string, std::string> index;
+  if (notes_dir.empty()) {
+    return index;
+  }
+  std::error_code ec;
+  if (!std::filesystem::is_directory(notes_dir, ec)) {
+    return index;
+  }
+  for (const auto& entry : std::filesystem::directory_iterator(notes_dir, ec)) {
+    if (ec || !entry.is_directory(ec)) {
+      continue;
+    }
+    const std::filesystem::path notes_path = entry.path() / "notes.md";
+    if (!std::filesystem::is_regular_file(notes_path, ec)) {
+      continue;
+    }
+    const std::optional<std::string> text = ReadFile(notes_path.string());
+    if (!text || text->empty()) {
+      continue;
+    }
+    const std::string path_str = notes_path.string();
+    const std::string dir_key =
+        NormalizeInstanceKey(entry.path().filename().string());
+    if (!dir_key.empty()) {
+      index.try_emplace(dir_key, path_str);
+    }
+    const size_t nl = text->find('\n');
+    std::string_view first_line = nl == std::string::npos
+                                      ? std::string_view(*text)
+                                      : std::string_view(*text).substr(0, nl);
+    first_line = base::TrimWhitespaceASCII(first_line);
+    if (first_line.starts_with("# ")) {
+      first_line.remove_prefix(2);
+      // Strip trailing ` (<Abbr>)` if present.
+      const size_t open_paren = first_line.rfind(" (");
+      if (open_paren != std::string_view::npos && first_line.ends_with(")")) {
+        first_line = first_line.substr(0, open_paren);
+      }
+      const std::string title_key = NormalizeInstanceKey(first_line);
+      if (!title_key.empty()) {
+        index.try_emplace(title_key, path_str);
+        const std::string no_the = StripLeadingThe(title_key);
+        if (no_the != title_key && !no_the.empty()) {
+          index.try_emplace(no_the, path_str);
+        }
+      }
+    }
+  }
+  return index;
+}
+
 }  // namespace
 
 BotLoop::BotLoop(BotLoopConfig config,
@@ -91,6 +162,15 @@ BotLoop::BotLoop(BotLoopConfig config,
                         ? nullptr
                         : std::make_unique<DecisionLog>(config_.bots_dir)),
       scheduler_(config_.max_in_flight) {
+  if (!config_.notes_dir.empty()) {
+    instance_notes_index_ = LoadInstanceNotesIndex(config_.notes_dir);
+    if (!instance_notes_index_.empty()) {
+      Log(base::StringPrintf(
+          "harness: indexed %zu instance boss-note keys "
+          "from %s",
+          instance_notes_index_.size(), config_.notes_dir.c_str()));
+    }
+  }
   if (!config_.knowledge_path.empty()) {
     std::string err;
     if (std::optional<WorldKnowledge> wk =
@@ -248,12 +328,18 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   const std::string cur_map = state.latest_snapshot->base.where.map;
   const bool left_or_changed_instance =
       state.was_in_instance && (!in_instance || state.last_map != cur_map);
-  if (left_or_changed_instance && !state.orders.orders().empty()) {
-    if (state.orders.SetOrders({}, received_at)) {
-      SendStopMoving(bot);
+  if (left_or_changed_instance) {
+    if (!in_instance) {
+      state.notes.clear();
+      state.last_selected_notes.clear();
     }
-    Log(base::StrCat(
-        {bot, ": cleared standing orders after leaving ", state.last_map}));
+    if (!state.orders.orders().empty()) {
+      if (state.orders.SetOrders({}, received_at)) {
+        SendStopMoving(bot);
+      }
+      Log(base::StrCat(
+          {bot, ": cleared standing orders after leaving ", state.last_map}));
+    }
   }
   const bool entered_instance =
       in_instance && (!state.was_in_instance || state.last_map != cur_map);
@@ -261,10 +347,35 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   state.last_map = cur_map;
   bool pre_pull_woke = false;
   if (entered_instance) {
+    state.notes.clear();
     if (!config_.bots_dir.empty()) {
       state.notes =
           ReadFile(base::StrCat({config_.bots_dir, "/", bot, "/notes.md"}))
               .value_or("");
+    }
+    if (state.notes.empty() && !instance_notes_index_.empty()) {
+      const auto lookup = [&](std::string_view raw) -> std::string {
+        const std::string key = NormalizeInstanceKey(raw);
+        if (key.empty()) {
+          return "";
+        }
+        if (auto it = instance_notes_index_.find(key);
+            it != instance_notes_index_.end()) {
+          return ReadFile(it->second).value_or("");
+        }
+        const std::string no_the = StripLeadingThe(key);
+        if (no_the != key) {
+          if (auto it = instance_notes_index_.find(no_the);
+              it != instance_notes_index_.end()) {
+            return ReadFile(it->second).value_or("");
+          }
+        }
+        return "";
+      };
+      state.notes = lookup(cur_map);
+      if (state.notes.empty()) {
+        state.notes = lookup(state.latest_snapshot->base.where.zone);
+      }
     }
     const std::string selected_notes =
         SelectRelevantNotes(state.notes, *state.latest_snapshot);

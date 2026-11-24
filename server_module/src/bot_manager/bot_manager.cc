@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -13,7 +14,7 @@
 #include "Action.h"
 #include "AiFactory.h"
 #include "CharacterCache.h"
-#include "DBCStores.h"
+#include "DBCStructure.h"
 #include "Engine.h"
 #include "Event.h"
 #include "Group.h"
@@ -31,6 +32,7 @@
 #include "SharedDefines.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
+#include "Timer.h"
 #include "config/config_parsing.h"
 
 namespace llm_brain {
@@ -39,10 +41,6 @@ namespace {
 constexpr uint32_t kTickMs = 1000;
 // A failed or dropped login is retried after this long.
 constexpr uint32_t kLoginRetryMs = 10000;
-// Milliseconds a ghost whose corpse is inside a dungeon waits before cross-map
-// dungeon entrance recovery fires (after Playerbots' FindCorpseAction fails
-// because Player::GetCorpse() returns nullptr across maps).
-constexpr uint64_t kStuckDungeonGhostMs = 30000;
 
 struct BotStrategyOverride {
   std::string combat;
@@ -124,7 +122,29 @@ bool HasEligibleTempEnchant(Player* bot, PlayerbotAI* ai, bool is_stone) {
   return false;
 }
 
-bool HasLivingGroupMemberOnSameMap(Player* bot) {
+bool CanResurrectOthers(Player* member) {
+  if (!member) {
+    return false;
+  }
+  for (const auto& [spell_id, state] : member->GetSpellMap()) {
+    if (!state || !state->Active || state->State == PLAYERSPELL_REMOVED) {
+      continue;
+    }
+    const SpellInfo* info = sSpellMgr->GetSpellInfo(spell_id);
+    if (!info) {
+      continue;
+    }
+    for (uint8_t i = 0; i < MAX_SPELL_EFFECTS; ++i) {
+      const uint32_t eff = info->Effects[i].Effect;
+      if (eff == SPELL_EFFECT_RESURRECT || eff == SPELL_EFFECT_RESURRECT_NEW) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool HasLivingResurrectorOnSameMap(Player* bot) {
   if (!bot || !bot->GetGroup()) {
     return false;
   }
@@ -133,12 +153,19 @@ bool HasLivingGroupMemberOnSameMap(Player* bot) {
     Player* member = itr->GetSource();
     if (member && member != bot && member->IsInWorld() && member->IsAlive() &&
         member->GetMapId() == bot->GetMapId() &&
-        member->GetInstanceId() == bot->GetInstanceId()) {
+        member->GetInstanceId() == bot->GetInstanceId() &&
+        CanResurrectOthers(member)) {
       return true;
     }
   }
   return false;
 }
+
+// Maximum time to suppress Playerbots' automatic `"auto release"` while waiting
+// for a living resurrector in a dungeon; beyond this window the bot may release
+// (or the brain can choose `Release spirit` / `Accept resurrection` at any
+// time).
+constexpr uint32_t kMaxWaitForRezMs = 90000;
 
 // Enforces clean ownership boundaries between the LLM brain and Playerbots'
 // reflex layer on each Engine:
@@ -147,9 +174,9 @@ bool HasLivingGroupMemberOnSameMap(Player* bot) {
 //    auto-equipper never fights the brain's `Equip` choices.
 //  - Gates `"apply stone"` / `"apply oil"` on actual AzerothCore temp-enchant
 //    eligibility to stop SPELL_FAILED_LOWLEVEL 5-second spam loops.
-//  - Gates `"auto release"` inside dungeons when a living party member is on
-//    the same map so standalone bots wait for a healer rez (instead of
-//    releasing after 4 s to an outside graveyard).
+//  - Gates `"auto release"` inside dungeons only when a living party member on
+//    the same map can resurrect AND within `kMaxWaitForRezMs` (90 s), so bots
+//    never lie dead forever when no healer is alive or no rez arrives.
 // Owned by the Engine's ActionExecutionListeners (which `delete`s every
 // listener on Engine destruction).
 class BrainPolicyListener final : public ActionExecutionListener {
@@ -178,8 +205,20 @@ class BrainPolicyListener final : public ActionExecutionListener {
       return HasEligibleTempEnchant(bot_, ai_, /*is_stone=*/false);
     }
     if (name == "auto release" && bot_ && bot_->GetMap() &&
-        bot_->GetMap()->IsDungeon() && HasLivingGroupMemberOnSameMap(bot_)) {
-      return false;
+        bot_->GetMap()->IsDungeon()) {
+      if (bot_->IsAlive()) {
+        dead_since_ms_.reset();
+        return true;
+      }
+      if (!dead_since_ms_) {
+        dead_since_ms_ = getMSTime();
+      }
+      if (GetMSTimeDiffToNow(*dead_since_ms_) < kMaxWaitForRezMs &&
+          HasLivingResurrectorOnSameMap(bot_)) {
+        return false;
+      }
+    } else if (bot_ && bot_->IsAlive()) {
+      dead_since_ms_.reset();
     }
     return true;
   }
@@ -192,8 +231,13 @@ class BrainPolicyListener final : public ActionExecutionListener {
 
  private:
   uintptr_t engine_key_;
+  // Non-owning raw pointers (CONTRIBUTING.md: upstream AzerothCore `Player` and
+  // `PlayerbotAI` do not inherit `base::RawPtrTarget`; lifetime is strictly
+  // bounded because `Player` owns `PlayerbotAI` which owns `Engine` which owns
+  // this listener).
   Player* bot_;
   PlayerbotAI* ai_;
+  std::optional<uint32_t> dead_since_ms_;
 };
 
 void EnsurePolicyListener(Player* player, PlayerbotAI* ai) {
@@ -208,69 +252,6 @@ void EnsurePolicyListener(Player* player, PlayerbotAI* ai) {
     engine->AddActionExecutionListener(
         new BrainPolicyListener(key, player, ai));
   }
-}
-
-// Recovers a ghost stuck at an outside graveyard whose corpse is inside a
-// dungeon. Uses `Player::GetCorpseLocation()` (not `GetCorpse()`, which only
-// checks `player->GetMap()` and returns nullptr across maps). Enters the
-// dungeon entrance portal via AzerothCore's AreaTriggerTeleport (the standard
-// WoW dungeon corpse-run mechanic).
-void RecoverStuckDungeonGhost(Player* player,
-                              uint64_t now_ms,
-                              uint64_t* stuck_since_ms) {
-  if (!player || !player->HasPlayerFlag(PLAYER_FLAGS_GHOST) ||
-      !player->HasCorpse() || player->isMoving() ||
-      player->IsBeingTeleported()) {
-    *stuck_since_ms = 0;
-    return;
-  }
-  const WorldLocation corpse_loc = player->GetCorpseLocation();
-  const uint32_t corpse_map_id = corpse_loc.GetMapId();
-  if (corpse_map_id == player->GetMapId()) {
-    *stuck_since_ms = 0;
-    return;
-  }
-  const MapEntry* corpse_map = sMapStore.LookupEntry(corpse_map_id);
-  if (!corpse_map || !corpse_map->IsDungeon()) {
-    *stuck_since_ms = 0;
-    return;
-  }
-  if (*stuck_since_ms == 0) {
-    *stuck_since_ms = now_ms;
-    return;
-  }
-  if (now_ms - *stuck_since_ms < kStuckDungeonGhostMs) {
-    return;
-  }
-  const AreaTriggerTeleport* entrance =
-      sObjectMgr->GetMapEntranceTrigger(corpse_map_id);
-  if (!entrance) {
-    *stuck_since_ms = now_ms;
-    LOG_INFO("module",
-             "mod-llm-brain: dungeon ghost {} cannot enter map {} (no entrance "
-             "trigger)",
-             player->GetName(), corpse_map_id);
-    return;
-  }
-  if (player->TeleportTo(entrance->target_mapId, entrance->target_X,
-                         entrance->target_Y, entrance->target_Z,
-                         entrance->target_Orientation)) {
-    *stuck_since_ms = 0;
-    // AzerothCore's HandleMoveWorldportAck resurrects the ghost and converts
-    // its dungeon corpse to bones on the destination dungeon map.
-    LOG_INFO("module",
-             "mod-llm-brain: recovered dungeon ghost {} into map {} entrance",
-             player->GetName(), corpse_map_id);
-    return;
-  }
-  // Transient denial (e.g., CANNOT_ENTER_ZONE_IN_COMBAT during an active
-  // encounter): retry after kStuckDungeonGhostMs rather than free-reviving
-  // outside the instance or calling cross-map SpawnCorpseBones().
-  *stuck_since_ms = now_ms;
-  LOG_INFO("module",
-           "mod-llm-brain: dungeon ghost {} teleport to map {} entrance "
-           "deferred; will retry",
-           player->GetName(), corpse_map_id);
 }
 
 // World-thread-only per-bot strategy overrides.
@@ -351,13 +332,9 @@ void BotManager::Tick() {
       // of the world: wait, never log it in a second time.
       if (player->IsInWorld()) {
         EnsureStrategies(player);
-        RecoverStuckDungeonGhost(player, now_ms_, &bot.stuck_ghost_since_ms);
-      } else {
-        bot.stuck_ghost_since_ms = 0;
       }
       continue;
     }
-    bot.stuck_ghost_since_ms = 0;
     if (now_ms_ >= bot.next_login_ms) {
       // No master: playerbots runs it as a standalone bot. With autologin off,
       // its random-bot manager does nothing else with it.

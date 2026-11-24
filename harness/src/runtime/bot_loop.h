@@ -41,6 +41,7 @@ namespace harness {
 struct BotLoopConfig {
   std::string rules;           // Shared RULES.md text.
   std::string bots_dir;        // Optional: var/bots (identity.md + logs).
+  std::string notes_dir;       // Optional: content/notes (<instance>/notes.md).
   std::string knowledge_path;  // Optional: var/knowledge/world_knowledge.json.
   size_t max_in_flight = 16;   // llama-server slots / concurrent calls.
   float temperature = 0.7f;
@@ -288,6 +289,8 @@ class BotLoop {
   LogMessageFn log_message_;
   std::unique_ptr<DecisionLog> decision_log_;
   WorldKnowledge knowledge_;
+  // Lowercased instance map name -> path to `content/notes/<dir>/notes.md`.
+  std::flat_map<std::string, std::string> instance_notes_index_;
   Scheduler scheduler_;
   std::flat_map<std::string, BotState> bots_;
   // Pre-pull compiled standing orders cached by (bot, map, notes).

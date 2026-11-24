@@ -57,7 +57,6 @@ class BotManager {
     std::string name;
     uint64_t guid = 0;  // 0: unknown character name.
     uint64_t next_login_ms = 0;
-    uint64_t stuck_ghost_since_ms = 0;
   };
 
   void Tick();

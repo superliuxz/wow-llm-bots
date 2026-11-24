@@ -1666,6 +1666,42 @@ TEST(
   std::filesystem::remove_all(tmp_dir);
 }
 
+TEST(BotLoopTest, AutoLoadsInstanceNotesFromNotesDirOnInstanceEntry) {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "wlb_bot_loop_notes_dir_test";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir / "ICC");
+  {
+    std::ofstream f(tmp_dir / "ICC" / "notes.md");
+    f << "# Icecrown Citadel (ICC)\n\n"
+      << "## The Lich King\n"
+      << "- Defile: move out immediately.\n"
+      << "```\nin Defile -> out of it\n```\n";
+  }
+
+  CannedBrain brain;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.notes_dir = tmp_dir.string();
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(), [](const pb::Command&) {});
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot snap = MakeLiveSnap("Loada", 1, t0, /*in_combat=*/false);
+  snap.base.where.in_instance = true;
+  snap.base.where.map = "Icecrown Citadel";
+  AddKeep(&snap);
+  loop.OnSnapshot(snap, t0);
+
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("compile standing orders"),
+            std::string::npos);
+  EXPECT_NE(brain.front_request().user.find("in Defile -> out of it"),
+            std::string::npos);
+
+  std::filesystem::remove_all(tmp_dir);
+}
+
 TEST(BotLoopTest, TellGrammarIncludesOnlyWhisperersAndPartyMembers) {
   CannedBrain brain;
   BotLoopConfig cfg;

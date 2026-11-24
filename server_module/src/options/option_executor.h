@@ -124,6 +124,12 @@ void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink);
 void CollectUsableBagItems(Player* bot,
                            std::vector<wlb::snapshot::OptionFacts_Item>* out);
 
+// When `bot` is alive, out of combat, and has unspent talent points, lists the
+// class's 3 talent trees with current points spent so the brain can choose.
+void CollectTalentTrees(
+    Player* bot,
+    std::vector<wlb::snapshot::OptionFacts_TalentTree>* out);
+
 // Whether `bot` is currently preparing, channeling, or has a non-cancelling
 // queued cast for `spell_id` (excluding SPELL_STATE_DELAYED projectiles and
 // unrelated SpellQueue entries).

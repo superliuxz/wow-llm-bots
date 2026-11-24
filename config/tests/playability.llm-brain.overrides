@@ -1,0 +1,7 @@
+# Playability test: two fresh level-1 Troll Priests at the Valley of Trials start (reset from
+# the fixture on every server start), isolated from `whisper` / `invite` because `e2e_playability`
+# levels Loada to 20 and spends talent points. Needs a test build (tools/wlb build server --test).
+LlmBrain.Bots = "Loada,Telda"
+LlmBrain.TestFixtures = "Loada=priest-l1-valley.pdump,Telda=priest-l1-valley.pdump"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.NonCombatStrategies = "-follow,-grind,-new rpg"

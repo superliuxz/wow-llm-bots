@@ -40,8 +40,10 @@ int Usage() {
   std::fputs(
       "usage:\n"
       "  harness run [--socket=PATH] [--rules=FILE] [--bots-dir=DIR]\n"
-      "              [--knowledge=FILE] [--host=H] [--port=N] [--slots=N]\n"
-      "              [--temperature=T] [--seconds=S] [--only-bots=NAME,NAME]\n"
+      "              [--notes-dir=DIR] [--knowledge=FILE] [--host=H] "
+      "[--port=N]\n"
+      "              [--slots=N] [--temperature=T] [--seconds=S]\n"
+      "              [--only-bots=NAME,NAME]\n"
       "  harness decide <snapshot.json> [--name=BOT] [--goal=TEXT]\n"
       "                 [--reason=TEXT] [--rules=FILE] [--identity=FILE]\n"
       "                 [--knowledge=FILE] [--log-dir=DIR] [--host=H]\n"

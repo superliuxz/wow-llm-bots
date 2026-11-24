@@ -136,6 +136,7 @@ class LlmBrainChatScript : public PlayerScript {
     }
     const bool is_raid =
         (type == CHAT_MSG_RAID || type == CHAT_MSG_RAID_LEADER);
+    const bool sender_is_human = GET_PLAYERBOT_AI(player) == nullptr;
     for (const std::string& bot_name : inbox_->Bots()) {
       if (bot_name == player->GetName()) {
         continue;
@@ -148,7 +149,9 @@ class LlmBrainChatScript : public PlayerScript {
       chat.channel = is_raid ? pb::RAID : pb::PARTY;
       chat.from = player->GetName();
       chat.text = msg;
-      chat.at_me = !is_raid || MentionsName(msg, bot_name);
+      // Only human party/raid messages wake bots directly; bot-to-bot party
+      // lines remain visible in the chat log without triggering reply loops.
+      chat.at_me = sender_is_human && (!is_raid || MentionsName(msg, bot_name));
       inbox_->Add(bot_name, std::move(chat));
     }
     return true;
