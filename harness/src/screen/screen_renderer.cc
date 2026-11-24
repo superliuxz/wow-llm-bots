@@ -536,7 +536,7 @@ bool IsSelfPartyLeader(const pb::Snapshot& snapshot) {
   return false;
 }
 
-std::string SelfLine(const pb::Self& s, bool party_leader) {
+std::string SelfLine(const pb::Self& s, bool party_leader, bool party_member) {
   std::vector<std::string> who;
   who.push_back(
       s.unit.level.value_or(0) != 0
@@ -589,7 +589,8 @@ std::string SelfLine(const pb::Self& s, bool party_leader) {
                {s.in_flight, "in flight"},
                {s.camping, "camping"},
                {s.drunk != pb::Self::DRUNK_UNSPECIFIED, "drunk"},
-               {party_leader, "party leader"}};
+               {party_leader, "party leader"},
+               {party_member, "party member"}};
   for (const auto& flag : flags) {
     if (flag.value) {
       bits.push_back(flag.word);
@@ -1389,9 +1390,12 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
 
   const pb::Base& base = snapshot.base;
   const bool self_is_leader = IsSelfPartyLeader(snapshot);
+  const bool self_in_party =
+      snapshot.ext.party.has_value() || base.self.unit.group.has_value();
   std::vector<std::string> lines;
   if (base.self != pb::Self{}) {
-    lines.push_back("me: " + SelfLine(base.self, self_is_leader));
+    lines.push_back("me: " + SelfLine(base.self, self_is_leader,
+                                      !self_is_leader && self_in_party));
   }
   if (base.where != pb::Where{}) {
     lines.push_back("where: " + WhereLine(base.where));

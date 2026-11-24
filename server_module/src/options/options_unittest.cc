@@ -660,5 +660,40 @@ TEST(OptionsTest, QuestTurnInPlaceFormattedAsTurnInOption) {
   EXPECT_EQ(targets[0].kind, OptionTarget::Kind::kGoTo);
 }
 
+TEST(OptionsTest, MovementAndRestAppearBeforeBagUtilityItems) {
+  OptionFacts facts;
+  facts.has_food = true;
+  facts.spots.push_back({"spot:619:460:-1035",
+                         pb::Direction::N,
+                         187.0f,
+                         "Deep Crawler (3)",
+                         {460.0f, -1035.0f, 30.3f}});
+  facts.usable_items.push_back({.entry = 6948,
+                                .name = "Hearthstone",
+                                .out_of_combat_only = true,
+                                .equippable = false,
+                                .detail = "teleports home to Sunstrider Isle"});
+  facts.usable_items.push_back({.entry = 33447,
+                                .name = "Runic Healing Potion",
+                                .out_of_combat_only = false,
+                                .equippable = false,
+                                .detail = ""});
+
+  pb::Snapshot snap;
+  snap.base.self.in_combat = false;
+  snap.base.self.health = 90;
+  snap.base.self.health_max = 100;
+  const std::vector<OptionTarget> targets = AddOptions(&snap, facts);
+  EXPECT_EQ(Texts(snap),
+            (std::vector<std::string>{
+                "Explore N, 187 yd (Deep Crawler (3))", "Rest (eat)",
+                "Use Hearthstone (teleports home to Sunstrider Isle)",
+                "Use Runic Healing Potion", "Keep doing what I'm doing"}));
+  ASSERT_EQ(targets.size(), 5u);
+  EXPECT_EQ(targets[0].kind, OptionTarget::Kind::kExplore);
+  EXPECT_EQ(targets[1].kind, OptionTarget::Kind::kRest);
+  EXPECT_EQ(targets[2].kind, OptionTarget::Kind::kUse);
+}
+
 }  // namespace
 }  // namespace llm_brain

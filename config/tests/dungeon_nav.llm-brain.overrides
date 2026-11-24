@@ -1,0 +1,7 @@
+# Dungeon navigation e2e test: isolated from `choose` because `e2e_dungeon_nav.py`
+# gears `Loada` to level 80 and teleports it across 7 Classic/TBC/WotLK dungeon
+# entrances. Needs a test build (`tools/wlb build server --test`).
+LlmBrain.Bots = "Loada"
+LlmBrain.TestFixtures = "Loada=priest-l1-boars.pdump"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.NonCombatStrategies = "-follow,-grind,-new rpg"

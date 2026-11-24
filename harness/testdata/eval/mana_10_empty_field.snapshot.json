@@ -65,10 +65,6 @@
   },
   "options": [
     {
-      "text": "Rest (eat and drink)",
-      "kind": "REST"
-    },
-    {
       "text": "Explore NE, 59 yd (boars, level 1-2)",
       "guid": "spot:1:-517:-4287",
       "kind": "EXPLORE",
@@ -97,6 +93,10 @@
       "guid": "place:1:-560:-4217",
       "kind": "GO_TO",
       "name": "Valley of Trials"
+    },
+    {
+      "text": "Rest (eat and drink)",
+      "kind": "REST"
     },
     {
       "text": "Keep doing what I'm doing",

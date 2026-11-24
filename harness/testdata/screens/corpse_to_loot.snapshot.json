@@ -825,10 +825,6 @@
       "name": "Cactus Apple"
     },
     {
-      "text": "Rest (eat and drink)",
-      "kind": "REST"
-    },
-    {
       "text": "Explore SW, 37 yd (boars, level 1-2)",
       "guid": "spot:1:-715:-4286",
       "kind": "EXPLORE",
@@ -857,6 +853,10 @@
       "guid": "place:1:-627:-4230",
       "kind": "GO_TO",
       "name": "Valley of Trials"
+    },
+    {
+      "text": "Rest (eat and drink)",
+      "kind": "REST"
     },
     {
       "text": "Keep doing what I'm doing",

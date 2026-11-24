@@ -415,45 +415,7 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
     }
   }
 
-  if (alive) {
-    for (const OptionFacts::Item& item : facts.usable_items) {
-      if (item.entry == 0 || item.name.empty()) {
-        continue;
-      }
-      if (self.in_combat && (item.out_of_combat_only || item.equippable)) {
-        continue;
-      }
-      const std::string item_guid =
-          (item.equippable ? "equip:" : "item:") + std::to_string(item.entry);
-      targets.push_back({OptionTarget::Kind::kUse, item_guid, item.name});
-      pb::Option& option = snapshot->options.emplace_back();
-      if (item.equippable) {
-        option.text = item.detail.empty()
-                          ? "Equip " + item.name
-                          : "Equip " + item.name + " (" + item.detail + ")";
-      } else {
-        option.text = item.detail.empty()
-                          ? "Use " + item.name
-                          : "Use " + item.name + " (" + item.detail + ")";
-      }
-      option.guid = item_guid;
-      option.kind = pb::Option::USE;
-      option.name = item.name;
-    }
-  }
-
   if (alive && !self.in_combat) {
-    const bool hurt = self.health_max > 0 && self.health < self.health_max;
-    const bool low_mana = self.power_type == pb::Self::MANA &&
-                          self.power_max > 0 && self.power < self.power_max;
-    if (!self.mounted && !self.swimming && (hurt || low_mana)) {
-      const std::string text = RestText(facts);
-      targets.push_back({OptionTarget::Kind::kRest, "", text});
-      pb::Option& option = snapshot->options.emplace_back();
-      option.text = text;
-      option.kind = pb::Option::REST;
-    }
-
     size_t explore_count = 0;
     uint32_t seen_dirs = 0;
     for (const OptionFacts::Spot& spot : facts.spots) {
@@ -489,6 +451,44 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       option.guid = place.id;
       option.kind = pb::Option::GO_TO;
       option.name = place.name;
+    }
+
+    const bool hurt = self.health_max > 0 && self.health < self.health_max;
+    const bool low_mana = self.power_type == pb::Self::MANA &&
+                          self.power_max > 0 && self.power < self.power_max;
+    if (!self.mounted && !self.swimming && (hurt || low_mana)) {
+      const std::string text = RestText(facts);
+      targets.push_back({OptionTarget::Kind::kRest, "", text});
+      pb::Option& option = snapshot->options.emplace_back();
+      option.text = text;
+      option.kind = pb::Option::REST;
+    }
+  }
+
+  if (alive) {
+    for (const OptionFacts::Item& item : facts.usable_items) {
+      if (item.entry == 0 || item.name.empty()) {
+        continue;
+      }
+      if (self.in_combat && (item.out_of_combat_only || item.equippable)) {
+        continue;
+      }
+      const std::string item_guid =
+          (item.equippable ? "equip:" : "item:") + std::to_string(item.entry);
+      targets.push_back({OptionTarget::Kind::kUse, item_guid, item.name});
+      pb::Option& option = snapshot->options.emplace_back();
+      if (item.equippable) {
+        option.text = item.detail.empty()
+                          ? "Equip " + item.name
+                          : "Equip " + item.name + " (" + item.detail + ")";
+      } else {
+        option.text = item.detail.empty()
+                          ? "Use " + item.name
+                          : "Use " + item.name + " (" + item.detail + ")";
+      }
+      option.guid = item_guid;
+      option.kind = pb::Option::USE;
+      option.name = item.name;
     }
   }
 

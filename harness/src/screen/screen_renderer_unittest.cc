@@ -873,6 +873,7 @@ TEST(ScreenRendererTest, RendersPartyLeaderTagOnSelfOnlyWhenSelfIsLeader) {
   const std::string leader_me =
       leader_screen.text.substr(0, leader_screen.text.find('\n'));
   EXPECT_NE(leader_me.find("; party leader"), std::string::npos) << leader_me;
+  EXPECT_EQ(leader_me.find("party member"), std::string::npos) << leader_me;
   EXPECT_NE(leader_screen.text.find("party: leader you; loot group loot\n"
                                     "  - Gatda"),
             std::string::npos)
@@ -885,12 +886,14 @@ TEST(ScreenRendererTest, RendersPartyLeaderTagOnSelfOnlyWhenSelfIsLeader) {
   const Screen group_only_screen = RenderScreen(group_only);
   EXPECT_NE(group_only_screen.text.find("; party leader"), std::string::npos)
       << group_only_screen.text;
+  EXPECT_EQ(group_only_screen.text.find("party member"), std::string::npos)
+      << group_only_screen.text;
   EXPECT_NE(group_only_screen.text.find("party: leader you; loot group loot"),
             std::string::npos)
       << group_only_screen.text;
 
-  // 3. Self is a follower: me: must NOT say party leader, and the leader
-  //    member line carries the "leader" tag.
+  // 3. Self is a follower: me: must say party member (not party leader), and
+  //    the leader member line carries the "leader" tag.
   pb::Snapshot follower_snap = NewSnapshot();
   follower_snap.bot = "Tess";
   follower_snap.base.self.unit.guid = "0x10";
@@ -909,12 +912,21 @@ TEST(ScreenRendererTest, RendersPartyLeaderTagOnSelfOnlyWhenSelfIsLeader) {
   const std::string follower_me =
       follower_screen.text.substr(0, follower_screen.text.find('\n'));
   EXPECT_EQ(follower_me.find("party leader"), std::string::npos) << follower_me;
+  EXPECT_NE(follower_me.find("; party member"), std::string::npos)
+      << follower_me;
   EXPECT_EQ(follower_screen.text.find("leader you"), std::string::npos)
       << follower_screen.text;
   EXPECT_NE(follower_screen.text.find("party: loot group loot\n"
                                       "  - Gatda: leader"),
             std::string::npos)
       << follower_screen.text;
+
+  // 4. Solo player: me: has neither party leader nor party member.
+  const Screen solo_screen = RenderScreen(NewSnapshot());
+  const std::string solo_me =
+      solo_screen.text.substr(0, solo_screen.text.find('\n'));
+  EXPECT_EQ(solo_me.find("party leader"), std::string::npos) << solo_me;
+  EXPECT_EQ(solo_me.find("party member"), std::string::npos) << solo_me;
 }
 
 }  // namespace

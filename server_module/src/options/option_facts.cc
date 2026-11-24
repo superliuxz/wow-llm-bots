@@ -24,12 +24,14 @@
 #include "GameGraveyard.h"
 #include "GameTime.h"
 #include "GridTerrainData.h"
+#include "Group.h"
 #include "IVMapMgr.h"
 #include "InstanceScript.h"
 #include "Map.h"
 #include "MapDefines.h"
 #include "MapMgr.h"
 #include "Object.h"
+#include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "PathGenerator.h"
 #include "Player.h"
@@ -419,7 +421,35 @@ void FillSpots(const WorldPlaces& world,
 
 void FillPlaces(const WorldPlaces& world,
                 const Viewpoint& view,
+                const WorldObject* path_owner,
                 PositionFacts* out) {
+  // When grouped as a non-leader and the living party leader is in the same
+  // map/instance/phase at travel distance, expose a factual `Go to <leader>`
+  // option so followers can regroup via stepped navigation (including across
+  // dungeon navmesh seams where Playerbots' +follow gets stuck).
+  if (const Player* bot = path_owner ? path_owner->ToPlayer() : nullptr) {
+    if (const Group* group = bot->GetGroup();
+        group && !group->IsLeader(bot->GetGUID())) {
+      if (const Player* leader =
+              ObjectAccessor::FindConnectedPlayer(group->GetLeaderGUID());
+          leader && leader->IsInWorld() && leader->IsAlive() &&
+          leader->GetMapId() == view.map_id &&
+          leader->GetInstanceId() == bot->GetInstanceId() &&
+          (leader->GetPhaseMask() & view.phase_mask) != 0) {
+        const pb::Vec3 leader_pos{leader->GetPositionX(),
+                                  leader->GetPositionY(),
+                                  leader->GetPositionZ()};
+        const float dist =
+            Dist(view.pos, leader_pos.x, leader_pos.y, leader_pos.z);
+        if (dist >= kMinTravelDistYd && dist <= kMaxTravelDistYd) {
+          out->places.push_back({"place:leader", leader->GetName(),
+                                 "party leader",
+                                 DirFrom(view.pos, leader_pos.x, leader_pos.y),
+                                 dist, leader_pos});
+        }
+      }
+    }
+  }
   const uint32_t class_bit = 1u << view.class_id;
   const std::string trainer_label =
       base::StrCat({base::ToLowerASCII(ClassName(view.class_id)), " trainer"});
@@ -820,7 +850,7 @@ bool FindDungeonSeamHop(Map* map,
   filter.setExcludeFlags(NAV_MAGMA | NAV_SLIME | NAV_GROUND_STEEP);
 
   static constexpr float kSeamAngles[] = {0.0f, 0.35f, -0.35f, 0.7f, -0.7f};
-  static constexpr float kSeamDists[] = {10.0f, 14.0f, 18.0f};
+  static constexpr float kSeamDists[] = {6.0f, 8.0f, 10.0f, 14.0f, 18.0f};
   for (float d : kSeamDists) {
     const float step_d = std::min(d, max_dist_yd);
     if (step_d < 3.0f) {
@@ -840,10 +870,13 @@ bool FindDungeonSeamHop(Map* map,
       if (dz < -max_drop || dz > max_climb) {
         continue;
       }
-      // Verify continuous walkable terrain along the hop (no chasm/pit or
-      // intermediate wall/railing spike).
+      // Verify continuous walkable terrain and dual-height LOS (+0.6 yd low
+      // railing, +1.5 yd torso/wall) piecewise along the hop so convex stair
+      // crests do not clip a single chord while walls/railings/pits still fail.
       const float floor_min = std::min(from.z, hz) - 2.0f;
       const float ceil_max = std::max(from.z, hz) + 1.5f;
+      float prev_x = from.x;
+      float prev_y = from.y;
       float prev_z = from.z;
       bool terrain_ok = true;
       for (int i = 1; i <= samples; ++i) {
@@ -858,23 +891,31 @@ bool FindDungeonSeamHop(Map* map,
           terrain_ok = false;
           break;
         }
+        if (!map->isInLineOfSight(prev_x, prev_y, prev_z + 0.6f, sx, sy,
+                                  sz + 0.6f, phase_mask, LINEOFSIGHT_ALL_CHECKS,
+                                  VMAP::ModelIgnoreFlags::Nothing) ||
+            !map->isInLineOfSight(prev_x, prev_y, prev_z + 1.5f, sx, sy,
+                                  sz + 1.5f, phase_mask, LINEOFSIGHT_ALL_CHECKS,
+                                  VMAP::ModelIgnoreFlags::Nothing)) {
+          terrain_ok = false;
+          break;
+        }
+        prev_x = sx;
+        prev_y = sy;
         prev_z = sz;
       }
       if (!terrain_ok) {
         continue;
       }
-      // Dual-height LOS blocks both walls (+1.5 yd) and low railings (+0.6 yd).
-      if (!map->isInLineOfSight(from.x, from.y, from.z + 0.6f, hx, hy,
-                                hz + 0.6f, phase_mask, LINEOFSIGHT_ALL_CHECKS,
-                                VMAP::ModelIgnoreFlags::Nothing) ||
-          !map->isInLineOfSight(from.x, from.y, from.z + 1.5f, hx, hy,
-                                hz + 1.5f, phase_mask, LINEOFSIGHT_ALL_CHECKS,
-                                VMAP::ModelIgnoreFlags::Nothing)) {
+      // `prev_z` is the continuous terrain-following floor height at (hx, hy);
+      // validate it against drop/climb bounds and snap it onto the navmesh.
+      const float end_dz = prev_z - from.z;
+      if (end_dz < -max_drop || end_dz > max_climb) {
         continue;
       }
       // Confirm the landing point lies on a walkable navmesh polygon so the
       // bot never steps off-mesh or into geometry.
-      const float point[3] = {hy, hz, hx};  // Detour uses (y, z, x).
+      const float point[3] = {hy, prev_z, hx};  // Detour uses (y, z, x).
       const float extents[3] = {1.5f, 2.5f, 1.5f};
       dtPolyRef poly_ref = INVALID_POLYREF;
       float closest[3] = {0.0f, 0.0f, 0.0f};
@@ -884,7 +925,7 @@ bool FindDungeonSeamHop(Map* map,
         continue;
       }
       if (std::hypot(closest[2] - hx, closest[0] - hy) > 1.5f ||
-          std::abs(closest[1] - hz) > 2.0f) {
+          std::abs(closest[1] - prev_z) > 2.0f) {
         continue;
       }
       // Re-validate drop/climb bounds and dual-height LOS to the snapped
@@ -896,14 +937,12 @@ bool FindDungeonSeamHop(Map* map,
       if (snap_dz < -max_drop || snap_dz > max_climb) {
         continue;
       }
-      if (!map->isInLineOfSight(from.x, from.y, from.z + 0.6f, snap_x, snap_y,
-                                snap_z + 0.6f, phase_mask,
-                                LINEOFSIGHT_ALL_CHECKS,
-                                VMAP::ModelIgnoreFlags::Nothing) ||
-          !map->isInLineOfSight(from.x, from.y, from.z + 1.5f, snap_x, snap_y,
-                                snap_z + 1.5f, phase_mask,
-                                LINEOFSIGHT_ALL_CHECKS,
-                                VMAP::ModelIgnoreFlags::Nothing)) {
+      if (!map->isInLineOfSight(
+              hx, hy, prev_z + 0.6f, snap_x, snap_y, snap_z + 0.6f, phase_mask,
+              LINEOFSIGHT_ALL_CHECKS, VMAP::ModelIgnoreFlags::Nothing) ||
+          !map->isInLineOfSight(
+              hx, hy, prev_z + 1.5f, snap_x, snap_y, snap_z + 1.5f, phase_mask,
+              LINEOFSIGHT_ALL_CHECKS, VMAP::ModelIgnoreFlags::Nothing)) {
         continue;
       }
       *out_hop = {snap_x, snap_y, snap_z};
@@ -919,7 +958,7 @@ PositionFacts ComputePositionFacts(const WorldPlaces& world,
                                    const DungeonNavConfig& dungeon_nav) {
   PositionFacts facts;
   FillSpots(world, view, path_owner, dungeon_nav, &facts.spots);
-  FillPlaces(world, view, &facts);
+  FillPlaces(world, view, path_owner, &facts);
   RefreshFrom(view.pos, &facts);
   return facts;
 }
