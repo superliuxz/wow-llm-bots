@@ -137,7 +137,8 @@ Findings from "Wow Llm Bots Review 2". Tick when fixed and tested.
    wait, follow, attack my target, pull, drink, mount, `@heal`, `rti skull`. Runs through
    `ValidateAction` / `ExecuteAction`, then wakes the brain with `leader_said: wait (applied)`
    so the bot replies in character. This is also the trusted channel "chat is untrusted" needs.
-3. **Popup policies in C++** (rez, ready, roll, role, boot, summon), written once by the brain and
+3. **[done] Popup policies in C++** (`Answer popups automatically`, `AnswerPopupsByPolicy`,
+   summon and kick-vote options; `e2e_popup_policy`; summon and kick vote not live-triggered yet) (rez, ready, roll, role, boot, summon), written once by the brain and
    answered in under 1 s. Add the Disenchant vote, the LFG vote-kick and summon accept.
 4. **Follow marks and do CC.** `Attack <mob> (skull)` options sorted by mark,
    `Crowd-control <mob> (moon): Polymorph`, and a "don't break CC" `-aoe` override. Make "human is

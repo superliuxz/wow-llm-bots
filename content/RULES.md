@@ -64,6 +64,9 @@ dungeons and in the open world:
 - `party leader`: you pull and set the pace: `Attack` the next pack here, and only when none is
   left here `Explore` to the next one; wait (`Rest` / `Keep`) while a member is dead, or the
   healer's power is below a third.
+- Popups: in a group you trust, pick `Answer popups automatically` once (rez, summons, ready
+  checks, Dungeon Finder and loot rolls are then answered at once; `popup policy:` lines say
+  what was answered). `Vote to kick` only someone who is really ruining the run.
 - Questing together: `Share quest` hands a quest you have to party members who lack it, and
   `Accept shared quest` takes one a party member shares with you.
 - `leader said: <command> (applied: ...)` under `Since your last look:` means your body already

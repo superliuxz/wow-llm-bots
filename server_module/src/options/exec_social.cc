@@ -15,6 +15,7 @@
 #include "DBCStores.h"
 #include "DBCStructure.h"
 #include "Define.h"
+#include "GameTime.h"
 #include "Group.h"
 #include "Item.h"
 #include "ItemTemplate.h"
@@ -42,6 +43,7 @@
 #include "WorldSession.h"
 #include "base/strings/stringprintf.h"
 #include "bot_manager/bot_manager.h"
+#include "bot_session.h"
 #include "options/action_types.h"
 #include "options/exec_items.h"
 #include "options/exec_shared.h"
@@ -367,6 +369,30 @@ void CollectGroupAndUpkeepActions(Player* bot,
     out->push_back({"ready:no", "Not ready (decline ready check)"});
   }
 
+  // 2a. A summon and a Dungeon Finder kick vote (Now #3).
+  if (bot->GetSummonExpireTimer() > GameTime::GetGameTime().count()) {
+    const std::string from = BotSessionRegistry::Instance().InspectSession(
+        bot->GetGUID().GetRawValue(), [](const BotSession* s) {
+          return s ? s->pending_summoner : std::string();
+        });
+    out->push_back({"summon:accept", from.empty()
+                                         ? "Accept summon"
+                                         : "Accept summon from " + from});
+    out->push_back({"summon:decline", "Decline summon"});
+  }
+  {
+    const auto [victim, reason] = BotSessionRegistry::Instance().InspectSession(
+        bot->GetGUID().GetRawValue(), [](const BotSession* s) {
+          return s ? std::pair{s->pending_boot_victim, s->pending_boot_reason}
+                   : std::pair{std::string(), std::string()};
+        });
+    if (!victim.empty()) {
+      const std::string why = reason.empty() ? "" : " (" + reason + ")";
+      out->push_back({"boot:yes", "Vote to kick " + victim + why});
+      out->push_back({"boot:no", "Vote not to kick " + victim});
+    }
+  }
+
   // 3. Shared quest accept / decline.
   if (bot->IsAlive()) {
     if (const uint32_t qid = BotManager::GetPendingSharedQuest(bot); qid != 0) {
@@ -475,6 +501,17 @@ void CollectGroupAndUpkeepActions(Player* bot,
   // 5b. Group policies.
   if (bot->IsAlive() && !bot->IsInCombat()) {
     if (Group* group = bot->GetGroup()) {
+      const bool auto_popups = BotSessionRegistry::Instance().InspectSession(
+          bot->GetGUID().GetRawValue(),
+          [](const BotSession* s) { return s && s->auto_popups; });
+      if (auto_popups) {
+        out->push_back({"popups:manual", "Answer popups yourself again"});
+      } else {
+        out->push_back({"popups:auto",
+                        "Answer popups automatically (accept rez, summons, "
+                        "ready checks and Dungeon Finder; Need usable "
+                        "upgrades, else Greed)"});
+      }
       const BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
       if (policy.not_tank) {
         out->push_back({"grouppolicy:tank", "Tank for the group again"});
@@ -836,6 +873,16 @@ ActionOutcome ExecuteGroupPolicyAction(Player* bot,
       policy.stay = false;
       info = "following the leader again";
       break;
+    case GroupPolicyAction::Op::kAutoPopups:
+    case GroupPolicyAction::Op::kManualPopups: {
+      const bool on = action.op == GroupPolicyAction::Op::kAutoPopups;
+      BotSessionRegistry::Instance().WithSession(
+          bot->GetGUID().GetRawValue(),
+          [on](BotSession& s) { s.auto_popups = on; });
+      return {.used = true,
+              .info = on ? "popups are answered automatically now"
+                         : "you answer popups yourself again"};
+    }
   }
   BotManager::SetGroupPolicy(bot, policy);
   return {.used = true, .info = std::move(info)};
@@ -883,6 +930,154 @@ ItemActionOutcome ExecuteMountAction(Player* bot, const MountAction& action) {
   return {.used = !casting,
           .info = casting ? "" : ("mounted " + action.label),
           .pending_spell_id = casting ? action.spell_id : 0};
+}
+
+ActionOutcome ExecutePopupAnswerAction(Player* bot,
+                                       const PopupAnswerAction& action) {
+  WorldSession* session = bot->GetSession();
+  if (!session) {
+    return {.error = "no session"};
+  }
+  const uint64_t key = bot->GetGUID().GetRawValue();
+  if (action.kind == PopupAnswerAction::Kind::kSummon) {
+    if (bot->GetSummonExpireTimer() <= GameTime::GetGameTime().count()) {
+      return {.error = "no summon to answer"};
+    }
+    bot->SummonIfPossible(action.yes, ObjectGuid::Empty);
+    BotSessionRegistry::Instance().WithSession(
+        key, [](BotSession& s) { s.pending_summoner.clear(); });
+    return {.used = true,
+            .info = action.yes ? "accepted the summon" : "declined the summon"};
+  }
+  const bool pending =
+      BotSessionRegistry::Instance().WithSession(key, [](BotSession& s) {
+        const bool had = !s.pending_boot_victim.empty();
+        s.pending_boot_victim.clear();
+        s.pending_boot_reason.clear();
+        return had;
+      });
+  if (!pending) {
+    return {.error = "no kick vote to answer"};
+  }
+  WorldPacket p(CMSG_LFG_SET_BOOT_VOTE, 1);
+  p << uint8_t(action.yes ? 1 : 0);
+  p.rpos(0);
+  session->HandleLfgSetBootVoteOpcode(p);
+  return {.used = true,
+          .info = action.yes ? "voted to kick" : "voted not to kick"};
+}
+
+namespace {
+
+// The brain's loot policy: Need a usable upgrade of the bot's own armor type
+// that doesn't bind on equip, else Greed, else Pass.
+uint8_t PolicyRollVote(Player* bot, const Roll& roll) {
+  const ItemTemplate* proto = sObjectMgr->GetItemTemplate(roll.itemid);
+  bool upgrade = false;
+  if (proto && proto->Bonding != BIND_WHEN_EQUIPPED &&
+      bot->CanUseItem(proto) == EQUIP_ERR_OK) {
+    const bool armor_ok = proto->Class != ITEM_CLASS_ARMOR ||
+                          proto->InventoryType == INVTYPE_CLOAK ||
+                          !ArmorTypeName(proto->SubClass) ||
+                          proto->SubClass == BestArmorSubclass(bot);
+    const std::vector<uint8_t> slots = SlotsFor(bot, proto->InventoryType);
+    for (const uint8_t slot : slots) {
+      const Item* worn = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
+      const ItemTemplate* wp = worn ? worn->GetTemplate() : nullptr;
+      if (armor_ok && (!wp || proto->ItemLevel > wp->ItemLevel)) {
+        upgrade = true;
+        break;
+      }
+    }
+  }
+  if (upgrade && (roll.rollVoteMask & ROLL_FLAG_TYPE_NEED)) {
+    return 1;
+  }
+  if (roll.rollVoteMask & ROLL_FLAG_TYPE_GREED) {
+    return 2;
+  }
+  return 0;
+}
+
+}  // namespace
+
+std::vector<std::string> AnswerPopupsByPolicy(Player* bot) {
+  std::vector<std::string> answered;
+  if (!bot || !bot->IsInWorld()) {
+    return answered;
+  }
+  const bool on = BotSessionRegistry::Instance().InspectSession(
+      bot->GetGUID().GetRawValue(),
+      [](const BotSession* s) { return s && s->auto_popups; });
+  if (!on) {
+    return answered;
+  }
+  const auto note = [&](const ActionOutcome& out, std::string what) {
+    if (out.error.empty()) {
+      answered.push_back(std::move(what));
+    }
+  };
+  if (!bot->IsAlive()) {
+    if (bot->isResurrectRequested()) {
+      note(ExecuteResurrectAction(
+               bot, ResurrectAction{ResurrectAction::Mode::kAccept}),
+           "accepted a resurrection");
+    }
+  } else {
+    if (BotManager::HasPendingReadyCheck(bot)) {
+      note(ExecuteReadyCheckAction(bot, ReadyCheckAction{true}),
+           "answered the ready check: ready");
+    }
+    if (bot->GetSummonExpireTimer() > GameTime::GetGameTime().count()) {
+      note(ExecutePopupAnswerAction(
+               bot, PopupAnswerAction{PopupAnswerAction::Kind::kSummon, true}),
+           "accepted a summon");
+    }
+    const lfg::LfgState st = sLFGMgr->GetState(bot->GetGUID());
+    if (st == lfg::LFG_STATE_ROLECHECK) {
+      const std::vector<LfgRoleChoice> roles = SpecLfgRoles(bot);
+      if (!roles.empty()) {
+        note(ExecuteLfgAction(
+                 bot, LfgAction{LfgAction::Op::kRole, roles.front().mask}),
+             std::string("confirmed the Dungeon Finder role: ") +
+                 roles.front().name);
+      }
+    } else if (st == lfg::LFG_STATE_PROPOSAL) {
+      if (const uint32_t pid = BotManager::GetPendingLfgProposal(bot)) {
+        note(ExecuteLfgAction(bot,
+                              LfgAction{LfgAction::Op::kAcceptProposal, pid}),
+             "accepted the Dungeon Finder proposal");
+      }
+    }
+  }
+  if (Group* group = bot->GetGroup()) {
+    std::vector<LootRollAction> votes;
+    for (const Roll* roll : group->GetRolls()) {
+      if (!roll) {
+        continue;
+      }
+      auto it = roll->playerVote.find(bot->GetGUID());
+      if (it == roll->playerVote.end() || it->second != NOT_EMITED_YET) {
+        continue;
+      }
+      LootRollAction a;
+      a.item_guid = base::StringPrintf(
+          "0x%016llx",
+          static_cast<unsigned long long>(roll->itemGUID.GetRawValue()));
+      a.slot = roll->itemSlot;
+      a.vote = PolicyRollVote(bot, *roll);
+      const ItemTemplate* proto = sObjectMgr->GetItemTemplate(roll->itemid);
+      a.label = std::string(a.vote == 1   ? "Need "
+                            : a.vote == 2 ? "Greed "
+                                          : "Pass ") +
+                (proto ? proto->Name1 : "an item");
+      votes.push_back(std::move(a));
+    }
+    for (const LootRollAction& a : votes) {
+      note(ExecuteLootRollAction(bot, a), "rolled: " + a.label);
+    }
+  }
+  return answered;
 }
 
 }  // namespace llm_brain

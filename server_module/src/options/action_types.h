@@ -110,8 +110,22 @@ struct LfgAction {
 };
 
 struct GroupPolicyAction {
-  enum class Op : uint8_t { kNoTank, kTank, kStay, kFollow };
+  enum class Op : uint8_t {
+    kNoTank,
+    kTank,
+    kStay,
+    kFollow,
+    kAutoPopups,
+    kManualPopups
+  };
   Op op = Op::kFollow;
+};
+
+// Answers a summon or a Dungeon Finder kick vote (Now #3).
+struct PopupAnswerAction {
+  enum class Kind : uint8_t { kSummon, kBootVote };
+  Kind kind = Kind::kSummon;
+  bool yes = true;
 };
 
 struct FollowLeaderAction {
@@ -190,6 +204,7 @@ using BotAction = std::variant<KeepAction,
                                ShareQuestAction,
                                LfgAction,
                                GroupPolicyAction,
+                               PopupAnswerAction,
                                FollowLeaderAction,
                                MarkTargetAction,
                                MountAction,

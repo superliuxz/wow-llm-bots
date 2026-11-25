@@ -55,6 +55,20 @@ BotAction DecodeOptionFactAction(std::string_view guid,
     return LootRollAction{std::string(parts[1]), slot,
                           static_cast<uint8_t>(vote), std::string(label)};
   }
+  if (guid == "popups:auto") {
+    return GroupPolicyAction{GroupPolicyAction::Op::kAutoPopups};
+  }
+  if (guid == "popups:manual") {
+    return GroupPolicyAction{GroupPolicyAction::Op::kManualPopups};
+  }
+  if (guid == "summon:accept" || guid == "summon:decline") {
+    return PopupAnswerAction{PopupAnswerAction::Kind::kSummon,
+                             guid == "summon:accept"};
+  }
+  if (guid == "boot:yes" || guid == "boot:no") {
+    return PopupAnswerAction{PopupAnswerAction::Kind::kBootVote,
+                             guid == "boot:yes"};
+  }
   if (guid == "ready:yes") {
     return ReadyCheckAction{true};
   }
@@ -255,6 +269,7 @@ bool IsDeadAllowedAction(const BotAction& action) {
       std::holds_alternative<ResurrectAction>(action) ||
       std::holds_alternative<LootRollAction>(action) ||
       std::holds_alternative<ReadyCheckAction>(action) ||
+      std::holds_alternative<PopupAnswerAction>(action) ||
       std::holds_alternative<LeaveGroupAction>(action) ||
       std::holds_alternative<AcceptInviteAction>(action) ||
       std::holds_alternative<DeclineInviteAction>(action)) {
@@ -328,6 +343,8 @@ std::string_view ActionKindName(const BotAction& action) {
           return "lfg";
         if constexpr (std::is_same_v<T, GroupPolicyAction>)
           return "group_policy";
+        if constexpr (std::is_same_v<T, PopupAnswerAction>)
+          return "popup_answer";
         if constexpr (std::is_same_v<T, FollowLeaderAction>)
           return "follow";
         if constexpr (std::is_same_v<T, MarkTargetAction>)

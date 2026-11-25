@@ -1139,4 +1139,92 @@ def _case_human_party():
                 "the bots")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
-CASES = [_case_human_party(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal()]
+def _case_popup_policy():
+    """The brain's popup policy answers popups in C++, without a brain call (Now #3).
+
+      1. Level Loada and Telda to 20 and group them (Loada leads).
+      2. Telda picks `Answer popups automatically`.
+      3. Loada starts a ready check and a group roll on a cape Telda can wear and has no cloak:
+         Telda answers both by policy within seconds (ready; Greed: the cape binds on equip, and
+         BoE is greeded even as an upgrade), and is told
+         so by `popup policy:` info events, with no further choice from the brain.
+    """
+
+    import socket
+    import time
+
+    from wlblib import server
+    from wlblib.common import TEST
+    from wlblib.testing import expect
+
+    NAME = "popup_policy"
+    DESCRIPTION = "Answer popups automatically: ready check and loot roll answered in C++"
+    TEST_CONFIG = "whisper"  # Two level-1 priests.
+    BOT = "Loada"
+    ONLINE = 2
+    ITEM = 1355  # Buckskin Cape (green).
+
+    def run(stack):
+        for bot in ("Loada", "Telda"):
+            server.console(f"character level {bot} 20", inst=TEST)
+        server.console("llmtest group Loada Telda", inst=TEST)
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        sock.connect(str(TEST.run / "brain.sock"))
+        reader = wire.FrameReader()
+        policy_cmd = None
+        policy_ok = False
+        started = None
+        answers = []
+        chooses_after = 0
+        deadline = time.time() + 40.0
+        try:
+            while time.time() < deadline and len(answers) < 2:
+                try:
+                    chunk = sock.recv(1 << 20)
+                except socket.timeout:
+                    chunk = b""
+                for payload in reader.feed(chunk):
+                    msg = wire.decode_module_message(payload)
+                    if not msg:
+                        continue
+                    if "event" in msg:
+                        if msg["event"].get("bot") != "Telda":
+                            continue
+                        ev = msg["event"].get("event", {})
+                        text = ev.get("info", {}).get("text", "")
+                        if text.startswith("popup policy:"):
+                            answers.append(text)
+                        if ev.get("error", {}).get("command_id") == policy_cmd:
+                            expect(False, f"policy choice failed: {ev['error'].get('text')}")
+                        continue
+                    snap = msg.get("snapshot")
+                    if not snap or snap.get("bot") != "Telda":
+                        continue
+                    if policy_cmd is None:
+                        idx = find_option(snap.get("options", []),
+                                          "Answer popups automatically")
+                        if idx:
+                            policy_cmd = 7
+                            send_cmd(sock, {"bot": "Telda", "command_id": policy_cmd,
+                                             "choose": {"option": idx, "seq": snap.get("seq", 0)}})
+                    elif not policy_ok and find_option(snap.get("options", []),
+                                                       "Answer popups yourself again"):
+                        policy_ok = True
+                        started = time.time()
+                        server.console("llmtest readycheck Loada", inst=TEST)
+                        out = server.console(f"llmtest lootroll Loada {ITEM}", inst=TEST)
+                        expect("roll started" in out, f"setup: no roll started ({out[-200:]})")
+        finally:
+            sock.close()
+            server.console("llmtest ungroup Telda", inst=TEST)
+        expect(policy_ok, "Telda never set the popup policy")
+        took = time.time() - started if started else 0
+        expect(any("answered the ready check: ready" in a for a in answers),
+               f"ready check not answered by policy: {answers}")
+        expect(any("rolled: Greed Buckskin Cape" in a for a in answers),
+               f"loot roll not answered by policy (Greed: BoE): {answers}")
+        return f"answered by policy within {took:.1f} s: {answers}"
+    return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
+
+CASES = [_case_popup_policy(), _case_human_party(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal()]

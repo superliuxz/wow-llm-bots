@@ -61,6 +61,7 @@
 #include "options/exec_movement.h"
 #include "options/exec_npc.h"
 #include "options/exec_shared.h"
+#include "options/exec_social.h"
 #include "options/option_executor.h"
 #include "options/option_facts.h"
 #include "options/options.h"
@@ -391,6 +392,13 @@ class LlmBrainWorldScript : public WorldScript {
         ClearAvoidedTargetsForBot(bot->GetGUID().GetRawValue());
       }
       CheckPendingGroupInvite(bot, i, config_.bots[i], now);
+      // The brain's popup policy answers them first, within a tick (Now #3);
+      // the brain hears what was answered.
+      for (std::string& answered : AnswerPopupsByPolicy(bot)) {
+        wlb::snapshot::Event info;
+        info.info.emplace().text = "popup policy: " + std::move(answered);
+        SendImmediateEvent(i, config_.bots[i], std::move(info));
+      }
       // Timed popups (ready check, LFG, loot roll, quest share, rez) wake the
       // brain while they are still open (RH-H1).
       for (wlb::snapshot::Event& ev :

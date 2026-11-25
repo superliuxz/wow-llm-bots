@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -46,6 +47,17 @@ struct BotSession {
   // group does too.
   uint64_t group_guid = 0;
   GroupPolicy group_policy;
+
+  // The brain's popup policy (Now #3): answer rez offers, summons, ready
+  // checks, role checks, proposals and loot rolls automatically. Survives
+  // logout.
+  bool auto_popups = false;
+
+  // A summon (warlock ritual, meeting stone) and a Dungeon Finder kick vote
+  // waiting for an answer, seen in outgoing packets.
+  std::string pending_summoner;
+  std::string pending_boot_victim;
+  std::string pending_boot_reason;
 
   // Pending timed popups observed via outgoing packets.
   uint32_t pending_shared_quest_id = 0;

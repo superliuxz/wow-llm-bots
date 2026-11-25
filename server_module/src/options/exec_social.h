@@ -6,6 +6,7 @@
 #ifndef MOD_LLM_BRAIN_OPTIONS_EXEC_SOCIAL_H_
 #define MOD_LLM_BRAIN_OPTIONS_EXEC_SOCIAL_H_
 
+#include <string>
 #include <vector>
 
 #include "options/action_types.h"
@@ -31,6 +32,13 @@ ActionOutcome ExecuteLeaveGroupAction(Player* bot);
 ActionOutcome ExecuteResurrectAction(Player* bot,
                                      const ResurrectAction& action);
 ActionOutcome ExecuteLootRollAction(Player* bot, const LootRollAction& action);
+ActionOutcome ExecutePopupAnswerAction(Player* bot,
+                                       const PopupAnswerAction& action);
+// With the brain's `auto_popups` policy set, answers what is open now: rez
+// offers from the party, summons, ready checks, role checks, proposals, and
+// loot rolls (Need a usable upgrade, else Greed, else Pass). Returns a short
+// line per answer, for the brain. World thread.
+std::vector<std::string> AnswerPopupsByPolicy(Player* bot);
 ActionOutcome ExecuteReadyCheckAction(Player* bot,
                                       const ReadyCheckAction& action);
 ActionOutcome ExecuteSharedQuestAction(Player* bot,

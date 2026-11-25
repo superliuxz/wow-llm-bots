@@ -22,14 +22,16 @@ void BotSessionRegistry::ResetOnLogout(uint64_t bot_guid) {
   if (it == sessions_.end()) {
     return;
   }
-  if (it->second.group_guid == 0) {
+  if (it->second.group_guid == 0 && !it->second.auto_popups) {
     sessions_.erase(it);
     return;
   }
-  // A relog keeps its group, so it keeps the brain's policy for that group.
+  // A relog keeps its group, so it keeps the brain's policy for that group,
+  // and the brain's popup policy.
   BotSession kept;
   kept.group_guid = it->second.group_guid;
   kept.group_policy = it->second.group_policy;
+  kept.auto_popups = it->second.auto_popups;
   it->second = std::move(kept);
 }
 

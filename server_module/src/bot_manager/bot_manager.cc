@@ -339,6 +339,55 @@ class LlmBrainPacketScript final : public ServerScript {
         }
         break;
       }
+      case SMSG_SUMMON_REQUEST: {
+        if (packet.size() >= 8) {
+          ByteBuffer copy(packet);
+          copy.rpos(0);
+          ObjectGuid summoner;
+          copy >> summoner;
+          std::string name;
+          if (Player* from = ObjectAccessor::FindConnectedPlayer(summoner)) {
+            name = from->GetName();
+          }
+          BotSessionRegistry::Instance().WithSession(
+              key, [&name](BotSession& s) { s.pending_summoner = name; });
+        }
+        break;
+      }
+      case SMSG_LFG_BOOT_PROPOSAL_UPDATE: {
+        if (packet.size() >= 3 + 8 + 16) {
+          ByteBuffer copy(packet);
+          copy.rpos(0);
+          uint8_t in_progress = 0;
+          uint8_t did_vote = 0;
+          uint8_t agree = 0;
+          ObjectGuid victim;
+          uint32_t votes = 0;
+          uint32_t agree_num = 0;
+          uint32_t secs_left = 0;
+          uint32_t needed = 0;
+          std::string reason;
+          copy >> in_progress >> did_vote >> agree >> victim >> votes >>
+              agree_num >> secs_left >> needed;
+          if (copy.rpos() < copy.size()) {
+            copy >> reason;
+          }
+          std::string name;
+          if (in_progress && !did_vote && victim != bot->GetGUID()) {
+            if (Player* p = ObjectAccessor::FindConnectedPlayer(victim)) {
+              name = p->GetName();
+            } else {
+              name = "a group member";
+            }
+          }
+          BotSessionRegistry::Instance().WithSession(
+              key, [&name, &reason](BotSession& s) {
+                s.pending_boot_victim = name;
+                s.pending_boot_reason = name.empty() ? "" : reason;
+              });
+        }
+        break;
+      }
       default:
         break;
     }
