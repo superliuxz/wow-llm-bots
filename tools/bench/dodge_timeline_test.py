@@ -550,10 +550,12 @@ class DodgeTimelineAndMeterTest(unittest.TestCase):
                     state["max_in_flight"] = max(state["max_in_flight"], state["in_flight"])
 
                 def finish() -> None:
-                    with log.open("a", encoding="utf-8") as fp:
-                        fp.write(replies[tok])
+                    # Done before the reply shows: the batch may send the next command the
+                    # moment it reads this one's reply (writing first raced, ~1 run in 12).
                     with lock:
                         state["in_flight"] -= 1
+                    with log.open("a", encoding="utf-8") as fp:
+                        fp.write(replies[tok])
 
                 t = threading.Timer(0.02, finish)
                 timers.append(t)
