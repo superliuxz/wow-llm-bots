@@ -1193,19 +1193,73 @@ def _case_human_party():
                                       if "leader said:" in e.get("event", {}).get("info", {})
                                       .get("text", "")})
 
+                # 6 (Milestone 1b). A minimap ping from the human shows on every bot's
+                # minimap (`ext.minimap.ping`), relative to the bot; a bot's own ping
+                # reaches the others and the human, never itself.
+                def pings_of(bot, after, before=None):
+                    with proxy.lock:
+                        snaps = [(t, s) for t, s in proxy.snapshots
+                                 if s.get("bot") == bot and t >= after
+                                 and (before is None or t < before)]
+                    return [(t, s, ((s.get("ext") or {}).get("minimap") or {}).get("ping"))
+                            for t, s in snaps]
+                start_t = 0.0
+                early_pings = [p for b in BOTS for _, _, p in pings_of(b, start_t) if p]
+                with proxy.lock:
+                    loada_now = [s for _, s in proxy.snapshots if s.get("bot") == "Loada"][-1]
+                lpos = loada_now["base"]["where"]["position"]
+                since_ping = time.monotonic()
+                client.ping(lpos["x"] + 15.0, lpos["y"])  # 15 yd north of Loada.
+
+                def all_see_human_ping():
+                    return all(any(p and p.get("from") == HUMAN for _, _, p in
+                                   pings_of(b, since_ping)) for b in BOTS)
+                _poll(all_see_human_ping, 10, f"every bot seeing {HUMAN}'s minimap ping")
+                loada_ping = next(p for _, _, p in pings_of("Loada", since_ping)
+                                  if p and p.get("from") == HUMAN)
+                since_bot_ping = time.monotonic()
+                server.console("llmtest ping Loada 0 10", wait_s=0.3, inst=TEST)
+                _poll(lambda: any(p and p.get("from") == "Loada" for _, _, p in
+                                  pings_of("Loadb", since_bot_ping)), 10,
+                      "Loadb seeing Loada's minimap ping")
+                time.sleep(1.5)
+                self_pinged = [p for _, _, p in pings_of("Loada", since_bot_ping)
+                               if p and p.get("from") == "Loada"]
+                with client.lock:
+                    human_saw = [pg for pg in client.pings if pg["t"] >= since_bot_ping
+                                 and pg["from_guid"] != client.guid]
+
                 # 5 (Now #8). A follower 60 yd from its human leader, outdoors, comes back
                 # by itself (no LLM call).
                 server.console("llmtest tele Loadb 0 -8880 -132.5 82 0", wait_s=0.5, inst=TEST)
                 _poll(lambda: "Loadb strayed" in stack.server_log(), 10,
                       "Loadb following back after straying")
 
-                # 3. A boss emote reaches the bots.
+                # 3. A boss emote reaches the bots (and, 6, the woken bot's screen shows a
+                # fresh ping).
+                client.ping(lpos["x"], lpos["y"] + 12.0)
+                time.sleep(1.5)
                 since_emote = time.monotonic()
                 server.console(f"llmtest bossemote {HUMAN} roars at the party!", wait_s=0.5,
                                inst=TEST)
                 _poll(lambda: any(t >= since_emote and "roars at the party" in w
                                   for t, _, w in list(brain.wakes)), 20,
                       "a bot woken by the boss emote")
+                with brain.lock:
+                    ping_on_screen = any(t >= since_emote and f"\nping: {HUMAN} pinged " in txt
+                                         for t, _, txt in brain.prompts)
+
+                # 6. Leaving the group takes the ping off the minimap at once.
+                before_ungroup = pings_of("Loadc", since_emote)
+                pinged_before_ungroup = bool(before_ungroup and before_ungroup[-1][2])
+                since_ungroup = time.monotonic()
+                server.console("llmtest ungroup Loadc", wait_s=0.3, inst=TEST)
+                time.sleep(0.5)
+
+                def ungrouped_snaps():
+                    return [p for _, _, p in pings_of("Loadc", since_ungroup + 1.0)]
+                _poll(lambda: len(ungrouped_snaps()) >= 2, 10, "Loadc snapshots after ungroup")
+                ungrouped_pings = [p for p in ungrouped_snaps() if p]
             finally:
                 if client:
                     client.close()
@@ -1228,9 +1282,20 @@ def _case_human_party():
         expect(any("leader said: wait (applied" in a for a in applied)
                and any("leader said: follow (applied" in a for a in applied),
                f"the brain wasn't told what was applied: {applied}")
+        expect(not early_pings, f"a minimap ping before anyone pinged: {early_pings}")
+        rel = loada_ping.get("rel") or {}
+        expect(10.0 <= rel.get("dist_yd", 0.0) <= 20.0 and rel.get("dir") in ("N", "NE", "NW"),
+               f"Loada saw {HUMAN}'s ping 15 yd north as {loada_ping}")
+        expect(not self_pinged, f"Loada saw its own ping: {self_pinged}")
+        expect(human_saw, f"{HUMAN}'s client never saw Loada's ping")
+        expect(ping_on_screen, "no 'ping: Allyone pinged ...' line on a woken bot's screen")
+        expect(pinged_before_ungroup, "Loadc had no fresh ping just before leaving the group")
+        expect(not ungrouped_pings, f"Loadc kept a ping after leaving the group: "
+               f"{ungrouped_pings}")
         return (f"3 bots accepted, master={HUMAN} for all; one party reply ({replies[0]!r}); "
                 "'wait here' / 'loadb follow' / 'follow me' applied in C++; quest help shown; "
-                "stray follower came back; boss emote woke the bots")
+                "stray follower came back; boss emote woke the bots; minimap pings shown "
+                f"({rel.get('dist_yd', 0):.0f} yd {rel.get('dir')}), not to self, gone on ungroup")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
 def _case_popup_policy():

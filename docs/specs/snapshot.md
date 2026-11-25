@@ -41,7 +41,10 @@ Enforced mechanically on every fixture and live capture by `ValidateSnapshotVisi
      populated only when relevant in the client. `action_bars.buttons` is every snapshot's
      castable spellbook from pure `Spell.dbc` metadata (active spec, non-passive, displayed,
      non-tradeskill, highest known rank, each name once, with cooldown left), rendered as one
-     `spells:` screen line capped at 600 B (`+N more`).
+     `spells:` screen line capped at 600 B (`+N more`). `minimap.ping` is the last party
+     member's minimap ping (`MSG_MINIMAP_PING`: who, ground position relative to the bot, age),
+     kept 30 s while the pinger is still in the group on the bot's map/instance, rendered as a
+     core `ping: <Name> pinged 18 yd NE` line (`(Ns ago)` once 5 s old).
    - Panel-gated (`bags`, `map`, `character`, `quest_log`, `spellbook`, tagged `visibility: OPEN`):
      present only when the corresponding `Panel` is in `base.ui.open_panels`.
 3. **Hover-only fields (`visibility: HOVER`):** 26 fields (e.g., `PlayerPart::race`,

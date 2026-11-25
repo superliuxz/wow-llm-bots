@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <list>
@@ -388,6 +389,38 @@ class LlmBrainPacketScript final : public ServerScript {
                   s.pending_lfg_proposal_ms = 0;
                 }
               });
+        }
+        break;
+      }
+      case MSG_MINIMAP_PING: {
+        // `Group::DoMinimapPing` (MinimapPing::Write: ObjectGuid SourceGuid,
+        // float MapX, float MapY in world coordinates), broadcast to the
+        // pinger's group but not the pinger; handled on the world thread
+        // (PROCESS_THREADUNSAFE). The client shows it on the minimap.
+        if (packet.size() >= 8 + 4 + 4) {
+          ByteBuffer copy(packet);
+          copy.rpos(0);
+          ObjectGuid source;
+          float x = 0.0f;
+          float y = 0.0f;
+          copy >> source >> x >> y;
+          Group* group = bot->GetGroup();
+          Player* from = ObjectAccessor::FindConnectedPlayer(source);
+          if (source == bot->GetGUID() || !group || !group->IsMember(source) ||
+              !from || !std::isfinite(x) || !std::isfinite(y)) {
+            break;
+          }
+          BotSession::PartyPing ping{
+              .from_guid = source.GetRawValue(),
+              .from = from->GetName(),
+              .x = x,
+              .y = y,
+              .map_id = from->GetMapId(),
+              .instance_id = from->GetInstanceId(),
+              .ms = getMSTime(),
+          };
+          BotSessionRegistry::Instance().WithSession(
+              key, [&ping](BotSession& s) { s.party_ping = std::move(ping); });
         }
         break;
       }

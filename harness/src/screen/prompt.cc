@@ -156,13 +156,14 @@ bool IsNumberedOptionLine(std::string_view line) {
   return i + 1 < line.size() && line[i] == '.' && line[i + 1] == ' ';
 }
 
-// Core status lines (`me:`, `where:`, `party:` summary/help/state) stay ahead
-// of unnumbered scenery lines when a crowded screen has to be trimmed.
+// Core status lines (`me:`, `where:`, `party:` summary/help/state, a party
+// member's `ping:`) stay ahead of unnumbered scenery lines when a crowded
+// screen has to be trimmed.
 bool IsCoreScreenLine(std::string_view line) {
   return line.starts_with("me:") || line.starts_with("where:") ||
          line.starts_with("party:") || line.starts_with("  party hurt:") ||
          line.starts_with("  loose mobs:") || line.starts_with("  help ") ||
-         line.starts_with("  party_state:");
+         line.starts_with("  party_state:") || line.starts_with("ping: ");
 }
 
 // Truncates `user` to `max_bytes` while keeping ALL numbered option lines (both

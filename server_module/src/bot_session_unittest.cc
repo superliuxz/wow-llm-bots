@@ -24,6 +24,7 @@ TEST(BotSessionRegistryTest, UnifiedResetsClearLifecycleState) {
     s.avoided_targets = {0x99, 0x100};
     s.last_interrupted.active = true;
     s.last_interrupted.map_id = 602;
+    s.party_ping = BotSession::PartyPing{.from_guid = 7, .from = "Allyone"};
   });
   EXPECT_EQ(reg.size(), 1u);
 
@@ -34,6 +35,7 @@ TEST(BotSessionRegistryTest, UnifiedResetsClearLifecycleState) {
     ASSERT_NE(s, nullptr);
     EXPECT_FALSE(s->last_interrupted.active);
     EXPECT_TRUE(s->avoided_targets.empty());
+    EXPECT_FALSE(s->party_ping.has_value());
     EXPECT_TRUE(s->group_policy.stay);
     EXPECT_EQ(s->pending_shared_quest_id, 104u);
   });
@@ -59,6 +61,32 @@ TEST(BotSessionRegistryTest, UnifiedResetsClearLifecycleState) {
   reg.ResetOnLogout(kBot);
   EXPECT_EQ(reg.size(), 0u);
   reg.InspectSession(kBot, [](const BotSession* s) { EXPECT_EQ(s, nullptr); });
+}
+
+// A party ping never outlives a harness disconnect or a relog, while a relog
+// still keeps the group policy (adversarial counter-test for the reset hooks).
+TEST(BotSessionRegistryTest, PartyPingClearsOnDisconnectAndLogout) {
+  BotSessionRegistry reg;
+  constexpr uint64_t kBot = 0x1002;
+  const auto ping = BotSession::PartyPing{
+      .from_guid = 7, .from = "Allyone", .x = 1.0f, .y = 2.0f, .ms = 10};
+  reg.WithSession(kBot, [&](BotSession& s) {
+    s.group_guid = 42;
+    s.party_ping = ping;
+  });
+  reg.ResetOnDisconnect(kBot);
+  reg.InspectSession(kBot, [](const BotSession* s) {
+    ASSERT_NE(s, nullptr);
+    EXPECT_FALSE(s->party_ping.has_value());
+    EXPECT_EQ(s->group_guid, 42u);
+  });
+  reg.WithSession(kBot, [&](BotSession& s) { s.party_ping = ping; });
+  reg.ResetOnLogout(kBot);
+  reg.InspectSession(kBot, [](const BotSession* s) {
+    ASSERT_NE(s, nullptr);
+    EXPECT_FALSE(s->party_ping.has_value());
+    EXPECT_EQ(s->group_guid, 42u);
+  });
 }
 
 }  // namespace

@@ -43,6 +43,7 @@ void BotSessionRegistry::ResetOnMapChange(uint64_t bot_guid) {
     it->second.last_interrupted = {};
     it->second.avoided_targets.clear();
     it->second.stray_recalled_ms = 0;
+    it->second.party_ping.reset();
   }
 }
 
@@ -52,6 +53,7 @@ void BotSessionRegistry::ResetOnDisconnect(uint64_t bot_guid) {
     it->second.last_interrupted = {};
     it->second.avoided_targets.clear();
     it->second.stray_recalled_ms = 0;
+    it->second.party_ping.reset();
   }
 }
 

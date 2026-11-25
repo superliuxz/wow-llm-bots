@@ -1694,6 +1694,17 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
       lines.push_back(std::move(line));
     }
   }
+  // A party member's minimap ping (MSG_MINIMAP_PING): "ping: Hele pinged 18
+  // yd NE", with its age once it is a few seconds old.
+  if (ext.minimap && ext.minimap->ping && !ext.minimap->ping->from.empty()) {
+    const pb::Minimap::Ping& ping = *ext.minimap->ping;
+    std::string line =
+        base::StrCat({"ping: ", ping.from, " pinged ", Where(ping.rel)});
+    if (std::isfinite(ping.age_s) && ping.age_s >= 5.0f) {
+      base::StrAppend(&line, {base::StringPrintf(" (%.0fs ago)", ping.age_s)});
+    }
+    lines.push_back(std::move(line));
+  }
   for (std::string& line : QuestLines(ext.quest_tracker)) {
     lines.push_back(std::move(line));
   }

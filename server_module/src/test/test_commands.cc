@@ -37,6 +37,7 @@
 #include "LFGMgr.h"
 #include "LootMgr.h"
 #include "Map.h"
+#include "MiscPackets.h"
 #include "Object.h"
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
@@ -101,6 +102,7 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"master", HandleMaster, SEC_ADMINISTRATOR, Console::Yes},
         {"bossemote", HandleBossEmote, SEC_ADMINISTRATOR, Console::Yes},
         {"marknear", HandleMarkNear, SEC_ADMINISTRATOR, Console::Yes},
+        {"ping", HandlePing, SEC_ADMINISTRATOR, Console::Yes},
         {"maketank", HandleMakeTank, SEC_ADMINISTRATOR, Console::Yes},
         {"lootroll", HandleLootRoll, SEC_ADMINISTRATOR, Console::Yes},
         {"chat", HandleChat, SEC_ADMINISTRATOR, Console::Yes},
@@ -607,6 +609,29 @@ class LlmBrainTestCommandScript : public CommandScript {
     }
     speaker->TextEmote(std::string(text), nullptr, /*isBossEmote=*/true);
     handler->PSendSysMessage("llmtest: {} boss-emoted", speaker->GetName());
+    return true;
+  }
+
+  // `llmtest ping <member> <dx> <dy>`: `member` pings the minimap `dx` yd
+  // north and `dy` yd west of where it stands, as a minimap click sends
+  // MSG_MINIMAP_PING (the server shows it to the rest of its group).
+  static bool HandlePing(ChatHandler* handler,
+                         std::string member_name,
+                         float dx,
+                         float dy) {
+    Player* member = FindOnlinePlayer(handler, std::move(member_name));
+    if (!member || !member->GetSession() || !member->GetGroup()) {
+      handler->SendErrorMessage("llmtest: ping: needs a grouped player");
+      return false;
+    }
+    WorldPacket request(MSG_MINIMAP_PING, 8);
+    request << float(member->GetPositionX() + dx)
+            << float(member->GetPositionY() + dy);
+    WorldPackets::Misc::MinimapPingClient ping(std::move(request));
+    ping.Read();
+    member->GetSession()->HandleMinimapPingOpcode(ping);
+    handler->PSendSysMessage("llmtest: {} pinged {:.1f} {:.1f}",
+                             member->GetName(), ping.MapX, ping.MapY);
     return true;
   }
 

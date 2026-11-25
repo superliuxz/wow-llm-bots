@@ -1809,7 +1809,19 @@ struct Tooltipped {
   bool operator==(const Tooltipped&) const = default;
 };
 
+// The last minimap ping a party member made (MSG_MINIMAP_PING), as the
+// client flashes it on the minimap: who pinged, where on the ground (the ping
+// itself is 2D; `rel.position.z` is the ground there), and how long ago.
+struct Minimap_Ping {
+  std::string from;
+  Relative rel;
+  float age_s = 0.0f;
+
+  bool operator==(const Minimap_Ping&) const = default;
+};
+
 struct Minimap {
+  using Ping = Minimap_Ping;
   std::string zone;
   std::string subzone;
   std::string clock;
@@ -1820,6 +1832,7 @@ struct Minimap {
   std::vector<Unit> party;
   std::optional<Relative> corpse;
   std::string tracking;
+  std::optional<Minimap_Ping> ping;
 
   bool operator==(const Minimap&) const = default;
 };

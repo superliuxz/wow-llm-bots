@@ -39,6 +39,18 @@ struct BotSession {
     bool was_attacking = false;
   };
 
+  // A party member's minimap ping (MSG_MINIMAP_PING) in world coordinates.
+  struct PartyPing {
+    uint64_t from_guid = 0;
+    std::string from;
+    float x = 0.0f;
+    float y = 0.0f;
+    uint32_t map_id = 0;
+    uint32_t instance_id = 0;
+    uint32_t ms = 0;  // getMSTime() when it arrived.
+    bool operator==(const PartyPing&) const = default;
+  };
+
   // Auto-release hold & explicit `rez:wait` timers (ms).
   std::optional<uint32_t> dead_since_ms;
   std::optional<uint32_t> rez_wait_until_ms;
@@ -76,6 +88,11 @@ struct BotSession {
   std::optional<uint32_t> pending_ready_check_ms;
   uint32_t pending_lfg_proposal_id = 0;
   uint32_t pending_lfg_proposal_ms = 0;
+
+  // The last party minimap ping, seen in outgoing packets (cleared on logout,
+  // map change and disconnect; the snapshot drops it once stale or the pinger
+  // left the group).
+  std::optional<PartyPing> party_ping;
 
   // Last outdoor stray-recall tick (`KeepNearHumanLeader`, Now #8).
   uint32_t stray_recalled_ms = 0;

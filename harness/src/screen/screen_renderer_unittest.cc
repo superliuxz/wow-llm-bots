@@ -1087,6 +1087,42 @@ TEST(ScreenRendererTest, NoSpellsLineWithoutActionBarsOrNames) {
             std::string::npos);
 }
 
+TEST(ScreenRendererTest, PartyPingShowsWhoAndWhereWithAgeWhenOld) {
+  pb::Snapshot snapshot = NewSnapshot();
+  EXPECT_EQ(RenderScreen(snapshot).text.find("ping:"), std::string::npos);
+  pb::Minimap& minimap = snapshot.ext.minimap.emplace();
+  EXPECT_EQ(RenderScreen(snapshot).text.find("ping:"), std::string::npos);
+  pb::Minimap::Ping& ping = minimap.ping.emplace();
+  ping.from = "Hele";
+  ping.rel.dist_yd = 18.2f;
+  ping.rel.dir = pb::NE;
+  ping.age_s = 1.5f;
+  const Screen fresh = RenderScreen(snapshot);
+  EXPECT_NE(fresh.text.find("\nping: Hele pinged 18 yd NE\n"),
+            std::string::npos)
+      << fresh.text;
+  // Not an option: the fixed options are unchanged.
+  EXPECT_EQ(fresh.options,
+            (std::vector<OptionKind>{OptionKind::kKeep, OptionKind::kExplore,
+                                     OptionKind::kRest, OptionKind::kTown}));
+  ping.age_s = 12.4f;
+  ping.rel.height = pb::Relative::BELOW;
+  EXPECT_NE(RenderScreen(snapshot).text.find(
+                "\nping: Hele pinged 18 yd NE, below (12s ago)\n"),
+            std::string::npos)
+      << RenderScreen(snapshot).text;
+  // Broken numbers are safe; a ping at the bot's feet reads "here".
+  ping.age_s = std::numeric_limits<float>::quiet_NaN();
+  ping.rel = {};
+  ping.rel.dir = pb::HERE;
+  EXPECT_NE(RenderScreen(snapshot).text.find("\nping: Hele pinged here\n"),
+            std::string::npos)
+      << RenderScreen(snapshot).text;
+  // A ping with no sender name is never rendered.
+  ping.from.clear();
+  EXPECT_EQ(RenderScreen(snapshot).text.find("ping:"), std::string::npos);
+}
+
 TEST(ScreenRendererTest, AHugeSpellbookIsCutWithACountAndKeepsOptions) {
   pb::Snapshot snapshot = NewSnapshot();
   snapshot.ext.action_bars.emplace();

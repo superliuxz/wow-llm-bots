@@ -45,12 +45,14 @@
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "ThreatManager.h"
+#include "Timer.h"
 #include "Trainer.h"
 #include "TravelMgr.h"
 #include "Unit.h"
 #include "UpdateFields.h"
 #include "World.h"
 #include "base/time/time.h"
+#include "bot_session.h"
 #include "options/exec_items.h"
 #include "options/exec_npc.h"
 #include "options/exec_shared.h"
@@ -830,6 +832,54 @@ void FillQuestTracker(Player* bot,
   }
 }
 
+// How long a party member's minimap ping stays on the bot's minimap (the
+// client's flash is brief; the bot reads its screen at most every few seconds).
+constexpr uint32_t kPartyPingShowMs = 30000;
+
+// The last party minimap ping (captured from MSG_MINIMAP_PING in
+// LlmBrainPacketScript): kept while recent, from someone still in the bot's
+// group, and on the bot's own map and instance; dropped from the session
+// otherwise so a stale ping never comes back.
+void FillPartyPing(Player* bot, pb::Minimap* minimap) {
+  const uint64_t key = bot->GetGUID().GetRawValue();
+  const std::optional<BotSession::PartyPing> ping =
+      BotSessionRegistry::Instance().InspectSession(
+          key,
+          [](const BotSession* s) { return s ? s->party_ping : std::nullopt; });
+  if (!ping) {
+    return;
+  }
+  const uint32_t age_ms = GetMSTimeDiffToNow(ping->ms);
+  const Group* group = bot->GetGroup();
+  if (age_ms > kPartyPingShowMs || !group ||
+      !group->IsMember(ObjectGuid(ping->from_guid)) ||
+      ping->map_id != bot->GetMapId() ||
+      ping->instance_id != bot->GetInstanceId()) {
+    BotSessionRegistry::Instance().WithSession(key, [&ping](BotSession& s) {
+      if (s.party_ping == ping) {
+        s.party_ping.reset();
+      }
+    });
+    return;
+  }
+  pb::Minimap::Ping& out = minimap->ping.emplace();
+  out.from = ping->from;
+  out.age_s = static_cast<float>(age_ms) / 1000.0f;
+  const float dx = ping->x - bot->GetPositionX();
+  const float dy = ping->y - bot->GetPositionY();
+  // A minimap ping is a point on the 2D map: the distance is on the ground,
+  // and its height is the floor there nearest the bot's own.
+  float z = bot->GetMap()->GetHeight(bot->GetPhaseMask(), ping->x, ping->y,
+                                     bot->GetPositionZ() + 5.0f);
+  if (!std::isfinite(z) || z <= INVALID_HEIGHT) {
+    z = bot->GetPositionZ();
+  }
+  out.rel.dist_yd = std::hypot(dx, dy);
+  out.rel.dir = CompassDirection(dx, dy);
+  out.rel.height = HeightOf(z - bot->GetPositionZ());
+  out.rel.position = {ping->x, ping->y, z};
+}
+
 // Talkable NPCs and non-attackable neutral/hostile units on screen, with their
 // flags (what the client knows of a unit it can click: service icons, and
 // whether the attack cursor is unavailable).
@@ -945,6 +995,7 @@ void SnapshotBuilder::FillOptionFacts(Player* bot,
   pb::Minimap& minimap = snapshot->ext.minimap.emplace();
   minimap.zone = snapshot->base.where.zone;
   minimap.subzone = snapshot->base.where.subzone;
+  FillPartyPing(bot, &minimap);
   if (!world || !bot->IsAlive() || bot->IsInCombat()) {
     return;  // Explore and Go to are offered only alive and out of combat.
   }

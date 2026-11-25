@@ -40,6 +40,7 @@ CMSG_GROUP_INVITE = 0x06E
 SMSG_GROUP_LIST = 0x07D
 CMSG_MESSAGECHAT = 0x095
 SMSG_MESSAGECHAT = 0x096
+MSG_MINIMAP_PING = 0x1D5
 SMSG_TIME_SYNC_REQ = 0x390
 CMSG_TIME_SYNC_RESP = 0x391
 
@@ -110,6 +111,7 @@ class WowClient:
         self.lock = threading.Lock()
         self.chats: list[dict] = []  # {"type", "from_guid", "text", "t"}
         self.group_lists = 0
+        self.pings: list[dict] = []  # {"from_guid", "x", "y", "t"}: party pings it saw
         self.guid = 0
         self.lang = LANG_COMMON
         self._reader: threading.Thread | None = None
@@ -219,6 +221,11 @@ class WowClient:
         self.send(CMSG_MESSAGECHAT, struct.pack("<II", CHAT_MSG_WHISPER, self.lang) +
                   to.encode() + b"\0" + text.encode() + b"\0")
 
+    def ping(self, x: float, y: float) -> None:
+        """Pings the minimap at world coordinates (x, y), as a click on the minimap does: the
+        server shows it to the rest of the party."""
+        self.send(MSG_MINIMAP_PING, struct.pack("<ff", x, y))
+
     def close(self) -> None:
         self._stop = True
         try:
@@ -243,6 +250,10 @@ class WowClient:
             counter = struct.unpack_from("<I", data)[0]
             self.send(CMSG_TIME_SYNC_RESP, struct.pack("<II", counter, int(time.monotonic() * 1000)
                                                        & 0xFFFFFFFF))
+        elif op == MSG_MINIMAP_PING and len(data) >= 16:
+            guid, x, y = struct.unpack_from("<Qff", data)
+            with self.lock:
+                self.pings.append({"from_guid": guid, "x": x, "y": y, "t": time.monotonic()})
         elif op == SMSG_GROUP_LIST:
             with self.lock:
                 self.group_lists += 1

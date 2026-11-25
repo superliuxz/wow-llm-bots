@@ -397,5 +397,29 @@ TEST(PromptTest, AFullSpellsLineYieldsToOptionsAndCoreLinesUnderTightBudget) {
   EXPECT_NE(roomy.user.find("spells: SSS"), std::string::npos) << roomy.user;
 }
 
+TEST(PromptTest, APartyPingOutlivesSceneryUnderTightBudget) {
+  PromptInput input = SampleInput();
+  input.rules = std::string(9600, 'R');
+  Screen screen;
+  screen.text = "me: Tess\naround me:\n  1. Attack Boar\nobjects:\n";
+  for (int i = 0; i < 40; ++i) {
+    screen.text +=
+        "  Copper Vein " + std::to_string(i) + " (40 yd N, mineable)\n";
+  }
+  screen.text += "party: leader Hele\nping: Hele pinged 18 yd NE\n";
+  screen.text += "spells: " + std::string(590, 'S') + ", +40 more\n";
+  screen.text += "also:\n  2. Keep doing what I'm doing";
+  screen.options = {OptionKind::kAttack, OptionKind::kKeep};
+  const LlmRequest req = BuildPlanRequest(input, screen);
+  const size_t est_tokens = (req.system.size() + 2) / 3 +
+                            (req.user.size() + 2) / 3 +
+                            static_cast<size_t>(req.max_tokens);
+  EXPECT_LE(est_tokens, 4096u);
+  EXPECT_NE(req.user.find("ping: Hele pinged 18 yd NE"), std::string::npos)
+      << req.user;
+  EXPECT_EQ(req.user.find("spells: SSS"), std::string::npos) << req.user;
+  EXPECT_NE(req.user.find("  2. Keep doing what I'm doing"), std::string::npos);
+}
+
 }  // namespace
 }  // namespace harness
