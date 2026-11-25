@@ -139,9 +139,27 @@ TEST(PromptTest, TokenCapDropsRememberedPanelsBeforeScreenAndPreservesAlso) {
                             (request.user.size() + 2) / 3 +
                             static_cast<size_t>(request.max_tokens);
   EXPECT_LE(est_tokens, 4096u);
-  // Live screen and `also:` options are never dropped for remembered panels.
+  // Live screen and `also:` options are never dropped for remembered panels,
+  // and core party/me lines outlive unnumbered scenery under tight budgets.
   EXPECT_NE(request.user.find("Your screen now:"), std::string::npos);
   EXPECT_NE(request.user.find("also:\n  2. Keep doing what I'm doing"),
+            std::string::npos);
+
+  PromptInput crowded = SampleInput();
+  crowded.rules = std::string(9600, 'R');
+  Screen party_screen;
+  party_screen.text = "me: Tess\naround me:\n  1. Attack Boar\n";
+  for (int i = 0; i < 20; ++i) {
+    party_screen.text += "  - Scenery Mob " + std::to_string(i) + "\n";
+  }
+  party_screen.text +=
+      "party: leader Hele\n  help Hele with Cutting Teeth (0/10)\n"
+      "  party_state: fighting (Hele)\nalso:\n  2. Keep doing what I'm doing";
+  party_screen.options = {OptionKind::kAttack, OptionKind::kKeep};
+  const LlmRequest crowded_req = BuildPlanRequest(crowded, party_screen);
+  EXPECT_NE(crowded_req.user.find("help Hele with Cutting Teeth"),
+            std::string::npos);
+  EXPECT_NE(crowded_req.user.find("party_state: fighting (Hele)"),
             std::string::npos);
 }
 

@@ -293,6 +293,9 @@ struct GroupPart {
   bool main_tank = false;
   bool main_assist = false;
   std::string ready;
+  // Unfinished quests of a party member in range, with their progress
+  // ("Kobold Camp Cleanup: Kobold Vermin slain 3/8"), at most 3 (Now #8).
+  std::vector<std::string> quests;
 
   bool operator==(const GroupPart&) const = default;
 };

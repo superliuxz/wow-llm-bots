@@ -49,6 +49,16 @@ std::vector<pb::Event> PopupWatch::Update(const PopupState& now) {
   if (now.resurrect_offer && !last_.resurrect_offer) {
     out.push_back(Prompt(pb::PromptEvent::RESURRECT_OFFER));
   }
+  if (now.summon && !last_.summon) {
+    out.push_back(Prompt(pb::PromptEvent::SUMMON, now.summon_from, {}, 120.0f));
+  }
+  if (!now.boot_victim.empty() && now.boot_victim != last_.boot_victim) {
+    out.push_back(Prompt(pb::PromptEvent::LFG_BOOT_VOTE, {},
+                         now.boot_reason.empty()
+                             ? now.boot_victim
+                             : now.boot_victim + ": " + now.boot_reason,
+                         60.0f));
+  }
   for (const PopupState::Roll& roll : now.rolls) {
     const bool seen = std::any_of(
         last_.rolls.begin(), last_.rolls.end(), [&](const PopupState::Roll& r) {

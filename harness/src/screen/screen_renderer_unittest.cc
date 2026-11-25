@@ -1009,9 +1009,15 @@ TEST(ScreenRendererTest, PartyStateLineSummarizesThePace) {
   add("Zenji", pb::HEALER).power_pct = 20.0f;
   add("Rokzul", pb::DPS).dead = true;
   add("Mabaku", pb::DPS).group->online = false;
+  party.members[0].group->quests = {
+      "Kobold Camp Cleanup: Kobold Vermin slain 3/8"};
   const Screen screen = RenderScreen(snap);
   EXPECT_NE(screen.text.find("party_state: fighting (Hele); healer Zenji 20% "
                              "mana; Rokzul dead; Mabaku offline"),
+            std::string::npos)
+      << screen.text;
+  EXPECT_NE(screen.text.find("help Hele with Kobold Camp Cleanup (Kobold "
+                             "Vermin slain 3/8)"),
             std::string::npos)
       << screen.text;
 
@@ -1020,6 +1026,23 @@ TEST(ScreenRendererTest, PartyStateLineSummarizesThePace) {
   calm.ext.party.emplace().members.emplace_back().name = "Hele";
   calm.ext.party->members.back().group.emplace().online = true;
   EXPECT_EQ(RenderScreen(calm).text.find("party_state:"), std::string::npos);
+
+  // Now #9: Luck of the Draw and Dungeon Deserter facts on the party lines.
+  pb::Aura& luck = calm.base.self.unit.auras.emplace_back();
+  luck.id = 72221;
+  luck.name = "Luck of the Draw";
+  luck.stacks = 3;
+  pb::Aura& deserter = calm.ext.party->members.back().auras.emplace_back();
+  deserter.id = 71041;
+  deserter.name = "Dungeon Deserter";
+  deserter.harmful = true;
+  deserter.remaining_s = 1740.0f;
+  const Screen lfg_screen = RenderScreen(calm);
+  EXPECT_NE(lfg_screen.text.find("luck of the draw (+15%)"), std::string::npos)
+      << lfg_screen.text;
+  EXPECT_NE(lfg_screen.text.find("party_state: deserter Hele (29m)"),
+            std::string::npos)
+      << lfg_screen.text;
 }
 
 }  // namespace

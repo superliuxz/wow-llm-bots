@@ -62,13 +62,23 @@ struct BotSession {
   std::string pending_summoner;
   std::string pending_boot_victim;
   std::string pending_boot_reason;
+  uint32_t pending_boot_until_ms = 0;
+
+  // Group GUID that had a human player (`LeaveAbandonedHumanGroup`, Now #9 /
+  // T11) and when the last human member went offline.
+  uint64_t human_group_guid = 0;
+  std::optional<uint32_t> human_offline_since_ms;
 
   // Pending timed popups observed via outgoing packets.
   uint32_t pending_shared_quest_id = 0;
   uint32_t pending_shared_quest_ms = 0;
+  bool pending_shared_quest_confirm = false;
   std::optional<uint32_t> pending_ready_check_ms;
   uint32_t pending_lfg_proposal_id = 0;
   uint32_t pending_lfg_proposal_ms = 0;
+
+  // Last outdoor stray-recall tick (`KeepNearHumanLeader`, Now #8).
+  uint32_t stray_recalled_ms = 0;
 
   // Combat movement/targeting memory (cleared on combat end / map change /
   // disconnect).

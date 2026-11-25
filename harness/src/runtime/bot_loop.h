@@ -81,6 +81,11 @@ struct BotLoopConfig {
   // 60 s.
   base::TimeDelta combat_call_timeout = base::Seconds(10);
   base::TimeDelta call_timeout = base::Seconds(30);
+  // Human-like reaction + typing delay before outbound chat (`say:`, `party:`,
+  // `tell`, `general:`, `lfg:`) flushes on `OnTick` (Now #10). Zero by default
+  // for synchronous unit tests; enabled (1-3 s) in live `harness run`.
+  base::TimeDelta typing_delay_min;
+  base::TimeDelta typing_delay_max;
 };
 
 // Starts one brain call. Returns a handle whose Cancel() aborts it early (the
@@ -254,6 +259,15 @@ class BotLoop {
     // Outbound chat command IDs so chat error events with a real command_id
     // are recognized and wake the brain instead of being dropped as stale.
     std::deque<uint32_t> recent_chat_command_ids;
+    // Outbound chat lines waiting out their human typing delay (Now #10).
+    struct PendingSay {
+      base::TimeTicks due_at;
+      wlb::snapshot::ChatChannel channel =
+          wlb::snapshot::CHAT_CHANNEL_UNSPECIFIED;
+      std::string to;
+      std::string text;
+    };
+    std::deque<PendingSay> pending_says;
     uint32_t last_bag_free_slots = 1;
     // The quest tracker's state; nullopt before the first snapshot (no
     // glance for what was there already).
@@ -391,10 +405,24 @@ class BotLoop {
       const BotState& state,
       base::TimeTicks now,
       base::TimeDelta remember_for);
+  void QueueOrSendSay(const std::string& bot,
+                      BotState* state,
+                      wlb::snapshot::ChatChannel channel,
+                      const std::string& to,
+                      const std::string& text,
+                      base::TimeTicks now);
   void SendSay(const std::string& bot,
                wlb::snapshot::ChatChannel channel,
                const std::string& to,
                const std::string& text);
+  bool IsPartyChatBudgetMuted(const std::string& bot,
+                              const wlb::snapshot::Snapshot& snapshot,
+                              base::TimeTicks now) const;
+  bool AllowAndRecordPartyChat(const std::string& bot,
+                               const wlb::snapshot::Snapshot& snapshot,
+                               std::string_view text,
+                               bool prompted_by_player_chat,
+                               base::TimeTicks now);
   void Log(const std::string& line);
 
   const BotLoopConfig config_;
@@ -407,6 +435,13 @@ class BotLoop {
   std::flat_map<std::string, std::string> instance_notes_index_;
   Scheduler scheduler_;
   std::flat_map<std::string, BotState> bots_;
+  // Per-party unprompted chat budget across all bots in the group (Now #10).
+  struct PartyChatBudget {
+    std::deque<base::TimeTicks> unprompted_times;
+    std::string last_text_lower;
+    base::TimeTicks last_text_at;
+  };
+  std::flat_map<std::string, PartyChatBudget> party_chat_budgets_;
   // Pre-pull compiled standing orders cached by (bot, map, notes).
   static constexpr size_t kMaxCompiledOrdersCache = 256;
   // How many of the newest `remember:` notes go into each prompt (RH-M4).

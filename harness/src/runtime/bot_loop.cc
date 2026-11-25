@@ -181,6 +181,63 @@ std::string SanitizeRememberNote(
 constexpr base::TimeDelta kChatWakeWindow = base::Seconds(10);
 constexpr size_t kMaxChatWakesPerSender = 3;
 
+// Per-party unprompted chat budget across all bots in the group (Now #10): at
+// most 2 unprompted lines per 30 s, spaced by >= 6 s, with no 30 s echoes.
+constexpr base::TimeDelta kPartyBudgetWindow = base::Seconds(30);
+constexpr size_t kMaxUnpromptedPartyLinesPerWindow = 2;
+constexpr base::TimeDelta kMinUnpromptedPartySpacing = base::Seconds(6);
+constexpr int64_t kTypingMsPerChar = 35;
+
+bool HasGroupMembers(const pb::Snapshot& snapshot) {
+  return (snapshot.ext.party && !snapshot.ext.party->members.empty()) ||
+         (snapshot.ext.raid && !snapshot.ext.raid->members.empty());
+}
+
+bool IsGroupSharedChatChannel(pb::ChatChannel ch,
+                              const pb::Snapshot& snapshot) {
+  if (ch == pb::PARTY || ch == pb::RAID) {
+    return true;
+  }
+  return (ch == pb::SAY || ch == pb::YELL) && HasGroupMembers(snapshot);
+}
+
+std::string PartyBudgetKey(const std::string& bot,
+                           const pb::Snapshot& snapshot) {
+  if (!HasGroupMembers(snapshot)) {
+    return "";
+  }
+  std::vector<std::string> names{bot};
+  if (snapshot.ext.party) {
+    for (const pb::Unit& m : snapshot.ext.party->members) {
+      if (!m.name.empty()) {
+        names.push_back(m.name);
+      }
+    }
+  }
+  if (snapshot.ext.raid) {
+    for (const pb::Unit& m : snapshot.ext.raid->members) {
+      if (!m.name.empty()) {
+        names.push_back(m.name);
+      }
+    }
+  }
+  std::sort(names.begin(), names.end());
+  names.erase(std::unique(names.begin(), names.end()), names.end());
+  return names.size() > 1 ? base::JoinString(names, ",") : "";
+}
+
+base::TimeDelta ComputeTypingDelay(size_t chars,
+                                   base::TimeDelta min_delay,
+                                   base::TimeDelta max_delay) {
+  if (!max_delay.is_positive()) {
+    return base::TimeDelta();
+  }
+  const base::TimeDelta raw =
+      min_delay +
+      base::Milliseconds(static_cast<int64_t>(chars) * kTypingMsPerChar);
+  return std::clamp(raw, min_delay, max_delay);
+}
+
 // Structured `memory.md` (F5): optional `## Earlier summary` section followed
 // by `## Recent` (or flat lines for legacy/hand-edited files).
 constexpr std::string_view kEarlierSummaryHeading = "## Earlier summary";
@@ -549,17 +606,15 @@ bool BotLoop::AnswersPartyLine(const std::string& bot,
   std::sort(brain_bots.begin(), brain_bots.end());
   brain_bots.erase(std::unique(brain_bots.begin(), brain_bots.end()),
                    brain_bots.end());
-  bool named_any = false;
   for (const std::string& name : brain_bots) {
     if (ContainsWholeWordIgnoringCase(text, name)) {
-      named_any = true;
-      if (name == bot) {
-        return true;  // Asked by name.
-      }
+      // One responder per question (Now #10): even if multiple bots are named,
+      // only the first named online bot answers.
+      return name == bot;
     }
   }
   // Nobody named: one bot answers for the group.
-  return !named_any && brain_bots.front() == bot;
+  return brain_bots.front() == bot;
 }
 
 bool BotLoop::AnswersPartyChat(const std::string& bot,
@@ -567,7 +622,7 @@ bool BotLoop::AnswersPartyChat(const std::string& bot,
                                const pb::Snapshot& snapshot) const {
   bool any_group_line = false;
   for (const BotState::ObservedChat& c : chats) {
-    if (c.triggered_wake && (c.channel == pb::PARTY || c.channel == pb::RAID)) {
+    if (c.triggered_wake && IsGroupSharedChatChannel(c.channel, snapshot)) {
       any_group_line = true;
       if (AnswersPartyLine(bot, c.text, snapshot)) {
         return true;
@@ -589,6 +644,7 @@ void BotLoop::OnConnectionChanged(bool connected) {
     for (auto&& [name, state] : bots_) {
       ResetBotSession(&state, /*cancel_in_flight=*/false);
     }
+    party_chat_budgets_.clear();
     // Answers to screens of the old connection are useless: free the slots.
     scheduler_.CancelAllInFlight();
   }
@@ -606,6 +662,7 @@ void BotLoop::ResetBotSession(BotState* state, bool cancel_in_flight) {
   state->notes.clear();
   state->last_selected_notes.clear();
   state->recent_chat_command_ids.clear();
+  state->pending_says.clear();
   state->call_state = BotState::CallState::kIdle;
   state->queued_urgency = Urgency::kP2Routine;
   if (state->in_flight_cancel) {
@@ -928,11 +985,12 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
   std::optional<WakeTrigger> chat_trig =
       is_player_chat ? EvaluateEventTrigger(imm.event, state.triggers.watches())
                      : std::nullopt;
-  // T9: a party/raid line wakes only the bot that answers it (named, or the
-  // group's one responder); the others just hear it.
+  // T9 & Now #10: a group or nearby party-shared line wakes only the one bot
+  // that answers it (named, or the group's single responder); the others just
+  // hear it.
   if (chat_trig && state.latest_snapshot &&
-      (imm.event.chat->channel == pb::PARTY ||
-       imm.event.chat->channel == pb::RAID) &&
+      IsGroupSharedChatChannel(imm.event.chat->channel,
+                               *state.latest_snapshot) &&
       !AnswersPartyLine(bot, imm.event.chat->text, *state.latest_snapshot)) {
     chat_trig.reset();
   }
@@ -1086,6 +1144,12 @@ void BotLoop::OnTick(base::TimeTicks now) {
           bot.c_str(), (now - state.latest_received_at).InSecondsF()));
       ResetBotSession(&state, /*cancel_in_flight=*/true);
       continue;
+    }
+    while (!state.pending_says.empty() &&
+           now >= state.pending_says.front().due_at) {
+      BotState::PendingSay next = std::move(state.pending_says.front());
+      state.pending_says.pop_front();
+      SendSay(bot, next.channel, next.to, next.text);
     }
     // Enforce overall wall-clock deadline on stalled in-flight LLM calls
     // (A-M13) so a wedged llama-server never blocks a bot for 60 s.
@@ -1245,7 +1309,18 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
   }
   ctx.current_goal = state.current_goal;
   ctx.wake_reason = wake_reason;
-  if (!AnswersPartyChat(bot, asked_chats, *state.latest_snapshot)) {
+  const base::TimeTicks effective_ask_time =
+      state.latest_received_at.is_null()
+          ? asked_at_for_whisperers
+          : std::max(asked_at_for_whisperers, state.latest_received_at);
+  const bool prompted_by_chat =
+      std::any_of(asked_chats.begin(), asked_chats.end(),
+                  [](const BotState::ObservedChat& c) {
+                    return c.triggered_wake && IsPlayerChatChannel(c.channel);
+                  });
+  if (!AnswersPartyChat(bot, asked_chats, *state.latest_snapshot) ||
+      (!prompted_by_chat && IsPartyChatBudgetMuted(bot, *state.latest_snapshot,
+                                                   effective_ask_time))) {
     state.party_reply_muted_epoch = epoch;
     ctx.party_reply_muted = true;
   }
@@ -1548,15 +1623,21 @@ void BotLoop::OnReply(const std::string& bot,
         if (!state.early_step_failed) {
           state.look_deadline = now + base::Seconds(plan->look_s);
         }
+        const base::TimeTicks effective_now =
+            state.latest_received_at.is_null()
+                ? now
+                : std::max(now, state.latest_received_at);
+        const bool prompted_by_chat = std::any_of(
+            asked_chats.begin(), asked_chats.end(),
+            [](const BotState::ObservedChat& c) {
+              return c.triggered_wake && IsPlayerChatChannel(c.channel);
+            });
         const bool party_reply_muted = state.party_reply_muted_epoch == epoch;
         if (!plan->say.empty() && !party_reply_muted) {
           // Answer a party/raid line in that channel (RH-L1, A-M14: decided by
           // the structured chat event's channel, never by splitting strings).
           pb::ChatChannel ch = pb::SAY;
-          if ((state.latest_snapshot->ext.party &&
-               !state.latest_snapshot->ext.party->members.empty()) ||
-              (state.latest_snapshot->ext.raid &&
-               !state.latest_snapshot->ext.raid->members.empty())) {
+          if (HasGroupMembers(*state.latest_snapshot)) {
             for (const BotState::ObservedChat& c : asked_chats) {
               if (c.triggered_wake &&
                   (c.channel == pb::PARTY || c.channel == pb::RAID)) {
@@ -1566,8 +1647,10 @@ void BotLoop::OnReply(const std::string& bot,
             }
           }
           // A `party:` line already says it there (RH-L6: no double post).
-          if (ch == pb::SAY || plan->party.empty()) {
-            SendSay(bot, ch, "", plan->say);
+          if ((ch == pb::SAY || plan->party.empty()) &&
+              AllowAndRecordPartyChat(bot, *state.latest_snapshot, plan->say,
+                                      prompted_by_chat, effective_now)) {
+            QueueOrSendSay(bot, &state, ch, "", plan->say, effective_now);
           }
         }
         const bool in_party =
@@ -1577,19 +1660,24 @@ void BotLoop::OnReply(const std::string& bot,
         // `ext.party`, T13).
         const bool in_raid = state.latest_snapshot->ext.raid.has_value();
         if (!plan->party.empty() && (in_party || in_raid) &&
-            !party_reply_muted) {
-          SendSay(bot, in_raid ? pb::RAID : pb::PARTY, "", plan->party);
+            !party_reply_muted &&
+            AllowAndRecordPartyChat(bot, *state.latest_snapshot, plan->party,
+                                    prompted_by_chat, effective_now)) {
+          QueueOrSendSay(bot, &state, in_raid ? pb::RAID : pb::PARTY, "",
+                         plan->party, effective_now);
         }
         if (!plan->tell.empty()) {
-          SendSay(bot, pb::WHISPER, plan->tell_to, plan->tell);
+          QueueOrSendSay(bot, &state, pb::WHISPER, plan->tell_to, plan->tell,
+                         effective_now);
         }
         // Public channels (F1): a refusal (not queued, wrong place) comes back
         // as a chat error event, which wakes the brain to see it.
         if (!plan->general.empty()) {
-          SendSay(bot, pb::GENERAL, "", plan->general);
+          QueueOrSendSay(bot, &state, pb::GENERAL, "", plan->general,
+                         effective_now);
         }
         if (!plan->lfg.empty()) {
-          SendSay(bot, pb::LFG, "", plan->lfg);
+          QueueOrSendSay(bot, &state, pb::LFG, "", plan->lfg, effective_now);
         }
         if (!plan->remember.empty() && !config_.bots_dir.empty()) {
           // Trust by sender, not keywords: what the party (and its leader)
@@ -2014,6 +2102,29 @@ uint32_t BotLoop::SendAct(const std::string& bot, pb::Command::Act act) {
   return cmd.command_id;
 }
 
+void BotLoop::QueueOrSendSay(const std::string& bot,
+                             BotState* state,
+                             pb::ChatChannel channel,
+                             const std::string& to,
+                             const std::string& text,
+                             base::TimeTicks now) {
+  const base::TimeDelta delay = ComputeTypingDelay(
+      text.size(), config_.typing_delay_min, config_.typing_delay_max);
+  if (!delay.is_positive()) {
+    SendSay(bot, channel, to, text);
+    return;
+  }
+  static constexpr size_t kMaxPendingSays = 4;
+  if (state->pending_says.size() >= kMaxPendingSays) {
+    return;
+  }
+  const base::TimeTicks start =
+      state->pending_says.empty()
+          ? now
+          : std::max(now, state->pending_says.back().due_at);
+  state->pending_says.push_back({start + delay, channel, to, text});
+}
+
 void BotLoop::SendSay(const std::string& bot,
                       pb::ChatChannel channel,
                       const std::string& to,
@@ -2034,6 +2145,69 @@ void BotLoop::SendSay(const std::string& bot,
   if (send_command_) {
     send_command_.Run(cmd);
   }
+}
+
+bool BotLoop::IsPartyChatBudgetMuted(const std::string& bot,
+                                     const pb::Snapshot& snapshot,
+                                     base::TimeTicks now) const {
+  const std::string key = PartyBudgetKey(bot, snapshot);
+  if (key.empty()) {
+    return false;
+  }
+  const auto it = party_chat_budgets_.find(key);
+  if (it == party_chat_budgets_.end() || it->second.unprompted_times.empty()) {
+    return false;
+  }
+  const auto& times = it->second.unprompted_times;
+  if (now - times.back() < kMinUnpromptedPartySpacing) {
+    return true;
+  }
+  const size_t recent = static_cast<size_t>(std::count_if(
+      times.begin(), times.end(),
+      [&](base::TimeTicks t) { return now - t <= kPartyBudgetWindow; }));
+  return recent >= kMaxUnpromptedPartyLinesPerWindow;
+}
+
+bool BotLoop::AllowAndRecordPartyChat(const std::string& bot,
+                                      const pb::Snapshot& snapshot,
+                                      std::string_view text,
+                                      bool prompted_by_player_chat,
+                                      base::TimeTicks now) {
+  const std::string norm =
+      base::ToLowerASCII(base::TrimWhitespaceASCII(text, base::TRIM_ALL));
+  if (norm.empty()) {
+    return false;
+  }
+  const std::string key = PartyBudgetKey(bot, snapshot);
+  if (key.empty()) {
+    return true;
+  }
+  if (party_chat_budgets_.size() >= 64 && !party_chat_budgets_.contains(key)) {
+    std::erase_if(party_chat_budgets_, [&](const auto& kv) {
+      return kv.second.unprompted_times.empty() ||
+             now - kv.second.unprompted_times.back() > kPartyBudgetWindow;
+    });
+  }
+  PartyChatBudget& budget = party_chat_budgets_[key];
+  while (!budget.unprompted_times.empty() &&
+         now - budget.unprompted_times.front() > kPartyBudgetWindow) {
+    budget.unprompted_times.pop_front();
+  }
+  if (!prompted_by_player_chat) {
+    if (!budget.last_text_lower.empty() && norm == budget.last_text_lower &&
+        now - budget.last_text_at <= kPartyBudgetWindow) {
+      return false;  // Suppress duplicate party echo ("grats", "oom", ...).
+    }
+    if (budget.unprompted_times.size() >= kMaxUnpromptedPartyLinesPerWindow ||
+        (!budget.unprompted_times.empty() &&
+         now - budget.unprompted_times.back() < kMinUnpromptedPartySpacing)) {
+      return false;
+    }
+    budget.unprompted_times.push_back(now);
+  }
+  budget.last_text_lower = norm;
+  budget.last_text_at = now;
+  return true;
 }
 
 void BotLoop::Log(const std::string& line) {

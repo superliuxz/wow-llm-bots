@@ -39,6 +39,7 @@
 #include "SpellAuraDefines.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
+#include "Timer.h"
 #include "Unit.h"
 #include "UpdateFields.h"
 #include "World.h"
@@ -51,6 +52,7 @@
 #include "options/action_types.h"
 #include "options/exec_items.h"
 #include "options/exec_shared.h"
+#include "options/options.h"
 #include "snapshot/snapshot.h"
 
 namespace llm_brain {
@@ -58,72 +60,49 @@ namespace {
 
 namespace pb = wlb::snapshot;
 
-struct LfgRoleChoice {
-  uint8_t mask = lfg::PLAYER_ROLE_DAMAGE;
-  const char* name = "DPS";
-};
+static_assert(kLfgRoleTank == lfg::PLAYER_ROLE_TANK);
+static_assert(kLfgRoleHealer == lfg::PLAYER_ROLE_HEALER);
+static_assert(kLfgRoleDamage == lfg::PLAYER_ROLE_DAMAGE);
+static_assert(WARRIOR_TAB_PROTECTION == 2);
+static_assert(PALADIN_TAB_HOLY == 0 && PALADIN_TAB_PROTECTION == 1);
+static_assert(PRIEST_TAB_SHADOW == 2);
+static_assert(DEATH_KNIGHT_TAB_BLOOD == 0);
+static_assert(SHAMAN_TAB_RESTORATION == 2);
+static_assert(DRUID_TAB_FERAL == 1 && DRUID_TAB_RESTORATION == 2);
 
-std::vector<LfgRoleChoice> ClassLfgRoles(uint8_t cls) {
-  switch (cls) {
-    case CLASS_WARRIOR:
-    case CLASS_DEATH_KNIGHT:
-      return {{lfg::PLAYER_ROLE_TANK, "Tank"},
-              {lfg::PLAYER_ROLE_DAMAGE, "DPS"}};
-    case CLASS_PRIEST:
-    case CLASS_SHAMAN:
-      return {{lfg::PLAYER_ROLE_HEALER, "Healer"},
-              {lfg::PLAYER_ROLE_DAMAGE, "DPS"}};
-    case CLASS_PALADIN:
-    case CLASS_DRUID:
-      return {{lfg::PLAYER_ROLE_TANK, "Tank"},
-              {lfg::PLAYER_ROLE_HEALER, "Healer"},
-              {lfg::PLAYER_ROLE_DAMAGE, "DPS"}};
-    default:
-      return {{lfg::PLAYER_ROLE_DAMAGE, "DPS"}};
-  }
+std::vector<LfgRoleChoice> SpecLfgRoles(Player* bot) {
+  const bool has_talents =
+      bot->GetFreeTalentPoints() < bot->CalculateTalentsPoints();
+  return SpecLfgRoleChoices(bot->getClass(), AiFactory::GetPlayerSpecTab(bot),
+                            has_talents, bot->GetLevel());
 }
 
-// The roles the bot's talents fit (T6): a Shadow priest queues as DPS, a
-// Ret paladin never as tank. With no talents spent yet, every role its class
-// can play.
-std::vector<LfgRoleChoice> SpecLfgRoles(Player* bot) {
-  if (bot->GetFreeTalentPoints() >= bot->CalculateTalentsPoints() ||
-      bot->GetLevel() < 10) {
-    return ClassLfgRoles(bot->getClass());
+// Non-empty reason when `bot` or a connected party member has Dungeon Deserter
+// or Random Dungeon cooldown, which blocks joining the random LFG queue (Now
+// #9).
+std::string PartyLfgBlockReason(Player* bot) {
+  if (bot->HasAura(lfg::LFG_SPELL_DUNGEON_DESERTER)) {
+    return "you have Dungeon Deserter";
   }
-  const LfgRoleChoice tank{lfg::PLAYER_ROLE_TANK, "Tank"};
-  const LfgRoleChoice healer{lfg::PLAYER_ROLE_HEALER, "Healer"};
-  const LfgRoleChoice dps{lfg::PLAYER_ROLE_DAMAGE, "DPS"};
-  const uint8_t tab = AiFactory::GetPlayerSpecTab(bot);
-  switch (bot->getClass()) {
-    case CLASS_WARRIOR:
-      return {tab == WARRIOR_TAB_PROTECTION ? tank : dps};
-    case CLASS_PALADIN:
-      if (tab == PALADIN_TAB_HOLY) {
-        return {healer};
-      }
-      return {tab == PALADIN_TAB_PROTECTION ? tank : dps};
-    case CLASS_PRIEST:
-      return {tab == PRIEST_TAB_SHADOW ? dps : healer};
-    case CLASS_SHAMAN:
-      return {tab == SHAMAN_TAB_RESTORATION ? healer : dps};
-    case CLASS_DRUID:
-      if (tab == DRUID_TAB_RESTORATION) {
-        return {healer};
-      }
-      if (tab == DRUID_TAB_FERAL) {
-        return {tank, dps};
-      }
-      return {dps};
-    case CLASS_DEATH_KNIGHT:
-      // Any 3.3.5a DK spec can tank; Blood is built for it.
-      if (tab == DEATH_KNIGHT_TAB_BLOOD) {
-        return {tank, dps};
-      }
-      return {dps, tank};
-    default:
-      return {dps};
+  if (bot->HasAura(lfg::LFG_SPELL_DUNGEON_COOLDOWN)) {
+    return "Random Dungeon is on cooldown";
   }
+  if (Group* group = bot->GetGroup()) {
+    for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
+         itr = itr->next()) {
+      Player* m = itr->GetSource();
+      if (!m || m == bot || !m->IsInWorld()) {
+        continue;
+      }
+      if (m->HasAura(lfg::LFG_SPELL_DUNGEON_DESERTER)) {
+        return m->GetName() + " has Dungeon Deserter";
+      }
+      if (m->HasAura(lfg::LFG_SPELL_DUNGEON_COOLDOWN)) {
+        return m->GetName() + " is on Random Dungeon cooldown";
+      }
+    }
+  }
+  return "";
 }
 
 // The normal-difficulty random dungeon for the bot's level (server L2: never
@@ -409,11 +388,7 @@ void CollectGroupAndUpkeepActions(Player* bot,
     out->push_back({"summon:decline", "Decline summon"});
   }
   {
-    const auto [victim, reason] = BotSessionRegistry::Instance().InspectSession(
-        bot->GetGUID().GetRawValue(), [](const BotSession* s) {
-          return s ? std::pair{s->pending_boot_victim, s->pending_boot_reason}
-                   : std::pair{std::string(), std::string()};
-        });
+    const auto [victim, reason] = BotManager::GetPendingBootVote(bot);
     if (!victim.empty()) {
       const std::string why = reason.empty() ? "" : " (" + reason + ")";
       out->push_back({"boot:yes", "Vote to kick " + victim + why});
@@ -421,14 +396,16 @@ void CollectGroupAndUpkeepActions(Player* bot,
     }
   }
 
-  // 3. Shared quest accept / decline.
+  // 3. Shared / party-escort quest accept / decline.
   if (bot->IsAlive()) {
     if (const uint32_t qid = BotManager::GetPendingSharedQuest(bot); qid != 0) {
       if (const Quest* q = sObjectMgr->GetQuestTemplate(qid)) {
+        const bool escort = BotManager::IsPendingSharedQuestConfirm(bot);
+        const char* kind = escort ? "escort quest \"" : "shared quest \"";
         out->push_back({"qshare:accept:" + std::to_string(qid),
-                        "Accept shared quest \"" + q->GetTitle() + "\""});
+                        std::string("Accept ") + kind + q->GetTitle() + "\""});
         out->push_back({"qshare:decline:" + std::to_string(qid),
-                        "Decline shared quest \"" + q->GetTitle() + "\""});
+                        std::string("Decline ") + kind + q->GetTitle() + "\""});
       }
     }
   }
@@ -452,7 +429,9 @@ void CollectGroupAndUpkeepActions(Player* bot,
       }
     } else if (st == lfg::LFG_STATE_QUEUED) {
       out->push_back({"lfg:leave", "Leave Dungeon Finder queue"});
-    } else if (st == lfg::LFG_STATE_DUNGEON && !bot->IsInCombat()) {
+    } else if ((st == lfg::LFG_STATE_DUNGEON || st == lfg::LFG_STATE_BOOT ||
+                st == lfg::LFG_STATE_FINISHED_DUNGEON) &&
+               !bot->IsInCombat()) {
       if (bot->GetMap() && !bot->GetMap()->IsDungeon()) {
         out->push_back({"lfg:tele_in", "Teleport to LFG dungeon"});
       } else {
@@ -463,6 +442,7 @@ void CollectGroupAndUpkeepActions(Player* bot,
                !bot->GetMap()->IsDungeon() &&
                (!bot->GetGroup() ||
                 bot->GetGroup()->IsLeader(bot->GetGUID())) &&
+               PartyLfgBlockReason(bot).empty() &&
                FindRandomLfgDungeonId(bot) != 0) {
       for (const LfgRoleChoice& rc : SpecLfgRoles(bot)) {
         out->push_back(
@@ -855,6 +835,7 @@ ActionOutcome ExecuteSharedQuestAction(Player* bot,
     }
     return {.used = true, .info = "declined shared quest"};
   }
+  const bool is_confirm = BotManager::IsPendingSharedQuestConfirm(bot);
   WorldSession* session = bot->GetSession();
   const ObjectGuid divider = bot->GetDivider();
   const Quest* quest = sObjectMgr->GetQuestTemplate(action.quest_id);
@@ -862,16 +843,27 @@ ActionOutcome ExecuteSharedQuestAction(Player* bot,
     return {.error = "shared quest is no longer available"};
   }
   BotManager::ClearPendingSharedQuest(bot);
-  WorldPacket p(CMSG_QUESTGIVER_ACCEPT_QUEST, 8 + 4 + 4);
-  p << divider << action.quest_id << uint32_t(0);
-  p.rpos(0);
-  session->HandleQuestgiverAcceptQuestOpcode(p);
+  if (is_confirm || quest->HasFlag(QUEST_FLAGS_PARTY_ACCEPT)) {
+    WorldPacket raw(CMSG_QUEST_CONFIRM_ACCEPT, 4);
+    raw << action.quest_id;
+    WorldPackets::Quest::QuestConfirmAcceptClient pkt(std::move(raw));
+    pkt.Read();
+    session->HandleQuestConfirmAccept(pkt);
+  } else {
+    WorldPacket p(CMSG_QUESTGIVER_ACCEPT_QUEST, 8 + 4 + 4);
+    p << divider << action.quest_id << uint32_t(0);
+    p.rpos(0);
+    session->HandleQuestgiverAcceptQuestOpcode(p);
+  }
   if (bot->GetQuestStatus(action.quest_id) == QUEST_STATUS_NONE) {
     bot->SetDivider(ObjectGuid::Empty);
     return {.error = "cannot accept shared quest"};
   }
   ai->RecordQuestAccepted(action.quest_id);
-  return {.used = true, .info = "accepted shared quest " + quest->GetTitle()};
+  return {.used = true,
+          .info = (is_confirm ? "accepted escort quest "
+                              : "accepted shared quest ") +
+                  quest->GetTitle()};
 }
 
 ActionOutcome ExecuteShareQuestAction(Player* bot,
@@ -902,6 +894,9 @@ ActionOutcome ExecuteLfgAction(Player* bot, const LfgAction& action) {
       }
       if (action.value == 0) {
         return {.error = "invalid LFG role"};
+      }
+      if (std::string why = PartyLfgBlockReason(bot); !why.empty()) {
+        return {.error = "cannot queue for Dungeon Finder: " + std::move(why)};
       }
       const uint32_t did = FindRandomLfgDungeonId(bot);
       if (did == 0) {
@@ -1088,9 +1083,13 @@ ActionOutcome ExecutePopupAnswerAction(Player* bot,
   }
   const bool pending =
       BotSessionRegistry::Instance().WithSession(key, [](BotSession& s) {
-        const bool had = !s.pending_boot_victim.empty();
+        const bool had =
+            !s.pending_boot_victim.empty() &&
+            (s.pending_boot_until_ms == 0 ||
+             static_cast<int32_t>(s.pending_boot_until_ms - getMSTime()) > 0);
         s.pending_boot_victim.clear();
         s.pending_boot_reason.clear();
+        s.pending_boot_until_ms = 0;
         return had;
       });
   if (!pending) {
@@ -1179,14 +1178,30 @@ std::vector<std::string> AnswerPopupsByPolicy(Player* bot) {
                bot, PopupAnswerAction{PopupAnswerAction::Kind::kSummon, true}),
            "accepted a summon");
     }
+    if (BotManager::IsPendingSharedQuestConfirm(bot)) {
+      if (const uint32_t qid = BotManager::GetPendingSharedQuest(bot)) {
+        const Quest* q = sObjectMgr->GetQuestTemplate(qid);
+        note(ExecuteSharedQuestAction(bot, SharedQuestAction{qid, true}),
+             "accepted escort quest " +
+                 (q ? q->GetTitle() : std::to_string(qid)));
+      }
+    }
     const lfg::LfgState st = sLFGMgr->GetState(bot->GetGUID());
     if (st == lfg::LFG_STATE_ROLECHECK) {
       const std::vector<LfgRoleChoice> roles = SpecLfgRoles(bot);
       if (!roles.empty()) {
-        note(ExecuteLfgAction(
-                 bot, LfgAction{LfgAction::Op::kRole, roles.front().mask}),
-             std::string("confirmed the Dungeon Finder role: ") +
-                 roles.front().name);
+        const LfgRoleChoice* pick = &roles.front();
+        if (BotManager::GetGroupPolicy(bot).not_tank &&
+            pick->mask == lfg::PLAYER_ROLE_TANK) {
+          for (const LfgRoleChoice& rc : roles) {
+            if (rc.mask != lfg::PLAYER_ROLE_TANK) {
+              pick = &rc;
+              break;
+            }
+          }
+        }
+        note(ExecuteLfgAction(bot, LfgAction{LfgAction::Op::kRole, pick->mask}),
+             std::string("confirmed the Dungeon Finder role: ") + pick->name);
       }
     } else if (st == lfg::LFG_STATE_PROPOSAL) {
       if (const uint32_t pid = BotManager::GetPendingLfgProposal(bot)) {

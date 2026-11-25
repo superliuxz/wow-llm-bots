@@ -23,6 +23,7 @@
 #include "DBCStructure.h"
 #include "Engine.h"
 #include "Event.h"
+#include "GameTime.h"
 #include "GridNotifiers.h"
 #include "GridNotifiersImpl.h"  // IWYU pragma: keep
 #include "Group.h"
@@ -54,6 +55,7 @@
 #include "bot_session.h"
 #include "chat/chat_scripts.h"
 #include "config/config_parsing.h"
+#include "options/exec_shared.h"
 #include "popup_watch.h"
 
 namespace llm_brain {
@@ -314,6 +316,33 @@ class LlmBrainPacketScript final : public ServerScript {
                 key, [quest_id](BotSession& s) {
                   s.pending_shared_quest_id = quest_id;
                   s.pending_shared_quest_ms = getMSTime();
+                  s.pending_shared_quest_confirm = false;
+                });
+          }
+        }
+        break;
+      }
+      case SMSG_QUEST_CONFIRM_ACCEPT: {
+        // Sent when a nearby party member starts a `QUEST_FLAGS_PARTY_ACCEPT`
+        // escort quest (`QuestConfirmAccept::Write`: uint32 QuestId, C-string
+        // QuestTitle, ObjectGuid PlayerGuid; `bot->GetDivider()` is the
+        // starter).
+        if (packet.size() >= 4 + 1 + 8) {
+          ByteBuffer copy(packet);
+          copy.rpos(0);
+          uint32_t quest_id = 0;
+          std::string title;
+          ObjectGuid starter_guid;
+          copy >> quest_id >> title;
+          if (copy.rpos() + 8 <= copy.size()) {
+            copy >> starter_guid;
+          }
+          if (quest_id != 0 && starter_guid && starter_guid != bot->GetGUID()) {
+            BotSessionRegistry::Instance().WithSession(
+                key, [quest_id](BotSession& s) {
+                  s.pending_shared_quest_id = quest_id;
+                  s.pending_shared_quest_ms = getMSTime();
+                  s.pending_shared_quest_confirm = true;
                 });
           }
         }
@@ -404,9 +433,12 @@ class LlmBrainPacketScript final : public ServerScript {
             }
           }
           BotSessionRegistry::Instance().WithSession(
-              key, [&name, &reason](BotSession& s) {
+              key, [&name, &reason, secs_left](BotSession& s) {
                 s.pending_boot_victim = name;
                 s.pending_boot_reason = name.empty() ? "" : reason;
+                s.pending_boot_until_ms =
+                    name.empty() ? 0
+                                 : getMSTime() + std::max(secs_left, 5u) * 1000;
               });
         }
         break;
@@ -629,6 +661,8 @@ void BotManager::Tick() {
               });
         }
         EnsureStrategies(player);
+        KeepNearHumanLeader(player);
+        LeaveAbandonedHumanGroup(player);
       }
       bot.was_online = true;
       continue;
@@ -648,6 +682,159 @@ void BotManager::Tick() {
       bot.next_login_ms = now_ms_ + kLoginRetryMs;
     }
   }
+}
+
+void BotManager::KeepNearHumanLeader(Player* player) {
+  // Outdoors, a follower more than 40 yd from the human leading its group
+  // comes back on its own, without an LLM call (Now #8). `Wait here` (stay),
+  // flights, loss of control, and fights keep it where it is.
+  constexpr float kStrayYd = 40.0f;
+  constexpr uint32_t kRecallCooldownMs = 4000;
+  Group* group = player->GetGroup();
+  PlayerbotAI* ai = GET_PLAYERBOT_AI(player);
+  if (!group || !ai || !player->IsAlive() || player->IsInCombat() ||
+      group->IsLeader(player->GetGUID()) || !player->GetMap() ||
+      player->GetMap()->IsDungeon() || GetGroupPolicy(player).stay ||
+      !CanClearBotMovement(player)) {
+    return;
+  }
+  Player* leader = ObjectAccessor::FindConnectedPlayer(group->GetLeaderGUID());
+  if (!leader || !leader->IsInWorld() || !IsHumanPlayer(leader) ||
+      leader->IsInFlight() || leader->GetMapId() != player->GetMapId() ||
+      leader->GetInstanceId() != player->GetInstanceId() ||
+      player->GetDistance(leader) <= kStrayYd) {
+    return;
+  }
+  const uint64_t key = player->GetGUID().GetRawValue();
+  const bool moving = player->isMoving();
+  const bool throttled =
+      BotSessionRegistry::Instance().WithSession(key, [moving](BotSession& s) {
+        if (moving && s.stray_recalled_ms != 0 &&
+            GetMSTimeDiffToNow(s.stray_recalled_ms) < kRecallCooldownMs) {
+          return true;
+        }
+        s.stray_recalled_ms = getMSTime();
+        return false;
+      });
+  if (throttled) {
+    return;
+  }
+  ClearLastMovement(player);
+  if (!ai->DoSpecificAction("follow", Event(), /*silent=*/true) &&
+      !player->isMoving()) {
+    WalkTowards(player, leader->GetPositionX(), leader->GetPositionY(),
+                leader->GetPositionZ());
+  }
+  LOG_INFO("module", "mod-llm-brain: {} strayed {:.0f} yd from {}; following",
+           player->GetName(), player->GetDistance(leader), leader->GetName());
+}
+
+bool BotManager::IsKnownBotGuid(uint64_t raw_guid) const {
+  for (const Bot& b : bots_) {
+    if (b.guid == raw_guid) {
+      return true;
+    }
+  }
+  return sRandomPlayerbotMgr.IsRandomBot(ObjectGuid(raw_guid).GetCounter());
+}
+
+void BotManager::LeaveAbandonedHumanGroup(Player* player) {
+  // When a group formed with a human loses its human (they leave the party, or
+  // stay offline >= 60 s), the bots leave Dungeon Finder, teleport out of any
+  // dungeon once out of combat, and disband the leftover bot group (Now #9 /
+  // T11).
+  constexpr uint32_t kOfflineGraceMs = 60000;
+  const uint64_t key = player->GetGUID().GetRawValue();
+  Group* group = player->GetGroup();
+  if (!group) {
+    const bool had_human =
+        BotSessionRegistry::Instance().WithSession(key, [](BotSession& s) {
+          const bool had = s.human_group_guid != 0;
+          if (!had) {
+            s.human_offline_since_ms.reset();
+          }
+          return had;
+        });
+    if (!had_human || player->IsInCombat()) {
+      return;
+    }
+    BotSessionRegistry::Instance().WithSession(key, [](BotSession& s) {
+      s.human_group_guid = 0;
+      s.human_offline_since_ms.reset();
+    });
+    sLFGMgr->LeaveLfg(player->GetGUID());
+    ClearPendingLfgProposal(player);
+    if (player->GetMap() && player->GetMap()->IsDungeon() &&
+        !player->IsBeingTeleportedFar()) {
+      sLFGMgr->TeleportPlayer(player, true);
+      if (!player->IsBeingTeleportedFar() && player->GetMap() &&
+          player->GetMap()->IsDungeon()) {
+        player->TeleportToEntryPoint();
+      }
+      LOG_INFO("module",
+               "mod-llm-brain: {} left group and teleported out after human "
+               "left",
+               player->GetName());
+    }
+    return;
+  }
+
+  const uint64_t gguid = group->GetGUID().GetRawValue();
+  if (GroupHasHuman(group)) {
+    BotSessionRegistry::Instance().WithSession(key, [gguid](BotSession& s) {
+      s.human_group_guid = gguid;
+      s.human_offline_since_ms.reset();
+    });
+    return;
+  }
+
+  bool offline_human_slot = false;
+  for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+    if (!ObjectAccessor::FindConnectedPlayer(slot.guid) &&
+        !IsKnownBotGuid(slot.guid.GetRawValue())) {
+      offline_human_slot = true;
+      break;
+    }
+  }
+  const bool abandoned = BotSessionRegistry::Instance().WithSession(
+      key, [gguid, offline_human_slot](BotSession& s) {
+        if (s.human_group_guid != gguid) {
+          s.human_group_guid = 0;
+          s.human_offline_since_ms.reset();
+          return false;
+        }
+        if (!offline_human_slot) {
+          return true;
+        }
+        if (!s.human_offline_since_ms) {
+          s.human_offline_since_ms = getMSTime();
+          return false;
+        }
+        return GetMSTimeDiffToNow(*s.human_offline_since_ms) >= kOfflineGraceMs;
+      });
+  if (!abandoned || player->IsInCombat()) {
+    return;
+  }
+  BotSessionRegistry::Instance().WithSession(key, [](BotSession& s) {
+    s.human_group_guid = 0;
+    s.human_offline_since_ms.reset();
+  });
+  const bool was_in_dungeon = player->GetMap() && player->GetMap()->IsDungeon();
+  sLFGMgr->LeaveLfg(player->GetGUID());
+  ClearPendingLfgProposal(player);
+  if (was_in_dungeon && !player->IsBeingTeleportedFar()) {
+    sLFGMgr->TeleportPlayer(player, true);
+  }
+  if (WorldSession* sess = player->GetSession(); sess && player->GetGroup()) {
+    WorldPacket pkt(CMSG_GROUP_DISBAND, 0);
+    sess->HandleGroupDisbandOpcode(pkt);
+  }
+  if (was_in_dungeon && !player->IsBeingTeleportedFar() && player->GetMap() &&
+      player->GetMap()->IsDungeon()) {
+    player->TeleportToEntryPoint();
+  }
+  LOG_INFO("module", "mod-llm-brain: {} left group{} after human left",
+           player->GetName(), was_in_dungeon ? " and teleported out" : "");
 }
 
 void BotManager::EnsureStrategies(Player* player) {
@@ -867,6 +1054,7 @@ uint32_t BotManager::GetPendingSharedQuest(Player* bot) {
     BotSessionRegistry::Instance().WithSession(key, [](BotSession& s) {
       s.pending_shared_quest_id = 0;
       s.pending_shared_quest_ms = 0;
+      s.pending_shared_quest_confirm = false;
     });
     return 0;
   }
@@ -880,6 +1068,7 @@ uint32_t BotManager::GetPendingSharedQuest(Player* bot) {
             kPendingSharedQuestTimeoutMs) {
           s.pending_shared_quest_id = 0;
           s.pending_shared_quest_ms = 0;
+          s.pending_shared_quest_confirm = false;
           timed_out = true;
           return 0;
         }
@@ -902,15 +1091,25 @@ uint32_t BotManager::GetPendingSharedQuest(Player* bot) {
   return quest_id;
 }
 
+bool BotManager::IsPendingSharedQuestConfirm(Player* bot) {
+  if (!bot || GetPendingSharedQuest(bot) == 0) {
+    return false;
+  }
+  return BotSessionRegistry::Instance().InspectSession(
+      bot->GetGUID().GetRawValue(),
+      [](const BotSession* s) { return s && s->pending_shared_quest_confirm; });
+}
+
 void BotManager::ClearPendingSharedQuest(Player* bot) {
   if (!bot) {
     return;
   }
-  BotSessionRegistry::Instance().WithSession(bot->GetGUID().GetRawValue(),
-                                             [](BotSession& s) {
-                                               s.pending_shared_quest_id = 0;
-                                               s.pending_shared_quest_ms = 0;
-                                             });
+  BotSessionRegistry::Instance().WithSession(
+      bot->GetGUID().GetRawValue(), [](BotSession& s) {
+        s.pending_shared_quest_id = 0;
+        s.pending_shared_quest_ms = 0;
+        s.pending_shared_quest_confirm = false;
+      });
 }
 
 bool BotManager::HasPendingReadyCheck(Player* bot) {
@@ -974,6 +1173,28 @@ void BotManager::ClearPendingLfgProposal(Player* bot) {
                                              });
 }
 
+std::pair<std::string, std::string> BotManager::GetPendingBootVote(
+    Player* bot) {
+  if (!bot || !bot->GetGroup()) {
+    return {};
+  }
+  return BotSessionRegistry::Instance().WithSession(
+      bot->GetGUID().GetRawValue(),
+      [](BotSession& s) -> std::pair<std::string, std::string> {
+        if (s.pending_boot_victim.empty()) {
+          return {};
+        }
+        if (s.pending_boot_until_ms != 0 &&
+            static_cast<int32_t>(s.pending_boot_until_ms - getMSTime()) <= 0) {
+          s.pending_boot_victim.clear();
+          s.pending_boot_reason.clear();
+          s.pending_boot_until_ms = 0;
+          return {};
+        }
+        return {s.pending_boot_victim, s.pending_boot_reason};
+      });
+}
+
 PopupState BotManager::ReadPopupState(Player* bot) {
   PopupState s;
   if (!bot || !bot->IsInWorld()) {
@@ -985,7 +1206,17 @@ PopupState BotManager::ReadPopupState(Player* bot) {
   if (lfg_state == lfg::LFG_STATE_PROPOSAL) {
     s.lfg_proposal_id = GetPendingLfgProposal(bot);
   }
+  auto [boot_victim, boot_reason] = GetPendingBootVote(bot);
+  s.boot_victim = std::move(boot_victim);
+  s.boot_reason = std::move(boot_reason);
   if (bot->IsAlive()) {
+    if (bot->GetSummonExpireTimer() > GameTime::GetGameTime().count()) {
+      s.summon = true;
+      s.summon_from = BotSessionRegistry::Instance().InspectSession(
+          bot->GetGUID().GetRawValue(), [](const BotSession* bs) {
+            return bs ? bs->pending_summoner : std::string();
+          });
+    }
     s.shared_quest_id = GetPendingSharedQuest(bot);
     if (s.shared_quest_id != 0) {
       if (const Quest* q = sObjectMgr->GetQuestTemplate(s.shared_quest_id)) {

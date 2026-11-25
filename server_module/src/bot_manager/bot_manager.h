@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "bot_manager/popup_watch.h"
@@ -86,15 +87,18 @@ class BotManager {
   // prompts captured via ServerScript::OnPacketSent (works for standalone
   // no-master bots) while BrainPolicyListener blocks Playerbots' auto-handlers.
   static uint32_t GetPendingSharedQuest(Player* bot);
+  static bool IsPendingSharedQuestConfirm(Player* bot);
   static void ClearPendingSharedQuest(Player* bot);
   static bool HasPendingReadyCheck(Player* bot);
   static void ClearPendingReadyCheck(Player* bot);
   static uint32_t GetPendingLfgProposal(Player* bot);
   static void ClearPendingLfgProposal(Player* bot);
+  static std::pair<std::string, std::string> GetPendingBootVote(Player* bot);
 
   // World thread only: the timed popups open for `bot` right now (ready
-  // check, LFG role check / proposal, shared quest, resurrect offer, loot
-  // rolls it hasn't voted on), for PopupWatch to turn into wake events.
+  // check, LFG role check / proposal / boot vote, summon, shared quest,
+  // resurrect offer, loot rolls it hasn't voted on), for PopupWatch to turn
+  // into wake events.
   static PopupState ReadPopupState(Player* bot);
 
  private:
@@ -109,6 +113,9 @@ class BotManager {
 
   void Tick();
   void EnsureStrategies(Player* player);
+  void KeepNearHumanLeader(Player* player);
+  void LeaveAbandonedHumanGroup(Player* player);
+  bool IsKnownBotGuid(uint64_t raw_guid) const;
 
   const Strategies strategies_;
   std::vector<Bot> bots_;

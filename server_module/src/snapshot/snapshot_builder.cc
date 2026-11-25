@@ -23,6 +23,7 @@
 #include "Item.h"
 #include "ItemTemplate.h"
 #include "LFG.h"
+#include "LFGMgr.h"
 #include "LootMgr.h"
 #include "Map.h"
 #include "MapMgr.h"
@@ -415,6 +416,55 @@ void FillCombat(Player* bot, NearbyBuilder* nearby, pb::Extensions* ext) {
   }
 }
 
+// A party member's unfinished quests and the first objective left on each
+// ("Kobold Camp Cleanup: Kobold Vermin slain 3/8"), at most 3 (Now #8): what
+// a player sees hovering a party frame with a quest addon.
+std::vector<std::string> MemberQuestProgress(Player* member) {
+  std::vector<std::string> out;
+  const QuestStatusMap& status_map = member->getQuestStatusMap();
+  for (uint16_t slot = 0; slot < MAX_QUEST_LOG_SIZE && out.size() < 3; ++slot) {
+    const uint32_t quest_id = member->GetQuestSlotQuestId(slot);
+    const Quest* q =
+        quest_id ? sObjectMgr->GetQuestTemplate(quest_id) : nullptr;
+    const auto it = status_map.find(quest_id);
+    if (!q || it == status_map.end() ||
+        it->second.Status != QUEST_STATUS_INCOMPLETE) {
+      continue;
+    }
+    std::string left;
+    for (size_t i = 0; i < QUEST_OBJECTIVES_COUNT && left.empty(); ++i) {
+      const int32_t npc_or_go = q->RequiredNpcOrGo[i];
+      const uint32_t need = q->RequiredNpcOrGoCount[i];
+      const uint32_t have = it->second.CreatureOrGOCount[i];
+      if (npc_or_go == 0 || need == 0 || have >= need) {
+        continue;
+      }
+      std::string what = q->ObjectiveText[i];
+      if (what.empty() && npc_or_go > 0) {
+        if (const CreatureTemplate* tmpl = sObjectMgr->GetCreatureTemplate(
+                static_cast<uint32_t>(npc_or_go))) {
+          what = tmpl->Name + " slain";
+        }
+      }
+      left = (what.empty() ? std::string("objective") : what) + " " +
+             std::to_string(have) + "/" + std::to_string(need);
+    }
+    for (size_t i = 0; i < QUEST_ITEM_OBJECTIVES_COUNT && left.empty(); ++i) {
+      const uint32_t need = q->RequiredItemCount[i];
+      const uint32_t have = it->second.ItemCount[i];
+      if (q->RequiredItemId[i] == 0 || need == 0 || have >= need) {
+        continue;
+      }
+      const ItemTemplate* tmpl =
+          sObjectMgr->GetItemTemplate(q->RequiredItemId[i]);
+      left = (tmpl ? tmpl->Name1 : std::string("item")) + " " +
+             std::to_string(have) + "/" + std::to_string(need);
+    }
+    out.push_back(left.empty() ? q->GetTitle() : q->GetTitle() + ": " + left);
+  }
+  return out;
+}
+
 void FillParty(Player* bot, NearbyBuilder* nearby, pb::Extensions* ext) {
   Group* group = bot->GetGroup();
   if (!group) {
@@ -467,11 +517,35 @@ void FillParty(Player* bot, NearbyBuilder* nearby, pb::Extensions* ext) {
       gp.aggro = !member->getAttackers().empty();
       gp.in_range = member->GetMapId() == bot->GetMapId() &&
                     bot->GetDistance(member) <= 100.0f;
+      if (member->GetMapId() == bot->GetMapId()) {
+        gp.quests = MemberQuestProgress(member);
+      }
       if (gp.in_range) {
         nearby->FillUnitRelative(bot, member, &m.rel);
       }
       if (Unit* sel = member->GetSelectedUnit()) {
         m.target = sel->GetName();
+      }
+      // Dungeon Finder party facts visible on party frames (Now #9): Dungeon
+      // Deserter and Luck of the Draw.
+      for (uint32_t spell_id :
+           {static_cast<uint32_t>(lfg::LFG_SPELL_DUNGEON_DESERTER),
+            static_cast<uint32_t>(lfg::LFG_SPELL_LUCK_OF_THE_DRAW)}) {
+        if (const Aura* aura = member->GetAura(spell_id)) {
+          pb::Aura& out_aura = m.auras.emplace_back();
+          out_aura.id = spell_id;
+          if (const char* sn = aura->GetSpellInfo()
+                                   ->SpellName[sWorld->GetDefaultDbcLocale()]) {
+            out_aura.name = sn;
+          }
+          out_aura.harmful = spell_id == lfg::LFG_SPELL_DUNGEON_DESERTER;
+          if (aura->GetDuration() > 0) {
+            out_aura.remaining_s =
+                static_cast<float>(aura->GetDuration()) / 1000.0f;
+          }
+          out_aura.stacks =
+              aura->GetStackAmount() > 1 ? aura->GetStackAmount() : 0;
+        }
       }
     }
   }

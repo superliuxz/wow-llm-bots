@@ -951,5 +951,67 @@ TEST(OptionsTest, BindHearthstoneReplacesGenericTalkAtInnkeeper) {
   EXPECT_EQ(targets[0].guid, "npc_bind:0x0000000000006928");
 }
 
+TEST(OptionsTest, EscortQuestWaitsUntilPartyIsReadyOrSomeoneHasIt) {
+  // Solo: no wait.
+  EXPECT_EQ(EscortStartHoldReason(/*self_is_leader=*/false, {}), "");
+
+  // Human in party who hasn't started it yet: bots never start ahead of them.
+  EXPECT_NE(EscortStartHoldReason(/*self_is_leader=*/true,
+                                  {{.is_human = true, .dist_to_npc_yd = 5.0f}}),
+            "");
+
+  // Once the human (or any party member) has the quest, bots accept at once.
+  EXPECT_EQ(EscortStartHoldReason(
+                /*self_is_leader=*/false,
+                {{.is_human = true, .dist_to_npc_yd = 5.0f, .has_quest = true},
+                 {.dist_to_npc_yd = 50.0f}}),
+            "");
+
+  // All-bot party: follower waits for the leader.
+  EXPECT_NE(EscortStartHoldReason(/*self_is_leader=*/false,
+                                  {{.dist_to_npc_yd = 4.0f}}),
+            "");
+
+  // All-bot party leader waits if a member is far away, dead, or missing the
+  // prerequisite turn-in, and starts once all online members are ready.
+  EXPECT_NE(EscortStartHoldReason(/*self_is_leader=*/true,
+                                  {{.dist_to_npc_yd = 45.0f}}),
+            "");
+  EXPECT_NE(EscortStartHoldReason(/*self_is_leader=*/true,
+                                  {{.alive = false, .dist_to_npc_yd = 5.0f}}),
+            "");
+  EXPECT_NE(EscortStartHoldReason(
+                /*self_is_leader=*/true,
+                {{.dist_to_npc_yd = 5.0f, .missing_prereq = true}}),
+            "");
+  EXPECT_EQ(
+      EscortStartHoldReason(/*self_is_leader=*/true,
+                            {{.dist_to_npc_yd = 8.0f},
+                             {.online = false, .dist_to_npc_yd = 999.0f}}),
+      "");
+}
+
+TEST(OptionsTest, SpecLfgRoleChoicesMatchTalentSpec) {
+  // Shadow priest (class 5, tab 2) -> DPS only; Holy (tab 1) -> Healer only.
+  const auto spriest = SpecLfgRoleChoices(5, 2, /*has_talents=*/true, 20);
+  ASSERT_EQ(spriest.size(), 1u);
+  EXPECT_EQ(spriest[0].mask, kLfgRoleDamage);
+  const auto hpriest = SpecLfgRoleChoices(5, 1, /*has_talents=*/true, 20);
+  ASSERT_EQ(hpriest.size(), 1u);
+  EXPECT_EQ(hpriest[0].mask, kLfgRoleHealer);
+
+  // Prot warrior (class 1, tab 2) -> Tank; Arms (tab 0) -> DPS.
+  EXPECT_EQ(SpecLfgRoleChoices(1, 2, true, 20)[0].mask, kLfgRoleTank);
+  EXPECT_EQ(SpecLfgRoleChoices(1, 0, true, 20)[0].mask, kLfgRoleDamage);
+
+  // Ret paladin (class 2, tab 2) never queues as tank or healer.
+  const auto ret = SpecLfgRoleChoices(2, 2, true, 40);
+  ASSERT_EQ(ret.size(), 1u);
+  EXPECT_EQ(ret[0].mask, kLfgRoleDamage);
+
+  // Untalented paladin falls back to all three class roles.
+  EXPECT_EQ(SpecLfgRoleChoices(2, 0, /*has_talents=*/false, 20).size(), 3u);
+}
+
 }  // namespace
 }  // namespace llm_brain

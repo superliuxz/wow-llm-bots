@@ -77,6 +77,45 @@ std::string_view OptionKindName(OptionTarget::Kind kind);
 std::vector<OptionTarget> AddOptions(wlb::snapshot::Snapshot* snapshot,
                                      const OptionFacts& facts = {});
 
+// Party member readiness facts for a `QUEST_FLAGS_PARTY_ACCEPT` escort quest
+// (Now #8: "An escort waits until everyone has the quest").
+struct EscortPartyMember {
+  bool is_human = false;
+  bool online = true;
+  bool alive = true;
+  bool same_map = true;
+  float dist_to_npc_yd = 0.0f;
+  bool has_quest = false;
+  bool missing_prereq = false;
+};
+
+// Returns why a grouped bot should hold off starting an escort quest right now,
+// or "" when solo, a party member already started/has the quest, or the leader
+// has every party member nearby, alive, and past any prerequisite turn-in.
+std::string EscortStartHoldReason(
+    bool self_is_leader,
+    const std::vector<EscortPartyMember>& members);
+
+// WoW 3.3.5a LFG role bitmasks (`lfg::LfgRoles` in LFG.h), kept here so spec
+// role selection is unit-testable without AzerothCore headers (Now #9 / T6).
+inline constexpr uint8_t kLfgRoleTank = 0x02;
+inline constexpr uint8_t kLfgRoleHealer = 0x04;
+inline constexpr uint8_t kLfgRoleDamage = 0x08;
+
+struct LfgRoleChoice {
+  uint8_t mask = kLfgRoleDamage;
+  const char* name = "DPS";
+};
+
+// Spec-correct Dungeon Finder roles for `class_id` (WoW `Classes` enum: 1
+// warrior, 2 paladin, 5 priest, 6 DK, 7 shaman, 11 druid, ...) and 0-based
+// primary talent tab `spec_tab`. Untalented or pre-level-10 characters get
+// every role their class can play.
+std::vector<LfgRoleChoice> SpecLfgRoleChoices(uint8_t class_id,
+                                              uint8_t spec_tab,
+                                              bool has_talents,
+                                              uint8_t level);
+
 // The options of a bot's recent snapshots, so a Choose naming (seq, option)
 // can be resolved after the bot has moved on to newer snapshots. Keeps the
 // snapshots built within `window` of the newest one: by time, not by count, so

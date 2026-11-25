@@ -33,6 +33,10 @@ struct PopupState {
   std::string shared_quest_title;
   std::string shared_quest_from;
   bool resurrect_offer = false;
+  bool summon = false;
+  std::string summon_from;
+  std::string boot_victim;
+  std::string boot_reason;
   std::vector<Roll> rolls;
 };
 

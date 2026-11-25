@@ -13,6 +13,7 @@
 #include "CreatureData.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
+#include "Group.h"
 #include "Item.h"
 #include "ItemPackets.h"
 #include "ItemTemplate.h"
@@ -37,8 +38,10 @@
 #include "WorldSession.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "chat/chat_scripts.h"
 #include "options/action_types.h"
 #include "options/exec_shared.h"
+#include "options/options.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/world_util.h"
 
@@ -114,6 +117,45 @@ bool IsBoundNearHere(const Player* bot) {
   return bot->m_homebindMapId == bot->GetMapId() &&
          bot->m_homebindAreaId == bot->GetAreaId() &&
          bot->GetExactDist2d(bot->m_homebindX, bot->m_homebindY) <= 50.0f;
+}
+
+// Holds starting a `QUEST_FLAGS_PARTY_ACCEPT` escort quest until the party has
+// it or every party member is nearby, alive, and past any prerequisite turn-in
+// (Now #8).
+std::string EscortHoldReason(Player* bot, Creature* npc, const Quest* quest) {
+  if (!quest->HasFlag(QUEST_FLAGS_PARTY_ACCEPT)) {
+    return "";
+  }
+  Group* group = bot->GetGroup();
+  if (!group) {
+    return "";
+  }
+  const uint32_t qid = quest->GetQuestId();
+  const int32_t prev = quest->GetPrevQuestId();
+  const uint32_t req_prev = prev > 0 ? static_cast<uint32_t>(prev) : 0;
+  std::vector<EscortPartyMember> members;
+  for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+    if (slot.guid == bot->GetGUID()) {
+      continue;
+    }
+    EscortPartyMember m;
+    Player* p = ObjectAccessor::FindConnectedPlayer(slot.guid);
+    if (!p || !p->IsInWorld()) {
+      m.online = false;
+      members.push_back(m);
+      continue;
+    }
+    m.online = true;
+    m.is_human = IsHumanPlayer(p);
+    m.alive = p->IsAlive();
+    m.same_map = p->GetMapId() == bot->GetMapId() &&
+                 p->GetInstanceId() == bot->GetInstanceId();
+    m.dist_to_npc_yd = m.same_map ? p->GetDistance(npc) : 9999.0f;
+    m.has_quest = p->GetQuestStatus(qid) != QUEST_STATUS_NONE;
+    m.missing_prereq = req_prev != 0 && !p->GetQuestRewardStatus(req_prev);
+    members.push_back(m);
+  }
+  return EscortStartHoldReason(group->IsLeader(bot->GetGUID()), members);
 }
 
 }  // namespace
@@ -234,12 +276,16 @@ void CollectNpcActions(Player* bot,
           continue;
         }
         if (bot->GetQuestStatus(qid) == QUEST_STATUS_NONE &&
-            bot->CanTakeQuest(quest, false) && bot->CanAddQuest(quest, false)) {
+            bot->CanTakeQuest(quest, false) && bot->CanAddQuest(quest, false) &&
+            EscortHoldReason(bot, npc, quest).empty()) {
+          const char* verb = quest->HasFlag(QUEST_FLAGS_PARTY_ACCEPT)
+                                 ? "Accept escort quest \""
+                                 : "Accept quest \"";
           out->push_back(
               {"npc_qaccept:" + u.guid + ":" +
                    std::to_string(quest->GetQuestId()),
                u.guid,
-               "Accept quest \"" + quest->GetTitle() + "\" from " + npc_name});
+               std::string(verb) + quest->GetTitle() + "\" from " + npc_name});
         }
       }
     }
@@ -453,6 +499,9 @@ ActionOutcome ExecuteNpcAction(Player* bot, const NpcAction& action) {
       if (!quest || !bot->CanTakeQuest(quest, false) ||
           !bot->CanAddQuest(quest, false)) {
         return {.error = "cannot accept that quest"};
+      }
+      if (std::string hold = EscortHoldReason(bot, npc, quest); !hold.empty()) {
+        return {.error = std::move(hold)};
       }
       WorldPacket p(CMSG_QUESTGIVER_ACCEPT_QUEST);
       uint32_t unk1 = 0;

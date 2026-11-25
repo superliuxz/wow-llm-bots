@@ -24,8 +24,12 @@ TEST(PopupWatchTest, ReportsEachNewPopupOnce) {
   s.shared_quest_title = "Vile Familiars";
   s.shared_quest_from = "Hele";
   s.resurrect_offer = true;
+  s.summon = true;
+  s.summon_from = "Zenji";
+  s.boot_victim = "Loadc";
+  s.boot_reason = "afk";
   std::vector<pb::Event> evs = watch.Update(s);
-  ASSERT_EQ(evs.size(), 5u);
+  ASSERT_EQ(evs.size(), 7u);
   EXPECT_EQ(evs[0].prompt->kind, pb::PromptEvent::READY_CHECK);
   EXPECT_EQ(evs[1].prompt->kind, pb::PromptEvent::ROLE_CHECK);
   EXPECT_EQ(evs[2].prompt->kind, pb::PromptEvent::LFG_PROPOSAL);
@@ -33,6 +37,10 @@ TEST(PopupWatchTest, ReportsEachNewPopupOnce) {
   EXPECT_EQ(evs[3].prompt->from, "Hele");
   EXPECT_EQ(evs[3].prompt->text, "Vile Familiars");
   EXPECT_EQ(evs[4].prompt->kind, pb::PromptEvent::RESURRECT_OFFER);
+  EXPECT_EQ(evs[5].prompt->kind, pb::PromptEvent::SUMMON);
+  EXPECT_EQ(evs[5].prompt->from, "Zenji");
+  EXPECT_EQ(evs[6].prompt->kind, pb::PromptEvent::LFG_BOOT_VOTE);
+  EXPECT_EQ(evs[6].prompt->text, "Loadc: afk");
 
   // Still open: nothing new.
   EXPECT_TRUE(watch.Update(s).empty());

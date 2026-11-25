@@ -188,14 +188,16 @@ def _case_party_reply():
                     time.sleep(6.0)
                     with proxy.lock:
                         says = _party_says(proxy, since)
+                        delays = [t - since for t, cmd in proxy.commands
+                                  if t >= since and cmd.get("say", {}).get("channel") == "PARTY"]
                     with brain.lock:
                         woken = sorted({b for t, b, w in brain.wakes
                                         if t >= since and f"party from Loadd: {text}" in w})
-                    return says, woken
+                    return says, woken, delays
 
-                says1, woken1 = say_and_wait("anyone up for RFC?")
-                says2, woken2 = say_and_wait("loadc can you heal?")
-                says3, woken3 = say_and_wait("lol")
+                says1, woken1, delays1 = say_and_wait("anyone up for RFC?")
+                says2, woken2, delays2 = say_and_wait("loadc can you heal?")
+                says3, woken3, _ = say_and_wait("lol")
             finally:
                 harness.terminate()
                 try:
@@ -208,14 +210,16 @@ def _case_party_reply():
                 for bot in ("Loadb", "Loadc", "Loadd"):
                     server.console(f"llmtest ungroup {bot}", wait_s=0.2, inst=TEST)
 
-        # T9: a party line wakes only the bot that answers it.
+        # T9 & Now #10: one responder per question, and a >= 1 s typing delay.
         expect(woken1 == ["Loada"], f"'anyone up for RFC?' woke {woken1}, expected only Loada")
         expect(says1 == {"Loada": 1}, f"'anyone up for RFC?' got party replies {says1}, expected only Loada")
+        expect(delays1 and delays1[0] >= 1.0, f"party reply had no >= 1 s typing delay: {delays1}")
         expect(woken2 == ["Loadc"], f"'loadc can you heal?' woke {woken2}, expected only Loadc")
         expect(says2 == {"Loadc": 1}, f"'loadc can you heal?' got party replies {says2}, expected only Loadc")
+        expect(delays2 and delays2[0] >= 1.0, f"named reply had no >= 1 s typing delay: {delays2}")
         expect(not woken3 and not says3, f"'lol' woke {woken3} / got replies {says3}")
-        return ("unnamed line: only Loada woke and answered; named: only Loadc woke and answered; "
-                "'lol' woke nobody")
+        return (f"unnamed: Loada answered after {delays1[0]:.2f} s; named: Loadc answered after "
+                f"{delays2[0]:.2f} s; 'lol' woke nobody")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
 def _case_lfg_channel():

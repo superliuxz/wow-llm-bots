@@ -156,12 +156,21 @@ Findings from "Wow Llm Bots Review 2". Tick when fixed and tested.
    by …]` on roll options, the loot policy never Needs against a human who did, RULES "grats" once;
    `e2e_lootroll`) Main-spec, armor type and primary stat facts. Disenchant. BoE -> Greed.
    "grats" at most once. Never Need against something the human said they need.
-8. **Questing together.** Party objective progress on screen (`Help X with Y (3/8)`). An escort
-   waits until everyone has the quest. A 40 yd stray check outdoors done in C++, without the LLM.
-9. **Dungeon Finder life.** Spec-correct roles (T6). Leave and teleport out when the human leaves
-   (T11). Deserter and Luck of the Draw facts. Boot votes.
-10. **Less chatter, sensibly timed.** A chat budget per party, a 1-3 s typing delay, one responder
-    per question, no stating the obvious.
+8. **[done] Questing together.** (`GroupPart::quests` + `help <name> with <quest> (<obj>)` on
+   screen, `EscortStartHoldReason` + `SMSG_QUEST_CONFIRM_ACCEPT` escort handling, 40 yd outdoor
+   stray recall in `BotManager::KeepNearHumanLeader`; unit tests, `e2e_human_party`) Party
+   objective progress on screen (`Help X with Y (3/8)`). An escort waits until everyone has the
+   quest. A 40 yd stray check outdoors done in C++, without the LLM.
+9. **[done] Dungeon Finder life.** (`SpecLfgRoleChoices` from T6, `LeaveAbandonedHumanGroup`
+   leaving LFG and teleporting out when the human leaves, `Dungeon Deserter` queue gate + screen
+   fact and `Luck of the Draw` party header fact, `LFG_BOOT_VOTE` popup wake + `boot:yes`/`boot:no`;
+   unit tests, `e2e_lfg_proposal`) Spec-correct roles (T6). Leave and teleport out when the human
+   leaves (T11). Deserter and Luck of the Draw facts. Boot votes.
+10. **[done] Less chatter, sensibly timed.** (per-party unprompted chat budget and echo filter in
+    `BotLoop`, 1-3 s length-scaled typing delay in live `harness run`, single responder across
+    party/raid/nearby say even when multiple bots are named, tightened `RULES.md` silence/brevity
+    rules; `bot_loop_unittest`, `e2e_party_reply`, `e2e_human_party`) A chat budget per party, a
+    1-3 s typing delay, one responder per question, no stating the obvious.
 
 Lessons from official AI companions (Follower Dungeons, FFXIV Duty Support, Dragon's Dogma pawns,
 Guild Wars heroes):

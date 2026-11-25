@@ -91,6 +91,8 @@ class LiveSession : public base::RawPtrTarget {
     cfg.knowledge_path = options.knowledge_path;
     cfg.max_in_flight = options.slots;
     cfg.temperature = options.temperature;
+    cfg.typing_delay_min = base::Seconds(1);
+    cfg.typing_delay_max = base::Seconds(3);
     loop_ = std::make_unique<BotLoop>(
         std::move(cfg),
         [this](LlmRequest req, base::OnceCallback<void(LlmResult)> reply,
@@ -120,12 +122,12 @@ class LiveSession : public base::RawPtrTarget {
     }
     runner->PostDelayedTask(
         base::BindOnce(&LiveSession::OnTick, weak_factory_.GetWeakPtr()),
-        base::Seconds(1));
+        base::Milliseconds(200));
   }
 
   void OnTick() {
     loop_->OnTick(base::TimeTicks::Now());
-    if (++ticks_ % 60 == 0) {
+    if (++ticks_ % 300 == 0) {
       LogStatsSummary();
     }
     ScheduleTick();

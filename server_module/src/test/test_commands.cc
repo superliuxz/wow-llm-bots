@@ -34,6 +34,7 @@
 #include "InstanceSaveMgr.h"
 #include "Item.h"
 #include "ItemTemplate.h"
+#include "LFGMgr.h"
 #include "LootMgr.h"
 #include "Map.h"
 #include "Object.h"
@@ -117,6 +118,7 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"setskill", HandleSetSkill, SEC_ADMINISTRATOR, Console::Yes},
         {"logout", HandleLogout, SEC_ADMINISTRATOR, Console::Yes},
         {"kill", HandleKill, SEC_ADMINISTRATOR, Console::Yes},
+        {"lfgboot", HandleLfgBoot, SEC_ADMINISTRATOR, Console::Yes},
     };
     static ChatCommandTable root_table = {
         {"llmtest", test_table},
@@ -1095,6 +1097,27 @@ class LlmBrainTestCommandScript : public CommandScript {
     }
     handler->PSendSysMessage("llmtest: killed {}{}", player->GetName(),
                              FormatToken(token));
+    return true;
+  }
+
+  static bool HandleLfgBoot(ChatHandler* handler,
+                            std::string kicker_name,
+                            std::string victim_name,
+                            Optional<std::string> reason) {
+    Player* kicker = FindOnlinePlayer(handler, std::move(kicker_name));
+    Player* victim = FindOnlinePlayer(handler, std::move(victim_name));
+    if (!kicker || !victim) {
+      return false;
+    }
+    Group* group = kicker->GetGroup();
+    if (!group || victim->GetGroup() != group) {
+      handler->SendErrorMessage("llmtest: lfgboot requires same group");
+      return false;
+    }
+    sLFGMgr->InitBoot(group->GetGUID(), kicker->GetGUID(), victim->GetGUID(),
+                      reason ? *reason : "afk");
+    handler->PSendSysMessage("llmtest: boot vote started on {} by {}",
+                             victim->GetName(), kicker->GetName());
     return true;
   }
 };

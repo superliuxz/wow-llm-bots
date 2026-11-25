@@ -3151,5 +3151,80 @@ TEST(BotLoopTest, InvalidPlanStopsItsEarlySteps) {
   EXPECT_EQ(commands[1].act->stop, pb::Command::Act::MOVING);
 }
 
+// Now #10: typing delay (1-3 s scaled by message length), per-party unprompted
+// chat budget across all bots in the group, and single responder even when
+// multiple bots are named or spoken to in `/say`.
+TEST(BotLoopTest, TypingDelayPartyBudgetAndSingleResponder) {
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  cfg.typing_delay_min = base::Seconds(1);
+  cfg.typing_delay_max = base::Seconds(3);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { sent.push_back(cmd); });
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  const auto snap_for = [&](const std::string& bot, const std::string& other,
+                            uint32_t seq, base::TimeTicks at) {
+    pb::Snapshot s = MakeLiveSnap(bot, seq, at, /*in_combat=*/false);
+    AddKeep(&s);
+    pb::Party& p = s.ext.party.emplace();
+    p.leader = "Hele";
+    for (const char* name : {"Hele", other.c_str()}) {
+      pb::Unit m;
+      m.name = name;
+      p.members.push_back(m);
+    }
+    return s;
+  };
+  const auto count_says = [&] {
+    return std::count_if(sent.begin(), sent.end(), [](const pb::Command& c) {
+      return c.say.has_value();
+    });
+  };
+
+  // 1. Both bots wake simultaneously on first look and try to speak unprompted:
+  //    the party budget allows only the first bot's line (6 s spacing), and
+  //    typing delay holds it until >= 1 s has elapsed.
+  loop.OnSnapshot(snap_for("Loada", "Telda", 1, t0), t0);
+  loop.OnSnapshot(snap_for("Telda", "Loada", 1, t0), t0);
+  ASSERT_EQ(brain.size(), 2u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300\nparty: hi");
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300\nparty: yo");
+  EXPECT_EQ(count_says(), 0);  // Held for typing delay.
+
+  loop.OnTick(t0 + base::Milliseconds(800));
+  EXPECT_EQ(count_says(), 0);
+  loop.OnTick(t0 + base::Milliseconds(1200));
+  EXPECT_EQ(count_says(), 1);  // Loada's short line flushed; Telda's dropped.
+
+  // 2. Long reply waits up to `typing_delay_max` (3 s) and human-prompted lines
+  //    bypass the unprompted budget while still keeping 1 responder even if two
+  //    bots are named or spoken to in `/say`.
+  sent.clear();
+  for (const char* bot : {"Loada", "Telda"}) {
+    pb::ImmediateEvent imm;
+    imm.bot = bot;
+    pb::ChatEvent& chat = imm.event.chat.emplace();
+    chat.channel = pb::SAY;
+    chat.from = "Hele";
+    chat.text = "loada or telda can one of you buff?";
+    chat.at_me = true;
+    loop.OnEvent(imm, t0 + base::Seconds(2));
+  }
+  ASSERT_EQ(brain.size(), 1u);  // Only Loada (first named) woke!
+  loop.OnSnapshot(snap_for("Loada", "Telda", 2, t0 + base::Seconds(2)),
+                  t0 + base::Seconds(2));
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 300\n"
+      "party: sure thing give me one second to drink up and buff everyone");
+  loop.OnTick(t0 + base::Milliseconds(4500));
+  EXPECT_EQ(count_says(), 0);  // 60+ chars -> 3.0 s typing delay.
+  loop.OnTick(t0 + base::Milliseconds(5100));
+  EXPECT_EQ(count_says(), 1);
+}
+
 }  // namespace
 }  // namespace harness

@@ -783,6 +783,99 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
   return targets;
 }
 
+std::string EscortStartHoldReason(
+    bool self_is_leader,
+    const std::vector<EscortPartyMember>& members) {
+  if (members.empty()) {
+    return "";
+  }
+  for (const EscortPartyMember& m : members) {
+    if (m.has_quest) {
+      return "";  // Already started by a party member: accept right away.
+    }
+  }
+  for (const EscortPartyMember& m : members) {
+    if (m.is_human && m.online) {
+      return "wait for your party to start this escort quest";
+    }
+  }
+  if (!self_is_leader) {
+    return "wait for the party leader to start this escort quest";
+  }
+  constexpr float kEscortReadyDistYd = 30.0f;
+  for (const EscortPartyMember& m : members) {
+    if (!m.online) {
+      continue;
+    }
+    if (!m.alive || !m.same_map || m.dist_to_npc_yd > kEscortReadyDistYd ||
+        m.missing_prereq) {
+      return "wait until everyone in your party is here and ready for the "
+             "escort";
+    }
+  }
+  return "";
+}
+
+namespace {
+
+std::vector<LfgRoleChoice> ClassLfgRoleChoices(uint8_t class_id) {
+  switch (class_id) {
+    case 1:  // CLASS_WARRIOR
+    case 6:  // CLASS_DEATH_KNIGHT
+      return {{kLfgRoleTank, "Tank"}, {kLfgRoleDamage, "DPS"}};
+    case 5:  // CLASS_PRIEST
+    case 7:  // CLASS_SHAMAN
+      return {{kLfgRoleHealer, "Healer"}, {kLfgRoleDamage, "DPS"}};
+    case 2:   // CLASS_PALADIN
+    case 11:  // CLASS_DRUID
+      return {{kLfgRoleTank, "Tank"},
+              {kLfgRoleHealer, "Healer"},
+              {kLfgRoleDamage, "DPS"}};
+    default:
+      return {{kLfgRoleDamage, "DPS"}};
+  }
+}
+
+}  // namespace
+
+std::vector<LfgRoleChoice> SpecLfgRoleChoices(uint8_t class_id,
+                                              uint8_t spec_tab,
+                                              bool has_talents,
+                                              uint8_t level) {
+  if (!has_talents || level < 10) {
+    return ClassLfgRoleChoices(class_id);
+  }
+  const LfgRoleChoice tank{kLfgRoleTank, "Tank"};
+  const LfgRoleChoice healer{kLfgRoleHealer, "Healer"};
+  const LfgRoleChoice dps{kLfgRoleDamage, "DPS"};
+  switch (class_id) {
+    case 1:  // Warrior: 0 Arms, 1 Fury, 2 Protection.
+      return {spec_tab == 2 ? tank : dps};
+    case 2:  // Paladin: 0 Holy, 1 Protection, 2 Retribution.
+      if (spec_tab == 0) {
+        return {healer};
+      }
+      return {spec_tab == 1 ? tank : dps};
+    case 5:  // Priest: 0 Discipline, 1 Holy, 2 Shadow.
+      return {spec_tab == 2 ? dps : healer};
+    case 6:  // Death Knight: 0 Blood, 1 Frost, 2 Unholy.
+      return spec_tab == 0 ? std::vector<LfgRoleChoice>{tank, dps}
+                           : std::vector<LfgRoleChoice>{dps, tank};
+    case 7:  // Shaman: 0 Elemental, 1 Enhancement, 2 Restoration.
+      return {spec_tab == 2 ? healer : dps};
+    case 11:  // Druid: 0 Balance, 1 Feral, 2 Restoration.
+      if (spec_tab == 2) {
+        return {healer};
+      }
+      if (spec_tab == 1) {
+        return {tank, dps};
+      }
+      return {dps};
+    default:
+      return {dps};
+  }
+}
+
 OptionHistory::OptionHistory(base::TimeDelta window) : window_(window) {}
 
 OptionHistory::OptionHistory(OptionHistory&&) noexcept = default;

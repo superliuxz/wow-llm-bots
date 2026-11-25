@@ -156,6 +156,15 @@ bool IsNumberedOptionLine(std::string_view line) {
   return i + 1 < line.size() && line[i] == '.' && line[i + 1] == ' ';
 }
 
+// Core status lines (`me:`, `where:`, `party:` summary/help/state) stay ahead
+// of unnumbered scenery lines when a crowded screen has to be trimmed.
+bool IsCoreScreenLine(std::string_view line) {
+  return line.starts_with("me:") || line.starts_with("where:") ||
+         line.starts_with("party:") || line.starts_with("  party hurt:") ||
+         line.starts_with("  loose mobs:") || line.starts_with("  help ") ||
+         line.starts_with("  party_state:");
+}
+
 // Truncates `user` to `max_bytes` while keeping ALL numbered option lines (both
 // `around me:` and `also:`) visible so the grammar never allows option numbers
 // the brain cannot see.
@@ -183,9 +192,21 @@ std::string CapUserPreservingAlso(std::string_view user, size_t max_bytes) {
     }
     std::vector<bool> keep(lines.size(), true);
     size_t cur_size = user.size();
-    // Pass 1: drop non-option description lines inside the screen body from
-    // bottom up (preserving `also:` and every numbered option line).
+    // Pass 1a: drop non-option, non-core description lines inside the screen
+    // body from bottom up (scenery `- ...`, open panels, etc.).
     for (size_t i = lines.size(); i > 0 && cur_size > max_bytes; --i) {
+      const std::string_view l = lines[i - 1];
+      if (l == "also:" || IsNumberedOptionLine(l) || IsCoreScreenLine(l)) {
+        continue;
+      }
+      keep[i - 1] = false;
+      cur_size -= l.size() + 1;
+    }
+    // Pass 1b: if still over budget, drop core non-option lines before options.
+    for (size_t i = lines.size(); i > 0 && cur_size > max_bytes; --i) {
+      if (!keep[i - 1]) {
+        continue;
+      }
       const std::string_view l = lines[i - 1];
       if (l == "also:" || IsNumberedOptionLine(l)) {
         continue;

@@ -837,6 +837,7 @@ std::vector<std::string> PartyLines(
     const std::flat_set<std::string>& guids,
     std::string_view my_name,
     const std::optional<pb::GroupPart>& self_group,
+    const std::vector<pb::Aura>& self_auras,
     bool self_is_leader,
     const std::vector<pb::Unit>& nearby_units,
     bool in_combat) {
@@ -856,6 +857,28 @@ std::vector<std::string> PartyLines(
   }
   if (!p.loot_method.empty()) {
     header.push_back(base::StrCat({"loot ", Word(p.loot_method)}));
+  }
+  // Luck of the Draw (72221: +5% damage, healing and health per stack in RDF,
+  // Now #9).
+  const auto find_luck =
+      [](const std::vector<pb::Aura>& auras) -> const pb::Aura* {
+    for (const pb::Aura& a : auras) {
+      if (a.id == 72221 || a.name == "Luck of the Draw") {
+        return &a;
+      }
+    }
+    return nullptr;
+  };
+  const pb::Aura* luck = find_luck(self_auras);
+  for (const pb::Unit& u : p.members) {
+    if (!luck) {
+      luck = find_luck(u.auras);
+    }
+  }
+  if (luck) {
+    const uint32_t stacks = std::max<uint32_t>(1, luck->stacks);
+    header.push_back(
+        base::StringPrintf("luck of the draw (+%u%%)", stacks * 5));
   }
   if (!p.missing_buffs_i_can_give.empty()) {
     header.push_back(
@@ -956,10 +979,44 @@ std::vector<std::string> PartyLines(
     }
   }
 
-  // The party at a glance (Now #5): who is fighting, dead, a healer low on
-  // mana, or gone, so pace (pull, wait, drink) can be read off one line.
+  // What party members are still doing (Now #8): "help Hele with Kobold Camp
+  // Cleanup (Kobold Vermin slain 3/8)".
+  for (const pb::Unit& u : p.members) {
+    if (!u.group || u.dead) {
+      continue;
+    }
+    for (const std::string& q : u.group->quests) {
+      const size_t colon = q.find(": ");
+      lines.push_back(
+          colon == std::string::npos
+              ? base::StrCat({"  help ", u.name, " with ", q})
+              : base::StrCat({"  help ", u.name, " with ", q.substr(0, colon),
+                              " (", q.substr(colon + 2), ")"}));
+    }
+  }
+
+  // The party at a glance (Now #5, Now #9): who is fighting, dead, a healer low
+  // on mana, gone, or holding Dungeon Deserter (71041).
+  const auto append_deserter = [&](std::string_view who,
+                                   const std::vector<pb::Aura>& auras,
+                                   std::vector<std::string>* out) {
+    for (const pb::Aura& a : auras) {
+      if (a.id == 71041 || a.name == "Dungeon Deserter") {
+        if (a.remaining_s && *a.remaining_s > 0.0f &&
+            std::isfinite(*a.remaining_s)) {
+          out->push_back(base::StringPrintf(
+              "deserter %.*s (%.0fm)", static_cast<int>(who.size()), who.data(),
+              std::ceil(*a.remaining_s / 60.0f)));
+        } else {
+          out->push_back(base::StrCat({"deserter ", who}));
+        }
+        return;
+      }
+    }
+  };
   std::vector<std::string> state;
   std::vector<std::string> fighting;
+  append_deserter("you", self_auras, &state);
   for (const pb::Unit& u : p.members) {
     if (!u.group) {
       continue;
@@ -978,6 +1035,7 @@ std::vector<std::string> PartyLines(
         state.push_back(base::StringPrintf("healer %s %.0f%% mana",
                                            u.name.c_str(), *u.power_pct));
       }
+      append_deserter(u.name, u.auras, &state);
     }
   }
   if (!fighting.empty()) {
@@ -1593,7 +1651,8 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
         !snapshot.bot.empty() ? snapshot.bot : base.self.unit.name;
     for (std::string& line :
          PartyLines(*ext.party, around_me, my_name, base.self.unit.group,
-                    self_is_leader, nearby.units, base.self.in_combat)) {
+                    base.self.unit.auras, self_is_leader, nearby.units,
+                    base.self.in_combat)) {
       lines.push_back(std::move(line));
     }
   }

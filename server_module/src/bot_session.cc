@@ -22,15 +22,17 @@ void BotSessionRegistry::ResetOnLogout(uint64_t bot_guid) {
   if (it == sessions_.end()) {
     return;
   }
-  if (it->second.group_guid == 0 && !it->second.auto_popups) {
+  if (it->second.group_guid == 0 && it->second.human_group_guid == 0 &&
+      !it->second.auto_popups) {
     sessions_.erase(it);
     return;
   }
   // A relog keeps its group, so it keeps the brain's policy for that group,
-  // and the brain's popup policy.
+  // whether the group came with a human, and the brain's popup policy.
   BotSession kept;
   kept.group_guid = it->second.group_guid;
   kept.group_policy = it->second.group_policy;
+  kept.human_group_guid = it->second.human_group_guid;
   kept.auto_popups = it->second.auto_popups;
   it->second = std::move(kept);
 }
@@ -40,6 +42,7 @@ void BotSessionRegistry::ResetOnMapChange(uint64_t bot_guid) {
   if (auto it = sessions_.find(bot_guid); it != sessions_.end()) {
     it->second.last_interrupted = {};
     it->second.avoided_targets.clear();
+    it->second.stray_recalled_ms = 0;
   }
 }
 
@@ -48,6 +51,7 @@ void BotSessionRegistry::ResetOnDisconnect(uint64_t bot_guid) {
   if (auto it = sessions_.find(bot_guid); it != sessions_.end()) {
     it->second.last_interrupted = {};
     it->second.avoided_targets.clear();
+    it->second.stray_recalled_ms = 0;
   }
 }
 

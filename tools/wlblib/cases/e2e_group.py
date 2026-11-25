@@ -851,9 +851,13 @@ def _case_lfg_proposal():
 
 
     def run(stack):
-        for bot in ("Loada", "Loadb"):
+        for bot in ("Loada", "Loadb", "Loadc"):
             server.console(f"character level {bot} 20", inst=TEST)
         server.console("llmtest group Loada Loadb", inst=TEST)
+        server.console("llmtest group Loada Loadc", inst=TEST)
+        # Now #9: Dungeon Deserter on a party member blocks LFG queueing and
+        # shows on the party frame.
+        server.console("llmtest aura Loadb 71041", inst=TEST)
 
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(0.5)
@@ -867,6 +871,14 @@ def _case_lfg_proposal():
         proposal_at = None
         in_instance = set()
         tele_tries = {}
+        deserter_blocked = False
+        deserter_cleared = False
+        luck_seen = False
+        boot_started = False
+        boot_voted = False
+        human_armed = False
+        human_left = False
+        out_after_leave = set()
 
         def choose(bot, idx, seq, step):
             nonlocal cmd_id
@@ -875,9 +887,9 @@ def _case_lfg_proposal():
             send_cmd(sock, {"bot": bot, "command_id": cmd_id,
                              "choose": {"option": idx, "seq": seq}})
 
-        deadline = time.time() + 60.0
+        deadline = time.time() + 75.0
         try:
-            while time.time() < deadline and len(in_instance) < 2:
+            while time.time() < deadline and len(out_after_leave) < 2:
                 try:
                     chunk = sock.recv(1 << 20)
                 except socket.timeout:
@@ -905,47 +917,92 @@ def _case_lfg_proposal():
                         continue
                     bot, seq = snap.get("bot", ""), snap.get("seq", 0)
                     options = snap.get("options", [])
-                    if snap.get("base", {}).get("where", {}).get("in_instance"):
+                    is_in_inst = bool(snap.get("base", {}).get("where", {}).get("in_instance"))
+                    if is_in_inst and not human_left:
                         in_instance.add(bot)
+                    if human_left and bot in ("Loada", "Loadb") and not is_in_inst:
+                        out_after_leave.add(bot)
+
+                    if bot == "Loada" and not deserter_cleared:
+                        members = snap.get("ext", {}).get("party", {}).get("members", [])
+                        has_deserter_aura = any(
+                            a.get("id") == 71041
+                            for m in members if m.get("name") == "Loadb"
+                            for a in m.get("auras", [])
+                        )
+                        if has_deserter_aura:
+                            deserter_blocked = find_option(options, "Queue Random Dungeon") is None
+                            deserter_cleared = True
+                            server.console("llmtest unaura Loadb 71041", inst=TEST)
+                        continue
+
                     if bot == "Loada" and "queue" not in sent:
                         idx = find_option(options, "Queue Random Dungeon (LFG: Healer)")
                         if idx:
                             choose("Loada", idx, seq, "queue")
-                    elif bot == "Loadb" and "queue" in sent and "role" not in sent:
+                    elif bot in ("Loadb", "Loadc") and "queue" in sent and f"role_{bot}" not in sent:
                         idx = find_option(options, "Confirm Dungeon Finder role", avoid="Healer")
                         if idx:
-                            choose("Loadb", idx, seq, "role")
+                            choose(bot, idx, seq, f"role_{bot}")
                             role_at = time.time()
-                    elif bot in ("Loada", "Loadb") and f"accept_{bot}" not in sent:
+                    elif bot in ("Loada", "Loadb", "Loadc") and f"accept_{bot}" not in sent:
                         idx = find_option(options, "Accept Dungeon Finder proposal")
                         if idx:
                             choose(bot, idx, seq, f"accept_{bot}")
-                    elif (bot in ("Loada", "Loadb") and bot not in in_instance
-                          and time.time() - tele_tries.get(bot, 0.0) > 5.0):
-                        # LFG teleports the group once, when the proposal succeeds; a bot
-                        # in combat or falling just then gets a teleport error and stays
-                        # outside (the full e2e run's intermittent failure). A player then
-                        # clicks "Teleport to LFG dungeon", offered to the bots too.
+                    elif (bot in ("Loada", "Loadb", "Loadc") and bot not in in_instance
+                          and not human_left and time.time() - tele_tries.get(bot, 0.0) > 5.0):
                         idx = find_option(options, "Teleport to LFG dungeon")
                         if idx:
                             tele_tries[bot] = time.time()
                             choose(bot, idx, seq, f"tele_{bot}_{int(tele_tries[bot])}")
+                    elif len(in_instance) == 3 and not boot_started:
+                        boot_started = True
+                        server.console("llmtest aura Loada 72221", inst=TEST)
+                        server.console("llmtest testhuman Loadc 1", inst=TEST)
+                        server.console("llmtest lfgboot Loada Loadc afk", inst=TEST)
+                    elif boot_started and not boot_voted and bot == "Loadb":
+                        idx = find_option(options, "Vote not to kick Loadc")
+                        if idx:
+                            boot_voted = True
+                            choose("Loadb", idx, seq, "boot_no")
+                    elif boot_voted and bot == "Loadb" and not luck_seen:
+                        members = snap.get("ext", {}).get("party", {}).get("members", [])
+                        if any(a.get("id") == 72221 for m in members for a in m.get("auras", [])):
+                            luck_seen = True
+                    elif boot_voted and luck_seen and not human_armed:
+                        human_armed = True
+                        time.sleep(1.5)  # Let BotManager tick record human_group_guid.
+                        human_left = True
+                        server.console("llmtest ungroup Loadc", inst=TEST)
         finally:
             sock.close()
+            server.console("llmtest testhuman Loadc 0", inst=TEST)
+            server.console("llmtest unaura Loadb 71041", inst=TEST)
+            server.console("llmtest unaura Loada 72221", inst=TEST)
             server.console("lfg clean", inst=TEST)
-            server.console("llmtest ungroup Loadb", inst=TEST)
+            for bot in ("Loada", "Loadb", "Loadc"):
+                server.console(f"llmtest ungroup {bot}", inst=TEST)
 
+        expect(deserter_blocked, "Dungeon Deserter on Loadb did not block `Queue Random Dungeon`")
         expect("queue" in sent, "Loada was never offered `Queue Random Dungeon (LFG: Healer)`")
-        expect("role" in sent, "Loadb was never offered a non-healer `Confirm Dungeon Finder role`")
+        expect("role_Loadb" in sent and "role_Loadc" in sent,
+               "members were not offered a non-healer `Confirm Dungeon Finder role`")
         expect(proposal_at is not None,
                f"Loadb got no LFG_PROPOSAL prompt event (prompts: {prompts})")
         delay = proposal_at - role_at
         expect(delay <= 10.0, f"LFG_PROPOSAL took {delay:.1f} s after the role check (> 10 s)")
-        expect("accept_Loadb" in sent and "accept_Loada" in sent,
-               "both bots were not offered `Accept Dungeon Finder proposal`")
+        expect(all(f"accept_{b}" in sent for b in ("Loada", "Loadb", "Loadc")),
+               "not all bots were offered `Accept Dungeon Finder proposal`")
+        expect("LFG_BOOT_VOTE" in prompts.get("Loadb", set()),
+               f"Loadb got no LFG_BOOT_VOTE prompt event (prompts: {prompts})")
+        expect(boot_voted, "Loadb was never offered `Vote not to kick Loadc`")
+        expect(luck_seen, "Luck of the Draw (72221) was not exposed on party members")
         expect(not errors, f"LFG choices produced errors: {errors}")
-        expect(len(in_instance) == 2, f"not both bots entered the dungeon (in: {sorted(in_instance)})")
-        return f"LFG_PROPOSAL woke Loadb {delay:.2f} s after the role check; both accepted and entered"
+        expect(len(in_instance) == 3, f"not all bots entered the dungeon (in: {sorted(in_instance)})")
+        expect(len(out_after_leave) == 2,
+               f"bots did not teleport out after the human left (out: {sorted(out_after_leave)})")
+        return (f"Deserter blocked queue; LFG_PROPOSAL woke Loadb in {delay:.2f} s; Luck of the Draw "
+                "and boot vote worked; bots left and teleported out when the human left")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
 def _case_human_party():
@@ -995,6 +1052,7 @@ def _case_human_party():
         def __init__(self):
             self.lock = threading.Lock()
             self.wakes = []  # (time, bot, woken line)
+            self.prompts = []  # (time, bot, full prompt)
             parent = self
 
             class Handler(http.server.BaseHTTPRequestHandler):
@@ -1010,6 +1068,7 @@ def _case_human_party():
                     woken = next((ln for ln in text.splitlines() if ln.startswith("Woken: ")), "")
                     with parent.lock:
                         parent.wakes.append((time.monotonic(), bot, woken))
+                        parent.prompts.append((time.monotonic(), bot, text))
                     pick = ACCEPT_RE.search(text) or KEEP_RE.search(text)
                     lines = [f"do: {pick.group(1) if pick else 1}", "expect: none",
                              "watch: none", "look: 300"]
@@ -1092,7 +1151,9 @@ def _case_human_party():
                         return masters[bot] == HUMAN
                     _poll(is_master, 30, f"{bot} accepting the invite with {HUMAN} as master")
 
-                # 2. One party line: one bot answers.
+                # 2. One party line: one bot answers. (Now #8: the human's quest shows up
+                # on the bots' screens as something to help with.)
+                server.console(f"llmtest questadd {HUMAN} 788", wait_s=0.3, inst=TEST)
                 time.sleep(2.0)
                 since = time.monotonic()
                 client.say(wowclient.CHAT_MSG_PARTY, "anyone up for RFC?")
@@ -1100,6 +1161,9 @@ def _case_human_party():
                 with brain.lock:
                     woken = sorted({b for t, b, w in brain.wakes
                                     if t >= since and f"party from {HUMAN}" in w})
+                with brain.lock:
+                    help_seen = any(t >= since and f"help {HUMAN} with Cutting Teeth" in txt
+                                    for t, _, txt in brain.prompts)
                 with client.lock:
                     replies = [c["text"] for c in client.chats
                                if c["t"] >= since and c["type"] == "party"
@@ -1121,6 +1185,12 @@ def _case_human_party():
                     applied = sorted({e["event"]["info"]["text"] for _, e in proxy.events
                                       if "leader said:" in e.get("event", {}).get("info", {})
                                       .get("text", "")})
+
+                # 5 (Now #8). A follower 60 yd from its human leader, outdoors, comes back
+                # by itself (no LLM call).
+                server.console("llmtest tele Loadb 1 -560 -4250 40 0", wait_s=0.5, inst=TEST)
+                _poll(lambda: "Loadb strayed" in stack.server_log(), 10,
+                      "Loadb following back after straying")
 
                 # 3. A boss emote reaches the bots.
                 since_emote = time.monotonic()
@@ -1144,6 +1214,7 @@ def _case_human_party():
 
         expect(all(m == HUMAN for m in masters.values()), f"masters: {masters}")
         expect(woken == ["Loada"], f"the party line woke {woken}, expected only Loada")
+        expect(help_seen, f"no 'help {HUMAN} with Cutting Teeth' on the woken bot's screen")
         expect(replies == ["Loada here"], f"the client saw party replies {replies}")
         expect(still_wait == ["Loada", "Loadc"],
                f"'loadb follow' should move only Loadb; still waiting: {still_wait}")
@@ -1151,8 +1222,8 @@ def _case_human_party():
                and any("leader said: follow (applied" in a for a in applied),
                f"the brain wasn't told what was applied: {applied}")
         return (f"3 bots accepted, master={HUMAN} for all; one party reply ({replies[0]!r}); "
-                "'wait here' / 'loadb follow' / 'follow me' applied in C++; boss emote woke "
-                "the bots")
+                "'wait here' / 'loadb follow' / 'follow me' applied in C++; quest help shown; "
+                "stray follower came back; boss emote woke the bots")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
 def _case_popup_policy():
