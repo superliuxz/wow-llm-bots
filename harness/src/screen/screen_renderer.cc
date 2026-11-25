@@ -1337,6 +1337,44 @@ std::vector<std::string> QuestLogLines(const pb::QuestLog& log) {
   return lines;
 }
 
+// The spells line is cut at this many bytes ("+N more") so a high-level
+// spellbook never crowds options out of the prompt.
+constexpr size_t kMaxSpellsLine = 600;
+
+// `ext.action_bars` as one compact line: each spell name once, with the
+// seconds left on its own cooldown when it is cooling down.
+std::string SpellsLine(const pb::ActionBars& bars) {
+  std::flat_set<std::string> seen;
+  std::vector<std::string> parts;
+  for (const std::vector<pb::Spell>* bar :
+       {&bars.buttons, &bars.stance_bar, &bars.totem_bar}) {
+    for (const pb::Spell& sp : *bar) {
+      if (sp.name.empty() || !seen.insert(sp.name).second) {
+        continue;
+      }
+      const float cd =
+          sp.ability ? Finite(sp.ability->cooldown_remaining_s) : 0.0f;
+      parts.push_back(
+          cd >= 1.0f ? base::StringPrintf("%s (cd %.0fs)", sp.name.c_str(), cd)
+                     : sp.name);
+    }
+  }
+  if (parts.empty()) {
+    return "";
+  }
+  std::string out = "spells: ";
+  for (size_t i = 0; i < parts.size(); ++i) {
+    const std::string_view sep = i == 0 ? "" : ", ";
+    if (i > 0 && out.size() + sep.size() + parts[i].size() > kMaxSpellsLine) {
+      base::StrAppend(&out,
+                      {", +", base::NumberToString(parts.size() - i), " more"});
+      break;
+    }
+    base::StrAppend(&out, {sep, parts[i]});
+  }
+  return out;
+}
+
 std::string TooltipLine(const pb::Tooltipped& t) {
   std::string name = t.ref ? t.ref->name : "";
   std::vector<std::string> lines;
@@ -1658,6 +1696,11 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
   }
   for (std::string& line : QuestLines(ext.quest_tracker)) {
     lines.push_back(std::move(line));
+  }
+  if (ext.action_bars) {
+    if (std::string spells = SpellsLine(*ext.action_bars); !spells.empty()) {
+      lines.push_back(std::move(spells));
+    }
   }
   // Open panels and the tooltip of what the bot points at
   // (docs/specs/options.md): last, after every option ("also:"), so

@@ -651,4 +651,50 @@ def _case_self_rez():
         return f"self-resurrected {alive_after[0]['t'] - use['t']:.1f} s after choosing it"
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
-CASES = [_case_self_rez(), _case_create_bots(), _case_keep(), _case_choose(), _case_walk(), _case_rest(), _case_talk(), _case_panels(), _case_bind(), _case_death()]
+def _case_spells():
+    """`ext.action_bars` lists the castable spellbook from Spell.dbc (Milestone 1, step 1a).
+
+    `talk` test config (one fresh level-1 priest standing still). Every snapshot carries the bot's
+    active, non-passive, non-tradeskill spells, highest known rank only, each name once. Learning
+    Smite rank 2 replaces rank 1 on the bar; a learned smelting recipe (a tradeskill) and passive
+    armor/language skills never show.
+    """
+
+    import time
+
+    from wlblib import server
+    from wlblib.common import TEST
+    from wlblib.testing import expect
+
+    NAME = "spells"
+    DESCRIPTION = "action bars: known spells from Spell.dbc, top rank only, no passives/recipes"
+    TEST_CONFIG = "talk"
+    BOT = "Loada"
+    SMITE_R2 = 591
+    SMELT_COPPER = 2657
+
+    def run(stack):
+        first = stack.play([], seconds=6, tail_s=6)
+        expect(first["snapshots"], "no snapshots")
+        before = first["snapshots"][-1]["spells"]
+        names = [sp["name"] for sp in before]
+        expect(names, "no spells on the action bars")
+        expect(len(names) == len(set(names)), f"a spell name twice: {names}")
+        expect("Smite" in names, f"a priest without Smite: {names}")
+        for passive in ("Cloth", "Language Orcish", "Language Common"):
+            expect(passive not in names, f"passive {passive!r} on the action bars: {names}")
+        server.console(f"llmtest learn Loada {SMITE_R2}", inst=TEST)
+        server.console(f"llmtest learn Loada {SMELT_COPPER}", inst=TEST)
+        time.sleep(1)
+        later = stack.play([], seconds=6, tail_s=6)
+        expect(later["snapshots"], "no snapshots after learning")
+        after = later["snapshots"][-1]["spells"]
+        smites = [sp for sp in after if sp["name"] == "Smite"]
+        expect(len(smites) == 1 and smites[0]["id"] == SMITE_R2,
+               f"Smite after learning rank 2: {smites}")
+        expect(not any(sp["name"] == "Smelt Copper" for sp in after),
+               f"a tradeskill recipe on the action bars: {[sp['name'] for sp in after]}")
+        return f"{len(after)} spells: {', '.join(sp['name'] for sp in after)}; Smite rank 2 only"
+    return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
+
+CASES = [_case_self_rez(), _case_create_bots(), _case_keep(), _case_choose(), _case_walk(), _case_rest(), _case_talk(), _case_panels(), _case_bind(), _case_death(), _case_spells()]

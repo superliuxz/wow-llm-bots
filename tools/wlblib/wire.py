@@ -357,6 +357,12 @@ def play_script(sock_path: str, seconds: float, words, echo=print, tail_s=None) 
                 "tooltips": [t_.get("tooltip", {}).get("lines", [])
                              for t_ in snap.get("base", {}).get("tooltips", [])],
                 "auras": [a.get("name", "") for a in me.get("unit", {}).get("auras", [])],
+                "spells": [{"id": sp.get("id", 0), "name": sp.get("name", ""),
+                            "rank": sp.get("rank", 0),
+                            "cooldown_left_s": sp.get("ability", {}).get(
+                                "cooldown_remaining_s", 0.0)}
+                           for sp in (snap.get("ext", {}).get("action_bars") or {}).get(
+                               "buttons", [])],
                 "pos": [pos.get("x", 0.0), pos.get("y", 0.0)],
             })
             echo(f"<< {bot} #{seq}: health {hp}/{hp_max}"

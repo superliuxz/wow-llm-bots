@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -15,6 +16,8 @@
 #include "Bag.h"
 #include "Creature.h"
 #include "CreatureData.h"
+#include "DBCStores.h"
+#include "DBCStructure.h"
 #include "GameObject.h"
 #include "GameObjectData.h"
 #include "GridTerrainData.h"
@@ -465,6 +468,86 @@ std::vector<std::string> MemberQuestProgress(Player* member) {
   return out;
 }
 
+// True when Spell.dbc / SkillLineAbility.dbc place `info` in a profession or
+// secondary skill line (recipes, gathering, cooking, fishing, first aid): the
+// client lists those in the tradeskill window, not the spellbook.
+bool IsTradeskillSpell(const SpellInfo* info) {
+  if (info->HasAttribute(SPELL_ATTR0_IS_TRADESKILL) || info->IsProfession()) {
+    return true;
+  }
+  const SkillLineAbilityMapBounds bounds =
+      sSpellMgr->GetSkillLineAbilityMapBounds(info->Id);
+  for (auto it = bounds.first; it != bounds.second; ++it) {
+    if (const SkillLineEntry* line =
+            sSkillLineStore.LookupEntry(it->second->SkillLine)) {
+      if (line->categoryId == SKILL_CATEGORY_PROFESSION ||
+          line->categoryId == SKILL_CATEGORY_SECONDARY) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// The bot's castable spellbook as one action bar (docs/specs/snapshot.md:
+// `ext.action_bars` is always visible): every active, non-passive, displayed,
+// non-tradeskill spell of the active spec, highest known rank only, sorted by
+// name. Pure Spell.dbc metadata; no spell, class or role is special-cased.
+void FillActionBars(Player* bot, pb::Extensions* ext) {
+  std::vector<pb::Spell> spells;
+  for (const auto& [spell_id, state] : bot->GetSpellMap()) {
+    if (!state || state->State == PLAYERSPELL_REMOVED || !state->Active ||
+        !(state->specMask & bot->GetActiveSpecMask())) {
+      continue;
+    }
+    const SpellInfo* info = sSpellMgr->GetSpellInfo(spell_id);
+    if (!info || info->IsPassive() ||
+        info->HasAttribute(SPELL_ATTR0_DO_NOT_DISPLAY)) {
+      continue;
+    }
+    // A higher rank the bot also knows replaces this one on the bar.
+    if (const uint32_t next = sSpellMgr->GetNextSpellInChain(spell_id);
+        next != 0 && bot->HasActiveSpell(next)) {
+      continue;
+    }
+    const std::string_view name = SpellLocalizedName(info);
+    if (name.empty() || IsTradeskillSpell(info)) {
+      continue;
+    }
+    pb::Spell spell;
+    spell.id = info->Id;
+    spell.name = std::string(name);
+    spell.rank = info->GetRank();
+    spell.cooldown_s = static_cast<float>(std::max(
+                           info->RecoveryTime, info->CategoryRecoveryTime)) /
+                       1000.0f;
+    pb::AbilityState& ability = spell.ability.emplace();
+    ability.known = true;
+    ability.cooldown_remaining_s =
+        static_cast<float>(bot->GetSpellCooldownDelay(info->Id)) / 1000.0f;
+    const int32_t cost = info->CalcPowerCost(bot, info->GetSchoolMask());
+    ability.usable = ability.cooldown_remaining_s <= 0.0f &&
+                     (cost <= 0 || info->PowerType >= MAX_POWERS ||
+                      bot->GetPower(static_cast<Powers>(info->PowerType)) >=
+                          static_cast<uint32_t>(cost));
+    ability.ground_targeted =
+        (info->GetExplicitTargetMask() & TARGET_FLAG_DEST_LOCATION) != 0;
+    spells.push_back(std::move(spell));
+  }
+  // Same-name spells (e.g. a racial and a class version): keep the highest
+  // rank so a name in an order resolves to one entry.
+  std::sort(
+      spells.begin(), spells.end(), [](const pb::Spell& a, const pb::Spell& b) {
+        return std::tie(a.name, b.rank, a.id) < std::tie(b.name, a.rank, b.id);
+      });
+  spells.erase(std::unique(spells.begin(), spells.end(),
+                           [](const pb::Spell& a, const pb::Spell& b) {
+                             return a.name == b.name;
+                           }),
+               spells.end());
+  ext->action_bars.emplace().buttons = std::move(spells);
+}
+
 void FillParty(Player* bot, NearbyBuilder* nearby, pb::Extensions* ext) {
   Group* group = bot->GetGroup();
   if (!group) {
@@ -797,6 +880,7 @@ NearbyBuilder::Stats SnapshotBuilder::Build(Player* bot,
   FillTarget(bot, &nearby_, &snapshot->ext);
   FillCombat(bot, &nearby_, &snapshot->ext);
   FillParty(bot, &nearby_, &snapshot->ext);
+  FillActionBars(bot, &snapshot->ext);
   FillQuestTracker(bot, &snapshot->ext, &quest_pois_);
   FillOptionFacts(bot, snapshot, facts, world, now);
   // Open panels and the tooltip of what the bot points at (visibility OPEN and

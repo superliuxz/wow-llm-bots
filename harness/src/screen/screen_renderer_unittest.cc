@@ -1045,5 +1045,64 @@ TEST(ScreenRendererTest, PartyStateLineSummarizesThePace) {
       << lfg_screen.text;
 }
 
+pb::Spell* AddSpell(pb::Snapshot* snapshot,
+                    const std::string& name,
+                    float cooldown_left_s) {
+  pb::Spell& spell = snapshot->ext.action_bars->buttons.emplace_back();
+  spell.name = name;
+  spell.ability.emplace().known = true;
+  spell.ability->cooldown_remaining_s = cooldown_left_s;
+  return &spell;
+}
+
+TEST(ScreenRendererTest, SpellsLineListsKnownSpellsWithCooldownsLeft) {
+  pb::Snapshot snapshot = NewSnapshot();
+  snapshot.ext.action_bars.emplace();
+  AddSpell(&snapshot, "Sinister Strike", 0.0f);
+  AddSpell(&snapshot, "Sprint", 42.4f);
+  AddSpell(&snapshot, "Evasion", 0.4f);  // Under a second: shown as ready.
+  AddSpell(&snapshot, "Sprint", 42.4f);  // Same name twice: written once.
+  snapshot.ext.action_bars->stance_bar.emplace_back().name = "Stealth";
+  const Screen screen = RenderScreen(snapshot);
+  EXPECT_NE(screen.text.find("\nspells: Sinister Strike, Sprint (cd 42s), "
+                             "Evasion, Stealth\nalso:\n"),
+            std::string::npos)
+      << screen.text;
+  // The spells line is not an option: the fixed options are unchanged.
+  EXPECT_EQ(screen.options,
+            (std::vector<OptionKind>{OptionKind::kKeep, OptionKind::kExplore,
+                                     OptionKind::kRest, OptionKind::kTown}));
+}
+
+TEST(ScreenRendererTest, NoSpellsLineWithoutActionBarsOrNames) {
+  pb::Snapshot snapshot = NewSnapshot();
+  EXPECT_EQ(RenderScreen(snapshot).text.find("spells:"), std::string::npos);
+  snapshot.ext.action_bars.emplace();
+  EXPECT_EQ(RenderScreen(snapshot).text.find("spells:"), std::string::npos);
+  AddSpell(&snapshot, "", 0.0f);
+  EXPECT_EQ(RenderScreen(snapshot).text.find("spells:"), std::string::npos);
+  // A broken cooldown is safe and reads as ready.
+  AddSpell(&snapshot, "Kick", std::numeric_limits<float>::quiet_NaN());
+  EXPECT_NE(RenderScreen(snapshot).text.find("\nspells: Kick\n"),
+            std::string::npos);
+}
+
+TEST(ScreenRendererTest, AHugeSpellbookIsCutWithACountAndKeepsOptions) {
+  pb::Snapshot snapshot = NewSnapshot();
+  snapshot.ext.action_bars.emplace();
+  for (int i = 0; i < 120; ++i) {
+    AddSpell(&snapshot, "Spell Number " + std::to_string(i), 0.0f);
+  }
+  const Screen screen = RenderScreen(snapshot);
+  const size_t start = screen.text.find("\nspells: ");
+  ASSERT_NE(start, std::string::npos);
+  const size_t end = screen.text.find('\n', start + 1);
+  const std::string line = screen.text.substr(start + 1, end - start - 1);
+  EXPECT_LE(line.size(), 620u) << line;
+  EXPECT_TRUE(line.ends_with(" more")) << line;
+  EXPECT_NE(line.find("Spell Number 0, "), std::string::npos);
+  EXPECT_NE(screen.text.find("  4. Go to the nearest town"), std::string::npos);
+}
+
 }  // namespace
 }  // namespace harness

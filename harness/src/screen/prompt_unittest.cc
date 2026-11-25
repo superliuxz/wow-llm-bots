@@ -373,5 +373,29 @@ TEST(PromptTest, AssemblePromptInputUnifiesLiveAndOfflineFields) {
             std::vector<std::string>{"bags, seen 10 s ago: bread"});
 }
 
+TEST(PromptTest, AFullSpellsLineYieldsToOptionsAndCoreLinesUnderTightBudget) {
+  PromptInput input = SampleInput();
+  input.rules = std::string(9600, 'R');
+  Screen screen;
+  screen.text = "me: Tess\naround me:\n  1. Attack Boar\n";
+  screen.text += "party: leader Hele\n  party_state: fighting (Hele)\n";
+  screen.text += "spells: " + std::string(590, 'S') + ", +40 more\n";
+  screen.text += "also:\n  2. Keep doing what I'm doing";
+  screen.options = {OptionKind::kAttack, OptionKind::kKeep};
+  const LlmRequest req = BuildPlanRequest(input, screen);
+  const size_t est_tokens = (req.system.size() + 2) / 3 +
+                            (req.user.size() + 2) / 3 +
+                            static_cast<size_t>(req.max_tokens);
+  EXPECT_LE(est_tokens, 4096u);
+  EXPECT_NE(req.user.find("  1. Attack Boar"), std::string::npos) << req.user;
+  EXPECT_NE(req.user.find("  2. Keep doing what I'm doing"), std::string::npos);
+  EXPECT_NE(req.user.find("party_state: fighting"), std::string::npos);
+
+  // With room to spare (a ~7.8 KB RULES.md) the spells line stays whole.
+  input.rules = std::string(7800, 'R');
+  const LlmRequest roomy = BuildPlanRequest(input, screen);
+  EXPECT_NE(roomy.user.find("spells: SSS"), std::string::npos) << roomy.user;
+}
+
 }  // namespace
 }  // namespace harness

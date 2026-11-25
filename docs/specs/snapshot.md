@@ -38,7 +38,10 @@ Enforced mechanically on every fixture and live capture by `ValidateSnapshotVisi
 2. **`ext` (contextual & panel-gated):**
    - Contextual (`minimap`, `quest_tracker`, `action_bars`, `world`, `target`, `combat`, `party`,
      `raid`, `encounter`, `instance`, `death`, `vehicle`, `interaction`, `pet`, `possessed`)
-     populated only when relevant in the client.
+     populated only when relevant in the client. `action_bars.buttons` is every snapshot's
+     castable spellbook from pure `Spell.dbc` metadata (active spec, non-passive, displayed,
+     non-tradeskill, highest known rank, each name once, with cooldown left), rendered as one
+     `spells:` screen line capped at 600 B (`+N more`).
    - Panel-gated (`bags`, `map`, `character`, `quest_log`, `spellbook`, tagged `visibility: OPEN`):
      present only when the corresponding `Panel` is in `base.ui.open_panels`.
 3. **Hover-only fields (`visibility: HOVER`):** 26 fields (e.g., `PlayerPart::race`,
