@@ -71,6 +71,10 @@ def _load():
         ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t)
     ]
     lib.wlb_module_message_visibility_errors.restype = ctypes.c_void_p
+    lib.wlb_hello_command_json.argtypes = [
+        ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t)
+    ]
+    lib.wlb_hello_command_json.restype = ctypes.c_void_p
     lib.wlb_wire_free.argtypes = [ctypes.c_void_p]
     lib.wlb_wire_free.restype = None
     _lib = lib
@@ -93,9 +97,51 @@ def module_message_to_json(payload: bytes, pretty: bool = False):
         lib.wlb_wire_free(ptr)
 
 
+class WireMismatch(RuntimeError):
+    """The module's hello names another build than `libwlb_wire_py.so`'s."""
+
+
+def hello_command(role: str) -> dict:
+    """This build's hello as a Command dict ({"version", "hello": {wire_version, schema_hash,
+    role}}): what a tool may send first (`send_frame(sock, encode_command(...))`)."""
+    lib = _load()
+    if lib is None:
+        raise RuntimeError(f"missing {SO_PATH}: run `tools/wlb build common --no-tests`")
+    raw = role.encode("utf-8")
+    out_len = ctypes.c_size_t(0)
+    ptr = lib.wlb_hello_command_json(raw, len(raw), ctypes.byref(out_len))
+    try:
+        return json.loads(ctypes.string_at(ptr, out_len.value).decode("utf-8"))
+    finally:
+        lib.wlb_wire_free(ptr)
+
+
+def hello_mismatch(hello: dict) -> str:
+    """Why the module's `hello` can't talk to this build ("" when it can)."""
+    mine = hello_command("")["hello"]
+    if hello.get("wire_version", 0) != mine["wire_version"]:
+        return (f"module speaks wire version {hello.get('wire_version', 0)}, these tools "
+                f"{mine['wire_version']}: rebuild (`tools/wlb build common` / `build server`)")
+    if hello.get("schema_hash", "") != mine["schema_hash"]:
+        return (f"module has wire schema {hello.get('schema_hash', '')}, these tools "
+                f"{mine['schema_hash']}: rebuild (`tools/wlb build common` / `build server`)")
+    return ""
+
+
 def decode_module_message(payload: bytes):
+    """A module frame as a dict, or None. The module's hello (the first frame of every
+    connection) is checked and consumed here, so readers only ever see snapshots and events;
+    one of another build raises WireMismatch."""
     text = module_message_to_json(payload, pretty=False)
-    return json.loads(text) if text is not None else None
+    if text is None:
+        return None
+    message = json.loads(text)
+    if "hello" in message:
+        mismatch = hello_mismatch(message["hello"])
+        if mismatch:
+            raise WireMismatch(mismatch)
+        return None
+    return message
 
 
 def decode_command(payload: bytes):
@@ -220,10 +266,13 @@ def capture_snapshots(out_dir: pathlib.Path, seconds: float = 15.0,
     return 0 if saved > 0 else 1
 
 
-def _connect(sock_path: str) -> socket.socket:
+def _connect(sock_path: str, role: str | None = None) -> socket.socket:
+    """Connects to the module; with a `role`, says hello first (passive readers needn't)."""
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.connect(sock_path)
     s.settimeout(0.2)
+    if role is not None:
+        send_frame(s, encode_command(hello_command(role)))
     return s
 
 
@@ -307,7 +356,7 @@ def measure_delivery(sock_path: str, seconds: float, warmup: float = 2.0) -> dic
 
 
 def play_script(sock_path: str, seconds: float, words, echo=print, tail_s=None) -> dict:
-    s = _connect(sock_path)
+    s = _connect(sock_path, role="wlb snap fake")
     reader = FrameReader()
     words = list(words)
     out = {"snapshots": [], "events": [], "commands": [], "never_offered": [], "closed": False,

@@ -37,8 +37,6 @@ Guild Wars heroes):
 - **Single tick owner per bot:** Replace the string-blocklist between `mod-llm-brain` and
   `mod-playerbots` with an explicit per-bot mode (`brain-led` vs `playerbots-led`) and a startup
   check against playerbots' action factory.
-- **Socket handshake on connect:** Exchange wire version, schema hash, and peer role on Unix socket
-  connect so mismatched builds or stray tools fail with one clear refusal.
 - **Latency & world-thread polish:** Measure 4 Hz combat snapshot cost at raid scale (build lighter
   combat snapshots if needed), reserve llama slots for the human's party, and add a real held-out
   eval split run at live temperature (`0.7`).

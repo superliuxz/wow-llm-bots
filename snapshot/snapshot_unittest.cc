@@ -115,6 +115,62 @@ TEST(SnapshotProtoTest, ZeroAndFalseOptionalsSurvive) {
 
 // Whatever arrives on the socket, reading it fails cleanly or succeeds: never a
 // crash (the sanitizer builds run this too).
+TEST(SnapshotProtoTest, HelloNamesThisBuildAndRoundTrips) {
+  const std::string& hash = pb::SchemaHash();
+  ASSERT_EQ(hash.size(), 16u);
+  EXPECT_EQ(hash.find_first_not_of("0123456789abcdef"), std::string::npos);
+  EXPECT_EQ(&pb::SchemaHash(), &hash);  // Computed once.
+
+  pb::ModuleMessage sent;
+  sent.version = pb::kWireVersion;
+  sent.hello = pb::MakeHello("module");
+  pb::ModuleMessage received;
+  ASSERT_TRUE(pb::ReadBeve(pb::WriteBeve(sent), &received));
+  EXPECT_EQ(received, sent);
+  EXPECT_FALSE(received.snapshot);
+  EXPECT_FALSE(received.event);
+  EXPECT_EQ(pb::HelloMismatch(*received.hello), "");
+
+  pb::Command cmd;
+  cmd.version = pb::kWireVersion;
+  cmd.hello = pb::MakeHello("harness");
+  pb::Command cmd_back;
+  ASSERT_TRUE(pb::ReadBeve(pb::WriteBeve(cmd), &cmd_back));
+  EXPECT_EQ(cmd_back, cmd);
+  EXPECT_TRUE(cmd_back.bot.empty());
+}
+
+TEST(SnapshotProtoTest, HelloMismatchNamesWhatDiffers) {
+  pb::Hello other_version = pb::MakeHello("harness");
+  other_version.wire_version = pb::kWireVersion + 1;
+  const std::string version_error = pb::HelloMismatch(other_version);
+  EXPECT_NE(version_error.find("harness speaks wire version"),
+            std::string::npos)
+      << version_error;
+  EXPECT_NE(version_error.find("rebuild"), std::string::npos);
+
+  pb::Hello other_schema = pb::MakeHello("");
+  other_schema.schema_hash = "0000000000000000";
+  const std::string schema_error = pb::HelloMismatch(other_schema);
+  EXPECT_NE(schema_error.find("peer has wire schema 0000000000000000"),
+            std::string::npos)
+      << schema_error;
+
+  // An empty hello (a peer that doesn't know the fields) never matches.
+  EXPECT_NE(pb::HelloMismatch(pb::Hello{}), "");
+}
+
+// A reader of an older build skips the hello it doesn't know: a hello-only
+// message reads as one with neither snapshot nor event.
+TEST(SnapshotProtoTest, HelloOnlyMessageCarriesNothingElse) {
+  pb::ModuleMessage hello;
+  hello.version = pb::kWireVersion;
+  hello.hello = pb::MakeHello("module");
+  const std::string json = pb::WriteJson(hello);
+  EXPECT_NE(json.find("\"hello\""), std::string::npos) << json;
+  EXPECT_EQ(json.find("snapshot"), std::string::npos) << json;
+}
+
 TEST(SnapshotProtoTest, CorruptFramesNeverCrash) {
   const std::string good = pb::WriteBeve(MakeSnapshotMessage());
   uint32_t state = 12345;

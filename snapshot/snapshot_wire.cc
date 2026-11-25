@@ -1124,6 +1124,61 @@ std::string ReflectedSchemaJson() {
   return out;
 }
 
+const std::string& SchemaHash() {
+  static const std::string* const hash = [] {
+    std::vector<std::string> paths;
+    detail::CollectFieldPaths<ModuleMessage, 8>("module.", &paths);
+    detail::CollectFieldPaths<Command, 8>("command.", &paths);
+    std::sort(paths.begin(), paths.end());
+    // FNV-1a, 64-bit: stable across compilers and runs (std::hash isn't).
+    uint64_t h = 0xcbf29ce484222325ULL;
+    const auto mix = [&h](std::string_view bytes) {
+      for (const char c : bytes) {
+        h ^= static_cast<unsigned char>(c);
+        h *= 0x100000001b3ULL;
+      }
+      h ^= '\n';
+      h *= 0x100000001b3ULL;
+    };
+    mix(base::NumberToString(kWireVersion));
+    for (const std::string& path : paths) {
+      mix(path);
+    }
+    constexpr char kHex[] = "0123456789abcdef";
+    std::string out(16, '0');
+    for (int i = 15; i >= 0; --i, h >>= 4) {
+      out[static_cast<size_t>(i)] = kHex[h & 0xf];
+    }
+    return new std::string(std::move(out));
+  }();
+  return *hash;
+}
+
+Hello MakeHello(std::string_view role) {
+  Hello hello;
+  hello.wire_version = kWireVersion;
+  hello.schema_hash = SchemaHash();
+  hello.role = std::string(role);
+  return hello;
+}
+
+std::string HelloMismatch(const Hello& peer) {
+  const std::string who = peer.role.empty() ? "peer" : peer.role;
+  if (peer.wire_version != kWireVersion) {
+    return base::StrCat({who, " speaks wire version ",
+                         base::NumberToString(peer.wire_version),
+                         ", this build ", base::NumberToString(kWireVersion),
+                         ": rebuild and restart the one that is out of date"});
+  }
+  if (peer.schema_hash != SchemaHash()) {
+    return base::StrCat({who, " has wire schema ", peer.schema_hash,
+                         ", this build ", SchemaHash(),
+                         " (same version, other fields): rebuild and restart "
+                         "the one that is out of date"});
+  }
+  return {};
+}
+
 std::string WriteBeve(const ModuleMessage& msg) {
   return WriteBeveOf(msg);
 }

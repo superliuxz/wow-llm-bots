@@ -39,7 +39,9 @@ std::optional<RunOptions> ParseRunArgs(const std::vector<std::string>& args,
                                        std::string* error);
 
 // Runs the live harness loop until `stop_event` is signaled (if provided) or
-// `options.seconds` elapses (when > 0). Returns 0 on clean shutdown, 1 on
+// `options.seconds` elapses (when > 0), or the module turns out to be of
+// another build (2: its hello named another wire version or schema hash; the
+// reason is logged). Returns 0 on clean shutdown, 1 on
 // startup error (e.g. unreadable rules file).
 int RunHarness(const RunOptions& options,
                base::WaitableEvent* stop_event = nullptr,

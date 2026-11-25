@@ -1326,6 +1326,21 @@ struct LfgEvent {
 // LEAVE_GROUP) and General/Trade/Party chat channels.
 inline constexpr uint32_t kWireVersion = 4;
 
+// What one build speaks: sent once each way when a connection opens, so two
+// builds that can't talk refuse at once with one clear message instead of
+// dropping or misreading frames. A side whose hello differs from its own
+// (another kWireVersion or SchemaHash()) refuses the connection; a client that
+// sends no hello (a passive capture tool) is still served.
+struct Hello {
+  uint32_t wire_version = 0;
+  // SchemaHash() of the sender's build.
+  std::string schema_hash;
+  // Who sent it: "module", "harness", or a tool's name (logs only).
+  std::string role;
+
+  bool operator==(const Hello&) const = default;
+};
+
 struct Command {
   using Choose = Command_Choose;
   using SetGoal = Command_SetGoal;
@@ -1352,6 +1367,8 @@ struct Command {
   std::optional<Command_AhSearch> ah_search;
   std::optional<Command_Who> who;
   std::optional<Command_Act> act;
+  // The client's hello: its first frame (no `bot`), optional.
+  std::optional<Hello> hello;
 
   bool operator==(const Command&) const = default;
 };
@@ -2017,6 +2034,9 @@ struct ModuleMessage {
   uint32_t version = 0;
   std::optional<Snapshot> snapshot;
   std::optional<ImmediateEvent> event;
+  // The module's hello: the first frame of every connection, before any
+  // snapshot or event.
+  std::optional<Hello> hello;
 
   bool operator==(const ModuleMessage&) const = default;
 };
@@ -2245,6 +2265,16 @@ std::vector<std::string> ValidateSnapshotVisibility(const Snapshot& snap);
 // from Snapshot/Event/PromptEvent for a client-event audit (docs/design.md,
 // "Client-event coverage").
 std::string ReflectedSchemaJson();
+
+// 16 hex digits naming this build's wire schema: a hash of kWireVersion and
+// every field path of ModuleMessage and Command. Two builds whose hashes differ
+// added, renamed or removed a field the other doesn't know.
+const std::string& SchemaHash();
+// This build's hello (wire_version, schema_hash) for `role`.
+Hello MakeHello(std::string_view role);
+// Why `peer` can't talk to this build ("" when it can): names both versions or
+// schema hashes and says to rebuild the one that is out of date.
+std::string HelloMismatch(const Hello& peer);
 
 }  // namespace wlb::snapshot
 

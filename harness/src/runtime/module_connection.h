@@ -1,7 +1,8 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
 // Connects the harness to `mod-llm-brain`'s Unix socket (`brain.sock`):
-// receives `ModuleMessage` frames (`Snapshot` and `ImmediateEvent`) on a
+// trades hellos (wire version, schema hash) and refuses a module of another
+// build, receives `ModuleMessage` frames (`Snapshot` and `ImmediateEvent`) on a
 // dedicated epoll IO thread, records `built -> received` delivery ages from
 // `monotonic_us`, posts decoded messages onto the harness's own sequence, sends
 // `Command` frames out, and reconnects automatically whenever `worldserver`
@@ -36,6 +37,10 @@ class ModuleConnection {
     base::RepeatingCallback<void(wlb::snapshot::ImmediateEvent,
                                  base::TimeTicks received_at)>
         on_event;
+    // The module's hello named another build (wire version or schema hash):
+    // `reason` says which and what to rebuild. Nothing more is delivered or
+    // sent on that connection.
+    base::RepeatingCallback<void(std::string reason)> on_refused;
   };
 
   struct DeliveryStats {
@@ -69,6 +74,7 @@ class ModuleConnection {
   class StatsCollector;
 
   void OnConnectionChanged(bool connected);
+  void OnRefused(std::string reason);
   void OnSnapshot(wlb::snapshot::Snapshot snapshot,
                   base::TimeTicks received_at);
   void OnEvent(wlb::snapshot::ImmediateEvent event,

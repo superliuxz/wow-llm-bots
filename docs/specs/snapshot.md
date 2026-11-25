@@ -10,6 +10,16 @@ strict JSON for fixtures and `snapshot_check`).
 big-endian length-prefixed BEVE frames (`common/net/frame_codec.h`, max payload 1 MiB,
 `kWireVersion` checked on every message).
 
+- **Handshake (`hello`):** the module's first frame on every connection is a `ModuleMessage`
+  carrying only `hello` (`wire_version`, `schema_hash` = `SchemaHash()`, a hash of
+  `kWireVersion` and every `ModuleMessage`/`Command` field path, and `role: "module"`). A client
+  may answer with a `Command` carrying only `hello` (the harness does, `role: "harness"`;
+  `wlb snap fake` sends `"wlb snap fake"`). A side whose peer's hello names another version or
+  schema refuses that connection with one log line saying what to rebuild: the harness ends its
+  run (exit 2); the module drops the client's commands, stops building snapshots for it and
+  hands the bots back to playerbots until it disconnects. A client that sends no hello (a
+  passive capture tool, raw-socket e2e cases) is still served; `wire.decode_module_message`
+  checks and consumes the module's hello so Python readers only see snapshots and events.
 - **Module → Harness (`ModuleMessage`):**
   - `Snapshot`: periodic picture of what one bot sees (`1 s` out of combat, `250 ms` in combat,
     staggered across bots, latest-wins per bot if the socket backs up; sooner on a combat, life

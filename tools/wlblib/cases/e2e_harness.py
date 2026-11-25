@@ -231,6 +231,7 @@ def _case_reconnect():
 
     def run(stack):
         build.common("default", tests=False)
+        log_start = len(stack.server_log())  # Cases batched before this one log too.
         with tempfile.TemporaryDirectory(prefix="wlb-e2e-reconnect-") as tmp:
             tmp_dir = pathlib.Path(tmp)
             proxy_sock = tmp_dir / "proxy.sock"
@@ -294,6 +295,18 @@ def _case_reconnect():
         expect(out.count("connected to mod-llm-brain") >= 2,
                f"harness did not log second connect (log tail: {out[-300:]!r})")
         expect(not errors, f"module reported errors across reconnect: {errors}")
+        with proxy.lock:
+            firsts = {}
+            for g, c in proxy.commands:
+                firsts.setdefault(g, c)
+        for g, c in sorted(firsts.items()):
+            expect(c.get("hello", {}).get("role") == "harness",
+                   f"connection {g}: the harness's first frame was not its hello: {c}")
+        log = stack.server_log()[log_start:]
+        hello_lines = log.count("mod-llm-brain: harness hello: wire version")
+        expect(hello_lines >= gens,
+               f"module logged {hello_lines} harness hellos for {gens} connections")
+        expect("refusing the connection" not in log, "the module refused a harness of this build")
         return f"reconnected across drop ({gens} generations, wakes {wakes_before}->{wakes_after})"
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
@@ -724,4 +737,122 @@ def _case_relationships():
                 "and rendered under People you know:")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
-CASES = [_case_reconnect(), _case_memory_condense(), _case_relationships()]
+def _case_handshake():
+    """Hellos on connect (docs/specs/snapshot.md, "Handshake").
+
+    1. The module's first frame on a raw connection is its hello, naming this build's wire
+       version and schema hash; a passive reader that says nothing gets snapshots after it.
+    2. A client whose hello names another schema is refused: one clear line in the server log,
+       no snapshots while it stays, and its commands are not applied.
+    3. The next client, of this build, is served again (its hello logged, snapshots back).
+    """
+
+    import json
+    import socket
+    import time
+
+    from wlblib import wire
+    from wlblib.testing import expect
+
+    NAME = "handshake"
+    DESCRIPTION = "Module hello first; a client of another build is refused, the next one served"
+    TEST_CONFIG = "choose"
+    BOT = "Loada"
+
+    def connect():
+        """A connection the module accepted (the last one may still be closing)."""
+        deadline = time.monotonic() + 10.0
+        while True:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(0.5)
+            s.connect(str(stack_socket[0]))
+            reader = wire.FrameReader()
+            try:
+                chunk = s.recv(1 << 20)
+            except socket.timeout:
+                chunk = None
+            if chunk:
+                return s, reader, reader.feed(chunk)
+            s.close()
+            expect(time.monotonic() < deadline, "the module kept refusing new connections")
+            time.sleep(0.2)
+
+    def read(s, reader, seconds):
+        """Decoded (raw json, decoded-or-None) module frames for `seconds`."""
+        frames = []
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            try:
+                chunk = s.recv(1 << 20)
+            except socket.timeout:
+                continue
+            if not chunk:
+                break
+            frames.extend(reader.feed(chunk))
+        return frames
+
+    stack_socket = [None]
+
+    def run(stack):
+        stack_socket[0] = stack.socket
+        mine = wire.hello_command("")["hello"]
+
+        # 1. Hello first, then snapshots for a passive reader.
+        s, reader, first = connect()
+        frames = first + read(s, reader, 3.0)
+        s.close()
+        expect(frames, "no frames at all")
+        hello = json.loads(wire.module_message_to_json(frames[0]))
+        expect(set(hello) == {"version", "hello"}, f"first frame is not a bare hello: {hello}")
+        expect(hello["hello"] == {"wire_version": mine["wire_version"],
+                                  "schema_hash": mine["schema_hash"], "role": "module"},
+               f"module hello {hello['hello']} vs this build {mine}")
+        decoded = [wire.decode_module_message(f) for f in frames]
+        expect(decoded[0] is None, "decode_module_message passed the hello through")
+        hellos = sum(1 for f in frames[1:] if "hello" in json.loads(wire.module_message_to_json(f)))
+        expect(hellos == 0, f"{hellos} more hellos after the first")
+        snaps = [m for m in decoded if m and "snapshot" in m]
+        expect(snaps, "a passive reader got no snapshots after the hello")
+
+        # 2. A client of another build: refused.
+        log_before = len(stack.server_log())
+        s, reader, first = connect()
+        stale = wire.hello_command("stale e2e")
+        stale["hello"]["schema_hash"] = "0000000000000000"
+        wire.send_frame(s, wire.encode_command(stale))
+        wire.send_frame(s, wire.encode_command(
+            {"bot": BOT, "command_id": 9001, "say": {"channel": "SAY", "text": "stale build"}}))
+        time.sleep(1.0)  # The refusal lands before later snapshots are built...
+        read(s, reader, 0.5)  # ...so drop what was sent before it.
+        later = read(s, reader, 3.0)
+        s.close()
+        log = stack.server_log()[log_before:]
+        expect("refusing the connection: stale e2e has wire schema 0000000000000000" in log,
+               f"no refusal in the server log: {log[-600:]!r}")
+        expect(log.count("refusing the connection") == 1,
+               f"refusal logged {log.count('refusing the connection')} times")
+        refused_snaps = [m for m in map(wire.decode_module_message, later) if m and "snapshot" in m]
+        expect(not refused_snaps, f"{len(refused_snaps)} snapshots sent to a refused client")
+        expect(f"{BOT} says (SAY, len=11)" not in log, "the refused client's say was applied")
+
+        # 3. This build again: served.
+        log_before = len(stack.server_log())
+        s, reader, first = connect()
+        wire.send_frame(s, wire.encode_command(wire.hello_command("e2e handshake")))
+        wire.send_frame(s, wire.encode_command(
+            {"bot": BOT, "command_id": 9002, "say": {"channel": "SAY", "text": "fresh build"}}))
+        frames = first + read(s, reader, 3.0)
+        s.close()
+        snaps = [m for m in map(wire.decode_module_message, frames) if m and "snapshot" in m]
+        expect(snaps, "no snapshots for a client of this build after a refused one")
+        log = stack.server_log()[log_before:]
+        expect("mod-llm-brain: e2e handshake hello: wire version" in log,
+               f"the good hello wasn't logged: {log[-600:]!r}")
+        expect("refusing" not in log, "a client of this build was refused")
+        expect(f"{BOT} says (SAY, len=11)" in log,
+               f"the say of a client of this build wasn't applied: {log[-600:]!r}")
+        return (f"hello {mine['schema_hash']} first; stale schema refused once with no "
+                f"snapshots; next client got {len(snaps)} snapshots")
+    return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
+
+CASES = [_case_reconnect(), _case_handshake(), _case_memory_condense(), _case_relationships()]

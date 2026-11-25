@@ -149,6 +149,36 @@ TEST(BrainBridgeTest, MessagesFlowBothWays) {
             std::vector<std::string>{"{\"type\":\"snapshot\"}"});
 }
 
+TEST(BrainBridgeTest, HelloIsTheFirstFrameOfEveryConnection) {
+  WorldRecorder world;
+  BrainBridge bridge(TestSocketPath(), 100, world.Callbacks(), "hello");
+  ASSERT_TRUE(bridge.Start());
+  for (int round = 0; round < 2; ++round) {  // Again after a reconnect.
+    auto harness = std::make_unique<FakeHarness>(TestSocketPath());
+    ASSERT_TRUE(RunWorldUntil(bridge, [&] { return bridge.connected(); }));
+    bridge.Send("event");
+    bridge.SendLatest("Loada", "snapshot");
+    ASSERT_TRUE(
+        RunWorldUntil(bridge, [&] { return harness->frames().size() == 3; }));
+    EXPECT_EQ(harness->frames(),
+              (std::vector<std::string>{"hello", "event", "snapshot"}))
+        << "round " << round;
+    harness.reset();
+    ASSERT_TRUE(RunWorldUntil(bridge, [&] { return !bridge.connected(); }));
+  }
+}
+
+TEST(BrainBridgeTest, NoHelloWithoutOne) {
+  WorldRecorder world;
+  BrainBridge bridge(TestSocketPath(), 100, world.Callbacks());
+  ASSERT_TRUE(bridge.Start());
+  FakeHarness harness(TestSocketPath());
+  ASSERT_TRUE(RunWorldUntil(bridge, [&] { return bridge.connected(); }));
+  bridge.Send("event");
+  ASSERT_TRUE(RunWorldUntil(bridge, [&] { return !harness.frames().empty(); }));
+  EXPECT_EQ(harness.frames(), std::vector<std::string>{"event"});
+}
+
 TEST(BrainBridgeTest, SendWithoutHarnessIsDropped) {
   WorldRecorder world;
   BrainBridge bridge(TestSocketPath(), 100, world.Callbacks());
@@ -160,11 +190,12 @@ TEST(BrainBridgeTest, SendWithoutHarnessIsDropped) {
 
 TEST(BrainBridgeTest, SecondConnectionRejectedWhileLiveHarnessConnected) {
   WorldRecorder world;
-  BrainBridge bridge(TestSocketPath(), 100, world.Callbacks());
+  BrainBridge bridge(TestSocketPath(), 100, world.Callbacks(), "hello");
   ASSERT_TRUE(bridge.Start());
   FakeHarness first(TestSocketPath());
   ASSERT_TRUE(RunWorldUntil(bridge, [&] { return bridge.connected(); }));
-  // A stray second client must not kick out the live harness.
+  // A stray second client must not kick out the live harness (and gets no
+  // hello: it is closed unread).
   const int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
   ASSERT_GE(fd, 0);
   sockaddr_un addr{};
@@ -177,9 +208,10 @@ TEST(BrainBridgeTest, SecondConnectionRejectedWhileLiveHarnessConnected) {
   ::close(fd);
 
   bridge.Send("still to the first harness");
-  ASSERT_TRUE(RunWorldUntil(bridge, [&] { return !first.frames().empty(); }));
+  ASSERT_TRUE(
+      RunWorldUntil(bridge, [&] { return first.frames().size() == 2; }));
   EXPECT_EQ(first.frames(),
-            std::vector<std::string>{"still to the first harness"});
+            (std::vector<std::string>{"hello", "still to the first harness"}));
 }
 
 TEST(BrainBridgeTest, FramesFromAHarnessThatLeftAreNotApplied) {

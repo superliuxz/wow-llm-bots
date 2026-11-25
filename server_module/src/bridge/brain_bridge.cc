@@ -68,13 +68,15 @@ class BrainBridge::Generation : public base::RawPtrTarget {
 class BrainBridge::IoCore : public BrainBridge::IoCoreHandle {
  public:
   IoCore(std::string path,
+         std::string hello,
          base::scoped_refptr<base::TaskQueue> world_queue,
          size_t max_pending_messages,
          base::WeakPtr<BrainBridge> bridge,
          MessageHandler on_message,
          SendStatsCollector* stats,
          Generation* generation)
-      : world_queue_(std::move(world_queue)),
+      : hello_(std::move(hello)),
+        world_queue_(std::move(world_queue)),
         max_pending_messages_(max_pending_messages),
         bridge_(std::move(bridge)),
         on_message_(std::move(on_message)),
@@ -83,6 +85,11 @@ class BrainBridge::IoCore : public BrainBridge::IoCoreHandle {
         server_(std::move(path),
                 net::UnixSocketServer::Callbacks{
                     [this] {
+                      // First on the wire: the world thread only sends once
+                      // it has heard of this connection (posted below).
+                      if (!hello_.empty()) {
+                        server_.SendFrame(hello_);
+                      }
                       generation_->Bump();
                       PostConnectionChanged(true);
                     },
@@ -165,6 +172,7 @@ class BrainBridge::IoCore : public BrainBridge::IoCoreHandle {
         base::BindOnce(&BrainBridge::OnConnectionChanged, bridge_, connected));
   }
 
+  const std::string hello_;
   base::scoped_refptr<base::TaskQueue> world_queue_;
   const size_t max_pending_messages_;
   // Bound to the world thread: only dereferenced by tasks run there.
@@ -178,10 +186,12 @@ class BrainBridge::IoCore : public BrainBridge::IoCoreHandle {
 
 BrainBridge::BrainBridge(std::string socket_path,
                          size_t max_pending_messages,
-                         Callbacks callbacks)
+                         Callbacks callbacks,
+                         std::string hello)
     : socket_path_(std::move(socket_path)),
       max_pending_messages_(max_pending_messages),
       callbacks_(std::move(callbacks)),
+      hello_(std::move(hello)),
       world_queue_(base::TaskQueue::Create()),
       send_stats_(std::make_unique<SendStatsCollector>()),
       generation_(std::make_unique<Generation>()),
@@ -204,9 +214,9 @@ bool BrainBridge::Start() {
   IoCore* core = nullptr;
   const bool posted = io_thread_.task_runner()->PostTask(
       [&, bridge = weak_factory_.GetWeakPtr()] {
-        core = new IoCore(socket_path_, world_queue_, max_pending_messages_,
-                          bridge, callbacks_.on_message, send_stats_.get(),
-                          generation_.get());
+        core = new IoCore(socket_path_, hello_, world_queue_,
+                          max_pending_messages_, bridge, callbacks_.on_message,
+                          send_stats_.get(), generation_.get());
         if (!core->Listen()) {
           delete core;
           core = nullptr;

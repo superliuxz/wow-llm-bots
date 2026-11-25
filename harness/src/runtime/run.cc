@@ -5,6 +5,7 @@
 #include <inttypes.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -57,10 +58,13 @@ void DefaultStdoutLog(const std::string& line) {
 // Owns all sequence-bound objects on `harness-loop` thread.
 class LiveSession : public base::RawPtrTarget {
  public:
+  // `on_refused` runs (on this session's sequence) when the module is of
+  // another build: the run ends.
   LiveSession(const RunOptions& options,
               std::string rules,
               LogMessageFn log_fn,
-              base::TimeDelta retry_delay)
+              base::TimeDelta retry_delay,
+              base::RepeatingClosure on_refused)
       : log_fn_(std::move(log_fn)),
         only_bots_(options.only_bots),
         llm_(options.endpoint, options.slots),
@@ -81,8 +85,17 @@ class LiveSession : public base::RawPtrTarget {
                     return;
                   }
                   loop_->OnEvent(std::move(ev), at);
+                },
+                [this, on_refused](std::string reason) {
+                  if (log_fn_) {
+                    log_fn_.Run(
+                        base::StrCat({"harness: refusing the module at ",
+                                      options_socket_path_, ": ", reason}));
+                  }
+                  on_refused.Run();
                 }},
-            retry_delay) {
+            retry_delay),
+        options_socket_path_(options.socket_path) {
     BotLoopConfig cfg;
     cfg.rules = std::move(rules);
     cfg.bots_dir = options.bots_dir;
@@ -169,6 +182,7 @@ class LiveSession : public base::RawPtrTarget {
   std::unordered_set<std::string> only_bots_;
   LlmClient llm_;
   ModuleConnection module_;
+  const std::string options_socket_path_;
   std::unique_ptr<BotLoop> loop_;
   uint64_t ticks_ = 0;
   base::WeakPtrFactory<LiveSession> weak_factory_{this};
@@ -244,6 +258,10 @@ int RunHarness(const RunOptions& options,
     return 1;
   }
 
+  base::WaitableEvent local_stop;
+  base::WaitableEvent* waiter = stop_event ? stop_event : &local_stop;
+  // Set on the loop thread, read here after the wait (Signal() orders it).
+  std::atomic<bool> refused{false};
   base::WaitableEvent started;
   base::raw_ptr<LiveSession> session = nullptr;
   bool ok = false;
@@ -251,7 +269,14 @@ int RunHarness(const RunOptions& options,
       options.seconds > 0 && options.seconds < 5.0 ? base::Milliseconds(25)
                                                    : base::Seconds(1);
   loop_thread.task_runner()->PostTask([&] {
-    auto* s = new LiveSession(options, *rules, log_fn, retry_delay);
+    auto* s = new LiveSession(
+        options, *rules, log_fn, retry_delay,
+        base::BindRepeating(
+            [](std::atomic<bool>* refused, base::WaitableEvent* waiter) {
+              refused->store(true);
+              waiter->Signal();
+            },
+            &refused, waiter));
     ok = s->Start();
     if (!ok) {
       delete s;
@@ -272,8 +297,6 @@ int RunHarness(const RunOptions& options,
       options.socket_path.c_str(), options.endpoint.host.c_str(),
       options.endpoint.port, options.slots));
 
-  base::WaitableEvent local_stop;
-  base::WaitableEvent* waiter = stop_event ? stop_event : &local_stop;
   if (options.seconds > 0) {
     waiter->TimedWait(
         base::Milliseconds(static_cast<int64_t>(options.seconds * 1000.0)));
@@ -286,7 +309,7 @@ int RunHarness(const RunOptions& options,
     s.ClearAndDelete();
   });
   loop_thread.Stop();
-  return 0;
+  return refused.load() ? 2 : 0;
 }
 
 }  // namespace harness

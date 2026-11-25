@@ -5,10 +5,12 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/message_loop/message_pump.h"
 #include "base/synchronization/lock.h"
@@ -186,6 +188,66 @@ TEST(RunHarnessTest, EndToEndSocketToStreamingLlmToChooseCommand) {
   mod_io.Stop();
   http_srv.stop();
   http_thread.Stop();
+  ::rmdir(dir.c_str());
+}
+
+// A module of another build: the run ends by itself (exit code 2), with one
+// log line naming what differs.
+TEST(RunHarnessTest, EndsOnAModuleOfAnotherBuild) {
+  std::string dir = testing::TempDir() + "wlb-run-XXXXXX";
+  ASSERT_NE(::mkdtemp(dir.data()), nullptr);
+  const std::string sock = dir + "/brain.sock";
+
+  base::Thread mod_io("fake-mod");
+  ASSERT_TRUE(mod_io.StartWithOptions({base::MessagePumpType::IO}));
+  base::raw_ptr<net::UnixSocketServer> mod_srv = nullptr;
+  base::WaitableEvent mod_listening;
+  pb::ModuleMessage hello;
+  hello.version = pb::kWireVersion + 1;
+  hello.hello = pb::MakeHello("module");
+  hello.hello->wire_version = pb::kWireVersion + 1;
+  const std::string hello_frame = pb::WriteBeve(hello);
+  mod_io.task_runner()->PostTask([&] {
+    mod_srv = new net::UnixSocketServer(
+        sock, net::UnixSocketServer::Callbacks{
+                  [&] { mod_srv->SendFrame(hello_frame); }, {}, {}, {}});
+    ASSERT_TRUE(mod_srv->Listen());
+    mod_listening.Signal();
+  });
+  mod_listening.Wait();
+
+  RunOptions opts;
+  opts.socket_path = sock;
+  opts.rules_path = std::string(WLB_HARNESS_TESTDATA) + "/rules.txt";
+  opts.bots_dir = "";
+  opts.seconds = 30;  // Must end long before this.
+  base::Lock log_lock;
+  std::vector<std::string> logs;
+  const base::TimeTicks start = base::TimeTicks::Now();
+  const int exit_code =
+      RunHarness(opts, nullptr,
+                 base::BindRepeating(
+                     [](base::Lock* lock, std::vector<std::string>* out,
+                        const std::string& line) {
+                       base::AutoLock hold(*lock);
+                       out->push_back(line);
+                     },
+                     &log_lock, &logs));
+  EXPECT_EQ(exit_code, 2);
+  EXPECT_LT(base::TimeTicks::Now() - start, base::Seconds(10));
+  {
+    base::AutoLock hold(log_lock);
+    const auto refusal =
+        std::find_if(logs.begin(), logs.end(), [](const std::string& line) {
+          return line.find("harness: refusing the module at ") == 0 &&
+                 line.find("module speaks wire version") != std::string::npos;
+        });
+    EXPECT_NE(refusal, logs.end());
+  }
+
+  mod_io.task_runner()->PostTask(
+      [s = std::move(mod_srv)]() mutable { s.ClearAndDelete(); });
+  mod_io.Stop();
   ::rmdir(dir.c_str());
 }
 

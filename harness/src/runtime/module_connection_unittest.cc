@@ -16,6 +16,7 @@
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/thread_annotations.h"
+#include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "gtest/gtest.h"
@@ -45,8 +46,14 @@ class FakeModuleServer {
                      [this] { client_connected_.Signal(); },
                      [this](std::string frame) {
                        pb::Command cmd;
-                       if (pb::ReadBeve(frame, &cmd)) {
-                         base::AutoLock lock(lock_);
+                       if (!pb::ReadBeve(frame, &cmd)) {
+                         return;
+                       }
+                       base::AutoLock lock(lock_);
+                       if (cmd.hello) {
+                         hellos_.push_back(std::move(*cmd.hello));
+                         got_hello_.Signal();
+                       } else {
                          commands_.push_back(std::move(cmd));
                          got_command_.Signal();
                        }
@@ -71,6 +78,7 @@ class FakeModuleServer {
 
   void WaitForClient() { client_connected_.Wait(); }
   void WaitForCommand() { got_command_.Wait(); }
+  void WaitForHello() { got_hello_.Wait(); }
 
   // Sent as this checkout's module would: with kWireVersion, unless the test
   // sets another.
@@ -88,6 +96,10 @@ class FakeModuleServer {
     base::AutoLock lock(lock_);
     return commands_;
   }
+  std::vector<pb::Hello> hellos() {
+    base::AutoLock lock(lock_);
+    return hellos_;
+  }
 
  private:
   const std::string path_;
@@ -95,8 +107,10 @@ class FakeModuleServer {
   base::raw_ptr<net::UnixSocketServer> server_ = nullptr;
   base::WaitableEvent client_connected_;
   base::WaitableEvent got_command_;
+  base::WaitableEvent got_hello_;
   base::Lock lock_;
   std::vector<pb::Command> commands_ GUARDED_BY(lock_);
+  std::vector<pb::Hello> hellos_ GUARDED_BY(lock_);
 };
 
 TEST(ModuleConnectionTest, ReceivesSnapshotsEventsSendsCommandsAndReconnects) {
@@ -133,7 +147,8 @@ TEST(ModuleConnectionTest, ReceivesSnapshotsEventsSendsCommandsAndReconnects) {
                 event_text = ev.event.error->text;
               }
               got_event.Signal();
-            }},
+            },
+            {}},
         /*retry_delay=*/base::Milliseconds(20));
     ASSERT_TRUE(conn->Start());
     conn_started.Signal();
@@ -170,6 +185,10 @@ TEST(ModuleConnectionTest, ReceivesSnapshotsEventsSendsCommandsAndReconnects) {
     choose.option = 2;
     harness_seq.task_runner()->PostTask([&] { conn->SendCommand(cmd); });
     s1.WaitForCommand();
+    // The harness said hello first, as this build (a module without a hello
+    // of its own, like this one, is still served).
+    ASSERT_EQ(s1.hellos().size(), 1u);
+    EXPECT_EQ(s1.hellos()[0], pb::MakeHello("harness"));
     const auto cmds = s1.commands();
     ASSERT_EQ(cmds.size(), 1u);
     EXPECT_EQ(cmds[0].command_id, 42u);
@@ -196,6 +215,8 @@ TEST(ModuleConnectionTest, ReceivesSnapshotsEventsSendsCommandsAndReconnects) {
     s2_snap.seq = 2;
     s2.Send(m2);
     got_snap_2.Wait();
+    s2.WaitForHello();  // Again on the new connection.
+    EXPECT_EQ(s2.hellos().size(), 1u);
   }
 
   ModuleConnection::DeliveryStats stats;
@@ -215,6 +236,96 @@ TEST(ModuleConnectionTest, ReceivesSnapshotsEventsSendsCommandsAndReconnects) {
   EXPECT_EQ(stats.receive_ages.size(), 1u);
   EXPECT_EQ(stats.wrong_version, 1u);
 
+  ::rmdir(dir.c_str());
+}
+
+// A module of another build: its hello refuses the connection (reported
+// once), nothing after it is delivered or sent; a module of this build on the
+// next connection is served again.
+TEST(ModuleConnectionTest, RefusesAModuleOfAnotherBuildUntilReconnect) {
+  std::string dir = testing::TempDir() + "wlb-modconn-XXXXXX";
+  ASSERT_NE(::mkdtemp(dir.data()), nullptr);
+  const std::string sock = dir + "/brain.sock";
+
+  base::Thread harness_seq("harness-seq");
+  harness_seq.Start();
+  base::WaitableEvent refused;
+  base::WaitableEvent got_snap;
+  std::vector<std::string> reasons;
+  std::vector<uint32_t> seqs;
+  std::unique_ptr<ModuleConnection> conn;
+  base::WaitableEvent conn_started;
+  harness_seq.task_runner()->PostTask([&] {
+    conn = std::make_unique<ModuleConnection>(
+        sock,
+        ModuleConnection::Callbacks{
+            {},
+            [&](pb::Snapshot snap, base::TimeTicks /*at*/) {
+              seqs.push_back(snap.seq);
+              got_snap.Signal();
+            },
+            {},
+            [&](std::string reason) {
+              reasons.push_back(std::move(reason));
+              refused.Signal();
+            }},
+        /*retry_delay=*/base::Milliseconds(20));
+    ASSERT_TRUE(conn->Start());
+    conn_started.Signal();
+  });
+  conn_started.Wait();
+
+  pb::Command cmd;
+  cmd.bot = "Testpriest";
+  cmd.command_id = 7;
+  cmd.say.emplace().text = "hi";
+  {
+    FakeModuleServer stale(sock);
+    ASSERT_TRUE(stale.Start());
+    stale.WaitForClient();
+    pb::ModuleMessage hello;
+    hello.hello = pb::MakeHello("module");
+    hello.hello->schema_hash = "0123456789abcdef";
+    stale.Send(hello);
+    stale.Send(hello);  // Reported once per connection.
+    refused.Wait();
+    pb::ModuleMessage snap;
+    snap.snapshot.emplace().seq = 5;
+    stale.Send(snap);
+    harness_seq.task_runner()->PostTask([&] { conn->SendCommand(cmd); });
+    base::PlatformThread::Sleep(base::Milliseconds(100));
+    stale.WaitForHello();
+    EXPECT_TRUE(stale.commands().empty());
+  }
+  {
+    FakeModuleServer fresh(sock);
+    ASSERT_TRUE(fresh.Start());
+    fresh.WaitForClient();
+    pb::ModuleMessage hello;
+    hello.hello = pb::MakeHello("module");
+    fresh.Send(hello);
+    pb::ModuleMessage snap;
+    snap.snapshot.emplace().seq = 6;
+    fresh.Send(snap);
+    got_snap.Wait();
+    harness_seq.task_runner()->PostTask([&] { conn->SendCommand(cmd); });
+    fresh.WaitForCommand();
+    EXPECT_EQ(fresh.commands().size(), 1u);
+  }
+
+  base::WaitableEvent stopped;
+  harness_seq.task_runner()->PostTask([&] {
+    conn.reset();
+    stopped.Signal();
+  });
+  stopped.Wait();
+  harness_seq.Stop();
+
+  ASSERT_EQ(reasons.size(), 1u);
+  EXPECT_NE(reasons[0].find("module has wire schema 0123456789abcdef"),
+            std::string::npos)
+      << reasons[0];
+  EXPECT_EQ(seqs, std::vector<uint32_t>{6});
   ::rmdir(dir.c_str());
 }
 

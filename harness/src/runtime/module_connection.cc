@@ -76,7 +76,7 @@ class ModuleConnection::IoCore : public base::RawPtrTarget {
         stats_(stats),
         client_(std::move(socket_path),
                 net::UnixSocketClient::Callbacks{
-                    [this] { PostConnectionChanged(true); },
+                    [this] { OnConnected(); },
                     [this](std::string frame) { OnFrame(std::move(frame)); },
                     [this] { PostConnectionChanged(false); }},
                 retry_delay) {}
@@ -84,12 +84,36 @@ class ModuleConnection::IoCore : public base::RawPtrTarget {
   void Start() { client_.Start(); }
 
   void Send(const std::string& bytes) {
-    if (!client_.SendFrame(bytes)) {
+    if (refused_ || !client_.SendFrame(bytes)) {
       stats_->RecordDroppedOutbound();
     }
   }
 
  private:
+  // Our hello goes first, before any command of this connection.
+  void OnConnected() {
+    refused_ = false;
+    pb::Command hello;
+    hello.version = pb::kWireVersion;
+    hello.hello = pb::MakeHello("harness");
+    client_.SendFrame(pb::WriteBeve(hello));
+    PostConnectionChanged(true);
+  }
+
+  // The module's hello: one of another build refuses this connection (its
+  // frames are dropped, no command is sent) until the next one.
+  void OnHello(const pb::Hello& hello) {
+    std::string mismatch = pb::HelloMismatch(hello);
+    if (mismatch.empty() || refused_) {
+      return;
+    }
+    refused_ = true;
+    if (origin_) {
+      origin_->PostTask(base::BindOnce(&ModuleConnection::OnRefused, owner_,
+                                       std::move(mismatch)));
+    }
+  }
+
   void PostConnectionChanged(bool connected) {
     if (origin_) {
       origin_->PostTask(base::BindOnce(&ModuleConnection::OnConnectionChanged,
@@ -102,6 +126,14 @@ class ModuleConnection::IoCore : public base::RawPtrTarget {
     pb::ModuleMessage msg;
     if (!pb::ReadBeve(frame, &msg)) {
       stats_->RecordUnparseable();
+      return;
+    }
+    // Before the version check: a hello of another version is what it names.
+    if (msg.hello) {
+      OnHello(*msg.hello);
+      return;
+    }
+    if (refused_) {
       return;
     }
     if (msg.version != pb::kWireVersion) {
@@ -127,6 +159,8 @@ class ModuleConnection::IoCore : public base::RawPtrTarget {
   base::scoped_refptr<base::SequencedTaskRunner> origin_;
   base::WeakPtr<ModuleConnection> owner_;
   const base::raw_ptr<StatsCollector> stats_;
+  // The module's hello named another build (IO thread; reset on connect).
+  bool refused_ = false;
   net::UnixSocketClient client_;
 };
 
@@ -203,6 +237,12 @@ void ModuleConnection::OnConnectionChanged(bool connected) {
   connected_ = connected;
   if (callbacks_.on_connection_changed) {
     callbacks_.on_connection_changed.Run(connected);
+  }
+}
+
+void ModuleConnection::OnRefused(std::string reason) {
+  if (callbacks_.on_refused) {
+    callbacks_.on_refused.Run(std::move(reason));
   }
 }
 

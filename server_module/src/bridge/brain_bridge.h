@@ -48,10 +48,12 @@ class BrainBridge {
   };
 
   // Depends only on common/ (no AzerothCore headers), so it is unit-tested in
-  // server_module/tests/.
+  // server_module/tests/. A non-empty `hello` is the first frame every new
+  // connection gets, before anything Send() or SendLatest() queued for it.
   BrainBridge(std::string socket_path,
               size_t max_pending_messages,
-              Callbacks callbacks);
+              Callbacks callbacks,
+              std::string hello = {});
   BrainBridge(const BrainBridge&) = delete;
   BrainBridge& operator=(const BrainBridge&) = delete;
   ~BrainBridge();
@@ -106,6 +108,7 @@ class BrainBridge {
   const std::string socket_path_;
   const size_t max_pending_messages_;
   Callbacks callbacks_;
+  const std::string hello_;
   base::scoped_refptr<base::TaskQueue> world_queue_;
   // Outlives the IO thread's use of it: Stop() joins the thread first.
   std::unique_ptr<SendStatsCollector> send_stats_;

@@ -103,6 +103,17 @@ char* wlb_module_message_visibility_errors(const char* bytes,
   return DupBytes(errors, out_len);
 }
 
+// This build's hello for `role`, as the JSON of a Command that carries only
+// it ({"version": .., "hello": {"wire_version", "schema_hash", "role"}}): what
+// a tool sends first, and what it checks the module's hello against. Returns
+// a malloc'd buffer (free with wlb_wire_free).
+char* wlb_hello_command_json(const char* role, size_t len, size_t* out_len) {
+  wlb::snapshot::Command cmd;
+  cmd.version = wlb::snapshot::kWireVersion;
+  cmd.hello = wlb::snapshot::MakeHello(std::string_view(role, len));
+  return DupBytes(wlb::snapshot::WriteJson(cmd, /*pretty=*/false), out_len);
+}
+
 void wlb_wire_free(void* ptr) {
   std::free(ptr);
 }

@@ -293,7 +293,8 @@ class LlmBrainWorldScript : public WorldScript {
             base::BindRepeating(&LlmBrainWorldScript::OnHarnessMessage,
                                 weak_factory_.GetWeakPtr()),
             base::BindRepeating(&LlmBrainWorldScript::OnHarnessConnection,
-                                weak_factory_.GetWeakPtr())});
+                                weak_factory_.GetWeakPtr())},
+        ServerHelloFrame());
     if (!bridge_->Start()) {
       LOG_ERROR("module", "mod-llm-brain: cannot listen on {}",
                 config_.socket_path);
@@ -362,7 +363,7 @@ class LlmBrainWorldScript : public WorldScript {
     if (trace_writer_ && trace_writer_->enabled()) {
       SampleObservedEntities(now);
     }
-    if (!bridge_->connected()) {
+    if (!bridge_->connected() || harness_refused_) {
       return;  // Nobody to send to: don't spend world-thread time building.
     }
     // Each bot has its own moment in the interval (bots are spread over it, so
@@ -506,11 +507,41 @@ class LlmBrainWorldScript : public WorldScript {
     }
   }
 
+  // The first frame of every connection (BrainBridge sends it): this build's
+  // wire version and schema hash, so a harness or tool of another build
+  // refuses at once (docs/specs/snapshot.md, "Handshake").
+  static std::string ServerHelloFrame() {
+    wlb::snapshot::ModuleMessage hello;
+    hello.version = wlb::snapshot::kWireVersion;
+    hello.hello = wlb::snapshot::MakeHello("module");
+    return wlb::snapshot::WriteBeve(hello);
+  }
+
+  // A client's optional hello: one of another build is refused (its commands
+  // dropped, the bots left to playerbots) until it disconnects.
+  void OnClientHello(const wlb::snapshot::Hello& hello) {
+    const std::string mismatch = wlb::snapshot::HelloMismatch(hello);
+    if (mismatch.empty()) {
+      LOG_INFO("module", "mod-llm-brain: {} hello: wire version {}, schema {}",
+               hello.role.empty() ? "client" : hello.role, hello.wire_version,
+               hello.schema_hash);
+      return;
+    }
+    if (!harness_refused_) {
+      harness_refused_ = true;
+      LOG_ERROR("module", "mod-llm-brain: refusing the connection: {}",
+                mismatch);
+      // Nothing it sends is applied, so playerbots keeps the bots alive.
+      BotManager::SetBrainConnected(false);
+    }
+  }
+
   void OnHarnessConnection(bool connected) {
     LOG_INFO("module", "mod-llm-brain: harness {}",
              connected ? "connected" : "disconnected");
     BotManager::SetBrainConnected(connected);
     wrong_version_logged_ = false;
+    harness_refused_ = false;
     for (size_t i = 0; i < bots_.size(); ++i) {
       Player* bot = ObjectAccessor::FindPlayerByName(config_.bots[i]);
       if (bot && GET_PLAYERBOT_AI(bot) != nullptr) {
@@ -960,6 +991,14 @@ class LlmBrainWorldScript : public WorldScript {
       LOG_ERROR("module", "mod-llm-brain: unreadable command ({} bytes)",
                 bytes.size());
       return;
+    }
+    // Before the version check: a hello of another version is what it names.
+    if (command.hello) {
+      OnClientHello(*command.hello);
+      return;
+    }
+    if (harness_refused_) {
+      return;  // Logged once, in OnClientHello.
     }
     if (command.version != wlb::snapshot::kWireVersion) {
       // Once per connection: every command of that harness would say the same.
@@ -1998,6 +2037,8 @@ class LlmBrainWorldScript : public WorldScript {
   std::vector<BotState> bots_;
   // A wrong-version command was logged on this connection.
   bool wrong_version_logged_ = false;
+  // The connected client's hello named another build (reset on reconnect).
+  bool harness_refused_ = false;
   // How old each applied choice's snapshot was, since the last summary.
   std::vector<base::TimeDelta> apply_ages_;
   // Time spent in PathGenerator per ~70 yd walk step, since the last summary.
