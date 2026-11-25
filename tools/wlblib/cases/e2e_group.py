@@ -708,8 +708,9 @@ def _case_lootroll():
       2. `llmtest lootroll` kills a boar near Loada and starts a group roll on a
          green item (Buckskin Cape) under group loot.
       3. Telda gets a `loot_roll` event at once and `Need` / `Greed` / `Pass`
-         options; choosing `Greed` is accepted (no error), and the roll options
-         go away.
+         options; Loada rolls Need, and Telda's options then say `[Need rolled by
+         Loada]` (Now #7); choosing `Greed` is accepted (no error), and the roll
+         options go away.
     """
 
     import socket
@@ -745,6 +746,7 @@ def _case_lootroll():
         expect("roll started" in out, f"setup: no roll started ({out.strip()[-200:]})")
 
         roll_event_at = None
+        loada_needed = False
         greed_cmd = None
         greed_sent_at = None
         greed_text = ""
@@ -772,11 +774,23 @@ def _case_lootroll():
                             errors.append(err.get("text"))
                         continue
                     snap = msg.get("snapshot")
-                    if not snap or snap.get("bot") != "Telda":
+                    if not snap:
                         continue
                     options = snap.get("options", [])
+                    if snap.get("bot") == "Loada":
+                        # Now #7: Loada needs first; Telda's options must say so.
+                        need = next((i for i, o in enumerate(options, 1)
+                                     if o.get("text", "").startswith("Need Buckskin Cape")), None)
+                        if need and not loada_needed:
+                            loada_needed = True
+                            send_cmd(sock, {"bot": "Loada", "command_id": 98,
+                                             "choose": {"option": need, "seq": snap.get("seq", 0)}})
+                        continue
+                    if snap.get("bot") != "Telda":
+                        continue
                     greed = next((i for i, o in enumerate(options, 1)
-                                  if o.get("text", "").startswith("Greed Buckskin Cape")), None)
+                                  if o.get("text", "").startswith("Greed Buckskin Cape")
+                                  and "Need rolled by Loada" in o.get("text", "")), None)
                     if greed_cmd is None and roll_event_at is not None and greed:
                         greed_text = options[greed - 1].get("text", "")
                         greed_cmd = 99
@@ -796,6 +810,8 @@ def _case_lootroll():
         expect(greed_cmd is not None, "Telda was never offered `Greed Buckskin Cape`")
         # F2: the option says whether the item is usable and an upgrade (a fresh priest wears no cloak).
         expect("usable, upgrade" in greed_text, f"roll option lacks usable/upgrade facts: {greed_text!r}")
+        expect("[Need rolled by Loada]" in greed_text,
+               f"roll option doesn't say Loada rolled Need: {greed_text!r}")
         expect(not errors, f"Greed produced errors: {errors}")
         expect(options_gone, "the roll options stayed after Telda chose Greed")
         return f"loot_roll woke Telda {delay:.2f} s after the roll started; Greed accepted"

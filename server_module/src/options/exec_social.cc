@@ -47,6 +47,7 @@
 #include "base/strings/stringprintf.h"
 #include "bot_manager/bot_manager.h"
 #include "bot_session.h"
+#include "chat/chat_scripts.h"
 #include "options/action_types.h"
 #include "options/exec_items.h"
 #include "options/exec_shared.h"
@@ -346,8 +347,24 @@ void CollectGroupAndUpkeepActions(Player* bot,
       const ItemTemplate* proto = sObjectMgr->GetItemTemplate(roll->itemid);
       const std::string item_name =
           proto ? proto->Name1 : ("item #" + std::to_string(roll->itemid));
-      const std::string detail =
+      std::string detail =
           proto ? " (" + RollItemFacts(bot, proto) + ")" : std::string();
+      // Who already rolled Need on it (Now #7: never Need against them).
+      std::vector<std::string> needers;
+      for (const auto& [guid, vote] : roll->playerVote) {
+        if (vote == NEED && guid != bot->GetGUID()) {
+          if (Player* p = ObjectAccessor::FindConnectedPlayer(guid)) {
+            needers.push_back(p->GetName());
+          }
+        }
+      }
+      if (!needers.empty()) {
+        std::string who;
+        for (const std::string& n : needers) {
+          who += (who.empty() ? "" : ", ") + n;
+        }
+        detail += " [Need rolled by " + who + "]";
+      }
       const std::string prefix = base::StringPrintf(
           "roll:0x%016llx:%u:",
           static_cast<unsigned long long>(roll->itemGUID.GetRawValue()),
@@ -1107,6 +1124,15 @@ uint8_t PolicyRollVote(Player* bot, const Roll& roll) {
       if (armor_ok && (!wp || proto->ItemLevel > wp->ItemLevel)) {
         upgrade = true;
         break;
+      }
+    }
+  }
+  // Never Need against a human who already did (Now #7).
+  for (const auto& [guid, vote] : roll.playerVote) {
+    if (vote == NEED && guid != bot->GetGUID()) {
+      Player* p = ObjectAccessor::FindConnectedPlayer(guid);
+      if (p && IsHumanPlayer(p)) {
+        upgrade = false;
       }
     }
   }

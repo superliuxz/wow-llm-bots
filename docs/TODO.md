@@ -152,7 +152,9 @@ Findings from "Wow Llm Bots Review 2". Tick when fixed and tested.
 6. **[done] Wipe protocol.** (`Use Soulstone (resurrect yourself)` / Reincarnation, release held
    while one is up, playerbots' own self-res left to the brain, RULES; `e2e_self_rez`) Wait if a soulstone or ankh is up, otherwise release and run back. Hold 10 s
    to rebuff and drink. Hold auto-release everywhere when a resurrector is nearby (T12).
-7. **Loot manners.** Main-spec, armor type and primary stat facts. Disenchant. BoE -> Greed.
+7. **[done] Loot manners.** (stat, armor-type and BoE facts from T7, Disenchant, `[Need rolled
+   by …]` on roll options, the loot policy never Needs against a human who did, RULES "grats" once;
+   `e2e_lootroll`) Main-spec, armor type and primary stat facts. Disenchant. BoE -> Greed.
    "grats" at most once. Never Need against something the human said they need.
 8. **Questing together.** Party objective progress on screen (`Help X with Y (3/8)`). An escort
    waits until everyone has the quest. A 40 yd stray check outdoors done in C++, without the LLM.
