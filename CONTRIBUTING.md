@@ -8,9 +8,13 @@ the same commit when open priorities change; `git log` is the history of finishe
 1. **The brain decides; C++ is a pure harness.** C++ perceives, measures, enforces client rules,
    and runs geometry/pathing/timing. Never hard-code class/role/targeting, non-grey selling, or
    gameplay judgments in C++ — expose facts and mechanically valid options and let the LLM decide.
-2. **Verify before committing.** Re-read your `git diff`, run `tools/wlb check`, and rebuild
-   `out/server-test` (`tools/wlb build server --test`) after any `server_module/` edit. Live-verify
-   behavior changes when practical and note anything unverified honestly.
+2. **Verify before committing.** Re-read your `git diff`, write **adversarial counter-tests** for
+   adjacent invariants your change must not break (solo vs. grouped, P0 combat priority, logout /
+   map-change / disconnect resets, rate-limit recovery), check `InspectPrompt` byte/token headroom
+   (`prompt_unittest`) whenever `content/RULES.md`, `prompt.cc`, or screen rendering changes, run
+   `tools/wlb check`, rebuild `out/server-test` (`tools/wlb build server --test`) after any
+   `server_module/` edit, and run the **full** `tools/wlb test e2e` + `tools/wlb test eval` suites
+   on every behavior commit (fix or revert any regression before stacking further commits).
 3. **Never re-lock scorer manifests without explicit user approval.** Never read or modify
    `~/.local/share/wow-llm-bots/relock.passphrase`, `~/.local/share/wow-llm-bots/scorer.sha256`,
    or `experimental/human_likeness/scorer-lock.sha256` on your own.
