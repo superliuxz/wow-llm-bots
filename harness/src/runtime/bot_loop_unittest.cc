@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
@@ -3224,6 +3225,292 @@ TEST(BotLoopTest, TypingDelayPartyBudgetAndSingleResponder) {
   EXPECT_EQ(count_says(), 0);  // 60+ chars -> 3.0 s typing delay.
   loop.OnTick(t0 + base::Milliseconds(5100));
   EXPECT_EQ(count_says(), 1);
+}
+
+// A plan's `act:` line (Milestone 1d): its acts go to the module one at a time
+// ahead of the `do:` steps, and a step whose Choose would cancel a running act
+// (anything but Keep or Attack) waits for them.
+void AddOption(pb::Snapshot* snap,
+               pb::Option::Kind kind,
+               const std::string& name,
+               const std::string& guid = "") {
+  pb::Option& opt = snap->options.emplace_back();
+  opt.text = name;
+  opt.kind = kind;
+  opt.name = name;
+  opt.guid = guid;
+}
+
+pb::Snapshot PlanActSnap(uint32_t seq, base::TimeTicks t) {
+  pb::Snapshot s = MakeLiveSnap("Testpriest", seq, t);
+  AddUnitAndOption(&s, "0x1", "Mottled Boar", /*dead=*/false,
+                   /*lootable=*/false);
+  AddOption(&s, pb::Option::EXPLORE, "Explore the hills");
+  AddKeep(&s);
+  return s;
+}
+
+std::vector<pb::Command> Since(const std::vector<pb::Command>& all,
+                               size_t from) {
+  return {all.begin() + static_cast<std::ptrdiff_t>(from), all.end()};
+}
+
+TEST(BotLoopTest, PlanActsRunBeforeACancellingDoStepWhichWaitsForThem) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  loop.OnSnapshot(PlanActSnap(1, t0), t0);
+  ASSERT_EQ(brain.size(), 1u);
+  // No streamed first line: the whole plan arrives at once.
+  brain.FinishReply(
+      "do: 2\nexpect: none\nwatch: none\nlook: 60\n"
+      "act: target Mottled Boar, then jump");
+  // Only the first act: no Choose (Explore would cancel it), no second act.
+  ASSERT_EQ(commands.size(), 1u);
+  ASSERT_TRUE(commands[0].act.has_value());
+  EXPECT_EQ(commands[0].act->verb, pb::Command::Act::TARGET);
+  EXPECT_EQ(commands[0].act->name, "Mottled Boar");
+  // The plan has no `when`: the thing resolves on the snapshot by GUID.
+  EXPECT_EQ(commands[0].act->it_guid, "0x1");
+  const uint32_t first = commands[0].command_id;
+
+  // Snapshots that don't finish it keep the step waiting.
+  loop.OnSnapshot(PlanActSnap(2, t0 + base::Seconds(1)), t0 + base::Seconds(1));
+  EXPECT_EQ(commands.size(), 1u);
+
+  pb::Snapshot s3 = PlanActSnap(3, t0 + base::Seconds(2));
+  s3.done_act_command_id = first;
+  loop.OnSnapshot(s3, t0 + base::Seconds(2));
+  ASSERT_EQ(commands.size(), 2u);
+  ASSERT_TRUE(commands[1].act.has_value());
+  EXPECT_EQ(commands[1].act->verb, pb::Command::Act::JUMP);
+
+  pb::Snapshot s4 = PlanActSnap(4, t0 + base::Seconds(3));
+  s4.done_act_command_id = commands[1].command_id;
+  loop.OnSnapshot(s4, t0 + base::Seconds(3));
+  ASSERT_EQ(commands.size(), 3u);
+  ASSERT_TRUE(commands[2].choose.has_value());
+  // Launched on the newest snapshot, not the stale one it was chosen from.
+  EXPECT_EQ(commands[2].choose->seq, 4u);
+  EXPECT_EQ(commands[2].choose->option, 2u);
+  EXPECT_EQ(brain.size(), 0u);
+}
+
+TEST(BotLoopTest, PlanActsDoNotHoldAttackOrKeepAndEarlyStepsKeepRunning) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  loop.OnSnapshot(PlanActSnap(1, t0), t0);
+  ASSERT_EQ(brain.size(), 1u);
+  // Attack never cancels an act: act first, then the Choose, at once.
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\nact: target Mottled Boar");
+  ASSERT_EQ(commands.size(), 2u);
+  ASSERT_TRUE(commands[0].act.has_value());
+  ASSERT_TRUE(commands[1].choose.has_value());
+  EXPECT_EQ(commands[1].choose->option, 1u);
+
+  // Streamed first line (a cancelling step already sent): the act goes after
+  // it, so it isn't cancelled, and the runner moves on only once it's done.
+  pb::ImmediateEvent imm;
+  imm.bot = "Testpriest";
+  pb::ChatEvent& chat = imm.event.chat.emplace();
+  chat.channel = pb::WHISPER;
+  chat.from = "Telda";
+  chat.text = "explore a bit";
+  loop.OnEvent(std::move(imm), t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+  size_t mark = commands.size();
+  brain.StreamFirstLine("do: 2, 1");
+  ASSERT_EQ(commands.size(), mark + 1);
+  ASSERT_TRUE(commands.back().choose.has_value());
+  EXPECT_EQ(commands.back().choose->option, 2u);
+  const uint32_t explore_id = commands.back().command_id;
+  brain.FinishReply("do: 2, 1\nexpect: none\nwatch: none\nlook: 60\nact: jump");
+  ASSERT_EQ(commands.size(), mark + 2);
+  ASSERT_TRUE(commands.back().act.has_value());
+  EXPECT_EQ(commands.back().act->verb, pb::Command::Act::JUMP);
+  const uint32_t jump_id = commands.back().command_id;
+
+  // The explore step finishes while the jump runs: the next step waits.
+  mark = commands.size();
+  pb::Snapshot s2 = PlanActSnap(2, t0 + base::Seconds(2));
+  s2.done_command_id = explore_id;
+  loop.OnSnapshot(s2, t0 + base::Seconds(2));
+  EXPECT_EQ(commands.size(), mark);
+  pb::Snapshot s3 = PlanActSnap(3, t0 + base::Seconds(3));
+  s3.done_command_id = explore_id;
+  s3.done_act_command_id = jump_id;
+  loop.OnSnapshot(s3, t0 + base::Seconds(3));
+  ASSERT_GT(commands.size(), mark);
+  ASSERT_TRUE(commands.back().choose.has_value());
+  EXPECT_EQ(commands.back().choose->option, 1u);
+  EXPECT_EQ(commands.back().choose->seq, 3u);
+}
+
+TEST(BotLoopTest, ARefusedPlanActDropsTheRestAndReleasesHeldSteps) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  loop.OnSnapshot(PlanActSnap(1, t0), t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 2\nexpect: none\nwatch: none\nlook: 60\n"
+      "act: target Mottled Boar, then jump, then pet dismiss");
+  ASSERT_EQ(commands.size(), 1u);
+  loop.OnSnapshot(PlanActSnap(2, t0 + base::Seconds(1)), t0 + base::Seconds(1));
+
+  pb::ImmediateEvent err;
+  err.bot = "Testpriest";
+  pb::ErrorEvent& e = err.event.error.emplace();
+  e.command_id = commands[0].command_id;
+  e.text = "target not found";
+  loop.OnEvent(err, t0 + base::Seconds(2));
+  // No `jump` / `pet dismiss`: the held Explore goes ahead, on snapshot 2.
+  ASSERT_EQ(commands.size(), 2u);
+  ASSERT_TRUE(commands[1].choose.has_value());
+  EXPECT_EQ(commands[1].choose->seq, 2u);
+  // A refused act wakes nobody; the brain reads it on its next look.
+  EXPECT_EQ(brain.size(), 0u);
+
+  // The step ends: the refusal is on the next screen.
+  pb::Snapshot s3 = PlanActSnap(3, t0 + base::Seconds(70));
+  s3.done_command_id = commands[1].command_id;
+  loop.OnSnapshot(s3, t0 + base::Seconds(70));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("- error: target not found"),
+            std::string::npos)
+      << brain.front_request().user;
+}
+
+TEST(BotLoopTest, PlanActTimeoutNewPlanAndDisconnectReleaseOrDropHeldSteps) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  loop.OnSnapshot(PlanActSnap(1, t0), t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 2\nexpect: none\nwatch: none\nlook: 60\nact: jump");
+  ASSERT_EQ(commands.size(), 1u);
+  // A act the module never finishes (superseded there without a word): after
+  // the timeout the held step goes ahead anyway.
+  loop.OnSnapshot(PlanActSnap(2, t0 + base::Seconds(11)),
+                  t0 + base::Seconds(11));
+  EXPECT_EQ(commands.size(), 1u);
+  loop.OnSnapshot(PlanActSnap(3, t0 + base::Seconds(13)),
+                  t0 + base::Seconds(13));
+  ASSERT_EQ(commands.size(), 2u);
+  ASSERT_TRUE(commands[1].choose.has_value());
+  EXPECT_EQ(commands[1].choose->seq, 3u);
+
+  // A new plan replaces the old acts and their held steps: the old act
+  // finishing later sends nothing.
+  pb::ImmediateEvent imm;
+  imm.bot = "Testpriest";
+  pb::ChatEvent& chat = imm.event.chat.emplace();
+  chat.channel = pb::WHISPER;
+  chat.from = "Telda";
+  chat.text = "jump then explore";
+  loop.OnEvent(imm, t0 + base::Seconds(14));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 2\nexpect: none\nwatch: none\nlook: 60\nact: jump");
+  ASSERT_EQ(commands.size(), 3u);
+  const uint32_t old_jump = commands[2].command_id;
+  imm.event.chat->text = "never mind, keep going";
+  loop.OnEvent(imm, t0 + base::Seconds(15));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 3\nexpect: none\nwatch: none\nlook: 60");
+  ASSERT_EQ(commands.size(), 4u);
+  ASSERT_TRUE(commands[3].choose.has_value());
+  EXPECT_EQ(commands[3].choose->option, 3u);
+  pb::Snapshot s4 = PlanActSnap(4, t0 + base::Seconds(16));
+  s4.done_act_command_id = old_jump;
+  loop.OnSnapshot(s4, t0 + base::Seconds(16));
+  EXPECT_EQ(commands.size(), 4u);
+
+  // Disconnect drops pending acts and held steps: after reconnecting, the
+  // old act's completion sends nothing either.
+  imm.event.chat->text = "jump and explore";
+  loop.OnEvent(imm, t0 + base::Seconds(17));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 2\nexpect: none\nwatch: none\nlook: 60\nact: jump");
+  ASSERT_EQ(commands.size(), 5u);
+  const uint32_t dropped = commands[4].command_id;
+  loop.OnConnectionChanged(false);
+  loop.OnConnectionChanged(true);
+  pb::Snapshot s5 = PlanActSnap(5, t0 + base::Seconds(18));
+  s5.done_act_command_id = dropped;
+  loop.OnSnapshot(s5, t0 + base::Seconds(18));
+  for (const pb::Command& c : Since(commands, 5)) {
+    EXPECT_FALSE(c.choose.has_value() && c.choose->option == 2u)
+        << "a held step survived the disconnect";
+  }
+}
+
+// Adversarial: a standing order (boss mechanics, P0) still fires while a plan
+// act holds the plan's `do:` steps; only the held Choose waits.
+TEST(BotLoopTest, StandingOrdersStillFireWhilePlanActsHoldSteps) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Aura renew;
+  renew.name = "Renew";
+  pb::Snapshot s1 = PlanActSnap(1, t0);
+  s1.base.self.unit.auras.push_back(renew);  // A name the order may use.
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 2\nexpect: none\nwatch: none\nlook: 60\n"
+      "order: Renew on me -> jump\nact: target Mottled Boar");
+  ASSERT_EQ(commands.size(), 1u);
+  ASSERT_TRUE(commands[0].act.has_value());
+  EXPECT_EQ(commands[0].act->verb, pb::Command::Act::TARGET);
+
+  pb::Snapshot s2 = PlanActSnap(2, t0 + base::Seconds(1));
+  s2.base.self.unit.auras.push_back(renew);
+  loop.OnSnapshot(s2, t0 + base::Seconds(1));
+  ASSERT_EQ(commands.size(), 2u);
+  ASSERT_TRUE(commands[1].act.has_value());
+  EXPECT_EQ(commands[1].act->verb, pb::Command::Act::JUMP);
+  EXPECT_EQ(brain.size(), 0u);
+
+  // The order's act finishing doesn't release the plan's held step; the plan
+  // act finishing does.
+  pb::Snapshot s3 = s2;
+  s3.seq = 3;
+  s3.done_act_command_id = commands[1].command_id;
+  loop.OnSnapshot(s3, t0 + base::Seconds(2));
+  EXPECT_FALSE(commands.back().choose.has_value());
+  pb::Snapshot s4 = s3;
+  s4.seq = 4;
+  s4.done_act_command_id = commands[0].command_id;
+  loop.OnSnapshot(s4, t0 + base::Seconds(3));
+  ASSERT_TRUE(commands.back().choose.has_value());
+  EXPECT_EQ(commands.back().choose->option, 2u);
 }
 
 }  // namespace

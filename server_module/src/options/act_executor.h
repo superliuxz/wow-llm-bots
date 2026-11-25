@@ -1,14 +1,16 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
-// Executes standing-order acts (`Command::Act`) on the world thread for the
-// first verbs (`to`, `away`, `target`, `use`, `stop`, `wake`), resolving
-// targets and relative places against live world state with ground, LoS, and
-// path checks, and recomputing relative spots while a movement step runs.
+// Executes standing-order and plan acts (`Command::Act`) on the world thread,
+// resolving targets and relative places (or the party's minimap ping) against
+// live world state with ground, LoS, and path checks, recomputing relative
+// spots while a movement step runs, and walking a `use` into its spell's range
+// and line of sight first.
 
 #ifndef MOD_LLM_BRAIN_OPTIONS_ACT_EXECUTOR_H_
 #define MOD_LLM_BRAIN_OPTIONS_ACT_EXECUTOR_H_
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 #include "base/time/time.h"
@@ -59,6 +61,17 @@ struct ActiveAct {
   uint32_t cast_mana_before = 0;
   bool cast_cd_before = false;
   base::TimeTicks cast_expected_end;
+  // For `use <spell>` out of range or sight: walking in (2 yd inside the
+  // spell's max range, with line of sight) before the cast, after entering
+  // stealth first for a spell usable only in stealth. The target is a unit
+  // (`approach_target_guid`) or the ping's spot (`approach_spot`).
+  bool approach_cast = false;
+  uint32_t approach_spell_id = 0;
+  uint64_t approach_target_guid = 0;
+  std::optional<wlb::snapshot::Vec3> approach_spot;
+  float approach_closer_yd = 0.0f;
+  uint32_t stealth_spell_id = 0;
+  base::TimeTicks stealth_started_at;
 };
 
 struct ActStartResult {

@@ -1023,6 +1023,7 @@ def _case_human_party():
 
     import http.server
     import json
+    import math
     import os
     import re
     import subprocess
@@ -1074,6 +1075,14 @@ def _case_human_party():
                              "watch: none", "look: 300"]
                     if f"party from {HUMAN}" in woken:
                         lines.append(f"party: {bot} here")
+                    # Milestone 1d: Loada answers the boss emote by going to the ping
+                    # on its screen (a plan `act:` line, sent ahead of its `do:`).
+                    if bot == "Loada" and "roars at the party" in woken and "\nping: " in text:
+                        lines.append("act: to ping")
+                    # ... and `use` walks into the spell's range before casting.
+                    if (bot == "Loadb" and f"party from {HUMAN}" in woken
+                            and "loadb fort me please" in text):
+                        lines.append("act: use Power Word: Fortitude on leader")
                     reply = json.dumps({
                         "choices": [{"message": {"content": "\n".join(lines)}}],
                         "usage": {"prompt_tokens": 100, "completion_tokens": 20},
@@ -1249,6 +1258,99 @@ def _case_human_party():
                     ping_on_screen = any(t >= since_emote and f"\nping: {HUMAN} pinged " in txt
                                          for t, _, txt in brain.prompts)
 
+                # 7 (Milestone 1d). Loada's plan `act: to ping` walks it to the ping, and it
+                # holds there (playerbots' `stay`) while its leader is near; the other bots
+                # keep following; "follow me" ends the hold.
+                ping_spot = (lpos["x"], lpos["y"] + 12.0)
+
+                def to_ping_cmd():
+                    with proxy.lock:
+                        return next((c for t, c in proxy.commands
+                                     if t >= since_emote and c.get("bot") == "Loada"
+                                     and (c.get("act") or {}).get("verb") == "TO"
+                                     and (c.get("act") or {}).get("thing") == "PING"), None)
+                ping_cmd = _poll(to_ping_cmd, 20, "Loada's plan act `to ping`")
+
+                def loada_at_ping():
+                    with proxy.lock:
+                        snaps = [s for t, s in proxy.snapshots
+                                 if s.get("bot") == "Loada" and t >= since_emote]
+                    for s in reversed(snaps):
+                        pos = s["base"]["where"]["position"]
+                        if math.dist((pos["x"], pos["y"]), ping_spot) <= 4.0:
+                            return s
+                    return None
+                _poll(loada_at_ping, 20, "Loada reaching the ping")
+                with proxy.lock:
+                    act_done = any(s.get("bot") == "Loada"
+                                   and s.get("done_act_command_id") == ping_cmd["command_id"]
+                                   for _, s in proxy.snapshots)
+                held_at_ping = bool(_poll(lambda: stays("Loada"), 5,
+                                          "Loada holding at the ping"))
+                others_follow = [b for b in ("Loadb", "Loadc") if stays(b)]
+                time.sleep(2.0)
+                with proxy.lock:
+                    last = [s for _, s in proxy.snapshots if s.get("bot") == "Loada"][-1]
+                lp = last["base"]["where"]["position"]
+                still_at_ping = math.dist((lp["x"], lp["y"]), ping_spot) <= 5.0
+                client.say(wowclient.CHAT_MSG_PARTY, "follow me")
+                _poll(lambda: stays("Loada") is False, 5, "Loada following after 'follow me'")
+
+                # 8 (Milestone 1d). `use` walks into the spell's range first: Loadb waits
+                # 60+ yd from its leader (Power Word: Fortitude reaches 30), is told to
+                # fort the leader, walks to 2 yd inside that range and casts. (Not a heal:
+                # playerbots cancels a heal on a full-health target.)
+                def human_in(snap):
+                    ext_party = ((snap.get("ext") or {}).get("party") or {}).get("members", [])
+                    units = ((snap.get("base") or {}).get("nearby") or {}).get("units", [])
+                    return next((u for u in list(ext_party) + list(units)
+                                 if u.get("name") == HUMAN), None)
+
+                def latest(bot, after=0.0):
+                    with proxy.lock:
+                        return next((s for t, s in reversed(proxy.snapshots)
+                                     if s.get("bot") == bot and t >= after), None)
+                server.console("llmtest learn Loadb 1243", wait_s=0.5, inst=TEST)
+                client.say(wowclient.CHAT_MSG_PARTY, "wait here")
+                _poll(lambda: stays("Loadb"), 5, "Loadb staying after 'wait here'")
+                hpos = human_in(latest("Loadb"))["rel"]["position"]
+                # The stray spot of step 5 (its ground height is known): 60+ yd away.
+                server.console("llmtest tele Loadb 0 -8880 -132.5 82 0", wait_s=1.0, inst=TEST)
+                since_tele = time.monotonic()
+
+                def loadb_far():
+                    s = latest("Loadb", since_tele)
+                    pos = s and s["base"]["where"]["position"]
+                    return pos and math.dist((pos["x"], pos["y"]), (hpos["x"], hpos["y"])) > 31.0
+                _poll(loadb_far, 10, "Loadb waiting out of Power Word: Fortitude's range")
+                since_fort = time.monotonic()
+                client.say(wowclient.CHAT_MSG_PARTY, "loadb fort me please")
+
+                def fort_cmd():
+                    with proxy.lock:
+                        return next((c for t, c in proxy.commands
+                                     if t >= since_fort and c.get("bot") == "Loadb"
+                                     and (c.get("act") or {}).get("verb") == "USE"), None)
+                fort = _poll(fort_cmd, 20, "Loadb's plan act `use Power Word: Fortitude`")
+
+                def fort_done():
+                    with proxy.lock:
+                        return next((s for _, s in proxy.snapshots
+                                     if s.get("bot") == "Loadb"
+                                     and s.get("done_act_command_id") == fort["command_id"]),
+                                    None)
+                done_snap = _poll(fort_done, 25,
+                                  "Loadb walking in and casting Power Word: Fortitude")
+                with proxy.lock:
+                    fort_errs = [e["event"]["error"] for _, e in proxy.events
+                                 if (e.get("event", {}).get("error") or {}).get("command_id")
+                                 == fort["command_id"]]
+
+                bpos = done_snap["base"]["where"]["position"]
+                fort_dist = math.dist((bpos["x"], bpos["y"]), (hpos["x"], hpos["y"]))
+                client.say(wowclient.CHAT_MSG_PARTY, "follow me")
+                _poll(lambda: not any(stays(b) for b in BOTS), 5, "every bot following again")
+
                 # 6. Leaving the group takes the ping off the minimap at once.
                 before_ungroup = pings_of("Loadc", since_emote)
                 pinged_before_ungroup = bool(before_ungroup and before_ungroup[-1][2])
@@ -1292,9 +1394,18 @@ def _case_human_party():
         expect(pinged_before_ungroup, "Loadc had no fresh ping just before leaving the group")
         expect(not ungrouped_pings, f"Loadc kept a ping after leaving the group: "
                f"{ungrouped_pings}")
+        expect(act_done, f"Loada's `to ping` act {ping_cmd} never finished")
+        expect(held_at_ping and still_at_ping,
+               f"Loada didn't hold at the ping (stay={held_at_ping}, at={lp})")
+        expect(not others_follow, f"bots without the act stopped following: {others_follow}")
+        expect(not fort_errs, f"Loadb's walk-in cast was refused: {fort_errs}")
+        # 30 yd range, edge to edge (+ ~3 yd of combat reach): 2 yd inside it.
+        expect(fort_dist <= 31.5, f"Loadb cast Power Word: Fortitude from {fort_dist:.1f} yd")
         return (f"3 bots accepted, master={HUMAN} for all; one party reply ({replies[0]!r}); "
                 "'wait here' / 'loadb follow' / 'follow me' applied in C++; quest help shown; "
                 "stray follower came back; boss emote woke the bots; minimap pings shown "
+                "(`act: to ping` walked Loada there and held it; `use` walked Loadb into "
+                "range first) "
                 f"({rel.get('dist_yd', 0):.0f} yd {rel.get('dir')}), not to self, gone on ungroup")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 

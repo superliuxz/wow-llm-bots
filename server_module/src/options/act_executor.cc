@@ -39,6 +39,7 @@
 #include "Opcodes.h"
 #include "PathGenerator.h"
 #include "Pet.h"
+#include "PetDefines.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
 #include "Playerbots.h"
@@ -56,6 +57,7 @@
 #include "World.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "bot_session.h"
@@ -264,6 +266,38 @@ Creature* ResolveHiddenTriggerByGuid(
   return trigger;
 }
 
+// The party's minimap ping as a move anchor: a point on the ground (no
+// radius, no facing), or nullopt while there is none to use.
+std::optional<AnchorGeometry> PingAnchor(Player* bot) {
+  const std::optional<PartyPingSpot> ping = CurrentPartyPing(bot);
+  if (!ping) {
+    return std::nullopt;
+  }
+  AnchorGeometry g;
+  g.pos = {ping->x, ping->y, ping->z};
+  return g;
+}
+
+bool IsToPing(const pb::Command_Act& act) {
+  return act.verb == pb::Command_Act::TO && act.thing == pb::Command_Act::PING;
+}
+
+// Starts (where the bot stands, on arriving at the ping) or ends the bot's
+// `to ping` hold (BotSession::ping_stay, BotManager::PingStayHolds).
+void SetPingStay(Player* bot, bool hold) {
+  std::optional<BotSession::PingStay> stay;
+  if (hold) {
+    stay = BotSession::PingStay{.map_id = bot->GetMapId(),
+                                .instance_id = bot->GetInstanceId(),
+                                .x = bot->GetPositionX(),
+                                .y = bot->GetPositionY(),
+                                .z = bot->GetPositionZ()};
+  }
+  BotSessionRegistry::Instance().WithSession(
+      bot->GetGUID().GetRawValue(),
+      [&stay](BotSession& s) { s.ping_stay = stay; });
+}
+
 // Resolves a `Command_Act::ThingKind` to a live `WorldObject*` (unit, object,
 // or dynamic area) in the world.
 WorldObject* ResolveThing(Player* bot,
@@ -272,6 +306,9 @@ WorldObject* ResolveThing(Player* bot,
                           bool allow_hidden_triggers = false) {
   // Prefer the exact GUID chosen by the harness when present so condition
   // evaluation and act execution always land on the same world entity.
+  if (act.thing == pb::Command_Act::PING) {
+    return nullptr;  // A spot on the ground, never a unit (PingAnchor).
+  }
   if (act.thing != pb::Command_Act::THING_UNSPECIFIED &&
       act.thing != pb::Command_Act::ME && act.thing != pb::Command_Act::FOCUS &&
       !act.it_guid.empty()) {
@@ -298,6 +335,7 @@ WorldObject* ResolveThing(Player* bot,
   }
   switch (act.thing) {
     case pb::Command_Act::THING_UNSPECIFIED:
+    case pb::Command_Act::PING:
       return nullptr;
     case pb::Command_Act::ME:
       return bot;
@@ -1214,6 +1252,10 @@ bool StartReturnToInterrupted(Player* bot,
 // hostile dynamic area if standing near one, otherwise `bot`'s current spot.
 std::optional<AnchorGeometry> ResolveMoveAnchor(Player* bot,
                                                 const pb::Command_Act& act) {
+  // `ping` is a spot, whatever unit an order's `when` bound to `it`.
+  if (act.thing == pb::Command_Act::PING) {
+    return PingAnchor(bot);
+  }
   if (!act.it_guid.empty()) {
     if (std::optional<HazardInfo> th = ResolveTriggerHazard(bot, act)) {
       return th->anchor;
@@ -1276,6 +1318,329 @@ bool PlaceNeedsLos(pb::Command_Act::PlaceKind place) {
 
 bool PlaceCaresAboutFacing(pb::Command_Act::PlaceKind place) {
   return place == pb::Command_Act::BEHIND || place == pb::Command_Act::IN_FRONT;
+}
+
+// How long a stealth cast may take to put its aura on before a spell usable
+// only in stealth gives up.
+constexpr base::TimeDelta kStealthSettleTime = base::Milliseconds(1500);
+// A `use` walks to this far inside its spell's max range.
+constexpr float kCastRangeMarginYd = 2.0f;
+
+// Keeps playerbots' own movement (follow, back to a `stay` spot) off the bot
+// for `ms` (MOVEMENT_FORCED where it stands), e.g. while it casts.
+void HoldStill(Player* bot, float ms) {
+  if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot)) {
+    if (auto* last = ai->GetAiObjectContext()->GetValue<LastMovement&>(
+            "last movement")) {
+      last->Get().Set(bot->GetMapId(), bot->GetPositionX(), bot->GetPositionY(),
+                      bot->GetPositionZ(), bot->GetOrientation(), ms,
+                      MovementPriority::MOVEMENT_FORCED);
+    }
+  }
+}
+
+// Casts `spell` like a player's click (CMSG_CAST_SPELL): at `spot` (a ground
+// spell on the ping), on the ground under `cast_target` (a ground spell on a
+// unit), or on `cast_target`. A cast-time spell fills `*out_active` to wait
+// for it.
+ActStartResult CastSpellNow(Player* bot,
+                            uint32_t command_id,
+                            const pb::Command_Act& act,
+                            const SpellInfo* spell,
+                            Unit* cast_target,
+                            const std::optional<pb::Vec3>& spot,
+                            base::TimeTicks now,
+                            ActiveAct* out_active) {
+  // A spell with a cast time can't be cast on the move (the client stops
+  // first); the bot then stands still until it lands.
+  const uint32_t cast_time_ms = spell->CalcCastTime(bot);
+  if (cast_time_ms > 0 && bot->isMoving() && CanClearBotMovement(bot)) {
+    bot->StopMoving();
+    bot->GetMotionMaster()->Clear();
+  }
+  const CastBeforeState before = CaptureCastBefore(bot, spell, cast_target);
+  WorldPacket p(CMSG_CAST_SPELL);
+  p << static_cast<uint8_t>(0) << spell->Id << static_cast<uint8_t>(0);
+  SpellCastTargets targets;
+  if (spot) {
+    targets.SetDst(spot->x, spot->y, spot->z, bot->GetOrientation(),
+                   bot->GetMapId());
+  } else if ((spell->GetExplicitTargetMask() & TARGET_FLAG_DEST_LOCATION) !=
+             0) {
+    targets.SetDst(*cast_target);
+  } else {
+    targets.SetUnitTarget(cast_target);
+  }
+  targets.Write(p);
+  p.rpos(0);
+  bot->GetSession()->HandleCastSpellOpcode(p);
+  if (!CastStartedAfter(bot, spell, cast_target, before)) {
+    return {.error = "cannot cast " + act.name + " now"};
+  }
+  if (!IsCurrentlyCastingSpell(bot, spell->Id)) {
+    return {.done = true};
+  }
+  const pb::Command_Act act_copy = act;
+  out_active->command_id = command_id;
+  out_active->map_id = bot->GetMapId();
+  out_active->instance_id = bot->GetInstanceId();
+  out_active->act = act_copy;
+  out_active->approach_cast = false;
+  out_active->waiting_cast = true;
+  out_active->cast_spell_id = spell->Id;
+  out_active->cast_mana_before = before.mana;
+  out_active->cast_cd_before = before.on_cd;
+  int32_t cast_ms = 0;
+  if (Spell* cur = bot->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+      cur && cur->GetSpellInfo() && cur->GetSpellInfo()->Id == spell->Id) {
+    cast_ms = cur->GetCastTime();
+  } else if (Spell* ch = bot->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
+             ch && ch->GetSpellInfo() && ch->GetSpellInfo()->Id == spell->Id) {
+    cast_ms = ch->GetCastTime();
+  }
+  out_active->cast_expected_end =
+      now + base::Milliseconds(std::max<int32_t>(0, cast_ms));
+  if (cast_ms > 0) {
+    // Playerbots' own walks (follow, back to a `stay` spot) would interrupt
+    // it: the cast owns the body until it lands.
+    HoldStill(bot, static_cast<float>(cast_ms) + 500.0f);
+  }
+  return {.done = false};
+}
+
+// A known spell that puts a stealth aura on the bot (Spell.dbc: the aura,
+// not a list of spells) and that moving doesn't break, highest rank first;
+// nullptr when it knows none ready.
+const SpellInfo* FindStealthSpell(Player* bot) {
+  const SpellInfo* best = nullptr;
+  for (const auto& [spell_id, player_spell] : bot->GetSpellMap()) {
+    if (!player_spell || player_spell->State == PLAYERSPELL_REMOVED ||
+        !player_spell->Active) {
+      continue;
+    }
+    const SpellInfo* info = sSpellMgr->GetSpellInfo(spell_id);
+    if (!info || info->IsPassive() || !info->HasAura(SPELL_AURA_MOD_STEALTH) ||
+        (info->AuraInterruptFlags & AURA_INTERRUPT_FLAG_MOVE) != 0 ||
+        bot->HasSpellCooldown(info->Id)) {
+      continue;
+    }
+    if (!best || info->GetRank() > best->GetRank()) {
+      best = info;
+    }
+  }
+  return best;
+}
+
+// Where `spell` reaches from: whether the bot can cast it on `target` (or at
+// `spot`) from where it stands, and the anchor to walk towards otherwise.
+struct SpellReach {
+  bool in_reach = true;
+  float max_range_yd = 0.0f;
+  AnchorGeometry anchor;
+};
+
+// `margin_yd`: how far inside the range counts (a walk in goes
+// kCastRangeMarginYd inside, so a target stepping back doesn't break the
+// cast; standing still, anything in range does).
+SpellReach SpellReachFor(Player* bot,
+                         const SpellInfo* spell,
+                         Unit* target,
+                         const std::optional<pb::Vec3>& spot,
+                         float margin_yd) {
+  SpellReach reach;
+  if (!spot && (!target || target == bot)) {
+    return reach;
+  }
+  const bool positive = !spot && bot->IsFriendlyTo(target);
+  reach.max_range_yd = spell->GetMaxRange(positive, bot);
+  if (reach.max_range_yd <= 0.0f) {
+    return reach;
+  }
+  const bool ignores_los =
+      spell->HasAttribute(SPELL_ATTR2_IGNORE_LINE_OF_SIGHT);
+  float dist = 0.0f;
+  bool los = true;
+  if (spot) {
+    reach.anchor.pos = *spot;
+    dist = bot->GetDistance(spot->x, spot->y, spot->z);
+    los = ignores_los || bot->IsWithinLOS(spot->x, spot->y, spot->z + 1.0f);
+  } else {
+    reach.anchor = AnchorOf(target);
+    dist = bot->GetDistance(target);
+    los = ignores_los || bot->IsWithinLOSInMap(target);
+  }
+  reach.in_reach = los && dist <= reach.max_range_yd - margin_yd;
+  return reach;
+}
+
+// Spots `kCastRangeMarginYd` (plus `closer_yd`) inside `reach`'s range, in
+// sight of its anchor. The range is taken centre to centre (whatever the
+// server adds for combat reach, this is inside it).
+std::optional<pb::Vec3> MoveIntoSpellReach(Player* bot,
+                                           const SpellInfo* spell,
+                                           const SpellReach& reach,
+                                           float closer_yd = 0.0f) {
+  const float yd =
+      std::max(1.0f, reach.max_range_yd - kCastRangeMarginYd - closer_yd -
+                         bot->GetCombatReach() - reach.anchor.radius_yd);
+  const std::vector<pb::Vec3> candidates =
+      CandidateSpotsForPlace(pb::Command_Act::YD_FROM, PosOf(bot), reach.anchor,
+                             yd, yd, bot->GetCombatReach());
+  const bool ignores_los =
+      spell->HasAttribute(SPELL_ATTR2_IGNORE_LINE_OF_SIGHT);
+  return MoveToFirstValidSpot(bot, candidates,
+                              ignores_los ? nullptr : &reach.anchor);
+}
+
+// Uses a known spell the way a player has to (pure Spell.dbc facts): a spell
+// usable only in stealth enters stealth first, and a target or spot out of
+// range or sight is walked into range before the cast.
+ActStartResult StartSpellUse(Player* bot,
+                             uint32_t command_id,
+                             const pb::Command_Act& act,
+                             const SpellInfo* spell,
+                             Unit* cast_target,
+                             const std::optional<pb::Vec3>& spot,
+                             base::TimeTicks now,
+                             ActiveAct* out_active) {
+  uint32_t stealth_id = 0;
+  if (spell->HasAttribute(SPELL_ATTR0_ONLY_STEALTHED) &&
+      !bot->HasStealthAura()) {
+    const SpellInfo* stealth = FindStealthSpell(bot);
+    if (!stealth) {
+      return {.error = act.name + " needs stealth"};
+    }
+    const CastBeforeState before = CaptureCastBefore(bot, stealth, bot);
+    WorldPacket p(CMSG_CAST_SPELL);
+    p << static_cast<uint8_t>(0) << stealth->Id << static_cast<uint8_t>(0);
+    SpellCastTargets targets;
+    targets.SetUnitTarget(bot);
+    targets.Write(p);
+    p.rpos(0);
+    bot->GetSession()->HandleCastSpellOpcode(p);
+    if (!bot->HasStealthAura() &&
+        !CastStartedAfter(bot, stealth, bot, before)) {
+      return {.error = base::StrCat({act.name, " needs stealth: cannot use ",
+                                     SpellLocalizedName(stealth), " now"})};
+    }
+    stealth_id = stealth->Id;
+  }
+  const SpellReach reach =
+      SpellReachFor(bot, spell, cast_target, spot, /*margin_yd=*/0.5f);
+  if (reach.in_reach && stealth_id == 0) {
+    return CastSpellNow(bot, command_id, act, spell, cast_target, spot, now,
+                        out_active);
+  }
+  // Walk in (or, in reach, just let the stealth settle) and cast from
+  // StepActiveAct.
+  pb::Vec3 dest = PosOf(bot);
+  if (!reach.in_reach) {
+    std::optional<pb::Vec3> chosen = MoveIntoSpellReach(bot, spell, reach);
+    if (!chosen) {
+      return {.error = "no path into range for " + act.name};
+    }
+    dest = *chosen;
+  }
+  out_active->command_id = command_id;
+  out_active->map_id = bot->GetMapId();
+  out_active->instance_id = bot->GetInstanceId();
+  out_active->act = act;
+  out_active->dest = dest;
+  out_active->last_anchor = reach.anchor;
+  out_active->last_repath_at = now;
+  out_active->waiting_cast = false;
+  out_active->approach_cast = true;
+  out_active->approach_spell_id = spell->Id;
+  out_active->approach_target_guid =
+      spot ? 0 : cast_target->GetGUID().GetRawValue();
+  out_active->approach_spot = spot;
+  out_active->stealth_spell_id = stealth_id;
+  out_active->stealth_started_at = now;
+  return {.done = false};
+}
+
+// One tick of a `use` walking into its spell's reach (StartSpellUse).
+ActStepResult StepSpellApproach(Player* bot,
+                                base::TimeTicks now,
+                                ActiveAct* active) {
+  const SpellInfo* spell = sSpellMgr->GetSpellInfo(active->approach_spell_id);
+  if (!spell || !bot->HasSpell(spell->Id)) {
+    ClearActMovement(bot);
+    return {.error = "you don't know that spell"};
+  }
+  Unit* target = bot;
+  if (!active->approach_spot) {
+    target =
+        ObjectAccessor::GetUnit(*bot, ObjectGuid(active->approach_target_guid));
+    if (!target || !IsVisibleToBot(bot, target)) {
+      ClearActMovement(bot);
+      return {.error = "spell target is gone"};
+    }
+  }
+  if (spell->HasAttribute(SPELL_ATTR0_ONLY_STEALTHED) &&
+      !bot->HasStealthAura()) {
+    if (active->stealth_spell_id == 0 ||
+        (!IsCurrentlyCastingSpell(bot, active->stealth_spell_id) &&
+         now - active->stealth_started_at >= kStealthSettleTime)) {
+      ClearActMovement(bot);
+      return {.error = active->act.name + " needs stealth: stealth broke"};
+    }
+    return {};  // The stealth cast hasn't put its aura on yet.
+  }
+  const SpellReach reach = SpellReachFor(
+      bot, spell, target, active->approach_spot, kCastRangeMarginYd);
+  if (reach.in_reach) {
+    if (bot->isMoving() && CanClearBotMovement(bot)) {
+      bot->StopMoving();
+      bot->GetMotionMaster()->Clear();
+    }
+    HoldStill(bot, 1000.0f);
+    if (bot->GetGlobalCooldownMgr().HasGlobalCooldown(spell) ||
+        bot->HasSpellCooldown(spell->Id)) {
+      if (bot->HasSpellCooldown(spell->Id) &&
+          !bot->GetGlobalCooldownMgr().HasGlobalCooldown(spell)) {
+        return {.error = active->act.name + " is on cooldown"};
+      }
+      return {};  // Wait out the global cooldown (the stealth's, say).
+    }
+    const pb::Command_Act act = active->act;
+    const std::optional<pb::Vec3> spot = active->approach_spot;
+    active->approach_cast = false;
+    const ActStartResult r = CastSpellNow(bot, active->command_id, act, spell,
+                                          target, spot, now, active);
+    if (!r.error.empty()) {
+      return {.error = r.error};
+    }
+    return {.done = r.done};
+  }
+  if (now - active->last_repath_at < kRepathInterval) {
+    return {};
+  }
+  const bool arrived = Dist2D(PosOf(bot), active->dest) <= kArrivalToleranceYd;
+  if (bot->isMoving() && !arrived &&
+      !AnchorMovedSignificantly(active->last_anchor, reach.anchor,
+                                /*cares_facing=*/false)) {
+    return {};
+  }
+  active->last_repath_at = now;
+  if (arrived) {
+    // Got there and still out of reach (sight, or a range measured another
+    // way): the next spot is closer.
+    active->approach_closer_yd += kCastRangeMarginYd;
+    if (active->approach_closer_yd > reach.max_range_yd) {
+      ClearActMovement(bot);
+      return {.error = "cannot get into range for " + active->act.name};
+    }
+  }
+  std::optional<pb::Vec3> chosen =
+      MoveIntoSpellReach(bot, spell, reach, active->approach_closer_yd);
+  if (!chosen) {
+    ClearActMovement(bot);
+    return {.error = "no path into range for " + active->act.name};
+  }
+  active->dest = *chosen;
+  active->last_anchor = reach.anchor;
+  return {};
 }
 
 }  // namespace
@@ -1361,7 +1726,14 @@ ActStartResult StartAct(Player* bot,
 
     case pb::Command_Act::USE: {
       Unit* target = nullptr;
-      if (act.thing != pb::Command_Act::THING_UNSPECIFIED) {
+      std::optional<pb::Vec3> spot;
+      if (act.thing == pb::Command_Act::PING) {
+        const std::optional<AnchorGeometry> ping = PingAnchor(bot);
+        if (!ping) {
+          return {.error = "no minimap ping to use " + act.name + " on"};
+        }
+        spot = ping->pos;
+      } else if (act.thing != pb::Command_Act::THING_UNSPECIFIED) {
         const std::string_view thing_name =
             !act.target_name.empty() ? act.target_name : act.name;
         WorldObject* obj = ResolveThing(bot, act, thing_name);
@@ -1377,7 +1749,11 @@ ActStartResult StartAct(Player* bot,
         if (bot->HasSpellCooldown(spell->Id)) {
           return {.error = act.name + " is on cooldown"};
         }
-        Unit* cast_target = target ? target : bot;
+        if (spot &&
+            (spell->GetExplicitTargetMask() & TARGET_FLAG_DEST_LOCATION) == 0) {
+          return {.error = act.name + " is not cast on the ground"};
+        }
+        Unit* cast_target = spot ? bot : (target ? target : bot);
         // Match WoW auto-self-cast: when no `on <target>` was given and a
         // helpful spell is cast while an enemy is selected, cast it on self.
         if (act.thing == pb::Command_Act::THING_UNSPECIFIED &&
@@ -1385,48 +1761,13 @@ ActStartResult StartAct(Player* bot,
             !bot->IsFriendlyTo(cast_target)) {
           cast_target = bot;
         }
-        const CastBeforeState before =
-            CaptureCastBefore(bot, spell, cast_target);
-        WorldPacket p(CMSG_CAST_SPELL);
-        p << static_cast<uint8_t>(0) << spell->Id << static_cast<uint8_t>(0);
-        SpellCastTargets targets;
-        if ((spell->GetExplicitTargetMask() & TARGET_FLAG_DEST_LOCATION) != 0) {
-          targets.SetDst(*cast_target);
-        } else {
-          targets.SetUnitTarget(cast_target);
-        }
-        targets.Write(p);
-        p.rpos(0);
-        bot->GetSession()->HandleCastSpellOpcode(p);
-        if (!CastStartedAfter(bot, spell, cast_target, before)) {
-          return {.error = "cannot cast " + act.name + " now"};
-        }
-        if (IsCurrentlyCastingSpell(bot, spell->Id)) {
-          out_active->command_id = command_id;
-          out_active->map_id = bot->GetMapId();
-          out_active->instance_id = bot->GetInstanceId();
-          out_active->act = act;
-          out_active->waiting_cast = true;
-          out_active->cast_spell_id = spell->Id;
-          out_active->cast_mana_before = before.mana;
-          out_active->cast_cd_before = before.on_cd;
-          int32_t cast_ms = 0;
-          if (Spell* cur = bot->GetCurrentSpell(CURRENT_GENERIC_SPELL);
-              cur && cur->GetSpellInfo() &&
-              cur->GetSpellInfo()->Id == spell->Id) {
-            cast_ms = cur->GetCastTime();
-          } else if (Spell* ch = bot->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
-                     ch && ch->GetSpellInfo() &&
-                     ch->GetSpellInfo()->Id == spell->Id) {
-            cast_ms = ch->GetCastTime();
-          }
-          out_active->cast_expected_end =
-              now + base::Milliseconds(std::max<int32_t>(0, cast_ms));
-          return {.done = false};
-        }
-        return {.done = true};
+        return StartSpellUse(bot, command_id, act, spell, cast_target, spot,
+                             now, out_active);
       }
 
+      if (spot) {
+        return {.error = "unknown spell: " + act.name};
+      }
       if (std::optional<BagSlotItem> found = FindBagItemByName(bot, act.name)) {
         Item* item = found->item;
         const ItemTemplate* proto = item->GetTemplate();
@@ -1570,7 +1911,14 @@ ActStartResult StartAct(Player* bot,
     case pb::Command_Act::AWAY: {
       std::optional<AnchorGeometry> anchor = ResolveMoveAnchor(bot, act);
       if (!anchor) {
-        return {.error = "destination not found"};
+        return {.error = act.thing == pb::Command_Act::PING
+                             ? "no minimap ping to go to"
+                             : "destination not found"};
+      }
+      if (act.verb == pb::Command_Act::TO) {
+        // Going anywhere ends a `to ping` hold (a new one starts on arrival:
+        // playerbots' `stay` would stop the walk there).
+        SetPingStay(bot, false);
       }
       const pb::Vec3 bot_pos = PosOf(bot);
       const float bot_reach = bot->GetCombatReach();
@@ -1598,10 +1946,12 @@ ActStartResult StartAct(Player* bot,
               : CandidateSpotsForAway(bot_pos, *anchor, away_yd, bot_reach);
       if (candidates.empty()) {
         // Already far enough away.
+        SetPingStay(bot, IsToPing(act));
         return {.done = true};
       }
       // Already at the ideal destination.
       if (Dist2D(bot_pos, candidates.front()) <= kArrivalToleranceYd) {
+        SetPingStay(bot, IsToPing(act));
         return {.done = true};
       }
       const AnchorGeometry* los_anchor =
@@ -1914,6 +2264,31 @@ ActStartResult StartAct(Player* bot,
           spell_id = REACT_DEFENSIVE;
           flag = ACT_REACTION;
           break;
+        case pb::Command_Act::DISMISS: {
+          // The client's Dismiss: a spell with the dismiss-pet effect when the
+          // bot knows one (a hunter's Dismiss Pet: the pet bar's abandon
+          // would delete a hunter's pet for good), else the pet bar's
+          // dismiss (a summoned demon, a guardian).
+          for (const auto& [id, player_spell] : bot->GetSpellMap()) {
+            const SpellInfo* info = sSpellMgr->GetSpellInfo(id);
+            if (!player_spell || player_spell->State == PLAYERSPELL_REMOVED ||
+                !player_spell->Active || !info ||
+                !info->HasEffect(SPELL_EFFECT_DISMISS_PET)) {
+              continue;
+            }
+            pb::Command_Act use = act;
+            use.name = std::string(SpellLocalizedName(info));
+            return CastSpellNow(bot, command_id, use, info, pet, std::nullopt,
+                                now, out_active);
+          }
+          if (pet->getPetType() == HUNTER_PET) {
+            return {.error = "you can't dismiss your pet (no Dismiss Pet)"};
+          }
+          bot->GetSession()->HandlePetActionHelper(pet, pet->GetGUID(),
+                                                   COMMAND_ABANDON, ACT_COMMAND,
+                                                   ObjectGuid::Empty);
+          return {.done = true};
+        }
         case pb::Command_Act::PET_CMD_UNSPECIFIED:
           return {.error = "unspecified pet command"};
       }
@@ -1978,6 +2353,9 @@ ActStepResult StepActiveAct(Player* bot,
       return {.done = true};
     }
     return {.error = "cast interrupted"};
+  }
+  if (active->approach_cast) {
+    return StepSpellApproach(bot, now, active);
   }
 
   const pb::Command_Act& act = active->act;
@@ -2189,6 +2567,7 @@ ActStepResult StepActiveAct(Player* bot,
 
   if (Dist2D(bot_pos, active->dest) <= kArrivalToleranceYd) {
     ClearActMovement(bot);
+    SetPingStay(bot, IsToPing(act));
     return {.done = true};
   }
 
@@ -2215,6 +2594,7 @@ ActStepResult StepActiveAct(Player* bot,
         act.place, bot_pos, *cur_anchor, act.yd, max_range, bot_reach);
     if (candidates.empty()) {
       ClearActMovement(bot);
+      SetPingStay(bot, IsToPing(act));
       return {.done = true};
     }
     const AnchorGeometry* los_anchor =

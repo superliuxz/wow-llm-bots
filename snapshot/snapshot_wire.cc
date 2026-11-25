@@ -78,7 +78,8 @@ struct glz::meta<wlb::snapshot::Command_Act::ThingKind> {
                                                ALLY_WITH,
                                                GROUP,
                                                ALLIES,
-                                               NAMED);
+                                               NAMED,
+                                               PING);
 };
 
 template <>
@@ -91,8 +92,12 @@ struct glz::meta<wlb::snapshot::Command_Act::StopKind> {
 template <>
 struct glz::meta<wlb::snapshot::Command_Act::PetCmd> {
   using enum wlb::snapshot::Command_Act::PetCmd;
-  static constexpr auto value =
-      glz::enumerate(PET_CMD_UNSPECIFIED, STAY, FOLLOW, PASSIVE, DEFENSIVE);
+  static constexpr auto value = glz::enumerate(PET_CMD_UNSPECIFIED,
+                                               STAY,
+                                               FOLLOW,
+                                               PASSIVE,
+                                               DEFENSIVE,
+                                               DISMISS);
 };
 
 template <>

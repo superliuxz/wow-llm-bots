@@ -47,6 +47,21 @@ class PlanRunner {
                      const Screen& screen,
                      base::TimeTicks now);
 
+  // Like Start, but launches the first step on a newer `(launch_seq,
+  // launch_screen)`, re-resolved by target like a repeat (a `do:` held back
+  // while the plan's `act:` line ran).
+  RunnerAction StartOn(const std::vector<PlanStep>& steps,
+                       const Screen& screen,
+                       uint32_t launch_seq,
+                       const Screen& launch_screen,
+                       base::TimeTicks now);
+
+  // The kind of the first step `steps` would run on `screen` (a lone `Keep`
+  // only when it is all there is), or nullopt for no step.
+  static std::optional<OptionKind> FirstStepKind(
+      const std::vector<PlanStep>& steps,
+      const Screen& screen);
+
   void Stop();
 
   bool active() const { return active_; }

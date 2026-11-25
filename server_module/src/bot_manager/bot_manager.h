@@ -77,6 +77,14 @@ class BotManager {
   static GroupPolicy GetGroupPolicy(Player* bot);
   static void SetGroupPolicy(Player* bot, GroupPolicy policy);
 
+  // World thread only: whether a `to ping` act still holds the bot where it
+  // went (BotSession::ping_stay): it holds through a fight, and is dropped
+  // once the bot is out of combat with its group's leader more than
+  // kPingStayLeaderYd away (or gone, or on another map).
+  static constexpr float kPingStayLeaderYd = 30.0f;
+  static bool PingStayHolds(Player* bot);
+  static void ClearPingStay(Player* bot);
+
   // World thread only: the brain chose to lie dead hoping for a rez (RH-M3):
   // playerbots' auto release waits `wait_ms` from now, anywhere (by default
   // it waits up to 90 s, and only in a dungeon with a living resurrector).

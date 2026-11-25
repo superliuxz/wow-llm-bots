@@ -81,6 +81,13 @@ std::optional<wlb::snapshot::Command::Act> OrderActToCommand(
     std::string_view it_name,
     std::string_view target_guid = {});
 
+// The GUID of the entity a plan `act:` line's act names on `snapshot` (by the
+// rules standing orders use; a plan has no `when`, so no `it`), or empty when
+// it names none or only `me`/`focus`.
+std::string ResolvePlanActTargetGuid(const wlb::snapshot::Snapshot& snapshot,
+                                     const Act& act,
+                                     base::TimeTicks now);
+
 class OrderEvaluator {
  public:
   explicit OrderEvaluator(

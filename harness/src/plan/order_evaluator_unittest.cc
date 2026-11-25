@@ -673,15 +673,41 @@ TEST(OrderEvaluatorTest, OrderActToCommandAndWireRoundTrip) {
   ASSERT_TRUE(cmd_act.has_value());
   EXPECT_EQ(cmd_act->verb, pb::Command::Act::PET_ATTACK);
 
-  // `ping` and `pet dismiss` parse, but the module can't carry them out yet:
-  // no command (never a half-filled one); the forms next to them still work.
-  EXPECT_FALSE(to_wire("always -> to ping").has_value());
-  EXPECT_FALSE(to_wire("always -> use Flare on ping").has_value());
-  EXPECT_FALSE(to_wire("always -> face ping").has_value());
-  EXPECT_FALSE(to_wire("always -> pet dismiss").has_value());
-  EXPECT_EQ(to_wire("always -> use Flare")->verb, pb::Command::Act::USE);
+  // `ping` is the spot of the party's minimap ping (never a unit: no name,
+  // no GUID even when one is resolved), and `pet dismiss` its own command;
+  // both survive the BEVE round trip.
+  cmd_act = to_wire("always -> to ping");
+  ASSERT_TRUE(cmd_act.has_value());
+  EXPECT_EQ(cmd_act->verb, pb::Command::Act::TO);
+  EXPECT_EQ(cmd_act->place, pb::Command::Act::AT);
+  EXPECT_EQ(cmd_act->thing, pb::Command::Act::PING);
+  EXPECT_TRUE(cmd_act->name.empty());
+  cmd_act = to_wire("always -> use Flare on ping");
+  ASSERT_TRUE(cmd_act.has_value());
+  EXPECT_EQ(cmd_act->verb, pb::Command::Act::USE);
+  EXPECT_EQ(cmd_act->name, "Flare");
+  EXPECT_EQ(cmd_act->thing, pb::Command::Act::PING);
+  EXPECT_TRUE(cmd_act->target_name.empty());
+  EXPECT_EQ(to_wire("always -> face ping")->thing, pb::Command::Act::PING);
+  cmd_act = to_wire("always -> pet dismiss");
+  ASSERT_TRUE(cmd_act.has_value());
+  EXPECT_EQ(cmd_act->verb, pb::Command::Act::PET);
+  EXPECT_EQ(cmd_act->pet_cmd, pb::Command::Act::DISMISS);
+  EXPECT_EQ(to_wire("always -> use Flare")->thing,
+            pb::Command::Act::THING_UNSPECIFIED);
   EXPECT_EQ(to_wire("always -> pet defensive")->pet_cmd,
             pb::Command::Act::DEFENSIVE);
+  for (const char* text :
+       {"always -> use Flare on ping", "always -> pet dismiss"}) {
+    pb::Command c;
+    c.version = pb::kWireVersion;
+    c.bot = "Aelindra";
+    c.command_id = 43;
+    c.act = to_wire(text);
+    pb::Command back;
+    ASSERT_TRUE(pb::ReadBeve(pb::WriteBeve(c), &back)) << text;
+    EXPECT_EQ(back, c) << text;
+  }
 
   EXPECT_EQ(to_wire("always -> avoid boss")->verb, pb::Command::Act::AVOID);
   EXPECT_EQ(to_wire("always -> face boss")->verb, pb::Command::Act::FACE);

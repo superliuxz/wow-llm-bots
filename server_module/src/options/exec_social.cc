@@ -968,6 +968,7 @@ ActionOutcome ExecuteGroupPolicyAction(Player* bot,
       break;
     case GroupPolicyAction::Op::kFollow:
       policy.stay = false;
+      BotManager::ClearPingStay(bot);
       info = "following the leader again";
       break;
     case GroupPolicyAction::Op::kAutoPopups:
@@ -991,6 +992,7 @@ ActionOutcome ExecuteFollowLeaderAction(Player* bot,
     BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
     policy.stay = false;
     BotManager::SetGroupPolicy(bot, policy);
+    BotManager::ClearPingStay(bot);
   }
   Player* leader = ObjectAccessor::FindConnectedPlayer(
       ParseSnapshotGuid(action.leader_guid));

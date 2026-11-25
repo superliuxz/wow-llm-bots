@@ -94,6 +94,20 @@ struct BotSession {
   // left the group).
   std::optional<PartyPing> party_ping;
 
+  // Where a `to ping` act sent the bot to hold (out of combat it doesn't
+  // follow the leader back): cleared once it is out of combat with the
+  // leader more than kPingStayLeaderYd away, by a new choice or `follow`,
+  // and on logout, map change and disconnect.
+  struct PingStay {
+    uint32_t map_id = 0;
+    uint32_t instance_id = 0;
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    bool operator==(const PingStay&) const = default;
+  };
+  std::optional<PingStay> ping_stay;
+
   // Last outdoor stray-recall tick (`KeepNearHumanLeader`, Now #8).
   uint32_t stray_recalled_ms = 0;
 

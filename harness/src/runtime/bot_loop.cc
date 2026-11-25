@@ -176,6 +176,11 @@ std::string SanitizeRememberNote(
   return base::StrCat({out, " [heard in chat]"});
 }
 
+// How long one act of a plan's `act:` line may run before the held `do:`
+// steps go ahead anyway (a walk into range, then a cast; a standing order's
+// act or `stop moving` can supersede it on the module without a word).
+constexpr base::TimeDelta kPlanActTimeout = base::Seconds(12);
+
 // Per-sender chat wake rate limit (A-M8): at most 3 chat-triggered LLM wakes
 // per sender in a 10 s sliding window (messages still appear in recent_events).
 constexpr base::TimeDelta kChatWakeWindow = base::Seconds(10);
@@ -654,6 +659,7 @@ void BotLoop::OnConnectionChanged(bool connected) {
 void BotLoop::ResetBotSession(BotState* state, bool cancel_in_flight) {
   state->runner.Stop();
   state->orders.Clear();
+  state->plan_acts = {};
   state->latest_snapshot.reset();
   state->look_deadline = base::TimeTicks();
   state->has_ever_woken = false;
@@ -808,6 +814,18 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
 
   const bool look_woke = OnLookSnapshot(bot, &state, received_at);
 
+  if (state.plan_acts.active()) {
+    if (state.latest_snapshot->done_act_command_id ==
+        state.plan_acts.pending_command_id) {
+      SendNextPlanAct(bot, &state, received_at);
+    } else if (received_at - state.plan_acts.sent_at >= kPlanActTimeout) {
+      Log(base::StrCat({"harness: ", bot, " plan act ",
+                        std::to_string(state.plan_acts.pending_command_id),
+                        " timed out; going on with its do: steps"}));
+      FinishPlanActs(bot, &state, received_at);
+    }
+  }
+
   // Pre-pull standing-order compilation on instance entry (A4): when a bot
   // enters an instance with boss notes, install cached compiled orders at once
   // or wake urgently out-of-combat to compile them before the pull.
@@ -937,8 +955,9 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   if (!ord.wake_reason.empty()) {
     return;
   }
+  // While a plan's acts run, its steps wait (a new Choose would cancel them).
   if (look_woke || state.call_in_flight() || state.has_queued_wake() ||
-      ord.covered) {
+      ord.covered || state.plan_acts.active()) {
     return;
   }
   const RunnerAction action = state.runner.OnSnapshot(
@@ -1032,6 +1051,17 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
     return;
   }
   if (imm.event.error && imm.event.error->command_id != 0) {
+    if (state.plan_acts.active() &&
+        imm.event.error->command_id == state.plan_acts.pending_command_id) {
+      // A refused plan act: the rest of the line is dropped (its later acts
+      // assumed this one) and the held steps go ahead; the brain reads the
+      // error (NoteEvent above) on its next look.
+      Log(base::StrCat(
+          {"harness: ", bot, " plan act refused: ", imm.event.error->text}));
+      state.plan_acts.left.clear();
+      FinishPlanActs(bot, &state, received_at);
+      return;
+    }
     if (state.orders.active() &&
         imm.event.error->command_id == state.orders.pending_command_id()) {
       OrderEvalResult failed = state.orders.OnStepFailed(imm.event.error->text);
@@ -1757,10 +1787,24 @@ void BotLoop::OnReply(const std::string& bot,
           look.until = now + config_.look_wait;
           state.pending_look = std::move(look);
         }
+        // The `act:` line goes first: a Choose other than Keep or Attack
+        // would cancel it on the module, so such `do:` steps wait for it.
+        // Steps already started from the streamed first line keep running
+        // (the act, sent after them, isn't cancelled by them).
+        StartPlanActs(bot, &state, plan->acts, now);
         if (!state.early_steps_dispatched) {
-          const RunnerAction action =
-              state.runner.Start(plan->steps, ask_seq, ask_screen, now);
-          DispatchRunnerAction(bot, &state, action);
+          const std::optional<OptionKind> first =
+              PlanRunner::FirstStepKind(plan->steps, ask_screen);
+          if (state.plan_acts.active() && first &&
+              *first != OptionKind::kKeep && *first != OptionKind::kAttack) {
+            state.runner.Stop();
+            state.plan_acts.held = BotState::PlanActs::HeldSteps{
+                .steps = plan->steps, .ask_screen = ask_screen};
+          } else {
+            const RunnerAction action =
+                state.runner.Start(plan->steps, ask_seq, ask_screen, now);
+            DispatchRunnerAction(bot, &state, action);
+          }
         }
         if (state.order_failure_during_call) {
           state.order_failure_during_call = false;
@@ -2088,6 +2132,66 @@ bool BotLoop::DispatchOrderEval(const std::string& bot,
   const uint32_t id = SendAct(bot, std::move(*wire));
   state->orders.set_pending_command_id(id);
   return false;
+}
+
+void BotLoop::StartPlanActs(const std::string& bot,
+                            BotState* state,
+                            const std::vector<Act>& acts,
+                            base::TimeTicks now) {
+  // A new plan replaces an older plan's acts and the steps they held.
+  state->plan_acts = {};
+  if (acts.empty()) {
+    return;
+  }
+  state->plan_acts.left.assign(acts.begin(), acts.end());
+  SendNextPlanAct(bot, state, now);
+}
+
+void BotLoop::SendNextPlanAct(const std::string& bot,
+                              BotState* state,
+                              base::TimeTicks now) {
+  BotState::PlanActs& pa = state->plan_acts;
+  pa.pending_command_id = 0;
+  while (!pa.left.empty()) {
+    const Act act = std::move(pa.left.front());
+    pa.left.pop_front();
+    // A plan has no `when`: no `it`. The act's thing resolves on the newest
+    // snapshot by the standing orders' rules.
+    const std::string target_guid =
+        state->latest_snapshot
+            ? ResolvePlanActTargetGuid(*state->latest_snapshot, act, now)
+            : std::string();
+    std::optional<pb::Command::Act> wire =
+        OrderActToCommand(act, "", "", target_guid);
+    if (!wire || wire->verb == pb::Command::Act::WAKE) {
+      // `wake` (or anything the wire can't carry) does nothing here: the
+      // brain is the one that just answered.
+      continue;
+    }
+    pa.pending_command_id = SendAct(bot, std::move(*wire));
+    pa.sent_at = now;
+    return;
+  }
+  FinishPlanActs(bot, state, now);
+}
+
+void BotLoop::FinishPlanActs(const std::string& bot,
+                             BotState* state,
+                             base::TimeTicks now) {
+  std::optional<BotState::PlanActs::HeldSteps> held =
+      std::move(state->plan_acts.held);
+  state->plan_acts = {};
+  // A newer decision on its way replaces the held steps (a chat-only wake
+  // doesn't: it never supersedes a plan).
+  if (!held || state->call_in_flight() ||
+      (state->has_queued_wake() && !state->queued_for_chat_only) ||
+      !state->latest_snapshot) {
+    return;
+  }
+  const RunnerAction action = state->runner.StartOn(
+      held->steps, held->ask_screen, state->latest_snapshot->seq,
+      state->latest_screen, now);
+  DispatchRunnerAction(bot, state, action);
 }
 
 uint32_t BotLoop::SendAct(const std::string& bot, pb::Command::Act act) {

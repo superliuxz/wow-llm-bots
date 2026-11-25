@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -19,6 +20,7 @@
 #include "Event.h"
 #include "G3D/Vector3.h"
 #include "GameObject.h"
+#include "GridTerrainData.h"
 #include "Group.h"
 #include "Item.h"
 #include "ItemTemplate.h"
@@ -37,10 +39,12 @@
 #include "Spell.h"
 #include "SpellDefines.h"
 #include "SpellInfo.h"
+#include "Timer.h"
 #include "Unit.h"
 #include "UnitDefines.h"
 #include "UpdateFields.h"
 #include "base/strings/stringprintf.h"
+#include "bot_session.h"
 #include "options/position_facts.h"
 
 namespace llm_brain {
@@ -136,6 +140,40 @@ ObjectGuid ParseSnapshotGuid(std::string_view text) {
     return ObjectGuid::Empty;
   }
   return ObjectGuid(raw);
+}
+
+std::optional<PartyPingSpot> CurrentPartyPing(Player* bot) {
+  if (!bot || !bot->IsInWorld()) {
+    return std::nullopt;
+  }
+  const uint64_t key = bot->GetGUID().GetRawValue();
+  const std::optional<BotSession::PartyPing> ping =
+      BotSessionRegistry::Instance().InspectSession(
+          key,
+          [](const BotSession* s) { return s ? s->party_ping : std::nullopt; });
+  if (!ping) {
+    return std::nullopt;
+  }
+  const uint32_t age_ms = GetMSTimeDiffToNow(ping->ms);
+  const Group* group = bot->GetGroup();
+  if (age_ms > kPartyPingShowMs || !group ||
+      !group->IsMember(ObjectGuid(ping->from_guid)) ||
+      ping->map_id != bot->GetMapId() ||
+      ping->instance_id != bot->GetInstanceId()) {
+    BotSessionRegistry::Instance().WithSession(key, [&ping](BotSession& s) {
+      if (s.party_ping == ping) {
+        s.party_ping.reset();
+      }
+    });
+    return std::nullopt;
+  }
+  float z = bot->GetMap()->GetHeight(bot->GetPhaseMask(), ping->x, ping->y,
+                                     bot->GetPositionZ() + 5.0f);
+  if (!std::isfinite(z) || z <= INVALID_HEIGHT) {
+    z = bot->GetPositionZ();
+  }
+  return PartyPingSpot{
+      .from = ping->from, .x = ping->x, .y = ping->y, .z = z, .age_ms = age_ms};
 }
 
 bool CanClearBotMovement(const Player* bot) {

@@ -89,5 +89,38 @@ TEST(BotSessionRegistryTest, PartyPingClearsOnDisconnectAndLogout) {
   });
 }
 
+// A `to ping` hold never outlives a map change, a harness disconnect or a
+// relog (the group policy, `Wait here`, does survive a relog).
+TEST(BotSessionRegistryTest, PingStayClearsOnMapChangeDisconnectAndLogout) {
+  BotSessionRegistry reg;
+  constexpr uint64_t kBot = 0x1003;
+  const auto stay =
+      BotSession::PingStay{.map_id = 36, .x = 1.0f, .y = 2.0f, .z = 3.0f};
+  const auto set = [&] {
+    reg.WithSession(kBot, [&](BotSession& s) {
+      s.group_guid = 42;
+      s.group_policy.stay = true;
+      s.ping_stay = stay;
+    });
+  };
+  const auto expect_cleared = [&] {
+    reg.InspectSession(kBot, [](const BotSession* s) {
+      ASSERT_NE(s, nullptr);
+      EXPECT_FALSE(s->ping_stay.has_value());
+      EXPECT_EQ(s->group_guid, 42u);
+      EXPECT_TRUE(s->group_policy.stay);
+    });
+  };
+  set();
+  reg.ResetOnMapChange(kBot);
+  expect_cleared();
+  set();
+  reg.ResetOnDisconnect(kBot);
+  expect_cleared();
+  set();
+  reg.ResetOnLogout(kBot);
+  expect_cleared();
+}
+
 }  // namespace
 }  // namespace llm_brain

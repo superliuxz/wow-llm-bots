@@ -730,6 +730,9 @@ struct Command_Act {
     GROUP = 17,
     ALLIES = 18,
     NAMED = 19,
+    // Where the party's last minimap ping is (`ext.minimap.ping`): a spot on
+    // the ground, not a unit.
+    PING = 20,
   };
   using enum ThingKind;
 
@@ -747,6 +750,7 @@ struct Command_Act {
     FOLLOW = 2,
     PASSIVE = 3,
     DEFENSIVE = 4,
+    DISMISS = 5,
   };
   using enum PetCmd;
 

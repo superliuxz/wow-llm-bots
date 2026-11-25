@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -30,6 +31,20 @@ struct ActionOutcome {
 
 // The guid of a snapshot's "0x" + 16 hex digits; empty if malformed.
 ObjectGuid ParseSnapshotGuid(std::string_view text);
+
+// The party's last minimap ping as the bot can still use it: at most
+// kPartyPingShowMs old, from someone still in its group, on its own map and
+// instance; a stale one is dropped from the session. `z` is the floor at the
+// ping nearest the bot's own height (a ping is a point on the 2D map).
+inline constexpr uint32_t kPartyPingShowMs = 30000;
+struct PartyPingSpot {
+  std::string from;
+  float x = 0.0f;
+  float y = 0.0f;
+  float z = 0.0f;
+  uint32_t age_ms = 0;
+};
+std::optional<PartyPingSpot> CurrentPartyPing(Player* bot);
 
 // True when `bot` is allowed to cancel its own movement (never while on a taxi
 // flight path, riding a vehicle, or under fear/stun/charm/controlled motion).

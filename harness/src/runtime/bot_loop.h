@@ -30,6 +30,7 @@
 #include "llm/scheduler.h"
 #include "plan/order_evaluator.h"
 #include "plan/orders.h"
+#include "plan/plan.h"
 #include "plan/plan_runner.h"
 #include "plan/triggers.h"
 #include "runtime/decision_log.h"
@@ -172,6 +173,25 @@ class BotLoop {
     TriggerEvaluator::WatchInputs ask_watch_inputs;
     PlanRunner runner;
     OrderEvaluator orders;
+    // The plan's `act:` line (Plan::acts), sent one act at a time ahead of its
+    // `do:` steps. A `Choose` other than Keep or Attack cancels the module's
+    // running act, so such steps wait until the acts are done, refused, or
+    // timed out (kPlanActTimeout in bot_loop.cc).
+    struct PlanActs {
+      // Acts still to send after the pending one.
+      std::deque<Act> left;
+      uint32_t pending_command_id = 0;
+      base::TimeTicks sent_at;
+      // The `do:` steps waiting for the acts, with the screen they were
+      // chosen from.
+      struct HeldSteps {
+        std::vector<PlanStep> steps;
+        Screen ask_screen;
+      };
+      std::optional<HeldSteps> held;
+      bool active() const { return pending_command_id != 0; }
+    };
+    PlanActs plan_acts;
 
     // Explicit brain-call lifecycle state (replaces separate `call_in_flight` +
     // `has_queued_wake` booleans so transitions and resets stay consistent).
@@ -389,6 +409,19 @@ class BotLoop {
                     base::TimeTicks now,
                     bool is_failure);
   void SendStopMoving(const std::string& bot);
+  // Starts a plan's `act:` line (replacing any acts of an older plan).
+  void StartPlanActs(const std::string& bot,
+                     BotState* state,
+                     const std::vector<Act>& acts,
+                     base::TimeTicks now);
+  // Sends the next plan act (skipping ones the wire can't carry), or, with
+  // none left, ends the acts and starts the held `do:` steps.
+  void SendNextPlanAct(const std::string& bot,
+                       BotState* state,
+                       base::TimeTicks now);
+  void FinishPlanActs(const std::string& bot,
+                      BotState* state,
+                      base::TimeTicks now);
   uint32_t SendAct(const std::string& bot, wlb::snapshot::Command::Act act);
   uint32_t SendChoose(const std::string& bot,
                       const wlb::snapshot::Command::Choose& choose);

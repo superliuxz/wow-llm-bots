@@ -684,6 +684,7 @@ class LlmBrainWorldScript : public WorldScript {
       case LeaderCommand::kFollow:
         policy.stay = false;
         BotManager::SetGroupPolicy(bot, policy);
+        BotManager::ClearPingStay(bot);
         done = "you follow " + sender->GetName() + " again";
         break;
       case LeaderCommand::kAttackMyTarget: {
@@ -865,6 +866,10 @@ class LlmBrainWorldScript : public WorldScript {
       error = ValidateAction(bot, target->action);
       if (error.empty()) {
         if (!keep) {
+          if (!attack) {
+            // A new errand ends a `to ping` hold (a fight from there doesn't).
+            BotManager::ClearPingStay(bot);
+          }
           if (!attack && state.active_act) {
             const uint32_t cancelled_cmd_id = state.active_act->command_id;
             CancelActiveAct(bot, &*state.active_act);

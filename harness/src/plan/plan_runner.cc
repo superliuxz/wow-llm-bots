@@ -167,6 +167,32 @@ RunnerAction PlanRunner::Start(const std::vector<PlanStep>& steps,
                                uint32_t snapshot_seq,
                                const Screen& screen,
                                base::TimeTicks now) {
+  return StartOn(steps, screen, snapshot_seq, screen, now);
+}
+
+// static
+std::optional<OptionKind> PlanRunner::FirstStepKind(
+    const std::vector<PlanStep>& steps,
+    const Screen& screen) {
+  for (const PlanStep& step : steps) {
+    if (step.option < 1 ||
+        static_cast<size_t>(step.option) > screen.details.size()) {
+      return std::nullopt;
+    }
+    const OptionKind kind =
+        screen.details[static_cast<size_t>(step.option - 1)].kind;
+    if (kind != OptionKind::kKeep || &step == &steps.back()) {
+      return kind;
+    }
+  }
+  return std::nullopt;
+}
+
+RunnerAction PlanRunner::StartOn(const std::vector<PlanStep>& steps,
+                                 const Screen& screen,
+                                 uint32_t launch_seq,
+                                 const Screen& launch_screen,
+                                 base::TimeTicks now) {
   Stop();
   if (steps.empty()) {
     return {};
@@ -194,11 +220,11 @@ RunnerAction PlanRunner::Start(const std::vector<PlanStep>& steps,
   active_guid_ = steps_[0].target.guid;
   step_started_at_ = now;
 
-  if (!screen.has_module_options) {
+  if (!launch_screen.has_module_options) {
     // Offline/derived screen: never guess module option numbers.
     return {};
   }
-  return LaunchCurrentFromScreen(snapshot_seq, screen,
+  return LaunchCurrentFromScreen(launch_seq, launch_screen,
                                  /*match_guid_first=*/true, now);
 }
 

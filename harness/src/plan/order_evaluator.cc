@@ -1638,6 +1638,13 @@ OrderEvalResult OrderEvaluator::OnSnapshot(const pb::Snapshot& snapshot,
   return {};
 }
 
+std::string ResolvePlanActTargetGuid(const pb::Snapshot& snapshot,
+                                     const Act& act,
+                                     base::TimeTicks now) {
+  const SnapshotView view(snapshot, now, now);
+  return ResolveActThingGuid(view, act, std::nullopt);
+}
+
 OrderEvalResult OrderEvaluator::OnStepDone(uint32_t command_id,
                                            base::TimeTicks now) {
   if (active_order_ < 0 || command_id == 0 ||
@@ -1772,9 +1779,8 @@ std::optional<pb::Command::Act> OrderActToCommand(
     std::string_view it_guid,
     std::string_view it_name,
     std::string_view target_guid) {
-  bool supported = true;
-  auto fill_thing = [&supported](const Thing& thing, pb::Command::Act* out,
-                                 bool target_slot) {
+  auto fill_thing = [](const Thing& thing, pb::Command::Act* out,
+                       bool target_slot) {
     std::string& dst_name = target_slot ? out->target_name : out->name;
     std::visit(
         [&](const auto& t) {
@@ -1843,8 +1849,7 @@ std::optional<pb::Command::Act> OrderActToCommand(
             out->thing = pb::Command::Act::NAMED;
             dst_name = t.name;
           } else if constexpr (std::is_same_v<T, grammar::ThingPing>) {
-            // The module can't aim at a minimap ping yet.
-            supported = false;
+            out->thing = pb::Command::Act::PING;
           }
         },
         thing.value);
@@ -1854,6 +1859,7 @@ std::optional<pb::Command::Act> OrderActToCommand(
   out.it_guid = std::string(it_guid);
   out.it_name = std::string(it_name);
 
+  bool supported = true;
   std::visit(
       [&](const auto& a) {
         using A = std::decay_t<decltype(a)>;
@@ -1969,8 +1975,7 @@ std::optional<pb::Command::Act> OrderActToCommand(
               out.pet_cmd = pb::Command::Act::DEFENSIVE;
               break;
             case grammar::PetCmd::kDismiss:
-              // The module can't dismiss a pet yet.
-              supported = false;
+              out.pet_cmd = pb::Command::Act::DISMISS;
               break;
           }
         } else if constexpr (std::is_same_v<A, grammar::ActKite>) {
@@ -1988,7 +1993,8 @@ std::optional<pb::Command::Act> OrderActToCommand(
   if (!target_guid.empty() &&
       out.thing != pb::Command::Act::THING_UNSPECIFIED &&
       out.thing != pb::Command::Act::ME && out.thing != pb::Command::Act::IT &&
-      out.thing != pb::Command::Act::FOCUS) {
+      out.thing != pb::Command::Act::FOCUS &&
+      out.thing != pb::Command::Act::PING) {
     out.it_guid = std::string(target_guid);
   }
   return out;

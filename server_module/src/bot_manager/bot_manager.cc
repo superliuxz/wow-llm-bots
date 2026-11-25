@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <list>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -32,6 +33,7 @@
 #include "ItemTemplate.h"
 #include "LFG.h"
 #include "LFGMgr.h"
+#include "LastMovementValue.h"
 #include "Log.h"
 #include "Map.h"
 #include "ObjectAccessor.h"
@@ -520,6 +522,20 @@ class BrainPolicyListener final : public ActionExecutionListener {
     if (name == "apply oil") {
       return HasEligibleTempEnchant(bot_, ai_, /*is_stone=*/false);
     }
+    // A brain act walking the bot (MOVEMENT_FORCED, act_executor.cc) outranks
+    // `stay`, which would stop it at every step, and its walk back (`to
+    // ping`, or a `use` walking into range, while told to wait).
+    if ((name == "stay" || name == "return to stay position") && ai_) {
+      if (auto* last = ai_->GetAiObjectContext()->GetValue<LastMovement&>(
+              "last movement")) {
+        const LastMovement& lm = last->Get();
+        if (lm.priority == MovementPriority::MOVEMENT_FORCED &&
+            static_cast<float>(GetMSTimeDiffToNow(lm.msTime)) <
+                lm.lastdelayTime) {
+          return false;
+        }
+      }
+    }
     // Gear is the brain's choice even while the harness is down: playerbots'
     // auto-equip would undo it.
     if (name == "equip upgrade" || name == "equip upgrades packet action") {
@@ -728,7 +744,7 @@ void BotManager::KeepNearHumanLeader(Player* player) {
   if (!group || !ai || !player->IsAlive() || player->IsInCombat() ||
       group->IsLeader(player->GetGUID()) || !player->GetMap() ||
       player->GetMap()->IsDungeon() || GetGroupPolicy(player).stay ||
-      !CanClearBotMovement(player)) {
+      PingStayHolds(player) || !CanClearBotMovement(player)) {
     return;
   }
   Player* leader = ObjectAccessor::FindConnectedPlayer(group->GetLeaderGUID());
@@ -980,7 +996,7 @@ void BotManager::EnsureStrategies(Player* player) {
   } else if (PlayerbotAI::IsTank(player)) {
     combat += ",+tank assist,+pull back,-dps assist";
   }
-  if (policy.stay) {
+  if (policy.stay || PingStayHolds(player)) {
     non_combat += ",-follow,+stay";
   } else {
     non_combat += ",-stay";
@@ -1064,6 +1080,49 @@ void BotManager::SetGroupPolicy(Player* bot, GroupPolicy policy) {
           s.group_policy = {policy.not_tank, policy.stay};
         }
       });
+}
+
+bool BotManager::PingStayHolds(Player* bot) {
+  if (!bot) {
+    return false;
+  }
+  const uint64_t key = bot->GetGUID().GetRawValue();
+  const std::optional<BotSession::PingStay> stay =
+      BotSessionRegistry::Instance().InspectSession(
+          key,
+          [](const BotSession* s) { return s ? s->ping_stay : std::nullopt; });
+  if (!stay) {
+    return false;
+  }
+  const Group* group = bot->GetGroup();
+  bool holds = group && stay->map_id == bot->GetMapId() &&
+               stay->instance_id == bot->GetInstanceId();
+  if (holds && !bot->IsInCombat()) {
+    const Player* leader =
+        ObjectAccessor::FindConnectedPlayer(group->GetLeaderGUID());
+    holds = leader && leader->IsInWorld() &&
+            leader->GetMapId() == bot->GetMapId() &&
+            leader->GetInstanceId() == bot->GetInstanceId() &&
+            (leader == bot || bot->GetDistance(leader) <= kPingStayLeaderYd);
+  }
+  if (!holds) {
+    BotSessionRegistry::Instance().WithSession(key, [&stay](BotSession& s) {
+      if (s.ping_stay == stay) {
+        s.ping_stay.reset();
+      }
+    });
+    LOG_INFO("module", "mod-llm-brain: {} stops holding at the ping",
+             bot->GetName());
+  }
+  return holds;
+}
+
+void BotManager::ClearPingStay(Player* bot) {
+  if (!bot) {
+    return;
+  }
+  BotSessionRegistry::Instance().WithSession(
+      bot->GetGUID().GetRawValue(), [](BotSession& s) { s.ping_stay.reset(); });
 }
 
 void BotManager::ClearBotStrategyOverride(const std::string& bot_name) {
