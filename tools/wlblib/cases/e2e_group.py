@@ -850,6 +850,7 @@ def _case_lfg_proposal():
         role_at = None
         proposal_at = None
         in_instance = set()
+        tele_tries = {}
 
         def choose(bot, idx, seq, step):
             nonlocal cmd_id
@@ -873,7 +874,9 @@ def _case_lfg_proposal():
                         bot = msg["event"].get("bot")
                         ev = msg["event"].get("event", {})
                         err = ev.get("error")
-                        if err and err.get("command_id") in sent.values():
+                        # A refused teleport retry (still in combat) is retried, not a failure.
+                        checked = {v for k, v in sent.items() if not k.startswith("tele_")}
+                        if err and err.get("command_id") in checked:
                             errors.append(f"{bot}: {err.get('text')}")
                         if ev.get("prompt"):
                             kind = str(ev["prompt"].get("kind"))
@@ -901,6 +904,16 @@ def _case_lfg_proposal():
                         idx = find_option(options, "Accept Dungeon Finder proposal")
                         if idx:
                             choose(bot, idx, seq, f"accept_{bot}")
+                    elif (bot in ("Loada", "Loadb") and bot not in in_instance
+                          and time.time() - tele_tries.get(bot, 0.0) > 5.0):
+                        # LFG teleports the group once, when the proposal succeeds; a bot
+                        # in combat or falling just then gets a teleport error and stays
+                        # outside (the full e2e run's intermittent failure). A player then
+                        # clicks "Teleport to LFG dungeon", offered to the bots too.
+                        idx = find_option(options, "Teleport to LFG dungeon")
+                        if idx:
+                            tele_tries[bot] = time.time()
+                            choose(bot, idx, seq, f"tele_{bot}_{int(tele_tries[bot])}")
         finally:
             sock.close()
             server.console("lfg clean", inst=TEST)

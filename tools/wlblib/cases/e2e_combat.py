@@ -428,6 +428,8 @@ def _case_orders():
                 ])
                 server.console("llmbrain whisper Telda Loada phase4", wait_s=0.1, inst=TEST)
                 replies_before_kite = wait_plan(prev_replies)
+                with brain.lock:
+                    wakes_before_kite = len(brain.loada_wake_reasons)
                 start_pos = _pos2d(next(
                     s for _, s in reversed(proxy.snapshots) if s.get("bot") == "Loada"
                 ))
@@ -464,8 +466,14 @@ def _case_orders():
                        f"kite froze in second half: {second_half[:2]}..{second_half[-2:]}")
                 with brain.lock:
                     timeout_wakes = [w for w in brain.loada_wake_reasons if "timed out" in w]
-                    expect(not timeout_wakes and brain.loada_replies == replies_before_kite,
-                           f"unexpected wake while kiting: {brain.loada_wake_reasons}")
+                    # Kiting can run Loada into another boar: a combat wake is the world's,
+                    # not the kite timing out, and allowed (the full e2e run's intermittent
+                    # failure). Any other wake while kiting is not.
+                    kite_wakes = brain.loada_wake_reasons[wakes_before_kite:]
+                    other_wakes = [w for w in kite_wakes
+                                   if not ("entered combat" in w or "attacked" in w)]
+                    expect(not timeout_wakes and not other_wakes,
+                           f"unexpected wake while kiting: {kite_wakes}")
 
                 # Sending a new plan while kiting (Renew still on) must emit `stop moving`
                 # (High #2).

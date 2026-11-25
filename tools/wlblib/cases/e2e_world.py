@@ -107,7 +107,13 @@ def _case_playability():
                         for m in snap.get("ext", {}).get("party", {}).get("members", [])
                     ]
 
-                    if not party_sent and "Telda" in party_members:
+                    # Telda listed is not Telda in the world: a party line sent before she
+                    # logs in reaches nobody (the full e2e run's intermittent failure).
+                    telda_online = any(
+                        m.get("name") == "Telda" and m.get("group", {}).get("online")
+                        for m in snap.get("ext", {}).get("party", {}).get("members", [])
+                    )
+                    if not party_sent and telda_online:
                         cmd_id += 1
                         send_cmd(
                             sock,

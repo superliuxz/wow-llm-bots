@@ -117,8 +117,12 @@ Findings from "Wow Llm Bots Review 2". Tick when fixed and tested.
 - [x] **Play preset characters:** `LlmBrain.CreateBots` created Drogbar, Zenji, Rokzul and Mabaku
   on the play server (all online in Durotar; Gatda already existed as an orc rogue, so the tank is
   Drogbar); `e2e_create_bots` checks a restart keeps them.
-- [ ] **Intermittent e2e cases:** in a full `wlb test e2e` run `lfg_proposal`, `orders` and
-  `playability` failed once each and passed when rerun alone; find the race.
+- [x] **Intermittent e2e cases** (`lfg_proposal`, `orders`, `playability` failed once in a full
+  run): `playability` sent its party line before Telda was in the world (now waits for her
+  online); `orders` counted a real combat wake (kiting into a boar) as a kite timeout (combat
+  wakes now allowed, timeouts still fail); `lfg_proposal` relied on LFG's one-shot teleport, which
+  a bot in combat or falling misses (now clicks `Teleport to LFG dungeon` like a player).
+  Verified: fresh full `wlb test e2e`, 27/27.
 
 ## Now (team play first: the gaps a human feels in the first hour)
 
