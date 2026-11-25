@@ -1227,4 +1227,81 @@ def _case_popup_policy():
         return f"answered by policy within {took:.1f} s: {answers}"
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
-CASES = [_case_popup_policy(), _case_human_party(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal()]
+def _case_crowd_control():
+    """A mob marked for crowd control is offered to the CC class and polymorphed (Now #4).
+
+      1. Loada (a troll mage made level 20 and taught Polymorph) groups with Telda.
+      2. Telda's group marks a boar next to Loada with the moon.
+      3. Loada is offered `Crowd-control Mottled Boar (moon): Polymorph`; choosing it puts
+         Polymorph on the boar with no error; the bot manager sees the crowd control and turns
+         area damage off near it.
+    """
+
+    import socket
+    import time
+
+    from wlblib import server
+    from wlblib.common import TEST
+    from wlblib.testing import expect
+
+    NAME = "crowd_control"
+    DESCRIPTION = "A moon-marked mob: the mage is offered Polymorph on it and it lands"
+    TEST_CONFIG = "cc"
+    BOT = "Loada"
+    ONLINE = 2
+
+    def run(stack):
+        server.console("character level Loada 20", inst=TEST)
+        server.console("llmtest learn Loada 118", inst=TEST)  # Polymorph (rank 1).
+        server.console("llmtest group Telda Loada", inst=TEST)
+        out = server.console("llmtest marknear Telda 4", inst=TEST)
+        expect("marked" in out, f"setup: no marked boar ({out[-200:]})")
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        sock.connect(str(TEST.run / "brain.sock"))
+        reader = wire.FrameReader()
+        offered = ""
+        sent = None
+        errors = []
+        polymorphed = False
+        deadline = time.time() + 30.0
+        try:
+            while time.time() < deadline and not polymorphed:
+                try:
+                    chunk = sock.recv(1 << 20)
+                except socket.timeout:
+                    continue
+                for payload in reader.feed(chunk):
+                    msg = wire.decode_module_message(payload)
+                    if not msg:
+                        continue
+                    if "event" in msg:
+                        err = msg["event"].get("event", {}).get("error")
+                        if err and sent is not None and err.get("command_id") == sent:
+                            errors.append(err.get("text"))
+                        continue
+                    snap = msg.get("snapshot")
+                    if not snap or snap.get("bot") != "Loada":
+                        continue
+                    if sent is None:
+                        idx = find_option(snap.get("options", []), "Crowd-control Mottled Boar")
+                        if idx:
+                            offered = snap["options"][idx - 1].get("text", "")
+                            sent = 5
+                            send_cmd(sock, {"bot": "Loada", "command_id": sent,
+                                             "choose": {"option": idx, "seq": snap.get("seq", 0)}})
+                    elif "Loada: crowd control nearby" in stack.server_log():
+                        # The bot manager saw the boar held by breakable CC (and turned
+                        # Loada's and Telda's area damage off for it).
+                        polymorphed = True
+        finally:
+            sock.close()
+            server.console("llmtest ungroup Loada", inst=TEST)
+        expect(offered == "Crowd-control Mottled Boar (moon): Polymorph",
+               f"CC option: {offered!r}")
+        expect(not errors, f"Polymorph failed: {errors}")
+        expect(polymorphed, "no crowd control seen near Loada after Polymorph")
+        return f"offered {offered!r}; the boar was polymorphed"
+    return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
+
+CASES = [_case_crowd_control(), _case_popup_policy(), _case_human_party(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal()]

@@ -69,6 +69,9 @@ dungeons and in the open world:
   what was answered). `Vote to kick` only someone who is really ruining the run.
 - Questing together: `Share quest` hands a quest you have to party members who lack it, and
   `Accept shared quest` takes one a party member shares with you.
+- Marks: kill `(skull)` first, then `(cross)`. A mob marked for crowd control (moon, square,
+  ...) is left alone, except that if `Crowd-control <mob> (<mark>): <spell>` is offered to
+  you, it's yours to keep controlled. Never break crowd control.
 - `leader said: <command> (applied: ...)` under `Since your last look:` means your body already
   did what your leader typed (wait, follow, attack, drink, mount): keep to it (`Keep doing what
   I'm doing`) and answer briefly if at all; `(not applied: ...)` says why you couldn't. For

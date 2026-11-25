@@ -26,6 +26,7 @@
 #include "DBCEnums.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
+#include "Define.h"
 #include "GridNotifiers.h"
 #include "GridNotifiersImpl.h"  // IWYU pragma: keep
 #include "Group.h"
@@ -98,6 +99,7 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"istank", HandleIsTank, SEC_ADMINISTRATOR, Console::Yes},
         {"master", HandleMaster, SEC_ADMINISTRATOR, Console::Yes},
         {"bossemote", HandleBossEmote, SEC_ADMINISTRATOR, Console::Yes},
+        {"marknear", HandleMarkNear, SEC_ADMINISTRATOR, Console::Yes},
         {"maketank", HandleMakeTank, SEC_ADMINISTRATOR, Console::Yes},
         {"lootroll", HandleLootRoll, SEC_ADMINISTRATOR, Console::Yes},
         {"chat", HandleChat, SEC_ADMINISTRATOR, Console::Yes},
@@ -603,6 +605,32 @@ class LlmBrainTestCommandScript : public CommandScript {
     }
     speaker->TextEmote(std::string(text), nullptr, /*isBossEmote=*/true);
     handler->PSendSysMessage("llmtest: {} boss-emoted", speaker->GetName());
+    return true;
+  }
+
+  // `llmtest marknear <leader> <icon 0-7>`: a temporary Mottled Boar 12 yd
+  // from the leader, marked with the icon (4 = moon, 7 = skull) by its group.
+  static bool HandleMarkNear(ChatHandler* handler,
+                             std::string leader_name,
+                             uint32_t icon) {
+    Player* leader = FindOnlinePlayer(handler, std::move(leader_name));
+    Group* group = leader ? leader->GetGroup() : nullptr;
+    if (!group || icon > 7) {
+      handler->SendErrorMessage("llmtest: marknear: needs a grouped leader");
+      return false;
+    }
+    constexpr uint32_t kMottledBoar = 3098;
+    Creature* boar = leader->SummonCreature(
+        kMottledBoar, leader->GetPositionX() + 12.0f, leader->GetPositionY(),
+        leader->GetPositionZ(), 0.0f, TEMPSUMMON_TIMED_DESPAWN, 120000);
+    if (!boar) {
+      handler->SendErrorMessage("llmtest: marknear: no boar");
+      return false;
+    }
+    group->SetTargetIcon(static_cast<uint8>(icon), leader->GetGUID(),
+                         boar->GetGUID());
+    handler->PSendSysMessage("llmtest: marked {} with icon {}", boar->GetName(),
+                             icon);
     return true;
   }
 

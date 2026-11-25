@@ -175,6 +175,8 @@ ExecuteResult ExecuteAction(Player* bot,
           return FromOutcome(ExecuteGroupPolicyAction(bot, a));
         } else if constexpr (std::is_same_v<T, PopupAnswerAction>) {
           return FromOutcome(ExecutePopupAnswerAction(bot, a));
+        } else if constexpr (std::is_same_v<T, CrowdControlAction>) {
+          return FromItemOutcome(ExecuteCrowdControlAction(bot, a));
         } else if constexpr (std::is_same_v<T, FollowLeaderAction>) {
           return FromOutcome(ExecuteFollowLeaderAction(bot, a));
         } else if constexpr (std::is_same_v<T, MarkTargetAction>) {

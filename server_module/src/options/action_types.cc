@@ -55,6 +55,16 @@ BotAction DecodeOptionFactAction(std::string_view guid,
     return LootRollAction{std::string(parts[1]), slot,
                           static_cast<uint8_t>(vote), std::string(label)};
   }
+  if (guid.starts_with("cc:")) {
+    const std::vector<std::string_view> parts = base::SplitStringPiece(
+        guid, ":", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+    uint32_t spell = 0;
+    if (parts.size() != 3 || !ParseUint32(parts[1], &spell) || spell == 0 ||
+        parts[2].empty()) {
+      return InvalidAction{"invalid crowd control"};
+    }
+    return CrowdControlAction{spell, std::string(parts[2]), std::string(label)};
+  }
   if (guid == "popups:auto") {
     return GroupPolicyAction{GroupPolicyAction::Op::kAutoPopups};
   }
@@ -345,6 +355,8 @@ std::string_view ActionKindName(const BotAction& action) {
           return "group_policy";
         if constexpr (std::is_same_v<T, PopupAnswerAction>)
           return "popup_answer";
+        if constexpr (std::is_same_v<T, CrowdControlAction>)
+          return "crowd_control";
         if constexpr (std::is_same_v<T, FollowLeaderAction>)
           return "follow";
         if constexpr (std::is_same_v<T, MarkTargetAction>)

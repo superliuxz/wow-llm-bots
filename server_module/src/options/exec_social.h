@@ -32,6 +32,8 @@ ActionOutcome ExecuteLeaveGroupAction(Player* bot);
 ActionOutcome ExecuteResurrectAction(Player* bot,
                                      const ResurrectAction& action);
 ActionOutcome ExecuteLootRollAction(Player* bot, const LootRollAction& action);
+ItemActionOutcome ExecuteCrowdControlAction(Player* bot,
+                                            const CrowdControlAction& action);
 ActionOutcome ExecutePopupAnswerAction(Player* bot,
                                        const PopupAnswerAction& action);
 // With the brain's `auto_popups` policy set, answers what is open now: rez

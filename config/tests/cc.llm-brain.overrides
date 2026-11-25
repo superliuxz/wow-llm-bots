@@ -1,0 +1,6 @@
+# e2e_crowd_control: a fresh troll mage (Loada, made level 20 and taught Polymorph by the case) and
+# a priest (Telda) at the Valley of Trials, standing still.
+LlmBrain.Bots = "Loada,Telda"
+LlmBrain.TestFixtures = "Loada=new:troll:mage,Telda=priest-l1-valley.pdump"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.NonCombatStrategies = "-follow,-grind,-new rpg"

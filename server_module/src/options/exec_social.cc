@@ -3,10 +3,12 @@
 #include "options/exec_social.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <numbers>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -570,6 +572,53 @@ void CollectGroupAndUpkeepActions(Player* bot,
     }
   }
 
+  // 6a. Crowd control on a mob the leader marked for it (moon, square, ...:
+  //     any mark but skull and cross), with the bot's own CC spell (Now #4).
+  if (bot->IsAlive() && bot->GetGroup()) {
+    const uint32_t locale = sWorld->GetDefaultDbcLocale();
+    static constexpr const char* kCcSpells[] = {
+        "Polymorph", "Hex",         "Sap",        "Shackle Undead",
+        "Hibernate", "Banish",      "Repentance", "Entangling Roots",
+        "Fear",      "Wyvern Sting"};
+    const SpellInfo* cc = nullptr;
+    for (const char* wanted : kCcSpells) {
+      for (const auto& [spell_id, state] : bot->GetSpellMap()) {
+        if (!state || !state->Active || state->State == PLAYERSPELL_REMOVED) {
+          continue;
+        }
+        const SpellInfo* info = sSpellMgr->GetSpellInfo(spell_id);
+        const char* name = info ? info->SpellName[locale] : nullptr;
+        if (name && std::string_view(name) == wanted &&
+            (!cc || info->GetRank() > cc->GetRank())) {
+          cc = info;
+        }
+      }
+      if (cc) {
+        break;
+      }
+    }
+    size_t cc_added = 0;
+    for (const pb::Unit& u : snapshot.base.nearby.units) {
+      if (!cc || cc_added >= 2) {
+        break;
+      }
+      if (u.dead || u.guid.empty() || u.reaction == pb::Unit::FRIENDLY ||
+          u.raid_marker == pb::RAID_MARKER_UNSPECIFIED ||
+          u.raid_marker == pb::SKULL || u.raid_marker == pb::CROSS ||
+          u.rel.dist_yd > 35.0f) {
+        continue;
+      }
+      std::string mark(pb::EnumName(u.raid_marker));
+      for (char& c : mark) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      }
+      out->push_back({"cc:" + std::to_string(cc->Id) + ":" + u.guid,
+                      "Crowd-control " + u.name + " (" + mark +
+                          "): " + cc->SpellName[locale]});
+      ++cc_added;
+    }
+  }
+
   // 7. Mount.
   if (bot->IsAlive() && !bot->IsInCombat() && !bot->IsMounted() &&
       bot->GetMap() && !bot->GetMap()->IsDungeon() && bot->IsOutdoors()) {
@@ -930,6 +979,41 @@ ItemActionOutcome ExecuteMountAction(Player* bot, const MountAction& action) {
   return {.used = !casting,
           .info = casting ? "" : ("mounted " + action.label),
           .pending_spell_id = casting ? action.spell_id : 0};
+}
+
+ItemActionOutcome ExecuteCrowdControlAction(Player* bot,
+                                            const CrowdControlAction& action) {
+  const SpellInfo* spell = sSpellMgr->GetSpellInfo(action.spell_id);
+  Unit* target =
+      ObjectAccessor::GetUnit(*bot, ParseSnapshotGuid(action.target_guid));
+  if (!spell || !bot->HasSpell(action.spell_id)) {
+    return {.error = "you don't know that spell"};
+  }
+  if (!target || !target->IsAlive() || !bot->IsValidAttackTarget(target)) {
+    return {.error = "no target to crowd-control"};
+  }
+  if (bot->HasSpellCooldown(spell->Id)) {
+    return {.error = action.label + " is on cooldown"};
+  }
+  if (bot->isMoving()) {
+    bot->StopMoving();
+  }
+  // The client's cast: CMSG_CAST_SPELL on the target, like a player's click.
+  WorldPacket p(CMSG_CAST_SPELL);
+  p << static_cast<uint8_t>(0) << spell->Id << static_cast<uint8_t>(0);
+  SpellCastTargets targets;
+  targets.SetUnitTarget(target);
+  targets.Write(p);
+  p.rpos(0);
+  bot->GetSession()->HandleCastSpellOpcode(p);
+  const bool casting = IsSpellCastPending(bot, spell->Id);
+  const bool landed = target->HasAura(spell->Id);
+  if (!casting && !landed) {
+    return {.error = "cannot cast " + action.label + " now"};
+  }
+  return {.used = !casting,
+          .info = casting ? "" : action.label,
+          .pending_spell_id = casting ? spell->Id : 0};
 }
 
 ActionOutcome ExecutePopupAnswerAction(Player* bot,

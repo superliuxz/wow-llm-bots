@@ -287,6 +287,33 @@ pb::Option::Kind ToProtoKind(OptionTarget::Kind kind) {
 
 }  // namespace
 
+namespace {
+
+const char* MarkerName(pb::RaidMarker m) {
+  switch (m) {
+    case pb::STAR:
+      return "star";
+    case pb::CIRCLE:
+      return "circle";
+    case pb::DIAMOND:
+      return "diamond";
+    case pb::TRIANGLE:
+      return "triangle";
+    case pb::MOON:
+      return "moon";
+    case pb::SQUARE:
+      return "square";
+    case pb::CROSS:
+      return "cross";
+    case pb::SKULL:
+      return "skull";
+    default:
+      return "";
+  }
+}
+
+}  // namespace
+
 std::string_view OptionKindName(OptionTarget::Kind kind) {
   switch (kind) {
     case OptionTarget::Kind::kAttack:
@@ -343,8 +370,14 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
           has_explicit_npc_actions(u.guid)) {
         continue;
       }
-      AddTarget(*kind, u.guid, u.name, {u.targeting_me, u.rel.dist_yd},
-                &targets, &ranks);
+      // The leader's kill marks win over nearness: among mobs of one name,
+      // the skull (or cross) is the one to attack.
+      const bool kill_mark =
+          u.raid_marker == pb::SKULL || u.raid_marker == pb::CROSS;
+      AddTarget(
+          *kind, u.guid, u.name,
+          kill_mark ? Rank{true, -1.0f} : Rank{u.targeting_me, u.rel.dist_yd},
+          &targets, &ranks);
     }
   }
   for (const pb::GameObject& go : snapshot->base.nearby.objects) {
@@ -379,9 +412,39 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
     }
     return false;
   };
+  // Marked mobs come first, skull then cross (kill order), and say their mark
+  // (Now #4: follow the leader's marks).
+  const auto marker_of = [&](const OptionTarget& t) {
+    if (t.kind != OptionTarget::Kind::kAttack) {
+      return pb::RAID_MARKER_UNSPECIFIED;
+    }
+    for (const pb::Unit& u : snapshot->base.nearby.units) {
+      if (u.guid == t.guid) {
+        return u.raid_marker;
+      }
+    }
+    return pb::RAID_MARKER_UNSPECIFIED;
+  };
+  const auto kill_rank = [&](const OptionTarget& t) {
+    const pb::RaidMarker m = marker_of(t);
+    return m == pb::SKULL ? 0 : m == pb::CROSS ? 1 : 2;
+  };
+  std::stable_sort(targets.begin(), targets.end(),
+                   [&](const OptionTarget& a, const OptionTarget& b) {
+                     return kill_rank(a) < kill_rank(b);
+                   });
+  // A human leads: they pull. Mobs nobody in the party fights yet get no
+  // Attack option at all (a gate, not a prompt rule).
+  if (facts.leave_pulls_to_leader) {
+    std::erase_if(targets, not_pulled);
+  }
   for (const OptionTarget& target : targets) {
     pb::Option& option = snapshot->options.emplace_back();
     option.text = TargetedOptionText(target);
+    if (const pb::RaidMarker m = marker_of(target);
+        m != pb::RAID_MARKER_UNSPECIFIED) {
+      option.text += std::string(" (") + MarkerName(m) + ")";
+    }
     if (not_pulled(target)) {
       option.text += " (not pulled)";
     }

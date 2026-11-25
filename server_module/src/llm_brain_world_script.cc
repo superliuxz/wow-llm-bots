@@ -1438,6 +1438,11 @@ class LlmBrainWorldScript : public WorldScript {
     }
     Group* cur_group = bot->GetGroup();
     facts.can_leave_group = (cur_group != nullptr && !bot->IsInCombat());
+    if (cur_group && !cur_group->IsLeader(bot->GetGUID())) {
+      Player* leader =
+          ObjectAccessor::FindConnectedPlayer(cur_group->GetLeaderGUID());
+      facts.leave_pulls_to_leader = leader && IsHumanPlayer(leader);
+    }
     const bool can_invite =
         !bot->IsInCombat() &&
         (!cur_group || ((cur_group->IsLeader(bot->GetGUID()) ||

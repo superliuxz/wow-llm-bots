@@ -140,7 +140,9 @@ Findings from "Wow Llm Bots Review 2". Tick when fixed and tested.
 3. **[done] Popup policies in C++** (`Answer popups automatically`, `AnswerPopupsByPolicy`,
    summon and kick-vote options; `e2e_popup_policy`; summon and kick vote not live-triggered yet) (rez, ready, roll, role, boot, summon), written once by the brain and
    answered in under 1 s. Add the Disenchant vote, the LFG vote-kick and summon accept.
-4. **Follow marks and do CC.** `Attack <mob> (skull)` options sorted by mark,
+4. **[done] Follow marks and do CC.** (marked Attack options first with their mark,
+   `Crowd-control <mob> (<mark>): <spell>`, area damage off near CC, human-leader pull gate;
+   `e2e_crowd_control`, unit tests) `Attack <mob> (skull)` options sorted by mark,
    `Crowd-control <mob> (moon): Polymorph`, and a "don't break CC" `-aoe` override. Make "human is
    tank -> bots never pull" a C++ gate, not a prompt rule.
 5. **Party awareness.** P1 wakes for party combat start, a member died, healer under 30% mana. A

@@ -48,6 +48,10 @@ struct BotSession {
   uint64_t group_guid = 0;
   GroupPolicy group_policy;
 
+  // The area-damage strategies (`aoe`, `frost aoe`, ...) taken off while a
+  // crowd-controlled mob is near (Now #4), given back when none is.
+  std::vector<std::string> suppressed_aoe;
+
   // The brain's popup policy (Now #3): answer rez offers, summons, ready
   // checks, role checks, proposals and loot rolls automatically. Survives
   // logout.

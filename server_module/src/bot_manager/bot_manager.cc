@@ -2,9 +2,11 @@
 
 #include "bot_manager/bot_manager.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <list>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -15,10 +17,14 @@
 #include "AiFactory.h"
 #include "AiObjectContext.h"
 #include "ByteBuffer.h"
+#include "Cell.h"
+#include "CellImpl.h"  // IWYU pragma: keep
 #include "CharacterCache.h"
 #include "DBCStructure.h"
 #include "Engine.h"
 #include "Event.h"
+#include "GridNotifiers.h"
+#include "GridNotifiersImpl.h"  // IWYU pragma: keep
 #include "Group.h"
 #include "Item.h"
 #include "ItemTemplate.h"
@@ -203,6 +209,22 @@ bool GroupHasHuman(Group* group) {
        itr = itr->next()) {
     Player* member = itr->GetSource();
     if (member && IsHumanPlayer(member)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// A hostile within 30 yd is held by crowd control that damage would break
+// (Polymorph, Sap, Hex, ...): area damage would free it (Now #4).
+bool CrowdControlledMobNearby(Player* bot) {
+  std::list<Unit*> nearby;
+  Acore::AnyUnfriendlyUnitInObjectRangeCheck check(bot, bot, 30.0f);
+  Acore::UnitListSearcher<Acore::AnyUnfriendlyUnitInObjectRangeCheck> searcher(
+      bot, nearby, check);
+  Cell::VisitObjects(bot, searcher, 30.0f);
+  for (Unit* u : nearby) {
+    if (u && u->IsAlive() && u->HasBreakableByDamageCrowdControlAura()) {
       return true;
     }
   }
@@ -691,6 +713,42 @@ void BotManager::EnsureStrategies(Player* player) {
   }
   // The brain's own choice for this group comes last, so it wins (RH-M1/M2).
   const GroupPolicy policy = GetGroupPolicy(player);  // Empty outside it.
+  // Don't break crowd control: no area damage while a CC'd mob is near; the
+  // area strategies the bot had come back after (Now #4).
+  if (player->GetGroup()) {
+    const bool cc_near = CrowdControlledMobNearby(player);
+    std::vector<std::string> now_aoe;
+    if (cc_near) {
+      for (const std::string& name : ai->GetStrategies(BOT_STATE_COMBAT)) {
+        if (name == "aoe" || name.ends_with(" aoe") || name == "baoe") {
+          now_aoe.push_back(name);
+        }
+      }
+    }
+    const std::vector<std::string> off =
+        BotSessionRegistry::Instance().WithSession(
+            player->GetGUID().GetRawValue(), [&](BotSession& s) {
+              for (const std::string& n : now_aoe) {
+                if (std::find(s.suppressed_aoe.begin(), s.suppressed_aoe.end(),
+                              n) == s.suppressed_aoe.end()) {
+                  s.suppressed_aoe.push_back(n);
+                }
+              }
+              std::vector<std::string> was = s.suppressed_aoe;
+              if (!cc_near) {
+                s.suppressed_aoe.clear();
+              }
+              return was;
+            });
+    for (const std::string& name : off) {
+      combat += (cc_near ? ",-" : ",+") + name;
+    }
+    if (!now_aoe.empty()) {  // Only when it is switched off.
+      LOG_INFO("module",
+               "mod-llm-brain: {}: crowd control nearby, area damage off ({})",
+               player->GetName(), now_aoe.front());
+    }
+  }
   // Both directions are spelled out: clearing a policy must undo it (T4).
   if (policy.not_tank) {
     combat += ",-tank assist,-pull back,+dps assist";

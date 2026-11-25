@@ -28,6 +28,15 @@ TEST(ActionTypesTest, DecodesTypedNpcAndGroupActions) {
     EXPECT_EQ(roll->vote, 1u);
   }
   {
+    BotAction a = DecodeOptionFactAction("cc:118:0xF130", "Polymorph");
+    const auto* cc = std::get_if<CrowdControlAction>(&a);
+    ASSERT_NE(cc, nullptr);
+    EXPECT_EQ(cc->spell_id, 118u);
+    EXPECT_EQ(cc->target_guid, "0xF130");
+    EXPECT_TRUE(std::holds_alternative<InvalidAction>(
+        DecodeOptionFactAction("cc:0:0xF130", "bad")));
+  }
+  {
     BotAction a = DecodeOptionFactAction("roll:0x100:3:3", "Disenchant Sword");
     const auto* roll = std::get_if<LootRollAction>(&a);
     ASSERT_NE(roll, nullptr);

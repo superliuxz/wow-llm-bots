@@ -68,6 +68,40 @@ TEST(OptionsTest, OneAttackPerNameTargetingTheNearest) {
   EXPECT_EQ(snapshot.options[2].guid, "");
 }
 
+// Now #4: the leader's marks order the kills: skull first, then cross, and
+// among mobs of one name the marked one is the target; the mark is shown.
+TEST(OptionsTest, MarkedMobsComeFirstAndSayTheirMark) {
+  pb::Snapshot snapshot;
+  AddUnit(&snapshot, "Vile Familiar", "0x1", 5);
+  AddUnit(&snapshot, "Scorpid Worker", "0x2", 8);
+  AddUnit(&snapshot, "Scorpid Worker", "0x3", 25)->raid_marker = pb::SKULL;
+  AddUnit(&snapshot, "Kobold", "0x4", 20)->raid_marker = pb::CROSS;
+  AddUnit(&snapshot, "Kobold Miner", "0x5", 9)->raid_marker = pb::MOON;
+  const std::vector<OptionTarget> targets = AddOptions(&snapshot);
+  EXPECT_EQ(Texts(snapshot),
+            (std::vector<std::string>{
+                "Attack Scorpid Worker (skull)", "Attack Kobold (cross)",
+                "Attack Vile Familiar", "Attack Kobold Miner (moon)",
+                "Keep doing what I'm doing"}));
+  EXPECT_EQ(targets[0].guid, "0x3");
+}
+
+// Now #4: when a human leads, they pull: a mob nobody in the party fights
+// gets no Attack option (a gate, not a prompt rule).
+TEST(OptionsTest, HumanLeaderPullsSoUnpulledMobsGetNoAttack) {
+  pb::Snapshot snapshot;
+  snapshot.bot = "Loada";
+  snapshot.ext.party.emplace().members.emplace_back().name = "Hele";
+  AddUnit(&snapshot, "Kobold Tunneler", "0x1", 10);
+  AddUnit(&snapshot, "Kobold Miner", "0x2", 12)->target = "Hele";
+  OptionFacts facts;
+  facts.leave_pulls_to_leader = true;
+  AddOptions(&snapshot, facts);
+  EXPECT_EQ(Texts(snapshot),
+            (std::vector<std::string>{"Attack Kobold Miner",
+                                      "Keep doing what I'm doing"}));
+}
+
 // The mob hitting the bot is the one a player hits back, even if another of
 // the same name is nearer.
 TEST(OptionsTest, AttackPrefersTheUnitAttackingTheBot) {
