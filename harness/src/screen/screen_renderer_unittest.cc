@@ -990,5 +990,37 @@ TEST(ScreenRendererTest, RendersPartyLeaderTagOnSelfOnlyWhenSelfIsLeader) {
       << empty_party_me;
 }
 
+// Now #5: the party's pace on one line: who fights, who is dead or gone, and
+// a healer low on mana.
+TEST(ScreenRendererTest, PartyStateLineSummarizesThePace) {
+  pb::Snapshot snap;
+  snap.bot = "Loada";
+  pb::Party& party = snap.ext.party.emplace();
+  party.leader = "Hele";
+  const auto add = [&](const char* name, pb::Role role) -> pb::Unit& {
+    pb::Unit& m = party.members.emplace_back();
+    m.name = name;
+    m.guid = std::string("0x") + name;
+    m.group.emplace().online = true;
+    m.group->role = role;
+    return m;
+  };
+  add("Hele", pb::TANK).group->aggro = true;
+  add("Zenji", pb::HEALER).power_pct = 20.0f;
+  add("Rokzul", pb::DPS).dead = true;
+  add("Mabaku", pb::DPS).group->online = false;
+  const Screen screen = RenderScreen(snap);
+  EXPECT_NE(screen.text.find("party_state: fighting (Hele); healer Zenji 20% "
+                             "mana; Rokzul dead; Mabaku offline"),
+            std::string::npos)
+      << screen.text;
+
+  pb::Snapshot calm;
+  calm.bot = "Loada";
+  calm.ext.party.emplace().members.emplace_back().name = "Hele";
+  calm.ext.party->members.back().group.emplace().online = true;
+  EXPECT_EQ(RenderScreen(calm).text.find("party_state:"), std::string::npos);
+}
+
 }  // namespace
 }  // namespace harness

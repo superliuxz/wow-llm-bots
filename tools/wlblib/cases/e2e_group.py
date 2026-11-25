@@ -1144,7 +1144,8 @@ def _case_popup_policy():
 
       1. Level Loada and Telda to 20 and group them (Loada leads).
       2. Telda picks `Answer popups automatically`.
-      3. Loada starts a ready check and a group roll on a cape Telda can wear and has no cloak:
+      3. Loada starts a ready check with its `Start ready check` option (Now #5) and a group
+         roll on a cape Telda can wear and has no cloak:
          Telda answers both by policy within seconds (ready; Greed: the cape binds on equip, and
          BoE is greeded even as an upgrade), and is told
          so by `popup policy:` info events, with no further choice from the brain.
@@ -1174,6 +1175,7 @@ def _case_popup_policy():
         reader = wire.FrameReader()
         policy_cmd = None
         policy_ok = False
+        ready_started = False
         started = None
         answers = []
         chooses_after = 0
@@ -1199,7 +1201,19 @@ def _case_popup_policy():
                             expect(False, f"policy choice failed: {ev['error'].get('text')}")
                         continue
                     snap = msg.get("snapshot")
-                    if not snap or snap.get("bot") != "Telda":
+                    if not snap:
+                        continue
+                    if snap.get("bot") == "Loada":
+                        # Now #5: the leader starts the ready check by its own option.
+                        if policy_ok and not ready_started:
+                            idx = find_option(snap.get("options", []), "Start ready check")
+                            if idx:
+                                ready_started = True
+                                send_cmd(sock, {"bot": "Loada", "command_id": 8,
+                                                 "choose": {"option": idx,
+                                                            "seq": snap.get("seq", 0)}})
+                        continue
+                    if snap.get("bot") != "Telda":
                         continue
                     if policy_cmd is None:
                         idx = find_option(snap.get("options", []),
@@ -1212,13 +1226,13 @@ def _case_popup_policy():
                                                        "Answer popups yourself again"):
                         policy_ok = True
                         started = time.time()
-                        server.console("llmtest readycheck Loada", inst=TEST)
                         out = server.console(f"llmtest lootroll Loada {ITEM}", inst=TEST)
                         expect("roll started" in out, f"setup: no roll started ({out[-200:]})")
         finally:
             sock.close()
             server.console("llmtest ungroup Telda", inst=TEST)
         expect(policy_ok, "Telda never set the popup policy")
+        expect(ready_started, "Loada (leader) was never offered `Start ready check`")
         took = time.time() - started if started else 0
         expect(any("answered the ready check: ready" in a for a in answers),
                f"ready check not answered by policy: {answers}")

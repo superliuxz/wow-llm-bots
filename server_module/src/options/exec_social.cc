@@ -371,6 +371,14 @@ void CollectGroupAndUpkeepActions(Player* bot,
     out->push_back({"ready:no", "Not ready (decline ready check)"});
   }
 
+  // 2. (leader) A ready check before a boss or a pull (Now #5).
+  if (bot->IsAlive() && !bot->IsInCombat() && bot->GetGroup() &&
+      bot->GetGroup()->IsLeader(bot->GetGUID()) &&
+      !BotManager::HasPendingReadyCheck(bot) &&
+      bot->GetGroup()->GetMembersCount() > 1) {
+    out->push_back({"ready:start", "Start ready check"});
+  }
+
   // 2a. A summon and a Dungeon Finder kick vote (Now #3).
   if (bot->GetSummonExpireTimer() > GameTime::GetGameTime().count()) {
     const std::string from = BotSessionRegistry::Instance().InspectSession(
@@ -773,6 +781,15 @@ ActionOutcome ExecuteReadyCheckAction(Player* bot,
   if (!bot->GetGroup()) {
     BotManager::ClearPendingReadyCheck(bot);
     return {.error = "you are not in a group"};
+  }
+  if (action.start) {
+    if (!bot->GetGroup()->IsLeader(bot->GetGUID()) &&
+        !bot->GetGroup()->IsAssistant(bot->GetGUID())) {
+      return {.error = "only the leader starts a ready check"};
+    }
+    WorldPacket request(MSG_RAID_READY_CHECK, 0);
+    session->HandleRaidReadyCheckOpcode(request);
+    return {.used = true, .info = "started a ready check"};
   }
   const uint8_t state = action.ready ? 1 : 0;
   WorldPacket p(MSG_RAID_READY_CHECK, 1);

@@ -28,6 +28,12 @@ TEST(ActionTypesTest, DecodesTypedNpcAndGroupActions) {
     EXPECT_EQ(roll->vote, 1u);
   }
   {
+    BotAction a = DecodeOptionFactAction("ready:start", "Start ready check");
+    const auto* rc = std::get_if<ReadyCheckAction>(&a);
+    ASSERT_NE(rc, nullptr);
+    EXPECT_TRUE(rc->start);
+  }
+  {
     BotAction a = DecodeOptionFactAction("cc:118:0xF130", "Polymorph");
     const auto* cc = std::get_if<CrowdControlAction>(&a);
     ASSERT_NE(cc, nullptr);

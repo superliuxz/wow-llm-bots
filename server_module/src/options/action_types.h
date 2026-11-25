@@ -83,6 +83,7 @@ struct LootRollAction {
 
 struct ReadyCheckAction {
   bool ready = true;
+  bool start = false;  // The leader starts one (Now #5).
 };
 
 struct SharedQuestAction {

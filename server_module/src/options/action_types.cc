@@ -79,6 +79,9 @@ BotAction DecodeOptionFactAction(std::string_view guid,
     return PopupAnswerAction{PopupAnswerAction::Kind::kBootVote,
                              guid == "boot:yes"};
   }
+  if (guid == "ready:start") {
+    return ReadyCheckAction{true, true};
+  }
   if (guid == "ready:yes") {
     return ReadyCheckAction{true};
   }

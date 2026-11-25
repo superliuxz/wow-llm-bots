@@ -145,7 +145,8 @@ Findings from "Wow Llm Bots Review 2". Tick when fixed and tested.
    `e2e_crowd_control`, unit tests) `Attack <mob> (skull)` options sorted by mark,
    `Crowd-control <mob> (moon): Polymorph`, and a "don't break CC" `-aoe` override. Make "human is
    tank -> bots never pull" a C++ gate, not a prompt rule.
-5. **Party awareness.** P1 wakes for party combat start, a member died, healer under 30% mana. A
+5. **[done] Party awareness.** (party wakes from T8, `party_state:` screen line, `Start ready
+   check` for the leader, RULES pace; unit tests, `e2e_popup_policy`) P1 wakes for party combat start, a member died, healer under 30% mana. A
    `party_state:` line on screen. The healer says "oom, drinking"; the tank waits; a leader
    `Start ready check` option before bosses.
 6. **Wipe protocol.** Wait if a soulstone or ankh is up, otherwise release and run back. Hold 10 s

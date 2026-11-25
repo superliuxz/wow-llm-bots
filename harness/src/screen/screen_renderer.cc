@@ -955,6 +955,40 @@ std::vector<std::string> PartyLines(
       }
     }
   }
+
+  // The party at a glance (Now #5): who is fighting, dead, a healer low on
+  // mana, or gone, so pace (pull, wait, drink) can be read off one line.
+  std::vector<std::string> state;
+  std::vector<std::string> fighting;
+  for (const pb::Unit& u : p.members) {
+    if (!u.group) {
+      continue;
+    }
+    if (!u.group->online) {
+      state.push_back(base::StrCat({u.name, " offline"}));
+    } else if (u.dead) {
+      state.push_back(base::StrCat({u.name, " dead"}));
+    } else {
+      if (u.group->aggro) {
+        fighting.push_back(u.name);
+      }
+      constexpr float kLowManaPct = 35.0f;
+      if (u.group->role == pb::HEALER && u.power_pct &&
+          std::isfinite(*u.power_pct) && *u.power_pct < kLowManaPct) {
+        state.push_back(base::StringPrintf("healer %s %.0f%% mana",
+                                           u.name.c_str(), *u.power_pct));
+      }
+    }
+  }
+  if (!fighting.empty()) {
+    state.insert(
+        state.begin(),
+        base::StrCat({"fighting (", base::JoinString(fighting, ", "), ")"}));
+  }
+  if (!state.empty()) {
+    lines.push_back(
+        base::StrCat({"  party_state: ", base::JoinString(state, "; ")}));
+  }
   return lines;
 }
 

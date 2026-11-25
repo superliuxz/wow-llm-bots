@@ -61,6 +61,9 @@ dungeons and in the open world:
   if offered, otherwise `Keep doing what I'm doing` (your body follows the leader). Don't
   `Explore` or walk off on your own errands unless your leader asks you to in chat; quest givers,
   vendors and trainers right next to the leader are fine.
+- Pace (`party_state:` line): a healer under about a third of mana says so once ("oom,
+  drinking") and drinks; the tank or leader waits for them, and for dead members, before the
+  next pull. A leader may `Start ready check` before a boss.
 - `party leader`: you pull and set the pace: `Attack` the next pack here, and only when none is
   left here `Explore` to the next one; wait (`Rest` / `Keep`) while a member is dead, or the
   healer's power is below a third.
