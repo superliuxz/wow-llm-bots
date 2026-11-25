@@ -154,6 +154,9 @@ class BotLoop {
       std::string text;
       bool at_me = false;
       bool triggered_wake = false;
+      // When the line arrived: a reply's typing delay counts from here, so the
+      // brain's thinking time is not typed again on top.
+      base::TimeTicks at;
     };
     std::vector<ObservedChat> pending_chats;
     // Per-sender recent chat wake timestamps for spam rate limiting (A-M8).
@@ -288,6 +291,15 @@ class BotLoop {
       std::string text;
     };
     std::deque<PendingSay> pending_says;
+    // What the bot said lately (lowercased), for the unprompted self-repeat
+    // filter (kSelfRepeatWindow in bot_loop.cc).
+    struct SaidLine {
+      std::string text;
+      base::TimeTicks at;
+    };
+    std::deque<SaidLine> said_lines;
+    // When the call in flight was asked (or its snapshot arrived, if later).
+    base::TimeTicks call_started_at;
     uint32_t last_bag_free_slots = 1;
     // The quest tracker's state; nullopt before the first snapshot (no
     // glance for what was there already).
@@ -311,7 +323,8 @@ class BotLoop {
 
   void NoteEvent(BotState* state,
                  const wlb::snapshot::Event& event,
-                 bool triggered_wake = false);
+                 bool triggered_wake = false,
+                 base::TimeTicks at = base::TimeTicks());
   // A line for the next prompt's "Since your last look".
   void NoteText(BotState* state, std::string text);
   static void ResetBotSession(BotState* state, bool cancel_in_flight);
@@ -320,14 +333,34 @@ class BotLoop {
   // `path`'s text, re-read only when its modification time changed (it is
   // read on every brain call: RH-L5); "" when missing.
   std::string ReadFileIfChanged(const std::string& path);
-  // Whether `bot` answers the party/raid chat lines among `chats` (RH-H4):
-  // a bot named in the line does; when no brain bot of the group is named,
-  // only the first of them by name does. True when no such line woke it.
-  // Whether `bot` answers one party/raid line `text`: named in it, or, when no
-  // online brain bot of the group is named, the first online one by name.
+  // Who a party/raid line `text` is for (addressing, not judgment): the
+  // group's online brain bots (sorted, `bot` included), and those of them the
+  // line addresses by name, class (or a common alias/typo), or role, names
+  // first.
+  struct PartyLineAddressees {
+    std::vector<std::string> online;
+    std::vector<std::string> addressed;
+  };
+  PartyLineAddressees AddresseesOf(
+      const std::string& bot,
+      std::string_view text,
+      const wlb::snapshot::Snapshot& snapshot) const;
+  // Whether one party/raid line from `from` wakes `bot`: every addressed bot
+  // wakes; when nobody is addressed, a human's tactical call ("los", "buff
+  // pls") wakes every online brain bot of a small group (<= 4), and any other
+  // line only the group's first online brain bot by name.
+  bool WakesForPartyLine(const std::string& bot,
+                         std::string_view text,
+                         const std::string& from,
+                         const wlb::snapshot::Snapshot& snapshot) const;
+  // Whether `bot` is the one who replies in chat to party/raid line `text`
+  // (at most one speaker, Now #10): the first addressed bot, or, when nobody
+  // is addressed, the first online brain bot by name.
   bool AnswersPartyLine(const std::string& bot,
                         std::string_view text,
                         const wlb::snapshot::Snapshot& snapshot) const;
+  // Whether `bot` answers the party/raid chat lines among `chats` (RH-H4).
+  // True when no such line woke it.
   bool AnswersPartyChat(const std::string& bot,
                         const std::vector<BotState::ObservedChat>& chats,
                         const wlb::snapshot::Snapshot& snapshot) const;
@@ -443,7 +476,15 @@ class BotLoop {
                       wlb::snapshot::ChatChannel channel,
                       const std::string& to,
                       const std::string& text,
-                      base::TimeTicks now);
+                      base::TimeTicks now,
+                      base::TimeDelta already_waited = base::TimeDelta());
+  // An unprompted line the bot already said in the last kSelfRepeatWindow.
+  static bool IsSelfRepeat(const BotState& state,
+                           std::string_view text,
+                           base::TimeTicks now);
+  static void RecordSaid(BotState* state,
+                         std::string_view text,
+                         base::TimeTicks now);
   void SendSay(const std::string& bot,
                wlb::snapshot::ChatChannel channel,
                const std::string& to,

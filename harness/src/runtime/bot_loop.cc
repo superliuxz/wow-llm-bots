@@ -231,16 +231,21 @@ std::string PartyBudgetKey(const std::string& bot,
   return names.size() > 1 ? base::JoinString(names, ",") : "";
 }
 
+// How long a person would take to type `chars` characters, less what the
+// reader already waited (`already_waited`: the brain's inference time since the
+// line that woke it), never negative.
 base::TimeDelta ComputeTypingDelay(size_t chars,
                                    base::TimeDelta min_delay,
-                                   base::TimeDelta max_delay) {
+                                   base::TimeDelta max_delay,
+                                   base::TimeDelta already_waited) {
   if (!max_delay.is_positive()) {
     return base::TimeDelta();
   }
   const base::TimeDelta raw =
       min_delay +
       base::Milliseconds(static_cast<int64_t>(chars) * kTypingMsPerChar);
-  return std::clamp(raw, min_delay, max_delay);
+  return std::max(base::TimeDelta(),
+                  std::clamp(raw, min_delay, max_delay) - already_waited);
 }
 
 // Structured `memory.md` (F5): optional `## Earlier summary` section followed
@@ -363,6 +368,120 @@ bool ContainsWholeWordIgnoringCase(std::string_view haystack,
     }
   }
   return false;
+}
+
+// How players address party members in chat (addressing, not judgment): a
+// class by its name, a plural, or a common nickname/typo, or a role. A word
+// here only says who a line is for; the addressed bots' brains decide what to
+// do about it.
+struct AddressWord {
+  std::string_view word;
+  std::string_view class_name;  // pb::PlayerPart::class_, or "" for a role.
+  pb::Role role = pb::Role::ROLE_UNSPECIFIED;
+};
+constexpr AddressWord kAddressWords[] = {
+    {"warrior", "Warrior"},
+    {"warriors", "Warrior"},
+    {"warr", "Warrior"},
+    {"paladin", "Paladin"},
+    {"paladins", "Paladin"},
+    {"pally", "Paladin"},
+    {"pallies", "Paladin"},
+    {"pala", "Paladin"},
+    {"hunter", "Hunter"},
+    {"hunters", "Hunter"},
+    {"hunt", "Hunter"},
+    {"rogue", "Rogue"},
+    {"rogues", "Rogue"},
+    {"rouge", "Rogue"},
+    {"rouges", "Rogue"},
+    {"priest", "Priest"},
+    {"priests", "Priest"},
+    {"preist", "Priest"},
+    {"death knight", "Death Knight"},
+    {"deathknight", "Death Knight"},
+    {"dk", "Death Knight"},
+    {"dks", "Death Knight"},
+    {"shaman", "Shaman"},
+    {"shamans", "Shaman"},
+    {"shammy", "Shaman"},
+    {"sham", "Shaman"},
+    {"mage", "Mage"},
+    {"mages", "Mage"},
+    {"warlock", "Warlock"},
+    {"warlocks", "Warlock"},
+    {"lock", "Warlock"},
+    {"locks", "Warlock"},
+    {"druid", "Druid"},
+    {"druids", "Druid"},
+    {"dudu", "Druid"},
+    {"tank", "", pb::Role::TANK},
+    {"tanks", "", pb::Role::TANK},
+    {"healer", "", pb::Role::HEALER},
+    {"healers", "", pb::Role::HEALER},
+    {"heals", "", pb::Role::HEALER},
+    {"healz", "", pb::Role::HEALER},
+    {"dps", "", pb::Role::DPS},
+};
+
+// Words of a tactical call to the whole group ("los", "buff pls", "anyone got
+// decurse?"): unaddressed, such a line from a human wakes every brain bot of
+// a small group, so whoever can help hears it; chit-chat and invitations
+// ("anyone up for RFC?") wake one.
+constexpr std::string_view kGroupCallWords[] = {
+    "los",    "buff",  "buffs",     "rebuff",  "decurse", "dispel",   "cleanse",
+    "cure",   "curse", "poison",    "disease", "magic",   "cc",       "sheep",
+    "poly",   "sap",   "trap",      "fear",    "shackle", "hex",      "root",
+    "stun",   "kick",  "interrupt", "pull",    "wait",    "stop",     "hold",
+    "run",    "stack", "spread",    "focus",   "kill",    "assist",   "help",
+    "heal",   "rez",   "res",       "ress",    "mana",    "oom",      "drink",
+    "water",  "food",  "summon",    "follow",  "come",    "move",     "kite",
+    "taunt",  "aoe",   "adds",      "add",     "careful", "fire",     "behind",
+    "skull",  "cross", "star",      "moon",    "square",  "triangle", "diamond",
+    "circle",
+};
+constexpr size_t kMaxGroupWakeBots = 4;
+
+// The unprompted self-repeat filter: a bot doesn't say a line again, unasked,
+// within 5 minutes of saying it.
+constexpr base::TimeDelta kSelfRepeatWindow = base::Minutes(5);
+constexpr size_t kMaxSaidLines = 32;
+
+std::string NormalizeSaid(std::string_view text) {
+  std::string out;
+  for (char c : text) {
+    if (IsAsciiWordChar(c)) {
+      out.push_back(base::ToLowerASCII(c));
+    } else if (!out.empty() && out.back() != ' ') {
+      out.push_back(' ');
+    }
+  }
+  if (!out.empty() && out.back() == ' ') {
+    out.pop_back();
+  }
+  return out;
+}
+
+bool AddressesClassOrRole(std::string_view text,
+                          std::string_view class_name,
+                          pb::Role role) {
+  for (const AddressWord& w : kAddressWords) {
+    const bool matches =
+        w.class_name.empty()
+            ? (role != pb::Role::ROLE_UNSPECIFIED && w.role == role)
+            : base::EqualsCaseInsensitiveASCII(w.class_name, class_name);
+    if (matches && ContainsWholeWordIgnoringCase(text, w.word)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool IsGroupCall(std::string_view text) {
+  return std::any_of(std::begin(kGroupCallWords), std::end(kGroupCallWords),
+                     [&](std::string_view w) {
+                       return ContainsWholeWordIgnoringCase(text, w);
+                     });
 }
 
 struct RelationshipSection {
@@ -581,13 +700,15 @@ std::string BotLoop::ReadFileIfChanged(const std::string& path) {
   return text;
 }
 
-bool BotLoop::AnswersPartyLine(const std::string& bot,
-                               std::string_view text,
-                               const pb::Snapshot& snapshot) const {
+BotLoop::PartyLineAddressees BotLoop::AddresseesOf(
+    const std::string& bot,
+    std::string_view text,
+    const pb::Snapshot& snapshot) const {
   // The online brain bots in this party (this harness runs them, and their
   // snapshots are fresh), this one included (T15: an offline or stalled bot
   // must not be the one that answers).
-  std::vector<std::string> brain_bots{bot};
+  PartyLineAddressees out;
+  out.online.push_back(bot);
   const auto add_members = [&](const std::vector<pb::Unit>& members) {
     for (const pb::Unit& m : members) {
       if (m.name.empty() || m.name == bot) {
@@ -598,7 +719,7 @@ bool BotLoop::AnswersPartyLine(const std::string& bot,
           !it->second.latest_received_at.is_null() &&
           base::TimeTicks::Now() - it->second.latest_received_at <=
               config_.stale_snapshot_after) {
-        brain_bots.push_back(m.name);
+        out.online.push_back(m.name);
       }
     }
   };
@@ -608,18 +729,84 @@ bool BotLoop::AnswersPartyLine(const std::string& bot,
   if (snapshot.ext.raid) {
     add_members(snapshot.ext.raid->members);
   }
-  std::sort(brain_bots.begin(), brain_bots.end());
-  brain_bots.erase(std::unique(brain_bots.begin(), brain_bots.end()),
-                   brain_bots.end());
-  for (const std::string& name : brain_bots) {
+  std::sort(out.online.begin(), out.online.end());
+  out.online.erase(std::unique(out.online.begin(), out.online.end()),
+                   out.online.end());
+  // A bot's class and role as it sees itself, else as this bot's group frame
+  // shows it.
+  const auto class_and_role = [&](const std::string& name) {
+    std::string class_name;
+    pb::Role role = pb::Role::ROLE_UNSPECIFIED;
+    const auto take = [&](const pb::Unit& u) {
+      if (class_name.empty() && u.player) {
+        class_name = u.player->class_;
+      }
+      if (role == pb::Role::ROLE_UNSPECIFIED && u.group) {
+        role = u.group->role;
+      }
+    };
+    if (name == bot) {
+      take(snapshot.base.self.unit);
+    } else if (const auto it = bots_.find(name);
+               it != bots_.end() && it->second.latest_snapshot) {
+      take(it->second.latest_snapshot->base.self.unit);
+    }
+    for (const auto* group :
+         {snapshot.ext.party ? &snapshot.ext.party->members : nullptr,
+          snapshot.ext.raid ? &snapshot.ext.raid->members : nullptr}) {
+      if (!group) {
+        continue;
+      }
+      for (const pb::Unit& m : *group) {
+        if (m.name == name) {
+          take(m);
+        }
+      }
+    }
+    return std::pair(class_name, role);
+  };
+  for (const std::string& name : out.online) {
     if (ContainsWholeWordIgnoringCase(text, name)) {
-      // One responder per question (Now #10): even if multiple bots are named,
-      // only the first named online bot answers.
-      return name == bot;
+      out.addressed.push_back(name);
     }
   }
-  // Nobody named: one bot answers for the group.
-  return brain_bots.front() == bot;
+  for (const std::string& name : out.online) {
+    if (std::find(out.addressed.begin(), out.addressed.end(), name) !=
+        out.addressed.end()) {
+      continue;
+    }
+    const auto [class_name, role] = class_and_role(name);
+    if (AddressesClassOrRole(text, class_name, role)) {
+      out.addressed.push_back(name);
+    }
+  }
+  return out;
+}
+
+bool BotLoop::WakesForPartyLine(const std::string& bot,
+                                std::string_view text,
+                                const std::string& from,
+                                const pb::Snapshot& snapshot) const {
+  const PartyLineAddressees a = AddresseesOf(bot, text, snapshot);
+  if (!a.addressed.empty()) {
+    return std::find(a.addressed.begin(), a.addressed.end(), bot) !=
+           a.addressed.end();
+  }
+  // A brain bot's own party line is never a call for the whole group.
+  const bool from_human = !from.empty() && !bots_.contains(from);
+  if (from_human && a.online.size() <= kMaxGroupWakeBots && IsGroupCall(text)) {
+    return true;
+  }
+  return a.online.front() == bot;
+}
+
+bool BotLoop::AnswersPartyLine(const std::string& bot,
+                               std::string_view text,
+                               const pb::Snapshot& snapshot) const {
+  // One responder per line (Now #10): even if several bots are addressed (and
+  // woken), only the first of them answers.
+  const PartyLineAddressees a = AddresseesOf(bot, text, snapshot);
+  return (a.addressed.empty() ? a.online.front() : a.addressed.front()) == bot;
 }
 
 bool BotLoop::AnswersPartyChat(const std::string& bot,
@@ -669,6 +856,8 @@ void BotLoop::ResetBotSession(BotState* state, bool cancel_in_flight) {
   state->last_selected_notes.clear();
   state->recent_chat_command_ids.clear();
   state->pending_says.clear();
+  state->said_lines.clear();
+  state->call_started_at = base::TimeTicks();
   state->call_state = BotState::CallState::kIdle;
   state->queued_urgency = Urgency::kP2Routine;
   if (state->in_flight_cancel) {
@@ -700,7 +889,8 @@ void BotLoop::ResetBotSession(BotState* state, bool cancel_in_flight) {
 
 void BotLoop::NoteEvent(BotState* state,
                         const pb::Event& event,
-                        bool triggered_wake) {
+                        bool triggered_wake,
+                        base::TimeTicks at) {
   NoteText(state, DescribeEvent(event));
   if (event.chat) {
     const size_t cap = std::max<size_t>(config_.max_recent_events, 1) * 2;
@@ -709,7 +899,7 @@ void BotLoop::NoteEvent(BotState* state,
     }
     state->pending_chats.push_back({event.chat->channel, event.chat->from,
                                     event.chat->text, event.chat->at_me,
-                                    triggered_wake});
+                                    triggered_wake, at});
   }
 }
 
@@ -802,7 +992,7 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   for (const pb::Event& ev : snapshot.events) {
     const bool wakes =
         EvaluateEventTrigger(ev, state.triggers.watches()).has_value();
-    NoteEvent(&state, ev, wakes);
+    NoteEvent(&state, ev, wakes, received_at);
     NoteWhisperer(&state, ev, received_at);
   }
   Screen screen = RenderScreen(snapshot);
@@ -1004,13 +1194,14 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
   std::optional<WakeTrigger> chat_trig =
       is_player_chat ? EvaluateEventTrigger(imm.event, state.triggers.watches())
                      : std::nullopt;
-  // T9 & Now #10: a group or nearby party-shared line wakes only the one bot
-  // that answers it (named, or the group's single responder); the others just
-  // hear it.
+  // T9 & Now #10: a group or nearby party-shared line wakes only the bots it
+  // is for (addressed, or for a human's group call every bot of a small group,
+  // else the group's single responder); the others just hear it.
   if (chat_trig && state.latest_snapshot &&
       IsGroupSharedChatChannel(imm.event.chat->channel,
                                *state.latest_snapshot) &&
-      !AnswersPartyLine(bot, imm.event.chat->text, *state.latest_snapshot)) {
+      !WakesForPartyLine(bot, imm.event.chat->text, imm.event.chat->from,
+                         *state.latest_snapshot)) {
     chat_trig.reset();
   }
   bool chat_rate_limited = false;
@@ -1045,7 +1236,8 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
     }
   }
   NoteEvent(&state, imm.event,
-            /*triggered_wake=*/chat_trig.has_value() && !chat_rate_limited);
+            /*triggered_wake=*/chat_trig.has_value() && !chat_rate_limited,
+            received_at);
   NoteWhisperer(&state, imm.event, received_at);
   if (chat_rate_limited) {
     return;
@@ -1395,11 +1587,10 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
   const base::TimeDelta call_limit = (call_urgency == Urgency::kP0Combat)
                                          ? config_.combat_call_timeout
                                          : config_.call_timeout;
+  state.call_started_at = std::max(asked_at, state.latest_received_at);
   if (call_limit.is_positive()) {
     request.timeout_ms = static_cast<int>(call_limit.InMilliseconds());
-    const base::TimeTicks call_start =
-        std::max(asked_at, state.latest_received_at);
-    state.call_deadline = call_start + call_limit;
+    state.call_deadline = state.call_started_at + call_limit;
   } else {
     state.call_deadline = base::TimeTicks();
   }
@@ -1663,6 +1854,39 @@ void BotLoop::OnReply(const std::string& bot,
               return c.triggered_wake && IsPlayerChatChannel(c.channel);
             });
         const bool party_reply_muted = state.party_reply_muted_epoch == epoch;
+        // The brain's thinking time counts toward the human typing delay: it
+        // runs from the line that woke the bot (or the call's start), so a
+        // short ack to a command lands about as fast as a person's.
+        base::TimeTicks wake_started_at;
+        for (const BotState::ObservedChat& c : asked_chats) {
+          if (c.triggered_wake && !c.at.is_null() &&
+              (wake_started_at.is_null() || c.at < wake_started_at)) {
+            wake_started_at = c.at;
+          }
+        }
+        if (wake_started_at.is_null()) {
+          wake_started_at = state.call_started_at;
+        }
+        const base::TimeDelta waited =
+            wake_started_at.is_null()
+                ? base::TimeDelta()
+                : std::max(base::TimeDelta(), effective_now - wake_started_at);
+        // Every line goes through here: unasked, a bot doesn't repeat itself
+        // within kSelfRepeatWindow.
+        const auto say_line = [&](pb::ChatChannel channel,
+                                  const std::string& to,
+                                  const std::string& text, bool group_budget) {
+          if (!prompted_by_chat && IsSelfRepeat(state, text, effective_now)) {
+            return;
+          }
+          if (group_budget &&
+              !AllowAndRecordPartyChat(bot, *state.latest_snapshot, text,
+                                       prompted_by_chat, effective_now)) {
+            return;
+          }
+          QueueOrSendSay(bot, &state, channel, to, text, effective_now, waited);
+          RecordSaid(&state, text, effective_now);
+        };
         if (!plan->say.empty() && !party_reply_muted) {
           // Answer a party/raid line in that channel (RH-L1, A-M14: decided by
           // the structured chat event's channel, never by splitting strings).
@@ -1677,10 +1901,8 @@ void BotLoop::OnReply(const std::string& bot,
             }
           }
           // A `party:` line already says it there (RH-L6: no double post).
-          if ((ch == pb::SAY || plan->party.empty()) &&
-              AllowAndRecordPartyChat(bot, *state.latest_snapshot, plan->say,
-                                      prompted_by_chat, effective_now)) {
-            QueueOrSendSay(bot, &state, ch, "", plan->say, effective_now);
+          if (ch == pb::SAY || plan->party.empty()) {
+            say_line(ch, "", plan->say, /*group_budget=*/true);
           }
         }
         const bool in_party =
@@ -1690,24 +1912,21 @@ void BotLoop::OnReply(const std::string& bot,
         // `ext.party`, T13).
         const bool in_raid = state.latest_snapshot->ext.raid.has_value();
         if (!plan->party.empty() && (in_party || in_raid) &&
-            !party_reply_muted &&
-            AllowAndRecordPartyChat(bot, *state.latest_snapshot, plan->party,
-                                    prompted_by_chat, effective_now)) {
-          QueueOrSendSay(bot, &state, in_raid ? pb::RAID : pb::PARTY, "",
-                         plan->party, effective_now);
+            !party_reply_muted) {
+          say_line(in_raid ? pb::RAID : pb::PARTY, "", plan->party,
+                   /*group_budget=*/true);
         }
         if (!plan->tell.empty()) {
-          QueueOrSendSay(bot, &state, pb::WHISPER, plan->tell_to, plan->tell,
-                         effective_now);
+          say_line(pb::WHISPER, plan->tell_to, plan->tell,
+                   /*group_budget=*/false);
         }
         // Public channels (F1): a refusal (not queued, wrong place) comes back
         // as a chat error event, which wakes the brain to see it.
         if (!plan->general.empty()) {
-          QueueOrSendSay(bot, &state, pb::GENERAL, "", plan->general,
-                         effective_now);
+          say_line(pb::GENERAL, "", plan->general, /*group_budget=*/false);
         }
         if (!plan->lfg.empty()) {
-          QueueOrSendSay(bot, &state, pb::LFG, "", plan->lfg, effective_now);
+          say_line(pb::LFG, "", plan->lfg, /*group_budget=*/false);
         }
         if (!plan->remember.empty() && !config_.bots_dir.empty()) {
           // Trust by sender, not keywords: what the party (and its leader)
@@ -2211,9 +2430,13 @@ void BotLoop::QueueOrSendSay(const std::string& bot,
                              pb::ChatChannel channel,
                              const std::string& to,
                              const std::string& text,
-                             base::TimeTicks now) {
+                             base::TimeTicks now,
+                             base::TimeDelta already_waited) {
+  // Only the first line of a reply had the brain's thinking time to type in;
+  // a line queued behind another is typed after it, in full.
   const base::TimeDelta delay = ComputeTypingDelay(
-      text.size(), config_.typing_delay_min, config_.typing_delay_max);
+      text.size(), config_.typing_delay_min, config_.typing_delay_max,
+      state->pending_says.empty() ? already_waited : base::TimeDelta());
   if (!delay.is_positive()) {
     SendSay(bot, channel, to, text);
     return;
@@ -2227,6 +2450,34 @@ void BotLoop::QueueOrSendSay(const std::string& bot,
           ? now
           : std::max(now, state->pending_says.back().due_at);
   state->pending_says.push_back({start + delay, channel, to, text});
+}
+
+// static
+bool BotLoop::IsSelfRepeat(const BotState& state,
+                           std::string_view text,
+                           base::TimeTicks now) {
+  const std::string norm = NormalizeSaid(text);
+  return !norm.empty() &&
+         std::any_of(state.said_lines.begin(), state.said_lines.end(),
+                     [&](const BotState::SaidLine& l) {
+                       return l.text == norm && now - l.at <= kSelfRepeatWindow;
+                     });
+}
+
+// static
+void BotLoop::RecordSaid(BotState* state,
+                         std::string_view text,
+                         base::TimeTicks now) {
+  std::string norm = NormalizeSaid(text);
+  if (norm.empty()) {
+    return;
+  }
+  auto& lines = state->said_lines;
+  while (!lines.empty() && (now - lines.front().at > kSelfRepeatWindow ||
+                            lines.size() >= kMaxSaidLines)) {
+    lines.pop_front();
+  }
+  lines.push_back({std::move(norm), now});
 }
 
 void BotLoop::SendSay(const std::string& bot,

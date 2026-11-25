@@ -2407,13 +2407,13 @@ TEST(BotLoopTest, OnlyOneBotAnswersAHumansPartyLine) {
     });
   };
 
-  // Nobody named: only Loada (first by name) wakes and answers (T9: the
-  // others hear the line without a prompt of their own).
+  // Nobody named, no call to the group: only Loada (first by name) wakes and
+  // answers (T9: the others hear the line without a prompt of their own).
   sent.clear();
-  party_line("Loada", "pull?");
+  party_line("Loada", "how is everyone doing?");
   ASSERT_EQ(brain.size(), 1u);
   brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300\nparty: go");
-  party_line("Telda", "pull?");
+  party_line("Telda", "how is everyone doing?");
   EXPECT_EQ(brain.size(), 0u);
   EXPECT_EQ(party_says_by("Loada"), 1);
   EXPECT_EQ(party_says_by("Telda"), 0);
@@ -3004,7 +3004,7 @@ TEST(BotLoopTest, ChatPreservesPlanRateLimitsSpamAndNeverParsesFakeRaid) {
   need_msg.bot = "Ed";
   need_msg.event.chat.emplace().channel = pb::PARTY;
   need_msg.event.chat->from = "Hele";
-  need_msg.event.chat->text = "need mana?";
+  need_msg.event.chat->text = "need a sec?";
   need_msg.event.chat->at_me = true;
   loop.OnEvent(need_msg, t0 + base::Seconds(2));
   EXPECT_EQ(brain.size(), 0u);  // Alan answers; Ed isn't even woken (T9).
@@ -3215,12 +3215,15 @@ TEST(BotLoopTest, TypingDelayPartyBudgetAndSingleResponder) {
     chat.at_me = true;
     loop.OnEvent(imm, t0 + base::Seconds(2));
   }
-  ASSERT_EQ(brain.size(), 1u);  // Only Loada (first named) woke!
+  ASSERT_EQ(brain.size(), 2u);  // Both named bots woke...
   loop.OnSnapshot(snap_for("Loada", "Telda", 2, t0 + base::Seconds(2)),
                   t0 + base::Seconds(2));
   brain.FinishReply(
       "do: 1\nexpect: none\nwatch: none\nlook: 300\n"
       "party: sure thing give me one second to drink up and buff everyone");
+  // ...but only Loada (first named) speaks.
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 300\nparty: me too");
   loop.OnTick(t0 + base::Milliseconds(4500));
   EXPECT_EQ(count_says(), 0);  // 60+ chars -> 3.0 s typing delay.
   loop.OnTick(t0 + base::Milliseconds(5100));
@@ -3511,6 +3514,309 @@ TEST(BotLoopTest, StandingOrdersStillFireWhilePlanActsHoldSteps) {
   loop.OnSnapshot(s4, t0 + base::Seconds(3));
   ASSERT_TRUE(commands.back().choose.has_value());
   EXPECT_EQ(commands.back().choose->option, 2u);
+}
+
+// Milestone 2a: who a human's party line wakes vs. who replies. A line wakes
+// every bot it addresses (by name, class incl. common aliases/typos, or role);
+// an unaddressed group call wakes every bot of a small group; chit-chat wakes
+// one; and at most one bot replies in chat.
+struct PartyBotSpec {
+  const char* name;
+  const char* class_name;
+  pb::Role role;
+};
+
+class PartyWakeFixture {
+ public:
+  PartyWakeFixture(std::vector<PartyBotSpec> bots, BotLoopConfig cfg = {})
+      : bots_(std::move(bots)),
+        t0_(base::TimeTicks::Now()),
+        loop_(WithDefaults(std::move(cfg)),
+              brain_.Fn(),
+              [this](const pb::Command& c) { sent_.push_back(c); }) {
+    for (const PartyBotSpec& b : bots_) {
+      loop_.OnSnapshot(Snap(b, 1, t0_), t0_);
+    }
+    FinishAll("");
+  }
+
+  static BotLoopConfig WithDefaults(BotLoopConfig cfg) {
+    cfg.rules = "RULES";
+    cfg.stale_snapshot_after = base::Seconds(3600);
+    return cfg;
+  }
+
+  pb::Snapshot Snap(const PartyBotSpec& b, uint32_t seq, base::TimeTicks at) {
+    pb::Snapshot s = MakeLiveSnap(b.name, seq, at, /*in_combat=*/false);
+    AddKeep(&s);
+    s.base.self.unit.name = b.name;
+    s.base.self.unit.player.emplace().class_ = b.class_name;
+    s.base.self.unit.group.emplace().role = b.role;
+    pb::Party& p = s.ext.party.emplace();
+    p.leader = "Hele";
+    pb::Unit human;
+    human.name = "Hele";
+    p.members.push_back(human);
+    for (const PartyBotSpec& o : bots_) {
+      if (std::string(o.name) != b.name) {
+        pb::Unit m;
+        m.name = o.name;
+        p.members.push_back(m);
+      }
+    }
+    return s;
+  }
+
+  // Delivers one party line to every bot (11 s apart, clear of the per-sender
+  // rate limit); returns the bots it woke.
+  std::vector<std::string> Line(const std::string& text,
+                                const std::string& from = "Hele") {
+    at_ = at_ + base::Seconds(11);
+    std::vector<std::string> woke;
+    for (const PartyBotSpec& b : bots_) {
+      pb::ImmediateEvent imm;
+      imm.bot = b.name;
+      pb::ChatEvent& chat = imm.event.chat.emplace();
+      chat.channel = pb::PARTY;
+      chat.from = from;
+      chat.text = text;
+      chat.at_me = true;
+      const size_t before = brain_.size();
+      loop_.OnEvent(imm, t0_ + at_);
+      if (brain_.size() > before) {
+        woke.push_back(b.name);
+      }
+    }
+    return woke;
+  }
+
+  // Every woken bot answers `party:`; returns who actually spoke in /p.
+  std::vector<std::string> FinishAll(const std::string& party) {
+    sent_.clear();
+    while (brain_.size() > 0) {
+      brain_.FinishReply(
+          std::string("do: 1\nexpect: none\nwatch: none\nlook: 300") +
+          (party.empty() ? "" : "\nparty: " + party));
+    }
+    std::vector<std::string> spoke;
+    for (const pb::Command& c : sent_) {
+      if (c.say && c.say->channel == pb::PARTY) {
+        spoke.push_back(c.bot);
+      }
+    }
+    return spoke;
+  }
+
+  CannedBrain& brain() { return brain_; }
+  BotLoop& loop() { return loop_; }
+  std::vector<pb::Command>& sent() { return sent_; }
+  base::TimeTicks t0() const { return t0_; }
+
+ private:
+  std::vector<PartyBotSpec> bots_;
+  base::TimeTicks t0_;
+  base::TimeDelta at_;
+  CannedBrain brain_;
+  std::vector<pb::Command> sent_;
+  BotLoop loop_;
+};
+
+using Names = std::vector<std::string>;
+
+TEST(BotLoopTest, PartyLineWakesEveryAddressedBotButOneReplies) {
+  PartyWakeFixture f({{"Gatda", "Rogue", pb::Role::DPS},
+                      {"Loada", "Priest", pb::Role::HEALER},
+                      {"Telda", "Mage", pb::Role::DPS}});
+  // Class, by a common typo / alias.
+  EXPECT_EQ(f.Line("rouge zap diamond"), Names{"Gatda"});
+  EXPECT_EQ(f.FinishAll("on it"), Names{"Gatda"});
+  EXPECT_EQ(f.Line("mage sheep star"), Names{"Telda"});
+  EXPECT_EQ(f.FinishAll("ok"), Names{"Telda"});
+  EXPECT_EQ(f.Line("need heals"), Names{"Loada"});
+  EXPECT_EQ(f.FinishAll("coming"), Names{"Loada"});
+  // A role shared by two: both wake, the first by name replies.
+  EXPECT_EQ(f.Line("dps stop"), (Names{"Gatda", "Telda"}));
+  EXPECT_EQ(f.FinishAll("stopping"), Names{"Gatda"});
+  // Two named: both wake, one reply.
+  EXPECT_EQ(f.Line("telda and loada, drink up"), (Names{"Loada", "Telda"}));
+  EXPECT_EQ(f.FinishAll("k"), Names{"Loada"});
+  // A name outranks a class for the reply: Telda named, rogue by class.
+  EXPECT_EQ(f.Line("telda sheep, rogue sap"), (Names{"Gatda", "Telda"}));
+  EXPECT_EQ(f.FinishAll("sure"), Names{"Telda"});
+  // Counter-test: a class nobody in the group plays addresses nobody, so it
+  // is not taken as a call to that class (and "lock" in "unlock" is no word).
+  EXPECT_EQ(f.Line("unlock the warlock door"), Names{"Gatda"});
+  f.FinishAll("");
+}
+
+TEST(BotLoopTest, UnaddressedGroupCallWakesASmallGroupButChitChatWakesOne) {
+  PartyWakeFixture f({{"Gatda", "Rogue", pb::Role::DPS},
+                      {"Loada", "Priest", pb::Role::HEALER},
+                      {"Telda", "Mage", pb::Role::DPS}});
+  EXPECT_EQ(f.Line("los"), (Names{"Gatda", "Loada", "Telda"}));
+  // The responder's prompt asks for a reply; the others' say someone else
+  // answers.
+  EXPECT_EQ(f.brain().front_request().user.find("another party member"),
+            std::string::npos);
+  f.brain().FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300");
+  EXPECT_NE(f.brain().front_request().user.find("another party member"),
+            std::string::npos);
+  EXPECT_EQ(f.FinishAll("ok"), Names{});  // Muted: Loada and Telda.
+  EXPECT_EQ(f.Line("buff pls"), (Names{"Gatda", "Loada", "Telda"}));
+  f.FinishAll("");
+  EXPECT_EQ(f.Line("anyone got decurse?"), (Names{"Gatda", "Loada", "Telda"}));
+  f.FinishAll("");
+  // Chit-chat: the single responder only.
+  EXPECT_EQ(f.Line("how was your day"), Names{"Gatda"});
+  f.FinishAll("");
+  EXPECT_EQ(f.Line("anyone up for Deadmines?"), Names{"Gatda"});
+  f.FinishAll("");
+  // Counter-test: a brain bot's own line is no call to the group.
+  EXPECT_EQ(f.Line("los", "Telda"), Names{"Gatda"});
+  f.FinishAll("");
+}
+
+TEST(BotLoopTest, GroupCallWakesOnlyTheResponderInALargerGroup) {
+  PartyWakeFixture f({{"Abby", "Warrior", pb::Role::TANK},
+                      {"Gatda", "Rogue", pb::Role::DPS},
+                      {"Loada", "Priest", pb::Role::HEALER},
+                      {"Mira", "Druid", pb::Role::HEALER},
+                      {"Telda", "Mage", pb::Role::DPS}});
+  EXPECT_EQ(f.Line("los"), Names{"Abby"});
+  f.FinishAll("");
+  // Addressing still wakes every addressed bot there.
+  EXPECT_EQ(f.Line("healers drink"), (Names{"Loada", "Mira"}));
+  EXPECT_EQ(f.FinishAll("ok"), Names{"Loada"});
+  EXPECT_EQ(f.Line("pally or warr tank this"), Names{"Abby"});
+  f.FinishAll("");
+}
+
+TEST(BotLoopTest, GroupCallFanOutNeverPreemptsACombatCall) {
+  const PartyBotSpec gatda{"Gatda", "Rogue", pb::Role::DPS};
+  PartyWakeFixture f({gatda, {"Loada", "Priest", pb::Role::HEALER}});
+  // Gatda enters combat: a P0 call is in flight.
+  pb::Snapshot fight = f.Snap(gatda, 2, f.t0() + base::Seconds(1));
+  fight.base.self.in_combat = true;
+  AddUnitAndOption(&fight, "0x9", "Defias Thug", /*dead=*/false,
+                   /*lootable=*/false, /*targeting_me=*/true);
+  f.loop().OnSnapshot(fight, f.t0() + base::Seconds(1));
+  ASSERT_EQ(f.brain().size(), 1u);
+  // A human's "los" fans out to both bots: Loada wakes, Gatda's combat call
+  // is not cancelled for it.
+  EXPECT_EQ(f.Line("los"), Names{"Loada"});
+  ASSERT_EQ(f.brain().size(), 2u);
+  EXPECT_FALSE(f.brain().front_cancelled());
+  f.brain().FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300");
+  f.brain().FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300");
+  // ...and the line is not lost: Gatda's queued chat wake runs after.
+  ASSERT_EQ(f.brain().size(), 1u);
+  EXPECT_NE(f.brain().front_request().user.find("los"), std::string::npos);
+  f.FinishAll("");
+}
+
+TEST(BotLoopTest, TypingDelayCountsTheBrainsInferenceTime) {
+  BotLoopConfig cfg;
+  cfg.typing_delay_min = base::Seconds(1);
+  cfg.typing_delay_max = base::Seconds(3);
+  const PartyBotSpec bot{"Gatda", "Rogue", pb::Role::DPS};
+  PartyWakeFixture f({bot}, cfg);
+  const auto party_says = [&] {
+    return std::count_if(
+        f.sent().begin(), f.sent().end(),
+        [](const pb::Command& c) { return c.say.has_value(); });
+  };
+  // The line arrives at t0+11s (the fixture's first line).
+  ASSERT_EQ(f.Line("rogue sap star"), Names{"Gatda"});
+  const base::TimeTicks heard = f.t0() + base::Seconds(11);
+  // The brain thinks for 0.6 s (a newer snapshot shows the time passed).
+  f.loop().OnSnapshot(f.Snap(bot, 2, heard + base::Milliseconds(600)),
+                      heard + base::Milliseconds(600));
+  f.sent().clear();
+  f.brain().FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 300\nparty: on it");
+  // "on it": 1 s + 5 * 35 ms = 1.175 s after the line, not after the reply.
+  f.loop().OnTick(heard + base::Milliseconds(1100));
+  EXPECT_EQ(party_says(), 0);
+  f.loop().OnTick(heard + base::Milliseconds(1200));
+  EXPECT_EQ(party_says(), 1);
+
+  // Inference longer than the typing time: sent at once with the reply.
+  ASSERT_EQ(f.Line("rogue stealth"), Names{"Gatda"});
+  const base::TimeTicks heard2 = f.t0() + base::Seconds(22);
+  f.loop().OnSnapshot(f.Snap(bot, 3, heard2 + base::Seconds(2)),
+                      heard2 + base::Seconds(2));
+  f.sent().clear();
+  f.brain().FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 300\nparty: k going");
+  EXPECT_EQ(party_says(), 1);
+}
+
+TEST(BotLoopTest, UnpromptedSelfRepeatIsDroppedForFiveMinutes) {
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& c) { sent.push_back(c); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  uint32_t seq = 0;
+  const auto look_at = [&](base::TimeDelta at) {
+    pb::Snapshot s = MakeLiveSnap("Ed", ++seq, t0 + at, /*in_combat=*/false);
+    AddKeep(&s);
+    loop.OnSnapshot(s, t0 + at);
+  };
+  const auto says = [&] {
+    return std::count_if(sent.begin(), sent.end(), [](const pb::Command& c) {
+      return c.say.has_value();
+    });
+  };
+  const std::string reply =
+      "do: 1\nexpect: none\nwatch: none\nlook: 30\nsay: Nice weather today!";
+
+  look_at(base::TimeDelta());  // First look: unprompted.
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(reply);
+  EXPECT_EQ(says(), 1);
+
+  // The look timer wakes it 30 s later: the same line (case and punctuation
+  // aside) is dropped, a new one isn't.
+  look_at(base::Seconds(31));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 30\nsay: nice weather today");
+  EXPECT_EQ(says(), 1);
+  look_at(base::Seconds(62));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 30\nsay: off to the mine");
+  EXPECT_EQ(says(), 2);
+
+  // Counter-test: asked by a player, it may say it again.
+  pb::ImmediateEvent ask;
+  ask.bot = "Ed";
+  ask.event.chat.emplace().channel = pb::WHISPER;
+  ask.event.chat->from = "Hele";
+  ask.event.chat->text = "how's the weather?";
+  ask.event.chat->at_me = true;
+  loop.OnEvent(ask, t0 + base::Seconds(70));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(reply);
+  EXPECT_EQ(says(), 3);
+
+  // Five minutes after it last said it, unasked is fine again.
+  look_at(base::Seconds(70 + 301));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(reply);
+  EXPECT_EQ(says(), 4);
+
+  // Counter-test: a reconnect starts a fresh session (nothing remembered).
+  loop.OnConnectionChanged(false);
+  loop.OnConnectionChanged(true);
+  look_at(base::Seconds(380));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(reply);
+  EXPECT_EQ(says(), 5);
 }
 
 }  // namespace
