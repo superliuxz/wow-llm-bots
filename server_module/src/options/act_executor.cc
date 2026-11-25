@@ -1358,6 +1358,20 @@ ActStartResult CastSpellNow(Player* bot,
     bot->StopMoving();
     bot->GetMotionMaster()->Clear();
   }
+  // A spell cast at a unit in front (Spell.dbc FacingCasterFlags) turns the
+  // bot to face it first, as a player turns before the cast.
+  if (!spot && cast_target && cast_target != bot &&
+      (spell->FacingCasterFlags & SPELL_FACING_FLAG_INFRONT) != 0 &&
+      !bot->HasInArc(std::numbers::pi_v<float>, cast_target)) {
+    if (bot->isMoving() && CanClearBotMovement(bot)) {
+      bot->StopMoving();
+      bot->GetMotionMaster()->Clear();
+    }
+    bot->SetOrientation(bot->GetAngle(cast_target));
+    if (!bot->IsRooted()) {
+      bot->SendMovementFlagUpdate(true);
+    }
+  }
   const CastBeforeState before = CaptureCastBefore(bot, spell, cast_target);
   WorldPacket p(CMSG_CAST_SPELL);
   p << static_cast<uint8_t>(0) << spell->Id << static_cast<uint8_t>(0);
@@ -2321,6 +2335,19 @@ ActStartResult StartAct(Player* bot,
     }
   }
   return {.error = "unsupported act"};
+}
+
+ActStartResult StartSpellUseOn(Player* bot,
+                               uint32_t command_id,
+                               const SpellInfo* spell,
+                               Unit* target,
+                               base::TimeTicks now,
+                               ActiveAct* out_active) {
+  pb::Command_Act act;
+  act.verb = pb::Command_Act::USE;
+  act.name = std::string(SpellLocalizedName(spell));
+  return StartSpellUse(bot, command_id, act, spell, target, std::nullopt, now,
+                       out_active);
 }
 
 ActStepResult StepActiveAct(Player* bot,

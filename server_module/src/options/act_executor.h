@@ -18,6 +18,8 @@
 #include "snapshot/snapshot.h"
 
 class Player;
+class SpellInfo;
+class Unit;
 
 namespace llm_brain {
 
@@ -72,6 +74,9 @@ struct ActiveAct {
   float approach_closer_yd = 0.0f;
   uint32_t stealth_spell_id = 0;
   base::TimeTicks stealth_started_at;
+  // Started by a chosen option (crowd control), not an act: its finish is
+  // the option's (`done_command_id`), not an act's.
+  bool for_option = false;
 };
 
 struct ActStartResult {
@@ -96,6 +101,19 @@ ActStartResult StartAct(Player* bot,
                         const wlb::snapshot::Command_Act& act,
                         base::TimeTicks now,
                         ActiveAct* out_active);
+
+// Uses known `spell` on `target` the way `act: use` does (pure Spell.dbc
+// facts): a spell usable only in stealth enters stealth first, and a target
+// out of range or sight is walked to 2 yd inside the spell's range before the
+// cast; a cast-time spell holds still while it casts. For a chosen option
+// (crowd control). World thread only. When `done` is false and `error` is
+// empty, populates `*out_active` (to step with StepActiveAct).
+ActStartResult StartSpellUseOn(Player* bot,
+                               uint32_t command_id,
+                               const SpellInfo* spell,
+                               Unit* target,
+                               base::TimeTicks now,
+                               ActiveAct* out_active);
 
 // Advances an active multi-tick act (`to`, `away`, cast-time `use`). World
 // thread only.

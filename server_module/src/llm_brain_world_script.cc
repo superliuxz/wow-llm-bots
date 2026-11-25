@@ -860,6 +860,10 @@ class LlmBrainWorldScript : public WorldScript {
     const bool keep = target && IsKeepAction(target->action);
     const bool attack = target && IsAttackAction(target->action);
     uint32_t pending_spell_id = 0;
+    // A crowd-control cast that walks in / stealths / casts over ticks runs
+    // as the `use` act machinery, finishing as this option.
+    ActiveAct option_use;
+    bool option_use_started = false;
     if (target) {
       // Validate BEFORE cancelling any active dodge/movement act so an invalid
       // or combat-blocked choice never aborts an active boss dodge.
@@ -870,7 +874,9 @@ class LlmBrainWorldScript : public WorldScript {
             // A new errand ends a `to ping` hold (a fight from there doesn't).
             BotManager::ClearPingStay(bot);
           }
-          if (!attack && state.active_act) {
+          // Attack leaves a running act be, but not an earlier choice's
+          // crowd-control cast (a new choice replaces it).
+          if (state.active_act && (!attack || state.active_act->for_option)) {
             const uint32_t cancelled_cmd_id = state.active_act->command_id;
             CancelActiveAct(bot, &*state.active_act);
             state.active_act.reset();
@@ -887,11 +893,14 @@ class LlmBrainWorldScript : public WorldScript {
         ActionRunContext ctx;
         ctx.walk = &state.walk;
         ctx.dungeon_nav = &config_.dungeon_nav;
+        ctx.out_active_act = &option_use;
+        ctx.now = base::TimeTicks::Now();
         ExecuteResult result = ExecuteAction(bot, target->action, &ctx);
         error = std::move(result.error);
         used = result.used;
         info = std::move(result.info);
         pending_spell_id = result.pending_spell_id;
+        option_use_started = result.act_started;
         if (!result.path_time.is_zero()) {
           path_times_.push_back(result.path_time);
         }
@@ -931,6 +940,13 @@ class LlmBrainWorldScript : public WorldScript {
       // Keep: the body carries on, including a walk to an object it hasn't
       // clicked yet.
       state.done_command_id = command.command_id;
+    } else if (option_use_started) {
+      state.active_option.reset();
+      state.active_item_spell_id = 0;
+      option_use.command_id = command.command_id;
+      option_use.for_option = true;
+      state.active_act = std::move(option_use);
+      schedule_->SetActiveTargetPending(bot_index, true);
     } else if (target) {
       // Hub work (quests, vendors, trainers, loot) writes no combat event:
       // this one shows the stall gate the bot is doing things.
@@ -1021,6 +1037,7 @@ class LlmBrainWorldScript : public WorldScript {
             act.stop == wlb::snapshot::Command_Act::STOP_UNSPECIFIED)) ||
           IsMovementActVerb(act.verb);
       if (stops_movement && state.active_act) {
+        ReportOptionUseDropped(bot_index, name, bot);
         if (act.verb != wlb::snapshot::Command_Act::STOP) {
           CancelActiveAct(bot, &*state.active_act);
         }
@@ -1031,6 +1048,7 @@ class LlmBrainWorldScript : public WorldScript {
           bot_index,
           state.active_option.has_value() || state.active_act.has_value());
     } else {
+      ReportOptionUseDropped(bot_index, name, bot);
       if (state.active_act && !IsMovementActVerb(act.verb)) {
         // Non-movement multi-tick act (e.g. cast-time `use`) supersedes an old
         // movement act's forced priority.
@@ -1039,6 +1057,23 @@ class LlmBrainWorldScript : public WorldScript {
       state.active_act = std::move(pending);
       schedule_->SetActiveTargetPending(bot_index, true);
     }
+  }
+
+  // An act taking over the body from a chosen crowd-control cast still
+  // walking in or casting: that option fails (the caller drops or cancels the
+  // act state itself).
+  void ReportOptionUseDropped(size_t bot_index,
+                              const std::string& name,
+                              Player* bot) {
+    BotState& state = bots_[bot_index];
+    if (!state.active_act || !state.active_act->for_option) {
+      return;
+    }
+    wlb::snapshot::Event payload;
+    wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
+    failed.text = "cancelled by an act";
+    failed.command_id = state.active_act->command_id;
+    EmitAlertingEvent(bot_index, name, bot, std::move(payload));
   }
 
   bool CanSendChatNow(size_t bot_index, base::TimeTicks now) {
@@ -1165,7 +1200,9 @@ class LlmBrainWorldScript : public WorldScript {
         failed.command_id = cmd_id;
         EmitAlertingEvent(index, name, bot, std::move(payload));
       } else if (res.done) {
-        state.done_act_command_id = state.active_act->command_id;
+        (state.active_act->for_option ? state.done_command_id
+                                      : state.done_act_command_id) =
+            state.active_act->command_id;
         state.active_act.reset();
       } else {
         // An active standing-order act owns movement/casting until it finishes

@@ -1602,4 +1602,180 @@ def _case_crowd_control():
         return f"offered {offered!r}; the boar was polymorphed"
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
-CASES = [_case_crowd_control(), _case_popup_policy(), _case_human_party(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal()]
+def _case_use_physics():
+    """`use` physics from Spell.dbc on the option and act paths (Milestone 1d).
+
+      1. Loada (a troll rogue made level 10, taught Stealth and Sap) groups with Telda, whose
+         group square-marks a boar and moon-marks a passive Defias Thug, 20 yd from Loada (Sap
+         reaches 10). Sap (rank 1 holds humanoids only) is offered on the thug, not the boar.
+         Choosing `Crowd-control Defias Thug (moon): Sap` enters Stealth first, walks into range,
+         turns to face the thug and Saps it: the option finishes (done_command_id), no error.
+      2. Loadb (an orc warlock made level 20, taught Rain of Fire) is sent `act: use Rain of Fire
+         on ping` for a party ping 38 yd off (the spell reaches 30): it walks in and channels it
+         on the spot.
+      3. With its imp out (`act: use Summon Imp` unless it has one), `act: pet dismiss` sends it
+         away (the pet bar's dismiss: a warlock knows no Dismiss Pet).
+    """
+
+    import math
+    import socket
+    import time
+
+    from wlblib import server
+    from wlblib.common import TEST
+    from wlblib.testing import expect
+
+    NAME = "use_physics"
+    DESCRIPTION = "Stealth->Sap walk-in (CC option), a ground spell on the ping, pet dismiss"
+    TEST_CONFIG = "usephys"
+    BOT = "Loada"
+    ONLINE = 3
+
+    def run(stack):
+        server.console("character level Loada 10", inst=TEST)
+        server.console("llmtest learn Loada 1784", inst=TEST)  # Stealth.
+        server.console("llmtest learn Loada 6770", inst=TEST)  # Sap (rank 1).
+        server.console("character level Loadb 20", inst=TEST)
+        server.console("llmtest learn Loadb 5740", inst=TEST)  # Rain of Fire (rank 1).
+        server.console("llmtest learn Loadb 688", inst=TEST)  # Summon Imp.
+        server.console("llmtest group Telda Loada", inst=TEST)
+        server.console("llmtest group Telda Loadb", inst=TEST)
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        sock.connect(str(TEST.run / "brain.sock"))
+        reader = wire.FrameReader()
+        snaps = []   # (monotonic, snapshot)
+        errors = {}  # command_id -> [text]
+
+        def pump(until, timeout, what):
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                got = until()
+                if got:
+                    return got
+                try:
+                    chunk = sock.recv(1 << 20)
+                except socket.timeout:
+                    continue
+                for payload in reader.feed(chunk):
+                    msg = wire.decode_module_message(payload)
+                    if not msg:
+                        continue
+                    if "event" in msg:
+                        err = msg["event"].get("event", {}).get("error")
+                        if err:
+                            errors.setdefault(err.get("command_id"), []).append(err.get("text"))
+                        continue
+                    if msg.get("snapshot"):
+                        snaps.append((time.monotonic(), msg["snapshot"]))
+            raise AssertionError(f"timed out waiting for {what} (errors: {errors})")
+
+        def latest(bot, after=0.0):
+            return next((s for t, s in reversed(snaps)
+                         if s.get("bot") == bot and t >= after), None)
+
+        def boar_of(snap):
+            return next((u for u in snap["base"]["nearby"]["units"]
+                         if u.get("name") == "Defias Thug" and u.get("raid_marker") == "MOON"),
+                        None)
+
+        def done(bot, field, cmd_id):
+            return lambda: (cmd_id in errors) or next(
+                (s for _, s in snaps if s.get("bot") == bot and s.get(field) == cmd_id), None)
+
+        def pet_of(snap):
+            # Nobody else in the party has a pet: a pet in sight is Loadb's imp.
+            return next((u for u in snap["base"]["nearby"]["units"]
+                         if u.get("kind") == "PET" and not u.get("dead")), None)
+
+        try:
+            # 1. Stealth -> Sap through the crowd-control option. Loada stands 8 yd west of
+            #    Telda, so the boar (12 yd east of Telda) is out of Sap's reach.
+            def telda_seen():
+                s = latest("Loada")
+                return s and next((u for u in s["base"]["nearby"]["units"]
+                                   if u.get("name") == "Telda"), None)
+            tpos = pump(telda_seen, 20, "Telda in Loada's sight")["rel"]["position"]
+            server.console(f"llmtest move Loada {tpos['x'] - 8.0} {tpos['y']} {tpos['z'] + 0.5} 0",
+                           wait_s=0.5, inst=TEST)
+            # A boar (square) and a passive Defias Thug (moon): rank-1 Sap holds humanoids only.
+            out = server.console("llmtest marknear Telda 5", inst=TEST)
+            expect("marked" in out, f"setup: no marked boar ({out[-200:]})")
+            out = server.console("llmtest marknear Telda 4 38", inst=TEST)
+            expect("marked" in out, f"setup: no marked thug ({out[-200:]})")
+            since_mark = time.monotonic()
+
+            def cc_offer():
+                s = latest("Loada", since_mark)
+                idx = s and find_option(s.get("options", []), "Crowd-control Defias Thug")
+                return idx and (s, idx)
+            snap, idx = pump(cc_offer, 20, "Loada's crowd-control option")
+            offered = snap["options"][idx - 1].get("text", "")
+            boar_offered = [o.get("text") for o in snap.get("options", [])
+                            if o.get("text", "").startswith("Crowd-control Mottled Boar")]
+            sap_from = boar_of(snap)["rel"]["dist_yd"]
+            send_cmd(sock, {"bot": "Loada", "command_id": 11,
+                            "choose": {"option": idx, "seq": snap.get("seq", 0)}})
+            pump(done("Loada", "done_command_id", 11), 25, "Loada's Sap to finish")
+            sap_errs = errors.get(11, [])
+            sapped = bool(pump(lambda: "Loada: crowd control nearby" in stack.server_log(), 5,
+                               "the bot manager seeing the Sap")) if not sap_errs else False
+            boar = boar_of(latest("Loada"))
+            sap_at = boar["rel"]["dist_yd"] if boar else None
+
+            # 2. A ground spell on the party's ping, out of range: walk in, then cast.
+            server.console("llmtest ping Telda 0 38", wait_s=0.5, inst=TEST)
+            since_ping = time.monotonic()
+
+            def ping_seen():
+                s = latest("Loadb", since_ping)
+                return s and (((s.get("ext") or {}).get("minimap") or {}).get("ping"))
+            ping = pump(ping_seen, 10, "the ping on Loadb's minimap")
+            rof_from = ping["rel"]["dist_yd"]
+            send_cmd(sock, {"bot": "Loadb", "command_id": 21,
+                            "act": {"verb": "USE", "name": "Rain of Fire", "thing": "PING"}})
+            pump(done("Loadb", "done_act_command_id", 21), 30, "Loadb's Rain of Fire to finish")
+            rof_errs = errors.get(21, [])
+            rof_snap = next((s for _, s in snaps if s.get("bot") == "Loadb"
+                             and s.get("done_act_command_id") == 21), None)
+            rof_ping = rof_snap and (((rof_snap.get("ext") or {}).get("minimap") or {})
+                                     .get("ping"))
+            rof_at = rof_ping["rel"]["dist_yd"] if rof_ping else None
+
+            # 3. Pet dismiss.
+            summon_errs = []
+            if not pet_of(latest("Loadb")):
+                send_cmd(sock, {"bot": "Loadb", "command_id": 31,
+                                "act": {"verb": "USE", "name": "Summon Imp"}})
+                pump(lambda: pet_of(latest("Loadb")) or 31 in errors, 25, "Loadb's imp")
+                summon_errs = errors.get(31, [])
+            had_pet = bool(pet_of(latest("Loadb")))
+            since_dismiss = time.monotonic()
+            send_cmd(sock, {"bot": "Loadb", "command_id": 32,
+                            "act": {"verb": "PET", "pet_cmd": "DISMISS"}})
+            pump(done("Loadb", "done_act_command_id", 32), 10, "Loadb's pet dismiss")
+            dismiss_errs = errors.get(32, [])
+            pump(lambda: latest("Loadb", since_dismiss) and not pet_of(
+                latest("Loadb", since_dismiss)), 5, "Loadb's imp gone")
+        finally:
+            sock.close()
+            server.console("llmtest ungroup Loada", inst=TEST)
+            server.console("llmtest ungroup Loadb", inst=TEST)
+        expect(offered == "Crowd-control Defias Thug (moon): Sap", f"CC option: {offered!r}")
+        expect(not boar_offered, f"Sap offered on a beast it can't hold: {boar_offered!r}")
+        expect(sap_from > 10.0, f"setup: Loada started {sap_from:.1f} yd from the thug")
+        expect(not sap_errs, f"Sap failed: {sap_errs}")
+        expect(sapped, "no crowd control seen near Loada after Sap")
+        expect(sap_at is not None and sap_at <= 10.0,
+               f"Loada Sapped from {sap_at} yd (Sap reaches 10)")
+        expect(rof_from > 30.0, f"setup: the ping was {rof_from:.1f} yd from Loadb")
+        expect(not rof_errs, f"Rain of Fire on the ping failed: {rof_errs}")
+        expect(rof_at is not None and rof_at <= 30.0,
+               f"Loadb cast Rain of Fire {rof_at} yd from the ping (it reaches 30)")
+        expect(not summon_errs and had_pet, f"no imp to dismiss: {summon_errs}")
+        expect(not dismiss_errs, f"pet dismiss failed: {dismiss_errs}")
+        return (f"stealth->Sap walked in from {sap_from:.0f} to {sap_at:.0f} yd; Rain of Fire on "
+                f"the ping from {rof_at:.0f} yd (was {rof_from:.0f}); the imp was dismissed")
+    return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
+
+CASES = [_case_crowd_control(), _case_use_physics(), _case_popup_policy(), _case_human_party(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal()]

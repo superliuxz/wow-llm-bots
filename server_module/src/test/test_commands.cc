@@ -635,11 +635,13 @@ class LlmBrainTestCommandScript : public CommandScript {
     return true;
   }
 
-  // `llmtest marknear <leader> <icon 0-7>`: a temporary Mottled Boar 12 yd
-  // from the leader, marked with the icon (4 = moon, 7 = skull) by its group.
+  // `llmtest marknear <leader> <icon 0-7> [entry]`: a temporary Mottled Boar
+  // (or creature `entry`, kept passive so it starts no fight) 12 yd from the
+  // leader, marked with the icon (4 = moon, 7 = skull) by its group.
   static bool HandleMarkNear(ChatHandler* handler,
                              std::string leader_name,
-                             uint32_t icon) {
+                             uint32_t icon,
+                             Optional<uint32_t> entry) {
     Player* leader = FindOnlinePlayer(handler, std::move(leader_name));
     Group* group = leader ? leader->GetGroup() : nullptr;
     if (!group || icon > 7) {
@@ -648,11 +650,15 @@ class LlmBrainTestCommandScript : public CommandScript {
     }
     constexpr uint32_t kMottledBoar = 3098;
     Creature* boar = leader->SummonCreature(
-        kMottledBoar, leader->GetPositionX() + 12.0f, leader->GetPositionY(),
-        leader->GetPositionZ(), 0.0f, TEMPSUMMON_TIMED_DESPAWN, 120000);
+        entry.value_or(kMottledBoar), leader->GetPositionX() + 12.0f,
+        leader->GetPositionY(), leader->GetPositionZ(), 0.0f,
+        TEMPSUMMON_TIMED_DESPAWN, 120000);
     if (!boar) {
-      handler->SendErrorMessage("llmtest: marknear: no boar");
+      handler->SendErrorMessage("llmtest: marknear: no creature");
       return false;
+    }
+    if (entry) {
+      boar->SetReactState(REACT_PASSIVE);
     }
     group->SetTargetIcon(static_cast<uint8>(icon), leader->GetGUID(),
                          boar->GetGUID());

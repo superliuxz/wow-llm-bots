@@ -1,0 +1,7 @@
+# e2e_use_physics: a fresh troll rogue (Loada, made level 10 and taught Sap by the case), an orc
+# warlock (Loadb, made level 20 and taught Rain of Fire) and a priest (Telda, the group leader) at
+# the Valley of Trials, standing still.
+LlmBrain.Bots = "Loada,Loadb,Telda"
+LlmBrain.TestFixtures = "Loada=new:troll:rogue,Loadb=new:orc:warlock,Telda=priest-l1-valley.pdump"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.NonCombatStrategies = "-follow,-grind,-new rpg"

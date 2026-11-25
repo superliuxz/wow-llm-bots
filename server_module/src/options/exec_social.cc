@@ -46,9 +46,11 @@
 #include "WorldPacket.h"
 #include "WorldSession.h"
 #include "base/strings/stringprintf.h"
+#include "base/time/time.h"
 #include "bot_manager/bot_manager.h"
 #include "bot_session.h"
 #include "chat/chat_scripts.h"
+#include "options/act_executor.h"
 #include "options/action_types.h"
 #include "options/exec_items.h"
 #include "options/exec_shared.h"
@@ -614,6 +616,12 @@ void CollectGroupAndUpkeepActions(Player* bot,
           u.rel.dist_yd > 35.0f) {
         continue;
       }
+      // Only a target the spell can hold (Spell.dbc TargetCreatureType: rank-1
+      // Sap takes humanoids only).
+      Unit* live = ObjectAccessor::GetUnit(*bot, ParseSnapshotGuid(u.guid));
+      if (!live || !cc->CheckTargetCreatureType(live)) {
+        continue;
+      }
       std::string mark(pb::EnumName(u.raid_marker));
       for (char& c : mark) {
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -1031,8 +1039,10 @@ ItemActionOutcome ExecuteMountAction(Player* bot, const MountAction& action) {
           .pending_spell_id = casting ? action.spell_id : 0};
 }
 
-ItemActionOutcome ExecuteCrowdControlAction(Player* bot,
-                                            const CrowdControlAction& action) {
+ActStartResult ExecuteCrowdControlAction(Player* bot,
+                                         const CrowdControlAction& action,
+                                         base::TimeTicks now,
+                                         ActiveAct* out_active) {
   const SpellInfo* spell = sSpellMgr->GetSpellInfo(action.spell_id);
   Unit* target =
       ObjectAccessor::GetUnit(*bot, ParseSnapshotGuid(action.target_guid));
@@ -1045,25 +1055,10 @@ ItemActionOutcome ExecuteCrowdControlAction(Player* bot,
   if (bot->HasSpellCooldown(spell->Id)) {
     return {.error = action.label + " is on cooldown"};
   }
-  if (bot->isMoving()) {
-    bot->StopMoving();
-  }
-  // The client's cast: CMSG_CAST_SPELL on the target, like a player's click.
-  WorldPacket p(CMSG_CAST_SPELL);
-  p << static_cast<uint8_t>(0) << spell->Id << static_cast<uint8_t>(0);
-  SpellCastTargets targets;
-  targets.SetUnitTarget(target);
-  targets.Write(p);
-  p.rpos(0);
-  bot->GetSession()->HandleCastSpellOpcode(p);
-  const bool casting = IsSpellCastPending(bot, spell->Id);
-  const bool landed = target->HasAura(spell->Id);
-  if (!casting && !landed) {
-    return {.error = "cannot cast " + action.label + " now"};
-  }
-  return {.used = !casting,
-          .info = casting ? "" : action.label,
-          .pending_spell_id = casting ? spell->Id : 0};
+  // The same physics as `act: use`: stealth first for a stealth-only spell,
+  // walk into range and sight, hold still while casting (CMSG_CAST_SPELL on
+  // the target, like a player's click).
+  return StartSpellUseOn(bot, /*command_id=*/0, spell, target, now, out_active);
 }
 
 ActionOutcome ExecutePopupAnswerAction(Player* bot,

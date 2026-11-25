@@ -40,6 +40,9 @@ struct ExecuteResult {
   base::TimeDelta path_time;
   // Non-zero when a bag item or mount started a cast / queued into SpellQueue.
   uint32_t pending_spell_id = 0;
+  // True when a crowd-control cast went on as a multi-tick `use` (walk-in,
+  // stealth, cast time) in `ActionRunContext::out_active_act`.
+  bool act_started = false;
 };
 
 // Pre-validates `action` before mutating bot state or cancelling any active

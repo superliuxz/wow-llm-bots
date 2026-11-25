@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "base/time/time.h"
+#include "options/act_executor.h"
 #include "options/action_types.h"
 #include "options/exec_items.h"
 #include "options/exec_shared.h"
@@ -32,8 +34,12 @@ ActionOutcome ExecuteLeaveGroupAction(Player* bot);
 ActionOutcome ExecuteResurrectAction(Player* bot,
                                      const ResurrectAction& action);
 ActionOutcome ExecuteLootRollAction(Player* bot, const LootRollAction& action);
-ItemActionOutcome ExecuteCrowdControlAction(Player* bot,
-                                            const CrowdControlAction& action);
+// Casts the crowd-control spell on its target with `act: use` physics
+// (StartSpellUseOn): a multi-tick walk-in / stealth / cast fills `*out_active`.
+ActStartResult ExecuteCrowdControlAction(Player* bot,
+                                         const CrowdControlAction& action,
+                                         base::TimeTicks now,
+                                         ActiveAct* out_active);
 ActionOutcome ExecutePopupAnswerAction(Player* bot,
                                        const PopupAnswerAction& action);
 // With the brain's `auto_popups` policy set, answers what is open now: rez
