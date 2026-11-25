@@ -3903,5 +3903,82 @@ TEST(BotLoopTest, AnAfkPartyMemberHoldsTheLookTimerAndUnaskedChatter) {
   EXPECT_EQ(says(), 2);
 }
 
+TEST(BotLoopTest, HoldsOneLlmPermitForBotsInAHumansParty) {
+  CannedBrain brain;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.max_in_flight = 2;
+  BotLoop loop(cfg, brain.Fn(), [](const pb::Command&) {});
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  const auto party_with = [](pb::Snapshot* s, const std::string& name,
+                             bool online) {
+    pb::Unit& m = s->ext.party.emplace().members.emplace_back();
+    m.name = name;
+    m.group.emplace().online = online;
+  };
+  // Mate plays with a human (Will); Solo1 and Solo2 are on their own, and
+  // Pal's only party member is another brain bot (Solo1).
+  pb::Snapshot mate = MakeLiveSnap("Mate", 1, t0);
+  AddKeep(&mate);
+  party_with(&mate, "Will", /*online=*/true);
+  loop.OnSnapshot(mate, t0);
+  pb::Snapshot solo1 = MakeLiveSnap("Solo1", 1, t0);
+  AddKeep(&solo1);
+  loop.OnSnapshot(solo1, t0);
+  EXPECT_EQ(loop.in_flight(), 2u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");  // Mate.
+  EXPECT_EQ(loop.in_flight(), 1u);
+
+  pb::Snapshot solo2 = MakeLiveSnap("Solo2", 1, t0);
+  AddKeep(&solo2);
+  loop.OnSnapshot(solo2, t0);
+  EXPECT_EQ(loop.in_flight(), 1u);  // The last permit is Mate's.
+  EXPECT_EQ(loop.queued(), 1u);
+
+  // Counter-tests: a party of brain bots gets no held permit, and once Mate's
+  // human goes offline the permit is free again.
+  pb::Snapshot pal = MakeLiveSnap("Pal", 1, t0);
+  AddKeep(&pal);
+  party_with(&pal, "Solo1", /*online=*/true);
+  loop.OnSnapshot(pal, t0);
+  EXPECT_EQ(loop.in_flight(), 1u);
+  EXPECT_EQ(loop.queued(), 2u);
+  pb::Snapshot mate2 = MakeLiveSnap("Mate", 2, t0 + base::Seconds(1));
+  AddKeep(&mate2);
+  party_with(&mate2, "Will", /*online=*/false);
+  loop.OnSnapshot(mate2, t0 + base::Seconds(1));
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");  // Solo1.
+  EXPECT_EQ(loop.in_flight(), 2u);  // Solo2 and Pal (or Mate) share both.
+}
+
+TEST(BotLoopTest, ADisconnectForgetsWhoPlaysWithAHuman) {
+  CannedBrain brain;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.max_in_flight = 2;
+  BotLoop loop(cfg, brain.Fn(), [](const pb::Command&) {});
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot mate = MakeLiveSnap("Mate", 1, t0);
+  AddKeep(&mate);
+  pb::Unit& will = mate.ext.party.emplace().members.emplace_back();
+  will.name = "Will";
+  will.group.emplace().online = true;
+  loop.OnSnapshot(mate, t0);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  ASSERT_EQ(loop.in_flight(), 0u);
+
+  loop.OnConnectionChanged(false);
+  loop.OnConnectionChanged(true);
+  // After the reconnect Mate hasn't sent a snapshot yet: both permits are free.
+  for (const char* bot : {"Solo1", "Solo2"}) {
+    pb::Snapshot s = MakeLiveSnap(bot, 1, t0 + base::Seconds(1));
+    AddKeep(&s);
+    loop.OnSnapshot(s, t0 + base::Seconds(1));
+  }
+  EXPECT_EQ(loop.in_flight(), 2u);
+}
+
 }  // namespace
 }  // namespace harness

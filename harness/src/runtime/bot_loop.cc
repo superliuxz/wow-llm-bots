@@ -813,6 +813,19 @@ bool BotLoop::WakesForPartyLine(const std::string& bot,
   return a.online.front() == bot;
 }
 
+bool BotLoop::PlaysWithHuman(const pb::Snapshot& snapshot) const {
+  const auto is_human = [&](const pb::Unit& m) {
+    return m.group && m.group->online && !m.name.empty() &&
+           m.name != snapshot.bot && !bots_.contains(m.name);
+  };
+  return (snapshot.ext.party &&
+          std::any_of(snapshot.ext.party->members.begin(),
+                      snapshot.ext.party->members.end(), is_human)) ||
+         (snapshot.ext.raid &&
+          std::any_of(snapshot.ext.raid->members.begin(),
+                      snapshot.ext.raid->members.end(), is_human));
+}
+
 bool BotLoop::AnswersPartyLine(const std::string& bot,
                                std::string_view text,
                                const pb::Snapshot& snapshot) const {
@@ -848,6 +861,7 @@ void BotLoop::OnConnectionChanged(bool connected) {
   if (!connected) {
     for (auto&& [name, state] : bots_) {
       ResetBotSession(&state, /*cancel_in_flight=*/false);
+      scheduler_.SetHumanParty(name, false);
     }
     party_chat_budgets_.clear();
     // Answers to screens of the old connection are useless: free the slots.
@@ -1011,6 +1025,7 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   Screen screen = RenderScreen(snapshot);
   const std::optional<WakeTrigger> trig =
       state.triggers.EvaluateSnapshot(snapshot);
+  scheduler_.SetHumanParty(bot, PlaysWithHuman(snapshot));
   state.latest_snapshot = std::move(snapshot);
   state.latest_screen = std::move(screen);
   state.latest_received_at = received_at;
@@ -1380,6 +1395,7 @@ void BotLoop::OnTick(base::TimeTicks now) {
           "for it to come back",
           bot.c_str(), (now - state.latest_received_at).InSecondsF()));
       ResetBotSession(&state, /*cancel_in_flight=*/true);
+      scheduler_.SetHumanParty(bot, false);
       continue;
     }
     while (!state.pending_says.empty() &&

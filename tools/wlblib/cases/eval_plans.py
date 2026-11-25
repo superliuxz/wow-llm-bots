@@ -206,6 +206,43 @@ def act_line(got):
     return next((line for line in got.get("raw", "").splitlines() if line.startswith("act:")), "")
 
 
+# The held-out check at the live harness's temperature (`wlb test eval --live`): the T=0 run is
+# what RULES.md wording is tuned on, so it can overfit one sampled answer per case; live play
+# samples at LIVE_TEMPERATURE, where a case should pass most of LIVE_SAMPLES draws.
+LIVE_TEMPERATURE = 0.7
+LIVE_SAMPLES = 3
+# Mean share of scored cases a live run must pass (T=0 scores ~57/59 = 97%).
+LIVE_MIN_PASS_RATE = 0.85
+
+
+def run_live(cases, samples=LIVE_SAMPLES, temperature=LIVE_TEMPERATURE):
+    """Every scored case `samples` times at `temperature`; prints each case's passes and the mean
+    score, and returns {"mean_rate", "passed_draws", "draws", "unstable": [...]}."""
+    ensure_harness()
+    say(f"== eval (live: T={temperature:g}, {samples} draws per case) ==")
+    cases = [c for c in cases if can_fail(c)]
+    rows = []
+    for case in cases:
+        verdicts, firsts = [], []
+        for i in range(samples):
+            got = decide_one(case, temperature=temperature, slot=0)
+            problems = check_case(case, got)
+            verdicts.append(not problems)
+            firsts.append(got.get("plan_desc", "INVALID") if not problems
+                          else f"FAIL: {problems[0]}")
+        n = sum(verdicts)
+        mark = "PASS" if n == samples else ("FAIL" if n == 0 else "FLAKY")
+        say(f"  {mark:5s} {n}/{samples} {case['name']:25s} -> {' | '.join(firsts)}")
+        rows.append((case["name"], n))
+    draws = samples * len(rows)
+    passed = sum(n for _, n in rows)
+    rate = passed / draws if draws else 0.0
+    unstable = [name for name, n in rows if n < samples]
+    say(f"live score: {passed}/{draws} draws ({100 * rate:.0f}%; mean {passed / samples:.1f}/"
+        f"{len(rows)} cases), all draws pass on {len(rows) - len(unstable)}/{len(rows)}")
+    return {"mean_rate": rate, "passed_draws": passed, "draws": draws, "unstable": unstable}
+
+
 def run_suite(cases, label=None):
     ensure_harness()
     if label:

@@ -9,6 +9,12 @@
 // is waiting for its turn, the newer wake-up replaces the old (the old screen
 // is stale); if one is in progress, the newer waits behind it.
 //
+// A human playing with bots shouldn't wait behind the rest of the world: while
+// any bot shares a party with an online human (`SetHumanParty`) and there are
+// at least 2 permits, one permit is held for those bots; others run on the
+// rest. Slots are not reserved, only the permit: a human-party bot still
+// takes any free slot (preferring its own, for the KV cache).
+//
 // Not thread-safe: use on one sequence. Work reports back by calling `done`
 // on that sequence.
 
@@ -18,6 +24,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <flat_map>
+#include <flat_set>
 #include <string>
 #include <vector>
 
@@ -69,6 +76,11 @@ class Scheduler {
   void Submit(const std::string& bot, Urgency urgency, SlotWork work);
   void Submit(const std::string& bot, Urgency urgency, Work work);
 
+  // Whether `bot` plays in a party with an online human (from its latest
+  // snapshot). Turning it off frees the held permit as soon as the next call
+  // finishes or is submitted (never runs work from inside this call).
+  void SetHumanParty(const std::string& bot, bool in_human_party);
+
   // Aborts all cancelable in-flight calls (e.g. on harness disconnect).
   void CancelAllInFlight();
 
@@ -94,6 +106,8 @@ class Scheduler {
   base::TimeTicks Now() const;
   int EffectivePriority(const Waiting& w, base::TimeTicks now) const;
   int PickSlot(const std::string& bot);
+  // One permit is held for human-party bots and `bot` isn't one of them.
+  bool HeldBackForHumanParty(const std::string& bot) const;
   void StartWaiting();
   void OnDone(const std::string& bot, uint64_t run_id);
 
@@ -107,6 +121,7 @@ class Scheduler {
   std::vector<bool> slot_busy_;
   std::flat_map<std::string, InFlight> in_flight_;
   std::flat_map<std::string, int> last_slot_;
+  std::flat_set<std::string> human_party_;
   bool starting_ = false;  // StartWaiting is running (work may finish inside).
   base::WeakPtrFactory<Scheduler> weak_factory_{this};
 };

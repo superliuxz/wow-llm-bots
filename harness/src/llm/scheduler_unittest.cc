@@ -331,5 +331,82 @@ TEST(SchedulerTest, AgedWakesNeverOvertakeAFreshCombatWake) {
   EXPECT_EQ(r.started(), (Names{"busy", "tank"}));
 }
 
+TEST(SchedulerTest, HoldsOnePermitForAHumansParty) {
+  Scheduler scheduler(3);
+  Recorder r;
+  scheduler.SetHumanParty("mate", true);
+  scheduler.Submit("a", Urgency::kNormal, r.Work("a"));
+  scheduler.Submit("b", Urgency::kNormal, r.Work("b"));
+  scheduler.Submit("c", Urgency::kNormal, r.Work("c"));
+  EXPECT_EQ(r.started(), (Names{"a", "b"}));
+  EXPECT_EQ(scheduler.queued(), 1u);
+  // The human's party mate gets the held permit at once, behind nobody.
+  scheduler.Submit("mate", Urgency::kNormal, r.Work("mate"));
+  EXPECT_EQ(r.started(), (Names{"a", "b", "mate"}));
+  // Once it's done the permit is held again: c still waits for a or b.
+  r.Finish("mate");
+  EXPECT_EQ(r.started(), (Names{"a", "b", "mate"}));
+  r.Finish("a");
+  EXPECT_EQ(r.started(), (Names{"a", "b", "mate", "c"}));
+}
+
+TEST(SchedulerTest, AnUrgentWakeOutsideTheHumansPartyStillLeavesItsPermit) {
+  Scheduler scheduler(2);
+  Recorder r;
+  scheduler.SetHumanParty("mate", true);
+  scheduler.Submit("a", Urgency::kNormal, r.Work("a"));
+  scheduler.Submit("fight", Urgency::kUrgent, r.Work("fight"));
+  EXPECT_EQ(r.started(), (Names{"a"}));
+  r.Finish("a");
+  EXPECT_EQ(r.started(), (Names{"a", "fight"}));
+}
+
+TEST(SchedulerTest, HumanPartyBotsMayUseEveryPermit) {
+  Scheduler scheduler(2);
+  Recorder r;
+  scheduler.SetHumanParty("m1", true);
+  scheduler.SetHumanParty("m2", true);
+  scheduler.Submit("m1", Urgency::kNormal, r.Work("m1"));
+  scheduler.Submit("m2", Urgency::kNormal, r.Work("m2"));
+  scheduler.Submit("a", Urgency::kNormal, r.Work("a"));
+  EXPECT_EQ(r.started(), (Names{"m1", "m2"}));
+  // The held permit is one of the two: with m2 still running, a takes m1's.
+  r.Finish("m1");
+  EXPECT_EQ(r.started(), (Names{"m1", "m2", "a"}));
+}
+
+TEST(SchedulerTest, NoPermitIsHeldWithoutAHumansPartyOrWithOnePermit) {
+  {
+    Scheduler scheduler(2);
+    Recorder r;
+    scheduler.SetHumanParty("mate", true);
+    scheduler.SetHumanParty("mate", false);  // The party broke up.
+    scheduler.Submit("a", Urgency::kNormal, r.Work("a"));
+    scheduler.Submit("b", Urgency::kNormal, r.Work("b"));
+    EXPECT_EQ(r.started(), (Names{"a", "b"}));
+  }
+  {
+    Scheduler scheduler(1);
+    Recorder r;
+    scheduler.SetHumanParty("mate", true);
+    scheduler.Submit("a", Urgency::kNormal, r.Work("a"));
+    EXPECT_EQ(r.started(), (Names{"a"}));
+  }
+}
+
+TEST(SchedulerTest, LeavingTheHumansPartyFreesThePermitOnTheNextChange) {
+  Scheduler scheduler(2);
+  Recorder r;
+  scheduler.SetHumanParty("mate", true);
+  scheduler.Submit("a", Urgency::kNormal, r.Work("a"));
+  scheduler.Submit("b", Urgency::kNormal, r.Work("b"));
+  EXPECT_EQ(r.started(), (Names{"a"}));
+  // Never starts work from inside SetHumanParty (callers may be mid-update).
+  scheduler.SetHumanParty("mate", false);
+  EXPECT_EQ(r.started(), (Names{"a"}));
+  scheduler.Submit("c", Urgency::kNormal, r.Work("c"));
+  EXPECT_EQ(r.started(), (Names{"a", "b"}));
+}
+
 }  // namespace
 }  // namespace harness

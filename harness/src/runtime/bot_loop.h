@@ -353,6 +353,10 @@ class BotLoop {
                          std::string_view text,
                          const std::string& from,
                          const wlb::snapshot::Snapshot& snapshot) const;
+  // Whether the snapshot's party/raid has an online member who isn't a brain
+  // bot (a human, as WakesForPartyLine counts one): its bot's calls may use
+  // the scheduler permit held for a human's party.
+  bool PlaysWithHuman(const wlb::snapshot::Snapshot& snapshot) const;
   // Whether `bot` is the one who replies in chat to party/raid line `text`
   // (at most one speaker, Now #10): the first addressed bot, or, when nobody
   // is addressed, the first online brain bot by name.

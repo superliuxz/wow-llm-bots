@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <flat_set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -105,6 +106,28 @@ void Scheduler::Submit(const std::string& bot, Urgency urgency, Work work) {
       });
 }
 
+void Scheduler::SetHumanParty(const std::string& bot, bool in_human_party) {
+  if (in_human_party) {
+    human_party_.insert(bot);
+  } else {
+    human_party_.erase(bot);
+  }
+}
+
+bool Scheduler::HeldBackForHumanParty(const std::string& bot) const {
+  if (max_in_flight_ < 2 || human_party_.empty() ||
+      human_party_.contains(bot)) {
+    return false;
+  }
+  size_t others_in_flight = 0;
+  for (const auto& [name, state] : in_flight_) {
+    if (!human_party_.contains(name)) {
+      ++others_in_flight;
+    }
+  }
+  return others_in_flight + 1 >= max_in_flight_;
+}
+
 void Scheduler::CancelAllInFlight() {
   std::vector<base::OnceClosure> cancels;
   cancels.reserve(in_flight_.size());
@@ -145,12 +168,14 @@ void Scheduler::StartWaiting() {
   while (in_flight_.size() < max_in_flight_) {
     // The next to start: lowest effective priority (with aging so lower tiers
     // cannot starve under load), then the longest waiting, skipping bots that
-    // already have a question in progress.
+    // already have a question in progress and, while one permit is held for
+    // a human's party, the bots outside it once the rest are taken.
     const base::TimeTicks now = Now();
     size_t best = queue_.size();
     int best_prio = 0;
     for (size_t i = 0; i < queue_.size(); ++i) {
-      if (in_flight_.count(queue_[i].bot) > 0) {
+      if (in_flight_.count(queue_[i].bot) > 0 ||
+          HeldBackForHumanParty(queue_[i].bot)) {
         continue;
       }
       const int prio = EffectivePriority(queue_[i], now);

@@ -556,10 +556,17 @@ def soak(minutes=5.0, runs=0, suite="varied", temperature=0.7, no_brain=False):
     )
 
 
-def eval_(names=(), model=None, shootout=False):
+def eval_(names=(), model=None, shootout=False, live=False, samples=None):
     from wlblib.cases import eval_plans
 
     cases = eval_plans.load_cases(names)
+    if live:
+        with LlamaServer(slots=4, model=model):
+            res = eval_plans.run_live(cases, samples=samples or eval_plans.LIVE_SAMPLES)
+        if res["mean_rate"] < eval_plans.LIVE_MIN_PASS_RATE:
+            raise Failed(f"live eval passed {100 * res['mean_rate']:.0f}% of draws "
+                         f"(< {100 * eval_plans.LIVE_MIN_PASS_RATE:.0f}%)")
+        return
     if shootout:
         models = [m for m in eval_plans.SHOOTOUT_MODELS if (ROOT / "models" / m).exists()]
         if not models:

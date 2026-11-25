@@ -35,8 +35,10 @@ Guild Wars heroes):
 - **Short-term per-player memory & richer personas:** Store the last N exchanges per player
   (source-tagged so player chat never injects trusted instructions) and add more identities.
 - **Latency & world-thread polish:** Measure 4 Hz combat snapshot cost at raid scale (build lighter
-  combat snapshots if needed), reserve llama slots for the human's party, and add a real held-out
-  eval split run at live temperature (`0.7`).
+  combat snapshots if needed).
+- **Held-out eval split:** `wlb test eval --live` samples every case 3x at T=0.7 (94% of draws;
+  `herb_to_gather` fails all 3 there), but every case was used to tune RULES.md. Add fresh cases
+  kept out of tuning (`held_out`), scored only by `--live`.
 
 ## Later (broader WoW systems)
 
