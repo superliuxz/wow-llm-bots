@@ -1,0 +1,3 @@
+# Applied to every test config before its own overrides: settings of the play config tests must
+# not inherit. The play preset's characters (LlmBrain.CreateBots) aren't created on the test server.
+LlmBrain.CreateBots = ""

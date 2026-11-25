@@ -235,9 +235,11 @@ def config(test=None, inst=PLAY):
                          f"server{' --test' if inst is TEST else ''})")
         files = [configs / f"{name}.overrides" for name in names]
         if test and test_name:
-            extra = configs / "tests" / f"{test}.{test_name}.overrides"
-            if extra.exists():
-                files.append(extra)
+            # config/tests/_base.*: what every test resets from the play config.
+            for extra in (configs / "tests" / f"_base.{test_name}.overrides",
+                          configs / "tests" / f"{test}.{test_name}.overrides"):
+                if extra.exists():
+                    files.append(extra)
         _apply(dist, dist.with_suffix(""), files, tokens)
     say(f"{inst.name} config applied{f' (test: {test})' if test else ''}")
 

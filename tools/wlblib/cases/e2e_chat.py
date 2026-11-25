@@ -63,7 +63,7 @@ def _case_party_reply():
     (`party: <its name> here`), so the harness, not the model, decides who speaks. Loadd stands in for
     the user (`llmtest testhuman Loadd 1`) in a party with Loada, Loadb and Loadc.
 
-      1. Loadd types "anyone up for RFC?": all three bots wake, but only Loada (first by name) says
+      1. Loadd types "anyone up for RFC?": only Loada (first by name) wakes (T9) and says
          anything in party.
       2. Loadd types "loadc can you heal?": only Loadc answers.
       3. Loadd types "lol": no bot is woken by it.
@@ -208,11 +208,13 @@ def _case_party_reply():
                 for bot in ("Loadb", "Loadc", "Loadd"):
                     server.console(f"llmtest ungroup {bot}", wait_s=0.2, inst=TEST)
 
-        expect(woken1 == list(BOTS), f"'anyone up for RFC?' woke {woken1}, expected all of {list(BOTS)}")
+        # T9: a party line wakes only the bot that answers it.
+        expect(woken1 == ["Loada"], f"'anyone up for RFC?' woke {woken1}, expected only Loada")
         expect(says1 == {"Loada": 1}, f"'anyone up for RFC?' got party replies {says1}, expected only Loada")
+        expect(woken2 == ["Loadc"], f"'loadc can you heal?' woke {woken2}, expected only Loadc")
         expect(says2 == {"Loadc": 1}, f"'loadc can you heal?' got party replies {says2}, expected only Loadc")
         expect(not woken3 and not says3, f"'lol' woke {woken3} / got replies {says3}")
-        return (f"unnamed line: {woken1} woke, only Loada answered; named: only Loadc answered; "
+        return ("unnamed line: only Loada woke and answered; named: only Loadc woke and answered; "
                 "'lol' woke nobody")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 

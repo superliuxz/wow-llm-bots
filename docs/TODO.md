@@ -9,93 +9,116 @@ Findings from "Wow Llm Bots Review 2". Tick when fixed and tested.
 
 ### Team-play breakers
 
-- [ ] **T1 (High)** `config/llm-brain.overrides`, `worldserver.overrides`: the play config has 2 brain
+- [x] **T1 (High)** `config/llm-brain.overrides`, `worldserver.overrides`: the play config has 2 brain
   bots (`Testpriest`, `Gatda`), 2 identities, no random bots and no `Debug.LFG`. You can't form
   human + 4, and a Random Dungeon queue with 3 players never pops.
-- [ ] **T2 (High)** `config_parsing.cc`: only non-leader members get `-grind,-new rpg`. A bot leader
+- [x] **T2 (High)** `config_parsing.cc`: only non-leader members get `-grind,-new rpg`. A bot leader
   keeps solo grind/RPG-travel strategies, wanders, hearths or flies off; in a dungeon it pulls
   trash by itself.
-- [ ] **T3 (High)** `bot_manager.cc`, `CombatStrategies = "+boost,+dps assist,-threat"`: every
+- [x] **T3 (High)** `bot_manager.cc`, `CombatStrategies = "+boost,+dps assist,-threat"`: every
   non-tank bot runs `-threat,+boost`, grouped or not. DPS opens with cooldowns, ignores threat
   and pulls mobs off you.
-- [ ] **T4 (High)** `bot_manager.cc` group policy: clearing `Wait here` / `Let X tank` emits nothing
+- [x] **T4 (High)** `bot_manager.cc` group policy: clearing `Wait here` / `Let X tank` emits nothing
   (the bot never comes back, a prot bot never tanks again). The policy silently disappears when
   the group changes while `+stay` stays on.
-- [ ] **T5 (High)** `exec_social.cc`, `bot_manager.cc` (`AddPlayerBot(guid, 0)`, no master): follow
+- [x] **T5 (High, mostly not a bug)** Once grouped with a real player, playerbots'
+  `UpdateAIGroupMaster` -> `FindNewMaster` makes that player the bot's master, so `+follow`
+  (taxi follow included) and master commands work; only an all-bot group has no master. Still to
+  verify with a real client (see the human + 4 e2e item below). Original finding: `exec_social.cc`, `bot_manager.cc` (`AddPlayerBot(guid, 0)`, no master): follow
   works only on the same map within 8-25 yd. No option for taxi, hearth, boat/zeppelin or
   portals; playerbots' taxi and teleport-to-master follow never run.
-- [ ] **T6 (Med)** `exec_social.cc`: Dungeon Finder roles come from class, not spec.
-- [ ] **T7 (Med)** `exec_social.cc`: "upgrade" is item level only, no Disenchant vote, at most 2
+- [x] **T6 (Med)** `exec_social.cc`: Dungeon Finder roles come from class, not spec.
+- [x] **T7 (Med)** `exec_social.cc`: "upgrade" is item level only, no Disenchant vote, at most 2
   rolls shown at once. A warrior Needs a cloth spell-power robe over the mage.
-- [ ] **T8 (Med)** `triggers.cc`: no wake when the party enters combat, a member dies, or the healer
+- [x] **T8 (Med)** `triggers.cc`: no wake when the party enters combat, a member dies, or the healer
   is low on mana. A bot wakes only on its own state.
-- [ ] **T9 (Med)** `chat_scripts.cc`, `bot_loop.cc`: every non-trivial party line wakes all bots at
+- [x] **T9 (Med)** `chat_scripts.cc`, `bot_loop.cc`: every non-trivial party line wakes all bots at
   P1; only the replies are muted. 4 prompts per "next pack".
-- [ ] **T10 (Med)** `chat_scripts.cc`: raid warnings are dropped; boss emotes and monster yells are
+- [x] **T10 (Med)** `chat_scripts.cc`: raid warnings are dropped; boss emotes and monster yells are
   never forwarded, yet the triggers treat them as P0.
-- [ ] **T11 (Med)** missing: nothing handles the human logging out, leaving the group, or leaving
+- [x] **T11 (Med)** missing: nothing handles the human logging out, leaving the group, or leaving
   the Dungeon Finder group. Bots idle forever or stay stuck in the dungeon.
-- [ ] **T12 (Med)** `bot_manager.cc`: holding playerbots' auto-release only happens in dungeons. In
+- [x] **T12 (Med)** `bot_manager.cc`: holding playerbots' auto-release only happens in dungeons. In
   the open world a bot runs back from the graveyard while your priest casts Resurrection.
-- [ ] **T13 (Low)** `chat_scripts.cc`: raid `/p` reaches every subgroup; `ext.raid` is never
+- [x] **T13 (Low)** `chat_scripts.cc`: raid `/p` reaches every subgroup; `ext.raid` is never
   filled, so bots never use `/raid`.
-- [ ] **T14 (Low)** `exec_social.cc`: every member is offered "Mark nearest hostile with Skull",
+- [x] **T14 (Low)** `exec_social.cc`: every member is offered "Mark nearest hostile with Skull",
   even on unpulled mobs.
-- [ ] **T15 (Low)** `bot_loop.cc`: the party-chat responder is the alphabetically first bot, with
+- [x] **T15 (Low)** `bot_loop.cc`: the party-chat responder is the alphabetically first bot, with
   no check that it is online.
-- [ ] **T16 (Low, suspected)** no master + `CommandPrefix = "!pb "`: playerbots' `follow` / `stay` /
+- [x] **T16 (Low, suspected; mostly not a bug)** With the human as master (T5), `!pb follow` /
+  `!pb stay` work; plain words don't until the fast command path (Now #2). Original finding: no master + `CommandPrefix = "!pb "`: playerbots' `follow` / `stay` /
   `rti skull` from you probably do nothing; no fallback until the fast command path exists.
 
 ### New bugs from the audit fix
 
-- [ ] Scheduler aging inverts combat priority (`scheduler.cc`): P1-P3 age to P0 in 2-6 s and ties
+- [x] Scheduler aging inverts combat priority (`scheduler.cc`): P1-P3 age to P0 in 2-6 s and ties
   go to the oldest, so a fresh tank combat wake waits behind old "plan done" entries. Stop aging
   at P1.
-- [ ] The 350-token reserve applies almost always (`prompt.cc`): `order_names` includes every
+- [x] The 350-token reserve applies almost always (`prompt.cc`): `order_names` includes every
   nearby unit, so the boss notes are dropped on the pre-pull compile wake. Reserve only on
   compile wakes and fill notes first there.
-- [ ] An order wake held back by backoff still stops the plan (`bot_loop.cc`): with
+- [x] An order wake held back by backoff still stops the plan (`bot_loop.cc`): with
   `every 2s -> wake` the bot stands idle most of the time.
-- [ ] A rate-limited chat line is never answered (`bot_loop.cc`): the human's 4th quick line
+- [x] A rate-limited chat line is never answered (`bot_loop.cc`): the human's 4th quick line
   ("STOP") wakes nothing.
-- [ ] Chat arriving during a call drops that call's plan (superseded): a human typing every few
+- [x] Chat arriving during a call drops that call's plan (superseded): a human typing every few
   seconds can keep a bot from ever installing a plan.
-- [ ] `SanitizeRememberNote` rejects what the human teaches ("remember: always heal me first" is
+- [x] `SanitizeRememberNote` rejects what the human teaches ("remember: always heal me first" is
   dropped as an imperative echo); a paraphrase still gets through, and condensing strips the
   `[heard in chat]` tag. Filter by sender (trust leader and party), not keywords.
-- [ ] Group policy is wiped on every logout or relog (`bot_session.cc`).
-- [ ] A hung (not crashed) harness locks out every replacement (`unix_socket_server.cc`), and popups
+- [x] Group policy is wiped on every logout or relog (`bot_session.cc`).
+- [x] A hung (not crashed) harness locks out every replacement (`unix_socket_server.cc`), and popups
   stay blocked.
-- [ ] playerbots' auto-equip runs whenever the harness is down (`bot_manager.cc`), undoing the
+- [x] playerbots' auto-equip runs whenever the harness is down (`bot_manager.cc`), undoing the
   brain's gear choices.
 
 ### Old findings still open
 
-- [ ] Rest holds the healer's reflexes while the tank pulls (server M4).
-- [ ] `to` / `away` / `kite` still queue movement on a taxi or while feared (server H2, partial).
-- [ ] Party responder has no online check (harness #6, partial; same as T15).
-- [ ] An invalid plan keeps its early steps (harness #12).
-- [ ] Random Dungeon picks the highest max level, probably Heroic at 80 (server L2).
-- [ ] Raid warning is P0 for every bot (harness #20).
+- [x] Rest holds the healer's reflexes while the tank pulls (server M4).
+- [x] `to` / `away` / `kite` still queue movement on a taxi or while feared (server H2, partial).
+- [x] Party responder has no online check (harness #6, partial; same as T15).
+- [x] An invalid plan keeps its early steps (harness #12).
+- [x] Random Dungeon picks the highest max level, probably Heroic at 80 (server L2).
+- [x] Raid warning is P0 for every bot (harness #20).
 
 ### Python, tools and docs
 
-- [ ] Stall gate broken by the trace shrink: `stall_check.PROGRESS_EVENTS` lists ~15 events the
+- [x] Stall gate broken by the trace shrink: `stall_check.PROGRESS_EVENTS` lists ~15 events the
   module no longer writes (`quest_accept`, `loot`, `vendor_repair`, `go_interact`, ...); the spec
   test that would catch it was parked.
-- [ ] `no_wake_loop` reads `peak_wakes_per_min`, and the XP fallback reads `xp_max`; nothing writes
+- [x] `no_wake_loop` reads `peak_wakes_per_min`, and the XP fallback reads `xp_max`; nothing writes
   either.
-- [ ] `docs/results.md` misreports the Qwen boss row (44/37/42 vs source 46/33/39), dropped the
+- [x] `docs/results.md` misreports the Qwen boss row (44/37/42 vs source 46/33/39), dropped the
   one significant result (p_holm = 0.0208), calls p50 "tail latency", and says 52 cases (now 66).
-- [ ] The doc distill dropped live rules: no secrets or personal data in tracked files / noreply
+- [x] The doc distill dropped live rules: no secrets or personal data in tracked files / noreply
   email; never copy `private/BigFootAddOns` into the public repo; the legal note and decided
   product rules; the playerbots audit doc that 4 code comments still cite; open TODO items
   ("confirm the single responder in a real session", loot etiquette from play-with-human).
-- [ ] About 20 stale references to deleted or moved files.
-- [ ] Screen goldens now check C++ against C++ (`--rewrite`), and the perf baselines were recorded by
-  the retired Python tool.
-- [ ] Restoring parked code doesn't work as documented: `hill_climb.py` imports an API that no
-  longer exists.
+- [x] About 20 stale references to deleted or moved files.
+- [x] Screen goldens now check C++ against C++ (`--rewrite`): labeled regression-only, read every
+  golden diff by hand.
+- [x] The perf baselines (`tools/wlblib/cases/perf_baselines.json`) were recorded by the retired
+  Python tool: re-recorded 2026-11-24 with the C++ replay on a fresh capture and verified (brain,
+  snapshots, walk). The new brain numbers are slower than the old ones (50 bots wake->plan p50
+  1.2 s vs 0.4 s) because the capture and tool changed: an A/B on the same capture shows today's
+  harness faster than the pre-review one (6.9 vs 6.3 wakes/s, p50 1.26 s vs 1.48 s).
+- [x] Restoring parked code doesn't work as documented: `hill_climb.py` imports an API that no
+  longer exists. Tried in a scratch worktree; `experimental/README.md` now lists what a restore
+  really needs (the pre-split scorer and the pre-shrink trace events).
+
+### Left from Review 2
+
+- [x] **Human + 4 e2e with a real client account:** `e2e_human_party` logs a scripted 3.3.5a
+  client (`tools/wlblib/wowclient.py`, no playerbots AI) in as a real player: the bots accept its
+  invite and playerbots makes it their master (T5/T16), one bot answers its party line (single
+  responder), and a creature's boss emote wakes the bots (T10). Still worth one session with your
+  own client.
+- [x] **Play preset characters:** `LlmBrain.CreateBots` created Drogbar, Zenji, Rokzul and Mabaku
+  on the play server (all online in Durotar; Gatda already existed as an orc rogue, so the tank is
+  Drogbar); `e2e_create_bots` checks a restart keeps them.
+- [ ] **Intermittent e2e cases:** in a full `wlb test e2e` run `lfg_proposal`, `orders` and
+  `playability` failed once each and passed when rerun alone; find the race.
 
 ## Now (team play first: the gaps a human feels in the first hour)
 

@@ -13,6 +13,7 @@
 
 #include "Action.h"
 #include "AiFactory.h"
+#include "AiObjectContext.h"
 #include "ByteBuffer.h"
 #include "CharacterCache.h"
 #include "DBCStructure.h"
@@ -654,8 +655,14 @@ void BotManager::EnsureStrategies(Player* player) {
   }
   // Still as we left it in every state: playerbots hasn't reset any of them
   // since (it resets combat alone too, e.g. SelectiveResetStrategies).
+  // A strategy this bot's class doesn't have (a warrior has no `boost`) can
+  // never be added: don't count it, or the bot is re-strategized every tick.
+  const auto supported = ai->GetAiObjectContext()->GetSupportedStrategies();
   const auto holds = [&](const std::string& changes, BotState state) {
     for (const StrategyCheck& check : StrategyChecks(changes)) {
+      if (check.present && !supported.contains(check.name)) {
+        continue;
+      }
       if (ai->HasStrategy(check.name, state) != check.present) {
         return false;
       }

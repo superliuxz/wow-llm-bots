@@ -919,4 +919,188 @@ def _case_lfg_proposal():
         return f"LFG_PROPOSAL woke Loadb {delay:.2f} s after the role check; both accepted and entered"
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
-CASES = [_case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal()]
+def _case_human_party():
+    """A real human client plays with the bots (Review 2: T5, T9 single responder, T10).
+
+    `humanparty` test config. A scripted 3.3.5a client (tools/wlblib/wowclient.py, no playerbots
+    AI: a real player to the server) logs in as Humanone, an orc warrior at the Valley of Trials,
+    next to Loada, Loadb and Loadc. The real harness runs the bots against a mock LLM that accepts
+    group invites, keeps doing what it does, and answers a party line it was woken by.
+
+      1. Humanone invites the three bots: each accepts, and playerbots makes Humanone their
+         master (T5: follow, taxi follow and `!pb` commands work for the human).
+      2. Humanone types "anyone up for RFC?" in party: exactly one bot is woken and answers, and
+         the client sees that one party reply (the single responder, with a real client).
+      3. A creature next to the party sends a raid boss emote: it reaches the bots and wakes them
+         (T10).
+    """
+
+    import http.server
+    import json
+    import os
+    import re
+    import subprocess
+    import tempfile
+    import threading
+    import time
+    import pathlib
+
+    from wlblib import build, server, wowclient
+    from wlblib.common import OUT, ROOT, TEST
+    from wlblib.testing import ProxyRecorder, expect
+
+    NAME = "human_party"
+    DESCRIPTION = "Real client: bots accept its invite, it becomes their master, one bot answers"
+    TEST_CONFIG = "humanparty"
+    BOT = "Loada"
+    ONLINE = 3
+
+    BOTS = ("Loada", "Loadb", "Loadc")
+    HUMAN = "Humanone"
+    ACCOUNT = "HUMANTEST"
+    KEEP_RE = re.compile(r"^\s+(\d+)\. Keep doing what I'm doing$", re.M)
+    ACCEPT_RE = re.compile(r"^\s+(\d+)\. Accept group invite", re.M)
+    NAME_RE = re.compile(r"^You are (\w+)\.", re.M)
+
+    class _Brain:
+        def __init__(self):
+            self.lock = threading.Lock()
+            self.wakes = []  # (time, bot, woken line)
+            parent = self
+
+            class Handler(http.server.BaseHTTPRequestHandler):
+                def log_message(self, fmt, *args):
+                    pass
+
+                def do_POST(self):
+                    length = int(self.headers.get("Content-Length", "0"))
+                    body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+                    text = "\n".join(m.get("content", "") for m in body.get("messages", []))
+                    name = NAME_RE.search(text)
+                    bot = name.group(1) if name else "?"
+                    woken = next((ln for ln in text.splitlines() if ln.startswith("Woken: ")), "")
+                    with parent.lock:
+                        parent.wakes.append((time.monotonic(), bot, woken))
+                    pick = ACCEPT_RE.search(text) or KEEP_RE.search(text)
+                    lines = [f"do: {pick.group(1) if pick else 1}", "expect: none",
+                             "watch: none", "look: 300"]
+                    if f"party from {HUMAN}" in woken:
+                        lines.append(f"party: {bot} here")
+                    reply = json.dumps({
+                        "choices": [{"message": {"content": "\n".join(lines)}}],
+                        "usage": {"prompt_tokens": 100, "completion_tokens": 20},
+                    }).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(reply)))
+                    self.end_headers()
+                    self.wfile.write(reply)
+
+            self._httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            self.port = self._httpd.server_address[1]
+            self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
+
+        def start(self):
+            self._thread.start()
+
+        def stop(self):
+            self._httpd.shutdown()
+            self._httpd.server_close()
+
+    def _account_ready():
+        out = subprocess.run(
+            ["mysql", f"--defaults-file={OUT / 'server' / 'etc' / 'mysql.cnf'}", "-uroot", "-N",
+             "-e", f"select id from {TEST.db_prefix}auth.account where username = '{ACCOUNT}'"],
+            capture_output=True, text=True, check=True).stdout.strip()
+        return bool(out)
+
+    def _poll(pred, timeout_s, what):
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            val = pred()
+            if val:
+                return val
+            time.sleep(0.5)
+        expect(False, f"timed out ({timeout_s} s) waiting for {what}")
+
+    def run(stack):
+        build.common("default", tests=False)
+        if not _account_ready():
+            server.console(f"account create {ACCOUNT} humantestpw", wait_s=1.0, inst=TEST)
+            _poll(_account_ready, 20, "the human's account")
+        key = os.urandom(40)
+        wowclient.prepare_account(TEST.db_prefix, ACCOUNT, key)
+
+        with tempfile.TemporaryDirectory(prefix="wlb-e2e-human-") as tmp:
+            tmp_dir = pathlib.Path(tmp)
+            proxy_sock = tmp_dir / "proxy.sock"
+            proxy = ProxyRecorder(stack.socket, proxy_sock)
+            brain = _Brain()
+            proxy.start()
+            brain.start()
+            harness = subprocess.Popen(
+                [str(OUT / "common" / "harness"), "run", f"--socket={proxy_sock}",
+                 f"--rules={ROOT / 'content' / 'RULES.md'}", f"--bots-dir={tmp_dir / 'bots'}",
+                 "--host=127.0.0.1", f"--port={brain.port}", "--slots=4", "--temperature=0"],
+                cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            client = None
+            try:
+                _poll(lambda: set(BOTS) <= {b for _, b, _ in brain.wakes}, 40,
+                      "every bot's first look")
+                client = wowclient.WowClient(TEST.world_port, ACCOUNT, key)
+                client.authenticate()
+                client.enter_world(HUMAN, race=2, cls=1)  # Orc warrior: Valley of Trials.
+                time.sleep(2.0)
+
+                # 1. Invites; playerbots makes the human their master.
+                masters = {}
+                for bot in BOTS:
+                    client.invite(bot)
+                    def is_master(bot=bot):
+                        out = server.console(f"llmtest master {bot}", wait_s=0.5, inst=TEST)
+                        m = re.search(rf"master {bot}=(\w+|-)", out)
+                        masters[bot] = m.group(1) if m else "?"
+                        return masters[bot] == HUMAN
+                    _poll(is_master, 30, f"{bot} accepting the invite with {HUMAN} as master")
+
+                # 2. One party line: one bot answers.
+                time.sleep(2.0)
+                since = time.monotonic()
+                client.say(wowclient.CHAT_MSG_PARTY, "anyone up for RFC?")
+                time.sleep(8.0)
+                with brain.lock:
+                    woken = sorted({b for t, b, w in brain.wakes
+                                    if t >= since and f"party from {HUMAN}" in w})
+                with client.lock:
+                    replies = [c["text"] for c in client.chats
+                               if c["t"] >= since and c["type"] == "party"
+                               and c["from_guid"] != client.guid]  # Not its own echo.
+
+                # 3. A boss emote reaches the bots.
+                since_emote = time.monotonic()
+                server.console(f"llmtest bossemote {HUMAN} roars at the party!", wait_s=0.5,
+                               inst=TEST)
+                _poll(lambda: any(t >= since_emote and "roars at the party" in w
+                                  for t, _, w in list(brain.wakes)), 20,
+                      "a bot woken by the boss emote")
+            finally:
+                if client:
+                    client.close()
+                harness.terminate()
+                try:
+                    harness.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    harness.kill()
+                proxy.stop()
+                brain.stop()
+                for bot in BOTS:
+                    server.console(f"llmtest ungroup {bot}", wait_s=0.2, inst=TEST)
+
+        expect(all(m == HUMAN for m in masters.values()), f"masters: {masters}")
+        expect(woken == ["Loada"], f"the party line woke {woken}, expected only Loada")
+        expect(replies == ["Loada here"], f"the client saw party replies {replies}")
+        return (f"3 bots accepted, master={HUMAN} for all; one party reply ({replies[0]!r}); "
+                "boss emote woke the bots")
+    return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
+
+CASES = [_case_human_party(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal()]

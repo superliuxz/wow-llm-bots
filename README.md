@@ -38,6 +38,15 @@ tools/wlb setup data          # extract maps/vmaps/mmaps/DBC from the 3.3.5a cli
 tools/wlb db start            # project-local MySQL (Percona)
 ```
 
+## Playing with the bots
+
+`tools/wlb server start` brings up the play server with a party preset (`config/llm-brain.overrides`):
+Drogbar (orc warrior, tank), Zenji (troll priest, healer), Rokzul (orc hunter) and Mabaku (troll
+mage), plus Gatda (orc rogue, 23) and Testpriest (priest, 31). Missing preset characters are created on the first start
+(`LlmBrain.CreateBots`) at the troll/orc starting area and keep their progress afterwards. Make a
+level-1 Horde character there, invite them, and quest, queue for Dungeon Finder, or pug in the
+LookingForGroup channel. Start the brain with `tools/wlb llm` and `tools/wlb harness run`.
+
 ## Tools (`tools/wlb`)
 
 Single Python stdlib CLI (`tools/wlb <command> --help`). Acts only on this checkout's PID files.

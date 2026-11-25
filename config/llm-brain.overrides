@@ -1,11 +1,10 @@
 # mod-llm-brain (our module). Phase 2: one bot, harness socket in out/server/run.
 LlmBrain.Enable = 1
 LlmBrain.SocketPath = "@RUN@/brain.sock"
-# Play preset: a party for human + 4 (tank, healer, 2 DPS: Gatda, Zenji, Rokzul, Mabaku; level-1
-# Horde starters), plus Testpriest. Persistent here, like real players whose memory carries over;
-# test configs (config/tests/) reset theirs from fixtures instead. Each has an identity in
-# content/identities/.
-LlmBrain.Bots = "Gatda,Zenji,Rokzul,Mabaku,Testpriest"
-# Created on the WLBTEST account pool on first start when missing, never reset afterwards.
-LlmBrain.CreateBots = "Gatda=new:troll:warrior,Zenji=new:troll:priest,Rokzul=new:orc:hunter,Mabaku=new:troll:mage"
+# Play preset: a party for human + 4: Drogbar (tank), Zenji (healer), Rokzul and Mabaku (DPS), all
+# level-1 Horde starters, plus Gatda (an orc rogue, level 23) and Testpriest (a priest, level 31).
+# Persistent here, like real players whose memory carries over; test configs (config/tests/)
+# reset theirs from fixtures instead. Each has an identity in content/identities/.
+LlmBrain.Bots = "Drogbar,Zenji,Rokzul,Mabaku,Gatda,Testpriest"
+LlmBrain.CreateBots = "Drogbar=new:orc:warrior,Zenji=new:troll:priest,Rokzul=new:orc:hunter,Mabaku=new:troll:mage"
 LlmBrain.SnapshotIntervalMs = 1000

@@ -571,4 +571,52 @@ def _case_death():
         return f"DEAD_BODY -> Release spirit -> GHOST -> ALIVE in {revived_at - ghost_at:.1f} s"
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
-CASES = [_case_keep(), _case_choose(), _case_walk(), _case_rest(), _case_talk(), _case_panels(), _case_bind(), _case_death()]
+def _case_create_bots():
+    """LlmBrain.CreateBots creates a missing bot once and never resets it (T1 play preset).
+
+    `createbots` test config: Loadcw=new:troll:warrior. After the first start the character
+    exists as a troll warrior and logs in; a restart logs it in again without creating it anew.
+    """
+
+    import subprocess
+    import time
+
+    from wlblib.common import OUT
+    from wlblib.testing import expect
+
+    NAME = "create_bots"
+    DESCRIPTION = "CreateBots makes a missing troll warrior, logs it in, and keeps it on restart"
+    TEST_CONFIG = "createbots"
+    BOT = "Loadcw"
+
+    def _character():
+        out = subprocess.run(
+            ["mysql", f"--defaults-file={OUT / 'server' / 'etc' / 'mysql.cnf'}", "-uroot", "-N",
+             "-e", "select race, class, guid from acore_test_characters.characters "
+                   "where name = 'Loadcw'"],
+            capture_output=True, text=True, check=True).stdout.split()
+        return out
+
+    def _wait_logged_in(stack, what):
+        from wlblib import server
+        from wlblib.common import TEST
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            if "Loadcw" in server.online_characters(TEST):
+                return
+            time.sleep(0.5)
+        expect(False, f"timed out waiting for {what}")
+
+    def run(stack):
+        _wait_logged_in(stack, "Loadcw online")
+        first = _character()
+        expect(first[:2] == ["8", "1"], f"Loadcw is not a troll (8) warrior (1): {first}")
+        stack.switch(TEST_CONFIG, BOT)
+        _wait_logged_in(stack, "Loadcw online after a restart")
+        log = stack.server_log()
+        expect("created Loadcw" not in log, "a restart created Loadcw again")
+        expect(_character() == first, f"a restart changed Loadcw: {first} -> {_character()}")
+        return f"Loadcw (guid {first[2]}) created as a troll warrior; a restart kept it"
+    return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
+
+CASES = [_case_create_bots(), _case_keep(), _case_choose(), _case_walk(), _case_rest(), _case_talk(), _case_panels(), _case_bind(), _case_death()]

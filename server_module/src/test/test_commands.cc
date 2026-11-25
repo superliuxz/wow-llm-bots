@@ -96,6 +96,8 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"ungroup", HandleUngroup, SEC_ADMINISTRATOR, Console::Yes},
         {"readycheck", HandleReadyCheck, SEC_ADMINISTRATOR, Console::Yes},
         {"istank", HandleIsTank, SEC_ADMINISTRATOR, Console::Yes},
+        {"master", HandleMaster, SEC_ADMINISTRATOR, Console::Yes},
+        {"bossemote", HandleBossEmote, SEC_ADMINISTRATOR, Console::Yes},
         {"maketank", HandleMakeTank, SEC_ADMINISTRATOR, Console::Yes},
         {"lootroll", HandleLootRoll, SEC_ADMINISTRATOR, Console::Yes},
         {"chat", HandleChat, SEC_ADMINISTRATOR, Console::Yes},
@@ -563,6 +565,44 @@ class LlmBrainTestCommandScript : public CommandScript {
     }
     handler->PSendSysMessage("llmtest: istank {}={}", player->GetName(),
                              PlayerbotAI::IsTank(player) ? 1 : 0);
+    return true;
+  }
+
+  // `llmtest master <bot>`: the player playerbots treats as the bot's master
+  // (T5: a human in the bot's group becomes it).
+  static bool HandleMaster(ChatHandler* handler, std::string player_name) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    PlayerbotAI* ai = player ? GET_PLAYERBOT_AI(player) : nullptr;
+    if (!ai) {
+      handler->SendErrorMessage("llmtest: master: not a bot");
+      return false;
+    }
+    Player* master = ai->GetMaster();
+    handler->PSendSysMessage("llmtest: master {}={}", player->GetName(),
+                             master ? master->GetName() : "-");
+    return true;
+  }
+
+  // `llmtest bossemote <near> <text>`: a creature next to `near` sends a raid
+  // boss emote, as a boss script's Talk does (T10).
+  static bool HandleBossEmote(ChatHandler* handler,
+                              std::string near_name,
+                              Tail text) {
+    Player* near = FindOnlinePlayer(handler, std::move(near_name));
+    if (!near) {
+      return false;
+    }
+    // A temporary speaker next to `near` (gone in 30 s).
+    constexpr uint32_t kMottledBoar = 3098;
+    Creature* speaker = near->SummonCreature(
+        kMottledBoar, near->GetPositionX() + 3.0f, near->GetPositionY(),
+        near->GetPositionZ(), 0.0f, TEMPSUMMON_TIMED_DESPAWN, 30000);
+    if (!speaker) {
+      handler->SendErrorMessage("llmtest: bossemote: no creature nearby");
+      return false;
+    }
+    speaker->TextEmote(std::string(text), nullptr, /*isBossEmote=*/true);
+    handler->PSendSysMessage("llmtest: {} boss-emoted", speaker->GetName());
     return true;
   }
 

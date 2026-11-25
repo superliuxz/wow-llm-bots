@@ -488,7 +488,7 @@ class LlamaServer:
                              f"(stop it first to load {self.model})")
             say("using the llama-server that is already running")
             return self
-        label = self.model or "the 35B model"
+        label = self.model or "the default model, wlb llm"
         say(f"starting llama-server ({label})")
         (OUT / "logs").mkdir(parents=True, exist_ok=True)
         log = open(OUT / "logs" / "llama-perf.log", "wb")

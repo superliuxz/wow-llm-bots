@@ -1,0 +1,2 @@
+# e2e_human_party: the scripted client (tools/wlblib/wowclient.py) can't answer Warden.
+Warden.Enabled = 0
