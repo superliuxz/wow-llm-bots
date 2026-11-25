@@ -66,6 +66,10 @@ dungeons and in the open world:
   healer's power is below a third.
 - Questing together: `Share quest` hands a quest you have to party members who lack it, and
   `Accept shared quest` takes one a party member shares with you.
+- `leader said: <command> (applied: ...)` under `Since your last look:` means your body already
+  did what your leader typed (wait, follow, attack, drink, mount): keep to it (`Keep doing what
+  I'm doing`) and answer briefly if at all; `(not applied: ...)` says why you couldn't. For
+  `heal me`, heal them if you're the healer.
 - `Wait here` / `Follow the party leader again`: when your leader asks you to wait or to come
   along. `Let <name> tank`: when another member is the group's tank; `Tank for the group again`
   when asked to tank.

@@ -17,14 +17,17 @@
 #include "DBCStores.h"
 #include "DBCStructure.h"
 #include "Define.h"
+#include "Event.h"
 #include "GameObject.h"
 #include "Group.h"
 #include "Log.h"
 #include "Map.h"
 #include "ObjectAccessor.h"
+#include "ObjectGuid.h"
 #include "Opcodes.h"
 #include "Pet.h"
 #include "Player.h"
+#include "PlayerbotAI.h"
 #include "Playerbots.h"
 #include "Position.h"
 #include "SharedDefines.h"
@@ -48,6 +51,7 @@
 #include "bridge/brain_bridge.h"
 #include "chat/chat_inbox.h"
 #include "chat/chat_scripts.h"
+#include "chat/leader_command.h"
 #include "chat/speak.h"
 #include "config/llm_brain_config.h"
 #include "net/frame_codec.h"
@@ -600,6 +604,14 @@ class LlmBrainWorldScript : public WorldScript {
           chatters.pop_back();
         }
       }
+      // A human leader's party command ("wait", "follow", "attack my
+      // target"...) is applied here, within a tick; the brain then hears the
+      // line and what was done, to answer in character (Now #2).
+      std::string applied;
+      if (line.chat.channel == wlb::snapshot::PARTY ||
+          line.chat.channel == wlb::snapshot::RAID) {
+        applied = ApplyLeaderCommand(bot, line.chat);
+      }
       const bool alerting =
           line.chat.channel == wlb::snapshot::WHISPER ||
           line.chat.channel == wlb::snapshot::MONSTER_WHISPER ||
@@ -612,7 +624,123 @@ class LlmBrainWorldScript : public WorldScript {
       } else {
         SendImmediateEvent(index, line.to, std::move(payload));
       }
+      if (!applied.empty()) {
+        wlb::snapshot::Event info;
+        info.info.emplace().text = std::move(applied);
+        SendImmediateEvent(index, line.to, std::move(info));
+      }
     }
+  }
+
+  // The group's human leader (or a human naming this bot) typed a command:
+  // carries it out and says what was done ("leader said: wait (applied: you
+  // stay here)"), or returns empty when the line isn't one for this bot.
+  std::string ApplyLeaderCommand(Player* bot,
+                                 const wlb::snapshot::ChatEvent& chat) {
+    Group* group = bot->GetGroup();
+    Player* sender = ObjectAccessor::FindPlayerByName(chat.from);
+    if (!group || !sender || sender == bot || sender->GetGroup() != group ||
+        !IsHumanPlayer(sender)) {
+      return "";
+    }
+    std::vector<std::string> names;
+    for (const std::string& name : config_.bots) {
+      if (Player* p = ObjectAccessor::FindPlayerByName(name);
+          p && p->GetGroup() == group) {
+        names.push_back(p->GetName());
+      }
+    }
+    const std::optional<ParsedLeaderCommand> parsed =
+        ParseLeaderCommand(chat.text, names);
+    if (!parsed) {
+      return "";
+    }
+    const bool for_me =
+        parsed->addressed.empty()
+            ? group->IsLeader(sender->GetGUID())
+            : std::find(parsed->addressed.begin(), parsed->addressed.end(),
+                        bot->GetName()) != parsed->addressed.end();
+    if (!for_me) {
+      return "";
+    }
+    PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
+    std::string done;
+    BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
+    switch (parsed->command) {
+      case LeaderCommand::kWait:
+        policy.stay = true;
+        BotManager::SetGroupPolicy(bot, policy);
+        bot->StopMoving();
+        done = "you stop and wait here";
+        break;
+      case LeaderCommand::kFollow:
+        policy.stay = false;
+        BotManager::SetGroupPolicy(bot, policy);
+        done = "you follow " + sender->GetName() + " again";
+        break;
+      case LeaderCommand::kAttackMyTarget: {
+        Unit* target = sender->GetSelectedUnit();
+        if (!target || !bot->IsValidAttackTarget(target)) {
+          return "leader said: attack my target (not applied: no enemy "
+                 "targeted)";
+        }
+        if (ai) {
+          ai->GetAiObjectContext()
+              ->GetValue<GuidVector>("prioritized targets")
+              ->Set({target->GetGUID()});
+        }
+        bot->SetSelection(target->GetGUID());
+        if (!ai || !ai->DoSpecificAction("attack my target", Event(), true)) {
+          bot->Attack(target, true);
+        }
+        done = "you attack " + target->GetName();
+        break;
+      }
+      case LeaderCommand::kAttackSkull: {
+        Unit* skull = ObjectAccessor::GetUnit(*bot, group->GetTargetIcon(7));
+        if (!skull || !bot->IsValidAttackTarget(skull)) {
+          return "leader said: kill skull (not applied: nothing marked "
+                 "skull)";
+        }
+        bot->SetSelection(skull->GetGUID());
+        if (ai) {
+          ai->GetAiObjectContext()
+              ->GetValue<GuidVector>("prioritized targets")
+              ->Set({skull->GetGUID()});
+          ai->GetAiObjectContext()->GetValue<std::string>("rti")->Set("skull");
+        }
+        if (!ai || !ai->DoSpecificAction("attack rti target", Event(), true)) {
+          bot->Attack(skull, true);
+        }
+        done = "you attack " + skull->GetName() + " (skull)";
+        break;
+      }
+      case LeaderCommand::kDrink: {
+        const ActionOutcome rest = ExecuteRestAction(bot);
+        if (!rest.error.empty()) {
+          return "leader said: drink (not applied: " + rest.error + ")";
+        }
+        done = "you sit down to eat and drink";
+        break;
+      }
+      case LeaderCommand::kMount:
+        if (bot->IsMounted() || bot->IsInCombat() ||
+            (bot->GetMap() && bot->GetMap()->IsDungeon()) || !ai ||
+            !ai->DoSpecificAction("mount", Event(), true)) {
+          return "leader said: mount up (not applied: you can't mount here)";
+        }
+        done = "you mount up";
+        break;
+      case LeaderCommand::kHealMe:
+        // Who heals and with what is the brain's call: it is woken for it.
+        return "leader said: heal me (" + sender->GetName() +
+               " asks for heals)";
+    }
+    LOG_INFO("module", "mod-llm-brain: {} applied leader command {} from {}",
+             bot->GetName(), LeaderCommandName(parsed->command),
+             sender->GetName());
+    return std::string("leader said: ") + LeaderCommandName(parsed->command) +
+           " (applied: " + done + ")";
   }
 
   void CheckPendingGroupInvite(Player* bot,

@@ -131,7 +131,8 @@ Findings from "Wow Llm Bots Review 2". Tick when fixed and tested.
    human-led group (playerbots' taxi/teleport follow and command words for free). A "human + 4"
    e2e case with a raw-packet second account (`wlblib/wire.py` speaks the frames) that invites 4
    bots, queues LFG, ready-checks, rolls, types "wait"/"follow" and rezzes a dead bot.
-2. **Chat commands that apply at once.** A pure `ParseLeaderCommand(text) -> BotAction` in
+2. **[done] Chat commands that apply at once.** (`chat/leader_command.{h,cc}`, applied in
+   `ApplyLeaderCommand`; `e2e_human_party` checks wait/follow.) A pure `ParseLeaderCommand(text) -> BotAction` in
    `server_module/src/chat/`, run only for the group leader or when the bot is named. Words:
    wait, follow, attack my target, pull, drink, mount, `@heal`, `rti skull`. Runs through
    `ValidateAction` / `ExecuteAction`, then wakes the brain with `leader_said: wait (applied)`

@@ -1089,6 +1089,23 @@ def _case_human_party():
                                if c["t"] >= since and c["type"] == "party"
                                and c["from_guid"] != client.guid]  # Not its own echo.
 
+                # 4 (Now #2). Leader commands apply within a tick, without the LLM.
+                def stays(bot):
+                    out = server.console(f"llmtest checkstrat {bot} stay", wait_s=0.3, inst=TEST)
+                    m = re.search(rf"strat stay on {bot} exists=\d combat=\d noncombat=(\d)", out)
+                    return m.group(1) == "1" if m else None
+                client.say(wowclient.CHAT_MSG_PARTY, "wait here")
+                _poll(lambda: all(stays(b) for b in BOTS), 5, "every bot staying after 'wait here'")
+                client.say(wowclient.CHAT_MSG_PARTY, "loadb follow")
+                _poll(lambda: stays("Loadb") is False, 5, "Loadb following after 'loadb follow'")
+                still_wait = [b for b in ("Loada", "Loadc") if stays(b)]
+                client.say(wowclient.CHAT_MSG_PARTY, "follow me")
+                _poll(lambda: not any(stays(b) for b in BOTS), 5, "every bot following again")
+                with proxy.lock:
+                    applied = sorted({e["event"]["info"]["text"] for _, e in proxy.events
+                                      if "leader said:" in e.get("event", {}).get("info", {})
+                                      .get("text", "")})
+
                 # 3. A boss emote reaches the bots.
                 since_emote = time.monotonic()
                 server.console(f"llmtest bossemote {HUMAN} roars at the party!", wait_s=0.5,
@@ -1112,8 +1129,14 @@ def _case_human_party():
         expect(all(m == HUMAN for m in masters.values()), f"masters: {masters}")
         expect(woken == ["Loada"], f"the party line woke {woken}, expected only Loada")
         expect(replies == ["Loada here"], f"the client saw party replies {replies}")
+        expect(still_wait == ["Loada", "Loadc"],
+               f"'loadb follow' should move only Loadb; still waiting: {still_wait}")
+        expect(any("leader said: wait (applied" in a for a in applied)
+               and any("leader said: follow (applied" in a for a in applied),
+               f"the brain wasn't told what was applied: {applied}")
         return (f"3 bots accepted, master={HUMAN} for all; one party reply ({replies[0]!r}); "
-                "boss emote woke the bots")
+                "'wait here' / 'loadb follow' / 'follow me' applied in C++; boss emote woke "
+                "the bots")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
 CASES = [_case_human_party(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal()]
