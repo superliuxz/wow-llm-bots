@@ -1009,14 +1009,14 @@ def _case_human_party():
     """A real human client plays with the bots (Review 2: T5, T9 single responder, T10).
 
     `humanparty` test config. A scripted 3.3.5a client (tools/wlblib/wowclient.py, no playerbots
-    AI: a real player to the server) logs in as Humanone, an orc warrior at the Valley of Trials,
+    AI: a real player to the server) logs in as Allyone, a human warrior at Northshire Abbey,
     next to Loada, Loadb and Loadc. The real harness runs the bots against a mock LLM that accepts
     group invites, keeps doing what it does, and answers a party line it was woken by.
 
-      1. Humanone invites the three bots: each accepts, and playerbots makes Humanone their
+      1. Allyone invites the three bots: each accepts, and playerbots makes Allyone their
          master (T5: follow, taxi follow and `!pb` commands work for the human).
-      2. Humanone types "anyone up for RFC?" in party: exactly one bot is woken and answers, and
-         the client sees that one party reply (the single responder, with a real client).
+      2. Allyone types "anyone up for Deadmines?" in party: exactly one bot is woken and answers,
+         and the client sees that one party reply (the single responder, with a real client).
       3. A creature next to the party sends a raid boss emote: it reaches the bots and wakes them
          (T10).
     """
@@ -1042,7 +1042,7 @@ def _case_human_party():
     ONLINE = 3
 
     BOTS = ("Loada", "Loadb", "Loadc")
-    HUMAN = "Humanone"
+    HUMAN = "Allyone"
     ACCOUNT = "HUMANTEST"
     KEEP_RE = re.compile(r"^\s+(\d+)\. Keep doing what I'm doing$", re.M)
     ACCEPT_RE = re.compile(r"^\s+(\d+)\. Accept group invite", re.M)
@@ -1137,7 +1137,14 @@ def _case_human_party():
                       "every bot's first look")
                 client = wowclient.WowClient(TEST.world_port, ACCOUNT, key)
                 client.authenticate()
-                client.enter_world(HUMAN, race=2, cls=1)  # Orc warrior: Valley of Trials.
+                # Adversarial counter-test: CharacterCreating.Disabled = 2 blocks Horde creation.
+                horde_blocked = False
+                try:
+                    client.create_character("Hordeblock", race=2, cls=1)
+                except ConnectionError as exc:
+                    horde_blocked = "character create refused" in str(exc)
+                expect(horde_blocked, "Horde character creation was not blocked on Alliance realm")
+                client.enter_world(HUMAN, race=1, cls=1)  # Human warrior: Northshire Abbey.
                 time.sleep(2.0)
 
                 # 1. Invites; playerbots makes the human their master.
@@ -1153,16 +1160,16 @@ def _case_human_party():
 
                 # 2. One party line: one bot answers. (Now #8: the human's quest shows up
                 # on the bots' screens as something to help with.)
-                server.console(f"llmtest questadd {HUMAN} 788", wait_s=0.3, inst=TEST)
+                server.console(f"llmtest questadd {HUMAN} 7", wait_s=0.3, inst=TEST)
                 time.sleep(2.0)
                 since = time.monotonic()
-                client.say(wowclient.CHAT_MSG_PARTY, "anyone up for RFC?")
+                client.say(wowclient.CHAT_MSG_PARTY, "anyone up for Deadmines?")
                 time.sleep(8.0)
                 with brain.lock:
                     woken = sorted({b for t, b, w in brain.wakes
                                     if t >= since and f"party from {HUMAN}" in w})
                 with brain.lock:
-                    help_seen = any(t >= since and f"help {HUMAN} with Cutting Teeth" in txt
+                    help_seen = any(t >= since and f"help {HUMAN} with Kobold Camp Cleanup" in txt
                                     for t, _, txt in brain.prompts)
                 with client.lock:
                     replies = [c["text"] for c in client.chats
@@ -1188,7 +1195,7 @@ def _case_human_party():
 
                 # 5 (Now #8). A follower 60 yd from its human leader, outdoors, comes back
                 # by itself (no LLM call).
-                server.console("llmtest tele Loadb 1 -560 -4250 40 0", wait_s=0.5, inst=TEST)
+                server.console("llmtest tele Loadb 0 -8880 -132.5 82 0", wait_s=0.5, inst=TEST)
                 _poll(lambda: "Loadb strayed" in stack.server_log(), 10,
                       "Loadb following back after straying")
 
@@ -1214,7 +1221,7 @@ def _case_human_party():
 
         expect(all(m == HUMAN for m in masters.values()), f"masters: {masters}")
         expect(woken == ["Loada"], f"the party line woke {woken}, expected only Loada")
-        expect(help_seen, f"no 'help {HUMAN} with Cutting Teeth' on the woken bot's screen")
+        expect(help_seen, f"no 'help {HUMAN} with Kobold Camp Cleanup' on the woken bot's screen")
         expect(replies == ["Loada here"], f"the client saw party replies {replies}")
         expect(still_wait == ["Loada", "Loadc"],
                f"'loadb follow' should move only Loadb; still waiting: {still_wait}")
@@ -1262,13 +1269,15 @@ def _case_popup_policy():
         reader = wire.FrameReader()
         policy_cmd = None
         policy_ok = False
+        manual_cmd = None
+        manual_ok = False
         ready_started = False
         started = None
         answers = []
         chooses_after = 0
         deadline = time.time() + 40.0
         try:
-            while time.time() < deadline and len(answers) < 2:
+            while time.time() < deadline and not manual_ok:
                 try:
                     chunk = sock.recv(1 << 20)
                 except socket.timeout:
@@ -1284,7 +1293,8 @@ def _case_popup_policy():
                         text = ev.get("info", {}).get("text", "")
                         if text.startswith("popup policy:"):
                             answers.append(text)
-                        if ev.get("error", {}).get("command_id") == policy_cmd:
+                        cid = ev.get("error", {}).get("command_id")
+                        if cid is not None and cid in (policy_cmd, manual_cmd):
                             expect(False, f"policy choice failed: {ev['error'].get('text')}")
                         continue
                     snap = msg.get("snapshot")
@@ -1315,6 +1325,16 @@ def _case_popup_policy():
                         started = time.time()
                         out = server.console(f"llmtest lootroll Loada {ITEM}", inst=TEST)
                         expect("roll started" in out, f"setup: no roll started ({out[-200:]})")
+                    elif len(answers) >= 2 and manual_cmd is None:
+                        idx = find_option(snap.get("options", []),
+                                          "Answer popups yourself again")
+                        if idx:
+                            manual_cmd = 9
+                            send_cmd(sock, {"bot": "Telda", "command_id": manual_cmd,
+                                             "choose": {"option": idx, "seq": snap.get("seq", 0)}})
+                    elif manual_cmd is not None and find_option(snap.get("options", []),
+                                                                "Answer popups automatically"):
+                        manual_ok = True
         finally:
             sock.close()
             server.console("llmtest ungroup Telda", inst=TEST)
@@ -1325,7 +1345,8 @@ def _case_popup_policy():
                f"ready check not answered by policy: {answers}")
         expect(any("rolled: Greed Buckskin Cape" in a for a in answers),
                f"loot roll not answered by policy (Greed: BoE): {answers}")
-        return f"answered by policy within {took:.1f} s: {answers}"
+        expect(manual_ok, "Telda never turned automatic popups back off")
+        return f"answered by policy within {took:.1f} s and restored manual popups: {answers}"
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
 def _case_crowd_control():

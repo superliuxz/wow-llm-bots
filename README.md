@@ -40,12 +40,14 @@ tools/wlb db start            # project-local MySQL (Percona)
 
 ## Playing with the bots
 
-`tools/wlb server start` brings up the play server with a party preset (`config/llm-brain.overrides`):
-Drogbar (orc warrior, tank), Zenji (troll priest, healer), Rokzul (orc hunter) and Mabaku (troll
-mage), plus Gatda (orc rogue, 23) and Testpriest (priest, 31). Missing preset characters are created on the first start
-(`LlmBrain.CreateBots`) at the troll/orc starting area and keep their progress afterwards. Make a
-level-1 Horde character there, invite them, and quest, queue for Dungeon Finder, or pug in the
-LookingForGroup channel. Start the brain with `tools/wlb llm` and `tools/wlb harness run`.
+`tools/wlb server start` brings up the play server with an Alliance roster (`config/llm-brain.overrides`)
+covering all 5 Alliance races and 9 classes, each starting in its own racial starting zone:
+Aldric (human paladin), Mirabel (human priest), Cedric (human rogue), and Vesper (human warlock) in
+Northshire; Torvin (dwarf warrior), Bram (dwarf hunter), and Pippa (gnome mage) in Coldridge;
+Sylva (night elf druid) in Shadowglen; and Talaan (draenei shaman) in Ammen Vale. Missing preset
+characters are created on the first start (`LlmBrain.CreateBots`) and keep their progress
+afterwards. Make a level-1 Alliance character, invite them, and quest, queue for Dungeon Finder, or
+pug in the LookingForGroup channel. Start the brain with `tools/wlb llm` and `tools/wlb harness run`.
 
 ## Tools (`tools/wlb`)
 

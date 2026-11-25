@@ -55,6 +55,8 @@ CHAT_MSG_PARTY_LEADER = 0x33
 CHAT_TYPE_NAMES = {CHAT_MSG_SAY: "say", CHAT_MSG_PARTY: "party", CHAT_MSG_RAID: "raid",
                    CHAT_MSG_WHISPER: "whisper", CHAT_MSG_PARTY_LEADER: "party"}
 LANG_ORCISH = 1
+LANG_COMMON = 7
+ALLIANCE_RACES = frozenset({1, 3, 4, 7, 11})  # Human, Dwarf, Night Elf, Gnome, Draenei.
 
 SERVER_ENCRYPTION_KEY = bytes.fromhex("CC98AE04E897EACA12DDC09342915357")
 SERVER_DECRYPTION_KEY = bytes.fromhex("C2B3723CC6AED9B5343C53EE2F4367CE")
@@ -109,6 +111,7 @@ class WowClient:
         self.chats: list[dict] = []  # {"type", "from_guid", "text", "t"}
         self.group_lists = 0
         self.guid = 0
+        self.lang = LANG_COMMON
         self._reader: threading.Thread | None = None
         self._stop = False
 
@@ -193,6 +196,7 @@ class WowClient:
     def enter_world(self, name: str, race: int, cls: int) -> None:
         """Logs `name` in (creating it first if this account lacks it), then reads in the
         background."""
+        self.lang = LANG_COMMON if race in ALLIANCE_RACES else LANG_ORCISH
         chars = dict((n, g) for g, n in self.characters())
         if name not in chars:
             self.create_character(name, race, cls)
@@ -209,10 +213,10 @@ class WowClient:
         self.send(CMSG_GROUP_INVITE, name.encode() + b"\0" + struct.pack("<I", 0))
 
     def say(self, chat_type: int, text: str) -> None:
-        self.send(CMSG_MESSAGECHAT, struct.pack("<II", chat_type, LANG_ORCISH) + text.encode() + b"\0")
+        self.send(CMSG_MESSAGECHAT, struct.pack("<II", chat_type, self.lang) + text.encode() + b"\0")
 
     def whisper(self, to: str, text: str) -> None:
-        self.send(CMSG_MESSAGECHAT, struct.pack("<II", CHAT_MSG_WHISPER, LANG_ORCISH) +
+        self.send(CMSG_MESSAGECHAT, struct.pack("<II", CHAT_MSG_WHISPER, self.lang) +
                   to.encode() + b"\0" + text.encode() + b"\0")
 
     def close(self) -> None:

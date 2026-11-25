@@ -1,10 +1,10 @@
-# mod-llm-brain (our module). Phase 2: one bot, harness socket in out/server/run.
+# mod-llm-brain (our module). Play preset, harness socket in out/server/run.
 LlmBrain.Enable = 1
 LlmBrain.SocketPath = "@RUN@/brain.sock"
-# Play preset: a party for human + 4: Drogbar (tank), Zenji (healer), Rokzul and Mabaku (DPS), all
-# level-1 Horde starters, plus Gatda (an orc rogue, level 23) and Testpriest (a priest, level 31).
-# Persistent here, like real players whose memory carries over; test configs (config/tests/)
+# Play preset: Alliance roster across all 5 Alliance races and 9 classes, each starting in its own
+# racial starting zone (Northshire: Aldric/Mirabel/Cedric/Vesper; Coldridge: Torvin/Bram/Pippa;
+# Shadowglen: Sylva; Ammen Vale: Talaan). Persistent across restarts; test configs (config/tests/)
 # reset theirs from fixtures instead. Each has an identity in content/identities/.
-LlmBrain.Bots = "Drogbar,Zenji,Rokzul,Mabaku,Gatda,Testpriest"
-LlmBrain.CreateBots = "Drogbar=new:orc:warrior,Zenji=new:troll:priest,Rokzul=new:orc:hunter,Mabaku=new:troll:mage"
+LlmBrain.Bots = "Aldric,Mirabel,Cedric,Vesper,Torvin,Bram,Pippa,Sylva,Talaan"
+LlmBrain.CreateBots = "Aldric=new:human:paladin,Mirabel=new:human:priest,Cedric=new:human:rogue,Vesper=new:human:warlock,Torvin=new:dwarf:warrior,Bram=new:dwarf:hunter,Pippa=new:gnome:mage,Sylva=new:nightelf:druid,Talaan=new:draenei:shaman"
 LlmBrain.SnapshotIntervalMs = 1000

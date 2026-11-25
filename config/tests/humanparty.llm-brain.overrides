@@ -1,6 +1,5 @@
-# e2e_human_party: a real (scripted) human client invites three fresh level-1 Troll Priests at the
-# Valley of Trials start (reset from the fixture on every server start). Needs a test build.
+# e2e_human_party: a real (scripted) Alliance human client invites fresh Alliance bots at the
+# Northshire Abbey start (reset on every server start). Needs a test build.
 LlmBrain.Bots = "Loada,Loadb,Loadc"
-LlmBrain.TestFixtures = "Loada=priest-l1-valley.pdump,Loadb=priest-l1-valley.pdump,Loadc=priest-l1-valley.pdump"
-LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.TestFixtures = "Loada=new:human:paladin,Loadb=new:human:priest,Loadc=new:human:mage"
 LlmBrain.NonCombatStrategies = "-follow,-grind,-new rpg"

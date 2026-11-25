@@ -7,10 +7,10 @@ tracing (`var/soak_traces/`).
 
 Suites (`--suite`):
   - `varied` (default): 2 varied runs per evaluation —
-      1. `soak_horde_rfc`: 5 Horde questing classes across 5 zones +
-         5-man Horde Tank/Healer/3DPS in Ragefire Chasm (L15)
-      2. `soak_alliance_dm`: 5 Alliance questing classes across 5 zones +
+      1. `soak_alliance_dm`: 5 Alliance questing classes across 5 zones +
          5-man Alliance Tank/Healer/3DPS in Deadmines (L20)
+      2. `soak_horde_rfc`: 5 Horde questing classes across 5 zones +
+         5-man Horde Tank/Healer/3DPS in Ragefire Chasm (L15)
   - `heldout`: generalization check (never used for hill-climb tuning) —
       1. `soak_northrend_hol`: 5 mid/high-level Horde questing bots +
          5-man Halls of Lightning (L80)
@@ -365,7 +365,7 @@ SCENARIOS = {
 }
 
 SUITES = {
-    "varied": ["soak_horde_rfc", "soak_alliance_dm"],
+    "varied": ["soak_alliance_dm", "soak_horde_rfc"],
     "heldout": ["soak_northrend_hol", "soak_heldout_uk"],
     "endurance": [
         "soak_classic_ulda",

@@ -574,8 +574,8 @@ def _case_death():
 def _case_create_bots():
     """LlmBrain.CreateBots creates a missing bot once and never resets it (T1 play preset).
 
-    `createbots` test config: Loadcw=new:troll:warrior. After the first start the character
-    exists as a troll warrior and logs in; a restart logs it in again without creating it anew.
+    `createbots` test config: Loadca=new:dwarf:warrior. After the first start the character
+    exists as a dwarf warrior and logs in; a restart logs it in again without creating it anew.
     """
 
     import subprocess
@@ -585,15 +585,15 @@ def _case_create_bots():
     from wlblib.testing import expect
 
     NAME = "create_bots"
-    DESCRIPTION = "CreateBots makes a missing troll warrior, logs it in, and keeps it on restart"
+    DESCRIPTION = "CreateBots makes a missing dwarf warrior, logs it in, and keeps it on restart"
     TEST_CONFIG = "createbots"
-    BOT = "Loadcw"
+    BOT = "Loadca"
 
     def _character():
         out = subprocess.run(
             ["mysql", f"--defaults-file={OUT / 'server' / 'etc' / 'mysql.cnf'}", "-uroot", "-N",
              "-e", "select race, class, guid from acore_test_characters.characters "
-                   "where name = 'Loadcw'"],
+                   "where name = 'Loadca'"],
             capture_output=True, text=True, check=True).stdout.split()
         return out
 
@@ -602,21 +602,21 @@ def _case_create_bots():
         from wlblib.common import TEST
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
-            if "Loadcw" in server.online_characters(TEST):
+            if "Loadca" in server.online_characters(TEST):
                 return
             time.sleep(0.5)
         expect(False, f"timed out waiting for {what}")
 
     def run(stack):
-        _wait_logged_in(stack, "Loadcw online")
+        _wait_logged_in(stack, "Loadca online")
         first = _character()
-        expect(first[:2] == ["8", "1"], f"Loadcw is not a troll (8) warrior (1): {first}")
+        expect(first[:2] == ["3", "1"], f"Loadca is not a dwarf (3) warrior (1): {first}")
         stack.switch(TEST_CONFIG, BOT)
-        _wait_logged_in(stack, "Loadcw online after a restart")
+        _wait_logged_in(stack, "Loadca online after a restart")
         log = stack.server_log()
-        expect("created Loadcw" not in log, "a restart created Loadcw again")
-        expect(_character() == first, f"a restart changed Loadcw: {first} -> {_character()}")
-        return f"Loadcw (guid {first[2]}) created as a troll warrior; a restart kept it"
+        expect("created Loadca" not in log, "a restart created Loadca again")
+        expect(_character() == first, f"a restart changed Loadca: {first} -> {_character()}")
+        return f"Loadca (guid {first[2]}) created as a dwarf warrior; a restart kept it"
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
 def _case_self_rez():

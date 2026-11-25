@@ -1,5 +1,5 @@
 # e2e_create_bots: LlmBrain.CreateBots makes a missing bot character on startup (a fresh level-1
-# troll warrior) and leaves it alone on the next start (play presets keep their progress).
-LlmBrain.Bots = "Loadcw"
-LlmBrain.CreateBots = "Loadcw=new:troll:warrior"
+# dwarf warrior) and leaves it alone on the next start (play presets keep their progress).
+LlmBrain.Bots = "Loadca"
+LlmBrain.CreateBots = "Loadca=new:dwarf:warrior"
 LlmBrain.NonCombatStrategies = "-follow,-grind,-new rpg"

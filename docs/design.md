@@ -70,7 +70,7 @@ Four latency tiers separate reflexes from deliberation:
 
 ## Decided Product Rules
 
-- **Realm:** PvE, Horde only (Alliance character creation disabled); bots choose Horde races
+- **Realm:** PvE, Alliance only (Horde character creation disabled); bots choose Alliance races
   freely. New bots start at their race's starting area like a new character.
 - **No cheats, human ways out:** release and corpse-run or resurrect at the spirit healer,
   hearthstone, the client's "Character Stuck", or asking for help. Playerbots' random-bot refresh,

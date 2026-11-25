@@ -2,9 +2,9 @@
 DataDir = "@ROOT@/out/server/data"
 # 8085 for the play server, 8086 for the test server (tools/wlblib/common.py).
 WorldServerPort = @WORLD_PORT@
-# PvE realm (decided). Horde only: disable Alliance character creation.
+# PvE realm (decided). Alliance only: disable Horde character creation.
 GameType = 0
-CharacterCreating.Disabled = 1
+CharacterCreating.Disabled = 2
 # Save characters every 60 s (state sampling for evals: bots and the user's human baseline).
 PlayerSaveInterval = 60000
 # Chat log for evals (bot chat + the user's human baseline). Flags 5 = timestamp + filter type.
@@ -23,7 +23,7 @@ Logger.chat.channel = 4,Chat
 # 4 seasonal bosses.
 DungeonFinder.OptionsMask = 7
 # LookingForGroup channel usable anywhere and without queueing (decided 2026-11-24), so the user
-# and the bots can form pugs in chat ("LFM RFC need heals"), as on most 3.3.5a servers.
+# and the bots can form pugs in chat ("LFM DM need heals"), as on most 3.3.5a servers.
 # AzerothCore's defaults (0 / 1) keep it to cities and to players queued in Dungeon Finder.
 LFG.Location.All = 1
 Channel.RestrictedLfg = 0
