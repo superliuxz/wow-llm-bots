@@ -198,6 +198,19 @@ bool HasGroupMembers(const pb::Snapshot& snapshot) {
          (snapshot.ext.raid && !snapshot.ext.raid->members.empty());
 }
 
+// A party member is AFK and the bot is out of combat: it waits for them like
+// a player would, so its routine look timer and unasked chatter hold until
+// they're back (P0 wakes, chat and a refusal's retry still go through).
+bool WaitingOnAfkMember(const pb::Snapshot& snapshot) {
+  if (snapshot.base.self.in_combat || !snapshot.ext.party) {
+    return false;
+  }
+  return std::any_of(snapshot.ext.party->members.begin(),
+                     snapshot.ext.party->members.end(), [](const pb::Unit& m) {
+                       return m.group && m.group->online && m.group->afk;
+                     });
+}
+
 bool IsGroupSharedChatChannel(pb::ChatChannel ch,
                               const pb::Snapshot& snapshot) {
   if (ch == pb::PARTY || ch == pb::RAID) {
@@ -1158,7 +1171,9 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   }
   DispatchRunnerAction(bot, &state, action);
   if (!state.has_queued_wake() && !state.call_in_flight() &&
-      !state.look_deadline.is_null() && received_at >= state.look_deadline) {
+      !state.look_deadline.is_null() && received_at >= state.look_deadline &&
+      !(state.pending_reasons.empty() &&
+        WaitingOnAfkMember(*state.latest_snapshot))) {
     state.look_deadline = base::TimeTicks();
     state.runner.Stop();
     const bool backoff_wake = !state.pending_reasons.empty();
@@ -1410,7 +1425,9 @@ void BotLoop::OnTick(base::TimeTicks now) {
         continue;
       }
     }
-    if (!state.look_deadline.is_null() && now >= state.look_deadline) {
+    if (!state.look_deadline.is_null() && now >= state.look_deadline &&
+        !(state.pending_reasons.empty() &&
+          WaitingOnAfkMember(*state.latest_snapshot))) {
       state.look_deadline = base::TimeTicks();
       state.runner.Stop();
       const bool backoff_wake = !state.pending_reasons.empty();
@@ -1876,7 +1893,9 @@ void BotLoop::OnReply(const std::string& bot,
         const auto say_line = [&](pb::ChatChannel channel,
                                   const std::string& to,
                                   const std::string& text, bool group_budget) {
-          if (!prompted_by_chat && IsSelfRepeat(state, text, effective_now)) {
+          if (!prompted_by_chat &&
+              (IsSelfRepeat(state, text, effective_now) ||
+               (group_budget && WaitingOnAfkMember(*state.latest_snapshot)))) {
             return;
           }
           if (group_budget &&

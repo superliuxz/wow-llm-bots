@@ -433,9 +433,10 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
                    [&](const OptionTarget& a, const OptionTarget& b) {
                      return kill_rank(a) < kill_rank(b);
                    });
-  // A human leads: they pull. Mobs nobody in the party fights yet get no
-  // Attack option at all (a gate, not a prompt rule).
-  if (facts.leave_pulls_to_leader) {
+  // Pulls wait for the human (who leads, tanks, or is AFK or behind): mobs
+  // nobody in the party fights yet get no Attack option at all (a gate, not
+  // a prompt rule).
+  if (facts.hold_pulls) {
     std::erase_if(targets, not_pulled);
   }
   for (const OptionTarget& target : targets) {
@@ -555,9 +556,10 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
 
   if (alive && !self.in_combat) {
     size_t explore_count = 0;
+    const size_t max_explore = facts.hold_explore ? 0 : 3;
     uint32_t seen_dirs = 0;
     for (const OptionFacts::Spot& spot : facts.spots) {
-      if (explore_count >= 3) {
+      if (explore_count >= max_explore) {
         break;
       }
       const uint32_t dir_bit = 1u << static_cast<uint8_t>(spot.dir);

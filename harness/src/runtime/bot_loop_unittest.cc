@@ -3819,5 +3819,89 @@ TEST(BotLoopTest, UnpromptedSelfRepeatIsDroppedForFiveMinutes) {
   EXPECT_EQ(says(), 5);
 }
 
+// Milestone 3a: while a party member is AFK, out of combat, the bot waits:
+// its look timer and unasked chatter hold (by snapshot and by tick), and the
+// held look runs once they're back. Counter-tests: a watch, a whisper and a
+// mob attacking the AFK party still wake it, a player's question is still
+// answered, and in combat it speaks up.
+TEST(BotLoopTest, AnAfkPartyMemberHoldsTheLookTimerAndUnaskedChatter) {
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& c) { sent.push_back(c); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  uint32_t seq = 0;
+  const auto look_at = [&](base::TimeDelta at, bool afk, bool in_combat = false,
+                           uint32_t hp = 60) {
+    pb::Snapshot s = MakeLiveSnap("Ed", ++seq, t0 + at, in_combat, hp);
+    pb::Unit& m = s.ext.party.emplace().members.emplace_back();
+    m.name = "Hele";
+    m.guid = "0x48";
+    m.group.emplace().online = true;
+    m.group->afk = afk;
+    if (in_combat) {
+      AddUnitAndOption(&s, "0x9", "Defias Thug", /*dead=*/false,
+                       /*lootable=*/false, /*targeting_me=*/true);
+    }
+    AddKeep(&s);
+    loop.OnSnapshot(s, t0 + at);
+  };
+  const auto says = [&] {
+    return std::count_if(sent.begin(), sent.end(), [](const pb::Command& c) {
+      return c.say.has_value();
+    });
+  };
+
+  look_at(base::TimeDelta(), /*afk=*/false);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 30");
+  // Hele goes AFK: past the look timer nothing wakes, by snapshot or tick.
+  look_at(base::Seconds(31), /*afk=*/true);
+  loop.OnTick(t0 + base::Seconds(40));
+  EXPECT_EQ(brain.size(), 0u);
+  // Back: the held look runs at once.
+  look_at(base::Seconds(45), /*afk=*/false);
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("Woken: look timer."),
+            std::string::npos);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: hp<40\nlook: 30");
+
+  // AFK again: the bot's own watch still wakes it, but its unasked party line
+  // waits.
+  look_at(base::Seconds(50), /*afk=*/true, /*in_combat=*/false, /*hp=*/20);
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("party_state: afk Hele"),
+            std::string::npos)
+      << brain.front_request().user;
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 30\nparty: brb drinking");
+  EXPECT_EQ(says(), 0);
+
+  // A player's question is still answered.
+  pb::ImmediateEvent ask;
+  ask.bot = "Ed";
+  ask.event.chat.emplace().channel = pb::WHISPER;
+  ask.event.chat->from = "Hele";
+  ask.event.chat->text = "you ok?";
+  ask.event.chat->at_me = true;
+  loop.OnEvent(ask, t0 + base::Seconds(55));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 30\nsay: yep");
+  EXPECT_EQ(says(), 1);
+
+  // A mob attacking the AFK party wakes the bot with its Attack option, and
+  // in combat it speaks up.
+  look_at(base::Seconds(60), /*afk=*/true, /*in_combat=*/true);
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("Attack Defias Thug"),
+            std::string::npos)
+      << brain.front_request().user;
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 30\nparty: on me");
+  EXPECT_EQ(says(), 2);
+}
+
 }  // namespace
 }  // namespace harness

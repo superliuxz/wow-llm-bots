@@ -86,19 +86,55 @@ TEST(OptionsTest, MarkedMobsComeFirstAndSayTheirMark) {
   EXPECT_EQ(targets[0].guid, "0x3");
 }
 
-// Now #4: when a human leads, they pull: a mob nobody in the party fights
-// gets no Attack option (a gate, not a prompt rule).
-TEST(OptionsTest, HumanLeaderPullsSoUnpulledMobsGetNoAttack) {
+// Now #4: when pulls wait for the human (they lead, tank, or are AFK or
+// behind), a mob nobody in the party fights gets no Attack option (a gate,
+// not a prompt rule); one already on the party or the bot keeps it.
+TEST(OptionsTest, HeldPullsLeaveNoAttackOnUnpulledMobs) {
   pb::Snapshot snapshot;
   snapshot.bot = "Loada";
   snapshot.ext.party.emplace().members.emplace_back().name = "Hele";
   AddUnit(&snapshot, "Kobold Tunneler", "0x1", 10);
   AddUnit(&snapshot, "Kobold Miner", "0x2", 12)->target = "Hele";
+  AddUnit(&snapshot, "Kobold Worker", "0x3", 14)->targeting_me = true;
   OptionFacts facts;
-  facts.leave_pulls_to_leader = true;
+  facts.hold_pulls = true;
   AddOptions(&snapshot, facts);
+  EXPECT_EQ(Texts(snapshot), (std::vector<std::string>{
+                                 "Attack Kobold Miner", "Attack Kobold Worker",
+                                 "Keep doing what I'm doing"}));
+}
+
+// Counter-test: when pulls aren't held (the group's bot tank under a human
+// leader who doesn't tank), the unpulled mob is offered, saying so.
+TEST(OptionsTest, UnheldPullsOfferUnpulledMobsMarkedNotPulled) {
+  pb::Snapshot snapshot;
+  snapshot.bot = "Torvin";
+  snapshot.ext.party.emplace().members.emplace_back().name = "Hele";
+  AddUnit(&snapshot, "Kobold Tunneler", "0x1", 10);
+  AddOptions(&snapshot, OptionFacts{});
   EXPECT_EQ(Texts(snapshot),
-            (std::vector<std::string>{"Attack Kobold Miner",
+            (std::vector<std::string>{"Attack Kobold Tunneler (not pulled)",
+                                      "Keep doing what I'm doing"}));
+}
+
+// A bot leading a dungeon group doesn't explore ahead while the human is
+// held up; it can still go to a place, and Explore comes back after.
+TEST(OptionsTest, HeldExploreDropsOnlyExplore) {
+  OptionFacts facts;
+  facts.spots = {{"spot:36:1:2", pb::N, 60.0f, "Defias Overseer", {1, 2, 3}}};
+  facts.places = {{"place:exit", "Exit", "", pb::S, 80.0f, {4, 5, 6}}};
+  facts.hold_explore = true;
+  pb::Snapshot held;
+  AddOptions(&held, facts);
+  EXPECT_EQ(Texts(held),
+            (std::vector<std::string>{"Go to Exit, 80 yd S",
+                                      "Keep doing what I'm doing"}));
+  facts.hold_explore = false;
+  pb::Snapshot free;
+  AddOptions(&free, facts);
+  EXPECT_EQ(Texts(free),
+            (std::vector<std::string>{"Explore N, 60 yd (Defias Overseer)",
+                                      "Go to Exit, 80 yd S",
                                       "Keep doing what I'm doing"}));
 }
 

@@ -798,6 +798,34 @@ class LlmBrainWorldScript : public WorldScript {
     return PlayerbotAI::IsTank(bot);
   }
 
+  // The facts behind the pull gate (OptionFacts::hold_pulls/hold_explore):
+  // what the group's humans are doing. Whether to pull with what's left is
+  // the brain's call.
+  static void FillPullFacts(Player* bot, Group* group, OptionFacts* facts) {
+    constexpr float kHumanBehindYd = 25.0f;
+    bool human_leads = false;
+    bool human_holds = false;  // A human tanks, is AFK or is behind.
+    for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+      if (slot.guid == bot->GetGUID()) {
+        continue;
+      }
+      Player* member = ObjectAccessor::FindConnectedPlayer(slot.guid);
+      if (!member || !member->IsInWorld() || !IsHumanPlayer(member)) {
+        continue;
+      }
+      human_leads |= slot.guid == group->GetLeaderGUID();
+      human_holds |= (slot.flags & MEMBER_FLAG_MAINTANK) != 0 ||
+                     IsGroupTank(group, member) || member->isAFK() ||
+                     member->GetMapId() != bot->GetMapId() ||
+                     bot->GetDistance(member) > kHumanBehindYd;
+    }
+    const bool bot_tanks =
+        IsGroupTank(group, bot) && !BotManager::GetGroupPolicy(bot).not_tank;
+    facts->hold_pulls = human_holds || (human_leads && !bot_tanks);
+    facts->hold_explore = human_holds && group->IsLeader(bot->GetGUID()) &&
+                          bot->GetMap() && bot->GetMap()->IsDungeon();
+  }
+
   // Attacks `target` for a leader's command, through playerbots' own attack
   // (and its raid-target value for a mark) when it has one.
   static void LeaderAttack(Player* bot,
@@ -1602,10 +1630,8 @@ class LlmBrainWorldScript : public WorldScript {
     }
     Group* cur_group = bot->GetGroup();
     facts.can_leave_group = (cur_group != nullptr && !bot->IsInCombat());
-    if (cur_group && !cur_group->IsLeader(bot->GetGUID())) {
-      Player* leader =
-          ObjectAccessor::FindConnectedPlayer(cur_group->GetLeaderGUID());
-      facts.leave_pulls_to_leader = leader && IsHumanPlayer(leader);
+    if (cur_group) {
+      FillPullFacts(bot, cur_group, &facts);
     }
     const bool can_invite =
         !bot->IsInCombat() &&

@@ -52,6 +52,7 @@ CHAT_MSG_SAY = 0x01
 CHAT_MSG_PARTY = 0x02
 CHAT_MSG_RAID = 0x03
 CHAT_MSG_WHISPER = 0x07
+CHAT_MSG_AFK = 0x17  # An empty line toggles /afk.
 CHAT_MSG_PARTY_LEADER = 0x33
 CHAT_TYPE_NAMES = {CHAT_MSG_SAY: "say", CHAT_MSG_PARTY: "party", CHAT_MSG_RAID: "raid",
                    CHAT_MSG_WHISPER: "whisper", CHAT_MSG_PARTY_LEADER: "party"}

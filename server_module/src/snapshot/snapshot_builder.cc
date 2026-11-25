@@ -51,6 +51,7 @@
 #include "UpdateFields.h"
 #include "World.h"
 #include "base/time/time.h"
+#include "chat/chat_scripts.h"
 #include "options/exec_items.h"
 #include "options/exec_npc.h"
 #include "options/exec_shared.h"
@@ -598,6 +599,9 @@ void FillParty(Player* bot, NearbyBuilder* nearby, pb::Extensions* ext) {
       }
       m.player.emplace().class_ = ClassName(member->getClass());
       gp.aggro = !member->getAttackers().empty();
+      // Playerbots flags idle bots AFK to throttle them; only a human's
+      // /afk means someone is away.
+      gp.afk = member->isAFK() && IsHumanPlayer(member);
       gp.in_range = member->GetMapId() == bot->GetMapId() &&
                     bot->GetDistance(member) <= 100.0f;
       if (member->GetMapId() == bot->GetMapId()) {

@@ -206,6 +206,10 @@ def _case_orders():
                         if i >= since_idx and c.get("bot") == "Loada" and "act" in c
                     ]
 
+                # A cast refused for a moment (the GCD or a cooldown playerbots'
+                # own cast just started) is timing, not a broken order.
+                transient = re.compile(r"cannot cast .* now|is on cooldown")
+
                 def check_no_errors():
                     with proxy.lock:
                         expect(not proxy.visibility_errors,
@@ -213,6 +217,7 @@ def _case_orders():
                         errs = [
                             ev["event"]["error"] for _, ev in proxy.events
                             if "error" in ev.get("event", {})
+                            and not transient.search(ev["event"]["error"].get("text", ""))
                         ]
                         expect(not errs, f"module reported command errors: {errs}")
 

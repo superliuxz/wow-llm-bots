@@ -1021,6 +1021,9 @@ std::vector<std::string> PartyLines(
     if (!u.group) {
       continue;
     }
+    if (u.group->online && u.group->afk) {
+      state.push_back(base::StrCat({"afk ", u.name}));
+    }
     if (!u.group->online) {
       state.push_back(base::StrCat({u.name, " offline"}));
     } else if (u.dead) {

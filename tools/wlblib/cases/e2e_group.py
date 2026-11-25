@@ -1,4 +1,4 @@
-"""Grouped e2e cases: invite, group, tank, popups, rez_ready, lootroll, lfg_proposal."""
+"""Grouped e2e cases: invite, group, tank, pull_gate, popups, rez_ready, lootroll, lfg_proposal."""
 
 import types
 from wlblib import wire
@@ -1404,6 +1404,22 @@ def _case_human_party():
                 _poll(lambda: not any(stays(b) for b in BOTS), 5,
                       "every bot following again after 'los'")
 
+                # 10 (Milestone 3a). The human's /afk shows on the bots' party frames
+                # (`group.afk`), and clears when they're back.
+                def human_afk(after):
+                    s = latest("Loadc", after)
+                    m = s and human_in(s)
+                    return m and bool((m.get("group") or {}).get("afk"))
+                since_afk = time.monotonic()
+                client.say(wowclient.CHAT_MSG_AFK, "")
+                went_afk = bool(_poll(lambda: human_afk(since_afk), 10,
+                                      f"{HUMAN} shown AFK to Loadc"))
+                since_back = time.monotonic()
+                client.say(wowclient.CHAT_MSG_AFK, "")
+                came_back_afk = bool(_poll(
+                    lambda: latest("Loadc", since_back) and not human_afk(since_back), 10,
+                    f"{HUMAN} no longer shown AFK to Loadc"))
+
                 # 6. Leaving the group takes the ping off the minimap at once.
                 before_ungroup = pings_of("Loadc", since_emote)
                 pinged_before_ungroup = bool(before_ungroup and before_ungroup[-1][2])
@@ -1452,6 +1468,9 @@ def _case_human_party():
                f"Loada didn't hold at the ping (stay={held_at_ping}, at={lp})")
         expect(not others_follow, f"bots without the act stopped following: {others_follow}")
         expect(not fort_errs, f"Loadb's walk-in cast was refused: {fort_errs}")
+        expect(went_afk and came_back_afk,
+               f"{HUMAN}'s /afk wasn't shown and cleared (afk={went_afk}, "
+               f"back={came_back_afk})")
         expect(cross_refused, "'kill {rt7}' wasn't parsed as kill cross")
         expect(rt_as_word, "the brain saw '{rt7}' instead of 'cross'")
         expect(went_there and held_there,
@@ -1471,6 +1490,120 @@ def _case_human_party():
                 "(`act: to ping` walked Loada there and held it; `use` walked Loadb into "
                 "range first; 'kill {rt7}' read as cross, 'go there' / 'los' applied in C++) "
                 f"({rel.get('dist_yd', 0):.0f} yd {rel.get('dir')}), not to self, gone on ungroup")
+    return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
+
+def _case_pull_gate():
+    """Who may pull: the gate on Attack options for mobs nobody fights yet (Milestone 3a).
+
+    Loada stands in for the human (`llmtest testhuman Loada 1`) and leads Telda. Telda's
+    snapshots say which mobs it may pull (an `Attack ... (not pulled)` option); the brain picks.
+
+      1. Solo, Telda is offered Attack on the mobs around (so there are some).
+      2. Grouped under the human leader, Telda (no tank) gets no unpulled Attack.
+      3. Made the group's tank (`llmtest maketank`), Telda is offered them, marked
+         `(not pulled)`: the human leader doesn't tank.
+      4. The human 40 yd away (behind): no unpulled Attack again.
+      5. Counter-test: back next to Telda, they are offered again.
+    """
+
+    import socket
+    import time
+
+    from wlblib import server
+    from wlblib.common import TEST
+    from wlblib.testing import expect
+
+    NAME = "pull_gate"
+    DESCRIPTION = "A bot tank under a human leader may pull; not when the human is behind"
+    TEST_CONFIG = "orders"  # config/tests/orders.*.overrides: two priests next to boars.
+    BOT = "Telda"
+    ONLINE = 2
+    KALIMDOR = 1
+
+    def run(stack):
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        sock.connect(str(TEST.run / "brain.sock"))
+        reader = wire.FrameReader()
+        seen = {}
+        pos = None
+
+        def next_telda(after, timeout_s=20.0):
+            deadline = time.time() + timeout_s
+            while time.time() < deadline:
+                try:
+                    chunk = sock.recv(1 << 20)
+                except socket.timeout:
+                    continue
+                for payload in reader.feed(chunk):
+                    msg = wire.decode_module_message(payload)
+                    snap = (msg or {}).get("snapshot")
+                    if snap and snap.get("bot") == "Telda" and time.time() >= after:
+                        return snap
+            return None
+
+        def wait_for(step, pred, after, timeout_s=20.0):
+            deadline = time.time() + timeout_s
+            while time.time() < deadline:
+                snap = next_telda(after, deadline - time.time())
+                if snap is None:
+                    break
+                texts = [o.get("text", "") for o in snap.get("options", [])]
+                seen[step] = texts
+                if pred(snap, texts):
+                    return True
+            return False
+
+        def grouped(snap):
+            return bool(((snap.get("ext") or {}).get("party") or {}).get("members"))
+
+        def unpulled(texts):
+            return [t for t in texts if t.startswith("Attack ") and t.endswith("(not pulled)")]
+
+        try:
+            t = time.time()
+            solo = wait_for("solo", lambda s, x: not grouped(s)
+                            and any(o.startswith("Attack ") for o in x), t)
+            server.console("llmtest testhuman Loada 1", wait_s=0.3, inst=TEST)
+            server.console("llmtest group Loada Telda", wait_s=0.5, inst=TEST)
+            t = time.time()
+            held_no_tank = (wait_for("held", lambda s, x: grouped(s), t)
+                            and wait_for("held2", lambda s, x: grouped(s), time.time())
+                            and not unpulled(seen["held"]) and not unpulled(seen["held2"]))
+            server.console("llmtest maketank Telda", wait_s=1.5, inst=TEST)
+            tank_may_pull = wait_for("tank", lambda s, x: grouped(s) and unpulled(x),
+                                     time.time())
+            snap = next_telda(time.time())
+            pos = snap["base"]["where"]["position"]
+            server.console(f"llmtest tele Loada {KALIMDOR} {pos['x'] + 40.0} {pos['y']} "
+                           f"{pos['z'] + 1.0} 0", wait_s=1.0, inst=TEST)
+            behind_held = wait_for("behind", lambda s, x: grouped(s) and not unpulled(x),
+                                   time.time())
+            server.console(f"llmtest tele Loada {KALIMDOR} {pos['x'] + 2.0} {pos['y']} "
+                           f"{pos['z'] + 1.0} 0", wait_s=1.0, inst=TEST)
+            back_may_pull = wait_for("back", lambda s, x: grouped(s) and unpulled(x),
+                                     time.time())
+        finally:
+            sock.close()
+            if pos:
+                server.console(f"llmtest tele Loada {KALIMDOR} {pos['x']} {pos['y']} "
+                               f"{pos['z'] + 1.0} 0", wait_s=0.5, inst=TEST)
+            server.console("llmtest ungroup Telda", inst=TEST)
+            server.console("llmtest ungroup Loada", inst=TEST)
+            server.console("llmtest testhuman Loada 0", inst=TEST)
+            server.console("llmtest clearstrat", inst=TEST)
+
+        expect(solo, f"solo Telda was offered no Attack (options: {seen.get('solo')})")
+        expect(held_no_tank, f"Telda (not a tank) under a human leader was offered unpulled "
+               f"mobs: {seen.get('held')} / {seen.get('held2')}")
+        expect(tank_may_pull, f"Telda as the group's tank was offered no unpulled mob "
+               f"(options: {seen.get('tank')})")
+        expect(behind_held, f"Telda was offered unpulled mobs with the human 40 yd behind: "
+               f"{seen.get('behind')}")
+        expect(back_may_pull, f"Telda wasn't offered unpulled mobs again with the human back "
+               f"(options: {seen.get('back')})")
+        return (f"tank Telda offered {unpulled(seen['tank'])[0]!r}; none as a non-tank or with "
+                "the human 40 yd behind")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
 def _case_popup_policy():
@@ -1842,4 +1975,4 @@ def _case_use_physics():
                 f"the ping from {rof_at:.0f} yd (was {rof_from:.0f}); the imp was dismissed")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
-CASES = [_case_crowd_control(), _case_use_physics(), _case_popup_policy(), _case_human_party(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal()]
+CASES = [_case_pull_gate(), _case_crowd_control(), _case_use_physics(), _case_popup_policy(), _case_human_party(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal()]

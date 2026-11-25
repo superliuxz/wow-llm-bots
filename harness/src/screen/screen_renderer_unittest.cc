@@ -1026,6 +1026,15 @@ TEST(ScreenRendererTest, PartyStateLineSummarizesThePace) {
   calm.ext.party.emplace().members.emplace_back().name = "Hele";
   calm.ext.party->members.back().group.emplace().online = true;
   EXPECT_EQ(RenderScreen(calm).text.find("party_state:"), std::string::npos);
+  // Milestone 3a: a human's /afk shows, while they're online.
+  calm.ext.party->members.back().group->afk = true;
+  EXPECT_NE(RenderScreen(calm).text.find("  party_state: afk Hele\n"),
+            std::string::npos)
+      << RenderScreen(calm).text;
+  calm.ext.party->members.back().group->online = false;
+  EXPECT_EQ(RenderScreen(calm).text.find("afk Hele"), std::string::npos);
+  calm.ext.party->members.back().group->online = true;
+  calm.ext.party->members.back().group->afk = false;
 
   // Now #9: Luck of the Draw and Dungeon Deserter facts on the party lines.
   pb::Aura& luck = calm.base.self.unit.auras.emplace_back();

@@ -292,6 +292,8 @@ struct GroupPart {
   bool assistant = false;
   bool main_tank = false;
   bool main_assist = false;
+  // Flagged away (/afk), as the party frame shows.
+  bool afk = false;
   std::string ready;
   // Unfinished quests of a party member in range, with their progress
   // ("Kobold Camp Cleanup: Kobold Vermin slain 3/8"), at most 3 (Now #8).
@@ -2120,9 +2122,13 @@ struct OptionFacts {
   // The self-resurrection the dead bot can use now (Soulstone Resurrection,
   // Reincarnation), by name; empty when none.
   std::string self_resurrect;
-  // A human leads this bot's group (and this bot isn't the leader): the
-  // human pulls, so no Attack on a mob nobody in the party is fighting yet.
-  bool leave_pulls_to_leader = false;
+  // No Attack on a mob nobody in the party is fighting yet: a human leads
+  // and this bot isn't the group's tank (or the leader tanks), or a human in
+  // the group tanks, is AFK or is over 25 yd away.
+  bool hold_pulls = false;
+  // No Explore: the bot leads a dungeon group while a human in it tanks, is
+  // AFK or is over 25 yd away.
+  bool hold_explore = false;
 
   bool operator==(const OptionFacts&) const = default;
 };
