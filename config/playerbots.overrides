@@ -41,3 +41,11 @@ Playerbots.CommandPrefix = "!pb "
 # Followers keep a little room (playerbots' 1.5 yd stacks them on the leader's heels, where every
 # cleave and every step back drags them into the next pack).
 Playerbots.FollowDistance = 4.0
+# Heals start earlier and reflexes are quicker (late heals and last-second dodges look like
+# near-deaths to the human): a fixed 250 ms combat react delay instead of the dynamic 500 ms, and
+# health bands raised from 25/45/65 so playerbots' heal triggers fire sooner.
+Playerbots.DynamicReactDelay = 0
+Playerbots.CriticalHealth = 32
+Playerbots.LowHealth = 52
+Playerbots.MediumHealth = 72
+Playerbots.AlmostFullHealth = 85

@@ -416,6 +416,7 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
   // The party (T8): a bot wakes on its group's state too, not only its own.
   std::flat_set<std::string> dead_members;
   std::flat_set<std::string> low_mana_healers;
+  std::flat_set<std::string> critical_members;
   std::string aggro_member;
   std::flat_set<std::string> online_members;
   std::flat_set<std::string> offline_members;
@@ -432,6 +433,21 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
         dead_members.insert(m.name);
       } else if (m.group->aggro && m.group->in_range && aggro_member.empty()) {
         aggro_member = m.name;
+      }
+      // A member near death in a fight (the bot's own fight, or one
+      // the member is taking hits in) is worth a look at once. Latched until
+      // the member is back above kPartyCriticalRearmPct (or dies: that has
+      // its own wake).
+      constexpr float kPartyCriticalHpPct = 35.0f;
+      constexpr float kPartyCriticalRearmPct = 50.0f;
+      if (!m.dead && m.health_pct) {
+        if (*m.health_pct < kPartyCriticalHpPct && m.group->in_range &&
+            (in_combat || m.group->aggro)) {
+          critical_members.insert(m.name);
+        } else if (*m.health_pct < kPartyCriticalRearmPct &&
+                   prev_critical_members_.contains(m.name)) {
+          critical_members.insert(m.name);  // Still latched.
+        }
       }
       constexpr float kHealerLowManaPct = 30.0f;
       if (!m.dead && m.group->role == pb::HEALER && m.power_pct &&
@@ -464,6 +480,14 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
                                              ? " went offline"
                                              : " left the group"}),
                            kWakeParty});
+      }
+    }
+    for (const std::string& name : critical_members) {
+      if (!prev_critical_members_.contains(name)) {
+        Consider(&chosen,
+                 {Urgency::kP1Danger,
+                  base::StrCat({"party member ", name, " is near death"}),
+                  kWakeParty});
       }
     }
     for (const std::string& name : low_mana_healers) {
@@ -559,6 +583,7 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
   prev_dead_members_ = std::move(dead_members);
   prev_party_aggro_ = !aggro_member.empty();
   prev_low_mana_healers_ = std::move(low_mana_healers);
+  prev_critical_members_ = std::move(critical_members);
   prev_online_members_ = std::move(online_members);
   return chosen;
 }

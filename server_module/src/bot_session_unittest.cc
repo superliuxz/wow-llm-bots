@@ -89,8 +89,9 @@ TEST(BotSessionRegistryTest, PartyPingClearsOnDisconnectAndLogout) {
   });
 }
 
-// A `to ping` hold never outlives a map change, a harness disconnect or a
-// relog (the group policy, `Wait here`, does survive a relog).
+// A `to ping` hold (and a dodge's hold on reflex casts) never outlives a map
+// change, a harness disconnect or a relog (the group policy, `Wait here`, does
+// survive a relog).
 TEST(BotSessionRegistryTest, PingStayClearsOnMapChangeDisconnectAndLogout) {
   BotSessionRegistry reg;
   constexpr uint64_t kBot = 0x1003;
@@ -101,12 +102,14 @@ TEST(BotSessionRegistryTest, PingStayClearsOnMapChangeDisconnectAndLogout) {
       s.group_guid = 42;
       s.group_policy.stay = true;
       s.ping_stay = stay;
+      s.moving_out_until_ms = 12345;
     });
   };
   const auto expect_cleared = [&] {
     reg.InspectSession(kBot, [](const BotSession* s) {
       ASSERT_NE(s, nullptr);
       EXPECT_FALSE(s->ping_stay.has_value());
+      EXPECT_EQ(s->moving_out_until_ms, 0u);  // A dodge's cast hold too.
       EXPECT_EQ(s->group_guid, 42u);
       EXPECT_TRUE(s->group_policy.stay);
     });

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <list>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -11,10 +12,16 @@
 #include <vector>
 
 #include "Bag.h"
+#include "Cell.h"
+#include "CellImpl.h"  // IWYU pragma: keep
 #include "Common.h"
 #include "Creature.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
+#include "DynamicObject.h"
+#include "GridDefines.h"
+#include "GridNotifiers.h"
+#include "GridNotifiersImpl.h"  // IWYU pragma: keep
 #include "Group.h"
 #include "Item.h"
 #include "ItemTemplate.h"
@@ -27,6 +34,7 @@
 #include "StringFormat.h"
 #include "Unit.h"
 #include "UnitDefines.h"
+#include "UpdateFields.h"
 #include "World.h"
 #include "snapshot/snapshot.h"
 
@@ -204,6 +212,56 @@ bool HasNewCastOrAura(Player* bot, const ReactiveSnapshotState& last) {
     }
   }
   return false;
+}
+
+std::vector<std::pair<uint64_t, uint32_t>> CollectHostileHazards(
+    Player* bot,
+    float radius_yd) {
+  std::vector<std::pair<uint64_t, uint32_t>> out;
+  std::list<WorldObject*> objects;
+  Acore::AllWorldObjectsInRange check(bot, radius_yd);
+  Acore::WorldObjectListSearcher<Acore::AllWorldObjectsInRange> searcher(
+      bot, objects, check,
+      GRID_MAP_TYPE_MASK_CREATURE | GRID_MAP_TYPE_MASK_PLAYER |
+          GRID_MAP_TYPE_MASK_DYNAMICOBJECT);
+  Cell::VisitObjects(bot, searcher, radius_yd);
+  for (WorldObject* object : objects) {
+    if (DynamicObject* area = object->ToDynObject()) {
+      Unit* caster = area->GetCaster();
+      if (area->GetByteValue(DYNAMICOBJECT_BYTES, 0) ==
+              DYNAMIC_OBJECT_AREA_SPELL &&
+          caster && caster->IsHostileTo(bot)) {
+        out.emplace_back(area->GetGUID().GetRawValue(), area->GetSpellId());
+      }
+      continue;
+    }
+    Unit* unit = object->ToUnit();
+    if (!unit || unit == bot || !unit->IsAlive() || !unit->IsHostileTo(bot)) {
+      continue;
+    }
+    // A cast bar, as NearbyBuilder's FillActivity shows it.
+    const Spell* cast = unit->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+    if (cast && cast->getState() == SPELL_STATE_PREPARING &&
+        cast->GetSpellInfo() && cast->GetCastTime() > 0) {
+      out.emplace_back(unit->GetGUID().GetRawValue(), cast->GetSpellInfo()->Id);
+    }
+    const Spell* channel = unit->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
+    if (channel && channel->getState() != SPELL_STATE_FINISHED &&
+        channel->GetSpellInfo()) {
+      out.emplace_back(unit->GetGUID().GetRawValue(),
+                       channel->GetSpellInfo()->Id);
+    }
+  }
+  std::sort(out.begin(), out.end());
+  out.erase(std::unique(out.begin(), out.end()), out.end());
+  return out;
+}
+
+bool HasNewEntry(const std::vector<std::pair<uint64_t, uint32_t>>& now,
+                 const std::vector<std::pair<uint64_t, uint32_t>>& seen) {
+  return std::any_of(now.begin(), now.end(), [&seen](const auto& entry) {
+    return !std::binary_search(seen.begin(), seen.end(), entry);
+  });
 }
 
 std::string_view SpellLocalizedName(const SpellInfo* info) {

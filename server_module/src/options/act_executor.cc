@@ -641,6 +641,27 @@ std::optional<pb::Vec3> MoveToFirstValidSpot(
   return std::nullopt;
 }
 
+// A move act starting mid-cast (its walk already queued): cuts a cast or
+// channel that would hold the bot still for more than kLetCastLandMs
+// (CutCastForMove); after a nearly finished one lands, the walk starts.
+void CutCastsForMove(Player* bot) {
+  for (CurrentSpellTypes slot :
+       {CURRENT_GENERIC_SPELL, CURRENT_CHANNELED_SPELL}) {
+    Spell* sp = bot->GetCurrentSpell(slot);
+    if (!sp || !sp->GetSpellInfo() ||
+        (slot == CURRENT_GENERIC_SPELL
+             ? sp->getState() != SPELL_STATE_PREPARING
+             : sp->getState() == SPELL_STATE_FINISHED)) {
+      continue;
+    }
+    const bool allows_move = slot == CURRENT_CHANNELED_SPELL &&
+                             sp->GetSpellInfo()->IsActionAllowedChannel();
+    if (CutCastForMove(sp->GetCastTimeRemaining(), allows_move)) {
+      bot->InterruptSpell(slot, /*withDelayed=*/false);
+    }
+  }
+}
+
 // Finds the highest-rank spell known by `bot` matching `name`.
 const SpellInfo* FindKnownSpell(Player* bot, std::string_view name) {
   const SpellInfo* best = nullptr;
@@ -1925,6 +1946,7 @@ ActStartResult StartAct(Player* bot,
       if (!chosen) {
         return {.error = "no path out of hazard"};
       }
+      CutCastsForMove(bot);
       const ActiveAct::InterruptedActivity intr =
           CaptureInterruptedActivity(bot);
       SaveLastInterrupted(bot->GetGUID().GetRawValue(), intr);
@@ -2030,6 +2052,9 @@ ActStartResult StartAct(Player* bot,
           MoveToFirstValidSpot(bot, candidates, los_anchor);
       if (!chosen) {
         return {.error = "no path to destination"};
+      }
+      if (act.verb == pb::Command_Act::AWAY) {
+        CutCastsForMove(bot);
       }
       out_active->command_id = command_id;
       out_active->map_id = bot->GetMapId();
@@ -2377,6 +2402,7 @@ ActStartResult StartAct(Player* bot,
       if (!chosen) {
         return {.error = "no path to kite"};
       }
+      CutCastsForMove(bot);
       out_active->command_id = command_id;
       out_active->map_id = bot->GetMapId();
       out_active->instance_id = bot->GetInstanceId();
@@ -2693,6 +2719,18 @@ ActStepResult StepActiveAct(Player* bot,
     active->last_anchor = *cur_anchor;
   }
   return {};
+}
+
+bool ActMovesOut(const ActiveAct& active) {
+  switch (active.act.verb) {
+    case pb::Command_Act::OUT_OF:
+    case pb::Command_Act::AWAY:
+      return active.dodge_phase == ActiveAct::DodgePhase::kMovingOut;
+    case pb::Command_Act::KITE:
+      return true;
+    default:
+      return false;
+  }
 }
 
 void CancelActiveAct(Player* bot, ActiveAct* active) {

@@ -45,6 +45,7 @@ void BotSessionRegistry::ResetOnMapChange(uint64_t bot_guid) {
     it->second.stray_recalled_ms = 0;
     it->second.party_ping.reset();
     it->second.ping_stay.reset();
+    it->second.moving_out_until_ms = 0;
   }
 }
 
@@ -56,6 +57,7 @@ void BotSessionRegistry::ResetOnDisconnect(uint64_t bot_guid) {
     it->second.stray_recalled_ms = 0;
     it->second.party_ping.reset();
     it->second.ping_stay.reset();
+    it->second.moving_out_until_ms = 0;
   }
 }
 

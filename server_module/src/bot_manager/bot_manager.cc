@@ -24,9 +24,11 @@
 #include "CharacterCache.h"
 #include "CharmInfo.h"
 #include "DBCStructure.h"
+#include "Define.h"
 #include "Engine.h"
 #include "Event.h"
 #include "GameTime.h"
+#include "GenericSpellActions.h"
 #include "GridNotifiers.h"
 #include "GridNotifiersImpl.h"  // IWYU pragma: keep
 #include "Group.h"
@@ -61,6 +63,7 @@
 #include "bot_session.h"
 #include "chat/chat_scripts.h"
 #include "config/config_parsing.h"
+#include "options/act_geometry.h"
 #include "options/exec_shared.h"
 #include "popup_watch.h"
 
@@ -491,6 +494,8 @@ class LlmBrainPacketScript final : public ServerScript {
 // reflex layer on each Engine:
 //  - Blocks `"accept invitation"` so the brain decides group invites.
 //  - Blocks `"flee"` in a dungeon or a human's group (GroupReflexLimits).
+//  - Holds spells that would root the bot (a cast time, a rooting channel)
+//    while a brain dodge moves it out (BotSession::moving_out_until_ms).
 //  - Blocks `"equip upgrades packet action"` / `"equip upgrade"` so Playerbots'
 //    auto-equipper never fights the brain's `Equip` choices.
 //  - Gates `"apply stone"` / `"apply oil"` on actual AzerothCore temp-enchant
@@ -520,6 +525,15 @@ class BrainPolicyListener final : public ActionExecutionListener {
       return true;
     }
     const std::string& name = action->getName();
+    // While a dodge moves the bot out (BotSession::moving_out_until_ms), a
+    // reflex spell that would hold it still (a cast time, or a rooting
+    // channel) waits until it is out; instants still go out on the move.
+    if (bot_ && ai_) {
+      if (auto* cast = dynamic_cast<CastSpellAction*>(action);
+          cast && HoldsDodgedBotStill(cast->getSpell())) {
+        return false;
+      }
+    }
     if (name == "apply stone") {
       return HasEligibleTempEnchant(bot_, ai_, /*is_stone=*/true);
     }
@@ -612,6 +626,20 @@ class BrainPolicyListener final : public ActionExecutionListener {
     return true;
   }
   void After(Action* /*action*/, bool /*executed*/, Event /*event*/) override {}
+
+  bool HoldsDodgedBotStill(const std::string& spell) {
+    const uint32_t until = BotSessionRegistry::Instance().InspectSession(
+        bot_->GetGUID().GetRawValue(),
+        [](const BotSession* s) { return s ? s->moving_out_until_ms : 0u; });
+    if (until == 0 || static_cast<int32_t>(until - getMSTime()) <= 0) {
+      return false;
+    }
+    const SpellInfo* info = sSpellMgr->GetSpellInfo(
+        ai_->GetAiObjectContext()->GetValue<uint32>("spell id", spell)->Get());
+    return info &&
+           CastHoldsMoveOut(info->CalcCastTime(bot_), info->IsChanneled(),
+                            info->IsActionAllowedChannel());
+  }
   bool OverrideResult(Action* /*action*/,
                       bool executed,
                       Event /*event*/) override {

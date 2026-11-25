@@ -108,6 +108,12 @@ struct BotSession {
   };
   std::optional<PingStay> ping_stay;
 
+  // While a dodge moves the bot out (ActMovesOut), getMSTime() until which
+  // playerbots' spells that would hold it still wait (BrainPolicyListener).
+  // Refreshed every tick of the move, so it lapses by itself if the module
+  // stops ticking; cleared on logout, map change and disconnect.
+  uint32_t moving_out_until_ms = 0;
+
   // Last outdoor stray-recall tick (`KeepNearHumanLeader`, Now #8).
   uint32_t stray_recalled_ms = 0;
 

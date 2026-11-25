@@ -133,6 +133,8 @@ class TriggerEvaluator {
   std::flat_set<std::string> prev_dead_members_;
   bool prev_party_aggro_ = false;
   std::flat_set<std::string> prev_low_mana_healers_;
+  // Members under 35% health in a fight, latched until back over 50%.
+  std::flat_set<std::string> prev_critical_members_;
   // Online members (T11): one who leaves or logs out wakes the bot.
   std::flat_set<std::string> prev_online_members_;
   std::flat_set<std::string> prev_attackers_;

@@ -246,5 +246,26 @@ TEST(SnapshotScheduleTest, ReactiveEventFiresAfterMinGapAndDoesNotLatch) {
   EXPECT_TRUE(schedule.IsDue(0, At(100), reactive));
 }
 
+TEST(SnapshotScheduleTest, HazardEventFiresAfter100MsAndDoesNotLatch) {
+  SnapshotSchedule schedule = Schedule(1);
+  const Flags fighting{.in_combat = true};
+  schedule.Sent(0, At(0), fighting);
+
+  const Flags hazard{.in_combat = true, .hazard_event = true};
+  // Throttled harder than a reactive event: not at 50 ms, at 100 ms.
+  EXPECT_FALSE(schedule.IsDue(0, At(50), hazard));
+  EXPECT_FALSE(schedule.IsDue(0, At(99), hazard));
+  EXPECT_TRUE(schedule.IsDue(0, At(100), hazard));
+  schedule.Sent(0, At(100), hazard);
+  // An edge: once sent, the same flags don't make another snapshot due.
+  EXPECT_FALSE(schedule.IsDue(0, At(110), fighting));
+  EXPECT_FALSE(schedule.IsDue(0, At(150), hazard));
+  EXPECT_TRUE(schedule.IsDue(0, At(200), hazard));
+  // A core change (death) still goes at once inside the hazard gap.
+  schedule.Sent(0, At(200), hazard);
+  EXPECT_TRUE(
+      schedule.IsDue(0, At(201), Flags{.in_combat = true, .alive = false}));
+}
+
 }  // namespace
 }  // namespace llm_brain

@@ -238,5 +238,23 @@ TEST(ActGeometryTest, OutOfIncludesBotCombatReach) {
                   .empty());
 }
 
+TEST(ActGeometryTest, MoveCutsLongCastsButLetsNearlyDoneOnesLand) {
+  EXPECT_TRUE(CutCastForMove(2500, /*channel_allows_move=*/false));
+  EXPECT_TRUE(CutCastForMove(kLetCastLandMs + 1, false));
+  EXPECT_FALSE(CutCastForMove(kLetCastLandMs, false));
+  EXPECT_FALSE(CutCastForMove(0, false));
+  // A channel the caster may move in never holds the move: it isn't cut.
+  EXPECT_FALSE(CutCastForMove(8000, /*channel_allows_move=*/true));
+}
+
+TEST(ActGeometryTest, OnlySpellsThatHoldTheBotStillWaitOutADodge) {
+  EXPECT_TRUE(CastHoldsMoveOut(1500, /*channeled=*/false, false));
+  // Instants (shocks, shouts, instant heals) still go out on the move.
+  EXPECT_FALSE(CastHoldsMoveOut(0, /*channeled=*/false, false));
+  EXPECT_TRUE(CastHoldsMoveOut(0, /*channeled=*/true, false));
+  EXPECT_FALSE(CastHoldsMoveOut(0, /*channeled=*/true,
+                                /*channel_allows_move=*/true));
+}
+
 }  // namespace
 }  // namespace llm_brain

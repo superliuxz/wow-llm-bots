@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <numbers>
 #include <optional>
@@ -235,6 +236,16 @@ bool AnchorMovedSignificantly(const AnchorGeometry& prev,
     return true;
   }
   return false;
+}
+
+bool CutCastForMove(int32_t remaining_ms, bool channel_allows_move) {
+  return !channel_allows_move && remaining_ms > kLetCastLandMs;
+}
+
+bool CastHoldsMoveOut(uint32_t cast_time_ms,
+                      bool channeled,
+                      bool channel_allows_move) {
+  return channeled ? !channel_allows_move : cast_time_ms > 0;
 }
 
 }  // namespace llm_brain

@@ -367,5 +367,106 @@ TEST(TriggersTest, PartyStateWakesTheBot) {
   EXPECT_EQ(t->reason, "party member Zenji left the group");
 }
 
+TEST(TriggersTest, PartyMemberNearDeathInAFightWakesOncePerDrop) {
+  pb::Snapshot snap = BaseSnap();
+  snap.base.self.in_combat = true;
+  pb::Unit& m = snap.ext.party.emplace().members.emplace_back();
+  m.name = "Hele";
+  m.health_pct = 80.0f;
+  pb::GroupPart& gp = m.group.emplace();
+  gp.online = true;
+  gp.in_range = true;
+  gp.role = pb::TANK;
+  TriggerEvaluator eval;
+  EXPECT_FALSE(eval.EvaluateSnapshot(snap));
+
+  const auto at = [&snap](float hp) {
+    pb::Snapshot s = snap;
+    s.ext.party->members[0].health_pct = hp;
+    return s;
+  };
+  std::optional<WakeTrigger> t = eval.EvaluateSnapshot(at(30.0f));
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->urgency, Urgency::kP1Danger);
+  EXPECT_EQ(t->reason, "party member Hele is near death");
+  EXPECT_TRUE(t->kinds & kWakeParty);
+  // Latched while low, and through a small heal that doesn't clear 50%.
+  EXPECT_FALSE(eval.EvaluateSnapshot(at(20.0f)));
+  EXPECT_FALSE(eval.EvaluateSnapshot(at(40.0f)));
+  EXPECT_FALSE(eval.EvaluateSnapshot(at(30.0f)));
+  // Healed back up, then low again: a new wake.
+  EXPECT_FALSE(eval.EvaluateSnapshot(at(60.0f)));
+  EXPECT_TRUE(eval.EvaluateSnapshot(at(30.0f)));
+}
+
+TEST(TriggersTest, PartyMemberLowOutsideAFightDoesNotWake) {
+  // Counter-tests: low health with nobody fighting (resting after a pull),
+  // out of range, dead, or the bot's own health (its `hp<N` watch's job)
+  // wakes nothing as "near death".
+  pb::Snapshot snap = BaseSnap(/*hp=*/10);
+  pb::Unit& m = snap.ext.party.emplace().members.emplace_back();
+  m.name = "Hele";
+  m.health_pct = 80.0f;
+  pb::GroupPart& gp = m.group.emplace();
+  gp.online = true;
+  gp.in_range = true;
+  TriggerEvaluator eval;
+  EXPECT_FALSE(eval.EvaluateSnapshot(snap));
+  snap.ext.party->members[0].health_pct = 20.0f;
+  EXPECT_FALSE(eval.EvaluateSnapshot(snap));  // Out of combat, no aggro.
+
+  TriggerEvaluator eval_far;
+  pb::Snapshot far = snap;
+  far.base.self.in_combat = true;
+  far.ext.party->members[0].group->in_range = false;
+  far.ext.party->members[0].health_pct = 80.0f;
+  EXPECT_FALSE(eval_far.EvaluateSnapshot(far));
+  far.ext.party->members[0].health_pct = 20.0f;
+  EXPECT_FALSE(eval_far.EvaluateSnapshot(far));
+
+  // The member's own fight counts while the bot isn't in one yet.
+  pb::Snapshot hit = snap;
+  hit.ext.party->members[0].group->aggro = true;
+  std::optional<WakeTrigger> t = eval.EvaluateSnapshot(hit);
+  ASSERT_TRUE(t);
+  EXPECT_NE(t->reason.find("party member Hele is near death"),
+            std::string::npos);
+
+  TriggerEvaluator eval2;
+  pb::Snapshot alive = snap;
+  alive.base.self.in_combat = true;
+  alive.ext.party->members[0].health_pct = 80.0f;
+  EXPECT_FALSE(eval2.EvaluateSnapshot(alive));
+  pb::Snapshot dead = alive;
+  dead.ext.party->members[0].dead = true;
+  dead.ext.party->members[0].health_pct = 0.0f;
+  t = eval2.EvaluateSnapshot(dead);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->reason, "party member Hele died");  // Not "near death" too.
+}
+
+TEST(TriggersTest, NearDeathDoesNotOutrankCombatWakes) {
+  // P0 combat priority: a new attacker in the same snapshot keeps P0 urgency
+  // (kUrgent) and the near-death reason rides along.
+  pb::Snapshot snap = BaseSnap();
+  pb::Unit& m = snap.ext.party.emplace().members.emplace_back();
+  m.name = "Hele";
+  m.health_pct = 80.0f;
+  pb::GroupPart& gp = m.group.emplace();
+  gp.online = true;
+  gp.in_range = true;
+  TriggerEvaluator eval;
+  EXPECT_FALSE(eval.EvaluateSnapshot(snap));
+  pb::Snapshot hit = snap;
+  hit.base.self.in_combat = true;
+  hit.ext.party->members[0].health_pct = 20.0f;
+  AddNearbyUnit(&hit, "0x1", "Kobold", pb::Unit::NPC, pb::Unit::HOSTILE, 3.0f,
+                /*targeting_me=*/true);
+  std::optional<WakeTrigger> t = eval.EvaluateSnapshot(hit);
+  ASSERT_TRUE(t);
+  EXPECT_LT(t->urgency, Urgency::kP1Danger);
+  EXPECT_NE(t->reason.find("near death"), std::string::npos);
+}
+
 }  // namespace
 }  // namespace harness

@@ -43,6 +43,11 @@ class SnapshotSchedule {
     // target, or an attacker since the last snapshot. Triggers an immediate
     // snapshot subject to kMinReactiveGap (50 ms).
     bool reactive_event = false;
+    // True when, in combat, a hostile unit nearby started a cast or channel
+    // or a hostile spell area appeared since the last snapshot (a mechanic
+    // that may need a step aside). Triggers an immediate snapshot subject to
+    // kMinHazardGap (100 ms).
+    bool hazard_event = false;
 
     bool operator==(const Flags&) const = default;
   };
@@ -54,6 +59,9 @@ class SnapshotSchedule {
   static constexpr base::TimeDelta kMinInterval = base::Milliseconds(100);
   // Minimum gap between reactive (cast/aura) immediate snapshots per bot.
   static constexpr base::TimeDelta kMinReactiveGap = base::Milliseconds(50);
+  // Minimum gap between hazard (nearby hostile cast / area) immediate
+  // snapshots per bot.
+  static constexpr base::TimeDelta kMinHazardGap = base::Milliseconds(100);
   SnapshotSchedule(size_t bot_count,
                    base::TimeDelta interval,
                    base::TimeDelta combat_interval,

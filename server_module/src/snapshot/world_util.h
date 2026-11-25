@@ -67,6 +67,20 @@ ReactiveSnapshotState CollectReactiveState(Player* bot);
 // attacker that was not present in `last`.
 bool HasNewCastOrAura(Player* bot, const ReactiveSnapshotState& last);
 
+// What may need a step aside, within `radius_yd` of `bot`: casts with a cast
+// bar and channels by units hostile to it, and spell areas (DynamicObject)
+// hostile casters left on the ground, as sorted (raw_guid, spell_id) pairs.
+// A new one makes a combat snapshot due at once (SnapshotSchedule).
+inline constexpr float kHostileHazardRadiusYd = 40.0f;
+std::vector<std::pair<uint64_t, uint32_t>> CollectHostileHazards(
+    Player* bot,
+    float radius_yd = kHostileHazardRadiusYd);
+
+// Whether `now` (sorted, as CollectHostileHazards returns) has an entry that
+// `seen` (sorted) lacks.
+bool HasNewEntry(const std::vector<std::pair<uint64_t, uint32_t>>& now,
+                 const std::vector<std::pair<uint64_t, uint32_t>>& seen);
+
 // Localized spell name in the server's default DBC locale, or "" if unknown.
 std::string_view SpellLocalizedName(const SpellInfo* info);
 

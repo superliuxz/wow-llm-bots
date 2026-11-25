@@ -124,6 +124,11 @@ ActStepResult StepActiveAct(Player* bot,
                             base::TimeTicks now,
                             ActiveAct* active);
 
+// Whether `active` is moving the bot out of the way right now (`out of` /
+// `away` before it arrives, or `kite`): playerbots' reflex spells that would
+// hold the bot still wait meanwhile (BotSession::moving_out_until_ms).
+bool ActMovesOut(const ActiveAct& active);
+
 // Cancels an active act on `bot` (releasing `MOVEMENT_FORCED` and stopping
 // movement if it was a movement act). World thread only.
 void CancelActiveAct(Player* bot, ActiveAct* active);

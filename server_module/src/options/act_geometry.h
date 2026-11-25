@@ -3,11 +3,13 @@
 // Pure geometry for standing-order relative places (`behind`, `in front of`,
 // `max range of`, `<N> yd from`, `away [<thing>] [<N>]`). Generates ordered
 // candidate world positions for the module's executor to validate against
-// ground height, line of sight, and `PathGenerator`.
+// ground height, line of sight, and `PathGenerator`, and the cast-vs-move
+// rules of a moving act.
 
 #ifndef MOD_LLM_BRAIN_OPTIONS_ACT_GEOMETRY_H_
 #define MOD_LLM_BRAIN_OPTIONS_ACT_GEOMETRY_H_
 
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -106,6 +108,19 @@ std::vector<wlb::snapshot::Vec3> PreferSpotsClearOf(
 bool AnchorMovedSignificantly(const AnchorGeometry& prev,
                               const AnchorGeometry& cur,
                               bool cares_about_facing);
+
+// The server holds a caster still while a cast (or a channel that doesn't
+// allow moving) runs, so a move started mid-cast waits for it. A move act
+// (`out of`, `away`, `kite`) cuts a cast or channel with more than
+// kLetCastLandMs left and lets a nearly finished one land first.
+inline constexpr int32_t kLetCastLandMs = 300;
+bool CutCastForMove(int32_t remaining_ms, bool channel_allows_move);
+
+// While a dodge moves out, a reflex spell that would hold the bot still (a
+// cast time, or a channel that doesn't allow moving) waits until it is out.
+bool CastHoldsMoveOut(uint32_t cast_time_ms,
+                      bool channeled,
+                      bool channel_allows_move);
 
 }  // namespace llm_brain
 

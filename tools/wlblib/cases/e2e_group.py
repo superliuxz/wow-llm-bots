@@ -1,4 +1,5 @@
-"""Grouped e2e cases: invite, group, tank, pull_gate, popups, rez_ready, lootroll, lfg_proposal."""
+"""Grouped e2e cases: invite, group, tank, pull_gate, popups, rez_ready, lootroll, lfg_proposal,
+crisp_dodge."""
 
 import types
 from wlblib import wire
@@ -1975,4 +1976,107 @@ def _case_use_physics():
                 f"the ping from {rof_at:.0f} yd (was {rof_from:.0f}); the imp was dismissed")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
-CASES = [_case_pull_gate(), _case_crowd_control(), _case_use_physics(), _case_popup_policy(), _case_human_party(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal()]
+def _case_crisp_dodge():
+    """A move act cuts a long cast at once (Milestone 3c, crisp dodges).
+
+    The server holds a caster still while a cast runs, so without the cut a dodge sent mid-cast
+    would wait the whole cast out. Loadb (an orc warlock made level 20) starts `act: use Summon
+    Imp` (a 10 s cast), and once its snapshot shows it casting, `act: away from Telda 12` moves it
+    12 yd off within a few seconds and the summon is cut.
+    """
+
+    import socket
+    import time
+
+    from wlblib import server
+    from wlblib.common import TEST
+
+    NAME = "crisp_dodge"
+    DESCRIPTION = "a move act sent mid-cast cuts the cast and goes at once"
+    TEST_CONFIG = "usephys"
+    BOT = "Loadb"
+    ONLINE = 3
+
+    def run(stack):
+        server.console("character level Loadb 20", inst=TEST)
+        server.console("llmtest learn Loadb 688", inst=TEST)  # Summon Imp (10 s cast).
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        sock.connect(str(TEST.run / "brain.sock"))
+        reader = wire.FrameReader()
+        snaps = []   # (monotonic, snapshot)
+        errors = {}  # command_id -> [text]
+
+        def pump(until, timeout, what):
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                got = until()
+                if got:
+                    return got
+                try:
+                    chunk = sock.recv(1 << 20)
+                except socket.timeout:
+                    continue
+                for payload in reader.feed(chunk):
+                    msg = wire.decode_module_message(payload)
+                    if not msg:
+                        continue
+                    if "event" in msg:
+                        err = msg["event"].get("event", {}).get("error")
+                        if err:
+                            errors.setdefault(err.get("command_id"), []).append(err.get("text"))
+                        continue
+                    if msg.get("snapshot"):
+                        snaps.append((time.monotonic(), msg["snapshot"]))
+            raise AssertionError(f"timed out waiting for {what} (errors: {errors})")
+
+        def latest(after=0.0):
+            return next((s for t, s in reversed(snaps)
+                         if s.get("bot") == "Loadb" and t >= after), None)
+
+        def telda(snap):
+            return snap and next((u for u in snap["base"]["nearby"]["units"]
+                                  if u.get("name") == "Telda"), None)
+
+        def casting(snap):
+            return (snap or {}).get("base", {}).get("self", {}).get("casting")
+
+        try:
+            tpos = pump(lambda: telda(latest()), 20, "Telda in Loadb's sight")["rel"]["position"]
+            server.console(f"llmtest move Loadb {tpos['x'] + 3.0} {tpos['y']} {tpos['z'] + 0.5} 0",
+                           wait_s=1.0, inst=TEST)
+            since_move = time.monotonic()
+            start_yd = pump(lambda: telda(latest(since_move)), 10,
+                            "Loadb next to Telda")["rel"]["dist_yd"]
+            send_cmd(sock, {"bot": "Loadb", "command_id": 41,
+                            "act": {"verb": "USE", "name": "Summon Imp"}})
+            cast = pump(lambda: casting(latest()), 10, "Loadb casting Summon Imp")
+            sent_at = time.monotonic()
+            send_cmd(sock, {"bot": "Loadb", "command_id": 42,
+                            "act": {"verb": "AWAY", "thing": "NAMED", "name": "Telda",
+                                    "yd": 12}})
+
+            def done():
+                return (42 in errors) or next(
+                    (t for t, s in snaps if s.get("bot") == "Loadb"
+                     and s.get("done_act_command_id") == 42), None)
+            done_at = pump(done, 8, "Loadb's away act to finish")
+            away_errs = errors.get(42, [])
+            took = (done_at - sent_at) if isinstance(done_at, float) else None
+            after = latest()
+            end_yd = (telda(after) or {}).get("rel", {}).get("dist_yd")
+            still_casting = casting(after)
+        finally:
+            sock.close()
+        expect(start_yd < 6.0, f"setup: Loadb started {start_yd:.1f} yd from Telda")
+        expect("Summon Imp" in str(cast), f"setup: Loadb was casting {cast!r}")
+        expect(not away_errs, f"away act failed: {away_errs}")
+        expect(took is not None and took < 5.0,
+               f"the away act took {took} s with a 10 s cast running (the cast was not cut)")
+        expect(end_yd is not None and end_yd >= 10.0, f"Loadb ended {end_yd} yd from Telda")
+        expect(not still_casting, f"Loadb still casting after the dodge: {still_casting!r}")
+        return (f"mid-cast away act went {start_yd:.0f} -> {end_yd:.0f} yd from Telda in "
+                f"{took:.1f} s; the 10 s Summon Imp was cut")
+    return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
+
+CASES = [_case_pull_gate(), _case_crowd_control(), _case_use_physics(), _case_crisp_dodge(), _case_popup_policy(), _case_human_party(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal()]

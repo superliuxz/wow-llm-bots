@@ -12,9 +12,11 @@ big-endian length-prefixed BEVE frames (`common/net/frame_codec.h`, max payload 
 
 - **Module → Harness (`ModuleMessage`):**
   - `Snapshot`: periodic picture of what one bot sees (`1 s` out of combat, `250 ms` in combat,
-    staggered across bots, latest-wins per bot if the socket backs up). Carries `seq`, `time_ms`,
-    `monotonic_us`, `done_command_id`, `done_act_command_id`, `base`, `ext`, `events`, and
-    `options`.
+    staggered across bots, latest-wins per bot if the socket backs up; sooner on a combat, life
+    or control change, a new cast or aura on the bot, its target or attackers (`>= 50 ms` apart),
+    or in combat a new hostile cast or spell area within 40 yd (`>= 100 ms` apart)). Carries
+    `seq`, `time_ms`, `monotonic_us`, `done_command_id`, `done_act_command_id`, `base`, `ext`,
+    `events`, and `options`.
   - `ImmediateEvent`: alerting events (chat, errors, info, prompts, loot rolls) pushed at once,
     never replaced or reordered.
 - **Harness → Module (`Command`):**

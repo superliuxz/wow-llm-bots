@@ -34,6 +34,7 @@
 #include "SharedDefines.h"
 #include "Spell.h"
 #include "SpellInfo.h"
+#include "Timer.h"
 #include "Unit.h"
 #include "UnitDefines.h"
 #include "UpdateFields.h"
@@ -390,6 +391,7 @@ class LlmBrainWorldScript : public WorldScript {
       bots_[i].last_map_id = cur_map;
       bots_[i].last_instance_id = cur_inst;
       StepActiveOption(bot, i, config_.bots[i], now);
+      SyncMovingOut(bot, i);
       if (!bot->IsInCombat()) {
         ClearAvoidedTargetsForBot(bot->GetGUID().GetRawValue());
       }
@@ -762,6 +764,11 @@ class LlmBrainWorldScript : public WorldScript {
         break;
       case LeaderCommand::kHealMe:
         // Who heals and with what is the brain's call: it is woken for it.
+        // The body's own heal reflexes (playerbots' heal strategies, when it
+        // has them) look at the party now instead of after its react delay.
+        if (ai) {
+          ai->SetNextCheckDelay(0);
+        }
         return said + " (" + sender->GetName() + " asks for heals)";
       case LeaderCommand::kMoveToPing:
       case LeaderCommand::kPullBack: {
@@ -1212,6 +1219,25 @@ class LlmBrainWorldScript : public WorldScript {
     }
   }
 
+  // Tells the bot manager's policy listener while a dodge moves the bot out
+  // (ActMovesOut): playerbots' spells that would hold it still wait. Written
+  // every tick of the move (the hold lapses within kMovingOutHoldMs if
+  // ticking stops) and once when it ends.
+  void SyncMovingOut(Player* bot, size_t index) {
+    constexpr uint32_t kMovingOutHoldMs = 1000;
+    BotState* state = &bots_[index];
+    const bool moving_out =
+        state->active_act && ActMovesOut(*state->active_act);
+    if (!moving_out && !state->moving_out) {
+      return;
+    }
+    state->moving_out = moving_out;
+    const uint32_t until = moving_out ? getMSTime() + kMovingOutHoldMs : 0;
+    BotSessionRegistry::Instance().WithSession(
+        bot->GetGUID().GetRawValue(),
+        [until](BotSession& s) { s.moving_out_until_ms = until; });
+  }
+
   // An act taking over the body from a chosen crowd-control cast still
   // walking in or casting: that option fails (the caller drops or cancels the
   // act state itself).
@@ -1561,6 +1587,19 @@ class LlmBrainWorldScript : public WorldScript {
     }
     const bool reactive =
         state->seq > 0 && HasNewCastOrAura(bot, state->last_reactive);
+    // Nearby hostile casts and spell areas, looked at most every
+    // kMinHazardGap in combat: a new one is due in the next snapshot.
+    const base::TimeTicks now = base::TimeTicks::Now();
+    if (!bot->IsInCombat()) {
+      state->known_hazards.clear();
+      state->new_hazard = false;
+    } else if (now >= state->next_hazard_scan) {
+      state->next_hazard_scan = now + SnapshotSchedule::kMinHazardGap;
+      std::vector<std::pair<uint64_t, uint32_t>> hazards =
+          CollectHostileHazards(bot);
+      state->new_hazard |= HasNewEntry(hazards, state->known_hazards);
+      state->known_hazards = std::move(hazards);
+    }
     return SnapshotSchedule::Flags{
         .in_combat = bot->IsInCombat(),
         .alive = bot->IsAlive(),
@@ -1568,6 +1607,7 @@ class LlmBrainWorldScript : public WorldScript {
         .attacker_count = static_cast<uint32_t>(bot->getAttackers().size()),
         .active_target_pending = pending || state->active_act.has_value(),
         .reactive_event = reactive,
+        .hazard_event = state->seq > 0 && state->new_hazard,
     };
   }
 
@@ -1683,6 +1723,7 @@ class LlmBrainWorldScript : public WorldScript {
     // The newest snapshot of a bot wins if the harness is behind.
     bridge_->SendLatest(name, std::move(bytes));
     state.last_reactive = CollectReactiveState(bot);
+    state.new_hazard = false;
   }
 
   // Samples both observed humans and tracked bots through the exact same
@@ -1926,12 +1967,19 @@ class LlmBrainWorldScript : public WorldScript {
     PendingWalk walk;
     // Active standing-order act (to / away / cast-time use).
     std::optional<ActiveAct> active_act;
+    // Whether the last SyncMovingOut saw it moving the bot out.
+    bool moving_out = false;
     // Last observed map/instance so map changes clear active acts & `back`.
     bool has_last_map = false;
     uint32_t last_map_id = 0;
     uint32_t last_instance_id = 0;
     // Casts and auras on bot/target/attackers at the last sent snapshot.
     ReactiveSnapshotState last_reactive;
+    // Nearby hostile casts and spell areas at the last look (in combat), when
+    // to look again, and whether one appeared that no snapshot showed yet.
+    std::vector<std::pair<uint64_t, uint32_t>> known_hazards;
+    base::TimeTicks next_hazard_scan;
+    bool new_hazard = false;
     // Players who recently chatted to/near this bot (for group invite options).
     std::deque<RecentChatter> recent_chatters;
     // Timestamps of recent outbound bot chat messages (for rate limiting).
