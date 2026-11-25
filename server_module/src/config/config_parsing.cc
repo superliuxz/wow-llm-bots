@@ -107,4 +107,11 @@ std::string AdjustNonCombatStrategies(const std::string& base_non_combat,
   return out;
 }
 
+GroupReflexLimits GroupReflexLimitsFor(bool in_group,
+                                       bool in_dungeon,
+                                       bool group_has_human) {
+  return {.block_flee = in_group && (in_dungeon || group_has_human),
+          .pet_defensive = in_group};
+}
+
 }  // namespace llm_brain

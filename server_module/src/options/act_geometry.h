@@ -20,6 +20,11 @@ inline constexpr float kDefaultAwayYd = 12.0f;
 inline constexpr float kDefaultKiteYd = 20.0f;
 inline constexpr float kDefaultBehindMarginYd = 2.5f;
 inline constexpr float kDefaultOutOfMarginYd = 2.5f;
+// A dodge prefers spots at least this far from mobs nobody has pulled (about
+// where a mob a level or two above the bot notices it).
+inline constexpr float kUnpulledClearYd = 18.0f;
+// ... but not at the price of more than this much extra walking.
+inline constexpr float kUnpulledMaxExtraWalkYd = 10.0f;
 
 struct AnchorGeometry {
   wlb::snapshot::Vec3 pos;
@@ -82,6 +87,19 @@ std::vector<wlb::snapshot::Vec3> CandidateSpotsForKite(
     const AnchorGeometry& anchor,
     float kite_dist_yd = kDefaultKiteYd,
     float bot_radius_yd = 0.0f);
+
+// Two tiers of dodge spots: those at least `clear_yd` from every point in
+// `unpulled` (mobs nobody has pulled) and at most `max_extra_walk_yd` farther
+// from `bot_pos` than the nearest spot come first, then the rest, each tier in
+// its original order. Nothing is dropped, so a bot boxed in by packs still has
+// every way out of a hazard, and a clear spot never costs a long walk through
+// it.
+std::vector<wlb::snapshot::Vec3> PreferSpotsClearOf(
+    std::vector<wlb::snapshot::Vec3> spots,
+    const wlb::snapshot::Vec3& bot_pos,
+    const std::vector<wlb::snapshot::Vec3>& unpulled,
+    float clear_yd = kUnpulledClearYd,
+    float max_extra_walk_yd = kUnpulledMaxExtraWalkYd);
 
 // Whether an anchor moved or turned enough since the last path calculation to
 // justify recomputing a relative-place destination.

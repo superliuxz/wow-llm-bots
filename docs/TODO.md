@@ -27,6 +27,11 @@ Guild Wars heroes):
 - **`act:` eval coverage:** No eval case asks for an `act:` (e.g. party `"sheep moon"`, a ping
   plus `"go there"`), and the eval only counts unasked `act:` lines (1 of 59 at T=0) without
   scoring them. Add asking cases, then score unasked acts as misses.
+- **Bot tank pulls for a non-tank human leader:** the module now offers it `(not pulled)` Attack
+  options, but the screen shows neither the bot's own role nor `(not pulled)` on placed options,
+  and RULES.md says party members never pull. Planned eval case
+  `party_tank_pulls_for_healer_leader`; showing both facts with several RULES rewordings still chose
+  `Keep` at T=0.
 - **Short-term per-player memory & richer personas:** Store the last N exchanges per player
   (source-tagged so player chat never injects trusted instructions) and add more identities.
 - **Single tick owner per bot:** Replace the string-blocklist between `mod-llm-brain` and

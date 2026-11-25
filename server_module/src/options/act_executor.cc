@@ -181,6 +181,29 @@ std::vector<Creature*> NearbyHiddenTriggers(Player* bot,
   return triggers;
 }
 
+// Where the mobs near `bot` that nobody has pulled stand: alive, visible,
+// aggressive and hostile to it, not in combat. A dodge prefers spots clear of
+// them (PreferSpotsClearOf).
+std::vector<pb::Vec3> NearbyUnpulledHostiles(Player* bot) {
+  constexpr float kRadiusYd = 40.0f;
+  std::vector<Unit*> units;
+  Acore::AnyUnitInObjectRangeCheck check(bot, kRadiusYd);
+  Acore::UnitListSearcher<Acore::AnyUnitInObjectRangeCheck> searcher(bot, units,
+                                                                     check);
+  Cell::VisitObjects(bot, searcher, kRadiusYd);
+  std::vector<pb::Vec3> out;
+  for (Unit* u : units) {
+    Creature* c = u->ToCreature();
+    if (c && c->IsAlive() && !c->IsInCombat() &&
+        c->HasReactState(REACT_AGGRESSIVE) && bot->IsHostileTo(c) &&
+        bot->CanSeeOrDetect(c) &&
+        !HiddenFromPlayers(c->IsTrigger(), c->GetDisplayId())) {
+      out.push_back(PosOf(c));
+    }
+  }
+  return out;
+}
+
 // Collects nearby game objects around `bot`.
 std::vector<GameObject*> NearbyObjects(Player* bot,
                                        float radius = kActSearchRadiusYd) {
@@ -907,6 +930,23 @@ bool SpotInsideHostileArea(Player* bot, const pb::Vec3& spot) {
   return SpotInsideHostileAreas(CollectHostileAreas(bot), spot);
 }
 
+// The group's tank as party frames show it: the main tank flag, the Dungeon
+// Finder role when one was picked, else the spec's (a group made by invite
+// has no roles).
+bool IsTankSlot(const Group::MemberSlot& slot, Player* member) {
+  if ((slot.flags & MEMBER_FLAG_MAINTANK) != 0) {
+    return true;
+  }
+  if (slot.roles != 0) {
+    return (slot.roles & lfg::PLAYER_ROLE_TANK) != 0;
+  }
+  return PlayerbotAI::IsTank(member);
+}
+
+// Which way out of a hazard keeps the group together: toward the tank, else
+// the group's leader, else the middle of the living members (all outside the
+// hazard). A tank itself steps straight out: walking to the group would bring
+// what it holds onto them.
 std::optional<pb::Vec3> PreferredEscapePos(Player* bot,
                                            const pb::Vec3& hazard_pos,
                                            float hazard_radius_yd) {
@@ -914,17 +954,19 @@ std::optional<pb::Vec3> PreferredEscapePos(Player* bot,
   if (!grp) {
     return std::nullopt;
   }
-  // Prefer moving toward the tank (if outside the hazard), else centroid of
-  // living group members who are outside the hazard radius.
   float sum_x = 0.0f;
   float sum_y = 0.0f;
   float sum_z = 0.0f;
   int count = 0;
+  std::optional<pb::Vec3> leader_pos;
   for (const Group::MemberSlot& slot : grp->GetMemberSlots()) {
+    Player* member = ObjectAccessor::FindPlayer(slot.guid);
     if (slot.guid == bot->GetGUID()) {
+      if (member && IsTankSlot(slot, member)) {
+        return std::nullopt;
+      }
       continue;
     }
-    Player* member = ObjectAccessor::FindPlayer(slot.guid);
     if (!member || !member->IsInWorld() || !member->IsAlive() ||
         member->GetMapId() != bot->GetMapId() ||
         bot->GetDistance(member) > 60.0f) {
@@ -935,14 +977,19 @@ std::optional<pb::Vec3> PreferredEscapePos(Player* bot,
         Dist2D(mpos, hazard_pos) < hazard_radius_yd + 1.0f) {
       continue;
     }
-    if ((slot.flags & MEMBER_FLAG_MAINTANK) != 0 ||
-        (slot.roles & lfg::PLAYER_ROLE_TANK) != 0) {
+    if (IsTankSlot(slot, member)) {
       return mpos;
+    }
+    if (slot.guid == grp->GetLeaderGUID()) {
+      leader_pos = mpos;
     }
     sum_x += mpos.x;
     sum_y += mpos.y;
     sum_z += mpos.z;
     ++count;
+  }
+  if (leader_pos) {
+    return leader_pos;
   }
   if (count > 0) {
     return pb::Vec3{sum_x / static_cast<float>(count),
@@ -1870,8 +1917,11 @@ ActStartResult StartAct(Player* bot,
       if (Dist2D(bot_pos, candidates.front()) <= kArrivalToleranceYd) {
         return {.done = true};
       }
-      std::optional<pb::Vec3> chosen =
-          MoveToFirstValidSpot(bot, candidates, nullptr);
+      std::optional<pb::Vec3> chosen = MoveToFirstValidSpot(
+          bot,
+          PreferSpotsClearOf(std::move(candidates), bot_pos,
+                             NearbyUnpulledHostiles(bot)),
+          nullptr);
       if (!chosen) {
         return {.error = "no path out of hazard"};
       }
@@ -1972,6 +2022,10 @@ ActStartResult StartAct(Player* bot,
           (act.verb == pb::Command_Act::TO && PlaceNeedsLos(act.place))
               ? &*anchor
               : nullptr;
+      if (act.verb == pb::Command_Act::AWAY) {
+        candidates = PreferSpotsClearOf(std::move(candidates), bot_pos,
+                                        NearbyUnpulledHostiles(bot));
+      }
       std::optional<pb::Vec3> chosen =
           MoveToFirstValidSpot(bot, candidates, los_anchor);
       if (!chosen) {
@@ -2581,8 +2635,11 @@ ActStepResult StepActiveAct(Player* bot,
         FinishDodgeAct(bot, *active);
         return {.done = true};
       }
-      std::optional<pb::Vec3> chosen =
-          MoveToFirstValidSpot(bot, candidates, nullptr);
+      std::optional<pb::Vec3> chosen = MoveToFirstValidSpot(
+          bot,
+          PreferSpotsClearOf(std::move(candidates), bot_pos,
+                             NearbyUnpulledHostiles(bot)),
+          nullptr);
       if (!chosen) {
         ClearActMovement(bot);
         return {.error = "no path to destination"};

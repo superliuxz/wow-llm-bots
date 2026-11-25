@@ -44,6 +44,22 @@ std::string AdjustNonCombatStrategies(const std::string& base_non_combat,
                                       bool in_dungeon,
                                       bool group_has_human);
 
+// Playerbots reflexes held back in group play (they body-pull):
+//  - `block_flee`: its `flee` step back from a mob that gets close runs a
+//    ranged bot into unpulled packs, so it is blocked in a group in a dungeon
+//    or with a human in it. Solo bots (and all-bot groups outdoors) keep it.
+//  - `pet_defensive`: a grouped bot's pet on aggressive is set to defensive,
+//    so it never runs off to attack a mob nobody pulled.
+struct GroupReflexLimits {
+  bool block_flee = false;
+  bool pet_defensive = false;
+
+  bool operator==(const GroupReflexLimits&) const = default;
+};
+GroupReflexLimits GroupReflexLimitsFor(bool in_group,
+                                       bool in_dungeon,
+                                       bool group_has_human);
+
 }  // namespace llm_brain
 
 #endif  // MOD_LLM_BRAIN_CONFIG_CONFIG_PARSING_H_

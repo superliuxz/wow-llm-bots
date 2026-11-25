@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <numbers>
 #include <optional>
 #include <vector>
@@ -198,6 +199,28 @@ std::vector<pb::Vec3> CandidateSpotsForKite(const pb::Vec3& bot_pos,
   std::vector<pb::Vec3> spots;
   AppendFan(&spots, anchor.pos, base, dist, kOffsets,
             sizeof(kOffsets) / sizeof(kOffsets[0]));
+  return spots;
+}
+
+std::vector<pb::Vec3> PreferSpotsClearOf(std::vector<pb::Vec3> spots,
+                                         const pb::Vec3& bot_pos,
+                                         const std::vector<pb::Vec3>& unpulled,
+                                         float clear_yd,
+                                         float max_extra_walk_yd) {
+  if (unpulled.empty() || spots.empty()) {
+    return spots;
+  }
+  float nearest_yd = std::numeric_limits<float>::max();
+  for (const pb::Vec3& spot : spots) {
+    nearest_yd = std::min(nearest_yd, Dist2D(bot_pos, spot));
+  }
+  std::stable_partition(spots.begin(), spots.end(), [&](const pb::Vec3& spot) {
+    return Dist2D(bot_pos, spot) <= nearest_yd + max_extra_walk_yd &&
+           std::none_of(unpulled.begin(), unpulled.end(),
+                        [&](const pb::Vec3& mob) {
+                          return Dist2D(spot, mob) < clear_yd;
+                        });
+  });
   return spots;
 }
 

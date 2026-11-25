@@ -695,12 +695,21 @@ class LlmBrainWorldScript : public WorldScript {
         bot->StopMoving();
         done = "you stop and wait here";
         break;
-      case LeaderCommand::kFollow:
+      case LeaderCommand::kFollow: {
         policy.stay = false;
         BotManager::SetGroupPolicy(bot, policy);
+        // A leader's move still on its way ("go there", "los") would hold
+        // the bot again when it arrives: following ends it.
+        BotState& state = bots_[index];
+        if (state.active_act && !state.active_act->for_option &&
+            state.active_act->command_id == 0) {
+          CancelActiveAct(bot, &*state.active_act);
+          state.active_act.reset();
+        }
         BotManager::ClearPingStay(bot);
         done = "you follow " + sender->GetName() + " again";
         break;
+      }
       case LeaderCommand::kAttackMyTarget: {
         Unit* target = sender->GetSelectedUnit();
         if (!target || !bot->IsValidAttackTarget(target)) {

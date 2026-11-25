@@ -854,6 +854,17 @@
     ]
   },
   {
+    "name": "party_tank_pulls_for_healer_leader",
+    "source": "built from party_follower_next_to_tank_in_dungeon (3b)",
+    "reason": "plan done",
+    "summary": "in an instance: party member (warrior, tank) 5 yd from leader Hele (priest, healer), who fights nothing; a boar and a Scorpid Worker nobody has pulled (live: hold_pulls off, so the tank sees them)",
+    "rule": "the tank pulls for a non-tank leader: starts with Attack (planned: the screen shows neither the bot's own role nor `not pulled` on placed options, and RULES.md says party members never pull; 3b rewordings with both facts on screen still chose Keep)",
+    "first_kinds": [
+      "attack"
+    ],
+    "planned": true
+  },
+  {
     "name": "roll_need_usable_upgrade",
     "source": "built (F2)",
     "reason": "loot roll: Buckskin Cape",

@@ -4,6 +4,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <numbers>
 #include <optional>
 #include <vector>
@@ -155,6 +157,64 @@ TEST(ActGeometryTest, OutOfSkipsWhenAlreadyOutsideOrBiasesTowardGroup) {
   ASSERT_FALSE(opposite.empty());
   EXPECT_GT(opposite[0].x, 20.0f);
   EXPECT_NEAR(opposite[0].y, 0.0f, 1e-3f);
+}
+
+TEST(ActGeometryTest, DodgePrefersSpotsClearOfUnpulledMobs) {
+  const AnchorGeometry hazard{
+      .pos = {0.0f, 0.0f, 0.0f}, .facing_rad = 0.0f, .radius_yd = 0.0f};
+  const pb::Vec3 bot{5.0f, 0.0f, 0.0f};
+  const std::vector<pb::Vec3> spots =
+      CandidateSpotsForOutOf(bot, hazard, 10.0f);
+  ASSERT_GE(spots.size(), 3u);
+  // An unpulled pack just past the straight-out spot (+X): the first choice
+  // is now a spot at least 18 yd from it; the pack-side spot moves to the
+  // back but is kept.
+  const pb::Vec3 pack{20.0f, 0.0f, 0.0f};
+  const std::vector<pb::Vec3> ordered = PreferSpotsClearOf(spots, bot, {pack});
+  ASSERT_EQ(ordered.size(), spots.size());
+  EXPECT_GE(Dist2D(ordered.front(), pack), kUnpulledClearYd);
+  EXPECT_LT(Dist2D(ordered.back(), pack), kUnpulledClearYd);
+  // The clear tier keeps the fan's order (closest to the ideal bearing first).
+  float nearest_yd = 1e9f;
+  for (const pb::Vec3& s : spots) {
+    nearest_yd = std::min(nearest_yd, Dist2D(bot, s));
+  }
+  std::vector<pb::Vec3> clear;
+  for (const pb::Vec3& s : spots) {
+    if (Dist2D(s, pack) >= kUnpulledClearYd &&
+        Dist2D(bot, s) <= nearest_yd + kUnpulledMaxExtraWalkYd) {
+      clear.push_back(s);
+      // Never a long walk back through the hazard for a clear spot.
+      EXPECT_LE(Dist2D(bot, s), nearest_yd + kUnpulledMaxExtraWalkYd);
+    }
+  }
+  ASSERT_FALSE(clear.empty());
+  for (size_t i = 0; i < clear.size(); ++i) {
+    EXPECT_EQ(ordered[i].x, clear[i].x);
+    EXPECT_EQ(ordered[i].y, clear[i].y);
+  }
+
+  // No unpulled mobs: unchanged.
+  const std::vector<pb::Vec3> same = PreferSpotsClearOf(spots, bot, {});
+  ASSERT_EQ(same.size(), spots.size());
+  for (size_t i = 0; i < spots.size(); ++i) {
+    EXPECT_EQ(same[i].x, spots[i].x);
+    EXPECT_EQ(same[i].y, spots[i].y);
+  }
+
+  // Counter-test: boxed in by packs on every side, every way out of the
+  // lethal hazard is still there, in the original order.
+  const std::vector<pb::Vec3> boxed = PreferSpotsClearOf(spots, bot,
+                                                         {{15.0f, 0.0f, 0.0f},
+                                                          {-15.0f, 0.0f, 0.0f},
+                                                          {0.0f, 15.0f, 0.0f},
+                                                          {0.0f, -15.0f, 0.0f}},
+                                                         /*clear_yd=*/40.0f);
+  ASSERT_EQ(boxed.size(), spots.size());
+  for (size_t i = 0; i < spots.size(); ++i) {
+    EXPECT_EQ(boxed[i].x, spots[i].x);
+    EXPECT_EQ(boxed[i].y, spots[i].y);
+  }
 }
 
 TEST(ActGeometryTest, OutOfIncludesBotCombatReach) {

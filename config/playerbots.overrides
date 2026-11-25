@@ -38,3 +38,6 @@ Playerbots.RandomBotTalk = 0
 # every whisper ("who", "leave", "invite me") also ran as a command beside the brain's reply.
 # Commands still work with the prefix ("!pb stats").
 Playerbots.CommandPrefix = "!pb "
+# Followers keep a little room (playerbots' 1.5 yd stacks them on the leader's heels, where every
+# cleave and every step back drags them into the next pack).
+Playerbots.FollowDistance = 4.0

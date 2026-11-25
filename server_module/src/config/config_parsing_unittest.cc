@@ -104,5 +104,27 @@ TEST(ConfigParsingTest, AdjustNonCombatStrategiesRespectsGroupAndDungeon) {
             boss);
 }
 
+TEST(ConfigParsingTest, GroupReflexLimitsHoldBackBodyPulls) {
+  using L = GroupReflexLimits;
+  // Solo bots keep every reflex, even in a dungeon (counter-test).
+  EXPECT_EQ(GroupReflexLimitsFor(/*in_group=*/false, /*in_dungeon=*/false,
+                                 /*group_has_human=*/false),
+            L{});
+  EXPECT_EQ(GroupReflexLimitsFor(/*in_group=*/false, /*in_dungeon=*/true,
+                                 /*group_has_human=*/false),
+            L{});
+  // An all-bot group outdoors keeps `flee`; its pets still stay defensive.
+  EXPECT_EQ(GroupReflexLimitsFor(/*in_group=*/true, /*in_dungeon=*/false,
+                                 /*group_has_human=*/false),
+            (L{.block_flee = false, .pet_defensive = true}));
+  // In a dungeon or with a human: no `flee`.
+  EXPECT_EQ(GroupReflexLimitsFor(/*in_group=*/true, /*in_dungeon=*/true,
+                                 /*group_has_human=*/false),
+            (L{.block_flee = true, .pet_defensive = true}));
+  EXPECT_EQ(GroupReflexLimitsFor(/*in_group=*/true, /*in_dungeon=*/false,
+                                 /*group_has_human=*/true),
+            (L{.block_flee = true, .pet_defensive = true}));
+}
+
 }  // namespace
 }  // namespace llm_brain

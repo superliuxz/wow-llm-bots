@@ -22,6 +22,7 @@
 #include "Cell.h"
 #include "CellImpl.h"  // IWYU pragma: keep
 #include "CharacterCache.h"
+#include "CharmInfo.h"
 #include "DBCStructure.h"
 #include "Engine.h"
 #include "Event.h"
@@ -40,6 +41,7 @@
 #include "ObjectGuid.h"
 #include "ObjectMgr.h"
 #include "Opcodes.h"
+#include "Pet.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
 #include "Playerbots.h"
@@ -50,6 +52,7 @@
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "Timer.h"
+#include "Unit.h"
 #include "UpdateFields.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
@@ -487,6 +490,7 @@ class LlmBrainPacketScript final : public ServerScript {
 // Enforces clean ownership boundaries between the LLM brain and Playerbots'
 // reflex layer on each Engine:
 //  - Blocks `"accept invitation"` so the brain decides group invites.
+//  - Blocks `"flee"` in a dungeon or a human's group (GroupReflexLimits).
 //  - Blocks `"equip upgrades packet action"` / `"equip upgrade"` so Playerbots'
 //    auto-equipper never fights the brain's `Equip` choices.
 //  - Gates `"apply stone"` / `"apply oil"` on actual AzerothCore temp-enchant
@@ -534,6 +538,17 @@ class BrainPolicyListener final : public ActionExecutionListener {
                 lm.lastdelayTime) {
           return false;
         }
+      }
+    }
+    // No reflex step back into unpulled packs in a dungeon or a human's
+    // group (GroupReflexLimits); solo bots keep it.
+    if (name == "flee" && bot_) {
+      Group* group = bot_->GetGroup();
+      if (GroupReflexLimitsFor(group != nullptr,
+                               bot_->GetMap() && bot_->GetMap()->IsDungeon(),
+                               GroupHasHuman(group))
+              .block_flee) {
+        return false;
       }
     }
     // Gear is the brain's choice even while the harness is down: playerbots'
@@ -930,9 +945,24 @@ void BotManager::EnsureStrategies(Player* player) {
       in_group && group->GetLeaderGUID() == player->GetGUID();
   const bool in_dungeon =
       player->GetMap() != nullptr && player->GetMap()->IsDungeon();
+  const bool group_has_human = GroupHasHuman(group);
   std::string non_combat =
       AdjustNonCombatStrategies(strategies_.non_combat, in_group, is_leader,
-                                in_dungeon, is_leader && GroupHasHuman(group));
+                                in_dungeon, is_leader && group_has_human);
+  // A grouped bot's pet never runs off after mobs nobody pulled
+  // (GroupReflexLimits): aggressive becomes defensive, as a player sets it.
+  if (Pet* pet = player->GetPet();
+      pet &&
+      GroupReflexLimitsFor(in_group, in_dungeon, group_has_human)
+          .pet_defensive &&
+      pet->HasReactState(REACT_AGGRESSIVE)) {
+    pet->SetReactState(REACT_DEFENSIVE);
+    if (CharmInfo* charm = pet->GetCharmInfo()) {
+      charm->SetPlayerReactState(REACT_DEFENSIVE);
+    }
+    LOG_INFO("module", "mod-llm-brain: {}: grouped, pet set to defensive",
+             player->GetName());
+  }
   {
     PolicyGlobalState& st = PolicyState();
     base::AutoLock lock(st.lock);
