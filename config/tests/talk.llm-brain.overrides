@@ -1,6 +1,6 @@
 # Talk test: one fresh level-1 Troll Priest at the Valley of Trials start, 6 yd in front of
 # Kaltunk (a quest giver), standing still (no grind, no new rpg). The scripted brain
-# (tools/snapshot/fake_harness.py --choose) picks "Talk to Kaltunk". Needs a test build
+# (`tools/wlb snap fake --choose`) picks "Talk to Kaltunk". Needs a test build
 # (tools/wlb build server --test).
 LlmBrain.Bots = "Loada"
 LlmBrain.TestFixtures = "Loada=priest-l1-valley.pdump"

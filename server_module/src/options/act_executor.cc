@@ -1294,6 +1294,21 @@ ActStartResult StartAct(Player* bot,
   if (act.verb != pb::Command_Act::WAKE && !bot->IsAlive()) {
     return {.error = "you are dead"};
   }
+  // Movement can't start on a flight path or while the bot's body isn't its
+  // own (server H2): a queued spline would fight the taxi or the fear.
+  const bool moves =
+      act.verb == pb::Command_Act::TO || act.verb == pb::Command_Act::AWAY ||
+      act.verb == pb::Command_Act::KITE ||
+      act.verb == pb::Command_Act::OUT_OF ||
+      act.verb == pb::Command_Act::BACK || act.verb == pb::Command_Act::AVOID;
+  if (moves && bot->IsInFlight()) {
+    return {.error = "cannot move while on a flight path"};
+  }
+  if (moves && bot->HasUnitState(UNIT_STATE_STUNNED | UNIT_STATE_CONFUSED |
+                                 UNIT_STATE_FLEEING | UNIT_STATE_CHARMED |
+                                 UNIT_STATE_POSSESSED)) {
+    return {.error = "cannot move right now (stunned, feared or controlled)"};
+  }
 
   switch (act.verb) {
     case pb::Command_Act::VERB_UNSPECIFIED:

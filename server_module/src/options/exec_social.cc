@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "AiFactory.h"
+#include "DBCEnums.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
 #include "Define.h"
@@ -214,12 +215,14 @@ const char* ArmorTypeName(uint32_t subclass) {
 
 // The heaviest body armor the bot can wear (its class's main armor type).
 uint32_t BestArmorSubclass(Player* bot) {
-  for (const uint32_t sub :
-       {ITEM_SUBCLASS_ARMOR_PLATE, ITEM_SUBCLASS_ARMOR_MAIL,
-        ITEM_SUBCLASS_ARMOR_LEATHER}) {
-    if (bot->GetItemSubclassMask(ITEM_CLASS_ARMOR) & (1u << sub)) {
-      return sub;
-    }
+  if (bot->HasSkill(SKILL_PLATE_MAIL)) {
+    return ITEM_SUBCLASS_ARMOR_PLATE;
+  }
+  if (bot->HasSkill(SKILL_MAIL)) {
+    return ITEM_SUBCLASS_ARMOR_MAIL;
+  }
+  if (bot->HasSkill(SKILL_LEATHER)) {
+    return ITEM_SUBCLASS_ARMOR_LEATHER;
   }
   return ITEM_SUBCLASS_ARMOR_CLOTH;
 }
@@ -270,7 +273,7 @@ std::string PrimaryStats(const ItemTemplate* proto) {
 
 std::string RollItemFacts(Player* bot, const ItemTemplate* proto) {
   std::string out = "ilvl " + std::to_string(proto->ItemLevel);
-  if (proto->Bonding == BIND_WHEN_EQUIPED) {
+  if (proto->Bonding == BIND_WHEN_EQUIPPED) {
     out += ", BoE";
   }
   const std::vector<uint8_t> slots = SlotsFor(bot, proto->InventoryType);

@@ -35,6 +35,7 @@ enum WakeKind : uint32_t {
   kWakeHealth = 1u << 6,  // A `hp<N` watch: my own health.
   kWakeMana = 1u << 7,    // A `mana<N` watch.
   kWakeEnemyPlayer = 1u << 8,
+  kWakeParty = 1u << 9,  // The party: fighting, a member died, healer oom.
 };
 
 struct WakeTrigger {
@@ -127,6 +128,13 @@ class TriggerEvaluator {
   bool was_alive_ = true;
   bool was_in_combat_ = false;
   ControlFlags prev_control_;
+  // The party as last seen (T8): who was dead, whether anyone in range had
+  // aggro, and which healers were under 30% mana.
+  std::flat_set<std::string> prev_dead_members_;
+  bool prev_party_aggro_ = false;
+  std::flat_set<std::string> prev_low_mana_healers_;
+  // Online members (T11): one who leaves or logs out wakes the bot.
+  std::flat_set<std::string> prev_online_members_;
   std::flat_set<std::string> prev_attackers_;
   // Last snapshot's watch inputs, to seed latches in SetPlanContext().
   WatchInputs last_;

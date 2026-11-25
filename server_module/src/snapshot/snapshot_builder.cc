@@ -424,7 +424,17 @@ void FillParty(Player* bot, NearbyBuilder* nearby, pb::Extensions* ext) {
     party.leader = leader;
   }
   party.loot_method = LootMethodName(group->GetLootMethod());
+  // In a raid, members stay listed in `party` (with their subgroups) for the
+  // screen; `raid` marks the group as one (so `/raid` is the group channel,
+  // T13) and names its main tanks and assists.
+  pb::Raid* raid = group->isRaidGroup() ? &ext->raid.emplace() : nullptr;
   for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+    if (raid && (slot.flags & MEMBER_FLAG_MAINTANK) != 0) {
+      raid->main_tanks.push_back(slot.name);
+    }
+    if (raid && (slot.flags & MEMBER_FLAG_MAINASSIST) != 0) {
+      raid->main_assists.push_back(slot.name);
+    }
     if (slot.guid == bot->GetGUID()) {
       continue;
     }

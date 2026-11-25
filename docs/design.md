@@ -62,11 +62,30 @@ Four latency tiers separate reflexes from deliberation:
   pruned from `snapshot/snapshot.h` to keep the wire schema lean.
 - **Combat & soak tracing:** `BehaviorTraceWriter` records compact 5 Hz samples plus combat/soak
   events (`spell_cast`, `damage_dealt`, `damage_taken`, `heal_done`, `mob_kill`, `died`,
-  `xp_gain`, `quest_turnin`, `combat_start`, `combat_end`, `act_sent`) for `wlb trace` and
+  `xp_gain`, `quest_turnin`, `combat_start`, `combat_end`, `act_sent`, `option_chosen`) for `wlb trace` and
   `bench_bosses.py`.
 - **Parked research (`experimental/`):** The automated human-likeness scorer stack,
   `notes_hill_climb`, and the self-improving loop design doc live in `experimental/` (excluded
   from `wlb check` and CI) so core development stays focused on enjoyable play with a human.
+
+## Decided Product Rules
+
+- **Realm:** PvE, Horde only (Alliance character creation disabled); bots choose Horde races
+  freely. New bots start at their race's starting area like a new character.
+- **No cheats, human ways out:** release and corpse-run or resurrect at the spirit healer,
+  hearthstone, the client's "Character Stuck", or asking for help. Playerbots' random-bot refresh,
+  free revives and teleports stay off.
+- **Bad behavior is chat-only:** banter and trolling in General is fine (no slurs or hateful
+  content); never in gameplay: no ninja looting, rage-quitting, abandoning groups or sabotage.
+- **Chat like a human:** as often as a human would (most bots quiet: "hi/ty/gg/brb"), lowercase,
+  abbreviations and typos by personality, mostly between fights, typing delay by length.
+- **Calls are followed by choice:** each bot decides whether to follow a call (who called, trust,
+  its own perception, personality, skill, herd effect); bots can follow bad calls.
+- **Knowledge by experience:** bots learn mechanics by dying to them, being told, or looking them
+  up; ignorance that matters is enforced in code (options and reflexes), not by asking the model
+  to forget.
+- **Economy:** 100g starting gold for every bot and the user; the auction house and professions
+  are used like humans do, by personality.
 
 ## Further Specs
 
@@ -76,3 +95,8 @@ Four latency tiers separate reflexes from deliberation:
 - Grammar IDL: [docs/specs/grammar-idl.md](specs/grammar-idl.md)
 - Harness runtime: [docs/specs/harness.md](specs/harness.md)
 - Current measured numbers: [docs/results.md](results.md)
+
+## Legal note
+
+A private server for yourself and friends is generally tolerated; public or monetized servers get
+shut down. Keep it private.

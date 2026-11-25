@@ -154,7 +154,7 @@ TEST(OrdersTest, RejectsWhatIsNotTheGrammar) {
 }
 
 // docs/specs/trigger-{conditions,actions}.tsv: every `fits` row must parse
-// (the grammar's regression set; replaces tools/check-trigger-grammar.py).
+// (the grammar's regression set; replaces a retired Python checker).
 std::vector<std::string> FitsCells(const std::string& file,
                                    std::string_view cell,
                                    const std::vector<std::string>& verdicts) {

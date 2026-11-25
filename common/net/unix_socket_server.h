@@ -12,6 +12,7 @@
 #include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_pump_epoll.h"
+#include "base/time/time.h"
 #include "net/framed_connection.h"
 
 namespace net {
@@ -19,8 +20,10 @@ namespace net {
 // Unix socket server for length-prefixed frames (net/frame_codec.h), bound
 // owner-only (0600, same-UID SO_PEERCRED) with at most one client: a second
 // connection while a client is live is refused so a stray tool or second
-// harness cannot kick the live harness out. Create, use and destroy on one IO
-// thread (a base::Thread with MessagePumpType::IO).
+// harness cannot kick the live harness out. A hung client (its output backed
+// up, nothing read or received for `hung_after`) is replaced by the next one,
+// so a wedged harness can't lock out every restart. Create, use and destroy on
+// one IO thread (a base::Thread with MessagePumpType::IO).
 class UnixSocketServer : public base::MessagePumpForIO::FdWatcher {
  public:
   struct Callbacks {
@@ -37,11 +40,13 @@ class UnixSocketServer : public base::MessagePumpForIO::FdWatcher {
     uint64_t frames_dropped = 0;  // Not connected, or output backed up.
     uint64_t connections = 0;
     uint64_t connections_rejected = 0;  // Busy or unauthorized peer UID.
+    uint64_t connections_replaced = 0;  // A hung client made way.
   };
 
   UnixSocketServer(std::string path,
                    Callbacks callbacks,
-                   size_t max_output_bytes = 4 << 20);
+                   size_t max_output_bytes = 4 << 20,
+                   base::TimeDelta hung_after = base::Seconds(15));
   UnixSocketServer(const UnixSocketServer&) = delete;
   UnixSocketServer& operator=(const UnixSocketServer&) = delete;
   ~UnixSocketServer() override;  // Closes everything, removes the socket file.
@@ -67,10 +72,16 @@ class UnixSocketServer : public base::MessagePumpForIO::FdWatcher {
   void OnClientFrame(std::string frame);
   void OnClientClosed();
   void OnClientDrained();
+  // Whether the client stopped reading (output backed up) and has shown no
+  // sign of life for `hung_after_`.
+  bool ClientHung() const;
 
   const std::string path_;
   Callbacks callbacks_;
   const size_t max_output_bytes_;
+  const base::TimeDelta hung_after_;
+  // Last time the client read our output, sent a frame, or connected.
+  base::TimeTicks client_alive_at_;
   int listen_fd_ = -1;
   base::MessagePumpForIO::FdWatchController listen_controller_;
   std::unique_ptr<FramedConnection> client_;

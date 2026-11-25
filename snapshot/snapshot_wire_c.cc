@@ -1,7 +1,7 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 //
 // Minimal C ABI around wlb::snapshot BEVE <-> JSON for Python dev/e2e tools
-// (tools/snapshot/fake_harness.py, tools/bench/capture_snapshots.py) loaded via
+// (tools/wlblib/wire.py: `wlb snap fake` / `wlb snap capture`) loaded via
 // Python stdlib ctypes — no protobuf runtime or virtualenv needed.
 
 #include <cstdlib>

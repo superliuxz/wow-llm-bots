@@ -4,11 +4,14 @@
 
 #include <algorithm>  // IWYU pragma: keep (LLM_BRAIN_TEST_HOOKS)
 #include <atomic>
+#include <cstdint>
 #include <list>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "ByteBuffer.h"
 #include "Cell.h"
 #include "Channel.h"
 #include "Chat.h"
@@ -23,15 +26,19 @@
 #include "Group.h"
 #include "Language.h"
 #include "ObjectAccessor.h"
+#include "ObjectGuid.h"
 #include "ObjectMgr.h"
+#include "Opcodes.h"
 #include "Player.h"
 #include "PlayerScript.h"
 #include "PlayerbotAIConfig.h"
 #include "Playerbots.h"
+#include "ServerScript.h"
 #include "SharedDefines.h"
 #include "World.h"
 #include "WorldConfig.h"
 #include "WorldPacket.h"
+#include "WorldSession.h"
 #include "base/memory/raw_ptr.h"
 #include "chat/chat_inbox.h"
 #include "chat/chat_text.h"
@@ -153,11 +160,15 @@ class LlmBrainChatScript : public PlayerScript {
       return true;
     }
     if (type != CHAT_MSG_PARTY && type != CHAT_MSG_PARTY_LEADER &&
-        type != CHAT_MSG_RAID && type != CHAT_MSG_RAID_LEADER) {
+        type != CHAT_MSG_RAID && type != CHAT_MSG_RAID_LEADER &&
+        type != CHAT_MSG_RAID_WARNING) {
       return true;
     }
+    const bool is_warning = type == CHAT_MSG_RAID_WARNING;  // T10.
     const bool is_raid =
         (type == CHAT_MSG_RAID || type == CHAT_MSG_RAID_LEADER);
+    // In a raid, `/p` only reaches the sender's subgroup (T13).
+    const bool subgroup_only = !is_raid && !is_warning && group->isRaidGroup();
     const bool sender_is_human = IsHumanPlayer(player);
     for (const std::string& bot_name : inbox_->Bots()) {
       if (bot_name == player->GetName()) {
@@ -167,15 +178,19 @@ class LlmBrainChatScript : public PlayerScript {
       if (!bot || !bot->IsInWorld() || bot->GetGroup() != group) {
         continue;
       }
+      if (subgroup_only && bot->GetSubGroup() != player->GetSubGroup()) {
+        continue;
+      }
       pb::ChatEvent chat;
-      chat.channel = is_raid ? pb::RAID : pb::PARTY;
+      chat.channel =
+          is_warning ? pb::RAID_WARNING : (is_raid ? pb::RAID : pb::PARTY);
       chat.from = player->GetName();
       chat.text = msg;
       // Only human party/raid messages wake bots directly; bot-to-bot party
       // lines remain visible in the chat log without triggering reply loops.
       // "ok" / "lol" asks nothing of anyone: heard, not woken for (RH-H4).
-      chat.at_me = sender_is_human && !IsTrivialChat(msg) &&
-                   (!is_raid || MentionsName(msg, bot_name));
+      chat.at_me = is_warning || (sender_is_human && !IsTrivialChat(msg) &&
+                                  (!is_raid || MentionsName(msg, bot_name)));
       inbox_->Add(bot_name, std::move(chat));
     }
     return true;
@@ -318,6 +333,102 @@ class LlmBrainChatScript : public PlayerScript {
   const base::raw_ptr<std::atomic<BehaviorTraceWriter*>> human_trace_;
 };
 
+// Creature talk a bot's client receives (boss emotes, monster yells and
+// says, T10): AzerothCore sends it as SMSG_MESSAGECHAT with no player chat
+// hook, so it is read off the bot's outgoing packets. Runs on the map thread
+// that sends it, so it only hands lines to the thread-safe ChatInbox.
+class LlmBrainMonsterChatScript final : public ServerScript {
+ public:
+  explicit LlmBrainMonsterChatScript(ChatInbox* inbox)
+      : ServerScript("LlmBrainMonsterChatScript", {SERVERHOOK_ON_PACKET_SENT}),
+        inbox_(inbox) {}
+
+  void OnPacketSent(WorldSession* session, WorldPacket const& packet) override {
+    if (!session || packet.GetOpcode() != SMSG_MESSAGECHAT) {
+      return;
+    }
+    Player* bot = session->GetPlayer();
+    if (!bot || !inbox_->Contains(bot->GetName())) {
+      return;
+    }
+    std::optional<pb::ChatEvent> chat = ParseMonsterChat(packet);
+    if (chat) {
+      chat->at_me = chat->channel == pb::BOSS_EMOTE ||
+                    chat->channel == pb::MONSTER_WHISPER ||
+                    MentionsName(chat->text, bot->GetName());
+      inbox_->Add(bot->GetName(), std::move(*chat));
+    }
+  }
+
+ private:
+  // The ChatHandler::BuildChatPacket layout for creature senders.
+  static std::optional<pb::ChatEvent> ParseMonsterChat(
+      WorldPacket const& packet) {
+    if (packet.size() < 1 + 4 + 8 + 4 + 4) {
+      return std::nullopt;
+    }
+    ByteBuffer in(packet);
+    in.rpos(0);
+    uint8_t type = 0;
+    int32_t language = 0;
+    ObjectGuid sender;
+    uint32_t flags = 0;
+    in >> type >> language >> sender >> flags;
+    pb::ChatChannel channel = pb::CHAT_CHANNEL_UNSPECIFIED;
+    switch (type) {
+      case CHAT_MSG_MONSTER_SAY:
+        channel = pb::MONSTER_SAY;
+        break;
+      case CHAT_MSG_MONSTER_YELL:
+        channel = pb::MONSTER_YELL;
+        break;
+      case CHAT_MSG_MONSTER_EMOTE:
+        channel = pb::MONSTER_EMOTE;
+        break;
+      case CHAT_MSG_MONSTER_WHISPER:
+      case CHAT_MSG_RAID_BOSS_WHISPER:
+        channel = pb::MONSTER_WHISPER;
+        break;
+      case CHAT_MSG_RAID_BOSS_EMOTE:
+        channel = pb::BOSS_EMOTE;
+        break;
+      default:
+        return std::nullopt;
+    }
+    if (sender.IsPlayer()) {
+      return std::nullopt;
+    }
+    try {
+      uint32_t name_len = 0;
+      in >> name_len;
+      std::string name;
+      in >> name;
+      ObjectGuid receiver;
+      in >> receiver;
+      if (receiver && !receiver.IsPlayer() && !receiver.IsPet()) {
+        uint32_t receiver_len = 0;
+        std::string receiver_name;
+        in >> receiver_len >> receiver_name;
+      }
+      uint32_t text_len = 0;
+      std::string text;
+      in >> text_len >> text;
+      if (text.empty()) {
+        return std::nullopt;
+      }
+      pb::ChatEvent chat;
+      chat.channel = channel;
+      chat.from = std::move(name);
+      chat.text = std::move(text);
+      return chat;
+    } catch (const ByteBufferException&) {
+      return std::nullopt;
+    }
+  }
+
+  const base::raw_ptr<ChatInbox> inbox_;
+};
+
 class LlmBrainCommandScript : public CommandScript {
  public:
   LlmBrainCommandScript() : CommandScript("LlmBrainCommandScript") {}
@@ -363,6 +474,7 @@ class LlmBrainCommandScript : public CommandScript {
 void AddLlmBrainChatScripts(ChatInbox* inbox,
                             std::atomic<BehaviorTraceWriter*>* human_trace) {
   new LlmBrainChatScript(inbox, human_trace);
+  new LlmBrainMonsterChatScript(inbox);
   new LlmBrainCommandScript();
 }
 

@@ -1,6 +1,6 @@
 # Whisper test: two fresh level-1 Troll Priests at the Valley of Trials start (reset from the
 # fixture on every server start), standing still (no grind, no new rpg). The scripted brain
-# (tools/snapshot/fake_harness.py --whisper) makes one whisper the other and the other answer,
+# (`tools/wlb snap fake --whisper`) makes one whisper the other and the other answer,
 # through the module's Say command; each must hear the other through the whisper hook. Needs a
 # test build (tools/wlb build server --test).
 LlmBrain.Bots = "Loada,Telda"

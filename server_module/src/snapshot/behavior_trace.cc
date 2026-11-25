@@ -118,6 +118,7 @@ TraceSample TraceSampleFromSnapshot(const pb::Snapshot& snapshot,
   }
   out.level = snapshot.base.self.unit.level.value_or(0);
   out.xp = snapshot.base.self.xp;
+  out.xp_max = snapshot.base.self.xp_next;
   if (snapshot.base.self.health_max > 0) {
     out.hp_pct = 100.0f * static_cast<float>(snapshot.base.self.health) /
                  static_cast<float>(snapshot.base.self.health_max);
@@ -185,6 +186,8 @@ std::string FormatTraceSample(const TraceSample& s) {
        base::StringPrintf("%u", s.level),
        ",\"xp\":",
        base::StringPrintf("%u", s.xp),
+       ",\"xp_max\":",
+       base::StringPrintf("%u", s.xp_max),
        ",\"hp_pct\":",
        base::StringPrintf("%.1f", s.hp_pct),
        ",\"mana_pct\":",

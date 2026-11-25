@@ -239,6 +239,26 @@ std::vector<uint8_t> TakeableLootSlots(Player* bot, Creature* creature) {
   return slots;
 }
 
+// A party member nearby is fighting (server M4): resting would hold this
+// bot's reflexes (heals) while the tank pulls.
+bool PartyFightingNearby(Player* bot) {
+  Group* group = bot->GetGroup();
+  if (!group) {
+    return false;
+  }
+  constexpr float kNearbyYd = 40.0f;
+  for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
+       itr = itr->next()) {
+    Player* m = itr->GetSource();
+    if (m && m != bot && m->IsInWorld() && m->IsAlive() &&
+        m->GetMapId() == bot->GetMapId() && m->IsInCombat() &&
+        bot->GetDistance(m) <= kNearbyYd) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
 bool HasFoodOrDrinkAura(Player* bot) {
@@ -269,7 +289,8 @@ void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink) {
 
 void ContinueRest(Player* bot) {
   PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
-  if (!ai || bot->IsNonMeleeSpellCast(false) || bot->IsInCombat()) {
+  if (!ai || bot->IsNonMeleeSpellCast(false) || bot->IsInCombat() ||
+      PartyFightingNearby(bot)) {
     return;
   }
   TryEatAndDrink(bot, ai);
@@ -282,6 +303,16 @@ void ContinueRest(Player* bot) {
 bool IsRestInProgress(Player* bot, bool* had_food_drink_aura) {
   if (!bot->IsAlive() || bot->IsInCombat() || bot->IsMounted() ||
       bot->IsInWater()) {
+    return false;
+  }
+  if (PartyFightingNearby(bot)) {
+    // The rest ends and playerbots' reflexes run again at once.
+    if (bot->getStandState() == UNIT_STAND_STATE_SIT) {
+      bot->SetStandState(UNIT_STAND_STATE_STAND);
+    }
+    if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot)) {
+      ai->SetNextCheckDelay(0);
+    }
     return false;
   }
   const bool full_hp = bot->IsFullHealth();
@@ -913,6 +944,9 @@ ActionOutcome ExecuteRestAction(Player* bot) {
   }
   if (bot->IsInCombat()) {
     return {.error = "you are in combat"};
+  }
+  if (PartyFightingNearby(bot)) {
+    return {.error = "your party is fighting"};
   }
   if (bot->IsMounted()) {
     return {.error = "you are mounted"};

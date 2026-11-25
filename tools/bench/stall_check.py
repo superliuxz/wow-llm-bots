@@ -19,32 +19,30 @@ if str(ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(ROOT / "tools"))
 from wlblib import trace as trace_lib  # noqa: E402
 
-# Exact event names emitted by `server_module` (`docs/specs/trace-events.md`).
+# Events the module's trace writer really emits (server_module/src/snapshot/
+# behavior_trace.h) that mean the bot is getting somewhere. `spell_cast` is not
+# one: a bot stuck in a corner can buff forever. `option_chosen` covers hub work
+# (quests, vendors, trainers, loot), except resting.
 PROGRESS_EVENTS = frozenset({
     "combat_start",
     "combat_end",
-    "spell_cast",
     "damage_dealt",
     "heal_done",
     "mob_kill",
     "xp_gain",
-    "level_up",
-    "quest_accept",
     "quest_turnin",
-    "quest_reward",
-    "loot",
-    "item_equip",
-    "item_use",
-    "item_craft",
-    "vendor_repair",
-    "spell_learn",
-    "talent_learn",
-    "skill_up",
-    "go_interact",
-    "zone_change",
-    "area_change",
-    "map_change",
+    "option_chosen",
 })
+# `option_chosen` details that are not progress on their own.
+IDLE_OPTION_KINDS = frozenset({"rest"})
+
+
+def is_progress_event(rec: dict[str, Any]) -> bool:
+    ev = str(rec.get("event", ""))
+    if ev not in PROGRESS_EVENTS:
+        return False
+    return not (ev == "option_chosen" and str(rec.get("detail", "")) in IDLE_OPTION_KINDS)
+
 
 LOGOUT_GAP_MS = 60_000
 
@@ -85,8 +83,7 @@ def check_bot_records(
         kind = rec.get("kind")
 
         if kind == "event":
-            ev = str(rec.get("event", ""))
-            if ev in PROGRESS_EVENTS:
+            if is_progress_event(rec):
                 # If a logout gap preceded this event, close at the last live
                 # sample before the gap so offline time is never counted.
                 if last_alive_t_ms is not None and (t_ms - last_alive_t_ms) > LOGOUT_GAP_MS:

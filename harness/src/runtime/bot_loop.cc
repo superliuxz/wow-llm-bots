@@ -1470,6 +1470,13 @@ void BotLoop::OnReply(const std::string& bot,
     } else if (!plan) {
       Log(base::StringPrintf("harness: %s invalid plan (%.0f ms)", bot.c_str(),
                              decision.result.round_trip_ms));
+      // The streamed first line already started steps: an invalid plan keeps
+      // none of them (harness #12).
+      if (state.early_steps_dispatched) {
+        state.early_steps_dispatched = false;
+        state.runner.Stop();
+        SendStopMoving(bot);
+      }
       state.look_deadline = now + base::Seconds(10);
       Requeue(&state, std::move(asked_reasons), std::move(asked_events),
               std::move(asked_chats), std::move(asked_outcome));
@@ -1566,8 +1573,9 @@ void BotLoop::OnReply(const std::string& bot,
         const bool in_party =
             state.latest_snapshot->ext.party &&
             !state.latest_snapshot->ext.party->members.empty();
-        const bool in_raid = state.latest_snapshot->ext.raid &&
-                             !state.latest_snapshot->ext.raid->members.empty();
+        // The module sets `ext.raid` for raid groups (members stay in
+        // `ext.party`, T13).
+        const bool in_raid = state.latest_snapshot->ext.raid.has_value();
         if (!plan->party.empty() && (in_party || in_raid) &&
             !party_reply_muted) {
           SendSay(bot, in_raid ? pb::RAID : pb::PARTY, "", plan->party);

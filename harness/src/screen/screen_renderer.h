@@ -13,7 +13,7 @@
 // module sends a real options list, the options are derived from the entries:
 // attack, talk, loot, gather, use, plus a few that are always there.
 //
-// Ported from the Python prototype tools/bench/prompt_render.py, and tested
+// Ported from a retired Python prototype (prompt_render.py), and tested
 // against its output on real snapshots (testdata/screens). Not rendered yet,
 // because the module does not fill them yet: auras, services, group, boss, pet
 // and vehicle parts of a unit, a unit's cast, `doing`, `ui`, `tooltips`, and

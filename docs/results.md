@@ -13,10 +13,13 @@ its commit, sample size `n`, and main caveats so claims never outrun the data.
 
 ## Offline Eval & Model Comparison
 
+Measured on the 52 eval cases that existed at `19b3bbb`; the set has 66 cases now and has not
+been re-run since.
+
 | Model (GGUF on RTX 5090) | Commit | `n` | Offline Eval | 16-slot Capacity | Caveats |
 |---|---|---:|---:|---:|---|
 | **`gemma-4-26B-A4B-it-UD-Q4_K_XL`** *(default)* | `19b3bbb` | 52 cases | **47/52 (90%)**, `do:` p50 68 ms | **9.6 wakes/s** (2.1× faster) | `RULES.md` was tuned against these same 52 cases at `temp = 0` (live play uses `0.7`); no held-out split; `decide.cc` omitted memory/relationships until `dc31cec`. |
-| `Qwen3.8-27B-IQ4_XS` | `19b3bbb` | 52 cases | **49/52 (94%)**, `do:` p50 153 ms | 4.6 wakes/s (saturates at 100 bots) | Same eval-overfitting caveats; 2× slower throughput and 53× worse tail latency at 100 bots. |
+| `Qwen3.8-27B-IQ4_XS` | `19b3bbb` | 52 cases | **49/52 (94%)**, `do:` p50 153 ms | 4.6 wakes/s (saturates at 100 bots) | Same eval-overfitting caveats; 2× slower throughput, and at 100 bots wake→`do:` p50 is 53× worse (21.7 s vs 0.41 s; p95 38.5 s vs 0.71 s). |
 | `Qwen3.6-35B-A3B-UD-Q4_K_XL` | `19b3bbb` | 52 cases | 37/52 (71%) | 11.3 wakes/s (on older prompt) | Weak on standing-order cases (1/8). |
 | `gemma-4-E4B-it-qat` / `Qwen3-4B` | `19b3bbb` | 52 cases | 31/52 (60%) / 28/52 (54%) | — | Too weak for reliable multi-step plans. |
 
@@ -28,7 +31,7 @@ Bosses: Devourer of Souls, Loken, Murmur, Talon King Ikiss, Kael'thas (Magisters
 |---|---|---:|---:|---:|---:|---:|---|
 | **`gemma-4` `v3`** | `d5b8516` | 16 (80) | **52/80 (65.0%)** | 43/80 (53.8%) | 35/80 (43.8%) | 40/80 (50.0%) | 3rd sign-off attempt after iterative fixes; `llm` vs `no_brain` `p_holm3 = 0.033`, driven by Ikiss (+10) & Kael'thas (+6); vs `llm_no_notes`/`baseline` n.s. (`p > 0.15`). |
 | **`gemma-4` combined (`v1+v2+v3`)** | `7393849`–`d5b8516` | 32 (160) | **96/160 (60.0%)** | 90/160 (56.2%) | 76/160 (47.5%) | 90/160 (56.2%) | Pooled `llm` vs `no_brain` `p_raw = 0.033`, **`p_holm3 = 0.099` (n.s.)**. |
-| **`Qwen3.8-27B`** | `19b3bbb` | 16 (80) | **51/80 (63.8%)** | 44/80 (55.0%) | 37/80 (46.2%) | 42/80 (52.5%) | Compared against `gemma-4` `v3` from a *different commit* (`d5b8516`); at `n = 80`, the 95% CI on a difference between two arms is roughly **±15 percentage points** (51/80 vs 52/80 is noise, not proof of equivalence). |
+| **`Qwen3.8-27B`** | `19b3bbb` | 16 (80) | **51/80 (63.8%)** | 46/80 (57.5%) | 33/80 (41.2%) | 39/80 (48.8%) | `llm` vs `no_brain` Fisher `p_raw = 0.0069`, **`p_holm3 = 0.0208` (significant)**, driven by Ikiss (13 vs 3); vs `baseline` (`p_raw = 0.079`) and `llm_no_notes` n.s. Source: `var/bench_boss_c4_qwen38_27b_n16.json`. Compared against `gemma-4` `v3` from a *different commit* (`d5b8516`); at `n = 80`, the 95% CI on a difference between two arms is roughly **±15 percentage points** (51/80 vs 52/80 is noise, not proof of equivalence). |
 
 ## Live Soaks (`wlb test soak`)
 

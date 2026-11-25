@@ -2,7 +2,8 @@
 //
 // Validates snapshot JSON files against wlb::snapshot::Snapshot (strict JSON
 // keys + visibility rules), or prints the reflected schema JSON (--schema-json)
-// for tools/audit/check_client_events.py.
+// for a client-event audit (the 2026-11-15 audit tool is retired;
+// docs/design.md, "Client-event coverage").
 
 #include <cstdio>
 #include <optional>

@@ -69,7 +69,9 @@ dungeons and in the open world:
 - `Wait here` / `Follow the party leader again`: when your leader asks you to wait or to come
   along. `Let <name> tank`: when another member is the group's tank; `Tank for the group again`
   when asked to tank.
-- In an instance (`where:` says `in an instance`): never `Use Hearthstone` or `Leave group`.
+- In an instance (`where:` says `in an instance`): never `Use Hearthstone` or `Leave group`,
+  unless the player you came with left the group or went offline (woken by `left the group` /
+  `went offline`): then `Teleport out of LFG dungeon` if offered, otherwise `Leave group`.
 
 Reply in exactly this form (plain numbers only; omit `goal:` unless setting or changing your
 goal, `say:`, `party:` and `tell` unless talking to someone, `general:` and `lfg:` unless

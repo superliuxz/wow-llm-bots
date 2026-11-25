@@ -791,6 +791,19 @@ class LlmBrainWorldScript : public WorldScript {
       // clicked yet.
       state.done_command_id = command.command_id;
     } else if (target) {
+      // Hub work (quests, vendors, trainers, loot) writes no combat event:
+      // this one shows the stall gate the bot is doing things.
+      if (trace_writer_ && trace_writer_->enabled()) {
+        TraceEvent ev;
+        ev.time_ms = base::Time::Now().InMillisecondsSinceUnixEpoch();
+        ev.monotonic_us =
+            (base::TimeTicks::Now() - base::TimeTicks()).InMicroseconds();
+        ev.role = "bot";
+        ev.name = name;
+        ev.event = "option_chosen";
+        ev.detail = std::string(OptionKindName(target->kind));
+        trace_writer_->WriteEvent(ev);
+      }
       if (!info.empty()) {
         wlb::snapshot::Event payload;
         payload.info.emplace().text = std::move(info);
@@ -1335,7 +1348,7 @@ class LlmBrainWorldScript : public WorldScript {
   // Samples both observed humans and tracked bots through the exact same
   // observer-view path at 5 Hz (200 ms) plus movement-packet / combat edges so
   // downstream trajectory reconstruction sees identical timing and schema
-  // (docs/plans/self-improving-loop.md, section F).
+  // (experimental/docs/self-improving-loop.md, section F).
   static TraceSample BuildObservedSample(Player* player,
                                          std::string_view role,
                                          int64_t time_ms,

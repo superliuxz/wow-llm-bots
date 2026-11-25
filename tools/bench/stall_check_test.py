@@ -53,13 +53,44 @@ class StallCheckTest(unittest.TestCase):
             lines = [
                 json.dumps({"kind": "sample", "t_ms": 0, "x": 10.0, "y": 10.0, "z": 0.0, "dead": False, "in_combat": False}),
                 json.dumps({"kind": "sample", "t_ms": 20_000, "x": 10.0, "y": 10.0, "z": 0.0, "dead": False, "in_combat": False}),
-                # Bot logs out for 400 s and logs back in emitting spell_cast before next sample.
-                json.dumps({"kind": "event", "t_ms": 420_000, "event": "spell_cast"}),
+                # Bot logs out for 400 s and logs back in emitting xp_gain before next sample.
+                json.dumps({"kind": "event", "t_ms": 420_000, "event": "xp_gain"}),
                 json.dumps({"kind": "sample", "t_ms": 421_000, "x": 10.0, "y": 10.0, "z": 0.0, "dead": False, "in_combat": False}),
             ]
             (bdir / "trace.jsonl").write_text("\n".join(lines) + "\n")
             res = sc.check_trace_dir(pathlib.Path(tmp), max_stall_s=300.0)
             self.assertEqual(res, {})
+
+
+    def _still_bot(self, tmp: str, name: str, event: dict | None) -> dict:
+        bdir = pathlib.Path(tmp) / "bot" / name
+        bdir.mkdir(parents=True)
+        lines = []
+        for i in range(45):
+            lines.append(json.dumps({"kind": "sample", "t_ms": i * 10_000, "x": 1.0, "y": 1.0,
+                                     "z": 0.0, "dead": False, "in_combat": False}))
+            if event and i in (15, 30):
+                lines.append(json.dumps({"kind": "event", "t_ms": i * 10_000 + 500, **event}))
+        (bdir / "trace.jsonl").write_text("\n".join(lines) + "\n")
+        return sc.check_trace_dir(pathlib.Path(tmp), max_stall_s=300.0)
+
+    def test_hub_work_is_progress(self) -> None:
+        # Quests, vendors and trainers write option_chosen, not combat events.
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self._still_bot(tmp, "Hubbot", {"event": "option_chosen",
+                                                              "detail": "npc"}), {})
+
+    def test_buffing_or_resting_in_a_corner_is_a_stall(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIn("Buffbot", self._still_bot(tmp, "Buffbot", {"event": "spell_cast"}))
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIn("Restbot", self._still_bot(tmp, "Restbot", {"event": "option_chosen",
+                                                                       "detail": "rest"}))
+
+    def test_progress_events_are_ones_the_module_writes(self) -> None:
+        header = (ROOT / "server_module" / "src" / "snapshot" / "behavior_trace.h").read_text()
+        for ev in sc.PROGRESS_EVENTS:
+            self.assertIn(f"`{ev}`", header, f"{ev} is not a trace event the module writes")
 
 
 if __name__ == "__main__":

@@ -3124,5 +3124,32 @@ TEST(BotLoopTest, CompiledOrdersCacheUpdatesWithNewerOrders) {
   std::filesystem::remove_all(tmp_dir);
 }
 
+// Harness #12: the first streamed `do:` line starts steps at once; when the
+// full reply then turns out invalid, those steps are stopped, not kept.
+TEST(BotLoopTest, InvalidPlanStopsItsEarlySteps) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Testpriest", 1, t0);
+  AddUnitAndOption(&s1, "0x1", "Mottled Boar", /*dead=*/false,
+                   /*lootable=*/false);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.StreamFirstLine("do: 1");
+  ASSERT_EQ(commands.size(), 1u);
+  ASSERT_TRUE(commands[0].choose.has_value());
+  brain.FinishReply("do: 1\ngarbage that is not a plan line");
+  ASSERT_EQ(commands.size(), 2u);
+  ASSERT_TRUE(commands[1].act.has_value());
+  EXPECT_EQ(commands[1].act->verb, pb::Command::Act::STOP);
+  EXPECT_EQ(commands[1].act->stop, pb::Command::Act::MOVING);
+}
+
 }  // namespace
 }  // namespace harness

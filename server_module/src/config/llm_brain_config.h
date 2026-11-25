@@ -43,7 +43,8 @@ struct Config {
   // Unified human + bot behavior trace directory (empty disables tracing).
   std::string trace_dir;
   // Minimum interval between periodic behavior trace samples (ms). Defaults to
-  // 200 ms (5 Hz). Observer-parity scoring (tools/bench/trace_parity.py)
+  // 200 ms (5 Hz). Observer-parity scoring (parked:
+  // experimental/human_likeness/trace_parity.py)
   // requires a measured median rate >= 3.5 Hz in the trace; world-tick rounding
   // adds up to one tick (~50 ms) on top of this interval, and
   // LlmBrainWorldScript warns when the measured rate drops below 3.5 Hz, so

@@ -623,6 +623,13 @@ def _run_once(
             (len(v) / elapsed_min for v in decisions_by_bot.values()),
             default=0.0,
         )
+        # The busiest minute of any bot: an average over the run hides a wake
+        # loop (soak_scorer's no_wake_loop reads this).
+        peak_wakes_per_min = max(
+            (soak_scorer.peak_per_minute([d.get("time_ms") for d in v])
+             for v in decisions_by_bot.values()),
+            default=0,
+        )
         p50_do = statistics.median(do_ms) if do_ms else 0.0
         p95_do = (
             sorted(do_ms)[min(len(do_ms) - 1, int(0.95 * (len(do_ms) - 1)))]
@@ -639,6 +646,7 @@ def _run_once(
             "decisions": total_decs,
             "option_counts": option_counts,
             "max_wakes_per_min": max_wakes_per_min,
+            "peak_wakes_per_min": float(peak_wakes_per_min),
             "do_p50_ms": p50_do,
             "do_p95_ms": p95_do,
             "llm_errors": llm_errors,
@@ -723,6 +731,7 @@ def _aggregate_run_stats(results: list[dict]) -> dict:
         "decisions": sum(int(s.get("decisions", 0)) for s in stats_list),
         "option_counts": merged_options,
         "max_wakes_per_min": max(float(s.get("max_wakes_per_min", 0.0)) for s in stats_list),
+        "peak_wakes_per_min": max(float(s.get("peak_wakes_per_min", 0.0)) for s in stats_list),
         "do_p50_ms": statistics.median(p50s) if p50s else 0.0,
         "do_p95_ms": max(p95s) if p95s else 0.0,
         "llm_errors": sum(int(s.get("llm_errors", 0)) for s in stats_list),

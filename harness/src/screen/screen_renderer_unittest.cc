@@ -65,11 +65,13 @@ std::vector<OptionKind> ParseKinds(const std::string& text) {
   return kinds;
 }
 
-// Real snapshots, and the text the Python prototype renders for them
-// (tools/snapshot/make_screen_fixtures.py).
+// Real snapshots and their rendered text. The Python prototype these were
+// first checked against is retired: the goldens are now regression goldens,
+// written by C++ itself (`harness render-screen --rewrite`), so they catch
+// changes, not mistakes. Read every golden diff before committing it.
 class GoldenScreenTest : public testing::TestWithParam<const char*> {};
 
-TEST_P(GoldenScreenTest, MatchesThePrototype) {
+TEST_P(GoldenScreenTest, MatchesTheReviewedGolden) {
   const std::string dir = std::string(WLB_HARNESS_TESTDATA) + "/screens/";
   const std::string name = GetParam();
   pb::Snapshot snapshot;

@@ -15,19 +15,23 @@
 #include <utility>
 
 #include "base/functional/callback.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_pump_epoll.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/threading/thread.h"
+#include "base/time/time.h"
 #include "net/framed_connection.h"
 
 namespace net {
 
 UnixSocketServer::UnixSocketServer(std::string path,
                                    Callbacks callbacks,
-                                   size_t max_output_bytes)
+                                   size_t max_output_bytes,
+                                   base::TimeDelta hung_after)
     : path_(std::move(path)),
       callbacks_(std::move(callbacks)),
-      max_output_bytes_(max_output_bytes) {}
+      max_output_bytes_(max_output_bytes),
+      hung_after_(hung_after) {}
 
 UnixSocketServer::~UnixSocketServer() {
   client_.reset();
@@ -69,7 +73,15 @@ bool UnixSocketServer::SendFrame(std::string_view payload) {
     return false;
   }
   ++stats_.frames_sent;
+  if (client_->pending_output_bytes() == 0) {
+    client_alive_at_ = base::TimeTicks::Now();
+  }
   return true;
+}
+
+bool UnixSocketServer::ClientHung() const {
+  return client_ && client_->pending_output_bytes() > 0 &&
+         base::TimeTicks::Now() - client_alive_at_ >= hung_after_;
 }
 
 void UnixSocketServer::OnFileCanReadWithoutBlocking(int /*fd*/) {
@@ -89,11 +101,25 @@ void UnixSocketServer::OnFileCanReadWithoutBlocking(int /*fd*/) {
     socklen_t cred_len = sizeof(cred);
     if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &cred_len) != 0 ||
         cred_len != sizeof(cred) || cred.uid != geteuid() ||
-        client_ != nullptr) {
+        (client_ != nullptr && !ClientHung())) {
       close(fd);
       ++stats_.connections_rejected;
       continue;
     }
+    if (client_) {
+      // The live client is hung: it makes way for the new one.
+      client_.reset();
+      ++stats_.connections_replaced;
+      if (callbacks_.on_disconnected) {
+        base::WeakPtr<UnixSocketServer> self = weak_factory_.GetWeakPtr();
+        callbacks_.on_disconnected.Run();
+        if (!self) {
+          close(fd);
+          return;
+        }
+      }
+    }
+    client_alive_at_ = base::TimeTicks::Now();
     client_ = std::make_unique<FramedConnection>(
         fd,
         FramedConnection::Callbacks{
@@ -113,12 +139,14 @@ void UnixSocketServer::OnFileCanReadWithoutBlocking(int /*fd*/) {
 
 void UnixSocketServer::OnClientFrame(std::string frame) {
   ++stats_.frames_received;
+  client_alive_at_ = base::TimeTicks::Now();
   if (callbacks_.on_frame) {
     callbacks_.on_frame.Run(std::move(frame));
   }
 }
 
 void UnixSocketServer::OnClientDrained() {
+  client_alive_at_ = base::TimeTicks::Now();
   if (callbacks_.on_drained) {
     callbacks_.on_drained.Run();
   }

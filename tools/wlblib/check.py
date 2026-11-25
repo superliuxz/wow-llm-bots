@@ -174,7 +174,12 @@ def rules(fix=False):
 
 
 def goldens():
-    """The screen renderer's goldens match C++ `RenderScreen`."""
+    """The screen renderer's output matches the reviewed goldens.
+
+    Regression goldens only: they were last written by C++ itself (`render-screen --rewrite`) after
+    the Python prototype was retired, so a pass shows nothing changed, not that the text is right.
+    Read every golden diff by hand before committing a rewrite.
+    """
     harness_bin = OUT / "common" / "harness"
     if not harness_bin.exists():
         build.common("default", tests=False)

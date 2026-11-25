@@ -2,7 +2,8 @@
 //
 // AzerothCore script hooks that record explicit gameplay events (damage_taken,
 // cast_start, loot, quest_accept, quest_turnin) identically for both observed
-// human players and tracked LLM bots (docs/plans/self-improving-loop.md, F).
+// human players and tracked LLM bots (experimental/docs/self-improving-loop.md,
+// F).
 
 #ifndef MOD_LLM_BRAIN_SNAPSHOT_BEHAVIOR_TRACE_SCRIPTS_H_
 #define MOD_LLM_BRAIN_SNAPSHOT_BEHAVIOR_TRACE_SCRIPTS_H_

@@ -2210,7 +2210,8 @@ bool ReadJson(std::string_view json,
 std::vector<std::string> ValidateSnapshotVisibility(const Snapshot& snap);
 
 // JSON object {"events": [...], "prompts": [...], "fields": [...]} reflected
-// from Snapshot/Event/PromptEvent for tools/audit/check_client_events.py.
+// from Snapshot/Event/PromptEvent for a client-event audit (docs/design.md,
+// "Client-event coverage").
 std::string ReflectedSchemaJson();
 
 }  // namespace wlb::snapshot

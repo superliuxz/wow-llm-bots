@@ -7,7 +7,7 @@
   llama       build llama.cpp (CUDA, RTX 5090 = sm_120) into out/llama
   msan        build an MSan-instrumented libc++ into out/llvm/msan (for `wlb build common msan`)
   client-ui   extract the client's default UI code and event names into out/client-ui, for the
-              client-event audit (docs/specs/coverage.md)
+              client-event audit (docs/design.md, "Client-event coverage")
 
 The 3.3.5a client is $WOW_CLIENT (default: WoW-3.3.5a next to the repo).
 """

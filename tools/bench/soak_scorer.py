@@ -27,6 +27,18 @@ DEFAULT_MAX_STALL_S = 300.0
 DEFAULT_STALL_RADIUS_YD = 15.0
 
 
+def peak_per_minute(times_ms: list[Any]) -> int:
+    """The most timestamps (ms) that fall in any 60 s window."""
+    ts = sorted(int(t) for t in times_ms if isinstance(t, (int, float)))
+    best = 0
+    lo = 0
+    for hi, t in enumerate(ts):
+        while t - ts[lo] >= 60_000:
+            lo += 1
+        best = max(best, hi - lo + 1)
+    return best
+
+
 def _bot_xp_gained(rows: list[dict[str, Any]], samples: list[dict[str, Any]]) -> int:
     """Computes XP earned without dropping gains across level-ups.
 
@@ -168,9 +180,8 @@ def score_soak(
         run_stats.get("invalid_plans", 0) == 0,
         f"invalid_plans={run_stats.get('invalid_plans', 0)}",
     )
-    wake_rate = float(
-        run_stats.get("peak_wakes_per_min", run_stats.get("max_wakes_per_min", 0.0))
-    )
+    # The busiest minute (soak.py writes it), not the run's average.
+    wake_rate = float(run_stats.get("peak_wakes_per_min", 0.0))
     check(
         "no_wake_loop",
         wake_rate <= 20.0,

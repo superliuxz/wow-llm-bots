@@ -256,6 +256,22 @@ TEST(TriggersTest, EventsAlertOnlyOnClientAttentionEvents) {
             (std::optional<WakeTrigger>{
                 {Urgency::kP3Chat, "say from Stranger: hey"}}));
 
+  // A boss emote is a mechanic (P0); a raid warning reaches every bot of the
+  // raid at once (P1, harness #20: it must not cancel every in-flight call).
+  pb::Event emote;
+  pb::ChatEvent& e = emote.chat.emplace();
+  e.channel = pb::BOSS_EMOTE;
+  e.from = "Loken";
+  e.text = "begins to cast Lightning Nova!";
+  EXPECT_EQ(EvaluateEventTrigger(emote)->urgency, Urgency::kP0Combat);
+  pb::Event warning;
+  pb::ChatEvent& rw = warning.chat.emplace();
+  rw.channel = pb::RAID_WARNING;
+  rw.from = "Hele";
+  rw.text = "stack on skull";
+  rw.at_me = true;
+  EXPECT_EQ(EvaluateEventTrigger(warning)->urgency, Urgency::kP1Danger);
+
   pb::Event invite;
   pb::PromptEvent& prompt = invite.prompt.emplace();
   prompt.kind = pb::PromptEvent::GROUP_INVITE;
@@ -287,6 +303,68 @@ TEST(TriggersTest, EventsAlertOnlyOnClientAttentionEvents) {
   pchat.from = "Gorn";
   pchat.text = "pulling";
   EXPECT_FALSE(EvaluateEventTrigger(party_chat));
+}
+
+TEST(TriggersTest, PartyStateWakesTheBot) {
+  const auto member = [](pb::Snapshot* snap, const std::string& name,
+                         pb::Role role) -> pb::Unit& {
+    if (!snap->ext.party) {
+      snap->ext.party.emplace();
+    }
+    pb::Unit& m = snap->ext.party->members.emplace_back();
+    m.name = name;
+    m.power_pct = 100.0f;
+    pb::GroupPart& gp = m.group.emplace();
+    gp.online = true;
+    gp.in_range = true;
+    gp.role = role;
+    return m;
+  };
+  TriggerEvaluator eval;
+  pb::Snapshot calm = BaseSnap();
+  member(&calm, "Hele", pb::TANK);
+  member(&calm, "Zenji", pb::HEALER);
+  EXPECT_FALSE(eval.EvaluateSnapshot(calm));
+  EXPECT_FALSE(eval.EvaluateSnapshot(calm));
+
+  // The tank pulls: the party is fighting while this bot isn't yet.
+  pb::Snapshot pulled = calm;
+  pulled.ext.party->members[0].group->aggro = true;
+  std::optional<WakeTrigger> t = eval.EvaluateSnapshot(pulled);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->urgency, Urgency::kP1Danger);
+  EXPECT_EQ(t->reason, "party in combat (Hele attacked)");
+  EXPECT_FALSE(eval.EvaluateSnapshot(pulled));  // Once per pull.
+
+  // The healer runs low on mana.
+  pb::Snapshot oom = pulled;
+  oom.ext.party->members[1].power_pct = 20.0f;
+  t = eval.EvaluateSnapshot(oom);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->reason, "healer Zenji low on mana");
+  EXPECT_FALSE(eval.EvaluateSnapshot(oom));
+
+  // The tank dies.
+  pb::Snapshot died = oom;
+  died.ext.party->members[0].dead = true;
+  t = eval.EvaluateSnapshot(died);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->reason, "party member Hele died");
+  EXPECT_FALSE(eval.EvaluateSnapshot(died));
+
+  // The healer logs out, then leaves the group (T11).
+  pb::Snapshot offline = died;
+  offline.ext.party->members[1].group->online = false;
+  t = eval.EvaluateSnapshot(offline);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->reason, "party member Zenji went offline");
+  pb::Snapshot back = died;
+  EXPECT_TRUE(eval.EvaluateSnapshot(back));  // Healer oom again, on return.
+  pb::Snapshot left = died;
+  left.ext.party->members.pop_back();
+  t = eval.EvaluateSnapshot(left);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->reason, "party member Zenji left the group");
 }
 
 }  // namespace

@@ -518,7 +518,7 @@ class LlamaServer:
 
 def capture_snapshots(seconds=300):
     """Records live snapshots of 50 questing bots (the `questing` test stack) into
-    out/bench/snapshots/quest, the input of the brain load replay (tools/bench/brain_load.py).
+    out/bench/snapshots/quest, the input of the brain load replay (`perf brain`, tools/wlblib/cases/perf_brain.py).
     Replaces what is there only after a good capture."""
     target = OUT / "bench" / "snapshots" / "quest"
     tmp = target.with_name(target.name + ".tmp")

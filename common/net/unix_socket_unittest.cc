@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/functional/callback.h"
 #include "base/message_loop/message_pump.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
@@ -274,6 +275,57 @@ TEST(UnixSocketTest, SocketIsOwnerOnlyAndRejectsSecondClientWhileLive) {
   EXPECT_FALSE(first_disconnected.TimedWait(base::Milliseconds(50)));
 
   RunOn(client_io, [&] { first.reset(); });
+  RunOn(server_io, [&] { server.reset(); });
+}
+
+TEST(UnixSocketTest, HungClientIsReplacedByTheNextOne) {
+  const std::string path = TestSocketPath();
+  base::Thread server_io("server");
+  ASSERT_TRUE(server_io.StartWithOptions(IoOptions()));
+  std::unique_ptr<UnixSocketServer> server;
+  base::WaitableEvent disconnected;
+  RunOn(server_io, [&] {
+    server = std::make_unique<UnixSocketServer>(
+        path,
+        UnixSocketServer::Callbacks{
+            .on_disconnected = base::BindRepeating(
+                [](base::WaitableEvent* e) { e->Signal(); }, &disconnected)},
+        /*max_output_bytes=*/64 << 20, /*hung_after=*/base::TimeDelta());
+    ASSERT_TRUE(server->Listen());
+  });
+  const auto connect_raw = [&] {
+    const int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    sockaddr_un addr = {};
+    addr.sun_family = AF_UNIX;
+    std::strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
+    EXPECT_EQ(
+        connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)), 0);
+    return fd;
+  };
+  // A client that never reads: the server's output backs up.
+  const int hung = connect_raw();
+  bool backed_up = false;
+  for (int i = 0; i < 200 && !backed_up; ++i) {
+    RunOn(server_io, [&] {
+      if (!server->connected()) {
+        return;
+      }
+      server->SendFrame(std::string(64 * 1024, 'x'));
+      backed_up = server->pending_output_bytes() > 0;
+    });
+  }
+  ASSERT_TRUE(backed_up);
+  // The next client takes its place instead of being refused.
+  const int next = connect_raw();
+  ASSERT_TRUE(disconnected.TimedWait(kTimeout));
+  RunOn(server_io, [&] {
+    EXPECT_TRUE(server->connected());
+    EXPECT_EQ(server->stats().connections, 2u);
+    EXPECT_EQ(server->stats().connections_replaced, 1u);
+    EXPECT_EQ(server->stats().connections_rejected, 0u);
+  });
+  close(hung);
+  close(next);
   RunOn(server_io, [&] { server.reset(); });
 }
 

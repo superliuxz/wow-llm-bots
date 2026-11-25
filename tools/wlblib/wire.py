@@ -532,7 +532,7 @@ def run_print(sock_path: str, seconds: float, to_send: list[str]) -> None:
 
 
 def fake_harness_cli(argv: list[str]) -> int:
-    """CLI for `wlb snap fake` (replaces tools/snapshot/fake_harness.py)."""
+    """CLI for `wlb snap fake` (replaces the retired fake_harness.py)."""
     sock_path = next((a.split("=", 1)[1] for a in argv if a.startswith("--socket=")), DEFAULT_SOCK)
     args = [a for a in argv if not a.startswith("--socket=")]
     stats = "--stats" in args

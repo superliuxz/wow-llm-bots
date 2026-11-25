@@ -3,8 +3,8 @@
 // Combat and soak behavior trace logger (C++ cleanup #5). Writes JSONL samples
 // and combat/soak events (`damage_dealt`, `damage_taken`, `heal_done`,
 // `spell_cast`, `combat_start`, `combat_end`, `mob_kill`, `died`, `xp_gain`,
-// `quest_turnin`, `act_sent`) read by `boss_meter`, `dodge_timeline`,
-// `stall_check`, `soak_scorer`, and `mine_traces`.
+// `quest_turnin`, `act_sent`, `option_chosen`) read by `boss_meter`,
+// `dodge_timeline`, `stall_check`, `soak_scorer`, and `mine_traces`.
 
 #ifndef MOD_LLM_BRAIN_SNAPSHOT_BEHAVIOR_TRACE_H_
 #define MOD_LLM_BRAIN_SNAPSHOT_BEHAVIOR_TRACE_H_
@@ -41,6 +41,7 @@ struct TraceSample {
   float pet_hp_pct = -1.0f;
   uint32_t level = 0;
   uint32_t xp = 0;
+  uint32_t xp_max = 0;  // The level's XP bar (soak XP across level-ups).
   float hp_pct = 0.0f;
   float mana_pct = 0.0f;
   std::string casting;

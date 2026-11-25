@@ -50,7 +50,7 @@ class SoakSuitesTest(unittest.TestCase):
             ]
             (bot_dir / "trace.jsonl").write_text("\n".join(rows) + "\n")
             stats = {"bots": 1, "decisions": 5, "elapsed_min": 1.0, "llm_errors": 0,
-                     "invalid_plans": 0, "max_wakes_per_min": 5.0, "do_p95_ms": 100.0}
+                     "invalid_plans": 0, "peak_wakes_per_min": 5.0, "do_p95_ms": 100.0}
             r1 = soak_scorer.score_soak(td, run_stats=stats)
             r2 = soak_scorer.score_soak(td, run_stats=stats)
             self.assertTrue(r1["guardrails_ok"])
@@ -87,7 +87,7 @@ class SoakSuitesTest(unittest.TestCase):
                     }))
                 (bdir / "trace.jsonl").write_text("\n".join(rows) + "\n")
             stats = {"bots": 2, "decisions": 4, "elapsed_min": 7.0, "llm_errors": 0,
-                     "invalid_plans": 0, "max_wakes_per_min": 1.0, "do_p95_ms": 100.0}
+                     "invalid_plans": 0, "peak_wakes_per_min": 1.0, "do_p95_ms": 100.0}
             res = soak_scorer.score_soak(td, run_stats=stats)
             self.assertEqual(res["progress"]["moved_bots"], 2)
             self.assertEqual(res["progress"]["stalled_bots"], 2)
@@ -121,7 +121,7 @@ class SoakSuitesTest(unittest.TestCase):
                             "t_ms": 1800_000, "x": 20.0, "y": 0.0, "z": 0.0, "level": 2, "xp": 200}),
             ]) + "\n")
             stats = {"bots": 2, "decisions": 4, "elapsed_min": 30.0, "llm_errors": 0,
-                     "invalid_plans": 0, "max_wakes_per_min": 1.0, "do_p95_ms": 100.0}
+                     "invalid_plans": 0, "peak_wakes_per_min": 1.0, "do_p95_ms": 100.0}
             res = soak_scorer.score_soak(td, run_stats=stats)
             # Loada: 120 (rollover), Loadb: 250 (exact xp_gain event) => 370 total across 1.0 bot-hour.
             self.assertEqual(res["progress"]["total_xp"], 370)
@@ -218,6 +218,21 @@ class SoakSuitesTest(unittest.TestCase):
         mining_cmds = soak_case._profession_setup_cmds("Loada", "mining", 150)
         self.assertIn("llmtest item Loada 2901", mining_cmds)
         self.assertFalse(any("additem" in c for c in mining_cmds))
+
+
+
+class SoakScorerHelpersTest(unittest.TestCase):
+    def test_peak_per_minute_finds_the_busiest_window(self) -> None:
+        import soak_scorer
+        # 30 wakes in one minute of a 10-minute run: average 3/min, peak 30.
+        times = [i * 600_000 // 10 for i in range(10)] + [1_000_000 + i * 1000 for i in range(30)]
+        self.assertEqual(soak_scorer.peak_per_minute(times), 30)
+        self.assertEqual(soak_scorer.peak_per_minute([]), 0)
+
+    def test_xp_across_level_up_counts_the_rest_of_the_bar(self) -> None:
+        import soak_scorer
+        samples = [{"xp": 350, "xp_max": 400, "level": 5}, {"xp": 30, "xp_max": 900, "level": 6}]
+        self.assertEqual(soak_scorer._bot_xp_gained([], samples), 80)
 
 
 if __name__ == "__main__":

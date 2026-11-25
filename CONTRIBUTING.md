@@ -14,7 +14,10 @@ the same commit when open priorities change; `git log` is the history of finishe
 3. **Never re-lock scorer manifests without explicit user approval.** Never read or modify
    `~/.local/share/wow-llm-bots/relock.passphrase`, `~/.local/share/wow-llm-bots/scorer.sha256`,
    or `experimental/human_likeness/scorer-lock.sha256` on your own.
-4. **Never run `tools/wlb remote` unprompted.** Only offload work to configured workers
+4. **No secrets or personal details in tracked files.** They go in the `private/` submodule;
+   commits use the noreply email set in the repo config. Never publish or copy
+   `private/BigFootAddOns` (proprietary addons) into the public GPL repo.
+5. **Never run `tools/wlb remote` unprompted.** Only offload work to configured workers
    (`private/remotes.json`) when the user explicitly asks.
 
 ## C++ Style (`common/`, `snapshot/`, `harness/`, `server_module/`)

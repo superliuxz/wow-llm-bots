@@ -49,7 +49,7 @@ def _case_choose():
 
     The whole chain of step M1 (docs/specs/harness.md): the module offers the options, a Choose
     names one of them in a snapshot, the bot's own body (playerbots) carries it out, and the world
-    shows it. The brain here is the scripted one of tools/snapshot/fake_harness.py.
+    shows it. The brain here is the scripted one of `tools/wlb snap fake` (tools/wlblib/wire.py).
     """
 
     import re

@@ -226,8 +226,14 @@ std::optional<WakeTrigger> EvaluateEventTrigger(
       return WakeTrigger{Urgency::kP1Danger,
                          base::StrCat({"whisper from ", chat.from})};
     }
-    if (chat.channel == pb::RAID_WARNING || chat.channel == pb::BOSS_EMOTE) {
+    // A boss emote announces a mechanic: P0. A raid warning (harness #20) is a
+    // call to every bot of the raid at once: P1, so it never cancels 25
+    // in-flight calls.
+    if (chat.channel == pb::BOSS_EMOTE) {
       return WakeTrigger{Urgency::kP0Combat, DescribeEvent(event)};
+    }
+    if (chat.channel == pb::RAID_WARNING) {
+      return WakeTrigger{Urgency::kP1Danger, DescribeEvent(event)};
     }
     if (chat.at_me && chat.channel != pb::WHISPER_SENT) {
       const Urgency u = (chat.channel == pb::PARTY || chat.channel == pb::RAID)
@@ -407,6 +413,68 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
     }
   }
 
+  // The party (T8): a bot wakes on its group's state too, not only its own.
+  std::flat_set<std::string> dead_members;
+  std::flat_set<std::string> low_mana_healers;
+  std::string aggro_member;
+  std::flat_set<std::string> online_members;
+  std::flat_set<std::string> offline_members;
+  if (snapshot.ext.party) {
+    for (const pb::Unit& m : snapshot.ext.party->members) {
+      if (!m.name.empty() && m.group && !m.group->online) {
+        offline_members.insert(m.name);
+      }
+      if (m.name.empty() || !m.group || !m.group->online) {
+        continue;
+      }
+      online_members.insert(m.name);
+      if (m.dead) {
+        dead_members.insert(m.name);
+      } else if (m.group->aggro && m.group->in_range && aggro_member.empty()) {
+        aggro_member = m.name;
+      }
+      constexpr float kHealerLowManaPct = 30.0f;
+      if (!m.dead && m.group->role == pb::HEALER && m.power_pct &&
+          *m.power_pct < kHealerLowManaPct) {
+        low_mana_healers.insert(m.name);
+      }
+    }
+  }
+  if (seen_snapshot_) {
+    for (const std::string& name : dead_members) {
+      if (!prev_dead_members_.contains(name)) {
+        Consider(&chosen,
+                 {Urgency::kP1Danger,
+                  base::StrCat({"party member ", name, " died"}), kWakeParty});
+      }
+    }
+    if (!aggro_member.empty() && !prev_party_aggro_ && !in_combat) {
+      Consider(&chosen,
+               {Urgency::kP1Danger,
+                base::StrCat({"party in combat (", aggro_member, " attacked)"}),
+                kWakeParty});
+    }
+    // T11: a member who leaves or logs out (the human the bots came with
+    // most of all) is a choice to make: stay, go on, or leave too.
+    for (const std::string& name : prev_online_members_) {
+      if (!online_members.contains(name)) {
+        Consider(&chosen, {Urgency::kP1Danger,
+                           base::StrCat({"party member ", name,
+                                         offline_members.contains(name)
+                                             ? " went offline"
+                                             : " left the group"}),
+                           kWakeParty});
+      }
+    }
+    for (const std::string& name : low_mana_healers) {
+      if (!prev_low_mana_healers_.contains(name)) {
+        Consider(&chosen,
+                 {Urgency::kP1Danger,
+                  base::StrCat({"healer ", name, " low on mana"}), kWakeParty});
+      }
+    }
+  }
+
   // Evaluate watches (edge-latched per crossing).
   const std::optional<double> hp_pct = HealthPercent(self);
   const std::optional<double> mana_pct = ManaPercent(self);
@@ -488,6 +556,10 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
   was_in_combat_ = in_combat;
   prev_control_ = control;
   prev_attackers_ = std::move(attackers);
+  prev_dead_members_ = std::move(dead_members);
+  prev_party_aggro_ = !aggro_member.empty();
+  prev_low_mana_healers_ = std::move(low_mana_healers);
+  prev_online_members_ = std::move(online_members);
   return chosen;
 }
 
