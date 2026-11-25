@@ -38,11 +38,12 @@ struct BotSession {
     bool was_attacking = false;
   };
 
-  // Dungeon auto-release & explicit `rez:wait` timers (ms).
-  std::optional<uint32_t> dungeon_dead_since_ms;
+  // Auto-release hold & explicit `rez:wait` timers (ms).
+  std::optional<uint32_t> dead_since_ms;
   std::optional<uint32_t> rez_wait_until_ms;
 
-  // Group policy chosen by the brain for `group_guid`.
+  // Group policy chosen by the brain for `group_guid`. Survives logout: the
+  // group does too.
   uint64_t group_guid = 0;
   GroupPolicy group_policy;
 

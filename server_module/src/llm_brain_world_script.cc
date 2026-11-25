@@ -42,6 +42,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "bot_manager/bot_manager.h"
+#include "bot_manager/character_loader.h"
 #include "bot_manager/popup_watch.h"
 #include "bot_session.h"
 #include "bridge/brain_bridge.h"
@@ -73,7 +74,6 @@
 
 #if defined(LLM_BRAIN_TEST_HOOKS)
 #include "test/facts_dump.h"
-#include "test/fixture_loader.h"
 #include "test/test_commands.h"
 #endif
 
@@ -255,14 +255,10 @@ class LlmBrainWorldScript : public WorldScript {
         "mod-llm-brain: indexed {} grind spots and {} service hubs in {} ms",
         world_places_->buckets().size(), world_places_->hubs().size(),
         (base::TimeTicks::Now() - places_start).InMilliseconds());
+    std::vector<CharacterLoader::Fixture> characters;
 #if defined(LLM_BRAIN_TEST_HOOKS)
-    if (!config_.test_fixtures.empty()) {
-      std::vector<FixtureLoader::Fixture> fixtures;
-      for (const auto& [character, file] : config_.test_fixtures) {
-        fixtures.push_back({character, file});
-      }
-      fixture_loader_ = std::make_unique<FixtureLoader>(config_.test_account,
-                                                        std::move(fixtures));
+    for (const auto& [character, file] : config_.test_fixtures) {
+      characters.push_back({character, file});
     }
 #else
     if (!config_.test_fixtures.empty() || !config_.test_facts_queries.empty()) {
@@ -272,6 +268,13 @@ class LlmBrainWorldScript : public WorldScript {
                 "server --test)");
     }
 #endif
+    for (const auto& [character, spec] : config_.create_bots) {
+      characters.push_back({character, spec, /*create_only=*/true});
+    }
+    if (!characters.empty()) {
+      character_loader_ = std::make_unique<CharacterLoader>(
+          config_.test_account, std::move(characters));
+    }
     bot_manager_ = std::make_unique<BotManager>(
         config_.bots, BotManager::Strategies{config_.combat_strategies,
                                              config_.non_combat_strategies,
@@ -314,12 +317,13 @@ class LlmBrainWorldScript : public WorldScript {
   }
 
   void OnUpdate(uint32 diff) override {
-#if defined(LLM_BRAIN_TEST_HOOKS)
-    // Test fixtures are reset before the bot manager logs anyone in.
-    if (fixture_loader_ && fixture_loader_->Update()) {
-      fixture_loader_.reset();
+    // Bot characters are created (and test fixtures reset) before the bot
+    // manager logs anyone in.
+    if (character_loader_ && character_loader_->Update()) {
+      character_loader_.reset();
     }
-    const bool fixtures_pending = fixture_loader_ != nullptr;
+    const bool characters_pending = character_loader_ != nullptr;
+#if defined(LLM_BRAIN_TEST_HOOKS)
     // After startup (playerbots' travel caches are built by then).
     if (world_places_ && !config_.test_facts_queries.empty()) {
       std::string error;
@@ -332,10 +336,8 @@ class LlmBrainWorldScript : public WorldScript {
       }
       config_.test_facts_queries.clear();
     }
-#else
-    const bool fixtures_pending = false;
 #endif
-    if (bot_manager_ && !fixtures_pending) {
+    if (bot_manager_ && !characters_pending) {
       bot_manager_->Update(diff);
     }
     if (!bridge_) {
@@ -1518,9 +1520,7 @@ class LlmBrainWorldScript : public WorldScript {
   const base::raw_ptr<ChatInbox> inbox_;
   const base::raw_ptr<std::atomic<BehaviorTraceWriter*>> human_trace_;
   const base::raw_ptr<TraceHookState> trace_hooks_;
-#if defined(LLM_BRAIN_TEST_HOOKS)
-  std::unique_ptr<FixtureLoader> fixture_loader_;
-#endif
+  std::unique_ptr<CharacterLoader> character_loader_;
   // The client's text of item spells (tooltips), read from Spell.dbc.
   std::unique_ptr<ItemSpellTexts> item_spell_texts_;
   // Grind spots and service hubs, indexed at startup (Explore / Go to).

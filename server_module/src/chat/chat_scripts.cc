@@ -55,9 +55,9 @@ std::vector<std::string>& TestHumans() {
 }
 #endif
 
-// Whether a line from `player` is a human's: no playerbots AI, or a bot a
-// test stands in for the user (`llmtest testhuman`).
-bool IsHumanSender(Player* player) {
+}  // namespace
+
+bool IsHumanPlayer(Player* player) {
   if (GET_PLAYERBOT_AI(player) == nullptr) {
     return true;
   }
@@ -69,6 +69,8 @@ bool IsHumanSender(Player* player) {
   return false;
 #endif
 }
+
+namespace {
 
 // Whispers, Say/Yell, Party/Raid, and General/Trade/LFG channel chat heard by
 // brain-run bots. Runs on the sender's thread, so it only hands lines to the
@@ -101,7 +103,7 @@ class LlmBrainChatScript : public PlayerScript {
                 : sWorld->getFloatConfig(CONFIG_LISTEN_RANGE_SAY);
     const bool cross_faction =
         sWorld->getBoolConfig(CONFIG_ALLOW_TWO_SIDE_INTERACTION_CHAT);
-    const bool sender_is_human = IsHumanSender(player);
+    const bool sender_is_human = IsHumanPlayer(player);
     // Deliver Say/Yell via the sender's map grid (same map, instance, phase,
     // and thread) like upstream Player::Say/Yell — never cross-instance or
     // touching Player* owned by other map threads.
@@ -156,7 +158,7 @@ class LlmBrainChatScript : public PlayerScript {
     }
     const bool is_raid =
         (type == CHAT_MSG_RAID || type == CHAT_MSG_RAID_LEADER);
-    const bool sender_is_human = IsHumanSender(player);
+    const bool sender_is_human = IsHumanPlayer(player);
     for (const std::string& bot_name : inbox_->Bots()) {
       if (bot_name == player->GetName()) {
         continue;

@@ -14,7 +14,7 @@ TEST(BotSessionRegistryTest, UnifiedResetsClearLifecycleState) {
   constexpr uint64_t kBot = 0x1001;
 
   reg.WithSession(kBot, [](BotSession& s) {
-    s.dungeon_dead_since_ms = 1234;
+    s.dead_since_ms = 1234;
     s.rez_wait_until_ms = 9999;
     s.group_guid = 42;
     s.group_policy.stay = true;
@@ -38,7 +38,24 @@ TEST(BotSessionRegistryTest, UnifiedResetsClearLifecycleState) {
     EXPECT_EQ(s->pending_shared_quest_id, 104u);
   });
 
-  // Logout removes the entire per-bot session cleanly.
+  // Logout clears everything but the group policy: a relog keeps its group.
+  reg.ResetOnLogout(kBot);
+  reg.InspectSession(kBot, [](const BotSession* s) {
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(s->group_guid, 42u);
+    EXPECT_TRUE(s->group_policy.stay);
+    EXPECT_FALSE(s->dead_since_ms.has_value());
+    EXPECT_FALSE(s->rez_wait_until_ms.has_value());
+    EXPECT_EQ(s->pending_shared_quest_id, 0u);
+    EXPECT_FALSE(s->pending_ready_check_ms.has_value());
+    EXPECT_TRUE(s->avoided_targets.empty());
+  });
+
+  // With no group policy, logout removes the whole session.
+  reg.WithSession(kBot, [](BotSession& s) {
+    s.group_guid = 0;
+    s.group_policy = {};
+  });
   reg.ResetOnLogout(kBot);
   EXPECT_EQ(reg.size(), 0u);
   reg.InspectSession(kBot, [](const BotSession* s) { EXPECT_EQ(s, nullptr); });

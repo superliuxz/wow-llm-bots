@@ -44,6 +44,7 @@
 #include "base/synchronization/lock.h"
 #include "base/thread_annotations.h"
 #include "bot_session.h"
+#include "chat/chat_scripts.h"
 #include "config/config_parsing.h"
 #include "popup_watch.h"
 
@@ -168,16 +169,23 @@ bool CanResurrectOthers(Player* member) {
   return false;
 }
 
-bool HasLivingResurrectorOnSameMap(Player* bot) {
+// Outdoors, a resurrector farther than this from the body won't come for it.
+constexpr float kNearbyResurrectorYd = 100.0f;
+
+// A living group member who can resurrect is in the same instance, or nearby
+// on an open-world map (T12: not only in dungeons).
+bool HasLivingResurrectorNearby(Player* bot) {
   if (!bot || !bot->GetGroup()) {
     return false;
   }
+  const bool in_dungeon = bot->GetMap() && bot->GetMap()->IsDungeon();
   for (GroupReference* itr = bot->GetGroup()->GetFirstMember(); itr != nullptr;
        itr = itr->next()) {
     Player* member = itr->GetSource();
     if (member && member != bot && member->IsInWorld() && member->IsAlive() &&
         member->GetMapId() == bot->GetMapId() &&
         member->GetInstanceId() == bot->GetInstanceId() &&
+        (in_dungeon || bot->GetDistance(member) <= kNearbyResurrectorYd) &&
         CanResurrectOthers(member)) {
       return true;
     }
@@ -185,10 +193,45 @@ bool HasLivingResurrectorOnSameMap(Player* bot) {
   return false;
 }
 
+// Whether a human plays in `group` (a bot leading it must not wander off).
+bool GroupHasHuman(Group* group) {
+  if (!group) {
+    return false;
+  }
+  for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
+       itr = itr->next()) {
+    Player* member = itr->GetSource();
+    if (member && IsHumanPlayer(member)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Grouped bots play like playerbots' grouped defaults (AiFactory gives
+// `boost` / `-threat` to solo bots only): they watch threat and don't open
+// with cooldowns over someone else's tank (T3).
+std::string GroupedCombatStrategies(const std::string& combat) {
+  std::string out;
+  for (const StrategyCheck& check : StrategyChecks(combat)) {
+    bool present = check.present;
+    if (check.name == "threat") {
+      present = true;
+    } else if (check.name == "boost") {
+      present = false;
+    }
+    if (!out.empty()) {
+      out.push_back(',');
+    }
+    out += (present ? "+" : "-") + check.name;
+  }
+  return out;
+}
+
 // Maximum time to suppress Playerbots' automatic `"auto release"` while waiting
-// for a living resurrector in a dungeon; beyond this window the bot may release
-// (or the brain can choose `Release spirit` / `Accept resurrection` at any
-// time).
+// for a living resurrector nearby (any map); beyond this window the bot may
+// release (or the brain can choose `Release spirit` / `Accept resurrection` at
+// any time).
 constexpr uint32_t kMaxWaitForRezMs = 90000;
 
 constexpr uint32_t kPendingSharedQuestTimeoutMs = 60000;
@@ -308,9 +351,10 @@ class LlmBrainPacketScript final : public ServerScript {
 //    auto-equipper never fights the brain's `Equip` choices.
 //  - Gates `"apply stone"` / `"apply oil"` on actual AzerothCore temp-enchant
 //    eligibility to stop SPELL_FAILED_LOWLEVEL 5-second spam loops.
-//  - Gates `"auto release"` inside dungeons only when a living party member on
-//    the same map can resurrect AND within `kMaxWaitForRezMs` (90 s), so bots
-//    never lie dead forever when no healer is alive or no rez arrives.
+//  - Gates `"auto release"` while a living party member nearby (same
+//    instance, or within 100 yd outdoors) can resurrect AND within
+//    `kMaxWaitForRezMs` (90 s), so bots never lie dead forever when no healer
+//    is alive or no rez arrives.
 // Owned by the Engine's ActionExecutionListeners (which `delete`s every
 // listener on Engine destruction).
 class BrainPolicyListener final : public ActionExecutionListener {
@@ -338,15 +382,19 @@ class BrainPolicyListener final : public ActionExecutionListener {
     if (name == "apply oil") {
       return HasEligibleTempEnchant(bot_, ai_, /*is_stone=*/false);
     }
+    // Gear is the brain's choice even while the harness is down: playerbots'
+    // auto-equip would undo it.
+    if (name == "equip upgrade" || name == "equip upgrades packet action") {
+      return false;
+    }
     // When no LLM harness is connected, let Playerbots answer invites, loot
     // rolls, ready checks, quest shares, and LFG popups so human groupmates do
     // not stall waiting for timeouts (A-M9).
     const bool brain_connected = BotManager::IsBrainConnected();
     if (brain_connected &&
-        (name == "accept invitation" || name == "equip upgrade" ||
-         name == "equip upgrades packet action" || name == "loot roll" ||
-         name == "roll" || name == "accept quest share" ||
-         name == "ready check" || name == "lfg join" || name == "lfg accept" ||
+        (name == "accept invitation" || name == "loot roll" || name == "roll" ||
+         name == "accept quest share" || name == "ready check" ||
+         name == "lfg join" || name == "lfg accept" ||
          name == "lfg role check" || name == "lfg leave" ||
          name == "lfg teleport")) {
       return false;
@@ -369,23 +417,22 @@ class BrainPolicyListener final : public ActionExecutionListener {
         return false;
       }
     }
-    if (name == "auto release" && bot_ && bot_->GetMap() &&
-        bot_->GetMap()->IsDungeon()) {
+    if (name == "auto release" && bot_ && bot_->GetMap()) {
       const uint64_t key = bot_->GetGUID().GetRawValue();
       if (bot_->IsAlive()) {
         BotSessionRegistry::Instance().WithSession(
-            key, [](BotSession& s) { s.dungeon_dead_since_ms.reset(); });
+            key, [](BotSession& s) { s.dead_since_ms.reset(); });
         return true;
       }
       const uint32_t dead_since =
           BotSessionRegistry::Instance().WithSession(key, [](BotSession& s) {
-            if (!s.dungeon_dead_since_ms) {
-              s.dungeon_dead_since_ms = getMSTime();
+            if (!s.dead_since_ms) {
+              s.dead_since_ms = getMSTime();
             }
-            return *s.dungeon_dead_since_ms;
+            return *s.dead_since_ms;
           });
       if (GetMSTimeDiffToNow(dead_since) < kMaxWaitForRezMs &&
-          HasLivingResurrectorOnSameMap(bot_)) {
+          HasLivingResurrectorNearby(bot_)) {
         return false;
       }
     }
@@ -497,19 +544,11 @@ void BotManager::Tick() {
       // Connected. Between maps (a teleport, an instance) it is briefly out
       // of the world: wait, never log it in a second time.
       if (player->IsInWorld()) {
-        const bool clear_dungeon_dead = player->IsAlive() ||
-                                        !player->GetMap() ||
-                                        !player->GetMap()->IsDungeon();
-        if (clear_dungeon_dead || player->IsAlive()) {
+        if (player->IsAlive()) {
           BotSessionRegistry::Instance().WithSession(
-              bot.guid,
-              [clear_dungeon_dead, alive = player->IsAlive()](BotSession& s) {
-                if (clear_dungeon_dead) {
-                  s.dungeon_dead_since_ms.reset();
-                }
-                if (alive) {
-                  s.rez_wait_until_ms.reset();
-                }
+              bot.guid, [](BotSession& s) {
+                s.dead_since_ms.reset();
+                s.rez_wait_until_ms.reset();
               });
         }
         EnsureStrategies(player);
@@ -568,15 +607,19 @@ void BotManager::EnsureStrategies(Player* player) {
       base_combat += kept[i];
     }
   }
-  std::string combat = base_combat + extras;
   Group* group = player->GetGroup();
   const bool in_group = group != nullptr;
+  if (in_group) {
+    base_combat = GroupedCombatStrategies(base_combat);
+  }
+  std::string combat = base_combat + extras;
   const bool is_leader =
       in_group && group->GetLeaderGUID() == player->GetGUID();
   const bool in_dungeon =
       player->GetMap() != nullptr && player->GetMap()->IsDungeon();
-  std::string non_combat = AdjustNonCombatStrategies(
-      strategies_.non_combat, in_group, is_leader, in_dungeon);
+  std::string non_combat =
+      AdjustNonCombatStrategies(strategies_.non_combat, in_group, is_leader,
+                                in_dungeon, is_leader && GroupHasHuman(group));
   {
     PolicyGlobalState& st = PolicyState();
     base::AutoLock lock(st.lock);
@@ -598,11 +641,16 @@ void BotManager::EnsureStrategies(Player* player) {
   }
   // The brain's own choice for this group comes last, so it wins (RH-M1/M2).
   const GroupPolicy policy = GetGroupPolicy(player);  // Empty outside it.
+  // Both directions are spelled out: clearing a policy must undo it (T4).
   if (policy.not_tank) {
     combat += ",-tank assist,-pull back,+dps assist";
+  } else if (PlayerbotAI::IsTank(player)) {
+    combat += ",+tank assist,+pull back,-dps assist";
   }
   if (policy.stay) {
     non_combat += ",-follow,+stay";
+  } else {
+    non_combat += ",-stay";
   }
   // Still as we left it in every state: playerbots hasn't reset any of them
   // since (it resets combat alone too, e.g. SelectiveResetStrategies).

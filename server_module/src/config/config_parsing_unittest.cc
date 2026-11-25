@@ -58,32 +58,49 @@ TEST(ConfigParsingTest, AdjustNonCombatStrategiesRespectsGroupAndDungeon) {
   // Solo open-world: unchanged.
   EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/false,
                                       /*is_leader=*/false,
-                                      /*in_dungeon=*/false),
+                                      /*in_dungeon=*/false,
+                                      /*group_has_human=*/false),
             live);
   // Grouped leader in open world: unchanged.
   EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
                                       /*is_leader=*/true,
-                                      /*in_dungeon=*/false),
+                                      /*in_dungeon=*/false,
+                                      /*group_has_human=*/false),
             live);
   // Grouped leader in dungeon: keeps +grind, strips +new rpg.
   EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
                                       /*is_leader=*/true,
-                                      /*in_dungeon=*/true),
+                                      /*in_dungeon=*/true,
+                                      /*group_has_human=*/false),
             "-follow,+grind,-new rpg");
   // Grouped follower (open-world or dungeon): runs with leader (+follow).
   EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
                                       /*is_leader=*/false,
-                                      /*in_dungeon=*/true),
+                                      /*in_dungeon=*/true,
+                                      /*group_has_human=*/false),
             "+follow,-grind,-new rpg");
   EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
                                       /*is_leader=*/false,
-                                      /*in_dungeon=*/false),
+                                      /*in_dungeon=*/false,
+                                      /*group_has_human=*/false),
             "+follow,-grind,-new rpg");
+  // A bot leading a human: no grind or RPG travel, no follow either.
+  EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
+                                      /*is_leader=*/true,
+                                      /*in_dungeon=*/false,
+                                      /*group_has_human=*/true),
+            "-follow,-grind,-new rpg");
+  EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
+                                      /*is_leader=*/true,
+                                      /*in_dungeon=*/true,
+                                      /*group_has_human=*/true),
+            "-follow,-grind,-new rpg");
   // Stripped test configs (no +grind) are never altered.
   const std::string boss = "-follow,-grind,-new rpg,-wotlk-hol";
   EXPECT_EQ(AdjustNonCombatStrategies(boss, /*in_group=*/true,
                                       /*is_leader=*/false,
-                                      /*in_dungeon=*/true),
+                                      /*in_dungeon=*/true,
+                                      /*group_has_human=*/false),
             boss);
 }
 

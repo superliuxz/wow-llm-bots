@@ -314,5 +314,22 @@ TEST(SchedulerTest, PriorityAgingPreventsLowerTierStarvation) {
   EXPECT_EQ(r.started(), (Names{"busy", "chat"}));
 }
 
+TEST(SchedulerTest, AgedWakesNeverOvertakeAFreshCombatWake) {
+  base::TimeTicks now = base::TimeTicks() + base::Seconds(100);
+  Scheduler scheduler(1, /*aging_step=*/base::Seconds(2));
+  scheduler.SetNowForTesting([&] { return now; });
+  Recorder r;
+
+  scheduler.Submit("busy", Urgency::kP2Routine, r.Work("busy"));
+  scheduler.Submit("old_plan_done", Urgency::kP2Routine,
+                   r.Work("old_plan_done"));
+  // A minute later the old entry has aged as far as it can (P1)...
+  now = now + base::Seconds(60);
+  // ...and a fresh tank combat wake still goes first.
+  scheduler.Submit("tank", Urgency::kP0Combat, r.Work("tank"));
+  r.Finish("busy");
+  EXPECT_EQ(r.started(), (Names{"busy", "tank"}));
+}
+
 }  // namespace
 }  // namespace harness

@@ -1,6 +1,6 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
-#include "test/test_accounts.h"
+#include "bot_manager/bot_accounts.h"
 
 #include <algorithm>
 #include <cctype>
@@ -18,11 +18,11 @@ std::string Upper(std::string s) {
 
 }  // namespace
 
-std::string TestAccountName(const std::string& base, size_t index) {
+std::string BotAccountName(const std::string& base, size_t index) {
   return index == 0 ? base : base + std::to_string(index + 1);
 }
 
-bool IsTestAccountName(const std::string& name, const std::string& base) {
+bool IsBotAccountName(const std::string& name, const std::string& base) {
   const std::string upper_name = Upper(name);
   const std::string upper_base = Upper(base);
   if (upper_base.empty() || upper_name.rfind(upper_base, 0) != 0) {

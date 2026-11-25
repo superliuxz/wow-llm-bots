@@ -199,6 +199,9 @@ class BotLoop {
 
     bool has_ever_woken = false;
     Urgency queued_urgency = Urgency::kP2Routine;
+    // The queued wake is only for player chat: it doesn't supersede the plan
+    // of the call in flight.
+    bool queued_for_chat_only = false;
     base::scoped_refptr<LlmCancelHandle> in_flight_cancel;
     base::TimeTicks call_deadline;
     uint64_t call_timed_out_epoch = 0;
@@ -218,6 +221,8 @@ class BotLoop {
     // for the group (RH-H4): its `say:` / `party:` lines are not sent.
     uint64_t party_reply_muted_epoch = 0;
     base::TimeTicks look_deadline;
+    // When a rate-limited chat line (kept in pending_reasons) gets its wake.
+    base::TimeTicks deferred_chat_at;
     // Panels as the bot last saw them, for the prompt once they are closed.
     struct SeenPanel {
       std::vector<std::string> lines;
@@ -284,6 +289,11 @@ class BotLoop {
   // Whether `bot` answers the party/raid chat lines among `chats` (RH-H4):
   // a bot named in the line does; when no brain bot of the group is named,
   // only the first of them by name does. True when no such line woke it.
+  // Whether `bot` answers one party/raid line `text`: named in it, or, when no
+  // online brain bot of the group is named, the first online one by name.
+  bool AnswersPartyLine(const std::string& bot,
+                        std::string_view text,
+                        const wlb::snapshot::Snapshot& snapshot) const;
   bool AnswersPartyChat(const std::string& bot,
                         const std::vector<BotState::ObservedChat>& chats,
                         const wlb::snapshot::Snapshot& snapshot) const;
@@ -305,7 +315,8 @@ class BotLoop {
   void WakeBot(const std::string& bot,
                Urgency urgency,
                const std::string& reason,
-               bool preserve_backoffs = false);
+               bool preserve_backoffs = false,
+               bool for_chat = false);
   // Returns a closure that cancels the started call (empty if none started).
   base::OnceClosure StartBotCall(const std::string& bot,
                                  int slot,

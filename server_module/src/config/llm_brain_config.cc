@@ -50,6 +50,9 @@ Config LoadConfig() {
   config.test_fixtures = ParseFixtures(
       sConfigMgr->GetOption<std::string>("LlmBrain.TestFixtures", ""),
       sConfigMgr->GetOption<std::string>("LlmBrain.FixtureDir", ""));
+  // Play presets: `Name=new:race:class`, created once when missing.
+  config.create_bots = ParseFixtures(
+      sConfigMgr->GetOption<std::string>("LlmBrain.CreateBots", ""), "");
   config.test_facts_queries =
       sConfigMgr->GetOption<std::string>("LlmBrain.TestFactsQueries", "");
   config.trace_dir =

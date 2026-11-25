@@ -43,11 +43,12 @@ int Scheduler::EffectivePriority(const Waiting& w, base::TimeTicks now) const {
   }
   const int64_t steps = waited.InMicroseconds() / aging_step_.InMicroseconds();
   // Background reflection (P4) never jumps ahead of P1/P0 gameplay wakes;
-  // interactive/routine wakes (P1..P3) can age all the way to P0 so they
-  // cannot starve indefinitely under continuous load (A-M7).
+  // interactive/routine wakes (P1..P3) age up to P1 so they cannot starve
+  // under continuous load (A-M7), but never to P0: a fresh combat wake always
+  // goes first, ahead of old "plan done" entries.
   const int floor_prio = w.urgency == Urgency::kP4Reflect
                              ? static_cast<int>(Urgency::kP2Routine)
-                             : static_cast<int>(Urgency::kP0Combat);
+                             : static_cast<int>(Urgency::kP1Danger);
   return std::max(floor_prio,
                   base_prio - static_cast<int>(std::min<int64_t>(steps, 10)));
 }

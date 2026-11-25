@@ -57,7 +57,8 @@ std::vector<StrategyCheck> StrategyChecks(const std::string& changes) {
 std::string AdjustNonCombatStrategies(const std::string& base_non_combat,
                                       bool in_group,
                                       bool is_leader,
-                                      bool in_dungeon) {
+                                      bool in_dungeon,
+                                      bool group_has_human) {
   std::vector<StrategyCheck> checks = StrategyChecks(base_non_combat);
   bool has_grind = false;
   for (const StrategyCheck& c : checks) {
@@ -80,8 +81,13 @@ std::string AdjustNonCombatStrategies(const std::string& base_non_combat,
     checks.push_back(StrategyCheck{name, present});
   };
 
-  if (in_group && !is_leader) {
-    set_strategy("follow", true);
+  if (in_group && (!is_leader || group_has_human)) {
+    // Followers follow. A bot leading a human never solo-grinds or RPG-travels
+    // either: it would wander, hearth or fly off, and pull trash alone in a
+    // dungeon. (An all-bot party's leader still grinds its way through.)
+    if (!is_leader) {
+      set_strategy("follow", true);
+    }
     set_strategy("grind", false);
     set_strategy("new rpg", false);
   } else if (in_dungeon) {

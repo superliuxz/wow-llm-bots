@@ -6,6 +6,8 @@
 #include <atomic>
 #include <string>
 
+class Player;
+
 namespace llm_brain {
 
 class BehaviorTraceWriter;
@@ -20,6 +22,10 @@ class ChatInbox;
 void AddLlmBrainChatScripts(
     ChatInbox* inbox,
     std::atomic<BehaviorTraceWriter*>* human_trace = nullptr);
+
+// Whether `player` is a human: no playerbots AI, or (test builds) a bot a test
+// stands in for the user (`llmtest testhuman`).
+bool IsHumanPlayer(Player* player);
 
 // Test builds only (`llmtest testhuman`): the chat hooks treat `name`'s lines
 // as a human player's, so e2e cases can stand a bot in for the user. World

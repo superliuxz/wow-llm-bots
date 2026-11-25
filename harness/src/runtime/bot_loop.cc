@@ -519,23 +519,23 @@ std::string BotLoop::ReadFileIfChanged(const std::string& path) {
   return text;
 }
 
-bool BotLoop::AnswersPartyChat(const std::string& bot,
-                               const std::vector<BotState::ObservedChat>& chats,
+bool BotLoop::AnswersPartyLine(const std::string& bot,
+                               std::string_view text,
                                const pb::Snapshot& snapshot) const {
-  std::vector<const BotState::ObservedChat*> group_lines;
-  for (const BotState::ObservedChat& c : chats) {
-    if (c.triggered_wake && (c.channel == pb::PARTY || c.channel == pb::RAID)) {
-      group_lines.push_back(&c);
-    }
-  }
-  if (group_lines.empty()) {
-    return true;  // Not woken by party chat: nothing to share out.
-  }
-  // The brain bots in this party (this harness runs them), this one included.
+  // The online brain bots in this party (this harness runs them, and their
+  // snapshots are fresh), this one included (T15: an offline or stalled bot
+  // must not be the one that answers).
   std::vector<std::string> brain_bots{bot};
   const auto add_members = [&](const std::vector<pb::Unit>& members) {
     for (const pb::Unit& m : members) {
-      if (!m.name.empty() && m.name != bot && bots_.contains(m.name)) {
+      if (m.name.empty() || m.name == bot) {
+        continue;
+      }
+      const auto it = bots_.find(m.name);
+      if (it != bots_.end() && it->second.latest_snapshot &&
+          !it->second.latest_received_at.is_null() &&
+          base::TimeTicks::Now() - it->second.latest_received_at <=
+              config_.stale_snapshot_after) {
         brain_bots.push_back(m.name);
       }
     }
@@ -549,21 +549,32 @@ bool BotLoop::AnswersPartyChat(const std::string& bot,
   std::sort(brain_bots.begin(), brain_bots.end());
   brain_bots.erase(std::unique(brain_bots.begin(), brain_bots.end()),
                    brain_bots.end());
-  for (const BotState::ObservedChat* line : group_lines) {
-    bool named_any = false;
-    for (const std::string& name : brain_bots) {
-      if (ContainsWholeWordIgnoringCase(line->text, name)) {
-        named_any = true;
-        if (name == bot) {
-          return true;  // Asked by name.
-        }
+  bool named_any = false;
+  for (const std::string& name : brain_bots) {
+    if (ContainsWholeWordIgnoringCase(text, name)) {
+      named_any = true;
+      if (name == bot) {
+        return true;  // Asked by name.
       }
     }
-    if (!named_any && brain_bots.front() == bot) {
-      return true;  // Nobody named: one bot answers for the group.
+  }
+  // Nobody named: one bot answers for the group.
+  return !named_any && brain_bots.front() == bot;
+}
+
+bool BotLoop::AnswersPartyChat(const std::string& bot,
+                               const std::vector<BotState::ObservedChat>& chats,
+                               const pb::Snapshot& snapshot) const {
+  bool any_group_line = false;
+  for (const BotState::ObservedChat& c : chats) {
+    if (c.triggered_wake && (c.channel == pb::PARTY || c.channel == pb::RAID)) {
+      any_group_line = true;
+      if (AnswersPartyLine(bot, c.text, snapshot)) {
+        return true;
+      }
     }
   }
-  return false;
+  return !any_group_line;  // Not woken by party chat: nothing to share out.
 }
 
 std::string BotLoop::CurrentGoal(const std::string& bot) const {
@@ -614,6 +625,7 @@ void BotLoop::ResetBotSession(BotState* state, bool cancel_in_flight) {
   state->pending_reasons.clear();
   state->pending_chats.clear();
   state->chat_wake_times_by_sender.clear();
+  state->deferred_chat_at = base::TimeTicks();
   state->recent_events.clear();
   state->whisperers.clear();
   state->condense_state = BotState::CondenseState::kIdle;
@@ -913,9 +925,17 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
   const bool is_player_chat = imm.event.chat.has_value() &&
                               IsPlayerChatChannel(imm.event.chat->channel) &&
                               imm.event.chat->channel != pb::RAID_WARNING;
-  const std::optional<WakeTrigger> chat_trig =
+  std::optional<WakeTrigger> chat_trig =
       is_player_chat ? EvaluateEventTrigger(imm.event, state.triggers.watches())
                      : std::nullopt;
+  // T9: a party/raid line wakes only the bot that answers it (named, or the
+  // group's one responder); the others just hear it.
+  if (chat_trig && state.latest_snapshot &&
+      (imm.event.chat->channel == pb::PARTY ||
+       imm.event.chat->channel == pb::RAID) &&
+      !AnswersPartyLine(bot, imm.event.chat->text, *state.latest_snapshot)) {
+    chat_trig.reset();
+  }
   bool chat_rate_limited = false;
   if (is_player_chat && chat_trig && !imm.event.chat->from.empty()) {
     // Per-sender sliding-window rate limit (A-M8): cap spam at 3 LLM wakes
@@ -932,6 +952,17 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
     }
     if (times.size() >= kMaxChatWakesPerSender) {
       chat_rate_limited = true;
+      // Not dropped: answered once the window frees a wake (the 4th quick
+      // "STOP" must still get through), without stopping the plan.
+      const base::TimeTicks retry_at = times.front() + kChatWakeWindow;
+      if (state.deferred_chat_at.is_null() ||
+          retry_at < state.deferred_chat_at) {
+        state.deferred_chat_at = retry_at;
+      }
+      if (std::find(state.pending_reasons.begin(), state.pending_reasons.end(),
+                    chat_trig->reason) == state.pending_reasons.end()) {
+        state.pending_reasons.push_back(chat_trig->reason);
+      }
     } else {
       times.push_back(received_at);
     }
@@ -1036,7 +1067,8 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
   }
   if (state.latest_snapshot) {
     WakeBot(bot, trig->urgency, trig->reason,
-            /*preserve_backoffs=*/refusal || is_player_chat);
+            /*preserve_backoffs=*/refusal || is_player_chat,
+            /*for_chat=*/is_player_chat);
   } else if (std::find(state.pending_reasons.begin(),
                        state.pending_reasons.end(),
                        trig->reason) == state.pending_reasons.end()) {
@@ -1082,6 +1114,16 @@ void BotLoop::OnTick(base::TimeTicks now) {
       WakeBot(bot, Urgency::kNormal, *timeout);
       continue;
     }
+    if (!state.deferred_chat_at.is_null() && now >= state.deferred_chat_at) {
+      state.deferred_chat_at = base::TimeTicks();
+      if (!state.pending_reasons.empty()) {
+        // A rate-limited chat line, kept in pending_reasons: chat never stops
+        // a running plan (A-M8).
+        WakeBot(bot, Urgency::kP3Chat, "", /*preserve_backoffs=*/true,
+                /*for_chat=*/true);
+        continue;
+      }
+    }
     if (!state.look_deadline.is_null() && now >= state.look_deadline) {
       state.look_deadline = base::TimeTicks();
       state.runner.Stop();
@@ -1095,8 +1137,11 @@ void BotLoop::OnTick(base::TimeTicks now) {
 void BotLoop::WakeBot(const std::string& bot,
                       Urgency urgency,
                       const std::string& reason,
-                      bool preserve_backoffs) {
+                      bool preserve_backoffs,
+                      bool for_chat) {
   BotState& state = bots_[bot];
+  state.queued_for_chat_only =
+      for_chat && (!state.has_queued_wake() || state.queued_for_chat_only);
   if (!preserve_backoffs) {
     state.step_refusals = 0;
     state.order_wakes = 0;
@@ -1445,8 +1490,12 @@ void BotLoop::OnReply(const std::string& bot,
       // same call failed before the reply finished, still deliver say/tell and
       // watches, and keep the refusal wake or backoff timer instead of
       // requeueing the already-answered wake reasons.
-      if ((!state.has_queued_wake() || state.early_step_failed) &&
-          state.latest_snapshot) {
+      // A wake queued only for chat doesn't supersede the plan: a human
+      // typing every few seconds must not keep the bot from ever installing
+      // one; the chat wake runs next and can change course.
+      const bool superseded =
+          state.has_queued_wake() && !state.queued_for_chat_only;
+      if ((!superseded || state.early_step_failed) && state.latest_snapshot) {
         state.triggers.SetPlanContext(
             plan->watches,
             state.early_step_failed
@@ -1535,9 +1584,24 @@ void BotLoop::OnReply(const std::string& bot,
           SendSay(bot, pb::LFG, "", plan->lfg);
         }
         if (!plan->remember.empty() && !config_.bots_dir.empty()) {
+          // Trust by sender, not keywords: what the party (and its leader)
+          // teaches is kept as is ("always heal me first"); only lines from
+          // players outside the group go through the injection filter.
+          std::flat_set<std::string> party;
+          if (state.latest_snapshot && state.latest_snapshot->ext.party) {
+            for (const pb::Unit& m :
+                 state.latest_snapshot->ext.party->members) {
+              party.insert(m.name);
+            }
+          }
+          if (state.latest_snapshot && state.latest_snapshot->ext.raid) {
+            for (const pb::Unit& m : state.latest_snapshot->ext.raid->members) {
+              party.insert(m.name);
+            }
+          }
           std::vector<std::string> player_chat_texts;
           for (const BotState::ObservedChat& c : asked_chats) {
-            if (IsPlayerChatChannel(c.channel)) {
+            if (IsPlayerChatChannel(c.channel) && !party.contains(c.from)) {
               player_chat_texts.push_back(c.text);
             }
           }
@@ -1867,6 +1931,7 @@ bool BotLoop::WakeForOrder(const std::string& bot,
         backoff.InSecondsF()));
     return false;
   }
+  state->runner.Stop();
   state->look_deadline = base::TimeTicks();
   WakeBot(bot, Urgency::kUrgent, std::string(reason),
           /*preserve_backoffs=*/true);
@@ -1898,7 +1963,9 @@ bool BotLoop::DispatchOrderEval(const std::string& bot,
       // and release `MOVEMENT_FORCED` on the module before waking the brain.
       SendStopMoving(bot);
     }
-    state->runner.Stop();
+    // WakeForOrder stops the plan only when it really wakes: a wake held back
+    // by backoff leaves the plan running (`every 2s -> wake` must not idle
+    // the bot between looks).
     merge_extra();
     return WakeForOrder(bot, state, eval.wake_reason, now,
                         /*is_failure=*/eval.timed_out);
@@ -2052,7 +2119,9 @@ base::OnceClosure BotLoop::StartMemoryCondense(const std::string& bot,
       "You condense a World of Warcraft player's older session notes into a "
       "short bullet list of lasting memories. Keep player names, dungeons, "
       "bosses, lessons learned, and unfinished goals. Write at most 6 short "
-      "lines, each starting with '- ', plain facts only, no preamble.";
+      "lines, each starting with '- ', plain facts only, no preamble. Keep a "
+      "trailing '[heard in chat]' tag on any line made from notes that carry "
+      "it.";
   req.user = std::move(user);
   req.slot = slot;
   req.max_tokens = 200;

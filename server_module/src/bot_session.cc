@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 
 #include "base/synchronization/lock.h"
 
@@ -17,7 +18,19 @@ BotSessionRegistry& BotSessionRegistry::Instance() {
 
 void BotSessionRegistry::ResetOnLogout(uint64_t bot_guid) {
   base::AutoLock lock(lock_);
-  sessions_.erase(bot_guid);
+  auto it = sessions_.find(bot_guid);
+  if (it == sessions_.end()) {
+    return;
+  }
+  if (it->second.group_guid == 0) {
+    sessions_.erase(it);
+    return;
+  }
+  // A relog keeps its group, so it keeps the brain's policy for that group.
+  BotSession kept;
+  kept.group_guid = it->second.group_guid;
+  kept.group_policy = it->second.group_policy;
+  it->second = std::move(kept);
 }
 
 void BotSessionRegistry::ResetOnMapChange(uint64_t bot_guid) {

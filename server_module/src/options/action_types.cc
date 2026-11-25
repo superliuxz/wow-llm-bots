@@ -49,7 +49,7 @@ BotAction DecodeOptionFactAction(std::string_view guid,
     uint32_t slot = 0;
     uint32_t vote = 0;
     if (parts.size() != 4 || !ParseUint32(parts[2], &slot) ||
-        !ParseUint32(parts[3], &vote) || vote > 2) {
+        !ParseUint32(parts[3], &vote) || vote > 3) {
       return InvalidAction{"invalid loot roll"};
     }
     return LootRollAction{std::string(parts[1]), slot,

@@ -28,6 +28,10 @@ struct Config {
   std::string combat_strategies;
   std::string non_combat_strategies;
   std::string dead_strategies;
+  // Bot characters created at startup when missing (LlmBrain.CreateBots), as
+  // (character, `new:race:class`) pairs, on the `test_account` pool. Never
+  // reset: play presets keep their progress.
+  std::vector<std::pair<std::string, std::string>> create_bots;
   // Test only: characters reset from fixture files at startup, as
   // (character, fixture file path) pairs, on `test_account`.
   std::string test_account = "WLBTEST";

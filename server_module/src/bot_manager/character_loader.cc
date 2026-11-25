@@ -1,6 +1,6 @@
 // Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
 
-#include "test/fixture_loader.h"
+#include "bot_manager/character_loader.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -27,7 +27,7 @@
 #include "SharedDefines.h"
 #include "WorldSession.h"
 #include "base/time/time.h"
-#include "test/test_accounts.h"
+#include "bot_manager/bot_accounts.h"
 
 namespace llm_brain {
 namespace {
@@ -42,7 +42,7 @@ bool CharacterExists(const std::string& name) {
   return CharacterDatabase.Query(stmt) != nullptr;
 }
 
-// Test accounts are never logged into; the password only has to exist.
+// Bot accounts are never logged into; the password only has to exist.
 std::string RandomPassword() {
   static constexpr char kChars[] =
       "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -144,26 +144,27 @@ bool CreateFreshCharacter(uint32_t account_id,
 
 }  // namespace
 
-FixtureLoader::FixtureLoader(std::string account, std::vector<Fixture> fixtures)
+CharacterLoader::CharacterLoader(std::string account,
+                                 std::vector<Fixture> fixtures)
     : account_(std::move(account)), fixtures_(std::move(fixtures)) {
   if (fixtures_.empty()) {
     step_ = Step::kDone;
   }
 }
 
-FixtureLoader::~FixtureLoader() = default;
+CharacterLoader::~CharacterLoader() = default;
 
-void FixtureLoader::StartWait(Step step) {
+void CharacterLoader::StartWait(Step step) {
   step_ = step;
   deadline_ = base::TimeTicks::Now() + kWaitTimeout;
 }
 
-bool FixtureLoader::TimedOut() const {
+bool CharacterLoader::TimedOut() const {
   return base::TimeTicks::Now() > deadline_;
 }
 
-bool FixtureLoader::Update() {
-  const std::string account = TestAccountName(account_, pool_index_);
+bool CharacterLoader::Update() {
+  const std::string account = BotAccountName(account_, pool_index_);
   switch (step_) {
     case Step::kCreateAccount:
       account_id_ = AccountMgr::GetId(account);
@@ -172,10 +173,10 @@ bool FixtureLoader::Update() {
         break;
       }
       if (sAccountMgr->CreateAccount(account, RandomPassword()) != AOR_OK) {
-        Fail("cannot create test account " + account);
+        Fail("cannot create bot account " + account);
         break;
       }
-      LOG_INFO("module", "mod-llm-brain: created test account {}", account);
+      LOG_INFO("module", "mod-llm-brain: created bot account {}", account);
       StartWait(Step::kWaitForAccount);
       break;
 
@@ -184,7 +185,7 @@ bool FixtureLoader::Update() {
       if (account_id_) {
         step_ = Step::kDeleteCharacter;
       } else if (TimedOut()) {
-        Fail("test account " + account + " never appeared");
+        Fail("bot account " + account + " never appeared");
       }
       break;
 
@@ -206,14 +207,18 @@ bool FixtureLoader::Update() {
         step_ = Step::kLoadDump;
         break;
       }
+      if (fixture.create_only) {
+        NextFixture();  // Already there: keep its progress.
+        break;
+      }
       // Never erase a character that isn't ours to reset.
       const uint32_t owner = sCharacterCache->GetCharacterAccountIdByGuid(guid);
       std::string owner_name;
       if (!AccountMgr::GetName(owner, owner_name) ||
-          !IsTestAccountName(owner_name, account_)) {
+          !IsBotAccountName(owner_name, account_)) {
         LOG_ERROR("module",
                   "mod-llm-brain: {} exists on account {}; not resetting it "
-                  "(test characters must be on {}, {}2, ...)",
+                  "(bot characters must be on {}, {}2, ...)",
                   fixture.character, owner_name, account_, account_);
         NextFixture();
         break;
@@ -254,6 +259,14 @@ bool FixtureLoader::Update() {
         StartWait(Step::kWaitForLoad);
         break;
       }
+      if (fixture.create_only) {
+        LOG_ERROR("module",
+                  "mod-llm-brain: LlmBrain.CreateBots entry {}={} is not "
+                  "new:race:class; skipped",
+                  fixture.character, fixture.file);
+        NextFixture();
+        break;
+      }
       const DumpReturn result = PlayerDumpReader().LoadDumpFromFile(
           fixture.file, account_id_, fixture.character, /*guid=*/0);
       if (result == DUMP_TOO_MANY_CHARS) {
@@ -274,7 +287,7 @@ bool FixtureLoader::Update() {
 
     case Step::kWaitForLoad:
       if (CharacterExists(fixtures_[index_].character)) {
-        LOG_INFO("module", "mod-llm-brain: reset {} on {} from {}",
+        LOG_INFO("module", "mod-llm-brain: created {} on {} from {}",
                  fixtures_[index_].character, account, fixtures_[index_].file);
         NextFixture();
       } else if (TimedOut()) {
@@ -288,12 +301,12 @@ bool FixtureLoader::Update() {
   return step_ == Step::kDone;
 }
 
-void FixtureLoader::NextFixture() {
+void CharacterLoader::NextFixture() {
   ++index_;
   step_ = index_ < fixtures_.size() ? Step::kDeleteCharacter : Step::kDone;
 }
 
-void FixtureLoader::Fail(const std::string& why) {
+void CharacterLoader::Fail(const std::string& why) {
   LOG_ERROR("module", "mod-llm-brain: fixture reset failed: {}", why);
   step_ = Step::kDone;
 }

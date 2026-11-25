@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "AiFactory.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
 #include "Define.h"
@@ -75,6 +76,51 @@ std::vector<LfgRoleChoice> ClassLfgRoles(uint8_t cls) {
   }
 }
 
+// The roles the bot's talents fit (T6): a Shadow priest queues as DPS, a
+// Ret paladin never as tank. With no talents spent yet, every role its class
+// can play.
+std::vector<LfgRoleChoice> SpecLfgRoles(Player* bot) {
+  if (bot->GetFreeTalentPoints() >= bot->CalculateTalentsPoints() ||
+      bot->GetLevel() < 10) {
+    return ClassLfgRoles(bot->getClass());
+  }
+  const LfgRoleChoice tank{lfg::PLAYER_ROLE_TANK, "Tank"};
+  const LfgRoleChoice healer{lfg::PLAYER_ROLE_HEALER, "Healer"};
+  const LfgRoleChoice dps{lfg::PLAYER_ROLE_DAMAGE, "DPS"};
+  const uint8_t tab = AiFactory::GetPlayerSpecTab(bot);
+  switch (bot->getClass()) {
+    case CLASS_WARRIOR:
+      return {tab == WARRIOR_TAB_PROTECTION ? tank : dps};
+    case CLASS_PALADIN:
+      if (tab == PALADIN_TAB_HOLY) {
+        return {healer};
+      }
+      return {tab == PALADIN_TAB_PROTECTION ? tank : dps};
+    case CLASS_PRIEST:
+      return {tab == PRIEST_TAB_SHADOW ? dps : healer};
+    case CLASS_SHAMAN:
+      return {tab == SHAMAN_TAB_RESTORATION ? healer : dps};
+    case CLASS_DRUID:
+      if (tab == DRUID_TAB_RESTORATION) {
+        return {healer};
+      }
+      if (tab == DRUID_TAB_FERAL) {
+        return {tank, dps};
+      }
+      return {dps};
+    case CLASS_DEATH_KNIGHT:
+      // Any 3.3.5a DK spec can tank; Blood is built for it.
+      if (tab == DEATH_KNIGHT_TAB_BLOOD) {
+        return {tank, dps};
+      }
+      return {dps, tank};
+    default:
+      return {dps};
+  }
+}
+
+// The normal-difficulty random dungeon for the bot's level (server L2: never
+// a Heroic, which needs level 80 and gear).
 uint32_t FindRandomLfgDungeonId(Player* bot) {
   if (!bot) {
     return 0;
@@ -84,7 +130,9 @@ uint32_t FindRandomLfgDungeonId(Player* bot) {
   uint32_t best_max_lvl = 0;
   for (uint32_t i = 0; i < sLFGDungeonStore.GetNumRows(); ++i) {
     const LFGDungeonEntry* d = sLFGDungeonStore.LookupEntry(i);
-    if (!d || d->TypeID != lfg::LFG_TYPE_RANDOM) {
+    if (!d || d->TypeID != lfg::LFG_TYPE_RANDOM ||
+        d->Difficulty != DUNGEON_DIFFICULTY_NORMAL ||
+        d->ExpansionLevel > bot->GetSession()->Expansion()) {
       continue;
     }
     if (lvl < d->MinLevel || lvl > d->MaxLevel) {
@@ -149,11 +197,98 @@ std::vector<uint8_t> SlotsFor(Player* bot, uint32_t inventory_type) {
   }
 }
 
+const char* ArmorTypeName(uint32_t subclass) {
+  switch (subclass) {
+    case ITEM_SUBCLASS_ARMOR_CLOTH:
+      return "cloth";
+    case ITEM_SUBCLASS_ARMOR_LEATHER:
+      return "leather";
+    case ITEM_SUBCLASS_ARMOR_MAIL:
+      return "mail";
+    case ITEM_SUBCLASS_ARMOR_PLATE:
+      return "plate";
+    default:
+      return nullptr;
+  }
+}
+
+// The heaviest body armor the bot can wear (its class's main armor type).
+uint32_t BestArmorSubclass(Player* bot) {
+  for (const uint32_t sub :
+       {ITEM_SUBCLASS_ARMOR_PLATE, ITEM_SUBCLASS_ARMOR_MAIL,
+        ITEM_SUBCLASS_ARMOR_LEATHER}) {
+    if (bot->GetItemSubclassMask(ITEM_CLASS_ARMOR) & (1u << sub)) {
+      return sub;
+    }
+  }
+  return ITEM_SUBCLASS_ARMOR_CLOTH;
+}
+
+// "agility, stamina, spell power" (the stats a player reads first).
+std::string PrimaryStats(const ItemTemplate* proto) {
+  std::string out;
+  const auto add = [&out](const char* name) {
+    if (out.find(name) == std::string::npos) {
+      out += out.empty() ? name : std::string(", ") + name;
+    }
+  };
+  for (uint32_t i = 0; i < proto->StatsCount && i < MAX_ITEM_PROTO_STATS; ++i) {
+    if (proto->ItemStat[i].ItemStatValue <= 0) {
+      continue;
+    }
+    switch (proto->ItemStat[i].ItemStatType) {
+      case ITEM_MOD_STRENGTH:
+        add("strength");
+        break;
+      case ITEM_MOD_AGILITY:
+        add("agility");
+        break;
+      case ITEM_MOD_INTELLECT:
+        add("intellect");
+        break;
+      case ITEM_MOD_SPIRIT:
+        add("spirit");
+        break;
+      case ITEM_MOD_STAMINA:
+        add("stamina");
+        break;
+      case ITEM_MOD_SPELL_POWER:
+        add("spell power");
+        break;
+      case ITEM_MOD_ATTACK_POWER:
+        add("attack power");
+        break;
+      case ITEM_MOD_DEFENSE_SKILL_RATING:
+        add("defense");
+        break;
+      default:
+        break;
+    }
+  }
+  return out;
+}
+
 std::string RollItemFacts(Player* bot, const ItemTemplate* proto) {
   std::string out = "ilvl " + std::to_string(proto->ItemLevel);
+  if (proto->Bonding == BIND_WHEN_EQUIPED) {
+    out += ", BoE";
+  }
   const std::vector<uint8_t> slots = SlotsFor(bot, proto->InventoryType);
   if (slots.empty()) {
     return out + ", not gear";
+  }
+  if (const std::string stats = PrimaryStats(proto); !stats.empty()) {
+    out += ", " + stats;
+  }
+  if (proto->Class == ITEM_CLASS_ARMOR &&
+      proto->InventoryType != INVTYPE_CLOAK) {
+    if (const char* type = ArmorTypeName(proto->SubClass)) {
+      out += std::string(", ") + type;
+      const uint32_t best = BestArmorSubclass(bot);
+      if (proto->SubClass != best) {
+        out += std::string(" (you wear ") + ArmorTypeName(best) + ")";
+      }
+    }
   }
   if (bot->CanUseItem(proto) != EQUIP_ERR_OK) {
     return out + ", you can't use it";
@@ -193,7 +328,7 @@ void CollectGroupAndUpkeepActions(Player* bot,
   if (Group* group = bot->GetGroup()) {
     size_t rolls_added = 0;
     for (const Roll* roll : group->GetRolls()) {
-      if (!roll || rolls_added >= 2) {
+      if (!roll || rolls_added >= 4) {
         break;
       }
       auto it = roll->playerVote.find(bot->GetGUID());
@@ -214,6 +349,9 @@ void CollectGroupAndUpkeepActions(Player* bot,
       }
       if (roll->rollVoteMask & ROLL_FLAG_TYPE_GREED) {
         out->push_back({prefix + "2", "Greed " + item_name + detail});
+      }
+      if (roll->rollVoteMask & ROLL_FLAG_TYPE_DISENCHANT) {
+        out->push_back({prefix + "3", "Disenchant " + item_name});
       }
       out->push_back({prefix + "0", "Pass " + item_name});
       ++rolls_added;
@@ -242,7 +380,7 @@ void CollectGroupAndUpkeepActions(Player* bot,
   if (bot->IsAlive()) {
     const lfg::LfgState st = sLFGMgr->GetState(bot->GetGUID());
     if (st == lfg::LFG_STATE_ROLECHECK) {
-      for (const LfgRoleChoice& rc : ClassLfgRoles(bot->getClass())) {
+      for (const LfgRoleChoice& rc : SpecLfgRoles(bot)) {
         out->push_back(
             {"lfg:role:" + std::to_string(rc.mask),
              std::string("Confirm Dungeon Finder role (") + rc.name + ")"});
@@ -269,7 +407,7 @@ void CollectGroupAndUpkeepActions(Player* bot,
                (!bot->GetGroup() ||
                 bot->GetGroup()->IsLeader(bot->GetGUID())) &&
                FindRandomLfgDungeonId(bot) != 0) {
-      for (const LfgRoleChoice& rc : ClassLfgRoles(bot->getClass())) {
+      for (const LfgRoleChoice& rc : SpecLfgRoles(bot)) {
         out->push_back(
             {"lfg:queue:" + std::to_string(rc.mask),
              std::string("Queue Random Dungeon (LFG: ") + rc.name + ")"});
@@ -364,13 +502,15 @@ void CollectGroupAndUpkeepActions(Player* bot,
     }
   }
 
-  // 6. Raid target mark (unified rule: anyone in party, leader/assistant in
-  //    raid).
+  // 6. Raid target mark: the leader, an assistant or the tank marks (T14);
+  //    a follower's mark would redirect the group onto a fresh pack.
   if (bot->IsAlive()) {
     if (Group* group = bot->GetGroup();
         group &&
-        (!group->isRaidGroup() || group->IsLeader(bot->GetGUID()) ||
-         group->IsAssistant(bot->GetGUID())) &&
+        (group->IsLeader(bot->GetGUID()) ||
+         group->IsAssistant(bot->GetGUID()) ||
+         (!group->isRaidGroup() && PlayerbotAI::IsTank(bot) &&
+          !BotManager::GetGroupPolicy(bot).not_tank)) &&
         group->GetTargetIcon(7).IsEmpty()) {
       const pb::Unit* best = nullptr;
       for (const pb::Unit& u : snapshot.base.nearby.units) {
@@ -525,7 +665,7 @@ ActionOutcome ExecuteLootRollAction(Player* bot, const LootRollAction& action) {
   if (!session) {
     return {.error = "no session"};
   }
-  if (action.vote > 2) {
+  if (action.vote > 3) {  // Pass, Need, Greed, Disenchant.
     return {.error = "invalid loot roll"};
   }
   WorldPacket p(CMSG_LOOT_ROLL, 8 + 4 + 1);

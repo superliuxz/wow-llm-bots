@@ -132,8 +132,8 @@ add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/snapshot/spell_text_unittest.cc"
   "${WLB_MODULE_SRC}/snapshot/ui_state.cc"
   "${WLB_MODULE_SRC}/snapshot/ui_state_unittest.cc"
-  "${WLB_MODULE_SRC}/test/test_accounts.cc"
-  "${WLB_MODULE_SRC}/test/test_accounts_unittest.cc")
+  "${WLB_MODULE_SRC}/bot_manager/bot_accounts.cc"
+  "${WLB_MODULE_SRC}/bot_manager/bot_accounts_unittest.cc")
 target_include_directories(llm_brain_unittests PRIVATE "${WLB_MODULE_SRC}")
 target_link_libraries(llm_brain_unittests PRIVATE wlb_net wlb_snapshot
                       GTest::gtest_main)

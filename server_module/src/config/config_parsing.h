@@ -34,12 +34,15 @@ std::vector<StrategyCheck> StrategyChecks(const std::string& changes);
 // touching stripped test configs (where `+grind` is not enabled):
 //  - Grouped non-leader bots keep `+follow,-grind,-new rpg` so the party runs
 //    together naturally instead of splitting or hearthing via `+new rpg`.
+//  - A bot leading a group with a human in it also gets `-grind,-new rpg`
+//    (no `+follow`): it must not wander off from or pull ahead of the human.
 //  - Dungeon leaders/solo bots strip `+new rpg` (`-new rpg`) so Playerbots'
 //    open-world RPG travel does not Hearthstone them out of the instance.
 std::string AdjustNonCombatStrategies(const std::string& base_non_combat,
                                       bool in_group,
                                       bool is_leader,
-                                      bool in_dungeon);
+                                      bool in_dungeon,
+                                      bool group_has_human);
 
 }  // namespace llm_brain
 

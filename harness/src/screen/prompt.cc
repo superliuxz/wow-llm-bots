@@ -667,10 +667,13 @@ std::string SelectRelevantNotes(std::string_view full_notes,
 LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
   LlmRequest request;
   request.system = input.rules;
-  // Give replies room for up to 7 standing `order:` lines when orders are
-  // enabled so `max_tokens` does not silently cut them off (A-L9).
+  // Give replies room for up to 7 standing `order:` lines on compile wakes
+  // (boss notes on screen: RULES only writes boss `order:` lines then) so
+  // `max_tokens` does not cut them off (A-L9). `order_names` alone lists every
+  // nearby unit, so it would reserve 350 tokens on almost every wake.
+  const bool compile_wake = !input.notes.empty() && !input.order_names.empty();
   request.max_tokens =
-      input.order_names.empty() ? kDefaultPlanMaxTokens : kOrdersPlanMaxTokens;
+      compile_wake ? kOrdersPlanMaxTokens : kDefaultPlanMaxTokens;
 
   const size_t reserved_tokens =
       EstimateTokens(request.system) +
@@ -696,6 +699,19 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
       name_line.size() + 2 + woken_line.size() + screen_block.size();
   size_t remaining =
       max_user_bytes > mandatory_bytes ? max_user_bytes - mandatory_bytes : 0;
+
+  // Boss notes are filled first: on the pre-pull compile wake they are what
+  // the standing orders are written from.
+  std::string notes_block;
+  if (!input.notes.empty()) {
+    constexpr std::string_view kHeader = "\n\nYour boss notes:\n";
+    if (remaining > kHeader.size() + 32) {
+      const size_t budget =
+          std::min(kMaxNotesBytes, remaining - kHeader.size());
+      notes_block = base::StrCat({kHeader, CapText(input.notes, budget)});
+      remaining -= notes_block.size();
+    }
+  }
 
   std::string goal_line;
   if (!input.current_goal.empty()) {
@@ -778,17 +794,6 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
           std::min(kMaxIdentityBytes, remaining - kHeader.size());
       identity_block = base::StrCat({kHeader, CapText(input.identity, budget)});
       remaining -= identity_block.size();
-    }
-  }
-
-  std::string notes_block;
-  if (!input.notes.empty()) {
-    constexpr std::string_view kHeader = "\n\nYour boss notes:\n";
-    if (remaining > kHeader.size() + 32) {
-      const size_t budget =
-          std::min(kMaxNotesBytes, remaining - kHeader.size());
-      notes_block = base::StrCat({kHeader, CapText(input.notes, budget)});
-      remaining -= notes_block.size();
     }
   }
 

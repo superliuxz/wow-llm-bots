@@ -26,6 +26,12 @@ TEST(ActionTypesTest, DecodesTypedNpcAndGroupActions) {
     EXPECT_EQ(roll->item_guid, "0x100");
     EXPECT_EQ(roll->slot, 3u);
     EXPECT_EQ(roll->vote, 1u);
+  }
+  {
+    BotAction a = DecodeOptionFactAction("roll:0x100:3:3", "Disenchant Sword");
+    const auto* roll = std::get_if<LootRollAction>(&a);
+    ASSERT_NE(roll, nullptr);
+    EXPECT_EQ(roll->vote, 3u);
     EXPECT_TRUE(IsDeadAllowedAction(a));
   }
   {

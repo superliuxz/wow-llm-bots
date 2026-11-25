@@ -316,10 +316,16 @@ TEST(PromptTest, HugeIdentityMemoryAndEventsNeverHideAroundMeOptions) {
         << req.user;
   }
 
-  // Enabling standing orders raises max_tokens so 7 `order:` lines are not cut.
+  // A compile wake (boss notes + order names) raises max_tokens so 7 `order:`
+  // lines are not cut; nearby unit names alone (every wake) don't.
   PromptInput with_orders = SampleInput();
   with_orders.order_names = {"Defile", "Lich King"};
-  EXPECT_GE(BuildPlanRequest(with_orders, SampleScreen()).max_tokens, 300);
+  with_orders.notes.clear();
+  EXPECT_LT(BuildPlanRequest(with_orders, SampleScreen()).max_tokens, 300);
+  with_orders.notes = "## Lich King\n- Defile: move out of it.";
+  const LlmRequest compile = BuildPlanRequest(with_orders, SampleScreen());
+  EXPECT_GE(compile.max_tokens, 300);
+  EXPECT_NE(compile.user.find("Defile: move out of it."), std::string::npos);
 }
 
 TEST(PromptTest, AssemblePromptInputUnifiesLiveAndOfflineFields) {
