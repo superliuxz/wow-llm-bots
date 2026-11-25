@@ -18,6 +18,7 @@
 
 #include "base/synchronization/lock.h"
 #include "base/thread_annotations.h"
+#include "bot_manager/tick_owner.h"
 #include "snapshot/snapshot.h"
 
 namespace llm_brain {
@@ -113,6 +114,11 @@ struct BotSession {
   // Refreshed every tick of the move, so it lapses by itself if the module
   // stops ticking; cleared on logout, map change and disconnect.
   uint32_t moving_out_until_ms = 0;
+
+  // Who answers this bot's popups (tick_owner.h): set every world tick by
+  // BotManager::Update from the harness connection, read by
+  // BrainPolicyListener. Playerbots-led after a logout until that next tick.
+  TickOwner tick_owner = TickOwner::kPlayerbots;
 
   // Last outdoor stray-recall tick (`KeepNearHumanLeader`, Now #8).
   uint32_t stray_recalled_ms = 0;

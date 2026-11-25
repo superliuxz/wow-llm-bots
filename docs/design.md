@@ -55,6 +55,12 @@ Four latency tiers separate reflexes from deliberation:
 - **Bot lifecycle (`BotManager`):** Replaces `RandomPlayerbotMgr` (which auto-teleports,
   refreshes, and randomizes bots behind the brain's back) by logging configured characters in
   through playerbots' public login and re-applying configured strategies cleanly.
+- **One tick owner per bot:** each managed bot is `brain-led` (a harness of this build is
+  connected) or `playerbots-led` (none, a refused one, or a battleground); `BotManager::Update`
+  sets the mode every world tick and logs each change. `BrainPolicyListener` gates playerbots
+  actions from one table (`server_module/src/bot_manager/tick_owner.h`: popups are the brain's
+  only while it leads, auto-equip never runs, the rest are world-state checks), and startup
+  checks every gated name against playerbots' action factories so an upstream rename is logged.
 - **Client-event coverage (2026-11-15 audit):** All 713 WoW 3.3.5a client UI events were audited
   once against the snapshot schema to ensure every gameplay-relevant client alert (combat, death,
   chat, popups, loot rolls, LFG, ready check, prompts) maps to either an immediate `Event` or a

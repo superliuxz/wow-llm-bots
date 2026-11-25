@@ -34,9 +34,6 @@ Guild Wars heroes):
   `Keep` at T=0.
 - **Short-term per-player memory & richer personas:** Store the last N exchanges per player
   (source-tagged so player chat never injects trusted instructions) and add more identities.
-- **Single tick owner per bot:** Replace the string-blocklist between `mod-llm-brain` and
-  `mod-playerbots` with an explicit per-bot mode (`brain-led` vs `playerbots-led`) and a startup
-  check against playerbots' action factory.
 - **Latency & world-thread polish:** Measure 4 Hz combat snapshot cost at raid scale (build lighter
   combat snapshots if needed), reserve llama slots for the human's party, and add a real held-out
   eval split run at live temperature (`0.7`).

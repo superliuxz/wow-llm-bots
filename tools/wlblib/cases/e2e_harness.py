@@ -745,13 +745,17 @@ def _case_handshake():
     2. A client whose hello names another schema is refused: one clear line in the server log,
        no snapshots while it stays, and its commands are not applied.
     3. The next client, of this build, is served again (its hello logged, snapshots back).
+    4. Tick owner: the bot is playerbots-led while the refused client stays and brain-led
+       again under this build's client; every gated playerbots action name was found at startup.
     """
 
     import json
+    import re
     import socket
     import time
 
     from wlblib import wire
+    from wlblib.common import TEST
     from wlblib.testing import expect
 
     NAME = "handshake"
@@ -834,6 +838,11 @@ def _case_handshake():
         refused_snaps = [m for m in map(wire.decode_module_message, later) if m and "snapshot" in m]
         expect(not refused_snaps, f"{len(refused_snaps)} snapshots sent to a refused client")
         expect(f"{BOT} says (SAY, len=11)" not in log, "the refused client's say was applied")
+        # The latest mode line (the refusal may land before any tick saw it connected).
+        modes = re.findall(rf"mod-llm-brain: {BOT} is (brain-led|playerbots-led)",
+                           stack.server_log())
+        expect(not modes or modes[-1] == "playerbots-led",
+               f"{BOT} not playerbots-led under a refused client: {modes[-3:]}")
 
         # 3. This build again: served.
         log_before = len(stack.server_log())
@@ -842,17 +851,31 @@ def _case_handshake():
         wire.send_frame(s, wire.encode_command(
             {"bot": BOT, "command_id": 9002, "say": {"channel": "SAY", "text": "fresh build"}}))
         frames = first + read(s, reader, 3.0)
+        whole = stack.server_log()  # Before the close turns the bot playerbots-led.
+        log = whole[log_before:]
         s.close()
         snaps = [m for m in map(wire.decode_module_message, frames) if m and "snapshot" in m]
         expect(snaps, "no snapshots for a client of this build after a refused one")
-        log = stack.server_log()[log_before:]
         expect("mod-llm-brain: e2e handshake hello: wire version" in log,
                f"the good hello wasn't logged: {log[-600:]!r}")
         expect("refusing" not in log, "a client of this build was refused")
         expect(f"{BOT} says (SAY, len=11)" in log,
                f"the say of a client of this build wasn't applied: {log[-600:]!r}")
+        modes = re.findall(rf"mod-llm-brain: {BOT} is (brain-led|playerbots-led)", whole)
+        expect(modes and modes[-1] == "brain-led",
+               f"{BOT} not brain-led under a client of this build: {modes[-3:]}")
+
+        # 4. Every gated playerbots action name exists (checked once at startup, so before
+        # stack.server_log() starts: read the log file from the last server start).
+        full = (TEST.logs / "Server.log").read_text(errors="replace")
+        full = full[max(0, full.rfind("gated action names found") - 2000):]
+        found = re.search(r"mod-llm-brain: (\d+) of (\d+) gated action names found", full)
+        expect(found and found.group(1) == found.group(2),
+               f"gated action check: {found.group(0) if found else 'not logged'}")
+        expect("is not a playerbots action" not in full, "a gated action name is missing")
         return (f"hello {mine['schema_hash']} first; stale schema refused once with no "
-                f"snapshots; next client got {len(snaps)} snapshots")
+                f"snapshots ({BOT} playerbots-led); next client got {len(snaps)} snapshots "
+                f"({BOT} brain-led); {found.group(1)} gated action names found")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
 CASES = [_case_reconnect(), _case_handshake(), _case_memory_condense(), _case_relationships()]

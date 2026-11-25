@@ -102,6 +102,8 @@ add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/bot_session_unittest.cc"
   "${WLB_MODULE_SRC}/bot_manager/popup_watch.cc"
   "${WLB_MODULE_SRC}/bot_manager/popup_watch_unittest.cc"
+  "${WLB_MODULE_SRC}/bot_manager/tick_owner.cc"
+  "${WLB_MODULE_SRC}/bot_manager/tick_owner_unittest.cc"
   "${WLB_MODULE_SRC}/bridge/brain_bridge.cc"
   "${WLB_MODULE_SRC}/bridge/brain_bridge_unittest.cc"
   "${WLB_MODULE_SRC}/bridge/latest_wins.cc"

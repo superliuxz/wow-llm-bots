@@ -60,6 +60,8 @@
 #include "WorldSession.h"
 #include "base/synchronization/lock.h"
 #include "base/thread_annotations.h"
+#include "bot_manager/playerbots_actions.h"
+#include "bot_manager/tick_owner.h"
 #include "bot_session.h"
 #include "chat/chat_scripts.h"
 #include "config/config_parsing.h"
@@ -490,20 +492,21 @@ class LlmBrainPacketScript final : public ServerScript {
   }
 };
 
-// Enforces clean ownership boundaries between the LLM brain and Playerbots'
-// reflex layer on each Engine:
-//  - Blocks `"accept invitation"` so the brain decides group invites.
-//  - Blocks `"flee"` in a dungeon or a human's group (GroupReflexLimits).
-//  - Holds spells that would root the bot (a cast time, a rooting channel)
-//    while a brain dodge moves it out (BotSession::moving_out_until_ms).
-//  - Blocks `"equip upgrades packet action"` / `"equip upgrade"` so Playerbots'
+// Enforces the ownership boundary between the LLM brain and Playerbots'
+// reflex layer on each Engine, by the bot's mode (BotSession::tick_owner)
+// and the one table of gated actions (tick_owner.h, checked against
+// playerbots' action factories at startup):
+//  - kBrainLed: popups (invites, loot rolls, ready checks, quest shares, LFG,
+//    self resurrect) are the brain's while it leads, playerbots' otherwise.
+//  - kAlways: `"equip upgrade(s packet action)"` never run, so Playerbots'
 //    auto-equipper never fights the brain's `Equip` choices.
-//  - Gates `"apply stone"` / `"apply oil"` on actual AzerothCore temp-enchant
-//    eligibility to stop SPELL_FAILED_LOWLEVEL 5-second spam loops.
-//  - Gates `"auto release"` while a living party member nearby (same
-//    instance, or within 100 yd outdoors) can resurrect AND within
-//    `kMaxWaitForRezMs` (90 s), so bots never lie dead forever when no healer
-//    is alive or no rez arrives.
+//  - kCondition: `"flee"` is blocked in a dungeon or a human's group
+//    (GroupReflexLimits); `"stay"` yields to a brain act's forced walk;
+//    `"apply stone"` / `"apply oil"` need real temp-enchant eligibility
+//    (no SPELL_FAILED_LOWLEVEL loops); `"auto release"` waits while a living
+//    party member nearby can resurrect, within `kMaxWaitForRezMs` (90 s).
+//  - Spells that would root the bot (a cast time, a rooting channel) wait
+//    while a brain dodge moves it out (BotSession::moving_out_until_ms).
 // Owned by the Engine's ActionExecutionListeners (which `delete`s every
 // listener on Engine destruction).
 class BrainPolicyListener final : public ActionExecutionListener {
@@ -534,6 +537,16 @@ class BrainPolicyListener final : public ActionExecutionListener {
         return false;
       }
     }
+    const GatedAction* gated = FindGatedAction(name);
+    if (!gated) {
+      return true;
+    }
+    if (gated->gate == ActionGate::kAlways) {
+      return false;
+    }
+    if (gated->gate == ActionGate::kBrainLed) {
+      return !BlockedFor(*gated, Owner());
+    }
     if (name == "apply stone") {
       return HasEligibleTempEnchant(bot_, ai_, /*is_stone=*/true);
     }
@@ -553,77 +566,79 @@ class BrainPolicyListener final : public ActionExecutionListener {
           return false;
         }
       }
+      return true;
     }
     // No reflex step back into unpulled packs in a dungeon or a human's
     // group (GroupReflexLimits); solo bots keep it.
-    if (name == "flee" && bot_) {
-      Group* group = bot_->GetGroup();
-      if (GroupReflexLimitsFor(group != nullptr,
-                               bot_->GetMap() && bot_->GetMap()->IsDungeon(),
-                               GroupHasHuman(group))
-              .block_flee) {
-        return false;
-      }
+    if (name == "flee") {
+      Group* group = bot_ ? bot_->GetGroup() : nullptr;
+      return !bot_ || !GroupReflexLimitsFor(
+                           group != nullptr,
+                           bot_->GetMap() && bot_->GetMap()->IsDungeon(),
+                           GroupHasHuman(group))
+                           .block_flee;
     }
-    // Gear is the brain's choice even while the harness is down: playerbots'
-    // auto-equip would undo it.
-    if (name == "equip upgrade" || name == "equip upgrades packet action") {
-      return false;
-    }
-    // When no LLM harness is connected, let Playerbots answer invites, loot
-    // rolls, ready checks, quest shares, and LFG popups so human groupmates do
-    // not stall waiting for timeouts (A-M9). Using a soulstone or ankh is the
-    // brain's call too (mid-wipe it would just die again, Now #6).
-    const bool brain_connected = BotManager::IsBrainConnected();
-    if (brain_connected && (name == "accept invitation" ||
-                            name == "loot roll" || name == "self resurrect" ||
-                            name == "roll" || name == "accept quest share" ||
-                            name == "ready check" || name == "lfg join" ||
-                            name == "lfg accept" || name == "lfg role check" ||
-                            name == "lfg leave" || name == "lfg teleport")) {
-      return false;
-    }
-    if (name == "auto release" && bot_ && !bot_->IsAlive()) {
-      const uint64_t key = bot_->GetGUID().GetRawValue();
-      const bool wait = BotSessionRegistry::Instance().WithSession(
-          key, [brain_connected](BotSession& s) {
-            if (!s.rez_wait_until_ms) {
-              return false;
-            }
-            if (brain_connected &&
-                static_cast<int32_t>(*s.rez_wait_until_ms - getMSTime()) > 0) {
-              return true;
-            }
-            s.rez_wait_until_ms.reset();
-            return false;
-          });
-      if (wait) {
-        return false;
-      }
-    }
-    if (name == "auto release" && bot_ && bot_->GetMap()) {
-      const uint64_t key = bot_->GetGUID().GetRawValue();
-      if (bot_->IsAlive()) {
-        BotSessionRegistry::Instance().WithSession(
-            key, [](BotSession& s) { s.dead_since_ms.reset(); });
-        return true;
-      }
-      const uint32_t dead_since =
-          BotSessionRegistry::Instance().WithSession(key, [](BotSession& s) {
-            if (!s.dead_since_ms) {
-              s.dead_since_ms = getMSTime();
-            }
-            return *s.dead_since_ms;
-          });
-      // A soulstone or ankh up is a way back too (Now #6): hold the release
-      // for the brain to use it once the fight is over.
-      if (GetMSTimeDiffToNow(dead_since) < kMaxWaitForRezMs &&
-          (HasLivingResurrectorNearby(bot_) ||
-           bot_->GetUInt32Value(PLAYER_SELF_RES_SPELL) != 0)) {
-        return false;
-      }
+    if (name == "auto release") {
+      return AllowAutoRelease();
     }
     return true;
+  }
+
+  // An explicit `rez:wait` from the brain holds the release while the bot is
+  // brain-led. Otherwise it waits (up to kMaxWaitForRezMs) while a living
+  // party member nearby can resurrect, or a soulstone or ankh is up (Now
+  // #6), so bots never lie dead forever when no rez comes.
+  bool AllowAutoRelease() {
+    if (!bot_) {
+      return true;
+    }
+    const uint64_t key = bot_->GetGUID().GetRawValue();
+    if (bot_->IsAlive()) {
+      if (bot_->GetMap()) {
+        BotSessionRegistry::Instance().WithSession(
+            key, [](BotSession& s) { s.dead_since_ms.reset(); });
+      }
+      return true;
+    }
+    const bool wait =
+        BotSessionRegistry::Instance().WithSession(key, [](BotSession& s) {
+          if (!s.rez_wait_until_ms) {
+            return false;
+          }
+          if (s.tick_owner == TickOwner::kBrain &&
+              static_cast<int32_t>(*s.rez_wait_until_ms - getMSTime()) > 0) {
+            return true;
+          }
+          s.rez_wait_until_ms.reset();
+          return false;
+        });
+    if (wait) {
+      return false;
+    }
+    if (!bot_->GetMap()) {
+      return true;
+    }
+    const uint32_t dead_since =
+        BotSessionRegistry::Instance().WithSession(key, [](BotSession& s) {
+          if (!s.dead_since_ms) {
+            s.dead_since_ms = getMSTime();
+          }
+          return *s.dead_since_ms;
+        });
+    return GetMSTimeDiffToNow(dead_since) >= kMaxWaitForRezMs ||
+           (!HasLivingResurrectorNearby(bot_) &&
+            bot_->GetUInt32Value(PLAYER_SELF_RES_SPELL) == 0);
+  }
+
+  // This bot's mode (BotSession::tick_owner, set by BotManager::Update).
+  TickOwner Owner() const {
+    if (!bot_) {
+      return TickOwner::kPlayerbots;
+    }
+    return BotSessionRegistry::Instance().InspectSession(
+        bot_->GetGUID().GetRawValue(), [](const BotSession* s) {
+          return s ? s->tick_owner : TickOwner::kPlayerbots;
+        });
   }
   void After(Action* /*action*/, bool /*executed*/, Event /*event*/) override {}
 
@@ -700,21 +715,46 @@ BotManager::BotManager(std::vector<std::string> names, Strategies strategies)
   for (std::string& name : names) {
     bots_.push_back(Bot{std::move(name)});
   }
+  // A gated name playerbots renamed would silently stop being gated.
+  const std::vector<std::string> missing =
+      MissingActionNames(GatedActions(), PlayerbotsActionNames());
+  for (const std::string& name : missing) {
+    LOG_ERROR("module",
+              "mod-llm-brain: gated action \"{}\" is not a playerbots "
+              "action (renamed upstream?): its gate does nothing",
+              name);
+  }
+  LOG_INFO("module",
+           "mod-llm-brain: {} of {} gated action names found in playerbots",
+           GatedActions().size() - missing.size(), GatedActions().size());
 }
 
 BotManager::~BotManager() = default;
 
 void BotManager::Update(uint32_t diff_ms) {
   now_ms_ += diff_ms;
-  // Attach BrainPolicyListener on every world tick (O(1) hash lookup) so newly
-  // entered Engines (especially BOT_STATE_DEAD on first dungeon death) are
-  // protected before the 1 s Tick() runs.
+  // Set each bot's mode and attach BrainPolicyListener on every world tick
+  // (O(1) hash lookup) so newly entered Engines (especially BOT_STATE_DEAD
+  // on first dungeon death) are protected before the 1 s Tick() runs.
+  const bool connected = IsBrainConnected();
   for (const Bot& bot : bots_) {
     if (!bot.guid) {
       continue;
     }
     Player* player = ObjectAccessor::FindConnectedPlayer(ObjectGuid(bot.guid));
-    if (player && player->IsInWorld() && !player->InBattleground()) {
+    if (!player || !player->IsInWorld()) {
+      continue;
+    }
+    const TickOwner owner = TickOwnerFor(connected, player->InBattleground());
+    const bool changed = BotSessionRegistry::Instance().WithSession(
+        bot.guid, [owner](BotSession& s) {
+          return std::exchange(s.tick_owner, owner) != owner;
+        });
+    if (changed) {
+      LOG_INFO("module", "mod-llm-brain: {} is {}", player->GetName(),
+               TickOwnerName(owner));
+    }
+    if (!player->InBattleground()) {
       EnsurePolicyListener(player, GET_PLAYERBOT_AI(player));
     }
   }
