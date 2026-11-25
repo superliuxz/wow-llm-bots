@@ -201,6 +201,11 @@ def random_pass_rate(case):
     return sum(not check_case(case, p) for p in plain) / len(plain) if plain else 0.0
 
 
+def act_line(got):
+    """The reply's `act:` line (done once, at once), or "": decide's JSON has no field for it."""
+    return next((line for line in got.get("raw", "").splitlines() if line.startswith("act:")), "")
+
+
 def run_suite(cases, label=None):
     ensure_harness()
     if label:
@@ -226,6 +231,8 @@ def run_suite(cases, label=None):
             desc += f" | open: {', '.join(got['open'])}"
         if got.get("hover"):
             desc += f" | hover: {got['hover']}"
+        if act_line(got):
+            desc += f" | {act_line(got)}"
         verdict = "PASS" if ok else f"FAIL ({'; '.join(problems)})"
         say(f"  {verdict:4s} {case['name']:25s} -> {desc}")
         rows.append({"case": case["name"], "ok": ok, "got": got, "problems": problems})
@@ -239,5 +246,9 @@ def run_suite(cases, label=None):
         f"option scores {random_score:.1f}), "
         f"first line {med_first_ms:.0f} ms, total {med_ms:.0f} ms, "
         f"warm prompt_computed {med_comp:.0f} tok")
+    # No case asks for an `act:`, so every one written is unasked (not scored yet: content/RULES.md
+    # says to write one only for a player's ask; this keeps the count in view while tuning it).
+    unasked = [r["case"] for r in rows if act_line(r["got"])]
+    say(f"unasked act: lines: {len(unasked)}" + (f" ({', '.join(unasked)})" if unasked else ""))
     return {"label": label or "default", "passed": passed, "total": len(rows),
             "median_first_ms": med_first_ms, "median_ms": med_ms, "rows": rows}

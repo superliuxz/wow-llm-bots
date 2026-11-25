@@ -1,7 +1,7 @@
 # TODO
 
 Open work only (Now / Next / Later). Completed work lives in `git log`.
-Last updated: 2026-11-24.
+Last updated: 2026-11-25.
 
 ## Now (team play first: the gaps a human feels in the first hour)
 
@@ -24,6 +24,9 @@ Guild Wars heroes):
 
 ## Next (multi-session depth & architecture)
 
+- **`act:` eval coverage:** No eval case asks for an `act:` (e.g. party `"sheep moon"`, a ping
+  plus `"go there"`), and the eval only counts unasked `act:` lines (1 of 59 at T=0) without
+  scoring them. Add asking cases, then score unasked acts as misses.
 - **Short-term per-player memory & richer personas:** Store the last N exchanges per player
   (source-tagged so player chat never injects trusted instructions) and add more identities.
 - **Single tick owner per bot:** Replace the string-blocklist between `mod-llm-brain` and
