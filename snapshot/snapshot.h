@@ -2097,6 +2097,9 @@ struct OptionFacts {
   std::vector<std::string> invite_candidates;
   bool can_leave_group = false;
   bool has_pending_resurrect = false;
+  // The self-resurrection the dead bot can use now (Soulstone Resurrection,
+  // Reincarnation), by name; empty when none.
+  std::string self_resurrect;
   // A human leads this bot's group (and this bot isn't the leader): the
   // human pulls, so no Attack on a mob nobody in the party is fighting yet.
   bool leave_pulls_to_leader = false;

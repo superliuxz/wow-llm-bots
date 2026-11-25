@@ -619,4 +619,36 @@ def _case_create_bots():
         return f"Loadcw (guid {first[2]}) created as a troll warrior; a restart kept it"
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
-CASES = [_case_create_bots(), _case_keep(), _case_choose(), _case_walk(), _case_rest(), _case_talk(), _case_panels(), _case_bind(), _case_death()]
+def _case_self_rez():
+    """A soulstoned bot that dies is offered to resurrect itself, and gets up (Now #6).
+
+    `choose` test config (one level-1 priest). Loada gets Soulstone Resurrection, is killed, is
+    offered `Use <spell> (resurrect yourself)`; choosing it brings her back alive.
+    """
+
+    import time
+
+    from wlblib import server
+    from wlblib.common import TEST
+    from wlblib.testing import expect
+
+    NAME = "self_rez"
+    DESCRIPTION = "Soulstone up: dead Loada is offered self-resurrection and gets up"
+    TEST_CONFIG = "choose"
+    BOT = "Loada"
+
+    def run(stack):
+        server.console("llmtest aura Loada 20707", inst=TEST)  # Soulstone Resurrection.
+        server.console("llmtest kill Loada", inst=TEST)
+        t = stack.play(["Use Soulstone", "Keep"], seconds=40, tail_s=10)
+        last = t["snapshots"][-1] if t["snapshots"] else {}
+        expect(not t["never_offered"],
+               f"never offered: {t['never_offered']}; last screen ({len(t['snapshots'])} "
+               f"snapshots): health {last.get('health')}, options {last.get('options')}")
+        use = t["commands"][0]
+        alive_after = [s for s in t["snapshots"] if s["t"] > use["t"] and s["health"] > 0]
+        expect(alive_after, "Loada wasn't alive after using the soulstone")
+        return f"self-resurrected {alive_after[0]['t'] - use['t']:.1f} s after choosing it"
+    return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
+
+CASES = [_case_self_rez(), _case_create_bots(), _case_keep(), _case_choose(), _case_walk(), _case_rest(), _case_talk(), _case_panels(), _case_bind(), _case_death()]

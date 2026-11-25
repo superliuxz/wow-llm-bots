@@ -61,6 +61,9 @@ dungeons and in the open world:
   if offered, otherwise `Keep doing what I'm doing` (your body follows the leader). Don't
   `Explore` or walk off on your own errands unless your leader asks you to in chat; quest givers,
   vendors and trainers right next to the leader are fine.
+- Wipes: if you can `Use <Soulstone/Reincarnation> (resurrect yourself)`, wait until the fight
+  is over, then use it; if a party healer is alive, `Wait for a resurrection`; otherwise
+  `Release spirit` and run back. Once up, take a moment to rebuff and drink before the next pull.
 - Pace (`party_state:` line): a healer under about a third of mana says so once ("oom,
   drinking") and drinks; the tank or leader waits for them, and for dead members, before the
   next pull. A leader may `Start ready check` before a boss.

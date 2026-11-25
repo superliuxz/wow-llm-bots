@@ -1089,7 +1089,9 @@ class LlmBrainTestCommandScript : public CommandScript {
       return false;
     }
     if (player->IsAlive()) {
-      player->KillPlayer();
+      // A real death (JustDied, then the corpse): it is what arms a
+      // soulstone or ankh (PLAYER_SELF_RES_SPELL), as dying to a mob does.
+      Unit::Kill(player, player, /*durabilityLoss=*/false);
     }
     handler->PSendSysMessage("llmtest: killed {}{}", player->GetName(),
                              FormatToken(token));

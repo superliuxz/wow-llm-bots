@@ -40,6 +40,7 @@
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "Unit.h"
+#include "UpdateFields.h"
 #include "World.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
@@ -735,6 +736,24 @@ ActionOutcome ExecuteResurrectAction(Player* bot,
       }
       BotManager::WaitForResurrection(bot, /*wait_ms=*/5 * 60 * 1000);
       return {.used = true, .info = "waiting for a resurrection"};
+    case ResurrectAction::Mode::kSelf: {
+      if (bot->IsAlive() || bot->HasPlayerFlag(PLAYER_FLAGS_GHOST)) {
+        return {.error = "you are not lying dead"};
+      }
+      if (bot->GetUInt32Value(PLAYER_SELF_RES_SPELL) == 0) {
+        return {.error = "you have no way to resurrect yourself"};
+      }
+      WorldSession* session = bot->GetSession();
+      if (!session) {
+        return {.error = "no session"};
+      }
+      WorldPacket p(CMSG_SELF_RES, 0);
+      session->HandleSelfResOpcode(p);
+      if (!bot->IsAlive()) {
+        return {.error = "could not resurrect yourself now"};
+      }
+      return {.used = true, .info = "resurrected yourself"};
+    }
     case ResurrectAction::Mode::kRelease: {
       if (bot->IsAlive())
         return {.error = "you are already alive"};

@@ -702,6 +702,22 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       acc.kind = pb::Option::USE;
       acc.name = "Accept resurrection";
     }
+    // Now #6: a soulstone or ankh up means the bot can get back up on its
+    // own, best once the fight is over.
+    if (!facts.self_resurrect.empty()) {
+      // The soulstone's own spell is already called "Use Soulstone".
+      const std::string text =
+          (facts.self_resurrect.starts_with("Use ") ? "" : "Use ") +
+          facts.self_resurrect + " (resurrect yourself)";
+      targets.push_back({OptionTarget::Kind::kUse, "rez:self", text,
+                         std::nullopt,
+                         ResurrectAction{ResurrectAction::Mode::kSelf}});
+      pb::Option& self_rez = snapshot->options.emplace_back();
+      self_rez.text = text;
+      self_rez.guid = "rez:self";
+      self_rez.kind = pb::Option::USE;
+      self_rez.name = facts.self_resurrect;
+    }
     targets.push_back({OptionTarget::Kind::kUse, "rez:release",
                        "Release spirit", std::nullopt,
                        ResurrectAction{ResurrectAction::Mode::kRelease}});

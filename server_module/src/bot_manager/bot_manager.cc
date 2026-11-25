@@ -46,6 +46,7 @@
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "Timer.h"
+#include "UpdateFields.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
 #include "base/synchronization/lock.h"
@@ -461,14 +462,15 @@ class BrainPolicyListener final : public ActionExecutionListener {
     }
     // When no LLM harness is connected, let Playerbots answer invites, loot
     // rolls, ready checks, quest shares, and LFG popups so human groupmates do
-    // not stall waiting for timeouts (A-M9).
+    // not stall waiting for timeouts (A-M9). Using a soulstone or ankh is the
+    // brain's call too (mid-wipe it would just die again, Now #6).
     const bool brain_connected = BotManager::IsBrainConnected();
-    if (brain_connected &&
-        (name == "accept invitation" || name == "loot roll" || name == "roll" ||
-         name == "accept quest share" || name == "ready check" ||
-         name == "lfg join" || name == "lfg accept" ||
-         name == "lfg role check" || name == "lfg leave" ||
-         name == "lfg teleport")) {
+    if (brain_connected && (name == "accept invitation" ||
+                            name == "loot roll" || name == "self resurrect" ||
+                            name == "roll" || name == "accept quest share" ||
+                            name == "ready check" || name == "lfg join" ||
+                            name == "lfg accept" || name == "lfg role check" ||
+                            name == "lfg leave" || name == "lfg teleport")) {
       return false;
     }
     if (name == "auto release" && bot_ && !bot_->IsAlive()) {
@@ -503,8 +505,11 @@ class BrainPolicyListener final : public ActionExecutionListener {
             }
             return *s.dead_since_ms;
           });
+      // A soulstone or ankh up is a way back too (Now #6): hold the release
+      // for the brain to use it once the fight is over.
       if (GetMSTimeDiffToNow(dead_since) < kMaxWaitForRezMs &&
-          HasLivingResurrectorNearby(bot_)) {
+          (HasLivingResurrectorNearby(bot_) ||
+           bot_->GetUInt32Value(PLAYER_SELF_RES_SPELL) != 0)) {
         return false;
       }
     }

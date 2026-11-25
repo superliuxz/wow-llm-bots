@@ -39,6 +39,7 @@
 #include "SpellAuraDefines.h"
 #include "SpellAuras.h"
 #include "SpellInfo.h"
+#include "SpellMgr.h"
 #include "ThreatManager.h"
 #include "Trainer.h"
 #include "TravelMgr.h"
@@ -760,6 +761,12 @@ void SnapshotBuilder::FillOptionFacts(Player* bot,
                     &out->npc_actions);
   CollectGroupAndUpkeepActions(bot, *snapshot, &out->group_and_upkeep_actions);
   out->has_pending_resurrect = !bot->IsAlive() && bot->isResurrectRequested();
+  if (!bot->IsAlive() && !bot->HasPlayerFlag(PLAYER_FLAGS_GHOST)) {
+    if (const SpellInfo* self_res = sSpellMgr->GetSpellInfo(
+            bot->GetUInt32Value(PLAYER_SELF_RES_SPELL))) {
+      out->self_resurrect = self_res->SpellName[sWorld->GetDefaultDbcLocale()];
+    }
+  }
   if (Group* group = bot->GetGroup()) {
     for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
       if (slot.guid == bot->GetGUID()) {

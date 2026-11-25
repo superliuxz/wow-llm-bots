@@ -40,6 +40,9 @@ BotAction DecodeOptionFactAction(std::string_view guid,
   if (guid == "rez:release") {
     return ResurrectAction{ResurrectAction::Mode::kRelease};
   }
+  if (guid == "rez:self") {
+    return ResurrectAction{ResurrectAction::Mode::kSelf};
+  }
   if (guid == "rez:wait") {
     return ResurrectAction{ResurrectAction::Mode::kWait};
   }

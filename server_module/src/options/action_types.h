@@ -70,7 +70,7 @@ struct DeclineInviteAction {
 struct LeaveGroupAction {};
 
 struct ResurrectAction {
-  enum class Mode : uint8_t { kAccept, kRelease, kWait };
+  enum class Mode : uint8_t { kAccept, kRelease, kWait, kSelf };
   Mode mode = Mode::kRelease;
 };
 

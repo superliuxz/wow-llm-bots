@@ -113,6 +113,23 @@ TEST(OptionsTest, AttackPrefersTheUnitAttackingTheBot) {
   EXPECT_EQ(targets[0].guid, "0x2");
 }
 
+// Now #6: a soulstone or ankh up is offered while lying dead.
+TEST(OptionsTest, SelfResurrectionIsOfferedWhileLyingDead) {
+  pb::Snapshot snapshot;
+  snapshot.base.self.state = pb::Self::DEAD_BODY;
+  OptionFacts facts;
+  facts.self_resurrect = "Soulstone Resurrection";
+  const std::vector<OptionTarget> targets = AddOptions(&snapshot, facts);
+  EXPECT_EQ(Texts(snapshot)[0],
+            "Use Soulstone Resurrection (resurrect yourself)");
+  EXPECT_EQ(targets[0].guid, "rez:self");
+  pb::Snapshot stone;
+  stone.base.self.state = pb::Self::DEAD_BODY;
+  facts.self_resurrect = "Use Soulstone";
+  AddOptions(&stone, facts);
+  EXPECT_EQ(Texts(stone)[0], "Use Soulstone (resurrect yourself)");
+}
+
 TEST(OptionsTest, OnlyKeepWhileDead) {
   for (pb::Self::LifeState state : {pb::Self::DEAD_BODY, pb::Self::GHOST}) {
     pb::Snapshot snapshot;
