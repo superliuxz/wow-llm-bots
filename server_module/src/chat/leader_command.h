@@ -3,6 +3,7 @@
 #ifndef MOD_LLM_BRAIN_CHAT_LEADER_COMMAND_H_
 #define MOD_LLM_BRAIN_CHAT_LEADER_COMMAND_H_
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -17,16 +18,22 @@ enum class LeaderCommand {
   kWait,            // "wait", "stay", "hold"
   kFollow,          // "follow", "come", "on me"
   kAttackMyTarget,  // "attack", "assist", "attack my target"
-  kAttackSkull,     // "kill skull", "rti skull", "skull"
+  kAttackMark,      // "kill skull", "rti cross", "skull", "cross"
   kDrink,           // "drink", "drink up", "oom", "rest"
   kMount,           // "mount", "mount up"
   kHealMe,          // "@heal", "heal me"
+  kMoveToPing,      // "go there", "flag": to the party's minimap ping
+  kPullBack,        // "los", "pull back", "fall back": to the speaker, hold
+  kPull,            // "pull", "pull skull", "pull my target"
 };
 
 struct ParsedLeaderCommand {
   LeaderCommand command;
   // The names the line addressed ("loada wait"); empty: the whole group.
   std::vector<std::string> addressed;
+  // kAttackMark, kPull: the raid icon named (kRaidIconNames index); a bare
+  // "pull" names none.
+  std::optional<size_t> mark;
 };
 
 // Parses a party line that is nothing but a command, optionally addressed to
@@ -37,8 +44,12 @@ std::optional<ParsedLeaderCommand> ParseLeaderCommand(
     std::string_view text,
     const std::vector<std::string>& names);
 
-// "wait", "follow", ...: how the brain is told what was applied.
+// "wait", "follow", "kill", "pull", ...: the command's kind, for logs.
 const char* LeaderCommandName(LeaderCommand command);
+
+// "wait", "kill skull", "pull cross", ...: how the brain is told what the
+// leader said.
+std::string DescribeLeaderCommand(const ParsedLeaderCommand& parsed);
 
 }  // namespace llm_brain
 

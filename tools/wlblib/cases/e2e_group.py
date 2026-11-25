@@ -1351,6 +1351,59 @@ def _case_human_party():
                 client.say(wowclient.CHAT_MSG_PARTY, "follow me")
                 _poll(lambda: not any(stays(b) for b in BOTS), 5, "every bot following again")
 
+                # 9 (Milestone 2b). Raid icon tags reach the bots as words ("{rt7}" ->
+                # "cross"), and the fast leader shortcuts run in C++ with no LLM call:
+                # "kill {rt7}" with nothing marked is refused, "go there" walks the bots
+                # to a fresh ping and holds them, "los" runs them back to the speaker
+                # and holds them there, "follow me" ends it.
+                def infos_since(after):
+                    with proxy.lock:
+                        return [(e.get("bot"), e["event"]["info"]["text"])
+                                for t, e in proxy.events if t >= after
+                                and "leader said:" in (e.get("event", {}).get("info") or {})
+                                .get("text", "")]
+
+                def snap_near(bot, spot, yd, after):
+                    s = latest(bot, after)
+                    pos = s and s["base"]["where"]["position"]
+                    return bool(pos) and math.dist((pos["x"], pos["y"]), spot) <= yd
+                since_rt = time.monotonic()
+                client.say(wowclient.CHAT_MSG_PARTY, "kill {rt7}")
+                cross_refused = bool(_poll(
+                    lambda: any("leader said: kill cross (not applied: nothing marked cross)"
+                                in t for _, t in infos_since(since_rt)), 5,
+                    "'kill {rt7}' refused in C++ with nothing marked cross"))
+                time.sleep(1.0)
+                with brain.lock:
+                    rt_prompts = [txt for t, _, txt in brain.prompts if t >= since_rt]
+                rt_as_word = (any("kill cross" in txt for txt in rt_prompts)
+                              and not any("{rt7}" in txt for txt in rt_prompts))
+
+                hp = human_in(latest("Loada"))["rel"]["position"]
+                human_spot = (hp["x"], hp["y"])
+                client.ping(*ping_spot)
+                time.sleep(1.5)
+                since_go = time.monotonic()
+                client.say(wowclient.CHAT_MSG_PARTY, "go there")
+                went_there = bool(_poll(
+                    lambda: all(snap_near(b, ping_spot, 4.0, since_go)
+                                for b in ("Loada", "Loadc")), 15,
+                    "Loada and Loadc at the ping after 'go there'"))
+                held_there = bool(_poll(lambda: stays("Loada") and stays("Loadc"), 5,
+                                        "Loada and Loadc holding at the ping"))
+                since_los = time.monotonic()
+                client.say(wowclient.CHAT_MSG_PARTY, "los")
+                came_back = bool(_poll(
+                    lambda: all(snap_near(b, human_spot, 5.0, since_los)
+                                for b in ("Loada", "Loadc")), 15,
+                    f"Loada and Loadc back at {HUMAN} after 'los'"))
+                held_los = bool(_poll(lambda: stays("Loada") and stays("Loadc"), 5,
+                                      f"Loada and Loadc holding at {HUMAN} after 'los'"))
+                shortcut_infos = infos_since(since_go)
+                client.say(wowclient.CHAT_MSG_PARTY, "follow me")
+                _poll(lambda: not any(stays(b) for b in BOTS), 5,
+                      "every bot following again after 'los'")
+
                 # 6. Leaving the group takes the ping off the minimap at once.
                 before_ungroup = pings_of("Loadc", since_emote)
                 pinged_before_ungroup = bool(before_ungroup and before_ungroup[-1][2])
@@ -1399,13 +1452,24 @@ def _case_human_party():
                f"Loada didn't hold at the ping (stay={held_at_ping}, at={lp})")
         expect(not others_follow, f"bots without the act stopped following: {others_follow}")
         expect(not fort_errs, f"Loadb's walk-in cast was refused: {fort_errs}")
+        expect(cross_refused, "'kill {rt7}' wasn't parsed as kill cross")
+        expect(rt_as_word, "the brain saw '{rt7}' instead of 'cross'")
+        expect(went_there and held_there,
+               f"'go there' didn't walk and hold the bots at the ping "
+               f"(at={went_there}, held={held_there})")
+        expect(came_back and held_los,
+               f"'los' didn't bring the bots back to {HUMAN} and hold them "
+               f"(at={came_back}, held={held_los})")
+        expect(any("leader said: go there (applied" in t for _, t in shortcut_infos)
+               and any("leader said: pull back (applied" in t for _, t in shortcut_infos),
+               f"the brain wasn't told the shortcuts were applied: {shortcut_infos}")
         # 30 yd range, edge to edge (+ ~3 yd of combat reach): 2 yd inside it.
         expect(fort_dist <= 31.5, f"Loadb cast Power Word: Fortitude from {fort_dist:.1f} yd")
         return (f"3 bots accepted, master={HUMAN} for all; one party reply ({replies[0]!r}); "
                 "'wait here' / 'loadb follow' / 'follow me' applied in C++; quest help shown; "
                 "stray follower came back; boss emote woke the bots; minimap pings shown "
                 "(`act: to ping` walked Loada there and held it; `use` walked Loadb into "
-                "range first) "
+                "range first; 'kill {rt7}' read as cross, 'go there' / 'los' applied in C++) "
                 f"({rel.get('dist_yd', 0):.0f} yd {rel.get('dir')}), not to self, gone on ungroup")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 

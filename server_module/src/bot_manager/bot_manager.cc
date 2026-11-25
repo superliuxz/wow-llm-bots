@@ -1125,6 +1125,20 @@ void BotManager::ClearPingStay(Player* bot) {
       bot->GetGUID().GetRawValue(), [](BotSession& s) { s.ping_stay.reset(); });
 }
 
+void BotManager::StartPingStay(Player* bot) {
+  if (!bot) {
+    return;
+  }
+  const BotSession::PingStay stay{.map_id = bot->GetMapId(),
+                                  .instance_id = bot->GetInstanceId(),
+                                  .x = bot->GetPositionX(),
+                                  .y = bot->GetPositionY(),
+                                  .z = bot->GetPositionZ()};
+  BotSessionRegistry::Instance().WithSession(
+      bot->GetGUID().GetRawValue(),
+      [&stay](BotSession& s) { s.ping_stay = stay; });
+}
+
 void BotManager::ClearBotStrategyOverride(const std::string& bot_name) {
   PolicyGlobalState& st = PolicyState();
   base::AutoLock lock(st.lock);

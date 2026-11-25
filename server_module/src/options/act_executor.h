@@ -77,6 +77,9 @@ struct ActiveAct {
   // Started by a chosen option (crowd control), not an act: its finish is
   // the option's (`done_command_id`), not an act's.
   bool for_option = false;
+  // Started by a leader's party command ("los"): on arriving, the bot holds
+  // there like after `to ping` (BotManager::StartPingStay).
+  bool hold_on_arrival = false;
 };
 
 struct ActStartResult {

@@ -84,6 +84,8 @@ class BotManager {
   static constexpr float kPingStayLeaderYd = 30.0f;
   static bool PingStayHolds(Player* bot);
   static void ClearPingStay(Player* bot);
+  // Starts that hold where the bot stands now.
+  static void StartPingStay(Player* bot);
 
   // World thread only: the brain chose to lie dead hoping for a rez (RH-M3):
   // playerbots' auto release waits `wait_ms` from now, anywhere (by default

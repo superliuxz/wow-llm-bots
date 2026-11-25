@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/synchronization/lock.h"
+#include "chat/chat_text.h"
 #include "snapshot/snapshot.h"
 
 namespace llm_brain {
@@ -42,6 +43,7 @@ bool ChatInbox::Add(std::string_view to, wlb::snapshot::ChatEvent chat) {
     ++dropped_;
     return false;
   }
+  chat.text = NormalizeRaidIcons(chat.text);
   lines_.push_back({std::string(to), std::move(chat)});
   return true;
 }

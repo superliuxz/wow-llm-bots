@@ -4,11 +4,14 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include "chat/chat_text.h"
 
 namespace llm_brain {
 namespace {
@@ -39,10 +42,6 @@ constexpr Phrase kPhrases[] = {
     {"assist", LeaderCommand::kAttackMyTarget},
     {"assist me", LeaderCommand::kAttackMyTarget},
     {"dps my target", LeaderCommand::kAttackMyTarget},
-    {"skull", LeaderCommand::kAttackSkull},
-    {"kill skull", LeaderCommand::kAttackSkull},
-    {"rti skull", LeaderCommand::kAttackSkull},
-    {"attack skull", LeaderCommand::kAttackSkull},
     {"drink", LeaderCommand::kDrink},
     {"drink up", LeaderCommand::kDrink},
     {"oom", LeaderCommand::kDrink},
@@ -54,7 +53,30 @@ constexpr Phrase kPhrases[] = {
     {"heal pls", LeaderCommand::kHealMe},
     {"need heal", LeaderCommand::kHealMe},
     {"need heals", LeaderCommand::kHealMe},
+    {"go there", LeaderCommand::kMoveToPing},
+    {"move there", LeaderCommand::kMoveToPing},
+    {"flag", LeaderCommand::kMoveToPing},
+    {"go to flag", LeaderCommand::kMoveToPing},
+    {"go to the flag", LeaderCommand::kMoveToPing},
+    {"go to ping", LeaderCommand::kMoveToPing},
+    {"go to the ping", LeaderCommand::kMoveToPing},
+    {"los", LeaderCommand::kPullBack},
+    {"pull back", LeaderCommand::kPullBack},
+    {"fall back", LeaderCommand::kPullBack},
+    {"pull", LeaderCommand::kPull},
+    {"pull it", LeaderCommand::kPull},
+    {"pull my target", LeaderCommand::kPull},
 };
+
+// "<verb> <icon>": who to kill (or pull) by its raid mark.
+constexpr std::string_view kKillVerbs[] = {"kill", "attack", "rti", "focus",
+                                           "dps"};
+
+// A bare icon word is a kill call only for the usual kill marks; "moon" or
+// "square" alone more often names a crowd-control target.
+bool IsBareKillMark(size_t icon) {
+  return kRaidIconNames[icon] == "skull" || kRaidIconNames[icon] == "cross";
+}
 
 constexpr std::string_view kFiller[] = {
     "pls", "plz", "please",    "guys", "all", "everyone",
@@ -94,7 +116,7 @@ std::optional<ParsedLeaderCommand> ParseLeaderCommand(
     std::string_view text,
     const std::vector<std::string>& names) {
   std::vector<std::string> words = Words(text);
-  ParsedLeaderCommand parsed{LeaderCommand::kWait, {}};
+  ParsedLeaderCommand parsed{LeaderCommand::kWait, {}, std::nullopt};
   std::vector<std::string> rest;
   for (std::string& w : words) {
     if (w == "@heal") {
@@ -114,7 +136,7 @@ std::optional<ParsedLeaderCommand> ParseLeaderCommand(
     }
     rest.push_back(std::move(w));
   }
-  if (rest.empty() || rest.size() > 3) {
+  if (rest.empty() || rest.size() > 4) {
     return std::nullopt;
   }
   std::string joined;
@@ -130,6 +152,27 @@ std::optional<ParsedLeaderCommand> ParseLeaderCommand(
       return parsed;
     }
   }
+  const std::optional<size_t> icon = RaidIconIndex(rest.back());
+  if (!icon || rest.back() == "x") {
+    return std::nullopt;  // "kill x" is a sentence more often than a mark.
+  }
+  parsed.mark = icon;
+  if (rest.size() == 1 && IsBareKillMark(*icon)) {
+    parsed.command = LeaderCommand::kAttackMark;
+    return parsed;
+  }
+  if (rest.size() != 2) {
+    return std::nullopt;
+  }
+  if (rest[0] == "pull") {
+    parsed.command = LeaderCommand::kPull;
+    return parsed;
+  }
+  if (std::find(std::begin(kKillVerbs), std::end(kKillVerbs), rest[0]) !=
+      std::end(kKillVerbs)) {
+    parsed.command = LeaderCommand::kAttackMark;
+    return parsed;
+  }
   return std::nullopt;
 }
 
@@ -141,16 +184,33 @@ const char* LeaderCommandName(LeaderCommand command) {
       return "follow";
     case LeaderCommand::kAttackMyTarget:
       return "attack my target";
-    case LeaderCommand::kAttackSkull:
-      return "kill skull";
+    case LeaderCommand::kAttackMark:
+      return "kill";
     case LeaderCommand::kDrink:
       return "drink";
     case LeaderCommand::kMount:
       return "mount up";
     case LeaderCommand::kHealMe:
       return "heal me";
+    case LeaderCommand::kMoveToPing:
+      return "go there";
+    case LeaderCommand::kPullBack:
+      return "pull back";
+    case LeaderCommand::kPull:
+      return "pull";
   }
   return "?";
+}
+
+std::string DescribeLeaderCommand(const ParsedLeaderCommand& parsed) {
+  std::string out = LeaderCommandName(parsed.command);
+  if ((parsed.command == LeaderCommand::kAttackMark ||
+       parsed.command == LeaderCommand::kPull) &&
+      parsed.mark && *parsed.mark < kRaidIconNames.size()) {
+    out.push_back(' ');
+    out += kRaidIconNames[*parsed.mark];
+  }
+  return out;
 }
 
 }  // namespace llm_brain

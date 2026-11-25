@@ -4,6 +4,7 @@
 
 #include <cctype>
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -101,6 +102,60 @@ bool MentionsName(std::string_view text, std::string_view name) {
     }
   }
   return false;
+}
+
+std::optional<size_t> RaidIconIndex(std::string_view word) {
+  std::string w(word);
+  for (char& c : w) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  for (size_t i = 0; i < kRaidIconNames.size(); ++i) {
+    if (w == kRaidIconNames[i]) {
+      return i;
+    }
+  }
+  // The client's other tags (ICON_TAG_RAID_TARGET_*2 and `{rt1}`..`{rt8}`).
+  if (w == "coin") {
+    return 1;
+  }
+  if (w == "x") {
+    return 6;
+  }
+  if (w.size() == 3 && w.starts_with("rt") && w[2] >= '1' && w[2] <= '8') {
+    return static_cast<size_t>(w[2] - '1');
+  }
+  return std::nullopt;
+}
+
+std::string NormalizeRaidIcons(std::string_view text) {
+  const auto is_word = [](char c) {
+    return std::isalnum(static_cast<unsigned char>(c)) != 0;
+  };
+  std::string out;
+  out.reserve(text.size());
+  size_t i = 0;
+  while (i < text.size()) {
+    const size_t close =
+        text[i] == '{' ? text.find('}', i + 1) : std::string_view::npos;
+    const std::optional<size_t> icon =
+        close == std::string_view::npos
+            ? std::nullopt
+            : RaidIconIndex(text.substr(i + 1, close - i - 1));
+    if (!icon) {
+      out.push_back(text[i]);
+      ++i;
+      continue;
+    }
+    if (!out.empty() && is_word(out.back())) {
+      out.push_back(' ');
+    }
+    out += kRaidIconNames[*icon];
+    i = close + 1;
+    if (i < text.size() && is_word(text[i])) {
+      out.push_back(' ');
+    }
+  }
+  return out;
 }
 
 }  // namespace llm_brain

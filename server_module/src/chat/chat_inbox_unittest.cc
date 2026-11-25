@@ -38,6 +38,15 @@ TEST(ChatInboxTest, KeepsOnlyLinesToTheBotsInOrder) {
   EXPECT_TRUE(inbox.TakeAll().empty());
 }
 
+TEST(ChatInboxTest, WritesRaidIconTagsAsWords) {
+  ChatInbox inbox;
+  inbox.SetBots({"Loada"});
+  EXPECT_TRUE(inbox.Add("Loada", Whisper("Gatda", "sheep {rt5} kill {Skull}")));
+  const std::vector<ChatInbox::Line> lines = inbox.TakeAll();
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_EQ(lines[0].chat.text, "sheep moon kill skull");
+}
+
 TEST(ChatInboxTest, NothingIsKeptBeforeTheBotsAreKnown) {
   ChatInbox inbox;
   EXPECT_FALSE(inbox.Add("Testpriest", Whisper("Gatda", "hi")));

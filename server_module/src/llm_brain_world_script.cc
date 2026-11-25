@@ -20,6 +20,7 @@
 #include "Event.h"
 #include "GameObject.h"
 #include "Group.h"
+#include "LFG.h"
 #include "Log.h"
 #include "Map.h"
 #include "ObjectAccessor.h"
@@ -51,6 +52,7 @@
 #include "bridge/brain_bridge.h"
 #include "chat/chat_inbox.h"
 #include "chat/chat_scripts.h"
+#include "chat/chat_text.h"
 #include "chat/leader_command.h"
 #include "chat/speak.h"
 #include "config/llm_brain_config.h"
@@ -618,7 +620,7 @@ class LlmBrainWorldScript : public WorldScript {
       std::string applied;
       if (line.chat.channel == wlb::snapshot::PARTY ||
           line.chat.channel == wlb::snapshot::RAID) {
-        applied = ApplyLeaderCommand(bot, line.chat);
+        applied = ApplyLeaderCommand(index, line.to, bot, line.chat);
       }
       const bool alerting =
           line.chat.channel == wlb::snapshot::WHISPER ||
@@ -643,7 +645,11 @@ class LlmBrainWorldScript : public WorldScript {
   // The group's human leader (or a human naming this bot) typed a command:
   // carries it out and says what was done ("leader said: wait (applied: you
   // stay here)"), or returns empty when the line isn't one for this bot.
-  std::string ApplyLeaderCommand(Player* bot,
+  // What a command means is mechanical (a mark, a ping, the speaker's spot);
+  // what to say or do next is the brain's.
+  std::string ApplyLeaderCommand(size_t index,
+                                 const std::string& name,
+                                 Player* bot,
                                  const wlb::snapshot::ChatEvent& chat) {
     Group* group = bot->GetGroup();
     Player* sender = ObjectAccessor::FindPlayerByName(chat.from);
@@ -652,8 +658,8 @@ class LlmBrainWorldScript : public WorldScript {
       return "";
     }
     std::vector<std::string> names;
-    for (const std::string& name : config_.bots) {
-      if (Player* p = ObjectAccessor::FindPlayerByName(name);
+    for (const std::string& bot_name : config_.bots) {
+      if (Player* p = ObjectAccessor::FindPlayerByName(bot_name);
           p && p->GetGroup() == group) {
         names.push_back(p->GetName());
       }
@@ -663,17 +669,25 @@ class LlmBrainWorldScript : public WorldScript {
     if (!parsed) {
       return "";
     }
-    const bool for_me =
+    BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
+    bool for_me =
         parsed->addressed.empty()
             ? group->IsLeader(sender->GetGUID())
             : std::find(parsed->addressed.begin(), parsed->addressed.end(),
                         bot->GetName()) != parsed->addressed.end();
+    // An unaddressed "pull" is for whoever tanks: the group's tank role (the
+    // Dungeon Finder's, else the spec's), unless the bot let someone else
+    // tank.
+    if (for_me && parsed->addressed.empty() &&
+        parsed->command == LeaderCommand::kPull) {
+      for_me = IsGroupTank(group, bot) && !policy.not_tank;
+    }
     if (!for_me) {
       return "";
     }
+    const std::string said = "leader said: " + DescribeLeaderCommand(*parsed);
     PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
     std::string done;
-    BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
     switch (parsed->command) {
       case LeaderCommand::kWait:
         policy.stay = true;
@@ -690,44 +704,41 @@ class LlmBrainWorldScript : public WorldScript {
       case LeaderCommand::kAttackMyTarget: {
         Unit* target = sender->GetSelectedUnit();
         if (!target || !bot->IsValidAttackTarget(target)) {
-          return "leader said: attack my target (not applied: no enemy "
-                 "targeted)";
+          return said + " (not applied: no enemy targeted)";
         }
-        if (ai) {
-          ai->GetAiObjectContext()
-              ->GetValue<GuidVector>("prioritized targets")
-              ->Set({target->GetGUID()});
-        }
-        bot->SetSelection(target->GetGUID());
-        if (!ai || !ai->DoSpecificAction("attack my target", Event(), true)) {
-          bot->Attack(target, true);
-        }
+        LeaderAttack(bot, ai, target, /*mark=*/std::nullopt);
         done = "you attack " + target->GetName();
         break;
       }
-      case LeaderCommand::kAttackSkull: {
-        Unit* skull = ObjectAccessor::GetUnit(*bot, group->GetTargetIcon(7));
-        if (!skull || !bot->IsValidAttackTarget(skull)) {
-          return "leader said: kill skull (not applied: nothing marked "
-                 "skull)";
+      case LeaderCommand::kAttackMark:
+      case LeaderCommand::kPull: {
+        // "pull" alone pulls what the speaker targets, else skull.
+        std::optional<size_t> mark = parsed->mark;
+        Unit* target = nullptr;
+        if (!mark) {
+          target = sender->GetSelectedUnit();
+          if (!target || !bot->IsValidAttackTarget(target)) {
+            target = nullptr;
+            mark = kSkullIcon;
+          }
         }
-        bot->SetSelection(skull->GetGUID());
-        if (ai) {
-          ai->GetAiObjectContext()
-              ->GetValue<GuidVector>("prioritized targets")
-              ->Set({skull->GetGUID()});
-          ai->GetAiObjectContext()->GetValue<std::string>("rti")->Set("skull");
+        if (mark) {
+          target = ObjectAccessor::GetUnit(*bot, group->GetTargetIcon(*mark));
+          if (!target || !bot->IsValidAttackTarget(target)) {
+            return said + " (not applied: nothing marked " +
+                   std::string(kRaidIconNames[*mark]) +
+                   (parsed->mark ? "" : " or targeted") + ")";
+          }
         }
-        if (!ai || !ai->DoSpecificAction("attack rti target", Event(), true)) {
-          bot->Attack(skull, true);
-        }
-        done = "you attack " + skull->GetName() + " (skull)";
+        LeaderAttack(bot, ai, target, mark);
+        done = "you attack " + target->GetName() +
+               (mark ? " (" + std::string(kRaidIconNames[*mark]) + ")" : "");
         break;
       }
       case LeaderCommand::kDrink: {
         const ActionOutcome rest = ExecuteRestAction(bot);
         if (!rest.error.empty()) {
-          return "leader said: drink (not applied: " + rest.error + ")";
+          return said + " (not applied: " + rest.error + ")";
         }
         done = "you sit down to eat and drink";
         break;
@@ -736,20 +747,122 @@ class LlmBrainWorldScript : public WorldScript {
         if (bot->IsMounted() || bot->IsInCombat() ||
             (bot->GetMap() && bot->GetMap()->IsDungeon()) || !ai ||
             !ai->DoSpecificAction("mount", Event(), true)) {
-          return "leader said: mount up (not applied: you can't mount here)";
+          return said + " (not applied: you can't mount here)";
         }
         done = "you mount up";
         break;
       case LeaderCommand::kHealMe:
         // Who heals and with what is the brain's call: it is woken for it.
-        return "leader said: heal me (" + sender->GetName() +
-               " asks for heals)";
+        return said + " (" + sender->GetName() + " asks for heals)";
+      case LeaderCommand::kMoveToPing:
+      case LeaderCommand::kPullBack: {
+        // To the party's minimap ping, or to the speaker's spot ("los": out
+        // of the pull's sight), then hold there through the fight.
+        wlb::snapshot::Command_Act act;
+        act.verb = wlb::snapshot::Command_Act::TO;
+        act.place = wlb::snapshot::Command_Act::AT;
+        const bool to_ping = parsed->command == LeaderCommand::kMoveToPing;
+        if (to_ping) {
+          act.thing = wlb::snapshot::Command_Act::PING;
+        } else {
+          act.thing = wlb::snapshot::Command_Act::NAMED;
+          act.name = sender->GetName();
+        }
+        const std::string error =
+            StartLeaderMove(index, name, bot, act, /*hold=*/!to_ping);
+        if (!error.empty()) {
+          return said + " (not applied: " + error + ")";
+        }
+        policy.stay = false;
+        BotManager::SetGroupPolicy(bot, policy);
+        done = to_ping ? "you go to the ping and hold there"
+                       : "you run to " + sender->GetName() + " and hold there";
+        break;
+      }
     }
     LOG_INFO("module", "mod-llm-brain: {} applied leader command {} from {}",
-             bot->GetName(), LeaderCommandName(parsed->command),
-             sender->GetName());
-    return std::string("leader said: ") + LeaderCommandName(parsed->command) +
-           " (applied: " + done + ")";
+             bot->GetName(), DescribeLeaderCommand(*parsed), sender->GetName());
+    return said + " (applied: " + done + ")";
+  }
+
+  static constexpr size_t kSkullIcon = 7;
+
+  // The group's tank as party frames show it: the Dungeon Finder role when
+  // one was picked, else the spec's (snapshot_builder MemberRole).
+  static bool IsGroupTank(Group* group, Player* bot) {
+    for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+      if (slot.guid == bot->GetGUID() && slot.roles != 0) {
+        return (slot.roles & lfg::PLAYER_ROLE_TANK) != 0;
+      }
+    }
+    return PlayerbotAI::IsTank(bot);
+  }
+
+  // Attacks `target` for a leader's command, through playerbots' own attack
+  // (and its raid-target value for a mark) when it has one.
+  static void LeaderAttack(Player* bot,
+                           PlayerbotAI* ai,
+                           Unit* target,
+                           std::optional<size_t> mark) {
+    bot->SetSelection(target->GetGUID());
+    if (ai) {
+      ai->GetAiObjectContext()
+          ->GetValue<GuidVector>("prioritized targets")
+          ->Set({target->GetGUID()});
+      if (mark) {
+        ai->GetAiObjectContext()->GetValue<std::string>("rti")->Set(
+            std::string(kRaidIconNames[*mark]));
+      }
+    }
+    const char* action = mark ? "attack rti target" : "attack my target";
+    if (!ai || !ai->DoSpecificAction(action, Event(), true)) {
+      bot->Attack(target, true);
+    }
+  }
+
+  // Starts a leader's move like a brain's act (command 0: no plan waits on
+  // it); it takes over from a running act the way OnAct does. Returns the
+  // reason when it can't start.
+  std::string StartLeaderMove(size_t index,
+                              const std::string& name,
+                              Player* bot,
+                              const wlb::snapshot::Command_Act& act,
+                              bool hold) {
+    BotState& state = bots_[index];
+    ActiveAct pending;
+    const ActStartResult res =
+        StartAct(bot, /*command_id=*/0, act, base::TimeTicks::Now(), &pending);
+    if (!res.error.empty()) {
+      return res.error;
+    }
+    BotManager::ClearPingStay(bot);
+    ReportOptionUseDropped(index, name, bot);
+    if (state.active_act && !state.active_act->for_option &&
+        state.active_act->command_id != 0) {
+      // The brain's own act gives way to the leader: its plan hears why.
+      wlb::snapshot::Event payload;
+      wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
+      failed.text = "act cancelled by the leader's command";
+      failed.command_id = state.active_act->command_id;
+      EmitAlertingEvent(index, name, bot, std::move(payload));
+    }
+    if (res.done) {
+      if (state.active_act) {
+        CancelActiveAct(bot, &*state.active_act);
+        state.active_act.reset();
+      }
+      // Already there (a `to ping` act holds by itself).
+      if (hold || act.thing == wlb::snapshot::Command_Act::PING) {
+        BotManager::StartPingStay(bot);
+      }
+    } else {
+      // A movement act replaces the old one without stopping the new walk.
+      pending.hold_on_arrival = hold;
+      state.active_act = std::move(pending);
+    }
+    schedule_->SetActiveTargetPending(
+        index, state.active_option.has_value() || state.active_act.has_value());
+    return "";
   }
 
   void CheckPendingGroupInvite(Player* bot,
@@ -880,11 +993,14 @@ class LlmBrainWorldScript : public WorldScript {
             const uint32_t cancelled_cmd_id = state.active_act->command_id;
             CancelActiveAct(bot, &*state.active_act);
             state.active_act.reset();
-            wlb::snapshot::Event payload;
-            wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
-            failed.text = "act cancelled by new choice";
-            failed.command_id = cancelled_cmd_id;
-            EmitAlertingEvent(bot_index, name, bot, std::move(payload));
+            // A leader command's move (command 0) is the brain's to replace.
+            if (cancelled_cmd_id != 0) {
+              wlb::snapshot::Event payload;
+              wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
+              failed.text = "act cancelled by new choice";
+              failed.command_id = cancelled_cmd_id;
+              EmitAlertingEvent(bot_index, name, bot, std::move(payload));
+            }
           }
           state.had_food_drink_aura = false;
           state.attack_idle_since = base::TimeTicks();
@@ -1200,9 +1316,15 @@ class LlmBrainWorldScript : public WorldScript {
         failed.command_id = cmd_id;
         EmitAlertingEvent(index, name, bot, std::move(payload));
       } else if (res.done) {
-        (state.active_act->for_option ? state.done_command_id
-                                      : state.done_act_command_id) =
-            state.active_act->command_id;
+        if (state.active_act->hold_on_arrival) {
+          BotManager::StartPingStay(bot);
+        }
+        // A leader command's move (command 0) finishes no brain command.
+        if (state.active_act->command_id != 0) {
+          (state.active_act->for_option ? state.done_command_id
+                                        : state.done_act_command_id) =
+              state.active_act->command_id;
+        }
         state.active_act.reset();
       } else {
         // An active standing-order act owns movement/casting until it finishes

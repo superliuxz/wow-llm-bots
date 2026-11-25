@@ -41,7 +41,8 @@ class ChatInbox : public base::RawPtrTarget {
   std::vector<std::string> Bots();
   bool Contains(std::string_view name);
 
-  // Keeps `chat` if `to` is one of the bots. Returns whether it was kept. Any
+  // Keeps `chat` if `to` is one of the bots, raid icon tags ("{skull}")
+  // written as words (NormalizeRaidIcons). Returns whether it was kept. Any
   // thread.
   bool Add(std::string_view to, wlb::snapshot::ChatEvent chat);
 
