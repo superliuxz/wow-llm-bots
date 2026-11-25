@@ -19,6 +19,7 @@ choice Shape {
   Circle = "circle " r:Ratio (" in " color:Color)?;
   Tagged = "tag " label:Label (" and " other:Other)?;
   Pairs  = "pairs:" items:list<Pair, ",", 0..3> ".";
+  Gated  = "gated" @needs(others);  // Offered only while `others` has names.
 }
 
 struct Line = (bold:"bold ")? "hp" ~"<" n:Small ~"%" " " shape:Shape;

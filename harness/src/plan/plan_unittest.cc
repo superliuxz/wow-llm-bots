@@ -6,8 +6,10 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
+#include "grammar/orders.wlb.h"
 #include "grammar/plan.wlb.h"
 #include "grammar/wlb_runtime.h"
 #include "gtest/gtest.h"
@@ -343,6 +345,55 @@ TEST(PlanTest, OrderLinesOnlyWithNamesToUse) {
   EXPECT_FALSE(Accepts(grammar, "order: Frost Bomb appears -> away"));
 }
 
+// `act:` is up to 3 order steps done at once; like `order:` it needs names
+// to use, and `ping` is offered in it only while a ping is on the screen.
+TEST(PlanTest, ActLinesCarryAtMostThreeImmediateActs) {
+  const std::optional<Plan> plan = ParsePlan(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n"
+      "act: use Polymorph on marker star, then to ping, then pet dismiss",
+      1, {"Polymorph"});
+  ASSERT_TRUE(plan);
+  ASSERT_EQ(plan->acts.size(), 3u);
+  EXPECT_TRUE(std::holds_alternative<Act::Use>(plan->acts[0].value));
+  EXPECT_TRUE(std::holds_alternative<Act::To>(plan->acts[1].value));
+  EXPECT_EQ(std::get<Act::Pet>(plan->acts[2].value).cmd,
+            grammar::PetCmd::kDismiss);
+  EXPECT_TRUE(plan->orders.empty());
+  EXPECT_EQ(ParsePlan(FormatPlan(*plan), 1, {"Polymorph"}), plan);
+  EXPECT_NE(FormatPlan(*plan).find(
+                "\nact: use Polymorph on marker star, then to ping, then pet "
+                "dismiss"),
+            std::string::npos);
+
+  // Four acts, or a junk one: the line is dropped, the plan stands.
+  for (const char* bad :
+       {"act: jump, then jump, then jump, then jump", "act: dance", "act: "}) {
+    const std::optional<Plan> dropped = ParsePlan(
+        std::string("do: 1\nexpect: none\nwatch: none\nlook: 60\n") + bad, 1);
+    ASSERT_TRUE(dropped) << bad;
+    EXPECT_TRUE(dropped->acts.empty()) << bad;
+  }
+  // No `act:` line, no acts (and FormatPlan writes none).
+  const std::optional<Plan> none = ParsePlan(kFullPlan, 5);
+  ASSERT_TRUE(none);
+  EXPECT_TRUE(none->acts.empty());
+  EXPECT_EQ(FormatPlan(*none).find("act:"), std::string::npos);
+
+  // The grammar: no names, no `act:`; `ping` only with a pinger.
+  EXPECT_FALSE(Accepts(PlanGrammar(1), "act: jump"));
+  const std::string no_ping = PlanGrammar(1, {}, {}, {"Sap"});
+  EXPECT_TRUE(Accepts(no_ping, "act: use Sap on marker diamond, then back"));
+  EXPECT_TRUE(Accepts(no_ping, "order: always -> jump\nact: pet dismiss"));
+  EXPECT_FALSE(Accepts(no_ping, "act: to ping"));
+  EXPECT_FALSE(Accepts(no_ping, "act: jump, then jump, then jump, then jump"));
+  const std::string ping = PlanGrammar(1, {}, {}, {"Sap"}, {"Hele"});
+  EXPECT_TRUE(Accepts(ping, "act: to ping"));
+  EXPECT_TRUE(
+      Accepts(ping, "order: ping within 3 -> back\nact: use Sap on ping"));
+  // A pinger without order names doesn't turn `act:` on.
+  EXPECT_FALSE(Accepts(PlanGrammar(1, {}, {}, {}, {"Hele"}), "act: to ping"));
+}
+
 TEST(PlanTest, TheGrammarOffersHoverOnlyForNamesOnScreen) {
   EXPECT_FALSE(Accepts(PlanGrammar(1), "hover: Tough Hunk of Bread"));
   const std::string grammar =
@@ -356,7 +407,7 @@ TEST(PlanTest, TheGrammarOffersHoverOnlyForNamesOnScreen) {
 
 TEST(PlanTest, RandomPlansRoundTripAndTheGrammarAcceptsThem) {
   const std::vector<std::string> names = {"Gatda", "Brakka", "Kelra"};
-  const std::string grammar = PlanGrammar(9, names, names, names);
+  const std::string grammar = PlanGrammar(9, names, names, names, {"Hele"});
   grammar::rt::RandomSource source(11, names);
   for (int i = 0; i < 500; ++i) {
     const std::string text = grammar::FormatPlan(grammar::RandomPlan(&source));

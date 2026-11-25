@@ -371,6 +371,29 @@ TEST(PromptTest, AssemblePromptInputUnifiesLiveAndOfflineFields) {
   EXPECT_EQ(input.whisperers, std::vector<std::string>{"Hele"});
   EXPECT_EQ(input.remembered,
             std::vector<std::string>{"bags, seen 10 s ago: bread"});
+  // No minimap ping: no pinger, so the grammar offers no `ping` thing.
+  EXPECT_TRUE(input.pingers.empty());
+}
+
+// A party ping on the screen offers `ping` in `act:` / `order:` lines; with
+// none (or an unnamed one, which the screen doesn't show) it isn't.
+TEST(PromptTest, APartyPingOffersPingInTheGrammar) {
+  wlb::snapshot::Snapshot snap;
+  snap.bot = "Tess";
+  PromptAssemblyContext ctx;
+  ctx.extra_order_names = {"Sap"};
+  wlb::snapshot::Minimap::Ping& ping =
+      snap.ext.minimap.emplace().ping.emplace();
+  EXPECT_TRUE(AssemblePromptInput(ctx, snap).pingers.empty());  // No `from`.
+  ping.from = "Hele";
+  const PromptInput input = AssemblePromptInput(ctx, snap);
+  EXPECT_EQ(input.pingers, std::vector<std::string>{"Hele"});
+  EXPECT_NE(BuildPlanRequest(input, SampleScreen()).grammar.find("\"ping\""),
+            std::string::npos);
+  PromptInput no_ping = input;
+  no_ping.pingers.clear();
+  EXPECT_EQ(BuildPlanRequest(no_ping, SampleScreen()).grammar.find("\"ping\""),
+            std::string::npos);
 }
 
 TEST(PromptTest, AFullSpellsLineYieldsToOptionsAndCoreLinesUnderTightBudget) {

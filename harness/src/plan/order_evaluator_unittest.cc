@@ -673,6 +673,16 @@ TEST(OrderEvaluatorTest, OrderActToCommandAndWireRoundTrip) {
   ASSERT_TRUE(cmd_act.has_value());
   EXPECT_EQ(cmd_act->verb, pb::Command::Act::PET_ATTACK);
 
+  // `ping` and `pet dismiss` parse, but the module can't carry them out yet:
+  // no command (never a half-filled one); the forms next to them still work.
+  EXPECT_FALSE(to_wire("always -> to ping").has_value());
+  EXPECT_FALSE(to_wire("always -> use Flare on ping").has_value());
+  EXPECT_FALSE(to_wire("always -> face ping").has_value());
+  EXPECT_FALSE(to_wire("always -> pet dismiss").has_value());
+  EXPECT_EQ(to_wire("always -> use Flare")->verb, pb::Command::Act::USE);
+  EXPECT_EQ(to_wire("always -> pet defensive")->pet_cmd,
+            pb::Command::Act::DEFENSIVE);
+
   EXPECT_EQ(to_wire("always -> avoid boss")->verb, pb::Command::Act::AVOID);
   EXPECT_EQ(to_wire("always -> face boss")->verb, pb::Command::Act::FACE);
   EXPECT_EQ(to_wire("always -> face away boss")->verb,

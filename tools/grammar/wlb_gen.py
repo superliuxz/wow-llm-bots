@@ -85,7 +85,7 @@ class Reader:
 def read_seq(r, stop):
     """A sequence up to (not including) a `stop` punctuation."""
     elems = []
-    while not r.at("punct", stop) and not r.at("end"):
+    while not r.at("punct", stop) and not r.at("punct", "@") and not r.at("end"):
         if r.at("string"):
             elems.append({"kind": "lit", "text": r.take("string")})
         elif r.at("punct", "~"):
@@ -305,8 +305,17 @@ def read_wlb(path, imported=False):
                 arm = r.take("ident")
                 r.take("punct", "=")
                 seq = read_seq(r, ";")
+                needs = None
+                if r.at("punct", "@"):  # `@needs(list)`: offered only while it has names.
+                    r.take()
+                    r.take("ident", "needs")
+                    r.take("punct", "(")
+                    needs = r.take("ident")
+                    r.take("punct", ")")
+                    if env.get(needs) != "names":
+                        raise WlbError(f"{path}: {name}.{arm}: no env list {needs}")
                 r.take("punct", ";")
-                arms.append({"name": arm, "seq": seq})
+                arms.append({"name": arm, "seq": seq, "needs": needs})
             r.take("punct", "}")
             types[name] = {"kind": "choice", "arms": arms}
         else:
@@ -1210,10 +1219,23 @@ class Gen:
             elif k == "struct":
                 spec["alts"] = f"{{Seq{name}()}}"
             elif k == "choice":
-                alts = ", ".join(f"Seq{name}{a['name']}()" for a in t["arms"])
+                # An arm with `@needs(list)` is its own rule, so an empty list
+                # drops just that arm from the GBNF (parsing still reads it).
+                alts = ", ".join(
+                    f"rt::Seq{{rt::Field(nullptr, \"{self.rule(name)}-{a['name']}\", 0)}}"
+                    if a.get("needs") else f"Seq{name}{a['name']}()" for a in t["arms"])
                 spec["alts"] = f"{{{alts}}}"
             c[-1] += ", ".join(f".{k} = {v}" for k, v in spec.items()) + "};"
             c += ["  return *rule;", "}", ""]
+            if k == "choice":
+                for a in t["arms"]:
+                    if not a.get("needs"):
+                        continue
+                    arm_spec = self.rule_spec(f"{self.rule(name)}-{a['name']}")
+                    arm_spec["alts"] = f"{{Seq{name}{a['name']}()}}"
+                    arm_spec["needs"] = f"\"{a['needs']}\""
+                    c += self.rule_fn(f"Rule{name}{a['name']}", arm_spec)
+                    rules.append(f"Rule{name}{a['name']}")
         for name in order:
             if self.types[name]["kind"] == "lines":
                 lines_code, line_rules = self.lines_source(name, self.types[name])

@@ -24,7 +24,7 @@ and `harness/src/plan/orders.h`.
 | `text Goal max 60 no "\n" [from <env>]` | Free text (truncates UTF-8 over `max`, or rejects when `from <env>`) | `std::string` |
 | `name Name from <env>` | Player-visible name (contains an ASCII letter; GBNF restricts to `<env>`) | `std::string` |
 | `struct Order = ...` | Sequence of literals, fields, optionals `( ... )?`, and `list<T, "sep", min..max>` | `struct` |
-| `choice Act { ... }` | Ordered alternatives; each arm is a namespace-scope struct aliased into the choice | `std::variant` |
+| `choice Act { ... }` | Ordered alternatives; each arm is a namespace-scope struct aliased into the choice (`Arm = ... @needs(list);`: GBNF offers the arm only while `list` has names) | `std::variant` |
 | `lines Plan { ... }` | Ordered `key: value` reply lines (`key?`, `key*N`, `key <field>:`, `default`, `lenient`, `@needs`) | `struct` |
 
 - **Parse-only spellings (`~`):** `~"<"` or `~"questlog"` is accepted on parse (with optional

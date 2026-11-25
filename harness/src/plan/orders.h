@@ -47,8 +47,10 @@ std::optional<std::vector<Act>> ParseActs(
 // The GBNF rules for an order (root `orders-Order`, OrdersRuleName) and what it
 // uses, with names limited to `names` (what the bot can see or
 // knows: units, objects, auras, its spells and items); "" when `names` has no
-// usable name, so the plan grammar leaves `order:` lines out.
-std::string OrderGrammar(const std::vector<std::string>& names);
+// usable name, so the plan grammar leaves `order:` lines out. `pingers`: who
+// has a minimap ping on the screen; none, `ping` isn't offered as a thing.
+std::string OrderGrammar(const std::vector<std::string>& names,
+                         const std::vector<std::string>& pingers = {});
 
 // Collects the deduplicated list of usable order names from what the bot sees
 // on `snapshot` (units, objects, areas, auras, casts, action-bar/spellbook

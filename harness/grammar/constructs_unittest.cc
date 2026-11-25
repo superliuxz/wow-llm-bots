@@ -89,6 +89,22 @@ TEST(ConstructsTest, AnEmptyNameListPrunesWhatNeedsIt) {
   EXPECT_EQ(ConstructsGrammar("Label", TestEnv({}, {})), "");
 }
 
+TEST(ConstructsTest, AnArmThatNeedsAListIsOfferedOnlyWhileItHasNames) {
+  const std::string root = ConstructsRuleName("Shape");
+  const std::string without = ConstructsGrammar("Shape", TestEnv({"x"}, {}));
+  EXPECT_EQ(without.find("\"gated\""), std::string::npos) << without;
+  EXPECT_TRUE(GbnfAccepts(without, root, "dot").accepted) << without;
+  EXPECT_FALSE(GbnfAccepts(without, root, "gated").accepted);
+  const std::string with = ConstructsGrammar("Shape", TestEnv({"x"}, {"y"}));
+  EXPECT_TRUE(GbnfAccepts(with, root, "gated").accepted) << with;
+  EXPECT_TRUE(GbnfAccepts(with, root, "dot").accepted);
+  // Parsing reads it either way, and prints it back.
+  const std::optional<Shape> shape = ParseShape("gated");
+  ASSERT_TRUE(shape);
+  EXPECT_TRUE(std::holds_alternative<Shape::Gated>(shape->value));
+  EXPECT_EQ(FormatShape(*shape), "gated");
+}
+
 TEST(ConstructsTest, RandomValuesRoundTripAndTheGrammarAcceptsThem) {
   rt::RandomSource source(7, {"Label One", "Kel'Thuzad", "SI:7"});
   for (int i = 0; i < 500; ++i) {
@@ -97,8 +113,10 @@ TEST(ConstructsTest, RandomValuesRoundTripAndTheGrammarAcceptsThem) {
     EXPECT_EQ(ParseLine(text), line) << text;
     std::vector<std::string> names;
     CollectNames(line, &names);
+    std::vector<std::string> others = names;
+    others.push_back("Other");  // So the Gated arm is offered.
     const GbnfResult result =
-        GbnfAccepts(ConstructsGrammar("Line", TestEnv(names, names)),
+        GbnfAccepts(ConstructsGrammar("Line", TestEnv(names, others)),
                     ConstructsRuleName("Line"), text);
     EXPECT_TRUE(result.grammar_ok);
     EXPECT_TRUE(result.accepted) << text;

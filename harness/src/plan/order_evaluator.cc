@@ -1772,8 +1772,9 @@ std::optional<pb::Command::Act> OrderActToCommand(
     std::string_view it_guid,
     std::string_view it_name,
     std::string_view target_guid) {
-  auto fill_thing = [](const Thing& thing, pb::Command::Act* out,
-                       bool target_slot) {
+  bool supported = true;
+  auto fill_thing = [&supported](const Thing& thing, pb::Command::Act* out,
+                                 bool target_slot) {
     std::string& dst_name = target_slot ? out->target_name : out->name;
     std::visit(
         [&](const auto& t) {
@@ -1841,6 +1842,9 @@ std::optional<pb::Command::Act> OrderActToCommand(
           } else if constexpr (std::is_same_v<T, grammar::ThingNamed>) {
             out->thing = pb::Command::Act::NAMED;
             dst_name = t.name;
+          } else if constexpr (std::is_same_v<T, grammar::ThingPing>) {
+            // The module can't aim at a minimap ping yet.
+            supported = false;
           }
         },
         thing.value);
@@ -1850,7 +1854,6 @@ std::optional<pb::Command::Act> OrderActToCommand(
   out.it_guid = std::string(it_guid);
   out.it_name = std::string(it_name);
 
-  bool supported = true;
   std::visit(
       [&](const auto& a) {
         using A = std::decay_t<decltype(a)>;
@@ -1964,6 +1967,10 @@ std::optional<pb::Command::Act> OrderActToCommand(
               break;
             case grammar::PetCmd::kDefensive:
               out.pet_cmd = pb::Command::Act::DEFENSIVE;
+              break;
+            case grammar::PetCmd::kDismiss:
+              // The module can't dismiss a pet yet.
+              supported = false;
               break;
           }
         } else if constexpr (std::is_same_v<A, grammar::ActKite>) {

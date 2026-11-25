@@ -75,12 +75,12 @@ TEST(OrdersTest, ANameMayHoldTheSeparator) {
 }
 
 // What the printer writes, the GBNF the brain is held to accepts (with the
-// names the order uses).
+// names the order uses, and a minimap ping on the screen).
 void ExpectGrammarAccepts(const Order& order) {
   std::vector<std::string> names;
   grammar::CollectNames(order, &names);
-  const std::string rules =
-      OrderGrammar(names.empty() ? std::vector<std::string>{"X"} : names);
+  const std::string rules = OrderGrammar(
+      names.empty() ? std::vector<std::string>{"X"} : names, {"Hele"});
   const std::string text = FormatOrder(order);
   const GbnfResult result =
       GbnfAccepts(rules, grammar::OrdersRuleName("Order"), text);
@@ -126,6 +126,8 @@ TEST(OrdersTest, EveryFormRoundTrips) {
            "Shield",
            "Spirit Bomb appears & me nearest to it -> avoid boss, then face "
            "boss",
+           "always -> to ping, then pet dismiss",
+           "ping within 5 -> use Flare on ping",
        }) {
     const std::optional<Order> order = ParseOrder(text);
     ASSERT_TRUE(order) << text;
@@ -228,6 +230,40 @@ TEST(OrdersTest, EveryFittingActionOfTheAuditParses) {
     EXPECT_EQ(ParseOrder(FormatOrder(*order)), order) << act;
     ExpectGrammarAccepts(*order);
   }
+}
+
+// `ping` (where the party's minimap ping is) is offered only while there is
+// one; without it the rest of the grammar is unchanged. Parsing still reads it
+// (a standing order outlives the ping that it named).
+TEST(OrdersTest, PingIsOfferedOnlyWhileAPingIsOnTheScreen) {
+  const std::string root = grammar::OrdersRuleName("Order");
+  const std::string without = OrderGrammar({"Flare"});
+  const std::string with = OrderGrammar({"Flare"}, {"Hele"});
+  EXPECT_FALSE(GbnfAccepts(without, root, "always -> to ping").accepted)
+      << without;
+  EXPECT_FALSE(GbnfAccepts(without, root, "ping within 5 -> jump").accepted);
+  EXPECT_TRUE(GbnfAccepts(without, root, "always -> pet dismiss").accepted);
+  EXPECT_TRUE(GbnfAccepts(without, root, "always -> use Flare").accepted);
+  EXPECT_TRUE(GbnfAccepts(with, root, "always -> to ping").accepted) << with;
+  EXPECT_TRUE(GbnfAccepts(with, root, "always -> use Flare on ping").accepted);
+  // A ping alone doesn't turn orders on: they still need a name to use.
+  EXPECT_EQ(OrderGrammar({}, {"Hele"}), "");
+  // A non-name pinger (none of the screen's names) offers nothing.
+  EXPECT_FALSE(
+      GbnfAccepts(OrderGrammar({"Flare"}, {""}), root, "always -> to ping")
+          .accepted);
+
+  const std::optional<std::vector<Act>> acts = ParseActs("to ping");
+  ASSERT_TRUE(acts);
+  const auto& to = std::get<Act::To>((*acts)[0].value);
+  const auto& at = std::get<Place::At>(to.place.value);
+  EXPECT_TRUE(std::holds_alternative<Thing::Ping>(at.t.value));
+  // `ping` is the ping, never a unit named "ping".
+  const std::optional<std::vector<Act>> named =
+      ParseActs("target ping", {"ping"});
+  ASSERT_TRUE(named);
+  EXPECT_TRUE(std::holds_alternative<Thing::Ping>(
+      std::get<Act::Target>((*named)[0].value).t.value));
 }
 
 TEST(OrdersTest, TheGrammarNamesOnlyWhatTheBotKnows) {

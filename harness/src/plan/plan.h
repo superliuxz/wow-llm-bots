@@ -93,6 +93,9 @@ struct Plan {
   // `orders: none` (`clear_orders == true`) explicitly clears them.
   bool clear_orders = false;
   std::vector<Order> orders;
+  // Up to 3 acts to do at once (`act: <act>[, then <act>]`, the order steps'
+  // language, orders.h). Empty: none.
+  std::vector<Act> acts;
 
   bool operator==(const Plan&) const = default;
 };
@@ -104,11 +107,13 @@ struct Plan {
 // (2-12 ASCII letters) are left out.
 // `hover_names`: what a `hover:` line may name (items and quests on screen);
 // none, no `hover:` line. `order_names`: the names `order:` lines may use
-// (OrderGrammar); none, no `order:` lines.
+// (OrderGrammar); none, no `order:` or `act:` lines. `pingers`: who has a
+// minimap ping on the screen; none, no `ping` thing in orders or acts.
 std::string PlanGrammar(int option_count,
                         const std::vector<std::string>& tell_names = {},
                         const std::vector<std::string>& hover_names = {},
-                        const std::vector<std::string>& order_names = {});
+                        const std::vector<std::string>& order_names = {},
+                        const std::vector<std::string>& pingers = {});
 
 // Reads only the `do: ...` line, as soon as the first newline of a streamed
 // reply arrives, so the body can start moving while the rest of the plan is

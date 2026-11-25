@@ -6,6 +6,7 @@
 
 env OrderEnv {
   order_names: names;  // units, objects, auras, spells and items; none: no orders
+  pingers: names;      // who has a minimap ping on the screen; none: no `ping`
 }
 
 words Who     { me, tank, offtank, healer, leader, anyone, boss, it }
@@ -14,7 +15,7 @@ words State   { flying, grounded, untargetable, submerged }
 words MyState { "in vehicle", mounted, swimming, "nearest to it" }
 words Cmp     { "<", ">" }
 words Stop    { casting, attacking, moving }
-words PetCmd  { stay, follow, passive, defensive }
+words PetCmd  { stay, follow, passive, defensive, dismiss }
 num   Num    0..999 1dp
 num   PosSec 1..999 1dp
 int   Count  0..999
@@ -38,6 +39,7 @@ choice Thing {
   Group    = "group";
   Allies   = "allies";
   Focus    = "focus";
+  Ping     = "ping" @needs(pingers);  // Where the party's minimap ping is.
   Named    = name:Name;
 }
 

@@ -33,7 +33,8 @@ std::optional<std::vector<Act>> ParseActs(
   return std::move(order->steps);
 }
 
-std::string OrderGrammar(const std::vector<std::string>& names) {
+std::string OrderGrammar(const std::vector<std::string>& names,
+                         const std::vector<std::string>& pingers) {
   // No names, no orders: that is how `order:` lines stay off until the module
   // can carry acts out (docs/specs/triggers.md, step (b)). The generated
   // grammar alone would still allow orders that name nothing ("always ->
@@ -45,7 +46,8 @@ std::string OrderGrammar(const std::vector<std::string>& names) {
   }
   return grammar::OrdersGrammar(
       "Order",
-      grammar::rt::Env{.names = {{"order_names", names}}, .counts = {}});
+      grammar::rt::Env{.names = {{"order_names", names}, {"pingers", pingers}},
+                       .counts = {}});
 }
 
 namespace {
@@ -54,9 +56,9 @@ namespace pb = wlb::snapshot;
 
 bool IsOrderKeyword(std::string_view s) {
   static constexpr std::string_view kKeywords[] = {
-      "me",    "tank",   "offtank", "healer", "leader", "anyone",
-      "boss",  "it",     "ally",    "player", "enemy",  "my target",
-      "group", "allies", "focus",   "always", "wake",   "jump",
+      "me",    "tank",   "offtank", "healer", "leader",    "anyone", "boss",
+      "it",    "ally",   "player",  "enemy",  "my target", "group",  "allies",
+      "focus", "always", "wake",    "jump",   "ping",
   };
   return std::ranges::find(kKeywords, s) != std::end(kKeywords);
 }

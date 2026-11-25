@@ -564,6 +564,11 @@ PromptInput AssemblePromptInput(const PromptAssemblyContext& ctx,
       out.order_names.push_back(extra);
     }
   }
+  // The same test as the screen's `ping:` line.
+  if (snapshot.ext.minimap && snapshot.ext.minimap->ping &&
+      !snapshot.ext.minimap->ping->from.empty()) {
+    out.pingers.push_back(snapshot.ext.minimap->ping->from);
+  }
   out.slot = ctx.slot;
   out.temperature = ctx.temperature;
   return out;
@@ -898,7 +903,7 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
   }
   request.grammar =
       PlanGrammar(static_cast<int>(screen.options.size()), input.whisperers,
-                  hover_names, input.order_names);
+                  hover_names, input.order_names, input.pingers);
   request.slot = input.slot;
   request.temperature = input.temperature;
   return request;

@@ -30,10 +30,12 @@ namespace g = grammar;
 g::rt::Env PlanEnv(int option_count,
                    std::vector<std::string> tell_names = {},
                    std::vector<std::string> hover_names = {},
-                   std::vector<std::string> order_names = {}) {
+                   std::vector<std::string> order_names = {},
+                   std::vector<std::string> pingers = {}) {
   return {.names = {{"whisperers", std::move(tell_names)},
                     {"hover_names", std::move(hover_names)},
-                    {"order_names", std::move(order_names)}},
+                    {"order_names", std::move(order_names)},
+                    {"pingers", std::move(pingers)}},
           .counts = {{"options", option_count}}};
 }
 
@@ -121,15 +123,17 @@ std::vector<To> Map(const std::vector<From>& from, Fn fn) {
 std::string PlanGrammar(int option_count,
                         const std::vector<std::string>& tell_names,
                         const std::vector<std::string>& hover_names,
-                        const std::vector<std::string>& order_names) {
+                        const std::vector<std::string>& order_names,
+                        const std::vector<std::string>& pingers) {
   // A screen always has at least "Keep doing what I'm doing"; an empty
   // alternative would be an invalid grammar (llama-server rejects it).
-  // No order names, no `order:` lines (OrderGrammar): orders stay off until the
-  // module can carry acts out.
+  // No order names, no `order:` or `act:` lines (OrderGrammar): orders stay
+  // off until the module can carry acts out.
   const bool orders_on = !OrderGrammar(order_names).empty();
   const std::string rules = g::PlanGrammar(
-      "Plan", PlanEnv(std::max(option_count, 1), tell_names, hover_names,
-                      orders_on ? order_names : std::vector<std::string>{}));
+      "Plan",
+      PlanEnv(std::max(option_count, 1), tell_names, hover_names,
+              orders_on ? order_names : std::vector<std::string>{}, pingers));
   return base::StrCat({"root ::= ", g::PlanRuleName("Plan"), "\n", rules});
 }
 
@@ -189,6 +193,7 @@ std::optional<Plan> ParsePlan(std::string_view text,
   plan.hover = parsed->hover;
   plan.clear_orders = !parsed->clear_orders.empty();
   plan.orders = parsed->orders;
+  plan.acts = parsed->acts;
   return plan;
 }
 
@@ -233,6 +238,7 @@ std::string FormatPlan(const Plan& plan) {
     out.clear_orders.push_back(g::ClearOrders::kNone);
   }
   out.orders = plan.orders;
+  out.acts = plan.acts;
   return g::FormatPlan(out);
 }
 
