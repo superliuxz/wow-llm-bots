@@ -141,6 +141,9 @@ class TriggerEvaluator {
   // For a bot whose group role is tank: living mobs (not crowd-controlled)
   // whose target is another, non-tank party member.
   std::flat_set<std::string> prev_loose_mobs_;
+  // Last seen spell miss on `self`, so a miss wakes once while it remains on
+  // screen, and a second miss (higher `seq`) wakes again.
+  std::optional<wlb::snapshot::Self::SpellMiss> prev_spell_miss_;
   // Last snapshot's watch inputs, to seed latches in SetPlanContext().
   WatchInputs last_;
 

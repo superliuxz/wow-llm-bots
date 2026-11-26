@@ -359,6 +359,13 @@ void FillSelf(Player* bot, pb::Self* self) {
   self->money = bot->GetMoney();
   FillIndicators(bot, &self->indicators);
   self->control = ReadControlState(bot);
+  if (const std::optional<RecentSpellMiss> miss = CurrentSpellMiss(bot)) {
+    pb::Self::SpellMiss& out = self->spell_miss.emplace();
+    out.spell = miss->spell;
+    out.target = miss->target;
+    out.reason = miss->reason;
+    out.seq = miss->seq;
+  }
 }
 
 void FillWhere(Player* bot, pb::Where* where) {

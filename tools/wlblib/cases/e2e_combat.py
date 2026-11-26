@@ -1,4 +1,4 @@
-"""Grouped e2e cases: orders, boss."""
+"""Grouped e2e cases: orders, boss, spell_miss."""
 
 import types
 from wlblib import wire
@@ -208,7 +208,9 @@ def _case_orders():
 
                 # A cast refused for a moment (the GCD or a cooldown playerbots'
                 # own cast just started) is timing, not a broken order.
-                transient = re.compile(r"cannot cast .* now|is on cooldown")
+                transient = re.compile(
+                    r"cannot cast .* now|is on cooldown|spell is not ready yet"
+                )
 
                 def check_no_errors():
                     with proxy.lock:
@@ -854,4 +856,224 @@ def _case_boss():
                 proxy.stop()
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
-CASES = [_case_orders(), _case_boss()]
+
+def _case_spell_miss():
+    """Live spell-miss e2e test (M2.2) on the isolated test server.
+
+    Runs the real C++ `out/common/harness run` against two grouped level-80
+    priests (`Loada` and `Telda`) next to Mottled Boars, then broadcasts a
+    scripted WoW 3.3.5a `SMSG_SPELL_GO` miss packet (`llmtest spellmiss`) from
+    `Loada` to every player in visibility range. Verifies:
+      1. `Loada` receives `self.spell_miss` in a reactive snapshot.
+      2. `Loada`'s harness wakes the brain with `Woken: missed: ...` and renders
+         `missed: Shadow Word: Pain on Mottled Boar (resist)` on her screen.
+      3. A second consecutive miss of the exact same spell increments `seq` and
+         wakes `Loada` again.
+      4. Bystander `Telda` (1 yd away, receiving the same broadcast packet)
+         never gets `spell_miss` in her snapshot and never wakes on a miss.
+    """
+
+    import http.server
+    import json
+    import pathlib
+    import re
+    import subprocess
+    import tempfile
+    import threading
+    import time
+
+    from wlblib import build, server
+    from wlblib.common import OUT, ROOT, TEST
+    from wlblib.testing import expect
+
+    NAME = "spell_miss"
+    DESCRIPTION = "scripted SMSG_SPELL_GO miss surfaces on caster screen and wakes brain; bystander ignores broadcast"
+    TEST_CONFIG = "orders"
+    BOT = "Loada"
+    ONLINE = 2
+
+    KEEP_RE = re.compile(r"^\s+(\d+)\. Keep doing what I'm doing$", re.M)
+
+    class _MockBrainServer:
+        def __init__(self):
+            self.lock = threading.Lock()
+            self.prompts = {"Loada": [], "Telda": []}
+            parent = self
+
+            class Handler(http.server.BaseHTTPRequestHandler):
+                def log_message(self, fmt, *args):
+                    pass
+
+                def do_POST(self):
+                    length = int(self.headers.get("Content-Length", "0"))
+                    raw = self.rfile.read(length) if length > 0 else b""
+                    if not raw:
+                        return
+                    body = json.loads(raw.decode("utf-8"))
+                    user_text = body["messages"][1]["content"]
+                    m = KEEP_RE.search(user_text)
+                    keep_opt = int(m.group(1)) if m else 1
+                    for bot_name in ("Loada", "Telda"):
+                        if user_text.startswith(f"You are {bot_name}."):
+                            with parent.lock:
+                                parent.prompts[bot_name].append(user_text)
+                            break
+                    reply = json.dumps({
+                        "choices": [{"message": {"content": "\n".join([
+                            f"do: {keep_opt}",
+                            "expect: none",
+                            "watch: none",
+                            "look: 300",
+                        ])}}],
+                        "usage": {"prompt_tokens": 100, "completion_tokens": 20},
+                    }).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(reply)))
+                    self.end_headers()
+                    self.wfile.write(reply)
+
+            self._httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            self.port = self._httpd.server_address[1]
+            self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
+
+        def start(self):
+            self._thread.start()
+
+        def stop(self):
+            self._httpd.shutdown()
+            self._httpd.server_close()
+            self._thread.join(timeout=5)
+
+    def run(stack):
+        build.common("default", tests=False)
+
+        server.console("llmtest move Telda -669.0 -4282.0 41.0 0.0", wait_s=0.3, inst=TEST)
+        server.console("llmtest move Loada -668.0 -4282.0 41.0 0.0", wait_s=0.3, inst=TEST)
+        server.console("llmtest group Loada Telda", wait_s=0.5, inst=TEST)
+
+        with tempfile.TemporaryDirectory(prefix="wlb-e2e-spellmiss-") as tmp:
+            tmp_dir = pathlib.Path(tmp)
+            bots_dir = tmp_dir / "bots"
+            proxy_sock = tmp_dir / "proxy.sock"
+            proxy = _ProxyRecorder(stack.socket, proxy_sock)
+            brain = _MockBrainServer()
+            proxy.start()
+            brain.start()
+            harness_proc = subprocess.Popen(
+                [
+                    str(OUT / "common" / "harness"), "run",
+                    f"--socket={proxy_sock}",
+                    f"--rules={ROOT / 'content' / 'RULES.md'}",
+                    f"--bots-dir={bots_dir}",
+                    "--host=127.0.0.1",
+                    f"--port={brain.port}",
+                    "--slots=4",
+                    "--temperature=0",
+                ],
+                cwd=ROOT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            try:
+                def wait_prompts(bot_name, count, desc):
+                    deadline = time.monotonic() + 10.0
+                    while time.monotonic() < deadline:
+                        with brain.lock:
+                            if len(brain.prompts[bot_name]) >= count:
+                                return list(brain.prompts[bot_name])
+                        time.sleep(0.05)
+                    expect(False, f"timed out waiting for {desc}")
+
+                # Wait for both bots' initial wakes so subsequent wakes are reactive.
+                wait_prompts("Loada", 1, "Loada initial wake")
+                wait_prompts("Telda", 1, "Telda initial wake")
+                with brain.lock:
+                    loada_before = len(brain.prompts["Loada"])
+
+                expected_line = "missed: Shadow Word: Pain on Mottled Boar (resist)"
+
+                # 1. Broadcast SMSG_SPELL_GO (589 = Shadow Word: Pain, 2 = SPELL_MISS_RESIST).
+                server.console("llmtest spellmiss Loada 589 2", wait_s=0.1, inst=TEST)
+
+                first_snap = proxy.wait_until(
+                    lambda p: next(
+                        (s for _, s in reversed(p.snapshots)
+                         if s.get("bot") == "Loada"
+                         and s.get("base", {}).get("self", {}).get("spell_miss")),
+                        None,
+                    ),
+                    timeout_s=8.0,
+                    desc="Loada snapshot with self.spell_miss",
+                )
+                miss1 = first_snap["base"]["self"]["spell_miss"]
+                expect(miss1.get("spell") == "Shadow Word: Pain", f"unexpected spell: {miss1}")
+                expect(miss1.get("target") == "Mottled Boar", f"unexpected target: {miss1}")
+                expect(miss1.get("reason") == "resist", f"unexpected reason: {miss1}")
+                seq1 = miss1.get("seq", 0)
+                expect(seq1 >= 1, f"expected seq >= 1, got {miss1}")
+
+                prompts1 = wait_prompts("Loada", loada_before + 1, "Loada wake on first spell miss")
+                wake_prompt1 = next(
+                    (p for p in prompts1[loada_before:] if expected_line in p),
+                    None,
+                )
+                expect(wake_prompt1 is not None,
+                       f"expected {expected_line!r} in Loada wake prompt; got {prompts1[loada_before:]}")
+                expect(f"Woken: {expected_line}." in wake_prompt1,
+                       f"expected wake reason for miss in prompt:\n{wake_prompt1}")
+
+                # 2. Second consecutive identical miss must bump seq and wake Loada again.
+                with brain.lock:
+                    loada_before_2 = len(brain.prompts["Loada"])
+                server.console("llmtest spellmiss Loada 589 2", wait_s=0.1, inst=TEST)
+
+                second_snap = proxy.wait_until(
+                    lambda p: next(
+                        (s for _, s in reversed(p.snapshots)
+                         if s.get("bot") == "Loada"
+                         and (s.get("base", {}).get("self", {}).get("spell_miss") or {}).get("seq", 0) > seq1),
+                        None,
+                    ),
+                    timeout_s=8.0,
+                    desc="Loada snapshot with incremented spell_miss.seq",
+                )
+                seq2 = second_snap["base"]["self"]["spell_miss"]["seq"]
+                prompts2 = wait_prompts("Loada", loada_before_2 + 1, "Loada wake on second spell miss")
+                expect(any(f"Woken: {expected_line}." in p for p in prompts2[loada_before_2:]),
+                       f"second identical miss did not wake Loada: {prompts2[loada_before_2:]}")
+
+                # 3. Adversarial: bystander Telda received the broadcast SMSG_SPELL_GO
+                # too and must NOT record spell_miss or wake on it.
+                time.sleep(1.0)
+                with proxy.lock:
+                    telda_misses = [
+                        s.get("base", {}).get("self", {}).get("spell_miss")
+                        for _, s in proxy.snapshots
+                        if s.get("bot") == "Telda"
+                        and s.get("base", {}).get("self", {}).get("spell_miss")
+                    ]
+                    expect(not telda_misses,
+                           f"bystander Telda leaked caster's spell_miss: {telda_misses}")
+                    expect(not proxy.visibility_errors,
+                           f"visibility errors: {proxy.visibility_errors}")
+                with brain.lock:
+                    telda_miss_wakes = [
+                        p for p in brain.prompts["Telda"] if "missed:" in p
+                    ]
+                    expect(not telda_miss_wakes,
+                           f"bystander Telda woke on caster's miss: {telda_miss_wakes}")
+
+                return f"caster woke twice (seq {seq1}->{seq2}) with {expected_line!r}; bystander Telda ignored"
+            finally:
+                harness_proc.terminate()
+                try:
+                    harness_proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    harness_proc.kill()
+                brain.stop()
+                proxy.stop()
+    return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
+
+CASES = [_case_orders(), _case_boss(), _case_spell_miss()]

@@ -444,5 +444,31 @@ TEST(PromptTest, APartyPingOutlivesSceneryUnderTightBudget) {
   EXPECT_NE(req.user.find("  2. Keep doing what I'm doing"), std::string::npos);
 }
 
+TEST(PromptTest, ASpellMissOutlivesSceneryUnderTightBudget) {
+  PromptInput input = SampleInput();
+  input.rules = std::string(9600, 'R');
+  Screen screen;
+  screen.text =
+      "me: Vesper\nmissed: Sap on Defias Cutpurse (dodge)\n"
+      "around me:\n  1. Sap Defias Cutpurse\nobjects:\n";
+  for (int i = 0; i < 40; ++i) {
+    screen.text +=
+        "  Copper Vein " + std::to_string(i) + " (40 yd N, mineable)\n";
+  }
+  screen.text += "spells: " + std::string(590, 'S') + ", +40 more\n";
+  screen.text += "also:\n  2. Keep doing what I'm doing";
+  screen.options = {OptionKind::kAttack, OptionKind::kKeep};
+  const LlmRequest req = BuildPlanRequest(input, screen);
+  const size_t est_tokens = (req.system.size() + 2) / 3 +
+                            (req.user.size() + 2) / 3 +
+                            static_cast<size_t>(req.max_tokens);
+  EXPECT_LE(est_tokens, 4096u);
+  EXPECT_NE(req.user.find("missed: Sap on Defias Cutpurse (dodge)"),
+            std::string::npos)
+      << req.user;
+  EXPECT_EQ(req.user.find("spells: SSS"), std::string::npos) << req.user;
+  EXPECT_NE(req.user.find("  2. Keep doing what I'm doing"), std::string::npos);
+}
+
 }  // namespace
 }  // namespace harness

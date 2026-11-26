@@ -34,17 +34,13 @@ Last updated: 2026-11-26.
   Checks: e2e passes with `-j 1` and with `-j N`, twice in a row; timing recorded in the commit.
 
 - **Fix queue (next up, in this order; one commit each, full gates):**
-  1. **Spell misses:** read SMSG_SPELL_GO's miss list (and spell-cast failure results) in the
-     module; put `missed: <spell> on <target> (miss|dodge|parry|resist|immune|evade)` on the
-     caster's screen for a few seconds and end the option or `act:` with that result; wake the
-     brain on it. Eval case: the brain re-casts a missed Sap; e2e: a scripted miss shows up.
-  2. **Gold in a trade:** a `trade gold <amount>` option bounded by the bot's money (the brain
+  1. **Gold in a trade:** a `trade gold <amount>` option bounded by the bot's money (the brain
      picks the amount), shown in the trade facts alongside items; an eval case that asks a bot
      for gold and one that asks for a trade (non-held-out, so the held-out set stays fresh).
-  3. **`parse: error parsing grammar` during a passing test:** find which test prints it (grep
+  2. **`parse: error parsing grammar` during a passing test:** find which test prints it (grep
      the test logs and the GBNF loader), fix the grammar or the test input that triggers it, and
      make that message fail the test from then on.
-  4. **Boss notes vs. loose-mob wake** and **tank swap** (below): after 1–3, as one tanking step.
+  3. **Boss notes vs. loose-mob wake** and **tank swap** (below): after 1–2, as one tanking step.
   Older items not in this file any more get re-checked and listed if still real: no e2e for
   Hunter Dismiss Pet, /raid class/role addressing works only in /p. (`human_dungeon` run twice
   on one server: not reproduced in back-to-back full e2e runs, serial and parallel.)
@@ -94,7 +90,7 @@ Guild Wars heroes):
 ## Later (broader WoW systems)
 
 - **Economy & upkeep:** Vendor panel for selling non-grey items, mailbox, Auction House
-  (wrapping playerbots' AH pricing or `mod-ah-bot`), and bank. (Gold in a trade: Fix queue 2.)
+  (wrapping playerbots' AH pricing or `mod-ah-bot`), and bank. (Gold in a trade: Fix queue 1.)
 - **Professions:** Learn professions, craft skill-ups, fishing, and party disenchanting/crafting
   requests (wrapping playerbots' `craft`/`disenchant` actions).
 - **Guilds & LFG social graph:** `guild:` chat output, guild invite/charter, LookingForGroup channel

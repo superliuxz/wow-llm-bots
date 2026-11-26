@@ -1,0 +1,12 @@
+{
+  "has_food": true,
+  "has_drink": false,
+  "spots": [],
+  "places": [],
+  "group_and_upkeep_actions": [
+    {
+      "guid": "cc:6770:0xF1300011120000B2",
+      "label": "Crowd-control Ragefire Shaman (moon): Sap"
+    }
+  ]
+}

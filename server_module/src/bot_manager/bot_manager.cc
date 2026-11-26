@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <list>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -57,11 +58,13 @@
 #include "TradeData.h"
 #include "Unit.h"
 #include "UpdateFields.h"
+#include "World.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
 #include "base/synchronization/lock.h"
 #include "base/thread_annotations.h"
 #include "bot_manager/playerbots_actions.h"
+#include "bot_manager/spell_miss_packet.h"
 #include "bot_manager/tick_owner.h"
 #include "bot_session.h"
 #include "chat/chat_scripts.h"
@@ -505,6 +508,109 @@ class LlmBrainPacketScript final : public ServerScript {
                     name.empty() ? 0
                                  : getMSTime() + std::max(secs_left, 5u) * 1000;
               });
+        }
+        break;
+      }
+      case SMSG_SPELL_GO: {
+        // SMSG_SPELL_GO is broadcast to every player in visibility range:
+        // record misses only when this bot is the real caster.
+        if (packet.empty()) {
+          break;
+        }
+        if (const std::optional<ParsedSpellGo> parsed = ParseSpellGoMisses(
+                std::span<const uint8_t>(packet.contents(), packet.size()))) {
+          if (parsed->caster_guid != key || parsed->misses.empty()) {
+            break;
+          }
+          const SpellInfo* info = sSpellMgr->GetSpellInfo(parsed->spell_id);
+          const char* raw_name =
+              info ? info->SpellName[sWorld->GetDefaultDbcLocale()] : nullptr;
+          if (!raw_name || raw_name[0] == '\0') {
+            break;
+          }
+          const uint64_t selected_guid = bot->GetTarget().GetRawValue();
+          const ParsedSpellGo::Miss* chosen = &parsed->misses.front();
+          if (selected_guid != 0) {
+            for (const ParsedSpellGo::Miss& m : parsed->misses) {
+              if (m.target_guid == selected_guid) {
+                chosen = &m;
+                break;
+              }
+            }
+          }
+          std::string target_name;
+          if (Unit* target = ObjectAccessor::GetUnit(
+                  *bot, ObjectGuid(chosen->target_guid))) {
+            target_name = target->GetName();
+          }
+          BotSession::SpellMiss miss{
+              .spell_id = parsed->spell_id,
+              .spell = raw_name,
+              .target_guid = chosen->target_guid,
+              .target = std::move(target_name),
+              .reason = std::string(chosen->reason),
+              .map_id = bot->GetMapId(),
+              .instance_id = bot->GetInstanceId(),
+              .ms = getMSTime(),
+          };
+          BotSessionRegistry::Instance().WithSession(
+              key, [&miss](BotSession& s) {
+                miss.seq = ++s.spell_miss_seq;
+                s.spell_miss = std::move(miss);
+              });
+        }
+        break;
+      }
+      case SMSG_CAST_FAILED: {
+        // Sent directly to the caster (Spell::SendCastResult). Record the
+        // failure for active option/act completion, and surface
+        // SPELL_FAILED_IMMUNE as a caster-visible miss.
+        if (packet.empty()) {
+          break;
+        }
+        if (const std::optional<ParsedCastFailed> parsed = ParseCastFailed(
+                std::span<const uint8_t>(packet.contents(), packet.size()))) {
+          if (parsed->result == SPELL_FAILED_DONT_REPORT) {
+            break;
+          }
+          const uint32_t now_ms = getMSTime();
+          BotSessionRegistry::Instance().WithSession(
+              key, [parsed, now_ms](BotSession& s) {
+                s.cast_failure = BotSession::CastFailure{
+                    .seq = ++s.cast_failure_seq,
+                    .spell_id = parsed->spell_id,
+                    .result = parsed->result,
+                    .ms = now_ms,
+                };
+              });
+          if (IsCastFailureImmune(parsed->result)) {
+            const SpellInfo* info = sSpellMgr->GetSpellInfo(parsed->spell_id);
+            const char* raw_name =
+                info ? info->SpellName[sWorld->GetDefaultDbcLocale()] : nullptr;
+            if (raw_name && raw_name[0] != '\0') {
+              std::string target_name;
+              uint64_t target_guid = 0;
+              if (Unit* target = bot->GetSelectedUnit()) {
+                target_guid = target->GetGUID().GetRawValue();
+                target_name = target->GetName();
+              }
+              BotSession::SpellMiss miss{
+                  .spell_id = parsed->spell_id,
+                  .spell = raw_name,
+                  .target_guid = target_guid,
+                  .target = std::move(target_name),
+                  .reason = "immune",
+                  .map_id = bot->GetMapId(),
+                  .instance_id = bot->GetInstanceId(),
+                  .ms = now_ms,
+              };
+              BotSessionRegistry::Instance().WithSession(
+                  key, [&miss](BotSession& s) {
+                    miss.seq = ++s.spell_miss_seq;
+                    s.spell_miss = std::move(miss);
+                  });
+            }
+          }
         }
         break;
       }

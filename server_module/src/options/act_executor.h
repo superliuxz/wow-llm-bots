@@ -63,6 +63,9 @@ struct ActiveAct {
   uint32_t cast_mana_before = 0;
   bool cast_cd_before = false;
   base::TimeTicks cast_expected_end;
+  uint32_t cast_miss_seq_before = 0;
+  uint32_t cast_failure_seq_before = 0;
+  std::string cast_target_name;
   // For `use <spell>` out of range or sight: walking in (2 yd inside the
   // spell's max range, with line of sight) before the cast, after entering
   // stealth first for a spell usable only in stealth. The target is a unit

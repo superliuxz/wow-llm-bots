@@ -1646,8 +1646,14 @@ class LlmBrainWorldScript : public WorldScript {
         state->done_command_id = state->active_command_id;
       }
     }
-    const bool reactive =
+    bool reactive =
         state->seq > 0 && HasNewCastOrAura(bot, state->last_reactive);
+    if (state->seq > 0) {
+      if (const std::optional<RecentSpellMiss> miss = CurrentSpellMiss(bot);
+          miss && miss->seq != state->last_spell_miss_seq) {
+        reactive = true;
+      }
+    }
     // Nearby hostile casts and spell areas, looked at most every
     // kMinHazardGap in combat: a new one is due in the next snapshot.
     const base::TimeTicks now = base::TimeTicks::Now();
@@ -1735,6 +1741,8 @@ class LlmBrainWorldScript : public WorldScript {
     const NearbyBuilder::Stats nearby =
         state.builder->Build(bot, &snapshot, &facts, world_places_.get(),
                              &state.ui, item_spell_texts_.get(), start);
+    state.last_spell_miss_seq =
+        snapshot.base.self.spell_miss ? snapshot.base.self.spell_miss->seq : 0;
     if (Group* invite = bot->GetGroupInvite()) {
       facts.pending_group_invite_from = invite->GetLeaderName();
     }
@@ -2038,6 +2046,8 @@ class LlmBrainWorldScript : public WorldScript {
     uint32_t last_instance_id = 0;
     // Casts and auras on bot/target/attackers at the last sent snapshot.
     ReactiveSnapshotState last_reactive;
+    // Sequence number of the last spell miss already shown in a snapshot.
+    uint32_t last_spell_miss_seq = 0;
     // Nearby hostile casts and spell areas at the last look (in combat), when
     // to look again, and whether one appeared that no snapshot showed yet.
     std::vector<std::pair<uint64_t, uint32_t>> known_hazards;

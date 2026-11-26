@@ -46,6 +46,18 @@ struct PartyPingSpot {
 };
 std::optional<PartyPingSpot> CurrentPartyPing(Player* bot);
 
+// The caster's last missed spell (from SMSG_SPELL_GO or SMSG_CAST_FAILED
+// SPELL_FAILED_IMMUNE) while it is still fresh (at most kSpellMissShowMs old,
+// on the bot's own map and instance); a stale one is dropped from the session.
+inline constexpr uint32_t kSpellMissShowMs = 6000;
+struct RecentSpellMiss {
+  uint32_t seq = 0;
+  std::string spell;
+  std::string target;
+  std::string reason;
+};
+std::optional<RecentSpellMiss> CurrentSpellMiss(Player* bot);
+
 // True when `bot` is allowed to cancel its own movement (never while on a taxi
 // flight path, riding a vehicle, or under fear/stun/charm/controlled motion).
 bool CanClearBotMovement(const Player* bot);

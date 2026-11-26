@@ -127,5 +127,52 @@ TEST(BotSessionRegistryTest, PingStayClearsOnMapChangeDisconnectAndLogout) {
   expect_cleared();
 }
 
+// Adversarial counter-test: a spell miss and cast failure never outlive a map
+// change, harness disconnect, or logout, while group policy still survives.
+TEST(BotSessionRegistryTest, SpellMissClearsOnMapChangeDisconnectAndLogout) {
+  BotSessionRegistry reg;
+  constexpr uint64_t kBot = 0x1004;
+  const auto set = [&] {
+    reg.WithSession(kBot, [&](BotSession& s) {
+      s.group_guid = 42;
+      s.group_policy.stay = true;
+      s.spell_miss = BotSession::SpellMiss{
+          .seq = ++s.spell_miss_seq,
+          .spell_id = 6770,
+          .spell = "Sap",
+          .target_guid = 0x999,
+          .target = "Defias Cutpurse",
+          .reason = "dodge",
+          .map_id = 36,
+          .ms = 1000,
+      };
+      s.cast_failure = BotSession::CastFailure{
+          .seq = ++s.cast_failure_seq,
+          .spell_id = 6770,
+          .result = 38,
+          .ms = 1000,
+      };
+    });
+  };
+  const auto expect_cleared = [&] {
+    reg.InspectSession(kBot, [](const BotSession* s) {
+      ASSERT_NE(s, nullptr);
+      EXPECT_FALSE(s->spell_miss.has_value());
+      EXPECT_FALSE(s->cast_failure.has_value());
+      EXPECT_EQ(s->group_guid, 42u);
+      EXPECT_TRUE(s->group_policy.stay);
+    });
+  };
+  set();
+  reg.ResetOnMapChange(kBot);
+  expect_cleared();
+  set();
+  reg.ResetOnDisconnect(kBot);
+  expect_cleared();
+  set();
+  reg.ResetOnLogout(kBot);
+  expect_cleared();
+}
+
 }  // namespace
 }  // namespace llm_brain

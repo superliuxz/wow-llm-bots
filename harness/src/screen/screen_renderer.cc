@@ -1651,6 +1651,17 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
       lines.push_back(base::StrCat({"combat: ", combat}));
     }
   }
+  if (base.self.spell_miss && !base.self.spell_miss->spell.empty() &&
+      !base.self.spell_miss->reason.empty()) {
+    const pb::Self::SpellMiss& miss = *base.self.spell_miss;
+    if (!miss.target.empty()) {
+      lines.push_back(base::StrCat({"missed: ", miss.spell, " on ", miss.target,
+                                    " (", miss.reason, ")"}));
+    } else {
+      lines.push_back(
+          base::StrCat({"missed: ", miss.spell, " (", miss.reason, ")"}));
+    }
+  }
   // Mobs on a non-tank member (the party's `loose mobs:`) say so on their
   // own line too.
   std::flat_set<std::string> loose_guids;

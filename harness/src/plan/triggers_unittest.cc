@@ -578,5 +578,64 @@ TEST(TriggersTest, FixatedMobOnAMemberDoesNotWakeTheTank) {
   EXPECT_EQ(t->reason, "loose mob Spark on Hunt");
 }
 
+// A spell miss wakes the caster once (solo or grouped), does not re-wake while
+// the same miss remains on screen, wakes again on a fresh miss sequence, and
+// never downgrades a simultaneous P0 combat wake.
+TEST(TriggersTest, SpellMissWakesOncePerMissAndPreservesP0CombatPriority) {
+  // Solo caster.
+  pb::Snapshot solo = BaseSnap();
+  TriggerEvaluator solo_eval;
+  EXPECT_FALSE(solo_eval.EvaluateSnapshot(solo));
+
+  pb::Snapshot miss1 = solo;
+  miss1.base.self.spell_miss = pb::Self::SpellMiss{
+      .spell = "Sap",
+      .target = "Defias Cutpurse",
+      .reason = "dodge",
+      .seq = 1,
+  };
+  std::optional<WakeTrigger> t = solo_eval.EvaluateSnapshot(miss1);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->urgency, Urgency::kP1Danger);
+  EXPECT_EQ(t->reason, "missed: Sap on Defias Cutpurse (dodge)");
+
+  // Same miss still on screen on the next tick: no repeat wake.
+  EXPECT_FALSE(solo_eval.EvaluateSnapshot(miss1));
+
+  // A second consecutive miss of the exact same spell on the same target (new
+  // seq): wakes again.
+  pb::Snapshot miss2 = miss1;
+  miss2.base.self.spell_miss->seq = 2;
+  t = solo_eval.EvaluateSnapshot(miss2);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->urgency, Urgency::kP1Danger);
+  EXPECT_EQ(t->reason, "missed: Sap on Defias Cutpurse (dodge)");
+
+  // Adversarial counter-test: grouped caster with simultaneous P0 combat wake
+  // (death) still gets P0 priority, never downgraded to P1.
+  pb::Snapshot grouped = BaseSnap();
+  grouped.base.self.unit.group.emplace().role = pb::DPS;
+  pb::Unit& ally = grouped.ext.party.emplace().members.emplace_back();
+  ally.name = "Aldric";
+  ally.group.emplace().online = true;
+  ally.group->role = pb::TANK;
+  TriggerEvaluator grouped_eval;
+  EXPECT_FALSE(grouped_eval.EvaluateSnapshot(grouped));
+
+  pb::Snapshot miss_and_died = grouped;
+  miss_and_died.base.self.state = pb::Self::DEAD_BODY;
+  miss_and_died.base.self.spell_miss = pb::Self::SpellMiss{
+      .spell = "Polymorph",
+      .target = "Defias Pillager",
+      .reason = "resist",
+      .seq = 1,
+  };
+  t = grouped_eval.EvaluateSnapshot(miss_and_died);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->urgency, Urgency::kP0Combat);
+  EXPECT_NE(t->reason.find("missed: Polymorph on Defias Pillager (resist)"),
+            std::string::npos);
+}
+
 }  // namespace
 }  // namespace harness

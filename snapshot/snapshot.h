@@ -366,6 +366,18 @@ struct Self_Rune {
   bool operator==(const Self_Rune&) const = default;
 };
 
+struct Self_SpellMiss {
+  std::string spell;
+  std::string target;
+  // One of "miss", "dodge", "parry", "resist", "immune", "evade".
+  std::string reason;
+  // Per-bot monotonic counter so two consecutive misses of the same spell on
+  // the same target still wake the brain.
+  uint32_t seq = 0;
+
+  bool operator==(const Self_SpellMiss&) const = default;
+};
+
 struct Objective_Progress {
   uint32_t have = 0;
   uint32_t need = 0;
@@ -1777,6 +1789,7 @@ struct Self {
   using AutoAttack = Self_AutoAttack;
   using WeaponEnchant = Self_WeaponEnchant;
   using Rune = Self_Rune;
+  using SpellMiss = Self_SpellMiss;
 
   Unit unit;
   Self::Gender gender = Self::Gender::GENDER_UNSPECIFIED;
@@ -1813,6 +1826,7 @@ struct Self {
   std::string form;
   bool pvp_flagged = false;
   bool group_leader = false;
+  std::optional<Self_SpellMiss> spell_miss;
 
   bool operator==(const Self&) const = default;
 };

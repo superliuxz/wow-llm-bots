@@ -58,6 +58,8 @@
 #include "SpellAuraEffects.h"
 #include "SpellAuras.h"
 #include "SpellInfo.h"
+#include "SpellMgr.h"
+#include "Timer.h"
 #include "Unit.h"
 #include "UnitDefines.h"
 #include "Value.h"
@@ -124,6 +126,7 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"logout", HandleLogout, SEC_ADMINISTRATOR, Console::Yes},
         {"kill", HandleKill, SEC_ADMINISTRATOR, Console::Yes},
         {"lfgboot", HandleLfgBoot, SEC_ADMINISTRATOR, Console::Yes},
+        {"spellmiss", HandleSpellMiss, SEC_ADMINISTRATOR, Console::Yes},
     };
     static ChatCommandTable root_table = {
         {"llmtest", test_table},
@@ -1182,6 +1185,62 @@ class LlmBrainTestCommandScript : public CommandScript {
                       reason ? *reason : "afk");
     handler->PSendSysMessage("llmtest: boot vote started on {} by {}",
                              victim->GetName(), kicker->GetName());
+    return true;
+  }
+
+  // `llmtest spellmiss <caster> <spell id> <miss info>`: broadcasts a WoW
+  // 3.3.5a SMSG_SPELL_GO miss packet from `caster` against the nearest living
+  // Mottled Boar (or a temporary one if none is within 60 yd) to every player
+  // in visibility range.
+  static bool HandleSpellMiss(ChatHandler* handler,
+                              std::string caster_name,
+                              uint32_t spell_id,
+                              uint32_t miss_info) {
+    Player* caster = FindOnlinePlayer(handler, std::move(caster_name));
+    if (!caster || miss_info > 255) {
+      handler->SendErrorMessage("llmtest: spellmiss: bad caster or miss_info");
+      return false;
+    }
+    if (!sSpellMgr->GetSpellInfo(spell_id)) {
+      handler->SendErrorMessage("llmtest: spellmiss: unknown spell {}",
+                                spell_id);
+      return false;
+    }
+    Creature* victim = nullptr;
+    std::list<Creature*> nearby;
+    constexpr uint32_t kMottledBoar = 3098;
+    caster->GetCreatureListWithEntryInGrid(nearby, kMottledBoar, 60.0f);
+    for (Creature* c : nearby) {
+      if (c && c->IsAlive() && !c->IsPlayer() && !c->IsTotem() &&
+          (!victim || caster->GetDistance(c) < caster->GetDistance(victim))) {
+        victim = c;
+      }
+    }
+    if (!victim) {
+      victim = caster->SummonCreature(
+          kMottledBoar, caster->GetPositionX() + 3.0f, caster->GetPositionY(),
+          caster->GetPositionZ(), 0.0f, TEMPSUMMON_TIMED_DESPAWN, 30000);
+    }
+    if (!victim) {
+      handler->SendErrorMessage("llmtest: spellmiss: no creature nearby");
+      return false;
+    }
+    WorldPacket data(SMSG_SPELL_GO, 64);
+    data << caster->GetPackGUID();
+    data << caster->GetPackGUID();
+    data << static_cast<uint8>(0);  // cast_count
+    data << static_cast<uint32>(spell_id);
+    data << static_cast<uint32>(0);  // cast_flags (CAST_FLAG_NONE)
+    data << static_cast<uint32>(getMSTime());
+    data << static_cast<uint8>(0);          // hitCount
+    data << static_cast<uint8>(1);          // missCount
+    data << victim->GetGUID();              // raw uint64 target guid
+    data << static_cast<uint8>(miss_info);  // SpellMissInfo
+    data << static_cast<uint32>(0);         // SpellCastTargets flags
+    caster->SendMessageToSet(&data, true);
+    handler->PSendSysMessage("llmtest: {} missed spell {} on {} (info={})",
+                             caster->GetName(), spell_id, victim->GetName(),
+                             miss_info);
     return true;
   }
 };

@@ -1001,6 +1001,20 @@
     ]
   },
   {
+    "name": "sap_missed_recast",
+    "source": "built (M2.2 spell misses)",
+    "reason": "missed: Sap on Ragefire Shaman (miss)",
+    "summary": "in Ragefire Chasm out of combat: rogue's Sap missed the moon-marked Ragefire Shaman; the mob is still un-CC'd and Crowd-control Sap is offered",
+    "rule": "re-casts Sap (option 3) and never attacks an unpulled mob",
+    "first_options": [
+      3
+    ],
+    "forbid_kinds": [
+      "attack",
+      "rest"
+    ]
+  },
+  {
     "name": "held_trade_healer_between_pulls",
     "source": "built for the held-out split (4c-rest)",
     "held_out": true,

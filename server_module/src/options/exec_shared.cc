@@ -176,6 +176,36 @@ std::optional<PartyPingSpot> CurrentPartyPing(Player* bot) {
       .from = ping->from, .x = ping->x, .y = ping->y, .z = z, .age_ms = age_ms};
 }
 
+std::optional<RecentSpellMiss> CurrentSpellMiss(Player* bot) {
+  if (!bot || !bot->IsInWorld()) {
+    return std::nullopt;
+  }
+  const uint64_t key = bot->GetGUID().GetRawValue();
+  const std::optional<BotSession::SpellMiss> miss =
+      BotSessionRegistry::Instance().InspectSession(
+          key,
+          [](const BotSession* s) { return s ? s->spell_miss : std::nullopt; });
+  if (!miss) {
+    return std::nullopt;
+  }
+  const uint32_t age_ms = GetMSTimeDiffToNow(miss->ms);
+  if (age_ms > kSpellMissShowMs || miss->map_id != bot->GetMapId() ||
+      miss->instance_id != bot->GetInstanceId()) {
+    BotSessionRegistry::Instance().WithSession(key, [&miss](BotSession& s) {
+      if (s.spell_miss == miss) {
+        s.spell_miss.reset();
+      }
+    });
+    return std::nullopt;
+  }
+  return RecentSpellMiss{
+      .seq = miss->seq,
+      .spell = miss->spell,
+      .target = miss->target,
+      .reason = miss->reason,
+  };
+}
+
 bool CanClearBotMovement(const Player* bot) {
   if (!bot || !bot->IsInWorld()) {
     return false;

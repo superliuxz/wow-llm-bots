@@ -61,6 +61,7 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
+#include "bot_manager/spell_miss_packet.h"
 #include "bot_session.h"
 #include "options/act_geometry.h"
 #include "options/exec_npc.h"
@@ -1467,6 +1468,16 @@ ActStartResult CastSpellNow(Player* bot,
     }
   }
   const CastBeforeState before = CaptureCastBefore(bot, spell, cast_target);
+  const uint64_t bot_key = bot->GetGUID().GetRawValue();
+  uint32_t miss_seq_before = 0;
+  uint32_t failure_seq_before = 0;
+  BotSessionRegistry::Instance().InspectSession(
+      bot_key, [&](const BotSession* s) {
+        if (s) {
+          miss_seq_before = s->spell_miss_seq;
+          failure_seq_before = s->cast_failure_seq;
+        }
+      });
   WorldPacket p(CMSG_CAST_SPELL);
   p << static_cast<uint8_t>(0) << spell->Id << static_cast<uint8_t>(0);
   SpellCastTargets targets;
@@ -1482,7 +1493,42 @@ ActStartResult CastSpellNow(Player* bot,
   targets.Write(p);
   p.rpos(0);
   bot->GetSession()->HandleCastSpellOpcode(p);
+  std::optional<BotSession::SpellMiss> new_miss;
+  std::optional<BotSession::CastFailure> new_failure;
+  BotSessionRegistry::Instance().InspectSession(
+      bot_key, [&](const BotSession* s) {
+        if (!s) {
+          return;
+        }
+        if (s->spell_miss && s->spell_miss->seq > miss_seq_before &&
+            s->spell_miss->spell_id == spell->Id) {
+          new_miss = *s->spell_miss;
+        }
+        if (s->cast_failure && s->cast_failure->seq > failure_seq_before &&
+            s->cast_failure->spell_id == spell->Id) {
+          new_failure = *s->cast_failure;
+        }
+      });
+  if (new_miss) {
+    if (new_miss->target.empty() && cast_target != nullptr) {
+      new_miss->target = cast_target->GetName();
+      BotSessionRegistry::Instance().WithSession(bot_key, [&](BotSession& s) {
+        if (s.spell_miss && s.spell_miss->seq == new_miss->seq &&
+            s.spell_miss->target.empty()) {
+          s.spell_miss->target = new_miss->target;
+        }
+      });
+    }
+    return {.error = FormatSpellMissLine(new_miss->spell, new_miss->target,
+                                         new_miss->reason)};
+  }
   if (!CastStartedAfter(bot, spell, cast_target, before)) {
+    if (new_failure) {
+      if (const std::string_view why = CastFailureReason(new_failure->result);
+          !why.empty()) {
+        return {.error = base::StrCat({act.name, ": ", why})};
+      }
+    }
     return {.error = "cannot cast " + act.name + " now"};
   }
   if (!IsCurrentlyCastingSpell(bot, spell->Id)) {
@@ -1498,6 +1544,9 @@ ActStartResult CastSpellNow(Player* bot,
   out_active->cast_spell_id = spell->Id;
   out_active->cast_mana_before = before.mana;
   out_active->cast_cd_before = before.on_cd;
+  out_active->cast_miss_seq_before = miss_seq_before;
+  out_active->cast_failure_seq_before = failure_seq_before;
+  out_active->cast_target_name = cast_target ? cast_target->GetName() : "";
   int32_t cast_ms = 0;
   if (Spell* cur = bot->GetCurrentSpell(CURRENT_GENERIC_SPELL);
       cur && cur->GetSpellInfo() && cur->GetSpellInfo()->Id == spell->Id) {
@@ -2473,6 +2522,38 @@ ActStepResult StepActiveAct(Player* bot,
     return {.error = "map changed"};
   }
   if (active->waiting_cast) {
+    const uint64_t bot_key = bot->GetGUID().GetRawValue();
+    std::optional<BotSession::SpellMiss> new_miss;
+    std::optional<BotSession::CastFailure> new_failure;
+    BotSessionRegistry::Instance().InspectSession(
+        bot_key, [&](const BotSession* s) {
+          if (!s) {
+            return;
+          }
+          if (s->spell_miss &&
+              s->spell_miss->seq > active->cast_miss_seq_before &&
+              s->spell_miss->spell_id == active->cast_spell_id) {
+            new_miss = *s->spell_miss;
+          }
+          if (s->cast_failure &&
+              s->cast_failure->seq > active->cast_failure_seq_before &&
+              s->cast_failure->spell_id == active->cast_spell_id) {
+            new_failure = *s->cast_failure;
+          }
+        });
+    if (new_miss) {
+      if (new_miss->target.empty() && !active->cast_target_name.empty()) {
+        new_miss->target = active->cast_target_name;
+        BotSessionRegistry::Instance().WithSession(bot_key, [&](BotSession& s) {
+          if (s.spell_miss && s.spell_miss->seq == new_miss->seq &&
+              s.spell_miss->target.empty()) {
+            s.spell_miss->target = new_miss->target;
+          }
+        });
+      }
+      return {.error = FormatSpellMissLine(new_miss->spell, new_miss->target,
+                                           new_miss->reason)};
+    }
     if (IsCurrentlyCastingSpell(bot, active->cast_spell_id)) {
       return {};
     }
@@ -2484,6 +2565,12 @@ ActStepResult StepActiveAct(Player* bot,
         now + base::Milliseconds(250) >= active->cast_expected_end;
     if (finished_normally) {
       return {.done = true};
+    }
+    if (new_failure) {
+      if (const std::string_view why = CastFailureReason(new_failure->result);
+          !why.empty()) {
+        return {.error = base::StrCat({active->act.name, ": ", why})};
+      }
     }
     return {.error = "cast interrupted"};
   }

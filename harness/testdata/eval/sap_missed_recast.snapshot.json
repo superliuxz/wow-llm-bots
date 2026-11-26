@@ -1,0 +1,197 @@
+{
+  "bot": "Loadaa",
+  "seq": 22,
+  "time_ms": 1794793125000,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x00000000000003B0",
+        "name": "Loadaa",
+        "kind": "PLAYER",
+        "level": 13,
+        "health_pct": 100.0,
+        "power_pct": 100.0,
+        "player": {
+          "class": "Rogue"
+        },
+        "group": {
+          "subgroup": 1,
+          "online": true,
+          "in_range": true,
+          "role": "DPS"
+        }
+      },
+      "gender": "MALE",
+      "xp": 1200,
+      "xp_next": 11000,
+      "health": 240,
+      "health_max": 240,
+      "power_type": "ENERGY",
+      "power": 100,
+      "power_max": 100,
+      "state": "ALIVE",
+      "in_combat": false,
+      "spell_miss": {
+        "spell": "Sap",
+        "target": "Ragefire Shaman",
+        "reason": "miss",
+        "seq": 1
+      }
+    },
+    "where": {
+      "map": "Ragefire Chasm",
+      "zone": "Ragefire Chasm",
+      "subzone": "",
+      "position": {
+        "x": -675.0824,
+        "y": -4321.8477,
+        "z": 45.23722
+      },
+      "facing": 0.0,
+      "in_instance": true
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0xF1300011110000A1",
+          "name": "Ragefire Trogg",
+          "rel": {
+            "dist_yd": 12.0,
+            "dir": "N",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -663.0,
+              "y": -4322.0,
+              "z": 45.0
+            }
+          },
+          "kind": "NPC",
+          "level": 13,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "NORMAL",
+          "health_pct": 100.0,
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "IDLE"
+          }
+        },
+        {
+          "guid": "0xF1300011120000B2",
+          "name": "Ragefire Shaman",
+          "rel": {
+            "dist_yd": 7.0,
+            "dir": "N",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -668.0,
+              "y": -4322.0,
+              "z": 45.0
+            }
+          },
+          "kind": "NPC",
+          "level": 13,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "NORMAL",
+          "health_pct": 100.0,
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "IDLE"
+          },
+          "raid_marker": "MOON"
+        }
+      ]
+    }
+  },
+  "ext": {
+    "party": {
+      "leader": "Hele",
+      "loot_method": "GROUP_LOOT",
+      "members": [
+        {
+          "guid": "0x0000000000000400",
+          "name": "Hele",
+          "kind": "PLAYER",
+          "level": 13,
+          "health_pct": 100.0,
+          "power_pct": 0.0,
+          "target": "",
+          "player": {
+            "class": "Warrior"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": true,
+            "role": "TANK",
+            "online": true,
+            "in_range": true
+          },
+          "rel": {
+            "dist_yd": 14.0,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x0000000000000410",
+          "name": "Loadb",
+          "kind": "PLAYER",
+          "level": 13,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Priest"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "HEALER",
+            "online": true,
+            "in_range": true
+          },
+          "rel": {
+            "dist_yd": 18.0,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        }
+      ]
+    }
+  },
+  "options": [
+    {
+      "text": "Attack Ragefire Trogg (not pulled)",
+      "guid": "0xF1300011110000A1",
+      "kind": "ATTACK",
+      "name": "Ragefire Trogg"
+    },
+    {
+      "text": "Attack Ragefire Shaman (moon) (not pulled)",
+      "guid": "0xF1300011120000B2",
+      "kind": "ATTACK",
+      "name": "Ragefire Shaman"
+    },
+    {
+      "text": "Crowd-control Ragefire Shaman (moon): Sap",
+      "guid": "cc:6770:0xF1300011120000B2",
+      "kind": "USE",
+      "name": "Crowd-control Ragefire Shaman (moon): Sap"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
+}

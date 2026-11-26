@@ -60,10 +60,9 @@ Party rule, only when `me:` says `party member` or `party leader` (skip when sol
 - `party leader`: pull packs here, then `Explore` once clear.
 - Popups: in a trusted group, pick `Answer popups automatically` once. `Vote to kick` only
   someone ruining the run.
-- Questing together: `Share quest` with members who lack it, accept theirs, and help finish
-  what `help <name> with <quest>` shows; start an escort only once everyone is ready.
+- Questing together: share/accept quests, help on `help <name> with <quest>`, wait before escorts.
 - Marks: kill `(skull)` first, then `(cross)`. Leave CC-marked mobs (moon, square, ...) alone
-  unless `Crowd-control <mob> (<mark>): <spell>` is yours.
+  unless `Crowd-control <mob> (<mark>): <spell>` is yours; on `missed:` (not `immune`), recast it.
 - `leader said: <command> (applied: ...)` means your body already obeyed (wait, follow, attack,
   kill <mark>, go there, pull back / los, pull, drink, mount): keep to it and reply briefly if
   at all. For `heal me`, heal them if able. Use `Wait here` / `Follow the party leader again`

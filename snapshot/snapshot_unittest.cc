@@ -243,5 +243,29 @@ TEST(SnapshotVisibilityTest,
   EXPECT_TRUE(ValidateSnapshotVisibility(snap).empty());
 }
 
+TEST(SnapshotProtoTest, SelfSpellMissRoundTripsBeveAndJson) {
+  pb::Snapshot snap;
+  snap.bot = "Vesper";
+  pb::Self::SpellMiss& miss = snap.base.self.spell_miss.emplace();
+  miss.spell = "Sap";
+  miss.target = "Defias Cutpurse";
+  miss.reason = "dodge";
+  miss.seq = 3;
+
+  const std::string beve = pb::WriteBeve(snap);
+  ASSERT_FALSE(beve.empty());
+  pb::Snapshot from_beve;
+  ASSERT_TRUE(pb::ReadBeve(beve, &from_beve));
+  EXPECT_EQ(from_beve, snap);
+
+  const std::string json = pb::WriteJson(snap);
+  ASSERT_FALSE(json.empty());
+  pb::Snapshot from_json;
+  std::string err;
+  ASSERT_TRUE(pb::ReadJson(json, &from_json, &err)) << err;
+  EXPECT_EQ(from_json, snap);
+  EXPECT_TRUE(ValidateSnapshotVisibility(from_json).empty());
+}
+
 }  // namespace
 }  // namespace wlb::snapshot

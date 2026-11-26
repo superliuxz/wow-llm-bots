@@ -602,6 +602,22 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
     }
   }
 
+  const std::optional<pb::Self::SpellMiss>& miss = self.spell_miss;
+  if (seen_snapshot_ && miss && !miss->spell.empty() && !miss->reason.empty()) {
+    const bool is_new = !prev_spell_miss_ ||
+                        (miss->seq != 0 ? miss->seq != prev_spell_miss_->seq
+                                        : *miss != *prev_spell_miss_);
+    if (is_new) {
+      const std::string text =
+          !miss->target.empty()
+              ? base::StrCat({"missed: ", miss->spell, " on ", miss->target,
+                              " (", miss->reason, ")"})
+              : base::StrCat(
+                    {"missed: ", miss->spell, " (", miss->reason, ")"});
+      Consider(&chosen, {Urgency::kP1Danger, text});
+    }
+  }
+
   for (const pb::Event& ev : snapshot.events) {
     if (std::optional<WakeTrigger> trig = EvaluateEventTrigger(ev, watches_)) {
       Consider(&chosen, std::move(*trig));
@@ -621,6 +637,7 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
   prev_critical_members_ = std::move(critical_members);
   prev_online_members_ = std::move(online_members);
   prev_loose_mobs_ = std::move(loose_mobs);
+  prev_spell_miss_ = miss;
   return chosen;
 }
 

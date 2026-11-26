@@ -52,6 +52,33 @@ struct BotSession {
     bool operator==(const PartyPing&) const = default;
   };
 
+  // A spell cast by this bot that missed its target (from SMSG_SPELL_GO's miss
+  // list or SMSG_CAST_FAILED SPELL_FAILED_IMMUNE). Shown on the caster's screen
+  // for a few seconds and cleared on logout, map change, and disconnect.
+  struct SpellMiss {
+    uint32_t seq = 0;
+    uint32_t spell_id = 0;
+    std::string spell;
+    uint64_t target_guid = 0;
+    std::string target;
+    // One of "miss", "dodge", "parry", "resist", "immune", "evade".
+    std::string reason;
+    uint32_t map_id = 0;
+    uint32_t instance_id = 0;
+    uint32_t ms = 0;  // getMSTime() when it arrived.
+    bool operator==(const SpellMiss&) const = default;
+  };
+
+  // Most recent SMSG_CAST_FAILED result for this bot (for reporting the
+  // specific failure reason when an active option or act fails).
+  struct CastFailure {
+    uint32_t seq = 0;
+    uint32_t spell_id = 0;
+    uint8_t result = 0;
+    uint32_t ms = 0;
+    bool operator==(const CastFailure&) const = default;
+  };
+
   // Auto-release hold & explicit `rez:wait` timers (ms).
   std::optional<uint32_t> dead_since_ms;
   std::optional<uint32_t> rez_wait_until_ms;
@@ -138,6 +165,14 @@ struct BotSession {
   // disconnect).
   std::vector<uint64_t> avoided_targets;
   InterruptedSpot last_interrupted;
+
+  // Most recent spell miss and cast failure for this bot (cleared on logout,
+  // map change, and disconnect; monotonic seqs survive map change/disconnect so
+  // consecutive misses never alias).
+  uint32_t spell_miss_seq = 0;
+  std::optional<SpellMiss> spell_miss;
+  uint32_t cast_failure_seq = 0;
+  std::optional<CastFailure> cast_failure;
 };
 
 class BotSessionRegistry {

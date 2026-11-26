@@ -1315,5 +1315,35 @@ TEST(ScreenRendererTest, TankSeesRoleLooseMobsAndCrowdControl) {
   EXPECT_EQ(screen.text.find("(loose, on"), std::string::npos) << screen.text;
 }
 
+TEST(ScreenRendererTest, SpellMissShowsOnCasterScreenWithAndWithoutTarget) {
+  pb::Snapshot snapshot = NewSnapshot();
+  EXPECT_EQ(RenderScreen(snapshot).text.find("missed:"), std::string::npos);
+
+  pb::Self::SpellMiss& miss = snapshot.base.self.spell_miss.emplace();
+  miss.spell = "Sap";
+  miss.target = "Defias Cutpurse";
+  miss.reason = "dodge";
+  miss.seq = 1;
+  const Screen with_target = RenderScreen(snapshot);
+  EXPECT_NE(with_target.text.find("\nmissed: Sap on Defias Cutpurse (dodge)\n"),
+            std::string::npos)
+      << with_target.text;
+  // Not an option: the fixed options are unchanged.
+  EXPECT_EQ(with_target.options,
+            (std::vector<OptionKind>{OptionKind::kKeep, OptionKind::kExplore,
+                                     OptionKind::kRest, OptionKind::kTown}));
+
+  // Without target name, omits "on <target>".
+  miss.target.clear();
+  miss.reason = "immune";
+  EXPECT_NE(RenderScreen(snapshot).text.find("\nmissed: Sap (immune)\n"),
+            std::string::npos)
+      << RenderScreen(snapshot).text;
+
+  // Missing spell or reason is never rendered.
+  miss.reason.clear();
+  EXPECT_EQ(RenderScreen(snapshot).text.find("missed:"), std::string::npos);
+}
+
 }  // namespace
 }  // namespace harness

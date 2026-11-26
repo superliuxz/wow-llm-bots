@@ -48,6 +48,8 @@ void BotSessionRegistry::ResetOnMapChange(uint64_t bot_guid) {
     it->second.moving_out_until_ms = 0;
     it->second.act_stealth_until_ms = 0;
     it->second.trade_requested = false;
+    it->second.spell_miss.reset();
+    it->second.cast_failure.reset();
   }
 }
 
@@ -62,6 +64,8 @@ void BotSessionRegistry::ResetOnDisconnect(uint64_t bot_guid) {
     it->second.moving_out_until_ms = 0;
     it->second.act_stealth_until_ms = 0;
     it->second.trade_requested = false;
+    it->second.spell_miss.reset();
+    it->second.cast_failure.reset();
   }
 }
 
