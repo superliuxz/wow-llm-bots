@@ -3528,8 +3528,11 @@ struct PartyBotSpec {
 
 class PartyWakeFixture {
  public:
-  PartyWakeFixture(std::vector<PartyBotSpec> bots, BotLoopConfig cfg = {})
+  PartyWakeFixture(std::vector<PartyBotSpec> bots,
+                   BotLoopConfig cfg = {},
+                   bool raid = false)
       : bots_(std::move(bots)),
+        raid_(raid),
         t0_(base::TimeTicks::Now()),
         loop_(WithDefaults(std::move(cfg)),
               brain_.Fn(),
@@ -3564,23 +3567,30 @@ class PartyWakeFixture {
         p.members.push_back(m);
       }
     }
+    if (raid_) {
+      s.ext.raid.emplace();
+    }
     return s;
   }
 
-  // Delivers one party line to every bot (11 s apart, clear of the per-sender
+  // Delivers one chat line to every bot (11 s apart, clear of the per-sender
   // rate limit); returns the bots it woke.
-  std::vector<std::string> Line(const std::string& text,
-                                const std::string& from = "Hele") {
+  std::vector<std::string> Line(
+      const std::string& text,
+      const std::string& from = "Hele",
+      std::optional<pb::ChatChannel> channel = std::nullopt,
+      bool at_me = true) {
     at_ = at_ + base::Seconds(11);
+    const pb::ChatChannel ch = channel.value_or(raid_ ? pb::RAID : pb::PARTY);
     std::vector<std::string> woke;
     for (const PartyBotSpec& b : bots_) {
       pb::ImmediateEvent imm;
       imm.bot = b.name;
       pb::ChatEvent& chat = imm.event.chat.emplace();
-      chat.channel = pb::PARTY;
+      chat.channel = ch;
       chat.from = from;
       chat.text = text;
-      chat.at_me = true;
+      chat.at_me = at_me;
       const size_t before = brain_.size();
       loop_.OnEvent(imm, t0_ + at_);
       if (brain_.size() > before) {
@@ -3590,7 +3600,8 @@ class PartyWakeFixture {
     return woke;
   }
 
-  // Every woken bot answers `party:`; returns who actually spoke in /p.
+  // Every woken bot answers `party:`; returns who actually spoke in /p or
+  // /raid.
   std::vector<std::string> FinishAll(const std::string& party) {
     sent_.clear();
     while (brain_.size() > 0) {
@@ -3598,9 +3609,10 @@ class PartyWakeFixture {
           std::string("do: 1\nexpect: none\nwatch: none\nlook: 300") +
           (party.empty() ? "" : "\nparty: " + party));
     }
+    const pb::ChatChannel want = raid_ ? pb::RAID : pb::PARTY;
     std::vector<std::string> spoke;
     for (const pb::Command& c : sent_) {
-      if (c.say && c.say->channel == pb::PARTY) {
+      if (c.say && c.say->channel == want) {
         spoke.push_back(c.bot);
       }
     }
@@ -3614,6 +3626,7 @@ class PartyWakeFixture {
 
  private:
   std::vector<PartyBotSpec> bots_;
+  bool raid_ = false;
   base::TimeTicks t0_;
   base::TimeDelta at_;
   CannedBrain brain_;
@@ -3689,6 +3702,92 @@ TEST(BotLoopTest, GroupCallWakesOnlyTheResponderInALargerGroup) {
   EXPECT_EQ(f.FinishAll("ok"), Names{"Loada"});
   EXPECT_EQ(f.Line("pally or warr tank this"), Names{"Abby"});
   f.FinishAll("");
+}
+
+TEST(BotLoopTest, RaidLineAddressesByClassAndRoleAndRoutesReplyToRaid) {
+  PartyWakeFixture f({{"Abby", "Warrior", pb::Role::TANK},
+                      {"Gatda", "Rogue", pb::Role::DPS},
+                      {"Loada", "Priest", pb::Role::HEALER},
+                      {"Mira", "Druid", pb::Role::HEALER},
+                      {"Telda", "Mage", pb::Role::DPS}},
+                     /*cfg=*/{}, /*raid=*/true);
+  // Class addressing in /raid (including alias/typo): only matching class
+  // wakes and replies in /raid; non-matching bots do not wake.
+  EXPECT_EQ(f.Line("mage sheep star"), Names{"Telda"});
+  EXPECT_EQ(f.FinishAll("sheeping star"), Names{"Telda"});
+  EXPECT_EQ(f.Line("rouge zap diamond"), Names{"Gatda"});
+  EXPECT_EQ(f.FinishAll("on it"), Names{"Gatda"});
+  // Role addressing in /raid: every matching role wakes, non-matching stay
+  // silent, and at most one replies in /raid.
+  EXPECT_EQ(f.Line("healers drink"), (Names{"Loada", "Mira"}));
+  EXPECT_EQ(f.FinishAll("drinking"), Names{"Loada"});
+  EXPECT_EQ(f.Line("tanks pull"), Names{"Abby"});
+  EXPECT_EQ(f.FinishAll("pulling"), Names{"Abby"});
+  EXPECT_EQ(f.Line("dps stop"), (Names{"Gatda", "Telda"}));
+  EXPECT_EQ(f.FinishAll("stopping"), Names{"Gatda"});
+  // Unaddressed call in a >4-bot raid wakes only the single responder.
+  EXPECT_EQ(f.Line("los"), Names{"Abby"});
+  EXPECT_EQ(f.FinishAll("pulling back"), Names{"Abby"});
+
+  // Counter-test: non-matching class/role (nobody plays warlock, and "lock"
+  // inside "unlock" or "tank" inside "tanking" is not a whole word) never
+  // wakes a non-matching class as addressed.
+  EXPECT_EQ(f.Line("unlock the warlock door"), Names{"Abby"});
+  f.FinishAll("");
+  // Counter-test: bot-to-bot or trivial /raid lines (at_me = false) wake
+  // nobody even when they mention a class or role.
+  EXPECT_EQ(f.Line("healers drink", "Telda", pb::RAID, /*at_me=*/false),
+            Names{});
+  EXPECT_EQ(f.Line("ok", "Hele", pb::RAID, /*at_me=*/false), Names{});
+  // Counter-test: non-group chat (General, Trade, LFG, Guild, Yell) with
+  // class/role words and at_me = false is ignored.
+  for (pb::ChatChannel ch :
+       {pb::GENERAL, pb::TRADE, pb::LFG, pb::GUILD, pb::YELL}) {
+    EXPECT_EQ(f.Line("healers and mages needed", "Stranger", ch,
+                     /*at_me=*/false),
+              Names{})
+        << static_cast<int>(ch);
+  }
+  // Counter-test: /rw (RAID_WARNING) wakes every bot in the raid even when it
+  // mentions a role word ("stack on tank"), so nobody misses a raid warning.
+  EXPECT_EQ(f.Line("stack on tank", "Hele", pb::RAID_WARNING, /*at_me=*/true),
+            (Names{"Abby", "Gatda", "Loada", "Mira", "Telda"}));
+  f.FinishAll("");
+}
+
+TEST(BotLoopTest, NonGroupChatClassOrRoleLineDoesNotWakeSoloBot) {
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& c) { sent.push_back(c); });
+  pb::Snapshot snap = MakeLiveSnap("Telda", 1, t0, /*in_combat=*/false);
+  AddKeep(&snap);
+  snap.base.self.unit.name = "Telda";
+  snap.base.self.unit.player.emplace().class_ = "Mage";
+  snap.base.self.unit.group.emplace().role = pb::Role::DPS;
+  loop.OnSnapshot(snap, t0);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300");
+
+  // Solo bot hearing class/role calls in public/non-group channels (at_me =
+  // false as emitted by chat_scripts when the bot's name is not mentioned).
+  base::TimeDelta at;
+  for (pb::ChatChannel ch :
+       {pb::GENERAL, pb::TRADE, pb::LFG, pb::GUILD, pb::SAY, pb::YELL}) {
+    at = at + base::Seconds(11);
+    pb::ImmediateEvent imm;
+    imm.bot = "Telda";
+    pb::ChatEvent& chat = imm.event.chat.emplace();
+    chat.channel = ch;
+    chat.from = "Stranger";
+    chat.text = "lf mage dps";
+    chat.at_me = false;
+    loop.OnEvent(imm, t0 + at);
+    EXPECT_EQ(brain.size(), 0u) << static_cast<int>(ch);
+  }
 }
 
 TEST(BotLoopTest, GroupCallFanOutNeverPreemptsACombatCall) {

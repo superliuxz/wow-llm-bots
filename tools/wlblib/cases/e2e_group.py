@@ -2466,6 +2466,124 @@ def _case_use_physics():
                 f"the ping from {rof_at:.0f} yd (was {rof_from:.0f}); the imp was dismissed")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
+def _case_hunter_dismiss_pet():
+    """Hunter `act: pet dismiss` uses Dismiss Pet rather than abandoning the pet.
+
+      1. Loada (an orc hunter made level 10, given a tamed Mottled Boar) does not yet know
+         Dismiss Pet: `act: pet dismiss` is refused ("no Dismiss Pet") and the boar stays out.
+      2. Taught Dismiss Pet (2641) and Call Pet (883), `act: pet dismiss` casts Dismiss Pet,
+         completes with `done_act_command_id`, and dismisses the boar.
+      3. `act: use Call Pet` recalls the same boar, proving it was dismissed rather than abandoned.
+    """
+
+    import socket
+    import time
+
+    from wlblib import server
+    from wlblib.common import TEST
+    from wlblib.testing import expect
+
+    NAME = "hunter_dismiss_pet"
+    DESCRIPTION = "Hunter pet dismiss refuses without Dismiss Pet, casts Dismiss Pet when known, and keeps pet recallable"
+    TEST_CONFIG = "hunter"
+    BOT = "Loada"
+    ONLINE = 1
+
+    def run(stack):
+        server.console("character level Loada 10", inst=TEST)
+        out = server.console("llmtest tame Loada 3098", inst=TEST)  # Mottled Boar.
+        expect("tamed" in out or "already has a pet" in out,
+               f"setup: failed to give Loada a hunter pet ({out[-200:]})")
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        sock.connect(str(TEST.run / "brain.sock"))
+        reader = wire.FrameReader()
+        snaps = []   # (monotonic, snapshot)
+        errors = {}  # command_id -> [text]
+
+        def pump(until, timeout, what):
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                got = until()
+                if got:
+                    return got
+                try:
+                    chunk = sock.recv(1 << 20)
+                except socket.timeout:
+                    continue
+                for payload in reader.feed(chunk):
+                    msg = wire.decode_module_message(payload)
+                    if not msg:
+                        continue
+                    if "event" in msg:
+                        err = msg["event"].get("event", {}).get("error")
+                        if err:
+                            errors.setdefault(err.get("command_id"), []).append(err.get("text"))
+                        continue
+                    if msg.get("snapshot"):
+                        snaps.append((time.monotonic(), msg["snapshot"]))
+            raise AssertionError(f"timed out waiting for {what} (errors: {errors})")
+
+        def latest(after=0.0):
+            return next((s for t, s in reversed(snaps)
+                         if s.get("bot") == "Loada" and t >= after), None)
+
+        def pet_of(snap):
+            if not snap:
+                return None
+            return next((u for u in snap["base"]["nearby"]["units"]
+                         if u.get("kind") == "PET" and not u.get("dead")), None)
+
+        def done(cmd_id):
+            return lambda: (cmd_id in errors) or next(
+                (s for _, s in snaps
+                 if s.get("bot") == "Loada" and s.get("done_act_command_id") == cmd_id),
+                None)
+
+        try:
+            pump(lambda: pet_of(latest()), 15, "Loada's tamed boar in snapshot")
+
+            # 1. Counter-test: without Dismiss Pet, `act: pet dismiss` must refuse rather than
+            #    abandoning the hunter's pet.
+            since_refuse = time.monotonic()
+            send_cmd(sock, {"bot": "Loada", "command_id": 11,
+                            "act": {"verb": "PET", "pet_cmd": "DISMISS"}})
+            pump(done(11), 10, "refusal without Dismiss Pet")
+            refuse_errs = errors.get(11, [])
+            pump(lambda: latest(since_refuse), 5, "post-refusal snapshot")
+            still_out = bool(pet_of(latest(since_refuse)))
+
+            # 2. Teach Dismiss Pet (2641) and Call Pet (883), then dismiss via `act: pet dismiss`.
+            server.console("llmtest learn Loada 2641", inst=TEST)  # Dismiss Pet.
+            server.console("llmtest learn Loada 883", inst=TEST)   # Call Pet.
+            since_dismiss = time.monotonic()
+            send_cmd(sock, {"bot": "Loada", "command_id": 12,
+                            "act": {"verb": "PET", "pet_cmd": "DISMISS"}})
+            pump(done(12), 20, "Loada's Dismiss Pet cast to finish")
+            dismiss_errs = errors.get(12, [])
+            pump(lambda: latest(since_dismiss) and not pet_of(latest(since_dismiss)),
+                 10, "Loada's boar dismissed")
+
+            # 3. Call Pet brings the boar back (proving it was dismissed, not abandoned).
+            since_call = time.monotonic()
+            send_cmd(sock, {"bot": "Loada", "command_id": 13,
+                            "act": {"verb": "USE", "name": "Call Pet"}})
+            pump(done(13), 15, "Loada's Call Pet to finish")
+            call_errs = errors.get(13, [])
+            recalled = bool(pump(lambda: pet_of(latest(since_call)), 10,
+                                 "Loada's boar recalled by Call Pet"))
+        finally:
+            sock.close()
+
+        expect(refuse_errs == ["you can't dismiss your pet (no Dismiss Pet)"],
+               f"expected no-Dismiss-Pet refusal, got: {refuse_errs}")
+        expect(still_out, "hunter pet disappeared even without Dismiss Pet")
+        expect(not dismiss_errs, f"Dismiss Pet failed: {dismiss_errs}")
+        expect(not call_errs, f"Call Pet failed after dismiss: {call_errs}")
+        expect(recalled, "Call Pet did not bring back the dismissed hunter pet")
+        return "refused without Dismiss Pet; Dismiss Pet dismissed the boar; Call Pet recalled it"
+    return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
+
 def _case_crisp_dodge():
     """A move act cuts a long cast at once (Milestone 3c, crisp dodges).
 
@@ -2739,4 +2857,4 @@ def _case_trade():
                 "a cancelled trade closed both windows")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
-CASES = [_case_pull_gate(), _case_crowd_control(), _case_use_physics(), _case_crisp_dodge(), _case_popup_policy(), _case_human_party(), _case_human_dungeon(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal(), _case_trade()]
+CASES = [_case_pull_gate(), _case_crowd_control(), _case_use_physics(), _case_hunter_dismiss_pet(), _case_crisp_dodge(), _case_popup_policy(), _case_human_party(), _case_human_dungeon(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal(), _case_trade()]

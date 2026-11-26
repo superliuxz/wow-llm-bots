@@ -21,10 +21,8 @@ Last updated: 2026-11-26.
   `default_jobs()` (7.2 min with `10700k` at `-j 1` + local `-j 6`, bounded by the single 8-case
   `core` group). Only use `--remote` when asked (CONTRIBUTING rule 5).
 
-- **Fix queue:** cleared. Older items not in this file any more get re-checked and listed if still
-  real: no e2e for Hunter Dismiss Pet, /raid class/role addressing works only in /p.
-  (`human_dungeon` run twice on one server: not reproduced in back-to-back full e2e runs, serial
-  and parallel.)
+- **Fix queue:** cleared. (`human_dungeon` run twice on one server: not reproduced in back-to-back
+  full e2e runs, serial and parallel.)
 
 Lessons from official AI companions (Follower Dungeons, FFXIV Duty Support, Dragon's Dogma pawns,
 Guild Wars heroes):

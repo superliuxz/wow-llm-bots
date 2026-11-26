@@ -127,6 +127,7 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"kill", HandleKill, SEC_ADMINISTRATOR, Console::Yes},
         {"lfgboot", HandleLfgBoot, SEC_ADMINISTRATOR, Console::Yes},
         {"spellmiss", HandleSpellMiss, SEC_ADMINISTRATOR, Console::Yes},
+        {"tame", HandleTame, SEC_ADMINISTRATOR, Console::Yes},
     };
     static ChatCommandTable root_table = {
         {"llmtest", test_table},
@@ -1241,6 +1242,38 @@ class LlmBrainTestCommandScript : public CommandScript {
     handler->PSendSysMessage("llmtest: {} missed spell {} on {} (info={})",
                              caster->GetName(), spell_id, victim->GetName(),
                              miss_info);
+    return true;
+  }
+
+  // `llmtest tame <bot> <creature_entry>`: gives a hunter bot a tamed
+  // HUNTER_PET of `creature_entry` (must have a non-zero CreatureFamily).
+  static bool HandleTame(ChatHandler* handler,
+                         std::string bot_name,
+                         uint32_t creature_entry) {
+    Player* player = FindOnlinePlayer(handler, std::move(bot_name));
+    if (!player) {
+      return false;
+    }
+    const CreatureTemplate* tpl =
+        sObjectMgr->GetCreatureTemplate(creature_entry);
+    if (!tpl || !tpl->family) {
+      handler->SendErrorMessage(
+          "llmtest: tame: creature {} has no tameable family", creature_entry);
+      return false;
+    }
+    if (player->GetPet()) {
+      handler->PSendSysMessage("llmtest: {} already has a pet",
+                               player->GetName());
+      return true;
+    }
+    Pet* pet = player->CreatePet(creature_entry);
+    if (!pet) {
+      handler->SendErrorMessage("llmtest: tame: CreatePet({}) failed for {}",
+                                creature_entry, player->GetName());
+      return false;
+    }
+    handler->PSendSysMessage("llmtest: {} tamed {} (entry {})",
+                             player->GetName(), pet->GetName(), creature_entry);
     return true;
   }
 };

@@ -1,0 +1,6 @@
+# e2e_hunter_dismiss_pet: a fresh orc hunter (Loada, made level 10 and given a tamed boar by
+# the case) at the Valley of Trials, standing still.
+LlmBrain.Bots = "Loada"
+LlmBrain.TestFixtures = "Loada=new:orc:hunter"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.NonCombatStrategies = "-follow,-grind,-new rpg"

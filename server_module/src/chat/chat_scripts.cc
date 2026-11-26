@@ -189,8 +189,9 @@ class LlmBrainChatScript : public PlayerScript {
       // Only human party/raid messages wake bots directly; bot-to-bot party
       // lines remain visible in the chat log without triggering reply loops.
       // "ok" / "lol" asks nothing of anyone: heard, not woken for (RH-H4).
-      chat.at_me = is_warning || (sender_is_human && !IsTrivialChat(msg) &&
-                                  (!is_raid || MentionsName(msg, bot_name)));
+      // The harness (`BotLoop::WakesForPartyLine`) filters party and raid lines
+      // to addressed bots (by name, class, or role) or a single responder.
+      chat.at_me = is_warning || (sender_is_human && !IsTrivialChat(msg));
       inbox_->Add(bot_name, std::move(chat));
     }
     return true;

@@ -247,6 +247,24 @@ TEST(TriggersTest, EventsAlertOnlyOnClientAttentionEvents) {
             (std::optional<WakeTrigger>{
                 {Urgency::kP1Danger, "party from Hele: pull?"}}));
 
+  pb::Event raid_at_me;
+  pb::ChatEvent& r_at = raid_at_me.chat.emplace();
+  r_at.channel = pb::RAID;
+  r_at.from = "Hele";
+  r_at.text = "healers drink";
+  r_at.at_me = true;
+  EXPECT_EQ(EvaluateEventTrigger(raid_at_me),
+            (std::optional<WakeTrigger>{
+                {Urgency::kP1Danger, "raid from Hele: healers drink"}}));
+
+  pb::Event raid_silent;
+  pb::ChatEvent& r_silent = raid_silent.chat.emplace();
+  r_silent.channel = pb::RAID;
+  r_silent.from = "Gorn";
+  r_silent.text = "healers drink";
+  r_silent.at_me = false;
+  EXPECT_FALSE(EvaluateEventTrigger(raid_silent));
+
   pb::Event say_at_me;
   pb::ChatEvent& s_at = say_at_me.chat.emplace();
   s_at.channel = pb::SAY;
