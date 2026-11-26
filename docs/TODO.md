@@ -58,6 +58,21 @@ Guild Wars heroes):
 - Avoid: body pulls and drifting healers (the top Follower Dungeons complaint); late heals;
   last-second dodges (they look like near-deaths); repetitive, obvious or sycophantic chatter;
   replies slower than about 1.5-2 s for commands; carrying the human so hard dungeons feel empty.
+- Where we stand (2026-11-26): pace, AFK wait, no-blame and instant commands are in RULES.md
+  and the harness (AFK, kill-skull and go-there have e2e). Gaps, to plan as tests first:
+  1. **Body pulls / drifting healers (not done):** nothing keeps bots off a pack's aggro edge or
+     the healer in range and line of sight of the tank. E2e: a party walks past an unpulled pack
+     (no bot aggroes it); during a pull the healer stays within 40 yd and LoS of the tank.
+  2. **Late heals (not done):** no measure of heal reaction time. Perf/e2e: time from the tank
+     dropping below a threshold to the healer's heal starting; set a budget.
+  3. **Carrying the human (not done):** nothing limits bots' share of the work. Measure it in
+     the human-party e2e (bots' share of damage/kills while the human plays) and decide a target.
+  4. **Command reply speed (partial):** commands apply in the harness at once, but the LLM chat
+     reply after one isn't gated. Perf: p95 from a party command to the bot's reply <= 2 s.
+  5. **Last-second dodges (partial):** dodge eval cases exist; nothing checks the bot leaves
+     early. E2e: time left on the cast when the bot clears the area, with a minimum margin.
+  6. **Chatter (partial, rules only):** no long-session check. Soak: count repeated, narrating
+     or sycophantic lines per hour (simple string checks plus an LLM judge) with a ceiling.
 
 ## Next (multi-session depth & architecture)
 
