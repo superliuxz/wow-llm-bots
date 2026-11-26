@@ -1775,6 +1775,31 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
     }
     lines.push_back(std::move(line));
   }
+  // The open trade window: "trade with Hele: they give Conjured Water x20
+  // (accepted); I give 5s".
+  if (ext.trade && !ext.trade->with.empty()) {
+    const pb::Trade& t = *ext.trade;
+    const auto side = [](const std::vector<pb::Item>& items, uint32_t money,
+                         bool accepted) {
+      std::vector<std::string> parts;
+      if (!items.empty()) {
+        parts.push_back(ItemNames(items));
+      }
+      if (money > 0) {
+        parts.push_back(Money(money));
+      }
+      std::string out =
+          parts.empty() ? "nothing" : base::JoinString(parts, " and ");
+      if (accepted) {
+        base::StrAppend(&out, {" (accepted)"});
+      }
+      return out;
+    };
+    lines.push_back(base::StrCat(
+        {"trade with ", t.with, ": they give ",
+         side(t.getting, t.getting_money, t.they_accepted), "; I give ",
+         side(t.giving, t.giving_money, t.i_accepted)}));
+  }
   for (std::string& line : QuestLines(ext.quest_tracker)) {
     lines.push_back(std::move(line));
   }

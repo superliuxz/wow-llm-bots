@@ -38,8 +38,9 @@ Guild Wars heroes):
 
 ## Later (broader WoW systems)
 
-- **Economy & upkeep:** Vendor panel for selling non-grey items, mailbox, player trade window,
-  Auction House (wrapping playerbots' AH pricing or `mod-ah-bot`), and bank.
+- **Economy & upkeep:** Vendor panel for selling non-grey items, mailbox, Auction House
+  (wrapping playerbots' AH pricing or `mod-ah-bot`), and bank. Trade window: putting up gold
+  (only shown so far), and no eval case asks for a trade yet (e.g. a mage asked for water).
 - **Professions:** Learn professions, craft skill-ups, fishing, and party disenchanting/crafting
   requests (wrapping playerbots' `craft`/`disenchant` actions).
 - **Guilds & LFG social graph:** `guild:` chat output, guild invite/charter, LookingForGroup channel

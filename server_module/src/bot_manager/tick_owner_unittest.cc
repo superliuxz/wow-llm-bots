@@ -27,7 +27,8 @@ TEST(TickOwnerTest, PopupsAreTheBrainsOnlyWhileItLeads) {
   for (std::string_view name :
        {"accept invitation", "loot roll", "roll", "ready check",
         "accept quest share", "self resurrect", "lfg join", "lfg accept",
-        "lfg role check", "lfg leave", "lfg teleport"}) {
+        "lfg role check", "lfg leave", "lfg teleport", "accept trade",
+        "trade status extended"}) {
     const GatedAction* a = FindGatedAction(name);
     ASSERT_NE(a, nullptr) << name;
     EXPECT_TRUE(BlockedFor(*a, TickOwner::kBrain)) << name;
@@ -59,7 +60,10 @@ TEST(TickOwnerTest, ConditionalAndUngatedActionsAreNotBlockedByMode) {
   }
   // Combat, healing, following and looting stay playerbots' in both modes.
   for (std::string_view name :
-       {"attack", "follow", "loot", "heal", "", "accept invitation ", "Roll"}) {
+       {"attack", "follow", "loot", "heal", "", "accept invitation ", "Roll",
+        // "trade status" is playerbots' trigger name, not an action's; the
+        // master's `t <item>` chat command stays playerbots'.
+        "trade status", "trade"}) {
     EXPECT_EQ(FindGatedAction(name), nullptr) << "'" << name << "'";
   }
 }

@@ -136,6 +136,18 @@ struct PopupAnswerAction {
   bool yes = true;
 };
 
+// The trade window (Objective 9a): open one with a party member, put a bag
+// item up for trade, accept (press Trade), or cancel.
+struct TradeAction {
+  enum class Op : uint8_t { kOpen, kPutItem, kAccept, kCancel };
+  Op op = Op::kCancel;
+  std::string target_guid;  // kOpen.
+  uint8_t bag = 0;          // kPutItem: the item's bag and slot
+  uint8_t slot = 0;         // (Player::GetItemByPos) and entry.
+  uint32_t entry = 0;
+  std::string label;
+};
+
 struct FollowLeaderAction {
   std::string leader_guid;
 };
@@ -213,6 +225,7 @@ using BotAction = std::variant<KeepAction,
                                LfgAction,
                                GroupPolicyAction,
                                PopupAnswerAction,
+                               TradeAction,
                                CrowdControlAction,
                                FollowLeaderAction,
                                MarkTargetAction,
@@ -226,8 +239,8 @@ using BotAction = std::variant<KeepAction,
 
 // Decodes a wire/fact action guid (`npc_*`, `roll:*`, `ready:*`, `qshare:*`,
 // `lfg:*`, `qpush:*`, `grouppolicy:*`, `follow:*`, `mark:*`, `mount:*`,
-// `talent:*`, `item:*`, `equip:*`, `rez:*`) into a typed `BotAction` once at
-// option creation. Returns `InvalidAction` if malformed.
+// `talent:*`, `item:*`, `equip:*`, `rez:*`, `trade:*`) into a typed `BotAction`
+// once at option creation. Returns `InvalidAction` if malformed.
 BotAction DecodeOptionFactAction(std::string_view guid, std::string_view label);
 
 bool IsKeepAction(const BotAction& action);

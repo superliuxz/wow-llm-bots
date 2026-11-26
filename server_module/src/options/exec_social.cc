@@ -27,6 +27,7 @@
 #include "Map.h"
 #include "MotionMaster.h"
 #include "ObjectAccessor.h"
+#include "ObjectDefines.h"
 #include "ObjectGuid.h"
 #include "ObjectMgr.h"
 #include "Opcodes.h"
@@ -40,6 +41,7 @@
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "Timer.h"
+#include "TradeData.h"
 #include "Unit.h"
 #include "UpdateFields.h"
 #include "World.h"
@@ -56,6 +58,7 @@
 #include "options/exec_shared.h"
 #include "options/options.h"
 #include "snapshot/snapshot.h"
+#include "snapshot/world_util.h"
 
 namespace llm_brain {
 namespace {
@@ -304,6 +307,77 @@ std::string RollItemFacts(Player* bot, const ItemTemplate* proto) {
          std::to_string(worn) + ")";
 }
 
+// The trade window's choices while it is open (accept, cancel, put up one
+// more bag item), else a trade with each party member close enough. Only
+// what the server would allow: the brain decides what to give and whether
+// the trade is fair.
+constexpr size_t kMaxTradeItemOptions = 8;
+
+void CollectTradeActions(Player* bot,
+                         std::vector<pb::OptionFacts_Action>* out) {
+  if (!bot->IsAlive()) {
+    return;
+  }
+  if (const TradeData* mine = bot->GetTradeData()) {
+    const Player* trader = mine->GetTrader();
+    if (!trader) {
+      return;
+    }
+    const std::string with = trader->GetName();
+    if (!mine->IsAccepted()) {
+      out->push_back({"trade:accept", "Accept the trade with " + with});
+    }
+    out->push_back({"trade:cancel", "Cancel the trade with " + with});
+    bool slot_free = false;
+    for (uint8_t slot = 0; slot < TRADE_SLOT_TRADED_COUNT; ++slot) {
+      slot_free |= mine->GetItem(static_cast<TradeSlots>(slot)) == nullptr;
+    }
+    if (!slot_free) {
+      return;
+    }
+    // One option per kind of item (its first stack), in bag order.
+    std::vector<uint32_t> offered;
+    for (const BagSlotItem& b : BagItems(bot)) {
+      if (offered.size() >= kMaxTradeItemOptions) {
+        break;
+      }
+      const ItemTemplate* proto = b.item->GetTemplate();
+      if (!proto || mine->HasItem(b.item->GetGUID()) ||
+          !b.item->CanBeTraded(false, true) ||
+          b.item->IsBindedNotWith(trader) ||
+          std::find(offered.begin(), offered.end(), proto->ItemId) !=
+              offered.end()) {
+        continue;
+      }
+      offered.push_back(proto->ItemId);
+      const uint32_t count = b.item->GetCount();
+      out->push_back(
+          {base::StringPrintf("trade:put:%u:%u:%u", b.bag, b.slot,
+                              proto->ItemId),
+           "Put " + proto->Name1 +
+               (count > 1 ? " x" + std::to_string(count) : std::string()) +
+               " in the trade"});
+    }
+    return;
+  }
+  Group* group = bot->GetGroup();
+  if (!group || bot->IsInCombat()) {
+    return;
+  }
+  for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
+       itr = itr->next()) {
+    Player* m = itr->GetSource();
+    if (m && m != bot && m->IsInWorld() && m->IsAlive() && !m->GetTradeData() &&
+        m->GetTeamId() == bot->GetTeamId() &&
+        m->IsWithinDistInMap(bot, TRADE_DISTANCE, false)) {
+      out->push_back({base::StringPrintf("trade:open:0x%016llx",
+                                         static_cast<unsigned long long>(
+                                             m->GetGUID().GetRawValue())),
+                      "Open a trade with " + m->GetName()});
+    }
+  }
+}
+
 }  // namespace
 
 void CollectGroupAndUpkeepActions(Player* bot,
@@ -397,6 +471,9 @@ void CollectGroupAndUpkeepActions(Player* bot,
       out->push_back({"boot:no", "Vote not to kick " + victim});
     }
   }
+
+  // 2b. The trade window (Objective 9a).
+  CollectTradeActions(bot, out);
 
   // 3. Shared / party-escort quest accept / decline.
   if (bot->IsAlive()) {
@@ -1059,6 +1136,85 @@ ActStartResult ExecuteCrowdControlAction(Player* bot,
   // walk into range and sight, hold still while casting (CMSG_CAST_SPELL on
   // the target, like a player's click).
   return StartSpellUseOn(bot, /*command_id=*/0, spell, target, now, out_active);
+}
+
+ActionOutcome ExecuteTradeAction(Player* bot, const TradeAction& action) {
+  WorldSession* session = bot->GetSession();
+  if (!session) {
+    return {.error = "no session"};
+  }
+  TradeData* mine = bot->GetTradeData();
+  if (action.op == TradeAction::Op::kOpen) {
+    if (mine) {
+      return {.error = "you are already trading"};
+    }
+    Player* other = ObjectAccessor::FindConnectedPlayer(
+        ParseSnapshotGuid(action.target_guid));
+    if (!other || !other->IsInWorld()) {
+      return {.error = "they are not online"};
+    }
+    WorldPacket p(CMSG_INITIATE_TRADE, 8);
+    p << other->GetGUID();
+    p.rpos(0);
+    session->HandleInitiateTradeOpcode(p);
+    if (!bot->GetTradeData()) {
+      return {.error = "can't trade with " + other->GetName() + " now"};
+    }
+    return {.used = true, .info = "asked " + other->GetName() + " to trade"};
+  }
+  if (!mine || !mine->GetTrader()) {
+    return {.error = "no trade window is open"};
+  }
+  const std::string with = mine->GetTrader()->GetName();
+  switch (action.op) {
+    case TradeAction::Op::kAccept: {
+      WorldPacket p(CMSG_ACCEPT_TRADE, 4);
+      p << uint32_t(1);
+      p.rpos(0);
+      session->HandleAcceptTradeOpcode(p);
+      if (!bot->GetTradeData()) {
+        return {.used = true, .info = "traded with " + with};
+      }
+      if (!bot->GetTradeData()->IsAccepted()) {
+        return {.error = "the trade with " + with + " can't go through"};
+      }
+      return {.used = true, .info = "accepted the trade; waiting for " + with};
+    }
+    case TradeAction::Op::kCancel: {
+      WorldPacket p(CMSG_CANCEL_TRADE, 0);
+      session->HandleCancelTradeOpcode(p);
+      return {.used = true, .info = "cancelled the trade with " + with};
+    }
+    case TradeAction::Op::kPutItem: {
+      Item* item = bot->GetItemByPos(action.bag, action.slot);
+      if (!item || item->GetEntry() != action.entry) {
+        return {.error = "that item is no longer there"};
+      }
+      int free_slot = -1;
+      for (uint8_t slot = 0; slot < TRADE_SLOT_TRADED_COUNT; ++slot) {
+        if (!mine->GetItem(static_cast<TradeSlots>(slot))) {
+          free_slot = slot;
+          break;
+        }
+      }
+      if (free_slot < 0) {
+        return {.error = "the trade window is full"};
+      }
+      WorldPacket p(CMSG_SET_TRADE_ITEM, 3);
+      p << uint8_t(free_slot) << action.bag << action.slot;
+      p.rpos(0);
+      session->HandleSetTradeItemOpcode(p);
+      TradeData* now = bot->GetTradeData();
+      if (!now || !now->HasItem(item->GetGUID())) {
+        return {.error = "can't trade " + item->GetTemplate()->Name1};
+      }
+      return {.used = true,
+              .info = "put " + item->GetTemplate()->Name1 + " in the trade"};
+    }
+    case TradeAction::Op::kOpen:
+      break;
+  }
+  return {.error = "invalid trade action"};
 }
 
 ActionOutcome ExecutePopupAnswerAction(Player* bot,

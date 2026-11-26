@@ -65,6 +65,40 @@ TEST(PopupWatchTest, ReopenedOrChangedPopupIsReportedAgain) {
   EXPECT_EQ(evs[0].prompt->kind, pb::PromptEvent::LFG_PROPOSAL);
 }
 
+TEST(PopupWatchTest, TradeWindowOpenAndTheirAcceptEachWakeOnce) {
+  PopupWatch watch;
+  PopupState s;
+  s.trader = "Hele";
+  std::vector<pb::Event> evs = watch.Update(s);
+  ASSERT_EQ(evs.size(), 1u);
+  EXPECT_EQ(evs[0].prompt->kind, pb::PromptEvent::TRADE);
+  EXPECT_EQ(evs[0].prompt->from, "Hele");
+  EXPECT_EQ(evs[0].prompt->text, "window open");
+  EXPECT_TRUE(watch.Update(s).empty());  // Still open, nothing new.
+  s.trader_accepted = true;
+  evs = watch.Update(s);
+  ASSERT_EQ(evs.size(), 1u);
+  EXPECT_EQ(evs[0].prompt->text, "they accepted");
+  EXPECT_TRUE(watch.Update(s).empty());
+  // Counter-test: changing an offer releases their Trade button; pressing it
+  // again wakes the brain again.
+  s.trader_accepted = false;
+  EXPECT_TRUE(watch.Update(s).empty());
+  s.trader_accepted = true;
+  EXPECT_EQ(watch.Update(s).size(), 1u);
+  // Closed, then a new trade with someone else: a new window.
+  EXPECT_TRUE(watch.Update({}).empty());
+  PopupState other;
+  other.trader = "Zenji";
+  evs = watch.Update(other);
+  ASSERT_EQ(evs.size(), 1u);
+  EXPECT_EQ(evs[0].prompt->from, "Zenji");
+  EXPECT_EQ(evs[0].prompt->text, "window open");
+  // Reset (logout, disconnect) forgets the open window.
+  watch.Reset();
+  EXPECT_EQ(watch.Update(other).size(), 1u);
+}
+
 TEST(PopupWatchTest, EachNewLootRollIsOneEvent) {
   PopupWatch watch;
   PopupState s;

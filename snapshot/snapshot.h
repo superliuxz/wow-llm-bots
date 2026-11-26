@@ -1976,6 +1976,22 @@ struct Interaction {
   bool operator==(const Interaction&) const = default;
 };
 
+// The trade window while it is open (SMSG_TRADE_STATUS /
+// SMSG_TRADE_STATUS_EXTENDED, as the client shows it): who the bot trades
+// with, the items and money each side has put up for trade, and whose
+// Trade button is pressed. Changing either side's offer releases both.
+struct Trade {
+  std::string with;
+  std::vector<Item> giving;  // The bot's side (traded slots only).
+  std::vector<Item> getting;
+  uint32_t giving_money = 0;  // Copper.
+  uint32_t getting_money = 0;
+  bool i_accepted = false;
+  bool they_accepted = false;
+
+  bool operator==(const Trade&) const = default;
+};
+
 struct ImmediateEvent {
   std::string bot;
   uint32_t seq = 0;
@@ -2000,6 +2016,7 @@ struct Extensions {
   std::optional<Death> death;
   std::optional<Unit> vehicle;
   std::optional<Interaction> interaction;
+  std::optional<Trade> trade;
   std::optional<PetFrame> pet;
   std::optional<Unit> possessed;
   std::optional<Bags> bags;            // visibility: OPEN

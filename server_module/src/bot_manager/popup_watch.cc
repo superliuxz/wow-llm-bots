@@ -74,6 +74,14 @@ std::vector<pb::Event> PopupWatch::Update(const PopupState& now) {
     item.name = roll.item_name;
     out.push_back(std::move(ev));
   }
+  // A trade window opening, and the other side pressing Trade (the bot's
+  // own press then completes the trade).
+  if (!now.trader.empty() && now.trader != last_.trader) {
+    out.push_back(Prompt(pb::PromptEvent::TRADE, now.trader, "window open"));
+  } else if (!now.trader.empty() && now.trader_accepted &&
+             !last_.trader_accepted) {
+    out.push_back(Prompt(pb::PromptEvent::TRADE, now.trader, "they accepted"));
+  }
   last_ = now;
   return out;
 }

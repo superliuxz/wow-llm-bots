@@ -82,6 +82,36 @@ BotAction DecodeOptionFactAction(std::string_view guid,
     return PopupAnswerAction{PopupAnswerAction::Kind::kBootVote,
                              guid == "boot:yes"};
   }
+  if (guid.starts_with("trade:")) {
+    TradeAction trade;
+    trade.label = std::string(label);
+    if (guid == "trade:accept") {
+      trade.op = TradeAction::Op::kAccept;
+      return trade;
+    }
+    if (guid == "trade:cancel") {
+      trade.op = TradeAction::Op::kCancel;
+      return trade;
+    }
+    if (guid.starts_with("trade:open:") && guid.size() > 11) {
+      trade.op = TradeAction::Op::kOpen;
+      trade.target_guid = std::string(guid.substr(11));
+      return trade;
+    }
+    const std::vector<std::string_view> parts = base::SplitStringPiece(
+        guid, ":", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+    uint32_t bag = 0;
+    uint32_t slot = 0;
+    if (parts.size() == 5 && parts[1] == "put" && ParseUint32(parts[2], &bag) &&
+        ParseUint32(parts[3], &slot) && ParseUint32(parts[4], &trade.entry) &&
+        bag <= 255 && slot <= 255 && trade.entry != 0) {
+      trade.op = TradeAction::Op::kPutItem;
+      trade.bag = static_cast<uint8_t>(bag);
+      trade.slot = static_cast<uint8_t>(slot);
+      return trade;
+    }
+    return InvalidAction{"invalid trade action"};
+  }
   if (guid == "ready:start") {
     return ReadyCheckAction{true, true};
   }
@@ -361,6 +391,8 @@ std::string_view ActionKindName(const BotAction& action) {
           return "group_policy";
         if constexpr (std::is_same_v<T, PopupAnswerAction>)
           return "popup_answer";
+        if constexpr (std::is_same_v<T, TradeAction>)
+          return "trade";
         if constexpr (std::is_same_v<T, CrowdControlAction>)
           return "crowd_control";
         if constexpr (std::is_same_v<T, FollowLeaderAction>)

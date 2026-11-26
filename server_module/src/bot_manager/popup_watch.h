@@ -38,6 +38,9 @@ struct PopupState {
   std::string boot_victim;
   std::string boot_reason;
   std::vector<Roll> rolls;
+  // The open trade window: who with, and whether they pressed Trade.
+  std::string trader;
+  bool trader_accepted = false;
 };
 
 // Turns successive PopupStates of one bot into one alerting event per popup

@@ -175,6 +175,8 @@ ExecuteResult ExecuteAction(Player* bot,
           return FromOutcome(ExecuteGroupPolicyAction(bot, a));
         } else if constexpr (std::is_same_v<T, PopupAnswerAction>) {
           return FromOutcome(ExecutePopupAnswerAction(bot, a));
+        } else if constexpr (std::is_same_v<T, TradeAction>) {
+          return FromOutcome(ExecuteTradeAction(bot, a));
         } else if constexpr (std::is_same_v<T, CrowdControlAction>) {
           ActiveAct scratch;
           ActiveAct* out =

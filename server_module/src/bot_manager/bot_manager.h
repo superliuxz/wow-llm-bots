@@ -111,6 +111,12 @@ class BotManager {
   // into wake events.
   static PopupState ReadPopupState(Player* bot);
 
+  // World thread only: someone opened a trade with a brain-led `bot`: open
+  // its trade window, as a player's client does by itself (CMSG_BEGIN_TRADE).
+  // Accepting, filling and cancelling it are the brain's choices. A
+  // playerbots-led bot's request is playerbots' (TradeStatusAction).
+  static void OpenRequestedTrade(Player* bot);
+
  private:
   struct Bot {
     std::string name;

@@ -54,6 +54,7 @@
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "Timer.h"
+#include "TradeData.h"
 #include "Unit.h"
 #include "UpdateFields.h"
 #include "WorldPacket.h"
@@ -431,6 +432,27 @@ class LlmBrainPacketScript final : public ServerScript {
           };
           BotSessionRegistry::Instance().WithSession(
               key, [&ping](BotSession& s) { s.party_ping = std::move(ping); });
+        }
+        break;
+      }
+      case SMSG_TRADE_STATUS: {
+        // WorldSession::SendTradeStatus: uint32 status first. BEGIN_TRADE is
+        // the "X wants to trade" the client answers by opening the window.
+        if (packet.size() >= 4) {
+          ByteBuffer copy(packet);
+          copy.rpos(0);
+          uint32_t status = 0;
+          copy >> status;
+          if (status == TRADE_STATUS_BEGIN_TRADE ||
+              status == TRADE_STATUS_OPEN_WINDOW ||
+              status == TRADE_STATUS_CLOSE_WINDOW ||
+              status == TRADE_STATUS_TRADE_CANCELED ||
+              status == TRADE_STATUS_TRADE_COMPLETE) {
+            const bool requested = status == TRADE_STATUS_BEGIN_TRADE;
+            BotSessionRegistry::Instance().WithSession(
+                key,
+                [requested](BotSession& s) { s.trade_requested = requested; });
+          }
         }
         break;
       }
@@ -1454,7 +1476,32 @@ PopupState BotManager::ReadPopupState(Player* bot) {
       s.rolls.push_back(std::move(r));
     }
   }
+  if (const TradeData* trade = bot->GetTradeData()) {
+    if (const Player* trader = trade->GetTrader()) {
+      s.trader = trader->GetName();
+      const TradeData* theirs = trade->GetTraderData();
+      s.trader_accepted = theirs && theirs->IsAccepted();
+    }
+  }
   return s;
+}
+
+void BotManager::OpenRequestedTrade(Player* bot) {
+  // A request always comes with both sides' TradeData; a cancel, a close or
+  // a finished trade clears the flag (LlmBrainPacketScript).
+  if (!bot || !bot->IsInWorld() || !bot->GetSession() || !bot->GetTradeData()) {
+    return;
+  }
+  const bool open = BotSessionRegistry::Instance().WithSession(
+      bot->GetGUID().GetRawValue(), [](BotSession& s) {
+        const bool requested = s.trade_requested;
+        s.trade_requested = false;
+        return requested && s.tick_owner == TickOwner::kBrain;
+      });
+  if (open) {
+    WorldPacket p(CMSG_BEGIN_TRADE, 0);
+    bot->GetSession()->HandleBeginTradeOpcode(p);
+  }
 }
 
 void BotManager::WaitForResurrection(Player* bot, uint32_t wait_ms) {

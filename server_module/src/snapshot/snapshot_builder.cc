@@ -906,6 +906,10 @@ NearbyBuilder::Stats SnapshotBuilder::Build(Player* bot,
   FillActionBars(bot, &snapshot->ext);
   FillQuestTracker(bot, &snapshot->ext, &quest_pois_);
   FillOptionFacts(bot, snapshot, facts, world, now);
+  // The trade window pops up by itself, like a popup: not a panel to open.
+  if (bot->GetTradeData()) {
+    FillTrade(bot, &snapshot->ext.trade.emplace());
+  }
   // Open panels and the tooltip of what the bot points at (visibility OPEN and
   // HOVER, docs/specs/snapshot.md §3).
   const std::optional<pb::HoverRef> hover = ui->FillAndAge(&base.ui, now);

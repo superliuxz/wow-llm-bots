@@ -2,6 +2,7 @@
 
 #include "options/action_types.h"
 
+#include <utility>
 #include <variant>
 
 #include "gtest/gtest.h"
@@ -75,6 +76,45 @@ TEST(ActionTypesTest, DecodesTypedNpcAndGroupActions) {
     ASSERT_NE(m, nullptr);
     EXPECT_EQ(m->spell_id, 23249u);
     EXPECT_TRUE(IsPendingCastAction(a));
+  }
+}
+
+TEST(ActionTypesTest, DecodesTradeWindowChoices) {
+  {
+    BotAction a = DecodeOptionFactAction("trade:open:0x0000000000000042",
+                                         "Open a trade with Hele");
+    const auto* t = std::get_if<TradeAction>(&a);
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(t->op, TradeAction::Op::kOpen);
+    EXPECT_EQ(t->target_guid, "0x0000000000000042");
+    EXPECT_EQ(ActionKindName(a), "trade");
+    EXPECT_FALSE(IsDeadAllowedAction(a));
+  }
+  {
+    BotAction a = DecodeOptionFactAction("trade:put:255:23:5350",
+                                         "Put Conjured Water in the trade");
+    const auto* t = std::get_if<TradeAction>(&a);
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(t->op, TradeAction::Op::kPutItem);
+    EXPECT_EQ(t->bag, 255u);
+    EXPECT_EQ(t->slot, 23u);
+    EXPECT_EQ(t->entry, 5350u);
+  }
+  for (const auto& [guid, op] :
+       {std::pair{"trade:accept", TradeAction::Op::kAccept},
+        std::pair{"trade:cancel", TradeAction::Op::kCancel}}) {
+    BotAction a = DecodeOptionFactAction(guid, "x");
+    const auto* t = std::get_if<TradeAction>(&a);
+    ASSERT_NE(t, nullptr) << guid;
+    EXPECT_EQ(t->op, op) << guid;
+  }
+  // Counter-tests: malformed trade guids never become another action.
+  for (const char* bad :
+       {"trade:", "trade:open:", "trade:put:255:23", "trade:put:256:1:5350",
+        "trade:put:255:1:0", "trade:put:a:b:c", "trade:give:1"}) {
+    EXPECT_TRUE(std::holds_alternative<InvalidAction>(
+        DecodeOptionFactAction(bad, "bad")))
+        << bad;
   }
 }
 

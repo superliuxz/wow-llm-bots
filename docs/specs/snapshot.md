@@ -49,14 +49,20 @@ Enforced mechanically on every fixture and live capture by `ValidateSnapshotVisi
    and active hover refs), and `tooltips`.
 2. **`ext` (contextual & panel-gated):**
    - Contextual (`minimap`, `quest_tracker`, `action_bars`, `world`, `target`, `combat`, `party`,
-     `raid`, `encounter`, `instance`, `death`, `vehicle`, `interaction`, `pet`, `possessed`)
+     `raid`, `encounter`, `instance`, `death`, `vehicle`, `interaction`, `trade`, `pet`,
+     `possessed`)
      populated only when relevant in the client. `action_bars.buttons` is every snapshot's
      castable spellbook from pure `Spell.dbc` metadata (active spec, non-passive, displayed,
      non-tradeskill, highest known rank, each name once, with cooldown left), rendered as one
      `spells:` screen line capped at 600 B (`+N more`). `minimap.ping` is the last party
      member's minimap ping (`MSG_MINIMAP_PING`: who, ground position relative to the bot, age),
      kept 30 s while the pinger is still in the group on the bot's map/instance, rendered as a
-     core `ping: <Name> pinged 18 yd NE` line (`(Ns ago)` once 5 s old).
+     core `ping: <Name> pinged 18 yd NE` line (`(Ns ago)` once 5 s old). `trade` is the open
+     trade window (who with, each side's items and copper, who pressed Trade), rendered as
+     `trade with <Name>: they give …; I give …` with `(accepted)`; a window someone opens with a
+     brain-led bot opens by itself as a client's does, and TRADE prompts (`window open`, `they
+     accepted`) wake the brain. Its options (`Open a trade with <member>` within 11 yd out of
+     combat, `Put <item> in the trade`, `Accept`/`Cancel the trade`) use the client's packets.
    - Panel-gated (`bags`, `map`, `character`, `quest_log`, `spellbook`, tagged `visibility: OPEN`):
      present only when the corresponding `Panel` is in `base.ui.open_panels`.
 3. **Hover-only fields (`visibility: HOVER`):** 26 fields (e.g., `PlayerPart::race`,

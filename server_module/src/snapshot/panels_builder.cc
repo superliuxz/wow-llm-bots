@@ -30,6 +30,7 @@
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "StatsWeightCalculator.h"
+#include "TradeData.h"
 #include "Unit.h"
 #include "UpdateFields.h"
 #include "World.h"
@@ -726,6 +727,29 @@ std::unique_ptr<ItemSpellTexts> ItemSpellTexts::Load() {
 const std::string* ItemSpellTexts::Find(uint32_t spell_id) const {
   const auto it = texts_.find(spell_id);
   return it == texts_.end() ? nullptr : &it->second;
+}
+
+void FillTrade(Player* bot, pb::Trade* trade) {
+  const TradeData* mine = bot->GetTradeData();
+  const Player* trader = mine ? mine->GetTrader() : nullptr;
+  const TradeData* theirs = mine ? mine->GetTraderData() : nullptr;
+  if (!trader || !theirs) {
+    return;
+  }
+  trade->with = trader->GetName();
+  const auto items = [](const TradeData& side, std::vector<pb::Item>* out) {
+    for (uint8_t slot = 0; slot < TRADE_SLOT_TRADED_COUNT; ++slot) {
+      if (const Item* item = side.GetItem(static_cast<TradeSlots>(slot))) {
+        out->push_back(BasicItem(item->GetTemplate(), item->GetCount()));
+      }
+    }
+  };
+  items(*mine, &trade->giving);
+  items(*theirs, &trade->getting);
+  trade->giving_money = mine->GetMoney();
+  trade->getting_money = theirs->GetMoney();
+  trade->i_accepted = mine->IsAccepted();
+  trade->they_accepted = theirs->IsAccepted();
 }
 
 void FillBags(Player* bot, pb::Bags* bags) {

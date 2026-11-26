@@ -28,6 +28,12 @@ constexpr auto kGatedActions = std::to_array<GatedAction>({
     {"ready check", ActionGate::kBrainLed},
     {"roll", ActionGate::kBrainLed},
     {"self resurrect", ActionGate::kBrainLed},
+    // The trade window (Objective 9a): playerbots' handlers of
+    // SMSG_TRADE_STATUS (the "trade status" trigger) and
+    // SMSG_TRADE_STATUS_EXTENDED cancel a non-master's trade, ask random bots
+    // for gold, and accept on their own.
+    {"accept trade", ActionGate::kBrainLed},
+    {"trade status extended", ActionGate::kBrainLed},
     // World-state checks in BrainPolicyListener.
     {"apply oil", ActionGate::kCondition},
     {"apply stone", ActionGate::kCondition},

@@ -77,6 +77,11 @@ struct BotSession {
   std::string pending_boot_reason;
   uint32_t pending_boot_until_ms = 0;
 
+  // Someone opened a trade with the bot (SMSG_TRADE_STATUS BEGIN_TRADE): a
+  // brain-led bot's window opens on the next world tick, as the client's
+  // does (OpenRequestedTrade); the brain then trades or cancels.
+  bool trade_requested = false;
+
   // Group GUID that had a human player (`LeaveAbandonedHumanGroup`, Now #9 /
   // T11) and when the last human member went offline.
   uint64_t human_group_guid = 0;

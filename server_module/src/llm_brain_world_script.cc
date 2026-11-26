@@ -404,8 +404,11 @@ class LlmBrainWorldScript : public WorldScript {
         info.info.emplace().text = "popup policy: " + std::move(answered);
         SendImmediateEvent(i, config_.bots[i], std::move(info));
       }
-      // Timed popups (ready check, LFG, loot roll, quest share, rez) wake the
-      // brain while they are still open (RH-H1).
+      // A trade someone opened with the bot opens its window, as a client's
+      // does; its prompt below wakes the brain to fill, accept or cancel it.
+      BotManager::OpenRequestedTrade(bot);
+      // Timed popups (ready check, LFG, loot roll, quest share, rez, trade)
+      // wake the brain while they are still open (RH-H1).
       for (wlb::snapshot::Event& ev :
            bots_[i].popups.Update(BotManager::ReadPopupState(bot))) {
         EmitAlertingEvent(i, config_.bots[i], bot, std::move(ev));

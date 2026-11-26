@@ -43,6 +43,9 @@ class ItemSpellTexts {
 void FillBags(Player* bot, wlb::snapshot::Bags* bags);
 void FillCharacter(Player* bot, wlb::snapshot::Character* character);
 void FillQuestLog(Player* bot, wlb::snapshot::QuestLog* log);
+// The trade window, while one is open: who with, each side's offer and
+// accept state. Leaves `trade` empty when the bot isn't trading.
+void FillTrade(Player* bot, wlb::snapshot::Trade* trade);
 
 // The tooltip of the thing `ref` points at (an item by entry id, a quest by
 // id), or nullopt if there is no such thing for this bot. `texts` may be null.

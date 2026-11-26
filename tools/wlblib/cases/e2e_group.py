@@ -1,5 +1,5 @@
 """Grouped e2e cases: invite, group, tank, pull_gate, popups, rez_ready, lootroll, lfg_proposal,
-crisp_dodge, human_party, human_dungeon."""
+crisp_dodge, human_party, human_dungeon, trade."""
 
 import types
 from wlblib import wire
@@ -2528,4 +2528,174 @@ def _case_crisp_dodge():
                 f"{took:.1f} s; the 10 s Summon Imp was cut")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
-CASES = [_case_pull_gate(), _case_crowd_control(), _case_use_physics(), _case_crisp_dodge(), _case_popup_policy(), _case_human_party(), _case_human_dungeon(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal()]
+def _case_trade():
+    """The party trade window is the brain's (Objective 9a).
+
+      1. Level Loada and Telda to 20, group them; give Loada a Conjured Water. Telda opens
+         her bags.
+      2. Loada chooses `Open a trade with Telda`: Telda's window opens by itself (as a
+         client's does) and a TRADE prompt (`window open`) wakes her; both snapshots carry
+         `ext.trade`. playerbots' own "accept trade" is gated, so nothing else answers.
+      3. Loada puts the water up (`Put Conjured Water in the trade`) and accepts; Telda sees
+         it on her side with Loada's accept and a `they accepted` prompt, then accepts: the
+         water is in Telda's bags and no window is left open.
+      4. Counter-test: a second trade Telda cancels closes both windows with nothing moved.
+    """
+
+    import socket
+    import time
+
+    from wlblib import server
+    from wlblib.common import TEST
+
+    NAME = "trade"
+    DESCRIPTION = "Trade window: open, put up an item, both accept; cancel moves nothing"
+    TEST_CONFIG = "whisper"  # Two level-1 priests side by side.
+    BOT = "Loada"
+    ONLINE = 2
+    WATER = 5350  # Conjured Water: conjured items trade.
+
+    def water_count(snap):
+        bags = snap.get("ext", {}).get("bags") or {}
+        return sum(int(i.get("count", 1) or 1) for i in bags.get("items", [])
+                   if i.get("id") == WATER)
+
+    def run(stack):
+        for bot in ("Loada", "Telda"):
+            server.console(f"character level {bot} 20", inst=TEST)
+        server.console("llmtest group Loada Telda", inst=TEST)
+        server.console(f"llmtest item Loada {WATER}", inst=TEST)
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        sock.connect(str(TEST.run / "brain.sock"))
+        reader = wire.FrameReader()
+        cmd_id = 0
+        sent = {}
+        errors = []
+        prompts = []  # (bot, from, text) of TRADE prompts.
+        seen = {}  # Facts the test saw along the way.
+        telda_water_before = None
+        telda_water_after = None
+        phase = "open"  # open -> put -> accept -> their_accept -> done -> cancel_open -> cancel -> closed
+
+        def send(bot, step, body):
+            nonlocal cmd_id
+            cmd_id += 1
+            sent[step] = cmd_id
+            send_cmd(sock, dict({"bot": bot, "command_id": cmd_id}, **body))
+
+        def choose(bot, idx, seq, step):
+            send(bot, step, {"choose": {"option": idx, "seq": seq}})
+
+        last = {}
+        deadline = time.time() + 60.0
+        try:
+            while time.time() < deadline and phase != "closed":
+                try:
+                    chunk = sock.recv(1 << 20)
+                except socket.timeout:
+                    chunk = None
+                for payload in reader.feed(chunk or b""):
+                    msg = wire.decode_module_message(payload)
+                    if not msg:
+                        continue
+                    if "event" in msg:
+                        bot = msg["event"].get("bot")
+                        ev = msg["event"].get("event", {})
+                        err = ev.get("error")
+                        if err and err.get("command_id") in sent.values():
+                            errors.append(f"{bot}: {err.get('text')}")
+                        pr = ev.get("prompt")
+                        if pr and str(pr.get("kind")) == "TRADE":
+                            prompts.append((bot, pr.get("from"), pr.get("text")))
+                        continue
+                    snap = msg.get("snapshot")
+                    if not snap or snap.get("bot") not in ("Loada", "Telda"):
+                        continue
+                    bot = snap["bot"]
+                    last[bot] = snap
+                    seq, options = snap.get("seq", 0), snap.get("options", [])
+                    trade = snap.get("ext", {}).get("trade")
+                    if bot == "Telda" and "bags" not in sent:
+                        send("Telda", "bags", {"open": {"panel": "BAGS"}})
+                    if bot == "Telda" and telda_water_before is None and "bags" in (
+                            snap.get("ext") or {}):
+                        telda_water_before = water_count(snap)
+                    if phase == "open" and bot == "Loada" and telda_water_before is not None:
+                        idx = find_option(options, "Open a trade with Telda")
+                        if idx:
+                            choose("Loada", idx, seq, "open")
+                            phase = "put"
+                    elif phase == "put" and bot == "Loada" and trade:
+                        seen["loada_with"] = trade.get("with")
+                        idx = find_option(options, "Put Conjured Water")
+                        if idx:
+                            choose("Loada", idx, seq, "put")
+                            phase = "accept"
+                    elif phase == "accept" and bot == "Loada" and trade and any(
+                            i.get("id") == WATER for i in trade.get("giving", [])):
+                        idx = find_option(options, "Accept the trade with Telda")
+                        if idx:
+                            choose("Loada", idx, seq, "accept")
+                            phase = "their_accept"
+                    elif phase == "their_accept" and bot == "Telda" and trade and \
+                            trade.get("they_accepted") and any(
+                                i.get("id") == WATER for i in trade.get("getting", [])):
+                        seen["telda_with"] = trade.get("with")
+                        idx = find_option(options, "Accept the trade with Loada")
+                        if idx:
+                            choose("Telda", idx, seq, "telda_accept")
+                            phase = "done"
+                    elif phase == "done" and bot == "Telda" and not trade and "bags" in (
+                            snap.get("ext") or {}):
+                        telda_water_after = water_count(snap)
+                        if telda_water_after > (telda_water_before or 0):
+                            phase = "cancel_open"
+                    elif phase == "cancel_open" and bot == "Telda" and not trade:
+                        idx = find_option(options, "Open a trade with Loada")
+                        if idx:
+                            choose("Telda", idx, seq, "open2")
+                            phase = "cancel"
+                    elif phase == "cancel" and bot == "Telda" and trade:
+                        idx = find_option(options, "Cancel the trade with Loada")
+                        if idx:
+                            choose("Telda", idx, seq, "cancel")
+                            phase = "cancelled"
+                    elif phase == "cancelled" and bot == "Loada" and not trade:
+                        seen["loada_closed"] = True
+                        phase = "closed"
+        finally:
+            if phase not in ("closed", "done", "cancel_open"):
+                for bot, name in (("Loada", "Telda"), ("Telda", "Loada")):
+                    snap = last.get(bot) or {}
+                    idx = find_option(snap.get("options", []), f"Cancel the trade with {name}")
+                    if idx:
+                        choose(bot, idx, snap.get("seq", 0), f"teardown_{bot}")
+            send("Telda", "close", {"close": {"panel": "BAGS"}})
+            time.sleep(0.5)
+            sock.close()
+            server.console("llmtest ungroup Telda", inst=TEST)  # Leave no group.
+
+        telda_prompts = [p for p in prompts if p[0] == "Telda" and p[1] == "Loada"]
+        expect("open" in sent, "Loada was never offered `Open a trade with Telda`")
+        expect(seen.get("loada_with") == "Telda", f"Loada's ext.trade: {seen}")
+        expect(any(p[2] == "window open" for p in telda_prompts),
+               f"no TRADE `window open` prompt woke Telda: {prompts}")
+        expect("put" in sent, "Loada was never offered `Put Conjured Water in the trade`")
+        expect("accept" in sent, "Loada never saw her water in ext.trade.giving to accept")
+        expect(any(p[2] == "they accepted" for p in telda_prompts),
+               f"no TRADE `they accepted` prompt woke Telda: {prompts}")
+        expect("telda_accept" in sent,
+               "Telda never saw Loada's water + accept on her side of ext.trade")
+        expect(telda_water_after is not None and
+               telda_water_after > (telda_water_before or 0),
+               f"the water didn't reach Telda's bags ({telda_water_before} -> {telda_water_after})")
+        expect("cancel" in sent, "Telda's second trade never offered `Cancel the trade with Loada`")
+        expect(seen.get("loada_closed"), "Loada's window stayed open after Telda cancelled")
+        expect(not errors, f"choices produced errors: {errors}")
+        return (f"Loada -> Telda: Conjured Water traded ({telda_water_before} -> "
+                f"{telda_water_after} in Telda's bags); window open + they accepted woke Telda; "
+                "a cancelled trade closed both windows")
+    return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
+
+CASES = [_case_pull_gate(), _case_crowd_control(), _case_use_physics(), _case_crisp_dodge(), _case_popup_policy(), _case_human_party(), _case_human_dungeon(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal(), _case_trade()]

@@ -1106,6 +1106,45 @@ TEST(ScreenRendererTest, NoSpellsLineWithoutActionBarsOrNames) {
             std::string::npos);
 }
 
+TEST(ScreenRendererTest, TradeWindowShowsBothOffersAndWhoAccepted) {
+  pb::Snapshot snapshot = NewSnapshot();
+  EXPECT_EQ(RenderScreen(snapshot).text.find("trade with"), std::string::npos);
+  pb::Trade& trade = snapshot.ext.trade.emplace();
+  // No trader name: nothing to show.
+  EXPECT_EQ(RenderScreen(snapshot).text.find("trade with"), std::string::npos);
+  trade.with = "Hele";
+  const Screen empty = RenderScreen(snapshot);
+  EXPECT_NE(empty.text.find("\ntrade with Hele: they give nothing; I give "
+                            "nothing\n"),
+            std::string::npos)
+      << empty.text;
+  // Facts only, never an option of its own.
+  EXPECT_EQ(empty.options,
+            (std::vector<OptionKind>{OptionKind::kKeep, OptionKind::kExplore,
+                                     OptionKind::kRest, OptionKind::kTown}));
+  pb::Item& water = trade.giving.emplace_back();
+  water.name = "Conjured Water";
+  water.count = 20;
+  pb::Item& stone = trade.giving.emplace_back();
+  stone.name = "Minor Healthstone";
+  stone.count = 1;
+  trade.getting_money = 50500;
+  trade.they_accepted = true;
+  EXPECT_NE(RenderScreen(snapshot).text.find(
+                "\ntrade with Hele: they give 5g 5s (accepted); I give "
+                "Conjured Water x20, Minor Healthstone\n"),
+            std::string::npos)
+      << RenderScreen(snapshot).text;
+  trade.getting.emplace_back().name = "Linen Cloth";
+  trade.they_accepted = false;
+  trade.i_accepted = true;
+  EXPECT_NE(RenderScreen(snapshot).text.find(
+                "\ntrade with Hele: they give Linen Cloth and 5g 5s; I give "
+                "Conjured Water x20, Minor Healthstone (accepted)\n"),
+            std::string::npos)
+      << RenderScreen(snapshot).text;
+}
+
 TEST(ScreenRendererTest, PartyPingShowsWhoAndWhereWithAgeWhenOld) {
   pb::Snapshot snapshot = NewSnapshot();
   EXPECT_EQ(RenderScreen(snapshot).text.find("ping:"), std::string::npos);
