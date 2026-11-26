@@ -787,10 +787,20 @@ TEST(ScreenRendererTest, LooseMobsAndPartyHurtEdgeCases) {
       std::string::npos)
       << s_two.text;
 
-  // 2. Out of combat: loose mobs suppressed.
+  // 2. Out of combat: a tank still sees them (a mob that opened on the healer
+  // is the tank's to take, whoever pulled); anyone else doesn't.
   two_tank.base.self.in_combat = false;
   const Screen s_ooc = RenderScreen(two_tank);
-  EXPECT_EQ(s_ooc.text.find("loose mobs:"), std::string::npos) << s_ooc.text;
+  EXPECT_NE(s_ooc.text.find("loose mobs: Sludge Belcher"), std::string::npos)
+      << s_ooc.text;
+  pb::Snapshot ooc_dps = two_tank;
+  ooc_dps.base.self.unit.group->role = pb::DPS;
+  ooc_dps.base.self.unit.group->main_tank = false;
+  const Screen s_ooc_dps = RenderScreen(ooc_dps);
+  EXPECT_EQ(s_ooc_dps.text.find("loose mobs:"), std::string::npos)
+      << s_ooc_dps.text;
+  EXPECT_EQ(s_ooc_dps.text.find("(loose, on"), std::string::npos)
+      << s_ooc_dps.text;
 
   // 3. Group with no tank role/flag assigned: loose mobs suppressed (no
   // inversion).
@@ -1147,6 +1157,102 @@ TEST(ScreenRendererTest, AHugeSpellbookIsCutWithACountAndKeepsOptions) {
   EXPECT_TRUE(line.ends_with(" more")) << line;
   EXPECT_NE(line.find("Spell Number 0, "), std::string::npos);
   EXPECT_NE(screen.text.find("  4. Go to the nearest town"), std::string::npos);
+}
+
+// 4e: what a bot tank needs on screen to hold aggro, whoever opened the fight:
+// its own role, the module's "(not pulled)" on numbered lines, which mobs are
+// on another member, and which are crowd-controlled (never "loose").
+TEST(ScreenRendererTest, TankSeesRoleLooseMobsAndCrowdControl) {
+  pb::Snapshot snap;
+  snap.bot = "Tank1";
+  snap.base.self.state = pb::Self::ALIVE;
+  snap.base.self.unit.name = "Tank1";
+  snap.base.self.unit.group.emplace().role = pb::TANK;
+  pb::Party& party = snap.ext.party.emplace();
+  party.leader = "Heal1";
+  pb::Unit& healer = party.members.emplace_back();
+  healer.name = "Heal1";
+  healer.group.emplace().online = true;
+  healer.group->leader = true;
+  healer.group->role = pb::HEALER;
+  pb::Unit& mage = party.members.emplace_back();
+  mage.name = "Mage1";
+  mage.group.emplace().online = true;
+  mage.group->role = pb::DPS;
+
+  const auto add_mob = [&](const char* guid, const char* name, float dist) {
+    pb::Unit& u = snap.base.nearby.units.emplace_back();
+    u.guid = guid;
+    u.name = name;
+    u.kind = pb::Unit::NPC;
+    u.reaction = pb::Unit::HOSTILE;
+    u.rel.dist_yd = dist;
+    pb::Option& o = snap.options.emplace_back();
+    o.text = std::string("Attack ") + name;
+    o.guid = guid;
+    o.kind = pb::Option::ATTACK;
+    o.name = name;
+    return &u;
+  };
+  pb::Unit* sheep = add_mob("0x1", "Sheeped Shaman", 6.0f);
+  sheep->target = "Mage1";  // A sheep keeps its victim: still not loose.
+  sheep->crowd_control.emplace();
+  sheep->crowd_control->name = "Polymorph";
+  sheep->crowd_control->caster = "Mage1";
+  sheep->crowd_control->remaining_s = 31.2f;
+  snap.options.back().text += " (not pulled)";
+  pb::Unit* on_mage = add_mob("0x2", "Trogg", 10.0f);
+  on_mage->target = "Mage1";
+  pb::Unit* idle = add_mob("0x3", "Idle Cultist", 14.0f);
+  snap.options.back().text += " (not pulled)";
+  (void)idle;
+  snap.options.emplace_back().text = "Keep doing what I'm doing";
+  snap.options.back().kind = pb::Option::KEEP;
+
+  // Out of combat (the mage opened): the tank sees it all.
+  Screen screen = RenderScreen(snap);
+  EXPECT_NE(screen.text.find("party member; role tank"), std::string::npos)
+      << screen.text;
+  EXPECT_NE(screen.text.find("1. Attack Sheeped Shaman (not pulled): "),
+            std::string::npos)
+      << screen.text;
+  EXPECT_NE(screen.text.find("crowd-controlled (Polymorph by Mage1, 31s; "
+                             "damage breaks it)"),
+            std::string::npos)
+      << screen.text;
+  EXPECT_NE(screen.text.find("2. Attack Trogg (loose, on Mage1): "),
+            std::string::npos)
+      << screen.text;
+  EXPECT_NE(screen.text.find("3. Attack Idle Cultist (not pulled): "),
+            std::string::npos)
+      << screen.text;
+  EXPECT_NE(screen.text.find("loose mobs: Trogg (targeting Mage1, 10 yd)"),
+            std::string::npos)
+      << screen.text;
+  EXPECT_EQ(screen.text.find("Sheeped Shaman (loose"), std::string::npos)
+      << screen.text;
+  EXPECT_EQ(screen.text.find("Sheeped Shaman (targeting"), std::string::npos)
+      << screen.text;
+  // The options keep their numbers and targets.
+  ASSERT_EQ(screen.details.size(), 4u);
+  EXPECT_EQ(screen.details[1].guid, "0x2");
+  EXPECT_EQ(screen.details[1].name, "Trogg");
+
+  // A healer in the same spot: its role, no loose tags out of combat.
+  pb::Snapshot as_healer = snap;
+  as_healer.base.self.unit.group->role = pb::HEALER;
+  screen = RenderScreen(as_healer);
+  EXPECT_NE(screen.text.find("party member; role healer"), std::string::npos)
+      << screen.text;
+  EXPECT_EQ(screen.text.find("(loose, on"), std::string::npos) << screen.text;
+
+  // Solo: no role on `me:`.
+  pb::Snapshot solo = snap;
+  solo.ext.party.reset();
+  solo.base.self.unit.group.reset();
+  screen = RenderScreen(solo);
+  EXPECT_EQ(screen.text.find("role "), std::string::npos) << screen.text;
+  EXPECT_EQ(screen.text.find("(loose, on"), std::string::npos) << screen.text;
 }
 
 }  // namespace

@@ -1674,6 +1674,9 @@ struct Unit {
   RaidMarker raid_marker = RaidMarker::RAID_MARKER_UNSPECIFIED;
   std::optional<Unit_Pack> pack;
   std::vector<Unit::VisualState> visual_state;
+  // A loss-of-control aura (confuse, fear, stun, transform) that any damage
+  // breaks, by its Spell.dbc aura interrupt flags: Polymorph, Sap, a trap.
+  std::optional<Aura> crowd_control;
   std::string quest_relevant;           // addon: Questie
   std::vector<Unit::Service> services;  // visibility: HOVER
   std::string subtitle;

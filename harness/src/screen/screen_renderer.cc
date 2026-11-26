@@ -175,6 +175,23 @@ std::string Who(const pb::Unit& u) {
   return base::JoinString(parts, " ");
 }
 
+constexpr std::string_view kNotPulledSuffix = " (not pulled)";
+
+// "crowd-controlled (Polymorph by Loadc, 40s; damage breaks it)".
+std::string CrowdControlText(const pb::Aura& cc) {
+  std::vector<std::string> bits;
+  std::string what = cc.name.empty() ? "?" : cc.name;
+  if (!cc.caster.empty()) {
+    base::StrAppend(&what, {" by ", cc.caster});
+  }
+  bits.push_back(std::move(what));
+  if (cc.remaining_s && Finite(*cc.remaining_s) > 0.0f) {
+    bits.push_back(base::StringPrintf("%.0fs", Finite(*cc.remaining_s)));
+  }
+  return base::StrCat({"crowd-controlled (", base::JoinString(bits, ", "),
+                       "; damage breaks it)"});
+}
+
 // Everything about a unit except its name and position, in the order of the
 // Python prototype: who it is, how it looks, how hurt, what it does, then the
 // rest of its fields by field number.
@@ -205,6 +222,9 @@ std::string UnitLook(const pb::Unit& u) {
   AddFlag(&bits, u.targeting_me, "targeting me");
   if (!u.target.empty()) {
     bits.push_back(base::StrCat({"target ", u.target}));
+  }
+  if (u.crowd_control) {
+    bits.push_back(CrowdControlText(*u.crowd_control));
   }
   AddEnum(&bits, NameOf(u.threat_status), "threat status");
   AddEnum(&bits, NameOf(u.quest_marker), "quest marker");
@@ -596,6 +616,14 @@ std::string SelfLine(const pb::Self& s, bool party_leader, bool party_member) {
       bits.push_back(flag.word);
     }
   }
+  // The group role (Dungeon Finder pick, else spec), as the party frame's
+  // role icon shows it.
+  if ((party_leader || party_member) && s.unit.group) {
+    const std::string role = NameOf(s.unit.group->role);
+    if (!role.empty() && !IsDefaultName(role)) {
+      bits.push_back(base::StrCat({"role ", Word(role)}));
+    }
+  }
   IndicatorBits(s.indicators, &bits);
   if (!s.unit.auras.empty()) {
     std::vector<std::string> buffs;
@@ -831,6 +859,51 @@ std::string MemberLine(const pb::Unit& u, bool around_me, bool leader) {
                    around_me ? "" : UnitWhere(u));
 }
 
+// Loose mobs (A5): only when at least one designated tank exists in the
+// group (including me when I tank), living hostile or pulled neutral mobs
+// targeting a non-tank party member, not crowd-controlled ones. In my fight,
+// or in any fight when I tank.
+std::vector<const pb::Unit*> LooseMobs(
+    const pb::Party& p,
+    std::string_view my_name,
+    const std::optional<pb::GroupPart>& self_group,
+    const std::vector<pb::Unit>& nearby_units,
+    bool in_combat) {
+  std::vector<const pb::Unit*> loose;
+  const bool i_tank =
+      self_group && (self_group->main_tank || self_group->role == pb::TANK);
+  if (!in_combat && !i_tank) {
+    return loose;
+  }
+  std::flat_set<std::string> tank_names;
+  std::flat_set<std::string> member_names;
+  if (i_tank && !my_name.empty()) {
+    tank_names.insert(std::string(my_name));
+  }
+  for (const pb::Unit& u : p.members) {
+    member_names.insert(u.name);
+    if (u.group && (u.group->main_tank || u.group->role == pb::TANK)) {
+      tank_names.insert(u.name);
+    }
+  }
+  if (tank_names.empty()) {
+    return loose;
+  }
+  for (const pb::Unit& u : nearby_units) {
+    if (u.dead || u.crowd_control ||
+        (u.reaction != pb::Unit::HOSTILE && u.reaction != pb::Unit::NEUTRAL) ||
+        u.target.empty()) {
+      continue;
+    }
+    const bool target_is_party = member_names.contains(u.target) ||
+                                 (!my_name.empty() && u.target == my_name);
+    if (target_is_party && !tank_names.contains(u.target)) {
+      loose.push_back(&u);
+    }
+  }
+  return loose;
+}
+
 // "party: leader you; loot group loot" and a line per member.
 std::vector<std::string> PartyLines(
     const pb::Party& p,
@@ -938,45 +1011,17 @@ std::vector<std::string> PartyLines(
         base::StrCat({"  party hurt: ", base::JoinString(parts, ", ")}));
   }
 
-  // Factual loose-mob summary (A5): only when at least one designated tank
-  // exists in the group (including `self` when marked tank), flag living
-  // hostile or pulled neutral mobs targeting a non-tank party member.
-  if (in_combat) {
-    std::flat_set<std::string> tank_names;
-    std::flat_set<std::string> member_names;
-    if (self_group && (self_group->main_tank || self_group->role == pb::TANK) &&
-        !my_name.empty()) {
-      tank_names.insert(std::string(my_name));
-    }
-    for (const pb::Unit& u : p.members) {
-      member_names.insert(u.name);
-      if (u.group && (u.group->main_tank || u.group->role == pb::TANK)) {
-        tank_names.insert(u.name);
-      }
-    }
-    if (!tank_names.empty()) {
-      std::vector<std::string> loose;
-      for (const pb::Unit& u : nearby_units) {
-        if (u.dead ||
-            (u.reaction != pb::Unit::HOSTILE &&
-             u.reaction != pb::Unit::NEUTRAL) ||
-            u.target.empty()) {
-          continue;
-        }
-        const bool target_is_party = member_names.contains(u.target) ||
-                                     (!my_name.empty() && u.target == my_name);
-        if (!target_is_party || tank_names.contains(u.target)) {
-          continue;
-        }
-        loose.push_back(base::StringPrintf("%s (targeting %s, %.0f yd)",
-                                           u.name.c_str(), u.target.c_str(),
-                                           Finite(u.rel.dist_yd)));
-      }
-      if (!loose.empty()) {
-        lines.push_back(
-            base::StrCat({"  loose mobs: ", base::JoinString(loose, ", ")}));
-      }
-    }
+  // Factual loose-mob summary (A5).
+  std::vector<std::string> loose;
+  for (const pb::Unit* u :
+       LooseMobs(p, my_name, self_group, nearby_units, in_combat)) {
+    loose.push_back(base::StringPrintf("%s (targeting %s, %.0f yd)",
+                                       u->name.c_str(), u->target.c_str(),
+                                       Finite(u->rel.dist_yd)));
+  }
+  if (!loose.empty()) {
+    lines.push_back(
+        base::StrCat({"  loose mobs: ", base::JoinString(loose, ", ")}));
   }
 
   // What party members are still doing (Now #8): "help Hele with Kobold Camp
@@ -1601,6 +1646,17 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
       lines.push_back(base::StrCat({"combat: ", combat}));
     }
   }
+  // Mobs on a non-tank member (the party's `loose mobs:`) say so on their
+  // own line too.
+  std::flat_set<std::string> loose_guids;
+  if (ext.party) {
+    for (const pb::Unit* u :
+         LooseMobs(*ext.party,
+                   !snapshot.bot.empty() ? snapshot.bot : base.self.unit.name,
+                   base.self.unit.group, nearby.units, base.self.in_combat)) {
+      loose_guids.insert(u->guid);
+    }
+  }
   std::vector<Thing> named;
   std::vector<const pb::Unit*> nameless;
   for (const pb::Unit& u : nearby.units) {
@@ -1611,7 +1667,18 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
       const std::optional<OptionKind> opt =
           mod_opt > 0 ? std::optional(screen.options[mod_opt - 1])
                       : UnitOption(u);
-      named.push_back({u.guid, u.name, UnitLook(u), u.rel, opt, mod_opt});
+      // The module's party facts on the option ("Attack X (not pulled)")
+      // stay on the numbered line.
+      std::string name = u.name;
+      if (mod_opt > 0 &&
+          snapshot.options[mod_opt - 1].text.ends_with(kNotPulledSuffix)) {
+        name += kNotPulledSuffix;
+      }
+      if (!u.guid.empty() && loose_guids.contains(u.guid)) {
+        base::StrAppend(&name, {" (loose, on ", u.target, ")"});
+      }
+      named.push_back(
+          {u.guid, std::move(name), UnitLook(u), u.rel, opt, mod_opt});
     }
   }
   if (!named.empty()) {

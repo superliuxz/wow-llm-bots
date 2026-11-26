@@ -29,6 +29,8 @@
 #include "SharedDefines.h"
 #include "Spell.h"
 #include "SpellAuraDefines.h"
+#include "SpellAuraEffects.h"
+#include "SpellAuras.h"
 #include "SpellDefines.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
@@ -305,6 +307,9 @@ void FillVisualState(Unit* unit, pb::Unit* out) {
   if (unit->HasAuraWithMechanic(1 << MECHANIC_POLYMORPH)) {
     out->visual_state.push_back(pb::Unit::POLYMORPHED);
   }
+  if (unit->HasAuraWithMechanic(1ULL << MECHANIC_SAPPED)) {
+    out->visual_state.push_back(pb::Unit::SAPPED);
+  }
   if (unit->HasAuraWithMechanic(1 << MECHANIC_SLEEP)) {
     out->visual_state.push_back(pb::Unit::ASLEEP);
   }
@@ -335,6 +340,35 @@ void FillVisualState(Unit* unit, pb::Unit* out) {
   }
 }
 
+// The first loss-of-control aura on the unit that any damage removes (what a
+// player reads as "sheeped" / "sapped" / "trapped"): a Spell.dbc fact (the
+// aura type and AURA_INTERRUPT_FLAG_TAKE_DAMAGE, as
+// Unit::HasBreakableByDamageCrowdControlAura), never a list of spells.
+void FillCrowdControl(Unit* unit, pb::Unit* out) {
+  for (const AuraType type : {SPELL_AURA_MOD_CONFUSE, SPELL_AURA_MOD_FEAR,
+                              SPELL_AURA_MOD_STUN, SPELL_AURA_TRANSFORM}) {
+    for (const AuraEffect* effect : unit->GetAuraEffectsByType(type)) {
+      const Aura* aura = effect ? effect->GetBase() : nullptr;
+      const SpellInfo* info = aura ? aura->GetSpellInfo() : nullptr;
+      if (!info ||
+          !(info->AuraInterruptFlags & AURA_INTERRUPT_FLAG_TAKE_DAMAGE)) {
+        continue;
+      }
+      pb::Aura& cc = out->crowd_control.emplace();
+      cc.id = info->Id;
+      cc.name = Localized(info->SpellName);
+      cc.harmful = true;
+      if (aura->GetDuration() > 0) {
+        cc.remaining_s = static_cast<float>(aura->GetDuration()) / 1000.0f;
+      }
+      if (const Unit* caster = aura->GetCaster()) {
+        cc.caster = caster->GetName();
+      }
+      return;
+    }
+  }
+}
+
 void FillPack(Creature* creature, pb::Unit* out) {
   CreatureGroup* group = creature->GetFormation();
   if (!group || !group->GetLeader() || group->GetMembers().size() < 2) {
@@ -355,6 +389,7 @@ void FillModel(Unit* unit, Player* bot, pb::Unit* out) {
   out->raid_marker = RaidMarkerOf(bot, unit->GetGUID().GetRawValue());
   FillActivity(unit, bot, &out->activity);
   FillVisualState(unit, out);
+  FillCrowdControl(unit, out);
   if (Creature* creature = unit->ToCreature()) {
     FillPack(creature, out);
     out->lootable = HasTakeableLoot(bot, creature);

@@ -125,7 +125,7 @@ def main():
         snap["options"] = want
         path.write_text(json.dumps(snap, indent=2, ensure_ascii=False) + "\n")
         after = {text: n for n, text in screen_options(path).items()}
-        for key in ("first_options", "forbid_options"):
+        for key in ("first_options", "forbid_options", "must_include_options"):
             if key not in case:
                 continue
             moved = [after[before[n]] for n in case[key] if before.get(n) in after]

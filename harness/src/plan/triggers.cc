@@ -456,7 +456,41 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
       }
     }
   }
+  // A bot that tanks for its group (its role, as the party frame shows it)
+  // is told when a mob goes for another member: who started the fight does
+  // not matter. Only the fact; the brain picks what to do.
+  std::flat_set<std::string> loose_mobs;
+  std::vector<std::pair<std::string, std::string>> new_loose;  // (mob, on)
+  const std::optional<pb::GroupPart>& my_group = self.unit.group;
+  if (snapshot.ext.party && my_group &&
+      (my_group->role == pb::TANK || my_group->main_tank)) {
+    std::flat_set<std::string> others;  // Non-tank members but me.
+    for (const pb::Unit& m : snapshot.ext.party->members) {
+      if (!m.name.empty() && m.name != snapshot.bot &&
+          !(m.group && (m.group->role == pb::TANK || m.group->main_tank))) {
+        others.insert(m.name);
+      }
+    }
+    for (const pb::Unit& u : snapshot.base.nearby.units) {
+      if (u.dead || u.crowd_control || u.reaction == pb::Unit::FRIENDLY ||
+          u.kind == pb::Unit::PLAYER || !others.contains(u.target)) {
+        continue;
+      }
+      const std::string key = AttackerKey(u);
+      if (loose_mobs.insert(key).second && !prev_loose_mobs_.contains(key)) {
+        new_loose.push_back({u.name, u.target});
+      }
+    }
+  }
+
   if (seen_snapshot_) {
+    for (const auto& [mob, on] : new_loose) {
+      Consider(
+          &chosen,
+          {Urgency::kP1Danger,
+           base::StrCat({"loose mob ", mob.empty() ? "?" : mob, " on ", on}),
+           kWakeParty});
+    }
     for (const std::string& name : dead_members) {
       if (!prev_dead_members_.contains(name)) {
         Consider(&chosen,
@@ -585,6 +619,7 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
   prev_low_mana_healers_ = std::move(low_mana_healers);
   prev_critical_members_ = std::move(critical_members);
   prev_online_members_ = std::move(online_members);
+  prev_loose_mobs_ = std::move(loose_mobs);
   return chosen;
 }
 

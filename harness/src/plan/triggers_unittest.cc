@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -466,6 +467,80 @@ TEST(TriggersTest, NearDeathDoesNotOutrankCombatWakes) {
   ASSERT_TRUE(t);
   EXPECT_LT(t->urgency, Urgency::kP1Danger);
   EXPECT_NE(t->reason.find("near death"), std::string::npos);
+}
+
+// 4e: a bot that tanks wakes when a mob goes for another, non-tank member
+// (healing threat, a sheep opener, a patrol), once per mob; never for a
+// crowd-controlled mob, a mob on another tank, or when it doesn't tank.
+TEST(TriggersTest, LooseMobOnAMemberWakesTheTankOnce) {
+  pb::Snapshot snap = BaseSnap();
+  snap.bot = "Tanky";
+  snap.base.self.in_combat = true;
+  snap.base.self.unit.name = "Tanky";
+  snap.base.self.unit.group.emplace().role = pb::TANK;
+  pb::Party& party = snap.ext.party.emplace();
+  for (const auto& [name, role] :
+       {std::pair{"Hele", pb::HEALER}, std::pair{"Offtank", pb::TANK}}) {
+    pb::Unit& m = party.members.emplace_back();
+    m.name = name;
+    m.health_pct = 100.0f;
+    m.group.emplace().online = true;
+    m.group->in_range = true;
+    m.group->role = role;
+  }
+  pb::Unit* mine = AddNearbyUnit(&snap, "0x1", "Trogg", pb::Unit::NPC,
+                                 pb::Unit::HOSTILE, 3.0f, true);
+  mine->target = "Tanky";
+  TriggerEvaluator eval;
+  EXPECT_FALSE(eval.EvaluateSnapshot(snap));
+  EXPECT_FALSE(eval.EvaluateSnapshot(snap));
+
+  // On the other tank, or crowd-controlled on the healer: no wake.
+  pb::Snapshot quiet = snap;
+  AddNearbyUnit(&quiet, "0x2", "Brute", pb::Unit::NPC, pb::Unit::HOSTILE, 9.0f)
+      ->target = "Offtank";
+  pb::Unit* sheep = AddNearbyUnit(&quiet, "0x3", "Shaman", pb::Unit::NPC,
+                                  pb::Unit::HOSTILE, 6.0f);
+  sheep->target = "Hele";
+  sheep->crowd_control.emplace().name = "Polymorph";
+  EXPECT_FALSE(eval.EvaluateSnapshot(quiet));
+
+  // The sheep breaks and runs at the healer: one P1 wake, then latched.
+  pb::Snapshot broke = quiet;
+  broke.base.nearby.units[2].crowd_control.reset();
+  std::optional<WakeTrigger> t = eval.EvaluateSnapshot(broke);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->urgency, Urgency::kP1Danger);
+  EXPECT_EQ(t->reason, "loose mob Shaman on Hele");
+  EXPECT_TRUE(t->kinds & kWakeParty);
+  EXPECT_FALSE(eval.EvaluateSnapshot(broke));
+
+  // Taken back by the tank, then lost again: a new wake.
+  pb::Snapshot taken = broke;
+  taken.base.nearby.units[2].target = "Tanky";
+  EXPECT_FALSE(eval.EvaluateSnapshot(taken));
+  EXPECT_TRUE(eval.EvaluateSnapshot(broke));
+
+  // Out of combat too (the mage opened with a sheep; the rest run at Hele).
+  TriggerEvaluator ooc_eval;
+  pb::Snapshot ooc = snap;
+  ooc.base.self.in_combat = false;
+  ooc.base.nearby.units.clear();
+  EXPECT_FALSE(ooc_eval.EvaluateSnapshot(ooc));
+  AddNearbyUnit(&ooc, "0x4", "Cultist", pb::Unit::NPC, pb::Unit::HOSTILE, 14.0f)
+      ->target = "Hele";
+  t = ooc_eval.EvaluateSnapshot(ooc);
+  ASSERT_TRUE(t);
+  EXPECT_NE(t->reason.find("loose mob Cultist on Hele"), std::string::npos);
+
+  // Not a tank: the same screens wake nothing new.
+  TriggerEvaluator dps_eval;
+  pb::Snapshot dps = snap;
+  dps.base.self.unit.group->role = pb::DPS;
+  EXPECT_FALSE(dps_eval.EvaluateSnapshot(dps));
+  pb::Snapshot dps_broke = broke;
+  dps_broke.base.self.unit.group->role = pb::DPS;
+  EXPECT_FALSE(dps_eval.EvaluateSnapshot(dps_broke));
 }
 
 }  // namespace

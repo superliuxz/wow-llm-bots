@@ -138,6 +138,9 @@ class TriggerEvaluator {
   // Online members (T11): one who leaves or logs out wakes the bot.
   std::flat_set<std::string> prev_online_members_;
   std::flat_set<std::string> prev_attackers_;
+  // For a bot whose group role is tank: living mobs (not crowd-controlled)
+  // whose target is another, non-tank party member.
+  std::flat_set<std::string> prev_loose_mobs_;
   // Last snapshot's watch inputs, to seed latches in SetPlanContext().
   WatchInputs last_;
 

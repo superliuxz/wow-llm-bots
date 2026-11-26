@@ -858,11 +858,50 @@
     "source": "built from party_follower_next_to_tank_in_dungeon (3b)",
     "reason": "plan done",
     "summary": "in an instance: party member (warrior, tank) 5 yd from leader Hele (priest, healer), who fights nothing; a boar and a Scorpid Worker nobody has pulled (live: hold_pulls off, so the tank sees them)",
-    "rule": "the tank pulls for a non-tank leader: starts with Attack (planned: the screen shows neither the bot's own role nor `not pulled` on placed options, and RULES.md says party members never pull; 3b rewordings with both facts on screen still chose Keep)",
+    "rule": "the tank pulls for a non-tank leader: starts with Attack (4e: the screen shows `role tank` and `(not pulled)` on placed options)",
+    "first_kinds": [
+      "attack"
+    ]
+  },
+  {
+    "name": "party_tank_takes_mob_from_healer",
+    "source": "built from party_tank_pulls_for_healer_leader (4e)",
+    "reason": "loose mob Ragefire Shaman on Hele",
+    "summary": "in an instance, in combat: party member (warrior, tank) fights a Ragefire Trogg on him; a Ragefire Shaman went for the healer/leader Hele (healing threat)",
+    "rule": "the tank takes the mob off the healer first: first step Attack Ragefire Shaman",
+    "first_options": [
+      2
+    ]
+  },
+  {
+    "name": "party_tank_leaves_sheeped_mob",
+    "source": "built from party_tank_pulls_for_healer_leader (4e)",
+    "reason": "loose mob Searing Blade Cultist on Loadc",
+    "summary": "in an instance, in combat: party member (warrior, tank) fights a Ragefire Trogg; the mage Loadc sheeped a closer Ragefire Shaman (moon); a Searing Blade Cultist is on Loadc",
+    "rule": "the tank picks up the loose mob on the mage (the plan includes Attack Searing Blade Cultist) and never hits the sheeped Ragefire Shaman",
+    "forbid_options": [
+      2
+    ],
     "first_kinds": [
       "attack"
     ],
-    "planned": true
+    "must_include_options": [
+      3
+    ]
+  },
+  {
+    "name": "party_tank_mage_sheep_opener",
+    "source": "built from party_tank_pulls_for_healer_leader (4e)",
+    "reason": "party in combat (Loadc attacked)",
+    "summary": "in an instance, out of combat: party member (warrior, tank) next to leader Hele (priest, healer); the mage Loadc opened with Polymorph on the nearest Ragefire Shaman (moon, not pulled); a Trogg and a Cultist run at Loadc",
+    "rule": "whoever opened, the tank engages the mobs on the mage and leaves the sheep: first step Attack Trogg or Cultist, never the sheeped Shaman",
+    "first_options": [
+      2,
+      3
+    ],
+    "forbid_options": [
+      1
+    ]
   },
   {
     "name": "roll_need_usable_upgrade",

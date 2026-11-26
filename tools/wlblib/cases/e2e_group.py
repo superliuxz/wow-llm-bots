@@ -1516,7 +1516,8 @@ def _case_human_dungeon():
          `use Resurrection on Loadd` brings it back (Loadd accepts the offer).
       8. Two passive Defias Thugs ahead are marked diamond and star: "rouge zap diamond" wakes
          only Loadd (`act: use Sap on marker diamond`) and "mage sheep star" only Loadc
-         (`act: use Polymorph on marker star`); both acts finish without an error.
+         (`act: use Polymorph on marker star`); both acts finish without an error, and the
+         bots' snapshots show each thug's `crowd_control` aura (Sap by Loadd, Polymorph by Loadc).
     """
 
     import http.server
@@ -1719,6 +1720,19 @@ def _case_human_dungeon():
                                and s.get("done_act_command_id") == cmd["command_id"]
                                for _, s in proxy.snapshots)
 
+            def cc_on_thug(spell, after):
+                """A bot's snapshot showing a Defias Thug crowd-controlled by `spell` (4e: the
+                breaks-on-damage aura fact, read from Spell.dbc), with the caster's name."""
+                with proxy.lock:
+                    for t, s in proxy.snapshots:
+                        if t < after:
+                            continue
+                        for u in s.get("base", {}).get("nearby", {}).get("units", []):
+                            cc = u.get("crowd_control") or {}
+                            if u.get("name") == "Defias Thug" and cc.get("name") == spell:
+                                return cc
+                return None
+
             def woken_by(after, words):
                 with brain.lock:
                     return sorted({b for t, b, w in brain.wakes
@@ -1876,6 +1890,8 @@ def _case_human_dungeon():
                       "Loadd's Sap finishing")
                 zap_woken = woken_by(since_zap, "zap diamond")
                 sap_errs = errors_for(sap["command_id"])
+                sapped = _poll(lambda: cc_on_thug("Sap", since_zap), 10,
+                               "a snapshot showing the diamond thug crowd-controlled by Sap")
                 since_sheep = time.monotonic()
                 client.say(wowclient.CHAT_MSG_PARTY, "mage sheep star")
                 poly = _poll(lambda: act_cmd("Loadc", "USE", "Polymorph", since_sheep), 20,
@@ -1884,6 +1900,8 @@ def _case_human_dungeon():
                       "Loadc's Polymorph finishing")
                 sheep_woken = woken_by(since_sheep, "sheep star")
                 poly_errs = errors_for(poly["command_id"])
+                sheeped = _poll(lambda: cc_on_thug("Polymorph", since_sheep), 10,
+                                "a snapshot showing the star thug crowd-controlled by Polymorph")
             finally:
                 # Back out of the unfinished run to the start, so the case can run again on
                 # this server (the human needs its client still logged in for this).
@@ -1916,9 +1934,12 @@ def _case_human_dungeon():
         expect(not sap_errs, f"Loadd's Sap was refused: {sap_errs}")
         expect(sheep_woken == ["Loadc"], f"'mage sheep star' woke {sheep_woken}")
         expect(not poly_errs, f"Loadc's Polymorph was refused: {poly_errs}")
+        expect(sapped.get("caster") == "Loadd", f"Sap on the thug: {sapped}")
+        expect(sheeped.get("caster") == "Loadc", f"Polymorph on the thug: {sheeped}")
         return (f"4 bots joined {HUMAN}, LFG put all 5 in the Deadmines; ready x{len(BOTS)}; "
                 f"summoned Loadd back ({summon_dist:.1f} yd); loot roll ended ({ended['op']}); "
-                "go there / los; Loadb rezzed Loadd; Sap on diamond and Polymorph on star")
+                "go there / los; Loadb rezzed Loadd; Sap on diamond and Polymorph on star, both "
+                "seen as crowd control on the thugs")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
 def _case_pull_gate():

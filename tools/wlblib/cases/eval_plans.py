@@ -112,6 +112,9 @@ def check_case(case, got):
     for req_kind in case.get("must_include_kinds", ()):
         if req_kind not in all_kinds:
             problems.append(f"plan never includes '{req_kind}'")
+    for req_opt in case.get("must_include_options", ()):
+        if req_opt not in all_opts:
+            problems.append(f"plan never includes option {req_opt}")
     for bad_opt in case.get("forbid_options", ()):
         if bad_opt in all_opts:
             problems.append(f"plan chose forbidden option {bad_opt}")
