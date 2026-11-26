@@ -34,6 +34,7 @@
 #include "SpellDefines.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
+#include "ThreatManager.h"
 #include "Unit.h"
 #include "UnitDefines.h"
 #include "UpdateFields.h"
@@ -369,6 +370,34 @@ void FillCrowdControl(Unit* unit, pb::Unit* out) {
   }
 }
 
+// What a player learns from a mob that ignores threat: who it is locked onto
+// (a scripted fixate, else the caster of a taunt aura on it), and whether
+// taunts bounce off it ("Immune"). Facts only; the brain decides.
+void FillThreatLocks(Unit* unit, pb::Unit* out) {
+  if (!unit->ToCreature() || !unit->IsAlive()) {
+    return;
+  }
+  const Unit* locked = nullptr;
+  if (unit->CanHaveThreatList()) {
+    locked = unit->GetThreatMgr().GetFixateTarget();
+  }
+  if (!locked) {
+    for (const AuraEffect* effect :
+         unit->GetAuraEffectsByType(SPELL_AURA_MOD_TAUNT)) {
+      const Aura* aura = effect ? effect->GetBase() : nullptr;
+      if (const Unit* caster = aura ? aura->GetCaster() : nullptr) {
+        locked = caster;
+        break;
+      }
+    }
+  }
+  if (locked) {
+    out->fixated_on = locked->GetName();
+  }
+  out->taunt_immune =
+      unit->m_spellImmune[IMMUNITY_STATE].count(SPELL_AURA_MOD_TAUNT) > 0;
+}
+
 void FillPack(Creature* creature, pb::Unit* out) {
   CreatureGroup* group = creature->GetFormation();
   if (!group || !group->GetLeader() || group->GetMembers().size() < 2) {
@@ -414,6 +443,7 @@ void FillNameplate(Unit* unit, Player* bot, pb::Unit* out) {
     }
   }
   out->skinnable = unit->HasUnitFlag(UNIT_FLAG_SKINNABLE);
+  FillThreatLocks(unit, out);
   if (Player* player = unit->ToPlayer()) {
     out->pvp_flagged = player->IsPvP();
     out->player.emplace().class_ = ClassName(player->getClass());

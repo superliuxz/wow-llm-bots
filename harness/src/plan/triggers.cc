@@ -472,8 +472,9 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
       }
     }
     for (const pb::Unit& u : snapshot.base.nearby.units) {
-      if (u.dead || u.crowd_control || u.reaction == pb::Unit::FRIENDLY ||
-          u.kind == pb::Unit::PLAYER || !others.contains(u.target)) {
+      if (u.dead || u.crowd_control || !u.fixated_on.empty() ||
+          u.reaction == pb::Unit::FRIENDLY || u.kind == pb::Unit::PLAYER ||
+          !others.contains(u.target)) {
         continue;
       }
       const std::string key = AttackerKey(u);

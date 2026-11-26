@@ -37,6 +37,7 @@
 #include "PathGenerator.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
+#include "Playerbots.h"
 #include "QuestDef.h"
 #include "SharedDefines.h"
 #include "Spell.h"
@@ -51,6 +52,7 @@
 #include "UpdateFields.h"
 #include "World.h"
 #include "base/time/time.h"
+#include "bot_manager/bot_manager.h"
 #include "chat/chat_scripts.h"
 #include "options/exec_items.h"
 #include "options/exec_npc.h"
@@ -213,7 +215,7 @@ pb::Role PartyRole(uint8_t roles) {
 // The Dungeon Finder role when one was picked, else what the player's spec
 // and stance say (what a player learns by inspecting: a prot warrior tanks, a
 // holy priest heals), so roles show in every group, not only LFG (RH-M1).
-pb::Role MemberRole(Player* member, uint8_t lfg_roles) {
+pb::Role RoleBySpecOrLfg(Player* member, uint8_t lfg_roles) {
   const pb::Role lfg = PartyRole(lfg_roles);
   if (lfg != pb::Role::ROLE_UNSPECIFIED || member == nullptr) {
     return lfg;
@@ -225,6 +227,17 @@ pb::Role MemberRole(Player* member, uint8_t lfg_roles) {
     return pb::Role::HEALER;
   }
   return pb::Role::DPS;
+}
+
+// A bot that chose `Let <name> tank` plays dps in this group whatever its
+// Dungeon Finder role says, so it (and its party) reads the role it plays.
+pb::Role MemberRole(Player* member, uint8_t lfg_roles) {
+  const pb::Role role = RoleBySpecOrLfg(member, lfg_roles);
+  if (role == pb::Role::TANK && member && GET_PLAYERBOT_AI(member) &&
+      BotManager::GetGroupPolicy(member).not_tank) {
+    return pb::Role::DPS;
+  }
+  return role;
 }
 
 void FillSelf(Player* bot, pb::Self* self) {

@@ -27,7 +27,7 @@ Grammar source of truth: [harness/grammar/plan.wlb](../../harness/grammar/plan.w
 | Priority | Trigger class | Examples |
 |---|---|---|
 | **P0 (urgent)** | Immediate combat/survival & `-> wake` orders | Died, entered combat unexpectedly, lost control, new unexpected attacker, boss standing-order `wake`. Can preempt lower-tier in-flight LLM calls. |
-| **P1** | Plan failure / step error / party danger | Action refused (`ErrorEvent`), path failed, walk stuck, target gone mid-step; party pulled, a member died, went offline or is near death (under 35% health in a fight, again once back over 50%), a healer low on mana; for a bot whose group role is tank, a mob (not crowd-controlled) newly on another, non-tank member (`loose mob <mob> on <name>`, whoever started the fight). |
+| **P1** | Plan failure / step error / party danger | Action refused (`ErrorEvent`), path failed, walk stuck, target gone mid-step; party pulled, a member died, went offline or is near death (under 35% health in a fight, again once back over 50%), a healer low on mana; for a bot whose group role is tank, a mob (not crowd-controlled or fixated) newly on another, non-tank member (`loose mob <mob> on <name>`, whoever started the fight). |
 | **P2** | Normal plan boundary & popups | Plan finished, `watch:` edge crossed, timed popups (`PopupWatch`: ready check, loot roll, LFG role/proposal, shared quest, rez offer), `look:` timer elapsed. |
 | **P3** | Chat & social | Whispers, `at_me` mentions, party/raid chat (rate-limited per sender; whispers/chat never cancel an active boss dodge). |
 

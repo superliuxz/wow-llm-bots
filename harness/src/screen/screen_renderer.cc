@@ -226,6 +226,10 @@ std::string UnitLook(const pb::Unit& u) {
   if (u.crowd_control) {
     bits.push_back(CrowdControlText(*u.crowd_control));
   }
+  if (!u.fixated_on.empty()) {
+    bits.push_back(base::StrCat({"fixated on ", u.fixated_on}));
+  }
+  AddFlag(&bits, u.taunt_immune, "taunt immune");
   AddEnum(&bits, NameOf(u.threat_status), "threat status");
   AddEnum(&bits, NameOf(u.quest_marker), "quest marker");
   AddFlag(&bits, u.pvp_flagged, "pvp flagged");
@@ -861,7 +865,8 @@ std::string MemberLine(const pb::Unit& u, bool around_me, bool leader) {
 
 // Loose mobs (A5): only when at least one designated tank exists in the
 // group (including me when I tank), living hostile or pulled neutral mobs
-// targeting a non-tank party member, not crowd-controlled ones. In my fight,
+// targeting a non-tank party member, not crowd-controlled or fixated ones (no
+// threat pulls those off their target). In my fight,
 // or in any fight when I tank.
 std::vector<const pb::Unit*> LooseMobs(
     const pb::Party& p,
@@ -890,7 +895,7 @@ std::vector<const pb::Unit*> LooseMobs(
     return loose;
   }
   for (const pb::Unit& u : nearby_units) {
-    if (u.dead || u.crowd_control ||
+    if (u.dead || u.crowd_control || !u.fixated_on.empty() ||
         (u.reaction != pb::Unit::HOSTILE && u.reaction != pb::Unit::NEUTRAL) ||
         u.target.empty()) {
       continue;

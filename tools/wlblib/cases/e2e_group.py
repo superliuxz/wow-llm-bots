@@ -343,7 +343,7 @@ def _case_tank():
          strategy (`+tank assist`, the strategy that makes a bot a tank).
       2. Telda is offered `Let Loada tank (stop tanking)`; choosing it removes
          Telda's `tank assist` (checked with `llmtest istank`), and offers
-         `Tank for the group again`.
+         `Tank for the group again`; her own snapshots no longer say role tank.
       3. Choosing that gives Telda `tank assist` back.
     """
 
@@ -390,6 +390,7 @@ def _case_tank():
         errors = []
         stood_down = None
         tank_again = None
+        roles_down = []  # Telda's own group role while she lets Loada tank.
 
         def choose(idx, seq, step):
             nonlocal cmd_id
@@ -418,6 +419,10 @@ def _case_tank():
                     if not snap or snap.get("bot") != "Telda":
                         continue
                     seq, options = snap.get("seq", 0), snap.get("options", [])
+                    role = (((snap.get("base") or {}).get("self") or {}).get("unit") or {}) \
+                        .get("group", {}).get("role")
+                    if stood_down and "tank" not in sent:
+                        roles_down.append(role)
                     if "notank" not in sent:
                         idx = find_option(options, "Let Loada tank")
                         if idx:
@@ -438,6 +443,8 @@ def _case_tank():
         expect(tanked_before, "setup: Telda did not have `tank assist`")
         expect("notank" in sent, "Telda was never offered `Let Loada tank (stop tanking)`")
         expect(stood_down, "Telda still had `tank assist` after letting Loada tank")
+        expect(roles_down and "TANK" not in roles_down,
+               f"Telda's `me:` still read role tank after letting Loada tank: {roles_down}")
         expect("tank" in sent, "Telda was never offered `Tank for the group again`")
         expect(tank_again, "Telda did not get `tank assist` back")
         expect(not errors, f"choices produced errors: {errors}")

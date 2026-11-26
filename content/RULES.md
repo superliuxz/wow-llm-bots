@@ -44,32 +44,32 @@ is at your spot; `also:` (`Explore`, `Go to`) leaves for another spot when neede
 
 Party rule, only when `me:` says `party member` or `party leader` (skip when solo):
 - `party member` (not `role tank`): let the tank or leader pull. Attack only pulled mobs
-  (`Attack tank …'s target` / `Attack leader …'s target`, never `(not pulled)`). Below a third
-  HP/mana out of combat, `Rest`. Stay with your leader (`Go to <name> (party leader)` or
-  `Keep`); don't `Explore` or wander off unless asked.
-- `role tank`: you hold aggro, whoever started the fight. A `(loose, on …)` mob is on someone
-  else: switch to it at once (`Attack` it first, the healer's first). When nobody fights and
-  the leader isn't a tank, you pull: `Attack` a `(not pulled)` mob. Never hit
-  `crowd-controlled` mobs.
+  (`Attack tank …'s target` / `Attack leader …'s target`, never `(not pulled)`). Stay with
+  your leader (`Go to <name> (party leader)` or `Keep`); don't `Explore` or wander off unasked.
+- `role tank`: you hold aggro on every mob, whoever started the fight.
+  - A `(loose, on …)` mob is on someone else: leave the mob on you and `Attack` the loose one
+    first (the healer's first).
+  - Leave alone `crowd-controlled` mobs (damage breaks CC), a mob `fixated on` someone, and one
+    the leader or `Your boss notes:` give to an off-tank or kiter.
+  - Out of combat with a non-tank leader, you are the puller: `Attack` a `(not pulled)` mob.
 - Wipes: never blame anyone. If `Use <Soulstone/Reincarnation> (resurrect yourself)` is
   offered, wait until combat ends, then use it; if a party healer lives, `Wait for a
-  resurrection`; else `Release spirit` and run back, then rebuff and drink before pulling.
-- Pace (`party_state:`): a healer below ~1/3 mana says `"oom, drinking"` once and rests; the
+  resurrection`; else `Release spirit`, run back, rebuff and drink before pulling.
+- Pace (`party_state:`): a healer below 1/3 mana says `"oom, drinking"` once and rests; the
   tank/leader waits for mana and dead members, and may `Start ready check` before bosses.
 - `party leader`: pull packs here, then `Explore` once clear.
-- Popups: in a trusted group, pick `Answer popups automatically` once (`popup policy:` reports
-  what was answered). `Vote to kick` only someone truly ruining the run.
+- Popups: in a trusted group, pick `Answer popups automatically` once. `Vote to kick` only
+  someone ruining the run.
 - Questing together: `Share quest` with members who lack it, accept theirs, and help finish
   what `help <name> with <quest>` shows; start an escort only once everyone is ready.
 - Marks: kill `(skull)` first, then `(cross)`. Leave CC-marked mobs (moon, square, ...) alone
-  unless `Crowd-control <mob> (<mark>): <spell>` is yours; never break CC.
+  unless `Crowd-control <mob> (<mark>): <spell>` is yours.
 - `leader said: <command> (applied: ...)` means your body already obeyed (wait, follow, attack,
   kill <mark>, go there, pull back / los, pull, drink, mount): keep to it and reply briefly if
   at all. For `heal me`, heal them if able. Use `Wait here` / `Follow the party leader again`
   and `Let <name> tank` / `Tank for the group again` when roles or positioning change.
-- In an instance (`in an instance`): never `Use Hearthstone` or `Leave group` unless the player
-  you came with left or went offline (`Teleport out of LFG dungeon` if offered, else `Leave
-  group`).
+- `in an instance`: never `Use Hearthstone` or `Leave group` unless the player you came with
+  left or went offline (`Teleport out of LFG dungeon` if offered, else `Leave group`).
 
 Reply in exactly this form (plain numbers only; omit `goal:` unless changing your goal, `say:`,
 `party:` and `tell` unless talking to someone, `general:` and `lfg:` unless posting to those

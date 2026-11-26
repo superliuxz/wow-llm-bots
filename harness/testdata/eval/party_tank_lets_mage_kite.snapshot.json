@@ -1,0 +1,860 @@
+{
+  "bot": "Loadaa",
+  "seq": 1,
+  "time_ms": 1794793117558,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x00000000000003B0",
+        "name": "Loadaa",
+        "kind": "PLAYER",
+        "level": 1,
+        "health_pct": 80.0,
+        "power_pct": 20.0,
+        "player": {
+          "class": "Warrior"
+        },
+        "group": {
+          "subgroup": 1,
+          "online": true,
+          "in_range": true,
+          "role": "TANK"
+        }
+      },
+      "gender": "MALE",
+      "xp": 149,
+      "xp_next": 400,
+      "health": 77,
+      "health_max": 96,
+      "power_type": "RAGE",
+      "power": 20,
+      "power_max": 100,
+      "state": "ALIVE",
+      "in_combat": true
+    },
+    "where": {
+      "map": "Ragefire Chasm",
+      "zone": "Ragefire Chasm",
+      "subzone": "",
+      "position": {
+        "x": -675.0824,
+        "y": -4321.8477,
+        "z": 45.23722
+      },
+      "facing": -1.5401514,
+      "in_instance": true
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0xF1300011110000A1",
+          "name": "Ragefire Trogg",
+          "rel": {
+            "dist_yd": 3.0,
+            "dir": "N",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -675.0,
+              "y": -4319.0,
+              "z": 45.0
+            }
+          },
+          "kind": "NPC",
+          "level": 3,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "NORMAL",
+          "health_pct": 55.0,
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "FIGHTING",
+            "with": "Loadaa"
+          },
+          "target": "Loadaa",
+          "targeting_me": true,
+          "threat_status": "THREAT_AGGRO"
+        },
+        {
+          "guid": "0xF1300011120000A2",
+          "name": "Ragefire Shaman",
+          "rel": {
+            "dist_yd": 12.0,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -667.0,
+              "y": -4322.0,
+              "z": 45.0
+            }
+          },
+          "kind": "NPC",
+          "level": 3,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "NORMAL",
+          "health_pct": 100.0,
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "FIGHTING",
+            "with": "Loadc"
+          },
+          "target": "Loadc"
+        },
+        {
+          "guid": "0xF130000C1A0002E8",
+          "rel": {
+            "dist_yd": 81.7004,
+            "dir": "NE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -619.219,
+              "y": -4384.33,
+              "z": 43.388855
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF13000293C0002BC",
+          "rel": {
+            "dist_yd": 85.12883,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -762.903,
+              "y": -4322.07,
+              "z": 46.4172
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "visual_state": [
+            "ROOTED"
+          ],
+          "looks_like": "humanoid",
+          "size": "SMALL",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C1A0002E4",
+          "rel": {
+            "dist_yd": 75.16866,
+            "dir": "SW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -729.0376,
+              "y": -4266.5884,
+              "z": 41.93052
+            }
+          },
+          "kind": "NPC",
+          "dead": true,
+          "activity": {
+            "state": "DEAD"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C1A00026D",
+          "rel": {
+            "dist_yd": 84.7399,
+            "dir": "SW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -732.1587,
+              "y": -4256.692,
+              "z": 38.598003
+            },
+            "facing_me": true
+          },
+          "kind": "NPC",
+          "dead": true,
+          "activity": {
+            "state": "DEAD"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C1A0002B2",
+          "rel": {
+            "dist_yd": 29.023928,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -676.4848,
+              "y": -4352.9653,
+              "z": 44.506767
+            }
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C1A0002E3",
+          "rel": {
+            "dist_yd": 20.007412,
+            "dir": "SW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -694.393,
+              "y": -4311.529,
+              "z": 41.941853
+            }
+          },
+          "kind": "NPC",
+          "dead": true,
+          "activity": {
+            "state": "DEAD"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C1A0002E2",
+          "rel": {
+            "dist_yd": 43.927673,
+            "dir": "NE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -643.56573,
+              "y": -4355.416,
+              "z": 43.99877
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C340002DD",
+          "rel": {
+            "dist_yd": 35.367294,
+            "dir": "SE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -705.4314,
+              "y": -4343.897,
+              "z": 47.435333
+            }
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "scorpid",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF13000293C0002C9",
+          "rel": {
+            "dist_yd": 47.68591,
+            "dir": "N",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -628.48,
+              "y": -4340.7,
+              "z": 41.8407
+            },
+            "facing_me": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "visual_state": [
+            "ROOTED"
+          ],
+          "looks_like": "humanoid",
+          "size": "SMALL",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C1A0002DA",
+          "rel": {
+            "dist_yd": 45.392193,
+            "dir": "W",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -690.87164,
+              "y": -4277.5503,
+              "z": 38.36897
+            }
+          },
+          "kind": "NPC",
+          "dead": true,
+          "lootable": true,
+          "activity": {
+            "state": "DEAD"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130002C720002AC",
+          "rel": {
+            "dist_yd": 61.003914,
+            "dir": "N",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -611.587,
+              "y": -4322.08,
+              "z": 40.0927
+            },
+            "behind_it": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "SMALL",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C1A000274",
+          "rel": {
+            "dist_yd": 85.40454,
+            "dir": "W",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -700.8113,
+              "y": -4238.2593,
+              "z": 41.49748
+            },
+            "facing_me": true
+          },
+          "kind": "NPC",
+          "dead": true,
+          "activity": {
+            "state": "DEAD"
+          },
+          "looks_like": "boar",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF1300027C0000253",
+          "rel": {
+            "dist_yd": 91.51615,
+            "dir": "NW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -610.073,
+              "y": -4253.52,
+              "z": 39.0393
+            },
+            "facing_me": true
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130001740000271",
+          "rel": {
+            "dist_yd": 65.39109,
+            "dir": "NW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -645.423,
+              "y": -4260.63,
+              "z": 38.163
+            }
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF13000173F0002BA",
+          "rel": {
+            "dist_yd": 71.11457,
+            "dir": "SW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -727.6021,
+              "y": -4270.77,
+              "z": 41.34939
+            },
+            "facing_me": true
+          },
+          "kind": "CRITTER",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "critter",
+          "size": "SMALL",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003B1",
+          "rel": {
+            "dist_yd": 73.05661,
+            "dir": "SW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -721.9474,
+              "y": -4262.0713,
+              "z": 41.35572
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0xF130000C340002C6",
+          "rel": {
+            "dist_yd": 83.78958,
+            "dir": "S",
+            "height": "ABOVE",
+            "in_los": true,
+            "position": {
+              "x": -756.204,
+              "y": -4349.712,
+              "z": 51.468506
+            }
+          },
+          "kind": "NPC",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "scorpid",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003B4",
+          "rel": {
+            "dist_yd": 69.761055,
+            "dir": "SW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -737.1481,
+              "y": -4284.0005,
+              "z": 42.136364
+            },
+            "facing_me": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "MOVING"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003AA",
+          "rel": {
+            "dist_yd": 82.80712,
+            "dir": "SW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -730.551,
+              "y": -4256.7373,
+              "z": 38.400925
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003B7",
+          "rel": {
+            "dist_yd": 91.494194,
+            "dir": "NW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -610.10266,
+              "y": -4253.53,
+              "z": 38.955803
+            },
+            "behind_it": true
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        },
+        {
+          "guid": "0x00000000000003AD",
+          "rel": {
+            "dist_yd": 91.82224,
+            "dir": "NW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -609.9867,
+              "y": -4253.1865,
+              "z": 38.955803
+            }
+          },
+          "kind": "PLAYER",
+          "activity": {
+            "state": "IDLE"
+          },
+          "looks_like": "troll",
+          "size": "MEDIUM",
+          "detail": "MODEL"
+        }
+      ],
+      "objects": [
+        {
+          "guid": "0xF11002AEA80000CA",
+          "name": "LumberPile",
+          "rel": {
+            "dist_yd": 77.19425,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -754.337,
+              "y": -4322.51,
+              "z": 43.4382
+            }
+          },
+          "kind": "OTHER",
+          "usable": true,
+          "state": "ready"
+        },
+        {
+          "guid": "0xF110000C9F0000BD",
+          "name": "Razor Hill",
+          "rel": {
+            "dist_yd": 84.14255,
+            "dir": "N",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -591.935,
+              "y": -4300.3,
+              "z": 40.3764
+            }
+          },
+          "kind": "OTHER",
+          "usable": true,
+          "state": "ready"
+        },
+        {
+          "guid": "0xF110029FA20000C2",
+          "name": "Cactus Apple",
+          "rel": {
+            "dist_yd": 39.47097,
+            "dir": "SE",
+            "height": "ABOVE",
+            "in_los": true,
+            "position": {
+              "x": -696.942,
+              "y": -4355.8,
+              "z": 54.1846
+            }
+          },
+          "kind": "HERB",
+          "usable": true,
+          "state": "ready"
+        },
+        {
+          "guid": "0xF110000C0C00009A",
+          "name": "Fire",
+          "rel": {
+            "dist_yd": 99.92542,
+            "dir": "NW",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -602.425,
+              "y": -4250.57,
+              "z": 37.5115
+            }
+          },
+          "kind": "OTHER",
+          "usable": true,
+          "state": "ready"
+        },
+        {
+          "guid": "0xF110029FA20000CB",
+          "name": "Cactus Apple",
+          "rel": {
+            "dist_yd": 82.62536,
+            "dir": "SW",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -746.487,
+              "y": -4276.66,
+              "z": 43.7713
+            }
+          },
+          "kind": "HERB",
+          "usable": true,
+          "state": "ready"
+        },
+        {
+          "guid": "0xF11002AEA80000C9",
+          "name": "LumberPile",
+          "rel": {
+            "dist_yd": 55.16656,
+            "dir": "N",
+            "height": "BELOW",
+            "in_los": true,
+            "position": {
+              "x": -619.816,
+              "y": -4336.18,
+              "z": 41.0216
+            }
+          },
+          "kind": "OTHER",
+          "usable": true,
+          "state": "ready"
+        },
+        {
+          "guid": "0xF110029FA20000C8",
+          "name": "Cactus Apple",
+          "rel": {
+            "dist_yd": 19.725079,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -674.292,
+              "y": -4300.25,
+              "z": 44.9458
+            }
+          },
+          "kind": "HERB",
+          "usable": true,
+          "state": "ready"
+        }
+      ]
+    }
+  },
+  "ext": {
+    "party": {
+      "leader": "Hele",
+      "loot_method": "GROUP_LOOT",
+      "members": [
+        {
+          "guid": "0x0000000000000400",
+          "name": "Hele",
+          "kind": "PLAYER",
+          "level": 2,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Priest"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": true,
+            "role": "HEALER",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 8.0,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x0000000000000410",
+          "name": "Loadc",
+          "kind": "PLAYER",
+          "level": 2,
+          "health_pct": 62.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Mage"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "DPS",
+            "online": true,
+            "in_range": true,
+            "aggro": true
+          },
+          "rel": {
+            "dist_yd": 10.0,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        }
+      ]
+    },
+    "target": {
+      "target": {
+        "guid": "0xF1300011110000A1",
+        "name": "Ragefire Trogg",
+        "rel": {
+          "dist_yd": 3.0,
+          "dir": "N",
+          "height": "LEVEL",
+          "in_los": true,
+          "position": {
+            "x": -675.0,
+            "y": -4319.0,
+            "z": 45.0
+          }
+        },
+        "kind": "NPC",
+        "level": 3,
+        "level_color": "YELLOW",
+        "reaction": "HOSTILE",
+        "classification": "NORMAL",
+        "health_pct": 55.0,
+        "looks_like": "humanoid",
+        "size": "MEDIUM",
+        "detail": "NAMEPLATE",
+        "activity": {
+          "state": "FIGHTING",
+          "with": "Loadaa"
+        },
+        "target": "Loadaa",
+        "targeting_me": true,
+        "threat_status": "THREAT_AGGRO"
+      }
+    },
+    "combat": {
+      "attackers": [
+        {
+          "guid": "0xF1300011110000A1",
+          "name": "Ragefire Trogg",
+          "rel": {
+            "dist_yd": 3.0,
+            "dir": "N",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -675.0,
+              "y": -4319.0,
+              "z": 45.0
+            }
+          },
+          "kind": "NPC",
+          "level": 3,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "NORMAL",
+          "health_pct": 60.0,
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "FIGHTING",
+            "with": "Loadaa"
+          },
+          "target": "Loadaa",
+          "targeting_me": true,
+          "threat_status": "THREAT_AGGRO"
+        }
+      ]
+    }
+  },
+  "options": [
+    {
+      "text": "Attack Ragefire Trogg",
+      "guid": "0xF1300011110000A1",
+      "kind": "ATTACK",
+      "name": "Ragefire Trogg"
+    },
+    {
+      "text": "Attack Ragefire Shaman",
+      "guid": "0xF1300011120000A2",
+      "kind": "ATTACK",
+      "name": "Ragefire Shaman"
+    },
+    {
+      "text": "Gather Cactus Apple",
+      "guid": "0xF110029FA20000C8",
+      "kind": "GATHER",
+      "name": "Cactus Apple"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
+}

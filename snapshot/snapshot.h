@@ -1677,6 +1677,12 @@ struct Unit {
   // A loss-of-control aura (confuse, fear, stun, transform) that any damage
   // breaks, by its Spell.dbc aura interrupt flags: Polymorph, Sap, a trap.
   std::optional<Aura> crowd_control;
+  // Who the mob is locked onto whatever the threat (a scripted fixate, or a
+  // taunt aura's caster): threat can't pull it off them.
+  std::string fixated_on;
+  // Immune to taunt auras and 'attack me' effects (the creature's spell
+  // immunity state, as a taunt's "Immune" shows).
+  bool taunt_immune = false;
   std::string quest_relevant;           // addon: Questie
   std::vector<Unit::Service> services;  // visibility: HOVER
   std::string subtitle;

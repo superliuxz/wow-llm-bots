@@ -12,6 +12,51 @@ Last updated: 2026-11-26.
   mock LLM, no pulls or boss fights) are in place. Run a live session from a real 3.3.5a client to
   confirm pacing and single-responder feel in practice.
 
+- **Parallel e2e (use the idle cores):** e2e runs every case serially on the one test server
+  (`common.TEST`: port 8086, `acore_test_*` databases, `out/server-test/run`). Most of the time
+  goes to server start-up and bot log-in. Plan, one step at a time (each step lands green before
+  the next starts):
+  1. **Numbered test instances:** `common.test_instance(k)` gives shard `k` its own run dir
+     (`out/server-test/run-k`: pid files, console pipe, `brain.sock`), `etc-k` config, logs
+     (`var/logs/test-k`), databases (`acore_test_k_*`, reset from the same golden copy) and world
+     port (8086 + k), plus SOAP/RA ports if enabled. Shard 0 stays the plain `TEST` names, so
+     existing commands, scripts and `--keep-server` keep working. All shards share one build
+     (`out/server-test/bin`), MySQL, client data and llama-server. Each shard's auth database
+     has its own realmlist row pointing at its port. `Stack` and every `server.*` helper take the
+     instance instead of using `TEST` directly; `wlb server stop --test` stops all shards.
+  2. **Sharded runner:** `tools/wlb test e2e -j N` (default: by free RAM and cores, capped at
+     6; `-j 1` is today's behaviour) puts the `(TEST_CONFIG, BOT, ONLINE)` groups on N shards,
+     longest groups first (from the last run's timings in `var/`), one process per shard;
+     output is buffered per case and printed whole, and the summary is the same as today.
+     Golden databases are made once, before shards start.
+  3. **Both machines:** `tools/wlb test e2e --remote 10700k` splits the groups between this
+     machine and the worker (`tools/wlb remote` sync, `touch` before rsync so mtimes don't
+     leave stale objects) and merges the results. Only when asked (CONTRIBUTING rule 5).
+  4. **Eval beside e2e:** eval needs only llama-server, so a `tools/wlb test all` runs it
+     concurrently with e2e.
+  Checks: e2e passes with `-j 1` and with `-j N` (same 37/37), run twice in a row on one
+  machine (also checks the `human_dungeon` run-twice bug), no leftover worldservers or
+  `acore_test_k_*` state between runs, and the timing before/after is recorded in the commit.
+  Risks to check first: worldserver RAM per shard (maps/vmaps loaded), MySQL load, any hard-coded
+  `TEST`/8086/`brain.sock` paths in cases and the module, and cases that assume they are alone
+  (fixed character names are per-database, so they should be fine).
+
+- **Fix queue (after the tank-aggro commit and parallel e2e, one commit each, full gates):**
+  1. **Spell misses:** read SMSG_SPELL_GO's miss list (and spell-cast failure results) in the
+     module; put `missed: <spell> on <target> (miss|dodge|parry|resist|immune|evade)` on the
+     caster's screen for a few seconds and end the option or `act:` with that result; wake the
+     brain on it. Eval case: the brain re-casts a missed Sap; e2e: a scripted miss shows up.
+  2. **Gold in a trade:** a `trade gold <amount>` option bounded by the bot's money (the brain
+     picks the amount), shown in the trade facts alongside items; an eval case that asks a bot
+     for gold and one that asks for a trade (non-held-out, so the held-out set stays fresh).
+  3. **`parse: error parsing grammar` during a passing test:** find which test prints it (grep
+     the test logs and the GBNF loader), fix the grammar or the test input that triggers it, and
+     make that message fail the test from then on.
+  4. **Boss notes vs. loose-mob wake** and **tank swap** (below): after 1–3, as one tanking step.
+  Older items not in this file any more get re-checked and listed if still real: `human_dungeon`
+  fails when run twice on one server (covered by parallel e2e's checks), no e2e for Hunter
+  Dismiss Pet, /raid class/role addressing works only in /p.
+
 Lessons from official AI companions (Follower Dungeons, FFXIV Duty Support, Dragon's Dogma pawns,
 Guild Wars heroes):
 - Copy: match the player's pace (when the human tanks, NPCs never pull); wait patiently when the
@@ -26,8 +71,6 @@ Guild Wars heroes):
 - **`act:` eval coverage:** No eval case asks for an `act:` (e.g. party `"sheep moon"`, a ping
   plus `"go there"`), and the eval only counts unasked `act:` lines (1 of 59 at T=0) without
   scoring them. Add asking cases, then score unasked acts as misses.
-- **Bot tank under `Let <name> tank`:** a bot told not to tank still reads `role tank` on its
-  `me:` line (and wakes on loose mobs); show the policy instead of the Dungeon Finder / spec role.
 - **Short-term per-player memory & richer personas:** Store the last N exchanges per player
   (source-tagged so player chat never injects trusted instructions) and add more identities.
 - **Latency & world-thread polish:** Measure 4 Hz combat snapshot cost at raid scale (build lighter
@@ -36,11 +79,14 @@ Guild Wars heroes):
   (SMSG_SPELL_GO's miss list, e.g. a Sap that rolls SPELL_MISS_MISS) still finishes its option or
   `act:` with no error, and the screen never says "missed". Show it as a fact (as a player's
   floating combat text does) so the brain can try again.
-- **Held-out finding: tank leaves an add on a DPS.** Held-out `held_tank_add_on_hunter` (8 cases
-  marked `held_out`, scored only by `wlb test eval --live`, 21/24 draws) fails 0/3: a bot tank
-  holding its own mob keeps hitting it while a loose add chews on the hunter (the tuned case has
-  the add on the healer). Fix through RULES.md wording checked on the tuned cases, then confirm on
-  the held-out ones; add a fresh held-out case once a held-out case has been fixed against.
+- **Boss notes don't beat a loose-mob wake:** planned eval `party_tank_rotface_ooze_notes`
+  (Rotface: the notes give Little Oozes to the off-tank) fails 0/8: woken by `loose mob Little
+  Ooze on <dps>`, the tank still leaves Rotface for the ooze, even when the notes name it. The
+  leader's word (`party_tank_lets_mage_kite`) and `fixated on` facts do work. Try putting
+  notes nearer the screen, or a harness fact tying a nearby mob to its notes line.
+- **No tank swap yet:** ICC notes now name tank swaps (Rune of Blood, Mutated Plague, Soul
+  Reaper), but no option or act taunts, and the off-tank can't see the debuff stacks on the
+  other tank; expose them as facts plus a `Taunt <mob>` option before raid tanking.
 
 ## Later (broader WoW systems)
 

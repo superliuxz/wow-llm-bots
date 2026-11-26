@@ -543,5 +543,40 @@ TEST(TriggersTest, LooseMobOnAMemberWakesTheTankOnce) {
   EXPECT_FALSE(dps_eval.EvaluateSnapshot(dps_broke));
 }
 
+// A mob fixated on a member ignores threat (a kite, a scripted fixate), so it
+// is not loose: no wake; once the fixate ends and it stays on them, one wake.
+TEST(TriggersTest, FixatedMobOnAMemberDoesNotWakeTheTank) {
+  pb::Snapshot snap = BaseSnap();
+  snap.bot = "Tanky";
+  snap.base.self.in_combat = true;
+  snap.base.self.unit.name = "Tanky";
+  snap.base.self.unit.group.emplace().role = pb::TANK;
+  pb::Unit& m = snap.ext.party.emplace().members.emplace_back();
+  m.name = "Hunt";
+  m.health_pct = 100.0f;
+  m.group.emplace().online = true;
+  m.group->role = pb::DPS;
+  AddNearbyUnit(&snap, "0x1", "Trogg", pb::Unit::NPC, pb::Unit::HOSTILE, 3.0f,
+                true)
+      ->target = "Tanky";
+  TriggerEvaluator eval;
+  EXPECT_FALSE(eval.EvaluateSnapshot(snap));
+
+  pb::Snapshot fixed = snap;
+  pb::Unit* chaser = AddNearbyUnit(&fixed, "0x2", "Spark", pb::Unit::NPC,
+                                   pb::Unit::HOSTILE, 12.0f);
+  chaser->target = "Hunt";
+  chaser->fixated_on = "Hunt";
+  chaser->taunt_immune = true;
+  EXPECT_FALSE(eval.EvaluateSnapshot(fixed));
+  EXPECT_FALSE(eval.EvaluateSnapshot(fixed));
+
+  pb::Snapshot freed = fixed;
+  freed.base.nearby.units[1].fixated_on.clear();
+  std::optional<WakeTrigger> t = eval.EvaluateSnapshot(freed);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->reason, "loose mob Spark on Hunt");
+}
+
 }  // namespace
 }  // namespace harness

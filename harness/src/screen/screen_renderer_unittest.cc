@@ -1285,6 +1285,27 @@ TEST(ScreenRendererTest, TankSeesRoleLooseMobsAndCrowdControl) {
       << screen.text;
   EXPECT_EQ(screen.text.find("(loose, on"), std::string::npos) << screen.text;
 
+  // Fixated on the mage (threat can't take it) and taunt immune: shown as
+  // facts, never loose; a taunt-immune mob that isn't fixated stays loose.
+  pb::Snapshot fixate = snap;
+  fixate.base.nearby.units[1].fixated_on = "Mage1";
+  fixate.base.nearby.units[1].taunt_immune = true;
+  screen = RenderScreen(fixate);
+  EXPECT_NE(screen.text.find("2. Attack Trogg: "), std::string::npos)
+      << screen.text;
+  EXPECT_NE(screen.text.find("target Mage1, fixated on Mage1, taunt immune "
+                             "yes"),
+            std::string::npos)
+      << screen.text;
+  EXPECT_EQ(screen.text.find("loose mobs:"), std::string::npos) << screen.text;
+  fixate.base.nearby.units[1].fixated_on.clear();
+  screen = RenderScreen(fixate);
+  EXPECT_NE(screen.text.find("2. Attack Trogg (loose, on Mage1): "),
+            std::string::npos)
+      << screen.text;
+  EXPECT_NE(screen.text.find("taunt immune yes"), std::string::npos)
+      << screen.text;
+
   // Solo: no role on `me:`.
   pb::Snapshot solo = snap;
   solo.ext.party.reset();

@@ -1,0 +1,219 @@
+{
+  "bot": "Loadaa",
+  "seq": 1,
+  "time_ms": 1794793117558,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x00000000000003B0",
+        "name": "Loadaa",
+        "kind": "PLAYER",
+        "level": 22,
+        "health_pct": 77.0,
+        "power_pct": 0.0,
+        "player": {
+          "class": "Warrior"
+        },
+        "group": {
+          "subgroup": 1,
+          "online": true,
+          "in_range": true,
+          "role": "TANK"
+        }
+      },
+      "gender": "MALE",
+      "xp": 9000,
+      "xp_next": 15500,
+      "health": 402,
+      "health_max": 520,
+      "power_type": "RAGE",
+      "power": 0,
+      "power_max": 100,
+      "state": "ALIVE",
+      "in_combat": true
+    },
+    "where": {
+      "map": "Shadowfang Keep",
+      "zone": "Shadowfang Keep",
+      "subzone": "",
+      "position": {
+        "x": -675.0824,
+        "y": -4321.8477,
+        "z": 45.23722
+      },
+      "facing": -1.5401514,
+      "in_instance": true
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0xF1300011110000A1",
+          "name": "Shadowfang Moonwalker",
+          "rel": {
+            "dist_yd": 3.0,
+            "dir": "N",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -675.0,
+              "y": -4319.0,
+              "z": 45.0
+            }
+          },
+          "kind": "NPC",
+          "level": 22,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "NORMAL",
+          "health_pct": 62.0,
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "FIGHTING",
+            "with": "Loadaa"
+          },
+          "target": "Loadaa",
+          "targeting_me": true,
+          "threat_status": "THREAT_AGGRO"
+        },
+        {
+          "guid": "0xF1300011120000A2",
+          "name": "Shadowfang Darksoul",
+          "rel": {
+            "dist_yd": 11.0,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -667.0,
+              "y": -4322.0,
+              "z": 45.0
+            }
+          },
+          "kind": "NPC",
+          "level": 22,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "NORMAL",
+          "health_pct": 100.0,
+          "looks_like": "undead",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "FIGHTING",
+            "with": "Loadh"
+          },
+          "target": "Loadh"
+        }
+      ]
+    }
+  },
+  "ext": {
+    "party": {
+      "leader": "Mirra",
+      "loot_method": "GROUP_LOOT",
+      "members": [
+        {
+          "guid": "0x0000000000000430",
+          "name": "Mirra",
+          "kind": "PLAYER",
+          "level": 22,
+          "health_pct": 92.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Druid"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": true,
+            "role": "HEALER",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 3.0,
+            "dir": "NE",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x0000000000000400",
+          "name": "Ossa",
+          "kind": "PLAYER",
+          "level": 22,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Shaman"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "DPS",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 9.0,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x0000000000000410",
+          "name": "Loadh",
+          "kind": "PLAYER",
+          "level": 22,
+          "health_pct": 49.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Warlock"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "DPS",
+            "online": true,
+            "in_range": true,
+            "aggro": true
+          },
+          "rel": {
+            "dist_yd": 13.0,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        }
+      ]
+    }
+  },
+  "options": [
+    {
+      "text": "Attack Shadowfang Moonwalker",
+      "guid": "0xF1300011110000A1",
+      "kind": "ATTACK",
+      "name": "Shadowfang Moonwalker"
+    },
+    {
+      "text": "Attack Shadowfang Darksoul",
+      "guid": "0xF1300011120000A2",
+      "kind": "ATTACK",
+      "name": "Shadowfang Darksoul"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
+}

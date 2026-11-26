@@ -904,6 +904,65 @@
     ]
   },
   {
+    "name": "party_tank_takes_add_off_dps",
+    "source": "built from party_tank_takes_mob_from_healer (tank keeps every mob)",
+    "reason": "loose mob Ragefire Shaman on Loadc",
+    "summary": "in an instance, in combat: party member (warrior, tank) fights a 55% Ragefire Trogg on him; a Ragefire Shaman went for the mage Loadc (62%), not the healer",
+    "rule": "the tank holds every mob, not only the healer's: first step Attack Ragefire Shaman, before its own nearly dead mob",
+    "first_options": [
+      2
+    ]
+  },
+  {
+    "name": "party_tank_takes_add_off_hunter",
+    "source": "built from party_tank_takes_add_off_dps (level 20, a ranged member, a dps leader)",
+    "reason": "loose mob Deviate Ravager on Loadg",
+    "summary": "in Wailing Caverns, in combat: the level 20 bot tank holds a 48% Druid of the Fang; a Deviate Ravager runs at the hunter Loadg (58%, 21 yd SW); the leader Corvin is a rogue, the healer Hele is free",
+    "rule": "a ranged dps can't hold an add either: first step Attack Deviate Ravager, before the tank's own half-dead mob",
+    "first_options": [
+      2
+    ]
+  },
+  {
+    "name": "party_tank_leaves_fixated_add",
+    "source": "built from party_tank_takes_add_off_dps (tank exceptions)",
+    "reason": "loose mob Searing Blade Cultist on Hele",
+    "summary": "in an instance, in combat: the tank fights a Trogg; a Searing Blade Cultist is on the healer Hele; a taunt-immune Ragefire Shaman is `fixated on Loadc` (not loose)",
+    "rule": "the tank takes the loose Cultist off the healer first, never the fixated Shaman first",
+    "first_options": [
+      3
+    ]
+  },
+  {
+    "name": "party_tank_lets_mage_kite",
+    "source": "built from party_tank_takes_add_off_dps (tank exceptions)",
+    "reason": "party from Hele: Loadc kite the shaman around, Loadaa stay on your trogg",
+    "summary": "in an instance, in combat: the tank fights a Trogg; a Ragefire Shaman is loose on the mage Loadc; the leader tells Loadc to kite it and the tank to stay",
+    "rule": "the leader gave the Shaman to the mage: the tank keeps its Trogg (Attack it or Keep) and never attacks the Shaman",
+    "first_options": [
+      1,
+      4
+    ],
+    "forbid_options": [
+      2
+    ]
+  },
+  {
+    "name": "party_tank_rotface_ooze_notes",
+    "source": "built from party_tank_takes_add_off_dps (tank exceptions, boss notes)",
+    "reason": "loose mob Little Ooze on Loadc",
+    "summary": "in Icecrown Citadel, on Rotface: the bot tank holds Rotface; a Little Ooze spawned on the mage Loadc; the paladin Loadf is the off-tank; boss notes give Little Oozes to the off-tank",
+    "rule": "by the boss notes the tank stays on Rotface and never takes the Little Ooze (planned: the brain still takes the ooze 0/8 at T=0.7; boss notes don't yet beat a loose-mob wake, see docs/TODO.md)",
+    "notes": "# Icecrown Citadel — Rotface\n- **Mutated Infection**: a player is infected and spawns a **Little Ooze** that attacks them; the off-tank picks up the Little Oozes and kites them together, while the tank on Rotface never leaves him.\n- **Unstable Ooze Explosion**: cast by Big Ooze; move out immediately and return once safe.",
+    "first_options": [
+      1
+    ],
+    "forbid_options": [
+      2
+    ],
+    "planned": true
+  },
+  {
     "name": "roll_need_usable_upgrade",
     "source": "built (F2)",
     "reason": "loot roll: Buckskin Cape",
@@ -1064,6 +1123,20 @@
     ],
     "forbid_texts": [
       "Open a trade"
+    ],
+    "scene": {
+      "team": "ALLIANCE"
+    }
+  },
+  {
+    "name": "held_tank_add_on_warlock",
+    "source": "built for the held-out split after the tank-aggro fix (fresh, never tuned on)",
+    "held_out": true,
+    "reason": "loose mob Shadowfang Darksoul on Loadh",
+    "summary": "in Shadowfang Keep, in combat: the bot tank holds a 62% Shadowfang Moonwalker; a Shadowfang Darksoul is on the warlock Loadh (49%, 13 yd E); the leader Mirra heals",
+    "rule": "the tank picks the loose Darksoul off the warlock first",
+    "first_options": [
+      2
     ],
     "scene": {
       "team": "ALLIANCE"

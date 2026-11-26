@@ -2,6 +2,7 @@
 
 ## Lord Marrowgar
 
+- **Saber Lash**: split between the two closest targets; both tanks stand in front of him.
 - **Coldflame**: moving line of blue fire; move out immediately.
 - **Bone Spike Graveyard**: impales players on **Bone Spike** targets; switch and destroy Bone Spikes immediately.
 - **Bone Storm**: boss spins and deals heavy melee AoE while moving; move away from Marrowgar during Bone Storm.
@@ -23,6 +24,7 @@ Vengeful Shade appears -> away Vengeful Shade 15
 
 ## Deathbringer Saurfang
 
+- **Rune of Blood**: debuff on the current tank; the other tank taunts Saurfang at once (tank swap).
 - **Blood Beast**: priority add; switch and burn promptly.
 
 ```
@@ -39,6 +41,7 @@ Unstable Ooze Explosion cast -> out of it, then back
 
 ## Professor Putricide
 
+- **Mutated Plague**: stacks on the current tank; the other tank taunts at 3-4 stacks (tank swap).
 - **Slime Puddle**: ground hazard; move out immediately.
 - **Choking Gas Explosion**: ground hazard; move out immediately.
 - **Volatile Ooze**: priority add; switch and burn promptly.
@@ -67,7 +70,8 @@ Ball of Flames Visual within 12 -> away Ball of Flames Visual 16
 
 ## Valithria Dreamwalker
 
-- **Blistering Zombie**: fixates on you; kite it.
+- **Blistering Zombie**: fixates on a player and explodes in melee; that player kites it while ranged kill it. Tanks never pick it up.
+- **Gluttonous Abomination**, **Risen Archmage**: tanks pick these up.
 
 ```
 Blistering Zombie targets me -> kite it
@@ -84,6 +88,7 @@ Blistering Cold cast -> out of it
 
 ## The Lich King
 
+- **Soul Reaper**: on the current tank; the other tank taunts the Lich King at once (tank swap).
 - **Quake**: boss cast; move to 40 yd from the boss to stay on the safe inner platform ring (`to 40 yd from boss`).
 
 ```
