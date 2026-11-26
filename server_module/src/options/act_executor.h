@@ -129,6 +129,12 @@ ActStepResult StepActiveAct(Player* bot,
 // hold the bot still wait meanwhile (BotSession::moving_out_until_ms).
 bool ActMovesOut(const ActiveAct& active);
 
+// Whether `active` is a `use` of a spell usable only in stealth still walking
+// in (StartSpellUse entered stealth, or found the bot in it): playerbots'
+// `unstealth` and spell casts would break the stealth the act depends on, so
+// they wait meanwhile (BotSession::act_stealth_until_ms).
+bool ActHoldsStealth(const ActiveAct& active);
+
 // Cancels an active act on `bot` (releasing `MOVEMENT_FORCED` and stopping
 // movement if it was a movement act). World thread only.
 void CancelActiveAct(Player* bot, ActiveAct* active);

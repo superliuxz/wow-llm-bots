@@ -393,6 +393,7 @@ class LlmBrainWorldScript : public WorldScript {
       bots_[i].last_instance_id = cur_inst;
       StepActiveOption(bot, i, config_.bots[i], now);
       SyncMovingOut(bot, i);
+      SyncActStealth(bot, i);
       if (!bot->IsInCombat()) {
         ClearAvoidedTargetsForBot(bot->GetGUID().GetRawValue());
       }
@@ -1280,6 +1281,24 @@ class LlmBrainWorldScript : public WorldScript {
         [until](BotSession& s) { s.moving_out_until_ms = until; });
   }
 
+  // Tells the bot manager's policy listener while a `use` of a stealth-only
+  // spell walks in (ActHoldsStealth): playerbots' `unstealth` and casts would
+  // break the stealth it entered (Sap from Stealth). Written every tick like
+  // SyncMovingOut, and once when it ends.
+  void SyncActStealth(Player* bot, size_t index) {
+    constexpr uint32_t kActStealthHoldMs = 1000;
+    BotState* state = &bots_[index];
+    const bool holds = state->active_act && ActHoldsStealth(*state->active_act);
+    if (!holds && !state->act_stealth) {
+      return;
+    }
+    state->act_stealth = holds;
+    const uint32_t until = holds ? getMSTime() + kActStealthHoldMs : 0;
+    BotSessionRegistry::Instance().WithSession(
+        bot->GetGUID().GetRawValue(),
+        [until](BotSession& s) { s.act_stealth_until_ms = until; });
+  }
+
   // An act taking over the body from a chosen crowd-control cast still
   // walking in or casting: that option fails (the caller drops or cancels the
   // act state itself).
@@ -2011,6 +2030,8 @@ class LlmBrainWorldScript : public WorldScript {
     std::optional<ActiveAct> active_act;
     // Whether the last SyncMovingOut saw it moving the bot out.
     bool moving_out = false;
+    // Whether the last SyncActStealth saw a stealth-only `use` walking in.
+    bool act_stealth = false;
     // Last observed map/instance so map changes clear active acts & `back`.
     bool has_last_map = false;
     uint32_t last_map_id = 0;

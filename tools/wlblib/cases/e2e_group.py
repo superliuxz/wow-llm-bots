@@ -2257,6 +2257,8 @@ def _case_use_physics():
          reaches 10). Sap (rank 1 holds humanoids only) is offered on the thug, not the boar.
          Choosing `Crowd-control Defias Thug (moon): Sap` enters Stealth first, walks into range,
          turns to face the thug and Saps it: the option finishes (done_command_id), no error.
+         Sap can miss (the hit table); a missed Sap is chosen again (up to 3 Saps), after
+         Stealth's cooldown if playerbots dropped the stealth meanwhile.
       2. Loadb (an orc warlock made level 20, taught Rain of Fire) is sent `act: use Rain of Fire
          on ping` for a party ping 38 yd off (the spell reaches 30): it walks in and channels it
          on the spot.
@@ -2356,17 +2358,47 @@ def _case_use_physics():
                 s = latest("Loada", since_mark)
                 idx = s and find_option(s.get("options", []), "Crowd-control Defias Thug")
                 return idx and (s, idx)
-            snap, idx = pump(cc_offer, 20, "Loada's crowd-control option")
-            offered = snap["options"][idx - 1].get("text", "")
-            boar_offered = [o.get("text") for o in snap.get("options", [])
-                            if o.get("text", "").startswith("Crowd-control Mottled Boar")]
-            sap_from = boar_of(snap)["rel"]["dist_yd"]
-            send_cmd(sock, {"bot": "Loada", "command_id": 11,
-                            "choose": {"option": idx, "seq": snap.get("seq", 0)}})
-            pump(done("Loada", "done_command_id", 11), 25, "Loada's Sap to finish")
-            sap_errs = errors.get(11, [])
-            sapped = bool(pump(lambda: "Loada: crowd control nearby" in stack.server_log(), 5,
-                               "the bot manager seeing the Sap")) if not sap_errs else False
+
+            # Sap rolls on the melee hit table: it can miss (SMSG_SPELL_GO reports
+            # SPELL_MISS_MISS; the thug is untouched and out of combat). A miss is the game's
+            # roll, not the harness's: choose it again, as a player would (3 Saps leave ~0.3%
+            # to bad luck). Once the act is over playerbots may drop the stealth, and Stealth
+            # then has a 10 s cooldown: a retry refused "needs stealth" waits it out.
+            sap_errs, sapped, missed, offered, boar_offered, sap_from = [], False, 0, "", [], None
+            for attempt in range(5):
+                if missed >= 3:
+                    break
+                cmd_id = 11 + attempt
+                snap, idx = pump(cc_offer, 20, "Loada's crowd-control option")
+                if attempt == 0:
+                    offered = snap["options"][idx - 1].get("text", "")
+                    boar_offered = [o.get("text") for o in snap.get("options", [])
+                                    if o.get("text", "").startswith("Crowd-control Mottled Boar")]
+                    sap_from = boar_of(snap)["rel"]["dist_yd"]
+                send_cmd(sock, {"bot": "Loada", "command_id": cmd_id,
+                                "choose": {"option": idx, "seq": snap.get("seq", 0)}})
+                pump(done("Loada", "done_command_id", cmd_id), 25, "Loada's Sap to finish")
+                sap_errs = errors.get(cmd_id, [])
+                if sap_errs == ["Sap needs stealth"] and missed:
+                    try:
+                        pump(lambda: False, 11, "")
+                    except AssertionError:
+                        pass
+                    since_mark = time.monotonic()
+                    sap_errs = []
+                    continue
+                if sap_errs:
+                    break
+                since_mark = time.monotonic()
+                try:
+                    sapped = bool(pump(
+                        lambda: "Loada: crowd control nearby" in stack.server_log(), 3,
+                        "the bot manager seeing the Sap"))
+                except AssertionError:
+                    sapped = False
+                if sapped:
+                    break
+                missed += 1
             boar = boar_of(latest("Loada"))
             sap_at = boar["rel"]["dist_yd"] if boar else None
 
@@ -2412,7 +2444,7 @@ def _case_use_physics():
         expect(not boar_offered, f"Sap offered on a beast it can't hold: {boar_offered!r}")
         expect(sap_from > 10.0, f"setup: Loada started {sap_from:.1f} yd from the thug")
         expect(not sap_errs, f"Sap failed: {sap_errs}")
-        expect(sapped, "no crowd control seen near Loada after Sap")
+        expect(sapped, f"no crowd control seen near Loada after {missed} Saps")
         expect(sap_at is not None and sap_at <= 10.0,
                f"Loada Sapped from {sap_at} yd (Sap reaches 10)")
         expect(rof_from > 30.0, f"setup: the ping was {rof_from:.1f} yd from Loadb")
@@ -2421,7 +2453,9 @@ def _case_use_physics():
                f"Loadb cast Rain of Fire {rof_at} yd from the ping (it reaches 30)")
         expect(not summon_errs and had_pet, f"no imp to dismiss: {summon_errs}")
         expect(not dismiss_errs, f"pet dismiss failed: {dismiss_errs}")
-        return (f"stealth->Sap walked in from {sap_from:.0f} to {sap_at:.0f} yd; Rain of Fire on "
+        missed_note = f" ({missed} missed first)" if missed else ""
+        return (f"stealth->Sap walked in from {sap_from:.0f} to {sap_at:.0f} yd{missed_note}; "
+                f"Rain of Fire on "
                 f"the ping from {rof_at:.0f} yd (was {rof_from:.0f}); the imp was dismissed")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 

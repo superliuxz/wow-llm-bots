@@ -1,7 +1,7 @@
 # TODO
 
 Open work only (Now / Next / Later). Completed work lives in `git log`.
-Last updated: 2026-11-25.
+Last updated: 2026-11-26.
 
 ## Now (team play first: the gaps a human feels in the first hour)
 
@@ -32,8 +32,10 @@ Guild Wars heroes):
   (source-tagged so player chat never injects trusted instructions) and add more identities.
 - **Latency & world-thread polish:** Measure 4 Hz combat snapshot cost at raid scale (build lighter
   combat snapshots if needed).
-- **e2e `use_physics` Sap fails:** Stealth->Sap through the crowd-control option errors "Sap needs
-  stealth: stealth broke" in 4 of 5 runs since 5a (was only occasionally flaky). Find why.
+- **Spell misses are invisible to the brain:** an instant spell that misses, is dodged or resisted
+  (SMSG_SPELL_GO's miss list, e.g. a Sap that rolls SPELL_MISS_MISS) still finishes its option or
+  `act:` with no error, and the screen never says "missed". Show it as a fact (as a player's
+  floating combat text does) so the brain can try again.
 - **Held-out finding: tank leaves an add on a DPS.** Held-out `held_tank_add_on_hunter` (8 cases
   marked `held_out`, scored only by `wlb test eval --live`, 21/24 draws) fails 0/3: a bot tank
   holding its own mob keeps hitting it while a loose add chews on the hunter (the tuned case has

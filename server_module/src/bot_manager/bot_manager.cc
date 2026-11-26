@@ -529,6 +529,8 @@ class LlmBrainPacketScript final : public ServerScript {
 //    party member nearby can resurrect, within `kMaxWaitForRezMs` (90 s).
 //  - Spells that would root the bot (a cast time, a rooting channel) wait
 //    while a brain dodge moves it out (BotSession::moving_out_until_ms).
+//  - `"unstealth"` and all spell casts wait while a brain `use` of a
+//    stealth-only spell walks in (BotSession::act_stealth_until_ms).
 // Owned by the Engine's ActionExecutionListeners (which `delete`s every
 // listener on Engine destruction).
 class BrainPolicyListener final : public ActionExecutionListener {
@@ -550,6 +552,14 @@ class BrainPolicyListener final : public ActionExecutionListener {
       return true;
     }
     const std::string& name = action->getName();
+    // While the brain's `use` of a stealth-only spell walks in (Sap from
+    // Stealth), playerbots' `unstealth` (its "often" non-combat trigger drops
+    // stealth at random) and its casts would break the stealth the act
+    // entered: they wait until the act casts, fails or is cancelled.
+    if (bot_ && ai_ && HoldsActStealth() &&
+        (name == "unstealth" || dynamic_cast<CastSpellAction*>(action))) {
+      return false;
+    }
     // While a dodge moves the bot out (BotSession::moving_out_until_ms), a
     // reflex spell that would hold it still (a cast time, or a rooting
     // channel) waits until it is out; instants still go out on the move.
@@ -663,6 +673,13 @@ class BrainPolicyListener final : public ActionExecutionListener {
         });
   }
   void After(Action* /*action*/, bool /*executed*/, Event /*event*/) override {}
+
+  bool HoldsActStealth() {
+    const uint32_t until = BotSessionRegistry::Instance().InspectSession(
+        bot_->GetGUID().GetRawValue(),
+        [](const BotSession* s) { return s ? s->act_stealth_until_ms : 0u; });
+    return until != 0 && static_cast<int32_t>(until - getMSTime()) > 0;
+  }
 
   bool HoldsDodgedBotStill(const std::string& spell) {
     const uint32_t until = BotSessionRegistry::Instance().InspectSession(

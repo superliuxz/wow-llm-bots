@@ -2759,6 +2759,14 @@ bool ActMovesOut(const ActiveAct& active) {
   }
 }
 
+bool ActHoldsStealth(const ActiveAct& active) {
+  if (!active.approach_cast) {
+    return false;
+  }
+  const SpellInfo* spell = sSpellMgr->GetSpellInfo(active.approach_spell_id);
+  return spell && spell->HasAttribute(SPELL_ATTR0_ONLY_STEALTHED);
+}
+
 void CancelActiveAct(Player* bot, ActiveAct* active) {
   if (!bot || !active || GET_PLAYERBOT_AI(bot) == nullptr) {
     return;

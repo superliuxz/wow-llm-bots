@@ -119,6 +119,12 @@ struct BotSession {
   // Refreshed every tick of the move, so it lapses by itself if the module
   // stops ticking; cleared on logout, map change and disconnect.
   uint32_t moving_out_until_ms = 0;
+  // While a `use` of a stealth-only spell walks in (ActHoldsStealth),
+  // getMSTime() until which playerbots' `unstealth` and spell casts wait
+  // (BrainPolicyListener): they would break the stealth the act entered.
+  // Refreshed every tick like moving_out_until_ms; cleared on logout, map
+  // change and disconnect.
+  uint32_t act_stealth_until_ms = 0;
 
   // Who answers this bot's popups (tick_owner.h): set every world tick by
   // BotManager::Update from the harness connection, read by
