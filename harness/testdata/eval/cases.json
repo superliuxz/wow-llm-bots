@@ -1015,6 +1015,33 @@
     ]
   },
   {
+    "name": "trade_asked_for_gold",
+    "source": "built (M3.2 trade gold)",
+    "reason": "party from Vorka: Loadb can you put 2g in the trade for repairs?",
+    "summary": "in Ragefire Chasm between pulls: trade window is open with leader Vorka; bot has 5g 25s and Vorka asks for 2g in the trade",
+    "rule": "puts 2g in the trade via `act: trade gold 2g` and does not cancel the trade",
+    "must_act_contain": [
+      "trade gold 2g"
+    ],
+    "forbid_texts": [
+      "Cancel the trade"
+    ]
+  },
+  {
+    "name": "trade_asked_to_open",
+    "source": "built (M3.2 trade gold)",
+    "reason": "party from Vorka: Loadc can you trade me 1g for repairs?",
+    "summary": "in Ragefire Chasm between pulls: no trade window open yet; leader Vorka asks the mage to trade 1g; three party members within trade range",
+    "rule": "opens a trade with Vorka (the one who asked) and with nobody else",
+    "must_include_options": [
+      2
+    ],
+    "forbid_options": [
+      3,
+      4
+    ]
+  },
+  {
     "name": "held_trade_healer_between_pulls",
     "source": "built for the held-out split (4c-rest)",
     "held_out": true,

@@ -101,6 +101,24 @@ class RealCasesTest(unittest.TestCase):
             for suffix in (".snapshot.json", ".facts.json"):
                 self.assertTrue((eval_plans.EVAL_DIR / f"{name}{suffix}").exists(), name)
 
+    def test_check_case_must_act_contain_and_forbid_act(self):
+        base = {"valid": True, "steps": [{"option": 1, "times": 1, "kind": "use",
+                                          "text": "Accept the trade with Vorka"}],
+                "look_s": 60, "goal": "", "tell_to": "", "tell": "", "open": [], "hover": "",
+                "orders": [], "acts": []}
+        case = {"name": "trade_asked_for_gold", "reason": "party from Vorka: put 2g in trade",
+                "must_act_contain": ["trade gold 2g"]}
+        self.assertTrue(eval_plans.check_case(case, base))
+        self.assertEqual(eval_plans.check_case(case, {**base, "acts": ["trade gold 2g"]}), [])
+        self.assertTrue(eval_plans.check_case(case, {**base, "acts": ["trade gold 1g"]}))
+        forbid = {"name": "no_act", "reason": "plan done", "forbid_act": True}
+        self.assertEqual(eval_plans.check_case(forbid, base), [])
+        self.assertTrue(eval_plans.check_case(forbid, {**base, "acts": ["wake"]}))
+        self.assertTrue(eval_plans.can_fail(
+            next(c for c in eval_plans.load_cases(["trade_asked_for_gold"]))))
+        self.assertTrue(eval_plans.can_fail(
+            next(c for c in eval_plans.load_cases(["trade_asked_to_open"]))))
+
 
 if __name__ == "__main__":
     unittest.main()

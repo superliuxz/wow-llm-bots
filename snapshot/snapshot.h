@@ -710,6 +710,7 @@ struct Command_Act {
     KITE = 19,
     OUT_OF = 20,
     BACK = 21,
+    TRADE_GOLD = 22,
   };
   using enum Verb;
 
@@ -777,6 +778,7 @@ struct Command_Act {
   std::string name;
   std::string target_name;
   float yd = 0.0f;
+  uint32_t copper = 0;  // TRADE_GOLD: amount to offer in copper.
   std::string it_guid;
   std::string it_name;
 

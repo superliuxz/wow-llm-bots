@@ -722,6 +722,23 @@ TEST(OrderEvaluatorTest, OrderActToCommandAndWireRoundTrip) {
   EXPECT_EQ(to_wire("always -> leave vehicle")->verb, pb::Command::Act::LEAVE);
   EXPECT_EQ(to_wire("always -> equip Wyrmrest Lance")->verb,
             pb::Command::Act::EQUIP);
+  {
+    const std::optional<pb::Command::Act> gold =
+        to_wire("always -> trade gold 5g 25s");
+    ASSERT_TRUE(gold.has_value());
+    EXPECT_EQ(gold->verb, pb::Command::Act::TRADE_GOLD);
+    EXPECT_EQ(gold->copper, 52500u);
+    pb::Command c;
+    c.version = pb::kWireVersion;
+    c.bot = "Aelindra";
+    c.command_id = 44;
+    c.act = *gold;
+    pb::Command back;
+    ASSERT_TRUE(pb::ReadBeve(pb::WriteBeve(c), &back));
+    EXPECT_EQ(back, c);
+  }
+  // Overflow above MAX_MONEY_AMOUNT does not produce a wire command.
+  EXPECT_FALSE(to_wire("always -> trade gold 214748g 99s 99c").has_value());
 }
 
 TEST(OrderEvaluatorTest, AnyoneExcludesHostileEnemies) {

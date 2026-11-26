@@ -129,5 +129,19 @@ TEST(ActionTypesTest, RejectsMalformedFactGuids) {
       DecodeOptionFactAction("item:0", "zero entry")));
 }
 
+TEST(ActionTypesTest, ValidateTradeGoldRejectsInvalidStateAndAmounts) {
+  EXPECT_TRUE(ValidateTradeGold(/*has_trade=*/true, 1, 1).empty());
+  EXPECT_TRUE(ValidateTradeGold(/*has_trade=*/true, 50000, 50000).empty());
+  EXPECT_TRUE(ValidateTradeGold(/*has_trade=*/true, 25000, 50000).empty());
+  // Counter-tests: non-trade state, zero, and exceeding bot's money.
+  EXPECT_EQ(ValidateTradeGold(/*has_trade=*/false, 100, 50000),
+            "no trade window is open");
+  EXPECT_EQ(ValidateTradeGold(/*has_trade=*/true, 0, 50000),
+            "invalid trade gold amount");
+  EXPECT_EQ(ValidateTradeGold(/*has_trade=*/true, 50001, 50000),
+            "not enough money");
+  EXPECT_EQ(ValidateTradeGold(/*has_trade=*/true, 1, 0), "not enough money");
+}
+
 }  // namespace
 }  // namespace llm_brain

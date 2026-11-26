@@ -11,6 +11,7 @@
 #ifndef HARNESS_PLAN_ORDERS_H_
 #define HARNESS_PLAN_ORDERS_H_
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -26,14 +27,20 @@ inline constexpr int kMaxOrders = 7;  // Per plan (`order:` lines).
 using grammar::Act;
 using grammar::Check;
 using grammar::Condition;
+using grammar::Money;
 using grammar::Order;
 using grammar::Place;
 using grammar::Thing;
 using grammar::When;
 using grammar::Who;
 
+// Converts a parsed `Money` (`5g`, `1g 50s`, `25c`) to copper, or nullopt if
+// zero or above WoW 3.3.5a's MAX_MONEY_AMOUNT (214748g 36s 47c).
+std::optional<uint32_t> MoneyToCopper(const Money& money);
+
 // Parse the parts as the grammar writes them (nullopt if `text` isn't one),
 // and the text of an order as the grammar writes it (ParseOrder's inverse).
+using grammar::FormatAct;
 using grammar::FormatOrder;
 using grammar::ParseOrder;
 using grammar::ParseWhen;
@@ -48,9 +55,12 @@ std::optional<std::vector<Act>> ParseActs(
 // uses, with names limited to `names` (what the bot can see or
 // knows: units, objects, auras, its spells and items); "" when `names` has no
 // usable name, so the plan grammar leaves `order:` lines out. `pingers`: who
-// has a minimap ping on the screen; none, `ping` isn't offered as a thing.
+// `pingers`: who has a minimap ping on the screen; none, `ping` isn't offered
+// as a thing. `traders`: who the bot has a trade window open with (while the
+// bot has money > 0); none, `trade gold` isn't offered as an act.
 std::string OrderGrammar(const std::vector<std::string>& names,
-                         const std::vector<std::string>& pingers = {});
+                         const std::vector<std::string>& pingers = {},
+                         const std::vector<std::string>& traders = {});
 
 // Collects the deduplicated list of usable order names from what the bot sees
 // on `snapshot` (units, objects, areas, auras, casts, action-bar/spellbook

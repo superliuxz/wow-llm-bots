@@ -113,7 +113,8 @@ std::string PlanGrammar(int option_count,
                         const std::vector<std::string>& tell_names = {},
                         const std::vector<std::string>& hover_names = {},
                         const std::vector<std::string>& order_names = {},
-                        const std::vector<std::string>& pingers = {});
+                        const std::vector<std::string>& pingers = {},
+                        const std::vector<std::string>& traders = {});
 
 // Reads only the `do: ...` line, as soon as the first newline of a streamed
 // reply arrives, so the body can start moving while the rest of the plan is

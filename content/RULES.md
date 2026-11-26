@@ -38,7 +38,7 @@ is at your spot; `also:` (`Explore`, `Go to`) leaves for another spot when neede
   `away`, `out of <thing>`, `back`, `avoid`, `target`, `use` (`[on <thing>]`), `stop`
   (`casting` / `attacking` / `moving`), `face` / `face away`, `jump`, `cancel`, `mark`,
   `interact`, `board` / `leave vehicle`, `equip`, `pet` (`attack` / `stay` / `follow` /
-  `passive` / `defensive` / `dismiss`), `kite`, `wake`; `ping` is a party minimap ping. Omit
+  `passive` / `defensive` / `dismiss`), `kite`, `wake`, `trade gold <amount>`; `ping` is a party minimap ping. Omit
   `order:` to keep active orders; `orders: none` clears them. Write boss `order:` lines only from
   `Your boss notes:`.
 

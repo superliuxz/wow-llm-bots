@@ -66,6 +66,7 @@
 #include "options/act_geometry.h"
 #include "options/exec_npc.h"
 #include "options/exec_shared.h"
+#include "options/exec_social.h"
 #include "snapshot/perception.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/world_util.h"
@@ -2487,6 +2488,14 @@ ActStartResult StartAct(Player* bot,
       out_active->last_repath_at = now;
       out_active->waiting_cast = false;
       return {.done = false};
+    }
+
+    case pb::Command_Act::TRADE_GOLD: {
+      const ActionOutcome out = ExecuteTradeGold(bot, act.copper);
+      if (!out.error.empty()) {
+        return {.error = out.error};
+      }
+      return {.done = true};
     }
   }
   return {.error = "unsupported act"};

@@ -407,7 +407,8 @@ TEST(PlanTest, TheGrammarOffersHoverOnlyForNamesOnScreen) {
 
 TEST(PlanTest, RandomPlansRoundTripAndTheGrammarAcceptsThem) {
   const std::vector<std::string> names = {"Gatda", "Brakka", "Kelra"};
-  const std::string grammar = PlanGrammar(9, names, names, names, {"Hele"});
+  const std::string grammar =
+      PlanGrammar(9, names, names, names, {"Hele"}, {"Hele"});
   grammar::rt::RandomSource source(11, names);
   for (int i = 0; i < 500; ++i) {
     const std::string text = grammar::FormatPlan(grammar::RandomPlan(&source));

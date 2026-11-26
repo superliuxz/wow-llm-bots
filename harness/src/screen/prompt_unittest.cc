@@ -396,6 +396,34 @@ TEST(PromptTest, APartyPingOffersPingInTheGrammar) {
             std::string::npos);
 }
 
+TEST(PromptTest, AnOpenTradeWithMoneyOffersTradeGoldInTheGrammar) {
+  wlb::snapshot::Snapshot snap;
+  snap.bot = "Tess";
+  PromptAssemblyContext ctx;
+  // No trade open: no traders, no `trade gold` in grammar.
+  EXPECT_TRUE(AssemblePromptInput(ctx, snap).traders.empty());
+  // Trade open, but bot has 0 money: still no `trade gold`.
+  snap.ext.trade.emplace().with = "Hele";
+  EXPECT_TRUE(AssemblePromptInput(ctx, snap).traders.empty());
+  EXPECT_EQ(BuildPlanRequest(AssemblePromptInput(ctx, snap), SampleScreen())
+                .grammar.find("\"trade gold \""),
+            std::string::npos);
+  // Trade open with money > 0: `trade gold` is offered in GBNF.
+  snap.base.self.money = 50000;
+  const PromptInput with_trade = AssemblePromptInput(ctx, snap);
+  EXPECT_EQ(with_trade.traders, std::vector<std::string>{"Hele"});
+  EXPECT_NE(BuildPlanRequest(with_trade, SampleScreen())
+                .grammar.find("\"trade gold \""),
+            std::string::npos);
+  // Trade closed/cancelled: `trade gold` disappears immediately.
+  snap.ext.trade.reset();
+  const PromptInput closed = AssemblePromptInput(ctx, snap);
+  EXPECT_TRUE(closed.traders.empty());
+  EXPECT_EQ(
+      BuildPlanRequest(closed, SampleScreen()).grammar.find("\"trade gold \""),
+      std::string::npos);
+}
+
 TEST(PromptTest, AFullSpellsLineYieldsToOptionsAndCoreLinesUnderTightBudget) {
   PromptInput input = SampleInput();
   input.rules = std::string(9600, 'R');

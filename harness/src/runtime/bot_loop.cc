@@ -2422,6 +2422,26 @@ void BotLoop::SendNextPlanAct(const std::string& bot,
       // brain is the one that just answered.
       continue;
     }
+    if (wire->verb == pb::Command::Act::TRADE_GOLD) {
+      const bool in_trade = state->latest_snapshot &&
+                            state->latest_snapshot->ext.trade &&
+                            !state->latest_snapshot->ext.trade->with.empty();
+      const uint32_t money =
+          state->latest_snapshot ? state->latest_snapshot->base.self.money : 0;
+      if (!in_trade) {
+        state->last_outcome = "no trade window is open";
+        pa.left.clear();
+        pa.held.reset();
+        break;
+      }
+      if (wire->copper == 0 || wire->copper > money) {
+        state->last_outcome = wire->copper == 0 ? "invalid trade gold amount"
+                                                : "not enough money";
+        pa.left.clear();
+        pa.held.reset();
+        break;
+      }
+    }
     pa.pending_command_id = SendAct(bot, std::move(*wire));
     pa.sent_at = now;
     return;

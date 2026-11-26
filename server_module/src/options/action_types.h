@@ -243,6 +243,12 @@ using BotAction = std::variant<KeepAction,
 // once at option creation. Returns `InvalidAction` if malformed.
 BotAction DecodeOptionFactAction(std::string_view guid, std::string_view label);
 
+// Pure validation for `Command_Act::TRADE_GOLD` before sending
+// CMSG_SET_TRADE_GOLD. Returns empty string if valid, else an error message.
+std::string ValidateTradeGold(bool has_trade,
+                              uint32_t copper,
+                              uint32_t bot_money);
+
 bool IsKeepAction(const BotAction& action);
 bool IsAttackAction(const BotAction& action);
 bool IsRestAction(const BotAction& action);

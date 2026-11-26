@@ -1981,6 +1981,13 @@ std::optional<pb::Command::Act> OrderActToCommand(
         } else if constexpr (std::is_same_v<A, grammar::ActKite>) {
           out.verb = pb::Command::Act::KITE;
           fill_thing(a.t, &out, /*target_slot=*/false);
+        } else if constexpr (std::is_same_v<A, grammar::ActTradeGold>) {
+          if (const std::optional<uint32_t> copper = MoneyToCopper(a.amount)) {
+            out.verb = pb::Command::Act::TRADE_GOLD;
+            out.copper = *copper;
+          } else {
+            supported = false;
+          }
         } else {
           supported = false;
         }

@@ -1,0 +1,16 @@
+{
+  "has_food": true,
+  "has_drink": true,
+  "spots": [],
+  "places": [],
+  "group_and_upkeep_actions": [
+    {
+      "guid": "trade:accept",
+      "label": "Accept the trade with Vorka"
+    },
+    {
+      "guid": "trade:cancel",
+      "label": "Cancel the trade with Vorka"
+    }
+  ]
+}

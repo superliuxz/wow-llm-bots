@@ -1143,6 +1143,16 @@ TEST(ScreenRendererTest, TradeWindowShowsBothOffersAndWhoAccepted) {
                 "Conjured Water x20, Minor Healthstone (accepted)\n"),
             std::string::npos)
       << RenderScreen(snapshot).text;
+  // When the bot has money, the trade line shows it alongside the trade gold
+  // act hint so the brain knows how much it can offer.
+  snapshot.base.self.money = 120500;
+  trade.giving_money = 10000;
+  EXPECT_NE(RenderScreen(snapshot).text.find(
+                "\ntrade with Hele: they give Linen Cloth and 5g 5s; I give "
+                "Conjured Water x20, Minor Healthstone and 1g (accepted); "
+                "my money 12g 5s (act: trade gold <amount>)\n"),
+            std::string::npos)
+      << RenderScreen(snapshot).text;
 }
 
 TEST(ScreenRendererTest, PartyPingShowsWhoAndWhereWithAgeWhenOld) {

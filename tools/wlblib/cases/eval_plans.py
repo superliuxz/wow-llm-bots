@@ -179,6 +179,12 @@ def check_case(case, got):
                     f"order for {needle!r} does not perform any of {case['must_order_act']!r} "
                     f"(orders: {matching})"
                 )
+    acts = got.get("acts", ())
+    if case.get("forbid_act") and acts:
+        problems.append(f"wrote unexpected acts: {acts}")
+    for needle in case.get("must_act_contain", ()):
+        if not any(needle.lower() in a.lower() for a in acts):
+            problems.append(f"no act mentions {needle!r} (acts: {acts or 'none'})")
     return problems
 
 
@@ -192,14 +198,15 @@ def _probe_plans(case):
         kind = OPTION_KIND_NAME.get(opt.get("kind", ""), "?")
         step = {"option": i, "times": 1, "kind": kind, "text": text}
         plain = {"valid": True, "steps": [step], "look_s": 60, "goal": "", "tell_to": "",
-                 "tell": "", "open": [], "hover": "", "orders": []}
+                 "tell": "", "open": [], "hover": "", "orders": [], "acts": []}
         plans.append(plain)
         whisperers = (
             WHISPER_FROM_RE.findall(case["reason"])
             + list(case.get("whisperers", []))
         ) or ["Someone"]
         plans.append({**plain, "tell_to": whisperers[0], "tell": "hi", "open": ["bags"],
-                      "hover": "x", "look_s": 10, "orders": ["Defile on me -> away"]})
+                      "hover": "x", "look_s": 10, "orders": ["Defile on me -> away"],
+                      "acts": ["wake"]})
     return plans
 
 
@@ -312,9 +319,10 @@ def run_suite(cases, label=None):
         f"option scores {random_score:.1f}), "
         f"first line {med_first_ms:.0f} ms, total {med_ms:.0f} ms, "
         f"warm prompt_computed {med_comp:.0f} tok")
-    # No case asks for an `act:`, so every one written is unasked (not scored yet: content/RULES.md
-    # says to write one only for a player's ask; this keeps the count in view while tuning it).
-    unasked = [r["case"] for r in rows if act_line(r["got"])]
+    # Cases without `must_act_contain` shouldn't write an `act:` line (not scored yet:
+    # content/RULES.md says to write one only for a player's ask; this keeps the count in view).
+    asked_act = {c["name"] for c in cases if c.get("must_act_contain")}
+    unasked = [r["case"] for r in rows if act_line(r["got"]) and r["case"] not in asked_act]
     say(f"unasked act: lines: {len(unasked)}" + (f" ({', '.join(unasked)})" if unasked else ""))
     return {"label": label or "default", "passed": passed, "total": len(rows),
             "median_first_ms": med_first_ms, "median_ms": med_ms, "rows": rows}

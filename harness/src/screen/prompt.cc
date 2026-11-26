@@ -164,7 +164,8 @@ bool IsCoreScreenLine(std::string_view line) {
          line.starts_with("missed: ") || line.starts_with("party:") ||
          line.starts_with("  party hurt:") ||
          line.starts_with("  loose mobs:") || line.starts_with("  help ") ||
-         line.starts_with("  party_state:") || line.starts_with("ping: ");
+         line.starts_with("  party_state:") || line.starts_with("ping: ") ||
+         line.starts_with("trade with ");
 }
 
 // Truncates `user` to `max_bytes` while keeping ALL numbered option lines (both
@@ -570,6 +571,11 @@ PromptInput AssemblePromptInput(const PromptAssemblyContext& ctx,
       !snapshot.ext.minimap->ping->from.empty()) {
     out.pingers.push_back(snapshot.ext.minimap->ping->from);
   }
+  // Open trade window with positive money: offer `trade gold <amount>`.
+  if (snapshot.ext.trade && !snapshot.ext.trade->with.empty() &&
+      snapshot.base.self.money > 0) {
+    out.traders.push_back(snapshot.ext.trade->with);
+  }
   out.slot = ctx.slot;
   out.temperature = ctx.temperature;
   return out;
@@ -904,7 +910,7 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
   }
   request.grammar =
       PlanGrammar(static_cast<int>(screen.options.size()), input.whisperers,
-                  hover_names, input.order_names, input.pingers);
+                  hover_names, input.order_names, input.pingers, input.traders);
   request.slot = input.slot;
   request.temperature = input.temperature;
   return request;

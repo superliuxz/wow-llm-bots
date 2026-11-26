@@ -304,6 +304,11 @@ int RunDecide(const DecideOptions& options,
         orders.push_back(FormatOrder(o));
       }
       out["orders"] = std::move(orders);
+      nlohmann::json acts = nlohmann::json::array();
+      for (const Act& a : p.acts) {
+        acts.push_back(FormatAct(a));
+      }
+      out["acts"] = std::move(acts);
     } else {
       out["plan_desc"] = "";
       out["look_s"] = 0;
@@ -314,6 +319,7 @@ int RunDecide(const DecideOptions& options,
       out["close"] = nlohmann::json::array();
       out["hover"] = "";
       out["orders"] = nlohmann::json::array();
+      out["acts"] = nlohmann::json::array();
     }
     out["steps"] = std::move(steps);
     base::StrAppend(report, {out.dump(), "\n"});

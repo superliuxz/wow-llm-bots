@@ -79,8 +79,9 @@ TEST(OrdersTest, ANameMayHoldTheSeparator) {
 void ExpectGrammarAccepts(const Order& order) {
   std::vector<std::string> names;
   grammar::CollectNames(order, &names);
-  const std::string rules = OrderGrammar(
-      names.empty() ? std::vector<std::string>{"X"} : names, {"Hele"});
+  const std::string rules =
+      OrderGrammar(names.empty() ? std::vector<std::string>{"X"} : names,
+                   {"Hele"}, {"Hele"});
   const std::string text = FormatOrder(order);
   const GbnfResult result =
       GbnfAccepts(rules, grammar::OrdersRuleName("Order"), text);
@@ -264,6 +265,51 @@ TEST(OrdersTest, PingIsOfferedOnlyWhileAPingIsOnTheScreen) {
   ASSERT_TRUE(named);
   EXPECT_TRUE(std::holds_alternative<Thing::Ping>(
       std::get<Act::Target>((*named)[0].value).t.value));
+}
+
+TEST(OrdersTest, TradeGoldIsOfferedOnlyWhileTradingAndRejectsInvalidAmounts) {
+  const std::string root = grammar::OrdersRuleName("Order");
+  const std::string without = OrderGrammar({"Hele"});
+  const std::string with = OrderGrammar({"Hele"}, {}, {"Hele"});
+  EXPECT_FALSE(GbnfAccepts(without, root, "always -> trade gold 5g").accepted);
+  EXPECT_TRUE(GbnfAccepts(without, root, "always -> jump").accepted);
+  for (const char* valid :
+       {"5g", "1g 50s", "1g 50s 25c", "1g 25c", "50s 25c", "50s", "25c"}) {
+    const std::string line = base::StrCat({"always -> trade gold ", valid});
+    EXPECT_TRUE(GbnfAccepts(with, root, line).accepted) << line;
+  }
+  struct Case {
+    const char* text;
+    uint32_t expected_copper;
+  };
+  for (const Case& c : std::vector<Case>{{"trade gold 5g", 50000},
+                                         {"trade gold 1g 50s", 15000},
+                                         {"trade gold 1g 50s 25c", 15025},
+                                         {"trade gold 1g 25c", 10025},
+                                         {"trade gold 50s 25c", 5025},
+                                         {"trade gold 50s", 5000},
+                                         {"trade gold 25c", 25}}) {
+    const std::optional<std::vector<Act>> parsed = ParseActs(c.text);
+    ASSERT_TRUE(parsed) << c.text;
+    ASSERT_EQ(parsed->size(), 1u);
+    const auto* tg = std::get_if<Act::TradeGold>(&(*parsed)[0].value);
+    ASSERT_NE(tg, nullptr) << c.text;
+    EXPECT_EQ(MoneyToCopper(tg->amount), c.expected_copper) << c.text;
+  }
+  // Adversarial counter-tests: 0, negative, unitless, out-of-range rejected.
+  for (const char* bad :
+       {"trade gold 0", "trade gold 0g", "trade gold 0s", "trade gold 0c",
+        "trade gold -5g", "trade gold -100c", "trade gold 5", "trade gold 100s",
+        "trade gold 100c", "trade gold 214749g", "trade gold "}) {
+    EXPECT_FALSE(ParseActs(bad)) << bad;
+  }
+  // Above WoW's MAX_MONEY_AMOUNT (214748g 36s 47c): rejected by MoneyToCopper.
+  const std::optional<std::vector<Act>> huge =
+      ParseActs("trade gold 214748g 99s 99c");
+  ASSERT_TRUE(huge);
+  const auto* tg_huge = std::get_if<Act::TradeGold>(&(*huge)[0].value);
+  ASSERT_NE(tg_huge, nullptr);
+  EXPECT_FALSE(MoneyToCopper(tg_huge->amount).has_value());
 }
 
 TEST(OrdersTest, TheGrammarNamesOnlyWhatTheBotKnows) {

@@ -42,7 +42,8 @@ struct glz::meta<wlb::snapshot::Command_Act::Verb> {
                                                PET,
                                                KITE,
                                                OUT_OF,
-                                               BACK);
+                                               BACK,
+                                               TRADE_GOLD);
 };
 
 template <>

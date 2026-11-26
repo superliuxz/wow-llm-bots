@@ -6,6 +6,7 @@
 #ifndef MOD_LLM_BRAIN_OPTIONS_EXEC_SOCIAL_H_
 #define MOD_LLM_BRAIN_OPTIONS_EXEC_SOCIAL_H_
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -43,9 +44,10 @@ ActStartResult ExecuteCrowdControlAction(Player* bot,
 ActionOutcome ExecutePopupAnswerAction(Player* bot,
                                        const PopupAnswerAction& action);
 // Opens, fills, accepts or cancels the trade window through the client's
-// own packets (CMSG_INITIATE_TRADE, CMSG_SET_TRADE_ITEM, CMSG_ACCEPT_TRADE,
-// CMSG_CANCEL_TRADE), so the server's checks apply.
+// own packets (CMSG_INITIATE_TRADE, CMSG_SET_TRADE_ITEM, CMSG_SET_TRADE_GOLD,
+// CMSG_ACCEPT_TRADE, CMSG_CANCEL_TRADE), so the server's checks apply.
 ActionOutcome ExecuteTradeAction(Player* bot, const TradeAction& action);
+ActionOutcome ExecuteTradeGold(Player* bot, uint32_t copper);
 // With the brain's `auto_popups` policy set, answers what is open now: rez
 // offers from the party, summons, ready checks, role checks, proposals, and
 // loot rolls (Need a usable upgrade, else Greed, else Pass). Returns a short

@@ -319,5 +319,40 @@ TEST(DecideTest, InspectPromptAndKnowledgeFlagWorkWithoutCallingModel) {
   EXPECT_NE(report.find("tokens (est):"), std::string::npos) << report;
 }
 
+TEST(DecideTest, JsonOutputIncludesActsAndTradeGoldGrammar) {
+  DecideOptions options = Options();
+  options.snapshot_path = std::string(WLB_HARNESS_TESTDATA) +
+                          "/eval/trade_asked_for_gold.snapshot.json";
+  options.json_output = true;
+  const std::string reply_with_act =
+      "do: 1\n"
+      "expect: none\n"
+      "watch: none\n"
+      "look: 60\n"
+      "act: trade gold 2g\n";
+  LlmRequest seen;
+  std::string report;
+  EXPECT_EQ(RunDecide(options, Replying(reply_with_act, &seen), &report), 0);
+  EXPECT_NE(seen.grammar.find("\"trade gold \""), std::string::npos);
+  EXPECT_NE(report.find("\"acts\":[\"trade gold 2g\"]"), std::string::npos)
+      << report;
+
+  // Without an open trade window, `trade gold` is absent from the grammar.
+  DecideOptions no_trade = Options();
+  no_trade.snapshot_path = std::string(WLB_HARNESS_TESTDATA) +
+                           "/eval/trade_asked_to_open.snapshot.json";
+  no_trade.json_output = true;
+  LlmRequest seen_no_trade;
+  std::string report_no_trade;
+  EXPECT_EQ(RunDecide(no_trade,
+                      Replying("do: 2\nexpect: none\nwatch: none\nlook: 60\n",
+                               &seen_no_trade),
+                      &report_no_trade),
+            0);
+  EXPECT_EQ(seen_no_trade.grammar.find("\"trade gold \""), std::string::npos);
+  EXPECT_NE(report_no_trade.find("\"acts\":[]"), std::string::npos)
+      << report_no_trade;
+}
+
 }  // namespace
 }  // namespace harness

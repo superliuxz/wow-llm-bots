@@ -4,11 +4,14 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <flat_set>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "base/strings/strcat.h"
@@ -19,6 +22,43 @@
 #include "snapshot/snapshot.h"
 
 namespace harness {
+
+std::optional<uint32_t> MoneyToCopper(const Money& money) {
+  constexpr uint64_t kMaxMoneyCopper = 2147483647ULL;
+  uint64_t g = 0;
+  uint64_t s = 0;
+  uint64_t c = 0;
+  std::visit(
+      [&](const auto& m) {
+        using M = std::decay_t<decltype(m)>;
+        if constexpr (std::is_same_v<M, grammar::MoneyGoldSilverCopper>) {
+          g = static_cast<uint64_t>(m.g);
+          s = static_cast<uint64_t>(m.s);
+          c = static_cast<uint64_t>(m.c);
+        } else if constexpr (std::is_same_v<M, grammar::MoneyGoldSilver>) {
+          g = static_cast<uint64_t>(m.g);
+          s = static_cast<uint64_t>(m.s);
+        } else if constexpr (std::is_same_v<M, grammar::MoneyGoldCopper>) {
+          g = static_cast<uint64_t>(m.g);
+          c = static_cast<uint64_t>(m.c);
+        } else if constexpr (std::is_same_v<M, grammar::MoneyGold>) {
+          g = static_cast<uint64_t>(m.g);
+        } else if constexpr (std::is_same_v<M, grammar::MoneySilverCopper>) {
+          s = static_cast<uint64_t>(m.s);
+          c = static_cast<uint64_t>(m.c);
+        } else if constexpr (std::is_same_v<M, grammar::MoneySilver>) {
+          s = static_cast<uint64_t>(m.s);
+        } else if constexpr (std::is_same_v<M, grammar::MoneyCopper>) {
+          c = static_cast<uint64_t>(m.c);
+        }
+      },
+      money.value);
+  const uint64_t total = g * 10000ULL + s * 100ULL + c;
+  if (total == 0 || total > kMaxMoneyCopper) {
+    return std::nullopt;
+  }
+  return static_cast<uint32_t>(total);
+}
 
 std::optional<std::vector<Act>> ParseActs(
     std::string_view text,
@@ -34,7 +74,8 @@ std::optional<std::vector<Act>> ParseActs(
 }
 
 std::string OrderGrammar(const std::vector<std::string>& names,
-                         const std::vector<std::string>& pingers) {
+                         const std::vector<std::string>& pingers,
+                         const std::vector<std::string>& traders) {
   // No names, no orders: that is how `order:` lines stay off until the module
   // can carry acts out (docs/specs/triggers.md, step (b)). The generated
   // grammar alone would still allow orders that name nothing ("always ->
@@ -45,9 +86,10 @@ std::string OrderGrammar(const std::vector<std::string>& names,
     return "";
   }
   return grammar::OrdersGrammar(
-      "Order",
-      grammar::rt::Env{.names = {{"order_names", names}, {"pingers", pingers}},
-                       .counts = {}});
+      "Order", grammar::rt::Env{.names = {{"order_names", names},
+                                          {"pingers", pingers},
+                                          {"traders", traders}},
+                                .counts = {}});
 }
 
 namespace {
@@ -388,6 +430,9 @@ std::vector<std::string> CollectOrderNames(const pb::Snapshot& snapshot,
   }
   if (snapshot.ext.pet && snapshot.ext.pet->pet) {
     add_unit(*snapshot.ext.pet->pet, /*include_unit_name=*/true);
+  }
+  if (snapshot.ext.trade && !snapshot.ext.trade->with.empty()) {
+    add(snapshot.ext.trade->with);
   }
   for (const pb::Option& opt : snapshot.options) {
     if (opt.kind == pb::Option::USE || opt.kind == pb::Option::ATTACK ||

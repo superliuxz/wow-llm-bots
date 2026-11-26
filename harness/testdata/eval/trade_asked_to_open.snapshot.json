@@ -1,0 +1,170 @@
+{
+  "bot": "Loadc",
+  "seq": 1,
+  "time_ms": 1794793210000,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x00000000000004C0",
+        "name": "Loadc",
+        "kind": "PLAYER",
+        "level": 15,
+        "health_pct": 100.0,
+        "power_pct": 92.0,
+        "player": {
+          "class": "Mage"
+        },
+        "group": {
+          "subgroup": 1,
+          "online": true,
+          "in_range": true,
+          "role": "DPS"
+        }
+      },
+      "gender": "FEMALE",
+      "xp": 3400,
+      "xp_next": 11000,
+      "health": 200,
+      "health_max": 200,
+      "power_type": "MANA",
+      "power": 552,
+      "power_max": 600,
+      "state": "ALIVE",
+      "in_combat": false,
+      "money": 35000
+    },
+    "where": {
+      "map": "Ragefire Chasm",
+      "zone": "Ragefire Chasm",
+      "subzone": "",
+      "position": {
+        "x": -12.0,
+        "y": -28.0,
+        "z": -21.0
+      },
+      "facing": 1.57,
+      "in_instance": true
+    },
+    "nearby": {
+      "units": [],
+      "objects": []
+    }
+  },
+  "ext": {
+    "party": {
+      "leader": "Vorka",
+      "loot_method": "GROUP_LOOT",
+      "members": [
+        {
+          "guid": "0x0000000000000510",
+          "name": "Vorka",
+          "kind": "PLAYER",
+          "level": 15,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Warrior"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": true,
+            "role": "TANK",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 5.0,
+            "dir": "N",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000004B0",
+          "name": "Krag",
+          "kind": "PLAYER",
+          "level": 15,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Priest"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "HEALER",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 6.0,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000004D0",
+          "name": "Zelra",
+          "kind": "PLAYER",
+          "level": 15,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Rogue"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "DPS",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 4.0,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        }
+      ]
+    }
+  },
+  "options": [
+    {
+      "text": "Rest (eat and drink)",
+      "kind": "REST"
+    },
+    {
+      "text": "Open a trade with Vorka",
+      "guid": "trade:open:0x0000000000000510",
+      "kind": "USE",
+      "name": "Open a trade with Vorka"
+    },
+    {
+      "text": "Open a trade with Krag",
+      "guid": "trade:open:0x00000000000004B0",
+      "kind": "USE",
+      "name": "Open a trade with Krag"
+    },
+    {
+      "text": "Open a trade with Zelra",
+      "guid": "trade:open:0x00000000000004D0",
+      "kind": "USE",
+      "name": "Open a trade with Zelra"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
+}

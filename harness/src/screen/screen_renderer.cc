@@ -1811,10 +1811,15 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
       }
       return out;
     };
-    lines.push_back(base::StrCat(
+    std::string trade_line = base::StrCat(
         {"trade with ", t.with, ": they give ",
          side(t.getting, t.getting_money, t.they_accepted), "; I give ",
-         side(t.giving, t.giving_money, t.i_accepted)}));
+         side(t.giving, t.giving_money, t.i_accepted)});
+    if (base.self.money > 0) {
+      base::StrAppend(&trade_line, {"; my money ", Money(base.self.money),
+                                    " (act: trade gold <amount>)"});
+    }
+    lines.push_back(std::move(trade_line));
   }
   for (std::string& line : QuestLines(ext.quest_tracker)) {
     lines.push_back(std::move(line));

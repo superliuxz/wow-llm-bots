@@ -298,6 +298,21 @@ BotAction DecodeOptionFactAction(std::string_view guid,
   return InvalidAction{"unknown action"};
 }
 
+std::string ValidateTradeGold(bool has_trade,
+                              uint32_t copper,
+                              uint32_t bot_money) {
+  if (!has_trade) {
+    return "no trade window is open";
+  }
+  if (copper == 0) {
+    return "invalid trade gold amount";
+  }
+  if (copper > bot_money) {
+    return "not enough money";
+  }
+  return {};
+}
+
 bool IsKeepAction(const BotAction& action) {
   return std::holds_alternative<KeepAction>(action);
 }

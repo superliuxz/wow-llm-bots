@@ -3980,5 +3980,110 @@ TEST(BotLoopTest, ADisconnectForgetsWhoPlaysWithAHuman) {
   EXPECT_EQ(loop.in_flight(), 2u);
 }
 
+TEST(BotLoopTest,
+     TradeGoldActValidatesStateAndMoneyAndResetsOnCancelOrDisconnect) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+
+  auto trade_snap = [&](uint32_t seq, base::TimeTicks at, bool open,
+                        uint32_t money) {
+    pb::Snapshot s = MakeLiveSnap("Tess", seq, at);
+    s.base.self.money = money;
+    pb::Option& accept = s.options.emplace_back();
+    accept.kind = pb::Option::USE;
+    accept.text = "Accept the trade with Hele";
+    accept.name = "Accept the trade with Hele";
+    AddKeep(&s);
+    if (open) {
+      s.ext.trade.emplace().with = "Hele";
+    }
+    return s;
+  };
+
+  // 1. Happy path: open trade with 5g, brain offers 2g 50s and accepts.
+  loop.OnSnapshot(trade_snap(1, t0, /*open=*/true, 50000), t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\nact: trade gold 2g 50s");
+  ASSERT_EQ(commands.size(), 1u);
+  ASSERT_TRUE(commands[0].act.has_value());
+  EXPECT_EQ(commands[0].act->verb, pb::Command::Act::TRADE_GOLD);
+  EXPECT_EQ(commands[0].act->copper, 25000u);
+  const uint32_t gold_id = commands[0].command_id;
+
+  // Finishing the trade gold act releases the held Accept step.
+  pb::Snapshot s2 = trade_snap(2, t0 + base::Seconds(1), /*open=*/true, 50000);
+  s2.done_act_command_id = gold_id;
+  loop.OnSnapshot(s2, t0 + base::Seconds(1));
+  ASSERT_EQ(commands.size(), 2u);
+  ASSERT_TRUE(commands[1].choose.has_value());
+  EXPECT_EQ(commands[1].choose->option, 1u);
+
+  // 2. Counter-test: amount > bot's money is rejected and never sent.
+  {
+    pb::ImmediateEvent imm;
+    imm.bot = "Tess";
+    pb::ChatEvent& chat = imm.event.chat.emplace();
+    chat.channel = pb::WHISPER;
+    chat.from = "Hele";
+    chat.text = "6g please";
+    loop.OnEvent(std::move(imm), t0 + base::Seconds(2));
+  }
+  ASSERT_EQ(brain.size(), 1u);
+  const size_t before_over = commands.size();
+  brain.FinishReply(
+      "do: 2\nexpect: none\nwatch: none\nlook: 60\nact: trade gold 6g");
+  // No TRADE_GOLD command sent; Keep still runs or is not preceded by invalid
+  // TRADE_GOLD.
+  for (size_t i = before_over; i < commands.size(); ++i) {
+    EXPECT_FALSE(commands[i].act &&
+                 commands[i].act->verb == pb::Command::Act::TRADE_GOLD);
+  }
+
+  // 3. Counter-test: trade cancelled before reply arrives -> rejected, not
+  // sent.
+  {
+    pb::ImmediateEvent imm;
+    imm.bot = "Tess";
+    pb::ChatEvent& chat = imm.event.chat.emplace();
+    chat.channel = pb::WHISPER;
+    chat.from = "Hele";
+    chat.text = "actually 1g";
+    loop.OnEvent(std::move(imm), t0 + base::Seconds(3));
+  }
+  ASSERT_EQ(brain.size(), 1u);
+  // Trade closes while the brain is thinking.
+  loop.OnSnapshot(trade_snap(3, t0 + base::Seconds(4), /*open=*/false, 50000),
+                  t0 + base::Seconds(4));
+  const size_t before_closed = commands.size();
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\nact: trade gold 1g");
+  for (size_t i = before_closed; i < commands.size(); ++i) {
+    EXPECT_FALSE(commands[i].act &&
+                 commands[i].act->verb == pb::Command::Act::TRADE_GOLD);
+  }
+
+  // 4. Counter-test: disconnect resets trade state so next wake has no trade
+  // gold in grammar.
+  loop.OnConnectionChanged(false);
+  loop.OnConnectionChanged(true);
+  loop.OnSnapshot(trade_snap(4, t0 + base::Seconds(5), /*open=*/false, 50000),
+                  t0 + base::Seconds(5));
+  ASSERT_EQ(brain.size(), 1u);
+  const size_t before_disc = commands.size();
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\nact: trade gold 1g");
+  for (size_t i = before_disc; i < commands.size(); ++i) {
+    EXPECT_FALSE(commands[i].act &&
+                 commands[i].act->verb == pb::Command::Act::TRADE_GOLD);
+  }
+}
+
 }  // namespace
 }  // namespace harness

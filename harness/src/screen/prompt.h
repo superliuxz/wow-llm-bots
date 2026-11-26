@@ -61,6 +61,9 @@ struct PromptInput {
   // Who has a minimap ping on the screen (`ping:`): `ping` is offered as a
   // thing in `order:` / `act:` lines only while this isn't empty.
   std::vector<std::string> pingers;
+  // Who the bot has a trade window open with while its money > 0: `trade gold`
+  // is offered in `act:` lines only while this isn't empty.
+  std::vector<std::string> traders;
   int slot = -1;  // llama-server slot, or -1
   float temperature = 0.7f;
 };

@@ -1217,6 +1217,28 @@ ActionOutcome ExecuteTradeAction(Player* bot, const TradeAction& action) {
   return {.error = "invalid trade action"};
 }
 
+ActionOutcome ExecuteTradeGold(Player* bot, uint32_t copper) {
+  WorldSession* session = bot ? bot->GetSession() : nullptr;
+  if (!session) {
+    return {.error = "no session"};
+  }
+  TradeData* mine = bot->GetTradeData();
+  const bool has_trade = mine && mine->GetTrader() != nullptr;
+  if (std::string err = ValidateTradeGold(has_trade, copper, bot->GetMoney());
+      !err.empty()) {
+    return {.error = std::move(err)};
+  }
+  WorldPacket p(CMSG_SET_TRADE_GOLD, 4);
+  p << copper;
+  p.rpos(0);
+  session->HandleSetTradeGoldOpcode(p);
+  TradeData* now = bot->GetTradeData();
+  if (!now || now->GetMoney() != copper) {
+    return {.error = "can't set trade gold"};
+  }
+  return {.used = true, .info = "put money in the trade"};
+}
+
 ActionOutcome ExecutePopupAnswerAction(Player* bot,
                                        const PopupAnswerAction& action) {
   WorldSession* session = bot->GetSession();

@@ -7,6 +7,7 @@
 env OrderEnv {
   order_names: names;  // units, objects, auras, spells and items; none: no orders
   pingers: names;      // who has a minimap ping on the screen; none: no `ping`
+  traders: names;      // open trade with bot money > 0; none: no `trade gold`
 }
 
 words Who     { me, tank, offtank, healer, leader, anyone, boss, it }
@@ -21,7 +22,20 @@ num   PosSec 1..999 1dp
 int   Count  0..999
 int   Points 0..99999
 int   Digit  0..9
+int   Gold   1..214748
+int   Silver 1..99
+int   Copper 1..99
 name  Name  from order_names
+
+choice Money {
+  GoldSilverCopper = g:Gold "g " s:Silver "s " c:Copper "c";
+  GoldSilver       = g:Gold "g " s:Silver "s";
+  GoldCopper       = g:Gold "g " c:Copper "c";
+  Gold             = g:Gold "g";
+  SilverCopper     = s:Silver "s " c:Copper "c";
+  Silver           = s:Silver "s";
+  Copper           = c:Copper "c";
+}
 
 choice NearestKind {
   Ally   = "ally";
@@ -110,6 +124,7 @@ choice Act {
   Pet       = "pet " cmd:PetCmd;
   Kite      = "kite " t:Thing;
   Wake      = "wake";
+  TradeGold = "trade gold " amount:Money @needs(traders);
 }
 
 struct Order = when:When " -> " steps:list<Act, ", then ", 1..3>;
