@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <list>
 #include <string>
@@ -130,6 +131,7 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"spellmiss", HandleSpellMiss, SEC_ADMINISTRATOR, Console::Yes},
         {"tame", HandleTame, SEC_ADMINISTRATOR, Console::Yes},
         {"sethp", HandleSetHp, SEC_ADMINISTRATOR, Console::Yes},
+        {"spawnmob", HandleSpawnMob, SEC_ADMINISTRATOR, Console::Yes},
     };
     static ChatCommandTable root_table = {
         {"llmtest", test_table},
@@ -1303,6 +1305,39 @@ class LlmBrainTestCommandScript : public CommandScript {
     handler->PSendSysMessage("llmtest: sethp {} {}/{} ({}%) t_us={}",
                              player->GetName(), player->GetHealth(), max_hp,
                              clamped, t_us);
+    return true;
+  }
+
+  // `llmtest spawnmob <near_player> <entry>`: spawns a temporary creature of
+  // `entry` 2 yd from `near_player` (despawns after 60 s) and prints its raw
+  // uint64 GUID so a scripted client can target and attack it.
+  static bool HandleSpawnMob(ChatHandler* handler,
+                             std::string player_name,
+                             uint32_t entry) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player || !player->IsAlive()) {
+      handler->SendErrorMessage("llmtest: spawnmob: needs a living player");
+      return false;
+    }
+    if (!sObjectMgr->GetCreatureTemplate(entry)) {
+      handler->SendErrorMessage("llmtest: spawnmob: unknown creature {}",
+                                entry);
+      return false;
+    }
+    const float o = player->GetOrientation();
+    const float sx = player->GetPositionX() + 1.5f * std::cos(o);
+    const float sy = player->GetPositionY() + 1.5f * std::sin(o);
+    Creature* mob = player->SummonCreature(
+        entry, sx, sy, player->GetPositionZ(), o + 3.14159265f,
+        TEMPSUMMON_TIMED_DESPAWN, 60000);
+    if (!mob) {
+      handler->SendErrorMessage("llmtest: spawnmob: failed to summon {}",
+                                entry);
+      return false;
+    }
+    handler->PSendSysMessage("llmtest: spawned {} (entry {}) guid={}",
+                             mob->GetName(), entry,
+                             mob->GetGUID().GetRawValue());
     return true;
   }
 };

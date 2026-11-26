@@ -43,6 +43,7 @@ from wlblib.common import OUT, ROOT, TEST, VAR, say
 from wlblib.testing import LlamaServer, Stack, expect
 
 sys.path.insert(0, str(ROOT / "tools" / "bench"))
+import chatter_check  # noqa: E402
 import soak_scorer  # noqa: E402
 
 NAME = "soak"
@@ -506,6 +507,8 @@ def _run_once(
     eval_passed: int | None = None,
     temperature: float = 0.7,
     no_brain: bool = False,
+    max_chatter_per_hour: float = soak_scorer.DEFAULT_MAX_CHATTER_PER_HOUR,
+    chatter_judge: chatter_check.JudgeFn | None = None,
 ) -> dict:
     scenario = SCENARIOS[scenario_name]
     trace_dir = VAR / "soak_traces"
@@ -658,6 +661,8 @@ def _run_once(
             run_stats=run_stats,
             min_eval_passed=min_eval_passed,
             eval_passed=eval_passed,
+            max_chatter_per_hour=max_chatter_per_hour,
+            chatter_judge=chatter_judge,
         )
         res["scenario"] = scenario_name
         return res
@@ -751,10 +756,17 @@ def run_soak(
     eval_passed: int | None = None,
     temperature: float = 0.7,
     no_brain: bool = False,
+    max_chatter_per_hour: float = soak_scorer.DEFAULT_MAX_CHATTER_PER_HOUR,
+    chatter_llm_judge: bool = False,
 ) -> dict:
     scenarios = _resolve_scenarios(suite, runs)
     if not no_brain:
         build.common("default", tests=False)
+    judge = (
+        chatter_check.make_llm_judge()
+        if (chatter_llm_judge and not no_brain)
+        else None
+    )
     results = []
     with tempfile.TemporaryDirectory(prefix="wlb-soak-runs-") as runs_tmp:
         per_run_dirs: list[pathlib.Path] = []
@@ -770,6 +782,8 @@ def run_soak(
                     eval_passed=(eval_passed if len(scenarios) == 1 else None),
                     temperature=temperature,
                     no_brain=no_brain,
+                    max_chatter_per_hour=max_chatter_per_hour,
+                    chatter_judge=judge,
                 )
                 results.append(res)
                 if len(scenarios) > 1:
@@ -807,6 +821,8 @@ def run_soak(
                     run_stats=merged_stats,
                     min_eval_passed=min_eval_passed,
                     eval_passed=eval_passed,
+                    max_chatter_per_hour=max_chatter_per_hour,
+                    chatter_judge=judge,
                 )
                 agg["scenarios"] = [r.get("scenario", "soak") for r in results]
                 agg["guardrails_ok"] = bool(agg["guardrails_ok"]) and all(

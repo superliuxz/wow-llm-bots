@@ -19,12 +19,14 @@ for p in (ROOT / "tools", ROOT / "tools" / "bench"):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
+import chatter_check  # noqa: E402
 import stall_check  # noqa: E402
 from wlblib import trace as trace_lib  # noqa: E402
 
 MAX_REPEATED_REFUSALS = 5
 DEFAULT_MAX_STALL_S = 300.0
 DEFAULT_STALL_RADIUS_YD = 15.0
+DEFAULT_MAX_CHATTER_PER_HOUR = chatter_check.DEFAULT_MAX_CHATTER_PER_HOUR
 
 
 def peak_per_minute(times_ms: list[Any]) -> int:
@@ -124,6 +126,7 @@ def _progress_metrics(
     quests_per_hour = (quests_completed / total_hours) if total_hours > 0 else 0.0
     return {
         "total_xp": total_xp,
+        "total_hours": round(total_hours, 4),
         "xp_per_hour": round(xp_per_hour, 1),
         "quests_completed": quests_completed,
         "quests_per_hour": round(quests_per_hour, 2),
@@ -137,6 +140,28 @@ def _progress_metrics(
     }
 
 
+def _resolve_decisions_dirs(
+    decisions_dirs: list[pathlib.Path] | None,
+    run_stats: dict[str, Any],
+) -> list[pathlib.Path]:
+    raw: list[pathlib.Path | str] = []
+    if decisions_dirs is not None:
+        raw.extend(decisions_dirs)
+    else:
+        if run_stats.get("decisions_dirs"):
+            raw.extend(run_stats["decisions_dirs"])
+        elif run_stats.get("decisions_dir"):
+            raw.append(run_stats["decisions_dir"])
+    resolved: list[pathlib.Path] = []
+    for entry in raw:
+        p = pathlib.Path(entry)
+        if not p.is_absolute():
+            p = ROOT / p
+        if p.exists():
+            resolved.append(p)
+    return resolved
+
+
 def score_soak(
     trace_dir: pathlib.Path,
     run_stats: dict[str, Any],
@@ -145,6 +170,9 @@ def score_soak(
     eval_passed: int | None = None,
     max_stall_s: float = DEFAULT_MAX_STALL_S,
     stall_radius_yd: float = DEFAULT_STALL_RADIUS_YD,
+    decisions_dirs: list[pathlib.Path] | None = None,
+    max_chatter_per_hour: float = DEFAULT_MAX_CHATTER_PER_HOUR,
+    chatter_judge: chatter_check.JudgeFn | None = None,
 ) -> dict[str, Any]:
     """Evaluates plain soak health gates (stalls, deaths, XP/h, wake loops, latency)."""
     traces = trace_lib.load_traces(trace_dir)
@@ -210,6 +238,28 @@ def score_soak(
         max_refusals <= MAX_REPEATED_REFUSALS,
         f"max_repeated_refusals={max_refusals} (<= {MAX_REPEATED_REFUSALS})",
     )
+    chatter: dict[str, Any] | None = None
+    resolved_dec_dirs = _resolve_decisions_dirs(decisions_dirs, run_stats)
+    if resolved_dec_dirs:
+        chatter_hours: float | None = None
+        if progress["total_hours"] > 0.0:
+            chatter_hours = float(progress["total_hours"])
+        elif float(run_stats.get("elapsed_min", 0.0)) > 0.0:
+            chatter_hours = (float(run_stats["elapsed_min"]) / 60.0) * n_bots
+        chatter = chatter_check.check_decision_dirs(
+            resolved_dec_dirs,
+            duration_hours=chatter_hours,
+            max_per_hour=max_chatter_per_hour,
+            judge=chatter_judge,
+        )
+        c = chatter["counts"]
+        check(
+            "chatter_bounded",
+            chatter["ok"],
+            f"flagged/h={chatter['flagged_per_hour']:.2f} (<= {chatter['max_per_hour']:.2f}; "
+            f"rep={c.get('repeated', 0)}, nar={c.get('narrating', 0)}, "
+            f"syc={c.get('sycophantic', 0)}, total={chatter['total_lines']})",
+        )
     if min_eval_passed is not None and eval_passed is not None:
         check(
             "offline_eval",
@@ -217,12 +267,15 @@ def score_soak(
             f"eval={eval_passed} (>= {min_eval_passed})",
         )
 
-    return {
+    out: dict[str, Any] = {
         "guardrails_ok": all(g["ok"] for g in guardrails),
         "guardrails": guardrails,
         "progress": progress,
         "run_stats": run_stats,
     }
+    if chatter is not None:
+        out["chatter"] = chatter
+    return out
 
 
 def format_score_report(res: dict[str, Any]) -> str:
@@ -233,8 +286,17 @@ def format_score_report(res: dict[str, Any]) -> str:
         f"quests={p['quests_completed']}, deaths={p['deaths']}, "
         f"moved={p['moved_bots']}/{p['traced_bots']}, "
         f"stalled={p['stalled_bots']} (max={p['max_stall_s']}s)",
-        "  Gates:",
     ]
+    if res.get("chatter") is not None:
+        ch = res["chatter"]
+        c = ch["counts"]
+        lines.append(
+            f"  chatter: flagged/h={ch['flagged_per_hour']:.2f} (<= {ch['max_per_hour']:.2f}), "
+            f"flagged={ch['flagged_lines']}/{ch['total_lines']} "
+            f"(rep={c.get('repeated', 0)}, nar={c.get('narrating', 0)}, "
+            f"syc={c.get('sycophantic', 0)})"
+        )
+    lines.append("  Gates:")
     for g in res["guardrails"]:
         lines.append(f"    {'PASS' if g['ok'] else 'FAIL'} {g['name']:22s}: {g['detail']}")
     return "\n".join(lines)
@@ -243,11 +305,22 @@ def format_score_report(res: dict[str, Any]) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Score a soak trace directory (plain soak checks)")
     ap.add_argument("trace_dir", type=pathlib.Path)
+    ap.add_argument("--decisions-dir", action="append", type=pathlib.Path, default=None)
     ap.add_argument("--max-stall-s", type=float, default=DEFAULT_MAX_STALL_S)
+    ap.add_argument("--max-chatter-per-hour", type=float, default=DEFAULT_MAX_CHATTER_PER_HOUR)
+    ap.add_argument("--chatter-llm-judge", action="store_true")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
-    res = score_soak(args.trace_dir, run_stats={}, max_stall_s=args.max_stall_s)
+    judge = chatter_check.make_llm_judge() if args.chatter_llm_judge else None
+    res = score_soak(
+        args.trace_dir,
+        run_stats={},
+        max_stall_s=args.max_stall_s,
+        decisions_dirs=args.decisions_dir,
+        max_chatter_per_hour=args.max_chatter_per_hour,
+        chatter_judge=judge,
+    )
     if args.json:
         print(json.dumps(res, indent=2))
     else:

@@ -55,6 +55,8 @@ SMSG_LOOT_ROLL_WON = 0x29F
 CMSG_LOOT_ROLL = 0x2A0
 SMSG_LOOT_START_ROLL = 0x2A1
 SMSG_LOOT_ROLL = 0x2A2
+CMSG_SET_SELECTION = 0x13D
+CMSG_ATTACKSWING = 0x141
 
 AUTH_OK = 0x0C
 CHAR_CREATE_SUCCESS = 0x2F
@@ -263,6 +265,12 @@ class WowClient:
 
     def loot_roll(self, item_guid: int, slot: int, vote: int) -> None:
         self.send(CMSG_LOOT_ROLL, struct.pack("<QIB", item_guid, slot, vote))
+
+    def attack(self, target_guid: int) -> None:
+        """Targets `target_guid` and starts melee auto-attack."""
+        packed = struct.pack("<Q", target_guid)
+        self.send(CMSG_SET_SELECTION, packed)
+        self.send(CMSG_ATTACKSWING, packed)
 
     def close(self) -> None:
         self._stop = True

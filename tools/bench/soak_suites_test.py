@@ -234,6 +234,49 @@ class SoakScorerHelpersTest(unittest.TestCase):
         samples = [{"xp": 350, "xp_max": 400, "level": 5}, {"xp": 30, "xp_max": 900, "level": 6}]
         self.assertEqual(soak_scorer._bot_xp_gained([], samples), 80)
 
+    def test_score_soak_enforces_chatter_gate_when_decisions_dir_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            t = pathlib.Path(tmp)
+            td = t / "traces"
+            bdir = td / "bot" / "Loada"
+            bdir.mkdir(parents=True)
+            (bdir / "trace.jsonl").write_text("\n".join([
+                json.dumps({"kind": "sample", "role": "bot", "name": "Loada",
+                            "t_ms": 0, "x": 0.0, "y": 0.0, "z": 0.0, "level": 1, "xp": 0}),
+                json.dumps({"kind": "sample", "role": "bot", "name": "Loada",
+                            "t_ms": 1_800_000, "x": 40.0, "y": 0.0, "z": 0.0, "level": 1, "xp": 100}),
+            ]) + "\n")
+
+            dec_dir = t / "decisions"
+            ev_dir = dec_dir / "bots" / "Loada" / "events"
+            ev_dir.mkdir(parents=True)
+            (ev_dir / "2026-11-26.jsonl").write_text("\n".join([
+                json.dumps({"time_ms": 0, "plan": "do: 1\nexpect: none\nwatch: none\nlook: 60\nparty: oom, drinking"}),
+                json.dumps({"time_ms": 900_000, "plan": "do: 1\nexpect: none\nwatch: none\nlook: 60\nparty: ty"}),
+            ]) + "\n")
+
+            stats = {"bots": 1, "decisions": 2, "elapsed_min": 30.0, "llm_errors": 0,
+                     "invalid_plans": 0, "peak_wakes_per_min": 1.0, "do_p95_ms": 100.0,
+                     "decisions_dir": str(dec_dir)}
+            res_ok = soak_scorer.score_soak(td, run_stats=stats, max_chatter_per_hour=4.0)
+            self.assertTrue(res_ok["guardrails_ok"])
+            self.assertIn("chatter", res_ok)
+            self.assertEqual(res_ok["chatter"]["flagged_lines"], 0)
+            self.assertIn("chatter:", soak_scorer.format_score_report(res_ok))
+
+            # Now write adversarial chatter (4 bad lines over 0.5 bot-h = 8.0/h > 4.0/h).
+            (ev_dir / "2026-11-26.jsonl").write_text("\n".join([
+                json.dumps({"time_ms": 0, "plan": "do: 1\nexpect: none\nwatch: none\nlook: 60\nparty: Great idea!"}),
+                json.dumps({"time_ms": 60_000, "plan": "do: 1\nexpect: none\nwatch: none\nlook: 60\nparty: I'm looting the corpse"}),
+                json.dumps({"time_ms": 120_000, "plan": "do: 1\nexpect: none\nwatch: none\nlook: 60\nparty: Absolutely, happy to help!"}),
+                json.dumps({"time_ms": 180_000, "plan": "do: 1\nexpect: none\nwatch: none\nlook: 60\nparty: Going to attack the kobold"}),
+            ]) + "\n")
+            res_bad = soak_scorer.score_soak(td, run_stats=stats, max_chatter_per_hour=4.0)
+            self.assertFalse(res_bad["guardrails_ok"])
+            failed = {g["name"] for g in res_bad["guardrails"] if not g["ok"]}
+            self.assertIn("chatter_bounded", failed)
+            self.assertEqual(res_bad["chatter"]["flagged_per_hour"], 8.0)
+
 
 if __name__ == "__main__":
     unittest.main()

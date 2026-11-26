@@ -1040,8 +1040,8 @@ def _case_human_party():
     import time
     import pathlib
 
-    from wlblib import build, server, wowclient
-    from wlblib.common import OUT, ROOT, TEST
+    from wlblib import build, server, trace as trace_lib, wowclient
+    from wlblib.common import OUT, ROOT, TEST, say
     from wlblib.testing import ProxyRecorder, expect
 
     NAME = "human_party"
@@ -1053,6 +1053,12 @@ def _case_human_party():
     BOTS = ("Loada", "Loadb", "Loadc")
     HUMAN = "Allyone"
     ACCOUNT = "HUMANTEST"
+    COMBAT_MOBS = 3
+    KOBOLD_VERMIN_ENTRY = 6
+    # Companion-lessons gap 3 (Carrying the human): in a 1-human + 3-bot party,
+    # equal share is 75% for the 3 bots; cap bot damage share at 85% so the
+    # playing human contributes at least 15% and isn't reduced to a spectator.
+    BOT_DAMAGE_SHARE_MAX = 0.85
     KEEP_RE = re.compile(r"^\s+(\d+)\. Keep doing what I'm doing$", re.M)
     ACCEPT_RE = re.compile(r"^\s+(\d+)\. Accept group invite", re.M)
     NAME_RE = re.compile(r"^You are (\w+)\.", re.M)
@@ -1428,9 +1434,69 @@ def _case_human_party():
                     lambda: latest("Loadc", since_back) and not human_afk(since_back), 10,
                     f"{HUMAN} no longer shown AFK to Loadc"))
 
+                # 11 (Companion gap 3: Carrying the human). The human fights 3
+                # Kobold Vermin alongside the 3 bots; measure bots' share of
+                # damage and killing blows from behavior traces.
+                trace_dir = TEST.run / "traces"
+                combat_start_ms = int(time.time() * 1000)
+                for mob_i in range(COMBAT_MOBS):
+                    server.console(f"llmtest sethp {HUMAN} 100", wait_s=0.2, inst=TEST)
+                    out = server.console(
+                        f"llmtest spawnmob {HUMAN} {KOBOLD_VERMIN_ENTRY}",
+                        wait_s=0.3, inst=TEST,
+                    )
+                    m_guid = re.search(r"guid=(\d+)", out)
+                    expect(m_guid, f"spawnmob {mob_i + 1} returned no guid: {out!r}")
+                    mob_guid = int(m_guid.group(1))
+                    prev_kills = trace_lib.summarize_combat_share(
+                        trace_lib.load_traces(trace_dir), HUMAN, BOTS,
+                        since_t_ms=combat_start_ms,
+                    )["total_kills"]
+                    client.attack(mob_guid)
+
+                    def _mob_dead(target_kills=prev_kills + 1):
+                        cur = trace_lib.summarize_combat_share(
+                            trace_lib.load_traces(trace_dir), HUMAN, BOTS,
+                            since_t_ms=combat_start_ms,
+                        )
+                        return cur["total_kills"] >= target_kills
+
+                    _poll(_mob_dead, 25, f"combat mob {mob_i + 1}/{COMBAT_MOBS} killed")
+                    time.sleep(0.5)
+                # Let the async BehaviorTraceWriter flush final events.
+                time.sleep(0.5)
+                combat_share = trace_lib.summarize_combat_share(
+                    trace_lib.load_traces(trace_dir), HUMAN, BOTS,
+                    since_t_ms=combat_start_ms,
+                )
+                bot_dmg_pct = (
+                    100.0 * combat_share["bot_damage_share"]
+                    if combat_share["bot_damage_share"] is not None else 0.0
+                )
+                bot_kill_pct = (
+                    100.0 * combat_share["bot_kill_share"]
+                    if combat_share["bot_kill_share"] is not None else 0.0
+                )
+                per_bot_str = ", ".join(
+                    f"{b}={combat_share['bots_damage'][b]}dmg/{combat_share['bots_kills'][b]}kb"
+                    for b in BOTS
+                )
+                say(
+                    f"human_party combat share: bots {bot_dmg_pct:.1f}% dmg "
+                    f"({combat_share['bot_damage_total']}/{combat_share['total_damage']}), "
+                    f"{bot_kill_pct:.1f}% kills "
+                    f"({combat_share['bot_kills_total']}/{combat_share['total_kills']}) "
+                    f"[{HUMAN}={combat_share['human_damage']}dmg/{combat_share['human_kills']}kb; "
+                    f"{per_bot_str}]"
+                )
+
                 # 6. Leaving the group takes the ping off the minimap at once.
-                before_ungroup = pings_of("Loadc", since_emote)
-                pinged_before_ungroup = bool(before_ungroup and before_ungroup[-1][2])
+                # Refresh the ping after step 11's combat so it hasn't aged out.
+                since_reping = time.monotonic()
+                client.ping(*ping_spot)
+                pinged_before_ungroup = bool(_poll(
+                    lambda: any(p for _, _, p in pings_of("Loadc", since_reping)), 10,
+                    "Loadc seeing fresh ping before ungroup"))
                 since_ungroup = time.monotonic()
                 server.console("llmtest ungroup Loadc", wait_s=0.3, inst=TEST)
                 time.sleep(0.5)
@@ -1492,12 +1558,33 @@ def _case_human_party():
                f"the brain wasn't told the shortcuts were applied: {shortcut_infos}")
         # 30 yd range, edge to edge (+ ~3 yd of combat reach): 2 yd inside it.
         expect(fort_dist <= 31.5, f"Loadb cast Power Word: Fortitude from {fort_dist:.1f} yd")
+        # Companion gap 3: both human and bots participated, all mobs died, and
+        # bots did not carry past BOT_DAMAGE_SHARE_MAX.
+        expect(
+            combat_share["total_kills"] >= COMBAT_MOBS,
+            f"expected >= {COMBAT_MOBS} kills in combat share check, got {combat_share}",
+        )
+        expect(
+            combat_share["human_damage"] > 0 and combat_share["bot_damage_total"] > 0,
+            f"both human and bots must deal damage: {combat_share}",
+        )
+        expect(
+            combat_share["bot_damage_share"] is not None
+            and combat_share["bot_damage_share"] <= BOT_DAMAGE_SHARE_MAX,
+            f"bots carried the human: bot damage share {bot_dmg_pct:.1f}% > "
+            f"{100.0 * BOT_DAMAGE_SHARE_MAX:.0f}% target "
+            f"(human={combat_share['human_damage']}, bots={combat_share['bots_damage']}, "
+            f"kills={combat_share['bot_kills_total']}/{combat_share['total_kills']})",
+        )
         return (f"3 bots accepted, master={HUMAN} for all; one party reply ({replies[0]!r}); "
                 "'wait here' / 'loadb follow' / 'follow me' applied in C++; quest help shown; "
                 "stray follower came back; boss emote woke the bots; minimap pings shown "
                 "(`act: to ping` walked Loada there and held it; `use` walked Loadb into "
                 "range first; 'kill {rt7}' read as cross, 'go there' / 'los' applied in C++) "
-                f"({rel.get('dist_yd', 0):.0f} yd {rel.get('dir')}), not to self, gone on ungroup")
+                f"({rel.get('dist_yd', 0):.0f} yd {rel.get('dir')}), not to self, gone on ungroup; "
+                f"combat share: bots {bot_dmg_pct:.1f}% dmg "
+                f"({combat_share['bot_damage_total']}/{combat_share['total_damage']}), "
+                f"{combat_share['bot_kills_total']}/{combat_share['total_kills']} kills")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
 def _case_human_dungeon():

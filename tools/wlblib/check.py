@@ -191,6 +191,7 @@ def bench_tests():
     run(["python3", "-I", "-B", ROOT / "tools/bench/soak_suites_test.py", "-q"])
     run(["python3", "-I", "-B", ROOT / "tools/bench/dodge_timeline_test.py", "-q"])
     run(["python3", "-I", "-B", ROOT / "tools/bench/stall_check_test.py", "-q"])
+    run(["python3", "-I", "-B", ROOT / "tools/bench/chatter_check_test.py", "-q"])
     run(["python3", "-I", "-B", ROOT / "tools/notes/extract_boss_notes_test.py", "-q"])
     run(["python3", "-I", "-B", ROOT / "tools/knowledge/export_knowledge_test.py", "-q"])
     run(["python3", "-I", "-B", ROOT / "tools/knowledge/backfill_quest_poi_test.py", "-q"])

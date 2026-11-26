@@ -914,16 +914,28 @@ def capture_snapshots(seconds=300):
     say(f"captured {count} snapshots")
 
 
-def soak(minutes=5.0, runs=0, suite="varied", temperature=0.7, no_brain=False):
+def soak(
+    minutes=5.0,
+    runs=0,
+    suite="varied",
+    temperature=0.7,
+    no_brain=False,
+    max_chatter_per_hour=None,
+    chatter_llm_judge=False,
+):
     from wlblib.cases import soak as soak_case
 
-    return soak_case.run_soak(
-        minutes=minutes,
-        runs=runs,
-        suite=suite,
-        temperature=temperature,
-        no_brain=no_brain,
-    )
+    kwargs = {
+        "minutes": minutes,
+        "runs": runs,
+        "suite": suite,
+        "temperature": temperature,
+        "no_brain": no_brain,
+        "chatter_llm_judge": chatter_llm_judge,
+    }
+    if max_chatter_per_hour is not None:
+        kwargs["max_chatter_per_hour"] = max_chatter_per_hour
+    return soak_case.run_soak(**kwargs)
 
 
 def eval_(names=(), model=None, shootout=False, live=False, samples=None):

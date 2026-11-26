@@ -18,7 +18,7 @@
   tools/wlb llm [--slots N] [--ctx N] [--model FILE] [-- llama-server args...]
   tools/wlb harness [run|decide|replay|render-screen ...]  build and run the C++ brain harness
   tools/wlb snap capture|fake ...        capture snapshots or run the scripted harness stand-in
-  tools/wlb trace meter|dodge|stalls|mine ...  analyze behavior traces and mine eval cases
+  tools/wlb trace meter|dodge|stalls|chatter|mine ...  analyze behavior traces and mine eval cases
   tools/wlb gen invisible-displays|quest-poi|knowledge|boss-notes|grammar|fixture-options ...
   tools/wlb remote list | <name> sync|status|run|pull|stop|install-hook  run on a remote worker (private/remotes.json)
 
@@ -118,6 +118,10 @@ def parse(argv):
                    help="soak: LLM sampling temperature (default: 0.7; use 0 for deterministic)")
     p.add_argument("--no-brain", action="store_true",
                    help="soak: playerbots-only comparison run without launching the LLM harness")
+    p.add_argument("--max-chatter-per-hour", type=float, default=None,
+                   help="soak: max flagged chatter lines per bot-hour")
+    p.add_argument("--chatter-llm-judge", action="store_true",
+                   help="soak: also run local llama-server LLM judge on chatter lines")
 
     p = sub.add_parser("setup", help="one-time setup steps")
     p.add_argument("step", choices=["links", "configure", "data", "llama", "msan", "client-ui"])
@@ -136,7 +140,7 @@ def parse(argv):
     p.add_argument("args", nargs=argparse.REMAINDER, help="capture <out> [s] [sock] | fake ...")
 
     p = sub.add_parser("trace", add_help=False, help="analyze behavior traces")
-    p.add_argument("args", nargs=argparse.REMAINDER, help="meter | dodge | stalls | mine ...")
+    p.add_argument("args", nargs=argparse.REMAINDER, help="meter | dodge | stalls | chatter | mine ...")
 
     p = sub.add_parser("gen", add_help=False, help="run code/data generators")
     p.add_argument("args", nargs=argparse.REMAINDER,
@@ -172,6 +176,7 @@ def _dispatch_trace(args):
         "meter": common.ROOT / "tools/bench/boss_meter.py",
         "dodge": common.ROOT / "tools/bench/dodge_timeline.py",
         "stalls": common.ROOT / "tools/bench/stall_check.py",
+        "chatter": common.ROOT / "tools/bench/chatter_check.py",
         "mine": common.ROOT / "tools/eval/mine_traces.py",
     }
     if not args or args[0] not in scripts:
@@ -276,6 +281,8 @@ def main():
                 suite=a.suite,
                 temperature=a.temperature,
                 no_brain=a.no_brain,
+                max_chatter_per_hour=a.max_chatter_per_hour,
+                chatter_llm_judge=a.chatter_llm_judge,
             )
         else:
             testing.eval_(a.names, model=a.model, shootout=a.shootout, live=a.live,

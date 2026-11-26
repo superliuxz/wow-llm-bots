@@ -54,3 +54,57 @@ def filter_role_rows(
         if filtered:
             out[name] = filtered
     return out
+
+
+def summarize_combat_share(
+    traces: dict[str, dict[str, list[dict[str, Any]]]],
+    human_name: str,
+    bot_names: tuple[str, ...] | list[str],
+    since_t_ms: int = 0,
+) -> dict[str, Any]:
+    """Summarizes human vs. bot damage dealt and killing blows from loaded traces.
+
+    Counts `damage_dealt` and `killing_blow` events with `t_ms >= since_t_ms`.
+    Returns totals, per-character breakdowns, and `bot_damage_share` / `bot_kill_share`
+    (None when total is 0).
+    """
+    def _count(rows: list[dict[str, Any]]) -> tuple[int, int]:
+        dmg = 0
+        kills = 0
+        for r in rows:
+            if r.get("kind") != "event":
+                continue
+            if int(r.get("t_ms", 0)) < since_t_ms:
+                continue
+            ev = r.get("event")
+            if ev == "damage_dealt":
+                dmg += max(0, int(r.get("value", 0)))
+            elif ev == "killing_blow":
+                kills += 1
+        return dmg, kills
+
+    human_dmg, human_kills = _count(traces.get("human", {}).get(human_name, []))
+    bots_dmg: dict[str, int] = {}
+    bots_kills: dict[str, int] = {}
+    for b in bot_names:
+        d, k = _count(traces.get("bot", {}).get(b, []))
+        bots_dmg[b] = d
+        bots_kills[b] = k
+
+    bot_dmg_total = sum(bots_dmg.values())
+    bot_kills_total = sum(bots_kills.values())
+    total_dmg = human_dmg + bot_dmg_total
+    total_kills = human_kills + bot_kills_total
+    return {
+        "human_name": human_name,
+        "human_damage": human_dmg,
+        "human_kills": human_kills,
+        "bots_damage": bots_dmg,
+        "bots_kills": bots_kills,
+        "bot_damage_total": bot_dmg_total,
+        "bot_kills_total": bot_kills_total,
+        "total_damage": total_dmg,
+        "total_kills": total_kills,
+        "bot_damage_share": (bot_dmg_total / total_dmg) if total_dmg > 0 else None,
+        "bot_kill_share": (bot_kills_total / total_kills) if total_kills > 0 else None,
+    }

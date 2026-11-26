@@ -16,7 +16,8 @@ from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
-from wlblib import build, common, remote, server, testing  # noqa: E402
+from wlblib import build, common, remote, server, testing, trace  # noqa: E402
+from wlblib.cases import perf_command_reply  # noqa: E402
 
 
 class TestInstanceTest(unittest.TestCase):
@@ -571,6 +572,84 @@ class UnitTestGrammarErrorTest(unittest.TestCase):
             with self.assertRaises(common.Failed) as ctx:
                 self._run_py("import sys; sys.exit(2)")
         self.assertIn("failed (2)", str(ctx.exception))
+
+
+class CombatShareTest(unittest.TestCase):
+    def test_balanced_party_share_and_timestamp_filter(self):
+        traces = {
+            "human": {
+                "Allyone": [
+                    # Pre-window events must be ignored.
+                    {"kind": "event", "t_ms": 900, "event": "damage_dealt", "value": 999},
+                    {"kind": "event", "t_ms": 950, "event": "killing_blow", "value": 1},
+                    # Sample rows and group-credited mob_kill must not affect share.
+                    {"kind": "sample", "t_ms": 1000, "in_combat": True},
+                    {"kind": "event", "t_ms": 1100, "event": "damage_dealt", "value": 40},
+                    {"kind": "event", "t_ms": 1200, "event": "killing_blow", "value": 1},
+                    {"kind": "event", "t_ms": 1200, "event": "mob_kill", "value": 1},
+                ],
+            },
+            "bot": {
+                "Loada": [
+                    {"kind": "event", "t_ms": 1100, "event": "damage_dealt", "value": 30},
+                    {"kind": "event", "t_ms": 1300, "event": "killing_blow", "value": 1},
+                    {"kind": "event", "t_ms": 1300, "event": "mob_kill", "value": 1},
+                ],
+                "Loadb": [
+                    {"kind": "event", "t_ms": 1150, "event": "damage_dealt", "value": 10},
+                ],
+                "Loadc": [
+                    {"kind": "event", "t_ms": 1180, "event": "damage_dealt", "value": 20},
+                    {"kind": "event", "t_ms": 1400, "event": "killing_blow", "value": 1},
+                ],
+            },
+        }
+        res = trace.summarize_combat_share(
+            traces, "Allyone", ("Loada", "Loadb", "Loadc"), since_t_ms=1000
+        )
+        self.assertEqual(res["human_damage"], 40)
+        self.assertEqual(res["human_kills"], 1)
+        self.assertEqual(res["bot_damage_total"], 60)
+        self.assertEqual(res["bot_kills_total"], 2)
+        self.assertEqual(res["total_damage"], 100)
+        self.assertEqual(res["total_kills"], 3)
+        self.assertAlmostEqual(res["bot_damage_share"], 0.6)
+        self.assertAlmostEqual(res["bot_kill_share"], 2 / 3)
+
+    def test_empty_and_extreme_shares(self):
+        empty = trace.summarize_combat_share({"human": {}, "bot": {}}, "Allyone", ("Loada",))
+        self.assertIsNone(empty["bot_damage_share"])
+        self.assertIsNone(empty["bot_kill_share"])
+        self.assertEqual(empty["total_damage"], 0)
+
+        carry = trace.summarize_combat_share(
+            {"human": {}, "bot": {"Loada": [
+                {"kind": "event", "t_ms": 10, "event": "damage_dealt", "value": 50},
+                {"kind": "event", "t_ms": 20, "event": "killing_blow", "value": 1},
+            ]}},
+            "Allyone",
+            ("Loada",),
+        )
+        self.assertAlmostEqual(carry["bot_damage_share"], 1.0)
+        self.assertAlmostEqual(carry["bot_kill_share"], 1.0)
+
+
+class CommandReplyPerfTest(unittest.TestCase):
+    def test_percentile_nearest_rank(self):
+        self.assertEqual(perf_command_reply.percentile([1.5], 95), 1.5)
+        self.assertEqual(perf_command_reply.percentile([3.0, 1.0, 2.0, 4.0], 50), 2.0)
+        self.assertEqual(perf_command_reply.percentile([0.5, 0.7, 0.9, 1.1, 1.8], 95), 1.8)
+        self.assertEqual(perf_command_reply.percentile([0.5, 1.5], 0), 0.5)
+        self.assertEqual(perf_command_reply.percentile([0.5, 1.5], 100), 1.5)
+        with self.assertRaises(ValueError):
+            perf_command_reply.percentile([], 95)
+
+    def test_discovered_as_perf_case(self):
+        cases = testing.discover("perf")
+        self.assertIn("command_reply", cases)
+        mod = cases["command_reply"]
+        self.assertEqual(mod.TEST_CONFIG, "humanparty")
+        self.assertEqual(mod.REPLY_P95_LIMIT_S, 2.0)
 
 
 if __name__ == "__main__":

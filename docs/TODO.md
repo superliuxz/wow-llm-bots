@@ -41,14 +41,20 @@ Guild Wars heroes):
   2. **Late heals (done):** `heal_reaction` e2e (`e2e_group.py`) + `llmtest sethp` measures 3
      in-combat tank drops to 45% HP against a 1500 ms budget; fixed grouped healers restoring
      their exclusive heal strategy and keeping `-threat`.
-  3. **Carrying the human (not done):** nothing limits bots' share of the work. Measure it in
-     the human-party e2e (bots' share of damage/kills while the human plays) and decide a target.
-  4. **Command reply speed (partial):** commands apply in the harness at once, but the LLM chat
-     reply after one isn't gated. Perf: p95 from a party command to the bot's reply <= 2 s.
+  3. **Carrying the human (done):** `human_party` e2e (`e2e_group.py`) + `killing_blow` trace
+     event + `llmtest spawnmob` has Allyone fight 3 Kobold Vermin alongside 3 bots, logs per-member
+     damage and killing blows via `wlblib.trace.summarize_combat_share` (measured ~77% bot damage
+     share in a 1-human + 3-bot party), and enforces bot damage share <= 85% (human >= 15%).
+  4. **Command reply speed (done):** `perf command_reply` (`perf_command_reply.py`) measures
+     end-to-end latency from Allyone's party command to the bot's real LLM chat reply against a
+     p95 <= 2.0 s gate (plus decision p95 <= 2.0 s).
   5. **Last-second dodges (done):** `boss` e2e (`e2e_combat.py`) starts Loada inside Loken's 20 yd
      Lightning Nova radius and enforces >= 1000 ms remaining on the cast when clearing 20 yd.
-  6. **Chatter (partial, rules only):** no long-session check. Soak: count repeated, narrating
-     or sycophantic lines per hour (simple string checks plus an LLM judge) with a ceiling.
+  6. **Chatter (done):** `tools/bench/chatter_check.py` (`tools/wlb trace chatter`) scans soak
+     decision logs for repeated (exact/near-duplicate/catchphrase), narrating, and sycophantic
+     lines per bot-hour using deterministic checks plus an optional pluggable LLM judge, wired
+     into `soak_scorer.score_soak` (`chatter_bounded` gate) and `tools/wlb test soak` with a
+     configurable ceiling (`--max-chatter-per-hour`, `--chatter-llm-judge`).
 
 ## Next (multi-session depth & architecture)
 

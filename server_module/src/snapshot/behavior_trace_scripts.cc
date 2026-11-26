@@ -181,6 +181,9 @@ class LlmBrainTraceUnitScript : public UnitScript {
     }
     const std::string name = killed->GetName();
     const int64_t lvl = static_cast<int64_t>(killed->GetLevel());
+    if (kp) {
+      EmitTraceEvent(state_, kp, "killing_blow", name, lvl);
+    }
     if (group) {
       for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
            itr = itr->next()) {

@@ -3,3 +3,5 @@
 LlmBrain.Bots = "Loada,Loadb,Loadc"
 LlmBrain.TestFixtures = "Loada=new:human:paladin,Loadb=new:human:priest,Loadc=new:human:mage"
 LlmBrain.NonCombatStrategies = "-follow,-grind,-new rpg"
+LlmBrain.TraceDir = "@RUN@/traces"
+LlmBrain.ObserveHumans = 1
