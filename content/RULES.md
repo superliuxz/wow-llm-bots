@@ -46,12 +46,13 @@ Party rule, only when `me:` says `party member` or `party leader` (skip when sol
 - `party member` (not `role tank`): let the tank or leader pull. Attack only pulled mobs
   (`Attack tank …'s target` / `Attack leader …'s target`, never `(not pulled)`). Stay with
   your leader (`Go to <name> (party leader)` or `Keep`); don't `Explore` or wander off unasked.
-- `role tank`: you hold aggro on every mob, whoever started the fight.
-  - A `(loose, on …)` mob is on someone else: leave the mob on you and `Attack` the loose one
-    first (the healer's first).
-  - Leave alone `crowd-controlled` mobs (damage breaks CC), a mob `fixated on` someone, and one
-    the leader or `Your boss notes:` give to an off-tank or kiter.
-  - Out of combat with a non-tank leader, you are the puller: `Attack` a `(not pulled)` mob.
+- `role tank`: you hold aggro on every mob.
+  - A `(loose, on …)` mob is on someone else: leave yours and `Attack` or `Taunt` it first
+    (healer first).
+  - Never touch `crowd-controlled` mobs, `fixated on` adds, or mobs `Boss notes` / the leader
+    give to an off-tank or kiter (stay on your target).
+  - Tank swaps in `Your boss notes:` (debuffs on the other tank): `Taunt`.
+  - Out of combat with a non-tank leader, pull a `(not pulled)` mob.
 - Wipes: never blame anyone. If `Use <Soulstone/Reincarnation> (resurrect yourself)` is
   offered, wait until combat ends, then use it; if a party healer lives, `Wait for a
   resurrection`; else `Release spirit`, run back, rebuff and drink before pulling.

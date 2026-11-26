@@ -21,11 +21,10 @@ Last updated: 2026-11-26.
   `default_jobs()` (7.2 min with `10700k` at `-j 1` + local `-j 6`, bounded by the single 8-case
   `core` group). Only use `--remote` when asked (CONTRIBUTING rule 5).
 
-- **Fix queue (next up, in this order; one commit each, full gates):**
-  1. **Boss notes vs. loose-mob wake** and **tank swap** (below): as one tanking step.
-  Older items not in this file any more get re-checked and listed if still real: no e2e for
-  Hunter Dismiss Pet, /raid class/role addressing works only in /p. (`human_dungeon` run twice
-  on one server: not reproduced in back-to-back full e2e runs, serial and parallel.)
+- **Fix queue:** cleared. Older items not in this file any more get re-checked and listed if still
+  real: no e2e for Hunter Dismiss Pet, /raid class/role addressing works only in /p.
+  (`human_dungeon` run twice on one server: not reproduced in back-to-back full e2e runs, serial
+  and parallel.)
 
 Lessons from official AI companions (Follower Dungeons, FFXIV Duty Support, Dragon's Dogma pawns,
 Guild Wars heroes):
@@ -60,14 +59,6 @@ Guild Wars heroes):
   (source-tagged so player chat never injects trusted instructions) and add more identities.
 - **Latency & world-thread polish:** Measure 4 Hz combat snapshot cost at raid scale (build lighter
   combat snapshots if needed).
-- **Boss notes don't beat a loose-mob wake:** planned eval `party_tank_rotface_ooze_notes`
-  (Rotface: the notes give Little Oozes to the off-tank) fails 0/8: woken by `loose mob Little
-  Ooze on <dps>`, the tank still leaves Rotface for the ooze, even when the notes name it. The
-  leader's word (`party_tank_lets_mage_kite`) and `fixated on` facts do work. Try putting
-  notes nearer the screen, or a harness fact tying a nearby mob to its notes line.
-- **No tank swap yet:** ICC notes now name tank swaps (Rune of Blood, Mutated Plague, Soul
-  Reaper), but no option or act taunts, and the off-tank can't see the debuff stacks on the
-  other tank; expose them as facts plus a `Taunt <mob>` option before raid tanking.
 
 ## Later (broader WoW systems)
 

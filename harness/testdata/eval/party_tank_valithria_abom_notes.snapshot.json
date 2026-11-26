@@ -1,0 +1,293 @@
+{
+  "bot": "Loadaa",
+  "seq": 1,
+  "time_ms": 1794793317558,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x00000000000003B0",
+        "name": "Loadaa",
+        "kind": "PLAYER",
+        "level": 80,
+        "health_pct": 82.0,
+        "power_pct": 35.0,
+        "player": {
+          "class": "Warrior"
+        },
+        "group": {
+          "subgroup": 1,
+          "online": true,
+          "in_range": true,
+          "role": "TANK"
+        }
+      },
+      "gender": "MALE",
+      "xp": 0,
+      "xp_next": 0,
+      "health": 34440,
+      "health_max": 42000,
+      "power_type": "RAGE",
+      "power": 35,
+      "power_max": 100,
+      "state": "ALIVE",
+      "in_combat": true
+    },
+    "where": {
+      "map": "Icecrown Citadel",
+      "zone": "Icecrown Citadel",
+      "subzone": "The Frostwing Halls",
+      "position": {
+        "x": 4200.0,
+        "y": 2480.0,
+        "z": 365.0
+      },
+      "facing": 0.0,
+      "in_instance": true
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0xF1300011120000C1",
+          "name": "Risen Archmage",
+          "rel": {
+            "dist_yd": 3.0,
+            "dir": "N",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": 4200.0,
+              "y": 2483.0,
+              "z": 365.0
+            }
+          },
+          "kind": "NPC",
+          "level": 80,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "ELITE",
+          "health_pct": 58.0,
+          "looks_like": "undead",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "FIGHTING",
+            "with": "Loadaa"
+          },
+          "target": "Loadaa",
+          "targeting_me": true,
+          "threat_status": "THREAT_AGGRO"
+        },
+        {
+          "guid": "0xF1300011120000C2",
+          "name": "Gluttonous Abomination",
+          "rel": {
+            "dist_yd": 12.0,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": 4212.0,
+              "y": 2480.0,
+              "z": 365.0
+            }
+          },
+          "kind": "NPC",
+          "level": 80,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "ELITE",
+          "health_pct": 95.0,
+          "looks_like": "undead",
+          "size": "LARGE",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "FIGHTING",
+            "with": "Hele"
+          },
+          "target": "Hele"
+        }
+      ]
+    }
+  },
+  "ext": {
+    "party": {
+      "leader": "Hele",
+      "loot_method": "GROUP_LOOT",
+      "members": [
+        {
+          "guid": "0x0000000000000400",
+          "name": "Hele",
+          "kind": "PLAYER",
+          "level": 80,
+          "health_pct": 68.0,
+          "power_pct": 85.0,
+          "target": "",
+          "player": {
+            "class": "Priest"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": true,
+            "role": "HEALER",
+            "online": true,
+            "in_range": true,
+            "aggro": true
+          },
+          "rel": {
+            "dist_yd": 11.0,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x0000000000000410",
+          "name": "Loadc",
+          "kind": "PLAYER",
+          "level": 80,
+          "health_pct": 100.0,
+          "power_pct": 90.0,
+          "target": "Risen Archmage",
+          "player": {
+            "class": "Mage"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "DPS",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 14.0,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x0000000000000420",
+          "name": "Loadf",
+          "kind": "PLAYER",
+          "level": 80,
+          "health_pct": 100.0,
+          "power_pct": 95.0,
+          "target": "",
+          "player": {
+            "class": "Paladin"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "TANK",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 18.0,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        }
+      ]
+    },
+    "target": {
+      "target": {
+        "guid": "0xF1300011120000C1",
+        "name": "Risen Archmage",
+        "rel": {
+          "dist_yd": 3.0,
+          "dir": "N",
+          "height": "LEVEL",
+          "in_los": true,
+          "position": {
+            "x": 4200.0,
+            "y": 2483.0,
+            "z": 365.0
+          }
+        },
+        "kind": "NPC",
+        "level": 80,
+        "level_color": "YELLOW",
+        "reaction": "HOSTILE",
+        "classification": "ELITE",
+        "health_pct": 58.0,
+        "looks_like": "undead",
+        "size": "MEDIUM",
+        "detail": "NAMEPLATE",
+        "activity": {
+          "state": "FIGHTING",
+          "with": "Loadaa"
+        },
+        "target": "Loadaa",
+        "targeting_me": true,
+        "threat_status": "THREAT_AGGRO"
+      }
+    },
+    "combat": {
+      "attackers": [
+        {
+          "guid": "0xF1300011120000C1",
+          "name": "Risen Archmage",
+          "rel": {
+            "dist_yd": 3.0,
+            "dir": "N",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": 4200.0,
+              "y": 2483.0,
+              "z": 365.0
+            }
+          },
+          "kind": "NPC",
+          "level": 80,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "ELITE",
+          "health_pct": 58.0,
+          "looks_like": "undead",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "FIGHTING",
+            "with": "Loadaa"
+          },
+          "target": "Loadaa",
+          "targeting_me": true,
+          "threat_status": "THREAT_AGGRO"
+        }
+      ]
+    }
+  },
+  "options": [
+    {
+      "text": "Attack Risen Archmage",
+      "guid": "0xF1300011120000C1",
+      "kind": "ATTACK",
+      "name": "Risen Archmage"
+    },
+    {
+      "text": "Attack Gluttonous Abomination",
+      "guid": "0xF1300011120000C2",
+      "kind": "ATTACK",
+      "name": "Gluttonous Abomination"
+    },
+    {
+      "text": "Taunt Gluttonous Abomination",
+      "guid": "taunt:355:0xF1300011120000C2",
+      "kind": "USE",
+      "name": "Taunt Gluttonous Abomination"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
+}

@@ -41,6 +41,10 @@ ActStartResult ExecuteCrowdControlAction(Player* bot,
                                          const CrowdControlAction& action,
                                          base::TimeTicks now,
                                          ActiveAct* out_active);
+ActStartResult ExecuteTauntAction(Player* bot,
+                                  const TauntAction& action,
+                                  base::TimeTicks now,
+                                  ActiveAct* out_active);
 ActionOutcome ExecutePopupAnswerAction(Player* bot,
                                        const PopupAnswerAction& action);
 // Opens, fills, accepts or cancels the trade window through the client's

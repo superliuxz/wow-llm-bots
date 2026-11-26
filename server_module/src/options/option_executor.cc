@@ -189,6 +189,18 @@ ExecuteResult ExecuteAction(Player* bot,
                   .used = res.done,
                   .info = res.done ? a.label : "",
                   .act_started = started};
+        } else if constexpr (std::is_same_v<T, TauntAction>) {
+          ActiveAct scratch;
+          ActiveAct* out =
+              (ctx && ctx->out_active_act) ? ctx->out_active_act : &scratch;
+          const base::TimeTicks now =
+              (ctx && !ctx->now.is_null()) ? ctx->now : base::TimeTicks::Now();
+          ActStartResult res = ExecuteTauntAction(bot, a, now, out);
+          const bool started = !res.done && res.error.empty();
+          return {.error = std::move(res.error),
+                  .used = res.done,
+                  .info = res.done ? a.label : "",
+                  .act_started = started};
         } else if constexpr (std::is_same_v<T, FollowLeaderAction>) {
           return FromOutcome(ExecuteFollowLeaderAction(bot, a));
         } else if constexpr (std::is_same_v<T, MarkTargetAction>) {

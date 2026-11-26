@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <flat_map>
 #include <flat_set>
 #include <optional>
 #include <string>
@@ -461,6 +462,13 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
   // not matter. Only the fact; the brain picks what to do.
   std::flat_set<std::string> loose_mobs;
   std::vector<std::pair<std::string, std::string>> new_loose;  // (mob, on)
+  std::flat_map<std::string, uint32_t> tank_debuffs;
+  struct TankDebuffEvent {
+    std::string tank;
+    std::string debuff;
+    uint32_t stacks = 1;
+  };
+  std::vector<TankDebuffEvent> new_tank_debuffs;
   const std::optional<pb::GroupPart>& my_group = self.unit.group;
   if (snapshot.ext.party && my_group &&
       (my_group->role == pb::TANK || my_group->main_tank)) {
@@ -469,6 +477,26 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
       if (!m.name.empty() && m.name != snapshot.bot &&
           !(m.group && (m.group->role == pb::TANK || m.group->main_tank))) {
         others.insert(m.name);
+      }
+      if (!m.name.empty() && m.name != snapshot.bot && !m.dead && m.group &&
+          m.group->online &&
+          (m.group->role == pb::TANK || m.group->main_tank)) {
+        for (const pb::Aura& a : m.auras) {
+          if (!a.harmful || a.name.empty() || a.id == 71041 ||
+              a.name == "Dungeon Deserter") {
+            continue;
+          }
+          const uint32_t stacks = std::max<uint32_t>(1, a.stacks);
+          const std::string key = base::StrCat({m.name, "|", a.name});
+          auto [it, inserted] = tank_debuffs.emplace(key, stacks);
+          if (!inserted && stacks > it->second) {
+            it->second = stacks;
+          }
+          const auto prev = prev_tank_debuffs_.find(key);
+          if (prev == prev_tank_debuffs_.end() || stacks > prev->second) {
+            new_tank_debuffs.push_back({m.name, a.name, stacks});
+          }
+        }
       }
     }
     for (const pb::Unit& u : snapshot.base.nearby.units) {
@@ -491,6 +519,13 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
           {Urgency::kP1Danger,
            base::StrCat({"loose mob ", mob.empty() ? "?" : mob, " on ", on}),
            kWakeParty});
+    }
+    for (const TankDebuffEvent& ev : new_tank_debuffs) {
+      std::string reason = base::StrCat({"tank ", ev.tank, " has ", ev.debuff});
+      if (ev.stacks > 1) {
+        base::StrAppend(&reason, {" x", base::NumberToString(ev.stacks)});
+      }
+      Consider(&chosen, {Urgency::kP1Danger, std::move(reason), kWakeParty});
     }
     for (const std::string& name : dead_members) {
       if (!prev_dead_members_.contains(name)) {
@@ -637,6 +672,7 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
   prev_critical_members_ = std::move(critical_members);
   prev_online_members_ = std::move(online_members);
   prev_loose_mobs_ = std::move(loose_mobs);
+  prev_tank_debuffs_ = std::move(tank_debuffs);
   prev_spell_miss_ = miss;
   return chosen;
 }

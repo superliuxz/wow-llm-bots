@@ -500,5 +500,72 @@ TEST(PromptTest, ASpellMissOutlivesSceneryUnderTightBudget) {
   EXPECT_NE(req.user.find("  2. Keep doing what I'm doing"), std::string::npos);
 }
 
+TEST(PromptTest, BossNotesForNearbyMobsAppearNearScreenAndPreserveKvPrefix) {
+  PromptInput input = SampleInput();
+  input.rules = std::string(7800, 'R');
+  input.bot_name = "Loadaa";
+  input.wake_reason = "loose mob Little Ooze on Loadc";
+  input.notes =
+      "# Icecrown Citadel — Rotface\n"
+      "- **Mutated Infection**: a player is infected and spawns a **Little "
+      "Ooze** that attacks them; the off-tank picks up the Little Oozes and "
+      "kites them together, while the tank on Rotface never leaves him.\n"
+      "- **Unstable Ooze Explosion**: cast by Big Ooze; move out immediately.";
+
+  Screen screen;
+  screen.text =
+      "me: Loadaa, level 80 Warrior, role tank; in combat\n"
+      "around me:\n"
+      "  1. Attack Rotface: hostile\n"
+      "  2. Attack Little Ooze (loose, on Loadc): hostile\n"
+      "also:\n  3. Keep doing what I'm doing";
+  screen.options = {OptionKind::kAttack, OptionKind::kAttack,
+                    OptionKind::kKeep};
+  screen.details = {{OptionKind::kAttack, "0x1", "Rotface"},
+                    {OptionKind::kAttack, "0x2", "Little Ooze"},
+                    {OptionKind::kKeep, "", ""}};
+
+  const LlmRequest req = BuildPlanRequest(input, screen);
+  const size_t notes_pos = req.user.find("Your boss notes:\n");
+  const size_t woken_pos = req.user.find("Woken: loose mob Little Ooze");
+  const size_t mob_notes_pos = req.user.find("Boss notes for mobs here:\n");
+  const size_t screen_pos = req.user.find("Your screen now:\n");
+  ASSERT_NE(notes_pos, std::string::npos);
+  ASSERT_NE(woken_pos, std::string::npos);
+  ASSERT_NE(mob_notes_pos, std::string::npos);
+  ASSERT_NE(screen_pos, std::string::npos);
+  // Static notes stay before Woken (KV cache), while the mob-specific reminder
+  // sits right after the live screen (immediately before generation).
+  EXPECT_LT(notes_pos, woken_pos);
+  EXPECT_LT(woken_pos, screen_pos);
+  EXPECT_LT(screen_pos, mob_notes_pos);
+  const std::string mob_section = req.user.substr(mob_notes_pos);
+  EXPECT_NE(mob_section.find("option 2 (Little Ooze):"), std::string::npos);
+  EXPECT_NE(mob_section.find("off-tank picks up the Little Oozes"),
+            std::string::npos);
+  // Unmatched mobs (Big Ooze) are not repeated in the mob reminder.
+  EXPECT_EQ(mob_section.find("Unstable Ooze Explosion"), std::string::npos);
+
+  // InspectPrompt headroom stays comfortably within the 4,096-token slot.
+  const PromptBreakdown b = InspectPrompt(input, screen);
+  EXPECT_LE(b.est_total_tokens + static_cast<size_t>(req.max_tokens), 4096u);
+
+  // Adversarial counter-test: an un-noted loose mob gets NO mob-notes block.
+  PromptInput unnoted = input;
+  unnoted.wake_reason = "loose mob Searing Blade Cultist on Hele";
+  Screen unnoted_screen;
+  unnoted_screen.text =
+      "me: Loadaa, role tank\naround me:\n"
+      "  1. Attack Searing Blade Cultist (loose, on Hele)\n"
+      "also:\n  2. Keep doing what I'm doing";
+  unnoted_screen.options = {OptionKind::kAttack, OptionKind::kKeep};
+  unnoted_screen.details = {
+      {OptionKind::kAttack, "0x3", "Searing Blade Cultist"},
+      {OptionKind::kKeep, "", ""}};
+  const LlmRequest unnoted_req = BuildPlanRequest(unnoted, unnoted_screen);
+  EXPECT_EQ(unnoted_req.user.find("Boss notes for mobs here:"),
+            std::string::npos);
+}
+
 }  // namespace
 }  // namespace harness

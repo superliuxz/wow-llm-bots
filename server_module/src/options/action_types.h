@@ -129,6 +129,13 @@ struct CrowdControlAction {
   std::string label;
 };
 
+// Casts a single-target taunt spell on an enemy (M5.1).
+struct TauntAction {
+  uint32_t spell_id = 0;
+  std::string target_guid;
+  std::string label;
+};
+
 // Answers a summon or a Dungeon Finder kick vote (Now #3).
 struct PopupAnswerAction {
   enum class Kind : uint8_t { kSummon, kBootVote };
@@ -227,6 +234,7 @@ using BotAction = std::variant<KeepAction,
                                PopupAnswerAction,
                                TradeAction,
                                CrowdControlAction,
+                               TauntAction,
                                FollowLeaderAction,
                                MarkTargetAction,
                                MountAction,

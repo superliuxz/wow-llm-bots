@@ -710,6 +710,49 @@ void CollectGroupAndUpkeepActions(Player* bot,
     }
   }
 
+  // 6b. Single-target Taunt on an enemy targeting someone else (M5.1: tank
+  //     swaps and loose mobs). Discovered generically via SPELL_AURA_MOD_TAUNT
+  //     + TARGET_UNIT_TARGET_ENEMY; prefers shortest cooldown (e.g. Dark
+  //     Command over Death Grip, Taunt over Mocking Blow).
+  if (bot->IsAlive() && bot->GetGroup() &&
+      !BotManager::GetGroupPolicy(bot).not_tank &&
+      snapshot.base.self.unit.group &&
+      (snapshot.base.self.unit.group->role == pb::TANK ||
+       snapshot.base.self.unit.group->main_tank)) {
+    const SpellInfo* best_taunt = nullptr;
+    uint32_t best_cd_ms = 0;
+    for (const auto& [spell_id, state] : bot->GetSpellMap()) {
+      if (!state || !state->Active || state->State == PLAYERSPELL_REMOVED) {
+        continue;
+      }
+      const SpellInfo* info = sSpellMgr->GetSpellInfo(spell_id);
+      if (!info || !info->HasAura(SPELL_AURA_MOD_TAUNT) ||
+          bot->HasSpellCooldown(info->Id)) {
+        continue;
+      }
+      bool targets_enemy = false;
+      for (uint8_t i = 0; i < MAX_SPELL_EFFECTS; ++i) {
+        if (info->Effects[i].TargetA.GetTarget() == TARGET_UNIT_TARGET_ENEMY) {
+          targets_enemy = true;
+          break;
+        }
+      }
+      if (!targets_enemy) {
+        continue;
+      }
+      const uint32_t cd_ms =
+          std::max(info->RecoveryTime, info->CategoryRecoveryTime);
+      if (!best_taunt || cd_ms < best_cd_ms ||
+          (cd_ms == best_cd_ms && info->GetRank() > best_taunt->GetRank())) {
+        best_taunt = info;
+        best_cd_ms = cd_ms;
+      }
+    }
+    if (best_taunt) {
+      CollectTauntActions(snapshot, best_taunt->Id, /*not_tank=*/false, out);
+    }
+  }
+
   // 7. Mount.
   if (bot->IsAlive() && !bot->IsInCombat() && !bot->IsMounted() &&
       bot->GetMap() && !bot->GetMap()->IsDungeon() && bot->IsOutdoors()) {
@@ -1135,6 +1178,25 @@ ActStartResult ExecuteCrowdControlAction(Player* bot,
   // The same physics as `act: use`: stealth first for a stealth-only spell,
   // walk into range and sight, hold still while casting (CMSG_CAST_SPELL on
   // the target, like a player's click).
+  return StartSpellUseOn(bot, /*command_id=*/0, spell, target, now, out_active);
+}
+
+ActStartResult ExecuteTauntAction(Player* bot,
+                                  const TauntAction& action,
+                                  base::TimeTicks now,
+                                  ActiveAct* out_active) {
+  const SpellInfo* spell = sSpellMgr->GetSpellInfo(action.spell_id);
+  Unit* target =
+      ObjectAccessor::GetUnit(*bot, ParseSnapshotGuid(action.target_guid));
+  if (!spell || !bot->HasSpell(action.spell_id)) {
+    return {.error = "you don't know that spell"};
+  }
+  if (!target || !target->IsAlive() || !bot->IsValidAttackTarget(target)) {
+    return {.error = "no target to taunt"};
+  }
+  if (bot->HasSpellCooldown(spell->Id)) {
+    return {.error = action.label + " is on cooldown"};
+  }
   return StartSpellUseOn(bot, /*command_id=*/0, spell, target, now, out_active);
 }
 

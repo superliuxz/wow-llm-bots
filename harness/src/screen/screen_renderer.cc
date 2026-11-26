@@ -560,6 +560,25 @@ bool IsSelfPartyLeader(const pb::Snapshot& snapshot) {
   return false;
 }
 
+std::string FormatAuraText(const pb::Aura& aura) {
+  std::string text = aura.name;
+  if (aura.stacks > 1) {
+    base::StrAppend(&text, {" x", base::NumberToString(aura.stacks)});
+  }
+  if (aura.remaining_s) {
+    const float secs = Finite(*aura.remaining_s);
+    if (secs > 0.0f) {
+      const int rounded = static_cast<int>(std::lround(secs));
+      base::StrAppend(&text,
+                      {" (",
+                       rounded >= 60 ? base::NumberToString(rounded / 60) + "m"
+                                     : base::NumberToString(rounded) + "s",
+                       ")"});
+    }
+  }
+  return text;
+}
+
 std::string SelfLine(const pb::Self& s, bool party_leader, bool party_member) {
   std::vector<std::string> who;
   who.push_back(
@@ -636,22 +655,7 @@ std::string SelfLine(const pb::Self& s, bool party_leader, bool party_member) {
       if (aura.name.empty()) {
         continue;
       }
-      std::string text = aura.name;
-      if (aura.stacks > 1) {
-        base::StrAppend(&text, {" x", base::NumberToString(aura.stacks)});
-      }
-      if (aura.remaining_s) {
-        const float secs = Finite(*aura.remaining_s);
-        if (secs > 0.0f) {
-          const int rounded = static_cast<int>(std::lround(secs));
-          base::StrAppend(
-              &text, {" (",
-                      rounded >= 60 ? base::NumberToString(rounded / 60) + "m"
-                                    : base::NumberToString(rounded) + "s",
-                      ")"});
-        }
-      }
-      (aura.harmful ? debuffs : buffs).push_back(std::move(text));
+      (aura.harmful ? debuffs : buffs).push_back(FormatAuraText(aura));
     }
     if (!buffs.empty()) {
       bits.push_back(base::StrCat({"buffs: ", base::JoinString(buffs, ", ")}));
@@ -858,6 +862,21 @@ std::string MemberLine(const pb::Unit& u, bool around_me, bool leader) {
   AddPercent(&bits, u.power_pct, "power");
   if (!u.target.empty()) {
     bits.push_back(base::StrCat({"target ", u.target}));
+  }
+  if (!u.dead && u.group && (u.group->role == pb::TANK || u.group->main_tank) &&
+      !u.auras.empty()) {
+    std::vector<std::string> debuffs;
+    for (const pb::Aura& aura : u.auras) {
+      if (!aura.harmful || aura.name.empty() || aura.id == 71041 ||
+          aura.name == "Dungeon Deserter") {
+        continue;
+      }
+      debuffs.push_back(FormatAuraText(aura));
+    }
+    if (!debuffs.empty()) {
+      bits.push_back(
+          base::StrCat({"debuffs: ", base::JoinString(debuffs, ", ")}));
+    }
   }
   return NamedLine(u.name, base::JoinString(bits, ", "),
                    around_me ? "" : UnitWhere(u));

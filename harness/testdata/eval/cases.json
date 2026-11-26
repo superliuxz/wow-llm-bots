@@ -952,15 +952,38 @@
     "source": "built from party_tank_takes_add_off_dps (tank exceptions, boss notes)",
     "reason": "loose mob Little Ooze on Loadc",
     "summary": "in Icecrown Citadel, on Rotface: the bot tank holds Rotface; a Little Ooze spawned on the mage Loadc; the paladin Loadf is the off-tank; boss notes give Little Oozes to the off-tank",
-    "rule": "by the boss notes the tank stays on Rotface and never takes the Little Ooze (planned: the brain still takes the ooze 0/8 at T=0.7; boss notes don't yet beat a loose-mob wake, see docs/TODO.md)",
+    "rule": "by the boss notes the tank stays on Rotface (Attack it or Keep) and never takes the Little Ooze",
     "notes": "# Icecrown Citadel — Rotface\n- **Mutated Infection**: a player is infected and spawns a **Little Ooze** that attacks them; the off-tank picks up the Little Oozes and kites them together, while the tank on Rotface never leaves him.\n- **Unstable Ooze Explosion**: cast by Big Ooze; move out immediately and return once safe.",
     "first_options": [
-      1
+      1,
+      3
     ],
     "forbid_options": [
       2
-    ],
-    "planned": true
+    ]
+  },
+  {
+    "name": "party_tank_putricide_tank_swap",
+    "source": "built (M5.2 tank swap)",
+    "reason": "tank Loadaa has Mutated Plague x4",
+    "summary": "in Icecrown Citadel, on Professor Putricide: the bot off-tank Loadf sees main tank Loadaa at 4 stacks of Mutated Plague; ICC boss notes call for a tank swap at 3-4 stacks",
+    "rule": "the off-tank taunts Professor Putricide (option 3)",
+    "notes": "# Icecrown Citadel — Professor Putricide\n- **Mutated Plague**: stacks on the current tank; the other tank taunts at 3-4 stacks (tank swap).\n- **Slime Puddle**: ground hazard; move out immediately.\n- **Volatile Ooze**: priority add; switch and burn promptly.",
+    "first_options": [
+      3
+    ]
+  },
+  {
+    "name": "party_tank_valithria_abom_notes",
+    "source": "built (M5.2 adversarial boss-notes loose-mob check)",
+    "reason": "loose mob Gluttonous Abomination on Hele",
+    "summary": "in Icecrown Citadel, on Valithria Dreamwalker: the bot tank holds a Risen Archmage; a Gluttonous Abomination is loose on healer Hele; boss notes exclude Blistering Zombie but assign Gluttonous Abomination to tanks",
+    "rule": "notes do not assign Gluttonous Abomination elsewhere, so the tank picks it up off Hele first (Attack or Taunt)",
+    "notes": "# Icecrown Citadel — Valithria Dreamwalker\n- **Blistering Zombie**: fixates on a player and explodes in melee; that player kites it while ranged kill it. Tanks never pick it up.\n- **Gluttonous Abomination**, **Risen Archmage**: tanks pick these up.",
+    "first_options": [
+      2,
+      3
+    ]
   },
   {
     "name": "roll_need_usable_upgrade",

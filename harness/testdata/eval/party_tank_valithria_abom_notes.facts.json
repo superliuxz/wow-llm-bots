@@ -1,0 +1,12 @@
+{
+  "has_food": true,
+  "has_drink": true,
+  "spots": [],
+  "places": [],
+  "group_and_upkeep_actions": [
+    {
+      "guid": "taunt:355:0xF1300011120000C2",
+      "label": "Taunt Gluttonous Abomination"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "has_food": true,
+  "has_drink": true,
+  "spots": [],
+  "places": [],
+  "group_and_upkeep_actions": [
+    {
+      "guid": "taunt:62124:0xF1300011110000B1",
+      "label": "Taunt Professor Putricide"
+    }
+  ]
+}

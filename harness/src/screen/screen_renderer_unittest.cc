@@ -3,8 +3,10 @@
 #include "screen/screen_renderer.h"
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <limits>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1353,6 +1355,78 @@ TEST(ScreenRendererTest, SpellMissShowsOnCasterScreenWithAndWithoutTarget) {
   // Missing spell or reason is never rendered.
   miss.reason.clear();
   EXPECT_EQ(RenderScreen(snapshot).text.find("missed:"), std::string::npos);
+}
+
+TEST(ScreenRendererTest, TankDebuffsShowOnPartyTankLineAndNotNonTanks) {
+  pb::Snapshot snap = NewSnapshot();
+  snap.bot = "Offtank";
+  snap.base.self.unit.name = "Offtank";
+  snap.base.self.unit.group.emplace().role = pb::TANK;
+  snap.base.self.in_combat = true;
+
+  pb::Party& party = snap.ext.party.emplace();
+  party.leader = "Hele";
+
+  pb::Unit& mt = party.members.emplace_back();
+  mt.guid = "0x10";
+  mt.name = "MainTank";
+  mt.kind = pb::Unit::PLAYER;
+  mt.player.emplace().class_ = "Paladin";
+  mt.health_pct = 82.0f;
+  mt.target = "Professor Putricide";
+  mt.group.emplace().role = pb::TANK;
+  mt.group->online = true;
+  mt.group->in_range = true;
+  mt.group->aggro = true;
+  auto make_aura = [](uint32_t id, std::string name, bool harmful,
+                      std::optional<float> remaining_s = std::nullopt,
+                      uint32_t stacks = 0) {
+    pb::Aura a;
+    a.id = id;
+    a.name = std::move(name);
+    a.harmful = harmful;
+    a.remaining_s = remaining_s;
+    a.stacks = stacks;
+    return a;
+  };
+  // Harmful stacking debuff + single-stack debuff + positive buff + deserter.
+  mt.auras.push_back(make_aura(72451, "Mutated Plague", true, 10.0f, 3));
+  mt.auras.push_back(make_aura(72410, "Rune of Blood", true, 18.0f, 0));
+  mt.auras.push_back(make_aura(25898, "Greater Blessing of Kings", false));
+  mt.auras.push_back(make_aura(71041, "Dungeon Deserter", true));
+
+  pb::Unit& dps = party.members.emplace_back();
+  dps.guid = "0x11";
+  dps.name = "Mage1";
+  dps.kind = pb::Unit::PLAYER;
+  dps.player.emplace().class_ = "Mage";
+  dps.health_pct = 90.0f;
+  dps.group.emplace().role = pb::DPS;
+  dps.group->online = true;
+  dps.group->in_range = true;
+  dps.auras.push_back(make_aura(72451, "Mutated Plague", true, 10.0f, 2));
+
+  const Screen screen = RenderScreen(snap);
+  EXPECT_NE(screen.text.find(
+                "MainTank: paladin, tank, has aggro, health 82%, "
+                "target Professor Putricide, debuffs: Mutated Plague x3 (10s), "
+                "Rune of Blood (18s)"),
+            std::string::npos)
+      << screen.text;
+  // Positive buffs and Dungeon Deserter stay out of tank `debuffs:`.
+  EXPECT_EQ(screen.text.find("Greater Blessing of Kings"), std::string::npos);
+  // Non-tank debuffs are not rendered on their party line.
+  const size_t mage_pos = screen.text.find("Mage1");
+  ASSERT_NE(mage_pos, std::string::npos);
+  const size_t mage_eol = screen.text.find('\n', mage_pos);
+  const std::string mage_line =
+      screen.text.substr(mage_pos, mage_eol - mage_pos);
+  EXPECT_EQ(mage_line.find("debuffs:"), std::string::npos) << mage_line;
+
+  // Dead tank: no debuffs shown.
+  snap.ext.party->members[0].dead = true;
+  EXPECT_EQ(RenderScreen(snap).text.find("debuffs: Mutated Plague"),
+            std::string::npos);
 }
 
 }  // namespace

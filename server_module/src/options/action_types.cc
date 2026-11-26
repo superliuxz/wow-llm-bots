@@ -68,6 +68,16 @@ BotAction DecodeOptionFactAction(std::string_view guid,
     }
     return CrowdControlAction{spell, std::string(parts[2]), std::string(label)};
   }
+  if (guid.starts_with("taunt:")) {
+    const std::vector<std::string_view> parts = base::SplitStringPiece(
+        guid, ":", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+    uint32_t spell = 0;
+    if (parts.size() != 3 || !ParseUint32(parts[1], &spell) || spell == 0 ||
+        parts[2].empty()) {
+      return InvalidAction{"invalid taunt"};
+    }
+    return TauntAction{spell, std::string(parts[2]), std::string(label)};
+  }
   if (guid == "popups:auto") {
     return GroupPolicyAction{GroupPolicyAction::Op::kAutoPopups};
   }
@@ -410,6 +420,8 @@ std::string_view ActionKindName(const BotAction& action) {
           return "trade";
         if constexpr (std::is_same_v<T, CrowdControlAction>)
           return "crowd_control";
+        if constexpr (std::is_same_v<T, TauntAction>)
+          return "taunt";
         if constexpr (std::is_same_v<T, FollowLeaderAction>)
           return "follow";
         if constexpr (std::is_same_v<T, MarkTargetAction>)

@@ -36,6 +36,7 @@ constexpr size_t kMaxIdentityBytes = 900;
 constexpr size_t kMaxMemoryBytes = 900;
 constexpr size_t kMaxRecentEventsBytes = 700;
 constexpr size_t kMaxActiveOrdersBytes = 700;
+constexpr size_t kMaxMobNotesBytes = 600;
 constexpr size_t kMaxEventLineBytes = 180;
 constexpr size_t kMaxInlineFieldBytes = 200;
 constexpr int kDefaultPlanMaxTokens = 150;
@@ -291,6 +292,102 @@ bool ContainsIgnoreCase(std::string_view haystack, std::string_view needle) {
     }
   }
   return false;
+}
+
+// Ties nearby living mobs (and any mob named in a `loose mob <X> on <Y>` wake)
+// to bullet lines in `notes` that mention them, so the brain sees the relevant
+// boss-note line right beside the live screen without disturbing the static
+// KV-cache prefix. Pure string matching; no gameplay judgments.
+std::string FormatMobNotesBlock(std::string_view notes,
+                                const Screen& screen,
+                                std::string_view wake_reason,
+                                size_t budget) {
+  constexpr std::string_view kHeader = "\n\nBoss notes for mobs here:";
+  if (notes.empty() || budget <= kHeader.size() + 16) {
+    return "";
+  }
+  struct MobRef {
+    std::string_view name;
+    size_t option_index = 0;  // 1-based option number when present on screen.
+  };
+  std::vector<MobRef> mobs;
+  const auto add_mob = [&](std::string_view name, size_t opt_idx) {
+    name = base::TrimWhitespaceASCII(name, base::TRIM_ALL);
+    if (name.size() < 4) {
+      return;
+    }
+    for (MobRef& existing : mobs) {
+      if (base::EqualsCaseInsensitiveASCII(existing.name, name)) {
+        if (existing.option_index == 0 && opt_idx != 0) {
+          existing.option_index = opt_idx;
+        }
+        return;
+      }
+    }
+    mobs.push_back({name, opt_idx});
+  };
+  constexpr std::string_view kLoosePrefix = "loose mob ";
+  if (const size_t pos = wake_reason.find(kLoosePrefix);
+      pos != std::string_view::npos) {
+    const std::string_view rest = wake_reason.substr(pos + kLoosePrefix.size());
+    const size_t on_pos = rest.find(" on ");
+    if (on_pos != std::string_view::npos) {
+      add_mob(rest.substr(0, on_pos), 0);
+    }
+  }
+  for (size_t i = 0; i < screen.details.size(); ++i) {
+    const ScreenOption& opt = screen.details[i];
+    if (opt.kind == OptionKind::kAttack && !opt.name.empty()) {
+      add_mob(opt.name, i + 1);
+    }
+  }
+  if (mobs.empty()) {
+    return "";
+  }
+  std::vector<std::string_view> bullet_lines;
+  size_t pos = 0;
+  while (pos <= notes.size()) {
+    const size_t nl = notes.find('\n', pos);
+    const std::string_view raw = (nl == std::string_view::npos)
+                                     ? notes.substr(pos)
+                                     : notes.substr(pos, nl - pos);
+    const std::string_view trimmed =
+        base::TrimWhitespaceASCII(raw, base::TRIM_ALL);
+    if (trimmed.starts_with("- ") || trimmed.starts_with("* ")) {
+      bullet_lines.push_back(trimmed.substr(2));
+    }
+    if (nl == std::string_view::npos) {
+      break;
+    }
+    pos = nl + 1;
+  }
+  if (bullet_lines.empty()) {
+    return "";
+  }
+  std::vector<bool> used_bullet(bullet_lines.size(), false);
+  std::string out(kHeader);
+  bool added = false;
+  for (const MobRef& mob : mobs) {
+    for (size_t i = 0; i < bullet_lines.size(); ++i) {
+      if (used_bullet[i] || !ContainsIgnoreCase(bullet_lines[i], mob.name)) {
+        continue;
+      }
+      const std::string label =
+          mob.option_index > 0
+              ? base::StrCat({"option ", std::to_string(mob.option_index), " (",
+                              mob.name, ")"})
+              : std::string(mob.name);
+      const std::string line =
+          base::StrCat({"\n- ", label, ": ", OneLine(bullet_lines[i])});
+      if (out.size() + line.size() > budget) {
+        continue;
+      }
+      out.append(line);
+      used_bullet[i] = true;
+      added = true;
+    }
+  }
+  return added ? out : "";
 }
 
 constexpr std::string_view kEarlierSummaryHeading = "## Earlier summary";
@@ -891,16 +988,25 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
     }
   }
 
+  std::string mob_notes_block =
+      FormatMobNotesBlock(input.notes, screen, input.wake_reason,
+                          std::min(kMaxMobNotesBytes, remaining));
+  if (!mob_notes_block.empty()) {
+    remaining -= mob_notes_block.size();
+  }
+
   // Static prefix first (`name`, `identity`, `memory`, `notes`, `knowledge`)
   // then dynamic per-wake fields (`goal`, `outcome`, `woken`, `events`,
-  // `active_orders`, `relationships`, `remembered`) then live screen for
+  // `active_orders`, `relationships`, `remembered`), live screen, and
+  // mob-specific boss-note reminder last (right before generation) for
   // llama.cpp KV-cache prefix reuse.
   const std::string dynamic_prefix =
       base::StrCat({"\n\n", goal_line, outcome_line, woken_line, events_block,
                     orders_block});
-  request.user = base::StrCat(
-      {name_line, identity_block, memory_block, notes_block, knowledge_block,
-       dynamic_prefix, relationships_block, remembered_block, screen_block});
+  request.user =
+      base::StrCat({name_line, identity_block, memory_block, notes_block,
+                    knowledge_block, dynamic_prefix, relationships_block,
+                    remembered_block, screen_block, mob_notes_block});
   if (request.user.size() > max_user_bytes) {
     request.user = CapUserPreservingAlso(request.user, max_user_bytes);
   }

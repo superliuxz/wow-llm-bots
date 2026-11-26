@@ -44,6 +44,23 @@ TEST(ActionTypesTest, DecodesTypedNpcAndGroupActions) {
         DecodeOptionFactAction("cc:0:0xF130", "bad")));
   }
   {
+    BotAction a = DecodeOptionFactAction("taunt:355:0xF130",
+                                         "Taunt Deathbringer Saurfang");
+    const auto* taunt = std::get_if<TauntAction>(&a);
+    ASSERT_NE(taunt, nullptr);
+    EXPECT_EQ(taunt->spell_id, 355u);
+    EXPECT_EQ(taunt->target_guid, "0xF130");
+    EXPECT_EQ(taunt->label, "Taunt Deathbringer Saurfang");
+    EXPECT_EQ(ActionKindName(a), "taunt");
+    EXPECT_FALSE(IsDeadAllowedAction(a));
+    for (const char* bad :
+         {"taunt:0:0xF130", "taunt:355:", "taunt:bad:0xF130", "taunt:355"}) {
+      EXPECT_TRUE(std::holds_alternative<InvalidAction>(
+          DecodeOptionFactAction(bad, "bad")))
+          << bad;
+    }
+  }
+  {
     BotAction a = DecodeOptionFactAction("roll:0x100:3:3", "Disenchant Sword");
     const auto* roll = std::get_if<LootRollAction>(&a);
     ASSERT_NE(roll, nullptr);

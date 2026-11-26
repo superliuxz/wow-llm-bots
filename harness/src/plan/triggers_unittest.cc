@@ -637,5 +637,114 @@ TEST(TriggersTest, SpellMissWakesOncePerMissAndPreservesP0CombatPriority) {
             std::string::npos);
 }
 
+// Tank debuffs on the other tank wake a tank bot on new debuff and stack
+// increases, never repeat on the same stack, ignore non-tanks / solo /
+// Dungeon Deserter, still wake on loose mobs, reset cleanly, and never
+// downgrade a simultaneous P0 combat wake.
+TEST(TriggersTest, TankDebuffsWakeOtherTankAndRespectCounterInvariants) {
+  pb::Snapshot base = BaseSnap();
+  base.bot = "Offtank";
+  base.base.self.unit.name = "Offtank";
+  base.base.self.unit.group.emplace().role = pb::TANK;
+  base.base.self.in_combat = true;
+  pb::Party& party = base.ext.party.emplace();
+  pb::Unit& mt = party.members.emplace_back();
+  mt.guid = "0x10";
+  mt.name = "MainTank";
+  mt.group.emplace().role = pb::TANK;
+  mt.group->online = true;
+  mt.group->in_range = true;
+  pb::Unit& healer = party.members.emplace_back();
+  healer.guid = "0x11";
+  healer.name = "Hele";
+  healer.group.emplace().role = pb::HEALER;
+  healer.group->online = true;
+  healer.group->in_range = true;
+
+  TriggerEvaluator eval;
+  EXPECT_FALSE(eval.EvaluateSnapshot(base));
+
+  auto make_aura = [](uint32_t id, std::string name, bool harmful,
+                      uint32_t stacks = 0) {
+    pb::Aura a;
+    a.id = id;
+    a.name = std::move(name);
+    a.harmful = harmful;
+    a.stacks = stacks;
+    return a;
+  };
+
+  // Stack 1 arrives: wakes once.
+  pb::Snapshot s1 = base;
+  s1.ext.party->members[0].auras.push_back(
+      make_aura(72451, "Mutated Plague", true, 0));
+  std::optional<WakeTrigger> t = eval.EvaluateSnapshot(s1);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->urgency, Urgency::kP1Danger);
+  EXPECT_EQ(t->reason, "tank MainTank has Mutated Plague");
+
+  // Same stack on next tick: no repeat wake.
+  EXPECT_FALSE(eval.EvaluateSnapshot(s1));
+
+  // Stack increases to 3: wakes with stack count.
+  pb::Snapshot s3 = s1;
+  s3.ext.party->members[0].auras[0].stacks = 3;
+  t = eval.EvaluateSnapshot(s3);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->reason, "tank MainTank has Mutated Plague x3");
+  EXPECT_FALSE(eval.EvaluateSnapshot(s3));
+
+  // Debuff clears, then re-applies: wakes again.
+  EXPECT_FALSE(eval.EvaluateSnapshot(base));
+  t = eval.EvaluateSnapshot(s1);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->reason, "tank MainTank has Mutated Plague");
+
+  // Adversarial counter-test 1: un-noted loose mob on healer still wakes tank.
+  pb::Snapshot loose = s1;
+  pb::Unit* add = AddNearbyUnit(&loose, "0x99", "Cultist", pb::Unit::NPC,
+                                pb::Unit::HOSTILE, 10.0f);
+  add->target = "Hele";
+  t = eval.EvaluateSnapshot(loose);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->reason, "loose mob Cultist on Hele");
+
+  // Adversarial counter-test 2: non-tank (DPS) does NOT wake on tank debuffs.
+  pb::Snapshot dps_base = base;
+  dps_base.base.self.unit.group->role = pb::DPS;
+  TriggerEvaluator dps_eval;
+  EXPECT_FALSE(dps_eval.EvaluateSnapshot(dps_base));
+  pb::Snapshot dps_s1 = s1;
+  dps_s1.base.self.unit.group->role = pb::DPS;
+  EXPECT_FALSE(dps_eval.EvaluateSnapshot(dps_s1));
+
+  // Adversarial counter-test 3: solo player does NOT wake.
+  pb::Snapshot solo = base;
+  solo.ext.party.reset();
+  solo.base.self.unit.group.reset();
+  TriggerEvaluator solo_eval;
+  EXPECT_FALSE(solo_eval.EvaluateSnapshot(solo));
+
+  // Adversarial counter-test 4: Dungeon Deserter and positive buffs don't wake.
+  pb::Snapshot ignored = base;
+  ignored.ext.party->members[0].auras.push_back(
+      make_aura(71041, "Dungeon Deserter", true));
+  ignored.ext.party->members[0].auras.push_back(
+      make_aura(25898, "Blessing of Kings", false));
+  TriggerEvaluator ign_eval;
+  EXPECT_FALSE(ign_eval.EvaluateSnapshot(base));
+  EXPECT_FALSE(ign_eval.EvaluateSnapshot(ignored));
+
+  // Adversarial counter-test 5: disconnect/logout reset (fresh evaluator)
+  // re-arms cleanly, and simultaneous P0 death is never downgraded.
+  eval = TriggerEvaluator{};
+  EXPECT_FALSE(eval.EvaluateSnapshot(base));
+  pb::Snapshot death_and_debuff = s1;
+  death_and_debuff.base.self.state = pb::Self::DEAD_BODY;
+  t = eval.EvaluateSnapshot(death_and_debuff);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->urgency, Urgency::kP0Combat);
+}
+
 }  // namespace
 }  // namespace harness

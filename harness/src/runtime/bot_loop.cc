@@ -872,6 +872,7 @@ void BotLoop::OnConnectionChanged(bool connected) {
 // static
 void BotLoop::ResetBotSession(BotState* state, bool cancel_in_flight) {
   state->runner.Stop();
+  state->triggers = {};
   state->orders.Clear();
   state->plan_acts = {};
   state->latest_snapshot.reset();

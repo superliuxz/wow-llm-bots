@@ -785,6 +785,58 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
   return targets;
 }
 
+void CollectTauntActions(const pb::Snapshot& snapshot,
+                         uint32_t taunt_spell_id,
+                         bool not_tank,
+                         std::vector<pb::OptionFacts_Action>* out) {
+  if (!out || taunt_spell_id == 0 || not_tank) {
+    return;
+  }
+  const pb::Self& self = snapshot.base.self;
+  if (self.state == pb::Self::DEAD_BODY || self.state == pb::Self::GHOST) {
+    return;
+  }
+  if (!snapshot.ext.party || !self.unit.group ||
+      !(self.unit.group->role == pb::TANK || self.unit.group->main_tank)) {
+    return;
+  }
+  std::vector<const pb::Unit*> candidates;
+  for (const pb::Unit& u : snapshot.base.nearby.units) {
+    if (u.dead || u.guid.empty() || u.name.empty() || u.kind != pb::Unit::NPC ||
+        (u.reaction != pb::Unit::HOSTILE && u.reaction != pb::Unit::NEUTRAL) ||
+        u.taunt_immune || u.crowd_control || u.targeting_me ||
+        u.target.empty() || !std::isfinite(u.rel.dist_yd) ||
+        u.rel.dist_yd > 40.0f) {
+      continue;
+    }
+    candidates.push_back(&u);
+  }
+  std::stable_sort(
+      candidates.begin(), candidates.end(),
+      [](const pb::Unit* a, const pb::Unit* b) {
+        const bool a_boss = a->classification == pb::Unit::WORLD_BOSS;
+        const bool b_boss = b->classification == pb::Unit::WORLD_BOSS;
+        if (a_boss != b_boss) {
+          return a_boss;
+        }
+        return a->rel.dist_yd < b->rel.dist_yd;
+      });
+  constexpr size_t kMaxTauntOptions = 2;
+  std::vector<std::string_view> seen_names;
+  for (const pb::Unit* u : candidates) {
+    if (seen_names.size() >= kMaxTauntOptions) {
+      break;
+    }
+    if (std::find(seen_names.begin(), seen_names.end(), u->name) !=
+        seen_names.end()) {
+      continue;
+    }
+    seen_names.push_back(u->name);
+    out->push_back({"taunt:" + std::to_string(taunt_spell_id) + ":" + u->guid,
+                    "Taunt " + u->name});
+  }
+}
+
 std::string EscortStartHoldReason(
     bool self_is_leader,
     const std::vector<EscortPartyMember>& members) {

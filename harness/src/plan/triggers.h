@@ -10,6 +10,7 @@
 #define HARNESS_PLAN_TRIGGERS_H_
 
 #include <cstdint>
+#include <flat_map>
 #include <flat_set>
 #include <optional>
 #include <string>
@@ -141,6 +142,9 @@ class TriggerEvaluator {
   // For a bot whose group role is tank: living mobs (not crowd-controlled)
   // whose target is another, non-tank party member.
   std::flat_set<std::string> prev_loose_mobs_;
+  // For a tank bot: harmful debuffs on other living tanks in the group,
+  // keyed by "<tank>|<debuff>" -> stack count (>= 1).
+  std::flat_map<std::string, uint32_t> prev_tank_debuffs_;
   // Last seen spell miss on `self`, so a miss wakes once while it remains on
   // screen, and a second miss (higher `seq`) wakes again.
   std::optional<wlb::snapshot::Self::SpellMiss> prev_spell_miss_;

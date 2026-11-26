@@ -77,6 +77,15 @@ std::string_view OptionKindName(OptionTarget::Kind kind);
 std::vector<OptionTarget> AddOptions(wlb::snapshot::Snapshot* snapshot,
                                      const OptionFacts& facts = {});
 
+// Adds `Taunt <mob>` options (at most 2, bosses first then nearest) when the
+// bot is alive, grouped as a tank (not `not_tank`), has an off-cooldown
+// single-target taunt spell (`taunt_spell_id != 0`), and a nearby living
+// non-friendly, non-CC, non-taunt-immune enemy is fighting someone else.
+void CollectTauntActions(const wlb::snapshot::Snapshot& snapshot,
+                         uint32_t taunt_spell_id,
+                         bool not_tank,
+                         std::vector<wlb::snapshot::OptionFacts_Action>* out);
+
 // Party member readiness facts for a `QUEST_FLAGS_PARTY_ACCEPT` escort quest
 // (Now #8: "An escort waits until everyone has the quest").
 struct EscortPartyMember {

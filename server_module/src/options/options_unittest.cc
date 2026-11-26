@@ -1049,5 +1049,78 @@ TEST(OptionsTest, SpecLfgRoleChoicesMatchTalentSpec) {
   EXPECT_EQ(SpecLfgRoleChoices(2, 0, /*has_talents=*/false, 20).size(), 3u);
 }
 
+TEST(OptionsTest, CollectTauntActionsOffersValidTargetsForGroupedTanksOnly) {
+  pb::Snapshot snap;
+  snap.bot = "Offtank";
+  snap.base.self.state = pb::Self::ALIVE;
+  snap.base.self.unit.name = "Offtank";
+  snap.base.self.unit.group.emplace().role = pb::TANK;
+  snap.ext.party.emplace().leader = "Hele";
+
+  pb::Unit* boss = AddUnit(&snap, "Deathbringer Saurfang", "0x1", 15.0f);
+  boss->classification = pb::Unit::WORLD_BOSS;
+  boss->target = "MainTank";
+
+  pb::Unit* loose_near = AddUnit(&snap, "Blood Beast", "0x2", 10.0f);
+  loose_near->target = "Hele";
+
+  pb::Unit* loose_far = AddUnit(&snap, "Ghoul", "0x3", 25.0f);
+  loose_far->target = "Mage1";
+
+  // Invalid targets that must never be offered:
+  pb::Unit* on_me = AddUnit(&snap, "My Mob", "0x4", 4.0f);
+  on_me->target = "Offtank";
+  on_me->targeting_me = true;
+
+  pb::Unit* immune = AddUnit(&snap, "Immune Add", "0x5", 5.0f);
+  immune->target = "Hele";
+  immune->taunt_immune = true;
+
+  pb::Unit* sheep = AddUnit(&snap, "Sheeped Add", "0x6", 6.0f);
+  sheep->target = "Hele";
+  sheep->crowd_control.emplace().name = "Polymorph";
+
+  AddUnit(&snap, "Idle Mob", "0x7", 7.0f);  // Empty target (not in combat).
+
+  pb::Unit* too_far = AddUnit(&snap, "Distant Add", "0x8", 45.0f);
+  too_far->target = "Hele";
+
+  std::vector<pb::OptionFacts_Action> out;
+  CollectTauntActions(snap, /*taunt_spell_id=*/355, /*not_tank=*/false, &out);
+  ASSERT_EQ(out.size(), 2u);
+  // Boss comes first, then nearest valid non-boss; capped at 2.
+  EXPECT_EQ(out[0].guid, "taunt:355:0x1");
+  EXPECT_EQ(out[0].label, "Taunt Deathbringer Saurfang");
+  EXPECT_EQ(out[1].guid, "taunt:355:0x2");
+  EXPECT_EQ(out[1].label, "Taunt Blood Beast");
+
+  // Adversarial counter-test 1: non-tank (DPS / Healer) never gets Taunt.
+  pb::Snapshot dps = snap;
+  dps.base.self.unit.group->role = pb::DPS;
+  out.clear();
+  CollectTauntActions(dps, 355, false, &out);
+  EXPECT_TRUE(out.empty());
+
+  // Adversarial counter-test 2: solo player never gets Taunt.
+  pb::Snapshot solo = snap;
+  solo.ext.party.reset();
+  solo.base.self.unit.group.reset();
+  out.clear();
+  CollectTauntActions(solo, 355, false, &out);
+  EXPECT_TRUE(out.empty());
+
+  // Adversarial counter-test 3: `not_tank` policy, missing spell, or dead bot
+  // never gets Taunt.
+  out.clear();
+  CollectTauntActions(snap, 355, /*not_tank=*/true, &out);
+  EXPECT_TRUE(out.empty());
+  CollectTauntActions(snap, /*taunt_spell_id=*/0, false, &out);
+  EXPECT_TRUE(out.empty());
+  pb::Snapshot dead = snap;
+  dead.base.self.state = pb::Self::DEAD_BODY;
+  CollectTauntActions(dead, 355, false, &out);
+  EXPECT_TRUE(out.empty());
+}
+
 }  // namespace
 }  // namespace llm_brain

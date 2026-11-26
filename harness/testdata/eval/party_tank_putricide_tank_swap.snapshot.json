@@ -1,0 +1,239 @@
+{
+  "bot": "Loadf",
+  "seq": 1,
+  "time_ms": 1794793217558,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x0000000000000420",
+        "name": "Loadf",
+        "kind": "PLAYER",
+        "level": 80,
+        "health_pct": 94.0,
+        "power_pct": 82.0,
+        "player": {
+          "class": "Paladin"
+        },
+        "group": {
+          "subgroup": 1,
+          "online": true,
+          "in_range": true,
+          "role": "TANK"
+        }
+      },
+      "gender": "MALE",
+      "xp": 0,
+      "xp_next": 0,
+      "health": 39500,
+      "health_max": 42000,
+      "power_type": "MANA",
+      "power": 5740,
+      "power_max": 7000,
+      "state": "ALIVE",
+      "in_combat": true
+    },
+    "where": {
+      "map": "Icecrown Citadel",
+      "zone": "Icecrown Citadel",
+      "subzone": "The Plagueworks",
+      "position": {
+        "x": -675.0,
+        "y": -4322.0,
+        "z": 45.0
+      },
+      "facing": -1.54,
+      "in_instance": true
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0xF1300011110000B1",
+          "name": "Professor Putricide",
+          "rel": {
+            "dist_yd": 6.0,
+            "dir": "N",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -675.0,
+              "y": -4316.0,
+              "z": 45.0
+            }
+          },
+          "kind": "NPC",
+          "level": 80,
+          "level_color": "SKULL_LEVEL",
+          "reaction": "HOSTILE",
+          "classification": "WORLD_BOSS",
+          "health_pct": 42.0,
+          "looks_like": "undead",
+          "size": "LARGE",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "FIGHTING",
+            "with": "Loadaa"
+          },
+          "target": "Loadaa",
+          "targeting_me": false,
+          "threat_status": "THREAT_NONE"
+        }
+      ]
+    }
+  },
+  "ext": {
+    "party": {
+      "leader": "Hele",
+      "loot_method": "GROUP_LOOT",
+      "members": [
+        {
+          "guid": "0x00000000000003B0",
+          "name": "Loadaa",
+          "kind": "PLAYER",
+          "level": 80,
+          "health_pct": 66.0,
+          "power_pct": 45.0,
+          "target": "Professor Putricide",
+          "player": {
+            "class": "Warrior"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "TANK",
+            "main_tank": true,
+            "online": true,
+            "in_range": true,
+            "aggro": true
+          },
+          "auras": [
+            {
+              "id": 72451,
+              "name": "Mutated Plague",
+              "harmful": true,
+              "stacks": 4,
+              "remaining_s": 10.0
+            }
+          ],
+          "rel": {
+            "dist_yd": 5.0,
+            "dir": "NW",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x0000000000000400",
+          "name": "Hele",
+          "kind": "PLAYER",
+          "level": 80,
+          "health_pct": 100.0,
+          "power_pct": 78.0,
+          "target": "",
+          "player": {
+            "class": "Priest"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": true,
+            "role": "HEALER",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 14.0,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x0000000000000410",
+          "name": "Loadc",
+          "kind": "PLAYER",
+          "level": 80,
+          "health_pct": 100.0,
+          "power_pct": 85.0,
+          "target": "Professor Putricide",
+          "player": {
+            "class": "Mage"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "DPS",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 16.0,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        }
+      ]
+    },
+    "target": {
+      "target": {
+        "guid": "0xF1300011110000B1",
+        "name": "Professor Putricide",
+        "rel": {
+          "dist_yd": 6.0,
+          "dir": "N",
+          "height": "LEVEL",
+          "in_los": true,
+          "position": {
+            "x": -675.0,
+            "y": -4316.0,
+            "z": 45.0
+          }
+        },
+        "kind": "NPC",
+        "level": 80,
+        "level_color": "SKULL_LEVEL",
+        "reaction": "HOSTILE",
+        "classification": "WORLD_BOSS",
+        "health_pct": 42.0,
+        "looks_like": "undead",
+        "size": "LARGE",
+        "detail": "NAMEPLATE",
+        "activity": {
+          "state": "FIGHTING",
+          "with": "Loadaa"
+        },
+        "target": "Loadaa",
+        "targeting_me": false,
+        "threat_status": "THREAT_NONE"
+      }
+    }
+  },
+  "options": [
+    {
+      "text": "Attack Professor Putricide",
+      "guid": "0xF1300011110000B1",
+      "kind": "ATTACK",
+      "name": "Professor Putricide"
+    },
+    {
+      "text": "Attack tank Loadaa's target (Professor Putricide)",
+      "guid": "assist:0xF1300011110000B1",
+      "kind": "ATTACK",
+      "name": "Professor Putricide"
+    },
+    {
+      "text": "Taunt Professor Putricide",
+      "guid": "taunt:62124:0xF1300011110000B1",
+      "kind": "USE",
+      "name": "Taunt Professor Putricide"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
+}

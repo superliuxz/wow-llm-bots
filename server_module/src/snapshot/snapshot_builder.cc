@@ -654,6 +654,38 @@ void FillParty(Player* bot, NearbyBuilder* nearby, pb::Extensions* ext) {
               aura->GetStackAmount() > 1 ? aura->GetStackAmount() : 0;
         }
       }
+      // Visible harmful debuffs on party/raid tanks (for tank swaps, e.g.
+      // Rune of Blood, Mutated Plague, Soul Reaper — generic facts only).
+      if (!m.dead && gp.in_range && (gp.role == pb::TANK || gp.main_tank)) {
+        constexpr size_t kMaxTankDebuffs = 8;
+        size_t added_debuffs = 0;
+        for (const auto& [spell_id, app] : member->GetAppliedAuras()) {
+          if (added_debuffs >= kMaxTankDebuffs) {
+            break;
+          }
+          const Aura* base = app ? app->GetBase() : nullptr;
+          if (!base || app->GetSlot() >= MAX_AURAS || app->IsPositive() ||
+              spell_id == lfg::LFG_SPELL_DUNGEON_DESERTER) {
+            continue;
+          }
+          const char* sn =
+              base->GetSpellInfo()->SpellName[sWorld->GetDefaultDbcLocale()];
+          if (!sn || !*sn) {
+            continue;
+          }
+          pb::Aura& out_aura = m.auras.emplace_back();
+          out_aura.id = spell_id;
+          out_aura.name = sn;
+          out_aura.harmful = true;
+          if (base->GetDuration() > 0) {
+            out_aura.remaining_s =
+                static_cast<float>(base->GetDuration()) / 1000.0f;
+          }
+          out_aura.stacks =
+              base->GetStackAmount() > 1 ? base->GetStackAmount() : 0;
+          ++added_debuffs;
+        }
+      }
     }
   }
 }
