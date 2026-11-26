@@ -39,19 +39,31 @@ OPTION_KIND_NAME = {
 }
 
 
-def load_cases(names=()):
+def load_cases(names=(), live=False):
     """The cases to score: by default those whose options live bots have; `planned` for the
     ones that need options the module doesn't offer yet (Talk, Rest, Explore, Go to town:
-    review 2026-11-17, finding 5), or cases by name."""
+    review 2026-11-17, finding 5), or cases by name.
+
+    `held_out` cases are the true held-out split: fresh scenes never used to tune RULES.md, so
+    only the live check (`live=True`) scores them; the T=0 run, the one wording is tuned on,
+    never sees them, not even by name."""
     cases = json.loads(CASES_FILE.read_text())
     by_name = {c["name"]: c for c in cases}
     if not names or list(names) == [NAME]:
-        return [c for c in cases if not c.get("planned")]
+        return [c for c in cases if not c.get("planned") and (live or not c.get("held_out"))]
     if list(names) == ["planned"]:
         return [c for c in cases if c.get("planned")]
+    if list(names) == ["held_out"]:
+        if not live:
+            raise Failed("held-out cases are scored only by `wlb test eval --live`")
+        return [c for c in cases if c.get("held_out") and not c.get("planned")]
     unknown = [n for n in names if n not in by_name]
     if unknown:
         raise Failed(f"no eval case {', '.join(unknown)} (have: {', '.join(by_name)})")
+    held = [n for n in names if by_name[n].get("held_out")]
+    if held and not live:
+        raise Failed(f"{', '.join(held)}: held-out, scored only by `wlb test eval --live` "
+                     "(never tune RULES.md on them)")
     return [by_name[n] for n in names]
 
 
@@ -220,7 +232,8 @@ LIVE_MIN_PASS_RATE = 0.85
 
 def run_live(cases, samples=LIVE_SAMPLES, temperature=LIVE_TEMPERATURE):
     """Every scored case `samples` times at `temperature`; prints each case's passes and the mean
-    score, and returns {"mean_rate", "passed_draws", "draws", "unstable": [...]}."""
+    score, and returns {"mean_rate", "passed_draws", "draws", "unstable": [...]} for the tuned
+    cases plus "held_out": the same for the held-out ones (None if none ran)."""
     ensure_harness()
     say(f"== eval (live: T={temperature:g}, {samples} draws per case) ==")
     cases = [c for c in cases if can_fail(c)]
@@ -235,13 +248,26 @@ def run_live(cases, samples=LIVE_SAMPLES, temperature=LIVE_TEMPERATURE):
                           else f"FAIL: {problems[0]}")
         n = sum(verdicts)
         mark = "PASS" if n == samples else ("FAIL" if n == 0 else "FLAKY")
-        say(f"  {mark:5s} {n}/{samples} {case['name']:25s} -> {' | '.join(firsts)}")
+        tag = " [held-out]" if case.get("held_out") else ""
+        say(f"  {mark:5s} {n}/{samples} {case['name']:25s}{tag} -> {' | '.join(firsts)}")
         rows.append((case["name"], n))
+    held = {c["name"] for c in cases if c.get("held_out")}
+    tuned_rows = [(name, n) for name, n in rows if name not in held]
+    held_rows = [(name, n) for name, n in rows if name in held]
+    tuned = _live_score("live score", tuned_rows, samples)
+    result = {**tuned, "held_out": None}
+    if held_rows:
+        # Reported, not gated: a held-out miss is a finding about RULES.md, not a case to tune.
+        result["held_out"] = _live_score("held-out score", held_rows, samples)
+    return result
+
+
+def _live_score(label, rows, samples):
     draws = samples * len(rows)
     passed = sum(n for _, n in rows)
     rate = passed / draws if draws else 0.0
     unstable = [name for name, n in rows if n < samples]
-    say(f"live score: {passed}/{draws} draws ({100 * rate:.0f}%; mean {passed / samples:.1f}/"
+    say(f"{label}: {passed}/{draws} draws ({100 * rate:.0f}%; mean {passed / samples:.1f}/"
         f"{len(rows)} cases), all draws pass on {len(rows) - len(unstable)}/{len(rows)}")
     return {"mean_rate": rate, "passed_draws": passed, "draws": draws, "unstable": unstable}
 

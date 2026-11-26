@@ -1,0 +1,220 @@
+{
+  "bot": "Loada",
+  "seq": 1,
+  "time_ms": 1794793117558,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x00000000000004A0",
+        "name": "Loada",
+        "kind": "PLAYER",
+        "level": 18,
+        "health_pct": 70.0,
+        "power_pct": 0.0,
+        "player": {
+          "class": "Warrior"
+        },
+        "group": {
+          "subgroup": 1,
+          "online": true,
+          "in_range": true,
+          "role": "TANK"
+        }
+      },
+      "gender": "MALE",
+      "xp": 5200,
+      "xp_next": 13700,
+      "health": 294,
+      "health_max": 420,
+      "power_type": "RAGE",
+      "power": 0,
+      "power_max": 100,
+      "state": "ALIVE",
+      "in_combat": true
+    },
+    "where": {
+      "map": "The Deadmines",
+      "zone": "The Deadmines",
+      "subzone": "",
+      "position": {
+        "x": -168.0,
+        "y": -390.0,
+        "z": 57.0
+      },
+      "facing": 1.57,
+      "in_instance": true
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0xF130000E2D000131",
+          "name": "Defias Miner",
+          "rel": {
+            "dist_yd": 3.0,
+            "dir": "N",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -168.0,
+              "y": -387.0,
+              "z": 57.0
+            }
+          },
+          "kind": "NPC",
+          "level": 17,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "NORMAL",
+          "health_pct": 55.0,
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "FIGHTING",
+            "with": "Loada"
+          },
+          "target": "Loada",
+          "targeting_me": true,
+          "threat_status": "THREAT_AGGRO"
+        },
+        {
+          "guid": "0xF130000E2D000132",
+          "name": "Defias Taskmaster",
+          "rel": {
+            "dist_yd": 14.0,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -168.0,
+              "y": -404.0,
+              "z": 57.0
+            }
+          },
+          "kind": "NPC",
+          "level": 18,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "NORMAL",
+          "health_pct": 100.0,
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "FIGHTING",
+            "with": "Loade"
+          },
+          "target": "Loade"
+        }
+      ],
+      "objects": []
+    }
+  },
+  "ext": {
+    "party": {
+      "leader": "Thessa",
+      "loot_method": "GROUP_LOOT",
+      "members": [
+        {
+          "guid": "0x0000000000000520",
+          "name": "Thessa",
+          "kind": "PLAYER",
+          "level": 18,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Paladin"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": true,
+            "role": "DPS",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 4.0,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000004B0",
+          "name": "Loadb",
+          "kind": "PLAYER",
+          "level": 18,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Priest"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "HEALER",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 7.0,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000004E0",
+          "name": "Loade",
+          "kind": "PLAYER",
+          "level": 18,
+          "health_pct": 66.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Hunter"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "DPS",
+            "online": true,
+            "in_range": true,
+            "aggro": true
+          },
+          "rel": {
+            "dist_yd": 16.0,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        }
+      ]
+    }
+  },
+  "options": [
+    {
+      "text": "Attack Defias Miner",
+      "guid": "0xF130000E2D000131",
+      "kind": "ATTACK",
+      "name": "Defias Miner"
+    },
+    {
+      "text": "Attack Defias Taskmaster",
+      "guid": "0xF130000E2D000132",
+      "kind": "ATTACK",
+      "name": "Defias Taskmaster"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
+}

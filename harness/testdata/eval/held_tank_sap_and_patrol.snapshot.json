@@ -1,0 +1,245 @@
+{
+  "bot": "Loada",
+  "seq": 1,
+  "time_ms": 1794793117558,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x00000000000004A0",
+        "name": "Loada",
+        "kind": "PLAYER",
+        "level": 18,
+        "health_pct": 100.0,
+        "power_pct": 0.0,
+        "player": {
+          "class": "Warrior"
+        },
+        "group": {
+          "subgroup": 1,
+          "online": true,
+          "in_range": true,
+          "role": "TANK"
+        }
+      },
+      "gender": "MALE",
+      "xp": 5200,
+      "xp_next": 13700,
+      "health": 420,
+      "health_max": 420,
+      "power_type": "RAGE",
+      "power": 0,
+      "power_max": 100,
+      "state": "ALIVE",
+      "in_combat": false
+    },
+    "where": {
+      "map": "The Deadmines",
+      "zone": "The Deadmines",
+      "subzone": "",
+      "position": {
+        "x": -168.0,
+        "y": -390.0,
+        "z": 57.0
+      },
+      "facing": 1.57,
+      "in_instance": true
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0xF130000E2E000141",
+          "name": "Defias Pirate",
+          "rel": {
+            "dist_yd": 9.0,
+            "dir": "N",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -168.0,
+              "y": -381.0,
+              "z": 57.0
+            }
+          },
+          "kind": "NPC",
+          "level": 17,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "NORMAL",
+          "health_pct": 100.0,
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "IDLE"
+          },
+          "crowd_control": {
+            "id": 6770,
+            "name": "Sap",
+            "harmful": true,
+            "remaining_s": 41.0,
+            "caster": "Loadd"
+          },
+          "visual_state": [
+            "SAPPED"
+          ],
+          "raid_marker": "STAR"
+        },
+        {
+          "guid": "0xF130000E2E000142",
+          "name": "Defias Squallshaper",
+          "rel": {
+            "dist_yd": 12.0,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -168.0,
+              "y": -402.0,
+              "z": 57.0
+            }
+          },
+          "kind": "NPC",
+          "level": 18,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "NORMAL",
+          "health_pct": 100.0,
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "FIGHTING",
+            "with": "Loadb"
+          },
+          "target": "Loadb"
+        }
+      ],
+      "objects": []
+    }
+  },
+  "ext": {
+    "party": {
+      "leader": "Thessa",
+      "loot_method": "GROUP_LOOT",
+      "members": [
+        {
+          "guid": "0x0000000000000520",
+          "name": "Thessa",
+          "kind": "PLAYER",
+          "level": 18,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Mage"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": true,
+            "role": "DPS",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 7.0,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000004B0",
+          "name": "Loadb",
+          "kind": "PLAYER",
+          "level": 18,
+          "health_pct": 88.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Priest"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "HEALER",
+            "online": true,
+            "in_range": true,
+            "aggro": true
+          },
+          "rel": {
+            "dist_yd": 10.0,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000004D0",
+          "name": "Loadd",
+          "kind": "PLAYER",
+          "level": 18,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Rogue"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "DPS",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 9.0,
+            "dir": "N",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        }
+      ]
+    }
+  },
+  "options": [
+    {
+      "text": "Attack Defias Pirate (star) (not pulled)",
+      "guid": "0xF130000E2E000141",
+      "kind": "ATTACK",
+      "name": "Defias Pirate"
+    },
+    {
+      "text": "Attack Defias Squallshaper",
+      "guid": "0xF130000E2E000142",
+      "kind": "ATTACK",
+      "name": "Defias Squallshaper"
+    },
+    {
+      "text": "Open a trade with Thessa",
+      "guid": "trade:open:0x0000000000000520",
+      "kind": "USE",
+      "name": "Open a trade with Thessa"
+    },
+    {
+      "text": "Open a trade with Loadb",
+      "guid": "trade:open:0x00000000000004B0",
+      "kind": "USE",
+      "name": "Open a trade with Loadb"
+    },
+    {
+      "text": "Open a trade with Loadd",
+      "guid": "trade:open:0x00000000000004D0",
+      "kind": "USE",
+      "name": "Open a trade with Loadd"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
+}

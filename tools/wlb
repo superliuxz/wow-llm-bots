@@ -96,7 +96,8 @@ def parse(argv):
     p.add_argument("--shootout", action="store_true",
                    help="eval: run the same cases across every candidate model in models/")
     p.add_argument("--live", action="store_true",
-                   help="eval: held-out check at the live temperature (0.7), several draws per case")
+                   help="eval: check at the live temperature (0.7), several draws per case; "
+                        "the only run that scores the `held_out` cases")
     p.add_argument("--samples", type=int, default=None,
                    help="eval --live: draws per case (default: 3)")
     p.add_argument("--minutes", type=float, default=5.0,

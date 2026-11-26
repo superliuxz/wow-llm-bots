@@ -1,0 +1,24 @@
+{
+  "has_food": true,
+  "has_drink": true,
+  "spots": [],
+  "places": [],
+  "group_and_upkeep_actions": [
+    {
+      "guid": "trade:open:0x0000000000000520",
+      "label": "Open a trade with Thessa"
+    },
+    {
+      "guid": "trade:open:0x00000000000004B0",
+      "label": "Open a trade with Loadb"
+    },
+    {
+      "guid": "trade:open:0x00000000000004C0",
+      "label": "Open a trade with Loadc"
+    },
+    {
+      "guid": "trade:open:0x00000000000004E0",
+      "label": "Open a trade with Loade"
+    }
+  ]
+}

@@ -32,15 +32,19 @@ Guild Wars heroes):
   (source-tagged so player chat never injects trusted instructions) and add more identities.
 - **Latency & world-thread polish:** Measure 4 Hz combat snapshot cost at raid scale (build lighter
   combat snapshots if needed).
-- **Held-out eval split:** `wlb test eval --live` samples every case 3x at T=0.7 (94% of draws;
-  `herb_to_gather` fails all 3 there), but every case was used to tune RULES.md. Add fresh cases
-  kept out of tuning (`held_out`), scored only by `--live`.
+- **e2e `use_physics` Sap fails:** Stealth->Sap through the crowd-control option errors "Sap needs
+  stealth: stealth broke" in 4 of 5 runs since 5a (was only occasionally flaky). Find why.
+- **Held-out finding: tank leaves an add on a DPS.** Held-out `held_tank_add_on_hunter` (8 cases
+  marked `held_out`, scored only by `wlb test eval --live`, 21/24 draws) fails 0/3: a bot tank
+  holding its own mob keeps hitting it while a loose add chews on the hunter (the tuned case has
+  the add on the healer). Fix through RULES.md wording checked on the tuned cases, then confirm on
+  the held-out ones; add a fresh held-out case once a held-out case has been fixed against.
 
 ## Later (broader WoW systems)
 
 - **Economy & upkeep:** Vendor panel for selling non-grey items, mailbox, Auction House
   (wrapping playerbots' AH pricing or `mod-ah-bot`), and bank. Trade window: putting up gold
-  (only shown so far), and no eval case asks for a trade yet (e.g. a mage asked for water).
+  (only shown so far); only held-out `held_trade_asked_for_water` asks for a trade.
 - **Professions:** Learn professions, craft skill-ups, fishing, and party disenchanting/crafting
   requests (wrapping playerbots' `craft`/`disenchant` actions).
 - **Guilds & LFG social graph:** `guild:` chat output, guild invite/charter, LookingForGroup channel

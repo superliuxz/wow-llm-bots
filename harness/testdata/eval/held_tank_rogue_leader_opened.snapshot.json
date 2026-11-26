@@ -1,0 +1,230 @@
+{
+  "bot": "Loada",
+  "seq": 1,
+  "time_ms": 1794793117558,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x00000000000004A0",
+        "name": "Loada",
+        "kind": "PLAYER",
+        "level": 18,
+        "health_pct": 100.0,
+        "power_pct": 0.0,
+        "player": {
+          "class": "Warrior"
+        },
+        "group": {
+          "subgroup": 1,
+          "online": true,
+          "in_range": true,
+          "role": "TANK"
+        }
+      },
+      "gender": "MALE",
+      "xp": 5200,
+      "xp_next": 13700,
+      "health": 420,
+      "health_max": 420,
+      "power_type": "RAGE",
+      "power": 0,
+      "power_max": 100,
+      "state": "ALIVE",
+      "in_combat": false
+    },
+    "where": {
+      "map": "The Deadmines",
+      "zone": "The Deadmines",
+      "subzone": "",
+      "position": {
+        "x": -168.0,
+        "y": -390.0,
+        "z": 57.0
+      },
+      "facing": 1.57,
+      "in_instance": true
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0xF130000E2C000121",
+          "name": "Defias Overseer",
+          "rel": {
+            "dist_yd": 13.0,
+            "dir": "NE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -158.9,
+              "y": -380.9,
+              "z": 57.0
+            }
+          },
+          "kind": "NPC",
+          "level": 18,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "NORMAL",
+          "health_pct": 81.0,
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "FIGHTING",
+            "with": "Thessa"
+          },
+          "target": "Thessa"
+        },
+        {
+          "guid": "0xF130000E2C000122",
+          "name": "Defias Evoker",
+          "rel": {
+            "dist_yd": 17.0,
+            "dir": "N",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -168.0,
+              "y": -373.0,
+              "z": 57.0
+            }
+          },
+          "kind": "NPC",
+          "level": 17,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "NORMAL",
+          "health_pct": 100.0,
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "FIGHTING",
+            "with": "Thessa"
+          },
+          "target": "Thessa"
+        }
+      ],
+      "objects": []
+    }
+  },
+  "ext": {
+    "party": {
+      "leader": "Thessa",
+      "loot_method": "GROUP_LOOT",
+      "members": [
+        {
+          "guid": "0x0000000000000520",
+          "name": "Thessa",
+          "kind": "PLAYER",
+          "level": 18,
+          "health_pct": 74.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Rogue"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": true,
+            "role": "DPS",
+            "online": true,
+            "in_range": true,
+            "aggro": true
+          },
+          "rel": {
+            "dist_yd": 9.0,
+            "dir": "NE",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000004B0",
+          "name": "Loadb",
+          "kind": "PLAYER",
+          "level": 18,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Priest"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "HEALER",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 8.0,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000004C0",
+          "name": "Loadc",
+          "kind": "PLAYER",
+          "level": 18,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Mage"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "DPS",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 12.0,
+            "dir": "SW",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        }
+      ]
+    }
+  },
+  "options": [
+    {
+      "text": "Attack Defias Overseer",
+      "guid": "0xF130000E2C000121",
+      "kind": "ATTACK",
+      "name": "Defias Overseer"
+    },
+    {
+      "text": "Attack Defias Evoker",
+      "guid": "0xF130000E2C000122",
+      "kind": "ATTACK",
+      "name": "Defias Evoker"
+    },
+    {
+      "text": "Open a trade with Thessa",
+      "guid": "trade:open:0x0000000000000520",
+      "kind": "USE",
+      "name": "Open a trade with Thessa"
+    },
+    {
+      "text": "Open a trade with Loadb",
+      "guid": "trade:open:0x00000000000004B0",
+      "kind": "USE",
+      "name": "Open a trade with Loadb"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
+}

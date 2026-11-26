@@ -1,0 +1,259 @@
+{
+  "bot": "Loadb",
+  "seq": 1,
+  "time_ms": 1794793117558,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x00000000000004B0",
+        "name": "Loadb",
+        "kind": "PLAYER",
+        "level": 18,
+        "health_pct": 100.0,
+        "power_pct": 87.1,
+        "player": {
+          "class": "Priest"
+        },
+        "group": {
+          "subgroup": 1,
+          "online": true,
+          "in_range": true,
+          "role": "HEALER"
+        }
+      },
+      "gender": "FEMALE",
+      "xp": 5200,
+      "xp_next": 13700,
+      "health": 260,
+      "health_max": 260,
+      "power_type": "MANA",
+      "power": 610,
+      "power_max": 700,
+      "state": "ALIVE",
+      "in_combat": false
+    },
+    "where": {
+      "map": "The Deadmines",
+      "zone": "The Deadmines",
+      "subzone": "",
+      "position": {
+        "x": -168.0,
+        "y": -390.0,
+        "z": 57.0
+      },
+      "facing": 1.57,
+      "in_instance": true
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0xF130000E2A000101",
+          "name": "Defias Henchman",
+          "rel": {
+            "dist_yd": 5.0,
+            "dir": "NE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -164.5,
+              "y": -386.5,
+              "z": 57.0
+            }
+          },
+          "kind": "NPC",
+          "level": 17,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "NORMAL",
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "DEAD"
+          },
+          "dead": true,
+          "lootable": false
+        },
+        {
+          "guid": "0xF130000E2A000102",
+          "name": "Defias Henchman",
+          "rel": {
+            "dist_yd": 8.0,
+            "dir": "N",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -168.0,
+              "y": -382.0,
+              "z": 57.0
+            }
+          },
+          "kind": "NPC",
+          "level": 17,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "NORMAL",
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "DEAD"
+          },
+          "dead": true,
+          "lootable": false
+        }
+      ],
+      "objects": []
+    }
+  },
+  "ext": {
+    "party": {
+      "leader": "Thessa",
+      "loot_method": "GROUP_LOOT",
+      "members": [
+        {
+          "guid": "0x0000000000000520",
+          "name": "Thessa",
+          "kind": "PLAYER",
+          "level": 18,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Warrior"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": true,
+            "role": "TANK",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 6.0,
+            "dir": "N",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000004C0",
+          "name": "Loadc",
+          "kind": "PLAYER",
+          "level": 18,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Mage"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "DPS",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 9.0,
+            "dir": "SW",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000004D0",
+          "name": "Loadd",
+          "kind": "PLAYER",
+          "level": 18,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Rogue"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "DPS",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 4.0,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000004E0",
+          "name": "Loade",
+          "kind": "PLAYER",
+          "level": 18,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Hunter"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "DPS",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 10.0,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        }
+      ]
+    }
+  },
+  "options": [
+    {
+      "text": "Rest (eat and drink)",
+      "kind": "REST"
+    },
+    {
+      "text": "Open a trade with Thessa",
+      "guid": "trade:open:0x0000000000000520",
+      "kind": "USE",
+      "name": "Open a trade with Thessa"
+    },
+    {
+      "text": "Open a trade with Loadc",
+      "guid": "trade:open:0x00000000000004C0",
+      "kind": "USE",
+      "name": "Open a trade with Loadc"
+    },
+    {
+      "text": "Open a trade with Loadd",
+      "guid": "trade:open:0x00000000000004D0",
+      "kind": "USE",
+      "name": "Open a trade with Loadd"
+    },
+    {
+      "text": "Open a trade with Loade",
+      "guid": "trade:open:0x00000000000004E0",
+      "kind": "USE",
+      "name": "Open a trade with Loade"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
+}

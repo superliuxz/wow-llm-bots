@@ -1,0 +1,202 @@
+{
+  "bot": "Loadc",
+  "seq": 1,
+  "time_ms": 1794793117558,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x00000000000004C0",
+        "name": "Loadc",
+        "kind": "PLAYER",
+        "level": 18,
+        "health_pct": 100.0,
+        "power_pct": 88.9,
+        "player": {
+          "class": "Mage"
+        },
+        "group": {
+          "subgroup": 1,
+          "online": true,
+          "in_range": true,
+          "role": "DPS"
+        }
+      },
+      "gender": "FEMALE",
+      "xp": 5200,
+      "xp_next": 13700,
+      "health": 250,
+      "health_max": 250,
+      "power_type": "MANA",
+      "power": 640,
+      "power_max": 720,
+      "state": "ALIVE",
+      "in_combat": false
+    },
+    "where": {
+      "map": "The Deadmines",
+      "zone": "The Deadmines",
+      "subzone": "",
+      "position": {
+        "x": -168.0,
+        "y": -390.0,
+        "z": 57.0
+      },
+      "facing": 1.57,
+      "in_instance": true
+    },
+    "nearby": {
+      "units": [],
+      "objects": []
+    }
+  },
+  "ext": {
+    "party": {
+      "leader": "Thessa",
+      "loot_method": "GROUP_LOOT",
+      "members": [
+        {
+          "guid": "0x0000000000000520",
+          "name": "Thessa",
+          "kind": "PLAYER",
+          "level": 18,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Warrior"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": true,
+            "role": "TANK",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 6.0,
+            "dir": "N",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000004B0",
+          "name": "Loadb",
+          "kind": "PLAYER",
+          "level": 18,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Priest"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "HEALER",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 7.0,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000004D0",
+          "name": "Loadd",
+          "kind": "PLAYER",
+          "level": 18,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Rogue"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "DPS",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 4.0,
+            "dir": "E",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000004E0",
+          "name": "Loade",
+          "kind": "PLAYER",
+          "level": 18,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Hunter"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "DPS",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 10.0,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        }
+      ]
+    }
+  },
+  "options": [
+    {
+      "text": "Rest (eat and drink)",
+      "kind": "REST"
+    },
+    {
+      "text": "Open a trade with Thessa",
+      "guid": "trade:open:0x0000000000000520",
+      "kind": "USE",
+      "name": "Open a trade with Thessa"
+    },
+    {
+      "text": "Open a trade with Loadb",
+      "guid": "trade:open:0x00000000000004B0",
+      "kind": "USE",
+      "name": "Open a trade with Loadb"
+    },
+    {
+      "text": "Open a trade with Loadd",
+      "guid": "trade:open:0x00000000000004D0",
+      "kind": "USE",
+      "name": "Open a trade with Loadd"
+    },
+    {
+      "text": "Open a trade with Loade",
+      "guid": "trade:open:0x00000000000004E0",
+      "kind": "USE",
+      "name": "Open a trade with Loade"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
+}

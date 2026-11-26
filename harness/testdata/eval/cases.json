@@ -940,5 +940,133 @@
       9,
       10
     ]
+  },
+  {
+    "name": "held_trade_healer_between_pulls",
+    "source": "built for the held-out split (4c-rest)",
+    "held_out": true,
+    "reason": "plan done",
+    "summary": "in the Deadmines, out of combat between pulls: party healer next to the tank/leader Thessa and three bots, all within trade range (four `Open a trade with` lines); two looted corpses",
+    "rule": "nobody asked for a trade: never opens one (5a risk)",
+    "forbid_texts": [
+      "Open a trade"
+    ],
+    "scene": {
+      "team": "ALLIANCE"
+    }
+  },
+  {
+    "name": "held_trade_rogue_loot_after_fight",
+    "source": "built for the held-out split (4c-rest)",
+    "held_out": true,
+    "reason": "plan done",
+    "summary": "in the Deadmines right after a fight: party rogue, a lootable Defias Miner 3 yd away, four party members within trade range",
+    "rule": "loots or carries on; never opens a trade nobody asked for",
+    "forbid_texts": [
+      "Open a trade"
+    ],
+    "scene": {
+      "team": "ALLIANCE"
+    }
+  },
+  {
+    "name": "held_trade_party_chat_ready_check",
+    "source": "built for the held-out split (4c-rest)",
+    "held_out": true,
+    "reason": "party from Thessa: everyone ready for the next pack?",
+    "summary": "in the Deadmines between pulls: the leader asks in party chat whether everyone is ready; four members within trade range",
+    "rule": "a ready question is not a trade request: no `Open a trade`",
+    "forbid_texts": [
+      "Open a trade"
+    ],
+    "scene": {
+      "team": "ALLIANCE"
+    }
+  },
+  {
+    "name": "held_trade_whisper_mana_question",
+    "source": "built for the held-out split (4c-rest)",
+    "held_out": true,
+    "reason": "whisper from Thessa: how is your mana?",
+    "summary": "in the Deadmines between pulls: the leader whispers the mage about its mana; three members within trade range",
+    "rule": "whispers back to Thessa; a question is not a trade request",
+    "must_tell_to": "Thessa",
+    "forbid_texts": [
+      "Open a trade"
+    ],
+    "scene": {
+      "team": "ALLIANCE"
+    }
+  },
+  {
+    "name": "held_trade_asked_for_water",
+    "source": "built for the held-out split (4c-rest)",
+    "held_out": true,
+    "reason": "party from Thessa: Loadc can you trade me some water?",
+    "summary": "in the Deadmines between pulls: the leader asks the mage for water in party chat; four members within trade range",
+    "rule": "opens a trade with Thessa (the one who asked) and with nobody else",
+    "must_include_options": [
+      2
+    ],
+    "forbid_options": [
+      3,
+      4,
+      5
+    ],
+    "scene": {
+      "team": "ALLIANCE"
+    }
+  },
+  {
+    "name": "held_tank_rogue_leader_opened",
+    "source": "built for the held-out split (4c-rest)",
+    "held_out": true,
+    "reason": "party in combat (Thessa attacked)",
+    "summary": "in the Deadmines: the human leader Thessa (rogue, dps) opened on a pack; an Overseer and an Evoker are on him; the bot tank is still out of combat with trade lines on screen",
+    "rule": "whoever opened, the tank engages a mob on the leader at once; no trade",
+    "first_options": [
+      1,
+      2
+    ],
+    "forbid_texts": [
+      "Open a trade"
+    ],
+    "scene": {
+      "team": "ALLIANCE"
+    }
+  },
+  {
+    "name": "held_tank_add_on_hunter",
+    "source": "built for the held-out split (4c-rest)",
+    "held_out": true,
+    "reason": "loose mob Defias Taskmaster on Loade",
+    "summary": "in the Deadmines, in combat: the bot tank holds a Defias Miner; a Defias Taskmaster ran at the hunter Loade (16 yd S)",
+    "rule": "the tank picks the loose Taskmaster off the hunter first",
+    "first_options": [
+      2
+    ],
+    "scene": {
+      "team": "ALLIANCE"
+    }
+  },
+  {
+    "name": "held_tank_sap_and_patrol",
+    "source": "built for the held-out split (4c-rest)",
+    "held_out": true,
+    "reason": "loose mob Defias Squallshaper on Loadb",
+    "summary": "in the Deadmines, out of combat: the rogue Loadd sapped a Defias Pirate (star); a patrolling Squallshaper attacks the healer Loadb",
+    "rule": "the tank takes the Squallshaper off the healer and leaves the sapped Pirate alone; no trade",
+    "first_options": [
+      2
+    ],
+    "forbid_options": [
+      1
+    ],
+    "forbid_texts": [
+      "Open a trade"
+    ],
+    "scene": {
+      "team": "ALLIANCE"
+    }
   }
 ]
