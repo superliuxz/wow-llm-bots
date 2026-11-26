@@ -2,8 +2,10 @@
 """Unit tests for parallel e2e: test server shards' names (common.test_instance) and how the
 sharded runner splits groups and prints their output (testing.plan_shards, _CaseBlocks)."""
 
+import io
 import os
 import pathlib
+import signal
 import subprocess
 import sys
 import tempfile
@@ -14,7 +16,7 @@ from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
-from wlblib import common, server, testing  # noqa: E402
+from wlblib import build, common, server, testing  # noqa: E402
 
 
 class TestInstanceTest(unittest.TestCase):
@@ -172,6 +174,157 @@ class TimingsTest(unittest.TestCase):
                 self.assertEqual(testing._load_timings(), {"a/B/1": 10.0, "b/B/1": 30.0})
                 path.write_text("not json")
                 self.assertEqual(testing._load_timings(), {})
+
+
+class _FakeProc:
+    """Minimal Popen stand-in for testing `testing.all_` orchestration and cleanup."""
+
+    def __init__(self, rc=0, lines=(), wait_exc=None):
+        self.rc = rc
+        self.stdout = io.StringIO("".join(lines))
+        self._wait_exc = wait_exc
+        self.waited = False
+        self.signals = []
+        self.killed = False
+
+    def poll(self):
+        return self.rc if self.waited else None
+
+    def send_signal(self, sig):
+        self.signals.append(sig)
+
+    def kill(self):
+        self.killed = True
+        self.waited = True
+
+    def wait(self, timeout=None):
+        if self._wait_exc is not None:
+            exc = self._wait_exc
+            self._wait_exc = None
+            raise exc
+        self.waited = True
+        return self.rc
+
+
+class TestAllTest(unittest.TestCase):
+    def test_commands_default_and_flag_passthrough(self):
+        cmds = dict(testing._all_commands())
+        wlb = common.ROOT / "tools" / "wlb"
+        self.assertEqual(cmds["e2e"], [wlb, "test", "e2e"])
+        self.assertEqual(cmds["eval"], [wlb, "test", "eval"])
+
+        cmds = dict(testing._all_commands(jobs=4, keep_server=True, model="m.gguf",
+                                          live=True, samples=5))
+        self.assertEqual(cmds["e2e"], [wlb, "test", "e2e", "-j", "4", "--keep-server"])
+        self.assertEqual(cmds["eval"],
+                         [wlb, "test", "eval", "--model", "m.gguf", "--live", "--samples", "5"])
+
+        cmds_serial = dict(testing._all_commands(jobs=1))
+        self.assertEqual(cmds_serial["e2e"], [wlb, "test", "e2e", "-j", "1"])
+
+    def _run_all(self, e2e_proc, eval_proc, **kwargs):
+        spawned = []
+        procs = iter([e2e_proc, eval_proc])
+
+        def fake_popen(cmd, **popen_kwargs):
+            spawned.append((cmd, popen_kwargs))
+            p = next(procs)
+            if isinstance(p, BaseException):
+                raise p
+            return p
+
+        with mock.patch.object(build, "common") as m_common, \
+             mock.patch.object(build, "server") as m_server, \
+             mock.patch.object(server, "test_servers_stop") as m_stop, \
+             mock.patch.object(subprocess, "Popen", side_effect=fake_popen), \
+             mock.patch.object(testing, "say"):
+            testing.all_(**kwargs)
+            return spawned, m_common, m_server, m_stop
+
+    def test_both_pass_prebuilt_and_cleanup(self):
+        e2e_p = _FakeProc(rc=0, lines=["PASS e2e choose\n"])
+        eval_p = _FakeProc(rc=0, lines=["59 of 59 passed\n"])
+        spawned, m_common, m_server, m_stop = self._run_all(e2e_p, eval_p, jobs=3)
+        m_common.assert_called_once_with("default", tests=False)
+        m_server.assert_called_once_with(test=True)
+        m_stop.assert_called_once_with()
+        self.assertEqual(len(spawned), 2)
+        self.assertIn("-j", spawned[0][0])
+        self.assertIn("3", spawned[0][0])
+        for _, kw in spawned:
+            self.assertEqual(kw["env"][build.PREBUILT_ENV], "1")
+            self.assertEqual(kw["env"]["PYTHONUNBUFFERED"], "1")
+        self.assertTrue(e2e_p.waited and eval_p.waited)
+
+    def test_keep_server_skips_stop(self):
+        e2e_p = _FakeProc(rc=0)
+        eval_p = _FakeProc(rc=0)
+        _, _, _, m_stop = self._run_all(e2e_p, eval_p, keep_server=True)
+        m_stop.assert_not_called()
+
+    def test_exit_code_propagation(self):
+        for e2e_rc, eval_rc, expected_in_msg in [
+            (1, 0, ("e2e",)),
+            (0, 2, ("eval",)),
+            (1, 3, ("e2e", "eval")),
+        ]:
+            e2e_p, eval_p = _FakeProc(rc=e2e_rc), _FakeProc(rc=eval_rc)
+            with self.subTest(e2e_rc=e2e_rc, eval_rc=eval_rc):
+                with self.assertRaises(common.Failed) as ctx:
+                    self._run_all(e2e_p, eval_p)
+                for needle in expected_in_msg:
+                    self.assertIn(needle, str(ctx.exception))
+                self.assertTrue(e2e_p.waited and eval_p.waited)
+
+    def test_keyboard_interrupt_waits_without_duplicate_sigint_and_stops_servers(self):
+        e2e_p = _FakeProc(rc=130, wait_exc=KeyboardInterrupt())
+        eval_p = _FakeProc(rc=130)
+        with mock.patch.object(build, "common"), \
+             mock.patch.object(build, "server"), \
+             mock.patch.object(server, "test_servers_stop") as m_stop, \
+             mock.patch.object(subprocess, "Popen", side_effect=[e2e_p, eval_p]), \
+             mock.patch.object(testing, "say"):
+            with self.assertRaises(KeyboardInterrupt):
+                testing.all_()
+        self.assertEqual(e2e_p.signals, [])
+        self.assertEqual(eval_p.signals, [])
+        self.assertTrue(e2e_p.waited and eval_p.waited)
+        m_stop.assert_called_once_with()
+
+    def test_spawn_error_signals_started_child_and_stops_servers(self):
+        e2e_p = _FakeProc(rc=0)
+        with mock.patch.object(build, "common"), \
+             mock.patch.object(build, "server"), \
+             mock.patch.object(server, "test_servers_stop") as m_stop, \
+             mock.patch.object(subprocess, "Popen", side_effect=[e2e_p, OSError("boom")]), \
+             mock.patch.object(testing, "say"):
+            with self.assertRaises(OSError):
+                testing.all_()
+        self.assertEqual(e2e_p.signals, [signal.SIGINT])
+        self.assertTrue(e2e_p.waited)
+        m_stop.assert_called_once_with()
+
+    def test_stream_lines_prefixes_output(self):
+        out = []
+        proc = _FakeProc(lines=["hello\n", "world\r\n"])
+        testing._stream_lines(proc, "eval", threading.Lock(), emit=out.append)
+        self.assertEqual(out, ["[eval] hello", "[eval] world"])
+
+    def test_llama_server_cleans_up_on_startup_interrupt(self):
+        fake_proc = mock.MagicMock()
+        fake_proc.poll.return_value = None
+        srv = testing.LlamaServer(slots=4, timeout_s=30)
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(testing, "OUT", pathlib.Path(tmp)), \
+             mock.patch.object(srv, "healthy", side_effect=[False, KeyboardInterrupt()]), \
+             mock.patch.object(subprocess, "Popen", return_value=fake_proc), \
+             mock.patch.object(testing, "say"):
+            with self.assertRaises(KeyboardInterrupt):
+                srv.__enter__()
+        fake_proc.terminate.assert_called_once_with()
+
+    def test_cli_target_all_in_targets(self):
+        self.assertIn("all", testing.TARGETS)
 
 
 if __name__ == "__main__":

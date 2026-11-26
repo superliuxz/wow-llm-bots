@@ -1,9 +1,10 @@
-"""`wlb test`: the four test targets.
+"""`wlb test`: the test targets.
 
   unit   the gtest suites (common, module, harness); no game, no GPU. `ninja unit_tests`.
   e2e    live scenarios against a real worldserver (test build + a test config), pass or fail
   perf   what things cost, each checked against a bound, so a regression fails
   eval   how well the brain decides, on saved snapshots, scored
+  all    e2e (parallel) and eval concurrently; fails if either fails
 
 A case is a module in wlblib/cases/ named <target>_<name>.py with
   NAME         short name, as `wlb test e2e NAME` selects it
@@ -36,7 +37,7 @@ from wlblib import build, cases, llm, server, wire
 from wlblib.common import (MAX_SHARDS, OUT, PLAY, ROOT, TEST, VAR, Failed, output, run,
                            running_pid, say, test_instance)
 
-TARGETS = ("unit", "e2e", "perf", "eval", "soak")
+TARGETS = ("unit", "e2e", "perf", "eval", "soak", "all")
 
 
 def expect(condition, message):
@@ -181,6 +182,7 @@ def list_cases():
     from wlblib.cases import eval_plans
     say("eval: " + ", ".join(eval_plans.case_names()))
     say("unit: every gtest suite (wlb test unit [--filter PATTERN] [--variant asan|tsan|msan])")
+    say("all: e2e (parallel) and eval concurrently (wlb test all [-j N])")
 
 
 def unit(variant="default", gtest_filter=None):
@@ -723,20 +725,23 @@ class LlamaServer:
         label = self.model or "the default model, wlb llm"
         say(f"starting llama-server ({label})")
         (OUT / "logs").mkdir(parents=True, exist_ok=True)
-        log = open(OUT / "logs" / "llama-perf.log", "wb")
         cmd = [ROOT / "tools" / "wlb", "llm", "--slots", str(self.slots)]
         if self.model:
             cmd += ["--model", self.model]
-        self.proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)
-        deadline = time.time() + self.timeout_s
-        while time.time() < deadline:
-            if self.proc.poll() is not None:
-                raise Failed("llama-server exited (see out/logs/llama-perf.log)")
-            if self.healthy():
-                return self
-            time.sleep(2)
-        self.__exit__()
-        raise Failed(f"llama-server not healthy after {self.timeout_s} s")
+        with open(OUT / "logs" / "llama-perf.log", "wb") as log:
+            self.proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)
+        try:
+            deadline = time.time() + self.timeout_s
+            while time.time() < deadline:
+                if self.proc.poll() is not None:
+                    raise Failed("llama-server exited (see out/logs/llama-perf.log)")
+                if self.healthy():
+                    return self
+                time.sleep(2)
+            raise Failed(f"llama-server not healthy after {self.timeout_s} s")
+        except BaseException:
+            self.__exit__()
+            raise
 
     def __exit__(self, *exc):
         if self.proc and self.proc.poll() is None:
@@ -826,6 +831,86 @@ def eval_(names=(), model=None, shootout=False, live=False, samples=None):
         res = eval_plans.run_suite(cases, label=model)
     if res["passed"] != res["total"]:
         raise Failed(f"{res['total'] - res['passed']} of {res['total']} eval cases failed")
+
+
+# ---- all (e2e + eval concurrently) --------------------------------------------------------------
+
+def _all_commands(jobs=None, keep_server=False, model=None, live=False, samples=None):
+    """Builds the (label, argv) pairs for `wlb test all`."""
+    wlb = ROOT / "tools" / "wlb"
+    e2e_cmd = [wlb, "test", "e2e"]
+    if jobs is not None:
+        e2e_cmd += ["-j", str(jobs)]
+    if keep_server:
+        e2e_cmd.append("--keep-server")
+
+    eval_cmd = [wlb, "test", "eval"]
+    if model:
+        eval_cmd += ["--model", model]
+    if live:
+        eval_cmd.append("--live")
+    if samples is not None:
+        eval_cmd += ["--samples", str(samples)]
+    return [("e2e", e2e_cmd), ("eval", eval_cmd)]
+
+
+def _stream_lines(proc, label, lock, emit=None):
+    if proc.stdout is None:
+        return
+    emit = emit or (lambda text: print(text, flush=True))
+    for line in proc.stdout:
+        with lock:
+            emit(f"[{label}] {line.rstrip('\r\n')}")
+
+
+def all_(jobs=None, keep_server=False, model=None, live=False, samples=None):
+    """Runs `e2e` (parallel by default, or `-j N`) concurrently with `eval` (GPU/llama-server).
+    Streams both outputs prefixed by suite name, reports both results, and fails if either fails."""
+    started = time.time()
+    build.common("default", tests=False)
+    build.server(test=True)
+    cmds = _all_commands(jobs=jobs, keep_server=keep_server, model=model, live=live,
+                         samples=samples)
+    env = {**os.environ, build.PREBUILT_ENV: "1", "PYTHONUNBUFFERED": "1"}
+    lock = threading.Lock()
+    procs = []
+    say("running e2e and eval concurrently")
+    try:
+        for label, cmd in cmds:
+            proc = subprocess.Popen(cmd, cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                    errors="replace")
+            reader = threading.Thread(target=_stream_lines, args=(proc, label, lock), daemon=True)
+            reader.start()
+            procs.append((label, proc, reader))
+        results = {}
+        for label, proc, reader in procs:
+            rc = proc.wait()
+            reader.join()
+            results[label] = rc
+    except BaseException as e:
+        for _, proc, _ in procs:
+            if proc.poll() is None and not isinstance(e, KeyboardInterrupt):
+                proc.send_signal(signal.SIGINT)
+        for _, proc, reader in procs:
+            try:
+                proc.wait(150)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            reader.join(timeout=5)
+        raise
+    finally:
+        if not keep_server:
+            server.test_servers_stop()
+
+    elapsed_min = (time.time() - started) / 60
+    summary = ", ".join(f"{label}={'PASS' if rc == 0 else f'FAIL ({rc})'}"
+                        for label, rc in results.items())
+    say(f"test all ({elapsed_min:.1f} min): {summary}")
+    failed = [f"{label} (exit {rc})" for label, rc in results.items() if rc != 0]
+    if failed:
+        raise Failed("test all failed: " + ", ".join(failed))
 
 
 # ---- shared -------------------------------------------------------------------------------------

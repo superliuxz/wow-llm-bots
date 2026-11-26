@@ -12,10 +12,11 @@ Last updated: 2026-11-26.
   mock LLM, no pulls or boss fights) are in place. Run a live session from a real 3.3.5a client to
   confirm pacing and single-responder feel in practice.
 
-- **Parallel e2e (use the idle cores):** steps 1-2 are done: `tools/wlb test e2e -j N` (default
+- **Parallel e2e (use the idle cores):** steps 1-2 and 4 are done: `tools/wlb test e2e -j N` (default
   by free RAM and cores, capped at 6; `-j 1` is the old serial run) runs the groups on numbered
   test servers (`common.test_instance(k)`: `run-k`, `etc-k`, `var/logs/test-k`, `acore_test_k_*`,
-  port 8086 + k), 21.4 -> 6.5-7 min here. As built: shards share the test world database
+  port 8086 + k), 21.4 -> 6.5-7 min here, and `tools/wlb test all [-j N]` runs `e2e` and `eval`
+  concurrently (7.1 min total here). As built: shards share the test world database
   (`acore_test_world`, 558 MB, not written by tests) instead of one copy each; a shard's
   worldserver gets its `etc-k` bind-mounted over the install's `etc` in an unprivileged
   mount namespace (`unshare --user --map-root-user --mount`), because AzerothCore reads module
@@ -26,12 +27,10 @@ Last updated: 2026-11-26.
   flakier under 6-way load and got test-only fixes: `orders` (a leftover phase-3 wake could
   install the kite plan before the phase-4 whisper woke the bot; a missed Shield act is now
   retried) and `boss` (a healer already 25 yd out when the Nova starts has nothing to move).
-  Left, one step at a time (not started):
+  Left (not started):
   3. **Both machines:** `tools/wlb test e2e --remote 10700k` splits the groups between this
      machine and the worker (`tools/wlb remote` sync, `touch` before rsync so mtimes don't
      leave stale objects) and merges the results. Only when asked (CONTRIBUTING rule 5).
-  4. **Eval beside e2e:** eval needs only llama-server, so a `tools/wlb test all` runs it
-     concurrently with e2e.
   Checks: e2e passes with `-j 1` and with `-j N`, twice in a row; timing recorded in the commit.
 
 - **Fix queue (next up, in this order; one commit each, full gates):**

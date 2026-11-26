@@ -10,6 +10,7 @@
   tools/wlb test unit [--filter PATTERN] [--variant asan|tsan|msan]
   tools/wlb test e2e|perf|eval [NAME...]  [--keep-server]   (e2e/perf: the isolated test server)
   tools/wlb test e2e [-j N] [NAME...]     (N test servers at once; default by free RAM and cores)
+  tools/wlb test all [-j N]               (e2e and eval concurrently; fails if either fails)
   tools/wlb test perf [--update-baselines [--verify]] | --capture   (perf: record the numbers, and
                                                                      check they reproduce / the replay input)
   tools/wlb test --list
@@ -78,7 +79,7 @@ def parse(argv):
     p.add_argument("--fix", action="store_true", help="for format, includes and rules: rewrite files")
     p.add_argument("files", nargs="*", help="for snapshots: files to validate")
 
-    p = sub.add_parser("test", help="unit, e2e, perf and eval tests")
+    p = sub.add_parser("test", help="unit, e2e, perf, eval, soak and all tests")
     p.add_argument("target", nargs="?", choices=list(testing.TARGETS))
     p.add_argument("names", nargs="*", help="e2e, perf, eval: the cases to run (default: all)")
     p.add_argument("--list", action="store_true", help="list the cases")
@@ -88,7 +89,7 @@ def parse(argv):
     p.add_argument("--keep-server", action="store_true",
                    help="leave the test server running afterwards (tools/wlb server stop --test)")
     p.add_argument("-j", "--jobs", type=int, default=None,
-                   help=f"e2e: how many test servers at once (1..{common.MAX_SHARDS}; default: "
+                   help=f"e2e, all: how many test servers at once (1..{common.MAX_SHARDS}; default: "
                         "by free memory and cores; 1: one after the other, in this process)")
     p.add_argument("--update-baselines", action="store_true",
                    help="perf: record this run's numbers as the new baselines")
@@ -251,6 +252,14 @@ def main():
             if a.jobs is not None and not 1 <= a.jobs <= common.MAX_SHARDS:
                 raise common.Failed(f"-j {a.jobs}: 1..{common.MAX_SHARDS}")
             testing.e2e(a.names, a.keep_server, a.jobs)
+        elif a.target == "all":
+            if a.names:
+                raise common.Failed("test all takes no case names (use `wlb test e2e` or "
+                                    "`wlb test eval`)")
+            if a.jobs is not None and not 1 <= a.jobs <= common.MAX_SHARDS:
+                raise common.Failed(f"-j {a.jobs}: 1..{common.MAX_SHARDS}")
+            testing.all_(jobs=a.jobs, keep_server=a.keep_server, model=a.model,
+                         live=a.live, samples=a.samples)
         elif a.target == "perf" and a.capture:
             testing.capture_snapshots()
         elif a.target == "perf":
