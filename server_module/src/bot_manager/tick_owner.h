@@ -65,6 +65,26 @@ std::vector<std::string> MissingActionNames(
     std::span<const GatedAction> gated,
     std::span<const std::string> supported);
 
+// Healer talent specializations whose solo combat extras (damage strategies)
+// are toggled on solo and off in a group.
+enum class HealerSpec : uint8_t {
+  kNone,
+  kPriestDiscipline,
+  kPriestHoly,
+  kDruidRestoration,
+  kShamanRestoration,
+  kPaladinHoly,
+};
+
+// Combat strategy delta for a healer spec solo vs. grouped.
+// Solo adds playerbots' damage extras so a solo healer can quest. Grouped
+// removes those extras and explicitly restores the spec's healing strategy,
+// because playerbots' combat strategy factories for Priest (`holy dps` vs.
+// `holy heal`/`disc`), Shaman (`ele` vs. `resto`), and Paladin (`ret` vs.
+// `holy`) are mutually exclusive — removing the solo DPS strategy alone would
+// otherwise leave a grouped healer with no combat healing strategy.
+std::string_view HealerCombatStrategyDelta(HealerSpec spec, bool in_group);
+
 }  // namespace llm_brain
 
 #endif  // MOD_LLM_BRAIN_BOT_MANAGER_TICK_OWNER_H_

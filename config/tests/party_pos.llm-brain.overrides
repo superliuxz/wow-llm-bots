@@ -1,0 +1,7 @@
+# Party positioning test (e2e_party_positioning): four fresh Troll Priests,
+# isolated from `party` because `party_positioning` gears bots to level 20 and
+# spends talent points. Needs a test build (tools/wlb build server --test).
+LlmBrain.Bots = "Loada,Loadb,Loadc,Loadd"
+LlmBrain.TestFixtures = "Loada=priest-l1-valley.pdump,Loadb=priest-l1-valley.pdump,Loadc=priest-l1-valley.pdump,Loadd=priest-l1-valley.pdump"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.NonCombatStrategies = "-follow,-grind,-new rpg"

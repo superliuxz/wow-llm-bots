@@ -2857,4 +2857,485 @@ def _case_trade():
                 "a cancelled trade closed both windows")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
-CASES = [_case_pull_gate(), _case_crowd_control(), _case_use_physics(), _case_hunter_dismiss_pet(), _case_crisp_dodge(), _case_popup_policy(), _case_human_party(), _case_human_dungeon(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal(), _case_trade()]
+
+def _case_party_positioning():
+    """Body-pull avoidance and healer range/LoS during a pull (Companion-lessons Gap 1).
+
+    Four level-17 bots in the Deadmines (map 36): Loada (tank/leader), Loadb (Holy priest
+    healer), Loadc and Loadd (Shadow priest DPS) following Loada.
+
+      1. Walking past an unpulled pack: Loada walks from the entrance down the tunnel past
+         the unpulled Defias Miner packs while Loadb/Loadc/Loadd follow. Every follower
+         advances with Loada and no bot aggroes the unpulled pack.
+      2. Healer range and LoS during a pull: Loadb starts out of range (> 40 yd) / behind
+         the tunnel bend while Loada pulls the Defias pack ahead. During the pull, Loadb
+         closes to within 40 yd and line of sight of Loada and stays there.
+    """
+
+    import math
+    import socket
+    import time
+
+    from wlblib import server
+    from wlblib.common import TEST
+    from wlblib.testing import expect
+
+    NAME = "party_positioning"
+    DESCRIPTION = "Party walks past an unpulled pack without body-pulling; healer stays <=40 yd and LoS of tank"
+    TEST_CONFIG = "party_pos"
+    BOT = "Loada"
+    ONLINE = 4
+
+    DM_MAP = 36
+    BOTS = ("Loada", "Loadb", "Loadc", "Loadd")
+    FOLLOWERS = ("Loadb", "Loadc", "Loadd")
+    ENTRANCE = (-16.4, -383.07, 61.78, 1.86)
+    # Safe waypoint along the entrance tunnel (o=1.86 rad): ~10.8 yd ahead at (-19.8, -373.1),
+    # ~20.5 yd from the unpulled Defias Miner at (-40.1, -370.4) (just outside level-17 aggro).
+    WALK_DX, WALK_DY = -4.0, 10.0
+    # Pull spot deeper in the first mine room (~42 yd from entrance, around the tunnel bend).
+    PULL_POS = (-58.0, -380.0, 54.2, 3.14)
+    HEALER_MAX_YD = 40.0
+
+    def run(stack):
+        # Gear at level 20 (3 levels above Deadmines entrance Defias Miners: real
+        # ~17 yd aggro radius, and tank Loada survives the pull while healer closes).
+        server.console("llmtest gear Loada 20 0", wait_s=0.3, inst=TEST)
+        server.console("llmtest maketank Loada", wait_s=0.3, inst=TEST)
+        server.console("llmtest gear Loadb 20 1", wait_s=0.3, inst=TEST)
+        server.console("llmtest gear Loadc 20 2", wait_s=0.3, inst=TEST)
+        server.console("llmtest gear Loadd 20 2", wait_s=0.3, inst=TEST)
+        for b in FOLLOWERS:
+            server.console(f"llmtest group Loada {b}", wait_s=0.3, inst=TEST)
+            server.console(f"llmtest setstrat {b} +follow", wait_s=0.2, inst=TEST)
+        for i, b in enumerate(BOTS):
+            ex, ey, ez, eo = ENTRANCE
+            server.console(f"llmtest tele {b} {DM_MAP} {ex + i * 0.6:.2f} {ey:.2f} {ez:.2f} {eo}",
+                           wait_s=0.3, inst=TEST)
+
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        sock.connect(str(TEST.run / "brain.sock"))
+        reader = wire.FrameReader()
+        snaps = []  # (monotonic, snap)
+
+        def pump(until, timeout, what):
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                got = until()
+                if got:
+                    return got
+                try:
+                    chunk = sock.recv(1 << 20)
+                except socket.timeout:
+                    continue
+                if not chunk:
+                    break
+                for payload in reader.feed(chunk):
+                    msg = wire.decode_module_message(payload)
+                    if msg and msg.get("snapshot"):
+                        snaps.append((time.monotonic(), msg["snapshot"]))
+            return None
+
+        def latest(bot, after=0.0):
+            return next((s for t, s in reversed(snaps)
+                         if s.get("bot") == bot and t >= after), None)
+
+        def in_dm(snap):
+            w = (snap or {}).get("base", {}).get("where", {})
+            return bool(w.get("in_instance")) and "Deadmines" in w.get("map", "")
+
+        def pos_of(snap):
+            p = (snap or {}).get("base", {}).get("where", {}).get("position")
+            return (p["x"], p["y"]) if p else None
+
+        def in_combat(snap):
+            return bool((snap or {}).get("base", {}).get("self", {}).get("in_combat", False))
+
+        def tank_rel(healer_snap):
+            for m in (healer_snap or {}).get("ext", {}).get("party", {}).get("members", []):
+                if m.get("name") == "Loada":
+                    return m.get("rel") or {}
+            return None
+
+        try:
+            t0 = time.monotonic()
+            ready = pump(
+                lambda: all(in_dm(latest(b, t0)) and not in_combat(latest(b, t0)) for b in BOTS),
+                20.0, "party in Deadmines entrance",
+            )
+            expect(ready, "setup: party did not arrive cleanly in Deadmines")
+            start_pos = {b: pos_of(latest(b, t0)) for b in BOTS}
+
+            # Phase 1: Walk past the unpulled Defias pack without body-pulling.
+            # MSG_MINIMAP_PING is broadcast to the *rest* of the group, so Loadb pings
+            # for Loada (the leader) to walk there while Loadb/Loadc/Loadd follow.
+            walk_start = time.monotonic()
+            server.console(f"llmtest ping Loadb {WALK_DX} {WALK_DY}", wait_s=0.5, inst=TEST)
+            send_cmd(sock, {"bot": "Loada", "command_id": 701,
+                            "act": {"verb": "TO", "thing": "PING"}})
+            walk_done = pump(
+                lambda: any(
+                    s.get("bot") == "Loada" and s.get("done_act_command_id") == 701
+                    for t, s in snaps if t >= walk_start
+                ),
+                15.0, "Loada reaching walk waypoint",
+            )
+            expect(walk_done, "Loada did not finish walking past the unpulled pack")
+            # Let followers catch up and settle for 4 s.
+            settle_until = time.monotonic() + 4.0
+            pump(lambda: time.monotonic() >= settle_until, 5.0, "followers settling")
+
+            end_pos = {b: pos_of(latest(b, walk_start)) for b in BOTS}
+            loada_moved = math.dist(start_pos["Loada"], end_pos["Loada"])
+            follower_moved = {b: math.dist(start_pos[b], end_pos[b]) for b in FOLLOWERS}
+            aggroed = sorted({
+                s.get("bot") for t, s in snaps
+                if t >= walk_start and in_combat(s)
+            })
+
+            # Phase 2: During a pull, healer Loadb stays within 40 yd and LoS of tank Loada.
+            ex, ey, ez, eo = ENTRANCE
+            px, py, pz, po = PULL_POS
+            server.console(f"llmtest move Loadb {ex:.2f} {ey:.2f} {ez:.2f} {eo}",
+                           wait_s=0.3, inst=TEST)
+            server.console(f"llmtest move Loada {px:.2f} {py:.2f} {pz:.2f} {po}",
+                           wait_s=0.3, inst=TEST)
+            server.console(f"llmtest move Loadc {px + 2.0:.2f} {py:.2f} {pz:.2f} {po}",
+                           wait_s=0.3, inst=TEST)
+            server.console(f"llmtest move Loadd {px + 2.0:.2f} {py + 2.0:.2f} {pz:.2f} {po}",
+                           wait_s=0.3, inst=TEST)
+
+            pull_t0 = time.monotonic()
+            tank_in_combat = pump(
+                lambda: in_combat(latest("Loada", pull_t0)),
+                12.0, "tank Loada entering combat",
+            )
+            expect(tank_in_combat, "setup: tank Loada did not enter combat with the Defias pack")
+
+            # Wait up to 12 s for healer Loadb to get into <= 40 yd AND LoS of tank Loada,
+            # then verify Loadb holds range+LoS while the pull continues.
+            reached = pump(
+                lambda: (
+                    (rel := tank_rel(latest("Loadb", pull_t0))) is not None
+                    and float(rel.get("dist_yd", 999.0)) <= HEALER_MAX_YD
+                    and rel.get("in_los") is True
+                ),
+                12.0, "healer Loadb reaching <= 40 yd and LoS of tank Loada",
+            )
+            reached_at = time.monotonic()
+            hold_until = reached_at + 4.0
+            if reached:
+                pump(lambda: time.monotonic() >= hold_until, 5.0, "healer holding range+LoS")
+
+            healer_snaps_pull = [
+                (t, tank_rel(s)) for t, s in snaps
+                if s.get("bot") == "Loadb" and t >= pull_t0
+            ]
+            last_rel = tank_rel(latest("Loadb", pull_t0))
+            # Allow a brief single-tick corner flicker while finishing the approach,
+            # but fail if Loadb stays out of range/LoS for > 1.5 s or ends out of range/LoS.
+            bad_since = None
+            drifted_after = []
+            for t, rel in healer_snaps_pull:
+                if not reached or t < reached_at or rel is None:
+                    continue
+                if not in_combat(latest("Loada", pull_t0)):
+                    break
+                bad = (float(rel.get("dist_yd", 999.0)) > HEALER_MAX_YD
+                       or rel.get("in_los") is False)
+                if bad:
+                    if bad_since is None:
+                        bad_since = t
+                    elif t - bad_since > 1.5:
+                        drifted_after.append(rel)
+                else:
+                    bad_since = None
+            if reached and last_rel is not None and in_combat(latest("Loada", pull_t0)):
+                if (float(last_rel.get("dist_yd", 999.0)) > HEALER_MAX_YD
+                        or last_rel.get("in_los") is False):
+                    drifted_after.append(last_rel)
+        finally:
+            sock.close()
+            server.console("llmtest clearstrat", wait_s=0.2, inst=TEST)
+            for b in BOTS:
+                server.console(f"llmtest ungroup {b}", wait_s=0.2, inst=TEST)
+                server.console(f"llmtest tele {b} 1 -618.5 -4251.7 38.7 0",
+                               wait_s=0.2, inst=TEST)
+
+        expect(loada_moved >= 10.0,
+               f"setup: Loada only moved {loada_moved:.1f} yd along the walk path")
+        expect(all(d >= 5.0 for d in follower_moved.values()),
+               f"followers did not follow Loada past the pack: {follower_moved}")
+        expect(not aggroed,
+               f"body pull while walking past unpulled pack: {aggroed} entered combat")
+        expect(reached,
+               f"healer Loadb never reached <= {HEALER_MAX_YD:.0f} yd + LoS of tank Loada "
+               f"during pull (last rel={last_rel})")
+        expect(not drifted_after,
+               f"healer Loadb drifted out of range/LoS during pull: {drifted_after[:3]}")
+        final_yd = float((last_rel or {}).get("dist_yd", 0.0))
+        return (f"walked {loada_moved:.1f} yd past unpulled pack with 0 body pulls; "
+                f"healer Loadb closed to {final_yd:.1f} yd + LoS of tank during pull")
+    return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
+
+
+def _case_heal_reaction():
+    """Heal reaction time measurement & budget (Companion-lessons Gap 2).
+
+    Measures the time from the tank (`Loada`) dropping below the heal threshold
+    (`TANK_DROP_PCT = 45%`, below `Playerbots.LowHealth = 52%`) during real
+    combat to the Holy Priest healer (`Loadb`, in range and LoS) starting a
+    heal cast (or landing an instant heal/shield aura).
+
+    Budget: `HEAL_REACTION_BUDGET_MS = 1500.0` ms per trial (3 trials).
+    With `Playerbots.DynamicReactDelay = 0` (250 ms combat react delay in
+    `config/playerbots.overrides`), world tick (~50 ms), and reactive cast
+    snapshot (`kMinReactiveGap = 50 ms`), an unblocked healer reacts well under
+    1.5 s; a regression in react delay, health bands, or healer AI fails this
+    gate.
+    """
+
+    import re
+    import socket
+    import time
+
+    from wlblib import server
+    from wlblib.common import TEST
+    from wlblib.testing import expect
+
+    NAME = "heal_reaction"
+    DESCRIPTION = "Healer starts a heal promptly when the tank drops below threshold (budget <= 1500 ms)"
+    TEST_CONFIG = "party_pos"
+    BOT = "Loada"
+    ONLINE = 4
+
+    DM_MAP = 36
+    # Single Defias Miner in the Deadmines entrance tunnel and healer spot ~15 yd
+    # back in clear LoS (so the tank holds aggro on one mob and the healer stays
+    # out of melee / `enemy too close for spell` fleeing).
+    TANK_POS = (-40.1, -370.4, 58.0, 3.14)
+    HEALER_POS = (-25.0, -373.0, 60.5, 3.14)
+    TANK_DROP_PCT = 45
+    TRIALS = 3
+    HEAL_REACTION_BUDGET_MS = 1500.0
+    HEAL_SPELLS = (
+        "Flash Heal",
+        "Heal",
+        "Lesser Heal",
+        "Greater Heal",
+        "Binding Heal",
+        "Prayer of Healing",
+        "Renew",
+        "Power Word: Shield",
+    )
+    # Only count Renew as an instant healer aura (not Power Word: Shield, which
+    # Shadow Priest tank Loada can cast on itself when low health).
+    INSTANT_HEAL_AURAS = ("Renew",)
+    T_US_RE = re.compile(r"t_us=(\d+)")
+
+    def run(stack):
+        # Shadow spec + maketank on Loada so the tank doesn't self-heal away the
+        # test spike; Holy spec (tab 1) on Loadb as the dedicated party healer.
+        server.console("llmtest gear Loada 20 2", wait_s=0.3, inst=TEST)
+        server.console("llmtest maketank Loada", wait_s=0.3, inst=TEST)
+        server.console("llmtest gear Loadb 20 1", wait_s=0.3, inst=TEST)
+        server.console("llmtest resetbot Loada", wait_s=0.3, inst=TEST)
+        server.console("llmtest resetbot Loadb", wait_s=0.3, inst=TEST)
+        # Group Loadb (leader) + Loada (tank) only, so Loadc/Loadd don't burn
+        # down the pack during the 3 trials and party_positioning gets a fresh
+        # Loada-led group afterwards.
+        server.console("llmtest group Loadb Loada", wait_s=0.3, inst=TEST)
+        tx, ty, tz, to = TANK_POS
+        hx, hy, hz, ho = HEALER_POS
+        server.console(f"llmtest tele Loada {DM_MAP} {tx:.2f} {ty:.2f} {tz:.2f} {to}",
+                       wait_s=0.3, inst=TEST)
+        server.console(f"llmtest tele Loadb {DM_MAP} {hx:.2f} {hy:.2f} {hz:.2f} {ho}",
+                       wait_s=0.3, inst=TEST)
+
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        sock.connect(str(TEST.run / "brain.sock"))
+        reader = wire.FrameReader()
+        snaps = []  # (monotonic, snap)
+
+        def pump(until, timeout):
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                got = until()
+                if got:
+                    return got
+                try:
+                    chunk = sock.recv(1 << 20)
+                except socket.timeout:
+                    continue
+                if not chunk:
+                    break
+                for payload in reader.feed(chunk):
+                    msg = wire.decode_module_message(payload)
+                    if msg and msg.get("snapshot"):
+                        snaps.append((time.monotonic(), msg["snapshot"]))
+            return None
+
+        def latest(bot, after_us=0):
+            return next(
+                (s for _, s in reversed(snaps)
+                 if s.get("bot") == bot and int(s.get("monotonic_us", 0)) >= after_us),
+                None,
+            )
+
+        def in_dm(snap):
+            w = (snap or {}).get("base", {}).get("where", {})
+            return bool(w.get("in_instance")) and "Deadmines" in w.get("map", "")
+
+        def in_combat(snap):
+            return bool((snap or {}).get("base", {}).get("self", {}).get("in_combat", False))
+
+        def cast_name(snap):
+            c = (snap or {}).get("base", {}).get("self", {}).get("casting") or {}
+            sp = c.get("spell") or {}
+            return sp.get("name", "")
+
+        def aura_names(snap):
+            auras = (snap or {}).get("base", {}).get("self", {}).get("unit", {}).get("auras") or []
+            return {a.get("name", "") for a in auras}
+
+        def tank_rel(healer_snap):
+            for m in (healer_snap or {}).get("ext", {}).get("party", {}).get("members", []):
+                if m.get("name") == "Loada":
+                    return m.get("rel") or {}
+            return None
+
+        reactions_ms = []
+        spells_seen = []
+        try:
+            ready = pump(
+                lambda: (
+                    in_dm(latest("Loada"))
+                    and in_combat(latest("Loada"))
+                    and in_dm(latest("Loadb"))
+                    and (rel := tank_rel(latest("Loadb"))) is not None
+                    and float(rel.get("dist_yd", 999.0)) <= 30.0
+                    and rel.get("in_los") is True
+                ),
+                15.0,
+            )
+            expect(ready, "setup: tank Loada in combat with healer Loadb in range+LoS in Deadmines")
+            # Let Loada land an opening hit/DoT so Loada holds aggro on the mob,
+            # then nudge Loada to 80% HP so Loadb enters BOT_STATE_COMBAT before
+            # the timed trials begin (measuring combat heal reaction, not the
+            # 1 s out-of-combat tick).
+            settle = time.monotonic() + 1.5
+            pump(lambda: time.monotonic() >= settle, 2.0)
+            server.console("llmtest sethp Loada 80", wait_s=0.2, inst=TEST)
+            both_combat = pump(
+                lambda: in_combat(latest("Loada")) and in_combat(latest("Loadb")),
+                10.0,
+            )
+            expect(both_combat, "setup: healer Loadb did not enter combat with tank Loada")
+            # Let Loadb finish its opening combat-entry GCD / Fear Ward buff so
+            # Trial 1 measures steady-state in-combat heal reaction.
+            gcd_settle = time.monotonic() + 2.0
+            pump(lambda: time.monotonic() >= gcd_settle, 2.5)
+
+            for trial in range(TRIALS):
+                # Reset tank to full HP and wait for healer to finish any prior
+                # cast so each trial measures a clean reaction to a fresh drop.
+                top_out = server.console("llmtest sethp Loada 100", wait_s=0.2, inst=TEST)
+                m_top = T_US_RE.search(top_out)
+                expect(m_top, f"trial {trial + 1}: sethp 100 did not report t_us: {top_out!r}")
+                top_us = int(m_top.group(1))
+                idle = pump(
+                    lambda: (
+                        (hs := latest("Loadb", top_us)) is not None
+                        and in_combat(hs)
+                        and cast_name(hs) not in HEAL_SPELLS
+                        and (ts := latest("Loada", top_us)) is not None
+                        and in_combat(ts)
+                    ),
+                    8.0,
+                )
+                expect(idle, f"trial {trial + 1}: healer did not finish prior cast / tank left combat")
+                pre_tank_auras = aura_names(latest("Loada", top_us))
+
+                # Drop tank HP below LowHealth (52%) and record exact world-thread t_us.
+                drop_out = server.console(
+                    f"llmtest sethp Loada {TANK_DROP_PCT}", wait_s=0.15, inst=TEST
+                )
+                m_drop = T_US_RE.search(drop_out)
+                expect(m_drop, f"trial {trial + 1}: sethp {TANK_DROP_PCT} did not report t_us: {drop_out!r}")
+                t_drop_us = int(m_drop.group(1))
+
+                def find_heal_response():
+                    for _, s in snaps:
+                        t_us = int(s.get("monotonic_us", 0))
+                        if t_us < t_drop_us:
+                            continue
+                        if s.get("bot") == "Loadb":
+                            sp = cast_name(s)
+                            if sp in HEAL_SPELLS:
+                                return (t_us, sp)
+                        elif s.get("bot") == "Loada":
+                            new_auras = aura_names(s) - pre_tank_auras
+                            for a in INSTANT_HEAL_AURAS:
+                                if a in new_auras:
+                                    return (t_us, a)
+                    return None
+
+                hit = pump(find_heal_response, 5.0)
+                if not hit:
+                    b_snaps = [s for _, s in snaps if s.get("bot") == "Loadb" and int(s.get("monotonic_us", 0)) >= t_drop_us]
+                    a_snaps = [s for _, s in snaps if s.get("bot") == "Loada" and int(s.get("monotonic_us", 0)) >= t_drop_us]
+                    b_tl = [
+                        (round((int(s.get("monotonic_us", 0)) - t_drop_us) / 1000),
+                         s.get("base", {}).get("self", {}).get("power"),
+                         s.get("base", {}).get("self", {}).get("casting"),
+                         (round(p["x"], 1), round(p["y"], 1))
+                         if (p := s.get("base", {}).get("where", {}).get("position")) else None,
+                         round((tank_rel(s) or {}).get("dist_yd", -1), 1),
+                         (tank_rel(s) or {}).get("in_los"))
+                        for s in b_snaps
+                    ]
+                    a_tl = [
+                        (round((int(s.get("monotonic_us", 0)) - t_drop_us) / 1000),
+                         s.get("base", {}).get("self", {}).get("health"),
+                         sorted(aura_names(s)))
+                        for s in a_snaps
+                    ]
+                    b_party = (b_snaps[-1].get("ext", {}).get("party", {}) if b_snaps else {})
+                    expect(
+                        False,
+                        f"trial {trial + 1}: healer Loadb did not start a heal within 5.0 s\n"
+                        f"  b_tl={b_tl[:12]}\n"
+                        f"  a_tl={a_tl[:12]}\n"
+                        f"  b_party={b_party}",
+                    )
+                t_heal_us, spell = hit
+                react_ms = max(0.0, (t_heal_us - t_drop_us) / 1000.0)
+                reactions_ms.append(react_ms)
+                spells_seen.append(spell)
+        finally:
+            sock.close()
+            server.console("llmtest clearstrat", wait_s=0.2, inst=TEST)
+            for b in ("Loada", "Loadb"):
+                server.console(f"llmtest resetbot {b}", wait_s=0.2, inst=TEST)
+                server.console(f"llmtest ungroup {b}", wait_s=0.2, inst=TEST)
+                server.console(f"llmtest tele {b} 1 -618.5 -4251.7 38.7 0",
+                               wait_s=0.2, inst=TEST)
+
+        worst_ms = max(reactions_ms)
+        expect(
+            worst_ms <= HEAL_REACTION_BUDGET_MS,
+            f"late heal: worst reaction {worst_ms:.0f} ms > budget "
+            f"{HEAL_REACTION_BUDGET_MS:.0f} ms (trials={[round(x) for x in reactions_ms]} ms, "
+            f"spells={spells_seen})",
+        )
+        return (
+            f"{TRIALS}/{TRIALS} heals within {HEAL_REACTION_BUDGET_MS:.0f} ms budget "
+            f"(trials={[round(x) for x in reactions_ms]} ms, max {worst_ms:.0f} ms, "
+            f"spells={spells_seen})"
+        )
+    return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
+
+
+CASES = [_case_pull_gate(), _case_crowd_control(), _case_use_physics(), _case_hunter_dismiss_pet(), _case_crisp_dodge(), _case_popup_policy(), _case_human_party(), _case_human_dungeon(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal(), _case_trade(), _case_party_positioning(), _case_heal_reaction()]

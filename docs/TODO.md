@@ -34,17 +34,19 @@ Guild Wars heroes):
   replies slower than about 1.5-2 s for commands; carrying the human so hard dungeons feel empty.
 - Where we stand (2026-11-26): pace, AFK wait, no-blame and instant commands are in RULES.md
   and the harness (AFK, kill-skull and go-there have e2e). Gaps, to plan as tests first:
-  1. **Body pulls / drifting healers (not done):** nothing keeps bots off a pack's aggro edge or
-     the healer in range and line of sight of the tank. E2e: a party walks past an unpulled pack
-     (no bot aggroes it); during a pull the healer stays within 40 yd and LoS of the tank.
-  2. **Late heals (not done):** no measure of heal reaction time. Perf/e2e: time from the tank
-     dropping below a threshold to the healer's heal starting; set a budget.
+  1. **Body pulls / drifting healers (done):** `party_positioning` e2e (`e2e_group.py`) walks a
+     4-bot party past an unpulled Deadmines pack with 0 body pulls and verifies the healer closes
+     to <= 40 yd and LoS of the tank during a pull; pure-harness `KeepSafeGroupFollow` and
+     `KeepHealerInTankRangeAndLos` enforce both while yielding to stay, casts, and forced moves.
+  2. **Late heals (done):** `heal_reaction` e2e (`e2e_group.py`) + `llmtest sethp` measures 3
+     in-combat tank drops to 45% HP against a 1500 ms budget; fixed grouped healers restoring
+     their exclusive heal strategy and keeping `-threat`.
   3. **Carrying the human (not done):** nothing limits bots' share of the work. Measure it in
      the human-party e2e (bots' share of damage/kills while the human plays) and decide a target.
   4. **Command reply speed (partial):** commands apply in the harness at once, but the LLM chat
      reply after one isn't gated. Perf: p95 from a party command to the bot's reply <= 2 s.
-  5. **Last-second dodges (partial):** dodge eval cases exist; nothing checks the bot leaves
-     early. E2e: time left on the cast when the bot clears the area, with a minimum margin.
+  5. **Last-second dodges (done):** `boss` e2e (`e2e_combat.py`) starts Loada inside Loken's 20 yd
+     Lightning Nova radius and enforces >= 1000 ms remaining on the cast when clearing 20 yd.
   6. **Chatter (partial, rules only):** no long-session check. Soak: count repeated, narrating
      or sycophantic lines per hour (simple string checks plus an LLM judge) with a ceiling.
 

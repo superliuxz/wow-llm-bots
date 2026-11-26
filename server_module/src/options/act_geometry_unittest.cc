@@ -256,5 +256,98 @@ TEST(ActGeometryTest, OnlySpellsThatHoldTheBotStillWaitOutADodge) {
                                 /*channel_allows_move=*/true));
 }
 
+TEST(ActGeometryTest, SafeFollowKeepsFollowersOffUnpulledPackEdge) {
+  // Leader at origin facing +X (0 rad); unpulled pack directly behind at (-16,
+  // 0) so the naive "directly behind" spot (-3, 0) would step closer to the
+  // pack than the leader is.
+  const AnchorGeometry leader{
+      .pos = {0.0f, 0.0f, 0.0f}, .facing_rad = 0.0f, .radius_yd = 0.0f};
+  const pb::Vec3 pack{-16.0f, 0.0f, 0.0f};
+  const std::vector<pb::Vec3> spots =
+      CandidateSpotsForSafeFollow({-5.0f, 0.0f, 0.0f}, leader, {pack});
+  ASSERT_FALSE(spots.empty());
+  // First candidate must be at least as far from `pack` as the leader (16 yd).
+  EXPECT_GE(Dist2D(spots.front(), pack), Dist2D(leader.pos, pack));
+
+  // With a pack to the left (+Y at 15 yd), the directly-behind spot (-3, 0)
+  // is farther from the pack than the leader is, so it stays first.
+  const pb::Vec3 left_pack{0.0f, 15.0f, 0.0f};
+  const std::vector<pb::Vec3> left_spots =
+      CandidateSpotsForSafeFollow({-4.0f, 0.0f, 0.0f}, leader, {left_pack});
+  ASSERT_FALSE(left_spots.empty());
+  EXPECT_NEAR(left_spots.front().x, -kSafeFollowDistYd, 1e-3f);
+  EXPECT_NEAR(left_spots.front().y, 0.0f, 1e-3f);
+
+  // Adversarial counter-test: boxed in by packs on every side still returns
+  // all candidates (never empty).
+  const std::vector<pb::Vec3> boxed =
+      CandidateSpotsForSafeFollow({0.0f, 0.0f, 0.0f}, leader,
+                                  {{10.0f, 0.0f, 0.0f},
+                                   {-10.0f, 0.0f, 0.0f},
+                                   {0.0f, 10.0f, 0.0f},
+                                   {0.0f, -10.0f, 0.0f}});
+  EXPECT_EQ(boxed.size(), 12u);
+}
+
+TEST(ActGeometryTest, BotEncroachesUnpulledDetectsAggroEdgeDrift) {
+  const pb::Vec3 leader{0.0f, 0.0f, 0.0f};
+  const pb::Vec3 pack{0.0f, 19.0f, 0.0f};
+  // Follower drifted 3 yd toward the pack (16 yd < 18 yd guard and closer than
+  // leader's 19 yd).
+  EXPECT_TRUE(BotEncroachesUnpulled({0.0f, 3.0f, 0.0f}, leader, {pack}));
+  // Follower on the safe side (22 yd from pack, farther than leader).
+  EXPECT_FALSE(BotEncroachesUnpulled({0.0f, -3.0f, 0.0f}, leader, {pack}));
+  // Pack far away (30 yd > guard): not encroaching.
+  EXPECT_FALSE(
+      BotEncroachesUnpulled({0.0f, 3.0f, 0.0f}, leader, {{0.0f, 35.0f, 0.0f}}));
+  // No unpulled packs: never encroaching.
+  EXPECT_FALSE(BotEncroachesUnpulled({0.0f, 3.0f, 0.0f}, leader, {}));
+}
+
+TEST(ActGeometryTest, HealerNeedsTankRepositionAndAdversarialCounterTests) {
+  HealerPositionCheck base{
+      .bot_alive = true,
+      .is_healer = true,
+      .in_group = true,
+      .stay = false,
+      .forced_move_active = false,
+      .casting = false,
+      .tank_alive = true,
+      .tank_in_combat = true,
+      .dist_to_tank_yd = 20.0f,
+      .in_los_of_tank = true,
+  };
+  // Within range and in LoS: no reposition needed.
+  EXPECT_FALSE(HealerNeedsTankReposition(base));
+
+  // Beyond reposition threshold (> 34 yd): must close range.
+  HealerPositionCheck far = base;
+  far.dist_to_tank_yd = kHealerRepositionDistYd + 1.0f;
+  EXPECT_TRUE(HealerNeedsTankReposition(far));
+
+  // Out of LoS even at 15 yd: must reposition around the corner.
+  HealerPositionCheck no_los = base;
+  no_los.dist_to_tank_yd = 15.0f;
+  no_los.in_los_of_tank = false;
+  EXPECT_TRUE(HealerNeedsTankReposition(no_los));
+
+  // Adversarial counter-tests: never override solo, non-healer, stay policy,
+  // active brain dodge (forced_move_active), active cast, dead bot/tank, or
+  // out-of-combat tank.
+  auto check_blocked = [&](auto mutate) {
+    HealerPositionCheck c = no_los;
+    mutate(c);
+    EXPECT_FALSE(HealerNeedsTankReposition(c));
+  };
+  check_blocked([](auto& c) { c.in_group = false; });
+  check_blocked([](auto& c) { c.is_healer = false; });
+  check_blocked([](auto& c) { c.stay = true; });
+  check_blocked([](auto& c) { c.forced_move_active = true; });
+  check_blocked([](auto& c) { c.casting = true; });
+  check_blocked([](auto& c) { c.bot_alive = false; });
+  check_blocked([](auto& c) { c.tank_alive = false; });
+  check_blocked([](auto& c) { c.tank_in_combat = false; });
+}
+
 }  // namespace
 }  // namespace llm_brain

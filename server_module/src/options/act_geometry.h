@@ -122,6 +122,52 @@ bool CastHoldsMoveOut(uint32_t cast_time_ms,
                       bool channeled,
                       bool channel_allows_move);
 
+// Safe group-follow geometry (Companion-lessons Gap 1): keeps followers behind
+// the leader and off the aggro edge of unpulled hostile packs.
+inline constexpr float kSafeFollowDistYd = 3.0f;
+inline constexpr float kSafeFollowTriggerYd = 5.5f;
+
+// Candidate follow spots around `leader` at `follow_dist_yd`, ordered behind
+// the leader first, then partitioned so spots that are safe from every point
+// in `unpulled` (at least `clear_yd` away, or at least as far from the pack as
+// `leader.pos` is) come first. Never returns empty.
+std::vector<wlb::snapshot::Vec3> CandidateSpotsForSafeFollow(
+    const wlb::snapshot::Vec3& bot_pos,
+    const AnchorGeometry& leader,
+    const std::vector<wlb::snapshot::Vec3>& unpulled,
+    float follow_dist_yd = kSafeFollowDistYd,
+    float clear_yd = kUnpulledClearYd);
+
+// True when `bot_pos` is within `guard_yd` of at least one unpulled hostile
+// AND closer to it than `leader_pos` is (by >= 0.5 yd), meaning the follower
+// is encroaching on a pack's aggro edge that the leader stayed clear of.
+bool BotEncroachesUnpulled(const wlb::snapshot::Vec3& bot_pos,
+                           const wlb::snapshot::Vec3& leader_pos,
+                           const std::vector<wlb::snapshot::Vec3>& unpulled,
+                           float guard_yd = kUnpulledClearYd);
+
+// Healer range/LoS guard during a pull (Companion-lessons Gap 1): keeps a
+// grouped healer within 40 yd (triggering at 34 yd for hysteresis, stopping
+// around 28 yd) and line of sight of the tank in combat, while yielding to
+// stay policies, casts, and brain forced-move acts (e.g. boss dodges).
+inline constexpr float kHealerRepositionDistYd = 34.0f;
+inline constexpr float kHealerStopDistYd = 28.0f;
+
+struct HealerPositionCheck {
+  bool bot_alive = false;
+  bool is_healer = false;
+  bool in_group = false;
+  bool stay = false;
+  bool forced_move_active = false;
+  bool casting = false;
+  bool tank_alive = false;
+  bool tank_in_combat = false;
+  float dist_to_tank_yd = 0.0f;
+  bool in_los_of_tank = true;
+};
+
+bool HealerNeedsTankReposition(const HealerPositionCheck& check);
+
 }  // namespace llm_brain
 
 #endif  // MOD_LLM_BRAIN_OPTIONS_ACT_GEOMETRY_H_

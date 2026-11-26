@@ -621,6 +621,11 @@ def _case_boss():
 
     LOKEN_X = 1186.47
     LOKEN_Y = 33.8305
+    NOVA_RADIUS_YD = 20.0
+    # Loken's Lightning Nova is a 5.0 s normal (4.0 s heroic) cast with a 20 yd
+    # blast radius; from point-blank melee (~0.5 yd) at 7 yd/s run speed,
+    # clearing with >= 1000 ms remaining proves an early dodge, not a last-second one.
+    MIN_DODGE_MARGIN_MS = 1000
     ATTACK_LOKEN_RE = re.compile(r"^\s+(\d+)\. Attack Loken\b", re.M)
     KEEP_RE = re.compile(r"^\s+(\d+)\. Keep doing what I'm doing$", re.M)
 
@@ -647,6 +652,16 @@ def _case_boss():
         cast_obj = act_obj.get("cast", {}) if isinstance(act_obj, dict) else {}
         sp_obj = cast_obj.get("spell", {}) if isinstance(cast_obj, dict) else {}
         return sp_obj.get("name", "") if isinstance(sp_obj, dict) else ""
+
+
+    def _loken_cast_remaining_ms(loken):
+        if not loken:
+            return None
+        act_obj = loken.get("activity", {})
+        cast_obj = act_obj.get("cast", {}) if isinstance(act_obj, dict) else {}
+        if not isinstance(cast_obj, dict) or not cast_obj.get("spell"):
+            return None
+        return int(cast_obj.get("remaining_ms", 0))
 
 
     def _loken_dist(snap, loken):
@@ -721,13 +736,16 @@ def _case_boss():
     def run(stack):
         build.common("default", tests=False)
 
-        # Gear both priests at level 80, group them, and place them in front of
-        # Loken in Halls of Lightning (map 602).
+        # Gear both priests at level 80, group them, and place Telda as tank near
+        # Loken (1186.47, 33.83) with Loada ~12 yd West (inside Loken's 20 yd
+        # Lightning Nova danger radius) in Halls of Lightning (map 602), so Loada
+        # always runs out West down the open corridor in clear LoS of Loken.
         server.console("llmtest gear Loada 80", wait_s=0.5, inst=TEST)
         server.console("llmtest gear Telda 80", wait_s=0.5, inst=TEST)
+        server.console("llmtest maketank Telda", wait_s=0.5, inst=TEST)
         server.console("llmtest group Loada Telda", wait_s=0.5, inst=TEST)
-        server.console("llmtest tele Loada 602 1160.0 33.83 60.81 0.0", wait_s=0.5, inst=TEST)
-        server.console("llmtest tele Telda 602 1160.0 31.83 60.81 0.0", wait_s=1.0, inst=TEST)
+        server.console("llmtest tele Loada 602 1174.0 33.83 60.81 0.0", wait_s=0.5, inst=TEST)
+        server.console("llmtest tele Telda 602 1182.0 31.83 60.81 0.0", wait_s=1.0, inst=TEST)
 
         with tempfile.TemporaryDirectory(prefix="wlb-e2e-boss-") as tmp:
             tmp_dir = pathlib.Path(tmp)
@@ -820,8 +838,53 @@ def _case_boss():
                 # A healer can already stand 25 yd out when the Nova starts: then `away 25`
                 # is done at once and there is nothing to move (Loken may close in a little).
                 moved = dist_after >= dist_start + 8.0 or dist_start >= 25.0
-                expect(moved and dist_after >= 20.0,
-                       f"Loada only moved {dist_start:.1f} -> {dist_after:.1f} yd from Loken")
+                if not (moved and dist_after >= NOVA_RADIUS_YD):
+                    with proxy.lock:
+                        tl = [
+                            (round(t - t_nova_start, 2),
+                             round(_loken_dist(s, _find_loken(s)), 1),
+                             _loken_cast_remaining_ms(_find_loken(s)),
+                             tuple(round(v, 1) for v in _pos2d(s)),
+                             (s.get("base", {}).get("self", {}).get("casting") or {}).get("spell", {}).get("name", ""),
+                             s.get("done_act_command_id"))
+                            for t, s in proxy.snapshots
+                            if s.get("bot") == "Loada" and t >= t_nova_start - 0.5
+                        ]
+                    expect(False,
+                           f"Loada only moved {dist_start:.1f} -> {dist_after:.1f} yd from Loken; tl={tl[:25]}")
+
+                # 5. Dodge safety margin (Gap 5): Loada starts inside the 20 yd
+                # Lightning Nova radius and must clear 20 yd while the cast still has at
+                # least MIN_DODGE_MARGIN_MS remaining (no last-second dodges).
+                expect(
+                    dist_start < NOVA_RADIUS_YD,
+                    f"setup: Loada started {dist_start:.1f} yd from Loken (outside "
+                    f"{NOVA_RADIUS_YD:.0f} yd danger radius)",
+                )
+                with proxy.lock:
+                    clear_snap = next(
+                        (s for t, s in proxy.snapshots
+                         if s.get("bot") == "Loada"
+                         and t >= t_nova_start
+                         and _loken_dist(s, _find_loken(s)) >= NOVA_RADIUS_YD),
+                        None,
+                    )
+                clear_loken = _find_loken(clear_snap) if clear_snap else None
+                clear_cast = _loken_cast_name(clear_loken)
+                clear_rem_ms = (
+                    _loken_cast_remaining_ms(clear_loken)
+                    if clear_cast == "Lightning Nova"
+                    else 0
+                )
+                expect(
+                    clear_snap is not None
+                    and clear_cast == "Lightning Nova"
+                    and clear_rem_ms is not None
+                    and clear_rem_ms >= MIN_DODGE_MARGIN_MS,
+                    f"last-second dodge: cleared {NOVA_RADIUS_YD:.0f} yd with "
+                    f"{clear_rem_ms} ms left on cast {clear_cast!r} "
+                    f"(need >= {MIN_DODGE_MARGIN_MS} ms; dist_start={dist_start:.1f})",
+                )
 
                 with proxy.lock:
                     expect(not proxy.visibility_errors,
@@ -844,8 +907,9 @@ def _case_boss():
                     expect(not nova_wakes,
                            f"unexpected standing-order wake during Lightning Nova: {nova_wakes}")
 
+                margin_str = f", margin {clear_rem_ms} ms" if clear_rem_ms is not None else ""
                 return (f"Loken Lightning Nova: react {react_ms:.0f} ms, "
-                        f"dist {dist_start:.1f} -> {dist_after:.1f} yd, 0 deaths")
+                        f"dist {dist_start:.1f} -> {dist_after:.1f} yd{margin_str}, 0 deaths")
             finally:
                 harness_proc.terminate()
                 try:

@@ -248,4 +248,57 @@ bool CastHoldsMoveOut(uint32_t cast_time_ms,
   return channeled ? !channel_allows_move : cast_time_ms > 0;
 }
 
+std::vector<pb::Vec3> CandidateSpotsForSafeFollow(
+    const pb::Vec3& /*bot_pos*/,
+    const AnchorGeometry& leader,
+    const std::vector<pb::Vec3>& unpulled,
+    float follow_dist_yd,
+    float clear_yd) {
+  const float dist = std::max(1.0f, follow_dist_yd);
+  const float behind_angle = leader.facing_rad + kPi;
+  static constexpr float kOffsets[] = {0.0f,    30.0f,  -30.0f,  60.0f,
+                                       -60.0f,  90.0f,  -90.0f,  120.0f,
+                                       -120.0f, 150.0f, -150.0f, 180.0f};
+  std::vector<pb::Vec3> spots;
+  AppendFan(&spots, leader.pos, behind_angle, dist, kOffsets,
+            sizeof(kOffsets) / sizeof(kOffsets[0]));
+  if (unpulled.empty()) {
+    return spots;
+  }
+  // A follow spot is safe against every unpulled hostile if it stays at least
+  // `clear_yd` away from that hostile OR at least as far from it as the leader
+  // already is (so the follower never steps closer to a pack than the leader).
+  std::stable_partition(spots.begin(), spots.end(), [&](const pb::Vec3& spot) {
+    return std::all_of(unpulled.begin(), unpulled.end(),
+                       [&](const pb::Vec3& mob) {
+                         const float spot_d = Dist2D(spot, mob);
+                         const float leader_d = Dist2D(leader.pos, mob);
+                         return spot_d >= clear_yd || spot_d >= leader_d;
+                       });
+  });
+  return spots;
+}
+
+bool BotEncroachesUnpulled(const pb::Vec3& bot_pos,
+                           const pb::Vec3& leader_pos,
+                           const std::vector<pb::Vec3>& unpulled,
+                           float guard_yd) {
+  for (const pb::Vec3& mob : unpulled) {
+    const float bot_d = Dist2D(bot_pos, mob);
+    const float leader_d = Dist2D(leader_pos, mob);
+    if (bot_d < guard_yd && bot_d + 0.5f < leader_d) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool HealerNeedsTankReposition(const HealerPositionCheck& c) {
+  if (!c.bot_alive || !c.is_healer || !c.in_group || c.stay ||
+      c.forced_move_active || c.casting || !c.tank_alive || !c.tank_in_combat) {
+    return false;
+  }
+  return c.dist_to_tank_yd > kHealerRepositionDistYd || !c.in_los_of_tank;
+}
+
 }  // namespace llm_brain

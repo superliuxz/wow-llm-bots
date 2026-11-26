@@ -90,4 +90,24 @@ std::vector<std::string> MissingActionNames(
   return missing;
 }
 
+std::string_view HealerCombatStrategyDelta(HealerSpec spec, bool in_group) {
+  switch (spec) {
+    case HealerSpec::kNone:
+      return "";
+    case HealerSpec::kPriestDiscipline:
+      return in_group ? ",-holy dps,-shadow debuff,-shadow aoe,+disc"
+                      : ",+holy dps,+shadow debuff,+shadow aoe";
+    case HealerSpec::kPriestHoly:
+      return in_group ? ",-holy dps,-shadow debuff,-shadow aoe,+holy heal"
+                      : ",+holy dps,+shadow debuff,+shadow aoe";
+    case HealerSpec::kDruidRestoration:
+      return in_group ? ",-aoe,+resto" : ",+aoe";
+    case HealerSpec::kShamanRestoration:
+      return in_group ? ",-ele,-caster aoe,+resto" : ",+ele,+caster aoe";
+    case HealerSpec::kPaladinHoly:
+      return in_group ? ",-ret,-baoe,+holy" : ",+ret,+baoe";
+  }
+  return "";
+}
+
 }  // namespace llm_brain

@@ -44,6 +44,15 @@ std::string AdjustNonCombatStrategies(const std::string& base_non_combat,
                                       bool in_dungeon,
                                       bool group_has_human);
 
+// Adjusts `LlmBrain.CombatStrategies` when a bot is in a group:
+//  - Strips `boost` (`-boost`) so grouped bots don't open with cooldowns over
+//    someone else's tank (T3).
+//  - Enables `threat` (`+threat`) for DPS, but keeps `-threat` for healers:
+//    playerbots marks every `CastHealingSpellAction` as
+//    `ActionThreatType::Aoe`, causing `ThreatMultiplier` to suppress all heals
+//    once AoE threat reaches 50%.
+std::string GroupedCombatStrategies(const std::string& combat, bool is_healer);
+
 // Playerbots reflexes held back in group play (they body-pull):
 //  - `block_flee`: its `flee` step back from a mob that gets close runs a
 //    ranged bot into unpulled packs, so it is blocked in a group in a dungeon

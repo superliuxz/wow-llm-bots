@@ -131,5 +131,40 @@ TEST(TickOwnerTest, SessionModeResets) {
   EXPECT_EQ(owner(), TickOwner::kPlayerbots);
 }
 
+TEST(TickOwnerTest, HealerCombatStrategyDeltaRestoresHealingInGroup) {
+  // Solo healers get DPS extras; grouped healers strip them AND restore the
+  // exclusive primary healing strategy (e.g. `+holy heal`, `+disc`, `+resto`,
+  // `+holy`).
+  EXPECT_EQ(HealerCombatStrategyDelta(HealerSpec::kPriestHoly, false),
+            ",+holy dps,+shadow debuff,+shadow aoe");
+  EXPECT_EQ(HealerCombatStrategyDelta(HealerSpec::kPriestHoly, true),
+            ",-holy dps,-shadow debuff,-shadow aoe,+holy heal");
+
+  EXPECT_EQ(HealerCombatStrategyDelta(HealerSpec::kPriestDiscipline, false),
+            ",+holy dps,+shadow debuff,+shadow aoe");
+  EXPECT_EQ(HealerCombatStrategyDelta(HealerSpec::kPriestDiscipline, true),
+            ",-holy dps,-shadow debuff,-shadow aoe,+disc");
+
+  EXPECT_EQ(HealerCombatStrategyDelta(HealerSpec::kDruidRestoration, false),
+            ",+aoe");
+  EXPECT_EQ(HealerCombatStrategyDelta(HealerSpec::kDruidRestoration, true),
+            ",-aoe,+resto");
+
+  EXPECT_EQ(HealerCombatStrategyDelta(HealerSpec::kShamanRestoration, false),
+            ",+ele,+caster aoe");
+  EXPECT_EQ(HealerCombatStrategyDelta(HealerSpec::kShamanRestoration, true),
+            ",-ele,-caster aoe,+resto");
+
+  EXPECT_EQ(HealerCombatStrategyDelta(HealerSpec::kPaladinHoly, false),
+            ",+ret,+baoe");
+  EXPECT_EQ(HealerCombatStrategyDelta(HealerSpec::kPaladinHoly, true),
+            ",-ret,-baoe,+holy");
+
+  // Adversarial counter-test: non-healer specs get no strategy delta solo or
+  // grouped.
+  EXPECT_TRUE(HealerCombatStrategyDelta(HealerSpec::kNone, false).empty());
+  EXPECT_TRUE(HealerCombatStrategyDelta(HealerSpec::kNone, true).empty());
+}
+
 }  // namespace
 }  // namespace llm_brain

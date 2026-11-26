@@ -64,6 +64,7 @@
 #include "UnitDefines.h"
 #include "Value.h"
 #include "WorldPacket.h"
+#include "base/time/time.h"
 #include "bot_manager/bot_manager.h"
 #include "chat/chat_scripts.h"
 
@@ -128,6 +129,7 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"lfgboot", HandleLfgBoot, SEC_ADMINISTRATOR, Console::Yes},
         {"spellmiss", HandleSpellMiss, SEC_ADMINISTRATOR, Console::Yes},
         {"tame", HandleTame, SEC_ADMINISTRATOR, Console::Yes},
+        {"sethp", HandleSetHp, SEC_ADMINISTRATOR, Console::Yes},
     };
     static ChatCommandTable root_table = {
         {"llmtest", test_table},
@@ -1274,6 +1276,33 @@ class LlmBrainTestCommandScript : public CommandScript {
     }
     handler->PSendSysMessage("llmtest: {} tamed {} (entry {})",
                              player->GetName(), pet->GetName(), creature_entry);
+    return true;
+  }
+
+  // `llmtest sethp <name> <pct>`: sets a living player's health to `pct`% of
+  // max health (clamped to [1, 100]) and prints the world-thread monotonic
+  // timestamp in microseconds (`t_us=...`) on the same clock as snapshot
+  // `monotonic_us`, so e2e tests can measure heal reaction time without
+  // console-polling jitter.
+  static bool HandleSetHp(ChatHandler* handler,
+                          std::string player_name,
+                          uint32_t pct) {
+    Player* player = FindOnlinePlayer(handler, std::move(player_name));
+    if (!player || !player->IsAlive()) {
+      handler->SendErrorMessage("llmtest: sethp: needs a living player");
+      return false;
+    }
+    const uint32_t clamped = std::clamp<uint32_t>(pct, 1, 100);
+    const uint32_t max_hp = std::max<uint32_t>(1, player->GetMaxHealth());
+    const uint32_t target_hp = std::max<uint32_t>(
+        1,
+        static_cast<uint32_t>((static_cast<uint64_t>(max_hp) * clamped) / 100));
+    player->SetHealth(target_hp);
+    const int64_t t_us =
+        (base::TimeTicks::Now() - base::TimeTicks()).InMicroseconds();
+    handler->PSendSysMessage("llmtest: sethp {} {}/{} ({}%) t_us={}",
+                             player->GetName(), player->GetHealth(), max_hp,
+                             clamped, t_us);
     return true;
   }
 };

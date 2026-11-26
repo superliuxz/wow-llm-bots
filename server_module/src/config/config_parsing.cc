@@ -107,6 +107,23 @@ std::string AdjustNonCombatStrategies(const std::string& base_non_combat,
   return out;
 }
 
+std::string GroupedCombatStrategies(const std::string& combat, bool is_healer) {
+  std::string out;
+  for (const StrategyCheck& check : StrategyChecks(combat)) {
+    bool present = check.present;
+    if (check.name == "threat") {
+      present = !is_healer;
+    } else if (check.name == "boost") {
+      present = false;
+    }
+    if (!out.empty()) {
+      out.push_back(',');
+    }
+    out += (present ? "+" : "-") + check.name;
+  }
+  return out;
+}
+
 GroupReflexLimits GroupReflexLimitsFor(bool in_group,
                                        bool in_dungeon,
                                        bool group_has_human) {

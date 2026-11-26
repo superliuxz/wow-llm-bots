@@ -104,6 +104,23 @@ TEST(ConfigParsingTest, AdjustNonCombatStrategiesRespectsGroupAndDungeon) {
             boss);
 }
 
+TEST(ConfigParsingTest, GroupedCombatStrategiesKeepsThreatOffForHealers) {
+  const std::string base = "+boost,+dps assist,-threat";
+  // Grouped DPS watch threat and drop solo `boost`.
+  EXPECT_EQ(GroupedCombatStrategies(base, /*is_healer=*/false),
+            "-boost,+dps assist,+threat");
+  // Grouped healers drop `boost` but MUST keep `-threat`, or playerbots'
+  // ThreatMultiplier blocks all CastHealingSpellAction spells at >= 50% AoE
+  // threat.
+  EXPECT_EQ(GroupedCombatStrategies(base, /*is_healer=*/true),
+            "-boost,+dps assist,-threat");
+  // Adversarial counter-test: even if a config passed `+threat`, healers still
+  // get `-threat`, and unrelated strategies stay intact.
+  EXPECT_EQ(GroupedCombatStrategies("+boost,+threat,-wotlk-hol",
+                                    /*is_healer=*/true),
+            "-boost,-threat,-wotlk-hol");
+}
+
 TEST(ConfigParsingTest, GroupReflexLimitsHoldBackBodyPulls) {
   using L = GroupReflexLimits;
   // Solo bots keep every reflex, even in a dungeon (counter-test).

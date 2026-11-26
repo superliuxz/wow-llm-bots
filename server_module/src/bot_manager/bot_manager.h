@@ -130,6 +130,8 @@ class BotManager {
   void Tick();
   void EnsureStrategies(Player* player);
   void KeepNearHumanLeader(Player* player);
+  void KeepSafeGroupFollow(Player* player);
+  void KeepHealerInTankRangeAndLos(Player* player);
   void LeaveAbandonedHumanGroup(Player* player);
   bool IsKnownBotGuid(uint64_t raw_guid) const;
 

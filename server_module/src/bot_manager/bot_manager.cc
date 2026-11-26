@@ -24,15 +24,19 @@
 #include "CellImpl.h"  // IWYU pragma: keep
 #include "CharacterCache.h"
 #include "CharmInfo.h"
+#include "Creature.h"
 #include "DBCStructure.h"
 #include "Define.h"
 #include "Engine.h"
 #include "Event.h"
+#include "G3D/Vector3.h"
 #include "GameTime.h"
 #include "GenericSpellActions.h"
 #include "GridNotifiers.h"
 #include "GridNotifiersImpl.h"  // IWYU pragma: keep
+#include "GridTerrainData.h"
 #include "Group.h"
+#include "IVMapMgr.h"
 #include "Item.h"
 #include "ItemTemplate.h"
 #include "LFG.h"
@@ -40,10 +44,12 @@
 #include "LastMovementValue.h"
 #include "Log.h"
 #include "Map.h"
+#include "MoveSplineInitArgs.h"
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
 #include "ObjectMgr.h"
 #include "Opcodes.h"
+#include "PathGenerator.h"
 #include "Pet.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
@@ -72,6 +78,8 @@
 #include "options/act_geometry.h"
 #include "options/exec_shared.h"
 #include "popup_watch.h"
+#include "snapshot/perception.h"
+#include "snapshot/snapshot.h"
 
 namespace llm_brain {
 namespace {
@@ -247,26 +255,6 @@ bool CrowdControlledMobNearby(Player* bot) {
     }
   }
   return false;
-}
-
-// Grouped bots play like playerbots' grouped defaults (AiFactory gives
-// `boost` / `-threat` to solo bots only): they watch threat and don't open
-// with cooldowns over someone else's tank (T3).
-std::string GroupedCombatStrategies(const std::string& combat) {
-  std::string out;
-  for (const StrategyCheck& check : StrategyChecks(combat)) {
-    bool present = check.present;
-    if (check.name == "threat") {
-      present = true;
-    } else if (check.name == "boost") {
-      present = false;
-    }
-    if (!out.empty()) {
-      out.push_back(',');
-    }
-    out += (present ? "+" : "-") + check.name;
-  }
-  return out;
 }
 
 // Maximum time to suppress Playerbots' automatic `"auto release"` while waiting
@@ -675,6 +663,25 @@ class BrainPolicyListener final : public ActionExecutionListener {
         return false;
       }
     }
+    // Near unpulled hostile packs, yield playerbots' ChaosFormation `follow`
+    // (which jitters laterally into aggro edges) to BotManager's safe follow.
+    if (name == "follow" && bot_ && !bot_->IsInCombat() && bot_->GetGroup()) {
+      constexpr float kGuardRadiusYd = kUnpulledClearYd + 4.0f;
+      std::vector<Unit*> units;
+      Acore::AnyUnitInObjectRangeCheck check(bot_, kGuardRadiusYd);
+      Acore::UnitListSearcher<Acore::AnyUnitInObjectRangeCheck> searcher(
+          bot_, units, check);
+      Cell::VisitObjects(bot_, searcher, kGuardRadiusYd);
+      for (Unit* u : units) {
+        Creature* c = u->ToCreature();
+        if (c && c->IsAlive() && !c->IsInCombat() &&
+            c->HasReactState(REACT_AGGRESSIVE) && bot_->IsHostileTo(c) &&
+            bot_->CanSeeOrDetect(c) &&
+            !HiddenFromPlayers(c->IsTrigger(), c->GetDisplayId())) {
+          return false;
+        }
+      }
+    }
     const GatedAction* gated = FindGatedAction(name);
     if (!gated) {
       return true;
@@ -834,22 +841,28 @@ void EnsurePolicyListener(Player* player, PlayerbotAI* ai) {
   }
 }
 
-// The solo combat extras playerbots' AiFactory gives random bots that aren't
-// in a group (AddDefaultCombatStrategies): healers also deal damage.
-std::string SoloHealerCombatExtras(Player* player) {
+HealerSpec HealerSpecFor(Player* player) {
   const uint8_t tab = AiFactory::GetPlayerSpecTab(player);
   switch (player->getClass()) {
     case CLASS_PRIEST:
-      return tab != PRIEST_TAB_SHADOW ? ",+holy dps,+shadow debuff,+shadow aoe"
-                                      : "";
+      if (tab == PRIEST_TAB_DISCIPLINE) {
+        return HealerSpec::kPriestDiscipline;
+      }
+      if (tab == PRIEST_TAB_HOLY) {
+        return HealerSpec::kPriestHoly;
+      }
+      return HealerSpec::kNone;
     case CLASS_DRUID:
-      return tab == DRUID_TAB_RESTORATION ? ",+aoe" : "";
+      return tab == DRUID_TAB_RESTORATION ? HealerSpec::kDruidRestoration
+                                          : HealerSpec::kNone;
     case CLASS_SHAMAN:
-      return tab == SHAMAN_TAB_RESTORATION ? ",+ele,+caster aoe" : "";
+      return tab == SHAMAN_TAB_RESTORATION ? HealerSpec::kShamanRestoration
+                                           : HealerSpec::kNone;
     case CLASS_PALADIN:
-      return tab == PALADIN_TAB_HOLY ? ",+ret,+baoe" : "";
+      return tab == PALADIN_TAB_HOLY ? HealerSpec::kPaladinHoly
+                                     : HealerSpec::kNone;
     default:
-      return "";
+      return HealerSpec::kNone;
   }
 }
 
@@ -939,6 +952,8 @@ void BotManager::Tick() {
         }
         EnsureStrategies(player);
         KeepNearHumanLeader(player);
+        KeepSafeGroupFollow(player);
+        KeepHealerInTankRangeAndLos(player);
         LeaveAbandonedHumanGroup(player);
       }
       bot.was_online = true;
@@ -1004,6 +1019,190 @@ void BotManager::KeepNearHumanLeader(Player* player) {
   }
   LOG_INFO("module", "mod-llm-brain: {} strayed {:.0f} yd from {}; following",
            player->GetName(), player->GetDistance(leader), leader->GetName());
+}
+
+namespace {
+
+bool HasActiveForcedMove(PlayerbotAI* ai) {
+  if (!ai) {
+    return false;
+  }
+  auto* last =
+      ai->GetAiObjectContext()->GetValue<LastMovement&>("last movement");
+  if (!last) {
+    return false;
+  }
+  const LastMovement& lm = last->Get();
+  return lm.priority == MovementPriority::MOVEMENT_FORCED &&
+         static_cast<float>(GetMSTimeDiffToNow(lm.msTime)) < lm.lastdelayTime;
+}
+
+std::vector<wlb::snapshot::Vec3> CollectUnpulledHostiles(Player* bot,
+                                                         float radius_yd) {
+  std::vector<Unit*> units;
+  Acore::AnyUnitInObjectRangeCheck check(bot, radius_yd);
+  Acore::UnitListSearcher<Acore::AnyUnitInObjectRangeCheck> searcher(bot, units,
+                                                                     check);
+  Cell::VisitObjects(bot, searcher, radius_yd);
+  std::vector<wlb::snapshot::Vec3> out;
+  for (Unit* u : units) {
+    Creature* c = u->ToCreature();
+    if (c && c->IsAlive() && !c->IsInCombat() &&
+        c->HasReactState(REACT_AGGRESSIVE) && bot->IsHostileTo(c) &&
+        bot->CanSeeOrDetect(c) &&
+        !HiddenFromPlayers(c->IsTrigger(), c->GetDisplayId())) {
+      out.push_back({c->GetPositionX(), c->GetPositionY(), c->GetPositionZ()});
+    }
+  }
+  return out;
+}
+
+Player* FindCombatTank(Player* healer, Group* group) {
+  if (!healer || !group) {
+    return nullptr;
+  }
+  auto eligible = [healer](Player* m) {
+    return m && m != healer && m->IsInWorld() && m->IsAlive() &&
+           m->IsInCombat() && m->GetMapId() == healer->GetMapId() &&
+           m->GetInstanceId() == healer->GetInstanceId();
+  };
+  for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+    if ((slot.flags & MEMBER_FLAG_MAINTANK) != 0) {
+      if (Player* m = ObjectAccessor::FindConnectedPlayer(slot.guid);
+          eligible(m)) {
+        return m;
+      }
+    }
+  }
+  for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+    if ((slot.roles & lfg::PLAYER_ROLE_TANK) != 0) {
+      if (Player* m = ObjectAccessor::FindConnectedPlayer(slot.guid);
+          eligible(m)) {
+        return m;
+      }
+    }
+  }
+  for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+    if (Player* m = ObjectAccessor::FindConnectedPlayer(slot.guid);
+        eligible(m) && PlayerbotAI::IsTank(m)) {
+      return m;
+    }
+  }
+  if (Player* leader =
+          ObjectAccessor::FindConnectedPlayer(group->GetLeaderGUID());
+      eligible(leader)) {
+    return leader;
+  }
+  return nullptr;
+}
+
+}  // namespace
+
+void BotManager::KeepSafeGroupFollow(Player* player) {
+  // Keeps grouped followers (with `+follow`, out of combat) trailing behind
+  // their leader and off the aggro edge of nearby unpulled hostile packs
+  // (Companion-lessons Gap 1).
+  Group* group = player->GetGroup();
+  PlayerbotAI* ai = GET_PLAYERBOT_AI(player);
+  if (!group || !ai || !player->IsAlive() || player->IsInCombat() ||
+      group->IsLeader(player->GetGUID()) || !player->GetMap() ||
+      !ai->HasStrategy("follow", BOT_STATE_NON_COMBAT) ||
+      GetGroupPolicy(player).stay || PingStayHolds(player) ||
+      HasActiveForcedMove(ai) || !CanClearBotMovement(player)) {
+    return;
+  }
+  Player* leader = ObjectAccessor::FindConnectedPlayer(group->GetLeaderGUID());
+  if (!leader || !leader->IsInWorld() || !leader->IsAlive() ||
+      leader->IsInFlight() || leader->GetMapId() != player->GetMapId() ||
+      leader->GetInstanceId() != player->GetInstanceId()) {
+    return;
+  }
+  const wlb::snapshot::Vec3 bot_pos{
+      player->GetPositionX(), player->GetPositionY(), player->GetPositionZ()};
+  const AnchorGeometry leader_anchor{
+      .pos = {leader->GetPositionX(), leader->GetPositionY(),
+              leader->GetPositionZ()},
+      .facing_rad = leader->GetOrientation(),
+      .radius_yd = leader->GetCombatReach()};
+  const std::vector<wlb::snapshot::Vec3> unpulled =
+      CollectUnpulledHostiles(player, 40.0f);
+  const float dist_to_leader = player->GetDistance(leader);
+  const bool encroaching =
+      BotEncroachesUnpulled(bot_pos, leader_anchor.pos, unpulled);
+  if (!encroaching && dist_to_leader <= kSafeFollowTriggerYd) {
+    return;
+  }
+  const std::vector<wlb::snapshot::Vec3> spots =
+      CandidateSpotsForSafeFollow(bot_pos, leader_anchor, unpulled);
+  Map* map = player->GetMap();
+  for (const wlb::snapshot::Vec3& cand : spots) {
+    float z = cand.z;
+    const float h = map->GetHeight(player->GetPhaseMask(), cand.x, cand.y,
+                                   leader->GetPositionZ() + 4.0f);
+    if (h != INVALID_HEIGHT && h != VMAP_INVALID_HEIGHT_VALUE) {
+      z = h;
+    }
+    if (WalkTo(player, cand.x, cand.y, z)) {
+      return;
+    }
+  }
+  WalkTowards(player, leader->GetPositionX(), leader->GetPositionY(),
+              leader->GetPositionZ());
+}
+
+void BotManager::KeepHealerInTankRangeAndLos(Player* player) {
+  // Keeps a grouped healer within 40 yd (triggering at 34 yd) and line of
+  // sight of the combat tank during a pull, yielding to stay policies, casts,
+  // and brain forced-move acts such as boss dodges (Companion-lessons Gap 1).
+  Group* group = player->GetGroup();
+  PlayerbotAI* ai = GET_PLAYERBOT_AI(player);
+  if (!group || !ai || !player->GetMap() || !CanClearBotMovement(player)) {
+    return;
+  }
+  Player* tank = FindCombatTank(player, group);
+  if (!tank) {
+    return;
+  }
+  const bool stay = GetGroupPolicy(player).stay || PingStayHolds(player);
+  const bool forced_move = HasActiveForcedMove(ai);
+  const bool casting = player->IsNonMeleeSpellCast(/*withDelayed=*/false);
+  const float dist_yd = player->GetDistance(tank);
+  const bool in_los = player->IsWithinLOSInMap(tank);
+  if (!HealerNeedsTankReposition({
+          .bot_alive = player->IsAlive(),
+          .is_healer = PlayerbotAI::IsHeal(player),
+          .in_group = true,
+          .stay = stay,
+          .forced_move_active = forced_move,
+          .casting = casting,
+          .tank_alive = tank->IsAlive(),
+          .tank_in_combat = tank->IsInCombat(),
+          .dist_to_tank_yd = dist_yd,
+          .in_los_of_tank = in_los,
+      })) {
+    return;
+  }
+  PathGenerator path(player);
+  path.CalculatePath(tank->GetPositionX(), tank->GetPositionY(),
+                     tank->GetPositionZ());
+  const Movement::PointsArray& pts = path.GetPath();
+  if (pts.size() >= 2) {
+    // Stop at the earliest point along the path into LoS and <= 28 yd of the
+    // tank so the healer rounds the corner without running into melee.
+    for (size_t i = 1; i < pts.size(); ++i) {
+      const G3D::Vector3& p = pts[i];
+      const float d_tank = tank->GetExactDist(p.x, p.y, p.z);
+      if (d_tank <= kHealerStopDistYd &&
+          tank->IsWithinLOS(p.x, p.y, p.z + 1.5f)) {
+        if (WalkTo(player, p.x, p.y, p.z)) {
+          return;
+        }
+        break;
+      }
+    }
+  }
+  WalkTowards(player, tank->GetPositionX(), tank->GetPositionY(),
+              tank->GetPositionZ());
 }
 
 bool BotManager::IsKnownBotGuid(uint64_t raw_guid) const {
@@ -1119,16 +1318,13 @@ void BotManager::EnsureStrategies(Player* player) {
   if (!ai || player->InBattleground()) {
     return;  // Not set up yet, or playerbots' battleground strategies apply.
   }
-  // Solo, a healer also deals damage; in a group it heals, so the same extras
-  // are removed (",+holy dps" becomes ",-holy dps"): joining a group must undo
-  // what being solo added.
-  std::string extras = SoloHealerCombatExtras(player);
-  if (player->GetGroup()) {
-    for (size_t at = extras.find(",+"); at != std::string::npos;
-         at = extras.find(",+", at)) {
-      extras[at + 1] = '-';
-    }
-  }
+  // Solo, a healer also deals damage; in a group it heals, removing the solo
+  // extras and explicitly restoring its primary healing strategy (playerbots'
+  // combat strategy factories for Priest/Shaman/Paladin are exclusive).
+  const HealerSpec healer_spec = HealerSpecFor(player);
+  const bool is_healer = healer_spec != HealerSpec::kNone;
+  const std::string extras(
+      HealerCombatStrategyDelta(healer_spec, player->GetGroup() != nullptr));
   // Role-aware combat strategies: never apply "+dps assist" or "-threat" to
   // tanks (which would strip playerbots' tank assist / threat / pull behavior).
   std::string base_combat = strategies_.combat;
@@ -1151,7 +1347,7 @@ void BotManager::EnsureStrategies(Player* player) {
   Group* group = player->GetGroup();
   const bool in_group = group != nullptr;
   if (in_group) {
-    base_combat = GroupedCombatStrategies(base_combat);
+    base_combat = GroupedCombatStrategies(base_combat, is_healer);
   }
   std::string combat = base_combat + extras;
   const bool is_leader =
