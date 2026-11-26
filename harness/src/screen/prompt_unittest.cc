@@ -72,12 +72,14 @@ TEST(PromptTest, ALineBreakCannotWriteAFakeLine) {
 TEST(PromptTest, TheGrammarAllowsOnlyTheScreensOptions) {
   const LlmRequest request = BuildPlanRequest(SampleInput(), SampleScreen());
   EXPECT_EQ(request.grammar, PlanGrammar(2));
-  EXPECT_TRUE(GbnfAccepts(request.grammar, "root",
-                          "do: 2\nexpect: none\nwatch: none\nlook: 60")
-                  .accepted);
-  EXPECT_FALSE(GbnfAccepts(request.grammar, "root",
-                           "do: 3\nexpect: none\nwatch: none\nlook: 60")
-                   .accepted);
+  const GbnfResult ok = GbnfAccepts(
+      request.grammar, "root", "do: 2\nexpect: none\nwatch: none\nlook: 60");
+  EXPECT_TRUE(ok.grammar_ok) << request.grammar;
+  EXPECT_TRUE(ok.accepted);
+  const GbnfResult bad = GbnfAccepts(
+      request.grammar, "root", "do: 3\nexpect: none\nwatch: none\nlook: 60");
+  EXPECT_TRUE(bad.grammar_ok) << request.grammar;
+  EXPECT_FALSE(bad.accepted);
 }
 
 TEST(PromptTest, TheSlotAndTemperatureArePassedOn) {

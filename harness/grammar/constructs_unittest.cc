@@ -93,11 +93,19 @@ TEST(ConstructsTest, AnArmThatNeedsAListIsOfferedOnlyWhileItHasNames) {
   const std::string root = ConstructsRuleName("Shape");
   const std::string without = ConstructsGrammar("Shape", TestEnv({"x"}, {}));
   EXPECT_EQ(without.find("\"gated\""), std::string::npos) << without;
-  EXPECT_TRUE(GbnfAccepts(without, root, "dot").accepted) << without;
-  EXPECT_FALSE(GbnfAccepts(without, root, "gated").accepted);
+  const GbnfResult without_dot = GbnfAccepts(without, root, "dot");
+  EXPECT_TRUE(without_dot.grammar_ok) << without;
+  EXPECT_TRUE(without_dot.accepted) << without;
+  const GbnfResult without_gated = GbnfAccepts(without, root, "gated");
+  EXPECT_TRUE(without_gated.grammar_ok) << without;
+  EXPECT_FALSE(without_gated.accepted);
   const std::string with = ConstructsGrammar("Shape", TestEnv({"x"}, {"y"}));
-  EXPECT_TRUE(GbnfAccepts(with, root, "gated").accepted) << with;
-  EXPECT_TRUE(GbnfAccepts(with, root, "dot").accepted);
+  const GbnfResult with_gated = GbnfAccepts(with, root, "gated");
+  EXPECT_TRUE(with_gated.grammar_ok) << with;
+  EXPECT_TRUE(with_gated.accepted) << with;
+  const GbnfResult with_dot = GbnfAccepts(with, root, "dot");
+  EXPECT_TRUE(with_dot.grammar_ok) << with;
+  EXPECT_TRUE(with_dot.accepted);
   // Parsing reads it either way, and prints it back.
   const std::optional<Shape> shape = ParseShape("gated");
   ASSERT_TRUE(shape);

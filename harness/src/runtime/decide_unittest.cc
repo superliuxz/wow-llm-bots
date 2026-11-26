@@ -118,12 +118,14 @@ TEST(DecideTest, ShowsTheScreenTheReplyAndWhatThePlanMeans) {
   EXPECT_NE(seen.user.find("You are Tess."), std::string::npos);
   EXPECT_NE(seen.user.find("Woken: plan done."), std::string::npos);
   // The grammar offers the screen's three options and no more.
-  EXPECT_TRUE(GbnfAccepts(seen.grammar, "root",
-                          "do: 3\nexpect: none\nwatch: none\nlook: 60")
-                  .accepted);
-  EXPECT_FALSE(GbnfAccepts(seen.grammar, "root",
-                           "do: 4\nexpect: none\nwatch: none\nlook: 60")
-                   .accepted);
+  const GbnfResult ok = GbnfAccepts(
+      seen.grammar, "root", "do: 3\nexpect: none\nwatch: none\nlook: 60");
+  EXPECT_TRUE(ok.grammar_ok) << seen.grammar;
+  EXPECT_TRUE(ok.accepted);
+  const GbnfResult bad = GbnfAccepts(
+      seen.grammar, "root", "do: 4\nexpect: none\nwatch: none\nlook: 60");
+  EXPECT_TRUE(bad.grammar_ok) << seen.grammar;
+  EXPECT_FALSE(bad.accepted);
 }
 
 TEST(DecideTest, TheBotNameDefaultsToTheSnapshots) {

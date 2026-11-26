@@ -1,8 +1,13 @@
 """`wlb build`: our shared C++ (common/, the harness, the module's tests) and the server."""
 
 import os
+import shlex
+import subprocess
+import sys
 
-from wlblib.common import OUT, PLAY, ROOT, TEST, run, say
+from wlblib.common import OUT, PLAY, ROOT, TEST, Failed, run, say
+
+GRAMMAR_PARSE_ERROR = "parse: error parsing grammar"
 
 # Set by `wlb test e2e -j N` for the processes it starts per shard: it built everything first, and
 # ninja runs side by side on one build directory would race.
@@ -27,6 +32,27 @@ VARIANTS = {
     # isn't instrumented.
     "msan": ("common-msan", "memory", "Debug", True),
 }
+
+
+def run_unit_test(cmd):
+    """Runs one gtest binary, forwarding its output and failing on grammar parse errors.
+
+    llama.cpp prints `parse: error parsing grammar:` directly to stderr and returns null;
+    a test that only checks `!accepted` would pass silently unless we fail on that output.
+    """
+    cmd = [str(c) for c in cmd]
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if result.stdout:
+        sys.stdout.write(result.stdout)
+        sys.stdout.flush()
+    if result.stderr:
+        sys.stderr.write(result.stderr)
+        sys.stderr.flush()
+    if result.returncode != 0:
+        raise Failed(f"failed ({result.returncode}): {shlex.join(cmd)}")
+    if GRAMMAR_PARSE_ERROR in f"{result.stdout}\n{result.stderr}":
+        raise Failed(f"{GRAMMAR_PARSE_ERROR} during passing test: {shlex.join(cmd)}")
+    return result
 
 
 def common_dir(variant):
@@ -70,8 +96,8 @@ def common(variant="default", tests=True, gtest_filter=None):
     if tests and variant != "server":
         run(["ninja", "-C", build, *targets, "unit_tests"])
         for test in UNIT_TESTS:
-            run([build / test, "--gtest_brief=1",
-                 *([f"--gtest_filter={gtest_filter}"] if gtest_filter else [])])
+            run_unit_test([build / test, "--gtest_brief=1",
+                           *([f"--gtest_filter={gtest_filter}"] if gtest_filter else [])])
     else:
         run(["ninja", "-C", build, *targets])
     return build

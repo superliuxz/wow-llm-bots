@@ -535,5 +535,43 @@ class RemoteE2eSplitTest(unittest.TestCase):
         self.assertIn("--remote", res.stderr)
 
 
+class UnitTestGrammarErrorTest(unittest.TestCase):
+    def _run_py(self, code):
+        return build.run_unit_test([sys.executable, "-c", code])
+
+    def test_clean_passing_test_succeeds(self):
+        buf_out, buf_err = io.StringIO(), io.StringIO()
+        with mock.patch.object(sys, "stdout", buf_out), mock.patch.object(sys, "stderr", buf_err):
+            res = self._run_py("print('ok')")
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(buf_out.getvalue(), "ok\n")
+        self.assertEqual(buf_err.getvalue(), "")
+
+    def test_grammar_parse_error_on_stderr_fails_passing_test(self):
+        buf_out, buf_err = io.StringIO(), io.StringIO()
+        with mock.patch.object(sys, "stdout", buf_out), mock.patch.object(sys, "stderr", buf_err):
+            with self.assertRaises(common.Failed) as ctx:
+                self._run_py(
+                    "import sys; print(\"parse: error parsing grammar: expecting ')'\", file=sys.stderr)"
+                )
+        self.assertIn("parse: error parsing grammar", str(ctx.exception))
+        self.assertIn("parse: error parsing grammar", buf_err.getvalue())
+
+    def test_grammar_parse_error_on_stdout_fails_passing_test(self):
+        buf_out, buf_err = io.StringIO(), io.StringIO()
+        with mock.patch.object(sys, "stdout", buf_out), mock.patch.object(sys, "stderr", buf_err):
+            with self.assertRaises(common.Failed) as ctx:
+                self._run_py("print('parse: error parsing grammar: bad rule')")
+        self.assertIn("parse: error parsing grammar", str(ctx.exception))
+        self.assertIn("parse: error parsing grammar", buf_out.getvalue())
+
+    def test_nonzero_exit_still_fails(self):
+        buf_out, buf_err = io.StringIO(), io.StringIO()
+        with mock.patch.object(sys, "stdout", buf_out), mock.patch.object(sys, "stderr", buf_err):
+            with self.assertRaises(common.Failed) as ctx:
+                self._run_py("import sys; sys.exit(2)")
+        self.assertIn("failed (2)", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

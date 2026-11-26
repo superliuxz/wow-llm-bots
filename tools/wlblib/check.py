@@ -160,7 +160,7 @@ def triggers():
     `fits` row parses, every row has a known verdict. Also part of the unit tests."""
     build.common("default", tests=False)
     run(["ninja", "-C", OUT / "common", "harness_unittests"])
-    run([OUT / "common" / "harness_unittests", "--gtest_filter=OrdersTest.*Audit*"])
+    build.run_unit_test([OUT / "common" / "harness_unittests", "--gtest_filter=OrdersTest.*Audit*"])
 
 
 def rules(fix=False):

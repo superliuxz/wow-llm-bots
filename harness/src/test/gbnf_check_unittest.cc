@@ -24,8 +24,17 @@ TEST(GbnfCheckTest, AcceptsOnlyWhatTheGrammarAllows) {
 }
 
 TEST(GbnfCheckTest, ABrokenGrammarOrMissingRootIsReported) {
-  EXPECT_FALSE(GbnfAccepts("root ::= (", "root", "x").grammar_ok);
-  EXPECT_FALSE(GbnfAccepts("root ::= \"x\"", "nope", "x").grammar_ok);
+  testing::internal::CaptureStderr();
+  const GbnfResult broken = GbnfAccepts("root ::= (", "root", "x");
+  const std::string stderr_output = testing::internal::GetCapturedStderr();
+  EXPECT_FALSE(broken.grammar_ok);
+  EXPECT_FALSE(broken.accepted);
+  EXPECT_NE(stderr_output.find("parse: error parsing grammar"),
+            std::string::npos)
+      << stderr_output;
+  const GbnfResult missing_root = GbnfAccepts("root ::= \"x\"", "nope", "x");
+  EXPECT_FALSE(missing_root.grammar_ok);
+  EXPECT_FALSE(missing_root.accepted);
 }
 
 // Today's hand-written grammar and printer agree: what FormatPlan writes, the

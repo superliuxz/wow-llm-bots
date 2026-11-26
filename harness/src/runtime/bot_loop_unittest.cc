@@ -499,16 +499,16 @@ TEST(BotLoopTest, AWhisperWakesTheBotAndItsTellWhispersBack) {
             std::string::npos);
   // The grammar lets it answer Gatda, and only Gatda.
   const std::string& grammar = brain.front_request().grammar;
-  EXPECT_TRUE(
-      GbnfAccepts(
-          grammar, "root",
-          "do: 1\nexpect: none\nwatch: none\nlook: 60\ntell Gatda: sure")
-          .accepted);
-  EXPECT_FALSE(
-      GbnfAccepts(
-          grammar, "root",
-          "do: 1\nexpect: none\nwatch: none\nlook: 60\ntell Kelra: sure")
-          .accepted);
+  const GbnfResult gatda = GbnfAccepts(
+      grammar, "root",
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\ntell Gatda: sure");
+  EXPECT_TRUE(gatda.grammar_ok) << grammar;
+  EXPECT_TRUE(gatda.accepted);
+  const GbnfResult kelra = GbnfAccepts(
+      grammar, "root",
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\ntell Kelra: sure");
+  EXPECT_TRUE(kelra.grammar_ok) << grammar;
+  EXPECT_FALSE(kelra.accepted);
 
   commands.clear();
   brain.FinishReply(

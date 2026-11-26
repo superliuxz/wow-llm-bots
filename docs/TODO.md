@@ -22,10 +22,7 @@ Last updated: 2026-11-26.
   `core` group). Only use `--remote` when asked (CONTRIBUTING rule 5).
 
 - **Fix queue (next up, in this order; one commit each, full gates):**
-  1. **`parse: error parsing grammar` during a passing test:** find which test prints it (grep
-     the test logs and the GBNF loader), fix the grammar or the test input that triggers it, and
-     make that message fail the test from then on.
-  2. **Boss notes vs. loose-mob wake** and **tank swap** (below): after 1, as one tanking step.
+  1. **Boss notes vs. loose-mob wake** and **tank swap** (below): as one tanking step.
   Older items not in this file any more get re-checked and listed if still real: no e2e for
   Hunter Dismiss Pet, /raid class/role addressing works only in /p. (`human_dungeon` run twice
   on one server: not reproduced in back-to-back full e2e runs, serial and parallel.)

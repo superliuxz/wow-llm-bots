@@ -29,6 +29,14 @@
 namespace harness {
 namespace {
 
+bool Accepts(std::string_view grammar,
+             std::string_view root,
+             std::string_view text) {
+  const GbnfResult result = GbnfAccepts(grammar, root, text);
+  EXPECT_TRUE(result.grammar_ok) << grammar;
+  return result.accepted;
+}
+
 TEST(OrdersTest, ParsesTheSpecsExample) {
   const std::optional<Order> order =
       ParseOrder("Defile on me -> away, then to behind boss");
@@ -240,19 +248,17 @@ TEST(OrdersTest, PingIsOfferedOnlyWhileAPingIsOnTheScreen) {
   const std::string root = grammar::OrdersRuleName("Order");
   const std::string without = OrderGrammar({"Flare"});
   const std::string with = OrderGrammar({"Flare"}, {"Hele"});
-  EXPECT_FALSE(GbnfAccepts(without, root, "always -> to ping").accepted)
-      << without;
-  EXPECT_FALSE(GbnfAccepts(without, root, "ping within 5 -> jump").accepted);
-  EXPECT_TRUE(GbnfAccepts(without, root, "always -> pet dismiss").accepted);
-  EXPECT_TRUE(GbnfAccepts(without, root, "always -> use Flare").accepted);
-  EXPECT_TRUE(GbnfAccepts(with, root, "always -> to ping").accepted) << with;
-  EXPECT_TRUE(GbnfAccepts(with, root, "always -> use Flare on ping").accepted);
+  EXPECT_FALSE(Accepts(without, root, "always -> to ping")) << without;
+  EXPECT_FALSE(Accepts(without, root, "ping within 5 -> jump"));
+  EXPECT_TRUE(Accepts(without, root, "always -> pet dismiss"));
+  EXPECT_TRUE(Accepts(without, root, "always -> use Flare"));
+  EXPECT_TRUE(Accepts(with, root, "always -> to ping")) << with;
+  EXPECT_TRUE(Accepts(with, root, "always -> use Flare on ping"));
   // A ping alone doesn't turn orders on: they still need a name to use.
   EXPECT_EQ(OrderGrammar({}, {"Hele"}), "");
   // A non-name pinger (none of the screen's names) offers nothing.
   EXPECT_FALSE(
-      GbnfAccepts(OrderGrammar({"Flare"}, {""}), root, "always -> to ping")
-          .accepted);
+      Accepts(OrderGrammar({"Flare"}, {""}), root, "always -> to ping"));
 
   const std::optional<std::vector<Act>> acts = ParseActs("to ping");
   ASSERT_TRUE(acts);
@@ -271,12 +277,12 @@ TEST(OrdersTest, TradeGoldIsOfferedOnlyWhileTradingAndRejectsInvalidAmounts) {
   const std::string root = grammar::OrdersRuleName("Order");
   const std::string without = OrderGrammar({"Hele"});
   const std::string with = OrderGrammar({"Hele"}, {}, {"Hele"});
-  EXPECT_FALSE(GbnfAccepts(without, root, "always -> trade gold 5g").accepted);
-  EXPECT_TRUE(GbnfAccepts(without, root, "always -> jump").accepted);
+  EXPECT_FALSE(Accepts(without, root, "always -> trade gold 5g"));
+  EXPECT_TRUE(Accepts(without, root, "always -> jump"));
   for (const char* valid :
        {"5g", "1g 50s", "1g 50s 25c", "1g 25c", "50s 25c", "50s", "25c"}) {
     const std::string line = base::StrCat({"always -> trade gold ", valid});
-    EXPECT_TRUE(GbnfAccepts(with, root, line).accepted) << line;
+    EXPECT_TRUE(Accepts(with, root, line)) << line;
   }
   struct Case {
     const char* text;
@@ -602,10 +608,9 @@ TEST(OrdersTest, EveryZeroSecondsIsRejectedByParserAndGrammar) {
   EXPECT_TRUE(ParseOrder("every 1.5s -> wake").has_value());
   const std::string gbnf = OrderGrammar({"Defile"});
   ASSERT_FALSE(gbnf.empty());
-  EXPECT_FALSE(GbnfAccepts(gbnf, "orders-Order", "every 0s -> wake").accepted);
-  EXPECT_FALSE(
-      GbnfAccepts(gbnf, "orders-Order", "every 0.5s -> wake").accepted);
-  EXPECT_TRUE(GbnfAccepts(gbnf, "orders-Order", "every 1s -> wake").accepted);
+  EXPECT_FALSE(Accepts(gbnf, "orders-Order", "every 0s -> wake"));
+  EXPECT_FALSE(Accepts(gbnf, "orders-Order", "every 0.5s -> wake"));
+  EXPECT_TRUE(Accepts(gbnf, "orders-Order", "every 1s -> wake"));
 }
 
 }  // namespace
