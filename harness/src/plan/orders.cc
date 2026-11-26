@@ -276,8 +276,11 @@ std::vector<std::string> CollectOrderNames(const pb::Snapshot& snapshot,
     }
   };
 
-  auto add_unit = [&](const pb::Unit& u, bool include_unit_name) {
-    if (include_unit_name && !u.dead) {
+  // A dead unit's name is no order target, except a party or raid member's
+  // (a body to resurrect: `use Resurrection on <name>`).
+  auto add_unit = [&](const pb::Unit& u, bool include_unit_name,
+                      bool even_dead = false) {
+    if (include_unit_name && (even_dead || !u.dead)) {
       add(u.name);
     }
     for (const pb::Aura& a : u.auras) {
@@ -338,12 +341,12 @@ std::vector<std::string> CollectOrderNames(const pb::Snapshot& snapshot,
   }
   if (snapshot.ext.party) {
     for (const pb::Unit& m : snapshot.ext.party->members) {
-      add_unit(m, /*include_unit_name=*/true);
+      add_unit(m, /*include_unit_name=*/true, /*even_dead=*/true);
     }
   }
   if (snapshot.ext.raid) {
     for (const pb::Unit& m : snapshot.ext.raid->members) {
-      add_unit(m, /*include_unit_name=*/true);
+      add_unit(m, /*include_unit_name=*/true, /*even_dead=*/true);
     }
   }
   if (snapshot.ext.combat) {

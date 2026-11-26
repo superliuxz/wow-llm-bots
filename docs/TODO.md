@@ -5,13 +5,12 @@ Last updated: 2026-11-25.
 
 ## Now (team play first: the gaps a human feels in the first hour)
 
-- **Finish human + 4 dungeon e2e and live playtest:** Alliance preset characters (`Aldric`,
-  `Mirabel`, `Cedric`, `Vesper`, `Torvin`, `Bram`, `Pippa`, `Sylva`, `Talaan`) and `e2e_human_party`
-  (`tools/wlblib/wowclient.py` covering invite, `FindNewMaster` master handoff, single-responder
-  chat, boss emote, wait/follow, and quest progress) are in place. Extend `e2e_human_party` to a
-  full human + 4 dungeon run (LFG queue, ready check, loot roll, summon accept, and resurrecting a
-  dead bot), and run a live session from a real 3.3.5a client to confirm pacing and
-  single-responder feel in practice.
+- **Live playtest with a real client:** Alliance preset characters (`Aldric`, `Mirabel`, `Cedric`,
+  `Vesper`, `Torvin`, `Bram`, `Pippa`, `Sylva`, `Talaan`), `e2e_human_party` and
+  `e2e_human_dungeon` (a scripted client leads 4 bots through the Dungeon Finder into the
+  Deadmines: ready check, summon, loot roll, ping/go there/los, a bot rez, Sap/Polymorph on marks;
+  mock LLM, no pulls or boss fights) are in place. Run a live session from a real 3.3.5a client to
+  confirm pacing and single-responder feel in practice.
 
 Lessons from official AI companions (Follower Dungeons, FFXIV Duty Support, Dragon's Dogma pawns,
 Guild Wars heroes):

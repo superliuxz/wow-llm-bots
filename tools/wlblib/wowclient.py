@@ -43,6 +43,18 @@ SMSG_MESSAGECHAT = 0x096
 MSG_MINIMAP_PING = 0x1D5
 SMSG_TIME_SYNC_REQ = 0x390
 CMSG_TIME_SYNC_RESP = 0x391
+SMSG_NEW_WORLD = 0x03E
+MSG_MOVE_WORLDPORT_ACK = 0x0DC
+CMSG_LFG_JOIN = 0x35C
+SMSG_LFG_PROPOSAL_UPDATE = 0x361
+CMSG_LFG_PROPOSAL_RESULT = 0x362
+MSG_RAID_READY_CHECK = 0x322
+MSG_RAID_READY_CHECK_CONFIRM = 0x3AE
+SMSG_LOOT_ALL_PASSED = 0x29E
+SMSG_LOOT_ROLL_WON = 0x29F
+CMSG_LOOT_ROLL = 0x2A0
+SMSG_LOOT_START_ROLL = 0x2A1
+SMSG_LOOT_ROLL = 0x2A2
 
 AUTH_OK = 0x0C
 CHAR_CREATE_SUCCESS = 0x2F
@@ -54,6 +66,10 @@ CHAT_MSG_RAID = 0x03
 CHAT_MSG_WHISPER = 0x07
 CHAT_MSG_AFK = 0x17  # An empty line toggles /afk.
 CHAT_MSG_PARTY_LEADER = 0x33
+# Dungeon Finder roles (CMSG_LFG_JOIN) and loot roll votes (CMSG_LOOT_ROLL).
+LFG_ROLE_LEADER, LFG_ROLE_TANK, LFG_ROLE_HEALER, LFG_ROLE_DAMAGE = 1, 2, 4, 8
+LFG_TYPE_DUNGEON = 1
+ROLL_PASS, ROLL_NEED, ROLL_GREED = 0, 1, 2
 CHAT_TYPE_NAMES = {CHAT_MSG_SAY: "say", CHAT_MSG_PARTY: "party", CHAT_MSG_RAID: "raid",
                    CHAT_MSG_WHISPER: "whisper", CHAT_MSG_PARTY_LEADER: "party"}
 LANG_ORCISH = 1
@@ -113,6 +129,12 @@ class WowClient:
         self.chats: list[dict] = []  # {"type", "from_guid", "text", "t"}
         self.group_lists = 0
         self.pings: list[dict] = []  # {"from_guid", "x", "y", "t"}: party pings it saw
+        self.new_worlds: list[dict] = []  # {"map", "x", "y", "z", "o", "t"}: map changes (acked)
+        self.lfg_proposals: list[dict] = []  # {"id", "dungeon", "state", "t"}
+        self.accept_lfg = True  # Accept every Dungeon Finder proposal, as a click would.
+        self.ready_confirms: list[dict] = []  # {"guid", "ready", "t"}
+        self.loot_rolls: list[dict] = []  # {"op", "guid", "slot", "item", ...}: start/roll/won
+        self._send_lock = threading.Lock()
         self.guid = 0
         self.lang = LANG_COMMON
         self._reader: threading.Thread | None = None
@@ -146,9 +168,10 @@ class WowClient:
 
     def send(self, opcode: int, payload: bytes = b"") -> None:
         head = struct.pack(">H", len(payload) + 4) + struct.pack("<I", opcode)
-        if self._encrypt:
-            head = self._encrypt.process(head)
-        self._sock.sendall(head + payload)
+        with self._send_lock:  # The reader thread answers some packets itself.
+            if self._encrypt:
+                head = self._encrypt.process(head)
+            self._sock.sendall(head + payload)
 
     def _wait_for(self, opcode: int, timeout_s: float = 15.0) -> bytes:
         deadline = time.monotonic() + timeout_s
@@ -227,6 +250,20 @@ class WowClient:
         server shows it to the rest of the party."""
         self.send(MSG_MINIMAP_PING, struct.pack("<ff", x, y))
 
+    def lfg_join(self, dungeon_id: int, roles: int, dungeon_type: int = LFG_TYPE_DUNGEON) -> None:
+        """Queues for one Dungeon Finder dungeon (LFGDungeons.dbc id), as the leader of a group
+        queues the whole group: a role check goes to the other members."""
+        self.send(CMSG_LFG_JOIN, struct.pack("<IBBB", roles, 0, 0, 1) +
+                  struct.pack("<I", dungeon_id | (dungeon_type << 24)) +
+                  struct.pack("<BBBB", 3, 0, 0, 0) + b"\0")
+
+    def ready_check(self, answer: bool | None = None) -> None:
+        """Starts a ready check (the leader's button) or, with `answer`, answers one."""
+        self.send(MSG_RAID_READY_CHECK, b"" if answer is None else struct.pack("<B", int(answer)))
+
+    def loot_roll(self, item_guid: int, slot: int, vote: int) -> None:
+        self.send(CMSG_LOOT_ROLL, struct.pack("<QIB", item_guid, slot, vote))
+
     def close(self) -> None:
         self._stop = True
         try:
@@ -255,6 +292,47 @@ class WowClient:
             guid, x, y = struct.unpack_from("<Qff", data)
             with self.lock:
                 self.pings.append({"from_guid": guid, "x": x, "y": y, "t": time.monotonic()})
+        elif op == SMSG_NEW_WORLD and len(data) >= 20:
+            # A teleport to another map: the client loads it and says so, or the server keeps
+            # the player out of the world.
+            mapid, x, y, z, o = struct.unpack_from("<Iffff", data)
+            self.send(MSG_MOVE_WORLDPORT_ACK)
+            with self.lock:
+                self.new_worlds.append({"map": mapid, "x": x, "y": y, "z": z, "o": o,
+                                        "t": time.monotonic()})
+        elif op == SMSG_LFG_PROPOSAL_UPDATE and len(data) >= 14:
+            dungeon, state, pid, _, silent = struct.unpack_from("<IBIIB", data)
+            with self.lock:
+                self.lfg_proposals.append({"id": pid, "dungeon": dungeon & 0xFFFFFF,
+                                           "state": state, "t": time.monotonic()})
+            if self.accept_lfg and state == 0 and not silent:  # LFG_PROPOSAL_INITIATING.
+                self.send(CMSG_LFG_PROPOSAL_RESULT, struct.pack("<IB", pid, 1))
+        elif op == MSG_RAID_READY_CHECK_CONFIRM and len(data) >= 9:
+            guid, ready = struct.unpack_from("<QB", data)
+            with self.lock:
+                self.ready_confirms.append({"guid": guid, "ready": bool(ready),
+                                            "t": time.monotonic()})
+        elif op == SMSG_LOOT_START_ROLL and len(data) >= 37:
+            guid, _, slot, item = struct.unpack_from("<QIII", data)
+            with self.lock:
+                self.loot_rolls.append({"op": "start", "guid": guid, "slot": slot, "item": item,
+                                        "t": time.monotonic()})
+        elif op == SMSG_LOOT_ROLL and len(data) >= 34:
+            guid, slot, roller, item, _, _, number, vote = struct.unpack_from("<QIQIIIBB", data)
+            with self.lock:
+                self.loot_rolls.append({"op": "roll", "guid": guid, "slot": slot, "item": item,
+                                        "roller": roller, "number": number, "vote": vote,
+                                        "t": time.monotonic()})
+        elif op == SMSG_LOOT_ROLL_WON and len(data) >= 32:
+            guid, slot, item, _, _, winner = struct.unpack_from("<QIIIIQ", data)
+            with self.lock:
+                self.loot_rolls.append({"op": "won", "guid": guid, "slot": slot, "item": item,
+                                        "winner": winner, "t": time.monotonic()})
+        elif op == SMSG_LOOT_ALL_PASSED and len(data) >= 16:
+            guid, slot, item = struct.unpack_from("<QII", data)
+            with self.lock:
+                self.loot_rolls.append({"op": "all_passed", "guid": guid, "slot": slot,
+                                        "item": item, "t": time.monotonic()})
         elif op == SMSG_GROUP_LIST:
             with self.lock:
                 self.group_lists += 1

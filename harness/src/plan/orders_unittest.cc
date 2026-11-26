@@ -446,6 +446,35 @@ TEST(OrdersTest, CollectOrderNamesExtractsFromNotesAndSnapshot) {
   EXPECT_FALSE(has("Kinetic Bomb1-4"));
 }
 
+// A dead party or raid member is a body to resurrect (`use Resurrection on
+// Loadd`), so its name stays an order target; a dead mob's does not, even with
+// the same name as nothing living.
+TEST(OrdersTest, CollectOrderNamesKeepsDeadGroupMembers) {
+  wlb::snapshot::Snapshot snap;
+  snap.bot = "Loadb";
+  wlb::snapshot::Unit dead_mate;
+  dead_mate.name = "Loadd";
+  dead_mate.dead = true;
+  snap.base.nearby.units.push_back(dead_mate);
+  snap.ext.party.emplace().members.push_back(dead_mate);
+  wlb::snapshot::Unit dead_raider;
+  dead_raider.name = "Kelra";
+  dead_raider.dead = true;
+  snap.ext.raid.emplace().members.push_back(dead_raider);
+  wlb::snapshot::Unit dead_mob;
+  dead_mob.name = "Defias Thug";
+  dead_mob.dead = true;
+  snap.base.nearby.units.push_back(dead_mob);
+
+  const std::vector<std::string> names = CollectOrderNames(snap);
+  auto has = [&](std::string_view want) {
+    return std::find(names.begin(), names.end(), want) != names.end();
+  };
+  EXPECT_TRUE(has("Loadd"));
+  EXPECT_TRUE(has("Kelra"));
+  EXPECT_FALSE(has("Defias Thug"));
+}
+
 TEST(OrdersTest, CollectOrderNamesIsEmptyOnBlankSnapshotAndNotes) {
   wlb::snapshot::Snapshot empty;
   EXPECT_TRUE(CollectOrderNames(empty).empty());

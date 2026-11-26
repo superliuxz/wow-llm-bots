@@ -1,0 +1,6 @@
+# e2e_human_dungeon: a real (scripted) Alliance human client leads four fresh Alliance bots, made
+# level 18 by the case, from Northshire Abbey into the Deadmines through the Dungeon Finder.
+# Needs a test build.
+LlmBrain.Bots = "Loada,Loadb,Loadc,Loadd"
+LlmBrain.TestFixtures = "Loada=new:human:paladin,Loadb=new:human:priest,Loadc=new:gnome:mage,Loadd=new:human:rogue"
+LlmBrain.NonCombatStrategies = "-follow,-grind,-new rpg"

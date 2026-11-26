@@ -25,6 +25,7 @@
 #include "GridNotifiers.h"
 #include "GridTerrainData.h"
 #include "Group.h"
+#include "GroupReference.h"
 #include "IVMapMgr.h"
 #include "Item.h"
 #include "ItemTemplate.h"
@@ -159,6 +160,26 @@ std::vector<Unit*> NearbyUnits(Player* bot, float radius = kActSearchRadiusYd) {
   Cell::VisitObjects(bot, searcher, radius);
   std::erase_if(units, [&](Unit* u) { return !IsVisibleToBot(bot, u); });
   return units;
+}
+
+// A dead party member named `name` within `radius` (a body to resurrect):
+// NearbyUnits() sees living units only.
+Player* DeadGroupMemberNamed(Player* bot,
+                             std::string_view name,
+                             float radius = kActSearchRadiusYd) {
+  Group* group = bot->GetGroup();
+  if (!group) {
+    return nullptr;
+  }
+  for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next()) {
+    Player* member = ref->GetSource();
+    if (member && member != bot && !member->IsAlive() &&
+        NameEq(member->GetName(), name) && member->IsInMap(bot) &&
+        bot->IsWithinDistInMap(member, radius) && IsVisibleToBot(bot, member)) {
+      return member;
+    }
+  }
+  return nullptr;
 }
 
 // Collects nearby living hidden trigger creatures (carriers of visible ground
@@ -564,6 +585,11 @@ WorldObject* ResolveThing(Player* bot,
             }
           }
         }
+      }
+      if (!best) {
+        // Nothing living has the name: a dead party member's body (a
+        // resurrection's target).
+        best = DeadGroupMemberNamed(bot, thing_name);
       }
       return best;
     }

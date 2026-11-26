@@ -50,6 +50,7 @@
 #include "PlayerbotAI.h"
 #include "PlayerbotFactory.h"
 #include "Playerbots.h"
+#include "Position.h"
 #include "QuestDef.h"
 #include "RandomPlayerbotMgr.h"
 #include "SharedDefines.h"
@@ -60,6 +61,7 @@
 #include "Unit.h"
 #include "UnitDefines.h"
 #include "Value.h"
+#include "WorldPacket.h"
 #include "bot_manager/bot_manager.h"
 #include "chat/chat_scripts.h"
 
@@ -109,6 +111,7 @@ class LlmBrainTestCommandScript : public CommandScript {
         {"joinchannel", HandleJoinChannel, SEC_ADMINISTRATOR, Console::Yes},
         {"testhuman", HandleTestHuman, SEC_ADMINISTRATOR, Console::Yes},
         {"rezoffer", HandleRezOffer, SEC_ADMINISTRATOR, Console::Yes},
+        {"summon", HandleSummon, SEC_ADMINISTRATOR, Console::Yes},
         {"item", HandleItem, SEC_ADMINISTRATOR, Console::Yes},
         {"checkstrat", HandleCheckStrat, SEC_ADMINISTRATOR, Console::Yes},
         {"setstrat", HandleSetStrat, SEC_ADMINISTRATOR, Console::Yes},
@@ -635,13 +638,15 @@ class LlmBrainTestCommandScript : public CommandScript {
     return true;
   }
 
-  // `llmtest marknear <leader> <icon 0-7> [entry]`: a temporary Mottled Boar
-  // (or creature `entry`, kept passive so it starts no fight) 12 yd from the
-  // leader, marked with the icon (4 = moon, 7 = skull) by its group.
+  // `llmtest marknear <leader> <icon 0-7> [entry] [ahead yd]`: a temporary
+  // Mottled Boar (or creature `entry`, kept passive so it starts no fight)
+  // 12 yd north of the leader (or `ahead` yd in front of it, short of any wall:
+  // indoors), marked with the icon (4 = moon, 7 = skull) by its group.
   static bool HandleMarkNear(ChatHandler* handler,
                              std::string leader_name,
                              uint32_t icon,
-                             Optional<uint32_t> entry) {
+                             Optional<uint32_t> entry,
+                             Optional<float> ahead) {
     Player* leader = FindOnlinePlayer(handler, std::move(leader_name));
     Group* group = leader ? leader->GetGroup() : nullptr;
     if (!group || icon > 7) {
@@ -649,10 +654,14 @@ class LlmBrainTestCommandScript : public CommandScript {
       return false;
     }
     constexpr uint32_t kMottledBoar = 3098;
+    Position spot(leader->GetPositionX() + 12.0f, leader->GetPositionY(),
+                  leader->GetPositionZ());
+    if (ahead) {
+      spot = leader->GetFirstCollisionPosition(*ahead, 0.0f);
+    }
     Creature* boar = leader->SummonCreature(
-        entry.value_or(kMottledBoar), leader->GetPositionX() + 12.0f,
-        leader->GetPositionY(), leader->GetPositionZ(), 0.0f,
-        TEMPSUMMON_TIMED_DESPAWN, 120000);
+        entry.value_or(kMottledBoar), spot.GetPositionX(), spot.GetPositionY(),
+        spot.GetPositionZ(), 0.0f, TEMPSUMMON_TIMED_DESPAWN, 120000);
     if (!boar) {
       handler->SendErrorMessage("llmtest: marknear: no creature");
       return false;
@@ -762,6 +771,30 @@ class LlmBrainTestCommandScript : public CommandScript {
                                   dead->GetMaxPower(POWER_MANA));
     handler->PSendSysMessage("llmtest: {} offered {} a resurrection",
                              caster->GetName(), dead->GetName());
+    return true;
+  }
+
+  // `llmtest summon <target> <summoner>`: `summoner` summons `target` to where
+  // it stands, as a Ritual of Summoning or meeting stone does (the summon
+  // point and the SMSG_SUMMON_REQUEST popup of Spell::EffectSummonPlayer).
+  static bool HandleSummon(ChatHandler* handler,
+                           std::string target_name,
+                           std::string summoner_name) {
+    Player* target = FindOnlinePlayer(handler, std::move(target_name));
+    Player* summoner = FindOnlinePlayer(handler, std::move(summoner_name));
+    if (!target || !summoner || !target->IsAlive()) {
+      handler->SendErrorMessage("llmtest: summon: needs a living target");
+      return false;
+    }
+    target->SetSummonPoint(summoner->GetMapId(), summoner->GetPositionX(),
+                           summoner->GetPositionY(), summoner->GetPositionZ());
+    WorldPacket data(SMSG_SUMMON_REQUEST, 8 + 4 + 4);
+    data << summoner->GetGUID();
+    data << static_cast<uint32_t>(summoner->GetZoneId());
+    data << static_cast<uint32_t>(MAX_PLAYER_SUMMON_DELAY * IN_MILLISECONDS);
+    target->SendDirectMessage(&data);
+    handler->PSendSysMessage("llmtest: {} summoned {}", summoner->GetName(),
+                             target->GetName());
     return true;
   }
 

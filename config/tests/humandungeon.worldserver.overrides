@@ -1,0 +1,5 @@
+# e2e_human_dungeon: the scripted client (tools/wlblib/wowclient.py) can't answer Warden.
+Warden.Enabled = 0
+# e2e_human_dungeon: every run enters a new Deadmines instance on the same accounts; the default
+# limit of 5 new instances an hour refuses the teleport after a few runs.
+AccountInstancesPerHour = 1000

@@ -1,5 +1,5 @@
 """Grouped e2e cases: invite, group, tank, pull_gate, popups, rez_ready, lootroll, lfg_proposal,
-crisp_dodge."""
+crisp_dodge, human_party, human_dungeon."""
 
 import types
 from wlblib import wire
@@ -1493,6 +1493,434 @@ def _case_human_party():
                 f"({rel.get('dist_yd', 0):.0f} yd {rel.get('dir')}), not to self, gone on ungroup")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
+def _case_human_dungeon():
+    """A real human leads four bots into the Deadmines (Milestone 4, objective 4).
+
+    `humandungeon` test config. A scripted 3.3.5a client (tools/wlblib/wowclient.py) logs in as
+    Allytwo, a level-18 human warrior at Northshire Abbey, next to four fresh Alliance bots made
+    level 18: Loada (paladin), Loadb (priest), Loadc (gnome mage) and Loadd (rogue). The real
+    harness runs the bots against a mock LLM that answers popups (invite, Dungeon Finder role and
+    proposal, ready check, summon, loot roll, resurrection) and turns party orders into plan acts.
+
+      1. Allytwo invites the four bots; each accepts and Allytwo becomes their master.
+      2. Allytwo queues the group for the Deadmines in the Dungeon Finder (as tank): every bot
+         confirms a role (Loadb healer, the rest damage) and accepts the proposal, the client
+         accepts it too, and all five are put into the Deadmines (the client acks the map change).
+      3. Allytwo starts a ready check: the client sees each bot confirm ready.
+      4. Loadd is sent out to Northshire, and Allytwo summons it: Loadd accepts and is back in the
+         Deadmines next to Allytwo.
+      5. A group loot roll: every bot rolls (the client passes) and the roll ends.
+      6. A minimap ping and "go there" walk Loada and Loadc to it and hold them; "los" brings
+         them back to Allytwo; "follow me" ends the hold (C++ shortcuts, no LLM).
+      7. Loadd dies and waits for a resurrection; "loadb rez loadd" wakes Loadb, whose plan act
+         `use Resurrection on Loadd` brings it back (Loadd accepts the offer).
+      8. Two passive Defias Thugs ahead are marked diamond and star: "rouge zap diamond" wakes
+         only Loadd (`act: use Sap on marker diamond`) and "mage sheep star" only Loadc
+         (`act: use Polymorph on marker star`); both acts finish without an error.
+    """
+
+    import http.server
+    import json
+    import math
+    import os
+    import pathlib
+    import re
+    import subprocess
+    import tempfile
+    import threading
+    import time
+
+    from wlblib import build, server, wowclient
+    from wlblib.common import OUT, ROOT, TEST
+    from wlblib.testing import ProxyRecorder, expect
+
+    NAME = "human_dungeon"
+    DESCRIPTION = "Real client + 4 bots: LFG into Deadmines, ready/summon/loot/rez, CC and pings"
+    TEST_CONFIG = "humandungeon"
+    BOT = "Loada"
+    ONLINE = 4
+
+    BOTS = ("Loada", "Loadb", "Loadc", "Loadd")
+    SPECS = {"Loada": 2, "Loadb": 1, "Loadc": 2, "Loadd": 1}  # Ret, Holy, Frost, Combat.
+    # Rank-1 spells the steps use (the level-18 trainer set has them; taught to be sure).
+    SPELLS = {"Loadb": (2006,), "Loadc": (118,), "Loadd": (1784, 6770)}
+    HUMAN = "Allytwo"
+    ACCOUNT = "HUMANDM"
+    DEADMINES = 6  # LFGDungeons.dbc.
+    DM_MAP = 36
+    DESERTER = 71041  # Dungeon Deserter.
+    NORTHSHIRE = "0 -8949.95 -132.49 83.53 0"  # map x y z o: the human start.
+    ITEM = 1355  # Buckskin Cape (green).
+    THUG = 38  # Defias Thug: a humanoid (rank-1 Sap) a Polymorph also holds.
+    STAR, DIAMOND = 0, 2
+    OPTION_RE = re.compile(r"^\s+(\d+)\. (.+)$", re.M)
+    NAME_RE = re.compile(r"^You are (\w+)\.", re.M)
+    # Popup answers, most specific first; anything else keeps doing what it does.
+    ANSWERS = ("Accept group invite", "Accept Dungeon Finder proposal",
+               "Ready (confirm ready check)", "Accept summon", "Accept resurrection",
+               "Wait for a resurrection", "Greed ", "Pass ")
+    ACTS = {  # bot -> (words in the human's party line, plan act)
+        "Loadb": ("rez loadd", "act: use Resurrection on Loadd"),
+        "Loadc": ("sheep star", "act: use Polymorph on marker star"),
+        "Loadd": ("zap diamond", "act: use Sap on marker diamond"),
+    }
+
+    def _pick(bot, text, tele_in=False):
+        options = OPTION_RE.findall(text)
+        roles = [(i, o) for i, o in options if o.startswith("Confirm Dungeon Finder role")]
+        if roles:
+            want = [r for r in roles if ("Healer" in r[1]) == (bot == "Loadb")
+                    and "Tank" not in r[1]]
+            return (want or roles)[0][0]
+        for prefix in ANSWERS:
+            hit = next((i for i, o in options if o.startswith(prefix)), None)
+            if hit:
+                return hit
+        # A Dungeon Finder teleport the server refused (as e2e_lfg_proposal retries it).
+        tele = next((i for i, o in options if o.startswith("Teleport to LFG dungeon")), None)
+        if tele_in and tele:
+            return tele
+        keep = next((i for i, o in options if o.startswith("Keep doing what I'm doing")), None)
+        return keep or "1"
+
+    class _Brain:
+        def __init__(self):
+            self.lock = threading.Lock()
+            self.wakes = []  # (time, bot, woken line)
+            self.tele_in = False  # Step 2 only: step 4 sends Loadd out on purpose.
+            parent = self
+
+            class Handler(http.server.BaseHTTPRequestHandler):
+                def log_message(self, fmt, *args):
+                    pass
+
+                def do_POST(self):
+                    length = int(self.headers.get("Content-Length", "0"))
+                    body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+                    text = "\n".join(m.get("content", "") for m in body.get("messages", []))
+                    name = NAME_RE.search(text)
+                    bot = name.group(1) if name else "?"
+                    woken = next((ln for ln in text.splitlines() if ln.startswith("Woken: ")), "")
+                    with parent.lock:
+                        parent.wakes.append((time.monotonic(), bot, woken))
+                    lines = [f"do: {_pick(bot, text, parent.tele_in)}", "expect: none", "watch: none",
+                             "look: 300"]
+                    words, act = ACTS.get(bot, ("", ""))
+                    if words and f"party from {HUMAN}" in woken and words in woken.lower():
+                        lines.append(act)
+                    reply = json.dumps({
+                        "choices": [{"message": {"content": "\n".join(lines)}}],
+                        "usage": {"prompt_tokens": 100, "completion_tokens": 20},
+                    }).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(reply)))
+                    self.end_headers()
+                    self.wfile.write(reply)
+
+            self._httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            self.port = self._httpd.server_address[1]
+            self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
+
+        def start(self):
+            self._thread.start()
+
+        def stop(self):
+            self._httpd.shutdown()
+            self._httpd.server_close()
+
+    def _account_ready():
+        out = subprocess.run(
+            ["mysql", f"--defaults-file={OUT / 'server' / 'etc' / 'mysql.cnf'}", "-uroot", "-N",
+             "-e", f"select id from {TEST.db_prefix}auth.account where username = '{ACCOUNT}'"],
+            capture_output=True, text=True, check=True).stdout.strip()
+        return bool(out)
+
+    def _poll(pred, timeout_s, what):
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            val = pred()
+            if val:
+                return val
+            time.sleep(0.5)
+        expect(False, f"timed out ({timeout_s} s) waiting for {what}")
+
+    def _reset(who):
+        """Out of any group and the Dungeon Finder, back at the human start, no desertion."""
+        server.console("lfg clean", wait_s=0.2, inst=TEST)
+        server.console(f"llmtest ungroup {who}", wait_s=0.2, inst=TEST)
+        server.console(f"llmtest tele {who} {NORTHSHIRE}", wait_s=0.5, inst=TEST)
+        server.console(f"llmtest unaura {who} {DESERTER}", wait_s=0.2, inst=TEST)
+
+    def run(stack):
+        build.common("default", tests=False)
+        if not _account_ready():
+            server.console(f"account create {ACCOUNT} humandmpw", wait_s=1.0, inst=TEST)
+            _poll(_account_ready, 20, "the human's account")
+        key = os.urandom(40)
+        wowclient.prepare_account(TEST.db_prefix, ACCOUNT, key)
+        for bot in BOTS:
+            server.console(f"llmtest gear {bot} 18 {SPECS[bot]}", wait_s=0.5, inst=TEST)
+            for spell in SPELLS.get(bot, ()):
+                server.console(f"llmtest learn {bot} {spell}", wait_s=0.2, inst=TEST)
+
+        with tempfile.TemporaryDirectory(prefix="wlb-e2e-dm-") as tmp:
+            tmp_dir = pathlib.Path(tmp)
+            proxy_sock = tmp_dir / "proxy.sock"
+            proxy = ProxyRecorder(stack.socket, proxy_sock)
+            brain = _Brain()
+            proxy.start()
+            brain.start()
+            harness = subprocess.Popen(
+                [str(OUT / "common" / "harness"), "run", f"--socket={proxy_sock}",
+                 f"--rules={ROOT / 'content' / 'RULES.md'}", f"--bots-dir={tmp_dir / 'bots'}",
+                 "--host=127.0.0.1", f"--port={brain.port}", "--slots=4", "--temperature=0"],
+                cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            # Drained, so a long run never blocks the harness on a full pipe.
+            harness_log = []
+            threading.Thread(target=lambda: harness_log.extend(harness.stdout), daemon=True).start()
+            client = None
+
+            def latest(bot, after=0.0):
+                with proxy.lock:
+                    return next((s for t, s in reversed(proxy.snapshots)
+                                 if s.get("bot") == bot and t >= after), None)
+
+            def state_of(bot, after=0.0):
+                s = latest(bot, after)
+                return s and s.get("base", {}).get("self", {}).get("state", "")
+
+            def in_dm(bot, after=0.0):
+                s = latest(bot, after)
+                where = (s or {}).get("base", {}).get("where", {})
+                return bool(where.get("in_instance")) and "Deadmines" in where.get("map", "")
+
+            def pos_of(bot, after=0.0):
+                s = latest(bot, after)
+                p = s and s["base"]["where"]["position"]
+                return p and (p["x"], p["y"])
+
+            def errors_for(cmd_id):
+                with proxy.lock:
+                    return [e["event"]["error"].get("text") for _, e in proxy.events
+                            if (e.get("event", {}).get("error") or {}).get("command_id")
+                            == cmd_id]
+
+            def act_cmd(bot, verb, name, after):
+                with proxy.lock:
+                    return next((c for t, c in proxy.commands
+                                 if t >= after and c.get("bot") == bot
+                                 and (c.get("act") or {}).get("verb") == verb
+                                 and (c.get("act") or {}).get("name") == name), None)
+
+            def act_done(bot, cmd):
+                with proxy.lock:
+                    return any(s.get("bot") == bot
+                               and s.get("done_act_command_id") == cmd["command_id"]
+                               for _, s in proxy.snapshots)
+
+            def woken_by(after, words):
+                with brain.lock:
+                    return sorted({b for t, b, w in brain.wakes
+                                   if t >= after and f"party from {HUMAN}" in w
+                                   and words in w.lower()})
+
+            def stays(bot):
+                out = server.console(f"llmtest checkstrat {bot} stay", wait_s=0.3, inst=TEST)
+                m = re.search(rf"strat stay on {bot} exists=\d combat=\d noncombat=(\d)", out)
+                return m.group(1) == "1" if m else None
+
+            try:
+                _poll(lambda: set(BOTS) <= {b for _, b, _ in brain.wakes}, 40,
+                      "every bot's first look")
+                client = wowclient.WowClient(TEST.world_port, ACCOUNT, key)
+                client.authenticate()
+                client.enter_world(HUMAN, race=1, cls=1)  # Human warrior: Northshire Abbey.
+                # The human is no fixture: start it clean of an earlier run (its group and
+                # Dungeon Finder state, desertion, the dungeon it logged out in).
+                _reset(HUMAN)
+                server.console(f"character level {HUMAN} 18", wait_s=0.5, inst=TEST)
+                time.sleep(2.0)
+
+                # 1. Invites; playerbots makes the human their master.
+                masters = {}
+                for bot in BOTS:
+                    client.invite(bot)
+
+                    def is_master(bot=bot):
+                        out = server.console(f"llmtest master {bot}", wait_s=0.5, inst=TEST)
+                        m = re.search(rf"master {bot}=(\w+|-)", out)
+                        masters[bot] = m.group(1) if m else "?"
+                        return masters[bot] == HUMAN
+                    _poll(is_master, 30, f"{bot} accepting the invite with {HUMAN} as master")
+
+                # 2. Dungeon Finder: the human queues the group for the Deadmines as tank.
+                since_lfg = time.monotonic()
+                brain.tele_in = True
+                client.lfg_join(DEADMINES, wowclient.LFG_ROLE_LEADER | wowclient.LFG_ROLE_TANK)
+                _poll(lambda: any(w["map"] == DM_MAP for w in list(client.new_worlds)), 60,
+                      f"{HUMAN} put into the Deadmines by the Dungeon Finder")
+                deadline = time.monotonic() + 60.0
+                while (outside := [b for b in BOTS if not in_dm(b, since_lfg)]) \
+                        and time.monotonic() < deadline:
+                    time.sleep(0.5)
+                expect(not outside, f"bots never put into the Deadmines: {outside}")
+                brain.tele_in = False
+                with client.lock:
+                    arrival = next(w for w in client.new_worlds if w["map"] == DM_MAP)
+                    proposals = list(client.lfg_proposals)
+                with proxy.lock:
+                    prompts = {(e.get("bot"), str(e["event"]["prompt"].get("kind")))
+                               for t, e in proxy.events
+                               if t >= since_lfg and e.get("event", {}).get("prompt")}
+                role_checked = sorted(b for b, k in prompts if k == "ROLE_CHECK")
+                proposed = sorted(b for b, k in prompts if k == "LFG_PROPOSAL")
+                time.sleep(3.0)  # Let the party settle in.
+
+                # 3. Ready check: every bot confirms ready to the human.
+                since_ready = time.monotonic()
+                client.ready_check()
+                client.ready_check(True)
+
+                def ready_from():
+                    with client.lock:
+                        return {c["guid"] for c in client.ready_confirms
+                                if c["t"] >= since_ready and c["ready"]
+                                and c["guid"] != client.guid}
+                _poll(lambda: len(ready_from()) >= len(BOTS), 30, "every bot confirming ready")
+
+                # 4. Summon: Loadd waits outside in Northshire; the human summons it back.
+                server.console("llmtest tele Loadd 0 -8880 -132.5 82 0", wait_s=1.0, inst=TEST)
+                since_out = time.monotonic()
+                _poll(lambda: latest("Loadd", since_out) and not in_dm("Loadd", since_out), 20,
+                      "Loadd outside")
+                server.console(f"llmtest summon Loadd {HUMAN}", wait_s=0.5, inst=TEST)
+                since_summon = time.monotonic()
+                _poll(lambda: in_dm("Loadd", since_summon), 30,
+                      "Loadd accepting the summon into the Deadmines")
+                summon_pos = pos_of("Loadd", since_summon)
+                summon_dist = math.dist(summon_pos, (arrival["x"], arrival["y"]))
+
+                # 5. Loot roll: the bots roll, the human passes, the roll ends.
+                since_loot = time.monotonic()
+                out = server.console(f"llmtest lootroll {HUMAN} {ITEM}", wait_s=0.5, inst=TEST)
+                expect("roll started" in out, f"setup: no roll started ({out.strip()[-200:]})")
+                start = _poll(lambda: next((r for r in list(client.loot_rolls)
+                                            if r["op"] == "start" and r["t"] >= since_loot),
+                                           None), 10, f"{HUMAN}'s loot roll window")
+                client.loot_roll(start["guid"], start["slot"], wowclient.ROLL_PASS)
+
+                def roll_over():
+                    with client.lock:
+                        return next((r for r in client.loot_rolls if r["t"] >= since_loot
+                                     and r["op"] in ("won", "all_passed")), None)
+                ended = _poll(roll_over, 40, "the loot roll ending")
+                with client.lock:
+                    rollers = {r["roller"] for r in client.loot_rolls
+                               if r["t"] >= since_loot and r["op"] == "roll"
+                               and r["roller"] != client.guid}
+
+                # 6. A ping, "go there", "los", "follow me": C++ shortcuts, no LLM.
+                o = arrival["o"]
+                hx, hy = arrival["x"], arrival["y"]
+                ping_spot = (hx + 10.0 * math.cos(o), hy + 10.0 * math.sin(o))
+                client.ping(*ping_spot)
+                time.sleep(1.5)
+                since_go = time.monotonic()
+                client.say(wowclient.CHAT_MSG_PARTY, "go there")
+
+                def near(bot, spot, yd, after):
+                    p = pos_of(bot, after)
+                    return bool(p) and math.dist(p, spot) <= yd
+                went_there = bool(_poll(
+                    lambda: all(near(b, ping_spot, 4.0, since_go) for b in ("Loada", "Loadc")),
+                    20, "Loada and Loadc at the ping after 'go there'"))
+                held_there = bool(_poll(lambda: stays("Loada") and stays("Loadc"), 5,
+                                        "Loada and Loadc holding at the ping"))
+                since_los = time.monotonic()
+                client.say(wowclient.CHAT_MSG_PARTY, "los")
+                came_back = bool(_poll(
+                    lambda: all(near(b, (hx, hy), 5.0, since_los) for b in ("Loada", "Loadc")),
+                    20, f"Loada and Loadc back at {HUMAN} after 'los'"))
+                client.say(wowclient.CHAT_MSG_PARTY, "follow me")
+                _poll(lambda: not any(stays(b) for b in BOTS), 5, "every bot following again")
+
+                # 7. Loadd dies, waits; Loadb resurrects it on the human's word.
+                server.console("llmtest kill Loadd", wait_s=0.5, inst=TEST)
+                since_dead = time.monotonic()
+                _poll(lambda: state_of("Loadd", since_dead) == "DEAD_BODY", 15, "Loadd dead")
+                time.sleep(4.0)
+                still_body = state_of("Loadd") == "DEAD_BODY"  # Waited, did not release.
+                since_rez = time.monotonic()
+                client.say(wowclient.CHAT_MSG_PARTY, "loadb rez loadd")
+                rez = _poll(lambda: act_cmd("Loadb", "USE", "Resurrection", since_rez), 20,
+                            "Loadb's plan act `use Resurrection on Loadd`")
+                _poll(lambda: state_of("Loadd", since_rez) == "ALIVE", 40,
+                      "Loadd alive after Loadb's Resurrection")
+                _poll(lambda: act_done("Loadb", rez) or errors_for(rez["command_id"]), 20,
+                      "Loadb's Resurrection finishing")
+                rez_woken = woken_by(since_rez, "rez loadd")
+                rez_errs = errors_for(rez["command_id"])
+
+                # 8. Crowd control on the human's marks: zap diamond, sheep star.
+                for icon in (DIAMOND, STAR):
+                    out = server.console(f"llmtest marknear {HUMAN} {icon} {THUG} 14",
+                                         wait_s=0.3, inst=TEST)
+                    expect("marked" in out, f"setup: no thug marked ({out.strip()[-200:]})")
+                time.sleep(2.0)
+                since_zap = time.monotonic()
+                client.say(wowclient.CHAT_MSG_PARTY, "rouge zap diamond")
+                sap = _poll(lambda: act_cmd("Loadd", "USE", "Sap", since_zap), 20,
+                            "Loadd's plan act `use Sap on marker diamond`")
+                _poll(lambda: act_done("Loadd", sap) or errors_for(sap["command_id"]), 25,
+                      "Loadd's Sap finishing")
+                zap_woken = woken_by(since_zap, "zap diamond")
+                sap_errs = errors_for(sap["command_id"])
+                since_sheep = time.monotonic()
+                client.say(wowclient.CHAT_MSG_PARTY, "mage sheep star")
+                poly = _poll(lambda: act_cmd("Loadc", "USE", "Polymorph", since_sheep), 20,
+                             "Loadc's plan act `use Polymorph on marker star`")
+                _poll(lambda: act_done("Loadc", poly) or errors_for(poly["command_id"]), 20,
+                      "Loadc's Polymorph finishing")
+                sheep_woken = woken_by(since_sheep, "sheep star")
+                poly_errs = errors_for(poly["command_id"])
+            finally:
+                # Back out of the unfinished run to the start, so the case can run again on
+                # this server (the human needs its client still logged in for this).
+                for who in (HUMAN,) + BOTS:
+                    _reset(who)
+                if client:
+                    client.close()
+                harness.terminate()
+                try:
+                    harness.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    harness.kill()
+                proxy.stop()
+                brain.stop()
+
+        expect(all(m == HUMAN for m in masters.values()), f"masters: {masters}")
+        expect(role_checked == sorted(BOTS), f"role checks woke {role_checked}")
+        expect(proposed == sorted(BOTS), f"Dungeon Finder proposals woke {proposed}")
+        expect(any(p["dungeon"] == DEADMINES for p in proposals),
+               f"{HUMAN} saw no Deadmines proposal: {proposals}")
+        expect(summon_dist <= 10.0, f"Loadd came back {summon_dist:.1f} yd from the entrance")
+        expect(len(rollers) >= len(BOTS), f"{len(rollers)} bots rolled, expected {len(BOTS)}")
+        expect(went_there and held_there and came_back,
+               f"'go there' / 'los' (at={went_there}, held={held_there}, back={came_back})")
+        expect(still_body, "dead Loadd released instead of waiting for a resurrection")
+        # Both are named: the dead Loadd wakes too (and keeps waiting).
+        expect("Loadb" in rez_woken, f"'loadb rez loadd' woke {rez_woken}")
+        expect(not rez_errs, f"Loadb's Resurrection was refused: {rez_errs}")
+        expect(zap_woken == ["Loadd"], f"'rouge zap diamond' woke {zap_woken}")
+        expect(not sap_errs, f"Loadd's Sap was refused: {sap_errs}")
+        expect(sheep_woken == ["Loadc"], f"'mage sheep star' woke {sheep_woken}")
+        expect(not poly_errs, f"Loadc's Polymorph was refused: {poly_errs}")
+        return (f"4 bots joined {HUMAN}, LFG put all 5 in the Deadmines; ready x{len(BOTS)}; "
+                f"summoned Loadd back ({summon_dist:.1f} yd); loot roll ended ({ended['op']}); "
+                "go there / los; Loadb rezzed Loadd; Sap on diamond and Polymorph on star")
+    return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
+
 def _case_pull_gate():
     """Who may pull: the gate on Attack options for mobs nobody fights yet (Milestone 3a).
 
@@ -2079,4 +2507,4 @@ def _case_crisp_dodge():
                 f"{took:.1f} s; the 10 s Summon Imp was cut")
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
-CASES = [_case_pull_gate(), _case_crowd_control(), _case_use_physics(), _case_crisp_dodge(), _case_popup_policy(), _case_human_party(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal()]
+CASES = [_case_pull_gate(), _case_crowd_control(), _case_use_physics(), _case_crisp_dodge(), _case_popup_policy(), _case_human_party(), _case_human_dungeon(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal()]
