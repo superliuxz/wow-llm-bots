@@ -2,22 +2,24 @@
 game server (authserver + worldserver) and its console. Everything acts on this checkout's
 processes only, found by their pid files, never by name across the machine.
 
-Two servers (common.Instance): the play server, and the isolated test server e2e and perf run on
-while you play (worldserver only, its own port, run directory, logs and databases, reset for
-every run from a golden copy: docs/design.md, E). Functions take `inst`, the play server
-by default."""
+Two kinds of server (common.Instance): the play server, and the isolated test server e2e and perf
+run on while you play (worldserver only, its own port, run directory, logs and databases, reset
+for every run from a golden copy: docs/design.md, E). `wlb test e2e -j N` runs up to
+common.MAX_SHARDS test servers at once (common.test_instance(k)), all from the one test install.
+Functions take `inst`, the play server by default."""
 
 import datetime
 import errno
 import os
 import pathlib
 import re
+import shutil
 import signal
 import subprocess
 import time
 
-from wlblib.common import (ETC, LOGS, MYSQL_CNF, PLAY, ROOT, TEST, VAR, Failed, alive,
-                           output, pid_file, run, running_pid, say)
+from wlblib.common import (ETC, LOGS, MAX_SHARDS, MYSQL_CNF, PLAY, ROOT, TEST, TEST_ROOT, VAR,
+                           Failed, alive, output, pid_file, run, running_pid, say, test_instance)
 
 SECRETS = VAR / "secrets"
 DB_PASSWORD = SECRETS / "db-password"
@@ -31,7 +33,7 @@ ALL_NAMES = (*STATE_NAMES, "world")
 # The test server's state databases as they were right after it first set them up: every test
 # run starts from a copy of these (the world database isn't written by tests: it stays).
 GOLDEN_PREFIX = "acore_golden_"
-GOLDEN_KEY = TEST.root / "golden-key"  # What the golden copy was made with (submodule commits).
+GOLDEN_KEY = TEST_ROOT / "golden-key"  # What the golden copy was made with (submodule commits).
 
 
 def console_pipe(inst=PLAY):
@@ -98,8 +100,15 @@ def _ensure_acore_users():
 def db_start(*, allow_init: bool = False):
     """Starts the project-local MySQL (Percona) in the background, from config/mysql.cnf.in."""
     ETC.mkdir(parents=True, exist_ok=True)
-    MYSQL_CNF.write_text((ROOT / "config" / "mysql.cnf.in").read_text()
-                         .replace("@ROOT@", str(ROOT)))
+    cnf = (ROOT / "config" / "mysql.cnf.in").read_text().replace("@ROOT@", str(ROOT))
+    try:
+        current = MYSQL_CNF.read_text()
+    except OSError:
+        current = None
+    if cnf != current:  # Only when it changed, whole: test shards start side by side.
+        tmp = MYSQL_CNF.with_name(f"{MYSQL_CNF.name}.{os.getpid()}.tmp")
+        tmp.write_text(cnf)
+        tmp.rename(MYSQL_CNF)
     _ensure_local_db_initialized(allow_init=allow_init)
     if _mysql_up():
         _ensure_acore_users()
@@ -172,7 +181,7 @@ def _db_password():
 def _tokens(inst, password):
     """What the @...@ placeholders of config/*.overrides stand for, for `inst`."""
     return {"@DB_PASSWORD@": password, "@ROOT@": str(ROOT), "@DB@": inst.db_prefix,
-            "@LOGS@": str(inst.logs), "@RUN@": str(inst.run),
+            "@WORLD_DB@": inst.db("world"), "@LOGS@": str(inst.logs), "@RUN@": str(inst.run),
             "@WORLD_PORT@": str(inst.world_port)}
 
 
@@ -204,8 +213,11 @@ def _apply(dist, out, override_files, tokens):
                 text = pattern.sub(lambda _: line, text, count=1)
             else:
                 text += ("" if text.endswith("\n") else "\n") + line + "\n"
-    out.write_text(text)
-    out.chmod(0o600)
+    # Written whole, then renamed: a worldserver starting meanwhile never reads half a file.
+    tmp = out.with_name(out.name + ".tmp")
+    tmp.write_text(text)
+    tmp.chmod(0o600)
+    tmp.rename(out)
 
 
 # The rendered config: template (under out/server/etc) -> the overrides applied to it, in order,
@@ -221,8 +233,11 @@ CONFIGS = (
 
 def config(test=None, inst=PLAY):
     """Renders <inst>/etc/*.conf from AzerothCore's .dist templates plus config/*.overrides
-    (and config/tests/<test>.*.overrides for a test)."""
+    (and config/tests/<test>.*.overrides for a test). A test shard's etc-k gets the templates
+    copied from the install first."""
     tokens = _tokens(inst, _db_password())
+    if inst.etc != inst.install_etc:
+        _copy_templates(inst.install_etc, inst.etc)
     configs = ROOT / "config"
     if test and not list((configs / "tests").glob(f"{test}.*.overrides")):
         raise Failed(f"no test config {test} (config/tests/{test}.*.overrides)")
@@ -232,7 +247,7 @@ def config(test=None, inst=PLAY):
             if "mod-llm-brain" in template:
                 continue  # A server built without our module.
             raise Failed(f"no {template} under {inst.etc.relative_to(ROOT)} (tools/wlb build "
-                         f"server{' --test' if inst is TEST else ''})")
+                         f"server{' --test' if inst.test_hooks else ''})")
         files = [configs / f"{name}.overrides" for name in names]
         if test and test_name:
             # config/tests/_base.*: what every test resets from the play config.
@@ -242,6 +257,20 @@ def config(test=None, inst=PLAY):
                     files.append(extra)
         _apply(dist, dist.with_suffix(""), files, tokens)
     say(f"{inst.name} config applied{f' (test: {test})' if test else ''}")
+
+
+def _copy_templates(source, target):
+    """Copies the *.dist templates under `source` (the install's etc) to `target` (a shard's
+    etc-k), so it is a whole etc directory the worldserver can have in its place."""
+    for dist in source.rglob("*.dist"):
+        out = target / dist.relative_to(source)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if out.stat().st_mtime_ns == dist.stat().st_mtime_ns:
+                continue
+        except OSError:
+            pass
+        shutil.copy2(dist, out)
 
 
 # ---- Server -------------------------------------------------------------------------------------
@@ -330,9 +359,14 @@ def server_start(inst=PLAY):
         # Hold the pipe open for writing, so worldserver never sees EOF on its console.
         holder = _hold_console_open(pipe)
         pid_file("worldserver-pipe", inst).write_text(f"{holder}\n")
+        cmd = ["./worldserver", "-c", "../etc/worldserver.conf"]
+        if inst.etc != inst.install_etc:
+            cmd = _with_own_etc(inst, cmd)
         with open(pipe, "rb", buffering=0) as console:
-            _start_detached("worldserver", ["./worldserver", "-c", "../etc/worldserver.conf"],
-                            inst.bin, inst.logs / "worldserver.out", stdin=console, inst=inst)
+            pid = _start_detached("worldserver", cmd, inst.bin, inst.logs / "worldserver.out",
+                                  stdin=console, inst=inst)
+        if inst.etc != inst.install_etc:
+            _wait_exec(pid, "worldserver", inst)
         say(f"{inst.name} worldserver started (log: "
             f"{(inst.logs / 'worldserver.out').relative_to(ROOT)})")
     if not play:
@@ -345,6 +379,39 @@ def server_start(inst=PLAY):
                         [ROOT / "tools" / "wlb", "server", "sample", log, "60", account],
                         ROOT, os.devnull)
         say("human-play sampler started")
+
+
+def _with_own_etc(inst, cmd):
+    """`cmd` run with `inst.etc` (a test shard's etc-k) mounted over the install's etc, in a
+    mount namespace of its own (an unprivileged user namespace: nothing changes outside it).
+    AzerothCore reads module configs (playerbots, ours) from the etc/modules path compiled into
+    it, so a second test server on the same install can't be pointed elsewhere with `-c`."""
+    script = 'mount --bind "$1" "$2" && shift 2 && exec "$@"'
+    return ["unshare", "--user", "--map-root-user", "--mount", "--", "sh", "-c", script, "sh",
+            str(inst.etc), str(inst.install_etc), *cmd]
+
+
+def own_etc_supported():
+    """Whether this machine lets a test shard mount its own etc (_with_own_etc): unprivileged
+    user namespaces with mounts. Without it, e2e runs on one test server (`-j 1`)."""
+    result = subprocess.run(
+        ["unshare", "--user", "--map-root-user", "--mount", "--", "sh", "-c",
+         'mount --bind "$1" "$1"', "sh", str(TEST_ROOT)], capture_output=True)
+    return result.returncode == 0
+
+
+def _wait_exec(pid, name, inst, timeout_s=10):
+    """Waits until `pid` (started through unshare and sh) has become `name`, so running_pid
+    finds it; fails if it exits first."""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if running_pid(name, inst):
+            return
+        if not alive(pid):
+            break
+        time.sleep(0.05)
+    raise Failed(f"the {inst.name} {name} didn't start (log: "
+                 f"{(inst.logs / f'{name}.out').relative_to(ROOT)})")
 
 
 def _hold_console_open(pipe):
@@ -472,10 +539,16 @@ def server_stop(backup=True, inst=PLAY):
                 db_backup()  # The databases are quiet now.
         except Failed as e:
             say(f"backup FAILED (the server is stopping anyway): {e}")
-        if running_pid("worldserver", TEST):
-            say("the test server is running: MySQL stays up for it")
+        if any(running_pid("worldserver", test_instance(k)) for k in range(MAX_SHARDS + 1)):
+            say("a test server is running: MySQL stays up for it")
         else:
             db_stop()
+
+
+def test_servers_stop():
+    """Stops every test server of this checkout: the plain one and the e2e shards."""
+    for k in range(MAX_SHARDS + 1):
+        worldserver_stop(test_instance(k))
 
 
 # ---- The test server's databases ----------------------------------------------------------------
@@ -522,12 +595,13 @@ def _grant(name):
         _sql(f"GRANT ALL PRIVILEGES ON `{name}`.* TO 'acore'@'{host}'")
 
 
-def test_databases_reset():
-    """Puts the test server's databases in their golden state: auth, characters and playerbots
-    copied from the golden copy; world as the test server set it up. The first time (and when
-    AzerothCore or playerbots moved on), the test server is started once on its databases to set
-    them up (a few minutes for an empty world database), and the golden copy is made from the
-    result. The test server must be stopped."""
+def golden_databases_make():
+    """Makes the golden copy of the test databases when it is missing or AzerothCore or
+    playerbots moved on: the plain test server (shard 0, which must be stopped) is started once
+    on its databases to set them up (a few minutes for an empty world database), and the golden
+    copy is made from the result; its world database stays as the one every test server uses.
+    Does nothing when the golden copy is current. A sharded e2e run makes it once, before its
+    shards start."""
     db_start(allow_init=True)
     have = _databases()
     golden = all(GOLDEN_PREFIX + n in have for n in STATE_NAMES)
@@ -536,36 +610,61 @@ def test_databases_reset():
         current = GOLDEN_KEY.read_text().strip()
     except OSError:
         current = None
-    if not golden or current != key:
-        say("making the test server's golden databases (first run, or AzerothCore or "
-            "playerbots moved on)")
-        for name in ALL_NAMES:
-            db = TEST.db(name)
-            if golden:
-                if name in STATE_NAMES:  # Start from the old golden: only updates to apply.
-                    _copy_database(GOLDEN_PREFIX + name, db)
-            elif db not in have:
-                _sql(f"CREATE DATABASE `{db}`")
-            _grant(db)
-        GOLDEN_KEY.unlink(missing_ok=True)
-        _set_up_once()
-        for name in STATE_NAMES:
-            _copy_database(TEST.db(name), GOLDEN_PREFIX + name)
-        GOLDEN_KEY.write_text(key + "\n")
-        say("golden databases made")
+    if golden and current == key:
+        return
+    say("making the test server's golden databases (first run, or AzerothCore or "
+        "playerbots moved on)")
+    base = test_instance(0)
+    for name in ALL_NAMES:
+        db = base.db(name)
+        if golden:
+            if name in STATE_NAMES:  # Start from the old golden: only updates to apply.
+                _copy_database(GOLDEN_PREFIX + name, db)
+        elif db not in have:
+            _sql(f"CREATE DATABASE `{db}`")
+        _grant(db)
+    GOLDEN_KEY.unlink(missing_ok=True)
+    _set_up_once(base)
     for name in STATE_NAMES:
-        _copy_database(GOLDEN_PREFIX + name, TEST.db(name))
-    say("test databases reset")
+        _copy_database(base.db(name), GOLDEN_PREFIX + name)
+    GOLDEN_KEY.write_text(key + "\n")
+    say("golden databases made")
 
 
-def _set_up_once(timeout_s=1800):
-    """Starts the test server on the base config (no test characters) until it is ready, so it
-    sets its databases up (AzerothCore's and playerbots' updaters), then stops it."""
-    config(inst=TEST)
-    log = TEST.logs / "worldserver.out"
-    TEST.logs.mkdir(parents=True, exist_ok=True)
+def test_databases_reset(inst=None):
+    """Puts test server `inst`'s databases in their golden state: auth, characters and
+    playerbots copied from the golden copy (made first if needed: golden_databases_make), its
+    realm pointing at its own world port; world as the test server set it up. `inst` (by
+    default this process's test server, common.TEST) must be stopped."""
+    inst = inst or TEST
+    if inst.shard:
+        db_start(allow_init=True)
+        key = _golden_key()
+        try:
+            current = GOLDEN_KEY.read_text().strip()
+        except OSError:
+            current = None
+        if current != key:  # Shard 0's server makes it: the sharded runner does, first.
+            raise Failed("the test databases' golden copy is missing or old: run e2e with -j 1 "
+                         "once (or let `wlb test e2e` make it before its shards start)")
+    else:
+        golden_databases_make()
+    for name in STATE_NAMES:
+        _copy_database(GOLDEN_PREFIX + name, inst.db(name))
+        _grant(inst.db(name))
+    _grant(inst.db("world"))
+    _sql(f"UPDATE `{inst.db('auth')}`.realmlist SET port = {inst.world_port}")
+    say(f"{inst.name} databases reset")
+
+
+def _set_up_once(inst, timeout_s=1800):
+    """Starts test server `inst` on the base config (no test characters) until it is ready, so
+    it sets its databases up (AzerothCore's and playerbots' updaters), then stops it."""
+    config(inst=inst)
+    log = inst.logs / "worldserver.out"
+    inst.logs.mkdir(parents=True, exist_ok=True)
     start = log.stat().st_size if log.exists() else 0
-    server_start(TEST)
+    server_start(inst)
     deadline = time.time() + timeout_s
     try:
         while True:
@@ -573,7 +672,7 @@ def _set_up_once(timeout_s=1800):
                 f.seek(start)
                 if b") ready..." in f.read():
                     break
-            if not running_pid("worldserver", TEST):
+            if not running_pid("worldserver", inst):
                 raise Failed(f"the test worldserver exited while setting up its databases "
                              f"(log: {log.relative_to(ROOT)})")
             if time.time() > deadline:
@@ -581,7 +680,7 @@ def _set_up_once(timeout_s=1800):
                              f"(log: {log.relative_to(ROOT)})")
             time.sleep(5)
     finally:
-        worldserver_stop(TEST)
+        worldserver_stop(inst)
 
 
 def sample(out, interval_s, account_like):

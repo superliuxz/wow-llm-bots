@@ -1,7 +1,16 @@
 """`wlb build`: our shared C++ (common/, the harness, the module's tests) and the server."""
 
+import os
 
 from wlblib.common import OUT, PLAY, ROOT, TEST, run, say
+
+# Set by `wlb test e2e -j N` for the processes it starts per shard: it built everything first, and
+# ninja runs side by side on one build directory would race.
+PREBUILT_ENV = "WLB_PREBUILT"
+
+
+def _prebuilt():
+    return os.environ.get(PREBUILT_ENV) == "1"
 
 # The unit test suites; `ninja unit_tests` (common/CMakeLists.txt) builds them all.
 UNIT_TESTS = ("wlb_common_unittests", "llm_brain_unittests", "harness_unittests")
@@ -32,6 +41,8 @@ def common(variant="default", tests=True, gtest_filter=None):
 
     out_dir, sanitizer, build_type, hardened = VARIANTS[variant]
     build = OUT / out_dir
+    if _prebuilt() and not tests:
+        return build
     if not (build / "build.ninja").exists():
         flags, ldflags = [], ["-fuse-ld=lld"]
         if sanitizer:
@@ -76,6 +87,8 @@ def server(test=False, install=True):
     from wlblib import setup
 
     inst = TEST if test else PLAY
+    if _prebuilt():
+        return
     common("server", tests=False)
     if not (inst.root / "build.ninja").exists():
         say(f"configuring the {inst.name} server build in {inst.root.relative_to(ROOT)}")

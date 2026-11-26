@@ -56,6 +56,13 @@ Follow Google/Chromium C++ style (`.clang-format`, `BasedOnStyle: Chromium`). `c
   those to CI unless explicitly asked.
 - **Test targets (`tools/wlb test <target>`):** `unit`, `e2e` (6 grouped files in
   `tools/wlblib/cases/e2e_*.py` on isolated `out/server-test`), `perf`, `eval`, `soak`.
+- **Parallel e2e:** `tools/wlb test e2e -j N` runs the case groups on N test servers at once
+  (shard k: port 8086+k, `out/server-test/run-k`/`etc-k`, `var/logs/test-k`, `acore_test_k_*`;
+  one shared build and test world DB). Default N: one per 7 GB free RAM and per 2 cores, at most
+  6 (about 21 -> 6.5 min here); `-j 1` is the serial run. Needs unprivileged user+mount
+  namespaces (`unshare`), else it falls back to `-j 1`. `tools/wlb server stop --test` stops
+  every shard. Splitting with a remote worker and running eval alongside are not built yet
+  (docs/TODO.md).
 
 ## Repo Layout
 

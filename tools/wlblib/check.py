@@ -197,6 +197,7 @@ def bench_tests():
     run(["python3", "-I", "-B", ROOT / "tools/eval/mine_traces_test.py", "-q"])
     run(["python3", "-I", "-B", ROOT / "tools/wlblib/remote_test.py", "-q"])
     run(["python3", "-I", "-B", ROOT / "tools/wlblib/eval_plans_test.py", "-q"])
+    run(["python3", "-I", "-B", ROOT / "tools/wlblib/testing_test.py", "-q"])
 
 
 def sanitizers():

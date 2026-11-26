@@ -19,23 +19,35 @@ MYSQL_CNF = ETC / "mysql.cnf"  # The one MySQL, shared by the play and test serv
 
 @dataclasses.dataclass(frozen=True)
 class Instance:
-    """One game server: the play server you log in to, or the isolated test server e2e and perf
-    run on (docs/design.md, E) while you play. Each has its own build and install, run
-    directory (pid files, console pipe, brain socket), logs, databases and world port; they
-    share MySQL, the client data and llama-server."""
+    """One game server: the play server you log in to, or a test server e2e and perf run on
+    (docs/design.md, E) while you play. Each has its own build and install, run directory (pid
+    files, console pipe, brain socket), logs, databases and world port; they share MySQL, the
+    client data and llama-server. Test shards (test_instance(k), k > 0: parallel e2e) share the
+    one test build and install, and the test world database (tests don't write it); each has
+    its own run-k and etc-k directories next to the install."""
     name: str
     root: pathlib.Path  # Build and install directory.
     logs: pathlib.Path
     db_prefix: str  # Database names: <prefix>auth, <prefix>characters, ...
     world_port: int
     test_hooks: bool  # The module's test-only code compiled in (src/test/).
+    shard: int = 0  # A test shard's number; 0 for the play server and the plain test server.
+    world_db: str = ""  # The world database, when it isn't <prefix>world (a test shard's).
 
     @property
     def run(self):
-        return self.root / "run"
+        return self.root / (f"run-{self.shard}" if self.shard else "run")
 
     @property
     def etc(self):
+        """Its rendered config. A test shard's etc-k is bind-mounted over the install's etc for
+        its worldserver (server.server_start): module configs are read from a path fixed when
+        AzerothCore was compiled."""
+        return self.root / (f"etc-{self.shard}" if self.shard else "etc")
+
+    @property
+    def install_etc(self):
+        """The config templates (*.dist) the install put there."""
         return self.root / "etc"
 
     @property
@@ -43,11 +55,45 @@ class Instance:
         return self.root / "bin"
 
     def db(self, name):
+        if name == "world" and self.world_db:
+            return self.world_db
         return f"{self.db_prefix}{name}"
 
 
 PLAY = Instance("play", SERVER, LOGS, "acore_", 8085, False)
-TEST = Instance("test", OUT / "server-test", LOGS / "test", "acore_test_", 8086, True)
+TEST_ROOT = OUT / "server-test"
+TEST_PORT = 8086
+MAX_SHARDS = 6  # The most test servers at once: `wlb test e2e -j N`.
+
+
+def test_instance(k):
+    """Test server `k`: 0 is the plain test server (port 8086, acore_test_* databases,
+    out/server-test/run, var/logs/test), what `wlb server --test`, `--keep-server` and perf use;
+    shard k > 0 has port 8086 + k, acore_test_<k>_* databases (the world database shared),
+    out/server-test/run-k and etc-k, and var/logs/test-k."""
+    if not 0 <= k <= MAX_SHARDS:
+        raise ValueError(f"no test shard {k} (0..{MAX_SHARDS})")
+    if k == 0:
+        return Instance("test", TEST_ROOT, LOGS / "test", "acore_test_", TEST_PORT, True)
+    return Instance(f"test-{k}", TEST_ROOT, LOGS / f"test-{k}", f"acore_test_{k}_",
+                    TEST_PORT + k, True, shard=k, world_db="acore_test_world")
+
+
+def _shard_from_env():
+    """The test shard this process works on: $WLB_TEST_SHARD, set by `wlb test e2e -j N` for
+    the process it starts per shard (0 when unset)."""
+    text = os.environ.get("WLB_TEST_SHARD", "").strip()
+    try:
+        k = int(text) if text else 0
+        test_instance(k)
+    except ValueError:
+        raise SystemExit(f"wlb: WLB_TEST_SHARD={text!r} is not a test shard (0..{MAX_SHARDS})")
+    return k
+
+
+# The test server this process works on (cases, Stack, soak): shard 0 unless a sharded e2e run
+# started this process for another one.
+TEST = test_instance(_shard_from_env())
 
 
 class Failed(Exception):

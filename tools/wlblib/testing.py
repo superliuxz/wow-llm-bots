@@ -11,22 +11,30 @@ A case is a module in wlblib/cases/ named <target>_<name>.py with
   run(env)     does the case; raises (expect() fails with a message) when it fails
 and, for e2e, TEST_CONFIG (config/tests/<TEST_CONFIG>.*.overrides) and BOT (the character to wait
 for). The runner prints one PASS or FAIL line per case and exits 1 if any failed.
+
+`wlb test e2e -j N` runs the e2e groups (cases sharing a TEST_CONFIG, BOT and ONLINE: one server
+start each) on N test servers at once (common.test_instance), one `wlb test e2e` process per
+shard, longest groups first by the last run's timings (var/e2e-timings.json).
 """
 
 import datetime
 import importlib
 import json
+import os
 import pathlib
 import pkgutil
+import re
 import select
 import shutil
+import signal
 import socket
 import subprocess
 import threading
 import time
 
 from wlblib import build, cases, llm, server, wire
-from wlblib.common import OUT, PLAY, ROOT, TEST, Failed, output, run, running_pid, say
+from wlblib.common import (MAX_SHARDS, OUT, PLAY, ROOT, TEST, VAR, Failed, output, run,
+                           running_pid, say, test_instance)
 
 TARGETS = ("unit", "e2e", "perf", "eval", "soak")
 
@@ -183,39 +191,40 @@ def unit(variant="default", gtest_filter=None):
 # ---- e2e ----------------------------------------------------------------------------------------
 
 class Stack:
-    """The running test stack: the isolated test server (common.TEST: its own build, port, run
-    directory, logs and databases) with a test config and the test bot online, and a record of
-    its log from the start of the run. Your play server keeps running meanwhile, untouched.
+    """The running test stack: an isolated test server (`inst`, by default this process's,
+    common.TEST: its own port, run directory, logs and databases) with a test config and the
+    test bot online, and a record of its log from the start of the run. Your play server keeps
+    running meanwhile, untouched.
 
     Every run starts from the same state: the test server's databases are reset from their
     golden copy (server.test_databases_reset), and test characters are recreated from fixtures
     on every start."""
 
-    socket = TEST.run / "brain.sock"
-
-    def __init__(self, test_config, bot, keep=False, online=1):
+    def __init__(self, test_config, bot, keep=False, online=1, inst=None):
         self.test_config, self.bot, self.keep, self.online = test_config, bot, keep, online
+        self.inst = inst or TEST
+        self.socket = self.inst.run / "brain.sock"
         self.log_start = 0
 
     def __enter__(self):
         build.server(test=True)  # Only what changed since the last run.
-        server.server_stop(inst=TEST)  # One left running by --keep-server or a crash.
+        server.server_stop(inst=self.inst)  # One left running by --keep-server or a crash.
         try:
-            server.test_databases_reset()
+            server.test_databases_reset(self.inst)
             self._bring_up()
         except BaseException:
-            server.server_stop(inst=TEST)
+            server.server_stop(inst=self.inst)
             raise
         return self
 
     def _bring_up(self):
-        server.config(self.test_config, inst=TEST)
-        server.server_start(TEST)
-        server.wait_online(self.bot, inst=TEST)
+        server.config(self.test_config, inst=self.inst)
+        server.server_start(self.inst)
+        server.wait_online(self.bot, inst=self.inst)
         if self.online > 1:
-            server.wait_online_count(self.online, inst=TEST)
+            server.wait_online_count(self.online, inst=self.inst)
         try:
-            self.log_start = (TEST.logs / "Server.log").stat().st_size
+            self.log_start = (self.inst.logs / "Server.log").stat().st_size
         except OSError:
             self.log_start = 0
         # The first snapshots are sent as soon as a harness connects.
@@ -225,11 +234,11 @@ class Stack:
         self.test_config, self.bot, self.online = test_config, bot, online
         say(f"switching the test stack to {test_config}")
         try:
-            server.server_stop(inst=TEST)
+            server.server_stop(inst=self.inst)
             self._bring_up()
         except BaseException:
             if not self.keep:
-                server.server_stop(inst=TEST)
+                server.server_stop(inst=self.inst)
             raise
 
     def __exit__(self, *exc):
@@ -237,13 +246,13 @@ class Stack:
             say("leaving the test server running (--keep-server; stop it with "
                 "`tools/wlb server stop --test`)")
         else:
-            server.server_stop(inst=TEST)
+            server.server_stop(inst=self.inst)
         return False
 
     def server_log(self):
         """The module's log lines since the stack came up."""
         try:
-            with open(TEST.logs / "Server.log", "rb") as f:
+            with open(self.inst.logs / "Server.log", "rb") as f:
                 f.seek(self.log_start)
                 return f.read().decode(errors="replace")
         except OSError:
@@ -285,11 +294,10 @@ def _select(target, names):
     return selected
 
 
-def _run_selected(selected, keep_server, call):
-    """Runs `call(module, stack)` for every case. Cases with a TEST_CONFIG share one stack per
-    (TEST_CONFIG, BOT, ONLINE); cases without one run with stack None, first (the play server
-    stays up for them)."""
-    groups, plain, results = {}, [], []
+def _groups(selected):
+    """Splits cases into (plain, groups): plain ones have no TEST_CONFIG; the others are grouped
+    by (TEST_CONFIG, BOT, ONLINE), each group one server start, in the order first seen."""
+    groups, plain = {}, []
     for module in selected:
         config = getattr(module, "TEST_CONFIG", None)
         if config:
@@ -297,29 +305,253 @@ def _run_selected(selected, keep_server, call):
             groups.setdefault(key, []).append(module)
         else:
             plain.append(module)
+    return plain, groups
+
+
+def _group_name(key):
+    config, bot, online = key
+    return f"{config}/{bot}/{online}"
+
+
+def _run_selected(selected, keep_server, call, record=None):
+    """Runs `call(module, stack)` for every case. Cases with a TEST_CONFIG share one stack per
+    (TEST_CONFIG, BOT, ONLINE); cases without one run with stack None, first (the play server
+    stays up for them). With `record` (a dict), fills in record["cases"] (name, ok, seconds per
+    case) and record["groups"] (seconds per group, its server start included) as it goes."""
+    plain, groups = _groups(selected)
+    results = []
+    if record is not None:
+        record.setdefault("cases", [])
+        record.setdefault("groups", {})
+
+    def one(module, stack):
+        start = time.time()
+        ok = call(module, stack)
+        results.append(ok)
+        if record is not None:
+            record["cases"].append({"name": module.NAME, "ok": bool(ok),
+                                    "seconds": round(time.time() - start, 1)})
+        return ok
+
     for module in plain:
-        results.append(call(module, None))
+        one(module, None)
     # One test stack for the whole run: the test build is installed once and the play server
     # restored once; between configs only the config changes (a restart).
     if groups:
         keys = list(groups)
         config, bot, online = keys[0]
+        started = time.time()
         with Stack(config, bot, keep=keep_server, online=online) as stack:
             for i, key in enumerate(keys):
                 if i:
+                    started = time.time()
                     stack.switch(*key)
                 for module in groups[key]:
-                    results.append(call(module, stack))
+                    one(module, stack)
+                if record is not None:
+                    record["groups"][_group_name(key)] = round(time.time() - started, 1)
     _summary(results)
 
 
-def e2e(names=(), keep_server=False):
+# ---- e2e, sharded -------------------------------------------------------------------------------
+
+TIMINGS = VAR / "e2e-timings.json"  # Seconds per e2e group, from the last run that ran it.
+RESULTS_ENV = "WLB_E2E_RESULTS"  # Where a shard's process writes its record (sharded runs).
+# What one more test server costs: a test worldserver peaks at about 6 GB resident (its maps
+# loaded, measured 2026-11-26), plus the harness and scripted brains its cases start.
+SHARD_RAM_GB = 7.0
+RAM_RESERVE_GB = 4.0  # Left free for everything else (the desktop, MySQL's growth).
+GROUP_GUESS_S = 60.0  # A group never timed yet: a server start ...
+CASE_GUESS_S = 60.0  # ... and this per case.
+
+
+def _mem_available_gb():
+    try:
+        for line in pathlib.Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) / (1 << 20)
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0.0
+
+
+def default_jobs(mem_available_gb=None, cpus=None):
+    """How many test servers at once by default: one per SHARD_RAM_GB of memory available
+    (after RAM_RESERVE_GB) and per two cores, at least 1, at most common.MAX_SHARDS."""
+    mem = _mem_available_gb() if mem_available_gb is None else mem_available_gb
+    cpus = (os.cpu_count() or 1) if cpus is None else cpus
+    by_ram = int((mem - RAM_RESERVE_GB) // SHARD_RAM_GB)
+    return max(1, min(MAX_SHARDS, by_ram, cpus // 2))
+
+
+def _load_timings():
+    try:
+        data = json.loads(TIMINGS.read_text())
+        return {k: float(v) for k, v in data.get("groups", {}).items()}
+    except (OSError, ValueError, AttributeError, TypeError):
+        return {}
+
+
+def _save_timings(groups):
+    """Merges this run's group times into TIMINGS (groups not run keep their last time)."""
+    if not groups:
+        return
+    merged = _load_timings()
+    merged.update(groups)
+    TIMINGS.parent.mkdir(parents=True, exist_ok=True)
+    tmp = TIMINGS.with_name(TIMINGS.name + ".tmp")
+    tmp.write_text(json.dumps({"groups": dict(sorted(merged.items()))}, indent=1) + "\n")
+    tmp.rename(TIMINGS)
+
+
+def plan_shards(groups, jobs, timings):
+    """Puts groups ({key: [case names]}) on `jobs` shards, longest first, each on the shard with
+    the least work so far (by `timings`, {group name: seconds}; a group not timed yet is guessed
+    from its case count). Returns one list of keys per shard (no empty shards), in the order the
+    shard runs them, and each shard's estimated seconds."""
+    def estimate(key):
+        return timings.get(_group_name(key), GROUP_GUESS_S + CASE_GUESS_S * len(groups[key]))
+
+    order = sorted(groups, key=lambda k: (-estimate(k), _group_name(k)))
+    shards = [[] for _ in range(max(1, min(jobs, len(groups))))]
+    load = [0.0] * len(shards)
+    for key in order:
+        i = min(range(len(shards)), key=lambda j: (load[j], j))
+        shards[i].append(key)
+        load[i] += estimate(key)
+    return shards, load
+
+
+# A case's result line; console output just before it may share its line ("AC> PASS e2e ...").
+_RESULT_LINE = re.compile(r"(?:^|\s)(?:PASS|FAIL) e2e \S")
+
+
+class _CaseBlocks:
+    """Collects one shard's output lines and prints each case's lines whole, ending at its
+    PASS or FAIL line, so the shards' output doesn't interleave. Lines other than the result
+    lines carry the shard's name."""
+
+    def __init__(self, label, lock, emit=None):
+        self.label, self.lock, self.lines = label, lock, []
+        self.emit = emit or (lambda text: print(text, flush=True))
+
+    def feed(self, line):
+        line = line.rstrip("\n")
+        if _RESULT_LINE.search(line):
+            self.lines.append(line)
+            self.flush()
+        else:
+            self.lines.append(f"  [{self.label}] {line}")
+
+    def flush(self):
+        if self.lines:
+            with self.lock:
+                self.emit("\n".join(self.lines))
+            self.lines = []
+
+
+def _run_sharded(groups, jobs):
+    """Runs the groups on `jobs` test servers at once, one `wlb test e2e` process per shard
+    (shards 0..jobs-1), and prints the same summary as a serial run."""
+    started = time.time()
+    build.server(test=True)  # Once, for all shards: theirs skip building (build.PREBUILT_ENV).
+    server.test_servers_stop()  # Left running by --keep-server or a crash.
+    server.golden_databases_make()  # Once, before the shards copy it.
+    shards, load = plan_shards({k: [m.NAME for m in v] for k, v in groups.items()}, jobs,
+                               _load_timings())
+    say(f"running {sum(len(v) for v in groups.values())} e2e cases in {len(groups)} groups on "
+        f"{len(shards)} test servers (estimated {max(load) / 60:.0f} min)")
+    lock = threading.Lock()
+    procs = []
+    try:
+        for k, keys in enumerate(shards):
+            names = [m.NAME for key in keys for m in groups[key]]
+            results = OUT / "e2e-shards" / f"shard-{k}.json"
+            results.parent.mkdir(parents=True, exist_ok=True)
+            results.unlink(missing_ok=True)
+            env = {**os.environ, "WLB_TEST_SHARD": str(k), build.PREBUILT_ENV: "1",
+                   RESULTS_ENV: str(results), "PYTHONUNBUFFERED": "1"}
+            proc = subprocess.Popen([ROOT / "tools" / "wlb", "test", "e2e", "-j", "1", *names],
+                                    cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                    errors="replace")
+            blocks = _CaseBlocks(test_instance(k).name, lock)
+            reader = threading.Thread(target=_pump, args=(proc, blocks), daemon=True)
+            reader.start()
+            procs.append((k, names, results, proc, reader))
+        for _, _, _, proc, reader in procs:
+            proc.wait()
+            reader.join()
+    except BaseException as e:
+        # A shard stops its own server on SIGINT, as a serial run does on Ctrl-C. Ctrl-C has
+        # reached the shards already (one process group): a second one would cut their cleanup.
+        for _, _, _, proc, _ in procs:
+            if proc.poll() is None and not isinstance(e, KeyboardInterrupt):
+                proc.send_signal(signal.SIGINT)
+        for _, _, _, proc, _ in procs:
+            try:
+                proc.wait(150)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        raise
+    finally:
+        server.test_servers_stop()  # Whatever a shard left behind (normally nothing).
+    oks, timed = [], {}
+    for k, names, results, proc, _ in procs:
+        try:
+            record = json.loads(results.read_text())
+        except (OSError, ValueError):
+            record = {}
+        ran = {c["name"]: c["ok"] for c in record.get("cases", [])}
+        for name in names:
+            if name not in ran:
+                say(f"FAIL e2e {name}: not run (the {test_instance(k).name} process exited "
+                    f"{proc.returncode} first)")
+            oks.append(bool(ran.get(name, False)))
+        timed.update(record.get("groups", {}))
+    _save_timings(timed)
+    say(f"e2e on {len(shards)} test servers: {(time.time() - started) / 60:.1f} min")
+    _summary(oks)
+
+
+def _pump(proc, blocks):
+    for line in proc.stdout:
+        blocks.feed(line)
+    blocks.flush()
+
+
+def e2e(names=(), keep_server=False, jobs=None):
+    """The e2e cases, on one test server (`jobs` 1: in this process) or on `jobs` at once
+    (default: default_jobs(); never more than there are groups)."""
     build.common("default", tests=False)
     selected = _select("e2e", names)
     missing = [m.NAME for m in selected if not getattr(m, "TEST_CONFIG", None)]
     if missing:
         raise Failed(f"e2e cases need a TEST_CONFIG: {', '.join(missing)}")
-    _run_selected(selected, keep_server, lambda module, stack: _run_case("e2e", module, stack))
+    _, groups = _groups(selected)
+    asked = jobs
+    jobs = min(default_jobs() if jobs is None else jobs, len(groups))
+    if jobs > 1 and keep_server:
+        if asked:
+            say("--keep-server: running on one test server")
+        jobs = 1
+    if jobs > 1 and not server.own_etc_supported():
+        say("this machine doesn't allow unprivileged mount namespaces (unshare --user "
+            "--mount): running on one test server")
+        jobs = 1
+    if jobs > 1:
+        _run_sharded(groups, jobs)
+        return
+    record = {}
+    results = os.environ.get(RESULTS_ENV)
+    try:
+        _run_selected(selected, keep_server, lambda module, stack: _run_case("e2e", module, stack),
+                      record=record)
+    finally:
+        if results:  # A shard of a sharded run: its parent merges this and saves the times.
+            pathlib.Path(results).write_text(json.dumps(record))
+        else:
+            _save_timings(record.get("groups", {}))
 
 
 # ---- perf ---------------------------------------------------------------------------------------

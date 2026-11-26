@@ -4,11 +4,12 @@
   tools/wlb build common [VARIANT] [--no-tests] | server [--test]   (--test: out/server-test)
   tools/wlb db start [--init] | stop | backup [--keep N]
   tools/wlb config [TEST]                render out/server/etc/*.conf (TEST: config/tests/TEST.*)
-  tools/wlb server start | stop [--test]   (--test: the isolated test server)
+  tools/wlb server start | stop [--test]   (--test: the isolated test server; stop: all of them)
   tools/wlb console [--test] COMMAND...   send a command to worldserver's console
   tools/wlb check [format|includes|snapshots|triggers|rules|goldens|sanitizers] [--san] [--fix] [FILES...]
   tools/wlb test unit [--filter PATTERN] [--variant asan|tsan|msan]
   tools/wlb test e2e|perf|eval [NAME...]  [--keep-server]   (e2e/perf: the isolated test server)
+  tools/wlb test e2e [-j N] [NAME...]     (N test servers at once; default by free RAM and cores)
   tools/wlb test perf [--update-baselines [--verify]] | --capture   (perf: record the numbers, and
                                                                      check they reproduce / the replay input)
   tools/wlb test --list
@@ -86,6 +87,9 @@ def parse(argv):
                    help="unit: the build (default, asan, tsan, msan)")
     p.add_argument("--keep-server", action="store_true",
                    help="leave the test server running afterwards (tools/wlb server stop --test)")
+    p.add_argument("-j", "--jobs", type=int, default=None,
+                   help=f"e2e: how many test servers at once (1..{common.MAX_SHARDS}; default: "
+                        "by free memory and cores; 1: one after the other, in this process)")
     p.add_argument("--update-baselines", action="store_true",
                    help="perf: record this run's numbers as the new baselines")
     p.add_argument("--verify", action="store_true",
@@ -213,6 +217,8 @@ def main():
         inst = common.TEST if a.test else common.PLAY
         if a.action == "start":
             server.server_start(inst)
+        elif a.action == "stop" and a.test:
+            server.test_servers_stop()  # The plain test server and any e2e shards.
         elif a.action == "stop":
             server.server_stop(inst=inst)
         else:
@@ -242,7 +248,9 @@ def main():
         elif a.target == "unit":
             testing.unit(a.variant, a.filter)
         elif a.target == "e2e":
-            testing.e2e(a.names, a.keep_server)
+            if a.jobs is not None and not 1 <= a.jobs <= common.MAX_SHARDS:
+                raise common.Failed(f"-j {a.jobs}: 1..{common.MAX_SHARDS}")
+            testing.e2e(a.names, a.keep_server, a.jobs)
         elif a.target == "perf" and a.capture:
             testing.capture_snapshots()
         elif a.target == "perf":

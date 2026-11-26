@@ -1,6 +1,6 @@
 # Applied to worldserver, authserver and dbimport.
 LoginDatabaseInfo = "127.0.0.1;3306;acore;@DB_PASSWORD@;@DB@auth"
-WorldDatabaseInfo = "127.0.0.1;3306;acore;@DB_PASSWORD@;@DB@world"
+WorldDatabaseInfo = "127.0.0.1;3306;acore;@DB_PASSWORD@;@WORLD_DB@"
 CharacterDatabaseInfo = "127.0.0.1;3306;acore;@DB_PASSWORD@;@DB@characters"
 LogsDir = "@LOGS@"
 SourceDirectory = "@ROOT@/third_party/azerothcore-wotlk"

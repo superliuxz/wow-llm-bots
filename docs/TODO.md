@@ -12,34 +12,27 @@ Last updated: 2026-11-26.
   mock LLM, no pulls or boss fights) are in place. Run a live session from a real 3.3.5a client to
   confirm pacing and single-responder feel in practice.
 
-- **Parallel e2e (use the idle cores):** e2e runs every case serially on the one test server
-  (`common.TEST`: port 8086, `acore_test_*` databases, `out/server-test/run`). Most of the time
-  goes to server start-up and bot log-in. Plan, one step at a time (each step lands green before
-  the next starts):
-  1. **Numbered test instances:** `common.test_instance(k)` gives shard `k` its own run dir
-     (`out/server-test/run-k`: pid files, console pipe, `brain.sock`), `etc-k` config, logs
-     (`var/logs/test-k`), databases (`acore_test_k_*`, reset from the same golden copy) and world
-     port (8086 + k), plus SOAP/RA ports if enabled. Shard 0 stays the plain `TEST` names, so
-     existing commands, scripts and `--keep-server` keep working. All shards share one build
-     (`out/server-test/bin`), MySQL, client data and llama-server. Each shard's auth database
-     has its own realmlist row pointing at its port. `Stack` and every `server.*` helper take the
-     instance instead of using `TEST` directly; `wlb server stop --test` stops all shards.
-  2. **Sharded runner:** `tools/wlb test e2e -j N` (default: by free RAM and cores, capped at
-     6; `-j 1` is today's behaviour) puts the `(TEST_CONFIG, BOT, ONLINE)` groups on N shards,
-     longest groups first (from the last run's timings in `var/`), one process per shard;
-     output is buffered per case and printed whole, and the summary is the same as today.
-     Golden databases are made once, before shards start.
+- **Parallel e2e (use the idle cores):** steps 1-2 are done: `tools/wlb test e2e -j N` (default
+  by free RAM and cores, capped at 6; `-j 1` is the old serial run) runs the groups on numbered
+  test servers (`common.test_instance(k)`: `run-k`, `etc-k`, `var/logs/test-k`, `acore_test_k_*`,
+  port 8086 + k), 21.4 -> 6.5-7 min here. As built: shards share the test world database
+  (`acore_test_world`, 558 MB, not written by tests) instead of one copy each; a shard's
+  worldserver gets its `etc-k` bind-mounted over the install's `etc` in an unprivileged
+  mount namespace (`unshare --user --map-root-user --mount`), because AzerothCore reads module
+  configs from the compiled-in etc path (no namespaces: `-j 1`); SOAP/RA are off, so no ports for
+  them; playerbots' command server (TCP 8888, shared with the play server) is off for tests. A
+  test worldserver peaks at about 6 GB resident (maps loaded); 6 shards took ~29 GB.
+  `human_dungeon` passed in every run (serial and parallel, runs back to back). Two cases were
+  flakier under 6-way load and got test-only fixes: `orders` (a leftover phase-3 wake could
+  install the kite plan before the phase-4 whisper woke the bot; a missed Shield act is now
+  retried) and `boss` (a healer already 25 yd out when the Nova starts has nothing to move).
+  Left, one step at a time (not started):
   3. **Both machines:** `tools/wlb test e2e --remote 10700k` splits the groups between this
      machine and the worker (`tools/wlb remote` sync, `touch` before rsync so mtimes don't
      leave stale objects) and merges the results. Only when asked (CONTRIBUTING rule 5).
   4. **Eval beside e2e:** eval needs only llama-server, so a `tools/wlb test all` runs it
      concurrently with e2e.
-  Checks: e2e passes with `-j 1` and with `-j N` (same 37/37), run twice in a row on one
-  machine (also checks the `human_dungeon` run-twice bug), no leftover worldservers or
-  `acore_test_k_*` state between runs, and the timing before/after is recorded in the commit.
-  Risks to check first: worldserver RAM per shard (maps/vmaps loaded), MySQL load, any hard-coded
-  `TEST`/8086/`brain.sock` paths in cases and the module, and cases that assume they are alone
-  (fixed character names are per-database, so they should be fine).
+  Checks: e2e passes with `-j 1` and with `-j N`, twice in a row; timing recorded in the commit.
 
 - **Fix queue (after the tank-aggro commit and parallel e2e, one commit each, full gates):**
   1. **Spell misses:** read SMSG_SPELL_GO's miss list (and spell-cast failure results) in the
@@ -53,9 +46,9 @@ Last updated: 2026-11-26.
      the test logs and the GBNF loader), fix the grammar or the test input that triggers it, and
      make that message fail the test from then on.
   4. **Boss notes vs. loose-mob wake** and **tank swap** (below): after 1–3, as one tanking step.
-  Older items not in this file any more get re-checked and listed if still real: `human_dungeon`
-  fails when run twice on one server (covered by parallel e2e's checks), no e2e for Hunter
-  Dismiss Pet, /raid class/role addressing works only in /p.
+  Older items not in this file any more get re-checked and listed if still real: no e2e for
+  Hunter Dismiss Pet, /raid class/role addressing works only in /p. (`human_dungeon` run twice
+  on one server: not reproduced in back-to-back full e2e runs, serial and parallel.)
 
 Lessons from official AI companions (Follower Dungeons, FFXIV Duty Support, Dragon's Dogma pawns,
 Guild Wars heroes):

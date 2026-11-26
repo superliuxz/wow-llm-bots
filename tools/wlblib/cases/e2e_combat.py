@@ -386,17 +386,19 @@ def _case_orders():
                     server.console("llmtest unaura Loada 6788", wait_s=0.1, inst=TEST)
                     cmd_mark = len(proxy.commands)
                     server.console("llmtest aura Loada 139", wait_s=0.1, inst=TEST)
-                    proxy.wait_until(
-                        lambda _: next(
-                            ((i, t, c) for i, t, c in act_cmds(cmd_mark)
-                             if c["act"].get("verb") == "USE"
-                             and c["act"].get("name") == "Power Word: Shield"),
-                            None,
-                        ),
-                        timeout_s=8.0,
-                        desc="USE Power Word: Shield act command",
-                    )
                     try:
+                        # No act when playerbots' own Shield landed between the unaura
+                        # and the Renew (`not Power Word: Shield on me` false): retried.
+                        proxy.wait_until(
+                            lambda _: next(
+                                ((i, t, c) for i, t, c in act_cmds(cmd_mark)
+                                 if c["act"].get("verb") == "USE"
+                                 and c["act"].get("name") == "Power Word: Shield"),
+                                None,
+                            ),
+                            timeout_s=8.0,
+                            desc="USE Power Word: Shield act command",
+                        )
                         shield_snap = proxy.wait_until(
                             lambda p: next(
                                 (s for _, s in p.snapshots
@@ -431,8 +433,23 @@ def _case_orders():
                 prev_replies = brain.set_orders([
                     "Renew on me -> kite nearest Mottled Boar",
                 ])
+                with brain.lock:
+                    wake_mark = len(brain.loada_wake_reasons)
+                with proxy.lock:
+                    choose_mark = sum(1 for _, c in proxy.commands
+                                      if c.get("bot") == "Loada" and "choose" in c)
                 server.console("llmbrain whisper Telda Loada phase4", wait_s=0.1, inst=TEST)
-                replies_before_kite = wait_plan(prev_replies)
+                # A wake left over from phase 3 (a refused Shield: "is on cooldown") can
+                # install the kite plan first; the phase4 whisper's own wake must land
+                # before kiting starts, or it is counted as a wake while kiting.
+                deadline = time.monotonic() + 10.0
+                while time.monotonic() < deadline:
+                    with brain.lock:
+                        if any("whisper from Telda" in w
+                               for w in brain.loada_wake_reasons[wake_mark:]):
+                            break
+                    time.sleep(0.05)
+                replies_before_kite = wait_plan(prev_replies, choose_mark)
                 with brain.lock:
                     wakes_before_kite = len(brain.loada_wake_reasons)
                 start_pos = _pos2d(next(
@@ -798,7 +815,10 @@ def _case_boss():
                     desc="AWAY Loken 25 completion",
                 )
                 dist_after = _loken_dist(away_done, _find_loken(away_done))
-                expect(dist_after >= dist_start + 8.0 and dist_after >= 20.0,
+                # A healer can already stand 25 yd out when the Nova starts: then `away 25`
+                # is done at once and there is nothing to move (Loken may close in a little).
+                moved = dist_after >= dist_start + 8.0 or dist_start >= 25.0
+                expect(moved and dist_after >= 20.0,
                        f"Loada only moved {dist_start:.1f} -> {dist_after:.1f} yd from Loken")
 
                 with proxy.lock:

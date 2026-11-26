@@ -590,9 +590,10 @@ def _case_create_bots():
     BOT = "Loadca"
 
     def _character():
+        from wlblib.common import TEST
         out = subprocess.run(
             ["mysql", f"--defaults-file={OUT / 'server' / 'etc' / 'mysql.cnf'}", "-uroot", "-N",
-             "-e", "select race, class, guid from acore_test_characters.characters "
+             "-e", f"select race, class, guid from {TEST.db('characters')}.characters "
                    "where name = 'Loadca'"],
             capture_output=True, text=True, check=True).stdout.split()
         return out
