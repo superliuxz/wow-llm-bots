@@ -63,6 +63,13 @@ Follow Google/Chromium C++ style (`.clang-format`, `BasedOnStyle: Chromium`). `c
   namespaces (`unshare`), else it falls back to `-j 1`. `tools/wlb server stop --test` stops
   every shard. Splitting with a remote worker and running eval alongside are not built yet
   (docs/TODO.md).
+- **Eval gates:** `tools/wlb test eval` (T=0, judge on a freshly started llama-server) must
+  have no new misses: the known ones are `skip_tapped_mob`, `whisper_while_low_hp` and the flaky
+  `herb_to_gather`. `tools/wlb test eval --live` (sampled draws) must stay >= 85%; it also
+  scores the `held_out` cases in `harness/testdata/eval/cases.json` (never tune rules against
+  them; add a fresh one after fixing against one). Known flaky e2e cases under load: `orders`,
+  `boss`; a failure counts as passing if the case passes 2/2 alone. Keep `content/RULES.md`
+  <= 7,800 B.
 
 ## Repo Layout
 

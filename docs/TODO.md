@@ -34,7 +34,7 @@ Last updated: 2026-11-26.
      concurrently with e2e.
   Checks: e2e passes with `-j 1` and with `-j N`, twice in a row; timing recorded in the commit.
 
-- **Fix queue (after the tank-aggro commit and parallel e2e, one commit each, full gates):**
+- **Fix queue (next up, in this order; one commit each, full gates):**
   1. **Spell misses:** read SMSG_SPELL_GO's miss list (and spell-cast failure results) in the
      module; put `missed: <spell> on <target> (miss|dodge|parry|resist|immune|evade)` on the
      caster's screen for a few seconds and end the option or `act:` with that result; wake the
@@ -68,10 +68,6 @@ Guild Wars heroes):
   (source-tagged so player chat never injects trusted instructions) and add more identities.
 - **Latency & world-thread polish:** Measure 4 Hz combat snapshot cost at raid scale (build lighter
   combat snapshots if needed).
-- **Spell misses are invisible to the brain:** an instant spell that misses, is dodged or resisted
-  (SMSG_SPELL_GO's miss list, e.g. a Sap that rolls SPELL_MISS_MISS) still finishes its option or
-  `act:` with no error, and the screen never says "missed". Show it as a fact (as a player's
-  floating combat text does) so the brain can try again.
 - **Boss notes don't beat a loose-mob wake:** planned eval `party_tank_rotface_ooze_notes`
   (Rotface: the notes give Little Oozes to the off-tank) fails 0/8: woken by `loose mob Little
   Ooze on <dps>`, the tank still leaves Rotface for the ooze, even when the notes name it. The
@@ -84,8 +80,7 @@ Guild Wars heroes):
 ## Later (broader WoW systems)
 
 - **Economy & upkeep:** Vendor panel for selling non-grey items, mailbox, Auction House
-  (wrapping playerbots' AH pricing or `mod-ah-bot`), and bank. Trade window: putting up gold
-  (only shown so far); only held-out `held_trade_asked_for_water` asks for a trade.
+  (wrapping playerbots' AH pricing or `mod-ah-bot`), and bank. (Gold in a trade: Fix queue 2.)
 - **Professions:** Learn professions, craft skill-ups, fishing, and party disenchanting/crafting
   requests (wrapping playerbots' `craft`/`disenchant` actions).
 - **Guilds & LFG social graph:** `guild:` chat output, guild invite/charter, LookingForGroup channel
