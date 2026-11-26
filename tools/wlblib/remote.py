@@ -328,7 +328,13 @@ def _rsync_to_remote(spec: RemoteSpec, repo: pathlib.Path = ROOT) -> None:
         f'flock -o {shlex.quote(REMOTE_LOCK_REL)} rsync "$@"'
     )
     rsync_path = f"bash -c {shlex.quote(inner_rsync)} _"
-    cmd = ["rsync", "-a", "--delete", f"--rsync-path={rsync_path}", "-e", _rsync_ssh_cmd()]
+    # --no-times --checksum: compare by content rather than mtime so unchanged files never get
+    # re-touched/rebuilt across syncs, while any changed file is written with the remote's current
+    # clock (preventing older local mtimes or clock skew from leaving stale ninja/cmake objects).
+    cmd = [
+        "rsync", "-a", "--no-times", "--checksum", "--delete",
+        f"--rsync-path={rsync_path}", "-e", _rsync_ssh_cmd(),
+    ]
     for pat in RSYNC_EXCLUDES:
         cmd.append(f"--exclude={pat}")
     cmd += ["--", f"{repo}/", f"{spec.ssh}:{spec.repo}/"]

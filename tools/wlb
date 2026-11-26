@@ -9,8 +9,8 @@
   tools/wlb check [format|includes|snapshots|triggers|rules|goldens|sanitizers] [--san] [--fix] [FILES...]
   tools/wlb test unit [--filter PATTERN] [--variant asan|tsan|msan]
   tools/wlb test e2e|perf|eval [NAME...]  [--keep-server]   (e2e/perf: the isolated test server)
-  tools/wlb test e2e [-j N] [NAME...]     (N test servers at once; default by free RAM and cores)
-  tools/wlb test all [-j N]               (e2e and eval concurrently; fails if either fails)
+  tools/wlb test e2e [-j N] [--remote WORKER] [NAME...]   (N test servers; --remote splits with WORKER)
+  tools/wlb test all [-j N] [--remote WORKER]             (e2e and eval concurrently; fails if either fails)
   tools/wlb test perf [--update-baselines [--verify]] | --capture   (perf: record the numbers, and
                                                                      check they reproduce / the replay input)
   tools/wlb test --list
@@ -91,6 +91,9 @@ def parse(argv):
     p.add_argument("-j", "--jobs", type=int, default=None,
                    help=f"e2e, all: how many test servers at once (1..{common.MAX_SHARDS}; default: "
                         "by free memory and cores; 1: one after the other, in this process)")
+    p.add_argument("--remote", metavar="WORKER",
+                   help="e2e, all: split e2e groups between this machine and WORKER "
+                        "(configured in private/remotes.json)")
     p.add_argument("--update-baselines", action="store_true",
                    help="perf: record this run's numbers as the new baselines")
     p.add_argument("--verify", action="store_true",
@@ -244,6 +247,8 @@ def main():
         else:
             check.goldens()
     elif a.command == "test":
+        if a.remote and a.target not in ("e2e", "all"):
+            raise common.Failed("--remote is only supported for `e2e` and `all`")
         if a.list or not a.target:
             testing.list_cases()
         elif a.target == "unit":
@@ -251,7 +256,7 @@ def main():
         elif a.target == "e2e":
             if a.jobs is not None and not 1 <= a.jobs <= common.MAX_SHARDS:
                 raise common.Failed(f"-j {a.jobs}: 1..{common.MAX_SHARDS}")
-            testing.e2e(a.names, a.keep_server, a.jobs)
+            testing.e2e(a.names, a.keep_server, a.jobs, remote=a.remote)
         elif a.target == "all":
             if a.names:
                 raise common.Failed("test all takes no case names (use `wlb test e2e` or "
@@ -259,7 +264,7 @@ def main():
             if a.jobs is not None and not 1 <= a.jobs <= common.MAX_SHARDS:
                 raise common.Failed(f"-j {a.jobs}: 1..{common.MAX_SHARDS}")
             testing.all_(jobs=a.jobs, keep_server=a.keep_server, model=a.model,
-                         live=a.live, samples=a.samples)
+                         live=a.live, samples=a.samples, remote=a.remote)
         elif a.target == "perf" and a.capture:
             testing.capture_snapshots()
         elif a.target == "perf":

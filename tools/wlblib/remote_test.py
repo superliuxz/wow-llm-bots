@@ -188,6 +188,40 @@ class RemoteLibTest(unittest.TestCase):
         self.assertIn("flock -o var/.remote.lock", cmd[-1])
         self.assertIn("var/.built_stamp", cmd[-1])
 
+    def test_rsync_checksum_no_times_preserves_unchanged_and_refreshes_changed_mtime(self) -> None:
+        if shutil.which("rsync") is None:
+            self.skipTest("rsync not installed")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            src = root / "src"
+            fake_home = root / "home"
+            dst = fake_home / "wow-llm-bots"
+            src.mkdir(parents=True)
+            dst.mkdir(parents=True)
+            (src / "a.cc").write_text("v1\n")
+            wrapper = root / "fake_ssh.sh"
+            wrapper.write_text(
+                f"#!/bin/sh\nexport HOME={shlex.quote(str(fake_home))}\nshift\nexec sh -c \"$*\"\n"
+            )
+            wrapper.chmod(0o755)
+            live_spec = remote.RemoteSpec(name="w", ssh="fakehost", repo="~/wow-llm-bots")
+            with mock.patch.object(remote, "_rsync_ssh_cmd", return_value=str(wrapper)), \
+                 mock.patch.object(remote, "_verify_remote_sync_target"):
+                remote._rsync_to_remote(live_spec, repo=src)
+                # Backdate remote copy slightly so we can tell if a second no-op sync touches it.
+                old_remote = 1_700_000_000
+                os.utime(dst / "a.cc", (old_remote, old_remote))
+                remote._rsync_to_remote(live_spec, repo=src)
+                self.assertEqual(int((dst / "a.cc").stat().st_mtime), old_remote)
+
+                # Same-length edit with a much older local mtime must still transfer and get a fresh
+                # remote mtime so ninja/cmake never keep stale objects.
+                (src / "a.cc").write_text("v2\n")
+                os.utime(src / "a.cc", (946_684_800, 946_684_800))  # 2000-01-01
+                remote._rsync_to_remote(live_spec, repo=src)
+                self.assertEqual((dst / "a.cc").read_text(), "v2\n")
+                self.assertGreater((dst / "a.cc").stat().st_mtime, old_remote)
+
     def test_ensure_remote_map_data_uses_synced_sentinel_and_ssh_opts(self) -> None:
         spec = remote.RemoteSpec(name="worker1", ssh="wlb@192.0.2.10", repo="~/wow-llm-bots")
         with tempfile.TemporaryDirectory() as tmp:

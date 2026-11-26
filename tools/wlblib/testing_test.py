@@ -16,7 +16,7 @@ from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
-from wlblib import build, common, server, testing  # noqa: E402
+from wlblib import build, common, remote, server, testing  # noqa: E402
 
 
 class TestInstanceTest(unittest.TestCase):
@@ -214,8 +214,9 @@ class TestAllTest(unittest.TestCase):
         self.assertEqual(cmds["eval"], [wlb, "test", "eval"])
 
         cmds = dict(testing._all_commands(jobs=4, keep_server=True, model="m.gguf",
-                                          live=True, samples=5))
-        self.assertEqual(cmds["e2e"], [wlb, "test", "e2e", "-j", "4", "--keep-server"])
+                                          live=True, samples=5, remote="10700k"))
+        self.assertEqual(cmds["e2e"],
+                         [wlb, "test", "e2e", "-j", "4", "--keep-server", "--remote", "10700k"])
         self.assertEqual(cmds["eval"],
                          [wlb, "test", "eval", "--model", "m.gguf", "--live", "--samples", "5"])
 
@@ -325,6 +326,213 @@ class TestAllTest(unittest.TestCase):
 
     def test_cli_target_all_in_targets(self):
         self.assertIn("all", testing.TARGETS)
+
+    def test_all_remote_passthrough_and_early_validation(self):
+        e2e_p = _FakeProc(rc=0)
+        eval_p = _FakeProc(rc=0)
+        with mock.patch.object(remote, "get_remote") as m_get:
+            spawned, _, _, _ = self._run_all(e2e_p, eval_p, jobs=4, remote="10700k")
+        m_get.assert_called_once_with("10700k")
+        self.assertIn("--remote", spawned[0][0])
+        self.assertIn("10700k", spawned[0][0])
+        self.assertNotIn("--remote", spawned[1][0])
+
+        # Unknown remote fails before building or spawning anything.
+        with mock.patch.object(remote, "get_remote", side_effect=common.Failed("unknown remote")), \
+             mock.patch.object(build, "common") as m_common, \
+             mock.patch.object(build, "server") as m_server:
+            with self.assertRaises(common.Failed):
+                testing.all_(remote="nope")
+        m_common.assert_not_called()
+        m_server.assert_not_called()
+
+
+class RemoteE2eSplitTest(unittest.TestCase):
+    def test_split_groups_balanced_and_single_group_local(self):
+        groups = {
+            ("g1", "B", 1): ["a"],
+            ("g2", "B", 1): ["b"],
+            ("g3", "B", 1): ["c"],
+            ("g4", "B", 1): ["d"],
+        }
+        timings = {"g1/B/1": 100, "g2/B/1": 400, "g3/B/1": 300, "g4/B/1": 200}
+        local_keys, remote_keys = testing.split_groups_for_remote(groups, timings)
+        self.assertEqual(local_keys, [("g2", "B", 1), ("g1", "B", 1)])
+        self.assertEqual(remote_keys, [("g3", "B", 1), ("g4", "B", 1)])
+        self.assertEqual(sorted(local_keys + remote_keys), sorted(groups))
+
+        # Asymmetric capacity: 6 local shards vs 1 remote shard gives remote 1 of 4 bins.
+        lk_asym, rk_asym = testing.split_groups_for_remote(
+            groups, timings, local_jobs=6, remote_jobs=1,
+        )
+        self.assertEqual(len(lk_asym), 3)
+        self.assertEqual(len(rk_asym), 1)
+        self.assertEqual(rk_asym, [("g1", "B", 1)])
+        self.assertEqual(sorted(lk_asym + rk_asym), sorted(groups))
+
+        single = {("only", "B", 1): ["a", "b"]}
+        lk, rk = testing.split_groups_for_remote(single, {})
+        self.assertEqual(lk, [("only", "B", 1)])
+        self.assertEqual(rk, [])
+
+    def test_remote_e2e_commands_layout(self):
+        wlb = common.ROOT / "tools" / "wlb"
+        cmds = testing._remote_e2e_commands(
+            ["a", "b"], ["c", "d"], "10700k", jobs=4, keep_server=True
+        )
+        self.assertEqual(cmds[0][0], "local")
+        self.assertEqual(cmds[0][1], [wlb, "test", "e2e", "-j", "4", "--keep-server", "a", "b"])
+        self.assertEqual(cmds[0][2][build.PREBUILT_ENV], "1")
+        self.assertEqual(cmds[1][0], "remote:10700k")
+        self.assertEqual(
+            cmds[1][1],
+            [wlb, "remote", "10700k", "run", "--no-sync", "--",
+             "env", f"{build.PREBUILT_ENV}=1", "tools/wlb", "test", "e2e", "c", "d"],
+        )
+        # Remote uses its own parallel -j default (no -j flag forwarded).
+        self.assertNotIn("-j", cmds[1][1])
+        self.assertNotIn("--keep-server", cmds[1][1])
+
+    def _groups(self):
+        _, groups = testing._groups(_modules([
+            ("a", "g1", "B", 1),
+            ("b", "g2", "B", 1),
+            ("c", "g3", "B", 1),
+            ("d", "g4", "B", 1),
+        ]))
+        return groups
+
+    def _run_split(self, local_proc, remote_proc, *, jobs=None, keep_server=False):
+        spawned = []
+        procs = iter([local_proc, remote_proc])
+
+        def fake_popen(cmd, **popen_kwargs):
+            spawned.append((cmd, popen_kwargs))
+            p = next(procs)
+            if isinstance(p, BaseException):
+                raise p
+            return p
+
+        timings = {"g1/B/1": 100, "g2/B/1": 400, "g3/B/1": 300, "g4/B/1": 200}
+        with mock.patch.object(remote, "get_remote") as m_get, \
+             mock.patch.object(remote, "sync") as m_sync, \
+             mock.patch.object(build, "common") as m_common, \
+             mock.patch.object(build, "server") as m_server, \
+             mock.patch.object(server, "test_servers_stop") as m_stop, \
+             mock.patch.object(testing, "_load_timings", return_value=timings), \
+             mock.patch.object(testing, "default_jobs", return_value=1), \
+             mock.patch.object(testing, "_remote_default_jobs", return_value=1), \
+             mock.patch.object(subprocess, "Popen", side_effect=fake_popen), \
+             mock.patch.object(testing, "say"):
+            ran = testing._run_e2e_remote(self._groups(), jobs, keep_server, "10700k")
+            return ran, spawned, m_get, m_sync, m_common, m_server, m_stop
+
+    def test_sync_and_both_halves_pass(self):
+        lp = _FakeProc(rc=0, lines=["PASS e2e b\n", "PASS e2e a\n"])
+        rp = _FakeProc(rc=0, lines=["PASS e2e c\n", "PASS e2e d\n"])
+        ran, spawned, m_get, m_sync, m_common, m_server, m_stop = self._run_split(lp, rp, jobs=1)
+        self.assertTrue(ran)
+        m_get.assert_called_once_with("10700k")
+        m_common.assert_called_once_with("default", tests=False)
+        m_server.assert_called_once_with(test=True)
+        m_sync.assert_called_once_with("10700k", server_build=True)
+        m_stop.assert_called_once_with()
+        self.assertEqual(len(spawned), 2)
+        self.assertEqual(spawned[0][0][-2:], ["b", "a"])
+        self.assertIn("-j", spawned[0][0])
+        self.assertIn("1", spawned[0][0])
+        self.assertEqual(spawned[0][1]["env"][build.PREBUILT_ENV], "1")
+        self.assertEqual(spawned[1][0][-2:], ["c", "d"])
+        self.assertIn("--no-sync", spawned[1][0])
+        self.assertTrue(lp.waited and rp.waited)
+
+    def test_single_group_skips_remote_sync_and_returns_false(self):
+        _, one_group = testing._groups(_modules([("a", "g1", "B", 1)]))
+        with mock.patch.object(remote, "get_remote") as m_get, \
+             mock.patch.object(remote, "sync") as m_sync, \
+             mock.patch.object(build, "server") as m_server, \
+             mock.patch.object(testing, "say"):
+            ran = testing._run_e2e_remote(one_group, None, False, "10700k")
+        self.assertFalse(ran)
+        m_get.assert_called_once_with("10700k")
+        m_sync.assert_not_called()
+        m_server.assert_not_called()
+
+    def test_exit_code_propagation(self):
+        for local_rc, remote_rc, expected_in_msg in [
+            (1, 0, ("local",)),
+            (0, 2, ("remote:10700k",)),
+            (1, 3, ("local", "remote:10700k")),
+        ]:
+            lp, rp = _FakeProc(rc=local_rc), _FakeProc(rc=remote_rc)
+            with self.subTest(local_rc=local_rc, remote_rc=remote_rc):
+                with self.assertRaises(common.Failed) as ctx:
+                    self._run_split(lp, rp)
+                for needle in expected_in_msg:
+                    self.assertIn(needle, str(ctx.exception))
+                self.assertTrue(lp.waited and rp.waited)
+
+    def test_interrupt_and_spawn_error_cleanup(self):
+        lp = _FakeProc(rc=130, wait_exc=KeyboardInterrupt())
+        rp = _FakeProc(rc=130)
+        with mock.patch.object(remote, "get_remote"), \
+             mock.patch.object(remote, "sync"), \
+             mock.patch.object(build, "common"), \
+             mock.patch.object(build, "server"), \
+             mock.patch.object(server, "test_servers_stop") as m_stop, \
+             mock.patch.object(testing, "_load_timings", return_value={}), \
+             mock.patch.object(testing, "_remote_default_jobs", return_value=1), \
+             mock.patch.object(subprocess, "Popen", side_effect=[lp, rp]), \
+             mock.patch.object(testing, "say"):
+            with self.assertRaises(KeyboardInterrupt):
+                testing._run_e2e_remote(self._groups(), None, False, "10700k")
+        self.assertEqual(lp.signals, [])
+        self.assertEqual(rp.signals, [])
+        self.assertTrue(lp.waited and rp.waited)
+        m_stop.assert_called_once_with()
+
+        lp2 = _FakeProc(rc=0)
+        with mock.patch.object(remote, "get_remote"), \
+             mock.patch.object(remote, "sync"), \
+             mock.patch.object(build, "common"), \
+             mock.patch.object(build, "server"), \
+             mock.patch.object(server, "test_servers_stop") as m_stop2, \
+             mock.patch.object(testing, "_load_timings", return_value={}), \
+             mock.patch.object(testing, "_remote_default_jobs", return_value=1), \
+             mock.patch.object(subprocess, "Popen", side_effect=[lp2, OSError("boom")]), \
+             mock.patch.object(testing, "say"):
+            with self.assertRaises(OSError):
+                testing._run_e2e_remote(self._groups(), None, False, "10700k")
+        self.assertEqual(lp2.signals, [signal.SIGINT])
+        self.assertTrue(lp2.waited)
+        m_stop2.assert_called_once_with()
+
+    def test_remote_default_jobs_parses_and_falls_back(self):
+        ok = subprocess.CompletedProcess([], 0, stdout="banner\n3\n", stderr="")
+        with mock.patch.object(subprocess, "run", return_value=ok):
+            self.assertEqual(testing._remote_default_jobs("10700k"), 3)
+        bad = subprocess.CompletedProcess([], 1, stdout="", stderr="err")
+        with mock.patch.object(subprocess, "run", return_value=bad):
+            self.assertEqual(testing._remote_default_jobs("10700k"), 1)
+        with mock.patch.object(subprocess, "run", side_effect=OSError("no ssh")):
+            self.assertEqual(testing._remote_default_jobs("10700k"), 1)
+
+    def test_unknown_remote_fails_before_build_or_sync(self):
+        with mock.patch.object(remote, "get_remote", side_effect=common.Failed("unknown remote")), \
+             mock.patch.object(remote, "sync") as m_sync, \
+             mock.patch.object(build, "server") as m_server:
+            with self.assertRaises(common.Failed):
+                testing._run_e2e_remote(self._groups(), None, False, "nope")
+        m_sync.assert_not_called()
+        m_server.assert_not_called()
+
+    def test_cli_rejects_remote_on_non_e2e_targets(self):
+        res = subprocess.run(
+            [str(ROOT / "tools" / "wlb"), "test", "unit", "--remote", "10700k"],
+            capture_output=True, text=True,
+        )
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("--remote", res.stderr)
 
 
 if __name__ == "__main__":

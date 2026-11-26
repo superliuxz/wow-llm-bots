@@ -12,26 +12,14 @@ Last updated: 2026-11-26.
   mock LLM, no pulls or boss fights) are in place. Run a live session from a real 3.3.5a client to
   confirm pacing and single-responder feel in practice.
 
-- **Parallel e2e (use the idle cores):** steps 1-2 and 4 are done: `tools/wlb test e2e -j N` (default
-  by free RAM and cores, capped at 6; `-j 1` is the old serial run) runs the groups on numbered
-  test servers (`common.test_instance(k)`: `run-k`, `etc-k`, `var/logs/test-k`, `acore_test_k_*`,
-  port 8086 + k), 21.4 -> 6.5-7 min here, and `tools/wlb test all [-j N]` runs `e2e` and `eval`
-  concurrently (7.1 min total here). As built: shards share the test world database
-  (`acore_test_world`, 558 MB, not written by tests) instead of one copy each; a shard's
-  worldserver gets its `etc-k` bind-mounted over the install's `etc` in an unprivileged
-  mount namespace (`unshare --user --map-root-user --mount`), because AzerothCore reads module
-  configs from the compiled-in etc path (no namespaces: `-j 1`); SOAP/RA are off, so no ports for
-  them; playerbots' command server (TCP 8888, shared with the play server) is off for tests. A
-  test worldserver peaks at about 6 GB resident (maps loaded); 6 shards took ~29 GB.
-  `human_dungeon` passed in every run (serial and parallel, runs back to back). Two cases were
-  flakier under 6-way load and got test-only fixes: `orders` (a leftover phase-3 wake could
-  install the kite plan before the phase-4 whisper woke the bot; a missed Shield act is now
-  retried) and `boss` (a healer already 25 yd out when the Nova starts has nothing to move).
-  Left (not started):
-  3. **Both machines:** `tools/wlb test e2e --remote 10700k` splits the groups between this
-     machine and the worker (`tools/wlb remote` sync, `touch` before rsync so mtimes don't
-     leave stale objects) and merges the results. Only when asked (CONTRIBUTING rule 5).
-  Checks: e2e passes with `-j 1` and with `-j N`, twice in a row; timing recorded in the commit.
+- **Parallel e2e (done):** steps 1-4 are done: `tools/wlb test e2e -j N` (default by free RAM and
+  cores, capped at 6; `-j 1` is the old serial run) runs the groups on numbered test servers
+  (`common.test_instance(k)`: `run-k`, `etc-k`, `var/logs/test-k`, `acore_test_k_*`, port 8086 + k),
+  21.4 -> 6.5-7 min here; `tools/wlb test all [-j N]` runs `e2e` and `eval` concurrently (7.1 min
+  total here); and `--remote WORKER` on `e2e`/`all` syncs with `rsync -a --no-times --checksum`
+  (no stale objects or spurious rebuilds) and splits groups proportional to each machine's
+  `default_jobs()` (7.2 min with `10700k` at `-j 1` + local `-j 6`, bounded by the single 8-case
+  `core` group). Only use `--remote` when asked (CONTRIBUTING rule 5).
 
 - **Fix queue (next up, in this order; one commit each, full gates):**
   1. **`parse: error parsing grammar` during a passing test:** find which test prints it (grep

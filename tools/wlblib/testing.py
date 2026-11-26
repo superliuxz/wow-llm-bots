@@ -33,7 +33,7 @@ import subprocess
 import threading
 import time
 
-from wlblib import build, cases, llm, server, wire
+from wlblib import build, cases, llm, remote as remote_mod, server, wire
 from wlblib.common import (MAX_SHARDS, OUT, PLAY, ROOT, TEST, VAR, Failed, output, run,
                            running_pid, say, test_instance)
 
@@ -182,7 +182,7 @@ def list_cases():
     from wlblib.cases import eval_plans
     say("eval: " + ", ".join(eval_plans.case_names()))
     say("unit: every gtest suite (wlb test unit [--filter PATTERN] [--variant asan|tsan|msan])")
-    say("all: e2e (parallel) and eval concurrently (wlb test all [-j N])")
+    say("all: e2e (parallel) and eval concurrently (wlb test all [-j N] [--remote WORKER])")
 
 
 def unit(variant="default", gtest_filter=None):
@@ -522,15 +522,148 @@ def _pump(proc, blocks):
     blocks.flush()
 
 
-def e2e(names=(), keep_server=False, jobs=None):
-    """The e2e cases, on one test server (`jobs` 1: in this process) or on `jobs` at once
-    (default: default_jobs(); never more than there are groups)."""
+def split_groups_for_remote(groups, timings, local_jobs=1, remote_jobs=1):
+    """Splits e2e `groups` ({key: [case names]}) across local (`local_jobs` shards) and remote
+    (`remote_jobs` shards) by packing into `local_jobs + remote_jobs` balanced bins with
+    `plan_shards` and assigning proportional bins to each side (heaviest bins to local). With
+    <= 1 group or non-positive `remote_jobs`, puts everything on local and leaves remote empty."""
+    if len(groups) <= 1 or remote_jobs <= 0:
+        return list(groups), []
+    local_jobs = max(1, local_jobs)
+    total = min(len(groups), local_jobs + remote_jobs)
+    r_bins = max(1, min(total - 1, round(total * remote_jobs / (local_jobs + remote_jobs))))
+    l_bins = total - r_bins
+    shards, _ = plan_shards(groups, total, timings)
+    local_keys = [k for s in shards[:l_bins] for k in s]
+    remote_keys = [k for s in shards[l_bins:] for k in s]
+    return local_keys, remote_keys
+
+
+def _remote_default_jobs(remote_name):
+    """Queries `default_jobs()` on `remote_name` (already synced); falls back to 1 on error."""
+    wlb = ROOT / "tools" / "wlb"
+    probe = "import sys; sys.path.insert(0, 'tools'); from wlblib import testing; print(testing.default_jobs())"
+    try:
+        res = subprocess.run(
+            [wlb, "remote", remote_name, "run", "--no-sync", "--", "python3", "-c", probe],
+            cwd=ROOT, capture_output=True, text=True, timeout=30,
+        )
+        if res.returncode == 0:
+            for line in reversed(res.stdout.splitlines()):
+                line = line.strip()
+                if line.isdigit():
+                    return max(1, min(MAX_SHARDS, int(line)))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return 1
+
+
+def _remote_e2e_commands(local_names, remote_names, remote_name, *, jobs=None, keep_server=False):
+    """Builds the `(label, argv, env_extra)` tuples for split local+remote e2e."""
+    wlb = ROOT / "tools" / "wlb"
+    local_cmd = [wlb, "test", "e2e"]
+    if jobs is not None:
+        local_cmd += ["-j", str(jobs)]
+    if keep_server:
+        local_cmd.append("--keep-server")
+    local_cmd += list(local_names)
+
+    remote_cmd = [
+        wlb, "remote", remote_name, "run", "--no-sync", "--",
+        "env", f"{build.PREBUILT_ENV}=1", "tools/wlb", "test", "e2e", *remote_names,
+    ]
+    return [
+        ("local", local_cmd, {build.PREBUILT_ENV: "1", "PYTHONUNBUFFERED": "1"}),
+        (f"remote:{remote_name}", remote_cmd, {"PYTHONUNBUFFERED": "1"}),
+    ]
+
+
+def _run_e2e_remote(groups, jobs, keep_server, remote_name):
+    """Syncs `remote_name`, splits `groups` across local and `remote_name` proportional to each
+    machine's shard capacity, runs both halves concurrently, streams prefixed output, merges
+    results, and tears down cleanly on failure or interrupt. Returns True if split ran, False if
+    <= 1 group (caller runs locally)."""
+    remote_mod.get_remote(remote_name)  # Validate worker name before building/syncing.
+    if len(groups) <= 1:
+        say(f"only {len(groups)} e2e group; running locally without remote {remote_name}")
+        return False
+
+    started = time.time()
     build.common("default", tests=False)
+    build.server(test=True)
+    remote_mod.sync(remote_name, server_build=True)
+
+    local_jobs = default_jobs() if jobs is None else jobs
+    remote_jobs = _remote_default_jobs(remote_name)
+    group_names = {k: [m.NAME for m in v] for k, v in groups.items()}
+    local_keys, remote_keys = split_groups_for_remote(
+        group_names, _load_timings(), local_jobs=local_jobs, remote_jobs=remote_jobs,
+    )
+    if not remote_keys:
+        say(f"only {len(groups)} e2e group; running locally without remote {remote_name}")
+        return False
+
+    local_names = [m.NAME for key in local_keys for m in groups[key]]
+    remote_names = [m.NAME for key in remote_keys for m in groups[key]]
+    cmds = _remote_e2e_commands(local_names, remote_names, remote_name, jobs=jobs,
+                                keep_server=keep_server)
+    say(f"splitting {len(local_names) + len(remote_names)} e2e cases across local "
+        f"({len(local_names)} cases, {len(local_keys)} groups, -j {local_jobs}) and remote "
+        f"{remote_name} ({len(remote_names)} cases, {len(remote_keys)} groups, -j {remote_jobs})")
+    lock = threading.Lock()
+    procs = []
+    try:
+        for label, cmd, env_extra in cmds:
+            env = {**os.environ, **env_extra}
+            proc = subprocess.Popen(cmd, cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                    errors="replace")
+            reader = threading.Thread(target=_stream_lines, args=(proc, label, lock), daemon=True)
+            reader.start()
+            procs.append((label, proc, reader))
+        results = {}
+        for label, proc, reader in procs:
+            rc = proc.wait()
+            reader.join()
+            results[label] = rc
+    except BaseException as e:
+        for _, proc, _ in procs:
+            if proc.poll() is None and not isinstance(e, KeyboardInterrupt):
+                proc.send_signal(signal.SIGINT)
+        for _, proc, reader in procs:
+            try:
+                proc.wait(150)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            reader.join(timeout=5)
+        raise
+    finally:
+        if not keep_server:
+            server.test_servers_stop()
+
+    elapsed_min = (time.time() - started) / 60
+    summary = ", ".join(f"{label}={'PASS' if rc == 0 else f'FAIL ({rc})'}"
+                        for label, rc in results.items())
+    say(f"e2e split ({elapsed_min:.1f} min): {summary}")
+    failed = [f"{label} (exit {rc})" for label, rc in results.items() if rc != 0]
+    if failed:
+        raise Failed("e2e split failed: " + ", ".join(failed))
+    return True
+
+
+def e2e(names=(), keep_server=False, jobs=None, remote=None):
+    """The e2e cases, on one test server (`jobs` 1: in this process), on `jobs` at once
+    (default: default_jobs(); never more than there are groups), or split across this machine
+    and `remote` (`--remote WORKER`)."""
     selected = _select("e2e", names)
     missing = [m.NAME for m in selected if not getattr(m, "TEST_CONFIG", None)]
     if missing:
         raise Failed(f"e2e cases need a TEST_CONFIG: {', '.join(missing)}")
     _, groups = _groups(selected)
+    if remote and _run_e2e_remote(groups, jobs, keep_server, remote):
+        return
+    build.common("default", tests=False)
     asked = jobs
     jobs = min(default_jobs() if jobs is None else jobs, len(groups))
     if jobs > 1 and keep_server:
@@ -835,7 +968,8 @@ def eval_(names=(), model=None, shootout=False, live=False, samples=None):
 
 # ---- all (e2e + eval concurrently) --------------------------------------------------------------
 
-def _all_commands(jobs=None, keep_server=False, model=None, live=False, samples=None):
+def _all_commands(jobs=None, keep_server=False, model=None, live=False, samples=None,
+                  remote=None):
     """Builds the (label, argv) pairs for `wlb test all`."""
     wlb = ROOT / "tools" / "wlb"
     e2e_cmd = [wlb, "test", "e2e"]
@@ -843,6 +977,8 @@ def _all_commands(jobs=None, keep_server=False, model=None, live=False, samples=
         e2e_cmd += ["-j", str(jobs)]
     if keep_server:
         e2e_cmd.append("--keep-server")
+    if remote:
+        e2e_cmd += ["--remote", remote]
 
     eval_cmd = [wlb, "test", "eval"]
     if model:
@@ -863,14 +999,17 @@ def _stream_lines(proc, label, lock, emit=None):
             emit(f"[{label}] {line.rstrip('\r\n')}")
 
 
-def all_(jobs=None, keep_server=False, model=None, live=False, samples=None):
-    """Runs `e2e` (parallel by default, or `-j N`) concurrently with `eval` (GPU/llama-server).
-    Streams both outputs prefixed by suite name, reports both results, and fails if either fails."""
+def all_(jobs=None, keep_server=False, model=None, live=False, samples=None, remote=None):
+    """Runs `e2e` (parallel by default, `-j N`, or split with `--remote WORKER`) concurrently
+    with `eval` (GPU/llama-server). Streams both outputs prefixed by suite name, reports both
+    results, and fails if either fails."""
+    if remote:
+        remote_mod.get_remote(remote)  # Validate worker name before building.
     started = time.time()
     build.common("default", tests=False)
     build.server(test=True)
     cmds = _all_commands(jobs=jobs, keep_server=keep_server, model=model, live=live,
-                         samples=samples)
+                         samples=samples, remote=remote)
     env = {**os.environ, build.PREBUILT_ENV: "1", "PYTHONUNBUFFERED": "1"}
     lock = threading.Lock()
     procs = []
