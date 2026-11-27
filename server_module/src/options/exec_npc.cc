@@ -28,6 +28,7 @@
 #include "Playerbots.h"
 #include "QuestDef.h"
 #include "SharedDefines.h"
+#include "SpellAuraDefines.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "Trainer.h"
@@ -41,6 +42,7 @@
 #include "chat/chat_scripts.h"
 #include "options/action_types.h"
 #include "options/exec_shared.h"
+#include "options/leader_travel.h"
 #include "options/options.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/world_util.h"
@@ -119,6 +121,44 @@ bool IsBoundNearHere(const Player* bot) {
          bot->GetExactDist2d(bot->m_homebindX, bot->m_homebindY) <= 50.0f;
 }
 
+void CollectKnownTaxiGraph(const Player* bot,
+                           uint32_t map_id,
+                           std::vector<TaxiNodeFact>* nodes,
+                           std::vector<TaxiLinkFact>* links) {
+  nodes->clear();
+  links->clear();
+  const uint32_t locale = sWorld->GetDefaultDbcLocale();
+  for (uint32_t i = 0; i < sTaxiNodesStore.GetNumRows(); ++i) {
+    const TaxiNodesEntry* node = sTaxiNodesStore.LookupEntry(i);
+    if (!node || node->map_id != map_id ||
+        !bot->m_taxi.IsTaximaskNodeKnown(node->ID)) {
+      continue;
+    }
+    const char* node_name = node->name[locale];
+    nodes->push_back(TaxiNodeFact{
+        .node_id = node->ID,
+        .map_id = node->map_id,
+        .pos = {node->x, node->y, node->z},
+        .name = (node_name && *node_name) ? node_name : "",
+    });
+  }
+  if (nodes->size() < 2) {
+    return;
+  }
+  for (uint32_t i = 0; i < sTaxiPathStore.GetNumRows(); ++i) {
+    const TaxiPathEntry* path = sTaxiPathStore.LookupEntry(i);
+    if (!path || !bot->m_taxi.IsTaximaskNodeKnown(path->from) ||
+        !bot->m_taxi.IsTaximaskNodeKnown(path->to)) {
+      continue;
+    }
+    links->push_back(TaxiLinkFact{
+        .from_node = path->from,
+        .to_node = path->to,
+        .price_copper = path->price,
+    });
+  }
+}
+
 // Holds starting a `QUEST_FLAGS_PARTY_ACCEPT` escort quest until the party has
 // it or every party member is nearby, alive, and past any prerequisite turn-in
 // (Now #8).
@@ -192,7 +232,7 @@ void CollectNpcActions(Player* bot,
   if (!bot || !bot->IsAlive() || bot->IsInCombat()) {
     return;
   }
-  static constexpr size_t kMaxNpcActions = 20;
+  static constexpr size_t kMaxNpcActions = 24;
   for (const pb::Unit& u : snapshot.base.nearby.units) {
     if (out->size() >= kMaxNpcActions) {
       break;
@@ -400,7 +440,7 @@ void CollectNpcActions(Player* bot,
       }
     }
 
-    // 5. Flight master travel.
+    // 5. Flight master travel (direct and multi-hop over known nodes).
     if (out->size() < kMaxNpcActions &&
         npc->HasNpcFlag(UNIT_NPC_FLAG_FLIGHTMASTER)) {
       const uint32_t cur_node =
@@ -409,26 +449,23 @@ void CollectNpcActions(Player* bot,
         out->push_back({"npc_fly_discover:" + u.guid, u.guid,
                         "Discover flight path at " + npc_name});
       } else if (cur_node != 0) {
-        size_t added_flights = 0;
-        const uint32_t locale = sWorld->GetDefaultDbcLocale();
-        for (uint32_t i = 0; i < sTaxiPathStore.GetNumRows() &&
-                             added_flights < 4 && out->size() < kMaxNpcActions;
-             ++i) {
-          const TaxiPathEntry* path = sTaxiPathStore.LookupEntry(i);
-          if (!path || path->from != cur_node ||
-              !bot->m_taxi.IsTaximaskNodeKnown(path->to) ||
-              !bot->HasEnoughMoney(path->price)) {
-            continue;
+        std::vector<TaxiNodeFact> known_nodes;
+        std::vector<TaxiLinkFact> taxi_links;
+        CollectKnownTaxiGraph(bot, bot->GetMapId(), &known_nodes, &taxi_links);
+        const std::vector<TaxiRouteOption> routes = ComputeReachableTaxiRoutes(
+            cur_node, bot->GetMoney(), bot->GetReputationPriceDiscount(npc),
+            known_nodes, taxi_links, kMaxFlightDestinations);
+        for (const TaxiRouteOption& route : routes) {
+          if (out->size() >= kMaxNpcActions) {
+            break;
           }
-          const TaxiNodesEntry* dest = sTaxiNodesStore.LookupEntry(path->to);
-          if (!dest || !dest->name[locale] || !*dest->name[locale]) {
-            continue;
+          std::string label = "Fly to " + route.dest_name + " via " + npc_name;
+          if (route.nodes.size() > 2) {
+            label += " (" + std::to_string(route.nodes.size() - 1) + " hops)";
           }
-          out->push_back({"npc_fly:" + u.guid + ":" + std::to_string(path->to),
-                          u.guid,
-                          std::string("Fly to ") + dest->name[locale] +
-                              " via " + npc_name});
-          ++added_flights;
+          out->push_back(
+              {"npc_fly:" + u.guid + ":" + std::to_string(route.dest_node),
+               u.guid, std::move(label)});
         }
       }
     }
@@ -617,8 +654,23 @@ ActionOutcome ExecuteNpcAction(Player* bot, const NpcAction& action) {
     case NpcAction::Op::kFlyTo: {
       const uint32_t cur_node =
           sObjectMgr->GetNearestTaxiNode(*npc, bot->GetTeamId(true));
-      if (cur_node == 0 ||
-          !bot->ActivateTaxiPathTo({cur_node, action.arg1}, npc)) {
+      if (cur_node == 0) {
+        return {.error = "could not start flight"};
+      }
+      std::vector<TaxiNodeFact> known_nodes;
+      std::vector<TaxiLinkFact> taxi_links;
+      CollectKnownTaxiGraph(bot, bot->GetMapId(), &known_nodes, &taxi_links);
+      const std::vector<uint32_t> route = FindTaxiNodePath(
+          cur_node, action.arg1, bot->GetMoney(),
+          bot->GetReputationPriceDiscount(npc), known_nodes, taxi_links);
+      if (route.size() < 2) {
+        return {.error = "could not start flight"};
+      }
+      if (bot->IsMounted()) {
+        bot->Dismount();
+        bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
+      }
+      if (!bot->ActivateTaxiPathTo(route, npc)) {
         return {.error = "could not start flight"};
       }
       return {.used = true, .info = "took flight path"};

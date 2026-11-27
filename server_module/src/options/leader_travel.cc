@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -40,21 +41,198 @@ bool ParseUint32(std::string_view s, uint32_t* out) {
   return true;
 }
 
+bool ParseInt32(std::string_view s, int32_t* out) {
+  if (s.empty()) {
+    return false;
+  }
+  int32_t val = 0;
+  const auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), val);
+  if (ec != std::errc{} || ptr != s.data() + s.size()) {
+    return false;
+  }
+  *out = val;
+  return true;
+}
+
+float ClampDiscount(float discount) {
+  if (!std::isfinite(discount) || discount <= 0.0f || discount > 1.0f) {
+    return 1.0f;
+  }
+  return discount;
+}
+
+uint64_t EffectiveTaxiCost(uint64_t raw_cost, float discount) {
+  return static_cast<uint64_t>(
+      std::ceil(static_cast<double>(raw_cost) * ClampDiscount(discount)));
+}
+
 bool EdgeAllowedForFaction(const CrossMapEdge& edge, bool alliance) {
   return alliance ? edge.for_alliance : edge.for_horde;
 }
 
 bool EdgeValid(const CrossMapEdge& edge) {
-  if (edge.from_map_id == edge.to_map_id) {
+  if (edge.from_map_id == edge.to_map_id &&
+      Dist(edge.from_pos, edge.to_pos.x, edge.to_pos.y, edge.to_pos.z) <
+          kSameMapPortalMinDistYd) {
     return false;
   }
   if (edge.kind == TravelLegKind::kAreaTrigger) {
     return edge.trigger_id != 0;
   }
-  if (edge.kind == TravelLegKind::kPortalObject) {
+  if (edge.kind == TravelLegKind::kPortalObject ||
+      edge.kind == TravelLegKind::kTransport) {
     return edge.object_entry != 0;
   }
   return false;
+}
+
+std::string EncodeEdgePlaceId(std::string_view prefix,
+                              const CrossMapEdge& edge) {
+  if (edge.kind == TravelLegKind::kAreaTrigger) {
+    return std::string(prefix) + ":at:" + std::to_string(edge.trigger_id);
+  }
+  if (edge.kind == TravelLegKind::kPortalObject) {
+    return std::string(prefix) + ":portal:" + std::to_string(edge.object_entry);
+  }
+  if (edge.kind == TravelLegKind::kTransport) {
+    return std::string(prefix) +
+           ":transport:" + std::to_string(edge.object_entry) + ":" +
+           std::to_string(edge.to_map_id) + ":" +
+           std::to_string(static_cast<int32_t>(std::lround(edge.to_pos.x))) +
+           ":" +
+           std::to_string(static_cast<int32_t>(std::lround(edge.to_pos.y))) +
+           ":" +
+           std::to_string(static_cast<int32_t>(std::lround(edge.to_pos.z)));
+  }
+  return std::string(prefix);
+}
+
+struct TaxiDijkstraResult {
+  std::vector<const TaxiNodeFact*> map_nodes;
+  size_t src_idx = 0;
+  std::vector<uint64_t> min_cost;
+  std::vector<size_t> prev;
+};
+
+std::optional<TaxiDijkstraResult> RunTaxiDijkstra(
+    uint32_t cur_node,
+    std::span<const TaxiNodeFact> known_nodes,
+    std::span<const TaxiLinkFact> links) {
+  if (cur_node == 0 || known_nodes.size() < 2 || links.empty()) {
+    return std::nullopt;
+  }
+  const TaxiNodeFact* src_fact = nullptr;
+  for (const TaxiNodeFact& n : known_nodes) {
+    if (n.node_id == cur_node) {
+      src_fact = &n;
+      break;
+    }
+  }
+  if (!src_fact) {
+    return std::nullopt;
+  }
+
+  TaxiDijkstraResult res;
+  res.map_nodes.reserve(known_nodes.size());
+  for (const TaxiNodeFact& n : known_nodes) {
+    if (n.node_id == 0 || n.map_id != src_fact->map_id) {
+      continue;
+    }
+    bool dup = false;
+    for (const TaxiNodeFact* existing : res.map_nodes) {
+      if (existing->node_id == n.node_id) {
+        dup = true;
+        break;
+      }
+    }
+    if (!dup) {
+      if (n.node_id == cur_node) {
+        res.src_idx = res.map_nodes.size();
+      }
+      res.map_nodes.push_back(&n);
+    }
+  }
+  if (res.map_nodes.size() < 2) {
+    return std::nullopt;
+  }
+
+  auto find_idx = [&](uint32_t node_id) -> std::optional<size_t> {
+    for (size_t i = 0; i < res.map_nodes.size(); ++i) {
+      if (res.map_nodes[i]->node_id == node_id) {
+        return i;
+      }
+    }
+    return std::nullopt;
+  };
+
+  struct AdjEdge {
+    size_t to = 0;
+    uint32_t price = 0;
+  };
+  const size_t n = res.map_nodes.size();
+  std::vector<std::vector<AdjEdge>> adj(n);
+  for (const TaxiLinkFact& link : links) {
+    const std::optional<size_t> from_i = find_idx(link.from_node);
+    const std::optional<size_t> to_i = find_idx(link.to_node);
+    if (from_i && to_i && *from_i != *to_i) {
+      adj[*from_i].push_back({*to_i, link.price_copper});
+    }
+  }
+
+  constexpr uint64_t kInfCost = std::numeric_limits<uint64_t>::max();
+  res.min_cost.assign(n, kInfCost);
+  res.prev.assign(n, n);
+  std::vector<size_t> min_hops(n, n + 1);
+  std::vector<bool> visited(n, false);
+  res.min_cost[res.src_idx] = 0;
+  min_hops[res.src_idx] = 0;
+
+  for (size_t iter = 0; iter < n; ++iter) {
+    size_t u = n;
+    uint64_t u_cost = kInfCost;
+    size_t u_hops = n + 1;
+    for (size_t i = 0; i < n; ++i) {
+      if (!visited[i] &&
+          (res.min_cost[i] < u_cost ||
+           (res.min_cost[i] == u_cost && min_hops[i] < u_hops))) {
+        u = i;
+        u_cost = res.min_cost[i];
+        u_hops = min_hops[i];
+      }
+    }
+    if (u == n || u_cost == kInfCost) {
+      break;
+    }
+    visited[u] = true;
+    for (const AdjEdge& e : adj[u]) {
+      const uint64_t cand_cost = u_cost + e.price;
+      const size_t cand_hops = u_hops + 1;
+      if (cand_cost < res.min_cost[e.to] ||
+          (cand_cost == res.min_cost[e.to] && cand_hops < min_hops[e.to])) {
+        res.min_cost[e.to] = cand_cost;
+        min_hops[e.to] = cand_hops;
+        res.prev[e.to] = u;
+      }
+    }
+  }
+  return res;
+}
+
+std::vector<uint32_t> ReconstructTaxiPath(const TaxiDijkstraResult& res,
+                                          size_t dst_idx) {
+  std::vector<uint32_t> path;
+  const size_t n = res.map_nodes.size();
+  for (size_t cur = dst_idx; cur != n; cur = res.prev[cur]) {
+    path.push_back(res.map_nodes[cur]->node_id);
+    if (cur == res.src_idx) {
+      break;
+    }
+  }
+  std::reverse(path.begin(), path.end());
+  if (path.size() < 2 || path.front() != res.map_nodes[res.src_idx]->node_id) {
+    return {};
+  }
+  return path;
 }
 
 struct TaxiRouteChoice {
@@ -209,6 +387,10 @@ LeaderTravelPlan MakeTaxiPlan(const pb::Vec3& bot_pos,
   return LeaderTravelPlan{
       .kind = TravelLegKind::kFlightMaster,
       .leg_dest = taxi.src_pos,
+      .trigger_id = 0,
+      .object_entry = 0,
+      .dest_map_id = 0,
+      .dest_pos = {},
       .taxi_nodes = taxi.nodes,
       .place_id = EncodeTaxiPlaceId(taxi.nodes),
       .route_label = label,
@@ -223,23 +405,22 @@ LeaderTravelPlan MakeEdgePlan(const pb::Vec3& bot_pos,
                               size_t cross_map_hops) {
   const float dist =
       Dist(bot_pos, edge.from_pos.x, edge.from_pos.y, edge.from_pos.z);
-  std::string place_id;
-  if (edge.kind == TravelLegKind::kAreaTrigger) {
-    place_id = "place:leader:at:" + std::to_string(edge.trigger_id);
-  } else {
-    place_id = "place:leader:portal:" + std::to_string(edge.object_entry);
-  }
+  std::string place_id = EncodeEdgePlaceId("place:leader", edge);
   std::string label = edge.label;
   if (label.empty()) {
-    label = edge.kind == TravelLegKind::kAreaTrigger ? "portal" : "portal";
+    label = edge.kind == TravelLegKind::kTransport ? "transport" : "portal";
   }
   return LeaderTravelPlan{
       .kind = edge.kind,
       .leg_dest = edge.from_pos,
       .trigger_id =
           edge.kind == TravelLegKind::kAreaTrigger ? edge.trigger_id : 0,
-      .object_entry =
-          edge.kind == TravelLegKind::kPortalObject ? edge.object_entry : 0,
+      .object_entry = (edge.kind == TravelLegKind::kPortalObject ||
+                       edge.kind == TravelLegKind::kTransport)
+                          ? edge.object_entry
+                          : 0,
+      .dest_map_id = edge.to_map_id,
+      .dest_pos = edge.to_pos,
       .taxi_nodes = {},
       .place_id = std::move(place_id),
       .route_label = std::move(label),
@@ -250,6 +431,173 @@ LeaderTravelPlan MakeEdgePlan(const pb::Vec3& bot_pos,
 }
 
 }  // namespace
+
+std::vector<TaxiRouteOption> ComputeReachableTaxiRoutes(
+    uint32_t cur_node,
+    uint32_t bot_money_copper,
+    float price_discount,
+    std::span<const TaxiNodeFact> known_nodes,
+    std::span<const TaxiLinkFact> links,
+    size_t max_results) {
+  if (max_results == 0) {
+    return {};
+  }
+  const std::optional<TaxiDijkstraResult> res =
+      RunTaxiDijkstra(cur_node, known_nodes, links);
+  if (!res) {
+    return {};
+  }
+  constexpr uint64_t kInfCost = std::numeric_limits<uint64_t>::max();
+  const TaxiNodeFact& src = *res->map_nodes[res->src_idx];
+  std::vector<TaxiRouteOption> out;
+  for (size_t i = 0; i < res->map_nodes.size(); ++i) {
+    if (i == res->src_idx || res->min_cost[i] == kInfCost) {
+      continue;
+    }
+    const TaxiNodeFact& dst = *res->map_nodes[i];
+    if (dst.name.empty()) {
+      continue;
+    }
+    const uint64_t cost = EffectiveTaxiCost(res->min_cost[i], price_discount);
+    if (cost > bot_money_copper) {
+      continue;
+    }
+    std::vector<uint32_t> path = ReconstructTaxiPath(*res, i);
+    if (path.size() < 2) {
+      continue;
+    }
+    out.push_back(TaxiRouteOption{
+        .dest_node = dst.node_id,
+        .dest_name = dst.name,
+        .nodes = std::move(path),
+        .total_cost_copper = static_cast<uint32_t>(cost),
+        .dist_yd = Dist(src.pos, dst.pos.x, dst.pos.y, dst.pos.z),
+    });
+  }
+  std::sort(out.begin(), out.end(),
+            [](const TaxiRouteOption& a, const TaxiRouteOption& b) {
+              if (a.dist_yd != b.dist_yd) {
+                return a.dist_yd < b.dist_yd;
+              }
+              if (a.total_cost_copper != b.total_cost_copper) {
+                return a.total_cost_copper < b.total_cost_copper;
+              }
+              return a.dest_node < b.dest_node;
+            });
+  if (out.size() > max_results) {
+    out.resize(max_results);
+  }
+  return out;
+}
+
+std::vector<uint32_t> FindTaxiNodePath(
+    uint32_t cur_node,
+    uint32_t dest_node,
+    uint32_t bot_money_copper,
+    float price_discount,
+    std::span<const TaxiNodeFact> known_nodes,
+    std::span<const TaxiLinkFact> links) {
+  if (cur_node == 0 || dest_node == 0 || cur_node == dest_node) {
+    return {};
+  }
+  const std::optional<TaxiDijkstraResult> res =
+      RunTaxiDijkstra(cur_node, known_nodes, links);
+  if (!res) {
+    return {};
+  }
+  constexpr uint64_t kInfCost = std::numeric_limits<uint64_t>::max();
+  for (size_t i = 0; i < res->map_nodes.size(); ++i) {
+    if (res->map_nodes[i]->node_id != dest_node) {
+      continue;
+    }
+    if (res->min_cost[i] == kInfCost) {
+      return {};
+    }
+    if (EffectiveTaxiCost(res->min_cost[i], price_discount) >
+        bot_money_copper) {
+      return {};
+    }
+    return ReconstructTaxiPath(*res, i);
+  }
+  return {};
+}
+
+std::vector<pb::OptionFacts::Place> BuildOpenWorldTravelPlaces(
+    uint32_t bot_map_id,
+    const pb::Vec3& bot_pos,
+    bool bot_alliance,
+    std::span<const CrossMapEdge> edges,
+    float max_dist_yd,
+    size_t max_places) {
+  if (max_places == 0 || max_dist_yd <= 0.0f) {
+    return {};
+  }
+  struct Candidate {
+    const CrossMapEdge* edge = nullptr;
+    float dist_yd = 0.0f;
+  };
+  std::vector<Candidate> cands;
+  for (const CrossMapEdge& e : edges) {
+    if (e.involves_instance || !EdgeValid(e) ||
+        !EdgeAllowedForFaction(e, bot_alliance) ||
+        e.from_map_id != bot_map_id) {
+      continue;
+    }
+    const float d = Dist(bot_pos, e.from_pos.x, e.from_pos.y, e.from_pos.z);
+    if (d > max_dist_yd) {
+      continue;
+    }
+    cands.push_back({&e, d});
+  }
+  std::sort(cands.begin(), cands.end(),
+            [](const Candidate& a, const Candidate& b) {
+              if (a.dist_yd != b.dist_yd) {
+                return a.dist_yd < b.dist_yd;
+              }
+              if (a.edge->dest_name != b.edge->dest_name) {
+                return a.edge->dest_name < b.edge->dest_name;
+              }
+              if (a.edge->to_map_id != b.edge->to_map_id) {
+                return a.edge->to_map_id < b.edge->to_map_id;
+              }
+              return a.edge->object_entry + a.edge->trigger_id <
+                     b.edge->object_entry + b.edge->trigger_id;
+            });
+
+  std::vector<pb::OptionFacts::Place> out;
+  std::vector<std::pair<uint32_t, std::string>> seen_dests;
+  for (const Candidate& c : cands) {
+    if (out.size() >= max_places) {
+      break;
+    }
+    const CrossMapEdge& e = *c.edge;
+    std::string name = !e.dest_name.empty() ? e.dest_name : e.label;
+    if (name.empty()) {
+      name = e.kind == TravelLegKind::kTransport ? "Transport" : "Portal";
+    }
+    const std::pair<uint32_t, std::string> dedup_key{e.to_map_id, name};
+    if (std::find(seen_dests.begin(), seen_dests.end(), dedup_key) !=
+        seen_dests.end()) {
+      continue;
+    }
+    seen_dests.push_back(dedup_key);
+
+    const std::string kind_word =
+        e.kind == TravelLegKind::kTransport ? "boat/zeppelin" : "portal";
+    const std::string services = e.dest_continent.empty()
+                                     ? kind_word
+                                     : kind_word + " to " + e.dest_continent;
+    out.push_back(pb::OptionFacts::Place{
+        .id = EncodeEdgePlaceId("place:travel", e),
+        .name = std::move(name),
+        .services = services,
+        .dir = DirFrom(bot_pos, e.from_pos.x, e.from_pos.y),
+        .dist_yd = c.dist_yd,
+        .pos = e.from_pos,
+    });
+  }
+  return out;
+}
 
 std::optional<LeaderTravelPlan> PlanLeaderTravel(
     const LeaderTravelInput& input,
@@ -281,11 +629,40 @@ std::optional<LeaderTravelPlan> PlanLeaderTravel(
             input.bot_money_copper, known_taxi_nodes, taxi_links)) {
       return MakeTaxiPlan(input.bot_pos, *taxi, /*cross_map_hops=*/0);
     }
+    // Check if a same-map portal or boat (e.g. Darnassus -> Rut'theran
+    // Village, Rut'theran -> Auberdine) cuts walking distance significantly.
+    if (dist >= kLeaderTaxiMinTripYd) {
+      const CrossMapEdge* best_same_map = nullptr;
+      float best_walk = dist - kLeaderTaxiMinSavingsYd;
+      for (const CrossMapEdge& edge : edges) {
+        if (!EdgeValid(edge) ||
+            !EdgeAllowedForFaction(edge, input.bot_alliance) ||
+            edge.from_map_id != input.bot_map_id ||
+            edge.to_map_id != input.bot_map_id) {
+          continue;
+        }
+        const float approach = Dist(input.bot_pos, edge.from_pos.x,
+                                    edge.from_pos.y, edge.from_pos.z);
+        const float egress = Dist(edge.to_pos, input.leader_pos.x,
+                                  input.leader_pos.y, input.leader_pos.z);
+        const float total_walk = approach + egress + kCrossMapHopPenaltyYd;
+        if (total_walk < best_walk) {
+          best_walk = total_walk;
+          best_same_map = &edge;
+        }
+      }
+      if (best_same_map) {
+        return MakeEdgePlan(input.bot_pos, *best_same_map,
+                            /*cross_map_hops=*/1);
+      }
+    }
     return LeaderTravelPlan{
         .kind = TravelLegKind::kWalk,
         .leg_dest = input.leader_pos,
         .trigger_id = 0,
         .object_entry = 0,
+        .dest_map_id = 0,
+        .dest_pos = {},
         .taxi_nodes = {},
         .place_id = "place:leader",
         .route_label = "",
@@ -324,7 +701,7 @@ std::optional<LeaderTravelPlan> PlanLeaderTravel(
   }
 
   // Case 3: Different map. Shortest-distance multi-hop search over legitimate
-  // cross-map edges (up to `kMaxCrossMapHops` transitions).
+  // cross-map and same-map island edges (up to `kMaxCrossMapHops` transitions).
   struct SearchState {
     uint32_t map_id = 0;
     pb::Vec3 pos;
@@ -333,11 +710,21 @@ std::optional<LeaderTravelPlan> PlanLeaderTravel(
     const CrossMapEdge* first_edge = nullptr;
     uint32_t visited_maps[kMaxCrossMapHops + 1] = {};
     size_t visited_count = 0;
+    size_t used_edges[kMaxCrossMapHops] = {};
+    size_t used_edge_count = 0;
   };
 
   auto has_visited = [](const SearchState& s, uint32_t map_id) {
     for (size_t i = 0; i < s.visited_count; ++i) {
       if (s.visited_maps[i] == map_id) {
+        return true;
+      }
+    }
+    return false;
+  };
+  auto has_used_edge = [](const SearchState& s, size_t edge_idx) {
+    for (size_t i = 0; i < s.used_edge_count; ++i) {
+      if (s.used_edges[i] == edge_idx) {
         return true;
       }
     }
@@ -377,9 +764,13 @@ std::optional<LeaderTravelPlan> PlanLeaderTravel(
       if (cur.cost >= best_total_cost) {
         continue;
       }
-      for (const CrossMapEdge* edge : valid_edges) {
-        if (edge->from_map_id != cur.map_id ||
-            has_visited(cur, edge->to_map_id)) {
+      for (size_t ei = 0; ei < valid_edges.size(); ++ei) {
+        const CrossMapEdge* edge = valid_edges[ei];
+        if (edge->from_map_id != cur.map_id || has_used_edge(cur, ei)) {
+          continue;
+        }
+        const bool same_map_hop = edge->to_map_id == cur.map_id;
+        if (!same_map_hop && has_visited(cur, edge->to_map_id)) {
           continue;
         }
         const float walk =
@@ -408,7 +799,10 @@ std::optional<LeaderTravelPlan> PlanLeaderTravel(
           nxt.cost = next_cost;
           nxt.hops = next_hops;
           nxt.first_edge = first;
-          nxt.visited_maps[nxt.visited_count++] = edge->to_map_id;
+          nxt.used_edges[nxt.used_edge_count++] = ei;
+          if (!same_map_hop && nxt.visited_count <= kMaxCrossMapHops) {
+            nxt.visited_maps[nxt.visited_count++] = edge->to_map_id;
+          }
           next_frontier.push_back(nxt);
         }
       }
@@ -465,7 +859,8 @@ std::optional<pb::OptionFacts::Place> BuildLeaderTravelPlace(
 }
 
 LeaderTravelArrival ParseLeaderTravelPlaceId(std::string_view place_id) {
-  if (!place_id.starts_with("place:leader:")) {
+  if (!place_id.starts_with("place:leader:") &&
+      !place_id.starts_with("place:travel:")) {
     return {};
   }
   const std::vector<std::string_view> parts = base::SplitStringPiece(
@@ -479,6 +874,8 @@ LeaderTravelArrival ParseLeaderTravelPlaceId(std::string_view place_id) {
       return {.kind = TravelLegKind::kAreaTrigger,
               .trigger_id = trigger_id,
               .object_entry = 0,
+              .dest_map_id = 0,
+              .dest_pos = {},
               .taxi_nodes = {}};
     }
     return {};
@@ -489,6 +886,27 @@ LeaderTravelArrival ParseLeaderTravelPlaceId(std::string_view place_id) {
       return {.kind = TravelLegKind::kPortalObject,
               .trigger_id = 0,
               .object_entry = entry,
+              .dest_map_id = 0,
+              .dest_pos = {},
+              .taxi_nodes = {}};
+    }
+    return {};
+  }
+  if (parts[2] == "transport" && parts.size() == 8) {
+    uint32_t entry = 0;
+    uint32_t dest_map = 0;
+    int32_t x = 0;
+    int32_t y = 0;
+    int32_t z = 0;
+    if (ParseUint32(parts[3], &entry) && entry != 0 &&
+        ParseUint32(parts[4], &dest_map) && ParseInt32(parts[5], &x) &&
+        ParseInt32(parts[6], &y) && ParseInt32(parts[7], &z)) {
+      return {.kind = TravelLegKind::kTransport,
+              .trigger_id = 0,
+              .object_entry = entry,
+              .dest_map_id = dest_map,
+              .dest_pos = {static_cast<float>(x), static_cast<float>(y),
+                           static_cast<float>(z)},
               .taxi_nodes = {}};
     }
     return {};
@@ -504,6 +922,10 @@ LeaderTravelArrival ParseLeaderTravelPlaceId(std::string_view place_id) {
       nodes.push_back(node);
     }
     return {.kind = TravelLegKind::kFlightMaster,
+            .trigger_id = 0,
+            .object_entry = 0,
+            .dest_map_id = 0,
+            .dest_pos = {},
             .taxi_nodes = std::move(nodes)};
   }
   return {};

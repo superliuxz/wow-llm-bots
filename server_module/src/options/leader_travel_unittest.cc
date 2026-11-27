@@ -379,6 +379,257 @@ TEST(LeaderTravelTest, ParseLeaderTravelPlaceIdRoundTripsAndRejectsGarbage) {
             TravelLegKind::kWalk);
   EXPECT_EQ(ParseLeaderTravelPlaceId("place:leader:unknown:1").kind,
             TravelLegKind::kWalk);
+
+  // Open-world `place:travel:*` and transport round-trip (including negative
+  // coordinates).
+  const LeaderTravelArrival travel_at =
+      ParseLeaderTravelPlaceId("place:travel:at:362");
+  EXPECT_EQ(travel_at.kind, TravelLegKind::kAreaTrigger);
+  EXPECT_EQ(travel_at.trigger_id, 362u);
+
+  const LeaderTravelArrival travel_portal =
+      ParseLeaderTravelPlaceId("place:travel:portal:183325");
+  EXPECT_EQ(travel_portal.kind, TravelLegKind::kPortalObject);
+  EXPECT_EQ(travel_portal.object_entry, 183325u);
+
+  const LeaderTravelArrival tr = ParseLeaderTravelPlaceId(
+      "place:travel:transport:176310:571:-2230:1705:5");
+  EXPECT_EQ(tr.kind, TravelLegKind::kTransport);
+  EXPECT_EQ(tr.object_entry, 176310u);
+  EXPECT_EQ(tr.dest_map_id, 571u);
+  EXPECT_FLOAT_EQ(tr.dest_pos.x, -2230.0f);
+  EXPECT_FLOAT_EQ(tr.dest_pos.y, 1705.0f);
+  EXPECT_FLOAT_EQ(tr.dest_pos.z, 5.0f);
+
+  const LeaderTravelArrival ldr_tr =
+      ParseLeaderTravelPlaceId("place:leader:transport:181688:571:585:-5100:2");
+  EXPECT_EQ(ldr_tr.kind, TravelLegKind::kTransport);
+  EXPECT_EQ(ldr_tr.object_entry, 181688u);
+  EXPECT_EQ(ldr_tr.dest_map_id, 571u);
+
+  // Adversarial counter-tests: malformed transport IDs degrade to kWalk.
+  for (const char* bad : {
+           "place:travel:transport:0:571:1:2:3",
+           "place:travel:transport:176310:571:1:2",
+           "place:travel:transport:176310:571:1:2:3:4",
+           "place:travel:transport:176310:571:abc:2:3",
+           "place:other:transport:176310:571:1:2:3",
+       }) {
+    EXPECT_EQ(ParseLeaderTravelPlaceId(bad).kind, TravelLegKind::kWalk) << bad;
+  }
+}
+
+TEST(LeaderTravelTest, MultiHopTaxiRoutesExposeMoreThanFourAndRespectBudget) {
+  // Linear + branching Eastern Kingdoms flight graph with 7 reachable nodes.
+  std::vector<TaxiNodeFact> nodes = {
+      {.node_id = 2, .map_id = 0, .pos = {0, 0, 0}, .name = "Stormwind"},
+      {.node_id = 4, .map_id = 0, .pos = {500, 0, 0}, .name = "Sentinel Hill"},
+      {.node_id = 12, .map_id = 0, .pos = {900, 0, 0}, .name = "Darkshire"},
+      {.node_id = 14, .map_id = 0, .pos = {1300, 0, 0}, .name = "Lakeshire"},
+      {.node_id = 19, .map_id = 0, .pos = {1800, 0, 0}, .name = "Booty Bay"},
+      {.node_id = 6, .map_id = 0, .pos = {2200, 0, 0}, .name = "Ironforge"},
+      {.node_id = 7, .map_id = 0, .pos = {2700, 0, 0}, .name = "Menethil"},
+      {.node_id = 8, .map_id = 0, .pos = {3200, 0, 0}, .name = "Thelsamar"},
+  };
+  std::vector<TaxiLinkFact> links = {
+      {.from_node = 2, .to_node = 4, .price_copper = 50},
+      {.from_node = 4, .to_node = 12, .price_copper = 60},
+      {.from_node = 2, .to_node = 14, .price_copper = 80},
+      {.from_node = 12, .to_node = 19, .price_copper = 100},
+      {.from_node = 2, .to_node = 6, .price_copper = 120},
+      {.from_node = 6, .to_node = 7, .price_copper = 90},
+      {.from_node = 6, .to_node = 8, .price_copper = 70},
+      // Expensive direct shortcut to Booty Bay (300c) vs 3-hop cheaper (210c).
+      {.from_node = 2, .to_node = 19, .price_copper = 300},
+  };
+
+  const std::vector<TaxiRouteOption> all =
+      ComputeReachableTaxiRoutes(2, /*bot_money_copper=*/500,
+                                 /*price_discount=*/1.0f, nodes, links);
+  // All 7 destinations exposed (not capped at 4), nearest first.
+  ASSERT_EQ(all.size(), 7u);
+  EXPECT_EQ(all[0].dest_name, "Sentinel Hill");
+  EXPECT_EQ(all[0].nodes, (std::vector<uint32_t>{2, 4}));
+  EXPECT_EQ(all[1].dest_name, "Darkshire");
+  EXPECT_EQ(all[1].nodes, (std::vector<uint32_t>{2, 4, 12}));
+  EXPECT_EQ(all[1].total_cost_copper, 110u);
+  EXPECT_EQ(all[3].dest_name, "Booty Bay");
+  // Picks cheaper 3-hop path (50+60+100=210) over 300c direct link.
+  EXPECT_EQ(all[3].nodes, (std::vector<uint32_t>{2, 4, 12, 19}));
+  EXPECT_EQ(all[3].total_cost_copper, 210u);
+
+  // FindTaxiNodePath reconstructs the exact hop-by-hop sequence.
+  EXPECT_EQ(FindTaxiNodePath(2, 19, 500, 1.0f, nodes, links),
+            (std::vector<uint32_t>{2, 4, 12, 19}));
+  // Reputation discount (10% off): ceil(210 * 0.9) = 189c fits 190c budget.
+  EXPECT_EQ(FindTaxiNodePath(2, 19, 190, 0.9f, nodes, links),
+            (std::vector<uint32_t>{2, 4, 12, 19}));
+
+  // Adversarial counter-test: insufficient copper excludes Booty Bay (210c)
+  // while keeping cheaper destinations; invalid/NaN/negative discount clamps
+  // to 1.0 (never grants free flights).
+  EXPECT_TRUE(FindTaxiNodePath(2, 19, 200, 1.0f, nodes, links).empty());
+  EXPECT_TRUE(FindTaxiNodePath(2, 19, 200, 0.0f, nodes, links).empty());
+  EXPECT_TRUE(FindTaxiNodePath(2, 19, 200, -0.5f, nodes, links).empty());
+  EXPECT_EQ(FindTaxiNodePath(2, 2, 500, 1.0f, nodes, links).size(), 0u);
+
+  // Adversarial counter-test: removing intermediate node 12 from known_nodes
+  // prevents routing through undiscovered nodes (falls back to 300c direct).
+  std::vector<TaxiNodeFact> without_darkshire;
+  for (const TaxiNodeFact& n : nodes) {
+    if (n.node_id != 12) {
+      without_darkshire.push_back(n);
+    }
+  }
+  EXPECT_EQ(FindTaxiNodePath(2, 19, 500, 1.0f, without_darkshire, links),
+            (std::vector<uint32_t>{2, 19}));
+  EXPECT_TRUE(
+      FindTaxiNodePath(2, 19, 250, 1.0f, without_darkshire, links).empty());
+}
+
+TEST(LeaderTravelTest, IslandAndNorthrendTravelOptionsWorkForSoloAndGrouped) {
+  // Teldrassil (map 1): Darnassus -> Rut'theran Village (same-map portal) ->
+  // Auberdine (same-map boat) -> Stormwind Harbor (cross-map boat to map 0) ->
+  // Valiance Keep (cross-map boat to Northrend map 571).
+  // Plus Horde zeppelin Orgrimmar (map 1) -> Warsong Hold (map 571),
+  // Azuremyst boat Valaar's Berth (map 530) -> Auberdine (map 1), and a
+  // dungeon entrance that must NOT leak into solo travel places.
+  std::vector<CrossMapEdge> edges = {
+      {.kind = TravelLegKind::kAreaTrigger,
+       .from_map_id = 1,
+       .from_pos = {9946.0f, 2610.0f, 1316.0f},
+       .to_map_id = 1,
+       .to_pos = {8785.0f, 967.0f, 30.0f},
+       .trigger_id = 362,
+       .label = "portal to Rut'theran Village",
+       .dest_name = "Rut'theran Village",
+       .for_alliance = true,
+       .for_horde = true},
+      {.kind = TravelLegKind::kTransport,
+       .from_map_id = 1,
+       .from_pos = {8300.0f, 1170.0f, 5.0f},
+       .to_map_id = 1,
+       .to_pos = {6550.0f, 930.0f, 5.0f},
+       .object_entry = 176244,
+       .label = "transport to Auberdine",
+       .dest_name = "Auberdine",
+       .for_alliance = true,
+       .for_horde = false},
+      {.kind = TravelLegKind::kTransport,
+       .from_map_id = 1,
+       .from_pos = {6580.0f, 950.0f, 5.0f},
+       .to_map_id = 0,
+       .to_pos = {-8290.0f, 1400.0f, 5.0f},
+       .object_entry = 176310,
+       .label = "transport to Stormwind Harbor",
+       .dest_name = "Stormwind Harbor",
+       .dest_continent = "Eastern Kingdoms",
+       .for_alliance = true,
+       .for_horde = false},
+      {.kind = TravelLegKind::kTransport,
+       .from_map_id = 530,
+       .from_pos = {-4260.0f, -11330.0f, 5.0f},
+       .to_map_id = 1,
+       .to_pos = {6540.0f, 920.0f, 5.0f},
+       .object_entry = 181646,
+       .label = "transport to Auberdine",
+       .dest_name = "Auberdine",
+       .dest_continent = "Kalimdor",
+       .for_alliance = true,
+       .for_horde = false},
+      {.kind = TravelLegKind::kTransport,
+       .from_map_id = 0,
+       .from_pos = {-8300.0f, 1420.0f, 5.0f},
+       .to_map_id = 571,
+       .to_pos = {2230.0f, 5130.0f, 5.0f},
+       .object_entry = 190536,
+       .label = "transport to Valiance Keep",
+       .dest_name = "Valiance Keep",
+       .dest_continent = "Northrend",
+       .for_alliance = true,
+       .for_horde = false},
+      {.kind = TravelLegKind::kTransport,
+       .from_map_id = 1,
+       .from_pos = {1180.0f, -4150.0f, 50.0f},
+       .to_map_id = 571,
+       .to_pos = {2840.0f, 6190.0f, 120.0f},
+       .object_entry = 186238,
+       .label = "transport to Warsong Hold",
+       .dest_name = "Warsong Hold",
+       .dest_continent = "Northrend",
+       .for_alliance = false,
+       .for_horde = true},
+      {.kind = TravelLegKind::kAreaTrigger,
+       .from_map_id = 0,
+       .from_pos = {-8770.0f, 840.0f, 88.0f},
+       .to_map_id = 34,
+       .to_pos = {48.0f, 0.0f, -16.0f},
+       .trigger_id = 101,
+       .label = "The Stockade entrance",
+       .dest_name = "The Stockade",
+       .for_alliance = true,
+       .for_horde = true,
+       .involves_instance = true},
+  };
+
+  // Solo Sylva in Darnassus sees portal to Rut'theran Village first (nearest)
+  // and the Rut'theran boat to Auberdine second.
+  const std::vector<pb::OptionFacts::Place> sylva_places =
+      BuildOpenWorldTravelPlaces(1, {9900.0f, 2550.0f, 1316.0f},
+                                 /*bot_alliance=*/true, edges);
+  ASSERT_EQ(sylva_places.size(), 2u);
+  EXPECT_EQ(sylva_places[0].id, "place:travel:at:362");
+  EXPECT_EQ(sylva_places[0].name, "Rut'theran Village");
+  EXPECT_EQ(sylva_places[0].services, "portal");
+  EXPECT_EQ(sylva_places[1].name, "Auberdine");
+  EXPECT_EQ(sylva_places[1].services, "boat/zeppelin");
+
+  // Solo Talaan on Azuremyst Isle sees boat to Auberdine (Kalimdor).
+  const std::vector<pb::OptionFacts::Place> talaan_places =
+      BuildOpenWorldTravelPlaces(530, {-4000.0f, -11500.0f, 10.0f},
+                                 /*bot_alliance=*/true, edges);
+  ASSERT_EQ(talaan_places.size(), 1u);
+  EXPECT_EQ(talaan_places[0].name, "Auberdine");
+  EXPECT_EQ(talaan_places[0].services, "boat/zeppelin to Kalimdor");
+  EXPECT_EQ(ParseLeaderTravelPlaceId(talaan_places[0].id).kind,
+            TravelLegKind::kTransport);
+
+  // Solo Alliance bot in Stormwind sees boat to Valiance Keep (Northrend),
+  // and does NOT see The Stockade dungeon entrance.
+  const std::vector<pb::OptionFacts::Place> sw_places =
+      BuildOpenWorldTravelPlaces(0, {-8800.0f, 650.0f, 95.0f},
+                                 /*bot_alliance=*/true, edges);
+  ASSERT_EQ(sw_places.size(), 1u);
+  EXPECT_EQ(sw_places[0].name, "Valiance Keep");
+  EXPECT_EQ(sw_places[0].services, "boat/zeppelin to Northrend");
+
+  // Adversarial counter-test: Horde bot near Stormwind does NOT see Alliance
+  // boat, and Alliance bot near Orgrimmar does NOT see Horde zeppelin.
+  EXPECT_TRUE(BuildOpenWorldTravelPlaces(0, {-8310.0f, 1410.0f, 5.0f},
+                                         /*bot_alliance=*/false, edges)
+                  .empty());
+  EXPECT_TRUE(BuildOpenWorldTravelPlaces(1, {1200.0f, -4160.0f, 50.0f},
+                                         /*bot_alliance=*/true, edges)
+                  .empty());
+  const std::vector<pb::OptionFacts::Place> org_horde =
+      BuildOpenWorldTravelPlaces(1, {1200.0f, -4160.0f, 50.0f},
+                                 /*bot_alliance=*/false, edges);
+  ASSERT_EQ(org_horde.size(), 1u);
+  EXPECT_EQ(org_horde[0].name, "Warsong Hold");
+
+  // Grouped Sylva in Darnassus routes 3 hops to leader in Stormwind (map 0):
+  // Darnassus -> Rut'theran Village -> Auberdine -> Stormwind Harbor.
+  LeaderTravelInput grouped = GroupedFollower();
+  grouped.bot_alliance = true;
+  grouped.bot_map_id = 1;
+  grouped.bot_pos = {9900.0f, 2550.0f, 1316.0f};
+  grouped.leader_map_id = 0;
+  grouped.leader_pos = {-8830.0f, 625.0f, 94.0f};
+  const std::optional<LeaderTravelPlan> plan = PlanLeaderTravel(grouped, edges);
+  ASSERT_TRUE(plan.has_value());
+  EXPECT_EQ(plan->kind, TravelLegKind::kAreaTrigger);
+  EXPECT_EQ(plan->trigger_id, 362u);
+  EXPECT_EQ(plan->cross_map_hops, 3u);
 }
 
 }  // namespace

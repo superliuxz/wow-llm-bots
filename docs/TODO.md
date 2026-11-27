@@ -18,9 +18,6 @@ Live verification following the `70b0878` team-play P0 fixes:
 Team-play P1 gaps and selected P2 items from the `70b0878` review:
 
 ### Questing & travel
-- **No boats, zeppelins, or portals:** `Sylva` (Teldrassil) and `Talaan` (Azuremyst) are stuck on
-  islands; bots can't reach Northrend alone (`config/llm-brain.overrides:4-9`).
-- **Flight path limits:** At most 4 destinations, direct links only (`exec_npc.cc:412-432,617-624`).
 - **No riding training or mounts:** Bots fall behind a mounted human from level 20
   (`exec_npc.cc:293-401`).
 - **No NPC dialogue options or vehicle controls:** `Talk to` only walks up/targets; vehicle

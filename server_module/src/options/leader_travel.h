@@ -50,8 +50,16 @@ inline constexpr float kLeaderTaxiMinTripYd = 500.0f;
 // Minimum walking distance saved (yd) for a flight path to beat direct walking.
 inline constexpr float kLeaderTaxiMinSavingsYd = 300.0f;
 
-// Maximum cross-map portal/trigger transitions in one planned route.
+// Maximum cross-map portal/trigger/transport transitions in one planned route.
 inline constexpr size_t kMaxCrossMapHops = 4;
+
+// Minimum distance (yd) between source and destination for a same-map portal
+// or transport edge to be considered a valid long-distance travel link (e.g.
+// Darnassus <-> Rut'theran Village, Rut'theran <-> Auberdine).
+inline constexpr float kSameMapPortalMinDistYd = 150.0f;
+
+// Maximum flight-master destinations exposed in one NPC action list.
+inline constexpr size_t kMaxFlightDestinations = 12;
 
 enum class TravelLegKind : uint8_t {
   // Walk directly along the navmesh to `leg_dest` on `bot_map_id`.
@@ -62,9 +70,13 @@ enum class TravelLegKind : uint8_t {
   kPortalObject,
   // Walk to a flight master (`taxi_nodes.front()`) and fly `taxi_nodes`.
   kFlightMaster,
+  // Walk to a boat/zeppelin dock (`from_pos`), wait/board `object_entry`, and
+  // disembark at `(dest_map_id, dest_pos)`.
+  kTransport,
 };
 
-// One legitimate cross-map transition (AreaTriggerTeleport or portal GO).
+// One legitimate world travel transition (AreaTriggerTeleport, portal GO, or
+// continent boat/zeppelin MotionTransport leg).
 struct CrossMapEdge {
   TravelLegKind kind = TravelLegKind::kAreaTrigger;
   uint32_t from_map_id = 0;
@@ -72,10 +84,13 @@ struct CrossMapEdge {
   uint32_t to_map_id = 0;
   wlb::snapshot::Vec3 to_pos;
   uint32_t trigger_id = 0;    // Set when kind == kAreaTrigger.
-  uint32_t object_entry = 0;  // Set when kind == kPortalObject.
+  uint32_t object_entry = 0;  // Set when kind == kPortalObject or kTransport.
   std::string label;
+  std::string dest_name;       // Destination area/map name for open-world UI.
+  std::string dest_continent;  // Non-empty when to_map_id != from_map_id.
   bool for_alliance = true;
   bool for_horde = true;
+  bool involves_instance = false;
 
   bool operator==(const CrossMapEdge&) const = default;
 };
@@ -124,11 +139,59 @@ struct LeaderTravelInput {
   wlb::snapshot::Vec3 leader_pos;
 };
 
+// One reachable multi-hop flight path from a flight master.
+struct TaxiRouteOption {
+  uint32_t dest_node = 0;
+  std::string dest_name;
+  std::vector<uint32_t> nodes;  // [cur_node, ..., dest_node], size >= 2.
+  uint32_t total_cost_copper = 0;
+  float dist_yd = 0.0f;
+
+  bool operator==(const TaxiRouteOption&) const = default;
+};
+
+// Computes reachable, affordable multi-hop taxi destinations from `cur_node`
+// over `known_nodes` and `links` using Dijkstra by total copper cost (with
+// `price_discount` applied via ceil(total_cost * discount) to match
+// Player::ActivateTaxiPathTo). Sorted nearest-first, up to `max_results`.
+std::vector<TaxiRouteOption> ComputeReachableTaxiRoutes(
+    uint32_t cur_node,
+    uint32_t bot_money_copper,
+    float price_discount,
+    std::span<const TaxiNodeFact> known_nodes,
+    std::span<const TaxiLinkFact> links,
+    size_t max_results = kMaxFlightDestinations);
+
+// Finds the cheapest known, affordable hop-by-hop node sequence
+// `[cur_node, ..., dest_node]` for `Player::ActivateTaxiPathTo`. Returns empty
+// vector when unreachable, unknown, same node, or unaffordable.
+std::vector<uint32_t> FindTaxiNodePath(
+    uint32_t cur_node,
+    uint32_t dest_node,
+    uint32_t bot_money_copper,
+    float price_discount,
+    std::span<const TaxiNodeFact> known_nodes,
+    std::span<const TaxiLinkFact> links);
+
+// Selects up to `max_places` nearest faction-compatible non-instance travel
+// links (boats, zeppelins, portals) on `bot_map_id` within `max_dist_yd`,
+// deduplicated by destination `(to_map_id, dest_name)`, so solo and grouped
+// bots can choose cross-island and cross-continent routes.
+std::vector<wlb::snapshot::OptionFacts::Place> BuildOpenWorldTravelPlaces(
+    uint32_t bot_map_id,
+    const wlb::snapshot::Vec3& bot_pos,
+    bool bot_alliance,
+    std::span<const CrossMapEdge> edges,
+    float max_dist_yd = 2500.0f,
+    size_t max_places = 4);
+
 struct LeaderTravelPlan {
   TravelLegKind kind = TravelLegKind::kWalk;
   wlb::snapshot::Vec3 leg_dest;
   uint32_t trigger_id = 0;
   uint32_t object_entry = 0;
+  uint32_t dest_map_id = 0;
+  wlb::snapshot::Vec3 dest_pos;
   std::vector<uint32_t> taxi_nodes;
   std::string place_id;
   // Empty for direct same-map walk; otherwise e.g. "The Deadmines entrance",
@@ -141,11 +204,14 @@ struct LeaderTravelPlan {
   bool operator==(const LeaderTravelPlan&) const = default;
 };
 
-// Decoded arrival action for a `place:leader*` WalkAction id.
+// Decoded arrival action for a `place:leader*` or `place:travel*` WalkAction
+// id.
 struct LeaderTravelArrival {
   TravelLegKind kind = TravelLegKind::kWalk;
   uint32_t trigger_id = 0;
   uint32_t object_entry = 0;
+  uint32_t dest_map_id = 0;
+  wlb::snapshot::Vec3 dest_pos;
   std::vector<uint32_t> taxi_nodes;
 
   bool operator==(const LeaderTravelArrival&) const = default;
@@ -168,11 +234,12 @@ std::optional<wlb::snapshot::OptionFacts::Place> BuildLeaderTravelPlace(
     std::span<const TaxiNodeFact> known_taxi_nodes = {},
     std::span<const TaxiLinkFact> taxi_links = {});
 
-// Parses the arrival action encoded in a `place:leader*` id:
-//  - "place:leader"                 -> kWalk
-//  - "place:leader:at:<id>"         -> kAreaTrigger
-//  - "place:leader:portal:<entry>"  -> kPortalObject
-//  - "place:leader:taxi:<n1>:<n2>…" -> kFlightMaster
+// Parses the arrival action encoded in a `place:leader*` or `place:travel*` id:
+//  - "place:leader"                                        -> kWalk
+//  - "place:(leader|travel):at:<id>"                       -> kAreaTrigger
+//  - "place:(leader|travel):portal:<entry>"                -> kPortalObject
+//  - "place:(leader|travel):transport:<entry>:<m>:<x>:<y>:<z>" -> kTransport
+//  - "place:leader:taxi:<n1>:<n2>…"                        -> kFlightMaster
 // Any other id (or malformed suffix) returns `kWalk`.
 LeaderTravelArrival ParseLeaderTravelPlaceId(std::string_view place_id);
 

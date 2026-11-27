@@ -28,6 +28,9 @@ struct PendingWalk {
   base::TimeTicks last_path_at;
   uint8_t consecutive_seam_hops = 0;
   LeaderTravelArrival arrival;
+  bool waiting_for_transport = false;
+  bool boarded_transport = false;
+  base::TimeTicks transport_wait_started;
 };
 
 struct WalkStepResult {

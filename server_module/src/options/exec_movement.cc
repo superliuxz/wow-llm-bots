@@ -13,6 +13,10 @@
 #include "Cell.h"
 #include "CellImpl.h"  // IWYU pragma: keep
 #include "Creature.h"
+#include "DBCStructure.h"
+#include "DetourNavMesh.h"
+#include "DetourNavMeshQuery.h"
+#include "DetourStatus.h"
 #include "G3D/Vector3.h"
 #include "GameObject.h"
 #include "GridNotifiers.h"
@@ -20,6 +24,7 @@
 #include "GridTerrainData.h"
 #include "IVMapMgr.h"
 #include "Map.h"
+#include "MapDefines.h"
 #include "MotionMaster.h"
 #include "MoveSplineInit.h"
 #include "MoveSplineInitArgs.h"
@@ -27,6 +32,9 @@
 #include "Opcodes.h"
 #include "PathGenerator.h"
 #include "Player.h"
+#include "SpellAuraDefines.h"
+#include "Transport.h"
+#include "TransportMgr.h"
 #include "Unit.h"
 #include "UnitDefines.h"
 #include "WorldPacket.h"
@@ -47,7 +55,96 @@ namespace pb = wlb::snapshot;
 constexpr float kWalkStepYd = 70.0f;
 constexpr float kWalkStepAdvanceYd = 10.0f;
 constexpr float kWalkNearEnoughArrivalYd = 12.0f;
+constexpr float kTransportDockApproachYd = 30.0f;
+constexpr float kTransportDockStandYd = 15.0f;
 constexpr base::TimeDelta kWalkRepathEvery = base::Seconds(1);
+constexpr base::TimeDelta kTransportWaitTimeout = base::Seconds(240);
+
+MotionTransport* FindTransportByEntry(Map* map, uint32_t entry) {
+  if (!map || entry == 0) {
+    return nullptr;
+  }
+  for (Transport* t : map->GetAllTransports()) {
+    MotionTransport* mt = dynamic_cast<MotionTransport*>(t);
+    if (mt && mt->GetEntry() == entry) {
+      return mt;
+    }
+  }
+  return nullptr;
+}
+
+bool IsTransportDockedAt(const MotionTransport* mt,
+                         uint32_t map_id,
+                         const pb::Vec3& stop_pos) {
+  if (!mt || mt->GetMapId() != map_id) {
+    return false;
+  }
+  const float dist = mt->GetExactDist2d(stop_pos.x, stop_pos.y);
+  if (dist > 25.0f) {
+    return false;
+  }
+  const uint32_t period = mt->GetPeriod();
+  if (period == 0) {
+    return dist <= 10.0f;
+  }
+  const uint32_t timer = mt->GetPathProgress() % period;
+  for (const KeyFrame& kf : mt->GetKeyFrames()) {
+    if (!kf.IsStopFrame() || !kf.Node || kf.Node->mapid != map_id) {
+      continue;
+    }
+    if (std::hypot(kf.Node->x - stop_pos.x, kf.Node->y - stop_pos.y) <= 25.0f &&
+        timer >= kf.ArriveTime && timer < kf.DepartureTime) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void ComputeTransportDeckPos(const MotionTransport* mt,
+                             float* x,
+                             float* y,
+                             float* z,
+                             float* o) {
+  float ox = 0.0f;
+  float oy = 0.0f;
+  float oz = 1.5f;
+  float oo = 0.0f;
+  for (WorldObject* obj : mt->GetStaticPassengers()) {
+    if (obj && obj->ToCreature()) {
+      obj->m_movementInfo.transport.pos.GetPosition(ox, oy, oz, oo);
+      break;
+    }
+  }
+  mt->CalculatePassengerPosition(ox, oy, oz, &oo);
+  *x = ox;
+  *y = oy;
+  *z = oz;
+  *o = oo;
+}
+
+pb::Vec3 FindDockLandingPos(Map* map, const pb::Vec3& dock_pos) {
+  if (!map) {
+    return dock_pos;
+  }
+  const dtNavMeshQuery* nav_query =
+      map->GetMapCollisionData().GetMMapData().GetNavMeshQuery();
+  if (!nav_query) {
+    return dock_pos;
+  }
+  dtQueryFilter filter;
+  filter.setIncludeFlags(NAV_GROUND);
+  filter.setExcludeFlags(NAV_MAGMA | NAV_SLIME | NAV_GROUND_STEEP | NAV_WATER);
+  const float point[3] = {dock_pos.y, dock_pos.z, dock_pos.x};
+  const float extents[3] = {30.0f, 15.0f, 30.0f};
+  dtPolyRef poly_ref = INVALID_POLYREF;
+  float closest[3] = {0.0f, 0.0f, 0.0f};
+  if (dtStatusSucceed(nav_query->findNearestPoly(point, extents, &filter,
+                                                 &poly_ref, closest)) &&
+      poly_ref != INVALID_POLYREF) {
+    return {closest[2], closest[0], closest[1]};
+  }
+  return dock_pos;
+}
 
 G3D::Vector3 PointAlongPath(const Movement::PointsArray& points,
                             float step_yd) {
@@ -114,13 +211,51 @@ WalkStepResult TickLongWalk(Player* bot,
     return {.error = "walk interrupted: you are in combat"};
   }
   if (bot->GetMapId() != walk->map_id) {
-    stop_walk();
-    return {.error = "walk interrupted: you changed map"};
+    if (walk->arrival.kind == TravelLegKind::kTransport &&
+        walk->boarded_transport &&
+        bot->GetMapId() == walk->arrival.dest_map_id) {
+      walk->map_id = bot->GetMapId();
+      walk->transport_wait_started = now;
+    } else {
+      stop_walk();
+      return {.error = "walk interrupted: you changed map"};
+    }
   }
+
+  // Boat / zeppelin riding & disembarking.
+  if (walk->arrival.kind == TravelLegKind::kTransport &&
+      walk->boarded_transport) {
+    Transport* current_t = bot->GetTransport();
+    if (!current_t) {
+      const bool near_dest =
+          bot->GetMapId() == walk->arrival.dest_map_id &&
+          bot->GetExactDist2d(walk->arrival.dest_pos.x,
+                              walk->arrival.dest_pos.y) <= 60.0f;
+      if (near_dest) {
+        return {.arrived = true};
+      }
+      return {.error = "fell off transport"};
+    }
+    if (now - walk->transport_wait_started >= kTransportWaitTimeout) {
+      current_t->RemovePassenger(bot, /*withAll=*/true);
+      return {.error = "transport ride timed out"};
+    }
+    MotionTransport* mt = dynamic_cast<MotionTransport*>(current_t);
+    if (mt && IsTransportDockedAt(mt, walk->arrival.dest_map_id,
+                                  walk->arrival.dest_pos)) {
+      const pb::Vec3 land =
+          FindDockLandingPos(bot->GetMap(), walk->arrival.dest_pos);
+      mt->RemovePassenger(bot, /*withAll=*/true);
+      bot->NearTeleportTo(land.x, land.y, land.z, bot->GetOrientation());
+      return {.arrived = true};
+    }
+    return {};
+  }
+
   const float dist_to_dest =
       bot->GetExactDist(walk->dest.x, walk->dest.y, walk->dest.z);
 
-  // Legitimate cross-map / flight-path arrival handlers (Milestone 5b, #7).
+  // Legitimate cross-map / flight-path / transport arrival handlers.
   if (walk->arrival.kind == TravelLegKind::kAreaTrigger) {
     const AreaTrigger* at =
         sObjectMgr->GetAreaTrigger(walk->arrival.trigger_id);
@@ -158,6 +293,10 @@ WalkStepResult TickLongWalk(Player* bot,
     if (Creature* fm = FindNearbyFlightMaster(bot, 35.0f)) {
       if (IsInTalkRange(bot, fm)) {
         stop_walk();
+        if (bot->IsMounted()) {
+          bot->Dismount();
+          bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
+        }
         if (!bot->ActivateTaxiPathTo(walk->arrival.taxi_nodes, fm, 0)) {
           return {.error = "could not start flight"};
         }
@@ -167,6 +306,35 @@ WalkStepResult TickLongWalk(Player* bot,
         WalkNextTo(bot, fm);
         return {};
       }
+    }
+  } else if (walk->arrival.kind == TravelLegKind::kTransport &&
+             dist_to_dest <= kTransportDockApproachYd) {
+    if (!walk->waiting_for_transport) {
+      walk->waiting_for_transport = true;
+      walk->transport_wait_started = now;
+    }
+    if (MotionTransport* mt =
+            FindTransportByEntry(bot->GetMap(), walk->arrival.object_entry);
+        mt && IsTransportDockedAt(mt, bot->GetMapId(), walk->dest)) {
+      stop_walk();
+      float bx = 0.0f;
+      float by = 0.0f;
+      float bz = 0.0f;
+      float bo = 0.0f;
+      ComputeTransportDeckPos(mt, &bx, &by, &bz, &bo);
+      bot->NearTeleportTo(bx, by, bz, bo);
+      mt->AddPassenger(bot, /*withAll=*/true);
+      walk->boarded_transport = true;
+      walk->transport_wait_started = now;
+      return {};
+    }
+    if (now - walk->transport_wait_started >= kTransportWaitTimeout) {
+      stop_walk();
+      return {.error = "transport did not arrive"};
+    }
+    if (dist_to_dest <= kTransportDockStandYd) {
+      stop_walk();
+      return {};
     }
   }
 
@@ -178,11 +346,17 @@ WalkStepResult TickLongWalk(Player* bot,
         stop_walk();
         return {.arrived = true};
       }
-      // For portal/trigger/flight-master legs, arriving within 10 yd is not
-      // enough until the trigger/object/NPC is actually activated above; step
-      // closer if not yet in range.
+      // For portal/trigger/flight-master/transport legs, arriving within 10 yd
+      // is not enough until the trigger/object/NPC/transport is activated;
+      // step closer if not yet in range.
       break;
     case WalkProgressVerdict::kStuck:
+      if (walk->arrival.kind == TravelLegKind::kTransport &&
+          walk->waiting_for_transport) {
+        // Already at the pier edge waiting for the boat/zeppelin to dock.
+        stop_walk();
+        return {};
+      }
       stop_walk();
       return {.error = "stuck"};
     case WalkProgressVerdict::kContinue:

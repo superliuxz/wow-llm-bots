@@ -273,6 +273,9 @@ void RefreshFrom(const pb::Vec3& pos, PositionFacts* facts) {
   std::erase_if(facts->places, [&](pb::OptionFacts::Place& place) {
     place.dist_yd = Dist(pos, place.pos.x, place.pos.y, place.pos.z);
     place.dir = DirFrom(pos, place.pos.x, place.pos.y);
+    if (place.id.starts_with("place:travel:")) {
+      return place.dist_yd > kMaxTravelDistYd;
+    }
     return out_of_range(place.dist_yd);
   });
 }

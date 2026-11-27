@@ -40,6 +40,8 @@
 #include "SpellMgr.h"
 #include "StringFormat.h"
 #include "Trainer.h"
+#include "Transport.h"
+#include "TransportMgr.h"
 #include "TravelMgr.h"
 #include "UnitDefines.h"
 #include "World.h"
@@ -546,6 +548,12 @@ void FillPlaces(const WorldPlaces& world,
                              {grave->x, grave->y, grave->z}});
     }
   }
+
+  for (pb::OptionFacts::Place& travel_place :
+       BuildOpenWorldTravelPlaces(view.map_id, view.pos, view.alliance,
+                                  world.cross_map_edges(), kMaxTravelDistYd)) {
+    out->places.push_back(std::move(travel_place));
+  }
 }
 
 }  // namespace
@@ -776,15 +784,35 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
     }
   }
 
-  // Cross-map travel graph (Milestone 5b, Finding #7): legitimate
-  // AreaTriggerTeleports (dungeon/raid entrances & exits, Dark Portal,
-  // Deeprun Tram) and faction-compatible portal GameObjects (Shattrath/Dalaran
-  // city portals, Orb of Translocation).
+  // World travel graph: legitimate AreaTriggerTeleports (dungeon/raid
+  // entrances & exits, Dark Portal, Deeprun Tram, Darnassus <-> Rut'theran
+  // Village), faction-compatible portal GameObjects (Shattrath/Dalaran city
+  // portals, Orb of Translocation), and continent MotionTransports (boats &
+  // zeppelins).
   const uint32_t locale = sWorld->GetDefaultDbcLocale();
+  const auto location_area_name = [&](uint32_t map_id, float x, float y,
+                                      float z, const MapEntry* map_entry) {
+    uint32_t z_id = 0;
+    uint32_t a_id = 0;
+    sMapMgr->GetZoneAndAreaId(PHASEMASK_NORMAL, z_id, a_id, map_id, x, y, z);
+    if (std::string n = AreaName(a_id); !n.empty()) {
+      return n;
+    }
+    if (std::string n = AreaName(z_id); !n.empty()) {
+      return n;
+    }
+    const char* mname = map_entry ? map_entry->name[locale] : nullptr;
+    return (mname && *mname) ? std::string(mname) : std::string();
+  };
   for (const auto& [trigger_id, at_tp] :
        sObjectMgr->GetAllAreaTriggerTeleports()) {
     const AreaTrigger* at = sObjectMgr->GetAreaTrigger(trigger_id);
-    if (!at || at->map == at_tp.target_mapId) {
+    if (!at) {
+      continue;
+    }
+    if (at->map == at_tp.target_mapId &&
+        Dist({at->x, at->y, at->z}, at_tp.target_X, at_tp.target_Y,
+             at_tp.target_Z) < kSameMapPortalMinDistYd) {
       continue;
     }
     const MapEntry* from_map = sMapStore.LookupEntry(at->map);
@@ -794,12 +822,17 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
       continue;
     }
     const char* to_name = to_map->name[locale];
+    const std::string dest_name =
+        location_area_name(at_tp.target_mapId, at_tp.target_X, at_tp.target_Y,
+                           at_tp.target_Z, to_map);
     std::string label;
     if (to_map->IsDungeon()) {
       label = (to_name && *to_name) ? std::string(to_name) + " entrance"
                                     : "instance entrance";
     } else if (from_map->IsDungeon()) {
       label = "instance exit";
+    } else if (!dest_name.empty()) {
+      label = "portal to " + dest_name;
     } else {
       label = (to_name && *to_name) ? std::string("portal to ") + to_name
                                     : "portal";
@@ -813,8 +846,13 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
         .trigger_id = trigger_id,
         .object_entry = 0,
         .label = std::move(label),
+        .dest_name = dest_name,
+        .dest_continent = (at->map != at_tp.target_mapId && to_name && *to_name)
+                              ? std::string(to_name)
+                              : "",
         .for_alliance = true,
         .for_horde = true,
+        .involves_instance = from_map->IsDungeon() || to_map->IsDungeon(),
     });
   }
   for (const auto& [spawn_id, data] : sObjectMgr->GetAllGOData()) {
@@ -843,7 +881,12 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
         }
       }
     }
-    if (!tp || tp->target_mapId == data.mapid) {
+    if (!tp) {
+      continue;
+    }
+    if (tp->target_mapId == data.mapid &&
+        Dist({data.posX, data.posY, data.posZ}, tp->target_X, tp->target_Y,
+             tp->target_Z) < kSameMapPortalMinDistYd) {
       continue;
     }
     const MapEntry* from_map = sMapStore.LookupEntry(data.mapid);
@@ -866,6 +909,9 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
     if (!for_alliance && !for_horde) {
       continue;
     }
+    const char* to_name = to_map->name[locale];
+    const std::string dest_name = location_area_name(
+        tp->target_mapId, tp->target_X, tp->target_Y, tp->target_Z, to_map);
     world->cross_map_edges_.push_back(CrossMapEdge{
         .kind = TravelLegKind::kPortalObject,
         .from_map_id = data.mapid,
@@ -875,9 +921,141 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
         .trigger_id = 0,
         .object_entry = data.id,
         .label = go_tmpl->name,
+        .dest_name = dest_name.empty() ? go_tmpl->name : dest_name,
+        .dest_continent =
+            (data.mapid != tp->target_mapId && to_name && *to_name)
+                ? std::string(to_name)
+                : "",
         .for_alliance = for_alliance,
         .for_horde = for_horde,
+        .involves_instance = from_map->IsDungeon() || to_map->IsDungeon(),
     });
+  }
+
+  // Continent boats and zeppelins (MotionTransports): extract stop-to-stop
+  // legs from each active transport's keyFrames and infer faction safety from
+  // nearby hubs (Alliance docks, Horde zeppelin towers, neutral ports).
+  const auto infer_dock_factions = [&](uint32_t map_id, const pb::Vec3& pos,
+                                       bool* alliance_ok, bool* horde_ok) {
+    bool saw_ally = false;
+    bool saw_horde = false;
+    for (const Hub& hub : world->hubs_) {
+      if (hub.map_id != map_id ||
+          Dist(pos, hub.pos.x, hub.pos.y, hub.pos.z) > 180.0f) {
+        continue;
+      }
+      saw_ally |= hub.for_alliance;
+      saw_horde |= hub.for_horde;
+    }
+    if (saw_ally && !saw_horde) {
+      *horde_ok = false;
+    } else if (saw_horde && !saw_ally) {
+      *alliance_ok = false;
+    }
+  };
+  std::vector<uint32_t> seen_transport_entries;
+  for (uint32_t continent_map : {0u, 1u, 530u, 571u}) {
+    Map* cmap = sMapMgr->CreateBaseMap(continent_map);
+    if (!cmap) {
+      continue;
+    }
+    for (Transport* t : cmap->GetAllTransports()) {
+      MotionTransport* mt = dynamic_cast<MotionTransport*>(t);
+      if (!mt) {
+        continue;
+      }
+      const uint32_t entry = mt->GetEntry();
+      if (entry == 0 || std::find(seen_transport_entries.begin(),
+                                  seen_transport_entries.end(),
+                                  entry) != seen_transport_entries.end()) {
+        continue;
+      }
+      seen_transport_entries.push_back(entry);
+      const TransportTemplate* tmpl = mt->GetTransportTemplate();
+      if (!tmpl || tmpl->inInstance || tmpl->keyFrames.empty()) {
+        continue;
+      }
+      struct TransportStop {
+        uint32_t map_id = 0;
+        pb::Vec3 pos;
+      };
+      std::vector<TransportStop> stops;
+      for (const KeyFrame& kf : tmpl->keyFrames) {
+        if (!kf.IsStopFrame() || !kf.Node) {
+          continue;
+        }
+        const pb::Vec3 p{kf.Node->x, kf.Node->y, kf.Node->z};
+        if (!stops.empty() && stops.back().map_id == kf.Node->mapid &&
+            Dist(stops.back().pos, p.x, p.y, p.z) < 50.0f) {
+          continue;
+        }
+        stops.push_back({kf.Node->mapid, p});
+      }
+      if (stops.size() >= 2 && stops.front().map_id == stops.back().map_id &&
+          Dist(stops.front().pos, stops.back().pos.x, stops.back().pos.y,
+               stops.back().pos.z) < 50.0f) {
+        stops.pop_back();
+      }
+      if (stops.size() < 2) {
+        continue;
+      }
+      bool base_alliance = true;
+      bool base_horde = true;
+      if (const GameObjectTemplateAddon* addon =
+              sObjectMgr->GetGameObjectTemplateAddon(entry);
+          addon && addon->faction != 0) {
+        if (const FactionTemplateEntry* ft =
+                sFactionTemplateStore.LookupEntry(addon->faction)) {
+          base_alliance = (ft->hostileMask & FACTION_MASK_ALLIANCE) == 0;
+          base_horde = (ft->hostileMask & FACTION_MASK_HORDE) == 0;
+        }
+      }
+      for (size_t i = 0; i < stops.size(); ++i) {
+        const TransportStop& from = stops[i];
+        const TransportStop& to = stops[(i + 1) % stops.size()];
+        if (from.map_id == to.map_id &&
+            Dist(from.pos, to.pos.x, to.pos.y, to.pos.z) <
+                kSameMapPortalMinDistYd) {
+          continue;
+        }
+        const MapEntry* from_map = sMapStore.LookupEntry(from.map_id);
+        const MapEntry* to_map = sMapStore.LookupEntry(to.map_id);
+        if (!from_map || !to_map || from_map->IsBattlegroundOrArena() ||
+            to_map->IsBattlegroundOrArena() || from_map->IsDungeon() ||
+            to_map->IsDungeon()) {
+          continue;
+        }
+        bool for_alliance = base_alliance;
+        bool for_horde = base_horde;
+        infer_dock_factions(from.map_id, from.pos, &for_alliance, &for_horde);
+        infer_dock_factions(to.map_id, to.pos, &for_alliance, &for_horde);
+        if (!for_alliance && !for_horde) {
+          continue;
+        }
+        const char* to_name = to_map->name[locale];
+        const std::string dest_name =
+            location_area_name(to.map_id, to.pos.x, to.pos.y, to.pos.z, to_map);
+        std::string label =
+            dest_name.empty() ? "transport" : "transport to " + dest_name;
+        world->cross_map_edges_.push_back(CrossMapEdge{
+            .kind = TravelLegKind::kTransport,
+            .from_map_id = from.map_id,
+            .from_pos = from.pos,
+            .to_map_id = to.map_id,
+            .to_pos = to.pos,
+            .trigger_id = 0,
+            .object_entry = entry,
+            .label = std::move(label),
+            .dest_name = dest_name,
+            .dest_continent = (from.map_id != to.map_id && to_name && *to_name)
+                                  ? std::string(to_name)
+                                  : "",
+            .for_alliance = for_alliance,
+            .for_horde = for_horde,
+            .involves_instance = false,
+        });
+      }
+    }
   }
   return world;
 }

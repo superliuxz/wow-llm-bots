@@ -88,10 +88,15 @@ TEST(PositionFactsTest, RefreshSortsByDistanceAndDeduplicatesCompassDirection) {
 TEST(PositionFactsTest, DropsWhatIsOutOfTravelRange) {
   PositionFacts facts;
   facts.places = {PlaceAt("place:near", 10, 0), PlaceAt("place:far", 3000, 0),
-                  PlaceAt("place:ok", 500, 0)};
+                  PlaceAt("place:ok", 500, 0),
+                  PlaceAt("place:travel:transport:176310:571:1:2:3", 5, 0),
+                  PlaceAt("place:travel:at:362", 3000, 0)};
   RefreshFrom({0, 0, 0}, &facts);
-  ASSERT_EQ(facts.places.size(), 1u);
+  ASSERT_EQ(facts.places.size(), 2u);
   EXPECT_EQ(facts.places[0].id, "place:ok");
+  // Open-world travel links stay visible right next to the dock/portal (<25 yd)
+  // while still dropping beyond kMaxTravelDistYd (2500 yd).
+  EXPECT_EQ(facts.places[1].id, "place:travel:transport:176310:571:1:2:3");
 }
 
 TEST(PositionFactsTest, MinimapShowsOnlyHubsInRangeMeasuredFromPos) {
