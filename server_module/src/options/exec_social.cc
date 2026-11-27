@@ -46,6 +46,7 @@
 #include "Timer.h"
 #include "TradeData.h"
 #include "Unit.h"
+#include "UnitDefines.h"
 #include "UpdateFields.h"
 #include "World.h"
 #include "WorldPacket.h"
@@ -62,6 +63,7 @@
 #include "options/exec_shared.h"
 #include "options/loot_roll_policy.h"
 #include "options/options.h"
+#include "options/riding_mounts.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/world_util.h"
 
@@ -938,26 +940,71 @@ void CollectGroupAndUpkeepActions(Player* bot,
     }
   }
 
-  // 7. Mount.
-  if (bot->IsAlive() && !bot->IsInCombat() && !bot->IsMounted() &&
-      bot->GetMap() && !bot->GetMap()->IsDungeon() && bot->IsOutdoors()) {
+  // 7. Mount / Dismount.
+  const bool incapacitated = bot->HasUnitState(
+      UNIT_STATE_STUNNED | UNIT_STATE_CONFUSED | UNIT_STATE_FLEEING |
+      UNIT_STATE_CHARMED | UNIT_STATE_POSSESSED);
+  if (CanOfferDismount(bot->IsAlive(), bot->IsMounted(), bot->IsInFlight(),
+                       incapacitated)) {
+    out->push_back({"dismount", "Dismount"});
+  }
+  const MountState mount_state{
+      .alive = bot->IsAlive(),
+      .in_combat = bot->IsInCombat(),
+      .mounted = bot->IsMounted(),
+      .in_flight = bot->IsInFlight(),
+      .in_vehicle = bot->GetVehicle() != nullptr,
+      .in_dungeon = !bot->GetMap() || bot->GetMap()->IsDungeon(),
+      .outdoors = bot->IsOutdoors(),
+      .swimming = bot->IsInWater(),
+  };
+  if (CanOfferMount(mount_state)) {
     const uint32_t locale = sWorld->GetDefaultDbcLocale();
+    std::vector<KnownMountSpell> known_mounts;
     for (const auto& [spell_id, state] : bot->GetSpellMap()) {
       if (!state || !state->Active || state->State == PLAYERSPELL_REMOVED) {
         continue;
       }
       const SpellInfo* info = sSpellMgr->GetSpellInfo(spell_id);
-      if (!info || !info->HasAura(SPELL_AURA_MOUNTED) ||
-          info->HasAura(SPELL_AURA_MOD_INCREASE_MOUNTED_FLIGHT_SPEED)) {
+      if (!info || !info->HasAura(SPELL_AURA_MOUNTED)) {
         continue;
       }
       const char* name = info->SpellName[locale];
       if (!name || !*name) {
         continue;
       }
+      uint32_t ground_spd = 0;
+      uint32_t flight_spd = 0;
+      for (uint8_t i = 0; i < MAX_SPELL_EFFECTS; ++i) {
+        const uint32_t aura = info->Effects[i].ApplyAuraName;
+        if (aura == SPELL_AURA_MOD_INCREASE_MOUNTED_SPEED) {
+          const int32_t val = info->Effects[i].CalcValue();
+          if (val > 0 && static_cast<uint32_t>(val) > ground_spd) {
+            ground_spd = static_cast<uint32_t>(val);
+          }
+        } else if (aura == SPELL_AURA_MOD_INCREASE_MOUNTED_FLIGHT_SPEED) {
+          const int32_t val = info->Effects[i].CalcValue();
+          if (val > 0 && static_cast<uint32_t>(val) > flight_spd) {
+            flight_spd = static_cast<uint32_t>(val);
+          }
+        }
+      }
+      known_mounts.push_back(KnownMountSpell{
+          .spell_id = spell_id,
+          .name = name,
+          .ground_speed_pct = ground_spd,
+          .flight_speed_pct = flight_spd,
+          .is_flying = flight_spd > 0,
+      });
+    }
+    const bool can_fly =
+        bot->GetMap() &&
+        (bot->GetMapId() == 530 ||
+         (bot->GetMapId() == 571 && bot->HasSpell(kSpellColdWeatherFlying)));
+    if (std::optional<KnownMountSpell> best =
+            PickBestMount(known_mounts, can_fly)) {
       out->push_back(
-          {"mount:" + std::to_string(spell_id), std::string("Mount ") + name});
-      break;
+          {"mount:" + std::to_string(best->spell_id), "Mount " + best->name});
     }
   }
 }
@@ -1342,8 +1389,20 @@ ActionOutcome ExecuteMarkTargetAction(Player* bot,
 }
 
 ItemActionOutcome ExecuteMountAction(Player* bot, const MountAction& action) {
-  if (bot->IsInCombat()) {
-    return {.error = "cannot mount in combat"};
+  const MountState mount_state{
+      .alive = bot->IsAlive(),
+      .in_combat = bot->IsInCombat(),
+      .mounted = bot->IsMounted(),
+      .in_flight = bot->IsInFlight(),
+      .in_vehicle = bot->GetVehicle() != nullptr,
+      .in_dungeon = !bot->GetMap() || bot->GetMap()->IsDungeon(),
+      .outdoors = bot->IsOutdoors(),
+      .swimming = bot->IsInWater(),
+  };
+  if (std::string err =
+          ValidateMountState(mount_state, bot->HasSpell(action.spell_id));
+      !err.empty()) {
+    return {.error = std::move(err)};
   }
   if (bot->isMoving()) {
     bot->StopMoving();
@@ -1356,6 +1415,23 @@ ItemActionOutcome ExecuteMountAction(Player* bot, const MountAction& action) {
   return {.used = !casting,
           .info = casting ? "" : ("mounted " + action.label),
           .pending_spell_id = casting ? action.spell_id : 0};
+}
+
+ActionOutcome ExecuteDismountAction(Player* bot) {
+  const bool incapacitated = bot->HasUnitState(
+      UNIT_STATE_STUNNED | UNIT_STATE_CONFUSED | UNIT_STATE_FLEEING |
+      UNIT_STATE_CHARMED | UNIT_STATE_POSSESSED);
+  if (std::string err = ValidateDismountState(bot->IsMounted(),
+                                              bot->IsInFlight(), incapacitated);
+      !err.empty()) {
+    return {.error = std::move(err)};
+  }
+  bot->Dismount();
+  bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
+  if (bot->IsMounted()) {
+    return {.error = "could not dismount"};
+  }
+  return {.used = true, .info = "dismounted"};
 }
 
 ActStartResult ExecuteCrowdControlAction(Player* bot,

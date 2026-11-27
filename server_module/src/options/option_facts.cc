@@ -474,6 +474,9 @@ void FillPlaces(const WorldPlaces& world,
   pick_first([&](const WorldPlaces::Hub& h) {
     return (h.class_trainer_mask & class_bit) != 0;
   });
+  if (view.level >= 20) {
+    pick_first([](const WorldPlaces::Hub& h) { return h.has_riding_trainer; });
+  }
   pick_first([](const WorldPlaces::Hub& h) { return h.has_flight_master; });
   pick_first([](const WorldPlaces::Hub& h) { return h.has_quests; });
   pick_first([&](const WorldPlaces::Hub& h) {
@@ -504,6 +507,9 @@ void FillPlaces(const WorldPlaces& world,
     }
     if ((hub->class_trainer_mask & class_bit) != 0) {
       services.push_back(trainer_label);
+    }
+    if (hub->has_riding_trainer) {
+      services.push_back("riding trainer");
     }
     if (hub->has_flight_master) {
       services.push_back("flight master");
@@ -687,12 +693,17 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
       continue;
     }
     uint32_t class_mask = 0;
+    bool has_riding_trainer = false;
     if ((tmpl->npcflag &
          (UNIT_NPC_FLAG_TRAINER | UNIT_NPC_FLAG_TRAINER_CLASS)) != 0) {
       if (const Trainer::Trainer* trainer = sObjectMgr->GetTrainer(tmpl->Entry);
-          trainer && trainer->GetTrainerType() == Trainer::Type::Class &&
-          trainer->GetTrainerRequirement() < 32) {
-        class_mask = 1u << trainer->GetTrainerRequirement();
+          trainer) {
+        if (trainer->GetTrainerType() == Trainer::Type::Class &&
+            trainer->GetTrainerRequirement() < 32) {
+          class_mask = 1u << trainer->GetTrainerRequirement();
+        } else if (trainer->GetTrainerType() == Trainer::Type::Mount) {
+          has_riding_trainer = true;
+        }
       }
     }
     const bool has_inn = (tmpl->npcflag & UNIT_NPC_FLAG_INNKEEPER) != 0;
@@ -701,7 +712,7 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
     const bool has_fm = (tmpl->npcflag & UNIT_NPC_FLAG_FLIGHTMASTER) != 0;
     const bool has_quests = (tmpl->npcflag & UNIT_NPC_FLAG_QUESTGIVER) != 0;
     if (!has_inn && !has_vendor && !has_repair && !has_fm && !has_quests &&
-        class_mask == 0) {
+        !has_riding_trainer && class_mask == 0) {
       continue;
     }
 
@@ -741,6 +752,7 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
     hub->has_vendor |= has_vendor;
     hub->has_repair |= has_repair;
     hub->has_flight_master |= has_fm;
+    hub->has_riding_trainer |= has_riding_trainer;
     hub->has_quests |= has_quests;
     if (has_quests) {
       const auto bounds =

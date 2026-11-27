@@ -93,6 +93,32 @@ TEST(ActionTypesTest, DecodesTypedNpcAndGroupActions) {
     ASSERT_NE(m, nullptr);
     EXPECT_EQ(m->spell_id, 23249u);
     EXPECT_TRUE(IsPendingCastAction(a));
+    EXPECT_TRUE(std::holds_alternative<InvalidAction>(
+        DecodeOptionFactAction("mount:0", "bad mount")));
+  }
+  {
+    BotAction a = DecodeOptionFactAction("dismount", "Dismount");
+    EXPECT_TRUE(std::holds_alternative<DismountAction>(a));
+    EXPECT_EQ(ActionKindName(a), "dismount");
+    EXPECT_FALSE(IsDeadAllowedAction(a));
+    EXPECT_FALSE(IsPendingCastAction(a));
+  }
+  {
+    BotAction a =
+        DecodeOptionFactAction("npc_train_riding:0x1234:33388",
+                               "Train Apprentice Riding (4g) at Randal Hunter");
+    const auto* npc = std::get_if<NpcAction>(&a);
+    ASSERT_NE(npc, nullptr);
+    EXPECT_EQ(npc->op, NpcAction::Op::kTrainRiding);
+    EXPECT_EQ(npc->npc_guid, "0x1234");
+    EXPECT_EQ(npc->arg1, 33388u);
+    for (const char* bad :
+         {"npc_train_riding:0x1234", "npc_train_riding:0x1234:0",
+          "npc_train_riding:0x1234:abc"}) {
+      EXPECT_TRUE(std::holds_alternative<InvalidAction>(
+          DecodeOptionFactAction(bad, "bad")))
+          << bad;
+    }
   }
 }
 

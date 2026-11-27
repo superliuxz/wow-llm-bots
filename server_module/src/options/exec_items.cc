@@ -499,15 +499,20 @@ void CollectUsableBagItems(Player* bot,
     item.entry = proto->ItemId;
     item.name = proto->Name1;
     item.out_of_combat_only = out_of_combat_only;
-    for (uint8_t i = 0; i < MAX_SPELL_EFFECTS; ++i) {
-      const SpellEffectInfo& eff = info->Effects[i];
-      if (eff.Effect == SPELL_EFFECT_TELEPORT_UNITS &&
-          (eff.TargetA.GetTarget() == TARGET_DEST_HOME ||
-           eff.TargetB.GetTarget() == TARGET_DEST_HOME)) {
-        const std::string home = AreaName(bot->m_homebindAreaId);
-        item.detail =
-            home.empty() ? "teleports home" : "teleports home to " + home;
-        break;
+    if (proto->Class == ITEM_CLASS_MISC &&
+        proto->SubClass == ITEM_SUBCLASS_JUNK_MOUNT) {
+      item.detail = "learns mount";
+    } else {
+      for (uint8_t i = 0; i < MAX_SPELL_EFFECTS; ++i) {
+        const SpellEffectInfo& eff = info->Effects[i];
+        if (eff.Effect == SPELL_EFFECT_TELEPORT_UNITS &&
+            (eff.TargetA.GetTarget() == TARGET_DEST_HOME ||
+             eff.TargetB.GetTarget() == TARGET_DEST_HOME)) {
+          const std::string home = AreaName(bot->m_homebindAreaId);
+          item.detail =
+              home.empty() ? "teleports home" : "teleports home to " + home;
+          break;
+        }
       }
     }
     out->push_back(std::move(item));

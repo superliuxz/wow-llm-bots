@@ -44,6 +44,7 @@
 #include "options/exec_shared.h"
 #include "options/leader_travel.h"
 #include "options/options.h"
+#include "options/riding_mounts.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/world_util.h"
 
@@ -119,6 +120,85 @@ bool IsBoundNearHere(const Player* bot) {
   return bot->m_homebindMapId == bot->GetMapId() &&
          bot->m_homebindAreaId == bot->GetAreaId() &&
          bot->GetExactDist2d(bot->m_homebindX, bot->m_homebindY) <= 50.0f;
+}
+
+uint32_t MountSpellTaughtByItem(const ItemTemplate* proto) {
+  if (!proto) {
+    return 0;
+  }
+  for (int i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i) {
+    if (proto->Spells[i].SpellId > 0 &&
+        proto->Spells[i].SpellTrigger == ITEM_SPELLTRIGGER_LEARN_SPELL_ID) {
+      return static_cast<uint32_t>(proto->Spells[i].SpellId);
+    }
+  }
+  for (int i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i) {
+    if (proto->Spells[i].SpellId <= 0 ||
+        proto->Spells[i].SpellTrigger != ITEM_SPELLTRIGGER_ON_USE) {
+      continue;
+    }
+    const SpellInfo* sp = sSpellMgr->GetSpellInfo(
+        static_cast<uint32_t>(proto->Spells[i].SpellId));
+    if (!sp) {
+      continue;
+    }
+    for (uint8_t eff = 0; eff < MAX_SPELL_EFFECTS; ++eff) {
+      if (sp->Effects[eff].Effect == SPELL_EFFECT_LEARN_SPELL &&
+          sp->Effects[eff].TriggerSpell > 0) {
+        return sp->Effects[eff].TriggerSpell;
+      }
+    }
+  }
+  return 0;
+}
+
+void MeasureMountSpellSpeed(const SpellInfo* info,
+                            uint32_t* ground_speed_pct,
+                            uint32_t* flight_speed_pct) {
+  *ground_speed_pct = 0;
+  *flight_speed_pct = 0;
+  if (!info) {
+    return;
+  }
+  for (uint8_t i = 0; i < MAX_SPELL_EFFECTS; ++i) {
+    const uint32_t aura = info->Effects[i].ApplyAuraName;
+    if (aura == SPELL_AURA_MOD_INCREASE_MOUNTED_SPEED) {
+      const int32_t val = info->Effects[i].CalcValue();
+      if (val > 0 && static_cast<uint32_t>(val) > *ground_speed_pct) {
+        *ground_speed_pct = static_cast<uint32_t>(val);
+      }
+    } else if (aura == SPELL_AURA_MOD_INCREASE_MOUNTED_FLIGHT_SPEED) {
+      const int32_t val = info->Effects[i].CalcValue();
+      if (val > 0 && static_cast<uint32_t>(val) > *flight_speed_pct) {
+        *flight_speed_pct = static_cast<uint32_t>(val);
+      }
+    }
+  }
+}
+
+void BestKnownMountSpeeds(Player* bot,
+                          uint32_t* best_ground_pct,
+                          uint32_t* best_flight_pct) {
+  *best_ground_pct = 0;
+  *best_flight_pct = 0;
+  for (const auto& [spell_id, state] : bot->GetSpellMap()) {
+    if (!state || !state->Active || state->State == PLAYERSPELL_REMOVED) {
+      continue;
+    }
+    const SpellInfo* info = sSpellMgr->GetSpellInfo(spell_id);
+    if (!info || !info->HasAura(SPELL_AURA_MOUNTED)) {
+      continue;
+    }
+    uint32_t ground = 0;
+    uint32_t flight = 0;
+    MeasureMountSpellSpeed(info, &ground, &flight);
+    if (flight > *best_flight_pct) {
+      *best_flight_pct = flight;
+    }
+    if (flight == 0 && ground > *best_ground_pct) {
+      *best_ground_pct = ground;
+    }
+  }
 }
 
 void CollectKnownTaxiGraph(const Player* bot,
@@ -330,30 +410,58 @@ void CollectNpcActions(Player* bot,
       }
     }
 
-    // 2. Class trainer.
+    // 2. Class & riding trainers.
     if (out->size() < kMaxNpcActions &&
         npc->HasNpcFlag(UNIT_NPC_FLAG_TRAINER | UNIT_NPC_FLAG_TRAINER_CLASS)) {
       if (Trainer::Trainer* trainer = sObjectMgr->GetTrainer(npc->GetEntry());
-          trainer && trainer->GetTrainerType() == Trainer::Type::Class &&
-          trainer->IsTrainerValidForPlayer(bot)) {
+          trainer && trainer->IsTrainerValidForPlayer(bot)) {
         const float discount = bot->GetReputationPriceDiscount(npc);
-        uint32_t affordable = 0;
-        for (const Trainer::Spell& sp : trainer->GetSpells()) {
-          if (!PlayerbotFactory::IsTrainerSpellAllowedForBot(bot, trainer,
-                                                             &sp) ||
-              !trainer->CanTeachSpell(bot, &sp)) {
-            continue;
+        if (trainer->GetTrainerType() == Trainer::Type::Class) {
+          uint32_t affordable = 0;
+          for (const Trainer::Spell& sp : trainer->GetSpells()) {
+            if (!PlayerbotFactory::IsTrainerSpellAllowedForBot(bot, trainer,
+                                                               &sp) ||
+                !trainer->CanTeachSpell(bot, &sp)) {
+              continue;
+            }
+            const uint32_t cost = DiscountedCopperCost(sp.MoneyCost, discount);
+            if (bot->HasEnoughMoney(cost)) {
+              ++affordable;
+            }
           }
-          const int32_t cost = static_cast<int32_t>(sp.MoneyCost * discount);
-          if (bot->HasEnoughMoney(cost)) {
-            ++affordable;
+          if (affordable > 0) {
+            out->push_back({"npc_train:" + u.guid, u.guid,
+                            "Train " + std::to_string(affordable) +
+                                " class spell" + (affordable == 1 ? "" : "s") +
+                                " at " + npc_name});
           }
-        }
-        if (affordable > 0) {
-          out->push_back({"npc_train:" + u.guid, u.guid,
-                          "Train " + std::to_string(affordable) +
-                              " class spell" + (affordable == 1 ? "" : "s") +
-                              " at " + npc_name});
+        } else if (trainer->GetTrainerType() == Trainer::Type::Mount) {
+          const uint32_t locale = sWorld->GetDefaultDbcLocale();
+          std::vector<RidingTrainingCandidate> riding_candidates;
+          for (const Trainer::Spell& sp : trainer->GetSpells()) {
+            if (!PlayerbotFactory::IsTrainerSpellAllowedForBot(bot, trainer,
+                                                               &sp)) {
+              continue;
+            }
+            const SpellInfo* sinfo = sSpellMgr->GetSpellInfo(sp.SpellId);
+            const char* sname = sinfo ? sinfo->SpellName[locale] : nullptr;
+            riding_candidates.push_back(RidingTrainingCandidate{
+                .spell_id = sp.SpellId,
+                .name = (sname && *sname) ? std::string(sname) : std::string(),
+                .req_level = sp.ReqLevel,
+                .cost_copper = DiscountedCopperCost(sp.MoneyCost, discount),
+                .can_teach = trainer->CanTeachSpell(bot, &sp),
+            });
+          }
+          for (const RidingTrainingOption& opt : SelectAffordableRidingTraining(
+                   riding_candidates, bot->GetMoney(), npc_name)) {
+            if (out->size() >= kMaxNpcActions) {
+              break;
+            }
+            out->push_back({"npc_train_riding:" + u.guid + ":" +
+                                std::to_string(opt.spell_id),
+                            u.guid, opt.label});
+          }
         }
       }
     }
@@ -375,7 +483,7 @@ void CollectNpcActions(Player* bot,
       }
     }
 
-    // 4. Vendor upkeep buy (food, water, hunter ammo).
+    // 4. Vendor upkeep buy (food, water, hunter ammo, mounts).
     if (out->size() < kMaxNpcActions && npc->HasNpcFlag(UNIT_NPC_FLAG_VENDOR)) {
       if (const VendorItemData* vitems = npc->GetVendorItems()) {
         const float discount = bot->GetReputationPriceDiscount(npc);
@@ -388,6 +496,7 @@ void CollectNpcActions(Player* bot,
         const ItemTemplate* best_food = nullptr;
         const ItemTemplate* best_drink = nullptr;
         const ItemTemplate* best_ammo = nullptr;
+        std::vector<MountVendorCandidate> mount_candidates;
         for (uint32_t slot = 0; slot < vitems->GetItemCount(); ++slot) {
           const VendorItem* vi = vitems->GetItem(slot);
           if (!vi || vi->ExtendedCost != 0) {
@@ -398,9 +507,51 @@ void CollectNpcActions(Player* bot,
               proto->RequiredLevel > bot->GetLevel()) {
             continue;
           }
-          const uint32_t price =
-              static_cast<uint32_t>(proto->BuyPrice * discount);
+          const uint32_t price = DiscountedCopperCost(
+              proto->BuyPrice > 0 ? static_cast<uint32_t>(proto->BuyPrice) : 0u,
+              discount);
           if (!bot->HasEnoughMoney(price)) {
+            continue;
+          }
+          if (proto->Class == ITEM_CLASS_MISC &&
+              proto->SubClass == ITEM_SUBCLASS_JUNK_MOUNT) {
+            const uint32_t mount_spell_id = MountSpellTaughtByItem(proto);
+            const SpellInfo* mspell =
+                mount_spell_id ? sSpellMgr->GetSpellInfo(mount_spell_id)
+                               : nullptr;
+            if (mspell && mspell->HasAura(SPELL_AURA_MOUNTED)) {
+              const bool race_ok =
+                  proto->AllowableRace == 0 ||
+                  (proto->AllowableRace & bot->getRaceMask()) != 0;
+              const bool class_ok =
+                  proto->AllowableClass == 0 ||
+                  (proto->AllowableClass & bot->getClassMask()) != 0;
+              const bool skill_ok = proto->RequiredSkill == 0 ||
+                                    bot->GetSkillValue(proto->RequiredSkill) >=
+                                        proto->RequiredSkillRank;
+              const bool rep_ok =
+                  proto->RequiredReputationFaction == 0 ||
+                  bot->GetReputationRank(proto->RequiredReputationFaction) >=
+                      static_cast<ReputationRank>(
+                          proto->RequiredReputationRank);
+              const bool spell_ok = proto->RequiredSpell == 0 ||
+                                    bot->HasSpell(proto->RequiredSpell);
+              uint32_t ground_spd = 0;
+              uint32_t flight_spd = 0;
+              MeasureMountSpellSpeed(mspell, &ground_spd, &flight_spd);
+              const bool is_flying = flight_spd > 0;
+              mount_candidates.push_back(MountVendorCandidate{
+                  .item_id = proto->ItemId,
+                  .name = proto->Name1,
+                  .price_copper = price,
+                  .speed_pct = is_flying ? flight_spd : ground_spd,
+                  .is_flying = is_flying,
+                  .already_known = bot->HasSpell(mount_spell_id),
+                  .in_bags = bot->GetItemCount(proto->ItemId, true) > 0,
+                  .meets_requirements =
+                      race_ok && class_ok && skill_ok && rep_ok && spell_ok,
+              });
+            }
             continue;
           }
           if (!has_food && proto->Class == ITEM_CLASS_CONSUMABLE &&
@@ -435,6 +586,21 @@ void CollectNpcActions(Player* bot,
             out->push_back(
                 {"npc_buy:" + u.guid + ":" + std::to_string(pick->ItemId),
                  u.guid, "Buy " + pick->Name1 + " from " + npc_name});
+          }
+        }
+        if (!mount_candidates.empty() && out->size() < kMaxNpcActions) {
+          uint32_t best_ground = 0;
+          uint32_t best_flight = 0;
+          BestKnownMountSpeeds(bot, &best_ground, &best_flight);
+          for (const MountPurchaseOption& pick :
+               SelectMountPurchases(mount_candidates, bot->GetMoney(),
+                                    best_ground, best_flight, npc_name)) {
+            if (out->size() >= kMaxNpcActions) {
+              break;
+            }
+            out->push_back(
+                {"npc_buy:" + u.guid + ":" + std::to_string(pick.item_id),
+                 u.guid, pick.label});
           }
         }
       }
@@ -600,6 +766,44 @@ ActionOutcome ExecuteNpcAction(Player* bot, const NpcAction& action) {
       }
       return {.used = true,
               .info = "learned " + std::to_string(learned) + " class spell(s)"};
+    }
+    case NpcAction::Op::kTrainRiding: {
+      Trainer::Trainer* trainer = sObjectMgr->GetTrainer(npc->GetEntry());
+      const bool valid_trainer =
+          trainer != nullptr &&
+          trainer->GetTrainerType() == Trainer::Type::Mount &&
+          trainer->IsTrainerValidForPlayer(bot);
+      const Trainer::Spell* sp =
+          valid_trainer ? trainer->GetSpell(action.arg1) : nullptr;
+      const bool allowed =
+          sp != nullptr &&
+          PlayerbotFactory::IsTrainerSpellAllowedForBot(bot, trainer, sp) &&
+          trainer->CanTeachSpell(bot, sp);
+      const float discount = bot->GetReputationPriceDiscount(npc);
+      const uint32_t cost =
+          sp ? DiscountedCopperCost(sp->MoneyCost, discount) : 0;
+      if (std::string err = ValidateRidingTrain(bot->IsInCombat(),
+                                                valid_trainer, sp != nullptr,
+                                                allowed, cost, bot->GetMoney());
+          !err.empty()) {
+        return {.error = std::move(err)};
+      }
+      const uint32_t money_before = bot->GetMoney();
+      trainer->TeachSpell(npc, bot, sp->SpellId);
+      if (trainer->CanTeachSpell(bot, sp) &&
+          (cost == 0 || bot->GetMoney() == money_before)) {
+        return {.error = "could not learn riding skill"};
+      }
+      const SpellInfo* sinfo = sSpellMgr->GetSpellInfo(sp->SpellId);
+      const char* sname =
+          sinfo ? sinfo->SpellName[sWorld->GetDefaultDbcLocale()] : nullptr;
+      std::string learned_name =
+          (sname && *sname) ? std::string(sname)
+                            : std::string(RidingSpellName(sp->SpellId));
+      if (learned_name.empty()) {
+        learned_name = "riding skill";
+      }
+      return {.used = true, .info = "learned " + learned_name};
     }
     case NpcAction::Op::kVendor: {
       std::vector<std::string> done;

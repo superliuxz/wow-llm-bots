@@ -37,6 +37,7 @@ TEST(ErrandHoldTest, ClassifiesBrainErrandsAndNonErrands) {
             ErrandKind::kUseCast);
   EXPECT_EQ(ErrandKindForAction(MountAction{472, "Pinto"}),
             ErrandKind::kUseCast);
+  EXPECT_EQ(ErrandKindForAction(DismountAction{}), ErrandKind::kNone);
   EXPECT_EQ(ErrandKindForAction(TalkAction{"0x4", "Marshal Dughan"}),
             ErrandKind::kTalk);
   EXPECT_EQ(
@@ -48,6 +49,9 @@ TEST(ErrandHoldTest, ClassifiesBrainErrandsAndNonErrands) {
   EXPECT_EQ(ErrandKindForAction(NpcAction{NpcAction::Op::kVendor, "0x4", 0, 0}),
             ErrandKind::kNpcInteract);
   EXPECT_EQ(ErrandKindForAction(NpcAction{NpcAction::Op::kTrain, "0x4", 0, 0}),
+            ErrandKind::kNpcInteract);
+  EXPECT_EQ(ErrandKindForAction(
+                NpcAction{NpcAction::Op::kTrainRiding, "0x4", 33388, 0}),
             ErrandKind::kNpcInteract);
   EXPECT_EQ(ErrandKindForAction(
                 WalkAction{.id = "place:goldshire", .name = "Goldshire"}),

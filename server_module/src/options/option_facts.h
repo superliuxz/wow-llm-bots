@@ -66,6 +66,7 @@ class WorldPlaces {
     bool has_vendor = false;
     bool has_repair = false;
     bool has_flight_master = false;
+    bool has_riding_trainer = false;
     bool has_quests = false;
     uint32_t min_quest_level = 0;
     uint32_t max_quest_level = 0;

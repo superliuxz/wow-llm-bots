@@ -6,10 +6,12 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 #include "base/time/time.h"
 #include "gtest/gtest.h"
+#include "options/action_types.h"
 #include "snapshot/snapshot.h"
 
 namespace llm_brain {
@@ -1144,6 +1146,48 @@ TEST(OptionsTest, BindHearthstoneReplacesGenericTalkAtInnkeeper) {
   ASSERT_EQ(targets.size(), 2u);
   EXPECT_EQ(targets[0].kind, OptionTarget::Kind::kUse);
   EXPECT_EQ(targets[0].guid, "npc_bind:0x0000000000006928");
+}
+
+TEST(OptionsTest, RidingTrainingAndMountPurchaseSuppressedInCombat) {
+  pb::Snapshot snap;
+  snap.base.self.in_combat = false;
+  pb::Unit& trainer = snap.base.nearby.units.emplace_back();
+  trainer.guid = "0x0000000000004732";
+  trainer.name = "Randal Hunter";
+  trainer.kind = pb::Unit::NPC;
+  trainer.reaction = pb::Unit::FRIENDLY;
+
+  OptionFacts facts;
+  facts.npcs.push_back({trainer.guid, kNpcFlagTrainer | kNpcFlagVendor});
+  facts.npc_actions.push_back(
+      {"npc_train_riding:0x0000000000004732:33388", trainer.guid,
+       "Train Apprentice Riding (4g) at Randal Hunter"});
+  facts.npc_actions.push_back(
+      {"npc_buy:0x0000000000004732:5655", trainer.guid,
+       "Buy Chestnut Mare Bridle (60% mount, 90s) from Randal Hunter"});
+  facts.group_and_upkeep_actions.push_back({"dismount", "Dismount"});
+
+  const std::vector<OptionTarget> targets = AddOptions(&snap, facts);
+  EXPECT_EQ(Texts(snap),
+            (std::vector<std::string>{
+                "Train Apprentice Riding (4g) at Randal Hunter",
+                "Buy Chestnut Mare Bridle (60% mount, 90s) from Randal Hunter",
+                "Dismount", "Keep doing what I'm doing"}));
+  ASSERT_EQ(targets.size(), 4u);
+  const auto* train = std::get_if<NpcAction>(&targets[0].action);
+  ASSERT_NE(train, nullptr);
+  EXPECT_EQ(train->op, NpcAction::Op::kTrainRiding);
+  EXPECT_EQ(train->arg1, 33388u);
+  EXPECT_TRUE(std::holds_alternative<DismountAction>(targets[2].action));
+
+  // Counter-test (P0 combat priority): in combat, NPC riding training and mount
+  // purchase are suppressed, while Dismount remains available.
+  pb::Snapshot combat_snap;
+  combat_snap.base.self.in_combat = true;
+  combat_snap.base.nearby.units.push_back(trainer);
+  AddOptions(&combat_snap, facts);
+  EXPECT_EQ(Texts(combat_snap), (std::vector<std::string>{
+                                    "Dismount", "Keep doing what I'm doing"}));
 }
 
 TEST(OptionsTest, EscortQuestWaitsUntilPartyIsReadyOrSomeoneHasIt) {

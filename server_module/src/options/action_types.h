@@ -169,11 +169,14 @@ struct MountAction {
   std::string label;
 };
 
+struct DismountAction {};
+
 struct NpcAction {
   enum class Op : uint8_t {
     kQuestAccept,
     kQuestTurnIn,
     kTrain,
+    kTrainRiding,
     kVendor,
     kBuy,
     kFlyDiscover,
@@ -182,7 +185,7 @@ struct NpcAction {
   };
   Op op = Op::kVendor;
   std::string npc_guid;
-  uint32_t arg1 = 0;  // quest_id, item_entry, or dest_node
+  uint32_t arg1 = 0;  // quest_id, spell_id, item_entry, or dest_node
   uint32_t arg2 = 0;  // reward_idx for kQuestTurnIn
 };
 
@@ -238,6 +241,7 @@ using BotAction = std::variant<KeepAction,
                                FollowLeaderAction,
                                MarkTargetAction,
                                MountAction,
+                               DismountAction,
                                NpcAction,
                                SpendTalentsAction,
                                UseBagItemAction,

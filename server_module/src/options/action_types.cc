@@ -224,9 +224,12 @@ BotAction DecodeOptionFactAction(std::string_view guid,
     }
     return MarkTargetAction{std::string(parts[1]), static_cast<uint8_t>(icon)};
   }
+  if (guid == "dismount") {
+    return DismountAction{};
+  }
   if (guid.starts_with("mount:")) {
     uint32_t spell_id = 0;
-    if (!ParseUint32(guid.substr(6), &spell_id)) {
+    if (!ParseUint32(guid.substr(6), &spell_id) || spell_id == 0) {
       return InvalidAction{"invalid mount"};
     }
     return MountAction{spell_id, std::string(label)};
@@ -255,6 +258,13 @@ BotAction DecodeOptionFactAction(std::string_view guid,
     }
     if (parts[0] == "npc_train") {
       return NpcAction{NpcAction::Op::kTrain, npc_guid, 0, 0};
+    }
+    if (parts[0] == "npc_train_riding" && parts.size() == 3) {
+      uint32_t spell_id = 0;
+      if (!ParseUint32(parts[2], &spell_id) || spell_id == 0) {
+        return InvalidAction{"invalid riding spell"};
+      }
+      return NpcAction{NpcAction::Op::kTrainRiding, npc_guid, spell_id, 0};
     }
     if (parts[0] == "npc_vendor") {
       return NpcAction{NpcAction::Op::kVendor, npc_guid, 0, 0};
@@ -428,6 +438,8 @@ std::string_view ActionKindName(const BotAction& action) {
           return "mark";
         if constexpr (std::is_same_v<T, MountAction>)
           return "mount";
+        if constexpr (std::is_same_v<T, DismountAction>)
+          return "dismount";
         if constexpr (std::is_same_v<T, NpcAction>)
           return "npc";
         if constexpr (std::is_same_v<T, SpendTalentsAction>)

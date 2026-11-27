@@ -207,6 +207,8 @@ ExecuteResult ExecuteAction(Player* bot,
           return FromOutcome(ExecuteMarkTargetAction(bot, a));
         } else if constexpr (std::is_same_v<T, MountAction>) {
           return FromItemOutcome(ExecuteMountAction(bot, a));
+        } else if constexpr (std::is_same_v<T, DismountAction>) {
+          return FromOutcome(ExecuteDismountAction(bot));
         } else if constexpr (std::is_same_v<T, NpcAction>) {
           return FromOutcome(ExecuteNpcAction(bot, a));
         } else if constexpr (std::is_same_v<T, SpendTalentsAction>) {

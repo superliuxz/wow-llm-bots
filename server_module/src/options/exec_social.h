@@ -71,6 +71,7 @@ ActionOutcome ExecuteFollowLeaderAction(Player* bot,
 ActionOutcome ExecuteMarkTargetAction(Player* bot,
                                       const MarkTargetAction& action);
 ItemActionOutcome ExecuteMountAction(Player* bot, const MountAction& action);
+ActionOutcome ExecuteDismountAction(Player* bot);
 
 }  // namespace llm_brain
 

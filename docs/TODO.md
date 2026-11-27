@@ -18,8 +18,6 @@ Live verification following the `70b0878` team-play P0 fixes:
 Team-play P1 gaps and selected P2 items from the `70b0878` review:
 
 ### Questing & travel
-- **No riding training or mounts:** Bots fall behind a mounted human from level 20
-  (`exec_npc.cc:293-401`).
 - **No NPC dialogue options or vehicle controls:** `Talk to` only walks up/targets; vehicle
   snapshot fields are never filled, blocking WotLK vehicle quests (`exec_npc.cc:163-184`,
   `snapshot/snapshot.h:1423-1431,2039`).
