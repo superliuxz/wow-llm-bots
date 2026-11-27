@@ -69,6 +69,7 @@
 #include "WorldSession.h"
 #include "base/synchronization/lock.h"
 #include "base/thread_annotations.h"
+#include "bot_manager/human_group_grace.h"
 #include "bot_manager/playerbots_actions.h"
 #include "bot_manager/spell_miss_packet.h"
 #include "bot_manager/tick_owner.h"
@@ -96,6 +97,12 @@ struct BotStrategyOverride {
 // Whether an LLM harness is currently connected (A-M9).
 std::atomic<bool>& BrainConnectedFlag() {
   static auto* flag = new std::atomic<bool>(false);
+  return *flag;
+}
+
+// Whether the connected harness reports its LLM backend as healthy.
+std::atomic<bool>& LlmHealthyFlag() {
+  static auto* flag = new std::atomic<bool>(true);
   return *flag;
 }
 
@@ -895,6 +902,7 @@ void BotManager::Update(uint32_t diff_ms) {
   // (O(1) hash lookup) so newly entered Engines (especially BOT_STATE_DEAD
   // on first dungeon death) are protected before the 1 s Tick() runs.
   const bool connected = IsBrainConnected();
+  const bool llm_healthy = IsLlmHealthy();
   for (const Bot& bot : bots_) {
     if (!bot.guid) {
       continue;
@@ -903,16 +911,25 @@ void BotManager::Update(uint32_t diff_ms) {
     if (!player || !player->IsInWorld()) {
       continue;
     }
-    const TickOwner owner = TickOwnerFor(connected, player->InBattleground());
+    const bool in_bg = player->InBattleground();
+    const bool has_timed_popup =
+        connected && !in_bg &&
+        HasTimedPopup(ReadPopupState(player),
+                      player->GetGroupInvite() != nullptr);
+    TickOwner owner = TickOwner::kPlayerbots;
     const bool changed = BotSessionRegistry::Instance().WithSession(
-        bot.guid, [owner](BotSession& s) {
+        bot.guid, [&](BotSession& s) {
+          const bool popup_deadline_missed = UpdatePopupDeadline(
+              &s.popup_open_since_ms, has_timed_popup, now_ms_);
+          owner = TickOwnerFor(connected, in_bg, llm_healthy,
+                               popup_deadline_missed);
           return std::exchange(s.tick_owner, owner) != owner;
         });
     if (changed) {
       LOG_INFO("module", "mod-llm-brain: {} is {}", player->GetName(),
                TickOwnerName(owner));
     }
-    if (!player->InBattleground()) {
+    if (!in_bg) {
       EnsurePolicyListener(player, GET_PLAYERBOT_AI(player));
     }
   }
@@ -1216,101 +1233,66 @@ bool BotManager::IsKnownBotGuid(uint64_t raw_guid) const {
 
 void BotManager::LeaveAbandonedHumanGroup(Player* player) {
   // When a group formed with a human loses its human (they leave the party, or
-  // stay offline >= 60 s), the bots leave Dungeon Finder, teleport out of any
+  // stay offline past the grace period: 60 s in open world, 30 min inside a
+  // dungeon or raid), the bots leave Dungeon Finder, teleport out of any
   // dungeon once out of combat, and disband the leftover bot group (Now #9 /
-  // T11).
-  constexpr uint32_t kOfflineGraceMs = 60000;
+  // T11, M1a #1).
   const uint64_t key = player->GetGUID().GetRawValue();
   Group* group = player->GetGroup();
-  if (!group) {
-    const bool had_human =
-        BotSessionRegistry::Instance().WithSession(key, [](BotSession& s) {
-          const bool had = s.human_group_guid != 0;
-          if (!had) {
-            s.human_offline_since_ms.reset();
-          }
-          return had;
-        });
-    if (!had_human || player->IsInCombat()) {
-      return;
-    }
-    BotSessionRegistry::Instance().WithSession(key, [](BotSession& s) {
-      s.human_group_guid = 0;
-      s.human_offline_since_ms.reset();
-    });
-    sLFGMgr->LeaveLfg(player->GetGUID());
-    ClearPendingLfgProposal(player);
-    if (player->GetMap() && player->GetMap()->IsDungeon() &&
-        !player->IsBeingTeleportedFar()) {
-      sLFGMgr->TeleportPlayer(player, true);
-      if (!player->IsBeingTeleportedFar() && player->GetMap() &&
-          player->GetMap()->IsDungeon()) {
-        player->TeleportToEntryPoint();
+  const bool in_dungeon =
+      player->GetMap() != nullptr && player->GetMap()->IsDungeon();
+
+  HumanGroupGraceInput input{
+      .group_guid = group ? group->GetGUID().GetRawValue() : 0,
+      .has_online_human = group != nullptr && GroupHasHuman(group),
+      .in_instance = in_dungeon,
+      .in_combat = player->IsInCombat(),
+      .now_ms = getMSTime(),
+  };
+  if (group && !input.has_online_human) {
+    for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+      if (!ObjectAccessor::FindConnectedPlayer(slot.guid) &&
+          !IsKnownBotGuid(slot.guid.GetRawValue())) {
+        input.has_offline_human = true;
+        break;
       }
-      LOG_INFO("module",
-               "mod-llm-brain: {} left group and teleported out after human "
-               "left",
-               player->GetName());
-    }
-    return;
-  }
-
-  const uint64_t gguid = group->GetGUID().GetRawValue();
-  if (GroupHasHuman(group)) {
-    BotSessionRegistry::Instance().WithSession(key, [gguid](BotSession& s) {
-      s.human_group_guid = gguid;
-      s.human_offline_since_ms.reset();
-    });
-    return;
-  }
-
-  bool offline_human_slot = false;
-  for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
-    if (!ObjectAccessor::FindConnectedPlayer(slot.guid) &&
-        !IsKnownBotGuid(slot.guid.GetRawValue())) {
-      offline_human_slot = true;
-      break;
     }
   }
-  const bool abandoned = BotSessionRegistry::Instance().WithSession(
-      key, [gguid, offline_human_slot](BotSession& s) {
-        if (s.human_group_guid != gguid) {
-          s.human_group_guid = 0;
-          s.human_offline_since_ms.reset();
-          return false;
-        }
-        if (!offline_human_slot) {
-          return true;
-        }
-        if (!s.human_offline_since_ms) {
-          s.human_offline_since_ms = getMSTime();
-          return false;
-        }
-        return GetMSTimeDiffToNow(*s.human_offline_since_ms) >= kOfflineGraceMs;
+
+  const HumanGroupAction action =
+      BotSessionRegistry::Instance().WithSession(key, [&input](BotSession& s) {
+        HumanGroupGraceState state{
+            .human_group_guid = s.human_group_guid,
+            .human_offline_since_ms = s.human_offline_since_ms,
+        };
+        const HumanGroupAction act = EvaluateHumanGroupGrace(state, input);
+        s.human_group_guid = state.human_group_guid;
+        s.human_offline_since_ms = state.human_offline_since_ms;
+        return act;
       });
-  if (!abandoned || player->IsInCombat()) {
+  if (action == HumanGroupAction::kKeep) {
     return;
   }
-  BotSessionRegistry::Instance().WithSession(key, [](BotSession& s) {
-    s.human_group_guid = 0;
-    s.human_offline_since_ms.reset();
-  });
-  const bool was_in_dungeon = player->GetMap() && player->GetMap()->IsDungeon();
+
   sLFGMgr->LeaveLfg(player->GetGUID());
   ClearPendingLfgProposal(player);
-  if (was_in_dungeon && !player->IsBeingTeleportedFar()) {
+  if (in_dungeon && !player->IsBeingTeleportedFar()) {
     sLFGMgr->TeleportPlayer(player, true);
   }
-  if (WorldSession* sess = player->GetSession(); sess && player->GetGroup()) {
-    WorldPacket pkt(CMSG_GROUP_DISBAND, 0);
-    sess->HandleGroupDisbandOpcode(pkt);
+  if (action == HumanGroupAction::kAbandonGroup) {
+    if (WorldSession* sess = player->GetSession(); sess && player->GetGroup()) {
+      WorldPacket pkt(CMSG_GROUP_DISBAND, 0);
+      sess->HandleGroupDisbandOpcode(pkt);
+    }
   }
-  if (was_in_dungeon && !player->IsBeingTeleportedFar() && player->GetMap() &&
+  if (in_dungeon && !player->IsBeingTeleportedFar() && player->GetMap() &&
       player->GetMap()->IsDungeon()) {
     player->TeleportToEntryPoint();
   }
-  LOG_INFO("module", "mod-llm-brain: {} left group{} after human left",
-           player->GetName(), was_in_dungeon ? " and teleported out" : "");
+  if (action == HumanGroupAction::kAbandonGroup || in_dungeon) {
+    LOG_INFO("module", "mod-llm-brain: {} left group{} after human left",
+             player->GetName(), in_dungeon ? " and teleported out" : "");
+  }
 }
 
 void BotManager::EnsureStrategies(Player* player) {
@@ -1474,6 +1456,14 @@ void BotManager::SetBrainConnected(bool connected) {
 
 bool BotManager::IsBrainConnected() {
   return BrainConnectedFlag().load(std::memory_order_acquire);
+}
+
+void BotManager::SetLlmHealthy(bool healthy) {
+  LlmHealthyFlag().store(healthy, std::memory_order_release);
+}
+
+bool BotManager::IsLlmHealthy() {
+  return LlmHealthyFlag().load(std::memory_order_acquire);
 }
 
 void BotManager::SetBotStrategyOverride(const std::string& bot_name,
@@ -1834,6 +1824,7 @@ void BotManager::WaitForResurrection(Player* bot, uint32_t wait_ms) {
 
 void BotManager::Stop() {
   SetBrainConnected(false);
+  SetLlmHealthy(true);
   {
     PolicyGlobalState& st = PolicyState();
     base::AutoLock lock(st.lock);

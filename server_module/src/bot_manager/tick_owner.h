@@ -28,8 +28,13 @@ enum class TickOwner : uint8_t { kPlayerbots, kBrain };
 const char* TickOwnerName(TickOwner owner);
 
 // A managed bot's mode. Battlegrounds are left to playerbots (no policy
-// listener or brain strategies are set up there).
-TickOwner TickOwnerFor(bool harness_connected, bool in_battleground);
+// listener or brain strategies are set up there). Also falls back to
+// playerbots when the harness reports the LLM unhealthy or a pending timed
+// popup misses its brain-answer deadline, so popups never stall.
+TickOwner TickOwnerFor(bool harness_connected,
+                       bool in_battleground,
+                       bool llm_healthy = true,
+                       bool popup_deadline_missed = false);
 
 // How BrainPolicyListener gates one playerbots action.
 enum class ActionGate : uint8_t {

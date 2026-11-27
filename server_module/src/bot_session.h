@@ -154,9 +154,14 @@ struct BotSession {
   uint32_t act_stealth_until_ms = 0;
 
   // Who answers this bot's popups (tick_owner.h): set every world tick by
-  // BotManager::Update from the harness connection, read by
-  // BrainPolicyListener. Playerbots-led after a logout until that next tick.
+  // BotManager::Update from the harness connection, LLM health, and timed
+  // popup deadline, read by BrainPolicyListener. Playerbots-led after a logout
+  // until that next tick.
   TickOwner tick_owner = TickOwner::kPlayerbots;
+  // Monotonic BotManager::now_ms_ when a timed popup (ready check, LFG, loot
+  // roll, group invite, etc.) first opened for this bot; cleared when no timed
+  // popup is open, on logout, map change, and harness disconnect.
+  std::optional<uint64_t> popup_open_since_ms;
 
   // Last outdoor stray-recall tick (`KeepNearHumanLeader`, Now #8).
   uint32_t stray_recalled_ms = 0;

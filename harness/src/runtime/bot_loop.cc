@@ -927,7 +927,45 @@ void BotLoop::OnConnectionChanged(bool connected) {
     party_chat_budgets_.clear();
     // Answers to screens of the old connection are useless: free the slots.
     scheduler_.CancelAllInFlight();
+    // Server resets its own health flag on disconnect; start clean on the next
+    // connection.
+    consecutive_llm_failures_ = 0;
+    llm_healthy_ = true;
   }
+}
+
+void BotLoop::SetLlmHealthy(bool healthy) {
+  if (llm_healthy_ == healthy) {
+    return;
+  }
+  llm_healthy_ = healthy;
+  Log(healthy
+          ? "harness: LLM recovered; restoring brain popup ownership"
+          : "harness: LLM unhealthy; handing popup ownership to playerbots");
+  pb::Command cmd;
+  cmd.health = pb::Command::Health{.llm_healthy = healthy};
+  send_command_.Run(cmd);
+  ++commands_sent_;
+}
+
+void BotLoop::RecordLlmFailure(bool immediate_unhealthy) {
+  if (config_.llm_unhealthy_after_failures <= 0) {
+    return;
+  }
+  if (immediate_unhealthy) {
+    consecutive_llm_failures_ = std::max(consecutive_llm_failures_ + 1,
+                                         config_.llm_unhealthy_after_failures);
+  } else {
+    ++consecutive_llm_failures_;
+  }
+  if (consecutive_llm_failures_ >= config_.llm_unhealthy_after_failures) {
+    SetLlmHealthy(false);
+  }
+}
+
+void BotLoop::RecordLlmSuccess() {
+  consecutive_llm_failures_ = 0;
+  SetLlmHealthy(true);
 }
 
 // static
@@ -1543,6 +1581,7 @@ void BotLoop::OnTick(base::TimeTicks now) {
         now >= state.call_deadline) {
       state.call_deadline = base::TimeTicks();
       state.call_timed_out_epoch = state.call_epoch;
+      RecordLlmFailure(/*immediate_unhealthy=*/true);
       if (state.in_flight_cancel) {
         auto cancel = std::move(state.in_flight_cancel);
         cancel->Cancel();
@@ -1949,6 +1988,7 @@ void BotLoop::OnReply(const std::string& bot,
     state.in_flight_cancel.reset();
     state.call_deadline = base::TimeTicks();
     if (!decision.result.reply) {
+      RecordLlmFailure(/*immediate_unhealthy=*/false);
       Log(base::StringPrintf("harness: %s brain error (%.0f ms): %s",
                              bot.c_str(), decision.result.round_trip_ms,
                              decision.result.error.c_str()));
@@ -1969,6 +2009,7 @@ void BotLoop::OnReply(const std::string& bot,
       Requeue(&state, std::move(asked_reasons), std::move(asked_events),
               std::move(asked_chats), std::move(asked_outcome));
     } else {
+      RecordLlmSuccess();
       if (!plan->goal.empty()) {
         state.current_goal = plan->goal;
       }

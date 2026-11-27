@@ -3,6 +3,8 @@
 #include "bot_manager/popup_watch.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -88,6 +90,28 @@ std::vector<pb::Event> PopupWatch::Update(const PopupState& now) {
 
 void PopupWatch::Reset() {
   last_ = PopupState{};
+}
+
+bool HasTimedPopup(const PopupState& state, bool has_group_invite) {
+  return has_group_invite || state.ready_check || state.role_check ||
+         state.lfg_proposal_id != 0 || state.shared_quest_id != 0 ||
+         state.resurrect_offer || state.summon || !state.boot_victim.empty() ||
+         !state.rolls.empty();
+}
+
+bool UpdatePopupDeadline(std::optional<uint64_t>* open_since_ms,
+                         bool has_timed_popup,
+                         uint64_t now_ms,
+                         uint32_t deadline_ms) {
+  if (!has_timed_popup) {
+    open_since_ms->reset();
+    return false;
+  }
+  if (!open_since_ms->has_value()) {
+    *open_since_ms = now_ms;
+  }
+  const uint64_t opened_at = **open_since_ms;
+  return now_ms >= opened_at && (now_ms - opened_at) >= deadline_ms;
 }
 
 }  // namespace llm_brain

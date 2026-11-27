@@ -4,12 +4,18 @@
 #define MOD_LLM_BRAIN_BOT_MANAGER_POPUP_WATCH_H_
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "snapshot/snapshot.h"
 
 namespace llm_brain {
+
+// How long a timed popup may stay unanswered by the brain before popup
+// ownership temporarily hands off to playerbots (well under ready-check's
+// 30 s, LFG proposal's 45 s, and loot roll's 60 s).
+inline constexpr uint32_t kPopupFallbackDeadlineMs = 15000;
 
 // The timed popups a bot's client would show right now. BrainPolicyListener
 // blocks playerbots' auto-answers to these, so the brain must hear about them
@@ -55,6 +61,18 @@ class PopupWatch {
  private:
   PopupState last_;
 };
+
+// Whether `state` (or a pending group invite) has an open timed popup that
+// should fall back to playerbots if the brain misses `kPopupFallbackDeadlineMs`
+// (excludes trade windows, where a human may take longer to place items).
+bool HasTimedPopup(const PopupState& state, bool has_group_invite = false);
+
+// Updates `open_since_ms` for a bot's timed-popup deadline and returns true
+// once a timed popup has stayed open for at least `deadline_ms`.
+bool UpdatePopupDeadline(std::optional<uint64_t>* open_since_ms,
+                         bool has_timed_popup,
+                         uint64_t now_ms,
+                         uint32_t deadline_ms = kPopupFallbackDeadlineMs);
 
 }  // namespace llm_brain
 

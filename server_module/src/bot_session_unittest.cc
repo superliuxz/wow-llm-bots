@@ -174,5 +174,36 @@ TEST(BotSessionRegistryTest, SpellMissClearsOnMapChangeDisconnectAndLogout) {
   expect_cleared();
 }
 
+// Adversarial counter-test: human_group_guid survives map change, harness
+// disconnect, and relog (the bot is still in that human's group), while
+// human_offline_since_ms resets cleanly so zoning out of a dungeon or
+// reconnecting never triggers an immediate stale-timer abandonment.
+TEST(BotSessionRegistryTest, HumanGroupGraceResetsCleanly) {
+  BotSessionRegistry reg;
+  constexpr uint64_t kBot = 0x1005;
+  const auto set = [&] {
+    reg.WithSession(kBot, [](BotSession& s) {
+      s.human_group_guid = 99;
+      s.human_offline_since_ms = 123456;
+    });
+  };
+  const auto expect_clean = [&] {
+    reg.InspectSession(kBot, [](const BotSession* s) {
+      ASSERT_NE(s, nullptr);
+      EXPECT_EQ(s->human_group_guid, 99u);
+      EXPECT_FALSE(s->human_offline_since_ms.has_value());
+    });
+  };
+  set();
+  reg.ResetOnMapChange(kBot);
+  expect_clean();
+  set();
+  reg.ResetOnDisconnect(kBot);
+  expect_clean();
+  set();
+  reg.ResetOnLogout(kBot);
+  expect_clean();
+}
+
 }  // namespace
 }  // namespace llm_brain

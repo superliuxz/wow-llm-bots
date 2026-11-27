@@ -431,6 +431,7 @@ class LlmBrainWorldScript : public WorldScript {
 
   void OnShutdown() override {
     BotManager::SetBrainConnected(false);
+    BotManager::SetLlmHealthy(true);
     if (bot_manager_) {
       bot_manager_->Stop();
       bot_manager_.reset();
@@ -537,6 +538,18 @@ class LlmBrainWorldScript : public WorldScript {
                 mismatch);
       // Nothing it sends is applied, so playerbots keeps the bots alive.
       BotManager::SetBrainConnected(false);
+      BotManager::SetLlmHealthy(true);
+    }
+  }
+
+  void OnClientHealth(const wlb::snapshot::Command::Health& health) {
+    const bool was = BotManager::IsLlmHealthy();
+    BotManager::SetLlmHealthy(health.llm_healthy);
+    if (was != health.llm_healthy) {
+      LOG_INFO("module", "mod-llm-brain: LLM {}; {}",
+               health.llm_healthy ? "healthy" : "unhealthy",
+               health.llm_healthy ? "restoring brain popup ownership"
+                                  : "handing popups to playerbots");
     }
   }
 
@@ -544,6 +557,7 @@ class LlmBrainWorldScript : public WorldScript {
     LOG_INFO("module", "mod-llm-brain: harness {}",
              connected ? "connected" : "disconnected");
     BotManager::SetBrainConnected(connected);
+    BotManager::SetLlmHealthy(true);
     wrong_version_logged_ = false;
     harness_refused_ = false;
     for (size_t i = 0; i < bots_.size(); ++i) {
@@ -1014,6 +1028,10 @@ class LlmBrainWorldScript : public WorldScript {
                   "that is out of date",
                   command.version, wlb::snapshot::kWireVersion);
       }
+      return;
+    }
+    if (command.health) {
+      OnClientHealth(*command.health);
       return;
     }
     const std::string& name = command.bot;

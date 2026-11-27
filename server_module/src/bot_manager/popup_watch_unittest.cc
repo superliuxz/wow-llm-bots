@@ -2,6 +2,8 @@
 
 #include "bot_manager/popup_watch.h"
 
+#include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -129,6 +131,92 @@ TEST(PopupWatchTest, ResetForgetsWhatWasSeen) {
   EXPECT_EQ(watch.Update(s).size(), 1u);
   watch.Reset();
   EXPECT_EQ(watch.Update(s).size(), 1u);
+}
+
+TEST(PopupWatchTest, HasTimedPopupDetectsTimedPopupsAndExcludesTrade) {
+  EXPECT_FALSE(HasTimedPopup(PopupState{}, /*has_group_invite=*/false));
+  EXPECT_TRUE(HasTimedPopup(PopupState{}, /*has_group_invite=*/true));
+
+  PopupState ready;
+  ready.ready_check = true;
+  EXPECT_TRUE(HasTimedPopup(ready));
+
+  PopupState role;
+  role.role_check = true;
+  EXPECT_TRUE(HasTimedPopup(role));
+
+  PopupState lfg;
+  lfg.lfg_proposal_id = 9;
+  EXPECT_TRUE(HasTimedPopup(lfg));
+
+  PopupState quest;
+  quest.shared_quest_id = 42;
+  EXPECT_TRUE(HasTimedPopup(quest));
+
+  PopupState rez;
+  rez.resurrect_offer = true;
+  EXPECT_TRUE(HasTimedPopup(rez));
+
+  PopupState summon;
+  summon.summon = true;
+  EXPECT_TRUE(HasTimedPopup(summon));
+
+  PopupState boot;
+  boot.boot_victim = "Loadc";
+  EXPECT_TRUE(HasTimedPopup(boot));
+
+  PopupState roll;
+  roll.rolls.push_back(
+      {.item_guid = 1, .item_slot = 0, .item_id = 100, .item_name = "Ring"});
+  EXPECT_TRUE(HasTimedPopup(roll));
+
+  // Adversarial counter-test: an open trade window is NOT a timed popup that
+  // auto-hands off to playerbots after 15 s (a human may take longer to place
+  // items, and playerbots would cancel a non-master's trade).
+  PopupState trade;
+  trade.trader = "Hele";
+  trade.trader_accepted = true;
+  EXPECT_FALSE(HasTimedPopup(trade));
+}
+
+TEST(PopupWatchTest, UpdatePopupDeadlineHandsOffPastDeadlineAndResetsOnClose) {
+  std::optional<uint64_t> open_since;
+
+  // No popup open -> not missed, timer stays empty.
+  EXPECT_FALSE(UpdatePopupDeadline(&open_since, /*has_timed_popup=*/false,
+                                   /*now_ms=*/1000));
+  EXPECT_FALSE(open_since.has_value());
+
+  // Popup opens at t=1000 -> not missed yet.
+  EXPECT_FALSE(UpdatePopupDeadline(&open_since, /*has_timed_popup=*/true,
+                                   /*now_ms=*/1000));
+  ASSERT_TRUE(open_since.has_value());
+  EXPECT_EQ(*open_since, 1000u);
+
+  // Just before deadline -> still brain's.
+  EXPECT_FALSE(
+      UpdatePopupDeadline(&open_since, /*has_timed_popup=*/true,
+                          /*now_ms=*/1000 + kPopupFallbackDeadlineMs - 1));
+
+  // At deadline -> missed, hand off to playerbots.
+  EXPECT_TRUE(UpdatePopupDeadline(&open_since, /*has_timed_popup=*/true,
+                                  /*now_ms=*/1000 + kPopupFallbackDeadlineMs));
+
+  // Popup closes -> timer resets and ownership restores to brain.
+  EXPECT_FALSE(
+      UpdatePopupDeadline(&open_since, /*has_timed_popup=*/false,
+                          /*now_ms=*/1000 + kPopupFallbackDeadlineMs + 500));
+  EXPECT_FALSE(open_since.has_value());
+
+  // Subsequent popup starts a fresh deadline from its own open time.
+  EXPECT_FALSE(UpdatePopupDeadline(&open_since, /*has_timed_popup=*/true,
+                                   /*now_ms=*/50000));
+  ASSERT_TRUE(open_since.has_value());
+  EXPECT_EQ(*open_since, 50000u);
+  EXPECT_FALSE(UpdatePopupDeadline(&open_since, /*has_timed_popup=*/true,
+                                   /*now_ms=*/55000));
+  EXPECT_TRUE(UpdatePopupDeadline(&open_since, /*has_timed_popup=*/true,
+                                  /*now_ms=*/50000 + kPopupFallbackDeadlineMs));
 }
 
 }  // namespace

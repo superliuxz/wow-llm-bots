@@ -4361,5 +4361,151 @@ TEST(BotLoopTest,
   brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
 }
 
+TEST(BotLoopTest, LlmHealthHandsOffOnErrorsAndTimeoutsAndRestoresOnRecovery) {
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "Rules.";
+  cfg.stale_snapshot_after = base::Seconds(120);
+  cfg.call_timeout = base::Seconds(10);
+  cfg.llm_unhealthy_after_failures = 2;
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { sent.push_back(cmd); });
+
+  const auto make_snap = [](uint32_t seq, base::TimeTicks at) {
+    pb::Snapshot s = MakeLiveSnap("Aldric", seq, at);
+    AddKeep(&s);
+    return s;
+  };
+  const auto wake_with_popup = [&](base::TimeTicks at) {
+    pb::ImmediateEvent ev;
+    ev.bot = "Aldric";
+    ev.event.prompt.emplace().kind = pb::PromptEvent::READY_CHECK;
+    loop.OnEvent(std::move(ev), at);
+  };
+
+  const auto health_events = [&] {
+    std::vector<bool> out;
+    for (const pb::Command& cmd : sent) {
+      if (cmd.health) {
+        out.push_back(cmd.health->llm_healthy);
+      }
+    }
+    return out;
+  };
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  EXPECT_TRUE(loop.llm_healthy());
+
+  // 1. Healthy LLM keeps popup ownership and emits no health commands.
+  loop.OnSnapshot(make_snap(1, t0), t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  EXPECT_TRUE(loop.llm_healthy());
+  EXPECT_TRUE(health_events().empty());
+
+  // 2. Adversarial counter-test: a single transient error followed by a valid
+  // reply does NOT flip LLM health to unhealthy.
+  wake_with_popup(t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishError("connection reset");
+  EXPECT_TRUE(loop.llm_healthy());
+  EXPECT_TRUE(health_events().empty());
+
+  // Retry after 10 s backoff succeeds -> failure counter resets.
+  loop.OnTick(t0 + base::Seconds(12));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  EXPECT_TRUE(loop.llm_healthy());
+  EXPECT_TRUE(health_events().empty());
+
+  // 3. Two consecutive LLM errors flip health to false and notify the server
+  // once; a third error does not spam duplicate unhealthy commands.
+  wake_with_popup(t0 + base::Seconds(13));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishError("connection refused");
+  EXPECT_TRUE(loop.llm_healthy());
+  EXPECT_TRUE(health_events().empty());
+
+  loop.OnTick(t0 + base::Seconds(25));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishError("connection refused");
+  EXPECT_FALSE(loop.llm_healthy());
+  EXPECT_EQ(health_events(), (std::vector<bool>{false}));
+
+  loop.OnTick(t0 + base::Seconds(37));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishError("connection refused");
+  EXPECT_FALSE(loop.llm_healthy());
+  EXPECT_EQ(health_events(), (std::vector<bool>{false}));
+
+  // 4. Adversarial counter-test: an invalid plan while unhealthy does NOT
+  // falsely restore healthy status.
+  loop.OnTick(t0 + base::Seconds(49));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("not a valid plan");
+  EXPECT_FALSE(loop.llm_healthy());
+  EXPECT_EQ(health_events(), (std::vector<bool>{false}));
+
+  // 5. Recovery: a valid plan restores healthy status and notifies the server.
+  loop.OnTick(t0 + base::Seconds(61));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  EXPECT_TRUE(loop.llm_healthy());
+  EXPECT_EQ(health_events(), (std::vector<bool>{false, true}));
+
+  // 6. Stalled/timed-out LLM call immediately marks unhealthy on OnTick.
+  wake_with_popup(t0 + base::Seconds(62));
+  ASSERT_EQ(brain.size(), 1u);
+  // Advance past call_timeout (10 s).
+  loop.OnTick(t0 + base::Seconds(75));
+  EXPECT_TRUE(brain.front_cancelled());
+  EXPECT_FALSE(loop.llm_healthy());
+  EXPECT_EQ(health_events(), (std::vector<bool>{false, true, false}));
+  brain.FinishCancelled();
+  EXPECT_FALSE(loop.llm_healthy());
+  EXPECT_EQ(health_events(), (std::vector<bool>{false, true, false}));
+
+  // 7. Harness disconnect resets LLM health cleanly without sending a command
+  // while disconnected.
+  const size_t before_disconnect = health_events().size();
+  loop.OnConnectionChanged(false);
+  EXPECT_TRUE(loop.llm_healthy());
+  EXPECT_EQ(health_events().size(), before_disconnect);
+}
+
+TEST(BotLoopTest, PreemptionCancellationDoesNotMarkLlmUnhealthy) {
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "Rules.";
+  cfg.llm_unhealthy_after_failures = 1;
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { sent.push_back(cmd); });
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Aldric", 1, t0);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+
+  // Urgent P0 death wake preempts the in-flight routine call.
+  pb::Snapshot dead = MakeLiveSnap("Aldric", 2, t0 + base::Milliseconds(50));
+  dead.base.self.state = pb::Self::DEAD_BODY;
+  AddKeep(&dead);
+  loop.OnSnapshot(dead, t0 + base::Milliseconds(50));
+  ASSERT_TRUE(brain.front_cancelled());
+  brain.FinishCancelled();
+
+  // Preemption is normal operation, NOT an LLM failure.
+  EXPECT_TRUE(loop.llm_healthy());
+  for (const pb::Command& cmd : sent) {
+    EXPECT_FALSE(cmd.health.has_value());
+  }
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  EXPECT_TRUE(loop.llm_healthy());
+}
+
 }  // namespace
 }  // namespace harness

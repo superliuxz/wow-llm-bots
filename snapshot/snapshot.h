@@ -1355,6 +1355,12 @@ struct Hello {
   bool operator==(const Hello&) const = default;
 };
 
+struct Command_Health {
+  bool llm_healthy = false;
+
+  bool operator==(const Command_Health&) const = default;
+};
+
 struct Command {
   using Choose = Command_Choose;
   using SetGoal = Command_SetGoal;
@@ -1366,6 +1372,7 @@ struct Command {
   using AhSearch = Command_AhSearch;
   using Who = Command_Who;
   using Act = Command_Act;
+  using Health = Command_Health;
 
   // kWireVersion of the sender (set by the harness when it sends).
   uint32_t version = 0;
@@ -1383,6 +1390,9 @@ struct Command {
   std::optional<Command_Act> act;
   // The client's hello: its first frame (no `bot`), optional.
   std::optional<Hello> hello;
+  // Harness-wide LLM health signal (no `bot`): when false, the module hands
+  // popup ownership back to playerbots until the LLM recovers.
+  std::optional<Command_Health> health;
 
   bool operator==(const Command&) const = default;
 };

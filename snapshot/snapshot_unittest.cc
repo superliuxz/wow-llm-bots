@@ -138,6 +138,18 @@ TEST(SnapshotProtoTest, HelloNamesThisBuildAndRoundTrips) {
   ASSERT_TRUE(pb::ReadBeve(pb::WriteBeve(cmd), &cmd_back));
   EXPECT_EQ(cmd_back, cmd);
   EXPECT_TRUE(cmd_back.bot.empty());
+
+  for (bool healthy : {false, true}) {
+    pb::Command health_cmd;
+    health_cmd.version = pb::kWireVersion;
+    health_cmd.health = pb::Command::Health{.llm_healthy = healthy};
+    pb::Command health_back;
+    ASSERT_TRUE(pb::ReadBeve(pb::WriteBeve(health_cmd), &health_back));
+    EXPECT_EQ(health_back, health_cmd);
+    ASSERT_TRUE(health_back.health.has_value());
+    EXPECT_EQ(health_back.health->llm_healthy, healthy);
+    EXPECT_TRUE(health_back.bot.empty());
+  }
 }
 
 TEST(SnapshotProtoTest, HelloMismatchNamesWhatDiffers) {

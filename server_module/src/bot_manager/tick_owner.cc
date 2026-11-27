@@ -49,9 +49,14 @@ const char* TickOwnerName(TickOwner owner) {
   return owner == TickOwner::kBrain ? "brain-led" : "playerbots-led";
 }
 
-TickOwner TickOwnerFor(bool harness_connected, bool in_battleground) {
-  return harness_connected && !in_battleground ? TickOwner::kBrain
-                                               : TickOwner::kPlayerbots;
+TickOwner TickOwnerFor(bool harness_connected,
+                       bool in_battleground,
+                       bool llm_healthy,
+                       bool popup_deadline_missed) {
+  return harness_connected && !in_battleground && llm_healthy &&
+                 !popup_deadline_missed
+             ? TickOwner::kBrain
+             : TickOwner::kPlayerbots;
 }
 
 std::span<const GatedAction> GatedActions() {

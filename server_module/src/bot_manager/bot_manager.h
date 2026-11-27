@@ -53,6 +53,12 @@ class BotManager {
   static void SetBrainConnected(bool connected);
   static bool IsBrainConnected();
 
+  // Thread-safe: whether the connected harness reports its LLM backend as
+  // healthy. While false, popup ownership hands off to Playerbots until the
+  // LLM recovers and succeeds again.
+  static void SetLlmHealthy(bool healthy);
+  static bool IsLlmHealthy();
+
   // Optional per-bot strategy suffix applied on top of the server-wide
   // `strategies_` (used by test benchmarks to mix baseline and stripped-
   // strategy parties in the same wave). Thread-safe.

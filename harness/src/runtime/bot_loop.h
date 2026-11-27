@@ -86,6 +86,11 @@ struct BotLoopConfig {
   // 60 s.
   base::TimeDelta combat_call_timeout = base::Seconds(10);
   base::TimeDelta call_timeout = base::Seconds(30);
+  // Consecutive LLM transport/server errors before reporting the LLM unhealthy
+  // to the server so popup ownership falls back to playerbots (0 disables).
+  // A call that hits `combat_call_timeout`/`call_timeout` marks unhealthy at
+  // once.
+  int llm_unhealthy_after_failures = 2;
   // Human-like reaction + typing delay before outbound chat (`say:`, `party:`,
   // `tell`, `general:`, `lfg:`) flushes on `OnTick` (Now #10). Zero by default
   // for synchronous unit tests; enabled (1-3 s) in live `harness run`.
@@ -133,6 +138,7 @@ class BotLoop {
   uint64_t decisions_completed() const { return decisions_completed_; }
   uint64_t calls_cancelled() const { return calls_cancelled_; }
   uint64_t commands_sent() const { return commands_sent_; }
+  bool llm_healthy() const { return llm_healthy_; }
   std::string CurrentGoal(const std::string& bot) const;
 
  private:
@@ -531,6 +537,9 @@ class BotLoop {
                                std::string_view text,
                                bool prompted_by_player_chat,
                                base::TimeTicks now);
+  void SetLlmHealthy(bool healthy);
+  void RecordLlmFailure(bool immediate_unhealthy = false);
+  void RecordLlmSuccess();
   void Log(const std::string& line);
 
   const BotLoopConfig config_;
@@ -564,6 +573,8 @@ class BotLoop {
   uint64_t decisions_completed_ = 0;
   uint64_t calls_cancelled_ = 0;
   uint64_t commands_sent_ = 0;
+  bool llm_healthy_ = true;
+  int consecutive_llm_failures_ = 0;
   base::WeakPtrFactory<BotLoop> weak_factory_{this};
 };
 

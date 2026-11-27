@@ -23,6 +23,35 @@ TEST(TickOwnerTest, BrainLedOnlyWithAHarnessOutsideBattlegrounds) {
   EXPECT_STREQ(TickOwnerName(TickOwner::kPlayerbots), "playerbots-led");
 }
 
+TEST(TickOwnerTest, UnhealthyLlmOrMissedPopupDeadlineHandsOffToPlayerbots) {
+  // Healthy connected LLM outside BG keeps brain popup ownership.
+  EXPECT_EQ(TickOwnerFor(/*harness_connected=*/true, /*in_battleground=*/false,
+                         /*llm_healthy=*/true, /*popup_deadline_missed=*/false),
+            TickOwner::kBrain);
+  // Unhealthy LLM hands popups to playerbots even while harness is connected.
+  EXPECT_EQ(TickOwnerFor(/*harness_connected=*/true, /*in_battleground=*/false,
+                         /*llm_healthy=*/false,
+                         /*popup_deadline_missed=*/false),
+            TickOwner::kPlayerbots);
+  // Missed popup deadline hands popups to playerbots even if health flag is
+  // still true (e.g. wedged harness or slow queue).
+  EXPECT_EQ(TickOwnerFor(/*harness_connected=*/true, /*in_battleground=*/false,
+                         /*llm_healthy=*/true, /*popup_deadline_missed=*/true),
+            TickOwner::kPlayerbots);
+  // Both unhealthy and missed deadline -> playerbots.
+  EXPECT_EQ(TickOwnerFor(/*harness_connected=*/true, /*in_battleground=*/false,
+                         /*llm_healthy=*/false, /*popup_deadline_missed=*/true),
+            TickOwner::kPlayerbots);
+  // Adversarial counter-tests: disconnected or in battleground stays
+  // playerbots-led even when LLM is healthy and no deadline was missed.
+  EXPECT_EQ(TickOwnerFor(/*harness_connected=*/false, /*in_battleground=*/false,
+                         /*llm_healthy=*/true, /*popup_deadline_missed=*/false),
+            TickOwner::kPlayerbots);
+  EXPECT_EQ(TickOwnerFor(/*harness_connected=*/true, /*in_battleground=*/true,
+                         /*llm_healthy=*/true, /*popup_deadline_missed=*/false),
+            TickOwner::kPlayerbots);
+}
+
 TEST(TickOwnerTest, PopupsAreTheBrainsOnlyWhileItLeads) {
   for (std::string_view name :
        {"accept invitation", "loot roll", "roll", "ready check",
@@ -110,14 +139,27 @@ TEST(TickOwnerTest, SessionModeResets) {
     });
   };
   EXPECT_EQ(owner(), TickOwner::kPlayerbots);
-  reg.WithSession(kBot,
-                  [](BotSession& s) { s.tick_owner = TickOwner::kBrain; });
+  reg.WithSession(kBot, [](BotSession& s) {
+    s.tick_owner = TickOwner::kBrain;
+    s.popup_open_since_ms = 12345;
+  });
   reg.ResetOnMapChange(kBot);
   EXPECT_EQ(owner(), TickOwner::kBrain);
+  EXPECT_FALSE(reg.InspectSession(kBot, [](const BotSession* s) {
+    return s && s->popup_open_since_ms.has_value();
+  }));
+  reg.WithSession(kBot, [](BotSession& s) { s.popup_open_since_ms = 23456; });
   reg.ResetOnDisconnect(kBot);
   EXPECT_EQ(owner(), TickOwner::kBrain);
+  EXPECT_FALSE(reg.InspectSession(kBot, [](const BotSession* s) {
+    return s && s->popup_open_since_ms.has_value();
+  }));
+  reg.WithSession(kBot, [](BotSession& s) { s.popup_open_since_ms = 34567; });
   reg.ResetOnLogout(kBot);
   EXPECT_EQ(owner(), TickOwner::kPlayerbots);
+  EXPECT_FALSE(reg.InspectSession(kBot, [](const BotSession* s) {
+    return s && s->popup_open_since_ms.has_value();
+  }));
   // A relog that keeps its group keeps the group's state, not the mode.
   reg.WithSession(kBot, [](BotSession& s) {
     s.tick_owner = TickOwner::kBrain;
