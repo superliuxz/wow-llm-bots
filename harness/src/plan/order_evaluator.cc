@@ -221,6 +221,31 @@ const pb::Aura* FindAura(const pb::Unit& u, std::string_view mech) {
   return nullptr;
 }
 
+// Returns `u`'s `GroupPart`, falling back to `ext.party` / `ext.raid` when
+// `u` came from `base.nearby.units` (where `NearbyBuilder` omits `u.group`).
+const pb::GroupPart* GroupPartOf(const pb::Snapshot& snap, const pb::Unit& u) {
+  if (u.group) {
+    return &*u.group;
+  }
+  if (snap.ext.party) {
+    for (const pb::Unit& m : snap.ext.party->members) {
+      if (m.group &&
+          ((!u.guid.empty() && m.guid == u.guid) || NameEq(m.name, u.name))) {
+        return &*m.group;
+      }
+    }
+  }
+  if (snap.ext.raid) {
+    for (const pb::Unit& m : snap.ext.raid->members) {
+      if (m.group &&
+          ((!u.guid.empty() && m.guid == u.guid) || NameEq(m.name, u.name))) {
+        return &*m.group;
+      }
+    }
+  }
+  return nullptr;
+}
+
 bool IsGroupMember(const pb::Snapshot& snap, const pb::Unit& u) {
   if (u.group.has_value() || (u.player && u.player->in_my_group)) {
     return true;
@@ -372,15 +397,21 @@ struct SnapshotView {
 
   std::vector<Entity> FindTanks() const {
     std::vector<Entity> tanks;
-    auto add = [&](const Entity& e) {
+    auto seen = [&](const Entity& e) {
       for (const Entity& existing : tanks) {
         if (SameEntity(existing, e)) {
-          return;
+          return true;
         }
       }
-      tanks.push_back(e);
+      return false;
     };
-    // Raid main tanks first (preserves raid order for tank vs offtank).
+    auto add = [&](const Entity& e) {
+      if (!seen(e)) {
+        tanks.push_back(e);
+      }
+    };
+    // Tier 1a: raid main tanks first (preserves raid slot order for tank vs
+    // offtank, matching `ResolveGroupTankOrder` on the server).
     if (snap.ext.raid) {
       for (const std::string& ref : snap.ext.raid->main_tanks) {
         if (UnitMatchesRef(self, ref)) {
@@ -396,25 +427,57 @@ struct SnapshotView {
         }
       }
     }
-    // Units flagged `group.main_tank`.
-    if (snap.base.self.unit.group && snap.base.self.unit.group->main_tank) {
-      add(self);
+    struct RankedTank {
+      uint32_t subgroup = 0;
+      Entity entity;
+    };
+    auto append_sorted = [&](std::vector<RankedTank>& list) {
+      std::ranges::sort(list, [](const RankedTank& a, const RankedTank& b) {
+        if (a.subgroup != b.subgroup) {
+          return a.subgroup < b.subgroup;
+        }
+        return a.entity.guid < b.entity.guid;
+      });
+      for (const RankedTank& r : list) {
+        add(r.entity);
+      }
+    };
+    // Tier 1b: units flagged `group.main_tank` (e.g. 5-man or snapshots without
+    // `ext.raid->main_tanks`).
+    std::vector<RankedTank> mt_flagged;
+    if (snap.base.self.unit.group && snap.base.self.unit.group->main_tank &&
+        !seen(self)) {
+      mt_flagged.push_back({snap.base.self.unit.group->subgroup, self});
     }
     for (const pb::Unit* u : units) {
-      if (u->group && u->group->main_tank) {
-        add(MakeUnitEntity(*u));
+      if (const pb::GroupPart* gp = GroupPartOf(snap, *u);
+          gp && gp->main_tank) {
+        Entity e = MakeUnitEntity(*u);
+        if (!seen(e)) {
+          mt_flagged.push_back({gp->subgroup, std::move(e)});
+        }
       }
     }
-    // Fallback: units with `group.role == TANK`.
+    append_sorted(mt_flagged);
+
+    // Tier 2: units with effective `group.role == TANK`, ordered
+    // deterministically by `(subgroup, guid)` to match server
+    // `ResolveGroupTankOrder` across every bot in a hand-formed raid.
+    std::vector<RankedTank> role_tanks;
     if (snap.base.self.unit.group &&
-        snap.base.self.unit.group->role == pb::Role::TANK) {
-      add(self);
+        snap.base.self.unit.group->role == pb::Role::TANK && !seen(self)) {
+      role_tanks.push_back({snap.base.self.unit.group->subgroup, self});
     }
     for (const pb::Unit* u : units) {
-      if (u->group && u->group->role == pb::Role::TANK) {
-        add(MakeUnitEntity(*u));
+      if (const pb::GroupPart* gp = GroupPartOf(snap, *u);
+          gp && gp->role == pb::Role::TANK) {
+        Entity e = MakeUnitEntity(*u);
+        if (!seen(e)) {
+          role_tanks.push_back({gp->subgroup, std::move(e)});
+        }
       }
     }
+    append_sorted(role_tanks);
     return tanks;
   }
 };
@@ -452,7 +515,8 @@ std::vector<Entity> ResolveWho(const SnapshotView& view,
         out.push_back(view.self);
       }
       for (const pb::Unit* u : view.units) {
-        if (u->group && u->group->role == pb::Role::HEALER) {
+        if (const pb::GroupPart* gp = GroupPartOf(view.snap, *u);
+            gp && gp->role == pb::Role::HEALER) {
           out.push_back(MakeUnitEntity(*u));
         }
       }
@@ -482,7 +546,8 @@ std::vector<Entity> ResolveWho(const SnapshotView& view,
         }
       }
       for (const pb::Unit* u : view.units) {
-        if (u->group && u->group->leader) {
+        if (const pb::GroupPart* gp = GroupPartOf(view.snap, *u);
+            gp && gp->leader) {
           out.push_back(MakeUnitEntity(*u));
           break;
         }
@@ -1235,21 +1300,33 @@ std::string ResolveActThingGuid(const SnapshotView& view,
       }
     }
   }
-  // Otherwise pick the nearest matching entity instead of unordered map order.
-  const Entity* best = nullptr;
-  float best_dist = std::numeric_limits<float>::infinity();
+  // Otherwise pick the nearest matching entity instead of unordered map order,
+  // preferring living units over dead ones when any living match exists.
+  const Entity* best_alive = nullptr;
+  float best_alive_dist = std::numeric_limits<float>::infinity();
+  const Entity* best_dead = nullptr;
+  float best_dead_dist = std::numeric_limits<float>::infinity();
   for (const Entity& e : resolved) {
     if (e.guid.empty()) {
       continue;
     }
     const float d = DistanceBetween(view.self, e)
                         .value_or(std::numeric_limits<float>::infinity());
-    if (!best || d < best_dist) {
-      best = &e;
-      best_dist = d;
+    const bool dead = e.unit && e.unit->dead;
+    if (!dead) {
+      if (!best_alive || d < best_alive_dist) {
+        best_alive = &e;
+        best_alive_dist = d;
+      }
+    } else if (!best_dead || d < best_dead_dist) {
+      best_dead = &e;
+      best_dead_dist = d;
     }
   }
-  return best ? best->guid : resolved.front().guid;
+  if (best_alive) {
+    return best_alive->guid;
+  }
+  return best_dead ? best_dead->guid : resolved.front().guid;
 }
 
 }  // namespace
@@ -1997,12 +2074,18 @@ std::optional<pb::Command::Act> OrderActToCommand(
   if (!supported) {
     return std::nullopt;
   }
-  if (!target_guid.empty() &&
-      out.thing != pb::Command::Act::THING_UNSPECIFIED &&
-      out.thing != pb::Command::Act::ME && out.thing != pb::Command::Act::IT &&
-      out.thing != pb::Command::Act::FOCUS &&
-      out.thing != pb::Command::Act::PING) {
-    out.it_guid = std::string(target_guid);
+  if (out.thing != pb::Command::Act::THING_UNSPECIFIED &&
+      out.thing != pb::Command::Act::IT) {
+    if (!target_guid.empty() && out.thing != pb::Command::Act::ME &&
+        out.thing != pb::Command::Act::FOCUS &&
+        out.thing != pb::Command::Act::PING) {
+      out.it_guid = std::string(target_guid);
+    } else {
+      // Never leak an unrelated `when`-condition `it` binding (e.g. `self`
+      // from `Living Bomb on me`) into an explicit target like `away group` or
+      // `to tank` when `target_guid` is empty.
+      out.it_guid.clear();
+    }
   }
   return out;
 }

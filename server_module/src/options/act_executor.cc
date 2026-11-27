@@ -61,12 +61,14 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
+#include "bot_manager/bot_manager.h"
 #include "bot_manager/spell_miss_packet.h"
 #include "bot_session.h"
 #include "options/act_geometry.h"
 #include "options/exec_npc.h"
 #include "options/exec_shared.h"
 #include "options/exec_social.h"
+#include "options/group_roles.h"
 #include "snapshot/perception.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/world_util.h"
@@ -256,27 +258,70 @@ std::vector<DynamicObject*> NearbyAreas(Player* bot,
   return dynos;
 }
 
-// Finds group/raid tank players (main tanks first, then TANK role).
+pb::Role LfgRoleFromMask(uint8_t roles) {
+  if (roles & lfg::PLAYER_ROLE_TANK) {
+    return pb::Role::TANK;
+  }
+  if (roles & lfg::PLAYER_ROLE_HEALER) {
+    return pb::Role::HEALER;
+  }
+  if (roles & lfg::PLAYER_ROLE_DAMAGE) {
+    return pb::Role::DPS;
+  }
+  return pb::Role::ROLE_UNSPECIFIED;
+}
+
+GroupMemberRoleInput RoleInputForSlot(const Group::MemberSlot& slot,
+                                      Player* member,
+                                      const Player* viewer) {
+  GroupMemberRoleInput in;
+  in.guid = slot.guid.GetRawValue();
+  in.subgroup = static_cast<uint32_t>(slot.group) + 1;
+  in.lfg_role = LfgRoleFromMask(slot.roles);
+  in.main_tank_flag = (slot.flags & MEMBER_FLAG_MAINTANK) != 0;
+  if (member && member->IsInWorld()) {
+    in.online_in_world = true;
+    in.spec_tank = PlayerbotAI::IsTank(member);
+    in.spec_healer = PlayerbotAI::IsHeal(member);
+    in.not_tank_policy =
+        GET_PLAYERBOT_AI(member) && BotManager::GetGroupPolicy(member).not_tank;
+    in.alive = member->IsAlive();
+    if (viewer) {
+      in.same_map = member->GetMapId() == viewer->GetMapId();
+      if (in.same_map) {
+        in.dist_yd = viewer->GetDistance(member);
+      }
+    }
+  }
+  return in;
+}
+
+std::vector<GroupMemberRoleInput> BuildGroupRoleInputs(Group* grp,
+                                                       const Player* viewer) {
+  std::vector<GroupMemberRoleInput> members;
+  if (!grp) {
+    return members;
+  }
+  for (const Group::MemberSlot& slot : grp->GetMemberSlots()) {
+    members.push_back(
+        RoleInputForSlot(slot, ObjectAccessor::FindPlayer(slot.guid), viewer));
+  }
+  return members;
+}
+
+// Finds group/raid tank players using the same unified role rules as snapshots
+// and the harness (main tanks first in slot order, then effective TANK role via
+// LFG or spec fallback, respecting `not_tank`).
 std::vector<Player*> GroupTanks(Player* bot) {
   std::vector<Player*> tanks;
   Group* grp = bot->GetGroup();
   if (!grp) {
     return tanks;
   }
-  auto add_if_new = [&](Player* p) {
-    if (p && p->IsInWorld() && p->GetMapId() == bot->GetMapId() &&
-        std::find(tanks.begin(), tanks.end(), p) == tanks.end()) {
+  for (uint64_t guid : ResolveGroupTankOrder(BuildGroupRoleInputs(grp, bot))) {
+    if (Player* p = ObjectAccessor::FindPlayer(ObjectGuid(guid));
+        p && p->IsInWorld() && p->GetMapId() == bot->GetMapId()) {
       tanks.push_back(p);
-    }
-  };
-  for (const Group::MemberSlot& slot : grp->GetMemberSlots()) {
-    if ((slot.flags & MEMBER_FLAG_MAINTANK) != 0) {
-      add_if_new(ObjectAccessor::FindPlayer(slot.guid));
-    }
-  }
-  for (const Group::MemberSlot& slot : grp->GetMemberSlots()) {
-    if ((slot.roles & lfg::PLAYER_ROLE_TANK) != 0) {
-      add_if_new(ObjectAccessor::FindPlayer(slot.guid));
     }
   }
   return tanks;
@@ -413,15 +458,15 @@ WorldObject* ResolveThing(Player* bot,
       if (!grp) {
         return nullptr;
       }
-      for (const Group::MemberSlot& slot : grp->GetMemberSlots()) {
-        if ((slot.roles & lfg::PLAYER_ROLE_HEALER) != 0) {
-          if (Player* p = ObjectAccessor::FindPlayer(slot.guid);
-              p && p->IsInWorld() && p->GetMapId() == bot->GetMapId()) {
-            return p;
-          }
-        }
+      const std::optional<uint64_t> guid =
+          ResolveNearestGroupHealer(BuildGroupRoleInputs(grp, bot));
+      if (!guid) {
+        return nullptr;
       }
-      return nullptr;
+      Player* p = ObjectAccessor::FindPlayer(ObjectGuid(*guid));
+      return (p && p->IsInWorld() && p->GetMapId() == bot->GetMapId())
+                 ? p
+                 : nullptr;
     }
     case pb::Command_Act::LEADER: {
       Group* grp = bot->GetGroup();
@@ -475,7 +520,7 @@ WorldObject* ResolveThing(Player* bot,
         }
         if (act.thing == pb::Command_Act::GROUP) {
           Player* other = u->ToPlayer();
-          if (!other || !grp || !grp->SameSubGroup(bot, other)) {
+          if (!other || !grp || !grp->IsMember(other->GetGUID())) {
             continue;
           }
         } else if (act.thing == pb::Command_Act::ANYONE) {
@@ -980,16 +1025,9 @@ bool SpotInsideHostileArea(Player* bot, const pb::Vec3& spot) {
 }
 
 // The group's tank as party frames show it: the main tank flag, the Dungeon
-// Finder role when one was picked, else the spec's (a group made by invite
-// has no roles).
+// Finder role when one was picked, else the spec's (respecting `not_tank`).
 bool IsTankSlot(const Group::MemberSlot& slot, Player* member) {
-  if ((slot.flags & MEMBER_FLAG_MAINTANK) != 0) {
-    return true;
-  }
-  if (slot.roles != 0) {
-    return (slot.roles & lfg::PLAYER_ROLE_TANK) != 0;
-  }
-  return PlayerbotAI::IsTank(member);
+  return IsEffectiveTank(RoleInputForSlot(slot, member, /*viewer=*/nullptr));
 }
 
 // Which way out of a hazard keeps the group together: toward the tank, else

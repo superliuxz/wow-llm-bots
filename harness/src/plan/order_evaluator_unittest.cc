@@ -993,5 +993,189 @@ TEST(OrderEvaluatorTest, InAreaMatchesAreaAndCastRadiusAndRearms) {
   EXPECT_EQ(r3.it_guid, "trigger:0xF13000605A000002");
 }
 
+TEST(OrderEvaluatorTest, HandFormedRaidRolesMatchFromNearbyWithoutInlineGroup) {
+  // Real `SnapshotBuilder` puts `Unit::group` on `ext.party->members` while
+  // `base.nearby.units` omits `Unit::group`. In a hand-formed 10/25-man raid
+  // (no Main Tank flags), every bot — including the offtank itself — must
+  // resolve the same `tank`, `offtank`, and nearest living `healer`.
+  auto build_raid = [](bool self_is_ot) {
+    pb::Snapshot s = MakeBaseSnapshot();
+    s.ext.raid.emplace();
+    pb::Party& party = s.ext.party.emplace();
+
+    pb::Unit t1_nearby =
+        MakeUnit("0x0000000000000010", "TankOne", 20.0f, {20.0f, 0.0f, 0.0f});
+    pb::Unit t1_party = t1_nearby;
+    t1_party.group = MakeGroup(pb::Role::TANK, /*main_tank=*/false);
+    t1_party.group->subgroup = 1;
+
+    pb::Unit t2_nearby =
+        MakeUnit("0x0000000000000005", "TankTwo", 4.0f, {4.0f, 0.0f, 0.0f});
+    pb::Unit t2_party = t2_nearby;
+    t2_party.group = MakeGroup(pb::Role::TANK, /*main_tank=*/false);
+    t2_party.group->subgroup = 2;
+
+    pb::Unit heal_dead_nearby =
+        MakeUnit("0x0000000000000030", "DeadHealer", 3.0f, {3.0f, 0.0f, 0.0f});
+    heal_dead_nearby.dead = true;
+    pb::Unit heal_dead_party = heal_dead_nearby;
+    heal_dead_party.group = MakeGroup(pb::Role::HEALER);
+    heal_dead_party.group->subgroup = 1;
+
+    pb::Unit heal_alive_nearby = MakeUnit("0x0000000000000031", "LiveHealer",
+                                          12.0f, {0.0f, 12.0f, 0.0f});
+    pb::Unit heal_alive_party = heal_alive_nearby;
+    heal_alive_party.group = MakeGroup(pb::Role::HEALER);
+    heal_alive_party.group->subgroup = 3;
+
+    if (self_is_ot) {
+      // Self is TankTwo (subgroup 2, lower guid than TankOne in subgroup 1).
+      s.base.self.unit.guid = t2_nearby.guid;
+      s.base.self.unit.name = t2_nearby.name;
+      s.base.self.unit.group = t2_party.group;
+      s.base.nearby.units = {t1_nearby, heal_dead_nearby, heal_alive_nearby};
+      party.members = {t1_party, heal_dead_party, heal_alive_party};
+    } else {
+      // Self is a DPS in subgroup 4; TankTwo is closer in `nearby.units` than
+      // TankOne, so distance order alone would swap tank and offtank.
+      s.base.self.unit.group = MakeGroup(pb::Role::DPS);
+      s.base.self.unit.group->subgroup = 4;
+      s.base.nearby.units = {t2_nearby, t1_nearby, heal_dead_nearby,
+                             heal_alive_nearby};
+      party.members = {t2_party, t1_party, heal_dead_party, heal_alive_party};
+    }
+    return s;
+  };
+
+  const Act to_tank = MustParse("always -> to tank").steps.front();
+  const Act to_offtank = MustParse("always -> to offtank").steps.front();
+  const Act to_healer = MustParse("always -> to healer").steps.front();
+
+  for (bool self_is_ot : {false, true}) {
+    const pb::Snapshot s = build_raid(self_is_ot);
+    // TankOne (subgroup 1) is always `tank`, TankTwo (subgroup 2) is always
+    // `offtank`, and LiveHealer beats closer DeadHealer.
+    EXPECT_EQ(ResolvePlanActTargetGuid(s, to_tank, T(1)), "0x0000000000000010");
+    EXPECT_EQ(ResolvePlanActTargetGuid(s, to_offtank, T(1)),
+              "0x0000000000000005");
+    EXPECT_EQ(ResolvePlanActTargetGuid(s, to_healer, T(1)),
+              "0x0000000000000031");
+  }
+}
+
+TEST(OrderEvaluatorTest, LfgRaidMainTankFlagsPreserveRaidOrder) {
+  pb::Snapshot s = MakeBaseSnapshot();
+  s.base.self.unit.group = MakeGroup(pb::Role::DPS);
+  s.base.self.unit.group->subgroup = 4;
+
+  pb::Raid& raid = s.ext.raid.emplace();
+  // Raid leader marked Subgroup-3 tank first, Subgroup-1 tank second.
+  raid.main_tanks = {"MtSub3", "MtSub1"};
+
+  pb::Unit mt3 =
+      MakeUnit("0x0000000000000090", "MtSub3", 18.0f, {18.0f, 0.0f, 0.0f});
+  pb::Unit mt1 =
+      MakeUnit("0x0000000000000010", "MtSub1", 8.0f, {8.0f, 0.0f, 0.0f});
+  s.base.nearby.units = {mt1, mt3};
+
+  pb::Party& party = s.ext.party.emplace();
+  pb::Unit mt3_p = mt3;
+  mt3_p.group = MakeGroup(pb::Role::TANK, /*main_tank=*/true);
+  mt3_p.group->subgroup = 3;
+  pb::Unit mt1_p = mt1;
+  mt1_p.group = MakeGroup(pb::Role::TANK, /*main_tank=*/true);
+  mt1_p.group->subgroup = 1;
+  party.members = {mt3_p, mt1_p};
+
+  const Act to_tank = MustParse("always -> to tank").steps.front();
+  const Act to_offtank = MustParse("always -> to offtank").steps.front();
+  EXPECT_EQ(ResolvePlanActTargetGuid(s, to_tank, T(1)), "0x0000000000000090");
+  EXPECT_EQ(ResolvePlanActTargetGuid(s, to_offtank, T(1)),
+            "0x0000000000000010");
+}
+
+TEST(OrderEvaluatorTest, AwayGroupCoversWholeRaidAndNeverLeaksSelfItGuid) {
+  OrderEvaluator eval;
+  eval.SetOrders({MustParse("Living Bomb on me -> away group 15")}, T(0));
+
+  pb::Snapshot s = MakeBaseSnapshot();
+  s.base.self.unit.group = MakeGroup(pb::Role::DPS);
+  s.base.self.unit.group->subgroup = 1;
+  s.base.self.unit.auras.push_back(MakeAura("Living Bomb"));
+  s.ext.raid.emplace();
+
+  // Stranger is 1 yd away (not in raid), dead raider is 2 yd away, subgroup 4
+  // raider is 4 yd away, own subgroup 1 raider is 25 yd away.
+  pb::Unit stranger =
+      MakeUnit("0x0000000000000099", "Stranger", 1.0f, {1.0f, 0.0f, 0.0f});
+  stranger.reaction = pb::Unit::FRIENDLY;
+  stranger.kind = pb::Unit::PLAYER;
+
+  pb::Unit dead_raider =
+      MakeUnit("0x0000000000000020", "DeadRaider", 2.0f, {2.0f, 0.0f, 0.0f});
+  dead_raider.dead = true;
+
+  pb::Unit sub4_raider =
+      MakeUnit("0x0000000000000040", "Sub4Raider", 4.0f, {4.0f, 0.0f, 0.0f});
+  pb::Unit sub1_raider =
+      MakeUnit("0x0000000000000011", "Sub1Raider", 25.0f, {25.0f, 0.0f, 0.0f});
+
+  s.base.nearby.units = {stranger, dead_raider, sub4_raider, sub1_raider};
+  pb::Party& party = s.ext.party.emplace();
+  pb::Unit dead_p = dead_raider;
+  dead_p.group = MakeGroup(pb::Role::DPS);
+  dead_p.group->subgroup = 1;
+  pb::Unit sub4_p = sub4_raider;
+  sub4_p.group = MakeGroup(pb::Role::DPS);
+  sub4_p.group->subgroup = 4;
+  pb::Unit sub1_p = sub1_raider;
+  sub1_p.group = MakeGroup(pb::Role::DPS);
+  sub1_p.group->subgroup = 1;
+  party.members = {dead_p, sub4_p, sub1_p};
+
+  const OrderEvalResult r = eval.OnSnapshot(s, T(1));
+  ASSERT_TRUE(r.act.has_value());
+  // Whole-raid `away group` picks the living subgroup 4 raider (4 yd), not the
+  // far subgroup 1 ally, dead raider, or stranger.
+  EXPECT_EQ(r.target_guid, "0x0000000000000040");
+  const std::optional<pb::Command::Act> wire =
+      OrderActToCommand(*r.act, r.it_guid, r.it_name, r.target_guid);
+  ASSERT_TRUE(wire.has_value());
+  EXPECT_EQ(wire->verb, pb::Command::Act::AWAY);
+  EXPECT_EQ(wire->thing, pb::Command::Act::GROUP);
+  EXPECT_EQ(wire->it_guid, "0x0000000000000040");
+
+  // Adversarial counter-test: when `target_guid` is empty (e.g. `then` chain
+  // advancing via `OnStepDone` or solo), `OrderActToCommand` must NOT leak
+  // `self`'s `it_guid` from `Living Bomb on me` into a `GROUP` act.
+  const std::optional<pb::Command::Act> wire_no_target =
+      OrderActToCommand(*r.act, r.it_guid, r.it_name, /*target_guid=*/"");
+  ASSERT_TRUE(wire_no_target.has_value());
+  EXPECT_EQ(wire_no_target->thing, pb::Command::Act::GROUP);
+  EXPECT_TRUE(wire_no_target->it_guid.empty());
+}
+
+TEST(OrderEvaluatorTest, SoloBotDoesNotResolveGroupOrRoleTargets) {
+  pb::Snapshot s = MakeBaseSnapshot();
+  pb::Unit stranger = MakeUnit("0x0000000000000099", "FriendlyStranger", 3.0f,
+                               {3.0f, 0.0f, 0.0f});
+  stranger.reaction = pb::Unit::FRIENDLY;
+  stranger.kind = pb::Unit::PLAYER;
+  s.base.nearby.units = {stranger};
+
+  EXPECT_TRUE(ResolvePlanActTargetGuid(
+                  s, MustParse("always -> to tank").steps.front(), T(1))
+                  .empty());
+  EXPECT_TRUE(ResolvePlanActTargetGuid(
+                  s, MustParse("always -> to offtank").steps.front(), T(1))
+                  .empty());
+  EXPECT_TRUE(ResolvePlanActTargetGuid(
+                  s, MustParse("always -> to healer").steps.front(), T(1))
+                  .empty());
+  EXPECT_TRUE(ResolvePlanActTargetGuid(
+                  s, MustParse("always -> away group 10").steps.front(), T(1))
+                  .empty());
+}
+
 }  // namespace
 }  // namespace harness

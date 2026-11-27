@@ -391,7 +391,16 @@ std::string FormatMobNotesBlock(std::string_view notes,
       added = true;
     }
   }
-  return added ? out : "";
+  if (!added) {
+    return "";
+  }
+  constexpr std::string_view kCheckNote =
+      "\nCheck whether these boss notes assign a mob to another role before "
+      "picking it.";
+  if (out.size() + kCheckNote.size() <= budget) {
+    out.append(kCheckNote);
+  }
+  return out;
 }
 
 constexpr std::string_view kEarlierSummaryHeading = "## Earlier summary";

@@ -1,0 +1,90 @@
+// Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
+//
+// Pure C++20 group/raid role and scope resolution shared by snapshot_builder,
+// act_executor, bot_manager, and world_script so the server and harness agree
+// on `tank`, `offtank`, `healer`, and `group` across solo, 5-man, hand-formed
+// 10/25-man raids, and LFG groups.
+
+#ifndef MOD_LLM_BRAIN_OPTIONS_GROUP_ROLES_H_
+#define MOD_LLM_BRAIN_OPTIONS_GROUP_ROLES_H_
+
+#include <cstdint>
+#include <optional>
+#include <vector>
+
+#include "snapshot/snapshot.h"
+
+namespace llm_brain {
+
+// AzerothCore-independent view of one group/raid member slot.
+struct GroupMemberRoleInput {
+  uint64_t guid = 0;
+  // 1-based raid subgroup (`slot.group + 1`); 0 when unknown.
+  uint32_t subgroup = 0;
+  // Dungeon Finder role from `slot.roles`, or ROLE_UNSPECIFIED in hand-formed
+  // parties/raids.
+  wlb::snapshot::Role lfg_role = wlb::snapshot::Role::ROLE_UNSPECIFIED;
+  // Raid leader Main Tank flag (`MEMBER_FLAG_MAINTANK`).
+  bool main_tank_flag = false;
+  // True when the member is online and in world (spec/stance can be inspected).
+  bool online_in_world = false;
+  // Spec/stance fallback (`PlayerbotAI::IsTank` / `PlayerbotAI::IsHeal`).
+  bool spec_tank = false;
+  bool spec_healer = false;
+  // True when a bot chose `Let <name> tank` (`GroupPolicy::not_tank`).
+  bool not_tank_policy = false;
+  // True when on the same map as the querying bot (targetable by acts).
+  bool same_map = true;
+  // True when alive (healer selection prefers living healers over corpses).
+  bool alive = true;
+  // Distance from the querying bot in yards.
+  float dist_yd = 0.0f;
+};
+
+// Resolves a member's effective `GroupPart::role`:
+// - Dungeon Finder role when set, else spec/stance role when `online_in_world`
+//   (TANK -> HEALER -> DPS), else ROLE_UNSPECIFIED when offline.
+// - Demotes TANK -> DPS when `not_tank_policy` is set.
+wlb::snapshot::Role ResolveEffectiveRole(const GroupMemberRoleInput& m);
+
+// True when `m` counts as a tank in its group/raid: explicit `main_tank_flag`
+// OR effective role == TANK.
+bool IsEffectiveTank(const GroupMemberRoleInput& m);
+
+// True when `m` counts as a healer in its group/raid: effective role == HEALER.
+bool IsEffectiveHealer(const GroupMemberRoleInput& m);
+
+// Orders all available (`online_in_world && same_map`) group/raid tanks so
+// index 0 is `tank` and indices 1.. are `offtank`:
+// 1. Explicit `main_tank_flag` members first, preserving raid slot order.
+// 2. Remaining effective-TANK members next, sorted deterministically by
+//    `(subgroup, guid)` so server and every bot's harness agree on `tank` vs
+//    `offtank` even in hand-formed raids without Main Tank flags.
+std::vector<uint64_t> ResolveGroupTankOrder(
+    const std::vector<GroupMemberRoleInput>& members);
+
+// Selects the best available (`online_in_world && same_map`) healer GUID for
+// `healer` acts: nearest living healer first, falling back to nearest dead
+// healer if all healers are dead. Returns nullopt if no healer is available.
+std::optional<uint64_t> ResolveNearestGroupHealer(
+    const std::vector<GroupMemberRoleInput>& members);
+
+// Candidate nearby player for `Command_Act::GROUP` (e.g. `away group`).
+struct NearbyGroupCandidate {
+  uint64_t guid = 0;
+  // True when the player is a member of the bot's party or raid (any subgroup).
+  bool in_same_group = false;
+  bool alive = true;
+  float dist_yd = 0.0f;
+};
+
+// Selects the nearest living player in the bot's whole party or raid (across
+// all subgroups), excluding `bot_guid`. Returns nullopt when solo or when no
+// living group member is nearby.
+std::optional<uint64_t> ResolveNearestGroupMember(
+    uint64_t bot_guid,
+    const std::vector<NearbyGroupCandidate>& candidates);
+
+}  // namespace llm_brain
+
+#endif  // MOD_LLM_BRAIN_OPTIONS_GROUP_ROLES_H_

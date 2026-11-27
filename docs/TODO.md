@@ -18,9 +18,6 @@ Live verification following the `70b0878` team-play P0 fixes:
 Team-play P1 gaps and selected P2 items from the `70b0878` review:
 
 ### Raid scale & coordination
-- **Role mismatch (harness vs. server):** Harness falls back to spec role while server checks only
-  Main Tank flag or LFG role; in hand-formed raids `tank`/`offtank`/`healer` orders fail or target
-  the wrong player (`order_evaluator.cc:383-418` vs `act_executor.cc:259-283,407-425`).
 - **Standing orders limitations:** Compiled once on instance entry from the first 2,000 bytes of
   notes; never recompiled per boss; can't filter by role; `phase N` never fires because server
   never fills encounter data (`prompt.cc:34,933-945`; `bot_loop.cc:1199-1254`; `orders.wlb:16`;
@@ -30,7 +27,6 @@ Team-play P1 gaps and selected P2 items from the `70b0878` review:
 - **Boss notes coverage & wiki fallback:** TOC is 5-man only (no Trial of the Crusader), AQ40 has
   none, Naxx is missing Heigan/4H/KT, no tank-swap orders, UK/Nex/GD cover 1 boss each; having
   *any* notes file disables wiki boss fallback (`prompt.cc:789-792`, `knowledge.cc:186-191`).
-- **`away group` scope mismatch:** `away group` means subgroup on server vs. whole raid in harness.
 
 ### Questing & travel
 - **No boats, zeppelins, or portals:** `Sylva` (Teldrassil) and `Talaan` (Azuremyst) are stuck on

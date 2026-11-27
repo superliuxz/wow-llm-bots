@@ -92,6 +92,7 @@
 #include "config/config_parsing.h"
 #include "options/act_geometry.h"
 #include "options/exec_shared.h"
+#include "options/group_roles.h"
 #include "popup_watch.h"
 #include "snapshot/perception.h"
 #include "snapshot/snapshot.h"
@@ -296,8 +297,8 @@ ErrandHoldInput MakeErrandHoldInput(Player* bot) {
   };
 }
 
-// Whether `member` is a tank in `group` (main-tank flag, LFG tank role, or
-// tank spec/stance without `not_tank`).
+// Whether `member` is a tank in `group` (unified via `group_roles.h`: main-tank
+// flag, LFG tank role, or tank spec/stance, respecting `not_tank`).
 bool IsGroupTankMember(Group* group, Player* member) {
   if (!group || !member || !member->IsInWorld()) {
     return false;
@@ -307,14 +308,23 @@ bool IsGroupTankMember(Group* group, Player* member) {
     if (slot.guid != guid) {
       continue;
     }
-    if ((slot.flags & MEMBER_FLAG_MAINTANK) != 0) {
-      return true;
+    GroupMemberRoleInput in;
+    in.guid = slot.guid.GetRawValue();
+    in.subgroup = static_cast<uint32_t>(slot.group) + 1;
+    in.main_tank_flag = (slot.flags & MEMBER_FLAG_MAINTANK) != 0;
+    if (slot.roles & lfg::PLAYER_ROLE_TANK) {
+      in.lfg_role = wlb::snapshot::Role::TANK;
+    } else if (slot.roles & lfg::PLAYER_ROLE_HEALER) {
+      in.lfg_role = wlb::snapshot::Role::HEALER;
+    } else if (slot.roles & lfg::PLAYER_ROLE_DAMAGE) {
+      in.lfg_role = wlb::snapshot::Role::DPS;
     }
-    if (slot.roles != 0) {
-      return (slot.roles & lfg::PLAYER_ROLE_TANK) != 0;
-    }
-    return PlayerbotAI::IsTank(member) &&
-           !BotManager::GetGroupPolicy(member).not_tank;
+    in.online_in_world = true;
+    in.spec_tank = PlayerbotAI::IsTank(member);
+    in.spec_healer = PlayerbotAI::IsHeal(member);
+    in.not_tank_policy =
+        GET_PLAYERBOT_AI(member) && BotManager::GetGroupPolicy(member).not_tank;
+    return IsEffectiveTank(in);
   }
   return false;
 }

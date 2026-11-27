@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "Bag.h"
+#include "CharmInfo.h"
 #include "Creature.h"
 #include "CreatureData.h"
 #include "DBCStores.h"
@@ -58,6 +59,7 @@
 #include "options/exec_npc.h"
 #include "options/exec_shared.h"
 #include "options/exec_social.h"
+#include "options/group_roles.h"
 #include "options/leader_travel.h"
 #include "options/option_facts.h"
 #include "options/options.h"
@@ -219,30 +221,19 @@ pb::Role PartyRole(uint8_t roles) {
 
 // The Dungeon Finder role when one was picked, else what the player's spec
 // and stance say (what a player learns by inspecting: a prot warrior tanks, a
-// holy priest heals), so roles show in every group, not only LFG (RH-M1).
-pb::Role RoleBySpecOrLfg(Player* member, uint8_t lfg_roles) {
-  const pb::Role lfg = PartyRole(lfg_roles);
-  if (lfg != pb::Role::ROLE_UNSPECIFIED || member == nullptr) {
-    return lfg;
-  }
-  if (PlayerbotAI::IsTank(member)) {
-    return pb::Role::TANK;
-  }
-  if (PlayerbotAI::IsHeal(member)) {
-    return pb::Role::HEALER;
-  }
-  return pb::Role::DPS;
-}
-
-// A bot that chose `Let <name> tank` plays dps in this group whatever its
-// Dungeon Finder role says, so it (and its party) reads the role it plays.
+// holy priest heals), demoting `TANK` to `DPS` when a bot chose `Let <name>
+// tank` (`not_tank`). Shared via `ResolveEffectiveRole` with act execution.
 pb::Role MemberRole(Player* member, uint8_t lfg_roles) {
-  const pb::Role role = RoleBySpecOrLfg(member, lfg_roles);
-  if (role == pb::Role::TANK && member && GET_PLAYERBOT_AI(member) &&
-      BotManager::GetGroupPolicy(member).not_tank) {
-    return pb::Role::DPS;
+  GroupMemberRoleInput in;
+  in.lfg_role = PartyRole(lfg_roles);
+  if (member != nullptr) {
+    in.online_in_world = true;
+    in.spec_tank = PlayerbotAI::IsTank(member);
+    in.spec_healer = PlayerbotAI::IsHeal(member);
+    in.not_tank_policy =
+        GET_PLAYERBOT_AI(member) && BotManager::GetGroupPolicy(member).not_tank;
   }
-  return role;
+  return ResolveEffectiveRole(in);
 }
 
 void FillSelf(Player* bot, pb::Self* self) {
@@ -319,6 +310,9 @@ void FillSelf(Player* bot, pb::Self* self) {
       aura.remaining_s = static_cast<float>(base->GetDuration()) / 1000.0f;
     }
     aura.stacks = base->GetStackAmount() > 1 ? base->GetStackAmount() : 0;
+    if (const Unit* caster = base->GetCaster()) {
+      aura.caster = caster->GetName();
+    }
   }
 
   unit.raid_marker = RaidMarkerOf(bot, bot->GetGUID().GetRawValue());
@@ -363,6 +357,30 @@ void FillSelf(Player* bot, pb::Self* self) {
   self->on_transport = bot->GetTransport() != nullptr;
   self->money = bot->GetMoney();
   FillIndicators(bot, &self->indicators);
+  {
+    // Standard spell global cooldown (StartRecoveryCategory == 133 across all
+    // classes in WoW 3.3.5a). Cache one SpellInfo with category 133 so every
+    // snapshot tick is O(1).
+    static const SpellInfo* s_gcd_spell = nullptr;
+    if (!s_gcd_spell) {
+      constexpr uint32_t kStandardGcdCategory = 133;
+      for (const auto& [spell_id, player_spell] : bot->GetSpellMap()) {
+        if (!player_spell || player_spell->State == PLAYERSPELL_REMOVED) {
+          continue;
+        }
+        if (const SpellInfo* info = sSpellMgr->GetSpellInfo(spell_id);
+            info && info->StartRecoveryCategory == kStandardGcdCategory) {
+          s_gcd_spell = info;
+          break;
+        }
+      }
+    }
+    if (s_gcd_spell &&
+        bot->GetGlobalCooldownMgr().HasGlobalCooldown(s_gcd_spell)) {
+      self->gcd_remaining_ms =
+          bot->GetGlobalCooldownMgr().GetGlobalCooldown(s_gcd_spell);
+    }
+  }
   self->control = ReadControlState(bot);
   if (const std::optional<RecentSpellMiss> miss = CurrentSpellMiss(bot)) {
     pb::Self::SpellMiss& out = self->spell_miss.emplace();

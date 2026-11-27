@@ -68,6 +68,7 @@
 #include "options/exec_npc.h"
 #include "options/exec_shared.h"
 #include "options/exec_social.h"
+#include "options/group_roles.h"
 #include "options/option_executor.h"
 #include "options/option_facts.h"
 #include "options/options.h"
@@ -1020,26 +1021,41 @@ class LlmBrainWorldScript : public WorldScript {
     return nullptr;
   }
 
-  // The group's tank as party frames show it: the Dungeon Finder role when
-  // one was picked, else the spec's (snapshot_builder MemberRole).
-  static bool IsGroupTank(Group* group, Player* bot) {
+  static GroupMemberRoleInput MemberRoleInput(Group* group, Player* member) {
+    GroupMemberRoleInput in;
+    in.guid = member->GetGUID().GetRawValue();
+    in.online_in_world = member->IsInWorld();
+    if (in.online_in_world) {
+      in.spec_tank = PlayerbotAI::IsTank(member);
+      in.spec_healer = PlayerbotAI::IsHeal(member);
+      in.not_tank_policy = GET_PLAYERBOT_AI(member) &&
+                           BotManager::GetGroupPolicy(member).not_tank;
+    }
     for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
-      if (slot.guid == bot->GetGUID() && slot.roles != 0) {
-        return (slot.roles & lfg::PLAYER_ROLE_TANK) != 0;
+      if (slot.guid == member->GetGUID()) {
+        in.subgroup = static_cast<uint32_t>(slot.group) + 1;
+        in.main_tank_flag = (slot.flags & MEMBER_FLAG_MAINTANK) != 0;
+        if (slot.roles & lfg::PLAYER_ROLE_TANK) {
+          in.lfg_role = wlb::snapshot::Role::TANK;
+        } else if (slot.roles & lfg::PLAYER_ROLE_HEALER) {
+          in.lfg_role = wlb::snapshot::Role::HEALER;
+        } else if (slot.roles & lfg::PLAYER_ROLE_DAMAGE) {
+          in.lfg_role = wlb::snapshot::Role::DPS;
+        }
+        break;
       }
     }
-    return PlayerbotAI::IsTank(bot);
+    return in;
   }
 
-  // The group's healer as party frames show it: the Dungeon Finder role when
-  // one was picked, else the spec's (snapshot_builder MemberRole).
+  // The group's tank as party frames show it (unified via `group_roles.h`).
+  static bool IsGroupTank(Group* group, Player* bot) {
+    return IsEffectiveTank(MemberRoleInput(group, bot));
+  }
+
+  // The group's healer as party frames show it (unified via `group_roles.h`).
   static bool IsGroupHealer(Group* group, Player* member) {
-    for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
-      if (slot.guid == member->GetGUID() && slot.roles != 0) {
-        return (slot.roles & lfg::PLAYER_ROLE_HEALER) != 0;
-      }
-    }
-    return PlayerbotAI::IsHeal(member);
+    return IsEffectiveHealer(MemberRoleInput(group, member));
   }
 
   // The facts behind the pull gate (OptionFacts::hold_pulls/hold_explore):

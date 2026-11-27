@@ -132,6 +132,8 @@ add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/options/action_types_unittest.cc"
   "${WLB_MODULE_SRC}/options/act_geometry.cc"
   "${WLB_MODULE_SRC}/options/act_geometry_unittest.cc"
+  "${WLB_MODULE_SRC}/options/group_roles.cc"
+  "${WLB_MODULE_SRC}/options/group_roles_unittest.cc"
   "${WLB_MODULE_SRC}/options/leader_travel.cc"
   "${WLB_MODULE_SRC}/options/leader_travel_unittest.cc"
   "${WLB_MODULE_SRC}/options/loot_roll_policy.cc"

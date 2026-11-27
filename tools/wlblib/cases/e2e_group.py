@@ -3218,9 +3218,10 @@ def _case_heal_reaction():
         "Renew",
         "Power Word: Shield",
     )
-    # Only count Renew as an instant healer aura (not Power Word: Shield, which
-    # Shadow Priest tank Loada can cast on itself when low health).
-    INSTANT_HEAL_AURAS = ("Renew",)
+    # Instant healer auras on the tank, filtered to `caster == "Loadb"` so
+    # Shadow Priest tank Loada casting Power Word: Shield on itself never
+    # counts as a healer reaction while Loadb's real PW:S / Renew does.
+    INSTANT_HEAL_AURAS = ("Renew", "Power Word: Shield")
     T_US_RE = re.compile(r"t_us=(\d+)")
 
     def run(stack):
@@ -3289,6 +3290,14 @@ def _case_heal_reaction():
             auras = (snap or {}).get("base", {}).get("self", {}).get("unit", {}).get("auras") or []
             return {a.get("name", "") for a in auras}
 
+        def healer_auras(snap):
+            auras = (snap or {}).get("base", {}).get("self", {}).get("unit", {}).get("auras") or []
+            out = {}
+            for a in auras:
+                if a.get("caster") == "Loadb" and a.get("name") in INSTANT_HEAL_AURAS:
+                    out[a["name"]] = float(a.get("remaining_s") or 0.0)
+            return out
+
         def tank_rel(healer_snap):
             for m in (healer_snap or {}).get("ext", {}).get("party", {}).get("members", []):
                 if m.get("name") == "Loada":
@@ -3343,7 +3352,9 @@ def _case_heal_reaction():
 
             for trial in range(TRIALS):
                 # Reset tank to full HP and wait for healer to finish any prior
-                # cast so each trial measures a clean reaction to a fresh drop.
+                # cast and global cooldown so each trial measures a clean
+                # reaction to a fresh drop (an instant buff/DoT cast at 100% HP
+                # has no cast bar but still locks healing behind a 1.5 s GCD).
                 top_out = server.console("llmtest sethp Loada 100", wait_s=0.2, inst=TEST)
                 m_top = T_US_RE.search(top_out)
                 expect(m_top, f"trial {trial + 1}: sethp 100 did not report t_us: {top_out!r}")
@@ -3353,13 +3364,14 @@ def _case_heal_reaction():
                         (hs := latest("Loadb", top_us)) is not None
                         and in_combat(hs)
                         and not cast_name(hs)
+                        and int(hs.get("base", {}).get("self", {}).get("gcd_remaining_ms", 0)) == 0
                         and (ts := latest("Loada", top_us)) is not None
                         and in_combat(ts)
                     ),
                     8.0,
                 )
                 expect(idle, f"trial {trial + 1}: healer did not finish prior cast / tank left combat")
-                pre_tank_auras = aura_names(latest("Loada", top_us))
+                pre_healer_auras = healer_auras(latest("Loada", top_us))
 
                 # Drop tank HP below LowHealth (52%) and record exact world-thread t_us.
                 drop_out = server.console(
@@ -3379,9 +3391,10 @@ def _case_heal_reaction():
                             if sp in HEAL_SPELLS:
                                 return (t_us, sp)
                         elif s.get("bot") == "Loada":
-                            new_auras = aura_names(s) - pre_tank_auras
-                            for a in INSTANT_HEAL_AURAS:
-                                if a in new_auras:
+                            cur_auras = healer_auras(s)
+                            for a, rem in cur_auras.items():
+                                prev = pre_healer_auras.get(a)
+                                if prev is None or rem > prev + 1.0:
                                     return (t_us, a)
                     return None
 

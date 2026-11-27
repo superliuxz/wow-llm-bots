@@ -586,6 +586,8 @@ TEST(PromptTest, BossNotesForNearbyMobsAppearNearScreenAndPreserveKvPrefix) {
   EXPECT_NE(mob_section.find("option 2 (Little Ooze):"), std::string::npos);
   EXPECT_NE(mob_section.find("off-tank picks up the Little Oozes"),
             std::string::npos);
+  EXPECT_NE(mob_section.find("assign a mob to another role"),
+            std::string::npos);
   // Unmatched mobs (Big Ooze) are not repeated in the mob reminder.
   EXPECT_EQ(mob_section.find("Unstable Ooze Explosion"), std::string::npos);
 
