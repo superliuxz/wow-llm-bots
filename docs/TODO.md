@@ -18,10 +18,6 @@ Live verification following the `70b0878` team-play P0 fixes:
 Team-play P1 gaps and selected P2 items from the `70b0878` review:
 
 ### Raid scale & coordination
-- **Standing orders limitations:** Compiled once on instance entry from the first 2,000 bytes of
-  notes; never recompiled per boss; can't filter by role; `phase N` never fires because server
-  never fills encounter data (`prompt.cc:34,933-945`; `bot_loop.cc:1199-1254`; `orders.wlb:16`;
-  `order_evaluator.cc:1117`).
 - **LLM throughput at 25-man scale:** Emotes, `/rw`, raid deaths, and loot rolls each wake all 24
   bots (~7 wakes/s capacity, no tank/healer priority).
 - **Boss notes coverage & wiki fallback:** TOC is 5-man only (no Trial of the Crusader), AQ40 has

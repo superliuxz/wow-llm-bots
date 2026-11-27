@@ -13,10 +13,12 @@
 #include <vector>
 
 #include "Creature.h"
+#include "CreatureAI.h"
 #include "CreatureGroups.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
 #include "DynamicObject.h"
+#include "EventMap.h"
 #include "GameObject.h"
 #include "GameObjectData.h"
 #include "Group.h"
@@ -27,6 +29,7 @@
 #include "Player.h"
 #include "Position.h"
 #include "QuestDef.h"
+#include "ScriptedCreature.h"
 #include "SharedDefines.h"
 #include "Spell.h"
 #include "SpellAuraDefines.h"
@@ -42,6 +45,7 @@
 #include "World.h"
 #include "base/time/time.h"
 #include "options/exec_items.h"
+#include "snapshot/encounter_phase.h"
 #include "snapshot/perception.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/world_util.h"
@@ -456,6 +460,35 @@ void FillNameplate(Unit* unit, Player* bot, pb::Unit* out) {
         creature->hasLootRecipient() && !creature->isTappedBy(bot);
     if (!bot->IsInCombat()) {
       out->quest_marker = QuestMarker(bot, creature);
+    }
+    const bool is_boss =
+        !creature->IsPet() && !creature->IsTotem() &&
+        (creature->IsDungeonBoss() || creature->isWorldBoss() ||
+         dynamic_cast<const BossAI*>(creature->AI()) != nullptr);
+    if (is_boss) {
+      struct CreatureAIEvents : CreatureAI {
+        static uint8_t PhaseMask(const CreatureAI& ai) {
+          return (ai.*(&CreatureAIEvents::events)).GetPhaseMask();
+        }
+      };
+      struct WorldBossAIEvents : WorldBossAI {
+        static uint8_t PhaseMask(const WorldBossAI& ai) {
+          return (ai.*(&WorldBossAIEvents::events)).GetPhaseMask();
+        }
+      };
+      uint8_t phase_mask = 0;
+      bool engaged = false;
+      if (const CreatureAI* ai = creature->AI()) {
+        engaged = ai->IsEngaged();
+        if (const auto* wbai = dynamic_cast<const WorldBossAI*>(ai)) {
+          phase_mask = WorldBossAIEvents::PhaseMask(*wbai);
+        }
+        if (phase_mask == 0) {
+          phase_mask = CreatureAIEvents::PhaseMask(*ai);
+        }
+      }
+      out->boss.emplace().phase =
+          PhaseFromEventMapMask(phase_mask, creature->IsInCombat() || engaged);
     }
   }
 }

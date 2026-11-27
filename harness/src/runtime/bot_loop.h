@@ -309,6 +309,10 @@ class BotLoop {
     // compiled_orders_cache_ so truncated entrance notes never pollute the
     // full-file key).
     std::string last_selected_notes;
+    // Notes slice for which standing orders were last compiled/installed or
+    // requested in the current instance, so approaching a new boss triggers
+    // per-boss recompilation (or cache switch) without waking on every tick.
+    std::string compiled_notes;
     // Outbound chat command IDs so chat error events with a real command_id
     // are recognized and wake the brain instead of being dropped as stale.
     std::deque<uint32_t> recent_chat_command_ids;

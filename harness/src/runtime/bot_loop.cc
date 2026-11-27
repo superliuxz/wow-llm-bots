@@ -984,6 +984,7 @@ void BotLoop::ResetBotSession(BotState* state, bool cancel_in_flight) {
   state->last_map.clear();
   state->notes.clear();
   state->last_selected_notes.clear();
+  state->compiled_notes.clear();
   state->recent_chat_command_ids.clear();
   state->pending_says.clear();
   state->said_lines.clear();
@@ -1226,6 +1227,7 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   const bool left_or_changed_instance =
       state.was_in_instance && (!in_instance || state.last_map != cur_map);
   if (left_or_changed_instance) {
+    state.compiled_notes.clear();
     if (!in_instance) {
       state.notes.clear();
       state.last_selected_notes.clear();
@@ -1274,22 +1276,33 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
         state.notes = lookup(state.latest_snapshot->base.where.zone);
       }
     }
+  }
+  if (in_instance && !state.notes.empty()) {
+    bool matched_boss = false;
     const std::string selected_notes =
-        SelectRelevantNotes(state.notes, *state.latest_snapshot);
-    if (!selected_notes.empty()) {
+        SelectRelevantNotes(state.notes, *state.latest_snapshot, &matched_boss);
+    const bool should_compile =
+        !selected_notes.empty() &&
+        (entered_instance ||
+         (matched_boss && selected_notes != state.compiled_notes));
+    if (should_compile) {
       const CompiledOrdersKey key{bot, cur_map, selected_notes};
       if (auto cache_it = compiled_orders_cache_.find(key);
           cache_it != compiled_orders_cache_.end() &&
           !cache_it->second.empty()) {
         state.orders.SetOrders(cache_it->second, received_at);
+        state.compiled_notes = selected_notes;
         Log(base::StrCat({bot, ": pre-pull orders cache hit for ", cur_map,
                           " (", std::to_string(cache_it->second.size()),
                           " orders)"}));
       } else if (!state.latest_snapshot->base.self.in_combat) {
+        state.compiled_notes = selected_notes;
         state.has_ever_woken = true;
-        WakeBot(bot, Urgency::kUrgent,
-                base::StrCat({"entered instance ", cur_map,
-                              ": compile standing orders from boss notes"}));
+        WakeBot(
+            bot, Urgency::kUrgent,
+            base::StrCat(
+                {entered_instance ? "entered instance " : "approached boss in ",
+                 cur_map, ": compile standing orders from boss notes"}));
         pre_pull_woke = true;
       }
     }
@@ -2077,6 +2090,9 @@ void BotLoop::OnReply(const std::string& bot,
         } else if (!plan->orders.empty()) {
           if (state.orders.SetOrders(plan->orders, now)) {
             SendStopMoving(bot);
+          }
+          if (!state.last_selected_notes.empty()) {
+            state.compiled_notes = state.last_selected_notes;
           }
         }
         if (!plan->orders.empty() &&

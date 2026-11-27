@@ -1175,6 +1175,33 @@ CheckResult EvalCheck(const SnapshotView& view,
               }
               return {true, std::nullopt};
             }
+            case grammar::MyState::kTank: {
+              const std::vector<Entity> tanks = view.FindTanks();
+              const bool is_tank = std::ranges::any_of(
+                  tanks,
+                  [&](const Entity& e) { return SameEntity(e, view.self); });
+              return {is_tank, std::nullopt};
+            }
+            case grammar::MyState::kOfftank: {
+              const std::vector<Entity> tanks = view.FindTanks();
+              bool is_offtank = false;
+              for (size_t i = 1; i < tanks.size(); ++i) {
+                if (SameEntity(tanks[i], view.self)) {
+                  is_offtank = true;
+                  break;
+                }
+              }
+              return {is_offtank, std::nullopt};
+            }
+            case grammar::MyState::kHealer:
+              return {
+                  view.snap.base.self.unit.group &&
+                      view.snap.base.self.unit.group->role == pb::Role::HEALER,
+                  std::nullopt};
+            case grammar::MyState::kDps:
+              return {view.snap.base.self.unit.group &&
+                          view.snap.base.self.unit.group->role == pb::Role::DPS,
+                      std::nullopt};
           }
           return {};
 

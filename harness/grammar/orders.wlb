@@ -13,7 +13,7 @@ env OrderEnv {
 words Who     { me, tank, offtank, healer, leader, anyone, boss, it }
 words Icon    { skull, cross, square, moon, triangle, diamond, circle, star }
 words State   { flying, grounded, untargetable, submerged }
-words MyState { "in vehicle", mounted, swimming, "nearest to it" }
+words MyState { "in vehicle", mounted, swimming, "nearest to it", tank, offtank, healer, dps }
 words Cmp     { "<", ">" }
 words Stop    { casting, attacking, moving }
 words PetCmd  { stay, follow, passive, defensive, dismiss }

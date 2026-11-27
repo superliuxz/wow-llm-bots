@@ -838,7 +838,11 @@ PromptInput AssemblePromptInput(const PromptAssemblyContext& ctx,
 }
 
 std::string SelectRelevantNotes(std::string_view full_notes,
-                                const wlb::snapshot::Snapshot& snapshot) {
+                                const wlb::snapshot::Snapshot& snapshot,
+                                bool* matched_boss) {
+  if (matched_boss) {
+    *matched_boss = false;
+  }
   if (full_notes.empty()) {
     return "";
   }
@@ -924,6 +928,9 @@ std::string SelectRelevantNotes(std::string_view full_notes,
   }
 
   if (!matched.empty()) {
+    if (matched_boss) {
+      *matched_boss = true;
+    }
     std::string out(preamble);
     bool added_section = false;
     for (const Section* sec : matched) {

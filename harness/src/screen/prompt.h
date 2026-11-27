@@ -93,7 +93,8 @@ struct PromptInput {
 // large raid files (ICC, Ulduar) are never cut mid-order and stay in sync with
 // `CollectOrderNames`.
 std::string SelectRelevantNotes(std::string_view full_notes,
-                                const wlb::snapshot::Snapshot& snapshot);
+                                const wlb::snapshot::Snapshot& snapshot,
+                                bool* matched_boss = nullptr);
 
 // Formats raw `memory.md` (optional `## Earlier summary` + newest `max_recent`
 // lines) for `PromptInput::memory`.

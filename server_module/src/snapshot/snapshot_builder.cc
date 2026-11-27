@@ -16,6 +16,7 @@
 #include "Bag.h"
 #include "CharmInfo.h"
 #include "Creature.h"
+#include "CreatureAI.h"
 #include "CreatureData.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
@@ -40,6 +41,7 @@
 #include "PlayerbotAI.h"
 #include "Playerbots.h"
 #include "QuestDef.h"
+#include "ScriptedCreature.h"
 #include "SharedDefines.h"
 #include "Spell.h"
 #include "SpellAuraDefines.h"
@@ -64,6 +66,7 @@
 #include "options/option_facts.h"
 #include "options/options.h"
 #include "options/position_facts.h"
+#include "snapshot/encounter_phase.h"
 #include "snapshot/nearby_builder.h"
 #include "snapshot/panels_builder.h"
 #include "snapshot/perception.h"
@@ -461,6 +464,65 @@ void FillCombat(Player* bot, NearbyBuilder* nearby, pb::Extensions* ext) {
     res.combo_points = combo;
     res.soul_shards = shards;
   }
+}
+
+bool IsBossCreature(const Creature* creature) {
+  return creature && !creature->IsPet() && !creature->IsTotem() &&
+         (creature->IsDungeonBoss() || creature->isWorldBoss() ||
+          dynamic_cast<const BossAI*>(creature->AI()) != nullptr);
+}
+
+void FillEncounter(Player* bot,
+                   NearbyBuilder* nearby,
+                   const pb::Snapshot& snapshot,
+                   pb::Extensions* ext) {
+  std::vector<Creature*> bosses;
+  std::vector<EncounterBossCandidate> candidates;
+  Unit* selected = bot->GetSelectedUnit();
+  if (!selected) {
+    selected = bot->GetVictim();
+  }
+  auto consider = [&](Unit* unit) {
+    Creature* creature = unit ? unit->ToCreature() : nullptr;
+    if (!creature || !creature->IsInWorld() || !IsBossCreature(creature)) {
+      return;
+    }
+    for (Creature* seen : bosses) {
+      if (seen->GetGUID() == creature->GetGUID()) {
+        return;
+      }
+    }
+    const CreatureAI* ai = creature->AI();
+    bosses.push_back(creature);
+    candidates.push_back(EncounterBossCandidate{
+        .is_boss = true,
+        .dead = !creature->IsAlive(),
+        .friendly = bot->IsFriendlyTo(creature),
+        .in_combat = creature->IsInCombat(),
+        .engaged = ai && ai->IsEngaged(),
+        .is_target = selected && selected->GetGUID() == creature->GetGUID(),
+        .dist_yd = bot->GetExactDist(creature),
+    });
+  };
+
+  consider(selected);
+  for (Unit* attacker : bot->getAttackers()) {
+    consider(attacker);
+  }
+  for (const pb::Unit& u : snapshot.base.nearby.units) {
+    if (u.kind != pb::Unit::NPC || u.dead || u.guid.empty() ||
+        u.reaction == pb::Unit::FRIENDLY) {
+      continue;
+    }
+    consider(ObjectAccessor::GetCreature(*bot, ParseSnapshotGuid(u.guid)));
+  }
+
+  const int idx = SelectEncounterBossIndex(candidates);
+  if (idx < 0) {
+    return;
+  }
+  pb::Encounter& enc = ext->encounter.emplace();
+  nearby->FillUnit(bot, bosses[static_cast<size_t>(idx)], &enc.boss.emplace());
 }
 
 // A party member's unfinished quests and the first objective left on each
@@ -1031,6 +1093,7 @@ NearbyBuilder::Stats SnapshotBuilder::Build(Player* bot,
   const NearbyBuilder::Stats stats = nearby_.Build(bot, &base.nearby);
   FillTarget(bot, &nearby_, &snapshot->ext);
   FillCombat(bot, &nearby_, &snapshot->ext);
+  FillEncounter(bot, &nearby_, *snapshot, &snapshot->ext);
   FillParty(bot, &nearby_, in_combat, &snapshot->ext,
             &out_facts->party_targets);
   FillActionBars(bot, &snapshot->ext, now);

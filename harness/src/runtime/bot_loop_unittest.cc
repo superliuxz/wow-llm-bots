@@ -4740,5 +4740,146 @@ TEST(BotLoopTest, RedundantRezOfferDoesNotWakeBrainButAliveAgainDoes) {
             std::string::npos);
 }
 
+TEST(BotLoopTest, PerBossOrderRecompilationCachesAndRespectsCombatAndReset) {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "wlb_bot_loop_per_boss_test";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir / "Raida");
+  {
+    std::ofstream out(tmp_dir / "Raida" / "notes.md");
+    out << "# Icecrown Citadel\n\n";
+    for (int i = 0; i < 10; ++i) {
+      out << "## Early Boss " << i << "\n\n"
+          << std::string(220, 'A') << "\n\n"
+          << "```\nColdflame cast -> out of it\n```\n\n";
+    }
+    out << "## Sindragosa\n\n"
+        << "- **Blistering Cold**: move out.\n\n"
+        << "```\nBlistering Cold cast -> out of it\n```\n\n"
+        << "## The Lich King\n\n"
+        << "- **Quake**: move to 40 yd.\n\n"
+        << "```\nQuake cast -> to 40 yd from boss\n```\n";
+  }
+
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.bots_dir = tmp_dir.string();
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& c) { sent.push_back(c); });
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  auto make_icc_snap = [&](uint32_t seq, int sec, bool in_combat) {
+    pb::Snapshot s =
+        MakeLiveSnap("Raida", seq, t0 + base::Seconds(sec), in_combat);
+    s.base.where.in_instance = true;
+    s.base.where.map = "Icecrown Citadel";
+    AddKeep(&s);
+    return s;
+  };
+
+  // 1) Instance entry with no boss nearby compiles leading entrance notes.
+  loop.OnSnapshot(make_icc_snap(1, 0, /*in_combat=*/false), t0);
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("## Early Boss 0"),
+            std::string::npos);
+  EXPECT_EQ(brain.front_request().user.find("## Sindragosa"),
+            std::string::npos);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 300\n"
+      "order: Coldflame cast -> out of it");
+  ASSERT_EQ(brain.size(), 0u);
+
+  // 2) Approaching Sindragosa (beyond 2,000 B) out of combat triggers per-boss
+  //    recompilation with Sindragosa's notes.
+  pb::Snapshot s2 = make_icc_snap(2, 5, /*in_combat=*/false);
+  pb::Unit sindra;
+  sindra.guid = "0xF130009000000001";
+  sindra.name = "Sindragosa";
+  sindra.kind = pb::Unit::NPC;
+  sindra.reaction = pb::Unit::HOSTILE;
+  sindra.rel.dist_yd = 30.0f;
+  s2.base.nearby.units.push_back(sindra);
+  loop.OnSnapshot(s2, t0 + base::Seconds(5));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("approached boss in Icecrown"),
+            std::string::npos);
+  EXPECT_NE(brain.front_request().user.find("## Sindragosa"),
+            std::string::npos);
+  EXPECT_EQ(brain.front_request().user.find("## Early Boss 0"),
+            std::string::npos);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 300\n"
+      "order: Blistering Cold cast -> out of it");
+  ASSERT_EQ(brain.size(), 0u);
+
+  // 3) Walking into trash (no boss nearby) must NOT trigger a redundant wake.
+  loop.OnSnapshot(make_icc_snap(3, 10, /*in_combat=*/false),
+                  t0 + base::Seconds(10));
+  EXPECT_EQ(brain.size(), 0u);
+
+  // 4) Adversarial counter-test (P0 combat priority): approaching an uncached
+  //    boss (The Lich King via ext.encounter) while entering combat must wake
+  //    for P0 combat (not a non-combat pre-pull compile wake), and if combat
+  //    ends without compiling Lich King's orders, pre-pull compilation fires.
+  pb::Snapshot s4 = make_icc_snap(4, 15, /*in_combat=*/true);
+  pb::Unit lk;
+  lk.guid = "0xF130009000000002";
+  lk.name = "The Lich King";
+  lk.kind = pb::Unit::NPC;
+  lk.reaction = pb::Unit::HOSTILE;
+  lk.boss = pb::BossPart{.phase = 1};
+  s4.ext.encounter.emplace().boss = lk;
+  loop.OnSnapshot(s4, t0 + base::Seconds(15));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_EQ(brain.front_request().user.find("approached boss in"),
+            std::string::npos);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300");
+  ASSERT_EQ(brain.size(), 0u);
+
+  // 5) Once out of combat near The Lich King, per-boss compilation fires.
+  pb::Snapshot s5 = make_icc_snap(5, 20, /*in_combat=*/false);
+  s5.ext.encounter.emplace().boss = lk;
+  loop.OnSnapshot(s5, t0 + base::Seconds(20));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("approached boss in Icecrown"),
+            std::string::npos);
+  EXPECT_NE(brain.front_request().user.find("## The Lich King"),
+            std::string::npos);
+  brain.FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 300\n"
+      "order: Quake cast -> to 40 yd from boss");
+  ASSERT_EQ(brain.size(), 0u);
+
+  // 6) Re-approaching Sindragosa hits the per-boss cache without waking LLM.
+  pb::Snapshot s6 = make_icc_snap(6, 25, /*in_combat=*/false);
+  s6.base.nearby.units.push_back(sindra);
+  loop.OnSnapshot(s6, t0 + base::Seconds(25));
+  EXPECT_EQ(brain.size(), 0u);
+
+  // 7) Adversarial counter-test (leave instance / map-change reset): leaving
+  //    clears compiled_notes & active orders; re-entering at Sindragosa
+  //    installs cached orders cleanly without waking LLM.
+  pb::Snapshot outside = MakeLiveSnap("Raida", 7, t0 + base::Seconds(30),
+                                      /*in_combat=*/false);
+  outside.base.where.in_instance = false;
+  outside.base.where.map = "Northrend";
+  AddKeep(&outside);
+  loop.OnSnapshot(outside, t0 + base::Seconds(30));
+  if (brain.size() > 0) {
+    brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300");
+  }
+  ASSERT_EQ(brain.size(), 0u);
+
+  pb::Snapshot reenter = make_icc_snap(8, 35, /*in_combat=*/false);
+  reenter.base.nearby.units.push_back(sindra);
+  loop.OnSnapshot(reenter, t0 + base::Seconds(35));
+  EXPECT_EQ(brain.size(), 0u);
+
+  std::filesystem::remove_all(tmp_dir);
+}
+
 }  // namespace
 }  // namespace harness

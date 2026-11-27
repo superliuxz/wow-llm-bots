@@ -1177,5 +1177,74 @@ TEST(OrderEvaluatorTest, SoloBotDoesNotResolveGroupOrRoleTargets) {
                   .empty());
 }
 
+TEST(OrderEvaluatorTest, RoleFilterMatchesAssignedGroupRoleAndRejectsSolo) {
+  auto eval_role = [](const pb::Snapshot& snap, std::string_view order_text) {
+    OrderEvaluator eval;
+    eval.SetOrders({MustParse(order_text)}, T(0));
+    return eval.OnSnapshot(snap, T(1)).act.has_value();
+  };
+
+  // Adversarial counter-test: solo bot (no group) matches NO role filter,
+  // while `not me tank` is true.
+  pb::Snapshot solo = MakeBaseSnapshot();
+  EXPECT_FALSE(eval_role(solo, "me tank -> wake"));
+  EXPECT_FALSE(eval_role(solo, "me offtank -> wake"));
+  EXPECT_FALSE(eval_role(solo, "me healer -> wake"));
+  EXPECT_FALSE(eval_role(solo, "me dps -> wake"));
+  EXPECT_TRUE(eval_role(solo, "not me tank -> wake"));
+
+  // Main tank (first tank in group): `me tank` true, `me offtank` false.
+  pb::Snapshot mt = MakeBaseSnapshot();
+  mt.base.self.unit.guid = "Player-1";
+  mt.base.self.unit.group = MakeGroup(pb::Role::TANK);
+  mt.base.self.unit.group->main_tank = true;
+  pb::Unit ot_unit = MakeUnit("Player-2", "Offtank", 10.0f);
+  ot_unit.kind = pb::Unit::PLAYER;
+  ot_unit.reaction = pb::Unit::FRIENDLY;
+  ot_unit.group = MakeGroup(pb::Role::TANK);
+  mt.base.nearby.units.push_back(ot_unit);
+  EXPECT_TRUE(eval_role(mt, "me tank -> wake"));
+  EXPECT_FALSE(eval_role(mt, "me offtank -> wake"));
+  EXPECT_FALSE(eval_role(mt, "me healer -> wake"));
+  EXPECT_FALSE(eval_role(mt, "me dps -> wake"));
+  EXPECT_FALSE(eval_role(mt, "not me tank -> wake"));
+
+  // Off-tank (second tank after main tank): both `me tank` and `me offtank`.
+  pb::Snapshot ot = MakeBaseSnapshot();
+  ot.base.self.unit.guid = "Player-2";
+  ot.base.self.unit.group = MakeGroup(pb::Role::TANK);
+  pb::Unit mt_unit = MakeUnit("Player-1", "Maintank", 10.0f);
+  mt_unit.kind = pb::Unit::PLAYER;
+  mt_unit.reaction = pb::Unit::FRIENDLY;
+  mt_unit.group = MakeGroup(pb::Role::TANK);
+  mt_unit.group->main_tank = true;
+  ot.base.nearby.units.push_back(mt_unit);
+  EXPECT_TRUE(eval_role(ot, "me tank -> wake"));
+  EXPECT_TRUE(eval_role(ot, "me offtank -> wake"));
+  EXPECT_FALSE(eval_role(ot, "me healer -> wake"));
+  EXPECT_FALSE(eval_role(ot, "me dps -> wake"));
+
+  // Healer and DPS roles.
+  pb::Snapshot healer = MakeBaseSnapshot();
+  healer.base.self.unit.group = MakeGroup(pb::Role::HEALER);
+  EXPECT_TRUE(eval_role(healer, "me healer -> wake"));
+  EXPECT_FALSE(eval_role(healer, "me tank -> wake"));
+  EXPECT_FALSE(eval_role(healer, "me dps -> wake"));
+
+  pb::Snapshot dps = MakeBaseSnapshot();
+  dps.base.self.unit.group = MakeGroup(pb::Role::DPS);
+  EXPECT_TRUE(eval_role(dps, "me dps -> wake"));
+  EXPECT_FALSE(eval_role(dps, "me tank -> wake"));
+  EXPECT_FALSE(eval_role(dps, "me healer -> wake"));
+
+  // Combined role filter + encounter phase check.
+  pb::Unit boss = MakeUnit("Boss-1", "Lady Deathwhisper", 20.0f);
+  boss.boss = pb::BossPart{.phase = 2};
+  ot.ext.encounter.emplace().boss = boss;
+  EXPECT_TRUE(eval_role(ot, "me offtank & phase 2 -> target boss"));
+  EXPECT_FALSE(eval_role(ot, "me offtank & phase 1 -> target boss"));
+  EXPECT_FALSE(eval_role(mt, "me offtank & phase 2 -> target boss"));
+}
+
 }  // namespace
 }  // namespace harness
