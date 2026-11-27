@@ -53,6 +53,7 @@ void BotSessionRegistry::ResetOnMapChange(uint64_t bot_guid) {
     it->second.cast_failure.reset();
     it->second.human_offline_since_ms.reset();
     it->second.popup_open_since_ms.reset();
+    it->second.corpse_run_step.reset();
   }
 }
 
@@ -72,6 +73,7 @@ void BotSessionRegistry::ResetOnDisconnect(uint64_t bot_guid) {
     it->second.cast_failure.reset();
     it->second.human_offline_since_ms.reset();
     it->second.popup_open_since_ms.reset();
+    it->second.corpse_run_step.reset();
   }
 }
 

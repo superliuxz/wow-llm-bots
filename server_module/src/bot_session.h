@@ -83,6 +83,16 @@ struct BotSession {
   std::optional<uint32_t> dead_since_ms;
   std::optional<uint32_t> rez_wait_until_ms;
 
+  // Current intermediate waypoint for `BotManager::KeepCorpseRun` (M4a #6) so
+  // long ghost runs don't re-path every tick while making progress. Cleared on
+  // resurrection, logout, map change, and disconnect.
+  struct CorpseRunStep {
+    uint32_t map_id = 0;
+    wlb::snapshot::Vec3 dest;
+    bool operator==(const CorpseRunStep&) const = default;
+  };
+  std::optional<CorpseRunStep> corpse_run_step;
+
   // Group policy chosen by the brain for `group_guid`. Survives logout: the
   // group does too.
   uint64_t group_guid = 0;

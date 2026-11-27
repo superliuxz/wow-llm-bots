@@ -140,6 +140,7 @@ class BotManager {
 
   void Tick();
   void EnsureStrategies(Player* player);
+  void KeepCorpseRun(Player* player);
   void KeepNearHumanLeader(Player* player);
   void KeepSafeGroupFollow(Player* player);
   void KeepHealerInTankRangeAndLos(Player* player);

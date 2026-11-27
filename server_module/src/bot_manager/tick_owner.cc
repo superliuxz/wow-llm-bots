@@ -34,6 +34,15 @@ constexpr auto kGatedActions = std::to_array<GatedAction>({
     // for gold, and accept on their own.
     {"accept trade", ActionGate::kBrainLed},
     {"trade status extended", ActionGate::kBrainLed},
+    // Corpse run & revival (M4a #6): playerbots' corpse run ignores the
+    // corpse's map, revives at spirit healers without rez sickness, and
+    // cheat-teleports. Gated while brain-led so BotManager::KeepCorpseRun owns
+    // client-legal ghost walking and instance re-entry; falls back to
+    // playerbots if the harness disconnects.
+    {"find corpse", ActionGate::kBrainLed},
+    {"revive from corpse", ActionGate::kBrainLed},
+    {"spirit healer", ActionGate::kBrainLed},
+    {"repop", ActionGate::kBrainLed},
     // World-state checks in BrainPolicyListener.
     {"apply oil", ActionGate::kCondition},
     {"apply stone", ActionGate::kCondition},

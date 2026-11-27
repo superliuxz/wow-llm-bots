@@ -100,6 +100,8 @@ set(WLB_MODULE_SRC "${WLB_ROOT}/server_module/src")
 add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/bot_session.cc"
   "${WLB_MODULE_SRC}/bot_session_unittest.cc"
+  "${WLB_MODULE_SRC}/bot_manager/corpse_run.cc"
+  "${WLB_MODULE_SRC}/bot_manager/corpse_run_unittest.cc"
   "${WLB_MODULE_SRC}/bot_manager/human_group_grace.cc"
   "${WLB_MODULE_SRC}/bot_manager/human_group_grace_unittest.cc"
   "${WLB_MODULE_SRC}/bot_manager/popup_watch.cc"

@@ -1,0 +1,9 @@
+# Dungeon wipe e2e test (Milestone 4b): two bots grouped inside Utgarde Keep
+# wipe, release spirit, walk as ghosts from the exterior graveyard back to the
+# instance entrance portal (no cheat teleport), re-enter, and revive cleanly.
+# Isolated from `party`/`whisper` because the case gears both bots to level 80
+# and binds them to an instance. Needs a test build (`tools/wlb build server --test`).
+LlmBrain.Bots = "Loada,Loadb"
+LlmBrain.TestFixtures = "Loada=priest-l1-valley.pdump,Loadb=priest-l1-valley.pdump"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.NonCombatStrategies = "-follow,-grind,-new rpg"

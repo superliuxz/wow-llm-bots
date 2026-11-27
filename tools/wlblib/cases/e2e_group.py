@@ -1,5 +1,5 @@
 """Grouped e2e cases: invite, group, tank, pull_gate, popups, rez_ready, lootroll, lfg_proposal,
-crisp_dodge, human_party, human_dungeon, trade."""
+crisp_dodge, human_party, human_dungeon, dungeon_wipe, trade."""
 
 import types
 from wlblib import wire
@@ -3425,4 +3425,221 @@ def _case_heal_reaction():
     return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
 
 
-CASES = [_case_pull_gate(), _case_crowd_control(), _case_use_physics(), _case_hunter_dismiss_pet(), _case_crisp_dodge(), _case_popup_policy(), _case_human_party(), _case_human_dungeon(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal(), _case_trade(), _case_party_positioning(), _case_heal_reaction()]
+def _case_dungeon_wipe():
+    """Party wipe inside a dungeon: release spirit, ghost corpse run, portal re-entry (Milestone 4b).
+
+    Verifies Milestone 4a/4b (P0 #6 — Own the corpse run):
+      1. Gear Loada and Loadb to level 80, group them, and place them inside Utgarde Keep
+         (map 574). Both are ALIVE and inside the instance.
+      2. Wipe the party (`llmtest kill Loada`, `llmtest kill Loadb`). Both bots become
+         DEAD_BODY and hold for >= 3 s without playerbots auto-releasing or spirit-healer
+         reviving them.
+      3. The brain chooses `Release spirit` for both bots. Both become GHOST on Northrend
+         at the exterior Utgarde graveyard (~197 yd from entrance portal AreaTrigger 4745).
+      4. Without any teleport or manual move command, `BotManager::KeepCorpseRun` walks both
+         ghosts from the graveyard to the Utgarde Keep entrance portal (no cheat teleport:
+         smooth exterior ghost movement from >100 yd down to <45 yd of the portal) and
+         triggers `CMSG_AREATRIGGER` 4745.
+      5. Both bots re-enter Utgarde Keep and revive cleanly (`state == ALIVE`, `in_instance`,
+         no Resurrection Sickness debuff, zero command errors).
+    """
+
+    import math
+    import socket
+    import time
+
+    from wlblib import server
+    from wlblib.common import TEST
+    from wlblib.testing import expect
+
+    NAME = "dungeon_wipe"
+    DESCRIPTION = "Dungeon wipe: release spirit, ghost corpse run to portal, re-enter and revive"
+    TEST_CONFIG = "dungeon_wipe"
+    BOT = "Loada"
+    ONLINE = 2
+
+    BOTS = ("Loada", "Loadb")
+    UK_MAP = 574
+    UK_ENTRANCE = "574 153.79 -86.55 12.55 0"
+    UK_PORTAL_TRIGGER = 4745
+    UK_PORTAL_POS = (1257.1, -4854.5, 41.2)
+    HOLD_DEAD_S = 3.0
+    MAX_GHOST_STEP_YD = 80.0
+
+    def _where(snap):
+        return snap.get("base", {}).get("where", {})
+
+    def _state(snap):
+        return snap.get("base", {}).get("self", {}).get("state", "")
+
+    def _in_uk(snap):
+        w = _where(snap)
+        return bool(w.get("in_instance")) and "Utgarde Keep" in w.get("map", "")
+
+    def _pos3(snap):
+        p = _where(snap).get("position")
+        return (p["x"], p["y"], p["z"]) if p else None
+
+    def _has_rez_sickness(snap):
+        debuffs = snap.get("base", {}).get("self", {}).get("debuffs", [])
+        return any("Resurrection Sickness" in (d.get("name") or "") for d in debuffs)
+
+    def run(stack):
+        for bot in BOTS:
+            server.console(f"llmtest gear {bot} 80", wait_s=0.5, inst=TEST)
+        server.console("llmtest group Loada Loadb", wait_s=0.5, inst=TEST)
+        for bot in BOTS:
+            server.console(f"llmtest tele {bot} {UK_ENTRANCE}", wait_s=0.5, inst=TEST)
+        time.sleep(2.0)
+
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        sock.connect(str(TEST.run / "brain.sock"))
+        reader = wire.FrameReader()
+
+        cmd_id = 0
+        errors = []
+        latest = {}
+        phase = "enter"  # enter -> hold_dead -> release -> corpse_run -> done
+        killed_at = None
+        released_sent = set()
+        ghost_track = {b: [] for b in BOTS}  # list of (t, x, y, z) on exterior map while GHOST
+        revived = set()
+
+        deadline = time.monotonic() + 140.0
+        try:
+            while time.monotonic() < deadline and phase != "done":
+                try:
+                    chunk = sock.recv(1 << 20)
+                except socket.timeout:
+                    chunk = b""
+                if chunk:
+                    for payload in reader.feed(chunk):
+                        msg = wire.decode_module_message(payload)
+                        if not msg:
+                            continue
+                        if "event" in msg:
+                            ev = msg["event"].get("event", {})
+                            if "error" in ev:
+                                errors.append(
+                                    f"{msg['event'].get('bot')}: {ev['error'].get('text')}"
+                                )
+                            continue
+                        snap = msg.get("snapshot")
+                        if not snap:
+                            continue
+                        bot = snap.get("bot", "")
+                        if bot not in BOTS:
+                            continue
+                        latest[bot] = snap
+                        st = _state(snap)
+                        in_inst = bool(_where(snap).get("in_instance"))
+
+                        if phase in ("release", "corpse_run") and st == "GHOST" and not in_inst:
+                            p = _pos3(snap)
+                            if p:
+                                track = ghost_track[bot]
+                                if not track or math.dist(track[-1][1:], p) >= 0.5:
+                                    track.append((time.monotonic(), *p))
+
+                        if phase == "release" and bot not in released_sent and st == "DEAD_BODY":
+                            rel_idx = find_option(snap.get("options", []), "Release spirit")
+                            if rel_idx is not None:
+                                cmd_id += 1
+                                send_cmd(sock, {
+                                    "bot": bot,
+                                    "command_id": cmd_id,
+                                    "choose": {"option": rel_idx, "seq": snap.get("seq", 0)},
+                                })
+                                released_sent.add(bot)
+
+                if phase == "enter":
+                    if all(b in latest and _in_uk(latest[b]) and _state(latest[b]) == "ALIVE"
+                           for b in BOTS):
+                        for bot in BOTS:
+                            server.console(f"llmtest kill {bot}", wait_s=0.3, inst=TEST)
+                        killed_at = time.monotonic()
+                        phase = "hold_dead"
+
+                elif phase == "hold_dead":
+                    if (all(_state(latest[b]) == "DEAD_BODY" for b in BOTS)
+                            and time.monotonic() - killed_at >= HOLD_DEAD_S):
+                        phase = "release"
+
+                elif phase == "release":
+                    if all(b in released_sent and ghost_track[b] for b in BOTS):
+                        phase = "corpse_run"
+
+                elif phase == "corpse_run":
+                    for b in BOTS:
+                        if _in_uk(latest[b]) and _state(latest[b]) == "ALIVE":
+                            revived.add(b)
+                    if len(revived) == len(BOTS):
+                        phase = "done"
+        finally:
+            sock.close()
+
+        expect(not errors, f"unexpected command errors: {errors}")
+        expect(
+            phase == "done",
+            f"did not finish corpse run (phase={phase}, released={sorted(released_sent)}, "
+            f"revived={sorted(revived)}, states={ {b: _state(latest.get(b, {})) for b in BOTS} }, "
+            f"maps={ {b: _where(latest.get(b, {})).get('map') for b in BOTS} }, "
+            f"ghost_samples={ {b: len(ghost_track[b]) for b in BOTS} })",
+        )
+
+        # Verify server log recorded client-legal AreaTrigger instance re-entry for both bots.
+        log_path = TEST.logs / "Server.log"
+        log_text = ""
+        if log_path.exists():
+            with log_path.open("r", errors="replace") as f:
+                f.seek(stack.log_start)
+                log_text = f.read()
+
+        summaries = []
+        for b in BOTS:
+            track = ghost_track[b]
+            expect(
+                len(track) >= 3,
+                f"{b}: expected >= 3 exterior ghost movement samples, got {len(track)}: {track}",
+            )
+            dists = [math.dist(pt[1:], UK_PORTAL_POS) for pt in track]
+            start_d, min_d = dists[0], min(dists)
+            max_step = max(
+                (math.dist(track[i - 1][1:], track[i][1:]) for i in range(1, len(track))),
+                default=0.0,
+            )
+            expect(
+                start_d >= 100.0,
+                f"{b}: ghost did not spawn at exterior graveyard (start_dist={start_d:.1f} yd)",
+            )
+            expect(
+                min_d <= 45.0,
+                f"{b}: ghost never walked close to portal before re-entry "
+                f"(min_dist={min_d:.1f} yd, start_dist={start_d:.1f} yd)",
+            )
+            expect(
+                max_step <= MAX_GHOST_STEP_YD,
+                f"{b}: ghost jumped {max_step:.1f} yd in one step (possible cheat teleport)",
+            )
+            expect(
+                not _has_rez_sickness(latest[b]),
+                f"{b}: revived with Resurrection Sickness debuff",
+            )
+            portal_line = (
+                f"mod-llm-brain: {b} enters instance portal trigger "
+                f"{UK_PORTAL_TRIGGER} for corpse on map {UK_MAP}"
+            )
+            expect(
+                portal_line in log_text,
+                f"{b}: missing portal re-entry log line ({portal_line!r})",
+            )
+            summaries.append(
+                f"{b}({start_d:.0f}->{min_d:.0f}yd, {len(track)}pts, max_step={max_step:.0f}yd)"
+            )
+
+        return f"Utgarde Keep wipe -> release -> ghost walk -> portal {UK_PORTAL_TRIGGER} revive: " + ", ".join(summaries)
+    return types.SimpleNamespace(NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=locals().get('ONLINE', 1), run=run)
+
+
+CASES = [_case_pull_gate(), _case_crowd_control(), _case_use_physics(), _case_hunter_dismiss_pet(), _case_crisp_dodge(), _case_popup_policy(), _case_human_party(), _case_human_dungeon(), _case_dungeon_wipe(), _case_invite(), _case_group(), _case_tank(), _case_popups(), _case_rez_ready(), _case_lootroll(), _case_lfg_proposal(), _case_trade(), _case_party_positioning(), _case_heal_reaction()]

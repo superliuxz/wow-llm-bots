@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <list>
 #include <optional>
 #include <span>
@@ -25,6 +26,7 @@
 #include "CharacterCache.h"
 #include "CharmInfo.h"
 #include "Common.h"
+#include "Corpse.h"
 #include "Creature.h"
 #include "DBCStructure.h"
 #include "Define.h"
@@ -45,6 +47,7 @@
 #include "LastMovementValue.h"
 #include "Log.h"
 #include "Map.h"
+#include "MotionMaster.h"
 #include "MoveSplineInitArgs.h"
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
@@ -56,6 +59,7 @@
 #include "Player.h"
 #include "PlayerbotAI.h"
 #include "Playerbots.h"
+#include "Position.h"
 #include "QuestDef.h"
 #include "RandomPlayerbotMgr.h"
 #include "ServerScript.h"
@@ -71,6 +75,7 @@
 #include "WorldSession.h"
 #include "base/synchronization/lock.h"
 #include "base/thread_annotations.h"
+#include "bot_manager/corpse_run.h"
 #include "bot_manager/human_group_grace.h"
 #include "bot_manager/playerbots_actions.h"
 #include "bot_manager/pull_discipline.h"
@@ -1061,9 +1066,11 @@ void BotManager::Tick() {
               bot.guid, [](BotSession& s) {
                 s.dead_since_ms.reset();
                 s.rez_wait_until_ms.reset();
+                s.corpse_run_step.reset();
               });
         }
         EnsureStrategies(player);
+        KeepCorpseRun(player);
         KeepNearHumanLeader(player);
         KeepSafeGroupFollow(player);
         KeepHealerInTankRangeAndLos(player);
@@ -1085,6 +1092,237 @@ void BotManager::Tick() {
       LOG_INFO("module", "mod-llm-brain: logging in {}", bot.name);
       RandomPlayerbotMgr::instance().AddPlayerBot(guid, 0);
       bot.next_login_ms = now_ms_ + kLoginRetryMs;
+    }
+  }
+}
+
+namespace {
+
+G3D::Vector3 PointAlongGhostPath(const Movement::PointsArray& points,
+                                 float step_yd) {
+  if (points.empty()) {
+    return G3D::Vector3();
+  }
+  float acc = 0.0f;
+  for (size_t i = 1; i < points.size(); ++i) {
+    const G3D::Vector3 seg = points[i] - points[i - 1];
+    const float len = seg.length();
+    if (acc + len >= step_yd && len > 0.0f) {
+      const float t = (step_yd - acc) / len;
+      return points[i - 1] + seg * t;
+    }
+    acc += len;
+  }
+  return points.back();
+}
+
+// Walks a ghost toward `dest` on its current map using stepped navmesh paths
+// so long exterior graveyard runs (e.g. Westfall -> Deadmines) succeed without
+// cheat teleports. Returns the chosen step destination on success.
+std::optional<wlb::snapshot::Vec3> StepGhostToward(Player* bot,
+                                                   wlb::snapshot::Vec3 dest) {
+  constexpr float kGhostStepYd = 70.0f;
+  constexpr uint32_t kTypeOk =
+      PATHFIND_NORMAL | PATHFIND_INCOMPLETE | PATHFIND_FARFROMPOLY;
+  const float dist_to_dest = bot->GetExactDist(dest.x, dest.y, dest.z);
+
+  {
+    PathGenerator path(bot);
+    path.CalculatePath(dest.x, dest.y, dest.z);
+    const uint32_t path_type = path.GetPathType();
+    if ((path_type & ~kTypeOk) == 0 && path.GetPath().size() >= 2) {
+      const G3D::Vector3 cand =
+          PointAlongGhostPath(path.GetPath(), kGhostStepYd);
+      const G3D::Vector3& end = path.GetActualEndPosition();
+      const float end_dist = std::hypot(end.x - dest.x, end.y - dest.y);
+      if (bot->GetExactDist(cand.x, cand.y, cand.z) >= 1.5f &&
+          ((path_type & PATHFIND_NORMAL) != 0 ||
+           end_dist + 2.0f < dist_to_dest)) {
+        if (WalkTo(bot, cand.x, cand.y, cand.z)) {
+          return wlb::snapshot::Vec3{cand.x, cand.y, cand.z};
+        }
+      }
+      // Portal AreaTriggers can sit slightly past the navmesh edge; walk to
+      // the closest reachable point along the path if it moves us closer.
+      if (dist_to_dest <= 15.0f && end_dist + 0.5f < dist_to_dest &&
+          bot->GetExactDist(end.x, end.y, end.z) >= 1.0f &&
+          WalkTo(bot, end.x, end.y, end.z)) {
+        return wlb::snapshot::Vec3{end.x, end.y, end.z};
+      }
+    }
+  }
+
+  Map* map = bot->GetMap();
+  const float base_angle = bot->GetAngle(dest.x, dest.y);
+  const float step_len = std::min(kGhostStepYd, dist_to_dest);
+  static constexpr float kOffsets[] = {0.0f, 0.7f, -0.7f};
+  for (float offset : kOffsets) {
+    const float angle = base_angle + offset;
+    const float tx = bot->GetPositionX() + std::cos(angle) * step_len;
+    const float ty = bot->GetPositionY() + std::sin(angle) * step_len;
+    float tz = dest.z;
+    if (map) {
+      const float h = map->GetHeight(bot->GetPhaseMask(), tx, ty,
+                                     bot->GetPositionZ() + 10.0f);
+      if (h != INVALID_HEIGHT && h != VMAP_INVALID_HEIGHT_VALUE) {
+        tz = h;
+      }
+    }
+    PathGenerator path(bot);
+    path.CalculatePath(tx, ty, tz);
+    if ((path.GetPathType() & ~kTypeOk) == 0 && path.GetPath().size() >= 2) {
+      const G3D::Vector3 cand =
+          PointAlongGhostPath(path.GetPath(), kGhostStepYd);
+      if (bot->GetExactDist(cand.x, cand.y, cand.z) >= 2.0f &&
+          WalkTo(bot, cand.x, cand.y, cand.z)) {
+        return wlb::snapshot::Vec3{cand.x, cand.y, cand.z};
+      }
+    }
+  }
+  return std::nullopt;
+}
+
+}  // namespace
+
+void BotManager::KeepCorpseRun(Player* player) {
+  if (!player || player->IsAlive() ||
+      !player->HasPlayerFlag(PLAYER_FLAGS_GHOST) || !player->GetMap()) {
+    return;
+  }
+  const uint64_t key = player->GetGUID().GetRawValue();
+  const TickOwner owner = BotSessionRegistry::Instance().InspectSession(
+      key, [](const BotSession* s) {
+        return s ? s->tick_owner : TickOwner::kPlayerbots;
+      });
+  if (owner != TickOwner::kBrain) {
+    return;
+  }
+
+  CorpseRunInput input;
+  input.tick_owner = owner;
+  input.alive = player->IsAlive();
+  input.is_ghost = player->HasPlayerFlag(PLAYER_FLAGS_GHOST);
+  input.in_battleground = player->InBattleground();
+  input.in_arena = player->InArena();
+  input.has_corpse = player->HasCorpse();
+  input.being_teleported = player->IsBeingTeleported();
+  input.can_move = CanClearBotMovement(player);
+  input.bot_map_id = player->GetMapId();
+  input.bot_pos = {player->GetPositionX(), player->GetPositionY(),
+                   player->GetPositionZ()};
+
+  if (input.has_corpse) {
+    const WorldLocation corpse_loc = player->GetCorpseLocation();
+    input.corpse_map_id = corpse_loc.GetMapId();
+    input.corpse_pos = {corpse_loc.GetPositionX(), corpse_loc.GetPositionY(),
+                        corpse_loc.GetPositionZ()};
+    if (input.bot_map_id == input.corpse_map_id) {
+      if (Corpse* corpse = player->GetCorpse()) {
+        input.within_reclaim_range =
+            corpse->IsInMap(player) &&
+            corpse->IsWithinDist(player, CORPSE_RECLAIM_RADIUS, true);
+        const time_t reclaim_at =
+            corpse->GetGhostTime() +
+            player->GetCorpseReclaimDelay(corpse->GetType() ==
+                                          CORPSE_RESURRECTABLE_PVP);
+        input.reclaim_ready =
+            reclaim_at <= static_cast<time_t>(GameTime::GetGameTime().count());
+      }
+    } else {
+      std::vector<InstanceEntranceCandidate> candidates;
+      for (const auto& [trigger_id, at_tp] :
+           sObjectMgr->GetAllAreaTriggerTeleports()) {
+        if (at_tp.target_mapId != input.corpse_map_id) {
+          continue;
+        }
+        const AreaTrigger* at = sObjectMgr->GetAreaTrigger(trigger_id);
+        if (!at || at->map != input.bot_map_id) {
+          continue;
+        }
+        candidates.push_back(InstanceEntranceCandidate{
+            .trigger_id = trigger_id,
+            .trigger_map_id = at->map,
+            .trigger_pos = {at->x, at->y, at->z},
+            .target_map_id = at_tp.target_mapId,
+            .target_pos = {at_tp.target_X, at_tp.target_Y, at_tp.target_Z},
+            .bot_inside_trigger = player->IsInAreaTriggerRadius(at, 0.0f),
+        });
+      }
+      input.instance_entrance = SelectInstanceEntrance(
+          input.bot_map_id, input.bot_pos, input.corpse_map_id,
+          input.corpse_pos, candidates);
+    }
+  }
+
+  const CorpseRunDecision decision = EvaluateCorpseRun(input);
+  auto clear_step = [key]() {
+    BotSessionRegistry::Instance().WithSession(
+        key, [](BotSession& s) { s.corpse_run_step.reset(); });
+  };
+  switch (decision.action) {
+    case CorpseRunAction::kNone:
+      return;
+    case CorpseRunAction::kWaitReclaimDelay:
+      clear_step();
+      if (player->isMoving()) {
+        player->StopMoving();
+        ClearLastMovement(player);
+      }
+      return;
+    case CorpseRunAction::kReclaimCorpse: {
+      clear_step();
+      player->GetMotionMaster()->Clear();
+      player->StopMoving();
+      ClearLastMovement(player);
+      if (WorldSession* sess = player->GetSession()) {
+        WorldPacket pkt(CMSG_RECLAIM_CORPSE, 8);
+        pkt << player->GetGUID();
+        pkt.rpos(0);
+        sess->HandleReclaimCorpseOpcode(pkt);
+        LOG_INFO("module", "mod-llm-brain: {} reclaims corpse",
+                 player->GetName());
+      }
+      return;
+    }
+    case CorpseRunAction::kEnterInstanceTrigger: {
+      clear_step();
+      player->GetMotionMaster()->Clear();
+      player->StopMoving();
+      ClearLastMovement(player);
+      if (WorldSession* sess = player->GetSession()) {
+        WorldPacket pkt(CMSG_AREATRIGGER, 4);
+        pkt << uint32_t(decision.trigger_id);
+        pkt.rpos(0);
+        sess->HandleAreaTriggerOpcode(pkt);
+        LOG_INFO("module",
+                 "mod-llm-brain: {} enters instance portal trigger {} for "
+                 "corpse on map {}",
+                 player->GetName(), decision.trigger_id, input.corpse_map_id);
+      }
+      return;
+    }
+    case CorpseRunAction::kWalkToTarget: {
+      constexpr float kStepAdvanceYd = 10.0f;
+      const std::optional<BotSession::CorpseRunStep> cur_step =
+          BotSessionRegistry::Instance().InspectSession(
+              key, [](const BotSession* s) {
+                return s ? s->corpse_run_step : std::nullopt;
+              });
+      if (cur_step && cur_step->map_id == input.bot_map_id &&
+          player->isMoving() &&
+          player->GetExactDist(cur_step->dest.x, cur_step->dest.y,
+                               cur_step->dest.z) > kStepAdvanceYd) {
+        return;
+      }
+      if (const std::optional<wlb::snapshot::Vec3> next =
+              StepGhostToward(player, decision.target_pos)) {
+        BotSessionRegistry::Instance().WithSession(
+            key, [map_id = input.bot_map_id, dest = *next](BotSession& s) {
+              s.corpse_run_step =
+                  BotSession::CorpseRunStep{.map_id = map_id, .dest = dest};
+            });
+      }
+      return;
     }
   }
 }

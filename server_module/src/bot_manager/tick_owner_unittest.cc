@@ -67,6 +67,21 @@ TEST(TickOwnerTest, PopupsAreTheBrainsOnlyWhileItLeads) {
   }
 }
 
+TEST(TickOwnerTest, CorpseRunActionsAreGatedOnlyWhileBrainLed) {
+  for (std::string_view name :
+       {"find corpse", "revive from corpse", "spirit healer", "repop"}) {
+    const GatedAction* a = FindGatedAction(name);
+    ASSERT_NE(a, nullptr) << name;
+    EXPECT_EQ(a->gate, ActionGate::kBrainLed) << name;
+    // Blocked while brain-led so playerbots cannot cheat-teleport or revive at
+    // a spirit healer without rez sickness.
+    EXPECT_TRUE(BlockedFor(*a, TickOwner::kBrain)) << name;
+    // Adversarial counter-test: harness disconnect falls back cleanly to
+    // playerbots.
+    EXPECT_FALSE(BlockedFor(*a, TickOwner::kPlayerbots)) << name;
+  }
+}
+
 TEST(TickOwnerTest, AutoEquipIsBlockedInBothModes) {
   for (std::string_view name :
        {"equip upgrade", "equip upgrades packet action"}) {

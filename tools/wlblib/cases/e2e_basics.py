@@ -70,6 +70,7 @@ def _case_choose():
 
 
     def run(stack):
+        log_start = len(stack.server_log())  # Cases batched before this one log too.
         t = stack.play(["Attack", "Loot"])
         expect(not t["closed"], "the module closed the connection")
         expect(not t["never_offered"],
@@ -96,7 +97,7 @@ def _case_choose():
                f"the corpse still offered Loot {LOOTED_WITHIN_S} s after Loot")
 
         # The module's own record of each choice: accepted, and how old the picture was.
-        chose = CHOSE.findall(stack.server_log())
+        chose = CHOSE.findall(stack.server_log()[log_start:])
         expect(len(chose) == 2, f"expected 2 'chose' lines in the server log, found {len(chose)}")
         for option, seq, what, result, age_ms in chose:
             expect(result == "ok", f"the module refused '{what}': {result}")
