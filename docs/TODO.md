@@ -17,10 +17,6 @@ Live verification following the `70b0878` team-play P0 fixes:
 
 Team-play P1 gaps and selected P2 items from the `70b0878` review:
 
-### Questing & travel
-- **No vehicle controls:** Vehicle snapshot fields are never filled, blocking WotLK vehicle quests
-  (`snapshot/snapshot.h:1423-1431,2039`).
-
 ### P2 (selected)
 - **Leader commands scope & semantics:** Only work when human is group leader and only in
   party/raid chat (whispers don't count); `"stop"` maps to `"wait"` (keeps attacking); `"wait"`

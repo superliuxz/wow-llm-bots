@@ -14,6 +14,8 @@
 #include <vector>
 
 #include "AiFactory.h"
+#include "CharmInfo.h"
+#include "Creature.h"
 #include "DBCEnums.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
@@ -39,6 +41,7 @@
 #include "QuestDef.h"
 #include "QuestPackets.h"
 #include "SharedDefines.h"
+#include "Spell.h"
 #include "SpellAuraDefines.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
@@ -48,6 +51,7 @@
 #include "Unit.h"
 #include "UnitDefines.h"
 #include "UpdateFields.h"
+#include "Vehicle.h"
 #include "World.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
@@ -64,6 +68,7 @@
 #include "options/loot_roll_policy.h"
 #include "options/options.h"
 #include "options/riding_mounts.h"
+#include "options/vehicle_controls.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/world_util.h"
 
@@ -1007,6 +1012,25 @@ void CollectGroupAndUpkeepActions(Player* bot,
           {"mount:" + std::to_string(best->spell_id), "Mount " + best->name});
     }
   }
+
+  // 8. Vehicle controls (action-bar abilities + exit).
+  if (Vehicle* veh = bot->GetVehicle()) {
+    const VehicleSeatEntry* seat = veh->GetSeatForPassenger(bot);
+    const Unit* base = veh->GetBase();
+    const bool can_cast = base && base->IsAlive() && seat &&
+                          (seat->CanControl() ||
+                           (seat->m_flags & VEHICLE_SEAT_FLAG_CAN_CAST) != 0);
+    for (const VehicleSpellOption& opt :
+         CollectVehicleSpellOptions(snapshot, can_cast, incapacitated)) {
+      out->push_back(
+          {"vehicle:spell:" + std::to_string(opt.spell_id), opt.label});
+    }
+    const bool can_exit = seat && seat->CanEnterOrExit();
+    if (CanOfferVehicleExit(bot->IsAlive(), /*in_vehicle=*/true, can_exit,
+                            incapacitated)) {
+      out->push_back({"vehicle:leave", "Leave vehicle"});
+    }
+  }
 }
 
 ActionOutcome ExecuteInviteAction(Player* bot, const InviteAction& action) {
@@ -1432,6 +1456,95 @@ ActionOutcome ExecuteDismountAction(Player* bot) {
     return {.error = "could not dismount"};
   }
   return {.used = true, .info = "dismounted"};
+}
+
+ActionOutcome ExecuteVehicleSpellAction(Player* bot,
+                                        const VehicleSpellAction& action) {
+  WorldSession* session = bot->GetSession();
+  if (!session) {
+    return {.error = "no session"};
+  }
+  Vehicle* veh = bot->GetVehicle();
+  Unit* base = veh ? veh->GetBase() : nullptr;
+  Creature* creature = base ? base->ToCreature() : nullptr;
+  const bool incapacitated = bot->HasUnitState(
+      UNIT_STATE_STUNNED | UNIT_STATE_CONFUSED | UNIT_STATE_FLEEING |
+      UNIT_STATE_CHARMED | UNIT_STATE_POSSESSED);
+
+  bool has_spell = false;
+  if (base && action.spell_id != 0) {
+    if (const CharmInfo* charm = base->GetCharmInfo()) {
+      for (uint8_t i = ACTION_BAR_INDEX_START; i < ACTION_BAR_INDEX_END; ++i) {
+        const UnitActionBarEntry* entry = charm->GetActionBarEntry(i);
+        if (entry && entry->IsActionBarForSpell() &&
+            entry->GetAction() == action.spell_id) {
+          has_spell = true;
+          break;
+        }
+      }
+    }
+    if (!has_spell && creature && creature->HasSpell(action.spell_id)) {
+      has_spell = true;
+    }
+  }
+  const bool on_cooldown =
+      creature ? creature->HasSpellCooldown(action.spell_id) : false;
+  if (std::string err = ValidateVehicleSpellState(
+          veh != nullptr && base != nullptr, base && base->IsAlive(),
+          incapacitated, has_spell, on_cooldown);
+      !err.empty()) {
+    return {.error = std::move(err)};
+  }
+  const SpellInfo* spell = sSpellMgr->GetSpellInfo(action.spell_id);
+  if (!spell) {
+    return {.error = "unknown vehicle ability"};
+  }
+  Unit* target = bot->GetSelectedUnit();
+  if (!target) {
+    target = bot->GetVictim();
+  }
+  if (!target) {
+    target = base->GetVictim();
+  }
+  if (!target ||
+      (spell->IsPositive() && target != base && !base->IsFriendlyTo(target))) {
+    target = base;
+  }
+  WorldPacket p(CMSG_CAST_SPELL);
+  p << static_cast<uint8_t>(0) << spell->Id << static_cast<uint8_t>(0);
+  SpellCastTargets targets;
+  if ((spell->GetExplicitTargetMask() & TARGET_FLAG_DEST_LOCATION) != 0) {
+    targets.SetDst(*target);
+  } else {
+    targets.SetUnitTarget(target);
+  }
+  targets.Write(p);
+  p.rpos(0);
+  session->HandleCastSpellOpcode(p);
+  return {.used = true, .info = action.label};
+}
+
+ActionOutcome ExecuteLeaveVehicleAction(Player* bot) {
+  WorldSession* session = bot->GetSession();
+  if (!session) {
+    return {.error = "no session"};
+  }
+  Vehicle* veh = bot->GetVehicle();
+  const VehicleSeatEntry* seat = veh ? veh->GetSeatForPassenger(bot) : nullptr;
+  const bool incapacitated = bot->HasUnitState(
+      UNIT_STATE_STUNNED | UNIT_STATE_CONFUSED | UNIT_STATE_FLEEING |
+      UNIT_STATE_CHARMED | UNIT_STATE_POSSESSED);
+  if (std::string err = ValidateVehicleExitState(
+          veh != nullptr, seat && seat->CanEnterOrExit(), incapacitated);
+      !err.empty()) {
+    return {.error = std::move(err)};
+  }
+  WorldPacket p(CMSG_REQUEST_VEHICLE_EXIT, 0);
+  session->HandleRequestVehicleExit(p);
+  if (bot->GetVehicle()) {
+    return {.error = "could not leave vehicle"};
+  }
+  return {.used = true, .info = "left vehicle"};
 }
 
 ActStartResult ExecuteCrowdControlAction(Player* bot,

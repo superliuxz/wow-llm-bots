@@ -104,6 +104,28 @@ TEST(ActionTypesTest, DecodesTypedNpcAndGroupActions) {
     EXPECT_FALSE(IsPendingCastAction(a));
   }
   {
+    BotAction leave = DecodeOptionFactAction("vehicle:leave", "Leave vehicle");
+    EXPECT_TRUE(std::holds_alternative<LeaveVehicleAction>(leave));
+    EXPECT_EQ(ActionKindName(leave), "leave_vehicle");
+    EXPECT_FALSE(IsDeadAllowedAction(leave));
+    EXPECT_FALSE(IsPendingCastAction(leave));
+
+    BotAction spell = DecodeOptionFactAction("vehicle:spell:50240",
+                                             "Use Flame Spike (vehicle)");
+    const auto* vs = std::get_if<VehicleSpellAction>(&spell);
+    ASSERT_NE(vs, nullptr);
+    EXPECT_EQ(vs->spell_id, 50240u);
+    EXPECT_EQ(vs->label, "Use Flame Spike (vehicle)");
+    EXPECT_EQ(ActionKindName(spell), "vehicle_spell");
+    EXPECT_FALSE(IsDeadAllowedAction(spell));
+    for (const char* bad : {"vehicle:spell:", "vehicle:spell:0",
+                            "vehicle:spell:abc", "vehicle:bogus"}) {
+      EXPECT_TRUE(std::holds_alternative<InvalidAction>(
+          DecodeOptionFactAction(bad, "bad")))
+          << bad;
+    }
+  }
+  {
     BotAction a =
         DecodeOptionFactAction("npc_train_riding:0x1234:33388",
                                "Train Apprentice Riding (4g) at Randal Hunter");

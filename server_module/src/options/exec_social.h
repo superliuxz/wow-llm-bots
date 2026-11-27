@@ -72,6 +72,9 @@ ActionOutcome ExecuteMarkTargetAction(Player* bot,
                                       const MarkTargetAction& action);
 ItemActionOutcome ExecuteMountAction(Player* bot, const MountAction& action);
 ActionOutcome ExecuteDismountAction(Player* bot);
+ActionOutcome ExecuteVehicleSpellAction(Player* bot,
+                                        const VehicleSpellAction& action);
+ActionOutcome ExecuteLeaveVehicleAction(Player* bot);
 
 }  // namespace llm_brain
 

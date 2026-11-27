@@ -55,6 +55,7 @@
 #include "SpellMgr.h"
 #include "Unit.h"
 #include "UnitDefines.h"
+#include "Vehicle.h"
 #include "World.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
@@ -752,6 +753,43 @@ const SpellInfo* FindKnownSpell(Player* bot, std::string_view name) {
     }
   }
   return best;
+}
+
+// Finds a non-passive spell on the bot's current vehicle matching `name`.
+const SpellInfo* FindVehicleSpell(Player* bot, std::string_view name) {
+  Vehicle* veh = bot->GetVehicle();
+  Unit* base = veh ? veh->GetBase() : nullptr;
+  if (!base || !base->IsAlive()) {
+    return nullptr;
+  }
+  const auto match = [&](uint32_t spell_id) -> const SpellInfo* {
+    if (spell_id == 0) {
+      return nullptr;
+    }
+    const SpellInfo* info = sSpellMgr->GetSpellInfo(spell_id);
+    if (!info || info->IsPassive() || !NameEq(SpellLocalizedName(info), name)) {
+      return nullptr;
+    }
+    return info;
+  };
+  if (const CharmInfo* charm = base->GetCharmInfo()) {
+    for (uint8_t i = ACTION_BAR_INDEX_START; i < ACTION_BAR_INDEX_END; ++i) {
+      const UnitActionBarEntry* entry = charm->GetActionBarEntry(i);
+      if (entry && entry->IsActionBarForSpell()) {
+        if (const SpellInfo* info = match(entry->GetAction())) {
+          return info;
+        }
+      }
+    }
+  }
+  if (const Creature* creature = base->ToCreature()) {
+    for (uint32_t i = 0; i < MAX_CREATURE_SPELLS; ++i) {
+      if (const SpellInfo* info = match(creature->m_spells[i])) {
+        return info;
+      }
+    }
+  }
+  return nullptr;
 }
 
 // Captures cast-relevant state right before a client cast/use opcode so we can
@@ -1959,6 +1997,26 @@ ActStartResult StartAct(Player* bot,
         }
         return StartSpellUse(bot, command_id, act, spell, cast_target, spot,
                              now, out_active);
+      }
+
+      if (const SpellInfo* veh_spell = FindVehicleSpell(bot, act.name)) {
+        Unit* veh_base = bot->GetVehicle()->GetBase();
+        if (const Creature* c = veh_base->ToCreature();
+            c && c->HasSpellCooldown(veh_spell->Id)) {
+          return {.error = act.name + " is on cooldown"};
+        }
+        if (spot && (veh_spell->GetExplicitTargetMask() &
+                     TARGET_FLAG_DEST_LOCATION) == 0) {
+          return {.error = act.name + " is not cast on the ground"};
+        }
+        Unit* cast_target = spot ? veh_base : (target ? target : veh_base);
+        if (act.thing == pb::Command_Act::THING_UNSPECIFIED &&
+            veh_spell->IsPositive() && cast_target != veh_base &&
+            !veh_base->IsFriendlyTo(cast_target)) {
+          cast_target = veh_base;
+        }
+        return CastSpellNow(bot, command_id, act, veh_spell, cast_target, spot,
+                            now, out_active);
       }
 
       if (spot) {

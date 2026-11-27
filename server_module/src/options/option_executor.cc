@@ -210,6 +210,10 @@ ExecuteResult ExecuteAction(Player* bot,
           return FromItemOutcome(ExecuteMountAction(bot, a));
         } else if constexpr (std::is_same_v<T, DismountAction>) {
           return FromOutcome(ExecuteDismountAction(bot));
+        } else if constexpr (std::is_same_v<T, VehicleSpellAction>) {
+          return FromOutcome(ExecuteVehicleSpellAction(bot, a));
+        } else if constexpr (std::is_same_v<T, LeaveVehicleAction>) {
+          return FromOutcome(ExecuteLeaveVehicleAction(bot));
         } else if constexpr (std::is_same_v<T, NpcAction>) {
           return FromOutcome(ExecuteNpcAction(bot, a));
         } else if constexpr (std::is_same_v<T, SpendTalentsAction>) {

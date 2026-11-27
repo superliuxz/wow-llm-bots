@@ -954,5 +954,56 @@ TEST(PromptTest, NewRaidAndDungeonNotesSelectBossesAndFitInspectPromptBudget) {
   }
 }
 
+TEST(PromptTest, VehicleScreenFitsInspectPromptBudgetAndSurvivesTrimming) {
+  const std::filesystem::path repo_root =
+      std::filesystem::path(WLB_HARNESS_TESTDATA).parent_path().parent_path();
+  std::ifstream rules_in(repo_root / "content" / "RULES.md");
+  ASSERT_TRUE(rules_in.is_open());
+  const std::string rules((std::istreambuf_iterator<char>(rules_in)),
+                          std::istreambuf_iterator<char>());
+  EXPECT_LE(rules.size(), 7800u);
+
+  Screen vehicle_screen = SampleScreen();
+  vehicle_screen.text =
+      "me: Aldric, level 75 male paladin; health 9200/9200; mana 4100/4100; "
+      "in combat; in vehicle\n"
+      "where: Wyrmrest Temple, Dragonblight (Northrend)\n"
+      "vehicle: Wyrmrest Defender (84% hp; seat 0; abilities: Flame Spike, "
+      "Engulf in Flames (cd 5s), Revivify)\n"
+      "around me:\n"
+      "  1. Attack Azure Drake (level 74 dragonkin, hostile, 25 yd N)\n"
+      "also:\n"
+      "  2. Use Flame Spike (vehicle)\n"
+      "  3. Use Revivify (vehicle)\n"
+      "  4. Leave vehicle\n"
+      "  5. Keep doing what I'm doing";
+  vehicle_screen.options = {OptionKind::kAttack, OptionKind::kUse,
+                            OptionKind::kUse, OptionKind::kUse,
+                            OptionKind::kKeep};
+
+  PromptInput input;
+  input.rules = rules;
+  input.identity = "You are Aldric, a level 75 paladin.";
+  input.wake_reason = "boarded vehicle";
+  const LlmRequest req = BuildPlanRequest(input, vehicle_screen);
+  const PromptBreakdown b = InspectPrompt(input, vehicle_screen);
+  EXPECT_LE(b.est_total_tokens + static_cast<size_t>(req.max_tokens),
+            b.slot_budget_tokens);
+  EXPECT_NE(req.user.find("vehicle: Wyrmrest Defender"), std::string::npos);
+
+  // Adversarial tight-budget counter-test: `vehicle:` is a core status line
+  // and must outlive unnumbered scenery when the prompt is crowded.
+  Screen crowded = vehicle_screen;
+  for (int i = 0; i < 60; ++i) {
+    crowded.text += "\n  - Bystander Guard " + std::to_string(i) +
+                    " (level 75 humanoid, friendly, 30 yd E)";
+  }
+  PromptInput tight = input;
+  tight.rules = std::string(7800, 'r');
+  const LlmRequest tight_req = BuildPlanRequest(tight, crowded);
+  EXPECT_NE(tight_req.user.find("vehicle: Wyrmrest Defender"),
+            std::string::npos);
+}
+
 }  // namespace
 }  // namespace harness

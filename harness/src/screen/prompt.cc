@@ -166,8 +166,8 @@ bool IsNumberedOptionLine(std::string_view line) {
 // screen has to be trimmed.
 bool IsCoreScreenLine(std::string_view line) {
   return line.starts_with("me:") || line.starts_with("where:") ||
-         line.starts_with("missed: ") || line.starts_with("party:") ||
-         line.starts_with("  party hurt:") ||
+         line.starts_with("vehicle: ") || line.starts_with("missed: ") ||
+         line.starts_with("party:") || line.starts_with("  party hurt:") ||
          line.starts_with("  loose mobs:") || line.starts_with("  help ") ||
          line.starts_with("  party_state:") || line.starts_with("ping: ") ||
          line.starts_with("trade with ");

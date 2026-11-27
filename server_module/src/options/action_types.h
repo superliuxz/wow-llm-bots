@@ -171,6 +171,13 @@ struct MountAction {
 
 struct DismountAction {};
 
+struct VehicleSpellAction {
+  uint32_t spell_id = 0;
+  std::string label;
+};
+
+struct LeaveVehicleAction {};
+
 struct NpcAction {
   enum class Op : uint8_t {
     kQuestAccept,
@@ -251,6 +258,8 @@ using BotAction = std::variant<KeepAction,
                                MarkTargetAction,
                                MountAction,
                                DismountAction,
+                               VehicleSpellAction,
+                               LeaveVehicleAction,
                                NpcAction,
                                SpendTalentsAction,
                                UseBagItemAction,

@@ -1190,6 +1190,49 @@ TEST(OptionsTest, RidingTrainingAndMountPurchaseSuppressedInCombat) {
                                     "Dismount", "Keep doing what I'm doing"}));
 }
 
+TEST(OptionsTest, VehicleSpellAndExitOptionsAvailableInAndOutOfCombat) {
+  pb::Snapshot snap;
+  snap.base.self.state = pb::Self::ALIVE;
+  OptionFacts facts;
+  facts.group_and_upkeep_actions.push_back(
+      {"vehicle:spell:50240", "Use Flame Spike (vehicle)"});
+  facts.group_and_upkeep_actions.push_back({"vehicle:leave", "Leave vehicle"});
+
+  const std::vector<OptionTarget> targets = AddOptions(&snap, facts);
+  EXPECT_EQ(Texts(snap), (std::vector<std::string>{
+                             "Use Flame Spike (vehicle)", "Leave vehicle",
+                             "Keep doing what I'm doing"}));
+  ASSERT_EQ(targets.size(), 3u);
+  const auto* vs = std::get_if<VehicleSpellAction>(&targets[0].action);
+  ASSERT_NE(vs, nullptr);
+  EXPECT_EQ(vs->spell_id, 50240u);
+  EXPECT_TRUE(std::holds_alternative<LeaveVehicleAction>(targets[1].action));
+
+  // Counter-test (P0 combat priority): vehicle controls remain available in
+  // combat alongside hostile targets.
+  pb::Snapshot combat_snap;
+  combat_snap.base.self.in_combat = true;
+  pb::Unit mob;
+  mob.guid = "0xF130001000000001";
+  mob.name = "Azure Drake";
+  mob.kind = pb::Unit::NPC;
+  mob.reaction = pb::Unit::HOSTILE;
+  mob.rel.dist_yd = 25.0f;
+  combat_snap.base.nearby.units.push_back(mob);
+  AddOptions(&combat_snap, facts);
+  EXPECT_EQ(Texts(combat_snap),
+            (std::vector<std::string>{
+                "Attack Azure Drake", "Use Flame Spike (vehicle)",
+                "Leave vehicle", "Keep doing what I'm doing"}));
+
+  // Counter-test (vehicle exit/disconnect reset): when vehicle actions are
+  // absent, only normal options appear.
+  pb::Snapshot exited_snap;
+  AddOptions(&exited_snap, OptionFacts{});
+  EXPECT_EQ(Texts(exited_snap),
+            (std::vector<std::string>{"Keep doing what I'm doing"}));
+}
+
 TEST(OptionsTest, EscortQuestWaitsUntilPartyIsReadyOrSomeoneHasIt) {
   // Solo: no wait.
   EXPECT_EQ(EscortStartHoldReason(/*self_is_leader=*/false, {}), "");

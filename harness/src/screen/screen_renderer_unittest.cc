@@ -1432,5 +1432,43 @@ TEST(ScreenRendererTest, TankDebuffsShowOnPartyTankLineAndNotNonTanks) {
             std::string::npos);
 }
 
+TEST(ScreenRendererTest, RendersVehicleStatusSeatAbilitiesAndClearsOnExit) {
+  pb::Snapshot snap = NewSnapshot();
+  snap.bot = "Tess";
+  pb::Unit& veh = snap.ext.vehicle.emplace();
+  veh.guid = "0xF130006E00000001";
+  veh.name = "Wyrmrest Defender";
+  veh.kind = pb::Unit::VEHICLE;
+  veh.health_pct = 84.0f;
+  pb::VehiclePart& vp = veh.vehicle.emplace();
+  vp.seats.push_back({0, "Tess", true});
+  vp.seats.push_back({1, "", true});
+  pb::Spell sp1;
+  sp1.id = 50240;
+  sp1.name = "Flame Spike";
+  sp1.ability.emplace().usable = true;
+  vp.abilities.push_back(std::move(sp1));
+  pb::Spell sp2;
+  sp2.id = 50248;
+  sp2.name = "Engulf in Flames";
+  sp2.ability.emplace().cooldown_remaining_s = 5.0f;
+  vp.abilities.push_back(std::move(sp2));
+
+  const Screen in_veh = RenderScreen(snap);
+  EXPECT_NE(in_veh.text.find("in vehicle"), std::string::npos) << in_veh.text;
+  EXPECT_NE(
+      in_veh.text.find("vehicle: Wyrmrest Defender (84% hp; seat 0; abilities: "
+                       "Flame Spike, Engulf in Flames (cd 5s))"),
+      std::string::npos)
+      << in_veh.text;
+
+  // Adversarial counter-test: after exiting vehicle or disconnecting, clearing
+  // `ext.vehicle` removes both `in vehicle` and the `vehicle:` line.
+  snap.ext.vehicle.reset();
+  const Screen exited = RenderScreen(snap);
+  EXPECT_EQ(exited.text.find("in vehicle"), std::string::npos) << exited.text;
+  EXPECT_EQ(exited.text.find("vehicle:"), std::string::npos) << exited.text;
+}
+
 }  // namespace
 }  // namespace harness

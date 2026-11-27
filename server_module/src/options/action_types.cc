@@ -227,6 +227,16 @@ BotAction DecodeOptionFactAction(std::string_view guid,
   if (guid == "dismount") {
     return DismountAction{};
   }
+  if (guid == "vehicle:leave") {
+    return LeaveVehicleAction{};
+  }
+  if (guid.starts_with("vehicle:spell:")) {
+    uint32_t spell_id = 0;
+    if (!ParseUint32(guid.substr(14), &spell_id) || spell_id == 0) {
+      return InvalidAction{"invalid vehicle spell"};
+    }
+    return VehicleSpellAction{spell_id, std::string(label)};
+  }
   if (guid.starts_with("mount:")) {
     uint32_t spell_id = 0;
     if (!ParseUint32(guid.substr(6), &spell_id) || spell_id == 0) {
@@ -469,6 +479,10 @@ std::string_view ActionKindName(const BotAction& action) {
           return "mount";
         if constexpr (std::is_same_v<T, DismountAction>)
           return "dismount";
+        if constexpr (std::is_same_v<T, VehicleSpellAction>)
+          return "vehicle_spell";
+        if constexpr (std::is_same_v<T, LeaveVehicleAction>)
+          return "leave_vehicle";
         if constexpr (std::is_same_v<T, NpcAction>)
           return "npc";
         if constexpr (std::is_same_v<T, SpendTalentsAction>)

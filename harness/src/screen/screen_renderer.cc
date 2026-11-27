@@ -579,7 +579,10 @@ std::string FormatAuraText(const pb::Aura& aura) {
   return text;
 }
 
-std::string SelfLine(const pb::Self& s, bool party_leader, bool party_member) {
+std::string SelfLine(const pb::Self& s,
+                     bool party_leader,
+                     bool party_member,
+                     bool in_vehicle) {
   std::vector<std::string> who;
   who.push_back(
       s.unit.level.value_or(0) != 0
@@ -627,6 +630,7 @@ std::string SelfLine(const pb::Self& s, bool party_leader, bool party_member) {
     const char* word;
   } flags[] = {{s.in_combat, "in combat"},
                {s.resting, "resting"},
+               {in_vehicle, "in vehicle"},
                {s.mounted, "mounted"},
                {s.swimming, "swimming"},
                {s.in_flight, "in flight"},
@@ -666,6 +670,46 @@ std::string SelfLine(const pb::Self& s, bool party_leader, bool party_member) {
     }
   }
   return base::JoinString(bits, "; ");
+}
+
+std::string VehicleLine(const pb::Unit& v, std::string_view my_name) {
+  std::string out = v.name.empty() ? "vehicle" : v.name;
+  std::vector<std::string> details;
+  if (v.dead) {
+    details.push_back("destroyed");
+  } else if (v.health_pct && std::isfinite(*v.health_pct)) {
+    details.push_back(base::StringPrintf("%.0f%% hp", *v.health_pct));
+  }
+  if (v.vehicle) {
+    if (!my_name.empty()) {
+      for (const pb::VehiclePart::Seat& seat : v.vehicle->seats) {
+        if (seat.occupant == my_name) {
+          details.push_back(
+              base::StrCat({"seat ", base::NumberToString(seat.index)}));
+          break;
+        }
+      }
+    }
+    std::vector<std::string> abilities;
+    for (const pb::Spell& sp : v.vehicle->abilities) {
+      if (sp.name.empty()) {
+        continue;
+      }
+      const float cd =
+          sp.ability ? Finite(sp.ability->cooldown_remaining_s) : 0.0f;
+      abilities.push_back(
+          cd >= 1.0f ? base::StringPrintf("%s (cd %.0fs)", sp.name.c_str(), cd)
+                     : sp.name);
+    }
+    if (!abilities.empty()) {
+      details.push_back(
+          base::StrCat({"abilities: ", base::JoinString(abilities, ", ")}));
+    }
+  }
+  if (!details.empty()) {
+    base::StrAppend(&out, {" (", base::JoinString(details, "; "), ")"});
+  }
+  return out;
 }
 
 std::string WhereLine(const pb::Where& w) {
@@ -1631,10 +1675,16 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
   std::vector<std::string> lines;
   if (base.self != pb::Self{}) {
     lines.push_back("me: " + SelfLine(base.self, self_is_leader,
-                                      !self_is_leader && self_in_party));
+                                      !self_is_leader && self_in_party,
+                                      snapshot.ext.vehicle.has_value()));
   }
   if (base.where != pb::Where{}) {
     lines.push_back("where: " + WhereLine(base.where));
+  }
+  if (snapshot.ext.vehicle) {
+    const std::string_view my_name =
+        !snapshot.bot.empty() ? snapshot.bot : base.self.unit.name;
+    lines.push_back("vehicle: " + VehicleLine(*snapshot.ext.vehicle, my_name));
   }
   const pb::Nearby& nearby = base.nearby;
   // Units written under "around me": the frames below don't repeat them.

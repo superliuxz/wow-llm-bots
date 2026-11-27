@@ -53,6 +53,8 @@
 #include "TravelMgr.h"
 #include "Unit.h"
 #include "UpdateFields.h"
+#include "Vehicle.h"
+#include "VehicleDefines.h"
 #include "World.h"
 #include "base/time/time.h"
 #include "bot_manager/bot_manager.h"
@@ -66,6 +68,7 @@
 #include "options/option_facts.h"
 #include "options/options.h"
 #include "options/position_facts.h"
+#include "options/vehicle_controls.h"
 #include "snapshot/encounter_phase.h"
 #include "snapshot/nearby_builder.h"
 #include "snapshot/panels_builder.h"
@@ -435,6 +438,89 @@ void FillTarget(Player* bot, NearbyBuilder* nearby, pb::Extensions* ext) {
       target.my_threat_pct = 100.0f * mgr.GetThreat(bot) / top;
     }
   }
+}
+
+void FillVehicle(Player* bot, NearbyBuilder* nearby, pb::Extensions* ext) {
+  Vehicle* vehicle = bot->GetVehicle();
+  Unit* base = vehicle ? vehicle->GetBase() : nullptr;
+  if (!vehicle || !base || !base->IsInWorld()) {
+    return;
+  }
+  pb::Unit& out = ext->vehicle.emplace();
+  nearby->FillUnit(bot, base, &out);
+  out.kind = pb::Unit::VEHICLE;
+  if (out.name.empty()) {
+    out.name = base->GetName();
+  }
+  out.health_pct = base->GetHealthPct();
+  out.dead = !base->IsAlive();
+
+  std::vector<VehicleSeatInput> seats;
+  seats.reserve(vehicle->Seats.size());
+  for (const auto& [seat_id, seat] : vehicle->Seats) {
+    if (seat_id < 0) {
+      continue;
+    }
+    VehicleSeatInput in;
+    in.index = static_cast<uint32_t>(seat_id);
+    if (!seat.IsEmpty()) {
+      if (Unit* passenger =
+              ObjectAccessor::GetUnit(*base, seat.Passenger.Guid)) {
+        in.occupant = passenger->GetName();
+      }
+    }
+    in.can_use = seat.SeatInfo && (seat.SeatInfo->CanEnterOrExit() ||
+                                   seat.SeatInfo->CanControl());
+    seats.push_back(std::move(in));
+  }
+
+  const uint32_t locale = sWorld->GetDefaultDbcLocale();
+  Creature* creature = base->ToCreature();
+  std::vector<VehicleSpellInput> spells;
+  const auto push_spell = [&](uint32_t spell_id) {
+    const SpellInfo* info = sSpellMgr->GetSpellInfo(spell_id);
+    if (!info) {
+      return;
+    }
+    const char* name = info->SpellName[locale];
+    if (!name || !*name) {
+      return;
+    }
+    VehicleSpellInput in;
+    in.spell_id = spell_id;
+    in.name = name;
+    in.cooldown_s = static_cast<float>(info->RecoveryTime) / 1000.0f;
+    if (creature) {
+      in.cooldown_remaining_s =
+          static_cast<float>(creature->GetSpellCooldown(spell_id)) / 1000.0f;
+    }
+    const int32_t cost = info->CalcPowerCost(base, info->GetSchoolMask());
+    in.usable = in.cooldown_remaining_s <= 0.0f &&
+                (cost <= 0 || info->PowerType >= MAX_POWERS ||
+                 base->GetPower(static_cast<Powers>(info->PowerType)) >=
+                     static_cast<uint32_t>(cost));
+    in.ground_targeted =
+        (info->GetExplicitTargetMask() & TARGET_FLAG_DEST_LOCATION) != 0;
+    in.passive = info->IsPassive();
+    spells.push_back(std::move(in));
+  };
+
+  if (const CharmInfo* charm = base->GetCharmInfo()) {
+    for (uint8_t i = ACTION_BAR_INDEX_START; i < ACTION_BAR_INDEX_END; ++i) {
+      const UnitActionBarEntry* entry = charm->GetActionBarEntry(i);
+      if (entry && entry->IsActionBarForSpell() && entry->GetAction() != 0) {
+        push_spell(entry->GetAction());
+      }
+    }
+  }
+  if (spells.empty() && creature) {
+    for (uint32_t i = 0; i < MAX_CREATURE_SPELLS; ++i) {
+      if (creature->m_spells[i] != 0) {
+        push_spell(creature->m_spells[i]);
+      }
+    }
+  }
+  out.vehicle = BuildVehiclePart(seats, spells);
 }
 
 void FillCombat(Player* bot, NearbyBuilder* nearby, pb::Extensions* ext) {
@@ -1095,6 +1181,7 @@ NearbyBuilder::Stats SnapshotBuilder::Build(Player* bot,
   FillWhere(bot, &base.where);
   const NearbyBuilder::Stats stats = nearby_.Build(bot, &base.nearby);
   FillTarget(bot, &nearby_, &snapshot->ext);
+  FillVehicle(bot, &nearby_, &snapshot->ext);
   FillCombat(bot, &nearby_, &snapshot->ext);
   FillEncounter(bot, &nearby_, *snapshot, &snapshot->ext);
   FillParty(bot, &nearby_, in_combat, &snapshot->ext,
