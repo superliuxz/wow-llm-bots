@@ -23,13 +23,19 @@ struct TalkResult {
   std::string info;
 };
 
-// Approaches and faces `npc` once in talk range. Pure harness: never makes
-// quest/reward/trainer/vendor decisions in C++.
+// Approaches, faces, and opens gossip (when `npc` has UNIT_NPC_FLAG_GOSSIP)
+// once in talk range. Pure harness: never makes quest/reward/trainer/vendor
+// or dialogue decisions in C++.
 TalkResult TalkToNpcNow(Player* bot, Creature* npc);
 
+// True when `npc` has selectable gossip/dialogue options for `bot` (an already
+// open gossip menu, DB dialogue options whose conditions pass, or a scripted
+// gossip NPC). Read-only: never mutates `PlayerTalkClass`.
+bool NpcHasDialogue(Player* bot, Creature* npc);
+
 // Collects explicit per-quest, per-reward, class-trainer, vendor
-// (sell-grey/repair & buy upkeep), flight-master, and innkeeper actions for
-// friendly NPCs within talk range.
+// (sell-grey/repair & buy upkeep), flight-master, innkeeper, and open gossip
+// dialogue actions for friendly NPCs within talk range.
 void CollectNpcActions(Player* bot,
                        const wlb::snapshot::Snapshot& snapshot,
                        bool has_food,

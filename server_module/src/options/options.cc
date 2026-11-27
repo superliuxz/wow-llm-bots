@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "base/strings/stringprintf.h"
@@ -39,7 +40,7 @@ bool HasActionableQuestMarker(pb::Unit::QuestMarker marker) {
 bool HasTalkNpcFlags(const OptionFacts& facts, std::string_view guid) {
   for (const OptionFacts::Npc& npc : facts.npcs) {
     if (npc.guid == guid) {
-      return (npc.npc_flags & kTalkNpcFlags) != 0;
+      return (npc.npc_flags & (kTalkNpcFlags | kNpcFlagHasDialogue)) != 0;
     }
   }
   return false;
@@ -674,9 +675,13 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
     if (act.guid.empty() || act.label.empty()) {
       continue;
     }
+    BotAction decoded = DecodeOptionFactAction(act.guid, act.label);
+    if (std::holds_alternative<DestroyItemAction>(decoded) &&
+        (!alive || self.in_combat)) {
+      continue;
+    }
     targets.push_back({OptionTarget::Kind::kUse, act.guid, act.label,
-                       std::nullopt,
-                       DecodeOptionFactAction(act.guid, act.label)});
+                       std::nullopt, std::move(decoded)});
     pb::Option& option = snapshot->options.emplace_back();
     option.text = act.label;
     option.guid = act.guid;

@@ -1446,5 +1446,71 @@ TEST(OptionsTest, LighterCombatSnapshotPreservesP0CombatFactsAndOptions) {
   EXPECT_FALSE(has("Leave group"));
 }
 
+// Dialogue NPCs with `kNpcFlagHasDialogue` offer `Talk to` out of combat
+// (unlike plain flavor-only `kNpcFlagGossip`), and explicit `npc_gossip:*`
+// actions replace the generic `Talk to` once open.
+TEST(OptionsTest, DialogueFlagOffersTalkAndGossipActionsReplaceItOutOfCombat) {
+  pb::Snapshot snap;
+  AddUnit(&snap, "Brann Bronzebeard", "0x10", 4, pb::Unit::FRIENDLY);
+  AddUnit(&snap, "Stormwind Citizen", "0x11", 4, pb::Unit::FRIENDLY);
+
+  OptionFacts facts;
+  facts.npcs.push_back({"0x10", kNpcFlagGossip | kNpcFlagHasDialogue});
+  facts.npcs.push_back({"0x11", kNpcFlagGossip});  // Plain gossip: skipped.
+
+  AddOptions(&snap, facts);
+  EXPECT_EQ(Texts(snap),
+            (std::vector<std::string>{"Talk to Brann Bronzebeard",
+                                      "Keep doing what I'm doing"}));
+
+  // Once gossip is open, explicit dialogue choices replace `Talk to`.
+  facts.npc_actions.push_back({"npc_gossip:0x10:99:0", "0x10",
+                               "Say to Brann Bronzebeard: \"We are ready.\""});
+  snap.options.clear();
+  const std::vector<OptionTarget> targets = AddOptions(&snap, facts);
+  EXPECT_EQ(Texts(snap), (std::vector<std::string>{
+                             "Say to Brann Bronzebeard: \"We are ready.\"",
+                             "Keep doing what I'm doing"}));
+  const auto* npc_act = std::get_if<NpcAction>(&targets[0].action);
+  ASSERT_NE(npc_act, nullptr);
+  EXPECT_EQ(npc_act->op, NpcAction::Op::kGossipSelect);
+  EXPECT_EQ(npc_act->arg1, 99u);
+  EXPECT_EQ(npc_act->arg2, 0u);
+
+  // Adversarial counter-test: P0 combat suppresses both Talk and gossip
+  // options.
+  snap.options.clear();
+  snap.base.self.in_combat = true;
+  AddOptions(&snap, facts);
+  EXPECT_EQ(Texts(snap), std::vector<std::string>{"Keep doing what I'm doing"});
+}
+
+// Adversarial counter-test: full-bag destroy options are offered alive out of
+// combat, and suppressed in combat or while dead (P0 combat priority).
+TEST(OptionsTest, DestroyItemOptionsSuppressedInCombatAndWhenDead) {
+  OptionFacts facts;
+  facts.group_and_upkeep_actions.push_back(
+      {"destroy:255:23:4865", "Destroy Ruined Pelt (grey, 5c)"});
+
+  pb::Snapshot alive_ooc;
+  const std::vector<OptionTarget> ooc_targets = AddOptions(&alive_ooc, facts);
+  EXPECT_EQ(Texts(alive_ooc),
+            (std::vector<std::string>{"Destroy Ruined Pelt (grey, 5c)",
+                                      "Keep doing what I'm doing"}));
+  EXPECT_TRUE(std::holds_alternative<DestroyItemAction>(ooc_targets[0].action));
+
+  pb::Snapshot in_combat;
+  in_combat.base.self.in_combat = true;
+  AddOptions(&in_combat, facts);
+  EXPECT_EQ(Texts(in_combat),
+            std::vector<std::string>{"Keep doing what I'm doing"});
+
+  pb::Snapshot dead;
+  dead.base.self.state = pb::Self::DEAD_BODY;
+  AddOptions(&dead, facts);
+  EXPECT_EQ(Texts(dead), (std::vector<std::string>{
+                             "Release spirit", "Keep doing what I'm doing"}));
+}
+
 }  // namespace
 }  // namespace llm_brain

@@ -18,11 +18,8 @@ Live verification following the `70b0878` team-play P0 fixes:
 Team-play P1 gaps and selected P2 items from the `70b0878` review:
 
 ### Questing & travel
-- **No NPC dialogue options or vehicle controls:** `Talk to` only walks up/targets; vehicle
-  snapshot fields are never filled, blocking WotLK vehicle quests (`exec_npc.cc:163-184`,
-  `snapshot/snapshot.h:1423-1431,2039`).
-- **Full bags:** Bots only sell grey items and never destroy anything, so they stop looting quest
-  items (`exec_npc.cc:53-94,321-336`).
+- **No vehicle controls:** Vehicle snapshot fields are never filled, blocking WotLK vehicle quests
+  (`snapshot/snapshot.h:1423-1431,2039`).
 
 ### P2 (selected)
 - **Leader commands scope & semantics:** Only work when human is group leader and only in

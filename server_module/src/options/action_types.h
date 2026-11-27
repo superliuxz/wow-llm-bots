@@ -182,11 +182,13 @@ struct NpcAction {
     kFlyDiscover,
     kFlyTo,
     kBind,
+    kGossipOpen,
+    kGossipSelect,
   };
   Op op = Op::kVendor;
   std::string npc_guid;
-  uint32_t arg1 = 0;  // quest_id, spell_id, item_entry, or dest_node
-  uint32_t arg2 = 0;  // reward_idx for kQuestTurnIn
+  uint32_t arg1 = 0;  // quest_id, spell_id, item_entry, dest_node, or menu_id
+  uint32_t arg2 = 0;  // reward_idx for kQuestTurnIn, list_id for kGossipSelect
 };
 
 struct SpendTalentsAction {
@@ -200,6 +202,13 @@ struct UseBagItemAction {
 };
 
 struct EquipItemAction {
+  uint32_t entry = 0;
+  std::string name;
+};
+
+struct DestroyItemAction {
+  uint8_t bag = 0;
+  uint8_t slot = 0;
   uint32_t entry = 0;
   std::string name;
 };
@@ -246,13 +255,15 @@ using BotAction = std::variant<KeepAction,
                                SpendTalentsAction,
                                UseBagItemAction,
                                EquipItemAction,
+                               DestroyItemAction,
                                StandingActAction,
                                InvalidAction>;
 
 // Decodes a wire/fact action guid (`npc_*`, `roll:*`, `ready:*`, `qshare:*`,
 // `lfg:*`, `qpush:*`, `grouppolicy:*`, `follow:*`, `mark:*`, `mount:*`,
-// `talent:*`, `item:*`, `equip:*`, `rez:*`, `trade:*`) into a typed `BotAction`
-// once at option creation. Returns `InvalidAction` if malformed.
+// `talent:*`, `item:*`, `equip:*`, `destroy:*`, `rez:*`, `trade:*`) into a
+// typed `BotAction` once at option creation. Returns `InvalidAction` if
+// malformed.
 BotAction DecodeOptionFactAction(std::string_view guid, std::string_view label);
 
 // Pure validation for `Command_Act::TRADE_GOLD` before sending

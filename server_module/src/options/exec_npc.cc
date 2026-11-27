@@ -9,10 +9,12 @@
 #include <utility>
 #include <vector>
 
+#include "ConditionMgr.h"
 #include "Creature.h"
 #include "CreatureData.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
+#include "GossipDef.h"
 #include "Group.h"
 #include "Item.h"
 #include "ItemPackets.h"
@@ -43,6 +45,7 @@
 #include "options/action_types.h"
 #include "options/exec_shared.h"
 #include "options/leader_travel.h"
+#include "options/npc_gossip_and_bags.h"
 #include "options/options.h"
 #include "options/riding_mounts.h"
 #include "snapshot/snapshot.h"
@@ -52,6 +55,44 @@ namespace llm_brain {
 namespace {
 
 namespace pb = wlb::snapshot;
+
+static_assert(kGossipOptionGossip == GOSSIP_OPTION_GOSSIP);
+
+bool HasOpenGossipMenuFor(const Player* bot, const Creature* npc) {
+  if (!bot || !npc || !bot->PlayerTalkClass) {
+    return false;
+  }
+  const GossipMenu& menu = bot->PlayerTalkClass->GetGossipMenu();
+  return menu.GetSenderGUID() == npc->GetGUID() && !menu.Empty();
+}
+
+bool HasDbDialogueOptions(Player* bot, Creature* npc) {
+  if (!bot || !npc || !npc->HasNpcFlag(UNIT_NPC_FLAG_GOSSIP)) {
+    return false;
+  }
+  const uint32_t menu_id = npc->GetGossipMenuId();
+  if (menu_id == 0) {
+    return false;
+  }
+  const uint32_t npc_flags = npc->GetNpcFlags();
+  const GossipMenuItemsMapBounds bounds =
+      sObjectMgr->GetGossipMenuItemsMapBounds(menu_id);
+  for (auto itr = bounds.first; itr != bounds.second; ++itr) {
+    const GossipMenuItems& item = itr->second;
+    if (item.OptionType != GOSSIP_OPTION_GOSSIP || item.BoxCoded ||
+        (item.OptionNpcFlag & npc_flags) == 0) {
+      continue;
+    }
+    if (!sConditionMgr->IsObjectMeetToConditions(bot, npc, item.Conditions)) {
+      continue;
+    }
+    if (!SanitizeGossipText(item.OptionText).empty() ||
+        item.OptionBroadcastTextID != 0) {
+      return true;
+    }
+  }
+  return false;
+}
 
 bool HasGreySellableItem(Player* bot) {
   for (const BagSlotItem& entry : BagItems(bot)) {
@@ -280,6 +321,20 @@ std::string EscortHoldReason(Player* bot, Creature* npc, const Quest* quest) {
 
 }  // namespace
 
+bool NpcHasDialogue(Player* bot, Creature* npc) {
+  if (!bot || !npc || !npc->IsInWorld() || !npc->IsAlive() ||
+      !npc->HasNpcFlag(UNIT_NPC_FLAG_GOSSIP)) {
+    return false;
+  }
+  if (HasOpenGossipMenuFor(bot, npc)) {
+    return true;
+  }
+  if (HasDbDialogueOptions(bot, npc)) {
+    return true;
+  }
+  return npc->GetScriptId() != 0;
+}
+
 TalkResult TalkToNpcNow(Player* bot, Creature* npc) {
   PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
   if (!ai) {
@@ -299,7 +354,16 @@ TalkResult TalkToNpcNow(Player* bot, Creature* npc) {
   }
   bot->SetFacingToObject(npc);
   bot->SetSelection(npc->GetGUID());
+  if (npc->HasNpcFlag(UNIT_NPC_FLAG_GOSSIP) && bot->GetSession()) {
+    WorldPacket p(CMSG_GOSSIP_HELLO, 8);
+    p << npc->GetGUID();
+    p.rpos(0);
+    bot->GetSession()->HandleGossipHelloOpcode(p);
+  }
   ai->ResetActionDuration();
+  if (HasOpenGossipMenuFor(bot, npc)) {
+    return {"", "talked to " + npc->GetName()};
+  }
   return {"", "approached " + npc->GetName()};
 }
 
@@ -328,6 +392,7 @@ void CollectNpcActions(Player* bot,
       continue;
     }
     const std::string& npc_name = npc->GetName();
+    const size_t npc_actions_before = out->size();
 
     // 1. Quest turn-ins and quest accepts (reading quest relations directly
     //    without calling PrepareQuestMenu so PlayerTalkClass is never mutated).
@@ -650,6 +715,41 @@ void CollectNpcActions(Player* bot,
         out->push_back({"npc_bind:" + u.guid, u.guid, std::move(label)});
       }
     }
+
+    // 7. Gossip / dialogue options (read-only: never mutates PlayerTalkClass).
+    if (out->size() < kMaxNpcActions && npc->HasNpcFlag(UNIT_NPC_FLAG_GOSSIP)) {
+      if (HasOpenGossipMenuFor(bot, npc)) {
+        const GossipMenu& menu = bot->PlayerTalkClass->GetGossipMenu();
+        std::vector<GossipOptionCandidate> candidates;
+        candidates.reserve(menu.GetMenuItemCount());
+        for (const auto& [list_id, item] : menu.GetMenuItems()) {
+          candidates.push_back(GossipOptionCandidate{
+              .list_id = list_id,
+              .sender = item.Sender,
+              .option_type = item.OptionType,
+              .message = item.Message,
+              .box_money = item.BoxMoney,
+              .is_coded = item.IsCoded,
+          });
+        }
+        for (const GossipOptionChoice& choice : SelectGossipOptions(
+                 menu.GetMenuId(), candidates, bot->GetMoney(), npc_name)) {
+          if (out->size() >= kMaxNpcActions) {
+            break;
+          }
+          out->push_back({"npc_gossip:" + u.guid + ":" +
+                              std::to_string(choice.menu_id) + ":" +
+                              std::to_string(choice.list_id),
+                          u.guid, choice.label});
+        }
+      } else if (out->size() > npc_actions_before && NpcHasDialogue(bot, npc)) {
+        // Explicit service/quest actions above hide generic `Talk to <npc>`,
+        // so expose an explicit open-dialogue action when this NPC also has
+        // dialogue options.
+        out->push_back({"npc_gossip_open:" + u.guid, u.guid,
+                        "Talk to " + npc_name + " (dialogue)"});
+      }
+    }
   }
 }
 
@@ -902,6 +1002,42 @@ ActionOutcome ExecuteNpcAction(Player* bot, const NpcAction& action) {
         return {.error = "could not bind hearthstone at " + npc->GetName()};
       }
       return {.used = true, .info = "bound hearthstone at " + npc->GetName()};
+    }
+    case NpcAction::Op::kGossipOpen: {
+      TalkResult res = TalkToNpcNow(bot, npc);
+      return {.error = std::move(res.error),
+              .used = res.error.empty(),
+              .info = std::move(res.info)};
+    }
+    case NpcAction::Op::kGossipSelect: {
+      WorldSession* session = bot->GetSession();
+      if (!session) {
+        return {.error = "no session"};
+      }
+      const GossipMenu* menu = bot->PlayerTalkClass
+                                   ? &bot->PlayerTalkClass->GetGossipMenu()
+                                   : nullptr;
+      const bool menu_matches_npc =
+          menu != nullptr && menu->GetSenderGUID() == npc->GetGUID();
+      const bool menu_id_matches =
+          menu_matches_npc && menu->GetMenuId() == action.arg1;
+      const GossipMenuItem* item =
+          menu_id_matches ? menu->GetItem(action.arg2) : nullptr;
+      if (std::string err = ValidateGossipSelect(
+              bot->IsInCombat(), /*npc_in_range=*/true, menu_matches_npc,
+              menu_id_matches, item != nullptr, item ? item->IsCoded : false,
+              item ? item->BoxMoney : 0u, bot->GetMoney());
+          !err.empty()) {
+        return {.error = std::move(err)};
+      }
+      const std::string chosen_text = SanitizeGossipText(item->Message);
+      WorldPacket p(CMSG_GOSSIP_SELECT_OPTION, 16);
+      p << npc->GetGUID() << action.arg1 << action.arg2;
+      p.rpos(0);
+      session->HandleGossipSelectOptionOpcode(p);
+      ai->ResetActionDuration();
+      return {.used = true,
+              .info = "selected \"" + chosen_text + "\" at " + npc->GetName()};
     }
   }
   return {.error = "unknown NPC action"};

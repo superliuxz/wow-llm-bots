@@ -186,5 +186,57 @@ TEST(ActionTypesTest, ValidateTradeGoldRejectsInvalidStateAndAmounts) {
   EXPECT_EQ(ValidateTradeGold(/*has_trade=*/true, 1, 0), "not enough money");
 }
 
+TEST(ActionTypesTest, DecodesGossipAndDestroyActionsAndRejectsMalformed) {
+  {
+    BotAction a = DecodeOptionFactAction("npc_gossip_open:0x1234",
+                                         "Talk to Brann (dialogue)");
+    const auto* npc = std::get_if<NpcAction>(&a);
+    ASSERT_NE(npc, nullptr);
+    EXPECT_EQ(npc->op, NpcAction::Op::kGossipOpen);
+    EXPECT_EQ(npc->npc_guid, "0x1234");
+    EXPECT_FALSE(IsDeadAllowedAction(a));
+  }
+  {
+    BotAction a = DecodeOptionFactAction("npc_gossip:0x1234:500:2",
+                                         "Say to Brann: \"Ready\"");
+    const auto* npc = std::get_if<NpcAction>(&a);
+    ASSERT_NE(npc, nullptr);
+    EXPECT_EQ(npc->op, NpcAction::Op::kGossipSelect);
+    EXPECT_EQ(npc->npc_guid, "0x1234");
+    EXPECT_EQ(npc->arg1, 500u);
+    EXPECT_EQ(npc->arg2, 2u);
+    EXPECT_FALSE(IsDeadAllowedAction(a));
+  }
+  for (const char* bad :
+       {"npc_gossip_open:", "npc_gossip_open:0x1:extra", "npc_gossip:0x1234",
+        "npc_gossip:0x1234:500", "npc_gossip::500:2", "npc_gossip:0x1234:a:2",
+        "npc_gossip:0x1234:500:b"}) {
+    EXPECT_TRUE(std::holds_alternative<InvalidAction>(
+        DecodeOptionFactAction(bad, "bad")))
+        << bad;
+  }
+
+  {
+    BotAction a = DecodeOptionFactAction("destroy:255:23:4865",
+                                         "Destroy Ruined Pelt (grey, 5c)");
+    const auto* d = std::get_if<DestroyItemAction>(&a);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->bag, 255u);
+    EXPECT_EQ(d->slot, 23u);
+    EXPECT_EQ(d->entry, 4865u);
+    EXPECT_EQ(d->name, "Destroy Ruined Pelt (grey, 5c)");
+    EXPECT_EQ(ActionKindName(a), "destroy_item");
+    EXPECT_FALSE(IsDeadAllowedAction(a));
+    EXPECT_FALSE(IsPendingCastAction(a));
+  }
+  for (const char* bad :
+       {"destroy:", "destroy:255:23", "destroy:256:23:4865",
+        "destroy:255:256:4865", "destroy:255:23:0", "destroy:a:b:c"}) {
+    EXPECT_TRUE(std::holds_alternative<InvalidAction>(
+        DecodeOptionFactAction(bad, "bad")))
+        << bad;
+  }
+}
+
 }  // namespace
 }  // namespace llm_brain

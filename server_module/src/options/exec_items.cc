@@ -21,6 +21,7 @@
 #include "GameObject.h"
 #include "Group.h"
 #include "Item.h"
+#include "ItemPackets.h"
 #include "ItemTemplate.h"
 #include "LootMgr.h"
 #include "LootObjectStack.h"
@@ -33,6 +34,7 @@
 #include "PlayerbotAI.h"
 #include "PlayerbotAIConfig.h"
 #include "Playerbots.h"
+#include "QuestDef.h"
 #include "SharedDefines.h"
 #include "Spell.h"
 #include "SpellAuras.h"
@@ -45,6 +47,7 @@
 #include "base/strings/stringprintf.h"
 #include "options/action_types.h"
 #include "options/exec_shared.h"
+#include "options/npc_gossip_and_bags.h"
 #include "options/position_facts.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/world_util.h"
@@ -53,6 +56,84 @@ namespace llm_brain {
 namespace {
 
 namespace pb = wlb::snapshot;
+
+static_assert(kItemQualityPoor == ITEM_QUALITY_POOR);
+static_assert(kItemQualityNormal == ITEM_QUALITY_NORMAL);
+static_assert(kItemClassContainer == ITEM_CLASS_CONTAINER);
+static_assert(kItemClassProjectile == ITEM_CLASS_PROJECTILE);
+static_assert(kItemClassQuiver == ITEM_CLASS_QUIVER);
+static_assert(kItemClassQuest == ITEM_CLASS_QUEST);
+static_assert(kItemClassKey == ITEM_CLASS_KEY);
+static_assert(kItemBondQuest == BIND_QUEST_ITEM);
+static_assert(kItemBondQuest1 == BIND_QUEST_ITEM1);
+static_assert(kItemFlagNoUserDestroy == ITEM_FLAG_NO_USER_DESTROY);
+
+std::vector<uint32_t> CollectActiveQuestItemIds(const Player* bot) {
+  std::vector<uint32_t> ids;
+  if (!bot) {
+    return ids;
+  }
+  for (uint16_t slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot) {
+    const uint32_t qid = bot->GetQuestSlotQuestId(slot);
+    if (qid == 0) {
+      continue;
+    }
+    const Quest* q = sObjectMgr->GetQuestTemplate(qid);
+    if (!q) {
+      continue;
+    }
+    if (const uint32_t src = q->GetSrcItemId(); src != 0) {
+      ids.push_back(src);
+    }
+    for (size_t i = 0; i < QUEST_ITEM_OBJECTIVES_COUNT; ++i) {
+      if (q->RequiredItemId[i] != 0) {
+        ids.push_back(q->RequiredItemId[i]);
+      }
+    }
+    for (size_t i = 0; i < QUEST_SOURCE_ITEM_IDS_COUNT; ++i) {
+      if (q->ItemDrop[i] != 0) {
+        ids.push_back(q->ItemDrop[i]);
+      }
+    }
+  }
+  return ids;
+}
+
+DestroyItemCandidate BuildDestroyCandidate(
+    const Player* bot,
+    const Item* item,
+    uint8_t bag,
+    uint8_t slot,
+    bool in_general_bag,
+    const std::vector<uint32_t>& active_quest_items) {
+  DestroyItemCandidate cand;
+  cand.bag = bag;
+  cand.slot = slot;
+  cand.in_general_bag = in_general_bag;
+  const uint16_t pos = static_cast<uint16_t>((static_cast<uint16_t>(bag) << 8) |
+                                             static_cast<uint16_t>(slot));
+  cand.is_equipped_or_bag_slot = bot->IsEquipmentPos(pos) || bot->IsBagPos(pos);
+  if (!item) {
+    return cand;
+  }
+  const ItemTemplate* proto = item->GetTemplate();
+  if (!proto) {
+    return cand;
+  }
+  cand.entry = proto->ItemId;
+  cand.name = proto->Name1;
+  cand.quality = proto->Quality;
+  cand.item_class = proto->Class;
+  cand.bonding = proto->Bonding;
+  cand.start_quest = proto->StartQuest;
+  cand.flags = proto->Flags;
+  cand.sell_price = proto->SellPrice;
+  cand.stack_count = item->GetCount();
+  cand.required_for_active_quest =
+      std::find(active_quest_items.begin(), active_quest_items.end(),
+                proto->ItemId) != active_quest_items.end();
+  return cand;
+}
 
 constexpr uint32_t kSpellCategoryFood = 11;
 constexpr uint32_t kSpellCategoryDrink = 59;
@@ -1128,6 +1209,70 @@ ActionOutcome ExecuteEquipItemAction(Player* bot,
                         action.name);
   }
   return {.error = action.name + " is not in your bags"};
+}
+
+void CollectBagDestroyActions(Player* bot,
+                              uint32_t free_bag_slots,
+                              std::vector<pb::OptionFacts_Action>* out) {
+  if (!bot || free_bag_slots > 0 || !bot->IsAlive() || bot->IsInCombat() ||
+      bot->GetTradeData() != nullptr) {
+    return;
+  }
+  const std::vector<uint32_t> quest_items = CollectActiveQuestItemIds(bot);
+  std::vector<DestroyItemCandidate> candidates;
+  for (const BagSlotItem& entry : BagItems(bot)) {
+    if (!entry.item) {
+      continue;
+    }
+    candidates.push_back(BuildDestroyCandidate(bot, entry.item, entry.bag,
+                                               entry.slot, entry.general_bag,
+                                               quest_items));
+  }
+  for (const DestroyItemOption& opt : SelectDestroyItemOptions(
+           free_bag_slots, bot->IsAlive(), bot->IsInCombat(),
+           bot->GetTradeData() != nullptr, candidates)) {
+    out->push_back({opt.guid, opt.label});
+  }
+}
+
+ActionOutcome ExecuteDestroyItemAction(Player* bot,
+                                       const DestroyItemAction& action) {
+  WorldSession* session = bot->GetSession();
+  if (!session) {
+    return {.error = "no session"};
+  }
+  if (bot->IsInCombat()) {
+    return {.error = "you are in combat"};
+  }
+  if (bot->GetTradeData() != nullptr) {
+    return {.error = "cannot destroy items while trading"};
+  }
+  if (action.entry == 0) {
+    return {.error = "invalid item id"};
+  }
+  const bool in_general_bag = action.bag == INVENTORY_SLOT_BAG_0 ||
+                              IsGeneralBag(bot->GetBagByPos(action.bag));
+  Item* item = bot->GetItemByPos(action.bag, action.slot);
+  if (!item || item->GetEntry() != action.entry) {
+    return {.error = "that item is no longer in that bag slot"};
+  }
+  const std::vector<uint32_t> quest_items = CollectActiveQuestItemIds(bot);
+  const DestroyItemCandidate cand = BuildDestroyCandidate(
+      bot, item, action.bag, action.slot, in_general_bag, quest_items);
+  if (std::string block = DestroySafetyBlockReason(cand); !block.empty()) {
+    return {.error = std::move(block)};
+  }
+  const std::string item_name = cand.name;
+  WorldPacket raw(CMSG_DESTROYITEM, 6);
+  raw << action.bag << action.slot << uint8_t{0} << uint8_t{0} << uint8_t{0}
+      << uint8_t{0};
+  WorldPackets::Item::DestroyItem packet(std::move(raw));
+  packet.Read();
+  session->HandleDestroyItemOpcode(packet);
+  if (bot->GetItemByPos(action.bag, action.slot) != nullptr) {
+    return {.error = "could not destroy " + item_name};
+  }
+  return {.used = true, .info = "destroyed " + item_name};
 }
 
 ActionOutcome ExecuteSpendTalentsAction(Player* bot,

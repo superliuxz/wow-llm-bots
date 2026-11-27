@@ -1017,6 +1017,9 @@ void FillNpcFacts(Player* bot,
     uint32_t flags = 0;
     if (u.kind == pb::Unit::NPC && u.reaction == pb::Unit::FRIENDLY) {
       flags |= creature->GetUInt32Value(UNIT_NPC_FLAGS) & kTalkNpcFlags;
+      if (NpcHasDialogue(bot, creature)) {
+        flags |= kNpcFlagHasDialogue;
+      }
     } else if ((u.reaction == pb::Unit::HOSTILE ||
                 u.reaction == pb::Unit::NEUTRAL) &&
                !bot->IsValidAttackTarget(creature)) {
@@ -1144,6 +1147,10 @@ void SnapshotBuilder::FillOptionFacts(Player* bot,
                       &out->npc_actions);
   }
   CollectGroupAndUpkeepActions(bot, *snapshot, &out->group_and_upkeep_actions);
+  if (!in_combat && bot->IsAlive() &&
+      snapshot->base.self.indicators.bag_free_slots == 0u) {
+    CollectBagDestroyActions(bot, 0u, &out->group_and_upkeep_actions);
+  }
   out->has_pending_resurrect = !bot->IsAlive() && bot->isResurrectRequested();
   if (!bot->IsAlive() && !bot->HasPlayerFlag(PLAYER_FLAGS_GHOST)) {
     if (const SpellInfo* self_res = sSpellMgr->GetSpellInfo(

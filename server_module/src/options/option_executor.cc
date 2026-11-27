@@ -101,7 +101,8 @@ std::string ValidateAction(Player* bot, const BotAction& action) {
         std::holds_alternative<NpcAction>(action) ||
         std::holds_alternative<RestAction>(action) ||
         std::holds_alternative<WalkAction>(action) ||
-        std::holds_alternative<EquipItemAction>(action)) {
+        std::holds_alternative<EquipItemAction>(action) ||
+        std::holds_alternative<DestroyItemAction>(action)) {
       return "you are in combat";
     }
     if (std::holds_alternative<SpendTalentsAction>(action)) {
@@ -217,6 +218,8 @@ ExecuteResult ExecuteAction(Player* bot,
           return FromItemOutcome(ExecuteUseBagItemAction(bot, a));
         } else if constexpr (std::is_same_v<T, EquipItemAction>) {
           return FromOutcome(ExecuteEquipItemAction(bot, a));
+        } else if constexpr (std::is_same_v<T, DestroyItemAction>) {
+          return FromOutcome(ExecuteDestroyItemAction(bot, a));
         } else if constexpr (std::is_same_v<T, StandingActAction>) {
           ActiveAct scratch;
           ActiveAct* out =

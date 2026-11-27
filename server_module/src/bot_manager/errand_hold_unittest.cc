@@ -53,6 +53,12 @@ TEST(ErrandHoldTest, ClassifiesBrainErrandsAndNonErrands) {
   EXPECT_EQ(ErrandKindForAction(
                 NpcAction{NpcAction::Op::kTrainRiding, "0x4", 33388, 0}),
             ErrandKind::kNpcInteract);
+  EXPECT_EQ(
+      ErrandKindForAction(NpcAction{NpcAction::Op::kGossipOpen, "0x4", 0, 0}),
+      ErrandKind::kNpcInteract);
+  EXPECT_EQ(ErrandKindForAction(
+                NpcAction{NpcAction::Op::kGossipSelect, "0x4", 500, 1}),
+            ErrandKind::kNpcInteract);
   EXPECT_EQ(ErrandKindForAction(
                 WalkAction{.id = "place:goldshire", .name = "Goldshire"}),
             ErrandKind::kWalk);
@@ -61,6 +67,9 @@ TEST(ErrandHoldTest, ClassifiesBrainErrandsAndNonErrands) {
   // Flight paths and non-errands do not start an errand hold.
   EXPECT_EQ(ErrandKindForAction(NpcAction{NpcAction::Op::kFlyTo, "0x4", 2, 0}),
             ErrandKind::kNone);
+  EXPECT_EQ(
+      ErrandKindForAction(DestroyItemAction{255, 23, 4865, "Ruined Pelt"}),
+      ErrandKind::kNone);
   EXPECT_EQ(ErrandKindForAction(AttackAction{"0x5", "Kobold"}),
             ErrandKind::kNone);
   EXPECT_EQ(ErrandKindForAction(FollowLeaderAction{"0x6"}), ErrandKind::kNone);

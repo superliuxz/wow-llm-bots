@@ -33,6 +33,10 @@ bool IsRestInProgress(Player* bot, bool* had_food_drink_aura);
 
 void CollectUsableBagItems(Player* bot,
                            std::vector<wlb::snapshot::OptionFacts_Item>* out);
+void CollectBagDestroyActions(
+    Player* bot,
+    uint32_t free_bag_slots,
+    std::vector<wlb::snapshot::OptionFacts_Action>* out);
 void CollectTalentTrees(
     Player* bot,
     std::vector<wlb::snapshot::OptionFacts_TalentTree>* out);
@@ -49,6 +53,8 @@ ItemActionOutcome ExecuteUseBagItemAction(Player* bot,
                                           const UseBagItemAction& action);
 ActionOutcome ExecuteEquipItemAction(Player* bot,
                                      const EquipItemAction& action);
+ActionOutcome ExecuteDestroyItemAction(Player* bot,
+                                       const DestroyItemAction& action);
 ActionOutcome ExecuteSpendTalentsAction(Player* bot,
                                         const SpendTalentsAction& action);
 

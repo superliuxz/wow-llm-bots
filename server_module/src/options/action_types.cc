@@ -289,6 +289,20 @@ BotAction DecodeOptionFactAction(std::string_view guid,
     if (parts[0] == "npc_bind") {
       return NpcAction{NpcAction::Op::kBind, npc_guid, 0, 0};
     }
+    if (parts[0] == "npc_gossip_open" && parts.size() == 2 &&
+        !npc_guid.empty()) {
+      return NpcAction{NpcAction::Op::kGossipOpen, npc_guid, 0, 0};
+    }
+    if (parts[0] == "npc_gossip" && parts.size() == 4 && !npc_guid.empty()) {
+      uint32_t menu_id = 0;
+      uint32_t list_id = 0;
+      if (!ParseUint32(parts[2], &menu_id) ||
+          !ParseUint32(parts[3], &list_id)) {
+        return InvalidAction{"invalid gossip option"};
+      }
+      return NpcAction{NpcAction::Op::kGossipSelect, npc_guid, menu_id,
+                       list_id};
+    }
     return InvalidAction{"unknown NPC action"};
   }
   if (guid.starts_with("talent:")) {
@@ -311,6 +325,21 @@ BotAction DecodeOptionFactAction(std::string_view guid,
       return InvalidAction{"invalid item id"};
     }
     return EquipItemAction{entry, std::string(label)};
+  }
+  if (guid.starts_with("destroy:")) {
+    const std::vector<std::string_view> parts = base::SplitStringPiece(
+        guid, ":", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+    uint32_t bag = 0;
+    uint32_t slot = 0;
+    uint32_t entry = 0;
+    if (parts.size() != 4 || !ParseUint32(parts[1], &bag) ||
+        !ParseUint32(parts[2], &slot) || !ParseUint32(parts[3], &entry) ||
+        bag > 255 || slot > 255 || entry == 0) {
+      return InvalidAction{"invalid destroy item"};
+    }
+    return DestroyItemAction{static_cast<uint8_t>(bag),
+                             static_cast<uint8_t>(slot), entry,
+                             std::string(label)};
   }
   if (guid.starts_with("0x")) {
     return UseObjectAction{std::string(guid), std::string(label)};
@@ -448,6 +477,8 @@ std::string_view ActionKindName(const BotAction& action) {
           return "use_item";
         if constexpr (std::is_same_v<T, EquipItemAction>)
           return "equip_item";
+        if constexpr (std::is_same_v<T, DestroyItemAction>)
+          return "destroy_item";
         if constexpr (std::is_same_v<T, StandingActAction>)
           return "act";
         if constexpr (std::is_same_v<T, InvalidAction>)
