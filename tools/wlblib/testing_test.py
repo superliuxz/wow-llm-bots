@@ -16,7 +16,7 @@ from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
-from wlblib import build, common, remote, server, testing, trace  # noqa: E402
+from wlblib import build, check, common, remote, server, testing, trace  # noqa: E402
 from wlblib.cases import perf_command_reply  # noqa: E402
 
 
@@ -221,6 +221,40 @@ class PlanShardCasesTest(unittest.TestCase):
         self.assertEqual(r_empty, [])
         self.assertEqual(sorted(n for _, ns in l_only for n in ns),
                          ["c1", "c2", "c3", "c4", "x", "y"])
+
+    def test_splits_large_group_into_three_balanced_chunks_past_tied_halves(self):
+        """Regression test: whole-group k -> k+1 splitting escapes the 2-tied-halves local
+        minimum where bisecting only one half wouldn't reduce makespan."""
+        groups = {("choose", "Loada", 1): ["c1", "c2", "c3", "c4", "c5", "c6"]}
+        timings = {"choose/Loada/1": 585.0}
+        case_timings = {f"c{i}": 90.0 for i in range(1, 7)}
+        shards, load = testing.plan_shard_cases(groups, 3, timings, case_timings)
+        self.assertEqual(len(shards), 3)
+        self.assertLessEqual(max(load), testing.GROUP_BOOT_S + 180.0 + 1e-6)
+        flat = [n for s in shards for _, ns in s for n in ns]
+        self.assertEqual(sorted(flat), ["c1", "c2", "c3", "c4", "c5", "c6"])
+        self.assertEqual([len(s[0][1]) for s in shards], [2, 2, 2])
+
+    def test_never_splits_past_case_count_or_creates_empty_chunks(self):
+        """Adversarial counter-test: jobs > total cases must not create empty chunks or
+        duplicate cases, and non-bottleneck groups must not be split."""
+        groups = {
+            ("big", "B", 1): ["a", "b"],
+            ("solo", "B", 1): ["x"],
+        }
+        timings = {"big/B/1": 400.0, "solo/B/1": 500.0}
+        case_timings = {"a": 180.0, "b": 175.0, "x": 455.0}
+        shards, load = testing.plan_shard_cases(groups, 8, timings, case_timings)
+        # Solo (500s) is the bottleneck; splitting `big` (400s) cannot reduce makespan.
+        self.assertEqual(len(shards), 2)
+        self.assertEqual(load, [500.0, 400.0])
+        # Even when big IS the bottleneck with jobs=8, it has only 2 cases so at most 2 chunks.
+        shards2, _ = testing.plan_shard_cases(
+            {("big", "B", 1): ["a", "b"]}, 8, {"big/B/1": 400.0}, {"a": 180.0, "b": 175.0},
+        )
+        self.assertEqual(len(shards2), 2)
+        self.assertTrue(all(ns for s in shards2 for _, ns in s))
+        self.assertEqual(sorted(n for s in shards2 for _, ns in s for n in ns), ["a", "b"])
 
 
 class CaseBlocksTest(unittest.TestCase):
@@ -795,6 +829,114 @@ class LiveTargetTest(unittest.TestCase):
         )
         self.assertNotEqual(res.returncode, 0)
         self.assertIn("--remote", res.stderr)
+
+
+class ParallelVerificationTest(unittest.TestCase):
+    def test_run_unit_tests_preserves_order_and_reports_all_failures(self):
+        """Adversarial counter-test: when multiple parallel gtest binaries fail (exit code +
+        grammar parse error) while another passes, all outputs flush in deterministic order
+        and every failure is surfaced."""
+        fake_results = {
+            "wlb_common_unittests": (
+                subprocess.CompletedProcess([], 1, stdout="common-out\n", stderr="common-err\n"),
+                "failed (1): common",
+            ),
+            "llm_brain_unittests": (
+                subprocess.CompletedProcess([], 0, stdout="brain-out\n", stderr=""),
+                None,
+            ),
+            "harness_unittests": (
+                subprocess.CompletedProcess(
+                    [], 0, stdout="harness-out\n", stderr=f"{build.GRAMMAR_PARSE_ERROR}: bad\n",
+                ),
+                f"{build.GRAMMAR_PARSE_ERROR} during passing test: harness",
+            ),
+        }
+
+        def fake_exec(cmd):
+            name = pathlib.Path(cmd[0]).name
+            return fake_results[name]
+
+        buf_out, buf_err = io.StringIO(), io.StringIO()
+        with mock.patch.object(build, "_exec_unit_test", side_effect=fake_exec), \
+             mock.patch.object(sys, "stdout", buf_out), \
+             mock.patch.object(sys, "stderr", buf_err):
+            with self.assertRaises(common.Failed) as ctx:
+                build.run_unit_tests(pathlib.Path("/fake"))
+        self.assertEqual(buf_out.getvalue(), "common-out\nbrain-out\nharness-out\n")
+        self.assertIn("common-err", buf_err.getvalue())
+        self.assertIn(build.GRAMMAR_PARSE_ERROR, buf_err.getvalue())
+        self.assertIn("failed (1): common", str(ctx.exception))
+        self.assertIn(build.GRAMMAR_PARSE_ERROR, str(ctx.exception))
+
+    def test_include_job_sort_key_puts_largest_cc_first(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            small_h = root / "a.h"
+            big_h = root / "b.h"
+            small_cc = root / "c.cc"
+            big_cc = root / "d.cc"
+            small_h.write_text("x" * 10)
+            big_h.write_text("x" * 5000)
+            small_cc.write_text("x" * 100)
+            big_cc.write_text("x" * 2000)
+            jobs = [(small_h, []), (big_h, []), (small_cc, []), (big_cc, [])]
+            jobs.sort(key=check._include_job_sort_key)
+            self.assertEqual([j[0].name for j in jobs], ["d.cc", "c.cc", "b.h", "a.h"])
+
+    def test_compile_commands_files_handles_missing_and_corrupt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = pathlib.Path(tmp)
+            self.assertEqual(check._compile_commands_files(d), set())
+            (d / "compile_commands.json").write_text("not json")
+            self.assertEqual(check._compile_commands_files(d), set())
+            src = d / "foo.cc"
+            src.write_text("")
+            (d / "compile_commands.json").write_text(f'[{{"file": "{src}"}}]')
+            self.assertEqual(check._compile_commands_files(d), {src.resolve()})
+
+    def test_check_all_fails_fast_on_format_before_build(self):
+        """Adversarial counter-test: format failure stops before build or parallel checks."""
+        with mock.patch.object(check, "format_", side_effect=common.Failed("bad format")), \
+             mock.patch.object(check, "rules") as m_rules, \
+             mock.patch.object(build, "common") as m_build, \
+             mock.patch.object(check, "say"):
+            with self.assertRaises(common.Failed):
+                check.all_()
+        m_rules.assert_not_called()
+        m_build.assert_not_called()
+
+    def test_check_all_runs_post_build_checks_and_surfaces_all_failures(self):
+        """Adversarial counter-test: when multiple parallel post-build checks fail, all
+        finish cleanly and every failure is reported."""
+        ok_proc = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        with mock.patch.object(check, "format_"), \
+             mock.patch.object(check, "rules"), \
+             mock.patch.object(build, "common", return_value=pathlib.Path("/fake")) as m_build, \
+             mock.patch.object(check, "snapshots"), \
+             mock.patch.object(check, "goldens"), \
+             mock.patch.object(build, "run_unit_tests", return_value=([(ok_proc, None)], [])), \
+             mock.patch.object(check, "_run_includes", return_value=(["bad inc"], "includes failed")), \
+             mock.patch.object(check, "_run_bench_tests", return_value=([], ["bench failed"])), \
+             mock.patch.object(check, "say"):
+            with self.assertRaises(common.Failed) as ctx:
+                check.all_()
+        m_build.assert_called_once_with("default", tests=False, build_tests=True)
+        self.assertIn("includes failed", str(ctx.exception))
+        self.assertIn("bench failed", str(ctx.exception))
+
+    def test_test_servers_stop_stops_every_shard_and_never_play(self):
+        stopped = []
+
+        def fake_pid(name, inst):
+            return 1000 + inst.shard if inst.shard in (1, 3) else None
+
+        with mock.patch.object(server, "running_pid", side_effect=fake_pid), \
+             mock.patch.object(server, "worldserver_stop", side_effect=stopped.append):
+            server.test_servers_stop()
+        self.assertEqual(sorted(inst.shard for inst in stopped),
+                         list(range(common.MAX_SHARDS + 1)))
+        self.assertNotIn(common.PLAY, stopped)
 
 
 if __name__ == "__main__":

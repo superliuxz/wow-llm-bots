@@ -8,6 +8,7 @@ for every run from a golden copy: docs/design.md, E). `wlb test e2e -j N` runs u
 common.MAX_SHARDS test servers at once (common.test_instance(k)), all from the one test install.
 Functions take `inst`, the play server by default."""
 
+import concurrent.futures
 import datetime
 import errno
 import os
@@ -546,9 +547,17 @@ def server_stop(backup=True, inst=PLAY):
 
 
 def test_servers_stop():
-    """Stops every test server of this checkout: the plain one and the e2e shards."""
-    for k in range(MAX_SHARDS + 1):
-        worldserver_stop(test_instance(k))
+    """Stops every test server of this checkout: the plain one and the e2e shards.
+    Running shards are shut down concurrently so multi-shard teardown scales as 1x, not Nx."""
+    instances = [test_instance(k) for k in range(MAX_SHARDS + 1)]
+    running = [inst for inst in instances if running_pid("worldserver", inst)]
+    if len(running) > 1:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(running)) as pool:
+            list(pool.map(worldserver_stop, running))
+    running_set = set(running)
+    for inst in instances:
+        if inst not in running_set or len(running) <= 1:
+            worldserver_stop(inst)
 
 
 # ---- The test server's databases ----------------------------------------------------------------

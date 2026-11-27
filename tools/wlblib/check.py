@@ -16,6 +16,7 @@ import json
 import os
 import pathlib
 import subprocess
+import sys
 import tempfile
 
 from wlblib import build, wire
@@ -45,12 +46,24 @@ def format_(fix=False):
     say("format ok" if not fix else "formatted")
 
 
-def _in_compile_commands(build_dir, path):
+def _compile_commands_files(build_dir):
+    """Set of resolved source paths listed in `build_dir/compile_commands.json` (empty if absent)."""
     try:
         entries = json.loads((build_dir / "compile_commands.json").read_text())
+    except (OSError, ValueError):
+        return set()
+    return {pathlib.Path(e["file"]).resolve() for e in entries if "file" in e}
+
+
+def _include_job_sort_key(job):
+    """Longest-processing-time heuristic: check .cc files (which parse full TUs) before .h files,
+    and largest files first, so heavy TUs like snapshot_wire.cc start immediately."""
+    f = job[0]
+    try:
+        size = f.stat().st_size
     except OSError:
-        return False
-    return any(pathlib.Path(e["file"]).resolve() == path.resolve() for e in entries)
+        size = 0
+    return (0 if f.suffix == ".cc" else 1, -size, str(f))
 
 
 def _include_jobs():
@@ -59,8 +72,11 @@ def _include_jobs():
     common_db, server_db, server_test_db = OUT / "common", SERVER, OUT / "server-test"
     if not (common_db / "compile_commands.json").exists():
         raise Failed("missing out/common/compile_commands.json: tools/wlb build common")
-    have_server = (server_db / "compile_commands.json").exists()
-    have_server_test = (server_test_db / "compile_commands.json").exists()
+    common_files = _compile_commands_files(common_db)
+    server_test_files = _compile_commands_files(server_test_db)
+    server_files = _compile_commands_files(server_db)
+    have_server = bool(server_files)
+    have_server_test = bool(server_test_files)
     for f in [*(ROOT / "common").rglob("*.h"), *(ROOT / "snapshot").rglob("*.h")]:
         jobs.append((f, ["--", *HEADER_FLAGS_20]))
     for f in (ROOT / "harness").rglob("*.h"):
@@ -74,25 +90,27 @@ def _include_jobs():
               *(ROOT / "harness").rglob("*.cc")]:
         jobs.append((f, ["-p", common_db]))
     for f in (ROOT / "server_module").rglob("*.cc"):
+        resolved = f.resolve()
         if (f.name.endswith("_unittest.cc") or f.parent.name == "tools" or
-                _in_compile_commands(common_db, f)):
+                resolved in common_files):
             # Unit tests, tools, and AzerothCore-independent module files built by common/.
             jobs.append((f, ["-p", common_db]))
-        elif have_server_test and _in_compile_commands(server_test_db, f):
+        elif have_server_test and resolved in server_test_files:
             jobs.append((f, ["-p", server_test_db]))
-        elif have_server and _in_compile_commands(server_db, f):
+        elif have_server and resolved in server_files:
             jobs.append((f, ["-p", server_db]))
         elif not have_server and not have_server_test:
             notes.append(f"{f.relative_to(ROOT)} not checked (no server build)")
         else:
             notes.append(f"{f.relative_to(ROOT)} not checked (not in server compile_commands)")
+    jobs.sort(key=_include_job_sort_key)
     return jobs, notes
 
 
-def includes(fix=False):
-    """Every file includes exactly what it uses (clang-include-cleaner), and none includes absl
-    or <pthread.h> outside common/base/ (CONTRIBUTING.md). A file the tool can't parse is a
-    failure, not a pass."""
+def _run_includes(fix=False):
+    """Runs the banned-header scan and clang-include-cleaner, returning `(lines, error)` without
+    printing so callers can run it alongside other checks without interleaved output."""
+    lines = []
     banned = []
     for f in _sources(".h", ".cc"):
         rel = str(f.relative_to(ROOT))
@@ -108,8 +126,7 @@ def includes(fix=False):
             elif "<set>" in stripped or "<map>" in stripped:
                 banned.append(f"{rel}:{lineno}: {stripped} (use std::vector or std::flat_map/flat_set)")
     if banned:
-        say("\n".join(banned))
-        raise Failed("includes: banned header included directly (see CONTRIBUTING.md)")
+        return banned, "includes: banned header included directly (see CONTRIBUTING.md)"
     jobs, notes = _include_jobs()
     mode = "--edit" if fix else "--print=changes"
 
@@ -129,13 +146,25 @@ def includes(fix=False):
     with concurrent.futures.ThreadPoolExecutor(os.cpu_count()) as pool:
         problems = [p for p in pool.map(check, jobs) if p]
     for note in notes:
-        say(f"note: {note}")
+        lines.append(f"note: {note}")
     if fix:
         format_(fix=True)
     if problems and not fix:
-        say("\n".join(problems))
-        raise Failed(f"includes: {len(problems)} files need changes (tools/wlb check includes --fix)")
-    say("includes ok")
+        lines.extend(problems)
+        return lines, f"includes: {len(problems)} files need changes (tools/wlb check includes --fix)"
+    lines.append("includes ok")
+    return lines, None
+
+
+def includes(fix=False):
+    """Every file includes exactly what it uses (clang-include-cleaner), and none includes absl
+    or <pthread.h> outside common/base/ (CONTRIBUTING.md). A file the tool can't parse is a
+    failure, not a pass."""
+    lines, error = _run_includes(fix=fix)
+    if lines:
+        say("\n".join(lines))
+    if error:
+        raise Failed(error)
 
 
 def snapshots(files=()):
@@ -186,19 +215,52 @@ def goldens():
     run([harness_bin, "render-screen", ROOT / "harness/testdata/screens"])
 
 
+BENCH_TEST_SCRIPTS = (
+    "tools/bench/soak_suites_test.py",
+    "tools/bench/dodge_timeline_test.py",
+    "tools/bench/stall_check_test.py",
+    "tools/bench/chatter_check_test.py",
+    "tools/notes/extract_boss_notes_test.py",
+    "tools/knowledge/export_knowledge_test.py",
+    "tools/knowledge/backfill_quest_poi_test.py",
+    "tools/eval/mine_traces_test.py",
+    "tools/wlblib/remote_test.py",
+    "tools/wlblib/eval_plans_test.py",
+    "tools/wlblib/testing_test.py",
+)
+
+
+def _run_bench_tests(scripts=BENCH_TEST_SCRIPTS):
+    """Runs Python unit-test scripts concurrently, returning `(results, errors)` in input order."""
+    def one(rel):
+        cmd = ["python3", "-I", "-B", str(ROOT / rel), "-q"]
+        result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+        err = None if result.returncode == 0 else f"failed ({result.returncode}): {rel}"
+        return rel, result, err
+
+    workers = max(1, min(len(scripts), os.cpu_count() or 1))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(one, scripts))
+    errors = [err for _, _, err in results if err]
+    return results, errors
+
+
+def _emit_bench_results(results):
+    for _, result, _ in results:
+        if result.stdout:
+            sys.stdout.write(result.stdout)
+            sys.stdout.flush()
+        if result.stderr:
+            sys.stderr.write(result.stderr)
+            sys.stderr.flush()
+
+
 def bench_tests():
     """Unit tests for the soak checks, trace analyzers, generators, and remote worker."""
-    run(["python3", "-I", "-B", ROOT / "tools/bench/soak_suites_test.py", "-q"])
-    run(["python3", "-I", "-B", ROOT / "tools/bench/dodge_timeline_test.py", "-q"])
-    run(["python3", "-I", "-B", ROOT / "tools/bench/stall_check_test.py", "-q"])
-    run(["python3", "-I", "-B", ROOT / "tools/bench/chatter_check_test.py", "-q"])
-    run(["python3", "-I", "-B", ROOT / "tools/notes/extract_boss_notes_test.py", "-q"])
-    run(["python3", "-I", "-B", ROOT / "tools/knowledge/export_knowledge_test.py", "-q"])
-    run(["python3", "-I", "-B", ROOT / "tools/knowledge/backfill_quest_poi_test.py", "-q"])
-    run(["python3", "-I", "-B", ROOT / "tools/eval/mine_traces_test.py", "-q"])
-    run(["python3", "-I", "-B", ROOT / "tools/wlblib/remote_test.py", "-q"])
-    run(["python3", "-I", "-B", ROOT / "tools/wlblib/eval_plans_test.py", "-q"])
-    run(["python3", "-I", "-B", ROOT / "tools/wlblib/testing_test.py", "-q"])
+    results, errors = _run_bench_tests()
+    _emit_bench_results(results)
+    if errors:
+        raise Failed("; ".join(errors))
 
 
 def sanitizers():
@@ -210,22 +272,42 @@ def sanitizers():
 
 
 def all_(with_sanitizers=False):
-    """Fast checks in the order that fails fastest; optionally followed by *SAN."""
+    """Fast checks in the order that fails fastest; independent post-build checks run
+    concurrently with buffered, deterministic output. Optionally followed by *SAN."""
     say("== format")
     format_()
     say("== RULES.md reply form")
     rules()
-    say("== build + unit tests (default)")
-    build.common("default")
-    # snapshot_check and compile_commands.json are now up to date from the default build.
+    say("== build (default)")
+    build_dir = build.common("default", tests=False, build_tests=True)
+    # snapshot_check, harness, and compile_commands.json are now up to date from the default build.
     say("== snapshots")
     snapshots()
-    say("== includes")
-    includes()
     say("== screen goldens")
     goldens()
+    # Run the three heavier independent post-build checks concurrently, then flush in order.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+        unit_fut = pool.submit(build.run_unit_tests, build_dir, None, emit=False)
+        inc_fut = pool.submit(_run_includes, False)
+        bench_fut = pool.submit(_run_bench_tests)
+        unit_results, unit_errors = unit_fut.result()
+        inc_lines, inc_error = inc_fut.result()
+        bench_results, bench_errors = bench_fut.result()
+    failures = []
+    say("== unit tests (default)")
+    for result, _ in unit_results:
+        build._emit_unit_test(result)
+    failures.extend(unit_errors)
+    say("== includes")
+    if inc_lines:
+        say("\n".join(inc_lines))
+    if inc_error:
+        failures.append(inc_error)
     say("== bench & loop unit tests")
-    bench_tests()
+    _emit_bench_results(bench_results)
+    failures.extend(bench_errors)
+    if failures:
+        raise Failed("; ".join(failures))
     if with_sanitizers:
         sanitizers()
     say("ALL CHECKS PASSED")

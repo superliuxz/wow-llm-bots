@@ -470,14 +470,9 @@ def _pack_chunks(chunks, jobs):
     return shards, load
 
 
-def plan_shard_cases(groups, jobs, timings, case_timings=None):
-    """Packs `groups` ({key: [case names]}) onto at most `jobs` shards, automatically splitting
-    oversized multi-case groups into 2+ balanced chunks whenever doing so reduces the estimated
-    makespan by at least `SPLIT_MIN_GAIN_S` after paying `GROUP_BOOT_S` per extra server start.
-    Returns `(shards, load)` where each shard is a list of `(key, [case_names])` chunks."""
-    case_timings = case_timings or {}
-    chunks = []
-    for key, names in groups.items():
+def _group_chunks(key, names, count, timings, case_timings):
+    """Partitions `names` of group `key` into `count` balanced `(key, chunk_names, est_s)` chunks."""
+    if count <= 1 or len(names) <= 1:
         gname = _group_name(key)
         if gname in timings:
             est = timings[gname]
@@ -485,34 +480,56 @@ def plan_shard_cases(groups, jobs, timings, case_timings=None):
             est = GROUP_BOOT_S + sum(case_timings[n] for n in names)
         else:
             est = GROUP_GUESS_S + sum(case_timings.get(n, CASE_GUESS_S) for n in names)
-        chunks.append((key, list(names), est))
+        return [(key, list(names), est)]
+    c_est = _case_estimates(key, names, timings, case_timings)
+    k = min(count, len(names))
+    parts = [[] for _ in range(k)]
+    pload = [0.0] * k
+    for name in sorted(names, key=lambda n: (-c_est[n], n)):
+        j = min(range(k), key=lambda idx: (pload[idx], idx))
+        parts[j].append(name)
+        pload[j] += c_est[name]
+    return [(key, part, GROUP_BOOT_S + load_s) for part, load_s in zip(parts, pload) if part]
 
+
+def plan_shard_cases(groups, jobs, timings, case_timings=None):
+    """Packs `groups` ({key: [case names]}) onto at most `jobs` shards, automatically splitting
+    oversized multi-case groups into 2+ balanced chunks whenever doing so reduces the estimated
+    makespan by at least `SPLIT_MIN_GAIN_S` after paying `GROUP_BOOT_S` per extra server start.
+    Re-partitions a split group as a whole (`k -> k+1` balanced parts) rather than bisecting a
+    single existing chunk, avoiding local minima when two halves tie at the makespan.
+    Returns `(shards, load)` where each shard is a list of `(key, [case_names])` chunks."""
+    case_timings = case_timings or {}
+    split_counts = {key: 1 for key in groups}
+
+    def build_chunks(counts):
+        out = []
+        for key, names in groups.items():
+            out.extend(_group_chunks(key, names, counts[key], timings, case_timings))
+        return out
+
+    chunks = build_chunks(split_counts)
     if jobs > 1:
         while True:
             _, load = _pack_chunks(chunks, jobs)
             cur_max = max(load)
-            splittable = [idx for idx, c in enumerate(chunks) if len(c[1]) >= 2]
-            if not splittable:
+            best = None  # (new_max, total_load, group_name, key, cand_chunks)
+            for key, names in groups.items():
+                if split_counts[key] >= len(names):
+                    continue
+                cand_counts = dict(split_counts)
+                cand_counts[key] += 1
+                cand_chunks = build_chunks(cand_counts)
+                _, new_load = _pack_chunks(cand_chunks, jobs)
+                new_max = max(new_load)
+                if new_max < cur_max - SPLIT_MIN_GAIN_S:
+                    score = (new_max, sum(new_load), _group_name(key))
+                    if best is None or score < best[:3]:
+                        best = (*score, key, cand_chunks)
+            if best is None:
                 break
-            best_idx = max(splittable, key=lambda idx: (chunks[idx][2], -idx))
-            key, names, _ = chunks[best_idx]
-            c_est = _case_estimates(key, names, timings, case_timings)
-            parts = [[], []]
-            pload = [0.0, 0.0]
-            for name in sorted(names, key=lambda n: (-c_est[n], n)):
-                j = 0 if pload[0] <= pload[1] else 1
-                parts[j].append(name)
-                pload[j] += c_est[name]
-            cand = list(chunks)
-            cand[best_idx:best_idx + 1] = [
-                (key, parts[0], GROUP_BOOT_S + pload[0]),
-                (key, parts[1], GROUP_BOOT_S + pload[1]),
-            ]
-            _, new_load = _pack_chunks(cand, jobs)
-            if max(new_load) < cur_max - SPLIT_MIN_GAIN_S:
-                chunks = cand
-            else:
-                break
+            split_counts[best[3]] += 1
+            chunks = best[4]
 
     packed, load = _pack_chunks(chunks, jobs)
     return [[(k, ns) for k, ns, _ in shard] for shard in packed], load
