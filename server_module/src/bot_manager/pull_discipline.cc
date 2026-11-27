@@ -2,8 +2,12 @@
 
 #include "bot_manager/pull_discipline.h"
 
+#include <cmath>
 #include <cstdint>
 #include <string_view>
+#include <vector>
+
+#include "base/time/time.h"
 
 namespace llm_brain {
 
@@ -158,6 +162,92 @@ bool ShouldBlockFearCcAction(bool is_cc_spell_action,
                              bool in_battleground) {
   return is_cc_spell_action && spell_name == "fear" && !in_battleground &&
          (in_group || in_dungeon);
+}
+
+bool EvaluateHealerManaPullWait(HealerManaWaitState& state,
+                                bool in_group,
+                                bool in_combat,
+                                const std::vector<HealerManaMember>& members,
+                                base::TimeTicks now) {
+  if (!in_group || in_combat) {
+    state = {};
+    return false;
+  }
+
+  bool any_below_start = false;
+  bool any_drinking_below_ready = false;
+  bool any_below_ready = false;
+  for (const HealerManaMember& m : members) {
+    if (!m.is_healer || !m.online || !m.alive || !m.same_map || !m.uses_mana ||
+        !std::isfinite(m.dist_yd) || m.dist_yd < 0.0f ||
+        m.dist_yd > kHealerManaWaitMaxDistYd || !std::isfinite(m.mana_pct)) {
+      continue;
+    }
+    if (m.mana_pct < kHealerPullWaitReadyManaPct) {
+      any_below_ready = true;
+      if (m.mana_pct < kHealerPullWaitStartManaPct) {
+        any_below_start = true;
+      }
+      if (m.drinking) {
+        any_drinking_below_ready = true;
+      }
+    }
+  }
+
+  if (!any_below_ready) {
+    state = {};
+    return false;
+  }
+
+  if (state.timed_out) {
+    return false;
+  }
+
+  const bool should_wait =
+      any_below_start || any_drinking_below_ready || state.waiting;
+  if (!should_wait) {
+    state = {};
+    return false;
+  }
+
+  if (!state.waiting) {
+    state.waiting = true;
+    state.wait_started = now;
+    state.saw_drinking = any_drinking_below_ready;
+    state.last_drinking = any_drinking_below_ready ? now : base::TimeTicks();
+  } else if (any_drinking_below_ready) {
+    state.saw_drinking = true;
+    state.last_drinking = now;
+  }
+
+  if (now - state.wait_started >= kHealerMaxWaitTimeout) {
+    state.waiting = false;
+    state.timed_out = true;
+    return false;
+  }
+
+  if (!state.saw_drinking) {
+    if (now - state.wait_started >= kHealerNoDrinkTimeout) {
+      state.waiting = false;
+      state.timed_out = true;
+      return false;
+    }
+  } else if (!any_drinking_below_ready &&
+             now - state.last_drinking >= kHealerNoDrinkTimeout) {
+    state.waiting = false;
+    state.timed_out = true;
+    return false;
+  }
+
+  return true;
+}
+
+bool ClearHealerManaWait(HealerManaWaitState& state) {
+  if (!state.waiting && !state.timed_out && !state.saw_drinking) {
+    return false;
+  }
+  state = {};
+  return true;
 }
 
 }  // namespace llm_brain

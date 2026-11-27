@@ -378,6 +378,7 @@ class LlmBrainWorldScript : public WorldScript {
       if (!IsControlledBot(bot)) {
         ClearRtiOverride(bots_[i].rti_override);
         ClearStopDps(bots_[i].stop_dps);
+        ClearHealerManaWait(bots_[i].healer_mana_wait);
         continue;  // Offline, not in world, or logged in by a real human.
       }
       // Clear any active act or saved `back` coordinates if the bot changed
@@ -392,6 +393,7 @@ class LlmBrainWorldScript : public WorldScript {
         }
         ResetRtiOverride(bot, bots_[i].rti_override);
         ResetStopDps(bot, bots_[i].stop_dps);
+        ClearHealerManaWait(bots_[i].healer_mana_wait);
         bots_[i].errand_hold_active = false;
         BotSessionRegistry::Instance().ResetOnMapChange(
             bot->GetGUID().GetRawValue());
@@ -601,6 +603,7 @@ class LlmBrainWorldScript : public WorldScript {
       }
       ResetRtiOverride(bot, bots_[i].rti_override);
       ResetStopDps(bot, bots_[i].stop_dps);
+      ClearHealerManaWait(bots_[i].healer_mana_wait);
       bots_[i].errand_hold_active = false;
       if (bots_[i].active_act) {
         if (bot && GET_PLAYERBOT_AI(bot) != nullptr) {
@@ -1021,19 +1024,59 @@ class LlmBrainWorldScript : public WorldScript {
     return PlayerbotAI::IsTank(bot);
   }
 
+  // The group's healer as party frames show it: the Dungeon Finder role when
+  // one was picked, else the spec's (snapshot_builder MemberRole).
+  static bool IsGroupHealer(Group* group, Player* member) {
+    for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+      if (slot.guid == member->GetGUID() && slot.roles != 0) {
+        return (slot.roles & lfg::PLAYER_ROLE_HEALER) != 0;
+      }
+    }
+    return PlayerbotAI::IsHeal(member);
+  }
+
   // The facts behind the pull gate (OptionFacts::hold_pulls/hold_explore):
-  // what the group's humans are doing. Whether to pull with what's left is
-  // the brain's call.
-  static void FillPullFacts(Player* bot, Group* group, OptionFacts* facts) {
+  // what the group's humans are doing and whether a party healer is low on
+  // mana / drinking. Whether to pull with what's left is the brain's call.
+  static void FillPullFacts(Player* bot,
+                            Group* group,
+                            HealerManaWaitState* healer_wait,
+                            base::TimeTicks now,
+                            OptionFacts* facts) {
     constexpr float kHumanBehindYd = 25.0f;
     bool human_leads = false;
     bool human_holds = false;  // A human tanks, is AFK or is behind.
+    std::vector<HealerManaMember> healer_members;
     for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
       if (slot.guid == bot->GetGUID()) {
         continue;
       }
       Player* member = ObjectAccessor::FindConnectedPlayer(slot.guid);
-      if (!member || !member->IsInWorld() || !IsHumanPlayer(member)) {
+      if (!member || !member->IsInWorld()) {
+        continue;
+      }
+      if (IsGroupHealer(group, member)) {
+        const bool same_map = member->GetMapId() == bot->GetMapId() &&
+                              member->GetInstanceId() == bot->GetInstanceId();
+        const bool uses_mana = member->GetMaxPower(POWER_MANA) > 0;
+        const float mana_pct =
+            uses_mana ? member->GetPowerPct(POWER_MANA) : 100.0f;
+        const bool drinking =
+            HasFoodOrDrinkAura(member) ||
+            (member->getStandState() == UNIT_STAND_STATE_SIT &&
+             mana_pct < 99.0f);
+        healer_members.push_back({
+            .is_healer = true,
+            .online = true,
+            .alive = member->IsAlive(),
+            .same_map = same_map,
+            .uses_mana = uses_mana,
+            .dist_yd = same_map ? bot->GetDistance(member) : 0.0f,
+            .mana_pct = mana_pct,
+            .drinking = drinking,
+        });
+      }
+      if (!IsHumanPlayer(member)) {
         continue;
       }
       human_leads |= slot.guid == group->GetLeaderGUID();
@@ -1042,11 +1085,17 @@ class LlmBrainWorldScript : public WorldScript {
                      member->GetMapId() != bot->GetMapId() ||
                      bot->GetDistance(member) > kHumanBehindYd;
     }
+    const bool healer_mana_hold =
+        healer_wait != nullptr &&
+        EvaluateHealerManaPullWait(*healer_wait, /*in_group=*/true,
+                                   IsPartyInCombat(bot), healer_members, now);
     const bool bot_tanks =
         IsGroupTank(group, bot) && !BotManager::GetGroupPolicy(bot).not_tank;
-    facts->hold_pulls = human_holds || (human_leads && !bot_tanks);
-    facts->hold_explore = human_holds && group->IsLeader(bot->GetGUID()) &&
-                          bot->GetMap() && bot->GetMap()->IsDungeon();
+    facts->hold_pulls =
+        human_holds || healer_mana_hold || (human_leads && !bot_tanks);
+    facts->hold_explore = (human_holds || healer_mana_hold) &&
+                          group->IsLeader(bot->GetGUID()) && bot->GetMap() &&
+                          bot->GetMap()->IsDungeon();
   }
 
   static bool IsPartyInCombat(Player* bot) {
@@ -2071,7 +2120,9 @@ class LlmBrainWorldScript : public WorldScript {
     Group* cur_group = bot->GetGroup();
     facts.can_leave_group = (cur_group != nullptr && !bot->IsInCombat());
     if (cur_group) {
-      FillPullFacts(bot, cur_group, &facts);
+      FillPullFacts(bot, cur_group, &state.healer_mana_wait, start, &facts);
+    } else {
+      ClearHealerManaWait(state.healer_mana_wait);
     }
     const bool can_invite =
         !bot->IsInCombat() &&
@@ -2347,6 +2398,8 @@ class LlmBrainWorldScript : public WorldScript {
     uint32_t active_item_spell_id = 0;
     // Rest: whether a food or drink aura was observed while resting.
     bool had_food_drink_aura = false;
+    // Pre-pull wait state when a party healer is low on mana or drinking.
+    HealerManaWaitState healer_mana_wait;
     // What the bot has open and points at (open / close / hover).
     UiState ui;
     // Rest: when ContinueRest may next try the other of eat / drink.

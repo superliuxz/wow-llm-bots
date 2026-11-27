@@ -48,6 +48,20 @@ bool IsInvisibleModel(uint32_t display_id);
 // invisible model. These must not appear in the snapshot.
 bool HiddenFromPlayers(bool is_trigger, uint32_t display_id);
 
+// Maximum range (yd) at which a living unit actively fighting the bot or a
+// member of the bot's group gets NAMEPLATE detail even past
+// `nameplate_range_yd` (party aggro frames / combat log / 40 yd spell range).
+inline constexpr float kGroupCombatDetailRangeYd = 40.0f;
+
+// True when a visible unit should be filled at NAMEPLATE detail rather than
+// MODEL-only detail: either within `nameplate_range_yd`, or a living unit
+// within `kGroupCombatDetailRangeYd` actively fighting the bot or a member of
+// the bot's group.
+bool ShouldFillUnitNameplate(float dist_yd,
+                             float nameplate_range_yd,
+                             bool unit_alive,
+                             bool victim_in_bot_group);
+
 // Line-of-sight results per object, refreshed on a budget: a ray cast against
 // the map geometry is too expensive to do for every visible object every
 // snapshot. Near objects are refreshed more often than far ones.

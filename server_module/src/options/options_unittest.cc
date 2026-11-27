@@ -1279,6 +1279,22 @@ TEST(OptionsTest, CollectTauntActionsOffersValidTargetsForGroupedTanksOnly) {
   dead.base.self.state = pb::Self::DEAD_BODY;
   CollectTauntActions(dead, 355, false, &out);
   EXPECT_TRUE(out.empty());
+
+  // Mob hitting healer at 30 yd (between 20 yd nameplate range and 40 yd
+  // group-combat detail range) gets a Taunt option once nameplate detail is
+  // populated.
+  pb::Snapshot mid_range;
+  mid_range.base.self.unit.name = "Tank";
+  mid_range.base.self.unit.group.emplace().role = pb::TANK;
+  mid_range.ext.party.emplace().leader = "Hele";
+  pb::Unit* on_healer = AddUnit(&mid_range, "Defias Pillager", "0x30", 30.0f);
+  on_healer->detail = pb::Unit::NAMEPLATE;
+  on_healer->target = "Hele";
+  out.clear();
+  CollectTauntActions(mid_range, 355, false, &out);
+  ASSERT_EQ(out.size(), 1u);
+  EXPECT_EQ(out[0].guid, "taunt:355:0x30");
+  EXPECT_EQ(out[0].label, "Taunt Defias Pillager");
 }
 
 TEST(OptionsTest, LighterCombatSnapshotPreservesP0CombatFactsAndOptions) {

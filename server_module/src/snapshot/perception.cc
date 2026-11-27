@@ -113,6 +113,20 @@ bool HiddenFromPlayers(bool is_trigger, uint32_t display_id) {
   return is_trigger || IsInvisibleModel(display_id);
 }
 
+bool ShouldFillUnitNameplate(float dist_yd,
+                             float nameplate_range_yd,
+                             bool unit_alive,
+                             bool victim_in_bot_group) {
+  if (!std::isfinite(dist_yd) || dist_yd < 0.0f) {
+    return false;
+  }
+  if (std::isfinite(nameplate_range_yd) && dist_yd <= nameplate_range_yd) {
+    return true;
+  }
+  return unit_alive && victim_in_bot_group &&
+         dist_yd <= kGroupCombatDetailRangeYd;
+}
+
 LosCache::LosCache(float near_yd,
                    base::TimeDelta near_ttl,
                    base::TimeDelta far_ttl)

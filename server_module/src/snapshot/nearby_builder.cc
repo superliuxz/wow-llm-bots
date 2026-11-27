@@ -19,6 +19,7 @@
 #include "DynamicObject.h"
 #include "GameObject.h"
 #include "GameObjectData.h"
+#include "Group.h"
 #include "Map.h"
 #include "MotionMaster.h"
 #include "ObjectGuid.h"
@@ -552,6 +553,25 @@ bool HiddenFromPlayer(WorldObject* object) {
          HiddenFromPlayers(creature->IsTrigger(), creature->GetDisplayId());
 }
 
+// True when `unit` is actively fighting `bot` or a member (or pet) of `bot`'s
+// group, so party aggro frames / combat log / overhead name expose its target
+// beyond the 20 yd nameplate radius (up to kGroupCombatDetailRangeYd).
+bool VictimInBotGroup(Unit* unit, Player* bot) {
+  Unit* victim = unit->GetVictim();
+  if (!victim) {
+    return false;
+  }
+  Player* victim_player = victim->GetCharmerOrOwnerPlayerOrPlayerItself();
+  if (!victim_player) {
+    return false;
+  }
+  if (victim_player == bot) {
+    return true;
+  }
+  Group* group = bot->GetGroup();
+  return group && group->IsMember(victim_player->GetGUID());
+}
+
 }  // namespace
 
 NearbyBuilder::NearbyBuilder(Options options)
@@ -692,7 +712,9 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
       SetInLos(in_los, &out.rel);
       out.rel.behind_it = unit->isInBack(bot);
       out.rel.facing_me = unit->isInFront(bot, M_PI / 2);
-      if (near) {
+      if (ShouldFillUnitNameplate(dist, options_.nameplate_range_yd,
+                                  unit->IsAlive(),
+                                  VictimInBotGroup(unit, bot))) {
         out.detail = pb::Unit::NAMEPLATE;
         FillNameplate(unit, bot, &out);
       } else {

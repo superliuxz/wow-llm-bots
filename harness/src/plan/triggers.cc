@@ -424,6 +424,7 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
   // The party (T8): a bot wakes on its group's state too, not only its own.
   std::flat_set<std::string> dead_members;
   std::flat_set<std::string> low_mana_healers;
+  std::vector<std::string> recovered_healers;
   std::flat_set<std::string> critical_members;
   std::string aggro_member;
   std::flat_set<std::string> online_members;
@@ -458,9 +459,17 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
         }
       }
       constexpr float kHealerLowManaPct = 30.0f;
-      if (!m.dead && m.group->role == pb::HEALER && m.power_pct &&
-          *m.power_pct < kHealerLowManaPct) {
-        low_mana_healers.insert(m.name);
+      constexpr float kHealerReadyManaPct = 75.0f;
+      if (!m.dead && m.group->role == pb::HEALER && m.power_pct) {
+        if (*m.power_pct < kHealerLowManaPct) {
+          low_mana_healers.insert(m.name);
+        } else if (prev_low_mana_healers_.contains(m.name)) {
+          if (*m.power_pct < kHealerReadyManaPct) {
+            low_mana_healers.insert(m.name);  // Still recovering.
+          } else if (!in_combat && m.group->in_range) {
+            recovered_healers.push_back(m.name);
+          }
+        }
       }
     }
   }
@@ -573,6 +582,11 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
                  {Urgency::kP1Danger,
                   base::StrCat({"healer ", name, " low on mana"}), kWakeParty});
       }
+    }
+    for (const std::string& name : recovered_healers) {
+      Consider(&chosen,
+               {Urgency::kNormal,
+                base::StrCat({"healer ", name, " mana ready"}), kWakeParty});
     }
   }
 

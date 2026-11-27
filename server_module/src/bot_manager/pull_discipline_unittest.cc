@@ -2,6 +2,10 @@
 
 #include "bot_manager/pull_discipline.h"
 
+#include <limits>
+#include <vector>
+
+#include "base/time/time.h"
 #include "gtest/gtest.h"
 
 namespace llm_brain {
@@ -332,6 +336,185 @@ TEST(PullDisciplineTest, WarlockCcStrategyGatingAndFearActionGuard) {
   EXPECT_FALSE(ShouldBlockFearCcAction(/*is_cc_spell_action=*/false, "fear",
                                        /*in_group=*/true, /*in_dungeon=*/true,
                                        /*in_battleground=*/false));
+}
+
+TEST(PullDisciplineTest, HealerManaPullWaitHoldsUntilReadyWithHysteresis) {
+  HealerManaWaitState state;
+  const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
+  HealerManaMember healer{
+      .is_healer = true,
+      .online = true,
+      .alive = true,
+      .same_map = true,
+      .uses_mana = true,
+      .dist_yd = 15.0f,
+      .mana_pct = 20.0f,
+      .drinking = false,
+  };
+
+  // Below 35% mana: holds pulls out of combat.
+  EXPECT_TRUE(EvaluateHealerManaPullWait(state, /*in_group=*/true,
+                                         /*in_combat=*/false, {healer}, t0));
+  EXPECT_TRUE(state.waiting);
+
+  // Healer sits and drinks; climbs past 35% to 50% -> hysteresis keeps holding.
+  healer.drinking = true;
+  healer.mana_pct = 50.0f;
+  EXPECT_TRUE(EvaluateHealerManaPullWait(state, /*in_group=*/true,
+                                         /*in_combat=*/false, {healer},
+                                         t0 + base::Seconds(5)));
+
+  // Reaches 75% ready threshold -> releases pulls and clears state.
+  healer.mana_pct = kHealerPullWaitReadyManaPct;
+  EXPECT_FALSE(EvaluateHealerManaPullWait(state, /*in_group=*/true,
+                                          /*in_combat=*/false, {healer},
+                                          t0 + base::Seconds(15)));
+  EXPECT_FALSE(state.waiting);
+  EXPECT_FALSE(state.timed_out);
+
+  // Healer drinking starting at 55% (above 35% start threshold) also holds
+  // until 75%.
+  healer.mana_pct = 55.0f;
+  healer.drinking = true;
+  EXPECT_TRUE(EvaluateHealerManaPullWait(state, /*in_group=*/true,
+                                         /*in_combat=*/false, {healer},
+                                         t0 + base::Seconds(20)));
+  healer.mana_pct = 80.0f;
+  healer.drinking = false;
+  EXPECT_FALSE(EvaluateHealerManaPullWait(state, /*in_group=*/true,
+                                          /*in_combat=*/false, {healer},
+                                          t0 + base::Seconds(28)));
+}
+
+TEST(PullDisciplineTest, HealerManaPullWaitAdversarialAntiStallAndInvariants) {
+  const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(1000);
+  HealerManaMember healer{
+      .is_healer = true,
+      .online = true,
+      .alive = true,
+      .same_map = true,
+      .uses_mana = true,
+      .dist_yd = 20.0f,
+      .mana_pct = 15.0f,
+      .drinking = false,
+  };
+
+  // 1. Solo invariant: never holds pulls when not in a group, and clears state.
+  {
+    HealerManaWaitState state;
+    EXPECT_TRUE(EvaluateHealerManaPullWait(state, true, false, {healer}, t0));
+    EXPECT_FALSE(EvaluateHealerManaPullWait(state, /*in_group=*/false,
+                                            /*in_combat=*/false, {healer},
+                                            t0 + base::Seconds(1)));
+    EXPECT_FALSE(state.waiting);
+  }
+
+  // 2. P0 combat priority: entering combat immediately releases & clears wait.
+  {
+    HealerManaWaitState state;
+    EXPECT_TRUE(EvaluateHealerManaPullWait(state, true, false, {healer}, t0));
+    EXPECT_FALSE(EvaluateHealerManaPullWait(state, /*in_group=*/true,
+                                            /*in_combat=*/true, {healer},
+                                            t0 + base::Seconds(1)));
+    EXPECT_FALSE(state.waiting);
+    EXPECT_FALSE(state.timed_out);
+  }
+
+  // 3. Anti-stall (no drink): OOM healer who never drinks (out of water or
+  //    human who wants to pull) releases at kHealerNoDrinkTimeout and does NOT
+  //    re-latch on subsequent ticks until mana recovers or combat resets it.
+  {
+    HealerManaWaitState state;
+    EXPECT_TRUE(EvaluateHealerManaPullWait(state, true, false, {healer}, t0));
+    EXPECT_TRUE(EvaluateHealerManaPullWait(
+        state, true, false, {healer},
+        t0 + kHealerNoDrinkTimeout - base::Seconds(1)));
+    EXPECT_FALSE(EvaluateHealerManaPullWait(state, true, false, {healer},
+                                            t0 + kHealerNoDrinkTimeout));
+    EXPECT_TRUE(state.timed_out);
+    // Subsequent tick while still OOM stays released (no oscillation).
+    EXPECT_FALSE(EvaluateHealerManaPullWait(
+        state, true, false, {healer},
+        t0 + kHealerNoDrinkTimeout + base::Seconds(2)));
+    // Once healer recovers to >= 75%, timed_out clears so future OOM waits
+    // work.
+    HealerManaMember recovered = healer;
+    recovered.mana_pct = 80.0f;
+    EXPECT_FALSE(EvaluateHealerManaPullWait(
+        state, true, false, {recovered},
+        t0 + kHealerNoDrinkTimeout + base::Seconds(5)));
+    EXPECT_FALSE(state.timed_out);
+    EXPECT_TRUE(EvaluateHealerManaPullWait(
+        state, true, false, {healer},
+        t0 + kHealerNoDrinkTimeout + base::Seconds(6)));
+  }
+
+  // 4. Anti-stall (max wait): healer stuck drinking forever releases at
+  //    kHealerMaxWaitTimeout.
+  {
+    HealerManaWaitState state;
+    HealerManaMember stuck = healer;
+    stuck.drinking = true;
+    stuck.mana_pct = 40.0f;
+    EXPECT_TRUE(EvaluateHealerManaPullWait(state, true, false, {stuck}, t0));
+    EXPECT_TRUE(EvaluateHealerManaPullWait(
+        state, true, false, {stuck},
+        t0 + kHealerMaxWaitTimeout - base::Seconds(1)));
+    EXPECT_FALSE(EvaluateHealerManaPullWait(state, true, false, {stuck},
+                                            t0 + kHealerMaxWaitTimeout));
+    EXPECT_TRUE(state.timed_out);
+  }
+
+  // 5. Anti-stall (stopped drinking early): healer stops drinking at 50% mana
+  //    -> releases kHealerNoDrinkTimeout after stopping.
+  {
+    HealerManaWaitState state;
+    HealerManaMember drinking = healer;
+    drinking.drinking = true;
+    drinking.mana_pct = 20.0f;
+    EXPECT_TRUE(EvaluateHealerManaPullWait(state, true, false, {drinking}, t0));
+    drinking.drinking = false;
+    drinking.mana_pct = 50.0f;
+    EXPECT_TRUE(EvaluateHealerManaPullWait(state, true, false, {drinking},
+                                           t0 + base::Seconds(4)));
+    EXPECT_FALSE(EvaluateHealerManaPullWait(state, true, false, {drinking},
+                                            t0 + kHealerNoDrinkTimeout));
+    EXPECT_TRUE(state.timed_out);
+  }
+
+  // 6. Non-eligible members never stall pulls: dead, offline, other map,
+  //    out of range, non-mana, NaN, or non-healer DPS.
+  {
+    HealerManaWaitState state;
+    HealerManaMember dead = healer;
+    dead.alive = false;
+    HealerManaMember offline = healer;
+    offline.online = false;
+    HealerManaMember other_map = healer;
+    other_map.same_map = false;
+    HealerManaMember far_away = healer;
+    far_away.dist_yd = kHealerManaWaitMaxDistYd + 5.0f;
+    HealerManaMember no_mana = healer;
+    no_mana.uses_mana = false;
+    HealerManaMember nan_mana = healer;
+    nan_mana.mana_pct = std::numeric_limits<float>::quiet_NaN();
+    HealerManaMember oom_dps = healer;
+    oom_dps.is_healer = false;
+    EXPECT_FALSE(EvaluateHealerManaPullWait(
+        state, true, false,
+        {dead, offline, other_map, far_away, no_mana, nan_mana, oom_dps}, t0));
+  }
+
+  // 7. Logout / map-change / disconnect reset clears wait and timeout cleanly.
+  {
+    HealerManaWaitState state;
+    EXPECT_FALSE(ClearHealerManaWait(state));
+    EXPECT_TRUE(EvaluateHealerManaPullWait(state, true, false, {healer}, t0));
+    EXPECT_TRUE(ClearHealerManaWait(state));
+    EXPECT_FALSE(state.waiting);
+    EXPECT_FALSE(state.timed_out);
+    EXPECT_FALSE(ClearHealerManaWait(state));
+  }
 }
 
 }  // namespace

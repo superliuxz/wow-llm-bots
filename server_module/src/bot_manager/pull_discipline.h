@@ -12,6 +12,9 @@
 
 #include <cstdint>
 #include <string_view>
+#include <vector>
+
+#include "base/time/time.h"
 
 namespace llm_brain {
 
@@ -133,6 +136,49 @@ bool ShouldBlockFearCcAction(bool is_cc_spell_action,
                              bool in_group,
                              bool in_dungeon,
                              bool in_battleground);
+
+// Mechanical healer-mana pull gate thresholds and anti-stall safety timeouts.
+inline constexpr float kHealerManaWaitMaxDistYd = 100.0f;
+inline constexpr float kHealerPullWaitStartManaPct = 35.0f;
+inline constexpr float kHealerPullWaitReadyManaPct = 75.0f;
+inline constexpr base::TimeDelta kHealerNoDrinkTimeout = base::Seconds(12);
+inline constexpr base::TimeDelta kHealerMaxWaitTimeout = base::Seconds(35);
+
+struct HealerManaMember {
+  bool is_healer = false;
+  bool online = true;
+  bool alive = true;
+  bool same_map = true;
+  bool uses_mana = true;
+  float dist_yd = 0.0f;
+  float mana_pct = 100.0f;
+  bool drinking = false;
+};
+
+struct HealerManaWaitState {
+  bool waiting = false;
+  bool timed_out = false;
+  bool saw_drinking = false;
+  base::TimeTicks wait_started;
+  base::TimeTicks last_drinking;
+
+  bool operator==(const HealerManaWaitState&) const = default;
+};
+
+// Returns true when out-of-combat pulls should wait for a nearby living party
+// healer who is low on mana (< 35%) or actively drinking (< 75%). Uses
+// hysteresis up to 75% mana and bounded timeouts (12 s if not drinking, 35 s
+// max) so a healer without water or an AFK/bugged drink never causes an
+// infinite stall. Always returns false when solo or in combat.
+bool EvaluateHealerManaPullWait(HealerManaWaitState& state,
+                                bool in_group,
+                                bool in_combat,
+                                const std::vector<HealerManaMember>& members,
+                                base::TimeTicks now);
+
+// Unconditionally clears healer-mana wait state (group leave, map change,
+// logout, disconnect). Returns true if any state was active.
+bool ClearHealerManaWait(HealerManaWaitState& state);
 
 }  // namespace llm_brain
 

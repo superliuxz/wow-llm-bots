@@ -17,13 +17,6 @@ Live verification following the `70b0878` team-play P0 fixes:
 
 Team-play P1 gaps and selected P2 items from the `70b0878` review:
 
-### Pull & threat discipline (dungeons)
-- **Tank nameplate range blindspot:** Tank can't see a mob's target past 20 yd; mobs hitting a
-  healer at 25–35 yd don't wake the tank or offer a Taunt option
-  (`server_module/src/snapshot/nearby_builder.cc:439-441,680-690`).
-- **Healer mana pull wait:** Waiting for healer mana before pulling is only a prompt rule (soaks
-  logged dungeon stalls up to 1,793 s, `docs/results.md:42-43`).
-
 ### Loot
 - **Immediate auto-popup voting & roll criteria:** Auto-popup policy votes immediately, so "never
   Need against a human who already Needed" almost never fires; Need = any usable higher-iLvl

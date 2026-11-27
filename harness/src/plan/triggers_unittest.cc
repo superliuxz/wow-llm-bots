@@ -821,5 +821,70 @@ TEST(TriggersTest, TankDebuffsWakeOtherTankAndRespectCounterInvariants) {
   EXPECT_EQ(t->urgency, Urgency::kP0Combat);
 }
 
+TEST(TriggersTest, TankWakesOnLooseMobAt30YdAndHealerManaRecoveryWakesOoc) {
+  pb::Snapshot base = BaseSnap();
+  base.base.self.unit.name = "Tank";
+  base.base.self.unit.group.emplace().role = pb::TANK;
+  pb::Party& party = base.ext.party.emplace();
+  party.leader = "Tank";
+  pb::Unit& healer = party.members.emplace_back();
+  healer.guid = "0x11";
+  healer.name = "Hele";
+  healer.health_pct = 100.0f;
+  healer.power_pct = 90.0f;
+  pb::GroupPart& hgp = healer.group.emplace();
+  hgp.role = pb::HEALER;
+  hgp.online = true;
+  hgp.in_range = true;
+
+  TriggerEvaluator eval;
+  EXPECT_FALSE(eval.EvaluateSnapshot(base));
+
+  // 1. Loose mob hitting healer at 30 yd (past 20 yd nameplate range) wakes
+  //    the tank once nameplate detail exposes its target.
+  pb::Snapshot loose30 = base;
+  pb::Unit* mob = AddNearbyUnit(&loose30, "0x30", "Defias Pillager",
+                                pb::Unit::NPC, pb::Unit::HOSTILE, 30.0f);
+  mob->detail = pb::Unit::NAMEPLATE;
+  mob->target = "Hele";
+  std::optional<WakeTrigger> t = eval.EvaluateSnapshot(loose30);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->urgency, Urgency::kP1Danger);
+  EXPECT_EQ(t->reason, "loose mob Defias Pillager on Hele");
+
+  // 2. Healer drops below 30% mana -> wakes once; hysteresis prevents spam at
+  //    40% -> 25%; recovering to >= 75% out of combat wakes with "mana ready".
+  pb::Snapshot oom = base;
+  oom.ext.party->members[0].power_pct = 20.0f;
+  t = eval.EvaluateSnapshot(oom);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->reason, "healer Hele low on mana");
+
+  pb::Snapshot mid = base;
+  mid.ext.party->members[0].power_pct = 45.0f;
+  EXPECT_FALSE(eval.EvaluateSnapshot(mid));
+  EXPECT_FALSE(eval.EvaluateSnapshot(oom));  // Latched until >= 75%.
+
+  pb::Snapshot ready = base;
+  ready.ext.party->members[0].power_pct = 75.0f;
+  t = eval.EvaluateSnapshot(ready);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->urgency, Urgency::kNormal);
+  EXPECT_EQ(t->reason, "healer Hele mana ready");
+  EXPECT_FALSE(eval.EvaluateSnapshot(ready));  // Once per recovery.
+
+  // 3. Adversarial counter-test: recovering mana IN COMBAT does not emit
+  //    "mana ready", and going offline/dead does not emit "mana ready".
+  pb::Snapshot combat_oom = oom;
+  combat_oom.base.self.in_combat = true;
+  t = eval.EvaluateSnapshot(combat_oom);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->urgency, Urgency::kP0Combat);  // Entered combat beats low mana.
+
+  pb::Snapshot combat_ready = ready;
+  combat_ready.base.self.in_combat = true;
+  EXPECT_FALSE(eval.EvaluateSnapshot(combat_ready));
+}
+
 }  // namespace
 }  // namespace harness

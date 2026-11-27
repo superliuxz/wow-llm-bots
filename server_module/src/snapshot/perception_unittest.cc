@@ -3,6 +3,7 @@
 #include "snapshot/perception.h"
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <vector>
 
@@ -76,6 +77,46 @@ TEST(PerceptionTest, TriggersAndInvisibleModelsAreHiddenFromPlayers) {
   EXPECT_TRUE(HiddenFromPlayers(false, 11686));
   EXPECT_TRUE(HiddenFromPlayers(true, 11686));
   EXPECT_FALSE(HiddenFromPlayers(false, 169));
+}
+
+TEST(PerceptionTest, GroupCombatUnitGetsNameplateDetailPast20Yd) {
+  // Within nameplate range: always NAMEPLATE (alive or dead, solo or grouped).
+  EXPECT_TRUE(ShouldFillUnitNameplate(/*dist_yd=*/15.0f, 20.0f,
+                                      /*unit_alive=*/true,
+                                      /*victim_in_bot_group=*/false));
+  EXPECT_TRUE(ShouldFillUnitNameplate(/*dist_yd=*/20.0f, 20.0f,
+                                      /*unit_alive=*/false,
+                                      /*victim_in_bot_group=*/false));
+
+  // Mob hitting healer at 25-35 yd (up to 40 yd): promoted to NAMEPLATE so
+  // tank sees target, wakes on loose mob, and gets a Taunt option.
+  EXPECT_TRUE(ShouldFillUnitNameplate(/*dist_yd=*/25.0f, 20.0f,
+                                      /*unit_alive=*/true,
+                                      /*victim_in_bot_group=*/true));
+  EXPECT_TRUE(ShouldFillUnitNameplate(/*dist_yd=*/35.0f, 20.0f,
+                                      /*unit_alive=*/true,
+                                      /*victim_in_bot_group=*/true));
+  EXPECT_TRUE(ShouldFillUnitNameplate(kGroupCombatDetailRangeYd, 20.0f,
+                                      /*unit_alive=*/true,
+                                      /*victim_in_bot_group=*/true));
+
+  // Adversarial counter-tests:
+  // 1. Unengaged or non-group mob past 20 yd stays MODEL-only.
+  EXPECT_FALSE(ShouldFillUnitNameplate(/*dist_yd=*/25.0f, 20.0f,
+                                       /*unit_alive=*/true,
+                                       /*victim_in_bot_group=*/false));
+  // 2. Dead mob past 20 yd stays MODEL-only even if victim flag were set.
+  EXPECT_FALSE(ShouldFillUnitNameplate(/*dist_yd=*/25.0f, 20.0f,
+                                       /*unit_alive=*/false,
+                                       /*victim_in_bot_group=*/true));
+  // 3. Past 40 yd group-combat detail cap stays MODEL-only.
+  EXPECT_FALSE(ShouldFillUnitNameplate(kGroupCombatDetailRangeYd + 0.1f, 20.0f,
+                                       /*unit_alive=*/true,
+                                       /*victim_in_bot_group=*/true));
+  // 4. Non-finite or negative distances are rejected.
+  EXPECT_FALSE(ShouldFillUnitNameplate(-1.0f, 20.0f, true, true));
+  EXPECT_FALSE(ShouldFillUnitNameplate(std::numeric_limits<float>::quiet_NaN(),
+                                       20.0f, true, true));
 }
 
 TEST(PerceptionTest, SizeBuckets) {
