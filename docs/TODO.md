@@ -5,16 +5,13 @@ Last updated: 2026-11-27 (team-play review @ `70b0878`).
 
 ## Now
 
-Ordered team-play P0 fixes from the `70b0878` review, followed by live verification:
+Live verification following the `70b0878` team-play P0 fixes:
 
-1. **Live-model E2E team-play tests:** Add end-to-end tests with the live model covering a dungeon
-   clear with pulls and a wipe, a human disconnect, an LLM stall, and a 10-man boss.
-2. **Live playtest with a real client:** Alliance preset characters (`Aldric`, `Mirabel`, `Cedric`,
-   `Vesper`, `Torvin`, `Bram`, `Pippa`, `Sylva`, `Talaan`), `e2e_human_party` and
-   `e2e_human_dungeon` (a scripted client leads 4 bots through the Dungeon Finder into the
-   Deadmines: ready check, summon, loot roll, ping/go there/los, a bot rez, Sap/Polymorph on marks;
-   mock LLM, no pulls or boss fights) are in place. Run a live session from a real 3.3.5a client to
-   confirm pacing and single-responder feel in practice.
+1. **Live playtest with a real client:** Alliance preset characters (`Aldric`, `Mirabel`, `Cedric`,
+   `Vesper`, `Torvin`, `Bram`, `Pippa`, `Sylva`, `Talaan`), mock-LLM E2E (`e2e_human_party`,
+   `e2e_human_dungeon`), and live-model E2E (`tools/wlb test live`: `dungeon_clear`,
+   `human_disconnect`, `llm_stall`, `raid_boss`) are in place. Run a live session from a real
+   3.3.5a client to confirm pacing and single-responder feel in practice.
 
 ## Next
 

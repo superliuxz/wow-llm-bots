@@ -38,6 +38,7 @@ CMSG_PLAYER_LOGIN = 0x03D
 SMSG_LOGIN_VERIFY_WORLD = 0x236
 CMSG_GROUP_INVITE = 0x06E
 SMSG_GROUP_LIST = 0x07D
+CMSG_GROUP_RAID_CONVERT = 0x28E
 CMSG_MESSAGECHAT = 0x095
 SMSG_MESSAGECHAT = 0x096
 MSG_MINIMAP_PING = 0x1D5
@@ -67,13 +68,16 @@ CHAT_MSG_PARTY = 0x02
 CHAT_MSG_RAID = 0x03
 CHAT_MSG_WHISPER = 0x07
 CHAT_MSG_AFK = 0x17  # An empty line toggles /afk.
+CHAT_MSG_RAID_LEADER = 0x27
+CHAT_MSG_RAID_WARNING = 0x28
 CHAT_MSG_PARTY_LEADER = 0x33
 # Dungeon Finder roles (CMSG_LFG_JOIN) and loot roll votes (CMSG_LOOT_ROLL).
 LFG_ROLE_LEADER, LFG_ROLE_TANK, LFG_ROLE_HEALER, LFG_ROLE_DAMAGE = 1, 2, 4, 8
 LFG_TYPE_DUNGEON = 1
 ROLL_PASS, ROLL_NEED, ROLL_GREED = 0, 1, 2
 CHAT_TYPE_NAMES = {CHAT_MSG_SAY: "say", CHAT_MSG_PARTY: "party", CHAT_MSG_RAID: "raid",
-                   CHAT_MSG_WHISPER: "whisper", CHAT_MSG_PARTY_LEADER: "party"}
+                   CHAT_MSG_WHISPER: "whisper", CHAT_MSG_RAID_LEADER: "raid",
+                   CHAT_MSG_RAID_WARNING: "raid_warning", CHAT_MSG_PARTY_LEADER: "party"}
 LANG_ORCISH = 1
 LANG_COMMON = 7
 ALLIANCE_RACES = frozenset({1, 3, 4, 7, 11})  # Human, Dwarf, Night Elf, Gnome, Draenei.
@@ -239,6 +243,12 @@ class WowClient:
     # ---- in the world -----------------------------------------------------------------------
     def invite(self, name: str) -> None:
         self.send(CMSG_GROUP_INVITE, name.encode() + b"\0" + struct.pack("<I", 0))
+
+    def convert_to_raid(self) -> None:
+        self.send(CMSG_GROUP_RAID_CONVERT)
+
+    def raid_warning(self, text: str) -> None:
+        self.say(CHAT_MSG_RAID_WARNING, text)
 
     def say(self, chat_type: int, text: str) -> None:
         self.send(CMSG_MESSAGECHAT, struct.pack("<II", chat_type, self.lang) + text.encode() + b"\0")

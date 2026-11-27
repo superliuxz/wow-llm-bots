@@ -1,0 +1,6 @@
+# live raid_boss: a real (scripted) Alliance human client leads nine Alliance bots (10-man raid:
+# 1 Prot tank, 2 healers including a Draenei Shaman with Heroism, 6 DPS) into Vault of Archavon
+# against Archavon the Stone Watcher. Needs a test build.
+LlmBrain.Bots = "Loada,Loadb,Loadc,Loadd,Loade,Loadf,Loadg,Loadh,Loadi"
+LlmBrain.TestFixtures = "Loada=new:human:paladin,Loadb=new:human:priest,Loadc=new:draenei:shaman,Loadd=new:gnome:mage,Loade=new:human:rogue,Loadf=new:nightelf:hunter,Loadg=new:human:warlock,Loadh=new:dwarf:warrior,Loadi=new:nightelf:druid"
+LlmBrain.NonCombatStrategies = "-follow,-grind,-new rpg"

@@ -37,7 +37,7 @@ from wlblib import build, cases, llm, remote as remote_mod, server, wire
 from wlblib.common import (MAX_SHARDS, OUT, PLAY, ROOT, TEST, VAR, Failed, output, run,
                            running_pid, say, test_instance)
 
-TARGETS = ("unit", "e2e", "perf", "eval", "soak", "all")
+TARGETS = ("unit", "e2e", "live", "perf", "eval", "soak", "all")
 
 
 def expect(condition, message):
@@ -176,7 +176,7 @@ def discover(target):
 
 
 def list_cases():
-    for target in ("e2e", "perf"):
+    for target in ("e2e", "live", "perf"):
         found = discover(target)
         say(f"{target}: " + (", ".join(found) if found else "(no cases yet)"))
     from wlblib.cases import eval_plans
@@ -822,6 +822,35 @@ def e2e(names=(), keep_server=False, jobs=None, remote=None):
             case_timed = {c["name"]: float(c["seconds"]) for c in record.get("cases", [])
                           if "seconds" in c}
             _save_timings(record.get("groups", {}), case_timed)
+
+
+# ---- live (live-model E2E) ----------------------------------------------------------------------
+
+LIVE_TEMPERATURE_ENV = "WLB_LIVE_TEMPERATURE"
+
+
+def live(names=(), keep_server=False, model=None, temperature=0.0):
+    """Live-model E2E scenarios against a real isolated test server + real llama-server (:8090).
+
+    Kept separate from `wlb test e2e` so mock-LLM e2e stays CPU-only, deterministic, shardable
+    with `--remote`, and non-conflicting with `eval`'s llama-server during `wlb test all`.
+    """
+    selected = _select("live", names)
+    missing = [m.NAME for m in selected if not getattr(m, "TEST_CONFIG", None)]
+    if missing:
+        raise Failed(f"live cases need a TEST_CONFIG: {', '.join(missing)}")
+    build.common("default", tests=False)
+    prev_temp = os.environ.get(LIVE_TEMPERATURE_ENV)
+    os.environ[LIVE_TEMPERATURE_ENV] = str(temperature)
+    try:
+        with LlamaServer(slots=8, model=model):
+            _run_selected(selected, keep_server,
+                          lambda module, stack: _run_case("live", module, stack))
+    finally:
+        if prev_temp is None:
+            os.environ.pop(LIVE_TEMPERATURE_ENV, None)
+        else:
+            os.environ[LIVE_TEMPERATURE_ENV] = prev_temp
 
 
 # ---- perf ---------------------------------------------------------------------------------------

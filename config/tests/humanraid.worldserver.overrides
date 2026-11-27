@@ -1,0 +1,4 @@
+# live raid_boss: the scripted client (tools/wlblib/wowclient.py) can't answer Warden.
+Warden.Enabled = 0
+# Allow repeated VoA instance entries during test runs.
+AccountInstancesPerHour = 1000

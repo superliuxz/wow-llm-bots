@@ -733,5 +733,69 @@ class CommandReplyPerfTest(unittest.TestCase):
         self.assertEqual(mod.REPLY_P95_LIMIT_S, 2.0)
 
 
+class LiveTargetTest(unittest.TestCase):
+    def test_live_in_targets_and_cases_discovered(self):
+        self.assertIn("live", testing.TARGETS)
+        live_cases = testing.discover("live")
+        self.assertEqual(
+            set(live_cases),
+            {"dungeon_clear", "human_disconnect", "llm_stall", "raid_boss"},
+        )
+        expected_configs = {
+            "dungeon_clear": "humandungeon",
+            "human_disconnect": "humandungeon",
+            "llm_stall": "humandungeon",
+            "raid_boss": "humanraid",
+        }
+        for name, mod in live_cases.items():
+            self.assertEqual(mod.TEST_CONFIG, expected_configs[name])
+
+    def test_live_cases_never_leak_into_mock_e2e(self):
+        """Adversarial counter-test: live-model cases must never be picked up by
+        `wlb test e2e` so mock-LLM e2e stays CPU-only, deterministic, and `--remote`-safe."""
+        e2e_cases = testing.discover("e2e")
+        live_cases = testing.discover("live")
+        self.assertEqual(set(e2e_cases) & set(live_cases), set())
+
+    def test_live_starts_llama_server_and_runs_selected(self):
+        fake_case = types.SimpleNamespace(
+            NAME="dungeon_clear", TEST_CONFIG="humandungeon", BOT="Loada", ONLINE=4,
+            run=lambda stack: "ok",
+        )
+        entered = []
+
+        class _FakeLlama:
+            def __init__(self, slots=8, model=None):
+                entered.append(("init", slots, model))
+
+            def __enter__(self):
+                entered.append(("enter",))
+                return self
+
+            def __exit__(self, *exc):
+                entered.append(("exit",))
+                return False
+
+        with mock.patch.object(testing, "_select", return_value=[fake_case]), \
+             mock.patch.object(build, "common") as m_common, \
+             mock.patch.object(testing, "LlamaServer", _FakeLlama), \
+             mock.patch.object(testing, "_run_selected") as m_run:
+            testing.live(["dungeon_clear"], keep_server=True, model="m.gguf", temperature=0.2)
+
+        m_common.assert_called_once_with("default", tests=False)
+        self.assertEqual(entered, [("init", 8, "m.gguf"), ("enter",), ("exit",)])
+        m_run.assert_called_once()
+        self.assertEqual(m_run.call_args[0][0], [fake_case])
+        self.assertTrue(m_run.call_args[0][1])
+
+    def test_cli_rejects_remote_on_live_target(self):
+        res = subprocess.run(
+            [str(ROOT / "tools" / "wlb"), "test", "live", "--remote", "10700k"],
+            capture_output=True, text=True,
+        )
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("--remote", res.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

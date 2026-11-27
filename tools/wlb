@@ -8,7 +8,7 @@
   tools/wlb console [--test] COMMAND...   send a command to worldserver's console
   tools/wlb check [format|includes|snapshots|triggers|rules|goldens|sanitizers] [--san] [--fix] [FILES...]
   tools/wlb test unit [--filter PATTERN] [--variant asan|tsan|msan]
-  tools/wlb test e2e|perf|eval [NAME...]  [--keep-server]   (e2e/perf: the isolated test server)
+  tools/wlb test e2e|live|perf|eval [NAME...] [--keep-server] (e2e/live/perf: isolated test server)
   tools/wlb test e2e [-j N] [--remote WORKER] [NAME...]   (N test servers; --remote splits with WORKER)
   tools/wlb test all [-j N] [--remote WORKER]             (e2e and eval concurrently; fails if either fails)
   tools/wlb test perf [--update-baselines [--verify]] | --capture   (perf: record the numbers, and
@@ -79,9 +79,9 @@ def parse(argv):
     p.add_argument("--fix", action="store_true", help="for format, includes and rules: rewrite files")
     p.add_argument("files", nargs="*", help="for snapshots: files to validate")
 
-    p = sub.add_parser("test", help="unit, e2e, perf, eval, soak and all tests")
+    p = sub.add_parser("test", help="unit, e2e, live, perf, eval, soak and all tests")
     p.add_argument("target", nargs="?", choices=list(testing.TARGETS))
-    p.add_argument("names", nargs="*", help="e2e, perf, eval: the cases to run (default: all)")
+    p.add_argument("names", nargs="*", help="e2e, live, perf, eval: the cases to run (default: all)")
     p.add_argument("--list", action="store_true", help="list the cases")
     p.add_argument("--filter", help="unit: a gtest filter, e.g. 'PlanTest.*'")
     p.add_argument("--variant", default="default", choices=list(build.VARIANTS),
@@ -114,8 +114,8 @@ def parse(argv):
                    help="soak: number of runs (default: 0 = full suite once)")
     p.add_argument("--suite", default="varied",
                    help="soak: scenario suite (varied, heldout, endurance, quest, or a scenario name)")
-    p.add_argument("--temperature", type=float, default=0.7,
-                   help="soak: LLM sampling temperature (default: 0.7; use 0 for deterministic)")
+    p.add_argument("--temperature", type=float, default=None,
+                   help="soak/live: LLM sampling temperature (default: 0.7 for soak, 0.0 for live)")
     p.add_argument("--no-brain", action="store_true",
                    help="soak: playerbots-only comparison run without launching the LLM harness")
     p.add_argument("--max-chatter-per-hour", type=float, default=None,
@@ -262,6 +262,13 @@ def main():
             if a.jobs is not None and not 1 <= a.jobs <= common.MAX_SHARDS:
                 raise common.Failed(f"-j {a.jobs}: 1..{common.MAX_SHARDS}")
             testing.e2e(a.names, a.keep_server, a.jobs, remote=a.remote)
+        elif a.target == "live":
+            testing.live(
+                a.names,
+                keep_server=a.keep_server,
+                model=a.model,
+                temperature=0.0 if a.temperature is None else a.temperature,
+            )
         elif a.target == "all":
             if a.names:
                 raise common.Failed("test all takes no case names (use `wlb test e2e` or "
@@ -279,7 +286,7 @@ def main():
                 minutes=a.minutes,
                 runs=a.runs,
                 suite=a.suite,
-                temperature=a.temperature,
+                temperature=0.7 if a.temperature is None else a.temperature,
                 no_brain=a.no_brain,
                 max_chatter_per_hour=a.max_chatter_per_hour,
                 chatter_llm_judge=a.chatter_llm_judge,
