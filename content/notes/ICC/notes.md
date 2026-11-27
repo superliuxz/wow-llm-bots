@@ -28,6 +28,8 @@ Vengeful Shade appears -> away Vengeful Shade 15
 - **Blood Beast**: priority add; switch and burn promptly.
 
 ```
+Rune of Blood on tank & me offtank -> wake
+Rune of Blood on offtank & me tank & not me offtank -> wake
 Blood Beast appears -> target nearest Blood Beast
 ```
 
@@ -48,6 +50,8 @@ Unstable Ooze Explosion cast -> out of it, then back
 - **Gas Cloud**: stay clear (`away Gas Cloud 14`).
 
 ```
+Mutated Plague stacks>2 on tank & me offtank -> wake
+Mutated Plague stacks>2 on offtank & me tank & not me offtank -> wake
 in Slime Puddle -> out of it
 in Choking Gas Explosion -> out of it
 Volatile Ooze appears -> target nearest Volatile Ooze
@@ -92,5 +96,7 @@ Blistering Cold cast -> out of it
 - **Quake**: boss cast; move to 40 yd from the boss to stay on the safe inner platform ring (`to 40 yd from boss`).
 
 ```
+Soul Reaper on tank & me offtank -> wake
+Soul Reaper on offtank & me tank & not me offtank -> wake
 Quake cast -> to 40 yd from boss
 ```

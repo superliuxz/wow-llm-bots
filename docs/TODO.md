@@ -17,11 +17,6 @@ Live verification following the `70b0878` team-play P0 fixes:
 
 Team-play P1 gaps and selected P2 items from the `70b0878` review:
 
-### Raid scale & coordination
-- **Boss notes coverage & wiki fallback:** TOC is 5-man only (no Trial of the Crusader), AQ40 has
-  none, Naxx is missing Heigan/4H/KT, no tank-swap orders, UK/Nex/GD cover 1 boss each; having
-  *any* notes file disables wiki boss fallback (`prompt.cc:789-792`, `knowledge.cc:186-191`).
-
 ### Questing & travel
 - **No boats, zeppelins, or portals:** `Sylva` (Teldrassil) and `Talaan` (Azuremyst) are stuck on
   islands; bots can't reach Northrend alone (`config/llm-brain.overrides:4-9`).

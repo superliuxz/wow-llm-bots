@@ -100,6 +100,69 @@ bool AppendLineCapped(std::string* out, std::string_view line) {
   return true;
 }
 
+bool ContainsIgnoreCase(std::string_view haystack, std::string_view needle) {
+  if (needle.empty() || needle.size() > haystack.size()) {
+    return false;
+  }
+  const std::string h = base::ToLowerASCII(haystack);
+  const std::string n = base::ToLowerASCII(needle);
+  return h.find(n) != std::string::npos;
+}
+
+bool HeadingCoversBoss(std::string_view heading, std::string_view boss_name) {
+  if (heading.empty() || boss_name.empty()) {
+    return false;
+  }
+  if (base::EqualsCaseInsensitiveASCII(heading, boss_name)) {
+    return true;
+  }
+  // Check individual names inside compound headings such as
+  // `Blood Prince Council (Prince Valanar, Prince Keleseth, Prince Taldaram)`
+  // or `Skarvald the Constructor & Dalronn the Controller` so short names
+  // (e.g. `Ick`, `Vem`, `Ouro`) match cleanly.
+  size_t pos = 0;
+  while (pos < heading.size()) {
+    const size_t sep = heading.find_first_of("(),&/", pos);
+    const size_t end = (sep == std::string_view::npos) ? heading.size() : sep;
+    const std::string_view part = base::TrimWhitespaceASCII(
+        heading.substr(pos, end - pos), base::TRIM_ALL);
+    if (!part.empty() && base::EqualsCaseInsensitiveASCII(part, boss_name)) {
+      return true;
+    }
+    if (sep == std::string_view::npos) {
+      break;
+    }
+    pos = sep + 1;
+  }
+  return heading.size() >= 4 && boss_name.size() >= 4 &&
+         (ContainsIgnoreCase(boss_name, heading) ||
+          ContainsIgnoreCase(heading, boss_name));
+}
+
+bool NotesCoverBoss(std::string_view boss_notes, std::string_view boss_name) {
+  if (boss_notes.empty() || boss_name.empty()) {
+    return false;
+  }
+  size_t pos = 0;
+  while (pos <= boss_notes.size()) {
+    const size_t nl = boss_notes.find('\n', pos);
+    const size_t end = (nl == std::string_view::npos) ? boss_notes.size() : nl;
+    const std::string_view line = boss_notes.substr(pos, end - pos);
+    if (line.starts_with("## ")) {
+      const std::string_view heading =
+          base::TrimWhitespaceASCII(line.substr(3), base::TRIM_ALL);
+      if (HeadingCoversBoss(heading, boss_name)) {
+        return true;
+      }
+    }
+    if (nl == std::string_view::npos) {
+      break;
+    }
+    pos = nl + 1;
+  }
+  return false;
+}
+
 }  // namespace
 
 std::optional<WorldKnowledge> WorldKnowledge::LoadFile(std::string_view path,
@@ -185,8 +248,9 @@ std::optional<WorldKnowledge> WorldKnowledge::ParseJson(
 
 std::string WorldKnowledge::SelectRelevant(
     const wlb::snapshot::Snapshot& snapshot,
-    bool has_boss_notes) const {
-  if (empty() || has_boss_notes) {
+    bool has_boss_notes,
+    std::string_view boss_notes) const {
+  if (empty() || (has_boss_notes && boss_notes.empty())) {
     return {};
   }
   std::string out;
@@ -272,6 +336,9 @@ std::string WorldKnowledge::SelectRelevant(
       if (!seen_bosses.insert(bc.name).second) {
         continue;
       }
+      if (has_boss_notes && NotesCoverBoss(boss_notes, bc.name)) {
+        continue;
+      }
       bool any = false;
       if (!bc.info->abilities.empty()) {
         any |= AppendLineCapped(
@@ -287,6 +354,13 @@ std::string WorldKnowledge::SelectRelevant(
         ++bosses_emitted;
       }
     }
+  }
+
+  // When curated boss notes are loaded, only emit per-boss wiki fallback for
+  // uncovered bosses; never dilute boss notes with open-world, generic
+  // instance overview, or quest lore.
+  if (has_boss_notes) {
+    return out;
   }
 
   // 1) Open-world zone level range + outleveled-zone guidance.

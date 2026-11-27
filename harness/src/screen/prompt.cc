@@ -798,7 +798,8 @@ PromptInput AssemblePromptInput(const PromptAssemblyContext& ctx,
     out.notes = SelectRelevantNotes(ctx.raw_notes, snapshot);
   }
   if (knowledge) {
-    out.knowledge = knowledge->SelectRelevant(snapshot, !out.notes.empty());
+    out.knowledge =
+        knowledge->SelectRelevant(snapshot, !out.notes.empty(), out.notes);
   }
   out.active_orders = ctx.active_orders;
   out.order_names = CollectOrderNames(snapshot, out.notes);

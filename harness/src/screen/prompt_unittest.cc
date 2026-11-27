@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -13,6 +14,7 @@
 #include "gtest/gtest.h"
 #include "llm/llm_client.h"
 #include "plan/plan.h"
+#include "screen/knowledge.h"
 #include "screen/screen_renderer.h"
 #include "snapshot/snapshot.h"
 #include "test/gbnf_check.h"
@@ -793,6 +795,163 @@ TEST(PromptTest, RealRulesIdentitiesAndPlayerChatFitInspectPromptBudget) {
     }
   }
   EXPECT_GE(identity_count, 19);
+}
+
+TEST(PromptTest, PerBossWikiFallbackWorksInAssemblePromptAndFitsBudget) {
+  constexpr const char* kKnowledgeJson = R"json({
+    "version": 1,
+    "zones": {
+      "Elwynn Forest": {
+        "min_level": 1,
+        "max_level": 10,
+        "faction": "Alliance",
+        "next_zones": ["Westfall (10-20)"]
+      }
+    },
+    "dungeons": {
+      "Naxxramas": {
+        "level": "80",
+        "summary": "Four wings plus Frostwyrm Lair."
+      }
+    },
+    "bosses": {
+      "Patchwerk": {
+        "abilities": "Hateful Strike: heavy melee hit.",
+        "strategy": "Tank-and-spank throughput check."
+      },
+      "Noth the Plaguebringer": {
+        "abilities": "Curse of the Plaguebringer, Blink.",
+        "strategy": "Decurse promptly and kill Plagued Warriors."
+      }
+    }
+  })json";
+  const std::optional<WorldKnowledge> wk =
+      WorldKnowledge::ParseJson(kKnowledgeJson);
+  ASSERT_TRUE(wk.has_value());
+
+  const std::filesystem::path repo_root = std::filesystem::path(__FILE__)
+                                              .parent_path()
+                                              .parent_path()
+                                              .parent_path()
+                                              .parent_path();
+  std::ifstream rules_in(repo_root / "content" / "RULES.md");
+  ASSERT_TRUE(rules_in.is_open());
+  const std::string rules((std::istreambuf_iterator<char>(rules_in)),
+                          std::istreambuf_iterator<char>());
+
+  PromptAssemblyContext ctx;
+  ctx.rules = rules;
+  ctx.bot_name = "Aldric";
+  ctx.wake_reason = "entered combat";
+  ctx.raw_notes =
+      "# Naxxramas (Naxx)\n\n## Patchwerk\n- **Hateful Strike**: keep tanks "
+      "topped.\n";
+
+  // 1) Covered boss (Patchwerk): curated notes loaded, wiki suppressed.
+  wlb::snapshot::Snapshot covered_snap;
+  covered_snap.bot = "Aldric";
+  covered_snap.base.where.in_instance = true;
+  covered_snap.base.where.zone = "Naxxramas";
+  covered_snap.ext.encounter.emplace().boss.emplace().name = "Patchwerk";
+  const PromptInput covered = AssemblePromptInput(ctx, covered_snap, &*wk);
+  EXPECT_NE(covered.notes.find("## Patchwerk"), std::string::npos);
+  EXPECT_TRUE(covered.knowledge.empty());
+
+  // 2) Uncovered boss (Noth the Plaguebringer): curated notes still loaded,
+  // per-boss wiki fallback fills in Noth without leaking instance overview.
+  wlb::snapshot::Snapshot uncovered_snap;
+  uncovered_snap.bot = "Aldric";
+  uncovered_snap.base.where.in_instance = true;
+  uncovered_snap.base.where.zone = "Naxxramas";
+  uncovered_snap.ext.encounter.emplace().boss.emplace().name =
+      "Noth the Plaguebringer";
+  const PromptInput uncovered = AssemblePromptInput(ctx, uncovered_snap, &*wk);
+  EXPECT_NE(uncovered.notes.find("## Patchwerk"), std::string::npos);
+  EXPECT_NE(uncovered.knowledge.find("Boss Noth the Plaguebringer"),
+            std::string::npos);
+  EXPECT_EQ(uncovered.knowledge.find("Instance: Naxxramas"), std::string::npos);
+
+  const LlmRequest req = BuildPlanRequest(uncovered, SampleScreen());
+  const size_t notes_pos = req.user.find("Your boss notes:");
+  const size_t guide_pos = req.user.find("World guide:");
+  ASSERT_NE(notes_pos, std::string::npos);
+  ASSERT_NE(guide_pos, std::string::npos);
+  EXPECT_LT(notes_pos, guide_pos);
+  const PromptBreakdown b = InspectPrompt(uncovered, SampleScreen());
+  EXPECT_LE(b.est_total_tokens + static_cast<size_t>(req.max_tokens),
+            b.slot_budget_tokens);
+
+  // 3) Adversarial counter-test: leaving instance clears raw_notes and restores
+  // normal open-world zone knowledge.
+  ctx.raw_notes.clear();
+  wlb::snapshot::Snapshot open_world;
+  open_world.bot = "Aldric";
+  open_world.base.self.unit.level = 15;
+  open_world.base.where.in_instance = false;
+  open_world.base.where.zone = "Elwynn Forest";
+  const PromptInput ow = AssemblePromptInput(ctx, open_world, &*wk);
+  EXPECT_TRUE(ow.notes.empty());
+  EXPECT_NE(ow.knowledge.find("Zone: Elwynn Forest"), std::string::npos);
+}
+
+TEST(PromptTest, NewRaidAndDungeonNotesSelectBossesAndFitInspectPromptBudget) {
+  const std::filesystem::path repo_root = std::filesystem::path(__FILE__)
+                                              .parent_path()
+                                              .parent_path()
+                                              .parent_path()
+                                              .parent_path();
+  std::ifstream rules_in(repo_root / "content" / "RULES.md");
+  ASSERT_TRUE(rules_in.is_open());
+  const std::string rules((std::istreambuf_iterator<char>(rules_in)),
+                          std::istreambuf_iterator<char>());
+
+  struct Case {
+    const char* dir;
+    const char* boss;
+    const char* expect_substr;
+  };
+  const Case kCases[] = {
+      {"ToCR", "Gormok the Impaler", "Impale stacks>2 on tank & me offtank"},
+      {"ToCR", "Anub'arak", "Nerubian Burrower"},
+      {"TOC", "Eadric the Pure", "Radiance cast -> face away boss"},
+      {"AQ40", "Fankriss the Unyielding",
+       "Mortal Wound stacks>2 on tank & me offtank"},
+      {"AQ40", "C'Thun", "Giant Eye Tentacle"},
+      {"Naxx", "Heigan the Unclean", "in Eruption -> out of it"},
+      {"Naxx", "Thane Korth'azz", "Mark of Korth'azz stacks>2 on tank"},
+      {"Naxx", "Kel'Thuzad", "in Shadow Fissure -> out of it"},
+      {"UK", "Ingvar the Plunderer", "Dark Smash cast -> out of it"},
+      {"Nex", "Keristrasza", "Intense Cold stacks>2 on me -> jump"},
+      {"GD", "Gal'darah", "Whirling Slash cast -> out of it"},
+      {"ICC", "Deathbringer Saurfang",
+       "Rune of Blood on tank & me offtank -> wake"},
+  };
+  for (const Case& c : kCases) {
+    const std::filesystem::path path =
+        repo_root / "content" / "notes" / c.dir / "notes.md";
+    std::ifstream in(path);
+    ASSERT_TRUE(in.is_open()) << path;
+    const std::string raw((std::istreambuf_iterator<char>(in)),
+                          std::istreambuf_iterator<char>());
+    wlb::snapshot::Snapshot snap;
+    snap.bot = "Aldric";
+    snap.base.where.in_instance = true;
+    snap.ext.encounter.emplace().boss.emplace().name = c.boss;
+
+    PromptAssemblyContext ctx;
+    ctx.rules = rules;
+    ctx.bot_name = "Aldric";
+    ctx.wake_reason = "approached boss";
+    ctx.raw_notes = raw;
+    const PromptInput input = AssemblePromptInput(ctx, snap);
+    EXPECT_NE(input.notes.find(c.expect_substr), std::string::npos)
+        << c.dir << " / " << c.boss;
+    const LlmRequest req = BuildPlanRequest(input, SampleScreen());
+    const PromptBreakdown b = InspectPrompt(input, SampleScreen());
+    EXPECT_LE(b.est_total_tokens + static_cast<size_t>(req.max_tokens),
+              b.slot_budget_tokens)
+        << c.dir << " / " << c.boss;
+  }
 }
 
 }  // namespace

@@ -64,10 +64,14 @@ class WorldKnowledge {
   size_t boss_count() const { return bosses_.size(); }
 
   // Returns a compact Markdown snippet (<= 1,200 bytes) relevant to `snapshot`.
-  // When `has_boss_notes` is true, returns empty so combat-critical boss notes
-  // are never diluted or crowded out by open-world/quest lore.
+  // When `has_boss_notes` is true, open-world zone, generic instance overview,
+  // and quest lore are suppressed so combat-critical boss notes are never
+  // diluted; wiki boss entries are still emitted as a per-boss fallback for any
+  // active/nearby boss not covered by a `## <Boss>` heading in `boss_notes`
+  // (when `boss_notes` is empty, all wiki output is suppressed).
   std::string SelectRelevant(const wlb::snapshot::Snapshot& snapshot,
-                             bool has_boss_notes = false) const;
+                             bool has_boss_notes = false,
+                             std::string_view boss_notes = {}) const;
 
  private:
   std::flat_map<uint32_t, QuestInfo> quests_;

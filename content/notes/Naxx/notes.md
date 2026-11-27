@@ -30,3 +30,46 @@ Web Wrap appears -> target nearest Web Wrap
 ```
 in Blizzard -> out of it
 ```
+
+## Heigan the Unclean
+
+- **Eruption**: floor sections erupt in a repeating wave (Safety Dance); move out of erupting zones immediately and follow the tank across the safe zone in both phases.
+- **Decrepit Fever**: dispel disease promptly; tank holds Heigan away from the platform so ranged avoid **Spell Disruption**.
+
+```
+in Eruption -> out of it
+```
+
+## Gluth
+
+- **Mortal Wound**: stacking healing-reduction debuff on the current tank; the other tank taunts at 3 stacks (tank swap).
+- **Zombie Chow**: off-tank/kiters keep them away from Gluth; after **Decimate** drops them to 5% HP, burn them down before they reach Gluth.
+
+```
+Mortal Wound stacks>2 on tank & me offtank -> wake
+Mortal Wound stacks>2 on offtank & me tank & not me offtank -> wake
+```
+
+## The Four Horsemen (Thane Korth'azz, Lady Blaumeux, Sir Zeliek, Baron Rivendare)
+
+- **Mark of Korth'azz**, **Mark of Rivendare**, **Mark of Blaumeux**, **Mark of Zeliek**: stacking damage debuff per horseman; tanks swap at 3 stacks so marks drop, and never leave a horseman without a target in range.
+- **Void Zone**: dark ground hazard cast by Lady Blaumeux; move out immediately.
+
+```
+Mark of Korth'azz stacks>2 on tank & me offtank -> wake
+Mark of Korth'azz stacks>2 on offtank & me tank & not me offtank -> wake
+Mark of Rivendare stacks>2 on tank & me offtank -> wake
+Mark of Rivendare stacks>2 on offtank & me tank & not me offtank -> wake
+in Void Zone -> out of it
+```
+
+## Kel'Thuzad
+
+- Phase 1: kill **Soldier of the Frozen Wastes**, **Unstoppable Abomination**, and **Soul Weaver** adds before they overwhelm the center.
+- **Shadow Fissure**: fatal dark ground crack; move out immediately.
+- **Frostbolt**: interrupt single-target **Frostbolt** on the tank; spread 10+ yd so **Frost Blast** does not chain-freeze allies.
+- **Guardian of Icecrown**: at 45% HP, off-tank picks up guardians and tanks them away from the raid while DPS finishes Kel'Thuzad.
+
+```
+in Shadow Fissure -> out of it
+```

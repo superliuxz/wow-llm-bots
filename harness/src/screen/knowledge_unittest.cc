@@ -246,5 +246,83 @@ TEST(WorldKnowledgeTest, RejectsInvalidJson) {
   EXPECT_FALSE(err.empty());
 }
 
+TEST(WorldKnowledgeTest, PerBossWikiFallbackWhenCuratedNotesMissActiveBoss) {
+  const std::optional<WorldKnowledge> wk =
+      WorldKnowledge::ParseJson(kSampleKnowledgeJson);
+  ASSERT_TRUE(wk.has_value());
+
+  wlb::snapshot::Snapshot snap;
+  snap.base.where.in_instance = true;
+  snap.base.where.zone = "Deadmines";
+  wlb::snapshot::Objective q_open;
+  q_open.quest.emplace().quest_id = 60;
+  q_open.quest->complete = false;
+  snap.ext.quest_tracker.push_back(q_open);
+
+  wlb::snapshot::Unit loken;
+  loken.guid = "0xloken";
+  loken.name = "Loken";
+  loken.kind = wlb::snapshot::Unit::NPC;
+  loken.reaction = wlb::snapshot::Unit::HOSTILE;
+  loken.rel.dist_yd = 8.0f;
+  snap.base.nearby.units.push_back(loken);
+
+  wlb::snapshot::Unit murmur;
+  murmur.guid = "0xmurmur";
+  murmur.name = "Murmur";
+  murmur.kind = wlb::snapshot::Unit::NPC;
+  murmur.reaction = wlb::snapshot::Unit::HOSTILE;
+  murmur.rel.dist_yd = 15.0f;
+  snap.base.nearby.units.push_back(murmur);
+
+  // Curated notes cover Loken only: Loken is suppressed, Murmur gets wiki
+  // fallback, and generic dungeon overview / quest lore stay suppressed.
+  const std::string loken_only =
+      "# Halls of Lightning (HoL)\n\n## Loken\n- Run out on Lightning Nova.\n";
+  const std::string fallback =
+      wk->SelectRelevant(snap, /*has_boss_notes=*/true, loken_only);
+  EXPECT_EQ(fallback.find("Boss Loken"), std::string::npos);
+  EXPECT_NE(fallback.find("Boss Murmur — Abilities: Sonic Boom"),
+            std::string::npos);
+  EXPECT_EQ(fallback.find("Instance: Deadmines"), std::string::npos);
+  EXPECT_EQ(fallback.find("Kobold Candles"), std::string::npos);
+
+  // Compound heading covers both listed bosses -> no wiki fallback emitted.
+  const std::string compound_notes =
+      "# Raid\n\n## Council (Loken, Murmur)\n- Burn both.\n";
+  EXPECT_TRUE(wk->SelectRelevant(snap, /*has_boss_notes=*/true, compound_notes)
+                  .empty());
+
+  // Title-only notes file (no `## ` sections) falls back for every nearby boss
+  // without leaking instance overview or quests.
+  const std::string title_only = "# Trial of the Champion (TOC)\n";
+  const std::string title_fb =
+      wk->SelectRelevant(snap, /*has_boss_notes=*/true, title_only);
+  EXPECT_NE(title_fb.find("Boss Loken"), std::string::npos);
+  EXPECT_NE(title_fb.find("Boss Murmur"), std::string::npos);
+  EXPECT_EQ(title_fb.find("Instance: Deadmines"), std::string::npos);
+  EXPECT_EQ(title_fb.find("Kobold Candles"), std::string::npos);
+
+  // Adversarial counter-test: friendly NPCs, dead bosses, and totems must never
+  // trigger per-boss wiki fallback even when absent from curated notes.
+  wlb::snapshot::Snapshot adv;
+  adv.base.where.in_instance = true;
+  adv.base.where.zone = "Deadmines";
+  wlb::snapshot::Unit friendly_thrall;
+  friendly_thrall.guid = "0xthrall";
+  friendly_thrall.name = "Thrall";
+  friendly_thrall.kind = wlb::snapshot::Unit::NPC;
+  friendly_thrall.reaction = wlb::snapshot::Unit::FRIENDLY;
+  adv.base.nearby.units.push_back(friendly_thrall);
+  wlb::snapshot::Unit dead_murmur = murmur;
+  dead_murmur.dead = true;
+  adv.base.nearby.units.push_back(dead_murmur);
+  wlb::snapshot::Unit totem_loken = loken;
+  totem_loken.kind = wlb::snapshot::Unit::TOTEM;
+  adv.base.nearby.units.push_back(totem_loken);
+  EXPECT_TRUE(
+      wk->SelectRelevant(adv, /*has_boss_notes=*/true, title_only).empty());
+}
+
 }  // namespace
 }  // namespace harness
