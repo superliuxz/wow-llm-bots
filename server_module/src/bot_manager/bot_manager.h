@@ -12,6 +12,7 @@
 #include "bot_manager/popup_watch.h"
 
 class Player;
+class Unit;
 
 namespace llm_brain {
 
@@ -107,6 +108,18 @@ class BotManager {
   // offensive attacks and non-positive spell casts for `bot`.
   static void SetStopDps(Player* bot, bool stop);
   static bool IsStopDps(Player* bot);
+
+  // Thread-safe: whether a brain combat movement/spread act currently holds
+  // this bot's combat position against the healer-to-tank leash (M1b).
+  // Cleared when combat ends, on explicit follow/ping-stay clear, or on map
+  // change / disconnect / logout.
+  static void SetCombatPositionHold(Player* bot, bool hold);
+  static bool CombatPositionHoldActive(Player* bot);
+
+  // Thread-safe: records that `bot`'s brain explicitly issued a taunt on
+  // `target` so other tanks in the same group suppress playerbots' "lose
+  // aggro" reflex taunt instead of ping-ponging aggro back (M1b).
+  static void RecordBrainTaunt(Player* bot, Unit* target);
 
   // World thread only: the brain chose to lie dead hoping for a rez (RH-M3):
   // playerbots' auto release waits `wait_ms` from now, anywhere (by default

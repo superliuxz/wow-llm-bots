@@ -12,6 +12,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -64,6 +65,8 @@
 #include "RandomPlayerbotMgr.h"
 #include "ServerScript.h"
 #include "SharedDefines.h"
+#include "SpellAuraDefines.h"
+#include "SpellAuraEffects.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "Timer.h"
@@ -81,6 +84,7 @@
 #include "bot_manager/playerbots_actions.h"
 #include "bot_manager/pull_discipline.h"
 #include "bot_manager/spell_miss_packet.h"
+#include "bot_manager/tank_swap.h"
 #include "bot_manager/tick_owner.h"
 #include "bot_session.h"
 #include "chat/chat_scripts.h"
@@ -289,6 +293,112 @@ ErrandHoldInput MakeErrandHoldInput(Player* bot) {
       .instance_id = bot->GetInstanceId(),
       .now_ms = getMSTime(),
   };
+}
+
+// Whether `member` is a tank in `group` (main-tank flag, LFG tank role, or
+// tank spec/stance without `not_tank`).
+bool IsGroupTankMember(Group* group, Player* member) {
+  if (!group || !member || !member->IsInWorld()) {
+    return false;
+  }
+  const ObjectGuid guid = member->GetGUID();
+  for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+    if (slot.guid != guid) {
+      continue;
+    }
+    if ((slot.flags & MEMBER_FLAG_MAINTANK) != 0) {
+      return true;
+    }
+    if (slot.roles != 0) {
+      return (slot.roles & lfg::PLAYER_ROLE_TANK) != 0;
+    }
+    return PlayerbotAI::IsTank(member) &&
+           !BotManager::GetGroupPolicy(member).not_tank;
+  }
+  return false;
+}
+
+// Whether `bot`'s playerbots reflex taunt (`action_name`) should be suppressed
+// to avoid taunt ping-pong with another living group tank (M1b).
+bool ShouldBlockReflexTaunt(Player* bot,
+                            PlayerbotAI* ai,
+                            std::string_view action_name) {
+  if (!bot || !ai || !IsReflexTauntActionName(action_name)) {
+    return false;
+  }
+  Group* group = bot->GetGroup();
+  if (!group) {
+    return false;
+  }
+  Unit* target =
+      ai->GetAiObjectContext()->GetValue<Unit*>("current target")->Get();
+  if (!target) {
+    target = bot->GetSelectedUnit();
+  }
+  if (!target) {
+    return false;
+  }
+  // Righteous Defense targets a friendly player being attacked: never taunt
+  // mobs off another living tank in the group.
+  if (action_name == "righteous defense") {
+    if (Player* ally = target->ToPlayer();
+        ally && ally != bot && ally->IsAlive() &&
+        group->IsMember(ally->GetGUID()) && IsGroupTankMember(group, ally)) {
+      return true;
+    }
+  }
+  bool victim_is_other_living_tank = false;
+  if (Unit* victim = target->GetVictim()) {
+    if (Player* vp = victim->ToPlayer(); vp && vp != bot && vp->IsAlive() &&
+                                         group->IsMember(vp->GetGUID()) &&
+                                         IsGroupTankMember(group, vp)) {
+      victim_is_other_living_tank = true;
+    }
+  }
+  bool target_taunted_by_other_tank = false;
+  for (AuraEffect const* eff :
+       target->GetAuraEffectsByType(SPELL_AURA_MOD_TAUNT)) {
+    if (!eff) {
+      continue;
+    }
+    if (Unit* caster = eff->GetCaster()) {
+      if (Player* cp = caster->ToPlayer(); cp && cp != bot && cp->IsAlive() &&
+                                           group->IsMember(cp->GetGUID()) &&
+                                           IsGroupTankMember(group, cp)) {
+        target_taunted_by_other_tank = true;
+        break;
+      }
+    }
+  }
+  const uint32_t now_ms = getMSTime();
+  const std::optional<TankSwapClaim> claim =
+      TankSwapTracker::Instance().FindClaim(
+          target->GetGUID().GetRawValue(), group->GetGUID().GetRawValue(),
+          bot->GetMapId(), bot->GetInstanceId(), now_ms);
+  bool claiming_tank_alive = false;
+  bool claim_within_grace = false;
+  uint64_t claiming_tank_guid = 0;
+  if (claim) {
+    claiming_tank_guid = claim->claiming_tank_guid;
+    claim_within_grace = TankSwapTracker::IsWithinGrace(*claim, now_ms);
+    if (Player* claimer = ObjectAccessor::FindConnectedPlayer(
+            ObjectGuid(claim->claiming_tank_guid))) {
+      claiming_tank_alive = claimer->IsInWorld() && claimer->IsAlive() &&
+                            claimer->GetMapId() == bot->GetMapId() &&
+                            claimer->GetInstanceId() == bot->GetInstanceId();
+    }
+  }
+  return ShouldSuppressReflexTaunt({
+      .in_group = true,
+      .bot_guid = bot->GetGUID().GetRawValue(),
+      .target_guid = target->GetGUID().GetRawValue(),
+      .victim_is_other_living_tank = victim_is_other_living_tank,
+      .target_taunted_by_other_tank = target_taunted_by_other_tank,
+      .has_active_claim = claim.has_value(),
+      .claiming_tank_guid = claiming_tank_guid,
+      .claiming_tank_alive = claiming_tank_alive,
+      .claim_within_grace = claim_within_grace,
+  });
 }
 
 // Whether another member of `group` is a non-pet tank (main-tank flag, LFG
@@ -799,6 +909,11 @@ class BrainPolicyListener final : public ActionExecutionListener {
         }
       }
     }
+    // Tank-swap coordination (M1b): prevent playerbots' "lose aggro" reflex
+    // from taunting a mob back off another living group tank after a swap.
+    if (bot_ && ai_ && ShouldBlockReflexTaunt(bot_, ai_, name)) {
+      return false;
+    }
     // While a brain-initiated errand (loot, gather, talk, use, walk, rest,
     // NPC interaction) is active for a grouped follower, yield playerbots'
     // `follow` so it doesn't cancel the move or interrupt the cast.
@@ -1110,6 +1225,12 @@ void BotManager::Tick() {
                 s.rez_wait_until_ms.reset();
                 s.corpse_run_step.reset();
               });
+        }
+        if (!player->IsInCombat()) {
+          TankSwapTracker::Instance().ClearForBot(bot.guid);
+          if (!GroupInCombat(player->GetGroup(), player)) {
+            BotManager::SetCombatPositionHold(player, false);
+          }
         }
         EnsureStrategies(player);
         KeepCorpseRun(player);
@@ -1451,43 +1572,61 @@ std::vector<wlb::snapshot::Vec3> CollectUnpulledHostiles(Player* bot,
   return out;
 }
 
-Player* FindCombatTank(Player* healer, Group* group) {
+std::vector<Player*> FindCombatTanks(Player* healer, Group* group) {
+  std::vector<Player*> tanks;
   if (!healer || !group) {
-    return nullptr;
+    return tanks;
   }
-  auto eligible = [healer](Player* m) {
-    return m && m != healer && m->IsInWorld() && m->IsAlive() &&
-           m->IsInCombat() && m->GetMapId() == healer->GetMapId() &&
-           m->GetInstanceId() == healer->GetInstanceId();
+  auto add_if_eligible = [healer, &tanks](Player* m) {
+    if (m && m != healer && m->IsInWorld() && m->IsAlive() && m->IsInCombat() &&
+        m->GetMapId() == healer->GetMapId() &&
+        m->GetInstanceId() == healer->GetInstanceId() &&
+        std::find(tanks.begin(), tanks.end(), m) == tanks.end()) {
+      tanks.push_back(m);
+    }
   };
   for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
-    if ((slot.flags & MEMBER_FLAG_MAINTANK) != 0) {
-      if (Player* m = ObjectAccessor::FindConnectedPlayer(slot.guid);
-          eligible(m)) {
-        return m;
-      }
+    Player* m = ObjectAccessor::FindConnectedPlayer(slot.guid);
+    if (m && IsGroupTankMember(group, m)) {
+      add_if_eligible(m);
     }
   }
-  for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
-    if ((slot.roles & lfg::PLAYER_ROLE_TANK) != 0) {
-      if (Player* m = ObjectAccessor::FindConnectedPlayer(slot.guid);
-          eligible(m)) {
-        return m;
-      }
+  if (tanks.empty()) {
+    add_if_eligible(
+        ObjectAccessor::FindConnectedPlayer(group->GetLeaderGUID()));
+  }
+  return tanks;
+}
+
+// True when `healer` is already in heal range and LoS of an active friendly
+// heal target (e.g. a selected injured ally, or an injured friendly combat NPC
+// such as Valithria Dreamwalker or an escort NPC).
+bool HasFriendlyHealTargetInRangeAndLos(Player* healer, float range_yd) {
+  if (!healer || !healer->GetMap()) {
+    return false;
+  }
+  if (Unit* sel = healer->GetSelectedUnit();
+      sel && sel != healer && sel->IsAlive() && healer->IsFriendlyTo(sel) &&
+      (sel->GetHealthPct() < 100.0f ||
+       (sel->IsCreature() && sel->IsInCombat())) &&
+      healer->GetDistance(sel) <= range_yd && healer->IsWithinLOSInMap(sel)) {
+    return true;
+  }
+  std::vector<Unit*> units;
+  Acore::AnyUnitInObjectRangeCheck check(healer, range_yd);
+  Acore::UnitListSearcher<Acore::AnyUnitInObjectRangeCheck> searcher(
+      healer, units, check);
+  Cell::VisitObjects(healer, searcher, range_yd);
+  for (Unit* u : units) {
+    Creature* c = u->ToCreature();
+    if (c && c->IsAlive() && c->IsInCombat() && healer->IsFriendlyTo(c) &&
+        c->GetHealthPct() < 100.0f &&
+        !HiddenFromPlayers(c->IsTrigger(), c->GetDisplayId()) &&
+        healer->GetDistance(c) <= range_yd && healer->IsWithinLOSInMap(c)) {
+      return true;
     }
   }
-  for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
-    if (Player* m = ObjectAccessor::FindConnectedPlayer(slot.guid);
-        eligible(m) && PlayerbotAI::IsTank(m)) {
-      return m;
-    }
-  }
-  if (Player* leader =
-          ObjectAccessor::FindConnectedPlayer(group->GetLeaderGUID());
-      eligible(leader)) {
-    return leader;
-  }
-  return nullptr;
+  return false;
 }
 
 }  // namespace
@@ -1547,48 +1686,69 @@ void BotManager::KeepSafeGroupFollow(Player* player) {
 
 void BotManager::KeepHealerInTankRangeAndLos(Player* player) {
   // Keeps a grouped healer within 40 yd (triggering at 34 yd) and line of
-  // sight of the combat tank during a pull, yielding to stay policies, casts,
-  // and brain forced-move acts such as boss dodges (Companion-lessons Gap 1).
+  // sight of a combat tank during a pull, yielding to stay policies, spread/
+  // combat position holds, casts, brain forced-move acts, two-tank coverage
+  // (already in range & LoS of any living combat tank), and active friendly
+  // heal targets such as Valithria Dreamwalker (Companion-lessons Gap 1, M1b).
   Group* group = player->GetGroup();
   PlayerbotAI* ai = GET_PLAYERBOT_AI(player);
   if (!group || !ai || !player->GetMap() || !CanClearBotMovement(player)) {
     return;
   }
-  Player* tank = FindCombatTank(player, group);
-  if (!tank) {
+  const std::vector<Player*> tanks = FindCombatTanks(player, group);
+  if (tanks.empty()) {
     return;
   }
+  Player* nearest_tank = tanks.front();
+  float nearest_dist_yd = player->GetDistance(nearest_tank);
+  bool any_tank_in_range_and_los = false;
+  for (Player* t : tanks) {
+    const float d = player->GetDistance(t);
+    if (d < nearest_dist_yd) {
+      nearest_dist_yd = d;
+      nearest_tank = t;
+    }
+    if (d <= kHealerRepositionDistYd && player->IsWithinLOSInMap(t)) {
+      any_tank_in_range_and_los = true;
+    }
+  }
   const bool stay = GetGroupPolicy(player).stay || PingStayHolds(player);
+  const bool spread_or_position_hold = CombatPositionHoldActive(player);
   const bool forced_move = HasActiveForcedMove(ai);
   const bool casting = player->IsNonMeleeSpellCast(/*withDelayed=*/false);
-  const float dist_yd = player->GetDistance(tank);
-  const bool in_los = player->IsWithinLOSInMap(tank);
+  const bool in_los = player->IsWithinLOSInMap(nearest_tank);
+  const bool heal_target_in_range_and_los =
+      !any_tank_in_range_and_los &&
+      HasFriendlyHealTargetInRangeAndLos(player, kHealerRepositionDistYd);
   if (!HealerNeedsTankReposition({
           .bot_alive = player->IsAlive(),
           .is_healer = PlayerbotAI::IsHeal(player),
           .in_group = true,
           .stay = stay,
+          .spread_or_position_hold = spread_or_position_hold,
           .forced_move_active = forced_move,
           .casting = casting,
-          .tank_alive = tank->IsAlive(),
-          .tank_in_combat = tank->IsInCombat(),
-          .dist_to_tank_yd = dist_yd,
+          .tank_alive = nearest_tank->IsAlive(),
+          .tank_in_combat = nearest_tank->IsInCombat(),
+          .any_tank_in_range_and_los = any_tank_in_range_and_los,
+          .heal_target_in_range_and_los = heal_target_in_range_and_los,
+          .dist_to_tank_yd = nearest_dist_yd,
           .in_los_of_tank = in_los,
       })) {
     return;
   }
   PathGenerator path(player);
-  path.CalculatePath(tank->GetPositionX(), tank->GetPositionY(),
-                     tank->GetPositionZ());
+  path.CalculatePath(nearest_tank->GetPositionX(), nearest_tank->GetPositionY(),
+                     nearest_tank->GetPositionZ());
   const Movement::PointsArray& pts = path.GetPath();
   if (pts.size() >= 2) {
     // Stop at the earliest point along the path into LoS and <= 28 yd of the
     // tank so the healer rounds the corner without running into melee.
     for (size_t i = 1; i < pts.size(); ++i) {
       const G3D::Vector3& p = pts[i];
-      const float d_tank = tank->GetExactDist(p.x, p.y, p.z);
+      const float d_tank = nearest_tank->GetExactDist(p.x, p.y, p.z);
       if (d_tank <= kHealerStopDistYd &&
-          tank->IsWithinLOS(p.x, p.y, p.z + 1.5f)) {
+          nearest_tank->IsWithinLOS(p.x, p.y, p.z + 1.5f)) {
         if (WalkTo(player, p.x, p.y, p.z)) {
           return;
         }
@@ -1596,8 +1756,8 @@ void BotManager::KeepHealerInTankRangeAndLos(Player* player) {
       }
     }
   }
-  WalkTowards(player, tank->GetPositionX(), tank->GetPositionY(),
-              tank->GetPositionZ());
+  WalkTowards(player, nearest_tank->GetPositionX(),
+              nearest_tank->GetPositionY(), nearest_tank->GetPositionZ());
 }
 
 bool BotManager::IsKnownBotGuid(uint64_t raw_guid) const {
@@ -1933,8 +2093,11 @@ void BotManager::ClearPingStay(Player* bot) {
   if (!bot) {
     return;
   }
-  BotSessionRegistry::Instance().WithSession(
-      bot->GetGUID().GetRawValue(), [](BotSession& s) { s.ping_stay.reset(); });
+  BotSessionRegistry::Instance().WithSession(bot->GetGUID().GetRawValue(),
+                                             [](BotSession& s) {
+                                               s.ping_stay.reset();
+                                               s.combat_position_hold = false;
+                                             });
 }
 
 void BotManager::StartPingStay(Player* bot) {
@@ -2005,6 +2168,42 @@ bool BotManager::IsStopDps(Player* bot) {
   return BotSessionRegistry::Instance().InspectSession(
       bot->GetGUID().GetRawValue(),
       [](const BotSession* s) { return s ? s->stop_dps : false; });
+}
+
+void BotManager::SetCombatPositionHold(Player* bot, bool hold) {
+  if (!bot) {
+    return;
+  }
+  BotSessionRegistry::Instance().WithSession(
+      bot->GetGUID().GetRawValue(),
+      [hold](BotSession& s) { s.combat_position_hold = hold; });
+}
+
+bool BotManager::CombatPositionHoldActive(Player* bot) {
+  if (!bot) {
+    return false;
+  }
+  return BotSessionRegistry::Instance().InspectSession(
+      bot->GetGUID().GetRawValue(),
+      [](const BotSession* s) { return s ? s->combat_position_hold : false; });
+}
+
+void BotManager::RecordBrainTaunt(Player* bot, Unit* target) {
+  if (!bot || !target) {
+    return;
+  }
+  Group* group = bot->GetGroup();
+  if (!group) {
+    return;
+  }
+  TankSwapTracker::Instance().RecordClaim({
+      .target_guid = target->GetGUID().GetRawValue(),
+      .claiming_tank_guid = bot->GetGUID().GetRawValue(),
+      .group_guid = group->GetGUID().GetRawValue(),
+      .map_id = bot->GetMapId(),
+      .instance_id = bot->GetInstanceId(),
+      .claimed_at_ms = getMSTime(),
+  });
 }
 
 void BotManager::ClearBotStrategyOverride(const std::string& bot_name) {

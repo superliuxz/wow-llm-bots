@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "bot_manager/errand_hold.h"
+#include "bot_manager/tank_swap.h"
 #include "gtest/gtest.h"
 
 namespace llm_brain {
@@ -265,6 +266,51 @@ TEST(BotSessionRegistryTest, ErrandHoldClearsOnMapChangeDisconnectAndLogout) {
       EXPECT_EQ(s->group_guid, 42u);
       EXPECT_TRUE(s->group_policy.stay);
     });
+  };
+  set();
+  reg.ResetOnMapChange(kBot);
+  expect_cleared();
+  set();
+  reg.ResetOnDisconnect(kBot);
+  expect_cleared();
+  set();
+  reg.ResetOnLogout(kBot);
+  expect_cleared();
+}
+
+// Adversarial counter-test: combat_position_hold and TankSwapTracker claims
+// clear on map change, harness disconnect, and logout so a healer never stays
+// permanently unleashed and a tank never holds a stale swap claim across zones,
+// while group policy still survives.
+TEST(BotSessionRegistryTest,
+     CombatPositionHoldAndTankSwapClearOnMapChangeDisconnectAndLogout) {
+  BotSessionRegistry reg;
+  constexpr uint64_t kBot = 0x1008;
+  constexpr uint64_t kBoss = 0xF999;
+  const auto set = [&] {
+    reg.WithSession(kBot, [](BotSession& s) {
+      s.group_guid = 42;
+      s.group_policy.stay = true;
+      s.combat_position_hold = true;
+    });
+    TankSwapTracker::Instance().RecordClaim({
+        .target_guid = kBoss,
+        .claiming_tank_guid = kBot,
+        .group_guid = 42,
+        .map_id = 631,
+        .instance_id = 1,
+        .claimed_at_ms = 5000,
+    });
+  };
+  const auto expect_cleared = [&] {
+    reg.InspectSession(kBot, [](const BotSession* s) {
+      ASSERT_NE(s, nullptr);
+      EXPECT_FALSE(s->combat_position_hold);
+      EXPECT_EQ(s->group_guid, 42u);
+      EXPECT_TRUE(s->group_policy.stay);
+    });
+    EXPECT_FALSE(
+        TankSwapTracker::Instance().FindClaim(kBoss, 42, 631, 1, 5500));
   };
   set();
   reg.ResetOnMapChange(kBot);

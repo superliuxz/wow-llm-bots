@@ -1197,7 +1197,12 @@ ActStartResult ExecuteTauntAction(Player* bot,
   if (bot->HasSpellCooldown(spell->Id)) {
     return {.error = action.label + " is on cooldown"};
   }
-  return StartSpellUseOn(bot, /*command_id=*/0, spell, target, now, out_active);
+  ActStartResult res =
+      StartSpellUseOn(bot, /*command_id=*/0, spell, target, now, out_active);
+  if (res.error.empty()) {
+    BotManager::RecordBrainTaunt(bot, target);
+  }
+  return res;
 }
 
 ActionOutcome ExecuteTradeAction(Player* bot, const TradeAction& action) {

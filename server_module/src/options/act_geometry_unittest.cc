@@ -332,8 +332,10 @@ TEST(ActGeometryTest, HealerNeedsTankRepositionAndAdversarialCounterTests) {
   EXPECT_TRUE(HealerNeedsTankReposition(no_los));
 
   // Adversarial counter-tests: never override solo, non-healer, stay policy,
-  // active brain dodge (forced_move_active), active cast, dead bot/tank, or
-  // out-of-combat tank.
+  // spread/combat position hold, active brain dodge (forced_move_active),
+  // active cast, dead bot/tank, out-of-combat tank, two-tank coverage
+  // (already in range & LoS of an off-tank), or an active friendly heal target
+  // (e.g. Valithria Dreamwalker).
   auto check_blocked = [&](auto mutate) {
     HealerPositionCheck c = no_los;
     mutate(c);
@@ -342,11 +344,22 @@ TEST(ActGeometryTest, HealerNeedsTankRepositionAndAdversarialCounterTests) {
   check_blocked([](auto& c) { c.in_group = false; });
   check_blocked([](auto& c) { c.is_healer = false; });
   check_blocked([](auto& c) { c.stay = true; });
+  check_blocked([](auto& c) { c.spread_or_position_hold = true; });
   check_blocked([](auto& c) { c.forced_move_active = true; });
   check_blocked([](auto& c) { c.casting = true; });
   check_blocked([](auto& c) { c.bot_alive = false; });
   check_blocked([](auto& c) { c.tank_alive = false; });
   check_blocked([](auto& c) { c.tank_in_combat = false; });
+  check_blocked([](auto& c) { c.any_tank_in_range_and_los = true; });
+  check_blocked([](auto& c) { c.heal_target_in_range_and_los = true; });
+
+  // Counter-test: normal single-tank leash still fires when the healer is NOT
+  // spread, NOT covering another tank, and NOT on a friendly heal target.
+  HealerPositionCheck normal_far = far;
+  normal_far.spread_or_position_hold = false;
+  normal_far.any_tank_in_range_and_los = false;
+  normal_far.heal_target_in_range_and_los = false;
+  EXPECT_TRUE(HealerNeedsTankReposition(normal_far));
 }
 
 TEST(ActGeometryTest, SpreadAssignsDistinctEvenlySpacedBearings) {

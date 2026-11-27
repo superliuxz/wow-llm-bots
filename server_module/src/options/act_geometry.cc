@@ -323,7 +323,9 @@ bool BotEncroachesUnpulled(const pb::Vec3& bot_pos,
 
 bool HealerNeedsTankReposition(const HealerPositionCheck& c) {
   if (!c.bot_alive || !c.is_healer || !c.in_group || c.stay ||
-      c.forced_move_active || c.casting || !c.tank_alive || !c.tank_in_combat) {
+      c.spread_or_position_hold || c.forced_move_active || c.casting ||
+      !c.tank_alive || !c.tank_in_combat || c.any_tank_in_range_and_los ||
+      c.heal_target_in_range_and_los) {
     return false;
   }
   return c.dist_to_tank_yd > kHealerRepositionDistYd || !c.in_los_of_tank;

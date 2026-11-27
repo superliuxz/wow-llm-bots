@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/synchronization/lock.h"
+#include "bot_manager/tank_swap.h"
 
 namespace llm_brain {
 
@@ -17,6 +18,7 @@ BotSessionRegistry& BotSessionRegistry::Instance() {
 }
 
 void BotSessionRegistry::ResetOnLogout(uint64_t bot_guid) {
+  TankSwapTracker::Instance().ClearForBot(bot_guid);
   base::AutoLock lock(lock_);
   auto it = sessions_.find(bot_guid);
   if (it == sessions_.end()) {
@@ -38,11 +40,13 @@ void BotSessionRegistry::ResetOnLogout(uint64_t bot_guid) {
 }
 
 void BotSessionRegistry::ResetOnMapChange(uint64_t bot_guid) {
+  TankSwapTracker::Instance().ClearForBot(bot_guid);
   base::AutoLock lock(lock_);
   if (auto it = sessions_.find(bot_guid); it != sessions_.end()) {
     it->second.last_interrupted = {};
     it->second.avoided_targets.clear();
     it->second.stop_dps = false;
+    it->second.combat_position_hold = false;
     it->second.stray_recalled_ms = 0;
     it->second.party_ping.reset();
     it->second.ping_stay.reset();
@@ -59,11 +63,13 @@ void BotSessionRegistry::ResetOnMapChange(uint64_t bot_guid) {
 }
 
 void BotSessionRegistry::ResetOnDisconnect(uint64_t bot_guid) {
+  TankSwapTracker::Instance().ClearForBot(bot_guid);
   base::AutoLock lock(lock_);
   if (auto it = sessions_.find(bot_guid); it != sessions_.end()) {
     it->second.last_interrupted = {};
     it->second.avoided_targets.clear();
     it->second.stop_dps = false;
+    it->second.combat_position_hold = false;
     it->second.stray_recalled_ms = 0;
     it->second.party_ping.reset();
     it->second.ping_stay.reset();
@@ -80,6 +86,7 @@ void BotSessionRegistry::ResetOnDisconnect(uint64_t bot_guid) {
 }
 
 void BotSessionRegistry::ClearAll() {
+  TankSwapTracker::Instance().ClearAll();
   base::AutoLock lock(lock_);
   sessions_.clear();
 }

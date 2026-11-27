@@ -158,10 +158,13 @@ bool BotEncroachesUnpulled(const wlb::snapshot::Vec3& bot_pos,
                            const std::vector<wlb::snapshot::Vec3>& unpulled,
                            float guard_yd = kUnpulledClearYd);
 
-// Healer range/LoS guard during a pull (Companion-lessons Gap 1): keeps a
+// Healer range/LoS guard during a pull (Companion-lessons Gap 1, M1b): keeps a
 // grouped healer within 40 yd (triggering at 34 yd for hysteresis, stopping
-// around 28 yd) and line of sight of the tank in combat, while yielding to
-// stay policies, casts, and brain forced-move acts (e.g. boss dodges).
+// around 28 yd) and line of sight of a combat tank, while yielding to stay
+// policies, spread/combat position holds, active casts, brain forced-move acts
+// (e.g. boss dodges), two-tank coverage (already in range & LoS of another
+// living combat tank), and active friendly heal targets (e.g. Valithria
+// Dreamwalker or an injured ally in range & LoS).
 inline constexpr float kHealerRepositionDistYd = 34.0f;
 inline constexpr float kHealerStopDistYd = 28.0f;
 
@@ -170,10 +173,13 @@ struct HealerPositionCheck {
   bool is_healer = false;
   bool in_group = false;
   bool stay = false;
+  bool spread_or_position_hold = false;
   bool forced_move_active = false;
   bool casting = false;
   bool tank_alive = false;
   bool tank_in_combat = false;
+  bool any_tank_in_range_and_los = false;
+  bool heal_target_in_range_and_los = false;
   float dist_to_tank_yd = 0.0f;
   bool in_los_of_tank = true;
 };

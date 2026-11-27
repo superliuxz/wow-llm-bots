@@ -112,6 +112,8 @@ add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/bot_manager/pull_discipline_unittest.cc"
   "${WLB_MODULE_SRC}/bot_manager/spell_miss_packet.cc"
   "${WLB_MODULE_SRC}/bot_manager/spell_miss_packet_unittest.cc"
+  "${WLB_MODULE_SRC}/bot_manager/tank_swap.cc"
+  "${WLB_MODULE_SRC}/bot_manager/tank_swap_unittest.cc"
   "${WLB_MODULE_SRC}/bot_manager/tick_owner.cc"
   "${WLB_MODULE_SRC}/bot_manager/tick_owner_unittest.cc"
   "${WLB_MODULE_SRC}/bridge/brain_bridge.cc"

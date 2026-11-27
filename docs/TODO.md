@@ -18,10 +18,6 @@ Live verification following the `70b0878` team-play P0 fixes:
 Team-play P1 gaps and selected P2 items from the `70b0878` review:
 
 ### Control seam (brain vs. playerbots)
-- **Healer main-tank leash:** All healers leash to main tank (>34 yd or LoS every 1 s), breaking
-  two-tank fights, Valithria, and spread positions (`bot_manager.cc:1060-1097,1153-1206`).
-- **Taunt ping-pong:** After brain taunts, playerbots' "lost aggro" reflex makes the old tank taunt
-  back; no tank-swap coordination.
 - **Scripted raid strategy conflict:** Playerbots scripted raid strategies (Naxx, Ulduar, ICC) and
   brain standing orders move the same bots without coordinating.
 - **Solo bots playerbots overlap:** Without a human in group, playerbots `new rpg`/`grind` stays on

@@ -192,6 +192,10 @@ struct BotSession {
   // actions and non-positive spell casts until resumed, combat ends, or map
   // change / disconnect / logout.
   bool stop_dps = false;
+  // Active brain combat-position/spread hold (M1b): yields the healer-to-tank
+  // leash while the bot holds a brain-chosen combat position until combat ends,
+  // explicit follow, or map change / disconnect / logout.
+  bool combat_position_hold = false;
 
   // Most recent spell miss and cast failure for this bot (cleared on logout,
   // map change, and disconnect; monotonic seqs survive map change/disconnect so

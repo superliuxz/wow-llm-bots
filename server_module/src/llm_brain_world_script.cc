@@ -1522,6 +1522,10 @@ class LlmBrainWorldScript : public WorldScript {
     } else if (res.used) {
       state.errand_hold_active = false;
       BotManager::ClearErrandHold(bot);
+      if (IsMovementActVerb(act.verb) &&
+          (bot->IsInCombat() || IsPartyInCombat(bot))) {
+        BotManager::SetCombatPositionHold(bot, true);
+      }
       const bool stops_movement =
           (act.verb == wlb::snapshot::Command_Act::STOP &&
            (act.stop == wlb::snapshot::Command_Act::MOVING ||
@@ -1541,6 +1545,10 @@ class LlmBrainWorldScript : public WorldScript {
     } else {
       state.errand_hold_active = false;
       BotManager::ClearErrandHold(bot);
+      if (IsMovementActVerb(act.verb) &&
+          (bot->IsInCombat() || IsPartyInCombat(bot))) {
+        BotManager::SetCombatPositionHold(bot, true);
+      }
       ReportOptionUseDropped(bot_index, name, bot);
       if (state.active_act && !IsMovementActVerb(act.verb)) {
         // Non-movement multi-tick act (e.g. cast-time `use`) supersedes an old
