@@ -11,6 +11,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "Creature.h"
@@ -119,6 +120,32 @@ TargetProgress OptionTargetProgress(Player* bot,
   const auto cut = [](std::string why) {
     return TargetProgress{.interrupted = std::move(why)};
   };
+  if (const auto* rez = std::get_if<ResurrectAction>(&target.action);
+      rez && rez->mode == ResurrectAction::Mode::kWait) {
+    if (bot->IsAlive() || bot->HasPlayerFlag(PLAYER_FLAGS_GHOST) ||
+        bot->isResurrectRequested()) {
+      return done();
+    }
+    Group* group = bot->GetGroup();
+    bool has_living_ally = false;
+    if (group) {
+      for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+        if (slot.guid == bot->GetGUID()) {
+          continue;
+        }
+        if (Player* m = ObjectAccessor::FindConnectedPlayer(slot.guid);
+            m && m->IsInWorld() && m->IsAlive()) {
+          has_living_ally = true;
+          break;
+        }
+      }
+    }
+    if (!has_living_ally) {
+      BotManager::WaitForResurrection(bot, 0);
+      return cut("everyone in the party is dead");
+    }
+    return pending();
+  }
   if (IsDeadAllowedAction(target.action) && !IsKeepAction(target.action)) {
     return done();
   }

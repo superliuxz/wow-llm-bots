@@ -2505,7 +2505,11 @@ void BotManager::WaitForResurrection(Player* bot, uint32_t wait_ms) {
   if (bot) {
     BotSessionRegistry::Instance().WithSession(
         bot->GetGUID().GetRawValue(), [wait_ms](BotSession& s) {
-          s.rez_wait_until_ms = getMSTime() + wait_ms;
+          if (wait_ms == 0) {
+            s.rez_wait_until_ms.reset();
+          } else {
+            s.rez_wait_until_ms = getMSTime() + wait_ms;
+          }
         });
   }
 }

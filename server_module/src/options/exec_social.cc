@@ -1116,7 +1116,10 @@ ActionOutcome ExecuteResurrectAction(Player* bot,
         return {.error = "you are not lying dead"};
       }
       BotManager::WaitForResurrection(bot, /*wait_ms=*/5 * 60 * 1000);
-      return {.used = true, .info = "waiting for a resurrection"};
+      // Leave `used = false` so `PlanRunner` holds the wait step until a
+      // resurrection offer arrives or the step timeout re-checks, rather than
+      // waking the brain on every snapshot at 1 Hz.
+      return {.used = false, .info = "waiting for a resurrection"};
     case ResurrectAction::Mode::kSelf: {
       if (bot->IsAlive() || bot->HasPlayerFlag(PLAYER_FLAGS_GHOST)) {
         return {.error = "you are not lying dead"};

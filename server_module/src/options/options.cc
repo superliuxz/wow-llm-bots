@@ -744,9 +744,16 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
     rel.guid = "rez:release";
     rel.kind = pb::Option::USE;
     rel.name = "Release spirit";
-    // RH-M3: how long to lie dead hoping for a rez is the brain's call.
-    if (!facts.has_pending_resurrect && snapshot->ext.party &&
-        !snapshot->ext.party->members.empty()) {
+    // RH-M3: how long to lie dead hoping for a rez is the brain's call, as
+    // long as at least one online living party member could still resurrect
+    // (on a full wipe, nobody alive can rez, so only Release spirit applies).
+    const bool has_living_party_member =
+        snapshot->ext.party &&
+        std::any_of(snapshot->ext.party->members.begin(),
+                    snapshot->ext.party->members.end(), [](const pb::Unit& m) {
+                      return !m.dead && (!m.group || m.group->online);
+                    });
+    if (!facts.has_pending_resurrect && has_living_party_member) {
       targets.push_back({OptionTarget::Kind::kUse, "rez:wait",
                          "Wait for a resurrection (up to 5 min)", std::nullopt,
                          ResurrectAction{ResurrectAction::Mode::kWait}});

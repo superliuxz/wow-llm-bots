@@ -889,6 +889,41 @@ TEST(OptionsTest, AssistResolvesExactGuidCapAndEdgeCases) {
   EXPECT_EQ(Texts(dead_snap),
             (std::vector<std::string>{"Accept resurrection", "Release spirit",
                                       "Keep doing what I'm doing"}));
+
+  // Adversarial counter-test: full party wipe (every member dead or offline)
+  // must not offer `Wait for a resurrection` because nobody alive can rez.
+  facts.has_pending_resurrect = false;
+  pb::Snapshot wipe_snap = dead_snap;
+  wipe_snap.options.clear();
+  for (pb::Unit& m : wipe_snap.ext.party->members) {
+    m.dead = true;
+  }
+  AddOptions(&wipe_snap, facts);
+  EXPECT_EQ(Texts(wipe_snap),
+            (std::vector<std::string>{"Release spirit",
+                                      "Keep doing what I'm doing"}));
+
+  // Offline-only party members also cannot resurrect.
+  pb::Snapshot offline_snap = dead_snap;
+  offline_snap.options.clear();
+  for (pb::Unit& m : offline_snap.ext.party->members) {
+    m.dead = false;
+    m.group->online = false;
+  }
+  AddOptions(&offline_snap, facts);
+  EXPECT_EQ(Texts(offline_snap),
+            (std::vector<std::string>{"Release spirit",
+                                      "Keep doing what I'm doing"}));
+
+  // At least one online living teammate (regardless of role) restores Wait for
+  // a resurrection so the brain decides.
+  offline_snap.ext.party->members[0].group->online = true;
+  offline_snap.options.clear();
+  AddOptions(&offline_snap, facts);
+  EXPECT_EQ(Texts(offline_snap),
+            (std::vector<std::string>{"Release spirit",
+                                      "Wait for a resurrection (up to 5 min)",
+                                      "Keep doing what I'm doing"}));
 }
 
 TEST(OptionsTest, UsableBagItemsOfferedAsUseOptionsAndFilteredInCombat) {

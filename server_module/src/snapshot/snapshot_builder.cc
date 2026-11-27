@@ -251,7 +251,7 @@ void FillSelf(Player* bot, pb::Self* self) {
   unit.level = bot->GetLevel();
   unit.health_pct = Percent(bot->GetHealth(), bot->GetMaxHealth());
   unit.power_pct = Percent(bot->GetPower(power), bot->GetMaxPower(power));
-  unit.dead = bot->isDead();
+  unit.dead = !bot->IsAlive();
   unit.player.emplace().class_ = ClassName(bot->getClass());
   if (Group* group = bot->GetGroup()) {
     for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
@@ -334,7 +334,7 @@ void FillSelf(Player* bot, pb::Self* self) {
   self->power_max = bot->GetMaxPower(power);
   if (bot->HasPlayerFlag(PLAYER_FLAGS_GHOST)) {
     self->state = pb::Self::GHOST;
-  } else if (bot->isDead()) {
+  } else if (!bot->IsAlive()) {
     self->state = pb::Self::DEAD_BODY;
   } else {
     self->state = pb::Self::ALIVE;
@@ -780,7 +780,7 @@ void FillParty(Player* bot,
       gp.role = MemberRole(member, slot.roles);
       gp.online = true;
       m.level = member->GetLevel();
-      m.dead = member->isDead();
+      m.dead = !member->IsAlive();
       m.health_pct = Percent(member->GetHealth(), member->GetMaxHealth());
       const Powers p = member->getPowerType();
       if (member->GetMaxPower(p) > 0) {
