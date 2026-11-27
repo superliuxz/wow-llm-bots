@@ -88,9 +88,20 @@ bool ShouldSuppressPetTaunt(bool in_group, bool has_non_pet_tank) {
   return in_group && has_non_pet_tank;
 }
 
+bool ShouldApplyStopDps(bool in_group,
+                        bool is_tank,
+                        bool bot_in_combat,
+                        bool party_in_combat) {
+  return in_group && !is_tank && (bot_in_combat || party_in_combat);
+}
+
 void RecordStopDps(StopDpsState& state, bool in_combat) {
+  if (!in_combat) {
+    state = {};
+    return;
+  }
   state.active = true;
-  state.saw_combat = in_combat;
+  state.saw_combat = true;
 }
 
 bool ShouldResetStopDps(StopDpsState& state,
@@ -103,11 +114,8 @@ bool ShouldResetStopDps(StopDpsState& state,
     state.saw_combat = true;
     return false;
   }
-  if (state.saw_combat) {
-    state = {};
-    return true;
-  }
-  return false;
+  state = {};
+  return true;
 }
 
 bool ClearStopDps(StopDpsState& state) {
@@ -133,6 +141,11 @@ bool IsEligibleSkullMarkTarget(const SkullMarkCandidate& candidate) {
          candidate.dist_yd <= kSkullMarkMaxDistYd &&
          candidate.in_combat_with_group && !candidate.is_crowd_controlled &&
          !candidate.has_raid_marker;
+}
+
+bool ShouldSuppressUnpulledSkull(const UnpulledSkullGuardInput& input) {
+  return input.in_group && !input.in_battleground && input.has_skull_mark &&
+         !input.skull_in_combat_with_group && !input.explicit_target_override;
 }
 
 bool ShouldSuppressWarlockCcStrategy(bool is_warlock,
@@ -250,8 +263,11 @@ bool ClearHealerManaWait(HealerManaWaitState& state) {
   return true;
 }
 
-void RecordLeaderWait(LeaderWaitState& state, base::TimeTicks now) {
+void RecordLeaderWait(LeaderWaitState& state,
+                      base::TimeTicks now,
+                      bool issued_in_combat) {
   state.active = true;
+  state.issued_in_combat = issued_in_combat;
   state.started_at = now;
 }
 
@@ -269,7 +285,14 @@ bool ShouldExpireLeaderWait(LeaderWaitState& state,
     return false;
   }
   if (bot_in_combat || party_in_combat) {
+    if (!state.issued_in_combat) {
+      state = {};
+      return true;
+    }
     return false;
+  }
+  if (state.issued_in_combat) {
+    state.issued_in_combat = false;
   }
   if (now - state.started_at >= kLeaderWaitTimeout) {
     state = {};

@@ -79,6 +79,9 @@ class BotManager {
     bool not_tank = false;
     // Wait here instead of following the leader.
     bool stay = false;
+    // True only when `stay` was explicitly requested during combat; an
+    // out-of-combat wait releases automatically when combat begins.
+    bool stay_in_combat = false;
 
     bool operator==(const GroupPolicy&) const = default;
   };

@@ -4,8 +4,8 @@ Tracking document for findings from the WoW Team Play Review. Each item is tagge
 
 ## P0: breaks the session or wipes the group
 
-- [ ] **[M1] P0-1 — A human skull mark before the pull makes every bot attack.** Playerbots treats any skull-marked unit as an attacker. The repo guards only the bots' own marking (`pull_discipline.h:108-112`). Marking skull is the standard tank habit, so a human tank gets every pack pulled out from under them. (dungeon/raid)
-- [ ] **[M1] P0-2 — "stop" breaks the next fight.** `kStop -> halt_attacks() -> SetStopDps(true)` on every bot, tanks included (`llm_brain_world_script.cc:849-885`). Said out of combat, `saw_combat=false`, so it stays on through the whole next fight and clears only when that fight ends (`pull_discipline.cc:91-109`). DPS and pets stand idle, and the tank does no damage, builds no threat, and doesn't taunt. (combat/social)
+- [x] **[M1] P0-1 — A human skull mark before the pull makes every bot attack.** Playerbots treats any skull-marked unit as an attacker. The repo guards only the bots' own marking (`pull_discipline.h:108-112`). Marking skull is the standard tank habit, so a human tank gets every pack pulled out from under them. (dungeon/raid)
+- [x] **[M1] P0-2 — "stop" breaks the next fight.** `kStop -> halt_attacks() -> SetStopDps(true)` on every bot, tanks included (`llm_brain_world_script.cc:849-885`). Said out of combat, `saw_combat=false`, so it stays on through the whole next fight and clears only when that fight ends (`pull_discipline.cc:91-109`). DPS and pets stand idle, and the tank does no damage, builds no threat, and doesn't taunt. (combat/social)
 - [ ] **[M8] P0-3 — Raid scripts are removed with nothing to replace them.** `AdjustRaidStrategies` turns off `naxx/ulduar/icc/voa/os/eoe/...` when brain-led (`config_parsing.cc:175-185`). That throws away playerbots' C++ for vehicles, harpoons, cannons, Malygos drakes, and positioning. The notes miss whole bosses (ICC Gunship, Festergut, Blood-Queen; LK Defile and Val'kyr) and some are wrong (LK Quake sends bots outward; Four Horsemen is modeled as taunt-in-place). Orders can't drive a vehicle. (raid)
 - [ ] **[M9] P0-4 — Prompt budget at raid size.** The slot is 4096 tokens (`prompt.cc:30`, `llm.py:13`) and `RULES.md` takes about 2.6k. At 25-man the raid frame likely pushes out the boss notes, which are the only source of standing orders. The wake reason and the human's chat line can be dropped too. (raid/harness)
 - [ ] **[M2] P0-5 — Bots can't abandon quests.** Nothing sends `CMSG_QUESTLOG_REMOVE_QUEST`. A failed escort or timed quest blocks that quest chain for good. Bots accept every `!` quest, so at 25 quests the log is full and the human's shares fail silently. (questing)
@@ -46,9 +46,9 @@ Tracking document for findings from the WoW Team Play Review. Each item is tagge
 
 ### Human <-> bot control
 
-- [ ] **[M1]** Leader commands are dropped while the harness is disconnected, and `stay` / `stop dps` set before that never clear.
+- [x] **[M1]** Leader commands are dropped while the harness is disconnected, and `stay` / `stop dps` set before that never clear.
 - [ ] **[M7]** "brb"/"afk" wakes only the alphabetically first bot, so a bot tank keeps pulling while the human is away. The single responder is always that bot, even when another bot is the one who can act.
-- [ ] **[M1]** "wait" keeps holding in combat, so the healer doesn't move to the tank.
+- [x] **[M1]** "wait" keeps holding in combat, so the healer doesn't move to the tank.
 - [ ] **[M7]** A bot leader can queue Random Dungeon, start ready checks, or invite strangers without asking.
 
 ### Travel and death

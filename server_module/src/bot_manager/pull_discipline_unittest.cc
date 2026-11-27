@@ -148,21 +148,41 @@ TEST(PullDisciplineTest, PetTauntSpellClassification) {
 }
 
 TEST(PullDisciplineTest, StopDpsLifecycleAndActionFilter) {
+  // Eligibility policy (M1 P0-2): only grouped non-tanks in combat.
+  EXPECT_TRUE(ShouldApplyStopDps(/*in_group=*/true, /*is_tank=*/false,
+                                 /*bot_in_combat=*/true,
+                                 /*party_in_combat=*/true));
+  EXPECT_TRUE(ShouldApplyStopDps(/*in_group=*/true, /*is_tank=*/false,
+                                 /*bot_in_combat=*/false,
+                                 /*party_in_combat=*/true));
+  EXPECT_TRUE(ShouldApplyStopDps(/*in_group=*/true, /*is_tank=*/false,
+                                 /*bot_in_combat=*/true,
+                                 /*party_in_combat=*/false));
+  // Adversarial counter-tests: never apply to tanks, never out of combat,
+  // never when solo.
+  EXPECT_FALSE(ShouldApplyStopDps(/*in_group=*/true, /*is_tank=*/true,
+                                  /*bot_in_combat=*/true,
+                                  /*party_in_combat=*/true));
+  EXPECT_FALSE(ShouldApplyStopDps(/*in_group=*/true, /*is_tank=*/false,
+                                  /*bot_in_combat=*/false,
+                                  /*party_in_combat=*/false));
+  EXPECT_FALSE(ShouldApplyStopDps(/*in_group=*/false, /*is_tank=*/false,
+                                  /*bot_in_combat=*/true,
+                                  /*party_in_combat=*/true));
+
   StopDpsState state;
+  // Out-of-combat RecordStopDps refuses to latch (never breaks the next fight).
   RecordStopDps(state, /*in_combat=*/false);
-  EXPECT_TRUE(state.active);
+  EXPECT_FALSE(state.active);
   EXPECT_FALSE(state.saw_combat);
 
-  // Pre-combat hold stays active before combat begins.
-  EXPECT_FALSE(ShouldResetStopDps(state, /*bot_in_combat=*/false,
-                                  /*party_in_combat=*/false));
+  // In-combat RecordStopDps activates and holds through combat.
+  RecordStopDps(state, /*in_combat=*/true);
   EXPECT_TRUE(state.active);
-
-  // Combat begins: stays active through the fight.
+  EXPECT_TRUE(state.saw_combat);
   EXPECT_FALSE(ShouldResetStopDps(state, /*bot_in_combat=*/true,
                                   /*party_in_combat=*/true));
   EXPECT_TRUE(state.active);
-  EXPECT_TRUE(state.saw_combat);
 
   // Counter-test: bot briefly drops combat while raid is still fighting.
   EXPECT_FALSE(ShouldResetStopDps(state, /*bot_in_combat=*/false,
@@ -196,6 +216,45 @@ TEST(PullDisciplineTest, StopDpsLifecycleAndActionFilter) {
   EXPECT_FALSE(IsStopDpsBlockedActionName("stay"));
   EXPECT_FALSE(IsStopDpsBlockedActionName("dispel"));
   EXPECT_FALSE(IsStopDpsBlockedActionName("resurrect"));
+}
+
+TEST(PullDisciplineTest, UnpulledHumanSkullGuardPreAndPostPull) {
+  const UnpulledSkullGuardInput pre_pull{
+      .in_group = true,
+      .in_battleground = false,
+      .has_skull_mark = true,
+      .skull_in_combat_with_group = false,
+      .explicit_target_override = false,
+  };
+  // Human marks an unpulled mob with Skull -> suppressed so bots don't pull.
+  EXPECT_TRUE(ShouldSuppressUnpulledSkull(pre_pull));
+
+  // Post-pull: once the skull mob is in combat with any group member, bots
+  // immediately assist and focus Skull.
+  UnpulledSkullGuardInput post_pull = pre_pull;
+  post_pull.skull_in_combat_with_group = true;
+  EXPECT_FALSE(ShouldSuppressUnpulledSkull(post_pull));
+
+  // Adversarial counter-tests:
+  // 1. Explicit leader "pull skull" / "kill skull" override is allowed.
+  UnpulledSkullGuardInput explicit_pull = pre_pull;
+  explicit_pull.explicit_target_override = true;
+  EXPECT_FALSE(ShouldSuppressUnpulledSkull(explicit_pull));
+
+  // 2. Solo bot is unaffected.
+  UnpulledSkullGuardInput solo = pre_pull;
+  solo.in_group = false;
+  EXPECT_FALSE(ShouldSuppressUnpulledSkull(solo));
+
+  // 3. Battleground is left to playerbots.
+  UnpulledSkullGuardInput bg = pre_pull;
+  bg.in_battleground = true;
+  EXPECT_FALSE(ShouldSuppressUnpulledSkull(bg));
+
+  // 4. No skull mark -> nothing to suppress.
+  UnpulledSkullGuardInput no_skull = pre_pull;
+  no_skull.has_skull_mark = false;
+  EXPECT_FALSE(ShouldSuppressUnpulledSkull(no_skull));
 }
 
 TEST(PullDisciplineTest, SkullMarkTargetRequiresActiveCombatAndNoCc) {
@@ -557,11 +616,32 @@ TEST(PullDisciplineTest, LeaderWaitExpiresOutOfCombatAndResetsOnInvariants) {
         t0 + base::Minutes(2) + kLeaderWaitTimeout));
   }
 
-  // 3. P0 combat priority: never expires mid-combat (bot or party), then
-  //    expires once combat ends.
+  // 3. P1 ("wait" in combat): an out-of-combat wait immediately releases when
+  //    combat starts (bot or party), so healers/DPS move to the tank/target.
   {
     LeaderWaitState state;
-    RecordLeaderWait(state, t0);
+    RecordLeaderWait(state, t0, /*issued_in_combat=*/false);
+    EXPECT_TRUE(ShouldExpireLeaderWait(
+        state, /*in_group=*/true, /*policy_stay=*/true,
+        /*bot_in_combat=*/false, /*party_in_combat=*/true,
+        t0 + base::Seconds(2)));
+    EXPECT_FALSE(state.active);
+
+    RecordLeaderWait(state, t0, /*issued_in_combat=*/false);
+    EXPECT_TRUE(ShouldExpireLeaderWait(
+        state, /*in_group=*/true, /*policy_stay=*/true,
+        /*bot_in_combat=*/true, /*party_in_combat=*/false,
+        t0 + base::Seconds(2)));
+    EXPECT_FALSE(state.active);
+  }
+
+  // 3b. Adversarial counter-test: an explicit in-combat wait holds through
+  //     that fight (never expires mid-combat), downgrades once combat ends so
+  //     a later fight releases it, and expires after kLeaderWaitTimeout out of
+  //     combat.
+  {
+    LeaderWaitState state;
+    RecordLeaderWait(state, t0, /*issued_in_combat=*/true);
     EXPECT_FALSE(ShouldExpireLeaderWait(
         state, /*in_group=*/true, /*policy_stay=*/true,
         /*bot_in_combat=*/true, /*party_in_combat=*/false,
@@ -572,10 +652,18 @@ TEST(PullDisciplineTest, LeaderWaitExpiresOutOfCombatAndResetsOnInvariants) {
         /*bot_in_combat=*/false, /*party_in_combat=*/true,
         t0 + kLeaderWaitTimeout + base::Minutes(1)));
     EXPECT_TRUE(state.active);
-    EXPECT_TRUE(ShouldExpireLeaderWait(
+    // Combat ends before timeout -> downgrades issued_in_combat, so a new
+    // pull releases it immediately.
+    EXPECT_FALSE(ShouldExpireLeaderWait(
         state, /*in_group=*/true, /*policy_stay=*/true,
         /*bot_in_combat=*/false, /*party_in_combat=*/false,
-        t0 + kLeaderWaitTimeout + base::Minutes(2)));
+        t0 + base::Seconds(10)));
+    EXPECT_TRUE(state.active);
+    EXPECT_FALSE(state.issued_in_combat);
+    EXPECT_TRUE(ShouldExpireLeaderWait(
+        state, /*in_group=*/true, /*policy_stay=*/true,
+        /*bot_in_combat=*/false, /*party_in_combat=*/true,
+        t0 + base::Seconds(15)));
     EXPECT_FALSE(state.active);
   }
 

@@ -24,6 +24,7 @@
 #include "LFG.h"
 #include "Log.h"
 #include "Map.h"
+#include "MotionMaster.h"
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
 #include "Opcodes.h"
@@ -394,7 +395,28 @@ class LlmBrainWorldScript : public WorldScript {
     if (trace_writer_ && trace_writer_->enabled()) {
       SampleObservedEntities(now);
     }
-    if (!bridge_->connected() || harness_refused_) {
+    const bool harness_ready = bridge_->connected() && !harness_refused_;
+    if (!harness_ready) {
+      // Even while the harness is disconnected, keep pull-discipline timers
+      // and human leader-command moves advancing so nothing gets stuck.
+      for (size_t i = 0; i < config_.bots.size(); ++i) {
+        Player* bot = ObjectAccessor::FindPlayerByName(config_.bots[i]);
+        if (!TickPullDiscipline(bot, i, now)) {
+          continue;
+        }
+        BotState& state = bots_[i];
+        if (state.active_act && state.active_act->command_id == 0) {
+          ActStepResult res = StepActiveAct(bot, now, &*state.active_act);
+          if (!res.error.empty()) {
+            state.active_act.reset();
+          } else if (res.done) {
+            if (state.active_act->hold_on_arrival) {
+              BotManager::StartPingStay(bot);
+            }
+            state.active_act.reset();
+          }
+        }
+      }
       return;  // Nobody to send to: don't spend world-thread time building.
     }
     // Each bot has its own moment in the interval (bots are spread over it, so
@@ -403,82 +425,14 @@ class LlmBrainWorldScript : public WorldScript {
     size_t built = 0;
     for (size_t i = 0; i < config_.bots.size(); ++i) {
       Player* bot = ObjectAccessor::FindPlayerByName(config_.bots[i]);
-      if (!IsControlledBot(bot)) {
-        ClearRtiOverride(bots_[i].rti_override);
-        ClearStopDps(bots_[i].stop_dps);
-        ClearHealerManaWait(bots_[i].healer_mana_wait);
-        ClearLeaderWait(bots_[i].leader_wait);
+      if (!TickPullDiscipline(bot, i, now)) {
         continue;  // Offline, not in world, or logged in by a real human.
       }
-      // Clear any active act or saved `back` coordinates if the bot changed
-      // maps/instances so old-map coordinates are never reused (A-L1).
-      const uint32_t cur_map = bot->GetMapId();
-      const uint32_t cur_inst = bot->GetInstanceId();
-      if (bots_[i].has_last_map && (bots_[i].last_map_id != cur_map ||
-                                    bots_[i].last_instance_id != cur_inst)) {
-        if (bots_[i].active_act) {
-          CancelActiveAct(bot, &*bots_[i].active_act);
-          bots_[i].active_act.reset();
-        }
-        ResetRtiOverride(bot, bots_[i].rti_override);
-        ResetStopDps(bot, bots_[i].stop_dps);
-        ClearHealerManaWait(bots_[i].healer_mana_wait);
-        if (ClearLeaderWait(bots_[i].leader_wait)) {
-          BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
-          if (policy.stay) {
-            policy.stay = false;
-            BotManager::SetGroupPolicy(bot, policy);
-          }
-        }
-        bots_[i].errand_hold_active = false;
-        BotSessionRegistry::Instance().ResetOnMapChange(
-            bot->GetGUID().GetRawValue());
-      }
-      bots_[i].has_last_map = true;
-      bots_[i].last_map_id = cur_map;
-      bots_[i].last_instance_id = cur_inst;
       StepActiveOption(bot, i, config_.bots[i], now);
       SyncMovingOut(bot, i);
       SyncActStealth(bot, i);
       if (!bot->IsInCombat()) {
         ClearAvoidedTargetsForBot(bot->GetGUID().GetRawValue());
-      }
-      if (bots_[i].rti_override.active) {
-        Unit* marked =
-            bots_[i].rti_override.target_guid != 0
-                ? ObjectAccessor::GetUnit(
-                      *bot, ObjectGuid(bots_[i].rti_override.target_guid))
-                : nullptr;
-        const RtiOverrideTickInput rti_in{
-            .bot_in_combat = bot->IsInCombat(),
-            .party_in_combat = IsPartyInCombat(bot),
-            .target_alive_and_in_world =
-                marked != nullptr && marked->IsInWorld() && marked->IsAlive(),
-        };
-        if (ShouldResetRtiOverride(bots_[i].rti_override, rti_in)) {
-          ApplyDefaultRti(bot);
-          LOG_INFO("module", "mod-llm-brain: {}: combat ended, reset rti to {}",
-                   bot->GetName(), kDefaultRti);
-        }
-      }
-      if (bots_[i].stop_dps.active &&
-          ShouldResetStopDps(bots_[i].stop_dps, bot->IsInCombat(),
-                             IsPartyInCombat(bot))) {
-        BotManager::SetStopDps(bot, false);
-        LOG_INFO("module", "mod-llm-brain: {}: combat ended, cleared stop dps",
-                 bot->GetName());
-      }
-      if (bots_[i].leader_wait.active) {
-        BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
-        if (ShouldExpireLeaderWait(
-                bots_[i].leader_wait, bot->GetGroup() != nullptr, policy.stay,
-                bot->IsInCombat(), IsPartyInCombat(bot), now)) {
-          policy.stay = false;
-          BotManager::SetGroupPolicy(bot, policy);
-          LOG_INFO("module",
-                   "mod-llm-brain: {}: leader wait timed out, resuming follow",
-                   bot->GetName());
-        }
       }
       CheckPendingGroupInvite(bot, i, config_.bots[i], now);
       // The brain's popup policy answers them first, within a tick (Now #3);
@@ -655,6 +609,18 @@ class LlmBrainWorldScript : public WorldScript {
       if (bot && GET_PLAYERBOT_AI(bot) != nullptr) {
         BotSessionRegistry::Instance().ResetOnDisconnect(
             bot->GetGUID().GetRawValue());
+        BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
+        if (policy.stay || policy.stay_in_combat) {
+          policy.stay = false;
+          policy.stay_in_combat = false;
+          BotManager::SetGroupPolicy(bot, policy);
+        }
+        if (auto* rti = GET_PLAYERBOT_AI(bot)
+                            ->GetAiObjectContext()
+                            ->GetValue<std::string>("rti");
+            rti && rti->Get().empty()) {
+          rti->Set(std::string(kDefaultRti));
+        }
       }
       ResetRtiOverride(bot, bots_[i].rti_override);
       ResetStopDps(bot, bots_[i].stop_dps);
@@ -689,6 +655,87 @@ class LlmBrainWorldScript : public WorldScript {
       // them all on the next tick.
       schedule_->Restart(base::TimeTicks::Now());
     }
+  }
+
+  // Per-tick map-change and pull-discipline maintenance for `bot`. Runs even
+  // while the harness is disconnected so leader commands (`wait`, `stop dps`,
+  // `pull/kill <mark>`) never get stuck. Returns false when `bot` is offline
+  // or human-controlled.
+  bool TickPullDiscipline(Player* bot, size_t i, base::TimeTicks now) {
+    if (!IsControlledBot(bot)) {
+      ClearRtiOverride(bots_[i].rti_override);
+      ClearStopDps(bots_[i].stop_dps);
+      ClearHealerManaWait(bots_[i].healer_mana_wait);
+      ClearLeaderWait(bots_[i].leader_wait);
+      return false;
+    }
+    // Clear any active act or saved `back` coordinates if the bot changed
+    // maps/instances so old-map coordinates are never reused (A-L1).
+    const uint32_t cur_map = bot->GetMapId();
+    const uint32_t cur_inst = bot->GetInstanceId();
+    if (bots_[i].has_last_map && (bots_[i].last_map_id != cur_map ||
+                                  bots_[i].last_instance_id != cur_inst)) {
+      if (bots_[i].active_act) {
+        CancelActiveAct(bot, &*bots_[i].active_act);
+        bots_[i].active_act.reset();
+      }
+      ResetRtiOverride(bot, bots_[i].rti_override);
+      ResetStopDps(bot, bots_[i].stop_dps);
+      ClearHealerManaWait(bots_[i].healer_mana_wait);
+      ClearLeaderWait(bots_[i].leader_wait);
+      BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
+      if (policy.stay || policy.stay_in_combat) {
+        policy.stay = false;
+        policy.stay_in_combat = false;
+        BotManager::SetGroupPolicy(bot, policy);
+      }
+      bots_[i].errand_hold_active = false;
+      BotSessionRegistry::Instance().ResetOnMapChange(
+          bot->GetGUID().GetRawValue());
+    }
+    bots_[i].has_last_map = true;
+    bots_[i].last_map_id = cur_map;
+    bots_[i].last_instance_id = cur_inst;
+    if (bots_[i].rti_override.active) {
+      Unit* marked =
+          bots_[i].rti_override.target_guid != 0
+              ? ObjectAccessor::GetUnit(
+                    *bot, ObjectGuid(bots_[i].rti_override.target_guid))
+              : nullptr;
+      const RtiOverrideTickInput rti_in{
+          .bot_in_combat = bot->IsInCombat(),
+          .party_in_combat = IsPartyInCombat(bot),
+          .target_alive_and_in_world =
+              marked != nullptr && marked->IsInWorld() && marked->IsAlive(),
+      };
+      if (ShouldResetRtiOverride(bots_[i].rti_override, rti_in)) {
+        ApplyDefaultRti(bot);
+        LOG_INFO("module", "mod-llm-brain: {}: combat ended, reset rti to {}",
+                 bot->GetName(), kDefaultRti);
+      }
+    }
+    if (bots_[i].stop_dps.active &&
+        ShouldResetStopDps(bots_[i].stop_dps, bot->IsInCombat(),
+                           IsPartyInCombat(bot))) {
+      BotManager::SetStopDps(bot, false);
+      LOG_INFO("module", "mod-llm-brain: {}: combat ended, cleared stop dps",
+               bot->GetName());
+    }
+    if (bots_[i].leader_wait.active) {
+      BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
+      const bool in_combat = bot->IsInCombat() || IsPartyInCombat(bot);
+      if (ShouldExpireLeaderWait(
+              bots_[i].leader_wait, bot->GetGroup() != nullptr, policy.stay,
+              bot->IsInCombat(), IsPartyInCombat(bot), now)) {
+        policy.stay = false;
+        policy.stay_in_combat = false;
+        BotManager::SetGroupPolicy(bot, policy);
+        LOG_INFO("module", "mod-llm-brain: {}: leader wait {}, resuming follow",
+                 bot->GetName(),
+                 in_combat ? "released on combat" : "timed out");
+      }
+    }
+    return true;
   }
 
   // True only when `player` is in the world and controlled by Playerbots AI
@@ -742,12 +789,26 @@ class LlmBrainWorldScript : public WorldScript {
                dropped);
     }
     const base::TimeTicks now = base::TimeTicks::Now();
+    const bool harness_ready = bridge_->connected() && !harness_refused_;
     for (ChatInbox::Line& line : inbox_->TakeAll()) {
       const size_t index = BotIndex(line.to);
       Player* bot = ObjectAccessor::FindPlayerByName(line.to);
-      if (index == config_.bots.size() || !IsControlledBot(bot) ||
-          !bridge_->connected()) {
-        continue;  // Nobody to tell: like a whisper while away.
+      if (index == config_.bots.size() || !IsControlledBot(bot)) {
+        continue;
+      }
+      // A human group member's command ("wait", "stop", "follow", "attack my
+      // target"...) in party/raid/whisper is applied here, within a tick, even
+      // while the harness is disconnected so human control never stalls; when
+      // connected, the brain then hears the line and what was done.
+      std::string applied;
+      if (line.chat.channel == wlb::snapshot::PARTY ||
+          line.chat.channel == wlb::snapshot::RAID ||
+          line.chat.channel == wlb::snapshot::RAID_WARNING ||
+          line.chat.channel == wlb::snapshot::WHISPER) {
+        applied = ApplyLeaderCommand(index, line.to, bot, line.chat);
+      }
+      if (!harness_ready) {
+        continue;  // Nobody to tell: leader command still applied above.
       }
       const std::string ch_name = TraceChannelName(line.chat.channel);
       LOG_INFO("module", "mod-llm-brain: {} heard {} from {} (len={})", line.to,
@@ -761,16 +822,6 @@ class LlmBrainWorldScript : public WorldScript {
         while (chatters.size() > 5) {
           chatters.pop_back();
         }
-      }
-      // A human group member's command ("wait", "stop", "follow", "attack my
-      // target"...) in party/raid/whisper is applied here, within a tick; the
-      // brain then hears the line and what was done, to answer in character.
-      std::string applied;
-      if (line.chat.channel == wlb::snapshot::PARTY ||
-          line.chat.channel == wlb::snapshot::RAID ||
-          line.chat.channel == wlb::snapshot::RAID_WARNING ||
-          line.chat.channel == wlb::snapshot::WHISPER) {
-        applied = ApplyLeaderCommand(index, line.to, bot, line.chat);
       }
       const bool alerting =
           line.chat.channel == wlb::snapshot::WHISPER ||
@@ -840,6 +891,9 @@ class LlmBrainWorldScript : public WorldScript {
     } else if (for_me && !is_whisper && parsed->addressed.empty() &&
                parsed->command == LeaderCommand::kLust) {
       for_me = LustSpellName(bot) != nullptr;
+    } else if (for_me && !is_whisper && parsed->addressed.empty() &&
+               parsed->command == LeaderCommand::kStopDps) {
+      for_me = !(IsGroupTank(group, bot) && !policy.not_tank);
     }
     if (!for_me) {
       return "";
@@ -847,7 +901,8 @@ class LlmBrainWorldScript : public WorldScript {
     const std::string said = "leader said: " + DescribeLeaderCommand(*parsed);
     PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
     auto halt_attacks = [&]() {
-      RecordStopDps(bots_[index].stop_dps, IsPartyInCombat(bot));
+      RecordStopDps(bots_[index].stop_dps,
+                    bot->IsInCombat() || IsPartyInCombat(bot));
       BotManager::SetStopDps(bot, true);
       bot->AttackStop();
       bot->InterruptSpell(CURRENT_AUTOREPEAT_SPELL);
@@ -864,27 +919,47 @@ class LlmBrainWorldScript : public WorldScript {
     };
     std::string done;
     switch (parsed->command) {
-      case LeaderCommand::kWait:
+      case LeaderCommand::kWait: {
+        const bool in_combat = bot->IsInCombat() || IsPartyInCombat(bot);
         policy.stay = true;
+        policy.stay_in_combat = in_combat;
         BotManager::SetGroupPolicy(bot, policy);
-        RecordLeaderWait(bots_[index].leader_wait, base::TimeTicks::Now());
+        RecordLeaderWait(bots_[index].leader_wait, base::TimeTicks::Now(),
+                         in_combat);
         BotManager::ClearErrandHold(bot);
         bots_[index].errand_hold_active = false;
         bot->StopMoving();
         done = "you stop and wait here";
         break;
-      case LeaderCommand::kStop:
+      }
+      case LeaderCommand::kStop: {
+        const bool in_combat = bot->IsInCombat() || IsPartyInCombat(bot);
         policy.stay = true;
+        policy.stay_in_combat = in_combat;
         BotManager::SetGroupPolicy(bot, policy);
-        RecordLeaderWait(bots_[index].leader_wait, base::TimeTicks::Now());
+        RecordLeaderWait(bots_[index].leader_wait, base::TimeTicks::Now(),
+                         in_combat);
+        BotState& state = bots_[index];
+        if (state.active_act && !state.active_act->for_option &&
+            state.active_act->command_id == 0) {
+          CancelActiveAct(bot, &*state.active_act);
+          state.active_act.reset();
+        }
         BotManager::ClearErrandHold(bot);
-        bots_[index].errand_hold_active = false;
-        bot->StopMoving();
-        halt_attacks();
-        done = "you stop moving and attacking";
+        state.errand_hold_active = false;
+        if (CanClearBotMovement(bot)) {
+          bot->GetMotionMaster()->Clear();
+          bot->StopMoving();
+          ClearLastMovement(bot);
+        } else {
+          bot->StopMoving();
+        }
+        done = "you stop moving and wait here";
         break;
+      }
       case LeaderCommand::kFollow: {
         policy.stay = false;
+        policy.stay_in_combat = false;
         BotManager::SetGroupPolicy(bot, policy);
         ClearLeaderWait(bots_[index].leader_wait);
         if (!bot->IsInCombat() && !IsPartyInCombat(bot)) {
@@ -987,6 +1062,7 @@ class LlmBrainWorldScript : public WorldScript {
           return said + " (not applied: " + error + ")";
         }
         policy.stay = false;
+        policy.stay_in_combat = false;
         BotManager::SetGroupPolicy(bot, policy);
         ClearLeaderWait(bots_[index].leader_wait);
         done = to_ping ? "you go to the ping and hold there"
@@ -1040,6 +1116,7 @@ class LlmBrainWorldScript : public WorldScript {
           return said + " (not applied: " + error + ")";
         }
         policy.stay = false;
+        policy.stay_in_combat = false;
         BotManager::SetGroupPolicy(bot, policy);
         ClearLeaderWait(bots_[index].leader_wait);
         done = "you spread out and hold there";
@@ -1057,12 +1134,19 @@ class LlmBrainWorldScript : public WorldScript {
           return said + " (not applied: " + error + ")";
         }
         policy.stay = false;
+        policy.stay_in_combat = false;
         BotManager::SetGroupPolicy(bot, policy);
         ClearLeaderWait(bots_[index].leader_wait);
         done = "you stack on " + sender->GetName() + " and hold there";
         break;
       }
       case LeaderCommand::kStopDps: {
+        const bool is_tank = IsGroupTank(group, bot) && !policy.not_tank;
+        if (!ShouldApplyStopDps(/*in_group=*/true, is_tank, bot->IsInCombat(),
+                                IsPartyInCombat(bot))) {
+          return said + " (not applied: " +
+                 (is_tank ? "tanks keep threat" : "not in combat") + ")";
+        }
         halt_attacks();
         done = "you stop attacking until resumed or combat ends";
         break;

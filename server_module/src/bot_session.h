@@ -29,6 +29,9 @@ struct BotSession {
   struct GroupPolicy {
     bool not_tank = false;
     bool stay = false;
+    // True only when `stay` was explicitly requested while already in combat;
+    // out-of-combat waits release automatically when combat begins.
+    bool stay_in_combat = false;
     bool operator==(const GroupPolicy&) const = default;
   };
 
@@ -203,6 +206,9 @@ struct BotSession {
   // leash while the bot holds a brain-chosen combat position until combat ends,
   // explicit follow, or map change / disconnect / logout.
   bool combat_position_hold = false;
+  // True while playerbots' default `"skull"` RTI value is temporarily cleared
+  // because the group's Skull-marked unit is not yet in combat with the group.
+  bool skull_rti_suppressed = false;
 
   // Most recent spell miss and cast failure for this bot (cleared on logout,
   // map change, and disconnect; monotonic seqs survive map change/disconnect so

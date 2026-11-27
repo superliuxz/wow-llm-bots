@@ -16,7 +16,7 @@ namespace llm_brain {
 // can answer in character (Now #2, the trusted fast channel).
 enum class LeaderCommand {
   kWait,            // "wait", "stay", "hold"
-  kStop,            // "stop": halt moving and attacking
+  kStop,            // "stop": halt moving
   kFollow,          // "follow", "come", "on me"
   kAttackMyTarget,  // "attack", "assist", "attack my target"
   kAttackMark,      // "kill skull", "rti cross", "skull", "cross"

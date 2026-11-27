@@ -20,7 +20,9 @@ TEST(BotSessionRegistryTest, UnifiedResetsClearLifecycleState) {
     s.dead_since_ms = 1234;
     s.rez_wait_until_ms = 9999;
     s.group_guid = 42;
+    s.group_policy.not_tank = true;
     s.group_policy.stay = true;
+    s.group_policy.stay_in_combat = true;
     s.pending_shared_quest_id = 104;
     s.pending_ready_check_ms = 500;
     s.pending_lfg_proposal_id = 7;
@@ -31,24 +33,33 @@ TEST(BotSessionRegistryTest, UnifiedResetsClearLifecycleState) {
   });
   EXPECT_EQ(reg.size(), 1u);
 
-  // Map change clears act coordinates & avoided targets while keeping group
-  // policy and pending prompts intact.
+  // Map change clears act coordinates, avoided targets, and transient stay
+  // holds while keeping role policy (`not_tank`) and pending prompts intact.
   reg.ResetOnMapChange(kBot);
   reg.InspectSession(kBot, [](const BotSession* s) {
     ASSERT_NE(s, nullptr);
     EXPECT_FALSE(s->last_interrupted.active);
     EXPECT_TRUE(s->avoided_targets.empty());
     EXPECT_FALSE(s->party_ping.has_value());
-    EXPECT_TRUE(s->group_policy.stay);
+    EXPECT_TRUE(s->group_policy.not_tank);
+    EXPECT_FALSE(s->group_policy.stay);
+    EXPECT_FALSE(s->group_policy.stay_in_combat);
     EXPECT_EQ(s->pending_shared_quest_id, 104u);
   });
 
-  // Logout clears everything but the group policy: a relog keeps its group.
+  // Logout clears everything but the group role policy (`not_tank`): a relog
+  // keeps its group without staying frozen in `stay`.
+  reg.WithSession(kBot, [](BotSession& s) {
+    s.group_policy.stay = true;
+    s.group_policy.stay_in_combat = true;
+  });
   reg.ResetOnLogout(kBot);
   reg.InspectSession(kBot, [](const BotSession* s) {
     ASSERT_NE(s, nullptr);
     EXPECT_EQ(s->group_guid, 42u);
-    EXPECT_TRUE(s->group_policy.stay);
+    EXPECT_TRUE(s->group_policy.not_tank);
+    EXPECT_FALSE(s->group_policy.stay);
+    EXPECT_FALSE(s->group_policy.stay_in_combat);
     EXPECT_FALSE(s->dead_since_ms.has_value());
     EXPECT_FALSE(s->rez_wait_until_ms.has_value());
     EXPECT_EQ(s->pending_shared_quest_id, 0u);
@@ -103,6 +114,7 @@ TEST(BotSessionRegistryTest, PingStayClearsOnMapChangeDisconnectAndLogout) {
   const auto set = [&] {
     reg.WithSession(kBot, [&](BotSession& s) {
       s.group_guid = 42;
+      s.group_policy.not_tank = true;
       s.group_policy.stay = true;
       s.ping_stay = stay;
       s.moving_out_until_ms = 12345;
@@ -116,7 +128,8 @@ TEST(BotSessionRegistryTest, PingStayClearsOnMapChangeDisconnectAndLogout) {
       EXPECT_EQ(s->moving_out_until_ms, 0u);   // A dodge's cast hold too.
       EXPECT_EQ(s->act_stealth_until_ms, 0u);  // And a Sap walk-in's.
       EXPECT_EQ(s->group_guid, 42u);
-      EXPECT_TRUE(s->group_policy.stay);
+      EXPECT_TRUE(s->group_policy.not_tank);
+      EXPECT_FALSE(s->group_policy.stay);
     });
   };
   set();
@@ -138,6 +151,7 @@ TEST(BotSessionRegistryTest, SpellMissClearsOnMapChangeDisconnectAndLogout) {
   const auto set = [&] {
     reg.WithSession(kBot, [&](BotSession& s) {
       s.group_guid = 42;
+      s.group_policy.not_tank = true;
       s.group_policy.stay = true;
       s.spell_miss = BotSession::SpellMiss{
           .seq = ++s.spell_miss_seq,
@@ -163,7 +177,8 @@ TEST(BotSessionRegistryTest, SpellMissClearsOnMapChangeDisconnectAndLogout) {
       EXPECT_FALSE(s->spell_miss.has_value());
       EXPECT_FALSE(s->cast_failure.has_value());
       EXPECT_EQ(s->group_guid, 42u);
-      EXPECT_TRUE(s->group_policy.stay);
+      EXPECT_TRUE(s->group_policy.not_tank);
+      EXPECT_FALSE(s->group_policy.stay);
     });
   };
   set();
@@ -208,25 +223,32 @@ TEST(BotSessionRegistryTest, HumanGroupGraceResetsCleanly) {
   expect_clean();
 }
 
-// Adversarial counter-test: active "stop dps" clears on map change, harness
-// disconnect, and logout so a bot never stays muted on attacks in a new zone
-// or after reconnect, while group policy still survives.
+// Adversarial counter-test: active "stop dps", transient "stay" / combat-hold,
+// and skull RTI suppression clear on map change, harness disconnect, and logout
+// so a bot never stays muted or frozen after reconnect, while role policy
+// (`not_tank`) still survives.
 TEST(BotSessionRegistryTest, StopDpsClearsOnMapChangeDisconnectAndLogout) {
   BotSessionRegistry reg;
   constexpr uint64_t kBot = 0x1006;
   const auto set = [&] {
     reg.WithSession(kBot, [](BotSession& s) {
       s.group_guid = 42;
+      s.group_policy.not_tank = true;
       s.group_policy.stay = true;
+      s.group_policy.stay_in_combat = true;
       s.stop_dps = true;
+      s.skull_rti_suppressed = true;
     });
   };
   const auto expect_cleared = [&] {
     reg.InspectSession(kBot, [](const BotSession* s) {
       ASSERT_NE(s, nullptr);
       EXPECT_FALSE(s->stop_dps);
+      EXPECT_FALSE(s->skull_rti_suppressed);
       EXPECT_EQ(s->group_guid, 42u);
-      EXPECT_TRUE(s->group_policy.stay);
+      EXPECT_TRUE(s->group_policy.not_tank);
+      EXPECT_FALSE(s->group_policy.stay);
+      EXPECT_FALSE(s->group_policy.stay_in_combat);
     });
   };
   set();
@@ -241,13 +263,14 @@ TEST(BotSessionRegistryTest, StopDpsClearsOnMapChangeDisconnectAndLogout) {
 }
 
 // Adversarial counter-test: an active errand hold never outlives a map change,
-// harness disconnect, or logout, while group policy still survives.
+// harness disconnect, or logout, while role policy (`not_tank`) still survives.
 TEST(BotSessionRegistryTest, ErrandHoldClearsOnMapChangeDisconnectAndLogout) {
   BotSessionRegistry reg;
   constexpr uint64_t kBot = 0x1007;
   const auto set = [&] {
     reg.WithSession(kBot, [](BotSession& s) {
       s.group_guid = 42;
+      s.group_policy.not_tank = true;
       s.group_policy.stay = true;
       s.errand_hold = ErrandHoldState{
           .active = true,
@@ -265,7 +288,8 @@ TEST(BotSessionRegistryTest, ErrandHoldClearsOnMapChangeDisconnectAndLogout) {
       EXPECT_FALSE(s->errand_hold.active);
       EXPECT_EQ(s->errand_hold.kind, ErrandKind::kNone);
       EXPECT_EQ(s->group_guid, 42u);
-      EXPECT_TRUE(s->group_policy.stay);
+      EXPECT_TRUE(s->group_policy.not_tank);
+      EXPECT_FALSE(s->group_policy.stay);
     });
   };
   set();
@@ -282,7 +306,7 @@ TEST(BotSessionRegistryTest, ErrandHoldClearsOnMapChangeDisconnectAndLogout) {
 // Adversarial counter-test: combat_position_hold and TankSwapTracker claims
 // clear on map change, harness disconnect, and logout so a healer never stays
 // permanently unleashed and a tank never holds a stale swap claim across zones,
-// while group policy still survives.
+// while role policy (`not_tank`) still survives.
 TEST(BotSessionRegistryTest,
      CombatPositionHoldAndTankSwapClearOnMapChangeDisconnectAndLogout) {
   BotSessionRegistry reg;
@@ -291,6 +315,7 @@ TEST(BotSessionRegistryTest,
   const auto set = [&] {
     reg.WithSession(kBot, [](BotSession& s) {
       s.group_guid = 42;
+      s.group_policy.not_tank = true;
       s.group_policy.stay = true;
       s.combat_position_hold = true;
     });
@@ -308,7 +333,8 @@ TEST(BotSessionRegistryTest,
       ASSERT_NE(s, nullptr);
       EXPECT_FALSE(s->combat_position_hold);
       EXPECT_EQ(s->group_guid, 42u);
-      EXPECT_TRUE(s->group_policy.stay);
+      EXPECT_TRUE(s->group_policy.not_tank);
+      EXPECT_FALSE(s->group_policy.stay);
     });
     EXPECT_FALSE(
         TankSwapTracker::Instance().FindClaim(kBoss, 42, 631, 1, 5500));

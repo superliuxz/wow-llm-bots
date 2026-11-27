@@ -71,11 +71,21 @@ struct StopDpsState {
   bool operator==(const StopDpsState&) const = default;
 };
 
+// True when a leader's explicit "stop dps" command may pause offensive actions
+// on a bot: only when grouped, only while the bot or party is in combat, and
+// never on an active tank (tanks must keep building threat and taunting).
+bool ShouldApplyStopDps(bool in_group,
+                        bool is_tank,
+                        bool bot_in_combat,
+                        bool party_in_combat);
+
+// Records an active "stop dps" hold. Refuses to latch when `in_combat` is
+// false so an out-of-combat command can never break the next fight.
 void RecordStopDps(StopDpsState& state, bool in_combat);
 
-// Returns true (and clears `state`) once combat ends after `stop dps` was
-// active in combat. Keeps `state` active throughout combat and during a
-// pre-combat hold until combat ends or an explicit resume/reset occurs.
+// Returns true (and clears `state`) once both bot and party are out of combat.
+// Keeps `state` active throughout combat until combat ends or an explicit
+// resume/reset occurs.
 bool ShouldResetStopDps(StopDpsState& state,
                         bool bot_in_combat,
                         bool party_in_combat);
@@ -110,6 +120,22 @@ struct SkullMarkCandidate {
 // attacker, so marking an unpulled mob chain-pulls its pack, and marking a
 // CC'd or already-marked mob breaks crowd control or overwrites CC marks.
 bool IsEligibleSkullMarkTarget(const SkullMarkCandidate& candidate);
+
+// Inputs for guarding against human-placed pre-pull Skull raid icons.
+struct UnpulledSkullGuardInput {
+  bool in_group = false;
+  bool in_battleground = false;
+  bool has_skull_mark = false;
+  bool skull_in_combat_with_group = false;
+  // True when a leader command ("pull skull", "kill skull") or prioritized
+  // target explicitly ordered attacking this Skull-marked unit.
+  bool explicit_target_override = false;
+};
+
+// True when the group's Skull-marked unit is not yet in combat with the group
+// and has no explicit pull/kill override, so playerbots' Skull-as-attacker
+// reflex must be suppressed until the mob is actually pulled.
+bool ShouldSuppressUnpulledSkull(const UnpulledSkullGuardInput& input);
 
 // True when a Warlock bot's playerbots `cc` combat strategy (which casts Fear
 // on the moon CC target, running it into adjacent packs) should be suppressed:
@@ -184,22 +210,31 @@ bool ClearHealerManaWait(HealerManaWaitState& state);
 // automatically resuming follow so forgotten waits cannot stall a bot forever.
 inline constexpr base::TimeDelta kLeaderWaitTimeout = base::Minutes(3);
 
-// Tracks an active leader "wait"/"stop" stay hold so it expires after
-// `kLeaderWaitTimeout` out of combat (never mid-fight) and resets cleanly on
+// Tracks an active leader "wait"/"stop" stay hold so an out-of-combat wait
+// releases automatically when combat begins (letting healers/DPS move to the
+// tank/target), an explicit in-combat wait holds through that fight, and any
+// out-of-combat wait expires after `kLeaderWaitTimeout` and resets cleanly on
 // follow, group leave, map change, logout, or disconnect.
 struct LeaderWaitState {
   bool active = false;
+  bool issued_in_combat = false;
   base::TimeTicks started_at;
 
   bool operator==(const LeaderWaitState&) const = default;
 };
 
-void RecordLeaderWait(LeaderWaitState& state, base::TimeTicks now);
+void RecordLeaderWait(LeaderWaitState& state,
+                      base::TimeTicks now,
+                      bool issued_in_combat = false);
 
-// Returns true (and clears `state`) when a leader wait hold has exceeded
-// `kLeaderWaitTimeout` out of combat and the caller should clear `policy.stay`.
+// Returns true (and clears `state`) when the caller should clear `policy.stay`:
+//  - Immediately when combat starts for an out-of-combat wait
+//    (`!state.issued_in_combat`), so healers/DPS aren't held out of range.
+//  - After `kLeaderWaitTimeout` out of combat.
+// Explicit in-combat waits (`state.issued_in_combat`) hold through that fight
+// and downgrade once combat ends so they don't block the next pull.
 // Clears `state` without returning true when the bot left the group or `stay`
-// was already cleared externally. Never expires while in combat.
+// was already cleared externally.
 bool ShouldExpireLeaderWait(LeaderWaitState& state,
                             bool in_group,
                             bool policy_stay,

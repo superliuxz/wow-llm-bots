@@ -1345,16 +1345,32 @@ ActionOutcome ExecuteGroupPolicyAction(Player* bot,
       policy.not_tank = false;
       info = "tanking again";
       break;
-    case GroupPolicyAction::Op::kStay:
+    case GroupPolicyAction::Op::kStay: {
+      bool group_in_combat = bot->IsInCombat();
+      if (!group_in_combat) {
+        for (GroupReference* itr = bot->GetGroup()->GetFirstMember();
+             itr != nullptr; itr = itr->next()) {
+          Player* m = itr->GetSource();
+          if (m && m != bot && m->IsInWorld() &&
+              m->GetMapId() == bot->GetMapId() &&
+              m->GetInstanceId() == bot->GetInstanceId() && m->IsInCombat()) {
+            group_in_combat = true;
+            break;
+          }
+        }
+      }
       policy.stay = true;
+      policy.stay_in_combat = group_in_combat;
       if (CanClearBotMovement(bot)) {
         bot->StopMoving();
         bot->GetMotionMaster()->Clear();
       }
       info = "waiting here";
       break;
+    }
     case GroupPolicyAction::Op::kFollow:
       policy.stay = false;
+      policy.stay_in_combat = false;
       BotManager::ClearPingStay(bot);
       info = "following the leader again";
       break;
@@ -1378,6 +1394,7 @@ ActionOutcome ExecuteFollowLeaderAction(Player* bot,
   {
     BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
     policy.stay = false;
+    policy.stay_in_combat = false;
     BotManager::SetGroupPolicy(bot, policy);
     BotManager::ClearPingStay(bot);
   }

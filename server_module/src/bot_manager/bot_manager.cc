@@ -21,6 +21,7 @@
 #include "Action.h"
 #include "AiFactory.h"
 #include "AiObjectContext.h"
+#include "AttackAction.h"
 #include "ByteBuffer.h"
 #include "Cell.h"
 #include "CellImpl.h"  // IWYU pragma: keep
@@ -70,6 +71,7 @@
 #include "SpellAuraEffects.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
+#include "ThreatManager.h"
 #include "Timer.h"
 #include "TradeData.h"
 #include "Unit.h"
@@ -279,6 +281,101 @@ bool GroupInCombat(Group* group, Player* self) {
     }
   }
   return false;
+}
+
+// True when `unit` is actively engaged in combat with `bot` or another member
+// of `group` (or their pet) on the same map/instance.
+bool IsUnitInCombatWithGroup(Player* bot, Group* group, Unit* unit) {
+  if (!bot || !group || !unit || !unit->IsInCombat()) {
+    return false;
+  }
+  const ThreatManager& mgr = unit->GetThreatMgr();
+  if (mgr.CanHaveThreatList() && !mgr.IsThreatListEmpty()) {
+    for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
+         itr = itr->next()) {
+      Player* member = itr->GetSource();
+      if (!member || !member->IsInWorld() ||
+          member->GetMapId() != bot->GetMapId() ||
+          member->GetInstanceId() != bot->GetInstanceId()) {
+        continue;
+      }
+      if (mgr.GetThreat(member) > 0.0f) {
+        return true;
+      }
+      if (Pet* pet = member->GetPet(); pet && mgr.GetThreat(pet) > 0.0f) {
+        return true;
+      }
+    }
+  }
+  if (Unit* victim = unit->GetVictim()) {
+    if (Player* vp = victim->ToPlayer(); vp && group->IsMember(vp->GetGUID())) {
+      return true;
+    }
+    if (Unit* owner = victim->GetOwner()) {
+      if (Player* op = owner->ToPlayer();
+          op && group->IsMember(op->GetGUID())) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool IsPrioritizedTarget(PlayerbotAI* ai, ObjectGuid guid) {
+  if (!ai || guid.IsEmpty()) {
+    return false;
+  }
+  auto* value =
+      ai->GetAiObjectContext()->GetValue<GuidVector>("prioritized targets");
+  if (!value) {
+    return false;
+  }
+  const GuidVector targets = value->Get();
+  return std::find(targets.begin(), targets.end(), guid) != targets.end();
+}
+
+// Suppresses playerbots' default `"skull"` RTI while the group's Skull-marked
+// unit is not yet in combat with the group (e.g. a human tank pre-marking
+// before pulling), restoring `"skull"` once the mob is pulled or unmarked.
+void SyncUnpulledSkullRti(Player* bot, PlayerbotAI* ai) {
+  if (!bot || !ai) {
+    return;
+  }
+  constexpr uint8_t kSkullIcon = 7;
+  const uint64_t key = bot->GetGUID().GetRawValue();
+  Group* group = bot->GetGroup();
+  const ObjectGuid skull_guid =
+      group ? group->GetTargetIcon(kSkullIcon) : ObjectGuid::Empty;
+  Unit* skull = !skull_guid.IsEmpty()
+                    ? ObjectAccessor::GetUnit(*bot, skull_guid)
+                    : nullptr;
+  const bool suppress = ShouldSuppressUnpulledSkull({
+      .in_group = group != nullptr,
+      .in_battleground = bot->InBattleground(),
+      .has_skull_mark = !skull_guid.IsEmpty(),
+      .skull_in_combat_with_group =
+          skull != nullptr && IsUnitInCombatWithGroup(bot, group, skull),
+      .explicit_target_override = IsPrioritizedTarget(ai, skull_guid),
+  });
+  auto* rti_value = ai->GetAiObjectContext()->GetValue<std::string>("rti");
+  if (!rti_value) {
+    return;
+  }
+  if (suppress) {
+    if (rti_value->Get() == kDefaultRti) {
+      rti_value->Set("");
+      BotSessionRegistry::Instance().WithSession(
+          key, [](BotSession& s) { s.skull_rti_suppressed = true; });
+    }
+    return;
+  }
+  const bool was_suppressed =
+      BotSessionRegistry::Instance().WithSession(key, [](BotSession& s) {
+        return std::exchange(s.skull_rti_suppressed, false);
+      });
+  if (was_suppressed && rti_value->Get().empty()) {
+    rti_value->Set(std::string(kDefaultRti));
+  }
 }
 
 ErrandHoldInput MakeErrandHoldInput(Player* bot) {
@@ -920,6 +1017,36 @@ class BrainPolicyListener final : public ActionExecutionListener {
         }
       }
     }
+    // Pull discipline (M1 P0-1): block playerbots' autonomous attack/assist
+    // actions from pulling a human-marked Skull unit before anyone in the
+    // group has engaged it (AttackersValue hardcodes Skull as an attacker).
+    if (bot_ && ai_ && !bot_->InBattleground()) {
+      const bool is_guarded_attack =
+          (dynamic_cast<::AttackAction*>(action) != nullptr &&
+           name != "attack" && name != "attack my target") ||
+          name == "pull rti target";
+      if (is_guarded_attack) {
+        if (Group* group = bot_->GetGroup()) {
+          constexpr uint8_t kSkullIcon = 7;
+          const ObjectGuid skull_guid = group->GetTargetIcon(kSkullIcon);
+          if (!skull_guid.IsEmpty()) {
+            Unit* target = action->GetTarget();
+            if (target && target->GetGUID() == skull_guid &&
+                ShouldSuppressUnpulledSkull({
+                    .in_group = true,
+                    .in_battleground = false,
+                    .has_skull_mark = true,
+                    .skull_in_combat_with_group =
+                        IsUnitInCombatWithGroup(bot_, group, target),
+                    .explicit_target_override =
+                        IsPrioritizedTarget(ai_, skull_guid),
+                })) {
+              return false;
+            }
+          }
+        }
+      }
+    }
     // Tank-swap coordination (M1b): prevent playerbots' "lose aggro" reflex
     // from taunting a mob back off another living group tank after a swap.
     if (bot_ && ai_ && ShouldBlockReflexTaunt(bot_, ai_, name)) {
@@ -1212,7 +1339,9 @@ void BotManager::Update(uint32_t diff_ms) {
                TickOwnerName(owner));
     }
     if (!in_bg) {
-      EnsurePolicyListener(player, GET_PLAYERBOT_AI(player));
+      PlayerbotAI* ai = GET_PLAYERBOT_AI(player);
+      EnsurePolicyListener(player, ai);
+      SyncUnpulledSkullRti(player, ai);
     }
   }
   since_tick_ms_ += diff_ms;
@@ -1250,10 +1379,22 @@ void BotManager::Tick() {
                 s.corpse_run_step.reset();
               });
         }
+        const bool group_in_combat =
+            player->IsInCombat() || GroupInCombat(player->GetGroup(), player);
         if (!player->IsInCombat()) {
           TankSwapTracker::Instance().ClearForBot(bot.guid);
-          if (!GroupInCombat(player->GetGroup(), player)) {
+          if (!group_in_combat) {
             BotManager::SetCombatPositionHold(player, false);
+          }
+        }
+        if (player->GetGroup()) {
+          GroupPolicy policy = GetGroupPolicy(player);
+          if (group_in_combat && policy.stay && !policy.stay_in_combat) {
+            policy.stay = false;
+            SetGroupPolicy(player, policy);
+          } else if (!group_in_combat && policy.stay_in_combat) {
+            policy.stay_in_combat = false;
+            SetGroupPolicy(player, policy);
           }
         }
         EnsureStrategies(player);
@@ -1736,7 +1877,9 @@ void BotManager::KeepHealerInTankRangeAndLos(Player* player) {
       any_tank_in_range_and_los = true;
     }
   }
-  const bool stay = GetGroupPolicy(player).stay || PingStayHolds(player);
+  const GroupPolicy policy = GetGroupPolicy(player);
+  const bool stay =
+      (policy.stay && policy.stay_in_combat) || PingStayHolds(player);
   const bool spread_or_position_hold = CombatPositionHoldActive(player);
   const bool forced_move = HasActiveForcedMove(ai);
   const bool casting = player->IsNonMeleeSpellCast(/*withDelayed=*/false);
@@ -2082,7 +2225,8 @@ BotManager::GroupPolicy BotManager::GetGroupPolicy(Player* bot) {
           s.group_policy = {};
           return {};
         }
-        return {s.group_policy.not_tank, s.group_policy.stay};
+        return {s.group_policy.not_tank, s.group_policy.stay,
+                s.group_policy.stay_in_combat};
       });
 }
 
@@ -2092,16 +2236,16 @@ void BotManager::SetGroupPolicy(Player* bot, GroupPolicy policy) {
   }
   const Group* group = bot->GetGroup();
   const uint64_t key = bot->GetGUID().GetRawValue();
-  BotSessionRegistry::Instance().WithSession(
-      key, [group, policy](BotSession& s) {
-        if (!group || policy == GroupPolicy{}) {
-          s.group_guid = 0;
-          s.group_policy = {};
-        } else {
-          s.group_guid = group->GetGUID().GetRawValue();
-          s.group_policy = {policy.not_tank, policy.stay};
-        }
-      });
+  BotSessionRegistry::Instance().WithSession(key, [group,
+                                                   policy](BotSession& s) {
+    if (!group || policy == GroupPolicy{}) {
+      s.group_guid = 0;
+      s.group_policy = {};
+    } else {
+      s.group_guid = group->GetGUID().GetRawValue();
+      s.group_policy = {policy.not_tank, policy.stay, policy.stay_in_combat};
+    }
+  });
 }
 
 bool BotManager::PingStayHolds(Player* bot) {
