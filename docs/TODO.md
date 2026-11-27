@@ -13,19 +13,6 @@ Live verification following the `70b0878` team-play P0 fixes:
    `human_disconnect`, `llm_stall`, `raid_boss`) are in place. Run a live session from a real
    3.3.5a client to confirm pacing and single-responder feel in practice.
 
-## Next
-
-Team-play P1 gaps and selected P2 items from the `70b0878` review:
-
-### P2 (selected)
-- **Leader commands scope & semantics:** Only work when human is group leader and only in
-  party/raid chat (whispers don't count); `"stop"` maps to `"wait"` (keeps attacking); `"wait"`
-  never times out (`llm_brain_world_script.cc:658-661,710-714`, `leader_command.cc:31`).
-- **`act:` gated on group wakes:** `act:` lines are only allowed when wake reason starts with
-  party/raid/leader (whispers can't trigger acts) (`prompt.cc:815-825`).
-- **Docs drift:** Out-of-date paths for triggers/scheduler; docs say standing orders run only in
-  combat.
-
 ## Later (broader WoW systems)
 
 - **Economy & upkeep:** Vendor panel for selling non-grey items, mailbox, Auction House

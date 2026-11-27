@@ -819,15 +819,18 @@ PromptInput AssemblePromptInput(const PromptAssemblyContext& ctx,
       snapshot.base.self.money > 0) {
     out.traders.push_back(snapshot.ext.trade->with);
   }
-  // One-shot `act:` lines are only for a party/raid chat ask, a minimap ping,
-  // or an open trade with money; omitting `act:` on routine/combat/solo wakes
-  // prevents unasked acts without restricting `order:` lines.
+  // One-shot `act:` lines are only for a party/raid/group-whisper chat ask, a
+  // minimap ping, or an open trade with money; omitting `act:` on
+  // routine/combat/solo wakes prevents unasked acts without restricting
+  // `order:` lines.
   const bool in_group =
       snapshot.ext.party.has_value() || snapshot.ext.raid.has_value();
   const bool chat_wake =
       ctx.wake_reason.starts_with("party from ") ||
       ctx.wake_reason.starts_with("raid from ") ||
+      ctx.wake_reason.starts_with("raid_warning from ") ||
       ctx.wake_reason.starts_with("leader said: ") ||
+      (in_group && ctx.wake_reason.starts_with("whisper from ")) ||
       (in_group && std::any_of(snapshot.events.begin(), snapshot.events.end(),
                                [](const wlb::snapshot::Event& ev) {
                                  return ev.chat.has_value();

@@ -475,6 +475,21 @@ TEST(PromptTest, ActGrammarIsOfferedOnlyForChatPingOrOpenTrade) {
   snap.events.clear();
   ctx.wake_reason = "whisper from Gatda: meet me at the bank?";
   EXPECT_FALSE(AssemblePromptInput(ctx, snap).allow_act);
+  // Grouped whisper wake without chat event in snapshot: `act:` is offered.
+  snap.ext.party.emplace().leader = "Vorka";
+  ctx.wake_reason = "whisper from Vorka";
+  const PromptInput grp_whisper = AssemblePromptInput(ctx, snap);
+  EXPECT_TRUE(grp_whisper.allow_act);
+  EXPECT_NE(
+      BuildPlanRequest(grp_whisper, SampleScreen()).grammar.find("\\nact: "),
+      std::string::npos);
+  // Raid warning wake: `act:` is offered.
+  ctx.wake_reason = "raid_warning from Vorka: stack on me";
+  EXPECT_TRUE(AssemblePromptInput(ctx, snap).allow_act);
+  // Counter-test: grouped routine/combat wake without chat/ping/trade omits
+  // `act:`.
+  ctx.wake_reason = "entered combat";
+  EXPECT_FALSE(AssemblePromptInput(ctx, snap).allow_act);
 }
 
 TEST(PromptTest, AFullSpellsLineYieldsToOptionsAndCoreLinesUnderTightBudget) {

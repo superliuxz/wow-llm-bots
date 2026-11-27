@@ -22,6 +22,9 @@ std::optional<LeaderCommand> Cmd(const char* text) {
 TEST(LeaderCommandTest, ShortCommandsParse) {
   EXPECT_EQ(Cmd("wait"), LeaderCommand::kWait);
   EXPECT_EQ(Cmd("Wait here!"), LeaderCommand::kWait);
+  EXPECT_EQ(Cmd("stop"), LeaderCommand::kStop);
+  EXPECT_EQ(Cmd("Stop!"), LeaderCommand::kStop);
+  EXPECT_EQ(DescribeLeaderCommand(*ParseLeaderCommand("stop", kBots)), "stop");
   EXPECT_EQ(Cmd("follow me pls"), LeaderCommand::kFollow);
   EXPECT_EQ(Cmd("let's go"), LeaderCommand::kFollow);
   EXPECT_EQ(Cmd("attack my target"), LeaderCommand::kAttackMyTarget);
@@ -184,28 +187,63 @@ TEST(LeaderCommandTest, AuthorizationIgnoresNonLeadersAndBots) {
   ASSERT_TRUE(unaddressed);
   // Human leader reaches every bot in the group/raid.
   EXPECT_TRUE(IsLeaderCommandForBot(/*sender_is_human=*/true,
-                                    /*sender_is_leader=*/true, *unaddressed,
+                                    /*sender_is_leader=*/true,
+                                    /*leader_is_human=*/true,
+                                    /*is_whisper=*/false, *unaddressed,
                                     "Loada"));
   EXPECT_TRUE(IsLeaderCommandForBot(/*sender_is_human=*/true,
-                                    /*sender_is_leader=*/true, *unaddressed,
+                                    /*sender_is_leader=*/true,
+                                    /*leader_is_human=*/true,
+                                    /*is_whisper=*/false, *unaddressed,
                                     "Zenji"));
-  // Counter-test: non-leader human unaddressed call is ignored.
+  // Counter-test: non-leader human unaddressed call is ignored when another
+  // human is group leader.
   EXPECT_FALSE(IsLeaderCommandForBot(/*sender_is_human=*/true,
-                                     /*sender_is_leader=*/false, *unaddressed,
+                                     /*sender_is_leader=*/false,
+                                     /*leader_is_human=*/true,
+                                     /*is_whisper=*/false, *unaddressed,
                                      "Loada"));
-  // Counter-test: bot sender is always ignored, even if group leader.
+  // Bot-led group: human group member's unaddressed party/raid command applies.
+  EXPECT_TRUE(IsLeaderCommandForBot(/*sender_is_human=*/true,
+                                    /*sender_is_leader=*/false,
+                                    /*leader_is_human=*/false,
+                                    /*is_whisper=*/false, *unaddressed,
+                                    "Loada"));
+  // Whisper from a human group member applies to the whispered bot even when
+  // another human is group leader.
+  EXPECT_TRUE(IsLeaderCommandForBot(/*sender_is_human=*/true,
+                                    /*sender_is_leader=*/false,
+                                    /*leader_is_human=*/true,
+                                    /*is_whisper=*/true, *unaddressed,
+                                    "Loada"));
+  // Counter-test: bot sender is always ignored, even if group leader or
+  // whispering.
   EXPECT_FALSE(IsLeaderCommandForBot(/*sender_is_human=*/false,
-                                     /*sender_is_leader=*/true, *unaddressed,
+                                     /*sender_is_leader=*/true,
+                                     /*leader_is_human=*/false,
+                                     /*is_whisper=*/false, *unaddressed,
                                      "Loada"));
-  // Addressed command reaches only the named bot.
+  EXPECT_FALSE(IsLeaderCommandForBot(/*sender_is_human=*/false,
+                                     /*sender_is_leader=*/true,
+                                     /*leader_is_human=*/false,
+                                     /*is_whisper=*/true, *unaddressed,
+                                     "Loada"));
+  // Addressed command reaches only the named bot (in party or whisper).
   const auto addressed = ParseLeaderCommand("Zenji stop dps", kBots);
   ASSERT_TRUE(addressed);
   EXPECT_TRUE(IsLeaderCommandForBot(/*sender_is_human=*/true,
-                                    /*sender_is_leader=*/false, *addressed,
-                                    "Zenji"));
+                                    /*sender_is_leader=*/false,
+                                    /*leader_is_human=*/true,
+                                    /*is_whisper=*/false, *addressed, "Zenji"));
   EXPECT_FALSE(IsLeaderCommandForBot(/*sender_is_human=*/true,
-                                     /*sender_is_leader=*/true, *addressed,
+                                     /*sender_is_leader=*/true,
+                                     /*leader_is_human=*/true,
+                                     /*is_whisper=*/false, *addressed,
                                      "Loada"));
+  EXPECT_FALSE(IsLeaderCommandForBot(/*sender_is_human=*/true,
+                                     /*sender_is_leader=*/true,
+                                     /*leader_is_human=*/true,
+                                     /*is_whisper=*/true, *addressed, "Loada"));
 }
 
 }  // namespace

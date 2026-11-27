@@ -36,7 +36,7 @@ Four latency tiers separate reflexes from deliberation:
 | Tier | Latency | Owner | Role |
 |---|---:|---|---|
 | **Body (combat & movement)** | `< 50 ms` | `mod-playerbots` + `mod-llm-brain` | Class rotations, pathing, opcode-level execution, popup capture (`PopupWatch`). |
-| **Standing orders** | `< 250 ms` | `harness` (`OrderEvaluator`) + `mod-llm-brain` (`act_executor`) | Brain-written `<when> -> <act>` boss/combat rules evaluated locally on every combat snapshot without an LLM round trip. |
+| **Standing orders** | `< 250 ms` | `harness` (`OrderEvaluator`) + `mod-llm-brain` (`act_executor`) | Brain-written `<when> -> <act>` boss/combat rules evaluated locally on every snapshot without an LLM round trip. |
 | **Brain plans** | `0.1–2 s` | `harness` (`BotLoop`, `Scheduler`, `LlmClient`) | Woken by triggers (plan done/failed, urgent combat/death/whisper/popup, `watch:`, or `look:` timer). Streams `do:` on the first line (`FirstLineCallback`) and runs the plan until the next wake. |
 | **Lifelong memory** | minutes–days | `harness` (`memory.md`, `relationships.md`, `identity.md`) | Condensed narrative memories and per-player relationship notes injected into the unified prompt builder (`AssemblePromptInput`). |
 

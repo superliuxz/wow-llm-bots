@@ -16,6 +16,7 @@ namespace llm_brain {
 // can answer in character (Now #2, the trusted fast channel).
 enum class LeaderCommand {
   kWait,            // "wait", "stay", "hold"
+  kStop,            // "stop": halt moving and attacking
   kFollow,          // "follow", "come", "on me"
   kAttackMyTarget,  // "attack", "assist", "attack my target"
   kAttackMark,      // "kill skull", "rti cross", "skull", "cross"
@@ -57,10 +58,14 @@ const char* LeaderCommandName(LeaderCommand command);
 std::string DescribeLeaderCommand(const ParsedLeaderCommand& parsed);
 
 // True when `bot_name` should execute `parsed` sent by a group member:
-// non-humans never issue leader commands; unaddressed commands require the
-// group/raid leader; addressed commands apply only to named bots.
+// non-humans never issue leader commands; addressed commands apply only to
+// named bots; unaddressed whispers apply to the recipient bot; unaddressed
+// party/raid commands require either the group/raid leader or a bot-led group
+// (`!leader_is_human`).
 bool IsLeaderCommandForBot(bool sender_is_human,
                            bool sender_is_leader,
+                           bool leader_is_human,
+                           bool is_whisper,
                            const ParsedLeaderCommand& parsed,
                            std::string_view bot_name);
 

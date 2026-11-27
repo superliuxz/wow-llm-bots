@@ -28,7 +28,7 @@ constexpr Phrase kPhrases[] = {
     {"stay here", LeaderCommand::kWait},
     {"hold", LeaderCommand::kWait},
     {"hold up", LeaderCommand::kWait},
-    {"stop", LeaderCommand::kWait},
+    {"stop", LeaderCommand::kStop},
     {"follow", LeaderCommand::kFollow},
     {"follow me", LeaderCommand::kFollow},
     {"come", LeaderCommand::kFollow},
@@ -210,6 +210,8 @@ const char* LeaderCommandName(LeaderCommand command) {
   switch (command) {
     case LeaderCommand::kWait:
       return "wait";
+    case LeaderCommand::kStop:
+      return "stop";
     case LeaderCommand::kFollow:
       return "follow";
     case LeaderCommand::kAttackMyTarget:
@@ -255,16 +257,21 @@ std::string DescribeLeaderCommand(const ParsedLeaderCommand& parsed) {
 
 bool IsLeaderCommandForBot(bool sender_is_human,
                            bool sender_is_leader,
+                           bool leader_is_human,
+                           bool is_whisper,
                            const ParsedLeaderCommand& parsed,
                            std::string_view bot_name) {
   if (!sender_is_human) {
     return false;
   }
-  if (parsed.addressed.empty()) {
-    return sender_is_leader;
+  if (!parsed.addressed.empty()) {
+    return std::find(parsed.addressed.begin(), parsed.addressed.end(),
+                     bot_name) != parsed.addressed.end();
   }
-  return std::find(parsed.addressed.begin(), parsed.addressed.end(),
-                   bot_name) != parsed.addressed.end();
+  if (is_whisper) {
+    return true;
+  }
+  return sender_is_leader || !leader_is_human;
 }
 
 }  // namespace llm_brain

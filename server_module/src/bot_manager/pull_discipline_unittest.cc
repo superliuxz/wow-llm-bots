@@ -517,5 +517,100 @@ TEST(PullDisciplineTest, HealerManaPullWaitAdversarialAntiStallAndInvariants) {
   }
 }
 
+TEST(PullDisciplineTest, LeaderWaitExpiresOutOfCombatAndResetsOnInvariants) {
+  const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(500);
+
+  // 1. Holds before timeout, expires at kLeaderWaitTimeout out of combat.
+  {
+    LeaderWaitState state;
+    RecordLeaderWait(state, t0);
+    EXPECT_TRUE(state.active);
+    EXPECT_FALSE(ShouldExpireLeaderWait(
+        state, /*in_group=*/true, /*policy_stay=*/true,
+        /*bot_in_combat=*/false, /*party_in_combat=*/false,
+        t0 + kLeaderWaitTimeout - base::Seconds(1)));
+    EXPECT_TRUE(state.active);
+    EXPECT_TRUE(ShouldExpireLeaderWait(
+        state, /*in_group=*/true, /*policy_stay=*/true,
+        /*bot_in_combat=*/false, /*party_in_combat=*/false,
+        t0 + kLeaderWaitTimeout));
+    EXPECT_FALSE(state.active);
+    // Does not fire twice once cleared.
+    EXPECT_FALSE(ShouldExpireLeaderWait(
+        state, /*in_group=*/true, /*policy_stay=*/true,
+        /*bot_in_combat=*/false, /*party_in_combat=*/false,
+        t0 + kLeaderWaitTimeout + base::Minutes(1)));
+  }
+
+  // 2. Re-issuing "wait" refreshes the timeout window.
+  {
+    LeaderWaitState state;
+    RecordLeaderWait(state, t0);
+    RecordLeaderWait(state, t0 + base::Minutes(2));
+    EXPECT_FALSE(ShouldExpireLeaderWait(
+        state, /*in_group=*/true, /*policy_stay=*/true,
+        /*bot_in_combat=*/false, /*party_in_combat=*/false,
+        t0 + kLeaderWaitTimeout));
+    EXPECT_TRUE(ShouldExpireLeaderWait(
+        state, /*in_group=*/true, /*policy_stay=*/true,
+        /*bot_in_combat=*/false, /*party_in_combat=*/false,
+        t0 + base::Minutes(2) + kLeaderWaitTimeout));
+  }
+
+  // 3. P0 combat priority: never expires mid-combat (bot or party), then
+  //    expires once combat ends.
+  {
+    LeaderWaitState state;
+    RecordLeaderWait(state, t0);
+    EXPECT_FALSE(ShouldExpireLeaderWait(
+        state, /*in_group=*/true, /*policy_stay=*/true,
+        /*bot_in_combat=*/true, /*party_in_combat=*/false,
+        t0 + kLeaderWaitTimeout + base::Minutes(1)));
+    EXPECT_TRUE(state.active);
+    EXPECT_FALSE(ShouldExpireLeaderWait(
+        state, /*in_group=*/true, /*policy_stay=*/true,
+        /*bot_in_combat=*/false, /*party_in_combat=*/true,
+        t0 + kLeaderWaitTimeout + base::Minutes(1)));
+    EXPECT_TRUE(state.active);
+    EXPECT_TRUE(ShouldExpireLeaderWait(
+        state, /*in_group=*/true, /*policy_stay=*/true,
+        /*bot_in_combat=*/false, /*party_in_combat=*/false,
+        t0 + kLeaderWaitTimeout + base::Minutes(2)));
+    EXPECT_FALSE(state.active);
+  }
+
+  // 4. Solo / left group clears state without triggering follow mutation.
+  {
+    LeaderWaitState state;
+    RecordLeaderWait(state, t0);
+    EXPECT_FALSE(ShouldExpireLeaderWait(
+        state, /*in_group=*/false, /*policy_stay=*/true,
+        /*bot_in_combat=*/false, /*party_in_combat=*/false,
+        t0 + kLeaderWaitTimeout));
+    EXPECT_FALSE(state.active);
+  }
+
+  // 5. External stay=false (e.g. brain chose follow) clears state cleanly.
+  {
+    LeaderWaitState state;
+    RecordLeaderWait(state, t0);
+    EXPECT_FALSE(ShouldExpireLeaderWait(
+        state, /*in_group=*/true, /*policy_stay=*/false,
+        /*bot_in_combat=*/false, /*party_in_combat=*/false,
+        t0 + kLeaderWaitTimeout));
+    EXPECT_FALSE(state.active);
+  }
+
+  // 6. Logout / map-change / disconnect reset clears wait cleanly.
+  {
+    LeaderWaitState state;
+    EXPECT_FALSE(ClearLeaderWait(state));
+    RecordLeaderWait(state, t0);
+    EXPECT_TRUE(ClearLeaderWait(state));
+    EXPECT_FALSE(state.active);
+    EXPECT_FALSE(ClearLeaderWait(state));
+  }
+}
+
 }  // namespace
 }  // namespace llm_brain

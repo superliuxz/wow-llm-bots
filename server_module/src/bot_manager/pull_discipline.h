@@ -180,6 +180,37 @@ bool EvaluateHealerManaPullWait(HealerManaWaitState& state,
 // logout, disconnect). Returns true if any state was active.
 bool ClearHealerManaWait(HealerManaWaitState& state);
 
+// Maximum duration a leader "wait"/"stop" stay hold lasts out of combat before
+// automatically resuming follow so forgotten waits cannot stall a bot forever.
+inline constexpr base::TimeDelta kLeaderWaitTimeout = base::Minutes(3);
+
+// Tracks an active leader "wait"/"stop" stay hold so it expires after
+// `kLeaderWaitTimeout` out of combat (never mid-fight) and resets cleanly on
+// follow, group leave, map change, logout, or disconnect.
+struct LeaderWaitState {
+  bool active = false;
+  base::TimeTicks started_at;
+
+  bool operator==(const LeaderWaitState&) const = default;
+};
+
+void RecordLeaderWait(LeaderWaitState& state, base::TimeTicks now);
+
+// Returns true (and clears `state`) when a leader wait hold has exceeded
+// `kLeaderWaitTimeout` out of combat and the caller should clear `policy.stay`.
+// Clears `state` without returning true when the bot left the group or `stay`
+// was already cleared externally. Never expires while in combat.
+bool ShouldExpireLeaderWait(LeaderWaitState& state,
+                            bool in_group,
+                            bool policy_stay,
+                            bool bot_in_combat,
+                            bool party_in_combat,
+                            base::TimeTicks now);
+
+// Unconditionally clears leader wait state (follow, map change, logout,
+// disconnect). Returns true if a wait was active.
+bool ClearLeaderWait(LeaderWaitState& state);
+
 }  // namespace llm_brain
 
 #endif  // MOD_LLM_BRAIN_BOT_MANAGER_PULL_DISCIPLINE_H_

@@ -13,7 +13,7 @@ Grammar source of truth: [harness/grammar/plan.wlb](../../harness/grammar/plan.w
 - `expect:` — option numbers the plan accounts for (suppresses surprise wakes for those targets).
 - `watch:` — edge-latched conditions (`hp<N`, `mana<N`, `enemy_player<N`, `attacked`, `whisper`).
 - `order:` / `orders: none` — standing orders (`<when> -> <act>`) evaluated locally in C++ on
-  every combat snapshot (`harness/src/plan/order_evaluator.{h,cc}`).
+  every snapshot (`harness/src/plan/order_evaluator.{h,cc}`).
 - `open:` / `close:` / `hover:` — inspect panels or tooltips on the next wake.
 - `look:` — wake timer in seconds (enforced `>= 10` s to prevent polling loops).
 - `goal:` / `remember:` / `note:` — optional persistent goal, memory note, or player relationship note.
@@ -21,7 +21,7 @@ Grammar source of truth: [harness/grammar/plan.wlb](../../harness/grammar/plan.w
 
 ## Wake Sources & Scheduler Priorities
 
-`TriggerEvaluator` (`harness/src/runtime/triggers.{h,cc}`) evaluates each incoming snapshot and
+`TriggerEvaluator` (`harness/src/plan/triggers.{h,cc}`) evaluates each incoming snapshot and
 `ImmediateEvent` against the active plan:
 
 | Priority | Trigger class | Examples |
@@ -31,7 +31,7 @@ Grammar source of truth: [harness/grammar/plan.wlb](../../harness/grammar/plan.w
 | **P2** | Normal plan boundary & popups | Plan finished, `watch:` edge crossed, timed popups (`PopupWatch`: ready check, loot roll, LFG role/proposal, shared quest, rez offer), `look:` timer elapsed. |
 | **P3** | Chat & social | Whispers, `at_me` mentions, party/raid chat (rate-limited per sender; whispers/chat never cancel an active boss dodge). |
 
-`Scheduler` (`harness/src/runtime/scheduler.{h,cc}`) bounds in-flight calls to llama-server's
+`Scheduler` (`harness/src/llm/scheduler.{h,cc}`) bounds in-flight calls to llama-server's
 slot count, applies aging so lower priorities cannot starve indefinitely under load, and prefers
 soft idle-slot affinity.
 

@@ -250,4 +250,40 @@ bool ClearHealerManaWait(HealerManaWaitState& state) {
   return true;
 }
 
+void RecordLeaderWait(LeaderWaitState& state, base::TimeTicks now) {
+  state.active = true;
+  state.started_at = now;
+}
+
+bool ShouldExpireLeaderWait(LeaderWaitState& state,
+                            bool in_group,
+                            bool policy_stay,
+                            bool bot_in_combat,
+                            bool party_in_combat,
+                            base::TimeTicks now) {
+  if (!state.active) {
+    return false;
+  }
+  if (!in_group || !policy_stay) {
+    state = {};
+    return false;
+  }
+  if (bot_in_combat || party_in_combat) {
+    return false;
+  }
+  if (now - state.started_at >= kLeaderWaitTimeout) {
+    state = {};
+    return true;
+  }
+  return false;
+}
+
+bool ClearLeaderWait(LeaderWaitState& state) {
+  if (!state.active) {
+    return false;
+  }
+  state = {};
+  return true;
+}
+
 }  // namespace llm_brain

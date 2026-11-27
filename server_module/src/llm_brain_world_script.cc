@@ -380,6 +380,7 @@ class LlmBrainWorldScript : public WorldScript {
         ClearRtiOverride(bots_[i].rti_override);
         ClearStopDps(bots_[i].stop_dps);
         ClearHealerManaWait(bots_[i].healer_mana_wait);
+        ClearLeaderWait(bots_[i].leader_wait);
         continue;  // Offline, not in world, or logged in by a real human.
       }
       // Clear any active act or saved `back` coordinates if the bot changed
@@ -395,6 +396,13 @@ class LlmBrainWorldScript : public WorldScript {
         ResetRtiOverride(bot, bots_[i].rti_override);
         ResetStopDps(bot, bots_[i].stop_dps);
         ClearHealerManaWait(bots_[i].healer_mana_wait);
+        if (ClearLeaderWait(bots_[i].leader_wait)) {
+          BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
+          if (policy.stay) {
+            policy.stay = false;
+            BotManager::SetGroupPolicy(bot, policy);
+          }
+        }
         bots_[i].errand_hold_active = false;
         BotSessionRegistry::Instance().ResetOnMapChange(
             bot->GetGUID().GetRawValue());
@@ -432,6 +440,18 @@ class LlmBrainWorldScript : public WorldScript {
         BotManager::SetStopDps(bot, false);
         LOG_INFO("module", "mod-llm-brain: {}: combat ended, cleared stop dps",
                  bot->GetName());
+      }
+      if (bots_[i].leader_wait.active) {
+        BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
+        if (ShouldExpireLeaderWait(
+                bots_[i].leader_wait, bot->GetGroup() != nullptr, policy.stay,
+                bot->IsInCombat(), IsPartyInCombat(bot), now)) {
+          policy.stay = false;
+          BotManager::SetGroupPolicy(bot, policy);
+          LOG_INFO("module",
+                   "mod-llm-brain: {}: leader wait timed out, resuming follow",
+                   bot->GetName());
+        }
       }
       CheckPendingGroupInvite(bot, i, config_.bots[i], now);
       // The brain's popup policy answers them first, within a tick (Now #3);
@@ -612,6 +632,7 @@ class LlmBrainWorldScript : public WorldScript {
       ResetRtiOverride(bot, bots_[i].rti_override);
       ResetStopDps(bot, bots_[i].stop_dps);
       ClearHealerManaWait(bots_[i].healer_mana_wait);
+      ClearLeaderWait(bots_[i].leader_wait);
       bots_[i].errand_hold_active = false;
       if (bots_[i].active_act) {
         if (bot && GET_PLAYERBOT_AI(bot) != nullptr) {
@@ -714,13 +735,14 @@ class LlmBrainWorldScript : public WorldScript {
           chatters.pop_back();
         }
       }
-      // A human leader's party command ("wait", "follow", "attack my
-      // target"...) is applied here, within a tick; the brain then hears the
-      // line and what was done, to answer in character (Now #2).
+      // A human group member's command ("wait", "stop", "follow", "attack my
+      // target"...) in party/raid/whisper is applied here, within a tick; the
+      // brain then hears the line and what was done, to answer in character.
       std::string applied;
       if (line.chat.channel == wlb::snapshot::PARTY ||
           line.chat.channel == wlb::snapshot::RAID ||
-          line.chat.channel == wlb::snapshot::RAID_WARNING) {
+          line.chat.channel == wlb::snapshot::RAID_WARNING ||
+          line.chat.channel == wlb::snapshot::WHISPER) {
         applied = ApplyLeaderCommand(index, line.to, bot, line.chat);
       }
       const bool alerting =
@@ -772,17 +794,23 @@ class LlmBrainWorldScript : public WorldScript {
       return "";
     }
     BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
+    Player* leader =
+        ObjectAccessor::FindConnectedPlayer(group->GetLeaderGUID());
+    const bool sender_is_leader = group->IsLeader(sender->GetGUID());
+    const bool leader_is_human =
+        sender_is_leader || (leader != nullptr && IsHumanPlayer(leader));
+    const bool is_whisper = chat.channel == wlb::snapshot::WHISPER;
     bool for_me = IsLeaderCommandForBot(/*sender_is_human=*/true,
-                                        group->IsLeader(sender->GetGUID()),
-                                        *parsed, bot->GetName());
-    // An unaddressed "pull" is for whoever tanks: the group's tank role (the
-    // Dungeon Finder's, else the spec's), unless the bot let someone else
-    // tank. An unaddressed "lust" is only for bots that know Bloodlust or
-    // Heroism.
-    if (for_me && parsed->addressed.empty() &&
+                                        sender_is_leader, leader_is_human,
+                                        is_whisper, *parsed, bot->GetName());
+    // An unaddressed "pull" in party/raid is for whoever tanks: the group's
+    // tank role (the Dungeon Finder's, else the spec's), unless the bot let
+    // someone else tank. An unaddressed "lust" in party/raid is only for bots
+    // that know Bloodlust or Heroism.
+    if (for_me && !is_whisper && parsed->addressed.empty() &&
         parsed->command == LeaderCommand::kPull) {
       for_me = IsGroupTank(group, bot) && !policy.not_tank;
-    } else if (for_me && parsed->addressed.empty() &&
+    } else if (for_me && !is_whisper && parsed->addressed.empty() &&
                parsed->command == LeaderCommand::kLust) {
       for_me = LustSpellName(bot) != nullptr;
     }
@@ -791,19 +819,50 @@ class LlmBrainWorldScript : public WorldScript {
     }
     const std::string said = "leader said: " + DescribeLeaderCommand(*parsed);
     PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
+    auto halt_attacks = [&]() {
+      RecordStopDps(bots_[index].stop_dps, IsPartyInCombat(bot));
+      BotManager::SetStopDps(bot, true);
+      bot->AttackStop();
+      bot->InterruptSpell(CURRENT_AUTOREPEAT_SPELL);
+      for (CurrentSpellTypes type :
+           {CURRENT_GENERIC_SPELL, CURRENT_CHANNELED_SPELL}) {
+        if (Spell* sp = bot->GetCurrentSpell(type);
+            sp && sp->GetSpellInfo() && !sp->GetSpellInfo()->IsPositive()) {
+          bot->InterruptSpell(type, false);
+        }
+      }
+      if (Pet* pet = bot->GetPet()) {
+        pet->AttackStop();
+      }
+    };
     std::string done;
     switch (parsed->command) {
       case LeaderCommand::kWait:
         policy.stay = true;
         BotManager::SetGroupPolicy(bot, policy);
+        RecordLeaderWait(bots_[index].leader_wait, base::TimeTicks::Now());
         BotManager::ClearErrandHold(bot);
         bots_[index].errand_hold_active = false;
         bot->StopMoving();
         done = "you stop and wait here";
         break;
+      case LeaderCommand::kStop:
+        policy.stay = true;
+        BotManager::SetGroupPolicy(bot, policy);
+        RecordLeaderWait(bots_[index].leader_wait, base::TimeTicks::Now());
+        BotManager::ClearErrandHold(bot);
+        bots_[index].errand_hold_active = false;
+        bot->StopMoving();
+        halt_attacks();
+        done = "you stop moving and attacking";
+        break;
       case LeaderCommand::kFollow: {
         policy.stay = false;
         BotManager::SetGroupPolicy(bot, policy);
+        ClearLeaderWait(bots_[index].leader_wait);
+        if (!bot->IsInCombat() && !IsPartyInCombat(bot)) {
+          ResetStopDps(bot, bots_[index].stop_dps);
+        }
         // A leader's move still on its way ("go there", "los") would hold
         // the bot again when it arrives: following ends it.
         BotState& state = bots_[index];
@@ -902,6 +961,7 @@ class LlmBrainWorldScript : public WorldScript {
         }
         policy.stay = false;
         BotManager::SetGroupPolicy(bot, policy);
+        ClearLeaderWait(bots_[index].leader_wait);
         done = to_ping ? "you go to the ping and hold there"
                        : "you run to " + sender->GetName() + " and hold there";
         break;
@@ -954,6 +1014,7 @@ class LlmBrainWorldScript : public WorldScript {
         }
         policy.stay = false;
         BotManager::SetGroupPolicy(bot, policy);
+        ClearLeaderWait(bots_[index].leader_wait);
         done = "you spread out and hold there";
         break;
       }
@@ -970,24 +1031,12 @@ class LlmBrainWorldScript : public WorldScript {
         }
         policy.stay = false;
         BotManager::SetGroupPolicy(bot, policy);
+        ClearLeaderWait(bots_[index].leader_wait);
         done = "you stack on " + sender->GetName() + " and hold there";
         break;
       }
       case LeaderCommand::kStopDps: {
-        RecordStopDps(bots_[index].stop_dps, IsPartyInCombat(bot));
-        BotManager::SetStopDps(bot, true);
-        bot->AttackStop();
-        bot->InterruptSpell(CURRENT_AUTOREPEAT_SPELL);
-        for (CurrentSpellTypes type :
-             {CURRENT_GENERIC_SPELL, CURRENT_CHANNELED_SPELL}) {
-          if (Spell* sp = bot->GetCurrentSpell(type);
-              sp && sp->GetSpellInfo() && !sp->GetSpellInfo()->IsPositive()) {
-            bot->InterruptSpell(type, false);
-          }
-        }
-        if (Pet* pet = bot->GetPet()) {
-          pet->AttackStop();
-        }
+        halt_attacks();
         done = "you stop attacking until resumed or combat ends";
         break;
       }
@@ -2474,6 +2523,9 @@ class LlmBrainWorldScript : public WorldScript {
     // Active "stop dps" pause from a leader chat command (reset on resume,
     // attack command, combat end, map change, or disconnect).
     StopDpsState stop_dps;
+    // Active leader "wait"/"stop" stay hold (expires after timeout out of
+    // combat, or on follow, group leave, map change, or disconnect).
+    LeaderWaitState leader_wait;
   };
   std::vector<BotState> bots_;
   // A wrong-version command was logged on this connection.
