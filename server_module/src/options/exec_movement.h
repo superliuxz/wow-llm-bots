@@ -10,6 +10,7 @@
 
 #include "base/time/time.h"
 #include "options/action_types.h"
+#include "options/leader_travel.h"
 #include "options/position_facts.h"
 #include "snapshot/snapshot.h"
 
@@ -26,6 +27,7 @@ struct PendingWalk {
   WalkProgressTracker progress;
   base::TimeTicks last_path_at;
   uint8_t consecutive_seam_hops = 0;
+  LeaderTravelArrival arrival;
 };
 
 struct WalkStepResult {

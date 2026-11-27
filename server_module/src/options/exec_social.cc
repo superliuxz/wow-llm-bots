@@ -541,7 +541,7 @@ void CollectGroupAndUpkeepActions(Player* bot,
             leader->GetMapId() == bot->GetMapId() &&
             leader->GetInstanceId() == bot->GetInstanceId()) {
           const float dist = bot->GetDistance(leader);
-          if (dist >= 8.0f && dist < 25.0f) {
+          if (dist >= 8.0f && dist <= 25.0f) {
             out->push_back({base::StringPrintf("follow:0x%016llx",
                                                static_cast<unsigned long long>(
                                                    leader_guid.GetRawValue())),

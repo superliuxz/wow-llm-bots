@@ -58,6 +58,7 @@
 #include "options/exec_npc.h"
 #include "options/exec_shared.h"
 #include "options/exec_social.h"
+#include "options/leader_travel.h"
 #include "options/option_facts.h"
 #include "options/options.h"
 #include "options/position_facts.h"
@@ -1109,25 +1110,80 @@ void SnapshotBuilder::FillOptionFacts(Player* bot,
   AddPositionFacts(current, view.pos, snapshot->ext.quest_tracker, out,
                    &minimap);
   // Expose a live per-snapshot `Go to <leader>` option for non-leader group
-  // members when the living leader is on the same map/instance/phase at travel
-  // distance (never cached in `position_facts_` so moving leaders and group
-  // changes are reflected immediately).
+  // members whenever the leader is >25 yd away on the same map/instance or on
+  // another map/instance reachable via legitimate cross-map travel (instance
+  // entrances/exits, portals, and known flight paths; never cached in
+  // `position_facts_` so moving leaders and group changes reflect immediately).
   if (Group* group = bot->GetGroup();
       group && !group->IsLeader(bot->GetGUID())) {
     if (Player* leader =
             ObjectAccessor::FindConnectedPlayer(group->GetLeaderGUID());
-        leader && leader->IsInWorld() && leader->IsAlive() &&
-        leader->GetMapId() == view.map_id &&
-        leader->GetInstanceId() == bot->GetInstanceId() &&
-        (leader->GetPhaseMask() & view.phase_mask) != 0) {
-      const pb::Vec3 leader_pos{leader->GetPositionX(), leader->GetPositionY(),
-                                leader->GetPositionZ()};
-      const float dist =
-          Dist(view.pos, leader_pos.x, leader_pos.y, leader_pos.z);
-      if (dist >= kMinTravelDistYd && dist <= kMaxTravelDistYd) {
-        out->places.push_back(
-            {"place:leader", leader->GetName(), "party leader",
-             DirFrom(view.pos, leader_pos.x, leader_pos.y), dist, leader_pos});
+        leader && leader->IsInWorld()) {
+      LeaderTravelInput lt;
+      lt.in_group = true;
+      lt.is_leader = false;
+      lt.bot_alive = bot->IsAlive();
+      lt.bot_in_combat = bot->IsInCombat();
+      lt.bot_in_flight = bot->IsInFlight();
+      lt.bot_in_bg_or_arena = bot->InBattleground() || bot->InArena();
+      lt.bot_in_instance = bot->GetMap() && bot->GetMap()->Instanceable();
+      lt.bot_alliance = view.alliance;
+      lt.bot_money_copper = bot->GetMoney();
+      lt.bot_map_id = view.map_id;
+      lt.bot_instance_id = bot->GetInstanceId();
+      lt.bot_phase_mask = view.phase_mask;
+      lt.bot_pos = view.pos;
+      lt.leader_present = true;
+      lt.leader_alive = leader->IsAlive();
+      lt.leader_in_bg_or_arena = leader->InBattleground() || leader->InArena();
+      lt.leader_name = leader->GetName();
+      lt.leader_map_id = leader->GetMapId();
+      lt.leader_instance_id = leader->GetInstanceId();
+      lt.leader_phase_mask = leader->GetPhaseMask();
+      lt.leader_pos = {leader->GetPositionX(), leader->GetPositionY(),
+                       leader->GetPositionZ()};
+
+      // Collect known taxi nodes & links on the bot's current map so long
+      // same-continent trips (or approaches to cross-map portals) can use
+      // known affordable flight paths.
+      std::vector<TaxiNodeFact> known_nodes;
+      std::vector<TaxiLinkFact> taxi_links;
+      if (!lt.bot_in_instance && !lt.bot_in_flight && !lt.bot_in_bg_or_arena) {
+        const uint32_t locale = sWorld->GetDefaultDbcLocale();
+        for (uint32_t i = 0; i < sTaxiNodesStore.GetNumRows(); ++i) {
+          const TaxiNodesEntry* node = sTaxiNodesStore.LookupEntry(i);
+          if (!node || node->map_id != view.map_id ||
+              !bot->m_taxi.IsTaximaskNodeKnown(node->ID)) {
+            continue;
+          }
+          const char* node_name = node->name[locale];
+          known_nodes.push_back(TaxiNodeFact{
+              .node_id = node->ID,
+              .map_id = node->map_id,
+              .pos = {node->x, node->y, node->z},
+              .name = (node_name && *node_name) ? node_name : "",
+          });
+        }
+        if (known_nodes.size() >= 2) {
+          for (uint32_t i = 0; i < sTaxiPathStore.GetNumRows(); ++i) {
+            const TaxiPathEntry* path = sTaxiPathStore.LookupEntry(i);
+            if (!path || !bot->m_taxi.IsTaximaskNodeKnown(path->from) ||
+                !bot->m_taxi.IsTaximaskNodeKnown(path->to)) {
+              continue;
+            }
+            taxi_links.push_back(TaxiLinkFact{
+                .from_node = path->from,
+                .to_node = path->to,
+                .price_copper = path->price,
+            });
+          }
+        }
+      }
+
+      if (std::optional<pb::OptionFacts::Place> leader_place =
+              BuildLeaderTravelPlace(lt, world->cross_map_edges(), known_nodes,
+                                     taxi_links)) {
+        out->places.push_back(std::move(*leader_place));
       }
     }
   }

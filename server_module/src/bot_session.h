@@ -18,6 +18,7 @@
 
 #include "base/synchronization/lock.h"
 #include "base/thread_annotations.h"
+#include "bot_manager/errand_hold.h"
 #include "bot_manager/tick_owner.h"
 #include "snapshot/snapshot.h"
 
@@ -175,6 +176,13 @@ struct BotSession {
 
   // Last outdoor stray-recall tick (`KeepNearHumanLeader`, Now #8).
   uint32_t stray_recalled_ms = 0;
+
+  // Active brain-initiated errand hold (Milestone 5a): pauses playerbots'
+  // `follow`, `KeepSafeGroupFollow`, and the 40 yd leash while a grouped
+  // follower runs a brain errand (loot, gather, talk, use, walk, rest, NPC
+  // interaction). Cleared on completion, P0 combat, timeout, map change,
+  // disconnect, and logout.
+  ErrandHoldState errand_hold;
 
   // Combat movement/targeting memory (cleared on combat end / map change /
   // disconnect).

@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "options/leader_travel.h"
 #include "options/position_facts.h"
 #include "snapshot/snapshot.h"
 
@@ -99,6 +100,9 @@ class WorldPlaces {
     return buckets_;
   }
   const std::vector<Hub>& hubs() const { return hubs_; }
+  const std::vector<CrossMapEdge>& cross_map_edges() const {
+    return cross_map_edges_;
+  }
 
  private:
   WorldPlaces();
@@ -106,6 +110,7 @@ class WorldPlaces {
   std::unordered_map<uint64_t, SpotBucket> buckets_;
   std::vector<Hub> hubs_;
   std::unordered_map<uint32_t, std::vector<DungeonSpawn>> dungeon_spawns_;
+  std::vector<CrossMapEdge> cross_map_edges_;
 };
 
 // Probes a short, terrain- and navmesh-validated hop across a disconnected

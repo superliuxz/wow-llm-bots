@@ -4,6 +4,7 @@
 
 #include <cstdint>
 
+#include "bot_manager/errand_hold.h"
 #include "gtest/gtest.h"
 
 namespace llm_brain {
@@ -222,6 +223,45 @@ TEST(BotSessionRegistryTest, StopDpsClearsOnMapChangeDisconnectAndLogout) {
     reg.InspectSession(kBot, [](const BotSession* s) {
       ASSERT_NE(s, nullptr);
       EXPECT_FALSE(s->stop_dps);
+      EXPECT_EQ(s->group_guid, 42u);
+      EXPECT_TRUE(s->group_policy.stay);
+    });
+  };
+  set();
+  reg.ResetOnMapChange(kBot);
+  expect_cleared();
+  set();
+  reg.ResetOnDisconnect(kBot);
+  expect_cleared();
+  set();
+  reg.ResetOnLogout(kBot);
+  expect_cleared();
+}
+
+// Adversarial counter-test: an active errand hold never outlives a map change,
+// harness disconnect, or logout, while group policy still survives.
+TEST(BotSessionRegistryTest, ErrandHoldClearsOnMapChangeDisconnectAndLogout) {
+  BotSessionRegistry reg;
+  constexpr uint64_t kBot = 0x1007;
+  const auto set = [&] {
+    reg.WithSession(kBot, [](BotSession& s) {
+      s.group_guid = 42;
+      s.group_policy.stay = true;
+      s.errand_hold = ErrandHoldState{
+          .active = true,
+          .kind = ErrandKind::kLoot,
+          .started_ms = 1000,
+          .timeout_ms = kDefaultErrandTimeoutMs,
+          .map_id = 36,
+          .instance_id = 1,
+      };
+    });
+  };
+  const auto expect_cleared = [&] {
+    reg.InspectSession(kBot, [](const BotSession* s) {
+      ASSERT_NE(s, nullptr);
+      EXPECT_FALSE(s->errand_hold.active);
+      EXPECT_EQ(s->errand_hold.kind, ErrandKind::kNone);
       EXPECT_EQ(s->group_guid, 42u);
       EXPECT_TRUE(s->group_policy.stay);
     });

@@ -76,6 +76,7 @@
 #include "base/synchronization/lock.h"
 #include "base/thread_annotations.h"
 #include "bot_manager/corpse_run.h"
+#include "bot_manager/errand_hold.h"
 #include "bot_manager/human_group_grace.h"
 #include "bot_manager/playerbots_actions.h"
 #include "bot_manager/pull_discipline.h"
@@ -254,6 +255,40 @@ bool GroupHasHuman(Group* group) {
     }
   }
   return false;
+}
+
+// Whether another member of `group` on the same map/instance is in combat.
+bool GroupInCombat(Group* group, Player* self) {
+  if (!group || !self) {
+    return false;
+  }
+  for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
+       itr = itr->next()) {
+    Player* member = itr->GetSource();
+    if (member && member != self && member->IsInWorld() &&
+        member->GetMapId() == self->GetMapId() &&
+        member->GetInstanceId() == self->GetInstanceId() &&
+        member->IsInCombat()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+ErrandHoldInput MakeErrandHoldInput(Player* bot) {
+  Group* group = bot->GetGroup();
+  return ErrandHoldInput{
+      .in_group = group != nullptr,
+      .is_leader = group != nullptr && group->IsLeader(bot->GetGUID()),
+      .alive = bot->IsAlive(),
+      .in_combat = bot->IsInCombat(),
+      .party_in_combat = GroupInCombat(group, bot),
+      .in_battleground = bot->InBattleground(),
+      .harness_connected = BotManager::IsBrainConnected(),
+      .map_id = bot->GetMapId(),
+      .instance_id = bot->GetInstanceId(),
+      .now_ms = getMSTime(),
+  };
 }
 
 // Whether another member of `group` is a non-pet tank (main-tank flag, LFG
@@ -764,9 +799,16 @@ class BrainPolicyListener final : public ActionExecutionListener {
         }
       }
     }
-    // Near unpulled hostile packs, yield playerbots' ChaosFormation `follow`
-    // (which jitters laterally into aggro edges) to BotManager's safe follow.
+    // While a brain-initiated errand (loot, gather, talk, use, walk, rest,
+    // NPC interaction) is active for a grouped follower, yield playerbots'
+    // `follow` so it doesn't cancel the move or interrupt the cast.
+    // Near unpulled hostile packs, also yield playerbots' ChaosFormation
+    // `follow` (which jitters laterally into aggro edges) to BotManager's
+    // safe follow.
     if (name == "follow" && bot_ && !bot_->IsInCombat() && bot_->GetGroup()) {
+      if (BotManager::ErrandHoldActive(bot_)) {
+        return false;
+      }
       constexpr float kGuardRadiusYd = kUnpulledClearYd + 4.0f;
       std::vector<Unit*> units;
       Acore::AnyUnitInObjectRangeCheck check(bot_, kGuardRadiusYd);
@@ -1338,7 +1380,8 @@ void BotManager::KeepNearHumanLeader(Player* player) {
   if (!group || !ai || !player->IsAlive() || player->IsInCombat() ||
       group->IsLeader(player->GetGUID()) || !player->GetMap() ||
       player->GetMap()->IsDungeon() || GetGroupPolicy(player).stay ||
-      PingStayHolds(player) || !CanClearBotMovement(player)) {
+      PingStayHolds(player) || ErrandHoldActive(player) ||
+      !CanClearBotMovement(player)) {
     return;
   }
   Player* leader = ObjectAccessor::FindConnectedPlayer(group->GetLeaderGUID());
@@ -1459,7 +1502,8 @@ void BotManager::KeepSafeGroupFollow(Player* player) {
       group->IsLeader(player->GetGUID()) || !player->GetMap() ||
       !ai->HasStrategy("follow", BOT_STATE_NON_COMBAT) ||
       GetGroupPolicy(player).stay || PingStayHolds(player) ||
-      HasActiveForcedMove(ai) || !CanClearBotMovement(player)) {
+      ErrandHoldActive(player) || HasActiveForcedMove(ai) ||
+      !CanClearBotMovement(player)) {
     return;
   }
   Player* leader = ObjectAccessor::FindConnectedPlayer(group->GetLeaderGUID());
@@ -1905,6 +1949,44 @@ void BotManager::StartPingStay(Player* bot) {
   BotSessionRegistry::Instance().WithSession(
       bot->GetGUID().GetRawValue(),
       [&stay](BotSession& s) { s.ping_stay = stay; });
+}
+
+bool BotManager::StartErrandHold(Player* bot, ErrandKind kind) {
+  if (!bot) {
+    return false;
+  }
+  const ErrandHoldInput input = MakeErrandHoldInput(bot);
+  return BotSessionRegistry::Instance().WithSession(
+      bot->GetGUID().GetRawValue(), [kind, &input](BotSession& s) {
+        return llm_brain::StartErrandHold(s.errand_hold, kind, input);
+      });
+}
+
+bool BotManager::ErrandHoldActive(Player* bot) {
+  if (!bot) {
+    return false;
+  }
+  const uint64_t key = bot->GetGUID().GetRawValue();
+  // Fast path: avoid scanning group members when no errand hold is active.
+  const bool maybe_active = BotSessionRegistry::Instance().InspectSession(
+      key, [](const BotSession* s) { return s && s->errand_hold.active; });
+  if (!maybe_active) {
+    return false;
+  }
+  const ErrandHoldInput input = MakeErrandHoldInput(bot);
+  return BotSessionRegistry::Instance().WithSession(
+      key, [&input](BotSession& s) {
+        return EvaluateErrandHold(s.errand_hold, input);
+      });
+}
+
+void BotManager::ClearErrandHold(Player* bot) {
+  if (!bot) {
+    return;
+  }
+  BotSessionRegistry::Instance().WithSession(
+      bot->GetGUID().GetRawValue(),
+      [](BotSession& s) { llm_brain::ClearErrandHold(s.errand_hold); });
 }
 
 void BotManager::SetStopDps(Player* bot, bool stop) {

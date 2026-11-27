@@ -10,19 +10,31 @@
 
 #include "Optional.h"  // IWYU pragma: keep
 
+#include "Cell.h"
+#include "CellImpl.h"  // IWYU pragma: keep
+#include "Creature.h"
 #include "G3D/Vector3.h"
+#include "GameObject.h"
+#include "GridNotifiers.h"
+#include "GridNotifiersImpl.h"  // IWYU pragma: keep
 #include "GridTerrainData.h"
 #include "IVMapMgr.h"
 #include "Map.h"
 #include "MotionMaster.h"
 #include "MoveSplineInit.h"
 #include "MoveSplineInitArgs.h"
+#include "ObjectMgr.h"
+#include "Opcodes.h"
 #include "PathGenerator.h"
 #include "Player.h"
+#include "Unit.h"
 #include "UnitDefines.h"
+#include "WorldPacket.h"
+#include "WorldSession.h"
 #include "base/time/time.h"
 #include "options/action_types.h"
 #include "options/exec_shared.h"
+#include "options/leader_travel.h"
 #include "options/option_facts.h"
 #include "options/position_facts.h"
 #include "snapshot/snapshot.h"
@@ -55,6 +67,29 @@ G3D::Vector3 PointAlongPath(const Movement::PointsArray& points,
   return points.back();
 }
 
+Creature* FindNearbyFlightMaster(Player* bot, float radius_yd) {
+  std::vector<Unit*> units;
+  Acore::AnyUnitInObjectRangeCheck check(bot, radius_yd);
+  Acore::UnitListSearcher<Acore::AnyUnitInObjectRangeCheck> searcher(bot, units,
+                                                                     check);
+  Cell::VisitObjects(bot, searcher, radius_yd);
+  Creature* best = nullptr;
+  float best_dist = radius_yd + 1.0f;
+  for (Unit* u : units) {
+    Creature* c = u->ToCreature();
+    if (!c || !c->IsAlive() || !c->HasNpcFlag(UNIT_NPC_FLAG_FLIGHTMASTER) ||
+        bot->IsHostileTo(c)) {
+      continue;
+    }
+    const float d = bot->GetDistance(c);
+    if (d < best_dist) {
+      best = c;
+      best_dist = d;
+    }
+  }
+  return best;
+}
+
 }  // namespace
 
 WalkStepResult TickLongWalk(Player* bot,
@@ -84,12 +119,69 @@ WalkStepResult TickLongWalk(Player* bot,
   }
   const float dist_to_dest =
       bot->GetExactDist(walk->dest.x, walk->dest.y, walk->dest.z);
+
+  // Legitimate cross-map / flight-path arrival handlers (Milestone 5b, #7).
+  if (walk->arrival.kind == TravelLegKind::kAreaTrigger) {
+    const AreaTrigger* at =
+        sObjectMgr->GetAreaTrigger(walk->arrival.trigger_id);
+    if (!at || at->map != bot->GetMapId()) {
+      stop_walk();
+      return {.error = "portal trigger is not on this map"};
+    }
+    if (bot->IsInAreaTriggerRadius(at, 0.0f) || dist_to_dest <= 3.0f) {
+      stop_walk();
+      if (WorldSession* sess = bot->GetSession()) {
+        WorldPacket pkt(CMSG_AREATRIGGER, 4);
+        pkt << uint32_t(walk->arrival.trigger_id);
+        pkt.rpos(0);
+        sess->HandleAreaTriggerOpcode(pkt);
+        return {.arrived = true};
+      }
+      return {.error = "no session for portal trigger"};
+    }
+  } else if (walk->arrival.kind == TravelLegKind::kPortalObject &&
+             dist_to_dest <= 15.0f) {
+    if (GameObject* go = bot->FindNearestGameObject(
+            walk->arrival.object_entry, 20.0f, /*onlySpawned=*/true)) {
+      if (IsInUseRange(bot, go)) {
+        stop_walk();
+        go->Use(bot);
+        return {.arrived = true};
+      }
+      if (!bot->isMoving()) {
+        WalkNextTo(bot, go);
+        return {};
+      }
+    }
+  } else if (walk->arrival.kind == TravelLegKind::kFlightMaster &&
+             dist_to_dest <= 25.0f) {
+    if (Creature* fm = FindNearbyFlightMaster(bot, 35.0f)) {
+      if (IsInTalkRange(bot, fm)) {
+        stop_walk();
+        if (!bot->ActivateTaxiPathTo(walk->arrival.taxi_nodes, fm, 0)) {
+          return {.error = "could not start flight"};
+        }
+        return {.arrived = true};
+      }
+      if (!bot->isMoving()) {
+        WalkNextTo(bot, fm);
+        return {};
+      }
+    }
+  }
+
   const pb::Vec3 pos{bot->GetPositionX(), bot->GetPositionY(),
                      bot->GetPositionZ()};
   switch (CheckWalkProgress(pos, dist_to_dest, now, &walk->progress)) {
     case WalkProgressVerdict::kArrived:
-      stop_walk();
-      return {.arrived = true};
+      if (walk->arrival.kind == TravelLegKind::kWalk) {
+        stop_walk();
+        return {.arrived = true};
+      }
+      // For portal/trigger/flight-master legs, arriving within 10 yd is not
+      // enough until the trigger/object/NPC is actually activated above; step
+      // closer if not yet in range.
+      break;
     case WalkProgressVerdict::kStuck:
       stop_walk();
       return {.error = "stuck"};
@@ -132,11 +224,20 @@ WalkStepResult TickLongWalk(Player* bot,
            end_dist_to_dest + 2.0f < dist_to_dest)) {
         next_pt = cand;
         found = true;
+      } else if (walk->arrival.kind == TravelLegKind::kAreaTrigger &&
+                 dist_to_dest <= 15.0f &&
+                 end_dist_to_dest + 0.5f < dist_to_dest &&
+                 bot->GetExactDist(end.x, end.y, end.z) >= 1.0f) {
+        // Portal AreaTriggers can sit slightly past the navmesh edge; step to
+        // the closest reachable point along the path.
+        next_pt = end;
+        found = true;
       }
     }
   }
 
-  if (!found && dist_to_dest <= kWalkNearEnoughArrivalYd) {
+  if (!found && walk->arrival.kind == TravelLegKind::kWalk &&
+      dist_to_dest <= kWalkNearEnoughArrivalYd) {
     stop_walk();
     return {.arrived = true, .path_time = base::TimeTicks::Now() - path_start};
   }
@@ -250,6 +351,7 @@ WalkStepResult StartWalkAction(Player* bot,
               .last_closer_at = now,
           },
       .last_path_at = {},
+      .arrival = ParseLeaderTravelPlaceId(action.id),
   };
   return TickLongWalk(bot, now, walk, dungeon_nav);
 }

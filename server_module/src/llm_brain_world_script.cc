@@ -48,6 +48,7 @@
 #include "base/time/time.h"
 #include "bot_manager/bot_manager.h"
 #include "bot_manager/character_loader.h"
+#include "bot_manager/errand_hold.h"
 #include "bot_manager/popup_watch.h"
 #include "bot_manager/pull_discipline.h"
 #include "bot_session.h"
@@ -391,6 +392,7 @@ class LlmBrainWorldScript : public WorldScript {
         }
         ResetRtiOverride(bot, bots_[i].rti_override);
         ResetStopDps(bot, bots_[i].stop_dps);
+        bots_[i].errand_hold_active = false;
         BotSessionRegistry::Instance().ResetOnMapChange(
             bot->GetGUID().GetRawValue());
       }
@@ -599,6 +601,7 @@ class LlmBrainWorldScript : public WorldScript {
       }
       ResetRtiOverride(bot, bots_[i].rti_override);
       ResetStopDps(bot, bots_[i].stop_dps);
+      bots_[i].errand_hold_active = false;
       if (bots_[i].active_act) {
         if (bot && GET_PLAYERBOT_AI(bot) != nullptr) {
           CancelActiveAct(bot, &*bots_[i].active_act);
@@ -782,6 +785,8 @@ class LlmBrainWorldScript : public WorldScript {
       case LeaderCommand::kWait:
         policy.stay = true;
         BotManager::SetGroupPolicy(bot, policy);
+        BotManager::ClearErrandHold(bot);
+        bots_[index].errand_hold_active = false;
         bot->StopMoving();
         done = "you stop and wait here";
         break;
@@ -797,6 +802,8 @@ class LlmBrainWorldScript : public WorldScript {
           state.active_act.reset();
         }
         BotManager::ClearPingStay(bot);
+        BotManager::ClearErrandHold(bot);
+        state.errand_hold_active = false;
         done = "you follow " + sender->GetName() + " again";
         break;
       }
@@ -805,6 +812,8 @@ class LlmBrainWorldScript : public WorldScript {
         if (!target || !bot->IsValidAttackTarget(target)) {
           return said + " (not applied: no enemy targeted)";
         }
+        BotManager::ClearErrandHold(bot);
+        bots_[index].errand_hold_active = false;
         ResetStopDps(bot, bots_[index].stop_dps);
         LeaderAttack(bot, ai, target, /*mark=*/std::nullopt,
                      &bots_[index].rti_override);
@@ -1382,6 +1391,8 @@ class LlmBrainWorldScript : public WorldScript {
     if (!error.empty()) {
       state.active_option.reset();
       state.active_item_spell_id = 0;
+      state.errand_hold_active = false;
+      BotManager::ClearErrandHold(bot);
       schedule_->SetActiveTargetPending(bot_index, false);
       // The bot sees it like the client's red error line; attach a fresh
       // snapshot first so the harness acts on current world state rather than a
@@ -1393,11 +1404,18 @@ class LlmBrainWorldScript : public WorldScript {
       EmitAlertingEvent(bot_index, name, bot, std::move(payload));
     } else if (keep) {
       // Keep: the body carries on, including a walk to an object it hasn't
-      // clicked yet.
+      // clicked yet. If no option is pending, drop any post-NPC grace hold so
+      // follow resumes immediately.
+      if (!state.active_option) {
+        state.errand_hold_active = false;
+        BotManager::ClearErrandHold(bot);
+      }
       state.done_command_id = command.command_id;
     } else if (option_use_started) {
       state.active_option.reset();
       state.active_item_spell_id = 0;
+      state.errand_hold_active = false;
+      BotManager::ClearErrandHold(bot);
       option_use.command_id = command.command_id;
       option_use.for_option = true;
       state.active_act = std::move(option_use);
@@ -1428,6 +1446,14 @@ class LlmBrainWorldScript : public WorldScript {
           bot, *target, used, &state.had_food_drink_aura, pending_spell_id);
       if (progress.pending) {
         state.active_option = *target;
+        const ErrandKind errand_kind = ErrandKindForAction(target->action);
+        if (errand_kind != ErrandKind::kNone) {
+          state.errand_hold_active =
+              BotManager::StartErrandHold(bot, errand_kind);
+        } else if (ActionCancelsErrandHold(target->action)) {
+          state.errand_hold_active = false;
+          BotManager::ClearErrandHold(bot);
+        }
         schedule_->SetActiveTargetPending(bot_index, true);
       } else if (!progress.interrupted.empty()) {
         state.active_option = *target;
@@ -1435,6 +1461,14 @@ class LlmBrainWorldScript : public WorldScript {
       } else {
         state.active_option.reset();
         state.active_item_spell_id = 0;
+        state.errand_hold_active = false;
+        const ErrandKind errand_kind = ErrandKindForAction(target->action);
+        if (errand_kind == ErrandKind::kTalk ||
+            errand_kind == ErrandKind::kNpcInteract) {
+          BotManager::StartErrandHold(bot, ErrandKind::kNpcInteract);
+        } else {
+          BotManager::ClearErrandHold(bot);
+        }
         state.done_command_id = command.command_id;
         schedule_->SetActiveTargetPending(bot_index, false);
       }
@@ -1486,6 +1520,8 @@ class LlmBrainWorldScript : public WorldScript {
       failed.command_id = command_id;
       EmitAlertingEvent(bot_index, name, bot, std::move(payload));
     } else if (res.used) {
+      state.errand_hold_active = false;
+      BotManager::ClearErrandHold(bot);
       const bool stops_movement =
           (act.verb == wlb::snapshot::Command_Act::STOP &&
            (act.stop == wlb::snapshot::Command_Act::MOVING ||
@@ -1503,6 +1539,8 @@ class LlmBrainWorldScript : public WorldScript {
           bot_index,
           state.active_option.has_value() || state.active_act.has_value());
     } else {
+      state.errand_hold_active = false;
+      BotManager::ClearErrandHold(bot);
       ReportOptionUseDropped(bot_index, name, bot);
       if (state.active_act && !IsMovementActVerb(act.verb)) {
         // Non-movement multi-tick act (e.g. cast-time `use`) supersedes an old
@@ -1709,7 +1747,21 @@ class LlmBrainWorldScript : public WorldScript {
         return;
       }
     }
-    if (!state.active_option || state.object_used) {
+    if (!state.active_option) {
+      return;
+    }
+    if (state.errand_hold_active && !BotManager::ErrandHoldActive(bot)) {
+      state.errand_hold_active = false;
+      ClearLastMovement(bot);
+      if (bot->isMoving()) {
+        bot->StopMoving();
+      }
+      FailActiveOption(
+          index, name, bot,
+          IsPartyInCombat(bot) ? "interrupted by combat" : "errand timed out");
+      return;
+    }
+    if (state.object_used) {
       return;
     }
     const OptionTarget::Kind kind = state.active_option->kind;
@@ -1871,6 +1923,8 @@ class LlmBrainWorldScript : public WorldScript {
     const uint32_t command_id = state.active_command_id;
     state.active_option.reset();
     state.active_item_spell_id = 0;
+    state.errand_hold_active = false;
+    BotManager::ClearErrandHold(bot);
     schedule_->SetActiveTargetPending(index, false);
     wlb::snapshot::Event payload;
     wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
@@ -1893,8 +1947,16 @@ class LlmBrainWorldScript : public WorldScript {
                  progress.interrupted);
         FailActiveOption(index, bot->GetName(), bot, progress.interrupted);
       } else if (!pending) {
+        const OptionTarget::Kind done_kind = state->active_option->kind;
         state->active_option.reset();
         state->active_item_spell_id = 0;
+        if (done_kind == OptionTarget::Kind::kTalk) {
+          state->errand_hold_active = false;
+          BotManager::StartErrandHold(bot, ErrandKind::kNpcInteract);
+        } else if (state->errand_hold_active) {
+          state->errand_hold_active = false;
+          BotManager::ClearErrandHold(bot);
+        }
         state->done_command_id = state->active_command_id;
       }
     }
@@ -2292,6 +2354,9 @@ class LlmBrainWorldScript : public WorldScript {
     bool moving_out = false;
     // Whether the last SyncActStealth saw a stealth-only `use` walking in.
     bool act_stealth = false;
+    // Whether the current `active_option` holds a grouped-follower errand pause
+    // on playerbots `follow` and the 40 yd leash (Milestone 5a).
+    bool errand_hold_active = false;
     // Last observed map/instance so map changes clear active acts & `back`.
     bool has_last_map = false;
     uint32_t last_map_id = 0;

@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "bot_manager/errand_hold.h"
 #include "bot_manager/popup_watch.h"
 
 class Player;
@@ -92,6 +93,15 @@ class BotManager {
   static void ClearPingStay(Player* bot);
   // Starts that hold where the bot stands now.
   static void StartPingStay(Player* bot);
+
+  // Thread-safe: pauses playerbots' `follow`, `KeepSafeGroupFollow`, and the
+  // 40 yd leash (`KeepNearHumanLeader`) while a grouped follower runs a
+  // brain-initiated errand (loot, gather, talk, use, walk, rest, NPC
+  // interaction). Immediately yields on P0 combat (self or party), completion,
+  // timeout, map/instance change, or disconnect (Milestone 5a).
+  static bool StartErrandHold(Player* bot, ErrandKind kind);
+  static bool ErrandHoldActive(Player* bot);
+  static void ClearErrandHold(Player* bot);
 
   // Thread-safe: whether a leader "stop dps" command currently pauses
   // offensive attacks and non-positive spell casts for `bot`.

@@ -22,6 +22,7 @@
 #include "DetourStatus.h"
 #include "G3D/Vector3.h"
 #include "GameGraveyard.h"
+#include "GameObjectData.h"
 #include "GameTime.h"
 #include "GridTerrainData.h"
 #include "IVMapMgr.h"
@@ -35,6 +36,8 @@
 #include "Player.h"
 #include "Position.h"
 #include "SharedDefines.h"
+#include "SpellInfo.h"
+#include "SpellMgr.h"
 #include "StringFormat.h"
 #include "Trainer.h"
 #include "TravelMgr.h"
@@ -42,6 +45,7 @@
 #include "World.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
+#include "options/leader_travel.h"
 #include "options/position_facts.h"
 #include "snapshot/perception.h"
 #include "snapshot/snapshot.h"
@@ -770,6 +774,110 @@ std::unique_ptr<WorldPlaces> WorldPlaces::Build() {
         hub.max_quest_level = qlevels[(3 * (n - 1)) / 4];
       }
     }
+  }
+
+  // Cross-map travel graph (Milestone 5b, Finding #7): legitimate
+  // AreaTriggerTeleports (dungeon/raid entrances & exits, Dark Portal,
+  // Deeprun Tram) and faction-compatible portal GameObjects (Shattrath/Dalaran
+  // city portals, Orb of Translocation).
+  const uint32_t locale = sWorld->GetDefaultDbcLocale();
+  for (const auto& [trigger_id, at_tp] :
+       sObjectMgr->GetAllAreaTriggerTeleports()) {
+    const AreaTrigger* at = sObjectMgr->GetAreaTrigger(trigger_id);
+    if (!at || at->map == at_tp.target_mapId) {
+      continue;
+    }
+    const MapEntry* from_map = sMapStore.LookupEntry(at->map);
+    const MapEntry* to_map = sMapStore.LookupEntry(at_tp.target_mapId);
+    if (!from_map || !to_map || from_map->IsBattlegroundOrArena() ||
+        to_map->IsBattlegroundOrArena()) {
+      continue;
+    }
+    const char* to_name = to_map->name[locale];
+    std::string label;
+    if (to_map->IsDungeon()) {
+      label = (to_name && *to_name) ? std::string(to_name) + " entrance"
+                                    : "instance entrance";
+    } else if (from_map->IsDungeon()) {
+      label = "instance exit";
+    } else {
+      label = (to_name && *to_name) ? std::string("portal to ") + to_name
+                                    : "portal";
+    }
+    world->cross_map_edges_.push_back(CrossMapEdge{
+        .kind = TravelLegKind::kAreaTrigger,
+        .from_map_id = at->map,
+        .from_pos = {at->x, at->y, at->z},
+        .to_map_id = at_tp.target_mapId,
+        .to_pos = {at_tp.target_X, at_tp.target_Y, at_tp.target_Z},
+        .trigger_id = trigger_id,
+        .object_entry = 0,
+        .label = std::move(label),
+        .for_alliance = true,
+        .for_horde = true,
+    });
+  }
+  for (const auto& [spawn_id, data] : sObjectMgr->GetAllGOData()) {
+    if (data.phaseMask != PHASEMASK_NORMAL) {
+      continue;
+    }
+    const GameObjectTemplate* go_tmpl =
+        sObjectMgr->GetGameObjectTemplate(data.id);
+    if (!go_tmpl || go_tmpl->type != GAMEOBJECT_TYPE_SPELLCASTER ||
+        go_tmpl->spellcaster.spellId == 0 || go_tmpl->spellcaster.partyOnly ||
+        go_tmpl->name.empty()) {
+      continue;
+    }
+    const SpellInfo* spell =
+        sSpellMgr->GetSpellInfo(go_tmpl->spellcaster.spellId);
+    if (!spell) {
+      continue;
+    }
+    const SpellTargetPosition* tp = nullptr;
+    for (uint8_t i = 0; i < MAX_SPELL_EFFECTS; ++i) {
+      if (spell->Effects[i].Effect == SPELL_EFFECT_TELEPORT_UNITS) {
+        tp = sSpellMgr->GetSpellTargetPosition(spell->Id,
+                                               static_cast<SpellEffIndex>(i));
+        if (tp) {
+          break;
+        }
+      }
+    }
+    if (!tp || tp->target_mapId == data.mapid) {
+      continue;
+    }
+    const MapEntry* from_map = sMapStore.LookupEntry(data.mapid);
+    const MapEntry* to_map = sMapStore.LookupEntry(tp->target_mapId);
+    if (!from_map || !to_map || from_map->IsBattlegroundOrArena() ||
+        to_map->IsBattlegroundOrArena()) {
+      continue;
+    }
+    bool for_alliance = true;
+    bool for_horde = true;
+    if (const GameObjectTemplateAddon* addon =
+            sObjectMgr->GetGameObjectTemplateAddon(data.id);
+        addon && addon->faction != 0) {
+      if (const FactionTemplateEntry* ft =
+              sFactionTemplateStore.LookupEntry(addon->faction)) {
+        for_alliance = (ft->hostileMask & FACTION_MASK_ALLIANCE) == 0;
+        for_horde = (ft->hostileMask & FACTION_MASK_HORDE) == 0;
+      }
+    }
+    if (!for_alliance && !for_horde) {
+      continue;
+    }
+    world->cross_map_edges_.push_back(CrossMapEdge{
+        .kind = TravelLegKind::kPortalObject,
+        .from_map_id = data.mapid,
+        .from_pos = {data.posX, data.posY, data.posZ},
+        .to_map_id = tp->target_mapId,
+        .to_pos = {tp->target_X, tp->target_Y, tp->target_Z},
+        .trigger_id = 0,
+        .object_entry = data.id,
+        .label = go_tmpl->name,
+        .for_alliance = for_alliance,
+        .for_horde = for_horde,
+    });
   }
   return world;
 }

@@ -1,22 +1,15 @@
 # TODO
 
 Open work only (Now / Next / Later). Completed work lives in `git log`.
-Last updated: 2026-11-26 (team-play review @ `70b0878`).
+Last updated: 2026-11-27 (team-play review @ `70b0878`).
 
 ## Now
 
 Ordered team-play P0 fixes from the `70b0878` review, followed by live verification:
 
-1. **Errand movement & left-behind catch-up (P0 #7):** A bot left behind on another map, after a
-   missed boat/flight, or far away can't catch up — auto-recall only works on the same map over
-   short paths, "Follow (party leader)" only appears at 8–25 yd, and the leader is never a travel
-   destination (`server_module/src/bot_manager/bot_manager.cc:994-1019`,
-   `server_module/src/options/exec_social.cc:544-548`,
-   `server_module/src/options/option_facts.cc:432-435`). Pause follow and the leash while a brain
-   errand is running, and add a "go to leader" travel target with cross-map routing.
-2. **Live-model E2E team-play tests:** Add end-to-end tests with the live model covering a dungeon
+1. **Live-model E2E team-play tests:** Add end-to-end tests with the live model covering a dungeon
    clear with pulls and a wipe, a human disconnect, an LLM stall, and a 10-man boss.
-3. **Live playtest with a real client:** Alliance preset characters (`Aldric`, `Mirabel`, `Cedric`,
+2. **Live playtest with a real client:** Alliance preset characters (`Aldric`, `Mirabel`, `Cedric`,
    `Vesper`, `Torvin`, `Bram`, `Pippa`, `Sylva`, `Talaan`), `e2e_human_party` and
    `e2e_human_dungeon` (a scripted client leads 4 bots through the Dungeon Finder into the
    Deadmines: ready check, summon, loot roll, ping/go there/los, a bot rez, Sap/Polymorph on marks;
@@ -28,9 +21,6 @@ Ordered team-play P0 fixes from the `70b0878` review, followed by live verificat
 Team-play P1 gaps and selected P2 items from the `70b0878` review:
 
 ### Control seam (brain vs. playerbots)
-- **Follow cancels brain errands:** `follow` and `KeepSafeGroupFollow` (5.5 yd) cancel
-  loot/gather/talk/use moves and stop casts; 40 yd leash resets brain walks every 4 s
-  (`bot_manager.cc:1002-1019,1101-1151`; `pb:.../MovementActions.cpp:1086-1255`).
 - **Wake storms drop plans:** Every spell miss (dodge/parry/resist) wakes brain at P1 and stops the
   plan; any wake during an LLM call drops the reply (`harness/src/plan/triggers.cc:640-654`,
   `bot_loop.cc:1299-1303,1991-1993`).
