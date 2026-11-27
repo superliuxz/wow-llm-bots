@@ -408,5 +408,77 @@ TEST(SchedulerTest, LeavingTheHumansPartyFreesThePermitOnTheNextChange) {
   EXPECT_EQ(r.started(), (Names{"a", "b"}));
 }
 
+TEST(SchedulerTest, PrioritizesTanksAndHealersOverDpsWithinSameUrgency) {
+  Scheduler scheduler(1);
+  Recorder r;
+  scheduler.SetBotRole("tank1", BotRole::kTank);
+  scheduler.SetBotRole("tank2", BotRole::kTank);
+  scheduler.SetBotRole("heal1", BotRole::kHealer);
+  scheduler.SetBotRole("heal2", BotRole::kHealer);
+  scheduler.SetBotRole("dps1", BotRole::kDefault);
+  scheduler.SetBotRole("dps2", BotRole::kDefault);
+
+  // Occupy the single permit, then submit DPS first, then healers, then tanks
+  // at the same urgency (P0 combat burst).
+  scheduler.Submit("busy", Urgency::kP0Combat, r.Work("busy"));
+  scheduler.Submit("dps1", Urgency::kP0Combat, r.Work("dps1"));
+  scheduler.Submit("dps2", Urgency::kP0Combat, r.Work("dps2"));
+  scheduler.Submit("heal1", Urgency::kP0Combat, r.Work("heal1"));
+  scheduler.Submit("heal2", Urgency::kP0Combat, r.Work("heal2"));
+  scheduler.Submit("tank1", Urgency::kP0Combat, r.Work("tank1"));
+  scheduler.Submit("tank2", Urgency::kP0Combat, r.Work("tank2"));
+
+  for (const char* bot : {"busy", "tank1", "tank2", "heal1", "heal2", "dps1"}) {
+    r.Finish(bot);
+  }
+  EXPECT_EQ(r.started(), (Names{"busy", "tank1", "tank2", "heal1", "heal2",
+                                "dps1", "dps2"}));
+}
+
+TEST(SchedulerTest, P0CombatDpsAlwaysBeatsNonCombatTankAndHealer) {
+  Scheduler scheduler(1);
+  Recorder r;
+  scheduler.SetBotRole("tank", BotRole::kTank);
+  scheduler.SetBotRole("healer", BotRole::kHealer);
+  scheduler.SetBotRole("dps", BotRole::kDefault);
+
+  scheduler.Submit("busy", Urgency::kP2Routine, r.Work("busy"));
+  scheduler.Submit("tank", Urgency::kP1Danger, r.Work("tank"));
+  scheduler.Submit("healer", Urgency::kP1Danger, r.Work("healer"));
+  scheduler.Submit("dps", Urgency::kP0Combat, r.Work("dps"));
+  r.Finish("busy");
+  EXPECT_EQ(r.started(), (Names{"busy", "dps"}));
+}
+
+TEST(SchedulerTest, AgedDpsCanBeatFreshLowerPriorityTank) {
+  base::TimeTicks now = base::TimeTicks() + base::Seconds(100);
+  Scheduler scheduler(1, /*aging_step=*/base::Seconds(2));
+  scheduler.SetNowForTesting([&] { return now; });
+  Recorder r;
+  scheduler.SetBotRole("tank", BotRole::kTank);
+  scheduler.SetBotRole("dps", BotRole::kDefault);
+
+  scheduler.Submit("busy", Urgency::kP2Routine, r.Work("busy"));
+  scheduler.Submit("dps", Urgency::kP2Routine, r.Work("dps"));
+  // After 3 s, dps ages from P2 -> P1, beating a fresh P2 tank.
+  now = now + base::Seconds(3);
+  scheduler.Submit("tank", Urgency::kP2Routine, r.Work("tank"));
+  r.Finish("busy");
+  EXPECT_EQ(r.started(), (Names{"busy", "dps"}));
+}
+
+TEST(SchedulerTest, ResettingBotRoleReturnsToDefaultOrder) {
+  Scheduler scheduler(1);
+  Recorder r;
+  scheduler.SetBotRole("former_tank", BotRole::kTank);
+  scheduler.SetBotRole("former_tank", BotRole::kDefault);
+
+  scheduler.Submit("busy", Urgency::kP1Danger, r.Work("busy"));
+  scheduler.Submit("dps", Urgency::kP1Danger, r.Work("dps"));
+  scheduler.Submit("former_tank", Urgency::kP1Danger, r.Work("former_tank"));
+  r.Finish("busy");
+  EXPECT_EQ(r.started(), (Names{"busy", "dps"}));
+}
+
 }  // namespace
 }  // namespace harness

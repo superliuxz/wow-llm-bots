@@ -47,6 +47,15 @@ enum class Urgency {
   kNormal = kP2Routine,
 };
 
+// Declared group role for scheduling priority within the same urgency tier
+// (lower integer = higher priority). Tanks and healers go ahead of DPS when
+// many raid bots wake at once.
+enum class BotRole {
+  kTank = 0,
+  kHealer = 1,
+  kDefault = 2,
+};
+
 class Scheduler {
  public:
   // Starts the work for one bot (asks the model). `SlotWork` also receives the
@@ -81,6 +90,11 @@ class Scheduler {
   // finishes or is submitted (never runs work from inside this call).
   void SetHumanParty(const std::string& bot, bool in_human_party);
 
+  // Declared group role of `bot` (from its latest snapshot) used as a
+  // tie-breaker within the same effective urgency tier (tanks -> healers ->
+  // DPS/other). Never starts work from inside this call.
+  void SetBotRole(const std::string& bot, BotRole role);
+
   // Aborts all cancelable in-flight calls (e.g. on harness disconnect).
   void CancelAllInFlight();
 
@@ -105,6 +119,7 @@ class Scheduler {
 
   base::TimeTicks Now() const;
   int EffectivePriority(const Waiting& w, base::TimeTicks now) const;
+  BotRole RoleOf(const std::string& bot) const;
   int PickSlot(const std::string& bot);
   // One permit is held for human-party bots and `bot` isn't one of them.
   bool HeldBackForHumanParty(const std::string& bot) const;
@@ -122,6 +137,7 @@ class Scheduler {
   std::flat_map<std::string, InFlight> in_flight_;
   std::flat_map<std::string, int> last_slot_;
   std::flat_set<std::string> human_party_;
+  std::flat_map<std::string, BotRole> bot_roles_;
   bool starting_ = false;  // StartWaiting is running (work may finish inside).
   base::WeakPtrFactory<Scheduler> weak_factory_{this};
 };

@@ -254,6 +254,53 @@ constexpr size_t kMaxUnpromptedPartyLinesPerWindow = 2;
 constexpr base::TimeDelta kMinUnpromptedPartySpacing = base::Seconds(6);
 constexpr int64_t kTypingMsPerChar = 35;
 
+// Raid-scale (> 5 members) event fan-out coalescing and staggering.
+constexpr base::TimeDelta kRaidLootCoalesceDelay = base::Milliseconds(500);
+constexpr base::TimeDelta kRaidLootStaggerStep = base::Milliseconds(250);
+constexpr base::TimeDelta kRaidEmoteStaggerStep = base::Milliseconds(250);
+// Large-raid (> 10 members, e.g. 25-man) /rw pacing for non-addressed DPS
+// (~6.6 wakes/s, matching ~7 wakes/s LLM capacity).
+constexpr base::TimeDelta kRaidWarningStaggerStep = base::Milliseconds(150);
+
+BotRole BotRoleOf(const pb::Snapshot& snapshot) {
+  const std::optional<pb::GroupPart>& g = snapshot.base.self.unit.group;
+  if (!g) {
+    return BotRole::kDefault;
+  }
+  if (g->role == pb::TANK || g->main_tank) {
+    return BotRole::kTank;
+  }
+  if (g->role == pb::HEALER) {
+    return BotRole::kHealer;
+  }
+  return BotRole::kDefault;
+}
+
+size_t GroupSize(const pb::Snapshot& snapshot) {
+  if (!snapshot.ext.party && !snapshot.ext.raid) {
+    return 1;
+  }
+  std::flat_set<std::string> names;
+  if (!snapshot.bot.empty()) {
+    names.insert(snapshot.bot);
+  }
+  if (snapshot.ext.party) {
+    for (const pb::Unit& m : snapshot.ext.party->members) {
+      if (!m.name.empty()) {
+        names.insert(m.name);
+      }
+    }
+  }
+  if (snapshot.ext.raid) {
+    for (const pb::Unit& m : snapshot.ext.raid->members) {
+      if (!m.name.empty()) {
+        names.insert(m.name);
+      }
+    }
+  }
+  return std::max<size_t>(names.size(), 1);
+}
+
 bool HasGroupMembers(const pb::Snapshot& snapshot) {
   return (snapshot.ext.party && !snapshot.ext.party->members.empty()) ||
          (snapshot.ext.raid && !snapshot.ext.raid->members.empty());
@@ -277,7 +324,8 @@ bool IsGroupSharedChatChannel(pb::ChatChannel ch,
   if (ch == pb::PARTY || ch == pb::RAID) {
     return true;
   }
-  return (ch == pb::SAY || ch == pb::YELL) && HasGroupMembers(snapshot);
+  return (ch == pb::SAY || ch == pb::YELL || ch == pb::EMOTE) &&
+         HasGroupMembers(snapshot);
 }
 
 std::string PartyBudgetKey(const std::string& bot,
@@ -926,8 +974,10 @@ void BotLoop::OnConnectionChanged(bool connected) {
     for (auto&& [name, state] : bots_) {
       ResetBotSession(&state, /*cancel_in_flight=*/false);
       scheduler_.SetHumanParty(name, false);
+      scheduler_.SetBotRole(name, BotRole::kDefault);
     }
     party_chat_budgets_.clear();
+    raid_fanout_pacers_.clear();
     // Answers to screens of the old connection are useless: free the slots.
     scheduler_.CancelAllInFlight();
     // Server resets its own health flag on disconnect; start clean on the next
@@ -1010,6 +1060,8 @@ void BotLoop::ResetBotSession(BotState* state, bool cancel_in_flight) {
   state->pending_chats.clear();
   state->chat_wake_times_by_sender.clear();
   state->deferred_chat_at = base::TimeTicks();
+  state->deferred_raid_wake_at = base::TimeTicks();
+  state->deferred_raid_wake_urgency = Urgency::kP2Routine;
   state->recent_events.clear();
   state->whisperers.clear();
   state->player_chat_memory.clear();
@@ -1201,6 +1253,7 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   const std::optional<WakeTrigger> trig =
       state.triggers.EvaluateSnapshot(snapshot);
   scheduler_.SetHumanParty(bot, PlaysWithHuman(snapshot));
+  scheduler_.SetBotRole(bot, BotRoleOf(snapshot));
   state.latest_snapshot = std::move(snapshot);
   state.latest_screen = std::move(screen);
   state.latest_received_at = received_at;
@@ -1566,12 +1619,73 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
     }
   }
   const bool refusal = imm.event.error && imm.event.error->command_id != 0;
-  const std::optional<WakeTrigger> trig =
+  std::optional<WakeTrigger> trig =
       is_player_chat
           ? chat_trig
           : EvaluateEventTrigger(imm.event, state.triggers.watches());
   if (!trig) {
     return;
+  }
+  if (state.latest_snapshot) {
+    const size_t group_size = GroupSize(*state.latest_snapshot);
+    const BotRole role = BotRoleOf(*state.latest_snapshot);
+    const bool is_tank_or_healer = role != BotRole::kDefault;
+    // Raid-scale (> 5 members) fan-out throttling & coalescing: prevent 24-bot
+    // simultaneous wake storms on loot rolls, out-of-combat boss RP emotes, and
+    // large-raid /rw while keeping tanks, healers, named bots, and in-combat P0
+    // wakes immediate.
+    if (imm.event.loot_roll && group_size > 5) {
+      base::TimeTicks due_at = state.deferred_raid_wake_at;
+      if (due_at.is_null()) {
+        const std::string key = PartyBudgetKey(bot, *state.latest_snapshot);
+        RaidFanOutPacer& pacer = raid_fanout_pacers_[key];
+        due_at =
+            std::max(received_at + kRaidLootCoalesceDelay, pacer.next_loot_at);
+        pacer.next_loot_at = due_at + kRaidLootStaggerStep;
+      }
+      ScheduleDeferredRaidWake(&state, Urgency::kP2Routine, trig->reason,
+                               due_at);
+      return;
+    }
+    if (imm.event.chat && imm.event.chat->channel == pb::BOSS_EMOTE &&
+        group_size > 5 && !state.latest_snapshot->base.self.in_combat) {
+      // Out-of-combat raid boss emotes are pre-pull RP dialogue, not P0 combat
+      // mechanics: downgrade to P2 and stagger non-addressed DPS.
+      trig->urgency = Urgency::kP2Routine;
+      if (!is_tank_or_healer &&
+          !ContainsWholeWordIgnoringCase(imm.event.chat->text, bot)) {
+        base::TimeTicks due_at = state.deferred_raid_wake_at;
+        if (due_at.is_null()) {
+          const std::string key = PartyBudgetKey(bot, *state.latest_snapshot);
+          RaidFanOutPacer& pacer = raid_fanout_pacers_[key];
+          due_at = std::max(received_at + kRaidEmoteStaggerStep,
+                            pacer.next_emote_at);
+          pacer.next_emote_at = due_at + kRaidEmoteStaggerStep;
+        }
+        ScheduleDeferredRaidWake(&state, Urgency::kP2Routine, trig->reason,
+                                 due_at);
+        return;
+      }
+    }
+    if (imm.event.chat && imm.event.chat->channel == pb::RAID_WARNING &&
+        group_size > 10 && !is_tank_or_healer &&
+        !ContainsWholeWordIgnoringCase(imm.event.chat->text, bot)) {
+      base::TimeTicks due_at =
+          (!state.deferred_raid_wake_at.is_null() &&
+           state.deferred_raid_wake_urgency <= Urgency::kP1Danger)
+              ? state.deferred_raid_wake_at
+              : base::TimeTicks();
+      if (due_at.is_null()) {
+        const std::string key = PartyBudgetKey(bot, *state.latest_snapshot);
+        RaidFanOutPacer& pacer = raid_fanout_pacers_[key];
+        due_at =
+            std::max(received_at + kRaidWarningStaggerStep, pacer.next_rw_at);
+        pacer.next_rw_at = due_at + kRaidWarningStaggerStep;
+      }
+      ScheduleDeferredRaidWake(&state, Urgency::kP1Danger, trig->reason,
+                               due_at);
+      return;
+    }
   }
   // Only P0 combat/emergency events abort a running plan immediately (step
   // refusals already stopped the runner above). Player chat and non-P0 alerts
@@ -1603,6 +1717,7 @@ void BotLoop::OnTick(base::TimeTicks now) {
           bot.c_str(), (now - state.latest_received_at).InSecondsF()));
       ResetBotSession(&state, /*cancel_in_flight=*/true);
       scheduler_.SetHumanParty(bot, false);
+      scheduler_.SetBotRole(bot, BotRole::kDefault);
       continue;
     }
     while (!state.pending_says.empty() &&
@@ -1648,6 +1763,16 @@ void BotLoop::OnTick(base::TimeTicks now) {
         continue;
       }
     }
+    if (!state.deferred_raid_wake_at.is_null() &&
+        now >= state.deferred_raid_wake_at) {
+      const Urgency urgency = state.deferred_raid_wake_urgency;
+      state.deferred_raid_wake_at = base::TimeTicks();
+      state.deferred_raid_wake_urgency = Urgency::kP2Routine;
+      if (!state.pending_reasons.empty()) {
+        WakeBot(bot, urgency, "", /*preserve_backoffs=*/true);
+        continue;
+      }
+    }
     if (!state.look_deadline.is_null() && now >= state.look_deadline &&
         !(state.pending_reasons.empty() &&
           WaitingOnAfkMember(*state.latest_snapshot))) {
@@ -1660,11 +1785,31 @@ void BotLoop::OnTick(base::TimeTicks now) {
   }
 }
 
+void BotLoop::ScheduleDeferredRaidWake(BotState* state,
+                                       Urgency urgency,
+                                       const std::string& reason,
+                                       base::TimeTicks due_at) {
+  if (!reason.empty() &&
+      std::find(state->pending_reasons.begin(), state->pending_reasons.end(),
+                reason) == state->pending_reasons.end()) {
+    state->pending_reasons.push_back(reason);
+  }
+  state->deferred_raid_wake_urgency =
+      state->deferred_raid_wake_at.is_null()
+          ? urgency
+          : std::min(state->deferred_raid_wake_urgency, urgency);
+  SetEarlierDeadline(&state->deferred_raid_wake_at, due_at);
+}
+
 void BotLoop::WakeBot(const std::string& bot,
                       Urgency urgency,
                       const std::string& reason,
                       bool preserve_backoffs) {
   BotState& state = bots_[bot];
+  // An immediate wake delivers all pending_reasons, superseding any deferred
+  // raid wake.
+  state.deferred_raid_wake_at = base::TimeTicks();
+  state.deferred_raid_wake_urgency = Urgency::kP2Routine;
   if (!preserve_backoffs) {
     state.step_refusals = 0;
     state.order_wakes = 0;

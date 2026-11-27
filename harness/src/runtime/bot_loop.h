@@ -281,6 +281,10 @@ class BotLoop {
     base::TimeTicks look_deadline;
     // When a rate-limited chat line (kept in pending_reasons) gets its wake.
     base::TimeTicks deferred_chat_at;
+    // Staggered/coalesced raid-scale wake (loot rolls, out-of-combat boss
+    // emotes, large-raid /rw for non-addressed DPS), flushed on OnTick().
+    base::TimeTicks deferred_raid_wake_at;
+    Urgency deferred_raid_wake_urgency = Urgency::kP2Routine;
     // Panels as the bot last saw them, for the prompt once they are closed.
     struct SeenPanel {
       std::vector<std::string> lines;
@@ -432,6 +436,10 @@ class BotLoop {
                Urgency urgency,
                const std::string& reason,
                bool preserve_backoffs = false);
+  void ScheduleDeferredRaidWake(BotState* state,
+                                Urgency urgency,
+                                const std::string& reason,
+                                base::TimeTicks due_at);
   // Returns a closure that cancels the started call (empty if none started).
   base::OnceClosure StartBotCall(const std::string& bot,
                                  int slot,
@@ -567,6 +575,14 @@ class BotLoop {
     base::TimeTicks last_text_at;
   };
   std::flat_map<std::string, PartyChatBudget> party_chat_budgets_;
+  // Per-group fan-out pacing for raid-scale bursts (loot rolls, /rw, RP boss
+  // emotes) so 24 bots don't flood the LLM in a single tick.
+  struct RaidFanOutPacer {
+    base::TimeTicks next_loot_at;
+    base::TimeTicks next_rw_at;
+    base::TimeTicks next_emote_at;
+  };
+  std::flat_map<std::string, RaidFanOutPacer> raid_fanout_pacers_;
   // Pre-pull compiled standing orders cached by (bot, map, notes).
   static constexpr size_t kMaxCompiledOrdersCache = 256;
   // How many of the newest `remember:` notes go into each prompt (RH-M4).

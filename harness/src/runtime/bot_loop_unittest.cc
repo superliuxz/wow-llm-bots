@@ -4881,5 +4881,275 @@ TEST(BotLoopTest, PerBossOrderRecompilationCachesAndRespectsCombatAndReset) {
   std::filesystem::remove_all(tmp_dir);
 }
 
+TEST(BotLoopTest, TwentyFiveManBurstPrioritizesRolesAndStaggersFanOut) {
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  // 1 human ("Human") + 24 bots: 2 tanks, 5 healers, 17 DPS.
+  struct BotSpec {
+    std::string name;
+    pb::Role role;
+  };
+  std::vector<BotSpec> bots;
+  for (int i = 1; i <= 2; ++i) {
+    bots.push_back({"Tank" + std::to_string(i), pb::Role::TANK});
+  }
+  for (int i = 1; i <= 5; ++i) {
+    bots.push_back({"Heal" + std::to_string(i), pb::Role::HEALER});
+  }
+  for (int i = 1; i <= 17; ++i) {
+    bots.push_back({"Dps" + std::to_string(i), pb::Role::DPS});
+  }
+
+  // Track every started call with its bot name and reply callback.
+  struct InFlightCall {
+    std::string bot;
+    std::string user;
+    base::OnceCallback<void(LlmResult)> reply;
+    base::scoped_refptr<LlmCancelHandle> cancel;
+  };
+  std::vector<InFlightCall> active;
+  std::vector<std::string> started_order;
+  auto extract_bot = [&](const LlmRequest& req) -> std::string {
+    for (const BotSpec& b : bots) {
+      if (req.user.find("RaidZone_" + b.name + " ") != std::string::npos ||
+          req.user.find("RaidZone_" + b.name + "\n") != std::string::npos ||
+          req.user.find("RaidZone_" + b.name + ",") != std::string::npos) {
+        return b.name;
+      }
+    }
+    return "";
+  };
+  auto finish_all = [&]() {
+    while (!active.empty()) {
+      InFlightCall call = std::move(active.front());
+      active.erase(active.begin());
+      LlmResult res;
+      res.reply.emplace().text = "do: 1\nexpect: none\nwatch: none\nlook: 300";
+      std::move(call.reply).Run(std::move(res));
+    }
+  };
+  auto finish_one = [&](size_t idx = 0) {
+    InFlightCall call = std::move(active[idx]);
+    active.erase(active.begin() + static_cast<ptrdiff_t>(idx));
+    LlmResult res;
+    res.reply.emplace().text = "do: 1\nexpect: none\nwatch: none\nlook: 300";
+    std::move(call.reply).Run(std::move(res));
+  };
+
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.max_in_flight = 4;  // Small concurrency to observe scheduling order.
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(
+      cfg,
+      [&](LlmRequest req, base::OnceCallback<void(LlmResult)> reply,
+          FirstLineCallback) {
+        auto h = base::MakeRefCounted<LlmCancelHandle>();
+        const std::string name = extract_bot(req);
+        started_order.push_back(name);
+        active.push_back({name, req.user, std::move(reply), h});
+        return h;
+      },
+      [](const pb::Command&) {});
+
+  auto make_snap = [&](const BotSpec& self_spec, uint32_t seq,
+                       base::TimeTicks at, bool in_combat) {
+    pb::Snapshot s = MakeLiveSnap(self_spec.name, seq, at, in_combat);
+    s.base.where.zone = "RaidZone_" + self_spec.name;
+    AddKeep(&s);
+    s.base.self.unit.name = self_spec.name;
+    s.base.self.unit.group.emplace().role = self_spec.role;
+    pb::Party& p = s.ext.party.emplace();
+    p.leader = "Human";
+    pb::Unit h;
+    h.name = "Human";
+    h.group.emplace().online = true;
+    h.group->in_range = true;
+    p.members.push_back(h);
+    for (const BotSpec& other : bots) {
+      if (other.name == self_spec.name) {
+        continue;
+      }
+      pb::Unit m;
+      m.name = other.name;
+      m.health_pct = 100.0f;
+      m.power_pct = 100.0f;
+      pb::GroupPart& gp = m.group.emplace();
+      gp.online = true;
+      gp.in_range = true;
+      gp.role = other.role;
+      p.members.push_back(m);
+    }
+    s.ext.raid.emplace();
+    return s;
+  };
+
+  // First look for all 24 bots (out of combat).
+  for (const BotSpec& b : bots) {
+    loop.OnSnapshot(make_snap(b, 1, t0, /*in_combat=*/false), t0);
+  }
+  finish_all();
+  started_order.clear();
+
+  // 1) Multi-item loot roll burst (3 epics dropped off a boss):
+  //    All 24 bots coalesce 3 rolls into 1 staggered P2 wake each, with 0
+  //    immediate wakes at t0+1s and paced over time via OnTick.
+  base::TimeTicks t = t0 + base::Seconds(1);
+  for (int item_idx = 1; item_idx <= 3; ++item_idx) {
+    for (const BotSpec& b : bots) {
+      pb::ImmediateEvent imm;
+      imm.bot = b.name;
+      pb::LootRollEvent& lr = imm.event.loot_roll.emplace();
+      lr.roll_id = static_cast<uint32_t>(item_idx);
+      lr.item.emplace().name = "Epic Item " + std::to_string(item_idx);
+      loop.OnEvent(std::move(imm), t);
+    }
+  }
+  EXPECT_EQ(started_order.size(), 0u);  // No 24-bot instant spike!
+  // Advance in 250ms ticks for 8 seconds: every bot wakes exactly once (all 3
+  // items coalesced), never 72 times.
+  for (int step = 1; step <= 32; ++step) {
+    loop.OnTick(t + base::Milliseconds(step * 250));
+    finish_all();
+  }
+  EXPECT_EQ(started_order.size(), 24u);
+  started_order.clear();
+
+  // 2) Large-raid /rw burst (two back-to-back warnings, one naming Dps1):
+  //    Tanks (2) + Healers (5) + named Dps1 (1) = 8 bots wake immediately;
+  //    remaining 16 DPS are staggered and coalesce both /rw lines into 1 wake.
+  t = t + base::Seconds(10);
+  for (const char* text : {"Dps1 move out of fire!", "Everyone stack now!"}) {
+    for (const BotSpec& b : bots) {
+      pb::ImmediateEvent imm;
+      imm.bot = b.name;
+      pb::ChatEvent& chat = imm.event.chat.emplace();
+      chat.channel = pb::RAID_WARNING;
+      chat.from = "Human";
+      chat.text = text;
+      chat.at_me = true;
+      loop.OnEvent(std::move(imm), t);
+    }
+  }
+  // Immediate fan-out is bounded to tanks + healers + named DPS (8 bots: 4
+  // started immediately on line 1 + 4 queued for line 1 + 4 queued behind the
+  // in-flight bots for line 2 = 12 total calls, while the 16 non-addressed DPS
+  // coalesce both /rw lines into 1 staggered wake each = 16 calls, 28 total
+  // instead of 48).
+  EXPECT_EQ(loop.in_flight() + loop.queued(), 12u);
+  finish_all();
+  EXPECT_EQ(started_order.size(), 12u);
+  EXPECT_EQ(started_order[0], "Tank1");
+  EXPECT_EQ(started_order[1], "Tank2");
+  // Now drain the remaining 16 staggered DPS over 3 seconds: each wakes once
+  // (coalescing both /rw lines), so all 24 bots receive the warning.
+  for (int step = 1; step <= 20; ++step) {
+    loop.OnTick(t + base::Milliseconds(step * 150));
+    finish_all();
+  }
+  EXPECT_EQ(started_order.size(), 28u);
+  started_order.clear();
+
+  // 3) In-combat BOSS_EMOTE burst (P0):
+  //    All 24 bots are in combat; feed DPS first, then healers, then tanks.
+  //    All 24 wake (no P0 mechanic missed), and after the initial 4 slots
+  //    fill, queued tanks and healers run ahead of queued DPS!
+  t = t + base::Seconds(10);
+  for (const BotSpec& b : bots) {
+    loop.OnSnapshot(make_snap(b, 2, t, /*in_combat=*/true), t);
+  }
+  finish_all();
+  started_order.clear();
+
+  // Deliver in-combat BOSS_EMOTE in reverse order (DPS first, tanks last).
+  for (auto it = bots.rbegin(); it != bots.rend(); ++it) {
+    pb::ImmediateEvent imm;
+    imm.bot = it->name;
+    pb::ChatEvent& chat = imm.event.chat.emplace();
+    chat.channel = pb::BOSS_EMOTE;
+    chat.from = "Loken";
+    chat.text = "begins to cast Lightning Nova!";
+    chat.at_me = true;
+    loop.OnEvent(std::move(imm), t);
+  }
+  EXPECT_EQ(loop.in_flight() + loop.queued(), 24u);
+  // Finish the first 4 (which started before tanks arrived) one by one and
+  // verify Tanks and Healers jump ahead of the remaining queued DPS.
+  for (int i = 0; i < 4; ++i) {
+    finish_one(0);
+  }
+  // Positions 4 and 5 in started_order must be the two tanks!
+  ASSERT_GE(started_order.size(), 6u);
+  EXPECT_TRUE(started_order[4].starts_with("Tank")) << started_order[4];
+  EXPECT_TRUE(started_order[5].starts_with("Tank")) << started_order[5];
+  finish_all();
+  EXPECT_EQ(started_order.size(), 24u);
+  started_order.clear();
+
+  // 4) Adversarial counter-test: P0 combat wake for a DPS with a pending
+  //    staggered /rw preempts immediately and carries the /rw reason.
+  t = t + base::Seconds(10);
+  {
+    pb::ImmediateEvent rw;
+    rw.bot = "Dps5";
+    pb::ChatEvent& chat = rw.event.chat.emplace();
+    chat.channel = pb::RAID_WARNING;
+    chat.from = "Human";
+    chat.text = "Spread out!";
+    chat.at_me = true;
+    loop.OnEvent(std::move(rw), t);
+  }
+  EXPECT_EQ(started_order.size(), 0u);  // Staggered.
+  {
+    pb::ImmediateEvent died;
+    died.bot = "Dps5";
+    died.event.died.emplace().killer = "Loken";
+    loop.OnEvent(std::move(died), t + base::Milliseconds(10));
+  }
+  ASSERT_EQ(active.size(), 1u);
+  EXPECT_EQ(active[0].bot, "Dps5");
+  EXPECT_NE(active[0].user.find("Spread out!"), std::string::npos);
+  EXPECT_NE(active[0].user.find("killed by Loken"), std::string::npos);
+  finish_all();
+  started_order.clear();
+
+  // 5) Adversarial counter-test: disconnect clears pending deferred raid wakes
+  //    and resets role priority cleanly.
+  t = t + base::Seconds(10);
+  {
+    pb::ImmediateEvent lr;
+    lr.bot = "Dps6";
+    lr.event.loot_roll.emplace().item.emplace().name = "Old Drop";
+    loop.OnEvent(std::move(lr), t);
+  }
+  loop.OnConnectionChanged(false);
+  loop.OnTick(t + base::Seconds(5));
+  EXPECT_EQ(started_order.size(), 0u);
+}
+
+TEST(BotLoopTest, FiveManLootRollAndRaidWarningWakeImmediately) {
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  // 5-man party: Human + 4 bots (Tank, Healer, 2 DPS).
+  PartyWakeFixture f({{"Tank1", "Warrior", pb::Role::TANK},
+                      {"Heal1", "Priest", pb::Role::HEALER},
+                      {"Dps1", "Mage", pb::Role::DPS},
+                      {"Dps2", "Rogue", pb::Role::DPS}},
+                     /*cfg=*/{}, /*raid=*/false);
+  // Loot roll in a 5-man wakes every bot immediately (no raid staggering).
+  for (const char* bot : {"Tank1", "Heal1", "Dps1", "Dps2"}) {
+    pb::ImmediateEvent imm;
+    imm.bot = bot;
+    pb::LootRollEvent& lr = imm.event.loot_roll.emplace();
+    lr.roll_id = 1;
+    lr.item.emplace().name = "Cruel Barb";
+    f.loop().OnEvent(std::move(imm), t0 + base::Seconds(1));
+  }
+  EXPECT_EQ(f.brain().size(), 4u);
+  f.FinishAll("");
+
+  // Player /emote in a party/raid wakes only the single responder (not all 4).
+  EXPECT_EQ(f.Line("waves", "Hele", pb::EMOTE, /*at_me=*/true), Names{"Dps1"});
+  f.FinishAll("");
+}
+
 }  // namespace
 }  // namespace harness

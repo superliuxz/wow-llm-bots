@@ -114,6 +114,19 @@ void Scheduler::SetHumanParty(const std::string& bot, bool in_human_party) {
   }
 }
 
+void Scheduler::SetBotRole(const std::string& bot, BotRole role) {
+  if (role == BotRole::kDefault) {
+    bot_roles_.erase(bot);
+  } else {
+    bot_roles_[bot] = role;
+  }
+}
+
+BotRole Scheduler::RoleOf(const std::string& bot) const {
+  const auto it = bot_roles_.find(bot);
+  return it == bot_roles_.end() ? BotRole::kDefault : it->second;
+}
+
 bool Scheduler::HeldBackForHumanParty(const std::string& bot) const {
   if (max_in_flight_ < 2 || human_party_.empty() ||
       human_party_.contains(bot)) {
@@ -167,22 +180,30 @@ void Scheduler::StartWaiting() {
   starting_ = true;
   while (in_flight_.size() < max_in_flight_) {
     // The next to start: lowest effective priority (with aging so lower tiers
-    // cannot starve under load), then the longest waiting, skipping bots that
-    // already have a question in progress and, while one permit is held for
-    // a human's party, the bots outside it once the rest are taken.
+    // cannot starve under load), then declared group role (tanks -> healers ->
+    // DPS/other), then the longest waiting, skipping bots that already have a
+    // question in progress and, while one permit is held for a human's party,
+    // the bots outside it once the rest are taken.
     const base::TimeTicks now = Now();
     size_t best = queue_.size();
     int best_prio = 0;
+    BotRole best_role = BotRole::kDefault;
     for (size_t i = 0; i < queue_.size(); ++i) {
       if (in_flight_.count(queue_[i].bot) > 0 ||
           HeldBackForHumanParty(queue_[i].bot)) {
         continue;
       }
       const int prio = EffectivePriority(queue_[i], now);
-      if (best == queue_.size() || prio < best_prio ||
-          (prio == best_prio && queue_[i].order < queue_[best].order)) {
+      const BotRole role = RoleOf(queue_[i].bot);
+      const bool better =
+          best == queue_.size() || prio < best_prio ||
+          (prio == best_prio &&
+           (role < best_role ||
+            (role == best_role && queue_[i].order < queue_[best].order)));
+      if (better) {
         best = i;
         best_prio = prio;
+        best_role = role;
       }
     }
     if (best == queue_.size()) {

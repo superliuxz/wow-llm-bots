@@ -2,6 +2,7 @@
 
 #include "plan/triggers.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -884,6 +885,87 @@ TEST(TriggersTest, TankWakesOnLooseMobAt30YdAndHealerManaRecoveryWakesOoc) {
   pb::Snapshot combat_ready = ready;
   combat_ready.base.self.in_combat = true;
   EXPECT_FALSE(eval.EvaluateSnapshot(combat_ready));
+}
+
+TEST(TriggersTest, RaidScaleFiltersNonUrgentStatusForDpsOnly) {
+  auto make_raid = [](const std::string& bot, pb::Role self_role,
+                      size_t total_members) {
+    pb::Snapshot snap = BaseSnap();
+    snap.bot = bot;
+    snap.base.self.in_combat = true;
+    snap.base.self.unit.name = bot;
+    snap.base.self.unit.group.emplace().role = self_role;
+    pb::Party& p = snap.ext.party.emplace();
+    for (size_t i = 0; i + 1 < total_members; ++i) {
+      pb::Unit& m = p.members.emplace_back();
+      m.name = "Raider" + std::to_string(i);
+      m.health_pct = 100.0f;
+      m.power_pct = 100.0f;
+      pb::GroupPart& gp = m.group.emplace();
+      gp.online = true;
+      gp.in_range = true;
+      gp.role = (i == 0) ? pb::TANK : (i == 1 ? pb::HEALER : pb::DPS);
+    }
+    if (total_members > 5) {
+      snap.ext.raid.emplace();
+    }
+    return snap;
+  };
+
+  // 25-man raid: Tank, Healer, and DPS all start with a clean baseline.
+  pb::Snapshot tank_base = make_raid("TankBot", pb::TANK, 25);
+  pb::Snapshot heal_base = make_raid("HealBot", pb::HEALER, 25);
+  pb::Snapshot dps_base = make_raid("DpsBot", pb::DPS, 25);
+  TriggerEvaluator tank_eval, heal_eval, dps_eval;
+  EXPECT_FALSE(tank_eval.EvaluateSnapshot(tank_base));
+  EXPECT_FALSE(heal_eval.EvaluateSnapshot(heal_base));
+  EXPECT_FALSE(dps_eval.EvaluateSnapshot(dps_base));
+
+  // Raider2 (DPS) dies, Raider3 drops to 20% HP, Raider1 (healer) hits 20%
+  // mana: Tank and Healer wake at P1Danger; DPS does NOT wake.
+  auto apply_status = [](pb::Snapshot s) {
+    s.ext.party->members[2].dead = true;
+    s.ext.party->members[3].health_pct = 20.0f;
+    s.ext.party->members[1].power_pct = 20.0f;
+    return s;
+  };
+  const std::optional<WakeTrigger> tank_w =
+      tank_eval.EvaluateSnapshot(apply_status(tank_base));
+  const std::optional<WakeTrigger> heal_w =
+      heal_eval.EvaluateSnapshot(apply_status(heal_base));
+  const std::optional<WakeTrigger> dps_w =
+      dps_eval.EvaluateSnapshot(apply_status(dps_base));
+  ASSERT_TRUE(tank_w);
+  EXPECT_EQ(tank_w->urgency, Urgency::kP1Danger);
+  EXPECT_NE(tank_w->reason.find("party member Raider2 died"),
+            std::string::npos);
+  ASSERT_TRUE(heal_w);
+  EXPECT_EQ(heal_w->urgency, Urgency::kP1Danger);
+  EXPECT_NE(heal_w->reason.find("near death"), std::string::npos);
+  EXPECT_FALSE(dps_w);
+
+  // Counter-test 1: P0 personal combat wake STILL wakes DPS immediately in a
+  // 25-man raid.
+  pb::Snapshot dps_attacked = apply_status(dps_base);
+  AddNearbyUnit(&dps_attacked, "0x99", "BossAdd", pb::Unit::NPC,
+                pb::Unit::HOSTILE, 5.0f, /*targeting_me=*/true);
+  const std::optional<WakeTrigger> dps_p0 =
+      dps_eval.EvaluateSnapshot(dps_attacked);
+  ASSERT_TRUE(dps_p0);
+  EXPECT_EQ(dps_p0->urgency, Urgency::kP0Combat);
+  EXPECT_EQ(dps_p0->reason, "attacked by BossAdd");
+
+  // Counter-test 2: 5-man party responsiveness is preserved — DPS STILL wakes
+  // on party member death, near-death, and healer low mana.
+  pb::Snapshot five_man_dps = make_raid("DpsFive", pb::DPS, 5);
+  TriggerEvaluator five_eval;
+  EXPECT_FALSE(five_eval.EvaluateSnapshot(five_man_dps));
+  const std::optional<WakeTrigger> five_w =
+      five_eval.EvaluateSnapshot(apply_status(five_man_dps));
+  ASSERT_TRUE(five_w);
+  EXPECT_EQ(five_w->urgency, Urgency::kP1Danger);
+  EXPECT_NE(five_w->reason.find("party member Raider2 died"),
+            std::string::npos);
 }
 
 }  // namespace

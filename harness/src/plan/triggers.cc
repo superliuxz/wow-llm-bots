@@ -65,6 +65,31 @@ std::string AttackerKey(const pb::Unit& unit) {
   return !unit.guid.empty() ? unit.guid : unit.name;
 }
 
+size_t GroupSize(const pb::Snapshot& snapshot) {
+  if (!snapshot.ext.party && !snapshot.ext.raid) {
+    return 1;
+  }
+  std::flat_set<std::string> names;
+  if (!snapshot.bot.empty()) {
+    names.insert(snapshot.bot);
+  }
+  if (snapshot.ext.party) {
+    for (const pb::Unit& m : snapshot.ext.party->members) {
+      if (!m.name.empty()) {
+        names.insert(m.name);
+      }
+    }
+  }
+  if (snapshot.ext.raid) {
+    for (const pb::Unit& m : snapshot.ext.raid->members) {
+      if (!m.name.empty()) {
+        names.insert(m.name);
+      }
+    }
+  }
+  return std::max<size_t>(names.size(), 1);
+}
+
 void Consider(std::optional<WakeTrigger>* best, WakeTrigger candidate) {
   if (!*best) {
     *best = std::move(candidate);
@@ -529,6 +554,14 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
   }
 
   if (seen_snapshot_) {
+    // At raid scale (> 5 members), waking every DPS on any raider death,
+    // AoE near-death dip, healer low-mana, or disconnect floods the LLM.
+    // Tanks and healers still wake immediately; 5-man parties wake everyone.
+    const bool large_raid = GroupSize(snapshot) > 5;
+    const bool wakes_on_raid_status =
+        !large_raid ||
+        (my_group && (my_group->role == pb::TANK || my_group->main_tank ||
+                      my_group->role == pb::HEALER));
     for (const auto& [mob, on] : new_loose) {
       Consider(
           &chosen,
@@ -543,11 +576,13 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
       }
       Consider(&chosen, {Urgency::kP1Danger, std::move(reason), kWakeParty});
     }
-    for (const std::string& name : dead_members) {
-      if (!prev_dead_members_.contains(name)) {
-        Consider(&chosen,
-                 {Urgency::kP1Danger,
-                  base::StrCat({"party member ", name, " died"}), kWakeParty});
+    if (wakes_on_raid_status) {
+      for (const std::string& name : dead_members) {
+        if (!prev_dead_members_.contains(name)) {
+          Consider(&chosen, {Urgency::kP1Danger,
+                             base::StrCat({"party member ", name, " died"}),
+                             kWakeParty});
+        }
       }
     }
     if (!aggro_member.empty() && !prev_party_aggro_ && !in_combat) {
@@ -558,35 +593,39 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
     }
     // T11: a member who leaves or logs out (the human the bots came with
     // most of all) is a choice to make: stay, go on, or leave too.
-    for (const std::string& name : prev_online_members_) {
-      if (!online_members.contains(name)) {
-        Consider(&chosen, {Urgency::kP1Danger,
-                           base::StrCat({"party member ", name,
-                                         offline_members.contains(name)
-                                             ? " went offline"
-                                             : " left the group"}),
-                           kWakeParty});
+    if (wakes_on_raid_status) {
+      const Urgency leave_urgency =
+          large_raid ? Urgency::kP2Routine : Urgency::kP1Danger;
+      for (const std::string& name : prev_online_members_) {
+        if (!online_members.contains(name)) {
+          Consider(&chosen, {leave_urgency,
+                             base::StrCat({"party member ", name,
+                                           offline_members.contains(name)
+                                               ? " went offline"
+                                               : " left the group"}),
+                             kWakeParty});
+        }
       }
-    }
-    for (const std::string& name : critical_members) {
-      if (!prev_critical_members_.contains(name)) {
+      for (const std::string& name : critical_members) {
+        if (!prev_critical_members_.contains(name)) {
+          Consider(&chosen,
+                   {Urgency::kP1Danger,
+                    base::StrCat({"party member ", name, " is near death"}),
+                    kWakeParty});
+        }
+      }
+      for (const std::string& name : low_mana_healers) {
+        if (!prev_low_mana_healers_.contains(name)) {
+          Consider(&chosen, {Urgency::kP1Danger,
+                             base::StrCat({"healer ", name, " low on mana"}),
+                             kWakeParty});
+        }
+      }
+      for (const std::string& name : recovered_healers) {
         Consider(&chosen,
-                 {Urgency::kP1Danger,
-                  base::StrCat({"party member ", name, " is near death"}),
-                  kWakeParty});
+                 {Urgency::kNormal,
+                  base::StrCat({"healer ", name, " mana ready"}), kWakeParty});
       }
-    }
-    for (const std::string& name : low_mana_healers) {
-      if (!prev_low_mana_healers_.contains(name)) {
-        Consider(&chosen,
-                 {Urgency::kP1Danger,
-                  base::StrCat({"healer ", name, " low on mana"}), kWakeParty});
-      }
-    }
-    for (const std::string& name : recovered_healers) {
-      Consider(&chosen,
-               {Urgency::kNormal,
-                base::StrCat({"healer ", name, " mana ready"}), kWakeParty});
     }
   }
 
