@@ -106,6 +106,67 @@ bool IsPlayerChatChannel(pb::ChatChannel ch) {
   }
 }
 
+// Player chat channels worth keeping in short-term per-player exchange memory:
+// direct/group/local channels always count; noisy public broadcast channels
+// (General/Trade/LFG/custom) only enter when directly addressing the bot.
+bool IsConversationalPlayerChannel(pb::ChatChannel ch, bool at_me) {
+  switch (ch) {
+    case pb::WHISPER:
+    case pb::SAY:
+    case pb::YELL:
+    case pb::PARTY:
+    case pb::RAID:
+    case pb::RAID_WARNING:
+    case pb::GUILD:
+    case pb::OFFICER:
+    case pb::EMOTE:
+    case pb::BATTLEGROUND:
+      return true;
+    case pb::GENERAL:
+    case pb::TRADE:
+    case pb::LFG:
+    case pb::CUSTOM_CHANNEL:
+      return at_me;
+    default:
+      return false;
+  }
+}
+
+std::string ChatChannelLabel(pb::ChatChannel ch) {
+  switch (ch) {
+    case pb::WHISPER:
+      return "whisper";
+    case pb::SAY:
+      return "say";
+    case pb::YELL:
+      return "yell";
+    case pb::PARTY:
+      return "party";
+    case pb::RAID:
+      return "raid";
+    case pb::RAID_WARNING:
+      return "raid_warning";
+    case pb::GUILD:
+      return "guild";
+    case pb::OFFICER:
+      return "officer";
+    case pb::GENERAL:
+      return "general";
+    case pb::TRADE:
+      return "trade";
+    case pb::LFG:
+      return "lfg";
+    case pb::EMOTE:
+      return "emote";
+    case pb::BATTLEGROUND:
+      return "bg";
+    case pb::CUSTOM_CHANNEL:
+      return "channel";
+    default:
+      return "chat";
+  }
+}
+
 // Sanitizes a `remember:` note before writing to `memory.md` /
 // `relationships.md` (A-MH6): strips newlines, control bytes, and leading `#`
 // heading syntax; when player chat was present in the wake, rejects prompt-
@@ -908,6 +969,8 @@ void BotLoop::ResetBotSession(BotState* state, bool cancel_in_flight) {
   state->deferred_chat_at = base::TimeTicks();
   state->recent_events.clear();
   state->whisperers.clear();
+  state->player_chat_memory.clear();
+  state->player_chat_memory_seq = 0;
   state->condense_state = BotState::CondenseState::kIdle;
   ++state->memory_condense_epoch;
   state->condense_retry_after = base::TimeTicks();
@@ -980,6 +1043,73 @@ void BotLoop::NoteWhisperer(BotState* state,
   }
 }
 
+void BotLoop::NotePlayerExchange(const std::string& bot,
+                                 BotState* state,
+                                 const pb::Event& event) const {
+  if (!event.chat ||
+      !IsConversationalPlayerChannel(event.chat->channel, event.chat->at_me) ||
+      event.chat->from.empty() || event.chat->text.empty() ||
+      base::EqualsCaseInsensitiveASCII(event.chat->from, bot)) {
+    return;
+  }
+  RecordPlayerExchange(state, event.chat->from, /*from_bot=*/false,
+                       event.chat->channel, event.chat->text);
+}
+
+void BotLoop::RecordPlayerExchange(BotState* state,
+                                   std::string_view player,
+                                   bool from_bot,
+                                   pb::ChatChannel channel,
+                                   std::string_view text) const {
+  if (config_.max_player_memory_players == 0 ||
+      config_.max_player_memory_exchanges == 0) {
+    return;
+  }
+  const std::string_view trimmed_player =
+      base::TrimWhitespaceASCII(player, base::TRIM_ALL);
+  const std::string_view trimmed_text =
+      base::TrimWhitespaceASCII(text, base::TRIM_ALL);
+  if (trimmed_player.empty() || trimmed_text.empty()) {
+    return;
+  }
+  BotState::PlayerChatMemory* entry = nullptr;
+  for (BotState::PlayerChatMemory& existing : state->player_chat_memory) {
+    if (base::EqualsCaseInsensitiveASCII(existing.player, trimmed_player)) {
+      entry = &existing;
+      break;
+    }
+  }
+  if (!entry) {
+    if (state->player_chat_memory.size() >= config_.max_player_memory_players) {
+      auto lru = std::min_element(state->player_chat_memory.begin(),
+                                  state->player_chat_memory.end(),
+                                  [](const BotState::PlayerChatMemory& a,
+                                     const BotState::PlayerChatMemory& b) {
+                                    return a.last_touch_seq < b.last_touch_seq;
+                                  });
+      state->player_chat_memory.erase(lru);
+    }
+    entry = &state->player_chat_memory.emplace_back(
+        BotState::PlayerChatMemory{std::string(trimmed_player), {}, 0});
+  }
+  entry->last_touch_seq = ++state->player_chat_memory_seq;
+  if (!entry->exchanges.empty()) {
+    const BotState::PlayerExchange& last = entry->exchanges.back();
+    if (last.from_bot == from_bot && last.channel == channel &&
+        last.text == trimmed_text) {
+      return;
+    }
+  }
+  entry->exchanges.push_back(BotState::PlayerExchange{
+      .from_bot = from_bot,
+      .channel = channel,
+      .text = std::string(trimmed_text),
+  });
+  while (entry->exchanges.size() > config_.max_player_memory_exchanges) {
+    entry->exchanges.pop_front();
+  }
+}
+
 void BotLoop::Requeue(BotState* state,
                       std::vector<std::string> reasons,
                       std::vector<std::string> events,
@@ -1022,6 +1152,7 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
         EvaluateEventTrigger(ev, state.triggers.watches()).has_value();
     NoteEvent(&state, ev, wakes, received_at);
     NoteWhisperer(&state, ev, received_at);
+    NotePlayerExchange(bot, &state, ev);
   }
   Screen screen = RenderScreen(snapshot);
   const std::optional<WakeTrigger> trig =
@@ -1270,6 +1401,7 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
             /*triggered_wake=*/chat_trig.has_value() && !chat_rate_limited,
             received_at);
   NoteWhisperer(&state, imm.event, received_at);
+  NotePlayerExchange(bot, &state, imm.event);
   if (chat_rate_limited) {
     return;
   }
@@ -1557,10 +1689,36 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
         base::StrCat({config_.bots_dir, "/", bot, "/memory.md"}));
     ctx.raw_relationships = ReadFileIfChanged(
         base::StrCat({config_.bots_dir, "/", bot, "/relationships.md"}));
-    for (const BotState::ObservedChat& c : asked_chats) {
-      if (IsPlayerChatChannel(c.channel)) {
-        ctx.extra_present_players.push_back(c.from);
+  }
+  for (const BotState::ObservedChat& c : asked_chats) {
+    if (IsPlayerChatChannel(c.channel)) {
+      ctx.extra_present_players.push_back(c.from);
+    }
+  }
+  if (!state.player_chat_memory.empty()) {
+    std::vector<const BotState::PlayerChatMemory*> ordered;
+    ordered.reserve(state.player_chat_memory.size());
+    for (const BotState::PlayerChatMemory& mem : state.player_chat_memory) {
+      ordered.push_back(&mem);
+    }
+    std::sort(ordered.begin(), ordered.end(),
+              [](const BotState::PlayerChatMemory* a,
+                 const BotState::PlayerChatMemory* b) {
+                return a->last_touch_seq > b->last_touch_seq;
+              });
+    ctx.player_chat_memory.reserve(ordered.size());
+    for (const BotState::PlayerChatMemory* mem : ordered) {
+      PlayerChatHistory hist;
+      hist.player = mem->player;
+      hist.turns.reserve(mem->exchanges.size());
+      for (const BotState::PlayerExchange& ex : mem->exchanges) {
+        hist.turns.push_back(PlayerChatTurn{
+            .from_bot = ex.from_bot,
+            .channel = ChatChannelLabel(ex.channel),
+            .text = ex.text,
+        });
       }
+      ctx.player_chat_memory.push_back(std::move(hist));
     }
   }
   ctx.current_goal = state.current_goal;
@@ -1922,6 +2080,34 @@ void BotLoop::OnReply(const std::string& bot,
           }
           QueueOrSendSay(bot, &state, channel, to, text, effective_now, waited);
           RecordSaid(&state, text, effective_now);
+          if (channel == pb::WHISPER && !to.empty()) {
+            RecordPlayerExchange(&state, to, /*from_bot=*/true, channel, text);
+          } else if (channel == pb::PARTY || channel == pb::RAID ||
+                     channel == pb::SAY) {
+            std::vector<std::string> targets;
+            for (auto it = asked_chats.rbegin(); it != asked_chats.rend();
+                 ++it) {
+              if (!IsConversationalPlayerChannel(it->channel, it->at_me) ||
+                  it->from.empty() ||
+                  base::EqualsCaseInsensitiveASCII(it->from, bot)) {
+                continue;
+              }
+              const bool seen = std::any_of(
+                  targets.begin(), targets.end(), [&](const std::string& t) {
+                    return base::EqualsCaseInsensitiveASCII(t, it->from);
+                  });
+              if (!seen) {
+                targets.push_back(it->from);
+                if (targets.size() >= 2) {
+                  break;
+                }
+              }
+            }
+            for (const std::string& target : targets) {
+              RecordPlayerExchange(&state, target, /*from_bot=*/true, channel,
+                                   text);
+            }
+          }
         };
         if (!plan->say.empty() && !party_reply_muted) {
           // Answer a party/raid line in that channel (RH-L1, A-M14: decided by

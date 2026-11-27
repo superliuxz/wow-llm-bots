@@ -58,8 +58,6 @@ Guild Wars heroes):
 
 ## Next (multi-session depth & architecture)
 
-- **Short-term per-player memory & richer personas:** Store the last N exchanges per player
-  (source-tagged so player chat never injects trusted instructions) and add more identities.
 - **Latency & world-thread polish:** Measure 4 Hz combat snapshot cost at raid scale (build lighter
   combat snapshots if needed).
 

@@ -28,6 +28,19 @@ namespace harness {
 
 class WorldKnowledge;
 
+// One chat turn in short-term per-player conversation memory (source-tagged in
+// the prompt so player speech can never inject trusted instructions).
+struct PlayerChatTurn {
+  bool from_bot = false;
+  std::string channel;  // e.g. "whisper", "party", "raid", "say"
+  std::string text;
+};
+
+struct PlayerChatHistory {
+  std::string player;
+  std::vector<PlayerChatTurn> turns;
+};
+
 struct PromptInput {
   std::string rules;  // content/RULES.md
   std::string bot_name;
@@ -53,6 +66,9 @@ struct PromptInput {
   // Dynamic per-player relationship notes for players currently present or
   // talking to this bot (placed after static notes/guide to preserve KV cache).
   std::string relationships;
+  // Short-term per-player chat exchanges for present/active players (rendered
+  // with explicit untrusted source-tagging after relationships).
+  std::vector<PlayerChatHistory> player_chat_memory;
   // Standing orders currently in force (formatted strings; may be empty).
   std::vector<std::string> active_orders;
   // Known mechanic, spell, item, and unit names that `order:` lines may use
@@ -98,6 +114,7 @@ struct PromptAssemblyContext {
   std::string identity;
   std::string raw_memory;
   std::string raw_relationships;
+  std::vector<PlayerChatHistory> player_chat_memory;
   std::string current_goal;
   std::string last_outcome;
   std::string wake_reason;
@@ -129,6 +146,7 @@ struct PromptBreakdown {
   size_t system_bytes = 0;
   size_t prefix_bytes = 0;
   size_t relationships_bytes = 0;
+  size_t player_chat_bytes = 0;
   size_t remembered_bytes = 0;
   size_t screen_bytes = 0;
   size_t knowledge_bytes = 0;

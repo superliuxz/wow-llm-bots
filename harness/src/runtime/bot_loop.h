@@ -51,6 +51,10 @@ struct BotLoopConfig {
   size_t max_in_flight = 16;   // llama-server slots / concurrent calls.
   float temperature = 0.7f;
   size_t max_recent_events = 12;
+  // Short-term per-player chat exchange memory (bounded per player + LRU cap
+  // across players; cleared on logout/disconnect).
+  size_t max_player_memory_players = 16;
+  size_t max_player_memory_exchanges = 6;
   // A bot with no snapshot for this long has left the world (logged out,
   // loading screen, server trouble): its last screen is no longer true, so it
   // isn't asked about it; it gets a first look when snapshots come back.
@@ -169,6 +173,22 @@ class BotLoop {
       base::TimeTicks at;
     };
     std::deque<Whisperer> whisperers;
+    // Short-term per-player conversation memory: bounded last N exchanges per
+    // player with LRU eviction at `max_player_memory_players`, cleared on
+    // logout/disconnect.
+    struct PlayerExchange {
+      bool from_bot = false;
+      wlb::snapshot::ChatChannel channel =
+          wlb::snapshot::CHAT_CHANNEL_UNSPECIFIED;
+      std::string text;
+    };
+    struct PlayerChatMemory {
+      std::string player;
+      std::deque<PlayerExchange> exchanges;
+      uint64_t last_touch_seq = 0;
+    };
+    std::vector<PlayerChatMemory> player_chat_memory;
+    uint64_t player_chat_memory_seq = 0;
 
     TriggerEvaluator triggers;
     // The watch inputs of the snapshot the call in flight asked about: its
@@ -372,6 +392,16 @@ class BotLoop {
   static void NoteWhisperer(BotState* state,
                             const wlb::snapshot::Event& event,
                             base::TimeTicks now);
+  // Records an inbound player chat line or outbound bot reply into short-term
+  // bounded per-player memory (LRU-evicted across players, capped per player).
+  void NotePlayerExchange(const std::string& bot,
+                          BotState* state,
+                          const wlb::snapshot::Event& event) const;
+  void RecordPlayerExchange(BotState* state,
+                            std::string_view player,
+                            bool from_bot,
+                            wlb::snapshot::ChatChannel channel,
+                            std::string_view text) const;
   // Puts a call's wake reasons, chats, and recent events back in front of any
   // newer ones, for a call that ended without installing a plan, so the next
   // call still sees them (a whisper is not lost to a cancelled or failed call).
