@@ -9,6 +9,7 @@
 #ifndef MOD_LLM_BRAIN_OPTIONS_ACT_EXECUTOR_H_
 #define MOD_LLM_BRAIN_OPTIONS_ACT_EXECUTOR_H_
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -80,9 +81,13 @@ struct ActiveAct {
   // Started by a chosen option (crowd control), not an act: its finish is
   // the option's (`done_command_id`), not an act's.
   bool for_option = false;
-  // Started by a leader's party command ("los"): on arriving, the bot holds
-  // there like after `to ping` (BotManager::StartPingStay).
+  // Started by a leader's party command ("los", "stack", "spread"): on
+  // arriving, the bot holds there like after `to ping`
+  // (BotManager::StartPingStay).
   bool hold_on_arrival = false;
+  // Walks to a fixed world coordinate (`dest`) without re-resolving an anchor
+  // unit (used by leader `spread`).
+  bool fixed_spot = false;
 };
 
 struct ActStartResult {
@@ -107,6 +112,16 @@ ActStartResult StartAct(Player* bot,
                         const wlb::snapshot::Command_Act& act,
                         base::TimeTicks now,
                         ActiveAct* out_active);
+
+// Starts a leader-command spread move around `center` for bot `slot_index` of
+// `total_bots`, choosing the first navigable spot clear of unpulled hostiles.
+// World thread only.
+ActStartResult StartSpreadAct(Player* bot,
+                              const AnchorGeometry& center,
+                              size_t slot_index,
+                              size_t total_bots,
+                              base::TimeTicks now,
+                              ActiveAct* out_active);
 
 // Uses known `spell` on `target` the way `act: use` does (pure Spell.dbc
 // facts): a spell usable only in stealth enters stealth first, and a target

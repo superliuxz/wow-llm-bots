@@ -59,6 +59,33 @@ bool IsPetTauntSpell(uint32_t spell_id);
 // Solo pets and groups without a non-pet tank keep pet taunt autocast on.
 bool ShouldSuppressPetTaunt(bool in_group, bool has_non_pet_tank);
 
+// Tracks an active "stop dps" leader command so offensive attacks stay paused
+// until explicitly resumed, combat ends, or the bot changes maps/disconnects.
+struct StopDpsState {
+  bool active = false;
+  bool saw_combat = false;
+
+  bool operator==(const StopDpsState&) const = default;
+};
+
+void RecordStopDps(StopDpsState& state, bool in_combat);
+
+// Returns true (and clears `state`) once combat ends after `stop dps` was
+// active in combat. Keeps `state` active throughout combat and during a
+// pre-combat hold until combat ends or an explicit resume/reset occurs.
+bool ShouldResetStopDps(StopDpsState& state,
+                        bool bot_in_combat,
+                        bool party_in_combat);
+
+// Unconditionally clears an active `stop dps` state (explicit resume, attack
+// command, map change, disconnect, logout). Returns true if it was active.
+bool ClearStopDps(StopDpsState& state);
+
+// True for playerbots' offensive/attack action names that must be blocked
+// while `stop dps` is active (leaving movement, healing, dispels, and buffs
+// unaffected).
+bool IsStopDpsBlockedActionName(std::string_view action_name);
+
 }  // namespace llm_brain
 
 #endif  // MOD_LLM_BRAIN_BOT_MANAGER_PULL_DISCIPLINE_H_

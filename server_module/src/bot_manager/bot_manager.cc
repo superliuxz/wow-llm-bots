@@ -742,6 +742,23 @@ class BrainPolicyListener final : public ActionExecutionListener {
         return false;
       }
     }
+    // While a leader's "stop dps" is active, block offensive/attack actions
+    // and non-positive spell casts while allowing heals, dispels, buffs, and
+    // movement to continue uninterrupted.
+    if (bot_ && BotManager::IsStopDps(bot_)) {
+      if (IsStopDpsBlockedActionName(name)) {
+        return false;
+      }
+      if (auto* cast = dynamic_cast<CastSpellAction*>(action); cast && ai_) {
+        const SpellInfo* info = sSpellMgr->GetSpellInfo(
+            ai_->GetAiObjectContext()
+                ->GetValue<uint32>("spell id", cast->getSpell())
+                ->Get());
+        if (info && !info->IsPositive()) {
+          return false;
+        }
+      }
+    }
     // Near unpulled hostile packs, yield playerbots' ChaosFormation `follow`
     // (which jitters laterally into aggro edges) to BotManager's safe follow.
     if (name == "follow" && bot_ && !bot_->IsInCombat() && bot_->GetGroup()) {
@@ -1650,6 +1667,24 @@ void BotManager::StartPingStay(Player* bot) {
   BotSessionRegistry::Instance().WithSession(
       bot->GetGUID().GetRawValue(),
       [&stay](BotSession& s) { s.ping_stay = stay; });
+}
+
+void BotManager::SetStopDps(Player* bot, bool stop) {
+  if (!bot) {
+    return;
+  }
+  BotSessionRegistry::Instance().WithSession(
+      bot->GetGUID().GetRawValue(),
+      [stop](BotSession& s) { s.stop_dps = stop; });
+}
+
+bool BotManager::IsStopDps(Player* bot) {
+  if (!bot) {
+    return false;
+  }
+  return BotSessionRegistry::Instance().InspectSession(
+      bot->GetGUID().GetRawValue(),
+      [](const BotSession* s) { return s ? s->stop_dps : false; });
 }
 
 void BotManager::ClearBotStrategyOverride(const std::string& bot_name) {

@@ -170,6 +170,10 @@ struct BotSession {
   // disconnect).
   std::vector<uint64_t> avoided_targets;
   InterruptedSpot last_interrupted;
+  // Active "stop dps" leader command: BrainPolicyListener blocks offensive
+  // actions and non-positive spell casts until resumed, combat ends, or map
+  // change / disconnect / logout.
+  bool stop_dps = false;
 
   // Most recent spell miss and cast failure for this bot (cleared on logout,
   // map change, and disconnect; monotonic seqs survive map change/disconnect so

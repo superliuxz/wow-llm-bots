@@ -113,8 +113,6 @@ std::string GroupedCombatStrategies(const std::string& combat, bool is_healer) {
     bool present = check.present;
     if (check.name == "threat") {
       present = !is_healer;
-    } else if (check.name == "boost") {
-      present = false;
     }
     if (!out.empty()) {
       out.push_back(',');

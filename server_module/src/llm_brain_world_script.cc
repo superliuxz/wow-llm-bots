@@ -60,6 +60,7 @@
 #include "config/llm_brain_config.h"
 #include "net/frame_codec.h"
 #include "options/act_executor.h"
+#include "options/act_geometry.h"
 #include "options/action_types.h"
 #include "options/exec_items.h"
 #include "options/exec_movement.h"
@@ -375,6 +376,7 @@ class LlmBrainWorldScript : public WorldScript {
       Player* bot = ObjectAccessor::FindPlayerByName(config_.bots[i]);
       if (!IsControlledBot(bot)) {
         ClearRtiOverride(bots_[i].rti_override);
+        ClearStopDps(bots_[i].stop_dps);
         continue;  // Offline, not in world, or logged in by a real human.
       }
       // Clear any active act or saved `back` coordinates if the bot changed
@@ -388,6 +390,7 @@ class LlmBrainWorldScript : public WorldScript {
           bots_[i].active_act.reset();
         }
         ResetRtiOverride(bot, bots_[i].rti_override);
+        ResetStopDps(bot, bots_[i].stop_dps);
         BotSessionRegistry::Instance().ResetOnMapChange(
             bot->GetGUID().GetRawValue());
       }
@@ -417,6 +420,13 @@ class LlmBrainWorldScript : public WorldScript {
           LOG_INFO("module", "mod-llm-brain: {}: combat ended, reset rti to {}",
                    bot->GetName(), kDefaultRti);
         }
+      }
+      if (bots_[i].stop_dps.active &&
+          ShouldResetStopDps(bots_[i].stop_dps, bot->IsInCombat(),
+                             IsPartyInCombat(bot))) {
+        BotManager::SetStopDps(bot, false);
+        LOG_INFO("module", "mod-llm-brain: {}: combat ended, cleared stop dps",
+                 bot->GetName());
       }
       CheckPendingGroupInvite(bot, i, config_.bots[i], now);
       // The brain's popup policy answers them first, within a tick (Now #3);
@@ -588,6 +598,7 @@ class LlmBrainWorldScript : public WorldScript {
             bot->GetGUID().GetRawValue());
       }
       ResetRtiOverride(bot, bots_[i].rti_override);
+      ResetStopDps(bot, bots_[i].stop_dps);
       if (bots_[i].active_act) {
         if (bot && GET_PLAYERBOT_AI(bot) != nullptr) {
           CancelActiveAct(bot, &*bots_[i].active_act);
@@ -648,6 +659,8 @@ class LlmBrainWorldScript : public WorldScript {
         return "party";
       case wlb::snapshot::RAID:
         return "raid";
+      case wlb::snapshot::RAID_WARNING:
+        return "raid_warning";
       case wlb::snapshot::GENERAL:
         return "general";
       case wlb::snapshot::TRADE:
@@ -692,7 +705,8 @@ class LlmBrainWorldScript : public WorldScript {
       // line and what was done, to answer in character (Now #2).
       std::string applied;
       if (line.chat.channel == wlb::snapshot::PARTY ||
-          line.chat.channel == wlb::snapshot::RAID) {
+          line.chat.channel == wlb::snapshot::RAID ||
+          line.chat.channel == wlb::snapshot::RAID_WARNING) {
         applied = ApplyLeaderCommand(index, line.to, bot, line.chat);
       }
       const bool alerting =
@@ -737,23 +751,26 @@ class LlmBrainWorldScript : public WorldScript {
         names.push_back(p->GetName());
       }
     }
+    std::sort(names.begin(), names.end());
     const std::optional<ParsedLeaderCommand> parsed =
         ParseLeaderCommand(chat.text, names);
     if (!parsed) {
       return "";
     }
     BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
-    bool for_me =
-        parsed->addressed.empty()
-            ? group->IsLeader(sender->GetGUID())
-            : std::find(parsed->addressed.begin(), parsed->addressed.end(),
-                        bot->GetName()) != parsed->addressed.end();
+    bool for_me = IsLeaderCommandForBot(/*sender_is_human=*/true,
+                                        group->IsLeader(sender->GetGUID()),
+                                        *parsed, bot->GetName());
     // An unaddressed "pull" is for whoever tanks: the group's tank role (the
     // Dungeon Finder's, else the spec's), unless the bot let someone else
-    // tank.
+    // tank. An unaddressed "lust" is only for bots that know Bloodlust or
+    // Heroism.
     if (for_me && parsed->addressed.empty() &&
         parsed->command == LeaderCommand::kPull) {
       for_me = IsGroupTank(group, bot) && !policy.not_tank;
+    } else if (for_me && parsed->addressed.empty() &&
+               parsed->command == LeaderCommand::kLust) {
+      for_me = LustSpellName(bot) != nullptr;
     }
     if (!for_me) {
       return "";
@@ -788,6 +805,7 @@ class LlmBrainWorldScript : public WorldScript {
         if (!target || !bot->IsValidAttackTarget(target)) {
           return said + " (not applied: no enemy targeted)";
         }
+        ResetStopDps(bot, bots_[index].stop_dps);
         LeaderAttack(bot, ai, target, /*mark=*/std::nullopt,
                      &bots_[index].rti_override);
         done = "you attack " + target->GetName();
@@ -813,6 +831,7 @@ class LlmBrainWorldScript : public WorldScript {
                    (parsed->mark ? "" : " or targeted") + ")";
           }
         }
+        ResetStopDps(bot, bots_[index].stop_dps);
         LeaderAttack(bot, ai, target, mark, &bots_[index].rti_override);
         done = "you attack " + target->GetName() +
                (mark ? " (" + std::string(kRaidIconNames[*mark]) + ")" : "");
@@ -867,6 +886,99 @@ class LlmBrainWorldScript : public WorldScript {
                        : "you run to " + sender->GetName() + " and hold there";
         break;
       }
+      case LeaderCommand::kLust: {
+        const char* spell_name = LustSpellName(bot);
+        if (!spell_name) {
+          return said + " (not applied: you don't know Bloodlust or Heroism)";
+        }
+        if (!bot->IsAlive()) {
+          return said + " (not applied: you are dead)";
+        }
+        if (bot->HasAura(kBloodlustSpellId) || bot->HasAura(kHeroismSpellId) ||
+            bot->HasAura(kSatedAuraId) || bot->HasAura(kExhaustionAuraId)) {
+          return said + " (not applied: already active or exhausted)";
+        }
+        wlb::snapshot::Command_Act act;
+        act.verb = wlb::snapshot::Command_Act::USE;
+        act.name = spell_name;
+        ActiveAct pending;
+        const ActStartResult res = StartAct(bot, /*command_id=*/0, act,
+                                            base::TimeTicks::Now(), &pending);
+        if (!res.error.empty()) {
+          return said + " (not applied: " + res.error + ")";
+        }
+        done = std::string("you cast ") + spell_name;
+        break;
+      }
+      case LeaderCommand::kSpread: {
+        if (sender->GetMapId() != bot->GetMapId() ||
+            sender->GetInstanceId() != bot->GetInstanceId()) {
+          return said + " (not applied: leader is on another map)";
+        }
+        const auto self_it =
+            std::find(names.begin(), names.end(), bot->GetName());
+        const size_t slot_index =
+            self_it != names.end()
+                ? static_cast<size_t>(self_it - names.begin())
+                : 0;
+        const AnchorGeometry center{
+            .pos = {sender->GetPositionX(), sender->GetPositionY(),
+                    sender->GetPositionZ()},
+            .facing_rad = sender->GetOrientation(),
+            .radius_yd = sender->GetCombatReach(),
+        };
+        const std::string error = StartLeaderSpreadMove(
+            index, name, bot, center, slot_index, names.size());
+        if (!error.empty()) {
+          return said + " (not applied: " + error + ")";
+        }
+        policy.stay = false;
+        BotManager::SetGroupPolicy(bot, policy);
+        done = "you spread out and hold there";
+        break;
+      }
+      case LeaderCommand::kStack: {
+        wlb::snapshot::Command_Act act;
+        act.verb = wlb::snapshot::Command_Act::TO;
+        act.place = wlb::snapshot::Command_Act::AT;
+        act.thing = wlb::snapshot::Command_Act::NAMED;
+        act.name = sender->GetName();
+        const std::string error =
+            StartLeaderMove(index, name, bot, act, /*hold=*/true);
+        if (!error.empty()) {
+          return said + " (not applied: " + error + ")";
+        }
+        policy.stay = false;
+        BotManager::SetGroupPolicy(bot, policy);
+        done = "you stack on " + sender->GetName() + " and hold there";
+        break;
+      }
+      case LeaderCommand::kStopDps: {
+        RecordStopDps(bots_[index].stop_dps, IsPartyInCombat(bot));
+        BotManager::SetStopDps(bot, true);
+        bot->AttackStop();
+        bot->InterruptSpell(CURRENT_AUTOREPEAT_SPELL);
+        for (CurrentSpellTypes type :
+             {CURRENT_GENERIC_SPELL, CURRENT_CHANNELED_SPELL}) {
+          if (Spell* sp = bot->GetCurrentSpell(type);
+              sp && sp->GetSpellInfo() && !sp->GetSpellInfo()->IsPositive()) {
+            bot->InterruptSpell(type, false);
+          }
+        }
+        if (Pet* pet = bot->GetPet()) {
+          pet->AttackStop();
+        }
+        done = "you stop attacking until resumed or combat ends";
+        break;
+      }
+      case LeaderCommand::kResumeDps: {
+        ResetStopDps(bot, bots_[index].stop_dps);
+        if (ai) {
+          ai->SetNextCheckDelay(0);
+        }
+        done = "you resume attacking";
+        break;
+      }
     }
     LOG_INFO("module", "mod-llm-brain: {} applied leader command {} from {}",
              bot->GetName(), DescribeLeaderCommand(*parsed), sender->GetName());
@@ -874,6 +986,20 @@ class LlmBrainWorldScript : public WorldScript {
   }
 
   static constexpr size_t kSkullIcon = 7;
+  static constexpr uint32_t kBloodlustSpellId = 2825;
+  static constexpr uint32_t kHeroismSpellId = 32182;
+  static constexpr uint32_t kExhaustionAuraId = 57723;
+  static constexpr uint32_t kSatedAuraId = 57724;
+
+  static const char* LustSpellName(const Player* bot) {
+    if (bot->HasSpell(kBloodlustSpellId)) {
+      return "Bloodlust";
+    }
+    if (bot->HasSpell(kHeroismSpellId)) {
+      return "Heroism";
+    }
+    return nullptr;
+  }
 
   // The group's tank as party frames show it: the Dungeon Finder role when
   // one was picked, else the spec's (snapshot_builder MemberRole).
@@ -952,6 +1078,11 @@ class LlmBrainWorldScript : public WorldScript {
     ApplyDefaultRti(bot);
   }
 
+  static void ResetStopDps(Player* bot, StopDpsState& stop_dps) {
+    ClearStopDps(stop_dps);
+    BotManager::SetStopDps(bot, false);
+  }
+
   // Attacks `target` for a leader's command, through playerbots' own attack
   // (and its raid-target value for a mark) when it has one.
   static void LeaderAttack(Player* bot,
@@ -1017,6 +1148,43 @@ class LlmBrainWorldScript : public WorldScript {
     } else {
       // A movement act replaces the old one without stopping the new walk.
       pending.hold_on_arrival = hold;
+      state.active_act = std::move(pending);
+    }
+    schedule_->SetActiveTargetPending(
+        index, state.active_option.has_value() || state.active_act.has_value());
+    return "";
+  }
+
+  std::string StartLeaderSpreadMove(size_t index,
+                                    const std::string& name,
+                                    Player* bot,
+                                    const AnchorGeometry& center,
+                                    size_t slot_index,
+                                    size_t total_bots) {
+    BotState& state = bots_[index];
+    ActiveAct pending;
+    const ActStartResult res = StartSpreadAct(
+        bot, center, slot_index, total_bots, base::TimeTicks::Now(), &pending);
+    if (!res.error.empty()) {
+      return res.error;
+    }
+    BotManager::ClearPingStay(bot);
+    ReportOptionUseDropped(index, name, bot);
+    if (state.active_act && !state.active_act->for_option &&
+        state.active_act->command_id != 0) {
+      wlb::snapshot::Event payload;
+      wlb::snapshot::ErrorEvent& failed = payload.error.emplace();
+      failed.text = "act cancelled by the leader's command";
+      failed.command_id = state.active_act->command_id;
+      EmitAlertingEvent(index, name, bot, std::move(payload));
+    }
+    if (res.done) {
+      if (state.active_act) {
+        CancelActiveAct(bot, &*state.active_act);
+        state.active_act.reset();
+      }
+      BotManager::StartPingStay(bot);
+    } else {
       state.active_act = std::move(pending);
     }
     schedule_->SetActiveTargetPending(
@@ -2154,6 +2322,9 @@ class LlmBrainWorldScript : public WorldScript {
     // Active `rti` override from a leader chat command (reset after combat,
     // map change, or disconnect).
     RtiOverrideState rti_override;
+    // Active "stop dps" pause from a leader chat command (reset on resume,
+    // attack command, combat end, map change, or disconnect).
+    StopDpsState stop_dps;
   };
   std::vector<BotState> bots_;
   // A wrong-version command was logged on this connection.

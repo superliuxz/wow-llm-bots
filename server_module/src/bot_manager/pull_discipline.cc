@@ -3,6 +3,7 @@
 #include "bot_manager/pull_discipline.h"
 
 #include <cstdint>
+#include <string_view>
 
 namespace llm_brain {
 
@@ -81,6 +82,45 @@ bool IsPetTauntSpell(uint32_t spell_id) {
 
 bool ShouldSuppressPetTaunt(bool in_group, bool has_non_pet_tank) {
   return in_group && has_non_pet_tank;
+}
+
+void RecordStopDps(StopDpsState& state, bool in_combat) {
+  state.active = true;
+  state.saw_combat = in_combat;
+}
+
+bool ShouldResetStopDps(StopDpsState& state,
+                        bool bot_in_combat,
+                        bool party_in_combat) {
+  if (!state.active) {
+    return false;
+  }
+  if (bot_in_combat || party_in_combat) {
+    state.saw_combat = true;
+    return false;
+  }
+  if (state.saw_combat) {
+    state = {};
+    return true;
+  }
+  return false;
+}
+
+bool ClearStopDps(StopDpsState& state) {
+  if (!state.active) {
+    return false;
+  }
+  state = {};
+  return true;
+}
+
+bool IsStopDpsBlockedActionName(std::string_view action_name) {
+  return action_name == "attack" || action_name.starts_with("attack ") ||
+         action_name == "melee" || action_name == "shoot" ||
+         action_name == "auto shot" || action_name == "wand" ||
+         action_name == "reach melee" || action_name == "reach spell" ||
+         action_name == "pull my target" || action_name == "pull rti target" ||
+         action_name == "pet attack";
 }
 
 }  // namespace llm_brain

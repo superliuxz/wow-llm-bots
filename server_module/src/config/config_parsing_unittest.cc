@@ -104,21 +104,34 @@ TEST(ConfigParsingTest, AdjustNonCombatStrategiesRespectsGroupAndDungeon) {
             boss);
 }
 
-TEST(ConfigParsingTest, GroupedCombatStrategiesKeepsThreatOffForHealers) {
+TEST(ConfigParsingTest, GroupedCombatStrategiesPreservesBoostAndThreatRules) {
   const std::string base = "+boost,+dps assist,-threat";
-  // Grouped DPS watch threat and drop solo `boost`.
+  // Grouped DPS keep `boost` (for bosses / heavy pulls) and enable `+threat`.
   EXPECT_EQ(GroupedCombatStrategies(base, /*is_healer=*/false),
-            "-boost,+dps assist,+threat");
-  // Grouped healers drop `boost` but MUST keep `-threat`, or playerbots'
-  // ThreatMultiplier blocks all CastHealingSpellAction spells at >= 50% AoE
-  // threat.
+            "+boost,+dps assist,+threat");
+  // Grouped healers keep `boost` (e.g. Bloodlust/Heroism, Shadowfiend) but MUST
+  // keep `-threat`, or playerbots' ThreatMultiplier blocks all
+  // CastHealingSpellAction spells at >= 50% AoE threat.
   EXPECT_EQ(GroupedCombatStrategies(base, /*is_healer=*/true),
-            "-boost,+dps assist,-threat");
+            "+boost,+dps assist,-threat");
   // Adversarial counter-test: even if a config passed `+threat`, healers still
   // get `-threat`, and unrelated strategies stay intact.
   EXPECT_EQ(GroupedCombatStrategies("+boost,+threat,-wotlk-hol",
                                     /*is_healer=*/true),
-            "-boost,-threat,-wotlk-hol");
+            "+boost,-threat,-wotlk-hol");
+  // Adversarial counter-test: if a config explicitly disables `boost`, grouped
+  // mode preserves `-boost` rather than forcing it on.
+  EXPECT_EQ(GroupedCombatStrategies("-boost,+dps assist,-threat",
+                                    /*is_healer=*/false),
+            "-boost,+dps assist,+threat");
+  EXPECT_EQ(GroupedCombatStrategies("-boost,+dps assist,-threat",
+                                    /*is_healer=*/true),
+            "-boost,+dps assist,-threat");
+  // Adversarial counter-test: solo combat strategies (not passed through
+  // GroupedCombatStrategies) keep `-threat` and `+boost` untouched.
+  using Checks = std::vector<StrategyCheck>;
+  EXPECT_EQ(StrategyChecks(base),
+            (Checks{{"boost", true}, {"dps assist", true}, {"threat", false}}));
 }
 
 TEST(ConfigParsingTest, GroupReflexLimitsHoldBackBodyPulls) {

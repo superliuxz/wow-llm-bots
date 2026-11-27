@@ -25,6 +25,11 @@ enum class LeaderCommand {
   kMoveToPing,      // "go there", "flag": to the party's minimap ping
   kPullBack,        // "los", "pull back", "fall back": to the speaker, hold
   kPull,            // "pull", "pull skull", "pull my target"
+  kLust,            // "lust", "bloodlust", "bl", "hero", "heroism"
+  kSpread,          // "spread", "spread out": fan out around the speaker, hold
+  kStack,           // "stack", "stack up", "stack on me": stack on speaker
+  kStopDps,         // "stop dps", "hold dps", "cease fire": halt attacks
+  kResumeDps,       // "resume", "resume dps", "dps", "burn": lift stop dps
 };
 
 struct ParsedLeaderCommand {
@@ -50,6 +55,14 @@ const char* LeaderCommandName(LeaderCommand command);
 // "wait", "kill skull", "pull cross", ...: how the brain is told what the
 // leader said.
 std::string DescribeLeaderCommand(const ParsedLeaderCommand& parsed);
+
+// True when `bot_name` should execute `parsed` sent by a group member:
+// non-humans never issue leader commands; unaddressed commands require the
+// group/raid leader; addressed commands apply only to named bots.
+bool IsLeaderCommandForBot(bool sender_is_human,
+                           bool sender_is_leader,
+                           const ParsedLeaderCommand& parsed,
+                           std::string_view bot_name);
 
 }  // namespace llm_brain
 

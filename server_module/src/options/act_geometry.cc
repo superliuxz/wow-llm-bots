@@ -203,6 +203,34 @@ std::vector<pb::Vec3> CandidateSpotsForKite(const pb::Vec3& bot_pos,
   return spots;
 }
 
+std::vector<pb::Vec3> CandidateSpotsForSpread(const pb::Vec3& /*bot_pos*/,
+                                              const AnchorGeometry& center,
+                                              size_t slot_index,
+                                              size_t total_bots,
+                                              float radius_yd) {
+  const size_t n = std::max<size_t>(1, total_bots);
+  const size_t idx = slot_index % n;
+  const float base_radius =
+      radius_yd > 0.0f ? radius_yd : kDefaultSpreadRadiusYd;
+  // For larger raids (>8 bots), alternate inner and outer rings so adjacent
+  // bearings maintain ~8-10+ yd spacing while staying in heal/spell range.
+  const float ring_radius =
+      (n > 8 && (idx % 2 == 1)) ? (base_radius * 1.6f) : base_radius;
+  const float base =
+      (2.0f * kPi * static_cast<float>(idx)) / static_cast<float>(n);
+  static constexpr float kPrimaryOffsets[] = {0.0f,    25.0f, -25.0f, 50.0f,
+                                              -50.0f,  90.0f, -90.0f, 135.0f,
+                                              -135.0f, 180.0f};
+  static constexpr float kFallbackOffsets[] = {0.0f,  45.0f,  -45.0f,
+                                               90.0f, -90.0f, 180.0f};
+  std::vector<pb::Vec3> spots;
+  AppendFan(&spots, center.pos, base, ring_radius, kPrimaryOffsets,
+            sizeof(kPrimaryOffsets) / sizeof(kPrimaryOffsets[0]));
+  AppendFan(&spots, center.pos, base, ring_radius * 0.65f, kFallbackOffsets,
+            sizeof(kFallbackOffsets) / sizeof(kFallbackOffsets[0]));
+  return spots;
+}
+
 std::vector<pb::Vec3> PreferSpotsClearOf(std::vector<pb::Vec3> spots,
                                          const pb::Vec3& bot_pos,
                                          const std::vector<pb::Vec3>& unpulled,

@@ -90,6 +90,30 @@ TEST(LeaderCommandTest, DescribesWhatWasSaid) {
   EXPECT_EQ(DescribeLeaderCommand(*ParseLeaderCommand("los", kBots)),
             "pull back");
   EXPECT_EQ(DescribeLeaderCommand(*ParseLeaderCommand("wait", kBots)), "wait");
+  EXPECT_EQ(DescribeLeaderCommand(*ParseLeaderCommand("heroism", kBots)),
+            "lust");
+}
+
+TEST(LeaderCommandTest, LustCommandsAndCounterTests) {
+  EXPECT_EQ(Cmd("lust"), LeaderCommand::kLust);
+  EXPECT_EQ(Cmd("Lust!"), LeaderCommand::kLust);
+  EXPECT_EQ(Cmd("lust now"), LeaderCommand::kLust);
+  EXPECT_EQ(Cmd("bloodlust pls"), LeaderCommand::kLust);
+  EXPECT_EQ(Cmd("BL"), LeaderCommand::kLust);
+  EXPECT_EQ(Cmd("hero"), LeaderCommand::kLust);
+  EXPECT_EQ(Cmd("heroism guys"), LeaderCommand::kLust);
+  const auto addressed = ParseLeaderCommand("Zenji, lust", kBots);
+  ASSERT_TRUE(addressed);
+  EXPECT_EQ(addressed->command, LeaderCommand::kLust);
+  EXPECT_EQ(addressed->addressed, std::vector<std::string>{"Zenji"});
+  // Adversarial counter-tests: sentences discussing lust or similar words must
+  // not trigger an immediate cast.
+  EXPECT_FALSE(Cmd("save lust for phase 2"));
+  EXPECT_FALSE(Cmd("no lust yet"));
+  EXPECT_FALSE(Cmd("don't hero"));
+  EXPECT_FALSE(Cmd("who has bloodlust?"));
+  EXPECT_FALSE(Cmd("heroic"));
+  EXPECT_FALSE(Cmd("blood"));
 }
 
 TEST(LeaderCommandTest, SentencesAreNotCommands) {
@@ -112,6 +136,76 @@ TEST(LeaderCommandTest, AddressedNamesAreCollected) {
   const auto all = ParseLeaderCommand("everyone follow", kBots);
   ASSERT_TRUE(all);
   EXPECT_TRUE(all->addressed.empty());
+}
+
+TEST(LeaderCommandTest, RaidTacticsSpreadStackStopAndResumeDps) {
+  EXPECT_EQ(Cmd("spread"), LeaderCommand::kSpread);
+  EXPECT_EQ(Cmd("Spread out guys!"), LeaderCommand::kSpread);
+  EXPECT_EQ(Cmd("everyone spread now"), LeaderCommand::kSpread);
+  EXPECT_EQ(Cmd("stack"), LeaderCommand::kStack);
+  EXPECT_EQ(Cmd("stack up pls"), LeaderCommand::kStack);
+  EXPECT_EQ(Cmd("stack on me"), LeaderCommand::kStack);
+  EXPECT_EQ(Cmd("stack here"), LeaderCommand::kStack);
+  EXPECT_EQ(Cmd("group up"), LeaderCommand::kStack);
+  EXPECT_EQ(Cmd("clump up"), LeaderCommand::kStack);
+  EXPECT_EQ(Cmd("stop dps"), LeaderCommand::kStopDps);
+  EXPECT_EQ(Cmd("dps stop!"), LeaderCommand::kStopDps);
+  EXPECT_EQ(Cmd("hold dps everyone"), LeaderCommand::kStopDps);
+  EXPECT_EQ(Cmd("cease fire"), LeaderCommand::kStopDps);
+  EXPECT_EQ(Cmd("stop attacking"), LeaderCommand::kStopDps);
+  EXPECT_EQ(Cmd("hands off"), LeaderCommand::kStopDps);
+  EXPECT_EQ(Cmd("resume"), LeaderCommand::kResumeDps);
+  EXPECT_EQ(Cmd("resume dps"), LeaderCommand::kResumeDps);
+  EXPECT_EQ(Cmd("dps now"), LeaderCommand::kResumeDps);
+  EXPECT_EQ(Cmd("burn!"), LeaderCommand::kResumeDps);
+  EXPECT_EQ(Cmd("nuke"), LeaderCommand::kResumeDps);
+
+  EXPECT_EQ(DescribeLeaderCommand(*ParseLeaderCommand("spread", kBots)),
+            "spread");
+  EXPECT_EQ(DescribeLeaderCommand(*ParseLeaderCommand("stack up", kBots)),
+            "stack");
+  EXPECT_EQ(DescribeLeaderCommand(*ParseLeaderCommand("stop dps", kBots)),
+            "stop dps");
+  EXPECT_EQ(DescribeLeaderCommand(*ParseLeaderCommand("resume dps", kBots)),
+            "resume dps");
+
+  // Adversarial counter-tests: casual sentences discussing spread/stack/dps
+  // must never parse as fast C++ leader commands.
+  EXPECT_FALSE(Cmd("don't spread yet"));
+  EXPECT_FALSE(Cmd("should we stack on the boss?"));
+  EXPECT_FALSE(Cmd("nice dps guys"));
+  EXPECT_FALSE(Cmd("who stopped dps?"));
+  EXPECT_FALSE(Cmd("stop the patrol"));
+  EXPECT_FALSE(Cmd("stack on tank"));
+}
+
+TEST(LeaderCommandTest, AuthorizationIgnoresNonLeadersAndBots) {
+  const auto unaddressed = ParseLeaderCommand("spread", kBots);
+  ASSERT_TRUE(unaddressed);
+  // Human leader reaches every bot in the group/raid.
+  EXPECT_TRUE(IsLeaderCommandForBot(/*sender_is_human=*/true,
+                                    /*sender_is_leader=*/true, *unaddressed,
+                                    "Loada"));
+  EXPECT_TRUE(IsLeaderCommandForBot(/*sender_is_human=*/true,
+                                    /*sender_is_leader=*/true, *unaddressed,
+                                    "Zenji"));
+  // Counter-test: non-leader human unaddressed call is ignored.
+  EXPECT_FALSE(IsLeaderCommandForBot(/*sender_is_human=*/true,
+                                     /*sender_is_leader=*/false, *unaddressed,
+                                     "Loada"));
+  // Counter-test: bot sender is always ignored, even if group leader.
+  EXPECT_FALSE(IsLeaderCommandForBot(/*sender_is_human=*/false,
+                                     /*sender_is_leader=*/true, *unaddressed,
+                                     "Loada"));
+  // Addressed command reaches only the named bot.
+  const auto addressed = ParseLeaderCommand("Zenji stop dps", kBots);
+  ASSERT_TRUE(addressed);
+  EXPECT_TRUE(IsLeaderCommandForBot(/*sender_is_human=*/true,
+                                    /*sender_is_leader=*/false, *addressed,
+                                    "Zenji"));
+  EXPECT_FALSE(IsLeaderCommandForBot(/*sender_is_human=*/true,
+                                     /*sender_is_leader=*/true, *addressed,
+                                     "Loada"));
 }
 
 }  // namespace

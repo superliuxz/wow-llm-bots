@@ -498,23 +498,26 @@ constexpr AddressWord kAddressWords[] = {
     {"dps", "", pb::Role::DPS},
 };
 
-// Words of a tactical call to the whole group ("los", "buff pls", "anyone got
-// decurse?"): unaddressed, such a line from a human wakes every brain bot of
-// a small group, so whoever can help hears it; chit-chat and invitations
-// ("anyone up for RFC?") wake one.
+// Words of a tactical call to the whole group ("los", "spread", "stack",
+// "stop dps", "buff pls", "anyone got decurse?"): unaddressed, such a line
+// from a human wakes every online brain bot in the party or raid so nobody
+// misses a tactical call (AnswersPartyLine still keeps replies to a single
+// responder); chit-chat and invitations ("anyone up for RFC?") wake only one.
 constexpr std::string_view kGroupCallWords[] = {
-    "los",    "buff",  "buffs",     "rebuff",  "decurse", "dispel",   "cleanse",
-    "cure",   "curse", "poison",    "disease", "magic",   "cc",       "sheep",
-    "poly",   "sap",   "trap",      "fear",    "shackle", "hex",      "root",
-    "stun",   "kick",  "interrupt", "pull",    "wait",    "stop",     "hold",
-    "run",    "stack", "spread",    "focus",   "kill",    "assist",   "help",
-    "heal",   "rez",   "res",       "ress",    "mana",    "oom",      "drink",
-    "water",  "food",  "summon",    "follow",  "come",    "move",     "kite",
-    "taunt",  "aoe",   "adds",      "add",     "careful", "fire",     "behind",
-    "skull",  "cross", "star",      "moon",    "square",  "triangle", "diamond",
-    "circle",
+    "los",     "buff",   "buffs",  "rebuff", "decurse",   "dispel",
+    "cleanse", "cure",   "curse",  "poison", "disease",   "magic",
+    "cc",      "sheep",  "poly",   "sap",    "trap",      "fear",
+    "shackle", "hex",    "root",   "stun",   "kick",      "interrupt",
+    "pull",    "wait",   "stop",   "hold",   "run",       "stack",
+    "clump",   "spread", "focus",  "kill",   "assist",    "help",
+    "heal",    "rez",    "res",    "ress",   "mana",      "oom",
+    "drink",   "water",  "food",   "summon", "follow",    "come",
+    "move",    "kite",   "taunt",  "aoe",    "adds",      "add",
+    "careful", "fire",   "behind", "lust",   "bloodlust", "hero",
+    "heroism", "bl",     "resume", "burn",   "nuke",      "cease",
+    "skull",   "cross",  "star",   "moon",   "square",    "triangle",
+    "diamond", "circle",
 };
-constexpr size_t kMaxGroupWakeBots = 4;
 
 // The unprompted self-repeat filter: a bot doesn't say a line again, unasked,
 // within 5 minutes of saying it.
@@ -866,9 +869,9 @@ bool BotLoop::WakesForPartyLine(const std::string& bot,
     return std::find(a.addressed.begin(), a.addressed.end(), bot) !=
            a.addressed.end();
   }
-  // A brain bot's own party line is never a call for the whole group.
+  // A brain bot's own party/raid line is never a call for the whole group.
   const bool from_human = !from.empty() && !bots_.contains(from);
-  if (from_human && a.online.size() <= kMaxGroupWakeBots && IsGroupCall(text)) {
+  if (from_human && IsGroupCall(text)) {
     return true;
   }
   return a.online.front() == bot;

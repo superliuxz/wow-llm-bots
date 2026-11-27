@@ -2810,6 +2810,19 @@ ActStepResult StepActiveAct(Player* bot,
   }
   active->last_repath_at = now;
 
+  if (active->fixed_spot) {
+    if (!bot->isMoving()) {
+      std::optional<pb::Vec3> chosen =
+          MoveToFirstValidSpot(bot, {active->dest}, nullptr);
+      if (!chosen) {
+        ClearActMovement(bot);
+        return {.error = "no path to destination"};
+      }
+      active->dest = *chosen;
+    }
+    return {};
+  }
+
   std::optional<AnchorGeometry> cur_anchor = ResolveMoveAnchor(bot, act);
   if (!cur_anchor) {
     ClearActMovement(bot);
@@ -2851,8 +2864,49 @@ bool ActMovesOut(const ActiveAct& active) {
     case pb::Command_Act::KITE:
       return true;
     default:
-      return false;
+      return active.fixed_spot;
   }
+}
+
+ActStartResult StartSpreadAct(Player* bot,
+                              const AnchorGeometry& center,
+                              size_t slot_index,
+                              size_t total_bots,
+                              base::TimeTicks now,
+                              ActiveAct* out_active) {
+  if (!bot || !bot->IsInWorld() || !bot->IsAlive() || !out_active) {
+    return {.error = "bot cannot spread right now"};
+  }
+  const pb::Vec3 bot_pos = PosOf(bot);
+  std::vector<pb::Vec3> candidates = CandidateSpotsForSpread(
+      bot_pos, center, slot_index, total_bots, kDefaultSpreadRadiusYd);
+  if (candidates.empty()) {
+    return {.done = true};
+  }
+  candidates = PreferSpotsClearOf(std::move(candidates), bot_pos,
+                                  NearbyUnpulledHostiles(bot));
+  if (Dist2D(bot_pos, candidates.front()) <= kArrivalToleranceYd) {
+    return {.done = true};
+  }
+  std::optional<pb::Vec3> chosen =
+      MoveToFirstValidSpot(bot, candidates, nullptr);
+  if (!chosen) {
+    return {.error = "no path to spread"};
+  }
+  SetPingStay(bot, false);
+  CutCastsForMove(bot);
+  out_active->command_id = 0;
+  out_active->map_id = bot->GetMapId();
+  out_active->instance_id = bot->GetInstanceId();
+  out_active->act = {};
+  out_active->act.verb = pb::Command_Act::TO;
+  out_active->dest = *chosen;
+  out_active->last_anchor = center;
+  out_active->last_repath_at = now;
+  out_active->waiting_cast = false;
+  out_active->fixed_spot = true;
+  out_active->hold_on_arrival = true;
+  return {.done = false};
 }
 
 bool ActHoldsStealth(const ActiveAct& active) {

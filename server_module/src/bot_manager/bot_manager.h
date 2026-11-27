@@ -93,6 +93,11 @@ class BotManager {
   // Starts that hold where the bot stands now.
   static void StartPingStay(Player* bot);
 
+  // Thread-safe: whether a leader "stop dps" command currently pauses
+  // offensive attacks and non-positive spell casts for `bot`.
+  static void SetStopDps(Player* bot, bool stop);
+  static bool IsStopDps(Player* bot);
+
   // World thread only: the brain chose to lie dead hoping for a rez (RH-M3):
   // playerbots' auto release waits `wait_ms` from now, anywhere (by default
   // it waits up to 90 s, and only in a dungeon with a living resurrector).

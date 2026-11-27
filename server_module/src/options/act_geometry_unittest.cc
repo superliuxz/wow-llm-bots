@@ -349,5 +349,42 @@ TEST(ActGeometryTest, HealerNeedsTankRepositionAndAdversarialCounterTests) {
   check_blocked([](auto& c) { c.tank_in_combat = false; });
 }
 
+TEST(ActGeometryTest, SpreadAssignsDistinctEvenlySpacedBearings) {
+  const AnchorGeometry center{
+      .pos = {100.0f, 200.0f, 10.0f}, .facing_rad = 0.0f, .radius_yd = 0.0f};
+  // 5-bot raid: all 5 slots get distinct spots at ~10 yd from center and
+  // >11 yd from each other.
+  std::vector<pb::Vec3> five;
+  for (size_t i = 0; i < 5; ++i) {
+    const std::vector<pb::Vec3> cands = CandidateSpotsForSpread(
+        center.pos, center, i, 5, kDefaultSpreadRadiusYd);
+    ASSERT_GT(cands.size(), 5u);
+    EXPECT_NEAR(Dist2D(cands.front(), center.pos), kDefaultSpreadRadiusYd,
+                1e-2f);
+    five.push_back(cands.front());
+  }
+  for (size_t i = 0; i < five.size(); ++i) {
+    for (size_t j = i + 1; j < five.size(); ++j) {
+      EXPECT_GT(Dist2D(five[i], five[j]), 11.0f);
+    }
+  }
+  // 10-bot raid (>8): alternates inner (10 yd) and outer (16 yd) rings so
+  // adjacent slots stay well separated.
+  std::vector<pb::Vec3> ten;
+  for (size_t i = 0; i < 10; ++i) {
+    const std::vector<pb::Vec3> cands = CandidateSpotsForSpread(
+        center.pos, center, i, 10, kDefaultSpreadRadiusYd);
+    ASSERT_FALSE(cands.empty());
+    const float expected_r = (i % 2 == 1) ? 16.0f : 10.0f;
+    EXPECT_NEAR(Dist2D(cands.front(), center.pos), expected_r, 1e-2f);
+    ten.push_back(cands.front());
+  }
+  for (size_t i = 0; i < ten.size(); ++i) {
+    for (size_t j = i + 1; j < ten.size(); ++j) {
+      EXPECT_GT(Dist2D(ten[i], ten[j]), 7.5f);
+    }
+  }
+}
+
 }  // namespace
 }  // namespace llm_brain

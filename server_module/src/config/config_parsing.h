@@ -45,8 +45,12 @@ std::string AdjustNonCombatStrategies(const std::string& base_non_combat,
                                       bool group_has_human);
 
 // Adjusts `LlmBrain.CombatStrategies` when a bot is in a group:
-//  - Strips `boost` (`-boost`) so grouped bots don't open with cooldowns over
-//    someone else's tank (T3).
+//  - Preserves `boost` as configured (`+boost` stays `+boost`; `-boost` stays
+//    `-boost`): playerbots' `BoostTrigger`/`GenericBoostTrigger` already gates
+//    cooldowns (Bloodlust/Heroism, Icy Veins, Arcane Power, Rapid Fire,
+//    Shadowfiend, racials, trinkets) on `balance <= 50` or PvP targets, so
+//    grouped bots use them on bosses and heavy pulls without blowing them on
+//    routine trash.
 //  - Enables `threat` (`+threat`) for DPS, but keeps `-threat` for healers:
 //    playerbots marks every `CastHealingSpellAction` as
 //    `ActionThreatType::Aoe`, causing `ThreatMultiplier` to suppress all heals

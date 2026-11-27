@@ -3733,15 +3733,40 @@ TEST(BotLoopTest, UnaddressedGroupCallWakesASmallGroupButChitChatWakesOne) {
   f.FinishAll("");
 }
 
-TEST(BotLoopTest, GroupCallWakesOnlyTheResponderInALargerGroup) {
+TEST(BotLoopTest, UnaddressedTacticalCallsWakeLargeRaidButChitChatWakesOne) {
   PartyWakeFixture f({{"Abby", "Warrior", pb::Role::TANK},
                       {"Gatda", "Rogue", pb::Role::DPS},
                       {"Loada", "Priest", pb::Role::HEALER},
                       {"Mira", "Druid", pb::Role::HEALER},
-                      {"Telda", "Mage", pb::Role::DPS}});
-  EXPECT_EQ(f.Line("los"), Names{"Abby"});
+                      {"Telda", "Mage", pb::Role::DPS}},
+                     /*cfg=*/{}, /*raid=*/true);
+  const Names kAll = {"Abby", "Gatda", "Loada", "Mira", "Telda"};
+  // Tactical raid calls wake every online raid bot, while only the single
+  // responder (Abby) replies in /raid so chatter never explodes.
+  EXPECT_EQ(f.Line("spread"), kAll);
+  EXPECT_EQ(f.FinishAll("spreading"), Names{"Abby"});
+  EXPECT_EQ(f.Line("stack"), kAll);
+  EXPECT_EQ(f.FinishAll("stacking"), Names{"Abby"});
+  EXPECT_EQ(f.Line("cease fire"), kAll);
+  EXPECT_EQ(f.FinishAll("holding"), Names{"Abby"});
+  EXPECT_EQ(f.Line("move"), kAll);
+  EXPECT_EQ(f.FinishAll("moving"), Names{"Abby"});
+  EXPECT_EQ(f.Line("los"), kAll);
+  EXPECT_EQ(f.FinishAll("pulling back"), Names{"Abby"});
+  // Role-addressed tactical call ("stop dps") wakes every matching role bot.
+  EXPECT_EQ(f.Line("stop dps"), (Names{"Gatda", "Telda"}));
+  EXPECT_EQ(f.FinishAll("stopping"), Names{"Gatda"});
+
+  // Adversarial counter-test: casual chat in a >4-bot raid still wakes only
+  // the single responder (no fan-out chatter explosion).
+  EXPECT_EQ(f.Line("how was your day"), Names{"Abby"});
+  EXPECT_EQ(f.FinishAll("good"), Names{"Abby"});
+  EXPECT_EQ(f.Line("anyone up for Molten Core?"), Names{"Abby"});
   f.FinishAll("");
-  // Addressing still wakes every addressed bot there.
+  // Adversarial counter-test: a bot's own tactical call never fans out.
+  EXPECT_EQ(f.Line("spread", "Telda"), Names{"Abby"});
+  f.FinishAll("");
+  // Addressing still wakes only the addressed bots.
   EXPECT_EQ(f.Line("healers drink"), (Names{"Loada", "Mira"}));
   EXPECT_EQ(f.FinishAll("ok"), Names{"Loada"});
   EXPECT_EQ(f.Line("pally or warr tank this"), Names{"Abby"});
@@ -3769,8 +3794,9 @@ TEST(BotLoopTest, RaidLineAddressesByClassAndRoleAndRoutesReplyToRaid) {
   EXPECT_EQ(f.FinishAll("pulling"), Names{"Abby"});
   EXPECT_EQ(f.Line("dps stop"), (Names{"Gatda", "Telda"}));
   EXPECT_EQ(f.FinishAll("stopping"), Names{"Gatda"});
-  // Unaddressed call in a >4-bot raid wakes only the single responder.
-  EXPECT_EQ(f.Line("los"), Names{"Abby"});
+  // Unaddressed tactical call in a >4-bot raid wakes all bots so nobody misses
+  // it, while only the single responder replies in /raid.
+  EXPECT_EQ(f.Line("los"), (Names{"Abby", "Gatda", "Loada", "Mira", "Telda"}));
   EXPECT_EQ(f.FinishAll("pulling back"), Names{"Abby"});
 
   // Counter-test: non-matching class/role (nobody plays warlock, and "lock"

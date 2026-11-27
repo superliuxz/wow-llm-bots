@@ -205,5 +205,37 @@ TEST(BotSessionRegistryTest, HumanGroupGraceResetsCleanly) {
   expect_clean();
 }
 
+// Adversarial counter-test: active "stop dps" clears on map change, harness
+// disconnect, and logout so a bot never stays muted on attacks in a new zone
+// or after reconnect, while group policy still survives.
+TEST(BotSessionRegistryTest, StopDpsClearsOnMapChangeDisconnectAndLogout) {
+  BotSessionRegistry reg;
+  constexpr uint64_t kBot = 0x1006;
+  const auto set = [&] {
+    reg.WithSession(kBot, [](BotSession& s) {
+      s.group_guid = 42;
+      s.group_policy.stay = true;
+      s.stop_dps = true;
+    });
+  };
+  const auto expect_cleared = [&] {
+    reg.InspectSession(kBot, [](const BotSession* s) {
+      ASSERT_NE(s, nullptr);
+      EXPECT_FALSE(s->stop_dps);
+      EXPECT_EQ(s->group_guid, 42u);
+      EXPECT_TRUE(s->group_policy.stay);
+    });
+  };
+  set();
+  reg.ResetOnMapChange(kBot);
+  expect_cleared();
+  set();
+  reg.ResetOnDisconnect(kBot);
+  expect_cleared();
+  set();
+  reg.ResetOnLogout(kBot);
+  expect_cleared();
+}
+
 }  // namespace
 }  // namespace llm_brain

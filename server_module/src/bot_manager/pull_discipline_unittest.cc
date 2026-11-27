@@ -143,5 +143,56 @@ TEST(PullDisciplineTest, PetTauntSpellClassification) {
   EXPECT_FALSE(IsPetTauntSpell(6795));   // Druid Growl (bear form, not pet)
 }
 
+TEST(PullDisciplineTest, StopDpsLifecycleAndActionFilter) {
+  StopDpsState state;
+  RecordStopDps(state, /*in_combat=*/false);
+  EXPECT_TRUE(state.active);
+  EXPECT_FALSE(state.saw_combat);
+
+  // Pre-combat hold stays active before combat begins.
+  EXPECT_FALSE(ShouldResetStopDps(state, /*bot_in_combat=*/false,
+                                  /*party_in_combat=*/false));
+  EXPECT_TRUE(state.active);
+
+  // Combat begins: stays active through the fight.
+  EXPECT_FALSE(ShouldResetStopDps(state, /*bot_in_combat=*/true,
+                                  /*party_in_combat=*/true));
+  EXPECT_TRUE(state.active);
+  EXPECT_TRUE(state.saw_combat);
+
+  // Counter-test: bot briefly drops combat while raid is still fighting.
+  EXPECT_FALSE(ShouldResetStopDps(state, /*bot_in_combat=*/false,
+                                  /*party_in_combat=*/true));
+  EXPECT_TRUE(state.active);
+
+  // Once both bot and party drop combat, stop dps resets cleanly.
+  EXPECT_TRUE(ShouldResetStopDps(state, /*bot_in_combat=*/false,
+                                 /*party_in_combat=*/false));
+  EXPECT_FALSE(state.active);
+  EXPECT_FALSE(state.saw_combat);
+
+  // Explicit clear (resume dps / attack command / map change / disconnect).
+  RecordStopDps(state, /*in_combat=*/true);
+  EXPECT_TRUE(ClearStopDps(state));
+  EXPECT_FALSE(state.active);
+  EXPECT_FALSE(ClearStopDps(state));
+
+  // Action filter blocks offensive/attack actions without blocking heals or
+  // movement.
+  EXPECT_TRUE(IsStopDpsBlockedActionName("attack"));
+  EXPECT_TRUE(IsStopDpsBlockedActionName("attack my target"));
+  EXPECT_TRUE(IsStopDpsBlockedActionName("attack rti target"));
+  EXPECT_TRUE(IsStopDpsBlockedActionName("melee"));
+  EXPECT_TRUE(IsStopDpsBlockedActionName("shoot"));
+  EXPECT_TRUE(IsStopDpsBlockedActionName("auto shot"));
+  EXPECT_TRUE(IsStopDpsBlockedActionName("wand"));
+  EXPECT_TRUE(IsStopDpsBlockedActionName("pet attack"));
+  EXPECT_FALSE(IsStopDpsBlockedActionName("heal"));
+  EXPECT_FALSE(IsStopDpsBlockedActionName("follow"));
+  EXPECT_FALSE(IsStopDpsBlockedActionName("stay"));
+  EXPECT_FALSE(IsStopDpsBlockedActionName("dispel"));
+  EXPECT_FALSE(IsStopDpsBlockedActionName("resurrect"));
+}
+
 }  // namespace
 }  // namespace llm_brain

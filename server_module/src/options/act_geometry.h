@@ -9,6 +9,7 @@
 #ifndef MOD_LLM_BRAIN_OPTIONS_ACT_GEOMETRY_H_
 #define MOD_LLM_BRAIN_OPTIONS_ACT_GEOMETRY_H_
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -20,6 +21,7 @@ namespace llm_brain {
 inline constexpr float kDefaultMaxRangeYd = 28.0f;
 inline constexpr float kDefaultAwayYd = 12.0f;
 inline constexpr float kDefaultKiteYd = 20.0f;
+inline constexpr float kDefaultSpreadRadiusYd = 10.0f;
 inline constexpr float kDefaultBehindMarginYd = 2.5f;
 inline constexpr float kDefaultOutOfMarginYd = 2.5f;
 // A dodge prefers spots at least this far from mobs nobody has pulled (about
@@ -89,6 +91,16 @@ std::vector<wlb::snapshot::Vec3> CandidateSpotsForKite(
     const AnchorGeometry& anchor,
     float kite_dist_yd = kDefaultKiteYd,
     float bot_radius_yd = 0.0f);
+
+// Ordered spread waypoints around `center` for bot `slot_index` of
+// `total_bots`, assigning evenly spaced bearings (and two concentric rings
+// when `total_bots > 8`) so a whole raid fans out without stacking on one spot.
+std::vector<wlb::snapshot::Vec3> CandidateSpotsForSpread(
+    const wlb::snapshot::Vec3& bot_pos,
+    const AnchorGeometry& center,
+    size_t slot_index,
+    size_t total_bots,
+    float radius_yd = kDefaultSpreadRadiusYd);
 
 // Two tiers of dodge spots: those at least `clear_yd` from every point in
 // `unpulled` (mobs nobody has pulled) and at most `max_extra_walk_yd` farther

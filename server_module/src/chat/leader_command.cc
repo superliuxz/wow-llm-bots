@@ -66,6 +66,36 @@ constexpr Phrase kPhrases[] = {
     {"pull", LeaderCommand::kPull},
     {"pull it", LeaderCommand::kPull},
     {"pull my target", LeaderCommand::kPull},
+    {"lust", LeaderCommand::kLust},
+    {"bloodlust", LeaderCommand::kLust},
+    {"bl", LeaderCommand::kLust},
+    {"hero", LeaderCommand::kLust},
+    {"heroism", LeaderCommand::kLust},
+    {"spread", LeaderCommand::kSpread},
+    {"spread out", LeaderCommand::kSpread},
+    {"stack", LeaderCommand::kStack},
+    {"stack up", LeaderCommand::kStack},
+    {"stack on me", LeaderCommand::kStack},
+    {"stack here", LeaderCommand::kStack},
+    {"group up", LeaderCommand::kStack},
+    {"clump", LeaderCommand::kStack},
+    {"clump up", LeaderCommand::kStack},
+    {"stop dps", LeaderCommand::kStopDps},
+    {"dps stop", LeaderCommand::kStopDps},
+    {"hold dps", LeaderCommand::kStopDps},
+    {"cease fire", LeaderCommand::kStopDps},
+    {"stop attacking", LeaderCommand::kStopDps},
+    {"stop attack", LeaderCommand::kStopDps},
+    {"no dps", LeaderCommand::kStopDps},
+    {"hands off", LeaderCommand::kStopDps},
+    {"stop damage", LeaderCommand::kStopDps},
+    {"hold damage", LeaderCommand::kStopDps},
+    {"resume", LeaderCommand::kResumeDps},
+    {"resume dps", LeaderCommand::kResumeDps},
+    {"dps", LeaderCommand::kResumeDps},
+    {"go dps", LeaderCommand::kResumeDps},
+    {"burn", LeaderCommand::kResumeDps},
+    {"nuke", LeaderCommand::kResumeDps},
 };
 
 // "<verb> <icon>": who to kill (or pull) by its raid mark.
@@ -198,6 +228,16 @@ const char* LeaderCommandName(LeaderCommand command) {
       return "pull back";
     case LeaderCommand::kPull:
       return "pull";
+    case LeaderCommand::kLust:
+      return "lust";
+    case LeaderCommand::kSpread:
+      return "spread";
+    case LeaderCommand::kStack:
+      return "stack";
+    case LeaderCommand::kStopDps:
+      return "stop dps";
+    case LeaderCommand::kResumeDps:
+      return "resume dps";
   }
   return "?";
 }
@@ -211,6 +251,20 @@ std::string DescribeLeaderCommand(const ParsedLeaderCommand& parsed) {
     out += kRaidIconNames[*parsed.mark];
   }
   return out;
+}
+
+bool IsLeaderCommandForBot(bool sender_is_human,
+                           bool sender_is_leader,
+                           const ParsedLeaderCommand& parsed,
+                           std::string_view bot_name) {
+  if (!sender_is_human) {
+    return false;
+  }
+  if (parsed.addressed.empty()) {
+    return sender_is_leader;
+  }
+  return std::find(parsed.addressed.begin(), parsed.addressed.end(),
+                   bot_name) != parsed.addressed.end();
 }
 
 }  // namespace llm_brain
