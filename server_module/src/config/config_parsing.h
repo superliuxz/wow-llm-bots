@@ -3,7 +3,9 @@
 #ifndef MOD_LLM_BRAIN_CONFIG_CONFIG_PARSING_H_
 #define MOD_LLM_BRAIN_CONFIG_CONFIG_PARSING_H_
 
+#include <cstdint>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -30,19 +32,46 @@ struct StrategyCheck {
 };
 std::vector<StrategyCheck> StrategyChecks(const std::string& changes);
 
-// Adjusts `LlmBrain.NonCombatStrategies` for group and dungeon play without
-// touching stripped test configs (where `+grind` is not enabled):
-//  - Grouped non-leader bots keep `+follow,-grind,-new rpg` so the party runs
-//    together naturally instead of splitting or hearthing via `+new rpg`.
-//  - A bot leading a group with a human in it also gets `-grind,-new rpg`
-//    (no `+follow`): it must not wander off from or pull ahead of the human.
-//  - Dungeon leaders/solo bots strip `+new rpg` (`-new rpg`) so Playerbots'
-//    open-world RPG travel does not Hearthstone them out of the instance.
+// Adjusts `LlmBrain.NonCombatStrategies` for brain ownership, group, and
+// dungeon play without touching stripped test configs (where neither `+grind`
+// nor `+new rpg` is enabled):
+//  - While `brain_led` is true (harness connected and LLM healthy), the brain
+//    owns quests, grinding, travel, vendors, and flight paths: `grind` and
+//    `new rpg` are stripped (`-grind,-new rpg`) for solo bots, all-bot group
+//    leaders, and human-group members alike so playerbots never accepts, turns
+//    in, or abandons quests, picks rewards, flies, or teleports when stuck
+//    alongside the brain. Grouped non-leader bots still keep `+follow`.
+//  - While `brain_led` is false (harness disconnected or LLM unhealthy),
+//    playerbots fallback applies: grouped non-leader bots keep
+//    `+follow,-grind,-new rpg`, a bot leading a human keeps `-grind,-new rpg`,
+//    dungeon leaders/solo bots strip `+new rpg`, and solo/all-bot-leader
+//    open-world bots keep `base_non_combat`.
 std::string AdjustNonCombatStrategies(const std::string& base_non_combat,
                                       bool in_group,
                                       bool is_leader,
                                       bool in_dungeon,
-                                      bool group_has_human);
+                                      bool group_has_human,
+                                      bool brain_led);
+
+// Returns the playerbots scripted raid strategy name registered in
+// `RaidStrategyContext` / `PlayerbotAI::ApplyInstanceStrategies` for `map_id`
+// (e.g. 533 -> "naxx", 603 -> "ulduar", 631 -> "icc"), or empty for non-raid
+// maps (open world, 5-man dungeons, battlegrounds).
+std::string_view ScriptedRaidStrategyForMap(uint32_t map_id);
+
+// Coordinates playerbots' scripted raid strategies with brain standing orders:
+//  - On a non-raid map (`ScriptedRaidStrategyForMap(map_id)` empty), returns
+//    `base_strategies` unchanged.
+//  - While `brain_led` is true, strips the map's scripted raid strategy
+//    (`-<name>`) so playerbots' hardcoded raid movement never fights brain
+//    standing orders.
+//  - While `brain_led` is false (harness disconnected or LLM unhealthy),
+//    restores `+<name>` when `apply_instance_strategies` is true and
+//    `base_strategies` did not explicitly disable `-<name>`.
+std::string AdjustRaidStrategies(const std::string& base_strategies,
+                                 uint32_t map_id,
+                                 bool brain_led,
+                                 bool apply_instance_strategies = true);
 
 // Adjusts `LlmBrain.CombatStrategies` when a bot is in a group:
 //  - Preserves `boost` as configured (`+boost` stays `+boost`; `-boost` stays

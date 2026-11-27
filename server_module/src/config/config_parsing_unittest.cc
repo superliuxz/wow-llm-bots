@@ -2,10 +2,13 @@
 
 #include "config/config_parsing.h"
 
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "bot_manager/tick_owner.h"
+#include "bot_session.h"
 #include "gtest/gtest.h"
 
 namespace llm_brain {
@@ -55,53 +58,268 @@ TEST(ConfigParsingTest, StrategyChecksCoverEveryChange) {
 
 TEST(ConfigParsingTest, AdjustNonCombatStrategiesRespectsGroupAndDungeon) {
   const std::string live = "-follow,+grind,+new rpg";
-  // Solo open-world: unchanged.
+  // Brain-led (harness connected & LLM healthy): solo bots and all group
+  // leaders strip both `grind` and `new rpg` so playerbots never accepts/turns
+  // in/abandons quests, picks rewards, flies, or teleports alongside the brain.
   EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/false,
                                       /*is_leader=*/false,
                                       /*in_dungeon=*/false,
-                                      /*group_has_human=*/false),
-            live);
-  // Grouped leader in open world: unchanged.
+                                      /*group_has_human=*/false,
+                                      /*brain_led=*/true),
+            "-follow,-grind,-new rpg");
+  EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/false,
+                                      /*is_leader=*/false,
+                                      /*in_dungeon=*/true,
+                                      /*group_has_human=*/false,
+                                      /*brain_led=*/true),
+            "-follow,-grind,-new rpg");
   EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
                                       /*is_leader=*/true,
                                       /*in_dungeon=*/false,
-                                      /*group_has_human=*/false),
-            live);
-  // Grouped leader in dungeon: keeps +grind, strips +new rpg.
+                                      /*group_has_human=*/false,
+                                      /*brain_led=*/true),
+            "-follow,-grind,-new rpg");
   EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
                                       /*is_leader=*/true,
                                       /*in_dungeon=*/true,
-                                      /*group_has_human=*/false),
+                                      /*group_has_human=*/false,
+                                      /*brain_led=*/true),
+            "-follow,-grind,-new rpg");
+  EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
+                                      /*is_leader=*/false,
+                                      /*in_dungeon=*/false,
+                                      /*group_has_human=*/false,
+                                      /*brain_led=*/true),
+            "+follow,-grind,-new rpg");
+  EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
+                                      /*is_leader=*/false,
+                                      /*in_dungeon=*/true,
+                                      /*group_has_human=*/true,
+                                      /*brain_led=*/true),
+            "+follow,-grind,-new rpg");
+
+  // Playerbots-led fallback (harness disconnected or LLM unhealthy):
+  // Solo open-world: unchanged so the bot stays active.
+  EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/false,
+                                      /*is_leader=*/false,
+                                      /*in_dungeon=*/false,
+                                      /*group_has_human=*/false,
+                                      /*brain_led=*/false),
+            live);
+  // Solo in dungeon: strips +new rpg so it does not hearthstone out.
+  EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/false,
+                                      /*is_leader=*/false,
+                                      /*in_dungeon=*/true,
+                                      /*group_has_human=*/false,
+                                      /*brain_led=*/false),
+            "-follow,+grind,-new rpg");
+  // All-bot group leader in open world: unchanged.
+  EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
+                                      /*is_leader=*/true,
+                                      /*in_dungeon=*/false,
+                                      /*group_has_human=*/false,
+                                      /*brain_led=*/false),
+            live);
+  // All-bot group leader in dungeon: keeps +grind, strips +new rpg.
+  EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
+                                      /*is_leader=*/true,
+                                      /*in_dungeon=*/true,
+                                      /*group_has_human=*/false,
+                                      /*brain_led=*/false),
             "-follow,+grind,-new rpg");
   // Grouped follower (open-world or dungeon): runs with leader (+follow).
   EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
                                       /*is_leader=*/false,
                                       /*in_dungeon=*/true,
-                                      /*group_has_human=*/false),
+                                      /*group_has_human=*/false,
+                                      /*brain_led=*/false),
             "+follow,-grind,-new rpg");
   EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
                                       /*is_leader=*/false,
                                       /*in_dungeon=*/false,
-                                      /*group_has_human=*/false),
+                                      /*group_has_human=*/false,
+                                      /*brain_led=*/false),
             "+follow,-grind,-new rpg");
-  // A bot leading a human: no grind or RPG travel, no follow either.
+  // Adversarial counter-test: a bot leading a human NEVER solo-grinds or
+  // RPG-travels, even when playerbots-led (harness disconnected).
   EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
                                       /*is_leader=*/true,
                                       /*in_dungeon=*/false,
-                                      /*group_has_human=*/true),
+                                      /*group_has_human=*/true,
+                                      /*brain_led=*/false),
             "-follow,-grind,-new rpg");
   EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
                                       /*is_leader=*/true,
                                       /*in_dungeon=*/true,
-                                      /*group_has_human=*/true),
+                                      /*group_has_human=*/true,
+                                      /*brain_led=*/false),
             "-follow,-grind,-new rpg");
-  // Stripped test configs (no +grind) are never altered.
+  // Config with only `+new rpg` (no `+grind`) is still stripped when brain-led.
+  EXPECT_EQ(AdjustNonCombatStrategies("-follow,-grind,+new rpg",
+                                      /*in_group=*/false,
+                                      /*is_leader=*/false,
+                                      /*in_dungeon=*/false,
+                                      /*group_has_human=*/false,
+                                      /*brain_led=*/true),
+            "-follow,-grind,-new rpg");
+  // Stripped test configs (neither `+grind` nor `+new rpg`) are never altered.
   const std::string boss = "-follow,-grind,-new rpg,-wotlk-hol";
   EXPECT_EQ(AdjustNonCombatStrategies(boss, /*in_group=*/true,
                                       /*is_leader=*/false,
                                       /*in_dungeon=*/true,
-                                      /*group_has_human=*/false),
+                                      /*group_has_human=*/false,
+                                      /*brain_led=*/true),
             boss);
+  EXPECT_EQ(AdjustNonCombatStrategies(boss, /*in_group=*/false,
+                                      /*is_leader=*/false,
+                                      /*in_dungeon=*/false,
+                                      /*group_has_human=*/false,
+                                      /*brain_led=*/false),
+            boss);
+}
+
+// Adversarial counter-test: human join/leave, harness disconnect/reconnect,
+// and logout/reset transitions for a solo bot.
+TEST(ConfigParsingTest,
+     AdjustNonCombatStrategiesHumanJoinLeaveAndLogoutTransitions) {
+  const std::string live = "-follow,+grind,+new rpg";
+  BotSessionRegistry reg;
+  constexpr uint64_t kBot = 0x2001;
+
+  // 1. Solo brain-led: no grind / new rpg overlap.
+  reg.WithSession(kBot,
+                  [](BotSession& s) { s.tick_owner = TickOwner::kBrain; });
+  EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/false,
+                                      /*is_leader=*/false,
+                                      /*in_dungeon=*/false,
+                                      /*group_has_human=*/false,
+                                      /*brain_led=*/true),
+            "-follow,-grind,-new rpg");
+
+  // 2. Human invites bot (bot becomes follower in human group).
+  EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
+                                      /*is_leader=*/false,
+                                      /*in_dungeon=*/false,
+                                      /*group_has_human=*/true,
+                                      /*brain_led=*/true),
+            "+follow,-grind,-new rpg");
+
+  // 3. Human promotes bot to leader (still no follow, no grind, no new rpg).
+  EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/true,
+                                      /*is_leader=*/true,
+                                      /*in_dungeon=*/false,
+                                      /*group_has_human=*/true,
+                                      /*brain_led=*/true),
+            "-follow,-grind,-new rpg");
+
+  // 4. Human leaves group -> bot is solo again, still brain-led: MUST stay
+  //    `-follow,-grind,-new rpg` (never re-enables playerbots new rpg/grind).
+  EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/false,
+                                      /*is_leader=*/false,
+                                      /*in_dungeon=*/false,
+                                      /*group_has_human=*/false,
+                                      /*brain_led=*/true),
+            "-follow,-grind,-new rpg");
+
+  // 5. Logout resets tick_owner to kPlayerbots; until brain reconnects, solo
+  //    bot falls back cleanly to playerbots' open-world strategies.
+  reg.ResetOnLogout(kBot);
+  const bool brain_after_logout =
+      reg.InspectSession(kBot, [](const BotSession* s) {
+        return s && s->tick_owner == TickOwner::kBrain;
+      });
+  EXPECT_FALSE(brain_after_logout);
+  EXPECT_EQ(AdjustNonCombatStrategies(live, /*in_group=*/false,
+                                      /*is_leader=*/false,
+                                      /*in_dungeon=*/false,
+                                      /*group_has_human=*/false,
+                                      /*brain_led=*/brain_after_logout),
+            live);
+}
+
+TEST(ConfigParsingTest, ScriptedRaidStrategyForMapCoversRaidsAndExcludesRest) {
+  // WotLK raids (and classic/TBC raids in RaidStrategyContext).
+  EXPECT_EQ(ScriptedRaidStrategyForMap(533), "naxx");
+  EXPECT_EQ(ScriptedRaidStrategyForMap(603), "ulduar");
+  EXPECT_EQ(ScriptedRaidStrategyForMap(631), "icc");
+  EXPECT_EQ(ScriptedRaidStrategyForMap(249), "onyxia");
+  EXPECT_EQ(ScriptedRaidStrategyForMap(615), "wotlk-os");
+  EXPECT_EQ(ScriptedRaidStrategyForMap(616), "wotlk-eoe");
+  EXPECT_EQ(ScriptedRaidStrategyForMap(624), "voa");
+  EXPECT_EQ(ScriptedRaidStrategyForMap(724), "rs");
+  EXPECT_EQ(ScriptedRaidStrategyForMap(409), "moltencore");
+  EXPECT_EQ(ScriptedRaidStrategyForMap(532), "karazhan");
+  EXPECT_EQ(ScriptedRaidStrategyForMap(564), "blacktemple");
+
+  // Adversarial counter-tests: continents, 5-man dungeons, and battlegrounds
+  // are NOT scripted raid strategies.
+  for (uint32_t non_raid :
+       {0u, 1u, 30u, 36u, 489u, 530u, 571u, 574u, 602u, 650u}) {
+    EXPECT_TRUE(ScriptedRaidStrategyForMap(non_raid).empty()) << non_raid;
+  }
+}
+
+TEST(ConfigParsingTest, AdjustRaidStrategiesCoordinatesBrainAndFallback) {
+  const std::string combat = "+boost,+dps assist,+threat";
+  const std::string non_combat = "+follow,-grind,-new rpg";
+
+  // Brain-led in Naxx (533), Ulduar (603), ICC (631): strips scripted raid
+  // strategy from both combat and non-combat so standing orders never fight
+  // playerbots' hardcoded raid movement.
+  EXPECT_EQ(AdjustRaidStrategies(combat, 533, /*brain_led=*/true),
+            "+boost,+dps assist,+threat,-naxx");
+  EXPECT_EQ(AdjustRaidStrategies(non_combat, 533, /*brain_led=*/true),
+            "+follow,-grind,-new rpg,-naxx");
+  EXPECT_EQ(AdjustRaidStrategies(combat, 603, /*brain_led=*/true),
+            "+boost,+dps assist,+threat,-ulduar");
+  EXPECT_EQ(AdjustRaidStrategies(combat, 631, /*brain_led=*/true),
+            "+boost,+dps assist,+threat,-icc");
+
+  // Harness disconnect / LLM unhealthy (`brain_led=false`): restores the raid
+  // strategy when `apply_instance_strategies` is enabled so playerbots takes
+  // over boss survival cleanly.
+  EXPECT_EQ(AdjustRaidStrategies(combat, 631, /*brain_led=*/false,
+                                 /*apply_instance_strategies=*/true),
+            "+boost,+dps assist,+threat,+icc");
+  EXPECT_EQ(AdjustRaidStrategies(non_combat, 631, /*brain_led=*/false,
+                                 /*apply_instance_strategies=*/true),
+            "+follow,-grind,-new rpg,+icc");
+
+  // Adversarial counter-test: if `Playerbots.ApplyInstanceStrategies = 0`,
+  // disconnect fallback does NOT force `+icc` on.
+  EXPECT_EQ(AdjustRaidStrategies(combat, 631, /*brain_led=*/false,
+                                 /*apply_instance_strategies=*/false),
+            combat);
+
+  // Adversarial counter-test: if a config explicitly disabled `-icc`,
+  // disconnect fallback respects that config rather than forcing `+icc`.
+  const std::string explicit_off = "+boost,+dps assist,-threat,-icc";
+  EXPECT_EQ(AdjustRaidStrategies(explicit_off, 631, /*brain_led=*/false,
+                                 /*apply_instance_strategies=*/true),
+            explicit_off);
+  // Idempotent when already `-icc` and brain-led (no duplicate `-icc`).
+  EXPECT_EQ(AdjustRaidStrategies(explicit_off, 631, /*brain_led=*/true),
+            explicit_off);
+
+  // Adversarial counter-test: 5-man dungeon (HoL 602) and open world (571)
+  // are completely untouched in both modes.
+  EXPECT_EQ(AdjustRaidStrategies(combat, 602, /*brain_led=*/true), combat);
+  EXPECT_EQ(AdjustRaidStrategies(combat, 602, /*brain_led=*/false), combat);
+  EXPECT_EQ(AdjustRaidStrategies(combat, 571, /*brain_led=*/true), combat);
+  EXPECT_EQ(AdjustRaidStrategies(combat, 571, /*brain_led=*/false), combat);
+
+  // Map-change transition: ICC (brain-led -> `-icc`) -> Dalaran (571 -> clean)
+  // -> Ulduar (brain-led -> `-ulduar`) -> disconnect (`+ulduar`) -> reconnect
+  // (`-ulduar`).
+  EXPECT_EQ(AdjustRaidStrategies(combat, 631, /*brain_led=*/true),
+            "+boost,+dps assist,+threat,-icc");
+  EXPECT_EQ(AdjustRaidStrategies(combat, 571, /*brain_led=*/true), combat);
+  EXPECT_EQ(AdjustRaidStrategies(combat, 603, /*brain_led=*/true),
+            "+boost,+dps assist,+threat,-ulduar");
+  EXPECT_EQ(AdjustRaidStrategies(combat, 603, /*brain_led=*/false),
+            "+boost,+dps assist,+threat,+ulduar");
+  EXPECT_EQ(AdjustRaidStrategies(combat, 603, /*brain_led=*/true),
+            "+boost,+dps assist,+threat,-ulduar");
 }
 
 TEST(ConfigParsingTest, GroupedCombatStrategiesPreservesBoostAndThreatRules) {

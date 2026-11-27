@@ -17,13 +17,6 @@ Live verification following the `70b0878` team-play P0 fixes:
 
 Team-play P1 gaps and selected P2 items from the `70b0878` review:
 
-### Control seam (brain vs. playerbots)
-- **Scripted raid strategy conflict:** Playerbots scripted raid strategies (Naxx, Ulduar, ICC) and
-  brain standing orders move the same bots without coordinating.
-- **Solo bots playerbots overlap:** Without a human in group, playerbots `new rpg`/`grind` stays on
-  alongside the brain (accepts/turns in/abandons quests, picks rewards, flies, teleports when
-  stuck).
-
 ### Pull & threat discipline (dungeons)
 - **Skull on unpulled mob chain-pulls:** A skull on an unpulled mob counts as an attacker -> chain
   pulls mid-fight; tank's "Mark with Skull" picks nearest hostile including CC'd

@@ -59,6 +59,7 @@
 #include "PetDefines.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
+#include "PlayerbotAIConfig.h"
 #include "Playerbots.h"
 #include "Position.h"
 #include "QuestDef.h"
@@ -1870,6 +1871,9 @@ void BotManager::EnsureStrategies(Player* player) {
     base_combat = GroupedCombatStrategies(base_combat, is_healer);
   }
   std::string combat = base_combat + extras;
+  const bool brain_led =
+      TickOwnerFor(IsBrainConnected(), player->InBattleground(),
+                   IsLlmHealthy()) == TickOwner::kBrain;
   const bool is_leader =
       in_group && group->GetLeaderGUID() == player->GetGUID();
   const bool in_dungeon =
@@ -1877,7 +1881,14 @@ void BotManager::EnsureStrategies(Player* player) {
   const bool group_has_human = GroupHasHuman(group);
   std::string non_combat =
       AdjustNonCombatStrategies(strategies_.non_combat, in_group, is_leader,
-                                in_dungeon, is_leader && group_has_human);
+                                in_dungeon, group_has_human, brain_led);
+  const uint32_t map_id = player->GetMapId();
+  const bool apply_instance_strategies =
+      sPlayerbotAIConfig.ApplyInstanceStrategies;
+  combat = AdjustRaidStrategies(combat, map_id, brain_led,
+                                apply_instance_strategies);
+  non_combat = AdjustRaidStrategies(non_combat, map_id, brain_led,
+                                    apply_instance_strategies);
   // A grouped bot's pet never runs off after mobs nobody pulled
   // (GroupReflexLimits): aggressive becomes defensive, as a player sets it.
   if (Pet* pet = player->GetPet();
@@ -1981,14 +1992,21 @@ void BotManager::EnsureStrategies(Player* player) {
     }
     return true;
   };
-  if (holds(combat, BOT_STATE_COMBAT) &&
-      holds(non_combat, BOT_STATE_NON_COMBAT) &&
-      holds(strategies_.dead, BOT_STATE_DEAD)) {
+  const bool combat_ok = holds(combat, BOT_STATE_COMBAT);
+  const bool non_combat_ok = holds(non_combat, BOT_STATE_NON_COMBAT);
+  const bool dead_ok = holds(strategies_.dead, BOT_STATE_DEAD);
+  if (combat_ok && non_combat_ok && dead_ok) {
     return;
   }
-  ai->ChangeStrategy(combat, BOT_STATE_COMBAT);
-  ai->ChangeStrategy(non_combat, BOT_STATE_NON_COMBAT);
-  ai->ChangeStrategy(strategies_.dead, BOT_STATE_DEAD);
+  if (!combat_ok) {
+    ai->ChangeStrategy(combat, BOT_STATE_COMBAT);
+  }
+  if (!non_combat_ok) {
+    ai->ChangeStrategy(non_combat, BOT_STATE_NON_COMBAT);
+  }
+  if (!dead_ok) {
+    ai->ChangeStrategy(strategies_.dead, BOT_STATE_DEAD);
+  }
   LOG_INFO("module", "mod-llm-brain: applied strategies to {}",
            player->GetName());
 }
