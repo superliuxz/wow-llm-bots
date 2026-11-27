@@ -31,6 +31,7 @@
 #include "ObjectGuid.h"
 #include "ObjectMgr.h"
 #include "Opcodes.h"
+#include "Pet.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
 #include "Playerbots.h"
@@ -40,6 +41,7 @@
 #include "SpellAuraDefines.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
+#include "ThreatManager.h"
 #include "Timer.h"
 #include "TradeData.h"
 #include "Unit.h"
@@ -50,6 +52,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "bot_manager/bot_manager.h"
+#include "bot_manager/pull_discipline.h"
 #include "bot_session.h"
 #include "chat/chat_scripts.h"
 #include "options/act_executor.h"
@@ -62,6 +65,56 @@
 
 namespace llm_brain {
 namespace {
+
+// True when `unit` is actively engaged in combat with `bot` or another member
+// of `group` (or their pet) on the same map/instance.
+bool IsUnitInCombatWithGroup(Player* bot, Group* group, Unit* unit) {
+  if (!bot || !group || !unit || !unit->IsInCombat()) {
+    return false;
+  }
+  const ThreatManager& mgr = unit->GetThreatMgr();
+  if (mgr.CanHaveThreatList() && !mgr.IsThreatListEmpty()) {
+    for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
+         itr = itr->next()) {
+      Player* member = itr->GetSource();
+      if (!member || !member->IsInWorld() ||
+          member->GetMapId() != bot->GetMapId() ||
+          member->GetInstanceId() != bot->GetInstanceId()) {
+        continue;
+      }
+      if (mgr.GetThreat(member) > 0.0f) {
+        return true;
+      }
+      if (Pet* pet = member->GetPet(); pet && mgr.GetThreat(pet) > 0.0f) {
+        return true;
+      }
+    }
+  }
+  if (Unit* victim = unit->GetVictim()) {
+    if (Player* vp = victim->ToPlayer(); vp && group->IsMember(vp->GetGUID())) {
+      return true;
+    }
+    if (Unit* owner = victim->GetOwner()) {
+      if (Player* op = owner->ToPlayer();
+          op && group->IsMember(op->GetGUID())) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool HasAnyGroupTargetIcon(Group* group, ObjectGuid guid) {
+  if (!group || guid.IsEmpty()) {
+    return false;
+  }
+  for (uint8_t icon = 0; icon < TARGETICONCOUNT; ++icon) {
+    if (group->GetTargetIcon(icon) == guid) {
+      return true;
+    }
+  }
+  return false;
+}
 
 namespace pb = wlb::snapshot;
 
@@ -630,7 +683,10 @@ void CollectGroupAndUpkeepActions(Player* bot,
   }
 
   // 6. Raid target mark: the leader, an assistant or the tank marks (T14);
-  //    a follower's mark would redirect the group onto a fresh pack.
+  //    only offer mobs already in active combat with the group that are neither
+  //    CC'd nor already marked — playerbots' AttackersValue treats any
+  //    Skull-marked mob as an active attacker, so marking an unpulled mob
+  //    chain-pulls its pack.
   if (bot->IsAlive()) {
     if (Group* group = bot->GetGroup();
         group &&
@@ -641,9 +697,27 @@ void CollectGroupAndUpkeepActions(Player* bot,
         group->GetTargetIcon(7).IsEmpty()) {
       const pb::Unit* best = nullptr;
       for (const pb::Unit& u : snapshot.base.nearby.units) {
-        if (u.dead || u.kind != pb::Unit::NPC ||
-            u.reaction != pb::Unit::HOSTILE || u.guid.empty() ||
-            u.rel.dist_yd > 40.0f) {
+        Unit* live = !u.guid.empty() ? ObjectAccessor::GetUnit(
+                                           *bot, ParseSnapshotGuid(u.guid))
+                                     : nullptr;
+        const bool is_cc =
+            u.crowd_control.has_value() ||
+            std::find(u.visual_state.begin(), u.visual_state.end(),
+                      pb::Unit::BANISHED) != u.visual_state.end() ||
+            (live && live->HasBreakableByDamageCrowdControlAura());
+        const SkullMarkCandidate cand{
+            .alive = !u.dead && live && live->IsAlive(),
+            .is_npc = u.kind == pb::Unit::NPC,
+            .hostile = u.reaction == pb::Unit::HOSTILE,
+            .has_guid = !u.guid.empty(),
+            .dist_yd = u.rel.dist_yd,
+            .in_combat_with_group = IsUnitInCombatWithGroup(bot, group, live),
+            .is_crowd_controlled = is_cc,
+            .has_raid_marker =
+                u.raid_marker != pb::RAID_MARKER_UNSPECIFIED ||
+                (live && HasAnyGroupTargetIcon(group, live->GetGUID())),
+        };
+        if (!IsEligibleSkullMarkTarget(cand)) {
           continue;
         }
         if (!best || u.rel.dist_yd < best->rel.dist_yd) {
@@ -661,12 +735,18 @@ void CollectGroupAndUpkeepActions(Player* bot,
   //     any mark but skull and cross), with the bot's own CC spell (Now #4).
   if (bot->IsAlive() && bot->GetGroup()) {
     const uint32_t locale = sWorld->GetDefaultDbcLocale();
+    const bool suppress_fear_cc = ShouldSuppressWarlockCcStrategy(
+        /*is_warlock=*/true, /*in_group=*/true,
+        bot->GetMap() && bot->GetMap()->IsDungeon(), bot->InBattleground());
     static constexpr const char* kCcSpells[] = {
         "Polymorph", "Hex",         "Sap",        "Shackle Undead",
         "Hibernate", "Banish",      "Repentance", "Entangling Roots",
         "Fear",      "Wyvern Sting"};
     const SpellInfo* cc = nullptr;
     for (const char* wanted : kCcSpells) {
+      if (suppress_fear_cc && std::string_view(wanted) == "Fear") {
+        continue;
+      }
       for (const auto& [spell_id, state] : bot->GetSpellMap()) {
         if (!state || !state->Active || state->State == PLAYERSPELL_REMOVED) {
           continue;
@@ -1139,6 +1219,20 @@ ActionOutcome ExecuteMarkTargetAction(Player* bot,
                                       const MarkTargetAction& action) {
   Unit* u =
       ObjectAccessor::GetUnit(*bot, ParseSnapshotGuid(action.target_guid));
+  if (action.icon == 7) {
+    Group* group = bot ? bot->GetGroup() : nullptr;
+    if (u && group) {
+      if (!IsUnitInCombatWithGroup(bot, group, u)) {
+        return {.error = "target is not in active combat"};
+      }
+      if (u->HasBreakableByDamageCrowdControlAura()) {
+        return {.error = "target is crowd-controlled"};
+      }
+      if (HasAnyGroupTargetIcon(group, u->GetGUID())) {
+        return {.error = "target already has a raid mark"};
+      }
+    }
+  }
   return MarkUnitWithIcon(bot, u, action.icon);
 }
 

@@ -18,11 +18,6 @@ Live verification following the `70b0878` team-play P0 fixes:
 Team-play P1 gaps and selected P2 items from the `70b0878` review:
 
 ### Pull & threat discipline (dungeons)
-- **Skull on unpulled mob chain-pulls:** A skull on an unpulled mob counts as an attacker -> chain
-  pulls mid-fight; tank's "Mark with Skull" picks nearest hostile including CC'd
-  (`pb:.../AttackersValue.cpp:38-44`, `exec_social.cc:632-658`).
-- **Warlock Fear on CC target:** Warlock bots Fear the moon (CC) target into other packs
-  (`pb:.../GenericWarlockStrategy.cpp:118-135`).
 - **Tank nameplate range blindspot:** Tank can't see a mob's target past 20 yd; mobs hitting a
   healer at 25–35 yd don't wake the tank or offer a Taunt option
   (`server_module/src/snapshot/nearby_builder.cc:439-441,680-690`).

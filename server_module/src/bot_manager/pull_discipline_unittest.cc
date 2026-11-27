@@ -194,5 +194,145 @@ TEST(PullDisciplineTest, StopDpsLifecycleAndActionFilter) {
   EXPECT_FALSE(IsStopDpsBlockedActionName("resurrect"));
 }
 
+TEST(PullDisciplineTest, SkullMarkTargetRequiresActiveCombatAndNoCc) {
+  const SkullMarkCandidate valid{
+      .alive = true,
+      .is_npc = true,
+      .hostile = true,
+      .has_guid = true,
+      .dist_yd = 12.0f,
+      .in_combat_with_group = true,
+      .is_crowd_controlled = false,
+      .has_raid_marker = false,
+  };
+  EXPECT_TRUE(IsEligibleSkullMarkTarget(valid));
+
+  // Unpulled mob (not in active combat with the group) must never be offered
+  // for Skull, because playerbots' AttackersValue treats Skull as an attacker
+  // and chain-pulls its pack.
+  SkullMarkCandidate unpulled = valid;
+  unpulled.in_combat_with_group = false;
+  EXPECT_FALSE(IsEligibleSkullMarkTarget(unpulled));
+
+  // Crowd-controlled mob (Polymorph/Sap/Banish/etc.) must not be marked Skull.
+  SkullMarkCandidate cc_mob = valid;
+  cc_mob.is_crowd_controlled = true;
+  EXPECT_FALSE(IsEligibleSkullMarkTarget(cc_mob));
+
+  // Mob already holding a raid marker (e.g. Moon CC mark or Cross) must not be
+  // overwritten with Skull.
+  SkullMarkCandidate marked = valid;
+  marked.has_raid_marker = true;
+  EXPECT_FALSE(IsEligibleSkullMarkTarget(marked));
+
+  // Boundary and sanity counter-tests: dead, non-NPC, non-hostile, missing
+  // GUID, negative distance, and beyond 40 yd are rejected; exactly 40 yd is
+  // allowed.
+  SkullMarkCandidate at_max_range = valid;
+  at_max_range.dist_yd = kSkullMarkMaxDistYd;
+  EXPECT_TRUE(IsEligibleSkullMarkTarget(at_max_range));
+
+  SkullMarkCandidate too_far = valid;
+  too_far.dist_yd = kSkullMarkMaxDistYd + 0.1f;
+  EXPECT_FALSE(IsEligibleSkullMarkTarget(too_far));
+
+  SkullMarkCandidate dead = valid;
+  dead.alive = false;
+  EXPECT_FALSE(IsEligibleSkullMarkTarget(dead));
+
+  SkullMarkCandidate player = valid;
+  player.is_npc = false;
+  EXPECT_FALSE(IsEligibleSkullMarkTarget(player));
+
+  SkullMarkCandidate neutral = valid;
+  neutral.hostile = false;
+  EXPECT_FALSE(IsEligibleSkullMarkTarget(neutral));
+
+  SkullMarkCandidate no_guid = valid;
+  no_guid.has_guid = false;
+  EXPECT_FALSE(IsEligibleSkullMarkTarget(no_guid));
+}
+
+TEST(PullDisciplineTest, WarlockCcStrategyGatingAndFearActionGuard) {
+  // Grouped or dungeon Warlocks suppress playerbots' `cc` strategy (which casts
+  // Fear on the moon CC target into adjacent packs).
+  EXPECT_TRUE(ShouldSuppressWarlockCcStrategy(
+      /*is_warlock=*/true, /*in_group=*/true, /*in_dungeon=*/false,
+      /*in_battleground=*/false));
+  EXPECT_TRUE(ShouldSuppressWarlockCcStrategy(
+      /*is_warlock=*/true, /*in_group=*/false, /*in_dungeon=*/true,
+      /*in_battleground=*/false));
+  EXPECT_TRUE(ShouldSuppressWarlockCcStrategy(
+      /*is_warlock=*/true, /*in_group=*/true, /*in_dungeon=*/true,
+      /*in_battleground=*/false));
+  EXPECT_EQ(WarlockCcStrategyDelta(/*is_warlock=*/true, /*in_group=*/true,
+                                   /*in_dungeon=*/true,
+                                   /*in_battleground=*/false),
+            ",-cc");
+  EXPECT_EQ(WarlockCcStrategyDelta(/*is_warlock=*/true, /*in_group=*/true,
+                                   /*in_dungeon=*/false,
+                                   /*in_battleground=*/false),
+            ",-cc");
+
+  // Adversarial counter-tests:
+  // 1. Solo open-world Warlock keeps and restores `+cc`.
+  EXPECT_FALSE(ShouldSuppressWarlockCcStrategy(
+      /*is_warlock=*/true, /*in_group=*/false, /*in_dungeon=*/false,
+      /*in_battleground=*/false));
+  EXPECT_EQ(WarlockCcStrategyDelta(/*is_warlock=*/true, /*in_group=*/false,
+                                   /*in_dungeon=*/false,
+                                   /*in_battleground=*/false),
+            ",+cc");
+
+  // 2. Battleground/arena Warlock is unaffected (PvP Fear stays available).
+  EXPECT_FALSE(ShouldSuppressWarlockCcStrategy(
+      /*is_warlock=*/true, /*in_group=*/true, /*in_dungeon=*/false,
+      /*in_battleground=*/true));
+  EXPECT_TRUE(WarlockCcStrategyDelta(/*is_warlock=*/true, /*in_group=*/true,
+                                     /*in_dungeon=*/false,
+                                     /*in_battleground=*/true)
+                  .empty());
+
+  // 3. Non-Warlock classes (Mage Polymorph, Priest Shackle, Druid Hibernate,
+  //    Shaman Hex, Hunter Freezing Trap) are never stripped of `cc`.
+  EXPECT_FALSE(ShouldSuppressWarlockCcStrategy(
+      /*is_warlock=*/false, /*in_group=*/true, /*in_dungeon=*/true,
+      /*in_battleground=*/false));
+  EXPECT_TRUE(WarlockCcStrategyDelta(/*is_warlock=*/false, /*in_group=*/true,
+                                     /*in_dungeon=*/true,
+                                     /*in_battleground=*/false)
+                  .empty());
+
+  // Belt-and-suspenders action guard blocks only CastCrowdControlSpellAction
+  // for "fear" when grouped or in a dungeon outside battlegrounds.
+  EXPECT_TRUE(ShouldBlockFearCcAction(/*is_cc_spell_action=*/true, "fear",
+                                      /*in_group=*/true, /*in_dungeon=*/true,
+                                      /*in_battleground=*/false));
+  EXPECT_TRUE(ShouldBlockFearCcAction(/*is_cc_spell_action=*/true, "fear",
+                                      /*in_group=*/true, /*in_dungeon=*/false,
+                                      /*in_battleground=*/false));
+  EXPECT_TRUE(ShouldBlockFearCcAction(/*is_cc_spell_action=*/true, "fear",
+                                      /*in_group=*/false, /*in_dungeon=*/true,
+                                      /*in_battleground=*/false));
+
+  // Counter-tests: Banish, Polymorph, solo open-world Fear, BG Fear, and
+  // non-CC actions are NOT blocked.
+  EXPECT_FALSE(ShouldBlockFearCcAction(/*is_cc_spell_action=*/true, "banish",
+                                       /*in_group=*/true, /*in_dungeon=*/true,
+                                       /*in_battleground=*/false));
+  EXPECT_FALSE(ShouldBlockFearCcAction(/*is_cc_spell_action=*/true, "polymorph",
+                                       /*in_group=*/true, /*in_dungeon=*/true,
+                                       /*in_battleground=*/false));
+  EXPECT_FALSE(ShouldBlockFearCcAction(/*is_cc_spell_action=*/true, "fear",
+                                       /*in_group=*/false, /*in_dungeon=*/false,
+                                       /*in_battleground=*/false));
+  EXPECT_FALSE(ShouldBlockFearCcAction(/*is_cc_spell_action=*/true, "fear",
+                                       /*in_group=*/true, /*in_dungeon=*/false,
+                                       /*in_battleground=*/true));
+  EXPECT_FALSE(ShouldBlockFearCcAction(/*is_cc_spell_action=*/false, "fear",
+                                       /*in_group=*/true, /*in_dungeon=*/true,
+                                       /*in_battleground=*/false));
+}
+
 }  // namespace
 }  // namespace llm_brain

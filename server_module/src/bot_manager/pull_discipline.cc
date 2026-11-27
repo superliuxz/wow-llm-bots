@@ -123,4 +123,41 @@ bool IsStopDpsBlockedActionName(std::string_view action_name) {
          action_name == "pet attack";
 }
 
+bool IsEligibleSkullMarkTarget(const SkullMarkCandidate& candidate) {
+  return candidate.alive && candidate.is_npc && candidate.hostile &&
+         candidate.has_guid && candidate.dist_yd >= 0.0f &&
+         candidate.dist_yd <= kSkullMarkMaxDistYd &&
+         candidate.in_combat_with_group && !candidate.is_crowd_controlled &&
+         !candidate.has_raid_marker;
+}
+
+bool ShouldSuppressWarlockCcStrategy(bool is_warlock,
+                                     bool in_group,
+                                     bool in_dungeon,
+                                     bool in_battleground) {
+  if (!is_warlock || in_battleground) {
+    return false;
+  }
+  return in_group || in_dungeon;
+}
+
+std::string_view WarlockCcStrategyDelta(bool is_warlock,
+                                        bool in_group,
+                                        bool in_dungeon,
+                                        bool in_battleground) {
+  if (!is_warlock || in_battleground) {
+    return "";
+  }
+  return (in_group || in_dungeon) ? ",-cc" : ",+cc";
+}
+
+bool ShouldBlockFearCcAction(bool is_cc_spell_action,
+                             std::string_view spell_name,
+                             bool in_group,
+                             bool in_dungeon,
+                             bool in_battleground) {
+  return is_cc_spell_action && spell_name == "fear" && !in_battleground &&
+         (in_group || in_dungeon);
+}
+
 }  // namespace llm_brain

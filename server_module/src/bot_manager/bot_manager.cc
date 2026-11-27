@@ -915,6 +915,19 @@ class BrainPolicyListener final : public ActionExecutionListener {
     if (bot_ && ai_ && ShouldBlockReflexTaunt(bot_, ai_, name)) {
       return false;
     }
+    // Pull discipline (M2a): belt-and-suspenders guard against Warlock
+    // `fear on cc` (CastCrowdControlSpellAction("fear")) in groups or dungeons,
+    // even during the brief window before EnsureStrategies strips `-cc`.
+    if (bot_) {
+      if (auto* cc = dynamic_cast<CastCrowdControlSpellAction*>(action);
+          cc && ShouldBlockFearCcAction(
+                    /*is_cc_spell_action=*/true, cc->getSpell(),
+                    bot_->GetGroup() != nullptr,
+                    bot_->GetMap() && bot_->GetMap()->IsDungeon(),
+                    bot_->InBattleground())) {
+        return false;
+      }
+    }
     // While a brain-initiated errand (loot, gather, talk, use, walk, rest,
     // NPC interaction) is active for a grouped follower, yield playerbots'
     // `follow` so it doesn't cancel the move or interrupt the cast.
@@ -1970,6 +1983,15 @@ void BotManager::EnsureStrategies(Player* player) {
     combat += ",-tank assist,-pull back,+dps assist";
   } else if (PlayerbotAI::IsTank(player)) {
     combat += ",+tank assist,+pull back,-dps assist";
+  }
+  // Warlock `cc` strategy casts Fear on the moon CC target, sending it into
+  // adjacent packs (GenericWarlockStrategy.cpp:118-135). Suppress in groups
+  // and dungeons (restored when solo in open world).
+  if (std::string_view warlock_cc =
+          WarlockCcStrategyDelta(player->getClass() == CLASS_WARLOCK, in_group,
+                                 in_dungeon, player->InBattleground());
+      !warlock_cc.empty()) {
+    combat += warlock_cc;
   }
   if (policy.stay || PingStayHolds(player)) {
     non_combat += ",-follow,+stay";

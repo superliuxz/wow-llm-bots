@@ -86,6 +86,54 @@ bool ClearStopDps(StopDpsState& state);
 // unaffected).
 bool IsStopDpsBlockedActionName(std::string_view action_name);
 
+// Maximum range (yd) for offering "Mark <mob> with Skull".
+inline constexpr float kSkullMarkMaxDistYd = 40.0f;
+
+// Inputs describing a nearby unit evaluated for the tank/leader "Mark with
+// Skull" option.
+struct SkullMarkCandidate {
+  bool alive = false;
+  bool is_npc = false;
+  bool hostile = false;
+  bool has_guid = false;
+  float dist_yd = 0.0f;
+  bool in_combat_with_group = false;
+  bool is_crowd_controlled = false;
+  bool has_raid_marker = false;
+};
+
+// True when a nearby unit is a safe candidate for "Mark <mob> with Skull".
+// Playerbots' AttackersValue treats any Skull-marked unit as an active
+// attacker, so marking an unpulled mob chain-pulls its pack, and marking a
+// CC'd or already-marked mob breaks crowd control or overwrites CC marks.
+bool IsEligibleSkullMarkTarget(const SkullMarkCandidate& candidate);
+
+// True when a Warlock bot's playerbots `cc` combat strategy (which casts Fear
+// on the moon CC target, running it into adjacent packs) should be suppressed:
+// whenever the Warlock is grouped or in a dungeon/raid outside battlegrounds.
+bool ShouldSuppressWarlockCcStrategy(bool is_warlock,
+                                     bool in_group,
+                                     bool in_dungeon,
+                                     bool in_battleground);
+
+// Strategy delta for Warlock `cc`: `",-cc"` when suppressed, `",+cc"` to
+// restore it for solo open-world Warlocks, and `""` for other classes or in
+// battlegrounds.
+std::string_view WarlockCcStrategyDelta(bool is_warlock,
+                                        bool in_group,
+                                        bool in_dungeon,
+                                        bool in_battleground);
+
+// Belt-and-suspenders guard for BrainPolicyListener: blocks playerbots'
+// CastCrowdControlSpellAction("fear") (Warlock `fear on cc`) when grouped or
+// in a dungeon outside battlegrounds, without affecting Banish or other
+// classes' CC spells.
+bool ShouldBlockFearCcAction(bool is_cc_spell_action,
+                             std::string_view spell_name,
+                             bool in_group,
+                             bool in_dungeon,
+                             bool in_battleground);
+
 }  // namespace llm_brain
 
 #endif  // MOD_LLM_BRAIN_BOT_MANAGER_PULL_DISCIPLINE_H_
