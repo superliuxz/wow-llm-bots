@@ -7,14 +7,7 @@ Last updated: 2026-11-26 (team-play review @ `70b0878`).
 
 Ordered team-play P0 fixes from the `70b0878` review, followed by live verification:
 
-1. **Pull discipline (P0 #3 + pull P1s):**
-   - **Gate party-assist options:** "Attack tank's / leader's target" skips `hold_pulls` and
-     `(not pulled)` because assist options are added after the normal attack list with no gate,
-     while `content/RULES.md:46-48` says they are safe — bots pull any pack the human clicks to
-     inspect (`server_module/src/options/options.cc:436-452` vs `:457-554`).
-   - Also reset `rti` after a fight and disable pet taunt autocast when a non-pet tank is in the
-     group (see `## Next` -> Pull & threat).
-2. **Raid basics (P0 #4, #5):**
+1. **Raid basics (P0 #4, #5):**
    - **Raid cooldowns in groups:** `GroupedCombatStrategies` forces `boost` off whenever grouped
      (no Bloodlust/Heroism, Icy Veins, Arcane Power, Rapid Fire, Shadowfiend); brain can't cast
      spells as options and no note mentions lust
@@ -25,22 +18,22 @@ Ordered team-play P0 fixes from the `70b0878` review, followed by live verificat
      `/rw` and lack spread/stack/stop-dps (`harness/src/runtime/bot_loop.cc:517,860-875`;
      `server_module/src/llm_brain_world_script.cc:658-661`). Wake every bot on raid group calls or
      add C++ spread/stack/stop-dps leader commands.
-3. **Own the corpse run (P0 #6):** After a wipe, corpse run is ungated playerbots code that ignores
+2. **Own the corpse run (P0 #6):** After a wipe, corpse run is ungated playerbots code that ignores
    corpse map, can revive at the spirit healer without rez sickness, and teleports (breaks "no
    cheats"), with no instance re-entry logic and no dungeon wipe test
    (`pb:src/Ai/Base/Actions/ReviveFromCorpseAction.cpp:101-199,335,368`;
    `server_module/src/bot_manager/tick_owner.cc`). Gate playerbots revive/teleport, add ghost path
    into instance, and add an e2e wipe test.
-4. **Errand movement & left-behind catch-up (P0 #7):** A bot left behind on another map, after a
+3. **Errand movement & left-behind catch-up (P0 #7):** A bot left behind on another map, after a
    missed boat/flight, or far away can't catch up — auto-recall only works on the same map over
    short paths, "Follow (party leader)" only appears at 8–25 yd, and the leader is never a travel
    destination (`server_module/src/bot_manager/bot_manager.cc:994-1019`,
    `server_module/src/options/exec_social.cc:544-548`,
    `server_module/src/options/option_facts.cc:432-435`). Pause follow and the leash while a brain
    errand is running, and add a "go to leader" travel target with cross-map routing.
-5. **Live-model E2E team-play tests:** Add end-to-end tests with the live model covering a dungeon
+4. **Live-model E2E team-play tests:** Add end-to-end tests with the live model covering a dungeon
    clear with pulls and a wipe, a human disconnect, an LLM stall, and a 10-man boss.
-6. **Live playtest with a real client:** Alliance preset characters (`Aldric`, `Mirabel`, `Cedric`,
+5. **Live playtest with a real client:** Alliance preset characters (`Aldric`, `Mirabel`, `Cedric`,
    `Vesper`, `Torvin`, `Bram`, `Pippa`, `Sylva`, `Talaan`), `e2e_human_party` and
    `e2e_human_dungeon` (a scripted client leads 4 bots through the Dungeon Finder into the
    Deadmines: ready check, summon, loot roll, ping/go there/los, a bot rez, Sap/Polymorph on marks;
@@ -69,13 +62,9 @@ Team-play P1 gaps and selected P2 items from the `70b0878` review:
   stuck).
 
 ### Pull & threat discipline (dungeons)
-- **Sticky `rti` from chat commands:** Chat commands like "kill/pull" set `rti` and never reset it,
-  so later packs get opened on that mark including CC marks (`llm_brain_world_script.cc:882-899`).
 - **Skull on unpulled mob chain-pulls:** A skull on an unpulled mob counts as an attacker -> chain
   pulls mid-fight; tank's "Mark with Skull" picks nearest hostile including CC'd
   (`pb:.../AttackersValue.cpp:38-44`, `exec_social.cc:632-658`).
-- **Pet taunts in groups:** Pet taunts (Growl, Torment, Suffering) autocast in groups and steal
-  aggro from a human tank (`pb:.../PetsAction.cpp:41-47,342-398`; `bot_manager.cc:1362-1374`).
 - **Warlock Fear on CC target:** Warlock bots Fear the moon (CC) target into other packs
   (`pb:.../GenericWarlockStrategy.cpp:118-135`).
 - **Tank nameplate range blindspot:** Tank can't see a mob's target past 20 yd; mobs hitting a

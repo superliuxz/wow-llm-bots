@@ -49,6 +49,7 @@
 #include "bot_manager/bot_manager.h"
 #include "bot_manager/character_loader.h"
 #include "bot_manager/popup_watch.h"
+#include "bot_manager/pull_discipline.h"
 #include "bot_session.h"
 #include "bridge/brain_bridge.h"
 #include "chat/chat_inbox.h"
@@ -373,6 +374,7 @@ class LlmBrainWorldScript : public WorldScript {
     for (size_t i = 0; i < config_.bots.size(); ++i) {
       Player* bot = ObjectAccessor::FindPlayerByName(config_.bots[i]);
       if (!IsControlledBot(bot)) {
+        ClearRtiOverride(bots_[i].rti_override);
         continue;  // Offline, not in world, or logged in by a real human.
       }
       // Clear any active act or saved `back` coordinates if the bot changed
@@ -385,6 +387,7 @@ class LlmBrainWorldScript : public WorldScript {
           CancelActiveAct(bot, &*bots_[i].active_act);
           bots_[i].active_act.reset();
         }
+        ResetRtiOverride(bot, bots_[i].rti_override);
         BotSessionRegistry::Instance().ResetOnMapChange(
             bot->GetGUID().GetRawValue());
       }
@@ -396,6 +399,24 @@ class LlmBrainWorldScript : public WorldScript {
       SyncActStealth(bot, i);
       if (!bot->IsInCombat()) {
         ClearAvoidedTargetsForBot(bot->GetGUID().GetRawValue());
+      }
+      if (bots_[i].rti_override.active) {
+        Unit* marked =
+            bots_[i].rti_override.target_guid != 0
+                ? ObjectAccessor::GetUnit(
+                      *bot, ObjectGuid(bots_[i].rti_override.target_guid))
+                : nullptr;
+        const RtiOverrideTickInput rti_in{
+            .bot_in_combat = bot->IsInCombat(),
+            .party_in_combat = IsPartyInCombat(bot),
+            .target_alive_and_in_world =
+                marked != nullptr && marked->IsInWorld() && marked->IsAlive(),
+        };
+        if (ShouldResetRtiOverride(bots_[i].rti_override, rti_in)) {
+          ApplyDefaultRti(bot);
+          LOG_INFO("module", "mod-llm-brain: {}: combat ended, reset rti to {}",
+                   bot->GetName(), kDefaultRti);
+        }
       }
       CheckPendingGroupInvite(bot, i, config_.bots[i], now);
       // The brain's popup policy answers them first, within a tick (Now #3);
@@ -566,6 +587,7 @@ class LlmBrainWorldScript : public WorldScript {
         BotSessionRegistry::Instance().ResetOnDisconnect(
             bot->GetGUID().GetRawValue());
       }
+      ResetRtiOverride(bot, bots_[i].rti_override);
       if (bots_[i].active_act) {
         if (bot && GET_PLAYERBOT_AI(bot) != nullptr) {
           CancelActiveAct(bot, &*bots_[i].active_act);
@@ -766,7 +788,8 @@ class LlmBrainWorldScript : public WorldScript {
         if (!target || !bot->IsValidAttackTarget(target)) {
           return said + " (not applied: no enemy targeted)";
         }
-        LeaderAttack(bot, ai, target, /*mark=*/std::nullopt);
+        LeaderAttack(bot, ai, target, /*mark=*/std::nullopt,
+                     &bots_[index].rti_override);
         done = "you attack " + target->GetName();
         break;
       }
@@ -790,7 +813,7 @@ class LlmBrainWorldScript : public WorldScript {
                    (parsed->mark ? "" : " or targeted") + ")";
           }
         }
-        LeaderAttack(bot, ai, target, mark);
+        LeaderAttack(bot, ai, target, mark, &bots_[index].rti_override);
         done = "you attack " + target->GetName() +
                (mark ? " (" + std::string(kRaidIconNames[*mark]) + ")" : "");
         break;
@@ -891,12 +914,51 @@ class LlmBrainWorldScript : public WorldScript {
                           bot->GetMap() && bot->GetMap()->IsDungeon();
   }
 
+  static bool IsPartyInCombat(Player* bot) {
+    if (bot->IsInCombat()) {
+      return true;
+    }
+    Group* group = bot->GetGroup();
+    if (!group) {
+      return false;
+    }
+    for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
+         itr = itr->next()) {
+      Player* member = itr->GetSource();
+      if (member && member != bot && member->IsInWorld() &&
+          member->GetMapId() == bot->GetMapId() &&
+          member->GetInstanceId() == bot->GetInstanceId() &&
+          member->IsInCombat()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static void ApplyDefaultRti(Player* bot) {
+    if (PlayerbotAI* ai = bot ? GET_PLAYERBOT_AI(bot) : nullptr) {
+      ai->GetAiObjectContext()->GetValue<std::string>("rti")->Set(
+          std::string(kDefaultRti));
+      ai->GetAiObjectContext()
+          ->GetValue<GuidVector>("prioritized targets")
+          ->Set({});
+    }
+  }
+
+  static void ResetRtiOverride(Player* bot, RtiOverrideState& rti_override) {
+    if (!ClearRtiOverride(rti_override)) {
+      return;
+    }
+    ApplyDefaultRti(bot);
+  }
+
   // Attacks `target` for a leader's command, through playerbots' own attack
   // (and its raid-target value for a mark) when it has one.
   static void LeaderAttack(Player* bot,
                            PlayerbotAI* ai,
                            Unit* target,
-                           std::optional<size_t> mark) {
+                           std::optional<size_t> mark,
+                           RtiOverrideState* rti_override) {
     bot->SetSelection(target->GetGUID());
     if (ai) {
       ai->GetAiObjectContext()
@@ -905,6 +967,10 @@ class LlmBrainWorldScript : public WorldScript {
       if (mark) {
         ai->GetAiObjectContext()->GetValue<std::string>("rti")->Set(
             std::string(kRaidIconNames[*mark]));
+        if (rti_override) {
+          RecordRtiOverride(*rti_override, target->GetGUID().GetRawValue(),
+                            IsPartyInCombat(bot));
+        }
       }
     }
     const char* action = mark ? "attack rti target" : "attack my target";
@@ -2085,6 +2151,9 @@ class LlmBrainWorldScript : public WorldScript {
     base::TimeTicks pending_invite_since;
     // Which timed popups the harness was already told about.
     PopupWatch popups;
+    // Active `rti` override from a leader chat command (reset after combat,
+    // map change, or disconnect).
+    RtiOverrideState rti_override;
   };
   std::vector<BotState> bots_;
   // A wrong-version command was logged on this connection.

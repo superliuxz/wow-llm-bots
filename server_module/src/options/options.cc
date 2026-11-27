@@ -396,19 +396,23 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       party_names.push_back(m.name);
     }
   }
+  const auto unit_not_pulled = [&](const pb::Unit& u) {
+    if (party_names.empty()) {
+      return false;
+    }
+    const bool fights_party = u.targeting_me || u.target == snapshot->bot ||
+                              std::find(party_names.begin(), party_names.end(),
+                                        u.target) != party_names.end();
+    return !fights_party;
+  };
   const auto not_pulled = [&](const OptionTarget& t) {
     if (party_names.empty() || t.kind != OptionTarget::Kind::kAttack) {
       return false;
     }
     for (const pb::Unit& u : snapshot->base.nearby.units) {
-      if (u.guid != t.guid) {
-        continue;
+      if (u.guid == t.guid) {
+        return unit_not_pulled(u);
       }
-      const bool fights_party =
-          u.targeting_me || u.target == snapshot->bot ||
-          std::find(party_names.begin(), party_names.end(), u.target) !=
-              party_names.end();
-      return !fights_party;
     }
     return false;
   };
@@ -521,6 +525,10 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       if (!best) {
         continue;
       }
+      const bool assist_not_pulled = unit_not_pulled(*best);
+      if (facts.hold_pulls && assist_not_pulled) {
+        continue;
+      }
       bool dup = false;
       for (const std::string& g : seen_assist_guids) {
         if (g == best->guid) {
@@ -538,12 +546,15 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
               ? "tank "
               : "leader ";
       const std::string assist_name = caller->name + "'s target";
-      const std::string text = "Attack " + std::string(role_prefix) +
-                               assist_name + " (" + best->name + ")";
+      std::string text = "Attack " + std::string(role_prefix) + assist_name +
+                         " (" + best->name + ")";
+      if (assist_not_pulled) {
+        text += " (not pulled)";
+      }
       targets.push_back({OptionTarget::Kind::kAttack, best->guid, best->name,
                          std::nullopt, AttackAction{best->guid, best->name}});
       pb::Option& option = snapshot->options.emplace_back();
-      option.text = text;
+      option.text = std::move(text);
       // Distinct synthetic guid so PlanRunner::MatchOptionInScreen matches the
       // assist option rather than colliding with the regular Attack <mob> row;
       // OptionTarget::guid above still carries the real unit guid for

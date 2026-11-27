@@ -41,6 +41,7 @@ constexpr auto kGatedActions = std::to_array<GatedAction>({
     {"flee", ActionGate::kCondition},
     {"return to stay position", ActionGate::kCondition},
     {"stay", ActionGate::kCondition},
+    {"toggle pet spell", ActionGate::kCondition},
 });
 
 }  // namespace

@@ -104,6 +104,8 @@ add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/bot_manager/human_group_grace_unittest.cc"
   "${WLB_MODULE_SRC}/bot_manager/popup_watch.cc"
   "${WLB_MODULE_SRC}/bot_manager/popup_watch_unittest.cc"
+  "${WLB_MODULE_SRC}/bot_manager/pull_discipline.cc"
+  "${WLB_MODULE_SRC}/bot_manager/pull_discipline_unittest.cc"
   "${WLB_MODULE_SRC}/bot_manager/spell_miss_packet.cc"
   "${WLB_MODULE_SRC}/bot_manager/spell_miss_packet_unittest.cc"
   "${WLB_MODULE_SRC}/bot_manager/tick_owner.cc"

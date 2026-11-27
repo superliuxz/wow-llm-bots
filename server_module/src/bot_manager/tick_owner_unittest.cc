@@ -80,7 +80,7 @@ TEST(TickOwnerTest, AutoEquipIsBlockedInBothModes) {
 TEST(TickOwnerTest, ConditionalAndUngatedActionsAreNotBlockedByMode) {
   for (std::string_view name :
        {"auto release", "flee", "stay", "return to stay position",
-        "apply stone", "apply oil"}) {
+        "apply stone", "apply oil", "toggle pet spell"}) {
     const GatedAction* a = FindGatedAction(name);
     ASSERT_NE(a, nullptr) << name;
     EXPECT_EQ(a->gate, ActionGate::kCondition) << name;

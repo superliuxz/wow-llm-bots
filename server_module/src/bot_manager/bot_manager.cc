@@ -24,6 +24,7 @@
 #include "CellImpl.h"  // IWYU pragma: keep
 #include "CharacterCache.h"
 #include "CharmInfo.h"
+#include "Common.h"
 #include "Creature.h"
 #include "DBCStructure.h"
 #include "Define.h"
@@ -51,6 +52,7 @@
 #include "Opcodes.h"
 #include "PathGenerator.h"
 #include "Pet.h"
+#include "PetDefines.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
 #include "Playerbots.h"
@@ -71,6 +73,7 @@
 #include "base/thread_annotations.h"
 #include "bot_manager/human_group_grace.h"
 #include "bot_manager/playerbots_actions.h"
+#include "bot_manager/pull_discipline.h"
 #include "bot_manager/spell_miss_packet.h"
 #include "bot_manager/tick_owner.h"
 #include "bot_session.h"
@@ -246,6 +249,75 @@ bool GroupHasHuman(Group* group) {
     }
   }
   return false;
+}
+
+// Whether another member of `group` is a non-pet tank (main-tank flag, LFG
+// tank role, or tank spec/stance without `not_tank`).
+bool GroupHasNonPetTank(Group* group, Player* self) {
+  if (!group || !self) {
+    return false;
+  }
+  for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+    if (slot.guid == self->GetGUID()) {
+      continue;
+    }
+    if ((slot.flags & MEMBER_FLAG_MAINTANK) != 0) {
+      return true;
+    }
+    if (slot.roles != 0) {
+      if ((slot.roles & lfg::PLAYER_ROLE_TANK) != 0) {
+        return true;
+      }
+      continue;
+    }
+    Player* member = ObjectAccessor::FindConnectedPlayer(slot.guid);
+    if (!member || !member->IsInWorld()) {
+      continue;
+    }
+    if (PlayerbotAI::IsTank(member) &&
+        !BotManager::GetGroupPolicy(member).not_tank) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Disables autocast on pet taunt spells (Growl, Torment, Suffering, Anguish)
+// when `suppress_taunt` is true (grouped with a non-pet tank), and restores
+// autocast when solo or when no non-pet tank is in the group.
+void SyncPetTauntAutocast(Player* player, bool suppress_taunt) {
+  Pet* pet = player ? player->GetPet() : nullptr;
+  if (!pet) {
+    return;
+  }
+  const bool want_autocast = !suppress_taunt;
+  CharmInfo* charm = pet->GetCharmInfo();
+  for (const auto& [spell_id, pet_spell] : pet->m_spells) {
+    if (pet_spell.state == PETSPELL_REMOVED) {
+      continue;
+    }
+    const uint32_t first_id = sSpellMgr->GetFirstSpellInChain(spell_id);
+    if (!IsPetTauntSpell(spell_id) && !IsPetTauntSpell(first_id)) {
+      continue;
+    }
+    const SpellInfo* spell_info = sSpellMgr->GetSpellInfo(spell_id);
+    if (!spell_info || !spell_info->IsAutocastable()) {
+      continue;
+    }
+    const bool is_autocast =
+        std::find(pet->m_autospells.begin(), pet->m_autospells.end(),
+                  spell_id) != pet->m_autospells.end();
+    if (is_autocast == want_autocast) {
+      continue;
+    }
+    pet->ToggleAutocast(spell_info, want_autocast);
+    if (charm) {
+      charm->ToggleCreatureAutocast(spell_info, want_autocast);
+    }
+    LOG_INFO("module", "mod-llm-brain: {}: pet {} autocast {}",
+             player->GetName(), spell_info->SpellName[LOCALE_enUS],
+             want_autocast ? "enabled" : "disabled");
+  }
 }
 
 // A hostile within 30 yd is held by crowd control that damage would break
@@ -732,6 +804,13 @@ class BrainPolicyListener final : public ActionExecutionListener {
     }
     if (name == "auto release") {
       return AllowAutoRelease();
+    }
+    // Keep playerbots' `toggle pet spell` from re-enabling Growl/Torment/
+    // Suffering autocast while a non-pet tank is in the group.
+    if (name == "toggle pet spell" && bot_) {
+      Group* group = bot_->GetGroup();
+      return !ShouldSuppressPetTaunt(group != nullptr,
+                                     GroupHasNonPetTank(group, bot_));
     }
     return true;
   }
@@ -1354,6 +1433,11 @@ void BotManager::EnsureStrategies(Player* player) {
     LOG_INFO("module", "mod-llm-brain: {}: grouped, pet set to defensive",
              player->GetName());
   }
+  // Suppress pet taunt autocast when grouped with a non-pet tank; restore it
+  // when solo or when no non-pet tank is in the group.
+  SyncPetTauntAutocast(
+      player,
+      ShouldSuppressPetTaunt(in_group, GroupHasNonPetTank(group, player)));
   {
     PolicyGlobalState& st = PolicyState();
     base::AutoLock lock(st.lock);

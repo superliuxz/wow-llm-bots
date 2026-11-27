@@ -1,0 +1,86 @@
+// Copyright 2026 The wow-llm-bots Authors. Licensed under GPL-2.0.
+
+#include "bot_manager/pull_discipline.h"
+
+#include <cstdint>
+
+namespace llm_brain {
+
+void RecordRtiOverride(RtiOverrideState& state,
+                       uint64_t target_guid,
+                       bool in_combat) {
+  state.active = true;
+  state.target_guid = target_guid;
+  state.saw_combat = in_combat;
+}
+
+bool ShouldResetRtiOverride(RtiOverrideState& state,
+                            const RtiOverrideTickInput& input) {
+  if (!state.active) {
+    return false;
+  }
+  if (input.bot_in_combat || input.party_in_combat) {
+    state.saw_combat = true;
+    return false;
+  }
+  if (state.saw_combat || !input.target_alive_and_in_world) {
+    state = {};
+    return true;
+  }
+  return false;
+}
+
+bool ClearRtiOverride(RtiOverrideState& state) {
+  if (!state.active) {
+    return false;
+  }
+  state = {};
+  return true;
+}
+
+bool IsPetTauntSpell(uint32_t spell_id) {
+  switch (spell_id) {
+    // Hunter pet Growl (Ranks 1-9, WotLK 3.3.5a spell_ranks.sql).
+    case 2649:
+    case 14916:
+    case 14917:
+    case 14918:
+    case 14919:
+    case 14920:
+    case 14921:
+    case 27047:
+    case 61676:
+    // Warlock Voidwalker Torment (Ranks 1-8).
+    case 3716:
+    case 7809:
+    case 7810:
+    case 7811:
+    case 11774:
+    case 11775:
+    case 27270:
+    case 47984:
+    // Warlock Voidwalker Suffering (Ranks 1-8).
+    case 17735:
+    case 17750:
+    case 17751:
+    case 17752:
+    case 27271:
+    case 33701:
+    case 47989:
+    case 47990:
+    // Warlock Felguard Anguish (Ranks 1-4).
+    case 33698:
+    case 33699:
+    case 33700:
+    case 47993:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool ShouldSuppressPetTaunt(bool in_group, bool has_non_pet_tank) {
+  return in_group && has_non_pet_tank;
+}
+
+}  // namespace llm_brain

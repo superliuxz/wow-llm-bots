@@ -558,8 +558,10 @@ TEST(OptionsTest, AssistOptionOfferedForMainAssistAndTankTargets) {
   pb::Snapshot snapshot;
   pb::Unit* egg = AddUnit(&snapshot, "Phoenix Egg", "0x20", 14);
   egg->reaction = pb::Unit::HOSTILE;
+  egg->target = "Loadc";
   pb::Unit* boss = AddUnit(&snapshot, "Kael'thas Sunstrider", "0x21", 20);
   boss->reaction = pb::Unit::HOSTILE;
+  boss->target = "Loada";
 
   pb::Party& party = snapshot.ext.party.emplace();
   pb::Unit& tank = party.members.emplace_back();
@@ -642,6 +644,162 @@ TEST(OptionsTest, PartyFollowerSeesLeaderAssistAndNotPulledMobs) {
   for (const std::string& t : Texts(solo)) {
     EXPECT_EQ(t.find("(not pulled)"), std::string::npos) << t;
   }
+}
+
+// Finding #3: party-assist options obey hold_pulls and (not pulled) just like
+// normal Attack options, so a human clicking a pack to inspect it doesn't make
+// bots pull it.
+TEST(OptionsTest, HeldPullsGateUnpulledPartyAssistTargets) {
+  pb::Snapshot snapshot;
+  snapshot.bot = "Telda";
+  AddUnit(&snapshot, "Kobold Vermin", "0x50", 12);
+  AddUnit(&snapshot, "Kobold Tunneler", "0x51", 15);
+  AddUnit(&snapshot, "Kobold Geomancer", "0x52", 18);
+
+  pb::Party& party = snapshot.ext.party.emplace();
+  pb::Unit& ma = party.members.emplace_back();
+  ma.name = "Loadc";
+  ma.target = "Kobold Vermin";
+  ma.group.emplace().online = true;
+  ma.group->main_assist = true;
+
+  pb::Unit& tank = party.members.emplace_back();
+  tank.name = "Loada";
+  tank.target = "Kobold Tunneler";
+  tank.group.emplace().online = true;
+  tank.group->role = pb::TANK;
+
+  pb::Unit& leader = party.members.emplace_back();
+  leader.name = "Hele";
+  leader.target = "Kobold Geomancer";
+  leader.group.emplace().online = true;
+  leader.group->leader = true;
+  leader.group->role = pb::DPS;
+
+  OptionFacts facts;
+  facts.hold_pulls = true;
+  facts.party_targets = {
+      {"Loadc", "0x50"}, {"Loada", "0x51"}, {"Hele", "0x52"}};
+
+  AddOptions(&snapshot, facts);
+  EXPECT_EQ(Texts(snapshot),
+            std::vector<std::string>{"Keep doing what I'm doing"});
+}
+
+// When pulls are not held, unpulled party-assist targets are still offered but
+// tagged `(not pulled)` consistently with normal Attack options.
+TEST(OptionsTest, UnheldPullsTagUnpulledPartyAssistTargetsNotPulled) {
+  pb::Snapshot snapshot;
+  snapshot.bot = "Torvin";
+  AddUnit(&snapshot, "Kobold Tunneler", "0x53", 12);
+  AddUnit(&snapshot, "Kobold Geomancer", "0x54", 16);
+
+  pb::Party& party = snapshot.ext.party.emplace();
+  pb::Unit& tank = party.members.emplace_back();
+  tank.name = "Loada";
+  tank.target = "Kobold Tunneler";
+  tank.group.emplace().online = true;
+  tank.group->role = pb::TANK;
+
+  pb::Unit& leader = party.members.emplace_back();
+  leader.name = "Hele";
+  leader.target = "Kobold Geomancer";
+  leader.group.emplace().online = true;
+  leader.group->leader = true;
+  leader.group->role = pb::DPS;
+
+  OptionFacts facts;
+  facts.hold_pulls = false;
+  facts.party_targets = {{"Loada", "0x53"}, {"Hele", "0x54"}};
+
+  AddOptions(&snapshot, facts);
+  EXPECT_EQ(Texts(snapshot),
+            (std::vector<std::string>{
+                "Attack Kobold Tunneler (not pulled)",
+                "Attack Kobold Geomancer (not pulled)",
+                "Attack tank Loada's target (Kobold Tunneler) (not pulled)",
+                "Attack leader Hele's target (Kobold Geomancer) (not pulled)",
+                "Keep doing what I'm doing"}));
+}
+
+// Counter-test: when hold_pulls is on, already-pulled assist targets are still
+// offered (without `(not pulled)`), and a gated unpulled caller does not
+// consume one of the two assist slots.
+TEST(OptionsTest, HeldPullsStillAllowAssistOnAlreadyPulledTargets) {
+  pb::Snapshot snapshot;
+  snapshot.bot = "Telda";
+  AddUnit(&snapshot, "Idle Patrol", "0x60", 18);  // Unpulled.
+  AddUnit(&snapshot, "Kobold Miner", "0x61", 10)->target = "Loada";
+  AddUnit(&snapshot, "Kobold Laborer", "0x62", 8)->targeting_me = true;
+
+  pb::Party& party = snapshot.ext.party.emplace();
+  pb::Unit& ma = party.members.emplace_back();
+  ma.name = "Loadc";
+  ma.target = "Idle Patrol";
+  ma.group.emplace().online = true;
+  ma.group->main_assist = true;
+
+  pb::Unit& tank = party.members.emplace_back();
+  tank.name = "Loada";
+  tank.target = "Kobold Miner";
+  tank.group.emplace().online = true;
+  tank.group->role = pb::TANK;
+
+  pb::Unit& leader = party.members.emplace_back();
+  leader.name = "Hele";
+  leader.target = "Kobold Laborer";
+  leader.group.emplace().online = true;
+  leader.group->leader = true;
+  leader.group->role = pb::DPS;
+
+  OptionFacts facts;
+  facts.hold_pulls = true;
+  facts.party_targets = {
+      {"Loadc", "0x60"}, {"Loada", "0x61"}, {"Hele", "0x62"}};
+
+  AddOptions(&snapshot, facts);
+  EXPECT_EQ(Texts(snapshot), (std::vector<std::string>{
+                                 "Attack Kobold Miner", "Attack Kobold Laborer",
+                                 "Attack tank Loada's target (Kobold Miner)",
+                                 "Attack leader Hele's target (Kobold Laborer)",
+                                 "Keep doing what I'm doing"}));
+}
+
+// Counter-test: in combat with hold_pulls on, active combat targets stay
+// offered while an unpulled pack the leader inspects is still gated, and solo
+// play is unaffected.
+TEST(OptionsTest, HeldPullsInCombatAndSoloPlayCounterTests) {
+  pb::Snapshot combat;
+  combat.bot = "Telda";
+  combat.base.self.in_combat = true;
+  AddUnit(&combat, "Kobold Miner", "0x70", 6)->targeting_me = true;
+  AddUnit(&combat, "Unpulled Pack", "0x71", 20);
+
+  pb::Party& party = combat.ext.party.emplace();
+  pb::Unit& leader = party.members.emplace_back();
+  leader.name = "Hele";
+  leader.target = "Unpulled Pack";
+  leader.group.emplace().online = true;
+  leader.group->leader = true;
+  leader.group->role = pb::DPS;
+
+  OptionFacts facts;
+  facts.hold_pulls = true;
+  facts.party_targets = {{"Hele", "0x71"}};
+
+  AddOptions(&combat, facts);
+  EXPECT_EQ(Texts(combat),
+            (std::vector<std::string>{"Attack Kobold Miner",
+                                      "Keep doing what I'm doing"}));
+
+  // Solo play: no party means no pull gating and no `(not pulled)` tag.
+  pb::Snapshot solo;
+  solo.bot = "Telda";
+  AddUnit(&solo, "Kobold Tunneler", "0x72", 12);
+  AddOptions(&solo, facts);
+  EXPECT_EQ(Texts(solo),
+            (std::vector<std::string>{"Attack Kobold Tunneler",
+                                      "Keep doing what I'm doing"}));
 }
 
 TEST(OptionsTest, AssistResolvesExactGuidCapAndEdgeCases) {
