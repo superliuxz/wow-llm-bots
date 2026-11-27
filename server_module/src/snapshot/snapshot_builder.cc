@@ -73,6 +73,10 @@ namespace {
 
 namespace pb = wlb::snapshot;
 
+// How often the cached spellbook list is refreshed out of combat even when
+// the spell map size and active spec mask didn't change.
+constexpr base::TimeDelta kSpellCacheTtl = base::Seconds(5);
+
 // When a bot's Explore spots and Go to places are worked out again
 // (docs/specs/options.md, "World-thread cost").
 constexpr float kFactsRecomputeYd = 20.0f;
@@ -510,12 +514,11 @@ bool IsTradeskillSpell(const SpellInfo* info) {
   return false;
 }
 
-// The bot's castable spellbook as one action bar (docs/specs/snapshot.md:
-// `ext.action_bars` is always visible): every active, non-passive, displayed,
-// non-tradeskill spell of the active spec, highest known rank only, sorted by
-// name. Pure Spell.dbc metadata; no spell, class or role is special-cased.
-void FillActionBars(Player* bot, pb::Extensions* ext) {
-  std::vector<pb::Spell> spells;
+// Builds the sorted, deduplicated list of castable non-tradeskill spells for
+// `bot`'s active spec. Pure Spell.dbc metadata; no spell, class or role is
+// special-cased.
+std::vector<SnapshotBuilder::CachedSpell> BuildSpellCache(Player* bot) {
+  std::vector<SnapshotBuilder::CachedSpell> spells;
   for (const auto& [spell_id, state] : bot->GetSpellMap()) {
     if (!state || state->State == PLAYERSPELL_REMOVED || !state->Active ||
         !(state->specMask & bot->GetActiveSpecMask())) {
@@ -535,41 +538,40 @@ void FillActionBars(Player* bot, pb::Extensions* ext) {
     if (name.empty() || IsTradeskillSpell(info)) {
       continue;
     }
-    pb::Spell spell;
-    spell.id = info->Id;
-    spell.name = std::string(name);
-    spell.rank = info->GetRank();
-    spell.cooldown_s = static_cast<float>(std::max(
+    SnapshotBuilder::CachedSpell entry;
+    entry.info = info;
+    entry.id = info->Id;
+    entry.name = std::string(name);
+    entry.rank = info->GetRank();
+    entry.cooldown_s = static_cast<float>(std::max(
                            info->RecoveryTime, info->CategoryRecoveryTime)) /
                        1000.0f;
-    pb::AbilityState& ability = spell.ability.emplace();
-    ability.known = true;
-    ability.cooldown_remaining_s =
-        static_cast<float>(bot->GetSpellCooldownDelay(info->Id)) / 1000.0f;
-    const int32_t cost = info->CalcPowerCost(bot, info->GetSchoolMask());
-    ability.usable = ability.cooldown_remaining_s <= 0.0f &&
-                     (cost <= 0 || info->PowerType >= MAX_POWERS ||
-                      bot->GetPower(static_cast<Powers>(info->PowerType)) >=
-                          static_cast<uint32_t>(cost));
-    ability.ground_targeted =
+    entry.ground_targeted =
         (info->GetExplicitTargetMask() & TARGET_FLAG_DEST_LOCATION) != 0;
-    spells.push_back(std::move(spell));
+    spells.push_back(std::move(entry));
   }
   // Same-name spells (e.g. a racial and a class version): keep the highest
   // rank so a name in an order resolves to one entry.
-  std::sort(
-      spells.begin(), spells.end(), [](const pb::Spell& a, const pb::Spell& b) {
-        return std::tie(a.name, b.rank, a.id) < std::tie(b.name, a.rank, b.id);
-      });
+  std::sort(spells.begin(), spells.end(),
+            [](const SnapshotBuilder::CachedSpell& a,
+               const SnapshotBuilder::CachedSpell& b) {
+              return std::tie(a.name, b.rank, a.id) <
+                     std::tie(b.name, a.rank, b.id);
+            });
   spells.erase(std::unique(spells.begin(), spells.end(),
-                           [](const pb::Spell& a, const pb::Spell& b) {
+                           [](const SnapshotBuilder::CachedSpell& a,
+                              const SnapshotBuilder::CachedSpell& b) {
                              return a.name == b.name;
                            }),
                spells.end());
-  ext->action_bars.emplace().buttons = std::move(spells);
+  return spells;
 }
 
-void FillParty(Player* bot, NearbyBuilder* nearby, pb::Extensions* ext) {
+void FillParty(Player* bot,
+               NearbyBuilder* nearby,
+               bool in_combat,
+               pb::Extensions* ext,
+               std::vector<pb::OptionFacts_PartyTarget>* party_targets) {
   Group* group = bot->GetGroup();
   if (!group) {
     return;
@@ -624,7 +626,9 @@ void FillParty(Player* bot, NearbyBuilder* nearby, pb::Extensions* ext) {
       gp.afk = member->isAFK() && IsHumanPlayer(member);
       gp.in_range = member->GetMapId() == bot->GetMapId() &&
                     bot->GetDistance(member) <= 100.0f;
-      if (member->GetMapId() == bot->GetMapId()) {
+      // Party members' quest progress is non-combat context; omit at 4 Hz in
+      // combat to avoid O(raid_size * quest_log) work and wire bloat.
+      if (!in_combat && member->GetMapId() == bot->GetMapId()) {
         gp.quests = MemberQuestProgress(member);
       }
       if (gp.in_range) {
@@ -632,6 +636,10 @@ void FillParty(Player* bot, NearbyBuilder* nearby, pb::Extensions* ext) {
       }
       if (Unit* sel = member->GetSelectedUnit()) {
         m.target = sel->GetName();
+        if (party_targets) {
+          party_targets->push_back(
+              {slot.name, GuidString(sel->GetGUID().GetRawValue())});
+        }
       }
       // Dungeon Finder party facts visible on party frames (Now #9): Dungeon
       // Deserter and Luck of the Draw.
@@ -908,10 +916,16 @@ void FillPartyPing(Player* bot, pb::Minimap* minimap) {
 // Talkable NPCs and non-attackable neutral/hostile units on screen, with their
 // flags (what the client knows of a unit it can click: service icons, and
 // whether the attack cursor is unavailable).
-void FillNpcFacts(Player* bot, const pb::Snapshot& snapshot, OptionFacts* out) {
+void FillNpcFacts(Player* bot,
+                  const pb::Snapshot& snapshot,
+                  bool in_combat,
+                  OptionFacts* out) {
   for (const pb::Unit& u : snapshot.base.nearby.units) {
     if ((u.kind != pb::Unit::NPC && u.kind != pb::Unit::CRITTER) || u.dead ||
         u.guid.empty()) {
+      continue;
+    }
+    if (in_combat && u.reaction == pb::Unit::FRIENDLY) {
       continue;
     }
     Creature* creature =
@@ -941,6 +955,45 @@ SnapshotBuilder::SnapshotBuilder(NearbyBuilder::Options nearby_options,
 
 SnapshotBuilder::~SnapshotBuilder() = default;
 
+void SnapshotBuilder::FillActionBars(Player* bot,
+                                     pb::Extensions* ext,
+                                     base::TimeTicks now) {
+  const size_t map_size = bot->GetSpellMap().size();
+  const uint8_t spec_mask = bot->GetActiveSpecMask();
+  const bool stale =
+      spell_cache_time_.is_null() || map_size != spell_cache_map_size_ ||
+      spec_mask != spell_cache_spec_mask_ ||
+      (!bot->IsInCombat() && now - spell_cache_time_ >= kSpellCacheTtl);
+  if (stale) {
+    spell_cache_ = BuildSpellCache(bot);
+    spell_cache_map_size_ = map_size;
+    spell_cache_spec_mask_ = spec_mask;
+    spell_cache_time_ = now;
+  }
+  std::vector<pb::Spell> spells;
+  spells.reserve(spell_cache_.size());
+  for (const CachedSpell& entry : spell_cache_) {
+    const SpellInfo* info = entry.info.get();
+    pb::Spell spell;
+    spell.id = entry.id;
+    spell.name = entry.name;
+    spell.rank = entry.rank;
+    spell.cooldown_s = entry.cooldown_s;
+    pb::AbilityState& ability = spell.ability.emplace();
+    ability.known = true;
+    ability.cooldown_remaining_s =
+        static_cast<float>(bot->GetSpellCooldownDelay(entry.id)) / 1000.0f;
+    const int32_t cost = info->CalcPowerCost(bot, info->GetSchoolMask());
+    ability.usable = ability.cooldown_remaining_s <= 0.0f &&
+                     (cost <= 0 || info->PowerType >= MAX_POWERS ||
+                      bot->GetPower(static_cast<Powers>(info->PowerType)) >=
+                          static_cast<uint32_t>(cost));
+    ability.ground_targeted = entry.ground_targeted;
+    spells.push_back(std::move(spell));
+  }
+  ext->action_bars.emplace().buttons = std::move(spells);
+}
+
 NearbyBuilder::Stats SnapshotBuilder::Build(Player* bot,
                                             pb::Snapshot* snapshot,
                                             OptionFacts* facts,
@@ -948,16 +1001,26 @@ NearbyBuilder::Stats SnapshotBuilder::Build(Player* bot,
                                             UiState* ui,
                                             const ItemSpellTexts* texts,
                                             base::TimeTicks now) {
+  const bool in_combat = bot->IsInCombat();
+  OptionFacts local_facts;
+  OptionFacts* out_facts = facts ? facts : &local_facts;
+  *out_facts = OptionFacts{};
+
   pb::Base& base = snapshot->base;
   FillSelf(bot, &base.self);
   FillWhere(bot, &base.where);
   const NearbyBuilder::Stats stats = nearby_.Build(bot, &base.nearby);
   FillTarget(bot, &nearby_, &snapshot->ext);
   FillCombat(bot, &nearby_, &snapshot->ext);
-  FillParty(bot, &nearby_, &snapshot->ext);
-  FillActionBars(bot, &snapshot->ext);
-  FillQuestTracker(bot, &snapshot->ext, &quest_pois_);
-  FillOptionFacts(bot, snapshot, facts, world, now);
+  FillParty(bot, &nearby_, in_combat, &snapshot->ext,
+            &out_facts->party_targets);
+  FillActionBars(bot, &snapshot->ext, now);
+  // Quest tracker (including O(quests * raid_size) party-member lookups and
+  // POI lookups) is non-combat context; omit at 4 Hz in combat.
+  if (!in_combat) {
+    FillQuestTracker(bot, &snapshot->ext, &quest_pois_);
+  }
+  FillOptionFacts(bot, snapshot, out_facts, world, now);
   // The trade window pops up by itself, like a popup: not a panel to open.
   if (bot->GetTradeData()) {
     FillTrade(bot, &snapshot->ext.trade.emplace());
@@ -984,38 +1047,26 @@ NearbyBuilder::Stats SnapshotBuilder::Build(Player* bot,
 
 void SnapshotBuilder::FillOptionFacts(Player* bot,
                                       pb::Snapshot* snapshot,
-                                      OptionFacts* facts,
+                                      OptionFacts* out,
                                       const WorldPlaces* world,
                                       base::TimeTicks now) {
-  OptionFacts local;
-  OptionFacts* out = facts ? facts : &local;
-  *out = OptionFacts{};
-  FillNpcFacts(bot, *snapshot, out);
-  CheckBagFoodAndDrink(bot, &out->has_food, &out->has_drink);
+  const bool in_combat = bot->IsInCombat();
+  FillNpcFacts(bot, *snapshot, in_combat, out);
+  if (!in_combat) {
+    CheckBagFoodAndDrink(bot, &out->has_food, &out->has_drink);
+  }
   CollectUsableBagItems(bot, &out->usable_items);
-  CollectTalentTrees(bot, &out->talent_trees);
-  CollectNpcActions(bot, *snapshot, out->has_food, out->has_drink,
-                    &out->npc_actions);
+  if (!in_combat) {
+    CollectTalentTrees(bot, &out->talent_trees);
+    CollectNpcActions(bot, *snapshot, out->has_food, out->has_drink,
+                      &out->npc_actions);
+  }
   CollectGroupAndUpkeepActions(bot, *snapshot, &out->group_and_upkeep_actions);
   out->has_pending_resurrect = !bot->IsAlive() && bot->isResurrectRequested();
   if (!bot->IsAlive() && !bot->HasPlayerFlag(PLAYER_FLAGS_GHOST)) {
     if (const SpellInfo* self_res = sSpellMgr->GetSpellInfo(
             bot->GetUInt32Value(PLAYER_SELF_RES_SPELL))) {
       out->self_resurrect = self_res->SpellName[sWorld->GetDefaultDbcLocale()];
-    }
-  }
-  if (Group* group = bot->GetGroup()) {
-    for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
-      if (slot.guid == bot->GetGUID()) {
-        continue;
-      }
-      if (Player* member = ObjectAccessor::FindConnectedPlayer(slot.guid);
-          member && member->IsInWorld()) {
-        if (Unit* sel = member->GetSelectedUnit()) {
-          out->party_targets.push_back(
-              {slot.name, GuidString(sel->GetGUID().GetRawValue())});
-        }
-      }
     }
   }
   out->herbalism_skill = bot->GetSkillValue(SKILL_HERBALISM);

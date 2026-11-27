@@ -98,6 +98,7 @@ class SnapshotSchedule {
 
   const base::TimeDelta interval_;
   const base::TimeDelta combat_interval_;
+  base::TimeTicks start_;
   std::vector<Slot> slots_;
 };
 

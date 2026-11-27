@@ -2377,18 +2377,20 @@ bool BotLoop::OnLookSnapshot(const std::string& bot,
     }
     state->last_bag_free_slots = free;
   }
-  std::string quest_state;
-  for (const pb::Objective& o : snap.ext.quest_tracker) {
-    if (o.quest) {
-      base::StrAppend(&quest_state, {base::NumberToString(o.quest->quest_id),
-                                     o.quest->complete ? "c" : "", ";"});
+  if (!in_combat) {
+    std::string quest_state;
+    for (const pb::Objective& o : snap.ext.quest_tracker) {
+      if (o.quest) {
+        base::StrAppend(&quest_state, {base::NumberToString(o.quest->quest_id),
+                                       o.quest->complete ? "c" : "", ";"});
+      }
     }
+    if (habits.glance_at_quest_log && state->last_quest_state &&
+        quest_state != *state->last_quest_state) {
+      glance(pb::QUEST_LOG, "your quests changed");
+    }
+    state->last_quest_state = std::move(quest_state);
   }
-  if (habits.glance_at_quest_log && state->last_quest_state &&
-      quest_state != *state->last_quest_state) {
-    glance(pb::QUEST_LOG, "your quests changed");
-  }
-  state->last_quest_state = std::move(quest_state);
 
   // The look the brain asked for.
   if (!state->pending_look) {

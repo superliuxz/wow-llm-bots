@@ -1150,6 +1150,50 @@ TEST(BotLoopTest, HabitsGlanceAtTheFirstQuestRetryAndTellTheBrain) {
       << user;
 }
 
+// Adversarial counter-test: lighter 4 Hz combat snapshots omit
+// `ext.quest_tracker`. Leaving combat with the same quests as before must NOT
+// trigger a spurious `glance(QUEST_LOG, "your quests changed")`.
+TEST(BotLoopTest,
+     LighterCombatSnapshotOmittingQuestTrackerDoesNotTriggerSpuriousGlance) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  const auto snap = [&](int seq, int quest_id, bool in_combat) {
+    pb::Snapshot s =
+        MakeLiveSnap("Testpriest", seq, t0 + base::Seconds(seq), in_combat);
+    AddKeep(&s);
+    if (quest_id != 0) {
+      pb::Objective& o = s.ext.quest_tracker.emplace_back();
+      o.quest.emplace().quest_id = quest_id;
+      o.quest->quest = "Boar Hunt";
+    }
+    return s;
+  };
+  // Out of combat with quest 7.
+  loop.OnSnapshot(snap(1, 7, /*in_combat=*/false), t0 + base::Seconds(1));
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  EXPECT_TRUE(PanelCommands(commands).empty());
+
+  // Enter combat: lighter combat snapshot omits quest_tracker (quest_id = 0).
+  loop.OnSnapshot(snap(2, 0, /*in_combat=*/true), t0 + base::Seconds(2));
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  EXPECT_TRUE(PanelCommands(commands).empty());
+
+  // Leave combat: quest 7 reappears unchanged -> NO spurious quest-log glance.
+  loop.OnSnapshot(snap(3, 7, /*in_combat=*/false), t0 + base::Seconds(3));
+  EXPECT_TRUE(PanelCommands(commands).empty());
+
+  // A genuine quest change out of combat STILL triggers the glance.
+  loop.OnSnapshot(snap(4, 8, /*in_combat=*/false), t0 + base::Seconds(4));
+  const std::vector<pb::Command> panel = PanelCommands(commands);
+  ASSERT_EQ(panel.size(), 1u);
+  ASSERT_TRUE(panel[0].open);
+  EXPECT_EQ(panel[0].open->panel, pb::QUEST_LOG);
+}
+
 TEST(BotLoopTest, NotesAndScreenNamesFeedBothPlanGrammarAndParsePlan) {
   std::string dir = testing::TempDir() + "harness-botloop-notes-XXXXXX";
   ASSERT_NE(::mkdtemp(dir.data()), nullptr);

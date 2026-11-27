@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "base/time/time.h"
@@ -1120,6 +1121,111 @@ TEST(OptionsTest, CollectTauntActionsOffersValidTargetsForGroupedTanksOnly) {
   dead.base.self.state = pb::Self::DEAD_BODY;
   CollectTauntActions(dead, 355, false, &out);
   EXPECT_TRUE(out.empty());
+}
+
+TEST(OptionsTest, LighterCombatSnapshotPreservesP0CombatFactsAndOptions) {
+  // Build a 25-player raid combat snapshot with non-combat fields omitted
+  // (empty ext.quest_tracker, empty member gp.quests, no food/drink, no
+  // talent_trees, no npc_actions) and verify visibility + P0 combat options.
+  pb::Snapshot snap;
+  snap.base.self.unit.name = "Offtank";
+  snap.base.self.unit.guid = "0x100";
+  snap.base.self.unit.kind = pb::Unit::PLAYER;
+  snap.base.self.state = pb::Self::ALIVE;
+  snap.base.self.in_combat = true;
+  snap.base.self.health = 18000;
+  snap.base.self.health_max = 30000;
+  pb::GroupPart& self_gp = snap.base.self.unit.group.emplace();
+  self_gp.role = pb::TANK;
+  self_gp.main_tank = true;
+  self_gp.online = true;
+  self_gp.in_range = true;
+
+  pb::Party& party = snap.ext.party.emplace();
+  party.leader = "MainTank";
+  pb::Raid& raid = snap.ext.raid.emplace();
+  raid.main_tanks.push_back("MainTank");
+  for (int i = 0; i < 24; ++i) {
+    pb::Unit& m = party.members.emplace_back();
+    m.guid = "0x2" + std::to_string(i);
+    m.name = i == 0 ? "MainTank" : ("Raider" + std::to_string(i));
+    m.kind = pb::Unit::PLAYER;
+    m.detail = pb::Unit::NAMEPLATE;
+    m.health_pct = 85.0f;
+    pb::GroupPart& gp = m.group.emplace();
+    gp.subgroup = static_cast<uint32_t>(i / 5) + 1;
+    gp.online = true;
+    gp.in_range = true;
+    gp.role = i == 0 ? pb::TANK : pb::DPS;
+    // Omitted in lighter combat snapshots:
+    EXPECT_TRUE(gp.quests.empty());
+  }
+  // Tank debuff (P0 combat fact for tank swaps) is still present.
+  pb::Aura& debuff = party.members[0].auras.emplace_back();
+  debuff.id = 72410;
+  debuff.name = "Rune of Blood";
+  debuff.harmful = true;
+  debuff.remaining_s = 15.0f;
+
+  // Boss + add + ground hazard + action bar spells.
+  {
+    pb::Unit* boss = AddUnit(&snap, "Deathbringer Saurfang", "0x300", 12.0f);
+    boss->classification = pb::Unit::WORLD_BOSS;
+    boss->target = "MainTank";
+  }
+  {
+    pb::Unit* add = AddUnit(&snap, "Blood Beast", "0x301", 8.0f);
+    add->target = "Raider3";
+  }
+
+  pb::Area& hazard = snap.base.nearby.areas.emplace_back();
+  hazard.guid = "trigger:0x400";
+  hazard.name = "Defile";
+  hazard.radius_yd = 10.0f;
+  hazard.inside_me = true;
+  hazard.hostile = true;
+
+  pb::Combat& combat = snap.ext.combat.emplace();
+  combat.attackers.push_back(snap.base.nearby.units[0]);
+  snap.ext.target.emplace().target = snap.base.nearby.units[0];
+  pb::Spell& sp = snap.ext.action_bars.emplace().buttons.emplace_back();
+  sp.id = 355;
+  sp.name = "Taunt";
+  sp.ability.emplace().usable = true;
+  // Non-combat quest tracker omitted at 4 Hz in combat.
+  EXPECT_TRUE(snap.ext.quest_tracker.empty());
+
+  EXPECT_TRUE(pb::ValidateSnapshotVisibility(snap).empty());
+
+  OptionFacts facts;
+  facts.usable_items.push_back({.entry = 33447,
+                                .name = "Runic Healing Potion",
+                                .out_of_combat_only = false,
+                                .detail = "restores health"});
+  facts.usable_items.push_back({.entry = 6948,
+                                .name = "Hearthstone",
+                                .out_of_combat_only = true,
+                                .detail = "out of combat"});
+  CollectTauntActions(snap, /*taunt_spell_id=*/355, /*not_tank=*/false,
+                      &facts.group_and_upkeep_actions);
+
+  AddOptions(&snap, facts);
+  auto has = [&](std::string_view sub) {
+    return std::any_of(snap.options.begin(), snap.options.end(),
+                       [&](const pb::Option& o) {
+                         return o.text.find(sub) != std::string::npos;
+                       });
+  };
+  // All P0 combat options remain present:
+  EXPECT_TRUE(has("Attack Deathbringer Saurfang"));
+  EXPECT_TRUE(has("Attack Blood Beast"));
+  EXPECT_TRUE(has("Use Runic Healing Potion"));
+  EXPECT_TRUE(has("Taunt Deathbringer Saurfang"));
+  EXPECT_TRUE(has("Keep doing what I'm doing"));
+  // Non-combat options stay absent:
+  EXPECT_FALSE(has("Hearthstone"));
+  EXPECT_FALSE(has("Rest"));
+  EXPECT_FALSE(has("Leave group"));
 }
 
 }  // namespace

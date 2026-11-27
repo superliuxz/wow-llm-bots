@@ -58,8 +58,7 @@ Guild Wars heroes):
 
 ## Next (multi-session depth & architecture)
 
-- **Latency & world-thread polish:** Measure 4 Hz combat snapshot cost at raid scale (build lighter
-  combat snapshots if needed).
+- *(Empty — pull from `## Later` when `## Now` is clear.)*
 
 ## Later (broader WoW systems)
 

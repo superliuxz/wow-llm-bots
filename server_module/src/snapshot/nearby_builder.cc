@@ -453,7 +453,9 @@ void FillNameplate(Unit* unit, Player* bot, pb::Unit* out) {
     out->subtitle = creature->GetCreatureTemplate()->SubName;
     out->tapped_by_other =
         creature->hasLootRecipient() && !creature->isTappedBy(bot);
-    out->quest_marker = QuestMarker(bot, creature);
+    if (!bot->IsInCombat()) {
+      out->quest_marker = QuestMarker(bot, creature);
+    }
   }
 }
 
@@ -768,7 +770,11 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
   // CreatureGroup formation, count nearby living hostile attackable NPCs of
   // mutually friendly factions within social aggro range (15 yd) so the brain
   // sees real linked pack density without counting neutral wildlife or
-  // mutually hostile faction skirmishes.
+  // mutually hostile faction skirmishes. Only needed out of combat (when
+  // deciding whether to pull an unpulled pack).
+  if (bot->IsInCombat()) {
+    return stats;
+  }
   constexpr float kSocialPullRadiusYd = 15.0f;
   const auto is_social_hostile = [&](size_t idx) -> Creature* {
     const pb::Unit& u = nearby->units[idx];

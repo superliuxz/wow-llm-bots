@@ -267,5 +267,48 @@ TEST(SnapshotScheduleTest, HazardEventFiresAfter100MsAndDoesNotLatch) {
       schedule.IsDue(0, At(201), Flags{.in_combat = true, .alive = false}));
 }
 
+TEST(SnapshotScheduleTest, RaidPullStaggersCombatSnapshotsAcrossBots) {
+  constexpr size_t kRaidSize = 25;
+  SnapshotSchedule schedule = Schedule(kRaidSize, 1000, 250);
+  // All 25 bots send one initial out-of-combat snapshot at t=0..960 ms, then
+  // enter combat on the exact same world tick (a raid pull at t=1000 ms).
+  for (size_t bot = 0; bot < kRaidSize; ++bot) {
+    const base::TimeTicks t = At(static_cast<int64_t>(bot) * 40);
+    ASSERT_TRUE(schedule.IsDue(bot, t, Flags()));
+    schedule.Sent(bot, t, Flags());
+  }
+  const Flags fighting{.in_combat = true};
+  for (size_t bot = 0; bot < kRaidSize; ++bot) {
+    ASSERT_TRUE(schedule.IsDue(bot, At(1000), fighting)) << bot;
+    schedule.Sent(bot, At(1000), fighting);
+  }
+  // Over the next 2 seconds at 4 Hz (1 ms steps), no single tick should ever
+  // see a 25-bot thundering herd; each bot keeps its staggered 10 ms slot.
+  size_t busiest = 0;
+  size_t total_sent = 0;
+  for (int64_t ms = 1001; ms <= 3000; ++ms) {
+    size_t due = 0;
+    for (size_t bot = 0; bot < kRaidSize; ++bot) {
+      if (schedule.IsDue(bot, At(ms), fighting)) {
+        ++due;
+        schedule.Sent(bot, At(ms), fighting);
+        ++total_sent;
+      }
+    }
+    busiest = std::max(busiest, due);
+  }
+  EXPECT_LE(busiest, 2u);
+  // 25 bots * 4 Hz * 2 s = 200 snapshots (plus at most 1 partial initial cycle
+  // per bot while aligning into its phase).
+  EXPECT_GE(total_sent, 195u);
+  EXPECT_LE(total_sent, 230u);
+
+  // Adversarial counter-test: leaving combat still triggers an immediate
+  // snapshot for every bot without waiting out the 250 ms combat interval.
+  for (size_t bot = 0; bot < kRaidSize; ++bot) {
+    EXPECT_TRUE(schedule.IsDue(bot, At(3001), Flags())) << bot;
+  }
+}
+
 }  // namespace
 }  // namespace llm_brain

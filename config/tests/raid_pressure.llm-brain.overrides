@@ -1,0 +1,9 @@
+# Raid-scale 4 Hz combat snapshot pressure test: 25 level-80 bots grouped into a raid fighting a
+# raid-boss-ranked Heroic Training Dummy + nearby Grandmaster's Training Dummies in Orgrimmar's
+# Valley of Honor. Measures the world-thread cost of building 4 Hz combat snapshots at raid scale.
+# Needs a test build (tools/wlb build server --test).
+LlmBrain.Bots = "Loada,Loadb,Loadc,Loadd,Loade,Loadf,Loadg,Loadh,Loadi,Loadj,Loadk,Loadl,Loadm,Loadn,Loado,Loadp,Loadq,Loadr,Loads,Loadt,Loadu,Loadv,Loadw,Loadx,Loady"
+LlmBrain.TestFixtures = "Loada=priest-l80-boars.pdump,Loadb=priest-l80-boars.pdump,Loadc=priest-l80-boars.pdump,Loadd=priest-l80-boars.pdump,Loade=priest-l80-boars.pdump,Loadf=priest-l80-boars.pdump,Loadg=priest-l80-boars.pdump,Loadh=priest-l80-boars.pdump,Loadi=priest-l80-boars.pdump,Loadj=priest-l80-boars.pdump,Loadk=priest-l80-boars.pdump,Loadl=priest-l80-boars.pdump,Loadm=priest-l80-boars.pdump,Loadn=priest-l80-boars.pdump,Loado=priest-l80-boars.pdump,Loadp=priest-l80-boars.pdump,Loadq=priest-l80-boars.pdump,Loadr=priest-l80-boars.pdump,Loads=priest-l80-boars.pdump,Loadt=priest-l80-boars.pdump,Loadu=priest-l80-boars.pdump,Loadv=priest-l80-boars.pdump,Loadw=priest-l80-boars.pdump,Loadx=priest-l80-boars.pdump,Loady=priest-l80-boars.pdump"
+LlmBrain.FixtureDir = "@ROOT@/server_module/testdata/characters"
+LlmBrain.CombatStrategies = "+boost,+dps assist,-threat"
+LlmBrain.NonCombatStrategies = "-grind,-new rpg,-follow,+stay"

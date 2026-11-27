@@ -3,12 +3,14 @@
 #ifndef MOD_LLM_BRAIN_SNAPSHOT_SNAPSHOT_BUILDER_H_
 #define MOD_LLM_BRAIN_SNAPSHOT_SNAPSHOT_BUILDER_H_
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 #include "options/option_facts.h"
 #include "options/options.h"
@@ -18,6 +20,7 @@
 #include "snapshot/ui_state.h"
 
 class Player;
+class SpellInfo;
 
 namespace llm_brain {
 class ItemSpellTexts;
@@ -59,7 +62,22 @@ class SnapshotBuilder {
                              const ItemSpellTexts* texts,
                              base::TimeTicks now);
 
+  // One active, non-passive, non-tradeskill spell from the bot's spellbook,
+  // cached across snapshots so 4 Hz combat builds only refresh cooldowns and
+  // usability instead of rescanning the full spell map.
+  struct CachedSpell {
+    base::raw_ptr<const SpellInfo> info = nullptr;
+    uint32_t id = 0;
+    std::string name;
+    uint32_t rank = 0;
+    float cooldown_s = 0.0f;
+    bool ground_targeted = false;
+  };
+
  private:
+  void FillActionBars(Player* bot,
+                      wlb::snapshot::Extensions* ext,
+                      base::TimeTicks now);
   void FillOptionFacts(Player* bot,
                        wlb::snapshot::Snapshot* snapshot,
                        OptionFacts* facts,
@@ -69,6 +87,10 @@ class SnapshotBuilder {
   NearbyBuilder nearby_;
   DungeonNavConfig dungeon_nav_;
   std::vector<QuestPoi> quest_pois_;
+  std::vector<CachedSpell> spell_cache_;
+  size_t spell_cache_map_size_ = 0;
+  uint8_t spell_cache_spec_mask_ = 0;
+  base::TimeTicks spell_cache_time_;
   std::optional<PositionFacts> position_facts_;
   Viewpoint position_view_;
   base::TimeTicks position_time_;

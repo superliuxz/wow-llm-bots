@@ -24,6 +24,7 @@ SnapshotSchedule::SnapshotSchedule(size_t bot_count,
 }
 
 void SnapshotSchedule::Restart(base::TimeTicks now) {
+  start_ = now;
   const int64_t count = static_cast<int64_t>(slots_.size());
   for (size_t i = 0; i < slots_.size(); ++i) {
     slots_[i] = Slot{};
@@ -63,7 +64,24 @@ void SnapshotSchedule::Sent(size_t bot, base::TimeTicks now, Flags flags) {
     } while (slot.next_due <= now);
   }
   if (flags.in_combat && period.is_positive()) {
-    slot.next_due = std::min(slot.next_due, now + period);
+    const base::TimeTicks cap = now + period;
+    if (slot.next_due > cap) {
+      const int64_t count = static_cast<int64_t>(slots_.size());
+      if (count <= 1) {
+        slot.next_due = cap;
+      } else {
+        // Align to this bot's staggered combat phase (`start_ + k*period +
+        // period*bot/N`) inside `(now, now + period]` so a simultaneous raid
+        // pull does not phase-lock every bot onto the same world tick.
+        const base::TimeDelta phase =
+            period * static_cast<int64_t>(bot) / count;
+        const int64_t p_us = period.InMicroseconds();
+        const int64_t rel_us = (now - start_ - phase).InMicroseconds();
+        const int64_t next_k =
+            rel_us >= 0 ? (rel_us / p_us + 1) : -((-rel_us - 1) / p_us);
+        slot.next_due = start_ + period * next_k + phase;
+      }
+    }
   }
   flags.reactive_event = false;
   flags.hazard_event = false;
