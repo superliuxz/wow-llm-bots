@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <numbers>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -59,6 +60,7 @@
 #include "options/action_types.h"
 #include "options/exec_items.h"
 #include "options/exec_shared.h"
+#include "options/loot_roll_policy.h"
 #include "options/options.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/world_util.h"
@@ -127,6 +129,15 @@ static_assert(PRIEST_TAB_SHADOW == 2);
 static_assert(DEATH_KNIGHT_TAB_BLOOD == 0);
 static_assert(SHAMAN_TAB_RESTORATION == 2);
 static_assert(DRUID_TAB_FERAL == 1 && DRUID_TAB_RESTORATION == 2);
+static_assert(kRollMaskPass == ROLL_FLAG_TYPE_PASS);
+static_assert(kRollMaskNeed == ROLL_FLAG_TYPE_NEED);
+static_assert(kRollMaskGreed == ROLL_FLAG_TYPE_GREED);
+static_assert(kRollMaskDisenchant == ROLL_FLAG_TYPE_DISENCHANT);
+static_assert(static_cast<uint8_t>(LootRollChoice::kPass) == ROLL_PASS);
+static_assert(static_cast<uint8_t>(LootRollChoice::kNeed) == ROLL_NEED);
+static_assert(static_cast<uint8_t>(LootRollChoice::kGreed) == ROLL_GREED);
+static_assert(static_cast<uint8_t>(LootRollChoice::kDisenchant) ==
+              ROLL_DISENCHANT);
 
 std::vector<LfgRoleChoice> SpecLfgRoles(Player* bot) {
   const bool has_talents =
@@ -302,16 +313,97 @@ std::string PrimaryStats(const ItemTemplate* proto) {
         add("spell power");
         break;
       case ITEM_MOD_ATTACK_POWER:
+      case ITEM_MOD_RANGED_ATTACK_POWER:
         add("attack power");
+        break;
+      case ITEM_MOD_MANA_REGENERATION:
+        add("mp5");
         break;
       case ITEM_MOD_DEFENSE_SKILL_RATING:
         add("defense");
+        break;
+      case ITEM_MOD_DODGE_RATING:
+        add("dodge");
+        break;
+      case ITEM_MOD_PARRY_RATING:
+        add("parry");
+        break;
+      case ITEM_MOD_BLOCK_RATING:
+      case ITEM_MOD_BLOCK_VALUE:
+        add("block");
+        break;
+      case ITEM_MOD_EXPERTISE_RATING:
+        add("expertise");
+        break;
+      case ITEM_MOD_ARMOR_PENETRATION_RATING:
+        add("armor pen");
         break;
       default:
         break;
     }
   }
   return out;
+}
+
+ItemStatFlags ExtractItemStatFlags(const ItemTemplate* proto) {
+  ItemStatFlags flags;
+  if (!proto) {
+    return flags;
+  }
+  for (uint32_t i = 0; i < proto->StatsCount && i < MAX_ITEM_PROTO_STATS; ++i) {
+    if (proto->ItemStat[i].ItemStatValue <= 0) {
+      continue;
+    }
+    switch (proto->ItemStat[i].ItemStatType) {
+      case ITEM_MOD_STRENGTH:
+        flags.strength = true;
+        break;
+      case ITEM_MOD_AGILITY:
+        flags.agility = true;
+        break;
+      case ITEM_MOD_INTELLECT:
+        flags.intellect = true;
+        break;
+      case ITEM_MOD_SPIRIT:
+        flags.spirit = true;
+        break;
+      case ITEM_MOD_STAMINA:
+        flags.stamina = true;
+        break;
+      case ITEM_MOD_SPELL_POWER:
+        flags.spell_power = true;
+        break;
+      case ITEM_MOD_ATTACK_POWER:
+      case ITEM_MOD_RANGED_ATTACK_POWER:
+        flags.attack_power = true;
+        break;
+      case ITEM_MOD_MANA_REGENERATION:
+        flags.mp5 = true;
+        break;
+      case ITEM_MOD_DEFENSE_SKILL_RATING:
+      case ITEM_MOD_DODGE_RATING:
+      case ITEM_MOD_PARRY_RATING:
+      case ITEM_MOD_BLOCK_RATING:
+      case ITEM_MOD_BLOCK_VALUE:
+        flags.tank_avoidance = true;
+        break;
+      case ITEM_MOD_EXPERTISE_RATING:
+      case ITEM_MOD_ARMOR_PENETRATION_RATING:
+        flags.melee_dps = true;
+        break;
+      default:
+        break;
+    }
+  }
+  return flags;
+}
+
+LootStatProfile BotLootStatProfile(Player* bot) {
+  const bool has_talents =
+      bot->GetFreeTalentPoints() < bot->CalculateTalentsPoints();
+  return LootStatProfileForSpec(
+      bot->getClass(), AiFactory::GetPlayerSpecTab(bot), has_talents,
+      PlayerbotAI::IsTank(bot), PlayerbotAI::IsHeal(bot));
 }
 
 std::string RollItemFacts(Player* bot, const ItemTemplate* proto) {
@@ -339,6 +431,12 @@ std::string RollItemFacts(Player* bot, const ItemTemplate* proto) {
   if (bot->CanUseItem(proto) != EQUIP_ERR_OK) {
     return out + ", you can't use it";
   }
+  const LootStatProfile profile = BotLootStatProfile(bot);
+  const StatFit stat_fit =
+      EvaluateStatFit(profile, bot->getClass(), ExtractItemStatFlags(proto));
+  const bool off_spec = stat_fit == StatFit::kMismatch ||
+                        (proto->InventoryType == INVTYPE_SHIELD &&
+                         IsShieldDisallowedForProfile(profile));
   uint32_t worn = UINT32_MAX;
   bool empty_slot = false;
   for (const uint8_t slot : slots) {
@@ -349,6 +447,13 @@ std::string RollItemFacts(Player* bot, const ItemTemplate* proto) {
       break;
     }
     worn = std::min(worn, p->ItemLevel);
+  }
+  if (off_spec) {
+    if (empty_slot) {
+      return out + ", usable, off-spec stats (empty slot)";
+    }
+    return out + ", usable, off-spec stats (you wear ilvl " +
+           std::to_string(worn) + ")";
   }
   if (empty_slot) {
     return out + ", usable, upgrade (empty slot)";
@@ -649,8 +754,8 @@ void CollectGroupAndUpkeepActions(Player* bot,
       } else {
         out->push_back({"popups:auto",
                         "Answer popups automatically (accept rez, summons, "
-                        "ready checks and Dungeon Finder; Need usable "
-                        "upgrades, else Greed)"});
+                        "ready checks and Dungeon Finder; Need usable spec "
+                        "upgrades, else Disenchant/Greed)"});
       }
       const BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
       if (policy.not_tank) {
@@ -1441,43 +1546,56 @@ ActionOutcome ExecutePopupAnswerAction(Player* bot,
 
 namespace {
 
-// The brain's loot policy: Need a usable upgrade of the bot's own armor type
-// that doesn't bind on equip, else Greed, else Pass.
-uint8_t PolicyRollVote(Player* bot, const Roll& roll) {
+// The brain's loot policy: defer briefly while a human in the roll hasn't
+// voted yet, then Need a usable spec-appropriate upgrade of the bot's own
+// armor type that doesn't bind on equip (never against a human who already
+// Needed), else Disenchant (when eligible), else Greed, else Pass.
+std::optional<LootRollChoice> PolicyRollVote(Player* bot,
+                                             const Roll& roll,
+                                             uint64_t roll_elapsed_ms) {
   const ItemTemplate* proto = sObjectMgr->GetItemTemplate(roll.itemid);
-  bool upgrade = false;
-  if (proto && proto->Bonding != BIND_WHEN_EQUIPPED &&
-      bot->CanUseItem(proto) == EQUIP_ERR_OK) {
-    const bool armor_ok = proto->Class != ITEM_CLASS_ARMOR ||
-                          proto->InventoryType == INVTYPE_CLOAK ||
-                          !ArmorTypeName(proto->SubClass) ||
-                          proto->SubClass == BestArmorSubclass(bot);
+  LootRollPolicyInput in;
+  in.roll_vote_mask = roll.rollVoteMask;
+  in.roll_elapsed_ms = roll_elapsed_ms;
+  if (proto) {
+    in.bind_on_equip = proto->Bonding == BIND_WHEN_EQUIPPED;
+    in.usable = bot->CanUseItem(proto) == EQUIP_ERR_OK;
+    in.armor_type_matches = proto->Class != ITEM_CLASS_ARMOR ||
+                            proto->InventoryType == INVTYPE_CLOAK ||
+                            !ArmorTypeName(proto->SubClass) ||
+                            proto->SubClass == BestArmorSubclass(bot);
+    const LootStatProfile profile = BotLootStatProfile(bot);
+    in.shield_disallowed_for_spec = proto->InventoryType == INVTYPE_SHIELD &&
+                                    IsShieldDisallowedForProfile(profile);
+    in.stat_fit =
+        EvaluateStatFit(profile, bot->getClass(), ExtractItemStatFlags(proto));
     const std::vector<uint8_t> slots = SlotsFor(bot, proto->InventoryType);
     for (const uint8_t slot : slots) {
       const Item* worn = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
       const ItemTemplate* wp = worn ? worn->GetTemplate() : nullptr;
-      if (armor_ok && (!wp || proto->ItemLevel > wp->ItemLevel)) {
-        upgrade = true;
+      if (!wp || proto->ItemLevel > wp->ItemLevel) {
+        in.has_upgrade_slot = true;
         break;
       }
     }
   }
-  // Never Need against a human who already did (Now #7).
+  // Respect humans in the roll: defer while a connected human hasn't voted
+  // yet, and never Need against a human who already Needed.
   for (const auto& [guid, vote] : roll.playerVote) {
-    if (vote == NEED && guid != bot->GetGUID()) {
-      Player* p = ObjectAccessor::FindConnectedPlayer(guid);
-      if (p && IsHumanPlayer(p)) {
-        upgrade = false;
-      }
+    if (guid == bot->GetGUID()) {
+      continue;
+    }
+    Player* p = ObjectAccessor::FindConnectedPlayer(guid);
+    if (!p || !IsHumanPlayer(p)) {
+      continue;
+    }
+    if (vote == NEED) {
+      in.human_already_needed = true;
+    } else if (vote == NOT_EMITED_YET) {
+      in.human_pending_vote = true;
     }
   }
-  if (upgrade && (roll.rollVoteMask & ROLL_FLAG_TYPE_NEED)) {
-    return 1;
-  }
-  if (roll.rollVoteMask & ROLL_FLAG_TYPE_GREED) {
-    return 2;
-  }
-  return 0;
+  return DecidePolicyRollVote(in);
 }
 
 }  // namespace
@@ -1547,8 +1665,12 @@ std::vector<std::string> AnswerPopupsByPolicy(Player* bot) {
       }
     }
   }
+  const uint64_t bot_key = bot->GetGUID().GetRawValue();
   if (Group* group = bot->GetGroup()) {
-    std::vector<LootRollAction> votes;
+    const uint64_t now_ms = static_cast<uint64_t>(
+        (base::TimeTicks::Now() - base::TimeTicks()).InMilliseconds());
+    std::vector<RollKey> active_keys;
+    std::vector<const Roll*> open_rolls;
     for (const Roll* roll : group->GetRolls()) {
       if (!roll) {
         continue;
@@ -1557,22 +1679,44 @@ std::vector<std::string> AnswerPopupsByPolicy(Player* bot) {
       if (it == roll->playerVote.end() || it->second != NOT_EMITED_YET) {
         continue;
       }
+      active_keys.push_back(
+          RollKey{roll->itemGUID.GetRawValue(), roll->itemSlot});
+      open_rolls.push_back(roll);
+    }
+    std::vector<uint64_t> elapsed_ms;
+    elapsed_ms.reserve(open_rolls.size());
+    BotSessionRegistry::Instance().WithSession(bot_key, [&](BotSession& s) {
+      PrunePendingRolls(&s.pending_rolls_seen, active_keys);
+      for (const RollKey& key : active_keys) {
+        elapsed_ms.push_back(
+            RecordAndGetRollElapsedMs(&s.pending_rolls_seen, key, now_ms));
+      }
+    });
+    std::vector<LootRollAction> votes;
+    for (size_t idx = 0; idx < open_rolls.size(); ++idx) {
+      const Roll* roll = open_rolls[idx];
+      const std::optional<LootRollChoice> choice =
+          PolicyRollVote(bot, *roll, elapsed_ms[idx]);
+      if (!choice.has_value()) {
+        continue;  // Deferred while a human in the roll hasn't voted yet.
+      }
       LootRollAction a;
       a.item_guid = base::StringPrintf(
           "0x%016llx",
           static_cast<unsigned long long>(roll->itemGUID.GetRawValue()));
       a.slot = roll->itemSlot;
-      a.vote = PolicyRollVote(bot, *roll);
+      a.vote = static_cast<uint8_t>(*choice);
       const ItemTemplate* proto = sObjectMgr->GetItemTemplate(roll->itemid);
-      a.label = std::string(a.vote == 1   ? "Need "
-                            : a.vote == 2 ? "Greed "
-                                          : "Pass ") +
+      a.label = std::string(LootRollChoiceVerb(*choice)) + " " +
                 (proto ? proto->Name1 : "an item");
       votes.push_back(std::move(a));
     }
     for (const LootRollAction& a : votes) {
       note(ExecuteLootRollAction(bot, a), "rolled: " + a.label);
     }
+  } else {
+    BotSessionRegistry::Instance().WithSession(
+        bot_key, [](BotSession& s) { s.pending_rolls_seen.clear(); });
   }
   return answered;
 }

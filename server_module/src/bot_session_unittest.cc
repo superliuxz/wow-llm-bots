@@ -7,6 +7,7 @@
 #include "bot_manager/errand_hold.h"
 #include "bot_manager/tank_swap.h"
 #include "gtest/gtest.h"
+#include "options/loot_roll_policy.h"
 
 namespace llm_brain {
 namespace {
@@ -311,6 +312,38 @@ TEST(BotSessionRegistryTest,
     });
     EXPECT_FALSE(
         TankSwapTracker::Instance().FindClaim(kBoss, 42, 631, 1, 5500));
+  };
+  set();
+  reg.ResetOnMapChange(kBot);
+  expect_cleared();
+  set();
+  reg.ResetOnDisconnect(kBot);
+  expect_cleared();
+  set();
+  reg.ResetOnLogout(kBot);
+  expect_cleared();
+}
+
+// Adversarial counter-test: deferred auto-popup loot roll timestamps clear on
+// map change, harness disconnect, and logout so stale roll timers never carry
+// across zones or sessions, while `auto_popups` survives logout.
+TEST(BotSessionRegistryTest,
+     PendingLootRollTimersClearOnMapChangeDisconnectAndLogout) {
+  BotSessionRegistry reg;
+  constexpr uint64_t kBot = 0x1009;
+  const auto set = [&] {
+    reg.WithSession(kBot, [](BotSession& s) {
+      s.auto_popups = true;
+      s.pending_rolls_seen = {PendingRollSeen{
+          .item_guid = 0x55, .item_slot = 0, .first_seen_ms = 900}};
+    });
+  };
+  const auto expect_cleared = [&] {
+    reg.InspectSession(kBot, [](const BotSession* s) {
+      ASSERT_NE(s, nullptr);
+      EXPECT_TRUE(s->pending_rolls_seen.empty());
+      EXPECT_TRUE(s->auto_popups);
+    });
   };
   set();
   reg.ResetOnMapChange(kBot);

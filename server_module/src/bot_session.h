@@ -20,6 +20,7 @@
 #include "base/thread_annotations.h"
 #include "bot_manager/errand_hold.h"
 #include "bot_manager/tick_owner.h"
+#include "options/loot_roll_policy.h"
 #include "snapshot/snapshot.h"
 
 namespace llm_brain {
@@ -107,6 +108,12 @@ struct BotSession {
   // checks, role checks, proposals and loot rolls automatically. Survives
   // logout.
   bool auto_popups = false;
+
+  // Monotonic timestamp (ms) when each open group loot roll was first seen by
+  // auto-popup policy, so we can defer voting briefly while a human member
+  // hasn't voted yet. Pruned of closed rolls each tick and cleared on logout,
+  // map change, and disconnect.
+  std::vector<PendingRollSeen> pending_rolls_seen;
 
   // A summon (warlock ritual, meeting stone) and a Dungeon Finder kick vote
   // waiting for an answer, seen in outgoing packets.

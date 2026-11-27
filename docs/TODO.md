@@ -17,12 +17,6 @@ Live verification following the `70b0878` team-play P0 fixes:
 
 Team-play P1 gaps and selected P2 items from the `70b0878` review:
 
-### Loot
-- **Immediate auto-popup voting & roll criteria:** Auto-popup policy votes immediately, so "never
-  Need against a human who already Needed" almost never fires; Need = any usable higher-iLvl
-  non-BoE of armor type (no stat/spec check), and Disenchant is never picked
-  (`exec_social.cc:1345-1382`).
-
 ### Raid scale & coordination
 - **Role mismatch (harness vs. server):** Harness falls back to spec role while server checks only
   Main Tank flag or LFG role; in hand-formed raids `tank`/`offtank`/`healer` orders fail or target

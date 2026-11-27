@@ -445,8 +445,15 @@ class LlmBrainWorldScript : public WorldScript {
       BotManager::OpenRequestedTrade(bot);
       // Timed popups (ready check, LFG, loot roll, quest share, rez, trade)
       // wake the brain while they are still open (RH-H1).
-      for (wlb::snapshot::Event& ev :
-           bots_[i].popups.Update(BotManager::ReadPopupState(bot))) {
+      PopupState popup_state = BotManager::ReadPopupState(bot);
+      if (BotSessionRegistry::Instance().InspectSession(
+              bot->GetGUID().GetRawValue(),
+              [](const BotSession* s) { return s && s->auto_popups; })) {
+        // Deferred auto-popup loot rolls are answered by C++ once the human
+        // votes or the deferral window expires; don't wake the LLM for them.
+        popup_state.rolls.clear();
+      }
+      for (wlb::snapshot::Event& ev : bots_[i].popups.Update(popup_state)) {
         EmitAlertingEvent(i, config_.bots[i], bot, std::move(ev));
       }
       DrainPendingChat(bot, i, config_.bots[i], now);

@@ -816,8 +816,10 @@ def _case_lootroll():
         delay = roll_event_at - started_at
         expect(delay <= 5.0, f"loot_roll event took {delay:.1f} s (> 5 s)")
         expect(greed_cmd is not None, "Telda was never offered `Greed Buckskin Cape`")
-        # F2: the option says whether the item is usable and an upgrade (a fresh priest wears no cloak).
-        expect("usable, upgrade" in greed_text, f"roll option lacks usable/upgrade facts: {greed_text!r}")
+        # F2 + M3: the option reports usability, stat fit, and slot state
+        # (Buckskin Cape is agility-only on a fresh priest with no cloak).
+        expect("usable, off-spec stats (empty slot)" in greed_text,
+               f"roll option lacks usable/stat-fit facts: {greed_text!r}")
         expect("[Need rolled by Loada]" in greed_text,
                f"roll option doesn't say Loada rolled Need: {greed_text!r}")
         expect(not errors, f"Greed produced errors: {errors}")
@@ -3320,10 +3322,24 @@ def _case_heal_reaction():
                 10.0,
             )
             expect(both_combat, "setup: healer Loadb did not enter combat with tank Loada")
-            # Let Loadb finish its opening combat-entry GCD / Fear Ward buff so
-            # Trial 1 measures steady-state in-combat heal reaction.
-            gcd_settle = time.monotonic() + 2.0
-            pump(lambda: time.monotonic() >= gcd_settle, 2.5)
+            # Run one untimed warm-up heal so Loadb finishes its opening
+            # combat-entry buffs (Fade / Power Word: Shield / Renew) and enters
+            # Trial 1 immediately after a Heal cast — the same clean, zero-GCD
+            # precondition that Trials 2 and 3 start from.
+            warm_out = server.console(
+                f"llmtest sethp Loada {TANK_DROP_PCT}", wait_s=0.15, inst=TEST
+            )
+            m_warm = T_US_RE.search(warm_out)
+            expect(m_warm, f"setup: warm-up sethp {TANK_DROP_PCT} did not report t_us: {warm_out!r}")
+            t_warm_us = int(m_warm.group(1))
+            warmed = pump(
+                lambda: (
+                    (hs := latest("Loadb", t_warm_us)) is not None
+                    and cast_name(hs) in HEAL_SPELLS
+                ),
+                5.0,
+            )
+            expect(warmed, "setup: healer Loadb did not start warm-up heal")
 
             for trial in range(TRIALS):
                 # Reset tank to full HP and wait for healer to finish any prior
@@ -3336,7 +3352,7 @@ def _case_heal_reaction():
                     lambda: (
                         (hs := latest("Loadb", top_us)) is not None
                         and in_combat(hs)
-                        and cast_name(hs) not in HEAL_SPELLS
+                        and not cast_name(hs)
                         and (ts := latest("Loada", top_us)) is not None
                         and in_combat(ts)
                     ),
