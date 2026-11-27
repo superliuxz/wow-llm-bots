@@ -58,13 +58,14 @@ Follow Google/Chromium C++ style (`.clang-format`, `BasedOnStyle: Chromium`). `c
   `tools/wlblib/cases/e2e_*.py` on isolated `out/server-test`), `perf`, `eval`, `soak`, `all`
   (`e2e` and `eval` concurrently).
 - **Parallel e2e:** `tools/wlb test e2e -j N` runs the case groups on N test servers at once
-  (shard k: port 8086+k, `out/server-test/run-k`/`etc-k`, `var/logs/test-k`, `acore_test_k_*`;
-  one shared build and test world DB). Default N: one per 7 GB free RAM and per 2 cores, at most
-  6 (about 21 -> 6.5 min here); `-j 1` is the serial run. Needs unprivileged user+mount
+  (shard k: port 8086+k skipping 8090, `out/server-test/run-k`/`etc-k`, `var/logs/test-k`,
+  `acore_test_k_*`; one shared build and test world DB), automatically splitting oversized
+  multi-case groups across shards when it cuts wall time. Default N: one per 7 GB free RAM and
+  per 2 cores, at most 8; `-j 1` is the serial run. Needs unprivileged user+mount
   namespaces (`unshare`), else it falls back to `-j 1`. `tools/wlb server stop --test` stops
   every shard. `tools/wlb test all [-j N]` runs `e2e` and `eval` concurrently. Add
   `--remote WORKER` to `e2e` or `all` (only when explicitly asked, rule 5) to sync and split
-  e2e groups across this machine and a configured worker (`private/remotes.json`).
+  e2e work across this machine and a configured worker (`private/remotes.json`).
 - **Eval gates:** `tools/wlb test eval` (T=0, judge on a freshly started llama-server) must
   have no new misses: the known ones are `skip_tapped_mob`, `whisper_while_low_hp` and the flaky
   `herb_to_gather`. `tools/wlb test eval --live` (sampled draws) must stay >= 85%; it also

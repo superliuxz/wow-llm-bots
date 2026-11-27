@@ -53,6 +53,7 @@ class TestInstanceTest(unittest.TestCase):
             values = [getattr(s, attr) for s in shards]
             self.assertEqual(len(set(values)), len(values), attr)
         self.assertNotIn(common.PLAY.world_port, [s.world_port for s in shards])
+        self.assertNotIn(common.LLM_PORT, [s.world_port for s in shards])
         self.assertNotIn(common.PLAY.db_prefix, [s.db_prefix for s in shards])
 
     def test_out_of_range(self):
@@ -140,11 +141,86 @@ class PlanShardsTest(unittest.TestCase):
 
 class DefaultJobsTest(unittest.TestCase):
     def test_bounded_by_ram_cores_and_cap(self):
-        self.assertEqual(testing.default_jobs(mem_available_gb=57, cpus=16),
+        self.assertEqual(testing.default_jobs(mem_available_gb=64, cpus=16),
                          common.MAX_SHARDS)
+        self.assertEqual(testing.default_jobs(mem_available_gb=56, cpus=16), 7)
         self.assertEqual(testing.default_jobs(mem_available_gb=20, cpus=16), 2)
         self.assertEqual(testing.default_jobs(mem_available_gb=200, cpus=6), 3)
         self.assertEqual(testing.default_jobs(mem_available_gb=3, cpus=1), 1)
+
+
+class PlanShardCasesTest(unittest.TestCase):
+    def test_splits_oversized_multi_case_group_to_cut_makespan(self):
+        groups = {
+            ("choose", "Loada", 1): ["c1", "c2", "c3", "c4"],
+            ("g2", "B", 1): ["x"],
+            ("g3", "B", 1): ["y"],
+        }
+        timings = {"choose/Loada/1": 380.0, "g2/B/1": 150.0, "g3/B/1": 150.0}
+        case_timings = {"c1": 100.0, "c2": 100.0, "c3": 70.0, "c4": 65.0}
+        shards, load = testing.plan_shard_cases(groups, 4, timings, case_timings)
+        self.assertEqual(len(shards), 4)
+        self.assertLess(max(load), 230.0)
+        flat_cases = [n for s in shards for _, ns in s for n in ns]
+        self.assertEqual(sorted(flat_cases), ["c1", "c2", "c3", "c4", "x", "y"])
+        choose_chunks = [ns for s in shards for k, ns in s if k == ("choose", "Loada", 1)]
+        self.assertEqual(len(choose_chunks), 2)
+
+    def test_splits_without_case_timings_using_group_time(self):
+        groups = {
+            ("choose", "Loada", 1): ["c1", "c2", "c3", "c4"],
+            ("g2", "B", 1): ["x"],
+        }
+        timings = {"choose/Loada/1": 380.0, "g2/B/1": 150.0}
+        shards, load = testing.plan_shard_cases(groups, 3, timings, {})
+        self.assertEqual(len(shards), 3)
+        self.assertLess(max(load), 240.0)
+        flat_cases = [n for s in shards for _, ns in s for n in ns]
+        self.assertEqual(sorted(flat_cases), ["c1", "c2", "c3", "c4", "x"])
+
+    def test_does_not_split_small_or_single_case_groups(self):
+        groups = {
+            ("solo", "B", 1): ["big"],
+            ("small", "B", 1): ["a", "b", "c"],
+        }
+        timings = {"solo/B/1": 400.0, "small/B/1": 100.0}
+        shards, load = testing.plan_shard_cases(groups, 4, timings, {"a": 20, "b": 20, "c": 15})
+        self.assertEqual(len(shards), 2)
+        self.assertEqual(load, [400.0, 100.0])
+
+    def test_serial_jobs_never_splits_and_no_empty_shards(self):
+        groups = {("choose", "Loada", 1): ["c1", "c2", "c3", "c4"]}
+        timings = {"choose/Loada/1": 380.0}
+        shards1, _ = testing.plan_shard_cases(groups, 1, timings)
+        self.assertEqual(len(shards1), 1)
+        self.assertEqual(len(shards1[0]), 1)
+        shards_many, _ = testing.plan_shard_cases(
+            {("a", "B", 1): ["x"], ("b", "B", 1): ["y"]}, 8, {"a/B/1": 50.0, "b/B/1": 50.0}
+        )
+        self.assertEqual(len(shards_many), 2)
+        self.assertTrue(all(shards_many))
+
+    def test_split_cases_for_remote_balances_and_covers_all_cases(self):
+        groups = {
+            ("choose", "Loada", 1): ["c1", "c2", "c3", "c4"],
+            ("g2", "B", 1): ["x"],
+            ("g3", "B", 1): ["y"],
+        }
+        timings = {"choose/Loada/1": 380.0, "g2/B/1": 150.0, "g3/B/1": 150.0}
+        case_timings = {"c1": 100.0, "c2": 100.0, "c3": 70.0, "c4": 65.0}
+        l_chunks, r_chunks = testing.split_cases_for_remote(
+            groups, timings, case_timings, local_jobs=3, remote_jobs=1,
+        )
+        self.assertTrue(l_chunks and r_chunks)
+        flat = [n for _, ns in (l_chunks + r_chunks) for n in ns]
+        self.assertEqual(sorted(flat), ["c1", "c2", "c3", "c4", "x", "y"])
+
+        l_only, r_empty = testing.split_cases_for_remote(
+            groups, timings, case_timings, local_jobs=3, remote_jobs=0,
+        )
+        self.assertEqual(r_empty, [])
+        self.assertEqual(sorted(n for _, ns in l_only for n in ns),
+                         ["c1", "c2", "c3", "c4", "x", "y"])
 
 
 class CaseBlocksTest(unittest.TestCase):
@@ -171,10 +247,15 @@ class TimingsTest(unittest.TestCase):
             path = pathlib.Path(tmp) / "e2e-timings.json"
             with mock.patch.object(testing, "TIMINGS", path):
                 testing._save_timings({"a/B/1": 10.0, "b/B/1": 20.0})
-                testing._save_timings({"b/B/1": 30.0})
+                self.assertEqual(testing._load_case_timings(), {})
+                testing._save_timings({"b/B/1": 30.0}, {"c1": 12.5, "c2": 7.5})
+                testing._save_timings({}, {"c2": 9.0, "c3": 4.0})
                 self.assertEqual(testing._load_timings(), {"a/B/1": 10.0, "b/B/1": 30.0})
+                self.assertEqual(testing._load_case_timings(),
+                                 {"c1": 12.5, "c2": 9.0, "c3": 4.0})
                 path.write_text("not json")
                 self.assertEqual(testing._load_timings(), {})
+                self.assertEqual(testing._load_case_timings(), {})
 
 
 class _FakeProc:

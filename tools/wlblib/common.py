@@ -63,20 +63,24 @@ class Instance:
 PLAY = Instance("play", SERVER, LOGS, "acore_", 8085, False)
 TEST_ROOT = OUT / "server-test"
 TEST_PORT = 8086
-MAX_SHARDS = 6  # The most test servers at once: `wlb test e2e -j N`.
+LLM_PORT = 8090  # Reserved for local llama-server (tools/wlb llm, eval, remote tunnel).
+MAX_SHARDS = 8  # The most test servers at once: `wlb test e2e -j N`.
 
 
 def test_instance(k):
     """Test server `k`: 0 is the plain test server (port 8086, acore_test_* databases,
     out/server-test/run, var/logs/test), what `wlb server --test`, `--keep-server` and perf use;
-    shard k > 0 has port 8086 + k, acore_test_<k>_* databases (the world database shared),
-    out/server-test/run-k and etc-k, and var/logs/test-k."""
+    shard k > 0 has port 8086 + k (skipping LLM_PORT 8090), acore_test_<k>_* databases (the world
+    database shared), out/server-test/run-k and etc-k, and var/logs/test-k."""
     if not 0 <= k <= MAX_SHARDS:
         raise ValueError(f"no test shard {k} (0..{MAX_SHARDS})")
     if k == 0:
         return Instance("test", TEST_ROOT, LOGS / "test", "acore_test_", TEST_PORT, True)
+    port = TEST_PORT + k
+    if port >= LLM_PORT:
+        port += 1
     return Instance(f"test-{k}", TEST_ROOT, LOGS / f"test-{k}", f"acore_test_{k}_",
-                    TEST_PORT + k, True, shard=k, world_db="acore_test_world")
+                    port, True, shard=k, world_db="acore_test_world")
 
 
 def _shard_from_env():

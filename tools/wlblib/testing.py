@@ -365,6 +365,8 @@ SHARD_RAM_GB = 7.0
 RAM_RESERVE_GB = 4.0  # Left free for everything else (the desktop, MySQL's growth).
 GROUP_GUESS_S = 60.0  # A group never timed yet: a server start ...
 CASE_GUESS_S = 60.0  # ... and this per case.
+GROUP_BOOT_S = 45.0  # Extra server startup cost when splitting a multi-case group across shards.
+SPLIT_MIN_GAIN_S = 15.0  # Only split a group if doing so cuts makespan by at least this much.
 
 
 def _mem_available_gb():
@@ -394,15 +396,31 @@ def _load_timings():
         return {}
 
 
-def _save_timings(groups):
-    """Merges this run's group times into TIMINGS (groups not run keep their last time)."""
-    if not groups:
+def _load_case_timings():
+    try:
+        data = json.loads(TIMINGS.read_text())
+        return {k: float(v) for k, v in data.get("cases", {}).items()}
+    except (OSError, ValueError, AttributeError, TypeError):
+        return {}
+
+
+def _save_timings(groups, cases=None):
+    """Merges this run's group and per-case times into TIMINGS (entries not run keep their last
+    time)."""
+    if not groups and not cases:
         return
-    merged = _load_timings()
-    merged.update(groups)
+    merged_groups = _load_timings()
+    if groups:
+        merged_groups.update(groups)
+    merged_cases = _load_case_timings()
+    if cases:
+        merged_cases.update(cases)
+    payload = {"groups": dict(sorted(merged_groups.items()))}
+    if merged_cases:
+        payload["cases"] = dict(sorted(merged_cases.items()))
     TIMINGS.parent.mkdir(parents=True, exist_ok=True)
     tmp = TIMINGS.with_name(TIMINGS.name + ".tmp")
-    tmp.write_text(json.dumps({"groups": dict(sorted(merged.items()))}, indent=1) + "\n")
+    tmp.write_text(json.dumps(payload, indent=1) + "\n")
     tmp.rename(TIMINGS)
 
 
@@ -422,6 +440,82 @@ def plan_shards(groups, jobs, timings):
         shards[i].append(key)
         load[i] += estimate(key)
     return shards, load
+
+
+def _case_estimates(key, names, timings, case_timings):
+    """Estimated seconds per case in `names` for `key`, using recorded per-case timings when
+    available and distributing any remaining group time evenly across untimed cases."""
+    gname = _group_name(key)
+    known = {n: case_timings[n] for n in names if n in case_timings}
+    unknown = [n for n in names if n not in known]
+    if not unknown:
+        return known
+    if gname in timings:
+        rem = max(float(len(unknown)), timings[gname] - GROUP_BOOT_S - sum(known.values()))
+        each = rem / len(unknown)
+    else:
+        each = CASE_GUESS_S
+    return {n: known.get(n, each) for n in names}
+
+
+def _pack_chunks(chunks, jobs):
+    """LPT-packs `(key, case_names, est_s)` chunks onto at most `jobs` shards."""
+    order = sorted(chunks, key=lambda c: (-c[2], _group_name(c[0]), c[1]))
+    shards = [[] for _ in range(max(1, min(jobs, len(order))))]
+    load = [0.0] * len(shards)
+    for item in order:
+        i = min(range(len(shards)), key=lambda j: (load[j], j))
+        shards[i].append(item)
+        load[i] += item[2]
+    return shards, load
+
+
+def plan_shard_cases(groups, jobs, timings, case_timings=None):
+    """Packs `groups` ({key: [case names]}) onto at most `jobs` shards, automatically splitting
+    oversized multi-case groups into 2+ balanced chunks whenever doing so reduces the estimated
+    makespan by at least `SPLIT_MIN_GAIN_S` after paying `GROUP_BOOT_S` per extra server start.
+    Returns `(shards, load)` where each shard is a list of `(key, [case_names])` chunks."""
+    case_timings = case_timings or {}
+    chunks = []
+    for key, names in groups.items():
+        gname = _group_name(key)
+        if gname in timings:
+            est = timings[gname]
+        elif names and all(n in case_timings for n in names):
+            est = GROUP_BOOT_S + sum(case_timings[n] for n in names)
+        else:
+            est = GROUP_GUESS_S + sum(case_timings.get(n, CASE_GUESS_S) for n in names)
+        chunks.append((key, list(names), est))
+
+    if jobs > 1:
+        while True:
+            _, load = _pack_chunks(chunks, jobs)
+            cur_max = max(load)
+            splittable = [idx for idx, c in enumerate(chunks) if len(c[1]) >= 2]
+            if not splittable:
+                break
+            best_idx = max(splittable, key=lambda idx: (chunks[idx][2], -idx))
+            key, names, _ = chunks[best_idx]
+            c_est = _case_estimates(key, names, timings, case_timings)
+            parts = [[], []]
+            pload = [0.0, 0.0]
+            for name in sorted(names, key=lambda n: (-c_est[n], n)):
+                j = 0 if pload[0] <= pload[1] else 1
+                parts[j].append(name)
+                pload[j] += c_est[name]
+            cand = list(chunks)
+            cand[best_idx:best_idx + 1] = [
+                (key, parts[0], GROUP_BOOT_S + pload[0]),
+                (key, parts[1], GROUP_BOOT_S + pload[1]),
+            ]
+            _, new_load = _pack_chunks(cand, jobs)
+            if max(new_load) < cur_max - SPLIT_MIN_GAIN_S:
+                chunks = cand
+            else:
+                break
+
+    packed, load = _pack_chunks(chunks, jobs)
+    return [[(k, ns) for k, ns, _ in shard] for shard in packed], load
 
 
 # A case's result line; console output just before it may share its line ("AC> PASS e2e ...").
@@ -452,22 +546,29 @@ class _CaseBlocks:
             self.lines = []
 
 
-def _run_sharded(groups, jobs):
+def _run_sharded(groups, jobs, *, shards=None, load=None):
     """Runs the groups on `jobs` test servers at once, one `wlb test e2e` process per shard
     (shards 0..jobs-1), and prints the same summary as a serial run."""
     started = time.time()
     build.server(test=True)  # Once, for all shards: theirs skip building (build.PREBUILT_ENV).
     server.test_servers_stop()  # Left running by --keep-server or a crash.
     server.golden_databases_make()  # Once, before the shards copy it.
-    shards, load = plan_shards({k: [m.NAME for m in v] for k, v in groups.items()}, jobs,
-                               _load_timings())
-    say(f"running {sum(len(v) for v in groups.values())} e2e cases in {len(groups)} groups on "
-        f"{len(shards)} test servers (estimated {max(load) / 60:.0f} min)")
+    if shards is None or load is None:
+        shards, load = plan_shard_cases({k: [m.NAME for m in v] for k, v in groups.items()}, jobs,
+                                        _load_timings(), _load_case_timings())
+    chunk_counts = {}
+    for shard in shards:
+        for key, _ in shard:
+            chunk_counts[key] = chunk_counts.get(key, 0) + 1
+    split_group_names = {_group_name(k) for k, cnt in chunk_counts.items() if cnt > 1}
+    total_cases = sum(len(ns) for shard in shards for _, ns in shard)
+    say(f"running {total_cases} e2e cases in {len(groups)} groups on "
+        f"{len(shards)} test servers (estimated {max(load) / 60:.1f} min)")
     lock = threading.Lock()
     procs = []
     try:
-        for k, keys in enumerate(shards):
-            names = [m.NAME for key in keys for m in groups[key]]
+        for k, shard in enumerate(shards):
+            names = [name for _, chunk_names in shard for name in chunk_names]
             results = OUT / "e2e-shards" / f"shard-{k}.json"
             results.parent.mkdir(parents=True, exist_ok=True)
             results.unlink(missing_ok=True)
@@ -498,20 +599,28 @@ def _run_sharded(groups, jobs):
         raise
     finally:
         server.test_servers_stop()  # Whatever a shard left behind (normally nothing).
-    oks, timed = [], {}
+    oks, timed, case_timed = [], {}, {}
     for k, names, results, proc, _ in procs:
         try:
             record = json.loads(results.read_text())
         except (OSError, ValueError):
             record = {}
-        ran = {c["name"]: c["ok"] for c in record.get("cases", [])}
+        ran = {}
+        for c in record.get("cases", []):
+            ran[c["name"]] = c["ok"]
+            if "seconds" in c:
+                case_timed[c["name"]] = float(c["seconds"])
         for name in names:
             if name not in ran:
                 say(f"FAIL e2e {name}: not run (the {test_instance(k).name} process exited "
                     f"{proc.returncode} first)")
             oks.append(bool(ran.get(name, False)))
-        timed.update(record.get("groups", {}))
-    _save_timings(timed)
+        for gname, secs in record.get("groups", {}).items():
+            # A group split across multiple shards only reports a partial chunk time per shard;
+            # keep its whole-group timing intact (per-case timings handle future split planning).
+            if gname not in split_group_names:
+                timed[gname] = secs
+    _save_timings(timed, case_timed)
     say(f"e2e on {len(shards)} test servers: {(time.time() - started) / 60:.1f} min")
     _summary(oks)
 
@@ -537,6 +646,24 @@ def split_groups_for_remote(groups, timings, local_jobs=1, remote_jobs=1):
     local_keys = [k for s in shards[:l_bins] for k in s]
     remote_keys = [k for s in shards[l_bins:] for k in s]
     return local_keys, remote_keys
+
+
+def split_cases_for_remote(groups, timings, case_timings=None, local_jobs=1, remote_jobs=1):
+    """Splits e2e `groups` ({key: [case names]}) across local (`local_jobs` shards) and remote
+    (`remote_jobs` shards) using `plan_shard_cases` (which splits oversized multi-case groups when
+    it cuts makespan). Returns `(local_chunks, remote_chunks)` of `(key, [case_names])`."""
+    if remote_jobs <= 0 or (len(groups) <= 1 and sum(len(v) for v in groups.values()) <= 1):
+        return [(k, list(v)) for k, v in groups.items()], []
+    local_jobs = max(1, local_jobs)
+    shards, _ = plan_shard_cases(groups, local_jobs + remote_jobs, timings, case_timings)
+    if len(shards) <= 1:
+        return [c for s in shards for c in s], []
+    total = len(shards)
+    r_bins = max(1, min(total - 1, round(total * remote_jobs / (local_jobs + remote_jobs))))
+    l_bins = total - r_bins
+    local_chunks = [c for s in shards[:l_bins] for c in s]
+    remote_chunks = [c for s in shards[l_bins:] for c in s]
+    return local_chunks, remote_chunks
 
 
 def _remote_default_jobs(remote_name):
@@ -596,20 +723,23 @@ def _run_e2e_remote(groups, jobs, keep_server, remote_name):
     local_jobs = default_jobs() if jobs is None else jobs
     remote_jobs = _remote_default_jobs(remote_name)
     group_names = {k: [m.NAME for m in v] for k, v in groups.items()}
-    local_keys, remote_keys = split_groups_for_remote(
-        group_names, _load_timings(), local_jobs=local_jobs, remote_jobs=remote_jobs,
+    local_chunks, remote_chunks = split_cases_for_remote(
+        group_names, _load_timings(), _load_case_timings(),
+        local_jobs=local_jobs, remote_jobs=remote_jobs,
     )
-    if not remote_keys:
+    if not remote_chunks:
         say(f"only {len(groups)} e2e group; running locally without remote {remote_name}")
         return False
 
-    local_names = [m.NAME for key in local_keys for m in groups[key]]
-    remote_names = [m.NAME for key in remote_keys for m in groups[key]]
+    local_names = [name for _, ns in local_chunks for name in ns]
+    remote_names = [name for _, ns in remote_chunks for name in ns]
+    local_group_count = len({k for k, _ in local_chunks})
+    remote_group_count = len({k for k, _ in remote_chunks})
     cmds = _remote_e2e_commands(local_names, remote_names, remote_name, jobs=jobs,
                                 keep_server=keep_server)
     say(f"splitting {len(local_names) + len(remote_names)} e2e cases across local "
-        f"({len(local_names)} cases, {len(local_keys)} groups, -j {local_jobs}) and remote "
-        f"{remote_name} ({len(remote_names)} cases, {len(remote_keys)} groups, -j {remote_jobs})")
+        f"({len(local_names)} cases, {local_group_count} groups, -j {local_jobs}) and remote "
+        f"{remote_name} ({len(remote_names)} cases, {remote_group_count} groups, -j {remote_jobs})")
     lock = threading.Lock()
     procs = []
     try:
@@ -665,7 +795,7 @@ def e2e(names=(), keep_server=False, jobs=None, remote=None):
         return
     build.common("default", tests=False)
     asked = jobs
-    jobs = min(default_jobs() if jobs is None else jobs, len(groups))
+    jobs = min(default_jobs() if jobs is None else jobs, len(selected))
     if jobs > 1 and keep_server:
         if asked:
             say("--keep-server: running on one test server")
@@ -675,8 +805,11 @@ def e2e(names=(), keep_server=False, jobs=None, remote=None):
             "--mount): running on one test server")
         jobs = 1
     if jobs > 1:
-        _run_sharded(groups, jobs)
-        return
+        group_names = {k: [m.NAME for m in v] for k, v in groups.items()}
+        shards, load = plan_shard_cases(group_names, jobs, _load_timings(), _load_case_timings())
+        if len(shards) > 1:
+            _run_sharded(groups, jobs, shards=shards, load=load)
+            return
     record = {}
     results = os.environ.get(RESULTS_ENV)
     try:
@@ -686,7 +819,9 @@ def e2e(names=(), keep_server=False, jobs=None, remote=None):
         if results:  # A shard of a sharded run: its parent merges this and saves the times.
             pathlib.Path(results).write_text(json.dumps(record))
         else:
-            _save_timings(record.get("groups", {}))
+            case_timed = {c["name"]: float(c["seconds"]) for c in record.get("cases", [])
+                          if "seconds" in c}
+            _save_timings(record.get("groups", {}), case_timed)
 
 
 # ---- perf ---------------------------------------------------------------------------------------
