@@ -37,6 +37,7 @@ enum WakeKind : uint32_t {
   kWakeMana = 1u << 7,    // A `mana<N` watch.
   kWakeEnemyPlayer = 1u << 8,
   kWakeParty = 1u << 9,  // The party: fighting, a member died, healer oom.
+  kWakeSpellMiss = 1u << 10,
 };
 
 struct WakeTrigger {

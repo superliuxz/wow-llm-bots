@@ -4533,5 +4533,212 @@ TEST(BotLoopTest, PreemptionCancellationDoesNotMarkLlmUnhealthy) {
   EXPECT_TRUE(loop.llm_healthy());
 }
 
+TEST(BotLoopTest, InvalidPlanBackoffDoublesAndCapsAt120s) {
+  EXPECT_EQ(InvalidPlanBackoff(0), base::Seconds(10));
+  EXPECT_EQ(InvalidPlanBackoff(1), base::Seconds(10));
+  EXPECT_EQ(InvalidPlanBackoff(2), base::Seconds(20));
+  EXPECT_EQ(InvalidPlanBackoff(3), base::Seconds(40));
+  EXPECT_EQ(InvalidPlanBackoff(4), base::Seconds(80));
+  EXPECT_EQ(InvalidPlanBackoff(5), base::Seconds(120));
+  EXPECT_EQ(InvalidPlanBackoff(50), base::Seconds(120));
+}
+
+// Consecutive invalid plans back off exponentially (10 -> 20 -> 40 s), are not
+// reset by chat wakes, and reset cleanly on a valid plan or disconnect/logout.
+TEST(BotLoopTest, RepeatedInvalidPlansBackOffAndResetOnValidOrDisconnect) {
+  CannedBrain brain;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(), [](const pb::Command&) {});
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Tess", 1, t0);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+
+  // 1st invalid plan -> 10 s backoff (OnReply schedules from Now()).
+  brain.FinishReply("not a valid plan 1");
+  ASSERT_EQ(brain.size(), 0u);
+  loop.OnTick(base::TimeTicks::Now() + base::Seconds(9));
+  EXPECT_EQ(brain.size(), 0u);
+  loop.OnTick(base::TimeTicks::Now() + base::Seconds(11));
+  ASSERT_EQ(brain.size(), 1u);
+
+  // 2nd invalid plan -> 20 s backoff (does NOT retry at +15 s).
+  brain.FinishReply("not a valid plan 2");
+  ASSERT_EQ(brain.size(), 0u);
+  loop.OnTick(base::TimeTicks::Now() + base::Seconds(15));
+  EXPECT_EQ(brain.size(), 0u);
+  loop.OnTick(base::TimeTicks::Now() + base::Seconds(21));
+  ASSERT_EQ(brain.size(), 1u);
+
+  // 3rd invalid plan -> 40 s backoff (does NOT retry at +30 s).
+  brain.FinishReply("not a valid plan 3");
+  ASSERT_EQ(brain.size(), 0u);
+  loop.OnTick(base::TimeTicks::Now() + base::Seconds(30));
+  EXPECT_EQ(brain.size(), 0u);
+  loop.OnTick(base::TimeTicks::Now() + base::Seconds(41));
+  ASSERT_EQ(brain.size(), 1u);
+
+  // Valid plan resets backoff: a subsequent invalid plan retries at 10 s again.
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300");
+  loop.OnEvent(WhisperFrom("Tess", "Ally", "ping"), base::TimeTicks::Now());
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("not a valid plan after recovery");
+  loop.OnTick(base::TimeTicks::Now() + base::Seconds(11));
+  ASSERT_EQ(brain.size(), 1u);
+
+  // Adversarial counter-test: disconnect resets invalid-plan backoff cleanly.
+  brain.FinishReply("not a valid plan 2 before disconnect");
+  loop.OnConnectionChanged(false);
+  const base::TimeTicks t1 = base::TimeTicks::Now();
+  pb::Snapshot s2 = MakeLiveSnap("Tess", 2, t1);
+  AddKeep(&s2);
+  loop.OnSnapshot(s2, t1);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("not a valid plan after reconnect");
+  loop.OnTick(base::TimeTicks::Now() + base::Seconds(11));
+  EXPECT_EQ(brain.size(), 1u);
+}
+
+// Non-P0 wakes (e.g. healer low on mana, spell miss immune) during an in-flight
+// LLM call or active plan must NOT drop the in-flight reply or stop the running
+// plan, while P0 combat interrupts still stop the plan and supersede/cancel.
+TEST(BotLoopTest, NonCombatWakeDoesNotDropInFlightPlanOrStopRunner) {
+  CannedBrain brain;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { commands.push_back(cmd); });
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  auto make_party_snap = [&](uint32_t seq, base::TimeTicks at,
+                             float healer_mana_pct, bool in_combat) {
+    pb::Snapshot s = MakeLiveSnap("Aldric", seq, at, in_combat);
+    s.base.self.unit.group.emplace().role = pb::TANK;
+    pb::Unit& healer = s.ext.party.emplace().members.emplace_back();
+    healer.name = "Mirabel";
+    healer.group.emplace().online = true;
+    healer.group->in_range = true;
+    healer.group->role = pb::HEALER;
+    healer.power_pct = healer_mana_pct;
+    AddUnitAndOption(&s, "0x1", "Mottled Boar", false, false);
+    AddKeep(&s);
+    return s;
+  };
+
+  // Call #1 starts on first look.
+  loop.OnSnapshot(make_party_snap(1, t0, 80.0f, /*in_combat=*/false), t0);
+  ASSERT_EQ(brain.size(), 1u);
+
+  // While call #1 is in flight, a P1 party wake (healer low on mana) arrives.
+  loop.OnSnapshot(make_party_snap(2, t0 + base::Milliseconds(100), 20.0f,
+                                  /*in_combat=*/false),
+                  t0 + base::Milliseconds(100));
+  EXPECT_FALSE(brain.front_cancelled());
+  EXPECT_EQ(loop.queued(), 1u);
+
+  // Call #1 finishes: its plan MUST still be installed (not dropped!), and the
+  // queued P1 wake runs right after.
+  brain.FinishReply("do: 1\nexpect: 1\nwatch: none\nlook: 60");
+  ASSERT_EQ(commands.size(), 1u);
+  ASSERT_TRUE(commands[0].choose.has_value());
+  EXPECT_EQ(commands[0].choose->option, 1u);
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("healer Mirabel low on mana"),
+            std::string::npos);
+
+  // Call #2 keeps going; now a combat spell_miss (dodge) does NOT wake at all.
+  brain.FinishReply("do: 1\nexpect: 1\nwatch: none\nlook: 60");
+  ASSERT_EQ(brain.size(), 0u);
+  pb::Snapshot dodge_snap =
+      make_party_snap(3, t0 + base::Seconds(1), 20.0f, /*in_combat=*/true);
+  dodge_snap.base.self.spell_miss = pb::Self::SpellMiss{
+      .spell = "Heroic Strike",
+      .target = "Mottled Boar",
+      .reason = "dodge",
+      .seq = 1,
+  };
+  loop.OnSnapshot(dodge_snap, t0 + base::Seconds(1));
+  EXPECT_EQ(brain.size(), 0u);
+
+  // Adversarial counter-test: a genuine P0 combat interrupt (unexpected
+  // attacker while a call is in flight) STILL cancels/supersedes and stops the
+  // running plan.
+  pb::Snapshot immune_snap = dodge_snap;
+  immune_snap.seq = 4;
+  immune_snap.base.self.spell_miss = pb::Self::SpellMiss{
+      .spell = "Taunt",
+      .target = "Mottled Boar",
+      .reason = "immune",
+      .seq = 2,
+  };
+  loop.OnSnapshot(immune_snap, t0 + base::Seconds(2));
+  ASSERT_EQ(brain.size(), 1u);  // P2 wake from immune.
+
+  pb::Snapshot ambush = immune_snap;
+  ambush.seq = 5;
+  AddUnitAndOption(&ambush, "0x9", "Defias Cutpurse", false, false);
+  ambush.base.nearby.units.back().targeting_me = true;
+  loop.OnSnapshot(ambush, t0 + base::Seconds(2) + base::Milliseconds(100));
+  EXPECT_TRUE(brain.front_cancelled());
+  brain.FinishCancelled();
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("attacked by Defias Cutpurse"),
+            std::string::npos);
+}
+
+// Redundant rez wake: RESURRECT_OFFER does not wake the brain while playerbots
+// accepts the rez itself, and once alive the bot wakes once with "alive again"
+// (still seeing the prompt in recent events). Other prompts still wake.
+TEST(BotLoopTest, RedundantRezOfferDoesNotWakeBrainButAliveAgainDoes) {
+  CannedBrain brain;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(), [](const pb::Command&) {});
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot dead = MakeLiveSnap("Telda", 1, t0);
+  dead.base.self.state = pb::Self::DEAD_BODY;
+  AddKeep(&dead);
+  loop.OnSnapshot(dead, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300");
+  ASSERT_EQ(brain.size(), 0u);
+
+  // RESURRECT_OFFER arrives: must NOT wake the brain.
+  pb::ImmediateEvent rez_offer;
+  rez_offer.bot = "Telda";
+  rez_offer.event.prompt.emplace().kind = pb::PromptEvent::RESURRECT_OFFER;
+  loop.OnEvent(std::move(rez_offer), t0 + base::Seconds(1));
+  EXPECT_EQ(brain.size(), 0u);
+
+  // Playerbots accepts the rez -> next snapshot is ALIVE -> wakes ONCE with
+  // "alive again" and notes the rez offer in recent events.
+  pb::Snapshot alive = MakeLiveSnap("Telda", 2, t0 + base::Seconds(2));
+  AddKeep(&alive);
+  loop.OnSnapshot(alive, t0 + base::Seconds(2));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("Woken: alive again."),
+            std::string::npos);
+  EXPECT_NE(brain.front_request().user.find("prompt: resurrect offer"),
+            std::string::npos);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300");
+
+  // Adversarial counter-test: non-rez prompt (READY_CHECK) still wakes at P1.
+  pb::ImmediateEvent rc;
+  rc.bot = "Telda";
+  rc.event.prompt.emplace().kind = pb::PromptEvent::READY_CHECK;
+  loop.OnEvent(std::move(rc), t0 + base::Seconds(3));
+  ASSERT_EQ(brain.size(), 1u);
+  EXPECT_NE(brain.front_request().user.find("Woken: prompt: ready check."),
+            std::string::npos);
+}
+
 }  // namespace
 }  // namespace harness

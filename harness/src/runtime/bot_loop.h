@@ -115,6 +115,10 @@ using LogMessageFn = base::RepeatingCallback<void(const std::string&)>;
 // for the first, then 2, 4, 8, 16, 30, 30... seconds.
 base::TimeDelta StepRefusalBackoff(int refusals);
 
+// How long the retry after the `failures`-th consecutive invalid plan waits:
+// 10, 20, 40, 80, 120, 120... seconds.
+base::TimeDelta InvalidPlanBackoff(int failures);
+
 class BotLoop {
  public:
   BotLoop(BotLoopConfig config,
@@ -253,9 +257,6 @@ class BotLoop {
 
     bool has_ever_woken = false;
     Urgency queued_urgency = Urgency::kP2Routine;
-    // The queued wake is only for player chat: it doesn't supersede the plan
-    // of the call in flight.
-    bool queued_for_chat_only = false;
     base::scoped_refptr<LlmCancelHandle> in_flight_cancel;
     base::TimeTicks call_deadline;
     uint64_t call_timed_out_epoch = 0;
@@ -266,6 +267,9 @@ class BotLoop {
     // the wake is delayed (StepRefusalBackoff()) so a body that can't act
     // (dead, out of range) doesn't ask the brain again many times a second.
     int step_refusals = 0;
+    // Consecutive invalid plans since the last valid plan, fresh non-backoff
+    // wake, or session reset; delays retries via InvalidPlanBackoff().
+    int invalid_plan_retries = 0;
     // Consecutive order step failures/timeouts since the last completed order
     // step, normal look, or sustained quiet period.
     int order_wakes = 0;
@@ -416,14 +420,14 @@ class BotLoop {
                std::vector<std::string> events,
                std::vector<BotState::ObservedChat> chats,
                std::string outcome);
-  // `preserve_backoffs`: keep `step_refusals` and `order_wakes` intact (set
-  // for refusal retries, chat wakes, and order-wake backoff so chat spam or
-  // repeated refusals never clear refusal backoff).
+  // `preserve_backoffs`: keep `step_refusals`, `order_wakes`, and
+  // `invalid_plan_retries` intact (set for refusal/invalid-plan retries, chat
+  // wakes, and order-wake backoff so chat spam or repeated failures never clear
+  // backoff).
   void WakeBot(const std::string& bot,
                Urgency urgency,
                const std::string& reason,
-               bool preserve_backoffs = false,
-               bool for_chat = false);
+               bool preserve_backoffs = false);
   // Returns a closure that cancels the started call (empty if none started).
   base::OnceClosure StartBotCall(const std::string& bot,
                                  int slot,

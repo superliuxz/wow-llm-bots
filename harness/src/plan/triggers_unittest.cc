@@ -596,11 +596,13 @@ TEST(TriggersTest, FixatedMobOnAMemberDoesNotWakeTheTank) {
   EXPECT_EQ(t->reason, "loose mob Spark on Hunt");
 }
 
-// A spell miss wakes the caster once (solo or grouped), does not re-wake while
-// the same miss remains on screen, wakes again on a fresh miss sequence, and
-// never downgrades a simultaneous P0 combat wake.
+// An out-of-combat spell miss wakes the caster once per seq at P2Routine; in
+// combat, routine dodge/parry/resist/miss do not wake (avoiding wake storms),
+// while immune/evade still wake at P2Routine; simultaneous P0 combat wakes
+// always preserve P0 priority.
 TEST(TriggersTest, SpellMissWakesOncePerMissAndPreservesP0CombatPriority) {
-  // Solo caster.
+  // Solo out-of-combat caster (e.g. opener Sap): wakes at P2Routine once per
+  // seq.
   pb::Snapshot solo = BaseSnap();
   TriggerEvaluator solo_eval;
   EXPECT_FALSE(solo_eval.EvaluateSnapshot(solo));
@@ -614,7 +616,8 @@ TEST(TriggersTest, SpellMissWakesOncePerMissAndPreservesP0CombatPriority) {
   };
   std::optional<WakeTrigger> t = solo_eval.EvaluateSnapshot(miss1);
   ASSERT_TRUE(t);
-  EXPECT_EQ(t->urgency, Urgency::kP1Danger);
+  EXPECT_EQ(t->urgency, Urgency::kP2Routine);
+  EXPECT_EQ(t->kinds, kWakeSpellMiss);
   EXPECT_EQ(t->reason, "missed: Sap on Defias Cutpurse (dodge)");
 
   // Same miss still on screen on the next tick: no repeat wake.
@@ -626,11 +629,44 @@ TEST(TriggersTest, SpellMissWakesOncePerMissAndPreservesP0CombatPriority) {
   miss2.base.self.spell_miss->seq = 2;
   t = solo_eval.EvaluateSnapshot(miss2);
   ASSERT_TRUE(t);
-  EXPECT_EQ(t->urgency, Urgency::kP1Danger);
+  EXPECT_EQ(t->urgency, Urgency::kP2Routine);
   EXPECT_EQ(t->reason, "missed: Sap on Defias Cutpurse (dodge)");
 
+  // In combat: routine dodge/parry/resist/miss do NOT wake (prevents wake
+  // storms during playerbots' combat rotation).
+  pb::Snapshot combat = BaseSnap();
+  combat.base.self.in_combat = true;
+  TriggerEvaluator combat_eval;
+  EXPECT_FALSE(combat_eval.EvaluateSnapshot(combat));
+  uint32_t seq = 1;
+  for (const char* reason : {"dodge", "parry", "resist", "miss"}) {
+    pb::Snapshot m = combat;
+    m.base.self.spell_miss = pb::Self::SpellMiss{
+        .spell = "Heroic Strike",
+        .target = "Mottled Boar",
+        .reason = reason,
+        .seq = seq++,
+    };
+    EXPECT_FALSE(combat_eval.EvaluateSnapshot(m)) << reason;
+  }
+
+  // In combat: immune and evade DO wake at P2Routine.
+  for (const char* reason : {"immune", "evade"}) {
+    pb::Snapshot m = combat;
+    m.base.self.spell_miss = pb::Self::SpellMiss{
+        .spell = "Frostbolt",
+        .target = "Water Elemental",
+        .reason = reason,
+        .seq = seq++,
+    };
+    t = combat_eval.EvaluateSnapshot(m);
+    ASSERT_TRUE(t) << reason;
+    EXPECT_EQ(t->urgency, Urgency::kP2Routine);
+    EXPECT_EQ(t->kinds, kWakeSpellMiss);
+  }
+
   // Adversarial counter-test: grouped caster with simultaneous P0 combat wake
-  // (death) still gets P0 priority, never downgraded to P1.
+  // (death) still gets P0 priority, never downgraded to P2.
   pb::Snapshot grouped = BaseSnap();
   grouped.base.self.unit.group.emplace().role = pb::DPS;
   pb::Unit& ally = grouped.ext.party.emplace().members.emplace_back();
@@ -653,6 +689,27 @@ TEST(TriggersTest, SpellMissWakesOncePerMissAndPreservesP0CombatPriority) {
   EXPECT_EQ(t->urgency, Urgency::kP0Combat);
   EXPECT_NE(t->reason.find("missed: Polymorph on Defias Pillager (resist)"),
             std::string::npos);
+}
+
+// RESURRECT_OFFER prompt does not redundantly wake the brain (playerbots
+// accepts rez offers itself and `!was_alive_ && alive` wakes once alive),
+// while other timed prompts still wake at P1Danger.
+TEST(TriggersTest, ResurrectOfferPromptDoesNotWakeOtherPromptsStillDo) {
+  pb::Event rez;
+  rez.prompt.emplace().kind = pb::PromptEvent::RESURRECT_OFFER;
+  EXPECT_EQ(EvaluateEventTrigger(rez), std::nullopt);
+  EXPECT_EQ(DescribeEvent(rez), "prompt: resurrect offer");
+
+  // Adversarial counter-tests: other prompts still wake at P1Danger.
+  for (pb::PromptEvent::Kind kind :
+       {pb::PromptEvent::READY_CHECK, pb::PromptEvent::GROUP_INVITE,
+        pb::PromptEvent::SUMMON, pb::PromptEvent::LFG_PROPOSAL}) {
+    pb::Event ev;
+    ev.prompt.emplace().kind = kind;
+    const std::optional<WakeTrigger> trig = EvaluateEventTrigger(ev);
+    ASSERT_TRUE(trig);
+    EXPECT_EQ(trig->urgency, Urgency::kP1Danger);
+  }
 }
 
 // Tank debuffs on the other tank wake a tank bot on new debuff and stack

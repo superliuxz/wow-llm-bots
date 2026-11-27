@@ -186,6 +186,13 @@ std::optional<WakeTrigger> EvaluateEventTrigger(
     const pb::Event& event,
     const std::vector<Watch>& /*watches*/) {
   if (event.prompt) {
+    // Playerbots' DeadStrategy accepts resurrection offers itself (and the
+    // brain's auto_popups policy does too); waking on RESURRECT_OFFER is
+    // redundant because the bot wakes on `!was_alive_ && alive` ("alive again")
+    // once resurrected, while the prompt is still noted in recent events.
+    if (event.prompt->kind == pb::PromptEvent::RESURRECT_OFFER) {
+      return std::nullopt;
+    }
     return WakeTrigger{Urgency::kP1Danger, DescribeEvent(event)};
   }
   if (event.died) {
@@ -642,14 +649,20 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
     const bool is_new = !prev_spell_miss_ ||
                         (miss->seq != 0 ? miss->seq != prev_spell_miss_->seq
                                         : *miss != *prev_spell_miss_);
-    if (is_new) {
+    // In combat, routine dodge/parry/resist/miss from playerbots' rotation
+    // would cause wake storms and drop active plans; keep rendering them on
+    // screen when the brain looks, and only wake in combat for immune/evade
+    // (or any miss out of combat, e.g. a missed opener/CC like Sap).
+    const bool wakes_on_miss =
+        !in_combat || miss->reason == "immune" || miss->reason == "evade";
+    if (is_new && wakes_on_miss) {
       const std::string text =
           !miss->target.empty()
               ? base::StrCat({"missed: ", miss->spell, " on ", miss->target,
                               " (", miss->reason, ")"})
               : base::StrCat(
                     {"missed: ", miss->spell, " (", miss->reason, ")"});
-      Consider(&chosen, {Urgency::kP1Danger, text});
+      Consider(&chosen, {Urgency::kP2Routine, text, kWakeSpellMiss});
     }
   }
 

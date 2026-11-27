@@ -18,9 +18,6 @@ Live verification following the `70b0878` team-play P0 fixes:
 Team-play P1 gaps and selected P2 items from the `70b0878` review:
 
 ### Control seam (brain vs. playerbots)
-- **Wake storms drop plans:** Every spell miss (dodge/parry/resist) wakes brain at P1 and stops the
-  plan; any wake during an LLM call drops the reply (`harness/src/plan/triggers.cc:640-654`,
-  `bot_loop.cc:1299-1303,1991-1993`).
 - **Healer main-tank leash:** All healers leash to main tank (>34 yd or LoS every 1 s), breaking
   two-tank fights, Valithria, and spread positions (`bot_manager.cc:1060-1097,1153-1206`).
 - **Taunt ping-pong:** After brain taunts, playerbots' "lost aggro" reflex makes the old tank taunt
@@ -82,8 +79,6 @@ Team-play P1 gaps and selected P2 items from the `70b0878` review:
   never times out (`llm_brain_world_script.cc:658-661,710-714`, `leader_command.cc:31`).
 - **`act:` gated on group wakes:** `act:` lines are only allowed when wake reason starts with
   party/raid/leader (whispers can't trigger acts) (`prompt.cc:815-825`).
-- **Redundant rez wake & retry backoff:** Brain is still woken when playerbots accepts a rez
-  itself; invalid plans retry every 10 s with no backoff.
 - **Docs drift:** Out-of-date paths for triggers/scheduler; docs say standing orders run only in
   combat.
 

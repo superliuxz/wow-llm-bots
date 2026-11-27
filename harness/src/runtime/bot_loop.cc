@@ -1001,6 +1001,7 @@ void BotLoop::ResetBotSession(BotState* state, bool cancel_in_flight) {
   state->early_steps_dispatched = false;
   state->early_step_failed = false;
   state->step_refusals = 0;
+  state->invalid_plan_retries = 0;
   state->last_outcome.clear();
   state->order_wakes = 0;
   state->order_quiet_since = base::TimeTicks();
@@ -1338,8 +1339,17 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
     return;
   }
   if (trig && !trig_covered) {
-    state.runner.Stop();
-    state.look_deadline = base::TimeTicks();
+    // Only genuine interrupts (P0 combat/death/control/hp, returning alive, or
+    // watched enemy player nearby) abort the running plan immediately. Non-P0
+    // alerts (party state, spell misses, out-of-combat mana) wake the brain
+    // without stopping the active step while it decides.
+    const bool stops_plan =
+        trig->urgency == Urgency::kP0Combat ||
+        (trig->kinds & (kWakeAlive | kWakeEnemyPlayer)) != 0;
+    if (stops_plan) {
+      state.runner.Stop();
+      state.look_deadline = base::TimeTicks();
+    }
     WakeBot(bot, trig->urgency, trig->reason);
     return;
   }
@@ -1383,6 +1393,14 @@ base::TimeDelta StepRefusalBackoff(int refusals) {
   constexpr int kMaxSeconds = 30;
   const int shift = std::min(refusals - 1, 5);
   return base::Seconds(std::min(1 << shift, kMaxSeconds));
+}
+
+base::TimeDelta InvalidPlanBackoff(int failures) {
+  constexpr int kBaseSeconds = 10;
+  constexpr int kMaxSeconds = 120;
+  const int n = std::max(failures, 1);
+  const int shift = std::min(n - 1, 4);
+  return base::Seconds(std::min(kBaseSeconds << shift, kMaxSeconds));
 }
 
 void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
@@ -1542,17 +1560,19 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
   if (!trig) {
     return;
   }
-  // Player whispers and party/say chat must not abort a running plan mid-pull
-  // or clear refusal backoffs (A-M8); the brain wakes and can change course in
-  // its next plan if needed.
-  if (!is_player_chat) {
+  // Only P0 combat/emergency events abort a running plan immediately (step
+  // refusals already stopped the runner above). Player chat and non-P0 alerts
+  // (prompts, loot rolls, raid warnings) let the active step keep running
+  // while the brain wakes and decides whether to change course.
+  if (!is_player_chat && trig->urgency == Urgency::kP0Combat) {
     state.runner.Stop();
+    state.look_deadline = base::TimeTicks();
+  } else if (refusal) {
     state.look_deadline = base::TimeTicks();
   }
   if (state.latest_snapshot) {
     WakeBot(bot, trig->urgency, trig->reason,
-            /*preserve_backoffs=*/refusal || is_player_chat,
-            /*for_chat=*/is_player_chat);
+            /*preserve_backoffs=*/refusal || is_player_chat);
   } else if (std::find(state.pending_reasons.begin(),
                        state.pending_reasons.end(),
                        trig->reason) == state.pending_reasons.end()) {
@@ -1611,8 +1631,7 @@ void BotLoop::OnTick(base::TimeTicks now) {
       if (!state.pending_reasons.empty()) {
         // A rate-limited chat line, kept in pending_reasons: chat never stops
         // a running plan (A-M8).
-        WakeBot(bot, Urgency::kP3Chat, "", /*preserve_backoffs=*/true,
-                /*for_chat=*/true);
+        WakeBot(bot, Urgency::kP3Chat, "", /*preserve_backoffs=*/true);
         continue;
       }
     }
@@ -1631,14 +1650,12 @@ void BotLoop::OnTick(base::TimeTicks now) {
 void BotLoop::WakeBot(const std::string& bot,
                       Urgency urgency,
                       const std::string& reason,
-                      bool preserve_backoffs,
-                      bool for_chat) {
+                      bool preserve_backoffs) {
   BotState& state = bots_[bot];
-  state.queued_for_chat_only =
-      for_chat && (!state.has_queued_wake() || state.queued_for_chat_only);
   if (!preserve_backoffs) {
     state.step_refusals = 0;
     state.order_wakes = 0;
+    state.invalid_plan_retries = 0;
   }
   if (!reason.empty() &&
       std::find(state.pending_reasons.begin(), state.pending_reasons.end(),
@@ -1893,7 +1910,8 @@ void BotLoop::OnFirstLine(const std::string& bot,
   }
   BotState& state = it->second;
   if (!state.call_in_flight() || state.call_epoch != epoch ||
-      state.has_queued_wake() || !state.latest_snapshot) {
+      (state.has_queued_wake() && state.queued_urgency == Urgency::kP0Combat) ||
+      !state.latest_snapshot) {
     return;
   }
   const std::optional<std::vector<PlanStep>> steps =
@@ -1999,8 +2017,11 @@ void BotLoop::OnReply(const std::string& bot,
       Requeue(&state, std::move(asked_reasons), std::move(asked_events),
               std::move(asked_chats), std::move(asked_outcome));
     } else if (!plan) {
-      Log(base::StringPrintf("harness: %s invalid plan (%.0f ms)", bot.c_str(),
-                             decision.result.round_trip_ms));
+      const base::TimeDelta backoff =
+          InvalidPlanBackoff(++state.invalid_plan_retries);
+      Log(base::StringPrintf(
+          "harness: %s invalid plan (%.0f ms); retry in %.0f s", bot.c_str(),
+          decision.result.round_trip_ms, backoff.InSecondsF()));
       // The streamed first line already started steps: an invalid plan keeps
       // none of them (harness #12).
       if (state.early_steps_dispatched) {
@@ -2008,11 +2029,12 @@ void BotLoop::OnReply(const std::string& bot,
         state.runner.Stop();
         SendStopMoving(bot);
       }
-      state.look_deadline = now + base::Seconds(10);
+      state.look_deadline = now + backoff;
       Requeue(&state, std::move(asked_reasons), std::move(asked_events),
               std::move(asked_chats), std::move(asked_outcome));
     } else {
       RecordLlmSuccess();
+      state.invalid_plan_retries = 0;
       if (!plan->goal.empty()) {
         state.current_goal = plan->goal;
       }
@@ -2024,16 +2046,15 @@ void BotLoop::OnReply(const std::string& bot,
           bot.c_str(), decision.reason.c_str(), do_line.c_str(),
           decision.result.first_line_ms, decision.result.round_trip_ms,
           plan->look_s, decision.result.reply->prompt_tokens));
-      // Only install watches/steps if no newer surprise already superseded this
-      // call while it was in flight. When an early-dispatched step of this
-      // same call failed before the reply finished, still deliver say/tell and
-      // watches, and keep the refusal wake or backoff timer instead of
-      // requeueing the already-answered wake reasons.
-      // A wake queued only for chat doesn't supersede the plan: a human
-      // typing every few seconds must not keep the bot from ever installing
-      // one; the chat wake runs next and can change course.
+      // Only a queued P0 combat/emergency wake supersedes this in-flight reply
+      // and drops its steps/watches. Non-P0 wakes (chat, party status, prompts,
+      // routine alerts) must not cause wake storms that drop every reply: this
+      // plan still installs, and the queued wake runs next to adjust course.
+      // When an early-dispatched step of this same call failed before the reply
+      // finished, still deliver say/tell and watches, and keep the refusal wake
+      // or backoff timer instead of requeueing the already-answered reasons.
       const bool superseded =
-          state.has_queued_wake() && !state.queued_for_chat_only;
+          state.has_queued_wake() && state.queued_urgency == Urgency::kP0Combat;
       if ((!superseded || state.early_step_failed) && state.latest_snapshot) {
         state.triggers.SetPlanContext(
             plan->watches,
@@ -2688,10 +2709,11 @@ void BotLoop::FinishPlanActs(const std::string& bot,
   std::optional<BotState::PlanActs::HeldSteps> held =
       std::move(state->plan_acts.held);
   state->plan_acts = {};
-  // A newer decision on its way replaces the held steps (a chat-only wake
-  // doesn't: it never supersedes a plan).
+  // Only a queued P0 emergency wake replaces the held steps (non-P0 wakes do
+  // not supersede an active plan).
   if (!held || state->call_in_flight() ||
-      (state->has_queued_wake() && !state->queued_for_chat_only) ||
+      (state->has_queued_wake() &&
+       state->queued_urgency == Urgency::kP0Combat) ||
       !state->latest_snapshot) {
     return;
   }
