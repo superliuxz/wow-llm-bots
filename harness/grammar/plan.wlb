@@ -10,6 +10,7 @@ env PlanEnv {
   whisperers: names;    // who `tell` may answer (none: no tell line)
   hover_names: names;   // what `hover:` may name (none: no hover line)
   order_names: names;   // what `order:` lines may name (none: no order lines)
+  act_names: names;     // non-empty when a player's chat, ping, or trade may ask for `act:`
 }
 
 int   Option  1..options
@@ -69,6 +70,6 @@ lines Plan {
   order*7: orders:Order @needs(order_names)
       "<optional, up to 7 in priority order for mechanics in Your boss notes: <when> -> <act>[, then <act>]>";
   // Up to 3 order acts done once, at once: dispatched before the `do:` steps.
-  act?: acts:list<Act, ", then ", 1..3> @needs(order_names)
-      "<optional: up to 3 order acts a player asked for, e.g. to ping, then pet dismiss>";
+  act?: acts:list<Act, ", then ", 1..3> @needs(act_names)
+      "<omit unless a player asked for something no do: option does>";
 }

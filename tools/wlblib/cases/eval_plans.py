@@ -179,9 +179,9 @@ def check_case(case, got):
                     f"order for {needle!r} does not perform any of {case['must_order_act']!r} "
                     f"(orders: {matching})"
                 )
-    acts = got.get("acts", ())
-    if case.get("forbid_act") and acts:
-        problems.append(f"wrote unexpected acts: {acts}")
+    acts = reply_acts(got)
+    if acts and (case.get("forbid_act") or not (case.get("must_act_contain") or case.get("allow_act"))):
+        problems.append(f"wrote unasked act: {', '.join(acts)}")
     for needle in case.get("must_act_contain", ()):
         if not any(needle.lower() in a.lower() for a in acts):
             problems.append(f"no act mentions {needle!r} (acts: {acts or 'none'})")
@@ -224,8 +224,23 @@ def random_pass_rate(case):
 
 
 def act_line(got):
-    """The reply's `act:` line (done once, at once), or "": decide's JSON has no field for it."""
+    """The reply's `act:` line (done once, at once), or ""."""
+    acts = got.get("acts")
+    if acts:
+        return "act: " + ", then ".join(acts)
     return next((line for line in got.get("raw", "").splitlines() if line.startswith("act:")), "")
+
+
+def reply_acts(got):
+    """List of acts from `got["acts"]`, falling back to parsing `raw`'s `act:` line."""
+    acts = got.get("acts")
+    if acts:
+        return list(acts)
+    line = next((l for l in got.get("raw", "").splitlines() if l.startswith("act:")), "")
+    if not line:
+        return []
+    body = line.removeprefix("act:").strip()
+    return [part.strip() for part in body.split(", then ") if part.strip()] if body else []
 
 
 # The held-out check at the live harness's temperature (`wlb test eval --live`): the T=0 run is
@@ -319,10 +334,10 @@ def run_suite(cases, label=None):
         f"option scores {random_score:.1f}), "
         f"first line {med_first_ms:.0f} ms, total {med_ms:.0f} ms, "
         f"warm prompt_computed {med_comp:.0f} tok")
-    # Cases without `must_act_contain` shouldn't write an `act:` line (not scored yet:
-    # content/RULES.md says to write one only for a player's ask; this keeps the count in view).
-    asked_act = {c["name"] for c in cases if c.get("must_act_contain")}
-    unasked = [r["case"] for r in rows if act_line(r["got"]) and r["case"] not in asked_act]
+    # Cases without `must_act_contain` (or `allow_act`) fail check_case if they emit an `act:` line;
+    # keep the count visible in the suite summary.
+    asked_act = {c["name"] for c in cases if c.get("must_act_contain") or c.get("allow_act")}
+    unasked = [r["case"] for r in rows if reply_acts(r["got"]) and r["case"] not in asked_act]
     say(f"unasked act: lines: {len(unasked)}" + (f" ({', '.join(unasked)})" if unasked else ""))
     return {"label": label or "default", "passed": passed, "total": len(rows),
             "median_first_ms": med_first_ms, "median_ms": med_ms, "rows": rows}

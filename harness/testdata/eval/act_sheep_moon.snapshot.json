@@ -1,0 +1,200 @@
+{
+  "bot": "Loadc",
+  "seq": 1,
+  "time_ms": 1794793200000,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x00000000000004C0",
+        "name": "Loadc",
+        "kind": "PLAYER",
+        "level": 15,
+        "health_pct": 100.0,
+        "power_pct": 100.0,
+        "player": {
+          "class": "Mage"
+        },
+        "group": {
+          "subgroup": 1,
+          "online": true,
+          "in_range": true,
+          "role": "DPS"
+        }
+      },
+      "gender": "FEMALE",
+      "xp": 3400,
+      "xp_next": 11000,
+      "health": 200,
+      "health_max": 200,
+      "power_type": "MANA",
+      "power": 560,
+      "power_max": 560,
+      "state": "ALIVE",
+      "in_combat": false
+    },
+    "where": {
+      "map": "Ragefire Chasm",
+      "zone": "Ragefire Chasm",
+      "subzone": "",
+      "position": {
+        "x": -12.0,
+        "y": -28.0,
+        "z": -21.0
+      },
+      "facing": 1.57,
+      "in_instance": true
+    },
+    "nearby": {
+      "units": [
+        {
+          "guid": "0xF1300011110000A1",
+          "name": "Ragefire Trogg",
+          "rel": {
+            "dist_yd": 18.0,
+            "dir": "N",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -12.0,
+              "y": -10.0,
+              "z": -21.0
+            }
+          },
+          "kind": "NPC",
+          "level": 14,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "NORMAL",
+          "health_pct": 100.0,
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "IDLE"
+          }
+        },
+        {
+          "guid": "0xF1300011120000B2",
+          "name": "Ragefire Shaman",
+          "rel": {
+            "dist_yd": 16.0,
+            "dir": "NE",
+            "height": "LEVEL",
+            "in_los": true,
+            "position": {
+              "x": -4.0,
+              "y": -14.0,
+              "z": -21.0
+            }
+          },
+          "kind": "NPC",
+          "level": 14,
+          "level_color": "YELLOW",
+          "reaction": "HOSTILE",
+          "classification": "NORMAL",
+          "health_pct": 100.0,
+          "looks_like": "humanoid",
+          "size": "MEDIUM",
+          "detail": "NAMEPLATE",
+          "activity": {
+            "state": "IDLE"
+          },
+          "raid_marker": "MOON"
+        }
+      ],
+      "objects": []
+    }
+  },
+  "ext": {
+    "party": {
+      "leader": "Vorka",
+      "loot_method": "GROUP_LOOT",
+      "members": [
+        {
+          "guid": "0x0000000000000510",
+          "name": "Vorka",
+          "kind": "PLAYER",
+          "level": 15,
+          "health_pct": 100.0,
+          "power_pct": 0.0,
+          "target": "",
+          "player": {
+            "class": "Warrior"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": true,
+            "role": "TANK",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 5.0,
+            "dir": "N",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000004B0",
+          "name": "Loadb",
+          "kind": "PLAYER",
+          "level": 15,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Priest"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "HEALER",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 6.0,
+            "dir": "S",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        }
+      ]
+    },
+    "action_bars": {
+      "buttons": [
+        {
+          "id": 116,
+          "name": "Frostbolt"
+        },
+        {
+          "id": 118,
+          "name": "Polymorph"
+        }
+      ]
+    }
+  },
+  "options": [
+    {
+      "text": "Attack Ragefire Trogg (not pulled)",
+      "guid": "0xF1300011110000A1",
+      "kind": "ATTACK",
+      "name": "Ragefire Trogg"
+    },
+    {
+      "text": "Attack Ragefire Shaman (moon) (not pulled)",
+      "guid": "0xF1300011120000B2",
+      "kind": "ATTACK",
+      "name": "Ragefire Shaman"
+    },
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
+}

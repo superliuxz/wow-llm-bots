@@ -119,6 +119,41 @@ class RealCasesTest(unittest.TestCase):
         self.assertTrue(eval_plans.can_fail(
             next(c for c in eval_plans.load_cases(["trade_asked_to_open"]))))
 
+    def test_check_case_scores_unasked_act_as_miss(self):
+        base = {"valid": True, "steps": [{"option": 1, "times": 1, "kind": "keep doing what I'm doing",
+                                          "text": "Keep doing what I'm doing"}],
+                "look_s": 60, "goal": "", "tell_to": "", "tell": "", "open": [], "hover": "",
+                "orders": [], "acts": []}
+        plain = {"name": "routine_case", "reason": "plan done"}
+        # No act: passes.
+        self.assertEqual(eval_plans.check_case(plain, base), [])
+        # Unasked act via JSON `acts` field: scored as a miss.
+        problems = eval_plans.check_case(plain, {**base, "acts": ["target Mottled Boar"]})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("unasked act", problems[0])
+        # Unasked act via `raw` fallback when `acts` is omitted: also scored as a miss.
+        raw_only = {k: v for k, v in base.items() if k != "acts"}
+        raw_only["raw"] = "do: 1\nexpect: none\nwatch: none\nlook: 60\nact: jump"
+        problems_raw = eval_plans.check_case(plain, raw_only)
+        self.assertEqual(len(problems_raw), 1)
+        self.assertIn("jump", problems_raw[0])
+        # `allow_act: True` permits an optional act without requiring one.
+        allow = {"name": "optional_act", "reason": "plan done", "allow_act": True}
+        self.assertEqual(eval_plans.check_case(allow, base), [])
+        self.assertEqual(eval_plans.check_case(allow, {**base, "acts": ["jump"]}), [])
+        # `forbid_act: True` overrides even `allow_act`.
+        both = {**allow, "forbid_act": True}
+        self.assertTrue(eval_plans.check_case(both, {**base, "acts": ["jump"]}))
+
+    def test_repo_has_asking_act_cases_in_plain_run(self):
+        plain = {c["name"]: c for c in eval_plans.load_cases()}
+        for name in ("act_sheep_moon", "act_ping_go_there", "trade_asked_for_gold"):
+            self.assertIn(name, plain)
+            self.assertTrue(plain[name].get("must_act_contain"), name)
+            self.assertTrue(eval_plans.can_fail(plain[name]), name)
+            for suffix in (".snapshot.json", ".facts.json"):
+                self.assertTrue((eval_plans.EVAL_DIR / f"{name}{suffix}").exists(), name)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1800,7 +1800,7 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
     }
   }
   // A party member's minimap ping (MSG_MINIMAP_PING): "ping: Hele pinged 18
-  // yd NE", with its age once it is a few seconds old.
+  // yd NE (act: to ping)", with its age once it is a few seconds old.
   if (ext.minimap && ext.minimap->ping && !ext.minimap->ping->from.empty()) {
     const pb::Minimap::Ping& ping = *ext.minimap->ping;
     std::string line =
@@ -1808,6 +1808,7 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
     if (std::isfinite(ping.age_s) && ping.age_s >= 5.0f) {
       base::StrAppend(&line, {base::StringPrintf(" (%.0fs ago)", ping.age_s)});
     }
+    base::StrAppend(&line, {" (go there -> act: to ping)"});
     lines.push_back(std::move(line));
   }
   // The open trade window: "trade with Hele: they give Conjured Water x20

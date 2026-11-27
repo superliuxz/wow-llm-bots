@@ -392,6 +392,11 @@ TEST(PlanTest, ActLinesCarryAtMostThreeImmediateActs) {
       Accepts(ping, "order: ping within 3 -> back\nact: use Sap on ping"));
   // A pinger without order names doesn't turn `act:` on.
   EXPECT_FALSE(Accepts(PlanGrammar(1, {}, {}, {}, {"Hele"}), "act: to ping"));
+  // `allow_act = false` keeps `order:` enabled while omitting `act:`.
+  const std::string no_act = PlanGrammar(1, {}, {}, {"Sap"}, {}, {}, false);
+  EXPECT_TRUE(Accepts(no_act, "order: always -> jump"));
+  EXPECT_FALSE(Accepts(no_act, "act: jump"));
+  EXPECT_FALSE(Accepts(no_act, "order: always -> jump\nact: pet dismiss"));
 }
 
 TEST(PlanTest, TheGrammarOffersHoverOnlyForNamesOnScreen) {

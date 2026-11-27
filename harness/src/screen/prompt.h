@@ -64,6 +64,9 @@ struct PromptInput {
   // Who the bot has a trade window open with while its money > 0: `trade gold`
   // is offered in `act:` lines only while this isn't empty.
   std::vector<std::string> traders;
+  // True when a player's chat, minimap ping, or open trade may ask for a
+  // one-shot `act:` line; false omits `act:` from the grammar.
+  bool allow_act = false;
   int slot = -1;  // llama-server slot, or -1
   float temperature = 0.7f;
 };

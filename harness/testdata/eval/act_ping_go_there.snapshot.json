@@ -1,0 +1,137 @@
+{
+  "bot": "Loadb",
+  "seq": 1,
+  "time_ms": 1794793200000,
+  "base": {
+    "self": {
+      "unit": {
+        "guid": "0x00000000000004B0",
+        "name": "Loadb",
+        "kind": "PLAYER",
+        "level": 15,
+        "health_pct": 100.0,
+        "power_pct": 100.0,
+        "player": {
+          "class": "Priest"
+        },
+        "group": {
+          "subgroup": 1,
+          "online": true,
+          "in_range": true,
+          "role": "HEALER"
+        }
+      },
+      "gender": "FEMALE",
+      "xp": 3400,
+      "xp_next": 11000,
+      "health": 210,
+      "health_max": 210,
+      "power_type": "MANA",
+      "power": 540,
+      "power_max": 540,
+      "state": "ALIVE",
+      "in_combat": false
+    },
+    "where": {
+      "map": "Ragefire Chasm",
+      "zone": "Ragefire Chasm",
+      "subzone": "",
+      "position": {
+        "x": -12.0,
+        "y": -28.0,
+        "z": -21.0
+      },
+      "facing": 1.57,
+      "in_instance": true
+    },
+    "nearby": {
+      "units": [],
+      "objects": []
+    }
+  },
+  "ext": {
+    "party": {
+      "leader": "Vorka",
+      "loot_method": "GROUP_LOOT",
+      "members": [
+        {
+          "guid": "0x0000000000000510",
+          "name": "Vorka",
+          "kind": "PLAYER",
+          "level": 15,
+          "health_pct": 100.0,
+          "power_pct": 0.0,
+          "target": "",
+          "player": {
+            "class": "Warrior"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": true,
+            "role": "TANK",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 4.0,
+            "dir": "N",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        },
+        {
+          "guid": "0x00000000000004C0",
+          "name": "Loadc",
+          "kind": "PLAYER",
+          "level": 15,
+          "health_pct": 100.0,
+          "power_pct": 100.0,
+          "target": "",
+          "player": {
+            "class": "Mage"
+          },
+          "group": {
+            "subgroup": 1,
+            "leader": false,
+            "role": "DPS",
+            "online": true,
+            "in_range": true,
+            "aggro": false
+          },
+          "rel": {
+            "dist_yd": 6.0,
+            "dir": "W",
+            "height": "LEVEL",
+            "in_los": true
+          },
+          "detail": "NAMEPLATE"
+        }
+      ]
+    },
+    "minimap": {
+      "ping": {
+        "from": "Vorka",
+        "rel": {
+          "dist_yd": 18.0,
+          "dir": "NE",
+          "height": "LEVEL",
+          "in_los": true,
+          "position": {
+            "x": 1.0,
+            "y": -15.0,
+            "z": -21.0
+          }
+        },
+        "age_s": 2.0
+      }
+    }
+  },
+  "options": [
+    {
+      "text": "Keep doing what I'm doing",
+      "kind": "KEEP"
+    }
+  ]
+}

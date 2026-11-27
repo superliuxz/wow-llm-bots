@@ -58,9 +58,6 @@ Guild Wars heroes):
 
 ## Next (multi-session depth & architecture)
 
-- **`act:` eval coverage:** No eval case asks for an `act:` (e.g. party `"sheep moon"`, a ping
-  plus `"go there"`), and the eval only counts unasked `act:` lines (1 of 59 at T=0) without
-  scoring them. Add asking cases, then score unasked acts as misses.
 - **Short-term per-player memory & richer personas:** Store the last N exchanges per player
   (source-tagged so player chat never injects trusted instructions) and add more identities.
 - **Latency & world-thread polish:** Measure 4 Hz combat snapshot cost at raid scale (build lighter

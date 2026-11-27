@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -424,6 +425,45 @@ TEST(PromptTest, AnOpenTradeWithMoneyOffersTradeGoldInTheGrammar) {
   EXPECT_EQ(
       BuildPlanRequest(closed, SampleScreen()).grammar.find("\"trade gold \""),
       std::string::npos);
+}
+
+TEST(PromptTest, ActGrammarIsOfferedOnlyForChatPingOrOpenTrade) {
+  wlb::snapshot::Snapshot snap;
+  snap.bot = "Tess";
+  PromptAssemblyContext ctx;
+  ctx.extra_order_names = {"Polymorph", "Defile"};
+  // Routine solo/combat wake: `order:` is offered, `act:` is omitted.
+  ctx.wake_reason = "entered combat";
+  const PromptInput combat = AssemblePromptInput(ctx, snap);
+  EXPECT_FALSE(combat.allow_act);
+  const std::string combat_g = BuildPlanRequest(combat, SampleScreen()).grammar;
+  EXPECT_NE(combat_g.find("\\norder: "), std::string::npos);
+  EXPECT_EQ(combat_g.find("\\nact: "), std::string::npos);
+  // Party chat wake: `act:` is offered.
+  ctx.wake_reason = "party from Vorka: Tess sheep moon";
+  const PromptInput chat = AssemblePromptInput(ctx, snap);
+  EXPECT_TRUE(chat.allow_act);
+  EXPECT_NE(BuildPlanRequest(chat, SampleScreen()).grammar.find("\\nact: "),
+            std::string::npos);
+  // Minimap ping without chat wake: `act:` is offered.
+  ctx.wake_reason = "plan done";
+  snap.ext.minimap.emplace().ping.emplace().from = "Vorka";
+  const PromptInput ping = AssemblePromptInput(ctx, snap);
+  EXPECT_TRUE(ping.allow_act);
+  EXPECT_NE(BuildPlanRequest(ping, SampleScreen()).grammar.find("\\nact: "),
+            std::string::npos);
+  // Group chat event on snapshot without chat wake reason: `act:` is offered.
+  snap.ext.minimap.reset();
+  snap.ext.party.emplace().leader = "Vorka";
+  wlb::snapshot::Event ev;
+  ev.chat.emplace().from = "Vorka";
+  snap.events.push_back(std::move(ev));
+  EXPECT_TRUE(AssemblePromptInput(ctx, snap).allow_act);
+  // Solo whisper wake without ping/trade: `act:` is omitted.
+  snap.ext.party.reset();
+  snap.events.clear();
+  ctx.wake_reason = "whisper from Gatda: meet me at the bank?";
+  EXPECT_FALSE(AssemblePromptInput(ctx, snap).allow_act);
 }
 
 TEST(PromptTest, AFullSpellsLineYieldsToOptionsAndCoreLinesUnderTightBudget) {

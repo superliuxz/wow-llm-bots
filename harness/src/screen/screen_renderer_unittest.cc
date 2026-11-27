@@ -1168,7 +1168,8 @@ TEST(ScreenRendererTest, PartyPingShowsWhoAndWhereWithAgeWhenOld) {
   ping.rel.dir = pb::NE;
   ping.age_s = 1.5f;
   const Screen fresh = RenderScreen(snapshot);
-  EXPECT_NE(fresh.text.find("\nping: Hele pinged 18 yd NE\n"),
+  EXPECT_NE(fresh.text.find(
+                "\nping: Hele pinged 18 yd NE (go there -> act: to ping)\n"),
             std::string::npos)
       << fresh.text;
   // Not an option: the fixed options are unchanged.
@@ -1178,14 +1179,16 @@ TEST(ScreenRendererTest, PartyPingShowsWhoAndWhereWithAgeWhenOld) {
   ping.age_s = 12.4f;
   ping.rel.height = pb::Relative::BELOW;
   EXPECT_NE(RenderScreen(snapshot).text.find(
-                "\nping: Hele pinged 18 yd NE, below (12s ago)\n"),
+                "\nping: Hele pinged 18 yd NE, below (12s ago) (go there -> "
+                "act: to ping)\n"),
             std::string::npos)
       << RenderScreen(snapshot).text;
   // Broken numbers are safe; a ping at the bot's feet reads "here".
   ping.age_s = std::numeric_limits<float>::quiet_NaN();
   ping.rel = {};
   ping.rel.dir = pb::HERE;
-  EXPECT_NE(RenderScreen(snapshot).text.find("\nping: Hele pinged here\n"),
+  EXPECT_NE(RenderScreen(snapshot).text.find(
+                "\nping: Hele pinged here (go there -> act: to ping)\n"),
             std::string::npos)
       << RenderScreen(snapshot).text;
   // A ping with no sender name is never rendered.

@@ -63,11 +63,12 @@ Party rule, only when `me:` says `party member` or `party leader` (skip when sol
   someone ruining the run.
 - Questing together: share/accept quests, help on `help <name> with <quest>`, wait before escorts.
 - Marks: kill `(skull)` first, then `(cross)`. Leave CC-marked mobs (moon, square, ...) alone
-  unless `Crowd-control <mob> (<mark>): <spell>` is yours; on `missed:` (not `immune`), recast it.
-- `leader said: <command> (applied: ...)` means your body already obeyed (wait, follow, attack,
-  kill <mark>, go there, pull back / los, pull, drink, mount): keep to it and reply briefly if
-  at all. For `heal me`, heal them if able. Use `Wait here` / `Follow the party leader again`
-  and `Let <name> tank` / `Tank for the group again` when roles or positioning change.
+  unless `Crowd-control` is offered; on `missed:`, recast it. If party chat asks to CC a mark
+  (`"sheep moon"`), write `act: use <spell> on marker <mark>`.
+- `leader said: <cmd> (applied: ...)` means your body already obeyed: keep to it and reply briefly
+  if at all. If party chat asks `"go there"` with `ping:`, write `act: to ping`. For `heal me`,
+  heal them if able. Use `Wait here` / `Follow the party leader again` and `Let <name> tank` /
+  `Tank for the group again` when roles or positioning change.
 - `in an instance`: never `Use Hearthstone` or `Leave group` unless the player you came with
   left or went offline (`Teleport out of LFG dungeon` if offered, else `Leave group`).
 
@@ -93,7 +94,7 @@ close: <optional: panels to close>
 hover: <optional: the name of an item or quest on your screen whose tooltip isn't shown yet, to read it; you are woken again>
 orders: <optional: write 'none' to clear active standing orders>
 order: <optional, up to 7 in priority order for mechanics in Your boss notes: <when> -> <act>[, then <act>]>
-act: <optional: up to 3 order acts a player asked for, e.g. to ping, then pet dismiss>
+act: <omit unless a player asked for something no do: option does>
 
 Example:
 do: 5

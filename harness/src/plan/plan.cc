@@ -32,12 +32,14 @@ g::rt::Env PlanEnv(int option_count,
                    std::vector<std::string> hover_names = {},
                    std::vector<std::string> order_names = {},
                    std::vector<std::string> pingers = {},
-                   std::vector<std::string> traders = {}) {
+                   std::vector<std::string> traders = {},
+                   std::vector<std::string> act_names = {}) {
   return {.names = {{"whisperers", std::move(tell_names)},
                     {"hover_names", std::move(hover_names)},
                     {"order_names", std::move(order_names)},
                     {"pingers", std::move(pingers)},
-                    {"traders", std::move(traders)}},
+                    {"traders", std::move(traders)},
+                    {"act_names", std::move(act_names)}},
           .counts = {{"options", option_count}}};
 }
 
@@ -127,16 +129,20 @@ std::string PlanGrammar(int option_count,
                         const std::vector<std::string>& hover_names,
                         const std::vector<std::string>& order_names,
                         const std::vector<std::string>& pingers,
-                        const std::vector<std::string>& traders) {
+                        const std::vector<std::string>& traders,
+                        bool allow_act) {
   // A screen always has at least "Keep doing what I'm doing"; an empty
   // alternative would be an invalid grammar (llama-server rejects it).
   // No order names, no `order:` or `act:` lines (OrderGrammar): orders stay
   // off until the module can carry acts out.
   const bool orders_on = !OrderGrammar(order_names).empty();
+  const std::vector<std::string> active_order_names =
+      orders_on ? order_names : std::vector<std::string>{};
+  const std::vector<std::string> active_act_names =
+      (orders_on && allow_act) ? order_names : std::vector<std::string>{};
   const std::string rules = g::PlanGrammar(
       "Plan", PlanEnv(std::max(option_count, 1), tell_names, hover_names,
-                      orders_on ? order_names : std::vector<std::string>{},
-                      pingers, traders));
+                      active_order_names, pingers, traders, active_act_names));
   return base::StrCat({"root ::= ", g::PlanRuleName("Plan"), "\n", rules});
 }
 
@@ -173,8 +179,8 @@ std::optional<Plan> ParsePlan(std::string_view text,
       return std::nullopt;
     }
   }
-  const std::optional<g::Plan> parsed =
-      g::ParsePlan(text, PlanEnv(option_count, {}, {}, order_names));
+  const std::optional<g::Plan> parsed = g::ParsePlan(
+      text, PlanEnv(option_count, {}, {}, order_names, {}, {}, order_names));
   if (!parsed) {
     return std::nullopt;
   }

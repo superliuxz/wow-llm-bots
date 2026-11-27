@@ -1065,6 +1065,29 @@
     ]
   },
   {
+    "name": "act_sheep_moon",
+    "source": "built (M8.1 act: eval coverage)",
+    "reason": "party from Vorka: Loadc sheep moon",
+    "summary": "in Ragefire Chasm out of combat: mage Loadc has Polymorph on bars; leader Vorka asks in party chat to sheep moon (Ragefire Shaman); no Crowd-control option is offered",
+    "rule": "sheeps the moon-marked Ragefire Shaman via `act:` (`use Polymorph ...`) and never attacks the moon-marked Shaman",
+    "must_act_contain": [
+      "use Polymorph"
+    ],
+    "forbid_texts": [
+      "Attack Ragefire Shaman"
+    ]
+  },
+  {
+    "name": "act_ping_go_there",
+    "source": "built (M8.1 act: eval coverage)",
+    "reason": "party from Vorka: go there",
+    "summary": "in Ragefire Chasm out of combat: leader Vorka pings 18 yd NE and says 'go there' in party chat; no numbered option moves to the ping",
+    "rule": "moves to the ping via `act: to ping`",
+    "must_act_contain": [
+      "to ping"
+    ]
+  },
+  {
     "name": "held_trade_healer_between_pulls",
     "source": "built for the held-out split (4c-rest)",
     "held_out": true,
