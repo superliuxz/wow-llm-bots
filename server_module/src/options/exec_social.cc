@@ -234,225 +234,10 @@ std::vector<uint8_t> SlotsFor(Player* bot, uint32_t inventory_type) {
   }
 }
 
-const char* ArmorTypeName(uint32_t subclass) {
-  switch (subclass) {
-    case ITEM_SUBCLASS_ARMOR_CLOTH:
-      return "cloth";
-    case ITEM_SUBCLASS_ARMOR_LEATHER:
-      return "leather";
-    case ITEM_SUBCLASS_ARMOR_MAIL:
-      return "mail";
-    case ITEM_SUBCLASS_ARMOR_PLATE:
-      return "plate";
-    default:
-      return nullptr;
-  }
-}
-
-// The heaviest body armor the bot can wear (its class's main armor type).
-uint32_t BestArmorSubclass(Player* bot) {
-  if (bot->HasSkill(SKILL_PLATE_MAIL)) {
-    return ITEM_SUBCLASS_ARMOR_PLATE;
-  }
-  if (bot->HasSkill(SKILL_MAIL)) {
-    return ITEM_SUBCLASS_ARMOR_MAIL;
-  }
-  if (bot->HasSkill(SKILL_LEATHER)) {
-    return ITEM_SUBCLASS_ARMOR_LEATHER;
-  }
-  return ITEM_SUBCLASS_ARMOR_CLOTH;
-}
-
-// "agility, stamina, spell power" (the stats a player reads first).
-std::string PrimaryStats(const ItemTemplate* proto) {
-  std::string out;
-  const auto add = [&out](const char* name) {
-    if (out.find(name) == std::string::npos) {
-      out += out.empty() ? name : std::string(", ") + name;
-    }
-  };
-  for (uint32_t i = 0; i < proto->StatsCount && i < MAX_ITEM_PROTO_STATS; ++i) {
-    if (proto->ItemStat[i].ItemStatValue <= 0) {
-      continue;
-    }
-    switch (proto->ItemStat[i].ItemStatType) {
-      case ITEM_MOD_STRENGTH:
-        add("strength");
-        break;
-      case ITEM_MOD_AGILITY:
-        add("agility");
-        break;
-      case ITEM_MOD_INTELLECT:
-        add("intellect");
-        break;
-      case ITEM_MOD_SPIRIT:
-        add("spirit");
-        break;
-      case ITEM_MOD_STAMINA:
-        add("stamina");
-        break;
-      case ITEM_MOD_SPELL_POWER:
-        add("spell power");
-        break;
-      case ITEM_MOD_ATTACK_POWER:
-      case ITEM_MOD_RANGED_ATTACK_POWER:
-        add("attack power");
-        break;
-      case ITEM_MOD_MANA_REGENERATION:
-        add("mp5");
-        break;
-      case ITEM_MOD_DEFENSE_SKILL_RATING:
-        add("defense");
-        break;
-      case ITEM_MOD_DODGE_RATING:
-        add("dodge");
-        break;
-      case ITEM_MOD_PARRY_RATING:
-        add("parry");
-        break;
-      case ITEM_MOD_BLOCK_RATING:
-      case ITEM_MOD_BLOCK_VALUE:
-        add("block");
-        break;
-      case ITEM_MOD_EXPERTISE_RATING:
-        add("expertise");
-        break;
-      case ITEM_MOD_ARMOR_PENETRATION_RATING:
-        add("armor pen");
-        break;
-      default:
-        break;
-    }
-  }
-  return out;
-}
-
-ItemStatFlags ExtractItemStatFlags(const ItemTemplate* proto) {
-  ItemStatFlags flags;
-  if (!proto) {
-    return flags;
-  }
-  for (uint32_t i = 0; i < proto->StatsCount && i < MAX_ITEM_PROTO_STATS; ++i) {
-    if (proto->ItemStat[i].ItemStatValue <= 0) {
-      continue;
-    }
-    switch (proto->ItemStat[i].ItemStatType) {
-      case ITEM_MOD_STRENGTH:
-        flags.strength = true;
-        break;
-      case ITEM_MOD_AGILITY:
-        flags.agility = true;
-        break;
-      case ITEM_MOD_INTELLECT:
-        flags.intellect = true;
-        break;
-      case ITEM_MOD_SPIRIT:
-        flags.spirit = true;
-        break;
-      case ITEM_MOD_STAMINA:
-        flags.stamina = true;
-        break;
-      case ITEM_MOD_SPELL_POWER:
-        flags.spell_power = true;
-        break;
-      case ITEM_MOD_ATTACK_POWER:
-      case ITEM_MOD_RANGED_ATTACK_POWER:
-        flags.attack_power = true;
-        break;
-      case ITEM_MOD_MANA_REGENERATION:
-        flags.mp5 = true;
-        break;
-      case ITEM_MOD_DEFENSE_SKILL_RATING:
-      case ITEM_MOD_DODGE_RATING:
-      case ITEM_MOD_PARRY_RATING:
-      case ITEM_MOD_BLOCK_RATING:
-      case ITEM_MOD_BLOCK_VALUE:
-        flags.tank_avoidance = true;
-        break;
-      case ITEM_MOD_EXPERTISE_RATING:
-      case ITEM_MOD_ARMOR_PENETRATION_RATING:
-        flags.melee_dps = true;
-        break;
-      default:
-        break;
-    }
-  }
-  return flags;
-}
-
-LootStatProfile BotLootStatProfile(Player* bot) {
-  const bool has_talents =
-      bot->GetFreeTalentPoints() < bot->CalculateTalentsPoints();
-  return LootStatProfileForSpec(
-      bot->getClass(), AiFactory::GetPlayerSpecTab(bot), has_talents,
-      PlayerbotAI::IsTank(bot), PlayerbotAI::IsHeal(bot));
-}
-
-std::string RollItemFacts(Player* bot, const ItemTemplate* proto) {
-  std::string out = "ilvl " + std::to_string(proto->ItemLevel);
-  if (proto->Bonding == BIND_WHEN_EQUIPPED) {
-    out += ", BoE";
-  }
-  const std::vector<uint8_t> slots = SlotsFor(bot, proto->InventoryType);
-  if (slots.empty()) {
-    return out + ", not gear";
-  }
-  if (const std::string stats = PrimaryStats(proto); !stats.empty()) {
-    out += ", " + stats;
-  }
-  if (proto->Class == ITEM_CLASS_ARMOR &&
-      proto->InventoryType != INVTYPE_CLOAK) {
-    if (const char* type = ArmorTypeName(proto->SubClass)) {
-      out += std::string(", ") + type;
-      const uint32_t best = BestArmorSubclass(bot);
-      if (proto->SubClass != best) {
-        out += std::string(" (you wear ") + ArmorTypeName(best) + ")";
-      }
-    }
-  }
-  if (bot->CanUseItem(proto) != EQUIP_ERR_OK) {
-    return out + ", you can't use it";
-  }
-  const LootStatProfile profile = BotLootStatProfile(bot);
-  const StatFit stat_fit =
-      EvaluateStatFit(profile, bot->getClass(), ExtractItemStatFlags(proto));
-  const bool off_spec = stat_fit == StatFit::kMismatch ||
-                        (proto->InventoryType == INVTYPE_SHIELD &&
-                         IsShieldDisallowedForProfile(profile));
-  uint32_t worn = UINT32_MAX;
-  bool empty_slot = false;
-  for (const uint8_t slot : slots) {
-    const Item* item = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
-    const ItemTemplate* p = item ? item->GetTemplate() : nullptr;
-    if (!p) {
-      empty_slot = true;
-      break;
-    }
-    worn = std::min(worn, p->ItemLevel);
-  }
-  if (off_spec) {
-    if (empty_slot) {
-      return out + ", usable, off-spec stats (empty slot)";
-    }
-    return out + ", usable, off-spec stats (you wear ilvl " +
-           std::to_string(worn) + ")";
-  }
-  if (empty_slot) {
-    return out + ", usable, upgrade (empty slot)";
-  }
-  if (proto->ItemLevel > worn) {
-    return out + ", usable, upgrade over ilvl " + std::to_string(worn);
-  }
-  return out + ", usable, not an upgrade (you wear ilvl " +
-         std::to_string(worn) + ")";
-}
-
 // The trade window's choices while it is open (accept, cancel, put up one
 // more bag item), else a trade with each party member close enough. Only
 // what the server would allow: the brain decides what to give and whether
 // the trade is fair.
-constexpr size_t kMaxTradeItemOptions = 8;
-
 void CollectTradeActions(Player* bot,
                          std::vector<pb::OptionFacts_Action>* out) {
   if (!bot->IsAlive()) {
@@ -475,28 +260,26 @@ void CollectTradeActions(Player* bot,
     if (!slot_free) {
       return;
     }
-    // One option per kind of item (its first stack), in bag order.
-    std::vector<uint32_t> offered;
+    std::vector<TradeBagItem> bag_items;
     for (const BagSlotItem& b : BagItems(bot)) {
-      if (offered.size() >= kMaxTradeItemOptions) {
-        break;
-      }
       const ItemTemplate* proto = b.item->GetTemplate();
-      if (!proto || mine->HasItem(b.item->GetGUID()) ||
-          !b.item->CanBeTraded(false, true) ||
-          b.item->IsBindedNotWith(trader) ||
-          std::find(offered.begin(), offered.end(), proto->ItemId) !=
-              offered.end()) {
+      if (!proto) {
         continue;
       }
-      offered.push_back(proto->ItemId);
-      const uint32_t count = b.item->GetCount();
-      out->push_back(
-          {base::StringPrintf("trade:put:%u:%u:%u", b.bag, b.slot,
-                              proto->ItemId),
-           "Put " + proto->Name1 +
-               (count > 1 ? " x" + std::to_string(count) : std::string()) +
-               " in the trade"});
+      TradeBagItem tbi;
+      tbi.bag = b.bag;
+      tbi.slot = b.slot;
+      tbi.item_id = proto->ItemId;
+      tbi.name = proto->Name1;
+      tbi.count = b.item->GetCount();
+      tbi.quality = static_cast<uint8_t>(proto->Quality);
+      tbi.already_in_trade = mine->HasItem(b.item->GetGUID());
+      tbi.can_be_traded = b.item->CanBeTraded(false, true);
+      tbi.bound_not_with_trader = b.item->IsBindedNotWith(trader);
+      bag_items.push_back(std::move(tbi));
+    }
+    for (TradeOfferOption& opt : SelectTradeItemOffers(slot_free, bag_items)) {
+      out->push_back({std::move(opt.guid), std::move(opt.label)});
     }
     return;
   }
@@ -520,6 +303,67 @@ void CollectTradeActions(Player* bot,
 
 }  // namespace
 
+void SyncPendingRollTimers(Player* bot) {
+  if (!bot || !bot->IsInWorld()) {
+    return;
+  }
+  const uint64_t bot_key = bot->GetGUID().GetRawValue();
+  Group* group = bot->GetGroup();
+  if (!group) {
+    BotSessionRegistry::Instance().WithSession(
+        bot_key, [](BotSession& s) { s.pending_rolls_seen.clear(); });
+    return;
+  }
+  const uint64_t now_ms = static_cast<uint64_t>(
+      (base::TimeTicks::Now() - base::TimeTicks()).InMilliseconds());
+  std::vector<RollKey> active_keys;
+  for (const Roll* roll : group->GetRolls()) {
+    if (!roll) {
+      continue;
+    }
+    auto it = roll->playerVote.find(bot->GetGUID());
+    if (it == roll->playerVote.end() || it->second != NOT_EMITED_YET) {
+      continue;
+    }
+    active_keys.push_back(
+        RollKey{roll->itemGUID.GetRawValue(), roll->itemSlot});
+  }
+  BotSessionRegistry::Instance().WithSession(bot_key, [&](BotSession& s) {
+    PrunePendingRolls(&s.pending_rolls_seen, active_keys);
+    for (const RollKey& key : active_keys) {
+      RecordAndGetRollElapsedMs(&s.pending_rolls_seen, key, now_ms);
+    }
+  });
+}
+
+bool IsRollDeferredForHuman(Player* bot, const Roll& roll) {
+  if (!bot || !bot->IsInWorld()) {
+    return false;
+  }
+  bool human_pending_vote = false;
+  for (const auto& [guid, vote] : roll.playerVote) {
+    if (guid == bot->GetGUID() || vote != NOT_EMITED_YET) {
+      continue;
+    }
+    Player* p = ObjectAccessor::FindConnectedPlayer(guid);
+    if (p && IsHumanPlayer(p)) {
+      human_pending_vote = true;
+      break;
+    }
+  }
+  if (!human_pending_vote) {
+    return false;
+  }
+  const uint64_t now_ms = static_cast<uint64_t>(
+      (base::TimeTicks::Now() - base::TimeTicks()).InMilliseconds());
+  const RollKey key{roll.itemGUID.GetRawValue(), roll.itemSlot};
+  const uint64_t elapsed_ms = BotSessionRegistry::Instance().WithSession(
+      bot->GetGUID().GetRawValue(), [&](BotSession& s) {
+        return RecordAndGetRollElapsedMs(&s.pending_rolls_seen, key, now_ms);
+      });
+  return ShouldDeferRollForHuman(human_pending_vote, elapsed_ms);
+}
+
 void CollectGroupAndUpkeepActions(Player* bot,
                                   const pb::Snapshot& snapshot,
                                   std::vector<pb::OptionFacts_Action>* out) {
@@ -528,7 +372,9 @@ void CollectGroupAndUpkeepActions(Player* bot,
     return;
   }
 
-  // 1. Need / Greed / Pass loot rolls.
+  // 1. Need / Greed / Pass loot rolls (deferred for 10 s while an eligible
+  // connected human member in the roll hasn't voted yet).
+  SyncPendingRollTimers(bot);
   if (Group* group = bot->GetGroup()) {
     size_t rolls_added = 0;
     for (const Roll* roll : group->GetRolls()) {
@@ -539,11 +385,15 @@ void CollectGroupAndUpkeepActions(Player* bot,
       if (it == roll->playerVote.end() || it->second != NOT_EMITED_YET) {
         continue;
       }
+      if (IsRollDeferredForHuman(bot, *roll)) {
+        continue;
+      }
       const ItemTemplate* proto = sObjectMgr->GetItemTemplate(roll->itemid);
       const std::string item_name =
           proto ? proto->Name1 : ("item #" + std::to_string(roll->itemid));
-      std::string detail =
-          proto ? " (" + RollItemFacts(bot, proto) + ")" : std::string();
+      std::string detail = proto
+                               ? " (" + DescribeGearItemForBot(bot, proto) + ")"
+                               : std::string();
       // Who already rolled Need on it (Now #7: never Need against them).
       std::vector<std::string> needers;
       for (const auto& [guid, vote] : roll->playerVote) {
@@ -2373,22 +2223,34 @@ std::optional<LootRollChoice> PolicyRollVote(Player* bot,
   in.roll_vote_mask = roll.rollVoteMask;
   in.roll_elapsed_ms = roll_elapsed_ms;
   if (proto) {
+    const GearItemInfo info = ExtractGearItemInfo(proto);
+    const LootStatProfile profile = BotLootStatProfile(bot);
+    const uint32_t best_armor = BotBestArmorSubclass(bot);
     in.bind_on_equip = proto->Bonding == BIND_WHEN_EQUIPPED;
     in.usable = bot->CanUseItem(proto) == EQUIP_ERR_OK;
-    in.armor_type_matches = proto->Class != ITEM_CLASS_ARMOR ||
-                            proto->InventoryType == INVTYPE_CLOAK ||
-                            !ArmorTypeName(proto->SubClass) ||
-                            proto->SubClass == BestArmorSubclass(bot);
-    const LootStatProfile profile = BotLootStatProfile(bot);
-    in.shield_disallowed_for_spec = proto->InventoryType == INVTYPE_SHIELD &&
-                                    IsShieldDisallowedForProfile(profile);
+    in.armor_type_matches = !info.is_armor || info.is_cloak ||
+                            !ArmorSubclassName(proto->SubClass) ||
+                            proto->SubClass == best_armor;
+    in.shield_disallowed_for_spec =
+        info.is_shield && IsShieldDisallowedForProfile(profile);
+    in.weapon_disallowed_for_spec =
+        info.is_weapon && IsWeaponDisallowedForSpec(profile, bot->getClass(),
+                                                    info.weapon_subclass);
     in.stat_fit =
-        EvaluateStatFit(profile, bot->getClass(), ExtractItemStatFlags(proto));
+        EvaluateStatFit(profile, bot->getClass(), StatFlagsFromGearInfo(info));
+    const float cand_score =
+        ScoreGearItem(profile, bot->getClass(), best_armor, info);
     const std::vector<uint8_t> slots = SlotsFor(bot, proto->InventoryType);
     for (const uint8_t slot : slots) {
       const Item* worn = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
       const ItemTemplate* wp = worn ? worn->GetTemplate() : nullptr;
-      if (!wp || proto->ItemLevel > wp->ItemLevel) {
+      if (!wp) {
+        in.has_upgrade_slot = true;
+        break;
+      }
+      const float worn_score = ScoreGearItem(
+          profile, bot->getClass(), best_armor, ExtractGearItemInfo(wp));
+      if (cand_score > worn_score + 0.01f) {
         in.has_upgrade_slot = true;
         break;
       }

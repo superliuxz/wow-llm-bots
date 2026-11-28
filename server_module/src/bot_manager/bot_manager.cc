@@ -97,6 +97,7 @@
 #include "options/act_geometry.h"
 #include "options/exec_items.h"
 #include "options/exec_shared.h"
+#include "options/exec_social.h"
 #include "options/group_roles.h"
 #include "options/quest_helpers.h"
 #include "popup_watch.h"
@@ -2945,6 +2946,7 @@ PopupState BotManager::ReadPopupState(Player* bot) {
                           return bs && bs->corpse_run_progress.stuck;
                         });
   }
+  SyncPendingRollTimers(bot);
   if (Group* group = bot->GetGroup()) {
     for (const Roll* roll : group->GetRolls()) {
       if (!roll) {
@@ -2952,6 +2954,9 @@ PopupState BotManager::ReadPopupState(Player* bot) {
       }
       auto it = roll->playerVote.find(bot->GetGUID());
       if (it == roll->playerVote.end() || it->second != NOT_EMITED_YET) {
+        continue;
+      }
+      if (IsRollDeferredForHuman(bot, *roll)) {
         continue;
       }
       PopupState::Roll r;

@@ -48,6 +48,7 @@
 #include "WorldPacket.h"
 #include "WorldSession.h"
 #include "base/strings/stringprintf.h"
+#include "loot_roll_policy.h"
 #include "options/action_types.h"
 #include "options/exec_shared.h"
 #include "options/npc_gossip_and_bags.h"
@@ -702,12 +703,38 @@ void CollectUsableBagItems(Player* bot,
           return "SP";
         case ITEM_MOD_ATTACK_POWER:
           return "AP";
+        case ITEM_MOD_RANGED_ATTACK_POWER:
+          return "RAP";
+        case ITEM_MOD_MANA_REGENERATION:
+          return "MP5";
         case ITEM_MOD_CRIT_RATING:
+        case ITEM_MOD_CRIT_MELEE_RATING:
+        case ITEM_MOD_CRIT_RANGED_RATING:
+        case ITEM_MOD_CRIT_SPELL_RATING:
           return "Crit";
         case ITEM_MOD_HIT_RATING:
+        case ITEM_MOD_HIT_MELEE_RATING:
+        case ITEM_MOD_HIT_RANGED_RATING:
+        case ITEM_MOD_HIT_SPELL_RATING:
           return "Hit";
         case ITEM_MOD_HASTE_RATING:
+        case ITEM_MOD_HASTE_MELEE_RATING:
+        case ITEM_MOD_HASTE_RANGED_RATING:
+        case ITEM_MOD_HASTE_SPELL_RATING:
           return "Haste";
+        case ITEM_MOD_DEFENSE_SKILL_RATING:
+          return "Def";
+        case ITEM_MOD_DODGE_RATING:
+          return "Dodge";
+        case ITEM_MOD_PARRY_RATING:
+          return "Parry";
+        case ITEM_MOD_BLOCK_RATING:
+        case ITEM_MOD_BLOCK_VALUE:
+          return "Block";
+        case ITEM_MOD_EXPERTISE_RATING:
+          return "Exp";
+        case ITEM_MOD_ARMOR_PENETRATION_RATING:
+          return "ArP";
         default:
           return "";
       }
@@ -794,12 +821,14 @@ void CollectUsableBagItems(Player* bot,
       }
     };
     struct RankedEquip {
-      int32_t ilvl_delta = 0;
+      float score_delta = 0.0f;
       pb::OptionFacts_Item item;
     };
     std::vector<RankedEquip> candidates;
     const std::vector<EquippedBagSlotInfo> equipped_bags =
         ReadEquippedBagSlots(bot);
+    const LootStatProfile bot_profile = BotLootStatProfile(bot);
+    const uint32_t bot_best_armor = BotBestArmorSubclass(bot);
     for (const BagSlotItem& entry : BagItems(bot)) {
       Item* bag_item = entry.item;
       const ItemTemplate* proto = bag_item ? bag_item->GetTemplate() : nullptr;
@@ -837,7 +866,8 @@ void CollectUsableBagItems(Player* bot,
         item.detail = FormatBagEquipDetail(proto->ContainerSlots, *target);
         const int32_t slot_gain = static_cast<int32_t>(proto->ContainerSlots) -
                                   static_cast<int32_t>(target->replaced_slots);
-        candidates.push_back({slot_gain, std::move(item)});
+        candidates.push_back(
+            {1000.0f + static_cast<float>(slot_gain) * 10.0f, std::move(item)});
         continue;
       }
       if (proto->Quality <= ITEM_QUALITY_POOR ||
@@ -929,6 +959,29 @@ void CollectUsableBagItems(Player* bot,
           break;
         }
       }
+      const GearItemInfo gear_info = ExtractGearItemInfo(proto);
+      const float cand_score = ScoreGearItem(bot_profile, bot->getClass(),
+                                             bot_best_armor, gear_info);
+      const float worn_score =
+          equipped_proto
+              ? ScoreGearItem(bot_profile, bot->getClass(), bot_best_armor,
+                              ExtractGearItemInfo(equipped_proto))
+              : 0.0f;
+      if (gear_info.is_armor && !gear_info.is_cloak &&
+          ArmorSubclassName(proto->SubClass) &&
+          proto->SubClass != bot_best_armor) {
+        detail +=
+            std::string(", you wear ") + ArmorSubclassName(bot_best_armor);
+      }
+      const StatFit fit = EvaluateStatFit(bot_profile, bot->getClass(),
+                                          StatFlagsFromGearInfo(gear_info));
+      if (fit == StatFit::kMismatch ||
+          (gear_info.is_shield && IsShieldDisallowedForProfile(bot_profile)) ||
+          (gear_info.is_weapon &&
+           IsWeaponDisallowedForSpec(bot_profile, bot->getClass(),
+                                     gear_info.weapon_subclass))) {
+        detail += ", off-spec";
+      }
       if (proto->Bonding == BIND_WHEN_EQUIPPED && !bag_item->IsSoulBound()) {
         detail += ", BoE";
       }
@@ -938,13 +991,11 @@ void CollectUsableBagItems(Player* bot,
       item.out_of_combat_only = true;
       item.equippable = true;
       item.detail = std::move(detail);
-      candidates.push_back({static_cast<int32_t>(proto->ItemLevel) -
-                                static_cast<int32_t>(equipped_ilvl),
-                            std::move(item)});
+      candidates.push_back({cand_score - worn_score, std::move(item)});
     }
     std::stable_sort(candidates.begin(), candidates.end(),
                      [](const RankedEquip& a, const RankedEquip& b) {
-                       return a.ilvl_delta > b.ilvl_delta;
+                       return a.score_delta > b.score_delta;
                      });
     size_t equip_added = 0;
     for (RankedEquip& cand : candidates) {

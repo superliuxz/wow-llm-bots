@@ -14,6 +14,7 @@
 #include <string_view>
 #include <vector>
 
+#include "options/loot_roll_policy.h"
 #include "options/npc_gossip_and_bags.h"
 
 class Creature;
@@ -100,12 +101,34 @@ std::vector<uint32_t> CollectActiveQuestItemIds(const Player* bot);
 
 // Picks the best valid equipment slot for `bag_item` (shared by option
 // discovery, `EquipItemAction`, and `Command_Act::EQUIP`). Prefers empty or
-// lower-ilvl second slot for rings, trinkets, and dual-wielding weapons, and
-// empty or smaller general bag slot for bags.
+// lower-scoring second slot for rings, trinkets, and dual-wielding weapons,
+// and empty or smaller general bag slot for bags.
 bool PickEquipSlot(Player* bot,
                    Item* bag_item,
                    const ItemTemplate* proto,
                    uint16_t* out_dest);
+
+// Maps `bot`'s class, talent spec, and role to its loot/gear stat archetype.
+LootStatProfile BotLootStatProfile(Player* bot);
+
+// The heaviest body armor subclass `bot` is proficient in (plate/mail/leather/
+// cloth).
+uint32_t BotBestArmorSubclass(Player* bot);
+
+// Lowercase body armor type name ("cloth", "leather", "mail", "plate"), or
+// nullptr for non-body-armor subclasses.
+const char* ArmorSubclassName(uint32_t subclass);
+
+// Extracts numeric stats, armor/weapon subclass, and weapon DPS from `proto`.
+GearItemInfo ExtractGearItemInfo(const ItemTemplate* proto);
+
+// Stat/armor/weapon-weighted gear score for `proto` on `bot`.
+float ScoreItemForBot(Player* bot, const ItemTemplate* proto);
+
+// Concise, factual gear summary for loot rolls and quest reward choices
+// (ilvl, stats including hit/crit/haste, armor/weapon type, usability, and
+// stat-scored comparison against the worn slot).
+std::string DescribeGearItemForBot(Player* bot, const ItemTemplate* proto);
 
 // Equips `bag_item` at `(bag, slot)` using `PickEquipSlot` and verifies the
 // swap by item GUID.

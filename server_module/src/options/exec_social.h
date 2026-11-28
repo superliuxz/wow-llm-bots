@@ -18,8 +18,18 @@
 #include "snapshot/snapshot.h"
 
 class Player;
+class Roll;
 
 namespace llm_brain {
+
+// Syncs `pending_rolls_seen` for `bot` against all currently open group rolls
+// (pruning finished rolls and clearing when ungrouped). World thread.
+void SyncPendingRollTimers(Player* bot);
+
+// Whether `roll` is currently deferred waiting for an eligible connected human
+// group member to vote first (10 s window). Applies in both auto-popup and
+// brain-driven roll modes. World thread.
+bool IsRollDeferredForHuman(Player* bot, const Roll& roll);
 
 void CollectGroupAndUpkeepActions(
     Player* bot,

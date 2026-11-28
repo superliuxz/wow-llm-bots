@@ -8,15 +8,30 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace llm_brain {
 
-// How long auto-popup defers a loot roll while at least one connected human
-// member in the roll hasn't voted yet. Strictly shorter than
-// kPopupFallbackDeadlineMs (15 s) and WoW's 60 s group-loot timer so human
-// Need rolls are respected without stalling or handing off to playerbots.
+// How long loot rolls are deferred while at least one connected human member
+// in the roll hasn't voted yet (applies in both auto-popup and brain-driven
+// roll modes). Strictly shorter than kPopupFallbackDeadlineMs (15 s) and WoW's
+// 60 s group-loot timer so human Need rolls are respected without stalling or
+// handing off to playerbots.
 inline constexpr uint64_t kHumanLootRollDeferMs = 10000;
+
+// Mirrors AzerothCore's ItemSubclassArmor values for body armor tiers.
+inline constexpr uint32_t kArmorSubclassCloth = 1;
+inline constexpr uint32_t kArmorSubclassLeather = 2;
+inline constexpr uint32_t kArmorSubclassMail = 3;
+inline constexpr uint32_t kArmorSubclassPlate = 4;
+
+// Mirrors AzerothCore's ItemSubclassWeapon values used for class/role checks.
+inline constexpr uint32_t kWeaponSubclassBow = 2;
+inline constexpr uint32_t kWeaponSubclassGun = 3;
+inline constexpr uint32_t kWeaponSubclassThrown = 16;
+inline constexpr uint32_t kWeaponSubclassCrossbow = 18;
+inline constexpr uint32_t kWeaponSubclassWand = 19;
 
 // Mirrors AzerothCore's RollVoteMask bits (LootMgr.h).
 inline constexpr uint8_t kRollMaskPass = 0x01;
@@ -49,10 +64,65 @@ struct ItemStatFlags {
   bool spirit = false;
   bool stamina = false;
   bool spell_power = false;
-  bool attack_power = false;    // Includes ranged attack power.
-  bool mp5 = false;             // Mana regeneration per 5s.
-  bool tank_avoidance = false;  // Defense, dodge, parry, block rating/value.
+  bool attack_power = false;         // Melee / general attack power.
+  bool ranged_attack_power = false;  // Hunter-only ranged attack power.
+  bool mp5 = false;                  // Mana regeneration per 5s.
+  bool hit = false;                  // Hit rating (generic/melee/ranged/spell).
+  bool crit = false;            // Crit rating (generic/melee/ranged/spell).
+  bool haste = false;           // Haste rating.
+  bool tank_avoidance = false;  // Defense, dodge, parry, block.
   bool melee_dps = false;       // Armor penetration, expertise.
+};
+
+// Numeric item attributes used to score gear upgrades and quest rewards for a
+// bot's class, spec profile, and armor proficiency.
+struct GearItemInfo {
+  uint32_t item_level = 0;
+  uint32_t armor = 0;
+  float weapon_dps = 0.0f;
+  bool is_armor = false;
+  bool is_cloak = false;
+  bool is_shield = false;
+  bool is_weapon = false;
+  uint32_t armor_subclass = 0;   // kArmorSubclass* (0 for non-body-armor).
+  uint32_t weapon_subclass = 0;  // ItemSubclassWeapon.
+
+  int32_t strength = 0;
+  int32_t agility = 0;
+  int32_t intellect = 0;
+  int32_t spirit = 0;
+  int32_t stamina = 0;
+  int32_t spell_power = 0;
+  int32_t attack_power = 0;
+  int32_t ranged_attack_power = 0;
+  int32_t mp5 = 0;
+  int32_t hit = 0;
+  int32_t crit = 0;
+  int32_t haste = 0;
+  int32_t defense = 0;
+  int32_t dodge = 0;
+  int32_t parry = 0;
+  int32_t block = 0;
+  int32_t expertise = 0;
+  int32_t armor_pen = 0;
+};
+
+struct TradeBagItem {
+  uint8_t bag = 0;
+  uint8_t slot = 0;
+  uint32_t item_id = 0;
+  std::string name;
+  uint32_t count = 1;
+  uint8_t quality = 0;  // 0 = Poor (grey), 1+ = Common or higher.
+  bool already_in_trade = false;
+  bool can_be_traded = true;
+  bool bound_not_with_trader = false;
+};
+
+struct TradeOfferOption {
+  std::string guid;
+  std::string label;
+  bool operator==(const TradeOfferOption&) const = default;
 };
 
 enum class StatFit : uint8_t {
@@ -80,6 +150,7 @@ struct LootRollPolicyInput {
   bool bind_on_equip = false;
   bool armor_type_matches = false;
   bool shield_disallowed_for_spec = false;
+  bool weapon_disallowed_for_spec = false;
   bool has_upgrade_slot = false;
   StatFit stat_fit = StatFit::kNeutral;
 
@@ -100,15 +171,47 @@ LootStatProfile LootStatProfileForSpec(uint8_t class_id,
 // Warrior, Retribution Paladin, Enhancement Shaman).
 bool IsShieldDisallowedForProfile(LootStatProfile profile);
 
+// Whether a weapon subclass is off-role for `class_id` + `profile` (e.g.
+// Bows/Guns/Crossbows are Hunter primary weapons, not Warrior/Rogue Need
+// targets; Wands are caster-only; Thrown is non-Hunter physical).
+bool IsWeaponDisallowedForSpec(LootStatProfile profile,
+                               uint8_t class_id,
+                               uint32_t weapon_subclass);
+
+// Extracts boolean stat presence flags from numeric `GearItemInfo`.
+ItemStatFlags StatFlagsFromGearInfo(const GearItemInfo& item);
+
 // Classifies how an item's stats fit a bot's spec archetype.
 StatFit EvaluateStatFit(LootStatProfile profile,
                         uint8_t class_id,
                         const ItemStatFlags& stats);
 
+// Scores an equippable item for `profile` / `class_id` / `best_armor_subclass`,
+// weighting primary and secondary stats, armor proficiency, and weapon fit
+// instead of item level alone.
+float ScoreGearItem(LootStatProfile profile,
+                    uint8_t class_id,
+                    uint32_t best_armor_subclass,
+                    const GearItemInfo& item);
+
+// Whether a loot roll should be deferred while waiting for an eligible
+// connected human group member to vote first. Applies in both auto-popup and
+// brain-driven roll modes.
+bool ShouldDeferRollForHuman(bool human_pending_vote,
+                             uint64_t roll_elapsed_ms,
+                             uint64_t human_defer_ms = kHumanLootRollDeferMs);
+
 // Decides an auto-popup loot roll vote, or std::nullopt when the bot should
 // defer briefly while waiting for a human group member to vote.
 std::optional<LootRollChoice> DecidePolicyRollVote(
     const LootRollPolicyInput& in);
+
+// Selects tradeable bag items to offer in an open trade window (one option per
+// distinct item_id, prioritizing non-grey items ahead of grey junk while
+// preserving bag order within each tier). No 8-item cap.
+std::vector<TradeOfferOption> SelectTradeItemOffers(
+    bool has_free_trade_slot,
+    const std::vector<TradeBagItem>& bag_items);
 
 // Human-readable verb prefix for `choice` ("Need", "Greed", "Disenchant",
 // "Pass").

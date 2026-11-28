@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "AiFactory.h"
 #include "AiObjectContext.h"
 #include "Bag.h"
 #include "Creature.h"
@@ -62,6 +63,7 @@
 #include "base/strings/stringprintf.h"
 #include "bot_manager/pull_discipline.h"
 #include "bot_session.h"
+#include "loot_roll_policy.h"
 #include "options/npc_gossip_and_bags.h"
 #include "options/position_facts.h"
 #include "options/riding_mounts.h"
@@ -491,11 +493,9 @@ bool PickEquipSlot(Player* bot,
   auto try_dual = [&](uint8_t s1, uint8_t s2) -> bool {
     const Item* i1 = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, s1);
     const Item* i2 = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, s2);
-    const uint32_t l1 =
-        i1 && i1->GetTemplate() ? i1->GetTemplate()->ItemLevel : 0;
-    const uint32_t l2 =
-        i2 && i2->GetTemplate() ? i2->GetTemplate()->ItemLevel : 0;
-    const uint8_t preferred = (l2 < l1) ? s2 : s1;
+    const float sc1 = i1 ? ScoreItemForBot(bot, i1->GetTemplate()) : -1.0f;
+    const float sc2 = i2 ? ScoreItemForBot(bot, i2->GetTemplate()) : -1.0f;
+    const uint8_t preferred = (sc2 < sc1) ? s2 : s1;
     const uint8_t alternate = (preferred == s1) ? s2 : s1;
     if (bot->CanEquipItem(preferred, *out_dest, bag_item, true) ==
         EQUIP_ERR_OK) {
@@ -883,6 +883,381 @@ bool IsCreatureActiveQuestMobForPlayer(const Creature* creature,
     return true;
   }
   return false;
+}
+
+namespace {
+
+static_assert(kArmorSubclassCloth == ITEM_SUBCLASS_ARMOR_CLOTH);
+static_assert(kArmorSubclassLeather == ITEM_SUBCLASS_ARMOR_LEATHER);
+static_assert(kArmorSubclassMail == ITEM_SUBCLASS_ARMOR_MAIL);
+static_assert(kArmorSubclassPlate == ITEM_SUBCLASS_ARMOR_PLATE);
+static_assert(kWeaponSubclassBow == ITEM_SUBCLASS_WEAPON_BOW);
+static_assert(kWeaponSubclassGun == ITEM_SUBCLASS_WEAPON_GUN);
+static_assert(kWeaponSubclassThrown == ITEM_SUBCLASS_WEAPON_THROWN);
+static_assert(kWeaponSubclassCrossbow == ITEM_SUBCLASS_WEAPON_CROSSBOW);
+static_assert(kWeaponSubclassWand == ITEM_SUBCLASS_WEAPON_WAND);
+
+std::vector<uint8_t> EquipSlotsFor(Player* bot, uint32_t inv_type) {
+  switch (inv_type) {
+    case INVTYPE_HEAD:
+      return {EQUIPMENT_SLOT_HEAD};
+    case INVTYPE_NECK:
+      return {EQUIPMENT_SLOT_NECK};
+    case INVTYPE_SHOULDERS:
+      return {EQUIPMENT_SLOT_SHOULDERS};
+    case INVTYPE_CHEST:
+    case INVTYPE_ROBE:
+      return {EQUIPMENT_SLOT_CHEST};
+    case INVTYPE_WAIST:
+      return {EQUIPMENT_SLOT_WAIST};
+    case INVTYPE_LEGS:
+      return {EQUIPMENT_SLOT_LEGS};
+    case INVTYPE_FEET:
+      return {EQUIPMENT_SLOT_FEET};
+    case INVTYPE_WRISTS:
+      return {EQUIPMENT_SLOT_WRISTS};
+    case INVTYPE_HANDS:
+      return {EQUIPMENT_SLOT_HANDS};
+    case INVTYPE_FINGER:
+      return {EQUIPMENT_SLOT_FINGER1, EQUIPMENT_SLOT_FINGER2};
+    case INVTYPE_TRINKET:
+      return {EQUIPMENT_SLOT_TRINKET1, EQUIPMENT_SLOT_TRINKET2};
+    case INVTYPE_CLOAK:
+      return {EQUIPMENT_SLOT_BACK};
+    case INVTYPE_WEAPON:
+      if (bot->CanDualWield()) {
+        return {EQUIPMENT_SLOT_MAINHAND, EQUIPMENT_SLOT_OFFHAND};
+      }
+      return {EQUIPMENT_SLOT_MAINHAND};
+    case INVTYPE_2HWEAPON:
+    case INVTYPE_WEAPONMAINHAND:
+      return {EQUIPMENT_SLOT_MAINHAND};
+    case INVTYPE_SHIELD:
+    case INVTYPE_WEAPONOFFHAND:
+    case INVTYPE_HOLDABLE:
+      return {EQUIPMENT_SLOT_OFFHAND};
+    case INVTYPE_RANGED:
+    case INVTYPE_RANGEDRIGHT:
+    case INVTYPE_THROWN:
+    case INVTYPE_RELIC:
+      return {EQUIPMENT_SLOT_RANGED};
+    default:
+      return {};
+  }
+}
+
+const char* WeaponSubclassNameLower(uint32_t subclass) {
+  switch (subclass) {
+    case ITEM_SUBCLASS_WEAPON_AXE:
+    case ITEM_SUBCLASS_WEAPON_AXE2:
+      return "axe";
+    case ITEM_SUBCLASS_WEAPON_BOW:
+      return "bow";
+    case ITEM_SUBCLASS_WEAPON_GUN:
+      return "gun";
+    case ITEM_SUBCLASS_WEAPON_MACE:
+    case ITEM_SUBCLASS_WEAPON_MACE2:
+      return "mace";
+    case ITEM_SUBCLASS_WEAPON_POLEARM:
+      return "polearm";
+    case ITEM_SUBCLASS_WEAPON_SWORD:
+    case ITEM_SUBCLASS_WEAPON_SWORD2:
+      return "sword";
+    case ITEM_SUBCLASS_WEAPON_STAFF:
+      return "staff";
+    case ITEM_SUBCLASS_WEAPON_FIST:
+      return "fist";
+    case ITEM_SUBCLASS_WEAPON_DAGGER:
+      return "dagger";
+    case ITEM_SUBCLASS_WEAPON_THROWN:
+      return "thrown";
+    case ITEM_SUBCLASS_WEAPON_CROSSBOW:
+      return "crossbow";
+    case ITEM_SUBCLASS_WEAPON_WAND:
+      return "wand";
+    default:
+      return nullptr;
+  }
+}
+
+std::string FormatItemStatSummary(const GearItemInfo& info) {
+  std::string out;
+  const auto add = [&out](const char* name) {
+    if (out.find(name) == std::string::npos) {
+      out += out.empty() ? name : std::string(", ") + name;
+    }
+  };
+  if (info.strength > 0)
+    add("strength");
+  if (info.agility > 0)
+    add("agility");
+  if (info.intellect > 0)
+    add("intellect");
+  if (info.spirit > 0)
+    add("spirit");
+  if (info.stamina > 0)
+    add("stamina");
+  if (info.spell_power > 0)
+    add("spell power");
+  if (info.attack_power > 0)
+    add("attack power");
+  if (info.ranged_attack_power > 0)
+    add("ranged attack power");
+  if (info.mp5 > 0)
+    add("mp5");
+  if (info.hit > 0)
+    add("hit");
+  if (info.crit > 0)
+    add("crit");
+  if (info.haste > 0)
+    add("haste");
+  if (info.defense > 0)
+    add("defense");
+  if (info.dodge > 0)
+    add("dodge");
+  if (info.parry > 0)
+    add("parry");
+  if (info.block > 0)
+    add("block");
+  if (info.expertise > 0)
+    add("expertise");
+  if (info.armor_pen > 0)
+    add("armor pen");
+  return out;
+}
+
+}  // namespace
+
+LootStatProfile BotLootStatProfile(Player* bot) {
+  if (!bot) {
+    return LootStatProfile::kMeleeStrength;
+  }
+  const bool has_talents =
+      bot->GetFreeTalentPoints() < bot->CalculateTalentsPoints();
+  return LootStatProfileForSpec(
+      bot->getClass(), AiFactory::GetPlayerSpecTab(bot), has_talents,
+      PlayerbotAI::IsTank(bot), PlayerbotAI::IsHeal(bot));
+}
+
+uint32_t BotBestArmorSubclass(Player* bot) {
+  if (!bot) {
+    return ITEM_SUBCLASS_ARMOR_CLOTH;
+  }
+  if (bot->HasSkill(SKILL_PLATE_MAIL)) {
+    return ITEM_SUBCLASS_ARMOR_PLATE;
+  }
+  if (bot->HasSkill(SKILL_MAIL)) {
+    return ITEM_SUBCLASS_ARMOR_MAIL;
+  }
+  if (bot->HasSkill(SKILL_LEATHER)) {
+    return ITEM_SUBCLASS_ARMOR_LEATHER;
+  }
+  return ITEM_SUBCLASS_ARMOR_CLOTH;
+}
+
+const char* ArmorSubclassName(uint32_t subclass) {
+  switch (subclass) {
+    case ITEM_SUBCLASS_ARMOR_CLOTH:
+      return "cloth";
+    case ITEM_SUBCLASS_ARMOR_LEATHER:
+      return "leather";
+    case ITEM_SUBCLASS_ARMOR_MAIL:
+      return "mail";
+    case ITEM_SUBCLASS_ARMOR_PLATE:
+      return "plate";
+    default:
+      return nullptr;
+  }
+}
+
+GearItemInfo ExtractGearItemInfo(const ItemTemplate* proto) {
+  GearItemInfo info;
+  if (!proto) {
+    return info;
+  }
+  info.item_level = proto->ItemLevel;
+  info.armor = proto->Armor;
+  info.is_armor = proto->Class == ITEM_CLASS_ARMOR;
+  info.is_cloak = proto->InventoryType == INVTYPE_CLOAK;
+  info.is_shield = proto->InventoryType == INVTYPE_SHIELD;
+  info.is_weapon = proto->Class == ITEM_CLASS_WEAPON;
+  if (info.is_armor) {
+    info.armor_subclass = proto->SubClass;
+  }
+  if (info.is_weapon) {
+    info.weapon_subclass = proto->SubClass;
+    if (proto->Delay > 0) {
+      float avg_dmg = 0.0f;
+      for (int i = 0; i < MAX_ITEM_PROTO_DAMAGES; ++i) {
+        avg_dmg +=
+            (proto->Damage[i].DamageMin + proto->Damage[i].DamageMax) * 0.5f;
+      }
+      info.weapon_dps = avg_dmg / (static_cast<float>(proto->Delay) / 1000.0f);
+    }
+  }
+  for (uint32_t i = 0; i < proto->StatsCount && i < MAX_ITEM_PROTO_STATS; ++i) {
+    const int32_t val = proto->ItemStat[i].ItemStatValue;
+    if (val <= 0) {
+      continue;
+    }
+    switch (proto->ItemStat[i].ItemStatType) {
+      case ITEM_MOD_STRENGTH:
+        info.strength += val;
+        break;
+      case ITEM_MOD_AGILITY:
+        info.agility += val;
+        break;
+      case ITEM_MOD_INTELLECT:
+        info.intellect += val;
+        break;
+      case ITEM_MOD_SPIRIT:
+        info.spirit += val;
+        break;
+      case ITEM_MOD_STAMINA:
+        info.stamina += val;
+        break;
+      case ITEM_MOD_SPELL_POWER:
+      case ITEM_MOD_SPELL_HEALING_DONE:
+      case ITEM_MOD_SPELL_DAMAGE_DONE:
+        info.spell_power += val;
+        break;
+      case ITEM_MOD_ATTACK_POWER:
+        info.attack_power += val;
+        break;
+      case ITEM_MOD_RANGED_ATTACK_POWER:
+        info.ranged_attack_power += val;
+        break;
+      case ITEM_MOD_MANA_REGENERATION:
+        info.mp5 += val;
+        break;
+      case ITEM_MOD_HIT_RATING:
+      case ITEM_MOD_HIT_MELEE_RATING:
+      case ITEM_MOD_HIT_RANGED_RATING:
+      case ITEM_MOD_HIT_SPELL_RATING:
+        info.hit += val;
+        break;
+      case ITEM_MOD_CRIT_RATING:
+      case ITEM_MOD_CRIT_MELEE_RATING:
+      case ITEM_MOD_CRIT_RANGED_RATING:
+      case ITEM_MOD_CRIT_SPELL_RATING:
+        info.crit += val;
+        break;
+      case ITEM_MOD_HASTE_RATING:
+      case ITEM_MOD_HASTE_MELEE_RATING:
+      case ITEM_MOD_HASTE_RANGED_RATING:
+      case ITEM_MOD_HASTE_SPELL_RATING:
+        info.haste += val;
+        break;
+      case ITEM_MOD_DEFENSE_SKILL_RATING:
+        info.defense += val;
+        break;
+      case ITEM_MOD_DODGE_RATING:
+        info.dodge += val;
+        break;
+      case ITEM_MOD_PARRY_RATING:
+        info.parry += val;
+        break;
+      case ITEM_MOD_BLOCK_RATING:
+      case ITEM_MOD_BLOCK_VALUE:
+        info.block += val;
+        break;
+      case ITEM_MOD_EXPERTISE_RATING:
+        info.expertise += val;
+        break;
+      case ITEM_MOD_ARMOR_PENETRATION_RATING:
+        info.armor_pen += val;
+        break;
+      default:
+        break;
+    }
+  }
+  return info;
+}
+
+float ScoreItemForBot(Player* bot, const ItemTemplate* proto) {
+  if (!bot || !proto) {
+    return 0.0f;
+  }
+  return ScoreGearItem(BotLootStatProfile(bot), bot->getClass(),
+                       BotBestArmorSubclass(bot), ExtractGearItemInfo(proto));
+}
+
+std::string DescribeGearItemForBot(Player* bot, const ItemTemplate* proto) {
+  if (!proto) {
+    return {};
+  }
+  std::string out = "ilvl " + std::to_string(proto->ItemLevel);
+  if (proto->Bonding == BIND_WHEN_EQUIPPED) {
+    out += ", BoE";
+  }
+  const std::vector<uint8_t> slots = EquipSlotsFor(bot, proto->InventoryType);
+  if (slots.empty()) {
+    return out + ", not gear";
+  }
+  const GearItemInfo info = ExtractGearItemInfo(proto);
+  if (const std::string stats = FormatItemStatSummary(info); !stats.empty()) {
+    out += ", " + stats;
+  }
+  const uint32_t best_armor = BotBestArmorSubclass(bot);
+  bool wrong_armor = false;
+  if (info.is_armor && !info.is_cloak) {
+    if (const char* type = ArmorSubclassName(proto->SubClass)) {
+      out += std::string(", ") + type;
+      if (proto->SubClass != best_armor) {
+        wrong_armor = true;
+        out += std::string(" (you wear ") + ArmorSubclassName(best_armor) + ")";
+      }
+    }
+  } else if (info.is_weapon) {
+    if (const char* wtype = WeaponSubclassNameLower(proto->SubClass)) {
+      out += std::string(", ") + wtype;
+    }
+  }
+  if (bot->CanUseItem(proto) != EQUIP_ERR_OK) {
+    return out + ", you can't use it";
+  }
+  const LootStatProfile profile = BotLootStatProfile(bot);
+  const StatFit stat_fit =
+      EvaluateStatFit(profile, bot->getClass(), StatFlagsFromGearInfo(info));
+  const bool off_spec =
+      stat_fit == StatFit::kMismatch ||
+      (info.is_shield && IsShieldDisallowedForProfile(profile)) ||
+      (info.is_weapon && IsWeaponDisallowedForSpec(profile, bot->getClass(),
+                                                   info.weapon_subclass));
+  const float cand_score =
+      ScoreGearItem(profile, bot->getClass(), best_armor, info);
+  float min_worn_score = std::numeric_limits<float>::max();
+  uint32_t worn_ilvl = 0;
+  bool empty_slot = false;
+  for (const uint8_t slot : slots) {
+    const Item* item = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
+    const ItemTemplate* p = item ? item->GetTemplate() : nullptr;
+    if (!p) {
+      empty_slot = true;
+      break;
+    }
+    const float sc = ScoreGearItem(profile, bot->getClass(), best_armor,
+                                   ExtractGearItemInfo(p));
+    if (sc < min_worn_score) {
+      min_worn_score = sc;
+      worn_ilvl = p->ItemLevel;
+    }
+  }
+  if (off_spec) {
+    if (empty_slot) {
+      return out + ", usable, off-spec stats (empty slot)";
+    }
+    return out + ", usable, off-spec stats (you wear ilvl " +
+           std::to_string(worn_ilvl) + ")";
+  }
+  if (empty_slot) {
+    return out + ", usable, upgrade (empty slot)";
+  }
+  if (!wrong_armor && cand_score > min_worn_score + 0.01f) {
+    return out + ", usable, upgrade over ilvl " + std::to_string(worn_ilvl);
+  }
+  return out + ", usable, not an upgrade (you wear ilvl " +
+         std::to_string(worn_ilvl) + ")";
 }
 
 }  // namespace llm_brain

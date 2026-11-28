@@ -505,8 +505,8 @@ void CollectNpcActions(Player* bot,
               const ItemTemplate* rproto =
                   sObjectMgr->GetItemTemplate(quest->RewardChoiceItemId[r]);
               const std::string rdesc =
-                  rproto ? (rproto->Name1 + ", ilvl " +
-                            std::to_string(rproto->ItemLevel))
+                  rproto ? (rproto->Name1 + " (" +
+                            DescribeGearItemForBot(bot, rproto) + ")")
                          : ("reward #" + std::to_string(r + 1));
               out->push_back({"npc_qturnin:" + u.guid + ":" +
                                   std::to_string(quest->GetQuestId()) + ":" +
@@ -1053,8 +1053,8 @@ void CollectNpcActions(Player* bot,
             const ItemTemplate* rproto =
                 sObjectMgr->GetItemTemplate(quest->RewardChoiceItemId[r]);
             const std::string rdesc =
-                rproto ? (rproto->Name1 + ", ilvl " +
-                          std::to_string(rproto->ItemLevel))
+                rproto ? (rproto->Name1 + " (" +
+                          DescribeGearItemForBot(bot, rproto) + ")")
                        : ("reward #" + std::to_string(r + 1));
             out->push_back({"go_qturnin:" + obj.guid + ":" +
                                 std::to_string(quest->GetQuestId()) + ":" +
