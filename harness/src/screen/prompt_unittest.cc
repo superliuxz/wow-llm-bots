@@ -969,6 +969,83 @@ TEST(PromptTest, NewRaidAndDungeonNotesSelectBossesAndFitInspectPromptBudget) {
   }
 }
 
+TEST(PromptTest, MergeBossNotesPreservesCuratedAndAppendsPersonalWithinBudget) {
+  const std::string curated =
+      "# Icecrown Citadel (ICC)\n\n"
+      "## The Lich King\n"
+      "- Defile: move out immediately.\n"
+      "```\nin Defile -> out of it\n```\n";
+  const std::string personal =
+      "Personal reminder: save mana potions for phase 3.\n";
+
+  wlb::snapshot::Snapshot snap;
+  snap.bot = "Aldric";
+  snap.base.where.in_instance = true;
+  snap.ext.encounter.emplace().boss.emplace().name = "The Lich King";
+
+  // Both curated and personal notes are present; curated comes first.
+  const std::string merged = MergeBossNotes(curated, personal, snap);
+  const size_t curated_pos = merged.find("in Defile -> out of it");
+  const size_t personal_pos = merged.find("save mana potions for phase 3");
+  ASSERT_NE(curated_pos, std::string::npos);
+  ASSERT_NE(personal_pos, std::string::npos);
+  EXPECT_LT(curated_pos, personal_pos);
+
+  // Large multi-boss curated raid file (> 2000 B): selects active boss section,
+  // reports matched_boss=true, and still appends personal notes within budget.
+  std::string large_curated = "# Icecrown Citadel (ICC)\n\n";
+  for (int i = 0; i < 10; ++i) {
+    large_curated += "## Earlier Boss " + std::to_string(i) + "\n";
+    large_curated += std::string(220, 'a') + "\n\n";
+  }
+  large_curated +=
+      "## The Lich King\n- Defile: move out.\n"
+      "```\nin Defile -> out of it\n```\n";
+  bool matched = false;
+  const std::string merged_large =
+      MergeBossNotes(large_curated, personal, snap, &matched);
+  EXPECT_TRUE(matched);
+  EXPECT_NE(merged_large.find("in Defile -> out of it"), std::string::npos);
+  EXPECT_NE(merged_large.find("save mana potions for phase 3"),
+            std::string::npos);
+  EXPECT_LE(merged_large.size(), 2000u);
+
+  // Adversarial counter-test: huge personal notes never crowd out curated
+  // boss notes and total stays within the notes prompt budget (2000 B).
+  const std::string huge_personal(3000, 'x');
+  const std::string capped = MergeBossNotes(curated, huge_personal, snap);
+  EXPECT_NE(capped.find("in Defile -> out of it"), std::string::npos);
+  EXPECT_LE(capped.size(), 2000u);
+
+  // Deduplication: identical curated and personal notes are not duplicated.
+  const std::string dedup = MergeBossNotes(curated, curated, snap);
+  EXPECT_EQ(dedup.find("in Defile -> out of it"),
+            dedup.rfind("in Defile -> out of it"));
+
+  // Personal-only fallback (e.g. open world or custom instance).
+  EXPECT_EQ(MergeBossNotes("", personal, snap), personal);
+
+  // InspectPrompt stays within slot token budget with merged notes + RULES.md.
+  const std::filesystem::path repo_root =
+      std::filesystem::path(WLB_HARNESS_TESTDATA).parent_path().parent_path();
+  std::ifstream rules_in(repo_root / "content" / "RULES.md");
+  ASSERT_TRUE(rules_in.is_open());
+  const std::string rules((std::istreambuf_iterator<char>(rules_in)),
+                          std::istreambuf_iterator<char>());
+  PromptAssemblyContext ctx;
+  ctx.rules = rules;
+  ctx.bot_name = "Aldric";
+  ctx.wake_reason = "approached boss";
+  ctx.raw_notes = curated;
+  ctx.raw_personal_notes = huge_personal;
+  const PromptInput input = AssemblePromptInput(ctx, snap);
+  EXPECT_NE(input.notes.find("in Defile -> out of it"), std::string::npos);
+  const LlmRequest req = BuildPlanRequest(input, SampleScreen());
+  const PromptBreakdown b = InspectPrompt(input, SampleScreen());
+  EXPECT_LE(b.est_total_tokens + static_cast<size_t>(req.max_tokens),
+            b.slot_budget_tokens);
+}
+
 TEST(PromptTest, VehicleScreenFitsInspectPromptBudgetAndSurvivesTrimming) {
   const std::filesystem::path repo_root =
       std::filesystem::path(WLB_HARNESS_TESTDATA).parent_path().parent_path();

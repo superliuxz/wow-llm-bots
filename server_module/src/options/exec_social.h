@@ -66,6 +66,8 @@ ActionOutcome ExecuteShareQuestAction(Player* bot,
 ActionOutcome ExecuteLfgAction(Player* bot, const LfgAction& action);
 ActionOutcome ExecuteGroupPolicyAction(Player* bot,
                                        const GroupPolicyAction& action);
+ActionOutcome ExecuteGroupLeaderAction(Player* bot,
+                                       const GroupLeaderAction& action);
 ActionOutcome ExecuteFollowLeaderAction(Player* bot,
                                         const FollowLeaderAction& action);
 ActionOutcome ExecuteMarkTargetAction(Player* bot,

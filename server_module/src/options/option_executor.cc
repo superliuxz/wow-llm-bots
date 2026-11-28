@@ -187,6 +187,8 @@ ExecuteResult ExecuteAction(Player* bot,
           return FromOutcome(ExecuteLfgAction(bot, a));
         } else if constexpr (std::is_same_v<T, GroupPolicyAction>) {
           return FromOutcome(ExecuteGroupPolicyAction(bot, a));
+        } else if constexpr (std::is_same_v<T, GroupLeaderAction>) {
+          return FromOutcome(ExecuteGroupLeaderAction(bot, a));
         } else if constexpr (std::is_same_v<T, PopupAnswerAction>) {
           return FromOutcome(ExecutePopupAnswerAction(bot, a));
         } else if constexpr (std::is_same_v<T, TradeAction>) {

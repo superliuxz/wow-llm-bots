@@ -88,6 +88,42 @@ TEST(ActionTypesTest, DecodesTypedNpcAndGroupActions) {
     EXPECT_EQ(gp->op, GroupPolicyAction::Op::kStay);
   }
   {
+    BotAction p = DecodeOptionFactAction("group:promote:0x42",
+                                         "Promote Arthas to party leader");
+    const auto* gl = std::get_if<GroupLeaderAction>(&p);
+    ASSERT_NE(gl, nullptr);
+    EXPECT_EQ(gl->op, GroupLeaderAction::Op::kPromote);
+    EXPECT_EQ(gl->target_guid, "0x42");
+    EXPECT_EQ(ActionKindName(p), "group_leader");
+    EXPECT_FALSE(IsDeadAllowedAction(p));
+
+    BotAction d = DecodeOptionFactAction("group:difficulty:1",
+                                         "Set dungeon difficulty to Heroic");
+    const auto* gld = std::get_if<GroupLeaderAction>(&d);
+    ASSERT_NE(gld, nullptr);
+    EXPECT_EQ(gld->op, GroupLeaderAction::Op::kSetDifficulty);
+    EXPECT_EQ(gld->value, 1u);
+
+    BotAction l = DecodeOptionFactAction("group:loot:0",
+                                         "Set loot method to Free-for-All");
+    const auto* gll = std::get_if<GroupLeaderAction>(&l);
+    ASSERT_NE(gll, nullptr);
+    EXPECT_EQ(gll->op, GroupLeaderAction::Op::kSetLootMethod);
+    EXPECT_EQ(gll->value, 0u);
+
+    BotAction r = DecodeOptionFactAction("group:reset", "Reset all instances");
+    const auto* glr = std::get_if<GroupLeaderAction>(&r);
+    ASSERT_NE(glr, nullptr);
+    EXPECT_EQ(glr->op, GroupLeaderAction::Op::kResetInstances);
+
+    for (const char* bad : {"group:promote:", "group:difficulty:2",
+                            "group:loot:3", "group:loot:5", "group:bogus"}) {
+      EXPECT_TRUE(std::holds_alternative<InvalidAction>(
+          DecodeOptionFactAction(bad, "bad")))
+          << bad;
+    }
+  }
+  {
     BotAction a = DecodeOptionFactAction("qabandon:176",
                                          "Abandon quest \"Wanted: Hogger\"");
     const auto* ab = std::get_if<AbandonQuestAction>(&a);

@@ -794,8 +794,8 @@ PromptInput AssemblePromptInput(const PromptAssemblyContext& ctx,
     }
   }
   out.remembered = ctx.remembered;
-  if (!ctx.raw_notes.empty()) {
-    out.notes = SelectRelevantNotes(ctx.raw_notes, snapshot);
+  if (!ctx.raw_notes.empty() || !ctx.raw_personal_notes.empty()) {
+    out.notes = MergeBossNotes(ctx.raw_notes, ctx.raw_personal_notes, snapshot);
   }
   if (knowledge) {
     out.knowledge =
@@ -963,6 +963,53 @@ std::string SelectRelevantNotes(std::string_view full_notes,
     added_section = true;
   }
   return added_section ? out : CapText(full_notes, kMaxNotesBytes);
+}
+
+std::string MergeBossNotes(std::string_view curated_notes,
+                           std::string_view personal_notes,
+                           const wlb::snapshot::Snapshot& snapshot,
+                           bool* matched_boss) {
+  if (matched_boss) {
+    *matched_boss = false;
+  }
+  const std::string_view curated_trim =
+      base::TrimWhitespaceASCII(curated_notes, base::TRIM_ALL);
+  const std::string_view personal_trim =
+      base::TrimWhitespaceASCII(personal_notes, base::TRIM_ALL);
+  if (curated_trim.empty()) {
+    return personal_trim.empty()
+               ? ""
+               : SelectRelevantNotes(personal_notes, snapshot, matched_boss);
+  }
+  if (personal_trim.empty() || personal_trim == curated_trim) {
+    return SelectRelevantNotes(curated_notes, snapshot, matched_boss);
+  }
+  bool curated_matched = false;
+  std::string curated_sel =
+      SelectRelevantNotes(curated_notes, snapshot, &curated_matched);
+  bool personal_matched = false;
+  std::string personal_sel =
+      SelectRelevantNotes(personal_notes, snapshot, &personal_matched);
+  if (matched_boss) {
+    *matched_boss = curated_matched || personal_matched;
+  }
+  if (personal_sel.empty()) {
+    return curated_sel;
+  }
+  if (curated_sel.empty()) {
+    return personal_sel;
+  }
+  constexpr std::string_view kSep = "\n\n";
+  // Curated boss notes always take priority; personal notes fill remaining
+  // budget within `kMaxNotesBytes` so personal notes never crowd out or
+  // silently replace curated encounter mechanics.
+  if (curated_sel.size() + kSep.size() + 32 > kMaxNotesBytes) {
+    return curated_sel;
+  }
+  const size_t remaining = kMaxNotesBytes - curated_sel.size() - kSep.size();
+  curated_sel.append(kSep);
+  curated_sel.append(CapText(personal_sel, remaining));
+  return curated_sel;
 }
 
 LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {

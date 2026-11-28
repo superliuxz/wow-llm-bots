@@ -1767,6 +1767,63 @@ TEST(BotLoopTest, AutoLoadsInstanceNotesFromNotesDirOnInstanceEntry) {
   std::filesystem::remove_all(tmp_dir);
 }
 
+TEST(BotLoopTest, PersonalNotesDoNotReplaceCuratedInstanceBossNotes) {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "wlb_bot_loop_notes_merge_test";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir / "notes" / "ICC");
+  std::filesystem::create_directories(tmp_dir / "bots" / "Loada");
+  {
+    std::ofstream f(tmp_dir / "notes" / "ICC" / "notes.md");
+    f << "# Icecrown Citadel (ICC)\n\n"
+      << "## The Lich King\n"
+      << "- Defile: move out immediately.\n"
+      << "```\nin Defile -> out of it\n```\n";
+  }
+  {
+    std::ofstream f(tmp_dir / "bots" / "Loada" / "notes.md");
+    f << "Personal note: bring extra Mana Strudel.\n";
+  }
+
+  CannedBrain brain;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.bots_dir = (tmp_dir / "bots").string();
+  cfg.notes_dir = (tmp_dir / "notes").string();
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(), [](const pb::Command&) {});
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot snap = MakeLiveSnap("Loada", 1, t0, /*in_combat=*/false);
+  snap.base.where.in_instance = true;
+  snap.base.where.map = "Icecrown Citadel";
+  AddKeep(&snap);
+  loop.OnSnapshot(snap, t0);
+
+  ASSERT_EQ(brain.size(), 1u);
+  const std::string user_in_instance = brain.front_request().user;
+  EXPECT_NE(user_in_instance.find("in Defile -> out of it"), std::string::npos);
+  EXPECT_NE(user_in_instance.find("bring extra Mana Strudel"),
+            std::string::npos);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+
+  // Leaving the instance clears curated ICC notes while keeping personal notes.
+  pb::Snapshot outdoor =
+      MakeLiveSnap("Loada", 2, t0 + base::Seconds(5), /*in_combat=*/false);
+  outdoor.base.where.in_instance = false;
+  outdoor.base.where.map = "Dalaran";
+  AddKeep(&outdoor);
+  loop.OnSnapshot(outdoor, t0 + base::Seconds(5));
+  loop.OnTick(t0 + base::Seconds(70));
+
+  ASSERT_EQ(brain.size(), 1u);
+  const std::string user_outdoor = brain.front_request().user;
+  EXPECT_EQ(user_outdoor.find("in Defile -> out of it"), std::string::npos);
+  EXPECT_NE(user_outdoor.find("bring extra Mana Strudel"), std::string::npos);
+
+  std::filesystem::remove_all(tmp_dir);
+}
+
 TEST(BotLoopTest, TellGrammarIncludesOnlyWhisperersAndPartyMembers) {
   CannedBrain brain;
   BotLoopConfig cfg;

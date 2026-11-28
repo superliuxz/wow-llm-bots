@@ -253,6 +253,38 @@ BotAction DecodeOptionFactAction(std::string_view guid,
     }
     return InvalidAction{"unknown group policy"};
   }
+  if (guid.starts_with("group:")) {
+    if (guid == "group:reset") {
+      return GroupLeaderAction{GroupLeaderAction::Op::kResetInstances, "", 0,
+                               std::string(label)};
+    }
+    if (guid.starts_with("group:promote:")) {
+      const std::string_view target = guid.substr(14);
+      if (target.empty()) {
+        return InvalidAction{"invalid promote target"};
+      }
+      return GroupLeaderAction{GroupLeaderAction::Op::kPromote,
+                               std::string(target), 0, std::string(label)};
+    }
+    if (guid.starts_with("group:difficulty:")) {
+      uint32_t diff = 0;
+      if (!ParseUint32(guid.substr(17), &diff) || diff > 1) {
+        return InvalidAction{"invalid dungeon difficulty"};
+      }
+      return GroupLeaderAction{GroupLeaderAction::Op::kSetDifficulty, "", diff,
+                               std::string(label)};
+    }
+    if (guid.starts_with("group:loot:")) {
+      uint32_t method = 0;
+      if (!ParseUint32(guid.substr(11), &method) ||
+          (method != 0 && method != 1 && method != 2 && method != 4)) {
+        return InvalidAction{"invalid loot method"};
+      }
+      return GroupLeaderAction{GroupLeaderAction::Op::kSetLootMethod, "",
+                               method, std::string(label)};
+    }
+    return InvalidAction{"unknown group leader action"};
+  }
   if (guid.starts_with("follow:")) {
     return FollowLeaderAction{std::string(guid.substr(7))};
   }
@@ -522,6 +554,8 @@ std::string_view ActionKindName(const BotAction& action) {
           return "lfg";
         if constexpr (std::is_same_v<T, GroupPolicyAction>)
           return "group_policy";
+        if constexpr (std::is_same_v<T, GroupLeaderAction>)
+          return "group_leader";
         if constexpr (std::is_same_v<T, PopupAnswerAction>)
           return "popup_answer";
         if constexpr (std::is_same_v<T, TradeAction>)

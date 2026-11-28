@@ -24,9 +24,9 @@ Tracking document for findings from the WoW Team Play Review. Each item is tagge
 
 ### Dungeons
 
-- [ ] **[M6]** Tank behavior comes from the talent spec, not the group role. A tank-spec bot next to a human tank keeps `tank assist` and fights the human for aggro.
-- [ ] **[M6]** A non-empty `var/bots/<bot>/notes.md` silently replaces the curated boss notes in every instance.
-- [ ] **[M6]** In a bot-led group (LFG, or a bot invited the human), the human can't get lead: no promote, Heroic toggle, loot method, or reset.
+- [x] **[M6]** Tank behavior comes from the talent spec, not the group role. A tank-spec bot next to a human tank keeps `tank assist` and fights the human for aggro.
+- [x] **[M6]** A non-empty `var/bots/<bot>/notes.md` silently replaces the curated boss notes in every instance.
+- [x] **[M6]** In a bot-led group (LFG, or a bot invited the human), the human can't get lead: no promote, Heroic toggle, loot method, or reset.
 - [x] **[M4]** The pull gate applies only when the human leads. In bot-led groups, DPS bots still get `Attack (not pulled)`.
 
 ### Raids

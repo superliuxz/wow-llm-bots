@@ -96,6 +96,16 @@ std::string SelectRelevantNotes(std::string_view full_notes,
                                 const wlb::snapshot::Snapshot& snapshot,
                                 bool* matched_boss = nullptr);
 
+// Merges curated instance/boss notes with optional per-bot personal notes
+// (`var/bots/<bot>/notes.md`) within the notes prompt budget (M6). Curated
+// boss notes always stay active and take priority; non-empty personal notes
+// are appended cleanly into remaining budget rather than silently replacing
+// curated notes.
+std::string MergeBossNotes(std::string_view curated_notes,
+                           std::string_view personal_notes,
+                           const wlb::snapshot::Snapshot& snapshot,
+                           bool* matched_boss = nullptr);
+
 // Formats raw `memory.md` (optional `## Earlier summary` + newest `max_recent`
 // lines) for `PromptInput::memory`.
 std::string FormatMemoryForPrompt(std::string_view raw_memory,
@@ -125,6 +135,7 @@ struct PromptAssemblyContext {
   std::vector<std::string> extra_present_players;
   std::vector<std::string> remembered;
   std::string raw_notes;
+  std::string raw_personal_notes;
   std::vector<std::string> active_orders;
   std::vector<std::string> extra_order_names;
   int slot = -1;

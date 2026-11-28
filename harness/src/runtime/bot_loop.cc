@@ -1282,7 +1282,7 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   if (left_or_changed_instance) {
     state.compiled_notes.clear();
     if (!in_instance) {
-      state.notes.clear();
+      state.instance_notes.clear();
       state.last_selected_notes.clear();
     }
     if (!state.orders.orders().empty()) {
@@ -1299,13 +1299,8 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   state.last_map = cur_map;
   bool pre_pull_woke = false;
   if (entered_instance) {
-    state.notes.clear();
-    if (!config_.bots_dir.empty()) {
-      state.notes =
-          ReadFile(base::StrCat({config_.bots_dir, "/", bot, "/notes.md"}))
-              .value_or("");
-    }
-    if (state.notes.empty() && !instance_notes_index_.empty()) {
+    state.instance_notes.clear();
+    if (!instance_notes_index_.empty()) {
       const auto lookup = [&](std::string_view raw) -> std::string {
         const std::string key = NormalizeInstanceKey(raw);
         if (key.empty()) {
@@ -1324,16 +1319,22 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
         }
         return "";
       };
-      state.notes = lookup(cur_map);
-      if (state.notes.empty()) {
-        state.notes = lookup(state.latest_snapshot->base.where.zone);
+      state.instance_notes = lookup(cur_map);
+      if (state.instance_notes.empty()) {
+        state.instance_notes = lookup(state.latest_snapshot->base.where.zone);
       }
     }
+    if (!config_.bots_dir.empty()) {
+      state.notes =
+          ReadFile(base::StrCat({config_.bots_dir, "/", bot, "/notes.md"}))
+              .value_or("");
+    }
   }
-  if (in_instance && !state.notes.empty()) {
+  if (in_instance && (!state.instance_notes.empty() || !state.notes.empty())) {
     bool matched_boss = false;
     const std::string selected_notes =
-        SelectRelevantNotes(state.notes, *state.latest_snapshot, &matched_boss);
+        MergeBossNotes(state.instance_notes, state.notes,
+                       *state.latest_snapshot, &matched_boss);
     const bool should_compile =
         !selected_notes.empty() &&
         (entered_instance ||
@@ -1869,13 +1870,8 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
     }
   }
   if (!config_.bots_dir.empty()) {
-    const std::string per_bot = ReadFileIfChanged(
+    state.notes = ReadFileIfChanged(
         base::StrCat({config_.bots_dir, "/", bot, "/notes.md"}));
-    if (!per_bot.empty()) {
-      state.notes = per_bot;
-    } else if (!state.latest_snapshot->base.where.in_instance) {
-      state.notes.clear();
-    }
   }
 
   const Urgency call_urgency = state.queued_urgency;
@@ -1972,7 +1968,8 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
   std::string asked_outcome = std::move(state.last_outcome);
   state.last_outcome.clear();
   ctx.last_outcome = asked_outcome;
-  ctx.raw_notes = state.notes;
+  ctx.raw_notes = state.instance_notes;
+  ctx.raw_personal_notes = state.notes;
   for (const Order& o : state.orders.orders()) {
     ctx.active_orders.push_back(FormatOrder(o));
   }

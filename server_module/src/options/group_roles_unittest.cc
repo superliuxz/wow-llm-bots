@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -182,6 +183,191 @@ TEST(GroupRolesTest, AwayGroupScopeCoversWholeRaidNotJustSubgroup) {
       {.guid = 99, .in_same_group = false, .alive = true, .dist_yd = 2.0f},
   };
   EXPECT_EQ(ResolveNearestGroupMember(/*bot_guid=*/1, solo), std::nullopt);
+}
+
+TEST(GroupRolesTest, ResolveTankStrategyModeRespectsGroupRoleAndHumanTank) {
+  // Solo tank-spec bot keeps tank strategies; solo DPS bot leaves them alone.
+  {
+    TankStrategyInput solo_tank;
+    solo_tank.in_group = false;
+    solo_tank.spec_tank = true;
+    EXPECT_EQ(ResolveTankStrategyMode(solo_tank), TankStrategyMode::kTank);
+
+    TankStrategyInput solo_dps;
+    solo_dps.in_group = false;
+    EXPECT_EQ(ResolveTankStrategyMode(solo_dps), TankStrategyMode::kNone);
+  }
+
+  // Tank-spec bot in a hand-formed 5-man with a human tank must suppress
+  // `tank assist` so it does not fight the human tank for aggro.
+  {
+    TankStrategyInput with_human_tank;
+    with_human_tank.in_group = true;
+    with_human_tank.is_raid = false;
+    with_human_tank.spec_tank = true;
+    with_human_tank.has_tank_strategy = true;
+    with_human_tank.group_has_human_tank = true;
+    EXPECT_EQ(ResolveTankStrategyMode(with_human_tank),
+              TankStrategyMode::kSuppress);
+
+    // Recovery: once the human tank leaves (or bot goes solo), even if
+    // `has_tank_strategy` was stripped earlier, `spec_tank` restores tanking.
+    with_human_tank.has_tank_strategy = false;
+    with_human_tank.group_has_human_tank = false;
+    EXPECT_EQ(ResolveTankStrategyMode(with_human_tank),
+              TankStrategyMode::kTank);
+  }
+
+  // Adversarial counter-test: tank-spec bot in a 5-man with a human DPS (not
+  // tank) stays the tank.
+  {
+    TankStrategyInput with_human_dps;
+    with_human_dps.in_group = true;
+    with_human_dps.is_raid = false;
+    with_human_dps.spec_tank = true;
+    with_human_dps.group_has_human_tank = false;
+    EXPECT_EQ(ResolveTankStrategyMode(with_human_dps), TankStrategyMode::kTank);
+  }
+
+  // Adversarial counter-test: tank-spec bot in a raid with a human tank stays
+  // an active off-tank unless `not_tank_policy` or LFG DPS role is set.
+  {
+    TankStrategyInput raid_ot;
+    raid_ot.in_group = true;
+    raid_ot.is_raid = true;
+    raid_ot.spec_tank = true;
+    raid_ot.group_has_human_tank = true;
+    EXPECT_EQ(ResolveTankStrategyMode(raid_ot), TankStrategyMode::kTank);
+
+    raid_ot.not_tank_policy = true;
+    EXPECT_EQ(ResolveTankStrategyMode(raid_ot), TankStrategyMode::kSuppress);
+  }
+
+  // LFG role overrides talent spec in both directions.
+  {
+    TankStrategyInput prot_as_dps;
+    prot_as_dps.in_group = true;
+    prot_as_dps.spec_tank = true;
+    prot_as_dps.lfg_role = pb::Role::DPS;
+    EXPECT_EQ(ResolveTankStrategyMode(prot_as_dps),
+              TankStrategyMode::kSuppress);
+
+    TankStrategyInput prot_as_healer = prot_as_dps;
+    prot_as_healer.lfg_role = pb::Role::HEALER;
+    EXPECT_EQ(ResolveTankStrategyMode(prot_as_healer),
+              TankStrategyMode::kSuppress);
+
+    TankStrategyInput dps_as_dps;
+    dps_as_dps.in_group = true;
+    dps_as_dps.lfg_role = pb::Role::DPS;
+    EXPECT_EQ(ResolveTankStrategyMode(dps_as_dps), TankStrategyMode::kNone);
+
+    // Explicitly assigned LFG Tank tanks even if a human in the party happens
+    // to be tank-spec (queued as DPS).
+    TankStrategyInput lfg_tank;
+    lfg_tank.in_group = true;
+    lfg_tank.spec_tank = false;
+    lfg_tank.lfg_role = pb::Role::TANK;
+    lfg_tank.group_has_human_tank = true;
+    EXPECT_EQ(ResolveTankStrategyMode(lfg_tank), TankStrategyMode::kTank);
+  }
+}
+
+TEST(GroupRolesTest, CollectGroupLeaderControlsBotLedWithHumanAndCounterTests) {
+  auto has_guid = [](const std::vector<pb::OptionFacts_Action>& opts,
+                     std::string_view guid) {
+    for (const auto& o : opts) {
+      if (o.guid == guid) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Bot-led 5-man with a connected human outside a dungeon (Normal, Group
+  // Loot): offers promote, Heroic toggle, other loot methods, and reset.
+  GroupLeaderControlsInput in;
+  in.in_group = true;
+  in.self_is_leader = true;
+  in.alive = true;
+  in.in_combat = false;
+  in.is_raid = false;
+  in.is_lfg_restricted = false;
+  in.all_members_in_world = true;
+  in.any_member_in_dungeon = false;
+  in.current_heroic = false;
+  in.current_loot_method = 2;  // GROUP_LOOT
+  in.human_members.push_back({"0x0000000000000042", "Arthas", true});
+
+  {
+    const auto opts = CollectGroupLeaderControls(in);
+    EXPECT_TRUE(has_guid(opts, "group:promote:0x0000000000000042"));
+    EXPECT_TRUE(has_guid(opts, "group:difficulty:1"));
+    EXPECT_FALSE(has_guid(opts, "group:difficulty:0"));
+    EXPECT_TRUE(has_guid(opts, "group:loot:0"));
+    EXPECT_FALSE(has_guid(opts, "group:loot:2"));  // Already Group Loot.
+    EXPECT_TRUE(has_guid(opts, "group:loot:4"));
+    EXPECT_TRUE(has_guid(opts, "group:reset"));
+  }
+
+  // Heroic + Free-for-All flips to Normal and offers Group Loot + NBG.
+  {
+    auto heroic = in;
+    heroic.current_heroic = true;
+    heroic.current_loot_method = 0;  // FREE_FOR_ALL
+    const auto opts = CollectGroupLeaderControls(heroic);
+    EXPECT_TRUE(has_guid(opts, "group:difficulty:0"));
+    EXPECT_FALSE(has_guid(opts, "group:difficulty:1"));
+    EXPECT_FALSE(has_guid(opts, "group:loot:0"));
+    EXPECT_TRUE(has_guid(opts, "group:loot:2"));
+    EXPECT_TRUE(has_guid(opts, "group:loot:4"));
+  }
+
+  // LFG-restricted bot-led group: STILL offers Promote human, but blocks
+  // Heroic toggle, loot method, and reset.
+  {
+    auto lfg = in;
+    lfg.is_lfg_restricted = true;
+    const auto opts = CollectGroupLeaderControls(lfg);
+    ASSERT_EQ(opts.size(), 1u);
+    EXPECT_EQ(opts[0].guid, "group:promote:0x0000000000000042");
+  }
+
+  // Member inside a dungeon: offers Promote + loot method, blocks Heroic
+  // toggle and reset.
+  {
+    auto inside = in;
+    inside.any_member_in_dungeon = true;
+    const auto opts = CollectGroupLeaderControls(inside);
+    EXPECT_TRUE(has_guid(opts, "group:promote:0x0000000000000042"));
+    EXPECT_TRUE(has_guid(opts, "group:loot:0"));
+    EXPECT_FALSE(has_guid(opts, "group:difficulty:1"));
+    EXPECT_FALSE(has_guid(opts, "group:reset"));
+  }
+
+  // Adversarial counter-tests: all-bot group, non-leader, solo, in combat,
+  // dead -> empty.
+  {
+    auto all_bot = in;
+    all_bot.human_members.clear();
+    EXPECT_TRUE(CollectGroupLeaderControls(all_bot).empty());
+
+    auto not_leader = in;
+    not_leader.self_is_leader = false;
+    EXPECT_TRUE(CollectGroupLeaderControls(not_leader).empty());
+
+    auto solo = in;
+    solo.in_group = false;
+    EXPECT_TRUE(CollectGroupLeaderControls(solo).empty());
+
+    auto combat = in;
+    combat.in_combat = true;
+    EXPECT_TRUE(CollectGroupLeaderControls(combat).empty());
+
+    auto dead = in;
+    dead.alive = false;
+    EXPECT_TRUE(CollectGroupLeaderControls(dead).empty());
+  }
 }
 
 }  // namespace

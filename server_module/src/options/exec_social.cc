@@ -65,6 +65,7 @@
 #include "options/action_types.h"
 #include "options/exec_items.h"
 #include "options/exec_shared.h"
+#include "options/group_roles.h"
 #include "options/loot_roll_policy.h"
 #include "options/options.h"
 #include "options/riding_mounts.h"
@@ -735,9 +736,13 @@ void CollectGroupAndUpkeepActions(Player* bot,
                         "usable spec upgrades, else Disenchant/Greed)"});
       }
       const BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
+      const bool self_effective_tank =
+          snapshot.base.self.unit.group &&
+          (snapshot.base.self.unit.group->role == pb::TANK ||
+           snapshot.base.self.unit.group->main_tank);
       if (policy.not_tank) {
         out->push_back({"grouppolicy:tank", "Tank for the group again"});
-      } else if (PlayerbotAI::IsTank(bot)) {
+      } else if (self_effective_tank) {
         for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
              itr = itr->next()) {
           Player* m = itr->GetSource();
@@ -761,6 +766,56 @@ void CollectGroupAndUpkeepActions(Player* bot,
               {"grouppolicy:stay", "Wait here (stop following the leader)"});
         }
       }
+
+      // 5c. Bot-led group controls when a human is in the group (M6): promote
+      //     human to leader, toggle Heroic/Normal dungeon difficulty, change
+      //     loot method, or reset instances.
+      if (leader_guid == bot->GetGUID()) {
+        GroupLeaderControlsInput gl_in;
+        gl_in.in_group = true;
+        gl_in.self_is_leader = true;
+        gl_in.alive = true;
+        gl_in.in_combat = false;
+        gl_in.is_raid = group->isRaidGroup();
+        gl_in.is_lfg_restricted = group->isLFGGroup(true);
+        gl_in.current_heroic =
+            group->GetDungeonDifficulty() == DUNGEON_DIFFICULTY_HEROIC;
+        gl_in.current_loot_method =
+            static_cast<uint32_t>(group->GetLootMethod());
+        gl_in.all_members_in_world = true;
+        gl_in.any_member_in_dungeon =
+            bot->GetMap() && bot->GetMap()->IsDungeon();
+        for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+          if (slot.guid == bot->GetGUID()) {
+            continue;
+          }
+          Player* m = ObjectAccessor::FindConnectedPlayer(slot.guid);
+          if (!m || !m->IsInWorld()) {
+            gl_in.all_members_in_world = false;
+            if (m && IsHumanPlayer(m)) {
+              gl_in.human_members.push_back(
+                  {base::StringPrintf("0x%016llx",
+                                      static_cast<unsigned long long>(
+                                          slot.guid.GetRawValue())),
+                   slot.name, /*online_in_world=*/false});
+            }
+            continue;
+          }
+          if (m->GetMap() && m->GetMap()->IsNonRaidDungeon()) {
+            gl_in.any_member_in_dungeon = true;
+          }
+          if (IsHumanPlayer(m)) {
+            gl_in.human_members.push_back(
+                {base::StringPrintf(
+                     "0x%016llx",
+                     static_cast<unsigned long long>(slot.guid.GetRawValue())),
+                 m->GetName(), /*online_in_world=*/true});
+          }
+        }
+        for (pb::OptionFacts_Action& act : CollectGroupLeaderControls(gl_in)) {
+          out->push_back(std::move(act));
+        }
+      }
     }
   }
 
@@ -770,11 +825,15 @@ void CollectGroupAndUpkeepActions(Player* bot,
   //    Skull-marked mob as an active attacker, so marking an unpulled mob
   //    chain-pulls its pack.
   if (bot->IsAlive()) {
+    const bool self_effective_tank =
+        snapshot.base.self.unit.group &&
+        (snapshot.base.self.unit.group->role == pb::TANK ||
+         snapshot.base.self.unit.group->main_tank);
     if (Group* group = bot->GetGroup();
         group &&
         (group->IsLeader(bot->GetGUID()) ||
          group->IsAssistant(bot->GetGUID()) ||
-         (!group->isRaidGroup() && PlayerbotAI::IsTank(bot) &&
+         (!group->isRaidGroup() && self_effective_tank &&
           !BotManager::GetGroupPolicy(bot).not_tank)) &&
         group->GetTargetIcon(7).IsEmpty()) {
       const pb::Unit* best = nullptr;
@@ -1356,6 +1415,109 @@ ActionOutcome ExecuteGroupPolicyAction(Player* bot,
   }
   BotManager::SetGroupPolicy(bot, policy);
   return {.used = true, .info = std::move(info)};
+}
+
+ActionOutcome ExecuteGroupLeaderAction(Player* bot,
+                                       const GroupLeaderAction& action) {
+  Group* group = bot ? bot->GetGroup() : nullptr;
+  if (!group) {
+    return {.error = "you are not in a group"};
+  }
+  if (!group->IsLeader(bot->GetGUID())) {
+    return {.error = "only the party leader can do that"};
+  }
+  if (bot->IsInCombat()) {
+    return {.error = "cannot change group settings in combat"};
+  }
+  switch (action.op) {
+    case GroupLeaderAction::Op::kPromote: {
+      const ObjectGuid target_guid = ParseSnapshotGuid(action.target_guid);
+      Player* target = ObjectAccessor::FindConnectedPlayer(target_guid);
+      if (!target || !target->IsInWorld() || target->GetGroup() != group ||
+          target_guid == bot->GetGUID()) {
+        return {.error = "that player is not an online party member"};
+      }
+      group->ChangeLeader(target_guid);
+      group->SendUpdate();
+      return {.used = true,
+              .info = "promoted " + target->GetName() + " to party leader"};
+    }
+    case GroupLeaderAction::Op::kSetDifficulty: {
+      if (group->isRaidGroup() || group->isLFGGroup(true)) {
+        return {.error = "cannot change dungeon difficulty in this group"};
+      }
+      if (action.value >= MAX_DUNGEON_DIFFICULTY) {
+        return {.error = "invalid dungeon difficulty"};
+      }
+      const Difficulty diff = static_cast<Difficulty>(action.value);
+      if (group->GetDungeonDifficulty() == diff) {
+        return {.used = true,
+                .info = diff == DUNGEON_DIFFICULTY_HEROIC
+                            ? "dungeon difficulty is already Heroic"
+                            : "dungeon difficulty is already Normal"};
+      }
+      for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
+           itr = itr->next()) {
+        Player* m = itr->GetSource();
+        if (!m || !m->IsInWorld()) {
+          return {.error =
+                      "everyone must be online to change dungeon difficulty"};
+        }
+        const bool in_dng =
+            m->GetGUID() == bot->GetGUID()
+                ? (m->GetMap() && m->GetMap()->IsDungeon())
+                : (m->GetMap() && m->GetMap()->IsNonRaidDungeon());
+        if (in_dng) {
+          return {.error =
+                      "everyone must be outside the dungeon to change "
+                      "difficulty"};
+        }
+      }
+      group->ResetInstances(INSTANCE_RESET_CHANGE_DIFFICULTY, false, bot);
+      group->SetDungeonDifficulty(diff);
+      return {.used = true,
+              .info = diff == DUNGEON_DIFFICULTY_HEROIC
+                          ? "set dungeon difficulty to Heroic"
+                          : "set dungeon difficulty to Normal"};
+    }
+    case GroupLeaderAction::Op::kSetLootMethod: {
+      if (group->isLFGGroup(true)) {
+        return {.error = "cannot change loot method in a Dungeon Finder group"};
+      }
+      if (action.value > NEED_BEFORE_GREED || action.value == MASTER_LOOT) {
+        return {.error = "invalid loot method"};
+      }
+      const LootMethod method = static_cast<LootMethod>(action.value);
+      group->SetLootMethod(method);
+      group->SendUpdate();
+      const char* name = "Group Loot";
+      if (method == FREE_FOR_ALL) {
+        name = "Free-for-All";
+      } else if (method == ROUND_ROBIN) {
+        name = "Round Robin";
+      } else if (method == NEED_BEFORE_GREED) {
+        name = "Need Before Greed";
+      }
+      return {.used = true, .info = std::string("set loot method to ") + name};
+    }
+    case GroupLeaderAction::Op::kResetInstances: {
+      if (group->isLFGGroup(true)) {
+        return {.error = "cannot reset a Dungeon Finder instance"};
+      }
+      for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
+           itr = itr->next()) {
+        Player* m = itr->GetSource();
+        if (m && m->IsInWorld() && m->GetMap() && m->GetMap()->IsDungeon()) {
+          return {.error =
+                      "everyone must be outside the dungeon to reset "
+                      "instances"};
+        }
+      }
+      group->ResetInstances(INSTANCE_RESET_ALL, false, bot);
+      return {.used = true, .info = "reset all instances"};
+    }
+  }
+  return {.error = "unknown group leader action"};
 }
 
 ActionOutcome ExecuteFollowLeaderAction(Player* bot,

@@ -141,6 +141,21 @@ struct GroupPolicyAction {
   Op op = Op::kFollow;
 };
 
+// Bot-led group controls (M6): promote a member to leader, toggle 5-man
+// dungeon difficulty (Normal/Heroic), change loot method, or reset instances.
+struct GroupLeaderAction {
+  enum class Op : uint8_t {
+    kPromote,
+    kSetDifficulty,
+    kSetLootMethod,
+    kResetInstances,
+  };
+  Op op = Op::kResetInstances;
+  std::string target_guid;  // kPromote
+  uint32_t value = 0;       // kSetDifficulty or kSetLootMethod
+  std::string label;
+};
+
 // Casts a crowd-control spell on a marked mob (Now #4).
 struct CrowdControlAction {
   uint32_t spell_id = 0;
@@ -273,6 +288,7 @@ using BotAction = std::variant<KeepAction,
                                ItemQuestAction,
                                LfgAction,
                                GroupPolicyAction,
+                               GroupLeaderAction,
                                PopupAnswerAction,
                                TradeAction,
                                CrowdControlAction,

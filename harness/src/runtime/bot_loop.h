@@ -153,7 +153,8 @@ class BotLoop {
 
     bool identity_loaded = false;
     std::string identity;
-    std::string notes;
+    std::string instance_notes;  // Curated content/notes/<instance>/notes.md.
+    std::string notes;           // Per-bot var/bots/<bot>/notes.md.
     std::string current_goal;
     std::string last_outcome;
     std::deque<std::string> recent_events;

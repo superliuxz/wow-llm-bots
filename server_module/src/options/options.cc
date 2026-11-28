@@ -694,7 +694,8 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
     BotAction decoded = DecodeOptionFactAction(act.guid, act.label);
     if ((std::holds_alternative<DestroyItemAction>(decoded) ||
          std::holds_alternative<AbandonQuestAction>(decoded) ||
-         std::holds_alternative<ItemQuestAction>(decoded)) &&
+         std::holds_alternative<ItemQuestAction>(decoded) ||
+         std::holds_alternative<GroupLeaderAction>(decoded)) &&
         (!alive || self.in_combat)) {
       continue;
     }

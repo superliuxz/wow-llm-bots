@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <string>
 #include <tuple>
 #include <vector>
 
@@ -124,6 +125,79 @@ std::optional<uint64_t> ResolveNearestGroupMember(
     }
   }
   return best;
+}
+
+TankStrategyMode ResolveTankStrategyMode(const TankStrategyInput& in) {
+  const bool tank_capable = in.spec_tank || in.has_tank_strategy;
+  if (!in.in_group) {
+    return tank_capable ? TankStrategyMode::kTank : TankStrategyMode::kNone;
+  }
+  if (in.not_tank_policy) {
+    return TankStrategyMode::kSuppress;
+  }
+  if (in.main_tank_flag || in.lfg_role == pb::Role::TANK) {
+    return TankStrategyMode::kTank;
+  }
+  if (in.lfg_role == pb::Role::DPS || in.lfg_role == pb::Role::HEALER) {
+    return tank_capable ? TankStrategyMode::kSuppress : TankStrategyMode::kNone;
+  }
+  // Hand-formed group (no LFG role, no Main Tank flag): in a 5-man party with
+  // a human tank, yield tanking so a tank-spec bot does not fight the human
+  // tank for aggro. In raids, multiple tanks are normal (MT + OT).
+  if (!in.is_raid && in.group_has_human_tank) {
+    return tank_capable ? TankStrategyMode::kSuppress : TankStrategyMode::kNone;
+  }
+  return tank_capable ? TankStrategyMode::kTank : TankStrategyMode::kNone;
+}
+
+std::vector<pb::OptionFacts_Action> CollectGroupLeaderControls(
+    const GroupLeaderControlsInput& in) {
+  std::vector<pb::OptionFacts_Action> out;
+  if (!in.in_group || !in.self_is_leader || !in.alive || in.in_combat ||
+      in.human_members.empty()) {
+    return out;
+  }
+  // 1. Promote a connected human to leader (valid in regular, raid, and LFG
+  //    groups alike: WorldSession::HandleGroupSetLeaderOpcode).
+  for (const GroupLeaderControlsInput::HumanMember& h : in.human_members) {
+    if (h.online_in_world && !h.guid.empty() && !h.name.empty()) {
+      out.push_back({"group:promote:" + h.guid,
+                     "Promote " + h.name + " to party leader"});
+    }
+  }
+  // 2. Dungeon difficulty toggle (Normal <-> Heroic): non-raid, non-restricted
+  //    LFG, all members in world, nobody inside a dungeon.
+  if (!in.is_raid && !in.is_lfg_restricted && in.all_members_in_world &&
+      !in.any_member_in_dungeon) {
+    if (in.current_heroic) {
+      out.push_back({"group:difficulty:0", "Set dungeon difficulty to Normal"});
+    } else {
+      out.push_back({"group:difficulty:1", "Set dungeon difficulty to Heroic"});
+    }
+  }
+  // 3. Loot method: non-restricted LFG (HandleLootMethodOpcode rejects
+  //    isLFGGroup(true)).
+  if (!in.is_lfg_restricted) {
+    struct LootOption {
+      uint32_t method;
+      const char* label;
+    };
+    static constexpr LootOption kLootOptions[] = {
+        {0, "Set loot method to Free-for-All"},
+        {2, "Set loot method to Group Loot"},
+        {4, "Set loot method to Need Before Greed"},
+    };
+    for (const LootOption& opt : kLootOptions) {
+      if (opt.method != in.current_loot_method) {
+        out.push_back({"group:loot:" + std::to_string(opt.method), opt.label});
+      }
+    }
+  }
+  // 4. Reset all instances: non-restricted LFG, nobody inside a dungeon.
+  if (!in.is_lfg_restricted && !in.any_member_in_dungeon) {
+    out.push_back({"group:reset", "Reset all instances"});
+  }
+  return out;
 }
 
 }  // namespace llm_brain

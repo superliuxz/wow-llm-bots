@@ -482,6 +482,31 @@ bool IsGroupTankMember(Group* group, Player* member) {
   return false;
 }
 
+// Whether another member of `group` is a human tank (main-tank flag, LFG tank
+// role, or tank spec/stance). Checks flags/LFG even if the human is mid-zone.
+bool GroupHasHumanTank(Group* group, Player* self) {
+  if (!group) {
+    return false;
+  }
+  for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+    if (self && slot.guid == self->GetGUID()) {
+      continue;
+    }
+    Player* member = ObjectAccessor::FindConnectedPlayer(slot.guid);
+    if (!member || !IsHumanPlayer(member)) {
+      continue;
+    }
+    if ((slot.flags & MEMBER_FLAG_MAINTANK) != 0 ||
+        (slot.roles & lfg::PLAYER_ROLE_TANK) != 0) {
+      return true;
+    }
+    if (member->IsInWorld() && IsGroupTankMember(group, member)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Whether `bot`'s playerbots reflex taunt (`action_name`) should be suppressed
 // to avoid taunt ping-pong with another living group tank (M1b).
 bool ShouldBlockReflexTaunt(Player* bot,
@@ -2120,10 +2145,40 @@ void BotManager::EnsureStrategies(Player* player) {
   const bool is_healer = healer_spec != HealerSpec::kNone;
   const std::string extras(
       HealerCombatStrategyDelta(healer_spec, player->GetGroup() != nullptr));
+  Group* group = player->GetGroup();
+  const bool in_group = group != nullptr;
+  const GroupPolicy policy = GetGroupPolicy(player);  // Empty outside it.
+  // Derive tank combat strategy mode from effective group role rather than raw
+  // talent spec so a tank-spec bot assigned DPS/Healer (or in a 5-man with a
+  // human tank) does not keep `tank assist` active and fight for aggro (M6).
+  TankStrategyInput tank_in;
+  tank_in.in_group = in_group;
+  tank_in.is_raid = in_group && group->isRaidGroup();
+  tank_in.spec_tank = PlayerbotAI::IsTank(player, /*bySpec=*/true);
+  tank_in.has_tank_strategy = PlayerbotAI::IsTank(player, /*bySpec=*/false);
+  tank_in.not_tank_policy = policy.not_tank;
+  if (in_group) {
+    tank_in.group_has_human_tank = GroupHasHumanTank(group, player);
+    for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+      if (slot.guid == player->GetGUID()) {
+        tank_in.main_tank_flag = (slot.flags & MEMBER_FLAG_MAINTANK) != 0;
+        if (slot.roles & lfg::PLAYER_ROLE_TANK) {
+          tank_in.lfg_role = wlb::snapshot::Role::TANK;
+        } else if (slot.roles & lfg::PLAYER_ROLE_HEALER) {
+          tank_in.lfg_role = wlb::snapshot::Role::HEALER;
+        } else if (slot.roles & lfg::PLAYER_ROLE_DAMAGE) {
+          tank_in.lfg_role = wlb::snapshot::Role::DPS;
+        }
+        break;
+      }
+    }
+  }
+  const TankStrategyMode tank_mode = ResolveTankStrategyMode(tank_in);
   // Role-aware combat strategies: never apply "+dps assist" or "-threat" to
-  // tanks (which would strip playerbots' tank assist / threat / pull behavior).
+  // active tanks (which would strip playerbots' tank assist / threat / pull
+  // behavior).
   std::string base_combat = strategies_.combat;
-  if (PlayerbotAI::IsTank(player)) {
+  if (tank_mode == TankStrategyMode::kTank) {
     std::vector<std::string> kept;
     for (const StrategyCheck& check : StrategyChecks(base_combat)) {
       if (check.name == "dps assist" || check.name == "threat") {
@@ -2139,8 +2194,6 @@ void BotManager::EnsureStrategies(Player* player) {
       base_combat += kept[i];
     }
   }
-  Group* group = player->GetGroup();
-  const bool in_group = group != nullptr;
   if (in_group) {
     base_combat = GroupedCombatStrategies(base_combat, is_healer);
   }
@@ -2203,7 +2256,6 @@ void BotManager::EnsureStrategies(Player* player) {
     }
   }
   // The brain's own choice for this group comes last, so it wins (RH-M1/M2).
-  const GroupPolicy policy = GetGroupPolicy(player);  // Empty outside it.
   // Don't break crowd control: no area damage while a CC'd mob is near; the
   // area strategies the bot had come back after (Now #4).
   if (player->GetGroup()) {
@@ -2240,10 +2292,11 @@ void BotManager::EnsureStrategies(Player* player) {
                player->GetName(), now_aoe.front());
     }
   }
-  // Both directions are spelled out: clearing a policy must undo it (T4).
-  if (policy.not_tank) {
+  // Both directions are spelled out: clearing a policy or role change must
+  // undo the previous tank/dps assist strategies (T4, M6).
+  if (tank_mode == TankStrategyMode::kSuppress) {
     combat += ",-tank assist,-pull back,+dps assist";
-  } else if (PlayerbotAI::IsTank(player)) {
+  } else if (tank_mode == TankStrategyMode::kTank) {
     combat += ",+tank assist,+pull back,-dps assist";
   }
   // Warlock `cc` strategy casts Fear on the moon CC target, sending it into
