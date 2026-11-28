@@ -90,6 +90,9 @@ struct BotSession {
   // Auto-release hold & explicit `rez:wait` timers (ms).
   std::optional<uint32_t> dead_since_ms;
   std::optional<uint32_t> rez_wait_until_ms;
+  // Set by a leader `"wipe"` / `"release"` command so dead bots (or bots that
+  // die within the window) release immediately instead of waiting for a rez.
+  std::optional<uint32_t> wipe_release_until_ms;
 
   // Current intermediate waypoint for `BotManager::KeepCorpseRun` (M4a #6) so
   // long ghost runs don't re-path every tick while making progress. Cleared on

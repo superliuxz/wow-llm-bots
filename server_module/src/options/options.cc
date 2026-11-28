@@ -879,6 +879,119 @@ void CollectTauntActions(const pb::Snapshot& snapshot,
   }
 }
 
+void CollectBattleResActions(const pb::Snapshot& snapshot,
+                             const BattleResCapability& cap,
+                             std::vector<pb::OptionFacts_Action>* out) {
+  if (!out || snapshot.base.self.state != pb::Self::ALIVE ||
+      !snapshot.ext.party) {
+    return;
+  }
+  constexpr float kBattleResRangeYd = 30.0f;
+  constexpr size_t kMaxBattleResOptions = 3;
+  const auto role_tag = [](const pb::Unit& m) -> std::string {
+    if (!m.group) {
+      return "";
+    }
+    if (m.group->main_tank || m.group->role == pb::TANK) {
+      return " (tank)";
+    }
+    if (m.group->role == pb::HEALER) {
+      return " (healer)";
+    }
+    if (m.group->role == pb::DPS) {
+      return " (dps)";
+    }
+    return "";
+  };
+
+  // Druid Rebirth: combat resurrection on dead, online, in-range group members.
+  if (cap.rebirth_spell_id != 0 && snapshot.base.self.in_combat) {
+    std::vector<const pb::Unit*> dead_allies;
+    for (const pb::Unit& m : snapshot.ext.party->members) {
+      if (!m.dead || m.guid.empty() || m.name.empty() || !m.group ||
+          !m.group->online || !m.group->in_range) {
+        continue;
+      }
+      if (std::isfinite(m.rel.dist_yd) && m.rel.dist_yd > kBattleResRangeYd) {
+        continue;
+      }
+      dead_allies.push_back(&m);
+    }
+    std::sort(dead_allies.begin(), dead_allies.end(),
+              [](const pb::Unit* a, const pb::Unit* b) {
+                const float da =
+                    std::isfinite(a->rel.dist_yd) ? a->rel.dist_yd : 999.0f;
+                const float db =
+                    std::isfinite(b->rel.dist_yd) ? b->rel.dist_yd : 999.0f;
+                if (da != db) {
+                  return da < db;
+                }
+                return a->name < b->name;
+              });
+    const std::string spell_name =
+        cap.rebirth_spell_name.empty() ? "Rebirth" : cap.rebirth_spell_name;
+    const size_t limit = std::min(dead_allies.size(), kMaxBattleResOptions);
+    for (size_t i = 0; i < limit; ++i) {
+      const pb::Unit* m = dead_allies[i];
+      out->push_back(
+          {"brez:" + std::to_string(cap.rebirth_spell_id) + ":" + m->guid,
+           "Battle res " + m->name + role_tag(*m) + " with " + spell_name});
+    }
+  }
+
+  // Warlock Soulstone: preemptive combat res buff on a living ally when nobody
+  // in the group already holds Soulstone Resurrection.
+  if (cap.soulstone_item_entry != 0) {
+    auto has_soulstone = [](const std::vector<pb::Aura>& auras) {
+      return std::any_of(auras.begin(), auras.end(), [](const pb::Aura& a) {
+        return a.id == 20707 || a.name == "Soulstone Resurrection";
+      });
+    };
+    bool already_active = has_soulstone(snapshot.base.self.unit.auras);
+    for (const pb::Unit& m : snapshot.ext.party->members) {
+      if (has_soulstone(m.auras)) {
+        already_active = true;
+        break;
+      }
+    }
+    if (!already_active) {
+      std::vector<const pb::Unit*> living_allies;
+      for (const pb::Unit& m : snapshot.ext.party->members) {
+        if (m.dead || m.guid.empty() || m.name.empty() || !m.group ||
+            !m.group->online || !m.group->in_range) {
+          continue;
+        }
+        if (std::isfinite(m.rel.dist_yd) && m.rel.dist_yd > kBattleResRangeYd) {
+          continue;
+        }
+        living_allies.push_back(&m);
+      }
+      std::sort(living_allies.begin(), living_allies.end(),
+                [](const pb::Unit* a, const pb::Unit* b) {
+                  const float da =
+                      std::isfinite(a->rel.dist_yd) ? a->rel.dist_yd : 999.0f;
+                  const float db =
+                      std::isfinite(b->rel.dist_yd) ? b->rel.dist_yd : 999.0f;
+                  if (da != db) {
+                    return da < db;
+                  }
+                  return a->name < b->name;
+                });
+      const std::string item_name = cap.soulstone_item_name.empty()
+                                        ? "Soulstone"
+                                        : cap.soulstone_item_name;
+      const size_t limit = std::min(living_allies.size(), kMaxBattleResOptions);
+      for (size_t i = 0; i < limit; ++i) {
+        const pb::Unit* m = living_allies[i];
+        out->push_back(
+            {"soulstone:" + std::to_string(cap.soulstone_item_entry) + ":" +
+                 m->guid,
+             "Use " + item_name + " on " + m->name + role_tag(*m)});
+      }
+    }
+  }
+}
+
 std::string EscortStartHoldReason(
     bool self_is_leader,
     const std::vector<EscortPartyMember>& members) {

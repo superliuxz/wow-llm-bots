@@ -96,6 +96,11 @@ constexpr Phrase kPhrases[] = {
     {"go dps", LeaderCommand::kResumeDps},
     {"burn", LeaderCommand::kResumeDps},
     {"nuke", LeaderCommand::kResumeDps},
+    {"wipe", LeaderCommand::kWipe},
+    {"wipe it", LeaderCommand::kWipe},
+    {"call wipe", LeaderCommand::kWipe},
+    {"release", LeaderCommand::kWipe},
+    {"release spirit", LeaderCommand::kWipe},
 };
 
 // "<verb> <icon>": who to kill (or pull) by its raid mark.
@@ -240,6 +245,8 @@ const char* LeaderCommandName(LeaderCommand command) {
       return "stop dps";
     case LeaderCommand::kResumeDps:
       return "resume dps";
+    case LeaderCommand::kWipe:
+      return "wipe";
   }
   return "?";
 }
@@ -272,6 +279,10 @@ bool IsLeaderCommandForBot(bool sender_is_human,
     return true;
   }
   return sender_is_leader || !leader_is_human;
+}
+
+bool ShouldApplySpreadOrStack(bool is_tank, bool explicitly_addressed) {
+  return !is_tank || explicitly_addressed;
 }
 
 }  // namespace llm_brain

@@ -31,10 +31,10 @@ Tracking document for findings from the WoW Team Play Review. Each item is tagge
 
 ### Raids
 
-- [ ] **[M11]** Raid members' buffs and debuffs are invisible except on tanks, so `<debuff> on anyone`, dispels, and rebuffs can't work.
-- [ ] **[M11]** `/rw spread` and `/rw stack` move tanks too. At 25-man the spread ring is about 5 yd apart.
-- [ ] **[M11]** Bots have no battle res and there's no wipe/release command. Dead bots wait up to 5 min while any healer lives.
-- [ ] **[M11]** DBM fields and `ext.instance` (difficulty, lockout) are in the schema, but nothing fills them.
+- [x] **[M11]** Raid members' buffs and debuffs are invisible except on tanks, so `<debuff> on anyone`, dispels, and rebuffs can't work.
+- [x] **[M11]** `/rw spread` and `/rw stack` move tanks too. At 25-man the spread ring is about 5 yd apart.
+- [x] **[M11]** Bots have no battle res and there's no wipe/release command. Dead bots wait up to 5 min while any healer lives.
+- [x] **[M11]** DBM fields and `ext.instance` (difficulty, lockout) are in the schema, but nothing fills them.
 - [x] **[M9]** Each boss emote wakes all ~24 bots at top priority. The pull starts 24 order compiles of up to 350 tokens each, so reactions lag by seconds.
 
 ### Combat

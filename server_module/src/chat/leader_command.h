@@ -31,6 +31,7 @@ enum class LeaderCommand {
   kStack,           // "stack", "stack up", "stack on me": stack on speaker
   kStopDps,         // "stop dps", "hold dps", "cease fire": halt attacks
   kResumeDps,       // "resume", "resume dps", "dps", "burn": lift stop dps
+  kWipe,            // "wipe", "release", "release spirit": release immediately
 };
 
 struct ParsedLeaderCommand {
@@ -68,6 +69,11 @@ bool IsLeaderCommandForBot(bool sender_is_human,
                            bool is_whisper,
                            const ParsedLeaderCommand& parsed,
                            std::string_view bot_name);
+
+// True when a bot should move for `/rw spread` or `/rw stack`: tanks are
+// excluded by default so they don't spin or drag the boss, unless explicitly
+// addressed by name (M11).
+bool ShouldApplySpreadOrStack(bool is_tank, bool explicitly_addressed);
 
 }  // namespace llm_brain
 

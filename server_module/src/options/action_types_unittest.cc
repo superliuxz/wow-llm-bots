@@ -61,6 +61,30 @@ TEST(ActionTypesTest, DecodesTypedNpcAndGroupActions) {
     }
   }
   {
+    BotAction a = DecodeOptionFactAction(
+        "brez:48477:0x10", "Battle res Hele (healer) with Rebirth");
+    const auto* brez = std::get_if<BattleResAction>(&a);
+    ASSERT_NE(brez, nullptr);
+    EXPECT_EQ(brez->spell_id, 48477u);
+    EXPECT_EQ(brez->item_entry, 0u);
+    EXPECT_EQ(brez->target_guid, "0x10");
+    EXPECT_EQ(ActionKindName(a), "battle_res");
+    EXPECT_FALSE(IsDeadAllowedAction(a));
+    BotAction ss = DecodeOptionFactAction("soulstone:36895:0x11",
+                                          "Use Demonic Soulstone on Hele");
+    const auto* ss_act = std::get_if<BattleResAction>(&ss);
+    ASSERT_NE(ss_act, nullptr);
+    EXPECT_EQ(ss_act->spell_id, 0u);
+    EXPECT_EQ(ss_act->item_entry, 36895u);
+    EXPECT_EQ(ss_act->target_guid, "0x11");
+    for (const char* bad : {"brez:0:0x10", "brez:48477:", "soulstone:0:0x11",
+                            "soulstone:36895"}) {
+      EXPECT_TRUE(std::holds_alternative<InvalidAction>(
+          DecodeOptionFactAction(bad, "bad")))
+          << bad;
+    }
+  }
+  {
     BotAction a = DecodeOptionFactAction("roll:0x100:3:3", "Disenchant Sword");
     const auto* roll = std::get_if<LootRollAction>(&a);
     ASSERT_NE(roll, nullptr);

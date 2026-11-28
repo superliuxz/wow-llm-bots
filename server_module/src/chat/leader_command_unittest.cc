@@ -180,6 +180,26 @@ TEST(LeaderCommandTest, RaidTacticsSpreadStackStopAndResumeDps) {
   EXPECT_FALSE(Cmd("who stopped dps?"));
   EXPECT_FALSE(Cmd("stop the patrol"));
   EXPECT_FALSE(Cmd("stack on tank"));
+
+  // M11: wipe / release commands trigger immediate spirit release.
+  EXPECT_EQ(Cmd("wipe"), LeaderCommand::kWipe);
+  EXPECT_EQ(Cmd("wipe it guys"), LeaderCommand::kWipe);
+  EXPECT_EQ(Cmd("call wipe"), LeaderCommand::kWipe);
+  EXPECT_EQ(Cmd("release"), LeaderCommand::kWipe);
+  EXPECT_EQ(Cmd("release spirit everyone"), LeaderCommand::kWipe);
+  EXPECT_EQ(DescribeLeaderCommand(*ParseLeaderCommand("wipe", kBots)), "wipe");
+  // Counter-test: casual sentence mentioning wipe/release is not a command.
+  EXPECT_FALSE(Cmd("we might wipe if we pull"));
+  EXPECT_FALSE(Cmd("don't release yet"));
+
+  // M11: tanks are excluded from /rw spread and /rw stack by default so they
+  // don't spin or drag the boss, unless explicitly addressed by name.
+  EXPECT_FALSE(ShouldApplySpreadOrStack(/*is_tank=*/true,
+                                        /*explicitly_addressed=*/false));
+  EXPECT_TRUE(ShouldApplySpreadOrStack(/*is_tank=*/false,
+                                       /*explicitly_addressed=*/false));
+  EXPECT_TRUE(ShouldApplySpreadOrStack(/*is_tank=*/true,
+                                       /*explicitly_addressed=*/true));
 }
 
 TEST(LeaderCommandTest, AuthorizationIgnoresNonLeadersAndBots) {

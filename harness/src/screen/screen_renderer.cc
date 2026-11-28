@@ -712,7 +712,8 @@ std::string VehicleLine(const pb::Unit& v, std::string_view my_name) {
   return out;
 }
 
-std::string WhereLine(const pb::Where& w) {
+std::string WhereLine(const pb::Where& w,
+                      const std::optional<pb::Instance>& inst) {
   std::vector<std::string> places;
   if (!w.subzone.empty()) {
     places.push_back(w.subzone);
@@ -729,6 +730,18 @@ std::string WhereLine(const pb::Where& w) {
   }
   if (w.in_instance) {
     base::StrAppend(&out, {"; in an instance"});
+    if (inst) {
+      std::vector<std::string> meta;
+      if (!inst->difficulty.empty()) {
+        meta.push_back(inst->difficulty);
+      }
+      if (!inst->locked_until.empty()) {
+        meta.push_back(inst->locked_until);
+      }
+      if (!meta.empty()) {
+        base::StrAppend(&out, {" (", base::JoinString(meta, ", "), ")"});
+      }
+    }
   }
   return out;
 }
@@ -1090,6 +1103,73 @@ std::vector<std::string> PartyLines(
   if (!loose.empty()) {
     lines.push_back(
         base::StrCat({"  loose mobs: ", base::JoinString(loose, ", ")}));
+  }
+
+  // Compact raid/party debuff summary (M11): groups harmful debuffs on
+  // non-tank members (plus dispellable debuffs on any member) by debuff name
+  // so 25-man raids stay concise while surfacing `<debuff> on anyone` and
+  // dispels.
+  struct DebuffGroup {
+    std::string name;
+    std::vector<std::string> victims;
+    bool dispellable_by_me = false;
+  };
+  std::vector<DebuffGroup> debuff_groups;
+  constexpr size_t kMaxDebuffGroups = 6;
+  constexpr size_t kMaxNamesPerDebuff = 4;
+  for (const pb::Unit& u : p.members) {
+    if (u.dead || !u.group || !u.group->online || u.auras.empty()) {
+      continue;
+    }
+    const bool is_tank = u.group->role == pb::TANK || u.group->main_tank;
+    for (const pb::Aura& a : u.auras) {
+      if (!a.harmful || a.name.empty() || a.id == 71041 ||
+          a.name == "Dungeon Deserter") {
+        continue;
+      }
+      if (is_tank && !a.dispellable_by_me) {
+        continue;
+      }
+      auto it =
+          std::find_if(debuff_groups.begin(), debuff_groups.end(),
+                       [&](const DebuffGroup& g) { return g.name == a.name; });
+      if (it == debuff_groups.end()) {
+        if (debuff_groups.size() >= kMaxDebuffGroups) {
+          continue;
+        }
+        debuff_groups.push_back(DebuffGroup{
+            .name = a.name,
+            .victims = {u.name},
+            .dispellable_by_me = a.dispellable_by_me,
+        });
+      } else {
+        if (std::find(it->victims.begin(), it->victims.end(), u.name) ==
+            it->victims.end()) {
+          it->victims.push_back(u.name);
+        }
+        it->dispellable_by_me |= a.dispellable_by_me;
+      }
+    }
+  }
+  if (!debuff_groups.empty()) {
+    std::vector<std::string> parts;
+    for (const DebuffGroup& g : debuff_groups) {
+      const size_t shown = std::min(g.victims.size(), kMaxNamesPerDebuff);
+      std::vector<std::string> names(
+          g.victims.begin(), g.victims.begin() + static_cast<ptrdiff_t>(shown));
+      std::string entry =
+          base::StrCat({g.name, " on ", base::JoinString(names, ", ")});
+      if (g.victims.size() > shown) {
+        base::StrAppend(
+            &entry, {base::StringPrintf(" +%zu", g.victims.size() - shown)});
+      }
+      if (g.dispellable_by_me) {
+        base::StrAppend(&entry, {" (dispellable)"});
+      }
+      parts.push_back(std::move(entry));
+    }
+    lines.push_back(
+        base::StrCat({"  debuffs on party: ", base::JoinString(parts, "; ")}));
   }
 
   // What party members are still doing (Now #8): "help Hele with Kobold Camp
@@ -1679,7 +1759,7 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
                                       snapshot.ext.vehicle.has_value()));
   }
   if (base.where != pb::Where{}) {
-    lines.push_back("where: " + WhereLine(base.where));
+    lines.push_back("where: " + WhereLine(base.where, snapshot.ext.instance));
   }
   if (snapshot.ext.vehicle) {
     const std::string_view my_name =
@@ -1837,6 +1917,24 @@ Screen RenderScreen(const pb::Snapshot& snapshot) {
         lines.push_back("  " + aname + " (" + base::JoinString(parts, ", ") +
                         ")");
       }
+    }
+  }
+  if (ext.encounter && !ext.encounter->dbm.empty()) {
+    std::vector<std::string> timers;
+    constexpr size_t kMaxRenderedDbmTimers = 5;
+    for (const pb::Encounter::Timer& t : ext.encounter->dbm) {
+      if (timers.size() >= kMaxRenderedDbmTimers) {
+        break;
+      }
+      if (t.name.empty() || !std::isfinite(t.remaining_s) ||
+          t.remaining_s <= 0.0f) {
+        continue;
+      }
+      timers.push_back(
+          base::StringPrintf("%s %.1fs", t.name.c_str(), t.remaining_s));
+    }
+    if (!timers.empty()) {
+      lines.push_back(base::StrCat({"dbm: ", base::JoinString(timers, ", ")}));
     }
   }
   if (ext.party) {

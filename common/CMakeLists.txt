@@ -156,6 +156,8 @@ add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/snapshot/encounter_phase_unittest.cc"
   "${WLB_MODULE_SRC}/snapshot/perception.cc"
   "${WLB_MODULE_SRC}/snapshot/perception_unittest.cc"
+  "${WLB_MODULE_SRC}/snapshot/raid_meta.cc"
+  "${WLB_MODULE_SRC}/snapshot/raid_meta_unittest.cc"
   "${WLB_MODULE_SRC}/snapshot/snapshot_schedule.cc"
   "${WLB_MODULE_SRC}/snapshot/snapshot_schedule_unittest.cc"
   "${WLB_MODULE_SRC}/snapshot/snapshot_stats.cc"

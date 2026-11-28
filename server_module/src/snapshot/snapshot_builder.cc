@@ -22,9 +22,11 @@
 #include "DBCStructure.h"
 #include "GameObject.h"
 #include "GameObjectData.h"
+#include "GameTime.h"
 #include "GridTerrainData.h"
 #include "Group.h"
 #include "IVMapMgr.h"
+#include "InstanceSaveMgr.h"
 #include "Item.h"
 #include "ItemTemplate.h"
 #include "LFG.h"
@@ -75,6 +77,7 @@
 #include "snapshot/nearby_builder.h"
 #include "snapshot/panels_builder.h"
 #include "snapshot/perception.h"
+#include "snapshot/raid_meta.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/ui_state.h"
 #include "snapshot/world_util.h"
@@ -560,9 +563,66 @@ bool IsBossCreature(const Creature* creature) {
           dynamic_cast<const BossAI*>(creature->AI()) != nullptr);
 }
 
+uint32_t ComputeFriendlyDispelMask(
+    const std::vector<SnapshotBuilder::CachedSpell>& spells) {
+  uint32_t mask = 0;
+  for (const SnapshotBuilder::CachedSpell& entry : spells) {
+    const SpellInfo* info = entry.info.get();
+    if (!info) {
+      continue;
+    }
+    for (uint8_t i = 0; i < MAX_SPELL_EFFECTS; ++i) {
+      if (info->Effects[i].Effect != SPELL_EFFECT_DISPEL) {
+        continue;
+      }
+      const uint32_t target = info->Effects[i].TargetA.GetTarget();
+      if (target == TARGET_UNIT_TARGET_ALLY ||
+          target == TARGET_UNIT_TARGET_ANY ||
+          target == TARGET_UNIT_CASTER_AREA_PARTY ||
+          target == TARGET_UNIT_DEST_AREA_ALLY ||
+          target == TARGET_UNIT_DEST_AREA_ENTRY) {
+        mask |= SpellInfo::GetDispelMask(
+            static_cast<DispelType>(info->Effects[i].MiscValue));
+      }
+    }
+  }
+  return mask;
+}
+
+void FillInstance(Player* bot, pb::Extensions* ext) {
+  Map* map = bot->GetMap();
+  if (!map || !map->IsDungeon()) {
+    return;
+  }
+  InstanceMetaInput in;
+  in.is_dungeon_or_raid = true;
+  in.is_raid = map->IsRaid();
+  in.spawn_mode = map->GetSpawnMode();
+  if (const InstanceMap* im = map->ToInstanceMap()) {
+    in.max_players = im->GetMaxPlayers();
+  }
+  if (const char* mname = map->GetMapName(); mname && *mname) {
+    in.map_name = mname;
+  }
+  if (InstancePlayerBind* bind = sInstanceSaveMgr->PlayerGetBoundInstance(
+          bot->GetGUID(), map->GetId(), map->GetDifficulty());
+      bind && bind->perm && bind->save) {
+    in.perm_bound = true;
+    in.reset_time_epoch_s =
+        static_cast<int64_t>(bind->extended ? bind->save->GetExtendedResetTime()
+                                            : bind->save->GetResetTime());
+    in.now_epoch_s = static_cast<int64_t>(GameTime::GetGameTime().count());
+  }
+  if (std::optional<pb::Instance> inst = BuildInstanceMeta(in)) {
+    ext->instance = std::move(*inst);
+  }
+}
+
 void FillEncounter(Player* bot,
                    NearbyBuilder* nearby,
                    const pb::Snapshot& snapshot,
+                   BossTimerTracker* boss_timers,
+                   base::TimeTicks now,
                    pb::Extensions* ext) {
   std::vector<Creature*> bosses;
   std::vector<EncounterBossCandidate> candidates;
@@ -607,10 +667,35 @@ void FillEncounter(Player* bot,
 
   const int idx = SelectEncounterBossIndex(candidates);
   if (idx < 0) {
+    if (boss_timers) {
+      boss_timers->Reset();
+    }
     return;
   }
+  Creature* boss = bosses[static_cast<size_t>(idx)];
   pb::Encounter& enc = ext->encounter.emplace();
-  nearby->FillUnit(bot, bosses[static_cast<size_t>(idx)], &enc.boss.emplace());
+  nearby->FillUnit(bot, boss, &enc.boss.emplace());
+  if (boss_timers) {
+    std::optional<BossTimerTracker::ActiveCast> active_cast;
+    Spell* spell = boss->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+    if (!spell) {
+      spell = boss->GetCurrentSpell(CURRENT_CHANNELED_SPELL);
+    }
+    if (spell && spell->GetSpellInfo()) {
+      const char* sname =
+          spell->GetSpellInfo()->SpellName[sWorld->GetDefaultDbcLocale()];
+      const int32_t rem_ms = spell->GetCastTimeRemaining();
+      if (sname && *sname && rem_ms > 0) {
+        active_cast = BossTimerTracker::ActiveCast{
+            .spell_name = sname,
+            .remaining_s = static_cast<float>(rem_ms) / 1000.0f,
+        };
+      }
+    }
+    boss_timers->Update(boss->GetGUID().GetRawValue(), boss->IsInCombat(),
+                        std::move(active_cast), now);
+    enc.dbm = boss_timers->GetTimers(now);
+  }
 }
 
 // A party member's unfinished quests and the first objective left on each
@@ -739,6 +824,8 @@ std::vector<SnapshotBuilder::CachedSpell> BuildSpellCache(Player* bot) {
 void FillParty(Player* bot,
                NearbyBuilder* nearby,
                bool in_combat,
+               uint32_t friendly_dispel_mask,
+               const std::vector<SnapshotBuilder::CachedSpell>& known_spells,
                pb::Extensions* ext,
                std::vector<pb::OptionFacts_PartyTarget>* party_targets) {
   Group* group = bot->GetGroup();
@@ -750,6 +837,24 @@ void FillParty(Player* bot,
     party.leader = leader;
   }
   party.loot_method = LootMethodName(group->GetLootMethod());
+  // Collect positive aura names on self and living in-range group members for
+  // missing raid-buff detection (`party.missing_buffs_i_can_give`, M11).
+  std::vector<std::vector<std::string>> member_positive_auras;
+  if (bot->IsAlive()) {
+    std::vector<std::string> self_buffs;
+    for (const auto& [spell_id, app] : bot->GetAppliedAuras()) {
+      const Aura* base = app ? app->GetBase() : nullptr;
+      if (!base || app->GetSlot() >= MAX_AURAS || !app->IsPositive()) {
+        continue;
+      }
+      if (const char* sn =
+              base->GetSpellInfo()->SpellName[sWorld->GetDefaultDbcLocale()];
+          sn && *sn) {
+        self_buffs.emplace_back(sn);
+      }
+    }
+    member_positive_auras.push_back(std::move(self_buffs));
+  }
   // In a raid, members stay listed in `party` (with their subgroups) for the
   // screen; `raid` marks the group as one (so `/raid` is the group channel,
   // T13) and names its main tanks and assists.
@@ -837,29 +942,42 @@ void FillParty(Player* bot,
               aura->GetStackAmount() > 1 ? aura->GetStackAmount() : 0;
         }
       }
-      // Visible harmful debuffs on party/raid tanks (for tank swaps, e.g.
-      // Rune of Blood, Mutated Plague, Soul Reaper — generic facts only).
-      if (!m.dead && gp.in_range && (gp.role == pb::TANK || gp.main_tank)) {
-        constexpr size_t kMaxTankDebuffs = 8;
+      // Visible harmful debuffs on ALL living in-range party/raid members
+      // (M11: enables `<debuff> on anyone`, dispels, and tank swaps without
+      // bloating the wire). Also collect positive buffs for rebuff checks.
+      if (!m.dead && gp.in_range) {
+        const bool is_tank = gp.role == pb::TANK || gp.main_tank;
+        const size_t max_debuffs = is_tank ? 8 : 6;
         size_t added_debuffs = 0;
+        std::vector<std::string> member_buffs;
         for (const auto& [spell_id, app] : member->GetAppliedAuras()) {
-          if (added_debuffs >= kMaxTankDebuffs) {
-            break;
-          }
           const Aura* base = app ? app->GetBase() : nullptr;
-          if (!base || app->GetSlot() >= MAX_AURAS || app->IsPositive() ||
-              spell_id == lfg::LFG_SPELL_DUNGEON_DESERTER) {
+          if (!base || app->GetSlot() >= MAX_AURAS) {
             continue;
           }
+          const SpellInfo* sinfo = base->GetSpellInfo();
           const char* sn =
-              base->GetSpellInfo()->SpellName[sWorld->GetDefaultDbcLocale()];
+              sinfo ? sinfo->SpellName[sWorld->GetDefaultDbcLocale()] : nullptr;
           if (!sn || !*sn) {
+            continue;
+          }
+          if (app->IsPositive()) {
+            member_buffs.emplace_back(sn);
+            continue;
+          }
+          if (added_debuffs >= max_debuffs ||
+              spell_id == lfg::LFG_SPELL_DUNGEON_DESERTER) {
             continue;
           }
           pb::Aura& out_aura = m.auras.emplace_back();
           out_aura.id = spell_id;
           out_aura.name = sn;
           out_aura.harmful = true;
+          out_aura.dispel_type = MapAcoreDispelType(sinfo->Dispel);
+          if (sinfo->Dispel != DISPEL_NONE &&
+              (friendly_dispel_mask & (1u << sinfo->Dispel)) != 0) {
+            out_aura.dispellable_by_me = true;
+          }
           if (base->GetDuration() > 0) {
             out_aura.remaining_s =
                 static_cast<float>(base->GetDuration()) / 1000.0f;
@@ -868,8 +986,18 @@ void FillParty(Player* bot,
               base->GetStackAmount() > 1 ? base->GetStackAmount() : 0;
           ++added_debuffs;
         }
+        member_positive_auras.push_back(std::move(member_buffs));
       }
     }
+  }
+  if (!member_positive_auras.empty() && !known_spells.empty()) {
+    std::vector<std::string> spell_names;
+    spell_names.reserve(known_spells.size());
+    for (const SnapshotBuilder::CachedSpell& sp : known_spells) {
+      spell_names.push_back(sp.name);
+    }
+    party.missing_buffs_i_can_give =
+        ComputeMissingRaidBuffs(spell_names, member_positive_auras);
   }
 }
 
@@ -1144,6 +1272,7 @@ void SnapshotBuilder::FillActionBars(Player* bot,
       (!bot->IsInCombat() && now - spell_cache_time_ >= kSpellCacheTtl);
   if (stale) {
     spell_cache_ = BuildSpellCache(bot);
+    friendly_dispel_mask_ = ComputeFriendlyDispelMask(spell_cache_);
     spell_cache_map_size_ = map_size;
     spell_cache_spec_mask_ = spec_mask;
     spell_cache_time_ = now;
@@ -1191,10 +1320,11 @@ NearbyBuilder::Stats SnapshotBuilder::Build(Player* bot,
   FillTarget(bot, &nearby_, &snapshot->ext);
   FillVehicle(bot, &nearby_, &snapshot->ext);
   FillCombat(bot, &nearby_, &snapshot->ext);
-  FillEncounter(bot, &nearby_, *snapshot, &snapshot->ext);
-  FillParty(bot, &nearby_, in_combat, &snapshot->ext,
-            &out_facts->party_targets);
+  FillInstance(bot, &snapshot->ext);
+  FillEncounter(bot, &nearby_, *snapshot, &boss_timers_, now, &snapshot->ext);
   FillActionBars(bot, &snapshot->ext, now);
+  FillParty(bot, &nearby_, in_combat, friendly_dispel_mask_, spell_cache_,
+            &snapshot->ext, &out_facts->party_targets);
   // Quest tracker (including O(quests * raid_size) party-member lookups and
   // POI lookups) is non-combat context; omit at 4 Hz in combat.
   if (!in_combat) {

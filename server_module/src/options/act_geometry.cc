@@ -212,12 +212,34 @@ std::vector<pb::Vec3> CandidateSpotsForSpread(const pb::Vec3& /*bot_pos*/,
   const size_t idx = slot_index % n;
   const float base_radius =
       radius_yd > 0.0f ? radius_yd : kDefaultSpreadRadiusYd;
-  // For larger raids (>8 bots), alternate inner and outer rings so adjacent
-  // bearings maintain ~8-10+ yd spacing while staying in heal/spell range.
-  const float ring_radius =
-      (n > 8 && (idx % 2 == 1)) ? (base_radius * 1.6f) : base_radius;
-  const float base =
-      (2.0f * kPi * static_cast<float>(idx)) / static_cast<float>(n);
+  float ring_radius = base_radius;
+  float base = 0.0f;
+  if (n <= 6) {
+    base = (2.0f * kPi * static_cast<float>(idx)) / static_cast<float>(n);
+  } else {
+    // Concentric rings with radial and chord spacing >= max(base_radius, 12 yd)
+    // so 10-man and 25-man raids maintain >= 12 yd pairwise separation while
+    // staying within 36 yd (40 yd heal/spell range) of the center.
+    const float spacing = std::max(base_radius, 12.0f);
+    size_t remaining_idx = idx;
+    size_t remaining_total = n;
+    size_t ring = 1;
+    while (true) {
+      const size_t cap = 6 * ring;
+      const size_t count_on_ring = std::min(cap, remaining_total);
+      if (remaining_idx < count_on_ring) {
+        ring_radius = spacing * static_cast<float>(ring);
+        const float stagger =
+            (ring % 2 == 0) ? (kPi / static_cast<float>(count_on_ring)) : 0.0f;
+        base = stagger + (2.0f * kPi * static_cast<float>(remaining_idx)) /
+                             static_cast<float>(count_on_ring);
+        break;
+      }
+      remaining_idx -= count_on_ring;
+      remaining_total -= count_on_ring;
+      ++ring;
+    }
+  }
   static constexpr float kPrimaryOffsets[] = {0.0f,    25.0f, -25.0f, 50.0f,
                                               -50.0f,  90.0f, -90.0f, 135.0f,
                                               -135.0f, 180.0f};

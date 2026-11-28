@@ -1288,6 +1288,21 @@ class BrainPolicyListener final : public ActionExecutionListener {
       }
       return true;
     }
+    const bool wipe_release =
+        BotSessionRegistry::Instance().WithSession(key, [](BotSession& s) {
+          if (!s.wipe_release_until_ms) {
+            return false;
+          }
+          if (static_cast<int32_t>(*s.wipe_release_until_ms - getMSTime()) >
+              0) {
+            return true;
+          }
+          s.wipe_release_until_ms.reset();
+          return false;
+        });
+    if (wipe_release) {
+      return true;
+    }
     const bool wait =
         BotSessionRegistry::Instance().WithSession(key, [](BotSession& s) {
           if (!s.rez_wait_until_ms) {

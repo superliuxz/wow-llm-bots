@@ -170,6 +170,15 @@ struct TauntAction {
   std::string label;
 };
 
+// Casts a battle res spell (Druid Rebirth) on a dead ally in combat, or uses a
+// Warlock Soulstone item on a living ally (M11).
+struct BattleResAction {
+  uint32_t spell_id = 0;
+  uint32_t item_entry = 0;
+  std::string target_guid;
+  std::string label;
+};
+
 // Answers a summon or a Dungeon Finder kick vote (Now #3).
 struct PopupAnswerAction {
   enum class Kind : uint8_t { kSummon, kBootVote };
@@ -293,6 +302,7 @@ using BotAction = std::variant<KeepAction,
                                TradeAction,
                                CrowdControlAction,
                                TauntAction,
+                               BattleResAction,
                                FollowLeaderAction,
                                MarkTargetAction,
                                MountAction,

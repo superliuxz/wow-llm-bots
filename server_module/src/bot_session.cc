@@ -68,6 +68,7 @@ void BotSessionRegistry::ResetOnMapChange(uint64_t bot_guid) {
     it->second.errand_hold = {};
     it->second.human_brb_pause = {};
     it->second.leader_approvals = {};
+    it->second.wipe_release_until_ms.reset();
   }
 }
 
@@ -99,6 +100,7 @@ void BotSessionRegistry::ResetOnDisconnect(uint64_t bot_guid) {
     it->second.errand_hold = {};
     it->second.human_brb_pause = {};
     it->second.leader_approvals = {};
+    it->second.wipe_release_until_ms.reset();
   }
 }
 

@@ -95,6 +95,28 @@ void CollectTauntActions(const wlb::snapshot::Snapshot& snapshot,
                          bool not_tank,
                          std::vector<wlb::snapshot::OptionFacts_Action>* out);
 
+// Battle resurrection capability facts for the bot (M11): pure facts from
+// spellbook/bags/cooldowns so `CollectBattleResActions` needs no AzerothCore
+// headers.
+struct BattleResCapability {
+  // Highest known off-cooldown Rebirth spell id (0 if unknown, on CD, or
+  // missing mana/reagent).
+  uint32_t rebirth_spell_id = 0;
+  std::string rebirth_spell_name;
+  // Highest usable off-cooldown Soulstone item entry in bags (0 if none or CD).
+  uint32_t soulstone_item_entry = 0;
+  std::string soulstone_item_name;
+};
+
+// Adds `Battle res <name> (<role>) with Rebirth` options for dead in-range
+// party/raid members during combat when Rebirth is ready, and
+// `Use <Soulstone> on <name> (<role>)` options when a Soulstone is ready and
+// nobody in the group already has Soulstone Resurrection.
+void CollectBattleResActions(
+    const wlb::snapshot::Snapshot& snapshot,
+    const BattleResCapability& cap,
+    std::vector<wlb::snapshot::OptionFacts_Action>* out);
+
 // Party member readiness facts for a `QUEST_FLAGS_PARTY_ACCEPT` escort quest
 // (Now #8: "An escort waits until everyone has the quest").
 struct EscortPartyMember {

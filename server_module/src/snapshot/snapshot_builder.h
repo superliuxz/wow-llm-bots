@@ -16,6 +16,7 @@
 #include "options/options.h"
 #include "options/position_facts.h"
 #include "snapshot/nearby_builder.h"
+#include "snapshot/raid_meta.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/ui_state.h"
 
@@ -89,9 +90,11 @@ class SnapshotBuilder {
   DungeonNavConfig dungeon_nav_;
   std::vector<QuestPoi> quest_pois_;
   std::vector<CachedSpell> spell_cache_;
+  uint32_t friendly_dispel_mask_ = 0;
   size_t spell_cache_map_size_ = 0;
   uint8_t spell_cache_spec_mask_ = 0;
   base::TimeTicks spell_cache_time_;
+  BossTimerTracker boss_timers_;
   std::optional<PositionFacts> position_facts_;
   Viewpoint position_view_;
   base::TimeTicks position_time_;

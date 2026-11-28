@@ -381,22 +381,38 @@ TEST(ActGeometryTest, SpreadAssignsDistinctEvenlySpacedBearings) {
       EXPECT_GT(Dist2D(five[i], five[j]), 11.0f);
     }
   }
-  // 10-bot raid (>8): alternates inner (10 yd) and outer (16 yd) rings so
-  // adjacent slots stay well separated.
+  // 10-bot raid (>6): concentric rings keep >= 12 yd pairwise spacing.
   std::vector<pb::Vec3> ten;
   for (size_t i = 0; i < 10; ++i) {
     const std::vector<pb::Vec3> cands = CandidateSpotsForSpread(
         center.pos, center, i, 10, kDefaultSpreadRadiusYd);
     ASSERT_FALSE(cands.empty());
-    const float expected_r = (i % 2 == 1) ? 16.0f : 10.0f;
-    EXPECT_NEAR(Dist2D(cands.front(), center.pos), expected_r, 1e-2f);
     ten.push_back(cands.front());
   }
   for (size_t i = 0; i < ten.size(); ++i) {
     for (size_t j = i + 1; j < ten.size(); ++j) {
-      EXPECT_GT(Dist2D(ten[i], ten[j]), 7.5f);
+      EXPECT_GE(Dist2D(ten[i], ten[j]), 11.9f);
     }
   }
+
+  // 25-man raid: multi-ring layout keeps every pair >= 12 yd apart while
+  // staying within 36 yd (40 yd heal/spell range) of the center.
+  std::vector<pb::Vec3> twenty_five;
+  for (size_t i = 0; i < 25; ++i) {
+    const std::vector<pb::Vec3> cands = CandidateSpotsForSpread(
+        center.pos, center, i, 25, kDefaultSpreadRadiusYd);
+    ASSERT_FALSE(cands.empty());
+    EXPECT_LE(Dist2D(cands.front(), center.pos), 36.1f);
+    twenty_five.push_back(cands.front());
+  }
+  float min_pair_yd = 1e9f;
+  for (size_t i = 0; i < twenty_five.size(); ++i) {
+    for (size_t j = i + 1; j < twenty_five.size(); ++j) {
+      min_pair_yd =
+          std::min(min_pair_yd, Dist2D(twenty_five[i], twenty_five[j]));
+    }
+  }
+  EXPECT_GE(min_pair_yd, 11.9f);
 }
 
 }  // namespace

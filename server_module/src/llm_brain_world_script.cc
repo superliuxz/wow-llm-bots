@@ -82,6 +82,7 @@
 #include "snapshot/behavior_trace_scripts.h"
 #include "snapshot/nearby_builder.h"
 #include "snapshot/panels_builder.h"
+#include "snapshot/raid_meta.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/snapshot_builder.h"
 #include "snapshot/snapshot_schedule.h"
@@ -931,6 +932,13 @@ class LlmBrainWorldScript : public WorldScript {
           chatters.pop_back();
         }
       }
+      const bool is_boss_warning =
+          line.chat.channel == wlb::snapshot::BOSS_EMOTE ||
+          line.chat.channel == wlb::snapshot::MONSTER_WHISPER;
+      const std::optional<wlb::snapshot::DbmWarningEvent> dbm_warning =
+          is_boss_warning
+              ? BuildDbmWarningFromBossChat(line.chat.from, line.chat.text)
+              : std::nullopt;
       const bool alerting =
           line.chat.channel == wlb::snapshot::WHISPER ||
           line.chat.channel == wlb::snapshot::MONSTER_WHISPER ||
@@ -942,6 +950,11 @@ class LlmBrainWorldScript : public WorldScript {
         EmitAlertingEvent(index, line.to, bot, std::move(payload));
       } else {
         SendImmediateEvent(index, line.to, std::move(payload));
+      }
+      if (dbm_warning) {
+        wlb::snapshot::Event dbm_payload;
+        dbm_payload.dbm_warning = *dbm_warning;
+        SendImmediateEvent(index, line.to, std::move(dbm_payload));
       }
       if (!applied.empty()) {
         wlb::snapshot::Event info;
@@ -1202,15 +1215,42 @@ class LlmBrainWorldScript : public WorldScript {
         break;
       }
       case LeaderCommand::kSpread: {
+        const bool is_tank = IsGroupTank(group, bot) && !policy.not_tank;
+        if (!ShouldApplySpreadOrStack(is_tank, !parsed->addressed.empty())) {
+          return said + " (not applied: tanks hold boss position)";
+        }
         if (sender->GetMapId() != bot->GetMapId() ||
             sender->GetInstanceId() != bot->GetInstanceId()) {
           return said + " (not applied: leader is on another map)";
         }
+        // Assign spread slots among non-tank bots (unless explicitly
+        // addressed) so excluded tanks don't leave gaps in the ring.
+        std::vector<std::string> spread_names;
+        if (!parsed->addressed.empty()) {
+          spread_names = names;
+        } else {
+          for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+            Player* member = ObjectAccessor::FindConnectedPlayer(slot.guid);
+            if (!member || !member->IsInWorld()) {
+              continue;
+            }
+            const bool member_tank =
+                IsGroupTank(group, member) &&
+                !(GET_PLAYERBOT_AI(member) &&
+                  BotManager::GetGroupPolicy(member).not_tank);
+            if (!member_tank) {
+              spread_names.push_back(slot.name);
+            }
+          }
+          if (spread_names.empty()) {
+            spread_names = names;
+          }
+        }
         const auto self_it =
-            std::find(names.begin(), names.end(), bot->GetName());
+            std::find(spread_names.begin(), spread_names.end(), bot->GetName());
         const size_t slot_index =
-            self_it != names.end()
-                ? static_cast<size_t>(self_it - names.begin())
+            self_it != spread_names.end()
+                ? static_cast<size_t>(self_it - spread_names.begin())
                 : 0;
         const AnchorGeometry center{
             .pos = {sender->GetPositionX(), sender->GetPositionY(),
@@ -1219,7 +1259,7 @@ class LlmBrainWorldScript : public WorldScript {
             .radius_yd = sender->GetCombatReach(),
         };
         const std::string error = StartLeaderSpreadMove(
-            index, name, bot, center, slot_index, names.size());
+            index, name, bot, center, slot_index, spread_names.size());
         if (!error.empty()) {
           return said + " (not applied: " + error + ")";
         }
@@ -1231,6 +1271,10 @@ class LlmBrainWorldScript : public WorldScript {
         break;
       }
       case LeaderCommand::kStack: {
+        const bool is_tank = IsGroupTank(group, bot) && !policy.not_tank;
+        if (!ShouldApplySpreadOrStack(is_tank, !parsed->addressed.empty())) {
+          return said + " (not applied: tanks hold boss position)";
+        }
         wlb::snapshot::Command_Act act;
         act.verb = wlb::snapshot::Command_Act::TO;
         act.place = wlb::snapshot::Command_Act::AT;
@@ -1265,6 +1309,28 @@ class LlmBrainWorldScript : public WorldScript {
           ai->SetNextCheckDelay(0);
         }
         done = "you resume attacking";
+        break;
+      }
+      case LeaderCommand::kWipe: {
+        // Clear any pending 5-minute `rez:wait` and mark a 60 s wipe-release
+        // window so bots already dead or dying during the wipe release
+        // immediately instead of waiting for a living healer.
+        BotManager::WaitForResurrection(bot, 0);
+        constexpr uint32_t kWipeReleaseWindowMs = 60 * 1000;
+        BotSessionRegistry::Instance().WithSession(
+            bot->GetGUID().GetRawValue(), [](BotSession& s) {
+              s.wipe_release_until_ms = getMSTime() + kWipeReleaseWindowMs;
+            });
+        if (!bot->IsAlive() && !bot->HasPlayerFlag(PLAYER_FLAGS_GHOST)) {
+          const ActionOutcome res = ExecuteResurrectAction(
+              bot, ResurrectAction{ResurrectAction::Mode::kRelease});
+          if (!res.error.empty()) {
+            return said + " (not applied: " + res.error + ")";
+          }
+          done = "you released spirit immediately";
+        } else {
+          done = "you will release immediately on death";
+        }
         break;
       }
     }

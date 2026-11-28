@@ -78,6 +78,28 @@ BotAction DecodeOptionFactAction(std::string_view guid,
     }
     return TauntAction{spell, std::string(parts[2]), std::string(label)};
   }
+  if (guid.starts_with("brez:")) {
+    const std::vector<std::string_view> parts = base::SplitStringPiece(
+        guid, ":", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+    uint32_t spell = 0;
+    if (parts.size() != 3 || !ParseUint32(parts[1], &spell) || spell == 0 ||
+        parts[2].empty()) {
+      return InvalidAction{"invalid battle res"};
+    }
+    return BattleResAction{spell, /*item_entry=*/0, std::string(parts[2]),
+                           std::string(label)};
+  }
+  if (guid.starts_with("soulstone:")) {
+    const std::vector<std::string_view> parts = base::SplitStringPiece(
+        guid, ":", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+    uint32_t item = 0;
+    if (parts.size() != 3 || !ParseUint32(parts[1], &item) || item == 0 ||
+        parts[2].empty()) {
+      return InvalidAction{"invalid soulstone"};
+    }
+    return BattleResAction{/*spell_id=*/0, item, std::string(parts[2]),
+                           std::string(label)};
+  }
   if (guid == "popups:auto") {
     return GroupPolicyAction{GroupPolicyAction::Op::kAutoPopups};
   }
@@ -564,6 +586,8 @@ std::string_view ActionKindName(const BotAction& action) {
           return "crowd_control";
         if constexpr (std::is_same_v<T, TauntAction>)
           return "taunt";
+        if constexpr (std::is_same_v<T, BattleResAction>)
+          return "battle_res";
         if constexpr (std::is_same_v<T, FollowLeaderAction>)
           return "follow";
         if constexpr (std::is_same_v<T, MarkTargetAction>)

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -1536,6 +1537,86 @@ TEST(OptionsTest, CollectTauntActionsOffersValidTargetsForGroupedTanksOnly) {
   ASSERT_EQ(out.size(), 1u);
   EXPECT_EQ(out[0].guid, "taunt:355:0x30");
   EXPECT_EQ(out[0].label, "Taunt Defias Pillager");
+}
+
+TEST(OptionsTest, CollectBattleResActionsOffersRebirthAndSoulstoneWhenReady) {
+  pb::Snapshot snap;
+  snap.bot = "Sylva";
+  snap.base.self.state = pb::Self::ALIVE;
+  snap.base.self.in_combat = true;
+  pb::Party& party = snap.ext.party.emplace();
+
+  auto add_member = [&](const char* name, const char* guid, pb::Role role,
+                        bool dead, float dist_yd) -> pb::Unit& {
+    pb::Unit& m = party.members.emplace_back();
+    m.name = name;
+    m.guid = guid;
+    m.dead = dead;
+    m.group.emplace().role = role;
+    m.group->online = true;
+    m.group->in_range = true;
+    m.rel.dist_yd = dist_yd;
+    return m;
+  };
+  add_member("Hele", "0x10", pb::HEALER, /*dead=*/true, 18.0f);
+  add_member("Torvin", "0x11", pb::TANK, /*dead=*/true, 12.0f);
+  add_member("FarDps", "0x12", pb::DPS, /*dead=*/true, 45.0f);  // >30 yd.
+  add_member("AliveDps", "0x13", pb::DPS, /*dead=*/false, 10.0f);
+
+  BattleResCapability cap;
+  cap.rebirth_spell_id = 48477;
+  cap.rebirth_spell_name = "Rebirth";
+
+  std::vector<pb::OptionFacts_Action> out;
+  CollectBattleResActions(snap, cap, &out);
+  ASSERT_EQ(out.size(), 2u);
+  EXPECT_EQ(out[0].guid, "brez:48477:0x11");
+  EXPECT_EQ(out[0].label, "Battle res Torvin (tank) with Rebirth");
+  EXPECT_EQ(out[1].guid, "brez:48477:0x10");
+  EXPECT_EQ(out[1].label, "Battle res Hele (healer) with Rebirth");
+
+  // Counter-test 1: Rebirth on CD (`rebirth_spell_id == 0`) offers nothing.
+  out.clear();
+  CollectBattleResActions(snap, BattleResCapability{}, &out);
+  EXPECT_TRUE(out.empty());
+
+  // Counter-test 2: out of combat does not offer combat Rebirth.
+  pb::Snapshot ooc = snap;
+  ooc.base.self.in_combat = false;
+  out.clear();
+  CollectBattleResActions(ooc, cap, &out);
+  EXPECT_TRUE(out.empty());
+
+  // Counter-test 3: solo or dead bot never gets battle res.
+  pb::Snapshot solo = snap;
+  solo.ext.party.reset();
+  out.clear();
+  CollectBattleResActions(solo, cap, &out);
+  EXPECT_TRUE(out.empty());
+  pb::Snapshot dead_bot = snap;
+  dead_bot.base.self.state = pb::Self::DEAD_BODY;
+  out.clear();
+  CollectBattleResActions(dead_bot, cap, &out);
+  EXPECT_TRUE(out.empty());
+
+  // Warlock Soulstone: offered on living allies when off CD, suppressed once
+  // any group member already has Soulstone Resurrection.
+  BattleResCapability ss_cap;
+  ss_cap.soulstone_item_entry = 36895;
+  ss_cap.soulstone_item_name = "Demonic Soulstone";
+  out.clear();
+  CollectBattleResActions(ooc, ss_cap, &out);
+  ASSERT_EQ(out.size(), 1u);
+  EXPECT_EQ(out[0].guid, "soulstone:36895:0x13");
+  EXPECT_EQ(out[0].label, "Use Demonic Soulstone on AliveDps (dps)");
+
+  pb::Aura ss_aura;
+  ss_aura.id = 20707;
+  ss_aura.name = "Soulstone Resurrection";
+  ooc.ext.party->members[3].auras.push_back(std::move(ss_aura));
+  out.clear();
+  CollectBattleResActions(ooc, ss_cap, &out);
+  EXPECT_TRUE(out.empty());
 }
 
 TEST(OptionsTest, LighterCombatSnapshotPreservesP0CombatFactsAndOptions) {

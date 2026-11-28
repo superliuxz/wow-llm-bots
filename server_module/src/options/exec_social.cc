@@ -1004,6 +1004,71 @@ void CollectGroupAndUpkeepActions(Player* bot,
     }
   }
 
+  // 6b. Battle resurrection (Druid Rebirth in combat; Warlock Soulstone).
+  if (bot->IsAlive() && bot->GetGroup()) {
+    BattleResCapability cap;
+    // Druid Rebirth ranks (highest to lowest, WotLK 3.3.5a).
+    constexpr uint32_t kRebirthSpellIds[] = {48477, 26994, 24239, 20747,
+                                             20742, 20739, 20484};
+    constexpr uint32_t kGlyphOfUnburdenedRebirth = 57855;
+    const bool no_reagent_needed = bot->HasAura(kGlyphOfUnburdenedRebirth);
+    for (uint32_t sid : kRebirthSpellIds) {
+      if (!bot->HasActiveSpell(sid) || bot->HasSpellCooldown(sid)) {
+        continue;
+      }
+      const SpellInfo* info = sSpellMgr->GetSpellInfo(sid);
+      if (!info) {
+        continue;
+      }
+      const int32_t cost = info->CalcPowerCost(bot, info->GetSchoolMask());
+      if (cost > 0 && info->PowerType < MAX_POWERS &&
+          bot->GetPower(static_cast<Powers>(info->PowerType)) <
+              static_cast<uint32_t>(cost)) {
+        continue;
+      }
+      bool reagents_ok = no_reagent_needed;
+      if (!reagents_ok) {
+        reagents_ok = true;
+        for (uint8_t r = 0; r < MAX_SPELL_REAGENTS; ++r) {
+          if (info->Reagent[r] > 0 && info->ReagentCount[r] > 0 &&
+              !bot->HasItemCount(static_cast<uint32_t>(info->Reagent[r]),
+                                 info->ReagentCount[r])) {
+            reagents_ok = false;
+            break;
+          }
+        }
+      }
+      if (reagents_ok) {
+        cap.rebirth_spell_id = sid;
+        if (const char* sn = info->SpellName[sWorld->GetDefaultDbcLocale()];
+            sn && *sn) {
+          cap.rebirth_spell_name = sn;
+        }
+        break;
+      }
+    }
+    // Warlock Soulstone items in bags (highest to lowest, WotLK 3.3.5a).
+    constexpr uint32_t kSoulstoneItemEntries[] = {36895, 22116, 16896, 16895,
+                                                  16893, 16892, 5232};
+    for (uint32_t entry : kSoulstoneItemEntries) {
+      Item* item = bot->GetItemByEntry(entry);
+      if (!item) {
+        continue;
+      }
+      const ItemTemplate* proto = item->GetTemplate();
+      if (!proto || proto->Spells[0].SpellId == 0 ||
+          bot->HasSpellCooldown(proto->Spells[0].SpellId)) {
+        continue;
+      }
+      cap.soulstone_item_entry = entry;
+      cap.soulstone_item_name = proto->Name1;
+      break;
+    }
+    if (cap.rebirth_spell_id != 0 || cap.soulstone_item_entry != 0) {
+      CollectBattleResActions(snapshot, cap, out);
+    }
+  }
+
   // 7. Mount / Dismount.
   const bool incapacitated = bot->HasUnitState(
       UNIT_STATE_STUNNED | UNIT_STATE_CONFUSED | UNIT_STATE_FLEEING |
@@ -1870,6 +1935,52 @@ ActStartResult ExecuteTauntAction(Player* bot,
     BotManager::RecordBrainTaunt(bot, target);
   }
   return res;
+}
+
+ActStartResult ExecuteBattleResAction(Player* bot,
+                                      const BattleResAction& action,
+                                      base::TimeTicks now,
+                                      ActiveAct* out_active) {
+  Player* target = ObjectAccessor::FindConnectedPlayer(
+      ParseSnapshotGuid(action.target_guid));
+  if (!target || !target->IsInWorld() || !target->IsInMap(bot)) {
+    return {.error = "battle res target is not nearby"};
+  }
+  if (action.spell_id != 0) {
+    const SpellInfo* spell = sSpellMgr->GetSpellInfo(action.spell_id);
+    if (!spell || !bot->HasSpell(action.spell_id)) {
+      return {.error = "you don't know that battle res spell"};
+    }
+    if (target->IsAlive() || target->HasPlayerFlag(PLAYER_FLAGS_GHOST)) {
+      return {.error = "target is not a dead body"};
+    }
+    if (bot->HasSpellCooldown(spell->Id)) {
+      return {.error = action.label + " is on cooldown"};
+    }
+    return StartSpellUseOn(bot, /*command_id=*/0, spell, target, now,
+                           out_active);
+  }
+  if (action.item_entry != 0) {
+    if (!target->IsAlive()) {
+      return {.error = "soulstone target must be alive"};
+    }
+    Item* item = bot->GetItemByEntry(action.item_entry);
+    if (!item) {
+      return {.error = "no soulstone in bags"};
+    }
+    const ItemTemplate* proto = item->GetTemplate();
+    if (!proto || proto->Spells[0].SpellId == 0) {
+      return {.error = "invalid soulstone item"};
+    }
+    if (bot->HasSpellCooldown(proto->Spells[0].SpellId)) {
+      return {.error = action.label + " is on cooldown"};
+    }
+    SpellCastTargets targets;
+    targets.SetUnitTarget(target);
+    bot->CastItemUseSpell(item, targets, 0, 0);
+    return {.done = true};
+  }
+  return {.error = "invalid battle res action"};
 }
 
 ActionOutcome ExecuteTradeAction(Player* bot, const TradeAction& action) {

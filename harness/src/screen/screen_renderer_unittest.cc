@@ -1470,5 +1470,68 @@ TEST(ScreenRendererTest, RendersVehicleStatusSeatAbilitiesAndClearsOnExit) {
   EXPECT_EQ(exited.text.find("vehicle:"), std::string::npos) << exited.text;
 }
 
+TEST(ScreenRendererTest, RendersRaidDebuffSummaryInstanceMetaAndDbmTimers) {
+  pb::Snapshot snap = NewSnapshot();
+  snap.bot = "Mirabel";
+  snap.base.where.zone = "Icecrown Citadel";
+  snap.base.where.in_instance = true;
+  pb::Instance& inst = snap.ext.instance.emplace();
+  inst.name = "Icecrown Citadel";
+  inst.difficulty = "25H";
+  inst.size = 25;
+  inst.locked_until = "locked (2d 4h)";
+
+  pb::Encounter& enc = snap.ext.encounter.emplace();
+  enc.dbm.push_back({"Defile", 4.2f});
+  enc.dbm.push_back({"Next Infest", 12.5f});
+
+  pb::Party& party = snap.ext.party.emplace();
+  party.leader = "Human";
+  party.missing_buffs_i_can_give.push_back("Prayer of Fortitude");
+  for (int i = 1; i <= 6; ++i) {
+    pb::Unit& dps = party.members.emplace_back();
+    dps.guid = "0x2" + std::to_string(i);
+    dps.name = "Dps" + std::to_string(i);
+    dps.kind = pb::Unit::PLAYER;
+    dps.health_pct = 90.0f;
+    dps.group.emplace().role = pb::DPS;
+    dps.group->online = true;
+    dps.group->in_range = true;
+    pb::Aura a;
+    a.id = 70337;
+    a.name = "Necrotic Plague";
+    a.harmful = true;
+    a.dispel_type = pb::DispelType::DISEASE;
+    a.dispellable_by_me = true;
+    dps.auras.push_back(std::move(a));
+  }
+
+  const Screen screen = RenderScreen(snap);
+  EXPECT_NE(screen.text.find("in an instance (25H, locked (2d 4h))"),
+            std::string::npos)
+      << screen.text;
+  EXPECT_NE(screen.text.find("dbm: Defile 4.2s, Next Infest 12.5s"),
+            std::string::npos)
+      << screen.text;
+  EXPECT_NE(screen.text.find("missing my buffs Prayer of Fortitude"),
+            std::string::npos)
+      << screen.text;
+  // Compact summary groups all 6 non-tank victims into 4 names + "+2" and
+  // surfaces `(dispellable)` without bloating individual member lines.
+  EXPECT_NE(screen.text.find("debuffs on party: Necrotic Plague on Dps1, Dps2, "
+                             "Dps3, Dps4 +2 (dispellable)"),
+            std::string::npos)
+      << screen.text;
+
+  // Adversarial counter-test: outdoors (`in_instance = false`, no
+  // `ext.instance`) omits instance difficulty/lockout and DBM timers.
+  snap.base.where.in_instance = false;
+  snap.ext.instance.reset();
+  snap.ext.encounter.reset();
+  const Screen outdoors = RenderScreen(snap);
+  EXPECT_EQ(outdoors.text.find("25H"), std::string::npos) << outdoors.text;
+  EXPECT_EQ(outdoors.text.find("dbm:"), std::string::npos) << outdoors.text;
+}
+
 }  // namespace
 }  // namespace harness
