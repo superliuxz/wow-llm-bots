@@ -27,6 +27,8 @@ struct GroupMemberRoleInput {
   wlb::snapshot::Role lfg_role = wlb::snapshot::Role::ROLE_UNSPECIFIED;
   // Raid leader Main Tank flag (`MEMBER_FLAG_MAINTANK`).
   bool main_tank_flag = false;
+  // Raid leader Main Assist flag (`MEMBER_FLAG_MAINASSIST`).
+  bool main_assist_flag = false;
   // True when the member is online and in world (spec/stance can be inspected).
   bool online_in_world = false;
   // Spec/stance fallback (`PlayerbotAI::IsTank` / `PlayerbotAI::IsHeal`).

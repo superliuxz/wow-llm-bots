@@ -1816,11 +1816,13 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
     state.order_quiet_since = base::TimeTicks();
   }
   const bool trig_covered =
-      trig && ord.covered && ord.order_index >= 0 &&
-      static_cast<size_t>(ord.order_index) < state.orders.orders().size() &&
-      OrderCoversWake(
-          state.orders.orders()[static_cast<size_t>(ord.order_index)],
-          trig->kinds, trig->attackers);
+      trig && ord.covered &&
+      ((ord.generic_hazard && trig->kinds == kWakeHazard) ||
+       (ord.order_index >= 0 &&
+        static_cast<size_t>(ord.order_index) < state.orders.orders().size() &&
+        OrderCoversWake(
+            state.orders.orders()[static_cast<size_t>(ord.order_index)],
+            trig->kinds, trig->attackers)));
   const std::string_view extra_trig_reason =
       (trig && !trig_covered) ? std::string_view(trig->reason)
                               : std::string_view{};
@@ -1991,7 +1993,8 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
     }
     if (state.orders.active() &&
         imm.event.error->command_id == state.orders.pending_command_id()) {
-      OrderEvalResult failed = state.orders.OnStepFailed(imm.event.error->text);
+      OrderEvalResult failed =
+          state.orders.OnStepFailed(imm.event.error->text, received_at);
       state.order_quiet_since = base::TimeTicks();
       // An "act cancelled by new choice" event is our own plan's choice
       // replacing an old movement act (whether it arrives mid-call or after

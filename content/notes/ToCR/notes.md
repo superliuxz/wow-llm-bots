@@ -9,8 +9,8 @@
 - **Icehowl**: tank faces him away for **Arctic Breath**; after **Massive Crash** knocks the raid back, move out of his charge path and re-taunt immediately after.
 
 ```
-Impale stacks>2 on tank & me offtank -> wake
-Impale stacks>2 on offtank & me tank & not me offtank -> wake
+Impale stacks>2 on tank & me offtank -> use Taunt on boss
+Impale stacks>2 on offtank & me tank & not me offtank -> use Taunt on boss
 in Fire Bomb -> out of it
 Snobold Vassal appears -> target nearest Snobold Vassal
 ```

@@ -719,6 +719,39 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
     }
   }
 
+  // Generic hostile ground hazard detection (M12): alert when a living bot
+  // steps into a hostile ground AoE / dynamic object / trigger hazard (outside
+  // boss notes, e.g. trash Flamestrike / Rain of Fire / Poison Cloud).
+  std::flat_set<std::string> hostile_areas;
+  if (alive) {
+    for (const pb::Area& area : snapshot.base.nearby.areas) {
+      if (!area.hostile) {
+        continue;
+      }
+      const bool inside =
+          area.inside_me || (area.rel && area.radius_yd > 0.0f &&
+                             area.rel->dist_yd <= area.radius_yd + 1.0f);
+      if (!inside) {
+        continue;
+      }
+      const std::string_view area_name =
+          !area.name.empty() ? std::string_view(area.name)
+                             : (area.spell ? std::string_view(area.spell->name)
+                                           : std::string_view{});
+      const std::string key =
+          !area.guid.empty() ? area.guid : std::string(area_name);
+      if (hostile_areas.insert(key).second && seen_snapshot_ &&
+          !prev_hostile_areas_.contains(key)) {
+        Consider(
+            &chosen,
+            {Urgency::kP0Combat,
+             base::StrCat({"standing in hostile ",
+                           area_name.empty() ? "ground hazard" : area_name}),
+             kWakeHazard});
+      }
+    }
+  }
+
   for (const pb::Event& ev : snapshot.events) {
     if (std::optional<WakeTrigger> trig = EvaluateEventTrigger(ev, watches_)) {
       Consider(&chosen, std::move(*trig));
@@ -733,6 +766,7 @@ std::optional<WakeTrigger> TriggerEvaluator::EvaluateSnapshot(
   prev_control_ = control;
   prev_attackers_ = std::move(attackers);
   prev_dead_members_ = std::move(dead_members);
+  prev_hostile_areas_ = std::move(hostile_areas);
   prev_party_aggro_ = !aggro_member.empty();
   prev_low_mana_healers_ = std::move(low_mana_healers);
   prev_critical_members_ = std::move(critical_members);

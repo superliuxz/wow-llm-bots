@@ -50,6 +50,9 @@ struct OrderEvalResult {
   // True when a non-`wake` conditional order fired or is actively running.
   // Use `OrderCoversWakeReason` before suppressing a specific WakeTrigger.
   bool covered = false;
+  // True when the built-in generic hostile-ground-hazard evade reflex fired
+  // or is actively running (outside explicit boss-notes standing orders).
+  bool generic_hazard = false;
   // True when a higher-priority order preempted a running lower-priority one.
   bool preempted = false;
   // True when the active step timed out (caller should send `stop moving` to
@@ -102,7 +105,7 @@ class OrderEvaluator {
   void Clear();
 
   const std::vector<Order>& orders() const { return orders_; }
-  bool active() const { return active_order_ >= 0; }
+  bool active() const { return active_order_ >= 0 || generic_hazard_active_; }
   bool ActiveStepMoves() const;
   int active_order() const { return active_order_; }
   int active_step() const { return active_order_ >= 0 ? active_step_ : -1; }
@@ -121,8 +124,11 @@ class OrderEvaluator {
   // snapshot. Returns the next step's act if more steps remain.
   OrderEvalResult OnStepDone(uint32_t command_id, base::TimeTicks now);
 
-  // Cancels any active order on step failure and wakes the brain.
-  OrderEvalResult OnStepFailed(std::string_view error);
+  // Cancels any active order on step failure and wakes the brain. For `out of`
+  // steps (and generic hazard evades), clears the latch so the bot retries on
+  // the next snapshot instead of standing in fire until the LLM replies.
+  OrderEvalResult OnStepFailed(std::string_view error,
+                               base::TimeTicks now = {});
 
   // Checks the per-step safety timeout even if no snapshot arrived recently.
   OrderEvalResult CheckTimeout(base::TimeTicks now);
@@ -151,6 +157,9 @@ class OrderEvaluator {
   std::vector<std::optional<base::TimeTicks>> last_every_fired_;
   // Edge-trigger latch per order: true after firing until `when` goes false.
   std::vector<bool> order_latched_;
+  // Failure retry tracking for unlatched `out of` steps.
+  std::vector<int> order_fail_count_;
+  std::vector<base::TimeTicks> order_retry_after_;
 
   int active_order_ = -1;
   int active_step_ = 0;
@@ -158,6 +167,14 @@ class OrderEvaluator {
   std::string active_it_name_;
   base::TimeTicks step_started_at_;
   uint32_t pending_command_id_ = 0;
+
+  // Built-in generic hostile-ground-hazard evade reflex (active when no
+  // explicit standing order matched and the bot is inside a hostile Area).
+  bool generic_hazard_active_ = false;
+  std::string generic_hazard_guid_;
+  std::string generic_hazard_name_;
+  int generic_hazard_fail_count_ = 0;
+  base::TimeTicks generic_hazard_retry_after_;
 
   // Cross-snapshot history keyed by ASCII-lowercased spell/entity name.
   bool history_seeded_ = false;

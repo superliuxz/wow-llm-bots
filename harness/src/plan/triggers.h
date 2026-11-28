@@ -38,6 +38,7 @@ enum WakeKind : uint32_t {
   kWakeEnemyPlayer = 1u << 8,
   kWakeParty = 1u << 9,  // The party: fighting, a member died, healer oom.
   kWakeSpellMiss = 1u << 10,
+  kWakeHazard = 1u << 11,  // Standing inside a hostile ground AoE/hazard.
 };
 
 struct WakeTrigger {
@@ -133,6 +134,7 @@ class TriggerEvaluator {
   // The party as last seen (T8): who was dead, whether anyone in range had
   // aggro, and which healers were under 30% mana.
   std::flat_set<std::string> prev_dead_members_;
+  std::flat_set<std::string> prev_hostile_areas_;
   bool prev_party_aggro_ = false;
   std::flat_set<std::string> prev_low_mana_healers_;
   // Members under 35% health in a fight, latched until back over 50%.

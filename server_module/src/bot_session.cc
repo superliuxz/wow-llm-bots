@@ -45,6 +45,7 @@ void BotSessionRegistry::ResetOnMapChange(uint64_t bot_guid) {
   base::AutoLock lock(lock_);
   if (auto it = sessions_.find(bot_guid); it != sessions_.end()) {
     it->second.last_interrupted = {};
+    it->second.out_of_retry = {};
     it->second.avoided_targets.clear();
     it->second.stop_dps = false;
     it->second.combat_position_hold = false;
@@ -77,6 +78,7 @@ void BotSessionRegistry::ResetOnDisconnect(uint64_t bot_guid) {
   base::AutoLock lock(lock_);
   if (auto it = sessions_.find(bot_guid); it != sessions_.end()) {
     it->second.last_interrupted = {};
+    it->second.out_of_retry = {};
     it->second.avoided_targets.clear();
     it->second.stop_dps = false;
     it->second.combat_position_hold = false;

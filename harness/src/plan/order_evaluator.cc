@@ -460,6 +460,43 @@ struct SnapshotView {
     }
     append_sorted(mt_flagged);
 
+    // Tier 1c: explicit raid Main Assist flags on effective TANK members
+    // (common WotLK MT/OT raid assignment; never elevates DPS main assists).
+    if (snap.ext.raid) {
+      for (const std::string& ref : snap.ext.raid->main_assists) {
+        if (UnitMatchesRef(self, ref) && snap.base.self.unit.group &&
+            snap.base.self.unit.group->role == pb::Role::TANK) {
+          add(self);
+          continue;
+        }
+        for (const pb::Unit* u : units) {
+          Entity e = MakeUnitEntity(*u);
+          if (UnitMatchesRef(e, ref)) {
+            if (const pb::GroupPart* gp = GroupPartOf(snap, *u);
+                gp && gp->role == pb::Role::TANK) {
+              add(e);
+            }
+            break;
+          }
+        }
+      }
+    }
+    std::vector<RankedTank> ma_tanks;
+    if (snap.base.self.unit.group && snap.base.self.unit.group->main_assist &&
+        snap.base.self.unit.group->role == pb::Role::TANK && !seen(self)) {
+      ma_tanks.push_back({snap.base.self.unit.group->subgroup, self});
+    }
+    for (const pb::Unit* u : units) {
+      if (const pb::GroupPart* gp = GroupPartOf(snap, *u);
+          gp && gp->main_assist && gp->role == pb::Role::TANK) {
+        Entity e = MakeUnitEntity(*u);
+        if (!seen(e)) {
+          ma_tanks.push_back({gp->subgroup, std::move(e)});
+        }
+      }
+    }
+    append_sorted(ma_tanks);
+
     // Tier 2: units with effective `group.role == TANK`, ordered
     // deterministically by `(subgroup, guid)` to match server
     // `ResolveGroupTankOrder` across every bot in a hand-formed raid.
@@ -1392,6 +1429,8 @@ bool OrderEvaluator::SetOrders(std::vector<Order> orders, base::TimeTicks now) {
   order_installed_at_.assign(orders_.size(), now);
   last_every_fired_.assign(orders_.size(), std::nullopt);
   order_latched_.assign(orders_.size(), false);
+  order_fail_count_.assign(orders_.size(), 0);
+  order_retry_after_.assign(orders_.size(), base::TimeTicks());
   int kept_active_idx = -1;
   for (size_t i = 0; i < orders_.size(); ++i) {
     const std::string key = FormatOrder(orders_[i]);
@@ -1413,11 +1452,17 @@ bool OrderEvaluator::SetOrders(std::vector<Order> orders, base::TimeTicks now) {
     active_order_ = kept_active_idx;
     return false;
   }
+  if (generic_hazard_active_) {
+    return false;
+  }
   ResetActive();
   return was_moving;
 }
 
 bool OrderEvaluator::ActiveStepMoves() const {
+  if (generic_hazard_active_) {
+    return true;
+  }
   if (active_order_ < 0 ||
       static_cast<size_t>(active_order_) >= orders_.size()) {
     return false;
@@ -1442,6 +1487,13 @@ void OrderEvaluator::Clear() {
   order_installed_at_.clear();
   last_every_fired_.clear();
   order_latched_.clear();
+  order_fail_count_.clear();
+  order_retry_after_.clear();
+  generic_hazard_active_ = false;
+  generic_hazard_guid_.clear();
+  generic_hazard_name_.clear();
+  generic_hazard_fail_count_ = 0;
+  generic_hazard_retry_after_ = base::TimeTicks();
   ResetActive();
 }
 
@@ -1591,12 +1643,78 @@ OrderEvalResult OrderEvaluator::DispatchStep(int order_idx,
   return res;
 }
 
+namespace {
+
+bool IsOutOfStep(const Order& order, int step_idx) {
+  return step_idx >= 0 && static_cast<size_t>(step_idx) < order.steps.size() &&
+         std::holds_alternative<grammar::ActOutOf>(
+             order.steps[static_cast<size_t>(step_idx)].value);
+}
+
+base::TimeDelta RetryDelayForFailCount(int fail_count) {
+  if (fail_count <= 1) {
+    return base::TimeDelta();
+  }
+  return base::Seconds(std::min(fail_count - 1, 3));
+}
+
+Act MakeGenericOutOfItAct() {
+  Thing it_thing;
+  it_thing.value = grammar::ThingWho{grammar::Who::kIt};
+  Act act;
+  act.value = grammar::ActOutOf{std::move(it_thing)};
+  return act;
+}
+
+const pb::Area* FindHostileAreaContainingMe(const pb::Snapshot& snapshot) {
+  const pb::Self& self = snapshot.base.self;
+  if (self.unit.dead || (self.state != pb::Self::LIFE_STATE_UNSPECIFIED &&
+                         self.state != pb::Self::ALIVE)) {
+    return nullptr;
+  }
+  const pb::Area* best = nullptr;
+  float best_dist = std::numeric_limits<float>::infinity();
+  for (const pb::Area& a : snapshot.base.nearby.areas) {
+    if (!a.hostile) {
+      continue;
+    }
+    const bool inside = a.inside_me || (a.rel && a.radius_yd > 0.0f &&
+                                        a.rel->dist_yd <= a.radius_yd + 1.0f);
+    if (!inside) {
+      continue;
+    }
+    const float d = a.rel ? a.rel->dist_yd : 0.0f;
+    if (!best || d < best_dist) {
+      best = &a;
+      best_dist = d;
+    }
+  }
+  return best;
+}
+
+}  // namespace
+
 OrderEvalResult OrderEvaluator::OnSnapshot(const pb::Snapshot& snapshot,
                                            base::TimeTicks now) {
   UpdateHistory(snapshot, now);
 
-  if (orders_.empty()) {
-    return {};
+  // Check if a running generic hostile-ground-hazard evade completed or
+  // timed out.
+  if (generic_hazard_active_) {
+    if (pending_command_id_ != 0 &&
+        snapshot.done_act_command_id == pending_command_id_) {
+      generic_hazard_active_ = false;
+      generic_hazard_guid_.clear();
+      generic_hazard_name_.clear();
+      generic_hazard_fail_count_ = 0;
+      generic_hazard_retry_after_ = base::TimeTicks();
+      ResetActive();
+    } else {
+      OrderEvalResult timeout = CheckTimeout(now);
+      if (!timeout.wake_reason.empty()) {
+        return timeout;
+      }
+    }
   }
 
   // Check if the running step completed on this snapshot (separate from
@@ -1611,6 +1729,9 @@ OrderEvalResult OrderEvaluator::OnSnapshot(const pb::Snapshot& snapshot,
       pending_command_id_ = 0;
       step_advanced = true;
     } else {
+      order_fail_count_[static_cast<size_t>(active_order_)] = 0;
+      order_retry_after_[static_cast<size_t>(active_order_)] =
+          base::TimeTicks();
       ResetActive();
     }
   }
@@ -1623,123 +1744,175 @@ OrderEvalResult OrderEvaluator::OnSnapshot(const pb::Snapshot& snapshot,
     }
   }
 
-  // Build snapshot view and bind history entries to live entities where
-  // possible.
-  SnapshotView view(snapshot, now, now);
-  auto fallback_entity = [](const SeenEvent& ev) {
-    Entity e;
-    e.guid = ev.guid;
-    e.name = ev.name;
-    return e;
-  };
-  std::flat_map<std::string, std::pair<base::TimeTicks, Entity>> cast_entities;
-  for (const auto& [k, ev] : last_casts_) {
-    Entity e =
-        view.FindByGuidOrName(ev.guid, ev.name).value_or(fallback_entity(ev));
-    cast_entities.emplace(k, std::make_pair(ev.when, std::move(e)));
-  }
-  std::flat_map<std::string, std::pair<base::TimeTicks, Entity>>
-      appear_entities;
-  for (const auto& [k, ev] : last_appears_) {
-    Entity e =
-        view.FindByGuidOrName(ev.guid, ev.name).value_or(fallback_entity(ev));
-    appear_entities.emplace(k, std::make_pair(ev.when, std::move(e)));
-  }
-  view.last_casts = &cast_entities;
-  view.last_appears = &appear_entities;
+  bool explicit_out_of_cooling_down = false;
+  if (!orders_.empty()) {
+    // Build snapshot view and bind history entries to live entities where
+    // possible.
+    SnapshotView view(snapshot, now, now);
+    auto fallback_entity = [](const SeenEvent& ev) {
+      Entity e;
+      e.guid = ev.guid;
+      e.name = ev.name;
+      return e;
+    };
+    std::flat_map<std::string, std::pair<base::TimeTicks, Entity>>
+        cast_entities;
+    for (const auto& [k, ev] : last_casts_) {
+      Entity e =
+          view.FindByGuidOrName(ev.guid, ev.name).value_or(fallback_entity(ev));
+      cast_entities.emplace(k, std::make_pair(ev.when, std::move(e)));
+    }
+    std::flat_map<std::string, std::pair<base::TimeTicks, Entity>>
+        appear_entities;
+    for (const auto& [k, ev] : last_appears_) {
+      Entity e =
+          view.FindByGuidOrName(ev.guid, ev.name).value_or(fallback_entity(ev));
+      appear_entities.emplace(k, std::make_pair(ev.when, std::move(e)));
+    }
+    view.last_casts = &cast_entities;
+    view.last_appears = &appear_entities;
 
-  // Evaluate every order so edge latches re-arm whenever `when` goes false,
-  // and select the highest-priority eligible order (strictly higher than
-  // `active_order_` when an order is already running).
-  int winner = -1;
-  WhenMatch winner_match;
-  bool active_matched = false;
-  const int limit =
-      active_order_ >= 0 ? active_order_ : static_cast<int>(orders_.size());
-  for (int i = 0; i < static_cast<int>(orders_.size()); ++i) {
-    const Order& order = orders_[static_cast<size_t>(i)];
-    if (order.steps.empty()) {
-      continue;
+    // Evaluate every order so edge latches re-arm whenever `when` goes false,
+    // and select the highest-priority eligible order (strictly higher than
+    // `active_order_` when an order is already running).
+    int winner = -1;
+    WhenMatch winner_match;
+    bool active_matched = false;
+    const int limit =
+        active_order_ >= 0 ? active_order_ : static_cast<int>(orders_.size());
+    for (int i = 0; i < static_cast<int>(orders_.size()); ++i) {
+      const Order& order = orders_[static_cast<size_t>(i)];
+      if (order.steps.empty()) {
+        continue;
+      }
+      view.installed_at = order_installed_at_[static_cast<size_t>(i)];
+      view.order_last_every = last_every_fired_[static_cast<size_t>(i)];
+      WhenMatch match = EvalWhen(view, order.when);
+      if (!match.matched) {
+        order_latched_[static_cast<size_t>(i)] = false;
+        order_fail_count_[static_cast<size_t>(i)] = 0;
+        order_retry_after_[static_cast<size_t>(i)] = base::TimeTicks();
+        continue;
+      }
+      if (i == active_order_) {
+        active_matched = true;
+      }
+      const bool uses_every = OrderHasEvery(order);
+      const bool latched =
+          !uses_every && order_latched_[static_cast<size_t>(i)];
+      const base::TimeTicks retry_after =
+          order_retry_after_[static_cast<size_t>(i)];
+      const bool cooling_down = !retry_after.is_null() && now < retry_after;
+      if (cooling_down && IsOutOfStep(order, 0)) {
+        explicit_out_of_cooling_down = true;
+      }
+      if (winner < 0 && i < limit && !latched && !cooling_down) {
+        winner = i;
+        winner_match = std::move(match);
+      }
     }
-    view.installed_at = order_installed_at_[static_cast<size_t>(i)];
-    view.order_last_every = last_every_fired_[static_cast<size_t>(i)];
-    WhenMatch match = EvalWhen(view, order.when);
-    if (!match.matched) {
-      order_latched_[static_cast<size_t>(i)] = false;
-      continue;
-    }
-    if (i == active_order_) {
-      active_matched = true;
-    }
-    const bool uses_every = OrderHasEvery(order);
-    const bool latched = !uses_every && order_latched_[static_cast<size_t>(i)];
-    if (winner < 0 && i < limit && !latched) {
-      winner = i;
-      winner_match = std::move(match);
-    }
-  }
 
-  if (winner >= 0) {
-    const bool preempted = active_order_ >= 0;
-    if (preempted &&
-        std::holds_alternative<grammar::WhenAlways>(
-            orders_[static_cast<size_t>(active_order_)].when.value)) {
-      // Allow a preempted `always` fallback to resume once the urgent order
-      // finishes.
-      order_latched_[static_cast<size_t>(active_order_)] = false;
+    if (winner >= 0) {
+      const bool preempted = active_order_ >= 0 || generic_hazard_active_;
+      if (generic_hazard_active_) {
+        generic_hazard_active_ = false;
+        generic_hazard_guid_.clear();
+        generic_hazard_name_.clear();
+      }
+      if (active_order_ >= 0 &&
+          std::holds_alternative<grammar::WhenAlways>(
+              orders_[static_cast<size_t>(active_order_)].when.value)) {
+        // Allow a preempted `always` fallback to resume once the urgent order
+        // finishes.
+        order_latched_[static_cast<size_t>(active_order_)] = false;
+      }
+      std::string it_guid = winner_match.it ? winner_match.it->guid : "";
+      std::string it_name = winner_match.it ? winner_match.it->name : "";
+      OrderEvalResult res = DispatchStep(winner, 0, std::move(it_guid),
+                                         std::move(it_name), preempted, now);
+      if (res.act) {
+        res.target_guid = ResolveActThingGuid(view, *res.act, winner_match.it);
+      }
+      return res;
     }
-    std::string it_guid = winner_match.it ? winner_match.it->guid : "";
-    std::string it_name = winner_match.it ? winner_match.it->name : "";
-    OrderEvalResult res = DispatchStep(winner, 0, std::move(it_guid),
-                                       std::move(it_name), preempted, now);
-    if (res.act) {
-      res.target_guid = ResolveActThingGuid(view, *res.act, winner_match.it);
-    }
-    return res;
-  }
 
-  // A `kite` runs until stopped: it ends when its order's `when` no longer
-  // holds (the mob is far, the debuff is gone), not by itself.
-  if (active_order_ >= 0 && !active_matched && !step_advanced) {
-    const Order& cur = orders_[static_cast<size_t>(active_order_)];
-    if (std::holds_alternative<grammar::ActKite>(
-            cur.steps[static_cast<size_t>(active_step_)].value)) {
+    // A `kite` runs until stopped: it ends when its order's `when` no longer
+    // holds (the mob is far, the debuff is gone), not by itself.
+    if (active_order_ >= 0 && !active_matched && !step_advanced) {
+      const Order& cur = orders_[static_cast<size_t>(active_order_)];
+      if (std::holds_alternative<grammar::ActKite>(
+              cur.steps[static_cast<size_t>(active_step_)].value)) {
+        OrderEvalResult res;
+        res.order_index = active_order_;
+        res.step_index = active_step_;
+        res.kite_ended = true;
+        ResetActive();
+        return res;
+      }
+    }
+
+    // No higher-priority order preempted. If our active order just advanced its
+    // `then` chain, dispatch the next step now.
+    if (active_order_ >= 0 && step_advanced) {
+      OrderEvalResult res = DispatchStep(active_order_, active_step_,
+                                         active_it_guid_, active_it_name_,
+                                         /*preempted=*/false, now);
+      if (res.act) {
+        std::optional<Entity> it_ent =
+            view.FindByGuidOrName(active_it_guid_, active_it_name_);
+        res.target_guid = ResolveActThingGuid(view, *res.act, it_ent);
+      }
+      return res;
+    }
+
+    // Otherwise, the active step continues running.
+    if (active_order_ >= 0) {
+      const Order& cur = orders_[static_cast<size_t>(active_order_)];
       OrderEvalResult res;
       res.order_index = active_order_;
       res.step_index = active_step_;
-      res.kite_ended = true;
-      ResetActive();
+      res.it_guid = active_it_guid_;
+      res.it_name = active_it_name_;
+      res.covered =
+          !std::holds_alternative<grammar::WhenAlways>(cur.when.value);
       return res;
     }
   }
 
-  // No higher-priority order preempted. If our active order just advanced its
-  // `then` chain, dispatch the next step now.
-  if (active_order_ >= 0 && step_advanced) {
-    OrderEvalResult res = DispatchStep(active_order_, active_step_,
-                                       active_it_guid_, active_it_name_,
-                                       /*preempted=*/false, now);
-    if (res.act) {
-      std::optional<Entity> it_ent =
-          view.FindByGuidOrName(active_it_guid_, active_it_name_);
-      res.target_guid = ResolveActThingGuid(view, *res.act, it_ent);
-    }
-    return res;
-  }
-
-  // Otherwise, the active step continues running.
-  if (active_order_ >= 0) {
-    const Order& cur = orders_[static_cast<size_t>(active_order_)];
+  // Generic hostile-ground-hazard evade reflex (M12): when no explicit
+  // standing order is running or matched, move out of hostile ground AoEs /
+  // dynamic objects / trigger hazards even outside boss notes (trash mobs,
+  // unlisted abilities).
+  if (generic_hazard_active_) {
     OrderEvalResult res;
-    res.order_index = active_order_;
-    res.step_index = active_step_;
-    res.it_guid = active_it_guid_;
-    res.it_name = active_it_name_;
-    res.covered = !std::holds_alternative<grammar::WhenAlways>(cur.when.value);
+    res.it_guid = generic_hazard_guid_;
+    res.it_name = generic_hazard_name_;
+    res.covered = true;
+    res.generic_hazard = true;
     return res;
   }
-
-  return {};
+  const pb::Area* hazard = FindHostileAreaContainingMe(snapshot);
+  if (!hazard) {
+    generic_hazard_fail_count_ = 0;
+    generic_hazard_retry_after_ = base::TimeTicks();
+    return {};
+  }
+  if (explicit_out_of_cooling_down || (!generic_hazard_retry_after_.is_null() &&
+                                       now < generic_hazard_retry_after_)) {
+    return {};
+  }
+  generic_hazard_active_ = true;
+  generic_hazard_guid_ = hazard->guid;
+  generic_hazard_name_ = std::string(AreaName(*hazard));
+  step_started_at_ = now;
+  pending_command_id_ = 0;
+  OrderEvalResult res;
+  res.act = MakeGenericOutOfItAct();
+  res.it_guid = generic_hazard_guid_;
+  res.it_name = generic_hazard_name_;
+  res.covered = true;
+  res.generic_hazard = true;
+  return res;
 }
 
 std::string ResolvePlanActTargetGuid(const pb::Snapshot& snapshot,
@@ -1751,8 +1924,19 @@ std::string ResolvePlanActTargetGuid(const pb::Snapshot& snapshot,
 
 OrderEvalResult OrderEvaluator::OnStepDone(uint32_t command_id,
                                            base::TimeTicks now) {
-  if (active_order_ < 0 || command_id == 0 ||
-      command_id != pending_command_id_) {
+  if (command_id == 0 || command_id != pending_command_id_) {
+    return {};
+  }
+  if (generic_hazard_active_) {
+    generic_hazard_active_ = false;
+    generic_hazard_guid_.clear();
+    generic_hazard_name_.clear();
+    generic_hazard_fail_count_ = 0;
+    generic_hazard_retry_after_ = base::TimeTicks();
+    ResetActive();
+    return {};
+  }
+  if (active_order_ < 0) {
     return {};
   }
   const Order& cur = orders_[static_cast<size_t>(active_order_)];
@@ -1761,18 +1945,59 @@ OrderEvalResult OrderEvaluator::OnStepDone(uint32_t command_id,
     return DispatchStep(active_order_, next_step, active_it_guid_,
                         active_it_name_, /*preempted=*/false, now);
   }
+  order_fail_count_[static_cast<size_t>(active_order_)] = 0;
+  order_retry_after_[static_cast<size_t>(active_order_)] = base::TimeTicks();
   ResetActive();
   return {};
 }
 
-OrderEvalResult OrderEvaluator::OnStepFailed(std::string_view error) {
+OrderEvalResult OrderEvaluator::OnStepFailed(std::string_view error,
+                                             base::TimeTicks now) {
+  if (generic_hazard_active_) {
+    const std::string name =
+        generic_hazard_name_.empty() ? "ground hazard" : generic_hazard_name_;
+    generic_hazard_active_ = false;
+    generic_hazard_guid_.clear();
+    generic_hazard_name_.clear();
+    ++generic_hazard_fail_count_;
+    const base::TimeDelta delay =
+        RetryDelayForFailCount(generic_hazard_fail_count_);
+    if (!delay.is_zero() && !now.is_null()) {
+      generic_hazard_retry_after_ = now + delay;
+    } else {
+      generic_hazard_retry_after_ = base::TimeTicks();
+    }
+    ResetActive();
+    OrderEvalResult res;
+    res.covered = false;
+    res.generic_hazard = true;
+    res.wake_reason = "hazard evade failed (" + name + ")";
+    if (!error.empty()) {
+      res.wake_reason += ": ";
+      res.wake_reason += error;
+    }
+    return res;
+  }
   if (active_order_ < 0) {
     return {};
   }
   const int order_idx = active_order_;
   const int step_idx = active_step_;
-  const std::string order_text =
-      FormatOrder(orders_[static_cast<size_t>(order_idx)]);
+  const Order& order = orders_[static_cast<size_t>(order_idx)];
+  const std::string order_text = FormatOrder(order);
+  // Never leave a failed `out of` step latched while still standing in fire:
+  // unlatch so the bot retries on the next snapshot with an alternate escape
+  // vector instead of waiting for an LLM round trip.
+  if (IsOutOfStep(order, step_idx)) {
+    order_latched_[static_cast<size_t>(order_idx)] = false;
+    const int fails = ++order_fail_count_[static_cast<size_t>(order_idx)];
+    const base::TimeDelta delay = RetryDelayForFailCount(fails);
+    if (!delay.is_zero() && !now.is_null()) {
+      order_retry_after_[static_cast<size_t>(order_idx)] = now + delay;
+    } else {
+      order_retry_after_[static_cast<size_t>(order_idx)] = base::TimeTicks();
+    }
+  }
   ResetActive();
 
   OrderEvalResult res;
@@ -1788,6 +2013,30 @@ OrderEvalResult OrderEvaluator::OnStepFailed(std::string_view error) {
 }
 
 OrderEvalResult OrderEvaluator::CheckTimeout(base::TimeTicks now) {
+  if (generic_hazard_active_) {
+    const Act act = MakeGenericOutOfItAct();
+    const std::optional<base::TimeDelta> limit = TimeoutForAct(act);
+    if (!limit || (now - step_started_at_) < *limit) {
+      return {};
+    }
+    const std::string name =
+        generic_hazard_name_.empty() ? "ground hazard" : generic_hazard_name_;
+    generic_hazard_active_ = false;
+    generic_hazard_guid_.clear();
+    generic_hazard_name_.clear();
+    ++generic_hazard_fail_count_;
+    const base::TimeDelta delay =
+        RetryDelayForFailCount(generic_hazard_fail_count_);
+    generic_hazard_retry_after_ =
+        delay.is_zero() ? base::TimeTicks() : (now + delay);
+    ResetActive();
+    OrderEvalResult res;
+    res.covered = false;
+    res.generic_hazard = true;
+    res.timed_out = true;
+    res.wake_reason = "hazard evade timed out (" + name + ")";
+    return res;
+  }
   if (active_order_ < 0) {
     return {};
   }
@@ -1800,6 +2049,13 @@ OrderEvalResult OrderEvaluator::CheckTimeout(base::TimeTicks now) {
   const int order_idx = active_order_;
   const int step_idx = active_step_;
   const std::string order_text = FormatOrder(order);
+  if (IsOutOfStep(order, step_idx)) {
+    order_latched_[static_cast<size_t>(order_idx)] = false;
+    const int fails = ++order_fail_count_[static_cast<size_t>(order_idx)];
+    const base::TimeDelta delay = RetryDelayForFailCount(fails);
+    order_retry_after_[static_cast<size_t>(order_idx)] =
+        delay.is_zero() ? base::TimeTicks() : (now + delay);
+  }
   ResetActive();
 
   OrderEvalResult res;
@@ -1855,6 +2111,13 @@ bool OrderCoversWake(const Order& order,
     if (std::holds_alternative<grammar::CheckMana>(cond.check.value) ||
         std::holds_alternative<grammar::CheckManaPoints>(cond.check.value)) {
       covered |= kWakeMana;
+    }
+    if (std::holds_alternative<grammar::CheckInArea>(cond.check.value)) {
+      covered |= kWakeHazard;
+    }
+    if (const auto* on = std::get_if<grammar::CheckOn>(&cond.check.value);
+        on && on->who == grammar::Who::kMe) {
+      covered |= kWakeHazard;
     }
     if (const auto* targets =
             std::get_if<grammar::CheckTargets>(&cond.check.value);

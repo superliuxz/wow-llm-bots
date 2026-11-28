@@ -46,8 +46,8 @@ in Eruption -> out of it
 - **Zombie Chow**: off-tank/kiters keep them away from Gluth; after **Decimate** drops them to 5% HP, burn them down before they reach Gluth.
 
 ```
-Mortal Wound stacks>2 on tank & me offtank -> wake
-Mortal Wound stacks>2 on offtank & me tank & not me offtank -> wake
+Mortal Wound stacks>2 on tank & me offtank -> use Taunt on boss
+Mortal Wound stacks>2 on offtank & me tank & not me offtank -> use Taunt on boss
 ```
 
 ## The Four Horsemen (Thane Korth'azz, Lady Blaumeux, Sir Zeliek, Baron Rivendare)

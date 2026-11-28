@@ -202,6 +202,12 @@ void ExtractNamesFromNotes(std::string_view notes, const auto& add_name) {
   };
 
   bool in_code_block = false;
+  if (base::ToLowerASCII(notes).find("tank swap") != std::string::npos) {
+    // Allow class-agnostic `use Taunt on boss` standing orders for all tank
+    // classes (Warrior/Paladin/Druid/DK); the server maps `Taunt` to the bot's
+    // own single-target SPELL_AURA_MOD_TAUNT spell.
+    add_name("Taunt");
+  }
   for (std::string_view raw_line : base::SplitStringPiece(
            notes, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
     if (raw_line.starts_with("```")) {

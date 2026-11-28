@@ -702,7 +702,7 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
         const TriggerHazardInfo& hz = hz_it->second;
         const float dist_to_trigger = bot->GetExactDist2d(trigger);
         const float radius = hz.radius_yd > 0.0f ? hz.radius_yd : 8.0f;
-        const bool inside = dist_to_trigger <= radius;
+        const bool inside = dist_to_trigger <= radius + bot->GetCombatReach();
         const std::optional<bool> in_los = los_.Get(raw_guid);
         if (!inside && ((in_los.has_value() && !*in_los) ||
                         (dist_to_trigger > options_.nameplate_range_yd &&
@@ -808,7 +808,8 @@ NearbyBuilder::Stats NearbyBuilder::Build(Player* bot, pb::Nearby* nearby) {
       sp.id = area->GetSpellId();
       sp.name = out.name;
       out.radius_yd = area->GetRadius();
-      out.inside_me = bot->GetExactDist2d(area) <= area->GetRadius();
+      out.inside_me = bot->GetExactDist2d(area) <=
+                      area->GetRadius() + bot->GetCombatReach();
       Unit* caster = area->GetCaster();
       out.hostile = caster && caster->IsHostileTo(bot);
       if (area->GetDuration() > 0) {  // -1: lasts until removed.

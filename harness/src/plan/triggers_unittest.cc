@@ -968,5 +968,51 @@ TEST(TriggersTest, RaidScaleFiltersNonUrgentStatusForDpsOnly) {
             std::string::npos);
 }
 
+TEST(TriggersTest, HostileGroundAreaWakesP0AndIgnoresFriendlyOrDead) {
+  TriggerEvaluator eval;
+  pb::Snapshot base = BaseSnap();
+  EXPECT_FALSE(eval.EvaluateSnapshot(base));
+
+  // Friendly ground area (e.g. friendly Consecration) never wakes.
+  pb::Snapshot friendly = base;
+  pb::Area& f = friendly.base.nearby.areas.emplace_back();
+  f.guid = "Area-Friendly";
+  f.name = "Consecration";
+  f.radius_yd = 8.0f;
+  f.inside_me = true;
+  f.hostile = false;
+  EXPECT_FALSE(eval.EvaluateSnapshot(friendly));
+
+  // Stepping into hostile ground fire wakes at P0Combat with kWakeHazard.
+  pb::Snapshot fire = base;
+  pb::Area& h = fire.base.nearby.areas.emplace_back();
+  h.guid = "Area-Hostile";
+  h.name = "Flamestrike";
+  h.radius_yd = 6.0f;
+  h.inside_me = true;
+  h.hostile = true;
+  const std::optional<WakeTrigger> t = eval.EvaluateSnapshot(fire);
+  ASSERT_TRUE(t);
+  EXPECT_EQ(t->urgency, Urgency::kP0Combat);
+  EXPECT_EQ(t->kinds, kWakeHazard);
+  EXPECT_EQ(t->reason, "standing in hostile Flamestrike");
+  // Edge-latched while remaining in the same hazard.
+  EXPECT_FALSE(eval.EvaluateSnapshot(fire));
+
+  // Counter-test: dead bot in a new hostile area does not emit hazard wake.
+  pb::Snapshot dead_fire = base;
+  dead_fire.base.self.state = pb::Self::DEAD_BODY;
+  dead_fire.base.self.unit.dead = true;
+  pb::Area& h2 = dead_fire.base.nearby.areas.emplace_back();
+  h2.guid = "Area-Hostile-2";
+  h2.name = "Rain of Fire";
+  h2.radius_yd = 6.0f;
+  h2.inside_me = true;
+  h2.hostile = true;
+  const std::optional<WakeTrigger> dead_t = eval.EvaluateSnapshot(dead_fire);
+  ASSERT_TRUE(dead_t);
+  EXPECT_EQ(dead_t->kinds, kWakeDied);
+}
+
 }  // namespace
 }  // namespace harness

@@ -415,5 +415,40 @@ TEST(ActGeometryTest, SpreadAssignsDistinctEvenlySpacedBearings) {
   EXPECT_GE(min_pair_yd, 11.9f);
 }
 
+TEST(ActGeometryTest, OutOfRetryRotatesEscapeVectorAndIncludesTightFallback) {
+  const AnchorGeometry hazard{
+      .pos = {0.0f, 0.0f, 0.0f}, .facing_rad = 0.0f, .radius_yd = 0.0f};
+  const pb::Vec3 bot{5.0f, 0.0f, 0.0f};  // Directly +X from center.
+
+  // Attempt 0 goes straight outward (+X).
+  const std::vector<pb::Vec3> a0 =
+      CandidateSpotsForOutOf(bot, hazard, 10.0f, std::nullopt,
+                             kDefaultOutOfMarginYd, 0.0f, /*attempt=*/0);
+  ASSERT_GT(a0.size(), 12u);  // 12 primary + 8 tight fallback spots.
+  EXPECT_NEAR(a0.front().x, 10.0f + kDefaultOutOfMarginYd, 1e-2f);
+  EXPECT_NEAR(a0.front().y, 0.0f, 1e-2f);
+  // Tight fallback ring is strictly outside hazard radius (11.0 yd).
+  EXPECT_NEAR(Dist2D(a0.back(), hazard.pos), 11.0f, 1e-2f);
+
+  // Attempt 1 rotates +90 deg (+Y), ignoring preferred_dir_pos on +X so a
+  // blocked path tries an alternate escape vector first.
+  const std::vector<pb::Vec3> a1 =
+      CandidateSpotsForOutOf(bot, hazard, 10.0f, pb::Vec3{20.0f, 0.0f, 0.0f},
+                             kDefaultOutOfMarginYd, 0.0f, /*attempt=*/1);
+  ASSERT_FALSE(a1.empty());
+  EXPECT_NEAR(a1.front().x, 0.0f, 1e-2f);
+  EXPECT_NEAR(a1.front().y, 10.0f + kDefaultOutOfMarginYd, 1e-2f);
+
+  // Attempt 2 rotates -90 deg (-Y), attempt 3 rotates 180 deg (-X).
+  const std::vector<pb::Vec3> a2 =
+      CandidateSpotsForOutOf(bot, hazard, 10.0f, std::nullopt,
+                             kDefaultOutOfMarginYd, 0.0f, /*attempt=*/2);
+  EXPECT_NEAR(a2.front().y, -(10.0f + kDefaultOutOfMarginYd), 1e-2f);
+  const std::vector<pb::Vec3> a3 =
+      CandidateSpotsForOutOf(bot, hazard, 10.0f, std::nullopt,
+                             kDefaultOutOfMarginYd, 0.0f, /*attempt=*/3);
+  EXPECT_NEAR(a3.front().x, -(10.0f + kDefaultOutOfMarginYd), 1e-2f);
+}
+
 }  // namespace
 }  // namespace llm_brain

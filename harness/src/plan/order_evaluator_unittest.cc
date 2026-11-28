@@ -1246,5 +1246,197 @@ TEST(OrderEvaluatorTest, RoleFilterMatchesAssignedGroupRoleAndRejectsSolo) {
   EXPECT_FALSE(eval_role(mt, "me offtank & phase 2 -> target boss"));
 }
 
+TEST(OrderEvaluatorTest, FailedOutOfItUnlatchesAndRetriesWithoutWaitingForLlm) {
+  OrderEvaluator eval(base::Seconds(5));
+  eval.SetOrders({MustParse("in Flame Strike -> out of it")}, T(0));
+
+  pb::Snapshot s = MakeBaseSnapshot();
+  pb::Area fire;
+  fire.guid = "Area-Fire";
+  fire.name = "Flame Strike";
+  fire.radius_yd = 6.0f;
+  fire.inside_me = true;
+  fire.hostile = true;
+  s.base.nearby.areas.push_back(fire);
+
+  // First trigger dispatches `out of it`.
+  OrderEvalResult r = eval.OnSnapshot(s, T(1));
+  ASSERT_TRUE(r.act.has_value());
+  EXPECT_TRUE(std::holds_alternative<grammar::ActOutOf>(r.act->value));
+  EXPECT_EQ(r.order_index, 0);
+  eval.set_pending_command_id(10);
+
+  // Step fails (e.g., blocked path or cast interrupt): must NOT stay latched!
+  r = eval.OnStepFailed("no path out of hazard", T(2));
+  EXPECT_FALSE(r.wake_reason.empty());
+  EXPECT_FALSE(eval.active());
+
+  // Next snapshot still in Flame Strike retries immediately without LLM.
+  r = eval.OnSnapshot(s, T(2.2));
+  ASSERT_TRUE(r.act.has_value());
+  EXPECT_TRUE(std::holds_alternative<grammar::ActOutOf>(r.act->value));
+  EXPECT_EQ(r.order_index, 0);
+  eval.set_pending_command_id(11);
+
+  // Second consecutive failure applies a short 1s retry backoff so a genuinely
+  // boxed-in bot does not spin at tick rate, then retries once backoff elapses.
+  r = eval.OnStepFailed("no path out of hazard", T(2.5));
+  EXPECT_FALSE(eval.active());
+  r = eval.OnSnapshot(s, T(2.8));
+  EXPECT_FALSE(r.act.has_value());
+  r = eval.OnSnapshot(s, T(3.6));
+  ASSERT_TRUE(r.act.has_value());
+  EXPECT_TRUE(std::holds_alternative<grammar::ActOutOf>(r.act->value));
+
+  // Adversarial counter-test: non-`out of` orders stay latched on failure
+  // until their condition clears.
+  OrderEvaluator away_eval(base::Seconds(5));
+  away_eval.SetOrders({MustParse("Defile on me -> away")}, T(0));
+  pb::Snapshot s2 = MakeBaseSnapshot();
+  s2.base.self.unit.auras.push_back(MakeAura("Defile"));
+  r = away_eval.OnSnapshot(s2, T(1));
+  ASSERT_TRUE(r.act.has_value());
+  away_eval.OnStepFailed("no path", T(2));
+  EXPECT_FALSE(away_eval.OnSnapshot(s2, T(3)).act.has_value());
+}
+
+TEST(OrderEvaluatorTest, GenericHostileGroundHazardEvadesWithoutBossNotes) {
+  // No standing orders installed at all (trash mob / unlisted ability).
+  OrderEvaluator eval(base::Seconds(5));
+
+  // Adversarial counter-test: friendly ground area does NOT trigger evade.
+  pb::Snapshot friendly_snap = MakeBaseSnapshot();
+  pb::Area friendly;
+  friendly.guid = "Area-Cons";
+  friendly.name = "Consecration";
+  friendly.radius_yd = 8.0f;
+  friendly.inside_me = true;
+  friendly.hostile = false;
+  friendly_snap.base.nearby.areas.push_back(friendly);
+  EXPECT_FALSE(eval.OnSnapshot(friendly_snap, T(1)).act.has_value());
+
+  // Adversarial counter-test: dead bot in hostile fire does NOT trigger evade.
+  pb::Snapshot dead_snap = MakeBaseSnapshot();
+  dead_snap.base.self.state = pb::Self::DEAD_BODY;
+  dead_snap.base.self.unit.dead = true;
+  pb::Area hostile;
+  hostile.guid = "Area-Rain";
+  hostile.name = "Rain of Fire";
+  hostile.radius_yd = 8.0f;
+  hostile.inside_me = true;
+  hostile.hostile = true;
+  dead_snap.base.nearby.areas.push_back(hostile);
+  EXPECT_FALSE(eval.OnSnapshot(dead_snap, T(2)).act.has_value());
+
+  // Living solo bot inside hostile trash fire immediately evades via `out of`.
+  pb::Snapshot fire_snap = MakeBaseSnapshot();
+  fire_snap.base.nearby.areas.push_back(hostile);
+  OrderEvalResult r = eval.OnSnapshot(fire_snap, T(3));
+  ASSERT_TRUE(r.act.has_value());
+  EXPECT_TRUE(std::holds_alternative<grammar::ActOutOf>(r.act->value));
+  EXPECT_TRUE(r.covered);
+  EXPECT_TRUE(r.generic_hazard);
+  EXPECT_EQ(r.it_guid, "Area-Rain");
+  EXPECT_EQ(r.it_name, "Rain of Fire");
+  EXPECT_TRUE(eval.active());
+  EXPECT_TRUE(eval.ActiveStepMoves());
+  eval.set_pending_command_id(42);
+
+  // If generic evade fails, it unlatches and retries on the next snapshot.
+  r = eval.OnStepFailed("no path out of hazard", T(3.5));
+  EXPECT_TRUE(r.generic_hazard);
+  EXPECT_FALSE(eval.active());
+  r = eval.OnSnapshot(fire_snap, T(3.7));
+  ASSERT_TRUE(r.act.has_value());
+  EXPECT_TRUE(r.generic_hazard);
+  eval.set_pending_command_id(43);
+
+  // Completing the step clears generic hazard state.
+  fire_snap.done_act_command_id = 43;
+  fire_snap.base.nearby.areas.clear();
+  r = eval.OnSnapshot(fire_snap, T(4.5));
+  EXPECT_FALSE(eval.active());
+  EXPECT_FALSE(r.act.has_value());
+
+  // Explicit boss-notes standing order takes priority over generic evade.
+  eval.SetOrders({MustParse("in Rain of Fire -> out of it, then back")}, T(5));
+  pb::Snapshot fire_again = MakeBaseSnapshot();
+  fire_again.base.nearby.areas.push_back(hostile);
+  r = eval.OnSnapshot(fire_again, T(6));
+  ASSERT_TRUE(r.act.has_value());
+  EXPECT_EQ(r.order_index, 0);
+  EXPECT_FALSE(r.generic_hazard);
+}
+
+TEST(OrderEvaluatorTest, OfftankRoleUsesMainAssistAndFastTankSwapUsesTaunt) {
+  pb::Snapshot s = MakeBaseSnapshot();
+  s.base.self.unit.guid = "Player-30";
+  s.base.self.unit.name = "MaOfftank";
+  s.base.self.unit.group = MakeGroup(pb::Role::TANK);
+  s.base.self.unit.group->subgroup = 3;
+  s.base.self.unit.group->main_assist = true;
+
+  pb::Unit mt = MakeUnit("Player-20", "MainTank", 10.0f);
+  mt.kind = pb::Unit::PLAYER;
+  mt.reaction = pb::Unit::FRIENDLY;
+  mt.group = MakeGroup(pb::Role::TANK, /*main_tank=*/true);
+  mt.group->subgroup = 2;
+  mt.auras.push_back(MakeAura("Rune of Blood"));
+
+  pb::Unit backup = MakeUnit("Player-10", "Sub1BackupTank", 10.0f);
+  backup.kind = pb::Unit::PLAYER;
+  backup.reaction = pb::Unit::FRIENDLY;
+  backup.group = MakeGroup(pb::Role::TANK);
+  backup.group->subgroup = 1;
+
+  pb::Unit dps_ma = MakeUnit("Player-05", "DpsMainAssist", 10.0f);
+  dps_ma.kind = pb::Unit::PLAYER;
+  dps_ma.reaction = pb::Unit::FRIENDLY;
+  dps_ma.group = MakeGroup(pb::Role::DPS);
+  dps_ma.group->subgroup = 1;
+  dps_ma.group->main_assist = true;
+
+  pb::Unit boss = MakeUnit("Boss-1", "Deathbringer Saurfang", 8.0f);
+  boss.boss = pb::BossPart{.phase = 1};
+  s.ext.encounter.emplace().boss = boss;
+  s.base.nearby.units.push_back(mt);
+  s.base.nearby.units.push_back(backup);
+  s.base.nearby.units.push_back(dps_ma);
+  s.base.nearby.units.push_back(boss);
+
+  // Offtank is resolved by raid role (Main Assist tank in subgroup 3) rather
+  // than 2nd tank in group order (Sub1BackupTank in subgroup 1), and DPS Main
+  // Assist is never treated as a tank/offtank.
+  const Act to_offtank = MustParse("always -> to offtank").steps.front();
+  EXPECT_EQ(ResolvePlanActTargetGuid(s, to_offtank, T(1)), "Player-30");
+
+  // Fast tank swap via standing order executes `use Taunt on boss` immediately
+  // without waking the LLM.
+  OrderEvaluator eval;
+  eval.SetOrders(
+      {MustParse("Rune of Blood on tank & me offtank -> use Taunt on boss")},
+      T(0));
+  OrderEvalResult r = eval.OnSnapshot(s, T(1));
+  ASSERT_TRUE(r.act.has_value());
+  EXPECT_TRUE(r.wake_reason.empty());
+  EXPECT_EQ(r.target_guid, "Boss-1");
+  const std::optional<pb::Command::Act> cmd =
+      OrderActToCommand(*r.act, r.it_guid, r.it_name, r.target_guid);
+  ASSERT_TRUE(cmd.has_value());
+  EXPECT_EQ(cmd->verb, pb::Command::Act::USE);
+  EXPECT_EQ(cmd->name, "Taunt");
+  EXPECT_EQ(cmd->thing, pb::Command::Act::BOSS);
+  EXPECT_EQ(cmd->it_guid, "Boss-1");
+
+  // Adversarial counter-test: solo bot never triggers `me offtank` tank swap.
+  pb::Snapshot solo = MakeBaseSnapshot();
+  solo.base.self.unit.group.reset();
+  OrderEvaluator solo_eval;
+  solo_eval.SetOrders(
+      {MustParse("Rune of Blood on tank & me offtank -> use Taunt on boss")},
+      T(0));
+  EXPECT_FALSE(solo_eval.OnSnapshot(solo, T(1)).act.has_value());
+}
+
 }  // namespace
 }  // namespace harness

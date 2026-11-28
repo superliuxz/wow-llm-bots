@@ -155,7 +155,8 @@ std::vector<pb::Vec3> CandidateSpotsForOutOf(
     float hazard_radius_yd,
     std::optional<pb::Vec3> preferred_dir_pos,
     float margin_yd,
-    float bot_radius_yd) {
+    float bot_radius_yd,
+    uint32_t attempt) {
   const float cur_dist = Dist2D(bot_pos, hazard.pos);
   const float reach = std::max(0.0f, bot_radius_yd);
   const float effective_hazard_radius =
@@ -168,11 +169,20 @@ std::vector<pb::Vec3> CandidateSpotsForOutOf(
       effective_hazard_radius > 0.0f ? effective_hazard_radius : kDefaultAwayYd;
   const float target_dist = effective_radius + std::max(0.5f, margin_yd);
   float base = BearingFromTo(hazard.pos, bot_pos, hazard.facing_rad + kPi);
-  if (preferred_dir_pos) {
+  if (attempt == 0 && preferred_dir_pos) {
     const float pref = BearingFromTo(hazard.pos, *preferred_dir_pos, base);
     if (cur_dist < 1.0f || AngleDiffRad(base, pref) <= 0.5f * kPi) {
       base = pref;
     }
+  } else if (attempt > 0) {
+    // Rotate the primary escape bearing on retry/repath so a blocked or
+    // interrupted path tries an alternate escape vector first.
+    static constexpr float kRetryRotationsDeg[] = {
+        0.0f, 90.0f, -90.0f, 180.0f, 45.0f, -45.0f, 135.0f, -135.0f};
+    const float rot_deg =
+        kRetryRotationsDeg[attempt % (sizeof(kRetryRotationsDeg) /
+                                      sizeof(kRetryRotationsDeg[0]))];
+    base += rot_deg * (kPi / 180.0f);
   }
   static constexpr float kOffsets[] = {0.0f,    30.0f,  -30.0f,  60.0f,
                                        -60.0f,  90.0f,  -90.0f,  120.0f,
@@ -180,6 +190,15 @@ std::vector<pb::Vec3> CandidateSpotsForOutOf(
   std::vector<pb::Vec3> spots;
   AppendFan(&spots, hazard.pos, base, target_dist, kOffsets,
             sizeof(kOffsets) / sizeof(kOffsets[0]));
+  // Tight-room fallback: if every spot at `target_dist` lands inside a wall or
+  // obstacle, also offer a tighter ring just outside `effective_radius`.
+  const float tight_dist = effective_radius + 1.0f;
+  if (target_dist > tight_dist + 0.25f) {
+    static constexpr float kTightOffsets[] = {0.0f,   45.0f,  -45.0f,  90.0f,
+                                              -90.0f, 135.0f, -135.0f, 180.0f};
+    AppendFan(&spots, hazard.pos, base, tight_dist, kTightOffsets,
+              sizeof(kTightOffsets) / sizeof(kTightOffsets[0]));
+  }
   return spots;
 }
 

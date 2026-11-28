@@ -55,6 +55,7 @@ struct ActiveAct {
   uint64_t hazard_caster_guid = 0;
   uint32_t hazard_spell_id = 0;
   DodgePhase dodge_phase = DodgePhase::kMovingOut;
+  uint32_t out_of_attempt = 0;
   base::TimeTicks hold_deadline;
   InterruptedActivity interrupted;
   base::TimeTicks last_repath_at;

@@ -370,5 +370,30 @@ TEST(GroupRolesTest, CollectGroupLeaderControlsBotLedWithHumanAndCounterTests) {
   }
 }
 
+TEST(GroupRolesTest, OfftankSelectedByMainAssistAndLfgRoleNotGroupOrder) {
+  auto sub1_spec_tank = Member(10, /*subgroup=*/1);
+  sub1_spec_tank.spec_tank = true;
+
+  auto sub2_mt = Member(20, /*subgroup=*/2);
+  sub2_mt.spec_tank = true;
+  sub2_mt.main_tank_flag = true;
+
+  auto sub3_ma_ot = Member(30, /*subgroup=*/3);
+  sub3_ma_ot.spec_tank = true;
+  sub3_ma_ot.main_assist_flag = true;
+
+  auto sub1_dps_ma = Member(5, /*subgroup=*/1, pb::Role::DPS);
+  sub1_dps_ma.main_assist_flag = true;
+
+  auto sub2_lfg_tank = Member(25, /*subgroup=*/2, pb::Role::TANK);
+
+  const std::vector<GroupMemberRoleInput> raid = {
+      sub1_dps_ma, sub1_spec_tank, sub2_mt, sub2_lfg_tank, sub3_ma_ot};
+  // Order: Main Tank (20), Main Assist tank (30), LFG tank (25), spec tank
+  // (10). DPS Main Assist (5) is never elevated to tank/offtank.
+  EXPECT_EQ(ResolveGroupTankOrder(raid),
+            (std::vector<uint64_t>{20u, 30u, 25u, 10u}));
+}
+
 }  // namespace
 }  // namespace llm_brain

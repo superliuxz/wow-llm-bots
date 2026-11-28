@@ -26,8 +26,8 @@ Whirlwind cast -> out of it
 - **Spawn of Fankriss**: priority add; switch and burn promptly.
 
 ```
-Mortal Wound stacks>2 on tank & me offtank -> wake
-Mortal Wound stacks>2 on offtank & me tank & not me offtank -> wake
+Mortal Wound stacks>2 on tank & me offtank -> use Taunt on boss
+Mortal Wound stacks>2 on offtank & me tank & not me offtank -> use Taunt on boss
 Spawn of Fankriss appears -> target nearest Spawn of Fankriss
 ```
 

@@ -39,10 +39,10 @@ Tracking document for findings from the WoW Team Play Review. Each item is tagge
 
 ### Combat
 
-- [ ] **[M12]** Spending talents mid-session doesn't reset playerbots' class strategies, so a bot that goes Prot or Holy keeps its old rotation. Tests hide this with `ResetStrategies()`.
-- [ ] **[M12]** A failed `out of it` step stays latched, so the bot keeps standing in fire until the LLM answers.
-- [ ] **[M12]** No reaction to fire outside the boss notes (trash, abilities the notes don't list).
-- [ ] **[M12]** Tank swaps need an LLM round trip, and "offtank" just means the 2nd tank in group order.
+- [x] **[M12]** Spending talents mid-session doesn't reset playerbots' class strategies, so a bot that goes Prot or Holy keeps its old rotation. Tests hide this with `ResetStrategies()`.
+- [x] **[M12]** A failed `out of it` step stays latched, so the bot keeps standing in fire until the LLM answers.
+- [x] **[M12]** No reaction to fire outside the boss notes (trash, abilities the notes don't list).
+- [x] **[M12]** Tank swaps need an LLM round trip, and "offtank" just means the 2nd tank in group order.
 
 ### Human <-> bot control
 

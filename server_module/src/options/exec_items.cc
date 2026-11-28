@@ -1579,6 +1579,12 @@ ActionOutcome ExecuteSpendTalentsAction(Player* bot,
     return {.error = "no learnable talents in " + action.tree_name};
   }
   bot->SendTalentsInfoData(false);
+  // Refresh playerbots' class combat/non-combat strategies so a bot spending
+  // talents mid-session (e.g. transitioning to Prot or Holy) immediately picks
+  // up the new spec's rotation instead of keeping its old strategies.
+  if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot)) {
+    ai->ResetStrategies();
+  }
   return {.used = true,
           .info = "spent " + std::to_string(before - after) +
                   " talent point(s) in " + action.tree_name};

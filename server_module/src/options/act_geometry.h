@@ -73,15 +73,19 @@ std::vector<wlb::snapshot::Vec3> CandidateSpotsForAway(
 // Ordered candidate destination points for `out of <thing>`: moves just past
 // `hazard_radius_yd + bot_radius_yd + margin_yd` from `hazard.pos`, biasing
 // the escape bearing toward `preferred_dir_pos` (e.g. tank or group centroid)
-// when it does not cross back through the hazard center. Returns empty if
-// already outside (accounting for the bot's combat reach).
+// when it does not cross back through the hazard center. When `attempt > 0`
+// (repath or retry after a failed `out of`), rotates the primary escape
+// bearing to try an alternate escape vector instead of repeating a blocked
+// direction. Returns empty if already outside (accounting for the bot's combat
+// reach).
 std::vector<wlb::snapshot::Vec3> CandidateSpotsForOutOf(
     const wlb::snapshot::Vec3& bot_pos,
     const AnchorGeometry& hazard,
     float hazard_radius_yd,
     std::optional<wlb::snapshot::Vec3> preferred_dir_pos = std::nullopt,
     float margin_yd = kDefaultOutOfMarginYd,
-    float bot_radius_yd = 0.0f);
+    float bot_radius_yd = 0.0f,
+    uint32_t attempt = 0);
 
 // Ordered tangential kiting waypoints around `anchor` at `kite_dist_yd`
 // edge-to-edge, preferring a 45-degree arc around the anchor so the bot circles

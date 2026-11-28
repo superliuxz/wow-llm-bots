@@ -58,28 +58,48 @@ std::vector<uint64_t> ResolveGroupTankOrder(
     }
   }
 
-  // Tier 2: effective TANK role (LFG or spec fallback, respecting `not_tank`),
-  // ordered deterministically by `(subgroup, guid)` so server and harness agree
-  // on `tank` vs `offtank` regardless of which bot is querying.
-  std::vector<const GroupMemberRoleInput*> role_tanks;
+  // Tier 1.5: explicit raid Main Assist flags on effective TANK members
+  // (common WotLK MT/OT raid convention; never elevates DPS main assists).
+  for (const GroupMemberRoleInput& m : members) {
+    if (!m.online_in_world || !m.same_map || m.guid == 0 || seen(m.guid)) {
+      continue;
+    }
+    if (m.main_assist_flag && ResolveEffectiveRole(m) == pb::Role::TANK) {
+      tanks.push_back(m.guid);
+    }
+  }
+
+  // Tier 2: explicit Dungeon Finder TANK role before spec-only fallbacks,
+  // ordered deterministically by `(subgroup, guid)` so server and harness
+  // agree on `tank` vs `offtank` regardless of group/distance order.
+  auto append_sorted = [&](std::vector<const GroupMemberRoleInput*>& list) {
+    std::sort(list.begin(), list.end(),
+              [](const GroupMemberRoleInput* a, const GroupMemberRoleInput* b) {
+                return std::tie(a->subgroup, a->guid) <
+                       std::tie(b->subgroup, b->guid);
+              });
+    for (const GroupMemberRoleInput* m : list) {
+      if (!seen(m->guid)) {
+        tanks.push_back(m->guid);
+      }
+    }
+  };
+  std::vector<const GroupMemberRoleInput*> lfg_tanks;
+  std::vector<const GroupMemberRoleInput*> spec_tanks;
   for (const GroupMemberRoleInput& m : members) {
     if (!m.online_in_world || !m.same_map || m.guid == 0 || seen(m.guid)) {
       continue;
     }
     if (ResolveEffectiveRole(m) == pb::Role::TANK) {
-      role_tanks.push_back(&m);
+      if (m.lfg_role == pb::Role::TANK) {
+        lfg_tanks.push_back(&m);
+      } else {
+        spec_tanks.push_back(&m);
+      }
     }
   }
-  std::sort(role_tanks.begin(), role_tanks.end(),
-            [](const GroupMemberRoleInput* a, const GroupMemberRoleInput* b) {
-              return std::tie(a->subgroup, a->guid) <
-                     std::tie(b->subgroup, b->guid);
-            });
-  for (const GroupMemberRoleInput* m : role_tanks) {
-    if (!seen(m->guid)) {
-      tanks.push_back(m->guid);
-    }
-  }
+  append_sorted(lfg_tanks);
+  append_sorted(spec_tanks);
   return tanks;
 }
 

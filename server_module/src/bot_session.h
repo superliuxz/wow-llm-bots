@@ -18,6 +18,7 @@
 
 #include "base/synchronization/lock.h"
 #include "base/thread_annotations.h"
+#include "base/time/time.h"
 #include "bot_manager/errand_hold.h"
 #include "bot_manager/pull_discipline.h"
 #include "bot_manager/tick_owner.h"
@@ -199,10 +200,18 @@ struct BotSession {
   // disconnect, and logout.
   ErrandHoldState errand_hold;
 
+  struct OutOfRetryState {
+    uint32_t map_id = 0;
+    uint32_t instance_id = 0;
+    base::TimeTicks last_failed_at;
+    uint32_t attempt = 0;
+  };
+
   // Combat movement/targeting memory (cleared on combat end / map change /
   // disconnect).
   std::vector<uint64_t> avoided_targets;
   InterruptedSpot last_interrupted;
+  OutOfRetryState out_of_retry;
   // Active "stop dps" leader command: BrainPolicyListener blocks offensive
   // actions and non-positive spell casts until resumed, combat ends, or map
   // change / disconnect / logout.

@@ -40,8 +40,8 @@ in Rocket Artillery -> out of it
 - **Blood Beast**: priority add; switch and burn promptly.
 
 ```
-Rune of Blood on tank & me offtank -> wake
-Rune of Blood on offtank & me tank & not me offtank -> wake
+Rune of Blood on tank & me offtank -> use Taunt on boss
+Rune of Blood on offtank & me tank & not me offtank -> use Taunt on boss
 Blood Beast appears -> target nearest Blood Beast
 ```
 
@@ -53,8 +53,8 @@ Blood Beast appears -> target nearest Blood Beast
 - **Malleable Goo**: green slime impact (Heroic); move out immediately.
 
 ```
-Gastric Bloat stacks>7 on tank & me offtank -> wake
-Gastric Bloat stacks>7 on offtank & me tank & not me offtank -> wake
+Gastric Bloat stacks>7 on tank & me offtank -> use Taunt on boss
+Gastric Bloat stacks>7 on offtank & me tank & not me offtank -> use Taunt on boss
 Gas Spore on me -> to group
 in Malleable Goo -> out of it
 ```
@@ -76,8 +76,8 @@ Unstable Ooze Explosion cast -> out of it, then back
 - **Gas Cloud**: stay clear (`away Gas Cloud 14`).
 
 ```
-Mutated Plague stacks>2 on tank & me offtank -> wake
-Mutated Plague stacks>2 on offtank & me tank & not me offtank -> wake
+Mutated Plague stacks>2 on tank & me offtank -> use Taunt on boss
+Mutated Plague stacks>2 on offtank & me tank & not me offtank -> use Taunt on boss
 in Slime Puddle -> out of it
 in Choking Gas Explosion -> out of it
 Volatile Ooze appears -> target nearest Volatile Ooze
@@ -139,8 +139,8 @@ Blistering Cold cast -> out of it
 - **Val'kyr Shadowguard**: swoops down in Phase 2, grabs a player, and carries them toward the platform edge; stack near the center so they have further to fly, switch all DPS immediately (`target nearest Val'kyr Shadowguard`), and slow or stun them before they drop the player.
 
 ```
-Soul Reaper on tank & me offtank -> wake
-Soul Reaper on offtank & me tank & not me offtank -> wake
+Soul Reaper on tank & me offtank -> use Taunt on boss
+Soul Reaper on offtank & me tank & not me offtank -> use Taunt on boss
 Quake cast -> to boss
 Defile cast on me -> away group 15
 in Defile -> out of it

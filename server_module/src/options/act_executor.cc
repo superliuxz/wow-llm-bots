@@ -19,6 +19,7 @@
 #include "Cell.h"
 #include "CharmInfo.h"
 #include "Creature.h"
+#include "DBCStructure.h"
 #include "DynamicObject.h"
 #include "Event.h"
 #include "G3D/Vector3.h"
@@ -281,6 +282,7 @@ GroupMemberRoleInput RoleInputForSlot(const Group::MemberSlot& slot,
   in.subgroup = static_cast<uint32_t>(slot.group) + 1;
   in.lfg_role = LfgRoleFromMask(slot.roles);
   in.main_tank_flag = (slot.flags & MEMBER_FLAG_MAINTANK) != 0;
+  in.main_assist_flag = (slot.flags & MEMBER_FLAG_MAINASSIST) != 0;
   if (member && member->IsInWorld()) {
     in.online_in_world = true;
     in.spec_tank = PlayerbotAI::IsTank(member);
@@ -1997,7 +1999,46 @@ ActStartResult StartAct(Player* bot,
         target = bot->GetSelectedUnit();
       }
 
-      if (const SpellInfo* spell = FindKnownSpell(bot, act.name)) {
+      const SpellInfo* spell = FindKnownSpell(bot, act.name);
+      if (!spell && base::EqualsCaseInsensitiveASCII(act.name, "Taunt")) {
+        // Generic class-agnostic taunt resolution for standing orders
+        // (`use Taunt on boss`): picks the bot's shortest-cooldown known
+        // single-target SPELL_AURA_MOD_TAUNT spell (Taunt / Hand of Reckoning /
+        // Growl / Dark Command).
+        uint32_t best_cd_ms = 0;
+        for (const auto& [spell_id, state] : bot->GetSpellMap()) {
+          if (!state || !state->Active || state->State == PLAYERSPELL_REMOVED) {
+            continue;
+          }
+          const SpellInfo* info = sSpellMgr->GetSpellInfo(spell_id);
+          if (!info || !info->HasAura(SPELL_AURA_MOD_TAUNT)) {
+            continue;
+          }
+          bool targets_enemy = false;
+          for (uint8_t i = 0; i < MAX_SPELL_EFFECTS; ++i) {
+            if (info->Effects[i].TargetA.GetTarget() ==
+                TARGET_UNIT_TARGET_ENEMY) {
+              targets_enemy = true;
+              break;
+            }
+          }
+          if (!targets_enemy) {
+            continue;
+          }
+          const uint32_t cd_ms =
+              std::max(info->RecoveryTime, info->CategoryRecoveryTime);
+          const bool ready = !bot->HasSpellCooldown(info->Id);
+          const bool spell_ready = spell && !bot->HasSpellCooldown(spell->Id);
+          if (!spell || (ready && !spell_ready) ||
+              (ready == spell_ready &&
+               (cd_ms < best_cd_ms ||
+                (cd_ms == best_cd_ms && info->GetRank() > spell->GetRank())))) {
+            spell = info;
+            best_cd_ms = cd_ms;
+          }
+        }
+      }
+      if (spell) {
         if (bot->HasSpellCooldown(spell->Id)) {
           return {.error = act.name + " is on cooldown"};
         }
@@ -2013,8 +2054,14 @@ ActStartResult StartAct(Player* bot,
             !bot->IsFriendlyTo(cast_target)) {
           cast_target = bot;
         }
-        return StartSpellUse(bot, command_id, act, spell, cast_target, spot,
-                             now, out_active);
+        ActStartResult res = StartSpellUse(bot, command_id, act, spell,
+                                           cast_target, spot, now, out_active);
+        if (res.error.empty() && spell->HasAura(SPELL_AURA_MOD_TAUNT) &&
+            cast_target && cast_target != bot &&
+            !bot->IsFriendlyTo(cast_target)) {
+          BotManager::RecordBrainTaunt(bot, cast_target);
+        }
+        return res;
       }
 
       if (const SpellInfo* veh_spell = FindVehicleSpell(bot, act.name)) {
@@ -2105,6 +2152,30 @@ ActStartResult StartAct(Player* bot,
     }
 
     case pb::Command_Act::OUT_OF: {
+      const uint64_t bot_key = bot->GetGUID().GetRawValue();
+      auto clear_retry = [&]() {
+        BotSessionRegistry::Instance().WithSession(
+            bot_key, [](BotSession& s) { s.out_of_retry = {}; });
+      };
+      auto record_retry_fail = [&](uint32_t next_attempt) {
+        BotSessionRegistry::Instance().WithSession(bot_key, [&](BotSession& s) {
+          s.out_of_retry.map_id = bot->GetMapId();
+          s.out_of_retry.instance_id = bot->GetInstanceId();
+          s.out_of_retry.last_failed_at = now;
+          s.out_of_retry.attempt = next_attempt;
+        });
+      };
+      uint32_t attempt = 0;
+      BotSessionRegistry::Instance().InspectSession(
+          bot_key, [&](const BotSession* s) {
+            if (s && s->out_of_retry.attempt > 0 &&
+                s->out_of_retry.map_id == bot->GetMapId() &&
+                s->out_of_retry.instance_id == bot->GetInstanceId() &&
+                !s->out_of_retry.last_failed_at.is_null() &&
+                (now - s->out_of_retry.last_failed_at) <= base::Seconds(10)) {
+              attempt = s->out_of_retry.attempt;
+            }
+          });
       std::optional<HazardInfo> hazard = ResolveHazard(bot, act);
       if (!hazard) {
         return {.error = "hazard not found"};
@@ -2116,16 +2187,19 @@ ActStartResult StartAct(Player* bot,
           hazard->radius_yd > 0.0f ? (hazard->radius_yd + bot_reach) : 0.0f;
       if (effective_radius > 0.0f && cur_dist >= effective_radius + 0.5f) {
         // Already outside the hazard radius (including bot combat reach).
+        clear_retry();
         return {.done = true};
       }
       std::vector<pb::Vec3> candidates = CandidateSpotsForOutOf(
           bot_pos, hazard->anchor, hazard->radius_yd,
           PreferredEscapePos(bot, hazard->anchor.pos, effective_radius),
-          kDefaultOutOfMarginYd, bot_reach);
+          kDefaultOutOfMarginYd, bot_reach, attempt);
       if (candidates.empty()) {
+        clear_retry();
         return {.done = true};
       }
       if (Dist2D(bot_pos, candidates.front()) <= kArrivalToleranceYd) {
+        clear_retry();
         return {.done = true};
       }
       std::optional<pb::Vec3> chosen = MoveToFirstValidSpot(
@@ -2134,12 +2208,13 @@ ActStartResult StartAct(Player* bot,
                              NearbyUnpulledHostiles(bot)),
           nullptr);
       if (!chosen) {
+        record_retry_fail(attempt + 1);
         return {.error = "no path out of hazard"};
       }
       CutCastsForMove(bot);
       const ActiveAct::InterruptedActivity intr =
           CaptureInterruptedActivity(bot);
-      SaveLastInterrupted(bot->GetGUID().GetRawValue(), intr);
+      SaveLastInterrupted(bot_key, intr);
       out_active->command_id = command_id;
       out_active->map_id = bot->GetMapId();
       out_active->instance_id = bot->GetInstanceId();
@@ -2153,6 +2228,7 @@ ActStartResult StartAct(Player* bot,
       out_active->hazard_caster_guid = hazard->caster_guid;
       out_active->hazard_spell_id = hazard->spell_id;
       out_active->dodge_phase = ActiveAct::DodgePhase::kMovingOut;
+      out_active->out_of_attempt = attempt;
       out_active->hold_deadline =
           now +
           base::Milliseconds(static_cast<int64_t>(
@@ -2870,6 +2946,11 @@ ActStepResult StepActiveAct(Player* bot,
         active->last_repath_at = now;
         return {};
       }
+      if (act.verb == pb::Command_Act::OUT_OF) {
+        BotSessionRegistry::Instance().WithSession(
+            bot->GetGUID().GetRawValue(),
+            [](BotSession& s) { s.out_of_retry = {}; });
+      }
       FinishDodgeAct(bot, *active);
       return {.done = true};
     }
@@ -2878,6 +2959,9 @@ ActStepResult StepActiveAct(Player* bot,
     // chasing a shifting anchor forever.
     if (now - active->last_repath_at >= kRepathInterval && !bot->isMoving()) {
       active->last_repath_at = now;
+      if (act.verb == pb::Command_Act::OUT_OF) {
+        ++active->out_of_attempt;
+      }
       const float effective_radius =
           active->hazard_radius_yd > 0.0f
               ? (active->hazard_radius_yd + bot_reach)
@@ -2888,7 +2972,7 @@ ActStepResult StepActiveAct(Player* bot,
                     bot_pos, active->last_anchor, active->hazard_radius_yd,
                     PreferredEscapePos(bot, active->last_anchor.pos,
                                        effective_radius),
-                    kDefaultOutOfMarginYd, bot_reach)
+                    kDefaultOutOfMarginYd, bot_reach, active->out_of_attempt)
               : CandidateSpotsForAway(bot_pos, active->last_anchor, target_yd,
                                       bot_reach);
       if (candidates.empty()) {
@@ -2896,6 +2980,11 @@ ActStepResult StepActiveAct(Player* bot,
           bot->StopMoving();
           active->dodge_phase = ActiveAct::DodgePhase::kHolding;
           return {};
+        }
+        if (act.verb == pb::Command_Act::OUT_OF) {
+          BotSessionRegistry::Instance().WithSession(
+              bot->GetGUID().GetRawValue(),
+              [](BotSession& s) { s.out_of_retry = {}; });
         }
         FinishDodgeAct(bot, *active);
         return {.done = true};
@@ -2906,6 +2995,15 @@ ActStepResult StepActiveAct(Player* bot,
                              NearbyUnpulledHostiles(bot)),
           nullptr);
       if (!chosen) {
+        if (act.verb == pb::Command_Act::OUT_OF) {
+          BotSessionRegistry::Instance().WithSession(
+              bot->GetGUID().GetRawValue(), [&](BotSession& s) {
+                s.out_of_retry.map_id = bot->GetMapId();
+                s.out_of_retry.instance_id = bot->GetInstanceId();
+                s.out_of_retry.last_failed_at = now;
+                s.out_of_retry.attempt = active->out_of_attempt + 1;
+              });
+        }
         ClearActMovement(bot);
         return {.error = "no path to destination"};
       }
@@ -3068,8 +3166,10 @@ void ClearAvoidedTargetForBot(uint64_t bot_guid, uint64_t target_guid) {
 }
 
 void ClearLastInterruptedForBot(uint64_t bot_guid) {
-  BotSessionRegistry::Instance().WithSession(
-      bot_guid, [](BotSession& s) { s.last_interrupted = {}; });
+  BotSessionRegistry::Instance().WithSession(bot_guid, [](BotSession& s) {
+    s.last_interrupted = {};
+    s.out_of_retry = {};
+  });
 }
 
 }  // namespace llm_brain

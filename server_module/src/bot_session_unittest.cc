@@ -467,5 +467,36 @@ TEST(BotSessionRegistryTest,
   expect_cleared();
 }
 
+TEST(BotSessionRegistryTest, OutOfRetryStateClearsOnMapChangeDisconnectLogout) {
+  BotSessionRegistry reg;
+  constexpr uint64_t kBot = 0x1012;
+  const auto set = [&] {
+    reg.WithSession(kBot, [](BotSession& s) {
+      s.auto_popups = true;
+      s.out_of_retry.map_id = 631;
+      s.out_of_retry.instance_id = 7;
+      s.out_of_retry.last_failed_at = base::TimeTicks() + base::Seconds(123);
+      s.out_of_retry.attempt = 2;
+    });
+  };
+  const auto expect_cleared = [&] {
+    reg.InspectSession(kBot, [](const BotSession* s) {
+      ASSERT_NE(s, nullptr);
+      EXPECT_EQ(s->out_of_retry.attempt, 0u);
+      EXPECT_EQ(s->out_of_retry.map_id, 0u);
+      EXPECT_TRUE(s->out_of_retry.last_failed_at.is_null());
+    });
+  };
+  set();
+  reg.ResetOnMapChange(kBot);
+  expect_cleared();
+  set();
+  reg.ResetOnDisconnect(kBot);
+  expect_cleared();
+  set();
+  reg.ResetOnLogout(kBot);
+  expect_cleared();
+}
+
 }  // namespace
 }  // namespace llm_brain
