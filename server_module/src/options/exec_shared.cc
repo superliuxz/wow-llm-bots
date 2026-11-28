@@ -11,8 +11,11 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
+#include <vector>
 
 #include "AiObjectContext.h"
+#include "Bag.h"
 #include "Creature.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
@@ -30,11 +33,13 @@
 #include "Object.h"
 #include "ObjectDefines.h"
 #include "ObjectGuid.h"
+#include "ObjectMgr.h"
 #include "PathGenerator.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
 #include "PlayerbotAIConfig.h"
 #include "Playerbots.h"
+#include "QuestDef.h"
 #include "SharedDefines.h"
 #include "Spell.h"
 #include "SpellDefines.h"
@@ -45,7 +50,9 @@
 #include "UpdateFields.h"
 #include "base/strings/stringprintf.h"
 #include "bot_session.h"
+#include "options/npc_gossip_and_bags.h"
 #include "options/position_facts.h"
+#include "snapshot/world_util.h"
 
 namespace llm_brain {
 namespace {
@@ -127,7 +134,104 @@ bool WalkNextToObject(Player* bot, WorldObject* target) {
   return WalkTo(bot, x, y, z);
 }
 
+std::optional<std::pair<uint8_t, uint8_t>> FindFreeGeneralSlotOutsideBag(
+    const Player* bot,
+    uint8_t exclude_bag) {
+  if (!bot) {
+    return std::nullopt;
+  }
+  if (exclude_bag != INVENTORY_SLOT_BAG_0) {
+    for (uint8_t s = INVENTORY_SLOT_ITEM_START; s < INVENTORY_SLOT_ITEM_END;
+         ++s) {
+      if (bot->GetItemByPos(INVENTORY_SLOT_BAG_0, s) == nullptr) {
+        return std::make_pair(static_cast<uint8_t>(INVENTORY_SLOT_BAG_0), s);
+      }
+    }
+  }
+  for (uint8_t b = INVENTORY_SLOT_BAG_START; b < INVENTORY_SLOT_BAG_END; ++b) {
+    if (b == exclude_bag) {
+      continue;
+    }
+    const Bag* bag = bot->GetBagByPos(b);
+    if (!IsGeneralBag(bag)) {
+      continue;
+    }
+    for (uint32_t s = 0; s < bag->GetBagSize(); ++s) {
+      if (bag->GetItemByPos(static_cast<uint8_t>(s)) == nullptr) {
+        return std::make_pair(b, static_cast<uint8_t>(s));
+      }
+    }
+  }
+  return std::nullopt;
+}
+
 }  // namespace
+
+std::vector<EquippedBagSlotInfo> ReadEquippedBagSlots(const Player* bot) {
+  std::vector<EquippedBagSlotInfo> out;
+  if (!bot) {
+    return out;
+  }
+  out.reserve(INVENTORY_SLOT_BAG_END - INVENTORY_SLOT_BAG_START);
+  for (uint8_t slot = INVENTORY_SLOT_BAG_START; slot < INVENTORY_SLOT_BAG_END;
+       ++slot) {
+    EquippedBagSlotInfo info;
+    info.slot = slot;
+    const Bag* bag = bot->GetBagByPos(slot);
+    if (bag) {
+      info.occupied = true;
+      info.is_general_bag = IsGeneralBag(bag);
+      info.container_slots = bag->GetBagSize();
+      uint32_t used = 0;
+      for (uint32_t i = 0; i < bag->GetBagSize(); ++i) {
+        if (bag->GetItemByPos(static_cast<uint8_t>(i)) != nullptr) {
+          ++used;
+        }
+      }
+      info.used_slots = used;
+      if (const ItemTemplate* p = bag->GetTemplate()) {
+        info.name = p->Name1;
+      }
+    }
+    out.push_back(std::move(info));
+  }
+  return out;
+}
+
+bool HasFreeSlotOutsideBag(const Player* bot, uint8_t exclude_bag) {
+  return FindFreeGeneralSlotOutsideBag(bot, exclude_bag).has_value();
+}
+
+std::vector<uint32_t> CollectActiveQuestItemIds(const Player* bot) {
+  std::vector<uint32_t> ids;
+  if (!bot) {
+    return ids;
+  }
+  for (uint16_t slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot) {
+    const uint32_t qid = bot->GetQuestSlotQuestId(slot);
+    if (qid == 0) {
+      continue;
+    }
+    const Quest* q = sObjectMgr->GetQuestTemplate(qid);
+    if (!q) {
+      continue;
+    }
+    if (const uint32_t src = q->GetSrcItemId(); src != 0) {
+      ids.push_back(src);
+    }
+    for (size_t i = 0; i < QUEST_ITEM_OBJECTIVES_COUNT; ++i) {
+      if (q->RequiredItemId[i] != 0) {
+        ids.push_back(q->RequiredItemId[i]);
+      }
+    }
+    for (size_t i = 0; i < QUEST_SOURCE_ITEM_IDS_COUNT; ++i) {
+      if (q->ItemDrop[i] != 0) {
+        ids.push_back(q->ItemDrop[i]);
+      }
+    }
+  }
+  return ids;
+}
 
 ObjectGuid ParseSnapshotGuid(std::string_view text) {
   if (text.starts_with("0x")) {
@@ -362,6 +466,25 @@ bool PickEquipSlot(Player* bot,
        bot->CanTitanGrip())) {
     return try_dual(EQUIPMENT_SLOT_MAINHAND, EQUIPMENT_SLOT_OFFHAND);
   }
+  if (proto->InventoryType == INVTYPE_BAG) {
+    if (proto->Class != ITEM_CLASS_CONTAINER ||
+        proto->SubClass != ITEM_SUBCLASS_CONTAINER ||
+        proto->ContainerSlots == 0) {
+      return false;
+    }
+    if (bag_item && bag_item->IsNotEmptyBag()) {
+      return false;
+    }
+    const uint8_t src_bag = bag_item ? bag_item->GetBagSlot() : NULL_BAG;
+    const std::optional<BagEquipTarget> target = PickBagEquipSlot(
+        proto->ContainerSlots, src_bag, HasFreeSlotOutsideBag(bot, src_bag),
+        ReadEquippedBagSlots(bot));
+    if (!target) {
+      return false;
+    }
+    return bot->CanEquipItem(target->dest_slot, *out_dest, bag_item,
+                             target->replaces_existing) == EQUIP_ERR_OK;
+  }
   return bot->CanEquipItem(NULL_SLOT, *out_dest, bag_item, true) ==
          EQUIP_ERR_OK;
 }
@@ -377,8 +500,29 @@ ActionOutcome EquipBagItem(Player* bot,
     return {.error = "cannot equip " + std::string(label)};
   }
   const ObjectGuid src_guid = bag_item->GetGUID();
+  uint8_t cur_bag = bag;
+  uint8_t cur_slot = slot;
+  if (proto->InventoryType == INVTYPE_BAG &&
+      cur_bag == static_cast<uint8_t>(dest & 0xFF)) {
+    const std::optional<std::pair<uint8_t, uint8_t>> staging =
+        FindFreeGeneralSlotOutsideBag(bot, cur_bag);
+    if (!staging) {
+      return {.error = "cannot equip " + std::string(label)};
+    }
+    const uint16_t old_src =
+        static_cast<uint16_t>((static_cast<uint16_t>(cur_bag) << 8) | cur_slot);
+    const uint16_t stage_dst = static_cast<uint16_t>(
+        (static_cast<uint16_t>(staging->first) << 8) | staging->second);
+    bot->SwapItem(old_src, stage_dst);
+    Item* moved = bot->GetItemByPos(staging->first, staging->second);
+    if (!moved || moved->GetGUID() != src_guid) {
+      return {.error = "couldn't equip " + std::string(label)};
+    }
+    cur_bag = staging->first;
+    cur_slot = staging->second;
+  }
   const uint16_t src =
-      static_cast<uint16_t>((static_cast<uint16_t>(bag) << 8) | slot);
+      static_cast<uint16_t>((static_cast<uint16_t>(cur_bag) << 8) | cur_slot);
   bot->SwapItem(src, dest);
   Item* now_equipped = bot->GetItemByPos(dest);
   if (!now_equipped || now_equipped->GetGUID() != src_guid) {

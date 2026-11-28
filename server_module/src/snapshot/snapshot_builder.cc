@@ -65,6 +65,7 @@
 #include "options/exec_social.h"
 #include "options/group_roles.h"
 #include "options/leader_travel.h"
+#include "options/npc_gossip_and_bags.h"
 #include "options/option_facts.h"
 #include "options/options.h"
 #include "options/position_facts.h"
@@ -1240,8 +1241,12 @@ void SnapshotBuilder::FillOptionFacts(Player* bot,
     CollectItemQuestActions(bot, &out->group_and_upkeep_actions);
     CollectQuestAbandonActions(bot, quest_log_open,
                                &out->group_and_upkeep_actions);
-    if (snapshot->base.self.indicators.bag_free_slots == 0u) {
-      CollectBagDestroyActions(bot, 0u, &out->group_and_upkeep_actions);
+    if (snapshot->base.self.indicators.bag_free_slots &&
+        *snapshot->base.self.indicators.bag_free_slots <=
+            kDestroyOfferMaxFreeSlots) {
+      CollectBagDestroyActions(bot,
+                               *snapshot->base.self.indicators.bag_free_slots,
+                               &out->group_and_upkeep_actions);
     }
   }
   out->has_pending_resurrect = !bot->IsAlive() && bot->isResurrectRequested();

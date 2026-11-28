@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -61,7 +62,14 @@ namespace pb = wlb::snapshot;
 
 static_assert(kItemQualityPoor == ITEM_QUALITY_POOR);
 static_assert(kItemQualityNormal == ITEM_QUALITY_NORMAL);
+static_assert(kItemQualityUncommon == ITEM_QUALITY_UNCOMMON);
+static_assert(kItemQualityRare == ITEM_QUALITY_RARE);
+static_assert(kItemQualityEpic == ITEM_QUALITY_EPIC);
 static_assert(kItemClassContainer == ITEM_CLASS_CONTAINER);
+static_assert(kItemSubclassContainer == ITEM_SUBCLASS_CONTAINER);
+static_assert(kItemClassWeapon == ITEM_CLASS_WEAPON);
+static_assert(kItemClassArmor == ITEM_CLASS_ARMOR);
+static_assert(kItemClassReagent == ITEM_CLASS_REAGENT);
 static_assert(kItemClassProjectile == ITEM_CLASS_PROJECTILE);
 static_assert(kItemClassQuiver == ITEM_CLASS_QUIVER);
 static_assert(kItemClassQuest == ITEM_CLASS_QUEST);
@@ -69,37 +77,6 @@ static_assert(kItemClassKey == ITEM_CLASS_KEY);
 static_assert(kItemBondQuest == BIND_QUEST_ITEM);
 static_assert(kItemBondQuest1 == BIND_QUEST_ITEM1);
 static_assert(kItemFlagNoUserDestroy == ITEM_FLAG_NO_USER_DESTROY);
-
-std::vector<uint32_t> CollectActiveQuestItemIds(const Player* bot) {
-  std::vector<uint32_t> ids;
-  if (!bot) {
-    return ids;
-  }
-  for (uint16_t slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot) {
-    const uint32_t qid = bot->GetQuestSlotQuestId(slot);
-    if (qid == 0) {
-      continue;
-    }
-    const Quest* q = sObjectMgr->GetQuestTemplate(qid);
-    if (!q) {
-      continue;
-    }
-    if (const uint32_t src = q->GetSrcItemId(); src != 0) {
-      ids.push_back(src);
-    }
-    for (size_t i = 0; i < QUEST_ITEM_OBJECTIVES_COUNT; ++i) {
-      if (q->RequiredItemId[i] != 0) {
-        ids.push_back(q->RequiredItemId[i]);
-      }
-    }
-    for (size_t i = 0; i < QUEST_SOURCE_ITEM_IDS_COUNT; ++i) {
-      if (q->ItemDrop[i] != 0) {
-        ids.push_back(q->ItemDrop[i]);
-      }
-    }
-  }
-  return ids;
-}
 
 DestroyItemCandidate BuildDestroyCandidate(
     const Player* bot,
@@ -749,11 +726,49 @@ void CollectUsableBagItems(Player* bot,
       pb::OptionFacts_Item item;
     };
     std::vector<RankedEquip> candidates;
+    const std::vector<EquippedBagSlotInfo> equipped_bags =
+        ReadEquippedBagSlots(bot);
     for (const BagSlotItem& entry : BagItems(bot)) {
       Item* bag_item = entry.item;
       const ItemTemplate* proto = bag_item ? bag_item->GetTemplate() : nullptr;
-      if (!proto || proto->Name1.empty() ||
-          proto->Quality <= ITEM_QUALITY_POOR ||
+      if (!proto || proto->Name1.empty()) {
+        continue;
+      }
+      if (proto->InventoryType == INVTYPE_BAG &&
+          proto->Class == ITEM_CLASS_CONTAINER &&
+          proto->SubClass == ITEM_SUBCLASS_CONTAINER &&
+          proto->ContainerSlots > 0) {
+        const std::optional<BagEquipTarget> target = PickBagEquipSlot(
+            proto->ContainerSlots, entry.bag,
+            HasFreeSlotOutsideBag(bot, entry.bag), equipped_bags);
+        uint16_t dest = 0;
+        if (!target ||
+            bot->CanEquipItem(target->dest_slot, dest, bag_item,
+                              target->replaces_existing) != EQUIP_ERR_OK) {
+          continue;
+        }
+        bool dup = false;
+        for (const RankedEquip& existing : candidates) {
+          if (existing.item.entry == proto->ItemId) {
+            dup = true;
+            break;
+          }
+        }
+        if (dup) {
+          continue;
+        }
+        pb::OptionFacts_Item item;
+        item.entry = proto->ItemId;
+        item.name = proto->Name1;
+        item.out_of_combat_only = true;
+        item.equippable = true;
+        item.detail = FormatBagEquipDetail(proto->ContainerSlots, *target);
+        const int32_t slot_gain = static_cast<int32_t>(proto->ContainerSlots) -
+                                  static_cast<int32_t>(target->replaced_slots);
+        candidates.push_back({slot_gain, std::move(item)});
+        continue;
+      }
+      if (proto->Quality <= ITEM_QUALITY_POOR ||
           proto->InventoryType == INVTYPE_NON_EQUIP ||
           (proto->Class != ITEM_CLASS_ARMOR &&
            proto->Class != ITEM_CLASS_WEAPON)) {
@@ -1203,11 +1218,24 @@ ActionOutcome ExecuteEquipItemAction(Player* bot,
   if (action.entry == 0) {
     return {.error = "invalid item id"};
   }
-  for (const BagSlotItem& slot_item : BagItems(bot)) {
+  const std::vector<BagSlotItem> bag_items = BagItems(bot);
+  const BagSlotItem* fallback = nullptr;
+  for (const BagSlotItem& slot_item : bag_items) {
     if (!slot_item.item || slot_item.item->GetEntry() != action.entry) {
       continue;
     }
-    return EquipBagItem(bot, slot_item.item, slot_item.bag, slot_item.slot,
+    const ItemTemplate* proto = slot_item.item->GetTemplate();
+    uint16_t dest = 0;
+    if (proto && PickEquipSlot(bot, slot_item.item, proto, &dest)) {
+      return EquipBagItem(bot, slot_item.item, slot_item.bag, slot_item.slot,
+                          action.name);
+    }
+    if (!fallback) {
+      fallback = &slot_item;
+    }
+  }
+  if (fallback) {
+    return EquipBagItem(bot, fallback->item, fallback->bag, fallback->slot,
                         action.name);
   }
   return {.error = action.name + " is not in your bags"};
@@ -1216,8 +1244,8 @@ ActionOutcome ExecuteEquipItemAction(Player* bot,
 void CollectBagDestroyActions(Player* bot,
                               uint32_t free_bag_slots,
                               std::vector<pb::OptionFacts_Action>* out) {
-  if (!bot || free_bag_slots > 0 || !bot->IsAlive() || bot->IsInCombat() ||
-      bot->GetTradeData() != nullptr) {
+  if (!bot || free_bag_slots > kDestroyOfferMaxFreeSlots || !bot->IsAlive() ||
+      bot->IsInCombat() || bot->GetTradeData() != nullptr) {
     return;
   }
   const std::vector<uint32_t> quest_items = CollectActiveQuestItemIds(bot);

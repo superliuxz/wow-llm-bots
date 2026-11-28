@@ -48,6 +48,11 @@ TEST(ErrandHoldTest, ClassifiesBrainErrandsAndNonErrands) {
       ErrandKind::kNpcInteract);
   EXPECT_EQ(ErrandKindForAction(NpcAction{NpcAction::Op::kVendor, "0x4", 0, 0}),
             ErrandKind::kNpcInteract);
+  EXPECT_EQ(ErrandKindForAction(NpcAction{NpcAction::Op::kSellItem, "0x4", 2000,
+                                          (255u << 8) | 24u}),
+            ErrandKind::kNpcInteract);
+  EXPECT_EQ(ErrandKindForAction(NpcAction{NpcAction::Op::kBuy, "0x4", 4498, 0}),
+            ErrandKind::kNpcInteract);
   EXPECT_EQ(ErrandKindForAction(NpcAction{NpcAction::Op::kTrain, "0x4", 0, 0}),
             ErrandKind::kNpcInteract);
   EXPECT_EQ(ErrandKindForAction(

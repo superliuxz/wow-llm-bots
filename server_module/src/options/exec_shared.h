@@ -12,6 +12,9 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
+
+#include "options/npc_gossip_and_bags.h"
 
 class Creature;
 class GameObject;
@@ -82,9 +85,20 @@ void ClearStaleCombatTarget(Player* bot);
 // can mark. Returns empty `error` on success with a descriptive `info`.
 ActionOutcome MarkUnitWithIcon(Player* bot, Unit* unit, uint8_t icon);
 
+// Reads the 4 equipped bag slots (`INVENTORY_SLOT_BAG_START..END`).
+std::vector<EquippedBagSlotInfo> ReadEquippedBagSlots(const Player* bot);
+
+// True when `bot` has at least one free general bag slot outside `exclude_bag`
+// (used to relocate a bag item before swapping it into `exclude_bag`).
+bool HasFreeSlotOutsideBag(const Player* bot, uint8_t exclude_bag);
+
+// Returns item IDs required/started/dropped by the bot's active quests.
+std::vector<uint32_t> CollectActiveQuestItemIds(const Player* bot);
+
 // Picks the best valid equipment slot for `bag_item` (shared by option
 // discovery, `EquipItemAction`, and `Command_Act::EQUIP`). Prefers empty or
-// lower-ilvl second slot for rings, trinkets, and dual-wielding weapons.
+// lower-ilvl second slot for rings, trinkets, and dual-wielding weapons, and
+// empty or smaller general bag slot for bags.
 bool PickEquipSlot(Player* bot,
                    Item* bag_item,
                    const ItemTemplate* proto,

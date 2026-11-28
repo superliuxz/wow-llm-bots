@@ -138,6 +138,42 @@ uint32_t SellGreyItemsTo(Player* bot, ObjectGuid vendor_guid) {
   return sold;
 }
 
+VendorSellCandidate BuildVendorSellCandidate(
+    const Player* bot,
+    const Item* item,
+    uint8_t bag,
+    uint8_t slot,
+    const std::vector<uint32_t>& active_quest_items) {
+  VendorSellCandidate cand;
+  cand.bag = bag;
+  cand.slot = slot;
+  const uint16_t pos = static_cast<uint16_t>((static_cast<uint16_t>(bag) << 8) |
+                                             static_cast<uint16_t>(slot));
+  cand.is_equipped_or_bag_slot = bot->IsEquipmentPos(pos) || bot->IsBagPos(pos);
+  if (!item) {
+    return cand;
+  }
+  cand.is_non_empty_bag = item->IsNotEmptyBag();
+  cand.is_refundable = item->IsRefundable();
+  const ItemTemplate* proto = item->GetTemplate();
+  if (!proto) {
+    return cand;
+  }
+  cand.entry = proto->ItemId;
+  cand.name = proto->Name1;
+  cand.quality = proto->Quality;
+  cand.item_class = proto->Class;
+  cand.bonding = proto->Bonding;
+  cand.start_quest = proto->StartQuest;
+  cand.item_level = proto->ItemLevel;
+  cand.sell_price = proto->SellPrice;
+  cand.stack_count = item->GetCount();
+  cand.required_for_active_quest =
+      std::find(active_quest_items.begin(), active_quest_items.end(),
+                proto->ItemId) != active_quest_items.end();
+  return cand;
+}
+
 bool IsAmmoForHunter(Player* bot, const ItemTemplate* proto) {
   if (!bot || bot->getClass() != CLASS_HUNTER || !proto ||
       proto->Class != ITEM_CLASS_PROJECTILE) {
@@ -532,12 +568,14 @@ void CollectNpcActions(Player* bot,
       }
     }
 
-    // 3. Vendor sell grey items & repair.
+    // 3. Vendor sell (bulk grey + per-item non-grey) & repair.
     if (out->size() < kMaxNpcActions &&
         (npc->HasNpcFlag(UNIT_NPC_FLAG_VENDOR) ||
          npc->HasNpcFlag(UNIT_NPC_FLAG_REPAIR))) {
-      const bool can_sell_grey =
-          npc->HasNpcFlag(UNIT_NPC_FLAG_VENDOR) && HasGreySellableItem(bot);
+      const bool vendor_buys =
+          npc->HasNpcFlag(UNIT_NPC_FLAG_VENDOR) &&
+          !npc->HasFlagsExtra(CREATURE_FLAG_EXTRA_NO_SELL_VENDOR);
+      const bool can_sell_grey = vendor_buys && HasGreySellableItem(bot);
       const bool can_repair =
           npc->HasNpcFlag(UNIT_NPC_FLAG_REPAIR) && HasDamagedEquipment(bot);
       if (can_sell_grey || can_repair) {
@@ -547,9 +585,28 @@ void CollectNpcActions(Player* bot,
                                             : "Repair gear at ";
         out->push_back({"npc_vendor:" + u.guid, u.guid, label + npc_name});
       }
+      if (vendor_buys && out->size() < kMaxNpcActions) {
+        const std::vector<uint32_t> quest_items =
+            CollectActiveQuestItemIds(bot);
+        std::vector<VendorSellCandidate> sell_candidates;
+        for (const BagSlotItem& entry : BagItems(bot)) {
+          if (!entry.item) {
+            continue;
+          }
+          sell_candidates.push_back(BuildVendorSellCandidate(
+              bot, entry.item, entry.bag, entry.slot, quest_items));
+        }
+        for (const VendorSellOption& opt :
+             SelectVendorSellOptions(u.guid, npc_name, sell_candidates)) {
+          if (out->size() >= kMaxNpcActions) {
+            break;
+          }
+          out->push_back({opt.action_guid, u.guid, opt.label});
+        }
+      }
     }
 
-    // 4. Vendor upkeep buy (food, water, hunter ammo, mounts).
+    // 4. Vendor upkeep buy (food, water, hunter ammo, mounts, bags).
     if (out->size() < kMaxNpcActions && npc->HasNpcFlag(UNIT_NPC_FLAG_VENDOR)) {
       if (const VendorItemData* vitems = npc->GetVendorItems()) {
         const float discount = bot->GetReputationPriceDiscount(npc);
@@ -563,6 +620,7 @@ void CollectNpcActions(Player* bot,
         const ItemTemplate* best_drink = nullptr;
         const ItemTemplate* best_ammo = nullptr;
         std::vector<MountVendorCandidate> mount_candidates;
+        std::vector<BagVendorCandidate> bag_candidates;
         for (uint32_t slot = 0; slot < vitems->GetItemCount(); ++slot) {
           const VendorItem* vi = vitems->GetItem(slot);
           if (!vi || vi->ExtendedCost != 0) {
@@ -573,10 +631,43 @@ void CollectNpcActions(Player* bot,
               proto->RequiredLevel > bot->GetLevel()) {
             continue;
           }
+          if (vi->maxcount != 0 &&
+              npc->GetVendorItemCurrentCount(vi) < proto->BuyCount) {
+            continue;
+          }
           const uint32_t price = DiscountedCopperCost(
               proto->BuyPrice > 0 ? static_cast<uint32_t>(proto->BuyPrice) : 0u,
               discount);
           if (!bot->HasEnoughMoney(price)) {
+            continue;
+          }
+          if (proto->Class == ITEM_CLASS_CONTAINER &&
+              proto->SubClass == ITEM_SUBCLASS_CONTAINER &&
+              proto->InventoryType == INVTYPE_BAG &&
+              proto->ContainerSlots > 0) {
+            const bool race_ok =
+                proto->AllowableRace == 0 ||
+                (proto->AllowableRace & bot->getRaceMask()) != 0;
+            const bool class_ok =
+                proto->AllowableClass == 0 ||
+                (proto->AllowableClass & bot->getClassMask()) != 0;
+            const bool skill_ok = proto->RequiredSkill == 0 ||
+                                  bot->GetSkillValue(proto->RequiredSkill) >=
+                                      proto->RequiredSkillRank;
+            const bool rep_ok =
+                proto->RequiredReputationFaction == 0 ||
+                bot->GetReputationRank(proto->RequiredReputationFaction) >=
+                    static_cast<ReputationRank>(proto->RequiredReputationRank);
+            const bool spell_ok = proto->RequiredSpell == 0 ||
+                                  bot->HasSpell(proto->RequiredSpell);
+            bag_candidates.push_back(BagVendorCandidate{
+                .item_id = proto->ItemId,
+                .name = proto->Name1,
+                .container_slots = proto->ContainerSlots,
+                .price_copper = price,
+                .meets_requirements =
+                    race_ok && class_ok && skill_ok && rep_ok && spell_ok,
+            });
             continue;
           }
           if (proto->Class == ITEM_CLASS_MISC &&
@@ -661,6 +752,20 @@ void CollectNpcActions(Player* bot,
           for (const MountPurchaseOption& pick :
                SelectMountPurchases(mount_candidates, bot->GetMoney(),
                                     best_ground, best_flight, npc_name)) {
+            if (out->size() >= kMaxNpcActions) {
+              break;
+            }
+            out->push_back(
+                {"npc_buy:" + u.guid + ":" + std::to_string(pick.item_id),
+                 u.guid, pick.label});
+          }
+        }
+        if (!bag_candidates.empty() && out->size() < kMaxNpcActions) {
+          const uint32_t free_slots =
+              snapshot.base.self.indicators.bag_free_slots.value_or(0u);
+          for (const BagPurchaseOption& pick :
+               SelectBagPurchases(bag_candidates, bot->GetMoney(), free_slots,
+                                  ReadEquippedBagSlots(bot), npc_name)) {
             if (out->size() >= kMaxNpcActions) {
               break;
             }
@@ -1015,6 +1120,44 @@ ActionOutcome ExecuteNpcAction(Player* bot, const NpcAction& action) {
       }
       return {.used = true, .info = base::JoinString(done, ", ")};
     }
+    case NpcAction::Op::kSellItem: {
+      WorldSession* session = bot->GetSession();
+      if (!session) {
+        return {.error = "no session"};
+      }
+      if (!npc->HasNpcFlag(UNIT_NPC_FLAG_VENDOR) ||
+          npc->HasFlagsExtra(CREATURE_FLAG_EXTRA_NO_SELL_VENDOR)) {
+        return {.error = "that vendor will not buy items"};
+      }
+      if (bot->GetTradeData() != nullptr) {
+        return {.error = "cannot sell items while trading"};
+      }
+      const uint8_t bag = static_cast<uint8_t>((action.arg2 >> 8) & 0xFF);
+      const uint8_t slot = static_cast<uint8_t>(action.arg2 & 0xFF);
+      Item* item = bot->GetItemByPos(bag, slot);
+      if (!item || item->GetEntry() != action.arg1) {
+        return {.error = "that item is no longer in that bag slot"};
+      }
+      const std::vector<uint32_t> quest_items = CollectActiveQuestItemIds(bot);
+      const VendorSellCandidate cand =
+          BuildVendorSellCandidate(bot, item, bag, slot, quest_items);
+      if (std::string block = VendorSellSafetyBlockReason(cand);
+          !block.empty()) {
+        return {.error = std::move(block)};
+      }
+      const ObjectGuid item_guid = item->GetGUID();
+      const std::string item_name = cand.name;
+      WorldPacket p(CMSG_SELL_ITEM);
+      p << npc->GetGUID() << item_guid << item->GetCount();
+      WorldPackets::Item::SellItem packet(std::move(p));
+      packet.Read();
+      session->HandleSellItemOpcode(packet);
+      Item* after = bot->GetItemByPos(bag, slot);
+      if (after && after->GetGUID() == item_guid) {
+        return {.error = "could not sell " + item_name};
+      }
+      return {.used = true, .info = "sold " + item_name};
+    }
     case NpcAction::Op::kBuy: {
       const VendorItemData* vitems = npc->GetVendorItems();
       if (!vitems) {
@@ -1024,14 +1167,37 @@ ActionOutcome ExecuteNpcAction(Player* bot, const NpcAction& action) {
         const VendorItem* vi = vitems->GetItem(slot);
         if (vi && vi->item == action.arg1) {
           const ItemTemplate* proto = sObjectMgr->GetItemTemplate(action.arg1);
-          if (!bot->BuyItemFromVendorSlot(npc->GetGUID(), slot, action.arg1, 1,
-                                          NULL_BAG, NULL_SLOT)) {
-            return {.error = "could not buy " +
-                             (proto ? proto->Name1 : std::string("item"))};
+          const std::string item_name =
+              proto ? proto->Name1 : std::string("item");
+          // If buying a general-purpose bag and an empty bag slot exists, buy
+          // directly into that bag slot (works even when inventory is full).
+          if (proto && proto->Class == ITEM_CLASS_CONTAINER &&
+              proto->SubClass == ITEM_SUBCLASS_CONTAINER &&
+              proto->InventoryType == INVTYPE_BAG &&
+              proto->ContainerSlots > 0) {
+            for (const EquippedBagSlotInfo& s : ReadEquippedBagSlots(bot)) {
+              if (!s.occupied) {
+                bot->BuyItemFromVendorSlot(npc->GetGUID(), slot, action.arg1, 1,
+                                           INVENTORY_SLOT_BAG_0, s.slot);
+                Item* equipped =
+                    bot->GetItemByPos(INVENTORY_SLOT_BAG_0, s.slot);
+                if (!equipped || equipped->GetEntry() != action.arg1) {
+                  return {.error = "could not buy " + item_name};
+                }
+                return {.used = true,
+                        .info = "bought and equipped " + item_name};
+              }
+            }
           }
-          return {
-              .used = true,
-              .info = "bought " + (proto ? proto->Name1 : std::string("item"))};
+          const uint32_t count_before = bot->GetItemCount(action.arg1, false);
+          const uint32_t money_before = bot->GetMoney();
+          bot->BuyItemFromVendorSlot(npc->GetGUID(), slot, action.arg1, 1,
+                                     NULL_BAG, NULL_SLOT);
+          if (bot->GetItemCount(action.arg1, false) <= count_before &&
+              bot->GetMoney() >= money_before) {
+            return {.error = "could not buy " + item_name};
+          }
+          return {.used = true, .info = "bought " + item_name};
         }
       }
       return {.error = "item not sold by this vendor"};

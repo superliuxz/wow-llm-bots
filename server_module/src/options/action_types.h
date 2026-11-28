@@ -204,6 +204,7 @@ struct NpcAction {
     kTrain,
     kTrainRiding,
     kVendor,
+    kSellItem,
     kBuy,
     kFlyDiscover,
     kFlyTo,
@@ -214,7 +215,7 @@ struct NpcAction {
   Op op = Op::kVendor;
   std::string npc_guid;
   uint32_t arg1 = 0;  // quest_id, spell_id, item_entry, dest_node, or menu_id
-  uint32_t arg2 = 0;  // reward_idx for kQuestTurnIn, list_id for kGossipSelect
+  uint32_t arg2 = 0;  // reward_idx, list_id, or (bag << 8) | slot for kSellItem
 };
 
 struct SpendTalentsAction {

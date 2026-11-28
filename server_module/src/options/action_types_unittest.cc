@@ -311,6 +311,28 @@ TEST(ActionTypesTest, DecodesGossipAndDestroyActionsAndRejectsMalformed) {
         DecodeOptionFactAction(bad, "bad")))
         << bad;
   }
+
+  {
+    BotAction a = DecodeOptionFactAction(
+        "npc_sell:0x1234:255:24:2000",
+        "Sell Green Blade to Brother Danil (green, ilvl 18, 5s)");
+    const auto* npc = std::get_if<NpcAction>(&a);
+    ASSERT_NE(npc, nullptr);
+    EXPECT_EQ(npc->op, NpcAction::Op::kSellItem);
+    EXPECT_EQ(npc->npc_guid, "0x1234");
+    EXPECT_EQ(npc->arg1, 2000u);
+    EXPECT_EQ(npc->arg2, (255u << 8) | 24u);
+    EXPECT_FALSE(IsDeadAllowedAction(a));
+    EXPECT_FALSE(IsPendingCastAction(a));
+  }
+  for (const char* bad :
+       {"npc_sell:", "npc_sell:0x1234:255:24", "npc_sell::255:24:2000",
+        "npc_sell:0x1234:256:24:2000", "npc_sell:0x1234:255:256:2000",
+        "npc_sell:0x1234:255:24:0", "npc_sell:0x1234:a:b:c"}) {
+    EXPECT_TRUE(std::holds_alternative<InvalidAction>(
+        DecodeOptionFactAction(bad, "bad")))
+        << bad;
+  }
 }
 
 }  // namespace

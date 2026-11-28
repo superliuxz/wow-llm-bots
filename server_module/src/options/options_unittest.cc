@@ -1649,5 +1649,66 @@ TEST(OptionsTest, DestroyItemOptionsSuppressedInCombatAndWhenDead) {
                              "Release spirit", "Keep doing what I'm doing"}));
 }
 
+// Adversarial counter-test: non-grey vendor sell, bag buy, and bag equip
+// options are offered alive out of combat (solo and grouped) and suppressed in
+// combat (P0 combat priority) or while dead.
+TEST(OptionsTest, VendorSellBagBuyAndBagEquipSuppressedInCombatAndDead) {
+  OptionFacts facts;
+  facts.usable_items.push_back(OptionFacts::Item{
+      .entry = 4498,
+      .name = "Brown Leather Satchel",
+      .out_of_combat_only = true,
+      .detail = "8-slot bag, empty bag slot",
+      .equippable = true,
+  });
+  facts.npc_actions.push_back(
+      {"npc_sell:0x1234:255:24:2000", "0x1234",
+       "Sell Green Blade to Brother Danil (green, ilvl 18, 5s)"});
+  facts.npc_actions.push_back(
+      {"npc_buy:0x1234:4498", "0x1234",
+       "Buy Brown Leather Satchel (8-slot bag, 25s) from Brother Danil"});
+
+  // Solo out of combat: all three options offered.
+  pb::Snapshot solo_ooc;
+  const std::vector<OptionTarget> solo_targets = AddOptions(&solo_ooc, facts);
+  EXPECT_EQ(
+      Texts(solo_ooc),
+      (std::vector<std::string>{
+          "Equip Brown Leather Satchel (8-slot bag, empty bag slot)",
+          "Sell Green Blade to Brother Danil (green, ilvl 18, 5s)",
+          "Buy Brown Leather Satchel (8-slot bag, 25s) from Brother Danil",
+          "Keep doing what I'm doing"}));
+  EXPECT_TRUE(std::holds_alternative<EquipItemAction>(solo_targets[0].action));
+  const auto* sell = std::get_if<NpcAction>(&solo_targets[1].action);
+  ASSERT_NE(sell, nullptr);
+  EXPECT_EQ(sell->op, NpcAction::Op::kSellItem);
+  const auto* buy = std::get_if<NpcAction>(&solo_targets[2].action);
+  ASSERT_NE(buy, nullptr);
+  EXPECT_EQ(buy->op, NpcAction::Op::kBuy);
+
+  // Grouped out of combat: still offered.
+  pb::Snapshot grouped_ooc;
+  pb::Unit leader;
+  leader.name = "Human";
+  leader.group.emplace().leader = true;
+  grouped_ooc.ext.party.emplace().members.push_back(leader);
+  AddOptions(&grouped_ooc, facts);
+  EXPECT_EQ(Texts(grouped_ooc).size(), 4u);
+
+  // In combat (P0 combat priority): all suppressed.
+  pb::Snapshot in_combat;
+  in_combat.base.self.in_combat = true;
+  AddOptions(&in_combat, facts);
+  EXPECT_EQ(Texts(in_combat),
+            std::vector<std::string>{"Keep doing what I'm doing"});
+
+  // Dead: all suppressed.
+  pb::Snapshot dead;
+  dead.base.self.state = pb::Self::DEAD_BODY;
+  AddOptions(&dead, facts);
+  EXPECT_EQ(Texts(dead), (std::vector<std::string>{
+                             "Release spirit", "Keep doing what I'm doing"}));
+}
+
 }  // namespace
 }  // namespace llm_brain

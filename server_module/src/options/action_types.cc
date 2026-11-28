@@ -320,6 +320,18 @@ BotAction DecodeOptionFactAction(std::string_view guid,
     if (parts[0] == "npc_vendor") {
       return NpcAction{NpcAction::Op::kVendor, npc_guid, 0, 0};
     }
+    if (parts[0] == "npc_sell" && parts.size() == 5 && !npc_guid.empty()) {
+      uint32_t bag = 0;
+      uint32_t slot = 0;
+      uint32_t item_entry = 0;
+      if (!ParseUint32(parts[2], &bag) || !ParseUint32(parts[3], &slot) ||
+          !ParseUint32(parts[4], &item_entry) || bag > 255 || slot > 255 ||
+          item_entry == 0) {
+        return InvalidAction{"invalid vendor sell item"};
+      }
+      return NpcAction{NpcAction::Op::kSellItem, npc_guid, item_entry,
+                       (bag << 8) | slot};
+    }
     if (parts[0] == "npc_buy" && parts.size() == 3) {
       uint32_t item_entry = 0;
       if (!ParseUint32(parts[2], &item_entry)) {
