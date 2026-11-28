@@ -355,4 +355,77 @@ bool ShouldHoldPulls(const PullGateInput& input) {
   return !input.bot_leads;
 }
 
+void PinBrainTarget(BrainTargetPinState& state,
+                    uint64_t target_guid,
+                    bool in_combat) {
+  if (target_guid == 0) {
+    state = {};
+    return;
+  }
+  state.active = true;
+  state.target_guid = target_guid;
+  state.saw_combat = in_combat;
+}
+
+bool ClearBrainTargetPin(BrainTargetPinState& state) {
+  if (!state.active) {
+    return false;
+  }
+  state = {};
+  return true;
+}
+
+bool ShouldKeepBrainTargetPin(BrainTargetPinState& state,
+                              const BrainTargetPinTickInput& input) {
+  if (!state.active || state.target_guid == 0) {
+    state = {};
+    return false;
+  }
+  if (!input.bot_alive || input.in_battleground || !input.target_in_world ||
+      !input.target_alive || !input.target_valid_attack_target ||
+      input.target_evading || input.target_avoided) {
+    state = {};
+    return false;
+  }
+  if (input.bot_in_combat || input.party_in_combat) {
+    state.saw_combat = true;
+    return true;
+  }
+  if (state.saw_combat) {
+    state = {};
+    return false;
+  }
+  return true;
+}
+
+bool IsTargetSwitchingActionName(std::string_view action_name) {
+  return action_name == "dps assist" || action_name == "tank assist" ||
+         action_name == "dps aoe" || action_name == "attack least hp target" ||
+         action_name == "attack rti target" ||
+         action_name == "attack anything" ||
+         action_name == "aggressive target" ||
+         action_name == "attack enemy player" ||
+         action_name == "attack enemy flag carrier" ||
+         action_name == "pull rti target";
+}
+
+bool ShouldBlockTargetSwitchForBrainPin(const BrainTargetPinBlockInput& input) {
+  if (!input.pin_active || input.pinned_target_guid == 0 ||
+      !input.is_brain_led || input.in_battleground) {
+    return false;
+  }
+  const bool is_target_switch =
+      IsTargetSwitchingActionName(input.action_name) ||
+      (input.is_attack_action && input.action_name != "attack" &&
+       input.action_name != "attack my target");
+  if (!is_target_switch) {
+    return false;
+  }
+  if (input.action_target_guid != 0 &&
+      input.action_target_guid == input.pinned_target_guid) {
+    return false;
+  }
+  return true;
+}
+
 }  // namespace llm_brain

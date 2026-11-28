@@ -15,6 +15,7 @@
 #include "Playerbots.h"
 #include "Unit.h"
 #include "base/time/time.h"
+#include "bot_manager/bot_manager.h"
 #include "options/act_executor.h"
 #include "options/action_types.h"
 #include "options/exec_items.h"
@@ -61,6 +62,7 @@ ExecuteResult ExecuteAttackAction(Player* bot, const AttackAction& action) {
   current_target->Set(unit);
   if (!ai->DoSpecificAction("attack", Event(), /*silent=*/true)) {
     if (old_target == unit || bot->GetVictim() == unit) {
+      BotManager::PinBrainTarget(bot, unit);
       ai->ResetActionDuration();
       return {};
     }
@@ -68,12 +70,14 @@ ExecuteResult ExecuteAttackAction(Player* bot, const AttackAction& action) {
                                      bot->IsValidAttackTarget(unit),
                                      bot->IsWithinLOSInMap(unit)) &&
         WalkNextTo(bot, unit)) {
+      BotManager::PinBrainTarget(bot, unit);
       ai->ResetActionDuration();
       return {};
     }
     current_target->Set(old_target);
     return {.error = "can't attack " + action.name + " now"};
   }
+  BotManager::PinBrainTarget(bot, unit);
   ai->ResetActionDuration();
   return {};
 }

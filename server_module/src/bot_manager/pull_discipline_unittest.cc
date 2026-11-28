@@ -2,7 +2,9 @@
 
 #include "bot_manager/pull_discipline.h"
 
+#include <cstdint>
 #include <limits>
+#include <string_view>
 #include <vector>
 
 #include "base/time/time.h"
@@ -904,6 +906,289 @@ TEST(PullDisciplineTest, PullGateHumanLedBotLedAndSoloInvariants) {
       .bot_leads = false,
       .bot_tanks = false,
       .has_other_tank = false,
+  }));
+}
+
+TEST(PullDisciplineTest, BrainTargetPinPersistsWhileAliveAndValid) {
+  constexpr uint64_t kBoneSpike = 0xB05E1;
+  BrainTargetPinState state;
+
+  // Out-of-combat pin (e.g. `Attack <mob>` before engaging) stays active while
+  // approaching the living attackable target.
+  PinBrainTarget(state, kBoneSpike, /*in_combat=*/false);
+  EXPECT_TRUE(state.active);
+  EXPECT_EQ(state.target_guid, kBoneSpike);
+  EXPECT_FALSE(state.saw_combat);
+
+  EXPECT_TRUE(
+      ShouldKeepBrainTargetPin(state, {
+                                          .bot_alive = true,
+                                          .bot_in_combat = false,
+                                          .party_in_combat = false,
+                                          .in_battleground = false,
+                                          .target_in_world = true,
+                                          .target_alive = true,
+                                          .target_valid_attack_target = true,
+                                          .target_evading = false,
+                                          .target_avoided = false,
+                                      }));
+  EXPECT_TRUE(state.active);
+  EXPECT_FALSE(state.saw_combat);
+
+  // Entering combat latches `saw_combat` and keeps the pin across ticks.
+  for (int tick = 0; tick < 5; ++tick) {
+    EXPECT_TRUE(
+        ShouldKeepBrainTargetPin(state, {
+                                            .bot_alive = true,
+                                            .bot_in_combat = true,
+                                            .party_in_combat = true,
+                                            .in_battleground = false,
+                                            .target_in_world = true,
+                                            .target_alive = true,
+                                            .target_valid_attack_target = true,
+                                            .target_evading = false,
+                                            .target_avoided = false,
+                                        }));
+    EXPECT_TRUE(state.active);
+    EXPECT_TRUE(state.saw_combat);
+    EXPECT_EQ(state.target_guid, kBoneSpike);
+  }
+
+  // Replacing the pin with a new unit swaps cleanly.
+  constexpr uint64_t kWebWrap = 0xB05E2;
+  PinBrainTarget(state, kWebWrap, /*in_combat=*/true);
+  EXPECT_TRUE(state.active);
+  EXPECT_EQ(state.target_guid, kWebWrap);
+
+  // Explicit clear (or pinning 0) clears the pin.
+  EXPECT_TRUE(ClearBrainTargetPin(state));
+  EXPECT_FALSE(state.active);
+  EXPECT_EQ(state.target_guid, 0u);
+  EXPECT_FALSE(ClearBrainTargetPin(state));
+
+  PinBrainTarget(state, kWebWrap, /*in_combat=*/true);
+  PinBrainTarget(state, 0, /*in_combat=*/true);
+  EXPECT_FALSE(state.active);
+}
+
+TEST(PullDisciplineTest, BrainTargetPinClearsOnDeathDespawnEvadeOrCombatEnd) {
+  constexpr uint64_t kKineticBomb = 0xB05E3;
+  const auto valid_in_combat = [] {
+    return BrainTargetPinTickInput{
+        .bot_alive = true,
+        .bot_in_combat = true,
+        .party_in_combat = true,
+        .in_battleground = false,
+        .target_in_world = true,
+        .target_alive = true,
+        .target_valid_attack_target = true,
+        .target_evading = false,
+        .target_avoided = false,
+    };
+  };
+
+  // Target dies -> clears immediately.
+  {
+    BrainTargetPinState state;
+    PinBrainTarget(state, kKineticBomb, /*in_combat=*/true);
+    auto in = valid_in_combat();
+    in.target_alive = false;
+    EXPECT_FALSE(ShouldKeepBrainTargetPin(state, in));
+    EXPECT_FALSE(state.active);
+  }
+  // Target despawns / leaves world -> clears immediately.
+  {
+    BrainTargetPinState state;
+    PinBrainTarget(state, kKineticBomb, /*in_combat=*/true);
+    auto in = valid_in_combat();
+    in.target_in_world = false;
+    EXPECT_FALSE(ShouldKeepBrainTargetPin(state, in));
+    EXPECT_FALSE(state.active);
+  }
+  // Target becomes unattackable / friendly -> clears immediately.
+  {
+    BrainTargetPinState state;
+    PinBrainTarget(state, kKineticBomb, /*in_combat=*/true);
+    auto in = valid_in_combat();
+    in.target_valid_attack_target = false;
+    EXPECT_FALSE(ShouldKeepBrainTargetPin(state, in));
+    EXPECT_FALSE(state.active);
+  }
+  // Target evades -> clears immediately.
+  {
+    BrainTargetPinState state;
+    PinBrainTarget(state, kKineticBomb, /*in_combat=*/true);
+    auto in = valid_in_combat();
+    in.target_evading = true;
+    EXPECT_FALSE(ShouldKeepBrainTargetPin(state, in));
+    EXPECT_FALSE(state.active);
+  }
+  // Target avoided by brain -> clears immediately.
+  {
+    BrainTargetPinState state;
+    PinBrainTarget(state, kKineticBomb, /*in_combat=*/true);
+    auto in = valid_in_combat();
+    in.target_avoided = true;
+    EXPECT_FALSE(ShouldKeepBrainTargetPin(state, in));
+    EXPECT_FALSE(state.active);
+  }
+  // Bot dies -> clears immediately.
+  {
+    BrainTargetPinState state;
+    PinBrainTarget(state, kKineticBomb, /*in_combat=*/true);
+    auto in = valid_in_combat();
+    in.bot_alive = false;
+    EXPECT_FALSE(ShouldKeepBrainTargetPin(state, in));
+    EXPECT_FALSE(state.active);
+  }
+  // Entering a battleground -> clears immediately.
+  {
+    BrainTargetPinState state;
+    PinBrainTarget(state, kKineticBomb, /*in_combat=*/true);
+    auto in = valid_in_combat();
+    in.in_battleground = true;
+    EXPECT_FALSE(ShouldKeepBrainTargetPin(state, in));
+    EXPECT_FALSE(state.active);
+  }
+  // Solo vs grouped combat-end transition:
+  // Grouped bot keeps pin while party is still in combat even if bot briefly
+  // drops combat; clears once both bot and party leave combat.
+  {
+    BrainTargetPinState state;
+    PinBrainTarget(state, kKineticBomb, /*in_combat=*/true);
+    auto in = valid_in_combat();
+    in.bot_in_combat = false;
+    in.party_in_combat = true;
+    EXPECT_TRUE(ShouldKeepBrainTargetPin(state, in));
+    EXPECT_TRUE(state.active);
+
+    in.party_in_combat = false;
+    EXPECT_FALSE(ShouldKeepBrainTargetPin(state, in));
+    EXPECT_FALSE(state.active);
+  }
+  // Solo bot (`party_in_combat == false`) clears as soon as bot leaves combat
+  // after having engaged.
+  {
+    BrainTargetPinState state;
+    PinBrainTarget(state, kKineticBomb, /*in_combat=*/true);
+    auto in = valid_in_combat();
+    in.bot_in_combat = false;
+    in.party_in_combat = false;
+    EXPECT_FALSE(ShouldKeepBrainTargetPin(state, in));
+    EXPECT_FALSE(state.active);
+  }
+}
+
+// Adversarial counter-tests: brain target pin blocks playerbots' autonomous
+// target-switching actions (`dps assist`, `tank assist`, `dps aoe`,
+// `attack rti target`, etc.) from snapping back to another mob, without
+// breaking `"attack"` on the pinned target, tank threat/taunt spells, healing,
+// pull discipline, or playerbots fallback when LLM is disconnected.
+TEST(PullDisciplineTest, BrainTargetPinBlockingAndAdversarialCounterTests) {
+  constexpr uint64_t kBoneSpike = 0xA111;
+  constexpr uint64_t kBoss = 0xB055;
+
+  const auto base = [&] {
+    return BrainTargetPinBlockInput{
+        .pin_active = true,
+        .pinned_target_guid = kBoneSpike,
+        .is_brain_led = true,
+        .in_battleground = false,
+        .is_attack_action = true,
+        .action_name = "dps assist",
+        .action_target_guid = kBoss,
+    };
+  };
+
+  // Blocks autonomous target-switching actions when aiming at a different mob.
+  for (std::string_view switcher : {
+           "dps assist",
+           "tank assist",
+           "dps aoe",
+           "attack least hp target",
+           "attack rti target",
+           "attack anything",
+           "aggressive target",
+           "attack enemy player",
+           "attack enemy flag carrier",
+           "pull rti target",
+       }) {
+    auto in = base();
+    in.action_name = switcher;
+    in.is_attack_action = (switcher != "pull rti target");
+    EXPECT_TRUE(ShouldBlockTargetSwitchForBrainPin(in)) << switcher;
+  }
+
+  // Adversarial counter-test 1: allows `"attack"` (current/pinned target) and
+  // `"attack my target"`, and allows a target-switching action that already
+  // points at the pinned unit.
+  {
+    auto in = base();
+    in.action_name = "attack";
+    in.action_target_guid = kBoneSpike;
+    EXPECT_FALSE(ShouldBlockTargetSwitchForBrainPin(in));
+
+    in.action_name = "attack my target";
+    in.action_target_guid = kBoss;
+    EXPECT_FALSE(ShouldBlockTargetSwitchForBrainPin(in));
+
+    in.action_name = "dps assist";
+    in.action_target_guid = kBoneSpike;
+    EXPECT_FALSE(ShouldBlockTargetSwitchForBrainPin(in));
+  }
+
+  // Adversarial counter-test 2: never blocks tank threat/taunt spells, melee,
+  // reach, heals, dispels, or interrupts.
+  for (std::string_view allowed : {
+           "taunt",
+           "growl",
+           "hand of reckoning",
+           "dark command",
+           "righteous defense",
+           "challenging shout",
+           "taunt on snare target",
+           "shield slam",
+           "consecration",
+           "thunder clap",
+           "melee",
+           "shoot",
+           "reach melee",
+           "reach spell",
+           "flash heal",
+           "cleanse",
+           "kick",
+       }) {
+    auto in = base();
+    in.is_attack_action = false;
+    in.action_name = allowed;
+    in.action_target_guid = kBoss;
+    EXPECT_FALSE(ShouldBlockTargetSwitchForBrainPin(in)) << allowed;
+  }
+
+  // Adversarial counter-test 3: never blocks when no pin is active, when
+  // playerbots is leading (LLM stall/disconnect fallback), or in battlegrounds.
+  {
+    auto in = base();
+    in.pin_active = false;
+    EXPECT_FALSE(ShouldBlockTargetSwitchForBrainPin(in));
+
+    in = base();
+    in.is_brain_led = false;
+    EXPECT_FALSE(ShouldBlockTargetSwitchForBrainPin(in));
+
+    in = base();
+    in.in_battleground = true;
+    EXPECT_FALSE(ShouldBlockTargetSwitchForBrainPin(in));
+  }
+
+  // Adversarial counter-test 4: pull discipline for unpulled human Skull marks
+  // still holds when no brain pin / explicit override is active.
+  EXPECT_TRUE(ShouldSuppressUnpulledSkull({
+      .in_group = true,
+      .in_battleground = false,
+      .has_skull_mark = true,
+      .skull_in_combat_with_group = false,
+      .explicit_target_override = false,
   }));
 }
 

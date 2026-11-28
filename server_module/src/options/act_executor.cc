@@ -20,6 +20,7 @@
 #include "CharmInfo.h"
 #include "Creature.h"
 #include "DynamicObject.h"
+#include "Event.h"
 #include "G3D/Vector3.h"
 #include "GameObject.h"
 #include "GridNotifiers.h"
@@ -1922,6 +1923,7 @@ ActStartResult StartAct(Player* bot,
           bot->InterruptNonMeleeSpells(false);
           break;
         case pb::Command_Act::ATTACKING:
+          BotManager::ClearBrainTargetPin(bot);
           bot->AttackStop();
           break;
         case pb::Command_Act::MOVING:
@@ -1932,6 +1934,7 @@ ActStartResult StartAct(Player* bot,
           ClearActMovement(bot);
           break;
         case pb::Command_Act::STOP_UNSPECIFIED:
+          BotManager::ClearBrainTargetPin(bot);
           bot->InterruptNonMeleeSpells(false);
           bot->AttackStop();
           if (CanClearBotMovement(bot)) {
@@ -1955,6 +1958,21 @@ ActStartResult StartAct(Player* bot,
                                unit->GetGUID().GetRawValue());
       // Same call as WorldSession::HandleSetSelectionOpcode.
       bot->SetSelection(unit->GetGUID());
+      if (!bot->IsFriendlyTo(unit) && unit->IsAlive() &&
+          bot->IsValidAttackTarget(unit)) {
+        BotManager::PinBrainTarget(bot, unit);
+        if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
+            ai && !BotManager::IsStopDps(bot)) {
+          if (auto* current_target =
+                  ai->GetAiObjectContext()->GetValue<Unit*>("current target")) {
+            current_target->Set(unit);
+          }
+          ai->DoSpecificAction("attack", Event(), /*silent=*/true);
+          ai->ResetActionDuration();
+        }
+      } else {
+        BotManager::ClearBrainTargetPin(bot);
+      }
       return {.done = true};
     }
 
@@ -2271,6 +2289,9 @@ ActStartResult StartAct(Player* bot,
                 s.avoided_targets.push_back(raw);
               }
             });
+        if (BotManager::PinnedBrainTargetGuid(bot) == raw) {
+          BotManager::ClearBrainTargetPin(bot);
+        }
         if (bot->GetTarget() == obj->GetGUID()) {
           bot->AttackStop();
           bot->SetSelection(ObjectGuid::Empty);

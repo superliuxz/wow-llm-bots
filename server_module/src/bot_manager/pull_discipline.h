@@ -313,6 +313,69 @@ struct PullGateInput {
 // options for this bot (applies consistently to human-led and bot-led groups).
 bool ShouldHoldPulls(const PullGateInput& input);
 
+// Tracks an explicit brain-selected attack/target pin (`target <unit>` act or
+// `Attack <mob>` option) so playerbots' `dps assist` / `tank assist` strategies
+// do not snap the bot back to another target while the pinned unit is alive and
+// valid (M5 P0-8).
+struct BrainTargetPinState {
+  bool active = false;
+  uint64_t target_guid = 0;
+  bool saw_combat = false;
+
+  bool operator==(const BrainTargetPinState&) const = default;
+};
+
+struct BrainTargetPinTickInput {
+  bool bot_alive = false;
+  bool bot_in_combat = false;
+  bool party_in_combat = false;
+  bool in_battleground = false;
+  bool target_in_world = false;
+  bool target_alive = false;
+  bool target_valid_attack_target = false;
+  bool target_evading = false;
+  bool target_avoided = false;
+};
+
+// Pins `target_guid` as the brain's active combat target. Passing `0` clears
+// any existing pin.
+void PinBrainTarget(BrainTargetPinState& state,
+                    uint64_t target_guid,
+                    bool in_combat);
+
+// Unconditionally clears an active brain target pin (explicit target clear,
+// stop, non-attack choice, map change, disconnect, logout). Returns true if a
+// pin was active.
+bool ClearBrainTargetPin(BrainTargetPinState& state);
+
+// Evaluates whether an active brain target pin should remain active on this
+// tick. Returns true while the pin stays active (latching `saw_combat` once
+// combat starts); returns false (and clears `state`) when the target dies,
+// despawns, becomes unattackable/evades/avoided, the bot dies, enters a
+// battleground, or combat ends after engaging.
+bool ShouldKeepBrainTargetPin(BrainTargetPinState& state,
+                              const BrainTargetPinTickInput& input);
+
+// True for playerbots' autonomous target-switching action names (`dps assist`,
+// `tank assist`, `dps aoe`, `attack rti target`, etc.) that would override a
+// pinned brain target. Never matches `"attack"`, `"attack my target"`, tank
+// taunt/threat spells, healing, or movement.
+bool IsTargetSwitchingActionName(std::string_view action_name);
+
+struct BrainTargetPinBlockInput {
+  bool pin_active = false;
+  uint64_t pinned_target_guid = 0;
+  bool is_brain_led = false;
+  bool in_battleground = false;
+  bool is_attack_action = false;
+  std::string_view action_name;
+  uint64_t action_target_guid = 0;
+};
+
+// Returns true when `BrainPolicyListener` should block a playerbots action to
+// prevent it from switching targets away from the brain's pinned target.
+bool ShouldBlockTargetSwitchForBrainPin(const BrainTargetPinBlockInput& input);
+
 }  // namespace llm_brain
 
 #endif  // MOD_LLM_BRAIN_BOT_MANAGER_PULL_DISCIPLINE_H_

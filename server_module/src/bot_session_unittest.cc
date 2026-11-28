@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "bot_manager/errand_hold.h"
+#include "bot_manager/pull_discipline.h"
 #include "bot_manager/tank_swap.h"
 #include "gtest/gtest.h"
 #include "options/loot_roll_policy.h"
@@ -372,6 +373,42 @@ TEST(BotSessionRegistryTest,
       ASSERT_NE(s, nullptr);
       EXPECT_TRUE(s->pending_rolls_seen.empty());
       EXPECT_TRUE(s->auto_popups);
+    });
+  };
+  set();
+  reg.ResetOnMapChange(kBot);
+  expect_cleared();
+  set();
+  reg.ResetOnDisconnect(kBot);
+  expect_cleared();
+  set();
+  reg.ResetOnLogout(kBot);
+  expect_cleared();
+}
+
+// Adversarial counter-test: an active brain target pin never survives a map
+// change, harness disconnect, or logout, while role policy (`not_tank`) still
+// survives.
+TEST(BotSessionRegistryTest,
+     BrainTargetPinClearsOnMapChangeDisconnectAndLogout) {
+  BotSessionRegistry reg;
+  constexpr uint64_t kBot = 0x100A;
+  const auto set = [&] {
+    reg.WithSession(kBot, [](BotSession& s) {
+      s.group_guid = 42;
+      s.group_policy.not_tank = true;
+      PinBrainTarget(s.brain_target_pin, /*target_guid=*/0xB05E1,
+                     /*in_combat=*/true);
+    });
+  };
+  const auto expect_cleared = [&] {
+    reg.InspectSession(kBot, [](const BotSession* s) {
+      ASSERT_NE(s, nullptr);
+      EXPECT_FALSE(s->brain_target_pin.active);
+      EXPECT_EQ(s->brain_target_pin.target_guid, 0u);
+      EXPECT_FALSE(s->brain_target_pin.saw_combat);
+      EXPECT_EQ(s->group_guid, 42u);
+      EXPECT_TRUE(s->group_policy.not_tank);
     });
   };
   set();

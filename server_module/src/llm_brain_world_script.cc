@@ -625,6 +625,7 @@ class LlmBrainWorldScript : public WorldScript {
       }
       ResetRtiOverride(bot, bots_[i].rti_override);
       ResetStopDps(bot, bots_[i].stop_dps);
+      BotManager::ClearBrainTargetPin(bot);
       ClearHealerManaWait(bots_[i].healer_mana_wait);
       ClearLeaderWait(bots_[i].leader_wait);
       bots_[i].errand_hold_active = false;
@@ -682,6 +683,7 @@ class LlmBrainWorldScript : public WorldScript {
       }
       ResetRtiOverride(bot, bots_[i].rti_override);
       ResetStopDps(bot, bots_[i].stop_dps);
+      BotManager::ClearBrainTargetPin(bot);
       ClearHealerManaWait(bots_[i].healer_mana_wait);
       ClearLeaderWait(bots_[i].leader_wait);
       BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
@@ -1425,6 +1427,7 @@ class LlmBrainWorldScript : public WorldScript {
                            Unit* target,
                            std::optional<size_t> mark,
                            RtiOverrideState* rti_override) {
+    BotManager::ClearBrainTargetPin(bot);
     bot->SetSelection(target->GetGUID());
     if (ai) {
       ai->GetAiObjectContext()
@@ -1660,6 +1663,7 @@ class LlmBrainWorldScript : public WorldScript {
           if (!attack) {
             // A new errand ends a `to ping` hold (a fight from there doesn't).
             BotManager::ClearPingStay(bot);
+            BotManager::ClearBrainTargetPin(bot);
           }
           // Attack leaves a running act be, but not an earlier choice's
           // crowd-control cast (a new choice replaces it).

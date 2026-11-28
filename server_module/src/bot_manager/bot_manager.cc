@@ -297,6 +297,99 @@ bool IsPrioritizedTarget(PlayerbotAI* ai, ObjectGuid guid) {
   return std::find(targets.begin(), targets.end(), guid) != targets.end();
 }
 
+void AddPrioritizedTarget(PlayerbotAI* ai, ObjectGuid guid) {
+  if (!ai || guid.IsEmpty()) {
+    return;
+  }
+  auto* value =
+      ai->GetAiObjectContext()->GetValue<GuidVector>("prioritized targets");
+  if (!value) {
+    return;
+  }
+  GuidVector targets = value->Get();
+  if (std::find(targets.begin(), targets.end(), guid) == targets.end()) {
+    targets.push_back(guid);
+    value->Set(targets);
+  }
+}
+
+void RemovePrioritizedTarget(PlayerbotAI* ai, ObjectGuid guid) {
+  if (!ai || guid.IsEmpty()) {
+    return;
+  }
+  auto* value =
+      ai->GetAiObjectContext()->GetValue<GuidVector>("prioritized targets");
+  if (!value) {
+    return;
+  }
+  GuidVector targets = value->Get();
+  const size_t before = targets.size();
+  std::erase(targets, guid);
+  if (targets.size() != before) {
+    value->Set(targets);
+  }
+}
+
+// Maintains an active brain-selected target pin (M5 P0-8) on every world tick:
+// clears it automatically when the target dies, despawns, becomes unattackable,
+// evades, is avoided, or combat ends; otherwise keeps playerbots' `current
+// target` and selection aligned with the pinned target while brain-led.
+void SyncBrainTargetPin(Player* bot, PlayerbotAI* ai) {
+  if (!bot) {
+    return;
+  }
+  const uint64_t key = bot->GetGUID().GetRawValue();
+  uint64_t pinned_guid = 0;
+  bool avoided = false;
+  bool brain_led = false;
+  BotSessionRegistry::Instance().InspectSession(key, [&](const BotSession* s) {
+    if (!s || !s->brain_target_pin.active) {
+      return;
+    }
+    pinned_guid = s->brain_target_pin.target_guid;
+    brain_led = s->tick_owner == TickOwner::kBrain;
+    avoided = std::find(s->avoided_targets.begin(), s->avoided_targets.end(),
+                        pinned_guid) != s->avoided_targets.end();
+  });
+  if (pinned_guid == 0) {
+    return;
+  }
+  Unit* target = ObjectAccessor::GetUnit(*bot, ObjectGuid(pinned_guid));
+  const Creature* creature = target ? target->ToCreature() : nullptr;
+  const BrainTargetPinTickInput input{
+      .bot_alive = bot->IsAlive(),
+      .bot_in_combat = bot->IsInCombat(),
+      .party_in_combat = GroupInCombat(bot->GetGroup(), bot),
+      .in_battleground = bot->InBattleground(),
+      .target_in_world = target != nullptr && target->IsInWorld(),
+      .target_alive = target != nullptr && target->IsAlive(),
+      .target_valid_attack_target = target != nullptr &&
+                                    !bot->IsFriendlyTo(target) &&
+                                    bot->IsValidAttackTarget(target),
+      .target_evading = creature != nullptr && creature->IsInEvadeMode(),
+      .target_avoided = avoided,
+  };
+  const bool keep =
+      BotSessionRegistry::Instance().WithSession(key, [&](BotSession& s) {
+        return ShouldKeepBrainTargetPin(s.brain_target_pin, input);
+      });
+  if (!keep) {
+    RemovePrioritizedTarget(ai, ObjectGuid(pinned_guid));
+    return;
+  }
+  if (!brain_led || !ai || !target || BotManager::IsStopDps(bot)) {
+    return;
+  }
+  if (auto* current_target =
+          ai->GetAiObjectContext()->GetValue<Unit*>("current target");
+      current_target && current_target->Get() != target) {
+    current_target->Set(target);
+  }
+  if (bot->GetTarget() != target->GetGUID()) {
+    bot->SetSelection(target->GetGUID());
+  }
+}
+
 // Suppresses playerbots' default `"skull"` RTI while the group's Skull-marked
 // unit is not yet in combat with the group (e.g. a human tank pre-marking
 // before pulling), restoring `"skull"` once the mob is pulled or unmarked.
@@ -1032,6 +1125,29 @@ class BrainPolicyListener final : public ActionExecutionListener {
           }
         }
       }
+      // Brain target pin (M5 P0-8): while the brain has pinned a living,
+      // attackable target (`target <unit>` or `Attack <mob>`), block
+      // playerbots' autonomous target-switching actions (`dps assist`,
+      // `tank assist`, `dps aoe`, `attack rti target`, etc.) from snapping
+      // away to a different unit.
+      const uint64_t pinned_guid = BotManager::PinnedBrainTargetGuid(bot_);
+      if (pinned_guid != 0) {
+        Unit* action_target = action->GetTarget();
+        const uint64_t action_target_guid =
+            action_target ? action_target->GetGUID().GetRawValue() : 0;
+        if (ShouldBlockTargetSwitchForBrainPin({
+                .pin_active = true,
+                .pinned_target_guid = pinned_guid,
+                .is_brain_led = Owner() == TickOwner::kBrain,
+                .in_battleground = false,
+                .is_attack_action =
+                    dynamic_cast<::AttackAction*>(action) != nullptr,
+                .action_name = name,
+                .action_target_guid = action_target_guid,
+            })) {
+          return false;
+        }
+      }
     }
     // Tank-swap coordination (M1b): prevent playerbots' "lose aggro" reflex
     // from taunting a mob back off another living group tank after a swap.
@@ -1327,6 +1443,7 @@ void BotManager::Update(uint32_t diff_ms) {
     if (!in_bg) {
       PlayerbotAI* ai = GET_PLAYERBOT_AI(player);
       EnsurePolicyListener(player, ai);
+      SyncBrainTargetPin(player, ai);
       SyncUnpulledSkullRti(player, ai);
     }
   }
@@ -2342,9 +2459,65 @@ void BotManager::SetStopDps(Player* bot, bool stop) {
   if (!bot) {
     return;
   }
+  if (stop) {
+    ClearBrainTargetPin(bot);
+  }
   BotSessionRegistry::Instance().WithSession(
       bot->GetGUID().GetRawValue(),
       [stop](BotSession& s) { s.stop_dps = stop; });
+}
+
+void BotManager::PinBrainTarget(Player* bot, Unit* target) {
+  if (!bot || !target || !target->IsInWorld() || !target->IsAlive() ||
+      bot->IsFriendlyTo(target) || !bot->IsValidAttackTarget(target)) {
+    return;
+  }
+  const uint64_t new_guid = target->GetGUID().GetRawValue();
+  const bool in_combat =
+      bot->IsInCombat() || GroupInCombat(bot->GetGroup(), bot);
+  const uint64_t prev_guid = BotSessionRegistry::Instance().WithSession(
+      bot->GetGUID().GetRawValue(), [new_guid, in_combat](BotSession& s) {
+        const uint64_t old =
+            s.brain_target_pin.active ? s.brain_target_pin.target_guid : 0;
+        llm_brain::PinBrainTarget(s.brain_target_pin, new_guid, in_combat);
+        return old;
+      });
+  if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot)) {
+    if (prev_guid != 0 && prev_guid != new_guid) {
+      RemovePrioritizedTarget(ai, ObjectGuid(prev_guid));
+    }
+    AddPrioritizedTarget(ai, target->GetGUID());
+  }
+}
+
+void BotManager::ClearBrainTargetPin(Player* bot) {
+  if (!bot) {
+    return;
+  }
+  const uint64_t prev_guid = BotSessionRegistry::Instance().WithSession(
+      bot->GetGUID().GetRawValue(), [](BotSession& s) {
+        const uint64_t old =
+            s.brain_target_pin.active ? s.brain_target_pin.target_guid : 0;
+        llm_brain::ClearBrainTargetPin(s.brain_target_pin);
+        return old;
+      });
+  if (prev_guid != 0) {
+    if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot)) {
+      RemovePrioritizedTarget(ai, ObjectGuid(prev_guid));
+    }
+  }
+}
+
+uint64_t BotManager::PinnedBrainTargetGuid(Player* bot) {
+  if (!bot) {
+    return 0;
+  }
+  return BotSessionRegistry::Instance().InspectSession(
+      bot->GetGUID().GetRawValue(), [](const BotSession* s) -> uint64_t {
+        return (s && s->brain_target_pin.active)
+                   ? s->brain_target_pin.target_guid
+                   : 0;
+      });
 }
 
 bool BotManager::IsStopDps(Player* bot) {

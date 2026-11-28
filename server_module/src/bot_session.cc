@@ -49,6 +49,7 @@ void BotSessionRegistry::ResetOnMapChange(uint64_t bot_guid) {
     it->second.stop_dps = false;
     it->second.combat_position_hold = false;
     it->second.skull_rti_suppressed = false;
+    it->second.brain_target_pin = {};
     it->second.group_policy.stay = false;
     it->second.group_policy.stay_in_combat = false;
     it->second.stray_recalled_ms = 0;
@@ -77,6 +78,7 @@ void BotSessionRegistry::ResetOnDisconnect(uint64_t bot_guid) {
     it->second.stop_dps = false;
     it->second.combat_position_hold = false;
     it->second.skull_rti_suppressed = false;
+    it->second.brain_target_pin = {};
     it->second.group_policy.stay = false;
     it->second.group_policy.stay_in_combat = false;
     it->second.stray_recalled_ms = 0;

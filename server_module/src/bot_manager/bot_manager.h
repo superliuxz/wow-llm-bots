@@ -127,6 +127,14 @@ class BotManager {
   // aggro" reflex taunt instead of ping-ponging aggro back (M1b).
   static void RecordBrainTaunt(Player* bot, Unit* target);
 
+  // World thread: pins `target` as the brain's active combat target so
+  // playerbots' `dps assist` / `tank assist` strategies do not snap back to
+  // another unit while `target` is alive and valid (M5 P0-8).
+  static void PinBrainTarget(Player* bot, Unit* target);
+  static void ClearBrainTargetPin(Player* bot);
+  // Thread-safe: returns the currently pinned brain target GUID, or 0 if none.
+  static uint64_t PinnedBrainTargetGuid(Player* bot);
+
   // World thread only: the brain chose to lie dead hoping for a rez (RH-M3):
   // playerbots' auto release waits `wait_ms` from now, anywhere (by default
   // it waits up to 90 s, and only in a dungeon with a living resurrector).

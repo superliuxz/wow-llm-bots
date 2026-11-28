@@ -19,6 +19,7 @@
 #include "base/synchronization/lock.h"
 #include "base/thread_annotations.h"
 #include "bot_manager/errand_hold.h"
+#include "bot_manager/pull_discipline.h"
 #include "bot_manager/tick_owner.h"
 #include "options/loot_roll_policy.h"
 #include "options/quest_helpers.h"
@@ -209,6 +210,11 @@ struct BotSession {
   // True while playerbots' default `"skull"` RTI value is temporarily cleared
   // because the group's Skull-marked unit is not yet in combat with the group.
   bool skull_rti_suppressed = false;
+  // Active brain-selected target pin (M5 P0-8): keeps playerbots' `dps assist`
+  // and `tank assist` from snapping off a unit explicitly targeted or attacked
+  // by the brain until it dies, becomes unattackable/evades, combat ends, or
+  // the brain clears/replaces it.
+  BrainTargetPinState brain_target_pin;
 
   // Most recent spell miss and cast failure for this bot (cleared on logout,
   // map change, and disconnect; monotonic seqs survive map change/disconnect so
