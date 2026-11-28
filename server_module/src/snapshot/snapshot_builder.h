@@ -82,6 +82,7 @@ class SnapshotBuilder {
                        wlb::snapshot::Snapshot* snapshot,
                        OptionFacts* facts,
                        const WorldPlaces* world,
+                       bool quest_log_open,
                        base::TimeTicks now);
 
   NearbyBuilder nearby_;

@@ -16,14 +16,13 @@ constexpr uint64_t kOtherGroupGuid = 0x50002;
 TEST(HumanGroupGraceTest, GraceDurationsMatchMapType) {
   EXPECT_EQ(OfflineGraceMs(/*in_instance=*/false), kOpenWorldOfflineGraceMs);
   EXPECT_EQ(OfflineGraceMs(/*in_instance=*/true), kInstanceOfflineGraceMs);
-  EXPECT_EQ(kOpenWorldOfflineGraceMs, 60u * 1000u);
+  EXPECT_EQ(kOpenWorldOfflineGraceMs, 0u);
   EXPECT_EQ(kInstanceOfflineGraceMs, 30u * 60u * 1000u);
-  EXPECT_GT(kInstanceOfflineGraceMs, kOpenWorldOfflineGraceMs);
 }
 
-// Counter-test: open-world groups still abandon after 60 s so stray bot
-// parties do not linger indefinitely outside instances.
-TEST(HumanGroupGraceTest, OpenWorldLeavesAfterSixtySeconds) {
+// M2: open-world groups stay together indefinitely while the human groupmate
+// is offline so bots don't leave after 60 s and level ahead between sessions.
+TEST(HumanGroupGraceTest, OpenWorldStaysInGroupWhileHumanOffline) {
   HumanGroupGraceState state;
   // Human is online -> records human_group_guid.
   EXPECT_EQ(EvaluateHumanGroupGrace(state, {.group_guid = kGroupGuid,
@@ -34,7 +33,7 @@ TEST(HumanGroupGraceTest, OpenWorldLeavesAfterSixtySeconds) {
   EXPECT_EQ(state.human_group_guid, kGroupGuid);
   EXPECT_FALSE(state.human_offline_since_ms.has_value());
 
-  // Human disconnects -> starts timer at t=2000.
+  // Human logs off -> starts timer at t=2000 and stays in group.
   EXPECT_EQ(EvaluateHumanGroupGrace(state, {.group_guid = kGroupGuid,
                                             .has_online_human = false,
                                             .has_offline_human = true,
@@ -44,24 +43,28 @@ TEST(HumanGroupGraceTest, OpenWorldLeavesAfterSixtySeconds) {
   ASSERT_TRUE(state.human_offline_since_ms.has_value());
   EXPECT_EQ(*state.human_offline_since_ms, 2000u);
 
-  // Just before 60 s: still waiting.
-  EXPECT_EQ(EvaluateHumanGroupGrace(
-                state, {.group_guid = kGroupGuid,
-                        .has_online_human = false,
-                        .has_offline_human = true,
-                        .in_instance = false,
-                        .now_ms = 2000 + kOpenWorldOfflineGraceMs - 1}),
-            HumanGroupAction::kKeep);
-  EXPECT_EQ(state.human_group_guid, kGroupGuid);
+  // Past 60 s, 30 min, and 2 hours: still stays in the group.
+  for (uint32_t elapsed :
+       {60u * 1000u, kInstanceOfflineGraceMs, 2u * 60u * 60u * 1000u}) {
+    EXPECT_EQ(EvaluateHumanGroupGrace(state, {.group_guid = kGroupGuid,
+                                              .has_online_human = false,
+                                              .has_offline_human = true,
+                                              .in_instance = false,
+                                              .now_ms = 2000 + elapsed}),
+              HumanGroupAction::kKeep)
+        << "elapsed=" << elapsed;
+    EXPECT_EQ(state.human_group_guid, kGroupGuid);
+  }
 
-  // At 60 s: abandons group and clears state.
-  EXPECT_EQ(EvaluateHumanGroupGrace(
-                state, {.group_guid = kGroupGuid,
-                        .has_online_human = false,
-                        .has_offline_human = true,
-                        .in_instance = false,
-                        .now_ms = 2000 + kOpenWorldOfflineGraceMs}),
-            HumanGroupAction::kAbandonGroup);
+  // Adversarial counter-test: if the human explicitly leaves the open-world
+  // group (no offline human slot), bots STILL abandon immediately.
+  EXPECT_EQ(
+      EvaluateHumanGroupGrace(state, {.group_guid = kGroupGuid,
+                                      .has_online_human = false,
+                                      .has_offline_human = false,
+                                      .in_instance = false,
+                                      .now_ms = 2000 + 3u * 60u * 60u * 1000u}),
+      HumanGroupAction::kAbandonGroup);
   EXPECT_EQ(state.human_group_guid, 0u);
   EXPECT_FALSE(state.human_offline_since_ms.has_value());
 }
@@ -85,8 +88,8 @@ TEST(HumanGroupGraceTest, DungeonAndRaidWaitPastSixtySeconds) {
             HumanGroupAction::kKeep);
 
   // At 60 s, 5 min, and 29m59.999s: still waiting in the instance.
-  for (uint32_t elapsed : {kOpenWorldOfflineGraceMs, 5u * 60u * 1000u,
-                           kInstanceOfflineGraceMs - 1}) {
+  for (uint32_t elapsed :
+       {60u * 1000u, 5u * 60u * 1000u, kInstanceOfflineGraceMs - 1}) {
     EXPECT_EQ(EvaluateHumanGroupGrace(state, {.group_guid = kGroupGuid,
                                               .has_online_human = false,
                                               .has_offline_human = true,
@@ -218,28 +221,28 @@ TEST(HumanGroupGraceTest, GroupDisbandCleansUpAfterCombat) {
             HumanGroupAction::kKeep);
 }
 
-// Adversarial counter-test: combat defers abandonment even after grace expires,
-// and if the human reconnects during combat, the group is kept.
+// Adversarial counter-test: combat defers abandonment even after instance grace
+// expires, and if the human reconnects during combat, the group is kept.
 TEST(HumanGroupGraceTest, CombatDefersAbandonmentAndAllowsReconnect) {
   HumanGroupGraceState state;
   EvaluateHumanGroupGrace(state, {.group_guid = kGroupGuid,
                                   .has_online_human = true,
-                                  .in_instance = false,
+                                  .in_instance = true,
                                   .now_ms = 1000});
   EvaluateHumanGroupGrace(state, {.group_guid = kGroupGuid,
                                   .has_online_human = false,
                                   .has_offline_human = true,
-                                  .in_instance = false,
+                                  .in_instance = true,
                                   .now_ms = 2000});
 
-  // Grace expired at 62,000, but bot is in combat -> hold.
-  EXPECT_EQ(EvaluateHumanGroupGrace(
-                state, {.group_guid = kGroupGuid,
-                        .has_online_human = false,
-                        .has_offline_human = true,
-                        .in_instance = false,
-                        .in_combat = true,
-                        .now_ms = 2000 + kOpenWorldOfflineGraceMs}),
+  // Grace expired at 30 min, but bot is in combat -> hold.
+  EXPECT_EQ(EvaluateHumanGroupGrace(state,
+                                    {.group_guid = kGroupGuid,
+                                     .has_online_human = false,
+                                     .has_offline_human = true,
+                                     .in_instance = true,
+                                     .in_combat = true,
+                                     .now_ms = 2000 + kInstanceOfflineGraceMs}),
             HumanGroupAction::kKeep);
   EXPECT_EQ(state.human_group_guid, kGroupGuid);
 
@@ -247,9 +250,9 @@ TEST(HumanGroupGraceTest, CombatDefersAbandonmentAndAllowsReconnect) {
   EXPECT_EQ(EvaluateHumanGroupGrace(
                 state, {.group_guid = kGroupGuid,
                         .has_online_human = true,
-                        .in_instance = false,
+                        .in_instance = true,
                         .in_combat = true,
-                        .now_ms = 2000 + kOpenWorldOfflineGraceMs + 1000}),
+                        .now_ms = 2000 + kInstanceOfflineGraceMs + 1000}),
             HumanGroupAction::kKeep);
   EXPECT_FALSE(state.human_offline_since_ms.has_value());
 
@@ -257,9 +260,9 @@ TEST(HumanGroupGraceTest, CombatDefersAbandonmentAndAllowsReconnect) {
   EXPECT_EQ(EvaluateHumanGroupGrace(
                 state, {.group_guid = kGroupGuid,
                         .has_online_human = true,
-                        .in_instance = false,
+                        .in_instance = true,
                         .in_combat = false,
-                        .now_ms = 2000 + kOpenWorldOfflineGraceMs + 2000}),
+                        .now_ms = 2000 + kInstanceOfflineGraceMs + 2000}),
             HumanGroupAction::kKeep);
 }
 

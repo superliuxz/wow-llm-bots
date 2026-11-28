@@ -43,10 +43,18 @@ std::vector<pb::Event> PopupWatch::Update(const PopupState& now) {
       now.lfg_proposal_id != last_.lfg_proposal_id) {
     out.push_back(Prompt(pb::PromptEvent::LFG_PROPOSAL, {}, {}, 45.0f));
   }
-  if (now.shared_quest_id != 0 &&
-      now.shared_quest_id != last_.shared_quest_id) {
-    out.push_back(Prompt(pb::PromptEvent::QUEST_SHARE, now.shared_quest_from,
-                         now.shared_quest_title));
+  for (const PopupState::SharedQuest& sq : now.shared_quests) {
+    if (sq.quest_id == 0) {
+      continue;
+    }
+    const bool seen =
+        std::any_of(last_.shared_quests.begin(), last_.shared_quests.end(),
+                    [&](const PopupState::SharedQuest& prev) {
+                      return prev.quest_id == sq.quest_id;
+                    });
+    if (!seen) {
+      out.push_back(Prompt(pb::PromptEvent::QUEST_SHARE, sq.from, sq.title));
+    }
   }
   if (now.resurrect_offer && !last_.resurrect_offer) {
     out.push_back(Prompt(pb::PromptEvent::RESURRECT_OFFER));
@@ -94,7 +102,7 @@ void PopupWatch::Reset() {
 
 bool HasTimedPopup(const PopupState& state, bool has_group_invite) {
   return has_group_invite || state.ready_check || state.role_check ||
-         state.lfg_proposal_id != 0 || state.shared_quest_id != 0 ||
+         state.lfg_proposal_id != 0 || !state.shared_quests.empty() ||
          state.resurrect_offer || state.summon || !state.boot_victim.empty() ||
          !state.rolls.empty();
 }

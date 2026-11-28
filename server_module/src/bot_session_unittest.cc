@@ -23,7 +23,8 @@ TEST(BotSessionRegistryTest, UnifiedResetsClearLifecycleState) {
     s.group_policy.not_tank = true;
     s.group_policy.stay = true;
     s.group_policy.stay_in_combat = true;
-    s.pending_shared_quest_id = 104;
+    s.pending_shared_quests.push_back(
+        {.quest_id = 104, .sharer_guid = 0x55, .received_ms = 100});
     s.pending_ready_check_ms = 500;
     s.pending_lfg_proposal_id = 7;
     s.avoided_targets = {0x99, 0x100};
@@ -44,7 +45,7 @@ TEST(BotSessionRegistryTest, UnifiedResetsClearLifecycleState) {
     EXPECT_TRUE(s->group_policy.not_tank);
     EXPECT_FALSE(s->group_policy.stay);
     EXPECT_FALSE(s->group_policy.stay_in_combat);
-    EXPECT_EQ(s->pending_shared_quest_id, 104u);
+    EXPECT_TRUE(s->pending_shared_quests.empty());
   });
 
   // Logout clears everything but the group role policy (`not_tank`): a relog
@@ -52,6 +53,8 @@ TEST(BotSessionRegistryTest, UnifiedResetsClearLifecycleState) {
   reg.WithSession(kBot, [](BotSession& s) {
     s.group_policy.stay = true;
     s.group_policy.stay_in_combat = true;
+    s.pending_shared_quests.push_back(
+        {.quest_id = 105, .sharer_guid = 0x55, .received_ms = 200});
   });
   reg.ResetOnLogout(kBot);
   reg.InspectSession(kBot, [](const BotSession* s) {
@@ -62,7 +65,7 @@ TEST(BotSessionRegistryTest, UnifiedResetsClearLifecycleState) {
     EXPECT_FALSE(s->group_policy.stay_in_combat);
     EXPECT_FALSE(s->dead_since_ms.has_value());
     EXPECT_FALSE(s->rez_wait_until_ms.has_value());
-    EXPECT_EQ(s->pending_shared_quest_id, 0u);
+    EXPECT_TRUE(s->pending_shared_quests.empty());
     EXPECT_FALSE(s->pending_ready_check_ms.has_value());
     EXPECT_TRUE(s->avoided_targets.empty());
   });

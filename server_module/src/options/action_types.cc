@@ -156,6 +156,47 @@ BotAction DecodeOptionFactAction(std::string_view guid,
     }
     return ShareQuestAction{qid};
   }
+  if (guid.starts_with("qabandon:")) {
+    uint32_t qid = 0;
+    if (!ParseUint32(guid.substr(9), &qid) || qid == 0) {
+      return InvalidAction{"invalid quest id"};
+    }
+    return AbandonQuestAction{qid, std::string(label)};
+  }
+  if (guid.starts_with("go_qaccept:") || guid.starts_with("go_qturnin:")) {
+    const std::vector<std::string_view> parts = base::SplitStringPiece(
+        guid, ":", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+    if (parts[0] == "go_qaccept" && parts.size() == 3 && !parts[1].empty()) {
+      uint32_t qid = 0;
+      if (!ParseUint32(parts[2], &qid) || qid == 0) {
+        return InvalidAction{"invalid object quest id"};
+      }
+      return ObjectQuestAction{ObjectQuestAction::Op::kAccept,
+                               std::string(parts[1]), qid, 0};
+    }
+    if (parts[0] == "go_qturnin" && parts.size() == 4 && !parts[1].empty()) {
+      uint32_t qid = 0;
+      uint32_t reward_idx = 0;
+      if (!ParseUint32(parts[2], &qid) || qid == 0 ||
+          !ParseUint32(parts[3], &reward_idx)) {
+        return InvalidAction{"invalid object quest turn-in"};
+      }
+      return ObjectQuestAction{ObjectQuestAction::Op::kTurnIn,
+                               std::string(parts[1]), qid, reward_idx};
+    }
+    return InvalidAction{"invalid object quest action"};
+  }
+  if (guid.starts_with("item_qaccept:")) {
+    const std::vector<std::string_view> parts = base::SplitStringPiece(
+        guid, ":", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+    uint32_t entry = 0;
+    uint32_t qid = 0;
+    if (parts.size() != 3 || !ParseUint32(parts[1], &entry) || entry == 0 ||
+        !ParseUint32(parts[2], &qid) || qid == 0) {
+      return InvalidAction{"invalid item quest action"};
+    }
+    return ItemQuestAction{entry, qid, std::string(label)};
+  }
   if (guid.starts_with("lfg:")) {
     if (guid.starts_with("lfg:queue:")) {
       uint32_t role_mask = 0;
@@ -459,6 +500,12 @@ std::string_view ActionKindName(const BotAction& action) {
           return "shared_quest";
         if constexpr (std::is_same_v<T, ShareQuestAction>)
           return "share_quest";
+        if constexpr (std::is_same_v<T, AbandonQuestAction>)
+          return "abandon_quest";
+        if constexpr (std::is_same_v<T, ObjectQuestAction>)
+          return "object_quest";
+        if constexpr (std::is_same_v<T, ItemQuestAction>)
+          return "item_quest";
         if constexpr (std::is_same_v<T, LfgAction>)
           return "lfg";
         if constexpr (std::is_same_v<T, GroupPolicyAction>)

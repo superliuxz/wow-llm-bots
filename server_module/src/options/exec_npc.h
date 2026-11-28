@@ -44,6 +44,8 @@ void CollectNpcActions(Player* bot,
 
 ActionOutcome ExecuteTalkAction(Player* bot, const TalkAction& action);
 ActionOutcome ExecuteNpcAction(Player* bot, const NpcAction& action);
+ActionOutcome ExecuteObjectQuestAction(Player* bot,
+                                       const ObjectQuestAction& action);
 
 }  // namespace llm_brain
 

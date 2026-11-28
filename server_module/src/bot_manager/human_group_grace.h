@@ -14,11 +14,13 @@ namespace llm_brain {
 
 // How long a bot waits for a disconnected human groupmate before leaving the
 // group and teleporting out:
-// - Open world: 60 s, so stray bot groups clean up promptly.
+// - Open world: stay in the group indefinitely while the offline human remains
+//   in the group (autonomous pulls/explore/travel pause until they return), so
+//   bots never drop group and level ahead between sessions.
 // - Dungeon / raid (Map::IsDungeon(), covering MAP_INSTANCE and MAP_RAID):
 //   30 min, so a client crash, reboot, or long loading screen never aborts an
 //   active run.
-inline constexpr uint32_t kOpenWorldOfflineGraceMs = 60u * 1000u;
+inline constexpr uint32_t kOpenWorldOfflineGraceMs = 0u;
 inline constexpr uint32_t kInstanceOfflineGraceMs = 30u * 60u * 1000u;
 
 struct HumanGroupGraceState {

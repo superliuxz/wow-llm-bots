@@ -95,6 +95,25 @@ struct ShareQuestAction {
   uint32_t quest_id = 0;
 };
 
+struct AbandonQuestAction {
+  uint32_t quest_id = 0;
+  std::string label;
+};
+
+struct ObjectQuestAction {
+  enum class Op : uint8_t { kAccept, kTurnIn };
+  Op op = Op::kAccept;
+  std::string object_guid;
+  uint32_t quest_id = 0;
+  uint32_t reward_idx = 0;
+};
+
+struct ItemQuestAction {
+  uint32_t item_entry = 0;
+  uint32_t quest_id = 0;
+  std::string label;
+};
+
 struct LfgAction {
   enum class Op : uint8_t {
     kQueue,
@@ -248,6 +267,9 @@ using BotAction = std::variant<KeepAction,
                                ReadyCheckAction,
                                SharedQuestAction,
                                ShareQuestAction,
+                               AbandonQuestAction,
+                               ObjectQuestAction,
+                               ItemQuestAction,
                                LfgAction,
                                GroupPolicyAction,
                                PopupAnswerAction,

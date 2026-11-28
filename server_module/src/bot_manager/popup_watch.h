@@ -32,12 +32,18 @@ struct PopupState {
     bool operator==(const Roll&) const = default;
   };
 
+  struct SharedQuest {
+    uint32_t quest_id = 0;
+    std::string title;
+    std::string from;
+
+    bool operator==(const SharedQuest&) const = default;
+  };
+
   bool ready_check = false;
   bool role_check = false;
   uint32_t lfg_proposal_id = 0;
-  uint32_t shared_quest_id = 0;
-  std::string shared_quest_title;
-  std::string shared_quest_from;
+  std::vector<SharedQuest> shared_quests;
   bool resurrect_offer = false;
   bool summon = false;
   std::string summon_from;

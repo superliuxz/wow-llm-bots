@@ -42,8 +42,12 @@ HumanGroupAction EvaluateHumanGroupGrace(HumanGroupGraceState& state,
       state.human_offline_since_ms = input.now_ms;
       return HumanGroupAction::kKeep;
     }
+    const uint32_t grace_ms = OfflineGraceMs(input.in_instance);
+    if (grace_ms == 0u) {
+      return HumanGroupAction::kKeep;
+    }
     const uint32_t elapsed_ms = input.now_ms - *state.human_offline_since_ms;
-    if (elapsed_ms < OfflineGraceMs(input.in_instance)) {
+    if (elapsed_ms < grace_ms) {
       return HumanGroupAction::kKeep;
     }
   }

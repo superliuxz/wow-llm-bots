@@ -1192,7 +1192,8 @@ NearbyBuilder::Stats SnapshotBuilder::Build(Player* bot,
   if (!in_combat) {
     FillQuestTracker(bot, &snapshot->ext, &quest_pois_);
   }
-  FillOptionFacts(bot, snapshot, out_facts, world, now);
+  FillOptionFacts(bot, snapshot, out_facts, world,
+                  ui != nullptr && ui->IsOpen(pb::QUEST_LOG), now);
   // The trade window pops up by itself, like a popup: not a panel to open.
   if (bot->GetTradeData()) {
     FillTrade(bot, &snapshot->ext.trade.emplace());
@@ -1221,6 +1222,7 @@ void SnapshotBuilder::FillOptionFacts(Player* bot,
                                       pb::Snapshot* snapshot,
                                       OptionFacts* out,
                                       const WorldPlaces* world,
+                                      bool quest_log_open,
                                       base::TimeTicks now) {
   const bool in_combat = bot->IsInCombat();
   FillNpcFacts(bot, *snapshot, in_combat, out);
@@ -1234,9 +1236,13 @@ void SnapshotBuilder::FillOptionFacts(Player* bot,
                       &out->npc_actions);
   }
   CollectGroupAndUpkeepActions(bot, *snapshot, &out->group_and_upkeep_actions);
-  if (!in_combat && bot->IsAlive() &&
-      snapshot->base.self.indicators.bag_free_slots == 0u) {
-    CollectBagDestroyActions(bot, 0u, &out->group_and_upkeep_actions);
+  if (!in_combat && bot->IsAlive()) {
+    CollectItemQuestActions(bot, &out->group_and_upkeep_actions);
+    CollectQuestAbandonActions(bot, quest_log_open,
+                               &out->group_and_upkeep_actions);
+    if (snapshot->base.self.indicators.bag_free_slots == 0u) {
+      CollectBagDestroyActions(bot, 0u, &out->group_and_upkeep_actions);
+    }
   }
   out->has_pending_resurrect = !bot->IsAlive() && bot->isResurrectRequested();
   if (!bot->IsAlive() && !bot->HasPlayerFlag(PLAYER_FLAGS_GHOST)) {

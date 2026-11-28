@@ -56,6 +56,8 @@ ErrandKind ErrandKindForAction(const BotAction& action) {
         } else if constexpr (std::is_same_v<T, NpcAction>) {
           return a.op == NpcAction::Op::kFlyTo ? ErrandKind::kNone
                                                : ErrandKind::kNpcInteract;
+        } else if constexpr (std::is_same_v<T, ObjectQuestAction>) {
+          return ErrandKind::kNpcInteract;
         } else if constexpr (std::is_same_v<T, WalkAction>) {
           return ErrandKind::kWalk;
         } else if constexpr (std::is_same_v<T, RestAction>) {

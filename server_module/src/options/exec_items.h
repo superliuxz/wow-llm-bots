@@ -37,6 +37,13 @@ void CollectBagDestroyActions(
     Player* bot,
     uint32_t free_bag_slots,
     std::vector<wlb::snapshot::OptionFacts_Action>* out);
+void CollectItemQuestActions(
+    Player* bot,
+    std::vector<wlb::snapshot::OptionFacts_Action>* out);
+void CollectQuestAbandonActions(
+    Player* bot,
+    bool quest_log_open,
+    std::vector<wlb::snapshot::OptionFacts_Action>* out);
 void CollectTalentTrees(
     Player* bot,
     std::vector<wlb::snapshot::OptionFacts_TalentTree>* out);
@@ -55,6 +62,10 @@ ActionOutcome ExecuteEquipItemAction(Player* bot,
                                      const EquipItemAction& action);
 ActionOutcome ExecuteDestroyItemAction(Player* bot,
                                        const DestroyItemAction& action);
+ActionOutcome ExecuteItemQuestAction(Player* bot,
+                                     const ItemQuestAction& action);
+ActionOutcome ExecuteAbandonQuestAction(Player* bot,
+                                        const AbandonQuestAction& action);
 ActionOutcome ExecuteSpendTalentsAction(Player* bot,
                                         const SpendTalentsAction& action);
 

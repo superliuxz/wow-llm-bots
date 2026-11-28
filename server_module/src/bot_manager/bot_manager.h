@@ -4,13 +4,16 @@
 #define MOD_LLM_BRAIN_BOT_MANAGER_BOT_MANAGER_H_
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "bot_manager/errand_hold.h"
 #include "bot_manager/popup_watch.h"
+#include "options/quest_helpers.h"
 
+class Group;
 class Player;
 class Unit;
 
@@ -133,9 +136,11 @@ class BotManager {
   // World thread only: pending shared-quest / ready-check / LFG-proposal
   // prompts captured via ServerScript::OnPacketSent (works for standalone
   // no-master bots) while BrainPolicyListener blocks Playerbots' auto-handlers.
-  static uint32_t GetPendingSharedQuest(Player* bot);
-  static bool IsPendingSharedQuestConfirm(Player* bot);
-  static void ClearPendingSharedQuest(Player* bot);
+  static std::vector<PendingSharedQuest> GetPendingSharedQuests(Player* bot);
+  static std::optional<PendingSharedQuest> TakePendingSharedQuest(
+      Player* bot,
+      uint32_t quest_id);
+  static void ClearPendingSharedQuests(Player* bot);
   static bool HasPendingReadyCheck(Player* bot);
   static void ClearPendingReadyCheck(Player* bot);
   static uint32_t GetPendingLfgProposal(Player* bot);
@@ -153,6 +158,11 @@ class BotManager {
   // Accepting, filling and cancelling it are the brain's choices. A
   // playerbots-led bot's request is playerbots' (TradeStatusAction).
   static void OpenRequestedTrade(Player* bot);
+
+  // World thread only: true when `group` has at least one disconnected member
+  // slot that is not one of our bots or a random playerbot (i.e. an offline
+  // human player).
+  bool GroupHasOfflineHuman(Group* group) const;
 
  private:
   struct Bot {

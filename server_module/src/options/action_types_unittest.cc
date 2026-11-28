@@ -88,6 +88,59 @@ TEST(ActionTypesTest, DecodesTypedNpcAndGroupActions) {
     EXPECT_EQ(gp->op, GroupPolicyAction::Op::kStay);
   }
   {
+    BotAction a = DecodeOptionFactAction("qabandon:176",
+                                         "Abandon quest \"Wanted: Hogger\"");
+    const auto* ab = std::get_if<AbandonQuestAction>(&a);
+    ASSERT_NE(ab, nullptr);
+    EXPECT_EQ(ab->quest_id, 176u);
+    EXPECT_EQ(ActionKindName(a), "abandon_quest");
+    EXPECT_FALSE(IsDeadAllowedAction(a));
+    EXPECT_TRUE(std::holds_alternative<InvalidAction>(
+        DecodeOptionFactAction("qabandon:0", "bad")));
+    EXPECT_TRUE(std::holds_alternative<InvalidAction>(
+        DecodeOptionFactAction("qabandon:abc", "bad")));
+  }
+  {
+    BotAction a = DecodeOptionFactAction(
+        "go_qaccept:0xF1100001:176",
+        "Accept quest \"Wanted: \"Hogger\"\" from Wanted Poster");
+    const auto* oq = std::get_if<ObjectQuestAction>(&a);
+    ASSERT_NE(oq, nullptr);
+    EXPECT_EQ(oq->op, ObjectQuestAction::Op::kAccept);
+    EXPECT_EQ(oq->object_guid, "0xF1100001");
+    EXPECT_EQ(oq->quest_id, 176u);
+    EXPECT_EQ(ActionKindName(a), "object_quest");
+    BotAction ti = DecodeOptionFactAction(
+        "go_qturnin:0xF1100001:176:1",
+        "Turn in \"Wanted: \"Hogger\"\" to Wanted Poster");
+    const auto* oq2 = std::get_if<ObjectQuestAction>(&ti);
+    ASSERT_NE(oq2, nullptr);
+    EXPECT_EQ(oq2->op, ObjectQuestAction::Op::kTurnIn);
+    EXPECT_EQ(oq2->reward_idx, 1u);
+    for (const char* bad :
+         {"go_qaccept::176", "go_qaccept:0x1:0", "go_qturnin:0x1:176"}) {
+      EXPECT_TRUE(std::holds_alternative<InvalidAction>(
+          DecodeOptionFactAction(bad, "bad")))
+          << bad;
+    }
+  }
+  {
+    BotAction a = DecodeOptionFactAction(
+        "item_qaccept:1972:184",
+        "Accept quest \"Furlbrow's Deed\" from Westfall Deed");
+    const auto* iq = std::get_if<ItemQuestAction>(&a);
+    ASSERT_NE(iq, nullptr);
+    EXPECT_EQ(iq->item_entry, 1972u);
+    EXPECT_EQ(iq->quest_id, 184u);
+    EXPECT_EQ(ActionKindName(a), "item_quest");
+    for (const char* bad :
+         {"item_qaccept:0:184", "item_qaccept:1972:0", "item_qaccept:1972"}) {
+      EXPECT_TRUE(std::holds_alternative<InvalidAction>(
+          DecodeOptionFactAction(bad, "bad")))
+          << bad;
+    }
+  }
+  {
     BotAction a = DecodeOptionFactAction("mount:23249", "Mount Raptor");
     const auto* m = std::get_if<MountAction>(&a);
     ASSERT_NE(m, nullptr);

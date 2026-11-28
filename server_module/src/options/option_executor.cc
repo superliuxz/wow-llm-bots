@@ -99,6 +99,9 @@ std::string ValidateAction(Player* bot, const BotAction& action) {
   if (bot->IsInCombat()) {
     if (std::holds_alternative<TalkAction>(action) ||
         std::holds_alternative<NpcAction>(action) ||
+        std::holds_alternative<ObjectQuestAction>(action) ||
+        std::holds_alternative<ItemQuestAction>(action) ||
+        std::holds_alternative<AbandonQuestAction>(action) ||
         std::holds_alternative<RestAction>(action) ||
         std::holds_alternative<WalkAction>(action) ||
         std::holds_alternative<EquipItemAction>(action) ||
@@ -170,6 +173,12 @@ ExecuteResult ExecuteAction(Player* bot,
           return FromOutcome(ExecuteSharedQuestAction(bot, a));
         } else if constexpr (std::is_same_v<T, ShareQuestAction>) {
           return FromOutcome(ExecuteShareQuestAction(bot, a));
+        } else if constexpr (std::is_same_v<T, AbandonQuestAction>) {
+          return FromOutcome(ExecuteAbandonQuestAction(bot, a));
+        } else if constexpr (std::is_same_v<T, ObjectQuestAction>) {
+          return FromOutcome(ExecuteObjectQuestAction(bot, a));
+        } else if constexpr (std::is_same_v<T, ItemQuestAction>) {
+          return FromOutcome(ExecuteItemQuestAction(bot, a));
         } else if constexpr (std::is_same_v<T, LfgAction>) {
           return FromOutcome(ExecuteLfgAction(bot, a));
         } else if constexpr (std::is_same_v<T, GroupPolicyAction>) {

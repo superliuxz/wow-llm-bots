@@ -1131,6 +1131,65 @@ TEST(OptionsTest, ExplicitNpcActionsReplaceGenericTalkToOption) {
   EXPECT_EQ(targets[2].guid, "npc_qturnin:0x0000000000001234:788:1");
 }
 
+TEST(OptionsTest, ObjectQuestActionsReplaceGenericUseOutOfCombat) {
+  pb::Snapshot snap;
+  snap.base.self.in_combat = false;
+  pb::GameObject& poster = snap.base.nearby.objects.emplace_back();
+  poster.guid = "0xF1100001";
+  poster.name = "Wanted Poster";
+  poster.kind = pb::GameObject::QUEST_OBJECT;
+  poster.usable = true;
+  poster.highlighted = true;
+
+  // Out of range (no explicit npc_actions): generic Use is offered to walk up.
+  {
+    pb::Snapshot far_snap = snap;
+    const std::vector<OptionTarget> far_targets = AddOptions(&far_snap, {});
+    EXPECT_EQ(Texts(far_snap),
+              (std::vector<std::string>{"Use Wanted Poster",
+                                        "Keep doing what I'm doing"}));
+    ASSERT_EQ(far_targets.size(), 2u);
+  }
+
+  // In interact range: explicit object quest accept/turn-in replaces Use.
+  OptionFacts facts;
+  facts.npc_actions.push_back(
+      {"go_qaccept:0xF1100001:176", poster.guid,
+       "Accept quest \"Wanted: \"Hogger\"\" from Wanted Poster"});
+  facts.npc_actions.push_back({"go_qturnin:0xF1100001:55:0", poster.guid,
+                               "Turn in \"Bounty\" to Wanted Poster"});
+  facts.group_and_upkeep_actions.push_back(
+      {"item_qaccept:1972:184",
+       "Accept quest \"Furlbrow's Deed\" from Westfall Deed"});
+  facts.group_and_upkeep_actions.push_back(
+      {"qabandon:20", "Abandon failed quest \"The Defias Traitor\""});
+
+  const std::vector<OptionTarget> targets = AddOptions(&snap, facts);
+  EXPECT_EQ(Texts(snap),
+            (std::vector<std::string>{
+                "Accept quest \"Wanted: \"Hogger\"\" from Wanted Poster",
+                "Turn in \"Bounty\" to Wanted Poster",
+                "Accept quest \"Furlbrow's Deed\" from Westfall Deed",
+                "Abandon failed quest \"The Defias Traitor\"",
+                "Keep doing what I'm doing"}));
+  ASSERT_EQ(targets.size(), 5u);
+  EXPECT_TRUE(std::holds_alternative<ObjectQuestAction>(targets[0].action));
+  EXPECT_TRUE(std::holds_alternative<ItemQuestAction>(targets[2].action));
+  EXPECT_TRUE(std::holds_alternative<AbandonQuestAction>(targets[3].action));
+
+  // Adversarial counter-test: in combat, object/item/abandon quest actions are
+  // suppressed (P0 combat priority).
+  pb::Snapshot combat_snap;
+  combat_snap.base.self.in_combat = true;
+  combat_snap.base.nearby.objects.push_back(poster);
+  AddOptions(&combat_snap, facts);
+  for (const pb::Option& opt : combat_snap.options) {
+    EXPECT_EQ(opt.text.find("Accept quest"), std::string::npos) << opt.text;
+    EXPECT_EQ(opt.text.find("Turn in"), std::string::npos) << opt.text;
+    EXPECT_EQ(opt.text.find("Abandon"), std::string::npos) << opt.text;
+  }
+}
+
 TEST(OptionsTest, GroupAndUpkeepActionsAreExposedToTheBrain) {
   OptionFacts facts;
   facts.group_and_upkeep_actions.push_back(

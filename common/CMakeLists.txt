@@ -144,6 +144,8 @@ add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/options/options_unittest.cc"
   "${WLB_MODULE_SRC}/options/position_facts.cc"
   "${WLB_MODULE_SRC}/options/position_facts_unittest.cc"
+  "${WLB_MODULE_SRC}/options/quest_helpers.cc"
+  "${WLB_MODULE_SRC}/options/quest_helpers_unittest.cc"
   "${WLB_MODULE_SRC}/options/riding_mounts.cc"
   "${WLB_MODULE_SRC}/options/riding_mounts_unittest.cc"
   "${WLB_MODULE_SRC}/options/vehicle_controls.cc"

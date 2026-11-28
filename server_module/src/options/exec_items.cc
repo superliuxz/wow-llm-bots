@@ -35,6 +35,7 @@
 #include "PlayerbotAIConfig.h"
 #include "Playerbots.h"
 #include "QuestDef.h"
+#include "QuestPackets.h"
 #include "SharedDefines.h"
 #include "Spell.h"
 #include "SpellAuras.h"
@@ -49,6 +50,7 @@
 #include "options/exec_shared.h"
 #include "options/npc_gossip_and_bags.h"
 #include "options/position_facts.h"
+#include "options/quest_helpers.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/world_util.h"
 
@@ -1273,6 +1275,159 @@ ActionOutcome ExecuteDestroyItemAction(Player* bot,
     return {.error = "could not destroy " + item_name};
   }
   return {.used = true, .info = "destroyed " + item_name};
+}
+
+void CollectItemQuestActions(Player* bot,
+                             std::vector<pb::OptionFacts_Action>* out) {
+  if (!bot || !bot->IsAlive() || bot->IsInCombat()) {
+    return;
+  }
+  static constexpr size_t kMaxItemQuestActions = 4;
+  size_t added = 0;
+  std::vector<uint32_t> seen_quests;
+  for (const BagSlotItem& entry : BagItems(bot)) {
+    if (added >= kMaxItemQuestActions) {
+      break;
+    }
+    const ItemTemplate* proto =
+        entry.item ? entry.item->GetTemplate() : nullptr;
+    if (!proto || proto->StartQuest == 0 || proto->Name1.empty()) {
+      continue;
+    }
+    const uint32_t qid = proto->StartQuest;
+    if (std::find(seen_quests.begin(), seen_quests.end(), qid) !=
+        seen_quests.end()) {
+      continue;
+    }
+    const Quest* quest = sObjectMgr->GetQuestTemplate(qid);
+    if (!quest || bot->GetQuestStatus(qid) != QUEST_STATUS_NONE ||
+        !bot->CanTakeQuest(quest, false) || !bot->CanAddQuest(quest, false)) {
+      continue;
+    }
+    seen_quests.push_back(qid);
+    out->push_back(
+        {"item_qaccept:" + std::to_string(proto->ItemId) + ":" +
+             std::to_string(qid),
+         "Accept quest \"" + quest->GetTitle() + "\" from " + proto->Name1});
+    ++added;
+  }
+}
+
+ActionOutcome ExecuteItemQuestAction(Player* bot,
+                                     const ItemQuestAction& action) {
+  PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
+  if (!ai) {
+    return {.error = "not a bot"};
+  }
+  WorldSession* session = bot->GetSession();
+  if (!session) {
+    return {.error = "no session"};
+  }
+  if (bot->IsInCombat()) {
+    return {.error = "you are in combat"};
+  }
+  if (action.item_entry == 0 || action.quest_id == 0) {
+    return {.error = "invalid item quest"};
+  }
+  Item* found = nullptr;
+  for (const BagSlotItem& entry : BagItems(bot)) {
+    if (!entry.item || entry.item->GetEntry() != action.item_entry) {
+      continue;
+    }
+    const ItemTemplate* proto = entry.item->GetTemplate();
+    if (proto && proto->StartQuest == action.quest_id) {
+      found = entry.item;
+      break;
+    }
+  }
+  if (!found) {
+    return {.error = "that quest item is not in your bags"};
+  }
+  const Quest* quest = sObjectMgr->GetQuestTemplate(action.quest_id);
+  if (!quest || bot->GetQuestStatus(action.quest_id) != QUEST_STATUS_NONE ||
+      !bot->CanTakeQuest(quest, false) || !bot->CanAddQuest(quest, false)) {
+    return {.error = "cannot accept that quest"};
+  }
+  WorldPacket p(CMSG_QUESTGIVER_ACCEPT_QUEST, 8 + 4 + 4);
+  p << found->GetGUID() << quest->GetQuestId() << uint32_t(0);
+  p.rpos(0);
+  session->HandleQuestgiverAcceptQuestOpcode(p);
+  if (bot->GetQuestStatus(action.quest_id) == QUEST_STATUS_NONE) {
+    return {.error = "cannot accept that quest"};
+  }
+  ai->RecordQuestAccepted(quest->GetQuestId());
+  return {.used = true, .info = "accepted " + quest->GetTitle()};
+}
+
+void CollectQuestAbandonActions(Player* bot,
+                                bool quest_log_open,
+                                std::vector<pb::OptionFacts_Action>* out) {
+  if (!bot || !bot->IsAlive() || bot->IsInCombat()) {
+    return;
+  }
+  const QuestStatusMap& status_map = bot->getQuestStatusMap();
+  std::vector<AbandonQuestCandidate> candidates;
+  size_t total_quests = 0;
+  for (uint16_t slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot) {
+    const uint32_t qid = bot->GetQuestSlotQuestId(slot);
+    if (qid == 0) {
+      continue;
+    }
+    ++total_quests;
+    const Quest* q = sObjectMgr->GetQuestTemplate(qid);
+    if (!q) {
+      continue;
+    }
+    const QuestStatus status = bot->GetQuestStatus(qid);
+    const auto st_it = status_map.find(qid);
+    const bool timed = q->HasSpecialFlag(QUEST_SPECIAL_FLAGS_TIMED) ||
+                       (st_it != status_map.end() && st_it->second.Timer > 0);
+    candidates.push_back(AbandonQuestCandidate{
+        .quest_id = qid,
+        .title = q->GetTitle(),
+        .level = q->GetQuestLevel() > 0
+                     ? static_cast<uint32_t>(q->GetQuestLevel())
+                     : 0u,
+        .failed = status == QUEST_STATUS_FAILED,
+        .complete = status == QUEST_STATUS_COMPLETE,
+        .timed = timed,
+    });
+  }
+  for (const AbandonQuestOption& opt :
+       SelectAbandonQuestOptions(bot->IsAlive(), bot->IsInCombat(),
+                                 total_quests, quest_log_open, candidates)) {
+    out->push_back({opt.guid, opt.label});
+  }
+}
+
+ActionOutcome ExecuteAbandonQuestAction(Player* bot,
+                                        const AbandonQuestAction& action) {
+  WorldSession* session = bot->GetSession();
+  if (!session) {
+    return {.error = "no session"};
+  }
+  if (bot->IsInCombat()) {
+    return {.error = "you are in combat"};
+  }
+  if (action.quest_id == 0) {
+    return {.error = "invalid quest id"};
+  }
+  const uint16_t slot = bot->FindQuestSlot(action.quest_id);
+  if (slot >= MAX_QUEST_LOG_SIZE) {
+    return {.error = "that quest is not in your quest log"};
+  }
+  const Quest* quest = sObjectMgr->GetQuestTemplate(action.quest_id);
+  const std::string title =
+      quest ? quest->GetTitle() : std::to_string(action.quest_id);
+  WorldPacket raw(CMSG_QUESTLOG_REMOVE_QUEST, 1);
+  raw << static_cast<uint8_t>(slot);
+  WorldPackets::Quest::QuestLogRemoveQuest packet(std::move(raw));
+  packet.Read();
+  session->HandleQuestLogRemoveQuest(packet);
+  if (bot->FindQuestSlot(action.quest_id) < MAX_QUEST_LOG_SIZE) {
+    return {.error = "could not abandon " + title};
+  }
+  return {.used = true, .info = "abandoned quest " + title};
 }
 
 ActionOutcome ExecuteSpendTalentsAction(Player* bot,

@@ -22,9 +22,8 @@ TEST(PopupWatchTest, ReportsEachNewPopupOnce) {
   s.ready_check = true;
   s.role_check = true;
   s.lfg_proposal_id = 7;
-  s.shared_quest_id = 42;
-  s.shared_quest_title = "Vile Familiars";
-  s.shared_quest_from = "Hele";
+  s.shared_quests.push_back(
+      {.quest_id = 42, .title = "Vile Familiars", .from = "Hele"});
   s.resurrect_offer = true;
   s.summon = true;
   s.summon_from = "Zenji";
@@ -150,7 +149,8 @@ TEST(PopupWatchTest, HasTimedPopupDetectsTimedPopupsAndExcludesTrade) {
   EXPECT_TRUE(HasTimedPopup(lfg));
 
   PopupState quest;
-  quest.shared_quest_id = 42;
+  quest.shared_quests.push_back(
+      {.quest_id = 42, .title = "Vile Familiars", .from = "Hele"});
   EXPECT_TRUE(HasTimedPopup(quest));
 
   PopupState rez;
@@ -217,6 +217,30 @@ TEST(PopupWatchTest, UpdatePopupDeadlineHandsOffPastDeadlineAndResetsOnClose) {
                                    /*now_ms=*/55000));
   EXPECT_TRUE(UpdatePopupDeadline(&open_since, /*has_timed_popup=*/true,
                                   /*now_ms=*/50000 + kPopupFallbackDeadlineMs));
+}
+
+TEST(PopupWatchTest, RapidMultiShareEmitsOneEventPerNewQuest) {
+  PopupWatch watch;
+  PopupState s;
+  s.shared_quests.push_back(
+      {.quest_id = 101, .title = "Wanted: Hogger", .from = "Aldric"});
+  std::vector<pb::Event> evs = watch.Update(s);
+  ASSERT_EQ(evs.size(), 1u);
+  EXPECT_EQ(evs[0].prompt->kind, pb::PromptEvent::QUEST_SHARE);
+  EXPECT_EQ(evs[0].prompt->text, "Wanted: Hogger");
+
+  // Second and third shares arrive while the first is still open.
+  s.shared_quests.push_back(
+      {.quest_id = 102, .title = "Kobold Candles", .from = "Aldric"});
+  s.shared_quests.push_back(
+      {.quest_id = 103, .title = "Gold Dust Exchange", .from = "Aldric"});
+  evs = watch.Update(s);
+  ASSERT_EQ(evs.size(), 2u);
+  EXPECT_EQ(evs[0].prompt->text, "Kobold Candles");
+  EXPECT_EQ(evs[1].prompt->text, "Gold Dust Exchange");
+
+  // Still open -> no duplicate wakes.
+  EXPECT_TRUE(watch.Update(s).empty());
 }
 
 }  // namespace

@@ -384,6 +384,10 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
   for (const pb::GameObject& go : snapshot->base.nearby.objects) {
     if (const std::optional<OptionTarget::Kind> kind = ObjectKind(go, facts);
         kind && alive) {
+      if (*kind == OptionTarget::Kind::kUse && !self.in_combat &&
+          has_explicit_npc_actions(go.guid)) {
+        continue;
+      }
       AddTarget(*kind, go.guid, go.name, {false, go.rel.dist_yd}, &targets,
                 &ranks);
     }
@@ -676,7 +680,9 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       continue;
     }
     BotAction decoded = DecodeOptionFactAction(act.guid, act.label);
-    if (std::holds_alternative<DestroyItemAction>(decoded) &&
+    if ((std::holds_alternative<DestroyItemAction>(decoded) ||
+         std::holds_alternative<AbandonQuestAction>(decoded) ||
+         std::holds_alternative<ItemQuestAction>(decoded)) &&
         (!alive || self.in_combat)) {
       continue;
     }

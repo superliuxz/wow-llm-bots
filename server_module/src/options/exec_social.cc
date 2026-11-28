@@ -69,6 +69,7 @@
 #include "options/options.h"
 #include "options/riding_mounts.h"
 #include "options/vehicle_controls.h"
+#include "quest_helpers.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/world_util.h"
 
@@ -640,16 +641,23 @@ void CollectGroupAndUpkeepActions(Player* bot,
   // 2b. The trade window (Objective 9a).
   CollectTradeActions(bot, out);
 
-  // 3. Shared / party-escort quest accept / decline.
+  // 3. Shared / party-escort quest accept / decline (multiple queued shares).
   if (bot->IsAlive()) {
-    if (const uint32_t qid = BotManager::GetPendingSharedQuest(bot); qid != 0) {
-      if (const Quest* q = sObjectMgr->GetQuestTemplate(qid)) {
-        const bool escort = BotManager::IsPendingSharedQuestConfirm(bot);
-        const char* kind = escort ? "escort quest \"" : "shared quest \"";
-        out->push_back({"qshare:accept:" + std::to_string(qid),
+    size_t shown = 0;
+    constexpr size_t kMaxShownSharedQuests = 4;
+    for (const PendingSharedQuest& sq :
+         BotManager::GetPendingSharedQuests(bot)) {
+      if (shown >= kMaxShownSharedQuests) {
+        break;
+      }
+      if (const Quest* q = sObjectMgr->GetQuestTemplate(sq.quest_id)) {
+        const char* kind =
+            sq.is_confirm ? "escort quest \"" : "shared quest \"";
+        out->push_back({"qshare:accept:" + std::to_string(sq.quest_id),
                         std::string("Accept ") + kind + q->GetTitle() + "\""});
-        out->push_back({"qshare:decline:" + std::to_string(qid),
+        out->push_back({"qshare:decline:" + std::to_string(sq.quest_id),
                         std::string("Decline ") + kind + q->GetTitle() + "\""});
+        ++shown;
       }
     }
   }
@@ -761,8 +769,8 @@ void CollectGroupAndUpkeepActions(Player* bot,
       } else {
         out->push_back({"popups:auto",
                         "Answer popups automatically (accept rez, summons, "
-                        "ready checks and Dungeon Finder; Need usable spec "
-                        "upgrades, else Disenchant/Greed)"});
+                        "shared quests, ready checks and Dungeon Finder; Need "
+                        "usable spec upgrades, else Disenchant/Greed)"});
       }
       const BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
       if (policy.not_tank) {
@@ -1210,27 +1218,26 @@ ActionOutcome ExecuteSharedQuestAction(Player* bot,
   if (!ai) {
     return {.error = "not a bot"};
   }
-  const uint32_t pending_qid = BotManager::GetPendingSharedQuest(bot);
+  const std::optional<PendingSharedQuest> pending =
+      BotManager::TakePendingSharedQuest(bot, action.quest_id);
   if (!action.accept) {
-    if (pending_qid == action.quest_id) {
-      BotManager::ClearPendingSharedQuest(bot);
-      if (Player* sharer =
-              ObjectAccessor::FindConnectedPlayer(bot->GetDivider())) {
+    if (pending) {
+      if (Player* sharer = ObjectAccessor::FindConnectedPlayer(
+              ObjectGuid(pending->sharer_guid))) {
         sharer->SendPushToPartyResponse(bot, QUEST_PARTY_MSG_DECLINE_QUEST);
       }
-      bot->SetDivider(ObjectGuid::Empty);
     }
+    bot->SetDivider(ObjectGuid::Empty);
     return {.used = true, .info = "declined shared quest"};
   }
-  const bool is_confirm = BotManager::IsPendingSharedQuestConfirm(bot);
   WorldSession* session = bot->GetSession();
-  const ObjectGuid divider = bot->GetDivider();
   const Quest* quest = sObjectMgr->GetQuestTemplate(action.quest_id);
-  if (!session || !quest || !divider || pending_qid != action.quest_id) {
+  if (!session || !quest || !pending || pending->sharer_guid == 0) {
     return {.error = "shared quest is no longer available"};
   }
-  BotManager::ClearPendingSharedQuest(bot);
-  if (is_confirm || quest->HasFlag(QUEST_FLAGS_PARTY_ACCEPT)) {
+  const ObjectGuid divider(pending->sharer_guid);
+  bot->SetDivider(divider);
+  if (pending->is_confirm || quest->HasFlag(QUEST_FLAGS_PARTY_ACCEPT)) {
     WorldPacket raw(CMSG_QUEST_CONFIRM_ACCEPT, 4);
     raw << action.quest_id;
     WorldPackets::Quest::QuestConfirmAcceptClient pkt(std::move(raw));
@@ -1242,14 +1249,14 @@ ActionOutcome ExecuteSharedQuestAction(Player* bot,
     p.rpos(0);
     session->HandleQuestgiverAcceptQuestOpcode(p);
   }
+  bot->SetDivider(ObjectGuid::Empty);
   if (bot->GetQuestStatus(action.quest_id) == QUEST_STATUS_NONE) {
-    bot->SetDivider(ObjectGuid::Empty);
     return {.error = "cannot accept shared quest"};
   }
   ai->RecordQuestAccepted(action.quest_id);
   return {.used = true,
-          .info = (is_confirm ? "accepted escort quest "
-                              : "accepted shared quest ") +
+          .info = (pending->is_confirm ? "accepted escort quest "
+                                       : "accepted shared quest ") +
                   quest->GetTitle()};
 }
 
@@ -1841,13 +1848,14 @@ std::vector<std::string> AnswerPopupsByPolicy(Player* bot) {
                bot, PopupAnswerAction{PopupAnswerAction::Kind::kSummon, true}),
            "accepted a summon");
     }
-    if (BotManager::IsPendingSharedQuestConfirm(bot)) {
-      if (const uint32_t qid = BotManager::GetPendingSharedQuest(bot)) {
-        const Quest* q = sObjectMgr->GetQuestTemplate(qid);
-        note(ExecuteSharedQuestAction(bot, SharedQuestAction{qid, true}),
-             "accepted escort quest " +
-                 (q ? q->GetTitle() : std::to_string(qid)));
-      }
+    for (const PendingSharedQuest& sq :
+         BotManager::GetPendingSharedQuests(bot)) {
+      const Quest* q = sObjectMgr->GetQuestTemplate(sq.quest_id);
+      const char* kind =
+          sq.is_confirm ? "accepted escort quest " : "accepted shared quest ";
+      note(ExecuteSharedQuestAction(bot, SharedQuestAction{sq.quest_id, true}),
+           std::string(kind) +
+               (q ? q->GetTitle() : std::to_string(sq.quest_id)));
     }
     const lfg::LfgState st = sLFGMgr->GetState(bot->GetGUID());
     if (st == lfg::LFG_STATE_ROLECHECK) {

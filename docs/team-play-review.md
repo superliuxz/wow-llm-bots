@@ -8,7 +8,7 @@ Tracking document for findings from the WoW Team Play Review. Each item is tagge
 - [x] **[M1] P0-2 — "stop" breaks the next fight.** `kStop -> halt_attacks() -> SetStopDps(true)` on every bot, tanks included (`llm_brain_world_script.cc:849-885`). Said out of combat, `saw_combat=false`, so it stays on through the whole next fight and clears only when that fight ends (`pull_discipline.cc:91-109`). DPS and pets stand idle, and the tank does no damage, builds no threat, and doesn't taunt. (combat/social)
 - [ ] **[M8] P0-3 — Raid scripts are removed with nothing to replace them.** `AdjustRaidStrategies` turns off `naxx/ulduar/icc/voa/os/eoe/...` when brain-led (`config_parsing.cc:175-185`). That throws away playerbots' C++ for vehicles, harpoons, cannons, Malygos drakes, and positioning. The notes miss whole bosses (ICC Gunship, Festergut, Blood-Queen; LK Defile and Val'kyr) and some are wrong (LK Quake sends bots outward; Four Horsemen is modeled as taunt-in-place). Orders can't drive a vehicle. (raid)
 - [ ] **[M9] P0-4 — Prompt budget at raid size.** The slot is 4096 tokens (`prompt.cc:30`, `llm.py:13`) and `RULES.md` takes about 2.6k. At 25-man the raid frame likely pushes out the boss notes, which are the only source of standing orders. The wake reason and the human's chat line can be dropped too. (raid/harness)
-- [ ] **[M2] P0-5 — Bots can't abandon quests.** Nothing sends `CMSG_QUESTLOG_REMOVE_QUEST`. A failed escort or timed quest blocks that quest chain for good. Bots accept every `!` quest, so at 25 quests the log is full and the human's shares fail silently. (questing)
+- [x] **[M2] P0-5 — Bots can't abandon quests.** Nothing sends `CMSG_QUESTLOG_REMOVE_QUEST`. A failed escort or timed quest blocks that quest chain for good. Bots accept every `!` quest, so at 25 quests the log is full and the human's shares fail silently. (questing)
 - [ ] **[M3] P0-6 — Bags fill up for good.** Bots sell only grey items (`exec_npc.cc:101,126`), can't destroy greens, and can't buy or equip bags. Greens pile up until quest drops can't be looted, and those corpses stop showing as lootable. (loot)
 - [ ] **[M13] P0-7 — A ghost can get stuck forever.** If a corpse run can't make progress, the bot gets no spirit-healer option, no wake, and the human is never told. (travel/death)
 - [ ] **[M5] P0-8 — Brain target picks don't stick.** `target` / `Attack` only set the selection, and playerbots' `dps assist`/`tank assist` picks again. 35 note files rely on `-> target nearest <add>` (Bone Spike, Web Wrap, Kinetic Bomb...). (combat)
@@ -18,9 +18,9 @@ Tracking document for findings from the WoW Team Play Review. Each item is tagge
 ### Questing
 
 - [ ] **[M4]** The pull gate hides mobs attacking the human's pet, an escort NPC, or a friendly quest NPC. Bots stand by while the escort dies. The same gate stops bots from starting fights on the human's quest mobs, so `help <human> with <quest>` can't happen and grouping is no faster than solo.
-- [ ] **[M2]** One pending share blocks every later share for up to 60 s. Shares aren't auto-accepted even with "answer popups" on.
-- [ ] **[M2]** Bots can't take quests from objects or items ("Wanted: Hogger", item-started quests) and can't turn in quests that end at an object.
-- [ ] **[M2]** Bots leave the group 60 s after the human logs off and keep levelling alone, so they drift ahead between sessions.
+- [x] **[M2]** One pending share blocks every later share for up to 60 s. Shares aren't auto-accepted even with "answer popups" on.
+- [x] **[M2]** Bots can't take quests from objects or items ("Wanted: Hogger", item-started quests) and can't turn in quests that end at an object.
+- [x] **[M2]** Bots leave the group 60 s after the human logs off and keep levelling alone, so they drift ahead between sessions.
 
 ### Dungeons
 

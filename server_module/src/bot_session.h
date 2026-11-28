@@ -21,6 +21,7 @@
 #include "bot_manager/errand_hold.h"
 #include "bot_manager/tick_owner.h"
 #include "options/loot_roll_policy.h"
+#include "options/quest_helpers.h"
 #include "snapshot/snapshot.h"
 
 namespace llm_brain {
@@ -135,10 +136,9 @@ struct BotSession {
   uint64_t human_group_guid = 0;
   std::optional<uint32_t> human_offline_since_ms;
 
-  // Pending timed popups observed via outgoing packets.
-  uint32_t pending_shared_quest_id = 0;
-  uint32_t pending_shared_quest_ms = 0;
-  bool pending_shared_quest_confirm = false;
+  // Pending timed popups observed via outgoing packets. Multiple shared quests
+  // can be queued simultaneously without blocking later shares.
+  std::vector<PendingSharedQuest> pending_shared_quests;
   std::optional<uint32_t> pending_ready_check_ms;
   uint32_t pending_lfg_proposal_id = 0;
   uint32_t pending_lfg_proposal_ms = 0;

@@ -14,6 +14,7 @@
 #include "CreatureData.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
+#include "GameObject.h"
 #include "GossipDef.h"
 #include "Group.h"
 #include "Item.h"
@@ -751,6 +752,97 @@ void CollectNpcActions(Player* bot,
       }
     }
   }
+
+  // 8. Nearby GameObject questgivers (e.g. "Wanted: Hogger", bounty boards,
+  // and quest-ending objects within interact range).
+  for (const pb::GameObject& obj : snapshot.base.nearby.objects) {
+    if (out->size() >= kMaxNpcActions) {
+      break;
+    }
+    if (obj.guid.empty() || !obj.usable ||
+        obj.kind != pb::GameObject::QUEST_OBJECT) {
+      continue;
+    }
+    GameObject* go =
+        ObjectAccessor::GetGameObject(*bot, ParseSnapshotGuid(obj.guid));
+    if (!go || !go->IsInWorld() || !go->isSpawned() ||
+        go->GetGoType() != GAMEOBJECT_TYPE_QUESTGIVER ||
+        !IsInUseRange(bot, go) || !bot->CanInteractWithQuestGiver(go)) {
+      continue;
+    }
+    const std::string go_name = obj.name.empty() ? go->GetName() : obj.name;
+    std::vector<uint32_t> seen_quests;
+    const auto record_seen = [&](uint32_t qid) {
+      if (std::find(seen_quests.begin(), seen_quests.end(), qid) !=
+          seen_quests.end()) {
+        return false;
+      }
+      seen_quests.push_back(qid);
+      return true;
+    };
+    const QuestRelationBounds involved =
+        sObjectMgr->GetGOQuestInvolvedRelationBounds(go->GetEntry());
+    for (auto itr = involved.first;
+         itr != involved.second && out->size() < kMaxNpcActions; ++itr) {
+      const uint32_t qid = itr->second;
+      if (!record_seen(qid)) {
+        continue;
+      }
+      const Quest* quest = sObjectMgr->GetQuestTemplate(qid);
+      if (!quest) {
+        continue;
+      }
+      if (bot->GetQuestStatus(qid) == QUEST_STATUS_COMPLETE &&
+          !bot->GetQuestRewardStatus(qid) &&
+          bot->CanRewardQuest(quest, false)) {
+        const uint32_t choices = quest->GetRewChoiceItemsCount();
+        if (choices > 1) {
+          for (uint32_t r = 0; r < choices && out->size() < kMaxNpcActions;
+               ++r) {
+            const ItemTemplate* rproto =
+                sObjectMgr->GetItemTemplate(quest->RewardChoiceItemId[r]);
+            const std::string rdesc =
+                rproto ? (rproto->Name1 + ", ilvl " +
+                          std::to_string(rproto->ItemLevel))
+                       : ("reward #" + std::to_string(r + 1));
+            out->push_back({"go_qturnin:" + obj.guid + ":" +
+                                std::to_string(quest->GetQuestId()) + ":" +
+                                std::to_string(r),
+                            obj.guid,
+                            "Turn in \"" + quest->GetTitle() + "\" to " +
+                                go_name + " (pick " + rdesc + ")"});
+          }
+        } else {
+          out->push_back(
+              {"go_qturnin:" + obj.guid + ":" +
+                   std::to_string(quest->GetQuestId()) + ":0",
+               obj.guid,
+               "Turn in \"" + quest->GetTitle() + "\" to " + go_name});
+        }
+      }
+    }
+    const QuestRelationBounds starters =
+        sObjectMgr->GetGOQuestRelationBounds(go->GetEntry());
+    for (auto itr = starters.first;
+         itr != starters.second && out->size() < kMaxNpcActions; ++itr) {
+      const uint32_t qid = itr->second;
+      if (!record_seen(qid)) {
+        continue;
+      }
+      const Quest* quest = sObjectMgr->GetQuestTemplate(qid);
+      if (!quest) {
+        continue;
+      }
+      if (bot->GetQuestStatus(qid) == QUEST_STATUS_NONE &&
+          bot->CanTakeQuest(quest, false) && bot->CanAddQuest(quest, false)) {
+        out->push_back(
+            {"go_qaccept:" + obj.guid + ":" +
+                 std::to_string(quest->GetQuestId()),
+             obj.guid,
+             "Accept quest \"" + quest->GetTitle() + "\" from " + go_name});
+      }
+    }
+  }
 }
 
 ActionOutcome ExecuteTalkAction(Player* bot, const TalkAction& action) {
@@ -1041,6 +1133,69 @@ ActionOutcome ExecuteNpcAction(Player* bot, const NpcAction& action) {
     }
   }
   return {.error = "unknown NPC action"};
+}
+
+ActionOutcome ExecuteObjectQuestAction(Player* bot,
+                                       const ObjectQuestAction& action) {
+  PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
+  if (!ai) {
+    return {.error = "not a bot"};
+  }
+  if (bot->IsInCombat()) {
+    return {.error = "you are in combat"};
+  }
+  WorldSession* session = bot->GetSession();
+  if (!session) {
+    return {.error = "no session"};
+  }
+  GameObject* go = ObjectAccessor::GetGameObject(
+      *bot, ParseSnapshotGuid(action.object_guid));
+  if (!go || !go->IsInWorld() || !go->isSpawned() || !IsInUseRange(bot, go) ||
+      !bot->CanInteractWithQuestGiver(go)) {
+    return {.error = "that object is not in interact range"};
+  }
+  bot->SetFacingToObject(go);
+  const Quest* quest = sObjectMgr->GetQuestTemplate(action.quest_id);
+  if (!quest) {
+    return {.error = "unknown quest"};
+  }
+  switch (action.op) {
+    case ObjectQuestAction::Op::kAccept: {
+      if (!go->hasQuest(action.quest_id) ||
+          bot->GetQuestStatus(action.quest_id) != QUEST_STATUS_NONE ||
+          !bot->CanTakeQuest(quest, false) || !bot->CanAddQuest(quest, false)) {
+        return {.error = "cannot accept that quest"};
+      }
+      WorldPacket p(CMSG_QUESTGIVER_ACCEPT_QUEST, 8 + 4 + 4);
+      p << go->GetGUID() << quest->GetQuestId() << uint32_t(0);
+      p.rpos(0);
+      session->HandleQuestgiverAcceptQuestOpcode(p);
+      if (bot->GetQuestStatus(action.quest_id) == QUEST_STATUS_NONE) {
+        return {.error = "cannot accept that quest"};
+      }
+      ai->RecordQuestAccepted(quest->GetQuestId());
+      return {.used = true, .info = "accepted " + quest->GetTitle()};
+    }
+    case ObjectQuestAction::Op::kTurnIn: {
+      const uint32_t choices = quest->GetRewChoiceItemsCount();
+      const bool valid_idx = (choices == 0 && action.reward_idx == 0) ||
+                             action.reward_idx < choices;
+      if (!go->hasInvolvedQuest(action.quest_id) || !valid_idx ||
+          bot->GetQuestStatus(action.quest_id) != QUEST_STATUS_COMPLETE ||
+          bot->GetQuestRewardStatus(action.quest_id) ||
+          !bot->CanRewardQuest(quest, false) ||
+          !bot->CanRewardQuest(quest, action.reward_idx, false)) {
+        return {.error = "cannot turn in that quest"};
+      }
+      WorldPacket p(CMSG_QUESTGIVER_CHOOSE_REWARD, 8 + 4 + 4);
+      p << go->GetGUID() << quest->GetQuestId() << action.reward_idx;
+      p.rpos(0);
+      session->HandleQuestgiverChooseRewardOpcode(p);
+      ai->RecordQuestRewarded(quest->GetQuestId());
+      return {.used = true, .info = "turned in " + quest->GetTitle()};
+    }
+  }
+  return {.error = "unknown object quest action"};
 }
 
 }  // namespace llm_brain

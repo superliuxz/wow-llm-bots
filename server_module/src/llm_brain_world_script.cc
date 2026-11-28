@@ -74,6 +74,7 @@
 #include "options/option_executor.h"
 #include "options/option_facts.h"
 #include "options/options.h"
+#include "options/quest_helpers.h"
 #include "position_facts.h"
 #include "snapshot/behavior_trace.h"
 #include "snapshot/behavior_trace_scripts.h"
@@ -1223,10 +1224,12 @@ class LlmBrainWorldScript : public WorldScript {
   // mana / drinking. Whether to pull with what's left is the brain's call.
   static void FillPullFacts(Player* bot,
                             Group* group,
+                            bool has_offline_human,
                             HealerManaWaitState* healer_wait,
                             base::TimeTicks now,
                             OptionFacts* facts) {
     constexpr float kHumanBehindYd = 25.0f;
+    bool has_online_human = false;
     bool human_leads = false;
     bool human_holds = false;  // A human tanks, is AFK or is behind.
     std::vector<HealerManaMember> healer_members;
@@ -1262,23 +1265,33 @@ class LlmBrainWorldScript : public WorldScript {
       if (!IsHumanPlayer(member)) {
         continue;
       }
+      has_online_human = true;
       human_leads |= slot.guid == group->GetLeaderGUID();
       human_holds |= (slot.flags & MEMBER_FLAG_MAINTANK) != 0 ||
                      IsGroupTank(group, member) || member->isAFK() ||
                      member->GetMapId() != bot->GetMapId() ||
                      bot->GetDistance(member) > kHumanBehindYd;
     }
+    const bool offline_human_pause = ShouldPauseForOfflineHuman({
+        .in_group = true,
+        .has_online_human = has_online_human,
+        .has_offline_human = has_offline_human,
+    });
     const bool healer_mana_hold =
         healer_wait != nullptr &&
         EvaluateHealerManaPullWait(*healer_wait, /*in_group=*/true,
                                    IsPartyInCombat(bot), healer_members, now);
     const bool bot_tanks =
         IsGroupTank(group, bot) && !BotManager::GetGroupPolicy(bot).not_tank;
-    facts->hold_pulls =
-        human_holds || healer_mana_hold || (human_leads && !bot_tanks);
-    facts->hold_explore = (human_holds || healer_mana_hold) &&
-                          group->IsLeader(bot->GetGUID()) && bot->GetMap() &&
-                          bot->GetMap()->IsDungeon();
+    facts->hold_pulls = offline_human_pause || human_holds ||
+                        healer_mana_hold || (human_leads && !bot_tanks);
+    facts->hold_explore =
+        offline_human_pause ||
+        ((human_holds || healer_mana_hold) && group->IsLeader(bot->GetGUID()) &&
+         bot->GetMap() && bot->GetMap()->IsDungeon());
+    if (offline_human_pause) {
+      facts->places.clear();
+    }
   }
 
   static bool IsPartyInCombat(Player* bot) {
@@ -2303,7 +2316,10 @@ class LlmBrainWorldScript : public WorldScript {
     Group* cur_group = bot->GetGroup();
     facts.can_leave_group = (cur_group != nullptr && !bot->IsInCombat());
     if (cur_group) {
-      FillPullFacts(bot, cur_group, &state.healer_mana_wait, start, &facts);
+      const bool has_offline_human =
+          bot_manager_ && bot_manager_->GroupHasOfflineHuman(cur_group);
+      FillPullFacts(bot, cur_group, has_offline_human, &state.healer_mana_wait,
+                    start, &facts);
     } else {
       ClearHealerManaWait(state.healer_mana_wait);
     }
