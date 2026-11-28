@@ -2,7 +2,9 @@
 
 #include "screen/prompt.h"
 
+#include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -1216,6 +1218,208 @@ TEST(PromptTest, TwentyFiveManRaidPromptRetainsWakeHumanChatAndBossNotes) {
               std::string::npos)
         << "missing option " << i;
   }
+}
+
+// M10: Deterministic roster-based group coordination facts (spread slot/angle,
+// interrupt rotation among baseline interrupt classes, balanced soak groups).
+TEST(PromptTest, GroupCoordinationSoloIsEmptyAnd5Man25ManSlotsAreUnique) {
+  // 1. Adversarial counter-test: solo bot gets no coordination line.
+  wlb::snapshot::Snapshot solo;
+  solo.bot = "Aldric";
+  solo.base.self.unit.name = "Aldric";
+  solo.base.self.unit.player.emplace().class_ = "Warrior";
+  EXPECT_FALSE(ComputeGroupCoordination(solo).has_value());
+  PromptAssemblyContext solo_ctx;
+  solo_ctx.rules = "RULES";
+  solo_ctx.bot_name = "Aldric";
+  solo_ctx.wake_reason = "plan done";
+  const PromptInput solo_input = AssemblePromptInput(solo_ctx, solo);
+  EXPECT_TRUE(solo_input.coordination.empty());
+  EXPECT_EQ(BuildPlanRequest(solo_input, SampleScreen())
+                .user.find("Group coordination:"),
+            std::string::npos);
+
+  // Helper to build each member's view of the same group roster.
+  struct MemberSpec {
+    std::string name;
+    std::string cls;
+    uint32_t subgroup = 1;
+  };
+  const auto snap_for = [](const std::vector<MemberSpec>& roster, size_t self_i,
+                           bool is_raid) {
+    wlb::snapshot::Snapshot s;
+    s.bot = roster[self_i].name;
+    s.base.self.unit.name = roster[self_i].name;
+    s.base.self.unit.player.emplace().class_ = roster[self_i].cls;
+    s.base.self.unit.group.emplace().subgroup = roster[self_i].subgroup;
+    s.base.self.unit.group->online = true;
+    auto& dst =
+        is_raid ? s.ext.raid.emplace().members : s.ext.party.emplace().members;
+    for (size_t j = 0; j < roster.size(); ++j) {
+      if (j == self_i) {
+        continue;
+      }
+      wlb::snapshot::Unit u;
+      u.name = roster[j].name;
+      u.player.emplace().class_ = roster[j].cls;
+      u.group.emplace().subgroup = roster[j].subgroup;
+      u.group->online = true;
+      dst.push_back(std::move(u));
+    }
+    return s;
+  };
+
+  // 2. 5-man party: all 5 share subgroup 1 -> unique spread slots 1..5 &
+  //    angles, unique interrupt orders 1..3 for Warrior/Rogue/Mage (0 for
+  //    Priest/Paladin), and balanced soak groups A/B (not all A!).
+  const std::vector<MemberSpec> party5 = {
+      {"Vesper", "Rogue", 1},   {"Aldric", "Warrior", 1},
+      {"Mirabel", "Priest", 1}, {"Cedric", "Mage", 1},
+      {"Torvin", "Paladin", 1},
+  };
+  std::vector<int> slots5;
+  std::vector<int> angles5;
+  std::vector<int> interrupts5;
+  int soak5_a = 0;
+  int soak5_b = 0;
+  for (size_t i = 0; i < party5.size(); ++i) {
+    const wlb::snapshot::Snapshot s = snap_for(party5, i, /*is_raid=*/false);
+    const std::optional<GroupCoordination> c = ComputeGroupCoordination(s);
+    ASSERT_TRUE(c.has_value());
+    EXPECT_EQ(c->spread_total, 5);
+    EXPECT_EQ(c->spread_ring, 0);
+    EXPECT_EQ(c->interrupt_total, 3);
+    slots5.push_back(c->spread_slot);
+    angles5.push_back(c->spread_angle_deg);
+    if (c->interrupt_order > 0) {
+      interrupts5.push_back(c->interrupt_order);
+    }
+    if (c->soak_group == "A") {
+      ++soak5_a;
+    } else if (c->soak_group == "B") {
+      ++soak5_b;
+    }
+    const std::string line = FormatGroupCoordination(*c);
+    if (party5[i].cls == "Priest" || party5[i].cls == "Paladin") {
+      EXPECT_EQ(c->interrupt_order, 0);
+      EXPECT_EQ(line.find("interrupt #"), std::string::npos);
+    } else {
+      EXPECT_GT(c->interrupt_order, 0);
+      EXPECT_NE(line.find("interrupt #"), std::string::npos);
+    }
+  }
+  std::sort(slots5.begin(), slots5.end());
+  std::sort(angles5.begin(), angles5.end());
+  std::sort(interrupts5.begin(), interrupts5.end());
+  EXPECT_EQ(slots5, (std::vector<int>{1, 2, 3, 4, 5}));
+  EXPECT_EQ(angles5, (std::vector<int>{0, 72, 144, 216, 288}));
+  EXPECT_EQ(interrupts5, (std::vector<int>{1, 2, 3}));
+  EXPECT_EQ(soak5_a, 3);
+  EXPECT_EQ(soak5_b, 2);
+
+  // 3. 25-man raid across subgroups 1..5: unique spread slots 1..25, unique
+  //    angles, inner/outer rings, unique interrupt orders among interrupters,
+  //    and subgroup-parity soak groups (odd -> A, even -> B).
+  const std::vector<std::string> classes = {"Warrior", "Priest", "Mage",
+                                            "Paladin", "Rogue"};
+  std::vector<MemberSpec> raid25;
+  for (int i = 0; i < 25; ++i) {
+    raid25.push_back({
+        .name = "Raider" + std::string(1, static_cast<char>('A' + i)),
+        .cls = classes[static_cast<size_t>(i % 5)],
+        .subgroup = static_cast<uint32_t>((i / 5) + 1),
+    });
+  }
+  std::vector<int> slots25;
+  std::vector<int> angles25;
+  std::vector<int> interrupts25;
+  int inner_ring = 0;
+  int outer_ring = 0;
+  for (size_t i = 0; i < raid25.size(); ++i) {
+    const wlb::snapshot::Snapshot s = snap_for(raid25, i, /*is_raid=*/true);
+    const std::optional<GroupCoordination> c = ComputeGroupCoordination(s);
+    ASSERT_TRUE(c.has_value());
+    EXPECT_EQ(c->spread_total, 25);
+    EXPECT_EQ(c->interrupt_total, 15);
+    slots25.push_back(c->spread_slot);
+    angles25.push_back(c->spread_angle_deg);
+    if (c->spread_ring == 1) {
+      ++inner_ring;
+    } else if (c->spread_ring == 2) {
+      ++outer_ring;
+    }
+    if (c->interrupt_order > 0) {
+      interrupts25.push_back(c->interrupt_order);
+    }
+    EXPECT_EQ(c->subgroup, raid25[i].subgroup);
+    EXPECT_EQ(c->soak_group, (raid25[i].subgroup % 2 == 1) ? "A" : "B");
+  }
+  std::sort(slots25.begin(), slots25.end());
+  std::sort(angles25.begin(), angles25.end());
+  std::sort(interrupts25.begin(), interrupts25.end());
+  EXPECT_EQ(slots25.size(), 25u);
+  EXPECT_EQ(std::unique(slots25.begin(), slots25.end()), slots25.end());
+  EXPECT_EQ(std::unique(angles25.begin(), angles25.end()), angles25.end());
+  EXPECT_EQ(interrupts25.size(), 15u);
+  EXPECT_EQ(std::unique(interrupts25.begin(), interrupts25.end()),
+            interrupts25.end());
+  EXPECT_EQ(inner_ring, 13);
+  EXPECT_EQ(outer_ring, 12);
+
+  // 4. Adversarial counter-test: 5-man party without an active boss encounter
+  //    (both out-of-combat pre-pull/CC/loot/trade and in-combat trash pulls)
+  //    omits `Group coordination:` from the prompt; an active boss encounter
+  //    enables it.
+  PromptAssemblyContext party_ctx;
+  party_ctx.rules = "RULES";
+  party_ctx.bot_name = "Aldric";
+  party_ctx.wake_reason = "plan done";
+  wlb::snapshot::Snapshot party_ooc = snap_for(party5, 1, /*is_raid=*/false);
+  party_ooc.base.self.in_combat = false;
+  const PromptInput party_ooc_input = AssemblePromptInput(party_ctx, party_ooc);
+  EXPECT_TRUE(party_ooc_input.coordination.empty());
+  EXPECT_EQ(BuildPlanRequest(party_ooc_input, SampleScreen())
+                .user.find("Group coordination:"),
+            std::string::npos);
+
+  wlb::snapshot::Snapshot party_trash = party_ooc;
+  party_trash.base.self.in_combat = true;
+  const PromptInput party_trash_input =
+      AssemblePromptInput(party_ctx, party_trash);
+  EXPECT_TRUE(party_trash_input.coordination.empty());
+  EXPECT_EQ(BuildPlanRequest(party_trash_input, SampleScreen())
+                .user.find("Group coordination:"),
+            std::string::npos);
+
+  wlb::snapshot::Snapshot party_enc = party_trash;
+  party_enc.ext.encounter.emplace().boss.emplace().name =
+      "Taragaman the Hungerer";
+  const PromptInput party_enc_input = AssemblePromptInput(party_ctx, party_enc);
+  EXPECT_NE(party_enc_input.coordination.find("spread slot 1/5"),
+            std::string::npos);
+  EXPECT_NE(BuildPlanRequest(party_enc_input, SampleScreen())
+                .user.find("Group coordination: spread slot 1/5"),
+            std::string::npos);
+
+  // 5. Raid prompt assembly (even pre-pull) + InspectPrompt budget check.
+  PromptAssemblyContext raid_ctx;
+  raid_ctx.rules = std::string(7800, 'R');
+  raid_ctx.bot_name = "RaiderA";
+  raid_ctx.wake_reason = "plan done";
+  wlb::snapshot::Snapshot raid_snap = snap_for(raid25, 0, /*is_raid=*/true);
+  raid_snap.base.self.in_combat = false;
+  const PromptInput raid_input = AssemblePromptInput(raid_ctx, raid_snap);
+  EXPECT_NE(raid_input.coordination.find("spread slot 1/25"),
+            std::string::npos);
+  EXPECT_NE(raid_input.coordination.find("inner ring"), std::string::npos);
+  EXPECT_NE(raid_input.coordination.find("interrupt #1/15"), std::string::npos);
+  EXPECT_NE(raid_input.coordination.find("soak group A (subgroup 1)"),
+            std::string::npos);
+  const LlmRequest req = BuildPlanRequest(raid_input, SampleScreen());
+  EXPECT_NE(req.user.find("Group coordination: spread slot 1/25"),
+            std::string::npos);
+  const PromptBreakdown b = InspectPrompt(raid_input, SampleScreen());
+  EXPECT_LE(b.est_total_tokens + static_cast<size_t>(req.max_tokens), 8192u);
 }
 
 }  // namespace

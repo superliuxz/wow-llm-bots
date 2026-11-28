@@ -1339,7 +1339,8 @@ void BotLoop::OnConnectionChanged(bool connected) {
     scheduler_.CancelAllInFlight();
     // Server resets its own health flag on disconnect; start clean on the next
     // connection.
-    consecutive_llm_failures_ = 0;
+    recent_llm_failures_.clear();
+    consecutive_llm_successes_ = 0;
     llm_healthy_ = true;
   }
 }
@@ -1358,24 +1359,36 @@ void BotLoop::SetLlmHealthy(bool healthy) {
   ++commands_sent_;
 }
 
-void BotLoop::RecordLlmFailure(bool immediate_unhealthy) {
+void BotLoop::RecordLlmFailure(base::TimeTicks now) {
   if (config_.llm_unhealthy_after_failures <= 0) {
     return;
   }
-  if (immediate_unhealthy) {
-    consecutive_llm_failures_ = std::max(consecutive_llm_failures_ + 1,
-                                         config_.llm_unhealthy_after_failures);
-  } else {
-    ++consecutive_llm_failures_;
+  consecutive_llm_successes_ = 0;
+  if (config_.llm_failure_window.is_positive()) {
+    while (!recent_llm_failures_.empty() &&
+           now - recent_llm_failures_.front() > config_.llm_failure_window) {
+      recent_llm_failures_.pop_front();
+    }
   }
-  if (consecutive_llm_failures_ >= config_.llm_unhealthy_after_failures) {
+  recent_llm_failures_.push_back(now);
+  if (static_cast<int>(recent_llm_failures_.size()) >=
+      config_.llm_unhealthy_after_failures) {
     SetLlmHealthy(false);
   }
 }
 
 void BotLoop::RecordLlmSuccess() {
-  consecutive_llm_failures_ = 0;
-  SetLlmHealthy(true);
+  recent_llm_failures_.clear();
+  if (llm_healthy_) {
+    consecutive_llm_successes_ = 0;
+    return;
+  }
+  ++consecutive_llm_successes_;
+  if (consecutive_llm_successes_ >=
+      std::max(1, config_.llm_healthy_after_successes)) {
+    consecutive_llm_successes_ = 0;
+    SetLlmHealthy(true);
+  }
 }
 
 void BotLoop::ReleaseInFlightOrderCompile(const std::string& bot,
@@ -1413,6 +1426,9 @@ void BotLoop::ResetBotSession(BotState* state, bool cancel_in_flight) {
   state->call_started_at = base::TimeTicks();
   state->call_state = BotState::CallState::kIdle;
   state->queued_urgency = Urgency::kP2Routine;
+  state->in_flight_urgency = Urgency::kP2Routine;
+  state->in_flight_reasons.clear();
+  state->consecutive_superseded_p0_replies = 0;
   if (state->in_flight_cancel) {
     auto cancel = std::move(state->in_flight_cancel);
     if (cancel_in_flight) {
@@ -2198,7 +2214,7 @@ void BotLoop::OnTick(base::TimeTicks now) {
         now >= state.call_deadline) {
       state.call_deadline = base::TimeTicks();
       state.call_timed_out_epoch = state.call_epoch;
-      RecordLlmFailure(/*immediate_unhealthy=*/true);
+      RecordLlmFailure(now);
       if (state.in_flight_cancel) {
         auto cancel = std::move(state.in_flight_cancel);
         cancel->Cancel();
@@ -2281,6 +2297,16 @@ void BotLoop::WakeBot(const std::string& bot,
     state.order_wakes = 0;
     state.invalid_plan_retries = 0;
   }
+  // P0 livelock prevention (M10): if a P0 combat call is already in flight for
+  // this exact wake reason and no newer wake is queued, coalesce the duplicate
+  // P0 wake so the in-flight P0 reply is not thrown away by its own reason.
+  if (urgency == Urgency::kP0Combat && state.call_in_flight() &&
+      state.in_flight_urgency == Urgency::kP0Combat &&
+      !state.has_queued_wake() && !reason.empty() &&
+      std::find(state.in_flight_reasons.begin(), state.in_flight_reasons.end(),
+                reason) != state.in_flight_reasons.end()) {
+    return;
+  }
   if (!reason.empty() &&
       std::find(state.pending_reasons.begin(), state.pending_reasons.end(),
                 reason) == state.pending_reasons.end()) {
@@ -2341,6 +2367,7 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
 
   const Urgency call_urgency = state.queued_urgency;
   state.queued_urgency = Urgency::kP2Routine;
+  state.in_flight_urgency = call_urgency;
   state.MarkStarted();
   state.early_steps_dispatched = false;
   state.early_step_failed = false;
@@ -2353,6 +2380,7 @@ base::OnceClosure BotLoop::StartBotCall(const std::string& bot,
           : base::JoinString(state.pending_reasons, "; ");
   std::vector<std::string> asked_reasons = std::move(state.pending_reasons);
   state.pending_reasons.clear();
+  state.in_flight_reasons = asked_reasons;
   std::vector<BotState::ObservedChat> asked_chats =
       std::move(state.pending_chats);
   state.pending_chats.clear();
@@ -2530,7 +2558,8 @@ void BotLoop::OnFirstLine(const std::string& bot,
   }
   BotState& state = it->second;
   if (!state.call_in_flight() || state.call_epoch != epoch ||
-      (state.has_queued_wake() && state.queued_urgency == Urgency::kP0Combat) ||
+      (state.has_queued_wake() && state.queued_urgency == Urgency::kP0Combat &&
+       state.consecutive_superseded_p0_replies == 0) ||
       !state.latest_snapshot) {
     return;
   }
@@ -2576,6 +2605,7 @@ void BotLoop::OnReply(const std::string& bot,
         ReleaseInFlightOrderCompile(bot, &it->second);
       }
       it->second.MarkFinished();
+      it->second.in_flight_reasons.clear();
       it->second.in_flight_cancel.reset();
       it->second.call_deadline = base::TimeTicks();
       was_timeout = it->second.call_timed_out_epoch == epoch;
@@ -2632,13 +2662,18 @@ void BotLoop::OnReply(const std::string& bot,
     const bool was_order_compile = state.compiling_orders_key.has_value();
     ReleaseInFlightOrderCompile(bot, &state);
     state.MarkFinished();
+    state.in_flight_reasons.clear();
     state.in_flight_cancel.reset();
     state.call_deadline = base::TimeTicks();
     if (!decision.result.reply) {
       if (was_order_compile) {
         state.compiled_notes.clear();
       }
-      RecordLlmFailure(/*immediate_unhealthy=*/false);
+      const base::TimeTicks effective_now =
+          state.latest_received_at.is_null()
+              ? now
+              : std::max(now, state.latest_received_at);
+      RecordLlmFailure(effective_now);
       Log(base::StringPrintf("harness: %s brain error (%.0f ms): %s",
                              bot.c_str(), decision.result.round_trip_ms,
                              decision.result.error.c_str()));
@@ -2679,15 +2714,19 @@ void BotLoop::OnReply(const std::string& bot,
           decision.result.first_line_ms, decision.result.round_trip_ms,
           plan->look_s, decision.result.reply->prompt_tokens));
       // Only a queued P0 combat/emergency wake supersedes this in-flight reply
-      // and drops its steps/watches. Non-P0 wakes (chat, party status, prompts,
-      // routine alerts) must not cause wake storms that drop every reply: this
-      // plan still installs, and the queued wake runs next to adjust course.
-      // When an early-dispatched step of this same call failed before the reply
-      // finished, still deliver say/tell and watches, and keep the refusal wake
-      // or backoff timer instead of requeueing the already-answered reasons.
-      const bool superseded =
-          state.has_queued_wake() && state.queued_urgency == Urgency::kP0Combat;
+      // and drops its steps/watches, and at most once in a row (M10) so a
+      // stream of back-to-back P0 wakes mid-fight can never livelock the bot by
+      // discarding every reply. Non-P0 wakes (chat, party status, prompts,
+      // routine alerts) never supersede: this plan still installs, and the
+      // queued wake runs next to adjust course. When an early-dispatched step
+      // of this same call failed before the reply finished, still deliver
+      // say/tell and watches, and keep the refusal wake or backoff timer
+      // instead of requeueing the already-answered reasons.
+      const bool superseded = state.has_queued_wake() &&
+                              state.queued_urgency == Urgency::kP0Combat &&
+                              state.consecutive_superseded_p0_replies == 0;
       if ((!superseded || state.early_step_failed) && state.latest_snapshot) {
+        state.consecutive_superseded_p0_replies = 0;
         state.triggers.SetPlanContext(
             plan->watches,
             state.early_step_failed
@@ -2996,6 +3035,7 @@ void BotLoop::OnReply(const std::string& bot,
           MaybeScheduleMemoryCondense(bot, &state, now);
         }
       } else {
+        ++state.consecutive_superseded_p0_replies;
         // Superseded by a newer wake while in flight: that call answers. Still
         // honor an explicit `orders: none` clear so a runaway standing-order
         // wake can never trap the bot in a livelock (A-H2).

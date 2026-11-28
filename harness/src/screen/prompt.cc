@@ -3,8 +3,12 @@
 #include "screen/prompt.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <flat_set>
 #include <initializer_list>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -677,7 +681,178 @@ std::string FormatPlayerChatBlock(
   return added_any ? out : "";
 }
 
+bool IsBaselineInterruptClass(std::string_view class_name) {
+  return base::EqualsCaseInsensitiveASCII(class_name, "Warrior") ||
+         base::EqualsCaseInsensitiveASCII(class_name, "Rogue") ||
+         base::EqualsCaseInsensitiveASCII(class_name, "Shaman") ||
+         base::EqualsCaseInsensitiveASCII(class_name, "Mage") ||
+         base::EqualsCaseInsensitiveASCII(class_name, "Death Knight") ||
+         base::EqualsCaseInsensitiveASCII(class_name, "DeathKnight");
+}
+
+std::string_view CompassFromDegrees(int deg) {
+  static constexpr std::string_view kCompass[8] = {"N", "NE", "E", "SE",
+                                                   "S", "SW", "W", "NW"};
+  const int norm = ((deg % 360) + 360) % 360;
+  return kCompass[((norm + 22) / 45) % 8];
+}
+
 }  // namespace
+
+std::optional<GroupCoordination> ComputeGroupCoordination(
+    const wlb::snapshot::Snapshot& snapshot,
+    std::string_view bot_name) {
+  const bool has_group =
+      (snapshot.ext.party && !snapshot.ext.party->members.empty()) ||
+      (snapshot.ext.raid && !snapshot.ext.raid->members.empty());
+  if (!has_group) {
+    return std::nullopt;
+  }
+
+  const std::string self_name = !bot_name.empty() ? std::string(bot_name)
+                                : !snapshot.bot.empty()
+                                    ? snapshot.bot
+                                    : snapshot.base.self.unit.name;
+  if (self_name.empty()) {
+    return std::nullopt;
+  }
+
+  struct RosterEntry {
+    std::string name;
+    std::string lower_name;
+    std::string class_name;
+    uint32_t subgroup = 0;
+  };
+  std::vector<RosterEntry> roster;
+  const auto upsert = [&](std::string_view name, std::string_view class_name,
+                          uint32_t subgroup) {
+    name = base::TrimWhitespaceASCII(name, base::TRIM_ALL);
+    if (name.empty()) {
+      return;
+    }
+    const std::string lower = base::ToLowerASCII(name);
+    for (RosterEntry& entry : roster) {
+      if (entry.lower_name == lower) {
+        if (entry.class_name.empty() && !class_name.empty()) {
+          entry.class_name = std::string(class_name);
+        }
+        if (entry.subgroup == 0 && subgroup != 0) {
+          entry.subgroup = subgroup;
+        }
+        return;
+      }
+    }
+    roster.push_back(RosterEntry{
+        .name = std::string(name),
+        .lower_name = lower,
+        .class_name = std::string(class_name),
+        .subgroup = subgroup,
+    });
+  };
+
+  const std::string self_class = snapshot.base.self.unit.player
+                                     ? snapshot.base.self.unit.player->class_
+                                     : std::string();
+  const uint32_t self_subgroup = snapshot.base.self.unit.group
+                                     ? snapshot.base.self.unit.group->subgroup
+                                     : 0u;
+  upsert(self_name, self_class, self_subgroup);
+
+  auto add_members = [&](const std::vector<wlb::snapshot::Unit>& members) {
+    for (const wlb::snapshot::Unit& u : members) {
+      const std::string cls = u.player ? u.player->class_ : std::string();
+      const uint32_t sub = u.group ? u.group->subgroup : 0u;
+      upsert(u.name, cls, sub);
+    }
+  };
+  if (snapshot.ext.party) {
+    add_members(snapshot.ext.party->members);
+  }
+  if (snapshot.ext.raid) {
+    add_members(snapshot.ext.raid->members);
+  }
+  if (roster.size() < 2) {
+    return std::nullopt;
+  }
+
+  std::sort(roster.begin(), roster.end(),
+            [](const RosterEntry& a, const RosterEntry& b) {
+              if (a.lower_name != b.lower_name) {
+                return a.lower_name < b.lower_name;
+              }
+              return a.name < b.name;
+            });
+
+  const std::string self_lower = base::ToLowerASCII(self_name);
+  size_t self_idx = roster.size();
+  int interrupt_order = 0;
+  int interrupt_total = 0;
+  std::flat_set<uint32_t> distinct_subgroups;
+  for (size_t i = 0; i < roster.size(); ++i) {
+    if (roster[i].subgroup != 0) {
+      distinct_subgroups.insert(roster[i].subgroup);
+    }
+    if (IsBaselineInterruptClass(roster[i].class_name)) {
+      ++interrupt_total;
+      if (roster[i].lower_name == self_lower) {
+        interrupt_order = interrupt_total;
+      }
+    }
+    if (roster[i].lower_name == self_lower) {
+      self_idx = i;
+    }
+  }
+  if (self_idx >= roster.size()) {
+    return std::nullopt;
+  }
+
+  GroupCoordination out;
+  out.spread_slot = static_cast<int>(self_idx) + 1;
+  out.spread_total = static_cast<int>(roster.size());
+  out.spread_angle_deg =
+      static_cast<int>(std::lround((360.0 * static_cast<double>(self_idx)) /
+                                   static_cast<double>(roster.size()))) %
+      360;
+  out.spread_compass = std::string(CompassFromDegrees(out.spread_angle_deg));
+  if (roster.size() > 8) {
+    out.spread_ring = (static_cast<int>(self_idx) % 2) + 1;
+  }
+  out.interrupt_order = interrupt_order;
+  out.interrupt_total = interrupt_total;
+  const uint32_t resolved_subgroup = roster[self_idx].subgroup;
+  if (distinct_subgroups.size() >= 2 && resolved_subgroup != 0) {
+    out.subgroup = resolved_subgroup;
+    out.soak_group = (resolved_subgroup % 2 == 1) ? "A" : "B";
+  } else {
+    out.soak_group = (self_idx % 2 == 0) ? "A" : "B";
+  }
+  return out;
+}
+
+std::string FormatGroupCoordination(const GroupCoordination& coord) {
+  if (coord.spread_slot <= 0 || coord.spread_total < 2) {
+    return "";
+  }
+  std::string out = base::StringPrintf(
+      "spread slot %d/%d (%d deg, %s%s)", coord.spread_slot, coord.spread_total,
+      coord.spread_angle_deg, coord.spread_compass.c_str(),
+      coord.spread_ring == 1   ? ", inner ring"
+      : coord.spread_ring == 2 ? ", outer ring"
+                               : "");
+  if (coord.interrupt_order > 0 && coord.interrupt_total > 0) {
+    base::StrAppend(
+        &out, {base::StringPrintf("; interrupt #%d/%d", coord.interrupt_order,
+                                  coord.interrupt_total)});
+  }
+  if (!coord.soak_group.empty()) {
+    base::StrAppend(&out, {"; soak group ", coord.soak_group});
+    if (coord.subgroup > 0) {
+      base::StrAppend(&out,
+                      {base::StringPrintf(" (subgroup %u)", coord.subgroup)});
+    }
+  }
+  return out;
+}
 
 std::string FormatMemoryForPrompt(std::string_view raw_memory,
                                   size_t max_recent) {
@@ -895,6 +1070,20 @@ PromptInput AssemblePromptInput(const PromptAssemblyContext& ctx,
   }
   out.current_goal = ctx.current_goal;
   out.last_outcome = ctx.last_outcome;
+  // Emit deterministic group coordination facts only during an active boss
+  // encounter or in a raid (where spread angles, interrupt order, and soak
+  // groups matter). Ordinary 2-5 man party wakes (out-of-combat pre-pull/CC/
+  // loot/trade and non-boss trash pulls) omit the coordination line so they
+  // stay focused on tactical party calls.
+  const bool emit_coordination =
+      snapshot.ext.encounter.has_value() ||
+      (snapshot.ext.raid && !snapshot.ext.raid->members.empty());
+  if (emit_coordination) {
+    if (const std::optional<GroupCoordination> coord =
+            ComputeGroupCoordination(snapshot, out.bot_name)) {
+      out.coordination = FormatGroupCoordination(*coord);
+    }
+  }
   out.wake_reason = ctx.wake_reason;
   if (ctx.party_reply_muted) {
     base::StrAppend(&out.wake_reason,
@@ -1265,6 +1454,17 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
     }
   }
 
+  std::string coordination_line;
+  if (!input.coordination.empty()) {
+    std::string candidate = base::StrCat(
+        {"Group coordination: ",
+         CapInline(OneLine(input.coordination), kMaxInlineFieldBytes), ".\n"});
+    if (candidate.size() <= remaining) {
+      remaining -= candidate.size();
+      coordination_line = std::move(candidate);
+    }
+  }
+
   std::string orders_block;
   if (!input.active_orders.empty()) {
     constexpr std::string_view kHeader = "\n\nActive standing orders:";
@@ -1430,8 +1630,8 @@ LlmRequest BuildPlanRequest(const PromptInput& input, const Screen& screen) {
   // live screen, and mob-specific boss-note reminder last (right before
   // generation) for llama.cpp KV-cache prefix reuse.
   const std::string dynamic_prefix =
-      base::StrCat({"\n\n", goal_line, outcome_line, woken_line, events_block,
-                    orders_block});
+      base::StrCat({"\n\n", goal_line, outcome_line, coordination_line,
+                    woken_line, events_block, orders_block});
   request.user = base::StrCat(
       {name_line, identity_block, memory_block, notes_block, knowledge_block,
        dynamic_prefix, relationships_block, player_chat_block, remembered_block,
@@ -1468,7 +1668,8 @@ PromptBreakdown BreakdownOf(const LlmRequest& req) {
   const auto find_dyn_start = [&]() -> size_t {
     size_t pos = req.user.size();
     for (std::string_view marker :
-         {"\n\nCurrent goal: ", "\n\nLast outcome: ", "\n\nWoken: "}) {
+         {"\n\nCurrent goal: ", "\n\nLast outcome: ",
+          "\n\nGroup coordination: ", "\n\nWoken: "}) {
       if (const size_t p = req.user.find(marker); p != std::string::npos) {
         pos = std::min(pos, p);
       }

@@ -4725,11 +4725,23 @@ TEST(BotLoopTest, LlmHealthHandsOffOnErrorsAndTimeoutsAndRestoresOnRecovery) {
   EXPECT_TRUE(loop.llm_healthy());
   EXPECT_EQ(health_events(), (std::vector<bool>{false, true}));
 
-  // 6. Stalled/timed-out LLM call immediately marks unhealthy on OnTick.
+  // 6. A single timed-out LLM call does NOT immediately flip health to
+  // unhealthy (M10 smoothing); a second consecutive timeout within the failure
+  // window flips health to false.
   wake_with_popup(t0 + base::Seconds(62));
   ASSERT_EQ(brain.size(), 1u);
-  // Advance past call_timeout (10 s).
+  // Advance past call_timeout (10 s): 1st timeout stays healthy.
   loop.OnTick(t0 + base::Seconds(75));
+  EXPECT_TRUE(brain.front_cancelled());
+  EXPECT_TRUE(loop.llm_healthy());
+  EXPECT_EQ(health_events(), (std::vector<bool>{false, true}));
+  brain.FinishCancelled();
+  EXPECT_TRUE(loop.llm_healthy());
+
+  // 2nd consecutive timeout within llm_failure_window hits threshold (2).
+  wake_with_popup(t0 + base::Seconds(76));
+  ASSERT_EQ(brain.size(), 1u);
+  loop.OnTick(t0 + base::Seconds(90));
   EXPECT_TRUE(brain.front_cancelled());
   EXPECT_FALSE(loop.llm_healthy());
   EXPECT_EQ(health_events(), (std::vector<bool>{false, true, false}));
@@ -5663,6 +5675,201 @@ TEST(BotLoopTest, SharedPerRoleOrderCompileAndTrashToBossPull) {
   active.clear();
 
   std::filesystem::remove_all(tmp_dir);
+}
+
+// M10: A burst of back-to-back P0 wakes mid-fight must never livelock the bot
+// by throwing away every in-flight LLM reply; identical in-flight P0 reasons
+// coalesce, and at most one consecutive P0 reply is superseded before the next
+// reply installs its plan.
+TEST(BotLoopTest, P0WakeBurstNeverLivelocksAndCoalescesIdenticalP0Wakes) {
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { sent.push_back(cmd); });
+
+  const auto choose_count = [&] {
+    size_t n = 0;
+    for (const pb::Command& cmd : sent) {
+      if (cmd.choose) {
+        ++n;
+      }
+    }
+    return n;
+  };
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot s1 = MakeLiveSnap("Aldric", 1, t0, /*in_combat=*/true);
+  AddKeep(&s1);
+  loop.OnSnapshot(s1, t0);
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  ASSERT_EQ(choose_count(), 1u);
+
+  // 1. Identical P0 boss emote arriving while a P0 call for that exact emote is
+  // already in flight coalesces instead of queuing a redundant wake that would
+  // throw away the reply.
+  pb::ImmediateEvent emote1;
+  emote1.bot = "Aldric";
+  emote1.event.chat.emplace().channel = pb::BOSS_EMOTE;
+  emote1.event.chat->from = "Loken";
+  emote1.event.chat->text = "Lightning Nova begins!";
+  loop.OnEvent(emote1, t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+
+  // Repeat the exact same P0 boss emote while call 1 is in flight.
+  loop.OnEvent(emote1, t0 + base::Seconds(1) + base::Milliseconds(100));
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  // Applied immediately (no wasted follow-up call, Choose sent).
+  EXPECT_EQ(brain.size(), 0u);
+  EXPECT_EQ(choose_count(), 2u);
+
+  // 2. Burst of 6 distinct back-to-back P0 boss emotes arriving while each call
+  // is in flight: must NOT livelock (at least 3 replies must install and send
+  // Choose commands even while every single call has a newer P0 wake queued).
+  const size_t chooses_before_burst = choose_count();
+  pb::ImmediateEvent first_burst;
+  first_burst.bot = "Aldric";
+  first_burst.event.chat.emplace().channel = pb::BOSS_EMOTE;
+  first_burst.event.chat->from = "Loken";
+  first_burst.event.chat->text = "Phase alert 0";
+  loop.OnEvent(first_burst, t0 + base::Seconds(5));
+  ASSERT_EQ(brain.size(), 1u);
+
+  for (int i = 1; i <= 6; ++i) {
+    pb::ImmediateEvent next_burst;
+    next_burst.bot = "Aldric";
+    next_burst.event.chat.emplace().channel = pb::BOSS_EMOTE;
+    next_burst.event.chat->from = "Loken";
+    next_burst.event.chat->text = "Phase alert " + std::to_string(i);
+    loop.OnEvent(next_burst,
+                 t0 + base::Seconds(5) + base::Milliseconds(i * 100));
+    ASSERT_EQ(brain.size(), 1u);
+    brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  }
+  // Finish the final queued P0 call.
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  EXPECT_EQ(brain.size(), 0u);
+  // Of 6 calls that finished with a newer P0 queued + 1 final call, at least 4
+  // replies installed and dispatched Choose (zero livelock).
+  EXPECT_GE(choose_count() - chooses_before_burst, 4u);
+
+  // 3. Adversarial counter-test: disconnect resets supersession state cleanly.
+  loop.OnConnectionChanged(false);
+  EXPECT_EQ(brain.size(), 0u);
+}
+
+// M10: Smooth LLM health tracking — single timeout keeps fleet healthy,
+// failures outside the sliding window do not accumulate, sustained outage
+// flips to playerbots fallback, and recovery honors hysteresis.
+TEST(BotLoopTest, SmoothedLlmHealthToleratesSingleTimeoutWindowAndHysteresis) {
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  cfg.call_timeout = base::Seconds(10);
+  cfg.llm_unhealthy_after_failures = 3;
+  cfg.llm_healthy_after_successes = 2;
+  cfg.llm_failure_window = base::Seconds(60);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& cmd) { sent.push_back(cmd); });
+
+  const auto health_events = [&] {
+    std::vector<bool> out;
+    for (const pb::Command& cmd : sent) {
+      if (cmd.health) {
+        out.push_back(cmd.health->llm_healthy);
+      }
+    }
+    return out;
+  };
+  const auto wake = [&](const std::string& bot, base::TimeTicks at) {
+    pb::ImmediateEvent ev;
+    ev.bot = bot;
+    ev.event.prompt.emplace().kind = pb::PromptEvent::READY_CHECK;
+    loop.OnEvent(std::move(ev), at);
+  };
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  pb::Snapshot sa = MakeLiveSnap("Aldric", 1, t0);
+  AddKeep(&sa);
+  pb::Snapshot sb = MakeLiveSnap("Mirabel", 1, t0);
+  AddKeep(&sb);
+  loop.OnSnapshot(sa, t0);
+  loop.OnSnapshot(sb, t0);
+  ASSERT_EQ(brain.size(), 2u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300");
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300");
+  EXPECT_TRUE(loop.llm_healthy());
+  EXPECT_TRUE(health_events().empty());
+
+  // 1. Single timeout on Aldric does NOT flip fleet health.
+  wake("Aldric", t0 + base::Seconds(1));
+  ASSERT_EQ(brain.size(), 1u);
+  loop.OnTick(t0 + base::Seconds(15));
+  EXPECT_TRUE(brain.front_cancelled());
+  brain.FinishCancelled();
+  EXPECT_TRUE(loop.llm_healthy());
+  EXPECT_TRUE(health_events().empty());
+
+  // 2. A valid reply from Mirabel clears the failure streak.
+  wake("Mirabel", t0 + base::Seconds(16));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300");
+  EXPECT_TRUE(loop.llm_healthy());
+
+  // 3. Adversarial counter-test: isolated timeouts farther apart than
+  // llm_failure_window (60 s) never accumulate into an outage.
+  wake("Aldric", t0 + base::Seconds(20));
+  ASSERT_EQ(brain.size(), 1u);
+  loop.OnTick(t0 + base::Seconds(35));
+  brain.FinishCancelled();
+  EXPECT_TRUE(loop.llm_healthy());
+
+  wake("Aldric", t0 + base::Seconds(110));
+  ASSERT_EQ(brain.size(), 1u);
+  loop.OnTick(t0 + base::Seconds(125));
+  brain.FinishCancelled();
+  EXPECT_TRUE(loop.llm_healthy());
+
+  wake("Aldric", t0 + base::Seconds(200));
+  ASSERT_EQ(brain.size(), 1u);
+  loop.OnTick(t0 + base::Seconds(215));
+  brain.FinishCancelled();
+  EXPECT_TRUE(loop.llm_healthy());
+  EXPECT_TRUE(health_events().empty());
+
+  // 4. Sustained outage: 3 consecutive failures within 60 s flips unhealthy.
+  wake("Aldric", t0 + base::Seconds(220));
+  ASSERT_EQ(brain.size(), 1u);
+  loop.OnTick(t0 + base::Seconds(235));  // Failure 2 in window (215s, 235s).
+  brain.FinishCancelled();
+  EXPECT_TRUE(loop.llm_healthy());
+
+  wake("Mirabel", t0 + base::Seconds(240));
+  ASSERT_EQ(brain.size(), 1u);
+  loop.OnTick(t0 + base::Seconds(255));  // Failure 3 in window -> unhealthy!
+  brain.FinishCancelled();
+  EXPECT_FALSE(loop.llm_healthy());
+  EXPECT_EQ(health_events(), (std::vector<bool>{false}));
+
+  // 5. Recovery hysteresis: 1st valid reply (Aldric's 2 s post-timeout retry
+  // started on OnTick(255s)) is not enough when llm_healthy_after_successes ==
+  // 2; 2nd consecutive valid reply restores healthy status cleanly.
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  EXPECT_FALSE(loop.llm_healthy());
+  EXPECT_EQ(health_events(), (std::vector<bool>{false}));
+
+  wake("Mirabel", t0 + base::Seconds(261));
+  ASSERT_EQ(brain.size(), 1u);
+  brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 60");
+  EXPECT_TRUE(loop.llm_healthy());
+  EXPECT_EQ(health_events(), (std::vector<bool>{false, true}));
 }
 
 }  // namespace

@@ -13,6 +13,8 @@
 #define HARNESS_SCREEN_PROMPT_H_
 
 #include <cstddef>
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -49,6 +51,9 @@ struct PromptInput {
   std::string current_goal;  // Empty when the bot has no goal yet.
   // 1-line breadcrumb of the last action failure/interruption (if any).
   std::string last_outcome;
+  // Deterministic roster-derived coordination facts when in combat, during an
+  // encounter, or in a raid (M10).
+  std::string coordination;
   std::string wake_reason;  // "plan done", "attacked", ...
   // Events noted since the bot's last look (chat, loot, errors).
   std::vector<std::string> recent_events;
@@ -141,6 +146,34 @@ struct PromptAssemblyContext {
   int slot = -1;
   float temperature = 0.7f;
 };
+
+// Deterministic roster-derived coordination facts for grouped bots (M10).
+// Pure geometry and roster indexing (Core Rule 1): every bot in the same group
+// computes the same sorted roster and receives a unique spread slot/angle,
+// interrupt rotation index (among baseline interrupt-capable classes), and
+// balanced soak group ("A" or "B").
+struct GroupCoordination {
+  int spread_slot = 0;         // 1-based slot index (1..spread_total).
+  int spread_total = 0;        // Total members in the group.
+  int spread_angle_deg = 0;    // 0..359 deg (0=N, 90=E, 180=S, 270=W).
+  std::string spread_compass;  // N, NE, E, SE, S, SW, W, NW.
+  int spread_ring = 0;         // 0 for <=8 members; 1 (inner) / 2 (outer) >8.
+  int interrupt_order = 0;     // 1-based order among interrupters, or 0.
+  int interrupt_total = 0;     // Total interrupt-capable members in the group.
+  std::string soak_group;      // "A" or "B".
+  uint32_t subgroup = 0;       // 1-based raid subgroup when multi-subgroup.
+
+  bool operator==(const GroupCoordination&) const = default;
+};
+
+// Computes deterministic coordination facts for `bot_name` (or `snapshot.bot`)
+// from the group roster in `snapshot`. Returns `std::nullopt` when solo.
+std::optional<GroupCoordination> ComputeGroupCoordination(
+    const wlb::snapshot::Snapshot& snapshot,
+    std::string_view bot_name = {});
+
+// Compact single-line summary of `coord` for the brain prompt.
+std::string FormatGroupCoordination(const GroupCoordination& coord);
 
 // Assembles a complete `PromptInput` from `ctx` and `snapshot` (memory,
 // relationships for present players, party-mute suffix, whisperers + party

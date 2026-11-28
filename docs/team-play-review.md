@@ -61,10 +61,10 @@ Tracking document for findings from the WoW Team Play Review. Each item is tagge
 
 ### Brain / harness
 
-- [ ] **[M10]** P0 wakes in a row can throw away every reply mid-fight (livelock).
-- [ ] **[M10]** One timed-out call marks the LLM unhealthy for all bots, and control flips to playerbots: release, corpse run, and popups. That flaps under load.
+- [x] **[M10]** P0 wakes in a row can throw away every reply mid-fight (livelock).
+- [x] **[M10]** One timed-out call marks the LLM unhealthy for all bots, and control flips to playerbots: release, corpse run, and popups. That flaps under load.
 - [x] **[M9]** Orders are compiled only out of combat, once at the instance entrance, with a 7-order cap. A boss pulled straight from trash gets no orders.
-- [ ] **[M10]** No coordination between bots: no spread slots, interrupt rotation, or soak groups, so every bot does the same thing.
+- [x] **[M10]** No coordination between bots: no spread slots, interrupt rotation, or soak groups, so every bot does the same thing.
 
 ### Loot and upkeep
 

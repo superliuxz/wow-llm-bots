@@ -87,11 +87,17 @@ struct BotLoopConfig {
   // 60 s.
   base::TimeDelta combat_call_timeout = base::Seconds(10);
   base::TimeDelta call_timeout = base::Seconds(30);
-  // Consecutive LLM transport/server errors before reporting the LLM unhealthy
-  // to the server so popup ownership falls back to playerbots (0 disables).
-  // A call that hits `combat_call_timeout`/`call_timeout` marks unhealthy at
-  // once.
-  int llm_unhealthy_after_failures = 2;
+  // Consecutive LLM transport/server errors or call timeouts within
+  // `llm_failure_window` before reporting the LLM unhealthy to the server so
+  // popup/fallback ownership hands off to playerbots (0 disables). A single
+  // timeout does not flip the fleet; sustained failures do.
+  int llm_unhealthy_after_failures = 3;
+  // Consecutive valid LLM replies required to restore healthy status after an
+  // unhealthy transition (hysteresis; clamped to >= 1).
+  int llm_healthy_after_successes = 1;
+  // Sliding window for counting consecutive LLM failures; isolated failures
+  // farther apart than this do not accumulate into an outage (0 = no window).
+  base::TimeDelta llm_failure_window = base::Seconds(60);
   // Human-like reaction + typing delay before outbound chat (`say:`, `party:`,
   // `tell`, `general:`, `lfg:`) flushes on `OnTick` (Now #10). Zero by default
   // for synchronous unit tests; enabled (1-3 s) in live `harness run`.
@@ -266,6 +272,9 @@ class BotLoop {
 
     bool has_ever_woken = false;
     Urgency queued_urgency = Urgency::kP2Routine;
+    Urgency in_flight_urgency = Urgency::kP2Routine;
+    std::vector<std::string> in_flight_reasons;
+    int consecutive_superseded_p0_replies = 0;
     base::scoped_refptr<LlmCancelHandle> in_flight_cancel;
     base::TimeTicks call_deadline;
     uint64_t call_timed_out_epoch = 0;
@@ -570,7 +579,7 @@ class BotLoop {
                                bool prompted_by_player_chat,
                                base::TimeTicks now);
   void SetLlmHealthy(bool healthy);
-  void RecordLlmFailure(bool immediate_unhealthy = false);
+  void RecordLlmFailure(base::TimeTicks now);
   void RecordLlmSuccess();
   void Log(const std::string& line);
 
@@ -621,7 +630,8 @@ class BotLoop {
   uint64_t calls_cancelled_ = 0;
   uint64_t commands_sent_ = 0;
   bool llm_healthy_ = true;
-  int consecutive_llm_failures_ = 0;
+  std::deque<base::TimeTicks> recent_llm_failures_;
+  int consecutive_llm_successes_ = 0;
   base::WeakPtrFactory<BotLoop> weak_factory_{this};
 };
 
