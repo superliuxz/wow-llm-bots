@@ -704,7 +704,8 @@ TEST(TriggersTest, ResurrectOfferPromptDoesNotWakeOtherPromptsStillDo) {
   // Adversarial counter-tests: other prompts still wake at P1Danger.
   for (pb::PromptEvent::Kind kind :
        {pb::PromptEvent::READY_CHECK, pb::PromptEvent::GROUP_INVITE,
-        pb::PromptEvent::SUMMON, pb::PromptEvent::LFG_PROPOSAL}) {
+        pb::PromptEvent::SUMMON, pb::PromptEvent::LFG_PROPOSAL,
+        pb::PromptEvent::CONFIRM_SPIRIT_HEALER}) {
     pb::Event ev;
     ev.prompt.emplace().kind = kind;
     const std::optional<WakeTrigger> trig = EvaluateEventTrigger(ev);

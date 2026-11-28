@@ -1387,6 +1387,11 @@ void SnapshotBuilder::FillOptionFacts(Player* bot,
     }
   }
   out->has_pending_resurrect = !bot->IsAlive() && bot->isResurrectRequested();
+  out->ghost_stuck = bot->HasPlayerFlag(PLAYER_FLAGS_GHOST) &&
+                     BotSessionRegistry::Instance().InspectSession(
+                         bot->GetGUID().GetRawValue(), [](const BotSession* s) {
+                           return s && s->corpse_run_progress.stuck;
+                         });
   if (!bot->IsAlive() && !bot->HasPlayerFlag(PLAYER_FLAGS_GHOST)) {
     if (const SpellInfo* self_res = sSpellMgr->GetSpellInfo(
             bot->GetUInt32Value(PLAYER_SELF_RES_SPELL))) {
@@ -1457,7 +1462,8 @@ void SnapshotBuilder::FillOptionFacts(Player* bot,
       lt.bot_phase_mask = view.phase_mask;
       lt.bot_pos = view.pos;
       lt.leader_present = true;
-      lt.leader_alive = leader->IsAlive();
+      lt.leader_alive =
+          leader->IsAlive() && !leader->HasPlayerFlag(PLAYER_FLAGS_GHOST);
       lt.leader_in_bg_or_arena = leader->InBattleground() || leader->InArena();
       lt.leader_name = leader->GetName();
       lt.leader_map_id = leader->GetMapId();

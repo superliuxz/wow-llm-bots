@@ -118,8 +118,8 @@ std::string Speak(Player* bot,
   if (!bot->CanSpeak()) {
     return "you can't speak yet (muted)";
   }
-  if (std::string why = WhyCantTalk(bot, say.channel != pb::WHISPER);
-      !why.empty()) {
+  const bool out_loud = say.channel == pb::SAY || say.channel == pb::YELL;
+  if (std::string why = WhyCantTalk(bot, out_loud); !why.empty()) {
     return why;
   }
   // Out loud a player speaks their race's language; whispers are always

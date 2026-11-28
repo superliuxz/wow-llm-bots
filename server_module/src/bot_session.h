@@ -19,6 +19,7 @@
 #include "base/synchronization/lock.h"
 #include "base/thread_annotations.h"
 #include "base/time/time.h"
+#include "bot_manager/corpse_run.h"
 #include "bot_manager/errand_hold.h"
 #include "bot_manager/pull_discipline.h"
 #include "bot_manager/tick_owner.h"
@@ -104,6 +105,7 @@ struct BotSession {
     bool operator==(const CorpseRunStep&) const = default;
   };
   std::optional<CorpseRunStep> corpse_run_step;
+  CorpseRunProgressState corpse_run_progress;
 
   // Group policy chosen by the brain for `group_guid`. Survives logout: the
   // group does too.

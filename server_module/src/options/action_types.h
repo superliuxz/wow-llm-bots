@@ -70,7 +70,7 @@ struct DeclineInviteAction {
 struct LeaveGroupAction {};
 
 struct ResurrectAction {
-  enum class Mode : uint8_t { kAccept, kRelease, kWait, kSelf };
+  enum class Mode : uint8_t { kAccept, kRelease, kWait, kSelf, kSpiritHealer };
   Mode mode = Mode::kRelease;
 };
 
@@ -186,6 +186,14 @@ struct PopupAnswerAction {
   bool yes = true;
 };
 
+// Targets a remote group member and clicks a nearby Meeting Stone to begin a
+// summon (M13).
+struct MeetingStoneSummonAction {
+  std::string object_guid;
+  std::string target_guid;
+  std::string label;
+};
+
 // The trade window (Objective 9a): open one with a party member, put a bag
 // item up for trade, accept (press Trade), or cancel.
 struct TradeAction {
@@ -299,6 +307,7 @@ using BotAction = std::variant<KeepAction,
                                GroupPolicyAction,
                                GroupLeaderAction,
                                PopupAnswerAction,
+                               MeetingStoneSummonAction,
                                TradeAction,
                                CrowdControlAction,
                                TauntAction,

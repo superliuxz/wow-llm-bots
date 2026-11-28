@@ -2354,6 +2354,39 @@ class LlmBrainWorldScript : public WorldScript {
     }
     if (kind == OptionTarget::Kind::kUse ||
         kind == OptionTarget::Kind::kGather) {
+      if (const auto* ms = std::get_if<MeetingStoneSummonAction>(
+              &state.active_option->action)) {
+        GameObject* go = ObjectAccessor::GetGameObject(
+            *bot, ParseSnapshotGuid(ms->object_guid));
+        if (go == nullptr) {
+          return;
+        }
+        if (!IsInUseRange(bot, go)) {
+          if (!bot->isMoving() && now >= state.next_rest_try) {
+            state.next_rest_try = now + base::Seconds(1);
+            if (!WalkTowards(bot, go->GetPositionX(), go->GetPositionY(),
+                             go->GetPositionZ())) {
+              FailActiveOption(index, name, bot,
+                               "no path to " + state.active_option->name);
+            }
+          }
+          return;
+        }
+        state.object_used = true;
+        ActionOutcome res = ExecuteMeetingStoneSummonAction(bot, *ms);
+        if (!res.error.empty()) {
+          LOG_INFO("module",
+                   "mod-llm-brain: {} can't summon at meeting stone on "
+                   "arrival: {}",
+                   name, res.error);
+          FailActiveOption(index, name, bot, std::move(res.error));
+        } else if (!res.info.empty()) {
+          wlb::snapshot::Event payload;
+          payload.info.emplace().text = std::move(res.info);
+          SendImmediateEvent(index, name, std::move(payload));
+        }
+        return;
+      }
       if (!IsGameObjectAction(state.active_option->action)) {
         return;
       }

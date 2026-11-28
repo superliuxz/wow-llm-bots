@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
+#include <limits>
 #include <list>
 #include <optional>
 #include <span>
@@ -91,6 +92,7 @@
 #include "bot_manager/tick_owner.h"
 #include "bot_session.h"
 #include "chat/chat_scripts.h"
+#include "chat/speak.h"
 #include "config/config_parsing.h"
 #include "options/act_geometry.h"
 #include "options/exec_shared.h"
@@ -1202,6 +1204,22 @@ class BrainPolicyListener final : public ActionExecutionListener {
       if (BotManager::ErrandHoldActive(bot_)) {
         return false;
       }
+      if (Group* group = bot_->GetGroup();
+          group && !group->IsLeader(bot_->GetGUID())) {
+        Player* leader =
+            ObjectAccessor::FindConnectedPlayer(group->GetLeaderGUID());
+        if (ShouldHoldPositionForDeadLeader({
+                .bot_alive = bot_->IsAlive(),
+                .in_group = true,
+                .bot_is_leader = false,
+                .leader_present = leader != nullptr && leader->IsInWorld(),
+                .leader_alive = leader != nullptr && leader->IsAlive(),
+                .leader_is_ghost = leader != nullptr &&
+                                   leader->HasPlayerFlag(PLAYER_FLAGS_GHOST),
+            })) {
+          return false;
+        }
+      }
       constexpr float kGuardRadiusYd = kUnpulledClearYd + 4.0f;
       std::vector<Unit*> units;
       Acore::AnyUnitInObjectRangeCheck check(bot_, kGuardRadiusYd);
@@ -1520,6 +1538,7 @@ void BotManager::Tick() {
                 s.dead_since_ms.reset();
                 s.rez_wait_until_ms.reset();
                 s.corpse_run_step.reset();
+                s.corpse_run_progress = {};
               });
         }
         const bool group_in_combat =
@@ -1726,9 +1745,48 @@ void BotManager::KeepCorpseRun(Player* player) {
   }
 
   const CorpseRunDecision decision = EvaluateCorpseRun(input);
+  const bool track_progress =
+      decision.action == CorpseRunAction::kWalkToTarget ||
+      (decision.action == CorpseRunAction::kNone && input.has_corpse &&
+       !input.being_teleported && !input.in_battleground && !input.in_arena &&
+       !input.within_reclaim_range &&
+       (!input.can_move || (input.bot_map_id != input.corpse_map_id &&
+                            !input.instance_entrance.has_value())));
+  const float dist_to_target =
+      decision.action == CorpseRunAction::kWalkToTarget
+          ? player->GetExactDist(decision.target_pos.x, decision.target_pos.y,
+                                 decision.target_pos.z)
+          : std::numeric_limits<float>::infinity();
+  const CorpseRunProgressResult progress =
+      BotSessionRegistry::Instance().WithSession(
+          key, [&](BotSession& s) -> CorpseRunProgressResult {
+            return UpdateCorpseRunProgress(&s.corpse_run_progress,
+                                           track_progress, input.bot_map_id,
+                                           dist_to_target, getMSTime());
+          });
+  if (progress.newly_stuck) {
+    LOG_WARN("module",
+             "mod-llm-brain: {} ghost stuck on corpse run (map {}, dist {:.1f} "
+             "yd); exposing Spirit Healer option",
+             player->GetName(), input.bot_map_id,
+             std::isfinite(dist_to_target) ? dist_to_target : -1.0f);
+    Group* group = player->GetGroup();
+    if (ShouldSendStuckGhostChatAlert(progress.newly_stuck, group != nullptr,
+                                      GroupHasHuman(group))) {
+      wlb::snapshot::Command::Say alert;
+      alert.channel =
+          group->isRaidGroup() ? wlb::snapshot::RAID : wlb::snapshot::PARTY;
+      alert.text =
+          "My ghost is stuck on the corpse run; Spirit Healer resurrect is "
+          "available or I need a rez/summon.";
+      Speak(player, alert);
+    }
+  }
   auto clear_step = [key]() {
-    BotSessionRegistry::Instance().WithSession(
-        key, [](BotSession& s) { s.corpse_run_step.reset(); });
+    BotSessionRegistry::Instance().WithSession(key, [](BotSession& s) {
+      s.corpse_run_step.reset();
+      s.corpse_run_progress = {};
+    });
   };
   switch (decision.action) {
     case CorpseRunAction::kNone:
@@ -1814,6 +1872,23 @@ void BotManager::KeepNearHumanLeader(Player* player) {
     return;
   }
   Player* leader = ObjectAccessor::FindConnectedPlayer(group->GetLeaderGUID());
+  if (ShouldHoldPositionForDeadLeader({
+          .bot_alive = player->IsAlive(),
+          .in_group = true,
+          .bot_is_leader = false,
+          .leader_present = leader != nullptr && leader->IsInWorld(),
+          .leader_alive = leader != nullptr && leader->IsAlive(),
+          .leader_is_ghost =
+              leader != nullptr && leader->HasPlayerFlag(PLAYER_FLAGS_GHOST),
+      })) {
+    if (player->GetMotionMaster()->GetCurrentMovementGeneratorType() ==
+        FOLLOW_MOTION_TYPE) {
+      player->GetMotionMaster()->Clear();
+      player->StopMoving();
+      ClearLastMovement(player);
+    }
+    return;
+  }
   if (!leader || !leader->IsInWorld() || !IsHumanPlayer(leader) ||
       leader->IsInFlight() || leader->GetMapId() != player->GetMapId() ||
       leader->GetInstanceId() != player->GetInstanceId() ||
@@ -1954,6 +2029,23 @@ void BotManager::KeepSafeGroupFollow(Player* player) {
     return;
   }
   Player* leader = ObjectAccessor::FindConnectedPlayer(group->GetLeaderGUID());
+  if (ShouldHoldPositionForDeadLeader({
+          .bot_alive = player->IsAlive(),
+          .in_group = true,
+          .bot_is_leader = false,
+          .leader_present = leader != nullptr && leader->IsInWorld(),
+          .leader_alive = leader != nullptr && leader->IsAlive(),
+          .leader_is_ghost =
+              leader != nullptr && leader->HasPlayerFlag(PLAYER_FLAGS_GHOST),
+      })) {
+    if (player->GetMotionMaster()->GetCurrentMovementGeneratorType() ==
+        FOLLOW_MOTION_TYPE) {
+      player->GetMotionMaster()->Clear();
+      player->StopMoving();
+      ClearLastMovement(player);
+    }
+    return;
+  }
   if (!leader || !leader->IsInWorld() || !leader->IsAlive() ||
       leader->IsInFlight() || leader->GetMapId() != player->GetMapId() ||
       leader->GetInstanceId() != player->GetInstanceId()) {
@@ -2827,6 +2919,11 @@ PopupState BotManager::ReadPopupState(Player* bot) {
     }
   } else {
     s.resurrect_offer = bot->isResurrectRequested();
+    s.ghost_stuck = bot->HasPlayerFlag(PLAYER_FLAGS_GHOST) &&
+                    BotSessionRegistry::Instance().InspectSession(
+                        bot->GetGUID().GetRawValue(), [](const BotSession* bs) {
+                          return bs && bs->corpse_run_progress.stuck;
+                        });
   }
   if (Group* group = bot->GetGroup()) {
     for (const Roll* roll : group->GetRolls()) {

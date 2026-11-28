@@ -46,7 +46,8 @@ ErrandKind ErrandKindForAction(const BotAction& action) {
           return ErrandKind::kLoot;
         } else if constexpr (std::is_same_v<T, GatherAction>) {
           return ErrandKind::kGather;
-        } else if constexpr (std::is_same_v<T, UseObjectAction>) {
+        } else if constexpr (std::is_same_v<T, UseObjectAction> ||
+                             std::is_same_v<T, MeetingStoneSummonAction>) {
           return ErrandKind::kUseObject;
         } else if constexpr (std::is_same_v<T, UseBagItemAction> ||
                              std::is_same_v<T, MountAction>) {

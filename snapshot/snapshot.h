@@ -2191,6 +2191,9 @@ struct OptionFacts {
   std::vector<std::string> invite_candidates;
   bool can_leave_group = false;
   bool has_pending_resurrect = false;
+  // True when a ghost has made no progress toward its corpse/entrance for the
+  // stuck-ghost window, exposing the Spirit Healer resurrect option (M13 P0-7).
+  bool ghost_stuck = false;
   // The self-resurrection the dead bot can use now (Soulstone Resurrection,
   // Reincarnation), by name; empty when none.
   std::string self_resurrect;

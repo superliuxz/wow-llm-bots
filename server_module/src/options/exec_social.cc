@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <numbers>
 #include <optional>
 #include <string>
@@ -14,13 +15,19 @@
 #include <vector>
 
 #include "AiFactory.h"
+#include "Cell.h"
+#include "CellImpl.h"  // IWYU pragma: keep
 #include "CharmInfo.h"
 #include "Creature.h"
 #include "DBCEnums.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
 #include "Define.h"
+#include "GameObject.h"
+#include "GameObjectData.h"
 #include "GameTime.h"
+#include "GridNotifiers.h"
+#include "GridNotifiersImpl.h"  // IWYU pragma: keep
 #include "Group.h"
 #include "Item.h"
 #include "ItemTemplate.h"
@@ -704,6 +711,7 @@ void CollectGroupAndUpkeepActions(Player* bot,
       if (leader_guid && leader_guid != bot->GetGUID()) {
         if (Player* leader = ObjectAccessor::FindConnectedPlayer(leader_guid);
             leader && leader->IsInWorld() && leader->IsAlive() &&
+            !leader->HasPlayerFlag(PLAYER_FLAGS_GHOST) &&
             leader->GetMapId() == bot->GetMapId() &&
             leader->GetInstanceId() == bot->GetInstanceId()) {
           const float dist = bot->GetDistance(leader);
@@ -845,6 +853,57 @@ void CollectGroupAndUpkeepActions(Player* bot,
         for (pb::OptionFacts_Action& act : CollectGroupLeaderControls(gl_in)) {
           out->push_back(std::move(act));
         }
+      }
+
+      // 5d. Nearby Meeting Stone summon options (M13): let the brain pick
+      //     which remote group member to summon at a usable Meeting Stone.
+      for (const pb::GameObject& obj : snapshot.base.nearby.objects) {
+        if (obj.kind != pb::GameObject::MEETING_STONE || !obj.usable ||
+            obj.guid.empty()) {
+          continue;
+        }
+        GameObject* go =
+            ObjectAccessor::GetGameObject(*bot, ParseSnapshotGuid(obj.guid));
+        if (!go || !go->IsInWorld() || !go->isSpawned() ||
+            go->GetGoType() != GAMEOBJECT_TYPE_MEETINGSTONE) {
+          continue;
+        }
+        const GameObjectTemplate* info = go->GetGOInfo();
+        const uint8_t min_level =
+            info ? static_cast<uint8_t>(info->meetingstone.minLevel) : 0;
+        std::vector<MeetingStoneMember> members;
+        for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+          if (slot.guid == bot->GetGUID()) {
+            continue;
+          }
+          Player* m = ObjectAccessor::FindConnectedPlayer(slot.guid);
+          if (!m || !m->IsInWorld()) {
+            continue;
+          }
+          const bool same_map = m->GetMapId() == bot->GetMapId() &&
+                                m->GetInstanceId() == bot->GetInstanceId();
+          const float dist = same_map ? bot->GetDistance(m)
+                                      : std::numeric_limits<float>::infinity();
+          members.push_back(MeetingStoneMember{
+              .guid = base::StringPrintf(
+                  "0x%016llx",
+                  static_cast<unsigned long long>(slot.guid.GetRawValue())),
+              .name = m->GetName(),
+              .level = m->GetLevel(),
+              .is_human = IsHumanPlayer(m),
+              .online = true,
+              .same_map_and_close = same_map && dist <= 40.0f,
+              .dist_yd = dist,
+          });
+        }
+        CollectMeetingStoneSummonActions(
+            bot->IsAlive(), bot->IsInCombat(), bot->GetLevel(),
+            MeetingStoneFact{.guid = obj.guid,
+                             .name = obj.name,
+                             .min_level = min_level,
+                             .dist_yd = obj.rel.dist_yd},
+            members, out);
+        break;
       }
     }
   }
@@ -1311,6 +1370,70 @@ ActionOutcome ExecuteResurrectAction(Player* bot,
       session->HandleRepopRequestOpcode(p);
       return {.used = true, .info = "released spirit"};
     }
+    case ResurrectAction::Mode::kSpiritHealer: {
+      if (bot->IsAlive()) {
+        return {.error = "you are already alive"};
+      }
+      if (!bot->HasPlayerFlag(PLAYER_FLAGS_GHOST)) {
+        return {.error = "you must release spirit first"};
+      }
+      if (bot->HasPreventResurectionAura()) {
+        return {.error = "resurrection is currently prevented"};
+      }
+      WorldSession* session = bot->GetSession();
+      if (!session) {
+        return {.error = "no session"};
+      }
+      auto find_spirit_healer = [bot]() -> Creature* {
+        std::vector<Unit*> units;
+        Acore::AnyUnitInObjectRangeCheck check(bot, INTERACTION_DISTANCE);
+        Acore::UnitListSearcher<Acore::AnyUnitInObjectRangeCheck> searcher(
+            bot, units, check);
+        Cell::VisitObjects(bot, searcher, INTERACTION_DISTANCE);
+        for (Unit* u : units) {
+          if (Creature* c = u->ToCreature();
+              c && c->HasNpcFlag(UNIT_NPC_FLAG_SPIRITHEALER) &&
+              bot->GetNPCIfCanInteractWith(c->GetGUID(),
+                                           UNIT_NPC_FLAG_SPIRITHEALER)) {
+            return c;
+          }
+        }
+        return nullptr;
+      };
+      bot->GetMotionMaster()->Clear();
+      bot->StopMoving();
+      ClearLastMovement(bot);
+      Creature* healer = find_spirit_healer();
+      if (healer) {
+        WorldPacket p(CMSG_SPIRIT_HEALER_ACTIVATE, 8);
+        p << healer->GetGUID();
+        p.rpos(0);
+        session->HandleSpiritHealerActivateOpcode(p);
+      } else {
+        // Ghost is stuck away from the graveyard: return to graveyard first
+        // (equivalent to WoW's "Return to Graveyard" button) and then apply
+        // the legitimate Spirit Healer resurrection with sickness & durability
+        // loss.
+        bot->RepopAtGraveyard();
+        if (Creature* gy_healer = find_spirit_healer()) {
+          WorldPacket p(CMSG_SPIRIT_HEALER_ACTIVATE, 8);
+          p << gy_healer->GetGUID();
+          p.rpos(0);
+          session->HandleSpiritHealerActivateOpcode(p);
+        } else {
+          session->SendSpiritResurrect();
+        }
+      }
+      BotSessionRegistry::Instance().WithSession(bot->GetGUID().GetRawValue(),
+                                                 [](BotSession& s) {
+                                                   s.corpse_run_step.reset();
+                                                   s.corpse_run_progress = {};
+                                                 });
+      if (!bot->IsAlive()) {
+        return {.error = "could not resurrect at Spirit Healer now"};
+      }
+      return {.used = true, .info = "resurrected at Spirit Healer"};
+    }
   }
   return {.error = "invalid resurrection action"};
 }
@@ -1725,6 +1848,7 @@ ActionOutcome ExecuteFollowLeaderAction(Player* bot,
   Player* leader = ObjectAccessor::FindConnectedPlayer(
       ParseSnapshotGuid(action.leader_guid));
   if (!leader || !leader->IsInWorld() || !leader->IsAlive() ||
+      leader->HasPlayerFlag(PLAYER_FLAGS_GHOST) ||
       leader->GetMapId() != bot->GetMapId() ||
       leader->GetInstanceId() != bot->GetInstanceId()) {
     return {.error = "party leader is not nearby"};
@@ -2121,6 +2245,60 @@ ActionOutcome ExecutePopupAnswerAction(Player* bot,
   session->HandleLfgSetBootVoteOpcode(p);
   return {.used = true,
           .info = action.yes ? "voted to kick" : "voted not to kick"};
+}
+
+ActionOutcome ExecuteMeetingStoneSummonAction(
+    Player* bot,
+    const MeetingStoneSummonAction& action) {
+  WorldSession* session = bot->GetSession();
+  if (!session) {
+    return {.error = "no session"};
+  }
+  Group* group = bot->GetGroup();
+  if (!group) {
+    return {.error = "you are not in a group"};
+  }
+  GameObject* go = ObjectAccessor::GetGameObject(
+      *bot, ParseSnapshotGuid(action.object_guid));
+  if (!go || !go->IsInWorld() || !go->isSpawned() ||
+      go->GetGoType() != GAMEOBJECT_TYPE_MEETINGSTONE) {
+    return {.error = "meeting stone is gone"};
+  }
+  Player* target = ObjectAccessor::FindConnectedPlayer(
+      ParseSnapshotGuid(action.target_guid));
+  if (!target || target == bot || !target->IsInWorld() ||
+      !target->IsInSameRaidWith(bot)) {
+    return {.error = "group member is not available to summon"};
+  }
+  const GameObjectTemplate* info = go->GetGOInfo();
+  const uint8_t min_level =
+      info ? static_cast<uint8_t>(info->meetingstone.minLevel) : 0;
+  if (bot->GetLevel() < min_level) {
+    return {.error = "your level is too low for " + go->GetName()};
+  }
+  if (target->GetLevel() < min_level) {
+    return {.error =
+                target->GetName() + "'s level is too low for " + go->GetName()};
+  }
+  if (!IsInUseRange(bot, go)) {
+    if (!WalkNextTo(bot, go)) {
+      return {.error = "no path to " + go->GetName()};
+    }
+    return {};
+  }
+  if (bot->isMoving()) {
+    bot->StopMoving();
+  }
+  ClearLastMovement(bot);
+  bot->SetSelection(target->GetGUID());
+  WorldPacket pkt(CMSG_GAMEOBJ_USE, 8);
+  pkt << go->GetGUID();
+  pkt.rpos(0);
+  session->HandleGameObjectUseOpcode(pkt);
+  if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot)) {
+    ai->ResetActionDuration();
+  }
+  return {.used = true, .info = "summoning " + target->GetName()};
 }
 
 namespace {

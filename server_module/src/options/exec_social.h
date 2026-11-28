@@ -51,6 +51,9 @@ ActStartResult ExecuteBattleResAction(Player* bot,
                                       ActiveAct* out_active);
 ActionOutcome ExecutePopupAnswerAction(Player* bot,
                                        const PopupAnswerAction& action);
+ActionOutcome ExecuteMeetingStoneSummonAction(
+    Player* bot,
+    const MeetingStoneSummonAction& action);
 // Opens, fills, accepts or cancels the trade window through the client's
 // own packets (CMSG_INITIATE_TRADE, CMSG_SET_TRADE_ITEM, CMSG_SET_TRADE_GOLD,
 // CMSG_ACCEPT_TRADE, CMSG_CANCEL_TRADE), so the server's checks apply.

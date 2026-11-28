@@ -244,6 +244,8 @@ TEST(BotSessionRegistryTest, StopDpsClearsOnMapChangeDisconnectAndLogout) {
       s.group_policy.stay_in_combat = true;
       s.stop_dps = true;
       s.skull_rti_suppressed = true;
+      s.corpse_run_progress.tracking = true;
+      s.corpse_run_progress.stuck = true;
     });
   };
   const auto expect_cleared = [&] {
@@ -251,6 +253,8 @@ TEST(BotSessionRegistryTest, StopDpsClearsOnMapChangeDisconnectAndLogout) {
       ASSERT_NE(s, nullptr);
       EXPECT_FALSE(s->stop_dps);
       EXPECT_FALSE(s->skull_rti_suppressed);
+      EXPECT_FALSE(s->corpse_run_progress.tracking);
+      EXPECT_FALSE(s->corpse_run_progress.stuck);
       EXPECT_EQ(s->group_guid, 42u);
       EXPECT_TRUE(s->group_policy.not_tank);
       EXPECT_FALSE(s->group_policy.stay);

@@ -92,6 +92,30 @@ TEST(ActionTypesTest, DecodesTypedNpcAndGroupActions) {
     EXPECT_TRUE(IsDeadAllowedAction(a));
   }
   {
+    BotAction a = DecodeOptionFactAction(
+        "rez:spirit", "Resurrect at Spirit Healer (resurrection sickness)");
+    const auto* rez = std::get_if<ResurrectAction>(&a);
+    ASSERT_NE(rez, nullptr);
+    EXPECT_EQ(rez->mode, ResurrectAction::Mode::kSpiritHealer);
+    EXPECT_TRUE(IsDeadAllowedAction(a));
+  }
+  {
+    BotAction a = DecodeOptionFactAction("summon_stone:0x9010:0x42",
+                                         "Summon Human at Meeting Stone");
+    const auto* ms = std::get_if<MeetingStoneSummonAction>(&a);
+    ASSERT_NE(ms, nullptr);
+    EXPECT_EQ(ms->object_guid, "0x9010");
+    EXPECT_EQ(ms->target_guid, "0x42");
+    EXPECT_EQ(ActionKindName(a), "meeting_stone_summon");
+    EXPECT_FALSE(IsDeadAllowedAction(a));
+    for (const char* bad : {"summon_stone:", "summon_stone:0x9010:",
+                            "summon_stone::0x42", "summon_stone:0x1:0x2:0x3"}) {
+      EXPECT_TRUE(std::holds_alternative<InvalidAction>(
+          DecodeOptionFactAction(bad, "bad")))
+          << bad;
+    }
+  }
+  {
     BotAction a = DecodeOptionFactAction("mark:0xabc:7", "Mark Skull");
     const auto* mark = std::get_if<MarkTargetAction>(&a);
     ASSERT_NE(mark, nullptr);

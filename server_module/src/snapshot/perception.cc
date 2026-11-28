@@ -127,6 +127,29 @@ bool ShouldFillUnitNameplate(float dist_yd,
          dist_yd <= kGroupCombatDetailRangeYd;
 }
 
+bool IsSummoningRitualUsable(const SummoningRitualUsableInput& in) {
+  if (!in.loot_state_ready || in.bot_channeling) {
+    return false;
+  }
+  if (in.req_participants > 0 && in.unique_use_count >= in.req_participants) {
+    return false;
+  }
+  if (in.has_owner) {
+    if (!in.owner_is_player || in.bot_is_owner || !in.owner_channeling) {
+      return false;
+    }
+    if (in.casters_grouped && !in.in_same_raid_with_owner) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool IsMeetingStoneUsable(const MeetingStoneUsableInput& in) {
+  return in.bot_in_group && in.bot_level >= in.min_level &&
+         in.has_eligible_member;
+}
+
 LosCache::LosCache(float near_yd,
                    base::TimeDelta near_ttl,
                    base::TimeDelta far_ttl)

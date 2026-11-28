@@ -10,7 +10,7 @@ Tracking document for findings from the WoW Team Play Review. Each item is tagge
 - [x] **[M9] P0-4 — Prompt budget at raid size.** The slot is 4096 tokens (`prompt.cc:30`, `llm.py:13`) and `RULES.md` takes about 2.6k. At 25-man the raid frame likely pushes out the boss notes, which are the only source of standing orders. The wake reason and the human's chat line can be dropped too. (raid/harness)
 - [x] **[M2] P0-5 — Bots can't abandon quests.** Nothing sends `CMSG_QUESTLOG_REMOVE_QUEST`. A failed escort or timed quest blocks that quest chain for good. Bots accept every `!` quest, so at 25 quests the log is full and the human's shares fail silently. (questing)
 - [x] **[M3] P0-6 — Bags fill up for good.** Bots sell only grey items (`exec_npc.cc:101,126`), can't destroy greens, and can't buy or equip bags. Greens pile up until quest drops can't be looted, and those corpses stop showing as lootable. (loot)
-- [ ] **[M13] P0-7 — A ghost can get stuck forever.** If a corpse run can't make progress, the bot gets no spirit-healer option, no wake, and the human is never told. (travel/death)
+- [x] **[M13] P0-7 — A ghost can get stuck forever.** If a corpse run can't make progress, the bot gets no spirit-healer option, no wake, and the human is never told. (travel/death)
 - [x] **[M5] P0-8 — Brain target picks don't stick.** `target` / `Attack` only set the selection, and playerbots' `dps assist`/`tank assist` picks again. 35 note files rely on `-> target nearest <add>` (Bone Spike, Web Wrap, Kinetic Bomb...). (combat)
 
 ## P1: hurts play often
@@ -53,11 +53,11 @@ Tracking document for findings from the WoW Team Play Review. Each item is tagge
 
 ### Travel and death
 
-- [ ] **[M13]** Followers chase the human's ghost to the graveyard.
+- [x] **[M13]** Followers chase the human's ghost to the graveyard.
 - [ ] **[M14]** Bots can't fly: the picker takes a ground mount and movement is navmesh-only. Northrend group travel and Dalaran break.
 - [ ] **[M14]** No wake when the leader changes map or takes a portal, boat, or flight. `follow` reports "applied" but does nothing across maps.
 - [ ] **[M14]** "Go to leader" while the leader is on a taxi or boat aims at the leader's mid-route spot.
-- [ ] **[M13]** Bots can't click meeting stones or summoning portals.
+- [x] **[M13]** Bots can't click meeting stones or summoning portals.
 
 ### Brain / harness
 

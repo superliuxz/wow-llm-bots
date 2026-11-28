@@ -1851,5 +1851,153 @@ TEST(OptionsTest, VendorSellBagBuyAndBagEquipSuppressedInCombatAndDead) {
                              "Release spirit", "Keep doing what I'm doing"}));
 }
 
+TEST(OptionsTest, StuckGhostOffersSpiritHealerAndUnstuckGhostDoesNot) {
+  OptionFacts facts;
+  facts.ghost_stuck = false;
+
+  pb::Snapshot moving_ghost;
+  moving_ghost.base.self.state = pb::Self::GHOST;
+  AddOptions(&moving_ghost, facts);
+  EXPECT_EQ(Texts(moving_ghost),
+            std::vector<std::string>{"Keep doing what I'm doing"});
+
+  facts.ghost_stuck = true;
+  pb::Snapshot stuck_ghost;
+  stuck_ghost.base.self.state = pb::Self::GHOST;
+  const std::vector<OptionTarget> targets = AddOptions(&stuck_ghost, facts);
+  EXPECT_EQ(Texts(stuck_ghost),
+            (std::vector<std::string>{
+                "Resurrect at Spirit Healer (resurrection sickness)",
+                "Keep doing what I'm doing"}));
+  ASSERT_EQ(targets.size(), 2u);
+  EXPECT_EQ(targets[0].guid, "rez:spirit");
+  const auto* rez = std::get_if<ResurrectAction>(&targets[0].action);
+  ASSERT_NE(rez, nullptr);
+  EXPECT_EQ(rez->mode, ResurrectAction::Mode::kSpiritHealer);
+
+  // Adversarial: alive or unreleased body never gets rez:spirit even if flag
+  // is set.
+  pb::Snapshot alive;
+  alive.base.self.state = pb::Self::ALIVE;
+  AddOptions(&alive, facts);
+  EXPECT_EQ(Texts(alive),
+            std::vector<std::string>{"Keep doing what I'm doing"});
+
+  pb::Snapshot body;
+  body.base.self.state = pb::Self::DEAD_BODY;
+  AddOptions(&body, facts);
+  EXPECT_EQ(Texts(body), (std::vector<std::string>{
+                             "Release spirit", "Keep doing what I'm doing"}));
+}
+
+TEST(OptionsTest, MeetingStoneAndSummoningPortalOptionsAndCombatGating) {
+  // 1. Active Warlock / Meeting Stone Summoning Portal (RITUAL) is offered
+  //    when usable, hidden when not usable.
+  pb::Snapshot portal_snap;
+  pb::GameObject& portal = portal_snap.base.nearby.objects.emplace_back();
+  portal.guid = "0x0000000000009001";
+  portal.name = "Summoning Portal";
+  portal.kind = pb::GameObject::RITUAL;
+  portal.usable = true;
+  portal.rel.dist_yd = 6.0f;
+
+  pb::GameObject& spent = portal_snap.base.nearby.objects.emplace_back();
+  spent.guid = "0x0000000000009002";
+  spent.name = "Spent Portal";
+  spent.kind = pb::GameObject::SUMMONING_PORTAL;
+  spent.usable = false;
+  spent.rel.dist_yd = 4.0f;
+
+  const std::vector<OptionTarget> portal_targets = AddOptions(&portal_snap);
+  EXPECT_EQ(Texts(portal_snap),
+            (std::vector<std::string>{"Use Summoning Portal",
+                                      "Keep doing what I'm doing"}));
+  ASSERT_EQ(portal_targets.size(), 2u);
+  EXPECT_TRUE(
+      std::holds_alternative<UseObjectAction>(portal_targets[0].action));
+
+  // 2. Meeting Stone exposes per-member summon options (humans first, then
+  //    furthest, skipping close/under-level/offline) and hides duplicate
+  //    generic `Use Meeting Stone`.
+  std::vector<pb::OptionFacts_Action> stone_actions;
+  const MeetingStoneFact stone{.guid = "0x0000000000009010",
+                               .name = "Meeting Stone",
+                               .min_level = 15,
+                               .dist_yd = 8.0f};
+  const std::vector<MeetingStoneMember> members = {
+      {.guid = "0x1",
+       .name = "CloseBot",
+       .level = 20,
+       .is_human = false,
+       .online = true,
+       .same_map_and_close = true,
+       .dist_yd = 10.0f},
+      {.guid = "0x2",
+       .name = "Lowbie",
+       .level = 10,
+       .is_human = true,
+       .online = true,
+       .same_map_and_close = false,
+       .dist_yd = 500.0f},
+      {.guid = "0x3",
+       .name = "FarBot",
+       .level = 20,
+       .is_human = false,
+       .online = true,
+       .same_map_and_close = false,
+       .dist_yd = 600.0f},
+      {.guid = "0x4",
+       .name = "Human",
+       .level = 20,
+       .is_human = true,
+       .online = true,
+       .same_map_and_close = false,
+       .dist_yd = 200.0f},
+      {.guid = "0x5",
+       .name = "OfflineBot",
+       .level = 20,
+       .is_human = false,
+       .online = false,
+       .same_map_and_close = false,
+       .dist_yd = 900.0f},
+  };
+  CollectMeetingStoneSummonActions(/*bot_alive=*/true, /*bot_in_combat=*/false,
+                                   /*bot_level=*/20, stone, members,
+                                   &stone_actions);
+  ASSERT_EQ(stone_actions.size(), 2u);
+  EXPECT_EQ(stone_actions[0].guid, "summon_stone:0x0000000000009010:0x4");
+  EXPECT_EQ(stone_actions[0].label, "Summon Human at Meeting Stone");
+  EXPECT_EQ(stone_actions[1].guid, "summon_stone:0x0000000000009010:0x3");
+  EXPECT_EQ(stone_actions[1].label, "Summon FarBot at Meeting Stone");
+
+  pb::Snapshot stone_snap;
+  pb::GameObject& ms = stone_snap.base.nearby.objects.emplace_back();
+  ms.guid = stone.guid;
+  ms.name = stone.name;
+  ms.kind = pb::GameObject::MEETING_STONE;
+  ms.usable = true;
+  ms.rel.dist_yd = 8.0f;
+
+  OptionFacts stone_facts;
+  stone_facts.group_and_upkeep_actions = stone_actions;
+  const std::vector<OptionTarget> stone_targets =
+      AddOptions(&stone_snap, stone_facts);
+  EXPECT_EQ(Texts(stone_snap),
+            (std::vector<std::string>{"Summon Human at Meeting Stone",
+                                      "Summon FarBot at Meeting Stone",
+                                      "Keep doing what I'm doing"}));
+  ASSERT_EQ(stone_targets.size(), 3u);
+  EXPECT_TRUE(std::holds_alternative<MeetingStoneSummonAction>(
+      stone_targets[0].action));
+
+  // Adversarial: in combat (P0 combat priority) suppresses Meeting Stone
+  // summon actions.
+  pb::Snapshot ic_snap;
+  ic_snap.base.self.in_combat = true;
+  AddOptions(&ic_snap, stone_facts);
+  EXPECT_EQ(Texts(ic_snap),
+            std::vector<std::string>{"Keep doing what I'm doing"});
+}
+
 }  // namespace
 }  // namespace llm_brain

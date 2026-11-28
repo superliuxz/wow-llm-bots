@@ -59,6 +59,10 @@ std::vector<pb::Event> PopupWatch::Update(const PopupState& now) {
   if (now.resurrect_offer && !last_.resurrect_offer) {
     out.push_back(Prompt(pb::PromptEvent::RESURRECT_OFFER));
   }
+  if (now.ghost_stuck && !last_.ghost_stuck) {
+    out.push_back(Prompt(pb::PromptEvent::CONFIRM_SPIRIT_HEALER, {},
+                         "ghost stuck on corpse run; Spirit Healer available"));
+  }
   if (now.summon && !last_.summon) {
     out.push_back(Prompt(pb::PromptEvent::SUMMON, now.summon_from, {}, 120.0f));
   }

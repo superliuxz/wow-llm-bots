@@ -62,6 +62,33 @@ bool ShouldFillUnitNameplate(float dist_yd,
                              bool unit_alive,
                              bool victim_in_bot_group);
 
+// Pure usability predicate for `GAMEOBJECT_TYPE_SUMMONING_RITUAL` objects
+// (Warlock Ritual of Summoning / Meeting Stone Summoning Portal / Ritual of
+// Souls / Ritual of Refreshment) matching AzerothCore `GameObject::Use` (M13).
+struct SummoningRitualUsableInput {
+  bool loot_state_ready = true;
+  uint32_t unique_use_count = 0;
+  uint32_t req_participants = 0;
+  bool has_owner = false;
+  bool owner_is_player = false;
+  bool bot_is_owner = false;
+  bool owner_channeling = false;
+  bool casters_grouped = true;
+  bool in_same_raid_with_owner = false;
+  bool bot_channeling = false;
+};
+bool IsSummoningRitualUsable(const SummoningRitualUsableInput& in);
+
+// Pure usability predicate for `GAMEOBJECT_TYPE_MEETINGSTONE` objects
+// matching AzerothCore `GameObject::Use` level & group checks (M13).
+struct MeetingStoneUsableInput {
+  bool bot_in_group = false;
+  uint8_t bot_level = 0;
+  uint8_t min_level = 0;
+  bool has_eligible_member = false;
+};
+bool IsMeetingStoneUsable(const MeetingStoneUsableInput& in);
+
 // Line-of-sight results per object, refreshed on a budget: a ray cast against
 // the map geometry is too expensive to do for every visible object every
 // snapshot. Near objects are refreshed more often than far ones.

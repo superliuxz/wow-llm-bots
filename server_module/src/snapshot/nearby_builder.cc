@@ -24,6 +24,7 @@
 #include "Group.h"
 #include "Map.h"
 #include "MotionMaster.h"
+#include "ObjectAccessor.h"
 #include "ObjectGuid.h"
 #include "ObjectVisibilityContainer.h"
 #include "Player.h"
@@ -574,6 +575,57 @@ bool IsObjectUsable(Player* bot, GameObject* go) {
   if (go->GetGoType() == GAMEOBJECT_TYPE_CHEST ||
       go->GetGOInfo()->GetLootId() != 0) {
     return go->getLootState() == GO_READY;
+  }
+  if (go->GetGoType() == GAMEOBJECT_TYPE_SUMMONING_RITUAL) {
+    const GameObjectTemplate* info = go->GetGOInfo();
+    Unit* owner = go->GetOwner();
+    Player* owner_player = owner ? owner->ToPlayer() : nullptr;
+    return IsSummoningRitualUsable({
+        .loot_state_ready = go->getLootState() == GO_READY,
+        .unique_use_count = go->GetUniqueUseCount(),
+        .req_participants = info ? info->summoningRitual.reqParticipants : 0u,
+        .has_owner = owner != nullptr,
+        .owner_is_player = owner_player != nullptr,
+        .bot_is_owner = owner_player == bot,
+        .owner_channeling =
+            owner != nullptr &&
+            owner->GetCurrentSpell(CURRENT_CHANNELED_SPELL) != nullptr,
+        .casters_grouped = !info || info->summoningRitual.castersGrouped != 0,
+        .in_same_raid_with_owner =
+            owner_player != nullptr && bot->IsInSameRaidWith(owner_player),
+        .bot_channeling =
+            bot->GetCurrentSpell(CURRENT_CHANNELED_SPELL) != nullptr,
+    });
+  }
+  if (go->GetGoType() == GAMEOBJECT_TYPE_MEETINGSTONE) {
+    const GameObjectTemplate* info = go->GetGOInfo();
+    const uint8_t min_level =
+        info ? static_cast<uint8_t>(info->meetingstone.minLevel) : 0;
+    Group* group = bot->GetGroup();
+    bool has_eligible = false;
+    if (group) {
+      for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+        if (slot.guid == bot->GetGUID()) {
+          continue;
+        }
+        Player* m = ObjectAccessor::FindConnectedPlayer(slot.guid);
+        if (m && m->IsInWorld() && m->GetLevel() >= min_level) {
+          const bool close = m->GetMapId() == bot->GetMapId() &&
+                             m->GetInstanceId() == bot->GetInstanceId() &&
+                             bot->GetDistance(m) <= 40.0f;
+          if (!close) {
+            has_eligible = true;
+            break;
+          }
+        }
+      }
+    }
+    return IsMeetingStoneUsable({
+        .bot_in_group = group != nullptr,
+        .bot_level = bot->GetLevel(),
+        .min_level = min_level,
+        .has_eligible_member = has_eligible,
+    });
   }
   return true;
 }

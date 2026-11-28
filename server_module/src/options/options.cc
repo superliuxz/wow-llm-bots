@@ -112,6 +112,9 @@ std::optional<OptionTarget::Kind> ObjectKind(const pb::GameObject& go,
     case pb::GameObject::QUEST_OBJECT:
     case pb::GameObject::DOOR:
     case pb::GameObject::PORTAL:
+    case pb::GameObject::MEETING_STONE:
+    case pb::GameObject::SUMMONING_PORTAL:
+    case pb::GameObject::RITUAL:
       return OptionTarget::Kind::kUse;
     default:
       return std::nullopt;
@@ -390,11 +393,22 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
           &targets, &ranks);
     }
   }
+  auto has_explicit_stone_actions = [&](std::string_view go_guid) {
+    const std::string prefix = "summon_stone:" + std::string(go_guid) + ":";
+    for (const OptionFacts::Action& act : facts.group_and_upkeep_actions) {
+      if (act.guid.starts_with(prefix)) {
+        return true;
+      }
+    }
+    return false;
+  };
   for (const pb::GameObject& go : snapshot->base.nearby.objects) {
     if (const std::optional<OptionTarget::Kind> kind = ObjectKind(go, facts);
         kind && alive) {
       if (*kind == OptionTarget::Kind::kUse && !self.in_combat &&
-          has_explicit_npc_actions(go.guid)) {
+          (has_explicit_npc_actions(go.guid) ||
+           (go.kind == pb::GameObject::MEETING_STONE &&
+            has_explicit_stone_actions(go.guid)))) {
         continue;
       }
       AddTarget(*kind, go.guid, go.name, {false, go.rel.dist_yd}, &targets,
@@ -695,7 +709,8 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
     if ((std::holds_alternative<DestroyItemAction>(decoded) ||
          std::holds_alternative<AbandonQuestAction>(decoded) ||
          std::holds_alternative<ItemQuestAction>(decoded) ||
-         std::holds_alternative<GroupLeaderAction>(decoded)) &&
+         std::holds_alternative<GroupLeaderAction>(decoded) ||
+         std::holds_alternative<MeetingStoneSummonAction>(decoded)) &&
         (!alive || self.in_combat)) {
       continue;
     }
@@ -782,6 +797,19 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
       wait.kind = pb::Option::USE;
       wait.name = "Wait for a resurrection";
     }
+  }
+
+  if (self.state == pb::Self::GHOST && facts.ghost_stuck) {
+    constexpr const char* kSpiritText =
+        "Resurrect at Spirit Healer (resurrection sickness)";
+    targets.push_back({OptionTarget::Kind::kUse, "rez:spirit", kSpiritText,
+                       std::nullopt,
+                       ResurrectAction{ResurrectAction::Mode::kSpiritHealer}});
+    pb::Option& sh = snapshot->options.emplace_back();
+    sh.text = kSpiritText;
+    sh.guid = "rez:spirit";
+    sh.kind = pb::Option::USE;
+    sh.name = "Resurrect at Spirit Healer";
   }
 
   if (!facts.pending_group_invite_from.empty()) {
@@ -989,6 +1017,49 @@ void CollectBattleResActions(const pb::Snapshot& snapshot,
              "Use " + item_name + " on " + m->name + role_tag(*m)});
       }
     }
+  }
+}
+
+void CollectMeetingStoneSummonActions(
+    bool bot_alive,
+    bool bot_in_combat,
+    uint8_t bot_level,
+    const MeetingStoneFact& stone,
+    const std::vector<MeetingStoneMember>& members,
+    std::vector<pb::OptionFacts_Action>* out) {
+  if (!out || !bot_alive || bot_in_combat || stone.guid.empty() ||
+      stone.name.empty() || bot_level < stone.min_level) {
+    return;
+  }
+  std::vector<const MeetingStoneMember*> eligible;
+  for (const MeetingStoneMember& m : members) {
+    if (!m.online || m.guid.empty() || m.name.empty() ||
+        m.level < stone.min_level || m.same_map_and_close) {
+      continue;
+    }
+    eligible.push_back(&m);
+  }
+  if (eligible.empty()) {
+    return;
+  }
+  std::sort(eligible.begin(), eligible.end(),
+            [](const MeetingStoneMember* a, const MeetingStoneMember* b) {
+              if (a->is_human != b->is_human) {
+                return a->is_human;
+              }
+              const float da = std::isfinite(a->dist_yd) ? a->dist_yd : 1e9f;
+              const float db = std::isfinite(b->dist_yd) ? b->dist_yd : 1e9f;
+              if (da != db) {
+                return da > db;
+              }
+              return a->name < b->name;
+            });
+  constexpr size_t kMaxSummonTargets = 3;
+  const size_t limit = std::min(eligible.size(), kMaxSummonTargets);
+  for (size_t i = 0; i < limit; ++i) {
+    const MeetingStoneMember* m = eligible[i];
+    out->push_back({"summon_stone:" + stone.guid + ":" + m->guid,
+                    "Summon " + m->name + " at " + stone.name});
   }
 }
 

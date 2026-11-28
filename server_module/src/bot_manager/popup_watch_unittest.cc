@@ -243,5 +243,31 @@ TEST(PopupWatchTest, RapidMultiShareEmitsOneEventPerNewQuest) {
   EXPECT_TRUE(watch.Update(s).empty());
 }
 
+TEST(PopupWatchTest, StuckGhostEmitsSpiritHealerWakeOnceAndNotTimedFallback) {
+  PopupWatch watch;
+  PopupState s;
+  s.ghost_stuck = true;
+
+  // Stuck ghost is NOT a timed popup for playerbots fallback (playerbots'
+  // spirit healer cheats without resurrection sickness).
+  EXPECT_FALSE(HasTimedPopup(s));
+
+  std::vector<pb::Event> evs = watch.Update(s);
+  ASSERT_EQ(evs.size(), 1u);
+  ASSERT_TRUE(evs[0].prompt.has_value());
+  EXPECT_EQ(evs[0].prompt->kind, pb::PromptEvent::CONFIRM_SPIRIT_HEALER);
+
+  // Staying stuck does not re-emit the wake event.
+  EXPECT_TRUE(watch.Update(s).empty());
+
+  // Unsticking and getting stuck again emits a fresh wake.
+  s.ghost_stuck = false;
+  EXPECT_TRUE(watch.Update(s).empty());
+  s.ghost_stuck = true;
+  evs = watch.Update(s);
+  ASSERT_EQ(evs.size(), 1u);
+  EXPECT_EQ(evs[0].prompt->kind, pb::PromptEvent::CONFIRM_SPIRIT_HEALER);
+}
+
 }  // namespace
 }  // namespace llm_brain

@@ -46,6 +46,9 @@ BotAction DecodeOptionFactAction(std::string_view guid,
   if (guid == "rez:wait") {
     return ResurrectAction{ResurrectAction::Mode::kWait};
   }
+  if (guid == "rez:spirit") {
+    return ResurrectAction{ResurrectAction::Mode::kSpiritHealer};
+  }
   if (guid.starts_with("roll:")) {
     const std::vector<std::string_view> parts = base::SplitStringPiece(
         guid, ":", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
@@ -109,6 +112,15 @@ BotAction DecodeOptionFactAction(std::string_view guid,
   if (guid == "summon:accept" || guid == "summon:decline") {
     return PopupAnswerAction{PopupAnswerAction::Kind::kSummon,
                              guid == "summon:accept"};
+  }
+  if (guid.starts_with("summon_stone:")) {
+    const std::vector<std::string_view> parts = base::SplitStringPiece(
+        guid, ":", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+    if (parts.size() != 3 || parts[1].empty() || parts[2].empty()) {
+      return InvalidAction{"invalid meeting stone summon"};
+    }
+    return MeetingStoneSummonAction{std::string(parts[1]),
+                                    std::string(parts[2]), std::string(label)};
   }
   if (guid == "boot:yes" || guid == "boot:no") {
     return PopupAnswerAction{PopupAnswerAction::Kind::kBootVote,
@@ -580,6 +592,8 @@ std::string_view ActionKindName(const BotAction& action) {
           return "group_leader";
         if constexpr (std::is_same_v<T, PopupAnswerAction>)
           return "popup_answer";
+        if constexpr (std::is_same_v<T, MeetingStoneSummonAction>)
+          return "meeting_stone_summon";
         if constexpr (std::is_same_v<T, TradeAction>)
           return "trade";
         if constexpr (std::is_same_v<T, CrowdControlAction>)

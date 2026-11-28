@@ -2,6 +2,7 @@
 
 #include "bot_manager/corpse_run.h"
 
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -113,6 +114,61 @@ CorpseRunDecision EvaluateCorpseRun(const CorpseRunInput& input) {
   return {.action = CorpseRunAction::kWalkToTarget,
           .target_pos = ent.trigger_pos,
           .trigger_id = ent.trigger_id};
+}
+
+CorpseRunProgressResult UpdateCorpseRunProgress(CorpseRunProgressState* state,
+                                                bool tracking_active,
+                                                uint32_t map_id,
+                                                float dist_to_target_yd,
+                                                uint32_t now_ms,
+                                                uint32_t stuck_window_ms) {
+  if (!state) {
+    return {};
+  }
+  if (!tracking_active) {
+    *state = {};
+    return {};
+  }
+  const bool finite_dist = std::isfinite(dist_to_target_yd);
+  if (!state->tracking || state->map_id != map_id) {
+    state->tracking = true;
+    state->map_id = map_id;
+    state->best_dist_yd = finite_dist ? dist_to_target_yd
+                                      : std::numeric_limits<float>::infinity();
+    state->last_progress_ms = now_ms;
+    state->stuck = false;
+    return {};
+  }
+  if (finite_dist &&
+      (!std::isfinite(state->best_dist_yd) ||
+       dist_to_target_yd + kCorpseRunProgressMinYd <= state->best_dist_yd)) {
+    state->best_dist_yd = dist_to_target_yd;
+    state->last_progress_ms = now_ms;
+    state->stuck = false;
+    return {};
+  }
+  // Unsigned subtraction handles uint32_t getMSTime() wrap-around cleanly.
+  const uint32_t elapsed_ms = now_ms - state->last_progress_ms;
+  if (elapsed_ms >= stuck_window_ms) {
+    const bool newly_stuck = !state->stuck;
+    state->stuck = true;
+    return {.stuck = true, .newly_stuck = newly_stuck};
+  }
+  return {.stuck = state->stuck, .newly_stuck = false};
+}
+
+bool ShouldSendStuckGhostChatAlert(bool newly_stuck,
+                                   bool in_group,
+                                   bool group_has_human) {
+  return newly_stuck && in_group && group_has_human;
+}
+
+bool ShouldHoldPositionForDeadLeader(const LeaderFollowInput& input) {
+  if (!input.bot_alive || !input.in_group || input.bot_is_leader ||
+      !input.leader_present) {
+    return false;
+  }
+  return !input.leader_alive || input.leader_is_ghost;
 }
 
 }  // namespace llm_brain

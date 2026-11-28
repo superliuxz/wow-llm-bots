@@ -45,6 +45,7 @@ struct PopupState {
   uint32_t lfg_proposal_id = 0;
   std::vector<SharedQuest> shared_quests;
   bool resurrect_offer = false;
+  bool ghost_stuck = false;
   bool summon = false;
   std::string summon_from;
   std::string boot_victim;

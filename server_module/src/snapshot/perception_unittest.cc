@@ -215,5 +215,63 @@ TEST_F(LosCacheTest, AnotherMapForgetsEverything) {
   EXPECT_EQ(cache_.Get(1), std::nullopt);
 }
 
+TEST(PerceptionTest, SummoningRitualAndMeetingStoneUsability) {
+  SummoningRitualUsableInput ritual{
+      .loot_state_ready = true,
+      .unique_use_count = 1,
+      .req_participants = 2,
+      .has_owner = true,
+      .owner_is_player = true,
+      .bot_is_owner = false,
+      .owner_channeling = true,
+      .casters_grouped = true,
+      .in_same_raid_with_owner = true,
+      .bot_channeling = false,
+  };
+  EXPECT_TRUE(IsSummoningRitualUsable(ritual));
+
+  // Adversarial cases: owner cannot click own portal, stopped channeling,
+  // already full, outsider, bot already channeling, or not ready.
+  auto bad = ritual;
+  bad.bot_is_owner = true;
+  EXPECT_FALSE(IsSummoningRitualUsable(bad));
+
+  bad = ritual;
+  bad.owner_channeling = false;
+  EXPECT_FALSE(IsSummoningRitualUsable(bad));
+
+  bad = ritual;
+  bad.unique_use_count = 2;
+  EXPECT_FALSE(IsSummoningRitualUsable(bad));
+
+  bad = ritual;
+  bad.in_same_raid_with_owner = false;
+  EXPECT_FALSE(IsSummoningRitualUsable(bad));
+
+  bad = ritual;
+  bad.bot_channeling = true;
+  EXPECT_FALSE(IsSummoningRitualUsable(bad));
+
+  bad = ritual;
+  bad.loot_state_ready = false;
+  EXPECT_FALSE(IsSummoningRitualUsable(bad));
+
+  MeetingStoneUsableInput stone{
+      .bot_in_group = true,
+      .bot_level = 20,
+      .min_level = 15,
+      .has_eligible_member = true,
+  };
+  EXPECT_TRUE(IsMeetingStoneUsable(stone));
+  stone.bot_in_group = false;
+  EXPECT_FALSE(IsMeetingStoneUsable(stone));
+  stone.bot_in_group = true;
+  stone.bot_level = 14;
+  EXPECT_FALSE(IsMeetingStoneUsable(stone));
+  stone.bot_level = 20;
+  stone.has_eligible_member = false;
+  EXPECT_FALSE(IsMeetingStoneUsable(stone));
+}
+
 }  // namespace
 }  // namespace llm_brain

@@ -25,6 +25,7 @@
 #include "Event.h"
 #include "G3D/Vector3.h"
 #include "GameObject.h"
+#include "GameObjectData.h"
 #include "GridTerrainData.h"
 #include "Group.h"
 #include "Item.h"
@@ -34,9 +35,11 @@
 #include "LootObjectStack.h"
 #include "MotionMaster.h"
 #include "Object.h"
+#include "ObjectAccessor.h"
 #include "ObjectDefines.h"
 #include "ObjectGuid.h"
 #include "ObjectMgr.h"
+#include "Opcodes.h"
 #include "PathGenerator.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
@@ -52,11 +55,14 @@
 #include "Unit.h"
 #include "UnitDefines.h"
 #include "UpdateFields.h"
+#include "WorldPacket.h"
+#include "WorldSession.h"
 #include "base/strings/stringprintf.h"
 #include "bot_manager/pull_discipline.h"
 #include "bot_session.h"
 #include "options/npc_gossip_and_bags.h"
 #include "options/position_facts.h"
+#include "snapshot/perception.h"
 #include "snapshot/world_util.h"
 
 namespace llm_brain {
@@ -88,10 +94,17 @@ bool NeedsGatheringSkill(GameObject* go) {
 
 std::string WhyCantUse(Player* bot, GameObject* go) {
   const std::string name = go->GetName();
-  const float limit = sPlayerbotAIConfig.LootDistance;
-  if (limit > 0 && bot->GetDistance(go) > limit) {
-    return base::StringPrintf("%s is %.0f yd away", name.c_str(),
-                              bot->GetDistance(go));
+  if (!IsLootableObject(go)) {
+    if (!go->IsAtInteractDistance(bot)) {
+      return base::StringPrintf("%s is %.0f yd away", name.c_str(),
+                                bot->GetDistance(go));
+    }
+  } else {
+    const float limit = sPlayerbotAIConfig.LootDistance;
+    if (limit > 0 && bot->GetDistance(go) > limit) {
+      return base::StringPrintf("%s is %.0f yd away", name.c_str(),
+                                bot->GetDistance(go));
+    }
   }
   if (go->HasFlag(GAMEOBJECT_FLAGS, GO_FLAG_NOT_SELECTABLE)) {
     return name + " can't be used now";
@@ -593,6 +606,96 @@ std::string UseObjectNow(Player* bot, GameObject* go) {
     return why;
   }
   ClearLastMovement(bot);
+  if (go->GetGoType() == GAMEOBJECT_TYPE_SUMMONING_RITUAL) {
+    const GameObjectTemplate* info = go->GetGOInfo();
+    Unit* owner = go->GetOwner();
+    Player* owner_player = owner ? owner->ToPlayer() : nullptr;
+    if (!IsSummoningRitualUsable({
+            .loot_state_ready = go->getLootState() == GO_READY,
+            .unique_use_count = go->GetUniqueUseCount(),
+            .req_participants =
+                info ? info->summoningRitual.reqParticipants : 0u,
+            .has_owner = owner != nullptr,
+            .owner_is_player = owner_player != nullptr,
+            .bot_is_owner = owner_player == bot,
+            .owner_channeling =
+                owner != nullptr &&
+                owner->GetCurrentSpell(CURRENT_CHANNELED_SPELL) != nullptr,
+            .casters_grouped =
+                !info || info->summoningRitual.castersGrouped != 0,
+            .in_same_raid_with_owner =
+                owner_player != nullptr && bot->IsInSameRaidWith(owner_player),
+            .bot_channeling =
+                bot->GetCurrentSpell(CURRENT_CHANNELED_SPELL) != nullptr,
+        })) {
+      return go->GetName() + " is no longer active";
+    }
+    WorldSession* session = bot->GetSession();
+    if (!session) {
+      return "no session";
+    }
+    if (bot->isMoving()) {
+      bot->StopMoving();
+    }
+    WorldPacket pkt(CMSG_GAMEOBJ_USE, 8);
+    pkt << go->GetGUID();
+    pkt.rpos(0);
+    session->HandleGameObjectUseOpcode(pkt);
+    ai->ResetActionDuration();
+    return "";
+  }
+  if (go->GetGoType() == GAMEOBJECT_TYPE_MEETINGSTONE) {
+    const GameObjectTemplate* info = go->GetGOInfo();
+    const uint8_t min_level =
+        info ? static_cast<uint8_t>(info->meetingstone.minLevel) : 0;
+    Group* group = bot->GetGroup();
+    if (!group) {
+      return "you are not in a group";
+    }
+    if (bot->GetLevel() < min_level) {
+      return "your level is too low for " + go->GetName();
+    }
+    Player* target = ObjectAccessor::FindConnectedPlayer(bot->GetTarget());
+    if (!target || target == bot || !target->IsInWorld() ||
+        !target->IsInSameRaidWith(bot) || target->GetLevel() < min_level) {
+      target = nullptr;
+      float best_dist = -1.0f;
+      for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
+        if (slot.guid == bot->GetGUID()) {
+          continue;
+        }
+        Player* m = ObjectAccessor::FindConnectedPlayer(slot.guid);
+        if (!m || !m->IsInWorld() || m->GetLevel() < min_level) {
+          continue;
+        }
+        const float dist = (m->GetMapId() == bot->GetMapId() &&
+                            m->GetInstanceId() == bot->GetInstanceId())
+                               ? bot->GetDistance(m)
+                               : std::numeric_limits<float>::infinity();
+        if (!target || dist > best_dist) {
+          target = m;
+          best_dist = dist;
+        }
+      }
+    }
+    if (!target) {
+      return "no eligible group member to summon at " + go->GetName();
+    }
+    WorldSession* session = bot->GetSession();
+    if (!session) {
+      return "no session";
+    }
+    if (bot->isMoving()) {
+      bot->StopMoving();
+    }
+    bot->SetSelection(target->GetGUID());
+    WorldPacket pkt(CMSG_GAMEOBJ_USE, 8);
+    pkt << go->GetGUID();
+    pkt.rpos(0);
+    session->HandleGameObjectUseOpcode(pkt);
+    ai->ResetActionDuration();
+    return "";
+  }
   const std::string link =
       "|cffffff00|Hfound:" + std::to_string(go->GetGUID().GetRawValue()) + ":" +
       std::to_string(go->GetEntry()) + ":|h[" + go->GetName() + "]|h|r";

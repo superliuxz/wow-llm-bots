@@ -109,7 +109,8 @@ std::string ValidateAction(Player* bot, const BotAction& action) {
         std::holds_alternative<RestAction>(action) ||
         std::holds_alternative<WalkAction>(action) ||
         std::holds_alternative<EquipItemAction>(action) ||
-        std::holds_alternative<DestroyItemAction>(action)) {
+        std::holds_alternative<DestroyItemAction>(action) ||
+        std::holds_alternative<MeetingStoneSummonAction>(action)) {
       return "you are in combat";
     }
     if (std::holds_alternative<SpendTalentsAction>(action)) {
@@ -191,6 +192,8 @@ ExecuteResult ExecuteAction(Player* bot,
           return FromOutcome(ExecuteGroupLeaderAction(bot, a));
         } else if constexpr (std::is_same_v<T, PopupAnswerAction>) {
           return FromOutcome(ExecutePopupAnswerAction(bot, a));
+        } else if constexpr (std::is_same_v<T, MeetingStoneSummonAction>) {
+          return FromOutcome(ExecuteMeetingStoneSummonAction(bot, a));
         } else if constexpr (std::is_same_v<T, TradeAction>) {
           return FromOutcome(ExecuteTradeAction(bot, a));
         } else if constexpr (std::is_same_v<T, CrowdControlAction>) {

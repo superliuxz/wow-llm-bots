@@ -117,6 +117,37 @@ void CollectBattleResActions(
     const BattleResCapability& cap,
     std::vector<wlb::snapshot::OptionFacts_Action>* out);
 
+// Eligible group member for a Meeting Stone summon (M13).
+struct MeetingStoneMember {
+  std::string guid;
+  std::string name;
+  uint8_t level = 0;
+  bool is_human = false;
+  bool online = true;
+  bool same_map_and_close = false;
+  float dist_yd = 0.0f;
+};
+
+// Nearby usable Meeting Stone facts for `CollectMeetingStoneSummonActions`.
+struct MeetingStoneFact {
+  std::string guid;
+  std::string name;
+  uint8_t min_level = 0;
+  float dist_yd = 0.0f;
+};
+
+// Adds `Summon <name> at <stone>` options (at most 3, humans first then
+// furthest) when the bot is alive, out of combat, grouped, meets the stone's
+// minimum level, and at least one remote eligible online group member can be
+// summoned.
+void CollectMeetingStoneSummonActions(
+    bool bot_alive,
+    bool bot_in_combat,
+    uint8_t bot_level,
+    const MeetingStoneFact& stone,
+    const std::vector<MeetingStoneMember>& members,
+    std::vector<wlb::snapshot::OptionFacts_Action>* out);
+
 // Party member readiness facts for a `QUEST_FLAGS_PARTY_ACCEPT` escort quest
 // (Now #8: "An escort waits until everyone has the quest").
 struct EscortPartyMember {

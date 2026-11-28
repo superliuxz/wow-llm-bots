@@ -33,6 +33,47 @@ namespace llm_brain {
 // Client-enforced corpse reclaim radius in AzerothCore (Corpse.h).
 inline constexpr float kCorpseReclaimRadiusYd = 39.0f;
 
+// Minimum distance improvement (yd) toward the corpse-run target that resets
+// the stuck-ghost timer (M13 P0-7).
+inline constexpr float kCorpseRunProgressMinYd = 3.0f;
+
+// Bounded window (ms) without making progress toward the corpse-run target
+// before a ghost is flagged stuck, waking the brain with a Spirit Healer
+// resurrect option and alerting any human groupmates in party/raid chat.
+inline constexpr uint32_t kCorpseRunStuckWindowMs = 20000;
+
+struct CorpseRunProgressState {
+  bool tracking = false;
+  uint32_t map_id = 0;
+  float best_dist_yd = 0.0f;
+  uint32_t last_progress_ms = 0;
+  bool stuck = false;
+
+  bool operator==(const CorpseRunProgressState&) const = default;
+};
+
+struct CorpseRunProgressResult {
+  // True while the ghost is stuck (no progress for >= stuck window).
+  bool stuck = false;
+  // True on the single transition from not-stuck to stuck (triggers one-shot
+  // wake + human party/raid chat alert).
+  bool newly_stuck = false;
+
+  bool operator==(const CorpseRunProgressResult&) const = default;
+};
+
+// Pure inputs for deciding whether a living grouped follower must hold position
+// instead of following its leader (M13: prevents chasing a dead/ghost leader to
+// the graveyard).
+struct LeaderFollowInput {
+  bool bot_alive = true;
+  bool in_group = false;
+  bool bot_is_leader = false;
+  bool leader_present = false;
+  bool leader_alive = true;
+  bool leader_is_ghost = false;
+};
+
 // One exterior AreaTrigger + AreaTriggerTeleport pair that enters an instance.
 struct InstanceEntranceCandidate {
   uint32_t trigger_id = 0;
@@ -110,6 +151,29 @@ std::optional<InstanceEntranceCandidate> SelectInstanceEntrance(
 
 // Evaluates the next client-legal step for a dead/ghost bot.
 CorpseRunDecision EvaluateCorpseRun(const CorpseRunInput& input);
+
+// Tracks corpse-run progress over successive ticks. Resets cleanly when
+// `tracking_active` is false (alive, waiting for reclaim delay, reclaiming,
+// entering an instance trigger, or disconnected) or when `map_id` changes.
+// Non-finite `dist_to_target_yd` (e.g. unreachable entrance) never counts as
+// progress and still triggers stuck recovery after `stuck_window_ms`.
+CorpseRunProgressResult UpdateCorpseRunProgress(
+    CorpseRunProgressState* state,
+    bool tracking_active,
+    uint32_t map_id,
+    float dist_to_target_yd,
+    uint32_t now_ms,
+    uint32_t stuck_window_ms = kCorpseRunStuckWindowMs);
+
+// True when a newly stuck ghost should send a one-shot alert in party/raid
+// chat (only when grouped with at least one human player).
+bool ShouldSendStuckGhostChatAlert(bool newly_stuck,
+                                   bool in_group,
+                                   bool group_has_human);
+
+// True when a living grouped follower must hold position rather than follow
+// its leader because the leader is dead or a ghost (no graveyard chase).
+bool ShouldHoldPositionForDeadLeader(const LeaderFollowInput& input);
 
 }  // namespace llm_brain
 

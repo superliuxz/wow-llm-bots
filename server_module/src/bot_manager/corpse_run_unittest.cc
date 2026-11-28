@@ -3,6 +3,8 @@
 #include "bot_manager/corpse_run.h"
 
 #include <array>
+#include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 
@@ -235,6 +237,136 @@ TEST(CorpseRunTest, IgnoresLivingUnrleasedBgArenaAndTeleporting) {
   in.within_reclaim_range = true;
   in.reclaim_ready = true;
   EXPECT_EQ(EvaluateCorpseRun(in).action, CorpseRunAction::kReclaimCorpse);
+}
+
+TEST(CorpseRunTest, StuckGhostTriggersOnceAfterWindowAndResetsOnProgress) {
+  CorpseRunProgressState state;
+
+  // First tick starts tracking at 120 yd; not stuck.
+  EXPECT_EQ(UpdateCorpseRunProgress(&state, true, /*map_id=*/0, 120.0f, 1000),
+            (CorpseRunProgressResult{.stuck = false, .newly_stuck = false}));
+
+  // Just before stuck window with no progress -> still not stuck.
+  EXPECT_EQ(UpdateCorpseRunProgress(&state, true, /*map_id=*/0, 118.5f,
+                                    1000 + kCorpseRunStuckWindowMs - 1),
+            (CorpseRunProgressResult{.stuck = false, .newly_stuck = false}));
+
+  // At stuck window without >= 3 yd progress -> newly_stuck fires once.
+  EXPECT_EQ(UpdateCorpseRunProgress(&state, true, /*map_id=*/0, 118.5f,
+                                    1000 + kCorpseRunStuckWindowMs),
+            (CorpseRunProgressResult{.stuck = true, .newly_stuck = true}));
+
+  // Subsequent tick while still stuck -> stuck stays true, newly_stuck false.
+  EXPECT_EQ(UpdateCorpseRunProgress(&state, true, /*map_id=*/0, 118.5f,
+                                    1000 + kCorpseRunStuckWindowMs + 1000),
+            (CorpseRunProgressResult{.stuck = true, .newly_stuck = false}));
+
+  // Meaningful progress (>= 3 yd closer than best) clears stuck state.
+  EXPECT_EQ(UpdateCorpseRunProgress(&state, true, /*map_id=*/0, 115.0f,
+                                    1000 + kCorpseRunStuckWindowMs + 2000),
+            (CorpseRunProgressResult{.stuck = false, .newly_stuck = false}));
+  EXPECT_FALSE(state.stuck);
+
+  // Unreachable target (non-finite distance) also triggers stuck after window.
+  state = {};
+  const float inf = std::numeric_limits<float>::infinity();
+  EXPECT_EQ(UpdateCorpseRunProgress(&state, true, /*map_id=*/0, inf, 5000),
+            (CorpseRunProgressResult{.stuck = false, .newly_stuck = false}));
+  EXPECT_EQ(UpdateCorpseRunProgress(&state, true, /*map_id=*/0, inf,
+                                    5000 + kCorpseRunStuckWindowMs),
+            (CorpseRunProgressResult{.stuck = true, .newly_stuck = true}));
+
+  // Turning tracking off (alive, reclaim delay, disconnect) resets cleanly.
+  EXPECT_EQ(UpdateCorpseRunProgress(&state, false, /*map_id=*/0, 0.0f, 99999),
+            (CorpseRunProgressResult{.stuck = false, .newly_stuck = false}));
+  EXPECT_FALSE(state.tracking);
+  EXPECT_FALSE(state.stuck);
+}
+
+// Adversarial counter-test: a ghost steadily walking toward its corpse never
+// false-triggers stuck recovery, while a ghost oscillating < 3 yd on a cliff
+// or obstacle does trigger after the bounded window.
+TEST(CorpseRunTest, MovingGhostDoesNotFalseTriggerStuckRecovery) {
+  CorpseRunProgressState state;
+  float dist = 300.0f;
+  uint32_t now = 1000;
+  for (int i = 0; i < 40; ++i) {
+    const CorpseRunProgressResult r =
+        UpdateCorpseRunProgress(&state, true, /*map_id=*/0, dist, now);
+    EXPECT_FALSE(r.stuck) << "step " << i;
+    EXPECT_FALSE(r.newly_stuck) << "step " << i;
+    dist -= 5.0f;
+    now += 2000;
+  }
+
+  // Now ghost oscillates between 100 yd and 98 yd (never >= 3 yd closer).
+  const uint32_t stall_start = now;
+  UpdateCorpseRunProgress(&state, true, /*map_id=*/0, 100.0f, stall_start);
+  for (uint32_t dt = 1000; dt < kCorpseRunStuckWindowMs; dt += 1000) {
+    const float wobble = (dt / 1000) % 2 == 0 ? 100.0f : 98.0f;
+    EXPECT_FALSE(
+        UpdateCorpseRunProgress(&state, true, 0, wobble, stall_start + dt)
+            .stuck);
+  }
+  const CorpseRunProgressResult stuck = UpdateCorpseRunProgress(
+      &state, true, 0, 98.0f, stall_start + kCorpseRunStuckWindowMs);
+  EXPECT_TRUE(stuck.stuck);
+  EXPECT_TRUE(stuck.newly_stuck);
+}
+
+TEST(CorpseRunTest, StuckGhostChatAlertGating) {
+  EXPECT_TRUE(ShouldSendStuckGhostChatAlert(true, true, true));
+  // Solo or bot-only groups do not spam party chat.
+  EXPECT_FALSE(ShouldSendStuckGhostChatAlert(true, false, false));
+  EXPECT_FALSE(ShouldSendStuckGhostChatAlert(true, true, false));
+  // Already-alerted stuck ghost does not spam repeat ticks.
+  EXPECT_FALSE(ShouldSendStuckGhostChatAlert(false, true, true));
+}
+
+// Adversarial counter-test: living followers hold position when the leader
+// dies or releases as a ghost (no graveyard chase), while living leaders,
+// solo bots, leaders themselves, and dead/ghost bots are unaffected.
+TEST(CorpseRunTest, LivingFollowerDoesNotChaseDeadOrGhostLeader) {
+  LeaderFollowInput in;
+  in.bot_alive = true;
+  in.in_group = true;
+  in.bot_is_leader = false;
+  in.leader_present = true;
+
+  // Living leader -> normal follow allowed.
+  in.leader_alive = true;
+  in.leader_is_ghost = false;
+  EXPECT_FALSE(ShouldHoldPositionForDeadLeader(in));
+
+  // Leader died (body) -> hold position.
+  in.leader_alive = false;
+  in.leader_is_ghost = false;
+  EXPECT_TRUE(ShouldHoldPositionForDeadLeader(in));
+
+  // Leader released to graveyard (ghost) -> hold position (no graveyard chase).
+  in.leader_alive = false;
+  in.leader_is_ghost = true;
+  EXPECT_TRUE(ShouldHoldPositionForDeadLeader(in));
+
+  // Even if only ghost flag is set -> hold position.
+  in.leader_alive = true;
+  in.leader_is_ghost = true;
+  EXPECT_TRUE(ShouldHoldPositionForDeadLeader(in));
+
+  // Adversarial: dead/ghost bot runs its own corpse run, not dead-leader hold.
+  in.bot_alive = false;
+  EXPECT_FALSE(ShouldHoldPositionForDeadLeader(in));
+  in.bot_alive = true;
+
+  // Solo or bot-is-leader or missing leader -> false.
+  in.in_group = false;
+  EXPECT_FALSE(ShouldHoldPositionForDeadLeader(in));
+  in.in_group = true;
+  in.bot_is_leader = true;
+  EXPECT_FALSE(ShouldHoldPositionForDeadLeader(in));
+  in.bot_is_leader = false;
+  in.leader_present = false;
+  EXPECT_FALSE(ShouldHoldPositionForDeadLeader(in));
 }
 
 }  // namespace
