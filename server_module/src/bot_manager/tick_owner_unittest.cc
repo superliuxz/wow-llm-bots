@@ -83,19 +83,25 @@ TEST(TickOwnerTest, CorpseRunActionsAreGatedOnlyWhileBrainLed) {
 }
 
 TEST(TickOwnerTest, AutoEquipIsBlockedInBothModes) {
-  for (std::string_view name :
-       {"equip upgrade", "equip upgrades packet action"}) {
-    const GatedAction* a = FindGatedAction(name);
-    ASSERT_NE(a, nullptr) << name;
-    EXPECT_TRUE(BlockedFor(*a, TickOwner::kBrain)) << name;
-    EXPECT_TRUE(BlockedFor(*a, TickOwner::kPlayerbots)) << name;
-  }
+  const GatedAction* a = FindGatedAction("equip upgrade");
+  ASSERT_NE(a, nullptr);
+  EXPECT_EQ(a->gate, ActionGate::kAlways);
+  EXPECT_TRUE(BlockedFor(*a, TickOwner::kBrain));
+  EXPECT_TRUE(BlockedFor(*a, TickOwner::kPlayerbots));
+
+  // `equip upgrades packet action` is conditional so BrainPolicyListener can
+  // reload hunter ammo via SetAmmo when `no ammo` triggers while still
+  // blocking playerbots from overwriting brain-chosen gear equips.
+  const GatedAction* pkt = FindGatedAction("equip upgrades packet action");
+  ASSERT_NE(pkt, nullptr);
+  EXPECT_EQ(pkt->gate, ActionGate::kCondition);
 }
 
 TEST(TickOwnerTest, ConditionalAndUngatedActionsAreNotBlockedByMode) {
   for (std::string_view name :
-       {"auto release", "flee", "stay", "return to stay position",
-        "apply stone", "apply oil", "toggle pet spell"}) {
+       {"auto release", "equip upgrades packet action", "flee", "stay",
+        "return to stay position", "apply stone", "apply oil",
+        "toggle pet spell"}) {
     const GatedAction* a = FindGatedAction(name);
     ASSERT_NE(a, nullptr) << name;
     EXPECT_EQ(a->gate, ActionGate::kCondition) << name;

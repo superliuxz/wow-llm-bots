@@ -68,9 +68,9 @@ Tracking document for findings from the WoW Team Play Review. Each item is tagge
 
 ### Loot and upkeep
 
-- [ ] **[M15]** `Buy` passes `count=1`, and food or drink is offered only when the bot has none, so bots can't stock up.
-- [ ] **[M15]** Hunter ammo is never loaded: no `SetAmmo`, and playerbots' reload is blocked.
-- [ ] **[M15]** No training or repair while grouped. Bots can't buy reagents or poisons (no Rebirth, Ankh, or poisons).
+- [x] **[M15]** `Buy` passes `count=1`, and food or drink is offered only when the bot has none, so bots can't stock up.
+- [x] **[M15]** Hunter ammo is never loaded: no `SetAmmo`, and playerbots' reload is blocked.
+- [x] **[M15]** No training or repair while grouped. Bots can't buy reagents or poisons (no Rebirth, Ankh, or poisons).
 - [ ] **[M16]** Rolls: the 10 s "let the human vote first" delay applies only in auto-popup mode. The Need check counts attack power as a fit for both strength and agility classes and ignores hit, crit, and haste, so a warrior Needs a hunter's bow.
 - [ ] **[M16]** Gear and quest rewards are picked by item level alone, ignoring armor type and stats.
 - [ ] **[M16]** The trade window offers only the first 8 tradeable kinds of items.

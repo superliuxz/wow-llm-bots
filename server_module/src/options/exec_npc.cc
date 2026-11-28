@@ -9,6 +9,8 @@
 #include <utility>
 #include <vector>
 
+#include "Cell.h"
+#include "CellImpl.h"  // IWYU pragma: keep
 #include "ConditionMgr.h"
 #include "Creature.h"
 #include "CreatureData.h"
@@ -16,6 +18,8 @@
 #include "DBCStructure.h"
 #include "GameObject.h"
 #include "GossipDef.h"
+#include "GridNotifiers.h"
+#include "GridNotifiersImpl.h"  // IWYU pragma: keep
 #include "Group.h"
 #include "Item.h"
 #include "ItemPackets.h"
@@ -44,11 +48,13 @@
 #include "base/strings/stringprintf.h"
 #include "chat/chat_scripts.h"
 #include "options/action_types.h"
+#include "options/exec_items.h"
 #include "options/exec_shared.h"
 #include "options/leader_travel.h"
 #include "options/npc_gossip_and_bags.h"
 #include "options/options.h"
 #include "options/riding_mounts.h"
+#include "options/upkeep_helpers.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/world_util.h"
 
@@ -58,6 +64,39 @@ namespace {
 namespace pb = wlb::snapshot;
 
 static_assert(kGossipOptionGossip == GOSSIP_OPTION_GOSSIP);
+static_assert(kClassWarrior == CLASS_WARRIOR);
+static_assert(kClassPaladin == CLASS_PALADIN);
+static_assert(kClassHunter == CLASS_HUNTER);
+static_assert(kClassRogue == CLASS_ROGUE);
+static_assert(kClassPriest == CLASS_PRIEST);
+static_assert(kClassDeathKnight == CLASS_DEATH_KNIGHT);
+static_assert(kClassShaman == CLASS_SHAMAN);
+static_assert(kClassMage == CLASS_MAGE);
+static_assert(kClassWarlock == CLASS_WARLOCK);
+static_assert(kClassDruid == CLASS_DRUID);
+
+uint32_t MaxStorableItemsFor(Player* bot,
+                             const ItemTemplate* proto,
+                             uint32_t max_wanted) {
+  if (!bot || !proto || max_wanted == 0) {
+    return 0;
+  }
+  const uint32_t buy_count = std::max<uint32_t>(1u, proto->BuyCount);
+  uint32_t hi =
+      std::min<uint32_t>(255u, (max_wanted + buy_count - 1u) / buy_count);
+  uint32_t lo = 0;
+  while (lo < hi) {
+    const uint32_t mid = lo + (hi - lo + 1u) / 2u;
+    ItemPosCountVec dest;
+    if (bot->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, proto->ItemId,
+                             mid * buy_count) == EQUIP_ERR_OK) {
+      lo = mid;
+    } else {
+      hi = mid - 1u;
+    }
+  }
+  return lo * buy_count;
+}
 
 bool HasOpenGossipMenuFor(const Player* bot, const Creature* npc) {
   if (!bot || !npc || !bot->PlayerTalkClass) {
@@ -406,8 +445,8 @@ TalkResult TalkToNpcNow(Player* bot, Creature* npc) {
 
 void CollectNpcActions(Player* bot,
                        const pb::Snapshot& snapshot,
-                       bool has_food,
-                       bool has_drink,
+                       uint32_t food_count,
+                       uint32_t drink_count,
                        std::vector<pb::OptionFacts_NpcAction>* out) {
   out->clear();
   if (!bot || !bot->IsAlive() || bot->IsInCombat()) {
@@ -606,19 +645,37 @@ void CollectNpcActions(Player* bot,
       }
     }
 
-    // 4. Vendor upkeep buy (food, water, hunter ammo, mounts, bags).
+    // 4. Vendor upkeep buy (food, water, hunter ammo, class reagents, rogue
+    //    poisons, mounts, bags).
     if (out->size() < kMaxNpcActions && npc->HasNpcFlag(UNIT_NPC_FLAG_VENDOR)) {
       if (const VendorItemData* vitems = npc->GetVendorItems()) {
         const float discount = bot->GetReputationPriceDiscount(npc);
-        const bool need_drink = !has_drink && bot->getPowerType() == POWER_MANA;
+        const bool need_food = NeedsFoodRestock(food_count);
+        const bool need_drink =
+            NeedsDrinkRestock(drink_count, bot->getPowerType() == POWER_MANA);
+        const uint32_t cur_ammo_id = bot->GetUInt32Value(PLAYER_AMMO_ID);
+        const uint32_t cur_ammo_count =
+            cur_ammo_id ? bot->GetItemCount(cur_ammo_id, false) : 0u;
         const bool need_ammo =
             bot->getClass() == CLASS_HUNTER &&
-            (bot->GetUInt32Value(PLAYER_AMMO_ID) == 0 ||
-             bot->GetItemCount(bot->GetUInt32Value(PLAYER_AMMO_ID), false) <
-                 200);
-        const ItemTemplate* best_food = nullptr;
-        const ItemTemplate* best_drink = nullptr;
-        const ItemTemplate* best_ammo = nullptr;
+            (cur_ammo_id == 0 || cur_ammo_count < kAmmoRestockThreshold);
+        const std::vector<ClassReagentSpec> reagent_specs =
+            ClassReagentSpecsFor(bot->getClass(), bot->GetLevel());
+        const bool need_poisons =
+            bot->getClass() == CLASS_ROGUE && bot->GetLevel() >= 20;
+
+        struct VendorPick {
+          const ItemTemplate* proto = nullptr;
+          uint32_t unit_price = 0;
+          uint32_t vendor_stock = 0;
+          uint32_t current_count = 0;
+          uint32_t target_stock = 0;
+        };
+        VendorPick best_food;
+        VendorPick best_drink;
+        VendorPick best_ammo;
+        std::vector<VendorPick> reagent_picks;
+        VendorPick best_poisons[7]{};
         std::vector<MountVendorCandidate> mount_candidates;
         std::vector<BagVendorCandidate> bag_candidates;
         for (uint32_t slot = 0; slot < vitems->GetItemCount(); ++slot) {
@@ -631,8 +688,9 @@ void CollectNpcActions(Player* bot,
               proto->RequiredLevel > bot->GetLevel()) {
             continue;
           }
-          if (vi->maxcount != 0 &&
-              npc->GetVendorItemCurrentCount(vi) < proto->BuyCount) {
+          const uint32_t vendor_stock =
+              vi->maxcount != 0 ? npc->GetVendorItemCurrentCount(vi) : 0u;
+          if (vi->maxcount != 0 && vendor_stock < proto->BuyCount) {
             continue;
           }
           const uint32_t price = DiscountedCopperCost(
@@ -711,38 +769,126 @@ void CollectNpcActions(Player* bot,
             }
             continue;
           }
-          if (!has_food && proto->Class == ITEM_CLASS_CONSUMABLE &&
+          if (need_food && proto->Class == ITEM_CLASS_CONSUMABLE &&
               proto->SubClass == ITEM_SUBCLASS_FOOD &&
-              (!best_food || proto->ItemLevel > best_food->ItemLevel)) {
+              (!best_food.proto ||
+               proto->ItemLevel > best_food.proto->ItemLevel)) {
             const SpellInfo* sp =
                 proto->Spells[0].SpellId
                     ? sSpellMgr->GetSpellInfo(proto->Spells[0].SpellId)
                     : nullptr;
             if (sp && sp->GetCategory() == 11) {
-              best_food = proto;
+              best_food = {proto, price, vendor_stock, food_count,
+                           kFoodTargetStock};
             }
           }
           if (need_drink && proto->Class == ITEM_CLASS_CONSUMABLE &&
               proto->SubClass == ITEM_SUBCLASS_FOOD &&
-              (!best_drink || proto->ItemLevel > best_drink->ItemLevel)) {
+              (!best_drink.proto ||
+               proto->ItemLevel > best_drink.proto->ItemLevel)) {
             const SpellInfo* sp =
                 proto->Spells[0].SpellId
                     ? sSpellMgr->GetSpellInfo(proto->Spells[0].SpellId)
                     : nullptr;
             if (sp && sp->GetCategory() == 59) {
-              best_drink = proto;
+              best_drink = {proto, price, vendor_stock, drink_count,
+                            kDrinkTargetStock};
             }
           }
           if (need_ammo && IsAmmoForHunter(bot, proto) &&
-              (!best_ammo || proto->ItemLevel > best_ammo->ItemLevel)) {
-            best_ammo = proto;
+              (!best_ammo.proto ||
+               proto->ItemLevel > best_ammo.proto->ItemLevel)) {
+            best_ammo = {proto, price, vendor_stock,
+                         bot->GetItemCount(proto->ItemId, false),
+                         kAmmoTargetStock};
+          }
+          for (const ClassReagentSpec& spec : reagent_specs) {
+            if (proto->ItemId != spec.item_id) {
+              continue;
+            }
+            const uint32_t have = bot->GetItemCount(spec.item_id, false);
+            if (have < spec.restock_threshold) {
+              const bool dup = std::any_of(
+                  reagent_picks.begin(), reagent_picks.end(),
+                  [&](const VendorPick& p) {
+                    return p.proto && p.proto->ItemId == proto->ItemId;
+                  });
+              if (!dup) {
+                reagent_picks.push_back(
+                    {proto, price, vendor_stock, have, spec.target_stock});
+              }
+            }
+          }
+          if (need_poisons) {
+            const RoguePoisonFamily fam = ClassifyRoguePoison(proto->Name1);
+            if (fam != RoguePoisonFamily::kNone) {
+              const size_t fi = static_cast<size_t>(fam);
+              if (!best_poisons[fi].proto ||
+                  proto->ItemLevel > best_poisons[fi].proto->ItemLevel) {
+                best_poisons[fi] = {proto, price, vendor_stock,
+                                    bot->GetItemCount(proto->ItemId, false),
+                                    kPoisonTargetStock};
+              }
+            }
           }
         }
-        for (const ItemTemplate* pick : {best_food, best_drink, best_ammo}) {
-          if (pick && out->size() < kMaxNpcActions) {
-            out->push_back(
-                {"npc_buy:" + u.guid + ":" + std::to_string(pick->ItemId),
-                 u.guid, "Buy " + pick->Name1 + " from " + npc_name});
+        const auto emit_stack_buy = [&](const VendorPick& pick) {
+          if (!pick.proto || out->size() >= kMaxNpcActions) {
+            return;
+          }
+          const uint32_t max_stack =
+              std::max<uint32_t>(1u, pick.proto->GetMaxStackSize());
+          const uint32_t deficit = pick.target_stock > pick.current_count
+                                       ? pick.target_stock - pick.current_count
+                                       : 0u;
+          if (deficit == 0) {
+            return;
+          }
+          const uint32_t max_storable = MaxStorableItemsFor(
+              bot, pick.proto, std::min<uint32_t>(deficit, max_stack));
+          if (max_storable == 0) {
+            return;
+          }
+          const StackBuyPlan plan = ComputeStackBuyPlan(StackBuyRequest{
+              .current_count = pick.current_count,
+              .target_stock = pick.target_stock,
+              .buy_count = pick.proto->BuyCount,
+              .max_stack = max_stack,
+              .unit_price_copper = pick.unit_price,
+              .bot_money_copper = bot->GetMoney(),
+              .vendor_stock = pick.vendor_stock,
+              .max_storable_items = max_storable,
+          });
+          if (plan.purchase_units == 0) {
+            return;
+          }
+          out->push_back(
+              {"npc_buy:" + u.guid + ":" + std::to_string(pick.proto->ItemId) +
+                   ":" + std::to_string(plan.purchase_units),
+               u.guid, FormatStackBuyLabel(pick.proto->Name1, npc_name, plan)});
+        };
+        emit_stack_buy(best_food);
+        emit_stack_buy(best_drink);
+        emit_stack_buy(best_ammo);
+        for (const VendorPick& rp : reagent_picks) {
+          emit_stack_buy(rp);
+        }
+        size_t poisons_added = 0;
+        for (RoguePoisonFamily fam :
+             {RoguePoisonFamily::kInstant, RoguePoisonFamily::kDeadly,
+              RoguePoisonFamily::kWound, RoguePoisonFamily::kCrippling,
+              RoguePoisonFamily::kMindNumbing,
+              RoguePoisonFamily::kAnesthetic}) {
+          if (poisons_added >= 2 || out->size() >= kMaxNpcActions) {
+            break;
+          }
+          const VendorPick& pp = best_poisons[static_cast<size_t>(fam)];
+          if (pp.proto && pp.current_count < kPoisonRestockThreshold) {
+            const size_t before = out->size();
+            emit_stack_buy(pp);
+            if (out->size() > before) {
+              ++poisons_added;
+            }
           }
         }
         if (!mount_candidates.empty() && out->size() < kMaxNpcActions) {
@@ -948,6 +1094,60 @@ void CollectNpcActions(Player* bot,
       }
     }
   }
+}
+
+Creature* FindNearestServiceNpc(Player* bot,
+                                bool for_train,
+                                float max_dist_yd) {
+  if (!bot || !bot->IsInWorld() || !bot->IsAlive() || max_dist_yd <= 0.0f) {
+    return nullptr;
+  }
+  std::vector<Unit*> units;
+  Acore::AnyUnitInObjectRangeCheck check(bot, max_dist_yd);
+  Acore::UnitListSearcher<Acore::AnyUnitInObjectRangeCheck> searcher(bot, units,
+                                                                     check);
+  Cell::VisitObjects(bot, searcher, max_dist_yd);
+
+  Creature* best_primary = nullptr;
+  float best_primary_dist = max_dist_yd + 1.0f;
+  Creature* best_fallback = nullptr;
+  float best_fallback_dist = max_dist_yd + 1.0f;
+  for (Unit* u : units) {
+    Creature* c = u ? u->ToCreature() : nullptr;
+    if (!c || !c->IsInWorld() || !c->IsAlive() || !bot->IsFriendlyTo(c)) {
+      continue;
+    }
+    const float dist = bot->GetDistance(c);
+    if (dist > max_dist_yd) {
+      continue;
+    }
+    if (for_train) {
+      if (!c->HasNpcFlag(UNIT_NPC_FLAG_TRAINER | UNIT_NPC_FLAG_TRAINER_CLASS)) {
+        continue;
+      }
+      Trainer::Trainer* trainer = sObjectMgr->GetTrainer(c->GetEntry());
+      if (!trainer || trainer->GetTrainerType() != Trainer::Type::Class ||
+          !trainer->IsTrainerValidForPlayer(bot)) {
+        continue;
+      }
+      if (dist < best_primary_dist) {
+        best_primary = c;
+        best_primary_dist = dist;
+      }
+    } else {
+      if (c->HasNpcFlag(UNIT_NPC_FLAG_REPAIR)) {
+        if (dist < best_primary_dist) {
+          best_primary = c;
+          best_primary_dist = dist;
+        }
+      } else if (c->HasNpcFlag(UNIT_NPC_FLAG_VENDOR) &&
+                 dist < best_fallback_dist) {
+        best_fallback = c;
+        best_fallback_dist = dist;
+      }
+    }
+  }
+  return best_primary ? best_primary : best_fallback;
 }
 
 ActionOutcome ExecuteTalkAction(Player* bot, const TalkAction& action) {
@@ -1189,15 +1389,48 @@ ActionOutcome ExecuteNpcAction(Player* bot, const NpcAction& action) {
               }
             }
           }
+          const uint32_t req_units =
+              action.arg2 > 0 ? std::min<uint32_t>(action.arg2, 255u) : 1u;
+          uint32_t units = req_units;
+          if (proto && units > 1) {
+            const uint32_t buy_count = std::max<uint32_t>(1u, proto->BuyCount);
+            const uint32_t unit_price = DiscountedCopperCost(
+                proto->BuyPrice > 0 ? static_cast<uint32_t>(proto->BuyPrice)
+                                    : 0u,
+                bot->GetReputationPriceDiscount(npc));
+            if (unit_price > 0) {
+              units = std::min<uint32_t>(units, bot->GetMoney() / unit_price);
+            }
+            if (vi->maxcount != 0) {
+              units = std::min<uint32_t>(
+                  units, npc->GetVendorItemCurrentCount(vi) / buy_count);
+            }
+            const uint32_t max_storable =
+                MaxStorableItemsFor(bot, proto, units * buy_count);
+            units = std::min<uint32_t>(units, max_storable / buy_count);
+            if (units == 0) {
+              units = 1;
+            }
+          }
           const uint32_t count_before = bot->GetItemCount(action.arg1, false);
           const uint32_t money_before = bot->GetMoney();
-          bot->BuyItemFromVendorSlot(npc->GetGUID(), slot, action.arg1, 1,
-                                     NULL_BAG, NULL_SLOT);
-          if (bot->GetItemCount(action.arg1, false) <= count_before &&
-              bot->GetMoney() >= money_before) {
+          bot->BuyItemFromVendorSlot(npc->GetGUID(), slot, action.arg1,
+                                     static_cast<uint8_t>(units), NULL_BAG,
+                                     NULL_SLOT);
+          const uint32_t count_after = bot->GetItemCount(action.arg1, false);
+          if (count_after <= count_before && bot->GetMoney() >= money_before) {
             return {.error = "could not buy " + item_name};
           }
-          return {.used = true, .info = "bought " + item_name};
+          if (proto && IsAmmoForHunter(bot, proto)) {
+            EnsureHunterAmmoEquipped(bot);
+          }
+          const uint32_t gained =
+              count_after > count_before ? count_after - count_before : 0u;
+          std::string info = "bought " + item_name;
+          if (gained > 1) {
+            info += " x" + std::to_string(gained);
+          }
+          return {.used = true, .info = std::move(info)};
         }
       }
       return {.error = "item not sold by this vendor"};

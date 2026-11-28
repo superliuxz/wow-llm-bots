@@ -6,6 +6,7 @@
 #ifndef MOD_LLM_BRAIN_OPTIONS_EXEC_NPC_H_
 #define MOD_LLM_BRAIN_OPTIONS_EXEC_NPC_H_
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -38,9 +39,15 @@ bool NpcHasDialogue(Player* bot, Creature* npc);
 // dialogue actions for friendly NPCs within talk range.
 void CollectNpcActions(Player* bot,
                        const wlb::snapshot::Snapshot& snapshot,
-                       bool has_food,
-                       bool has_drink,
+                       uint32_t food_count,
+                       uint32_t drink_count,
                        std::vector<wlb::snapshot::OptionFacts_NpcAction>* out);
+
+// Returns the nearest living friendly repair/vendor NPC (`!for_train`) or
+// valid class trainer for `bot` (`for_train`) within `max_dist_yd`, or nullptr.
+Creature* FindNearestServiceNpc(Player* bot,
+                                bool for_train,
+                                float max_dist_yd = 150.0f);
 
 ActionOutcome ExecuteTalkAction(Player* bot, const TalkAction& action);
 ActionOutcome ExecuteNpcAction(Player* bot, const NpcAction& action);

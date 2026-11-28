@@ -247,7 +247,8 @@ struct NpcAction {
   Op op = Op::kVendor;
   std::string npc_guid;
   uint32_t arg1 = 0;  // quest_id, spell_id, item_entry, dest_node, or menu_id
-  uint32_t arg2 = 0;  // reward_idx, list_id, or (bag << 8) | slot for kSellItem
+  uint32_t arg2 = 0;  // reward_idx, list_id, (bag << 8) | slot (kSellItem),
+                      // or purchase_units (kBuy, 1..255)
 };
 
 struct SpendTalentsAction {

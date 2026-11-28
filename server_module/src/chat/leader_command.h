@@ -32,6 +32,8 @@ enum class LeaderCommand {
   kStopDps,         // "stop dps", "hold dps", "cease fire": halt attacks
   kResumeDps,       // "resume", "resume dps", "dps", "burn": lift stop dps
   kWipe,            // "wipe", "release", "release spirit": release immediately
+  kGoRepair,        // "go repair", "repair", "go vendor": visit repair/vendor
+  kGoTrain,         // "go train", "train", "train spells": visit class trainer
 };
 
 struct ParsedLeaderCommand {

@@ -192,6 +192,30 @@ TEST(LeaderCommandTest, RaidTacticsSpreadStackStopAndResumeDps) {
   EXPECT_FALSE(Cmd("we might wipe if we pull"));
   EXPECT_FALSE(Cmd("don't release yet"));
 
+  // M15: go repair / go train errands wake and direct bots to repair/train.
+  EXPECT_EQ(Cmd("go repair"), LeaderCommand::kGoRepair);
+  EXPECT_EQ(Cmd("repair"), LeaderCommand::kGoRepair);
+  EXPECT_EQ(Cmd("repair gear guys"), LeaderCommand::kGoRepair);
+  EXPECT_EQ(Cmd("go vendor"), LeaderCommand::kGoRepair);
+  EXPECT_EQ(Cmd("sell and repair"), LeaderCommand::kGoRepair);
+  EXPECT_EQ(Cmd("go train"), LeaderCommand::kGoTrain);
+  EXPECT_EQ(Cmd("train"), LeaderCommand::kGoTrain);
+  EXPECT_EQ(Cmd("train spells everyone"), LeaderCommand::kGoTrain);
+  EXPECT_EQ(Cmd("go train spells"), LeaderCommand::kGoTrain);
+  EXPECT_EQ(DescribeLeaderCommand(*ParseLeaderCommand("go repair", kBots)),
+            "go repair");
+  EXPECT_EQ(DescribeLeaderCommand(*ParseLeaderCommand("go train", kBots)),
+            "go train");
+  const auto named_repair = ParseLeaderCommand("Loada go repair", kBots);
+  ASSERT_TRUE(named_repair);
+  EXPECT_EQ(named_repair->command, LeaderCommand::kGoRepair);
+  EXPECT_EQ(named_repair->addressed, (std::vector<std::string>{"Loada"}));
+  // Adversarial counter-test: casual sentences mentioning repair/train are not
+  // leader commands.
+  EXPECT_FALSE(Cmd("I need to repair my gear later"));
+  EXPECT_FALSE(Cmd("did you train your new spells?"));
+  EXPECT_FALSE(Cmd("let's hit the vendor after this quest"));
+
   // M11: tanks are excluded from /rw spread and /rw stack by default so they
   // don't spin or drag the boss, unless explicitly addressed by name.
   EXPECT_FALSE(ShouldApplySpreadOrStack(/*is_tank=*/true,

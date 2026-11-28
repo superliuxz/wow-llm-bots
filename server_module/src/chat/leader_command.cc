@@ -101,6 +101,17 @@ constexpr Phrase kPhrases[] = {
     {"call wipe", LeaderCommand::kWipe},
     {"release", LeaderCommand::kWipe},
     {"release spirit", LeaderCommand::kWipe},
+    {"go repair", LeaderCommand::kGoRepair},
+    {"repair", LeaderCommand::kGoRepair},
+    {"repair gear", LeaderCommand::kGoRepair},
+    {"go vendor", LeaderCommand::kGoRepair},
+    {"vendor", LeaderCommand::kGoRepair},
+    {"go sell", LeaderCommand::kGoRepair},
+    {"sell repair", LeaderCommand::kGoRepair},
+    {"go train", LeaderCommand::kGoTrain},
+    {"train", LeaderCommand::kGoTrain},
+    {"train spells", LeaderCommand::kGoTrain},
+    {"go train spells", LeaderCommand::kGoTrain},
 };
 
 // "<verb> <icon>": who to kill (or pull) by its raid mark.
@@ -247,6 +258,10 @@ const char* LeaderCommandName(LeaderCommand command) {
       return "resume dps";
     case LeaderCommand::kWipe:
       return "wipe";
+    case LeaderCommand::kGoRepair:
+      return "go repair";
+    case LeaderCommand::kGoTrain:
+      return "go train";
   }
   return "?";
 }

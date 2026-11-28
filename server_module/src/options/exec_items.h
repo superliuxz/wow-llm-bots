@@ -27,7 +27,15 @@ struct ItemActionOutcome {
 };
 
 bool HasFoodOrDrinkAura(Player* bot);
+void CountBagFoodAndDrink(Player* bot,
+                          uint32_t* food_count,
+                          uint32_t* drink_count);
 void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink);
+// Equips the best matching, usable arrows/bullets in bags via Player::SetAmmo
+// when a hunter has no ammo loaded, ran out of the loaded stack, switched
+// ranged weapon type, or acquired higher-ilvl matching ammo. Returns true if
+// SetAmmo changed the loaded ammo ID.
+bool EnsureHunterAmmoEquipped(Player* bot);
 void ContinueRest(Player* bot);
 bool IsRestInProgress(Player* bot, bool* had_food_drink_aura);
 

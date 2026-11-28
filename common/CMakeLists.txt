@@ -150,6 +150,8 @@ add_executable(llm_brain_unittests
   "${WLB_MODULE_SRC}/options/quest_helpers_unittest.cc"
   "${WLB_MODULE_SRC}/options/riding_mounts.cc"
   "${WLB_MODULE_SRC}/options/riding_mounts_unittest.cc"
+  "${WLB_MODULE_SRC}/options/upkeep_helpers.cc"
+  "${WLB_MODULE_SRC}/options/upkeep_helpers_unittest.cc"
   "${WLB_MODULE_SRC}/options/vehicle_controls.cc"
   "${WLB_MODULE_SRC}/options/vehicle_controls_unittest.cc"
   "${WLB_MODULE_SRC}/snapshot/encounter_phase.cc"

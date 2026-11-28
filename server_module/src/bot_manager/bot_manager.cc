@@ -95,6 +95,7 @@
 #include "chat/speak.h"
 #include "config/config_parsing.h"
 #include "options/act_geometry.h"
+#include "options/exec_items.h"
 #include "options/exec_shared.h"
 #include "options/group_roles.h"
 #include "options/quest_helpers.h"
@@ -1245,6 +1246,15 @@ class BrainPolicyListener final : public ActionExecutionListener {
     }
     if (gated->gate == ActionGate::kBrainLed) {
       return !BlockedFor(*gated, Owner());
+    }
+    if (name == "equip upgrades packet action") {
+      // Hunter's `no ammo` trigger fires `equip upgrades packet action` to
+      // reload arrows/bullets from bags: equip valid ammo via SetAmmo while
+      // still blocking playerbots from overwriting brain-chosen gear equips.
+      if (bot_ && bot_->getClass() == CLASS_HUNTER) {
+        EnsureHunterAmmoEquipped(bot_);
+      }
+      return false;
     }
     if (name == "apply stone") {
       return HasEligibleTempEnchant(bot_, ai_, /*is_stone=*/true);

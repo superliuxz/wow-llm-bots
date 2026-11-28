@@ -1365,13 +1365,17 @@ void SnapshotBuilder::FillOptionFacts(Player* bot,
                                       base::TimeTicks now) {
   const bool in_combat = bot->IsInCombat();
   FillNpcFacts(bot, *snapshot, in_combat, out);
+  uint32_t food_count = 0;
+  uint32_t drink_count = 0;
   if (!in_combat) {
-    CheckBagFoodAndDrink(bot, &out->has_food, &out->has_drink);
+    CountBagFoodAndDrink(bot, &food_count, &drink_count);
+    out->has_food = food_count > 0;
+    out->has_drink = drink_count > 0;
   }
   CollectUsableBagItems(bot, &out->usable_items);
   if (!in_combat) {
     CollectTalentTrees(bot, &out->talent_trees);
-    CollectNpcActions(bot, *snapshot, out->has_food, out->has_drink,
+    CollectNpcActions(bot, *snapshot, food_count, drink_count,
                       &out->npc_actions);
   }
   CollectGroupAndUpkeepActions(bot, *snapshot, &out->group_and_upkeep_actions);

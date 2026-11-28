@@ -15,7 +15,10 @@ namespace {
 constexpr auto kGatedActions = std::to_array<GatedAction>({
     // Gear: the brain's `Equip` choices would be undone.
     {"equip upgrade", ActionGate::kAlways},
-    {"equip upgrades packet action", ActionGate::kAlways},
+    // `equip upgrades packet action` also fires on Hunter's `no ammo` trigger:
+    // BrainPolicyListener reloads hunter ammo via SetAmmo while still blocking
+    // playerbots from overwriting brain-chosen gear equips.
+    {"equip upgrades packet action", ActionGate::kCondition},
     // Popups the brain answers (and using a soulstone or ankh, Now #6).
     {"accept invitation", ActionGate::kBrainLed},
     {"accept quest share", ActionGate::kBrainLed},

@@ -279,6 +279,33 @@ TEST(ActionTypesTest, DecodesTypedNpcAndGroupActions) {
           << bad;
     }
   }
+  {
+    BotAction single = DecodeOptionFactAction("npc_buy:0x1234:4498",
+                                              "Buy Brown Leather Satchel");
+    const auto* npc_single = std::get_if<NpcAction>(&single);
+    ASSERT_NE(npc_single, nullptr);
+    EXPECT_EQ(npc_single->op, NpcAction::Op::kBuy);
+    EXPECT_EQ(npc_single->npc_guid, "0x1234");
+    EXPECT_EQ(npc_single->arg1, 4498u);
+    EXPECT_EQ(npc_single->arg2, 1u);
+
+    BotAction stack = DecodeOptionFactAction(
+        "npc_buy:0x1234:17034:20", "Buy Maple Seed x20 (10s) from Vendor");
+    const auto* npc_stack = std::get_if<NpcAction>(&stack);
+    ASSERT_NE(npc_stack, nullptr);
+    EXPECT_EQ(npc_stack->op, NpcAction::Op::kBuy);
+    EXPECT_EQ(npc_stack->npc_guid, "0x1234");
+    EXPECT_EQ(npc_stack->arg1, 17034u);
+    EXPECT_EQ(npc_stack->arg2, 20u);
+
+    for (const char* bad :
+         {"npc_buy:0x1234", "npc_buy:0x1234:0", "npc_buy:0x1234:17034:0",
+          "npc_buy:0x1234:17034:256", "npc_buy:0x1234:17034:abc"}) {
+      EXPECT_TRUE(std::holds_alternative<InvalidAction>(
+          DecodeOptionFactAction(bad, "bad")))
+          << bad;
+    }
+  }
 }
 
 TEST(ActionTypesTest, DecodesTradeWindowChoices) {

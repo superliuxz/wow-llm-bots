@@ -1851,6 +1851,45 @@ TEST(OptionsTest, VendorSellBagBuyAndBagEquipSuppressedInCombatAndDead) {
                              "Release spirit", "Keep doing what I'm doing"}));
 }
 
+TEST(OptionsTest,
+     GroupedRepairTrainAndReagentBuysAvailableOocAndGatedInCombat) {
+  OptionFacts facts;
+  facts.npc_actions.push_back(
+      {"npc_vendor:0x2001", "0x2001", "Repair gear at Smith Argus"});
+  facts.npc_actions.push_back(
+      {"npc_train:0x2002", "0x2002", "Train 2 class spells at Lyria Du Lac"});
+  facts.npc_actions.push_back({"npc_buy:0x2003:17030:20", "0x2003",
+                               "Buy Ankh x20 (2g) from Reagent Vendor"});
+
+  // Grouped out of combat: all three upkeep options are available and decode
+  // with stack purchase count intact.
+  pb::Snapshot grouped_ooc;
+  pb::Unit leader;
+  leader.name = "Human";
+  leader.group.emplace().leader = true;
+  grouped_ooc.ext.party.emplace().members.push_back(leader);
+  const std::vector<OptionTarget> targets = AddOptions(&grouped_ooc, facts);
+  EXPECT_EQ(Texts(grouped_ooc),
+            (std::vector<std::string>{"Repair gear at Smith Argus",
+                                      "Train 2 class spells at Lyria Du Lac",
+                                      "Buy Ankh x20 (2g) from Reagent Vendor",
+                                      "Keep doing what I'm doing"}));
+  const auto* buy = std::get_if<NpcAction>(&targets[2].action);
+  ASSERT_NE(buy, nullptr);
+  EXPECT_EQ(buy->op, NpcAction::Op::kBuy);
+  EXPECT_EQ(buy->arg1, 17030u);
+  EXPECT_EQ(buy->arg2, 20u);
+
+  // Adversarial counter-test (P0 combat priority): grouped in combat gates all
+  // repair, train, and reagent-buy options.
+  pb::Snapshot grouped_combat = grouped_ooc;
+  grouped_combat.options.clear();
+  grouped_combat.base.self.in_combat = true;
+  AddOptions(&grouped_combat, facts);
+  EXPECT_EQ(Texts(grouped_combat),
+            std::vector<std::string>{"Keep doing what I'm doing"});
+}
+
 TEST(OptionsTest, StuckGhostOffersSpiritHealerAndUnstuckGhostDoesNot) {
   OptionFacts facts;
   facts.ghost_stuck = false;

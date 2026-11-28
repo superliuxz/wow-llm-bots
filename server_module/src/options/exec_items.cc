@@ -44,6 +44,7 @@
 #include "SpellMgr.h"
 #include "Unit.h"
 #include "UnitDefines.h"
+#include "UpdateFields.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
 #include "base/strings/stringprintf.h"
@@ -52,6 +53,7 @@
 #include "options/npc_gossip_and_bags.h"
 #include "options/position_facts.h"
 #include "options/quest_helpers.h"
+#include "options/upkeep_helpers.h"
 #include "snapshot/snapshot.h"
 #include "snapshot/world_util.h"
 
@@ -327,9 +329,11 @@ bool HasFoodOrDrinkAura(Player* bot) {
          HasCategoryAura(bot, kSpellCategoryDrink);
 }
 
-void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink) {
-  *has_food = false;
-  *has_drink = false;
+void CountBagFoodAndDrink(Player* bot,
+                          uint32_t* food_count,
+                          uint32_t* drink_count) {
+  *food_count = 0;
+  *drink_count = 0;
   for (const BagSlotItem& entry : BagItems(bot)) {
     const ItemTemplate* proto = entry.item->GetTemplate();
     if (!proto || proto->Class != ITEM_CLASS_CONSUMABLE ||
@@ -340,11 +344,79 @@ void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink) {
     }
     const uint32_t cat = proto->Spells[0].SpellCategory;
     if (cat == kSpellCategoryFood) {
-      *has_food = true;
+      *food_count += entry.item->GetCount();
     } else if (cat == kSpellCategoryDrink) {
-      *has_drink = true;
+      *drink_count += entry.item->GetCount();
     }
   }
+}
+
+void CheckBagFoodAndDrink(Player* bot, bool* has_food, bool* has_drink) {
+  uint32_t food_count = 0;
+  uint32_t drink_count = 0;
+  CountBagFoodAndDrink(bot, &food_count, &drink_count);
+  *has_food = food_count > 0;
+  *has_drink = drink_count > 0;
+}
+
+bool EnsureHunterAmmoEquipped(Player* bot) {
+  if (!bot || bot->getClass() != CLASS_HUNTER || !bot->IsAlive()) {
+    return false;
+  }
+  Item* ranged = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_RANGED);
+  if (!ranged || !ranged->GetTemplate()) {
+    return false;
+  }
+  const uint32_t rsub = ranged->GetTemplate()->SubClass;
+  uint32_t wanted_ammo_subclass = 0;
+  if (rsub == ITEM_SUBCLASS_WEAPON_BOW ||
+      rsub == ITEM_SUBCLASS_WEAPON_CROSSBOW) {
+    wanted_ammo_subclass = ITEM_SUBCLASS_ARROW;
+  } else if (rsub == ITEM_SUBCLASS_WEAPON_GUN) {
+    wanted_ammo_subclass = ITEM_SUBCLASS_BULLET;
+  } else {
+    return false;
+  }
+  const uint32_t current_ammo_id = bot->GetUInt32Value(PLAYER_AMMO_ID);
+  const uint32_t current_ammo_count =
+      current_ammo_id ? bot->GetItemCount(current_ammo_id, false) : 0;
+  const ItemTemplate* current_proto =
+      current_ammo_id ? sObjectMgr->GetItemTemplate(current_ammo_id) : nullptr;
+  const uint32_t current_ammo_ilvl =
+      current_proto ? current_proto->ItemLevel : 0;
+  const bool current_matches = current_proto != nullptr &&
+                               current_proto->Class == ITEM_CLASS_PROJECTILE &&
+                               current_proto->SubClass == wanted_ammo_subclass;
+
+  std::vector<HunterAmmoCandidate> candidates;
+  std::vector<uint32_t> seen_ids;
+  for (const BagSlotItem& entry : BagItems(bot)) {
+    const ItemTemplate* proto =
+        entry.item ? entry.item->GetTemplate() : nullptr;
+    if (!proto || proto->Class != ITEM_CLASS_PROJECTILE) {
+      continue;
+    }
+    if (std::find(seen_ids.begin(), seen_ids.end(), proto->ItemId) !=
+        seen_ids.end()) {
+      continue;
+    }
+    seen_ids.push_back(proto->ItemId);
+    candidates.push_back(HunterAmmoCandidate{
+        .item_id = proto->ItemId,
+        .item_level = proto->ItemLevel,
+        .count = bot->GetItemCount(proto->ItemId, false),
+        .matches_ranged_weapon = proto->SubClass == wanted_ammo_subclass,
+        .usable = bot->CanUseAmmo(proto->ItemId) == EQUIP_ERR_OK,
+    });
+  }
+  const uint32_t pick = PickHunterAmmoToEquip(
+      /*is_hunter=*/true, bot->IsAlive(), current_ammo_id, current_ammo_count,
+      current_ammo_ilvl, current_matches, candidates);
+  if (pick == 0 || pick == current_ammo_id) {
+    return false;
+  }
+  bot->SetAmmo(pick);
+  return bot->GetUInt32Value(PLAYER_AMMO_ID) == pick;
 }
 
 void ContinueRest(Player* bot) {
@@ -987,6 +1059,9 @@ std::string LootCorpseNow(Player* bot, Creature* creature) {
   release_pkt << guid;
   release_pkt.rpos(0);
   bot->GetSession()->HandleLootReleaseOpcode(release_pkt);
+  if (bot->getClass() == CLASS_HUNTER) {
+    EnsureHunterAmmoEquipped(bot);
+  }
   ai->ResetActionDuration();
   if (!no_room.empty()) {
     return "Inventory is full";
@@ -1225,18 +1300,36 @@ ActionOutcome ExecuteEquipItemAction(Player* bot,
       continue;
     }
     const ItemTemplate* proto = slot_item.item->GetTemplate();
+    if (proto && proto->InventoryType == INVTYPE_AMMO) {
+      if (bot->CanUseAmmo(proto->ItemId) != EQUIP_ERR_OK) {
+        return {.error = "cannot equip " + action.name};
+      }
+      bot->SetAmmo(proto->ItemId);
+      if (bot->GetUInt32Value(PLAYER_AMMO_ID) != proto->ItemId) {
+        return {.error = "couldn't equip " + action.name};
+      }
+      return {.used = true, .info = "equipped " + action.name};
+    }
     uint16_t dest = 0;
     if (proto && PickEquipSlot(bot, slot_item.item, proto, &dest)) {
-      return EquipBagItem(bot, slot_item.item, slot_item.bag, slot_item.slot,
-                          action.name);
+      ActionOutcome res = EquipBagItem(bot, slot_item.item, slot_item.bag,
+                                       slot_item.slot, action.name);
+      if (res.used && bot->getClass() == CLASS_HUNTER) {
+        EnsureHunterAmmoEquipped(bot);
+      }
+      return res;
     }
     if (!fallback) {
       fallback = &slot_item;
     }
   }
   if (fallback) {
-    return EquipBagItem(bot, fallback->item, fallback->bag, fallback->slot,
-                        action.name);
+    ActionOutcome res = EquipBagItem(bot, fallback->item, fallback->bag,
+                                     fallback->slot, action.name);
+    if (res.used && bot->getClass() == CLASS_HUNTER) {
+      EnsureHunterAmmoEquipped(bot);
+    }
+    return res;
   }
   return {.error = action.name + " is not in your bags"};
 }

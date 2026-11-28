@@ -79,6 +79,7 @@
 #include "options/option_facts.h"
 #include "options/options.h"
 #include "options/quest_helpers.h"
+#include "options/upkeep_helpers.h"
 #include "position_facts.h"
 #include "snapshot/behavior_trace.h"
 #include "snapshot/behavior_trace_scripts.h"
@@ -1419,6 +1420,118 @@ class LlmBrainWorldScript : public WorldScript {
           done = "you will release immediately on death";
         }
         break;
+      }
+      case LeaderCommand::kGoRepair:
+      case LeaderCommand::kGoTrain: {
+        const bool for_train = parsed->command == LeaderCommand::kGoTrain;
+        if (const std::string err = ValidateLeaderErrandCommand(
+                bot->IsAlive(), bot->IsInCombat(), IsPartyInCombat(bot),
+                bot->InBattleground());
+            !err.empty()) {
+          return said + " (not applied: " + err + ")";
+        }
+        policy.stay = false;
+        policy.stay_in_combat = false;
+        BotManager::SetGroupPolicy(bot, policy);
+        ClearLeaderWait(bots_[index].leader_wait);
+        BotManager::ClearPingStay(bot);
+        BotState& state = bots_[index];
+        const char* errand_verb =
+            for_train ? "to train" : "to repair and restock";
+        if (Creature* npc = FindNearestServiceNpc(bot, for_train)) {
+          if (IsInTalkRange(bot, npc)) {
+            BotManager::StartErrandHold(bot, ErrandKind::kNpcInteract);
+            done = "you are at " + npc->GetName() + " " + errand_verb;
+            break;
+          }
+          WalkAction walk_act{
+              .id = for_train ? "errand:train" : "errand:repair",
+              .name = npc->GetName(),
+              .dest =
+                  wlb::snapshot::Vec3{npc->GetPositionX(), npc->GetPositionY(),
+                                      npc->GetPositionZ()},
+          };
+          const WalkStepResult step =
+              StartWalkAction(bot, walk_act, &state.walk, config_.dungeon_nav);
+          if (step.error.empty()) {
+            if (!step.arrived) {
+              state.active_option = OptionTarget{
+                  .kind = OptionTarget::Kind::kGoTo,
+                  .name = "Go to " + npc->GetName(),
+              };
+              state.active_command_id = 0;
+              state.errand_hold_active =
+                  BotManager::StartErrandHold(bot, ErrandKind::kWalk);
+              schedule_->SetActiveTargetPending(index, true);
+            } else {
+              BotManager::StartErrandHold(bot, ErrandKind::kNpcInteract);
+            }
+            done = "you head to " + npc->GetName() + " " + errand_verb;
+            break;
+          }
+        }
+        if (world_places_ &&
+            !(bot->GetMap() && bot->GetMap()->Instanceable())) {
+          const bool alliance = bot->GetTeamId() == TEAM_ALLIANCE;
+          const uint32_t class_bit = 1u << bot->getClass();
+          const wlb::snapshot::Vec3 pos{
+              bot->GetPositionX(), bot->GetPositionY(), bot->GetPositionZ()};
+          const WorldPlaces::Hub* best_primary = nullptr;
+          float best_primary_dist = kMaxTravelDistYd + 1.0f;
+          const WorldPlaces::Hub* best_fallback = nullptr;
+          float best_fallback_dist = kMaxTravelDistYd + 1.0f;
+          for (const WorldPlaces::Hub& hub : world_places_->hubs()) {
+            if (hub.map_id != bot->GetMapId() ||
+                (alliance ? !hub.for_alliance : !hub.for_horde)) {
+              continue;
+            }
+            const float dist = Dist(pos, hub.pos.x, hub.pos.y, hub.pos.z);
+            if (dist > kMaxTravelDistYd) {
+              continue;
+            }
+            if (for_train) {
+              if ((hub.class_trainer_mask & class_bit) != 0 &&
+                  dist < best_primary_dist) {
+                best_primary = &hub;
+                best_primary_dist = dist;
+              }
+            } else {
+              if (hub.has_repair && dist < best_primary_dist) {
+                best_primary = &hub;
+                best_primary_dist = dist;
+              } else if (hub.has_vendor && dist < best_fallback_dist) {
+                best_fallback = &hub;
+                best_fallback_dist = dist;
+              }
+            }
+          }
+          if (const WorldPlaces::Hub* hub =
+                  best_primary ? best_primary : best_fallback) {
+            WalkAction walk_act{
+                .id = hub->id,
+                .name = hub->name,
+                .dest = hub->pos,
+            };
+            const WalkStepResult step = StartWalkAction(
+                bot, walk_act, &state.walk, config_.dungeon_nav);
+            if (step.error.empty()) {
+              if (!step.arrived) {
+                state.active_option = OptionTarget{
+                    .kind = OptionTarget::Kind::kGoTo,
+                    .name = "Go to " + hub->name,
+                };
+                state.active_command_id = 0;
+                state.errand_hold_active =
+                    BotManager::StartErrandHold(bot, ErrandKind::kWalk);
+                schedule_->SetActiveTargetPending(index, true);
+              }
+              done = "you head to " + hub->name + " " + errand_verb;
+              break;
+            }
+          }
+        }
+        return said + " (not applied: no " +
+               (for_train ? "class trainer" : "repair vendor") + " nearby)";
       }
     }
     LOG_INFO("module", "mod-llm-brain: {} applied leader command {} from {}",

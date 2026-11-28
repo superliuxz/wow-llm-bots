@@ -398,12 +398,18 @@ BotAction DecodeOptionFactAction(std::string_view guid,
       return NpcAction{NpcAction::Op::kSellItem, npc_guid, item_entry,
                        (bag << 8) | slot};
     }
-    if (parts[0] == "npc_buy" && parts.size() == 3) {
+    if (parts[0] == "npc_buy" && (parts.size() == 3 || parts.size() == 4)) {
       uint32_t item_entry = 0;
-      if (!ParseUint32(parts[2], &item_entry)) {
+      uint32_t purchase_units = 1;
+      if (!ParseUint32(parts[2], &item_entry) || item_entry == 0) {
         return InvalidAction{"invalid vendor item"};
       }
-      return NpcAction{NpcAction::Op::kBuy, npc_guid, item_entry, 0};
+      if (parts.size() == 4 && (!ParseUint32(parts[3], &purchase_units) ||
+                                purchase_units == 0 || purchase_units > 255)) {
+        return InvalidAction{"invalid vendor item count"};
+      }
+      return NpcAction{NpcAction::Op::kBuy, npc_guid, item_entry,
+                       purchase_units};
     }
     if (parts[0] == "npc_fly_discover") {
       return NpcAction{NpcAction::Op::kFlyDiscover, npc_guid, 0, 0};
