@@ -63,6 +63,7 @@
 #include "chat/chat_scripts.h"
 #include "options/act_executor.h"
 #include "options/action_types.h"
+#include "options/bot_leader_guard.h"
 #include "options/exec_items.h"
 #include "options/exec_shared.h"
 #include "options/group_roles.h"
@@ -574,10 +575,36 @@ void CollectGroupAndUpkeepActions(Player* bot,
   }
 
   // 2. (leader) A ready check before a boss or a pull (Now #5).
+  // Guarded when grouped with a human: requires a human to ask/approve (M7).
+  const base::TimeTicks now = base::TimeTicks::Now();
+  bool group_has_human = false;
+  if (Group* group = bot->GetGroup()) {
+    for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
+         itr = itr->next()) {
+      if (Player* m = itr->GetSource(); m && IsHumanPlayer(m)) {
+        group_has_human = true;
+        break;
+      }
+    }
+    if (!group_has_human) {
+      const uint64_t gguid = group->GetGUID().GetRawValue();
+      group_has_human = BotSessionRegistry::Instance().InspectSession(
+          bot->GetGUID().GetRawValue(), [gguid](const BotSession* s) {
+            return s && s->human_group_guid == gguid;
+          });
+    }
+  }
+  const BotLeaderApprovalState leader_approvals =
+      BotSessionRegistry::Instance().InspectSession(
+          bot->GetGUID().GetRawValue(), [](const BotSession* s) {
+            return s ? s->leader_approvals : BotLeaderApprovalState{};
+          });
   if (bot->IsAlive() && !bot->IsInCombat() && bot->GetGroup() &&
       bot->GetGroup()->IsLeader(bot->GetGUID()) &&
       !BotManager::HasPendingReadyCheck(bot) &&
-      bot->GetGroup()->GetMembersCount() > 1) {
+      bot->GetGroup()->GetMembersCount() > 1 &&
+      CanBotLeaderPerformAction(BotLeaderActionKind::kReadyCheck,
+                                group_has_human, leader_approvals, now)) {
     out->push_back({"ready:start", "Start ready check"});
   }
 
@@ -657,6 +684,9 @@ void CollectGroupAndUpkeepActions(Player* bot,
                !bot->GetMap()->IsDungeon() &&
                (!bot->GetGroup() ||
                 bot->GetGroup()->IsLeader(bot->GetGUID())) &&
+               CanBotLeaderPerformAction(BotLeaderActionKind::kLfgQueue,
+                                         group_has_human, leader_approvals,
+                                         now) &&
                PartyLfgBlockReason(bot).empty() &&
                FindRandomLfgDungeonId(bot) != 0) {
       for (const LfgRoleChoice& rc : SpecLfgRoles(bot)) {
@@ -1080,13 +1110,44 @@ ActionOutcome ExecuteInviteAction(Player* bot, const InviteAction& action) {
   if (other->GetGroup() != nullptr) {
     return {.error = action.player_name + " is already in a group"};
   }
-  if (Group* g = bot->GetGroup();
-      g && !g->IsLeader(bot->GetGUID()) && !g->IsAssistant(bot->GetGUID())) {
-    return {.error = "only the group leader can invite"};
+  if (Group* g = bot->GetGroup()) {
+    if (!g->IsLeader(bot->GetGUID()) && !g->IsAssistant(bot->GetGUID())) {
+      return {.error = "only the group leader can invite"};
+    }
+    bool group_has_human = false;
+    for (GroupReference* itr = g->GetFirstMember(); itr != nullptr;
+         itr = itr->next()) {
+      if (Player* m = itr->GetSource(); m && IsHumanPlayer(m)) {
+        group_has_human = true;
+        break;
+      }
+    }
+    if (!group_has_human) {
+      const uint64_t gguid = g->GetGUID().GetRawValue();
+      group_has_human = BotSessionRegistry::Instance().InspectSession(
+          bot->GetGUID().GetRawValue(), [gguid](const BotSession* s) {
+            return s && s->human_group_guid == gguid;
+          });
+    }
+    const BotLeaderApprovalState approvals =
+        BotSessionRegistry::Instance().InspectSession(
+            bot->GetGUID().GetRawValue(), [](const BotSession* s) {
+              return s ? s->leader_approvals : BotLeaderApprovalState{};
+            });
+    if (!CanBotLeaderPerformAction(BotLeaderActionKind::kInvite,
+                                   group_has_human, approvals,
+                                   base::TimeTicks::Now(), other->GetName())) {
+      return {.error = "cannot invite without a human group member asking"};
+    }
   }
   WorldPacket pkt(CMSG_GROUP_INVITE, player_name.size() + 5);
   pkt << player_name << uint32(0);
   session->HandleGroupInviteOpcode(pkt);
+  BotSessionRegistry::Instance().WithSession(
+      bot->GetGUID().GetRawValue(), [](BotSession& s) {
+        ConsumeBotLeaderApproval(s.leader_approvals,
+                                 BotLeaderActionKind::kInvite);
+      });
   return {.used = true, .info = "invited " + action.player_name + " to group"};
 }
 
@@ -1215,12 +1276,44 @@ ActionOutcome ExecuteReadyCheckAction(Player* bot,
     return {.error = "you are not in a group"};
   }
   if (action.start) {
-    if (!bot->GetGroup()->IsLeader(bot->GetGUID()) &&
-        !bot->GetGroup()->IsAssistant(bot->GetGUID())) {
+    Group* g = bot->GetGroup();
+    if (!g->IsLeader(bot->GetGUID()) && !g->IsAssistant(bot->GetGUID())) {
       return {.error = "only the leader starts a ready check"};
+    }
+    bool group_has_human = false;
+    for (GroupReference* itr = g->GetFirstMember(); itr != nullptr;
+         itr = itr->next()) {
+      if (Player* m = itr->GetSource(); m && IsHumanPlayer(m)) {
+        group_has_human = true;
+        break;
+      }
+    }
+    if (!group_has_human) {
+      const uint64_t gguid = g->GetGUID().GetRawValue();
+      group_has_human = BotSessionRegistry::Instance().InspectSession(
+          bot->GetGUID().GetRawValue(), [gguid](const BotSession* s) {
+            return s && s->human_group_guid == gguid;
+          });
+    }
+    const BotLeaderApprovalState approvals =
+        BotSessionRegistry::Instance().InspectSession(
+            bot->GetGUID().GetRawValue(), [](const BotSession* s) {
+              return s ? s->leader_approvals : BotLeaderApprovalState{};
+            });
+    if (!CanBotLeaderPerformAction(BotLeaderActionKind::kReadyCheck,
+                                   group_has_human, approvals,
+                                   base::TimeTicks::Now())) {
+      return {.error =
+                  "cannot start a ready check without a human group member "
+                  "asking"};
     }
     WorldPacket request(MSG_RAID_READY_CHECK, 0);
     session->HandleRaidReadyCheckOpcode(request);
+    BotSessionRegistry::Instance().WithSession(
+        bot->GetGUID().GetRawValue(), [](BotSession& s) {
+          ConsumeBotLeaderApproval(s.leader_approvals,
+                                   BotLeaderActionKind::kReadyCheck);
+        });
     return {.used = true, .info = "started a ready check"};
   }
   const uint8_t state = action.ready ? 1 : 0;
@@ -1304,8 +1397,38 @@ ActionOutcome ExecuteShareQuestAction(Player* bot,
 ActionOutcome ExecuteLfgAction(Player* bot, const LfgAction& action) {
   switch (action.op) {
     case LfgAction::Op::kQueue: {
-      if (bot->GetGroup() && !bot->GetGroup()->IsLeader(bot->GetGUID())) {
-        return {.error = "only the group leader can queue for Dungeon Finder"};
+      if (Group* g = bot->GetGroup()) {
+        if (!g->IsLeader(bot->GetGUID())) {
+          return {.error =
+                      "only the group leader can queue for Dungeon Finder"};
+        }
+        bool group_has_human = false;
+        for (GroupReference* itr = g->GetFirstMember(); itr != nullptr;
+             itr = itr->next()) {
+          if (Player* m = itr->GetSource(); m && IsHumanPlayer(m)) {
+            group_has_human = true;
+            break;
+          }
+        }
+        if (!group_has_human) {
+          const uint64_t gguid = g->GetGUID().GetRawValue();
+          group_has_human = BotSessionRegistry::Instance().InspectSession(
+              bot->GetGUID().GetRawValue(), [gguid](const BotSession* s) {
+                return s && s->human_group_guid == gguid;
+              });
+        }
+        const BotLeaderApprovalState approvals =
+            BotSessionRegistry::Instance().InspectSession(
+                bot->GetGUID().GetRawValue(), [](const BotSession* s) {
+                  return s ? s->leader_approvals : BotLeaderApprovalState{};
+                });
+        if (!CanBotLeaderPerformAction(BotLeaderActionKind::kLfgQueue,
+                                       group_has_human, approvals,
+                                       base::TimeTicks::Now())) {
+          return {.error =
+                      "cannot queue Random Dungeon without a human group "
+                      "member asking"};
+        }
       }
       if (action.value == 0) {
         return {.error = "invalid LFG role"};
@@ -1322,6 +1445,11 @@ ActionOutcome ExecuteLfgAction(Player* bot, const LfgAction& action) {
       if (sLFGMgr->GetState(bot->GetGUID()) == lfg::LFG_STATE_NONE) {
         return {.error = "could not join Dungeon Finder queue"};
       }
+      BotSessionRegistry::Instance().WithSession(
+          bot->GetGUID().GetRawValue(), [](BotSession& s) {
+            ConsumeBotLeaderApproval(s.leader_approvals,
+                                     BotLeaderActionKind::kLfgQueue);
+          });
       return {.used = true, .info = "queued for Random Dungeon"};
     }
     case LfgAction::Op::kLeave:

@@ -16,6 +16,7 @@
 #include <deque>
 #include <filesystem>
 #include <flat_map>
+#include <flat_set>
 #include <memory>
 #include <optional>
 #include <string>
@@ -373,12 +374,15 @@ class BotLoop {
   // read on every brain call: RH-L5); "" when missing.
   std::string ReadFileIfChanged(const std::string& path);
   // Who a party/raid line `text` is for (addressing, not judgment): the
-  // group's online brain bots (sorted, `bot` included), and those of them the
-  // line addresses by name, class (or a common alias/typo), or role, names
-  // first.
+  // group's online brain bots (sorted, `bot` included), those of them the line
+  // addresses by name, class (or a common alias/typo), or role (names first),
+  // and the single responder best suited to answer/act (addressed first, else
+  // capability-matched by role/leader/class/buffs/quests/options, else
+  // deterministic alphabetical fallback).
   struct PartyLineAddressees {
     std::vector<std::string> online;
     std::vector<std::string> addressed;
+    std::string responder;
   };
   PartyLineAddressees AddresseesOf(
       const std::string& bot,
@@ -386,12 +390,16 @@ class BotLoop {
       const wlb::snapshot::Snapshot& snapshot) const;
   // Whether one party/raid line from `from` wakes `bot`: every addressed bot
   // wakes; when nobody is addressed, a human's tactical call ("los", "buff
-  // pls") wakes every online brain bot of a small group (<= 4), and any other
-  // line only the group's first online brain bot by name.
+  // pls") wakes every online brain bot, and any other line wakes only the
+  // capability-selected single responder.
   bool WakesForPartyLine(const std::string& bot,
                          std::string_view text,
                          const std::string& from,
                          const wlb::snapshot::Snapshot& snapshot) const;
+  // True when out of combat and a party member is AFK (either WoW `/afk` or an
+  // active human "brb"/"afk" chat pause for this party).
+  bool IsWaitingOnHumanPause(const std::string& bot,
+                             const wlb::snapshot::Snapshot& snapshot) const;
   // Whether the snapshot's party/raid has an online member who isn't a brain
   // bot (a human, as WakesForPartyLine counts one): its bot's calls may use
   // the scheduler permit held for a human's party.
@@ -576,6 +584,10 @@ class BotLoop {
     base::TimeTicks last_text_at;
   };
   std::flat_map<std::string, PartyChatBudget> party_chat_budgets_;
+  // Party keys (`PartyBudgetKey`) currently paused because a human group
+  // member said "brb"/"afk" in chat; cleared on "back"/"r"/"ready"/"go",
+  // combat start, or disconnect (M7).
+  std::flat_set<std::string> human_brb_paused_;
   // Per-group fan-out pacing for raid-scale bursts (loot rolls, /rw, RP boss
   // emotes) so 24 bots don't flood the LLM in a single tick.
   struct RaidFanOutPacer {

@@ -66,6 +66,8 @@ void BotSessionRegistry::ResetOnMapChange(uint64_t bot_guid) {
     it->second.pending_shared_quests.clear();
     it->second.corpse_run_step.reset();
     it->second.errand_hold = {};
+    it->second.human_brb_pause = {};
+    it->second.leader_approvals = {};
   }
 }
 
@@ -95,6 +97,8 @@ void BotSessionRegistry::ResetOnDisconnect(uint64_t bot_guid) {
     it->second.pending_shared_quests.clear();
     it->second.corpse_run_step.reset();
     it->second.errand_hold = {};
+    it->second.human_brb_pause = {};
+    it->second.leader_approvals = {};
   }
 }
 

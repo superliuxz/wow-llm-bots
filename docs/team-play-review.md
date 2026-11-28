@@ -47,9 +47,9 @@ Tracking document for findings from the WoW Team Play Review. Each item is tagge
 ### Human <-> bot control
 
 - [x] **[M1]** Leader commands are dropped while the harness is disconnected, and `stay` / `stop dps` set before that never clear.
-- [ ] **[M7]** "brb"/"afk" wakes only the alphabetically first bot, so a bot tank keeps pulling while the human is away. The single responder is always that bot, even when another bot is the one who can act.
+- [x] **[M7]** "brb"/"afk" wakes only the alphabetically first bot, so a bot tank keeps pulling while the human is away. The single responder is always that bot, even when another bot is the one who can act.
 - [x] **[M1]** "wait" keeps holding in combat, so the healer doesn't move to the tank.
-- [ ] **[M7]** A bot leader can queue Random Dungeon, start ready checks, or invite strangers without asking.
+- [x] **[M7]** A bot leader can queue Random Dungeon, start ready checks, or invite strangers without asking.
 
 ### Travel and death
 

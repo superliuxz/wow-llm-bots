@@ -1192,5 +1192,81 @@ TEST(PullDisciplineTest, BrainTargetPinBlockingAndAdversarialCounterTests) {
   }));
 }
 
+TEST(PullDisciplineTest, ParseHumanPauseSignalAndBrbLifecycle) {
+  // Pause phrases.
+  for (const char* pause :
+       {"brb", "BRB!", "afk", "afk 2m", "brb 1 min", "brb bio", "be right back",
+        "bio", "1 sec", "hold on"}) {
+    EXPECT_EQ(ParseHumanPauseSignal(pause), HumanPauseSignal::kPause) << pause;
+  }
+  // Resume phrases.
+  for (const char* resume : {"back", "im back", "I'm back!", "r", "ready", "go",
+                             "let's go", "im ready", "resume"}) {
+    EXPECT_EQ(ParseHumanPauseSignal(resume), HumanPauseSignal::kResume)
+        << resume;
+  }
+  // Adversarial counter-test: normal sentences do not false-trigger.
+  for (const char* neutral :
+       {"I wonder if we should go to the dungeon later today",
+        "don't go afk during the boss fight", "he is brb right now I think",
+        "can someone rez me please?", ""}) {
+    EXPECT_EQ(ParseHumanPauseSignal(neutral), HumanPauseSignal::kNone)
+        << neutral;
+  }
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  HumanBrbPauseState state;
+  RecordHumanBrbPause(state, /*human_guid=*/0x42, /*map_id=*/36,
+                      /*instance_id=*/1, /*x=*/10.0f, /*y=*/20.0f, t0);
+  EXPECT_TRUE(state.paused);
+
+  // Within the 2 s move grace period, a trailing step does NOT cancel brb.
+  EXPECT_FALSE(ShouldResumeHumanBrbPause(
+      state, /*in_group=*/true, /*human_online=*/true, /*human_map_id=*/36,
+      /*human_instance_id=*/1, /*human_x=*/20.0f, /*human_y=*/20.0f,
+      /*human_in_combat=*/false, /*human_casting=*/false,
+      t0 + base::Seconds(1)));
+  EXPECT_TRUE(state.paused);
+
+  // Small fidget (<= 5 yd) after grace does NOT cancel brb.
+  EXPECT_FALSE(ShouldResumeHumanBrbPause(
+      state, /*in_group=*/true, /*human_online=*/true, /*human_map_id=*/36,
+      /*human_instance_id=*/1, /*human_x=*/13.0f, /*human_y=*/22.0f,
+      /*human_in_combat=*/false, /*human_casting=*/false,
+      t0 + base::Seconds(5)));
+  EXPECT_TRUE(state.paused);
+
+  // Moving > 5 yd after grace resumes pulling.
+  EXPECT_TRUE(ShouldResumeHumanBrbPause(
+      state, /*in_group=*/true, /*human_online=*/true, /*human_map_id=*/36,
+      /*human_instance_id=*/1, /*human_x=*/18.0f, /*human_y=*/20.0f,
+      /*human_in_combat=*/false, /*human_casting=*/false,
+      t0 + base::Seconds(5)));
+  EXPECT_FALSE(state.paused);
+
+  // Human entering combat or casting resumes immediately (even within grace).
+  RecordHumanBrbPause(state, 0x42, 36, 1, 10.0f, 20.0f, t0);
+  EXPECT_TRUE(ShouldResumeHumanBrbPause(state, true, true, 36, 1, 10.0f, 20.0f,
+                                        /*human_in_combat=*/true, false, t0));
+  EXPECT_FALSE(state.paused);
+
+  RecordHumanBrbPause(state, 0x42, 36, 1, 10.0f, 20.0f, t0);
+  EXPECT_TRUE(ShouldResumeHumanBrbPause(state, true, true, 36, 1, 10.0f, 20.0f,
+                                        false, /*human_casting=*/true, t0));
+  EXPECT_FALSE(state.paused);
+
+  // Adversarial counter-test: leaving group, going offline, or changing map
+  // clears the brb pause cleanly.
+  RecordHumanBrbPause(state, 0x42, 36, 1, 10.0f, 20.0f, t0);
+  EXPECT_TRUE(ShouldResumeHumanBrbPause(state, /*in_group=*/false, true, 36, 1,
+                                        10.0f, 20.0f, false, false, t0));
+  EXPECT_FALSE(state.paused);
+
+  RecordHumanBrbPause(state, 0x42, 36, 1, 10.0f, 20.0f, t0);
+  EXPECT_TRUE(ShouldResumeHumanBrbPause(state, true, true, /*human_map_id=*/0,
+                                        0, 10.0f, 20.0f, false, false, t0));
+  EXPECT_FALSE(state.paused);
+}
+
 }  // namespace
 }  // namespace llm_brain

@@ -3882,6 +3882,194 @@ TEST(BotLoopTest, RaidLineAddressesByClassAndRoleAndRoutesReplyToRaid) {
   f.FinishAll("");
 }
 
+// M7: "brb"/"afk" wakes the tank (even when not alphabetically first) and
+// pauses routine look timers so the tank stops pulling until the human says
+// "back"/"r"/"ready"/"go" or combat starts (P0 priority).
+TEST(BotLoopTest, BrbAfkPausesNonAlphabeticalTankAndResumesOnBackOrCombat) {
+  PartyWakeFixture f({{"Aldric", "Rogue", pb::Role::DPS},
+                      {"Mirabel", "Priest", pb::Role::HEALER},
+                      {"Torvin", "Warrior", pb::Role::TANK}});
+  // "brb" wakes Torvin (the tank), NOT alphabetically first Aldric!
+  EXPECT_EQ(f.Line("brb"), Names{"Torvin"});
+  // Torvin replies with a 30 s look timer.
+  f.sent().clear();
+  f.brain().FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 30\nparty: np waiting");
+  EXPECT_TRUE(
+      std::any_of(f.sent().begin(), f.sent().end(), [](const pb::Command& c) {
+        return c.bot == "Torvin" && c.say.has_value() &&
+               c.say->channel == pb::PARTY;
+      }));
+
+  // Advance past the 30 s look timer: Torvin stays paused while brb is active.
+  f.loop().OnTick(f.t0() + base::Seconds(35));
+  EXPECT_EQ(f.brain().size(), 0u);
+
+  // Human says "back": wakes Torvin and lifts the brb pause.
+  EXPECT_EQ(f.Line("back"), Names{"Torvin"});
+  f.brain().FinishReply(
+      "do: 1\nexpect: none\nwatch: none\nlook: 30\nparty: pulling now");
+  // Now the 30 s look timer fires normally!
+  f.loop().OnTick(f.t0() + base::Seconds(35));
+  EXPECT_EQ(f.brain().size(), 1u);
+  f.FinishAll("");
+
+  // "afk" also wakes Torvin and pauses routine looks; P0 combat entry clears
+  // the brb pause immediately.
+  EXPECT_EQ(f.Line("afk 2m"), Names{"Torvin"});
+  f.brain().FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 30");
+  f.loop().OnTick(f.t0() + base::Seconds(35));
+  EXPECT_EQ(f.brain().size(), 0u);
+
+  pb::Snapshot combat_snap = f.Snap({"Torvin", "Warrior", pb::Role::TANK}, 2,
+                                    f.t0() + base::Seconds(36));
+  combat_snap.base.self.in_combat = true;
+  f.loop().OnSnapshot(combat_snap, f.t0() + base::Seconds(36));
+  EXPECT_EQ(f.brain().size(), 1u);
+  f.FinishAll("");
+
+  // Adversarial counter-test: disconnect clears brb pause cleanly.
+  EXPECT_EQ(f.Line("brb"), Names{"Torvin"});
+  f.FinishAll("");
+  f.loop().OnConnectionChanged(false);
+  f.loop().OnConnectionChanged(true);
+  f.loop().OnSnapshot(f.Snap({"Torvin", "Warrior", pb::Role::TANK}, 3,
+                             f.t0() + base::Seconds(37)),
+                      f.t0() + base::Seconds(37));
+  ASSERT_EQ(f.brain().size(), 1u);
+  f.brain().FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 30");
+  f.loop().OnTick(f.t0() + base::Seconds(35));
+  EXPECT_EQ(f.brain().size(), 1u);
+  f.FinishAll("");
+}
+
+// M7: Capability-aware single responder selects the bot best suited to act on
+// the human's request (healer for rez/heal, leader for promote/reset/ready
+// check, tank for pull/taunt, mage for water/portal, bot with missing buffs
+// or shareable quest) and falls back deterministically alphabetically on ties.
+TEST(BotLoopTest,
+     CapabilityAwareSingleResponderRoutesByRoleLeaderClassAndOptions) {
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  CannedBrain brain;
+  std::vector<pb::Command> sent;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(cfg, brain.Fn(),
+               [&](const pb::Command& c) { sent.push_back(c); });
+
+  const std::vector<PartyBotSpec> bots = {
+      {"Aldric", "Rogue", pb::Role::DPS},
+      {"Mirabel", "Priest", pb::Role::HEALER},
+      {"Torvin", "Warrior", pb::Role::TANK},
+      {"Vesper", "Mage", pb::Role::DPS},
+  };
+  for (const PartyBotSpec& b : bots) {
+    pb::Snapshot s = MakeLiveSnap(b.name, 1, t0, /*in_combat=*/false);
+    AddKeep(&s);
+    s.base.self.unit.name = b.name;
+    s.base.self.unit.player.emplace().class_ = b.class_name;
+    s.base.self.unit.group.emplace().role = b.role;
+    s.base.self.unit.group->leader = (std::string(b.name) == "Torvin");
+    pb::Party& p = s.ext.party.emplace();
+    p.leader = "Torvin";
+    if (std::string(b.name) == "Vesper") {
+      p.missing_buffs_i_can_give.push_back("Arcane Intellect");
+    }
+    if (std::string(b.name) == "Mirabel") {
+      AddOption(&s, pb::Option::USE, "Share quest \"The Defias Brotherhood\"",
+                "qshare:166");
+    }
+    pb::Unit human;
+    human.name = "Hele";
+    p.members.push_back(human);
+    for (const PartyBotSpec& o : bots) {
+      if (std::string(o.name) != b.name) {
+        pb::Unit m;
+        m.name = o.name;
+        p.members.push_back(m);
+      }
+    }
+    loop.OnSnapshot(s, t0);
+  }
+  while (brain.size() > 0) {
+    brain.FinishReply("do: 1\nexpect: none\nwatch: none\nlook: 300");
+  }
+
+  base::TimeDelta at;
+  const auto send_line = [&](const std::string& text) {
+    at = at + base::Seconds(11);
+    std::vector<std::string> woke;
+    for (const PartyBotSpec& b : bots) {
+      pb::ImmediateEvent imm;
+      imm.bot = b.name;
+      pb::ChatEvent& chat = imm.event.chat.emplace();
+      chat.channel = pb::PARTY;
+      chat.from = "Hele";
+      chat.text = text;
+      chat.at_me = true;
+      const size_t before = brain.size();
+      loop.OnEvent(imm, t0 + at);
+      if (brain.size() > before) {
+        woke.push_back(b.name);
+      }
+    }
+    sent.clear();
+    while (brain.size() > 0) {
+      brain.FinishReply(
+          "do: 1\nexpect: none\nwatch: none\nlook: 300\nparty: on it");
+    }
+    std::vector<std::string> spoke;
+    for (const pb::Command& c : sent) {
+      if (c.say && c.say->channel == pb::PARTY) {
+        spoke.push_back(c.bot);
+      }
+    }
+    return std::pair(woke, spoke);
+  };
+
+  // Rez / heal -> Mirabel (Priest Healer), not alphabetically first Aldric.
+  EXPECT_EQ(send_line("can someone rez me?").second, Names{"Mirabel"});
+  EXPECT_EQ(send_line("need a heal").second, Names{"Mirabel"});
+
+  // Leader actions (promote, reset, ready check) -> Torvin (bot leader) wakes
+  // and replies!
+  auto [promote_woke, promote_spoke] = send_line("promote me please");
+  EXPECT_EQ(promote_woke, Names{"Torvin"});
+  EXPECT_EQ(promote_spoke, Names{"Torvin"});
+  EXPECT_EQ(send_line("can you reset the instance?").second, Names{"Torvin"});
+  EXPECT_EQ(send_line("do a ready check").second, Names{"Torvin"});
+
+  // Tank actions (pull, taunt) -> Torvin (tank).
+  EXPECT_EQ(send_line("pull the next pack").second, Names{"Torvin"});
+  EXPECT_EQ(send_line("taunt the add").second, Names{"Torvin"});
+
+  // Class utility (water, portal) -> Vesper (Mage).
+  EXPECT_EQ(send_line("can I get some water?").second, Names{"Vesper"});
+  auto [port_woke, port_spoke] = send_line("portal to Dalaran?");
+  EXPECT_EQ(port_woke, Names{"Vesper"});
+  EXPECT_EQ(port_spoke, Names{"Vesper"});
+
+  // Missing buffs -> Vesper (the bot whose snapshot reports missing buffs).
+  EXPECT_EQ(send_line("buffs pls").second, Names{"Vesper"});
+
+  // Share quest -> Mirabel (the bot with a Share quest option).
+  auto [quest_woke, quest_spoke] = send_line("can you share the quest?");
+  EXPECT_EQ(quest_woke, Names{"Mirabel"});
+  EXPECT_EQ(quest_spoke, Names{"Mirabel"});
+
+  // Chit-chat with no capability match -> deterministic alphabetical fallback.
+  auto [chat_woke, chat_spoke] = send_line("how is everyone doing?");
+  EXPECT_EQ(chat_woke, Names{"Aldric"});
+  EXPECT_EQ(chat_spoke, Names{"Aldric"});
+
+  // Adversarial counter-test: explicit name addressing still outranks
+  // capability inference.
+  auto [named_woke, named_spoke] = send_line("Aldric can you rez me?");
+  EXPECT_EQ(named_woke, Names{"Aldric"});
+  EXPECT_EQ(named_spoke, Names{"Aldric"});
+}
+
 TEST(BotLoopTest, NonGroupChatClassOrRoleLineDoesNotWakeSoloBot) {
   const base::TimeTicks t0 = base::TimeTicks::Now();
   CannedBrain brain;

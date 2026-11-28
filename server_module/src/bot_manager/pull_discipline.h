@@ -246,6 +246,69 @@ bool ShouldExpireLeaderWait(LeaderWaitState& state,
 // disconnect). Returns true if a wait was active.
 bool ClearLeaderWait(LeaderWaitState& state);
 
+// Chat signal from a human group member stepping away ("brb", "afk") or
+// returning ("back", "r", "ready", "go") without toggling WoW's `/afk` flag.
+enum class HumanPauseSignal {
+  kNone,
+  kPause,
+  kResume,
+};
+
+// Parses a short party/raid/say/whisper line from a human group member for
+// pause ("brb", "afk", "bio", "sec", ...) or resume ("back", "r", "ready",
+// "go", ...) intent. Longer conversational sentences return `kNone`.
+HumanPauseSignal ParseHumanPauseSignal(std::string_view text);
+
+// Grace period after a human says "brb"/"afk" before movement resumes pulling
+// (avoids immediately cancelling pause from a trailing step after hitting
+// Enter).
+inline constexpr base::TimeDelta kHumanBrbMoveGrace = base::Seconds(2);
+
+// Horizontal distance (yd) the paused human must move after
+// `kHumanBrbMoveGrace` to count as having acted and resume pulling.
+inline constexpr float kHumanBrbMoveResumeYd = 5.0f;
+
+// Tracks an active "brb"/"afk" chat pause from a human group member so bot
+// tanks and bot leaders hold pulls/exploring until the human says "back"/"r"/
+// "ready"/"go", acts (moves > 5 yd, casts, or enters combat), or leaves/logs
+// out/changes map (M7).
+struct HumanBrbPauseState {
+  bool paused = false;
+  uint64_t human_guid = 0;
+  uint32_t map_id = 0;
+  uint32_t instance_id = 0;
+  float x = 0.0f;
+  float y = 0.0f;
+  base::TimeTicks paused_at;
+
+  bool operator==(const HumanBrbPauseState&) const = default;
+};
+
+void RecordHumanBrbPause(HumanBrbPauseState& state,
+                         uint64_t human_guid,
+                         uint32_t map_id,
+                         uint32_t instance_id,
+                         float x,
+                         float y,
+                         base::TimeTicks now);
+
+// Returns true (and clears `state`) when the brb/afk pause should end because
+// the group ended, the human went offline/changed map, or the human acted
+// (combat, spell cast, or moved > `kHumanBrbMoveResumeYd` after grace).
+bool ShouldResumeHumanBrbPause(HumanBrbPauseState& state,
+                               bool in_group,
+                               bool human_online,
+                               uint32_t human_map_id,
+                               uint32_t human_instance_id,
+                               float human_x,
+                               float human_y,
+                               bool human_in_combat,
+                               bool human_casting,
+                               base::TimeTicks now);
+
+// Unconditionally clears human brb/afk pause state. Returns true if paused.
+bool ClearHumanBrbPause(HumanBrbPauseState& state);
+
 // Maximum distance (yd) from a party member for a friendly non-escort NPC
 // being attacked by a hostile mob to count as a protected friendly NPC.
 inline constexpr float kFriendlyNpcProtectMaxDistYd = 30.0f;

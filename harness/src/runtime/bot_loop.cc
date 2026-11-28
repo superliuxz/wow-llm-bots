@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <flat_map>
 #include <flat_set>
+#include <initializer_list>
 #include <iterator>
 #include <memory>
 #include <optional>
@@ -609,6 +610,272 @@ bool IsGroupCall(std::string_view text) {
                      });
 }
 
+enum class HarnessPauseSignal {
+  kNone,
+  kPause,
+  kResume,
+};
+
+HarnessPauseSignal ParseHarnessPauseSignal(std::string_view text) {
+  std::vector<std::string> words;
+  std::string cur;
+  for (const char c : text) {
+    if (IsAsciiWordChar(c)) {
+      cur.push_back(base::ToLowerASCII(c));
+    } else if (c == '\'') {
+      continue;
+    } else if (!cur.empty()) {
+      words.push_back(std::move(cur));
+      cur.clear();
+    }
+  }
+  if (!cur.empty()) {
+    words.push_back(std::move(cur));
+  }
+  if (words.empty() || words.size() > 5) {
+    return HarnessPauseSignal::kNone;
+  }
+  const std::string joined = base::JoinString(words, " ");
+  constexpr std::string_view kPauseExact[] = {
+      "brb",        "afk",           "bio",           "sec",
+      "1 sec",      "1sec",          "one sec",       "one second",
+      "1 min",      "1min",          "one min",       "one minute",
+      "2 min",      "2min",          "be right back", "hold on",
+      "one moment", "moment",        "wait a sec",    "wait a second",
+      "wait a min", "stepping away",
+  };
+  for (std::string_view p : kPauseExact) {
+    if (joined == p) {
+      return HarnessPauseSignal::kPause;
+    }
+  }
+  if ((words.front() == "brb" || words.front() == "afk") && words.size() <= 4) {
+    return HarnessPauseSignal::kPause;
+  }
+  constexpr std::string_view kResumeExact[] = {
+      "back",   "im back",  "r",         "ready",      "go",   "lets go",
+      "ok go",  "im ready", "all ready", "good to go", "here", "im here",
+      "resume", "continue", "pull",      "follow",     "come", "attack",
+  };
+  for (std::string_view r : kResumeExact) {
+    if (joined == r) {
+      return HarnessPauseSignal::kResume;
+    }
+  }
+  return HarnessPauseSignal::kNone;
+}
+
+bool ContainsAnyWord(std::string_view text,
+                     std::initializer_list<std::string_view> words) {
+  for (std::string_view w : words) {
+    if (ContainsWholeWordIgnoringCase(text, w)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool EqualsAnyClass(std::string_view class_name,
+                    std::initializer_list<std::string_view> classes) {
+  for (std::string_view c : classes) {
+    if (base::EqualsCaseInsensitiveASCII(class_name, c)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+struct BotCapability {
+  std::string class_name;
+  pb::Role role = pb::Role::ROLE_UNSPECIFIED;
+  bool is_tank = false;
+  bool is_healer = false;
+  bool is_leader = false;
+  bool has_missing_buffs = false;
+  bool can_share_quest = false;
+  const pb::Snapshot* snap = nullptr;
+};
+
+int ScoreBotCapability(std::string_view text, const BotCapability& cap) {
+  int score = 0;
+
+  // 1. Group leader requests (promote, lead, loot, difficulty, reset, invite,
+  // ready check, LFG queue).
+  if (ContainsAnyWord(
+          text, {"promote", "lead", "leader", "assist", "kick", "invite", "inv",
+                 "loot", "master", "heroic", "normal", "reset", "readycheck",
+                 "lfg", "rdf", "queue", "requeue"}) ||
+      ContainsWholeWordIgnoringCase(text, "ready check") ||
+      ContainsWholeWordIgnoringCase(text, "dungeon finder")) {
+    if (cap.is_leader) {
+      score += 20;
+    }
+  }
+
+  // 2. Tank / pull / brb pause / resume requests.
+  const HarnessPauseSignal pause_sig = ParseHarnessPauseSignal(text);
+  if (pause_sig != HarnessPauseSignal::kNone ||
+      ContainsAnyWord(text, {"pull", "taunt", "aggro", "los", "brb", "afk",
+                             "bio", "wait", "hold", "stop", "kite"})) {
+    if (cap.is_tank) {
+      score += 12;
+    } else if (cap.is_leader) {
+      score += 6;
+    }
+  }
+
+  // 3. Heal / rez / mana requests.
+  if (ContainsAnyWord(text,
+                      {"heal", "rez", "res", "ress", "resurrect", "revive"})) {
+    if (cap.is_healer) {
+      score += 20;
+    } else if (EqualsAnyClass(cap.class_name,
+                              {"Priest", "Paladin", "Shaman", "Druid"})) {
+      score += 10;
+    }
+  }
+  if (ContainsAnyWord(text, {"oom", "mana", "drink"})) {
+    if (cap.is_healer) {
+      score += 12;
+    }
+  }
+
+  // 4. Buff / dispel / decurse requests.
+  if (ContainsAnyWord(text, {"buff", "buffs", "rebuff"})) {
+    if (cap.has_missing_buffs) {
+      score += 20;
+    } else if (cap.is_healer) {
+      score += 10;
+    } else if (EqualsAnyClass(cap.class_name, {"Priest", "Paladin", "Druid",
+                                               "Mage", "Shaman", "Warrior"})) {
+      score += 6;
+    }
+  }
+  if (ContainsAnyWord(text, {"decurse", "curse"})) {
+    if (EqualsAnyClass(cap.class_name, {"Mage", "Druid"})) {
+      score += 20;
+    } else if (EqualsAnyClass(cap.class_name, {"Shaman"})) {
+      score += 14;
+    } else if (cap.is_healer) {
+      score += 10;
+    }
+  }
+  if (ContainsAnyWord(text, {"dispel", "magic"})) {
+    if (EqualsAnyClass(cap.class_name, {"Priest", "Paladin", "Shaman"})) {
+      score += 16;
+    } else if (cap.is_healer) {
+      score += 12;
+    }
+  }
+  if (ContainsAnyWord(text, {"cleanse", "cure", "poison", "disease"})) {
+    if (EqualsAnyClass(cap.class_name,
+                       {"Paladin", "Priest", "Shaman", "Druid"})) {
+      score += 16;
+    } else if (cap.is_healer) {
+      score += 12;
+    }
+  }
+
+  // 5. Class-specific utility / CC / buffs.
+  if (ContainsAnyWord(
+          text, {"water", "food", "table", "refreshment", "portal", "port",
+                 "sheep", "poly", "polymorph", "intellect", "int"})) {
+    if (EqualsAnyClass(cap.class_name, {"Mage"})) {
+      score += 20;
+    }
+  }
+  if (ContainsAnyWord(
+          text, {"summon", "closet", "soulstone", "ss", "healthstone", "hs",
+                 "cookie", "cookies", "banish"})) {
+    if (EqualsAnyClass(cap.class_name, {"Warlock"})) {
+      score += 20;
+    }
+  }
+  if (ContainsAnyWord(text, {"lust", "bloodlust", "hero", "heroism", "bl",
+                             "totem", "totems", "hex", "ankh"})) {
+    if (EqualsAnyClass(cap.class_name, {"Shaman"})) {
+      score += 20;
+    }
+  }
+  if (ContainsAnyWord(text, {"sap", "lockpick", "distract", "tricks"})) {
+    if (EqualsAnyClass(cap.class_name, {"Rogue"})) {
+      score += 20;
+    }
+  }
+  if (ContainsAnyWord(text, {"trap", "misdirect", "md", "tranq"})) {
+    if (EqualsAnyClass(cap.class_name, {"Hunter"})) {
+      score += 20;
+    }
+  }
+  if (ContainsAnyWord(text,
+                      {"shackle", "fort", "fortitude", "spirit", "levitate"}) ||
+      ContainsWholeWordIgnoringCase(text, "fear ward")) {
+    if (EqualsAnyClass(cap.class_name, {"Priest"})) {
+      score += 20;
+    }
+  }
+  if (ContainsAnyWord(text, {"kings", "might", "wisdom", "salvation", "salv",
+                             "bop", "freedom", "beacon", "loh"}) ||
+      ContainsWholeWordIgnoringCase(text, "lay on hands")) {
+    if (EqualsAnyClass(cap.class_name, {"Paladin"})) {
+      score += 20;
+    }
+  }
+  if (ContainsAnyWord(text, {"brez", "rebirth", "innervate", "motw", "root",
+                             "roots", "hibernate", "cyclone"})) {
+    if (EqualsAnyClass(cap.class_name, {"Druid"})) {
+      score += 20;
+    }
+  }
+  if (ContainsAnyWord(text, {"sunder", "vigilance"}) ||
+      ContainsWholeWordIgnoringCase(text, "battle shout") ||
+      ContainsWholeWordIgnoringCase(text, "commanding shout")) {
+    if (EqualsAnyClass(cap.class_name, {"Warrior"})) {
+      score += 20;
+    }
+  }
+  if (ContainsAnyWord(text, {"grip", "horn"}) ||
+      ContainsWholeWordIgnoringCase(text, "death grip") ||
+      ContainsWholeWordIgnoringCase(text, "path of frost")) {
+    if (EqualsAnyClass(cap.class_name, {"Death Knight"})) {
+      score += 20;
+    }
+  }
+
+  // 6. Quest share requests.
+  if (ContainsAnyWord(text, {"quest", "share"})) {
+    if (cap.can_share_quest) {
+      score += 16;
+    }
+  }
+
+  // 7. Profession / crafting / disenchant requests matched against this bot's
+  // currently available options.
+  if (cap.snap) {
+    constexpr std::string_view kProfWords[] = {
+        "disenchant", "enchant", "craft",  "smelt",   "brew",      "mill",
+        "prospect",   "mine",    "mining", "herb",    "herbalism", "skin",
+        "skinning",   "bandage", "cook",   "cooking", "fish",      "fishing",
+    };
+    for (std::string_view pw : kProfWords) {
+      if (!ContainsWholeWordIgnoringCase(text, pw)) {
+        continue;
+      }
+      const bool has_opt =
+          std::any_of(cap.snap->options.begin(), cap.snap->options.end(),
+                      [pw](const pb::Option& o) {
+                        return ContainsWholeWordIgnoringCase(o.text, pw);
+                      });
+      if (has_opt) {
+        score += 18;
+        break;
+      }
+    }
+  }
+
+  return score;
+}
+
 struct RelationshipSection {
   std::string player;
   std::vector<std::string> notes;
@@ -857,24 +1124,55 @@ BotLoop::PartyLineAddressees BotLoop::AddresseesOf(
   std::sort(out.online.begin(), out.online.end());
   out.online.erase(std::unique(out.online.begin(), out.online.end()),
                    out.online.end());
-  // A bot's class and role as it sees itself, else as this bot's group frame
+  // A bot's capability facts as it sees itself, else as this bot's group frame
   // shows it.
-  const auto class_and_role = [&](const std::string& name) {
-    std::string class_name;
-    pb::Role role = pb::Role::ROLE_UNSPECIFIED;
+  const auto capability_of = [&](const std::string& name) {
+    BotCapability cap;
     const auto take = [&](const pb::Unit& u) {
-      if (class_name.empty() && u.player) {
-        class_name = u.player->class_;
+      if (cap.class_name.empty() && u.player) {
+        cap.class_name = u.player->class_;
       }
-      if (role == pb::Role::ROLE_UNSPECIFIED && u.group) {
-        role = u.group->role;
+      if (cap.role == pb::Role::ROLE_UNSPECIFIED && u.group) {
+        cap.role = u.group->role;
+      }
+      if (u.group) {
+        cap.is_tank |= u.group->role == pb::Role::TANK || u.group->main_tank;
+        cap.is_healer |= u.group->role == pb::Role::HEALER;
+        cap.is_leader |= u.group->leader;
       }
     };
     if (name == bot) {
+      cap.snap = &snapshot;
       take(snapshot.base.self.unit);
     } else if (const auto it = bots_.find(name);
                it != bots_.end() && it->second.latest_snapshot) {
+      cap.snap = &*it->second.latest_snapshot;
       take(it->second.latest_snapshot->base.self.unit);
+    }
+    if (snapshot.ext.party && snapshot.ext.party->leader == name) {
+      cap.is_leader = true;
+    }
+    if (cap.snap && cap.snap->ext.party) {
+      if (cap.snap->ext.party->leader == name) {
+        cap.is_leader = true;
+      }
+      cap.has_missing_buffs =
+          !cap.snap->ext.party->missing_buffs_i_can_give.empty();
+    }
+    if (cap.snap) {
+      cap.can_share_quest =
+          std::any_of(cap.snap->options.begin(), cap.snap->options.end(),
+                      [](const pb::Option& o) {
+                        return o.guid.starts_with("qshare:") ||
+                               o.text.starts_with("Share quest");
+                      });
+    }
+    if (snapshot.ext.raid) {
+      if (std::find(snapshot.ext.raid->main_tanks.begin(),
+                    snapshot.ext.raid->main_tanks.end(),
+                    name) != snapshot.ext.raid->main_tanks.end()) {
+        cap.is_tank = true;
+      }
     }
     for (const auto* group :
          {snapshot.ext.party ? &snapshot.ext.party->members : nullptr,
@@ -888,7 +1186,7 @@ BotLoop::PartyLineAddressees BotLoop::AddresseesOf(
         }
       }
     }
-    return std::pair(class_name, role);
+    return cap;
   };
   for (const std::string& name : out.online) {
     if (ContainsWholeWordIgnoringCase(text, name)) {
@@ -900,9 +1198,22 @@ BotLoop::PartyLineAddressees BotLoop::AddresseesOf(
         out.addressed.end()) {
       continue;
     }
-    const auto [class_name, role] = class_and_role(name);
-    if (AddressesClassOrRole(text, class_name, role)) {
+    const BotCapability cap = capability_of(name);
+    if (AddressesClassOrRole(text, cap.class_name, cap.role)) {
       out.addressed.push_back(name);
+    }
+  }
+  if (!out.addressed.empty()) {
+    out.responder = out.addressed.front();
+  } else {
+    out.responder = out.online.front();
+    int best_score = 0;
+    for (const std::string& name : out.online) {
+      const int score = ScoreBotCapability(text, capability_of(name));
+      if (score > best_score) {
+        best_score = score;
+        out.responder = name;
+      }
     }
   }
   return out;
@@ -922,7 +1233,19 @@ bool BotLoop::WakesForPartyLine(const std::string& bot,
   if (from_human && IsGroupCall(text)) {
     return true;
   }
-  return a.online.front() == bot;
+  return a.responder == bot;
+}
+
+bool BotLoop::IsWaitingOnHumanPause(const std::string& bot,
+                                    const pb::Snapshot& snapshot) const {
+  if (WaitingOnAfkMember(snapshot)) {
+    return true;
+  }
+  if (snapshot.base.self.in_combat) {
+    return false;
+  }
+  const std::string key = PartyBudgetKey(bot, snapshot);
+  return !key.empty() && human_brb_paused_.contains(key);
 }
 
 bool BotLoop::PlaysWithHuman(const pb::Snapshot& snapshot) const {
@@ -941,10 +1264,10 @@ bool BotLoop::PlaysWithHuman(const pb::Snapshot& snapshot) const {
 bool BotLoop::AnswersPartyLine(const std::string& bot,
                                std::string_view text,
                                const pb::Snapshot& snapshot) const {
-  // One responder per line (Now #10): even if several bots are addressed (and
-  // woken), only the first of them answers.
+  // One responder per line (Now #10 / M7): first addressed bot, else the
+  // capability-matched single responder (deterministic alphabetical tie-break).
   const PartyLineAddressees a = AddresseesOf(bot, text, snapshot);
-  return (a.addressed.empty() ? a.online.front() : a.addressed.front()) == bot;
+  return a.responder == bot;
 }
 
 bool BotLoop::AnswersPartyChat(const std::string& bot,
@@ -977,6 +1300,7 @@ void BotLoop::OnConnectionChanged(bool connected) {
       scheduler_.SetBotRole(name, BotRole::kDefault);
     }
     party_chat_budgets_.clear();
+    human_brb_paused_.clear();
     raid_fanout_pacers_.clear();
     // Answers to screens of the old connection are useless: free the slots.
     scheduler_.CancelAllInFlight();
@@ -1257,6 +1581,12 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   state.latest_snapshot = std::move(snapshot);
   state.latest_screen = std::move(screen);
   state.latest_received_at = received_at;
+  if (state.latest_snapshot->base.self.in_combat) {
+    const std::string party_key = PartyBudgetKey(bot, *state.latest_snapshot);
+    if (!party_key.empty()) {
+      human_brb_paused_.erase(party_key);
+    }
+  }
 
   const bool look_woke = OnLookSnapshot(bot, &state, received_at);
 
@@ -1438,7 +1768,7 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
   if (!state.has_queued_wake() && !state.call_in_flight() &&
       !state.look_deadline.is_null() && received_at >= state.look_deadline &&
       !(state.pending_reasons.empty() &&
-        WaitingOnAfkMember(*state.latest_snapshot))) {
+        IsWaitingOnHumanPause(bot, *state.latest_snapshot))) {
     state.look_deadline = base::TimeTicks();
     state.runner.Stop();
     const bool backoff_wake = !state.pending_reasons.empty();
@@ -1482,9 +1812,31 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
   std::optional<WakeTrigger> chat_trig =
       is_player_chat ? EvaluateEventTrigger(imm.event, state.triggers.watches())
                      : std::nullopt;
-  // T9 & Now #10: a group or nearby party-shared line wakes only the bots it
-  // is for (addressed, or for a human's group call every bot of a small group,
-  // else the group's single responder); the others just hear it.
+  // T9 & Now #10 & M7: track human "brb"/"afk" pause & resume in group chat,
+  // and wake only the bots a group line is for (addressed, tactical group call,
+  // or the capability-selected single responder).
+  if (is_player_chat && state.latest_snapshot &&
+      (IsGroupSharedChatChannel(imm.event.chat->channel,
+                                *state.latest_snapshot) ||
+       imm.event.chat->channel == pb::WHISPER)) {
+    const bool from_human =
+        !imm.event.chat->from.empty() && !bots_.contains(imm.event.chat->from);
+    if (from_human) {
+      const std::string party_key = PartyBudgetKey(bot, *state.latest_snapshot);
+      if (!party_key.empty()) {
+        const HarnessPauseSignal sig =
+            ParseHarnessPauseSignal(imm.event.chat->text);
+        if (sig == HarnessPauseSignal::kPause) {
+          human_brb_paused_.insert(party_key);
+          if (!state.latest_snapshot->base.self.in_combat) {
+            state.runner.Stop();
+          }
+        } else if (sig == HarnessPauseSignal::kResume) {
+          human_brb_paused_.erase(party_key);
+        }
+      }
+    }
+  }
   if (chat_trig && state.latest_snapshot &&
       IsGroupSharedChatChannel(imm.event.chat->channel,
                                *state.latest_snapshot) &&
@@ -1776,7 +2128,7 @@ void BotLoop::OnTick(base::TimeTicks now) {
     }
     if (!state.look_deadline.is_null() && now >= state.look_deadline &&
         !(state.pending_reasons.empty() &&
-          WaitingOnAfkMember(*state.latest_snapshot))) {
+          IsWaitingOnHumanPause(bot, *state.latest_snapshot))) {
       state.look_deadline = base::TimeTicks();
       state.runner.Stop();
       const bool backoff_wake = !state.pending_reasons.empty();
@@ -2293,7 +2645,8 @@ void BotLoop::OnReply(const std::string& bot,
                                   const std::string& text, bool group_budget) {
           if (!prompted_by_chat &&
               (IsSelfRepeat(state, text, effective_now) ||
-               (group_budget && WaitingOnAfkMember(*state.latest_snapshot)))) {
+               (group_budget &&
+                IsWaitingOnHumanPause(bot, *state.latest_snapshot)))) {
             return;
           }
           if (group_budget &&

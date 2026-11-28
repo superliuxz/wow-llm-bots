@@ -21,6 +21,7 @@
 #include "bot_manager/errand_hold.h"
 #include "bot_manager/pull_discipline.h"
 #include "bot_manager/tick_owner.h"
+#include "options/bot_leader_guard.h"
 #include "options/loot_roll_policy.h"
 #include "options/quest_helpers.h"
 #include "snapshot/snapshot.h"
@@ -215,6 +216,16 @@ struct BotSession {
   // by the brain until it dies, becomes unattackable/evades, combat ends, or
   // the brain clears/replaces it.
   BrainTargetPinState brain_target_pin;
+
+  // Active human "brb"/"afk" chat pause (M7): holds bot tank pulls and leader
+  // exploring until the human says "back"/"r"/"ready"/"go" or acts. Cleared on
+  // logout, map change, disconnect, and group leave.
+  HumanBrbPauseState human_brb_pause;
+
+  // Recent human approvals for bot-leader LFG queueing, ready checks, and
+  // group invites when grouped with a human (M7). Cleared on logout, map
+  // change, disconnect, and group leave.
+  BotLeaderApprovalState leader_approvals;
 
   // Most recent spell miss and cast failure for this bot (cleared on logout,
   // map change, and disconnect; monotonic seqs survive map change/disconnect so

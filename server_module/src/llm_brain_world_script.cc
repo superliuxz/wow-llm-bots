@@ -27,6 +27,7 @@
 #include "MotionMaster.h"
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
+#include "ObjectMgr.h"
 #include "Opcodes.h"
 #include "Pet.h"
 #include "Player.h"
@@ -65,6 +66,7 @@
 #include "options/act_executor.h"
 #include "options/act_geometry.h"
 #include "options/action_types.h"
+#include "options/bot_leader_guard.h"
 #include "options/exec_items.h"
 #include "options/exec_movement.h"
 #include "options/exec_npc.h"
@@ -738,6 +740,53 @@ class LlmBrainWorldScript : public WorldScript {
                  in_combat ? "released on combat" : "timed out");
       }
     }
+    Group* cur_group = bot->GetGroup();
+    if (!cur_group) {
+      BotSessionRegistry::Instance().WithSession(
+          bot->GetGUID().GetRawValue(), [](BotSession& s) {
+            ClearHumanBrbPause(s.human_brb_pause);
+            ClearBotLeaderApprovals(s.leader_approvals);
+          });
+    } else {
+      const HumanBrbPauseState brb =
+          BotSessionRegistry::Instance().InspectSession(
+              bot->GetGUID().GetRawValue(), [](const BotSession* s) {
+                return s ? s->human_brb_pause : HumanBrbPauseState{};
+              });
+      if (brb.paused) {
+        Player* human =
+            ObjectAccessor::FindConnectedPlayer(ObjectGuid(brb.human_guid));
+        const bool human_online = human != nullptr && human->IsInWorld() &&
+                                  human->GetGroup() == cur_group;
+        const bool human_casting =
+            human_online &&
+            (human->GetCurrentSpell(CURRENT_GENERIC_SPELL) != nullptr ||
+             human->GetCurrentSpell(CURRENT_CHANNELED_SPELL) != nullptr ||
+             human->GetCurrentSpell(CURRENT_AUTOREPEAT_SPELL) != nullptr ||
+             human->GetCurrentSpell(CURRENT_MELEE_SPELL) != nullptr);
+        const bool resumed = BotSessionRegistry::Instance().WithSession(
+            bot->GetGUID().GetRawValue(), [&](BotSession& s) {
+              return ShouldResumeHumanBrbPause(
+                  s.human_brb_pause, /*in_group=*/true, human_online,
+                  human_online ? human->GetMapId() : 0,
+                  human_online ? human->GetInstanceId() : 0,
+                  human_online ? human->GetPositionX() : 0.0f,
+                  human_online ? human->GetPositionY() : 0.0f,
+                  human_online && human->IsInCombat(), human_casting, now);
+            });
+        if (resumed) {
+          BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
+          if (policy.stay && !bots_[i].leader_wait.active) {
+            policy.stay = false;
+            policy.stay_in_combat = false;
+            BotManager::SetGroupPolicy(bot, policy);
+          }
+          LOG_INFO("module",
+                   "mod-llm-brain: {}: human brb/afk pause ended, resuming",
+                   bot->GetName());
+        }
+      }
+    }
     return true;
   }
 
@@ -809,6 +858,62 @@ class LlmBrainWorldScript : public WorldScript {
           line.chat.channel == wlb::snapshot::RAID_WARNING ||
           line.chat.channel == wlb::snapshot::WHISPER) {
         applied = ApplyLeaderCommand(index, line.to, bot, line.chat);
+      }
+      if (line.chat.channel == wlb::snapshot::PARTY ||
+          line.chat.channel == wlb::snapshot::RAID ||
+          line.chat.channel == wlb::snapshot::RAID_WARNING ||
+          line.chat.channel == wlb::snapshot::WHISPER ||
+          line.chat.channel == wlb::snapshot::SAY) {
+        Group* group = bot->GetGroup();
+        Player* sender = ObjectAccessor::FindPlayerByName(line.chat.from);
+        if (group && sender && sender != bot && sender->GetGroup() == group &&
+            IsHumanPlayer(sender)) {
+          BotSessionRegistry::Instance().WithSession(
+              bot->GetGUID().GetRawValue(), [&](BotSession& s) {
+                RecordHumanLeaderApproval(s.leader_approvals, line.chat.text,
+                                          now);
+              });
+          const HumanPauseSignal pause_sig =
+              ParseHumanPauseSignal(line.chat.text);
+          if (pause_sig == HumanPauseSignal::kPause) {
+            BotSessionRegistry::Instance().WithSession(
+                bot->GetGUID().GetRawValue(), [&](BotSession& s) {
+                  RecordHumanBrbPause(
+                      s.human_brb_pause, sender->GetGUID().GetRawValue(),
+                      sender->GetMapId(), sender->GetInstanceId(),
+                      sender->GetPositionX(), sender->GetPositionY(), now);
+                });
+            if (!bot->IsInCombat() && !IsPartyInCombat(bot)) {
+              BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
+              policy.stay = true;
+              policy.stay_in_combat = false;
+              BotManager::SetGroupPolicy(bot, policy);
+              bot->StopMoving();
+            }
+            if (applied.empty()) {
+              applied = "human said: " + line.chat.text +
+                        " (applied: pausing pulls until " + sender->GetName() +
+                        " returns)";
+            }
+          } else if (pause_sig == HumanPauseSignal::kResume) {
+            const bool was_paused = BotSessionRegistry::Instance().WithSession(
+                bot->GetGUID().GetRawValue(), [](BotSession& s) {
+                  return ClearHumanBrbPause(s.human_brb_pause);
+                });
+            if (was_paused) {
+              BotManager::GroupPolicy policy = BotManager::GetGroupPolicy(bot);
+              if (policy.stay && !bots_[index].leader_wait.active) {
+                policy.stay = false;
+                policy.stay_in_combat = false;
+                BotManager::SetGroupPolicy(bot, policy);
+              }
+              if (applied.empty()) {
+                applied =
+                    "human said: " + line.chat.text + " (applied: resuming)";
+              }
+            }
+          }
+        }
       }
       if (!harness_ready) {
         continue;  // Nobody to tell: leader command still applied above.
@@ -1295,6 +1400,13 @@ class LlmBrainWorldScript : public WorldScript {
       if (same_map) {
         online_same_map_humans.push_back(member);
       }
+    }
+    const bool human_brb_paused = BotSessionRegistry::Instance().InspectSession(
+        bot->GetGUID().GetRawValue(),
+        [](const BotSession* s) { return s && s->human_brb_pause.paused; });
+    if (human_brb_paused) {
+      human_afk = true;
+      human_holds = true;
     }
     const bool offline_human_pause = ShouldPauseForOfflineHuman({
         .in_group = true,
@@ -2414,11 +2526,35 @@ class LlmBrainWorldScript : public WorldScript {
                          cur_group->IsAssistant(bot->GetGUID())) &&
                         !cur_group->IsFull()));
     if (can_invite) {
+      bool group_has_human = false;
+      if (cur_group) {
+        group_has_human =
+            bot_manager_ && bot_manager_->GroupHasOfflineHuman(cur_group);
+        if (!group_has_human) {
+          for (GroupReference* itr = cur_group->GetFirstMember();
+               itr != nullptr; itr = itr->next()) {
+            if (Player* m = itr->GetSource(); m && IsHumanPlayer(m)) {
+              group_has_human = true;
+              break;
+            }
+          }
+        }
+      }
+      const BotLeaderApprovalState approvals =
+          BotSessionRegistry::Instance().InspectSession(
+              bot->GetGUID().GetRawValue(), [](const BotSession* s) {
+                return s ? s->leader_approvals : BotLeaderApprovalState{};
+              });
       static constexpr base::TimeDelta kChatterMemory = base::Minutes(5);
       for (const RecentChatter& rc : state.recent_chatters) {
         if (start - rc.at > kChatterMemory ||
             facts.invite_candidates.size() >= 3) {
           break;
+        }
+        if (!CanBotLeaderPerformAction(BotLeaderActionKind::kInvite,
+                                       group_has_human, approvals, start,
+                                       rc.name)) {
+          continue;
         }
         Player* other = ObjectAccessor::FindPlayerByName(rc.name);
         if (!other || !other->IsInWorld() || other == bot ||
@@ -2427,6 +2563,24 @@ class LlmBrainWorldScript : public WorldScript {
           continue;
         }
         facts.invite_candidates.push_back(rc.name);
+      }
+      if (group_has_human && !approvals.invite_approved_name.empty() &&
+          facts.invite_candidates.size() < 3 &&
+          CanBotLeaderPerformAction(BotLeaderActionKind::kInvite, true,
+                                    approvals, start,
+                                    approvals.invite_approved_name)) {
+        std::string approved = approvals.invite_approved_name;
+        if (normalizePlayerName(approved)) {
+          if (Player* other = ObjectAccessor::FindPlayerByName(approved);
+              other && other->IsInWorld() && other != bot &&
+              other->GetTeamId() == bot->GetTeamId() &&
+              other->GetGroup() == nullptr &&
+              std::find(facts.invite_candidates.begin(),
+                        facts.invite_candidates.end(),
+                        other->GetName()) == facts.invite_candidates.end()) {
+            facts.invite_candidates.push_back(other->GetName());
+          }
+        }
       }
     }
     state.history.Add(snapshot.seq, start, AddOptions(&snapshot, facts));

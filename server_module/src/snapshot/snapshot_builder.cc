@@ -58,6 +58,7 @@
 #include "World.h"
 #include "base/time/time.h"
 #include "bot_manager/bot_manager.h"
+#include "bot_session.h"
 #include "chat/chat_scripts.h"
 #include "options/exec_items.h"
 #include "options/exec_npc.h"
@@ -790,8 +791,14 @@ void FillParty(Player* bot,
       m.player.emplace().class_ = ClassName(member->getClass());
       gp.aggro = !member->getAttackers().empty();
       // Playerbots flags idle bots AFK to throttle them; only a human's
-      // /afk means someone is away.
-      gp.afk = member->isAFK() && IsHumanPlayer(member);
+      // /afk (or active "brb"/"afk" chat pause) means someone is away.
+      const bool brb_paused = BotSessionRegistry::Instance().InspectSession(
+          bot->GetGUID().GetRawValue(), [&](const BotSession* s) {
+            return s && s->human_brb_pause.paused &&
+                   s->human_brb_pause.human_guid ==
+                       member->GetGUID().GetRawValue();
+          });
+      gp.afk = (member->isAFK() || brb_paused) && IsHumanPlayer(member);
       gp.in_range = member->GetMapId() == bot->GetMapId() &&
                     bot->GetDistance(member) <= 100.0f;
       // Party members' quest progress is non-combat context; omit at 4 Hz in

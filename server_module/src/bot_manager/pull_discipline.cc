@@ -2,9 +2,13 @@
 
 #include "bot_manager/pull_discipline.h"
 
+#include <cctype>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "base/time/time.h"
@@ -303,6 +307,126 @@ bool ShouldExpireLeaderWait(LeaderWaitState& state,
 
 bool ClearLeaderWait(LeaderWaitState& state) {
   if (!state.active) {
+    return false;
+  }
+  state = {};
+  return true;
+}
+
+HumanPauseSignal ParseHumanPauseSignal(std::string_view text) {
+  std::vector<std::string> words;
+  std::string cur;
+  for (const char c : text) {
+    const unsigned char uc = static_cast<unsigned char>(c);
+    if (std::isalnum(uc)) {
+      cur.push_back(static_cast<char>(std::tolower(uc)));
+    } else if (c == '\'') {
+      continue;  // "i'm" -> "im", "let's" -> "lets".
+    } else if (!cur.empty()) {
+      words.push_back(std::move(cur));
+      cur.clear();
+    }
+  }
+  if (!cur.empty()) {
+    words.push_back(std::move(cur));
+  }
+  if (words.empty() || words.size() > 5) {
+    return HumanPauseSignal::kNone;
+  }
+
+  std::string joined;
+  for (size_t i = 0; i < words.size(); ++i) {
+    if (i > 0) {
+      joined.push_back(' ');
+    }
+    joined += words[i];
+  }
+
+  // Exact pause phrases.
+  constexpr std::string_view kPauseExact[] = {
+      "brb",        "afk",           "bio",           "sec",
+      "1 sec",      "1sec",          "one sec",       "one second",
+      "1 min",      "1min",          "one min",       "one minute",
+      "2 min",      "2min",          "be right back", "hold on",
+      "one moment", "moment",        "wait a sec",    "wait a second",
+      "wait a min", "stepping away",
+  };
+  for (std::string_view p : kPauseExact) {
+    if (joined == p) {
+      return HumanPauseSignal::kPause;
+    }
+  }
+  // Short leading "brb ..." or "afk ..." (e.g. "brb 2m", "afk bio", "brb
+  // phone").
+  if ((words.front() == "brb" || words.front() == "afk") && words.size() <= 4) {
+    return HumanPauseSignal::kPause;
+  }
+
+  // Exact resume phrases.
+  constexpr std::string_view kResumeExact[] = {
+      "back",    "im back", "r",        "ready",     "go",
+      "lets go", "ok go",   "im ready", "all ready", "good to go",
+      "here",    "im here", "resume",   "continue",
+  };
+  for (std::string_view r : kResumeExact) {
+    if (joined == r) {
+      return HumanPauseSignal::kResume;
+    }
+  }
+  return HumanPauseSignal::kNone;
+}
+
+void RecordHumanBrbPause(HumanBrbPauseState& state,
+                         uint64_t human_guid,
+                         uint32_t map_id,
+                         uint32_t instance_id,
+                         float x,
+                         float y,
+                         base::TimeTicks now) {
+  state.paused = true;
+  state.human_guid = human_guid;
+  state.map_id = map_id;
+  state.instance_id = instance_id;
+  state.x = x;
+  state.y = y;
+  state.paused_at = now;
+}
+
+bool ShouldResumeHumanBrbPause(HumanBrbPauseState& state,
+                               bool in_group,
+                               bool human_online,
+                               uint32_t human_map_id,
+                               uint32_t human_instance_id,
+                               float human_x,
+                               float human_y,
+                               bool human_in_combat,
+                               bool human_casting,
+                               base::TimeTicks now) {
+  if (!state.paused) {
+    return false;
+  }
+  if (!in_group || !human_online || human_map_id != state.map_id ||
+      human_instance_id != state.instance_id) {
+    state = {};
+    return true;
+  }
+  if (human_in_combat || human_casting) {
+    state = {};
+    return true;
+  }
+  if (now >= state.paused_at && (now - state.paused_at) >= kHumanBrbMoveGrace) {
+    const float dx = human_x - state.x;
+    const float dy = human_y - state.y;
+    if (dx * dx + dy * dy > kHumanBrbMoveResumeYd * kHumanBrbMoveResumeYd) {
+      state = {};
+      return true;
+    }
+  }
+  return false;
+}
+
+bool ClearHumanBrbPause(HumanBrbPauseState& state) {
+  if (!state.paused) {
     return false;
   }
   state = {};

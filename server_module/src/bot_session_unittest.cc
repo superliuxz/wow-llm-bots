@@ -4,10 +4,12 @@
 
 #include <cstdint>
 
+#include "base/time/time.h"
 #include "bot_manager/errand_hold.h"
 #include "bot_manager/pull_discipline.h"
 #include "bot_manager/tank_swap.h"
 #include "gtest/gtest.h"
+#include "options/bot_leader_guard.h"
 #include "options/loot_roll_policy.h"
 
 namespace llm_brain {
@@ -407,6 +409,49 @@ TEST(BotSessionRegistryTest,
       EXPECT_FALSE(s->brain_target_pin.active);
       EXPECT_EQ(s->brain_target_pin.target_guid, 0u);
       EXPECT_FALSE(s->brain_target_pin.saw_combat);
+      EXPECT_EQ(s->group_guid, 42u);
+      EXPECT_TRUE(s->group_policy.not_tank);
+    });
+  };
+  set();
+  reg.ResetOnMapChange(kBot);
+  expect_cleared();
+  set();
+  reg.ResetOnDisconnect(kBot);
+  expect_cleared();
+  set();
+  reg.ResetOnLogout(kBot);
+  expect_cleared();
+}
+
+// Adversarial counter-test: human_brb_pause and leader_approvals clear on map
+// change, harness disconnect, and logout so stale brb pauses or approvals never
+// leak across zones or sessions, while `group_policy.not_tank` survives.
+TEST(BotSessionRegistryTest,
+     HumanBrbPauseAndLeaderApprovalsClearOnMapChangeDisconnectAndLogout) {
+  BotSessionRegistry reg;
+  constexpr uint64_t kBot = 0x100B;
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  const auto set = [&] {
+    reg.WithSession(kBot, [t0](BotSession& s) {
+      s.group_guid = 42;
+      s.group_policy.not_tank = true;
+      RecordHumanBrbPause(s.human_brb_pause, 0x99, 36, 1, 1.0f, 2.0f, t0);
+      RecordHumanLeaderApproval(s.leader_approvals, "queue rdf", t0);
+      RecordHumanLeaderApproval(s.leader_approvals, "ready check", t0);
+      RecordHumanLeaderApproval(s.leader_approvals, "invite Bob", t0);
+    });
+  };
+  const auto expect_cleared = [&] {
+    reg.InspectSession(kBot, [t0](const BotSession* s) {
+      ASSERT_NE(s, nullptr);
+      EXPECT_FALSE(s->human_brb_pause.paused);
+      EXPECT_FALSE(CanBotLeaderPerformAction(BotLeaderActionKind::kLfgQueue,
+                                             true, s->leader_approvals, t0));
+      EXPECT_FALSE(CanBotLeaderPerformAction(BotLeaderActionKind::kReadyCheck,
+                                             true, s->leader_approvals, t0));
+      EXPECT_FALSE(CanBotLeaderPerformAction(BotLeaderActionKind::kInvite, true,
+                                             s->leader_approvals, t0, "Bob"));
       EXPECT_EQ(s->group_guid, 42u);
       EXPECT_TRUE(s->group_policy.not_tank);
     });
