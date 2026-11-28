@@ -7,7 +7,7 @@ Tracking document for findings from the WoW Team Play Review. Each item is tagge
 - [x] **[M1] P0-1 — A human skull mark before the pull makes every bot attack.** Playerbots treats any skull-marked unit as an attacker. The repo guards only the bots' own marking (`pull_discipline.h:108-112`). Marking skull is the standard tank habit, so a human tank gets every pack pulled out from under them. (dungeon/raid)
 - [x] **[M1] P0-2 — "stop" breaks the next fight.** `kStop -> halt_attacks() -> SetStopDps(true)` on every bot, tanks included (`llm_brain_world_script.cc:849-885`). Said out of combat, `saw_combat=false`, so it stays on through the whole next fight and clears only when that fight ends (`pull_discipline.cc:91-109`). DPS and pets stand idle, and the tank does no damage, builds no threat, and doesn't taunt. (combat/social)
 - [x] **[M8] P0-3 — Raid scripts are removed with nothing to replace them.** `AdjustRaidStrategies` turns off `naxx/ulduar/icc/voa/os/eoe/...` when brain-led (`config_parsing.cc:175-185`). That throws away playerbots' C++ for vehicles, harpoons, cannons, Malygos drakes, and positioning. The notes miss whole bosses (ICC Gunship, Festergut, Blood-Queen; LK Defile and Val'kyr) and some are wrong (LK Quake sends bots outward; Four Horsemen is modeled as taunt-in-place). Orders can't drive a vehicle. (raid)
-- [ ] **[M9] P0-4 — Prompt budget at raid size.** The slot is 4096 tokens (`prompt.cc:30`, `llm.py:13`) and `RULES.md` takes about 2.6k. At 25-man the raid frame likely pushes out the boss notes, which are the only source of standing orders. The wake reason and the human's chat line can be dropped too. (raid/harness)
+- [x] **[M9] P0-4 — Prompt budget at raid size.** The slot is 4096 tokens (`prompt.cc:30`, `llm.py:13`) and `RULES.md` takes about 2.6k. At 25-man the raid frame likely pushes out the boss notes, which are the only source of standing orders. The wake reason and the human's chat line can be dropped too. (raid/harness)
 - [x] **[M2] P0-5 — Bots can't abandon quests.** Nothing sends `CMSG_QUESTLOG_REMOVE_QUEST`. A failed escort or timed quest blocks that quest chain for good. Bots accept every `!` quest, so at 25 quests the log is full and the human's shares fail silently. (questing)
 - [x] **[M3] P0-6 — Bags fill up for good.** Bots sell only grey items (`exec_npc.cc:101,126`), can't destroy greens, and can't buy or equip bags. Greens pile up until quest drops can't be looted, and those corpses stop showing as lootable. (loot)
 - [ ] **[M13] P0-7 — A ghost can get stuck forever.** If a corpse run can't make progress, the bot gets no spirit-healer option, no wake, and the human is never told. (travel/death)
@@ -35,7 +35,7 @@ Tracking document for findings from the WoW Team Play Review. Each item is tagge
 - [ ] **[M11]** `/rw spread` and `/rw stack` move tanks too. At 25-man the spread ring is about 5 yd apart.
 - [ ] **[M11]** Bots have no battle res and there's no wipe/release command. Dead bots wait up to 5 min while any healer lives.
 - [ ] **[M11]** DBM fields and `ext.instance` (difficulty, lockout) are in the schema, but nothing fills them.
-- [ ] **[M9]** Each boss emote wakes all ~24 bots at top priority. The pull starts 24 order compiles of up to 350 tokens each, so reactions lag by seconds.
+- [x] **[M9]** Each boss emote wakes all ~24 bots at top priority. The pull starts 24 order compiles of up to 350 tokens each, so reactions lag by seconds.
 
 ### Combat
 
@@ -63,7 +63,7 @@ Tracking document for findings from the WoW Team Play Review. Each item is tagge
 
 - [ ] **[M10]** P0 wakes in a row can throw away every reply mid-fight (livelock).
 - [ ] **[M10]** One timed-out call marks the LLM unhealthy for all bots, and control flips to playerbots: release, corpse run, and popups. That flaps under load.
-- [ ] **[M9]** Orders are compiled only out of combat, once at the instance entrance, with a 7-order cap. A boss pulled straight from trash gets no orders.
+- [x] **[M9]** Orders are compiled only out of combat, once at the instance entrance, with a 7-order cap. A boss pulled straight from trash gets no orders.
 - [ ] **[M10]** No coordination between bots: no spread slots, interrupt rotation, or soak groups, so every bot does the same thing.
 
 ### Loot and upkeep

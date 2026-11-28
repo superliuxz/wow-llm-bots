@@ -147,6 +147,13 @@ class BotLoop {
   std::string CurrentGoal(const std::string& bot) const;
 
  private:
+  struct CompiledOrdersKey {
+    std::string role;
+    std::string map;
+    std::string notes;
+    auto operator<=>(const CompiledOrdersKey&) const = default;
+  };
+
   struct BotState {
     std::optional<wlb::snapshot::Snapshot> latest_snapshot;
     Screen latest_screen;
@@ -319,6 +326,12 @@ class BotLoop {
     // requested in the current instance, so approaching a new boss triggers
     // per-boss recompilation (or cache switch) without waking on every tick.
     std::string compiled_notes;
+    // Key currently claimed by this bot in `in_flight_order_compiles_` (if
+    // any).
+    std::optional<CompiledOrdersKey> compiling_orders_key;
+    // Last raid boss emote received (for short-window raid emote dedupe).
+    std::string last_boss_emote_key;
+    base::TimeTicks last_boss_emote_at;
     // Outbound chat command IDs so chat error events with a real command_id
     // are recognized and wake the brain instead of being dropped as stale.
     std::deque<uint32_t> recent_chat_command_ids;
@@ -354,13 +367,7 @@ class BotLoop {
     base::TimeTicks condense_retry_after;
   };
 
-  struct CompiledOrdersKey {
-    std::string bot;
-    std::string map;
-    std::string notes;
-    auto operator<=>(const CompiledOrdersKey&) const = default;
-  };
-
+  void ReleaseInFlightOrderCompile(const std::string& bot, BotState* state);
   void NoteEvent(BotState* state,
                  const wlb::snapshot::Event& event,
                  bool triggered_wake = false,
@@ -588,19 +595,22 @@ class BotLoop {
   // member said "brb"/"afk" in chat; cleared on "back"/"r"/"ready"/"go",
   // combat start, or disconnect (M7).
   std::flat_set<std::string> human_brb_paused_;
-  // Per-group fan-out pacing for raid-scale bursts (loot rolls, /rw, RP boss
-  // emotes) so 24 bots don't flood the LLM in a single tick.
+  // Per-group fan-out pacing for raid-scale bursts (loot rolls, /rw, RP &
+  // in-combat boss emotes) so 24 bots don't flood the LLM in a single tick.
   struct RaidFanOutPacer {
     base::TimeTicks next_loot_at;
     base::TimeTicks next_rw_at;
     base::TimeTicks next_emote_at;
+    base::TimeTicks next_combat_emote_at;
   };
   std::flat_map<std::string, RaidFanOutPacer> raid_fanout_pacers_;
-  // Pre-pull compiled standing orders cached by (bot, map, notes).
+  // Compiled standing orders cached by (role, map, notes) and shared across
+  // bots of the same role in the same encounter.
   static constexpr size_t kMaxCompiledOrdersCache = 256;
   // How many of the newest `remember:` notes go into each prompt (RH-M4).
   static constexpr size_t kMemoryLinesInPrompt = 15;
   std::flat_map<CompiledOrdersKey, std::vector<Order>> compiled_orders_cache_;
+  std::flat_map<CompiledOrdersKey, std::string> in_flight_order_compiles_;
   struct CachedFile {
     std::filesystem::file_time_type mtime;
     std::string text;

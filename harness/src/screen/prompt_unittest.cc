@@ -142,11 +142,11 @@ TEST(PromptTest, TokenCapDropsRememberedPanelsBeforeScreenAndPreservesAlso) {
       "me: Tess\nnearby:\n  1. Attack Mottled Boar\nalso:\n"
       "  2. Keep doing what I'm doing";
   const LlmRequest request = BuildPlanRequest(input, screen);
-  // Total estimated tokens (system + user + reply) stays below 4,096 slot.
+  // Total estimated tokens (system + user + reply) stays below 8,192 slot.
   const size_t est_tokens = (request.system.size() + 2) / 3 +
                             (request.user.size() + 2) / 3 +
                             static_cast<size_t>(request.max_tokens);
-  EXPECT_LE(est_tokens, 4096u);
+  EXPECT_LE(est_tokens, 8192u);
   // Live screen and `also:` options are never dropped for remembered panels,
   // and core party/me lines outlive unnumbered scenery under tight budgets.
   EXPECT_NE(request.user.find("Your screen now:"), std::string::npos);
@@ -154,7 +154,7 @@ TEST(PromptTest, TokenCapDropsRememberedPanelsBeforeScreenAndPreservesAlso) {
             std::string::npos);
 
   PromptInput crowded = SampleInput();
-  crowded.rules = std::string(9600, 'R');
+  crowded.rules = std::string(22000, 'R');
   Screen party_screen;
   party_screen.text = "me: Tess\naround me:\n  1. Attack Boar\n";
   for (int i = 0; i < 20; ++i) {
@@ -273,7 +273,7 @@ TEST(PromptTest, KnowledgeOutcomeAndInspectPromptBreakdown) {
 
   // Under a tight budget, boss notes win remaining bytes ahead of World guide.
   PromptInput tight = input;
-  tight.rules = std::string(12000, 'r');
+  tight.rules = std::string(24000, 'r');
   tight.notes = "## Hogger\n" + std::string(600, 'x');
   const LlmRequest tight_req = BuildPlanRequest(tight, screen);
   EXPECT_NE(tight_req.user.find("Your boss notes:"), std::string::npos);
@@ -340,7 +340,7 @@ TEST(PromptTest, HugeIdentityMemoryAndEventsNeverHideAroundMeOptions) {
   const size_t est_tokens = (req.system.size() + 2) / 3 +
                             (req.user.size() + 2) / 3 +
                             static_cast<size_t>(req.max_tokens);
-  EXPECT_LE(est_tokens, 4096u);
+  EXPECT_LE(est_tokens, 8192u);
   // Every single option offered in the grammar must stay visible in the prompt.
   for (int i = 1; i <= 16; ++i) {
     EXPECT_NE(req.user.find("  " + std::to_string(i) + ". "), std::string::npos)
@@ -348,15 +348,15 @@ TEST(PromptTest, HugeIdentityMemoryAndEventsNeverHideAroundMeOptions) {
         << req.user;
   }
 
-  // A compile wake (boss notes + order names) raises max_tokens so 7 `order:`
-  // lines are not cut; nearby unit names alone (every wake) don't.
+  // A compile wake (boss notes + order names) raises max_tokens so up to 12
+  // `order:` lines are not cut; nearby unit names alone (every wake) don't.
   PromptInput with_orders = SampleInput();
   with_orders.order_names = {"Defile", "Lich King"};
   with_orders.notes.clear();
   EXPECT_LT(BuildPlanRequest(with_orders, SampleScreen()).max_tokens, 300);
   with_orders.notes = "## Lich King\n- Defile: move out of it.";
   const LlmRequest compile = BuildPlanRequest(with_orders, SampleScreen());
-  EXPECT_GE(compile.max_tokens, 300);
+  EXPECT_GE(compile.max_tokens, 500);
   EXPECT_NE(compile.user.find("Defile: move out of it."), std::string::npos);
 }
 
@@ -494,7 +494,7 @@ TEST(PromptTest, ActGrammarIsOfferedOnlyForChatPingOrOpenTrade) {
 
 TEST(PromptTest, AFullSpellsLineYieldsToOptionsAndCoreLinesUnderTightBudget) {
   PromptInput input = SampleInput();
-  input.rules = std::string(9600, 'R');
+  input.rules = std::string(22000, 'R');
   Screen screen;
   screen.text = "me: Tess\naround me:\n  1. Attack Boar\n";
   screen.text += "party: leader Hele\n  party_state: fighting (Hele)\n";
@@ -505,7 +505,7 @@ TEST(PromptTest, AFullSpellsLineYieldsToOptionsAndCoreLinesUnderTightBudget) {
   const size_t est_tokens = (req.system.size() + 2) / 3 +
                             (req.user.size() + 2) / 3 +
                             static_cast<size_t>(req.max_tokens);
-  EXPECT_LE(est_tokens, 4096u);
+  EXPECT_LE(est_tokens, 8192u);
   EXPECT_NE(req.user.find("  1. Attack Boar"), std::string::npos) << req.user;
   EXPECT_NE(req.user.find("  2. Keep doing what I'm doing"), std::string::npos);
   EXPECT_NE(req.user.find("party_state: fighting"), std::string::npos);
@@ -518,7 +518,7 @@ TEST(PromptTest, AFullSpellsLineYieldsToOptionsAndCoreLinesUnderTightBudget) {
 
 TEST(PromptTest, APartyPingOutlivesSceneryUnderTightBudget) {
   PromptInput input = SampleInput();
-  input.rules = std::string(9600, 'R');
+  input.rules = std::string(22000, 'R');
   Screen screen;
   screen.text = "me: Tess\naround me:\n  1. Attack Boar\nobjects:\n";
   for (int i = 0; i < 40; ++i) {
@@ -533,7 +533,7 @@ TEST(PromptTest, APartyPingOutlivesSceneryUnderTightBudget) {
   const size_t est_tokens = (req.system.size() + 2) / 3 +
                             (req.user.size() + 2) / 3 +
                             static_cast<size_t>(req.max_tokens);
-  EXPECT_LE(est_tokens, 4096u);
+  EXPECT_LE(est_tokens, 8192u);
   EXPECT_NE(req.user.find("ping: Hele pinged 18 yd NE"), std::string::npos)
       << req.user;
   EXPECT_EQ(req.user.find("spells: SSS"), std::string::npos) << req.user;
@@ -542,7 +542,7 @@ TEST(PromptTest, APartyPingOutlivesSceneryUnderTightBudget) {
 
 TEST(PromptTest, ASpellMissOutlivesSceneryUnderTightBudget) {
   PromptInput input = SampleInput();
-  input.rules = std::string(9600, 'R');
+  input.rules = std::string(22000, 'R');
   Screen screen;
   screen.text =
       "me: Vesper\nmissed: Sap on Defias Cutpurse (dodge)\n"
@@ -558,7 +558,7 @@ TEST(PromptTest, ASpellMissOutlivesSceneryUnderTightBudget) {
   const size_t est_tokens = (req.system.size() + 2) / 3 +
                             (req.user.size() + 2) / 3 +
                             static_cast<size_t>(req.max_tokens);
-  EXPECT_LE(est_tokens, 4096u);
+  EXPECT_LE(est_tokens, 8192u);
   EXPECT_NE(req.user.find("missed: Sap on Defias Cutpurse (dodge)"),
             std::string::npos)
       << req.user;
@@ -614,9 +614,10 @@ TEST(PromptTest, BossNotesForNearbyMobsAppearNearScreenAndPreserveKvPrefix) {
   // Unmatched mobs (Big Ooze) are not repeated in the mob reminder.
   EXPECT_EQ(mob_section.find("Unstable Ooze Explosion"), std::string::npos);
 
-  // InspectPrompt headroom stays comfortably within the 4,096-token slot.
+  // InspectPrompt headroom stays comfortably within the 8,192-token slot.
   const PromptBreakdown b = InspectPrompt(input, screen);
-  EXPECT_LE(b.est_total_tokens + static_cast<size_t>(req.max_tokens), 4096u);
+  EXPECT_EQ(b.slot_budget_tokens, 8192u);
+  EXPECT_LE(b.est_total_tokens + static_cast<size_t>(req.max_tokens), 8192u);
 
   // Adversarial counter-test: an un-noted loose mob gets NO mob-notes block.
   PromptInput unnoted = input;
@@ -1102,6 +1103,119 @@ TEST(PromptTest, VehicleScreenFitsInspectPromptBudgetAndSurvivesTrimming) {
   const LlmRequest tight_req = BuildPlanRequest(tight, crowded);
   EXPECT_NE(tight_req.user.find("vehicle: Wyrmrest Defender"),
             std::string::npos);
+}
+
+TEST(PromptTest, TwentyFiveManRaidPromptRetainsWakeHumanChatAndBossNotes) {
+  const std::filesystem::path repo_root =
+      std::filesystem::path(WLB_HARNESS_TESTDATA).parent_path().parent_path();
+  std::ifstream rules_in(repo_root / "content" / "RULES.md");
+  ASSERT_TRUE(rules_in.is_open());
+  const std::string rules((std::istreambuf_iterator<char>(rules_in)),
+                          std::istreambuf_iterator<char>());
+  EXPECT_LE(rules.size(), 7800u);
+
+  // Build a realistic 25-man raid screen with 24 verbose raid members,
+  // distant scenery/entities, and 15 numbered options.
+  Screen raid_screen;
+  raid_screen.text =
+      "me: Aldric, level 80 male paladin, role tank; health 44000/44000; "
+      "mana 6000/6000; in combat; raid member\n"
+      "where: The Frozen Throne, Icecrown Citadel (in an instance)\n"
+      "party: leader Human; loot master looter\n";
+  for (int i = 1; i <= 24; ++i) {
+    raid_screen.text +=
+        "  - Raider" + std::to_string(i) +
+        " (level 80, health 95%, mana 82%, 18 yd NE, target The Lich King, "
+        "auras: Power Word: Fortitude, Mark of the Wild, Blessing of Kings)\n";
+  }
+  raid_screen.text += "around me:\n";
+  for (int i = 1; i <= 14; ++i) {
+    raid_screen.text += "  " + std::to_string(i) + ". Attack Drudge Ghoul " +
+                        std::to_string(i) +
+                        " (level 80 elite, hostile, 12 yd N)\n";
+    raid_screen.options.push_back(OptionKind::kAttack);
+  }
+  raid_screen.text += "objects:\n";
+  for (int i = 1; i <= 30; ++i) {
+    raid_screen.text += "  - Distant Ice Pillar " + std::to_string(i) +
+                        " (65 yd SW, scenery, unclickable)\n";
+  }
+  raid_screen.text += "also:\n  15. Keep doing what I'm doing";
+  raid_screen.options.push_back(OptionKind::kKeep);
+
+  PromptInput input;
+  input.rules = rules;
+  input.bot_name = "Aldric";
+  input.identity = std::string(800, 'I');
+  input.memory = std::string(800, 'M');
+  input.knowledge = std::string(1000, 'K');
+  input.relationships = "## Human\n- 2026-11-27 raid leader";
+  input.notes =
+      "## The Lich King\n"
+      "- **Defile**: move out of it immediately.\n"
+      "- **Soul Reaper**: tank swap after Soul Reaper lands.";
+  input.order_names = {"Defile", "Soul Reaper", "The Lich King"};
+  input.wake_reason = "raid_warning from Human: swap on Soul Reaper now!";
+  input.recent_events = {
+      "raid from Human: stack on skull for Val'kyr!",
+      "received 1x Emblem of Frost",
+      "loot roll on Invincible's Reins",
+  };
+  input.player_chat_memory = {
+      PlayerChatHistory{.player = "Human",
+                        .turns = {{.from_bot = false,
+                                   .channel = "raid",
+                                   .text = "stack on skull for Val'kyr!"}}}};
+
+  // 1) Normal 8k slot: InspectPrompt fits comfortably with headroom and keeps
+  //    wake reason, newest human chat, boss notes, and all 15 options.
+  const LlmRequest req = BuildPlanRequest(input, raid_screen);
+  const PromptBreakdown b = InspectPrompt(input, raid_screen);
+  EXPECT_EQ(b.slot_budget_tokens, 8192u);
+  EXPECT_LE(b.est_total_tokens + static_cast<size_t>(req.max_tokens), 8192u);
+  EXPECT_NE(
+      req.user.find("Woken: raid_warning from Human: swap on Soul Reaper"),
+      std::string::npos);
+  EXPECT_NE(req.user.find("stack on skull for Val'kyr!"), std::string::npos);
+  EXPECT_NE(req.user.find("Your boss notes:\n## The Lich King"),
+            std::string::npos);
+
+  // 2) Extreme 25-man overflow stress test: inflate verbose raid member lines
+  //    and distant entities far past the 8k slot so truncation MUST run.
+  //    Wake reason, newest human chat line, boss notes, and all numbered
+  //    options MUST still be retained while verbose raid member / scenery lines
+  //    are truncated first!
+  Screen huge_raid = raid_screen;
+  for (int i = 25; i <= 260; ++i) {
+    huge_raid.text += "\n  - Distant Raid Entity " + std::to_string(i) + " " +
+                      std::string(80, 'D');
+  }
+  // Flood recent_events with non-chat noise after the newest human chat line.
+  PromptInput flooded = input;
+  for (int i = 0; i < 12; ++i) {
+    flooded.recent_events.push_back("combat log spam " + std::to_string(i) +
+                                    " " + std::string(140, 'N'));
+  }
+  const LlmRequest capped = BuildPlanRequest(flooded, huge_raid);
+  const PromptBreakdown capped_b = InspectPrompt(flooded, huge_raid);
+  EXPECT_LE(capped_b.est_total_tokens + static_cast<size_t>(capped.max_tokens),
+            8192u);
+  EXPECT_NE(
+      capped.user.find("Woken: raid_warning from Human: swap on Soul Reaper"),
+      std::string::npos)
+      << capped.user;
+  EXPECT_NE(capped.user.find("stack on skull for Val'kyr!"), std::string::npos)
+      << capped.user;
+  EXPECT_NE(capped.user.find("Your boss notes:\n## The Lich King"),
+            std::string::npos)
+      << capped.user;
+  // Distant entities were truncated before guaranteed sections.
+  EXPECT_EQ(capped.user.find("Distant Raid Entity 250"), std::string::npos);
+  for (int i = 1; i <= 15; ++i) {
+    EXPECT_NE(capped.user.find("  " + std::to_string(i) + ". "),
+              std::string::npos)
+        << "missing option " << i;
+  }
 }
 
 }  // namespace

@@ -5296,8 +5296,10 @@ TEST(BotLoopTest, TwentyFiveManBurstPrioritizesRolesAndStaggersFanOut) {
 
   // 3) In-combat BOSS_EMOTE burst (P0):
   //    All 24 bots are in combat; feed DPS first, then healers, then tanks.
-  //    All 24 wake (no P0 mechanic missed), and after the initial 4 slots
-  //    fill, queued tanks and healers run ahead of queued DPS!
+  //    Tanks (2) + Healers (5) + addressed DPS (Dps3, 1) = 8 bots wake
+  //    immediately at P0 (never slamming all 24 at once!), and after the
+  //    initial 4 slots fill, queued tanks jump ahead of queued healers.
+  //    The remaining 16 non-addressed DPS stagger via OnTick at P0.
   t = t + base::Seconds(10);
   for (const BotSpec& b : bots) {
     loop.OnSnapshot(make_snap(b, 2, t, /*in_combat=*/true), t);
@@ -5305,20 +5307,37 @@ TEST(BotLoopTest, TwentyFiveManBurstPrioritizesRolesAndStaggersFanOut) {
   finish_all();
   started_order.clear();
 
-  // Deliver in-combat BOSS_EMOTE in reverse order (DPS first, tanks last).
+  // Deliver in-combat BOSS_EMOTE in reverse order (DPS first, tanks last),
+  // addressing Dps3 by name.
   for (auto it = bots.rbegin(); it != bots.rend(); ++it) {
     pb::ImmediateEvent imm;
     imm.bot = it->name;
     pb::ChatEvent& chat = imm.event.chat.emplace();
     chat.channel = pb::BOSS_EMOTE;
     chat.from = "Loken";
-    chat.text = "begins to cast Lightning Nova!";
+    chat.text = "targets Dps3 and begins to cast Lightning Nova!";
     chat.at_me = true;
     loop.OnEvent(std::move(imm), t);
   }
-  EXPECT_EQ(loop.in_flight() + loop.queued(), 24u);
+  // Only Tanks (2) + Healers (5) + named Dps3 (1) = 8 wake immediately (not
+  // all 24!).
+  EXPECT_EQ(loop.in_flight() + loop.queued(), 8u);
+  // Duplicate identical BOSS_EMOTE 500 ms later is deduplicated (0 extra
+  // wakes).
+  for (const BotSpec& b : bots) {
+    pb::ImmediateEvent dup;
+    dup.bot = b.name;
+    pb::ChatEvent& chat = dup.event.chat.emplace();
+    chat.channel = pb::BOSS_EMOTE;
+    chat.from = "Loken";
+    chat.text = "targets Dps3 and begins to cast Lightning Nova!";
+    chat.at_me = true;
+    loop.OnEvent(std::move(dup), t + base::Milliseconds(500));
+  }
+  EXPECT_EQ(loop.in_flight() + loop.queued(), 8u);
+
   // Finish the first 4 (which started before tanks arrived) one by one and
-  // verify Tanks and Healers jump ahead of the remaining queued DPS.
+  // verify Tanks jump ahead of remaining queued healers.
   for (int i = 0; i < 4; ++i) {
     finish_one(0);
   }
@@ -5327,6 +5346,12 @@ TEST(BotLoopTest, TwentyFiveManBurstPrioritizesRolesAndStaggersFanOut) {
   EXPECT_TRUE(started_order[4].starts_with("Tank")) << started_order[4];
   EXPECT_TRUE(started_order[5].starts_with("Tank")) << started_order[5];
   finish_all();
+  EXPECT_EQ(started_order.size(), 8u);
+  // Advance OnTick in 100 ms steps to drain the 16 staggered non-addressed DPS.
+  for (int step = 1; step <= 20; ++step) {
+    loop.OnTick(t + base::Milliseconds(step * 100));
+    finish_all();
+  }
   EXPECT_EQ(started_order.size(), 24u);
   started_order.clear();
 
@@ -5394,6 +5419,250 @@ TEST(BotLoopTest, FiveManLootRollAndRaidWarningWakeImmediately) {
   // Player /emote in a party/raid wakes only the single responder (not all 4).
   EXPECT_EQ(f.Line("waves", "Hele", pb::EMOTE, /*at_me=*/true), Names{"Dps1"});
   f.FinishAll("");
+
+  // Counter-test: 5-man BOSS_EMOTE wakes all 4 bots immediately (no raid
+  // staggering in 5-mans).
+  for (const char* bot : {"Tank1", "Heal1", "Dps1", "Dps2"}) {
+    pb::ImmediateEvent imm;
+    imm.bot = bot;
+    pb::ChatEvent& chat = imm.event.chat.emplace();
+    chat.channel = pb::BOSS_EMOTE;
+    chat.from = "Loken";
+    chat.text = "begins to cast Lightning Nova!";
+    chat.at_me = true;
+    f.loop().OnEvent(std::move(imm), t0 + base::Seconds(2));
+  }
+  EXPECT_EQ(f.brain().size(), 4u);
+  f.FinishAll("");
+}
+
+TEST(BotLoopTest, SharedPerRoleOrderCompileAndTrashToBossPull) {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "wlb_shared_role_orders_test";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir / "ICC");
+  {
+    std::ofstream out(tmp_dir / "ICC" / "notes.md");
+    out << "# Icecrown Citadel\n\n";
+    for (int i = 0; i < 6; ++i) {
+      out << "## Early Boss " << i << "\n\n"
+          << std::string(400, 'A') << "\n\n"
+          << "```\nColdflame cast -> out of it\n```\n\n";
+    }
+    out << "## Sindragosa\n\n"
+        << "- **Blistering Cold**: run out immediately.\n\n"
+        << "```\nBlistering Cold cast -> out of it\n```\n\n"
+        << "## The Lich King\n\n"
+        << "- **Defile**: run away.\n"
+        << "- **Soul Reaper**: tank swap.\n\n"
+        << "```\nDefile on me -> away\nSoul Reaper cast -> away\n```\n";
+  }
+
+  struct RoleBot {
+    std::string name;
+    std::string cls;
+    pb::Role role;
+  };
+  const std::vector<RoleBot> bots = {
+      {"TankA", "Warrior", pb::Role::TANK},
+      {"TankB", "Paladin", pb::Role::TANK},
+      {"HealA", "Priest", pb::Role::HEALER},
+      {"HealB", "Shaman", pb::Role::HEALER},
+      {"MeleeA", "Warrior", pb::Role::DPS},
+      {"MeleeB", "Rogue", pb::Role::DPS},
+      {"RangedA", "Mage", pb::Role::DPS},
+      {"RangedB", "Warlock", pb::Role::DPS},
+  };
+
+  struct Call {
+    std::string bot;
+    std::string user;
+    base::OnceCallback<void(LlmResult)> reply;
+    base::scoped_refptr<LlmCancelHandle> cancel;
+  };
+  std::vector<Call> active;
+  std::vector<pb::Command> commands;
+  BotLoopConfig cfg;
+  cfg.rules = "RULES";
+  cfg.notes_dir = tmp_dir.string();
+  cfg.max_in_flight = 16;
+  cfg.stale_snapshot_after = base::Seconds(3600);
+  BotLoop loop(
+      cfg,
+      [&](LlmRequest req, base::OnceCallback<void(LlmResult)> reply,
+          FirstLineCallback) {
+        auto h = base::MakeRefCounted<LlmCancelHandle>();
+        std::string who;
+        for (const RoleBot& b : bots) {
+          if (req.user.starts_with("You are " + b.name + ".")) {
+            who = b.name;
+            break;
+          }
+        }
+        active.push_back({who, req.user, std::move(reply), h});
+        return h;
+      },
+      [&](const pb::Command& cmd) { commands.push_back(cmd); });
+
+  const base::TimeTicks t0 = base::TimeTicks::Now();
+  auto make_snap = [&](const RoleBot& b, uint32_t seq, base::TimeTicks at,
+                       bool in_combat) {
+    pb::Snapshot s = MakeLiveSnap(b.name, seq, at, in_combat);
+    s.base.where.in_instance = true;
+    s.base.where.map = "Icecrown Citadel";
+    s.base.self.unit.name = b.name;
+    s.base.self.unit.player.emplace().class_ = b.cls;
+    s.base.self.unit.group.emplace().role = b.role;
+    s.ext.raid.emplace();
+    AddKeep(&s);
+    return s;
+  };
+
+  // 1) All 8 bots (2 per role: tank/healer/melee/ranged) enter ICC together.
+  //    Only 4 compile calls fire (1 per role), NOT 8!
+  for (const RoleBot& b : bots) {
+    loop.OnSnapshot(make_snap(b, 1, t0, /*in_combat=*/false), t0);
+  }
+  // The 4 non-compiling peers haven't woken yet; they only get their normal
+  // first-look wake if not suppressed, while only 1 per role gets the compile
+  // wake. Verify exactly 4 compile wakes fired!
+  int compile_wakes = 0;
+  for (const Call& c : active) {
+    if (c.user.find("compile standing orders from boss notes") !=
+        std::string::npos) {
+      ++compile_wakes;
+    }
+  }
+  EXPECT_EQ(compile_wakes, 4);
+
+  // Reply to all calls: the 4 role compilers return standing orders (which
+  // immediately cache & propagate to their same-role peers).
+  while (!active.empty()) {
+    Call c = std::move(active.front());
+    active.erase(active.begin());
+    LlmResult res;
+    res.reply.emplace().text =
+        "do: 1\nexpect: none\nwatch: none\nlook: 300\n"
+        "order: Coldflame cast -> out of it";
+    std::move(c.reply).Run(std::move(res));
+  }
+
+  // 2) All 8 bots approach Sindragosa out of combat: again ONLY 4 LLM compile
+  //    calls fire (1 per role), and when each finishes, its same-role peer
+  //    receives Sindragosa's orders without waking the LLM!
+  pb::Unit sindra;
+  sindra.guid = "0xF130009000000001";
+  sindra.name = "Sindragosa";
+  sindra.kind = pb::Unit::NPC;
+  sindra.reaction = pb::Unit::HOSTILE;
+  sindra.rel.dist_yd = 25.0f;
+  const base::TimeTicks t1 = t0 + base::Seconds(5);
+  for (const RoleBot& b : bots) {
+    pb::Snapshot s = make_snap(b, 2, t1, /*in_combat=*/false);
+    s.base.nearby.units.push_back(sindra);
+    loop.OnSnapshot(s, t1);
+  }
+  ASSERT_EQ(active.size(), 4u);
+  while (!active.empty()) {
+    Call c = std::move(active.front());
+    active.erase(active.begin());
+    LlmResult res;
+    res.reply.emplace().text =
+        "do: 1\nexpect: none\nwatch: none\nlook: 300\n"
+        "order: Blistering Cold cast -> out of it";
+    std::move(c.reply).Run(std::move(res));
+  }
+  // Second snapshot near Sindragosa for all 8 bots: 0 wakes (all 4 peers
+  // already received the shared compiled orders!).
+  const base::TimeTicks t2 = t0 + base::Seconds(10);
+  for (const RoleBot& b : bots) {
+    pb::Snapshot s = make_snap(b, 3, t2, /*in_combat=*/false);
+    s.base.nearby.units.push_back(sindra);
+    loop.OnSnapshot(s, t2);
+  }
+  EXPECT_EQ(active.size(), 0u);
+
+  // 3) Trash-to-boss pull: all 8 bots enter combat on trash (no boss nearby),
+  //    finish their combat wake, and THEN The Lich King enters the fight while
+  //    all bots are STILL in combat (`was_in_combat == true`).
+  const base::TimeTicks t3 = t0 + base::Seconds(15);
+  for (const RoleBot& b : bots) {
+    loop.OnSnapshot(make_snap(b, 4, t3, /*in_combat=*/true), t3);
+  }
+  while (!active.empty()) {
+    Call c = std::move(active.front());
+    active.erase(active.begin());
+    LlmResult res;
+    res.reply.emplace().text = "do: 1\nexpect: none\nwatch: none\nlook: 300";
+    std::move(c.reply).Run(std::move(res));
+  }
+  ASSERT_EQ(active.size(), 0u);
+
+  // Boss pulled straight from trash: 4 per-role P0 compile wakes fire!
+  pb::Unit lk;
+  lk.guid = "0xF130009000000002";
+  lk.name = "The Lich King";
+  lk.kind = pb::Unit::NPC;
+  lk.reaction = pb::Unit::HOSTILE;
+  lk.boss = pb::BossPart{.phase = 1};
+  const base::TimeTicks t4 = t0 + base::Seconds(20);
+  for (const RoleBot& b : bots) {
+    pb::Snapshot s = make_snap(b, 5, t4, /*in_combat=*/true);
+    s.ext.encounter.emplace().boss = lk;
+    loop.OnSnapshot(s, t4);
+  }
+  ASSERT_EQ(active.size(), 4u);
+  for (const Call& c : active) {
+    EXPECT_NE(c.user.find("boss engaged in Icecrown Citadel: compile standing "
+                          "orders from boss notes"),
+              std::string::npos);
+    EXPECT_NE(c.user.find("## The Lich King"), std::string::npos);
+  }
+  // Adversarial counter-test: cancel TankA's compile call mid-flight (error /
+  // timeout), finish the other 3 roles with orders. Next snapshot for TankB
+  // must be able to take over compiling (in-flight lock released, no deadlock).
+  for (size_t i = 0; i < active.size(); ++i) {
+    Call c = std::move(active[i]);
+    if (c.bot == "TankA") {
+      LlmResult err;
+      err.error = "timeout";
+      std::move(c.reply).Run(std::move(err));
+    } else {
+      LlmResult res;
+      res.reply.emplace().text =
+          "do: 1\nexpect: none\nwatch: none\nlook: 300\n"
+          "order: Defile on me -> away\n"
+          "order: Soul Reaper cast -> away";
+      std::move(c.reply).Run(std::move(res));
+    }
+  }
+  active.clear();
+
+  // TankB takes over compiling Lich King orders while still in combat; the
+  // other 6 bots (healer/melee/ranged) already have Lich King orders cached &
+  // shared so they do NOT wake!
+  const base::TimeTicks t5 = t0 + base::Seconds(25);
+  for (const RoleBot& b : bots) {
+    if (b.name == "TankA") {
+      continue;
+    }
+    pb::Snapshot s = make_snap(b, 6, t5, /*in_combat=*/true);
+    s.ext.encounter.emplace().boss = lk;
+    loop.OnSnapshot(s, t5);
+  }
+  ASSERT_EQ(active.size(), 1u);
+  EXPECT_EQ(active[0].bot, "TankB");
+  {
+    LlmResult res;
+    res.reply.emplace().text =
+        "do: 1\nexpect: none\nwatch: none\nlook: 300\n"
+        "order: Defile on me -> away\n"
+        "order: Soul Reaper cast -> away";
+    std::move(active[0].reply).Run(std::move(res));
+  }
+  active.clear();
+
+  std::filesystem::remove_all(tmp_dir);
 }
 
 }  // namespace

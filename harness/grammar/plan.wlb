@@ -67,7 +67,7 @@ lines Plan {
       "<optional: the name of an item or quest on your screen whose tooltip isn't shown yet, to read it; you are woken again>";
   orders?: clear_orders:list<ClearOrders, ", ", 1..1> @needs(order_names)
       "<optional: write 'none' to clear active standing orders>";
-  order*7: orders:Order @needs(order_names)
+  order*12: orders:Order @needs(order_names)
       "<optional, up to 7 in priority order for mechanics in Your boss notes: <when> -> <act>[, then <act>]>";
   // Up to 3 order acts done once, at once: dispatched before the `do:` steps.
   act?: acts:list<Act, ", then ", 1..3> @needs(act_names)

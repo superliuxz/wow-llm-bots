@@ -255,10 +255,12 @@ constexpr size_t kMaxUnpromptedPartyLinesPerWindow = 2;
 constexpr base::TimeDelta kMinUnpromptedPartySpacing = base::Seconds(6);
 constexpr int64_t kTypingMsPerChar = 35;
 
-// Raid-scale (> 5 members) event fan-out coalescing and staggering.
+// Raid-scale (> 5 members) event fan-out coalescing, staggering, and dedupe.
 constexpr base::TimeDelta kRaidLootCoalesceDelay = base::Milliseconds(500);
 constexpr base::TimeDelta kRaidLootStaggerStep = base::Milliseconds(250);
 constexpr base::TimeDelta kRaidEmoteStaggerStep = base::Milliseconds(250);
+constexpr base::TimeDelta kRaidCombatEmoteStaggerStep = base::Milliseconds(100);
+constexpr base::TimeDelta kRaidEmoteDedupeWindow = base::Seconds(3);
 // Large-raid (> 10 members, e.g. 25-man) /rw pacing for non-addressed DPS
 // (~6.6 wakes/s, matching ~7 wakes/s LLM capacity).
 constexpr base::TimeDelta kRaidWarningStaggerStep = base::Milliseconds(150);
@@ -275,6 +277,36 @@ BotRole BotRoleOf(const pb::Snapshot& snapshot) {
     return BotRole::kHealer;
   }
   return BotRole::kDefault;
+}
+
+// Role bucket for shared standing-order compilation: tank, healer, melee,
+// ranged (or "dps" when class is unspecified). Purely factual from snapshot.
+std::string OrderCompileRoleOf(const pb::Snapshot& snapshot) {
+  const BotRole role = BotRoleOf(snapshot);
+  if (role == BotRole::kTank) {
+    return "tank";
+  }
+  if (role == BotRole::kHealer) {
+    return "healer";
+  }
+  std::string cls;
+  if (snapshot.base.self.unit.player) {
+    cls = base::ToLowerASCII(snapshot.base.self.unit.player->class_);
+  }
+  if (cls == "mage" || cls == "warlock" || cls == "hunter" || cls == "priest" ||
+      cls == "shaman") {
+    return "ranged";
+  }
+  if (cls == "warrior" || cls == "rogue" || cls == "death knight" ||
+      cls == "deathknight" || cls == "paladin") {
+    return "melee";
+  }
+  if (cls == "druid") {
+    const pb::Self::PowerType pt = snapshot.base.self.power_type;
+    return (pt == pb::Self::ENERGY || pt == pb::Self::RAGE) ? "melee"
+                                                            : "ranged";
+  }
+  return "dps";
 }
 
 size_t GroupSize(const pb::Snapshot& snapshot) {
@@ -1302,6 +1334,7 @@ void BotLoop::OnConnectionChanged(bool connected) {
     party_chat_budgets_.clear();
     human_brb_paused_.clear();
     raid_fanout_pacers_.clear();
+    in_flight_order_compiles_.clear();
     // Answers to screens of the old connection are useless: free the slots.
     scheduler_.CancelAllInFlight();
     // Server resets its own health flag on disconnect; start clean on the next
@@ -1345,6 +1378,18 @@ void BotLoop::RecordLlmSuccess() {
   SetLlmHealthy(true);
 }
 
+void BotLoop::ReleaseInFlightOrderCompile(const std::string& bot,
+                                          BotState* state) {
+  if (!state->compiling_orders_key) {
+    return;
+  }
+  if (auto it = in_flight_order_compiles_.find(*state->compiling_orders_key);
+      it != in_flight_order_compiles_.end() && it->second == bot) {
+    in_flight_order_compiles_.erase(it);
+  }
+  state->compiling_orders_key.reset();
+}
+
 // static
 void BotLoop::ResetBotSession(BotState* state, bool cancel_in_flight) {
   state->runner.Stop();
@@ -1359,6 +1404,9 @@ void BotLoop::ResetBotSession(BotState* state, bool cancel_in_flight) {
   state->notes.clear();
   state->last_selected_notes.clear();
   state->compiled_notes.clear();
+  state->compiling_orders_key.reset();
+  state->last_boss_emote_key.clear();
+  state->last_boss_emote_at = base::TimeTicks();
   state->recent_chat_command_ids.clear();
   state->pending_says.clear();
   state->said_lines.clear();
@@ -1588,6 +1636,7 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
     }
   }
 
+  const bool prev_in_combat = state.was_in_combat;
   const bool look_woke = OnLookSnapshot(bot, &state, received_at);
 
   if (state.plan_acts.active()) {
@@ -1670,24 +1719,53 @@ void BotLoop::OnSnapshot(pb::Snapshot snapshot, base::TimeTicks received_at) {
         (entered_instance ||
          (matched_boss && selected_notes != state.compiled_notes));
     if (should_compile) {
-      const CompiledOrdersKey key{bot, cur_map, selected_notes};
+      const std::string role_key = OrderCompileRoleOf(*state.latest_snapshot);
+      const CompiledOrdersKey key{role_key, cur_map, selected_notes};
       if (auto cache_it = compiled_orders_cache_.find(key);
           cache_it != compiled_orders_cache_.end() &&
           !cache_it->second.empty()) {
         state.orders.SetOrders(cache_it->second, received_at);
         state.compiled_notes = selected_notes;
-        Log(base::StrCat({bot, ": pre-pull orders cache hit for ", cur_map,
-                          " (", std::to_string(cache_it->second.size()),
-                          " orders)"}));
-      } else if (!state.latest_snapshot->base.self.in_combat) {
-        state.compiled_notes = selected_notes;
-        state.has_ever_woken = true;
-        WakeBot(
-            bot, Urgency::kUrgent,
-            base::StrCat(
-                {entered_instance ? "entered instance " : "approached boss in ",
-                 cur_map, ": compile standing orders from boss notes"}));
-        pre_pull_woke = true;
+        Log(base::StrCat(
+            {bot, ": orders cache hit for ", cur_map, " (", role_key, ", ",
+             std::to_string(cache_it->second.size()), " orders)"}));
+      } else {
+        auto inflight_it = in_flight_order_compiles_.find(key);
+        const bool peer_compiling =
+            inflight_it != in_flight_order_compiles_.end() &&
+            inflight_it->second != bot;
+        if (!peer_compiling) {
+          if (!state.latest_snapshot->base.self.in_combat) {
+            ReleaseInFlightOrderCompile(bot, &state);
+            in_flight_order_compiles_[key] = bot;
+            state.compiling_orders_key = key;
+            state.compiled_notes = selected_notes;
+            state.has_ever_woken = true;
+            WakeBot(
+                bot, Urgency::kUrgent,
+                base::StrCat({entered_instance ? "entered instance "
+                                               : "approached boss in ",
+                              cur_map,
+                              ": compile standing orders from boss notes (up "
+                              "to 12)"}));
+            pre_pull_woke = true;
+          } else if (matched_boss && prev_in_combat) {
+            // Trash-to-boss pull: bot was already in combat on trash when the
+            // boss engaged, so `entered combat` did not fire. Compile boss
+            // orders immediately at P0 combat priority.
+            ReleaseInFlightOrderCompile(bot, &state);
+            in_flight_order_compiles_[key] = bot;
+            state.compiling_orders_key = key;
+            state.compiled_notes = selected_notes;
+            state.has_ever_woken = true;
+            WakeBot(
+                bot, Urgency::kP0Combat,
+                base::StrCat({"boss engaged in ", cur_map,
+                              ": compile standing orders from boss notes (up "
+                              "to 12)"}));
+            pre_pull_woke = true;
+          }
+        }
       }
     }
   }
@@ -2001,21 +2079,55 @@ void BotLoop::OnEvent(pb::ImmediateEvent imm, base::TimeTicks received_at) {
       return;
     }
     if (imm.event.chat && imm.event.chat->channel == pb::BOSS_EMOTE &&
-        group_size > 5 && !state.latest_snapshot->base.self.in_combat) {
-      // Out-of-combat raid boss emotes are pre-pull RP dialogue, not P0 combat
-      // mechanics: downgrade to P2 and stagger non-addressed DPS.
-      trig->urgency = Urgency::kP2Routine;
-      if (!is_tank_or_healer &&
-          !ContainsWholeWordIgnoringCase(imm.event.chat->text, bot)) {
-        base::TimeTicks due_at = state.deferred_raid_wake_at;
+        group_size > 5) {
+      // Dedupe identical raid-wide boss emotes within a short window so repeat
+      // boss script lines never double-wake the raid.
+      const std::string emote_key = base::ToLowerASCII(
+          base::StrCat({imm.event.chat->from, "|", imm.event.chat->text}));
+      if (!state.last_boss_emote_at.is_null() &&
+          received_at - state.last_boss_emote_at < kRaidEmoteDedupeWindow &&
+          state.last_boss_emote_key == emote_key) {
+        return;
+      }
+      state.last_boss_emote_key = emote_key;
+      state.last_boss_emote_at = received_at;
+
+      const bool addressed =
+          ContainsWholeWordIgnoringCase(imm.event.chat->text, bot);
+      if (!state.latest_snapshot->base.self.in_combat) {
+        // Out-of-combat raid boss emotes are pre-pull RP dialogue, not P0
+        // combat mechanics: downgrade to P2 and stagger non-addressed DPS.
+        trig->urgency = Urgency::kP2Routine;
+        if (!is_tank_or_healer && !addressed) {
+          base::TimeTicks due_at = state.deferred_raid_wake_at;
+          if (due_at.is_null()) {
+            const std::string key = PartyBudgetKey(bot, *state.latest_snapshot);
+            RaidFanOutPacer& pacer = raid_fanout_pacers_[key];
+            due_at = std::max(received_at + kRaidEmoteStaggerStep,
+                              pacer.next_emote_at);
+            pacer.next_emote_at = due_at + kRaidEmoteStaggerStep;
+          }
+          ScheduleDeferredRaidWake(&state, Urgency::kP2Routine, trig->reason,
+                                   due_at);
+          return;
+        }
+      } else if (!is_tank_or_healer && !addressed) {
+        // In-combat raid-wide boss emote: tanks, healers, and addressed bots
+        // wake immediately at P0; non-addressed DPS stagger at P0 so a single
+        // boss emote does not slam all ~24 bots simultaneously.
+        base::TimeTicks due_at =
+            (!state.deferred_raid_wake_at.is_null() &&
+             state.deferred_raid_wake_urgency <= Urgency::kP0Combat)
+                ? state.deferred_raid_wake_at
+                : base::TimeTicks();
         if (due_at.is_null()) {
           const std::string key = PartyBudgetKey(bot, *state.latest_snapshot);
           RaidFanOutPacer& pacer = raid_fanout_pacers_[key];
-          due_at = std::max(received_at + kRaidEmoteStaggerStep,
-                            pacer.next_emote_at);
-          pacer.next_emote_at = due_at + kRaidEmoteStaggerStep;
+          due_at = std::max(received_at + kRaidCombatEmoteStaggerStep,
+                            pacer.next_combat_emote_at);
+          pacer.next_combat_emote_at = due_at + kRaidCombatEmoteStaggerStep;
         }
-        ScheduleDeferredRaidWake(&state, Urgency::kP2Routine, trig->reason,
+        ScheduleDeferredRaidWake(&state, Urgency::kP0Combat, trig->reason,
                                  due_at);
         return;
       }
@@ -2068,6 +2180,7 @@ void BotLoop::OnTick(base::TimeTicks now) {
           "harness: %s: no snapshot for %.0f s; waiting "
           "for it to come back",
           bot.c_str(), (now - state.latest_received_at).InSecondsF()));
+      ReleaseInFlightOrderCompile(bot, &state);
       ResetBotSession(&state, /*cancel_in_flight=*/true);
       scheduler_.SetHumanParty(bot, false);
       scheduler_.SetBotRole(bot, BotRole::kDefault);
@@ -2458,6 +2571,10 @@ void BotLoop::OnReply(const std::string& bot,
     bool was_timeout = false;
     if (auto it = bots_.find(bot);
         it != bots_.end() && it->second.call_epoch == epoch) {
+      if (it->second.compiling_orders_key) {
+        it->second.compiled_notes.clear();
+        ReleaseInFlightOrderCompile(bot, &it->second);
+      }
       it->second.MarkFinished();
       it->second.in_flight_cancel.reset();
       it->second.call_deadline = base::TimeTicks();
@@ -2512,10 +2629,15 @@ void BotLoop::OnReply(const std::string& bot,
   auto it = bots_.find(bot);
   if (it != bots_.end() && it->second.call_epoch == epoch) {
     BotState& state = it->second;
+    const bool was_order_compile = state.compiling_orders_key.has_value();
+    ReleaseInFlightOrderCompile(bot, &state);
     state.MarkFinished();
     state.in_flight_cancel.reset();
     state.call_deadline = base::TimeTicks();
     if (!decision.result.reply) {
+      if (was_order_compile) {
+        state.compiled_notes.clear();
+      }
       RecordLlmFailure(/*immediate_unhealthy=*/false);
       Log(base::StringPrintf("harness: %s brain error (%.0f ms): %s",
                              bot.c_str(), decision.result.round_trip_ms,
@@ -2524,6 +2646,9 @@ void BotLoop::OnReply(const std::string& bot,
       Requeue(&state, std::move(asked_reasons), std::move(asked_events),
               std::move(asked_chats), std::move(asked_outcome));
     } else if (!plan) {
+      if (was_order_compile) {
+        state.compiled_notes.clear();
+      }
       const base::TimeDelta backoff =
           InvalidPlanBackoff(++state.invalid_plan_retries);
       Log(base::StringPrintf(
@@ -2578,7 +2703,8 @@ void BotLoop::OnReply(const std::string& bot,
               !state.latest_snapshot->base.self.in_combat &&
               !state.last_selected_notes.empty()) {
             compiled_orders_cache_.erase(
-                CompiledOrdersKey{bot, state.latest_snapshot->base.where.map,
+                CompiledOrdersKey{OrderCompileRoleOf(*state.latest_snapshot),
+                                  state.latest_snapshot->base.where.map,
                                   state.last_selected_notes});
           }
         } else if (!plan->orders.empty()) {
@@ -2591,22 +2717,60 @@ void BotLoop::OnReply(const std::string& bot,
         }
         if (!plan->orders.empty() &&
             state.latest_snapshot->base.where.in_instance &&
-            !state.latest_snapshot->base.self.in_combat &&
             !state.last_selected_notes.empty()) {
           const std::string& map_name = state.latest_snapshot->base.where.map;
-          const CompiledOrdersKey key{bot, map_name, state.last_selected_notes};
-          // Bounded (RH-L5): a long session visits many instance/notes pairs;
-          // dropping all of them only costs one recompile per instance entry.
-          // Always overwrite with the newest compiled orders (A-L8).
-          if (compiled_orders_cache_.size() >= kMaxCompiledOrdersCache &&
-              !compiled_orders_cache_.contains(key)) {
-            compiled_orders_cache_.clear();
+          const std::string role_key =
+              OrderCompileRoleOf(*state.latest_snapshot);
+          const CompiledOrdersKey key{role_key, map_name,
+                                      state.last_selected_notes};
+          // Cache out-of-combat compiles (always updating) and in-combat
+          // trash-to-boss compiles (only when the cache has no entry yet, so a
+          // mid-fight plan never overwrites an existing pre-pull cache).
+          const bool should_cache =
+              !state.latest_snapshot->base.self.in_combat ||
+              was_order_compile || !compiled_orders_cache_.contains(key);
+          if (should_cache) {
+            // Bounded (RH-L5): a long session visits many instance/notes pairs;
+            // dropping all of them only costs one recompile per role per
+            // encounter. Always overwrite with the newest compiled orders
+            // (A-L8).
+            if (compiled_orders_cache_.size() >= kMaxCompiledOrdersCache &&
+                !compiled_orders_cache_.contains(key)) {
+              compiled_orders_cache_.clear();
+            }
+            const bool inserted =
+                compiled_orders_cache_.insert_or_assign(key, plan->orders)
+                    .second;
+            size_t shared_peers = 0;
+            for (auto&& [peer_name, peer] : bots_) {
+              if (peer_name == bot || !peer.latest_snapshot ||
+                  !peer.latest_snapshot->base.where.in_instance ||
+                  peer.latest_snapshot->base.where.map != map_name ||
+                  OrderCompileRoleOf(*peer.latest_snapshot) != role_key ||
+                  peer.compiled_notes == state.last_selected_notes) {
+                continue;
+              }
+              const std::string peer_notes = MergeBossNotes(
+                  peer.instance_notes, peer.notes, *peer.latest_snapshot);
+              if (peer_notes != state.last_selected_notes) {
+                continue;
+              }
+              if (peer.orders.SetOrders(plan->orders, now)) {
+                SendStopMoving(peer_name);
+              }
+              peer.compiled_notes = state.last_selected_notes;
+              ++shared_peers;
+            }
+            Log(base::StrCat(
+                {bot, inserted ? ": cached " : ": updated cached ",
+                 std::to_string(plan->orders.size()), " standing orders for ",
+                 map_name, " (", role_key,
+                 shared_peers > 0
+                     ? base::StrCat({", shared with ",
+                                     std::to_string(shared_peers), " peers"})
+                     : "",
+                 ")"}));
           }
-          const bool inserted =
-              compiled_orders_cache_.insert_or_assign(key, plan->orders).second;
-          Log(base::StrCat({bot, inserted ? ": cached " : ": updated cached ",
-                            std::to_string(plan->orders.size()),
-                            " pre-pull standing orders for ", map_name}));
         }
         if (!state.early_step_failed) {
           state.look_deadline = now + base::Seconds(plan->look_s);
@@ -2845,7 +3009,8 @@ void BotLoop::OnReply(const std::string& bot,
               !state.latest_snapshot->base.self.in_combat &&
               !state.last_selected_notes.empty()) {
             compiled_orders_cache_.erase(
-                CompiledOrdersKey{bot, state.latest_snapshot->base.where.map,
+                CompiledOrdersKey{OrderCompileRoleOf(*state.latest_snapshot),
+                                  state.latest_snapshot->base.where.map,
                                   state.last_selected_notes});
           }
         }

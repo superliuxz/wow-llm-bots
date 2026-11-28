@@ -128,7 +128,7 @@ def parse(argv):
 
     p = sub.add_parser("llm", help="run llama-server with the brain's model")
     p.add_argument("--slots", type=int, default=16)
-    p.add_argument("--ctx", type=int, default=4096, help="context per slot")
+    p.add_argument("--ctx", type=int, default=8192, help="context per slot")
     p.add_argument("--model", help="a file in models/ (default: $MODEL or the 35B)")
     p.add_argument("extra", nargs=argparse.REMAINDER, help="after --: llama-server arguments")
 

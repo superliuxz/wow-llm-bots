@@ -10,7 +10,7 @@ DEFAULT_MODEL = "gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf"
 DEFAULT_URL = "http://127.0.0.1:8090"
 
 
-def serve(slots=16, ctx_per_slot=4096, model=None, extra=()):
+def serve(slots=16, ctx_per_slot=8192, model=None, extra=()):
     model = model or os.environ.get("MODEL", DEFAULT_MODEL)
     server = OUT / "llama" / "bin" / "llama-server"
     need(server, "tools/wlb setup llama")

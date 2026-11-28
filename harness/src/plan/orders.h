@@ -22,7 +22,7 @@
 
 namespace harness {
 
-inline constexpr int kMaxOrders = 7;  // Per plan (`order:` lines).
+inline constexpr int kMaxOrders = 12;  // Per plan (`order:` lines).
 
 using grammar::Act;
 using grammar::Check;

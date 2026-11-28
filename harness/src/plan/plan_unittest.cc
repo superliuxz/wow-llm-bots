@@ -449,5 +449,33 @@ TEST(PlanTest, StripTruncatedLastLineDropsCutLineOnLengthFinishReason) {
             "do: 1\nlook: 30\n");
 }
 
+TEST(PlanTest, MoreThanSevenStandingOrdersAreAcceptedUpToCap) {
+  static_assert(kMaxOrders >= 12);
+  const std::vector<std::string> names = {"Defile", "Soul Reaper", "Bone Spike",
+                                          "Coldflame"};
+  const std::string grammar = PlanGrammar(1, {}, {}, names);
+
+  std::string twelve_orders;
+  for (int i = 0; i < kMaxOrders; ++i) {
+    if (i > 0) {
+      twelve_orders += "\n";
+    }
+    twelve_orders += "order: Defile on me -> away";
+  }
+  EXPECT_TRUE(Accepts(grammar, twelve_orders));
+
+  const std::string full_text =
+      "do: 1\nexpect: none\nwatch: none\nlook: 60\n" + twelve_orders;
+  const std::optional<Plan> plan = ParsePlan(full_text, 1, names);
+  ASSERT_TRUE(plan);
+  EXPECT_EQ(static_cast<int>(plan->orders.size()), kMaxOrders);
+  EXPECT_EQ(ParsePlan(FormatPlan(*plan), 1, names), plan);
+
+  // Adversarial counter-test: exceeding kMaxOrders is rejected by the grammar.
+  const std::string thirteen_orders =
+      twelve_orders + "\norder: Defile on me -> away";
+  EXPECT_FALSE(Accepts(grammar, thirteen_orders));
+}
+
 }  // namespace
 }  // namespace harness
