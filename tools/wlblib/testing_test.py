@@ -773,10 +773,11 @@ class LiveTargetTest(unittest.TestCase):
         live_cases = testing.discover("live")
         self.assertEqual(
             set(live_cases),
-            {"dungeon_clear", "human_disconnect", "llm_stall", "raid_boss"},
+            {"dungeon_clear", "human_led_dungeon", "human_disconnect", "llm_stall", "raid_boss"},
         )
         expected_configs = {
             "dungeon_clear": "humandungeon",
+            "human_led_dungeon": "humandungeon",
             "human_disconnect": "humandungeon",
             "llm_stall": "humandungeon",
             "raid_boss": "humanraid",
@@ -790,6 +791,51 @@ class LiveTargetTest(unittest.TestCase):
         e2e_cases = testing.discover("e2e")
         live_cases = testing.discover("live")
         self.assertEqual(set(e2e_cases) & set(live_cases), set())
+
+    def test_raid_25man_e2e_case_and_config_consistency(self):
+        """Verifies M17 `raid_25man` e2e case is discovered in `e2e` (not `live`), uses the
+        `raid25` config with 24 bots + worldserver overrides, and never collides with `live`."""
+        e2e_cases = testing.discover("e2e")
+        self.assertIn("raid_25man", e2e_cases)
+        mod = e2e_cases["raid_25man"]
+        self.assertEqual(mod.TEST_CONFIG, "raid25")
+        self.assertEqual(mod.BOT, "Loada")
+        self.assertEqual(mod.ONLINE, 24)
+        llm_cfg = (ROOT / "config" / "tests" / "raid25.llm-brain.overrides").read_text()
+        ws_cfg = (ROOT / "config" / "tests" / "raid25.worldserver.overrides").read_text()
+        bots_line = next(ln for ln in llm_cfg.splitlines() if ln.startswith("LlmBrain.Bots ="))
+        bots = [b.strip() for b in bots_line.split('"', 2)[1].split(",") if b.strip()]
+        self.assertEqual(len(bots), 24)
+        self.assertIn("Warden.Enabled = 0", ws_cfg)
+        self.assertIn("AccountInstancesPerHour = 1000", ws_cfg)
+
+    def test_wowclient_set_raid_difficulty_roundtrip_and_truncated_packet(self):
+        """Verifies WowClient sends MSG_SET_RAID_DIFFICULTY with uint32 mode, parses the
+        12-byte server confirmation, and ignores truncated packets without clobbering state."""
+        import struct
+        from wlblib import wowclient
+
+        fake = wowclient.WowClient.__new__(wowclient.WowClient)
+        fake.lock = threading.Lock()
+        fake.raid_difficulty = None
+        sent = []
+        fake.send = lambda op, payload=b"": sent.append((op, payload))
+
+        fake.set_raid_difficulty(wowclient.RAID_DIFFICULTY_25MAN_NORMAL)
+        self.assertEqual(
+            sent,
+            [(wowclient.MSG_SET_RAID_DIFFICULTY,
+              struct.pack("<I", wowclient.RAID_DIFFICULTY_25MAN_NORMAL))],
+        )
+        # Server confirmation updates raid_difficulty.
+        fake._handle(
+            wowclient.MSG_SET_RAID_DIFFICULTY,
+            struct.pack("<III", wowclient.RAID_DIFFICULTY_25MAN_NORMAL, 1, 1),
+        )
+        self.assertEqual(fake.raid_difficulty, wowclient.RAID_DIFFICULTY_25MAN_NORMAL)
+        # Adversarial counter-test: truncated packet must not crash or overwrite raid_difficulty.
+        fake._handle(wowclient.MSG_SET_RAID_DIFFICULTY, b"\x00\x00\x00\x00")
+        self.assertEqual(fake.raid_difficulty, wowclient.RAID_DIFFICULTY_25MAN_NORMAL)
 
     def test_live_starts_llama_server_and_runs_selected(self):
         fake_case = types.SimpleNamespace(

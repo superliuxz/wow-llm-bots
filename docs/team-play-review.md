@@ -94,4 +94,4 @@ Tracking document for findings from the WoW Team Play Review. Each item is tagge
 - **M15:** P1 Upkeep (`Buy` count>1 & food/drink restock, hunter `SetAmmo` & reload, grouped train/repair/reagents + leader go repair/train)
 - **M16:** P1 Loot/Trade (10s human vote delay always, Need/gear/quest armor+stat scoring, trade window >8 items)
 - **M17:** Tests
-  - [ ] **[M17]** Live-LLM human-led dungeon E2E + 25-man raid fight with phases or vehicles
+  - [x] **[M17]** Live-LLM human-led dungeon E2E + 25-man raid fight with phases or vehicles

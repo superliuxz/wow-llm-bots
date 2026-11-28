@@ -1,5 +1,5 @@
-"""Live-model E2E team-play cases (Milestone 6a/6b): dungeon_clear, human_disconnect, llm_stall,
-raid_boss.
+"""Live-model E2E team-play cases (Milestone 6a/6b & M17): dungeon_clear, human_led_dungeon,
+human_disconnect, llm_stall, raid_boss.
 
 Runs the real C++ `out/common/harness run` against the real local `llama-server` (:8090) and
 isolated test worldserver (`wlb test live [NAME...]`). Kept separate from `wlb test e2e` so
@@ -1282,4 +1282,344 @@ def _case_raid_boss():
     )
 
 
-CASES = [_case_dungeon_clear(), _case_human_disconnect(), _case_llm_stall(), _case_raid_boss()]
+def _case_human_led_dungeon():
+    """Live-model human-led dungeon E2E (M17): human pulls, skull discipline, stop/wait, combat.
+
+      1. Scripted human client (Allytwo, level 18 Warrior tank) invites 4 Alliance bots
+         (Loada Ret Paladin, Loadb Holy Priest, Loadc Frost Mage, Loadd Combat Rogue);
+         the real live LLM accepts every invite and Allytwo becomes their master.
+      2. All 5 enter Deadmines (map 36).
+      3. Skull mark discipline (P0-1): Allytwo marks a nearby Defias Thug ahead with SKULL
+         while out of combat. Verify NO bot prematurely pulls or enters combat and NO bot is
+         offered `Attack ... (not pulled)` while the live LLM ticks.
+      4. Out-of-combat `stop` (P0-2) and `wait`/`follow`: Allytwo says "stop", "wait", then
+         "follow" in party chat. Verify all 4 bots apply each leader command, `stay` toggles
+         on/off cleanly, and out-of-combat "stop" does NOT latch `stop dps` into the next fight.
+      5. Human-led pull + combat coordination: Allytwo says "wait" before pulling (P1: wait
+         must release in combat), spawns & attacks a Defias Overseer (entry 634), and the 4
+         bots enter combat and damage the mob. Mid-fight "stop dps" -> "resume dps" apply
+         cleanly across all 4 bots with 0 visibility errors.
+    """
+    NAME = "human_led_dungeon"
+    DESCRIPTION = "Live LLM: human-led Deadmines (skull discipline, stop/wait, pull & combat)"
+    TEST_CONFIG = "humandungeon"
+    BOT = "Loada"
+    ONLINE = 4
+
+    BOTS = ("Loada", "Loadb", "Loadc", "Loadd")
+    SPECS = {"Loada": 2, "Loadb": 1, "Loadc": 2, "Loadd": 1}  # Ret, Holy, Frost, Combat.
+    HUMAN = "Allytwo"
+    ACCOUNT = "HUMANDM"
+    DM_ENTRANCE = "36 -16.4 -383.07 61.78 0"
+    THUG_ENTRY = 38
+    OVERSEER_ENTRY = 634
+    SKULL_ICON = 7
+
+    def _where(snap):
+        return (snap or {}).get("base", {}).get("where", {})
+
+    def _state(snap):
+        return (snap or {}).get("base", {}).get("self", {}).get("state", "")
+
+    def _in_combat(snap):
+        return bool((snap or {}).get("base", {}).get("self", {}).get("in_combat", False))
+
+    def _in_dm(snap):
+        w = _where(snap)
+        return bool(w.get("in_instance")) and "Deadmines" in w.get("map", "")
+
+    def _party_names(snap):
+        return [
+            m.get("name", "")
+            for m in ((snap or {}).get("ext") or {}).get("party", {}).get("members", [])
+        ]
+
+    def _stays(bot):
+        out = server.console(f"llmtest checkstrat {bot} stay", wait_s=0.3, inst=TEST)
+        m = re.search(rf"strat stay on {bot} exists=\d combat=\d noncombat=(\d)", out)
+        return m.group(1) == "1" if m else None
+
+    def _mob_hp_pct(snap, name):
+        for u in (snap or {}).get("base", {}).get("nearby", {}).get("units", []):
+            if u.get("name") == name:
+                return u.get("health_pct")
+        tgt = ((snap or {}).get("ext") or {}).get("target", {}).get("target") or {}
+        if tgt.get("name") == name:
+            return tgt.get("health_pct")
+        return None
+
+    def run(stack):
+        build.common("default", tests=False)
+        key = _ensure_human_account(ACCOUNT, "humandmpw")
+        for bot in BOTS:
+            server.console(f"llmtest gear {bot} 18 {SPECS[bot]}", wait_s=0.5, inst=TEST)
+
+        with tempfile.TemporaryDirectory(prefix="wlb-live-humandm-") as tmp:
+            tmp_dir = pathlib.Path(tmp)
+            proxy_sock = tmp_dir / "proxy.sock"
+            proxy = ProxyRecorder(stack.socket, proxy_sock)
+            proxy.start()
+            harness, harness_log = _launch_harness(
+                proxy_sock,
+                tmp_dir / "bots",
+                slots=8,
+                notes_dir=ROOT / "content" / "notes",
+            )
+            client = None
+
+            def latest(bot, after=0.0):
+                with proxy.lock:
+                    return next(
+                        (s for t, s in reversed(proxy.snapshots)
+                         if s.get("bot") == bot and t >= after),
+                        None,
+                    )
+
+            def _check_alive():
+                expect(
+                    harness.poll() is None,
+                    f"harness exited early:\n{''.join(harness_log[-30:])}",
+                )
+
+            try:
+                _poll(
+                    lambda: all(latest(b) is not None for b in BOTS),
+                    30,
+                    "initial snapshots for all 4 bots",
+                )
+                client = wowclient.WowClient(TEST.world_port, ACCOUNT, key)
+                client.authenticate()
+                client.enter_world(HUMAN, race=1, cls=1)
+                _reset_char(HUMAN)
+                server.console(f"character level {HUMAN} 18", wait_s=0.5, inst=TEST)
+                time.sleep(1.5)
+
+                # 1. Human invites all 4 bots; real live LLM accepts each invite.
+                for bot in BOTS:
+                    server.console(f"llmtest ungroup {bot}", wait_s=0.2, inst=TEST)
+                    client.invite(bot)
+
+                    def _is_master(bot=bot):
+                        _check_alive()
+                        out = server.console(f"llmtest master {bot}", wait_s=0.4, inst=TEST)
+                        m = re.search(rf"master {bot}=(\w+|-)", out)
+                        return m is not None and m.group(1) == HUMAN
+
+                    _poll(_is_master, 45, f"live LLM {bot} accepting invite from {HUMAN}")
+
+                # 2. Enter Deadmines.
+                since_dm = time.monotonic()
+                for who in (HUMAN,) + BOTS:
+                    server.console(f"llmtest tele {who} {DM_ENTRANCE}", wait_s=0.4, inst=TEST)
+                _poll(
+                    lambda: all(
+                        (s := latest(b, since_dm)) is not None
+                        and _in_dm(s)
+                        and _state(s) == "ALIVE"
+                        and HUMAN in _party_names(s)
+                        for b in BOTS
+                    ),
+                    30,
+                    "all 4 bots alive inside Deadmines with human in party",
+                )
+
+                # 3. Skull mark discipline (P0-1): human marks a mob SKULL before pull.
+                mark_t = time.monotonic()
+                out = server.console(
+                    f"llmtest marknear {HUMAN} {SKULL_ICON} {THUG_ENTRY} 14",
+                    wait_s=0.3,
+                    inst=TEST,
+                )
+                expect("marked" in out, f"setup: no thug marked skull ({out.strip()[-200:]})")
+
+                def _saw_skull():
+                    _check_alive()
+                    with proxy.lock:
+                        return any(
+                            t >= mark_t
+                            and s.get("bot") in BOTS
+                            and any(
+                                u.get("name") == "Defias Thug"
+                                and u.get("raid_marker") == "SKULL"
+                                for u in s.get("base", {}).get("nearby", {}).get("units", [])
+                            )
+                            for t, s in proxy.snapshots
+                        )
+
+                _poll(_saw_skull, 15, "bots seeing skull-marked Defias Thug")
+                hold_start = time.monotonic()
+                time.sleep(4.0)
+                hold_end = time.monotonic()
+                with proxy.lock:
+                    early_combat = sorted({
+                        s.get("bot")
+                        for t, s in proxy.snapshots
+                        if hold_start <= t <= hold_end
+                        and s.get("bot") in BOTS
+                        and _in_combat(s)
+                    })
+                    unpulled_attacks = [
+                        (s.get("bot"), o.get("text"))
+                        for t, s in proxy.snapshots
+                        if hold_start <= t <= hold_end
+                        and s.get("bot") in BOTS
+                        and _in_dm(s)
+                        for o in s.get("options", [])
+                        if o.get("text", "").startswith("Attack ")
+                        and o.get("text", "").endswith("(not pulled)")
+                    ]
+                expect(
+                    not early_combat,
+                    f"bots prematurely pulled human's skull-marked mob: {early_combat}",
+                )
+                expect(
+                    not unpulled_attacks,
+                    f"pull gate leaked unpulled Attack on skull-marked mob: {unpulled_attacks[:5]}",
+                )
+                say("live human_led_dungeon: skull mark discipline verified")
+
+                # 4. Out-of-combat `stop` (P0-2) and `wait` / `follow` leader commands.
+                log_stop = len(stack.server_log())
+                client.say(wowclient.CHAT_MSG_PARTY, "stop")
+                _poll(
+                    lambda: all(
+                        f"mod-llm-brain: {b} applied leader command stop from {HUMAN}"
+                        in stack.server_log()[log_stop:]
+                        for b in BOTS
+                    ),
+                    15,
+                    "all 4 bots applying out-of-combat 'stop'",
+                )
+
+                log_wait = len(stack.server_log())
+                client.say(wowclient.CHAT_MSG_PARTY, "wait")
+                _poll(
+                    lambda: all(
+                        f"mod-llm-brain: {b} applied leader command wait from {HUMAN}"
+                        in stack.server_log()[log_wait:]
+                        for b in BOTS
+                    ),
+                    15,
+                    "all 4 bots applying 'wait'",
+                )
+                _poll(
+                    lambda: all(_stays(b) is True for b in BOTS),
+                    10,
+                    "all 4 bots holding (`stay` active) after 'wait'",
+                )
+
+                client.say(wowclient.CHAT_MSG_PARTY, "follow")
+                _poll(
+                    lambda: all(_stays(b) is False for b in BOTS),
+                    10,
+                    "all 4 bots clearing `stay` after 'follow'",
+                )
+                say("live human_led_dungeon: out-of-combat stop/wait/follow verified")
+
+                # 5. Human-led pull after 'wait' (P1 wait-in-combat + P0-2 stop doesn't latch).
+                log_wait2 = len(stack.server_log())
+                client.say(wowclient.CHAT_MSG_PARTY, "wait")
+                _poll(
+                    lambda: all(
+                        f"mod-llm-brain: {b} applied leader command wait from {HUMAN}"
+                        in stack.server_log()[log_wait2:]
+                        for b in BOTS
+                    ),
+                    15,
+                    "all 4 bots applying pre-pull 'wait'",
+                )
+
+                pull_t = time.monotonic()
+                spawn_out = server.console(
+                    f"llmtest spawnmob {HUMAN} {OVERSEER_ENTRY}", wait_s=0.4, inst=TEST
+                )
+                m_guid = re.search(r"guid=(\d+)", spawn_out)
+                expect(m_guid is not None, f"setup: spawnmob failed ({spawn_out.strip()[-200:]})")
+                mob_guid = int(m_guid.group(1))
+                client.attack(mob_guid)
+
+                def _party_engaged():
+                    _check_alive()
+                    with proxy.lock:
+                        combat_bots = {
+                            s.get("bot")
+                            for t, s in proxy.snapshots
+                            if t >= pull_t and s.get("bot") in BOTS and _in_combat(s)
+                        }
+                    return len(combat_bots) >= 3
+
+                _poll(_party_engaged, 30, ">= 3/4 bots engaging human-pulled Defias Overseer")
+
+                def _mob_damaged():
+                    _check_alive()
+                    with proxy.lock:
+                        for t, s in reversed(proxy.snapshots):
+                            if t < pull_t:
+                                break
+                            hp = _mob_hp_pct(s, "Defias Overseer")
+                            if hp is not None and hp < 100:
+                                return hp
+                    return None
+
+                mob_hp = _poll(_mob_damaged, 25, "Defias Overseer taking damage (< 100% HP)")
+
+                # Mid-fight stop dps -> resume dps.
+                log_stop_dps = len(stack.server_log())
+                client.say(wowclient.CHAT_MSG_PARTY, "stop dps")
+                _poll(
+                    lambda: all(
+                        f"mod-llm-brain: {b} applied leader command stop dps from {HUMAN}"
+                        in stack.server_log()[log_stop_dps:]
+                        for b in BOTS
+                    ),
+                    15,
+                    "all 4 bots applying mid-fight 'stop dps'",
+                )
+                time.sleep(1.5)
+                log_resume = len(stack.server_log())
+                client.say(wowclient.CHAT_MSG_PARTY, "resume dps")
+                _poll(
+                    lambda: all(
+                        f"mod-llm-brain: {b} applied leader command resume dps from {HUMAN}"
+                        in stack.server_log()[log_resume:]
+                        for b in BOTS
+                    ),
+                    15,
+                    "all 4 bots applying mid-fight 'resume dps'",
+                )
+
+                with proxy.lock:
+                    vis_errs = list(proxy.visibility_errors)
+                    combat_bots = sorted({
+                        s.get("bot")
+                        for t, s in proxy.snapshots
+                        if t >= pull_t and s.get("bot") in BOTS and _in_combat(s)
+                    })
+            finally:
+                for who in (HUMAN,) + BOTS:
+                    _reset_char(who)
+                server.console("llmtest clearstrat", wait_s=0.2, inst=TEST)
+                if client is not None:
+                    client.close()
+                _stop_harness(harness)
+                proxy.stop()
+
+        expect(not vis_errs, f"visibility errors: {vis_errs}")
+        return (
+            f"4 bots joined {HUMAN} in Deadmines; skull discipline clean (0 early pulls); "
+            f"stop/wait/follow applied; human-led pull engaged {len(combat_bots)}/4 "
+            f"(Overseer hp={mob_hp}%); mid-fight stop/resume dps applied"
+        )
+
+    return types.SimpleNamespace(
+        NAME=NAME, DESCRIPTION=DESCRIPTION, TEST_CONFIG=TEST_CONFIG, BOT=BOT, ONLINE=ONLINE, run=run
+    )
+
+
+CASES = [
+    _case_dungeon_clear(),
+    _case_human_led_dungeon(),
+    _case_human_disconnect(),
+    _case_llm_stall(),
+    _case_raid_boss(),
+]

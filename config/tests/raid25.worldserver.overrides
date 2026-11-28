@@ -1,0 +1,4 @@
+# e2e raid_25man: the scripted client (tools/wlblib/wowclient.py) can't answer Warden.
+Warden.Enabled = 0
+# Allow repeated ICC instance entries during test runs.
+AccountInstancesPerHour = 1000

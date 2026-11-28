@@ -60,6 +60,7 @@
 #include "SpellAuras.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
+#include "TemporarySummon.h"
 #include "Timer.h"
 #include "Unit.h"
 #include "UnitDefines.h"
@@ -85,6 +86,39 @@ Player* FindOnlinePlayer(ChatHandler* handler, std::string name) {
     return nullptr;
   }
   return player;
+}
+
+// Summons a temporary creature with `REACT_PASSIVE` set BEFORE `AddToMap` so
+// `UpdateObjectVisibilityOnCreate` / `AIRelocationNotifier` cannot aggro nearby
+// players on spawn (e.g., ICC bosses triggering `CheckRequiredBosses` ->
+// `LIGHT_S_HAMMER_TELEPORT` before `SummonCreature` even returns).
+Creature* SummonPassive(Player* leader,
+                        uint32_t entry,
+                        const Position& pos,
+                        uint32_t duration_ms) {
+  Map* map = leader ? leader->FindMap() : nullptr;
+  if (!map) {
+    return nullptr;
+  }
+  auto* summon = new TempSummon(nullptr, leader->GetGUID());
+  map->LoadGrid(pos.GetPositionX(), pos.GetPositionY());
+  if (!summon->Create(map->GenerateLowGuid<HighGuid::Unit>(), map,
+                      leader->GetPhaseMask(), entry, /*vehId=*/0,
+                      pos.GetPositionX(), pos.GetPositionY(),
+                      pos.GetPositionZ(), /*ang=*/0.0f)) {
+    delete summon;
+    return nullptr;
+  }
+  summon->SetHomePosition(pos);
+  summon->InitStats(duration_ms);
+  summon->SetTempSummonType(TEMPSUMMON_TIMED_DESPAWN);
+  summon->SetReactState(REACT_PASSIVE);
+  if (!map->AddToMap(summon->ToCreature(), /*checkTransport=*/false)) {
+    delete summon;
+    return nullptr;
+  }
+  summon->InitSummon();
+  return summon;
 }
 
 class LlmBrainTestCommandScript : public CommandScript {
@@ -667,15 +701,14 @@ class LlmBrainTestCommandScript : public CommandScript {
     if (ahead) {
       spot = leader->GetFirstCollisionPosition(*ahead, 0.0f);
     }
-    Creature* boar = leader->SummonCreature(
-        entry.value_or(kMottledBoar), spot.GetPositionX(), spot.GetPositionY(),
-        spot.GetPositionZ(), 0.0f, TEMPSUMMON_TIMED_DESPAWN, 120000);
+    Creature* boar =
+        entry ? SummonPassive(leader, *entry, spot, 120000)
+              : leader->SummonCreature(kMottledBoar, spot.GetPositionX(),
+                                       spot.GetPositionY(), spot.GetPositionZ(),
+                                       0.0f, TEMPSUMMON_TIMED_DESPAWN, 120000);
     if (!boar) {
       handler->SendErrorMessage("llmtest: marknear: no creature");
       return false;
-    }
-    if (entry) {
-      boar->SetReactState(REACT_PASSIVE);
     }
     group->SetTargetIcon(static_cast<uint8>(icon), leader->GetGUID(),
                          boar->GetGUID());

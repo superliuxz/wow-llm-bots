@@ -58,6 +58,13 @@ SMSG_LOOT_START_ROLL = 0x2A1
 SMSG_LOOT_ROLL = 0x2A2
 CMSG_SET_SELECTION = 0x13D
 CMSG_ATTACKSWING = 0x141
+MSG_SET_RAID_DIFFICULTY = 0x4EB
+
+# Raid difficulties (DBCEnums.h: Difficulty).
+RAID_DIFFICULTY_10MAN_NORMAL = 0
+RAID_DIFFICULTY_25MAN_NORMAL = 1
+RAID_DIFFICULTY_10MAN_HEROIC = 2
+RAID_DIFFICULTY_25MAN_HEROIC = 3
 
 AUTH_OK = 0x0C
 CHAR_CREATE_SUCCESS = 0x2F
@@ -140,6 +147,7 @@ class WowClient:
         self.accept_lfg = True  # Accept every Dungeon Finder proposal, as a click would.
         self.ready_confirms: list[dict] = []  # {"guid", "ready", "t"}
         self.loot_rolls: list[dict] = []  # {"op", "guid", "slot", "item", ...}: start/roll/won
+        self.raid_difficulty: int | None = None
         self._send_lock = threading.Lock()
         self.guid = 0
         self.lang = LANG_COMMON
@@ -246,6 +254,11 @@ class WowClient:
 
     def convert_to_raid(self) -> None:
         self.send(CMSG_GROUP_RAID_CONVERT)
+
+    def set_raid_difficulty(self, difficulty: int) -> None:
+        """Sets the player's (or group's, as raid leader) raid difficulty (0=10N, 1=25N, 2=10H,
+        3=25H)."""
+        self.send(MSG_SET_RAID_DIFFICULTY, struct.pack("<I", difficulty))
 
     def raid_warning(self, text: str) -> None:
         self.say(CHAT_MSG_RAID_WARNING, text)
@@ -354,6 +367,10 @@ class WowClient:
         elif op == SMSG_GROUP_LIST:
             with self.lock:
                 self.group_lists += 1
+        elif op == MSG_SET_RAID_DIFFICULTY and len(data) >= 12:
+            diff, _, _ = struct.unpack_from("<III", data)
+            with self.lock:
+                self.raid_difficulty = diff
         elif op == SMSG_MESSAGECHAT and len(data) >= 17:
             chat_type = data[0]
             sender = struct.unpack_from("<Q", data, 5)[0]

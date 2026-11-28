@@ -1,0 +1,6 @@
+# e2e raid_25man: a real (scripted) Alliance human client leads 24 Alliance bots (25-man raid:
+# 2 tanks, 5 healers, 8 melee DPS, 9 ranged DPS) inside Icecrown Citadel (map 631).
+# Needs a test build (tools/wlb build server --test).
+LlmBrain.Bots = "Loada,Loadb,Loadc,Loadd,Loade,Loadf,Loadg,Loadh,Loadi,Loadj,Loadk,Loadl,Loadm,Loadn,Loado,Loadp,Loadq,Loadr,Loads,Loadt,Loadu,Loadv,Loadw,Loadx"
+LlmBrain.TestFixtures = "Loada=new:human:paladin,Loadb=new:dwarf:warrior,Loadc=new:human:priest,Loadd=new:human:priest,Loade=new:draenei:shaman,Loadf=new:nightelf:druid,Loadg=new:human:paladin,Loadh=new:human:rogue,Loadi=new:human:rogue,Loadj=new:dwarf:warrior,Loadk=new:dwarf:warrior,Loadl=new:human:paladin,Loadm=new:human:paladin,Loadn=new:human:rogue,Loado=new:dwarf:warrior,Loadp=new:gnome:mage,Loadq=new:gnome:mage,Loadr=new:human:warlock,Loads=new:human:warlock,Loadt=new:nightelf:hunter,Loadu=new:nightelf:hunter,Loadv=new:human:priest,Loadw=new:draenei:shaman,Loadx=new:nightelf:druid"
+LlmBrain.NonCombatStrategies = "-follow,-grind,-new rpg"
