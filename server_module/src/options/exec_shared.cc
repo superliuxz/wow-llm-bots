@@ -33,7 +33,9 @@
 #include "LastMovementValue.h"
 #include "LootMgr.h"
 #include "LootObjectStack.h"
+#include "Map.h"
 #include "MotionMaster.h"
+#include "MoveSplineInit.h"
 #include "Object.h"
 #include "ObjectAccessor.h"
 #include "ObjectDefines.h"
@@ -62,6 +64,7 @@
 #include "bot_session.h"
 #include "options/npc_gossip_and_bags.h"
 #include "options/position_facts.h"
+#include "options/riding_mounts.h"
 #include "snapshot/perception.h"
 #include "snapshot/world_util.h"
 
@@ -356,7 +359,12 @@ void RecordLastMovement(Player* bot, float x, float y, float z) {
   if (!last) {
     return;
   }
-  const float speed = bot->GetSpeed(MOVE_RUN);
+  const bool flying = CanUseFlightMovement(
+      bot->CanFly(), bot->IsFreeFlying(), bot->IsInFlight(),
+      bot->GetMap() && bot->GetMap()->IsDungeon(), bot->IsInCombat());
+  const float flight_speed = flying ? bot->GetSpeed(MOVE_FLIGHT) : 0.0f;
+  const float speed =
+      flight_speed > 0.0f ? flight_speed : bot->GetSpeed(MOVE_RUN);
   const float ms =
       speed > 0 ? bot->GetExactDist(x, y, z) / speed * 1000.0f : 1000.0f;
   last->Get().Set(bot->GetMapId(), x, y, z, bot->GetOrientation(), ms + 500.0f,
@@ -373,6 +381,29 @@ void ClearLastMovement(Player* bot) {
 }
 
 bool WalkTo(Player* bot, float x, float y, float z) {
+  if (CanUseFlightMovement(
+          bot->CanFly(), bot->IsFreeFlying(), bot->IsInFlight(),
+          bot->GetMap() && bot->GetMap()->IsDungeon(), bot->IsInCombat())) {
+    if (!CanClearBotMovement(bot) || bot->HasUnitFlag(UNIT_FLAG_DISABLE_MOVE) ||
+        bot->HasUnitState(UNIT_STATE_NOT_MOVE) ||
+        bot->IsMovementPreventedByCasting()) {
+      return false;
+    }
+    bot->GetMotionMaster()->Clear(/*reset=*/false);
+    bot->AddUnitMovementFlag(MOVEMENTFLAG_FLYING);
+    Movement::MoveSplineInit init(bot);
+    init.MoveTo(x, y, z, /*generatePath=*/false);
+    init.SetFly();
+    init.SetWalk(false);
+    if (const float speed = bot->GetSpeed(MOVE_FLIGHT); speed > 0.0f) {
+      init.SetVelocity(speed);
+    }
+    if (init.Launch() <= 0) {
+      return false;
+    }
+    RecordLastMovement(bot, x, y, z);
+    return true;
+  }
   PathGenerator path(bot);
   path.CalculatePath(x, y, z);
   const uint32_t type = path.GetPathType();

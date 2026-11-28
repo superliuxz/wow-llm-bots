@@ -1015,5 +1015,20 @@ TEST(TriggersTest, HostileGroundAreaWakesP0AndIgnoresFriendlyOrDead) {
   EXPECT_EQ(dead_t->kinds, kWakeDied);
 }
 
+TEST(TriggerEvaluatorTest, LeaderTravelInfoEventWakesAtP2Routine) {
+  pb::Event travel;
+  travel.info.emplace().text = "leader travel: Aldric moved to Dalaran";
+  const std::optional<WakeTrigger> t = EvaluateEventTrigger(travel);
+  ASSERT_TRUE(t.has_value());
+  EXPECT_EQ(t->urgency, Urgency::kP2Routine);
+  EXPECT_EQ(t->kinds, kWakeParty);
+  EXPECT_EQ(t->reason, "leader travel: Aldric moved to Dalaran");
+
+  // Adversarial counter-test: ordinary info events do not wake the brain.
+  pb::Event ordinary;
+  ordinary.info.emplace().text = "popup policy: accepted ready check";
+  EXPECT_FALSE(EvaluateEventTrigger(ordinary).has_value());
+}
+
 }  // namespace
 }  // namespace harness

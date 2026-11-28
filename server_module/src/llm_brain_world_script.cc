@@ -38,6 +38,7 @@
 #include "Spell.h"
 #include "SpellInfo.h"
 #include "Timer.h"
+#include "Transport.h"
 #include "Unit.h"
 #include "UnitDefines.h"
 #include "UpdateFields.h"
@@ -73,6 +74,7 @@
 #include "options/exec_shared.h"
 #include "options/exec_social.h"
 #include "options/group_roles.h"
+#include "options/leader_travel.h"
 #include "options/option_executor.h"
 #include "options/option_facts.h"
 #include "options/options.h"
@@ -439,6 +441,7 @@ class LlmBrainWorldScript : public WorldScript {
         ClearAvoidedTargetsForBot(bot->GetGUID().GetRawValue());
       }
       CheckPendingGroupInvite(bot, i, config_.bots[i], now);
+      CheckLeaderTravelWatch(bot, i, config_.bots[i]);
       // The brain's popup policy answers them first, within a tick (Now #3);
       // the brain hears what was answered.
       for (std::string& answered : AnswerPopupsByPolicy(bot)) {
@@ -672,6 +675,7 @@ class LlmBrainWorldScript : public WorldScript {
       ClearStopDps(bots_[i].stop_dps);
       ClearHealerManaWait(bots_[i].healer_mana_wait);
       ClearLeaderWait(bots_[i].leader_wait);
+      bots_[i].leader_watch.Reset();
       return false;
     }
     // Clear any active act or saved `back` coordinates if the bot changed
@@ -1097,6 +1101,89 @@ class LlmBrainWorldScript : public WorldScript {
         BotManager::ClearPingStay(bot);
         BotManager::ClearErrandHold(bot);
         state.errand_hold_active = false;
+        const FollowLeaderVerdict verdict = CheckFollowLeader({
+            .leader_present = sender->IsInWorld(),
+            .leader_alive = sender->IsAlive(),
+            .leader_is_ghost = sender->HasPlayerFlag(PLAYER_FLAGS_GHOST),
+            .leader_name = sender->GetName(),
+            .bot_map_id = bot->GetMapId(),
+            .bot_instance_id = bot->GetInstanceId(),
+            .leader_map_id = sender->GetMapId(),
+            .leader_instance_id = sender->GetInstanceId(),
+            .leader_in_flight = sender->IsInFlight(),
+            .leader_on_transport = sender->GetTransport() != nullptr,
+            .bot_on_same_transport =
+                sender->GetTransport() != nullptr &&
+                sender->GetTransport() == bot->GetTransport(),
+        });
+        if (verdict.status == FollowLeaderStatus::kCrossMap) {
+          if (world_places_ && bot->IsAlive() && !bot->IsInCombat() &&
+              !bot->IsInFlight() && !bot->InBattleground() && !bot->InArena()) {
+            LeaderTravelInput lt;
+            lt.in_group = true;
+            lt.is_leader = false;
+            lt.bot_alive = true;
+            lt.bot_in_combat = false;
+            lt.bot_in_flight = false;
+            lt.bot_in_bg_or_arena = false;
+            lt.bot_in_instance = bot->GetMap() && bot->GetMap()->Instanceable();
+            lt.bot_alliance = bot->GetTeamId() == TEAM_ALLIANCE;
+            lt.bot_money_copper = bot->GetMoney();
+            lt.bot_map_id = bot->GetMapId();
+            lt.bot_instance_id = bot->GetInstanceId();
+            lt.bot_phase_mask = bot->GetPhaseMask();
+            lt.bot_pos = {bot->GetPositionX(), bot->GetPositionY(),
+                          bot->GetPositionZ()};
+            lt.leader_present = true;
+            lt.leader_alive =
+                sender->IsAlive() && !sender->HasPlayerFlag(PLAYER_FLAGS_GHOST);
+            lt.leader_in_bg_or_arena =
+                sender->InBattleground() || sender->InArena();
+            lt.leader_name = sender->GetName();
+            lt.leader_map_id = sender->GetMapId();
+            lt.leader_instance_id = sender->GetInstanceId();
+            lt.leader_phase_mask = sender->GetPhaseMask();
+            lt.leader_pos = {sender->GetPositionX(), sender->GetPositionY(),
+                             sender->GetPositionZ()};
+            lt.leader_in_flight = sender->IsInFlight();
+            if (Transport* lt_t = sender->GetTransport()) {
+              lt.leader_on_transport = true;
+              lt.leader_transport_entry = lt_t->GetEntry();
+              lt.bot_on_same_transport = (bot->GetTransport() == lt_t);
+            }
+            if (std::optional<LeaderTravelPlan> plan =
+                    PlanLeaderTravel(lt, world_places_->cross_map_edges())) {
+              WalkAction walk_act{
+                  .id = plan->place_id,
+                  .name = plan->route_label.empty() ? sender->GetName()
+                                                    : plan->route_label,
+                  .dest = plan->leg_dest,
+              };
+              const WalkStepResult step = StartWalkAction(
+                  bot, walk_act, &state.walk, config_.dungeon_nav);
+              if (step.error.empty()) {
+                if (!step.arrived) {
+                  state.active_option = OptionTarget{
+                      .kind = OptionTarget::Kind::kGoTo,
+                      .name = "Go to " + sender->GetName(),
+                  };
+                  state.active_command_id = 0;
+                  schedule_->SetActiveTargetPending(index, true);
+                }
+                const std::string via = plan->route_label.empty()
+                                            ? "a portal/transport"
+                                            : plan->route_label;
+                done = "you head to " + via + " to reach " + sender->GetName() +
+                       " on another map";
+                break;
+              }
+            }
+          }
+          return said + " (not applied: " + verdict.reason + ")";
+        }
+        if (verdict.status != FollowLeaderStatus::kCanFollowDirectly) {
+          return said + " (not applied: " + verdict.reason + ")";
+        }
         done = "you follow " + sender->GetName() + " again";
         break;
       }
@@ -1706,6 +1793,57 @@ class LlmBrainWorldScript : public WorldScript {
     schedule_->SetActiveTargetPending(
         index, state.active_option.has_value() || state.active_act.has_value());
     return "";
+  }
+
+  void CheckLeaderTravelWatch(Player* bot,
+                              size_t index,
+                              const std::string& name) {
+    BotState& state = bots_[index];
+    Group* group = bot->GetGroup();
+    if (!group || group->IsLeader(bot->GetGUID())) {
+      state.leader_watch.Reset();
+      return;
+    }
+    Player* leader =
+        ObjectAccessor::FindConnectedPlayer(group->GetLeaderGUID());
+    if (!leader || !leader->IsInWorld()) {
+      state.leader_watch.Reset();
+      return;
+    }
+    LeaderTravelState cur;
+    cur.leader_guid = leader->GetGUID().GetRawValue();
+    cur.leader_name = leader->GetName();
+    cur.map_id = leader->GetMapId();
+    cur.instance_id = leader->GetInstanceId();
+    cur.in_flight = leader->IsInFlight();
+    const uint32_t locale = sWorld->GetDefaultDbcLocale();
+    if (const AreaTableEntry* area =
+            sAreaTableStore.LookupEntry(leader->GetZoneId());
+        area && area->area_name[locale] && *area->area_name[locale]) {
+      cur.zone_name = area->area_name[locale];
+    } else if (const MapEntry* map = sMapStore.LookupEntry(leader->GetMapId());
+               map && map->name[locale] && *map->name[locale]) {
+      cur.zone_name = map->name[locale];
+    }
+    if (cur.in_flight && !leader->m_taxi.empty()) {
+      const uint32_t dest_node = leader->m_taxi.GetPath().back();
+      if (const TaxiNodesEntry* node = sTaxiNodesStore.LookupEntry(dest_node);
+          node && node->name[locale] && *node->name[locale]) {
+        cur.taxi_dest_name = node->name[locale];
+      }
+    }
+    Transport* leader_transport = leader->GetTransport();
+    cur.on_transport = leader_transport != nullptr;
+    cur.transport_entry = leader_transport ? leader_transport->GetEntry() : 0;
+    const bool bot_on_same_transport =
+        leader_transport != nullptr && leader_transport == bot->GetTransport();
+    if (std::optional<std::string> alert = UpdateLeaderTravelWatch(
+            &state.leader_watch, cur, bot->GetMapId(), bot->GetInstanceId(),
+            bot_on_same_transport, bot->IsInCombat())) {
+      wlb::snapshot::Event ev;
+      ev.info.emplace().text = std::move(*alert);
+      EmitAlertingEvent(index, name, bot, std::move(ev));
+    }
   }
 
   void CheckPendingGroupInvite(Player* bot,
@@ -2959,6 +3097,8 @@ class LlmBrainWorldScript : public WorldScript {
     bool has_last_map = false;
     uint32_t last_map_id = 0;
     uint32_t last_instance_id = 0;
+    // Last observed leader travel state (map/instance/taxi/boat) for wakes.
+    LeaderTravelWatch leader_watch;
     // Casts and auras on bot/target/attackers at the last sent snapshot.
     ReactiveSnapshotState last_reactive;
     // Sequence number of the last spell miss already shown in a snapshot.

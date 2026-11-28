@@ -13,7 +13,13 @@
 #include <string_view>
 #include <vector>
 
+#include "snapshot/snapshot.h"
+
 namespace llm_brain {
+
+// WotLK 3.3.5a map IDs where flying mounts are allowed (Outland, Northrend).
+inline constexpr uint32_t kMapOutland = 530;
+inline constexpr uint32_t kMapNorthrend = 571;
 
 // WotLK 3.3.5a riding skill line and riding spell IDs.
 inline constexpr uint32_t kSkillRiding = 762;
@@ -118,10 +124,49 @@ struct KnownMountSpell {
   bool is_flying = false;
 };
 
-// Picks the best known mount spell to offer. Prefers the fastest ground mount
-// (tie-breaking by lowest `spell_id`) since ground pathing works everywhere
-// outdoors; falls back to the fastest flying mount only when `can_fly` is true
-// and no ground mount is known.
+// Inputs for checking whether a bot can summon and fly a flying mount in its
+// current area (mirrors WotLK 3.3.5a SpellInfo::CheckLocation +
+// Player::canFlyInZone + Spell::CheckCast).
+struct FlyableAreaInput {
+  uint32_t map_id = 0;
+  bool area_is_flyable = false;
+  bool area_no_fly_zone = false;
+  bool battlefield_blocks_fly = false;
+  bool has_cold_weather_flying = false;
+  bool outdoors = true;
+  bool in_dungeon = false;
+};
+
+// Returns true when flying mounts are mechanically usable in the bot's current
+// area (Outland outdoors, or Northrend outdoors with Cold Weather Flying,
+// excluding no-fly zones such as Dalaran streets and active Wintergrasp).
+bool CanFlyInArea(const FlyableAreaInput& in);
+
+// Returns true when a bot can move via 3D flight splines rather than
+// ground-only navmesh pathing (free-flying on a flying mount or flight form,
+// not on a taxi flight path, not in a dungeon, and out of combat).
+bool CanUseFlightMovement(bool can_fly_flag,
+                          bool has_fly_aura,
+                          bool in_flight_taxi,
+                          bool in_dungeon,
+                          bool in_combat);
+
+// Computes the next 3D flight waypoint from `from` toward `to` with step size
+// at most `max_step_yd`. When still further than `max_step_yd` horizontally,
+// lifts altitude by `clearance_z_yd` above the higher endpoint (and optional
+// `terrain_z` below the waypoint) so flying bots clear hills and ledges; when
+// within one step of `to`, descends directly to `to`.
+wlb::snapshot::Vec3 ComputeFlightStep(
+    const wlb::snapshot::Vec3& from,
+    const wlb::snapshot::Vec3& to,
+    float max_step_yd,
+    float clearance_z_yd = 12.0f,
+    std::optional<float> terrain_z = std::nullopt);
+
+// Picks the best known mount spell to offer. When `can_fly` is true, prefers
+// the fastest flying mount (falling back to the fastest ground mount if no
+// flying mount is known). When `can_fly` is false, never picks a flying-only
+// mount and picks the fastest ground mount (tie-breaking by lowest `spell_id`).
 std::optional<KnownMountSpell> PickBestMount(
     const std::vector<KnownMountSpell>& mounts,
     bool can_fly);

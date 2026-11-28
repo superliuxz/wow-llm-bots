@@ -54,9 +54,9 @@ Tracking document for findings from the WoW Team Play Review. Each item is tagge
 ### Travel and death
 
 - [x] **[M13]** Followers chase the human's ghost to the graveyard.
-- [ ] **[M14]** Bots can't fly: the picker takes a ground mount and movement is navmesh-only. Northrend group travel and Dalaran break.
-- [ ] **[M14]** No wake when the leader changes map or takes a portal, boat, or flight. `follow` reports "applied" but does nothing across maps.
-- [ ] **[M14]** "Go to leader" while the leader is on a taxi or boat aims at the leader's mid-route spot.
+- [x] **[M14]** Bots can't fly: the picker takes a ground mount and movement is navmesh-only. Northrend group travel and Dalaran break.
+- [x] **[M14]** No wake when the leader changes map or takes a portal, boat, or flight. `follow` reports "applied" but does nothing across maps.
+- [x] **[M14]** "Go to leader" while the leader is on a taxi or boat aims at the leader's mid-route spot.
 - [x] **[M13]** Bots can't click meeting stones or summoning portals.
 
 ### Brain / harness

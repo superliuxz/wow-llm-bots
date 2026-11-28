@@ -15,6 +15,8 @@
 #include <vector>
 
 #include "AiFactory.h"
+#include "Battlefield.h"
+#include "BattlefieldMgr.h"
 #include "Cell.h"
 #include "CellImpl.h"  // IWYU pragma: keep
 #include "CharmInfo.h"
@@ -74,6 +76,7 @@
 #include "options/exec_items.h"
 #include "options/exec_shared.h"
 #include "options/group_roles.h"
+#include "options/leader_travel.h"
 #include "options/loot_roll_policy.h"
 #include "options/options.h"
 #include "options/riding_mounts.h"
@@ -1185,10 +1188,21 @@ void CollectGroupAndUpkeepActions(Player* bot,
           .is_flying = flight_spd > 0,
       });
     }
-    const bool can_fly =
-        bot->GetMap() &&
-        (bot->GetMapId() == 530 ||
-         (bot->GetMapId() == 571 && bot->HasSpell(kSpellColdWeatherFlying)));
+    const AreaTableEntry* area = sAreaTableStore.LookupEntry(bot->GetAreaId());
+    if (!area) {
+      area = sAreaTableStore.LookupEntry(bot->GetZoneId());
+    }
+    Battlefield* bf = sBattlefieldMgr->GetBattlefieldToZoneId(bot->GetZoneId());
+    const bool can_fly = CanFlyInArea({
+        .map_id = bot->GetMapId(),
+        .area_is_flyable = area != nullptr && area->IsFlyable(),
+        .area_no_fly_zone =
+            area != nullptr && (area->flags & AREA_FLAG_NO_FLY_ZONE) != 0,
+        .battlefield_blocks_fly = bf != nullptr && !bf->CanFlyIn(),
+        .has_cold_weather_flying = bot->HasSpell(kSpellColdWeatherFlying),
+        .outdoors = mount_state.outdoors,
+        .in_dungeon = mount_state.in_dungeon,
+    });
     if (std::optional<KnownMountSpell> best =
             PickBestMount(known_mounts, can_fly)) {
       out->push_back(
@@ -1712,12 +1726,38 @@ ActionOutcome ExecuteGroupPolicyAction(Player* bot,
       info = "waiting here";
       break;
     }
-    case GroupPolicyAction::Op::kFollow:
+    case GroupPolicyAction::Op::kFollow: {
       policy.stay = false;
       policy.stay_in_combat = false;
       BotManager::ClearPingStay(bot);
       info = "following the leader again";
+      if (Group* group = bot->GetGroup();
+          group && !group->IsLeader(bot->GetGUID())) {
+        Player* leader =
+            ObjectAccessor::FindConnectedPlayer(group->GetLeaderGUID());
+        const FollowLeaderVerdict verdict = CheckFollowLeader({
+            .leader_present = leader != nullptr && leader->IsInWorld(),
+            .leader_alive = leader != nullptr && leader->IsAlive(),
+            .leader_is_ghost =
+                leader != nullptr && leader->HasPlayerFlag(PLAYER_FLAGS_GHOST),
+            .leader_name = leader ? leader->GetName() : "",
+            .bot_map_id = bot->GetMapId(),
+            .bot_instance_id = bot->GetInstanceId(),
+            .leader_map_id = leader ? leader->GetMapId() : 0,
+            .leader_instance_id = leader ? leader->GetInstanceId() : 0,
+            .leader_in_flight = leader != nullptr && leader->IsInFlight(),
+            .leader_on_transport =
+                leader != nullptr && leader->GetTransport() != nullptr,
+            .bot_on_same_transport =
+                leader != nullptr && leader->GetTransport() != nullptr &&
+                leader->GetTransport() == bot->GetTransport(),
+        });
+        if (verdict.status != FollowLeaderStatus::kCanFollowDirectly) {
+          info = "wait cleared, but " + verdict.reason;
+        }
+      }
       break;
+    }
     case GroupPolicyAction::Op::kAutoPopups:
     case GroupPolicyAction::Op::kManualPopups: {
       const bool on = action.op == GroupPolicyAction::Op::kAutoPopups;
@@ -1847,11 +1887,25 @@ ActionOutcome ExecuteFollowLeaderAction(Player* bot,
   }
   Player* leader = ObjectAccessor::FindConnectedPlayer(
       ParseSnapshotGuid(action.leader_guid));
-  if (!leader || !leader->IsInWorld() || !leader->IsAlive() ||
-      leader->HasPlayerFlag(PLAYER_FLAGS_GHOST) ||
-      leader->GetMapId() != bot->GetMapId() ||
-      leader->GetInstanceId() != bot->GetInstanceId()) {
-    return {.error = "party leader is not nearby"};
+  const FollowLeaderVerdict verdict = CheckFollowLeader({
+      .leader_present = leader != nullptr && leader->IsInWorld(),
+      .leader_alive = leader != nullptr && leader->IsAlive(),
+      .leader_is_ghost =
+          leader != nullptr && leader->HasPlayerFlag(PLAYER_FLAGS_GHOST),
+      .leader_name = leader ? leader->GetName() : "",
+      .bot_map_id = bot->GetMapId(),
+      .bot_instance_id = bot->GetInstanceId(),
+      .leader_map_id = leader ? leader->GetMapId() : 0,
+      .leader_instance_id = leader ? leader->GetInstanceId() : 0,
+      .leader_in_flight = leader != nullptr && leader->IsInFlight(),
+      .leader_on_transport =
+          leader != nullptr && leader->GetTransport() != nullptr,
+      .bot_on_same_transport = leader != nullptr &&
+                               leader->GetTransport() != nullptr &&
+                               leader->GetTransport() == bot->GetTransport(),
+  });
+  if (verdict.status != FollowLeaderStatus::kCanFollowDirectly) {
+    return {.error = verdict.reason};
   }
   RecordLastMovement(bot, leader->GetPositionX(), leader->GetPositionY(),
                      leader->GetPositionZ());
@@ -1920,6 +1974,10 @@ ActionOutcome ExecuteDismountAction(Player* bot) {
   }
   bot->Dismount();
   bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
+  bot->RemoveAurasByType(SPELL_AURA_MOD_INCREASE_MOUNTED_FLIGHT_SPEED);
+  if (!bot->IsFreeFlying()) {
+    bot->RemoveUnitMovementFlag(MOVEMENTFLAG_FLYING);
+  }
   if (bot->IsMounted()) {
     return {.error = "could not dismount"};
   }

@@ -1890,7 +1890,9 @@ void BotManager::KeepNearHumanLeader(Player* player) {
     return;
   }
   if (!leader || !leader->IsInWorld() || !IsHumanPlayer(leader) ||
-      leader->IsInFlight() || leader->GetMapId() != player->GetMapId() ||
+      leader->IsInFlight() ||
+      leader->GetTransport() != player->GetTransport() ||
+      leader->GetMapId() != player->GetMapId() ||
       leader->GetInstanceId() != player->GetInstanceId() ||
       player->GetDistance(leader) <= kStrayYd) {
     return;
@@ -2047,7 +2049,9 @@ void BotManager::KeepSafeGroupFollow(Player* player) {
     return;
   }
   if (!leader || !leader->IsInWorld() || !leader->IsAlive() ||
-      leader->IsInFlight() || leader->GetMapId() != player->GetMapId() ||
+      leader->IsInFlight() ||
+      leader->GetTransport() != player->GetTransport() ||
+      leader->GetMapId() != player->GetMapId() ||
       leader->GetInstanceId() != player->GetInstanceId()) {
     return;
   }
@@ -2069,12 +2073,18 @@ void BotManager::KeepSafeGroupFollow(Player* player) {
   const std::vector<wlb::snapshot::Vec3> spots =
       CandidateSpotsForSafeFollow(bot_pos, leader_anchor, unpulled);
   Map* map = player->GetMap();
+  const bool flying_follow = (player->CanFly() || player->IsFreeFlying()) &&
+                             (leader->IsFlying() || leader->CanFly());
   for (const wlb::snapshot::Vec3& cand : spots) {
     float z = cand.z;
-    const float h = map->GetHeight(player->GetPhaseMask(), cand.x, cand.y,
-                                   leader->GetPositionZ() + 4.0f);
-    if (h != INVALID_HEIGHT && h != VMAP_INVALID_HEIGHT_VALUE) {
-      z = h;
+    if (flying_follow) {
+      z = leader->GetPositionZ();
+    } else {
+      const float h = map->GetHeight(player->GetPhaseMask(), cand.x, cand.y,
+                                     leader->GetPositionZ() + 4.0f);
+      if (h != INVALID_HEIGHT && h != VMAP_INVALID_HEIGHT_VALUE) {
+        z = h;
+      }
     }
     if (WalkTo(player, cand.x, cand.y, z)) {
       return;

@@ -52,6 +52,7 @@
 #include "SpellMgr.h"
 #include "ThreatManager.h"
 #include "Trainer.h"
+#include "Transport.h"
 #include "TravelMgr.h"
 #include "Unit.h"
 #include "UpdateFields.h"
@@ -1471,6 +1472,25 @@ void SnapshotBuilder::FillOptionFacts(Player* bot,
       lt.leader_phase_mask = leader->GetPhaseMask();
       lt.leader_pos = {leader->GetPositionX(), leader->GetPositionY(),
                        leader->GetPositionZ()};
+      lt.leader_in_flight = leader->IsInFlight();
+      if (lt.leader_in_flight && !leader->m_taxi.empty()) {
+        const uint32_t dest_node = leader->m_taxi.GetPath().back();
+        if (const TaxiNodesEntry* node = sTaxiNodesStore.LookupEntry(dest_node);
+            node && node->map_id == leader->GetMapId()) {
+          const uint32_t locale = sWorld->GetDefaultDbcLocale();
+          const char* node_name = node->name[locale];
+          lt.leader_taxi_dest_node = dest_node;
+          lt.leader_taxi_dest_pos = {node->x, node->y, node->z};
+          if (node_name && *node_name) {
+            lt.leader_taxi_dest_name = node_name;
+          }
+        }
+      }
+      if (Transport* leader_transport = leader->GetTransport()) {
+        lt.leader_on_transport = true;
+        lt.leader_transport_entry = leader_transport->GetEntry();
+        lt.bot_on_same_transport = (bot->GetTransport() == leader_transport);
+      }
 
       // Collect known taxi nodes & links on the bot's current map so long
       // same-continent trips (or approaches to cross-map portals) can use

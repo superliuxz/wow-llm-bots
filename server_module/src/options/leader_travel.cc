@@ -613,6 +613,55 @@ std::optional<LeaderTravelPlan> PlanLeaderTravel(
     return std::nullopt;
   }
 
+  // Never aim at transient mid-air coordinates while the leader is on a taxi
+  // flight path: either take a known affordable taxi route to the leader's
+  // final destination node, or wait for the leader to land.
+  if (input.leader_in_flight) {
+    if (input.bot_map_id == input.leader_map_id &&
+        input.bot_instance_id == input.leader_instance_id &&
+        (input.bot_phase_mask & input.leader_phase_mask) != 0 &&
+        input.leader_taxi_dest_pos) {
+      if (const std::optional<TaxiRouteChoice> taxi = FindBestTaxiRoute(
+              input.bot_map_id, input.bot_pos, *input.leader_taxi_dest_pos,
+              input.bot_money_copper, known_taxi_nodes, taxi_links)) {
+        return MakeTaxiPlan(input.bot_pos, *taxi, /*cross_map_hops=*/0);
+      }
+    }
+    return std::nullopt;
+  }
+
+  // Never aim at transient mid-ocean / mid-route coordinates while the leader
+  // is aboard a boat or zeppelin: if we're already on the same transport, no
+  // travel is needed; otherwise head to the matching dock on our current map
+  // to board the same transport, or wait for the leader to disembark.
+  if (input.leader_on_transport) {
+    if (input.bot_on_same_transport) {
+      return std::nullopt;
+    }
+    if (input.leader_transport_entry != 0) {
+      const CrossMapEdge* best_dock = nullptr;
+      float best_dist = std::numeric_limits<float>::infinity();
+      for (const CrossMapEdge& edge : edges) {
+        if (edge.kind != TravelLegKind::kTransport || !EdgeValid(edge) ||
+            !EdgeAllowedForFaction(edge, input.bot_alliance) ||
+            edge.from_map_id != input.bot_map_id ||
+            edge.object_entry != input.leader_transport_entry) {
+          continue;
+        }
+        const float d = Dist(input.bot_pos, edge.from_pos.x, edge.from_pos.y,
+                             edge.from_pos.z);
+        if (!best_dock || d < best_dist) {
+          best_dock = &edge;
+          best_dist = d;
+        }
+      }
+      if (best_dock) {
+        return MakeEdgePlan(input.bot_pos, *best_dock, /*cross_map_hops=*/1);
+      }
+    }
+    return std::nullopt;
+  }
+
   // Case 1: Same map and same instance.
   if (input.bot_map_id == input.leader_map_id &&
       input.bot_instance_id == input.leader_instance_id) {
@@ -929,6 +978,92 @@ LeaderTravelArrival ParseLeaderTravelPlaceId(std::string_view place_id) {
             .taxi_nodes = std::move(nodes)};
   }
   return {};
+}
+
+std::optional<std::string> UpdateLeaderTravelWatch(
+    LeaderTravelWatch* watch,
+    const LeaderTravelState& current,
+    uint32_t bot_map_id,
+    uint32_t bot_instance_id,
+    bool bot_on_same_transport,
+    bool bot_in_combat) {
+  if (!watch) {
+    return std::nullopt;
+  }
+  if (current.leader_guid == 0 || current.leader_name.empty()) {
+    watch->Reset();
+    return std::nullopt;
+  }
+  if (!watch->initialized || watch->last.leader_guid != current.leader_guid) {
+    watch->initialized = true;
+    watch->last = current;
+    return std::nullopt;
+  }
+
+  const LeaderTravelState prev = watch->last;
+  watch->last = current;
+
+  if (bot_in_combat) {
+    return std::nullopt;
+  }
+
+  const bool map_or_instance_changed =
+      current.map_id != prev.map_id || current.instance_id != prev.instance_id;
+  const bool different_from_bot =
+      current.map_id != bot_map_id || current.instance_id != bot_instance_id;
+  if (map_or_instance_changed && different_from_bot) {
+    const std::string dest =
+        !current.zone_name.empty() ? current.zone_name : "another map";
+    return std::string(kLeaderTravelEventPrefix) + current.leader_name +
+           " moved to " + dest;
+  }
+
+  if (!prev.in_flight && current.in_flight) {
+    std::string msg = std::string(kLeaderTravelEventPrefix) +
+                      current.leader_name + " took a flight path";
+    if (!current.taxi_dest_name.empty()) {
+      msg += " to " + current.taxi_dest_name;
+    }
+    return msg;
+  }
+
+  if (!prev.on_transport && current.on_transport && !bot_on_same_transport) {
+    return std::string(kLeaderTravelEventPrefix) + current.leader_name +
+           " boarded a boat/zeppelin";
+  }
+
+  if ((prev.in_flight && !current.in_flight) ||
+      (prev.on_transport && !current.on_transport && !bot_on_same_transport)) {
+    std::string msg = std::string(kLeaderTravelEventPrefix) +
+                      current.leader_name + " arrived";
+    if (!current.zone_name.empty()) {
+      msg += " in " + current.zone_name;
+    }
+    return msg;
+  }
+
+  return std::nullopt;
+}
+
+FollowLeaderVerdict CheckFollowLeader(const FollowLeaderCheckInput& in) {
+  if (!in.leader_present || !in.leader_alive || in.leader_is_ghost) {
+    return {FollowLeaderStatus::kLeaderUnavailable,
+            "party leader is not nearby"};
+  }
+  const std::string who =
+      in.leader_name.empty() ? "party leader" : in.leader_name;
+  if (in.leader_map_id != in.bot_map_id ||
+      in.leader_instance_id != in.bot_instance_id) {
+    return {FollowLeaderStatus::kCrossMap, who + " is on another map"};
+  }
+  if (in.leader_in_flight) {
+    return {FollowLeaderStatus::kLeaderInFlight, who + " is on a flight path"};
+  }
+  if (in.leader_on_transport && !in.bot_on_same_transport) {
+    return {FollowLeaderStatus::kLeaderOnTransport,
+            who + " is on a boat/zeppelin"};
+  }
+  return {FollowLeaderStatus::kCanFollowDirectly, ""};
 }
 
 }  // namespace llm_brain

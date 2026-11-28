@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "gtest/gtest.h"
+#include "snapshot/snapshot.h"
 
 namespace llm_brain {
 namespace {
@@ -193,21 +194,42 @@ TEST(RidingMountsTest, MountOfferAndValidationEnforceCombatAndIndoorChecks) {
             "you don't know that mount");
 }
 
-TEST(RidingMountsTest, PickBestMountSelectsFastestGroundAndRespectsCanFly) {
+TEST(RidingMountsTest, PickBestMountSelectsFlyingWhenCanFlyAndGroundOtherwise) {
   const std::vector<KnownMountSpell> mounts = {
       {472, "Pinto", 60, 0, false},
       {23229, "Swift Brown Steed", 100, 0, false},
       {32235, "Golden Gryphon", 60, 150, true},
+      {32242, "Swift Blue Gryphon", 100, 280, true},
   };
 
-  // Prefers fastest ground mount (100% over 60%).
-  const std::optional<KnownMountSpell> best =
-      PickBestMount(mounts, /*can_fly=*/false);
-  ASSERT_TRUE(best.has_value());
-  EXPECT_EQ(best->spell_id, 23229u);
+  // Flyable zone (e.g. Northrend with Cold Weather Flying, Outland, Dalaran
+  // Krasus' Landing): picks fastest flying mount (280% over 150% and ground).
+  const std::optional<KnownMountSpell> fly =
+      PickBestMount(mounts, /*can_fly=*/true);
+  ASSERT_TRUE(fly.has_value());
+  EXPECT_EQ(fly->spell_id, 32242u);
 
-  // Counter-test: flying-only mount is NOT picked when `!can_fly`, IS picked as
-  // fallback when `can_fly` and no ground mount is known.
+  // Counter-test: non-flyable zone (Azeroth, Dalaran streets, Northrend without
+  // Cold Weather Flying, indoors): picks fastest ground mount (100%), NEVER a
+  // flying mount.
+  const std::optional<KnownMountSpell> ground =
+      PickBestMount(mounts, /*can_fly=*/false);
+  ASSERT_TRUE(ground.has_value());
+  EXPECT_EQ(ground->spell_id, 23229u);
+
+  // Counter-test: flyable zone when bot only knows ground mounts falls back to
+  // fastest ground mount.
+  const std::vector<KnownMountSpell> ground_only = {
+      {472, "Pinto", 60, 0, false},
+      {23229, "Swift Brown Steed", 100, 0, false},
+  };
+  const std::optional<KnownMountSpell> fallback =
+      PickBestMount(ground_only, /*can_fly=*/true);
+  ASSERT_TRUE(fallback.has_value());
+  EXPECT_EQ(fallback->spell_id, 23229u);
+
+  // Counter-test: flying-only mounts are NOT picked when `!can_fly`, ARE picked
+  // when `can_fly`.
   const std::vector<KnownMountSpell> flying_only = {
       {32235, "Golden Gryphon", 60, 150, true},
       {32242, "Swift Blue Gryphon", 100, 280, true},
@@ -217,6 +239,90 @@ TEST(RidingMountsTest, PickBestMountSelectsFastestGroundAndRespectsCanFly) {
       PickBestMount(flying_only, /*can_fly=*/true);
   ASSERT_TRUE(fly_best.has_value());
   EXPECT_EQ(fly_best->spell_id, 32242u);
+}
+
+TEST(RidingMountsTest, CanFlyInAreaChecksColdWeatherFlyingAndNoFlyZones) {
+  // Outland outdoors (map 530): flyable without Cold Weather Flying.
+  FlyableAreaInput outland;
+  outland.map_id = kMapOutland;
+  outland.area_is_flyable = true;
+  EXPECT_TRUE(CanFlyInArea(outland));
+
+  // Northrend outdoors / Dalaran Krasus' Landing (map 571, no-fly flag clear):
+  // requires Cold Weather Flying.
+  FlyableAreaInput northrend;
+  northrend.map_id = kMapNorthrend;
+  northrend.area_is_flyable = true;
+  northrend.has_cold_weather_flying = true;
+  EXPECT_TRUE(CanFlyInArea(northrend));
+
+  // Adversarial counter-tests:
+  // 1. Northrend WITHOUT Cold Weather Flying -> cannot fly.
+  northrend.has_cold_weather_flying = false;
+  EXPECT_FALSE(CanFlyInArea(northrend));
+
+  // 2. Dalaran city streets (AREA_FLAG_NO_FLY_ZONE) -> cannot fly even with
+  //    Cold Weather Flying.
+  northrend.has_cold_weather_flying = true;
+  northrend.area_no_fly_zone = true;
+  EXPECT_FALSE(CanFlyInArea(northrend));
+
+  // 3. Wintergrasp active battle -> cannot fly.
+  northrend.area_no_fly_zone = false;
+  northrend.battlefield_blocks_fly = true;
+  EXPECT_FALSE(CanFlyInArea(northrend));
+
+  // 4. Indoors or inside a dungeon -> cannot fly.
+  northrend.battlefield_blocks_fly = false;
+  northrend.outdoors = false;
+  EXPECT_FALSE(CanFlyInArea(northrend));
+  northrend.outdoors = true;
+  northrend.in_dungeon = true;
+  EXPECT_FALSE(CanFlyInArea(northrend));
+
+  // 5. Eastern Kingdoms (map 0) / Kalimdor (map 1) -> cannot fly in WotLK even
+  //    with Cold Weather Flying.
+  FlyableAreaInput azeroth;
+  azeroth.map_id = 0;
+  azeroth.area_is_flyable = true;
+  azeroth.has_cold_weather_flying = true;
+  EXPECT_FALSE(CanFlyInArea(azeroth));
+  azeroth.map_id = 1;
+  EXPECT_FALSE(CanFlyInArea(azeroth));
+}
+
+TEST(RidingMountsTest, FlightMovementGatesAndStepAltitudeClearance) {
+  // Free-flying outdoors out of combat -> flight movement allowed.
+  EXPECT_TRUE(CanUseFlightMovement(/*can_fly_flag=*/true,
+                                   /*has_fly_aura=*/true,
+                                   /*in_flight_taxi=*/false,
+                                   /*in_dungeon=*/false,
+                                   /*in_combat=*/false));
+  // Adversarial counter-tests: P0 combat priority, dungeon, taxi flight, or
+  // ground-only mount must NOT use free-flight movement.
+  EXPECT_FALSE(
+      CanUseFlightMovement(true, true, false, false, /*in_combat=*/true));
+  EXPECT_FALSE(
+      CanUseFlightMovement(true, true, false, /*in_dungeon=*/true, false));
+  EXPECT_FALSE(
+      CanUseFlightMovement(true, true, /*in_flight_taxi=*/true, false, false));
+  EXPECT_FALSE(CanUseFlightMovement(false, false, false, false, false));
+
+  // Mid-flight step lifts above terrain/cliff clearance.
+  const wlb::snapshot::Vec3 step = ComputeFlightStep(
+      {0.0f, 0.0f, 100.0f}, {200.0f, 0.0f, 100.0f}, /*max_step_yd=*/70.0f,
+      /*clearance_z_yd=*/12.0f, /*terrain_z=*/130.0f);
+  EXPECT_NEAR(step.x, 70.0f, 0.01f);
+  EXPECT_NEAR(step.y, 0.0f, 0.01f);
+  EXPECT_NEAR(step.z, 142.0f, 0.01f);
+
+  // Final approach within one step descends directly to destination.
+  const wlb::snapshot::Vec3 land = ComputeFlightStep(
+      {150.0f, 0.0f, 142.0f}, {200.0f, 0.0f, 100.0f}, /*max_step_yd=*/70.0f,
+      /*clearance_z_yd=*/12.0f, /*terrain_z=*/98.0f);
+  EXPECT_FLOAT_EQ(land.x, 200.0f);
+  EXPECT_FLOAT_EQ(land.y, 0.0f);
+  EXPECT_FLOAT_EQ(land.z, 100.0f);
 }
 
 TEST(RidingMountsTest, DismountOfferAndValidationEnforceFlightAndControl) {

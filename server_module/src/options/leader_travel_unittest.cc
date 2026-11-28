@@ -632,5 +632,215 @@ TEST(LeaderTravelTest, IslandAndNorthrendTravelOptionsWorkForSoloAndGrouped) {
   EXPECT_EQ(plan->cross_map_hops, 3u);
 }
 
+TEST(LeaderTravelTest,
+     LeaderOnTaxiSuppressesMidRoutePursuitOrTargetsFlightMaster) {
+  LeaderTravelInput in = GroupedFollower();
+  in.bot_pos = {0.0f, 0.0f, 0.0f};
+  // Leader is mid-air 900 yd away on a taxi flight to Sentinel Hill (2000 yd).
+  in.leader_pos = {900.0f, 0.0f, 250.0f};
+  in.leader_in_flight = true;
+  in.leader_taxi_dest_node = 4;
+  in.leader_taxi_dest_pos = pb::Vec3{2000.0f, 0.0f, 40.0f};
+  in.leader_taxi_dest_name = "Sentinel Hill";
+
+  // Without known taxi nodes, must NOT walk toward mid-air coordinates.
+  EXPECT_EQ(PlanLeaderTravel(in, {}), std::nullopt);
+
+  // With known affordable taxi route to the leader's destination, target the
+  // flight master rather than walking to transient mid-air coordinates.
+  const std::vector<TaxiNodeFact> nodes = {
+      {2, 0, {50.0f, 0.0f, 0.0f}, "Stormwind"},
+      {4, 0, {2000.0f, 0.0f, 40.0f}, "Sentinel Hill"},
+  };
+  const std::vector<TaxiLinkFact> links = {
+      {2, 4, 500},
+  };
+  const std::optional<LeaderTravelPlan> plan =
+      PlanLeaderTravel(in, {}, nodes, links);
+  ASSERT_TRUE(plan.has_value());
+  EXPECT_EQ(plan->kind, TravelLegKind::kFlightMaster);
+  EXPECT_EQ(plan->taxi_nodes, (std::vector<uint32_t>{2, 4}));
+  EXPECT_FLOAT_EQ(plan->leg_dest.x, 50.0f);
+
+  // Counter-test: if bot cannot afford the taxi, wait for arrival (nullopt).
+  in.bot_money_copper = 100;
+  EXPECT_EQ(PlanLeaderTravel(in, {}, nodes, links), std::nullopt);
+
+  // Counter-test: once leader lands, normal travel resumes.
+  in.leader_in_flight = false;
+  in.leader_pos = {2000.0f, 0.0f, 40.0f};
+  const std::optional<LeaderTravelPlan> landed =
+      PlanLeaderTravel(in, {}, nodes, links);
+  ASSERT_TRUE(landed.has_value());
+  EXPECT_EQ(landed->kind, TravelLegKind::kWalk);
+  EXPECT_FLOAT_EQ(landed->leg_dest.x, 2000.0f);
+}
+
+TEST(LeaderTravelTest, LeaderOnBoatSuppressesMidOceanWalkOrTargetsDock) {
+  LeaderTravelInput in = GroupedFollower();
+  in.bot_map_id = 0;
+  in.bot_pos = {-8350.0f, 1400.0f, 5.0f};
+  // Leader is mid-ocean on Stormwind -> Valiance Keep boat (entry 190536).
+  in.leader_map_id = 0;
+  in.leader_pos = {-6000.0f, 2500.0f, 0.0f};
+  in.leader_on_transport = true;
+  in.leader_transport_entry = 190536;
+  in.bot_on_same_transport = false;
+
+  // Without a matching dock edge, must NOT walk into the ocean.
+  EXPECT_EQ(PlanLeaderTravel(in, {}), std::nullopt);
+
+  // With the matching boat edge on bot's map, target the dock (kTransport),
+  // never the leader's mid-ocean coordinates.
+  const std::vector<CrossMapEdge> edges = {
+      CrossMapEdge{
+          .kind = TravelLegKind::kTransport,
+          .from_map_id = 0,
+          .from_pos = {-8295.0f, 1405.0f, 5.0f},
+          .to_map_id = 571,
+          .to_pos = {2213.0f, 5224.0f, 12.0f},
+          .object_entry = 190536,
+          .label = "boat to Valiance Keep",
+          .dest_name = "Valiance Keep",
+          .dest_continent = "Northrend",
+          .for_alliance = true,
+          .for_horde = false,
+      },
+  };
+  const std::optional<LeaderTravelPlan> dock = PlanLeaderTravel(in, edges);
+  ASSERT_TRUE(dock.has_value());
+  EXPECT_EQ(dock->kind, TravelLegKind::kTransport);
+  EXPECT_EQ(dock->object_entry, 190536u);
+  EXPECT_FLOAT_EQ(dock->leg_dest.x, -8295.0f);
+
+  // Counter-test: when bot is already aboard the same boat, no Go-to offered.
+  in.bot_on_same_transport = true;
+  EXPECT_EQ(PlanLeaderTravel(in, edges), std::nullopt);
+}
+
+TEST(LeaderTravelTest, LeaderTravelWatchWakesOnMapTaxiBoatAndRespectsCombat) {
+  LeaderTravelWatch watch;
+  LeaderTravelState s;
+  s.leader_guid = 1001;
+  s.leader_name = "Aldric";
+  s.map_id = 0;
+  s.instance_id = 0;
+  s.zone_name = "Stormwind City";
+
+  // First observation seeds state without spurious wake.
+  EXPECT_EQ(UpdateLeaderTravelWatch(&watch, s, /*bot_map_id=*/0,
+                                    /*bot_instance_id=*/0,
+                                    /*bot_on_same_transport=*/false,
+                                    /*bot_in_combat=*/false),
+            std::nullopt);
+  // Repeated identical state does not wake.
+  EXPECT_EQ(UpdateLeaderTravelWatch(&watch, s, 0, 0, false, false),
+            std::nullopt);
+
+  // Leader boards a taxi flight -> wakes with destination.
+  s.in_flight = true;
+  s.taxi_dest_name = "Sentinel Hill";
+  const std::optional<std::string> taxi_wake =
+      UpdateLeaderTravelWatch(&watch, s, 0, 0, false, false);
+  ASSERT_TRUE(taxi_wake.has_value());
+  EXPECT_EQ(*taxi_wake,
+            "leader travel: Aldric took a flight path to Sentinel Hill");
+  // Edge-triggered: staying in flight does not wake again.
+  EXPECT_EQ(UpdateLeaderTravelWatch(&watch, s, 0, 0, false, false),
+            std::nullopt);
+
+  // Leader lands -> arrival wake.
+  s.in_flight = false;
+  s.taxi_dest_name.clear();
+  s.zone_name = "Westfall";
+  const std::optional<std::string> land_wake =
+      UpdateLeaderTravelWatch(&watch, s, 0, 0, false, false);
+  ASSERT_TRUE(land_wake.has_value());
+  EXPECT_EQ(*land_wake, "leader travel: Aldric arrived in Westfall");
+
+  // Leader boards a boat/zeppelin -> wakes follower not on the boat.
+  s.on_transport = true;
+  s.transport_entry = 190536;
+  const std::optional<std::string> boat_wake =
+      UpdateLeaderTravelWatch(&watch, s, 0, 0, false, false);
+  ASSERT_TRUE(boat_wake.has_value());
+  EXPECT_EQ(*boat_wake, "leader travel: Aldric boarded a boat/zeppelin");
+
+  // Leader crosses map to Northrend (map 571) -> wakes follower still on map 0.
+  s.map_id = 571;
+  s.zone_name = "Borean Tundra";
+  const std::optional<std::string> map_wake =
+      UpdateLeaderTravelWatch(&watch, s, 0, 0, false, false);
+  ASSERT_TRUE(map_wake.has_value());
+  EXPECT_EQ(*map_wake, "leader travel: Aldric moved to Borean Tundra");
+
+  // Adversarial counter-test: P0 combat priority suppresses travel wake while
+  // bot is in combat.
+  s.map_id = 574;
+  s.instance_id = 42;
+  s.zone_name = "Utgarde Keep";
+  EXPECT_EQ(UpdateLeaderTravelWatch(&watch, s, 0, 0, false,
+                                    /*bot_in_combat=*/true),
+            std::nullopt);
+
+  // Adversarial counter-test: reset on solo / disconnect clears state cleanly
+  // and does not emit a spurious wake on reconnect.
+  watch.Reset();
+  EXPECT_EQ(UpdateLeaderTravelWatch(&watch, s, 0, 0, false, false),
+            std::nullopt);
+}
+
+TEST(LeaderTravelTest, CheckFollowLeaderReportsCrossMapTaxiAndBoatHonestly) {
+  FollowLeaderCheckInput in;
+  in.leader_present = true;
+  in.leader_alive = true;
+  in.leader_name = "Aldric";
+  in.bot_map_id = 0;
+  in.leader_map_id = 0;
+
+  EXPECT_EQ(CheckFollowLeader(in).status,
+            FollowLeaderStatus::kCanFollowDirectly);
+
+  // Cross-map mismatch: must NOT report direct follow.
+  in.leader_map_id = 571;
+  {
+    const FollowLeaderVerdict v = CheckFollowLeader(in);
+    EXPECT_EQ(v.status, FollowLeaderStatus::kCrossMap);
+    EXPECT_EQ(v.reason, "Aldric is on another map");
+  }
+
+  // Same map, different instance: cross-map mismatch.
+  in.leader_map_id = 0;
+  in.leader_instance_id = 7;
+  EXPECT_EQ(CheckFollowLeader(in).status, FollowLeaderStatus::kCrossMap);
+  in.leader_instance_id = 0;
+
+  // Leader on taxi flight path.
+  in.leader_in_flight = true;
+  {
+    const FollowLeaderVerdict v = CheckFollowLeader(in);
+    EXPECT_EQ(v.status, FollowLeaderStatus::kLeaderInFlight);
+    EXPECT_EQ(v.reason, "Aldric is on a flight path");
+  }
+  in.leader_in_flight = false;
+
+  // Leader on boat/zeppelin (bot not on same transport).
+  in.leader_on_transport = true;
+  {
+    const FollowLeaderVerdict v = CheckFollowLeader(in);
+    EXPECT_EQ(v.status, FollowLeaderStatus::kLeaderOnTransport);
+    EXPECT_EQ(v.reason, "Aldric is on a boat/zeppelin");
+  }
+  // Counter-test: both on the same boat -> can follow directly.
+  in.bot_on_same_transport = true;
+  EXPECT_EQ(CheckFollowLeader(in).status,
+            FollowLeaderStatus::kCanFollowDirectly);
+
+  // Counter-test: dead/ghost leader -> unavailable.
+  in.leader_is_ghost = true;
+  EXPECT_EQ(CheckFollowLeader(in).status,
+            FollowLeaderStatus::kLeaderUnavailable);
+}
+
 }  // namespace
 }  // namespace llm_brain

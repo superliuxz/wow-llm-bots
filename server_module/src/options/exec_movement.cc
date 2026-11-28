@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "Optional.h"  // IWYU pragma: keep
@@ -45,6 +46,7 @@
 #include "options/leader_travel.h"
 #include "options/option_facts.h"
 #include "options/position_facts.h"
+#include "options/riding_mounts.h"
 #include "snapshot/snapshot.h"
 
 namespace llm_brain {
@@ -379,6 +381,33 @@ WalkStepResult TickLongWalk(Player* bot,
   walk->last_path_at = now;
 
   const base::TimeTicks path_start = base::TimeTicks::Now();
+  if (CanUseFlightMovement(
+          bot->CanFly(), bot->IsFreeFlying(), bot->IsInFlight(),
+          bot->GetMap() && bot->GetMap()->IsDungeon(), bot->IsInCombat())) {
+    const float horiz = std::hypot(walk->dest.x - pos.x, walk->dest.y - pos.y);
+    std::optional<float> terrain_z;
+    if (Map* map = bot->GetMap(); map && horiz > kWalkStepYd) {
+      const float t = kWalkStepYd / horiz;
+      const float nx = pos.x + (walk->dest.x - pos.x) * t;
+      const float ny = pos.y + (walk->dest.y - pos.y) * t;
+      const float h = map->GetHeight(bot->GetPhaseMask(), nx, ny,
+                                     std::max(pos.z, walk->dest.z) + 50.0f);
+      if (h != INVALID_HEIGHT && h != VMAP_INVALID_HEIGHT_VALUE) {
+        terrain_z = h;
+      }
+    }
+    const pb::Vec3 fly_pt = ComputeFlightStep(
+        pos, walk->dest, kWalkStepYd, /*clearance_z_yd=*/12.0f, terrain_z);
+    const base::TimeDelta fly_time = base::TimeTicks::Now() - path_start;
+    walk->consecutive_seam_hops = 0;
+    walk->step_dest = fly_pt;
+    walk->has_step = true;
+    if (!WalkTo(bot, fly_pt.x, fly_pt.y, fly_pt.z)) {
+      return {.error = "stuck", .path_time = fly_time};
+    }
+    return {.path_time = fly_time};
+  }
+
   constexpr uint32_t kTypeOk =
       PATHFIND_NORMAL | PATHFIND_INCOMPLETE | PATHFIND_FARFROMPOLY;
   G3D::Vector3 next_pt;

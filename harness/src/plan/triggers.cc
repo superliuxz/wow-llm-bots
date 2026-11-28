@@ -251,6 +251,9 @@ std::optional<WakeTrigger> EvaluateEventTrigger(
     }
     return std::nullopt;
   }
+  if (event.info && event.info->text.starts_with("leader travel: ")) {
+    return WakeTrigger{Urgency::kP2Routine, event.info->text, kWakeParty};
+  }
   if (event.chat) {
     const pb::ChatEvent& chat = *event.chat;
     if (chat.channel == pb::WHISPER || chat.channel == pb::MONSTER_WHISPER) {

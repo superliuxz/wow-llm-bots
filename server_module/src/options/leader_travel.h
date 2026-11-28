@@ -137,6 +137,19 @@ struct LeaderTravelInput {
   uint32_t leader_instance_id = 0;
   uint32_t leader_phase_mask = 1;
   wlb::snapshot::Vec3 leader_pos;
+
+  // Set when the leader is mid-route on a taxi flight path so "Go to leader"
+  // never aims at transient mid-air coordinates.
+  bool leader_in_flight = false;
+  std::optional<uint32_t> leader_taxi_dest_node;
+  std::optional<wlb::snapshot::Vec3> leader_taxi_dest_pos;
+  std::string leader_taxi_dest_name;
+
+  // Set when the leader is aboard a moving boat/zeppelin transport so "Go to
+  // leader" never aims at transient mid-ocean coordinates.
+  bool leader_on_transport = false;
+  uint32_t leader_transport_entry = 0;
+  bool bot_on_same_transport = false;
 };
 
 // One reachable multi-hop flight path from a flight master.
@@ -242,6 +255,81 @@ std::optional<wlb::snapshot::OptionFacts::Place> BuildLeaderTravelPlace(
 //  - "place:leader:taxi:<n1>:<n2>…"                        -> kFlightMaster
 // Any other id (or malformed suffix) returns `kWalk`.
 LeaderTravelArrival ParseLeaderTravelPlaceId(std::string_view place_id);
+
+// Prefix for immediate info events emitted when the party leader changes map
+// or boards/arrives on a taxi flight or boat/zeppelin. Matched by the harness
+// trigger evaluator to wake grouped followers.
+inline constexpr std::string_view kLeaderTravelEventPrefix = "leader travel: ";
+
+struct LeaderTravelState {
+  uint64_t leader_guid = 0;
+  std::string leader_name;
+  uint32_t map_id = 0;
+  uint32_t instance_id = 0;
+  bool in_flight = false;
+  bool on_transport = false;
+  uint32_t transport_entry = 0;
+  std::string zone_name;
+  std::string taxi_dest_name;
+
+  bool operator==(const LeaderTravelState&) const = default;
+};
+
+struct LeaderTravelWatch {
+  bool initialized = false;
+  LeaderTravelState last;
+
+  void Reset() {
+    initialized = false;
+    last = {};
+  }
+};
+
+// Compares the leader's current travel state against `watch->last`, updates
+// `watch`, and returns a `"leader travel: ..."` wake event text when the
+// leader changed map/instance, boarded a taxi flight or boat/zeppelin, or
+// arrived from one while away from the bot. Suppresses wakes on first
+// observation, leader swap, solo state, or while `bot_in_combat` is true.
+std::optional<std::string> UpdateLeaderTravelWatch(
+    LeaderTravelWatch* watch,
+    const LeaderTravelState& current,
+    uint32_t bot_map_id,
+    uint32_t bot_instance_id,
+    bool bot_on_same_transport,
+    bool bot_in_combat);
+
+struct FollowLeaderCheckInput {
+  bool leader_present = false;
+  bool leader_alive = true;
+  bool leader_is_ghost = false;
+  std::string leader_name;
+  uint32_t bot_map_id = 0;
+  uint32_t bot_instance_id = 0;
+  uint32_t leader_map_id = 0;
+  uint32_t leader_instance_id = 0;
+  bool leader_in_flight = false;
+  bool leader_on_transport = false;
+  bool bot_on_same_transport = false;
+};
+
+enum class FollowLeaderStatus : uint8_t {
+  kCanFollowDirectly,
+  kLeaderUnavailable,
+  kCrossMap,
+  kLeaderInFlight,
+  kLeaderOnTransport,
+};
+
+struct FollowLeaderVerdict {
+  FollowLeaderStatus status = FollowLeaderStatus::kLeaderUnavailable;
+  std::string reason;
+
+  bool operator==(const FollowLeaderVerdict&) const = default;
+};
+
+// Checks whether a follower can directly follow the leader right now, or why
+// direct follow cannot apply (cross-map, leader on taxi, leader on boat, etc.).
+FollowLeaderVerdict CheckFollowLeader(const FollowLeaderCheckInput& in);
 
 }  // namespace llm_brain
 

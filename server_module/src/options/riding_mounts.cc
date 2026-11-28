@@ -11,6 +11,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include "snapshot/snapshot.h"
 
 namespace llm_brain {
 
@@ -234,6 +235,52 @@ std::string ValidateMountState(const MountState& state, bool has_spell) {
   return {};
 }
 
+bool CanFlyInArea(const FlyableAreaInput& in) {
+  if (in.in_dungeon || !in.outdoors || !in.area_is_flyable ||
+      in.area_no_fly_zone || in.battlefield_blocks_fly) {
+    return false;
+  }
+  if (in.map_id == kMapOutland) {
+    return true;
+  }
+  if (in.map_id == kMapNorthrend) {
+    return in.has_cold_weather_flying;
+  }
+  return false;
+}
+
+bool CanUseFlightMovement(bool can_fly_flag,
+                          bool has_fly_aura,
+                          bool in_flight_taxi,
+                          bool in_dungeon,
+                          bool in_combat) {
+  return (can_fly_flag || has_fly_aura) && !in_flight_taxi && !in_dungeon &&
+         !in_combat;
+}
+
+wlb::snapshot::Vec3 ComputeFlightStep(const wlb::snapshot::Vec3& from,
+                                      const wlb::snapshot::Vec3& to,
+                                      float max_step_yd,
+                                      float clearance_z_yd,
+                                      std::optional<float> terrain_z) {
+  const float dx = to.x - from.x;
+  const float dy = to.y - from.y;
+  const float horiz = std::hypot(dx, dy);
+  if (max_step_yd <= 0.0f || horiz <= max_step_yd) {
+    return to;
+  }
+  const float t = max_step_yd / horiz;
+  const float nx = from.x + dx * t;
+  const float ny = from.y + dy * t;
+  const float interp_z = from.z + (to.z - from.z) * t;
+  const float clearance = std::max(0.0f, clearance_z_yd);
+  float nz = std::max(interp_z, std::max(from.z, to.z) + clearance);
+  if (terrain_z && std::isfinite(*terrain_z)) {
+    nz = std::max(nz, *terrain_z + clearance);
+  }
+  return {nx, ny, nz};
+}
+
 std::optional<KnownMountSpell> PickBestMount(
     const std::vector<KnownMountSpell>& mounts,
     bool can_fly) {
@@ -252,16 +299,19 @@ std::optional<KnownMountSpell> PickBestMount(
     } else if (can_fly) {
       if (!best_flying || m.flight_speed_pct > best_flying->flight_speed_pct ||
           (m.flight_speed_pct == best_flying->flight_speed_pct &&
+           m.ground_speed_pct > best_flying->ground_speed_pct) ||
+          (m.flight_speed_pct == best_flying->flight_speed_pct &&
+           m.ground_speed_pct == best_flying->ground_speed_pct &&
            m.spell_id < best_flying->spell_id)) {
         best_flying = &m;
       }
     }
   }
+  if (can_fly && best_flying) {
+    return *best_flying;
+  }
   if (best_ground) {
     return *best_ground;
-  }
-  if (best_flying) {
-    return *best_flying;
   }
   return std::nullopt;
 }
