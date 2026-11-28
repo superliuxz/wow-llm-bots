@@ -601,6 +601,50 @@ TEST(OrdersTest, AllContentNotesParseWithRealOrdersParser) {
   EXPECT_GT(orders_checked, 100);
 }
 
+TEST(OrdersTest, CuratedIccAndNaxxRaidNotesCoverAccurateMechanics) {
+  const std::filesystem::path notes_root = std::filesystem::path(__FILE__)
+                                               .parent_path()
+                                               .parent_path()
+                                               .parent_path()
+                                               .parent_path() /
+                                           "content" / "notes";
+  auto read_file = [&](const std::filesystem::path& p) {
+    std::ifstream in(p);
+    EXPECT_TRUE(in.is_open()) << p;
+    return std::string((std::istreambuf_iterator<char>(in)),
+                       std::istreambuf_iterator<char>());
+  };
+
+  const std::string icc = read_file(notes_root / "ICC" / "notes.md");
+  // Missing ICC bosses are now covered.
+  EXPECT_NE(icc.find("## Icecrown Gunship Battle"), std::string::npos);
+  EXPECT_NE(icc.find("## Festergut"), std::string::npos);
+  EXPECT_NE(icc.find("## Blood-Queen Lana'thel"), std::string::npos);
+  // Lich King Quake moves INWARD (not outward to 40 yd), and Defile + Val'kyr
+  // Shadowguard are present.
+  EXPECT_NE(icc.find("Quake cast -> to boss"), std::string::npos);
+  EXPECT_EQ(icc.find("to 40 yd from boss"), std::string::npos);
+  EXPECT_NE(icc.find("Defile cast on me -> away group 15"), std::string::npos);
+  EXPECT_NE(icc.find("in Defile -> out of it"), std::string::npos);
+  EXPECT_NE(
+      icc.find(
+          "Val'kyr Shadowguard appears -> target nearest Val'kyr Shadowguard"),
+      std::string::npos);
+
+  const std::string naxx = read_file(notes_root / "Naxx" / "notes.md");
+  // Four Horsemen models corner rotation on personal mark stacks (not
+  // taunt-in-place on tank/offtank).
+  EXPECT_NE(naxx.find("Mark of Korth'azz stacks>2 on me -> wake"),
+            std::string::npos);
+  EXPECT_NE(naxx.find("Mark of Rivendare stacks>2 on me -> wake"),
+            std::string::npos);
+  EXPECT_NE(naxx.find("Mark of Blaumeux stacks>2 on me -> wake"),
+            std::string::npos);
+  EXPECT_NE(naxx.find("Mark of Zeliek stacks>2 on me -> wake"),
+            std::string::npos);
+  EXPECT_EQ(naxx.find("Mark of Korth'azz stacks>2 on tank"), std::string::npos);
+}
+
 TEST(OrdersTest, EveryZeroSecondsIsRejectedByParserAndGrammar) {
   EXPECT_FALSE(ParseOrder("every 0s -> wake").has_value());
   EXPECT_FALSE(ParseOrder("every 0.5s -> wake").has_value());

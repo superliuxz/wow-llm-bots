@@ -52,14 +52,17 @@ Mortal Wound stacks>2 on offtank & me tank & not me offtank -> wake
 
 ## The Four Horsemen (Thane Korth'azz, Lady Blaumeux, Sir Zeliek, Baron Rivendare)
 
-- **Mark of Korth'azz**, **Mark of Rivendare**, **Mark of Blaumeux**, **Mark of Zeliek**: stacking damage debuff per horseman; tanks swap at 3 stacks so marks drop, and never leave a horseman without a target in range.
+- **Corner Positioning**: each horseman holds a room corner — **Thane Korth'azz** and **Baron Rivendare** in the front corners (melee), **Lady Blaumeux** and **Sir Zeliek** in the back corners (casters). Every horseman must always have a target in range or they wipe the raid.
+- **Mark of Korth'azz**, **Mark of Rivendare**, **Mark of Blaumeux**, **Mark of Zeliek**: proximity aura stacking every ~12s within ~45 yd; taunting in place does NOT clear marks. Rotate corners and move out of your previous horseman's aura range at 3 stacks (`stacks>2`) so marks drop while another tank/soaker takes that corner.
+- **Meteor**: cast by Thane Korth'azz; splits fire damage among nearby players, so melee stack with Korth'azz's tank to soak it.
 - **Void Zone**: dark ground hazard cast by Lady Blaumeux; move out immediately.
+- **Holy Wrath**: cast by Sir Zeliek; chains to nearby players with escalating damage, so spread out near Zeliek.
 
 ```
-Mark of Korth'azz stacks>2 on tank & me offtank -> wake
-Mark of Korth'azz stacks>2 on offtank & me tank & not me offtank -> wake
-Mark of Rivendare stacks>2 on tank & me offtank -> wake
-Mark of Rivendare stacks>2 on offtank & me tank & not me offtank -> wake
+Mark of Korth'azz stacks>2 on me -> wake
+Mark of Rivendare stacks>2 on me -> wake
+Mark of Blaumeux stacks>2 on me -> wake
+Mark of Zeliek stacks>2 on me -> wake
 in Void Zone -> out of it
 ```
 

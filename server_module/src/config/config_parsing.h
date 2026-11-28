@@ -59,15 +59,16 @@ std::string AdjustNonCombatStrategies(const std::string& base_non_combat,
 // maps (open world, 5-man dungeons, battlegrounds).
 std::string_view ScriptedRaidStrategyForMap(uint32_t map_id);
 
-// Coordinates playerbots' scripted raid strategies with brain standing orders:
+// Coordinates playerbots' scripted raid strategies with brain ownership:
 //  - On a non-raid map (`ScriptedRaidStrategyForMap(map_id)` empty), returns
 //    `base_strategies` unchanged.
-//  - While `brain_led` is true, strips the map's scripted raid strategy
-//    (`-<name>`) so playerbots' hardcoded raid movement never fights brain
-//    standing orders.
-//  - While `brain_led` is false (harness disconnected or LLM unhealthy),
-//    restores `+<name>` when `apply_instance_strategies` is true and
+//  - Keeps playerbots' raid strategy (`+<name>`) enabled as the body layer
+//    (preserving vehicles, harpoons, cannons, Malygos drakes, and boss
+//    positioning) whenever `apply_instance_strategies` is true and
 //    `base_strategies` did not explicitly disable `-<name>`.
+//  - While `brain_led` is true, strips only the autonomous open-world
+//    sub-behaviors that clash with the brain (`grind`, `new rpg`) if present,
+//    never blanket-stripping the raid strategy itself.
 std::string AdjustRaidStrategies(const std::string& base_strategies,
                                  uint32_t map_id,
                                  bool brain_led,

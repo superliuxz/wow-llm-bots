@@ -262,22 +262,38 @@ TEST(ConfigParsingTest, ScriptedRaidStrategyForMapCoversRaidsAndExcludesRest) {
 TEST(ConfigParsingTest, AdjustRaidStrategiesCoordinatesBrainAndFallback) {
   const std::string combat = "+boost,+dps assist,+threat";
   const std::string non_combat = "+follow,-grind,-new rpg";
+  const std::string raw_non_combat = "-follow,+grind,+new rpg";
 
-  // Brain-led in Naxx (533), Ulduar (603), ICC (631): strips scripted raid
-  // strategy from both combat and non-combat so standing orders never fight
-  // playerbots' hardcoded raid movement.
+  // Brain-led in WotLK raids (Naxx 533, Ulduar 603, OS 615, EoE 616, VoA 624,
+  // ICC 631, RS 724): preserves playerbots' raid strategy as the body layer
+  // (vehicles, harpoons, cannons, Malygos drakes, boss positioning) instead of
+  // blanket-stripping it.
   EXPECT_EQ(AdjustRaidStrategies(combat, 533, /*brain_led=*/true),
-            "+boost,+dps assist,+threat,-naxx");
+            "+boost,+dps assist,+threat,+naxx");
   EXPECT_EQ(AdjustRaidStrategies(non_combat, 533, /*brain_led=*/true),
-            "+follow,-grind,-new rpg,-naxx");
+            "+follow,-grind,-new rpg,+naxx");
   EXPECT_EQ(AdjustRaidStrategies(combat, 603, /*brain_led=*/true),
-            "+boost,+dps assist,+threat,-ulduar");
+            "+boost,+dps assist,+threat,+ulduar");
+  EXPECT_EQ(AdjustRaidStrategies(combat, 615, /*brain_led=*/true),
+            "+boost,+dps assist,+threat,+wotlk-os");
+  EXPECT_EQ(AdjustRaidStrategies(combat, 616, /*brain_led=*/true),
+            "+boost,+dps assist,+threat,+wotlk-eoe");
+  EXPECT_EQ(AdjustRaidStrategies(combat, 624, /*brain_led=*/true),
+            "+boost,+dps assist,+threat,+voa");
   EXPECT_EQ(AdjustRaidStrategies(combat, 631, /*brain_led=*/true),
-            "+boost,+dps assist,+threat,-icc");
+            "+boost,+dps assist,+threat,+icc");
+  EXPECT_EQ(AdjustRaidStrategies(combat, 724, /*brain_led=*/true),
+            "+boost,+dps assist,+threat,+rs");
 
-  // Harness disconnect / LLM unhealthy (`brain_led=false`): restores the raid
-  // strategy when `apply_instance_strategies` is enabled so playerbots takes
-  // over boss survival cleanly.
+  // Strips only clashing autonomous open-world sub-behaviors (`grind`,
+  // `new rpg`) when brain-led, while keeping the raid strategy on.
+  EXPECT_EQ(AdjustRaidStrategies(raw_non_combat, 631, /*brain_led=*/true),
+            "-follow,-grind,-new rpg,+icc");
+  // When playerbots-led (disconnect fallback), `grind`/`new rpg` are not
+  // stripped by AdjustRaidStrategies while `+icc` remains enabled.
+  EXPECT_EQ(AdjustRaidStrategies(raw_non_combat, 631, /*brain_led=*/false,
+                                 /*apply_instance_strategies=*/true),
+            "-follow,+grind,+new rpg,+icc");
   EXPECT_EQ(AdjustRaidStrategies(combat, 631, /*brain_led=*/false,
                                  /*apply_instance_strategies=*/true),
             "+boost,+dps assist,+threat,+icc");
@@ -286,20 +302,33 @@ TEST(ConfigParsingTest, AdjustRaidStrategiesCoordinatesBrainAndFallback) {
             "+follow,-grind,-new rpg,+icc");
 
   // Adversarial counter-test: if `Playerbots.ApplyInstanceStrategies = 0`,
-  // disconnect fallback does NOT force `+icc` on.
+  // neither brain-led nor disconnect fallback forces `+icc` on (while brain-led
+  // still strips clashing `+grind`/`+new rpg` if present).
+  EXPECT_EQ(AdjustRaidStrategies(combat, 631, /*brain_led=*/true,
+                                 /*apply_instance_strategies=*/false),
+            combat);
   EXPECT_EQ(AdjustRaidStrategies(combat, 631, /*brain_led=*/false,
                                  /*apply_instance_strategies=*/false),
             combat);
+  EXPECT_EQ(AdjustRaidStrategies(raw_non_combat, 631, /*brain_led=*/true,
+                                 /*apply_instance_strategies=*/false),
+            "-follow,-grind,-new rpg");
 
-  // Adversarial counter-test: if a config explicitly disabled `-icc`,
-  // disconnect fallback respects that config rather than forcing `+icc`.
+  // Adversarial counter-test: if a config/benchmark explicitly disabled `-icc`,
+  // both brain-led and disconnect fallback respect `-icc` rather than forcing
+  // `+icc` back on.
   const std::string explicit_off = "+boost,+dps assist,-threat,-icc";
+  EXPECT_EQ(AdjustRaidStrategies(explicit_off, 631, /*brain_led=*/true,
+                                 /*apply_instance_strategies=*/true),
+            explicit_off);
   EXPECT_EQ(AdjustRaidStrategies(explicit_off, 631, /*brain_led=*/false,
                                  /*apply_instance_strategies=*/true),
             explicit_off);
-  // Idempotent when already `-icc` and brain-led (no duplicate `-icc`).
-  EXPECT_EQ(AdjustRaidStrategies(explicit_off, 631, /*brain_led=*/true),
-            explicit_off);
+  // Idempotent when already `+icc` (no duplicate `+icc`).
+  const std::string explicit_on = "+boost,+dps assist,+threat,+icc";
+  EXPECT_EQ(AdjustRaidStrategies(explicit_on, 631, /*brain_led=*/true,
+                                 /*apply_instance_strategies=*/true),
+            explicit_on);
 
   // Adversarial counter-test: 5-man dungeon (HoL 602) and open world (571)
   // are completely untouched in both modes.
@@ -307,19 +336,21 @@ TEST(ConfigParsingTest, AdjustRaidStrategiesCoordinatesBrainAndFallback) {
   EXPECT_EQ(AdjustRaidStrategies(combat, 602, /*brain_led=*/false), combat);
   EXPECT_EQ(AdjustRaidStrategies(combat, 571, /*brain_led=*/true), combat);
   EXPECT_EQ(AdjustRaidStrategies(combat, 571, /*brain_led=*/false), combat);
+  EXPECT_EQ(AdjustRaidStrategies(raw_non_combat, 571, /*brain_led=*/true),
+            raw_non_combat);
 
-  // Map-change transition: ICC (brain-led -> `-icc`) -> Dalaran (571 -> clean)
-  // -> Ulduar (brain-led -> `-ulduar`) -> disconnect (`+ulduar`) -> reconnect
-  // (`-ulduar`).
+  // Map-change & disconnect/reconnect transition: ICC (brain-led -> `+icc`) ->
+  // Dalaran (571 -> clean) -> Ulduar (brain-led -> `+ulduar`) -> disconnect
+  // (`+ulduar`) -> reconnect (`+ulduar`).
   EXPECT_EQ(AdjustRaidStrategies(combat, 631, /*brain_led=*/true),
-            "+boost,+dps assist,+threat,-icc");
+            "+boost,+dps assist,+threat,+icc");
   EXPECT_EQ(AdjustRaidStrategies(combat, 571, /*brain_led=*/true), combat);
   EXPECT_EQ(AdjustRaidStrategies(combat, 603, /*brain_led=*/true),
-            "+boost,+dps assist,+threat,-ulduar");
+            "+boost,+dps assist,+threat,+ulduar");
   EXPECT_EQ(AdjustRaidStrategies(combat, 603, /*brain_led=*/false),
             "+boost,+dps assist,+threat,+ulduar");
   EXPECT_EQ(AdjustRaidStrategies(combat, 603, /*brain_led=*/true),
-            "+boost,+dps assist,+threat,-ulduar");
+            "+boost,+dps assist,+threat,+ulduar");
 }
 
 TEST(ConfigParsingTest, GroupedCombatStrategiesPreservesBoostAndThreatRules) {

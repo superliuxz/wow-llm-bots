@@ -933,13 +933,20 @@ TEST(PromptTest, NewRaidAndDungeonNotesSelectBossesAndFitInspectPromptBudget) {
        "Mortal Wound stacks>2 on tank & me offtank"},
       {"AQ40", "C'Thun", "Giant Eye Tentacle"},
       {"Naxx", "Heigan the Unclean", "in Eruption -> out of it"},
-      {"Naxx", "Thane Korth'azz", "Mark of Korth'azz stacks>2 on tank"},
+      {"Naxx", "Thane Korth'azz", "Mark of Korth'azz stacks>2 on me -> wake"},
       {"Naxx", "Kel'Thuzad", "in Shadow Fissure -> out of it"},
       {"UK", "Ingvar the Plunderer", "Dark Smash cast -> out of it"},
       {"Nex", "Keristrasza", "Intense Cold stacks>2 on me -> jump"},
       {"GD", "Gal'darah", "Whirling Slash cast -> out of it"},
+      {"ICC", "Muradin Bronzebeard",
+       "Skybreaker Sorcerer appears -> target nearest Skybreaker Sorcerer"},
       {"ICC", "Deathbringer Saurfang",
        "Rune of Blood on tank & me offtank -> wake"},
+      {"ICC", "Festergut",
+       "Gastric Bloat stacks>7 on tank & me offtank -> wake"},
+      {"ICC", "Blood-Queen Lana'thel",
+       "Pact of the Darkfallen on me -> to ally with Pact of the Darkfallen"},
+      {"ICC", "The Lich King", "Quake cast -> to boss"},
   };
   for (const Case& c : kCases) {
     const std::filesystem::path path =

@@ -181,21 +181,28 @@ std::string AdjustRaidStrategies(const std::string& base_strategies,
     return base_strategies;
   }
   std::vector<StrategyCheck> checks = StrategyChecks(base_strategies);
+  bool changed = false;
   if (brain_led) {
-    SetStrategyCheck(checks, raid_strat, false);
-    return FormatStrategyChecks(checks);
+    // Strip only autonomous open-world sub-behaviors that clash with the brain
+    // (`grind`, `new rpg`), while preserving playerbots' raid strategy as the
+    // body layer (vehicles, harpoons, cannons, Malygos drakes, positioning).
+    for (StrategyCheck& c : checks) {
+      if ((c.name == "grind" || c.name == "new rpg") && c.present) {
+        c.present = false;
+        changed = true;
+      }
+    }
   }
-  if (!apply_instance_strategies) {
-    return base_strategies;
+  if (apply_instance_strategies) {
+    const auto existing = std::find_if(
+        checks.begin(), checks.end(),
+        [&](const StrategyCheck& c) { return c.name == raid_strat; });
+    if (existing == checks.end()) {
+      SetStrategyCheck(checks, raid_strat, true);
+      changed = true;
+    }
   }
-  const auto existing = std::find_if(
-      checks.begin(), checks.end(),
-      [&](const StrategyCheck& c) { return c.name == raid_strat; });
-  if (existing != checks.end() && !existing->present) {
-    return base_strategies;
-  }
-  SetStrategyCheck(checks, raid_strat, true);
-  return FormatStrategyChecks(checks);
+  return changed ? FormatStrategyChecks(checks) : base_strategies;
 }
 
 std::string GroupedCombatStrategies(const std::string& combat, bool is_healer) {
