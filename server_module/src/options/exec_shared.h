@@ -18,6 +18,7 @@
 
 class Creature;
 class GameObject;
+class Group;
 class Item;
 class ObjectGuid;
 class Player;
@@ -25,6 +26,8 @@ class Unit;
 struct ItemTemplate;
 
 namespace llm_brain {
+
+struct MobPullInput;
 
 struct ActionOutcome {
   std::string error;
@@ -133,6 +136,25 @@ std::string UseObjectNow(Player* bot, GameObject* go);
 // Whether the bot is close enough to talk to `npc` / loot `creature`.
 bool IsInTalkRange(Player* bot, Creature* npc);
 bool IsInLootRange(Player* bot, Creature* creature);
+
+// Populates the combat-relationship fields of `out` (`fights_party_member`,
+// `fights_party_pet_or_totem`, `fights_escort_npc`, `fights_friendly_npc`, and
+// their distances to the nearest member in `same_map_members`) for `unit`.
+void EvaluateMobCombatWithGroup(Player* bot,
+                                Group* group,
+                                const std::vector<Player*>& same_map_members,
+                                Unit* unit,
+                                MobPullInput* out);
+
+// True when `unit` is actively engaged in combat with `bot` or another member
+// of `group`, any member's pet/totem/guardian, an active friendly escort NPC
+// near the party, or a friendly NPC near the party.
+bool IsUnitInCombatWithGroup(Player* bot, Group* group, Unit* unit);
+
+// True when `creature` satisfies an incomplete kill or quest-item-drop
+// objective for `player`.
+bool IsCreatureActiveQuestMobForPlayer(const Creature* creature,
+                                       Player* player);
 
 }  // namespace llm_brain
 

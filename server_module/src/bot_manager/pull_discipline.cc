@@ -309,4 +309,50 @@ bool ClearLeaderWait(LeaderWaitState& state) {
   return true;
 }
 
+bool IsMobPulledForGroup(const MobPullInput& input) {
+  if (!input.in_group) {
+    return true;
+  }
+  if (input.fights_party_member || input.fights_party_pet_or_totem) {
+    return true;
+  }
+  if (input.fights_escort_npc &&
+      std::isfinite(input.escort_npc_dist_to_party_yd) &&
+      input.escort_npc_dist_to_party_yd >= 0.0f &&
+      input.escort_npc_dist_to_party_yd <= kEscortProtectMaxDistYd) {
+    return true;
+  }
+  if (input.fights_friendly_npc &&
+      std::isfinite(input.friendly_npc_dist_to_party_yd) &&
+      input.friendly_npc_dist_to_party_yd >= 0.0f &&
+      input.friendly_npc_dist_to_party_yd <= kFriendlyNpcProtectMaxDistYd) {
+    return true;
+  }
+  if (input.is_human_quest_mob && !input.in_dungeon &&
+      !input.human_away_or_paused &&
+      std::isfinite(input.human_quest_mob_dist_yd) &&
+      input.human_quest_mob_dist_yd >= 0.0f &&
+      input.human_quest_mob_dist_yd <= kHumanQuestMobAssistMaxDistYd) {
+    return true;
+  }
+  return false;
+}
+
+bool ShouldHoldPulls(const PullGateInput& input) {
+  if (!input.in_group) {
+    return false;
+  }
+  if (input.offline_human_pause || input.human_holds ||
+      input.healer_mana_hold) {
+    return true;
+  }
+  if (input.bot_tanks) {
+    return false;
+  }
+  if (input.human_leads || input.has_other_tank) {
+    return true;
+  }
+  return !input.bot_leads;
+}
+
 }  // namespace llm_brain

@@ -284,44 +284,6 @@ bool GroupInCombat(Group* group, Player* self) {
   return false;
 }
 
-// True when `unit` is actively engaged in combat with `bot` or another member
-// of `group` (or their pet) on the same map/instance.
-bool IsUnitInCombatWithGroup(Player* bot, Group* group, Unit* unit) {
-  if (!bot || !group || !unit || !unit->IsInCombat()) {
-    return false;
-  }
-  const ThreatManager& mgr = unit->GetThreatMgr();
-  if (mgr.CanHaveThreatList() && !mgr.IsThreatListEmpty()) {
-    for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
-         itr = itr->next()) {
-      Player* member = itr->GetSource();
-      if (!member || !member->IsInWorld() ||
-          member->GetMapId() != bot->GetMapId() ||
-          member->GetInstanceId() != bot->GetInstanceId()) {
-        continue;
-      }
-      if (mgr.GetThreat(member) > 0.0f) {
-        return true;
-      }
-      if (Pet* pet = member->GetPet(); pet && mgr.GetThreat(pet) > 0.0f) {
-        return true;
-      }
-    }
-  }
-  if (Unit* victim = unit->GetVictim()) {
-    if (Player* vp = victim->ToPlayer(); vp && group->IsMember(vp->GetGUID())) {
-      return true;
-    }
-    if (Unit* owner = victim->GetOwner()) {
-      if (Player* op = owner->ToPlayer();
-          op && group->IsMember(op->GetGUID())) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 bool IsPrioritizedTarget(PlayerbotAI* ai, ObjectGuid guid) {
   if (!ai || guid.IsEmpty()) {
     return false;

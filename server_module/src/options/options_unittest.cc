@@ -804,6 +804,66 @@ TEST(OptionsTest, HeldPullsInCombatAndSoloPlayCounterTests) {
                                       "Keep doing what I'm doing"}));
 }
 
+// M4: mobs flagged `kNpcFlagPulled` (hitting a party member's pet/totem,
+// hitting an escort/friendly NPC, or a close open-world human quest mob)
+// bypass `hold_pulls` and omit `(not pulled)`, while unrelated nearby packs
+// remain gated.
+TEST(OptionsTest, BroadenedPulledFlagUnlocksPetTotemEscortAndCloseQuestMobs) {
+  pb::Snapshot snapshot;
+  snapshot.bot = "Telda";
+  AddUnit(&snapshot, "Defias Pillager", "0x80", 10)->target = "Wolf";
+  AddUnit(&snapshot, "Defias Highwayman", "0x81", 12)->target = "Searing Totem";
+  AddUnit(&snapshot, "Defias Ambush", "0x82", 14)->target = "Defias Traitor";
+  AddUnit(&snapshot, "Kobold Vermin", "0x83", 15);   // Close human quest mob.
+  AddUnit(&snapshot, "Unrelated Bear", "0x84", 16);  // Idle non-quest pack.
+
+  pb::Party& party = snapshot.ext.party.emplace();
+  pb::Unit& leader = party.members.emplace_back();
+  leader.name = "Hele";
+  leader.target = "Defias Ambush";
+  leader.group.emplace().online = true;
+  leader.group->leader = true;
+  leader.group->role = pb::DPS;
+
+  OptionFacts facts;
+  facts.hold_pulls = true;
+  facts.party_targets = {{"Hele", "0x82"}};
+  facts.npcs = {
+      {"0x80", kNpcFlagPulled},
+      {"0x81", kNpcFlagPulled},
+      {"0x82", kNpcFlagPulled},
+      {"0x83", kNpcFlagPulled},
+  };
+
+  AddOptions(&snapshot, facts);
+  EXPECT_EQ(Texts(snapshot), (std::vector<std::string>{
+                                 "Attack Defias Pillager",
+                                 "Attack Defias Highwayman",
+                                 "Attack Defias Ambush",
+                                 "Attack Kobold Vermin",
+                                 "Attack leader Hele's target (Defias Ambush)",
+                                 "Keep doing what I'm doing",
+                             }));
+
+  // Counter-test: when pulls are not held (e.g. bot tank), flagged mobs omit
+  // `(not pulled)` while the unrelated idle pack is still tagged `(not
+  // pulled)`.
+  pb::Snapshot unheld = snapshot;
+  unheld.options.clear();
+  facts.hold_pulls = false;
+  AddOptions(&unheld, facts);
+  const std::vector<std::string> unheld_texts = Texts(unheld);
+  EXPECT_NE(std::find(unheld_texts.begin(), unheld_texts.end(),
+                      "Attack Unrelated Bear (not pulled)"),
+            unheld_texts.end());
+  EXPECT_NE(std::find(unheld_texts.begin(), unheld_texts.end(),
+                      "Attack Defias Pillager"),
+            unheld_texts.end());
+  EXPECT_NE(std::find(unheld_texts.begin(), unheld_texts.end(),
+                      "Attack Kobold Vermin"),
+            unheld_texts.end());
+}
+
 TEST(OptionsTest, AssistResolvesExactGuidCapAndEdgeCases) {
   pb::Snapshot snapshot;
   snapshot.bot = "SelfTank";

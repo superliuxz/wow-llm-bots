@@ -17,7 +17,7 @@ Tracking document for findings from the WoW Team Play Review. Each item is tagge
 
 ### Questing
 
-- [ ] **[M4]** The pull gate hides mobs attacking the human's pet, an escort NPC, or a friendly quest NPC. Bots stand by while the escort dies. The same gate stops bots from starting fights on the human's quest mobs, so `help <human> with <quest>` can't happen and grouping is no faster than solo.
+- [x] **[M4]** The pull gate hides mobs attacking the human's pet, an escort NPC, or a friendly quest NPC. Bots stand by while the escort dies. The same gate stops bots from starting fights on the human's quest mobs, so `help <human> with <quest>` can't happen and grouping is no faster than solo.
 - [x] **[M2]** One pending share blocks every later share for up to 60 s. Shares aren't auto-accepted even with "answer popups" on.
 - [x] **[M2]** Bots can't take quests from objects or items ("Wanted: Hogger", item-started quests) and can't turn in quests that end at an object.
 - [x] **[M2]** Bots leave the group 60 s after the human logs off and keep levelling alone, so they drift ahead between sessions.
@@ -27,7 +27,7 @@ Tracking document for findings from the WoW Team Play Review. Each item is tagge
 - [ ] **[M6]** Tank behavior comes from the talent spec, not the group role. A tank-spec bot next to a human tank keeps `tank assist` and fights the human for aggro.
 - [ ] **[M6]** A non-empty `var/bots/<bot>/notes.md` silently replaces the curated boss notes in every instance.
 - [ ] **[M6]** In a bot-led group (LFG, or a bot invited the human), the human can't get lead: no promote, Heroic toggle, loot method, or reset.
-- [ ] **[M4]** The pull gate applies only when the human leads. In bot-led groups, DPS bots still get `Attack (not pulled)`.
+- [x] **[M4]** The pull gate applies only when the human leads. In bot-led groups, DPS bots still get `Attack (not pulled)`.
 
 ### Raids
 

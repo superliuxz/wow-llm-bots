@@ -1219,11 +1219,13 @@ class LlmBrainWorldScript : public WorldScript {
     return IsEffectiveHealer(MemberRoleInput(group, member));
   }
 
-  // The facts behind the pull gate (OptionFacts::hold_pulls/hold_explore):
-  // what the group's humans are doing and whether a party healer is low on
-  // mana / drinking. Whether to pull with what's left is the brain's call.
+  // The facts behind the pull gate (OptionFacts::hold_pulls/hold_explore) and
+  // per-mob pulled flags (`kNpcFlagPulled`): what the group's humans/tanks are
+  // doing, whether a party healer is low on mana / drinking, and which nearby
+  // mobs count as pulled or engageable for the group.
   static void FillPullFacts(Player* bot,
                             Group* group,
+                            const wlb::snapshot::Snapshot& snapshot,
                             bool has_offline_human,
                             HealerManaWaitState* healer_wait,
                             base::TimeTicks now,
@@ -1232,6 +1234,11 @@ class LlmBrainWorldScript : public WorldScript {
     bool has_online_human = false;
     bool human_leads = false;
     bool human_holds = false;  // A human tanks, is AFK or is behind.
+    bool human_afk = false;
+    bool has_other_tank = false;
+    std::vector<Player*> same_map_members;
+    std::vector<Player*> online_same_map_humans;
+    same_map_members.push_back(bot);
     std::vector<HealerManaMember> healer_members;
     for (const Group::MemberSlot& slot : group->GetMemberSlots()) {
       if (slot.guid == bot->GetGUID()) {
@@ -1241,9 +1248,12 @@ class LlmBrainWorldScript : public WorldScript {
       if (!member || !member->IsInWorld()) {
         continue;
       }
+      const bool same_map = member->GetMapId() == bot->GetMapId() &&
+                            member->GetInstanceId() == bot->GetInstanceId();
+      if (same_map) {
+        same_map_members.push_back(member);
+      }
       if (IsGroupHealer(group, member)) {
-        const bool same_map = member->GetMapId() == bot->GetMapId() &&
-                              member->GetInstanceId() == bot->GetInstanceId();
         const bool uses_mana = member->GetMaxPower(POWER_MANA) > 0;
         const float mana_pct =
             uses_mana ? member->GetPowerPct(POWER_MANA) : 100.0f;
@@ -1262,15 +1272,27 @@ class LlmBrainWorldScript : public WorldScript {
             .drinking = drinking,
         });
       }
-      if (!IsHumanPlayer(member)) {
+      const bool is_human = IsHumanPlayer(member);
+      if (same_map && member->IsAlive()) {
+        const bool member_tanks =
+            (slot.flags & MEMBER_FLAG_MAINTANK) != 0 ||
+            (IsGroupTank(group, member) &&
+             (is_human || !BotManager::GetGroupPolicy(member).not_tank));
+        has_other_tank |= member_tanks;
+      }
+      if (!is_human) {
         continue;
       }
       has_online_human = true;
       human_leads |= slot.guid == group->GetLeaderGUID();
+      human_afk |= member->isAFK();
       human_holds |= (slot.flags & MEMBER_FLAG_MAINTANK) != 0 ||
                      IsGroupTank(group, member) || member->isAFK() ||
                      member->GetMapId() != bot->GetMapId() ||
                      bot->GetDistance(member) > kHumanBehindYd;
+      if (same_map) {
+        online_same_map_humans.push_back(member);
+      }
     }
     const bool offline_human_pause = ShouldPauseForOfflineHuman({
         .in_group = true,
@@ -1283,14 +1305,73 @@ class LlmBrainWorldScript : public WorldScript {
                                    IsPartyInCombat(bot), healer_members, now);
     const bool bot_tanks =
         IsGroupTank(group, bot) && !BotManager::GetGroupPolicy(bot).not_tank;
-    facts->hold_pulls = offline_human_pause || human_holds ||
-                        healer_mana_hold || (human_leads && !bot_tanks);
+    const bool bot_leads = group->IsLeader(bot->GetGUID());
+    facts->hold_pulls = ShouldHoldPulls({
+        .in_group = true,
+        .offline_human_pause = offline_human_pause,
+        .human_holds = human_holds,
+        .healer_mana_hold = healer_mana_hold,
+        .human_leads = human_leads,
+        .bot_leads = bot_leads,
+        .bot_tanks = bot_tanks,
+        .has_other_tank = has_other_tank,
+    });
+    const bool in_dungeon = bot->GetMap() && bot->GetMap()->IsDungeon();
     facts->hold_explore =
         offline_human_pause ||
-        ((human_holds || healer_mana_hold) && group->IsLeader(bot->GetGUID()) &&
-         bot->GetMap() && bot->GetMap()->IsDungeon());
+        ((human_holds || healer_mana_hold) && bot_leads && in_dungeon);
     if (offline_human_pause) {
       facts->places.clear();
+    }
+
+    const bool human_away_or_paused =
+        offline_human_pause || human_afk || healer_mana_hold;
+    for (const wlb::snapshot::Unit& u : snapshot.base.nearby.units) {
+      if ((u.kind != wlb::snapshot::Unit::NPC &&
+           u.kind != wlb::snapshot::Unit::CRITTER) ||
+          u.dead || u.guid.empty() ||
+          (u.reaction != wlb::snapshot::Unit::HOSTILE &&
+           u.reaction != wlb::snapshot::Unit::NEUTRAL)) {
+        continue;
+      }
+      Creature* c =
+          ObjectAccessor::GetCreature(*bot, ParseSnapshotGuid(u.guid));
+      if (!c || !c->IsAlive()) {
+        continue;
+      }
+      MobPullInput mob_in;
+      mob_in.in_group = true;
+      mob_in.in_dungeon = in_dungeon;
+      mob_in.human_away_or_paused = human_away_or_paused;
+      EvaluateMobCombatWithGroup(bot, group, same_map_members, c, &mob_in);
+      if (!in_dungeon && !human_away_or_paused &&
+          !online_same_map_humans.empty()) {
+        for (Player* human : online_same_map_humans) {
+          const float dist = c->GetDistance(human);
+          if (dist <= kHumanQuestMobAssistMaxDistYd &&
+              IsCreatureActiveQuestMobForPlayer(c, human)) {
+            if (!mob_in.is_human_quest_mob ||
+                dist < mob_in.human_quest_mob_dist_yd) {
+              mob_in.is_human_quest_mob = true;
+              mob_in.human_quest_mob_dist_yd = dist;
+            }
+          }
+        }
+      }
+      if (!IsMobPulledForGroup(mob_in)) {
+        continue;
+      }
+      bool updated = false;
+      for (OptionFacts::Npc& npc : facts->npcs) {
+        if (npc.guid == u.guid) {
+          npc.npc_flags |= kNpcFlagPulled;
+          updated = true;
+          break;
+        }
+      }
+      if (!updated) {
+        facts->npcs.push_back({u.guid, kNpcFlagPulled});
+      }
     }
   }
 
@@ -2318,8 +2399,8 @@ class LlmBrainWorldScript : public WorldScript {
     if (cur_group) {
       const bool has_offline_human =
           bot_manager_ && bot_manager_->GroupHasOfflineHuman(cur_group);
-      FillPullFacts(bot, cur_group, has_offline_human, &state.healer_mana_wait,
-                    start, &facts);
+      FillPullFacts(bot, cur_group, snapshot, has_offline_human,
+                    &state.healer_mana_wait, start, &facts);
     } else {
       ClearHealerManaWait(state.healer_mana_wait);
     }

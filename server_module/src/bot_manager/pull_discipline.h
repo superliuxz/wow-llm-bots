@@ -246,6 +246,73 @@ bool ShouldExpireLeaderWait(LeaderWaitState& state,
 // disconnect). Returns true if a wait was active.
 bool ClearLeaderWait(LeaderWaitState& state);
 
+// Maximum distance (yd) from a party member for a friendly non-escort NPC
+// being attacked by a hostile mob to count as a protected friendly NPC.
+inline constexpr float kFriendlyNpcProtectMaxDistYd = 30.0f;
+
+// Maximum distance (yd) from a party member for an active escort NPC being
+// attacked to count as pulled for the party.
+inline constexpr float kEscortProtectMaxDistYd = 60.0f;
+
+// Maximum distance (yd) from an online human group member for an unpulled mob
+// that satisfies one of the human's incomplete quests to be engageable for
+// quest assistance ("help <human> with <quest>") in open-world questing.
+inline constexpr float kHumanQuestMobAssistMaxDistYd = 25.0f;
+
+// Facts describing whether a nearby attackable mob counts as pulled /
+// engageable for a grouped bot.
+struct MobPullInput {
+  bool in_group = false;
+  bool in_dungeon = false;
+  // Mob is in combat with or targeting any group member (including this bot).
+  bool fights_party_member = false;
+  // Mob is in combat with or targeting any group member's pet, totem,
+  // guardian, or minion.
+  bool fights_party_pet_or_totem = false;
+  // Mob is in combat with or targeting an active friendly escort NPC near the
+  // party.
+  bool fights_escort_npc = false;
+  float escort_npc_dist_to_party_yd = 0.0f;
+  // Mob is in combat with or targeting a friendly NPC near the party.
+  bool fights_friendly_npc = false;
+  float friendly_npc_dist_to_party_yd = 0.0f;
+  // True when the mob is an active incomplete quest objective (kill credit or
+  // quest item drop) for an online human member of the group on the same map,
+  // and `human_quest_mob_dist_yd` is the mob's distance to that human.
+  bool is_human_quest_mob = false;
+  float human_quest_mob_dist_yd = 0.0f;
+  // True when the human is AFK/offline or a healer-mana pull wait is active.
+  // Active combat (party/pet/totem/escort/friendly NPC) still bypasses this so
+  // bots defend allies; unpulled quest-mob assistance respects the pause.
+  bool human_away_or_paused = false;
+};
+
+// Returns true when a nearby attackable mob counts as pulled / engageable for
+// the group (not gated by `hold_pulls` and not tagged `(not pulled)`).
+// Always returns true when solo (`!input.in_group`).
+bool IsMobPulledForGroup(const MobPullInput& input);
+
+// Inputs for deciding whether `OptionFacts::hold_pulls` should gate unpulled
+// mobs for a bot in either a human-led or bot-led group.
+struct PullGateInput {
+  bool in_group = false;
+  bool offline_human_pause = false;
+  // An online human group member tanks (or is MT), is AFK, is on another map,
+  // or is more than `kHumanBehindYd` behind.
+  bool human_holds = false;
+  bool healer_mana_hold = false;
+  bool human_leads = false;
+  bool bot_leads = false;
+  // This bot is an effective tank (and not marked `not_tank`).
+  bool bot_tanks = false;
+  // Another online, alive, same-map group member is an effective tank.
+  bool has_other_tank = false;
+};
+
+// Returns true when unpulled mobs should be withheld from Attack / assist
+// options for this bot (applies consistently to human-led and bot-led groups).
+bool ShouldHoldPulls(const PullGateInput& input);
+
 }  // namespace llm_brain
 
 #endif  // MOD_LLM_BRAIN_BOT_MANAGER_PULL_DISCIPLINE_H_

@@ -33,12 +33,17 @@ inline constexpr uint32_t kTalkNpcFlags =
     kNpcFlagTrainer | kNpcFlagTrainerClass | kNpcFlagTrainerProfession |
     kNpcFlagVendor | kNpcFlagRepair | kNpcFlagFlightMaster | kNpcFlagInnkeeper;
 // Internal OptionFacts bits (not WoW UNIT_NPC_FLAGS bits):
+// - `kNpcFlagPulled`: set for alive nearby hostile/neutral mobs that count as
+//   pulled / engageable for the bot's group (in combat with any party/raid
+//   member, party pet/totem/guardian, active escort NPC, protected friendly
+//   NPC near the party, or a close open-world quest mob for an online human).
 // - `kNpcFlagHasDialogue`: set for friendly gossip NPCs that have selectable
 //   dialogue options (DB dialogue menu, script, or open gossip menu) so
 //   plain flavor-only gossip NPCs don't clutter options.
 // - `kNpcFlagNotAttackable`: set for alive nearby creatures that fail
 //   bot->IsValidAttackTarget (e.g. immune or non-attackable neutral/event NPCs)
 //   so options.cc does not offer an impossible Attack option.
+inline constexpr uint32_t kNpcFlagPulled = 0x20000000u;
 inline constexpr uint32_t kNpcFlagHasDialogue = 0x40000000u;
 inline constexpr uint32_t kNpcFlagNotAttackable = 0x80000000u;
 

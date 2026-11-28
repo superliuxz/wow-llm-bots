@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -17,6 +18,7 @@
 #include "AiObjectContext.h"
 #include "Bag.h"
 #include "Creature.h"
+#include "CreatureAI.h"
 #include "DBCStores.h"
 #include "DBCStructure.h"
 #include "Define.h"
@@ -28,6 +30,7 @@
 #include "Item.h"
 #include "ItemTemplate.h"
 #include "LastMovementValue.h"
+#include "LootMgr.h"
 #include "LootObjectStack.h"
 #include "MotionMaster.h"
 #include "Object.h"
@@ -44,11 +47,13 @@
 #include "Spell.h"
 #include "SpellDefines.h"
 #include "SpellInfo.h"
+#include "ThreatManager.h"
 #include "Timer.h"
 #include "Unit.h"
 #include "UnitDefines.h"
 #include "UpdateFields.h"
 #include "base/strings/stringprintf.h"
+#include "bot_manager/pull_discipline.h"
 #include "bot_session.h"
 #include "options/npc_gossip_and_bags.h"
 #include "options/position_facts.h"
@@ -604,6 +609,146 @@ bool IsInTalkRange(Player* bot, Creature* npc) {
 
 bool IsInLootRange(Player* bot, Creature* creature) {
   return creature->IsWithinDistInMap(bot, INTERACTION_DISTANCE - 0.5f);
+}
+
+void EvaluateMobCombatWithGroup(Player* bot,
+                                Group* group,
+                                const std::vector<Player*>& same_map_members,
+                                Unit* unit,
+                                MobPullInput* out) {
+  if (!bot || !group || !unit || !out) {
+    return;
+  }
+  const auto classify_target = [&](Unit* target) {
+    if (!target || !target->IsInWorld() ||
+        target->GetMapId() != bot->GetMapId() ||
+        target->GetInstanceId() != bot->GetInstanceId()) {
+      return;
+    }
+    if (Player* p = target->ToPlayer()) {
+      if (group->IsMember(p->GetGUID())) {
+        out->fights_party_member = true;
+      }
+      return;
+    }
+    if (Player* owner = target->GetCharmerOrOwnerPlayerOrPlayerItself()) {
+      if (group->IsMember(owner->GetGUID())) {
+        out->fights_party_pet_or_totem = true;
+      }
+      return;
+    }
+    if (Creature* c = target->ToCreature()) {
+      if (c->IsCritter() || c->IsTrigger() || !bot->IsFriendlyTo(c)) {
+        return;
+      }
+      float min_dist = std::numeric_limits<float>::infinity();
+      for (Player* m : same_map_members) {
+        if (m && m->IsInWorld()) {
+          min_dist = std::min(min_dist, c->GetDistance(m));
+        }
+      }
+      if (!std::isfinite(min_dist)) {
+        min_dist = c->GetDistance(bot);
+      }
+      const bool is_escort =
+          c->AI() && (c->AI()->IsEscorted() || c->AI()->IsEscortNPC(true));
+      if (is_escort) {
+        if (!out->fights_escort_npc ||
+            min_dist < out->escort_npc_dist_to_party_yd) {
+          out->fights_escort_npc = true;
+          out->escort_npc_dist_to_party_yd = min_dist;
+        }
+      } else {
+        if (!out->fights_friendly_npc ||
+            min_dist < out->friendly_npc_dist_to_party_yd) {
+          out->fights_friendly_npc = true;
+          out->friendly_npc_dist_to_party_yd = min_dist;
+        }
+      }
+    }
+  };
+
+  if (Unit* victim = unit->GetVictim()) {
+    classify_target(victim);
+  }
+  if (!unit->IsInCombat()) {
+    return;
+  }
+  const ThreatManager& mgr = unit->GetThreatMgr();
+  if (mgr.CanHaveThreatList() && !mgr.IsThreatListEmpty()) {
+    for (const ThreatReference* ref : mgr.GetUnsortedThreatList()) {
+      if (ref && ref->GetThreat() > 0.0f) {
+        classify_target(ref->GetVictim());
+      }
+    }
+  }
+}
+
+bool IsUnitInCombatWithGroup(Player* bot, Group* group, Unit* unit) {
+  if (!bot || !group || !unit || !unit->IsInCombat()) {
+    return false;
+  }
+  std::vector<Player*> same_map_members;
+  for (GroupReference* itr = group->GetFirstMember(); itr != nullptr;
+       itr = itr->next()) {
+    Player* member = itr->GetSource();
+    if (member && member->IsInWorld() &&
+        member->GetMapId() == bot->GetMapId() &&
+        member->GetInstanceId() == bot->GetInstanceId()) {
+      same_map_members.push_back(member);
+    }
+  }
+  MobPullInput in;
+  in.in_group = true;
+  EvaluateMobCombatWithGroup(bot, group, same_map_members, unit, &in);
+  return IsMobPulledForGroup(in);
+}
+
+bool IsCreatureActiveQuestMobForPlayer(const Creature* creature,
+                                       Player* player) {
+  if (!creature || !player) {
+    return false;
+  }
+  const CreatureTemplate* tmpl = creature->GetCreatureTemplate();
+  if (!tmpl) {
+    return false;
+  }
+  const uint32_t entry = creature->GetEntry();
+  const uint32_t credit0 = tmpl->KillCredit[0];
+  const uint32_t credit1 = tmpl->KillCredit[1];
+  const QuestStatusMap& status_map = player->getQuestStatusMap();
+  for (uint16_t slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot) {
+    const uint32_t quest_id = player->GetQuestSlotQuestId(slot);
+    if (!quest_id) {
+      continue;
+    }
+    const auto it = status_map.find(quest_id);
+    if (it == status_map.end() ||
+        it->second.Status != QUEST_STATUS_INCOMPLETE) {
+      continue;
+    }
+    const Quest* q = sObjectMgr->GetQuestTemplate(quest_id);
+    if (!q) {
+      continue;
+    }
+    for (size_t i = 0; i < QUEST_OBJECTIVES_COUNT; ++i) {
+      const int32_t req = q->RequiredNpcOrGo[i];
+      const uint32_t need = q->RequiredNpcOrGoCount[i];
+      if (req <= 0 || need == 0 || it->second.CreatureOrGOCount[i] >= need) {
+        continue;
+      }
+      const uint32_t req_id = static_cast<uint32_t>(req);
+      if (req_id == entry || (credit0 != 0 && req_id == credit0) ||
+          (credit1 != 0 && req_id == credit1)) {
+        return true;
+      }
+    }
+  }
+  if (tmpl->lootid != 0 &&
+      LootTemplates_Creature.HaveQuestLootForPlayer(tmpl->lootid, player)) {
+    return true;
+  }
+  return false;
 }
 
 }  // namespace llm_brain

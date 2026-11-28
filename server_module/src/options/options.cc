@@ -55,6 +55,15 @@ bool IsMarkedNotAttackable(const OptionFacts& facts, std::string_view guid) {
   return false;
 }
 
+bool IsMarkedPulled(const OptionFacts& facts, std::string_view guid) {
+  for (const OptionFacts::Npc& npc : facts.npcs) {
+    if (npc.guid == guid) {
+      return (npc.npc_flags & kNpcFlagPulled) != 0;
+    }
+  }
+  return false;
+}
+
 // What a player can do with this unit by clicking it.
 std::optional<OptionTarget::Kind> UnitKind(const pb::Unit& u,
                                            bool in_combat,
@@ -403,6 +412,9 @@ std::vector<OptionTarget> AddOptions(pb::Snapshot* snapshot,
   }
   const auto unit_not_pulled = [&](const pb::Unit& u) {
     if (party_names.empty()) {
+      return false;
+    }
+    if (IsMarkedPulled(facts, u.guid)) {
       return false;
     }
     const bool fights_party = u.targeting_me || u.target == snapshot->bot ||

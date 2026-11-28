@@ -700,5 +700,212 @@ TEST(PullDisciplineTest, LeaderWaitExpiresOutOfCombatAndResetsOnInvariants) {
   }
 }
 
+TEST(PullDisciplineTest,
+     BroadenedPulledDefinitionPetsTotemsEscortsFriendlyNpcs) {
+  // Solo bot is never gated.
+  EXPECT_TRUE(IsMobPulledForGroup({.in_group = false}));
+
+  // Unrelated nearby idle pack in a group stays gated.
+  EXPECT_FALSE(IsMobPulledForGroup({.in_group = true}));
+
+  // Mob fighting a party member counts as pulled.
+  EXPECT_TRUE(
+      IsMobPulledForGroup({.in_group = true, .fights_party_member = true}));
+
+  // Mob hitting a party member's pet or totem counts as pulled, even when
+  // human_away_or_paused is set (bots must defend party pets/totems).
+  EXPECT_TRUE(IsMobPulledForGroup({.in_group = true,
+                                   .fights_party_pet_or_totem = true,
+                                   .human_away_or_paused = true}));
+
+  // Mob hitting an active escort NPC within kEscortProtectMaxDistYd counts as
+  // pulled (even if human_away_or_paused is set).
+  EXPECT_TRUE(IsMobPulledForGroup({
+      .in_group = true,
+      .fights_escort_npc = true,
+      .escort_npc_dist_to_party_yd = kEscortProtectMaxDistYd,
+      .human_away_or_paused = true,
+  }));
+  // Far-away escort NPC beyond range does not un-gate.
+  EXPECT_FALSE(IsMobPulledForGroup({
+      .in_group = true,
+      .fights_escort_npc = true,
+      .escort_npc_dist_to_party_yd = kEscortProtectMaxDistYd + 1.0f,
+  }));
+
+  // Mob attacking a friendly NPC near the party counts as pulled.
+  EXPECT_TRUE(IsMobPulledForGroup({
+      .in_group = true,
+      .fights_friendly_npc = true,
+      .friendly_npc_dist_to_party_yd = kFriendlyNpcProtectMaxDistYd,
+  }));
+  // Adversarial: distant unrelated friendly NPC skirmish stays gated.
+  EXPECT_FALSE(IsMobPulledForGroup({
+      .in_group = true,
+      .fights_friendly_npc = true,
+      .friendly_npc_dist_to_party_yd = kFriendlyNpcProtectMaxDistYd + 5.0f,
+  }));
+  // Adversarial: negative or NaN distance never un-gates.
+  EXPECT_FALSE(IsMobPulledForGroup({
+      .in_group = true,
+      .fights_friendly_npc = true,
+      .friendly_npc_dist_to_party_yd = -1.0f,
+  }));
+  EXPECT_FALSE(IsMobPulledForGroup({
+      .in_group = true,
+      .fights_escort_npc = true,
+      .escort_npc_dist_to_party_yd = std::numeric_limits<float>::quiet_NaN(),
+  }));
+}
+
+TEST(PullDisciplineTest, HumanQuestMobAssistanceCloseVsFarAndAdversarial) {
+  // Open-world quest mob within kHumanQuestMobAssistMaxDistYd of the human is
+  // engageable so bots can help the human finish quests faster than solo.
+  EXPECT_TRUE(IsMobPulledForGroup({
+      .in_group = true,
+      .in_dungeon = false,
+      .is_human_quest_mob = true,
+      .human_quest_mob_dist_yd = kHumanQuestMobAssistMaxDistYd,
+  }));
+  EXPECT_TRUE(IsMobPulledForGroup({
+      .in_group = true,
+      .in_dungeon = false,
+      .is_human_quest_mob = true,
+      .human_quest_mob_dist_yd = 12.0f,
+  }));
+
+  // Far-away quest mob stays gated to prevent accidental pulling.
+  EXPECT_FALSE(IsMobPulledForGroup({
+      .in_group = true,
+      .in_dungeon = false,
+      .is_human_quest_mob = true,
+      .human_quest_mob_dist_yd = kHumanQuestMobAssistMaxDistYd + 0.5f,
+  }));
+
+  // Adversarial: unrelated nearby mob (not a quest objective) stays gated.
+  EXPECT_FALSE(IsMobPulledForGroup({
+      .in_group = true,
+      .in_dungeon = false,
+      .is_human_quest_mob = false,
+      .human_quest_mob_dist_yd = 5.0f,
+  }));
+
+  // Adversarial: inside a dungeon, quest mobs do NOT bypass the pull gate
+  // (tank must still pull dungeon packs).
+  EXPECT_FALSE(IsMobPulledForGroup({
+      .in_group = true,
+      .in_dungeon = true,
+      .is_human_quest_mob = true,
+      .human_quest_mob_dist_yd = 10.0f,
+  }));
+
+  // Adversarial: when human is AFK/offline or healer is OOM/drinking, unpulled
+  // quest mobs stay gated.
+  EXPECT_FALSE(IsMobPulledForGroup({
+      .in_group = true,
+      .in_dungeon = false,
+      .is_human_quest_mob = true,
+      .human_quest_mob_dist_yd = 10.0f,
+      .human_away_or_paused = true,
+  }));
+
+  // Adversarial: NaN / negative distance never un-gates.
+  EXPECT_FALSE(IsMobPulledForGroup({
+      .in_group = true,
+      .is_human_quest_mob = true,
+      .human_quest_mob_dist_yd = -2.0f,
+  }));
+  EXPECT_FALSE(IsMobPulledForGroup({
+      .in_group = true,
+      .is_human_quest_mob = true,
+      .human_quest_mob_dist_yd = std::numeric_limits<float>::quiet_NaN(),
+  }));
+}
+
+TEST(PullDisciplineTest, PullGateHumanLedBotLedAndSoloInvariants) {
+  // 1. Solo bot is never gated, regardless of other flags.
+  EXPECT_FALSE(ShouldHoldPulls({
+      .in_group = false,
+      .offline_human_pause = true,
+      .human_holds = true,
+      .healer_mana_hold = true,
+      .human_leads = true,
+      .has_other_tank = true,
+  }));
+
+  // 2. Human-led group (non-tank human): tank bot may pull; DPS/healer holds.
+  EXPECT_FALSE(ShouldHoldPulls({
+      .in_group = true,
+      .human_leads = true,
+      .bot_tanks = true,
+  }));
+  EXPECT_TRUE(ShouldHoldPulls({
+      .in_group = true,
+      .human_leads = true,
+      .bot_tanks = false,
+  }));
+
+  // 3. Human tank / AFK / behind, offline human, or healer mana wait holds
+  //    even the bot tank.
+  EXPECT_TRUE(ShouldHoldPulls({
+      .in_group = true,
+      .human_holds = true,
+      .bot_tanks = true,
+  }));
+  EXPECT_TRUE(ShouldHoldPulls({
+      .in_group = true,
+      .offline_human_pause = true,
+      .bot_tanks = true,
+  }));
+  EXPECT_TRUE(ShouldHoldPulls({
+      .in_group = true,
+      .healer_mana_hold = true,
+      .bot_tanks = true,
+  }));
+
+  // 4. Bot-led group WITH a bot tank:
+  //    - Tank bot (whether leader or not) may pull.
+  EXPECT_FALSE(ShouldHoldPulls({
+      .in_group = true,
+      .bot_leads = true,
+      .bot_tanks = true,
+  }));
+  EXPECT_FALSE(ShouldHoldPulls({
+      .in_group = true,
+      .bot_leads = false,
+      .bot_tanks = true,
+  }));
+  //    - DPS/healer follower holds pulls (no `Attack (not pulled)`).
+  EXPECT_TRUE(ShouldHoldPulls({
+      .in_group = true,
+      .bot_leads = false,
+      .bot_tanks = false,
+      .has_other_tank = true,
+  }));
+  //    - Non-tank bot leader also holds pulls when another tank is present.
+  EXPECT_TRUE(ShouldHoldPulls({
+      .in_group = true,
+      .bot_leads = true,
+      .bot_tanks = false,
+      .has_other_tank = true,
+  }));
+
+  // 5. Bot-led group WITHOUT any tank:
+  //    - Bot leader may pull so the group isn't deadlocked.
+  EXPECT_FALSE(ShouldHoldPulls({
+      .in_group = true,
+      .bot_leads = true,
+      .bot_tanks = false,
+      .has_other_tank = false,
+  }));
+  //    - Bot follower still holds pulls and waits for the bot leader.
+  EXPECT_TRUE(ShouldHoldPulls({
+      .in_group = true,
+      .bot_leads = false,
+      .bot_tanks = false,
+      .has_other_tank = false,
+  }));
+}
+
 }  // namespace
 }  // namespace llm_brain
